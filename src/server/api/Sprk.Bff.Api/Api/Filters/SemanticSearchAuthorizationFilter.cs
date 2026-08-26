@@ -57,6 +57,27 @@ public sealed record SemanticSearchAuthorization
     /// Results outside this set MUST be dropped.
     /// </summary>
     public IReadOnlySet<string>? AuthorizedDocumentIds { get; init; }
+
+    /// <summary>
+    /// For <c>scope=all</c>: NO scope constraint was authorized up front. Every returned row MUST be
+    /// authorized against its own parent record before it may be served.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// An explicit flag rather than an inference from <see cref="Scope"/>. The result-level check fails
+    /// closed by default — a decision carrying no parent, no document set and not this flag permits
+    /// nothing — and that default is only safe while "permit" requires something to be positively set.
+    /// Deriving per-row mode from a string comparison would put the fail-closed default one typo away
+    /// from becoming a fail-open one, which is precisely the class of bug task 070 removed.
+    /// </para>
+    /// <para>
+    /// A route that cannot perform per-row enforcement MUST refuse when it sees this flag rather than
+    /// serving the unfiltered answer. <c>POST /api/ai/search/count</c> is exactly that case: a count has
+    /// no rows to drop, so an unfiltered tenant-wide count would be a (smaller) disclosure of the same
+    /// kind. The flag makes that obligation visible to any future route that adds this filter.
+    /// </para>
+    /// </remarks>
+    public bool RequiresPerRowParentAuthorization { get; init; }
 }
 
 /// <summary>
@@ -110,7 +131,16 @@ public class SemanticSearchAuthorizationFilter : IEndpointFilter
     /// <see cref="Sprk.Bff.Api.Services.Ai.SemanticSearch.SemanticSearchService"/>'s associated-only
     /// dispatch accepts both and "both occur in the wild".
     /// </remarks>
-    private static readonly IReadOnlyDictionary<string, string> AuthorizableParentEntitySets =
+    /// <remarks>
+    /// <para>
+    /// <b>internal, and deliberately the ONLY such map.</b> The <c>scope=all</c> path added by task 080
+    /// authorizes each returned row against its parent, so it needs the same entityType → entity-set
+    /// resolution. It consumes THIS dictionary through <see cref="TryResolveParentEntitySet"/> rather
+    /// than declaring its own — a second copy would be a second access policy, and the two would drift
+    /// (the project already carries three disagreeing entity-type vocabularies; see the task 080 notes).
+    /// </para>
+    /// </remarks>
+    internal static readonly IReadOnlyDictionary<string, string> AuthorizableParentEntitySets =
         new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
         {
             ["matter"] = "sprk_matters",
@@ -143,6 +173,33 @@ public class SemanticSearchAuthorizationFilter : IEndpointFilter
     /// profile is newly non-trivial and worth bounding at the cheapest point.
     /// </remarks>
     private static bool LooksLikeRecordId(string documentId) => Guid.TryParse(documentId, out _);
+
+    /// <summary>
+    /// Resolves a document's <c>parentEntityType</c> to the Dataverse entity SET name its access is
+    /// evaluated against. Returns false when the type is not an authorizable parent — callers MUST treat
+    /// that as DENY, never as "skip the check".
+    /// </summary>
+    /// <remarks>
+    /// Shared by the request-level <c>scope=entity</c> decision and the row-level <c>scope=all</c>
+    /// decision so both answer from one allow-list. Note the map does NOT cover <c>account</c> or
+    /// <c>contact</c>, which ARE valid <c>filters.entityTypes</c> values
+    /// (<see cref="ValidEntityTypes"/>) — documents parented to those tables therefore fail closed and
+    /// are dropped from cross-record results. That is the conservative reading of the build plan's
+    /// securable entities (matter / project / work assignment); widening it is a one-line addition and an
+    /// owner decision, recorded as O-1 in the task 080 notes.
+    /// </remarks>
+    internal static bool TryResolveParentEntitySet(string? parentEntityType, out string entitySetName)
+    {
+        if (!string.IsNullOrWhiteSpace(parentEntityType)
+            && AuthorizableParentEntitySets.TryGetValue(parentEntityType, out var resolved))
+        {
+            entitySetName = resolved;
+            return true;
+        }
+
+        entitySetName = string.Empty;
+        return false;
+    }
 
     public SemanticSearchAuthorizationFilter(
         AuthorizationService authorizationService,
@@ -318,25 +375,34 @@ public class SemanticSearchAuthorizationFilter : IEndpointFilter
                     request, callerObjectId, callerToken, correlationId, ct);
 
             case not null when Matches(scope, SearchScope.All):
-                // REFUSED, not reduced to the caller's accessible set.
+                // FILTERED, not refused — and not reduced to a pre-enumerated accessible set either.
                 //
-                // Reducing would be kinder to a UI, but there is no caller that needs it: the flagship
-                // consumers are parent-scoped (a Matter form's document list), and a tenant-wide
-                // document search is not a capability this product has decided to offer. Refusing is
-                // also the only option that cannot be subtly wrong — a reduction is one filter bug away
-                // from being the disclosure again, and that bug would be invisible because the response
-                // would still look plausible.
-                _logger?.LogWarning(
-                    "Semantic search REFUSED for caller {CallerId}: scope=all is not permitted.",
+                // Task 070 refused this scope outright, on the stated premise that "there is no caller
+                // that needs it". That premise was FALSE: the SemanticSearch code page emits scope=all
+                // for its "All" row, for a blank-label row, and — the highest-traffic path — for every
+                // search after the user types a query, because the launch-time entity scope is
+                // deliberately dropped at that point. Cross-record search is a capability this product
+                // offers (owner decision, 2026-08-26). Refusing was the right stop-gap and the wrong
+                // end state.
+                //
+                // What is NOT done here: enumerating the caller's accessible record set and pre-filtering
+                // the query. For a workforce principal that needs Dataverse's real answer, which is task
+                // 031's ADR-028 A2 amendment and has not landed; today's AccessibleRecordSetService
+                // resolves ADR-034 membership, which is far narrower than what a user can actually read.
+                // Gating on it would hide documents from people who can plainly read the parent.
+                //
+                // Instead the ANSWER is authorized: the endpoint checks each returned row against its own
+                // parent record and drops what the caller cannot read. N is a page, not the corpus.
+                _logger?.LogInformation(
+                    "Semantic search: caller {CallerId} requested scope=all — results will be authorized "
+                    + "per row against each document's parent record.",
                     callerObjectId);
 
-                return (null, Results.Problem(
-                    statusCode: 403,
-                    title: "Forbidden",
-                    detail: "scope=all is not permitted. Search within a specific parent record "
-                            + "(scope=entity) or a specific set of documents (scope=documentIds).",
-                    extensions: ProblemExtensions(
-                        SearchErrorCodes.ScopeAllNotPermitted, correlationId)));
+                return (new SemanticSearchAuthorization
+                {
+                    Scope = SearchScope.All,
+                    RequiresPerRowParentAuthorization = true
+                }, null);
 
             default:
                 // REFUSED. This branch previously returned allow with the comment "let endpoint handle
@@ -355,13 +421,13 @@ public class SemanticSearchAuthorizationFilter : IEndpointFilter
                     callerObjectId, request.Scope ?? "(none)");
 
                 // Mirrors the wording and error code the endpoint's own ValidateScope produced, so the
-                // contract a client sees for a bad scope is unchanged by the filter now answering
-                // first. Note the advertised list omits `all` — it is a valid scope VALUE that is
-                // refused, so offering it here would send callers straight into a 403.
+                // contract a client sees for a bad scope is unchanged by the filter now answering first.
+                // `all` is advertised again as of task 080: it is permitted-and-filtered rather than
+                // refused, so omitting it here would now be actively misleading.
                 return (null, Results.Problem(
                     statusCode: 400,
                     title: "Invalid Scope",
-                    detail: $"Invalid scope value '{request.Scope}'. Valid values: entity, documentIds.",
+                    detail: $"Invalid scope value '{request.Scope}'. Valid values: all, entity, documentIds.",
                     extensions: ProblemExtensions(SearchErrorCodes.InvalidScope, correlationId)));
         }
     }

@@ -1,6 +1,6 @@
 # Current Task State — `unified-access-control-r2`
 
-> **Last Updated**: 2026-08-25 (task 046 complete) — **021 + 045 merged to master; 046 configured live**
+> **Last Updated**: 2026-08-26 (task 080 implemented, gates pending) — **Wave 1 pushed; 080 uncommitted**
 > **Recovery**: read "Quick Recovery" first. History is in [`tasks/TASK-INDEX.md`](tasks/TASK-INDEX.md),
 > the per-task `.poml` files, and `notes/`. "Full State (Detailed)" below is retained history.
 
@@ -10,11 +10,60 @@
 
 | Field | Value |
 |---|---|
-| **Task** | ✅ **Phase 0c Wave 1 COMPLETE + committed + pushed** — `8ce4b7cac`. Tasks **070 ✅ 071 ✅ 074 ✅** |
-| **Step** | Between tasks. Nothing in flight. Working tree clean |
-| **Gates** | Unit **11,084 / 0** · Integration **385 / 0** · ArchTests **79/79** · publish **45.05 MB compressed, 0 delta**, ceiling 60 · CVE **clean** |
-| **⚠️ NO OPEN PR** | **#812 is MERGED.** This branch needs a NEW PR — not yet opened. Nothing blocks it now; just say the word (draft or ready) |
-| **Next Action** | **080** (restore cross-record search — the owner-confirmed capability, and the code page is broken until it lands) then **072**, or start **Wave 2 (075 → 076)** in parallel. 073/077/078/079 all filed and ready |
+| **Task** | **080 — cross-record search — code + tests COMPLETE, UNCOMMITTED.** Wave 1 (070/071/074) pushed at `c5143a776` |
+| **Step** | 080 at Step 5 of 6. Remaining: **Step 9.5 quality gates (`code-review` + `adr-check`) NOT YET RUN**, then commit |
+| **Gates so far** | Unit **11,084 / 0** (82 skip, unchanged vs Wave 1) · Integration SemanticSearch **81/81** · ArchTests **79/79** · code-page jest `useSemanticSearch` **48/48** · publish **43.76 MB** (ceiling 60) · CVE **clean**. **Only Step 9.5 (`code-review` + `adr-check`) remains** |
+| **⚠️ NO OPEN PR** | **#812 is MERGED.** This branch needs a NEW PR — not yet opened. Nothing blocks it |
+| **Next Action** | Run `/code-review` + `/adr-check` on the 6 modified files (listed below), then commit 080. Then **072**, or **Wave 2 (075 → 076)**. 073/077/078/079 filed and ready |
+
+### 🆕 CI FINDING 2026-08-26 — no CI had run on this branch at all
+
+`gh run list` showed **zero runs** for `8ce4b7cac`, `53c665abb`, `c5143a776` — including the Wave 1
+security commit. Cause: `ci-router.yml` triggers only on `pull_request:[master]` / `push:[master]` /
+`merge_group`; `sdap-ci.yml` needs a PR; `ci-tier1-blocking.yml` is `workflow_call` + `workflow_dispatch`
+only. **With no open PR, a push to this branch fires nothing.**
+
+- Dispatched tier 1 manually → **run 32983649044 = SUCCESS**, the first green CI on this branch.
+  Arch Tests (incl. the 4 newly-binding facts) ✅ · Classify ✅ · Compile ✅
+- ⚠️ **`Changed-Surface Integration Smoke` and `Auth Smoke` both SKIPPED** — they are gated to
+  `pull_request` events. The classifier *did* identify `Spe.Integration.Tests.SemanticSearch` as changed.
+  **Opening a PR is the only way to run them.** Do not report those two as verified in CI until then.
+- The `binary-tickling-yeti` plan (tier2 timeout 6→20, Router tier2-exclusion, tier2 self-collision) is
+  **already applied and committed** — verified present in both workflow files. Nothing left there.
+
+### Task 080 — files modified (all uncommitted)
+
+| File | Change |
+|---|---|
+| `Api/Filters/SemanticSearchAuthorizationFilter.cs` | `scope=all` permitted w/ `RequiresPerRowParentAuthorization`; allow-list made `internal` + `TryResolveParentEntitySet` |
+| `Api/Ai/SemanticSearchEndpoints.cs` | Row-level parent authorization (lazy, distinct-parent, budgeted); `/count` **refuses** `scope=all` |
+| `hooks/useSemanticSearch.ts` | Entity fragment w/o record id degrades to cross-record — in `search()` AND `loadMore()` |
+| `services/targetEntityNormalize.ts` | Blank-label fallback warns instead of silently widening |
+| `SemanticSearchAuthorizationTests.cs` | +19 cross-record cases; reconciled the stale `Search_ScopeAll_Returns403` |
+| `SemanticSearchIntegrationTests.cs` | 3 scope=all tests 403→200; **new** `Count_ScopeAll_Returns_403` |
+| `notes/task-080-cross-record-search.md` | NEW — premise corrections, paging contract, perturbation table |
+
+**Perturbation-verified on two independent mechanisms** (disjoint failure sets): neutralizing the access
+check reddens **9** tests; neutralizing fail-closed parent resolution reddens **5**. Full table in the notes.
+
+### ⛔ Do NOT re-derive these — task 080 corrected the POML's premises
+
+1. **The dropdown's `matter`/`project`/`invoice` rows never hit `/api/ai/search`.** `deriveSearchDomain`
+   routes them to `useRecordSearch` → **`/api/ai/search/records`**, which is **task 077's still-open hole**.
+   080 does not make the page safe on its own.
+2. **The main broken path was not a dropdown row.** It was `hasUserInitiatedSearch` dropping the launch
+   scope to tenant-wide the moment the user types a query (`App.tsx:473-474`) → `scope:'all'` → 403.
+3. **"Supply the missing entityId" was the wrong fix.** Those rows have no record to point at;
+   `SearchRequestFragment` omits `entityId` by design. The fix is degrading to filtered cross-record.
+4. **The POML's feared paging hazard does not exist.** `SemanticSearchService.cs:189` sets
+   `totalResults = results.Count`, so `hasMore` is already always false on this path. The real hazard is
+   **over-filtering** — a short page that looks like "no matches". Hence the `PARTIAL_RESULTS` warning.
+5. **`ValidEntityTypes` has no `workassignment`**, and `account`/`contact` are valid filter values with no
+   authorizable-parent mapping (so their rows fail closed). Three disagreeing vocabularies — notes §0.4.
+6. **Publish 43.76 MB is the clean baseline.** The apparent −1.29 MB vs task 070's 45.05 MB is
+   measurement hygiene (this run `rm -rf`'d the output dir first), not a real shrink.
+7. **The code page's jest suite has ~42 pre-existing failures** (`bundleIcon is not a function` +
+   `SearchFlowIntegration`). Confirmed identical with my changes stashed. Not mine, worth its own task.
 
 ### ✅ ALL THREE OWNER DECISIONS RESOLVED 2026-08-26
 

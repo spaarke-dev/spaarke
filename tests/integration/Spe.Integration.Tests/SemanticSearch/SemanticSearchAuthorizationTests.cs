@@ -208,17 +208,31 @@ public class SemanticSearchAuthorizationTests : IClassFixture<SemanticSearchAuth
     }
 
     [Fact]
-    public async Task Search_ScopeAll_Returns403()
+    public async Task Search_ScopeAll_IsAcceptedButNeverABlanketAllow()
     {
-        // Refused outright rather than reduced to the caller's accessible set. At HEAD this branch
-        // carried the comment "R3: scope=all is now supported for system-wide document search" and
-        // returned allow, which handed any authenticated non-admin every document in the tenant.
-        var client = _fixture.CreateAuthenticatedClient(TenantA);
+        // SUPERSEDED BEHAVIOUR — was Search_ScopeAll_Returns403 (task 070).
+        //
+        // At HEAD this branch carried the comment "R3: scope=all is now supported for system-wide
+        // document search" and returned allow, handing any authenticated non-admin every document in the
+        // tenant. Task 070 refused the scope outright. Task 080 accepts it again and FILTERS it per row,
+        // because cross-record search is a capability Spaarke offers — task 070's premise that no caller
+        // needed it was false.
+        //
+        // What this test still guards is the invariant common to all three eras: the scope alone never
+        // entitles a caller to anything. The full filtering suite lives in the "Cross-Record Search"
+        // region below; this asserts only that acceptance is not entitlement.
+        var callerId = Guid.NewGuid().ToString();
+        _fixture.Search.Results = [ResultFor(DocumentA)];   // the index matched
+        var client = _fixture.CreateAuthenticatedClient(TenantA, callerId);
         var request = new SemanticSearchRequest { Query = "test query", Scope = "all" };
 
         var response = await client.PostAsJsonAsync("/api/ai/search", request, _jsonOptions);
 
-        response.StatusCode.Should().Be(HttpStatusCode.Forbidden);
+        response.StatusCode.Should().Be(HttpStatusCode.OK);
+
+        var body = await response.Content.ReadAsStringAsync();
+        body.Should().NotContain(DocumentA,
+            "the caller holds Read on nothing, so an accepted scope must still yield no documents");
     }
 
     [Theory]
@@ -362,6 +376,346 @@ public class SemanticSearchAuthorizationTests : IClassFixture<SemanticSearchAuth
             DriveId = driveId,
             SpeFileId = speFileId
         };
+
+    #endregion
+
+    #region Cross-Record Search (scope=all) — task 080
+
+    // scope=all was a live tenant-wide document disclosure until task 070 refused it, and is restored
+    // here as a FILTERED capability. Filtering IS the security boundary now, so these tests are the
+    // deliverable rather than a coda. They are written to fail if any single code path serves a
+    // cross-record row without consulting the caller's access.
+    //
+    // All of them run against StubAccessDataSource, which DENIES BY DEFAULT — a grant has to be made
+    // explicitly, so a test cannot pass by accident of a permissive stub.
+
+    private const string MatterEntitySet = "sprk_matters";
+
+    /// <summary>
+    /// A cross-record row. Both parent fields are explicit with no defaults, deliberately: parentage is
+    /// the entire subject of these tests, so no test may leave it implied.
+    /// </summary>
+    private static SearchResult CrossRecordRow(string documentId, string? parentType, string? parentId) => new()
+    {
+        DocumentId = documentId,
+        Name = $"{documentId}.pdf",
+        CombinedScore = 0.5,
+        ParentEntityType = parentType,
+        ParentEntityId = parentId
+    };
+
+    [Fact]
+    public async Task Search_ScopeAll_ReturnsOnlyRowsWhoseParentTheCallerCanRead()
+    {
+        // Arrange — two matters, one readable. Rows interleaved so a bug that stops filtering after the
+        // first denial, or filters only the head of the list, still fails.
+        var callerId = Guid.NewGuid().ToString();
+        var readable = Guid.NewGuid();
+        var forbidden = Guid.NewGuid();
+
+        _fixture.Access.GrantRecord(callerId, MatterEntitySet, readable, AccessRights.Read);
+        // `forbidden` is deliberately never granted.
+
+        _fixture.Search.Results =
+        [
+            CrossRecordRow("doc-allowed-1", "matter", readable.ToString()),
+            CrossRecordRow("doc-denied-1", "matter", forbidden.ToString()),
+            CrossRecordRow("doc-allowed-2", "matter", readable.ToString()),
+            CrossRecordRow("doc-denied-2", "matter", forbidden.ToString())
+        ];
+
+        var client = _fixture.CreateAuthenticatedClient(TenantA, callerId);
+
+        // Act
+        var response = await client.PostAsJsonAsync(
+            "/api/ai/search", new SemanticSearchRequest { Query = "test query", Scope = "all" }, _jsonOptions);
+
+        // Assert
+        response.StatusCode.Should().Be(HttpStatusCode.OK);
+        var body = await response.Content.ReadAsStringAsync();
+
+        body.Should().Contain("doc-allowed-1").And.Contain("doc-allowed-2");
+        body.Should().NotContain("doc-denied-1",
+            "a document whose parent record the caller cannot read must never be served");
+        body.Should().NotContain("doc-denied-2");
+        body.Should().NotContain(forbidden.ToString(),
+            "not even the unreadable parent's id may leak — that alone confirms the record exists");
+    }
+
+    [Fact]
+    public async Task Search_ScopeAll_WithNoGrants_ReturnsNoRows_ThoughTheIndexMatched()
+    {
+        // The strongest single assertion here. The search DID match rows; the caller holds Read on
+        // nothing. If ANY code path serves cross-record rows without consulting access — a branch that
+        // forgets the per-row pass, an early return, a future refactor that restores the old
+        // `AuthorizeResults` call for this scope — this is the test that fails.
+        var callerId = Guid.NewGuid().ToString();
+
+        _fixture.Search.Results =
+        [
+            CrossRecordRow("doc-x", "matter", Guid.NewGuid().ToString()),
+            CrossRecordRow("doc-y", "project", Guid.NewGuid().ToString()),
+            CrossRecordRow("doc-z", "workassignment", Guid.NewGuid().ToString())
+        ];
+
+        var client = _fixture.CreateAuthenticatedClient(TenantA, callerId);
+
+        var response = await client.PostAsJsonAsync(
+            "/api/ai/search", new SemanticSearchRequest { Query = "test query", Scope = "all" }, _jsonOptions);
+
+        response.StatusCode.Should().Be(HttpStatusCode.OK,
+            "an empty result is the correct answer for cross-record search — unlike scope=documentIds, "
+            + "where the caller named specific documents and a 403 is the honest reply");
+
+        var content = await response.Content.ReadFromJsonAsync<SemanticSearchResponse>(_jsonOptions);
+        content!.Results.Should().BeEmpty();
+        content.Metadata.TotalResults.Should().Be(0);
+        content.Metadata.ReturnedResults.Should().Be(0);
+    }
+
+    [Fact]
+    public async Task Search_ScopeAll_CallerEntitledToThreeOfFifty_ReceivesExactlyThree()
+    {
+        // The acceptance criterion, verbatim: "a caller entitled to 3 of 50 matches gets exactly 3".
+        //
+        // 50 matching documents across 5 parents; the caller may read exactly one parent, which owns
+        // exactly 3 of them. The three are placed LAST so a naive implementation that authorizes only
+        // the first page-worth of candidates and stops returns zero and fails.
+        //
+        // Distinct parents — not rows — are the unit of cost, and 5 is well inside the check budget, so
+        // recall here is complete and the count is exact. The next test covers exceeding that budget.
+        var callerId = Guid.NewGuid().ToString();
+        var parents = Enumerable.Range(0, 5).Select(_ => Guid.NewGuid()).ToArray();
+        var entitled = parents[4];
+
+        _fixture.Access.GrantRecord(callerId, MatterEntitySet, entitled, AccessRights.Read);
+
+        var rows = new List<SearchResult>();
+        for (var i = 0; i < 47; i++)
+        {
+            rows.Add(CrossRecordRow($"doc-denied-{i}", "matter", parents[i % 4].ToString()));
+        }
+        for (var i = 0; i < 3; i++)
+        {
+            rows.Add(CrossRecordRow($"doc-entitled-{i}", "matter", entitled.ToString()));
+        }
+
+        _fixture.Search.Results = rows;
+        var client = _fixture.CreateAuthenticatedClient(TenantA, callerId);
+
+        var response = await client.PostAsJsonAsync(
+            "/api/ai/search", new SemanticSearchRequest { Query = "test query", Scope = "all" }, _jsonOptions);
+
+        response.StatusCode.Should().Be(HttpStatusCode.OK);
+        var content = await response.Content.ReadFromJsonAsync<SemanticSearchResponse>(_jsonOptions);
+
+        content!.Results.Should().HaveCount(3);
+        content.Results.Select(r => r.DocumentId).Should()
+            .BeEquivalentTo(["doc-entitled-0", "doc-entitled-1", "doc-entitled-2"]);
+
+        // The corpus was fully examined (the pool was not saturated) and the budget was not exhausted,
+        // so this answer is COMPLETE and must not be labelled otherwise. A warning that fires here would
+        // be the noise that makes the real signal ignorable.
+        content.Metadata.Warnings?.Select(w => w.Code)
+            .Should().NotContain(SearchWarningCode.PartialResults);
+    }
+
+    [Fact]
+    public async Task Search_ScopeAll_WhenParentCheckBudgetIsExhausted_AnnouncesIncompleteness()
+    {
+        // The honest limit. Every row has a DIFFERENT parent, so the per-page check budget runs out
+        // before the caller's readable parent — placed deliberately out of reach — is ever evaluated.
+        //
+        // The recall loss is real and this test asserts it rather than hiding it: the entitled document
+        // does NOT come back. What must not happen is the response presenting that as "no matches",
+        // because a short page is indistinguishable from an exhaustive one by inspection. That is the
+        // failure mode task 080 exists to defeat, so the PARTIAL_RESULTS warning is the assertion that
+        // matters most in this test.
+        var callerId = Guid.NewGuid().ToString();
+        var outOfReach = Guid.NewGuid();
+
+        _fixture.Access.GrantRecord(callerId, MatterEntitySet, outOfReach, AccessRights.Read);
+
+        var rows = new List<SearchResult>();
+        for (var i = 0; i < 60; i++)
+        {
+            rows.Add(CrossRecordRow($"doc-unreachable-{i}", "matter", Guid.NewGuid().ToString()));
+        }
+        rows.Add(CrossRecordRow("doc-entitled-but-beyond-budget", "matter", outOfReach.ToString()));
+
+        _fixture.Search.Results = rows;
+        var client = _fixture.CreateAuthenticatedClient(TenantA, callerId);
+
+        var response = await client.PostAsJsonAsync(
+            "/api/ai/search", new SemanticSearchRequest { Query = "test query", Scope = "all" }, _jsonOptions);
+
+        response.StatusCode.Should().Be(HttpStatusCode.OK);
+        var content = await response.Content.ReadFromJsonAsync<SemanticSearchResponse>(_jsonOptions);
+
+        content!.Results.Should().BeEmpty("the entitled parent ranks beyond the check budget");
+        content.Metadata.Warnings.Should().NotBeNull();
+        content.Metadata.Warnings!.Select(w => w.Code).Should().Contain(SearchWarningCode.PartialResults,
+            "a page shortened by authorization MUST NOT be presented as an exhaustive result set");
+    }
+
+    [Theory]
+    [InlineData("account", "a valid filters.entityTypes value that is NOT an authorizable parent")]
+    [InlineData("contact", "same — valid as a filter, unmapped as a securable parent")]
+    [InlineData("sprk_unknownthing", "an entirely unrecognised parent type")]
+    [InlineData(null, "no parent type at all")]
+    public async Task Search_ScopeAll_DropsRowsWhoseParentTypeIsNotAuthorizable(string? parentType, string why)
+    {
+        // Fail closed (ADR-003): a row whose parent cannot be resolved to an authorizable table is
+        // DROPPED, never served and never checked against some fallback. `account` and `contact` are the
+        // interesting cases — they ARE accepted in filters.entityTypes, so the vocabularies disagree and
+        // a "valid" type can still be unauthorizable. Open item O-1 in the task 080 notes.
+        var callerId = Guid.NewGuid().ToString();
+        var parentId = Guid.NewGuid();
+
+        // Granted on every set it could plausibly resolve to, so a pass cannot come from a missing grant.
+        _fixture.Access.GrantRecord(callerId, MatterEntitySet, parentId, AccessRights.Read);
+        _fixture.Access.GrantRecord(callerId, "accounts", parentId, AccessRights.Read);
+        _fixture.Access.GrantRecord(callerId, "contacts", parentId, AccessRights.Read);
+
+        _fixture.Search.Results = [CrossRecordRow("doc-unauthorizable-parent", parentType, parentId.ToString())];
+
+        var client = _fixture.CreateAuthenticatedClient(TenantA, callerId);
+
+        var response = await client.PostAsJsonAsync(
+            "/api/ai/search", new SemanticSearchRequest { Query = "test query", Scope = "all" }, _jsonOptions);
+
+        response.StatusCode.Should().Be(HttpStatusCode.OK);
+        var body = await response.Content.ReadAsStringAsync();
+        body.Should().NotContain("doc-unauthorizable-parent", why);
+    }
+
+    [Theory]
+    [InlineData(null)]
+    [InlineData("")]
+    [InlineData("not-a-guid")]
+    [InlineData("00000000-0000-0000-0000-000000000000")]
+    public async Task Search_ScopeAll_DropsRowsWithMissingOrMalformedParentId(string? parentId)
+    {
+        // Unknown parentage is precisely the case that must not be served. Guid.Empty is included
+        // because it PARSES — a check that only did Guid.TryParse would let it through and then query
+        // Dataverse for the all-zero record.
+        var callerId = Guid.NewGuid().ToString();
+        _fixture.Access.GrantRecord(callerId, MatterEntitySet, Guid.Empty, AccessRights.Read);
+
+        _fixture.Search.Results = [CrossRecordRow("doc-no-parentage", "matter", parentId)];
+
+        var client = _fixture.CreateAuthenticatedClient(TenantA, callerId);
+
+        var response = await client.PostAsJsonAsync(
+            "/api/ai/search", new SemanticSearchRequest { Query = "test query", Scope = "all" }, _jsonOptions);
+
+        response.StatusCode.Should().Be(HttpStatusCode.OK);
+        var body = await response.Content.ReadAsStringAsync();
+        body.Should().NotContain("doc-no-parentage");
+    }
+
+    [Fact]
+    public async Task Search_ScopeAll_StripsSpePointersFromPermittedRows()
+    {
+        // Broker-only: no client needs driveId/speFileId, and returning them invites clients to address
+        // SPE directly — the pattern that produced the ungated drive-keyed routes task 071 retired.
+        var callerId = Guid.NewGuid().ToString();
+        var readable = Guid.NewGuid();
+        _fixture.Access.GrantRecord(callerId, MatterEntitySet, readable, AccessRights.Read);
+
+        _fixture.Search.Results =
+        [
+            CrossRecordRow("doc-with-pointers", "matter", readable.ToString())
+                with { DriveId = "drive-should-not-appear", SpeFileId = "spefile-should-not-appear" }
+        ];
+
+        var client = _fixture.CreateAuthenticatedClient(TenantA, callerId);
+
+        var response = await client.PostAsJsonAsync(
+            "/api/ai/search", new SemanticSearchRequest { Query = "test query", Scope = "all" }, _jsonOptions);
+
+        response.StatusCode.Should().Be(HttpStatusCode.OK);
+        var body = await response.Content.ReadAsStringAsync();
+
+        body.Should().Contain("doc-with-pointers", "the row itself is permitted");
+        body.Should().NotContain("drive-should-not-appear");
+        body.Should().NotContain("spefile-should-not-appear");
+    }
+
+    [Fact]
+    public async Task Search_ScopeAll_TotalResultsMatchesWhatTheCallerCanActuallyReach()
+    {
+        // Paging contract (task 080 notes §1): totalResults is the count of PERMITTED rows in this
+        // response. It must never report a number drawn from the over-fetched candidate pool, because
+        // that is a page the caller cannot reach — and the client derives `hasMore` from it.
+        var callerId = Guid.NewGuid().ToString();
+        var readable = Guid.NewGuid();
+        _fixture.Access.GrantRecord(callerId, MatterEntitySet, readable, AccessRights.Read);
+
+        var rows = new List<SearchResult>
+        {
+            CrossRecordRow("doc-ok-1", "matter", readable.ToString()),
+            CrossRecordRow("doc-ok-2", "matter", readable.ToString())
+        };
+        for (var i = 0; i < 10; i++)
+        {
+            rows.Add(CrossRecordRow($"doc-nope-{i}", "matter", Guid.NewGuid().ToString()));
+        }
+
+        _fixture.Search.Results = rows;
+        var client = _fixture.CreateAuthenticatedClient(TenantA, callerId);
+
+        var response = await client.PostAsJsonAsync(
+            "/api/ai/search", new SemanticSearchRequest { Query = "test query", Scope = "all" }, _jsonOptions);
+
+        var content = await response.Content.ReadFromJsonAsync<SemanticSearchResponse>(_jsonOptions);
+
+        content!.Results.Should().HaveCount(2);
+        content.Metadata.ReturnedResults.Should().Be(2);
+        content.Metadata.TotalResults.Should().Be(2,
+            "reporting 12 here would tell the client there are 10 more pages of documents it can never load");
+    }
+
+    [Theory]
+    [InlineData("all")]
+    [InlineData("All")]
+    [InlineData("ALL")]
+    public async Task Search_ScopeAll_IsCaseInsensitive_AndStillFiltered(string scope)
+    {
+        // Casing was a live defect on scope=documentIds: the filter lower-cased the input and compared it
+        // against the camel-cased literal, so the case could never match and every request fell through
+        // to a permissive default. Pinning every scope's casing is how that stays fixed.
+        var callerId = Guid.NewGuid().ToString();
+
+        _fixture.Search.Results = [CrossRecordRow("doc-casing", "matter", Guid.NewGuid().ToString())];
+
+        var client = _fixture.CreateAuthenticatedClient(TenantA, callerId);
+
+        var response = await client.PostAsJsonAsync(
+            "/api/ai/search", new SemanticSearchRequest { Query = "test query", Scope = scope }, _jsonOptions);
+
+        response.StatusCode.Should().Be(HttpStatusCode.OK);
+        var body = await response.Content.ReadAsStringAsync();
+        body.Should().NotContain("doc-casing",
+            $"scope '{scope}' must be recognised as cross-record AND filtered — a casing that fell "
+            + "through to a permissive branch would serve this row");
+    }
+
+    [Fact]
+    public async Task Count_ScopeAll_IsRefused_BecauseACountCannotBeFiltered()
+    {
+        // /search serves scope=all by dropping rows; a count has nothing to drop. The only number it
+        // could return is derived from the unfiltered corpus, which discloses how many documents exist
+        // tenant-wide. The asymmetry between the two routes is intentional.
+        var callerId = Guid.NewGuid().ToString();
+        var client = _fixture.CreateAuthenticatedClient(TenantA, callerId);
+
+        var response = await client.PostAsJsonAsync(
+            "/api/ai/search/count", new SemanticSearchRequest { Query = "test query", Scope = "all" },
+            _jsonOptions);
+
+        response.StatusCode.Should().Be(HttpStatusCode.Forbidden);
+    }
 
     #endregion
 

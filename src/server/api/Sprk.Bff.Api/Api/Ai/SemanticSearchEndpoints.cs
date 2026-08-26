@@ -1,5 +1,9 @@
+using System.Security.Claims;
 using Microsoft.AspNetCore.Mvc;
+using Spaarke.Core.Auth;
+using Spaarke.Dataverse;
 using Sprk.Bff.Api.Api.Filters;
+using Sprk.Bff.Api.Infrastructure.Auth;
 using Sprk.Bff.Api.Models.Ai.SemanticSearch;
 using Sprk.Bff.Api.Services.Ai.SemanticSearch;
 
@@ -22,6 +26,46 @@ namespace Sprk.Bff.Api.Api.Ai;
 /// </remarks>
 public static class SemanticSearchEndpoints
 {
+    /// <summary>
+    /// How many candidate rows to draw from the index per permitted row the caller asked for, when
+    /// <c>scope=all</c> results must be authorized row by row.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// Cross-record results are authorized AFTER the index ranks them, so a caller entitled to few
+    /// records can have every one of their matches ranked below the page boundary. Fetching exactly
+    /// <c>limit</c> rows and then filtering would return an empty page while matches existed further
+    /// down — an over-filtering failure that is indistinguishable from "nothing matched". Drawing a
+    /// deeper candidate pool is what makes the acceptance criterion ("entitled to 3 of 50 → gets
+    /// exactly 3") reachable at all.
+    /// </para>
+    /// <para>
+    /// Bounded at 3×, not more: every fetched row is enriched from Dataverse by
+    /// <c>EnrichResultsWithDataverseMetadataAsync</c> before it reaches here, so the candidate pool is
+    /// not free — a large factor buys recall with latency the caller pays on every keystroke-driven
+    /// search.
+    /// </para>
+    /// </remarks>
+    private const int CrossRecordOverFetchFactor = 3;
+
+    /// <summary>Absolute ceiling on the candidate pool, whatever the requested limit.</summary>
+    private const int CrossRecordOverFetchCap = 150;
+
+    /// <summary>
+    /// Upper bound on DISTINCT parent records this endpoint will evaluate access for while assembling
+    /// one cross-record page.
+    /// </summary>
+    /// <remarks>
+    /// The cost that matters is distinct parents, not rows: twenty documents from one matter cost ONE
+    /// Dataverse round trip, and repeats inside the window are absorbed by <c>CachedAccessDataSource</c>.
+    /// The typical page touches one to three parents. This budget exists for the pathological page where
+    /// every row has a different parent — 25 sequential checks is roughly two seconds worst case, which
+    /// is a slow search; 150 would be a broken one. Exhausting the budget does NOT relax the decision:
+    /// unexamined rows are dropped and the response is marked incomplete, so the ceiling can only ever
+    /// cost recall, never authorization.
+    /// </remarks>
+    private const int MaxParentAuthorizationChecks = 25;
+
     /// <summary>
     /// Maps semantic search endpoints to the application.
     /// </summary>
@@ -66,6 +110,7 @@ public static class SemanticSearchEndpoints
     private static async Task<IResult> Search(
         [FromBody] SemanticSearchRequest request,
         ISemanticSearchService searchService,
+        AuthorizationService authorizationService,
         HttpContext httpContext,
         ILoggerFactory loggerFactory,
         CancellationToken cancellationToken)
@@ -116,10 +161,47 @@ public static class SemanticSearchEndpoints
                 "Executing semantic search for tenant {TenantId}, scope={Scope}, mode={Mode}",
                 tenantId, request.Scope, request.Options?.HybridMode ?? "rrf");
 
-            var response = await searchService.SearchAsync(
-                NarrowToAuthorized(request, authorization), tenantId, cancellationToken);
+            var callerLimit = request.Options?.Limit ?? 20;
 
-            response = AuthorizeResults(response, authorization, logger);
+            // scope=all draws a deeper candidate pool so that row-level authorization can still fill a
+            // page when the caller's readable records rank below the page boundary. Every other scope
+            // was already constrained by the filter and is fetched exactly as asked.
+            var searchRequest = NarrowToAuthorized(request, authorization);
+            if (authorization.RequiresPerRowParentAuthorization)
+            {
+                searchRequest = WithCrossRecordCandidatePool(searchRequest, callerLimit);
+            }
+
+            var response = await searchService.SearchAsync(searchRequest, tenantId, cancellationToken);
+
+            if (authorization.RequiresPerRowParentAuthorization)
+            {
+                // The filter proved both of these present before it permitted the request; if either is
+                // missing now, the pipeline changed underneath us. Refuse rather than serve the
+                // unfiltered cross-record answer — that answer IS the disclosure task 070 closed.
+                var callerObjectId = ExtractCallerObjectId(httpContext);
+                var callerToken = TokenHelper.ExtractBearerTokenOrNull(httpContext);
+
+                if (string.IsNullOrEmpty(callerObjectId) || string.IsNullOrEmpty(callerToken))
+                {
+                    logger.LogError(
+                        "Cross-record search reached the handler without a caller identity or bearer "
+                        + "token, which the authorization filter guarantees. Refusing.");
+
+                    return Results.Problem(
+                        statusCode: 500,
+                        title: "Internal Server Error",
+                        detail: "Caller context not available.");
+                }
+
+                response = await AuthorizeRowsByParentAsync(
+                    response, callerLimit, callerObjectId, callerToken,
+                    authorizationService, logger, cancellationToken);
+            }
+            else
+            {
+                response = AuthorizeResults(response, authorization, logger);
+            }
 
             logger.LogInformation(
                 "Semantic search completed for tenant {TenantId}: {ReturnedResults}/{TotalResults} results in {DurationMs}ms",
@@ -194,6 +276,35 @@ public static class SemanticSearchEndpoints
                 statusCode: 500,
                 title: "Internal Server Error",
                 detail: "Authorization context not available.");
+        }
+
+        // scope=all is permitted on /search but REFUSED here, and the asymmetry is the point.
+        //
+        // /search enforces cross-record access by dropping rows the caller may not read. A COUNT has no
+        // rows to drop: the only thing it can return is a number derived from the unfiltered corpus,
+        // which discloses how many documents exist tenant-wide. That is a smaller leak than the
+        // documents themselves but the same kind, and it is exactly what task 070 closed.
+        //
+        // Counting only what the caller may read would mean authorizing the whole matching corpus rather
+        // than a page — unbounded work for a number, and it needs the accessible-record-set enumeration
+        // that task 031 has not delivered. Refusing is honest; a filtered-looking count would not be.
+        if (authorization.RequiresPerRowParentAuthorization)
+        {
+            logger.LogWarning(
+                "Semantic search count REFUSED: scope=all cannot be counted without disclosing the "
+                + "unfiltered corpus size. Caller should count within a parent record or document set.");
+
+            return Results.Problem(
+                statusCode: 403,
+                title: "Forbidden",
+                detail: "scope=all is not supported for count. Count within a specific parent record "
+                        + "(scope=entity) or a specific set of documents (scope=documentIds).",
+                extensions: new Dictionary<string, object?>
+                {
+                    ["errorCode"] = SearchErrorCodes.ScopeAllNotPermitted,
+                    ["code"] = SearchErrorCodes.ScopeAllNotPermitted,
+                    ["correlationId"] = httpContext.TraceIdentifier
+                });
         }
 
         try
@@ -350,6 +461,197 @@ public static class SemanticSearchEndpoints
 
         return false;
     }
+
+    /// <summary>
+    /// Widens the index fetch for a cross-record search so row-level authorization has candidates to
+    /// work with. See <see cref="CrossRecordOverFetchFactor"/> for why this is necessary and bounded.
+    /// </summary>
+    /// <remarks>
+    /// The DTO's <c>[Range(1, 50)]</c> on <see cref="SearchOptions.Limit"/> has already been enforced
+    /// against the CALLER's value by model validation; this is a server-computed internal value that
+    /// deliberately exceeds it, and it is never echoed back to the caller.
+    /// </remarks>
+    private static SemanticSearchRequest WithCrossRecordCandidatePool(
+        SemanticSearchRequest request, int callerLimit)
+    {
+        var poolSize = CrossRecordCandidatePoolSize(callerLimit);
+        var options = request.Options ?? new SearchOptions();
+
+        return request with { Options = options with { Limit = poolSize } };
+    }
+
+    private static int CrossRecordCandidatePoolSize(int callerLimit) =>
+        Math.Min(Math.Max(callerLimit, 1) * CrossRecordOverFetchFactor, CrossRecordOverFetchCap);
+
+    /// <summary>
+    /// Authorizes a cross-record (<c>scope=all</c>) result set ROW BY ROW against each document's parent
+    /// record, and returns at most <paramref name="callerLimit"/> rows the caller may actually read.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <b>Grouped by distinct parent, evaluated in relevance order, lazily.</b> The unit of cost is the
+    /// distinct parent record, not the row: a page of twenty documents belonging to one matter is ONE
+    /// Dataverse round trip. Rows are walked in the order the index ranked them and evaluation stops as
+    /// soon as the caller's page is full, so the common case spends one to three checks. Repeat parents
+    /// within a request hit the local memo; repeats across requests hit
+    /// <c>CachedAccessDataSource</c>'s entity-set-qualified 60 s key.
+    /// </para>
+    /// <para>
+    /// <b>Fail closed per row (ADR-003).</b> A row is dropped unless its parent type resolves to an
+    /// authorizable table AND its parent id parses as a non-empty GUID AND Dataverse says the caller
+    /// holds Read. "Unknown parentage" is the case that must not be served, so it is never a skip.
+    /// </para>
+    /// <para>
+    /// <b>Sequential, deliberately</b> — the same constraint documented on task 070's documentIds loop.
+    /// <c>DataverseAccessDataSource</c> assigns <c>_httpClient.DefaultRequestHeaders.Authorization</c>
+    /// before issuing its request, and that client instance is shared within one HTTP request scope;
+    /// running these checks concurrently would mutate that header while siblings were mid-send.
+    /// <c>HttpHeaders</c> is not thread-safe, and the resulting failure is an intermittent phantom
+    /// denial — the kind of flakiness that gets an authorization gate disabled rather than debugged.
+    /// </para>
+    /// <para>
+    /// <b>Why a short page is announced.</b> Because rows are authorized after the index ranks them, a
+    /// caller entitled to few records can have their matches ranked below the candidate pool, or below
+    /// the check budget. The result is a page shorter than requested — which is indistinguishable, by
+    /// inspection, from "there simply are not many matches". That is the failure mode this whole task has
+    /// to defeat: it looks like success. A <c>PARTIAL_RESULTS</c> warning is what makes it legible.
+    /// </para>
+    /// </remarks>
+    private static async Task<SemanticSearchResponse> AuthorizeRowsByParentAsync(
+        SemanticSearchResponse response,
+        int callerLimit,
+        string callerObjectId,
+        string callerToken,
+        AuthorizationService authorizationService,
+        ILogger logger,
+        CancellationToken cancellationToken)
+    {
+        var permitted = new List<SearchResult>(callerLimit);
+        var decisions = new Dictionary<(string EntitySet, Guid ParentId), bool>();
+
+        var examined = 0;
+        var checksSpent = 0;
+        var unresolvableParents = 0;
+        var budgetExhausted = false;
+
+        foreach (var row in response.Results)
+        {
+            if (permitted.Count >= callerLimit)
+            {
+                break;
+            }
+
+            examined++;
+
+            if (!SemanticSearchAuthorizationFilter.TryResolveParentEntitySet(
+                    row.ParentEntityType, out var entitySetName)
+                || !Guid.TryParse(row.ParentEntityId, out var parentId)
+                || parentId == Guid.Empty)
+            {
+                unresolvableParents++;
+                continue;
+            }
+
+            var key = (entitySetName, parentId);
+            if (!decisions.TryGetValue(key, out var readable))
+            {
+                if (checksSpent >= MaxParentAuthorizationChecks)
+                {
+                    // Stop spending. Everything not yet evaluated stays unserved.
+                    budgetExhausted = true;
+                    examined--;
+                    break;
+                }
+
+                checksSpent++;
+
+                var snapshot = await authorizationService.GetCallerRecordAccessAsync(
+                    callerObjectId, entitySetName, parentId, callerToken, cancellationToken);
+
+                readable = snapshot.AccessRights.HasFlag(AccessRights.Read);
+                decisions[key] = readable;
+            }
+
+            if (readable)
+            {
+                permitted.Add(row);
+            }
+        }
+
+        // Pointers stripped for the same reason as every other scope: under the broker-only decision no
+        // client needs driveId/speFileId, and returning them invites clients to address SPE directly.
+        var sanitized = permitted
+            .Select(r => r with { DriveId = null, SpeFileId = null })
+            .ToList();
+
+        var droppedForAccess = examined - permitted.Count;
+
+        // "This page may be missing documents you are entitled to see." True in exactly two cases:
+        //
+        //   1. The parent-check budget ran out, so rows were left unevaluated. Always incomplete.
+        //   2. The candidate pool came back SATURATED — the index had at least as many rows as we were
+        //      willing to draw — and we still could not fill the caller's page. The shortfall might have
+        //      been fillable from rows we never fetched.
+        //
+        // Deliberately NOT `droppedForAccess > 0`, which was the first cut: that fires whenever ANY row
+        // was withheld, including the common case where the pool was not saturated and we therefore
+        // examined every matching document there was. That warning would be present on nearly every
+        // filtered cross-record search, and a warning that always fires is noise — which gets ignored,
+        // which restores exactly the blindness it exists to cure.
+        //
+        // A full page is not incomplete: the caller got what they asked for, and matches ranked below it
+        // are a paging question, not an authorization one (see the paging contract, task 080 notes §1).
+        var poolWasSaturated = response.Results.Count >= CrossRecordCandidatePoolSize(callerLimit);
+        var incomplete = budgetExhausted || (poolWasSaturated && sanitized.Count < callerLimit);
+
+        var warnings = response.Metadata.Warnings is { } existing
+            ? new List<SearchWarning>(existing)
+            : new List<SearchWarning>();
+
+        if (incomplete)
+        {
+            warnings.Add(new SearchWarning
+            {
+                Code = SearchWarningCode.PartialResults,
+                Message = "Some matching documents were withheld because you do not have access to their "
+                          + "parent records, and further matches may exist beyond the results examined. "
+                          + "Search within a specific record for a complete list."
+            });
+        }
+
+        logger.LogInformation(
+            "Cross-record search authorized for caller {CallerId}: {Permitted} of {Examined} examined rows "
+            + "permitted ({Checks} distinct parents evaluated, {Unresolvable} rows had unauthorizable "
+            + "parentage, budgetExhausted={BudgetExhausted}, incomplete={Incomplete})",
+            callerObjectId, sanitized.Count, examined, checksSpent, unresolvableParents,
+            budgetExhausted, incomplete);
+
+        return response with
+        {
+            Results = sanitized,
+            Metadata = response.Metadata with
+            {
+                // The count of rows in THIS response — the paging contract in the task 080 notes §1.
+                //
+                // Deliberately NOT `TotalResults - dropped`, which is what the request-scoped path above
+                // does. That subtraction is right there because the pre-filter total describes the same
+                // page being filtered. Here the pre-filter total describes the OVER-FETCHED candidate
+                // pool, so subtracting drops from it would report a number drawn from a page the caller
+                // never sees. What the caller can actually reach is exactly what is returned.
+                TotalResults = sanitized.Count,
+                ReturnedResults = sanitized.Count,
+                Warnings = warnings.Count > 0 ? warnings : null
+            }
+        };
+    }
+
+    /// <summary>
+    /// Extract the caller's object id from Azure AD token claims. Mirrors the filter's extraction so both
+    /// halves of the decision identify the caller identically.
+    /// </summary>
+    private static string? ExtractCallerObjectId(HttpContext httpContext) =>
+        httpContext.User.FindFirst("oid")?.Value
+        ?? httpContext.User.FindFirst(ClaimTypes.NameIdentifier)?.Value;
 
     /// <summary>
     /// Extract tenant ID from Azure AD token claims.
