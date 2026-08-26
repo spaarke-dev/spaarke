@@ -21,6 +21,7 @@ using Sprk.Bff.Api.Telemetry;
 // Microsoft.Extensions.AI.ChatMessage is the AI framework conversation message.
 using AiChatMessage = Microsoft.Extensions.AI.ChatMessage;
 using DvChatMessage = Sprk.Bff.Api.Models.Ai.Chat.ChatMessage;
+using Sprk.Bff.Api.Infrastructure.Authentication;
 
 namespace Sprk.Bff.Api.Api.Ai;
 
@@ -32,8 +33,8 @@ namespace Sprk.Bff.Api.Api.Ai;
 /// All endpoints follow ADR-001 (Minimal API) and ADR-008 (endpoint filters for authorization).
 /// SSE streaming follows the same pattern as <see cref="AnalysisEndpoints"/> for consistency.
 ///
-/// TenantId is extracted from the 'tid' JWT claim per ADR-014 (tenant-scoped cache keys),
-/// with X-Tenant-Id header as a fallback for service-to-service calls.
+/// TenantId is extracted from the 'tid' JWT claim per ADR-014 (tenant-scoped cache keys).
+/// Tenant comes from the caller's authenticated principal and from nothing else (task 059 — see Infrastructure/Authentication/TenantResolution).
 /// </summary>
 public static class ChatEndpoints
 {
@@ -411,7 +412,7 @@ public static class ChatEndpoints
             return Results.Problem(
                 statusCode: 400,
                 title: "Bad Request",
-                detail: "Tenant ID not found in token claims (tid) or X-Tenant-Id header.");
+                detail: "Tenant ID not found in token claims (tid).");
         }
 
         logger.LogInformation(
@@ -471,7 +472,7 @@ public static class ChatEndpoints
         if (string.IsNullOrEmpty(tenantId))
         {
             response.StatusCode = StatusCodes.Status400BadRequest;
-            await response.WriteAsJsonAsync(new { error = "Tenant ID not found in token claims or X-Tenant-Id header" }, cancellationToken);
+            await response.WriteAsJsonAsync(new { error = "Tenant ID not found in token claims" }, cancellationToken);
             return;
         }
 
@@ -1163,7 +1164,7 @@ public static class ChatEndpoints
         if (string.IsNullOrEmpty(tenantId))
         {
             response.StatusCode = StatusCodes.Status400BadRequest;
-            await response.WriteAsJsonAsync(new { error = "Tenant ID not found in token claims or X-Tenant-Id header" }, cancellationToken);
+            await response.WriteAsJsonAsync(new { error = "Tenant ID not found in token claims" }, cancellationToken);
             return;
         }
 
@@ -1277,7 +1278,7 @@ public static class ChatEndpoints
             return Results.Problem(
                 statusCode: 400,
                 title: "Bad Request",
-                detail: "Tenant ID not found in token claims (tid) or X-Tenant-Id header.");
+                detail: "Tenant ID not found in token claims (tid).");
         }
 
         logger.LogDebug(
@@ -1317,7 +1318,7 @@ public static class ChatEndpoints
             return Results.Problem(
                 statusCode: 400,
                 title: "Bad Request",
-                detail: "Tenant ID not found in token claims (tid) or X-Tenant-Id header.");
+                detail: "Tenant ID not found in token claims (tid).");
         }
 
         var session = await sessionManager.GetSessionAsync(tenantId, sessionId, cancellationToken);
@@ -1381,7 +1382,7 @@ public static class ChatEndpoints
             return Results.Problem(
                 statusCode: 400,
                 title: "Bad Request",
-                detail: "Tenant ID not found in token claims (tid) or X-Tenant-Id header.");
+                detail: "Tenant ID not found in token claims (tid).");
         }
 
         if (string.IsNullOrWhiteSpace(request.Title))
@@ -1445,7 +1446,7 @@ public static class ChatEndpoints
             return Results.Problem(
                 statusCode: 400,
                 title: "Bad Request",
-                detail: "Tenant ID not found in token claims (tid) or X-Tenant-Id header.");
+                detail: "Tenant ID not found in token claims (tid).");
         }
 
         // Verify session exists before deleting (returns 404 if not found)
@@ -1527,7 +1528,7 @@ public static class ChatEndpoints
             return Results.Problem(
                 statusCode: 400,
                 title: "Bad Request",
-                detail: "Tenant ID not found in token claims (tid) or X-Tenant-Id header.");
+                detail: "Tenant ID not found in token claims (tid).");
         }
 
         var session = await sessionManager.GetSessionAsync(tenantId, sessionId, cancellationToken);
@@ -1601,7 +1602,7 @@ public static class ChatEndpoints
             return Results.Problem(
                 statusCode: 400,
                 title: "Bad Request",
-                detail: "Tenant ID not found in token claims (tid) or X-Tenant-Id header.");
+                detail: "Tenant ID not found in token claims (tid).");
         }
 
         if (request is null || string.IsNullOrWhiteSpace(request.SupersedesRef))
@@ -1853,21 +1854,21 @@ public static class ChatEndpoints
         var tenantId = ExtractTenantId(httpContext);
         if (string.IsNullOrEmpty(tenantId))
         {
-            // Diagnostic: log claim details for debugging
+            // Diagnostic: log claim details for debugging. Task 059 dropped the X-Tenant-Id header from
+            // this line — the header no longer participates in resolution, so reporting it here would
+            // point whoever reads the log at a value that had no bearing on the outcome.
             var claims = httpContext.User.Claims.Select(c => $"{c.Type}={c.Value}").ToArray();
-            var xTenantHeader = httpContext.Request.Headers["X-Tenant-Id"].FirstOrDefault();
             logger.LogWarning(
                 "GetContextMappings: tenant ID missing — " +
-                "claimCount={ClaimCount}, claims=[{Claims}], X-Tenant-Id={XTenantId}, entityType={EntityType}",
+                "claimCount={ClaimCount}, claims=[{Claims}], entityType={EntityType}",
                 claims.Length,
                 claims.Length > 0 ? string.Join("; ", claims.Take(10)) : "(none)",
-                xTenantHeader ?? "(none)",
                 entityType);
 
             return Results.Problem(
                 statusCode: 400,
                 title: "Bad Request",
-                detail: "Tenant ID not found in token claims (tid) or X-Tenant-Id header.");
+                detail: "Tenant ID not found in token claims (tid).");
         }
 
         logger.LogDebug(
@@ -1899,7 +1900,7 @@ public static class ChatEndpoints
             return Results.Problem(
                 statusCode: 400,
                 title: "Bad Request",
-                detail: "Tenant ID not found in token claims (tid) or X-Tenant-Id header.");
+                detail: "Tenant ID not found in token claims (tid).");
         }
 
         logger.LogInformation(
@@ -1945,7 +1946,7 @@ public static class ChatEndpoints
             return Results.Problem(
                 statusCode: 400,
                 title: "Bad Request",
-                detail: "Tenant ID not found in token claims (tid) or X-Tenant-Id header.");
+                detail: "Tenant ID not found in token claims (tid).");
         }
 
         // Retrieve the session to obtain host context (entity type for playbook filtering)
@@ -2075,7 +2076,7 @@ public static class ChatEndpoints
             return Results.Problem(
                 statusCode: 400,
                 title: "Bad Request",
-                detail: "Tenant ID not found in token claims (tid) or X-Tenant-Id header.");
+                detail: "Tenant ID not found in token claims (tid).");
         }
 
         // R4-8 (UAT 2026-07-19): list the tenant's most-recent sessions from the Cosmos warm tier.
@@ -2163,7 +2164,7 @@ public static class ChatEndpoints
             return Results.Problem(
                 statusCode: 400,
                 title: "Bad Request",
-                detail: "Tenant ID not found in token claims (tid) or X-Tenant-Id header.");
+                detail: "Tenant ID not found in token claims (tid).");
         }
 
         var restored = await restoreService.RestoreSessionAsync(tenantId, sessionId, cancellationToken);
@@ -2235,7 +2236,7 @@ public static class ChatEndpoints
             return Results.Problem(
                 statusCode: 400,
                 title: "Bad Request",
-                detail: "Tenant ID not found in token claims (tid) or X-Tenant-Id header.");
+                detail: "Tenant ID not found in token claims (tid).");
         }
 
         var sessions = await dataverseRepository.GetSessionsByAnalysisAsync(tenantId, analysisId, cancellationToken);
@@ -2308,7 +2309,7 @@ public static class ChatEndpoints
             return Results.Problem(
                 statusCode: 400,
                 title: "Bad Request",
-                detail: "Tenant ID not found in token claims (tid) or X-Tenant-Id header.");
+                detail: "Tenant ID not found in token claims (tid).");
         }
 
         var trace = await traceReader.ReadTraceAsync(tenantId, sessionId, cancellationToken);
@@ -2356,7 +2357,7 @@ public static class ChatEndpoints
             return Results.Problem(
                 statusCode: 400,
                 title: "Bad Request",
-                detail: "Tenant ID not found in token claims (tid) or X-Tenant-Id header.");
+                detail: "Tenant ID not found in token claims (tid).");
         }
 
         if (request is null || request.Tabs is null)
@@ -2436,7 +2437,7 @@ public static class ChatEndpoints
             return Results.Problem(
                 statusCode: 400,
                 title: "Bad Request",
-                detail: "Tenant ID not found in token claims (tid) or X-Tenant-Id header.");
+                detail: "Tenant ID not found in token claims (tid).");
         }
 
         var session = await persistence.LoadSessionAsync(tenantId, sessionId, cancellationToken);
@@ -2590,7 +2591,7 @@ public static class ChatEndpoints
             return Results.Problem(
                 statusCode: 400,
                 title: "Bad Request",
-                detail: "Tenant ID not found in token claims (tid) or X-Tenant-Id header.");
+                detail: "Tenant ID not found in token claims (tid).");
         }
 
         // A proactive surface degrades silently: a request with no context type yields no chips
@@ -2731,7 +2732,7 @@ public static class ChatEndpoints
         if (string.IsNullOrEmpty(tenantId))
         {
             return Results.Problem(
-                detail: "Tenant ID not found in token claims or X-Tenant-Id header",
+                detail: "Tenant ID not found in token claims",
                 statusCode: StatusCodes.Status400BadRequest,
                 title: "Bad Request");
         }
@@ -3040,21 +3041,14 @@ public static class ChatEndpoints
     }
 
     /// <summary>
-    /// Extracts the tenant ID from the JWT 'tid' claim (ADR-014) with X-Tenant-Id header fallback
-    /// for service-to-service calls that don't carry a user JWT.
+    /// Extracts the tenant ID from the JWT 'tid' claim (ADR-014).
+    /// Tenant comes from the caller's authenticated principal and from nothing else (task 059 — see Infrastructure/Authentication/TenantResolution).
     /// </summary>
     private static string? ExtractTenantId(HttpContext httpContext)
     {
         // Primary: 'tid' claim from Azure AD JWT token
         // Microsoft.Identity.Web may map 'tid' to the long-form URI claim
-        var tenantId = httpContext.User.FindFirst("tid")?.Value
-            ?? httpContext.User.FindFirst("http://schemas.microsoft.com/identity/claims/tenantid")?.Value;
-
-        // Fallback: X-Tenant-Id request header (service-to-service calls)
-        if (string.IsNullOrEmpty(tenantId))
-        {
-            tenantId = httpContext.Request.Headers["X-Tenant-Id"].FirstOrDefault();
-        }
+        var tenantId = TenantResolution.ResolveTenantId(httpContext.User);
 
         return tenantId;
     }

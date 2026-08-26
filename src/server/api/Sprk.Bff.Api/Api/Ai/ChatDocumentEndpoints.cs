@@ -18,6 +18,7 @@ using Sprk.Bff.Api.Services.Ai.Telemetry;
 using Sprk.Bff.Api.Infrastructure.Errors;
 using Spaarke.Dataverse;
 using Spaarke.Core.Auth;
+using Sprk.Bff.Api.Infrastructure.Authentication;
 
 namespace Sprk.Bff.Api.Api.Ai;
 
@@ -114,25 +115,13 @@ public static class ChatDocumentEndpoints
         _ => file.ContentType ?? "application/octet-stream"
     };
 
-    /// <summary>
-    /// True when the request carried NO tenant claim and the tenant was taken from the spoofable
-    /// <c>X-Tenant-Id</c> header instead.
-    /// </summary>
-    /// <remarks>
-    /// <para>
-    /// The three-tier resolution (<c>tid</c> claim → schema-URI claim → <c>X-Tenant-Id</c> header) is
-    /// pre-existing and repo-wide, and this task does not change it. But compose-r8 task 060 makes that
-    /// header the partition key of a DURABLE store, not just a 4h cache key — so a spoofed value now
-    /// places bytes permanently in another tenant's prefix rather than poisoning a cache for an
-    /// afternoon. That blast-radius change deserves a signal an operator can alert on, which is the
-    /// most a store-scoped task can responsibly do. Removing the fallback is a security-sensitive
-    /// change across four handlers and is escalated separately;
-    /// <c>SummarizeSessionEndpoint.cs:215-216</c> is the shape to converge on.
-    /// </para>
-    /// </remarks>
-    private static bool TenantCameFromSpoofableHeader(HttpContext httpContext)
-        => httpContext.User.FindFirst("tid") is null
-           && httpContext.User.FindFirst("http://schemas.microsoft.com/identity/claims/tenantid") is null;
+    // TenantCameFromSpoofableHeader (task 060) and its two warning call sites were REMOVED by task
+    // 059. It reported "this durable write's tenant came from the header, not a claim" — a signal
+    // task 060 added because removing the fallback was out of its scope. Task 059 removed the
+    // fallback, so the condition it tested (no tenant claim in either form) now returns 400 at the
+    // top of both handlers and the warning could never fire again. Its own remark named
+    // SummarizeSessionEndpoint.cs:215-216 as "the shape to converge on"; that shape is now
+    // Infrastructure/Authentication/TenantResolution, and every endpoint uses it.
 
     private static string DocCacheId(string sessionId, string documentId)
         => SessionUploadCacheKeys.CacheId(sessionId, documentId);
@@ -320,11 +309,8 @@ public static class ChatDocumentEndpoints
         // Microsoft.Identity.Web's JwtBearer middleware may rename `tid` to the schema URL
         // form depending on Microsoft.IdentityModel.Tokens.DefaultInboundClaimTypeMap state.
         // Check both forms to match the pattern used by ChatEndpoints.cs and
-        // SummarizeSessionEndpoint.cs (R5). Fallback to X-Tenant-Id header for
-        // server-to-server scenarios that bypass JWT.
-        var tenantId = httpContext.User.FindFirst("tid")?.Value
-            ?? httpContext.User.FindFirst("http://schemas.microsoft.com/identity/claims/tenantid")?.Value
-            ?? httpContext.Request.Headers["X-Tenant-Id"].FirstOrDefault();
+        // SummarizeSessionEndpoint.cs (R5), which is now the shape every endpoint shares.
+        var tenantId = TenantResolution.ResolveTenantId(httpContext.User);
 
         if (string.IsNullOrEmpty(tenantId))
         {
@@ -574,15 +560,6 @@ public static class ChatDocumentEndpoints
         //   - store ENABLED but the write FAILS → 500. Returning 202 here would hand the user a
         //     "stored" file that quietly dies at the Redis TTL — silently reintroducing the very
         //     defect this task closes. The Azure SDK has already exhausted its retries by this point.
-        if (TenantCameFromSpoofableHeader(httpContext))
-        {
-            logger.LogWarning(
-                "Durable session-file write is using a tenant taken from the X-Tenant-Id HEADER, not a token " +
-                "claim. The header is spoofable unless stripped at the edge, and it is the partition key of a " +
-                "durable store. TenantId={TenantId}, DocumentId={DocumentId}, SessionId={SessionId}",
-                tenantId, documentId, sessionId);
-        }
-
         try
         {
             var durableOutcome = await durableFileStore.WriteAsync(
@@ -846,9 +823,7 @@ public static class ChatDocumentEndpoints
     {
         var logger = loggerFactory.CreateLogger("Sprk.Bff.Api.Api.Ai.ChatDocumentEndpoints");
 
-        var tenantId = httpContext.User.FindFirst("tid")?.Value
-            ?? httpContext.User.FindFirst("http://schemas.microsoft.com/identity/claims/tenantid")?.Value
-            ?? httpContext.Request.Headers["X-Tenant-Id"].FirstOrDefault();
+        var tenantId = TenantResolution.ResolveTenantId(httpContext.User);
 
         if (string.IsNullOrEmpty(tenantId))
         {
@@ -936,9 +911,7 @@ public static class ChatDocumentEndpoints
         var ct = httpContext.RequestAborted;
 
         // 1. Tenant identity (ADR-014) — same claim resolution as the sibling endpoints.
-        var tenantId = httpContext.User.FindFirst("tid")?.Value
-            ?? httpContext.User.FindFirst("http://schemas.microsoft.com/identity/claims/tenantid")?.Value
-            ?? httpContext.Request.Headers["X-Tenant-Id"].FirstOrDefault();
+        var tenantId = TenantResolution.ResolveTenantId(httpContext.User);
 
         if (string.IsNullOrEmpty(tenantId))
         {
@@ -1075,14 +1048,6 @@ public static class ChatDocumentEndpoints
         // spaarkeai-compose-r8 FR-B01 — this path appends a ChatSessionFile to the SAME manifest the
         // multipart upload does, so its bytes have the same 90-day obligation and get the same durable
         // copy. Same failure policy as UploadDocumentAsync step 9c: disabled → proceed, enabled-but-failed → 500.
-        if (TenantCameFromSpoofableHeader(httpContext))
-        {
-            logger.LogWarning(
-                "Durable session-file write is using a tenant taken from the X-Tenant-Id HEADER, not a token " +
-                "claim. TenantId={TenantId}, FileId={FileId}, SessionId={SessionId}",
-                tenantId, fileId, sessionId);
-        }
-
         try
         {
             var durableOutcome = await durableFileStore.WriteAsync(
@@ -1188,11 +1153,8 @@ public static class ChatDocumentEndpoints
         // Microsoft.Identity.Web's JwtBearer middleware may rename `tid` to the schema URL
         // form depending on Microsoft.IdentityModel.Tokens.DefaultInboundClaimTypeMap state.
         // Check both forms to match the pattern used by ChatEndpoints.cs and
-        // SummarizeSessionEndpoint.cs (R5). Fallback to X-Tenant-Id header for
-        // server-to-server scenarios that bypass JWT.
-        var tenantId = httpContext.User.FindFirst("tid")?.Value
-            ?? httpContext.User.FindFirst("http://schemas.microsoft.com/identity/claims/tenantid")?.Value
-            ?? httpContext.Request.Headers["X-Tenant-Id"].FirstOrDefault();
+        // SummarizeSessionEndpoint.cs (R5), which is now the shape every endpoint shares.
+        var tenantId = TenantResolution.ResolveTenantId(httpContext.User);
 
         if (string.IsNullOrEmpty(tenantId))
         {
@@ -1607,9 +1569,7 @@ public static class ChatDocumentEndpoints
 
     /// <summary>Tenant claim extraction — same dual-form pattern as UploadDocumentAsync.</summary>
     private static string? GetTenantIdClaim(HttpContext httpContext) =>
-        httpContext.User.FindFirst("tid")?.Value
-        ?? httpContext.User.FindFirst("http://schemas.microsoft.com/identity/claims/tenantid")?.Value
-        ?? httpContext.Request.Headers["X-Tenant-Id"].FirstOrDefault();
+        TenantResolution.ResolveTenantId(httpContext.User);
 
     /// <summary>User oid claim extraction — same dual-form pattern as SummarizeSessionEndpoint.</summary>
     private static string? GetUserOidClaim(HttpContext httpContext) =>

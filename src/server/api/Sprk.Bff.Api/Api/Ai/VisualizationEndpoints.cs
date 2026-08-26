@@ -3,6 +3,7 @@ using Spaarke.Dataverse;
 using Sprk.Bff.Api.Api.Filters;
 using Sprk.Bff.Api.Configuration;
 using Sprk.Bff.Api.Services.Ai.Visualization;
+using Sprk.Bff.Api.Infrastructure.Authentication;
 
 namespace Sprk.Bff.Api.Api.Ai;
 
@@ -83,9 +84,14 @@ public static class VisualizationEndpoints
     /// <param name="logger">Logger instance.</param>
     /// <param name="cancellationToken">Cancellation token.</param>
     /// <returns>Graph response with nodes, edges, and metadata.</returns>
-    private static async Task<IResult> GetRelatedDocuments(
+    /// <remarks>
+    /// <c>internal</c> so the task-059 tenant boundary is asserted against THIS handler rather than a
+    /// copy of its resolution branch.
+    /// </remarks>
+    internal static async Task<IResult> GetRelatedDocuments(
         Guid documentId,
         [AsParameters] VisualizationQueryParameters query,
+        HttpContext httpContext,
         IVisualizationService visualizationService,
         ILogger<Program> logger,
         CancellationToken cancellationToken)
@@ -101,20 +107,25 @@ public static class VisualizationEndpoints
             });
         }
 
-        if (string.IsNullOrWhiteSpace(query.TenantId))
+        // Tenant comes from the caller's token, never from the request (task 059). Before that task
+        // this handler read `?tenantId=` and nothing else — no claim was consulted at all — so any
+        // authenticated user could read any tenant's document-relationship graph by editing the URL.
+        // The DocumentRelationshipViewer PCF still sends the parameter; it is now simply ignored,
+        // which is why the property was deleted from VisualizationQueryParameters rather than left
+        // readable.
+        var tenantId = TenantResolution.ResolveTenantId(httpContext.User);
+        if (string.IsNullOrWhiteSpace(tenantId))
         {
-            return Results.BadRequest(new ProblemDetails
-            {
-                Title = "Invalid Request",
-                Detail = "TenantId query parameter is required",
-                Status = 400
-            });
+            return Results.Problem(
+                statusCode: 401,
+                title: "Unauthorized",
+                detail: "Tenant identity ('tid' claim) not found in authentication token.");
         }
 
         // Build visualization options from query parameters
         var options = new VisualizationOptions
         {
-            TenantId = query.TenantId,
+            TenantId = tenantId,
             Threshold = query.Threshold ?? 0.65f,
             Limit = Math.Clamp(query.Limit ?? 25, 1, 50),
             Depth = Math.Clamp(query.Depth ?? 1, 1, 3),
@@ -187,25 +198,29 @@ public static class VisualizationEndpoints
     /// <summary>
     /// Upload a file and index it as temporary content for similarity comparison.
     /// </summary>
-    private static async Task<IResult> IndexTemporaryContent(
-        [FromQuery(Name = "tenantId")] string? tenantId,
+    /// <remarks>
+    /// <c>internal</c> rather than <c>private</c> so the task-059 tenant boundary is asserted against
+    /// THIS handler rather than a re-implementation of its resolution branch — the same reason
+    /// <see cref="ChatEndpoints.DeleteSessionAsync"/> is internal. A cross-tenant reachability test
+    /// that exercises a copy of the code proves nothing about the code that ships.
+    /// </remarks>
+    internal static async Task<IResult> IndexTemporaryContent(
         HttpContext httpContext,
         IVisualizationService visualizationService,
         ILogger<Program> logger,
         CancellationToken cancellationToken)
     {
-        var effectiveTenantId = tenantId
-            ?? httpContext.User.FindFirst("tid")?.Value
-            ?? httpContext.Request.Headers["X-Tenant-Id"].FirstOrDefault();
+        // Task 059. The `?tenantId=` query parameter used to take precedence OVER the tid claim here,
+        // so a caller authenticated in tenant A could index content into tenant B's search partition
+        // just by naming it in the URL. It is gone: the tenant is the caller's, or the request fails.
+        var effectiveTenantId = TenantResolution.ResolveTenantId(httpContext.User);
 
         if (string.IsNullOrWhiteSpace(effectiveTenantId))
         {
-            return Results.BadRequest(new ProblemDetails
-            {
-                Title = "Invalid Request",
-                Detail = "TenantId is required (query parameter or JWT tid claim)",
-                Status = 400
-            });
+            return Results.Problem(
+                statusCode: 401,
+                title: "Unauthorized",
+                detail: "Tenant identity ('tid' claim) not found in authentication token.");
         }
 
         if (!httpContext.Request.HasFormContentType)
@@ -294,12 +309,12 @@ public static class VisualizationEndpoints
 /// </summary>
 public class VisualizationQueryParameters
 {
-    /// <summary>
-    /// Tenant identifier for multi-tenant routing.
-    /// Required for all visualization operations.
-    /// </summary>
-    [FromQuery(Name = "tenantId")]
-    public string? TenantId { get; init; }
+    // A `tenantId` query parameter was REMOVED here by task 059. It was the sole tenant source for
+    // GetRelatedDocuments and outranked the tid claim on IndexTemporaryContent, which made every
+    // visualization route a cross-tenant read/write for any authenticated caller. The property is
+    // deleted rather than left bound-but-ignored so that reading it again is a COMPILE error, not a
+    // silently reintroduced boundary hole. Callers may still send the parameter — model binding
+    // ignores unknown query keys, so the DocumentRelationshipViewer PCF needs no redeploy.
 
     /// <summary>
     /// Minimum similarity score threshold (0.0-1.0).

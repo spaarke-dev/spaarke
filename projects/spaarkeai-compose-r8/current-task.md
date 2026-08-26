@@ -10,10 +10,41 @@
 
 | Field | Value |
 |-------|-------|
-| **Task** | **none in progress** — **063 + 052b** landed. **Track B and Track C are both COMPLETE.** |
-| **Status** | Builds clean · BFF **11,335 passed / 0 failed** · ArchTests **62/62** · integration **96 P / 6 S** · compose-components **103 / 1,317** · SpaarkeAi **121 / 1,121** |
-| **Progress** | **43 of 56 complete**, 6 open, 1 blocked |
-| **Next Action** | **059** (SECURITY — `X-Tenant-Id` spoofable fallback; human sign-off required). It has been re-prioritised ahead of arming the store — see the ARMING WARNING below. Then **058** (nested/conditional merge fields), then Track D (**070–073**), then **090** wrap-up. |
+| **Task** | **059 code-complete, awaiting human sign-off** (security-sensitive, CLAUDE.md §6). **058** dispatched to an agent in worktree `C:\code_files\spaarke-wt-058` (branch `work/compose-r8-058`) — **unmerged**. |
+| **Status** | Builds clean · BFF **11,344 passed / 0 failed / 97 skipped** · ArchTests **62/62** · integration **96 P / 6 S**. No client code changed by 059, so the jest suites were not re-run. |
+| **Progress** | **44 of 56 complete**, 5 open, 1 blocked |
+| **Next Action** | **Sign off 059** (§8 of `notes/059-tenant-header-decisions.md` — two questions), then collect **058** from its worktree. Then Track D (**070–073**), then **090** wrap-up. |
+
+### 🔒 059 — what it actually turned out to be (read before signing off)
+
+Filed as *"remove the spoofable `X-Tenant-Id` fallback from four handlers plus the auth path."*
+The mandated enumeration found **21 sites across three mechanisms**, and **the filed one was the least
+severe**:
+
+| Mechanism | Sites | Status before 059 |
+|---|---|---|
+| `X-Tenant-Id` header, last tier of a `??` chain | 16 | **LATENT** — only reachable by a principal with **no `tid` claim at all**, since tier 1 short-circuits. One such principal exists (`RagApiKey`) but never touched this tier. |
+| `X-Spaarke-Tenant-Id`, no claim consulted | 1 | Live, admin-gated, **zero senders** anywhere in the repo |
+| **`?tenantId=` query string** | **4** | **LIVE for any authenticated user.** Three consult **no claim at all**; the fourth let the query string OUTRANK the claim. |
+
+**Two of those four are Compose's own**: `GET /api/compose/documents/{documentSpeId}` (the document
+**open/resume** path) and `GET /api/compose/sessions/{sessionId}/annotations`. Both took the tenant
+from the URL, so a caller could open another tenant's Compose session and resume its anchored
+annotations, defined terms and action history. Two of them rejected a missing value with *"tenantId
+query parameter is required for multi-tenant isolation"* — isolation the caller chose.
+
+All 21 are closed. The guarantee is **structural, not a rule**: `TenantResolution.ResolveTenantId`
+takes a `ClaimsPrincipal`, **not** an `HttpContext`, so it cannot reach a header, query string or
+body — the same idiom as `ComposeEditAnchorPass` (no document text) and post-064 offsets. A
+two-armed tripwire (`Headers[…Tenant…]` | `[FromQuery … tenantId`) matches by **shape, not name**;
+its regex is verified in both directions, and its query arm is what found the two Compose sites
+*after* the header sweep was believed complete.
+
+**Four test fixtures minted principals with no `tid`** — a shape Entra never issues — and the tests
+compensated with the header. That fixture gap was holding the hole open: it made the spoofable
+fallback the only tenant path those tests ever exercised. Repaired the fixture, not the symptom
+(`bff-extensions.md` §F.2). Two further tests were passing **vacuously** and now assert something
+real. Full record: [`notes/059-tenant-header-decisions.md`](notes/059-tenant-header-decisions.md).
 
 ### This session — 9 tasks landed, all committed, nothing at risk
 `052` demote text-search · `053` bounded confirmable fallback · `053b` null-identifier edits reach the
@@ -77,19 +108,28 @@ invariant is exactly what made this diagnosable.
 Tasks 060–063 are done: durable store, lazy re-index, retention, erasure. ADR-015's precondition
 (retention AND erasure before a persisted store is armed) is **satisfied in code**.
 
-**Two pre-existing AUTHORIZATION defects sit on the same DELETE route. Both verified directly, 2026-08-26:**
+**Two pre-existing AUTHORIZATION defects sat on the same DELETE route.** One is now CLOSED; one remains.
 
-1. **No owner check.** `ChatSessionManager.DeleteSessionAsync(tenantId, sessionId, …)` is keyed on tenant
-   + session only. Within a tenant, knowing a `sessionId` is enough to erase **another user's** files.
-2. **The spoofable `X-Tenant-Id` fallback** (task **059**) is live on that route
-   (`ChatEndpoints.cs:414`, `:474` — "Tenant ID not found in token claims (tid) or X-Tenant-Id header").
+1. ~~**The spoofable `X-Tenant-Id` fallback**~~ — **CLOSED by task 059** (2026-08-26), along with 20
+   sibling sites it turned out to have. ⚠️ **Correction to what this warning previously said**: the
+   header was described here as live on that route. It was **not**, for any caller holding a normal
+   token — it sat at the END of a `??` chain, so it was only ever reached by a principal carrying **no
+   `tid` claim at all**. The defect was **latent** (one route-registration away from live), not live.
+   I wrote the earlier claim; it was wrong, and a test I wrote to prove it passed **vacuously** before
+   the fix, which is how it was caught. See `notes/059-tenant-header-decisions.md` §3.
+2. **No owner check — STILL OPEN.** `ChatSessionManager.DeleteSessionAsync(tenantId, sessionId, …)` is
+   keyed on tenant + session only, and `ChatSession` has **no owner field at all** — so a check is not
+   implementable without a persisted-schema change (Redis + Cosmos + Dataverse) and a policy for
+   pre-existing sessions. 059 narrows it from **cross-tenant** to **within-tenant**; session ids are
+   `Guid.NewGuid().ToString("N")`, so exploitation needs a leaked id, not a guess. **Owner decision
+   pending** — `notes/059-tenant-header-decisions.md` §6a and §8.
 
-Neither is new. What changes is **blast radius**: today they can delete a 24-hour AI-Search index entry;
-armed, they delete **90-day durable bytes**, and 063 confirms Azure soft-delete and versioning are OFF,
-so a completed delete is final. A store that is armed and later disarmed also cannot be erased from.
+What arming changes is **blast radius**: today these delete a 24-hour AI-Search index entry; armed, they
+delete **90-day durable bytes**, and 063 confirms Azure soft-delete and versioning are OFF, so a
+completed delete is final. A store that is armed and later disarmed also cannot be erased from.
 
-**Recommendation: do 059 (and decide the cross-user question) BEFORE arming.** This inverts the task
-index's ordering, deliberately.
+**Arming is now gated on: (a) human sign-off of 059, and (b) the cross-user decision.** Not on further
+code.
 
 ### The four operator steps (all still required, and still not done)
 Provision/pick a storage account → create the container → grant **`mi-bff-api-dev`**

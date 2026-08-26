@@ -18,6 +18,7 @@ using Sprk.Bff.Api.Services.Communication.Models;
 using Sprk.Bff.Api.Services.Compose;
 using Sprk.Bff.Api.Services.Compose.Operations;
 using Sprk.Bff.Api.Telemetry;
+using Sprk.Bff.Api.Infrastructure.Authentication;
 
 namespace Sprk.Bff.Api.Api;
 
@@ -820,7 +821,6 @@ public static class ComposeEndpoints
     // stored, or an unknown session id — same contract as the service.
     private static async Task<IResult> GetAnnotations(
         string sessionId,
-        [FromQuery] string tenantId,
         IComposeService composeService,
         ILoggerFactory loggerFactory,
         HttpContext httpContext,
@@ -829,7 +829,18 @@ public static class ComposeEndpoints
         var logger = loggerFactory.CreateLogger("ComposeEndpoints");
 
         if (string.IsNullOrWhiteSpace(sessionId)) return BadRequest("sessionId is required.");
-        if (string.IsNullOrWhiteSpace(tenantId)) return BadRequest("tenantId query parameter is required for multi-tenant isolation.");
+
+        // Task 059. This took `?tenantId=` and consulted no claim, so the "multi-tenant isolation"
+        // the old message claimed was isolation the CALLER chose. Callers may still send the
+        // parameter — it is ignored.
+        var tenantId = TenantResolution.ResolveTenantId(httpContext.User);
+        if (string.IsNullOrWhiteSpace(tenantId))
+        {
+            return Results.Problem(
+                statusCode: StatusCodes.Status401Unauthorized,
+                title: "Unauthorized",
+                detail: "Tenant identity ('tid' claim) not found in authentication token.");
+        }
 
         try
         {
@@ -948,11 +959,9 @@ public static class ComposeEndpoints
         if (string.IsNullOrWhiteSpace(body.SessionId)) return BadRequest("sessionId is required.");
         if (string.IsNullOrWhiteSpace(body.DocumentId)) return BadRequest("documentId (the session-uploaded file id) is required.");
 
-        // Tenant scoping (ADR-014): dual-form tid claim + X-Tenant-Id fallback — same
-        // extraction pattern as ChatDocumentEndpoints so the cache key resolves identically.
-        var tenantId = httpContext.User.FindFirst("tid")?.Value
-            ?? httpContext.User.FindFirst("http://schemas.microsoft.com/identity/claims/tenantid")?.Value
-            ?? httpContext.Request.Headers["X-Tenant-Id"].FirstOrDefault();
+        // Tenant scoping (ADR-014): the caller's dual-form tid claim, via the one resolver every
+        // endpoint shares, so the cache key resolves identically across the BFF (task 059).
+        var tenantId = TenantResolution.ResolveTenantId(httpContext.User);
 
         if (string.IsNullOrWhiteSpace(tenantId))
         {
@@ -1246,7 +1255,6 @@ public static class ComposeEndpoints
     private static async Task<IResult> Load(
         string documentSpeId,
         [FromQuery] string driveId,
-        [FromQuery] string tenantId,
         [FromQuery] Guid? documentRecordId,
         [FromQuery] string? displayName,
         // FR-29/FR-33 (task 102, gap 4.1 — the linchpin): a reopen carries the KNOWN prior
@@ -1271,7 +1279,19 @@ public static class ComposeEndpoints
 
         if (string.IsNullOrWhiteSpace(documentSpeId)) return BadRequest("documentSpeId is required.");
         if (string.IsNullOrWhiteSpace(driveId)) return BadRequest("driveId query parameter is required for SPE drive-item access.");
-        if (string.IsNullOrWhiteSpace(tenantId)) return BadRequest("tenantId query parameter is required for multi-tenant isolation.");
+
+        // Task 059. The Compose document OPEN path took `?tenantId=` and consulted no claim, so a
+        // caller could load — and resume the anchored annotations, defined terms and action history
+        // of — a session belonging to another tenant, by editing the URL. Callers may still send the
+        // parameter (the Compose client passes it as a host prop); it is ignored.
+        var tenantId = TenantResolution.ResolveTenantId(httpContext.User);
+        if (string.IsNullOrWhiteSpace(tenantId))
+        {
+            return Results.Problem(
+                statusCode: StatusCodes.Status401Unauthorized,
+                title: "Unauthorized",
+                detail: "Tenant identity ('tid' claim) not found in authentication token.");
+        }
 
         logger.LogInformation(
             "Compose load: tenant={TenantId} drive={DriveId} item={DocumentSpeId} record={DocumentRecordId} session={SessionId} matter={MatterId} TraceId={TraceId}",
@@ -2201,9 +2221,7 @@ public static class ComposeEndpoints
         if (hasSessionFile && hasDocument)
             return BadRequest("Provide at most one of sessionFileId or documentId — they are mutually exclusive (upload vs stored).");
 
-        var tenantId = httpContext.User.FindFirst("tid")?.Value
-            ?? httpContext.User.FindFirst("http://schemas.microsoft.com/identity/claims/tenantid")?.Value
-            ?? httpContext.Request.Headers["X-Tenant-Id"].FirstOrDefault();
+        var tenantId = TenantResolution.ResolveTenantId(httpContext.User);
 
         if (string.IsNullOrWhiteSpace(tenantId))
         {

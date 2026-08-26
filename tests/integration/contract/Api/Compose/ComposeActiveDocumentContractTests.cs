@@ -565,9 +565,8 @@ public sealed class ComposeActiveDocumentFixture : WebApplicationFactory<Program
     {
         var client = CreateClient(new WebApplicationFactoryClientOptions { AllowAutoRedirect = false });
         client.DefaultRequestHeaders.Add("X-Test-User", Guid.NewGuid().ToString());
-        // The register endpoint reads the tenant from tid / X-Tenant-Id (dual-form). The fake auth
-        // handler emits no tid claim, so the header supplies the tenant for the endpoint.
-        client.DefaultRequestHeaders.Add("X-Tenant-Id", TenantId);
+        // The register endpoint reads the tenant from the `tid` claim only (task 059). The fake auth
+        // handler emits it, so no tenant header is sent — as in production.
         client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", "test-token");
         return client;
     }
@@ -601,6 +600,9 @@ internal sealed class ComposeActiveDocFakeAuthHandler : AuthenticationHandler<Au
             new("oid", oid),
             new(ClaimTypes.NameIdentifier, oid),
             new(ClaimTypes.Name, $"Compose Test User {oid}"),
+            // Task 059 — a real Entra token always carries `tid`. Without it this fixture forced the
+            // register endpoint down the X-Tenant-Id fallback, which is the path that task retired.
+            new("tid", ComposeActiveDocumentFixture.TenantId),
         };
 
         var identity = new ClaimsIdentity(claims, SchemeName);

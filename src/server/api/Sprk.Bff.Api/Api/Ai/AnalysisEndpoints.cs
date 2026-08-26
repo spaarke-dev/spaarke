@@ -14,6 +14,7 @@ using Sprk.Bff.Api.Services.Ai;
 using Sprk.Bff.Api.Services.Ai.Chat;
 using Sprk.Bff.Api.Services.Ai.LinearConsumers;
 using Sprk.Bff.Api.Services.Ai.PublicContracts;
+using Sprk.Bff.Api.Infrastructure.Authentication;
 
 namespace Sprk.Bff.Api.Api.Ai;
 
@@ -1161,7 +1162,7 @@ public static class AnalysisEndpoints
         if (string.IsNullOrEmpty(tenantId))
         {
             return AnalysisProblem(StatusCodes.Status400BadRequest, "Bad Request",
-                "Tenant ID not found in token claims (tid) or X-Tenant-Id header.");
+                "Tenant ID not found in token claims (tid).");
         }
 
         var correlationId = httpContext.TraceIdentifier;
@@ -1306,7 +1307,7 @@ public static class AnalysisEndpoints
         if (string.IsNullOrEmpty(tenantId))
         {
             return AnalysisProblem(StatusCodes.Status400BadRequest, "Bad Request",
-                "Tenant ID not found in token claims (tid) or X-Tenant-Id header.");
+                "Tenant ID not found in token claims (tid).");
         }
 
         var correlationId = httpContext.TraceIdentifier;
@@ -1450,17 +1451,12 @@ public static class AnalysisEndpoints
             : "https://tools.ietf.org/html/rfc7231#section-6.6.1");
 
     /// <summary>
-    /// Extracts the tenant ID from the JWT <c>tid</c> claim (ADR-014) with an <c>X-Tenant-Id</c>
-    /// header fallback for service-to-service calls. Mirrors <c>ChatEndpoints.ExtractTenantId</c>.
+    /// Extracts the tenant ID from the JWT <c>tid</c> claim (ADR-014).
+    /// Tenant comes from the caller's authenticated principal and from nothing else (task 059 — see Infrastructure/Authentication/TenantResolution).
     /// </summary>
     private static string? ExtractTenantId(HttpContext httpContext)
     {
-        var tenantId = httpContext.User.FindFirst("tid")?.Value
-            ?? httpContext.User.FindFirst("http://schemas.microsoft.com/identity/claims/tenantid")?.Value;
-        if (string.IsNullOrEmpty(tenantId))
-        {
-            tenantId = httpContext.Request.Headers["X-Tenant-Id"].FirstOrDefault();
-        }
+        var tenantId = TenantResolution.ResolveTenantId(httpContext.User);
         return tenantId;
     }
 }

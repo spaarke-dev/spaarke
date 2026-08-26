@@ -3,6 +3,7 @@ using Sprk.Bff.Api.Services.Ai;
 using Sprk.Bff.Api.Services.Ai.Chat;
 using Sprk.Bff.Api.Services.Ai.ReviewMemo;
 using Sprk.Bff.Api.Services.Compose;
+using Sprk.Bff.Api.Infrastructure.Authentication;
 
 namespace Sprk.Bff.Api.Api.Ai;
 
@@ -129,7 +130,7 @@ public static class ReviewMemoEndpoints
             return Problem(
                 StatusCodes.Status400BadRequest,
                 "Tenant Required",
-                "Tenant ID not found in token claims or X-Tenant-Id header.");
+                "Tenant ID not found in token claims.");
         }
 
         // Negative acceptance criterion (spec FR-13 / task 050): generation with no completed review
@@ -178,7 +179,7 @@ public static class ReviewMemoEndpoints
         if (string.IsNullOrEmpty(tenantId))
         {
             return Problem(StatusCodes.Status400BadRequest, "Tenant Required",
-                "Tenant ID not found in token claims or X-Tenant-Id header.");
+                "Tenant ID not found in token claims.");
         }
 
         var (analysisId, resolveError) = await ResolveBoundAnalysisIdAsync(sessionId, tenantId, sessionManager, cancellationToken);
@@ -209,7 +210,7 @@ public static class ReviewMemoEndpoints
         if (string.IsNullOrEmpty(tenantId))
         {
             return Problem(StatusCodes.Status400BadRequest, "Tenant Required",
-                "Tenant ID not found in token claims or X-Tenant-Id header.");
+                "Tenant ID not found in token claims.");
         }
 
         var (analysisId, resolveError) = await ResolveBoundAnalysisIdAsync(sessionId, tenantId, sessionManager, cancellationToken);
@@ -322,19 +323,14 @@ public static class ReviewMemoEndpoints
         extensions: code is null ? null : new Dictionary<string, object?> { ["code"] = code });
 
     /// <summary>
-    /// Extracts the tenant ID from the JWT <c>tid</c> claim (ADR-014) with an <c>X-Tenant-Id</c> header
+    /// Extracts the tenant ID from the JWT <c>tid</c> claim (ADR-014).
     /// fallback for service-to-service calls. Mirrors <c>AnalysisEndpoints.ExtractTenantId</c> /
     /// <c>ChatEndpoints.ExtractTenantId</c> (each endpoint file carries its own copy per existing
     /// convention — see the ~14 sibling private implementations across <c>Api/Ai/*.cs</c>).
     /// </summary>
     private static string? ExtractTenantId(HttpContext httpContext)
     {
-        var tenantId = httpContext.User.FindFirst("tid")?.Value
-            ?? httpContext.User.FindFirst("http://schemas.microsoft.com/identity/claims/tenantid")?.Value;
-        if (string.IsNullOrEmpty(tenantId))
-        {
-            tenantId = httpContext.Request.Headers["X-Tenant-Id"].FirstOrDefault();
-        }
+        var tenantId = TenantResolution.ResolveTenantId(httpContext.User);
         return tenantId;
     }
 }

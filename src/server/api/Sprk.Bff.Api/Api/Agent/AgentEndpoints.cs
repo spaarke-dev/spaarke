@@ -5,6 +5,7 @@ using Sprk.Bff.Api.Configuration;
 using Sprk.Bff.Api.Models.Ai;
 using Sprk.Bff.Api.Services.Ai;
 using Sprk.Bff.Api.Services.Ai.Chat;
+using Sprk.Bff.Api.Infrastructure.Authentication;
 
 namespace Sprk.Bff.Api.Api.Agent;
 
@@ -124,7 +125,7 @@ public static class AgentEndpoints
             return Results.Problem(
                 statusCode: 400,
                 title: "Bad Request",
-                detail: "Tenant ID not found in token claims (tid) or X-Tenant-Id header.",
+                detail: "Tenant ID not found in token claims (tid).",
                 type: "https://tools.ietf.org/html/rfc7231#section-6.5.1");
         }
 
@@ -514,18 +515,13 @@ public static class AgentEndpoints
     }
 
     /// <summary>
-    /// Extracts the tenant ID from the JWT 'tid' claim or X-Tenant-Id header fallback.
+    /// Extracts the tenant ID from the JWT 'tid' claim (ADR-014).
+    /// Tenant comes from the caller's authenticated principal and from nothing else (task 059 — see Infrastructure/Authentication/TenantResolution).
     /// Mirrors the pattern used in ChatEndpoints.
     /// </summary>
     private static string? ExtractTenantId(HttpContext httpContext)
     {
-        var tenantId = httpContext.User.FindFirst("tid")?.Value
-            ?? httpContext.User.FindFirst("http://schemas.microsoft.com/identity/claims/tenantid")?.Value;
-
-        if (string.IsNullOrEmpty(tenantId))
-        {
-            tenantId = httpContext.Request.Headers["X-Tenant-Id"].FirstOrDefault();
-        }
+        var tenantId = TenantResolution.ResolveTenantId(httpContext.User);
 
         return tenantId;
     }

@@ -2,6 +2,7 @@ using System.Security.Claims;
 using Microsoft.AspNetCore.Mvc;
 using Sprk.Bff.Api.Api.Filters;
 using Sprk.Bff.Api.Services.Insights.Precedents;
+using Sprk.Bff.Api.Infrastructure.Authentication;
 
 namespace Sprk.Bff.Api.Api.Insights;
 
@@ -84,12 +85,12 @@ public static class PrecedentAdminEndpoints
         return app;
     }
 
-    /// <summary>
-    /// Header name used to convey the tenant id for the projection sync (D-52). The
-    /// D-P15 endpoint will eventually centralize tenant resolution; for the admin
-    /// confirm path the caller supplies tenant explicitly via this header.
-    /// </summary>
-    private const string TenantIdHeader = "X-Spaarke-Tenant-Id";
+    // The X-Spaarke-Tenant-Id header constant was REMOVED by task 059. It was this endpoint's only
+    // tenant source — no claim was consulted — so an admin authenticated in tenant A could write a
+    // Precedent projection tagged tenant B, and nothing downstream would contradict it. The header
+    // had no sender anywhere in the repo (only a manual operator runbook), and the route already
+    // requires an authenticated JWT, which carries `tid`. The "D-P15 will centralize tenant
+    // resolution" note this replaced is now discharged: TenantResolution IS that central point.
 
     /// <summary>
     /// POST /api/insights/admin/precedents
@@ -240,16 +241,15 @@ public static class PrecedentAdminEndpoints
                 type: "https://tools.ietf.org/html/rfc7231#section-6.5.1");
         }
 
-        // Tenant id is mandatory for the projection sync (D-52). The endpoint accepts
-        // it via X-Spaarke-Tenant-Id header to keep the URL clean and to mirror the
-        // direction the D-P15 ask endpoint (task 061) is heading.
-        var tenantId = httpContext.Request.Headers[TenantIdHeader].ToString();
+        // Tenant id is mandatory for the projection sync (D-52), and it is the CALLER's tenant —
+        // taken from their token, never from the request (task 059).
+        var tenantId = TenantResolution.ResolveTenantId(httpContext.User);
         if (string.IsNullOrWhiteSpace(tenantId))
         {
             return Results.Problem(
-                statusCode: StatusCodes.Status400BadRequest,
-                title: "Bad Request",
-                detail: $"Header '{TenantIdHeader}' is required.",
+                statusCode: StatusCodes.Status401Unauthorized,
+                title: "Unauthorized",
+                detail: "Tenant identity ('tid' claim) not found in authentication token.",
                 type: "https://tools.ietf.org/html/rfc7231#section-6.5.1");
         }
 
