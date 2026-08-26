@@ -123,10 +123,10 @@ public sealed class ServiceBusSmokeTests : IAsyncLifetime
     /// Distinguishing any input dimension MUST change the MessageId.
     /// </summary>
     [Theory]
-    [InlineData("H4", "run-1", "acme", "{\"k\":\"v\"}",  "H5", "run-1", "acme", "{\"k\":\"v\"}")]   // HandlerId
-    [InlineData("H4", "run-1", "acme", "{\"k\":\"v\"}",  "H4", "run-2", "acme", "{\"k\":\"v\"}")]   // RunId
-    [InlineData("H4", "run-1", "acme", "{\"k\":\"v\"}",  "H4", "run-1", "beta", "{\"k\":\"v\"}")]   // CustomerId
-    [InlineData("H4", "run-1", "acme", "{\"k\":\"v\"}",  "H4", "run-1", "acme", "{\"k\":\"w\"}")]   // paramHash
+    [InlineData("H4", "run-1", "acme", "{\"k\":\"v\"}", "H5", "run-1", "acme", "{\"k\":\"v\"}")]   // HandlerId
+    [InlineData("H4", "run-1", "acme", "{\"k\":\"v\"}", "H4", "run-2", "acme", "{\"k\":\"v\"}")]   // RunId
+    [InlineData("H4", "run-1", "acme", "{\"k\":\"v\"}", "H4", "run-1", "beta", "{\"k\":\"v\"}")]   // CustomerId
+    [InlineData("H4", "run-1", "acme", "{\"k\":\"v\"}", "H4", "run-1", "acme", "{\"k\":\"w\"}")]   // paramHash
     public void ComputeMessageId_ChangesWhenAnyDimensionDiffers(
         string h1, string r1, string c1, string p1,
         string h2, string r2, string c2, string p2)
