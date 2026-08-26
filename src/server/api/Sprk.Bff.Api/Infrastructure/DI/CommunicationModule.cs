@@ -551,6 +551,17 @@ public static class CommunicationModule
         services.AddSingleton<AssociationStatusMapper>();
         services.AddSingleton<IncomingAssociationResolver>();
         services.AddSingleton<IncomingCommunicationProcessor>();
+
+        // unified-access-control-r2 task 075, strategy 2 — the adapter from a communication's polymorphic
+        // regarding to the record-aware container decision. SCOPED, because IRecordContainerResolver and
+        // IGenericEntityService are Scoped; IncomingCommunicationProcessor is a Singleton and resolves this
+        // per-message from IServiceScopeFactory, exactly as it already does for SpeFileStore.
+        //
+        // Registering this Singleton would throw "Cannot consume scoped service from singleton" under
+        // ValidateScopes, and registering its scoped dependencies as Singleton would throw "Cannot resolve
+        // scoped service from root provider" at the first upload — visible only on the path that actually
+        // writes bytes. Unconditional (no feature gate → no ADR-032 Null-Object peer required).
+        services.AddScoped<Sprk.Bff.Api.Services.Communication.Engine.CommunicationContainerResolver>();
     }
 
     /// <summary>

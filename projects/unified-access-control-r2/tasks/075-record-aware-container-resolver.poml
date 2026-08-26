@@ -3,7 +3,7 @@
   <metadata>
     <title>Build the record-aware container resolver: a secure record resolves to its OWN sprk_containerid, everything else to the BU cascade, absent secure container fails closed</title>
     <phase>0c Secure Documents — Wave 2</phase>
-    <status>pending</status>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>This is the seam the entire document-isolation guarantee rests on. Provisioning already stamps the container; this is the component that makes the stamp mean something.</rigor-reason>
     <model-tier>opus</model-tier>
