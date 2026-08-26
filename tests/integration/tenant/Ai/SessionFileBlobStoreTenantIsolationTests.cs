@@ -246,4 +246,120 @@ public sealed class SessionFileBlobStoreTenantIsolationTests
             "blob names are ordinal/case-sensitive; the store must not fold case and must not " +
             "accidentally serve one tenant's bytes to a differently-cased identifier");
     }
+
+    // ─────────────────────────────────────────────────────────────────────────
+    // spaarkeai-compose-r8 task 062 (FR-B04) — the ENUMERATION + DELETE surface retention adds and
+    // task 063's erasure will reuse. It carries a strictly larger blast radius than read/write: a
+    // listing that crosses the boundary leaks the EXISTENCE and SIZE of another tenant's files even
+    // when the bytes stay unreadable, and a delete that crosses it destroys them.
+    // ─────────────────────────────────────────────────────────────────────────
+
+    [Fact]
+    public async Task List_ReturnsOnlyTheCallingTenantsBlobs()
+    {
+        var (store, blobs) = BuildStore();
+
+        await store.WriteAsync(TenantA, SessionId, FileId, TenantASecret, "application/pdf");
+        await store.WriteAsync(TenantB, SessionId, FileId, BinaryData.FromString("tenant B content"), "text/plain");
+
+        var listedForB = new List<SessionFileBlobRef>();
+        await foreach (var blob in store.ListAsync(TenantB))
+        {
+            listedForB.Add(blob);
+        }
+
+        listedForB.Should().ContainSingle("tenant B has exactly one durable copy");
+        listedForB[0].TenantId.Should().Be(TenantB);
+        listedForB.Should().NotContain(b => b.TenantId == TenantA,
+            "a listing must not disclose even the EXISTENCE of another tenant's session files");
+
+        // Positive control: both blobs are physically present, so the single result above is a
+        // partitioning outcome and not an empty store.
+        blobs.Count.Should().Be(2);
+    }
+
+    [Fact]
+    public async Task List_ScopedToASession_DoesNotReachAnotherTenantsIdenticallyNamedSession()
+    {
+        var (store, _) = BuildStore();
+
+        await store.WriteAsync(TenantA, SessionId, FileId, TenantASecret, "application/pdf");
+
+        var listedForB = new List<SessionFileBlobRef>();
+        await foreach (var blob in store.ListAsync(TenantB, SessionId))
+        {
+            listedForB.Add(blob);
+        }
+
+        listedForB.Should().BeEmpty(
+            "knowing another tenant's session id must not enumerate that session's files — it is an " +
+            "identifier, not a capability");
+    }
+
+    [Fact]
+    public async Task Delete_FromAnotherTenant_WithTheSameIds_DestroysNothing()
+    {
+        // The highest-consequence version of the identifiers-are-not-authority rule: a cross-tenant
+        // read leaks, a cross-tenant DELETE is unrecoverable data loss.
+        var (store, blobs) = BuildStore();
+
+        await store.WriteAsync(TenantA, SessionId, FileId, TenantASecret, "application/pdf");
+
+        var deleted = await store.DeleteAsync(TenantB, SessionId, FileId);
+
+        deleted.Should().BeFalse();
+        blobs.Count.Should().Be(1);
+        blobs.TryPeek(SessionFileBlobStore.BuildBlobName(TenantA, SessionId, FileId), out var stillThere)
+            .Should().BeTrue("tenant A's bytes must survive a cross-tenant delete attempt");
+        stillThere!.ToString().Should().Be(TenantASecret.ToString());
+
+        // Positive control: the owning tenant CAN delete it, so the BeFalse above is partitioning and
+        // not a store that simply never deletes anything.
+        (await store.DeleteAsync(TenantA, SessionId, FileId)).Should().BeTrue();
+        blobs.Count.Should().Be(0);
+    }
+
+    [Theory]
+    [InlineData("")]
+    [InlineData("   ")]
+    [InlineData("../other-tenant")]
+    [InlineData("tenant/with-slash")]
+    public async Task List_WithAnUnsafeTenantSegment_IsRefusedBeforeAnyEnumeration(string craftedTenantId)
+    {
+        var (store, _) = BuildStore();
+        await store.WriteAsync(TenantA, SessionId, FileId, TenantASecret, "application/pdf");
+
+        var attempt = async () =>
+        {
+            await foreach (var _ in store.ListAsync(craftedTenantId))
+            {
+                // The throw must happen while composing the prefix, not part-way through results.
+            }
+        };
+
+        await attempt.Should().ThrowAsync<ArgumentException>(
+            "a crafted tenant segment must be refused before it becomes a listing prefix");
+    }
+
+    [Fact]
+    public async Task ParsedListings_AlwaysAttributeABlobToTheTenantItIsPhysicallyStoredUnder()
+    {
+        // The property the SYSTEM-scope retention enumeration depends on: it has no caller tenant to
+        // scope by, so correctness rests entirely on the tenant being recovered from the name itself.
+        var (store, _) = BuildStore();
+
+        await store.WriteAsync(TenantA, SessionId, FileId, TenantASecret, "application/pdf");
+        await store.WriteAsync(TenantB, SessionId, FileId, BinaryData.FromString("tenant B content"), "text/plain");
+
+        var all = new List<SessionFileBlobRef>();
+        await foreach (var blob in store.ListAllForRetentionAsync())
+        {
+            all.Add(blob);
+        }
+
+        all.Should().HaveCount(2);
+        all.Should().OnlyContain(b => b.BlobName.StartsWith(b.TenantId + "/", StringComparison.Ordinal),
+            "every row's TenantId must be the first segment of its own blob name — that is what makes " +
+            "the downstream Cosmos probe and delete tenant-correct without a caller tenant to trust");
+    }
 }

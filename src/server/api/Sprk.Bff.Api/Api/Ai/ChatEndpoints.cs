@@ -2073,14 +2073,28 @@ public static class ChatEndpoints
 
     /// <summary>
     /// A single uploaded file in the restore response — minimal projection of the session manifest
-    /// (FR-D5). Camel-cased on the wire by System.Text.Json (fileId/fileName/contentType/sizeBytes),
-    /// matching the client <c>SessionRestoreUploadedFile</c> shape in <c>useSessionRestore.ts</c>.
+    /// (FR-D5). Camel-cased on the wire by System.Text.Json
+    /// (fileId/fileName/contentType/sizeBytes/contentAvailable), matching the client
+    /// <c>SessionRestoreUploadedFile</c> shape in <c>useSessionRestore.ts</c>.
     /// </summary>
+    /// <param name="FileId">Stable session-scoped file id.</param>
+    /// <param name="FileName">Original upload file name (chip label).</param>
+    /// <param name="ContentType">MIME content type as reported on upload.</param>
+    /// <param name="SizeBytes">Original (uncompressed) file size in bytes.</param>
+    /// <param name="ContentAvailable">
+    /// spaarkeai-compose-r8 FR-B05 (task 062) — the server-authoritative availability fact that
+    /// REPLACES R7's client-side ~24h heuristic. <c>true</c> = a durable byte copy exists, so the
+    /// content lives as long as the session. <c>false</c> = the durable store is configured and holds
+    /// no copy. <c>null</c> (omitted-by-shape when unknown) = the server cannot answer, and the client
+    /// MUST render "unknown" rather than substituting a guess — two availability sources is the drift
+    /// FR-B05 exists to remove. See <see cref="Services.Ai.Sessions.SessionFileAvailability"/>.
+    /// </param>
     internal record SessionRestoreUploadedFileDto(
         string FileId,
         string FileName,
         string ContentType,
-        long SizeBytes);
+        long SizeBytes,
+        bool? ContentAvailable);
 
     /// <summary>
     /// GET /api/ai/chat/sessions/{sessionId}/restore
@@ -2120,7 +2134,8 @@ public static class ChatEndpoints
         // FR-D5: project the restored uploaded-files manifest to the wire DTO (already minimal — the
         // restore service dropped enriched fields). Empty list when the session had no attachments.
         var uploadedFiles = restored.UploadedFiles
-            .Select(f => new SessionRestoreUploadedFileDto(f.FileId, f.FileName, f.ContentType, f.SizeBytes))
+            .Select(f => new SessionRestoreUploadedFileDto(
+                f.FileId, f.FileName, f.ContentType, f.SizeBytes, f.ContentAvailable))
             .ToList();
 
         var response = new SessionRestoreResponse(

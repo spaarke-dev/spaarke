@@ -2729,9 +2729,22 @@ export function ConversationPane(): React.JSX.Element {
           };
           const rawFiles = Array.isArray(spec.uploadedFiles) ? spec.uploadedFiles : [];
           if (rawFiles.length === 0) return;
-          // Availability (best-effort 24h): prefer a server signal (contentAvailable) if present;
-          // otherwise infer from the freshest message age vs the ~24h AI-Search eviction window
-          // (SessionFilesCleanupJob). Unknown age ⇒ assume available (never falsely disable).
+          // Availability — TRI-STATE, server-preferred (FR-B05), with a deliberate client fallback.
+          //
+          // Task 062 made the server the AUTHORITY: `contentAvailable` is a real answer derived from
+          // the durable store. But while `SessionFileStore:BlobEndpoint` is empty — which it MUST stay
+          // until 062 AND 063 both merge, because ADR-015 requires retention AND erasure before a
+          // persisted store is armed — the server has NO answer and returns null everywhere.
+          //
+          // Deleting this fallback (as task 062's hand-off proposed) would therefore drop the dimmed
+          // chip entirely for the whole period the store is disabled, even though the ~24h AI-Search
+          // eviction (SessionFilesCleanupJob) is STILL REAL. That trades a real user-visible warning
+          // for a purity FR-B05 does not actually require: "server-authoritative" means the client must
+          // not OVERRIDE the server, not that the client must go silent when the server is mute.
+          //
+          // So: a boolean from the server always wins; null/absent falls back to the freshest-message
+          // age vs the eviction window. Unknown age ⇒ assume available (never falsely disable). Once
+          // the store is armed the server always answers and this branch becomes unreachable.
           const stamps = (spec.recentMessages ?? [])
             .map((m) => (m.timestamp ? Date.parse(m.timestamp) : NaN))
             .filter((n) => !Number.isNaN(n));

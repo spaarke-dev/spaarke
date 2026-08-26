@@ -1,3 +1,4 @@
+using System.Runtime.CompilerServices;
 using System.Text.RegularExpressions;
 using Azure;
 using Azure.Core;
@@ -32,6 +33,36 @@ public enum SessionFileStoreOutcome
 
 /// <summary>Bytes read back from the durable session-file store, with the content type they were stored under.</summary>
 public sealed record SessionFileBytes(BinaryData Content, string? ContentType);
+
+/// <summary>
+/// One durable session-file blob as the ENUMERATION paths see it — the parsed identity plus the two
+/// pieces of blob metadata a lifecycle decision needs.
+/// </summary>
+/// <remarks>
+/// The identity fields are parsed back OUT of the blob name rather than carried alongside it, so a
+/// listing can only ever describe blobs whose names actually conform to
+/// <c>{tenantId}/session-files/{sessionId}/{fileId}</c>. Anything else in the (shared) container is
+/// invisible to these paths by construction — see <see cref="SessionFileBlobStore.TryParseBlobName"/>.
+/// </remarks>
+/// <param name="TenantId">Tenant segment — always the FIRST path segment (ADR-014/ADR-015).</param>
+/// <param name="SessionId">Session segment.</param>
+/// <param name="FileId">File segment — matches <c>StoredUploadedFile.FileId</c>.</param>
+/// <param name="BlobName">The literal blob name, for delete and for diagnostics.</param>
+/// <param name="SizeBytes">Content length when the listing reported one.</param>
+/// <param name="CreatedOn">
+/// Blob creation time when the listing reported one. <c>null</c> makes a blob un-ageable, which
+/// <see cref="SessionFileRetentionPolicy"/> treats as RETAIN.
+/// </param>
+public sealed record SessionFileBlobRef(
+    string TenantId,
+    string SessionId,
+    string FileId,
+    string BlobName,
+    long? SizeBytes,
+    DateTimeOffset? CreatedOn);
+
+/// <summary>Raw listing row from the blob boundary, before the name is parsed.</summary>
+internal sealed record SessionFileBlobListing(string BlobName, long? SizeBytes, DateTimeOffset? CreatedOn);
 
 /// <summary>
 /// FR-B01 (spaarkeai-compose-r8 Track B) — the durable, tenant-partitioned byte copy of every chat
@@ -76,19 +107,33 @@ public sealed record SessionFileBytes(BinaryData Content, string? ContentType);
 /// refuses a connection string, account key, SAS or non-https endpoint outright (root CLAUDE.md §9).
 /// </para>
 /// <para>
-/// <b>Retention is NOT defined by this type, and that is a deliberate, gated deferral.</b> ADR-015
-/// requires retention and deletion behaviour to be defined for any persisted AI artifact. Task 062
-/// (retention: 90-day default for unfiled, indefinite for filed) and task 063 (GDPR erasure) own that,
-/// and this type exposes no delete precisely so the 24h cleanup sweep cannot reach durable bytes
-/// (FR-B03). Until those land, the store is inert by construction:
-/// <c>SessionFileStore:BlobEndpoint</c> ships EMPTY, so no bytes accumulate anywhere. Do not set that
-/// key in a deployed environment before 062/063 merge — see
-/// <c>projects/spaarkeai-compose-r8/notes/track-b-placement-justification.md</c> §5/§8.
+/// <b>Retention and the delete surface (task 062, FR-B04).</b> Task 060 shipped this type with
+/// <see cref="WriteAsync"/> and <see cref="ReadAsync"/> only, because ADR-015 requires retention and
+/// deletion behaviour to be DEFINED for any persisted AI artifact and neither existed yet. Task 062
+/// defines retention (<see cref="SessionFileRetentionPolicy"/>, swept by
+/// <see cref="SessionFileRetentionJob"/>) and therefore adds the two operations retention needs:
+/// <see cref="ListAsync"/> / <see cref="ListAllForRetentionAsync"/> and <see cref="DeleteAsync"/>.
+/// They are shaped as the SHARED primitive task 063 (GDPR erasure) also needs — erasing a session is
+/// "list its prefix, delete each"; erasing a tenant is the same with a shorter prefix — so 063 adds no
+/// new store surface, only a caller. Enumerating by PREFIX rather than by walking the Cosmos manifest
+/// is load-bearing: an orphaned blob (the durable write lands before the non-fatal manifest write) is
+/// not named by any manifest, so a manifest-driven erasure would leave it behind.
 /// </para>
 /// <para>
-/// <b>Not in scope here.</b> Lazy re-index on recall and the cleanup-job scope change are task 061;
-/// retention/availability is task 062; erasure is task 063. This type deliberately exposes no delete
-/// so the 24h cleanup sweep has no code path that can reach durable bytes (spec FR-B03).
+/// <b>Why adding a delete here does not weaken FR-B03.</b> FR-B03's guarantee is that the 24h
+/// hot-index cleanup sweep cannot reach durable bytes. Task 061 made that STRUCTURAL rather than
+/// incidental: <c>SessionFilesCleanupJob</c> no longer holds an <c>IServiceProvider</c>, and its entire
+/// reachable surface is one <c>SearchClient</c> plus a read-only Redis multiplexer, enforced by
+/// <c>tests/Spaarke.ArchTests/SessionFilesCleanupScopeTests.cs</c>. "This type has no delete method"
+/// was the second line of defence; the first one still holds, which is precisely why 061 was sequenced
+/// before 062.
+/// </para>
+/// <para>
+/// <b>Still gated.</b> <c>SessionFileStore:BlobEndpoint</c> ships EMPTY and must stay empty until task
+/// 063 (erasure) merges too — see
+/// <c>projects/spaarkeai-compose-r8/notes/track-b-placement-justification.md</c> §5/§8a. With it empty
+/// this store is inert: every operation below, including the new ones, short-circuits to
+/// disabled/no-op without a network call.
 /// </para>
 /// </remarks>
 public sealed class SessionFileBlobStore
@@ -276,6 +321,227 @@ public sealed class SessionFileBlobStore
     }
 
     /// <summary>
+    /// Enumerates this TENANT's durable session-file blobs, optionally narrowed to one session.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// Tenant-scoped and request-safe: the prefix always begins with <c>{tenantId}/</c>, and every
+    /// returned name is re-checked by <see cref="AssertTenantPartitioned"/> before it is yielded — so a
+    /// future change to the prefix construction cannot widen a listing across tenants without failing
+    /// loudly. Names that do not conform to <c>{tenantId}/session-files/{sessionId}/{fileId}</c> are
+    /// SKIPPED rather than returned: the container is shared, and this API must only ever describe
+    /// session files.
+    /// </para>
+    /// <para>
+    /// One request covers a whole session, which is why the availability probe
+    /// (<see cref="SessionFileRehydrationService.ProbeSessionAvailabilityAsync"/>) can answer for a
+    /// 20-file manifest without 20 round trips.
+    /// </para>
+    /// </remarks>
+    /// <param name="tenantId">Calling tenant. Required — there is no cross-tenant form of this method.</param>
+    /// <param name="sessionId">Optional session narrowing. Null lists every session of the tenant (task 063's erasure shape).</param>
+    /// <param name="cancellationToken">Cancellation token.</param>
+    /// <exception cref="ArgumentException">A segment is missing or is not a safe blob-name segment.</exception>
+    public async IAsyncEnumerable<SessionFileBlobRef> ListAsync(
+        string tenantId,
+        string? sessionId = null,
+        [EnumeratorCancellation] CancellationToken cancellationToken = default)
+    {
+        var safeTenant = RequireSafeSegment(tenantId, nameof(tenantId));
+
+        var prefix = sessionId is null
+            ? string.Concat(safeTenant, "/", SessionFilesPathSegment, "/")
+            : string.Concat(safeTenant, "/", SessionFilesPathSegment, "/",
+                RequireSafeSegment(sessionId, nameof(sessionId)), "/");
+
+        if (_gateway is null)
+        {
+            LogDisabledOnce();
+            yield break;
+        }
+
+        await foreach (var listing in EnumerateGatewayAsync(prefix, cancellationToken).ConfigureAwait(false))
+        {
+            if (!TryParseBlobName(listing.BlobName, out var parsed) || parsed is null)
+            {
+                continue;
+            }
+
+            // Belt-and-braces, exactly as on the read/write paths: a listing must never hand back a
+            // blob outside the calling tenant's prefix, whatever the prefix construction above did.
+            AssertTenantPartitioned(parsed.BlobName, safeTenant);
+
+            yield return parsed with { SizeBytes = listing.SizeBytes, CreatedOn = listing.CreatedOn };
+        }
+    }
+
+    /// <summary>
+    /// SYSTEM-SCOPE enumeration of every durable session-file blob in the container, ACROSS tenants.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <b>Read this before calling it.</b> This is the one operation on this type that is not scoped to
+    /// a caller's tenant, and it exists for exactly one consumer:
+    /// <see cref="SessionFileRetentionJob"/>. It must never be reachable from a request path.
+    /// </para>
+    /// <para>
+    /// <b>Why retention cannot use the tenant-scoped form.</b> Retention has to find blobs whose session
+    /// — and therefore whose Cosmos manifest — is GONE. Nothing left in Cosmos names those blobs or even
+    /// names the tenants that own them, so any enumeration driven from the manifest side is blind to
+    /// precisely the population retention exists to reap. The blob namespace is the only place that
+    /// still records them, and the tenant id is recoverable because it is the first path segment.
+    /// </para>
+    /// <para>
+    /// <b>The isolation property still holds.</b> Every row is parsed back out of the blob name, so the
+    /// tenant a row is attributed to is the tenant it is physically stored under — it cannot be
+    /// mis-attributed. Everything downstream (the Cosmos probe, the delete) is performed with THAT
+    /// tenant. Non-conforming names are skipped, so other content in the shared container is invisible.
+    /// </para>
+    /// </remarks>
+    public async IAsyncEnumerable<SessionFileBlobRef> ListAllForRetentionAsync(
+        [EnumeratorCancellation] CancellationToken cancellationToken = default)
+    {
+        if (_gateway is null)
+        {
+            LogDisabledOnce();
+            yield break;
+        }
+
+        await foreach (var listing in EnumerateGatewayAsync(prefix: string.Empty, cancellationToken).ConfigureAwait(false))
+        {
+            if (!TryParseBlobName(listing.BlobName, out var parsed) || parsed is null)
+            {
+                continue;
+            }
+
+            yield return parsed with { SizeBytes = listing.SizeBytes, CreatedOn = listing.CreatedOn };
+        }
+    }
+
+    /// <summary>
+    /// Deletes one durable byte copy. Idempotent.
+    /// </summary>
+    /// <returns>
+    /// <c>true</c> when a blob was deleted, <c>false</c> when there was nothing to delete or the store
+    /// is disabled. A second delete of the same file is a <c>false</c>, not an error — retention passes
+    /// and erasure requests overlap by design.
+    /// </returns>
+    /// <remarks>
+    /// The name is composed by the SAME <see cref="BuildBlobName"/> the write used and re-checked by
+    /// <see cref="AssertTenantPartitioned"/>, so a caller cannot delete outside its own tenant even by
+    /// supplying another tenant's session and file ids — it deletes nothing and gets <c>false</c>.
+    /// </remarks>
+    /// <exception cref="ArgumentException">A segment is missing or is not a safe blob-name segment.</exception>
+    public async Task<bool> DeleteAsync(
+        string tenantId,
+        string sessionId,
+        string fileId,
+        CancellationToken cancellationToken = default)
+    {
+        var blobName = BuildBlobName(tenantId, sessionId, fileId);
+        AssertTenantPartitioned(blobName, tenantId);
+
+        if (_gateway is null)
+        {
+            LogDisabledOnce();
+            return false;
+        }
+
+        bool deleted;
+        try
+        {
+            deleted = await _gateway.DeleteAsync(blobName, cancellationToken).ConfigureAwait(false);
+        }
+        catch (RequestFailedException ex)
+        {
+            throw Actionable(ex, "delete");
+        }
+
+        if (deleted)
+        {
+            // ADR-015: identifiers only. A deletion is an auditable event — logged at Information so a
+            // retention or erasure pass leaves a trail that names exactly what went.
+            _logger.LogInformation(
+                "Durable session-file copy deleted. TenantId={TenantId}, SessionId={SessionId}, FileId={FileId}",
+                tenantId, sessionId, fileId);
+        }
+
+        return deleted;
+    }
+
+    private async IAsyncEnumerable<SessionFileBlobListing> EnumerateGatewayAsync(
+        string prefix,
+        [EnumeratorCancellation] CancellationToken cancellationToken)
+    {
+        // The gateway's enumerator is the only thing that can throw RequestFailedException here, and it
+        // does so lazily during iteration — so the translation has to wrap MoveNext, not the call.
+        await using var enumerator = _gateway!.ListAsync(prefix, cancellationToken).GetAsyncEnumerator(cancellationToken);
+
+        while (true)
+        {
+            bool moved;
+            try
+            {
+                moved = await enumerator.MoveNextAsync().ConfigureAwait(false);
+            }
+            catch (RequestFailedException ex)
+            {
+                throw Actionable(ex, "list");
+            }
+
+            if (!moved)
+            {
+                yield break;
+            }
+
+            yield return enumerator.Current;
+        }
+    }
+
+    /// <summary>
+    /// Parses a blob name back into its identity, or returns <c>false</c> when the name is not a
+    /// session-file blob.
+    /// </summary>
+    /// <remarks>
+    /// The inverse of <see cref="BuildBlobName"/>, and deliberately as strict: every segment must
+    /// satisfy the same <see cref="SafeSegment"/> rule the write path enforced, the fixed
+    /// <see cref="SessionFilesPathSegment"/> must be in position 2, and there must be exactly four
+    /// segments. A container shared with other content therefore cannot produce a
+    /// <see cref="SessionFileBlobRef"/> that some later code path would delete.
+    /// </remarks>
+    internal static bool TryParseBlobName(string blobName, out SessionFileBlobRef? parsed)
+    {
+        parsed = null;
+
+        if (string.IsNullOrWhiteSpace(blobName))
+        {
+            return false;
+        }
+
+        var segments = blobName.Split('/');
+        if (segments.Length != 4
+            || !string.Equals(segments[1], SessionFilesPathSegment, StringComparison.Ordinal))
+        {
+            return false;
+        }
+
+        if (!IsSafeSegment(segments[0]) || !IsSafeSegment(segments[2]) || !IsSafeSegment(segments[3]))
+        {
+            return false;
+        }
+
+        parsed = new SessionFileBlobRef(
+            TenantId: segments[0],
+            SessionId: segments[2],
+            FileId: segments[3],
+            BlobName: blobName,
+            SizeBytes: null,
+            CreatedOn: null);
+
+        return true;
+    }
+
+    /// <summary>
     /// Translates an Azure failure into an exception whose MESSAGE names the thing an operator has to
     /// change. The two overwhelmingly likely production failures are both configuration, not transient:
     /// a missing role assignment (403) and a container that was never provisioned (404). Left as a raw
@@ -326,10 +592,7 @@ public sealed class SessionFileBlobStore
                 parameterName);
         }
 
-        if (value.Length > MaxSegmentLength
-            || !SafeSegment.IsMatch(value)
-            || value.Contains("..", StringComparison.Ordinal)
-            || value.EndsWith('.'))
+        if (!IsSafeSegment(value))
         {
             // The rejected value is attacker-influenceable, so it is NOT echoed into the log/message.
             throw new ArgumentException(
@@ -340,6 +603,19 @@ public sealed class SessionFileBlobStore
 
         return value;
     }
+
+    /// <summary>
+    /// The segment rule itself, shared by the write path (<see cref="RequireSafeSegment"/>, which
+    /// throws) and the listing path (<see cref="TryParseBlobName"/>, which skips). Sharing it is the
+    /// point: a name that could not have been WRITTEN must not be recognised when it is READ BACK, or a
+    /// listing-driven delete could act on something the write path would have rejected.
+    /// </summary>
+    private static bool IsSafeSegment(string value)
+        => !string.IsNullOrWhiteSpace(value)
+           && value.Length <= MaxSegmentLength
+           && SafeSegment.IsMatch(value)
+           && !value.Contains("..", StringComparison.Ordinal)
+           && !value.EndsWith('.');
 
     /// <summary>
     /// Belt-and-braces: the finished name MUST sit under the calling tenant's prefix. This exists so a
@@ -462,6 +738,18 @@ internal abstract class SessionFileBlobGateway
     public abstract Task UploadAsync(string blobName, BinaryData content, string? contentType, CancellationToken cancellationToken);
 
     public abstract Task<SessionFileBytes?> DownloadAsync(string blobName, CancellationToken cancellationToken);
+
+    /// <summary>
+    /// Enumerates blobs under <paramref name="prefix"/> (empty = the whole container); ordering is not
+    /// guaranteed. Task 062 (retention) and task 063 (erasure) both consume this.
+    /// </summary>
+    public abstract IAsyncEnumerable<SessionFileBlobListing> ListAsync(string prefix, CancellationToken cancellationToken);
+
+    /// <summary>
+    /// Deletes one blob. Returns <c>false</c> when it did not exist — deletes must be idempotent,
+    /// because a retention pass and an erasure request can legitimately race for the same blob.
+    /// </summary>
+    public abstract Task<bool> DeleteAsync(string blobName, CancellationToken cancellationToken);
 }
 
 /// <summary>Managed-identity-authenticated Azure Blob implementation of <see cref="SessionFileBlobGateway"/>.</summary>
@@ -504,5 +792,35 @@ internal sealed class AzureBlobSessionFileGateway : SessionFileBlobGateway
             // file" on every read. ContainerNotFound propagates to SessionFileBlobStore.Actionable.
             return null;
         }
+    }
+
+    public override async IAsyncEnumerable<SessionFileBlobListing> ListAsync(
+        string prefix,
+        [EnumeratorCancellation] CancellationToken cancellationToken)
+    {
+        // Flat listing. GetBlobsAsync pages transparently (5,000/page) and BlobItem.Properties carries
+        // both values a retention decision needs, so no per-blob GetProperties round trip is required.
+        await foreach (var item in _container
+            .GetBlobsAsync(traits: BlobTraits.None, states: BlobStates.None, prefix: prefix, cancellationToken: cancellationToken)
+            .ConfigureAwait(false))
+        {
+            yield return new SessionFileBlobListing(
+                BlobName: item.Name,
+                SizeBytes: item.Properties?.ContentLength,
+                CreatedOn: item.Properties?.CreatedOn);
+        }
+    }
+
+    public override async Task<bool> DeleteAsync(string blobName, CancellationToken cancellationToken)
+    {
+        var blob = _container.GetBlobClient(blobName);
+
+        // DeleteIfExists returns false for a blob that is already gone. A missing CONTAINER still
+        // throws, which is correct: that is a deployment fault, not "nothing to delete".
+        var response = await blob
+            .DeleteIfExistsAsync(DeleteSnapshotsOption.IncludeSnapshots, conditions: null, cancellationToken)
+            .ConfigureAwait(false);
+
+        return response.Value;
     }
 }

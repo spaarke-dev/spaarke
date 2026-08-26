@@ -183,5 +183,13 @@ public sealed class SessionFileBlobStoreConfigurationTests
 
         public override Task<SessionFileBytes?> DownloadAsync(string blobName, CancellationToken cancellationToken)
             => throw new InvalidOperationException("simulated blob failure");
+
+        // Task 062 added the enumeration + delete surface retention and erasure share. This gateway
+        // fails EVERY operation on purpose, so the new members fail the same way the old ones do.
+        public override IAsyncEnumerable<SessionFileBlobListing> ListAsync(string prefix, CancellationToken cancellationToken)
+            => throw new InvalidOperationException("simulated blob failure");
+
+        public override Task<bool> DeleteAsync(string blobName, CancellationToken cancellationToken)
+            => throw new InvalidOperationException("simulated blob failure");
     }
 }

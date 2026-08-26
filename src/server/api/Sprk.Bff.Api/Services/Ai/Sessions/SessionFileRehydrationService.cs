@@ -45,6 +45,58 @@ public enum SessionFileRehydrationOutcome
     Failed
 }
 
+/// <summary>
+/// spaarkeai-compose-r8 FR-B05 (task 062) — the SERVER's answer to "is this session's file content
+/// still usable?", for a whole session's manifest at once.
+/// </summary>
+/// <remarks>
+/// <para>
+/// <b>Tri-state on purpose.</b> R7 shipped a CLIENT-side guess (freshest message age vs a ~24h
+/// window) because the server genuinely did not know. It now knows — but only where the durable store
+/// is configured. Collapsing "no durable copy" and "this deployment has no durable store" into a
+/// single <c>false</c> would report files as unavailable in every deployment that has not enabled the
+/// store, which is the worst outcome the FR names: files that exist, reported unavailable.
+/// </para>
+/// <para>
+/// <b>What each value means.</b>
+/// <list type="bullet">
+///   <item><c>true</c> — a durable byte copy exists for THIS tenant, so the content is recoverable for
+///     as long as the session lives, re-indexing on demand if the hot chunks were evicted.</item>
+///   <item><c>false</c> — the durable store is configured and holds no copy of this file. The content
+///     is not guaranteed beyond the hot index's own (24h) window. Files uploaded before FR-B01 shipped
+///     are the realistic population here.</item>
+///   <item><c>null</c> — the server cannot answer (store not configured, or the probe failed). Callers
+///     MUST render this as "unknown", never as unavailable, and MUST NOT substitute a guess of their
+///     own: one availability source is the whole point of FR-B05.</item>
+/// </list>
+/// </para>
+/// </remarks>
+/// <param name="DurableFileIds">
+/// The file ids that have a durable copy, or <c>null</c> when the question could not be answered.
+/// </param>
+/// <param name="UnansweredReason">
+/// Why the answer is <c>null</c> — <see cref="SessionFileRehydrationOutcome.StoreDisabled"/> or
+/// <see cref="SessionFileRehydrationOutcome.Failed"/>. Null when the probe answered. Reuses the
+/// rehydration outcome enum rather than minting a parallel one: these are the same two "the durable
+/// tier cannot help you" states rehydration already names (root CLAUDE.md §11).
+/// </param>
+public sealed record SessionFileAvailability(
+    IReadOnlySet<string>? DurableFileIds,
+    SessionFileRehydrationOutcome? UnansweredReason)
+{
+    /// <summary>The probe could not answer; every file's availability is unknown.</summary>
+    public static SessionFileAvailability Unanswered(SessionFileRehydrationOutcome reason) => new(null, reason);
+
+    /// <summary>
+    /// Server-authoritative availability for one file: <c>true</c> / <c>false</c> / <c>null</c>
+    /// (unknown). See the type remarks for what each means.
+    /// </summary>
+    public bool? ContentAvailable(string fileId)
+        => DurableFileIds is null || string.IsNullOrWhiteSpace(fileId)
+            ? null
+            : DurableFileIds.Contains(fileId);
+}
+
 /// <summary>Result of one lazy rehydration attempt.</summary>
 /// <param name="Outcome">What happened.</param>
 /// <param name="ExtractedText">
@@ -163,6 +215,88 @@ public sealed class SessionFileRehydrationService
     /// <see cref="SessionFileRehydrationOutcome.Unavailable"/>, so callers can skip the attempt.
     /// </summary>
     public bool IsAvailable => _durableStore.IsEnabled && _textExtractor is not null;
+
+    /// <summary>
+    /// spaarkeai-compose-r8 FR-B05 (task 062) — server-authoritative availability for a whole session's
+    /// uploaded-file manifest, in ONE round trip.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <b>Why it lives here and not in a new component.</b> This is the read side of the same durable
+    /// store <see cref="RehydrateAsync"/> reads, answering the cheap version of the same question
+    /// ("could I rehydrate this?") without paying for the extraction. Its two "cannot help you" states
+    /// are literally the two <see cref="SessionFileRehydrationOutcome"/> values rehydration already
+    /// returns for them. A separate availability service would have duplicated the store dependency,
+    /// the tenant scoping and the disabled-store handling, and cost a third DI registration for a
+    /// method (root CLAUDE.md §11: extend, do not add).
+    /// </para>
+    /// <para>
+    /// <b>One request, not one per file.</b> The durable layout puts every file of a session under
+    /// <c>{tenantId}/session-files/{sessionId}/</c>, so a single prefix listing answers for all 20
+    /// (<c>ChatSession.MaxUploadedFiles</c>) of them. That is what keeps this affordable on the restore
+    /// path, whose NFR is &lt;500ms p95.
+    /// </para>
+    /// <para>
+    /// <b>Never throws, never blocks the caller.</b> A listing failure is reported as
+    /// <see cref="SessionFileRehydrationOutcome.Failed"/> and renders as "unknown" — an availability
+    /// signal must not be able to fail a session restore. Cancellation still propagates.
+    /// </para>
+    /// <para>
+    /// <b>Tenant isolation (ADR-014 / ADR-015).</b> The listing prefix is tenant-first and every
+    /// returned name is re-asserted against the calling tenant by
+    /// <see cref="SessionFileBlobStore.ListAsync"/>, so a probe under tenant B cannot observe that
+    /// tenant A holds a copy of the same (sessionId, fileId) — it answers <c>false</c>, exactly as if
+    /// the file did not exist.
+    /// </para>
+    /// </remarks>
+    /// <param name="tenantId">Calling tenant — the partition the listing is scoped to.</param>
+    /// <param name="sessionId">Session whose manifest is being answered for.</param>
+    /// <param name="cancellationToken">Cancellation token.</param>
+    public async Task<SessionFileAvailability> ProbeSessionAvailabilityAsync(
+        string tenantId,
+        string sessionId,
+        CancellationToken cancellationToken = default)
+    {
+        if (string.IsNullOrWhiteSpace(tenantId) || string.IsNullOrWhiteSpace(sessionId))
+        {
+            return SessionFileAvailability.Unanswered(SessionFileRehydrationOutcome.Failed);
+        }
+
+        if (!_durableStore.IsEnabled)
+        {
+            // The pre-FR-B01 world, and the deliberate default until tasks 062+063 both merge. The
+            // server has no basis for an answer, and must say so rather than guess.
+            return SessionFileAvailability.Unanswered(SessionFileRehydrationOutcome.StoreDisabled);
+        }
+
+        var durableFileIds = new HashSet<string>(StringComparer.Ordinal);
+
+        try
+        {
+            await foreach (var blob in _durableStore
+                .ListAsync(tenantId, sessionId, cancellationToken)
+                .ConfigureAwait(false))
+            {
+                durableFileIds.Add(blob.FileId);
+            }
+        }
+        catch (OperationCanceledException)
+        {
+            throw;
+        }
+        catch (Exception ex)
+        {
+            // ADR-015: identifiers only.
+            _logger.LogWarning(ex,
+                "Session-file availability probe failed - reporting UNKNOWN rather than unavailable. " +
+                "TenantId={TenantId}, SessionId={SessionId}",
+                tenantId, sessionId);
+
+            return SessionFileAvailability.Unanswered(SessionFileRehydrationOutcome.Failed);
+        }
+
+        return new SessionFileAvailability(durableFileIds, UnansweredReason: null);
+    }
 
     /// <summary>
     /// Rebuilds <paramref name="file"/>'s hot-index chunks from its durable byte copy.

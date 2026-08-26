@@ -51,20 +51,31 @@ public class SessionRestoreService : ISessionRestoreService
     private readonly IHttpClientFactory _httpClientFactory;
     private readonly IConfiguration _configuration;
     private readonly TokenCredential _credential;
+    private readonly SessionFileRehydrationService? _sessionFileAvailability;
     private readonly ILogger<SessionRestoreService> _logger;
 
+    /// <param name="sessionFileAvailability">
+    /// spaarkeai-compose-r8 FR-B05 (task 062) — supplies the server-authoritative
+    /// <c>contentAvailable</c> flag on the restored uploaded-files manifest. Optional and trailing so
+    /// the existing direct-construction tests keep compiling; DI registers
+    /// <see cref="SessionFileRehydrationService"/> unconditionally
+    /// (<c>AiPersistenceModule</c>), so production always supplies it. Null simply means every file's
+    /// availability is reported as UNKNOWN — never as unavailable.
+    /// </param>
     public SessionRestoreService(
         ISessionPersistenceService persistence,
         IHttpClientFactory httpClientFactory,
         IConfiguration configuration,
         TokenCredential credential,
-        ILogger<SessionRestoreService> logger)
+        ILogger<SessionRestoreService> logger,
+        SessionFileRehydrationService? sessionFileAvailability = null)
     {
         _persistence = persistence;
         _httpClientFactory = httpClientFactory;
         _configuration = configuration;
         _credential = credential;
         _logger = logger;
+        _sessionFileAvailability = sessionFileAvailability;
     }
 
     // =========================================================================
@@ -122,12 +133,33 @@ public class SessionRestoreService : ISessionRestoreService
         // (ADR-040: no new store, no new query) mapped to a strict subset. Enriched fields
         // (SummaryText / Sections / Citations / ExtractedText) are deliberately NOT projected
         // (ADR-015 Tier-2: restore payload carries identifiers + display metadata, never content).
-        IReadOnlyList<RestoredUploadedFile> uploadedFiles = session.UploadedFiles is { Count: > 0 }
-            ? session.UploadedFiles
-                .Select(f => new RestoredUploadedFile(f.FileId, f.FileName, f.ContentType, f.SizeBytes))
+        //
+        // spaarkeai-compose-r8 FR-B05 (task 062): each entry now carries a SERVER-authoritative
+        // ContentAvailable, replacing R7's client-side "freshest message age < 24h" guess. One prefix
+        // listing answers for the whole manifest (see ProbeSessionAvailabilityAsync), it is skipped
+        // entirely when there are no uploads, and it can only ever downgrade to "unknown" — an
+        // availability signal must not be able to fail a restore or push it past its <500ms NFR.
+        IReadOnlyList<RestoredUploadedFile> uploadedFiles;
+        if (session.UploadedFiles is { Count: > 0 })
+        {
+            var availability = _sessionFileAvailability is null
+                ? SessionFileAvailability.Unanswered(SessionFileRehydrationOutcome.StoreDisabled)
+                : await _sessionFileAvailability.ProbeSessionAvailabilityAsync(tenantId, sessionId, ct);
+
+            uploadedFiles = session.UploadedFiles
+                .Select(f => new RestoredUploadedFile(
+                    f.FileId,
+                    f.FileName,
+                    f.ContentType,
+                    f.SizeBytes,
+                    availability.ContentAvailable(f.FileId)))
                 .ToList()
-                .AsReadOnly()
-            : [];
+                .AsReadOnly();
+        }
+        else
+        {
+            uploadedFiles = [];
+        }
 
         sw.Stop();
 

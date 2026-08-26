@@ -245,6 +245,56 @@ public static class AiPersistenceModule
             indexingPipeline: sp.GetService<Sprk.Bff.Api.Services.Ai.RagIndexingPipeline>(),
             logger: sp.GetRequiredService<ILogger<SessionFileRehydrationService>>()));
 
+        // spaarkeai-compose-r8 FR-B04 (task 062): SessionFileRetentionJob — the expiry pass that makes a
+        // durable copy's lifetime follow its SESSION's retention (90-day default for unfiled, INDEFINITE
+        // for filed, StoredSession.Ttl == -1). Without it the bytes tasks 060/061 write never expire at
+        // all, ADR-015's "MUST define retention and deletion behavior" stays unmet, and the mechanical
+        // gate holding SessionFileStore:BlobEndpoint empty can never be lifted.
+        //
+        // ADR-010 budget: this is the project's THIRD registration (spec §11 budgeted one; the store was
+        // #1, the rehydration service #2). Justified rather than assumed:
+        //   - It cannot be folded into SessionFilesCleanupJob. Task 061 deliberately made that job
+        //     structurally incapable of reaching durable bytes (no IServiceProvider; reachable surface =
+        //     one SearchClient + a read-only multiplexer), enforced by
+        //     tests/Spaarke.ArchTests/SessionFilesCleanupScopeTests.cs. Adding retention there would undo
+        //     the exact property 061 was sequenced before 062 to establish, and would fail that test.
+        //   - The generic cron framework (SchedulingModule's ScheduledJobHost / IScheduledJob) costs
+        //     TWO registrations plus a seeded job definition, and stores run history in an explicitly
+        //     interim InMemoryBackgroundJobStore. More surface, not less.
+        //   - ADR-001 says BackgroundService + PeriodicTimer for in-process periodic work, which is one
+        //     AddHostedService line and mirrors SessionFilesCleanupJob next door.
+        //
+        // UNCONDITIONAL (ADR-032 P1), like the two registrations above: the job's collaborators are a
+        // singleton store and a delegate, neither feature-gated, and "no blob endpoint" is a RUNTIME
+        // state (ExecuteAsync logs once and returns without starting a timer) rather than a DI state. A
+        // feature-gated registration would be the asymmetric pattern §F.1 exists to catch.
+        //
+        // The Cosmos probe is passed as a one-method delegate rather than an IServiceProvider /
+        // IServiceScopeFactory. ISessionPersistenceService is Scoped, so a scope is genuinely required —
+        // but this job is the first component that CAN delete durable bytes, and task 061's finding was
+        // precisely that an ambient service locator inside a deleting component is a reach, not a
+        // boundary. The closure keeps the scope factory OUT of the job: after construction the job can
+        // reach the store and this delegate, and nothing else. A missing ISessionPersistenceService
+        // degrades to Indeterminate, which RETAINS.
+        services.AddHostedService(sp =>
+        {
+            var scopeFactory = sp.GetRequiredService<IServiceScopeFactory>();
+
+            return new SessionFileRetentionJob(
+                durableStore: sp.GetRequiredService<SessionFileBlobStore>(),
+                probeSessionRetention: async (tenantId, sessionId, ct) =>
+                {
+                    using var scope = scopeFactory.CreateScope();
+                    var persistence = scope.ServiceProvider.GetService<ISessionPersistenceService>();
+
+                    return persistence is null
+                        ? SessionRetentionProbe.Indeterminate
+                        : await persistence.ProbeSessionRetentionAsync(tenantId, sessionId, ct);
+                },
+                configuration: configuration,
+                logger: sp.GetRequiredService<ILogger<SessionFileRetentionJob>>());
+        });
+
         return services;
     }
 }

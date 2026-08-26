@@ -27,7 +27,13 @@ internal sealed class InMemorySessionFileBlobGateway : SessionFileBlobGateway
 {
     private readonly ConcurrentDictionary<string, StoredBlob> _blobs = new(StringComparer.Ordinal);
 
-    private sealed record StoredBlob(BinaryData Content, string? ContentType);
+    private sealed record StoredBlob(BinaryData Content, string? ContentType, DateTimeOffset? CreatedOn);
+
+    /// <summary>
+    /// Creation timestamp stamped on the next write, so a retention test can age a blob without
+    /// waiting. Null (the default) uses <see cref="DateTimeOffset.UtcNow"/>, matching Azure.
+    /// </summary>
+    public DateTimeOffset? NextWriteCreatedOn { get; set; }
 
     /// <summary>Every blob name written so far, exactly as the production code composed it.</summary>
     public IReadOnlyList<string> BlobNames => _blobs.Keys.OrderBy(k => k, StringComparer.Ordinal).ToList();
@@ -51,8 +57,22 @@ internal sealed class InMemorySessionFileBlobGateway : SessionFileBlobGateway
     }
 
     /// <summary>Seeds a blob directly, bypassing the store — used to plant another tenant's bytes.</summary>
-    public void Seed(string blobName, BinaryData content, string? contentType = null)
-        => _blobs[blobName] = new StoredBlob(content, contentType);
+    public void Seed(string blobName, BinaryData content, string? contentType = null, DateTimeOffset? createdOn = null)
+        => _blobs[blobName] = new StoredBlob(content, contentType, createdOn ?? DateTimeOffset.UtcNow);
+
+    /// <summary>
+    /// When set, the next <see cref="ListAsync"/> throws instead of enumerating. Lets a test drive the
+    /// "availability probe failed" branch, which must report UNKNOWN and never "unavailable".
+    /// </summary>
+    public bool FailNextList { get; set; }
+
+    /// <summary>When set, the next <see cref="DeleteAsync"/> throws instead of deleting.</summary>
+    public bool FailNextDelete { get; set; }
+
+    /// <summary>Deletes observed so far, in call order — proves WHAT a retention pass destroyed.</summary>
+    public IReadOnlyList<string> DeletedBlobNames => _deleted.ToList();
+
+    private readonly System.Collections.Concurrent.ConcurrentQueue<string> _deleted = new();
 
     /// <summary>
     /// When set, the next <see cref="UploadAsync"/> throws instead of storing. Lets a seam test drive
@@ -64,7 +84,11 @@ internal sealed class InMemorySessionFileBlobGateway : SessionFileBlobGateway
     public void Clear()
     {
         _blobs.Clear();
+        _deleted.Clear();
         FailNextWrite = false;
+        FailNextList = false;
+        FailNextDelete = false;
+        NextWriteCreatedOn = null;
     }
 
     public override Task UploadAsync(string blobName, BinaryData content, string? contentType, CancellationToken cancellationToken)
@@ -75,7 +99,10 @@ internal sealed class InMemorySessionFileBlobGateway : SessionFileBlobGateway
             throw new InvalidOperationException("simulated durable-store write failure");
         }
 
-        _blobs[blobName] = new StoredBlob(content, contentType);
+        var createdOn = NextWriteCreatedOn ?? DateTimeOffset.UtcNow;
+        NextWriteCreatedOn = null;
+
+        _blobs[blobName] = new StoredBlob(content, contentType, createdOn);
         return Task.CompletedTask;
     }
 
@@ -83,4 +110,56 @@ internal sealed class InMemorySessionFileBlobGateway : SessionFileBlobGateway
         => Task.FromResult(_blobs.TryGetValue(blobName, out var stored)
             ? new SessionFileBytes(stored.Content, stored.ContentType)
             : null);
+
+    /// <summary>
+    /// Prefix listing with Azure Blob's actual semantics for the operations the store uses: names are
+    /// opaque ORDINAL keys and the prefix match is a plain ordinal <c>StartsWith</c> — there is no path
+    /// awareness, no normalisation and no case folding. So whether a listing crosses a tenant boundary
+    /// is decided entirely by the prefix the PRODUCTION code composed, which is the property the tenant
+    /// suite pins.
+    /// </summary>
+    public override async IAsyncEnumerable<SessionFileBlobListing> ListAsync(
+        string prefix,
+        [System.Runtime.CompilerServices.EnumeratorCancellation] CancellationToken cancellationToken)
+    {
+        if (FailNextList)
+        {
+            FailNextList = false;
+            throw new InvalidOperationException("simulated durable-store list failure");
+        }
+
+        await Task.CompletedTask;
+
+        foreach (var (name, stored) in _blobs.ToArray().OrderBy(kvp => kvp.Key, StringComparer.Ordinal))
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+
+            if (!string.IsNullOrEmpty(prefix) && !name.StartsWith(prefix, StringComparison.Ordinal))
+            {
+                continue;
+            }
+
+            yield return new SessionFileBlobListing(
+                BlobName: name,
+                SizeBytes: stored.Content.ToMemory().Length,
+                CreatedOn: stored.CreatedOn);
+        }
+    }
+
+    public override Task<bool> DeleteAsync(string blobName, CancellationToken cancellationToken)
+    {
+        if (FailNextDelete)
+        {
+            FailNextDelete = false;
+            throw new InvalidOperationException("simulated durable-store delete failure");
+        }
+
+        var removed = _blobs.TryRemove(blobName, out _);
+        if (removed)
+        {
+            _deleted.Enqueue(blobName);
+        }
+
+        return Task.FromResult(removed);
+    }
 }

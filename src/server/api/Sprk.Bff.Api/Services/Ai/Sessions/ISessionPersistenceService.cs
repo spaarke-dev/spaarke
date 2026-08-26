@@ -38,6 +38,40 @@ public interface ISessionPersistenceService
     Task<StoredSession?> LoadSessionAsync(string tenantId, string sessionId, CancellationToken ct = default);
 
     /// <summary>
+    /// spaarkeai-compose-r8 FR-B04 (task 062) — answers "does this session document still exist, and
+    /// under what retention?" WITHOUT collapsing a read failure into "it is gone".
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <b>Why this is not <see cref="LoadSessionAsync"/>.</b> That method returns <c>null</c> for both
+    /// "not found" and "the read failed" — its Cosmos path catches every exception and returns null by
+    /// design, because a restore that cannot read must degrade to the new-session path rather than 500.
+    /// For retention the same collapse is catastrophic in the opposite direction: a Cosmos outage would
+    /// present as "every session has expired" and a sweep built on it would delete every durable byte
+    /// in the account. This probe therefore distinguishes
+    /// <see cref="SessionRetentionState.Absent"/> (a real 404 on a point read) from
+    /// <see cref="SessionRetentionState.Indeterminate"/> (anything else), and callers must treat
+    /// Indeterminate as RETAIN.
+    /// </para>
+    /// <para>
+    /// <b>Cosmos only — Redis is deliberately not consulted.</b> The hot tier's 24h sliding TTL means a
+    /// Redis miss carries no information about retention at all, and a Redis hit would only re-confirm
+    /// what the warm tier already knows. A point read on <c>(id, /tenantId)</c> is ~1 RU and is the
+    /// authoritative answer. It also avoids the re-warm side effect <see cref="LoadSessionAsync"/> has,
+    /// which a background sweep must not trigger for thousands of long-dead sessions.
+    /// </para>
+    /// <para>
+    /// Extends this existing service rather than adding a new one (root CLAUDE.md §11): the Cosmos
+    /// container handle, the partition-key convention and the tenant scoping all already live here, and
+    /// task 063's erasure path needs the same question answered.
+    /// </para>
+    /// </remarks>
+    /// <param name="tenantId">Tenant identifier (partition key).</param>
+    /// <param name="sessionId">Session identifier (document id).</param>
+    /// <param name="ct">Cancellation token. Cancellation propagates — it is not an Indeterminate.</param>
+    Task<SessionRetentionProbe> ProbeSessionRetentionAsync(string tenantId, string sessionId, CancellationToken ct = default);
+
+    /// <summary>
     /// Deletes the session from both Redis and Cosmos DB.
     /// Supports GDPR right to erasure (ADR-015 Tier 3, Art. 17).
     /// Failures in either store are logged but not re-thrown.
