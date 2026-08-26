@@ -6,6 +6,35 @@
 
 ---
 
+## 🔴 READ FIRST — F-9 is a live fail-open, traced end-to-end
+
+**The decision below is not "which resolution point is cleaner". It is "which resolution point closes
+a fail-open that is armed in shipped code today".** Options (A) and (C) read differently under that
+framing than under a cleanliness framing.
+
+> **F-9 · CRITICAL · Creating a secure project with files puts those bytes in the acting user's
+> business-unit container while the row advertises the project's own.**
+>
+> Traced end-to-end from source (§3b) — not inferred. The row ends up **correct** because provisioning
+> overwrites the stamp; the bytes end up **wrong** because the client never learns the new container.
+> Because SPE permissions are additive-only, **that placement cannot be retracted** by any later
+> permission change.
+>
+> **Armed, not yet fired.** The code path is live in shipped code; the trigger — creating a secure
+> project with files attached in the wizard — has never been exercised, because zero secure projects
+> exist in any environment (build plan §2). The first real secure project with an attachment fires it,
+> irreversibly. This is the strongest available argument for the build plan's "build it right now"
+> position: the window closes on first use, not on a date.
+
+**Scope, so this is not mis-filed**: F-9 does **not** reopen the task 075 gate. 075 built the seam and
+the gate closed on the seam; 076 routes the call sites, and F-9 is a call-site defect. It is also
+**pre-existing** — not introduced by 075 or 076 — and is in fact *the original defect this wave exists
+to close*, finally traced end-to-end rather than asserted. Both facts argue for naming it plainly.
+
+Full detail: **§4 F-9**. Verified sequence: **§3b**.
+
+---
+
 ## 1. Why this is escalated rather than half-done
 
 The POML carries this trigger, and it fires:
@@ -267,6 +296,41 @@ duplicate easy to mistake for the same file in a diff.
 See §3d — 9 sites, not 2. `CommunicationService.cs` alone has 5. A 076 that routes only
 `IncomingCommunicationProcessor` (its stated scope) would leave the **outbound** archive path writing
 secure correspondence to the shared archive container.
+
+### F-9 · CRITICAL — secure-project creation with files writes the bytes to the shared BU container
+
+**The sharpest live fail-open on this surface.** Promoted out of §2, where it had been sitting as a
+rationale bullet supporting a design recommendation — and a defect documented as an argument gets read
+as an argument.
+
+**What happens.** A user creates a secure project through the wizard and attaches files. Per the
+verified sequence in §3b: the row's `sprk_containerid` is stamped from the acting user's BU (W1),
+provisioning creates the project's own container and overwrites the stamp, and then the upload uses
+`context.speContainerId` — resolved at wizard-open, from the BU — because
+`CreateProjectWizard.tsx:700-704` consumes only `success`/`errorMessage` from `provisionResult` and
+nothing between the provisioning call (`:698`) and the upload guard (`:708`) reassigns it. The upload
+at `:712` therefore targets the BU container, and `createDocumentRecords` (`:726`) stamps that BU
+container onto the `sprk_document` rows.
+
+**Why it is CRITICAL rather than a bug.** SPE permissions are additive-only — inheritance cannot be
+broken on an individual file — so the bytes are readable by every member of the shared BU container
+and **no later permission change can retract them**. There is no per-item remedy and no repair short
+of migrating the content, which is precisely the migration the build plan says does not yet need to
+exist.
+
+**Armed, not fired.** The path is live in shipped code, but the trigger has never been exercised:
+zero secure projects exist in any environment (build plan §2). The window is closed by *first use*,
+not by a date — which is the strongest form of the build plan's "build it right now" argument.
+
+**What closes it.** Nothing in 075 — the seam cannot fix a call site that never asks it. Under option
+**(A)** the upload asks the resolver immediately before the first byte moves, so the stale
+wizard-open value stops being authoritative and F-9 closes as a consequence of the routing rather
+than as a special case. Under **(B)** it closes only if the two-line provisioning-return-value fix is
+applied *and* W1 is removed — two changes, on one path, leaving the other paths untouched. Under
+**(C)** it cannot occur, because the client stops naming a container at all.
+
+**Not a 075 regression.** 075 built the seam; its gate closed on the seam. F-9 is a call-site defect,
+pre-existing and owned by 076.
 
 ### F-8 · Two silent-skip paths in the create-project flow (from the POML, confirmed)
 
