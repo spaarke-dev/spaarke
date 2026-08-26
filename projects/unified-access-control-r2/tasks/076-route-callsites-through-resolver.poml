@@ -3,7 +3,7 @@
   <metadata>
     <title>Route every container call site through the resolver, and suppress the wizard's BU cascade for secure records</title>
     <phase>0c Secure Documents — Wave 2</phase>
-    <status>pending</status>
+    <status>blocked</status>
     <rigor>FULL</rigor>
     <rigor-reason>Modifies 7+ client sites plus server ingest on the path that decides where secure content is stored. A missed call site is a silent isolation failure.</rigor-reason>
     <model-tier>sonnet</model-tier>
