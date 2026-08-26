@@ -162,11 +162,17 @@ public static class ChatEndpoints
             .AddAiAuthorizationFilter()
             .WithName("DeleteChatSession")
             .WithSummary("Delete a chat session")
-            .WithDescription("Removes the session from Redis and archives it in Dataverse. Chat history is retained as an audit trail.")
+            .WithDescription(
+                "Erases every copy of the session's uploaded file bytes (durable blob + the 4-hour " +
+                "doc-upload caches), removes the session from Redis and Cosmos, and archives it in " +
+                "Dataverse. Chat history is retained as an audit trail. Returns 500 with errorCode " +
+                "'session.durable-erasure-incomplete' if the file bytes could not be confirmed erased — " +
+                "in that case NOTHING was deleted and the request can be retried (FR-B06).")
             .Produces(204)
             .ProducesProblem(401)
             .ProducesProblem(403)
-            .ProducesProblem(404);
+            .ProducesProblem(404)
+            .ProducesProblem(500);
 
         // GET /api/ai/chat/sessions/{sessionId}/restore — restore session state for three-pane UI
         group.MapGet("/sessions/{sessionId}/restore", RestoreSessionAsync)
@@ -1420,7 +1426,13 @@ public static class ChatEndpoints
     /// Delete a chat session.
     /// DELETE /api/ai/chat/sessions/{sessionId}
     /// </summary>
-    private static async Task<IResult> DeleteSessionAsync(
+    /// <remarks>
+    /// <c>internal</c> rather than <c>private</c> so the FR-B06 contract — an unconfirmed durable
+    /// erasure is a 500 with a stable errorCode, never a 204 — is asserted against THIS handler rather
+    /// than against a re-implementation of its branch. No test host maps this route today, and standing
+    /// one up for a two-line decision would cost far more surface than it proves.
+    /// </remarks>
+    internal static async Task<IResult> DeleteSessionAsync(
         string sessionId,
         ChatSessionManager sessionManager,
         HttpContext httpContext,
@@ -1446,11 +1458,50 @@ public static class ChatEndpoints
         logger.LogInformation(
             "DeleteSession: session={SessionId}, tenant={TenantId}", sessionId, tenantId);
 
-        await sessionManager.DeleteSessionAsync(tenantId, sessionId, cancellationToken);
+        var erasure = await sessionManager.DeleteSessionAsync(tenantId, sessionId, cancellationToken);
 
-        logger.LogInformation("Session deleted: {SessionId}", sessionId);
+        // spaarkeai-compose-r8 FR-B06 (task 063). A 204 here is a statement that the session and its
+        // uploaded files are gone. When the durable byte erasure could not be confirmed, that statement
+        // is false — and it is the kind of false that nothing downstream would ever contradict, because
+        // the manifest and the UI entry are the very things that would have shown the gap. So the
+        // deletion fails closed: the session record is intact (DeleteSessionAsync returned before
+        // touching it), the user still sees the conversation, and re-issuing this DELETE completes the
+        // erasure — SessionFileEraser enumerates the blob prefix and needs no manifest to find residue.
+        if (erasure.State == SessionFileErasureState.Incomplete)
+        {
+            logger.LogError(
+                "DeleteSession REFUSED for session={SessionId}, tenant={TenantId}: durable file bytes " +
+                "could not be confirmed erased (reason={Reason}). The session was not deleted.",
+                sessionId, tenantId, erasure.Reason);
+
+            // ADR-019: stable errorCode + correlationId so a client can tell THIS 500 from any other on
+            // this route, and so the response and the log line can be joined.
+            return Results.Problem(
+                statusCode: 500,
+                title: "Internal Server Error",
+                detail: "The session's stored files could not be confirmed deleted, so the session was " +
+                        "not deleted. Nothing was partially removed from your history. Please try again.",
+                extensions: new Dictionary<string, object?>
+                {
+                    ["errorCode"] = DurableErasureIncompleteErrorCode,
+                    ["correlationId"] = httpContext.TraceIdentifier
+                });
+        }
+
+        logger.LogInformation(
+            "Session deleted: {SessionId} (durableErasure={State}, blobsDeleted={Deleted})",
+            sessionId, erasure.State, erasure.BlobsDeleted);
+
         return Results.NoContent();
     }
+
+    /// <summary>
+    /// ADR-019 stable errorCode for "the session's durable file bytes could not be confirmed erased,
+    /// so the session was NOT deleted" (spaarkeai-compose-r8 FR-B06). Distinct from
+    /// <c>session.durable-store-failed</c> (task 060, the upload-side write failure): this one tells a
+    /// client that nothing was removed and that retrying the same DELETE is both safe and meaningful.
+    /// </summary>
+    internal const string DurableErasureIncompleteErrorCode = "session.durable-erasure-incomplete";
 
     /// <summary>
     /// GET /api/ai/chat/sessions/{sessionId}/compose-outputs

@@ -3,7 +3,7 @@
   <metadata>
     <title>FR-C05 residual — make stale-target DETECTION durable beyond the tab; today a cross-tab reopen silently restores the overwrite that 052 closed</title>
     <phase>5 Track C — AI Edit Placement</phase>
-    <status>pending</status>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>Closes a silent-data-loss path. The failure is invisible by construction — the user's newer text is replaced and the apply reports success — so a missed case produces no signal.</rigor-reason>
     <model-tier>opus</model-tier>

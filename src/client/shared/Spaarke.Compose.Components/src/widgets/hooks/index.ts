@@ -34,6 +34,9 @@ export type {
   PendingRedlineLegacyProposal,
   AnchorResolveResult,
   MaterializeStatus,
+  // FR-C05 residual (r8 task 052b) — `'live' | 'replay'`, the discriminator that decides whether the
+  // paragraph a materialize finds may be recorded as the text the model saw. Fail-closed when absent.
+  MaterializeOrigin,
   RedlineMatchMode,
   RedlineSpan,
   ResolveResult,

@@ -58,6 +58,18 @@ public class ChatSessionManager
     /// </summary>
     private readonly ISessionFilesCleanupSignal? _cleanupSignal;
 
+    /// <summary>
+    /// spaarkeai-compose-r8 FR-B06 (task 063) — the durable byte store whose copies
+    /// <see cref="DeleteSessionAsync"/> must erase. Optional for the same reason
+    /// <see cref="_persistence"/> is: this type is constructed directly by a number of tests and by
+    /// the <c>AnalysisServicesModule</c> factory, and a null store degrades to
+    /// <see cref="SessionFileErasureState.StoreDisabled"/> — the same outcome an unconfigured
+    /// deployment produces — rather than to a crash. In the composed host it is always present:
+    /// <c>AiPersistenceModule</c> registers <see cref="SessionFileBlobStore"/> UNCONDITIONALLY
+    /// (ADR-032 P1), so the DI graph is symmetric in every configuration.
+    /// </summary>
+    private readonly SessionFileBlobStore? _durableFileStore;
+
     // FR-05 / FR-14: key construction is now centralised in ITenantCache. Producing
     // (tenantId, "session", sessionId, v1) yields the on-wire key
     // "spaarke:tenant:{tenantId}:session:{sessionId}:v1" once the StackExchangeRedisCache
@@ -74,18 +86,50 @@ public class ChatSessionManager
     internal static string BuildCacheKey(string tenantId, string sessionId)
         => $"tenant:{tenantId}:{CacheResource}:{sessionId}:v{CacheVersion}";
 
+    /// <summary>
+    /// The pre-FR-B06 constructor, preserved verbatim. Equivalent to the full constructor below with
+    /// <c>durableFileStore: null</c>, i.e. a manager whose durable erasure reports
+    /// <see cref="SessionFileErasureState.StoreDisabled"/>.
+    /// </summary>
+    /// <remarks>
+    /// Kept as a real overload rather than folded into a trailing optional parameter because
+    /// <b>Castle DynamicProxy and <c>Activator.CreateInstance</c> bind constructors by exact arity and
+    /// do NOT apply optional-parameter defaults</b>. 59 existing construction sites across 51 test
+    /// files (many of them <c>new Mock&lt;ChatSessionManager&gt;(…five arguments…)</c>) would fail at
+    /// runtime with "Constructor on type 'Castle.Proxies.ChatSessionManagerProxy' not found" — observed,
+    /// 123 failures, before this overload was added. Every one of those call sites is a mock of a
+    /// collaborator that has nothing to do with session-file erasure, so churning them would be pure
+    /// blast radius on files several concurrent Compose tasks are editing.
+    /// </remarks>
     public ChatSessionManager(
         ITenantCache cache,
         IChatDataverseRepository dataverseRepository,
         ILogger<ChatSessionManager> logger,
         ISessionPersistenceService? persistence = null,
         ISessionFilesCleanupSignal? cleanupSignal = null)
+        : this(cache, dataverseRepository, logger, persistence, cleanupSignal, durableFileStore: null)
+    {
+    }
+
+    /// <summary>
+    /// The full constructor. <paramref name="durableFileStore"/> is what
+    /// <see cref="DeleteSessionAsync"/> erases (spaarkeai-compose-r8 FR-B06); the composed host always
+    /// supplies it, because <c>AiPersistenceModule</c> registers the store unconditionally.
+    /// </summary>
+    public ChatSessionManager(
+        ITenantCache cache,
+        IChatDataverseRepository dataverseRepository,
+        ILogger<ChatSessionManager> logger,
+        ISessionPersistenceService? persistence,
+        ISessionFilesCleanupSignal? cleanupSignal,
+        SessionFileBlobStore? durableFileStore)
     {
         _cache = cache;
         _dataverseRepository = dataverseRepository;
         _logger = logger;
         _persistence = persistence;
         _cleanupSignal = cleanupSignal;
+        _durableFileStore = durableFileStore;
     }
 
     /// <summary>
@@ -232,15 +276,45 @@ public class ChatSessionManager
     }
 
     /// <summary>
-    /// Deletes a chat session from Redis and marks it as archived in Dataverse.
+    /// Deletes a chat session: erases every copy of its uploaded files' BYTES, then removes the
+    /// session from Redis and marks it as archived in Dataverse.
     ///
     /// Does not delete Dataverse records — the <c>sprk_aichatsummary</c> and associated
     /// <c>sprk_aichatmessage</c> records are retained as an audit trail.
     /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <b>spaarkeai-compose-r8 FR-B06 (task 063) — erasure ordering, and why it is this way round.</b>
+    /// The durable bytes are erased FIRST, and if they cannot be confirmed gone the session RECORD is
+    /// left completely intact and this returns
+    /// <see cref="SessionFileErasureState.Incomplete"/>. Two reasons:
+    /// </para>
+    /// <list type="number">
+    ///   <item>A session that is still listed in History is a VISIBLE, retryable state. A session that
+    ///   vanished while its documents stayed in blob storage is an invisible compliance failure that
+    ///   looks exactly like a completed deletion — nothing in the product would ever surface it.</item>
+    ///   <item>Failing closed is cheap here precisely because the erasure does not need the record:
+    ///   <see cref="SessionFileEraser"/> enumerates the blob PREFIX, so the natural retry finds and
+    ///   removes the residue whether or not the manifest still exists.</item>
+    /// </list>
+    /// <para>
+    /// The erasure locations, in the order this method visits them, are enumerated in
+    /// <c>projects/spaarkeai-compose-r8/notes/track-b-erasure-surface.md</c>: durable blob (must
+    /// succeed), the four 4-hour <c>doc-upload-*</c> Redis copies (best-effort, TTL-bounded), the
+    /// session's own Redis key and Cosmos document (which carry the manifest and each file's extracted
+    /// text), and the AI-Search hot chunks (asynchronous, via the existing cleanup signal). Dataverse
+    /// transcript records are deliberately RETAINED — Tier-2 audit trail, ADR-015 independent
+    /// governance tiers, exactly as <c>memory-items</c> erasure never touches the audit container.
+    /// </para>
+    /// </remarks>
     /// <param name="tenantId">Tenant ID.</param>
     /// <param name="sessionId">Session ID to delete.</param>
     /// <param name="ct">Cancellation token.</param>
-    public async Task DeleteSessionAsync(
+    /// <returns>
+    /// The durable-byte erasure outcome. <see cref="SessionFileErasureState.Incomplete"/> means bytes
+    /// may remain AND the session record was not deleted — callers MUST NOT report success.
+    /// </returns>
+    public async Task<SessionFileErasureResult> DeleteSessionAsync(
         string tenantId,
         string sessionId,
         CancellationToken ct = default)
@@ -248,6 +322,38 @@ public class ChatSessionManager
         _logger.LogInformation(
             "Deleting chat session {SessionId} (tenant={TenantId})",
             sessionId, tenantId);
+
+        // 0. FR-B06 — read the manifest BEFORE anything is removed. Files uploaded while the durable
+        //    store was disabled (i.e. every deployment until the operator arms it) have no blob to
+        //    enumerate, so the manifest is the only place their fileIds exist. Best-effort: a session
+        //    that cannot be loaded still gets its durable prefix erased below, because that path needs
+        //    no manifest at all.
+        var manifestFileIds = await TryReadManifestFileIdsAsync(tenantId, sessionId, ct);
+
+        // 1. FR-B06 — the durable byte copies. This is the only step that can ABORT the delete: an
+        //    erasure that quietly skipped bytes is indistinguishable from a completed one, so
+        //    "Incomplete" stops here with the record intact rather than reporting a success it cannot
+        //    substantiate.
+        var erasure = await SessionFileEraser.EraseSessionFilesAsync(
+            _durableFileStore, tenantId, sessionId, _logger, ct);
+
+        if (erasure.State == SessionFileErasureState.Incomplete)
+        {
+            _logger.LogError(
+                "Session {SessionId} (tenant={TenantId}) was NOT deleted: its durable file bytes could " +
+                "not be confirmed erased (reason={Reason}, remaining={Remaining}, failures={Failures}). " +
+                "The session record is intact so the deletion can be retried and will complete.",
+                sessionId, tenantId, erasure.Reason, erasure.BlobsRemaining, erasure.Failures);
+
+            return erasure;
+        }
+
+        // 2. FR-B06 — the same bytes' 4-hour hot copies (doc-upload-text/binary/meta/persist). Both id
+        //    sources are used: the blob prefix names files with a durable copy, the manifest names
+        //    files uploaded while the store was disabled. Best-effort by design — see
+        //    SessionFileEraser.EvictUploadCachesAsync.
+        await SessionFileEraser.EvictUploadCachesAsync(
+            _cache, tenantId, sessionId, manifestFileIds.Concat(erasure.FileIds), _logger, ct);
 
         // Remove from Redis hot cache (tenant-scoped key per FR-05).
         await _cache.RemoveAsync(tenantId, CacheResource, sessionId, CacheVersion, ct: ct);
@@ -286,6 +392,48 @@ public class ChatSessionManager
             _logger.LogWarning(ex,
                 "Session-files cleanup signal failed for session {SessionId} (tenant={TenantId}) — eviction will run on the next scheduled scan",
                 sessionId, tenantId);
+        }
+
+        return erasure;
+    }
+
+    /// <summary>
+    /// Best-effort read of the session's uploaded-file ids, used only to evict those files' 4-hour
+    /// <c>doc-upload-*</c> cache entries (FR-B06). Never throws: a session that cannot be loaded must
+    /// not block its own deletion, and the durable erasure — the compliance-bearing half — does not
+    /// depend on this at all.
+    /// </summary>
+    private async Task<IReadOnlyList<string>> TryReadManifestFileIdsAsync(
+        string tenantId,
+        string sessionId,
+        CancellationToken ct)
+    {
+        try
+        {
+            var session = await GetSessionAsync(tenantId, sessionId, ct);
+            var files = session?.UploadedFiles;
+
+            if (files is null || files.Count == 0)
+            {
+                return Array.Empty<string>();
+            }
+
+            return files.Select(f => f.FileId).ToList();
+        }
+        catch (OperationCanceledException)
+        {
+            throw;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex,
+                "Could not read the uploaded-file manifest for session {SessionId} (tenant={TenantId}) " +
+                "before deletion. The durable byte erasure is unaffected (it enumerates by blob prefix); " +
+                "only the 4-hour doc-upload cache entries of files with no durable copy may be left to " +
+                "expire on their own TTL.",
+                sessionId, tenantId);
+
+            return Array.Empty<string>();
         }
     }
 

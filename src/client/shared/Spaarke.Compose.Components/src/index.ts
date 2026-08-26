@@ -29,6 +29,9 @@ export type {
   ComposeEditorDocumentRef,
   ComposeDraftPayload,
   ComposeDraftProvenance,
+  // FR-C05 residual (r8 task 052b) — the `'live' | 'replay'` provenance discriminator a host must
+  // declare so the stale-target check knows whether the paragraph it finds is the capture-time text.
+  MaterializeOrigin,
   // NDA-REVIEW advisory comments (ai-advanced-capabilities-nda-r1 task 031) —
   // ComposeEditorHandle.placeAdvisoryComments' input/output shapes.
   AdvisoryCommentInput,

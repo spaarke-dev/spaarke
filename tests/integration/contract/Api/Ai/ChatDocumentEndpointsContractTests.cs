@@ -614,6 +614,19 @@ public sealed class ChatDocumentEndpointsTestFixture : IAsyncLifetime, IDisposab
     /// <summary>Per-test control over the authenticated caller's tenant (see <see cref="UploadFakeAuthOptions"/>).</summary>
     public UploadFakeAuthOptions Auth { get; } = new(includeTid: true);
 
+    /// <summary>
+    /// The very <see cref="ITenantCache"/> the upload endpoint writes its four <c>doc-upload-*</c>
+    /// entries into (a real in-memory store behind <see cref="RecordingTenantCache"/>).
+    /// </summary>
+    /// <remarks>
+    /// Exposed by spaarkeai-compose-r8 task 063 so the erasure seam can run against the entries a REAL
+    /// upload produced. That is the only way to pin the property that matters: the eraser composes the
+    /// same cache key the writer did. Two independently-written key expressions that differ by one
+    /// character produce an erasure that removes nothing and reports success — with no exception, no
+    /// count and no log line to contradict it.
+    /// </remarks>
+    public ITenantCache Cache => _recordingCache;
+
     public ChatDocumentEndpointsTestFixture()
     {
         DurableFileStore = new SessionFileBlobStore(

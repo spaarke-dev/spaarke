@@ -386,12 +386,21 @@ public static class AnalysisServicesModule
         // compound AI gate (AddPlaybookServices). When AI is OFF, GetService returns
         // null and ChatSessionManager's fire-and-forget signal call short-circuits.
         // Back-compat preserved for existing call sites and unit tests.
+        //
+        // spaarkeai-compose-r8 FR-B06 (task 063) — SessionFileBlobStore is the durable byte store whose
+        // copies DeleteSessionAsync must erase. NOT a new registration: AiPersistenceModule already
+        // registers it UNCONDITIONALLY (ADR-032 P1), so this is a new EDGE in the graph and the ADR-010
+        // budget delta for task 063 is ZERO. GetService (not GetRequiredService) mirrors the two
+        // nullable injections above and keeps this factory resolvable in hosts that compose this module
+        // without AiPersistenceModule; a null store degrades to StoreDisabled, which is the same outcome
+        // an unconfigured deployment produces — never a silent success claim.
         services.AddScoped<ChatSessionManager>(sp => new ChatSessionManager(
             cache: sp.GetRequiredService<Sprk.Bff.Api.Infrastructure.Cache.ITenantCache>(),
             dataverseRepository: sp.GetRequiredService<IChatDataverseRepository>(),
             logger: sp.GetRequiredService<Microsoft.Extensions.Logging.ILogger<ChatSessionManager>>(),
             persistence: sp.GetService<Sprk.Bff.Api.Services.Ai.Sessions.ISessionPersistenceService>(),
-            cleanupSignal: sp.GetService<Sprk.Bff.Api.Services.Ai.Chat.ISessionFilesCleanupSignal>()));
+            cleanupSignal: sp.GetService<Sprk.Bff.Api.Services.Ai.Chat.ISessionFilesCleanupSignal>(),
+            durableFileStore: sp.GetService<Sprk.Bff.Api.Services.Ai.Sessions.SessionFileBlobStore>()));
 
         // B5 — ChatHistoryManager (deps: ChatSessionManager + IChatDataverseRepository + ILogger — all unconditional).
         services.AddScoped<ChatHistoryManager>();

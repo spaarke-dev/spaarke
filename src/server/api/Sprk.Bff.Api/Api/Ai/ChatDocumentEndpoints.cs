@@ -80,11 +80,16 @@ public static class ChatDocumentEndpoints
     //   spaarke:tenant:{tenantId}:doc-upload-binary:{sessionId}:{documentId}:v1
     //   spaarke:tenant:{tenantId}:doc-upload-meta:{sessionId}:{documentId}:v1
     //   spaarke:tenant:{tenantId}:doc-upload-persist:{sessionId}:{documentId}:v1
-    private const string DocTextResource = "doc-upload-text";
-    private const string DocBinaryResource = "doc-upload-binary";
-    private const string DocMetaResource = "doc-upload-meta";
-    private const string DocPersistResource = "doc-upload-persist";
-    private const int CacheVersion = 1;
+    //
+    // spaarkeai-compose-r8 FR-B06 (task 063): the literals now live in SessionUploadCacheKeys, which
+    // SessionFileEraser also reads. An eraser composing a key one character different from the
+    // writer's removes nothing and reports success — a silent miss with no exception and no log line.
+    // One definition removes that failure mode by construction.
+    private const string DocTextResource = SessionUploadCacheKeys.TextResource;
+    private const string DocBinaryResource = SessionUploadCacheKeys.BinaryResource;
+    private const string DocMetaResource = SessionUploadCacheKeys.MetaResource;
+    private const string DocPersistResource = SessionUploadCacheKeys.PersistResource;
+    private const int CacheVersion = SessionUploadCacheKeys.Version;
 
     /// <summary>
     /// ADR-019 stable errorCode for "the durable byte copy could not be written" (compose-r8 FR-B01).
@@ -129,7 +134,8 @@ public static class ChatDocumentEndpoints
         => httpContext.User.FindFirst("tid") is null
            && httpContext.User.FindFirst("http://schemas.microsoft.com/identity/claims/tenantid") is null;
 
-    private static string DocCacheId(string sessionId, string documentId) => $"{sessionId}:{documentId}";
+    private static string DocCacheId(string sessionId, string documentId)
+        => SessionUploadCacheKeys.CacheId(sessionId, documentId);
 
     /// <summary>
     /// Registers chat document upload endpoints on the provided route builder.

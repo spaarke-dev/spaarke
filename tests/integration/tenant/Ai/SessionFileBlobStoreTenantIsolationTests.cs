@@ -341,6 +341,62 @@ public sealed class SessionFileBlobStoreTenantIsolationTests
             "a crafted tenant segment must be refused before it becomes a listing prefix");
     }
 
+    // ─────────────────────────────────────────────────────────────────────────
+    // spaarkeai-compose-r8 task 063 (FR-B06) — the ERASURE composition. The two primitives above are
+    // individually tenant-safe; this pins that COMPOSING them stays tenant-safe, because that is what
+    // GDPR erasure actually calls and it is the one operation whose blast radius is permanent.
+    // ─────────────────────────────────────────────────────────────────────────
+
+    [Fact]
+    public async Task Erasure_RequestedByAnotherTenant_EnumeratesNothingAndDestroysNothing()
+    {
+        var (store, blobs) = BuildStore();
+
+        await store.WriteAsync(TenantA, SessionId, FileId, TenantASecret, "application/pdf");
+
+        // Tenant B knows tenant A's session id exactly and asks for that session to be erased.
+        var crossTenant = await SessionFileEraser.EraseSessionFilesAsync(
+            store, TenantB, SessionId, NullLogger<SessionFileBlobStore>.Instance);
+
+        crossTenant.BlobsDeleted.Should().Be(0);
+        crossTenant.State.Should().Be(SessionFileErasureState.Erased,
+            "from tenant B the prefix really is empty — another tenant's session is not merely " +
+            "un-erasable, it is invisible, which is the same answer a non-existent session gives");
+        blobs.Count.Should().Be(1, "tenant A's bytes must survive a cross-tenant erasure request");
+        blobs.TryPeek(SessionFileBlobStore.BuildBlobName(TenantA, SessionId, FileId), out var survived)
+            .Should().BeTrue();
+        survived!.ToString().Should().Be(TenantASecret.ToString());
+
+        // POSITIVE CONTROL: the owning tenant CAN erase it. Without this the assertions above would
+        // pass just as well against an eraser that never deletes anything at all.
+        var owning = await SessionFileEraser.EraseSessionFilesAsync(
+            store, TenantA, SessionId, NullLogger<SessionFileBlobStore>.Instance);
+
+        owning.BlobsDeleted.Should().Be(1);
+        owning.State.Should().Be(SessionFileErasureState.Erased);
+        blobs.Count.Should().Be(0);
+    }
+
+    [Fact]
+    public async Task Erasure_DeletesOnlyWithinTheCallingTenantsPrefix_EvenWhenTwoTenantsShareEveryIdentifier()
+    {
+        var (store, blobs) = BuildStore();
+
+        await store.WriteAsync(TenantA, SessionId, FileId, TenantASecret, "application/pdf");
+        await store.WriteAsync(TenantB, SessionId, FileId, BinaryData.FromString("tenant B content"), "text/plain");
+
+        var erasure = await SessionFileEraser.EraseSessionFilesAsync(
+            store, TenantA, SessionId, NullLogger<SessionFileBlobStore>.Instance);
+
+        erasure.BlobsDeleted.Should().Be(1);
+        blobs.DeletedBlobNames.Should().ContainSingle()
+            .Which.Should().StartWith(TenantA + "/",
+                "every delete an erasure issues is composed from the CALLING tenant, so even a listing " +
+                "that widened could not redirect one across the boundary");
+        blobs.TryPeek(SessionFileBlobStore.BuildBlobName(TenantB, SessionId, FileId), out _)
+            .Should().BeTrue("tenant B's identically-identified file is a different blob entirely");
+    }
+
     [Fact]
     public async Task ParsedListings_AlwaysAttributeABlobToTheTenantItIsPhysicallyStoredUnder()
     {

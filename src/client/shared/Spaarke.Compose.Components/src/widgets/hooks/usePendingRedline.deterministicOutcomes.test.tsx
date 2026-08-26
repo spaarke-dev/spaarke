@@ -75,7 +75,15 @@ jest.mock('./redlineTextSearch', () => {
 });
 
 const SCOPE = 'session-under-test';
-const PROV = { ledgerRef: 'b1@t1', bindingId: 'b1', turn: 1 };
+/**
+ * Task 052b — every materialize now declares WHERE IT CAME FROM, because the hook's fail-closed
+ * default treats an undeclared one as a replay. `PROV` is the LIVE leg: the model produced this
+ * proposal against the document as it reads right now, which is the only moment the anchored
+ * paragraph may be recorded as the capture-time text. `REPLAY` is a re-materialize from stored
+ * ledger state, where an arbitrary amount of editing may sit in between.
+ */
+const PROV = { ledgerRef: 'b1@t1', bindingId: 'b1', turn: 1, origin: 'live' as const };
+const REPLAY = { ...PROV, origin: 'replay' as const };
 
 const CLAUSE_41 =
   'Clause 4.1: The aggregate liability of the Supplier shall not exceed twelve months of fees paid under this Agreement.';
@@ -359,7 +367,7 @@ describe('FR-C05 outcome 2 — a stale target asks instead of overwriting', () =
 
     let status: string | undefined;
     act(() => {
-      status = result.current.materialize(payload, PROV);
+      status = result.current.materialize(payload, REPLAY);
     });
 
     expect(status).toBe('stale');
@@ -385,7 +393,7 @@ describe('FR-C05 outcome 2 — a stale target asks instead of overwriting', () =
     const { result } = renderHook(() => usePendingRedline(editor, referenceMap, { proposalScope: SCOPE }));
 
     act(() => {
-      result.current.materialize(payload, PROV);
+      result.current.materialize(payload, REPLAY);
     });
     act(() => {
       result.current.applyStaleTargetAnyway();
@@ -403,7 +411,7 @@ describe('FR-C05 outcome 2 — a stale target asks instead of overwriting', () =
     const { result } = renderHook(() => usePendingRedline(editor, referenceMap, { proposalScope: SCOPE }));
 
     act(() => {
-      result.current.materialize(payload, PROV);
+      result.current.materialize(payload, REPLAY);
     });
     const beforeText = textOf(editor, 'STAB0041');
     act(() => {
@@ -432,7 +440,7 @@ describe('FR-C05 outcome 2 — a stale target asks instead of overwriting', () =
     const { result } = renderHook(() => usePendingRedline(editor, referenceMap, { proposalScope: SCOPE }));
     let status: string | undefined;
     act(() => {
-      status = result.current.materialize(payload, PROV);
+      status = result.current.materialize(payload, REPLAY);
     });
 
     expect(status).toBe('applied');
@@ -461,7 +469,7 @@ describe('FR-C05 outcome 2 — a stale target asks instead of overwriting', () =
     const { result } = renderHook(() => usePendingRedline(editor, referenceMap, { proposalScope: SCOPE }));
     let status: string | undefined;
     act(() => {
-      status = result.current.materialize({}, { ledgerRef: 'b1@t2', bindingId: 'b1', turn: 2 });
+      status = result.current.materialize({}, { ledgerRef: 'b1@t2', bindingId: 'b1', turn: 2, origin: 'replay' });
     });
 
     // The retraction re-materializes as a retraction, NOT as a re-ask.
@@ -491,7 +499,7 @@ describe('FR-C05 outcome 2 — a stale target asks instead of overwriting', () =
     const { result } = renderHook(() => usePendingRedline(editor, referenceMap, { proposalScope: SCOPE }));
     let status: string | undefined;
     act(() => {
-      status = result.current.materialize(payload, PROV);
+      status = result.current.materialize(payload, REPLAY);
     });
 
     expect(status).not.toBe('stale');
@@ -505,7 +513,7 @@ describe('FR-C05 outcome 2 — a stale target asks instead of overwriting', () =
 
     let status: string | undefined;
     act(() => {
-      status = result.current.materialize(payload, PROV);
+      status = result.current.materialize(payload, REPLAY);
     });
 
     expect(status).toBe('applied');
@@ -519,7 +527,7 @@ describe('FR-C05 outcome 2 — a stale target asks instead of overwriting', () =
       { target_para_id: 'STAB0041', new_text: CLAUSE_41.replace('twelve', 'twenty-four') },
       { target_para_id: 'STAB0042', new_text: CLAUSE_42.replace('any breach', 'any material breach') },
     ];
-    const base = { ledgerRef: 'rev@t1', bindingId: 'rev', turn: 1 };
+    const base = { ledgerRef: 'rev@t1', bindingId: 'rev', turn: 1, origin: 'live' as const };
 
     // Propose, undo, then drift ONLY clause 4.1.
     const first = renderHook(() => usePendingRedline(editor, referenceMap, { proposalScope: SCOPE }));
@@ -540,7 +548,7 @@ describe('FR-C05 outcome 2 — a stale target asks instead of overwriting', () =
     const { result } = renderHook(() => usePendingRedline(editor, referenceMap, { proposalScope: SCOPE }));
     let statuses: string[] = [];
     act(() => {
-      statuses = result.current.materializeMany(edits, base);
+      statuses = result.current.materializeMany(edits, { ...base, origin: 'replay' });
     });
 
     expect(statuses).toEqual(['stale', 'applied']);

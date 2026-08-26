@@ -77,7 +77,7 @@ import type { RedlineSpan } from './redlineTextSearch';
 // paragraph-scoped: `redlineLocalDiff` cannot address a position outside the paragraph it is handed,
 // and `redlineProposalBaseline` only remembers text, it never locates anything.
 import { narrowAnchoredSpan, readRangeText } from './redlineLocalDiff';
-import { readProposalBaseline, recordProposalBaseline } from './redlineProposalBaseline';
+import { compareProposalBaseline, recordProposalBaseline } from './redlineProposalBaseline';
 // Task 053 (FR-C06) — the BOUNDED confirmable fallback for replayed/legacy anchorless entries. Its
 // input type has no public constructor (an anchored payload cannot be classified into it) and its
 // outcome vocabulary has no `applied` member, so neither bound is a convention this file must keep.
@@ -100,6 +100,31 @@ export type { RedlineMatchMode, RedlineSpan, ResolveResult } from './redlineText
  * precision; ADR-039). Rendered as a SECONDARY badge behind the rationale (the primary trust cue).
  */
 export type ConfidenceBand = 'high' | 'medium' | 'low';
+
+/**
+ * FR-C05 residual (spaarkeai-compose-r8 task 052b) — WHERE this materialize came from, and therefore
+ * whether the anchored paragraph as it reads right now can be trusted as the CAPTURE-TIME text.
+ *
+ *  - `'live'` — driven by the dispatch that produced the entry (the Flow-5
+ *    `compose_assistant_insert` leg, emitted by `ConversationPane` the moment the compose output is
+ *    written). The model wrote this proposal against the document as it reads now, so recording the
+ *    paragraph is recording the capture-time text.
+ *  - `'replay'` — a re-materialize from durable ledger state at an unknown later time (the reopen /
+ *    refresh-durability pass). An arbitrary amount of editing may have happened in between, so the
+ *    live paragraph proves nothing about what the model saw.
+ *
+ * WHY THIS IS THE LOAD-BEARING DISCRIMINATOR, not the store. Before 052b the hook inferred "this must
+ * be the first materialize" from the ABSENCE of a recorded baseline — which is also what a different
+ * tab, an evicted entry and a disabled store look like. On those paths it re-baselined against a
+ * possibly-drifted paragraph and applied silently: the pre-052 overwrite, restored. Origin is a fact
+ * about the CALL, so it stays true where a store cannot follow (another tab, another device, private
+ * browsing).
+ *
+ * FAIL-CLOSED: omitting it means `'replay'` (see {@link ComposeDraftProvenance.origin}). A caller that
+ * does not declare freshness cannot be granted it — the worst an omission can cost is a confirmation,
+ * where the worst a wrong `'live'` can cost is the user's text.
+ */
+export type MaterializeOrigin = 'live' | 'replay';
 
 /**
  * FR-13 (client-derived) — deterministic confidence-band derivation, ported from the retired server
@@ -244,12 +269,35 @@ export interface PendingRedlineStaleTarget {
    */
   ledgerRef: string;
   bindingId: string;
+  /**
+   * Task 052b — WHY the question is being asked, and therefore what the copy is allowed to claim.
+   * Required, not optional, for the same reason {@link PendingRedlineError.source} is: the host
+   * switches on it, and an absent value would silently pick one of two very different stories.
+   *
+   *  - `'changed'` — we HAVE the capture-time record and the clause does not match it. The document
+   *    definitely drifted. This is task 052's original question, unchanged.
+   *  - `'unverifiable'` — a REPLAYED suggestion for which no capture-time record exists anywhere this
+   *    browser can see (a different tab's session, a different device, an evicted entry, a disabled
+   *    store). We do NOT know that the clause changed, and the copy must not say we do — but we also
+   *    cannot rule it out, and applying silently is exactly the pre-052 overwrite. So we ask.
+   *
+   * For a batch this is `'changed'` whenever ANY held-back suggestion is genuinely changed (the
+   * stronger claim is then true of at least one), and the detail fields describe that same one.
+   */
+  reason: 'changed' | 'unverifiable';
   /** The `w14:paraId` of the clause that drifted (the FIRST one, when a batch has several). */
   paraId: string;
   /** Tier 3 — the clause as it reads NOW. Shown truncated; never logged. */
   currentText: string;
-  /** Tier 3 — the clause as it read when the suggestion was proposed. Shown truncated; never logged. */
-  proposedAgainst: string;
+  /**
+   * Tier 3 — the clause as it read when the suggestion was proposed. Shown truncated; never logged.
+   *
+   * `null` when the capture-time WORDING is not available: always for `reason: 'unverifiable'`, and
+   * for `'changed'` when only the durable fingerprint survived (a different tab). A fingerprint
+   * proves the change; it cannot reproduce the words, and this path does not invent them. The host
+   * omits the "when suggested" line rather than rendering an empty quote.
+   */
+  proposedAgainst: string | null;
   /** How many suggestions in this entry are stale (1 for a single-edit draft). */
   staleCount: number;
   /** How many suggestions the entry carried in total. */
@@ -776,7 +824,15 @@ type TargetedProposal =
 /** The outcome of {@link planAndApplyTargeted}; `null` means the payload named no target at all. */
 type TargetedPlacement =
   | { status: 'applied'; hasDeletion: boolean }
-  | { status: 'stale'; paraId: string; currentText: string; proposedAgainst: string }
+  | {
+      status: 'stale';
+      /** Task 052b — see {@link PendingRedlineStaleTarget.reason}. */
+      reason: 'changed' | 'unverifiable';
+      paraId: string;
+      currentText: string;
+      /** `null` when only a fingerprint (or nothing at all) was available — never a fabricated quote. */
+      proposedAgainst: string | null;
+    }
   | TargetedProposal
   | { status: 'not_found' | 'ambiguous' | 'target_deleted'; matchCount: number; source: 'anchored' | 'legacy-replay' };
 
@@ -835,6 +891,12 @@ function planAndApplyTargeted(args: {
   bindingId: string;
   newText: string;
   proposalScope: string | undefined;
+  /**
+   * Task 052b — whether this materialize is driven by the dispatch that produced the entry (`'live'`)
+   * or is a re-materialize from durable ledger state (`'replay'`). Decides whether the live paragraph
+   * may be recorded as the capture-time text. See {@link MaterializeOrigin}.
+   */
+  origin: MaterializeOrigin;
   /** The question the user already answered, if any. See {@link ConfirmedQuestion}. */
   confirmed?: ConfirmedQuestion;
   /**
@@ -845,7 +907,7 @@ function planAndApplyTargeted(args: {
    */
   intendedRange?: RedlineSpan;
 }): TargetedPlacement | null {
-  const { editor, payload, referenceMap, ledgerRef, bindingId, newText, proposalScope, confirmed } = args;
+  const { editor, payload, referenceMap, ledgerRef, bindingId, newText, proposalScope, origin, confirmed } = args;
 
   const anchored = resolveAnchoredSpans(editor, payload, referenceMap);
 
@@ -918,19 +980,56 @@ function planAndApplyTargeted(args: {
   const currentText = local ? local.currentText : readRangeText(editor, paragraphSpan);
 
   // FR-C05 outcome 2 — has this clause moved since the model wrote the suggestion?
+  //
+  // Task 052b restructured this from "is a baseline recorded?" into the four cases that actually
+  // exist. The old shape read the ABSENCE of a record as "this must be the first materialize", which
+  // is also what a different tab, an evicted entry and a disabled store look like — so on those paths
+  // it re-baselined against a possibly-drifted paragraph and applied silently. The discriminator is
+  // now {@link MaterializeOrigin}, a fact about the CALL, which stays true where a store cannot reach.
+  //
+  // | origin | recorded comparison | outcome |
+  // |---|---|---|
+  // | live   | (any)      | record + place — nothing can have drifted since the model wrote it |
+  // | replay | unchanged  | place — we KNOW the clause is what the suggestion was written against |
+  // | replay | changed    | ASK, `reason: 'changed'` — task 052's question, now durable across tabs |
+  // | replay | unrecorded | ASK, `reason: 'unverifiable'` — the hole 052b closes (see below) |
+  //
+  // The last row is the whole task. "No prompt" reads as safe and is not: it IS the pre-052 behaviour,
+  // and the pre-052 behaviour in the stale case is a silent overwrite of the user's newer text. Where
+  // detection cannot be established the outcome is a confirmation, never a silent apply (project
+  // invariant 1: a defined, honest outcome).
+  //
+  // Note that `live` only suppresses the UNRECORDED question; a recorded-and-changed clause still
+  // asks on either origin. This task can only ADD questions 052 would not have raised, never remove
+  // one it would.
   if (proposalScope) {
-    const proposedAgainst = readProposalBaseline(proposalScope, ledgerRef);
-    if (proposedAgainst === undefined) {
-      // FIRST materialize of this key: the model produced this proposal against the live document
-      // moments ago, so the paragraph as it reads NOW *is* the capture-time text. Record it.
+    const comparison = compareProposalBaseline(proposalScope, ledgerRef, currentText);
+    if (confirmed === 'stale-clause') {
+      // Already answered by the user. Re-baseline so a later re-render in this browser does not
+      // re-ask before the host's durable FR-17 supersession write lands (the answer's real home).
       recordProposalBaseline(proposalScope, ledgerRef, currentText);
-    } else if (proposedAgainst !== currentText) {
-      if (confirmed !== 'stale-clause') {
-        return { status: 'stale', paraId: anchored.paraId, currentText, proposedAgainst };
+    } else if (comparison.status === 'changed') {
+      return {
+        status: 'stale',
+        reason: 'changed',
+        paraId: anchored.paraId,
+        currentText,
+        proposedAgainst: comparison.proposedAgainst,
+      };
+    } else if (comparison.status === 'unrecorded') {
+      if (origin === 'live') {
+        // The model produced this proposal against the live document seconds ago, so the paragraph as
+        // it reads NOW *is* the capture-time text. This is the ONE place a baseline is minted.
+        recordProposalBaseline(proposalScope, ledgerRef, currentText);
+      } else {
+        return {
+          status: 'stale',
+          reason: 'unverifiable',
+          paraId: anchored.paraId,
+          currentText,
+          proposedAgainst: null,
+        };
       }
-      // Answered "apply anyway" — re-baseline so this tab does not re-ask before the host's durable
-      // supersession write lands.
-      recordProposalBaseline(proposalScope, ledgerRef, currentText);
     }
   }
 
@@ -1007,6 +1106,10 @@ export function usePendingRedline(
     (payload: ComposeDraftPayload, provenance: ComposeDraftProvenance): MaterializeStatus => {
       if (!editor) return 'noop';
       const { ledgerRef, bindingId, turn } = provenance;
+      // Task 052b — FAIL-CLOSED. A caller that does not declare freshness does not get it: the worst
+      // an omitted `origin` can cost is one confirmation, where the worst a wrong `'live'` can cost is
+      // the user's own newer wording, silently. See {@link MaterializeOrigin}.
+      const origin: MaterializeOrigin = provenance.origin ?? 'replay';
       const newText = payload?.new_text ?? '';
       // FR-13 (client-derived, §6.5 Path B) — grounding signal 1: the payload cites sources. Durable
       // payload field; does not change after materialize (only the live-doc resolve signal does).
@@ -1082,6 +1185,7 @@ export function usePendingRedline(
         bindingId,
         newText,
         proposalScope,
+        origin,
         intendedRange: trackedIntentRef.current,
       });
       trackedIntentRef.current = null;
@@ -1135,6 +1239,7 @@ export function usePendingRedline(
           setStaleTarget({
             ledgerRef,
             bindingId,
+            reason: placement.reason,
             paraId: placement.paraId,
             currentText: placement.currentText,
             proposedAgainst: placement.proposedAgainst,
@@ -1216,6 +1321,8 @@ export function usePendingRedline(
     (edits: ComposeDraftPayload[], baseProvenance: ComposeDraftProvenance): MaterializeStatus[] => {
       if (!editor) return edits.map(() => 'noop');
       const { ledgerRef: baseRef, bindingId, turn } = baseProvenance;
+      // Task 052b — FAIL-CLOSED, same rule as `materialize`. See {@link MaterializeOrigin}.
+      const origin: MaterializeOrigin = baseProvenance.origin ?? 'replay';
 
       // Idempotent: this whole-doc set already rendered (refresh / duplicate Flow-5 signal) → no-op.
       if (pending.some(p => ledgerRefMatches(p.ledgerRef, baseRef)) || isPresent(editor, baseRef)) {
@@ -1243,7 +1350,19 @@ export function usePendingRedline(
       // FR-C05 outcome 2 — suggestions whose clause drifted. Held back (NOT placed) until the user
       // answers one batched question, rather than raising a modal storm per change.
       const deferredStale: DeferredEdit[] = [];
-      let firstStale: { paraId: string; currentText: string; proposedAgainst: string } | null = null;
+      /**
+       * Task 052b — the item whose detail the batched question shows. A batch can hold BOTH kinds
+       * (some clauses provably changed, others merely unverifiable), and the copy must not over- or
+       * under-claim: a genuinely CHANGED item wins, because "at least one of these definitely changed"
+       * is then true and is the stronger warning; the shown paraId/text/wording is that same item's,
+       * so the reason and the detail always describe one and the same clause.
+       */
+      let firstStale: {
+        reason: 'changed' | 'unverifiable';
+        paraId: string;
+        currentText: string;
+        proposedAgainst: string | null;
+      } | null = null;
       // FR-C06 — replayed/legacy suggestions located by prose. Held back (NOT placed) until the user
       // confirms ONE batched proposal, for the same reason the stale set is batched.
       //
@@ -1274,6 +1393,7 @@ export function usePendingRedline(
           bindingId,
           newText,
           proposalScope,
+          origin,
           intendedRange: trackedIntentRef.current ?? undefined,
         });
 
@@ -1340,8 +1460,12 @@ export function usePendingRedline(
 
         if (placement.status === 'stale') {
           deferredStale.push({ payload, ledgerRef: subRef, bindingId, turn, question: 'stale-clause' });
-          if (firstStale === null) {
+          // Task 052b — first item wins, EXCEPT that a `'changed'` item promotes over a previously
+          // captured `'unverifiable'` one (see `firstStale`'s note). A `'changed'` item is never
+          // displaced, so this settles after at most one promotion.
+          if (firstStale === null || (firstStale.reason === 'unverifiable' && placement.reason === 'changed')) {
             firstStale = {
+              reason: placement.reason,
               paraId: placement.paraId,
               currentText: placement.currentText,
               proposedAgainst: placement.proposedAgainst,
@@ -1382,10 +1506,16 @@ export function usePendingRedline(
       setError(firstFailure ? { ...firstFailure, failedCount: failures.length, totalCount: targetedCount } : null);
       deferredStaleRef.current = deferredStale;
       if (firstStale !== null) {
-        const stale: { paraId: string; currentText: string; proposedAgainst: string } = firstStale;
+        const stale: {
+          reason: 'changed' | 'unverifiable';
+          paraId: string;
+          currentText: string;
+          proposedAgainst: string | null;
+        } = firstStale;
         setStaleTarget({
           ledgerRef: baseRef,
           bindingId,
+          reason: stale.reason,
           paraId: stale.paraId,
           currentText: stale.currentText,
           proposedAgainst: stale.proposedAgainst,
@@ -1451,6 +1581,11 @@ export function usePendingRedline(
         bindingId: item.bindingId,
         newText: item.payload?.new_text ?? '',
         proposalScope,
+        // Task 052b — `'replay'` is the honest value AND the inert one: `confirmed: 'stale-clause'`
+        // short-circuits the baseline gate ahead of any origin test, so this replay re-baselines and
+        // places whichever way it is labelled. Declaring the safe value keeps that true if the gate is
+        // ever reordered.
+        origin: 'replay',
         confirmed: item.question,
       });
       // Unreachable with `confirmed: 'stale-clause'` — the stale gate is the only producer of both,
@@ -1523,6 +1658,10 @@ export function usePendingRedline(
         bindingId: item.bindingId,
         newText: item.payload?.new_text ?? '',
         proposalScope,
+        // Task 052b — a deferred PROPOSAL is anchorless by construction, so it never reaches the
+        // anchored baseline gate at all. `'replay'` is declared rather than defaulted because that is
+        // what this call actually is: a re-placement long after the entry was produced.
+        origin: 'replay',
         // Task 053b — the answer is per-ITEM, never the button's own label. A batch can hold both
         // anchorless kinds; passing one blanket value would replay the other kind un-confirmed, which
         // would re-propose it forever (harmless) or, worse, invite someone to "fix" that by widening

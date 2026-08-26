@@ -155,6 +155,7 @@ import {
   usePendingRedline,
   resolveTargetSpans,
   type MaterializeStatus,
+  type MaterializeOrigin,
   type ConfidenceBand,
   type PendingRedlineError,
   type PendingRedlineStaleTarget,
@@ -599,10 +600,29 @@ export interface ComposeDraftComment {
  * Provenance stamp accompanying a materialized draft — all Tier 1 identifiers.
  * `ledgerRef` is the addressable `{bindingId}@t{n}` key of the stored output.
  */
+/**
+ * Re-exported so a host that constructs a {@link ComposeDraftProvenance} can name the value it is
+ * declaring without reaching into the hook module. The type itself is defined next to the gate that
+ * consumes it (`./hooks/usePendingRedline`).
+ */
+export type { MaterializeOrigin };
+
 export interface ComposeDraftProvenance {
   ledgerRef: string;
   bindingId: string;
   turn: number;
+  /**
+   * FR-C05 residual (r8 task 052b) — whether this materialize is driven by the dispatch that PRODUCED
+   * the entry (`'live'`) or is a re-materialize from durable ledger state (`'replay'`). It decides
+   * whether the anchored paragraph as it reads right now may be recorded as the CAPTURE-TIME text for
+   * the stale-target check.
+   *
+   * Optional on the wire, FAIL-CLOSED in effect: `usePendingRedline` reads an absent value as
+   * `'replay'`, so a caller that does not declare freshness cannot be granted it. The worst an
+   * omission costs is one confirmation; the worst a wrong `'live'` costs is the user's newer wording,
+   * overwritten silently. See {@link MaterializeOrigin}.
+   */
+  origin?: MaterializeOrigin;
 }
 
 export interface ComposeEditorProps {

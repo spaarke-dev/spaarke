@@ -86,6 +86,10 @@ import {
   type ComposeDraftPayload,
   type ComposeDraftComment,
   type AdvisoryCommentInput,
+  // r8 task 052b — `'live' | 'replay'`: whether a materialize is driven by the dispatch that produced
+  // the entry or is a replay from durable ledger state. Named rather than inlined so the two call
+  // sites below and the editor's stale-target gate cannot drift into two different vocabularies.
+  type MaterializeOrigin,
 } from './ComposeEditor';
 // r8 task 055 — the paraId-vs-citation precedence shared with the AI-edit path and the
 // advisory-comment path, so the whole-document review-flag path cannot drift from either.
@@ -3133,11 +3137,18 @@ export function ComposeWorkspace(props: ComposeWorkspaceProps): React.JSX.Elemen
   // independently of the findings loop below (the coexistence fix — a later edit no longer evicts an
   // earlier review's findings durability).
   const materializeEditOutput = React.useCallback(
-    (editor: ComposeEditorHandle, target: ComposeLedgerOutput): void => {
+    (editor: ComposeEditorHandle, target: ComposeLedgerOutput, origin: MaterializeOrigin): void => {
       const provenance = {
         ledgerRef: target.key, // {bindingId}@t{n} provenance
         bindingId: target.bindingId,
         turn: target.turn,
+        // FR-C05 residual (r8 task 052b) — the CAPTURE-TIME question. On the LIVE leg the model wrote
+        // this proposal against the document as it reads right now, so the editor may record the
+        // anchored paragraph as the text the suggestion was proposed against. On a REPLAY it may not:
+        // an arbitrary amount of editing sits between the proposal and this render, which is exactly
+        // the drift FR-C05 asks about. Passed through rather than guessed downstream — the two callers
+        // below are the only things that know which leg this is.
+        origin,
       };
       const editList = Array.isArray(target.payload?.edits) ? target.payload.edits : null;
       const commentList = Array.isArray(target.payload?.comments) ? target.payload.comments : null;
@@ -3270,7 +3281,7 @@ export function ComposeWorkspace(props: ComposeWorkspaceProps): React.JSX.Elemen
   // idempotent-duplicate-signal test). The UNTARGETED (reopen) path below does NOT use this — it
   // processes ALL findings outputs + the latest edit output directly (task 032 gap #3 coexistence).
   const materializeSingleOutput = React.useCallback(
-    (editor: ComposeEditorHandle, target: ComposeLedgerOutput): void => {
+    (editor: ComposeEditorHandle, target: ComposeLedgerOutput, origin: MaterializeOrigin): void => {
       const reviewPayload = target.payload as ComposeReviewPayload;
       const flaggedSections = Array.isArray(reviewPayload.flaggedSections) ? reviewPayload.flaggedSections : null;
       if (flaggedSections) {
@@ -3279,7 +3290,7 @@ export function ComposeWorkspace(props: ComposeWorkspaceProps): React.JSX.Elemen
       }
       // Idempotent — never double-apply the same stored draft (refresh / duplicate signal).
       if (target.key === lastMaterializedKey) return;
-      materializeEditOutput(editor, target);
+      materializeEditOutput(editor, target, origin);
     },
     [materializeFindingsOutput, materializeEditOutput, lastMaterializedKey]
   );
@@ -3320,7 +3331,15 @@ export function ComposeWorkspace(props: ComposeWorkspaceProps): React.JSX.Elemen
           if (composeOutputs.length === 0) return;
           const target = composeOutputs.find(o => o.key === targetLedgerRef);
           if (!target) return;
-          materializeSingleOutput(editor, target);
+          // FR-C05 residual (r8 task 052b) — THIS is the LIVE leg, and the `targetLedgerRef` argument
+          // is what makes it identifiable. Every producer of a Flow-5 `compose_assistant_insert`
+          // carrying a `ledgerRef` emits it immediately after WRITING that entry — `ConversationPane`
+          // after a compose dispatch, and `useEditSupersession`'s undo / try-another after their
+          // supersession POST returns the new key. So a targeted materialize always renders an entry
+          // that was created moments ago, in this mount, against this document as it reads now. The
+          // untargeted branch below is the opposite by construction: it replays whatever the ledger
+          // already held when the document loaded.
+          materializeSingleOutput(editor, target, 'live');
           return;
         }
 
@@ -3357,7 +3376,11 @@ export function ComposeWorkspace(props: ComposeWorkspaceProps): React.JSX.Elemen
         if (editOutputs.length > 0) {
           const latestEdit = editOutputs.reduce((a, b) => (b.turn > a.turn ? b : a));
           if (latestEdit.key !== lastMaterializedKey) {
-            materializeEditOutput(editor, latestEdit);
+            // Task 052b — the REPLAY leg. This pass runs on every 'loaded' transition and re-renders
+            // whatever the ledger already held, which may be minutes or months old and may have been
+            // proposed in a different tab, window or device. The editor must not treat the paragraph
+            // it finds now as the text the model saw.
+            materializeEditOutput(editor, latestEdit, 'replay');
           }
         }
 
@@ -5183,24 +5206,44 @@ export function ComposeWorkspace(props: ComposeWorkspaceProps): React.JSX.Elemen
       <ConfirmModal
         open={redlineStaleTarget !== null}
         busy={staleResolutionBusy}
-        title="This clause changed since the suggestion"
+        title={
+          redlineStaleTarget?.reason === 'unverifiable'
+            ? 'Apply this earlier suggestion?'
+            : 'This clause changed since the suggestion'
+        }
         message={
           redlineStaleTarget === null ? (
             ''
           ) : (
             <>
-              {redlineStaleTarget.staleCount > 1
-                ? `${redlineStaleTarget.staleCount} of ${redlineStaleTarget.totalCount} suggested edits target clauses that have changed since the suggestion was made. Applying them will replace the newer wording.`
-                : 'This clause has changed since the suggestion was made. Applying it will replace the newer wording.'}
+              {redlineStaleTarget.reason === 'unverifiable'
+                ? // Task 052b — we do NOT know the clause changed, and the copy must not say we do.
+                  // What we know is that this suggestion is being replayed from a stored session and
+                  // that no record of the wording it was written against survives in this browser, so
+                  // applying it could silently replace something typed since.
+                  redlineStaleTarget.staleCount > 1
+                  ? `${redlineStaleTarget.staleCount} of ${redlineStaleTarget.totalCount} suggested edits were made earlier in this document's session. This browser has no record of the wording they were written against, so we can't confirm those clauses haven't changed since — applying them would replace whatever is there now.`
+                  : "This suggestion was made earlier in this document's session. This browser has no record of the wording it was written against, so we can't confirm the clause hasn't changed since — applying it would replace whatever is there now."
+                : redlineStaleTarget.staleCount > 1
+                  ? `${redlineStaleTarget.staleCount} of ${redlineStaleTarget.totalCount} suggested edits target clauses that have changed since the suggestion was made. Applying them will replace the newer wording.`
+                  : 'This clause has changed since the suggestion was made. Applying it will replace the newer wording.'}
               <br />
               <br />
               {'Now: “'}
               {truncateClause(redlineStaleTarget.currentText)}
               {'”'}
-              <br />
-              {'When suggested: “'}
-              {truncateClause(redlineStaleTarget.proposedAgainst)}
-              {'”'}
+              {/* Task 052b — shown only when the capture-time WORDING actually survives (this tab's
+                  own record). Across tabs the durable record is a one-way fingerprint: it proves the
+                  clause changed, it cannot reproduce the words, and an empty quote would read as "it
+                  used to be blank". Omitted rather than faked. */}
+              {redlineStaleTarget.proposedAgainst === null ? null : (
+                <>
+                  <br />
+                  {'When suggested: “'}
+                  {truncateClause(redlineStaleTarget.proposedAgainst)}
+                  {'”'}
+                </>
+              )}
               <br />
               <br />
               Apply anyway?
