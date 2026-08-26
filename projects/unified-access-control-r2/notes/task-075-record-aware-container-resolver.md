@@ -510,6 +510,11 @@ Five claims in this component are currently **unfalsifiable by any test in this 
 5. **That Dataverse string collation is case-INSENSITIVE while both `IsSameContainer` and the double
    use `Ordinal`** — so the double is strictly *stricter* than the platform and can never surface case
    behaviour. This is also why **D-2 went unnoticed for three rounds.**
+6. **Page determinism.** The production queries carry **no `OrderBy`**, so Dataverse's `TOP` selects an
+   *arbitrary* page while the double selects deterministically in fixture order. Immaterial to every
+   current test — both refusal paths are order-independent — but it is the same shape as the collation
+   item: another place the double is **more determinate than the platform**, so an
+   order-dependent defect could not surface here. (Added pass 4.)
 
 **Recommendation**: **task 047 gains an explicit Dataverse operator-semantics assertion list** covering
 those five, plus the `sprk_issecure` field-security / NULL check already booked onto it. Until that
@@ -519,3 +524,26 @@ runs, the five claims above are assumptions carrying a fail-open or fail-closed 
 reverse direction. Task **073 is NOT gated** on this — it retired its three routes rather than
 consuming this seam, so as shipped it consumes nothing from 075. An earlier draft of this
 recommendation said "073 and 078"; that is stale for 073.
+
+### DEFERRED — the probe bound is off by one (precision, not correctness)
+
+`TopCount = ClaimantProbeLimit` paired with a guard of `Count >= ClaimantProbeLimit` means *exactly*
+25 matching rows with no 26th refuses, even though ownership was fully determinable. Fetching
+`ClaimantProbeLimit + 1` and guarding on `> ClaimantProbeLimit` would make the guard fire only when a
+row genuinely exists beyond the intended bound — and would make the log line ("filled its page … a
+further claimant may lie beyond") *true* rather than approximately true.
+
+**Deliberately NOT done in pass 4, and the reason is the round history rather than the change's size.**
+It is fail-closed either way (25 secure claimants of one container refuses as
+`container_ownership_ambiguous` regardless; only the error code and log wording differ), so nothing
+depends on it. Against that: **rounds 1–3 each restructured this query layer and each introduced a
+fresh defect there** — C-1/C-2 begat N-1/N-2/N-3, and the N-fixes begat D-1. Round 4 was the first
+clean round precisely because it confined itself to the double plus a one-word production change.
+Re-entering the query layer for a cosmetic improvement, immediately after closing the gate, is the
+trade that history argues against.
+
+**Fold it in when this method is next touched for a real reason** — most naturally task 078, which is
+already gated on 047 and will be reading this code closely as its first consumer. Whoever does it
+should add the missing boundary case: exactly `ClaimantProbeLimit` matching rows, asserting the
+diagnosis is `container_ownership_ambiguous` (determinable, and ambiguous on the merits) rather than
+`container_ownership_indeterminate`.
