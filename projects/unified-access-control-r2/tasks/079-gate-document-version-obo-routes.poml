@@ -3,7 +3,7 @@
   <metadata>
     <title>Gate the two drive-keyed OBO version routes in DocumentVersionEndpoints — unlike task 071's four, these have a live caller and must be gated, not deleted</title>
     <phase>0c Secure Documents — Wave 1 (added mid-wave)</phase>
-    <status>pending</status>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>Ungated byte-read of prior document versions on the BFF authorization surface, with a shipped client depending on it.</rigor-reason>
     <model-tier>opus</model-tier>
@@ -98,5 +98,38 @@ Note task 070 added `AuthorizationService.GetCallerRecordAccessAsync` (entity-ag
     <criterion>`GrantMembershipAsync` still has zero callers.</criterion>
   </acceptance-criteria>
 
-  <notes>These were missed by every prior enumeration of the document surface because they live in a version-specific file rather than in `OBOEndpoints.cs` or `FileAccessEndpoints.cs`. Task 071 found them by doing a caller inventory rather than a route inventory — worth remembering as a technique.</notes>
+  <notes>These were missed by every prior enumeration of the document surface because they live in a version-specific file rather than in `OBOEndpoints.cs` or `FileAccessEndpoints.cs`. Task 071 found them by doing a caller inventory rather than a route inventory — worth remembering as a technique.
+
+COMPLETED 2026-08-26 — see `notes/task-079-gate-document-version-obo-routes.md`.
+
+Outcome: step 2 taken, not step 1. Both routes RE-KEYED onto `{documentId}` and gated
+`.AddDocumentAuthorizationFilter("read")`; the drive-keyed pair DELETED. The decisive fact came from the
+caller, not the route: `App.tsx:366` already keys the list on `sprk_documentid`, so the client always
+held the document id and there was no resolution problem to solve — only a route keyed on the wrong
+thing. Re-keying is strictly stronger than resolving: the SPE pointer is now read off the AUTHORIZED
+row, so a caller cannot address an arbitrary SPE item at all, and it avoids the fact that
+`sprk_graphitemid_uk` is keyed on the ITEM alone (a resolution-based gate would have left the supplied
+`driveId` unvalidated).
+
+Operation key: `read` — NO new policy key needed. Parity with the current-version download on the same
+group (`/{documentId}/download` and `/content` are both `read`); prior-version bytes are equally, not
+more, disclosing, and gating history harder than the live document stops no attacker.
+
+Escalation trigger did NOT fire — every caller starts from a document row; no unmodelled content.
+
+Verified: 10/10 new auth tests; 8/8 migrated seam tests; full suite 11,184 passed / 0 failed / 82
+skipped (baseline 11,172 + 12 new); ArchTests 9 failures = known master baseline, task-074 route guard
+10/10; publish 45.09 MB incl. PDBs (+0.01 vs baseline, ceiling 60); no vulnerable packages;
+`GrantMembershipAsync` still zero callers. Three perturbations run and restored — removing the gates
+turns exactly the 3 per-document denial tests red AND makes task 074's Rule A name both new routes,
+proving the gates (not the waivers) keep it green.
+
+REQUIRES FROM MAIN SESSION (shared files, not editable here): delete both 079 waivers in
+`RouteAuthorizationGuardTests.cs:249-258` (dead — `NoWaiverIsStale` cannot see a DELETED route);
+update the `GovernedFile` reason at :106-107; fix the stale route comment at `SpeFileStore.cs:157`.
+
+RESIDUAL RISK: BFF + AllDocuments Code Page must deploy TOGETHER (transient 404 on the version modal
+otherwise — outage, not disclosure). Also `VersionHistoryModal.test.tsx` cannot execute in this
+workspace (pre-existing monorepo jest wiring; verified identical on unmodified HEAD), so the client
+regression assertion added there is currently unenforced.
 </task>
