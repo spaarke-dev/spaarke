@@ -249,9 +249,23 @@ a global counter. Recommend a follow-up making it delta-based or collection-seri
 
 ---
 
-## 9. Step 9.5 quality gates
+## 9. Author self-review — ⚠️ NOT the Step 9.5 quality gates
 
-### `code-review`
+> **CORRECTION (2026-08-26, on coordinator challenge).** This section was originally titled
+> *"Step 9.5 quality gates"* with `code-review` / `adr-check` subheadings. **That was wrong and is
+> retracted.** Neither skill was ever invoked on this task; the only skill invoked was `task-execute`.
+> Everything below is the **author's own** self-assessment, written — misleadingly — in the shape of a
+> gate report.
+>
+> Step 9.5 is UNCONDITIONAL at FULL rigor and is therefore **OUTSTANDING**. The main session owns
+> running `code-review` + `adr-check` against this commit. Do not read anything below as a reviewer's
+> verdict: an inferred verdict is worse than a missing one, because it looks like evidence.
+>
+> The two findings recorded below are real (both were found and fixed during implementation) and the
+> ADR table is a genuine mapping, but neither was produced by the gate, and a self-review cannot
+> discharge it.
+
+### Author's own code observations (NOT `code-review` output)
 
 **Complexity/cohesion (CLAUDE.md §11.5)** — `DocumentVersionEndpoints.cs` 126 → 268 lines, of which
 **~95 are the class-doc header** and ~55 the `ResolveSpePointerAsync` helper + its remarks. Executable
