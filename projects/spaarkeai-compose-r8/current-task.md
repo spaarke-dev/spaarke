@@ -10,10 +10,10 @@
 
 | Field | Value |
 |-------|-------|
-| **Task** | **none in progress** — **052 · 053 · 061** all landed (Track C AI-edit placement is now COMPLETE) |
-| **Status** | Full solution builds · ArchTests **62/62** · compose-components **101 suites / 1,273** · SpaarkeAi **121 suites / 1,119** |
-| **Progress** | **36 of 54 complete**, 11 open, 1 blocked |
-| **Next Action** | **062** then **063** — SEQUENTIALLY, not in parallel (see the parallelism warning below). Before dispatching, read 061's sequencing hand-off in `notes/` + the TASK-INDEX 061 row: 063 adds the delete surface to `SessionFileBlobStore`, at which point `SessionFilesCleanupScopeTests` becomes load-bearing — **do not weaken it** — and 063 must enumerate for erasure by **tenant PREFIX, not by walking the manifest** (rehydration creates no manifest entries, so orphans are invisible to a manifest walk). Also pending: the **null-identifier refusal** decision below. |
+| **Task** | **none in progress** — 052 · 053 · 053b · 061 · 064 all landed |
+| **Status** | Builds clean · BFF **11,277 passed / 0 failed** · ArchTests **62/62** · integration **96 P / 6 S** · compose-components **102 suites / 1,298** · SpaarkeAi **121 / 1,121** |
+| **Progress** | **39 of 56 complete**, 10 open, 1 blocked |
+| **Next Action** | **062** then **063** — SEQUENTIALLY (their `parallel-safe: ✅` flag is wrong; see the parallelism section). Before dispatching 063, read the TASK-INDEX 061 row: it adds the delete surface to `SessionFileBlobStore` (which today has only `WriteAsync`/`ReadAsync` — **no delete, no list**), at which point `SessionFilesCleanupScopeTests` becomes the load-bearing guard — **do not weaken it**. Erasure MUST enumerate by **tenant PREFIX** (`{tenantId}/session-files/{sessionId}/`), not by walking the Cosmos manifest: that container has `DefaultTimeToLive = 7776000` (90d), so the manifest expires while the blobs do not, and a manifest walk would orphan bytes permanently. |
 
 ### Files modified this session
 All committed. Nothing uncommitted, nothing at risk.
@@ -82,11 +82,11 @@ retention and erasure for a persisted store, and the empty endpoint is the only 
 
 ---
 
-## Remaining queue (11 open, 1 blocked)
+## Remaining queue (10 open, 1 blocked)
 
 | # | Task | Gate |
 |---|---|---|
-| **062 · 063** | Track B retention/TTL · erasure | 061 ✅ — ⚠️ their `parallel-safe: ✅` flag is MISLEADING (see below); **062 then 063, sequentially** |
+| **062 · 063** | Track B retention/TTL · erasure | 061 ✅ — **062 then 063, sequentially** |
 | **052b** | Stale-target DETECTION durability (052's answer is ledger-durable; the question is `sessionStorage`) | 052 ✅ |
 | **047b** | Never-silent hole (unpaired block reports no loss) | 056 ✅ |
 | **058** | Nested / conditional merge fields | 049 ✅ 057 ✅ |
@@ -95,6 +95,29 @@ retention and erasure for a persisted store, and the empty endpoint is the only 
 | **074** ⛔ | Retire `ComposeShadowPatchEngine` | gate-confirm before deleting 3,000 lines |
 | **090** | Wrap-up (incl. `/test-diet`) | all |
 
+---
+
+## 🔔 The ONE decision waiting
+
+**`ComposeEditAnchorPass` + `ComposeAnchorResolver` now have ZERO production callers.** Verified
+independently after 064: only comment references remain in `src/`; all 15 `Validate` call sites are in
+tests. `POST /api/compose/edit-batch/validate` was their only caller and 064 deleted it.
+
+They are the same orphan category 064 just retired — but task **052 kept the anchor pass deliberately**, and
+the ADR-043/041 assessment (§7, C-7) names it the designated home for closed-set validation. So retiring it
+is an owner decision, not a cleanup. Three options, in `notes/064-orphan-retirement-decisions.md` §4:
+
+- **(a) Keep** as the designated home — accept it is currently dark.
+- **(b) Wire it** — the obvious candidate is server-side validation of whole-document `target_para_id`s
+  (today the closed-set check is client-side only).
+- **(c) Retire it too** and amend the assessment.
+
+> Owner decisions A and B (2026-08-25) are DONE — A → task 053b, B → task 064. Do not re-ask them.
+> One sub-decision inside 064 has a revert point: three always-default fossils (`MatchCount`,
+> `EditErrorKind.Overlap`, `BatchValidationResult.BatchErrors`) were removed beyond the task's list.
+> Rationale + blast radius: `notes/064-orphan-retirement-decisions.md` §3.4.
+
+### Superseded — decision #1 is CLOSED
 ### 🔔 Decision waiting #1 — a false `applied` that contradicts what we tell the model (surfaced by 053 §5)
 
 A **post-052** payload can carry `target_para_id: null` — Structured Outputs requires the key to be present,
@@ -116,7 +139,7 @@ and null ⇒ an edit that failed to identify its target ⇒ **refuse**; key abse
 as today. **Fix it, or change the catalog promise to match the code?** Recommend fixing the code: the promise
 is the correct behavior and R8's charter is no false `applied`.
 
-### 🔔 Decision waiting #2 — orphaned code
+### Superseded — decision #2 is CLOSED (task 064 executed it)
 `ComposeEditBatch` + `ComposeEditTransaction` are now orphaned — the text-offset APPLY half of the
 mechanism 052 retired, with no producer and no production consumer, so they can never apply anything. They
 do **not** violate I-7 (they apply spans, they do not search), so 052 left them rather than delete ~500
@@ -177,3 +200,29 @@ matches EVERY line. Scope to `Services\\Compose\\` or a filename.
 - **C-4 still unmeasured against a real model response.** Anchors add 3.50% at realistic payload size.
 - **Nothing in Track B has run against real Azure** — no storage account, no MI, no RBAC.
 - **No bicep file has been changed by this project at any point.**
+
+---
+
+## Hard-won gotchas (this session) — do not rediscover these
+
+- **Publish size: PIN THE SHELL.** `Compress-Archive` gives **43.73 MB under Windows PowerShell 5.1** and
+  **45.03 MB under pwsh 7** for the SAME directory. Canonical is **pwsh 7** (CI uses it; reconciles with the
+  44.96 MB baseline at +0.07 MB). Always report the **raw dir sum (~137.41 MB) + file count (215 / 4 `.pdb`)**
+  alongside the zip — those are shell-independent and are the only reason this was diagnosable.
+- **Line endings**: `.gitattributes` sets `*.cs text eol=crlf`, and edits can silently produce pure LF.
+  **`grep -c $'\r$'` reports those files as CRLF and is WRONG.** Use `od -An -tx1 | grep -c '^0d$'`.
+- **`dotnet format` before committing**, scoped: `dotnet format whitespace <csproj> --no-restore --include
+  <your paths>`. CI auto-formats and pushes, which rejects the next push. A project-wide run also "fixes"
+  ~22 pre-existing IDE1006 violations in unrelated files.
+- **`grep -i compose` matches EVERY line** — the worktree path is `spaarke-wt-spaarkeai-compose-r8`. Scope to
+  `Services\Compose\` or a filename.
+- **Don't trust the POML `parallel-safe` flag — read the file sets.** 061/062/063 are all marked ✅ but all
+  three declare `Services/Ai/Sessions/` as `primary-edit`.
+- **Give each agent an explicit "you MUST NOT touch X" naming the OTHER agent's paths.** Both parallel waves
+  this session stayed clean because of that; the one cross-agent seam that broke was a file *neither* owned.
+- **When two agents share a contract, check the seam neither one owns.** Task 052: one agent fixed the `.cs`
+  eval test, the other flagged the file as out-of-boundary (and its flag was itself stale) — the JSON fixture
+  went stale and only main-session verification caught it.
+- **Verify every agent report.** This session that caught: a wrong publish number already committed to a
+  note, a stale test fixture, a misleading `parallel-safe` flag, and two of an agent's own tests that its
+  mutation pass proved were passing vacuously.
