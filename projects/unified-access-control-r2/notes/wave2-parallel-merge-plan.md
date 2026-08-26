@@ -280,6 +280,43 @@ SPE-pointer validation is a drift risk — evaluate whether to extract a shared 
 | Orphaned `[Fact(Skip)]` asserting `POST /api/containers` — **a route registered nowhere**. By 073's own stated rule it should have gone with the other three | `EndpointGroupingTests.DocumentsEndpoints_ReturnsProblemDetailsOnError` | 073 adr-check W-8 |
 | Record a one-line ADR-038:559 citation (Path A) so `/test-diet` reads the endpoint-table assertion as classifier noise, not a finding | project notes | 073 adr-check W-1 |
 
+## 4a. ✅ 075 GATES CLOSED — PASS at `3289844` (4 rounds, 10 defects, 0 in round 4)
+
+| Round | Found | Fixed in |
+|---|---|---|
+| 1 `6153049` | C-1 reverse trimmed on the wrong side · C-2 silent 25-row truncation · C-3 TS half fails open on empty read | `7db13de` |
+| 2 `7db13de` | N-1 probe lost selectivity → guaranteed outage at 25 secure records · N-2 C-1 mirrored onto co-mingling probe · N-3 `NotEqual true` excludes NULL · N-4 localized-substring fault matching | `ff45847` |
+| 3 `ff45847` | D-1 truncation refusal still vacuous · D-2 two definitions of container equality | `3289844` |
+| **4 `3289844`** | **none** | — |
+
+**adr-check: 0 violations.** ADR-003/007/012/032 pass · ADR-009 now compliant · ADR-010 improved to
+**152 with headroom restored** · ADR-029 pass (45.10 MB / 60) · ADR-038 pass.
+
+The reviewer also **corrected its own D-1 proof** and credited the implementing agent: removing the cap
+moves the refusal fail-*closed*, so a green test there is correct, not vacuity. *"A perturbation only
+proves something when it introduces a defect; mine didn't."*
+
+### Two conditions attached to the PASS
+
+1. **Task 078 must not ship before task 047 runs** (073 explicitly **not** gated — it retired its routes
+   rather than consuming this seam). 047 needs the operator-semantics assertion list.
+2. **The two-hop child gap stays open and filed** — `communication → sprk_invoice → secure matter` still
+   lands in the shared archive because `sprk_invoice` is a regarding target but not securable. Needs the
+   Phase 3 ancestor stamp (050–055).
+
+### One-line residual to fix at merge
+
+075's notes don't cite the project's existing **path-B ADR-003 amendment (task 030)** covering the
+new-seam tension. Add the citation.
+
+### Why four rounds — the structural read, worth carrying forward
+
+**All ten defects were in the fetch/query layer. None in the decision layer**, which sat still and
+correct throughout. Rounds 1–3 each restructured that layer and each introduced a fresh defect there;
+round 4 confined itself to the double plus a one-word production change and introduced none. **The
+component has outgrown what a hand-written double can verify** — recorded as §12 verification debt in
+the task notes rather than claimed away.
+
 ## 4b. 🔔 076 ESCALATION — blocks 076 only; 075 merges independently
 
 Full options in `notes/task-076-callsite-inventory-and-ESCALATION.md` §2. The trigger fired materially:
