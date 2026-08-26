@@ -1,5 +1,80 @@
 # Current Task State — customer-provisioning-orchestration-r1
 
+> **Last Updated**: 2026-08-26 SESSION 10 END — **🎯 SESSION 10 accomplishments** (3 clean commits pushed to origin `f280de764` = branch HEAD): (1) **Initial 205 sub-phase authored** (`7b82f60eb`) — 6 POMLs (205a-f) via 6 parallel background agents covering auth-v4 §10 addendum Δ1-Δ5 + traps + DELIVERED consumption. (2) **Peer 205a A38 ESCALATED cleanly** (`partial-omit-set-discovered` trigger fired at Step-2 grep-verify — 5 upsert sites verified beyond `StaticKvSecretManifest`) → owner APPROVED full re-scope split → **4 revised/new POMLs authored** (205a=A38a + 205g=A38b + 205h=A38c + 205i=A44.5). (3) **S1∥ mini-wave landed** (`cc6ecb6e4`) — 205b (A42) COMPLETE path (b) contract-parity (Fable/xhigh; 26 parity tests; `AssertFicTenancy` ported; `FicExchangeOutcomeClassifier` + `CrossTenantFicRefusedException` + typed exit codes; task-130 I6 preserved). (4) **S2∥ execution wave complete** (`f280de764`) — 4 parallel agents landed A38a+A38b+A38c+A44.5 (~1.5M tokens, 78min wall-clock, ALL green: build 0/0/0/0, `dotnet test` 1646/0/1). (5) **Peer A38a fired site-inventory-drifted on 6th site** (`Setup-OfficeServiceBus.ps1:172`) → owner-directed live `az` diagnosis confirmed script is 80% dead (Step-5 App Service ResourceNotFound, Step-4 KV secret SecretNotFound, SB namespace LIVE via canonical Bicep + MI auth per auth-v4 task 051; 3 `office-*` queues hardcoded + actively polled by Workers/Office/*.cs) → owner chose retain + A38c gate + deprecation banner → **main-session fold-in landed** (helper dot-source + gate + ~50-line banner naming canonical replacements). All 5 executed sub-phases pass Step 9.5 code-review + adr-check UNCONDITIONAL (auth-tagged); 0 ADR violations across the wave.
+
+## 🎯 SESSION 10 QUICK RECOVERY — 2026-08-26 END (READ THIS FIRST)
+
+| Field | Value |
+|-------|-------|
+| **Just completed** | Task 205 execution: **5 of 9 sub-phases LANDED** (205a A38a ✅ + 205b A42 ✅ + 205g A38b ✅ + 205h A38c ✅ + 205i A44.5 ✅). Setup-OfficeServiceBus.ps1 escalation resolved (retain + gate + banner). 3 SESSION 10 commits pushed. |
+| **Next actionable** | **Dispatch 205c (A39 H4b per_env_settings) — ORDERING GUARD unblocked** (A38+A42 both landed). Then 205d (A41 H10 dual DV) + 205e (A43 Deploy-AllIndexes gate) in parallel — Sonnet/high. Then MAIN-SESSION 205f (A44 §6.5 EDIT package + doc sweep) — touches `.claude/**` + root CLAUDE.md, cannot delegate. |
+| **Rigor** | 205c FULL Sonnet/xhigh (ORDERING GUARD critical-path to 186); 205d/e/f FULL Sonnet/high (auth-tagged → code-review + adr-check unconditional). |
+| **Model / Effort** | 205c: sonnet/xhigh (§10.2 fail-fast + FIC-flap tolerance). 205d/e: sonnet/high. 205f: sonnet/high MAIN-SESSION. |
+| **Parallel-safe** | 205c: NO (ORDERING GUARD dep on A38+A42 = landed; can dispatch NOW). 205d + 205e: YES (disjoint code + PS). 205f: NO (MAIN-SESSION per `.claude/**` write boundary). |
+| **Estimated remaining effort** | ~10h across 4 sub-phases (205c 4h + 205d 3.5h + 205e 2h + 205f 2.5h); parallel lanes compress to ~5h wall-clock. |
+| **Branch** | `work/customer-provisioning-orchestration-r1` @ `f280de764` = origin |
+| **Working tree** | CLEAN |
+| **Next action for fresh session** | (recommended): `task-execute projects/customer-provisioning-orchestration-r1/tasks/205c-a39-h4b-per-env-settings.poml` — critical-path to 186. Then dispatch 205d + 205e in parallel. Then 205f in main session. |
+
+### SESSION 10 commits (ALL PUSHED)
+
+- `7b82f60eb` — docs(provisioning): author task 205 sub-phase (6 initial POMLs 205a-f)
+- `cc6ecb6e4` — feat(provisioning): task 205 A38 re-scope + A42 landed (S1∥ mini-wave bundle) — includes revised 205a-a38a + new 205g/h/i POMLs + peer 205b's A42 code + old 205a POML deletion
+- `f280de764` — feat(provisioning): task 205 A38 split + A44.5 execution wave complete (S2∥ bundle) — 52 files (5 new + 37 modified), +4150/-184; includes Setup-OfficeServiceBus fold-in
+
+### Critical Context (1-3 sentences)
+
+**Task 205 is 5 of 9 sub-phases complete — all A38 split + A42 + A44.5 landed, task 186 critical-path unblocked pending 205c A39.** ORDERING GUARD (§10.2 BINDING) is now satisfied because A38 split (manifest omit + customer.bicep gate + operator script gates + L2 Worker credential seam) landed together AND A42 FIC creation landed — so 205c can dispatch A39 (Graph__Credentials__Order__0=ManagedIdentityFederated + RequireSecretFreeIdentity=true fail-fast + 6 other §10.2 entries) without boot-looping fresh stamps. Remaining sub-phases (205d/e/f) are smaller and non-critical to 186 (quality gates + doc sweep) but 205f cannot delegate (touches `.claude/**` + root CLAUDE.md).
+
+### Task 205 dispatch prep (next actionable)
+
+**Sub-phase 205c A39** (Sonnet @ xhigh, FULL, ordering-guard-satisfied):
+- POML: `projects/customer-provisioning-orchestration-r1/tasks/205c-a39-h4b-per-env-settings.poml` (143 lines)
+- Scope: extend H4b `per_env_settings` manifest with 8 §10.2 live-contract entries: `Graph__Credentials__Order__0=ManagedIdentityFederated` (sole entry), `Graph__Credentials__RequireSecretFreeIdentity=true` (fail-fast), `ManagedIdentity__ClientId` (FromHandlerOutput), 3 SB `FullyQualifiedNamespace` (`<ns>.servicebus.windows.net`, NOT conn string), `AiSearch__ManagedIdentity__Enabled=true`, `AiSafety__ContentSafety__ManagedIdentity__Enabled=true`
+- Tolerate FIC propagation flap (~130s AADSTS70025 window) — verified-exchange gate OR H4b boot-retry allowance (POML has documented-choice pattern)
+- No load-bearing key `required=false` (H4b:286 silent-skip trap avoidance per §5 SF-18)
+- Deps: A36/A37 (landed 1bc049e4c), A38a (landed f280de764), A42 (landed cc6ecb6e4)
+- ~4h POML estimate; Sonnet/xhigh; single background agent
+
+**Sub-phase 205d A41** (Sonnet @ high, parallel-safe with 205e):
+- POML: `205d-a41-h10-uami-dual-app-user.poml` (140 lines)
+- H10 dual DV app-user + Q8 D3 wording fix + Naming Standards Model 1 UAMI row
+- Dedupe FIRST against Wave-3E-053-H10-AppUser + ds8-uami-dv-appuser output (may collapse to probe-only, -2h)
+- ~3.5h POML estimate
+
+**Sub-phase 205e A43** (Sonnet @ high, parallel-safe with 205d):
+- POML: `205e-a43-deploy-allindexes-gate.poml` (120 lines)
+- Deploy-AllIndexes.ps1 silent-fallback gate; marker convention aligned with A38a landed (`spaarke-secret-free-identity=true` KV tag)
+- ~2h POML estimate
+
+**Sub-phase 205f A44** (Sonnet @ high, MAIN-SESSION ONLY):
+- POML: `205f-a44-template-guard-and-doc-align.poml` (205 lines)
+- Consumer guard for `appsettings.template.json` ServiceBus-ConnectionString KV ref + apply §6.5 EDIT package (Q3 signed 2026-08-25) to `.claude/constraints/provisioning.md` + `spec.md:259/:275` + root CLAUDE.md §17 + doc sweep (replace stale 280-line mirror with 626-line canonical + delete `PROVISIONING-CHANGE-REQUEST copy.md` + fix name-based UAMI resolution in 2 script help-texts)
+- Cannot delegate (`.claude/**` + root CLAUDE.md sub-agent write boundary)
+- ~2.5h POML estimate
+
+**Recommended sequencing**: (a) dispatch 205c immediately (critical-path); (b) parallel-dispatch 205d + 205e as background wave; (c) execute 205f in main session (may run in parallel with 205d/e background dispatch since disjoint file surfaces + main-session-only write boundary).
+
+### Deferred follow-ups (queued for post-186 or ongoing)
+
+1. **`SecretFreeMarkerConsistencyDetector` fleet enumeration** — detector class landed via A38a but runtime fleet enumeration deferred to T8-probe / H13-aggregation family (task 186 acceptance).
+2. **`sprk_credentialmode` column creation** on admin Dataverse env — schema prerequisite before any env enables `RequireSecretFreeIdentity=true` (documented in A38a follow-up rows).
+3. **Optional `sharedKeyVaultResourceGroupName` H4-shared parameter** — Model 1 shared-vault marker RG assumption per A38a.
+4. **A38c `-CredentialMode` pass-through live-read wiring** — 205h's TODO(A38a-followup); unblocked since A38a landed `UpdateCredentialModeAsync`/`sprk_credentialmode` contract.
+5. **CustomerRunGuard factory-unification row** — its Bicep KV-ref gated in A44.5 (partial-omit-trap avoidance) but its C# seam (`DataverseRegistryConcurrencyStore.cs:298` ClientSecretCredential) out of A44.5 scope; on secret-free envs `customerRunGuardEnabled` MUST stay false until MI-FIC seam lands.
+6. **Task-010 idempotency re-port** to `Register-EntraAppRegistrations.ps1` — from A35 master merge deferral.
+7. **Task 186 E2E live-fire** — blocked by 205c/d/f landing + owner disposition on any residual escalations.
+
+### To resume next session — say ONE of these
+
+- **"execute task 205c"** — dispatch A39 (Sonnet/xhigh) as background agent; critical-path to 186
+- **"execute task 205c and dispatch 205d + 205e in parallel"** — one background workflow with 3 agents
+- **"execute task 205f"** — main-session §6.5 EDIT package + doc sweep (safe to run alongside a background 205c/d/e dispatch)
+- **"continue provisioning-orchestration-r1"** — /project-continue loads full context, points at 205c per priority
+- **"execute task 186"** — do NOT do this yet; blocked by 205c/d/f landing
+
+---
+
 > **Last Updated**: 2026-08-25 SESSION 9 END — **🎯 SESSION 9 accomplishments** (all pushed to origin, master `28c2c1b38` = branch HEAD): (1) Task **203a foundation COMPLETE** (`45e14556a`) — 7 rows applied + 2 already-applied via verify-first. (2) **Fable-level deep review** of auth-v4 change request (`5bde2c750`, workflow `wl5blw993`) — 20 agents, 156 claims, 4 deliverables (remediation plan 304 lines / §6.5 decision doc 187 / draft punch rows 70 / open questions 119). (3) **All 11 owner decisions Q1-Q11 RESOLVED** (`c3e5b7d58`) — critical discovery: this branch was 281 behind master (auth-v4 A4+E-3+MI-migration missing here). (4) **S1∥ mini-wave DISPATCHED + LANDED** (A36+A37 `1bc049e4c`; A40 in `c3e5b7d58`) — 3 parallel background agents; `bff-runtime-rbac.bicep` (comprehensive) + `ArmAppServiceIdentityPatcher.cs` VERIFIED PASS + task 186 acceptance criterion + runbook §12.5/12.6. (5) **A35 master merge** (`28c2c1b38`) — 276 commits from master merged INTO branch; 15 conflicts resolved. (6) **/merge-to-master** completed — pushed `5532fc714..28c2c1b38` to origin/master; main repo local master fast-forward synced. Branch AND master now identical.
 
 ## 🎯 SESSION 9 QUICK RECOVERY — 2026-08-25 END (READ THIS FIRST)
