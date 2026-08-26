@@ -408,6 +408,32 @@ This project keeps finding "docs lose to live metadata". Same shape, different l
 nobody looking.** Worth asking what else is already being reported and unread — a log-review sweep is
 cheap next to another four-round review cycle.
 
+### 🔁 THIS REFRAMES THE 076 DECISION — A and C read differently now
+
+The gate reviewer's closing point, and it is the sharpest thing in the batch:
+
+> This is currently documented as a **rationale bullet** inside 076's design note, where it reads as
+> *argument* rather than *defect*. It changes what the operator is deciding: **not "which resolution
+> point is cleaner" but "which resolution point closes a fail-open that is live today."**
+> **Options A and C read differently under that framing.**
+
+Concretely: **(A)** puts the decision at each of ~12 client upload paths — correct only if every one is
+updated correctly, now and forever. **(C)** closes it **server-side in one place, client untouched** —
+which under "stop a live fail-open" is the stronger property, because it does not depend on client
+call-site discipline. (A) was recommended on *architectural* grounds — one seam, one decision point,
+two-hop gap closable in one place — which was the right recommendation for the question as originally
+framed. **The framing has changed; the recommendation deserves a second look before it is acted on.**
+
+**Action: elevate this from a rationale bullet to a named finding with a severity, in the escalation
+note's opening summary**, so the operator decides against the accurate framing.
+
+### ✅ The Warning-log claim is VERIFIED (the reviewer explicitly did not vouch for it)
+
+The gate reviewer flagged the "already logs a warning" claim as the implementer's, not verified by it.
+**Verified verbatim in the main session** at `ProvisionProjectEndpoint.cs:690-695` — text quoted above in
+§4b-0. It is confirmed, not merely claimed, and belongs alongside this project's other
+"docs lose to live metadata" findings as the logs-lose-to-nobody-looking instance.
+
 ### ⚠️ MECHANISM CORRECTION — verified in main session, fix in the 076 note before the operator acts
 
 The 076 escalation note argues against option (B) by saying the create path *"takes its container from
