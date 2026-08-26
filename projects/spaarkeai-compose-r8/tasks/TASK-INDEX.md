@@ -260,10 +260,37 @@ code quality is the priority. The discriminator is **"does a subtle miss ship si
 > still binds — for 073 especially the **enumerated route/verb diff** and per-endpoint filter
 > verification, which are the properties that actually protect behaviour.
 >
-> **074 is unchanged in substance**: task 031 recorded subsumption **NOT-CONFIRMED**, and its POML
-> forbids deleting on that basis. The owner funded the confirmation work on 2026-08-26, so 074 now
-> runs as *prove reachability empirically, then delete only if CONFIRMED* — a NOT-CONFIRMED result
-> remains a legitimate, successful outcome.
+> **074 — RESOLVED 2026-08-26, and the answer is DO NOT DELETE.** The owner funded the confirmation
+> work; it did not fill 031's evidence gap, it **disproved subsumption**. `ComposeShadowPatchEngine`
+> is still load-bearing. Evidence:
+> [`notes/patch-engine-retirement.md`](../notes/patch-engine-retirement.md).
+>
+> - **The branch is live.** `ComposeService.cs:1421` — `request.ContentModel is null && (hasOperations
+>   || hasComments)`. On that branch `ResolveSaveBaselineAsync` returns the baseline **unmodified**
+>   (the renderer is only invoked under `ContentModel is not null`, `:1544`), so `_patchEngine.Apply`
+>   (`:1450`) is the **only** thing that applies the user's edits. All three `Apply` sites collapse
+>   into it. *Verified independently in the main session, 2026-08-26.*
+> - **The mutation experiment is the finding.** With `Apply` replaced by a baseline passthrough —
+>   i.e. simulating the deletion — the op-log suite goes 151/0 → **44 passed / 107 failed**, and
+>   critically **the endpoint still returns HTTP 200**. So deleting the engine fails as **silent data
+>   loss**: a save that reports success while discarding the whole editing session. That is precisely
+>   the failure class R8 task 013 / FR-S06 exists to eliminate.
+> - **The client shape is an enforced contract, not residue** — `importedBuilt` is null under five
+>   live conditions, each routing to the op-log shape; two shipped tests assert it and pass today.
+> - **Capability gap, not coverage gap** (this is worse than 031 assumed): `PartialApplySummary` and
+>   `ReanchorSummary` are wired **exclusively** to the `ContentModel is null` path. The render path
+>   has no stale-base re-anchor (`:1381` only warns) and no partial-apply recovery. Deleting the
+>   engine would silently remove **two user-visible recovery behaviours**.
+>
+> Two POML premises are also void: there is **no `IComposeShadowPatchEngine`** to delete, and
+> `ComposeWritePathTextSearchAuditTests.cs` reads the engine's `.cs` **by path** and throws if absent
+> (full deletion scope ≈ 98 test methods across ~17 files).
+>
+> **Re-scheduling condition** — deletion becomes safe only after the capabilities are **ported, not
+> re-measured**: serve the `ContentModel`-null shape through the merge path (or eliminate it
+> client-side across all five conditions with a deprecation window), port re-anchor and partial-apply
+> to the render path, then re-run the mutation experiment and require **zero** failures. That is an
+> R9-sized item, not a Track D cleanup.
 
 | # | Task | File (LOC) | Rigor | Tier/Effort | ∥ | Deps | Status |
 |---|---|---|---|---|---|---|---|
@@ -271,7 +298,7 @@ code quality is the priority. The discriminator is **"does a subtle miss ship si
 | 071 | Decompose `ComposeDocxProjectionBuilder.cs` + delete its waiver | 3,085 | FULL | opus/xhigh | ❌ | 040 | 🔲 |
 | 072 | Decompose `ComposeDocumentRenderer.cs` + delete its waiver | 2,304 | FULL | opus/xhigh | ❌ | 040 | 🔲 |
 | 073 | Decompose `Api/ComposeEndpoints.cs` + delete its waiver | 2,651 | FULL | opus/xhigh | ❌ | 013 | 🔲 |
-| 074 | **Retire `ComposeShadowPatchEngine.cs`** + delete its waiver — confirm at the gate **before** deleting | 2,999 | FULL | opus/max | ❌ | 031, 040 | ⛔ |
+| 074 | **Retire `ComposeShadowPatchEngine.cs`** — **CLOSED as DO-NOT-DELETE, 2026-08-26.** The funded confirmation work *disproved* subsumption: the engine is the only thing applying edits on the `ContentModel`-null op-log branch, and a mutation simulating its deletion returns **HTTP 200 while discarding the edits** (silent data loss). Also owns two recovery capabilities the render path lacks. Re-scheduling requires PORTING those capabilities first — R9-sized, not Track D | 3,049 | FULL | opus/max | ❌ | 031, 040 | ⛔ |
 
 ## Phase 8 — Wrap-up
 
@@ -313,7 +340,7 @@ requires ≥3 well-specified low-ambiguity parallel tasks; no wave here qualifie
 | 040 | The merge mechanism — the project's central bet, in one pass |
 | 043 | Capability-gate false positives block documents we could have handled |
 | 052 | Retiring the text-search path — verify no consumer outside Compose |
-| 074 | Deleting a 3,000-line engine — gate-confirm first |
+| 074 | ~~Deleting a 3,000-line engine~~ — **CLOSED do-not-delete 2026-08-26**: the mutation experiment showed deletion returns HTTP 200 while discarding the edits (silent data loss). Risk retired by not taking it. |
 | 011 | Concurrency semantics reversal on the live save path |
 
 ## Re-cut record (2026-08-20)
