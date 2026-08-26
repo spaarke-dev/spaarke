@@ -31,9 +31,12 @@ import {
   MessageBar,
   MessageBarBody,
   Badge,
-  Combobox,
-  Field,
-  Option,
+  Menu,
+  MenuTrigger,
+  MenuButton,
+  MenuPopover,
+  MenuList,
+  MenuItemRadio,
   shorthands,
 } from "@fluentui/react-components";
 import {
@@ -196,11 +199,27 @@ const useStyles = makeStyles({
   compactRoot: {
     display: "flex",
     flexDirection: "row",
-    // flex-end, not center: the Fields now stack label-over-control, so their controls only line
-    // up with the environment badge when the row is bottom-aligned.
-    alignItems: "flex-end",
-    ...shorthands.gap(tokens.spacingHorizontalM),
+    // Back to center now that the pickers are single-line MenuButtons rather than
+    // label-over-control Fields — everything in the row is one line tall again.
+    alignItems: "center",
+    ...shorthands.gap(tokens.spacingHorizontalS),
     flexWrap: "nowrap",
+  },
+
+  /**
+   * The borderless title-as-dropdown trigger (UAT round 6).
+   *
+   * `appearance="transparent"` already removes the fill; the explicit `border: none` is belt and
+   * braces against a Fluent theme that re-adds a hairline, since "no field border box" was the
+   * literal request. Weight is regular so it reads as a field label, not as a command.
+   */
+  compactMenuButton: {
+    border: "none",
+    fontWeight: tokens.fontWeightRegular,
+    color: tokens.colorNeutralForeground1,
+    whiteSpace: "nowrap",
+    paddingLeft: tokens.spacingHorizontalSNudge,
+    paddingRight: tokens.spacingHorizontalSNudge,
   },
 
   /** Each compact item (a labelled Field, or the environment badge) in the header row. */
@@ -277,9 +296,9 @@ export const BuContextPicker: React.FC<BuContextPickerProps> = ({ variant = "ful
   const [configsLoading, setConfigsLoading] = React.useState(false);
   const [configsError, setConfigsError] = React.useState<string | null>(null);
 
-  // Compact variant: track combobox input values separately to support type-to-filter
-  const [buInputValue, setBuInputValue] = React.useState(selectedBu?.name ?? "");
-  const [configInputValue, setConfigInputValue] = React.useState(selectedConfig?.name ?? "");
+  // The compact variant's type-to-filter input state was removed with the Comboboxes
+  // (2026-08-26). See the note above `isContextComplete` for why leaving it in place would have
+  // been worse than unused code.
 
   // ── Load Business Units on mount ─────────────────────────────────────────
 
@@ -351,15 +370,9 @@ export const BuContextPicker: React.FC<BuContextPickerProps> = ({ variant = "ful
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selectedBu?.businessUnitId]);
 
-  // ── Sync compact input values with context ────────────────────────────────
-
-  React.useEffect(() => {
-    setBuInputValue(selectedBu?.name ?? "");
-  }, [selectedBu]);
-
-  React.useEffect(() => {
-    setConfigInputValue(selectedConfig?.name ?? "");
-  }, [selectedConfig]);
+  // The two effects that mirrored context into the compact Comboboxes' input state went with
+  // those Comboboxes (2026-08-26). The menus read `selectedBu` / `selectedConfig` directly, so
+  // there is no second copy of the selection left to keep in sync.
 
   // ── Derive environment from selected config ───────────────────────────────
 
@@ -431,24 +444,6 @@ export const BuContextPicker: React.FC<BuContextPickerProps> = ({ variant = "ful
     [configs, setSelectedConfig]
   );
 
-  // ── Selection handlers (compact variant) ─────────────────────────────────
-
-  const handleBuOptionSelect = React.useCallback(
-    (_: React.SyntheticEvent, data: { optionValue?: string; optionText?: string }) => {
-      const bu = allBus.find((b) => b.businessUnitId === data.optionValue) ?? null;
-      setSelectedBu(bu);
-    },
-    [allBus, setSelectedBu]
-  );
-
-  const handleConfigOptionSelect = React.useCallback(
-    (_: React.SyntheticEvent, data: { optionValue?: string; optionText?: string }) => {
-      const cfg = configs.find((c) => c.id === data.optionValue) ?? null;
-      setSelectedConfig(cfg);
-    },
-    [configs, setSelectedConfig]
-  );
-
   // ── Derive current LookupField values (full variant) ─────────────────────
 
   const buLookupValue: ILookupItem | null = selectedBu
@@ -459,13 +454,20 @@ export const BuContextPicker: React.FC<BuContextPickerProps> = ({ variant = "ful
     ? { id: selectedConfig.id, name: selectedConfig.name }
     : null;
 
-  // Filter combobox options by current input (compact variant)
-  const filteredBus = allBus.filter((bu) =>
-    bu.name.toLowerCase().includes(buInputValue.toLowerCase())
-  );
-  const filteredConfigs = configs.filter((cfg) =>
-    cfg.name.toLowerCase().includes(configInputValue.toLowerCase())
-  );
+  /*
+   * 🔴 The compact variant's `filteredBus` / `filteredConfigs` were DELETED here, not just left
+   * unused, and the reason is a bug they would have caused.
+   *
+   * They filtered the option lists by the Combobox's typed text. Those Comboboxes are gone (the
+   * pickers are menus now), but `configInputValue` is still SEEDED from the persisted selection —
+   * `React.useState(selectedConfig?.name ?? "")`. So on any load where a config was already
+   * selected, the filter would have matched exactly one row and the menu would have offered the
+   * operator only the container type they had already chosen, with no way to switch and nothing
+   * on screen explaining why.
+   *
+   * `allBus` and `configs` are the right sources: `configs` is already scoped to the selected
+   * business unit by the loader above, which is the only filtering these menus should do.
+   */
 
   const isContextComplete =
     selectedBu !== null && selectedConfig !== null && selectedEnvironment !== null;
@@ -476,33 +478,49 @@ export const BuContextPicker: React.FC<BuContextPickerProps> = ({ variant = "ful
     return (
       <div className={styles.compactRoot} role="region" aria-label="Context selector">
         {/*
-          Labels are spelled out and sit ABOVE their control as a Fluent Field, matching the
-          label-over-control pattern already used in the Container Type details pane. Previously
-          they were abbreviated ("BU", "Config") and rendered as loose text beside a bare box.
-          Operator-directed, UAT 2026-08-26.
+          ── The field TITLE is the dropdown ──
+
+          Operator-directed, UAT round 6: "the field title is the drop down, not a separate box;
+          no field border box". These were a Fluent `Field` label stacked over a bordered
+          `Combobox`; they are now a single borderless `MenuButton` whose text IS the field name,
+          with the current value marked by a checkmark in the menu.
+
+          What makes this safe rather than a loss of information: the selected scope is stated on
+          every page it affects — each page header reads "{config} · {environment}" — and the
+          environment badge sits immediately to the right of these buttons. The header does not
+          need to repeat it a third time.
+
+          `MenuItemRadio` (not MenuItem) is what supplies the checkmark and the radio semantics,
+          so the current selection is announced, not just drawn.
         */}
-        <Field label="Business Unit" className={styles.compactItem}>
-          <Combobox
-            size="small"
-            placeholder={busLoading ? "Loading…" : busError ? "⚠ Load failed" : "Business unit…"}
-            value={buInputValue}
-            selectedOptions={selectedBu ? [selectedBu.businessUnitId] : []}
-            onInput={(e) => setBuInputValue((e.target as HTMLInputElement).value)}
-            onOptionSelect={handleBuOptionSelect}
-            onBlur={() => {
-              // Reset input to selected value if user typed but didn't pick
-              setBuInputValue(selectedBu?.name ?? "");
-            }}
-            title={busError ?? undefined}
-            style={{ minWidth: "160px", maxWidth: "220px" }}
-          >
-            {filteredBus.map((bu) => (
-              <Option key={bu.businessUnitId} value={bu.businessUnitId}>
-                {bu.name}
-              </Option>
-            ))}
-          </Combobox>
-        </Field>
+        <Menu
+          checkedValues={{ bu: selectedBu ? [selectedBu.businessUnitId] : [] }}
+          onCheckedValueChange={(_e, data) => {
+            const id = data.checkedItems[0];
+            setSelectedBu(allBus.find((b) => b.businessUnitId === id) ?? null);
+          }}
+        >
+          <MenuTrigger disableButtonEnhancement>
+            <MenuButton
+              appearance="transparent"
+              size="medium"
+              disabled={busLoading}
+              title={busError ?? selectedBu?.name ?? undefined}
+              className={styles.compactMenuButton}
+            >
+              {busLoading ? "Loading…" : busError ? "⚠ Business Unit" : "Business Unit"}
+            </MenuButton>
+          </MenuTrigger>
+          <MenuPopover>
+            <MenuList>
+              {allBus.map((bu) => (
+                <MenuItemRadio key={bu.businessUnitId} name="bu" value={bu.businessUnitId}>
+                  {bu.name}
+                </MenuItemRadio>
+              ))}
+            </MenuList>
+          </MenuPopover>
+        </Menu>
 
         {/*
           Labelled "Container Type", not "Config". The underlying record
@@ -511,33 +529,38 @@ export const BuContextPicker: React.FC<BuContextPickerProps> = ({ variant = "ful
           not the thing an administrator believes they are choosing. Operator-directed, UAT
           2026-08-26.
         */}
-        <Field label="Container Type" className={styles.compactItem}>
-          <Combobox
-            size="small"
-            placeholder={
-              !selectedBu
-                ? "Select a business unit first"
-                : configsLoading
-                  ? "Loading…"
-                  : "Container type…"
-            }
-            disabled={!selectedBu || configsLoading}
-            value={configInputValue}
-            selectedOptions={selectedConfig ? [selectedConfig.id] : []}
-            onInput={(e) => setConfigInputValue((e.target as HTMLInputElement).value)}
-            onOptionSelect={handleConfigOptionSelect}
-            onBlur={() => {
-              setConfigInputValue(selectedConfig?.name ?? "");
-            }}
-            style={{ minWidth: "160px", maxWidth: "220px" }}
-          >
-            {filteredConfigs.map((cfg) => (
-              <Option key={cfg.id} value={cfg.id}>
-                {cfg.name}
-              </Option>
-            ))}
-          </Combobox>
-        </Field>
+        <Menu
+          checkedValues={{ config: selectedConfig ? [selectedConfig.id] : [] }}
+          onCheckedValueChange={(_e, data) => {
+            const id = data.checkedItems[0];
+            setSelectedConfig(configs.find((c) => c.id === id) ?? null);
+          }}
+        >
+          <MenuTrigger disableButtonEnhancement>
+            <MenuButton
+              appearance="transparent"
+              size="medium"
+              disabled={!selectedBu || configsLoading}
+              title={
+                !selectedBu
+                  ? "Select a business unit first"
+                  : selectedConfig?.name ?? undefined
+              }
+              className={styles.compactMenuButton}
+            >
+              {configsLoading ? "Loading…" : "Container Type"}
+            </MenuButton>
+          </MenuTrigger>
+          <MenuPopover>
+            <MenuList>
+              {configs.map((cfg) => (
+                <MenuItemRadio key={cfg.id} name="config" value={cfg.id}>
+                  {cfg.name}
+                </MenuItemRadio>
+              ))}
+            </MenuList>
+          </MenuPopover>
+        </Menu>
 
         {/* Environment badge (read-only) */}
         {selectedEnvironment && (

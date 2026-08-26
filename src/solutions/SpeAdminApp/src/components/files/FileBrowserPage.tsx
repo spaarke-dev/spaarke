@@ -45,8 +45,10 @@ import {
   Folder20Regular,
   ArrowClockwise20Regular,
 } from "@fluentui/react-icons";
-import { FileUploadZone } from "@spaarke/ui-components";
-import type { IUploadedFile, IFileValidationError } from "@spaarke/ui-components";
+// FileUploadZone (@spaarke/ui-components) was removed on 2026-08-26 — see the Upload toolbar
+// button. Its drop target occupied roughly a third of the pane, which the embedded browse pane
+// cannot afford. `IFileValidationError` is still the shape used for per-file upload errors.
+import type { IFileValidationError } from "@spaarke/ui-components";
 import { speApiClient } from "../../services/speApiClient";
 import type { DriveItem } from "../../types/spe";
 
@@ -490,23 +492,23 @@ export const FileBrowserPage: React.FC<FileBrowserPageProps> = ({
   // ── Upload ────────────────────────────────────────────────────────────────
 
   /**
-   * Accept-all validation config for FileUploadZone.
-   * SPE containers can hold any file type, not just PDF/DOCX/XLSX.
-   * We override acceptedExtensions and customValidator to accept everything,
-   * and raise the size limit to 250 MB.
+   * Client-side upload size cap, 250 MB.
+   *
+   * This used to be `FileUploadZone`'s `maxFileSizeBytes`. Removing the zone (2026-08-26) would
+   * otherwise have removed the check with it, silently — the file would upload until the server
+   * refused it, with no local explanation. There is deliberately NO extension allow-list: an SPE
+   * container holds any file type, which is what the zone's accept-all config existed to say.
    */
-  const uploadValidationConfig = React.useMemo(
-    () => ({
-      acceptedExtensions: ["*"] as string[],
-      inputAccept: "*/*",
-      maxFileSizeBytes: 250 * 1024 * 1024, // 250 MB
-      customValidator: (_file: File): null => null, // accept all
-    }),
-    []
-  );
+  const MAX_UPLOAD_BYTES = 250 * 1024 * 1024;
 
-  const handleFilesAccepted = React.useCallback(
-    async (accepted: IUploadedFile[]) => {
+  /**
+   * Uploads a batch of files to the current folder.
+   *
+   * Takes the minimal structural shape `{ file, name }` rather than the shared library's
+   * `IUploadedFile`, so it serves both the (removed) drop zone and the toolbar's file picker.
+   */
+  const uploadFiles = React.useCallback(
+    async (accepted: { file: File; name: string }[]) => {
       if (!containerId || !configId) return;
       setUploadErrors([]);
       setUploadingCount((c) => c + accepted.length);
@@ -541,11 +543,43 @@ export const FileBrowserPage: React.FC<FileBrowserPageProps> = ({
     [containerId, configId, currentFolderId, loadItems]
   );
 
-  const handleValidationErrors = React.useCallback(
-    (errors: IFileValidationError[]) => {
-      setUploadErrors((prev) => [...prev, ...errors]);
+  /**
+   * Hidden file input behind the Upload toolbar button.
+   *
+   * 🔴 The Upload button used to call `scrollIntoView` on the drop zone and nothing else — it never
+   * uploaded anything. When the file browser became a pane docked inside the Containers page the
+   * zone was often already on screen, so the click had no visible effect whatsoever, which is the
+   * operator's "the Upload tool bar does not work" (UAT 2026-08-26). A toolbar button that only
+   * scrolls to the control that does the work is not a command.
+   */
+  const fileInputRef = React.useRef<HTMLInputElement>(null);
+
+  const handleFilePickerChange = React.useCallback(
+    (e: React.ChangeEvent<HTMLInputElement>) => {
+      const picked = Array.from(e.target.files ?? []);
+      // Reset before awaiting, so picking the SAME file twice in a row still fires onChange.
+      e.target.value = "";
+      if (picked.length === 0) return;
+
+      const tooBig = picked.filter((f) => f.size > MAX_UPLOAD_BYTES);
+      const allowed = picked.filter((f) => f.size <= MAX_UPLOAD_BYTES);
+
+      if (tooBig.length > 0) {
+        setUploadErrors((prev) => [
+          ...prev,
+          ...tooBig.map((f) => ({
+            fileName: f.name,
+            reason: `File is ${formatFileSize(f.size)}, over the ${formatFileSize(
+              MAX_UPLOAD_BYTES
+            )} upload limit.`,
+          })),
+        ]);
+      }
+
+      if (allowed.length === 0) return;
+      void uploadFiles(allowed.map((file) => ({ file, name: file.name })));
     },
-    []
+    [uploadFiles, MAX_UPLOAD_BYTES]
   );
 
   // ── New Folder ────────────────────────────────────────────────────────────
@@ -698,15 +732,8 @@ export const FileBrowserPage: React.FC<FileBrowserPageProps> = ({
         <Tooltip content="Upload files to the current folder" relationship="label">
           <ToolbarButton
             icon={<ArrowUploadRegular />}
-            disabled={isUploading}
-            onClick={() => {
-              // Scroll the FileUploadZone into view so the user can
-              // drop or click it. The zone's built-in click handler
-              // opens the file picker.
-              document
-                .getElementById("spe-file-browser-upload-zone")
-                ?.scrollIntoView({ behavior: "smooth" });
-            }}
+            disabled={isUploading || loading}
+            onClick={() => fileInputRef.current?.click()}
           >
             Upload
           </ToolbarButton>
@@ -957,32 +984,34 @@ export const FileBrowserPage: React.FC<FileBrowserPageProps> = ({
         )}
       </div>
 
-      {/* ── Drag-Drop Upload Zone (ADR-012: FileUploadZone from @spaarke/ui-components) ── */}
-      <div
-        id="spe-file-browser-upload-zone"
-        className={styles.uploadSection}
-      >
-        <Text size={200} className={styles.uploadLabel}>
-          Drop files here to upload to the current folder
-        </Text>
-        <FileUploadZone
-          onFilesAccepted={handleFilesAccepted}
-          onValidationErrors={handleValidationErrors}
-          validationConfig={uploadValidationConfig}
-          disabled={isUploading || loading}
-        />
-        {uploadErrors.length > 0 && (
-          <div className={styles.uploadErrors}>
-            {uploadErrors.map((err, i) => (
-              <MessageBar key={i} intent="warning">
-                <MessageBarBody>
-                  <strong>{err.fileName}</strong>: {err.reason}
-                </MessageBarBody>
-              </MessageBar>
-            ))}
-          </div>
-        )}
-      </div>
+      {/*
+        ── Upload ──
+        The drop zone that used to live here was removed on 2026-08-26: it occupied roughly a third
+        of the pane's height for an affordance the toolbar's Upload button now provides directly.
+        Per-file upload errors still surface — they just no longer need a permanent panel to sit in.
+      */}
+      <input
+        ref={fileInputRef}
+        type="file"
+        multiple
+        accept="*/*"
+        onChange={handleFilePickerChange}
+        style={{ display: "none" }}
+        aria-hidden="true"
+        tabIndex={-1}
+      />
+
+      {uploadErrors.length > 0 && (
+        <div className={styles.uploadErrors}>
+          {uploadErrors.map((err, i) => (
+            <MessageBar key={i} intent="warning">
+              <MessageBarBody>
+                <strong>{err.fileName}</strong>: {err.reason}
+              </MessageBarBody>
+            </MessageBar>
+          ))}
+        </div>
+      )}
 
       {/* ── New Folder Dialog ── */}
       <Dialog

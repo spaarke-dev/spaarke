@@ -173,7 +173,13 @@ const useStyles = makeStyles({
     color: tokens.colorNeutralForeground1,
   },
 
+  /**
+   * `display: block` so the scope line sits BELOW the title. Fluent's `Text` is inline by
+   * default, so "Container Types" and "Spaarke PAYGO 1 · Spaarke Dev · 4 types" rendered on one
+   * line with no space between them — "Container TypesSpaarke PAYGO 1" (UAT round 6 screenshot).
+   */
   pageSubtitle: {
+    display: "block",
     color: tokens.colorNeutralForeground2,
   },
 
@@ -1078,6 +1084,18 @@ const ContainerTypeDataGrid: React.FC<ContainerTypeDataGridProps> = ({
       getRowId={(ct) => ct.containerTypeId}
       className={className}
       aria-label="Container types"
+      /* Drag a header edge to resize (UAT round 6). The Owning App column holds a GUID and the
+         Name column a free-text label — no single default fits both across tenants. */
+      resizableColumns
+      columnSizingOptions={{
+        displayName: { minWidth: 140, defaultWidth: 200, idealWidth: 200 },
+        billingClassification: { minWidth: 110, defaultWidth: 160, idealWidth: 160 },
+        billingStatus: { minWidth: 100, defaultWidth: 140, idealWidth: 140 },
+        trialExpiry: { minWidth: 100, defaultWidth: 140, idealWidth: 140 },
+        owningAppId: { minWidth: 140, defaultWidth: 260, idealWidth: 260 },
+        isRegistered: { minWidth: 90, defaultWidth: 120, idealWidth: 120 },
+        createdDateTime: { minWidth: 90, defaultWidth: 130, idealWidth: 130 },
+      }}
     >
       <DataGridHeader>
         <DataGridRow>

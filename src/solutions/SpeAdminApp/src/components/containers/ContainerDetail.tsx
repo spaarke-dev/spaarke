@@ -88,6 +88,11 @@ export interface ContainerDetailProps {
   onClose: () => void;
   /** Optional callback to open the container in the file browser. */
   onBrowseFiles?: (containerId: string, containerName?: string) => void;
+  /**
+   * Pane height in pixels, owned by the host's `useResizablePane` so the splitter above can drag
+   * it. Omitted falls back to the CSS default in `styles.panel`.
+   */
+  paneHeight?: number;
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -510,6 +515,7 @@ export const ContainerDetail: React.FC<ContainerDetailProps> = ({
   containerId,
   onClose,
   onBrowseFiles,
+  paneHeight,
 }) => {
   const styles = useStyles();
   const { selectedConfig } = useBuContext();
@@ -685,7 +691,12 @@ export const ContainerDetail: React.FC<ContainerDetailProps> = ({
     <>
       {/* Panel — docked beneath the list. No backdrop, and no longer `aria-modal`: the grid above
           stays both interactive and reachable by assistive tech while this is open. */}
-      <div className={styles.panel} role="complementary" aria-label="Container details">
+      <div
+        className={styles.panel}
+        style={paneHeight !== undefined ? { height: `${paneHeight}px` } : undefined}
+        role="complementary"
+        aria-label="Container details"
+      >
         <SidePaneShell header={panelHeader} footer={panelFooter}>
           {/* Tab list */}
           <TabList

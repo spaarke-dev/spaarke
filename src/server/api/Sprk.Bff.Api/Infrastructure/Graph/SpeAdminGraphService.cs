@@ -4802,22 +4802,28 @@ public sealed class SpeAdminGraphService
     /// Maps a Graph SDK FileStorageContainerTypeAppPermissionGrant to the
     /// SpeContainerTypePermission domain record.
     ///
-    /// DelegatedPermissions and ApplicationPermissions are enum values on the Graph SDK type.
-    /// They are converted to their string representation for the domain model.
     /// Null values are normalized to empty lists (ADR-007: no Graph SDK types in public surface).
     /// </summary>
+    /// <remarks>
+    /// 🔴 This is the SECOND site of the collection-<c>ToString()</c> bug, and it is the one the
+    /// Container Types → Permissions tab actually reads. The first was fixed on 2026-08-26 in
+    /// <c>MapConsumingTenant</c>; this one survived that pass and kept rendering
+    /// <c>System.Collections.Generic.List`1[System.Nullable`1[…FileStorageContainerTypeAppPermission]]</c>
+    /// in every Delegated and Application cell (UAT 2026-08-26, round 6).
+    ///
+    /// The header used to assert "DelegatedPermissions and ApplicationPermissions are enum values
+    /// on the Graph SDK type". Under Graph SDK 6.x they are <c>List&lt;…?&gt;</c> — collections of
+    /// nullable enums. That stale claim is exactly what made <c>.ToString()</c> on them look
+    /// correct: a comment describing another layer, still being trusted after that layer changed.
+    /// Deferring to <see cref="ToScopeList"/> removes the assumption entirely — it handles the
+    /// single-value, collection and null shapes without needing to know which one the SDK is using
+    /// this version.
+    /// </remarks>
     private static SpeContainerTypePermission MapContainerTypePermission(
         Microsoft.Graph.Models.FileStorageContainerTypeAppPermissionGrant perm)
     {
-        // DelegatedPermissions and ApplicationPermissions are typed enums in the Graph SDK.
-        // Convert to string list for the domain model, filtering out null/empty values.
-        var delegated = perm.DelegatedPermissions is not null
-            ? [perm.DelegatedPermissions.ToString()!]
-            : (IReadOnlyList<string>)[];
-
-        var application = perm.ApplicationPermissions is not null
-            ? [perm.ApplicationPermissions.ToString()!]
-            : (IReadOnlyList<string>)[];
+        var delegated = ToScopeList(perm.DelegatedPermissions);
+        var application = ToScopeList(perm.ApplicationPermissions);
 
         return new SpeContainerTypePermission(
             AppId: perm.AppId ?? string.Empty,

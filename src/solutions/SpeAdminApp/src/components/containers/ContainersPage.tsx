@@ -80,6 +80,7 @@ import { copyToClipboard } from "../../services/clipboard";
 import type { Container, ContainerStatus } from "../../types/spe";
 import { ContainerDetail } from "./ContainerDetail";
 import { FileBrowserPage } from "../files/FileBrowserPage";
+import { useResizablePane, PaneSplitter } from "../layout/ResizablePane";
 import {
   CONTAINER_URL_LABEL,
   CONTAINER_URL_ABSENT_LABEL,
@@ -174,7 +175,9 @@ const useStyles = makeStyles({
     color: tokens.colorNeutralForeground1,
   },
 
+  /** `display: block` so the scope line sits below the title — see ContainerTypesPage. */
   pageSubtitle: {
+    display: "block",
     color: tokens.colorNeutralForeground2,
   },
 
@@ -773,6 +776,13 @@ export const ContainersPage: React.FC<ContainersPageProps> = ({
     setDetailContainerId(containerId);
   }, []);
 
+  /*
+   * Drag-to-resize for the two bottom panes (UAT round 6). They are mutually exclusive, so ONE
+   * height serves both — dragging the browse pane and then opening details keeps the size the
+   * operator just chose, rather than snapping back to a default.
+   */
+  const bottomPane = useResizablePane({ defaultHeight: 380, minHeight: 160 });
+
   // ── Toolbar Action Handlers ─────────────────────────────────────────────────
 
   /** Run an action against each selected container (parallelised). */
@@ -1205,7 +1215,19 @@ export const ContainersPage: React.FC<ContainersPageProps> = ({
         here unchanged — it never needed to be a route.
       */}
       {browseContainer && (
-        <div className={styles.browsePane}>
+        <PaneSplitter
+          label="the file browser"
+          height={bottomPane.height}
+          onPointerDown={bottomPane.onPointerDown}
+          onKeyDown={bottomPane.onKeyDown}
+          isDragging={bottomPane.isDragging}
+        />
+      )}
+      {browseContainer && (
+        <div
+          className={styles.browsePane}
+          style={{ height: `${bottomPane.height}px`, flex: "0 0 auto", maxHeight: "none" }}
+        >
           <div className={styles.browsePaneHeader}>
             <Text size={300} weight="semibold">
               Files in &ldquo;{browseContainer.name ?? browseContainer.id}&rdquo;
@@ -1239,10 +1261,20 @@ export const ContainersPage: React.FC<ContainersPageProps> = ({
       />
 
       {/* ── Container Detail Panel ── */}
+      {detailContainerId !== null && (
+        <PaneSplitter
+          label="container details"
+          height={bottomPane.height}
+          onPointerDown={bottomPane.onPointerDown}
+          onKeyDown={bottomPane.onKeyDown}
+          isDragging={bottomPane.isDragging}
+        />
+      )}
       <ContainerDetail
         containerId={detailContainerId}
         onClose={() => setDetailContainerId(null)}
         onBrowseFiles={onOpenContainer}
+        paneHeight={bottomPane.height}
       />
     </div>
   );
@@ -1347,6 +1379,18 @@ const ContainerDataGrid: React.FC<ContainerDataGridProps> = ({
       getRowId={(container) => container.id}
       className={className}
       aria-label="Containers"
+      /* Drag a header edge to resize (UAT round 6). Container IDs and names vary wildly in
+         length, so no fixed set of widths suits every tenant — let the operator set them. */
+      resizableColumns
+      columnSizingOptions={{
+        displayName: { minWidth: 120, defaultWidth: 200, idealWidth: 200 },
+        id: { minWidth: 120, defaultWidth: 240, idealWidth: 240 },
+        status: { minWidth: 80, defaultWidth: 110, idealWidth: 110 },
+        createdDateTime: { minWidth: 90, defaultWidth: 130, idealWidth: 130 },
+        storageUsedInBytes: { minWidth: 100, defaultWidth: 140, idealWidth: 140 },
+        webUrl: { minWidth: 100, defaultWidth: 140, idealWidth: 140 },
+        browse: { minWidth: 80, defaultWidth: 110, idealWidth: 110 },
+      }}
     >
       <DataGridHeader>
         {/* No select-all affordance under single-select — there is nothing to select all of.

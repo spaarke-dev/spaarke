@@ -8,6 +8,7 @@ import { resolveTheme, setupThemeListener } from "./providers/ThemeProvider";
 import { BuProvider, useBuContext } from "./contexts/BuContext";
 import { AppShell, type SpeAdminPage } from "./components/layout/AppShell";
 import { PageErrorBoundary } from "./components/layout/PageErrorBoundary";
+import { useResizablePane, PaneSplitter } from "./components/layout/ResizablePane";
 import { DashboardPage } from "./components/dashboard/DashboardPage";
 import { FileBrowserPage } from "./components/files/FileBrowserPage";
 import { SettingsPage } from "./components/settings/SettingsPage";
@@ -172,6 +173,9 @@ const AppContent: React.FC<AppContentProps> = ({
   // Container type selected for detail panel — set when user clicks a row in ContainerTypesPage.
   const [detailContainerTypeId, setDetailContainerTypeId] = React.useState<string | null>(null);
 
+  /** Drag-to-resize state for the Container Types detail pane (UAT round 6). */
+  const typeDetailPane = useResizablePane({ defaultHeight: 340, minHeight: 160 });
+
   /** Called by ContainersPage when the user opens a container for browsing. */
   const handleOpenContainerInBrowser = React.useCallback(
     (containerId: string, containerName?: string) => {
@@ -252,9 +256,20 @@ const AppContent: React.FC<AppContentProps> = ({
           <div style={{ flex: "1 1 auto", minHeight: 0, overflow: "hidden" }}>
             <ContainerTypesPage onOpenDetail={setDetailContainerTypeId} />
           </div>
+          {/* Splitter renders only alongside the pane it resizes. */}
+          {detailContainerTypeId !== null && (
+            <PaneSplitter
+              label="container type details"
+              height={typeDetailPane.height}
+              onPointerDown={typeDetailPane.onPointerDown}
+              onKeyDown={typeDetailPane.onKeyDown}
+              isDragging={typeDetailPane.isDragging}
+            />
+          )}
           <ContainerTypeDetail
             containerTypeId={detailContainerTypeId}
             onClose={() => setDetailContainerTypeId(null)}
+            paneHeight={typeDetailPane.height}
           />
         </div>
       ) : (

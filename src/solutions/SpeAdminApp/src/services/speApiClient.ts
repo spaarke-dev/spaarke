@@ -321,6 +321,67 @@ function mapContainerType(w: WireContainerType): ContainerType {
   };
 }
 
+/**
+ * The wire shape of a drive item, as `SpeContainerItemSummary` actually serialises it.
+ *
+ * 🔴 It is FLAT. `DriveItem` — the type every file-browser component consumes — is Graph-shaped and
+ * NESTED. Nothing converted between them, and because the response was cast rather than parsed,
+ * TypeScript reported nothing.
+ *
+ * The damage was total and silent, and it is the third instance of this exact defect in this
+ * project (`id`→`containerTypeId`, the five `{items,count}` envelopes, now this):
+ *
+ *   - `isFolder` (flat) vs `folder` (nested) — `isFolder(item)` checks `!!item.folder`, so it was
+ *     false for EVERY item. Every folder rendered as a File, with a File icon, sorted among the
+ *     files, and — since only folders are links — could not be opened at all. That is the operator's
+ *     "File Browser folders are not click-openable", and it is also why the `Communications` /
+ *     `Emails` / `Exports` investigation stalled: the app could not open them because it did not
+ *     believe they were folders.
+ *   - `mimeType` (flat) vs `file.mimeType` (nested) — the Type column had nothing to report.
+ *   - `createdByDisplayName` (flat) vs `lastModifiedBy.user.displayName` (nested) — "Modified By"
+ *     rendered an em-dash on every row, which reads as "nobody" rather than "not mapped".
+ *
+ * Note the last one is not a pure rename: the server sends CREATED-by and the grid asks for
+ * MODIFIED-by. They are different facts, so `createdBy` is populated here and `lastModifiedBy` is
+ * deliberately left undefined rather than being filled with the wrong person's name.
+ */
+interface WireDriveItem {
+  id: string;
+  name: string;
+  size?: number;
+  createdDateTime?: string;
+  lastModifiedDateTime?: string;
+  createdByDisplayName?: string;
+  isFolder?: boolean;
+  mimeType?: string;
+  webUrl?: string;
+  /** Present only if a future server revision starts sending the nested Graph shape directly. */
+  folder?: { childCount?: number };
+  file?: { mimeType?: string };
+}
+
+/** Projects the flat wire item onto the nested `DriveItem` the components expect. */
+function mapDriveItem(w: WireDriveItem): DriveItem {
+  const isFolder = w.isFolder ?? w.folder !== undefined;
+
+  return {
+    id: w.id,
+    name: w.name,
+    size: w.size,
+    createdDateTime: w.createdDateTime ?? "",
+    lastModifiedDateTime: w.lastModifiedDateTime ?? "",
+    webUrl: w.webUrl,
+    // Exactly one of these is present, which is how Graph itself distinguishes the two and what
+    // every consumer here tests against.
+    folder: isFolder ? (w.folder ?? {}) : undefined,
+    file: isFolder ? undefined : { mimeType: w.mimeType ?? w.file?.mimeType },
+    createdBy: w.createdByDisplayName
+      ? { user: { displayName: w.createdByDisplayName } }
+      : undefined,
+    // lastModifiedBy is NOT set — see the note above. The server does not send it.
+  };
+}
+
 export const speApiClient = {
   // =========================================================================
   // Configuration - Business Units
@@ -833,17 +894,18 @@ export const speApiClient = {
   // =========================================================================
 
   items: {
+    /** @see mapDriveItem — the wire shape is FLAT; `DriveItem` is nested. */
     /**
      * GET /api/spe/containers/{containerId}/items?configId={id}&folderId={folderId}
      * List items (files and folders) in a container folder.
      * Omit folderId to list the root folder.
      */
-    list(
+    async list(
       containerId: string,
       configId: string,
       options?: { folderId?: string; top?: number; skip?: number },
     ): Promise<DriveItem[]> {
-      return get<DriveItem[]>(
+      const wire = await get<WireDriveItem[]>(
         "/spe/containers/" + containerId + "/items" + qs({
           configId,
           folderId: options?.folderId,
@@ -851,15 +913,23 @@ export const speApiClient = {
           skip: options?.skip,
         }),
       );
+      if (!Array.isArray(wire)) {
+        throw new Error(
+          "Unexpected shape from GET /spe/containers/{id}/items — expected an array.",
+        );
+      }
+      return wire.map(mapDriveItem);
     },
 
     /**
      * GET /api/spe/containers/{containerId}/items/{itemId}?configId={id}
      * Get details for a single drive item.
      */
-    get(containerId: string, itemId: string, configId: string): Promise<DriveItem> {
-      return get<DriveItem>(
-        "/spe/containers/" + containerId + "/items/" + itemId + qs({ configId }),
+    async get(containerId: string, itemId: string, configId: string): Promise<DriveItem> {
+      return mapDriveItem(
+        await get<WireDriveItem>(
+          "/spe/containers/" + containerId + "/items/" + itemId + qs({ configId }),
+        ),
       );
     },
 
@@ -868,18 +938,20 @@ export const speApiClient = {
      * Upload a file to a container folder.
      * Caller must provide FormData with the file attached as the "file" field.
      */
-    upload(
+    async upload(
       containerId: string,
       configId: string,
       formData: FormData,
       options?: { folderId?: string },
     ): Promise<DriveItem> {
-      return postFormData<DriveItem>(
-        "/spe/containers/" + containerId + "/items/upload" + qs({
-          configId,
-          folderId: options?.folderId,
-        }),
-        formData,
+      return mapDriveItem(
+        await postFormData<WireDriveItem>(
+          "/spe/containers/" + containerId + "/items/upload" + qs({
+            configId,
+            folderId: options?.folderId,
+          }),
+          formData,
+        ),
       );
     },
 
@@ -916,18 +988,20 @@ export const speApiClient = {
      * POST /api/spe/containers/{containerId}/folders?configId={id}&parentId={parentId}
      * Create a new folder inside a container.
      */
-    createFolder(
+    async createFolder(
       containerId: string,
       configId: string,
       body: { name: string },
       options?: { parentId?: string },
     ): Promise<DriveItem> {
-      return post<typeof body, DriveItem>(
-        "/spe/containers/" + containerId + "/folders" + qs({
-          configId,
-          parentId: options?.parentId,
-        }),
-        body,
+      return mapDriveItem(
+        await post<typeof body, WireDriveItem>(
+          "/spe/containers/" + containerId + "/folders" + qs({
+            configId,
+            parentId: options?.parentId,
+          }),
+          body,
+        ),
       );
     },
   },
