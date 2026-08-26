@@ -9,8 +9,11 @@
 
 Two things came out of the mandated enumeration that change what this task is:
 
-1. **The defect is 21 sites across THREE mechanisms**, not "four handlers plus the auth path". The
-   header was the mechanism that had been noticed; it was not the only one and not the worst one.
+1. **The defect is 21 resolution sites across THREE mechanisms**, not "four handlers plus the auth
+   path". (21 mechanism-instances across **20 distinct handlers** — `IndexTemporaryContent` carried
+   both a header tier and a query parameter. A 22nd header read existed but was a diagnostic log,
+   not a resolution.) The header was the mechanism that had been noticed; it was neither the only
+   one nor the worst one.
 2. **The filed defect — the `X-Tenant-Id` header — was the LESS severe class, and is in fact
    LATENT.** The mechanism nobody had filed — a `?tenantId=` query string on **four** routes, two of
    them **Compose's own** — was **live and exploitable by any authenticated user** for both read and
