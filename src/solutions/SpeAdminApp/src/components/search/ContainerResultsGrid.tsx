@@ -85,9 +85,11 @@ function exportToCsv(results: ContainerSearchResult[]): void {
     ...results.map(({ container }) => {
       const name = `"${container.displayName.replace(/"/g, '""')}"`;
       const typeId = container.containerTypeId;
-      const status = container.status;
-      const storage = container.storageUsedInBytes ?? 0;
-      const created = container.createdDateTime;
+      // Search does not report these three. Export them blank rather than as "active"/0/epoch —
+      // a CSV that states a status the server never sent is worse than one that states nothing.
+      const status = container.status ?? "";
+      const storage = container.storageUsedInBytes ?? "";
+      const created = container.createdDateTime ?? "";
       return [name, typeId, status, storage, created].join(",");
     }),
   ];
@@ -252,12 +254,14 @@ function buildColumns(styles: ReturnType<typeof useStyles>): ResultColumn[] {
     createTableColumn<ContainerSearchResult>({
       columnId: "containerTypeId",
       compare: (a, b) =>
-        a.container.containerTypeId.localeCompare(b.container.containerTypeId),
+        (a.container.containerTypeId ?? "").localeCompare(
+          b.container.containerTypeId ?? "",
+        ),
       renderHeaderCell: () => "Container Type",
       renderCell: ({ container }) => (
         <TableCellLayout>
           <Tooltip
-            content={container.containerTypeId}
+            content={container.containerTypeId ?? "Not reported by search"}
             relationship="description"
           >
             <Text size={200} className={styles.cellText}>
@@ -269,12 +273,14 @@ function buildColumns(styles: ReturnType<typeof useStyles>): ResultColumn[] {
     }),
     createTableColumn<ContainerSearchResult>({
       columnId: "status",
+      // Unguarded `.localeCompare` here would throw the moment a user clicked the column header:
+      // search results carry no status, so both sides are undefined.
       compare: (a, b) =>
-        a.container.status.localeCompare(b.container.status),
+        (a.container.status ?? "").localeCompare(b.container.status ?? ""),
       renderHeaderCell: () => "Status",
       renderCell: ({ container }) => (
         <TableCellLayout>
-          <Text size={200}>{container.status}</Text>
+          <Text size={200}>{container.status ?? "—"}</Text>
         </TableCellLayout>
       ),
     }),
@@ -292,14 +298,22 @@ function buildColumns(styles: ReturnType<typeof useStyles>): ResultColumn[] {
     }),
     createTableColumn<ContainerSearchResult>({
       columnId: "createdDateTime",
+      // `new Date(undefined).getTime()` is NaN, and NaN comparisons make a sort non-deterministic
+      // rather than merely wrong. Absent dates sort as 0 and render as "—".
       compare: (a, b) =>
-        new Date(a.container.createdDateTime).getTime() -
-        new Date(b.container.createdDateTime).getTime(),
+        (a.container.createdDateTime
+          ? new Date(a.container.createdDateTime).getTime()
+          : 0) -
+        (b.container.createdDateTime
+          ? new Date(b.container.createdDateTime).getTime()
+          : 0),
       renderHeaderCell: () => "Created",
       renderCell: ({ container }) => (
         <TableCellLayout>
           <Text size={200} style={{ whiteSpace: "nowrap" }}>
-            {formatDateTime(container.createdDateTime)}
+            {container.createdDateTime
+              ? formatDateTime(container.createdDateTime)
+              : "—"}
           </Text>
         </TableCellLayout>
       ),
