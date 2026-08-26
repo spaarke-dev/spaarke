@@ -1,6 +1,6 @@
 # Current Task State — `spaarkeai-compose-r8`
 
-> **Last Updated**: 2026-08-25 (by `context-handoff`) · **Committed through**: see `git log`
+> **Last Updated**: 2026-08-26 (by `context-handoff`) · **Committed through**: `6d6ff750d` · **10 commits ahead of origin, NOT pushed**
 > **Branch**: `work/spaarkeai-compose-r8` · **Recovery**: read "Quick Recovery" first.
 > Everything below is recoverable from files alone.
 
@@ -15,19 +15,22 @@
 | **Progress** | **43 of 56 complete**, 6 open, 1 blocked |
 | **Next Action** | **059** (SECURITY — `X-Tenant-Id` spoofable fallback; human sign-off required). It has been re-prioritised ahead of arming the store — see the ARMING WARNING below. Then **058** (nested/conditional merge fields), then Track D (**070–073**), then **090** wrap-up. |
 
-### Files modified this session
-All committed. Nothing uncommitted, nothing at risk.
+### This session — 9 tasks landed, all committed, nothing at risk
+`052` demote text-search · `053` bounded confirmable fallback · `053b` null-identifier edits reach the
+document · `061` lazy re-index · `062` retention + availability · `063` durable erasure · `064` retire the
+orphaned edit-batch surface · `047b` never-silent hole · `052b` stale-detection durability.
+
+Ten commits, tree clean, **nothing pushed** — push is the operator's call (PR #806 is open).
 
 ### Critical context in one paragraph
-Task 052 demoted the text-search placement path. Three findings reshaped it before any code moved: the
-**server** validation surface it deletes is dark machinery (`/api/compose/edit-batch/validate` has zero
-client callers), the **client** DELETE list did not survive its consumer check (`resolveTargetSpans` has
-four consumers; three are annotations/decorations, not placement), and the **real demotion is a catalog
-change** — the four compose Actions stop asking the model for `target_text`, which is what leaves the text
-leg reachable only by replayed ledger entries. Two of FR-C05's three "deterministic outcomes" turned out to
-be live defects rather than polish: an anchored edit replaced the ENTIRE paragraph, and a stale target was
-not detected at all (silent overwrite of the user's newer text). Full reasoning:
-[`notes/052-text-search-demotion-decisions.md`](notes/052-text-search-demotion-decisions.md).
+**Track C (AI edit placement) and Track B (durable session files) are both COMPLETE.** Text search is no
+longer a placement mechanism — and that is now enforced by the TYPE SYSTEM in two places rather than by
+rule: `ComposeEditAnchorPass.Validate` takes no document text, and after 064 no type in `Services/Compose/`
+can express a character offset at all. The client fallback survives only as a bounded, confirmable proposal
+for replayed entries, in a module that **has no `applied` outcome**. Three defects found along the way were
+worse than filed: an anchored edit replaced the ENTIRE paragraph; a stale target was not detected at all
+(silent overwrite of the user's newer text); and 047b was not merely under-reporting — it was cloning an
+UNTOUCHED block from the wrong base, an outright breach of ADR-049 invariant 2, in a real signed NDA.
 
 ---
 
@@ -239,6 +242,10 @@ matches EVERY line. Scope to `Services\\Compose\\` or a filename.
 - **When two agents share a contract, check the seam neither one owns.** Task 052: one agent fixed the `.cs`
   eval test, the other flagged the file as out-of-boundary (and its flag was itself stale) — the JSON fixture
   went stale and only main-session verification caught it.
+- **Don't `dotnet build` while a `dotnet test` run is live** — the test host holds the output assembly and
+  the build reports a phantom error. Same family as the mid-edit hazard. Re-run after it finishes.
+- **Run the two client suites SEQUENTIALLY, not concurrently.** 052b saw 2 and 12 spurious failures
+  running `Spaarke.Compose.Components` and `SpaarkeAi` at the same time; both green run one after the other.
 - **Verify every agent report.** This session that caught: a wrong publish number already committed to a
   note, a stale test fixture, a misleading `parallel-safe` flag, and two of an agent's own tests that its
   mutation pass proved were passing vacuously.
