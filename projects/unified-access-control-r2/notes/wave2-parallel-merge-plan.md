@@ -11,7 +11,7 @@
 | Task | Worktree branch | Commit | Status |
 |---|---|---|---|
 | **073** container-keyed write retirement | `worktree-agent-a088c001ee9c915f9` | `dd3e38f6d` | ✅ shipped · both gates returned |
-| **079** version route re-key | `worktree-agent-aaa745a0a240a67bd` | `0ddf90fc2` | ✅ shipped · **gates unconfirmed — asked** |
+| **079** version route re-key | `worktree-agent-aaa745a0a240a67bd` | **`8185c8fcc`** (docs-only on top of `0ddf90fc2`) | ✅ shipped · ⛔ **NEITHER GATE RAN — both must run here** |
 | **075 → 076** Wave 2 | (agent `wave2-075-076`) | — | 🔄 **STILL RUNNING** |
 
 Both completed agents based correctly on `4dee62a0f` (verified: 073's tree carries 072's `["share"]`
@@ -66,6 +66,42 @@ So copying either the sibling or the docs — the two most probable paths — ev
 **Fix**: normalize route patterns by erasing parameter names before comparing (or add `{id}` variants
 to `RetiredRoutes`). File is in 073's worktree and is **not** off-limits, so fix it during merge.
 Ask 079 whether its route-absence tests share the shape (asked; awaiting reply).
+
+## 3b. Route-absence guards: what each layer actually covers (079, perturbation-tested)
+
+079's route-absence tests are **immune to 073's parameter-name vector** — they issue a real GET to a
+concrete URL, and ASP.NET matches on URL *shape*, so parameter names are only capture labels. It
+verified this rather than arguing it, by re-registering the deleted pair under `{id}`/`{speItemId}`/
+`{verId}`. But it found its own limitation the same way:
+
+| Perturbation | 079's 4 behavioural tests | 074 Rule A |
+|---|---|---|
+| Re-registered, **different param names** | ✅ all 4 FAIL (caught) | ✅ FAIL, names both spellings |
+| Re-registered, **different URL shape** (`/api/obo/items/{itemId}/version-history`) | ❌ **all 4 FALSE-PASS** | ✅ FAIL, names both |
+
+**So Rule A is the load-bearing guard and the 404 tests are cheap corroboration** — the opposite of how
+the test file's own framing reads. The composite still holds (Rule A scans source registrations in the
+governed file irrespective of spelling; the endpoint-file census is the third layer for a re-add in a
+*new* file — untested by 079).
+
+**The better guard shape, not built:** assert on the **capability** — that no route anywhere reaches
+`ListFileVersionsAsUserAsync` / `DownloadFileVersionAsUserAsync` except the two gated ones — rather
+than on URL strings. That is shape-drift-proof and is the fix worth making if the behavioural layer
+should stand on its own. Applies to 073's guard too (see §3). Weigh at merge; it is a real gap.
+
+### Verified benign — 079's duplicate `MapGroup`
+
+079 flagged that there are now two `MapGroup("/api/documents")` declarations (its own +
+`FileAccessEndpoints`). **Checked: not a hole.** `DocumentVersionEndpoints.cs:100` is
+`MapGroup("/api/documents").RequireAuthorization()` — same as the sibling group — and both new routes
+carry `.AddDocumentAuthorizationFilter("read")` + `.RequireRateLimiting("graph-read")` (`:133-134`,
+`:182-183`). Templates are disjoint. No action.
+
+### For the reviewer, 079's own author-flagged item
+
+`ResolveSpePointerAsync` **duplicates the checks** in `private static FileAccessEndpoints.ValidateSpePointers`
+rather than sharing it, bounded by reusing its five error codes. Two implementations of the same
+SPE-pointer validation is a drift risk — evaluate whether to extract a shared helper at merge.
 
 ## 4. Other fixes to apply during merge
 
