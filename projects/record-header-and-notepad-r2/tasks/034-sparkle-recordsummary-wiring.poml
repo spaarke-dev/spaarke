@@ -4,7 +4,7 @@
     <title>Sparkle wiring — sprk_recordsummary via RECORDSUMMARY_FIELD, existence-gated visibility</title>
     <phase>3 Config Resolver + Control</phase>
     <gate>blocked until 033 (RecordHeader PCF) is complete</gate>
-    <status>not-started</status>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>Task tags include pcf; modifies the RecordHeader control view</rigor-reason>
     <model-tier>sonnet</model-tier>
@@ -174,6 +174,34 @@
     (extends the view created by 033; imports an existing constant). Summary POPULATION is
     explicitly out of scope — a separate project writes the columns; "No summary yet" is the
     intended steady state at ship time.
+
+    COMPLETED 2026-08-26 as v1.1.4. Bundle 99,068 to 100,352 bytes (40 percent of the NFR-02
+    ceiling). RecordHeader PCF suite 72 of 72; recordHeader.integration 11 of 11.
+
+    ESCALATION FIRED and was resolved additively. This POML asserted a "No summary yet" empty
+    state with testid sparkle-popover-empty, citing recordHeader.integration.test.tsx line 422.
+    That citation came from the KNOWN-RED suite: the shipped AiSummaryPopover had NEITHER the
+    testid NOR that copy (it read "No summary available for this document."). Rather than fork
+    the popover into the PCF layer, the shared component gained an OPTIONAL emptyText prop
+    defaulting to its existing string, plus stable data-testids. Nine existing callers render
+    byte-identical output. Alternative rejected: changing the default globally, which would have
+    reworded VisualHost, SemanticSearchControl, DocumentCard, RichFilePreview, InsightSummaryCard,
+    DocumentLibrary, MessageQuickView, CalendarVisual and MatterHeader.
+
+    TWO DEVIATIONS from the authored steps, both documented in
+    notes/decisions/034-sparkle-existence-gate.md:
+    (a) the metadata request now names BOTH summary candidates. Step 1 as written could not work:
+        sprk_recordsummary is on no rollout entity's FORM, so it would never appear in the
+        metadata payload and the existence gate would fail on every entity, silently.
+    (b) useHeaderFormMetadata retries unprojected if the named-attribute request is rejected, so a
+        maker typo in summaryField degrades to a working header rather than a blank one (NFR-10).
+
+    ALSO CLOSED: notes/issues/ISSUE-recordheader-integration-test-stale.md. That suite was assigned
+    here and is now green. It carried FIVE stale contracts, not the one diagnosed — see the
+    decision note. Repo-wide known-red drops from 9 suites to 8.
+
+    UI-TESTS NOT RUN — no --chrome session and the control is not yet imported. The four ui-tests
+    remain owner-executed at re-UAT.
   </notes>
 
   <execution>

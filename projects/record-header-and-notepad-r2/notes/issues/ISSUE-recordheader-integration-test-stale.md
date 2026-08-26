@@ -1,9 +1,38 @@
 # ISSUE — `recordHeader.integration.test.tsx` has been red since v1.0.10
 
 > **Diagnosed**: 2026-08-25 by task **015**, confirmed in main session
-> **Status**: 🟠 open — pre-dates R2; **input to task 034**, not a Wave-2 regression
+> **Status**: ✅ **RESOLVED 2026-08-26 by task 034** — suite rewritten, **11/11 green**
 > **Severity**: medium — a permanently-red suite trains people to ignore the gate
 > **File**: `src/client/shared/Spaarke.UI.Components/src/__tests__/recordHeader.integration.test.tsx`
+
+---
+
+## ✅ Resolution (2026-08-26, task 034)
+
+Rewritten to the post-v1.0.10 contract and **maintained, not deleted** — as this note recommended.
+**2/10 → 11/11.** Repo-wide known-red drops from 9 suites to **8**.
+
+The diagnosis below was correct but **incomplete**: the suite carried **five** stale contracts, not
+one. The four additional ones only surfaced once the first was fixed:
+
+| # | asserted | shipped reality |
+|---|---|---|
+| 1 | `sparklePopoverOpen` / `sparklePopoverContent` | removed at v1.0.10 (this note's diagnosis) |
+| 2 | badges read `@odata.count` | `Xrm.WebApi` strips it — `useRelatedCount` counts `entities.length` |
+| 3 | `pageInput.name` | `webresourceName` |
+| 4 | `pageInput.data` is an object | URL-encoded **string** |
+| 5 | sparkle named "AI Summary" | **"View AI summary"** |
+
+The through-line is worth keeping: in **every** case the source was right, had already been
+corrected once, and **documented its own correction in a comment** — #2 and #4 inside the very file
+the test was testing. The tests were believing stale prose over adjacent code. Two misleading
+comments were deleted as part of the fix so the next reader cannot repeat it.
+
+Full write-up: [`notes/decisions/034-sparkle-existence-gate.md`](../decisions/034-sparkle-existence-gate.md).
+
+---
+
+## Original diagnosis (retained)
 
 ---
 

@@ -60,5 +60,32 @@
  *   staged-draft renderer (type stages, Enter/blur commits) rather than the
  *   commit-on-calendar-selection special case, and all wall-clock <-> `Date`
  *   conversion goes through LOCAL calendar fields so no value shifts a day.
+ *
+ * 1.1.4 (2026-08-26) - sparkle wired to `sprk_recordsummary` (task 034, FR-17 /
+ *   FR-22 / FR-23). Visibility keys on the attribute EXISTING in entity
+ *   metadata, never on it being populated: an existing-but-empty column still
+ *   shows the sparkle and the popover reads "No summary yet." (a separate
+ *   project populates these columns, so empty IS the expected state at ship
+ *   time). When the attribute is absent the `aiSummary` prop is OMITTED
+ *   entirely - `HeaderToolbar` then renders no sparkle at all, rather than a
+ *   dead one whose popover is permanently empty.
+ *   Two things had to be true for that gate to work:
+ *     (a) the metadata request now names BOTH summary candidates (the
+ *         configured `summaryField` AND the `RECORDSUMMARY_FIELD` default).
+ *         `sprk_recordsummary` is on none of the six rollout entities' FORMS,
+ *         so without this the payload would never contain it, the gate would
+ *         fail on every entity, and the sparkle would be invisible everywhere
+ *         with no error to explain why;
+ *     (b) the column joins the `$select` ONLY after that check passes - a
+ *         `$select` naming a column the entity lacks fails the WHOLE retrieve
+ *         with HTTP 400 and blanks every cell (RS-1, third occurrence).
+ *   The field name is IMPORTED from the shared library, never re-declared - the
+ *   v1.0.20 sparkle regression was two copies of that literal drifting apart -
+ *   and a source-grep test now enforces it.
+ *   Shared-lib additions (additive; zero change for the nine existing callers):
+ *   `AiSummaryPopover` gained an optional `emptyText` plus stable
+ *   `data-testid`s, and `IHeaderToolbarProps.aiSummary` forwards `emptyText`.
+ *   The refresh icon stays UNWIRED (DEF-01) - and is now absent rather than
+ *   inert, since the shared popover offers only copy-to-clipboard.
  */
-export const CONTROL_VERSION = '1.1.3';
+export const CONTROL_VERSION = '1.1.4';

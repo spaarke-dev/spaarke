@@ -90,6 +90,23 @@ export const SMARTTODO_WEBRESOURCE_NAME = 'sprk_smarttodo';
 export const RECORDSUMMARY_FIELD = 'sprk_recordsummary';
 
 /**
+ * Empty-state copy for the record-header sparkle popover.
+ *
+ * Paired with {@link RECORDSUMMARY_FIELD} deliberately: the field and the words
+ * shown when it is unpopulated are one contract, and R2 asserts this string in
+ * both the shared integration suite and the RecordHeader PCF suite. Declaring
+ * it once keeps those from drifting apart.
+ *
+ * "Yet" is load-bearing. At R2 ship time an empty summary is the EXPECTED
+ * steady state — the owner created `sprk_recordsummary` on all six rollout
+ * entities and a SEPARATE project populates it. The sparkle is therefore an
+ * empty affordance, not a dead one, and the copy must not read as an error.
+ * `AiSummaryPopover`'s own default ("No summary available for this document.")
+ * stays untouched for its nine document-oriented callers.
+ */
+export const RECORD_SUMMARY_EMPTY_TEXT = 'No summary yet.';
+
+/**
  * ADR-024 dual-field pattern — `sprk_memo`'s entity-specific regarding lookups.
  *
  * Key   = parent entity logical name.

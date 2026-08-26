@@ -47,7 +47,7 @@
 | [031](031-resolve-header-config.poml) | `resolveHeaderConfig` (pure) | FULL | opus | ❌ | 030 | ✅ |
 | [032](032-shell-columns-prop.poml) | `RecordHeaderShell` `columns` prop | FULL | sonnet | ✅ C | 015 | ✅ |
 | [033](033-recordheader-pcf-control.poml) | **`RecordHeader` PCF control** | FULL | opus | ❌ | 001, 031, 023 | ⛔ |
-| [034](034-sparkle-recordsummary-wiring.poml) | Sparkle → `sprk_recordsummary` | FULL | sonnet | ❌ | 033 | 🔲 |
+| [034](034-sparkle-recordsummary-wiring.poml) | Sparkle → `sprk_recordsummary` | FULL | sonnet | ❌ | 033 | ✅ |
 
 ### Phase 4 — Schema-drift remediation (independent — schedule EARLY)
 

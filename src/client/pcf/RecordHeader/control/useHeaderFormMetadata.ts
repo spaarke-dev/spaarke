@@ -321,23 +321,54 @@ export function useHeaderFormMetadata(
     const requested = buildRequestedAttributeNames(controls, configuredKey === '' ? [] : configuredKey.split(','));
 
     const client = new XrmDataverseClient();
-    client.retrieveEntityMetadata(entityLogicalName, requested.length > 0 ? requested : undefined).then(
-      metadata => {
-        if (cancelled) return;
-        setFormControls(controls);
-        setEntityMetadata(metadata);
-        setLoading(false);
-      },
-      (err: unknown) => {
-        if (cancelled) return;
-        const wrapped =
-          err instanceof Error ? err : new Error(typeof err === 'string' ? err : 'retrieveEntityMetadata failed');
-        setFormControls(controls);
-        setEntityMetadata(null);
-        setError(wrapped);
-        setLoading(false);
-      }
-    );
+    const requestedNames = requested.length > 0 ? requested : undefined;
+
+    client
+      .retrieveEntityMetadata(entityLogicalName, requestedNames)
+      .catch((err: unknown) => {
+        // ── Named-request fallback (task 034) ────────────────────────────────
+        // The requested list is a UNION of form controls, every name the
+        // `layoutJson` mentions, and both summary-field candidates — so it can
+        // legitimately contain a name the entity does not have (a maker typo in
+        // `summaryField` is the expected case, and FR-17's negative path
+        // requires the header to survive it).
+        //
+        // `Xrm.Utility.getEntityMetadata` is documented to FILTER on this
+        // argument, so an unknown name should simply be absent from the result
+        // — which is exactly the signal the existence gate reads. But if a host
+        // ever rejects instead, the two-argument form would take the WHOLE
+        // header down: no metadata → no resolved config → no fields, i.e. the
+        // blank form NFR-10 forbids over a single mistyped character.
+        //
+        // Retrying unprojected costs one round trip in a path that is otherwise
+        // broken anyway, and degrades to the platform's own default behaviour.
+        // Same shape as the no-`$select` retry in `useRecordFieldValues`
+        // (FAILURE-MODES G-12) — the read path already learned this lesson.
+        if (!requestedNames) throw err;
+        console.warn(
+          `[RecordHeader] named-attribute metadata request failed for '${entityLogicalName}'; ` +
+            'retrying without the attribute filter.',
+          err
+        );
+        return client.retrieveEntityMetadata(entityLogicalName);
+      })
+      .then(
+        metadata => {
+          if (cancelled) return;
+          setFormControls(controls);
+          setEntityMetadata(metadata);
+          setLoading(false);
+        },
+        (err: unknown) => {
+          if (cancelled) return;
+          const wrapped =
+            err instanceof Error ? err : new Error(typeof err === 'string' ? err : 'retrieveEntityMetadata failed');
+          setFormControls(controls);
+          setEntityMetadata(null);
+          setError(wrapped);
+          setLoading(false);
+        }
+      );
 
     return () => {
       cancelled = true;

@@ -18,7 +18,9 @@
  */
 
 import * as React from 'react';
-import { render, screen, waitFor } from '@testing-library/react';
+import * as fs from 'fs';
+import * as path from 'path';
+import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { FluentProvider, webLightTheme } from '@fluentui/react-components';
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -39,7 +41,9 @@ jest.mock('@spaarke/ui-components/dist/services/XrmDataverseClient', () => ({
 
 import {
   RecordHeaderView,
+  buildMetadataAttributeNames,
   buildSelectFields,
+  summaryFieldExists,
   toCellSpan,
   toNumberKind,
   extractCurrencySymbol,
@@ -471,8 +475,14 @@ describe('entity agnosticism (FR-12)', () => {
     );
 
     expect(await screen.findByText('Form sprk_widgetname')).toBeInTheDocument();
-    // With no layoutJson the requested set is the form's own controls.
-    expect(mockRetrieveEntityMetadata).toHaveBeenCalledWith('sprk_widget', ['sprk_widgetname']);
+    // With no layoutJson the requested set is the form's own controls PLUS the
+    // default summary candidate (task 034 / FR-22). Asserted as an exact array
+    // rather than loosened to `toContain`: the whole point of this test is that
+    // nothing ENTITY-SPECIFIC is compiled in, and an exact match is what proves
+    // it. `sprk_recordsummary` is a cross-entity constant the owner created on
+    // every rollout entity — it does not name `sprk_widget` or any other single
+    // entity, so FR-12 still holds.
+    expect(mockRetrieveEntityMetadata).toHaveBeenCalledWith('sprk_widget', ['sprk_widgetname', SUMMARY_FIELD]);
   });
 });
 
@@ -630,5 +640,293 @@ describe('buildRequestedAttributeNames', () => {
 
   it('returns an empty list when there is nothing to request', () => {
     expect(buildRequestedAttributeNames([], [])).toEqual([]);
+  });
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Sparkle / summaryField wiring (task 034 — FR-17, FR-22, FR-23)
+//
+// The acceptance matrix in one place:
+//
+//   attribute in metadata │ value      │ sparkle │ popover body   │ in $select
+//   ──────────────────────┼────────────┼─────────┼────────────────┼───────────
+//   yes (default field)   │ populated  │ shown   │ the text       │ yes
+//   yes (default field)   │ '' or null │ shown   │ "No summary    │ yes
+//                         │            │         │  yet."         │
+//   yes (configured)      │ populated  │ shown   │ the text       │ yes
+//   NO                    │ n/a        │ HIDDEN  │ n/a            │ NO
+//
+// The last row matters most: a $select naming a column the entity does not
+// have fails the WHOLE retrieve with HTTP 400 and blanks every cell — RS-1,
+// third occurrence of that failure class (FAILURE-MODES G-12).
+// ─────────────────────────────────────────────────────────────────────────────
+
+const SUMMARY_FIELD = 'sprk_recordsummary';
+
+/** `ENTITY_METADATA` plus the summary column the six rollout entities carry. */
+const METADATA_WITH_SUMMARY = {
+  ...ENTITY_METADATA,
+  attributes: {
+    ...ENTITY_METADATA.attributes,
+    [SUMMARY_FIELD]: { attributeType: 'Memo', displayName: 'Record Summary' },
+  },
+};
+
+/** A layout that renders two plain fields and configures nothing else. */
+const MINIMAL_LAYOUT = JSON.stringify({
+  _version: '1.0',
+  fields: [{ name: 'sprk_projectnumber' }, { name: 'sprk_projectname' }],
+});
+
+/** Replace the record payload after `installXrm()` has wired the rest of Xrm. */
+function stubRecord(extra: Record<string, unknown>): void {
+  const webApi = (window as unknown as { Xrm: { WebApi: { retrieveRecord: unknown } } }).Xrm.WebApi;
+  webApi.retrieveRecord = jest.fn((_entity: string, _id: string, options?: string) => {
+    lastSelect = options;
+    return Promise.resolve({ ...RECORD, ...extra });
+  });
+}
+
+// Matches whether the accessible name comes from the Button's own aria-label
+// ("View AI summary") or from the wrapping Tooltip's `relationship="label"`
+// content ("AI Summary") — the suite should not depend on which one Fluent
+// wins with.
+const sparkleButton = () => screen.queryByRole('button', { name: /ai summary/i });
+
+describe('buildSelectFields — summaryField branch (FR-23)', () => {
+  const field = (name: string, renderer = 'text') =>
+    ({ name, renderer, label: name, span: 1, required: false, readOnly: false }) as never;
+
+  it('appends the summary field when one is supplied', () => {
+    expect(buildSelectFields([field('a')], SUMMARY_FIELD)).toEqual(['a', SUMMARY_FIELD]);
+  });
+
+  it('omits it for every "does not exist" spelling — null, undefined, empty', () => {
+    expect(buildSelectFields([field('a')], null)).toEqual(['a']);
+    expect(buildSelectFields([field('a')], undefined)).toEqual(['a']);
+    expect(buildSelectFields([field('a')], '')).toEqual(['a']);
+    expect(buildSelectFields([field('a')])).toEqual(['a']);
+  });
+
+  it('does not repeat the column when the layout also renders it', () => {
+    expect(buildSelectFields([field(SUMMARY_FIELD), field('a')], SUMMARY_FIELD)).toEqual([SUMMARY_FIELD, 'a']);
+  });
+
+  it('appends AFTER the layout fields, leaving render order untouched', () => {
+    expect(buildSelectFields([field('b'), field('a')], SUMMARY_FIELD)).toEqual(['b', 'a', SUMMARY_FIELD]);
+  });
+
+  it('still decorates lookups when a summary field is present', () => {
+    expect(buildSelectFields([field('sprk_projecttype', 'lookup')], SUMMARY_FIELD)).toEqual([
+      '_sprk_projecttype_value',
+      SUMMARY_FIELD,
+    ]);
+  });
+});
+
+describe('buildMetadataAttributeNames (FR-22)', () => {
+  it('adds the default summary candidate so the existence gate can ever pass', () => {
+    expect(buildMetadataAttributeNames(['sprk_projectname'])).toEqual(['sprk_projectname', SUMMARY_FIELD]);
+  });
+
+  it('does not duplicate it when layoutJson already named it', () => {
+    expect(buildMetadataAttributeNames(['a', SUMMARY_FIELD, 'b'])).toEqual(['a', SUMMARY_FIELD, 'b']);
+  });
+
+  it('requests BOTH candidates when a different summaryField is configured', () => {
+    // Neither can be dropped: which one wins is only known after the resolver
+    // runs, and the resolver needs the metadata this list fetches.
+    const names = buildMetadataAttributeNames(['sprk_description']);
+    expect(names).toContain('sprk_description');
+    expect(names).toContain(SUMMARY_FIELD);
+  });
+
+  it('produces the bare default when nothing is configured', () => {
+    expect(buildMetadataAttributeNames([])).toEqual([SUMMARY_FIELD]);
+  });
+});
+
+describe('summaryFieldExists (FR-17 — existence, never population)', () => {
+  it('is true for an attribute present in metadata', () => {
+    expect(summaryFieldExists(METADATA_WITH_SUMMARY as never, SUMMARY_FIELD)).toBe(true);
+  });
+
+  it('is false for an attribute absent from metadata', () => {
+    expect(summaryFieldExists(ENTITY_METADATA as never, SUMMARY_FIELD)).toBe(false);
+  });
+
+  it('is false before metadata resolves, rather than throwing', () => {
+    expect(summaryFieldExists(null, SUMMARY_FIELD)).toBe(false);
+  });
+
+  it('is false for an empty field name', () => {
+    expect(summaryFieldExists(METADATA_WITH_SUMMARY as never, '')).toBe(false);
+  });
+
+  it('does not treat inherited Object properties as attributes', () => {
+    // `hasOwnProperty`, not `in` — otherwise 'toString' would "exist" on every
+    // entity and the sparkle would show for a nonsense summaryField.
+    expect(summaryFieldExists(METADATA_WITH_SUMMARY as never, 'toString')).toBe(false);
+  });
+});
+
+describe('RecordHeaderView — sparkle visible (FR-17 positive)', () => {
+  beforeEach(() => {
+    mockRetrieveEntityMetadata.mockResolvedValue(METADATA_WITH_SUMMARY);
+  });
+
+  it('renders the sparkle when the DEFAULT summary attribute exists', async () => {
+    renderView(MINIMAL_LAYOUT);
+    await waitFor(() => expect(sparkleButton()).toBeInTheDocument());
+  });
+
+  it('requests the summary attribute from metadata even though it is not on the form', async () => {
+    renderView(MINIMAL_LAYOUT);
+    await waitFor(() => expect(mockRetrieveEntityMetadata).toHaveBeenCalled());
+    const [, requested] = mockRetrieveEntityMetadata.mock.calls[0];
+    expect(requested).toContain(SUMMARY_FIELD);
+  });
+
+  it('adds the column to the $select once it is known to exist', async () => {
+    renderView(MINIMAL_LAYOUT);
+    await waitFor(() => expect(lastSelect).toContain(SUMMARY_FIELD));
+  });
+
+  it('shows the "No summary yet." empty state when the value is null', async () => {
+    stubRecord({ [SUMMARY_FIELD]: null });
+    renderView(MINIMAL_LAYOUT);
+
+    await waitFor(() => expect(sparkleButton()).toBeInTheDocument());
+    // Closed popover renders no body.
+    expect(screen.queryByTestId('sparkle-popover-empty')).toBeNull();
+
+    fireEvent.click(sparkleButton() as HTMLElement);
+
+    await waitFor(() => expect(screen.getByTestId('sparkle-popover-empty')).toBeInTheDocument());
+    expect(screen.getByTestId('sparkle-popover-empty')).toHaveTextContent(/no summary yet/i);
+    expect(screen.queryByTestId('sparkle-popover-summary')).toBeNull();
+  });
+
+  it('shows the empty state for an EMPTY STRING too, not just null', async () => {
+    stubRecord({ [SUMMARY_FIELD]: '' });
+    renderView(MINIMAL_LAYOUT);
+
+    await waitFor(() => expect(sparkleButton()).toBeInTheDocument());
+    fireEvent.click(sparkleButton() as HTMLElement);
+
+    await waitFor(() => expect(screen.getByTestId('sparkle-popover-empty')).toBeInTheDocument());
+  });
+
+  it('shows the summary text when the column is populated', async () => {
+    stubRecord({ [SUMMARY_FIELD]: 'Apollo is a fixed-fee engagement.' });
+    renderView(MINIMAL_LAYOUT);
+
+    await waitFor(() => expect(sparkleButton()).toBeInTheDocument());
+    fireEvent.click(sparkleButton() as HTMLElement);
+
+    await waitFor(() => expect(screen.getByTestId('sparkle-popover-summary')).toBeInTheDocument());
+    expect(screen.getByTestId('sparkle-popover-summary')).toHaveTextContent('Apollo is a fixed-fee engagement.');
+    expect(screen.queryByTestId('sparkle-popover-empty')).toBeNull();
+  });
+
+  it('lets a configured summaryField outrank the default', async () => {
+    stubRecord({ [SUMMARY_FIELD]: 'the DEFAULT column', sprk_description: 'the CONFIGURED column' });
+    renderView(
+      JSON.stringify({
+        _version: '1.0',
+        summaryField: 'sprk_description',
+        fields: [{ name: 'sprk_projectnumber' }],
+      })
+    );
+
+    await waitFor(() => expect(sparkleButton()).toBeInTheDocument());
+    fireEvent.click(sparkleButton() as HTMLElement);
+
+    await waitFor(() => expect(screen.getByTestId('sparkle-popover-summary')).toBeInTheDocument());
+    expect(screen.getByTestId('sparkle-popover-summary')).toHaveTextContent('the CONFIGURED column');
+  });
+});
+
+describe('RecordHeaderView — sparkle hidden (FR-17 negative)', () => {
+  // `ENTITY_METADATA` (the default mock) deliberately has NO summary column —
+  // which is also why every other suite in this file renders without a sparkle.
+
+  const BOGUS_LAYOUT = JSON.stringify({
+    _version: '1.0',
+    summaryField: 'sprk_not_a_real_column',
+    fields: [{ name: 'sprk_projectnumber' }, { name: 'sprk_projectname' }],
+  });
+
+  it('renders no sparkle when the default attribute is absent from metadata', async () => {
+    renderView(MINIMAL_LAYOUT);
+    await waitFor(() => expect(screen.getByTestId('header-toolbar')).toBeInTheDocument());
+    expect(sparkleButton()).toBeNull();
+  });
+
+  it('renders no sparkle when a CONFIGURED summaryField names a non-existent attribute', async () => {
+    renderView(BOGUS_LAYOUT);
+    await waitFor(() => expect(screen.getByTestId('header-toolbar')).toBeInTheDocument());
+    expect(sparkleButton()).toBeNull();
+  });
+
+  it('keeps the bogus column OUT of the $select — the RS-1 / HTTP 400 guard', async () => {
+    renderView(BOGUS_LAYOUT);
+    await waitFor(() => expect(lastSelect).toBeDefined());
+    expect(lastSelect).not.toContain('sprk_not_a_real_column');
+    expect(lastSelect).not.toContain(SUMMARY_FIELD);
+  });
+
+  it('still renders the header fields — a bad summaryField must never blank the form', async () => {
+    renderView(BOGUS_LAYOUT);
+    expect(await screen.findByText('PRJ-0001')).toBeInTheDocument();
+    expect(screen.getByText('Apollo')).toBeInTheDocument();
+  });
+
+  it('leaves the To Do and Notepad slots untouched when the sparkle is hidden', async () => {
+    renderView(MINIMAL_LAYOUT);
+    const icons = await screen.findByTestId('header-toolbar-icons');
+    // The launcher slots are the hook's concern, independent of the sparkle
+    // gate — hiding one must not hide the others.
+    expect(icons.querySelectorAll('button').length).toBeGreaterThan(0);
+  });
+});
+
+describe('FR-22a — the summary field name has ONE source of truth', () => {
+  const CONTROL_DIR = path.join(__dirname, '..', 'control');
+
+  it('is never re-declared as a literal anywhere in the control source', () => {
+    // The v1.0.20 sparkle regression WAS a second copy of this literal drifting
+    // out of sync with the first. The constant is imported from the shared
+    // library; a literal here would re-open that failure mode.
+    const offenders = fs
+      .readdirSync(CONTROL_DIR)
+      .filter(f => f.endsWith('.ts') || f.endsWith('.tsx'))
+      .filter(f => fs.readFileSync(path.join(CONTROL_DIR, f), 'utf8').includes(`'${SUMMARY_FIELD}'`));
+
+    expect(offenders).toEqual([]);
+  });
+
+  it('imports the constant from the shared library instead', () => {
+    const view = fs.readFileSync(path.join(CONTROL_DIR, 'RecordHeaderView.tsx'), 'utf8');
+    expect(view).toContain('RECORDSUMMARY_FIELD');
+    expect(view).toContain('@spaarke/ui-components/dist/hooks/toolbarLaunchDefaults');
+  });
+});
+
+describe('DEF-01 — the sparkle refresh icon stays unwired', () => {
+  it('adds no network call beyond the record read the header already makes', async () => {
+    mockRetrieveEntityMetadata.mockResolvedValue(METADATA_WITH_SUMMARY);
+    stubRecord({ [SUMMARY_FIELD]: 'a summary' });
+    renderView(MINIMAL_LAYOUT);
+
+    await waitFor(() => expect(sparkleButton()).toBeInTheDocument());
+    fireEvent.click(sparkleButton() as HTMLElement);
+    await waitFor(() => expect(screen.getByTestId('sparkle-popover-summary')).toBeInTheDocument());
+
+    // The popover body comes from the ALREADY-FETCHED record payload, so
+    // opening it triggers no second read — and there is no BFF call to make
+    // (NFR-06: this control never leaves the Xrm host context).
+    const xrm = (window as unknown as { Xrm: { WebApi: { retrieveRecord: jest.Mock } } }).Xrm;
+    expect(xrm.WebApi.retrieveRecord).toHaveBeenCalledTimes(1);
   });
 });

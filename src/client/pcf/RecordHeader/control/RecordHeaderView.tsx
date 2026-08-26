@@ -41,7 +41,10 @@
  * React 16-17 safe; NFR-05 no `@spaarke/auth`; NFR-06 no BFF (host-context
  * `Xrm` only).
  *
- * NOTE: the sparkle / `summaryField` wiring is task 034, layered on this view.
+ * Task 034 layered the sparkle / `summaryField` wiring on top. It follows the
+ * same rule: the popover itself is `HeaderToolbar` + the shared
+ * `AiSummaryPopover`; this file only decides WHETHER the affordance exists
+ * (metadata existence, FR-17) and WHICH column feeds it (FR-22).
  *
  * @see FR-01 / FR-12 in projects/record-header-and-notepad-r2/spec.md
  */
@@ -76,6 +79,14 @@ import type { EntityMetadata } from '@spaarke/ui-components/dist/services/IDatav
 import { useRecordHeaderFields } from '@spaarke/ui-components/dist/hooks/useRecordHeaderFields';
 import type { IUseRecordHeaderFieldsResult } from '@spaarke/ui-components/dist/hooks/useRecordHeaderFields';
 import { useRecordHeaderToolbarActions } from '@spaarke/ui-components/dist/hooks/useRecordHeaderToolbarActions';
+// FR-22a — the summary field name and its empty-state copy are IMPORTED, never
+// re-declared here. R1 task 001 already corrected this constant once, and the
+// v1.0.20 sparkle regression was precisely a summary-field mismatch between two
+// copies of the literal. A grep guard in the test suite enforces the rule.
+import {
+  RECORDSUMMARY_FIELD,
+  RECORD_SUMMARY_EMPTY_TEXT,
+} from '@spaarke/ui-components/dist/hooks/toolbarLaunchDefaults';
 import { CONTROL_VERSION } from './version';
 import { useHeaderFormMetadata } from './useHeaderFormMetadata';
 
@@ -131,17 +142,81 @@ export function toCellSpan(span: number): 1 | 2 | 3 {
  * every other renderer reads the plain logical name. Duplicates are collapsed
  * so a layout that names the same attribute twice does not produce an invalid
  * repeated `$select` entry.
+ *
+ * ── `summaryField` is CONDITIONAL, and that is the whole point (FR-23) ──────
+ * The sparkle's backing column is appended ONLY when the caller has already
+ * confirmed it exists in entity metadata. A `$select` is all-or-nothing: one
+ * name Dataverse does not recognise fails the ENTIRE retrieve with HTTP 400 and
+ * blanks every cell in the header. That is not hypothetical — it is RS-1, which
+ * took the shipped Matter header down on every record, and it is the third
+ * occurrence of the same failure class in this codebase (FAILURE-MODES G-12).
+ * Passing `null`/`undefined` here is the "attribute does not exist" branch.
+ *
+ * @param fields       Resolved layout fields, in render order.
+ * @param summaryField Effective summary attribute, or `null` when it is absent
+ *                     from metadata and MUST NOT be selected.
  */
-export function buildSelectFields(fields: ReadonlyArray<ResolvedHeaderField>): string[] {
+export function buildSelectFields(
+  fields: ReadonlyArray<ResolvedHeaderField>,
+  summaryField?: string | null
+): string[] {
   const seen = new Set<string>();
   const result: string[] = [];
-  for (const field of fields) {
-    const key = field.renderer === 'lookup' ? `_${field.name}_value` : field.name;
-    if (seen.has(key)) continue;
+  const push = (key: string): void => {
+    if (seen.has(key)) return;
     seen.add(key);
     result.push(key);
+  };
+  for (const field of fields) {
+    push(field.renderer === 'lookup' ? `_${field.name}_value` : field.name);
   }
+  // Appended last so the layout's own field order is untouched; de-duplicated
+  // by the shared `seen` set, so a layout that also RENDERS its summary column
+  // does not produce a repeated `$select` entry.
+  if (typeof summaryField === 'string' && summaryField.length > 0) push(summaryField);
   return result;
+}
+
+/**
+ * Widen the metadata request to cover BOTH summary-field candidates.
+ *
+ * `extractConfiguredAttributeNames` already contributes a summaryField that
+ * `layoutJson` names explicitly. It cannot contribute the DEFAULT, because the
+ * default is applied downstream at this wiring site (task 031 deliberately
+ * passes `summaryField` through as `undefined` when unconfigured).
+ *
+ * That ordering would otherwise deadlock: the effective field comes from the
+ * resolved config, the resolved config comes from metadata, and metadata is
+ * fetched by NAME. Requesting both candidates up front breaks the cycle — the
+ * existence check downstream then simply reads whichever one won.
+ *
+ * Getting this wrong is silent and total: `sprk_recordsummary` sits on none of
+ * the six rollout entities' FORMS, so without this the metadata payload would
+ * never contain it, the existence gate would fail on every entity, and the
+ * sparkle would be invisible everywhere with no error to explain why.
+ */
+export function buildMetadataAttributeNames(configuredNames: ReadonlyArray<string>): string[] {
+  const names = [...configuredNames];
+  if (!names.includes(RECORDSUMMARY_FIELD)) names.push(RECORDSUMMARY_FIELD);
+  return names;
+}
+
+/**
+ * Does `summaryField` name an attribute the entity actually has?
+ *
+ * FR-17's visibility rule keys on EXISTENCE, never on population: the sparkle
+ * shows for an existing-but-empty column (rendering "No summary yet"), and
+ * hides only when the attribute is genuinely absent. A separate project
+ * populates these columns, so at R2 ship time "exists but empty" is the normal
+ * case and must not read as a broken affordance.
+ */
+export function summaryFieldExists(
+  entityMetadata: EntityMetadata | null,
+  summaryField: string
+): boolean {
+  const attributes = entityMetadata?.attributes;
+  if (!attributes || summaryField.length === 0) return false;
+  return Object.prototype.hasOwnProperty.call(attributes, summaryField);
 }
 
 /**
@@ -199,7 +274,10 @@ export const RecordHeaderView: React.FC<IRecordHeaderViewProps> = ({
   // round trip, so the fetch can name every attribute the header might bind —
   // including any the layout references that are not placed on the form. See
   // `useHeaderFormMetadata` for why naming them is load-bearing.
-  const configuredNames = React.useMemo(() => extractConfiguredAttributeNames(layoutJson), [layoutJson]);
+  const configuredNames = React.useMemo(
+    () => buildMetadataAttributeNames(extractConfiguredAttributeNames(layoutJson)),
+    [layoutJson]
+  );
   const {
     formMetadata,
     entityMetadata,
@@ -215,10 +293,17 @@ export const RecordHeaderView: React.FC<IRecordHeaderViewProps> = ({
     [layoutJson, formMetadata]
   );
 
-  // ── 3. Record read + form-buffer staging ───────────────────────────────────
+  // ── 3. Sparkle summary field — existence-gated (FR-17 / FR-22) ─────────────
+  // The DEFAULT is applied here, not in the resolver: task 031 passes
+  // `summaryField` through as `undefined` when `layoutJson` omits it, precisely
+  // so the wiring site owns this decision. A configured field outranks it.
+  const effectiveSummaryField = resolved?.summaryField ?? RECORDSUMMARY_FIELD;
+  const hasSummaryField = summaryFieldExists(entityMetadata, effectiveSummaryField);
+
+  // ── 4. Record read + form-buffer staging ───────────────────────────────────
   const selectFields = React.useMemo(
-    () => (resolved ? buildSelectFields(resolved.fields) : []),
-    [resolved]
+    () => (resolved ? buildSelectFields(resolved.fields, hasSummaryField ? effectiveSummaryField : null) : []),
+    [resolved, hasSummaryField, effectiveSummaryField]
   );
   // `recordId` is withheld until the field list is known — an empty `$select`
   // would otherwise pull the ENTIRE record for one throwaway render.
@@ -228,7 +313,7 @@ export const RecordHeaderView: React.FC<IRecordHeaderViewProps> = ({
     fields: selectFields,
   });
 
-  // ── 4. Toolbar ─────────────────────────────────────────────────────────────
+  // ── 5. Toolbar ─────────────────────────────────────────────────────────────
   // Manifest `title` outranks the resolved (layoutJson → metadata) title.
   const toolbarTitle = (title && title.trim().length > 0 ? title : resolved?.title) ?? '';
   const { toolbarProps } = useRecordHeaderToolbarActions({
@@ -237,12 +322,41 @@ export const RecordHeaderView: React.FC<IRecordHeaderViewProps> = ({
     title: toolbarTitle,
   });
 
+  // The sparkle is composed by the CONSUMER and merged into `toolbarProps` —
+  // `useRecordHeaderToolbarActions` stopped owning it at v1.0.10 and supplies
+  // only the launcher slots. `HeaderToolbar` builds the trigger + popover from
+  // this prop, so no icon is imported at the PCF layer (a direct
+  // `@fluentui/react-icons` import breaks the virtual-PCF webpack resolution).
+  // Hoisted to a local so the callback's dep array stays a plain identifier.
+  const summaryValue = (fieldsApi.values?.[effectiveSummaryField] ?? null) as string | null;
+
+  // Unconditional hook — only the SPREAD below is conditional, so the hook
+  // order is identical on every render whichever branch the gate takes.
+  const fetchSummary = React.useCallback(
+    async (): Promise<{ summary: string | null; tldr: string | null }> => ({
+      summary: summaryValue,
+      tldr: null,
+    }),
+    [summaryValue]
+  );
+
+  // FR-17: OMIT the prop entirely when the attribute is absent — that is what
+  // makes `HeaderToolbar` render no sparkle at all. Passing a fetch that
+  // resolves to `null` would instead show a sparkle whose popover is
+  // permanently empty, which is the dead affordance the spec rules out.
+  const toolbarPropsWithSparkle = hasSummaryField
+    ? {
+        ...toolbarProps,
+        aiSummary: { onFetchSummary: fetchSummary, emptyText: RECORD_SUMMARY_EMPTY_TEXT },
+      }
+    : toolbarProps;
+
   const columns = resolved?.columns ?? 3;
 
   return (
     <div className={styles.root}>
       <RecordHeaderShell
-        toolbar={toolbarProps}
+        toolbar={toolbarPropsWithSparkle}
         loading={metadataLoading || fieldsApi.loading}
         columns={columns}
         borderless

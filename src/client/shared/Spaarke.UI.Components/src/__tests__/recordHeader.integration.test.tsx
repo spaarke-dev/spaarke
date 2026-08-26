@@ -11,15 +11,35 @@
  * `Xrm.Navigation`. Mirrors the `MatterHeaderView.tsx` composition shape from
  * spec FR-12 (post-001 REVISED field list).
  *
- * Coverage summary (10 test cases):
+ * ══════════════════════════════════════════════════════════════════════════
+ * REWRITTEN at r2 task 034 — read `TestRecordHeader`'s header before editing.
+ * ══════════════════════════════════════════════════════════════════════════
+ * This suite had been RED since v1.0.10 (8 of 10 failing). Every failure was a
+ * stale ASSERTION, not a product defect — five separate contracts had moved on
+ * without it:
+ *
+ *   1. the hook's `sparklePopoverOpen`/`sparklePopoverContent` API was removed;
+ *      the consumer now composes `aiSummary` into `toolbarProps`
+ *   2. badge counts come from `entities.length`, not `@odata.count` (which
+ *      `Xrm.WebApi` does not expose) — the old mock's fake count annotation
+ *      alongside an empty `entities: []` was itself the mask that hid this
+ *   3. `pageInput.webresourceName`, not `pageInput.name`
+ *   4. `pageInput.data` is a URL-encoded query STRING, not an object
+ *   5. the sparkle's accessible name is "View AI summary", not "AI Summary"
+ *
+ * Kept rather than deleted per ADR-038 build-vs-maintain: this is the only
+ * suite exercising shell + toolbar + renderers end to end.
+ *
+ * Coverage summary (11 test cases):
  *  1. Renders composition after load — 3 toolbar slots + 5 field labels + values
- *  2. Badge counts propagate — checkmark=3, annotation=7 (from `@odata.count`)
+ *  2. Badge counts propagate — checkmark=3, annotation=7 (via `entities.length`)
  *  3. Loading state — RecordHeaderShell renders Skeleton; children absent
  *  4. Sparkle popover — summary body when `sprk_recordsummary` is populated
- *  5. Sparkle popover — empty state ("No summary yet") when null
- *  6. Refresh icon is unwired — click NEVER triggers a Dataverse read/write
+ *  5. Sparkle popover — empty state ("No summary yet.") when null
+ *  6. Sparkle triggers no Dataverse work, and offers no refresh affordance
+ * 6b. Omitting `aiSummary` renders no sparkle — the FR-17 negative branch
  *  7. Checkmark navigation — LAYOUT_1_MODAL (85%×85%) + SmartTodo webresource
- *  8. Annotation navigation — NOTEPAD_MODAL (70%×80%) + Notepad webresource
+ *  8. Annotation navigation — NOTEPAD_MODAL (25%×35% since v1.0.7) + Notepad
  *  9. Focus event refreshes badges — retrieveMultipleRecords re-invoked
  * 10. Unsupported entity — `sprk_document` yields memo badge=0, no memo query
  *
@@ -44,7 +64,7 @@
 
 import * as React from 'react';
 import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
-import { FluentProvider, Popover, PopoverSurface, webLightTheme } from '@fluentui/react-components';
+import { FluentProvider, webLightTheme } from '@fluentui/react-components';
 
 // Imports go through the sub-barrels rather than the top-level `../index`
 // barrel because the top-level barrel re-exports `services/` which pulls in
@@ -68,6 +88,8 @@ import {
   LAYOUT_1_MODAL,
   NOTEPAD_MODAL,
   NOTEPAD_WEBRESOURCE_NAME,
+  RECORDSUMMARY_FIELD,
+  RECORD_SUMMARY_EMPTY_TEXT,
   SMARTTODO_WEBRESOURCE_NAME,
   useRecordFieldValues,
   useRecordHeaderToolbarActions,
@@ -107,9 +129,9 @@ let mockNavigateTo: jest.Mock;
  *  - `retrieveRecord(entity, id, query)` → resolves the given `record` payload
  *    (used by useRecordFieldValues for the 5-field header + sprk_recordsummary).
  *  - `retrieveMultipleRecords(entity, query)` →
- *      - `sprk_todo`  → resolves `{ '@odata.count': todoCount, entities: [] }`
- *      - `sprk_memo`  → resolves `{ '@odata.count': memoCount, entities: [] }`
- *      - other        → resolves `{ '@odata.count': 0, entities: [] }`
+ *      - `sprk_todo`  → resolves `{ entities: <todoCount rows> }`
+ *      - `sprk_memo`  → resolves `{ entities: <memoCount rows> }`
+ *      - other        → resolves `{ entities: [] }`
  *  - `navigateTo(pageInput, options)` → resolves undefined.
  *  - `Utility.getGlobalContext().getClientUrl()` → the test env URL.
  *
@@ -130,14 +152,26 @@ function installXrm(config: {
     return Promise.resolve(record);
   });
 
+  // ── Counts come from `entities.length`, NOT from `@odata.count` ────────────
+  // Rewritten at r2 task 034. `Xrm.WebApi.retrieveMultipleRecords` does not
+  // expose the `@odata.count` annotation — the client wrapper strips it and
+  // returns only `{ entities, nextLink }`. `useRelatedCount` was fixed to count
+  // client-side at v1.0.16 after live UAT showed every badge stuck at 0, and
+  // its own header records that "tests mock a fake `@odata.count` field which
+  // masked the bug". This mock WAS that mask: it returned a count annotation
+  // alongside an EMPTY entities array, so the badges could only ever read 0.
+  // Returning rows of the requested length is what the platform actually does.
+  const rows = (n: number): Record<string, string>[] =>
+    Array.from({ length: n }, (_unused, i) => ({ id: `row-${i}` }));
+
   mockRetrieveMultipleRecords = jest.fn((entity: string) => {
     if (entity === 'sprk_todo') {
-      return Promise.resolve({ '@odata.count': todoCount, entities: [] });
+      return Promise.resolve({ entities: rows(todoCount) });
     }
     if (entity === 'sprk_memo') {
-      return Promise.resolve({ '@odata.count': memoCount, entities: [] });
+      return Promise.resolve({ entities: rows(memoCount) });
     }
-    return Promise.resolve({ '@odata.count': 0, entities: [] });
+    return Promise.resolve({ entities: [] });
   });
 
   mockNavigateTo = jest.fn().mockResolvedValue(undefined);
@@ -168,6 +202,20 @@ function uninstallXrm(): void {
 // Fixtures — mirror spec FR-12 post-001 REVISED field list
 // ─────────────────────────────────────────────────────────────────────────────
 
+/**
+ * Accessible name of the sparkle trigger.
+ *
+ * `HeaderToolbar` wraps the sparkle Button in a `<Tooltip content="AI Summary"
+ * relationship="label">` but the Button ALSO carries its own
+ * `aria-label="View AI summary"` — and the explicit child prop wins. The name
+ * a screen reader announces is therefore "View AI summary", not the tooltip
+ * text. This suite asserted the tooltip text and could never match.
+ *
+ * Kept as a regex so it survives either resolution rather than re-breaking the
+ * next time Fluent changes how tooltip labels merge.
+ */
+const SPARKLE_ACCESSIBLE_NAME = /ai summary/i;
+
 const MATTER_ENTITY = 'sprk_matter';
 const MATTER_ID = '00000000-0000-0000-0000-000000000001';
 const UNSUPPORTED_ENTITY = 'sprk_document'; // not in SUPPORTED_MEMO_PARENTS
@@ -196,30 +244,65 @@ const MATTER_FIELD_LIST = [
 ];
 
 // ─────────────────────────────────────────────────────────────────────────────
-// TestRecordHeader — mirrors MatterHeaderView.tsx from spec FR-12 with the
-// task-014 addition that the consumer owns the <Popover> shell (per task-012
-// API — hook exposes controlled open state + PopoverSurface-ready content).
+// TestRecordHeader — mirrors the SHIPPED consumer composition.
+//
+// ══════════════════════════════════════════════════════════════════════════
+// REWRITTEN at r2 task 034. Read this before "fixing" it back.
+// ══════════════════════════════════════════════════════════════════════════
+// This harness previously destructured `sparklePopoverOpen`,
+// `setSparklePopoverOpen` and `sparklePopoverContent` from
+// `useRecordHeaderToolbarActions` and mounted its own `<Popover>` sibling.
+// That API was REMOVED at v1.0.10 — the hook returns only `{ toolbarProps }` —
+// so this suite asserted an obsolete design and had been red ever since
+// (8 failures; diagnosed by r2 task 015, see
+// `projects/record-header-and-notepad-r2/notes/issues/`).
+//
+// The shipped contract: the CONSUMER composes `aiSummary` and merges it into
+// `toolbarProps`; `HeaderToolbar` renders the sparkle trigger and the shared
+// `<AiSummaryPopover>` internally. Omitting `aiSummary` renders no sparkle at
+// all — which is exactly how `RecordHeaderView` implements FR-17's
+// existence gate. `emptyText` carries the record-oriented copy; without it the
+// popover would show `AiSummaryPopover`'s document-oriented default.
+//
+// It was NOT deleted to make a number go green: per ADR-038 the question is
+// build-vs-maintain, and this is the only suite exercising shell + toolbar +
+// renderers end to end. Maintain, rewritten — not delete.
 // ─────────────────────────────────────────────────────────────────────────────
 
 interface TestRecordHeaderProps {
   entity: string;
   recordId: string;
   columns?: 2 | 3;
+  /** Omit the `aiSummary` merge entirely — the FR-17 "attribute absent" branch. */
+  withSparkle?: boolean;
 }
 
-function TestRecordHeader({ entity, recordId, columns = 3 }: TestRecordHeaderProps): React.ReactElement {
+function TestRecordHeader({
+  entity,
+  recordId,
+  columns = 3,
+  withSparkle = true,
+}: TestRecordHeaderProps): React.ReactElement {
   const { values, loading } = useRecordFieldValues(entity, recordId, MATTER_FIELD_LIST);
 
-  const { toolbarProps, sparklePopoverOpen, setSparklePopoverOpen, sparklePopoverContent } =
-    useRecordHeaderToolbarActions({
-      entity,
-      recordId,
-      recordSummary: (values?.sprk_recordsummary ?? null) as string | null,
-    });
+  const { toolbarProps } = useRecordHeaderToolbarActions({ entity, recordId });
+
+  const summaryValue = (values?.[RECORDSUMMARY_FIELD] ?? null) as string | null;
+  const onFetchSummary = React.useCallback(
+    async (): Promise<{ summary: string | null; tldr: string | null }> => ({
+      summary: summaryValue,
+      tldr: null,
+    }),
+    [summaryValue]
+  );
+
+  const composedToolbarProps = withSparkle
+    ? { ...toolbarProps, aiSummary: { onFetchSummary, emptyText: RECORD_SUMMARY_EMPTY_TEXT } }
+    : toolbarProps;
 
   return (
     <FluentProvider theme={webLightTheme}>
-      <RecordHeaderShell toolbar={toolbarProps} loading={loading}>
+      <RecordHeaderShell toolbar={composedToolbarProps} loading={loading}>
         <FieldGrid columns={columns}>
           <TextField span={1} label="Matter Number" value={values?.sprk_matternumber as string | undefined} required />
           <TextField span={2} label="Matter Name" value={values?.sprk_mattername as string | undefined} />
@@ -242,17 +325,6 @@ function TestRecordHeader({ entity, recordId, columns = 3 }: TestRecordHeaderPro
           />
         </FieldGrid>
       </RecordHeaderShell>
-
-      {/*
-       * Consumer wires the Popover shell — hook API split rationale:
-       * `HeaderToolbar` renders its own sparkle Button (the click toggles
-       * `sparklePopoverOpen`); the Popover trigger is the toolbar button, so we
-       * mount the Popover as a sibling and let its default anchor logic resolve
-       * against document coordinates. This matches the task-012 hook contract.
-       */}
-      <Popover open={sparklePopoverOpen} onOpenChange={(_, data) => setSparklePopoverOpen(data.open)}>
-        <PopoverSurface>{sparklePopoverContent}</PopoverSurface>
-      </Popover>
     </FluentProvider>
   );
 }
@@ -296,7 +368,7 @@ describe('RecordHeader composition — integration (Phase 1 as a whole)', () => 
     });
 
     // Toolbar slot buttons (aria-label = tooltip per HeaderToolbar contract).
-    expect(screen.getByRole('button', { name: 'AI Summary' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: SPARKLE_ACCESSIBLE_NAME })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Related to-dos' })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Notepad' })).toBeInTheDocument();
 
@@ -389,7 +461,7 @@ describe('RecordHeader composition — integration (Phase 1 as a whole)', () => 
     expect(screen.queryByTestId('sparkle-popover-empty')).toBeNull();
 
     // Click the sparkle button — toggles sparklePopoverOpen → true.
-    fireEvent.click(screen.getByRole('button', { name: 'AI Summary' }));
+    fireEvent.click(screen.getByRole('button', { name: SPARKLE_ACCESSIBLE_NAME }));
 
     // Popover surface renders the summary body.
     await waitFor(() => {
@@ -414,7 +486,7 @@ describe('RecordHeader composition — integration (Phase 1 as a whole)', () => 
       expect(screen.queryByTestId('record-header-shell-skeleton')).toBeNull();
     });
 
-    fireEvent.click(screen.getByRole('button', { name: 'AI Summary' }));
+    fireEvent.click(screen.getByRole('button', { name: SPARKLE_ACCESSIBLE_NAME }));
 
     await waitFor(() => {
       expect(screen.getByTestId('sparkle-popover-empty')).toBeInTheDocument();
@@ -423,9 +495,9 @@ describe('RecordHeader composition — integration (Phase 1 as a whole)', () => 
     expect(screen.queryByTestId('sparkle-popover-summary')).toBeNull();
   });
 
-  // ── (6) Refresh icon is unwired ────────────────────────────────────────────
+  // ── (6) The sparkle triggers no Dataverse work (DEF-01 / FR-08a) ──────────
 
-  it('refresh icon click inside sparkle popover is a no-op — no read, no write, no navigate', async () => {
+  it('opening the sparkle popover performs no read, no write, no navigate — and offers no refresh', async () => {
     installXrm({ record: MATTER_RECORD, todoCount: 0, memoCount: 0 });
 
     render(<TestRecordHeader entity={MATTER_ENTITY} recordId={MATTER_ID} />);
@@ -434,29 +506,53 @@ describe('RecordHeader composition — integration (Phase 1 as a whole)', () => 
       expect(screen.queryByTestId('record-header-shell-skeleton')).toBeNull();
     });
 
-    // Open sparkle popover.
-    fireEvent.click(screen.getByRole('button', { name: 'AI Summary' }));
-    await waitFor(() => {
-      expect(screen.getByTestId('sparkle-popover-summary')).toBeInTheDocument();
-    });
-
-    // Snapshot call counts BEFORE clicking refresh so we can assert no new
-    // Dataverse activity happens as a side effect. Baseline includes mount-time
-    // calls (retrieveRecord × 1, retrieveMultipleRecords × 2 for todo + memo).
+    // Snapshot BEFORE opening. Baseline is the mount-time traffic:
+    // retrieveRecord × 1, retrieveMultipleRecords × 2 (to-do + memo badges).
     const priorRetrieveRecord = mockRetrieveRecord.mock.calls.length;
     const priorRetrieveMultiple = mockRetrieveMultipleRecords.mock.calls.length;
     mockNavigateTo.mockClear();
 
-    // Refresh button aria-label = the deferral tooltip. Query by the "Refresh"
-    // substring so we're not coupled to exact copy.
-    const refreshBtn = screen.getByRole('button', { name: /refresh/i });
-    fireEvent.click(refreshBtn);
+    fireEvent.click(screen.getByRole('button', { name: SPARKLE_ACCESSIBLE_NAME }));
+    await waitFor(() => {
+      expect(screen.getByTestId('sparkle-popover-summary')).toBeInTheDocument();
+    });
 
-    // Zero new reads, writes, or navigation calls — refresh is a hard no-op
-    // in R1 per FR-08a.
+    // ── This test previously clicked a REFRESH button. There isn't one. ──────
+    // R1 asserted that a refresh affordance existed but did nothing (DEF-01
+    // defers it until a BFF endpoint exists). At v1.0.10 the hand-rolled
+    // popover was replaced by the shared `<AiSummaryPopover>`, which offers
+    // only a copy-to-clipboard action — so the deferral is now enforced by the
+    // affordance being ABSENT, which is strictly stronger than it being inert.
+    // Asserting its absence keeps DEF-01 covered and fails loudly if someone
+    // adds a refresh control without wiring the endpoint.
+    expect(screen.queryByRole('button', { name: /refresh/i })).toBeNull();
+
+    // The body is rendered from the ALREADY-FETCHED record payload, so opening
+    // the popover must not cost a single extra call. NFR-06 also forbids any
+    // BFF hop — there is no network surface here beyond `Xrm`.
     expect(mockRetrieveRecord.mock.calls.length).toBe(priorRetrieveRecord);
     expect(mockRetrieveMultipleRecords.mock.calls.length).toBe(priorRetrieveMultiple);
     expect(mockNavigateTo).not.toHaveBeenCalled();
+  });
+
+  // ── (6b) The FR-17 negative branch: no `aiSummary` prop → no sparkle ───────
+
+  it('renders no sparkle at all when the consumer omits the aiSummary prop', async () => {
+    installXrm({ record: MATTER_RECORD, todoCount: 0, memoCount: 0 });
+
+    render(<TestRecordHeader entity={MATTER_ENTITY} recordId={MATTER_ID} withSparkle={false} />);
+
+    await waitFor(() => {
+      expect(screen.queryByTestId('record-header-shell-skeleton')).toBeNull();
+    });
+
+    // This is how `RecordHeaderView` hides the sparkle when the summary
+    // attribute is absent from entity metadata — by omitting the prop, not by
+    // supplying a fetch that resolves empty.
+    expect(screen.queryByRole('button', { name: SPARKLE_ACCESSIBLE_NAME })).toBeNull();
+    // The launcher slots are unaffected.
+    expect(screen.getByTestId('header-toolbar-slot-checkmark')).toBeInTheDocument();
+    expect(screen.getByTestId('header-toolbar-slot-annotation')).toBeInTheDocument();
   });
 
   // ── (7) Checkmark navigation → SmartTodo webresource + LAYOUT_1_MODAL ─────
@@ -475,11 +571,18 @@ describe('RecordHeader composition — integration (Phase 1 as a whole)', () => 
     expect(mockNavigateTo).toHaveBeenCalledTimes(1);
     const [pageInput, navOptions] = mockNavigateTo.mock.calls[0];
     expect(pageInput.pageType).toBe('webresource');
-    expect(pageInput.name).toBe(SMARTTODO_WEBRESOURCE_NAME);
-    expect(pageInput.data).toEqual({
-      regardingEntity: MATTER_ENTITY,
-      regardingId: MATTER_ID,
-    });
+    // `webresourceName`, NOT `name` — an R1 gotcha the hook records in its own
+    // call-site comment ("Property name is `webresourceName` (NOT `name`)").
+    // Asserting `.name` here matched `undefined` against the constant.
+    expect(pageInput.webresourceName).toBe(SMARTTODO_WEBRESOURCE_NAME);
+    // `data` is a URL-encoded query STRING, not an object — the second half of
+    // the same v1.0.4 gotcha, and the hook says so at its call site. Asserted
+    // byte-for-byte because this string IS an external API contract (NFR-07):
+    // SmartTodo's own `useLaunchContext` parses `action=openTodos` to pre-filter
+    // the Kanban, so a changed separator or key silently breaks the launch.
+    expect(pageInput.data).toBe(
+      `action=openTodos&regardingType=${MATTER_ENTITY}&regardingId=${MATTER_ID}`
+    );
     // 85% × 85% modal per Layout 1 canonical standard.
     expect(navOptions).toEqual(LAYOUT_1_MODAL);
   });
@@ -500,12 +603,12 @@ describe('RecordHeader composition — integration (Phase 1 as a whole)', () => 
     expect(mockNavigateTo).toHaveBeenCalledTimes(1);
     const [pageInput, navOptions] = mockNavigateTo.mock.calls[0];
     expect(pageInput.pageType).toBe('webresource');
-    expect(pageInput.name).toBe(NOTEPAD_WEBRESOURCE_NAME);
-    expect(pageInput.data).toEqual({
-      regardingEntity: MATTER_ENTITY,
-      regardingId: MATTER_ID,
-    });
-    // 70% × 80% specialized-editor modal per FR-10.
+    expect(pageInput.webresourceName).toBe(NOTEPAD_WEBRESOURCE_NAME);
+    // Query STRING, not an object — and byte-identical, because NFR-07 pins
+    // `regardingEntity`/`regardingId` as the Notepad launch contract.
+    expect(pageInput.data).toBe(`regardingEntity=${MATTER_ENTITY}&regardingId=${MATTER_ID}`);
+    // Compact 25% × 35% editor modal — R1 v1.0.7 deliberately shrank this from
+    // the original 70% × 80%; `NOTEPAD_MODAL` is the source of truth either way.
     expect(navOptions).toEqual(NOTEPAD_MODAL);
   });
 

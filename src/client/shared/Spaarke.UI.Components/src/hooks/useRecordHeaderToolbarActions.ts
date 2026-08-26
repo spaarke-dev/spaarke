@@ -129,19 +129,6 @@ export interface IUseRecordHeaderToolbarActionsOptions {
  * `toolbarProps` is drop-in for `<HeaderToolbar {...toolbarProps} />` (via
  * `RecordHeaderShell`'s `toolbar` prop).
  *
- * `sparklePopoverOpen` / `setSparklePopoverOpen` are controlled Fluent v9
- * `<Popover>` state. The consumer wires them like:
- * ```tsx
- * <Popover open={sparklePopoverOpen} onOpenChange={(_, d) => setSparklePopoverOpen(d.open)}>
- *   <PopoverTrigger disableButtonEnhancement>{sparkleTriggerButton}</PopoverTrigger>
- *   <PopoverSurface>{sparklePopoverContent}</PopoverSurface>
- * </Popover>
- * ```
- * Rationale for split (vs baking Popover into the slot handler): the anchor
- * button MUST live inside `<PopoverTrigger>`. `HeaderToolbar` renders its own
- * button per slot — so the sparkle slot's `onClick` toggles state, and the
- * consumer renders the Popover shell as a sibling. This preserves anchor
- * positioning and keeps the shared `HeaderToolbar` contract unchanged.
  */
 /**
  * Hook result — v1.0.10 minimal surface.
@@ -171,10 +158,16 @@ export interface IUseRecordHeaderToolbarActionsResult {
 // argument that carries modal target/size. We cast the function reference to
 // this two-arg signature at the call site. Widening the shared-lib type is out
 // of scope for this task (would ripple into every Xrm consumer) — runtime
-// behavior is unchanged. The Xrm SDK `pageInput.data` for `pageType:
-// "webresource"` is an OBJECT (key → string map); `navigateTo` serializes it
-// as `key=value&...` internally. Tests verify the object shape (not a
-// pre-encoded URL) at the call site.
+// behavior is unchanged.
+//
+// ⛔ CORRECTED (r2 task 034). This comment used to claim `pageInput.data` for
+// `pageType: "webresource"` is an OBJECT that `navigateTo` serializes
+// internally, and that "tests verify the object shape (not a pre-encoded
+// URL)". Both halves are wrong, and they contradicted the call-site comment
+// ~90 lines below in THIS SAME FILE, which records the v1.0.4 fix: `data` MUST
+// be a URL-encoded query STRING, and an object produces a silent no-op — no
+// error, no modal, nothing. The integration suite trusted this comment over
+// the code and had been red ever since.
 // ─────────────────────────────────────────────────────────────────────────────
 
 type XrmNavigateToTwoArg = (
@@ -196,20 +189,28 @@ type XrmNavigateToTwoArg = (
  * `buildMemoFilterForParent` (`null` for unsupported parents → slot omitted,
  * per FR-16; the checkmark slot mirrors this via `buildTodoFilterForParent`).
  *
- * @example Per-entity PCF consumer (MatterHeaderPcf):
+ * @example Consumer wiring (post-v1.0.10 — the CURRENT contract).
+ *
+ * The hook supplies the launcher slots. The SPARKLE is composed by the consumer
+ * and merged into `toolbarProps`; `HeaderToolbar` then builds the trigger and
+ * the shared `<AiSummaryPopover>` internally, so no consumer imports an icon or
+ * hand-rolls a `<Popover>`. Reference impl: `RecordHeaderView.tsx` (r2 task
+ * 034), which additionally gates the merge on the summary attribute EXISTING in
+ * entity metadata — omit `aiSummary` entirely and no sparkle renders.
+ *
  * ```tsx
- * const { values } = useRecordFieldValues('sprk_matter', matterId, [
- *   'sprk_matternumber', 'sprk_mattername', 'sprk_matterdescription',
- *   'sprk_mattertype', 'sprk_practicearea', 'sprk_recordsummary',
- * ]);
- * const { toolbarProps, sparklePopoverOpen, setSparklePopoverOpen, sparklePopoverContent } =
- *   useRecordHeaderToolbarActions({
- *     entity: 'sprk_matter',
- *     recordId: matterId,
- *     recordSummary: values['sprk_recordsummary'] as string | null,
- *   });
- * // Consumer renders <HeaderToolbar {...toolbarProps} /> plus a <Popover>
- * // controlled by sparklePopoverOpen / setSparklePopoverOpen.
+ * const { toolbarProps } = useRecordHeaderToolbarActions({ entity, recordId, title });
+ *
+ * const onFetchSummary = React.useCallback(
+ *   async () => ({ summary: summaryValue, tldr: null }),
+ *   [summaryValue]
+ * );
+ *
+ * const props = hasSummaryField
+ *   ? { ...toolbarProps, aiSummary: { onFetchSummary, emptyText: RECORD_SUMMARY_EMPTY_TEXT } }
+ *   : toolbarProps;
+ *
+ * <RecordHeaderShell toolbar={props} ... />
  * ```
  */
 export function useRecordHeaderToolbarActions(
