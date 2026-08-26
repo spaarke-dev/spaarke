@@ -102,7 +102,7 @@
     { "name": "sprk_highpriority", "span": 1 },
     { "name": "sprk_description", "span": 3 } ] }
 (summaryField omitted deliberately — it defaults to sprk_recordsummary via RECORDSUMMARY_FIELD.) Set Header title / Show version footer (Yes during QA).</step>
-    <step order="7">Delete the section's other raw fields so they do not render twice; keep sprk_workassignmentnumber (invisible behind the PCF). Save → Publish.</step>
+    <step order="7">MOVE the section other raw fields so they do not render twice; keep sprk_workassignmentnumber (invisible behind the PCF).  They MUST remain on the form (a separate collapsed section, or controls set not-visible) - do NOT remove them from the form. Inline editing stages through the form buffer via Xrm.Page.getAttribute(name).setValue(v), and getAttribute returns null for a field with no control on the form, so requireFormAttribute throws "Field not on form". Corrected 2026-08-26: the shipped R1 Matter form keeps every edited field on the form; only the read-only sparkle field is absent. Save → Publish.</step>
     <step order="8">Run the per-form acceptance QA on a live Work Assignment record (ui-tests below), including the loud-failure negative test with a real entity field absent from the form.</step>
     <step order="9">Wave-1 measurement: reuse task 050's bundle/TTI numbers if already captured for this wave (cross-reference them), otherwise measure here: bundle.js bytes after npm run build:prod; TTI via browser perf trace cold + warm on the Work Assignment form.</step>
     <step order="10">Write QA evidence (screenshots light + dark, criterion checklist, measurements or cross-reference) to projects/record-header-and-notepad-r2/notes/rollout-sprk_workassignment.md.</step>
