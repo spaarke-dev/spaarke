@@ -258,9 +258,7 @@ describe('materializeMany — a whole-document change list (8 changes, mixed anc
       result.current.materializeMany(edits, PROV);
     });
     // FR-C06 (task 053): the two legacy prose changes are PROPOSED, so they are not pending yet.
-    expect(result.current.pending.map(p => p.ledgerRef)).toEqual(
-      ANCHORED_INDEXES.map(i => PROV.ledgerRef + '#' + i)
-    );
+    expect(result.current.pending.map(p => p.ledgerRef)).toEqual(ANCHORED_INDEXES.map(i => PROV.ledgerRef + '#' + i));
     act(() => {
       result.current.applyLegacyProposal();
     });

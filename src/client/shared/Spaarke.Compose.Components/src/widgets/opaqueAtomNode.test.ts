@@ -245,8 +245,7 @@ describe('R4 opaque-atom nodes (task 021, FR-02)', () => {
     // who recovers a draft saw the label eaten by its own placeholder. Task 056 carries objects through the
     // save, which makes it worth fixing on its own terms rather than leaving as a cosmetic oddity: an
     // attribute whose value is the UI's own label is a payload waiting to be trusted by the next task.
-    const objectAtom =
-      '<span class="compose-atom" data-atom-kind="object" contenteditable="false"></span>';
+    const objectAtom = '<span class="compose-atom" data-atom-kind="object" contenteditable="false"></span>';
 
     it('an object atom does not absorb its own placeholder label as display text', () => {
       const first = makeEditor(`<p>Exhibit ${objectAtom} above.</p>`);

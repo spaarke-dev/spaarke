@@ -1217,8 +1217,9 @@ describe('ComposeEditor pending-redline affordances (ADR-021 dark mode)', () => 
     // editor raises the question, the host answers it through the handle. These tests use legacy
     // prose fixtures and are about the accept/reject SURFACE, so the answer is always "place it";
     // the ComposeWorkspace ConfirmModal that asks a real user is covered in its own suites.
-    const [legacyProposal, setLegacyProposal] =
-      React.useState<import('./usePendingRedline').PendingRedlineLegacyProposal | null>(null);
+    const [legacyProposal, setLegacyProposal] = React.useState<
+      import('./usePendingRedline').PendingRedlineLegacyProposal | null
+    >(null);
     const handleRef = editorRef as React.RefObject<import('../ComposeEditor').ComposeEditorHandle | null>;
     React.useEffect(() => {
       if (legacyProposal !== null) handleRef.current?.applyLegacyRedlineProposal();
@@ -1334,8 +1335,9 @@ describe('ComposeEditor rationale-first accept/reject surface (FR-14, task 031, 
     editorRef: React.RefObject<import('../ComposeEditor').ComposeEditorHandle | null>;
     html: string;
   }): React.JSX.Element {
-    const [proposal, setProposal] =
-      React.useState<import('./usePendingRedline').PendingRedlineLegacyProposal | null>(null);
+    const [proposal, setProposal] = React.useState<import('./usePendingRedline').PendingRedlineLegacyProposal | null>(
+      null
+    );
     React.useEffect(() => {
       if (proposal !== null) editorRef.current?.applyLegacyRedlineProposal();
     }, [proposal, editorRef]);

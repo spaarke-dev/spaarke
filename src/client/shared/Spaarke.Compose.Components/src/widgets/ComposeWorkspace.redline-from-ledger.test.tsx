@@ -591,10 +591,7 @@ describe('r8 task 055: a whole-document review flag resolves its anchor determin
 
     const flags = latestReviewFlagAnnotations();
     expect(flags.map(f => anchorOf(f).paraId)).toEqual(['AAAA0042', 'AAAA0041']);
-    expect(flags.map(f => f.body)).toEqual([
-      'Indemnity is one-way; flag for negotiation.',
-      'Cap should be mutual.',
-    ]);
+    expect(flags.map(f => f.body)).toEqual(['Indemnity is one-way; flag for negotiation.', 'Cap should be mutual.']);
   });
 
   it('a text-only flag still registers, with no fabricated paraId (the shipped path is unchanged)', async () => {
