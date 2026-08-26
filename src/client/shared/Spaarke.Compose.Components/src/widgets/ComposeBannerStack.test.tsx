@@ -597,11 +597,7 @@ describe('ComposeBannerStack — FR-C07: the unresolved-target banner never blam
   }
 
   it.each(
-    KINDS.flatMap(kind =>
-      SOURCES.flatMap(source =>
-        [false, true].map(batched => [kind, source, batched] as const)
-      )
-    )
+    KINDS.flatMap(kind => SOURCES.flatMap(source => [false, true].map(batched => [kind, source, batched] as const)))
   )('renders a specific, non-empty message for %s / %s (batched: %s)', (kind, source, batched) => {
     renderStack({ pendingRedlineError: redlineError(kind, source, batched) });
     const text = screen.getByTestId('compose-redline-error').textContent ?? '';

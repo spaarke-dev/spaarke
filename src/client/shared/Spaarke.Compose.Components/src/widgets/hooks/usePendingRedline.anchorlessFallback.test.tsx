@@ -106,11 +106,7 @@ function makeDoc(): { editor: Editor; referenceMap: ParaIdMapEntry[] } {
       '<p>2. Indemnity. The receiving party shall indemnify the disclosing party.</p>' +
       '<p>5. Carve-outs. The disclosing party shall indemnify the receiving party.</p>',
   });
-  const referenceMap = [
-    entry(0, 'AAAA0001', '1', [1]),
-    entry(1, 'AAAA0002', '2', [2]),
-    entry(2, 'AAAA0005', '5', [5]),
-  ];
+  const referenceMap = [entry(0, 'AAAA0001', '1', [1]), entry(1, 'AAAA0002', '2', [2]), entry(2, 'AAAA0005', '5', [5])];
   stampParaIds(editor, referenceMap);
   return { editor, referenceMap };
 }
@@ -350,7 +346,10 @@ describe('usePendingRedline — the bounded confirmable fallback (FR-C06)', () =
     // FR-C06's whole point: that second, looser pass is exactly the reach that must be confirmed.
     let status: string | undefined;
     act(() => {
-      status = result.current.materialize({ target_text: 'thirty  days   notice', new_text: 'sixty days notice' }, PROV);
+      status = result.current.materialize(
+        { target_text: 'thirty  days   notice', new_text: 'sixty days notice' },
+        PROV
+      );
     });
 
     expect(status).toBe('proposed');

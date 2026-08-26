@@ -105,8 +105,7 @@ const DATE_FIELD_ATOM =
  * A field the server REFUSED to make carryable — a nested `{ IF { PAGE } = 1 … }` or one with no
  * recoverable instruction. Note what is missing: `data-field-instr`. Its ABSENCE is the whole contract.
  */
-const UNCARRYABLE_FIELD_ATOM =
-  '<span class="compose-atom" data-atom-kind="field" contenteditable="false">1</span>';
+const UNCARRYABLE_FIELD_ATOM = '<span class="compose-atom" data-atom-kind="field" contenteditable="false">1</span>';
 
 /** The `field` payload the loaded (server-projected) model carries for the REF atom above. */
 const REF_LOADED_RUN: ComposeInlineRun = {
@@ -430,9 +429,7 @@ describe('task 057 — a field in an EDITED paragraph reaches the posted model',
     editor.commands.insertContentAt(editor.state.doc.content.size - 1, ' X');
 
     const loaded: ComposeContentModel = {
-      blocks: [
-        { kind: 'Paragraph', paraId: 'AAAA0001', runs: [{ text: 'Clause ' }, { text: ' follows.' }] },
-      ],
+      blocks: [{ kind: 'Paragraph', paraId: 'AAAA0001', runs: [{ text: 'Clause ' }, { text: ' follows.' }] }],
     };
 
     const { model } = buildImportedContentModel(editor, loaded, snapshot, {

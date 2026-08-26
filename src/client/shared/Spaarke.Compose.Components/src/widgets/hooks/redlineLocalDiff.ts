@@ -156,8 +156,7 @@ export function narrowAnchoredSpan(
   // An entirely-rewritten paragraph is already "local": the changed region IS the paragraph, and the
   // span below reproduces `paragraphSpan` exactly. No special case needed.
   const from = range.start < index.positions.length ? index.positions[range.start] : paragraphSpan.to;
-  const to =
-    range.endCurrent > range.start ? index.positions[range.endCurrent - 1] + 1 : from;
+  const to = range.endCurrent > range.start ? index.positions[range.endCurrent - 1] + 1 : from;
 
   return {
     span: { from, to },

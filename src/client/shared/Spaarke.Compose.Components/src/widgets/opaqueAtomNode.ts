@@ -318,10 +318,12 @@ export const ComposeInlineAtomNode = Node.create<ComposeInlineAtomOptions>({
         parseHTML: (element: HTMLElement) =>
           element.hasAttribute('data-atom-display')
             ? element.getAttribute('data-atom-display')
-            : (element.textContent || null),
+            : element.textContent || null,
         renderHTML: attributes =>
           atomRendersAsItself(attributes.kind as string | null | undefined)
-            ? (attributes.displayText ? { 'data-atom-display': attributes.displayText as string } : {})
+            ? attributes.displayText
+              ? { 'data-atom-display': attributes.displayText as string }
+              : {}
             : { 'data-atom-display': (attributes.displayText as string | null) ?? '' },
       },
       symFont: {

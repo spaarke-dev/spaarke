@@ -228,8 +228,8 @@ describe('placeAdvisoryComments — the shipped sectionRef/legacy behaviour is u
     // paragraph (a mark cannot cross a block boundary), all carrying the SAME comment id.
     expect(anchoredTexts()).toEqual([CLAUSE_41, CLAUSE_42, CLAUSE_43]);
     const ids = new Set(
-      Array.from(screen.getByRole('textbox').querySelectorAll('span[data-comment-id]')).map(
-        n => n.getAttribute('data-comment-id')
+      Array.from(screen.getByRole('textbox').querySelectorAll('span[data-comment-id]')).map(n =>
+        n.getAttribute('data-comment-id')
       )
     );
     expect(ids.size).toBe(1);
@@ -252,9 +252,7 @@ describe('placeAdvisoryComments — the shipped sectionRef/legacy behaviour is u
     const ref = React.createRef<ComposeEditorHandle>();
     await mount(ref, 'advisory-additive-4');
 
-    const result = ref.current!.placeAdvisoryComments([
-      { targetText: CLAUSE_41, explanation: 'Prose only.' },
-    ]);
+    const result = ref.current!.placeAdvisoryComments([{ targetText: CLAUSE_41, explanation: 'Prose only.' }]);
 
     expect(result.placed).toBe(1);
     expect(anchoredTexts()).toEqual([CLAUSE_41]);

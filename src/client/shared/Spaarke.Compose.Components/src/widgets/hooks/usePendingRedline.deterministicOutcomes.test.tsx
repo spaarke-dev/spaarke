@@ -153,7 +153,10 @@ beforeEach(() => {
 // ---------------------------------------------------------------------------
 describe('computeLocalEditRange (FR-C05 outcome 1 — the local diff, as pure string arithmetic)', () => {
   it('isolates a changed phrase and snaps the region to WHOLE WORDS', () => {
-    const range = computeLocalEditRange('the cap shall be twelve months of fees', 'the cap shall be twenty-four months of fees');
+    const range = computeLocalEditRange(
+      'the cap shall be twelve months of fees',
+      'the cap shall be twenty-four months of fees'
+    );
     expect(range).not.toBeNull();
     expect('the cap shall be twelve months of fees'.slice(range!.start, range!.endCurrent)).toBe('twelve');
     expect('the cap shall be twenty-four months of fees'.slice(range!.start, range!.endReplacement)).toBe(

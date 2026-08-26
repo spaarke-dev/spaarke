@@ -51,7 +51,12 @@ import { DeletionMark } from '../marks/DeletionMark';
 import { CommentAnchorMark } from '../marks/CommentAnchorMark';
 import { COMPOSE_R3_PARAID } from '../paraIdExtension';
 import { collectBlocks } from '../importedRevisions';
-import { stampParaIds, captureParaIdSnapshot, buildContentModel, buildImportedContentModel } from '../../utils/docxBridge';
+import {
+  stampParaIds,
+  captureParaIdSnapshot,
+  buildContentModel,
+  buildImportedContentModel,
+} from '../../utils/docxBridge';
 import { usePendingRedline, collectMarkedRanges } from './usePendingRedline';
 import { classifyUnidentifiedTarget } from './anchorlessReplayFallback';
 import type { ComposeContentModel, ParaIdMapEntry } from '../../types/compose-contracts';

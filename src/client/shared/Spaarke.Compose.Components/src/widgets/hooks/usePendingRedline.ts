@@ -521,10 +521,7 @@ export function resolveAnchoredSpans(
   anchor: { target_para_id?: string | null; target_ref?: string | null } | undefined,
   referenceMap: readonly ParaIdMapEntry[] | undefined
 ): AnchorResolveResult | null {
-  const resolution = resolveAnchorParaIds(
-    { paraId: anchor?.target_para_id, ref: anchor?.target_ref },
-    referenceMap
-  );
+  const resolution = resolveAnchorParaIds({ paraId: anchor?.target_para_id, ref: anchor?.target_ref }, referenceMap);
   // No anchor at all — the ONLY route back to the text path.
   if (resolution.kind === 'none') return null;
   if (resolution.kind === 'not_found') return { ok: false, kind: 'not_found', matchCount: 0 };
@@ -1202,7 +1199,14 @@ export function usePendingRedline(
           // "is this the clause?". One surface, one answer path, two honest reasons.
           deferredProposalRef.current = [
             placement.reason === 'unidentified-target'
-              ? { payload, ledgerRef, bindingId, turn, question: 'unidentified-target', intendedRange: placement.intendedRange }
+              ? {
+                  payload,
+                  ledgerRef,
+                  bindingId,
+                  turn,
+                  question: 'unidentified-target',
+                  intendedRange: placement.intendedRange,
+                }
               : { payload, ledgerRef, bindingId, turn, question: 'anchorless-replay' },
           ];
           setLegacyProposal({
