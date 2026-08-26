@@ -37,5 +37,28 @@
  *   blanking the header (the RS-1 failure mode, third occurrence).
  *   DEF-2 `layoutJson` moved to `of-type="Multiple"` - the classic form
  *   designer caps SingleLine.Text at 100 characters, below any real layout.
+ *
+ * 1.1.3 (2026-08-26) - NFR-02 bundle-ceiling fix. `DateField` now edits through
+ *   the Fluent `Input` in native date mode (`type="date"` /
+ *   `type="datetime-local"`), the pattern already shipping in
+ *   `Spaarke.UI.Components/src/components/CreateWorkAssignmentWizard/EnterInfoStep.tsx`,
+ *   replacing `@fluentui/react-datepicker-compat`. `Input` lives inside the
+ *   `@fluentui/react-components` umbrella that `pcf-scripts` externalizes onto
+ *   the platform library, so it costs ZERO bundle bytes; the picker imported
+ *   its deps by their granular package names, none of which match that
+ *   externals regex, so webpack bundled a second private copy of Fluent
+ *   internals the host already serves. bundle.js: 378,457 -> 99,068 bytes
+ *   (-73.8%), now 40% of the 250,000-byte ceiling. Zero `datepicker-compat` /
+ *   `calendar-compat` references remain in the emitted bundle.
+ *   Two earlier attempts on this defect FAILED and must not be retried:
+ *   lazy-loading `DateField` (pcf-scripts emits one chunk, so `import()`
+ *   inlines back and measured LARGER) and a custom webpack `externals` block
+ *   for the granular `@fluentui/*` packages (built clean, passed static symbol
+ *   verification, then crashed on mount with "Minified React error #31" - see
+ *   notes/decisions/033-nfr02-externals-runtime-failure.md).
+ *   The FR-10 renderer contract is unchanged; `DateField` is now a plain
+ *   staged-draft renderer (type stages, Enter/blur commits) rather than the
+ *   commit-on-calendar-selection special case, and all wall-clock <-> `Date`
+ *   conversion goes through LOCAL calendar fields so no value shifts a day.
  */
-export const CONTROL_VERSION = '1.1.2';
+export const CONTROL_VERSION = '1.1.3';

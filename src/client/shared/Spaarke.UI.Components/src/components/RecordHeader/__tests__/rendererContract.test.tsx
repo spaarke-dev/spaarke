@@ -39,10 +39,14 @@
  *    the suite's only `stageDraft: undefined` ("immediate-commit") adapter.
  *    The blur assertion branches accordingly (see the blur test's comment);
  *    it is asserted for all six, never skipped for any.
- *  - `DateField` is driven in `format="datetime"` mode so its time-of-day
- *    input supplies a genuinely *pending* draft (calendar-day selection, like
- *    OptionSetField's, commits immediately by design — that path is covered in
- *    `DateField.test.tsx`).
+ *  - `DateField` is driven in `format="datetime"` mode, where its editor is a
+ *    single Fluent `Input type="datetime-local"` carrying both halves of the
+ *    value. Its draft is genuinely *pending* — typing stages, Enter/blur
+ *    commits — so it needs no allowance beyond the wall-clock string shape of
+ *    its draft text. (Before the NFR-02 rework it used
+ *    `@fluentui/react-datepicker-compat` plus a companion time input, and
+ *    calendar-day selection committed immediately; that special case retired
+ *    with the picker.)
  *  - `BooleanField` stages its draft by toggling the Switch, then commits on
  *    Enter/blur.
  *  - Per **D-10**, all six ACCEPT `required` but only `TextField` renders the
@@ -76,9 +80,23 @@ const STATUS_OPTIONS = [
 /** Fixed instant so formatted-output expectations are deterministic. */
 const DATETIME_ISO = '2026-08-21T14:30:00.000Z';
 
-/** Mirrors DateField's `toTimeInputValue` so we can predict the reverted draft. */
-const toTimeInputValue = (d: Date): string =>
-  `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`;
+/**
+ * Mirrors DateField's `toInputValue` so we can predict the reverted draft.
+ * LOCAL calendar fields on purpose — a `datetime-local` input has no zone, and
+ * building this from `toISOString()` would shift the day (the failure mode
+ * DateField's own suite guards directly).
+ */
+const toDateTimeInputValue = (d: Date): string =>
+  `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}` +
+  `T${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`;
+
+/** The committed value's wall-clock form, and the draft staged on top of it. */
+const DATETIME_LOCAL = toDateTimeInputValue(new Date(DATETIME_ISO));
+// Same local DAY, a different time-of-day. 14:30 UTC cannot be 09:15 in any
+// real zone (that would need a -05:15 offset), so the staged draft is always
+// genuinely different from the committed value — without which `commit` would
+// short-circuit as a no-op and the commit assertions would see zero saves.
+const DATETIME_LOCAL_STAGED = `${DATETIME_LOCAL.slice(0, 10)}T09:15`;
 
 /** A resolved `onSave` double. */
 const makeSave = (): jest.Mock => jest.fn().mockResolvedValue(undefined);
@@ -299,24 +317,24 @@ const dateFieldAdapter: IContractAdapter = {
     });
   },
   stageDraft: async () => {
-    fireEvent.change(byId('record-header-date-field-time-input'), { target: { value: '09:15' } });
+    fireEvent.change(byId('record-header-date-field-input'), { target: { value: DATETIME_LOCAL_STAGED } });
   },
   commitGesture: async () => {
-    fireEvent.keyDown(byId('record-header-date-field-time-input'), { key: 'Enter' });
+    fireEvent.keyDown(byId('record-header-date-field-input'), { key: 'Enter' });
   },
   blurEditor: async () => {
-    fireEvent.blur(byId('record-header-date-field-time-input'));
+    fireEvent.blur(byId('record-header-date-field-input'));
   },
   escapeEditor: async () => {
-    fireEvent.keyDown(byId('record-header-date-field-time-input'), { key: 'Escape' });
+    fireEvent.keyDown(byId('record-header-date-field-input'), { key: 'Escape' });
   },
   assertPayload: payload => {
     expect(payload).toBeInstanceOf(Date);
     expect((payload as Date).getHours()).toBe(9);
     expect((payload as Date).getMinutes()).toBe(15);
   },
-  draftText: () => (byId('record-header-date-field-time-input') as HTMLInputElement).value,
-  revertedDraftText: toTimeInputValue(new Date(DATETIME_ISO)),
+  draftText: () => (byId('record-header-date-field-input') as HTMLInputElement).value,
+  revertedDraftText: DATETIME_LOCAL,
   spinnerTestId: 'record-header-date-field-spinner',
   rendersRequiredMarker: false,
 };

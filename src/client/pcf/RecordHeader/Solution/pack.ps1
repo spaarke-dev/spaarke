@@ -12,7 +12,7 @@
 #   2. Copy out/controls/*/{bundle.js,ControlManifest.xml,styles.css}
 #      to Solution/Controls/sprk_Spaarke.Records.RecordHeader/
 #   3. Zip solution.xml + customizations.xml + [Content_Types].xml + Controls/*
-#      to Solution/bin/RecordHeaderPcf_v1.1.1.0.zip
+#      to Solution/bin/RecordHeaderPcf_v1.1.3.0.zip
 #
 # Requires: Node/npm on PATH. Does NOT require pac CLI (uses System.IO.Compression).
 
@@ -28,7 +28,7 @@ Set-Location $PSScriptRoot
 # ADR-020 version-sync location 5 of 5. Keep in lockstep with:
 #   control/ControlManifest.Input.xml, control/version.ts, Solution/solution.xml,
 #   Solution/Controls/sprk_Spaarke.Records.RecordHeader/ControlManifest.xml
-$version = "1.1.2.0"
+$version = "1.1.3.0"
 $solutionName = "RecordHeaderPcf"
 $controlSchemaName = "sprk_Spaarke.Records.RecordHeader"
 # ABSOLUTE paths throughout. `Set-Location` updates PowerShell's location but NOT

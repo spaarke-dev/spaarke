@@ -7,7 +7,7 @@
  *   - Wraps `<RecordHeaderView>` in a `<FluentProvider>` so Fluent v9 CSS
  *     variables (`--colorNeutralBackground1`, `--shadow16`, …) are injected
  *     into portal-rendered surfaces (`Popover`, `Tooltip`, `Menu`, `Dialog`,
- *     and the `DatePicker` callout that `DateField` opens).
+ *     and the option-set `Dropdown` listbox).
  *   - Resolves the current theme (light / dark / high-contrast) via the
  *     shared `themeStorage` utility.
  *

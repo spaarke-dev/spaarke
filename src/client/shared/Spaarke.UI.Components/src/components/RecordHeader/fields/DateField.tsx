@@ -7,10 +7,49 @@
  * touches `Xrm`/`ComponentFramework` itself (ADR-012 context-agnostic
  * boundary). Read mode shows a locale-formatted date (and time, in
  * `'datetime'` mode) via `Intl.DateTimeFormat` — no hard-coded locale, no
- * manual pattern strings. Edit mode uses the Fluent v9 `DatePicker`
- * (`@fluentui/react-datepicker-compat`) plus, in `'datetime'` mode, a native
- * `Input type="time"` alongside it (the lightest token-pure, React-16-safe
- * option for a time-of-day control — no second picker package).
+ * manual pattern strings.
+ *
+ * ── Editor: `Input type="date"` / `type="datetime-local"` (NFR-02) ──────────
+ * Edit mode uses the Fluent v9 `Input` in native date mode — the pattern
+ * already shipping in this library at
+ * `components/CreateWorkAssignmentWizard/EnterInfoStep.tsx` — which renders
+ * the BROWSER's own calendar/clock inside Fluent's `Input` chrome:
+ *   - `format === 'date'`     → `type="date"`           (`yyyy-MM-dd`)
+ *   - `format === 'datetime'` → `type="datetime-local"` (`yyyy-MM-ddTHH:mm`)
+ *
+ * This deliberately replaces `@fluentui/react-datepicker-compat`, which cost
+ * ~285 KB of bundle (breaching NFR-02's 250 KB ceiling by +51%) — almost all
+ * of it a SECOND private copy of Fluent internals the Power Apps host already
+ * serves, because `pcf-scripts` externalizes only the `@fluentui/react-components`
+ * umbrella and the picker imports its deps by their granular package names.
+ * `Input` and `Field` live INSIDE that umbrella, so this editor costs zero
+ * bundle bytes. Do NOT reintroduce the picker, and do NOT "fix" this with a
+ * custom webpack `externals` block — that was tried and crashes at runtime
+ * with "Minified React error #31" (see
+ * `projects/record-header-and-notepad-r2/notes/decisions/033-nfr02-externals-runtime-failure.md`
+ * and the ⛔ comment in the RecordHeader PCF `webpack.config.js`).
+ *
+ * ── Timezone contract (the classic day-shift failure) ───────────────────────
+ * Native date inputs speak WALL-CLOCK time with no zone; Dataverse speaks
+ * ISO-8601, often UTC. Every conversion here therefore goes through the
+ * LOCAL calendar fields (`getFullYear`/`getMonth`/`getDate`/`getHours`/
+ * `getMinutes` out, `new Date(y, m, d, h, min)` in) so the string in the input
+ * always names the same day the read-mode cell displays via
+ * `Intl.DateTimeFormat(undefined, …)`.
+ *
+ * Two traps this avoids, both of which shift the date by a day:
+ *   1. `new Date('2026-08-21')` — a BARE date string is defined by ES2015+ to
+ *      parse as UTC midnight, so it renders as Aug 20 anywhere west of UTC.
+ *      `parseDateValue` special-cases that shape and builds LOCAL midnight
+ *      instead. (Dataverse Web API returns exactly this shape for
+ *      `DateOnly`-behavior attributes; `Xrm.Page.getAttribute().getValue()`
+ *      returns a `Date` at local midnight — the two now agree.)
+ *   2. `date.toISOString().slice(0, 10)` for the input value — that converts
+ *      to UTC first, same shift in the other direction. `toInputValue` uses
+ *      the local getters.
+ * A date-time string carrying an explicit offset (`…Z`, `+05:00`) is a real
+ * instant and is honored as-is; a local-form string (`2026-08-21T00:00:00`) is
+ * already local per spec.
  *
  * Contract (FR-10, copied verbatim from {@link TextField}'s shape/semantics):
  *  - Label above (regular weight, neutral foreground — v1.0.4 typography)
@@ -21,36 +60,32 @@
  *  - CSS `grid-column: span N` self-applied on root for `FieldGrid` (FR-03)
  *  - `editable = typeof onSave === 'function' && disabled !== true`
  *  - Enter commits, Escape cancels (draft discarded, edit exited), blur
- *    commits; tiny `Spinner` + disabled inputs while saving; on save
+ *    commits; tiny `Spinner` + disabled input while saving; on save
  *    rejection the draft reverts to the prior value and edit mode is NOT
  *    exited (mirrors TextField.tsx:150-153)
+ *  - `filled-lighter` appearance, `size="small"` — matching every sibling
  *  - Per D-10 / FR-11: `required` is accepted for prop-shape parity with
  *    TextField but renders NOTHING — the `*` marker is deliberately
  *    TextField-only. `required` is intentionally never read below.
  *
- * Picking a calendar day (or confirming a typed time) commits immediately —
- * this matches the form-buffer dirty-state UX (`Xrm.Page.getAttribute(n)
- * .setValue(v)`, staged on selection, per project CLAUDE.md) rather than
- * requiring a separate Enter after a picker selection. Enter/Escape/blur on
- * the date input only drive the DateField-level commit/cancel contract while
- * the calendar popup itself is CLOSED — while the popup is open, those keys
- * are left to the popup's own (Fluent-authored) keyboard navigation so
- * arrow-key day browsing and Escape-to-close-popup keep working.
+ * Typing/picking a value STAGES a draft; Enter or blur COMMITS it. That makes
+ * DateField a plain staged-draft renderer exactly like TextField — the old
+ * "calendar selection commits immediately" special case belonged to the popup
+ * picker and is gone with it. Committing straight from the native input's
+ * per-keystroke `change` events would fire a save for every half-typed date.
  *
  * `onSave` receives a `Date | null` (the renderer domain) — the caller's
  * form-buffer payload type for a Dataverse DateAndTime/DateOnly attribute is
- * already a `Date`, so no serialization happens here. The value-TYPE differs
- * from TextField's `string`; the commit/cancel/revert SEMANTICS are
- * identical (task 015's contract-parity suite asserts behavior, not payload
- * uniformity).
+ * already a `Date`, so no serialization happens here, and staging goes through
+ * the form buffer (`Xrm.Page.getAttribute(n).setValue(v)`), never
+ * `Xrm.WebApi.updateRecord`. The value-TYPE differs from TextField's `string`;
+ * the commit/cancel/revert SEMANTICS are identical (task 015's contract-parity
+ * suite asserts behavior, not payload uniformity).
  *
  * Per ADR-021: Fluent v9 semantic tokens only. Per ADR-022 (React 16/17
- * boundary): plain functional component, no React-18-exclusive APIs —
- * `@fluentui/react-datepicker-compat` peer-supports React >=16.14.0 <20.0.0
- * and is Griffel/token-based (verified against the published package before
- * adding it as a dependency — see task 010 notes).
+ * boundary): plain functional component, no React-18-exclusive APIs.
  *
- * @see FR-06, FR-10, FR-11 record-header-and-notepad-r2 spec
+ * @see FR-06, FR-10, FR-11, NFR-02 record-header-and-notepad-r2 spec
  * @see ADR-021 Fluent UI v9 design system
  * @see ADR-022 PCF platform libraries
  * @see ADR-012 shared component library (context-agnostic renderers)
@@ -72,7 +107,6 @@
  */
 import * as React from 'react';
 import { Input, Spinner, makeStyles, mergeClasses, tokens } from '@fluentui/react-components';
-import { DatePicker } from '@fluentui/react-datepicker-compat';
 
 /**
  * Props for {@link DateField}.
@@ -110,15 +144,35 @@ export interface IDateFieldProps {
 
 export const EMPTY_VALUE_PLACEHOLDER = '—';
 
+/** A bare `yyyy-MM-dd` string — the Dataverse Web API shape for `DateOnly` behavior. */
+const BARE_DATE_RE = /^(\d{4})-(\d{2})-(\d{2})$/;
+
+/** What a native `date` / `datetime-local` input hands back on change. */
+const INPUT_VALUE_RE = /^(\d{4})-(\d{2})-(\d{2})(?:T(\d{2}):(\d{2}))?/;
+
+const pad2 = (n: number): string => String(n).padStart(2, '0');
+
 /**
  * Parses `value` into a `Date`, distinguishing "empty" (no warning) from
  * "unparseable" (warn once per changed input — NFR-10 graceful degradation).
+ *
+ * A BARE `yyyy-MM-dd` is built as LOCAL midnight rather than handed to
+ * `new Date(string)`, which the spec defines as UTC midnight for that shape —
+ * see the timezone section of the file-level JSDoc.
  */
 function parseDateValue(value: string | Date | null | undefined): { date: Date | null; invalid: boolean } {
   if (value === null || value === undefined || value === '') {
     return { date: null, invalid: false };
   }
-  const date = value instanceof Date ? value : new Date(value);
+  let date: Date;
+  if (value instanceof Date) {
+    date = value;
+  } else {
+    const bare = BARE_DATE_RE.exec(value);
+    date = bare
+      ? new Date(Number(bare[1]), Number(bare[2]) - 1, Number(bare[3]), 0, 0, 0, 0)
+      : new Date(value);
+  }
   return isNaN(date.getTime()) ? { date: null, invalid: true } : { date, invalid: false };
 }
 
@@ -129,31 +183,41 @@ function formatDisplayValue(date: Date, format: 'date' | 'datetime'): string {
   return new Intl.DateTimeFormat(undefined, options).format(date);
 }
 
-/** Merge a newly-picked calendar date (Y/M/D) onto the draft's existing time-of-day (H/M). */
-function mergeDatePart(base: Date | null, newDatePart: Date | null): Date | null {
-  if (!newDatePart) return null;
-  const merged = new Date(newDatePart);
-  if (base) {
-    merged.setHours(base.getHours(), base.getMinutes(), 0, 0);
-  } else {
-    merged.setHours(0, 0, 0, 0);
-  }
-  return merged;
-}
-
-/** Merge a newly-typed HH:mm time-of-day onto the draft's existing date-part (Y/M/D). */
-function mergeTimePart(base: Date | null, hours: number, minutes: number): Date {
-  const merged = base ? new Date(base) : new Date();
-  merged.setHours(hours, minutes, 0, 0);
-  return merged;
-}
-
-/** Format a `Date` as the `HH:mm` string a native `<input type="time">` expects. */
-function toTimeInputValue(date: Date | null): string {
+/**
+ * `Date` → the wall-clock string a native `date` / `datetime-local` input
+ * expects, read off the LOCAL calendar fields so it names the same day the
+ * read cell shows. Never `toISOString()` — that converts to UTC first.
+ */
+export function toInputValue(date: Date | null, format: 'date' | 'datetime'): string {
   if (!date) return '';
-  const hh = String(date.getHours()).padStart(2, '0');
-  const mm = String(date.getMinutes()).padStart(2, '0');
-  return `${hh}:${mm}`;
+  const datePart = `${date.getFullYear()}-${pad2(date.getMonth() + 1)}-${pad2(date.getDate())}`;
+  return format === 'datetime'
+    ? `${datePart}T${pad2(date.getHours())}:${pad2(date.getMinutes())}`
+    : datePart;
+}
+
+/**
+ * The native input's wall-clock string → `Date`, constructed from LOCAL parts
+ * (`new Date(y, m, d, …)`) so no zone conversion happens on the way in.
+ *
+ * In `'date'` mode the input carries no time-of-day, so the previous draft's
+ * time-of-day is preserved (midnight when there was none) — the same merge the
+ * retired picker's `mergeDatePart` performed, which keeps a `DateOnly`
+ * attribute round-tripping to the instant it was read at.
+ *
+ * Returns `null` for an empty or incomplete value (native date inputs report
+ * `''` until every segment is filled, and the input's own clear affordance
+ * produces `''` too — both mean "no value").
+ */
+export function fromInputValue(raw: string, format: 'date' | 'datetime', base: Date | null): Date | null {
+  if (!raw) return null;
+  const m = INPUT_VALUE_RE.exec(raw);
+  if (!m) return null;
+  const [, y, mo, d, h, mi] = m;
+  const hours = format === 'datetime' ? Number(h ?? 0) : base ? base.getHours() : 0;
+  const minutes = format === 'datetime' ? Number(mi ?? 0) : base ? base.getMinutes() : 0;
+  const parsed = new Date(Number(y), Number(mo) - 1, Number(d), hours, minutes, 0, 0);
+  return isNaN(parsed.getTime()) ? null : parsed;
 }
 
 const useDateFieldStyles = makeStyles({
@@ -203,7 +267,13 @@ const useDateFieldStyles = makeStyles({
     display: 'flex',
     alignItems: 'center',
     columnGap: tokens.spacingHorizontalXS,
-    flexWrap: 'wrap',
+    minWidth: 0,
+  },
+  editInput: {
+    // The native date/datetime segments need room; without this the Input
+    // shrinks to its flex-basis inside a narrow FieldGrid cell and clips.
+    flexGrow: 1,
+    minWidth: 0,
   },
 });
 
@@ -226,22 +296,16 @@ export const DateField: React.FC<IDateFieldProps> = ({ label, value, span, forma
   const [editing, setEditing] = React.useState(false);
   const [draft, setDraft] = React.useState<Date | null>(parsedValue);
   const [saving, setSaving] = React.useState(false);
-  // Tracks the DatePicker's OWN calendar-popup visibility (controlled) so
-  // DateField-level Enter/Escape/blur only fire while the popup is closed —
-  // otherwise the popup's own keyboard navigation and dismiss handling own
-  // those keys.
-  const [pickerOpen, setPickerOpen] = React.useState(false);
 
   // Focus-on-entering-edit-mode via ref + effect rather than the native
   // `autoFocus` attribute: `autoFocus` fires `.focus()` synchronously during
   // React's commitMount, which collides with Fluent's `useEventCallback`
-  // render-phase guard on DatePicker's internal onFocus handler ("Cannot
-  // call an event handler while rendering"). A passive effect runs after
-  // commit finishes, avoiding the collision while producing the same UX.
-  const dateInputRef = React.useRef<HTMLInputElement>(null);
+  // render-phase guard. A passive effect runs after commit finishes, avoiding
+  // the collision while producing the same UX.
+  const inputRef = React.useRef<HTMLInputElement>(null);
   React.useEffect(() => {
     if (editing) {
-      dateInputRef.current?.focus();
+      inputRef.current?.focus();
     }
   }, [editing]);
 
@@ -256,7 +320,6 @@ export const DateField: React.FC<IDateFieldProps> = ({ label, value, span, forma
   const enterEdit = React.useCallback(() => {
     if (!editable) return;
     setDraft(parsedValue);
-    setPickerOpen(false);
     setEditing(true);
   }, [editable, parsedValue]);
 
@@ -286,48 +349,17 @@ export const DateField: React.FC<IDateFieldProps> = ({ label, value, span, forma
 
   const cancel = React.useCallback(() => {
     setDraft(parsedValue);
-    setPickerOpen(false);
     setEditing(false);
   }, [parsedValue]);
 
-  const handleSelectDate = React.useCallback(
-    (selected: Date | null | undefined) => {
-      const merged = mergeDatePart(draft, selected ?? null);
-      setDraft(merged);
-      void commit(merged);
-    },
-    [draft, commit]
-  );
-
-  const handleDateKeyDown = React.useCallback(
-    (ev: React.KeyboardEvent<HTMLInputElement>) => {
-      if (pickerOpen) return; // let the open calendar own its own keyboard nav
-      if (ev.key === 'Enter') {
-        ev.preventDefault();
-        void commit(draft);
-      } else if (ev.key === 'Escape') {
-        ev.preventDefault();
-        cancel();
-      }
-    },
-    [pickerOpen, commit, draft, cancel]
-  );
-
-  const handleDateBlur = React.useCallback(() => {
-    if (pickerOpen) return; // focus is moving into the open calendar popup
-    void commit(draft);
-  }, [pickerOpen, commit, draft]);
-
-  const handleTimeChange = React.useCallback(
+  const handleChange = React.useCallback(
     (_ev: React.ChangeEvent<HTMLInputElement>, data: { value: string }) => {
-      const match = /^(\d{2}):(\d{2})$/.exec(data.value);
-      if (!match) return;
-      setDraft(prev => mergeTimePart(prev, Number(match[1]), Number(match[2])));
+      setDraft(prev => fromInputValue(data.value, format, prev));
     },
-    []
+    [format]
   );
 
-  const handleTimeKeyDown = React.useCallback(
+  const handleKeyDown = React.useCallback(
     (ev: React.KeyboardEvent<HTMLInputElement>) => {
       if (ev.key === 'Enter') {
         ev.preventDefault();
@@ -340,7 +372,7 @@ export const DateField: React.FC<IDateFieldProps> = ({ label, value, span, forma
     [commit, draft, cancel]
   );
 
-  const handleTimeBlur = React.useCallback(() => {
+  const handleBlur = React.useCallback(() => {
     void commit(draft);
   }, [commit, draft]);
 
@@ -359,34 +391,20 @@ export const DateField: React.FC<IDateFieldProps> = ({ label, value, span, forma
       </div>
       {editing ? (
         <div className={styles.editRow}>
-          <DatePicker
-            ref={dateInputRef}
+          <Input
+            ref={inputRef}
+            className={styles.editInput}
+            type={format === 'datetime' ? 'datetime-local' : 'date'}
             appearance="filled-lighter"
             size="small"
-            placeholder="Select a date"
-            value={draft}
-            onSelectDate={handleSelectDate}
-            formatDate={d => (d ? formatDisplayValue(d, 'date') : '')}
-            open={pickerOpen}
-            onOpenChange={setPickerOpen}
+            aria-label={label}
+            value={toInputValue(draft, format)}
+            onChange={handleChange}
+            onKeyDown={handleKeyDown}
+            onBlur={handleBlur}
             disabled={saving}
-            onKeyDown={handleDateKeyDown}
-            onBlur={handleDateBlur}
-            data-testid="record-header-date-field-date-input"
+            data-testid="record-header-date-field-input"
           />
-          {format === 'datetime' ? (
-            <Input
-              type="time"
-              appearance="filled-lighter"
-              size="small"
-              value={toTimeInputValue(draft)}
-              onChange={handleTimeChange}
-              onKeyDown={handleTimeKeyDown}
-              onBlur={handleTimeBlur}
-              disabled={saving}
-              data-testid="record-header-date-field-time-input"
-            />
-          ) : null}
           {saving ? <Spinner size="tiny" aria-label="Saving" data-testid="record-header-date-field-spinner" /> : null}
         </div>
       ) : (
