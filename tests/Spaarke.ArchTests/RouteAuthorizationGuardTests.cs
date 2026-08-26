@@ -178,11 +178,22 @@ public class RouteAuthorizationGuardTests
 
     private static readonly IReadOnlyList<Waiver> Waivers = new[]
     {
-        // ---------- PENDING — task 072 ----------
-        new Waiver("POST /api/documents/{documentId}/share-link", WaiverKind.Pending, "072",
-            "Mints a scope=anonymous, NON-EXPIRING SPE sharing link with no per-document filter. Escalates "
-            + "\"container member\" to \"anyone with the URL\". Task 072 adds the filter, bounds the expiry "
-            + "and drops scope=anonymous."),
+        // ---------- task 072: WAIVER REMOVED 2026-08-26, route is gated ----------
+        //
+        // POST /api/documents/{documentId}/share-link now carries
+        // .AddDocumentAuthorizationFilter("share"). Deleted rather than left behind per maintenance rule
+        // 3 above — a Pending waiver whose route has become gated is STALE and fails NoWaiverIsStale.
+        //
+        // What 072 actually closed, for the record: the missing per-document gate (the route's authority
+        // was container-scoped OBO access), the permanent lifetime (expiration: null → bounded by
+        // Documents:ShareLinks, [Range]-capped so it cannot be configured back to effectively-permanent),
+        // and anonymous-as-the-silent-default (now an explicit per-call request, capped harder, logged at
+        // Warning with the caller's oid).
+        //
+        // What 072 did NOT close, deliberately: anonymous links still EXIST, because the shipped email
+        // composer needs external recipients to be able to open them (email-communication-solution-r5 R2
+        // item 12) and an organization-scoped link cannot do that. That residual is bounded, gated on
+        // Share, and recorded in notes/task-072-gate-share-link.md — not silently accepted.
 
         // ---------- PENDING — task 073 (container/drive-keyed writes) ----------
         new Waiver("PUT /api/containers/{containerId}/files/{*path}", WaiverKind.Pending, "073",
