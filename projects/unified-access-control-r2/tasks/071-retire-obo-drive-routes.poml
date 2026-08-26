@@ -1,0 +1,106 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="071" project="unified-access-control-r2">
+  <metadata>
+    <title>Retire the drive-keyed OBO file routes (delete preferred, gate as fallback) — under broker-only they are a bypass by construction</title>
+    <phase>0c Secure Documents — Wave 1</phase>
+    <status>pending</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Deletes or gates public API surface including a DELETE route that currently carries no per-document authorization. Breaking a live caller is a real risk that must be checked, not assumed.</rigor-reason>
+    <model-tier>opus</model-tier>
+    <model-tier-reason>The delete-vs-gate decision requires judging caller impact across Compose, document versions and any client; getting it wrong either breaks features or leaves the bypass open.</model-tier-reason>
+    <effort>high</effort>
+    <effort-reason>Well-specified once the caller inventory is done; the work is inventory + a clean decision, not root-cause analysis.</effort-reason>
+    <parallel-group>wave1</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <parallel-reason>Confined to OBOEndpoints.cs and its direct callers; no shared authorization surface edits expected.</parallel-reason>
+    <deps>046</deps>
+    <tags>bff-api, api, auth, security</tags>
+    <estimated-effort>3-5 hours</estimated-effort>
+    <origin>Filed 2026-08-25. Verified first-hand: `AddDocumentAuthorizationFilter` appears ZERO times in Api/OBOEndpoints.cs. Every route there carries only `.RequireRateLimiting(...).RequireAuthorization()`.</origin>
+  </metadata>
+
+  <prompt>The drive-keyed OBO routes read, modify, DELETE and enumerate SPE content with no per-document authorization — their only authority is the caller's SPE container permission. Under the broker-only decision no user is ever granted a container permission, so these routes cannot serve a legitimate user need and exist only as a way around the gated document routes. Retire them.</prompt>
+
+  <role>SPAARKE BFF engineer. Comfortable deleting API surface, and rigorous about proving nothing depended on it first.</role>
+
+  <goal>No BFF route reaches SPE content keyed by (driveId, itemId) without a per-document authorization decision. Preferably those routes no longer exist. Every caller that used them works through a document-id-keyed route that carries the standard gate.</goal>
+
+  <context>
+    <background>THE ROUTES, in `src/server/api/Sprk.Bff.Api/Api/OBOEndpoints.cs` — verified 2026-08-25, `AddDocumentAuthorizationFilter` appears **zero** times in this file:
+
+| Route | Effect |
+|---|---|
+| `GET  /api/obo/drives/{driveId}/items/{itemId}/content` | read bytes (calls `DownloadFileWithRangeAsUserAsync` — OBO) |
+| `PATCH /api/obo/drives/{driveId}/items/{itemId}` | modify |
+| `DELETE /api/obo/drives/{driveId}/items/{itemId}` | **delete** |
+| `GET  /api/obo/containers/{id}/children` | enumerate a container |
+| `PUT  /api/obo/containers/{id}/files/{*path}` | write |
+
+All carry only `.RequireRateLimiting(...).RequireAuthorization()`.
+
+WHY THIS IS A BYPASS RATHER THAN A HOLE. These are OBO, so SPE evaluates the caller's container permission and denies without one. Under broker-only (SECURE-DOCUMENTS-BUILD-PLAN.md §1) **no user is ever granted a container permission** — `SpeContainerMembershipService.GrantMembershipAsync` has zero callers and stays that way. So for a normal user these routes fail at SPE; for anyone who *does* hold a container ACL they are a complete bypass of the per-document gate that `Api/FileAccessEndpoints.cs` applies to the id-keyed equivalents. Either way they have no legitimate purpose.
+
+WHY `DocumentAuthorizationFilter` CANNOT SIMPLY BE ADDED. Its `ExtractResourceId` falls back to `containerId`/`driveId`/`itemId` when no document id is present — and a driveId is not an `sprk_documents` GUID, so `RetrievePrincipalAccess` returns None and the request denies. That is fail-closed, but it is not authorization: it cannot authorize a drive-keyed route at all. This is precisely why these routes skipped the filter. Gating them therefore requires resolving the owning `sprk_document` from `(driveId, itemId)` first.
+
+KNOWN CALLERS TO CHECK BEFORE DELETING: `Api/DocumentVersionEndpoints.cs` (version content), `Api/ComposeEndpoints.cs` (document load / pull-annotations / reanchor), and any client under `src/client/**` or `src/solutions/**`. Compose is a shipped feature — do not break it.</background>
+    <relevant-files>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Api/OBOEndpoints.cs</file>
+      <file role="reference">src/server/api/Sprk.Bff.Api/Api/FileAccessEndpoints.cs</file>
+      <file role="reference">src/server/api/Sprk.Bff.Api/Api/Filters/DocumentAuthorizationFilter.cs</file>
+      <file role="reference">src/server/api/Sprk.Bff.Api/Api/DocumentVersionEndpoints.cs</file>
+      <file role="reference">src/server/api/Sprk.Bff.Api/Api/ComposeEndpoints.cs</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="build-plan">DELETE is the preferred outcome. Gating is the fallback ONLY where a caller genuinely needs the route and cannot be moved to a document-id-keyed equivalent. Record which you chose per route and why.</constraint>
+    <constraint source="project">If you gate rather than delete, the gate must resolve the owning `sprk_document` from `(driveId, itemId)` and apply the same OBO `RetrievePrincipalAccess` decision the id-keyed routes use. A container-scoped check is NOT sufficient and is the thing being fixed.</constraint>
+    <constraint source="ADR-003">Fail closed: if the owning document cannot be resolved from the drive/item pair, DENY. Do not fall back to container permission.</constraint>
+    <constraint source="build-plan">Do NOT grant SPE container permissions to users as a way of making a route work. `GrantMembershipAsync` stays at zero callers; needing it is an escalation.</constraint>
+    <constraint source="project">Prove the caller inventory rather than asserting it. Grep server AND client AND solutions. A deleted route with a live caller is a production outage.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/unified-access-control-r2/SECURE-DOCUMENTS-BUILD-PLAN.md</file>
+      <file>projects/unified-access-control-r2/notes/task-046-secure-project-owner-role.md</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+    </files>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="0">Build the caller inventory for each of the five routes — server, client, solutions, tests. Write it down before deciding anything.</step>
+    <step order="1">Per route, decide delete or gate. Default to delete. For Compose and version content, check whether a document-id-keyed equivalent already exists before concluding the route must stay.</step>
+    <step order="2">For any route that must stay: implement owning-document resolution from (driveId, itemId), then apply the standard per-document decision. Fail closed when resolution fails.</step>
+    <step order="3">Migrate remaining callers to document-id-keyed routes where that is the cleaner answer.</step>
+    <step order="4">Add tests: a caller without Read on the owning document is denied on every surviving route, including DELETE and PATCH — not just the read path.</step>
+    <step order="5">Build, test, publish size, CVE. Record per-route decisions in notes.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If a shipped feature (especially Compose) genuinely requires drive-keyed access and no document row exists for the item — e.g. transient or working files with no `sprk_document` — STOP. That is a modelling gap, and inventing an authorization answer for unmodelled content is how bypasses get built.</trigger>
+  </escalation>
+
+  <justification>
+    <existing>`FileAccessEndpoints` already provides gated, document-id-keyed equivalents for read/preview/download.</existing>
+    <extension>This removes duplicate ungated surface rather than adding anything. Where a route must survive, it reuses the existing filter + AuthorizationService.</extension>
+    <cost-of-doing-nothing>Five routes — including DELETE — reach SPE content with no per-document check. Any principal holding a container ACL bypasses every gate task 002 added, and the routes remain a standing invitation to grant container ACLs "to make something work".</cost-of-doing-nothing>
+  </justification>
+
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Api/OBOEndpoints.cs (routes deleted or gated)</output>
+    <output type="test">tests/ — per-document denial tests for any surviving route</output>
+    <output type="doc">notes — per-route decision + caller inventory</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion>No route in OBOEndpoints reaches SPE content keyed by drive/item without a per-document authorization decision.</criterion>
+    <criterion>The caller inventory is evidenced (grep results), not asserted.</criterion>
+    <criterion>Every former caller works — Compose and document versions specifically verified.</criterion>
+    <criterion>DELETE and PATCH are covered by the same standard as the read path.</criterion>
+    <criterion>Resolution failure denies; no fallback to container permission.</criterion>
+    <criterion>`GrantMembershipAsync` still has zero callers.</criterion>
+  </acceptance-criteria>
+
+  <notes>Deleting is better than gating here. A gated drive-keyed route still invites the question "why not just grant the user container access?" — which is the decision broker-only exists to foreclose.</notes>
+</task>

@@ -1,0 +1,98 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="072" project="unified-access-control-r2">
+  <metadata>
+    <title>Gate POST /api/documents/{id}/share-link, bound its expiry, and stop minting anonymous-scope links</title>
+    <phase>0c Secure Documents — Wave 1</phase>
+    <status>pending</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>The route mints a credential that outlives every other control in the system. Touches OperationAccessPolicy, which is shared authorization surface.</rigor-reason>
+    <model-tier>opus</model-tier>
+    <model-tier-reason>Adding a new operation-to-AccessRights mapping affects every consumer of the policy; and the anonymous-link decision has product consequences that need judgement, not mechanics.</model-tier-reason>
+    <effort>high</effort>
+    <effort-reason>Small, well-specified change; the sibling routes are the pattern. Effort is in the expiry/scope decision and its client impact, not in discovery.</effort-reason>
+    <parallel-group>wave1</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Adds a mapping to OperationAccessPolicy (shared), which other Wave 1 tasks may also touch.</parallel-reason>
+    <deps>046</deps>
+    <tags>bff-api, api, auth, security</tags>
+    <estimated-effort>2-4 hours</estimated-effort>
+    <origin>Filed 2026-08-25. Verified: `FileAccessEndpoints.cs` maps `POST /{documentId}/share-link` with NO `AddDocumentAuthorizationFilter`, while all eight sibling routes on the same group carry one. The handler calls `CreateSharingLinkAsUserAsync(linkType:"view", scope:"anonymous", expiration:null)`. Task 002 closed the siblings and missed this one.</origin>
+  </metadata>
+
+  <prompt>One route on the documents group has no per-document authorization filter, and it is the one that mints a non-expiring, anyone-with-the-link URL. Gate it like its siblings, bound the lifetime, and stop issuing anonymous-scope links unless the product genuinely requires them.</prompt>
+
+  <role>SPAARKE BFF security engineer, attentive to the difference between authorizing an action and authorizing the credential that action creates.</role>
+
+  <goal>`share-link` carries a per-document authorization decision appropriate to what it does (minting a shareable credential, not reading), links carry a bounded expiry, and anonymous scope is either removed or explicitly justified and constrained.</goal>
+
+  <context>
+    <background>WHAT IS WRONG, verified in code:
+
+`src/server/api/Sprk.Bff.Api/Api/FileAccessEndpoints.cs` registers `POST /api/documents/{documentId}/share-link` with **no** `AddDocumentAuthorizationFilter`. Every sibling mint route on the same group carries `.AddDocumentAuthorizationFilter("read")`. The handler calls `CreateSharingLinkAsUserAsync` with `linkType: "view"`, `scope: "anonymous"`, `expiration: null`.
+
+Consequences, in order of severity:
+1. **No per-document check.** Authority is the caller's container-scoped OBO access, which is coarser than per-document Dataverse rights — the exact coarseness the id-keyed routes exist to close (`FileAccessEndpoints.cs` header comment says so).
+2. **`scope: "anonymous"`** converts "someone with container access" into "anyone with the URL", including unauthenticated parties outside the tenant.
+3. **`expiration: null`** means the link outlives revocation entirely. The same file already flags that minted URLs survive revocation as a known unsolved problem — a non-expiring anonymous link is the worst instance of it.
+
+WHICH RIGHT SHOULD IT REQUIRE? `"read"` matches the siblings and is the minimum defensible bar. But minting a shareable credential is closer to sharing than to reading, and Dataverse has a distinct `Share` right (`prvSharesprk_*`, and `AccessRights.Share`). `OperationAccessPolicy` currently maps `["read"] = AccessRights.Read`; adding `["share"] = AccessRights.Share` and using it here is the more honest mapping and aligns with Graph's own `driveitem.createlink` permission model. Decide deliberately and record the reasoning — do not default to `"read"` merely because it is adjacent.
+
+TENANT POLICY NOTE (Microsoft, verified 2026-08-25): SPE sharing follows the consuming tenant's sharing configuration. If the tenant disables guest sharing, anonymous links may already fail — but do not rely on tenant configuration as the control.</background>
+    <relevant-files>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Api/FileAccessEndpoints.cs</file>
+      <file role="modify">src/server/shared/Spaarke.Core/Auth/OperationAccessPolicy.cs</file>
+      <file role="reference">src/server/api/Sprk.Bff.Api/Api/Filters/DocumentAuthorizationFilter.cs</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="project">Choose the required right deliberately — `"share"` (mapped to `AccessRights.Share`) or `"read"` — and record the reasoning. `Share` is the better fit; if you choose `read`, justify it.</constraint>
+    <constraint source="project">Links MUST carry a bounded expiry. Pick a default, make it configurable, and state the value. `expiration: null` does not survive this task.</constraint>
+    <constraint source="project">Do not keep `scope: "anonymous"` by default. If a product flow genuinely needs anonymous links, make it opt-in per call, gate it on the higher right, and cap its lifetime harder. Otherwise use an authenticated scope.</constraint>
+    <constraint source="ADR-003">Fail closed on any authorization or resolution failure.</constraint>
+    <constraint source="project">If you add `["share"] = AccessRights.Share` to OperationAccessPolicy, check every existing consumer of that policy for behaviour change before committing.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/unified-access-control-r2/SECURE-DOCUMENTS-BUILD-PLAN.md</file>
+      <file>projects/unified-access-control-r2/notes/task-046-secure-project-owner-role.md</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+    </files>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="0">Confirm the route still lacks the filter at HEAD and read the sibling registrations for the exact pattern.</step>
+    <step order="1">Decide the required right; if `share`, add the mapping to OperationAccessPolicy and audit existing consumers.</step>
+    <step order="2">Attach the filter. Set a bounded, configurable expiry. Resolve the anonymous-scope decision.</step>
+    <step order="3">Find client callers of this route and confirm the tightened contract still serves them; migrate or surface if not.</step>
+    <step order="4">Tests: a caller lacking the required right on the document is denied; a minted link carries an expiry; anonymous scope is not the default.</step>
+    <step order="5">Build, test, publish size, CVE. Record the right/expiry/scope decisions in notes.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If a shipped product flow depends on non-expiring anonymous links (e.g. an external-recipient email flow), STOP and surface it. Silently breaking external recipients is a support incident; silently keeping the link is a disclosure. The owner picks.</trigger>
+  </escalation>
+
+  <justification>
+    <existing>`DocumentAuthorizationFilter` + `AuthorizationService` already gate the eight sibling routes on this group.</existing>
+    <extension>Attaches existing machinery to the one route that was missed; the only new surface is possibly one entry in an existing policy map.</extension>
+    <cost-of-doing-nothing>A caller with container access but no Dataverse Read on a document can mint a permanent public URL to it, and revocation will never invalidate that URL.</cost-of-doing-nothing>
+  </justification>
+
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Api/FileAccessEndpoints.cs</output>
+    <output type="code">src/server/shared/Spaarke.Core/Auth/OperationAccessPolicy.cs (if the share mapping is added)</output>
+    <output type="test">tests/ — denial test + expiry assertion</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion>`share-link` carries a per-document authorization filter; a caller without the required right is denied, proven by a test that fails without the change.</criterion>
+    <criterion>Minted links carry a bounded, configurable expiry — no `expiration: null` path remains.</criterion>
+    <criterion>Anonymous scope is not the default; if retained at all, it is opt-in, justified in notes, and more tightly capped.</criterion>
+    <criterion>If `AccessRights.Share` was added to the policy, existing consumers are audited and unchanged.</criterion>
+    <criterion>Client callers still function or are migrated.</criterion>
+  </acceptance-criteria>
+
+  <notes>The header of `FileAccessEndpoints.cs` already documents that minted URLs outlive revocation as unsolved. This task does not solve that generally — it removes the worst instance (permanent + anonymous + ungated) and bounds the rest.</notes>
+</task>

@@ -10,11 +10,43 @@
 
 | Field | Value |
 |---|---|
-| **Task** | ✅ **046 COMPLETE** (live Dataverse config + docs; **uncommitted**). 021 + 045 merged to master (`290d9ab79`) |
-| **Step** | Between tasks. Nothing in flight. **Working tree has uncommitted 046 doc changes — commit before anything else** |
-| **Status** | **PR #812 is MERGED** — continued work needs a NEW PR |
-| **Phase** | **Phase 0 — 14 of 20** (001–010, 014, 016, 017, 019 ✅ · remaining **011 012 013 015 018 020**) · **Phase 0b — 4 of 12** (**021 ✅ 022 ✅ 045 ✅ 046 ✅** · remaining **047** 023 024 025 026 027 028 029) |
-| **Next Action** | **Commit + push 046**, then **🔔 owner decides the §5.1a-2 depth fix** (below). Task **047** is runnable after the operator deploys the BFF to dev — but see the scope caveat |
+| **Task** | ✅ **046 COMPLETE + committed** (`959e9dfee`, `75b588ba8`). **Phase 0c created: tasks 070–076** |
+| **Step** | Between tasks. Nothing in flight |
+| **Status** | **PR #812 is MERGED** — continued work needs a NEW PR. BFF **deployed to dev 2026-08-25** (45.05 MB, hash-verified, healthy) |
+| **Phase** | **Phase 0 — 14 of 20** (remaining **011 012 013 015 018 020**) · **Phase 0b — 4 of 12** (**021 ✅ 022 ✅ 045 ✅ 046 ✅** · remaining **047** 023–029) · **Phase 0c — 0 of 7 (070–076)** |
+| **Next Action** | **▶ START PHASE 0c.** Read [`SECURE-DOCUMENTS-BUILD-PLAN.md`](SECURE-DOCUMENTS-BUILD-PLAN.md) FIRST, then execute Wave 1 (**070–074**, parallel-capable) and Wave 2 (**075 → 076**) via `task-execute` |
+
+### ▶ START HERE — Phase 0c, Secure Documents
+
+**The owner decision, recorded 2026-08-25**: the BFF is the **single access-decision point** for every document and every byte, for **both** workforce and external contacts. No user is ever granted an SPE container permission — `GrantMembershipAsync` stays at zero callers. The per-project container is **blast-radius containment**, not the live ACL.
+
+**Why now**: **zero secure projects exist in any environment.** Build this before the first one and there is never a migration. That window closes the moment a real secure project is created.
+
+**The coordination contract is [`SECURE-DOCUMENTS-BUILD-PLAN.md`](SECURE-DOCUMENTS-BUILD-PLAN.md)** — the decision, the three invariants, what each component is *for*, verified current state, the platform constraints, and the honest claim at the end of Wave 2. **Read it before executing any 07x task.**
+
+| Wave | Tasks | Notes |
+|---|---|---|
+| **1 — close the holes** | 070 072 (serialize — shared auth surface) · 071 073 074 (`parallel-safe: true`) | **070 and 073 are exploitable at HEAD** |
+| **2 — make the container real** | 075 → 076 (strict) | Can run concurrently with Wave 1 |
+
+**074 is the highest-value task in both waves** — it makes ungated routes a build failure. Everything else closes a specific hole; 074 closes the way holes get added.
+
+### The two findings that drive Phase 0c
+
+**Exploitable now**: `POST /api/ai/search` returns allow for **every** scope including `default` and `scope=all` — any authenticated non-admin gets tenant-wide document names, AI summaries, TL;DRs, `driveId` and `speFileId`. It never touches SPE, so container permissions are irrelevant to it. And `PUT /api/containers/{containerId}/files/{*path}` takes the container id off the route and writes **app-only (MI)** — no container ACL needed.
+
+**The structural one**: **nothing reads `sprk_project.sprk_containerid`.** Provisioning stamps it; every write resolves from the acting user's BU or a global archive. So secure documents land in **shared** containers — and SPE permissions are **additive-only** (*"you can't break inheritance on arbitrary files or folders"*, verified against Microsoft docs 2026-08-25), so **no per-item permission can ever retract that**. Per-project containers are the only mechanism, which makes task 075 the document guarantee.
+
+⚠️ **Latent, not exploitable**: the `OBOEndpoints` drive-keyed routes (071) and `share-link` (072) are **OBO**, so SPE denies without a container ACL — and no user has one. They are bypasses by construction, not live holes. Do not overstate them.
+
+### Corrections carried forward — do not re-derive the old versions
+
+- **FR-29 delegation IS implemented** (`DelegationRuleFilter`, Write-on-record via OBO, fail-closed). This is *why* Manage Access silently fails: the server correctly 403s and **the UI swallows it**. UI defect only.
+- **The contact document path is CORRECT** and is the **reference implementation** for Wave 3's inheritance — `ExternalProjectDataEndpoints` checks project access AND doc∈project before any SPE read.
+- **`DocumentAuthorizationFilter.ExtractResourceId`'s container fallback is inert and fail-closed** — a driveId is not a document GUID, so it denies. Not a finding.
+- **The isolation guarantee is "no ordinary human sits at or above the secure BU in the tree"** — NOT "reduce the depth". `Deep` is fine at a *sibling* BU; validated live.
+
+
 
 ### 🔔 OWNER DECISION REQUIRED — task 046 found that secure projects are NOT isolated
 

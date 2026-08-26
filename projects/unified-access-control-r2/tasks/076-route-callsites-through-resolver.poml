@@ -1,0 +1,118 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="076" project="unified-access-control-r2">
+  <metadata>
+    <title>Route every container call site through the resolver, and suppress the wizard's BU cascade for secure records</title>
+    <phase>0c Secure Documents — Wave 2</phase>
+    <status>pending</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Modifies 7+ client sites plus server ingest on the path that decides where secure content is stored. A missed call site is a silent isolation failure.</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Mechanical once task 075's seam exists — find every site, route it through, prove none remain. The judgement was spent in 075.</model-tier-reason>
+    <effort>high</effort>
+    <effort-reason>Breadth rather than depth: many call sites across client and server, each individually simple, with completeness as the hard part.</effort-reason>
+    <parallel-group>wave2</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Depends on 075's seam and touches many shared client services; concurrent edits would conflict.</parallel-reason>
+    <deps>075</deps>
+    <tags>bff-api, pcf, react, dataverse, security</tags>
+    <estimated-effort>5-7 hours</estimated-effort>
+    <origin>Filed 2026-08-25. Design §5.1c: the same user-BU→container chain is repeated in at least seven places, plus the server-side archive path. Additionally `EntityCreationService.applyUserBuDefaults` stamps `sprk_containerid` onto secure projects today, which both defeats isolation and collided with provisioning's idempotency marker.</origin>
+  </metadata>
+
+  <prompt>The resolver from task 075 only matters if nothing bypasses it. Route every container-resolution call site through it, and stop the creation wizard from stamping a shared BU container onto secure projects.</prompt>
+
+  <role>SPAARKE full-stack engineer. The deliverable is completeness — every path, proven, with no survivors.</role>
+
+  <goal>No code decides which container to use except through task 075's resolver. The creation wizard no longer writes a BU container id onto secure records. Completeness is demonstrated, not asserted.</goal>
+
+  <context>
+    <background>THE CALL SITES, per design §5.1c and the workflow review — treat this list as a STARTING POINT and prove it complete, because prior counts in this project have been wrong every time:
+
+Client (the user-BU → `businessunit.sprk_containerid` chain), at least seven:
+- `CreateMatterWizard/main.tsx`
+- `sprk_wizard_commands.js`
+- `useWizardPageBootstrap.ts`
+- `WorkspaceGrid.tsx`
+- `SemanticSearchControl/NavigationService.ts`
+- `EntityCreationService.applyUserBuDefaults`
+- the five `*WizardDialog.tsx` callers
+Canonical client resolver: `xrmProvider.getSpeContainerIdFromBusinessUnit`.
+
+Server:
+- `IncomingCommunicationProcessor` — the global `ArchiveContainerId` used by email/communication ingest. **This is the one easiest to forget**: no client, no wizard, no UI. If it is missed, secure attachments land in the shared archive.
+
+THE WIZARD WRITE-BACK, two related problems:
+1. `EntityCreationService.applyUserBuDefaults` (`src/client/shared/Spaarke.UI.Components/src/services/EntityCreationService.ts`) applies `sprk_containerid` to secure projects. It must not.
+2. `src/solutions/DocumentUploadWizard/sprk_subgrid_commands.js` overwrites `sprk_project.sprk_containerid` with the BU container when the field is not on the form. This defeats a correct resolver *after the fact* — a stamped project silently reverts to shared storage.
+
+Both were implicated in the 409 provisioning regression, because `sprk_containerid` was shared state written by two different mechanisms. Provisioning now keys idempotency on ownership instead (task 021), but the write-back still corrupts the isolation marker.
+
+WHY COMPLETENESS IS THE DELIVERABLE. Because SPE permissions are additive-only, a single missed call site means secure content sits in a shared container permanently, and no later permission change can retract it. Partial completion here is not partial credit — it is the same failure as no completion, for whichever path was missed.
+
+INV-7: strategy 1's resolution stays client-side. Routing through the shared decision must respect that; consume 075's client half rather than moving BU resolution to the server.</background>
+    <relevant-files>
+      <file role="modify">src/client/shared/Spaarke.UI.Components/src/services/EntityCreationService.ts</file>
+      <file role="modify">src/solutions/DocumentUploadWizard/sprk_subgrid_commands.js</file>
+      <file role="modify">src/client/pcf/SemanticSearchControl/SemanticSearchControl/services/NavigationService.ts</file>
+      <file role="modify">src/server/api/Sprk.Bff.Api/ — IncomingCommunicationProcessor archive path</file>
+      <file role="reference">projects/unified-access-control-r2/design.md</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="build-plan">PROVE completeness. Grep for every container-id resolution and every `sprk_containerid` write across `src/client/**`, `src/solutions/**`, and `src/server/**`, and show the evidence. Prior route/site counts in this project were wrong every single time they were asserted rather than grepped.</constraint>
+    <constraint source="project">Do NOT add an `issecure` test at individual call sites. Call sites ask the resolver; they do not make the decision. A call site containing the word `issecure` is a review failure.</constraint>
+    <constraint source="ADR-003">Where a call site cannot resolve a container for a secure record, it must fail visibly — not silently proceed with a BU or archive container.</constraint>
+    <constraint source="project">The creation wizard must not write `sprk_containerid` for secure records at all. Removing the write is preferred over conditioning it.</constraint>
+    <constraint source="project">Respect INV-7 — BU resolution stays client-side; consume 075's client half.</constraint>
+    <constraint source="CLAUDE.md §12">PCF builds use `npm run build:prod`, never `npm run build`. Bump PCF versions in all four locations if any PCF ships.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/unified-access-control-r2/SECURE-DOCUMENTS-BUILD-PLAN.md</file>
+      <file>projects/unified-access-control-r2/design.md</file>
+      <file>projects/unified-access-control-r2/notes/secure-project-workflow-review-2026-08-24.md</file>
+      <file>src/client/pcf/CLAUDE.md</file>
+    </files>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="0">Grep the full call-site inventory — every container resolution and every `sprk_containerid` write, client, solutions and server. Record it. Compare against the list in this task and report any additions found.</step>
+    <step order="1">Route each site through 075's resolver.</step>
+    <step order="2">Remove the wizard's `sprk_containerid` write for secure records (`EntityCreationService`), and fix the DocumentUploadWizard write-back that overwrites a stamped container.</step>
+    <step order="3">Route the server-side ingest/archive path through the server half of the resolver.</step>
+    <step order="4">Re-grep to prove no unrouted site remains. This is the acceptance evidence.</step>
+    <step order="5">Tests: creating a document against a secure record targets that record's container; against a non-secure record, the BU cascade is unchanged; the wizard no longer stamps secure records.</step>
+    <step order="6">Build (`build:prod` for PCF), tests, publish size, CVE.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If a call site resolves a container in a context where the owning record is not known — so the resolver cannot be asked — STOP and surface it. That is a modelling gap; guessing the container in an unknown context is exactly how shared-container co-mingling happened.</trigger>
+  </escalation>
+
+  <justification>
+    <existing>Task 075 provides the resolver; the client BU-resolution chain and the server archive path already exist.</existing>
+    <extension>This is pure routing of existing call sites onto the new seam plus removal of a harmful write. No new component.</extension>
+    <cost-of-doing-nothing>Task 075's resolver decides nothing if callers bypass it. Any missed site places secure content in a shared container permanently — SPE cannot retract it — and the wizard write-back would silently revert correctly-stamped projects to shared storage.</cost-of-doing-nothing>
+  </justification>
+
+  <outputs>
+    <output type="code">All client container call sites routed through the resolver</output>
+    <output type="code">Server ingest/archive path routed through the resolver</output>
+    <output type="code">Wizard `sprk_containerid` write removed for secure records; DocumentUploadWizard write-back fixed</output>
+    <output type="doc">notes — full call-site inventory with grep evidence, before and after</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion>Every container-resolution call site goes through task 075's resolver — proven by a re-grep showing no survivors.</criterion>
+    <criterion>No call site contains its own `issecure` test.</criterion>
+    <criterion>The creation wizard does not write `sprk_containerid` for secure records.</criterion>
+    <criterion>The DocumentUploadWizard write-back can no longer overwrite a stamped secure container.</criterion>
+    <criterion>The server-side ingest/archive path is routed (the easiest one to miss — verify explicitly).</criterion>
+    <criterion>A document created against a secure record targets that record's own container, proven by a test.</criterion>
+    <criterion>Non-secure behaviour is unchanged.</criterion>
+  </acceptance-criteria>
+
+  <notes>Completeness is the entire deliverable. Because SPE permissions are additive-only, one missed call site is a permanent isolation failure for whatever flows through it — there is no later fix. Grep, do not remember.</notes>
+</task>
