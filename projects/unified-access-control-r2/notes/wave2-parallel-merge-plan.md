@@ -391,7 +391,21 @@ Two consequences:
    project **with files**, those bytes are in shared storage now and may need **moving**. Worth a
    dedicated task; 076 fixes the forward path only.
 
-### 🔊 The system has been reporting this in its own logs the entire time
+### ⚠️ CORRECTION — ARMED, NOT FIRED. Two claims above are overstated.
+
+**Zero secure projects exist in any environment** (`TASK-INDEX.md:110`, re-verified). The trigger for
+F-9 is *creating a secure project with files attached in the wizard*, which has therefore **never
+occurred**. Consequences:
+
+- **Consequence 2 above ("may need data remediation") is almost certainly moot.** No bytes are
+  misplaced today. 076 fixing the forward path is sufficient; there is nothing to move.
+- **The window closes on FIRST USE, not on a date.** This is the strongest form of the build plan's own
+  "build it before the first one and there is never a migration" argument — and it makes the finding
+  more urgent to fix, not less, even though it is currently harmless.
+- **State it explicitly wherever F-9 appears.** Without it, someone checks App Insights, finds nothing,
+  and downgrades a live-but-unfired defect to a non-issue.
+
+### 🔊 The Warning line exists and is correctly worded — but it has almost certainly never emitted
 
 `ProvisionProjectEndpoint.cs:690-695`, verified verbatim:
 
@@ -401,12 +415,13 @@ The previous value was cascaded from the creating user's business unit and
 is shared storage, not this project's container.
 ```
 
-A `LogWarning`, naming the defect precisely, on every secure-project creation. **If dev has ever run one,
-that Warning is in App Insights right now** and would have pointed straight at this.
+A `LogWarning` naming the defect precisely, on every secure-project creation — **of which there have been
+none.** So this is *a trap set correctly and never sprung*, which is a different and considerably less
+damning story than "the system reported it and nobody looked."
 
-This project keeps finding "docs lose to live metadata". Same shape, different loser: **logs losing to
-nobody looking.** Worth asking what else is already being reported and unread — a log-review sweep is
-cheap next to another four-round review cycle.
+**My earlier framing of this as "logs losing to nobody looking" was wrong** and is retracted here. The
+log line is verbatim-accurate and well-worded; what it is *not* is evidence of an ignored signal. Do not
+carry the stronger version forward — it would misrepresent both the team and the severity.
 
 ### 🔁 THIS REFRAMES THE 076 DECISION — A and C read differently now
 
