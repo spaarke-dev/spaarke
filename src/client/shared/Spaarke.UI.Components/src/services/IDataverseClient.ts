@@ -175,8 +175,16 @@ export interface IDataverseClient {
    * Implementations SHOULD cache aggressively (the BFF caches 6h per FR-BFF-03).
    *
    * @param entityName - Logical name of the entity.
+   * @param attributes - OPTIONAL explicit attribute logical names to project.
+   *        Callers that already know the attributes they need SHOULD pass them:
+   *        `XrmDataverseClient` forwards the list to
+   *        `Xrm.Utility.getEntityMetadata(entityName, attributes)`, which is the
+   *        documented way to guarantee the `Attributes` collection comes back
+   *        populated (and keeps the payload small). Omit to request the whole
+   *        entity. Implementations MAY ignore the hint, but MUST still return
+   *        at least the requested attributes when they exist.
    */
-  retrieveEntityMetadata(entityName: string): Promise<EntityMetadata>;
+  retrieveEntityMetadata(entityName: string, attributes?: string[]): Promise<EntityMetadata>;
 
   /**
    * Execute a FetchXML query against an entity.

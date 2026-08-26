@@ -598,6 +598,82 @@ function parseHeaderManifest(manifestJson: string | null | undefined): ManifestP
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
+// Pre-resolution name extraction
+// ─────────────────────────────────────────────────────────────────────────────
+
+/**
+ * Extract the attribute logical names a `layoutJson` REFERS to, without
+ * resolving anything.
+ *
+ * This exists to break a chicken-and-egg: `resolveHeaderConfig` needs entity
+ * metadata to resolve a layout, but a metadata fetch is far more reliable when
+ * it can name the attributes it wants up front (see
+ * `XrmDataverseClient.retrieveEntityMetadata`'s `attributes` argument). The
+ * names are already sitting in the raw JSON, so a caller can read them BEFORE
+ * the metadata round trip and request exactly those attributes.
+ *
+ * Deliberately shallow and maximally tolerant — this is a hint-gatherer, not a
+ * validator. It accepts input `resolveHeaderConfig` would reject (wrong
+ * `_version`, extra keys, unusable entries) because a name is still a useful
+ * hint even inside a config that will ultimately fall through to tier 2.
+ *
+ * **Never throws, for any input** — the same NFR-10 contract as the resolver.
+ * Malformed JSON yields `[]`.
+ *
+ * @param manifestJson The RAW `layoutJson` manifest value.
+ * @returns De-duplicated attribute names in first-seen order: every
+ *          `fields[].name` plus `summaryField` when present. Never `null`.
+ *
+ * @example
+ * ```ts
+ * extractConfiguredAttributeNames(
+ *   '{"summaryField":"sprk_recordsummary","fields":[{"name":"sprk_projecttype_ref"}]}'
+ * );
+ * // → ['sprk_projecttype_ref', 'sprk_recordsummary']
+ * ```
+ */
+export function extractConfiguredAttributeNames(manifestJson: string | null | undefined): string[] {
+  if (typeof manifestJson !== 'string' || manifestJson.trim().length === 0) {
+    return [];
+  }
+
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(manifestJson);
+  } catch {
+    return [];
+  }
+  if (parsed === null || typeof parsed !== 'object' || Array.isArray(parsed)) {
+    return [];
+  }
+
+  const source = parsed as { fields?: unknown; summaryField?: unknown };
+  const seen = new Set<string>();
+  const names: string[] = [];
+
+  const push = (candidate: unknown): void => {
+    // TRIMMED, unlike the resolver's own `nonBlankString`. These names go into a
+    // metadata request, and a whitespace-padded logical name can never match a
+    // real attribute — asking for one would just be another bad column.
+    const name = nonBlankString(candidate)?.trim();
+    if (name === undefined || seen.has(name)) return;
+    seen.add(name);
+    names.push(name);
+  };
+
+  if (Array.isArray(source.fields)) {
+    for (const entry of source.fields) {
+      if (entry !== null && typeof entry === 'object' && !Array.isArray(entry)) {
+        push((entry as { name?: unknown }).name);
+      }
+    }
+  }
+  push(source.summaryField);
+
+  return names;
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
 // The resolver
 // ─────────────────────────────────────────────────────────────────────────────
 

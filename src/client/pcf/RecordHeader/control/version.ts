@@ -20,5 +20,22 @@
  * MatterHeader feature set (spec assumption, confirmed here) plus the R2
  * renderer/config work. `MatterHeaderPcf` v1.0.21 stays live and is retired
  * separately at task 081.
+ *
+ * 1.1.1 (2026-08-26) — first-UAT defect fixes.
+ *   DEF-1 metadata never reached the resolver, so every field derived the
+ *   `text` renderer, every label humanized its logical name, and a lookup got
+ *   `$select`ed by its bare name (HTTP 400 -> every cell an em-dash). Two
+ *   independent causes, both fixed in `@spaarke/ui-components`:
+ *     (a) the attribute label/type rescue call used
+ *         `Xrm.WebApi.retrieveMultipleRecords('EntityDefinition', ...)`, which
+ *         cannot work - `Xrm.WebApi` does not serve metadata entities - so it
+ *         threw on every call and its catch swallowed the throw;
+ *     (b) `projectAttribute` parsed only Web-API shapes, but the CLIENT API
+ *         returns a numeric `AttributeType` and a plain-string `DisplayName`.
+ *   Plus two defences: the metadata fetch now NAMES the attributes it needs,
+ *   and a failed `$select` read degrades to an unprojected read instead of
+ *   blanking the header (the RS-1 failure mode, third occurrence).
+ *   DEF-2 `layoutJson` moved to `of-type="Multiple"` - the classic form
+ *   designer caps SingleLine.Text at 100 characters, below any real layout.
  */
-export const CONTROL_VERSION = '1.1.0';
+export const CONTROL_VERSION = '1.1.1';

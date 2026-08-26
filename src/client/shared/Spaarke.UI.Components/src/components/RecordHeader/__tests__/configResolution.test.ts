@@ -26,7 +26,7 @@
 
 import * as fs from 'fs';
 import * as path from 'path';
-import { resolveHeaderConfig } from '../configResolution';
+import { extractConfiguredAttributeNames, resolveHeaderConfig } from '../configResolution';
 import type { HeaderAttributeMetadata, HeaderFormMetadata, ResolvedHeaderConfig, ResolvedHeaderField } from '../configResolution';
 import type { RecordHeaderFieldRenderer } from '../../../types/RecordHeaderConfiguration';
 
@@ -1071,6 +1071,60 @@ describe('resolveHeaderConfig', () => {
     it('uses console.warn as its only console surface (FR-03)', () => {
       const consoleCalls = codeOnly.match(/console\.\w+/g) ?? [];
       expect(consoleCalls).toEqual(['console.warn']);
+    });
+  });
+
+  // ───────────────────────────────────────────────────────────────────────────
+  // extractConfiguredAttributeNames — the pre-metadata name hint
+  //
+  // Exists so the metadata fetch can NAME the attributes it needs before the
+  // layout is resolved. Getting this wrong reintroduces the v1.1.0 UAT defect:
+  // an attribute the fetch never asked for has no type, and an untyped lookup
+  // is `$select`ed by its bare name, which 400s the whole read.
+  // ───────────────────────────────────────────────────────────────────────────
+  describe('extractConfiguredAttributeNames', () => {
+    it('returns every field name plus summaryField, de-duplicated, in order', () => {
+      expect(
+        extractConfiguredAttributeNames(
+          '{"_version":"1.0","title":"Project","columns":3,"summaryField":"sprk_recordsummary","fields":[' +
+            '{"name":"sprk_projectname","span":2},' +
+            '{"name":"sprk_projecttype_ref"},' +
+            '{"name":"sprk_openeddate"},' +
+            '{"name":"sprk_projectname"}]}'
+        )
+      ).toEqual(['sprk_projectname', 'sprk_projecttype_ref', 'sprk_openeddate', 'sprk_recordsummary']);
+    });
+
+    it('gathers names from a config the resolver would REJECT (hint, not validator)', () => {
+      // Wrong _version -> resolveHeaderConfig falls through to tier 2, but the
+      // names are still worth requesting.
+      expect(extractConfiguredAttributeNames('{"_version":"9.9","fields":[{"name":"sprk_openeddate"}]}')).toEqual([
+        'sprk_openeddate',
+      ]);
+    });
+
+    it('never throws and returns [] for unusable input', () => {
+      for (const input of [
+        null,
+        undefined,
+        '',
+        '   ',
+        'not json',
+        '[]',
+        '"a string"',
+        '42',
+        '{}',
+        '{"fields":"nope"}',
+        '{"fields":[null,42,"x",{},{"name":""},{"name":"  "},{"name":123}]}',
+      ] as Array<string | null | undefined>) {
+        expect(extractConfiguredAttributeNames(input)).toEqual([]);
+      }
+    });
+
+    it('trims names and skips a non-string summaryField', () => {
+      expect(
+        extractConfiguredAttributeNames('{"summaryField":99,"fields":[{"name":"  sprk_openeddate  "}]}')
+      ).toEqual(['sprk_openeddate']);
     });
   });
 });

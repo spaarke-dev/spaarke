@@ -58,6 +58,7 @@ import {
   RecordHeaderShell,
   TextField,
   TextareaField,
+  extractConfiguredAttributeNames,
   resolveHeaderConfig,
 } from '@spaarke/ui-components/dist/components/RecordHeader';
 import type {
@@ -194,7 +195,16 @@ export const RecordHeaderView: React.FC<IRecordHeaderViewProps> = ({
   const styles = useStyles();
 
   // ── 1. Metadata (page-session cached; zero-network form walk) ──────────────
-  const { formMetadata, entityMetadata, loading: metadataLoading } = useHeaderFormMetadata(entityName);
+  // The layout's attribute names are read from the RAW json BEFORE the metadata
+  // round trip, so the fetch can name every attribute the header might bind —
+  // including any the layout references that are not placed on the form. See
+  // `useHeaderFormMetadata` for why naming them is load-bearing.
+  const configuredNames = React.useMemo(() => extractConfiguredAttributeNames(layoutJson), [layoutJson]);
+  const {
+    formMetadata,
+    entityMetadata,
+    loading: metadataLoading,
+  } = useHeaderFormMetadata(entityName, configuredNames);
 
   // ── 2. Config resolution (pure; at most one console.warn per resolve) ──────
   // Memoized so a malformed `layoutJson` warns ONCE per config change rather

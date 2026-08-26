@@ -262,11 +262,12 @@ describe('XrmDataverseClient', () => {
       const client = new XrmDataverseClient();
       const meta = await client.retrieveEntityMetadata('sprk_event');
 
-      // NOTE (pre-existing fix, unrelated to FR-21): the source intentionally omits
-      // the second arg — `getEntityMetadata`'s 2nd param is an attribute FILTER, not
-      // an "include this section" hint (see XrmDataverseClient.ts comment above the
-      // call). This assertion was stale against that behavior; corrected here since
-      // task 020 already owns this file and the shared-lib suite must be green.
+      // The second argument is OMITTED only because this caller requested no
+      // specific attributes. Callers that know which attributes they need MUST
+      // pass them — that is what guarantees a populated `Attributes` collection
+      // (see XrmDataverseClient.metadataShape.test.ts). A previous edit to this
+      // assertion recorded the one-argument call as intentional-and-sufficient,
+      // which hid the RecordHeader v1.1.0 empty-metadata defect.
       expect(xrm.Utility!.getEntityMetadata).toHaveBeenCalledWith('sprk_event');
       expect(meta.primaryIdAttribute).toBe('sprk_eventid');
       expect(meta.primaryNameAttribute).toBe('sprk_name');
@@ -369,7 +370,11 @@ describe('XrmDataverseClient', () => {
       const second = await client.retrieveEntityMetadata('sprk_matter');
 
       expect(xrm.Utility!.getEntityMetadata).toHaveBeenCalledTimes(1);
-      expect(xrm.WebApi.retrieveMultipleRecords).toHaveBeenCalledTimes(1);
+      // Metadata NEVER goes through Xrm.WebApi: it cannot serve metadata
+      // entities, so the old `retrieveMultipleRecords('EntityDefinition', ...)`
+      // rescue call was dead code whose throw was swallowed. See
+      // XrmDataverseClient.metadataShape.test.ts for the full evidence.
+      expect(xrm.WebApi.retrieveMultipleRecords).not.toHaveBeenCalled();
       expect(second).toBe(first);
     });
 

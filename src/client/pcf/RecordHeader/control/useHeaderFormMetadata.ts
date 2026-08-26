@@ -148,6 +148,43 @@ export function readFormControlOrder(): IFormControlProjection[] {
 }
 
 /**
+ * Build the attribute list to request from `retrieveEntityMetadata`.
+ *
+ * PURE — directly unit-testable, which matters because getting this list wrong
+ * is what produced the v1.1.0 "every cell is an em-dash" defect.
+ *
+ * The union is (form controls in form order) ∪ (names the `layoutJson`
+ * references). Form controls come first so a debug dump reads in form order;
+ * ordering is otherwise irrelevant to the caller, which sorts for its cache
+ * key. Duplicates and blanks are dropped.
+ *
+ * @param formControls   Controls as read off the live form, in form order.
+ * @param configuredNames Names referenced by `layoutJson` (may include
+ *                        attributes that are NOT on the form — that is
+ *                        legitimate and is precisely why they must be
+ *                        requested explicitly).
+ */
+export function buildRequestedAttributeNames(
+  formControls: ReadonlyArray<IFormControlProjection>,
+  configuredNames: ReadonlyArray<string>
+): string[] {
+  const seen = new Set<string>();
+  const out: string[] = [];
+  const push = (name: unknown): void => {
+    if (typeof name !== 'string') return;
+    const trimmed = name.trim();
+    if (trimmed.length === 0 || seen.has(trimmed)) return;
+    seen.add(trimmed);
+    out.push(trimmed);
+  };
+
+  for (const control of formControls) push(control?.name);
+  for (const name of configuredNames) push(name);
+
+  return out;
+}
+
+/**
  * Merge form-order controls + entity metadata into the resolver input.
  *
  * PURE — no `Xrm`, no I/O — so the ordering contract is directly unit-testable.
@@ -228,13 +265,42 @@ export interface IUseHeaderFormMetadataResult {
  * (task 020, FR-21 / NFR-01), so a second header on the same page — or a
  * re-mount on record navigation — costs no extra round trip.
  *
+ * ══════════════════════════════════════════════════════════════════════════
+ * WHY WE NAME THE ATTRIBUTES WE WANT
+ * ══════════════════════════════════════════════════════════════════════════
+ * `Xrm.Utility.getEntityMetadata`'s second argument is the documented way to
+ * guarantee the `Attributes` collection comes back populated. Relying on the
+ * one-argument form left the header with an EMPTY attribute map in UAT, so
+ * every field derived the `text` renderer — and a lookup rendered as `text`
+ * gets `$select`ed by its bare logical name, which 400s the whole read and
+ * turns every cell into an em-dash.
+ *
+ * The union we request is exactly what the header can possibly bind:
+ *  - every control on the form, in form order (tier-2 derivation, FR-04), and
+ *  - every name the `layoutJson` refers to — which may legitimately include
+ *    attributes NOT on the form, plus `summaryField`.
+ *
+ * When the union is empty (no form controls and no layout) we omit the
+ * argument and let the platform decide, which is the old behaviour.
+ *
+ * @param entityLogicalName Entity logical name, self-detected by the control class.
+ * @param configuredNames   Attribute names referenced by `layoutJson` — pass
+ *                          `extractConfiguredAttributeNames(layoutJson)`.
+ *
  * React 16/17-safe: `useState` / `useEffect` / `useMemo` only (ADR-022).
  */
-export function useHeaderFormMetadata(entityLogicalName: string): IUseHeaderFormMetadataResult {
+export function useHeaderFormMetadata(
+  entityLogicalName: string,
+  configuredNames?: ReadonlyArray<string>
+): IUseHeaderFormMetadataResult {
   const [entityMetadata, setEntityMetadata] = React.useState<EntityMetadata | null>(null);
   const [formControls, setFormControls] = React.useState<ReadonlyArray<IFormControlProjection> | null>(null);
   const [loading, setLoading] = React.useState<boolean>(false);
   const [error, setError] = React.useState<Error | null>(null);
+
+  // Stable dep key: a fresh array literal with the same contents must not
+  // re-trigger the fetch (mirrors `useRecordFieldValues`'s `fieldsKey`).
+  const configuredKey = (configuredNames ?? []).join(',');
 
   React.useEffect(() => {
     if (!entityLogicalName) {
@@ -252,9 +318,10 @@ export function useHeaderFormMetadata(entityLogicalName: string): IUseHeaderForm
     // Zero-network, synchronous — read it before awaiting so the form order is
     // captured from the same render pass that triggered the fetch.
     const controls = readFormControlOrder();
+    const requested = buildRequestedAttributeNames(controls, configuredKey === '' ? [] : configuredKey.split(','));
 
     const client = new XrmDataverseClient();
-    client.retrieveEntityMetadata(entityLogicalName).then(
+    client.retrieveEntityMetadata(entityLogicalName, requested.length > 0 ? requested : undefined).then(
       metadata => {
         if (cancelled) return;
         setFormControls(controls);
@@ -275,7 +342,7 @@ export function useHeaderFormMetadata(entityLogicalName: string): IUseHeaderForm
     return () => {
       cancelled = true;
     };
-  }, [entityLogicalName]);
+  }, [entityLogicalName, configuredKey]);
 
   const formMetadata = React.useMemo<HeaderFormMetadata | null>(() => {
     if (!entityMetadata) return null;

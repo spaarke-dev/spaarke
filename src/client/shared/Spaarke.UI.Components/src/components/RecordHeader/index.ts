@@ -71,7 +71,7 @@ export type { INumberFieldProps, NumberFieldKind } from './fields';
 // confirmed none of these five symbols collides with an existing export, so
 // all re-export un-aliased (`src/components/index.ts` does `export * from
 // './RecordHeader'`, so they surface at the top-level barrel too).
-export { resolveHeaderConfig } from './configResolution';
+export { resolveHeaderConfig, extractConfiguredAttributeNames } from './configResolution';
 export type {
   ResolvedHeaderConfig,
   ResolvedHeaderField,

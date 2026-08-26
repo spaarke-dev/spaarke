@@ -27,6 +27,7 @@ The distinction matters because the fix is different. Anti-patterns require *unl
 - [AP-5: AbortController in a useEffect whose deps include your own state transition](#ap-5-abortcontroller-in-a-useeffect-whose-deps-include-your-own-state-transition)
 - [AP-6: Interpolating a raw GUID into `@odata.bind` — braces cause "Error in query syntax" (use `cleanGuid`)](#ap-6-interpolating-a-raw-guid-into-odatabind--braces-cause-error-in-query-syntax)
 - [AP-7: Converting a silent fallback into fail-fast, verified with targeted tests only](#ap-7-converting-a-silent-fallback-into-fail-fast-verified-with-targeted-tests-only)
+- [AP-8: Amending a failing test to match the source, without checking the source against the vendor contract](#ap-8-amending-a-failing-test-to-match-the-source)
 
 ### Gotchas
 - [G-1: Settings-file schema malformation silently disables permission rules + hooks](#g-1-settings-file-schema-malformation-silently-disables-permission-rules--hooks)
@@ -40,6 +41,8 @@ The distinction matters because the fix is different. Anti-patterns require *unl
 - [G-9: BFF AI Search has TWO index-name settings — `AiSearch:KnowledgeIndexName` (read) and `Analysis:SharedIndexName` (write)](#g-9-bff-ai-search-has-two-index-name-settings)
 - [G-10: HTML5 DnD `dragEnter` fires on ancestors when preview extends beyond pointer](#g-10-html5-dnd-dragenter-fires-on-ancestors-when-preview-extends-beyond-pointer)
 - [G-11: `Xrm.Navigation.navigateTo({ target: 2 })` opens a separate window — cross-window signaling requires sessionStorage, not `window.*`](#g-11-xrmnavigationnavigateto-target-2-opens-a-separate-window--cross-window-signaling-requires-sessionstorage-not-window)
+- [G-12: A Dataverse `$select` is all-or-nothing — one bad column name blanks the entire control](#g-12-a-dataverse-select-is-all-or-nothing)
+- [G-13: `Xrm.Utility.getEntityMetadata` returns the Client API shape (numeric `AttributeType`), NOT the Web API shape](#g-13-xrmutilitygetentitymetadata-returns-the-client-api-shape)
 
 ---
 
@@ -638,6 +641,62 @@ sibling `DataverseAccessDataSource` already had — so doubles need no credentia
 and cannot break again when tasks 020/022/033 rewrite either branch.
 
 **Evidence**: `projects/spaarke-auth-v4-dataverse-MI/notes/decisions/011-adr009-token-cache-decision.md` §8.
+
+---
+
+### AP-8: Amending a failing test to match the source
+
+> **Date**: 2026-08-26 · **Class**: Anti-pattern · **Surfaced by**: `record-header-and-notepad-r2` (tasks 020 → 033 UAT)
+
+**What happened**: A task found `XrmDataverseClient.test.ts` asserting `getEntityMetadata('sprk_event', ['Attributes'])` while the source called it with one argument. The agent changed the **test** to match the **source**, reported it as "fixed a pre-existing stale assertion", and the orchestrator accepted it. Two waves later, first UAT of the new control showed every field blank, every renderer defaulted to text, and a lookup emitted as a bare column name causing an HTTP 400. The failing test had been the only signal.
+
+**Root cause**: A red test is a *disagreement* between two artifacts. Deciding the source is right because it is the source begs the question. Neither artifact is authoritative — the **vendor contract** is.
+
+**Fix**: When a test and its source disagree, resolve against the third party: vendor documentation, the live endpoint, or an in-repo implementation already proven against production. Only then amend whichever is wrong. Record which evidence settled it.
+
+**Prevention**: Treat "I fixed a stale assertion" in an agent report as a **claim requiring evidence**, not a completed chore. The report should name what the assertion was checked against. If the only justification is "the source does X", the check has not happened.
+
+**Evidence**: `projects/record-header-and-notepad-r2/notes/decisions/033-def1-metadata-never-reached-resolver.md`. The correct resolution was that the *source* was wrong (see G-13) — the original test had been closer to right than the code.
+
+---
+
+### G-12: A Dataverse `$select` is all-or-nothing
+
+> **Date**: 2026-08-26 · **Class**: Gotcha · **Occurrences**: 3 (`RS-1`, RecordHeader UAT, and the generic guard that closed it)
+
+**What happened**: Three separate times, one invalid column name in a `useRecordFieldValues` `$select` produced HTTP 400 for the **whole request**, so every field came back null and the entire control rendered em-dashes. It presents as "the control is broken", not as "one field is wrong", which sends diagnosis in the wrong direction.
+
+- **RS-1**: `sprk_mattersummary` had been deleted; the shipped Matter header stopped loading entirely.
+- **RecordHeader UAT**: metadata failed to resolve, so a Lookup was emitted as its bare name (`sprk_projecttype_ref`) instead of `_sprk_projecttype_ref_value` → 400 → whole header blank.
+
+**Root cause**: OData rejects the request, not the offending property. Two consequences compound it: a Lookup's OData property is `_<name>_value` (the bare logical name exists in *metadata* but is **not** a queryable entity property), and any upstream failure that degrades renderer derivation silently changes which key is emitted.
+
+**Fix**: `useRecordFieldValues` now retries once with **no `$select`** on failure, returning the full row including every decorated `_<lookup>_value`. Degrading to "fetch more than we need" beats blanking the control.
+
+**Prevention**: Never let a `$select` be assembled from names that a *derivation step* produced without a fallback. When adding or renaming a Dataverse column that any control selects, grep for the old name across `src/client/**` — a deleted column is a live outage, not a stale reference.
+
+**Evidence**: `projects/record-header-and-notepad-r2/notes/rs1-hotfix-decision.md`; `notes/decisions/033-def1-metadata-never-reached-resolver.md`.
+
+---
+
+### G-13: `Xrm.Utility.getEntityMetadata` returns the Client API shape
+
+> **Date**: 2026-08-26 · **Class**: Gotcha · **Surfaced by**: `record-header-and-notepad-r2` task 033 UAT
+
+**What happened**: `projectAttribute` parsed the metadata payload assuming Web API shapes — a **string** `AttributeType` (`"Lookup"`) and an object `DisplayName`. It guarded with `if (typeof attributeType !== 'string') return 'String'`. Because the Client API returns a **number**, *every attribute of every entity* projected as `String` with no label. Downstream: all renderers fell back to text, labels showed humanized logical names, and lookups were emitted as bare column names (see G-12).
+
+**Root cause**: Two different Microsoft surfaces return two different shapes for the same concept:
+
+| | `Xrm.Utility.getEntityMetadata` (Client API) | Web API `EntityDefinitions` |
+|---|---|---|
+| `AttributeType` | **Number** (`AttributeTypeCode`, e.g. `6` = Lookup) | String (`"Lookup"`) |
+| `DisplayName` | **String** | Object (`UserLocalizedLabel.Label`) |
+
+**Fix**: Map the numeric `AttributeTypeCode` (mirror `XrmEnum.AttributeTypeCode` from `@types/xrm`) and accept a string `DisplayName`. Parse **both** shapes defensively — the same projection function is reachable from either transport.
+
+**Prevention**: `Xrm.WebApi.retrieveMultipleRecords('EntityDefinition', …)` **can never succeed** — `Xrm.WebApi` resolves its first argument to an entity *set* name, and metadata entities are not entities (`SemanticSearchControl/services/DataverseMetadataService.ts:222` records the same finding). Metadata via `Xrm` means `Xrm.Utility.getEntityMetadata`; anything else needs a direct `fetch`, which is an NFR-05 decision, not an implementation detail.
+
+**Caveat still open**: Microsoft does not document `Targets` on the Client API attribute payload, and `@types/xrm` is silent. Lookup *display* works regardless; a lookup **picker** that depends on `targets[0]` should be verified on a real form.
 
 ---
 

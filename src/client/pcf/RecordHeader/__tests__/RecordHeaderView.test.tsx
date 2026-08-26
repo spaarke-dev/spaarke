@@ -29,8 +29,10 @@ const mockRetrieveEntityMetadata = jest.fn();
 
 jest.mock('@spaarke/ui-components/dist/services/XrmDataverseClient', () => ({
   XrmDataverseClient: class {
-    retrieveEntityMetadata(entityName: string): Promise<unknown> {
-      return mockRetrieveEntityMetadata(entityName);
+    retrieveEntityMetadata(entityName: string, attributes?: string[]): Promise<unknown> {
+      // BOTH arguments are forwarded: the requested-attribute list is part of
+      // the contract the v1.1.1 defect fix depends on (see the DEF-1 suite).
+      return mockRetrieveEntityMetadata(entityName, attributes);
     }
   },
 }));
@@ -43,7 +45,11 @@ import {
   extractCurrencySymbol,
 } from '../control/RecordHeaderView';
 import { resolveEntityContext } from '../control/entityContext';
-import { buildHeaderFormMetadata, readFormControlOrder } from '../control/useHeaderFormMetadata';
+import {
+  buildHeaderFormMetadata,
+  buildRequestedAttributeNames,
+  readFormControlOrder,
+} from '../control/useHeaderFormMetadata';
 import { CONTROL_VERSION } from '../control/version';
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -281,8 +287,11 @@ describe('RecordHeaderView — version footer', () => {
     expect(await screen.findByTestId('record-header-version')).toHaveTextContent(`v${CONTROL_VERSION}`);
   });
 
-  it('starts at 1.1.0 (the new control identity baseline)', () => {
-    expect(CONTROL_VERSION).toBe('1.1.0');
+  it('stays on the 1.1.x line (the new control identity baseline)', () => {
+    // 1.1.0 was the initial identity; 1.1.1 carries the first-UAT defect fixes.
+    // Pinning the MINOR line still catches an accidental reset to 1.0.x, which
+    // is what this assertion was actually guarding.
+    expect(CONTROL_VERSION).toMatch(/^1\.1\.\d+$/);
   });
 
   it('is suppressed when showVersion is false', async () => {
@@ -462,6 +471,164 @@ describe('entity agnosticism (FR-12)', () => {
     );
 
     expect(await screen.findByText('Form sprk_widgetname')).toBeInTheDocument();
-    expect(mockRetrieveEntityMetadata).toHaveBeenCalledWith('sprk_widget');
+    // With no layoutJson the requested set is the form's own controls.
+    expect(mockRetrieveEntityMetadata).toHaveBeenCalledWith('sprk_widget', ['sprk_widgetname']);
+  });
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// DEF-1 (v1.1.0 UAT) — metadata must reach the resolver, and a lookup must
+// never be $select-ed by its bare name.
+//
+// The failure chain that shipped in v1.1.0:
+//   empty entity metadata
+//     -> resolveHeaderConfig derives renderer 'text' for EVERY field
+//     -> buildSelectFields emits the lookup's BARE logical name
+//     -> Dataverse 400s the whole $select ("Could not find a property named
+//        'sprk_projecttype_ref'") — verified live against spaarkedev1
+//     -> every field null -> every cell an em-dash
+//
+// These tests pin each link.
+// ─────────────────────────────────────────────────────────────────────────────
+
+describe('RecordHeaderView — DEF-1 regression: lookups and the $select', () => {
+  it('emits a lookup as _<name>_value, never as the bare logical name', () => {
+    const field = (name: string, renderer: string) =>
+      ({ name, renderer, label: name, span: 1, readOnly: false, required: false }) as never;
+
+    const select = buildSelectFields([
+      field('sprk_projecttype_ref', 'lookup'),
+      field('sprk_openeddate', 'date'),
+      field('sprk_highpriority', 'boolean'),
+    ]);
+
+    expect(select).toContain('_sprk_projecttype_ref_value');
+    // The exact string that returned HTTP 400 live. Its presence anywhere in
+    // the $select is the defect.
+    expect(select).not.toContain('sprk_projecttype_ref');
+  });
+
+  it('$selects the lookup correctly END-TO-END when metadata types the field', async () => {
+    mockRetrieveEntityMetadata.mockResolvedValue({
+      primaryIdAttribute: 'sprk_projectid',
+      primaryNameAttribute: 'sprk_projectnumber',
+      attributes: {
+        // Live-verified sprk_project types.
+        sprk_projecttype_ref: { attributeType: 'Lookup', displayName: 'Project Type', targets: ['sprk_projecttype'] },
+        sprk_openeddate: { attributeType: 'DateTime', displayName: 'Opened Date' },
+        sprk_highpriority: { attributeType: 'Boolean', displayName: 'High Priority' },
+      },
+    });
+    installXrm(['sprk_projecttype_ref', 'sprk_openeddate', 'sprk_highpriority']);
+
+    render(
+      <FluentProvider theme={webLightTheme}>
+        <RecordHeaderView
+          entityName={ENTITY}
+          recordId={RECORD_ID}
+          layoutJson={JSON.stringify({
+            _version: '1.0',
+            fields: [
+              { name: 'sprk_projecttype_ref' },
+              { name: 'sprk_openeddate' },
+              { name: 'sprk_highpriority' },
+            ],
+          })}
+        />
+      </FluentProvider>
+    );
+
+    await waitFor(() => expect(lastSelect).toBeDefined());
+    expect(lastSelect).toContain('_sprk_projecttype_ref_value');
+    expect(lastSelect).not.toMatch(/[=,]sprk_projecttype_ref(,|$)/);
+  });
+
+  it('renders METADATA display names, not humanized logical names', async () => {
+    mockRetrieveEntityMetadata.mockResolvedValue({
+      primaryIdAttribute: 'sprk_projectid',
+      primaryNameAttribute: 'sprk_projectnumber',
+      attributes: {
+        sprk_openeddate: { attributeType: 'DateTime', displayName: 'Opened Date' },
+        sprk_highpriority: { attributeType: 'Boolean', displayName: 'High Priority' },
+      },
+    });
+    // No form controls at all, so the FORM label chain cannot mask a missing
+    // metadata displayName — exactly the UAT condition that surfaced
+    // "Openeddate" / "Highpriority".
+    installXrm([]);
+
+    render(
+      <FluentProvider theme={webLightTheme}>
+        <RecordHeaderView
+          entityName={ENTITY}
+          recordId={RECORD_ID}
+          layoutJson={JSON.stringify({
+            _version: '1.0',
+            fields: [{ name: 'sprk_openeddate' }, { name: 'sprk_highpriority' }],
+          })}
+        />
+      </FluentProvider>
+    );
+
+    expect(await screen.findByText('Opened Date')).toBeInTheDocument();
+    expect(screen.getByText('High Priority')).toBeInTheDocument();
+    expect(screen.queryByText('Openeddate')).not.toBeInTheDocument();
+    expect(screen.queryByText('Highpriority')).not.toBeInTheDocument();
+  });
+
+  it('requests the layoutJson attributes even when they are NOT on the form', async () => {
+    mockRetrieveEntityMetadata.mockResolvedValue(ENTITY_METADATA);
+    installXrm(['sprk_projectnumber']);
+
+    render(
+      <FluentProvider theme={webLightTheme}>
+        <RecordHeaderView
+          entityName={ENTITY}
+          recordId={RECORD_ID}
+          layoutJson={JSON.stringify({
+            _version: '1.0',
+            summaryField: 'sprk_recordsummary',
+            fields: [{ name: 'sprk_projecttype' }],
+          })}
+        />
+      </FluentProvider>
+    );
+
+    await waitFor(() => expect(mockRetrieveEntityMetadata).toHaveBeenCalled());
+
+    // Form control first, then the layout's names — including a field absent
+    // from the form and the summaryField (which gates the FR-17 sparkle).
+    expect(mockRetrieveEntityMetadata).toHaveBeenCalledWith(ENTITY, [
+      'sprk_projectnumber',
+      'sprk_projecttype',
+      'sprk_recordsummary',
+    ]);
+  });
+});
+
+describe('buildRequestedAttributeNames', () => {
+  const control = (name: string) => ({ name });
+
+  it('unions form controls with configured names, form order first', () => {
+    expect(
+      buildRequestedAttributeNames([control('a'), control('b')], ['c', 'sprk_recordsummary'])
+    ).toEqual(['a', 'b', 'c', 'sprk_recordsummary']);
+  });
+
+  it('de-duplicates across the two sources', () => {
+    expect(buildRequestedAttributeNames([control('a'), control('b')], ['b', 'a', 'c'])).toEqual(['a', 'b', 'c']);
+  });
+
+  it('drops blanks and non-strings', () => {
+    expect(
+      buildRequestedAttributeNames(
+        [control('a'), control('  '), control('' as string), { name: 42 as unknown as string }],
+        ['  b  ', '']
+      )
+    ).toEqual(['a', 'b']);
+  });
+
+  it('returns an empty list when there is nothing to request', () => {
+    expect(buildRequestedAttributeNames([], [])).toEqual([]);
   });
 });
