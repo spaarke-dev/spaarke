@@ -371,3 +371,67 @@ fixture cannot see.**
    but the stated invariant is stronger than what ships.
 4. **"ArchTests: zero delta" is a weaker signal than it reads as** — a ceiling-based ratchet consumed
    to zero headroom reports as unchanged. Failure-count parity ≠ ratchet-headroom parity (W-1).
+
+---
+
+## 11. Second review round — the C-1/C-2 fix introduced 4 more defects
+
+A re-verification pass against `7db13de` found that the C-1/C-2 restructure had itself introduced
+three new defects plus one warning. **Recorded prominently because the pattern is the real lesson: two
+consecutive rounds of fixes on this component each introduced a fresh fail-open or fail-closed defect
+in the query layer.** The decision layer has not moved since the first commit; everything since has
+been the fetch.
+
+| # | Defect | Class | Fix |
+|---|---|---|---|
+| **N-1** | The secure probe lost its container-**value** filter (`sprk_issecure == true AND sprk_containerid NOT NULL`, `TopCount 25`). It therefore returned *any* 25 secure records rather than claimants of **this** container. Once the org merely *holds* 25 secure records — the intended steady state, each with its own container — the page fills on every call and the truncation guard throws `container_ownership_indeterminate` **for every container, including the correct owner's**. Tasks 073 and 078 permanently dead at a trivially reachable number | **fail-CLOSED outage**, hard cliff | Restored a selective, trim-tolerant filter: `sprk_containerid Like '%escaped%'` with T-SQL bracket escaping (`_`→`[_]`, `%`→`[%]`, `[`→`[[]`). That answers the original `_`-is-a-wildcard objection properly — bracket escaping is exactly what it is for — while keeping the code-side exact-after-trim compare as the authority |
+| **N-2** | The co-mingling probe still carried **the original C-1 bug, mirrored**: `Equal` on the trimmed input with `ColumnSet(false)`, so it could not self-check. A non-secure record stamped `"  b!x  "` sharing a secure record's `b!x` was invisible → `nonSecureClaimantCount` stayed 0 → the ambiguity refusal never fired → the secure record was named **sole owner of a co-mingled container** | **fail-OPEN**, on the exact condition this wave exists to detect | Same shape as the secure probe: select the column, `Like` filter, trim-compare in code |
+| **N-3** | `sprk_issecure NotEqual true` is SQL `<> 1`, and `NULL <> 1` is **UNKNOWN**, so NULL-flagged rows were **excluded** from the co-mingling probe — while W-5's own fix documents exactly why those rows exist and are expected (Dataverse does not back-fill Two Options columns; FLS masks the value). A second, independent blind spot in the same detector | **fail-OPEN** | Nested `LogicalOperator.Or`: `(NotEqual true) OR (Null)` |
+| **N-4** | `IsRecordNotFound` matched localized message substrings. Locale: Dataverse fault messages are localized, so on a non-English org classification silently stops and W-6's raw fault returns. Over-breadth: *"Attribute sprk_issecure was not found"* — a real schema/FLS error — was reported to the operator as "the record does not exist", misdiagnosing the very case W-5 exists to surface | WARNING | Typed: `FaultException<OrganizationServiceFault>` with `ErrorCode == -2147220969` (`0x80040217 ObjectDoesNotExist`) |
+
+**Structural fix beyond the four**: pass 2 now runs **only when a secure claimant exists**. Probing a
+shared BU container — which legitimately has hundreds of non-secure claimants — would otherwise fill
+the page and turn the ordinary shared-container case into a refusal, breaking task 078 for every
+normal container.
+
+### The test double was lying twice, and that is the most important finding in this round
+
+Perturbation revealed that **two of the four new regression tests passed vacuously** on their first
+run. The double had been written to model *intent* rather than to evaluate the query:
+
+- **N-3 passed vacuously** because the double routed rows to pass 1 / pass 2 by `Flag == true`, so
+  reverting the nested `Or` to `NotEqual`-only changed the query but not the double. Fixed by
+  evaluating the query's real flag conditions under **SQL three-valued logic** (`NULL <> 1` →
+  UNKNOWN → excluded).
+- **N-2 passed vacuously** because the double looked only for a `Like` condition and **fell back to
+  match-everything** when it found none, so reverting to `Equal` removed the Like and the fallback
+  matched every row. Fixed by evaluating whichever operator the query actually used — `Like` as an
+  unescaped substring match, `Equal` as exact and untrimmed.
+- Both helpers now **throw** on an unmodelled operator, and on a probe carrying no flag/container
+  condition at all, rather than defaulting to permissive. A double that defaults to permissive cannot
+  test a filter.
+
+The generalisable rule, and the reason this is recorded rather than quietly fixed: **a test double
+that encodes what a query is *for* cannot detect a change in what it *does*.** Both vacuous passes
+looked identical to a real pass — green, fast, correctly named — and were caught only because every
+guard was perturbed individually.
+
+### Perturbation round 3
+
+| # | Broken | Result |
+|---|---|---|
+| 7 | N-1's container-value filter removed from the secure probe | ✅ 1 red (`N-1: 25 secure records that DON'T claim this container…`) |
+| 8 | N-3's `Null` leg removed from the nested Or | ⚠️ **first attempt: PASSED** (double was lying) → after fixing the double: ✅ 1 red |
+| 9 | N-2's `Like` reverted to `Equal` on the trimmed input | ⚠️ **first attempt: PASSED** (double was lying) → after fixing the double: ✅ 1 red |
+| 10 | N-4's typed fault check reverted to substring matching | ✅ 2 red (both the localized-message case and the schema/FLS misclassification case) |
+
+### Re-verification after round 2
+
+| Gate | Result |
+|---|---|
+| `dotnet test tests/unit/Sprk.Bff.Api.Tests/` | ✅ **11,204 passed / 0 failed / 82 skipped** (+32 vs the 11,172 baseline) |
+| New C# tests | 32 (was 27; +5 N-regressions) |
+| TS | ✅ 38 passed |
+| ArchTests | ✅ 9 failed / 105 passed — exact known baseline, zero delta |
+| Publish | ✅ **45.10 MB** compressed incl. PDBs (unchanged) |
+| CVE | ✅ clean |

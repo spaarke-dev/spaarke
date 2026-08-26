@@ -1,3 +1,4 @@
+using System.ServiceModel;
 using FluentAssertions;
 using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Xrm.Sdk;
@@ -353,12 +354,16 @@ public class RecordContainerResolverTests
         (await resolver.ResolveOwningRecordAsync(OwnContainer)).Should().BeNull();
     }
 
-    [Fact(DisplayName = "Task 075 reverse (C-2): hitting the probe bound REFUSES instead of reporting 'unowned'")]
+    [Fact(DisplayName = "Task 075 reverse (C-2): a page full of claimants of THIS container refuses")]
     public async Task Reverse_ProbeTruncation_Refuses()
     {
-        // C-2 regression. TopCount does not populate MoreRecords, so truncation is invisible. If the probe
-        // silently truncated, a secure claimant outside the page would read as absent → null → "shared
-        // container". Reaching the bound means ownership is genuinely unknown, so it refuses.
+        // C-2 regression. TopCount does not populate MoreRecords, so a full page is the only signal that a
+        // claimant may lie beyond it. 25 secure records all claiming ONE container is pathological
+        // co-mingling in its own right, so refusing is both honest and correct.
+        //
+        // NOTE this test was rewritten: its first version built 25 secure claimants whose stored container
+        // did NOT match, which is the N-1 defect (a probe with no container filter) dressed up as intended
+        // behaviour. The rows must actually claim the queried container for the bound to mean anything.
         var manyClaimants = Enumerable.Range(0, 25)
             .Select(_ => (SecureProjectEntity, Guid.NewGuid(), true))
             .ToArray();
@@ -366,12 +371,127 @@ public class RecordContainerResolverTests
         var resolver = Build(
             securable: [SecureProjectEntity],
             claimants: manyClaimants,
-            storedContainerOverride: "b!some-other-container-0000000");
+            storedContainerOverride: OwnContainer);
 
         var act = async () => await resolver.ResolveOwningRecordAsync(OwnContainer);
 
         (await act.Should().ThrowAsync<SdapProblemException>())
             .Which.Code.Should().Be("container_ownership_indeterminate");
+    }
+
+    [Fact(DisplayName = "Task 075 reverse (N-1): 25 secure records that DON'T claim this container must not break resolution")]
+    public async Task Reverse_ManyUnrelatedSecureRecords_StillResolvesTheOwner()
+    {
+        // N-1 regression, and the reason it matters: 25 secure records EACH WITH THEIR OWN CONTAINER is the
+        // intended steady state of this feature, not an edge case.
+        //
+        // The first version of the C-1/C-2 fix filtered the secure probe on `sprk_issecure == true AND
+        // sprk_containerid NOT NULL` with no container-VALUE condition. It therefore returned "any 25 secure
+        // records" rather than "claimants of THIS container", the page filled as soon as the org merely HELD
+        // 25 secure records, and the truncation guard then threw for EVERY container — including the correct
+        // owner's. Tasks 073 (write) and 078 (read) would have been permanently dead at a trivially
+        // reachable number. Fail-closed, so not a disclosure, but a hard availability cliff.
+        var unrelated = Enumerable.Range(0, 25)
+            .Select(i => new Claimant(SecureProjectEntity, Guid.NewGuid(), true, $"b!unrelated-container-{i:D4}"))
+            .Append(new Claimant(SecureProjectEntity, RecordId, true, OwnContainer))
+            .ToArray();
+
+        var resolver = Build(securable: [SecureProjectEntity], explicitClaimants: unrelated);
+
+        var owner = await resolver.ResolveOwningRecordAsync(OwnContainer);
+
+        owner.Should().NotBeNull(
+            "the probe must be scoped to claimants of THIS container, so unrelated secure records — however "
+            + "many — cannot fill the page and turn every lookup into a refusal");
+        owner!.RecordId.Should().Be(RecordId);
+    }
+
+    [Fact(DisplayName = "Task 075 reverse (N-2): a PADDED non-secure claimant is still detected as co-mingling")]
+    public async Task Reverse_PaddedNonSecureClaimant_IsDetected()
+    {
+        // N-2 regression. The co-mingling probe originally filtered `container Equal <trimmed>` with
+        // ColumnSet(false) — verbatim the C-1 defect, mirrored onto the detector. A non-secure record stamped
+        // "  b!x  " sharing a secure record's b!x was invisible, so nonSecureClaimantCount stayed 0, the
+        // ambiguity refusal never fired, and the reverse lookup named the secure record as SOLE owner of a
+        // co-mingled container. Fail-open on exactly the condition this wave exists to detect.
+        var resolver = Build(
+            securable: [SecureProjectEntity],
+            explicitClaimants:
+            [
+                new Claimant(SecureProjectEntity, RecordId, true, OwnContainer),
+                new Claimant(SecureProjectEntity, Guid.NewGuid(), false, $"  {OwnContainer}  ")
+            ]);
+
+        var act = async () => await resolver.ResolveOwningRecordAsync(OwnContainer);
+
+        (await act.Should().ThrowAsync<SdapProblemException>())
+            .Which.Code.Should().Be("container_ownership_ambiguous");
+    }
+
+    [Fact(DisplayName = "Task 075 reverse (N-3): a NULL-flagged non-secure claimant is still detected as co-mingling")]
+    public async Task Reverse_NullFlaggedNonSecureClaimant_IsDetected()
+    {
+        // N-3 regression. `sprk_issecure NotEqual true` is SQL `<> 1`, and `NULL <> 1` is UNKNOWN, so rows
+        // with a NULL flag were EXCLUDED from the co-mingling probe. Those rows are legitimate and expected —
+        // Dataverse does not back-fill a Two Options column on existing rows, and field-level security
+        // returns the row with the attribute masked rather than erroring. A second, independent blind spot in
+        // the same detector.
+        var resolver = Build(
+            securable: [SecureProjectEntity],
+            explicitClaimants:
+            [
+                new Claimant(SecureProjectEntity, RecordId, true, OwnContainer),
+                new Claimant(SecureProjectEntity, Guid.NewGuid(), null, OwnContainer)
+            ]);
+
+        var act = async () => await resolver.ResolveOwningRecordAsync(OwnContainer);
+
+        (await act.Should().ThrowAsync<SdapProblemException>())
+            .Which.Code.Should().Be("container_ownership_ambiguous");
+    }
+
+    [Fact(DisplayName = "Task 075 (N-4): a typed ObjectDoesNotExist fault becomes the documented 404")]
+    public async Task RecordNotFound_IsClassifiedFromTheTypedFault()
+    {
+        var entityService = Substitute.For<IGenericEntityService>();
+        entityService.RetrieveAsync(
+                Arg.Any<string>(), Arg.Any<Guid>(), Arg.Any<string[]>(), Arg.Any<CancellationToken>())
+            .ThrowsAsync(new FaultException<OrganizationServiceFault>(
+                new OrganizationServiceFault { ErrorCode = -2147220969 },
+                // Deliberately NOT an English "does not exist" message: the classification must come from the
+                // error code, because Dataverse fault messages are localized and the old substring match
+                // silently stopped working on a non-English org.
+                new FaultReason("Die angeforderte Entität existiert nicht.")));
+
+        var resolver = Build(securable: [SecureProjectEntity], entityService: entityService);
+
+        var act = async () => await resolver.ResolveForRecordAsync(
+            SecureProjectEntity, RecordId, SharedBuContainer);
+
+        (await act.Should().ThrowAsync<SdapProblemException>())
+            .Which.Code.Should().Be("container_record_not_found");
+    }
+
+    [Fact(DisplayName = "Task 075 (N-4): a schema/FLS 'attribute was not found' fault is NOT mis-reported as a missing record")]
+    public async Task AttributeNotFoundFault_IsNotMisclassifiedAsRecordNotFound()
+    {
+        // The over-breadth half of N-4. "Attribute sprk_issecure was not found" is a schema or field-level
+        // security error — precisely the masked-attribute case the absent-flag warning exists to surface —
+        // and reporting it to an operator as "the record does not exist" misdiagnoses it. It must propagate.
+        var entityService = Substitute.For<IGenericEntityService>();
+        entityService.RetrieveAsync(
+                Arg.Any<string>(), Arg.Any<Guid>(), Arg.Any<string[]>(), Arg.Any<CancellationToken>())
+            .ThrowsAsync(new FaultException<OrganizationServiceFault>(
+                new OrganizationServiceFault { ErrorCode = -2147217149 },
+                new FaultReason("Attribute sprk_issecure was not found in the metadata cache.")));
+
+        var resolver = Build(securable: [SecureProjectEntity], entityService: entityService);
+
+        var act = async () => await resolver.ResolveForRecordAsync(
+            SecureProjectEntity, RecordId, SharedBuContainer);
+
+        await act.Should().ThrowAsync<FaultException<OrganizationServiceFault>>(
+            "a schema or field-level-security fault must propagate, not be relabelled as a missing record");
     }
 
     [Fact(DisplayName = "Task 075 reverse: a blank container id resolves to null without querying")]
@@ -405,12 +525,188 @@ public class RecordContainerResolverTests
         return row;
     }
 
+    /// <summary>
+    /// A claimant of a container, in the shape the reverse-lookup probes actually see.
+    /// </summary>
+    /// <param name="Entity">Entity logical name.</param>
+    /// <param name="Id">Record id.</param>
+    /// <param name="Flag">
+    /// The <c>sprk_issecure</c> value. <c>null</c> means the attribute is ABSENT on the returned row — a NULL
+    /// flag, which is what Dataverse returns for an unset Two Options column and for a field-level-security
+    /// masked value. That is exactly the shape a <c>NotEqual true</c>-only filter silently excludes.
+    /// </param>
+    /// <param name="Stored">The stored <c>sprk_containerid</c> value, verbatim (may be padded).</param>
+    private sealed record Claimant(string Entity, Guid Id, bool? Flag, string Stored);
+
+    /// <summary>
+    /// Evaluates the query's real <c>sprk_issecure</c> conditions against a row's flag value under SQL
+    /// three-valued logic, so the double reflects what Dataverse would return rather than what the probe was
+    /// intended to mean.
+    ///
+    /// <para>The load-bearing rule is <c>NotEqual</c>: it maps to SQL <c>&lt;&gt; 1</c>, and <c>NULL &lt;&gt;
+    /// 1</c> is UNKNOWN, so a NULL-flagged row is EXCLUDED by it. Modelling that is what makes the N-3
+    /// regression test bite instead of passing vacuously.</para>
+    /// </summary>
+    private static bool FlagConditionsMatch(QueryExpression query, bool isSecureProbe, bool? flag)
+    {
+        const string flagAttribute = "sprk_issecure";
+
+        static bool Satisfies(ConditionExpression condition, bool? flag) => condition.Operator switch
+        {
+            // NULL = 1 is UNKNOWN → excluded.
+            ConditionOperator.Equal => flag.HasValue && flag.Value == (bool)condition.Values[0],
+
+            // NULL <> 1 is UNKNOWN → excluded. THE N-3 SEMANTIC.
+            ConditionOperator.NotEqual => flag.HasValue && flag.Value != (bool)condition.Values[0],
+
+            ConditionOperator.Null => !flag.HasValue,
+            ConditionOperator.NotNull => flag.HasValue,
+
+            _ => throw new InvalidOperationException(
+                $"The test double does not model ConditionOperator.{condition.Operator} on {flagAttribute}. "
+                + "Add it rather than defaulting, or a query change will silently stop being verified.")
+        };
+
+        var topLevel = query.Criteria.Conditions
+            .Where(c => c.AttributeName == flagAttribute)
+            .ToList();
+
+        // Top-level flag conditions are ANDed (the secure probe's `flag Equal true`).
+        if (topLevel.Any(c => !Satisfies(c, flag)))
+        {
+            return false;
+        }
+
+        // Nested filters are the co-mingle probe's Or group.
+        foreach (var nested in query.Criteria.Filters)
+        {
+            var conditions = nested.Conditions.Where(c => c.AttributeName == flagAttribute).ToList();
+            if (conditions.Count == 0)
+            {
+                continue;
+            }
+
+            var satisfied = nested.FilterOperator == LogicalOperator.Or
+                ? conditions.Any(c => Satisfies(c, flag))
+                : conditions.All(c => Satisfies(c, flag));
+
+            if (!satisfied)
+            {
+                return false;
+            }
+        }
+
+        // Guard against a probe that carries no flag condition at all — that would make both passes see every
+        // row and the secure/non-secure split would stop being tested.
+        if (topLevel.Count == 0 && query.Criteria.Filters.Count == 0)
+        {
+            throw new InvalidOperationException(
+                $"A reverse-lookup probe carried NO {flagAttribute} condition (isSecureProbe={isSecureProbe}). "
+                + "Both passes would then see every row and the secure/non-secure split would be untested.");
+        }
+
+        return true;
+    }
+
+    /// <summary>
+    /// Evaluates the query's real <c>sprk_containerid</c> condition against a row's stored value, honouring
+    /// the operator the resolver actually used.
+    ///
+    /// <para><b>Why this evaluates rather than assumes.</b> An earlier version looked only for a
+    /// <c>Like</c> condition and fell back to "match everything" when it found none. That made the N-2 test
+    /// pass VACUOUSLY: reverting the co-mingle probe to <c>Equal</c> removed the Like, the fallback matched
+    /// every row, and the padded claimant was still "detected" — so the perturbation did not bite. A double
+    /// that defaults to permissive cannot test a filter.</para>
+    ///
+    /// <para><c>Like</c> is mirrored as a substring match after unescaping the bracket forms the resolver
+    /// applies (<c>[_]</c> → <c>_</c>), because that is what T-SQL <c>LIKE '%…%'</c> means — deliberately
+    /// WIDER than the answer, with the resolver's code-side trim-compare as the authority. <c>Equal</c> is
+    /// mirrored as an exact, UNTRIMMED comparison, which is precisely why it misses a padded stored value.
+    /// </para>
+    /// </summary>
+    private static bool ContainerConditionMatches(QueryExpression query, string stored)
+    {
+        const string containerAttribute = "sprk_containerid";
+
+        var conditions = query.Criteria.Conditions
+            .Concat(query.Criteria.Filters.SelectMany(f => f.Conditions))
+            .Where(c => c.AttributeName == containerAttribute)
+            .ToList();
+
+        if (conditions.Count == 0)
+        {
+            throw new InvalidOperationException(
+                $"A reverse-lookup probe carried NO {containerAttribute} condition. The probe would then "
+                + "return 'any N secure records' rather than claimants of the queried container — the N-1 "
+                + "defect — so the double refuses to model it as a match-all.");
+        }
+
+        foreach (var condition in conditions)
+        {
+            var value = condition.Values.FirstOrDefault() as string ?? string.Empty;
+
+            var matches = condition.Operator switch
+            {
+                ConditionOperator.Like => stored.Contains(
+                    value.Trim('%')
+                        .Replace("[_]", "_", StringComparison.Ordinal)
+                        .Replace("[%]", "%", StringComparison.Ordinal)
+                        .Replace("[[]", "[", StringComparison.Ordinal),
+                    StringComparison.Ordinal),
+
+                // Exact and UNTRIMMED — this is the operator whose use on a padded stored value is the bug.
+                ConditionOperator.Equal => string.Equals(stored, value, StringComparison.Ordinal),
+
+                ConditionOperator.NotNull => !string.IsNullOrEmpty(stored),
+                ConditionOperator.Null => string.IsNullOrEmpty(stored),
+
+                _ => throw new InvalidOperationException(
+                    $"The test double does not model ConditionOperator.{condition.Operator} on "
+                    + $"{containerAttribute}. Add it rather than defaulting, or a query change will silently "
+                    + "stop being verified.")
+            };
+
+            if (!matches)
+            {
+                return false;
+            }
+        }
+
+        return true;
+    }
+
+    /// <summary>
+    /// Normalizes the simple tuple form plus any explicit <see cref="Claimant"/> rows into one list, and
+    /// computes which probe each row belongs to. Pass 1 sees <c>flag == true</c>; pass 2 sees
+    /// <c>flag != true OR flag IS NULL</c>.
+    /// </summary>
+    private static List<(Claimant Row, bool MatchesSecureProbe)> ExpandClaimants(
+        (string Entity, Guid Id, bool IsSecure)[]? simple,
+        Claimant[]? explicitRows,
+        string stored)
+    {
+        var result = new List<(Claimant, bool)>();
+
+        foreach (var (entity, id, isSecure) in simple ?? [])
+        {
+            result.Add((new Claimant(entity, id, isSecure, stored), isSecure));
+        }
+
+        foreach (var row in explicitRows ?? [])
+        {
+            result.Add((row, row.Flag == true));
+        }
+
+        return result;
+    }
+
     private static RecordContainerResolver Build(
         string[] securable,
         Entity? record = null,
         (string Entity, Guid Id, bool IsSecure)[]? claimants = null,
         IGenericEntityService? entityService = null,
-        string? storedContainerOverride = null)
+        string? storedContainerOverride = null,
+        Claimant[]? explicitClaimants = null)
     {
         var registry = Substitute.For<ISecurableEntityRegistry>();
         var set = new HashSet<string>(securable.Select(s => s.ToLowerInvariant()), StringComparer.Ordinal);
@@ -428,40 +724,63 @@ public class RecordContainerResolverTests
                     Arg.Any<string>(), Arg.Any<Guid>(), Arg.Any<string[]>(), Arg.Any<CancellationToken>())
                 .Returns(Task.FromResult(record!));
 
-            // The resolver's reverse direction issues TWO queries per securable entity, and the split is the
-            // C-2 fix, so this double must answer them SEPARATELY rather than returning one blended
-            // collection — otherwise the test would pass against the truncation bug it exists to catch.
+            // The reverse direction issues TWO queries per securable entity (the C-2 fix), so this double
+            // must answer them SEPARATELY — a blended collection would pass against the very truncation bug
+            // the split exists to remove.
             //
-            //   secure probe   — selects sprk_containerid, filters sprk_issecure == true
-            //   co-mingle probe — selects nothing, TopCount 1, filters sprk_issecure != true
+            //   pass 1, secure probe    — filters sprk_issecure == true AND container LIKE …
+            //   pass 2, co-mingle probe — filters container LIKE … AND a NESTED Or on the flag
             //
-            // Discriminated on whether the ColumnSet asks for the container column.
+            // DISCRIMINATED ON THE NESTED FILTER, deliberately not on the ColumnSet. Both probes now select
+            // sprk_containerid — they must, because the LIKE filter is wider than the answer and the exact
+            // compare happens in code — so a ColumnSet-based discriminator would silently route both queries
+            // to the same branch and the suite would mis-report. The nested Or is unique to pass 2 and is
+            // load-bearing there (it is the NULL-flag fix), so it is a stable key.
             var stored = storedContainerOverride ?? OwnContainer;
 
             svc.RetrieveMultipleAsync(Arg.Any<QueryExpression>(), Arg.Any<CancellationToken>())
                 .Returns(call =>
                 {
                     var query = call.Arg<QueryExpression>();
-                    var isSecureProbe = query.ColumnSet?.Columns?.Contains("sprk_containerid") == true;
+                    var isSecureProbe = (query.Criteria?.Filters?.Count ?? 0) == 0;
 
                     var collection = new EntityCollection();
 
-                    foreach (var (entity, id, isSecure) in claimants ?? [])
+                    foreach (var (claimant, _) in
+                             ExpandClaimants(claimants, explicitClaimants, stored))
                     {
-                        if (isSecure != isSecureProbe)
+                        // Evaluate the query's ACTUAL flag conditions against the row, under SQL three-valued
+                        // logic — do NOT assume what the probe "means".
+                        //
+                        // An earlier version of this double classified rows by `Flag == true` and routed them
+                        // to pass 1 / pass 2 accordingly. That made the N-3 test pass VACUOUSLY: reverting the
+                        // nested Or to `NotEqual true` alone changed the query but not the double, so the
+                        // NULL-flag row still reached the co-mingling probe and the perturbation did not bite.
+                        // Modelling `NULL <> 1 → UNKNOWN → excluded` is the whole point of that test.
+                        if (!FlagConditionsMatch(query, isSecureProbe, claimant.Flag))
                         {
                             continue;
                         }
 
-                        var row = new Entity(entity, id) { ["sprk_issecure"] = isSecure };
-
-                        if (isSecureProbe)
+                        // The LIKE filter is also mirrored, because it is wider than the answer: it matches a
+                        // superstring, and the resolver's code-side compare is what narrows it. A double that
+                        // pre-filtered exactly would hide whether that compare exists at all.
+                        if (!ContainerConditionMatches(query, claimant.Stored))
                         {
-                            // Only the secure probe selects the container column, and the resolver matches on
-                            // it in code (trim-tolerant, exact) rather than in the filter — that is the C-1
-                            // fix, so the stored value is what these tests vary.
-                            row["sprk_containerid"] = stored;
+                            continue;
                         }
+
+                        var row = new Entity(claimant.Entity, claimant.Id);
+
+                        // A NULL flag is represented by the attribute being ABSENT, which is how Dataverse
+                        // returns an unset Two Options column — and is exactly the shape the NotEqual-only
+                        // filter used to exclude.
+                        if (claimant.Flag.HasValue)
+                        {
+                            row["sprk_issecure"] = claimant.Flag.Value;
+                        }
+
+                        row["sprk_containerid"] = claimant.Stored;
 
                         collection.Entities.Add(row);
                     }
