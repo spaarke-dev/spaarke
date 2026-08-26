@@ -1,5 +1,45 @@
 # Current Task State — customer-provisioning-orchestration-r1
 
+> **Last Updated**: 2026-08-26 SESSION 12 END — **🎯 SESSION 12 accomplishments** (all pushed to origin, branch @ `abe16465a` = master + 11 ahead; working tree CLEAN): (1) **Prerequisite wave dispatched** (`wf_5d833b87-331`, 12 background agents, 1.74M tokens, ~21min) landing 204b Path A + 204c 10 H13 probes + 204d topology decision. **MASSIVE FINDING**: 9 of 10 H13 real probes for 204c B07 were ALREADY APPLIED by prior Wave G tasks (170/172/173/174/175/177/178/179/180 + composite wiring by 185); task 204d Path SPLIT was ALREADY DONE by Wave G-1 tasks 100/101/102 (2026-08-19); punch-list carried STALE "OPEN" markers. The 15-20h prerequisite estimate was illusory. (2) **I4 REPLACE** (owner directive SESSION 12): swapped I4 registration in `E2EAcceptanceModule.cs` from task-176 `SpeContainerResolverInvariantProbe` (BFF-diagnostic trust-me pattern; retained on disk with Wave G-6 retirement banner) → new `SpeContainerTenantDerivationInvariantProbe` (task 204c B07, INDEPENDENT ARM app-settings direct re-verification per 204c dispatch principle). Composition-root test I4 mapping updated. Tests 148/148 pass. (3) **204d regression guard**: `ApiHostShadowWorkerGuardTests.cs` (191 LOC) asserts `.Api` never registers hosted services (protects Path-SPLIT topology). Quality gates PASSED (0 Critical / 0 Warning / 1 non-blocking Suggestion). (4) **204b Path A landed**: spec.md §ADR Tensions row + design.md §17 Placement Justification + punch-list B04 annotated. NO code change to `DataverseServiceClientImpl.cs`. (5) **Task 203c SKILL.md wiring COMPLETE**: A15 + A16 verified ALREADY APPLIED (tasks 005 + 111 + 144); A02/A03/A04 landed as advisory quality-of-life additions to `/provision-environment` skill — Step 0.5 external-prereqs iteration (line 174, HARD STOP), Step 1.0 batch mode + `intake.schema.json` (Draft 2020-12 + conditional invariant + 2 examples), Step 7 postmortem (line 909, MANDATORY per template). Actual effort ~3h vs 15-20h estimate. (6) **TASK-INDEX**: 203c/204b/204c/204d all flipped to ✅. **CRITICAL OUTCOME — task 186 blocker status DRAMATICALLY REDUCED**: essentially unblocked pending A26 queue-recreate (30min human authorization per runbook §7). Owner directive still stands: DO NOT run 186 until A26 is executed by human operator.
+
+## 🎯 SESSION 12 END QUICK RECOVERY — 2026-08-26 (READ THIS FIRST)
+
+| Field | Value |
+|-------|-------|
+| **Just completed** | Prerequisite wave for task 186. 204b/204c/204d all flipped ✅ (mostly via already-applied discovery). 203c SKILL.md wiring COMPLETE (A02/A03/A04 landed as new SKILL sections + `intake.schema.json` authored). I4 REPLACED per owner directive. Punch-list + TASK-INDEX updated to reflect SESSION 12 outcomes. |
+| **Next actionable** | **A26 queue-recreate ceremony** — human executes `az servicebus queue delete sprk-provisioning-jobs -g <rg> --namespace-name spaarke-servicebus-dev` + Bicep re-provision per `notes/queue-recreate-runbook-2026-08.md` §7. WARNING: creation-time-only settings (`requiresSession=true` + `requiresDuplicateDetection=true` PT1H); existing messages LOST. 30min. Then task 186 dispatch (16-24h with 24h SPE gate). |
+| **Locked owner decision (SESSION 12)** | **I4 = REPLACE** — retire task 176's BFF-diagnostic-endpoint probe (kept on disk with retirement banner; may be re-registered under a distinct `InvariantKind` post-186 if operator approves complementary coverage), register task 204c's INDEPENDENT ARM app-settings-read probe. Composite disallows both under same Kind. Applied via `E2EAcceptanceModule.cs` swap + `E2EAcceptanceCompositionRootTests.cs` CR9 mapping update. |
+| **Branch** | `work/customer-provisioning-orchestration-r1` @ `abe16465a` = origin/master + 11 ahead; working tree CLEAN |
+| **Test suite** | 148/148 pass (E2EAcceptance + SpeContainer + ApiHostShadowWorker filter, post I4 swap). Full L2 test suite unchanged. |
+
+### SESSION 12 commits (ALL PUSHED)
+
+- `0185a7071` — feat(provisioning): SESSION 12 prerequisite wave — I4 REPLACE + 204b/c/d results (10 files, +1706/-14)
+- `abe16465a` — feat(provisioning): task 203c SKILL.md wiring — A02/A03/A04 applied + A15/A16 confirmed already-done (4 files, +351/-7)
+
+### Critical Context (2-3 sentences)
+
+**Task 186 prerequisite wave essentially self-resolved** — the vast majority of what looked like open blocker work had already been landed in prior Wave G iterations; the punch-list markers were stale. Real remaining work reduced to: (a) I4 REPLACE swap + composition-root test update, (b) 204d regression guard test (191 LOC preventing future silent regression to shadow-worker topology), (c) 204b Path A doc-only formalization, (d) 203c SKILL.md advisory wiring (Step 0.5 dynamic prereqs.yaml iteration + Step 1 --batch mode + Step 7 postmortem). All committed + pushed. **Task 186 is essentially unblocked pending A26 queue-recreate (human authorization, 30min).**
+
+### Deferred / follow-on (post-186)
+
+1. **Owner sign-off on re-registering task 176 `SpeContainerResolverInvariantProbe` under distinct `InvariantKind`** — if operator determines both BFF-diagnostic AND ARM app-settings probes should run in parallel (belt-and-suspenders), a new `InvariantKind.I4SpeContainerRuntimeAssertion` (or similar) enum value would need to be added + the retired probe's Kind property updated + composite would then dispatch to BOTH. Currently: only I4 = ARM app-settings direct read.
+2. **A26 queue-recreate ceremony** — human executes per runbook §7 (destructive, authorized SESSION 11 Q7).
+3. **203d POST-186 nice-to-have** — A32/A33/A34 (~5h; gate `deferred-post-186` still holds).
+4. **204e regression ArchTests + IOptions checklist** — ~11h; not blocking 186.
+5. **Customer-onboarding workflow (Stage 2)** — per SESSION 11 two-stage E2E model, this is future r2 scope.
+6. **/audit-provisioning-lessons slash command** — cross-run audit roll-up planned per task 203-followup (consumes lessons-learned.md files that Step 7 now writes).
+
+### To resume next session — say ONE of these
+
+- **"execute A26 queue-recreate"** — assumes human has executed the destructive az delete + Bicep re-provision; Claude verifies queue state (`requiresSession=true` + `requiresDuplicateDetection=true`) via `az servicebus queue show`.
+- **"dispatch task 186"** — RECOMMENDED after A26 verified. Task 186 is the full E2E acceptance rerun (16-24h with 24h SPE gate; `customerId=trial1` per SESSION 11 Q3).
+- **"Bicep what-if dry-run"** — proves the trial1 create plan against sub `484bc857` before task 186 fires (~1h; optional but recommended).
+- **"continue provisioning-orchestration-r1"** — `/project-continue` loads full context, points at recommended action.
+- **DO NOT** run task 186 until A26 is verified (owner directive SESSION 11 Q7 + still standing).
+
+---
+
 > **Last Updated**: 2026-08-26 SESSION 11 END — **🎯 SESSION 11 accomplishments** (all pushed to origin, branch @ `edc3a94ad` = master + 8 ahead; working tree clean): (1) **Task 205 c/d/e/f wave COMPLETE** (`8ca5a056f`) — 3 parallel task-execute background agents (205c/d/e Sonnet-mix, ~1.13M tokens, ~41min) + main-session 205f landed; 205c caught + fixed pre-existing YamlDotNet naming-convention bug (ALL 15 per_env_settings entries had silently returned Failure since task 201 — undetected because no prior test exercised the real embedded manifest); 205d closed §10.4 objectid trap not addressed by task 053; 205e landed 3-branch gate in Deploy-AllIndexes.ps1; 205f DROPPED sub-scope (a) as scope-drift + owner Path C (H4b/H9 do NOT iterate appsettings.template.json — live-code verified), APPLIED §6.5 EDIT package verbatim + companion sweep (6 of 7 sites; Site F was already cured) + doc sweep (mirror 280→642 lines + copy.md delete + rotation-cadence + 3 SF-1 UAMI sites); 1668/0/1 test suite green; +0.11 MB publish delta. **Task 205 FULLY COMPLETE — 9 of 9 sub-phases landed** (a/b/c/d/e/f/g/h/i). (2) **Master merge** (`edc3a94ad`) — 5 SPE-admin-app-r2 fix commits (PR #824) merged clean, 0 conflicts, no overlap with 205 changes. (3) **Housekeeping check** — git state verified clean, Azure identity confirmed as owner AAD `ralph.schroeder@spaarke.com` (NFR-11), 5 subs enumerated (default = `484bc857` Spaarke Devlopment Environment), L2 platform verified LIVE (`spaarke-provisioning-controlplane-dev` Running), Dataverse admin env identified (`spaarkedev1`), Q1-Q7 owner Q&A resolved + two-stage E2E model clarified. (4) **CRITICAL FINDING — task 186 NOT clear to fire despite 205 completion**: punch-list audit revealed 4 prerequisite waves + A26 queue-recreate ceremony still needed. Task 204c (H13 real probes) is explicitly labeled "HARD-BLOCKS TASK 186" in TASK-INDEX. Owner directive: **complete ALL prerequisites** before task 186 fires. (5) **Owner Q&A locked customerId=`trial1`** (matches §7.9 R1 naming convention) + two-stage E2E model + resource reuse plan + destructive A26 authorization + KEEP trial1 env permanently as production SMB shared-trial infrastructure.
 
 ## 🎯 SESSION 11 END QUICK RECOVERY — 2026-08-26 (READ THIS FIRST)
