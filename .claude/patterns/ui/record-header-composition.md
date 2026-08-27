@@ -7,7 +7,9 @@
 > ⚠️ **Do NOT author a new per-entity Record Header PCF.** That approach was withdrawn 2026-08-21.
 > R2 replaces it with ONE configuration-driven `RecordHeader` control serving every entity — see
 > [`projects/record-header-and-notepad-r2/design.md`](../../../projects/record-header-and-notepad-r2/design.md).
-> The authoring guide below still documents the retired per-entity recipe; it is rewritten as part of R2.
+> Adding the header to a new entity is a **maker** task (bind + paste `layoutJson`), not a coding one:
+> [`RECORD-HEADER-PCF-AUTHORING-GUIDE.md`](../../../docs/guides/RECORD-HEADER-PCF-AUTHORING-GUIDE.md)
+> — **rewritten 2026-08-27**, no longer the retired recipe.
 
 > **Lookup cells**: the header's editable lookup is the shared inline `LookupField` — load
 > [`inline-lookup-field.md`](inline-lookup-field.md) before touching one. It also explains the two
@@ -22,7 +24,7 @@
 
 ## Authoring guide
 
-Follow [`docs/guides/RECORD-HEADER-PCF-AUTHORING-GUIDE.md`](../../../docs/guides/RECORD-HEADER-PCF-AUTHORING-GUIDE.md) for the complete pattern: manifest anatomy, `ComponentFramework.ReactControl` class shell, view composition, ProjectHeaderPcf worked example, Notepad launch contract, and the **mandatory bundle-optimization triad** (`featureconfig.json` + `webpack.config.js` + deep-path imports from `@spaarke/ui-components/dist/components/RecordHeader` — post-Wave-8 discovery, keeps bundles at ~40 KB vs 1.6 MB without).
+Follow [`docs/guides/RECORD-HEADER-PCF-AUTHORING-GUIDE.md`](../../../docs/guides/RECORD-HEADER-PCF-AUTHORING-GUIDE.md) (rewritten 2026-08-27) for the complete current pattern: the maker binding recipe, the `layoutJson` schema, the two 🚨 traps (MOVE-don't-delete the raw fields; edit ALL THREE form factors), the Notepad launch contract, and the **mandatory bundle-optimization triad** (`featureconfig.json` + `webpack.config.js` + deep-path imports from `@spaarke/ui-components/dist/components/RecordHeader` — post-Wave-8 discovery, keeps bundles at ~40 KB vs 1.6 MB without).
 
 ## Duplication pointers (in-code work triggers — NOT filed as GitHub issues)
 

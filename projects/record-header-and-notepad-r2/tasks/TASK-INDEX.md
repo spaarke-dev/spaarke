@@ -72,9 +72,11 @@
 
 ### Phase 6 — Docs + Wrap
 
+> ‡ **085 pulled forward 2026-08-27** at owner request, ahead of its `080` dependency. That dependency was about finality, not content: the control is shipped and UAT-passed, and the maker recipe does not change when Matter migrates. The old guide was actively teaching the RETIRED per-entity-PCF approach, so leaving it until after 080 meant leaving a live hazard in place. Re-check it after 080 in case Matter surfaces anything new.
+
 | Task | Title | Rigor | Tier | Parallel | Deps | Status |
 |---|---|---|---|---|---|---|
-| [085](085-rewrite-authoring-guide.poml) | Rewrite authoring guide from shipped code | STANDARD | sonnet | ❌ | 080 | 🔲 |
+| [085](085-rewrite-authoring-guide.poml) | Rewrite authoring guide from shipped code | STANDARD | sonnet | ❌ | 080 | ✅ ‡ |
 | [086](086-refresh-record-header-pattern.poml) | Refresh pattern pointer (**main session only**) | MINIMAL | sonnet | ❌ | 085 | 🔲 |
 | [090](090-project-wrap-up.poml) | Wrap-up + `/test-diet` | MINIMAL | sonnet | ❌ | 086 | 🔲 |
 

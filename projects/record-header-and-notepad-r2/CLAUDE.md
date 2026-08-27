@@ -26,7 +26,7 @@ Stale references to the withdrawn plan still exist in the repo and will mislead 
 
 | Location | Staleness |
 |---|---|
-| [`docs/guides/RECORD-HEADER-PCF-AUTHORING-GUIDE.md`](../../docs/guides/RECORD-HEADER-PCF-AUTHORING-GUIDE.md) | Teaches the retired per-entity recipe end-to-end. **Rewriting it is an R2 deliverable** (design.md §3.1). Its bundle-optimization triad section (§6) is still correct and still mandatory. |
+| ~~`docs/guides/RECORD-HEADER-PCF-AUTHORING-GUIDE.md`~~ | ✅ **REWRITTEN 2026-08-27** — no longer stale. Now a configuration guide for the ONE control, opening with an explicit "if you came here to build a per-entity header PCF, stop". The bundle-optimization triad is retained (still mandatory) alongside the maker recipe. |
 | [`projects/record-header-and-notepad-r1/plan-extension.md`](../record-header-and-notepad-r1/plan-extension.md) DEF-05 | Describes R2 as "four per-entity PCFs". Historical record — do not edit. |
 | [`projects/record-header-and-notepad-r1/CLAUDE.md`](../record-header-and-notepad-r1/CLAUDE.md) | Same. Historical — do not edit. |
 | [`projects/record-header-and-notepad-r1/design.md`](../record-header-and-notepad-r1/design.md) §1 + architecture diagram | Same. Historical — do not edit. |

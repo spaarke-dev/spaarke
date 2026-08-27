@@ -4,7 +4,7 @@
     <title>Rewrite RECORD-HEADER-PCF-AUTHORING-GUIDE.md from shipped code: per-entity PCF recipe → configure-the-header-for-a-new-entity</title>
     <phase>6 Documentation + wrap</phase>
     <gate>blocked</gate>
-    <status>not-started</status>
+    <status>completed</status>
     <rigor>STANDARD</rigor>
     <rigor-reason>Documentation task, but with explicit constraints (preserve-verbatim block, author-from-code rule) and Phase 6 — STANDARD per the Step 3.5.5 tree; no code modification.</rigor-reason>
     <model-tier>sonnet</model-tier>
@@ -121,6 +121,30 @@
     Spec refs: FR-27; design.md §3.1 (scoping: ~170-190 of ~354 lines replaced, ~120 survive; triad block survives).
     The old guide is a drift EXHIBIT, not a source — treat its six known drift items as a checklist of claims that
     must not reappear. Task 086 (pattern pointer refresh) depends on this task and links to the rewritten guide.
+  </notes>
+
+  <notes>
+    COMPLETED 2026-08-27, PULLED FORWARD ahead of its `080` dependency at owner request ("this needs
+    to be fixed/updated"). The dependency was about finality rather than content: the control is
+    shipped and UAT-passed at v1.1.11, and the maker recipe does not change when Matter migrates.
+    Leaving it until after 080 meant leaving a live hazard in place -- the guide was teaching the
+    RETIRED per-entity-PCF recipe end-to-end, which is exactly the wrong instruction for any agent or
+    maker who found it.
+
+    Rewritten from shipped code, 353 -> ~250 lines. It now OPENS with an explicit stop-sign for the
+    retired approach rather than burying the correction. Reframed from "author a new PCF" to
+    "configure the one control": binding recipe, layoutJson schema reference, manifest properties,
+    sparkle behaviour, and the two 🚨 traps (MOVE-don't-delete the raw fields; edit ALL THREE form
+    factors). Developer material retained where still true -- the bundle-optimization triad (still
+    mandatory), the two FAILED bundle "fixes" that must not be re-derived, the Notepad/SmartTodo
+    launch contracts, and the G-12/G-13/G-14 rules. Troubleshooting now leads with the two console
+    diagnostics the control emits.
+
+    Also fixed FOUR broken ADR links, three of which were inherited from the original: ADR-024 and
+    ADR-028 live in `.claude/adr/`, not `docs/adr/`, and ADR-006's filename is
+    `ADR-006-prefer-pcf-over-webresources.md`. All relative links verified to resolve.
+
+    Follow-up: re-check after task 080 in case the Matter migration surfaces anything new.
   </notes>
 
   <execution>
