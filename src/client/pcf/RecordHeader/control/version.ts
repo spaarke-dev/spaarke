@@ -146,5 +146,31 @@
  *   each costing a full build/import/UAT cycle to disprove. `notOnForm` is the
  *   one to read first: form-buffer staging needs `getAttribute`, so anything
  *   listed there cannot be edited and will throw "Field not on form" on save.
+ *
+ * 1.1.7 (2026-08-26) - instrumentation only. `RecordHeaderLookupField` had
+ *   THREE silent exits, including a bare `catch {}`, so any click failure was
+ *   indistinguishable from a control that was never wired. Added a per-cell
+ *   decision log (renderer / format / targets / readOnly / editable).
+ *
+ * 1.1.8 (2026-08-26) - the lookup picker actually works. The v1.1.7 diagnostic
+ *   immediately surfaced what the swallow had hidden since task 023:
+ *     TypeError: Cannot read properties of undefined (reading '_clientApiExecutor')
+ *   `openPicker` aliased the method before calling it -
+ *   `const lookupObjects = xrm.Utility.lookupObjects` - which DETACHES it from
+ *   its namespace object. Xrm's internals dereference `this`, so a detached
+ *   call throws on every invocation. The cell rendered its value and fell
+ *   through to the read-only branch, which NAVIGATES to the related record -
+ *   exactly the reported "locked field value linked to the OOB field".
+ *   Now called directly: `await xrm.Utility.lookupObjects({...})`.
+ *   SECOND OCCURRENCE of this trap. R1 shipped four releases of a silent
+ *   no-op on `Xrm.Navigation.navigateTo` for the identical reason, and both
+ *   the project CLAUDE.md and `useRecordHeaderToolbarActions` carry CRITICAL
+ *   comments about it. Now catalogued repo-wide as FAILURE-MODES G-14.
+ *   The unit suite passed throughout because it mocked `lookupObjects` as a
+ *   plain `jest.fn()`, which needs no receiver - the mock was strictly more
+ *   permissive than the thing it replaced, so the one property that mattered
+ *   went untested. The mock is now `this`-sensitive and throws the real
+ *   TypeError when detached; verified by reverting the fix (3 of 19 fail on
+ *   the old code, 19 of 19 pass on the new).
  */
-export const CONTROL_VERSION = '1.1.7';
+export const CONTROL_VERSION = '1.1.8';

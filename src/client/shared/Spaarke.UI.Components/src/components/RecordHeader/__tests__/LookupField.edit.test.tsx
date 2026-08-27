@@ -37,15 +37,43 @@ describe('LookupField — editable mode (FR-15, FR-15a)', () => {
     }
   });
 
-  /** Installs a minimal Xrm shim with a mocked `Utility.lookupObjects`. */
+  /**
+   * Installs a minimal Xrm shim with a mocked `Utility.lookupObjects`.
+   *
+   * ══════════════════════════════════════════════════════════════════════════
+   * The mock is `this`-SENSITIVE ON PURPOSE. Do not simplify it back to a
+   * plain `jest.fn(impl)`.
+   * ══════════════════════════════════════════════════════════════════════════
+   * The real `Xrm.Utility.lookupObjects` reads `this._clientApiExecutor`
+   * internally, so calling it through a detached local alias
+   * (`const lookupObjects = xrm.Utility.lookupObjects; lookupObjects(...)`)
+   * throws `TypeError: Cannot read properties of undefined (reading
+   * '_clientApiExecutor')`.
+   *
+   * The component shipped exactly that bug from task 023 through v1.1.6. This
+   * suite passed the whole time, because a plain `jest.fn()` neither needs nor
+   * checks its receiver — the mock was strictly more permissive than the thing
+   * it stood in for, so the one property that mattered went untested. The
+   * production `catch {}` then swallowed the TypeError on every click, and the
+   * cell merely looked read-only.
+   *
+   * Replicating the receiver requirement makes this suite able to fail for the
+   * reason production failed.
+   */
   function stubLookupObjects(
     impl: (options: unknown) => Promise<Array<{ id: string; name: string; entityType: string }>>
   ): jest.Mock {
-    const lookupObjects = jest.fn(impl);
-    (window as unknown as { Xrm?: unknown }).Xrm = {
-      WebApi: {},
-      Utility: { lookupObjects },
-    };
+    const utility: Record<string, unknown> = { _clientApiExecutor: {} };
+    const lookupObjects = jest.fn(function (this: unknown, options: unknown) {
+      // A detached call has `this === undefined` under strict mode (and
+      // `globalThis` otherwise — neither carries `_clientApiExecutor`).
+      if ((this as Record<string, unknown> | undefined)?._clientApiExecutor === undefined) {
+        throw new TypeError("Cannot read properties of undefined (reading '_clientApiExecutor')");
+      }
+      return impl(options);
+    });
+    utility.lookupObjects = lookupObjects;
+    (window as unknown as { Xrm?: unknown }).Xrm = { WebApi: {}, Utility: utility };
     return lookupObjects;
   }
 

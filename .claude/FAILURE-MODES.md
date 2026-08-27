@@ -696,7 +696,34 @@ and cannot break again when tasks 020/022/033 rewrite either branch.
 
 **Prevention**: `Xrm.WebApi.retrieveMultipleRecords('EntityDefinition', …)` **can never succeed** — `Xrm.WebApi` resolves its first argument to an entity *set* name, and metadata entities are not entities (`SemanticSearchControl/services/DataverseMetadataService.ts:222` records the same finding). Metadata via `Xrm` means `Xrm.Utility.getEntityMetadata`; anything else needs a direct `fetch`, which is an NFR-05 decision, not an implementation detail.
 
-**Caveat still open**: Microsoft does not document `Targets` on the Client API attribute payload, and `@types/xrm` is silent. Lookup *display* works regardless; a lookup **picker** that depends on `targets[0]` should be verified on a real form.
+**Caveat CLOSED 2026-08-26**: `@types/xrm` is not silent — it is explicit. `Metadata.AttributeMetadata` (the `getEntityMetadata` result) declares exactly six members: `DefaultFormValue`, `LogicalName`, `DisplayName`, `AttributeType`, `EntityLogicalName`, `OptionSet`. **No `Targets`, and no `Format`.** Both must come from the live form — `Xrm.Page.getControl(name).getEntityTypes()` and `Xrm.Page.getAttribute(name).getFormat()` (a documented STRING, `"date"` / `"datetime"`). Read the shipped `.d.ts` before inferring a platform payload from symptoms; it cost three UAT rounds here not to.
+
+---
+
+### G-14: A detached `Xrm` method loses `this` and dies inside the platform
+
+> **Date**: 2026-08-26 · **Class**: Gotcha · **Surfaced by**: `record-header-and-notepad-r2` task 033 UAT round 4
+> **Second occurrence.** R1 hit the identical trap on `Xrm.Navigation.navigateTo` and shipped four releases of a silent no-op before finding it.
+
+**What happened**: `RecordHeaderLookupField` aliased the picker before calling it:
+
+```ts
+const lookupObjects = xrm?.Utility?.lookupObjects;   // ← detaches from `xrm.Utility`
+const results = await lookupObjects({ ... });        // ← `this` is now undefined
+```
+
+Every click threw `TypeError: Cannot read properties of undefined (reading '_clientApiExecutor')` — Xrm's own internals dereference `this`. The lookup rendered its value and appeared merely read-only.
+
+**Root cause**: Two compounding failures.
+
+1. **The alias.** Xrm methods are not free functions; they are bound to their namespace object. Extracting one strips the receiver.
+2. **A bare `catch {}` swallowed the TypeError**, so the failure was indistinguishable from "not wired". The component even documented the swallow as intentional ("preserve the no-throw contract").
+
+**Fix**: call directly on the namespace — `await xrm.Utility.lookupObjects({ ... })`. Never `const f = xrm.X.y`. Where a no-throw contract is genuinely required, `console.warn` the error; never discard it.
+
+**Prevention — the part that generalizes**: the unit suite passed throughout, because it mocked `lookupObjects` as a plain `jest.fn()`, which needs no receiver. **The mock was strictly more permissive than the thing it replaced, so the one property that mattered went untested.** When mocking a platform API, replicate its *requirements*, not just its signature — here, a `this`-sensitive mock that throws when the receiver is missing. Verified by reverting the fix: 3 of 19 tests fail on the old code, all 19 pass on the new.
+
+**Known aliasing sites already carrying warning comments** (do not "simplify"): `useRecordHeaderToolbarActions.ts` (navigateTo), `RegardingResolverApp.tsx:1483`, `DailyBriefingApp.tsx:566`.
 
 ---
 

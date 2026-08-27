@@ -324,8 +324,7 @@ export const LookupField: React.FC<ILookupFieldProps> = ({ label, value, span, t
     openingRef.current = true;
     try {
       const xrm = getXrm();
-      const lookupObjects = xrm?.Utility?.lookupObjects;
-      if (typeof lookupObjects !== 'function') {
+      if (typeof xrm?.Utility?.lookupObjects !== 'function') {
         // Host doesn't expose the picker (test env, unsupported surface) —
         // graceful no-op per the component's "never throws on click" contract.
         // WARN, though: silently doing nothing on click is indistinguishable
@@ -336,7 +335,23 @@ export const LookupField: React.FC<ILookupFieldProps> = ({ label, value, span, t
         return;
       }
 
-      const results = await lookupObjects({
+      // ══════════════════════════════════════════════════════════════════════
+      // Call `lookupObjects` DIRECTLY on `xrm.Utility` — never through a local
+      // alias. Aliasing detaches the method from its receiver, and the Xrm
+      // implementation reads `this._clientApiExecutor` internally, so a
+      // detached call dies with:
+      //   TypeError: Cannot read properties of undefined (reading '_clientApiExecutor')
+      //
+      // This is the SAME `this`-binding trap R1 hit on
+      // `Xrm.Navigation.navigateTo`, where v1.0.2–v1.0.5 aliased the method and
+      // shipped four releases of a silent no-op; see the CRITICAL comment in
+      // `useRecordHeaderToolbarActions.ts` and the gotcha in the project
+      // CLAUDE.md. Task 023 reintroduced it here in a different Xrm namespace,
+      // and the `catch {}` below swallowed the TypeError on every click, so the
+      // cell looked merely read-only rather than broken.
+      //
+      // Do NOT "simplify" this back to `const lookupObjects = xrm.Utility...`.
+      const results = await xrm.Utility.lookupObjects({
         entityTypes: [target],
         defaultEntityType: target,
         allowMultiSelect: false,
