@@ -81,7 +81,18 @@ Build Provisioning Sidecar  failure     <- build/Trivy/size all PASS; only the
 ## Next actions, in order
 
 1. ~~**Merge #833, #835, #836.**~~ ✅ **Done 2026-08-27.** master runs verified afterwards; results in the health block above.
-2. **Shadow window** — run tier1 and `sdap-ci.yml` in parallel across a few days of real PRs and confirm the verdicts agree. **Cannot be compressed**; see "the port broke twice" below.
+2. **Shadow window — 14 days, not "a few".** Run tier1 and `sdap-ci.yml` in parallel and confirm the verdicts agree.
+
+   **This is a binding MUST, not a judgement call.** `projects/ci-cd-unit-test-remediation-r1/spec.md:156`: *"MUST keep `sdap-ci.yml` running in parallel through Phase 2; retire only post-cutover after **14 days** of new-tier stability."* An earlier revision of this handoff said "a few days" — that understated the rule and would have retired `sdap-ci.yml` early. Corrected 2026-08-27.
+
+   Related rule, same spec: `spec.md:158` — MUST NOT restore the `Release` matrix before Phase 2 deletion has merged AND the surviving suite is green ≥7 days.
+
+   **What "verdicts agree" means concretely** — for each PR in the window, compare the two systems' blocking outcome:
+   - `sdap-ci` red while tier1 green ⇒ **false green** — the serious one. tier1 would let a real break through. Stop and diagnose before proceeding.
+   - `sdap-ci` green while tier1 red ⇒ **false red** — friction, not danger, but it burns the "no constant reds" goal. Diagnose before flipping branch protection.
+   - Both agree ⇒ a data point. Docs-only PRs produce no comparison (tier1/tier2 are skipped by `docs_only`, correctly) — they do not count toward the window.
+
+   **Cannot be compressed**; see "the port broke twice" below for why elapsed calendar time on real PRs is the point.
 3. **Delete `sdap-ci.yml`** (tasks 071 / 075 / 077). Removes the duplicate *and* its ~30 min leg.
 4. **Enable branch protection** with `CI / Router` as the single required check. **OWNER DECISION — do not do unprompted.** This is what makes the north star hold; without it everything drifts red again. Sequence last: flipping it while a flaky gate remains blocks the team rather than annoying them.
 
