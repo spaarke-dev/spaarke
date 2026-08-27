@@ -345,9 +345,38 @@ Interactive-mode operators skip this section entirely — proceed to 1a.
 #### 1a. `customerId` (required)
 
 - Format: `[a-z][a-z0-9-]{2,31}` (kebab-case, 3-32 chars, starts alpha)
-- Uniqueness: probe `GET /api/runs?customerId={id}` — if any run exists, present the operator with the existing run history and confirm: "customerId `{id}` has {N} prior runs. Continue as an UPGRADE run? (yes/no)"
-- If reused → this is an upgrade-mode run (per FR-34 §14A upgrade model); the operator MUST confirm intent
-- If new → this is a fresh-provisioning run
+- **Uniqueness / upgrade detection** (per Wave 0 Decision 2 / SKILL-02 fix, SESSION 15): probe the `sprk_dataverseenvironment` registry via Dataverse MCP alt-key filter on `sprk_customerid`. Earlier drafts of this skill probed a non-existent `GET /api/runs?customerId=` L2 endpoint (that endpoint has never existed — `RunsEndpoints.cs` maps only 7 routes, none of which is list-by-customerId).
+
+  ```powershell
+  # Registry probe — Dataverse MCP alt-key path per ADR-044 canonical registry
+  $probe = mcp__dataverse__read_query(query = @"
+    <fetch top="1">
+      <entity name="sprk_dataverseenvironment">
+        <attribute name="sprk_dataverseenvironmentid" />
+        <attribute name="sprk_provisionedon" />
+        <attribute name="sprk_setupstatus" />
+        <filter><condition attribute="sprk_customerid" operator="eq" value="$customerId" /></filter>
+      </entity>
+    </fetch>
+"@)
+
+  if ($probe.rows.Count -eq 0) {
+    # Fresh customerId — proceed to Step 1f placeholder-create
+    Write-Host "customerId '$customerId' is new (fresh provisioning)"
+  } elseif ($probe.rows[0].sprk_provisionedon -ne $null) {
+    # Prior successful run — upgrade-mode
+    Write-Host "customerId '$customerId' has a prior successful run (sprk_provisionedon=$($probe.rows[0].sprk_provisionedon)). Continue as UPGRADE run? (yes/no)"
+    # Wait for explicit yes; on yes, capture $environmentId from the row + skip Step 1f
+    $environmentId = $probe.rows[0].sprk_dataverseenvironmentid
+  } else {
+    # Prior halt / quarantine / partial (placeholder exists, sprk_provisionedon still null) — recover
+    Write-Host "customerId '$customerId' has a prior in-progress row (setupstatus=$($probe.rows[0].sprk_setupstatus)). See Fallback Matrix F1 recovery path."
+  }
+  ```
+
+  Fallback if Dataverse MCP disconnected: `pac data query --entity sprk_dataverseenvironment --filter "sprk_customerid eq '$customerId'"` OR raw Web API GET with operator's `az` token. See Fallback Matrix F1.
+- If reused (upgrade-mode) → per FR-34 §14A upgrade model; operator MUST confirm intent
+- If new → this is a fresh-provisioning run (proceed to Step 1f placeholder-create)
 
 #### 1b. `tenantId` (required per I1 invariant — NEVER default)
 
@@ -433,11 +462,30 @@ $environmentId = pac data create --entity sprk_dataverseenvironment `
   --query 'sprk_dataverseenvironmentid' -o tsv
 ```
 
-Verify `$environmentId` is a valid GUID before continuing:
+Verify `$environmentId` is a valid GUID **AND** that the row is queryable via alt-key (PRQ-05 addendum, SESSION 15 — belt-and-suspenders since PRQ-E-13 was deleted from prereqs.yaml; the placeholder-record-exists check now lives here exclusively):
 
 ```powershell
 if (-not ($environmentId -match '^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$')) {
   Write-Error "❌ Placeholder create failed — no valid GUID returned. Cannot proceed to POST /api/runs without environmentId. Check registry-env MCP connection or pac data auth."
+  exit 1
+}
+
+# PRQ-05 post-create verification — round-trip the row via alt-key to prove the
+# CustomerRunGuard alt-key lookup path works BEFORE Step 4 POSTs /api/runs
+# (avoids discovering the alt-key gap deep inside L2's concurrency-guard
+# 409-return path where the diagnostic is much worse).
+$verify = mcp__dataverse__read_query(query = @"
+  <fetch top="1">
+    <entity name="sprk_dataverseenvironment">
+      <attribute name="sprk_dataverseenvironmentid" />
+      <attribute name="sprk_customerid" />
+      <attribute name="sprk_setupstatus" />
+      <filter><condition attribute="sprk_customerid" operator="eq" value="$customerId" /></filter>
+    </entity>
+  </fetch>
+"@)
+if ($verify.rows.Count -eq 0 -or $verify.rows[0].sprk_dataverseenvironmentid -ne $environmentId) {
+  Write-Error "❌ Post-create verification failed — sprk_customerid alt-key returned no row OR returned a different GUID than the create call. CustomerRunGuard concurrency path will 409-loop indefinitely. Check sprk_customerid_key alt-key is registered on the entity (see scripts/Add-CustomerIdColumn.ps1)."
   exit 1
 }
 ```
