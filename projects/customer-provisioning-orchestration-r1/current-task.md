@@ -1,6 +1,54 @@
 # Current Task State — customer-provisioning-orchestration-r1
 
-> **Last Updated**: 2026-08-27 SESSION 15 END (97 of 127 findings landed across ~50 commits — 76% of pre-dispatch remediation complete). Waves 2/2.5/3/4/5/6/7/8 all COMPLETE at the subagent-safe layer + Wave 4 SKILL.md rewrite complete for all 40 findings the punchlist scoped to it. **Remaining: ~15 SKILL.md-touching items in Waves 5/6/7 deferred to next-session main-session pass** (per Sub-Agent Write Boundary §3 — SKILL.md main-session-only) + a handful of code partial-fix closeouts + end-to-end verify + task 186 dispatch. All work pushed to origin @ `9e9dfdbc1`. L2 test suite: 1889/1890 (was 1792 baseline, +97 net new tests).
+> **Last Updated**: 2026-08-27 SESSION 16 END (12 of ~15 remaining SKILL.md-touching items landed in this session; 109 of 127 findings landed cumulative — ~86% of pre-dispatch remediation complete). SESSION 16 executed the entire deferred SKILL.md main-session pass: COMP-14 (env fail-fast) + ISH-10 (Step 0c operator role probe rewrite) + Step 4.0 body construction (subscriptionId + openAiRegion→openAiLocation) + BAT-01..10 batch-mode wiring (Steps 0d/1a/1g/2/3/4b/5/7b). SKILL.md grew 1658 → ~2106 lines (+448 lines). Remaining: **3 code partial-fix closeouts** (COMP-03, COMP-06/ROLLBACK-1, COMP-10) + **ISH-12 [MEDIUM] deferred** (`environment`→`controlPlaneEnv` rename; touches 3+ files, better as separate task) + end-to-end verify + task 186 dispatch.
+
+## 🎯 SESSION 16 END — HANDOFF FOR NEXT SESSION (READ THIS FIRST)
+
+### SESSION 16 landed (12 items, 1 commit expected)
+
+| Finding | Where | Summary |
+|---|---|---|
+| **COMP-14** | SKILL.md Step 0.5a | Batch-mode fail-fast on null/empty `$env`; interactive-mode INFO passthrough (Step 1d assigns later). Prevents silent `{env}`→"" substitution + `spaarke-prov--kv` false-fails. |
+| **ISH-10** | SKILL.md Step 0c | Read-only GET role probe (random-GUID + valid customerId query param) replacing the mutating POST with invalid `profile:"dev"`. 404→Reader-verified; 403→no role assignment HARD STOP. |
+| **Step 4.0 body** | SKILL.md Step 4.0 | Intake top-level `subscriptionId` → `nonSecretParameters['subscriptionId']` (Model2 required per schema `allOf`; Model1 auto-defaults to `az account show`). Intake `openAiRegion` → `nonSecretParameters['openAiLocation']` (Bicep param name is `openAiLocation`). |
+| **BAT-01/BAT-03** | Step 1.0 | `confirmationAcknowledgment` const-string validation moved from prompt-only-at-Step-3 to schema+Step-1.0-fail-fast + Step-4.0 SHA-256 audit. |
+| **BAT-02** | Step 1g | Skip interactive "Proceed to preflight?" Read-Host prompt in batch mode (would block unattended dispatch indefinitely). |
+| **BAT-04** | Step 0d | `mcpDisconnectPolicy` — `failFast` (default; writes runs/pre-dispatch-mcp-disconnect.json + exit 1) OR `proceedWithFallback` (sets `$script:McpFallbackActive=$true`, uses Fallback F1 for registry ops). |
+| **BAT-05** | Step 1a | `acknowledgeUpgradeMode` — HARD STOP if prior successful run exists AND flag is false (writes runs/pre-dispatch-upgrade-required.json + exit 1). |
+| **BAT-07** | Step 4b | `onFailedPolicy` — `autoResumeOnce` (single POST /resume attempt) OR `abandon` (default; writes runs/{runId}-failed.json + exit 2). `onQuarantinedPolicy` — `failFast` only (writes runs/{runId}-quarantine.json + exit 3; never auto-clears). |
+| **BAT-08** | Step 5 dispatch | `onManualGatePolicy` — `waitAndExit` (default; writes runs/{runId}-WAITING.md + gate.json + exit 4) OR `pollUntilTimeout` (10s cadence, 30-min hard cap) OR `failFast` (immediate exit 4). Short-circuits interactive sub-flows 5a-5d in batch mode. |
+| **BAT-09** | Step 7b | `postmortemFile` — validated required sections ('What went right' / 'What went wrong' / 'Recommendations for next run' / 'Sign-off'); copy-verbatim + append auto-metadata OR auto-generate minimum lessons-learned.md when omitted. |
+| **BAT-10** | Step 2 preflight | `costEnvelopePolicy` — `abortOnOverrun` (default; writes runs/pre-dispatch-cost-overrun.json + exit 1) OR `warnAndProceed` (Model 1 shared-trial only per schema description; rejected for Model 2 at Step 1.0). Client-side check per tier cap. |
+| **`$env` alias** | Step 1.0 | Bound `$env = $environment` at Step 1.0 so Step 0.5a fail-fast + Step 0c URL selector both see it. |
+
+### What remains for next session
+
+**Code partial-fix closeouts (L2 codebase — no more SKILL.md touches needed for dispatch):**
+
+1. **COMP-03 [MEDIUM]** — L2 code: `KnownProfiles` const + endpoint validation + ArchTest (design decision needed: reject unknown profile with 400 vs warn+accept). Wave 7 flagged as partial pending design call. Est: 1h + design call.
+2. **COMP-06 / ROLLBACK-1 [HIGH]** — L2 code: fix `sprk_currentrunid` lock-leak in `QuarantineClearService.ClearAsync` (couples to REG-04 credential seam per Wave 0 Decision 9 — should land alongside or immediately after any REG-04-adjacent work). Est: 1h.
+3. **COMP-10 [MEDIUM]** — L2 code: `H0Options.CostEnvelopeAbortsPreflight` field + intake schema addition + red-path test. Wave 7 flagged as partial. Est: 1h.
+
+**Deferred (not blocking task 186 dispatch):**
+
+4. **ISH-12 [MEDIUM]** — `intake.schema.json.environment` → `controlPlaneEnv` rename. Touches intake schema + prereqs.yaml `{env}` token + spaarke-constants.yaml + SKILL.md references. Mechanical but wide; better as its own task after task 186 succeeds. Est: 30m.
+
+### Post-remediation sequencing
+
+Once above 3 code closeouts land + full L2 test suite still green:
+
+5. **End-to-end verify workflow** — adversarial dry-run of the fixed state: 3-5 skeptic verifiers pressure-test the full skill flow against actual L2 code, actual prereqs.yaml, actual intake schema. Confirm no cross-fix regression.
+6. **Task 186 dispatch re-attempt** — `/provision-environment trial1 --batch runs/trial1-intake.json`.
+
+### To resume in fresh session
+
+- **"where was I"** — reads this Quick Recovery
+- **"continue partial-fix closeouts"** — starts on item 1 (COMP-03), proceeds sequentially
+- **"start End-to-end verify"** — skips partial-fix items; runs verify workflow against current state (acceptable — the 3 remaining are L2 code, not skill flow)
+
+### SESSION 15 handoff (superseded — kept for context)
+
+> Prior update: SESSION 15 END (97 of 127 findings landed across ~50 commits — 76% of pre-dispatch remediation complete). Waves 2/2.5/3/4/5/6/7/8 all COMPLETE at the subagent-safe layer + Wave 4 SKILL.md rewrite complete for all 40 findings the punchlist scoped to it. Remaining: ~15 SKILL.md-touching items in Waves 5/6/7 deferred to next-session main-session pass (per Sub-Agent Write Boundary §3 — SKILL.md main-session-only) + a handful of code partial-fix closeouts + end-to-end verify + task 186 dispatch. All work pushed to origin @ `9e9dfdbc1`. L2 test suite: 1889/1890 (was 1792 baseline, +97 net new tests).
 
 ## 🎯 SESSION 15 END — HANDOFF FOR NEXT SESSION (READ THIS FIRST)
 

@@ -111,30 +111,55 @@ Assertions:
 
 #### 0c. L2 API reachability + Operator role
 
+> **ISH-10 rewrite (SESSION 16)**: earlier drafts of this step POSTed to `/api/runs` with `profile:"dev"` — but `dev` is NOT in the [`intake.schema.json`](../../scripts/provisioning-prereqs/intake.schema.json) profile enum (`spaarke-hosted-model1-trial` / `spaarke-hosted-model2` / `customer-owned-model2`). L2's model-binding would surface a 400 either way, so the probe technically "worked" — but the diagnostic path was wrong: a 400 could mean either "validation failure" (proving auth passed) OR "the probe payload is malformed and we're not actually testing auth." Worse, the probe was a mutating `POST` — even though L2 rejects the row before enqueue, POSTing a garbage payload to a mutation endpoint just to probe role assignment is bad hygiene. The rewrite uses a **read-only `GET`** against a Reader-safe endpoint. If `GET /api/runs/{fake-guid}?customerId=__role-probe__` returns anything OTHER than 403, the operator has at least Reader; a 403 proves the operator has NO role assignment at all.
+
 ```powershell
-# Acquire token — env is one of {dev, prod}
-$env = "dev"  # or prod (from intake or arg)
+# Acquire token — env is one of {dev, demo, prod}
+$env = "dev"  # populated by -Environment CLI arg / intake.environment / Step 1d prompt
 $token = az account get-access-token `
   --resource "api://spaarke.com/provisioning-controlplane-$env" `
   --query accessToken -o tsv
 
 # Health check L2 (unauth endpoint)
 $l2Base = if ($env -eq "prod") { "https://spaarke-provisioning-controlplane-prod.azurewebsites.net" } `
+          elseif ($env -eq "demo") { "https://spaarke-provisioning-controlplane-demo.azurewebsites.net" } `
           else { "https://spaarke-provisioning-controlplane-dev.azurewebsites.net" }
 curl -sf "$l2Base/healthz"  # expect 200
 
-# Role probe — call a known Operator-only endpoint with a well-formed but obviously-invalid payload; expect 400 (validation error) NOT 403 (forbidden)
-curl -sS -o /dev/null -w "%{http_code}" `
+# --- Role probe — READ-ONLY GET (ISH-10 rewrite; no mutation) ---
+# Uses a well-formed but guaranteed-not-to-exist run-id + a valid customerId query param.
+# Expected outcomes:
+#   200 → run exists (impossible with random probe GUID; treat as noise, retry)
+#   404 → route matched, customerId partition check passed, but run not found → PROVES auth+role work (Reader OR Operator both succeed)
+#   400 → customerId param missing/malformed (our probe payload bug; fix before shipping)
+#   401 → token invalid/expired → re-run `az login` and retry
+#   403 → NO role assignment at all → HARD STOP with grant instructions
+#   5xx → L2 upstream problem → escalate per Fallback F3
+$probeGuid = [Guid]::NewGuid().ToString()
+$probeUrl = "$l2Base/api/runs/$probeGuid`?customerId=__role-probe__"
+$probeCode = curl -sS -o $null -w "%{http_code}" `
   -H "Authorization: Bearer $token" `
-  -H "Content-Type: application/json" `
-  -d '{"customerId":"__role-probe__","tenancyModel":"Model1Shared","profile":"dev","tenantId":"__probe__"}' `
-  "$l2Base/api/runs"
-# Expect 400 (validation) — proves Operator role is granted. If 403 → operator does NOT have Operator role; HARD STOP with grant instructions.
+  $probeUrl
+switch ($probeCode) {
+  '404' { Write-Host "  [PASS] L2 reader/operator role check (HTTP $probeCode on read-probe)" -ForegroundColor Green }
+  '200' { Write-Host "  [PASS] L2 reader/operator role check (HTTP $probeCode — probe GUID collision; retrying would return 404)" -ForegroundColor Green }
+  '401' { Write-Error "  [FAIL] L2 token rejected (HTTP 401). Run `az login` interactively and retry."; exit 1 }
+  '403' { Write-Error "  [FAIL] L2 rejected the operator's identity with HTTP 403 — NO role assignment. Grant the operator's UPN at least the Reader app-role on 'api://spaarke.com/provisioning-controlplane-$env' via Portal or 'az ad app app-role assignment create' (Operator role is required for the actual /provision-environment dispatch — Reader alone will pass this probe but 403 on Step 4 POST)."; exit 1 }
+  default { Write-Warning "  [WARN] Unexpected role-probe HTTP $probeCode against $probeUrl — proceeding cautiously; investigate if Step 4 POST returns 403." }
+}
+
+# --- Operator-role probe (ISH-10 addendum) — attempt a Reader→Operator distinction ---
+# The GET above proves Reader. For Operator, we'd have to POST — but per this section's
+# intro we deliberately do NOT probe by POSTing garbage. Operator-role verification
+# happens organically at Step 4 (the real POST). A 403 there IS the signal.
+Write-Host "  [INFO] Operator-role assignment is verified organically at Step 4 (POST /api/runs). Reader-tier verified here." -ForegroundColor Cyan
 ```
 
 #### 0d. Dataverse MCP status (optional but strongly recommended)
 
-Attempt an MCP ping (`mcp__dataverse__describe` against a known small table). If MCP is disconnected:
+Attempt an MCP ping (`mcp__dataverse__describe` against a known small table).
+
+**Interactive mode** — if MCP is disconnected, prompt:
 
 ```
 ⚠ Dataverse MCP is not connected.
@@ -143,7 +168,51 @@ Attempt an MCP ping (`mcp__dataverse__describe` against a known small table). If
   Continue anyway? (yes/no)
 ```
 
-MCP status is NOT a hard stop — the fallback matrix handles disconnect (see Fallback Matrix section, added by task 076).
+**Batch mode (BAT-04, SESSION 16)** — honor `$script:BatchMcpDisconnectPolicy` bound at Step 1.0:
+
+```powershell
+$mcpAlive = $false
+try { mcp__dataverse__describe(entityName='sprk_dataverseenvironment') | Out-Null; $mcpAlive = $true } catch { $mcpAlive = $false }
+
+if (-not $mcpAlive) {
+  if ($script:SkipInteractiveIntake) {
+    # BATCH MODE
+    switch ($script:BatchMcpDisconnectPolicy) {
+      'failFast' {
+        $diag = @{
+          check    = 'dataverse-mcp'
+          runId    = 'pre-dispatch'
+          detected = (Get-Date -Format 'o')
+          reason   = 'Dataverse MCP ping returned no result; batch policy mcpDisconnectPolicy=failFast'
+          remedy   = 'Reconnect Dataverse MCP (see .claude/skills/provision-environment/SKILL.md Fallback F1) OR rerun with mcpDisconnectPolicy=proceedWithFallback'
+        } | ConvertTo-Json -Depth 4
+        $diagPath = "runs/pre-dispatch-mcp-disconnect.json"
+        New-Item -Path (Split-Path $diagPath) -ItemType Directory -Force | Out-Null
+        Set-Content -Path $diagPath -Value $diag
+        Write-Error "[skill] Batch HARD STOP (BAT-04, mcpDisconnectPolicy=failFast): Dataverse MCP not reachable. Diagnostic: $diagPath"
+        exit 1
+      }
+      'proceedWithFallback' {
+        Write-Warning "[skill] Batch mcpDisconnectPolicy=proceedWithFallback: Dataverse MCP not reachable. Registry ops (Step 1a probe, Step 1f placeholder-create, Step 6a completion PATCH) will use `pac data` / raw Web API fallback per Fallback F1. This choice is captured in Step 7b lessons-learned."
+        $script:McpFallbackActive = $true
+      }
+      default {
+        Write-Error "[skill] Batch HARD STOP: unknown mcpDisconnectPolicy '$($script:BatchMcpDisconnectPolicy)'. Valid: failFast | proceedWithFallback."
+        exit 1
+      }
+    }
+  } else {
+    # INTERACTIVE MODE — the prompt above
+    $answer = Read-Host "Continue anyway? (yes/no)"
+    if ($answer -ne 'yes') { Write-Error 'Aborted at Step 0d MCP prompt.'; exit 1 }
+    $script:McpFallbackActive = $true
+  }
+} else {
+  $script:McpFallbackActive = $false
+}
+```
+
+MCP status is NOT a hard stop by default in interactive mode; batch mode defaults to `failFast` (per BAT-04 rationale that unattended runs need up-front reliability, not degraded-path surprises later). Either way the fallback matrix handles disconnect (see Fallback Matrix section, added by task 076).
 
 #### 0e. Working directory + git state
 
@@ -206,7 +275,7 @@ If any FAIL: report the failure + resolution instructions + HARD STOP.
 
 Added by `customer-provisioning-orchestration-r1` task 203c per punch-list row A02. Reads the codified [`scripts/provisioning-prereqs/prereqs.yaml`](../../scripts/provisioning-prereqs/prereqs.yaml) manifest and iterates every prereq whose scope is checkable at operator invocation time (`once_per_tenant`, `once_per_subscription`, and — when `-Environment` is known from arg or batch intake — `once_per_env`). Customer-scoped prereqs (`once_per_customer`) defer to Step 2 preflight (server-side L2 H0 handler). This step iterates the manifest DYNAMICALLY — new prereqs added by future task 202 amendments are picked up automatically without a SKILL.md edit.
 
-#### 0.5a. YAML parser requirement
+#### 0.5a. YAML parser + environment fail-fast
 
 ```powershell
 # One-time install (idempotent); powershell-yaml provides ConvertFrom-Yaml.
@@ -217,6 +286,35 @@ Import-Module powershell-yaml
 ```
 
 If the module is unavailable AND cannot be installed (offline / restricted-network operator), the operator MUST invoke each prereq check manually per [`docs/guides/PROVISIONING-PREREQUISITES.md`](../../docs/guides/PROVISIONING-PREREQUISITES.md) and pass `-SkipStep0_5` (or `"skipExternalPrereqs": true` in batch intake) to acknowledge the risk. Silent skip is FORBIDDEN.
+
+**COMP-14 environment fail-fast (SESSION 16)** — Step 0.5b's substitution chain and its `$scopesToCheck += 'once_per_env'` branch both require a non-empty `$env`. When `$env` is null/empty, Step 0.5b silently degrades: `once_per_env` prereqs are skipped (invisible to the operator) and every `{env}` token substitutes to the empty string, producing malformed recipes that either fail with cryptic `az` parse errors OR — worse — false-PASS because the resulting name matches nothing.
+
+Different modes have different `$env` timing:
+- **Batch mode**: `$env` MUST be set by Step 1.0 (from `intake.environment`); a null value here means the intake was malformed and never should have passed schema validation, so HARD STOP.
+- **Interactive mode**: `$env` is set at Step 1d (after Step 0.5). It is EXPECTED to be null at Step 0.5 time; the `if ($env) { $scopesToCheck += 'once_per_env' }` branch in Step 0.5b handles this by skipping once_per_env prereqs (they get re-checked at Step 2 client-side dry-run once `$env` is known). Emit an INFO message but do NOT fail.
+
+```powershell
+if ($script:SkipInteractiveIntake) {
+  # BATCH — $env MUST be populated by Step 1.0 from intake.environment
+  if ([string]::IsNullOrWhiteSpace($env)) {
+    Write-Error "[skill-config] Step 0.5a HARD STOP (COMP-14): batch-mode `$env is null/empty after Step 1.0 read of intake.environment. This means the intake.json passed schema validation with a null/empty environment field OR the Step 1.0 batch loader dropped it. Correct the intake and rerun. Silent-skip of once_per_env prereqs is FORBIDDEN in batch mode."
+    exit 1
+  }
+  if ($env -notin @('dev','demo','prod')) {
+    Write-Error "[skill-config] Step 0.5a HARD STOP (COMP-14): batch-mode `$env='$env' is not one of the valid values (dev|demo|prod) per intake.schema.json. spaarke-constants.yaml per_env_constants.$env lookup would return null; PLX-13 sanity check would emit a confusing 'containerTypeId is null' error. Correct the intake and rerun."
+    exit 1
+  }
+  Write-Host "  [PASS] Batch-mode env='$env' — Step 0.5b will iterate once_per_tenant + once_per_subscription + once_per_env prereqs" -ForegroundColor Green
+} else {
+  # INTERACTIVE — Step 1d assigns $env; null here is expected and safe
+  if ([string]::IsNullOrWhiteSpace($env)) {
+    Write-Host "  [INFO] Interactive-mode env not yet assigned (Step 1d has not run); Step 0.5b will skip once_per_env prereqs. They get re-checked at Step 2 client-side dry-run once `$env` is known." -ForegroundColor Cyan
+  } elseif ($env -notin @('dev','demo','prod')) {
+    Write-Error "[skill-config] Step 0.5a HARD STOP: `$env='$env' is not one of (dev|demo|prod). Correct the CLI arg and rerun."
+    exit 1
+  }
+}
+```
 
 #### 0.5b. Iterate the manifest
 
@@ -393,21 +491,51 @@ if ($BatchIntakeFile) {
   }
 
   # Pre-fill from validated intake (skips 1a-1e interactive prompts)
-  $intake        = Get-Content $BatchIntakeFile -Raw | ConvertFrom-Json -Depth 10
-  $customerId    = $intake.customerId
-  $tenantId      = $intake.tenantId
-  $tenancyModel  = $intake.tenancyModel
-  $environment   = $intake.environment
-  $profile       = $intake.profile
-  $environmentId = $intake.environmentId       # may be null → 1f auto-creates
-  $region        = $intake.region              # optional
-  $tier          = $intake.tier                # optional
-  $operatorUpn   = if ($intake.operatorUpn) { $intake.operatorUpn } `
-                   else { az ad signed-in-user show --query userPrincipalName -o tsv }
-  $script:SkipInteractiveIntake = $true        # gates 1a-1e prompts below
+  $intake         = Get-Content $BatchIntakeFile -Raw | ConvertFrom-Json -Depth 10
+  $customerId     = $intake.customerId
+  $tenantId       = $intake.tenantId
+  $tenancyModel   = $intake.tenancyModel
+  $environment    = $intake.environment
+  $env            = $environment                # alias — Step 0.5a fail-fast + Step 0c URL selector read $env
+  $profile        = $intake.profile
+  $environmentId  = $intake.environmentId       # may be null → 1f auto-creates
+  $subscriptionId = $intake.subscriptionId      # ISH-02 — REQUIRED for Model2Dedicated (validated in schema allOf); optional for Model1Shared
+  $region         = $intake.region              # optional platform region (default westus2)
+  $openAiRegion   = $intake.openAiRegion        # optional AOAI region (default westus3); consumed by Step 4.0 openAiLocation mapping
+  $tier           = $intake.tier                # optional
+  $notes          = $intake.notes               # optional
+  $operatorUpn    = az ad signed-in-user show --query userPrincipalName -o tsv  # NEVER trust an operatorUpn field in the JSON (would risk NFR-11 spoof)
+  $script:SkipInteractiveIntake = $true         # gates 1a-1e prompts below
   $script:SkipStep0_5 = [bool]$intake.skipExternalPrereqs  # honors batch opt-in
 
-  Write-Host "Batch intake loaded from $BatchIntakeFile (schema-validated)."
+  # --- BAT-01/BAT-03 confirmation attestation (SESSION 16) ---
+  # Interactive mode requires the literal phrase typed at Step 3.
+  # Batch mode requires the same phrase in intake.confirmationAcknowledgment (const in schema).
+  # Capture BOTH the phrase AND the intake SHA-256 hash for NFR-11 audit parity.
+  if ($intake.confirmationAcknowledgment -ne 'proceed with provisioning') {
+    Write-Error "[skill] Batch intake HARD STOP: intake.confirmationAcknowledgment MUST equal the literal 'proceed with provisioning' (batch equivalent of Step 3 interactive gate per wave-0-adr-note Decision 3 / BAT-03). Got: '$($intake.confirmationAcknowledgment)'."
+    exit 1
+  }
+  $confirmationPhrase = $intake.confirmationAcknowledgment
+  Write-Host "  [PASS] Confirmation attestation: '$confirmationPhrase' (SHA-256 of intake file captured at Step 4 for audit trail)" -ForegroundColor Green
+
+  # --- BAT-04..09 batch policy fields (SESSION 16 — schema landed Wave 6 commit dc77381f8) ---
+  # These are SKILL-LOCAL control-flow policies, NOT L2 payload. Defaults per schema:
+  $script:BatchMcpDisconnectPolicy   = if ($intake.mcpDisconnectPolicy)   { $intake.mcpDisconnectPolicy }   else { 'failFast' }             # BAT-04 → Step 0d
+  $script:BatchAcknowledgeUpgradeMode = [bool]$intake.acknowledgeUpgradeMode                                                                # BAT-05 → Step 1a
+  $script:BatchOnFailedPolicy        = if ($intake.onFailedPolicy)        { $intake.onFailedPolicy }        else { 'abandon' }              # BAT-07 → Step 4b Failed
+  $script:BatchOnQuarantinedPolicy   = if ($intake.onQuarantinedPolicy)   { $intake.onQuarantinedPolicy }   else { 'failFast' }             # BAT-07 → Step 4b Quarantined
+  $script:BatchOnManualGatePolicy    = if ($intake.onManualGatePolicy)    { $intake.onManualGatePolicy }    else { 'waitAndExit' }          # BAT-08 → Step 5a-d
+  $script:BatchCostEnvelopePolicy    = if ($intake.costEnvelopePolicy)    { $intake.costEnvelopePolicy }    else { 'abortOnOverrun' }       # BAT-10 → Step 2 preflight + Step 4b H0 fail-fast
+  $script:BatchPostmortemFile        = $intake.postmortemFile                                                                                # BAT-09 → Step 7b
+
+  # Model2Dedicated + costEnvelopePolicy=warnAndProceed is forbidden per schema description
+  if ($tenancyModel -eq 'Model2Dedicated' -and $script:BatchCostEnvelopePolicy -eq 'warnAndProceed') {
+    Write-Error "[skill] Batch intake HARD STOP: costEnvelopePolicy='warnAndProceed' is FORBIDDEN for Model2Dedicated (per intake.schema.json description; cost envelope MUST abort for prod / customer-owned subs). Change to 'abortOnOverrun' and rerun."
+    exit 1
+  }
+
+  Write-Host "Batch intake loaded from $BatchIntakeFile (schema-validated + batch policies bound)."
 }
 ```
 
@@ -451,10 +579,32 @@ Interactive-mode operators skip this section entirely — proceed to 1a.
     # Fresh customerId — proceed to Step 1f placeholder-create
     Write-Host "customerId '$customerId' is new (fresh provisioning)"
   } elseif ($probe.rows[0].sprk_provisionedon -ne $null) {
-    # Prior successful run — upgrade-mode
-    Write-Host "customerId '$customerId' has a prior successful run (sprk_provisionedon=$($probe.rows[0].sprk_provisionedon)). Continue as UPGRADE run? (yes/no)"
-    # Wait for explicit yes; on yes, capture $environmentId from the row + skip Step 1f
+    # Prior successful run — upgrade-mode. BAT-05 branch:
+    if ($script:SkipInteractiveIntake) {
+      # BATCH MODE — honor $script:BatchAcknowledgeUpgradeMode (SESSION 16)
+      if (-not $script:BatchAcknowledgeUpgradeMode) {
+        $diag = @{
+          check       = 'upgrade-mode-detection'
+          customerId  = $customerId
+          detected    = (Get-Date -Format 'o')
+          reason      = "Prior sprk_provisionedon=$($probe.rows[0].sprk_provisionedon) row exists AND intake.acknowledgeUpgradeMode is false"
+          remedy      = "Set intake.acknowledgeUpgradeMode=true if the upgrade path is intended (see design.md §14A upgrade model), OR change customerId to a fresh identifier"
+        } | ConvertTo-Json -Depth 4
+        $diagPath = "runs/pre-dispatch-upgrade-required.json"
+        New-Item -Path (Split-Path $diagPath) -ItemType Directory -Force -ErrorAction SilentlyContinue | Out-Null
+        Set-Content -Path $diagPath -Value $diag
+        Write-Error "[skill] Batch HARD STOP (BAT-05): customerId '$customerId' has prior successful provisioning but intake.acknowledgeUpgradeMode is false. Diagnostic: $diagPath"
+        exit 1
+      }
+      Write-Host "  [BATCH] Upgrade-mode acknowledged in intake — proceeding as UPGRADE run against existing environmentId=$($probe.rows[0].sprk_dataverseenvironmentid)"
+    } else {
+      # INTERACTIVE MODE
+      Write-Host "customerId '$customerId' has a prior successful run (sprk_provisionedon=$($probe.rows[0].sprk_provisionedon)). Continue as UPGRADE run? (yes/no)"
+      $answer = Read-Host
+      if ($answer -ne 'yes') { Write-Error 'Aborted at Step 1a upgrade-mode confirmation prompt.'; exit 1 }
+    }
     $environmentId = $probe.rows[0].sprk_dataverseenvironmentid
+    $script:IsUpgradeRun = $true
   } else {
     # Prior halt / quarantine / partial (placeholder exists, sprk_provisionedon still null) — recover
     Write-Host "customerId '$customerId' has a prior in-progress row (setupstatus=$($probe.rows[0].sprk_setupstatus)). See Fallback Matrix F1 recovery path."
@@ -608,6 +758,17 @@ Proceed to preflight (H0)? (yes/no)
 
 Wait for "yes" (bare "y" is insufficient at every gate in this skill — spec §4.3a.4).
 
+**BAT-02 (SESSION 16)** — batch mode SKIPS the Step 1g prompt (the summary is written to stdout for audit, but no operator input is expected). The Step 3 confirmation gate is what covers the intent-to-proceed attestation in batch mode (via `intake.confirmationAcknowledgment` const-string validated at Step 1.0). Skipping Step 1g's yes/no prompt in batch mode is NOT a bypass — it eliminates a stdin read that would block the run indefinitely under `--batch` unattended dispatch:
+
+```powershell
+if (-not $script:SkipInteractiveIntake) {
+  $answer = Read-Host "Proceed to preflight (H0)? (yes/no)"
+  if ($answer -ne 'yes') { Write-Error 'Aborted at Step 1g preflight prompt.'; exit 1 }
+} else {
+  Write-Host "  [BATCH] Step 1g summary printed above; skipping interactive prompt (intent-to-proceed already captured at Step 1.0 via intake.confirmationAcknowledgment)." -ForegroundColor Cyan
+}
+```
+
 ---
 
 ### Step 2: Client-side Dry-Run + Preflight Planning (no server mutation)
@@ -638,6 +799,35 @@ PREFLIGHT (client-side) RESULT
 ```
 
 **Note**: server-side preflight (H0 handler) will run automatically when Step 4 POSTs `/api/runs`; H0 is the FIRST handler in the L2 DAG per `DagAdvancer.cs`. There is no separate "preflight-only" run mode — that concept was a skill fiction. If the operator wants H0-only re-verification WITHOUT triggering H1+, the actual mechanism is `POST /api/runs/{runId}/preflight?customerId={cid}` per `RunsEndpoints.cs:188` on an EXISTING run (upgrade-mode use case).
+
+**Cost-envelope pre-check (BAT-10, SESSION 16)** — Step 2 computes an estimated cost impact locally (from tier + tenancyModel + region). H0's server-side check is the AUTHORITY; the client-side estimate here is a fast fail-close BEFORE Step 4 POST when the intake obviously exceeds the tier ceiling. `$script:BatchCostEnvelopePolicy` (bound at Step 1.0) drives the branch:
+
+```powershell
+# Client-side envelope check (rough — H0 is the authority)
+$tierCap = switch ($tier) { 'shared-trial' { 430 } 'smb' { 700 } 'enterprise' { 2500 } 'dedicated' { 5000 } default { $null } }
+if ($tierCap -and $estimatedMonthlyUsd -gt $tierCap) {
+  if ($script:SkipInteractiveIntake) {
+    switch ($script:BatchCostEnvelopePolicy) {
+      'abortOnOverrun' {
+        $diag = @{ runId='pre-dispatch'; customerId=$customerId; estimated=$estimatedMonthlyUsd; cap=$tierCap; policy='abortOnOverrun' } | ConvertTo-Json
+        Set-Content -Path "runs/pre-dispatch-cost-overrun.json" -Value $diag
+        Write-Error "[skill] Batch HARD STOP (BAT-10, costEnvelopePolicy=abortOnOverrun): estimated `$$estimatedMonthlyUsd/mo exceeds tier '$tier' cap `$$tierCap/mo. Diagnostic: runs/pre-dispatch-cost-overrun.json"
+        exit 1
+      }
+      'warnAndProceed' {
+        # Already rejected for Model2Dedicated at Step 1.0 — reaching here means Model1Shared shared-trial
+        Write-Warning "[skill] Batch cost overrun ACKNOWLEDGED (BAT-10, warnAndProceed, Model 1 shared-trial only): estimated `$$estimatedMonthlyUsd/mo exceeds tier '$tier' cap `$$tierCap/mo. Proceeding per intake policy."
+        $script:CostWarningLogged = $true
+        Set-Content -Path "runs/pre-dispatch-cost-warning.json" -Value (@{estimated=$estimatedMonthlyUsd; cap=$tierCap; acknowledged='intake.costEnvelopePolicy=warnAndProceed'} | ConvertTo-Json)
+      }
+    }
+  } else {
+    Write-Warning "❌ Estimated `$$estimatedMonthlyUsd/mo exceeds tier '$tier' cap `$$tierCap/mo."
+    $answer = Read-Host "Proceed anyway? (yes/no)"
+    if ($answer -ne 'yes') { Write-Error 'Aborted at Step 2 cost envelope prompt.'; exit 1 }
+  }
+}
+```
 
 If Step 2 client-side validation FAILS, present the failure + escalation instructions. Do NOT proceed to Step 3.
 
@@ -822,6 +1012,25 @@ To proceed with this run, type the exact phrase:
 
 Wait for the literal string `proceed with provisioning`. Anything else — including "y", "yes", "go", "ok" — prompts a re-ask with the same gate. This is by design per NFR-11 auditability (the operator's explicit phrase is captured in the run's audit trail).
 
+**Batch mode (BAT-03, SESSION 16)** — the Step 3 gate is enforced at Step 1.0 (JSON schema `const:"proceed with provisioning"` on `intake.confirmationAcknowledgment`, PLUS the Step 1.0 branch that explicitly matches the string and exits on drift). Step 3 does NOT re-prompt in batch mode; the intake-level attestation is what carries the auditable intent. The SHA-256 of the intake file is captured into `nonSecretParameters.intakeFileSha256` at Step 4.0 so the L2 audit record can prove-back which exact intake JSON authorized this run:
+
+```powershell
+if (-not $script:SkipInteractiveIntake) {
+  # INTERACTIVE — retry-until-literal Read-Host loop
+  do {
+    $phrase = Read-Host
+    if ($phrase -ne 'proceed with provisioning') {
+      Write-Host "(literal phrase required; try again OR press Ctrl+C to abort)"
+    }
+  } until ($phrase -eq 'proceed with provisioning')
+  $confirmationPhrase = $phrase
+} else {
+  # BATCH — attestation already validated at Step 1.0; carry the phrase into Step 4.0
+  $confirmationPhrase = 'proceed with provisioning'
+  Write-Host "  [BATCH] Confirmation gate satisfied by intake.confirmationAcknowledgment (validated at Step 1.0)." -ForegroundColor Cyan
+}
+```
+
 ---
 
 ### Step 4: Execute — issue THE single POST + poll → advance
@@ -835,20 +1044,49 @@ Per Wave 0 Decision 1 (`tenantId` flows via `nonSecretParameters`) + Decision 6 
 ```powershell
 $intakeFileSha256 = if ($BatchIntakeFile) { (Get-FileHash -Path $BatchIntakeFile -Algorithm SHA256).Hash } else { $null }
 
+# --- ISH-02 subscriptionId flow (Wave 0 Decision 6 + Step-2-body-construction, SESSION 16) ---
+# Model2Dedicated: intake.subscriptionId is REQUIRED (per intake.schema.json allOf constraint).
+# Model1Shared: intake.subscriptionId is OPTIONAL; when omitted the skill auto-defaults to the
+# Spaarke shared subscription for the target env (looked up from spaarke-constants.yaml or
+# az account context — env-specific).
+if ($tenancyModel -eq 'Model2Dedicated') {
+  if ([string]::IsNullOrWhiteSpace($subscriptionId)) {
+    Write-Error "[skill] Step 4.0 HARD STOP: Model2Dedicated run requires intake.subscriptionId (customer's own subscription per ADR-027 D4). Missing at dispatch → H1 fail-fast within ~20s with MissingSubscriptionId. Correct the intake and rerun."
+    exit 1
+  }
+  $resolvedSubscriptionId = $subscriptionId
+} else {
+  # Model1Shared: auto-default from az context if not supplied
+  $resolvedSubscriptionId = if ($subscriptionId) { $subscriptionId } else { az account show --query id -o tsv }
+  if ([string]::IsNullOrWhiteSpace($resolvedSubscriptionId)) {
+    Write-Error "[skill] Step 4.0 HARD STOP: Model1Shared run — no subscriptionId in intake and az account show returned empty. Run `az login` and retry."
+    exit 1
+  }
+}
+
+# --- openAiRegion → openAiLocation mapping (Bicep param name is openAiLocation, intake field is openAiRegion) ---
+$resolvedOpenAiLocation = if ($openAiRegion) { $openAiRegion } else { 'westus3' }  # canonical Spaarke default per operator memory reference_azure_fresh_sub_regional_gotchas
+
 $body = @{
   customerId    = $customerId
   environmentId = $environmentId          # created at Step 1f
   tenancyModel  = $tenancyModel           # Model1Shared | Model2Dedicated
   profile       = $profile                # one of 3 enum values per Step 1e
   nonSecretParameters = @{
-    tenantId                    = $tenantId          # I1 invariant per Wave 0 Decision 1
-    confirmationAcknowledgment  = $confirmationPhrase # verbatim "proceed with provisioning"
-    intakeFileSha256            = $intakeFileSha256   # batch-mode audit trail (null in interactive)
-    region                      = $region
-    openAiRegion                = $openAiRegion
+    tenantId                    = $tenantId              # I1 invariant per Wave 0 Decision 1
+    subscriptionId              = $resolvedSubscriptionId # ISH-02 — consumed by H1/H2a/H2b/H4/H4b/H4Shared/H8/H9/H13/H14
+    openAiLocation              = $resolvedOpenAiLocation # Bicep param name (openAiLocation), NOT openAiRegion; intake field renamed at the boundary
+    confirmationAcknowledgment  = $confirmationPhrase     # verbatim "proceed with provisioning"
+    intakeFileSha256            = $intakeFileSha256       # batch-mode audit trail (null in interactive)
+    region                      = $region                 # primary platform region (e.g. westus2) — distinct from openAiLocation
     tier                        = $tier
     operatorUpn                 = $operatorUpn
-    # other operator-supplied intake fields go here (mechanical prune per Wave 0 Decision 6)
+    # other operator-supplied intake fields (notes, etc.) can be added here; the L2 side
+    # treats nonSecretParameters as a bag and ignores unknown keys (§4D-adjacent design).
+    # DO NOT include the *Policy fields (mcpDisconnectPolicy / acknowledgeUpgradeMode / onFailedPolicy
+    # / onQuarantinedPolicy / onManualGatePolicy / costEnvelopePolicy / postmortemFile) — those are
+    # SKILL-LOCAL batch policies (BAT-01..09), NOT L2 payload. They control this skill's control
+    # flow at Steps 0d/1a/1g/4b/5/7b and would just be noise on the L2 audit record.
   }
 } | ConvertTo-Json -Depth 5
 
@@ -906,11 +1144,146 @@ There is NO `Drifted` state — drift is detected inline by H13 and surfaces as 
 
 Do NOT auto-retry `Failed` runs. Auto-retry hides operator-actionable diagnostics. Ask.
 
+**Batch-mode terminal-state handling (BAT-07, SESSION 16)**:
+
+```powershell
+switch ($run.status) {
+  'Completed' {
+    # Interactive AND batch: proceed to Step 5 (manual gate handling) / Step 6 (completion handoff)
+  }
+  'Failed' {
+    if ($script:SkipInteractiveIntake) {
+      # BATCH — $script:BatchOnFailedPolicy is 'autoResumeOnce' | 'abandon' (default)
+      switch ($script:BatchOnFailedPolicy) {
+        'autoResumeOnce' {
+          if (-not $script:AlreadyResumed) {
+            Write-Host "  [BATCH] onFailedPolicy=autoResumeOnce → POST /api/runs/$runId/resume?customerId=$encodedCustomerId (single attempt)" -ForegroundColor Yellow
+            Invoke-RestMethod -Uri "$l2Base/api/runs/$runId/resume`?customerId=$encodedCustomerId" -Method POST -Headers @{ Authorization = "Bearer $token" }
+            $script:AlreadyResumed = $true
+            continue  # back to poll loop
+          }
+          # Fall through — already resumed once and still Failed. Write diag + exit.
+        }
+        'abandon' { <#  fall through — write diag + exit #> }
+      }
+      $diag = @{
+        runId       = $runId
+        customerId  = $customerId
+        finalStatus = 'Failed'
+        policy      = $script:BatchOnFailedPolicy
+        currentPhase = $run.currentPhase
+        rejection   = $run.rejectionCode
+        message     = $run.rejectionMessage
+      } | ConvertTo-Json -Depth 4
+      $diagPath = "runs/$runId-failed.json"
+      New-Item -Path (Split-Path $diagPath) -ItemType Directory -Force -ErrorAction SilentlyContinue | Out-Null
+      Set-Content -Path $diagPath -Value $diag
+      Write-Error "[skill] Batch HARD STOP (BAT-07, onFailedPolicy=$($script:BatchOnFailedPolicy)): run $runId ended Failed at phase $($run.currentPhase). Diagnostic: $diagPath"
+      # Still writes lessons-learned.md via Step 7 (postmortem is UNCONDITIONAL)
+      # Non-zero exit is 2 per BAT-07 convention.
+      exit 2
+    }
+    # INTERACTIVE — ask operator
+    Write-Host "❌ Run FAILED at phase $($run.currentPhase). Rejection: $($run.rejectionMessage)"
+    $answer = Read-Host "Resume this run? (yes/no)"
+    if ($answer -eq 'yes') { Invoke-RestMethod -Uri "$l2Base/api/runs/$runId/resume`?customerId=$encodedCustomerId" -Method POST -Headers @{ Authorization = "Bearer $token" }; continue }
+    Write-Error "Run abandoned by operator."
+    exit 2
+  }
+  'Quarantined' {
+    # $script:BatchOnQuarantinedPolicy is 'failFast' (enum-of-one for forward compat)
+    $diag = @{
+      runId       = $runId
+      customerId  = $customerId
+      finalStatus = 'Quarantined'
+      quarantineReason = $run.quarantineReason
+      remedy      = "Manually invoke QuarantineClearService via a separate maintenance workflow — batch mode never auto-clears quarantine per BAT-07 rationale (unattended runs must not silently clear operator-required state)."
+    } | ConvertTo-Json -Depth 4
+    $diagPath = "runs/$runId-quarantine.json"
+    New-Item -Path (Split-Path $diagPath) -ItemType Directory -Force -ErrorAction SilentlyContinue | Out-Null
+    Set-Content -Path $diagPath -Value $diag
+    Write-Error "[skill] HARD STOP (BAT-07, Quarantined): run $runId requires manual QuarantineClearService intervention. Diagnostic: $diagPath. Postmortem will still be written via Step 7."
+    exit 3
+  }
+  'Cancelled' {
+    Write-Warning "Run cancelled. sprk_currentrunid released."
+    exit 5
+  }
+  default {
+    # NotStarted / Running / WaitingOnGate — keep polling; WaitingOnGate handled in Step 5
+    continue
+  }
+}
+```
+
 ---
 
 ### Step 5: Manual Gate Handling
 
 Some handlers reach `WaitingOnGate` because they require operator-visible action:
+
+**Batch-mode dispatch (BAT-08, SESSION 16)** — the interactive sub-flows below (5a/5b/5c/5d) assume a live operator at stdin. In batch mode (`$script:SkipInteractiveIntake -eq $true`), the shared dispatch block below runs FIRST and short-circuits the interactive sub-flows per `$script:BatchOnManualGatePolicy`:
+
+```powershell
+if ($script:SkipInteractiveIntake -and $run.status -eq 'WaitingOnGate') {
+  $gateInfo = @{
+    runId       = $runId
+    customerId  = $customerId
+    gateId      = $run.gateId
+    handler     = $run.currentPhase
+    reason      = $run.gateReason
+    instructions = $run.gateInstructions
+    detected    = (Get-Date -Format 'o')
+  } | ConvertTo-Json -Depth 4
+  $gatePath = "runs/$runId-gate.json"
+  New-Item -Path (Split-Path $gatePath) -ItemType Directory -Force -ErrorAction SilentlyContinue | Out-Null
+  Set-Content -Path $gatePath -Value $gateInfo
+
+  switch ($script:BatchOnManualGatePolicy) {
+    'waitAndExit' {
+      # Write WAITING marker so operator resume flow can pick up
+      $waitingMd = @"
+# Run $runId — WAITING at manual gate
+
+- **Gate**: $($run.gateId) (handler: $($run.currentPhase))
+- **Reason**: $($run.gateReason)
+- **Instructions**: $($run.gateInstructions)
+- **Detected**: $(Get-Date -Format 'o')
+
+## Resume
+After clearing the gate condition, rerun the skill with:
+    /provision-environment $customerId --batch <original-intake.json> --resume $runId
+"@
+      $waitingPath = "runs/$runId-WAITING.md"
+      Set-Content -Path $waitingPath -Value $waitingMd
+      Write-Warning "[skill] Batch WAITING (BAT-08, onManualGatePolicy=waitAndExit): run $runId hit gate '$($run.gateId)'. Wrote $waitingPath + $gatePath. Exit 4."
+      exit 4
+    }
+    'pollUntilTimeout' {
+      # Poll GET /api/runs/{id} at 10s cadence until status != WaitingOnGate OR 30-min hard cap
+      $deadline = (Get-Date).AddMinutes(30)
+      Write-Host "[skill] Batch onManualGatePolicy=pollUntilTimeout — polling for gate clear (30 min hard cap)..." -ForegroundColor Cyan
+      while ((Get-Date) -lt $deadline) {
+        Start-Sleep -Seconds 10
+        $run = Invoke-RestMethod -Uri "$l2Base/api/runs/$runId`?customerId=$encodedCustomerId" -Method GET -Headers @{ Authorization = "Bearer $token" }
+        if ($run.status -ne 'WaitingOnGate') { break }
+      }
+      if ($run.status -eq 'WaitingOnGate') {
+        Write-Warning "[skill] Batch WAITING (BAT-08, pollUntilTimeout hit 30-min cap): run $runId still at gate '$($run.gateId)'. Exit 4."
+        exit 4
+      }
+      # else fall through — status advanced; continue poll loop
+      continue
+    }
+    'failFast' {
+      Write-Warning "[skill] Batch WAITING (BAT-08, onManualGatePolicy=failFast): run $runId hit gate '$($run.gateId)' — exiting immediately without poll. Exit 4."
+      exit 4
+    }
+  }
+}
+```
+
+Interactive-mode sub-flows below assume a live operator; batch mode returns before reaching them.
 
 #### 5a. H0.5 Model 2 admin consent (Model 2 only)
 
@@ -1212,9 +1585,84 @@ $content = $content -replace '\{ts\}', (Get-Date -Format 'yyyy-MM-ddTHH:mm:ssK')
 Set-Content -Path $lessonsPath -Value $content
 ```
 
-#### 7b. Interactive postmortem (or batch mode: `--postmortem-file <path.md>`)
+#### 7b. Interactive postmortem (or batch mode: `intake.postmortemFile`)
 
-Present the operator with each template section and collect responses. In batch mode, read the operator-authored postmortem verbatim + append auto-populated metadata (git-sha, INDEX.md lessons-count).
+Present the operator with each template section and collect responses. In batch mode, honor `$script:BatchPostmortemFile` (bound at Step 1.0 from `intake.postmortemFile`).
+
+**Batch-mode postmortem dispatch (BAT-09, SESSION 16)**:
+
+```powershell
+if ($script:SkipInteractiveIntake) {
+  if ($script:BatchPostmortemFile) {
+    $postmortemAbs = if ([System.IO.Path]::IsPathRooted($script:BatchPostmortemFile)) {
+      $script:BatchPostmortemFile
+    } else {
+      Join-Path (git rev-parse --show-toplevel) $script:BatchPostmortemFile
+    }
+    if (-not (Test-Path $postmortemAbs)) {
+      $diag = @{ runId = $runId; reason = "postmortemFile '$postmortemAbs' not found on disk"; remedy = 'Author the file at the path in intake.postmortemFile OR omit the field to auto-generate a minimum lessons-learned.md' } | ConvertTo-Json
+      Set-Content -Path "runs/$runId-postmortem-invalid.json" -Value $diag
+      Write-Error "[skill] Batch HARD STOP (BAT-09): intake.postmortemFile references '$postmortemAbs' which does not exist. Diagnostic: runs/$runId-postmortem-invalid.json"
+      exit 6
+    }
+    # Validate required sections (mirror interactive template's H2 headings)
+    $required = @('What went right','What went wrong','Recommendations for next run','Sign-off')
+    $content  = Get-Content -Raw -Path $postmortemAbs
+    $missing  = @()
+    foreach ($h in $required) {
+      if ($content -notmatch "(?im)^##\s+$([regex]::Escape($h))") { $missing += $h }
+    }
+    if ($missing.Count -gt 0) {
+      $diag = @{ runId = $runId; postmortemFile = $postmortemAbs; missingSections = $missing; remedy = 'Add the missing ## headings, or omit intake.postmortemFile to auto-generate the minimum shape' } | ConvertTo-Json -Depth 4
+      Set-Content -Path "runs/$runId-postmortem-invalid.json" -Value $diag
+      Write-Error "[skill] Batch HARD STOP (BAT-09): intake.postmortemFile is missing required sections: $($missing -join ', '). Diagnostic: runs/$runId-postmortem-invalid.json"
+      exit 6
+    }
+    # Copy verbatim + append auto-populated metadata (git-sha, INDEX.md lessons-count, run outcome)
+    Copy-Item -Path $postmortemAbs -Destination $lessonsPath -Force
+    $gitSha = git rev-parse HEAD
+    $auto = @"
+
+---
+
+## Auto-populated metadata (BAT-09)
+
+- **runId**: $runId
+- **customerId**: $customerId
+- **outcome**: $runOutcome
+- **git-sha**: $gitSha
+- **written-at**: $(Get-Date -Format 'o')
+- **source-postmortem**: $script:BatchPostmortemFile (validated + copied verbatim by skill Step 7b)
+"@
+    Add-Content -Path $lessonsPath -Value $auto
+    Write-Host "  [BATCH] Postmortem copied from $script:BatchPostmortemFile + metadata appended." -ForegroundColor Cyan
+  } else {
+    # No postmortemFile — auto-generate minimum shape from run outcome
+    $minimum = @"
+# Lessons Learned — $customerId / $runId
+
+## What went right
+- Run reached terminal state '$runOutcome' without manual gate escalation beyond design tolerance.
+
+## What went wrong
+- No operator-authored lessons for this batch run. If lessons DO exist for this run, an operator SHOULD amend this file post-hoc via a follow-up commit citing the runId.
+
+## Recommendations for next run
+- (none — auto-generated postmortem; consider providing intake.postmortemFile on future batch runs for higher-fidelity lessons capture)
+
+## Sign-off
+- Author: batch-mode auto-generation (BAT-09 auto-minimum path)
+- Reviewer: pending (operator should review + amend if lessons emerge)
+- git-sha: $(git rev-parse HEAD)
+- written-at: $(Get-Date -Format 'o')
+"@
+    Set-Content -Path $lessonsPath -Value $minimum
+    Write-Host "  [BATCH] Auto-generated minimum lessons-learned.md (no intake.postmortemFile supplied)." -ForegroundColor Cyan
+  }
+} else {
+  # INTERACTIVE — see below (operator prompt per template section)
+}
+```
 
 Sections (per template):
 - **What went right** — 3-5 concrete bullets citing handler + timestamp
