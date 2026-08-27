@@ -71,6 +71,7 @@ using System.Net;
 using System.Text.Json;
 using FluentAssertions;
 using Microsoft.Extensions.Logging.Abstractions;
+using Microsoft.Extensions.Options;
 using Sprk.Provisioning.ControlPlane.Enqueue;
 using Sprk.Provisioning.ControlPlane.Handlers;
 using Sprk.Provisioning.ControlPlane.Handlers.Preflight;
@@ -619,18 +620,179 @@ public sealed class H0PreflightHandlerTests
         enqueuer.Sent.Should().BeEmpty("H0 blocks the run on any preflight probe failure — no H0.5 dispatch");
     }
 
+    // ---------- COMP-10 cost-envelope gate (SESSION 17) ----------
+
+    [Fact]
+    public async Task CostEnvelope_OverrunAbortPolicy_FailsResumable_WithGateEntry()
+    {
+        // Red path: shared-trial tier + estimated $500/mo > $430 ceiling +
+        // default abortOnOverrun policy → Failure(Resumable, quota-cost-overrun).
+        var run = BuildRunWithTenant();
+        run.Parameters.NonSecret[H0PreflightHandler.TierParameterKey] = "shared-trial";
+        run.Parameters.NonSecret[H0PreflightHandler.EstimatedMonthlyUsdParameterKey] = "500";
+        // costEnvelopePolicy intentionally absent → default abortOnOverrun.
+        var repo = new FakeRepository(run, etag: "etag-comp10-red");
+        var enqueuer = new FakeEnqueuer();
+        var probes = AllPassProbes();
+        var handler = CreateHandler(repo, enqueuer, probes);
+
+        var result = await handler.HandleAsync(BuildEnvelope(), CancellationToken.None);
+
+        var failure = result.Should().BeOfType<HandlerResult.Failure>().Subject;
+        failure.Class.Should().Be(FailureClass.Resumable);
+        failure.RejectionCode.Should().Be(H0PreflightHandler.CostOverrunRejectionCode);
+        failure.Diagnostic.Should()
+            .Contain("shared-trial").And.Contain("500.00").And.Contain("430.00");
+
+        // Probes MUST NOT fire — the gate is before the probe fan-out.
+        probes.All(p => ((FakeProbe)p).CallCount == 0).Should().BeTrue(
+            "COMP-10: cost-envelope gate MUST short-circuit before any Azure probe fires");
+        enqueuer.Sent.Should().BeEmpty("H0 blocks; no H0.5 dispatch on cost overrun");
+
+        // Cosmos: Failed + gate-state carrying the evidence blob.
+        repo.LastWrittenRun.Should().NotBeNull();
+        repo.LastWrittenRun!.Status.Should().Be(RunStatus.Failed);
+        repo.LastWrittenRun.ErrorDetail.Should().Contain(H0PreflightHandler.CostOverrunRejectionCode);
+        repo.LastWrittenRun.GateStates.Should().ContainKey(
+            $"preflight-{H0PreflightHandler.CostOverrunRejectionCode}");
+
+        var evidence = repo.LastWrittenRun.GateStates[
+            $"preflight-{H0PreflightHandler.CostOverrunRejectionCode}"].Evidence;
+        evidence.Should().NotBeNull();
+        var evidenceJson = evidence!.Value.GetRawText();
+        evidenceJson.Should().Contain("shared-trial");
+        evidenceJson.Should().Contain("500");
+        evidenceJson.Should().Contain("430");
+    }
+
+    [Fact]
+    public async Task CostEnvelope_OverrunWarnAndProceedPolicy_ProceedsWithoutFail()
+    {
+        // Yellow path: same overrun BUT costEnvelopePolicy = warnAndProceed →
+        // proceed. Note: batch-mode Model2Dedicated intake REJECTS this pair
+        // at SKILL.md Step 1.0 (per intake.schema.json costEnvelopePolicy
+        // description); the H0 gate itself only enforces overrun-vs-policy,
+        // not the Model2Dedicated cross-field invariant.
+        var run = BuildRunWithTenant();
+        run.Parameters.NonSecret[H0PreflightHandler.TierParameterKey] = "shared-trial";
+        run.Parameters.NonSecret[H0PreflightHandler.EstimatedMonthlyUsdParameterKey] = "600";
+        run.Parameters.NonSecret[H0PreflightHandler.CostEnvelopePolicyParameterKey] =
+            H0PreflightHandler.CostEnvelopePolicyWarnAndProceed;
+        var repo = new FakeRepository(run, etag: "etag-comp10-yellow");
+        var enqueuer = new FakeEnqueuer();
+        var probes = AllPassProbes();
+        var handler = CreateHandler(repo, enqueuer, probes);
+
+        var result = await handler.HandleAsync(BuildEnvelope(), CancellationToken.None);
+
+        result.Should().BeOfType<HandlerResult.Success>(
+            "warnAndProceed policy MUST NOT block the run even when over-budget");
+        probes.All(p => ((FakeProbe)p).CallCount == 1).Should().BeTrue(
+            "warn-and-proceed reaches the probe fan-out");
+        enqueuer.Sent.Should().ContainSingle();
+    }
+
+    [Fact]
+    public async Task CostEnvelope_UnderCeiling_Proceeds()
+    {
+        // Green path: estimated $200/mo ≤ $430 shared-trial ceiling → proceed.
+        var run = BuildRunWithTenant();
+        run.Parameters.NonSecret[H0PreflightHandler.TierParameterKey] = "shared-trial";
+        run.Parameters.NonSecret[H0PreflightHandler.EstimatedMonthlyUsdParameterKey] = "200";
+        var repo = new FakeRepository(run, etag: "etag-comp10-green");
+        var enqueuer = new FakeEnqueuer();
+        var probes = AllPassProbes();
+        var handler = CreateHandler(repo, enqueuer, probes);
+
+        var result = await handler.HandleAsync(BuildEnvelope(), CancellationToken.None);
+
+        result.Should().BeOfType<HandlerResult.Success>();
+        probes.All(p => ((FakeProbe)p).CallCount == 1).Should().BeTrue();
+        enqueuer.Sent.Should().ContainSingle();
+    }
+
+    [Fact]
+    public async Task CostEnvelope_DisabledInOptions_SkipsGateEvenOnOverrun()
+    {
+        // Options.CostEnvelopeAbortsPreflight = false → gate SKIPPED entirely,
+        // even when the run is over-budget. Proves the operator escape hatch
+        // works so an internal-test env can disable the gate without touching
+        // handler code. Under-budget probes still fire.
+        var run = BuildRunWithTenant();
+        run.Parameters.NonSecret[H0PreflightHandler.TierParameterKey] = "shared-trial";
+        run.Parameters.NonSecret[H0PreflightHandler.EstimatedMonthlyUsdParameterKey] = "5000";
+        var repo = new FakeRepository(run, etag: "etag-comp10-disabled");
+        var enqueuer = new FakeEnqueuer();
+        var probes = AllPassProbes();
+        var options = Options.Create(new H0Options { CostEnvelopeAbortsPreflight = false });
+        var handler = CreateHandler(repo, enqueuer, probes, h0Options: options);
+
+        var result = await handler.HandleAsync(BuildEnvelope(), CancellationToken.None);
+
+        result.Should().BeOfType<HandlerResult.Success>(
+            "disabled gate MUST NOT block even a wildly-over-budget run");
+    }
+
+    [Theory]
+    [InlineData(null)]        // missing tier
+    [InlineData("")]          // blank tier
+    [InlineData("bogus-tier")] // unknown tier — no ceiling → log-only skip
+    public async Task CostEnvelope_MissingOrUnknownTier_LogOnlySkip(string? tier)
+    {
+        var run = BuildRunWithTenant();
+        if (tier is not null)
+        {
+            run.Parameters.NonSecret[H0PreflightHandler.TierParameterKey] = tier;
+        }
+        run.Parameters.NonSecret[H0PreflightHandler.EstimatedMonthlyUsdParameterKey] = "9999";
+        var repo = new FakeRepository(run, etag: "etag-comp10-skip");
+        var handler = CreateHandler(repo, new FakeEnqueuer(), AllPassProbes());
+
+        var result = await handler.HandleAsync(BuildEnvelope(), CancellationToken.None);
+
+        result.Should().BeOfType<HandlerResult.Success>(
+            "COMP-10: missing/unknown tier is a LOG-ONLY skip — never fail-close on plumbing gaps");
+    }
+
+    [Theory]
+    [InlineData(null)]        // missing estimatedMonthlyUsd
+    [InlineData("")]          // blank
+    [InlineData("not-a-number")] // unparseable
+    public async Task CostEnvelope_MissingOrUnparseableEstimate_LogOnlySkip(string? raw)
+    {
+        var run = BuildRunWithTenant();
+        run.Parameters.NonSecret[H0PreflightHandler.TierParameterKey] = "shared-trial";
+        if (raw is not null)
+        {
+            run.Parameters.NonSecret[H0PreflightHandler.EstimatedMonthlyUsdParameterKey] = raw;
+        }
+        var repo = new FakeRepository(run, etag: "etag-comp10-skip-est");
+        var handler = CreateHandler(repo, new FakeEnqueuer(), AllPassProbes());
+
+        var result = await handler.HandleAsync(BuildEnvelope(), CancellationToken.None);
+
+        result.Should().BeOfType<HandlerResult.Success>(
+            "COMP-10: missing/unparseable estimatedMonthlyUsd is a LOG-ONLY skip");
+    }
+
     // ---------- helpers ----------
 
     /// <summary>
     /// Constructs the handler under test. When <paramref name="matrix"/> is
     /// omitted, a throwing stub is injected — non-upgrade tests therefore
     /// implicitly assert that first-install runs NEVER query the matrix.
+    /// COMP-10 (SESSION 17): the h0Options parameter defaults to null which
+    /// the handler ctor resolves to <see cref="H0Options"/> built-in defaults
+    /// (CostEnvelopeAbortsPreflight=true + built-in tier ceilings). Tests
+    /// that need to exercise the cost-envelope gate override it via an
+    /// explicit IOptions&lt;H0Options&gt; wrapper.
     /// </summary>
     private static H0PreflightHandler CreateHandler(
         FakeRepository repo,
         FakeEnqueuer enqueuer,
         IPreflightQuotaProbe[] probes,
-        IVersionCompatMatrix? matrix = null)
+        IVersionCompatMatrix? matrix = null,
+        IOptions<H0Options>? h0Options = null)
         => new(
             repo,
             enqueuer,
@@ -639,6 +801,7 @@ public sealed class H0PreflightHandlerTests
                 VersionCompatVerdict.Green,
                 throws: new InvalidOperationException(
                     "IVersionCompatMatrix must not be queried outside upgrade mode")),
+            h0Options,
             NullLogger<H0PreflightHandler>.Instance);
 
     private static IPreflightQuotaProbe[] AllPassProbes() => new IPreflightQuotaProbe[]

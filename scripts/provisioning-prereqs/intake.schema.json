@@ -67,6 +67,11 @@
       "enum": ["shared-trial", "smb", "enterprise", "dedicated"],
       "description": "Cost-envelope tier hint for H0 preflight cost-envelope check. Optional."
     },
+    "estimatedMonthlyUsd": {
+      "type": "number",
+      "minimum": 0,
+      "description": "COMP-10 (SESSION 17): projected monthly Azure spend in USD for the target stamp. Consumed by H0 preflight cost-envelope gate. When present + tier is set + gate is enabled (H0Options.CostEnvelopeAbortsPreflight=true, default), H0 fails Resumable with rejection code 'quota-cost-overrun' if this value exceeds the tier ceiling AND costEnvelopePolicy is not 'warnAndProceed'. Optional; missing/blank is a LOG-ONLY skip (server-side gate does not fail-close on plumbing gaps — SKILL.md Step 2 BAT-10 is the client-side authoritative check). Default tier ceilings: shared-trial=$430, smb=$700, enterprise=$2500, dedicated=$5000/mo (mirror SKILL Step 2 BAT-10)."
+    },
     "skipExternalPrereqs": {
       "type": "boolean",
       "default": false,

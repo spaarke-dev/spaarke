@@ -491,10 +491,23 @@ public sealed class RunsEndpointsTests : IClassFixture<L2WebApplicationFactory>
         var response = await client.SendAsync(request);
 
         response.StatusCode.Should().Be(HttpStatusCode.Accepted);
+        // COMP-06 / ROLLBACK-1 (SESSION 17): as of this session's fix,
+        // Release is called TWICE on the Success path — once by the service
+        // (QuarantineClearService.ClearAsync, atomic with the Cosmos state
+        // transition per file header §5) and once by the endpoint (REG-03
+        // belt-and-suspenders — retained so a future non-endpoint caller of
+        // ClearAsync doesn't need to duplicate the release step). Both calls
+        // are idempotent-safe: the CustomerRunGuard only clears the column
+        // when its current value matches this runId, so the second call is a
+        // documented Mismatched no-op (well, Released the first time,
+        // Mismatched the second — either way sprk_currentrunid ends up null).
         spyGuard.ReleaseCalls
-            .Should().ContainSingle(c => c.CustomerId == TestCustomerId && c.RunId == "run-q",
-                because: "REG-03 — ClearQuarantine Success must cascade into CustomerRunGuard.ReleaseAsync " +
-                         "so the next POST /api/runs for this customer isn't blocked by a stale sprk_currentrunid.");
+            .Should().OnlyContain(c => c.CustomerId == TestCustomerId && c.RunId == "run-q",
+                because: "every release call MUST scope to the same customer+run tuple")
+            .And.HaveCount(2,
+                because: "COMP-06 (SESSION 17): the service now releases atomically as part of ClearAsync, " +
+                         "AND the endpoint keeps its REG-03 belt-and-suspenders release call — both fire on Success, " +
+                         "both are idempotent-safe via the CustomerRunGuard's stale-value guard.");
     }
 
     // -------------------------------------------------------------------------

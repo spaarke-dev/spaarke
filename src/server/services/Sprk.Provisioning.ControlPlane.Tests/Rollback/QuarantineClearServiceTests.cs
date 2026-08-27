@@ -25,6 +25,7 @@
 
 using FluentAssertions;
 using Microsoft.Extensions.Logging.Abstractions;
+using Sprk.Provisioning.ControlPlane.Concurrency;
 using Sprk.Provisioning.ControlPlane.Models;
 using Sprk.Provisioning.ControlPlane.Repositories;
 using Sprk.Provisioning.ControlPlane.Rollback;
@@ -52,8 +53,9 @@ public sealed class QuarantineClearServiceTests
         var repo = new InMemoryRunRepository();
         var run = MakeQuarantinedRun();
         repo.Seed(run, etag: "\"etag-1\"");
+        var runGuard = new FakeCustomerRunGuard();
 
-        var sut = new QuarantineClearService(repo, timeProvider, NullLogger<QuarantineClearService>.Instance);
+        var sut = new QuarantineClearService(repo, runGuard, timeProvider, NullLogger<QuarantineClearService>.Instance);
 
         // Act
         var result = await sut.ClearAsync(TestCustomerId, TestRunId, TestReason, TestActorOid, default);
@@ -72,6 +74,15 @@ public sealed class QuarantineClearServiceTests
             "originating handler preserved for audit trail");
 
         repo.ReplaceCalls.Should().Be(1);
+
+        // COMP-06 / ROLLBACK-1 (SESSION 17): service now releases the I5 guard
+        // as part of the same call. Verifies the sprk_currentrunid lock-leak
+        // fix — a future non-endpoint caller (state-reconciler, admin CLI)
+        // that only invokes ClearAsync (without the endpoint's REG-03 belt-
+        // and-suspenders release) still frees the customer for a fresh run.
+        runGuard.ReleaseCalls.Should().ContainSingle()
+            .Which.Should().Be((TestCustomerId, TestRunId),
+                "COMP-06: successful Quarantined→Failed transition MUST release sprk_currentrunid");
     }
 
     [Fact]
@@ -86,7 +97,8 @@ public sealed class QuarantineClearServiceTests
         run.Quarantine = null; // Corrupted / missing metadata.
         repo.Seed(run, etag: "\"etag-1\"");
 
-        var sut = new QuarantineClearService(repo, timeProvider, NullLogger<QuarantineClearService>.Instance);
+        var runGuard = new FakeCustomerRunGuard();
+        var sut = new QuarantineClearService(repo, runGuard, timeProvider, NullLogger<QuarantineClearService>.Instance);
 
         var result = await sut.ClearAsync(TestCustomerId, TestRunId, TestReason, TestActorOid, default);
 
@@ -117,8 +129,10 @@ public sealed class QuarantineClearServiceTests
         run.Status = currentStatus;
         repo.Seed(run, etag: "\"etag-1\"");
 
+        var runGuard = new FakeCustomerRunGuard();
         var sut = new QuarantineClearService(
             repo,
+            runGuard,
             TimeProvider.System,
             NullLogger<QuarantineClearService>.Instance);
 
@@ -130,6 +144,14 @@ public sealed class QuarantineClearServiceTests
         // No ReplaceRunAsync fired on the wrong-state path.
         repo.ReplaceCalls.Should().Be(0,
             "wrong-state guard MUST short-circuit before any Cosmos write");
+
+        // COMP-06 (SESSION 17): non-Success paths MUST NOT release the guard —
+        // wrong-state means SOME other run may hold sprk_currentrunid; releasing
+        // it would clear a fresh run's grab. The stale-value guard in
+        // ReleaseAsync prevents that in practice, but we also short-circuit
+        // in the service layer so a fake test-double can't hide the intent.
+        runGuard.ReleaseCalls.Should().BeEmpty(
+            "COMP-06: wrong-state path MUST NOT release sprk_currentrunid");
     }
 
     // -----------------------------------------------------------------------
@@ -140,8 +162,10 @@ public sealed class QuarantineClearServiceTests
     public async Task ClearAsync_RunNotInPartition_ReturnsNotFound()
     {
         var repo = new InMemoryRunRepository(); // empty — no seed.
+        var runGuard = new FakeCustomerRunGuard();
         var sut = new QuarantineClearService(
             repo,
+            runGuard,
             TimeProvider.System,
             NullLogger<QuarantineClearService>.Instance);
 
@@ -149,6 +173,8 @@ public sealed class QuarantineClearServiceTests
 
         result.Should().BeOfType<QuarantineClearResult.NotFound>();
         repo.ReplaceCalls.Should().Be(0);
+        runGuard.ReleaseCalls.Should().BeEmpty(
+            "COMP-06: NotFound path MUST NOT release sprk_currentrunid");
     }
 
     // -----------------------------------------------------------------------
@@ -168,9 +194,11 @@ public sealed class QuarantineClearServiceTests
         // supplied ifMatchEtag — we force it by mutating the seeded ETag after
         // seed but the service's ReadRunAsync captures the "stale" etag-1.
         repo.ForceNextReplaceConflict = true;
+        var runGuard = new FakeCustomerRunGuard();
 
         var sut = new QuarantineClearService(
             repo,
+            runGuard,
             TimeProvider.System,
             NullLogger<QuarantineClearService>.Instance);
 
@@ -178,6 +206,8 @@ public sealed class QuarantineClearServiceTests
 
         var conflict = result.Should().BeOfType<QuarantineClearResult.ConcurrencyConflict>().Subject;
         conflict.Current.Should().NotBeNull();
+        runGuard.ReleaseCalls.Should().BeEmpty(
+            "COMP-06: ConcurrencyConflict path MUST NOT release sprk_currentrunid — the winner still holds it");
     }
 
     // -----------------------------------------------------------------------
@@ -193,6 +223,7 @@ public sealed class QuarantineClearServiceTests
     {
         var sut = new QuarantineClearService(
             new InMemoryRunRepository(),
+            new FakeCustomerRunGuard(),
             TimeProvider.System,
             NullLogger<QuarantineClearService>.Instance);
 
@@ -211,6 +242,7 @@ public sealed class QuarantineClearServiceTests
     {
         var sut = new QuarantineClearService(
             new InMemoryRunRepository(),
+            new FakeCustomerRunGuard(),
             TimeProvider.System,
             NullLogger<QuarantineClearService>.Instance);
 
@@ -228,8 +260,10 @@ public sealed class QuarantineClearServiceTests
         var run = MakeQuarantinedRun();
         repo.Seed(run, etag: "\"etag-1\"");
 
+        var runGuard = new FakeCustomerRunGuard();
         var sut = new QuarantineClearService(
             repo,
+            runGuard,
             TimeProvider.System,
             NullLogger<QuarantineClearService>.Instance);
 
@@ -251,13 +285,65 @@ public sealed class QuarantineClearServiceTests
         var repo = new InMemoryRunRepository();
         repo.Seed(MakeQuarantinedRun(), etag: "\"etag-1\"");
 
-        var sut = new QuarantineClearService(repo, timeProvider, NullLogger<QuarantineClearService>.Instance);
+        var runGuard = new FakeCustomerRunGuard();
+        var sut = new QuarantineClearService(repo, runGuard, timeProvider, NullLogger<QuarantineClearService>.Instance);
 
         var result = await sut.ClearAsync(TestCustomerId, TestRunId, TestReason, TestActorOid, default);
 
         var success = result.Should().BeOfType<QuarantineClearResult.Success>().Subject;
         success.Run.Quarantine!.ClearedAt.Should().Be(frozenNow,
             "ClearedAt MUST come from injected TimeProvider — never DateTime.UtcNow");
+    }
+
+    // -----------------------------------------------------------------------
+    // COMP-06 / ROLLBACK-1 (SESSION 17): sprk_currentrunid release semantics
+    // -----------------------------------------------------------------------
+
+    [Fact]
+    public async Task ClearAsync_Success_ReleaseTransientFailure_StillReturnsSuccess()
+    {
+        // COMP-06: a TransientFailure at guard-release time MUST NOT unwind
+        // the Cosmos state transition — the Quarantined→Failed write already
+        // landed. Release failure is log-only per file header §5. Operators
+        // observe the sprk_currentrunid stale-value via the log + can invoke
+        // a maintenance workflow; the endpoint's REG-03 belt-and-suspenders
+        // release also retries on the next operator invocation.
+        var repo = new InMemoryRunRepository();
+        repo.Seed(MakeQuarantinedRun(), etag: "\"etag-1\"");
+        var runGuard = new FakeCustomerRunGuard
+        {
+            ReleaseOutcome = new ReleaseResult.TransientFailure(
+                TestCustomerId, TestRunId, "simulated Dataverse 503"),
+        };
+
+        var sut = new QuarantineClearService(
+            repo, runGuard, TimeProvider.System, NullLogger<QuarantineClearService>.Instance);
+
+        var result = await sut.ClearAsync(TestCustomerId, TestRunId, TestReason, TestActorOid, default);
+
+        result.Should().BeOfType<QuarantineClearResult.Success>(
+            "release-time transient failure MUST NOT unwind the Cosmos write");
+        runGuard.ReleaseCalls.Should().ContainSingle();
+    }
+
+    // -----------------------------------------------------------------------
+    // Fake ICustomerRunGuard — records ReleaseAsync calls; returns Released by
+    // default (mimics real guard's stale-value-safe idempotent-release contract).
+    // -----------------------------------------------------------------------
+    private sealed class FakeCustomerRunGuard : ICustomerRunGuard
+    {
+        public List<(string CustomerId, string RunId)> ReleaseCalls { get; } = new();
+        public ReleaseResult? ReleaseOutcome { get; set; }
+
+        public Task<AcquireResult> TryAcquireAsync(string customerId, string runId, CancellationToken cancellationToken)
+            => throw new NotSupportedException(
+                "QuarantineClearService MUST NOT call TryAcquireAsync — clear-quarantine is a release path only.");
+
+        public Task<ReleaseResult> ReleaseAsync(string customerId, string runId, CancellationToken cancellationToken)
+        {
+            ReleaseCalls.Add((customerId, runId));
+            return Task.FromResult(ReleaseOutcome ?? (ReleaseResult)new ReleaseResult.Released(customerId, runId));
+        }
     }
 
     // -----------------------------------------------------------------------

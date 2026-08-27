@@ -131,6 +131,64 @@ public static class RunsEndpoints
     public const string QuarantineClearedEventName = "QuarantineCleared";
 
     /// <summary>
+    /// COMP-03 (customer-provisioning-orchestration-r1 SESSION 17 pre-dispatch
+    /// remediation, 2026-08-27): centralised profile-enum constants + design
+    /// call = REJECT unknown profile (mirrors intake.schema.json profile enum
+    /// exactly). Rationale for the reject design (vs warn+accept):
+    ///   1. intake.schema.json declares profile as a strict enum of 3 values
+    ///      — batch mode already fails schema validation on any drift.
+    ///   2. Interactive mode passes the operator-typed value straight through;
+    ///      accepting an unknown profile silently produces cryptic downstream
+    ///      failures (H5 tier derivation, H11 user provisioning gate).
+    ///   3. The 4th "unknown" branch never has a defensible behavior — every
+    ///      handler hard-casts. Rejecting at intake with a clear diagnostic
+    ///      is strictly better than any warn+accept behavior.
+    ///
+    /// Enforced by <see cref="TryValidateTenancyProfilePair"/> at the endpoint
+    /// layer and mirror-checked by a contract-parity test in the sibling
+    /// <c>Sprk.Provisioning.ControlPlane.Tests</c> project that reads
+    /// <c>scripts/provisioning-prereqs/intake.schema.json</c> at test time and
+    /// asserts the enum values match this class's constants exactly (fails the
+    /// build the moment either surface drifts).
+    /// </summary>
+    public static class KnownProfiles
+    {
+        /// <summary>Model 1 shared trial / SMB tenancy (spaarke-hosted, multi-tenant).</summary>
+        public const string SpaarkeHostedModel1Trial = "spaarke-hosted-model1-trial";
+
+        /// <summary>Model 2 dedicated stamp on Spaarke's Azure subscription.</summary>
+        public const string SpaarkeHostedModel2 = "spaarke-hosted-model2";
+
+        /// <summary>Model 2 dedicated stamp on the customer's own Azure subscription.</summary>
+        public const string CustomerOwnedModel2 = "customer-owned-model2";
+
+        /// <summary>All 3 legal profile values — the authoritative L2-side enum.</summary>
+        public static readonly IReadOnlyList<string> All = new[]
+        {
+            SpaarkeHostedModel1Trial,
+            SpaarkeHostedModel2,
+            CustomerOwnedModel2,
+        };
+    }
+
+    /// <summary>
+    /// COMP-03 (customer-provisioning-orchestration-r1 SESSION 17): centralised
+    /// tenancy-model enum constants — same reject-unknown design as
+    /// <see cref="KnownProfiles"/>. Mirrors intake.schema.json tenancyModel enum.
+    /// </summary>
+    public static class KnownTenancyModels
+    {
+        /// <summary>Model 1 shared trial / SMB tenancy tier.</summary>
+        public const string Model1Shared = "Model1Shared";
+
+        /// <summary>Model 2 dedicated stamp (Spaarke- or customer-owned).</summary>
+        public const string Model2Dedicated = "Model2Dedicated";
+
+        /// <summary>All 2 legal tenancyModel values.</summary>
+        public static readonly IReadOnlyList<string> All = new[] { Model1Shared, Model2Dedicated };
+    }
+
+    /// <summary>
     /// Downstream handler dispatched by <c>POST /api/runs</c> on run creation
     /// and by <c>POST /api/runs/{id}/preflight</c>. H0 is the preflight-quota
     /// probe per design.md §4.1 catalog.
@@ -386,7 +444,7 @@ public static class RunsEndpoints
         // intake.schema.json subscriptionId description) so intake need not
         // carry it. Testing this branch: PostRuns_Model2Missing_SubscriptionId_Returns400
         // in RunsEndpointsTests.
-        if (string.Equals(request.TenancyModel, "Model2Dedicated", StringComparison.OrdinalIgnoreCase)
+        if (string.Equals(request.TenancyModel, KnownTenancyModels.Model2Dedicated, StringComparison.OrdinalIgnoreCase)
             && (!request.NonSecretParameters.TryGetValue("subscriptionId", out var subscriptionIdValue)
                 || string.IsNullOrWhiteSpace(subscriptionIdValue)))
         {
@@ -984,14 +1042,27 @@ public static class RunsEndpoints
         string profile,
         out string error)
     {
-        // Model 1 Shared: exactly one legal profile.
-        if (string.Equals(tenancyModel, "Model1Shared", StringComparison.OrdinalIgnoreCase))
+        // COMP-03: unknown-profile reject-first — before tenancy-model
+        // matching so a garbage profile string surfaces its own diagnostic
+        // instead of falling through to the pair-mismatch branch and blaming
+        // the tenancy-model. Mirrors intake.schema.json profile enum exactly.
+        if (!KnownProfiles.All.Any(p => string.Equals(p, profile, StringComparison.OrdinalIgnoreCase)))
         {
-            if (!string.Equals(profile, "spaarke-hosted-model1-trial", StringComparison.OrdinalIgnoreCase))
+            error =
+                $"Invalid profile '{profile}': must be one of [{string.Join(", ", KnownProfiles.All)}] " +
+                "(intake.schema.json profile enum). Handlers hard-cast on this value; unknown profiles " +
+                "are silent no-ops that surface deep in the DAG as cryptic H5/H11 failures.";
+            return false;
+        }
+
+        // Model 1 Shared: exactly one legal profile.
+        if (string.Equals(tenancyModel, KnownTenancyModels.Model1Shared, StringComparison.OrdinalIgnoreCase))
+        {
+            if (!string.Equals(profile, KnownProfiles.SpaarkeHostedModel1Trial, StringComparison.OrdinalIgnoreCase))
             {
                 error =
-                    $"Invalid tenancyModel × profile pair: 'Model1Shared' MUST pair with " +
-                    $"'spaarke-hosted-model1-trial' (received profile='{profile}'). Mirrors " +
+                    $"Invalid tenancyModel × profile pair: '{KnownTenancyModels.Model1Shared}' MUST pair with " +
+                    $"'{KnownProfiles.SpaarkeHostedModel1Trial}' (received profile='{profile}'). Mirrors " +
                     "intake.schema.json Model1Shared allOf invariant. Downstream handlers (H5 tier " +
                     "derivation, H11 user provisioning gate) misbehave on invalid pairs — fail-fast at intake.";
                 return false;
@@ -1001,16 +1072,16 @@ public static class RunsEndpoints
         }
 
         // Model 2 Dedicated: two legal profiles.
-        if (string.Equals(tenancyModel, "Model2Dedicated", StringComparison.OrdinalIgnoreCase))
+        if (string.Equals(tenancyModel, KnownTenancyModels.Model2Dedicated, StringComparison.OrdinalIgnoreCase))
         {
-            var isSpaarkeHosted = string.Equals(profile, "spaarke-hosted-model2", StringComparison.OrdinalIgnoreCase);
-            var isCustomerOwned = string.Equals(profile, "customer-owned-model2", StringComparison.OrdinalIgnoreCase);
+            var isSpaarkeHosted = string.Equals(profile, KnownProfiles.SpaarkeHostedModel2, StringComparison.OrdinalIgnoreCase);
+            var isCustomerOwned = string.Equals(profile, KnownProfiles.CustomerOwnedModel2, StringComparison.OrdinalIgnoreCase);
             if (!isSpaarkeHosted && !isCustomerOwned)
             {
                 error =
-                    $"Invalid tenancyModel × profile pair: 'Model2Dedicated' MUST pair with " +
-                    $"'spaarke-hosted-model2' or 'customer-owned-model2' (received profile='{profile}'). " +
-                    "Mirrors intake.schema.json Model2Dedicated allOf invariant.";
+                    $"Invalid tenancyModel × profile pair: '{KnownTenancyModels.Model2Dedicated}' MUST pair with " +
+                    $"'{KnownProfiles.SpaarkeHostedModel2}' or '{KnownProfiles.CustomerOwnedModel2}' " +
+                    $"(received profile='{profile}'). Mirrors intake.schema.json Model2Dedicated allOf invariant.";
                 return false;
             }
             error = string.Empty;
@@ -1021,7 +1092,7 @@ public static class RunsEndpoints
         // (the empty-check above only guards blank; a typo like 'Model3' would
         // otherwise slip through). Mirrors the intake.schema.json enum.
         error =
-            $"Invalid tenancyModel '{tenancyModel}': must be 'Model1Shared' or 'Model2Dedicated' " +
+            $"Invalid tenancyModel '{tenancyModel}': must be one of [{string.Join(", ", KnownTenancyModels.All)}] " +
             "(intake.schema.json enum). Handlers hard-cast on this value; unknown values are silent " +
             "no-ops with cost blow-up potential.";
         return false;

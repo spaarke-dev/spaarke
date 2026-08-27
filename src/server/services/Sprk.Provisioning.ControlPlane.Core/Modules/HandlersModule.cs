@@ -139,6 +139,15 @@ public static class HandlersModule
             configuration["Preflight:VersionCompatMatrixPath"],
             sp.GetRequiredService<ILogger<JsonFileVersionCompatMatrix>>()));
 
+        // COMP-10 (SESSION 17): H0Options — cost-envelope gate configuration.
+        // Bound to the "H0" section (H0Options.SectionName). Absent-config
+        // yields the built-in defaults (CostEnvelopeAbortsPreflight=true;
+        // shared-trial/smb/enterprise/dedicated ceilings per SKILL Step 2
+        // BAT-10). Operator overrides via appsettings / env:
+        //   "H0": { "CostEnvelopeAbortsPreflight": false }
+        //   "H0__CostEnvelopeAbortsPreflight": "false"
+        services.Configure<H0Options>(configuration.GetSection(H0Options.SectionName));
+
         // H0 handler — Scoped per IProvisioningHandler contract + parity
         // with IHandlerEnqueuer's Scoped registration. Concrete-only: the
         // keyed IProvisioningHandler registration (below) factory-forwards

@@ -75,9 +75,11 @@
 // -----------------------------------------------------------------------------
 
 using System.Diagnostics;
+using System.Globalization;
 using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
+using Microsoft.Extensions.Options;
 using Sprk.Provisioning.ControlPlane.Enqueue;
 using Sprk.Provisioning.ControlPlane.Models;
 using Sprk.Provisioning.ControlPlane.Repositories;
@@ -118,6 +120,44 @@ public sealed class H0PreflightHandler : IProvisioningHandler
     /// <summary>Gate id recorded on a Yellow verdict (operator manual-step ACK per matrix doc §5).</summary>
     public const string UpgradeCompatYellowGateId = "upgrade-compat-yellow";
 
+    /// <summary>
+    /// COMP-10 (SESSION 17): non-secret parameter carrying the operator-declared
+    /// cost tier (matches intake.schema.json `tier` enum:
+    /// <c>shared-trial</c>|<c>smb</c>|<c>enterprise</c>|<c>dedicated</c>).
+    /// Used to look up the monthly cost ceiling in <see cref="H0Options.GetCeilingUsd"/>.
+    /// </summary>
+    public const string TierParameterKey = "tier";
+
+    /// <summary>
+    /// COMP-10 (SESSION 17): non-secret parameter carrying the run's projected
+    /// monthly cost in USD as an invariant-culture decimal string (e.g.,
+    /// <c>"425"</c>, <c>"1200.50"</c>). Populated by the SKILL.md Step 2
+    /// BAT-10 client-side estimator OR by a direct-API caller passing its
+    /// own estimate. Missing/blank → the H0 cost gate LOG-ONLY skips
+    /// (no fail); values that fail invariant-culture decimal parse → same
+    /// skip with a WARN log line so operators notice.
+    /// </summary>
+    public const string EstimatedMonthlyUsdParameterKey = "estimatedMonthlyUsd";
+
+    /// <summary>
+    /// COMP-10 (SESSION 17): non-secret parameter carrying the operator's
+    /// cost-envelope policy — mirrors intake.schema.json `costEnvelopePolicy`
+    /// enum (<c>abortOnOverrun</c>|<c>warnAndProceed</c>). Any value other
+    /// than the exact literal <c>warnAndProceed</c> is treated as
+    /// <c>abortOnOverrun</c> (default-strict per COMP-10 binding). The
+    /// SKILL.md Step 1.0 batch loader rejects a Model2Dedicated intake that
+    /// pairs <c>warnAndProceed</c> — H0 does NOT re-enforce that pair
+    /// invariant (already caught at the boundary), only the overrun-vs-policy
+    /// decision.
+    /// </summary>
+    public const string CostEnvelopePolicyParameterKey = "costEnvelopePolicy";
+
+    /// <summary>Literal value of <see cref="CostEnvelopePolicyParameterKey"/> that skips the abort branch.</summary>
+    public const string CostEnvelopePolicyWarnAndProceed = "warnAndProceed";
+
+    /// <summary>Machine-stable rejection code emitted when COMP-10 aborts H0.</summary>
+    public const string CostOverrunRejectionCode = "quota-cost-overrun";
+
     private static readonly JsonSerializerOptions ParameterHashSerializerOptions = new()
     {
         // Canonical JSON for hashing — sorted keys + no whitespace + no
@@ -131,6 +171,7 @@ public sealed class H0PreflightHandler : IProvisioningHandler
     private readonly IHandlerEnqueuer _enqueuer;
     private readonly IEnumerable<IPreflightQuotaProbe> _probes;
     private readonly IVersionCompatMatrix _versionCompatMatrix;
+    private readonly H0Options _options;
     private readonly ILogger<H0PreflightHandler> _logger;
 
     /// <inheritdoc/>
@@ -143,12 +184,14 @@ public sealed class H0PreflightHandler : IProvisioningHandler
     /// <param name="enqueuer">Service Bus enqueuer used to dispatch H0.5 on success (wave-C4 temporary bridge — see file header).</param>
     /// <param name="probes">The four preflight probes. Registration order does not matter; the handler orchestrates all four in parallel and aggregates results.</param>
     /// <param name="versionCompatMatrix">Version-compat matrix queried in upgrade mode ONLY (spec.md FR-34; Wave G-8 Batch 10).</param>
+    /// <param name="options">COMP-10 (SESSION 17): H0 options — cost-envelope gate configuration. Optional (defaults to <see cref="H0Options"/> defaults when null so the handler stays constructible in ad-hoc tests without an Options.Create wrapper).</param>
     /// <param name="logger">Structured logger.</param>
     public H0PreflightHandler(
         IProvisioningRunRepository repository,
         IHandlerEnqueuer enqueuer,
         IEnumerable<IPreflightQuotaProbe> probes,
         IVersionCompatMatrix versionCompatMatrix,
+        IOptions<H0Options>? options,
         ILogger<H0PreflightHandler> logger)
     {
         ArgumentNullException.ThrowIfNull(repository);
@@ -161,6 +204,9 @@ public sealed class H0PreflightHandler : IProvisioningHandler
         _enqueuer = enqueuer;
         _probes = probes;
         _versionCompatMatrix = versionCompatMatrix;
+        // options may be null (test scaffolding) — fall back to defaults so
+        // the gate stays ON (fail-safe) rather than silently disabled.
+        _options = options?.Value ?? new H0Options();
         _logger = logger;
     }
 
@@ -231,6 +277,19 @@ public sealed class H0PreflightHandler : IProvisioningHandler
             await MarkFailedAsync(run, etag, rejectionCode, diagnostic, evidence: null, cancellationToken)
                 .ConfigureAwait(false);
             return new HandlerResult.Failure(FailureClass.Resumable, rejectionCode, diagnostic);
+        }
+
+        // (3.3) COMP-10 (SESSION 17) — cost-envelope gate. Fires BEFORE any
+        // Azure probe so an over-budget run blocks fast with zero API calls.
+        // Skipped entirely when `Options.CostEnvelopeAbortsPreflight = false`
+        // OR when the required nonSecret parameters (tier + estimatedMonthlyUsd)
+        // are absent/unparseable (LOG-ONLY skip so operators notice missing
+        // plumbing without a hard-fail on runs that predate the schema
+        // addition). See CheckCostEnvelopeAsync for the full decision matrix.
+        var costFailure = await CheckCostEnvelopeAsync(run, etag, cancellationToken).ConfigureAwait(false);
+        if (costFailure is not null)
+        {
+            return costFailure;
         }
 
         // (3.5) FR-34 upgrade-mode version-compat gate (Wave G-8 Batch 10).
@@ -340,6 +399,137 @@ public sealed class H0PreflightHandler : IProvisioningHandler
         var hash = SHA256.HashData(Encoding.UTF8.GetBytes(json));
         return Convert.ToHexString(hash);
     }
+
+    /// <summary>
+    /// COMP-10 (SESSION 17) cost-envelope gate. Returns a terminal
+    /// <see cref="HandlerResult.Failure"/> when the run's projected monthly
+    /// cost exceeds the tier ceiling AND the run's costEnvelopePolicy is not
+    /// <see cref="CostEnvelopePolicyWarnAndProceed"/> AND
+    /// <see cref="H0Options.CostEnvelopeAbortsPreflight"/> is true. Returns
+    /// <c>null</c> in every other case (gate disabled / missing parameters /
+    /// unknown tier / under-budget / warnAndProceed policy).
+    ///
+    /// Decision matrix:
+    ///   CostEnvelopeAbortsPreflight = false            → null (log-only skip)
+    ///   tier missing or unknown                        → null (WARN log)
+    ///   estimatedMonthlyUsd missing or unparseable     → null (WARN log)
+    ///   estimatedMonthlyUsd ≤ ceiling                  → null (INFO log)
+    ///   estimatedMonthlyUsd > ceiling + warnAndProceed → null (WARN log)
+    ///   estimatedMonthlyUsd > ceiling + abortOnOverrun → Failure(Resumable, quota-cost-overrun)
+    ///
+    /// Skipped/log-only branches never mutate Cosmos state — H0's own tenant
+    /// guard already wrote to Cosmos if needed; the cost gate is additive.
+    /// </summary>
+    private async Task<HandlerResult?> CheckCostEnvelopeAsync(
+        ProvisioningRun run,
+        string etag,
+        CancellationToken cancellationToken)
+    {
+        if (!_options.CostEnvelopeAbortsPreflight)
+        {
+            _logger.LogInformation(
+                "H0 cost-envelope gate DISABLED via H0Options.CostEnvelopeAbortsPreflight=false — skipping " +
+                "for runId={RunId} customerId={CustomerId}",
+                run.RunId, run.CustomerId);
+            return null;
+        }
+
+        if (!TryGetNonEmpty(run.Parameters.NonSecret, TierParameterKey, out var tier))
+        {
+            _logger.LogWarning(
+                "H0 cost-envelope gate SKIPPED — nonSecret['{Key}'] absent for runId={RunId} customerId={CustomerId}. " +
+                "Populate `tier` via the intake schema so H0 can enforce the tier ceiling.",
+                TierParameterKey, run.RunId, run.CustomerId);
+            return null;
+        }
+
+        var ceiling = _options.GetCeilingUsd(tier);
+        if (ceiling is null)
+        {
+            _logger.LogWarning(
+                "H0 cost-envelope gate SKIPPED — tier '{Tier}' has no ceiling in H0Options.TierMonthlyCostCeilingsUsd " +
+                "AND no built-in default (runId={RunId} customerId={CustomerId}). Add the tier to the intake schema " +
+                "enum + configure a ceiling, or accept the skip as intentional for an out-of-band tier.",
+                tier, run.RunId, run.CustomerId);
+            return null;
+        }
+
+        if (!TryGetNonEmpty(run.Parameters.NonSecret, EstimatedMonthlyUsdParameterKey, out var estimatedRaw))
+        {
+            _logger.LogWarning(
+                "H0 cost-envelope gate SKIPPED — nonSecret['{Key}'] absent for runId={RunId} customerId={CustomerId} " +
+                "(tier='{Tier}', ceiling=${Ceiling}). Populate `estimatedMonthlyUsd` via the intake schema so H0 can " +
+                "enforce the cost envelope.",
+                EstimatedMonthlyUsdParameterKey, run.RunId, run.CustomerId, tier, ceiling);
+            return null;
+        }
+
+        if (!decimal.TryParse(estimatedRaw, NumberStyles.Number, CultureInfo.InvariantCulture, out var estimatedMonthlyUsd))
+        {
+            _logger.LogWarning(
+                "H0 cost-envelope gate SKIPPED — nonSecret['{Key}']='{Raw}' is not a valid invariant-culture decimal " +
+                "for runId={RunId} customerId={CustomerId}. Fix the value in the intake (e.g., '425' or '1200.50').",
+                EstimatedMonthlyUsdParameterKey, estimatedRaw, run.RunId, run.CustomerId);
+            return null;
+        }
+
+        if (estimatedMonthlyUsd <= ceiling.Value)
+        {
+            _logger.LogInformation(
+                "H0 cost-envelope gate PASS — estimated ${Estimated}/mo ≤ tier '{Tier}' ceiling ${Ceiling}/mo " +
+                "(runId={RunId} customerId={CustomerId})",
+                estimatedMonthlyUsd, tier, ceiling, run.RunId, run.CustomerId);
+            return null;
+        }
+
+        // Overrun path — decision hinges on policy.
+        var policy = run.Parameters.NonSecret.TryGetValue(CostEnvelopePolicyParameterKey, out var policyRaw)
+            ? policyRaw
+            : null;
+        if (string.Equals(policy, CostEnvelopePolicyWarnAndProceed, StringComparison.OrdinalIgnoreCase))
+        {
+            _logger.LogWarning(
+                "H0 cost-envelope gate WARN-AND-PROCEED — estimated ${Estimated}/mo > tier '{Tier}' ceiling " +
+                "${Ceiling}/mo but nonSecret['{PolicyKey}']='{Policy}' explicitly requests proceed " +
+                "(runId={RunId} customerId={CustomerId}). Batch-mode Model2Dedicated intake rejects this pair " +
+                "at Step 1.0 — this branch fires only for interactive Model1 shared-trial or direct-API callers.",
+                estimatedMonthlyUsd, tier, ceiling, CostEnvelopePolicyParameterKey, policy,
+                run.RunId, run.CustomerId);
+            return null;
+        }
+
+        // Default (abortOnOverrun or unspecified) → fail Resumable.
+        var diagnostic =
+            $"Cost-envelope overrun: estimated ${estimatedMonthlyUsd:F2}/mo exceeds tier '{tier}' ceiling " +
+            $"${ceiling:F2}/mo (COMP-10). Set nonSecret['{CostEnvelopePolicyParameterKey}']='{CostEnvelopePolicyWarnAndProceed}' " +
+            "on Model 1 shared-trial runs to warn-and-proceed OR reduce the projected cost + resume. Batch-mode " +
+            "operators fix the estimate in the intake JSON; interactive operators re-invoke the skill.";
+        _logger.LogWarning(
+            "H0 cost-envelope gate ABORT — estimated ${Estimated}/mo > tier '{Tier}' ceiling ${Ceiling}/mo " +
+            "(runId={RunId} customerId={CustomerId} policy={Policy}) — rejecting with {RejectionCode}.",
+            estimatedMonthlyUsd, tier, ceiling, run.RunId, run.CustomerId, policy ?? "<absent>",
+            CostOverrunRejectionCode);
+        await MarkFailedAsync(
+            run, etag, CostOverrunRejectionCode, diagnostic,
+            evidence: BuildCostOverrunEvidence(tier, estimatedMonthlyUsd, ceiling.Value, policy),
+            cancellationToken).ConfigureAwait(false);
+        return new HandlerResult.Failure(FailureClass.Resumable, CostOverrunRejectionCode, diagnostic);
+    }
+
+    private static JsonElement BuildCostOverrunEvidence(
+        string tier,
+        decimal estimatedMonthlyUsd,
+        decimal ceilingUsd,
+        string? policy)
+        => JsonSerializer.SerializeToElement(new
+        {
+            tier,
+            estimatedMonthlyUsd,
+            ceilingUsd,
+            overageUsd = estimatedMonthlyUsd - ceilingUsd,
+            costEnvelopePolicy = policy ?? "abortOnOverrun (default)",
+            rejectionCode = CostOverrunRejectionCode,
+        });
 
     /// <summary>
     /// FR-34 upgrade-mode version-compat gate. Returns a terminal
