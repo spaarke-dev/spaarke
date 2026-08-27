@@ -83,19 +83,9 @@ public class SpeFileStore : ISpeFileOperations
     public virtual Task<string?> GetQuickXorHashAsync(string driveId, string itemId, CancellationToken ct = default)
         => _driveItemOps.GetQuickXorHashAsync(driveId, itemId, ct);
 
-    public Task<UploadSessionDto?> CreateUploadSessionAsync(
-        string containerId,
-        string path,
-        CancellationToken ct = default)
-        => _uploadManager.CreateUploadSessionAsync(containerId, path, ct);
-
-    public Task<HttpResponseMessage> UploadChunkAsync(
-        UploadSessionDto session,
-        Stream file,
-        long start,
-        long length,
-        CancellationToken ct = default)
-        => _uploadManager.UploadChunkAsync(session, file, start, length, ct);
+    // CreateUploadSessionAsync / UploadChunkAsync (app-only chunked upload) DELETED 2026-08-27 by
+    // unified-access-control-r2, following task 073's deletion of Api/UploadEndpoints.cs — their only
+    // caller. See the note in UploadSessionManager.cs for why the OBO twins are NOT covered by this.
 
     // Drive Item Operations - delegate to DriveItemOperations
     public Task<IList<FileHandleDto>> ListChildrenAsync(
