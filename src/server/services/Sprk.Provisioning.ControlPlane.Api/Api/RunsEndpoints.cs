@@ -333,6 +333,26 @@ public static class RunsEndpoints
             return BadRequest(httpContext, "profile is required.");
         }
 
+        // ISH-11 (customer-provisioning-orchestration-r1 Wave 5 punchlist,
+        // 2026-08-27): enforce tenancyModel × profile cross-field invariant,
+        // mirroring intake.schema.json's allOf logic. Without this check, a
+        // direct-API caller (test harness, retry script) supplying an invalid
+        // pair (e.g., Model1Shared + customer-owned-model2) succeeds at
+        // CreateRun; handlers that read tenancyModel then misbehave (H5 tier
+        // derivation, H11 user provisioning gate). Downstream failures are
+        // cryptic — surfacing "invalid tenancy/profile pair" at intake is
+        // the only place the operator gets a clear signal.
+        //
+        // Rules (mirrors intake.schema.json allOf):
+        //   Model1Shared    → profile MUST be 'spaarke-hosted-model1-trial'
+        //   Model2Dedicated → profile MUST be 'spaarke-hosted-model2' OR
+        //                     'customer-owned-model2'
+        //   Any other tenancyModel value → 400 (enum check).
+        if (!TryValidateTenancyProfilePair(request.TenancyModel, request.Profile, out var pairError))
+        {
+            return BadRequest(httpContext, pairError);
+        }
+
         // ISH-01 (customer-provisioning-orchestration-r1 Wave 2 B24 punchlist,
         // 2026-08-27, Wave 0 Decision 1): validate that tenantId is present in
         // nonSecretParameters. tenantId is the CANONICAL propagation path per
@@ -949,6 +969,63 @@ public static class RunsEndpoints
     // -------------------------------------------------------------------------
     // Helpers
     // -------------------------------------------------------------------------
+
+    /// <summary>
+    /// ISH-11 (customer-provisioning-orchestration-r1 Wave 5 punchlist,
+    /// 2026-08-27): mirrors the intake.schema.json allOf logic — validates
+    /// the tenancyModel × profile pair. Exposed <c>internal</c> so unit tests
+    /// can cover the matrix directly without going through the HTTP surface.
+    /// Returns true on a valid pair (or unrecognized tenancyModel value that
+    /// upstream validation already rejected); returns false with a filled
+    /// diagnostic string on a mis-paired combination.
+    /// </summary>
+    internal static bool TryValidateTenancyProfilePair(
+        string tenancyModel,
+        string profile,
+        out string error)
+    {
+        // Model 1 Shared: exactly one legal profile.
+        if (string.Equals(tenancyModel, "Model1Shared", StringComparison.OrdinalIgnoreCase))
+        {
+            if (!string.Equals(profile, "spaarke-hosted-model1-trial", StringComparison.OrdinalIgnoreCase))
+            {
+                error =
+                    $"Invalid tenancyModel × profile pair: 'Model1Shared' MUST pair with " +
+                    $"'spaarke-hosted-model1-trial' (received profile='{profile}'). Mirrors " +
+                    "intake.schema.json Model1Shared allOf invariant. Downstream handlers (H5 tier " +
+                    "derivation, H11 user provisioning gate) misbehave on invalid pairs — fail-fast at intake.";
+                return false;
+            }
+            error = string.Empty;
+            return true;
+        }
+
+        // Model 2 Dedicated: two legal profiles.
+        if (string.Equals(tenancyModel, "Model2Dedicated", StringComparison.OrdinalIgnoreCase))
+        {
+            var isSpaarkeHosted = string.Equals(profile, "spaarke-hosted-model2", StringComparison.OrdinalIgnoreCase);
+            var isCustomerOwned = string.Equals(profile, "customer-owned-model2", StringComparison.OrdinalIgnoreCase);
+            if (!isSpaarkeHosted && !isCustomerOwned)
+            {
+                error =
+                    $"Invalid tenancyModel × profile pair: 'Model2Dedicated' MUST pair with " +
+                    $"'spaarke-hosted-model2' or 'customer-owned-model2' (received profile='{profile}'). " +
+                    "Mirrors intake.schema.json Model2Dedicated allOf invariant.";
+                return false;
+            }
+            error = string.Empty;
+            return true;
+        }
+
+        // Unknown tenancyModel — reject explicitly rather than silently accept
+        // (the empty-check above only guards blank; a typo like 'Model3' would
+        // otherwise slip through). Mirrors the intake.schema.json enum.
+        error =
+            $"Invalid tenancyModel '{tenancyModel}': must be 'Model1Shared' or 'Model2Dedicated' " +
+            "(intake.schema.json enum). Handlers hard-cast on this value; unknown values are silent " +
+            "no-ops with cost blow-up potential.";
+        return false;
+    }
 
     /// <summary>
     /// Validates the route id + customerId query parameter. Returns true when

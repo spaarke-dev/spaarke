@@ -746,6 +746,84 @@ public sealed class RunsEndpointsTests : IClassFixture<L2WebApplicationFactory>
     }
 
     // -------------------------------------------------------------------------
+    // ISH-11 (customer-provisioning-orchestration-r1 Wave 5 punchlist,
+    // 2026-08-27) — CreateRun MUST reject invalid tenancyModel × profile
+    // pairs at the HTTP surface, mirroring intake.schema.json's allOf logic.
+    // A direct-API caller (test harness, retry script) supplying an invalid
+    // pair would otherwise reach downstream handlers (H5 tier derivation,
+    // H11 user provisioning gate) which fail cryptically.
+    // -------------------------------------------------------------------------
+
+    [Theory]
+    [InlineData("Model1Shared", "spaarke-hosted-model2")]
+    [InlineData("Model1Shared", "customer-owned-model2")]
+    [InlineData("Model2Dedicated", "spaarke-hosted-model1-trial")]
+    public async Task PostRuns_InvalidTenancyProfilePair_Returns400(string tenancyModel, string profile)
+    {
+        using var factory = new L2WebApplicationFactory();
+        var client = factory.CreateClient();
+
+        var request = new HttpRequestMessage(HttpMethod.Post, "/api/runs")
+        {
+            Content = JsonContent.Create(new
+            {
+                customerId = TestCustomerId,
+                environmentId = "env-1",
+                tenancyModel,
+                profile,
+                nonSecretParameters = new Dictionary<string, string>
+                {
+                    ["tenantId"] = "11111111-1111-1111-1111-111111111111",
+                    ["subscriptionId"] = "abcdef01-2345-6789-abcd-ef0123456789",
+                },
+            }),
+        };
+        AttachAuth(request, roles: new[] { "Operator" });
+
+        var response = await client.SendAsync(request);
+
+        response.StatusCode.Should().Be(HttpStatusCode.BadRequest,
+            $"ISH-11 — tenancyModel='{tenancyModel}' × profile='{profile}' is not a valid pair.");
+        var body = await response.Content.ReadAsStringAsync();
+        body.Should().Contain("tenancyModel", "diagnostic must reference the invariant.");
+        body.Should().Contain(profile, "diagnostic must echo the offending profile.");
+        factory.Repository.CreatedRuns.Should().BeEmpty();
+    }
+
+    [Fact]
+    public async Task PostRuns_UnknownTenancyModel_Returns400()
+    {
+        // ISH-11 — a typo like 'Model3Foo' MUST be rejected; the intake
+        // schema enum blocks this in batch dispatch, but the direct-API
+        // path (test harnesses) needs the same protection.
+        using var factory = new L2WebApplicationFactory();
+        var client = factory.CreateClient();
+
+        var request = new HttpRequestMessage(HttpMethod.Post, "/api/runs")
+        {
+            Content = JsonContent.Create(new
+            {
+                customerId = TestCustomerId,
+                environmentId = "env-1",
+                tenancyModel = "Model3Foo",
+                profile = "spaarke-hosted-model1-trial",
+                nonSecretParameters = new Dictionary<string, string>
+                {
+                    ["tenantId"] = "11111111-1111-1111-1111-111111111111",
+                },
+            }),
+        };
+        AttachAuth(request, roles: new[] { "Operator" });
+
+        var response = await client.SendAsync(request);
+
+        response.StatusCode.Should().Be(HttpStatusCode.BadRequest);
+        var body = await response.Content.ReadAsStringAsync();
+        body.Should().Contain("Model3Foo");
+        factory.Repository.CreatedRuns.Should().BeEmpty();
+    }
+
+    // -------------------------------------------------------------------------
     // ISH-02 (customer-provisioning-orchestration-r1 Wave 5 punchlist,
     // 2026-08-27) — Model2Dedicated CreateRun MUST fail-fast with 400 when
     // nonSecretParameters['subscriptionId'] is absent. Ten downstream handlers
