@@ -45,7 +45,8 @@ re-verified all of them today:
 |---|---|---|
 | `RecordSearchAuthorizationFilter`, `SemanticSearchAuthorizationFilter` | read `tid` / tenant schema URI | Correct — tenant, not identity. Out of scope by subject matter. |
 | `DataverseAuthorizationFilter`, `AiAuthorizationFilter`, `AnalysisAuthorizationFilter`, `AgentAuthorizationFilter`, `VisualizationAuthorizationFilter`, `ReportingAuthorizationFilter` | `"oid" ?? <schema URI> ?? NameIdentifier` | **Functionally correct** — short `"oid"` is absent under inbound mapping, so the **schema URI in second position** resolves the real oid. The third term never runs. |
-| `OfficeAuthFilter`, `OfficeRateLimitFilter`, `ResourceAccessHandler` | sequential oid-first extractors, early returns; `NameIdentifier`/`sub` used only as an **opaque partition/cache key** | Correct by design — that is the legitimate use of `sub`, and the one `ResolveOpaqueCallerKey` exists to name. |
+| `OfficeRateLimitFilter` | sequential oid-first; `sub` used as a rate-limit partition key | Correct by design — the legitimate use of `sub`. Now calls `ResolveOpaqueCallerKey`. |
+| ~~`OfficeAuthFilter`, `ResourceAccessHandler`~~ | sequential oid-first extractors, early returns | **CORRECTED 2026-08-27 — BROKEN, not opaque-key sites.** This row originally cleared all three on shape. `ResourceAccessHandler` feeds `AuthorizationContext.UserId`; `OfficeAuthFilter` feeds the `UserIdKey` that `OfficeDocumentAccessFilter` / `EntityAccessFilter` / `JobOwnershipFilter` authorize on. Both admitted a `sub`. Fixed in PR #840. **Classify by SINK, not by expression shape** — sequential early-return form reads as "oid first, correct", which is how these survived two passes. |
 
 **But the answer they should record is the third option:** those eight filters are correct *today* while
 still carrying a dead `?? ClaimTypes.NameIdentifier` tail. That tail is the OFFICE_009 pattern — a correct
@@ -53,10 +54,24 @@ source placed in front of a broken read, leaving the broken read live. It is ine
 always issues `oid`. Any token shape without one falls straight through to `sub` and authorizes the wrong
 principal.
 
-**So a follow-up sweep IS owed** — not to fix breakage, but to delete the tails. That is a ratchet task,
-which makes it theirs by their own §3 argument, and we support it landing there. #832 should not grow to
-40 files to chase sites that are not currently wrong; its PR description will say exactly this so the next
-reader does not assume the sweep was exhaustive.
+**So a follow-up sweep IS owed** — not to fix breakage, but to delete the tails.
+
+> ### ⚖️ SUPERSEDED 2026-08-27 by owner direction — the sweep is OURS and it is DONE
+>
+> This section originally continued: *"That is a ratchet task, which makes it theirs by their own §3
+> argument, and we support it landing there."* **The owner rejected that as a deferral** — "we do not
+> want anything knowingly (or unknowingly) deferred; this needs to be a 100% fix" — and was right to.
+>
+> Delivered in **PR #840**: **41 sites across 37 files**. The BFF now has **zero** direct identity-claim
+> reads outside `CallerResolution` and the two files they own. Enforced going forward by
+> `CallerIdentityGuardTests` (Rule 1 = no new claim read; Rule 2 = no ownership predicate gated on a
+> `Guid.TryParse`), both verified non-vacuous.
+>
+> **And the deferral would have shipped two live defects.** Three sites written in *sequential* form —
+> `oid` first with an early return — were cleared by the table above as "correct by design". Two of them
+> (`ResourceAccessHandler`, `OfficeAuthFilter`) feed **authorization**, not partition keys. They were
+> broken, and only re-tracing the sinks found it. **Shape is not the test; the sink is** — see the
+> corrected row above.
 
 ## 4. ⚠️ A blind spot in the census as scoped (their §3, §3a)
 
