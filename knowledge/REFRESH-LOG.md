@@ -6,6 +6,85 @@ Format per entry: `## YYYY-MM-DD — <type>` where type is `Initial setup`, `Mon
 
 ---
 
+## 2026-08-26 — Interim update: `sharepoint-embedded/` platform-currency refresh (task 061, `sdap-SPE-admin-app-r2`, FR-X01)
+
+Narrow, task-driven refresh of `knowledge/sharepoint-embedded/docs/` — not the full monthly cycle (still
+due; last full refresh of this topic was the 2026-05-14 initial curation, Batch 3). Driven by
+`sdap-SPE-admin-app-r2` (R2), which found the corpus predated every platform finding the project
+uncovered while diagnosing and fixing a live production defect in Spaarke's own SPE admin tool.
+
+**Refresh duration**: ~2h · **Refresher**: Claude Code (sub-agent), task 061, reviewed against project
+notes rather than a fresh Learn re-fetch (see Scope note below).
+
+**Files updated**: `docs/learn-containertypes.md`, `docs/learn-containers.md`, `docs/learn-overview.md`.
+Each file's original 2026-05-14 Learn snapshot was retained (none of it was found to be materially
+stale in its own right — see per-file notes below) and refreshed content was added as clearly marked,
+dated, sourced sections plus inline correction callouts at the two points the original content is now
+known to be actively misleading.
+
+### What was stale / added
+
+- **`learn-containertypes.md`**: added (1) the app-only-permission limitation for `containerTypes` —
+  Application permission is **Not supported** for this API on either version, confirmed both in Microsoft's
+  own permissions table and empirically (403 `accessDenied`, live Spaarke Dev tenant, 2026-08-21); (2) the
+  correct v1.0 settings shape — **nine** properties, Graph-`$metadata`-verified 2026-08-24, including two
+  common naming defects (`majorVersionLimit`→`itemMajorVersionLimit`,
+  `storageUsedInBytes`→`maxStoragePerContainerInBytes`, the latter a *different concept on a different
+  resource*, not just a rename) and one property (`agent.chatEmbedAllowedHosts`) that a prior R2
+  requirement doc asserted existed and does not, on either API version; (3) four container-type creation
+  paths, including the July-2026 admin-center path this corpus had no record of; (4) the create-role
+  documentation conflict (Graph reference page vs. conceptual doc) — **recorded as unresolved**, per
+  binding constraint, rather than silently picked; R2's own attempt to resolve it empirically
+  (task 010, 2026-08-21) could not, and it was still open as of task 027 (2026-08-24). One inline
+  correction: the original snapshot's "application permission" wording for CREATE is misleading given the
+  above.
+- **`learn-containers.md`** (an app-architecture concept page substituted in 2026-05-14 for a 404'd
+  containers/ URL — concept content found accurate, not stale): added net-new coverage this corpus
+  previously had none of — container **archival** (GA Feb 2026, documentation-only, not yet implemented
+  or live-verified by R2 as of this refresh — flagged explicitly, do not assume it shipped); the
+  per-container **item recycle bin** (GA v1.0), explicitly distinguished from the deleted-*containers*
+  collection this corpus already covered (two different Graph resources, same casual name); the
+  container **URL field** — Graph documents it as reachable via the `drive` navigation property, but R2
+  found empirically (task 028, 2026-08-24) that the collection-level `$expand=drive` is accepted, returns
+  `200`, and silently omits the data on both API versions — GET-single is required; and what R2 verified
+  about **storage-consumption reporting** (`storageUsedInBytes`) — available on beta LIST only, absent
+  from v1.0 entirely (`400`, not merely omitted) and absent from GET-single even on beta — live-verified
+  2026-08-24 against a real 861 MB / 5-container tenant.
+- **`learn-overview.md`**: added the SharePoint admin-center **Apps** experience (GA early July 2026,
+  MC1290827) — entirely new since curation, and directly overlaps container-type management screens a
+  custom admin app would otherwise build; and the **Purview compliance boundary** — SPE compliance is
+  delivered through Purview, not container-level app APIs, which is why R2 explicitly declined to build
+  hold/retention/eDiscovery management and instead surfaces only the container URL Purview's own scoping
+  UI needs.
+
+### Doc-vs-empirical conflicts recorded (both sides, not silently chosen)
+
+1. **Create-role requirement for `POST .../containerTypes`** — the Graph API reference page's boilerplate
+   permissions note ("Either the SharePoint Embedded admin role or the Global admin role is required")
+   contradicts the conceptual doc ("delegated-only... the caller doesn't need an administrator role").
+   R2 tried and failed to resolve this empirically (live-tenant safety rules forbid testing CREATE
+   destructively; testing LIST as a non-admin delegated user needs an interactive sign-in unavailable in
+   that session). **Recorded as open in `learn-containertypes.md`, both quotes cited verbatim with
+   source URLs** — this is the instance the task's binding constraint named explicitly.
+
+### Scope note — why this is not a full re-fetch
+
+Per `sdap-SPE-admin-app-r2` project CLAUDE.md and the task's own scope, this refresh drew on the
+project's own dated, cited, and in several cases stronger-than-documentation empirical evidence (live
+Graph calls and `$metadata` CSDL reads against Spaarke Dev, task-by-task through 2026-08-21–08-24) rather
+than re-fetching every Learn URL live. Every claim added carries an explicit citation — either a Learn
+URL or a project notes file with its task number and verification date. `SOURCE.md` and `NOTES.md` for
+this topic were **not** touched (out of this task's explicit scope) — their next full monthly refresh
+should reconcile provenance metadata (commit SHAs, fetch dates) against what changed here.
+
+**Gaps carried forward** (from the 2026-05-14 curation, still open): the `learn-knowledge-source.md` and
+`learn-semantic-index.md` docs were not touched by this refresh (out of task 061's scope — see
+`spec.md` FR-X01). `SOURCE.md`'s gap list (item 2, remote-SharePoint-parameters manifest) is unaffected.
+
+**Interim updates incorporated**: none pending for this topic.
+
+---
+
 ## 2026-07-14 — Interim update: `work-iq/` GA refresh (task 076, `email-communication-solution-r4`, DEC-7)
 
 Narrow, task-driven refresh of `knowledge/work-iq/` — not the full monthly cycle (still due; last full refresh was the 2026-05-14 initial curation). Driven by `email-communication-solution-r4` project's DEC-7 decision to exclude Work IQ as R4's app-only classifier.
