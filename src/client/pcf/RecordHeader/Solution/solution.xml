@@ -11,7 +11,7 @@
     <Descriptions>
       <Description description="Configuration-driven record header card plus toolbar for any Dataverse entity. Field layout comes from the layoutJson control property or is derived from entity metadata. Part of record-header-and-notepad-r2." languagecode="1033" />
     </Descriptions>
-    <Version>1.1.10.0</Version>
+    <Version>1.1.11.0</Version>
     <Managed>0</Managed>
     <Publisher>
       <UniqueName>Spaarke</UniqueName>

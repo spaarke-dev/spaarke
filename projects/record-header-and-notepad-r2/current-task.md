@@ -1,6 +1,6 @@
 # Current Task State — record-header-and-notepad-r2
 
-> **Last Updated**: 2026-08-27 (after the RecordHeader inline-lookup swap — v1.1.10 packed, awaiting UAT)
+> **Last Updated**: 2026-08-27 (after the RecordHeader inline-lookup swap — v1.1.11 packed, awaiting UAT)
 > **Recovery**: Read "Quick Recovery" first. Then [`CLAUDE.md`](CLAUDE.md), then [`tasks/TASK-INDEX.md`](tasks/TASK-INDEX.md).
 
 ---
@@ -9,46 +9,46 @@
 
 | Field | Value |
 |-------|-------|
-| **Task** | **033 + 034** complete — `Spaarke.Records.RecordHeader` **v1.1.10** packed, not yet imported |
+| **Task** | **033 + 034** complete — `Spaarke.Records.RecordHeader` **v1.1.11** packed, not yet imported |
 | **Phase** | 3 ✅ complete. Phase 5 rollout unblocked. The inline-lookup follow-on is **code-complete**. |
-| **Status** | ✅ Inline lookup swap DONE. `RecordHeaderPcf_v1.1.10.0.zip` is built and packed on disk. |
-| **Next Action** | **Import + UAT v1.1.10 on `spaarkedev1`** — the four checks in "UAT v1.1.10" below. |
+| **Status** | ✅ Inline lookup swap DONE. `RecordHeaderPcf_v1.1.11.0.zip` is built and packed on disk. |
+| **Next Action** | **Import + UAT v1.1.11 on `spaarkedev1`** — the four checks in "UAT v1.1.11" below. |
 | **Blocked by** | Nothing in code. **Task 001** still needs a classic-designer session no build can substitute for. |
 | **Working tree** | clean · **pushed** to `origin/work/record-header-and-notepad-r2` · no PR opened |
 
 ### ⚠️ Packed but NOT imported
 
-`Solution/bin/RecordHeaderPcf_v1.1.10.0.zip` is built from the current tree (bundle **115,496 B**,
+`Solution/bin/RecordHeaderPcf_v1.1.11.0.zip` is built from the current tree (bundle **116,422 B**,
 46% of the 250 KB NFR-02 ceiling — up from 99,068 B at v1.1.3, which is the inline lookup's cost).
 
 ```
-pac solution import --path "src/client/pcf/RecordHeader/Solution/bin/RecordHeaderPcf_v1.1.10.0.zip" --publish-changes
+pac solution import --path "src/client/pcf/RecordHeader/Solution/bin/RecordHeaderPcf_v1.1.11.0.zip" --publish-changes
 ```
 
 Import to **`spaarkedev1`** — never `spaarke-model1-prod`. Hard-refresh (Ctrl+Shift+R) and confirm
-the footer reads **v1.1.10**.
+the footer reads **v1.1.11**.
 
-### UAT v1.1.10 — what changed, what to check
+### UAT v1.1.11 — what changed, what to check
 
 1. **Project Type opens an INLINE dropdown under the field**, not the right-side pane.
 2. **The magnifier on the right of the field is clickable** — it drops the full list with no typing.
 3. **The list scrolls** (thin modern scrollbar) with **Advanced** pinned bottom-right; Advanced opens
    the OOB dialog. There is **no "+ New"** — deliberate.
 4. **The input has no border box** — gray fill, brand-blue underline on focus, placeholder reads
-   "Look for Project Type" (v1.1.10).
+   "Look for Project Type" (v1.1.11).
 5. **Everything else is unchanged** — date still saves as date-only, priority still a toggle, 14px
    edit text, sparkle still present.
 
-### Remaining OOB deltas — NOT done, awaiting an owner call
+### Remaining OOB deltas — CLOSED by owner 2026-08-27
 
-Observed side-by-side against the OOB control. Each needs data the header does not fetch today:
-
-| delta | what it needs |
+| delta | decision |
 |---|---|
-| per-row 16×16 entity icon | the target entity's icon — not in the `EntityMetadata` projection |
-| per-row secondary line (`3/5/2026 11:31 AM`) | a second column in the search `$select` (`modifiedon`) + a two-line row layout |
-| `Project Types` group header above the rows | the target entity's **display name** — `EntityMetadata` deliberately does not carry it (see `buildHeaderFormMetadata`) |
-| `+ New` in the footer | **excluded by owner decision** — stays excluded |
+| per-row 16×16 entity icon | ❌ **dropped for good** — "not critical, cleaner without it" |
+| `Project Types` group header | ❌ **dropped for good** — same |
+| `+ New` in the footer | ❌ **excluded** — taxonomy targets users cannot add to |
+| per-row secondary line (`3/5/2026 11:31 AM`) | ⏸️ **open** — this is the record's modified timestamp. OOB shows it to disambiguate same-named records; our taxonomy targets have unique names, so it buys little. Would cost one extra `$select` column + a two-line row. **Recommend dropping**; not built |
+
+Do not "restore parity" on the first three. They are decisions, not gaps.
 
 If a lookup renders as plain text with no search box, open the console: the per-cell diagnostic now
 prints `picker: 'inline' | 'display'` per field. `'display'` means one of the two required halves is
@@ -151,7 +151,7 @@ duplicate) · `CreateProjectWizard/CreateProjectStep` · `CreateRecordWizard/ste
 | `src/solutions/SmartTodo` | `AddTodoBar` → CreateTodo path |
 | `src/solutions/Notepad` | `hooks/discoverMemoNavProps` |
 | **`src/client/pcf/MatterHeader`** | ⚠️ imports `dist/components/LookupField/LookupField` **directly** (`MatterHeaderView.tsx:61`) — **its lookups change appearance on next rebuild**, relevant to task 080 parity |
-| **`src/client/pcf/RecordHeader`** | ✅ **DONE in v1.1.10** — now renders the inline component on the editable path (packed, not yet imported) |
+| **`src/client/pcf/RecordHeader`** | ✅ **DONE in v1.1.11** — now renders the inline component on the editable path (packed, not yet imported) |
 
 **None of these are urgent** — the change is additive and every consumer keeps working unchanged
 except that its lookup gains the right-side browse icon and the modern scrollbar. But a reviewer
@@ -166,7 +166,7 @@ handles it for wired PCFs). A stale `dist/` silently ships old code.
 
 ---
 
-## ✅ DONE: RecordHeader lookup swap (v1.1.10, 2026-08-27)
+## ✅ DONE: RecordHeader lookup swap (v1.1.11, 2026-08-27)
 
 `RecordHeaderView`'s `case 'lookup'` now renders the inline `components/LookupField` when the field
 is editable **and** a target resolved; read-only or target-less lookups keep the display renderer.

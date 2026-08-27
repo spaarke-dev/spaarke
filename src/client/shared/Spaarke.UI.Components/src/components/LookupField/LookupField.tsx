@@ -145,6 +145,38 @@ const useStyles = makeStyles({
     display: 'flex',
     flexDirection: 'column',
     gap: tokens.spacingVerticalXXS,
+    // Positioning context for the three transient panels below the field.
+    // Without it they anchor to the nearest positioned ancestor — which in a
+    // form is unpredictable — instead of to this cell.
+    position: 'relative',
+  },
+
+  /**
+   * Shared geometry for everything that appears BELOW the field: the results
+   * list, the loading spinner and the empty-state message.
+   *
+   * ══════════════════════════════════════════════════════════════════════════
+   * THESE MUST OVERLAY, NOT DISPLACE. This is a layout-shift fix, not styling.
+   * ══════════════════════════════════════════════════════════════════════════
+   * All three were previously in NORMAL FLOW, so opening the dropdown pushed
+   * every field below it down the form, and committing a value let the whole
+   * form snap back up — reported as "the screen jumps" (UAT, v1.1.10).
+   *
+   * An earlier comment here claimed `shadow8` made the list "elevate over the
+   * following field instead of pushing it down". That was wrong: a box-shadow
+   * paints over neighbours but does not remove the element from flow. Only
+   * `position: absolute` does.
+   */
+  overlayBelowField: {
+    position: 'absolute',
+    top: '100%',
+    left: 0,
+    right: 0,
+    // Above sibling form fields, far below Fluent's portal layers (Dialog,
+    // Popover and Tooltip all sit at ~1000000), so this can never cover a
+    // modal. Fluent v9 ships no z-index token.
+    zIndex: 100,
+    marginTop: tokens.spacingVerticalXXS,
   },
 
   labelRow: {
@@ -174,10 +206,7 @@ const useStyles = makeStyles({
     borderLeftColor: tokens.colorNeutralStroke1,
     borderRadius: tokens.borderRadiusMedium,
     overflow: 'hidden',
-    marginTop: tokens.spacingVerticalXXS,
     backgroundColor: tokens.colorNeutralBackground1,
-    // Elevate above the following form field the way the OOB dropdown does —
-    // without this the list pushes siblings down instead of overlaying them.
     boxShadow: tokens.shadow8,
   },
   /**
@@ -273,7 +302,13 @@ const useStyles = makeStyles({
     borderBottomColor: tokens.colorBrandStroke2,
     borderLeftColor: tokens.colorBrandStroke2,
     alignSelf: 'flex-start',
-    marginTop: tokens.spacingVerticalXXS,
+    // Match the Fluent medium field height (32px, `fieldHeights.medium` in
+    // @fluentui/react-input) EXACTLY. Committing a value swaps the Input for
+    // this chip, and any height difference between them reflows the grid row —
+    // the second half of the "screen jumps" report. No marginTop, for the same
+    // reason: the Input has none.
+    minHeight: '32px',
+    boxSizing: 'border-box',
   },
   selectedChipName: {
     color: tokens.colorBrandForeground2,
@@ -286,6 +321,25 @@ const useStyles = makeStyles({
     flexShrink: 0,
   },
 
+  // Spinner + empty state also overlay (see `overlayBelowField`), so they need
+  // the same card chrome as the results list to stay legible over content.
+  panelSurface: {
+    backgroundColor: tokens.colorNeutralBackground1,
+    borderRadius: tokens.borderRadiusMedium,
+    borderTopWidth: '1px',
+    borderRightWidth: '1px',
+    borderBottomWidth: '1px',
+    borderLeftWidth: '1px',
+    borderTopStyle: 'solid',
+    borderRightStyle: 'solid',
+    borderBottomStyle: 'solid',
+    borderLeftStyle: 'solid',
+    borderTopColor: tokens.colorNeutralStroke1,
+    borderRightColor: tokens.colorNeutralStroke1,
+    borderBottomColor: tokens.colorNeutralStroke1,
+    borderLeftColor: tokens.colorNeutralStroke1,
+    boxShadow: tokens.shadow8,
+  },
   spinnerRow: {
     display: 'flex',
     alignItems: 'center',
@@ -295,7 +349,9 @@ const useStyles = makeStyles({
   },
   emptyText: {
     color: tokens.colorNeutralForeground3,
+    display: 'block',
     paddingTop: tokens.spacingVerticalS,
+    paddingBottom: tokens.spacingVerticalS,
     textAlign: 'center',
   },
 });
@@ -333,6 +389,17 @@ export const LookupField: React.FC<ILookupFieldProps> = ({
   const [highlightedIndex, setHighlightedIndex] = React.useState(-1);
   const debounceRef = React.useRef<ReturnType<typeof setTimeout> | null>(null);
   const wrapperRef = React.useRef<HTMLDivElement>(null);
+  /**
+   * Needed to keep the brand focus underline lit while browsing.
+   *
+   * Fluent draws that 2px line from `:focus-within` on the Input root, so it
+   * only shows while the real `<input>` holds focus. Clicking the magnifier
+   * from a cold field previously left focus on `<body>` — the field opened its
+   * list with no underline, which is the "there is no blue line" report. The
+   * results list is a SIBLING of the Input, so focus must stay in the input
+   * rather than move into the list.
+   */
+  const inputRef = React.useRef<HTMLInputElement>(null);
 
   // ── Debounced search ──────────────────────────────────────────────────
   React.useEffect(() => {
@@ -463,6 +530,9 @@ export const LookupField: React.FC<ILookupFieldProps> = ({
    * Toggles, so a second click dismisses.
    */
   const handleSearchIconClick = React.useCallback(() => {
+    // Focus FIRST — `onMouseDown` preventDefault stops the button stealing
+    // focus, but it cannot grant focus the input never had.
+    inputRef.current?.focus();
     if (value) {
       // A committed value occupies the input slot with its chip; the icon is
       // not rendered in that state, so this is defensive only.
@@ -549,6 +619,7 @@ export const LookupField: React.FC<ILookupFieldProps> = ({
         ) : (
           <Input
             appearance={appearance}
+            input={{ ref: inputRef }}
             value={searchTerm}
             onChange={handleSearchChange}
             onKeyDown={handleKeyDown}
@@ -577,16 +648,20 @@ export const LookupField: React.FC<ILookupFieldProps> = ({
         )}
       </Field>
 
-      {/* Loading spinner */}
-      {loading && (
-        <div className={styles.spinnerRow}>
+      {/*
+        Loading spinner — overlays, and only while the list is CLOSED. With the
+        list open the rows update in place (what OOB does); rendering a spinner
+        over an open list would just cover the results the user is reading.
+      */}
+      {loading && !showResults && (
+        <div className={mergeClasses(styles.overlayBelowField, styles.panelSurface, styles.spinnerRow)}>
           <Spinner size="tiny" label="Searching..." />
         </div>
       )}
 
       {/* Results list — scrollable options + pinned footer */}
       {showResults && !value && (
-        <div className={styles.resultsList}>
+        <div className={mergeClasses(styles.overlayBelowField, styles.resultsList)}>
           <div className={styles.resultsScroll} role="listbox" aria-label={`${label} search results`}>
             {results.map((item, index) => (
               <div
@@ -598,6 +673,11 @@ export const LookupField: React.FC<ILookupFieldProps> = ({
                 role="option"
                 aria-selected={index === highlightedIndex}
                 tabIndex={0}
+                // Do not let mousedown pull focus out of the input: that would
+                // drop `:focus-within` and blink the underline off mid-click.
+                // Keyboard selection already routes through the input, so this
+                // also makes mouse and keyboard behave identically.
+                onMouseDown={e => e.preventDefault()}
                 onClick={() => handleSelect(item)}
                 onKeyDown={e => {
                   if (e.key === 'Enter' || e.key === ' ') {
@@ -639,7 +719,10 @@ export const LookupField: React.FC<ILookupFieldProps> = ({
 
       {/* Empty results */}
       {showEmpty && (
-        <Text size={100} className={styles.emptyText}>
+        <Text
+          size={100}
+          className={mergeClasses(styles.overlayBelowField, styles.panelSurface, styles.emptyText)}
+        >
           No results found
         </Text>
       )}

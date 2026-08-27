@@ -184,6 +184,46 @@ describe('LookupField — FieldGrid span (record-header FR-03)', () => {
   });
 });
 
+describe('LookupField — the panels must OVERLAY, never displace (no layout jump)', () => {
+  // UAT v1.1.10: "when a value is selected the screen jumps". All three
+  // transient panels were in normal flow, so opening the dropdown pushed every
+  // field below it down the form and committing let the form snap back.
+  //
+  // jsdom does not do layout, so this cannot be asserted by measuring. What it
+  // CAN check is the property that causes it — and `position: absolute` is the
+  // whole fix, so pinning it is pinning the bug.
+  const positionOf = (el: Element | null): string =>
+    el ? window.getComputedStyle(el).position : '<not rendered>';
+
+  it('the results list is absolutely positioned', async () => {
+    renderField();
+    fireEvent.click(browseButton());
+    await waitFor(() => expect(screen.getByRole('listbox')).toBeInTheDocument());
+
+    // The listbox is the scroll region; the positioned panel is its parent.
+    expect(positionOf(screen.getByRole('listbox').parentElement)).toBe('absolute');
+  });
+
+  it('the empty state is absolutely positioned', async () => {
+    const onSearch = jest.fn(async () => []);
+    renderField({ onSearch });
+
+    fireEvent.change(screen.getByRole('textbox'), { target: { value: 'zzz' } });
+
+    const empty = await screen.findByText('No results found', undefined, { timeout: 3000 });
+    expect(positionOf(empty)).toBe('absolute');
+  });
+
+  it('the committed chip is the same height as the input it replaces', () => {
+    // The second half of the jump: swapping a 32px Input for a shorter chip
+    // reflows the grid row. 32px is Fluent's `fieldHeights.medium`.
+    const { container } = renderField({ value: ITEMS[0] });
+    const chip = container.querySelector<HTMLElement>('.fui-Field')?.lastElementChild as HTMLElement;
+
+    expect(window.getComputedStyle(chip).minHeight).toBe('32px');
+  });
+});
+
 describe('LookupField — Input appearance', () => {
   // Griffel class names are not resolvable to computed styles under jsdom, so
   // asserting "the background is gray" is not available here. What IS worth

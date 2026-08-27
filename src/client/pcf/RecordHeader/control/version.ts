@@ -228,5 +228,38 @@
  *   icon, a secondary timestamp line, a "Project Types" group header, and
  *   "+ New". The first three each need data we do not currently fetch; "+ New"
  *   is excluded by owner decision and stays excluded.
+ *
+ * 1.1.11 (2026-08-27) - two UAT fixes, both in the SHARED component so every
+ *   consumer gets them.
+ *     DEF-6 "the screen jumps when a value is selected." All three transient
+ *       panels below the field - results list, spinner, empty state - were in
+ *       NORMAL FLOW, so opening the dropdown physically pushed every field
+ *       below it down the form and committing a value let the form snap back.
+ *       A prior comment claimed `shadow8` made the list "elevate over the
+ *       following field instead of pushing it down"; that was simply wrong - a
+ *       box-shadow paints over neighbours but does not remove an element from
+ *       flow. Only `position: absolute` does, and that is now what they use
+ *       (anchored to the field, z-index 100 - above sibling fields, far below
+ *       Fluent's ~1000000 portal layers, so it can never cover a modal).
+ *       Second half of the same jump: committing swapped a 32px Input for a
+ *       shorter chip, reflowing the grid row. The chip now pins minHeight to
+ *       32px (`fieldHeights.medium` in @fluentui/react-input) and drops its
+ *       marginTop, so the two footprints are identical.
+ *     DEF-7 "there is no blue line." Fluent draws that 2px brand underline
+ *       from `:focus-within` on the Input root, so it only lights while the
+ *       real <input> holds focus. Clicking the magnifier from a cold field
+ *       left focus on <body>: the list opened with no underline. The browse
+ *       handler now focuses the input explicitly (preventDefault on mousedown
+ *       stops the BUTTON stealing focus, but cannot grant focus the input
+ *       never had), and option rows preventDefault on mousedown too, so focus
+ *       never leaves the input while browsing and the line stays lit through
+ *       the whole interaction - which is what OOB does.
+ *   Both are pinned by tests: jsdom does no layout, but griffel's CSS does
+ *   resolve through getComputedStyle, so `position: absolute` and the 32px
+ *   chip height are directly assertable - and both assertions fail on the old
+ *   code.
+ *   Owner decision recorded: the per-row entity ICON and the target-entity
+ *   DISPLAY-NAME group header are dropped for good - "not critical, cleaner
+ *   without it". Do not add them back.
  */
-export const CONTROL_VERSION = '1.1.10';
+export const CONTROL_VERSION = '1.1.11';
