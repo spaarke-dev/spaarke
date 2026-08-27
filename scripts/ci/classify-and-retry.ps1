@@ -4,20 +4,44 @@
     Two-pass test runner classifier for SDAP CI.
 
 .DESCRIPTION
-    Reads pass-1 TRX files, identifies failed tests, classifies them via the
-    reliability registry (tests/.reliability-registry.json), and emits a
-    retry decision via $env:GITHUB_OUTPUT.
+    Reads pass-1 TRX files, identifies failed tests, and emits a retry decision
+    via $env:GITHUB_OUTPUT.
 
-    Three outcomes:
+    Two outcomes:
       - All tests passed in pass 1 → exit 0, retry_needed=false.
-      - Any failure is NOT in the registry (Deterministic = real bug) → exit 1,
-        the workflow step fails immediately. No retry.
-      - All failures ARE in the registry (TimingSensitive or ConcurrencySensitive)
-        → exit 0, retry_needed=true, retry_filter=<dotnet test filter for pass 2>.
+      - Any failures → exit 0, retry_needed=true, retry_filter=<dotnet test filter>.
+        EVERY pass-1 failure is retried, registered or not.
 
-    Pass 2 runs only those failed tests. If pass 2 also has failures, the workflow's
-    "Final test verdict" step fails the build (treated as a real regression — two
-    consecutive runs failed on different runners is no longer noise).
+    Pass 2 runs those tests on a fresh execution. If pass 2 also fails, the workflow's
+    "Final test verdict" step fails the build — two consecutive failures on different
+    runs is no longer noise.
+
+    DETERMINISM IS MEASURED, NOT ASSUMED (changed 2026-08-26)
+    ---------------------------------------------------------
+    This script previously treated "not in the reliability registry" as a synonym for
+    "deterministic — real bug" and failed the build immediately, with no retry. That
+    inference does not hold, and in practice it was wrong far more often than right:
+
+      - Run 33007649714 failed the build on ReAnalysisFlowTests.ReAnalysis_HappyPath.
+        That test passes locally in 32s.
+      - Runs 32871571761 and 32858914113 failed the build on six AuthorizationIntegration
+        / SystemIntegration tests. All six pass locally in 2s.
+      - A different set of tests was flagged on essentially every run.
+
+    The mechanism could only ever recognise flakiness it had already been told about, so
+    a NEW flake always presented as a real bug. Worse, a single unregistered failure
+    suppressed the retry for the registered ones too (run 33007649714 logged
+    "1 deterministic failure(s); 2 retry-eligible — failing build"), because the
+    deterministic branch returned before the retry branch could run.
+
+    The fix applies this file's own long-standing standard uniformly: a test is a real
+    failure when it fails TWICE, on different runs. The registry no longer gates the
+    retry decision — it is retained purely as reporting, to distinguish a known-flaky
+    failure from a newly-observed one in the log.
+
+    Cost: one extra pass on any run that has failures. Deliberately uncapped — a
+    genuinely broken build still fails, one pass later, and capping would restore a
+    version of the same false-confidence problem this change removes.
 
 .PARAMETER TrxDirectory
     Directory containing pass-1 .trx file(s). Searched recursively.
@@ -117,53 +141,78 @@ Write-Host ""
 Write-Host "PASS 1 had $failedCount failure(s):"
 $failedTestNames | ForEach-Object { Write-Host "  - $_" }
 
-# --- Classify each failure --------------------------------------------------
+# --- Annotate each failure (REPORTING ONLY — does not gate the retry) --------
 # A TRX 'testName' may be the FullyQualifiedName for a [Fact], OR include
 # parameter values for a [Theory] (e.g. "Namespace.Class.Method(p1: \"v1\")").
 # To handle both, we test each registry entry as a prefix of the failed name.
-$retryEligible = New-Object System.Collections.Generic.List[string]
-$deterministicFailures = New-Object System.Collections.Generic.List[string]
+$knownFlaky = New-Object System.Collections.Generic.List[string]
+$newlyObserved = New-Object System.Collections.Generic.List[string]
 
 foreach ($name in $failedTestNames) {
-    $isFlaky = $false
+    $isRegistered = $false
     foreach ($registered in $knownFlakies) {
         # Exact match OR registered name is a prefix (Theory case)
         if ($name -eq $registered -or $name.StartsWith("$registered(")) {
-            $isFlaky = $true
+            $isRegistered = $true
             break
         }
     }
-    if ($isFlaky) {
-        $retryEligible.Add($name) | Out-Null
+    if ($isRegistered) {
+        $knownFlaky.Add($name) | Out-Null
     } else {
-        $deterministicFailures.Add($name) | Out-Null
+        $newlyObserved.Add($name) | Out-Null
     }
 }
 
-# --- Decision ---------------------------------------------------------------
-if ($deterministicFailures.Count -gt 0) {
+if ($knownFlaky.Count -gt 0) {
     Write-Host ""
-    Write-Host "DETERMINISTIC FAILURES (not in reliability registry — real bugs):"
-    $deterministicFailures | ForEach-Object { Write-Host "  - $_" }
-    Emit-GithubOutput -Key "retry_needed" -Value "false"
-    Emit-GithubOutput -Key "summary" -Value "$($deterministicFailures.Count) deterministic failure(s); $($retryEligible.Count) retry-eligible — failing build"
+    Write-Host "Known-flaky (in reliability registry):"
+    $knownFlaky | ForEach-Object { Write-Host "  - $_" }
+}
+if ($newlyObserved.Count -gt 0) {
     Write-Host ""
-    Write-Host "::error::Deterministic test failure(s) detected — failing the build (no retry). See output above for the failing test names."
-    exit 1
+    Write-Host "Newly-observed (not in registry) — retried like any other failure."
+    Write-Host "If one of these fails pass 2 as well, it is a real failure and the build fails:"
+    $newlyObserved | ForEach-Object { Write-Host "  - $_" }
 }
 
-# All failures are in the reliability registry → retry
-Write-Host ""
-Write-Host "ALL FAILURES are in the reliability registry — emitting pass-2 retry filter"
-Write-Host "Retry-eligible tests:"
-$retryEligible | ForEach-Object { Write-Host "  - $_" }
+# --- Build the pass-2 filter -------------------------------------------------
+# Theory parameter values are stripped: a TRX name like
+#   Namespace.Class.Method(endpoint: "/api/containers")
+# is not valid inside `dotnet test --filter` — the parentheses, quotes and comma
+# break filter parsing. Truncating at the first '(' yields the method FQN, which
+# re-runs every case of that Theory. That is the intended granularity for a retry
+# and it collapses sibling cases into one filter term.
+function Get-FilterableName {
+    param([string]$TestName)
+    $paren = $TestName.IndexOf('(')
+    if ($paren -ge 0) { return $TestName.Substring(0, $paren) }
+    return $TestName
+}
+
+$filterNames = @(
+    $failedTestNames |
+        ForEach-Object { Get-FilterableName $_ } |
+        Where-Object { $_ } |
+        Sort-Object -Unique
+)
 
 # dotnet test --filter syntax: FullyQualifiedName~A|FullyQualifiedName~B
 # Using `~` (contains) instead of `=` so Theory parameterizations match.
-$filter = ($retryEligible | ForEach-Object { "FullyQualifiedName~$_" }) -join "|"
+$filter = ($filterNames | ForEach-Object { "FullyQualifiedName~$_" }) -join "|"
+
 Emit-GithubOutput -Key "retry_needed" -Value "true"
 Emit-GithubOutput -Key "retry_filter" -Value $filter
-Emit-GithubOutput -Key "summary" -Value "$($retryEligible.Count) timing/concurrency-sensitive failure(s) — retrying"
+
+# The verdict step re-reads this list and asserts every one of these methods actually
+# EXECUTED in pass 2. A filter term can silently match nothing — the test was renamed,
+# deleted, or carries a [Theory] DisplayName that differs from its FullyQualifiedName —
+# and "did not re-run" must never be read as "passed". Without this, a vanished test
+# turns a red build green, which is a worse failure than the one this script was
+# rewritten to fix.
+Emit-GithubOutput -Key "retry_methods" -Value ($filterNames -join ";")
+
+Emit-GithubOutput -Key "summary" -Value "$failedCount pass-1 failure(s) ($($knownFlaky.Count) known-flaky, $($newlyObserved.Count) newly-observed) across $($filterNames.Count) test method(s) — retrying all"
 Write-Host ""
-Write-Host "::notice::All failures are registry-tagged — running pass 2 with --filter `"$filter`""
+Write-Host "::notice::Retrying all $($filterNames.Count) failed test method(s) — a failure is real only if it fails twice"
 exit 0

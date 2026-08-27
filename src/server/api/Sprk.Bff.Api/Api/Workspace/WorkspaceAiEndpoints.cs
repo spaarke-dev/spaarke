@@ -2,6 +2,7 @@ using System.Security.Claims;
 using Sprk.Bff.Api.Api.Filters;
 using Sprk.Bff.Api.Api.Workspace.Models;
 using Sprk.Bff.Api.Services.Workspace;
+using Sprk.Bff.Api.Infrastructure.Authentication;
 
 namespace Sprk.Bff.Api.Api.Workspace;
 
@@ -112,8 +113,7 @@ public static class WorkspaceAiEndpoints
         // --- Resolve user identity ---
         // WorkspaceAuthorizationFilter has already run and stored UserId in Items.
         var userId = httpContext.Items["UserId"]?.ToString()
-            ?? httpContext.User.FindFirst("oid")?.Value
-            ?? httpContext.User.FindFirst(ClaimTypes.NameIdentifier)?.Value;
+            ?? CallerResolution.ResolveObjectId(httpContext.User);
 
         if (string.IsNullOrEmpty(userId))
         {

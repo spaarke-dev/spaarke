@@ -93,6 +93,11 @@ export interface ContainerTypeDetailProps {
   containerTypeId: string | null;
   /** Callback to close the panel. */
   onClose: () => void;
+  /**
+   * Pane height in pixels, owned by the host's `useResizablePane` so the splitter above can drag
+   * it. Omitted falls back to the CSS default in `styles.panel`.
+   */
+  paneHeight?: number;
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -160,26 +165,30 @@ function extractSettingsFromConfig(
 // ─────────────────────────────────────────────────────────────────────────────
 
 const useStyles = makeStyles({
-  /** Translucent backdrop covering the page behind the panel. */
-  backdrop: {
-    position: "fixed",
-    inset: 0,
-    zIndex: 200,
-    backgroundColor: tokens.colorBackgroundOverlay,
-  },
-
-  /** Panel container — fixed right-side overlay, 440px wide. */
+  /**
+   * Panel container — a docked BOTTOM pane, full width of the page.
+   *
+   * 🔴 Changed 2026-08-26 (UAT). This was a 440px fixed overlay on the right with a translucent
+   * backdrop. Two things were wrong with that. The panel carries a settings form, a permissions
+   * grid and a consuming-tenants list — content that needs horizontal room, and 440px gave it a
+   * column so narrow that labels wrapped mid-phrase. And the backdrop made it MODAL: the list you
+   * were comparing rows against was greyed out and unclickable behind it, which is the opposite of
+   * what a detail pane is for.
+   *
+   * Now it is in-flow, sized by its flex parent in `App.tsx`, so the grid above shrinks rather than
+   * being covered — the list stays live while the detail is open. The backdrop is gone with it.
+   */
   panel: {
-    position: "fixed",
-    top: 0,
-    right: 0,
-    bottom: 0,
-    width: "440px",
-    zIndex: 201,
-    boxShadow: tokens.shadow64,
+    flex: "0 0 auto",
+    height: "45%",
+    minHeight: "260px",
     display: "flex",
     flexDirection: "column",
     backgroundColor: tokens.colorNeutralBackground1,
+    borderTopWidth: "1px",
+    borderTopStyle: "solid",
+    borderTopColor: tokens.colorNeutralStroke2,
+    boxShadow: tokens.shadow16,
   },
 
   /** Header rendered inside SidePaneShell's header slot. */
@@ -322,8 +331,29 @@ const useStyles = makeStyles({
   },
 
   /** Permissions table. */
+  /**
+   * `tableLayout: fixed` is load-bearing, not cosmetic.
+   *
+   * With auto layout a single long unbroken token — which is exactly what the server was sending
+   * before the `MapContainerTypePermission` fix — widens its column past the table and the cells
+   * visually run over each other (UAT round 6: "the columns need to concat and not overlap").
+   * Fixed layout means a cell can never claim more than its share, whatever lands in it, so the
+   * overlap cannot recur even if some future value is long again.
+   */
   permTable: {
     width: "100%",
+    tableLayout: "fixed",
+  },
+
+  /**
+   * Wraps long scope lists inside their own cell instead of overflowing into the next one.
+   * `break-word` rather than `break-all` so readable names break at spaces where they can.
+   */
+  permCellText: {
+    wordBreak: "break-word",
+    overflowWrap: "anywhere",
+    whiteSpace: "normal",
+    color: tokens.colorNeutralForeground2,
   },
 
   noPermissions: {
@@ -359,6 +389,7 @@ const useStyles = makeStyles({
 export const ContainerTypeDetail: React.FC<ContainerTypeDetailProps> = ({
   containerTypeId,
   onClose,
+  paneHeight,
 }) => {
   const styles = useStyles();
   const { selectedConfig } = useBuContext();
@@ -717,15 +748,13 @@ export const ContainerTypeDetail: React.FC<ContainerTypeDetailProps> = ({
 
   return (
     <>
-      {/* Backdrop */}
+      {/* Panel — docked beneath the list. No backdrop: the grid above stays interactive. */}
       <div
-        className={styles.backdrop}
-        onClick={handleCloseRequest}
-        aria-hidden="true"
-      />
-
-      {/* Panel */}
-      <div className={styles.panel} role="complementary" aria-label="Container type detail">
+        className={styles.panel}
+        style={paneHeight !== undefined ? { height: `${paneHeight}px` } : undefined}
+        role="complementary"
+        aria-label="Container type detail"
+      >
         <SidePaneShell
           header={
             <>
@@ -1030,14 +1059,14 @@ export const ContainerTypeDetail: React.FC<ContainerTypeDetailProps> = ({
                             </Text>
                           </TableCell>
                           <TableCell>
-                            <Text size={200} style={{ color: tokens.colorNeutralForeground2 }}>
+                            <Text size={200} className={styles.permCellText}>
                               {perm.delegatedPermissions.length > 0
                                 ? perm.delegatedPermissions.join(", ")
                                 : "—"}
                             </Text>
                           </TableCell>
                           <TableCell>
-                            <Text size={200} style={{ color: tokens.colorNeutralForeground2 }}>
+                            <Text size={200} className={styles.permCellText}>
                               {perm.applicationPermissions.length > 0
                                 ? perm.applicationPermissions.join(", ")
                                 : "—"}

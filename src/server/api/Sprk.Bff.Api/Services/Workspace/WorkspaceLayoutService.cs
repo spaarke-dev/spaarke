@@ -2,6 +2,7 @@ using Microsoft.Xrm.Sdk;
 using Microsoft.Xrm.Sdk.Query;
 using Spaarke.Dataverse;
 using Sprk.Bff.Api.Api.Workspace;
+using Sprk.Bff.Api.Services.Identity;
 
 namespace Sprk.Bff.Api.Services.Workspace;
 
@@ -43,18 +44,60 @@ public sealed class WorkspaceLayoutService
         // so the Manage Workspaces pane can render "Modified ..." per layout
         // and so the future PATCH/If-Match concurrency surface (B-5 / task 054)
         // can use it as a strong validator / ETag value.
-        "modifiedon"
+        "modifiedon",
+        // REQUIRED for the ownership guard in GetLayoutByIdAsync — and it was ABSENT until
+        // 2026-08-27. Without it Retrieve returns no `ownerid`, GetAttributeValue yields null,
+        // and `ownerId.HasValue` short-circuits the guard to a no-op. That made read-by-id,
+        // UPDATE and DELETE reachable for ANY authenticated caller on ANY user layout — a
+        // separate defect from the oid/sub claim bug, and one the claim fix does NOT close.
+        // Do not remove: dropping this column silently disables authorization.
+        "ownerid"
     ];
 
     private readonly IGenericEntityService _entityService;
+    private readonly ISystemUserIdentityResolver _systemUserIdentityResolver;
     private readonly ILogger<WorkspaceLayoutService> _logger;
 
     public WorkspaceLayoutService(
         IGenericEntityService entityService,
+        ISystemUserIdentityResolver systemUserIdentityResolver,
         ILogger<WorkspaceLayoutService> logger)
     {
         _entityService = entityService ?? throw new ArgumentNullException(nameof(entityService));
+        _systemUserIdentityResolver = systemUserIdentityResolver ?? throw new ArgumentNullException(nameof(systemUserIdentityResolver));
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
+    }
+
+    /// <summary>
+    /// Translates the caller's Entra <c>oid</c> into the Dataverse <c>systemuserid</c> that
+    /// <c>ownerid</c> actually holds, returning <c>null</c> when no enabled systemuser matches.
+    /// </summary>
+    /// <remarks>
+    /// <para><b>Two id spaces, one column.</b> Every ownership predicate in this service compares
+    /// against <c>ownerid</c>, whose <c>.Id</c> is a <b>systemuserid</b>. The caller identifier that
+    /// arrives from <c>CallerResolution.ResolveObjectId</c> is an Entra <b>oid</b>. They are different
+    /// values for the same person, so comparing them directly matches nothing — which is why merely
+    /// fixing the oid/sub claim bug would have turned an over-sharing query into an empty one.</para>
+    /// <para><b>Callers MUST fail closed on null.</b> The original code expressed each predicate as
+    /// <c>if (Guid.TryParse(userId, out var g)) query.AddCondition("ownerid", Equal, g)</c>. Because
+    /// the guard wrapped the FILTER rather than the query, an unparseable caller DROPPED the ownership
+    /// condition instead of denying — the same shape as the PortfolioService disclosure.</para>
+    /// </remarks>
+    private async Task<Guid?> ResolveOwnerSystemUserIdAsync(string userId, CancellationToken ct)
+    {
+        var systemUserId = await _systemUserIdentityResolver
+            .ResolveSystemUserIdAsync(userId, ct)
+            .ConfigureAwait(false);
+
+        if (systemUserId is null)
+        {
+            _logger.LogWarning(
+                "WorkspaceLayoutService: caller {UserId} could not be resolved to an enabled systemuser; "
+                + "ownership-scoped operations will deny rather than run unfiltered.",
+                userId);
+        }
+
+        return systemUserId;
     }
 
     /// <summary>
@@ -147,8 +190,22 @@ public sealed class WorkspaceLayoutService
             var isSystem = entity.GetAttributeValue<bool?>("sprk_issystem") ?? false;
             if (!isSystem)
             {
+                // This guard is the authorization gate for read-by-id AND for UpdateLayoutAsync /
+                // DeleteLayoutAsync, both of which call this method to answer "does it belong to the
+                // caller". Every branch below therefore DENIES on doubt — an unreadable owner or an
+                // unresolvable caller must not read as "allowed".
                 var ownerId = entity.GetAttributeValue<EntityReference>("ownerid")?.Id;
-                if (ownerId.HasValue && Guid.TryParse(userId, out var userGuid) && ownerId.Value != userGuid)
+                if (ownerId is null)
+                {
+                    _logger.LogWarning(
+                        "Layout {LayoutId} returned no ownerid; denying. Check that SelectColumns still "
+                        + "requests the column — omitting it silently disables this check.",
+                        id);
+                    return null;
+                }
+
+                var callerSystemUserId = await ResolveOwnerSystemUserIdAsync(userId, ct).ConfigureAwait(false);
+                if (callerSystemUserId != ownerId.Value)
                 {
                     _logger.LogWarning(
                         "User {UserId} attempted to access layout {LayoutId} owned by {OwnerId}",
@@ -217,7 +274,12 @@ public sealed class WorkspaceLayoutService
         // query so step 2 can run even if the user has zero owned layouts
         // (the original query lumped both into one filter).
         // ──────────────────────────────────────────────────────────────────
-        if (Guid.TryParse(userId, out var userGuid))
+        // Unlike the other predicates in this file, step 1's guard wrapped the whole QUERY rather
+        // than just the ownership condition, so an unresolvable caller has always skipped to step 2
+        // rather than running unfiltered. Preserved — but keyed on the systemuserid now, since
+        // `ownerid` never held an oid and this query therefore never matched a real user's default.
+        var defaultOwnerSystemUserId = await ResolveOwnerSystemUserIdAsync(userId, ct).ConfigureAwait(false);
+        if (defaultOwnerSystemUserId is { } userGuid)
         {
             var userQuery = new QueryExpression(EntityName)
             {
@@ -351,13 +413,28 @@ public sealed class WorkspaceLayoutService
             ? existingLayouts.Max(l => l.SortOrder ?? 0)
             : 0;
 
+        // Assign the row to the CALLER, explicitly.
+        //
+        // Until 2026-08-27 this create set no `ownerid` at all. Writes go through
+        // IGenericEntityService — a singleton alias for the app-only IDataverseService — so Dataverse
+        // defaulted every layout to the service principal. The result: not one user-owned layout
+        // existed, and the per-user isolation this class documents could not have worked even with a
+        // correct caller identifier. Ownership must be stated here; it is not inherited from the
+        // caller's token on an app-only connection.
+        var ownerSystemUserId = await ResolveOwnerSystemUserIdAsync(userId, ct).ConfigureAwait(false);
+        if (ownerSystemUserId is not { } ownerId)
+        {
+            return (null, "Your user account could not be resolved. Sign out and back in, then retry.");
+        }
+
         var entity = new Entity(EntityName)
         {
             ["sprk_name"] = request.Name,
             ["sprk_layouttemplateid"] = request.LayoutTemplateId,
             ["sprk_sectionsjson"] = request.SectionsJson,
             ["sprk_isdefault"] = request.IsDefault,
-            ["sprk_sortorder"] = maxSortOrder + 1
+            ["sprk_sortorder"] = maxSortOrder + 1,
+            ["ownerid"] = new EntityReference("systemuser", ownerId)
         };
 
         try
@@ -755,11 +832,25 @@ public sealed class WorkspaceLayoutService
         // count them in the merged list.
         query.Criteria.AddCondition("sprk_issystem", ConditionOperator.NotEqual, true);
 
-        // Owned by the specified user (user isolation)
-        if (Guid.TryParse(userId, out var userGuid))
+        // Owned by the specified user (user isolation).
+        //
+        // Until 2026-08-27 this read:
+        //     if (Guid.TryParse(userId, out var userGuid))
+        //         query.Criteria.AddCondition("ownerid", ConditionOperator.Equal, userGuid);
+        //
+        // `userId` carried the Entra `sub` (a pairwise, non-GUID string), so TryParse ALWAYS failed,
+        // the condition was never added, and the query ran unscoped. This service queries on the app
+        // identity (IGenericEntityService is a singleton), so Dataverse row-level security never
+        // trimmed the result either — every caller received every user's layouts.
+        //
+        // Fail CLOSED: an unresolvable caller yields no rows rather than an unfiltered org-wide list.
+        var ownerSystemUserId = await ResolveOwnerSystemUserIdAsync(userId, ct).ConfigureAwait(false);
+        if (ownerSystemUserId is not { } userGuid)
         {
-            query.Criteria.AddCondition("ownerid", ConditionOperator.Equal, userGuid);
+            return Array.Empty<WorkspaceLayoutDto>();
         }
+
+        query.Criteria.AddCondition("ownerid", ConditionOperator.Equal, userGuid);
 
         query.AddOrder("sprk_sortorder", OrderType.Ascending);
 

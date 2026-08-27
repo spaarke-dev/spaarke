@@ -523,7 +523,7 @@ public sealed class ComposeDispatchEndpointContractTests : IClassFixture<Dispatc
         return new SendWorkspaceArtifactHandler(
             guidProvider.Object,
             TimeProvider.System,
-            new WorkspaceLayoutService(entityService.Object, Mock.Of<ILogger<WorkspaceLayoutService>>()),
+            new WorkspaceLayoutService(entityService.Object, global::Sprk.Bff.Api.Tests.Services.Workspace.StubSystemUserIdentityResolver.Instance, Mock.Of<ILogger<WorkspaceLayoutService>>()),
             Mock.Of<Sprk.Bff.Api.Services.Ai.Handlers.Dataverse.IDataverseUserClient>(),
             ack.Object,
             sessionManager,
