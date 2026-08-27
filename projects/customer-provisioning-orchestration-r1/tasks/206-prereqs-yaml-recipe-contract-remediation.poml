@@ -10,12 +10,12 @@
     <model-tier>sonnet</model-tier>
     <model-tier-reason>Mechanical per-recipe: convert `az command` to `result=$(az command); [ -n "$result" ] || exit 1` or similar with the specific assertion the `expect:` field describes. No architectural judgment beyond honoring the SKILL Step 0.5b author contract.</model-tier-reason>
     <effort>xhigh</effort>
-    <effort-reason>32 recipes across 27 prereqs. Each requires reading the recipe, understanding its assertion, authoring the exit-1 guard, verifying the guard behaves correctly (exits on failure, exits 0 on success). Non-trivial testing per recipe. Brownfield analysis of what each `az` / `pac` call actually returns on success vs failure.</effort-reason>
+    <effort-reason>32 recipes across 27 prereqs. Each requires reading the recipe, understanding its assertion, authoring the exit-1 guard, verifying the guard behaves correctly (exits on failure, exits 0 on success). Non-trivial testing per recipe. Brownfield analysis of what each `az` / `pac` call actually returns on success vs failure. **Amended 2026-08-27 (PRQ-10)**: added 8-recipe assertion-recompute scope (E-06 per-service role map, E-11 AND-condition Sender+Receiver, S-03 failed=0 loop, C-01 numeric limit>current, C-02 3-pin iteration, C-04 numeric used<limit, C-06 numeric >=25600000, plus any others surfaced in re-audit). Assertion RECOMPUTE is a heavier lift than exit-1-wrapper — several recipes required per-service data maps, bash-4 associative arrays, jq assertions, or loop restructures. Revised estimate: 8-12h (was 4-6h).</effort-reason>
     <parallel-group>none</parallel-group>
     <parallel-safe>false</parallel-safe>
     <deps>199</deps>
     <tags>provisioning, prereqs-manifest, silent-fail-remediation, skill-directive, recipe-hardening</tags>
-    <estimated-effort>4-6h (careful per-recipe work; cannot batch mechanically)</estimated-effort>
+    <estimated-effort>8-12h (careful per-recipe work; cannot batch mechanically; assertion-recompute scope adds ~4h over the exit-1-only estimate)</estimated-effort>
   </metadata>
 
   <prompt>Every prereq in `scripts/provisioning-prereqs/prereqs.yaml` EXCEPT PRQ-E-14 violates the SKILL Step 0.5b recipe-author contract: recipes MUST explicitly `exit 1` on any internal failure condition, not rely on `az`/`pac` empty-output-implies-fail. The audit surfaced 32 specific violations. Full per-recipe defect list + proposed fix pattern is in `projects/customer-provisioning-orchestration-r1/notes/prereqs-yaml-audit-2026-08-27.md` § Class B, sourced from workflow `wf_75aa08a8-13e` transcript.
@@ -42,6 +42,8 @@ Apply the exit-1 guard pattern to every recipe. Verify each via manual invocatio
 
       This task is the systematic sweep to actually implement what SESSION 12 declared.
 
+      **PRQ-10 amendment (2026-08-27)**: Task originally spec'd as "add exit-1 guard" — the SESSION 15 pre-dispatch audit surfaced that 8 of the recipes require full assertion-RECOMPUTE (not just wrapper) because their `expect:` field describes a SPECIFIC condition (numeric threshold, per-service role map, AND-condition, multi-pin iteration) that the current recipe does not test. A naive exit-1-on-empty wrapper would still silent-PASS the exact defect the prereq exists to catch. See notes/pre-dispatch-audit-punchlist-2026-08-27.md § PRQ-03, PRQ-10, PRQ-12 for the full analysis and the SESSION 12 mistake-at-one-meta-level-up framing. Acceptance criterion 6 enumerates the 8 recipes + the 12 additional SESSION 14 empty-output sweep recipes.
+
       **Non-goal**: this task does NOT fix placeholder-substitution defects (see task 207). Placeholder tokens like `{l2UamiPrincipalId}` will remain as literals in recipes until task 207 lands. The exit-1 guards authored here will help by making the false-fail loud rather than silent, but the eventual fix requires both classes remediated.
     </background>
     <relevant-files>
@@ -64,10 +66,20 @@ Apply the exit-1 guard pattern to every recipe. Verify each via manual invocatio
   </constraints>
 
   <acceptance-criteria>
-    <criterion>Every recipe in `scripts/provisioning-prereqs/prereqs.yaml check_recipe.cli` has an explicit `exit 1` failure path corresponding to its `expect:` assertion.</criterion>
+    <criterion>Every recipe in `scripts/provisioning-prereqs/prereqs.yaml check_recipe.cli` **computes the specific assertion its `expect:` field describes and exits 1 with an actionable diagnostic on failure** — NOT merely wraps the existing az/pac output with a naive non-empty-implies-pass guard. The bar is: recipe would exit 1 when the SPECIFIC condition the prereq exists to catch is present, exit 0 only when the exact assertion succeeds.</criterion>
     <criterion>PRQ-C-07 uses bash-native commands (grep -q, [ -n "$var" ], etc.) — NO PowerShell cmdlets under bash -c wrapper.</criterion>
     <criterion>Running `pwsh -File scripts/provisioning-prereqs/validate.ps1` PASSES (exit 0) after all edits.</criterion>
     <criterion>Smoke test: pick 3 recipes, synthesize a failing state (mock env var, mock az output, etc.), verify each recipe now exits 1 loudly with actionable message.</criterion>
     <criterion>Companion PR description enumerates each recipe modified + the specific assertion added.</criterion>
+    <criterion source="PRQ-10 amendment 2026-08-27">The following 8 recipes require full assertion-RECOMPUTE (not just exit-1 wrapper). Each recipe's fix commit / diff MUST include a comment linking to its assertion class:
+      - **PRQ-E-06** — per-service required role map inline (openai/docintel=Cognitive Services User, search=Search Service Contributor, servicebus=Azure Service Bus Data Owner, storage=Storage Account Contributor, redis=Redis Cache Contributor); assert EACH service has EXACT expected role
+      - **PRQ-E-11** — AND-condition assertion for both Azure Service Bus Data Sender AND Azure Service Bus Data Receiver via separate grep checks (prior OR query silent-passed on single-role)
+      - **PRQ-S-03** — `failed=0` flag loop pattern (prior loop always exited 0 on partial-registration)
+      - **PRQ-C-01** — numeric `limit > current` assertion via jq for every returned frontier tier entry (fresh-sub limit=0 silent-PASSes without this)
+      - **PRQ-C-02** — iterate 3 explicit pins (mirror PRQ-E-14); drop nonsense {pinnedVer} single-value placeholder; per-pin GenerallyAvailable/Legacy assertion
+      - **PRQ-C-04** — numeric `used &lt; limit` assertion (was: `pac admin quota` — PRQ-07 also swaps to az rest against BAP API)
+      - **PRQ-C-06** — numeric `>= 25600000` assertion (default 5MB silent-PASSes without this)
+      - **12 additional recipes from the SESSION 14 empty-output-implies-fail sweep** (T-03, T-04, T-05, T-06, T-07, S-04, E-03, E-04, E-05, E-09, E-10, C-05) also touched in the same sweep. C-05 was subsequently marked server-side-only (PRQ-02).
+    See notes/pre-dispatch-audit-punchlist-2026-08-27.md § PRQ-03, PRQ-10, PRQ-12 for the full analysis.</criterion>
   </acceptance-criteria>
 </task>
