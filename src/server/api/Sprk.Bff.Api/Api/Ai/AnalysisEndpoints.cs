@@ -1,3 +1,4 @@
+﻿using Sprk.Bff.Api.Infrastructure.Authentication;
 using System.Security.Claims;
 using System.Text.Json;
 using System.Web;
@@ -781,8 +782,7 @@ public static class AnalysisEndpoints
         IGenericEntityService entityService,
         ILogger logger)
     {
-        var oidClaim = user.FindFirst("oid")?.Value
-            ?? user.FindFirst("http://schemas.microsoft.com/identity/claims/objectidentifier")?.Value;
+        var oidClaim = CallerResolution.ResolveObjectId(user);
 
         if (string.IsNullOrEmpty(oidClaim) || !Guid.TryParse(oidClaim, out var azureAdOid))
         {

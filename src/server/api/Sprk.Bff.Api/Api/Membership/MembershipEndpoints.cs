@@ -1,4 +1,4 @@
-// R3 Part 1 — User-Record Membership Resolution (user-facing endpoint)
+﻿// R3 Part 1 — User-Record Membership Resolution (user-facing endpoint)
 // Task 035 (2026-06-21): GET /api/users/me/memberships/{entityType} — the public
 // surface defined by spec.md FR-1A.9. Resolves the calling user's
 // systemuser → 6-path PersonIdentity (task 031) → membership rows on the target
@@ -48,6 +48,7 @@
 //   - bff-extensions.md §A (BFF pre-merge checklist), §F.1 (unconditional registration
 //     — service AddMembership() + endpoint MapMembershipEndpoints() both unconditional)
 
+using Sprk.Bff.Api.Infrastructure.Authentication;
 using System.Security.Claims;
 using System.Text;
 using Microsoft.AspNetCore.Mvc;
@@ -353,9 +354,7 @@ public static class MembershipEndpoints
     /// </remarks>
     internal static Guid? ExtractAadObjectId(ClaimsPrincipal user)
     {
-        var oidString = user.FindFirst("oid")?.Value
-            ?? user.FindFirst("http://schemas.microsoft.com/identity/claims/objectidentifier")?.Value
-            ?? user.FindFirst(ClaimTypes.NameIdentifier)?.Value;
+        var oidString = CallerResolution.ResolveObjectId(user);
 
         if (string.IsNullOrWhiteSpace(oidString))
         {

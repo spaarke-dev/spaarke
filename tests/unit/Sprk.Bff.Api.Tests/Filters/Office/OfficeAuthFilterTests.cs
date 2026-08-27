@@ -1,4 +1,4 @@
-using System.Security.Claims;
+﻿using System.Security.Claims;
 using FluentAssertions;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Http.HttpResults;
@@ -128,13 +128,16 @@ public class OfficeAuthFilterTests
     }
 
     [Fact]
-    public async Task InvokeAsync_AuthenticatedUserWithNameIdentifier_Succeeds()
+    public async Task InvokeAsync_AuthenticatedUserWithOnlyNameIdentifier_IsRejected()
     {
-        // Arrange
-        var userId = "user-name-id-789";
+        // INVERTED 2026-08-27. Previously asserted that a NameIdentifier-only caller SUCCEEDS and
+        // that its `sub` was stored in UserIdKey. That value is consumed as the caller identity by
+        // OfficeDocumentAccessFilter, EntityAccessFilter and JobOwnershipFilter, all of which
+        // authorize against Dataverse — which matches on systemuser.azureactivedirectoryobjectid.
+        // Admitting a pairwise `sub` there authorizes an identifier that resolves to no user.
         var claims = new List<Claim>
         {
-            new(ClaimTypes.NameIdentifier, userId)
+            new(ClaimTypes.NameIdentifier, "d12L59FRq8kZ0m2Xr7bTn4wPqLzYhVcJ8sNdEuRkjg")
         };
         var identity = new ClaimsIdentity(claims, "TestAuth");
         var user = new ClaimsPrincipal(identity);
@@ -144,18 +147,22 @@ public class OfficeAuthFilterTests
         var result = await _sut.InvokeAsync(context.Object, NextDelegate);
 
         // Assert
-        result.Should().BeOfType<Ok<string>>();
-        context.Object.HttpContext.Items[OfficeAuthFilter.UserIdKey].Should().Be(userId);
+        result.Should().NotBeOfType<Ok<string>>(
+            "a caller with no `oid` cannot be resolved to a Dataverse user and must be rejected");
+        context.Object.HttpContext.Items.Should().NotContainKey(OfficeAuthFilter.UserIdKey,
+            "downstream authorization filters must not receive a `sub` as the caller identity");
     }
 
     [Fact]
-    public async Task InvokeAsync_AuthenticatedUserWithSubClaim_Succeeds()
+    public async Task InvokeAsync_AuthenticatedUserWithOnlySubClaim_IsRejected()
     {
-        // Arrange
-        var userId = "user-sub-012";
+        // INVERTED 2026-08-27 — see the NameIdentifier case above. `sub` is legitimate as a rate-limit
+        // partition (OfficeRateLimitFilter, via ResolveOpaqueCallerKey) but never as an authorization
+        // identity. Same claim, different purpose; the two filters now call differently named resolvers
+        // so the distinction is visible at the call site.
         var claims = new List<Claim>
         {
-            new("sub", userId)
+            new("sub", "d12L59FRq8kZ0m2Xr7bTn4wPqLzYhVcJ8sNdEuRkjg")
         };
         var identity = new ClaimsIdentity(claims, "TestAuth");
         var user = new ClaimsPrincipal(identity);
@@ -165,8 +172,8 @@ public class OfficeAuthFilterTests
         var result = await _sut.InvokeAsync(context.Object, NextDelegate);
 
         // Assert
-        result.Should().BeOfType<Ok<string>>();
-        context.Object.HttpContext.Items[OfficeAuthFilter.UserIdKey].Should().Be(userId);
+        result.Should().NotBeOfType<Ok<string>>();
+        context.Object.HttpContext.Items.Should().NotContainKey(OfficeAuthFilter.UserIdKey);
     }
 
     [Fact]

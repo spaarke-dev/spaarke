@@ -1,3 +1,4 @@
+﻿using Sprk.Bff.Api.Infrastructure.Authentication;
 using System.Security.Claims;
 using Microsoft.AspNetCore.Mvc;
 using Sprk.Bff.Api.Infrastructure.Errors;
@@ -655,8 +656,7 @@ public static class ReportingEndpoints
             ?? user.FindFirst("upn")?.Value
             ?? user.FindFirst(ClaimTypes.Upn)?.Value
             ?? user.FindFirst(ClaimTypes.Email)?.Value
-            ?? user.FindFirst("oid")?.Value
-            ?? user.FindFirst("http://schemas.microsoft.com/identity/claims/objectidentifier")?.Value;
+            ?? CallerResolution.ResolveObjectId(user);
     }
 
     /// <summary>

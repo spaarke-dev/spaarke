@@ -1,3 +1,4 @@
+﻿using Sprk.Bff.Api.Infrastructure.Authentication;
 using System.Security.Claims;
 using Microsoft.Extensions.Caching.Memory;
 using Microsoft.Graph;
@@ -240,7 +241,6 @@ public sealed class PrivilegeGroupResolver : IPrivilegeGroupResolver
     /// </summary>
     private static string? GetObjectId(ClaimsPrincipal user)
     {
-        return user.FindFirstValue(OidClaimType)
-            ?? user.FindFirstValue(ObjectIdClaimType);
+        return CallerResolution.ResolveObjectId(user);
     }
 }

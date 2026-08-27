@@ -1,3 +1,4 @@
+﻿using Sprk.Bff.Api.Infrastructure.Authentication;
 using System.Security.Claims;
 using Microsoft.AspNetCore.Mvc;
 using Sprk.Bff.Api.Configuration;
@@ -190,9 +191,7 @@ public static class InsightsSearchEndpoint
                 type: "https://tools.ietf.org/html/rfc7235#section-3.1");
         }
 
-        var callerOid = httpContext.User.FindFirst("oid")?.Value
-            ?? httpContext.User.FindFirst("http://schemas.microsoft.com/identity/claims/objectidentifier")?.Value
-            ?? httpContext.User.FindFirst(ClaimTypes.NameIdentifier)?.Value;
+        var callerOid = CallerResolution.ResolveObjectId(httpContext.User);
 
         if (string.IsNullOrWhiteSpace(callerOid))
         {

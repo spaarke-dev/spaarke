@@ -1,3 +1,4 @@
+﻿using Sprk.Bff.Api.Infrastructure.Authentication;
 using System.Runtime.ExceptionServices;
 using System.Security.Claims;
 using System.Text.Json;
@@ -199,9 +200,7 @@ public static class DispatchSessionEndpoint
             return;
         }
 
-        var callerOid = httpContext.User.FindFirst("oid")?.Value
-            ?? httpContext.User.FindFirst("http://schemas.microsoft.com/identity/claims/objectidentifier")?.Value
-            ?? httpContext.User.FindFirst(ClaimTypes.NameIdentifier)?.Value;
+        var callerOid = CallerResolution.ResolveObjectId(httpContext.User);
         if (string.IsNullOrWhiteSpace(callerOid))
         {
             await SummarizeSessionEndpoint.WriteProblemDetailsAsync(

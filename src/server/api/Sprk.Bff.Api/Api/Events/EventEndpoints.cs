@@ -1,4 +1,4 @@
-using System.Security.Claims;
+﻿using System.Security.Claims;
 using Microsoft.AspNetCore.Mvc;
 using Spaarke.Dataverse;
 using Sprk.Bff.Api.Api.Events.Dtos;
@@ -652,8 +652,7 @@ public static class EventEndpoints
     /// </summary>
     private static string? ExtractOid(HttpContext httpContext)
     {
-        return httpContext.User.FindFirst("oid")?.Value
-            ?? httpContext.User.FindFirst("http://schemas.microsoft.com/identity/claims/objectidentifier")?.Value;
+        return CallerResolution.ResolveObjectId(httpContext.User);
     }
 
     /// <summary>

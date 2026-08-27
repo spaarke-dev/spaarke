@@ -1,3 +1,4 @@
+﻿using Sprk.Bff.Api.Infrastructure.Authentication;
 using System.Security.Claims;
 using Microsoft.Extensions.Logging;
 using Spaarke.Dataverse;
@@ -226,8 +227,6 @@ public class AiAuthorizationService : IAiAuthorizationService
     {
         // Try multiple claim types in order of preference
         // 'oid' is the Azure AD Object ID claim
-        return user.FindFirst("oid")?.Value
-            ?? user.FindFirst("http://schemas.microsoft.com/identity/claims/objectidentifier")?.Value
-            ?? user.FindFirst(ClaimTypes.NameIdentifier)?.Value;
+        return CallerResolution.ResolveObjectId(user);
     }
 }

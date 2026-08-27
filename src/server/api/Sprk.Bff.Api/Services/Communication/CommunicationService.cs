@@ -1,3 +1,4 @@
+﻿using Sprk.Bff.Api.Infrastructure.Authentication;
 using System.Text.Json;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Options;
@@ -763,8 +764,7 @@ public sealed class CommunicationService : ICommunicationEnvelopeReader
             ?? httpContext.User.FindFirst(System.Security.Claims.ClaimTypes.Upn)?.Value
             ?? httpContext.User.FindFirst("unique_name")?.Value;
 
-        var userObjectId = httpContext.User.FindFirst("oid")?.Value
-            ?? httpContext.User.FindFirst("http://schemas.microsoft.com/identity/claims/objectidentifier")?.Value;
+        var userObjectId = CallerResolution.ResolveObjectId(httpContext.User);
 
         if (string.IsNullOrWhiteSpace(userObjectId))
         {
@@ -1449,8 +1449,7 @@ public sealed class CommunicationService : ICommunicationEnvelopeReader
         }
 
         // Resolve user object ID for sprk_sentby (Azure AD oid claim)
-        var userObjectId = httpContext.User.FindFirst("oid")?.Value
-            ?? httpContext.User.FindFirst("http://schemas.microsoft.com/identity/claims/objectidentifier")?.Value;
+        var userObjectId = CallerResolution.ResolveObjectId(httpContext.User);
 
         _logger.LogInformation(
             "Sending as user (OBO) | CorrelationId: {CorrelationId}, UserEmail: {UserEmail}",

@@ -1,3 +1,4 @@
+﻿using Sprk.Bff.Api.Infrastructure.Authentication;
 using System.Security.Claims;
 using System.Text.Json;
 using Microsoft.Extensions.Options;
@@ -166,29 +167,17 @@ public class OfficeRateLimitFilter : IEndpointFilter
     }
 
     /// <summary>
-    /// Extracts user ID from claims, checking Azure AD claims first.
+    /// Resolves a stable per-caller partition key for rate limiting.
     /// </summary>
+    /// <remarks>
+    /// Accepting <c>sub</c> here is CORRECT and deliberate — unlike <c>OfficeAuthFilter</c>, which
+    /// resolves the same claims for authorization. A rate-limit partition needs only stability per
+    /// (user, application); it never has to resolve to a Dataverse systemuser. Calling the
+    /// distinctly-named <see cref="CallerResolution.ResolveOpaqueCallerKey"/> is the point: the two
+    /// intents are now visibly different at the call site instead of hidden in identical chains.
+    /// </remarks>
     private static string? ExtractUserId(ClaimsPrincipal user)
-    {
-        // Try Azure AD object identifier (OID) first
-        var oid = user.FindFirst("oid")?.Value
-            ?? user.FindFirst("http://schemas.microsoft.com/identity/claims/objectidentifier")?.Value;
-
-        if (!string.IsNullOrWhiteSpace(oid))
-        {
-            return oid;
-        }
-
-        // Fallback to standard NameIdentifier
-        var nameId = user.FindFirst(ClaimTypes.NameIdentifier)?.Value;
-        if (!string.IsNullOrWhiteSpace(nameId))
-        {
-            return nameId;
-        }
-
-        // Fallback to OIDC 'sub' claim
-        return user.FindFirst("sub")?.Value;
-    }
+        => CallerResolution.ResolveOpaqueCallerKey(user);
 }
 
 /// <summary>

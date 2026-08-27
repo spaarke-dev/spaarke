@@ -1,3 +1,4 @@
+﻿using Sprk.Bff.Api.Infrastructure.Authentication;
 using System.Net.Http.Headers;
 using System.Net.Http.Json;
 using System.Security.Claims;
@@ -1221,8 +1222,7 @@ public class DocumentCheckoutService
     private static Guid GetUserId(ClaimsPrincipal user)
     {
         // Try multiple claim types for Azure AD object ID
-        var oid = user.FindFirst("oid")?.Value
-            ?? user.FindFirst("http://schemas.microsoft.com/identity/claims/objectidentifier")?.Value
+        var oid = CallerResolution.ResolveObjectId(user)
             ?? user.FindFirst("objectidentifier")?.Value;
 
         if (string.IsNullOrEmpty(oid))

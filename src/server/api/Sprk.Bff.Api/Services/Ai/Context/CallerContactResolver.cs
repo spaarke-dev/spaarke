@@ -1,4 +1,4 @@
-// spaarke-ai-architecture-redesign-r2 task AIR2-055 (FR-B-06): Caller-contact self-assignment
+﻿// spaarke-ai-architecture-redesign-r2 task AIR2-055 (FR-B-06): Caller-contact self-assignment
 // resolution — deterministic claims→Dataverse-contact mapping, server-side only, feeding the
 // ContextEnvelope User slice's CallerContactId (ADR-039 "no runtime judgment for what should be
 // data" — "assign it to me" stops being model guesswork).
@@ -28,6 +28,7 @@
 // latency-coupled to the per-turn bind (runs inside ContextBinder.BindAsync), so it belongs in the
 // BFF, not a separate service.
 
+using Sprk.Bff.Api.Infrastructure.Authentication;
 using System.Security.Claims;
 using Microsoft.Xrm.Sdk.Query;
 using Spaarke.Dataverse;
@@ -154,9 +155,7 @@ public sealed class CallerContactResolver : ICallerContactResolver
     /// </summary>
     internal static Guid? ExtractAadObjectId(ClaimsPrincipal user)
     {
-        var oidString = user.FindFirst("oid")?.Value
-            ?? user.FindFirst("http://schemas.microsoft.com/identity/claims/objectidentifier")?.Value
-            ?? user.FindFirst(ClaimTypes.NameIdentifier)?.Value;
+        var oidString = CallerResolution.ResolveObjectId(user);
 
         if (string.IsNullOrWhiteSpace(oidString))
         {

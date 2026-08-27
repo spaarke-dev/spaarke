@@ -1,3 +1,4 @@
+﻿using Sprk.Bff.Api.Infrastructure.Authentication;
 using System.Security.Claims;
 using Sprk.Bff.Api.Services.Dataverse.FetchXml;
 using Sprk.Bff.Api.Services.Dataverse.Privileges;
@@ -87,9 +88,7 @@ internal sealed class DataverseAuthorizationFilter : IEndpointFilter
         var ct = httpContext.RequestAborted;
 
         // Step 1: Identity extraction.
-        var userOidStr = httpContext.User.FindFirst(OidClaimType)?.Value
-                         ?? httpContext.User.FindFirst(AltOidClaimType)?.Value
-                         ?? httpContext.User.FindFirst(ClaimTypes.NameIdentifier)?.Value;
+        var userOidStr = CallerResolution.ResolveObjectId(httpContext.User);
 
         if (!Guid.TryParse(userOidStr, out var userOid))
         {

@@ -1,3 +1,4 @@
+﻿using Sprk.Bff.Api.Infrastructure.Authentication;
 using System.Security.Claims;
 using System.Text.Json.Serialization;
 using Sprk.Bff.Api.Services.Ai.Audit;
@@ -379,9 +380,7 @@ public static class MemoryGovernanceEndpoints
 
         var tid = httpContext.User.FindFirst("tid")?.Value
             ?? httpContext.User.FindFirst("http://schemas.microsoft.com/identity/claims/tenantid")?.Value;
-        var oidValue = httpContext.User.FindFirst("oid")?.Value
-            ?? httpContext.User.FindFirst("http://schemas.microsoft.com/identity/claims/objectidentifier")?.Value
-            ?? httpContext.User.FindFirst(ClaimTypes.NameIdentifier)?.Value;
+        var oidValue = CallerResolution.ResolveObjectId(httpContext.User);
 
         if (string.IsNullOrWhiteSpace(oidValue))
         {

@@ -1,3 +1,4 @@
+﻿using Sprk.Bff.Api.Infrastructure.Authentication;
 using System.Security.Claims;
 using Microsoft.Extensions.Logging;
 using Sprk.Bff.Api.Services.Dataverse.Privileges;
@@ -79,9 +80,7 @@ internal sealed class MemoryAccessAuthorizer : IMemoryAccessAuthorizer
 
     private static Guid? ExtractOid(ClaimsPrincipal caller)
     {
-        var raw = caller.FindFirst(OidClaimType)?.Value
-                  ?? caller.FindFirst(AltOidClaimType)?.Value
-                  ?? caller.FindFirst(ClaimTypes.NameIdentifier)?.Value;
+        var raw = CallerResolution.ResolveObjectId(caller);
 
         return Guid.TryParse(raw, out var oid) ? oid : null;
     }

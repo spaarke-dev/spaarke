@@ -1,4 +1,4 @@
-using System.Diagnostics;
+﻿using System.Diagnostics;
 using System.Runtime.ExceptionServices;
 using System.Security.Claims;
 using System.Text;
@@ -1468,9 +1468,7 @@ public static class ChatDocumentEndpoints
 
     /// <summary>User oid claim extraction — same dual-form pattern as SummarizeSessionEndpoint.</summary>
     private static string? GetUserOidClaim(HttpContext httpContext) =>
-        httpContext.User.FindFirst("oid")?.Value
-        ?? httpContext.User.FindFirst("http://schemas.microsoft.com/identity/claims/objectidentifier")?.Value
-        ?? httpContext.User.FindFirst(ClaimTypes.NameIdentifier)?.Value;
+        CallerResolution.ResolveObjectId(httpContext.User);
 
     /// <summary>SSE frame writer — <c>data: {json}\n\n</c>, camelCase (chat wire format).</summary>
     private static async Task WriteEventSseAsync(

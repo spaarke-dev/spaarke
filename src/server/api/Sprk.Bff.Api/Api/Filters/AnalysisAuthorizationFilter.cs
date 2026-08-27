@@ -1,3 +1,4 @@
+﻿using Sprk.Bff.Api.Infrastructure.Authentication;
 using System.Security.Claims;
 using Sprk.Bff.Api.Api.Ai;
 using Sprk.Bff.Api.Infrastructure.Errors;
@@ -91,9 +92,7 @@ public class AnalysisAuthorizationFilter : IEndpointFilter
         var user = httpContext.User;
 
         // Verify user has identity claims
-        var userId = user.FindFirst("oid")?.Value
-            ?? user.FindFirst("http://schemas.microsoft.com/identity/claims/objectidentifier")?.Value
-            ?? user.FindFirst(ClaimTypes.NameIdentifier)?.Value;
+        var userId = CallerResolution.ResolveObjectId(user);
 
         if (string.IsNullOrEmpty(userId))
         {

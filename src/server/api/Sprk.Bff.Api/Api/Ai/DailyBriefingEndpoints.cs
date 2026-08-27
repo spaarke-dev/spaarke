@@ -1,3 +1,4 @@
+﻿using Sprk.Bff.Api.Infrastructure.Authentication;
 using System.Text;
 using System.Text.Json.Serialization;
 using Sprk.Bff.Api.Configuration;
@@ -301,8 +302,7 @@ public static class DailyBriefingEndpoints
         string leg,
         CancellationToken cancellationToken)
     {
-        var aadOidRaw = httpContext.User?.FindFirst("oid")?.Value
-                     ?? httpContext.User?.FindFirst("http://schemas.microsoft.com/identity/claims/objectidentifier")?.Value;
+        var aadOidRaw = CallerResolution.ResolveObjectId(httpContext.User);
         // Defense-in-depth (task-043 review): the oid claim is interpolated into FetchXML —
         // require a well-formed GUID even though AAD token validation guarantees it in practice.
         if (string.IsNullOrEmpty(aadOidRaw) || !Guid.TryParse(aadOidRaw, out var aadOidGuid))
