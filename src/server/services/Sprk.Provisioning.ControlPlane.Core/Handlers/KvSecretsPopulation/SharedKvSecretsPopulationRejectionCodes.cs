@@ -99,4 +99,11 @@ public static class SharedKvSecretsPopulationRejectionCodes
     /// <see cref="KvSecretsPopulationRejectionCodes.SecretFreeMarkerApplyFailed"/>.
     /// </summary>
     public const string SecretFreeMarkerApplyFailed = "h4shared-secret-free-marker-apply-failed";
+
+    /// <summary>
+    /// HANDLER-09 (Wave 2 pre-dispatch remediation 2026-08-27) — F15 + F18 verbatim.
+    /// Operator KV RBAC bootstrap failed on the shared vault. Parity with
+    /// <see cref="KvSecretsPopulationRejectionCodes.OperatorKvRbacBootstrapFailed"/>.
+    /// </summary>
+    public const string OperatorKvRbacBootstrapFailed = "h4shared-operator-kv-rbac-bootstrap-failed";
 }

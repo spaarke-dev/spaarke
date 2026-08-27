@@ -891,6 +891,62 @@ public sealed class H4KvSecretsPopulationHandlerTests
         failure.RejectionCode.Should().Be(KvSecretsPopulationRejectionCodes.RunDeletedDuringPopulation);
     }
 
+    // ---------- HANDLER-09 operator KV RBAC bootstrap (Wave 2 pre-dispatch remediation 2026-08-27) ----------
+
+    private sealed class StubOperatorKvRbacBootstrapper : IOperatorKvRbacBootstrapper
+    {
+        private readonly OperatorKvRbacBootstrapOutcome _outcome;
+        public int CallCount { get; private set; }
+        public OperatorKvRbacBootstrapRequest? LastRequest { get; private set; }
+        public StubOperatorKvRbacBootstrapper(OperatorKvRbacBootstrapOutcome outcome) => _outcome = outcome;
+        public Task<OperatorKvRbacBootstrapOutcome> EnsureGrantedAsync(
+            OperatorKvRbacBootstrapRequest request, CancellationToken ct)
+        {
+            CallCount++;
+            LastRequest = request;
+            return Task.FromResult(_outcome);
+        }
+    }
+
+    [Fact]
+    public async Task Handler09_OperatorKvRbacBootstrap_Failure_FailsResumable_NoWriterCall()
+    {
+        var run = BuildRun();
+        var repo = new FakeRepository(run, etag: "etag-h09");
+        var manifest = FakeManifest.Success(Array.Empty<KvSecretEntry>());
+        var writer = FakeWriter.AllWrote();
+        var patcher = FakeIdentityPatcher.Success();
+        var probe = FakeArmProbe.Match();
+        var granter = FakeSlotGranter.NoSystemAssigned();
+        var failingBootstrapper = new StubOperatorKvRbacBootstrapper(
+            new OperatorKvRbacBootstrapOutcome.Failure("Insufficient permission — could not PUT role assignment."));
+
+        var handler = new H4KvSecretsPopulationHandler(
+            repo, manifest, writer, patcher, probe, granter,
+            FakeMarkerApplier.Success(),
+            failingBootstrapper,
+            Options.Create(new KvSecretsPopulationOptions()),
+            NullLogger<H4KvSecretsPopulationHandler>.Instance);
+
+        var result = await handler.HandleAsync(BuildEnvelope(), CancellationToken.None);
+
+        var failure = result.Should().BeOfType<HandlerResult.Failure>().Subject;
+        failure.Class.Should().Be(FailureClass.Resumable);
+        failure.RejectionCode.Should().Be(KvSecretsPopulationRejectionCodes.OperatorKvRbacBootstrapFailed);
+        failure.Diagnostic.Should().Contain("Insufficient permission");
+        writer.CallCount.Should().Be(0, "writer MUST NOT fire when bootstrap fails");
+        failingBootstrapper.CallCount.Should().Be(1);
+        failingBootstrapper.LastRequest!.RoleDefinitionId.Should().Be(KvBuiltInRoleIds.SecretsOfficer);
+        failingBootstrapper.LastRequest.KeyVaultName.Should().NotBeNullOrEmpty();
+    }
+
+    [Fact]
+    public void Handler09_KvBuiltInRoleIds_SecretsOfficer_MatchesF15bVerbatim()
+    {
+        // F15b verbatim: role definition id b86a8fe4-44ce-4948-aee5-eccb2c155cd7
+        KvBuiltInRoleIds.SecretsOfficer.Should().Be("b86a8fe4-44ce-4948-aee5-eccb2c155cd7");
+    }
+
     // ---------- helpers ----------
 
     private static H4KvSecretsPopulationHandler BuildHandler(
@@ -903,9 +959,13 @@ public sealed class H4KvSecretsPopulationHandlerTests
         FakeMarkerApplier? markerApplier = null,
         KvSecretsPopulationOptions? options = null)
     {
+        // HANDLER-09 (Wave 2 pre-dispatch remediation 2026-08-27): default
+        // to the production scaffold IOperatorKvRbacBootstrapper — returns
+        // Success unconditionally so existing tests remain unaffected.
         return new H4KvSecretsPopulationHandler(
             repo, manifest, writer, patcher, probe, granter,
             markerApplier ?? FakeMarkerApplier.Success(),
+            new ArmOperatorKvRbacBootstrapper(NullLogger<ArmOperatorKvRbacBootstrapper>.Instance),
             Options.Create(options ?? new KvSecretsPopulationOptions()),
             NullLogger<H4KvSecretsPopulationHandler>.Instance);
     }

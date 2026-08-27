@@ -132,6 +132,7 @@ public sealed class H4SharedKvSecretsPopulationHandler : IProvisioningHandler
     private readonly IArmKeyVaultRefProbe _t1Probe;
     private readonly ISourceServiceKeyExtractor _extractor;
     private readonly ISecretFreeMarkerApplier _markerApplier;
+    private readonly IOperatorKvRbacBootstrapper _operatorKvRbacBootstrapper;
     private readonly KvSecretsPopulationOptions _options;
     private readonly ILogger<H4SharedKvSecretsPopulationHandler> _logger;
 
@@ -151,6 +152,7 @@ public sealed class H4SharedKvSecretsPopulationHandler : IProvisioningHandler
         IArmKeyVaultRefProbe t1Probe,
         ISourceServiceKeyExtractor extractor,
         ISecretFreeMarkerApplier markerApplier,
+        IOperatorKvRbacBootstrapper operatorKvRbacBootstrapper,
         IOptions<KvSecretsPopulationOptions> options,
         ILogger<H4SharedKvSecretsPopulationHandler> logger)
     {
@@ -160,6 +162,7 @@ public sealed class H4SharedKvSecretsPopulationHandler : IProvisioningHandler
         ArgumentNullException.ThrowIfNull(t1Probe);
         ArgumentNullException.ThrowIfNull(extractor);
         ArgumentNullException.ThrowIfNull(markerApplier);
+        ArgumentNullException.ThrowIfNull(operatorKvRbacBootstrapper);
         ArgumentNullException.ThrowIfNull(options);
         ArgumentNullException.ThrowIfNull(logger);
 
@@ -169,6 +172,7 @@ public sealed class H4SharedKvSecretsPopulationHandler : IProvisioningHandler
         _t1Probe = t1Probe;
         _extractor = extractor;
         _markerApplier = markerApplier;
+        _operatorKvRbacBootstrapper = operatorKvRbacBootstrapper;
         _options = options.Value;
         _logger = logger;
     }
@@ -371,6 +375,46 @@ public sealed class H4SharedKvSecretsPopulationHandler : IProvisioningHandler
             return await FailAsync(run, etag, FailureClass.QuarantineRequired,
                 SharedKvSecretsPopulationRejectionCodes.BindingPreCheckViolation, diagnostic, cancellationToken)
                 .ConfigureAwait(false);
+        }
+
+        // (6.5) HANDLER-09 (Wave 2 pre-dispatch remediation 2026-08-27) — F15 + F18:
+        //       bootstrap KV Secrets Officer on the SHARED vault for the
+        //       operator principal BEFORE the per-entry read/write pipeline
+        //       fires. Fresh RBAC-enabled shared KVs deny data-plane access
+        //       even to subscription Owner; SESSION 2 hit this on the shared
+        //       KV alongside the per-tenant KV.
+        try
+        {
+            var sharedKvResourceId =
+                $"/subscriptions/{subscriptionId}/resourceGroups/{sourceResourceGroupName}" +
+                $"/providers/Microsoft.KeyVault/vaults/{sharedKeyVaultName}";
+            var bootstrapRequest = new OperatorKvRbacBootstrapRequest(
+                SubscriptionId: subscriptionId,
+                ResourceGroupName: sourceResourceGroupName,
+                KeyVaultName: sharedKeyVaultName,
+                KeyVaultResourceId: sharedKvResourceId,
+                PrincipalObjectId: run.InterStepState.MiObjectId ?? string.Empty,
+                RoleDefinitionId: KvBuiltInRoleIds.SecretsOfficer);
+            var bootstrapOutcome = await _operatorKvRbacBootstrapper
+                .EnsureGrantedAsync(bootstrapRequest, cancellationToken).ConfigureAwait(false);
+            if (bootstrapOutcome is OperatorKvRbacBootstrapOutcome.Failure bootstrapFailure)
+            {
+                return await FailAsync(run, etag, FailureClass.Resumable,
+                    SharedKvSecretsPopulationRejectionCodes.OperatorKvRbacBootstrapFailed,
+                    bootstrapFailure.Diagnostic, cancellationToken).ConfigureAwait(false);
+            }
+        }
+        catch (OperationCanceledException) { throw; }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex,
+                "H4-shared operator-KV-RBAC bootstrap infrastructure fault: runId={RunId} customerId={CustomerId}",
+                envelope.RunId, envelope.CustomerId);
+            return await FailAsync(run, etag, FailureClass.Resumable,
+                SharedKvSecretsPopulationRejectionCodes.OperatorKvRbacBootstrapFailed,
+                $"Operator-KV-RBAC bootstrap infrastructure error (shared KV): {ex.GetType().Name}: {ex.Message}. " +
+                "Manual role grant (Key Vault Secrets Officer) required on the shared vault before resume.",
+                cancellationToken).ConfigureAwait(false);
         }
 
         // (7) Per-entry pipeline: parse service_ref → extract → read-back →

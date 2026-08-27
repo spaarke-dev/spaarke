@@ -157,4 +157,14 @@ public static class KvSecretsPopulationRejectionCodes
     /// remediation-plan §5.3 fleet-consistency gap.
     /// </summary>
     public const string SecretFreeMarkerApplyFailed = "kvsecrets-secret-free-marker-apply-failed";
+
+    /// <summary>
+    /// HANDLER-09 (Wave 2 pre-dispatch remediation 2026-08-27) — F15 + F18 verbatim.
+    /// Operator KV RBAC bootstrap (Key Vault Secrets Officer) failed on the
+    /// target vault. Without this grant, every SecretClient.SetSecretAsync
+    /// call fails with 403 on fresh RBAC-enabled KVs — SESSION 2 hit this on
+    /// BOTH per-tenant and shared KVs and manually granted the role.
+    /// Resumable: operator manually grants role + resumes.
+    /// </summary>
+    public const string OperatorKvRbacBootstrapFailed = "kvsecrets-operator-kv-rbac-bootstrap-failed";
 }

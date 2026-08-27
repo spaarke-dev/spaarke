@@ -515,6 +515,9 @@ builder.Services.AddSingleton<ISecretFreeMarkerApplier>(sp =>
     var logger = sp.GetRequiredService<ILogger<ArmSecretFreeMarkerApplier>>();
     return new ArmSecretFreeMarkerApplier(armClient, registryClient, logger);
 });
+// HANDLER-09 (Wave 2 pre-dispatch remediation 2026-08-27): operator KV
+// RBAC bootstrapper — shared singleton consumed by BOTH H4 and H4-shared.
+builder.Services.AddSingleton<IOperatorKvRbacBootstrapper, ArmOperatorKvRbacBootstrapper>();
 builder.Services.AddScoped<H4KvSecretsPopulationHandler>();
 
 // Task 200: H4-shared handler + two new collaborator seams (source-service

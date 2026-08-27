@@ -639,9 +639,12 @@ public sealed class H4SharedKvSecretsPopulationHandlerTests
         FakeMarkerApplier? markerApplier = null,
         KvSecretsPopulationOptions? options = null)
     {
+        // HANDLER-09 (Wave 2 pre-dispatch remediation 2026-08-27): default
+        // to the production scaffold IOperatorKvRbacBootstrapper.
         return new H4SharedKvSecretsPopulationHandler(
             repo, manifest, accessor, probe, extractor,
             markerApplier ?? FakeMarkerApplier.Success(),
+            new ArmOperatorKvRbacBootstrapper(NullLogger<ArmOperatorKvRbacBootstrapper>.Instance),
             Options.Create(options ?? new KvSecretsPopulationOptions()),
             NullLogger<H4SharedKvSecretsPopulationHandler>.Instance);
     }
@@ -658,6 +661,7 @@ public sealed class H4SharedKvSecretsPopulationHandlerTests
         var h = new H4SharedKvSecretsPopulationHandler(
             repo, manifest, accessor, probe, extractor,
             FakeMarkerApplier.Success(),
+            new ArmOperatorKvRbacBootstrapper(NullLogger<ArmOperatorKvRbacBootstrapper>.Instance),
             Options.Create(new KvSecretsPopulationOptions()),
             logger);
         return (h, logs);

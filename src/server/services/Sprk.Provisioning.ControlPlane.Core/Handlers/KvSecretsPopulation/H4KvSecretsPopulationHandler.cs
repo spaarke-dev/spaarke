@@ -209,6 +209,7 @@ public sealed class H4KvSecretsPopulationHandler : IProvisioningHandler
     private readonly IArmKeyVaultRefProbe _t1Probe;
     private readonly ISlotIdentityRoleGranter _t5Granter;
     private readonly ISecretFreeMarkerApplier _markerApplier;
+    private readonly IOperatorKvRbacBootstrapper _operatorKvRbacBootstrapper;
     private readonly KvSecretsPopulationOptions _options;
     private readonly ILogger<H4KvSecretsPopulationHandler> _logger;
 
@@ -234,6 +235,7 @@ public sealed class H4KvSecretsPopulationHandler : IProvisioningHandler
         IArmKeyVaultRefProbe t1Probe,
         ISlotIdentityRoleGranter t5Granter,
         ISecretFreeMarkerApplier markerApplier,
+        IOperatorKvRbacBootstrapper operatorKvRbacBootstrapper,
         IOptions<KvSecretsPopulationOptions> options,
         ILogger<H4KvSecretsPopulationHandler> logger)
     {
@@ -244,6 +246,7 @@ public sealed class H4KvSecretsPopulationHandler : IProvisioningHandler
         ArgumentNullException.ThrowIfNull(t1Probe);
         ArgumentNullException.ThrowIfNull(t5Granter);
         ArgumentNullException.ThrowIfNull(markerApplier);
+        ArgumentNullException.ThrowIfNull(operatorKvRbacBootstrapper);
         ArgumentNullException.ThrowIfNull(options);
         ArgumentNullException.ThrowIfNull(logger);
 
@@ -254,6 +257,7 @@ public sealed class H4KvSecretsPopulationHandler : IProvisioningHandler
         _t1Probe = t1Probe;
         _t5Granter = t5Granter;
         _markerApplier = markerApplier;
+        _operatorKvRbacBootstrapper = operatorKvRbacBootstrapper;
         _options = options.Value;
         _logger = logger;
     }
@@ -472,6 +476,50 @@ public sealed class H4KvSecretsPopulationHandler : IProvisioningHandler
             "perTenantCount={PerTenantCount} sharedSkipped={SharedSkipped} upgradeMode={UpgradeMode} rotate={Rotate}",
             envelope.RunId, envelope.CustomerId, entries.Count, perTenantEntries.Count,
             entries.Count - perTenantEntries.Count, upgradeMode, rotateExisting);
+
+        // (5.5) HANDLER-09 (Wave 2 pre-dispatch remediation 2026-08-27) — F15 + F18:
+        //       bootstrap KV Secrets Officer role on the target vault for the
+        //       operator principal BEFORE the first SecretClient.SetSecretAsync
+        //       call. Fresh RBAC-enabled KVs deny data-plane access even to
+        //       subscription Owner; SESSION 2 hit this on BOTH per-tenant and
+        //       shared KVs and manually granted the role. Automating this here
+        //       eliminates the dead-loop halt.
+        //       Idempotent — no-op when the role assignment already exists.
+        //       Domain failure → Resumable + specific rejection code (operator
+        //       manually grants + resumes).
+        try
+        {
+            var bootstrapRequest = new OperatorKvRbacBootstrapRequest(
+                SubscriptionId: subscriptionId,
+                ResourceGroupName: resourceGroupName,
+                KeyVaultName: keyVaultName,
+                KeyVaultResourceId: kvResourceId,
+                // Principal: use the UAMI object id (H2a wrote it to interStepState.MiObjectId).
+                // Wave 2 scaffold accepts null when interStepState.MiObjectId is absent — real impl
+                // fails hard in that case.
+                PrincipalObjectId: run.InterStepState.MiObjectId ?? string.Empty,
+                RoleDefinitionId: KvBuiltInRoleIds.SecretsOfficer);
+            var bootstrapOutcome = await _operatorKvRbacBootstrapper
+                .EnsureGrantedAsync(bootstrapRequest, cancellationToken).ConfigureAwait(false);
+            if (bootstrapOutcome is OperatorKvRbacBootstrapOutcome.Failure bootstrapFailure)
+            {
+                return await FailAsync(run, etag, FailureClass.Resumable,
+                    KvSecretsPopulationRejectionCodes.OperatorKvRbacBootstrapFailed,
+                    bootstrapFailure.Diagnostic, cancellationToken).ConfigureAwait(false);
+            }
+        }
+        catch (OperationCanceledException) { throw; }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex,
+                "H4 operator-KV-RBAC bootstrap infrastructure fault: runId={RunId} customerId={CustomerId}",
+                envelope.RunId, envelope.CustomerId);
+            return await FailAsync(run, etag, FailureClass.Resumable,
+                KvSecretsPopulationRejectionCodes.OperatorKvRbacBootstrapFailed,
+                $"Operator-KV-RBAC bootstrap infrastructure error: {ex.GetType().Name}: {ex.Message}. " +
+                "Manual role grant (Key Vault Secrets Officer) required on the vault before resume.",
+                cancellationToken).ConfigureAwait(false);
+        }
 
         // (6) Invoke the writer. Domain outcomes (per-entry Failed / whole-writer
         //     Failure) do NOT throw; only infra faults do. Classification:
