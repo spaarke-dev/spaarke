@@ -49,6 +49,17 @@ public sealed class FileBicepTemplateInspector : IBicepTemplateInspector
         @"name:\s*['""]([^'""]+)['""]",
         RegexOptions.Compiled | RegexOptions.IgnoreCase);
 
+    // HANDLER-10 (Wave 2 pre-dispatch remediation 2026-08-27) — F16 verbatim.
+    // Detects the invalid literal `keyVaultReferenceIdentity: 'SystemAssigned'`
+    // pattern. Spaarke templates must assign a UAMI resource-id expression
+    // (e.g. `uami.outputs.resourceId` or a param that resolves to a UAMI RID)
+    // — the literal 'SystemAssigned' silently breaks every @Microsoft.KeyVault
+    // ref at runtime when the App Service has UAMI-only attached (which is
+    // the ADR-028 default).
+    private static readonly Regex InvalidKvRefIdentityRegex = new(
+        @"keyVaultReferenceIdentity\s*:\s*['""]SystemAssigned['""]",
+        RegexOptions.Compiled | RegexOptions.Multiline | RegexOptions.IgnoreCase);
+
     private readonly BicepInfraDeployOptions _options;
     private readonly ILogger<FileBicepTemplateInspector> _logger;
 
@@ -95,15 +106,38 @@ public sealed class FileBicepTemplateInspector : IBicepTemplateInspector
         // OpenAI), skip the check silently.
         var (unpinnedFound, unpinnedRef) = await ScanForUnpinnedModelsAsync(cancellationToken).ConfigureAwait(false);
 
+        // R3 (HANDLER-10 / Wave 2 pre-dispatch remediation 2026-08-27) — F16:
+        // detect the invalid `keyVaultReferenceIdentity: 'SystemAssigned'`
+        // literal anywhere under BicepDirectory.
+        var (kvRefIdentityInvalid, kvRefIdentityRef) = await ScanForInvalidKvRefIdentityAsync(cancellationToken).ConfigureAwait(false);
+
         _logger.LogInformation(
-            "BicepTemplateInspector: tenancyModel={TenancyModel} redisFound={RedisFound} unpinnedFound={UnpinnedFound}",
-            request.TenancyModel, redisFound, unpinnedFound);
+            "BicepTemplateInspector: tenancyModel={TenancyModel} redisFound={RedisFound} unpinnedFound={UnpinnedFound} kvRefIdentityInvalid={KvRefIdentityInvalid}",
+            request.TenancyModel, redisFound, unpinnedFound, kvRefIdentityInvalid);
 
         return new BicepTemplateInspectionResult(
             ContainsRedisResource: redisFound,
             RedisReference: redisRef,
             HasUnpinnedModelDeployment: unpinnedFound,
-            UnpinnedModelReference: unpinnedRef);
+            UnpinnedModelReference: unpinnedRef,
+            HasInvalidKvRefIdentity: kvRefIdentityInvalid,
+            KvRefIdentityReference: kvRefIdentityRef);
+    }
+
+    private async Task<(bool Found, string Reference)> ScanForInvalidKvRefIdentityAsync(CancellationToken cancellationToken)
+    {
+        foreach (var file in Directory.EnumerateFiles(_options.BicepDirectory, "*.bicep", SearchOption.AllDirectories))
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            var text = await File.ReadAllTextAsync(file, cancellationToken).ConfigureAwait(false);
+            var match = InvalidKvRefIdentityRegex.Match(text);
+            if (match.Success)
+            {
+                var relPath = Path.GetRelativePath(_options.BicepDirectory, file);
+                return (true, $"{relPath}: {match.Value.Trim()}");
+            }
+        }
+        return (false, string.Empty);
     }
 
     private string ResolveTemplatePath(string tenancyModel)

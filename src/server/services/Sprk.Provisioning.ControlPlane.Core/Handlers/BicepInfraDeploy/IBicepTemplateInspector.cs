@@ -69,8 +69,22 @@ public interface IBicepTemplateInspector
 /// Human-readable citation of the unpinned deployment (deployment name +
 /// observed version literal) — empty when the flag is <c>false</c>.
 /// </param>
+/// <param name="HasInvalidKvRefIdentity">
+/// HANDLER-10 (Wave 2 pre-dispatch remediation 2026-08-27) — F16 verbatim.
+/// <c>true</c> when the template contains a literal
+/// <c>keyVaultReferenceIdentity: 'SystemAssigned'</c> assignment. Spaarke's
+/// convention (ADR-028 + spec.md FR-33 T1) is UAMI-scoped kvRefIdentity;
+/// SystemAssigned combined with UAMI-only identity attached silently
+/// breaks every <c>@Microsoft.KeyVault(...)</c> ref at runtime.
+/// </param>
+/// <param name="KvRefIdentityReference">
+/// Human-readable citation of where the invalid kvRefIdentity was found
+/// (file:line + observed literal). Empty when the flag is <c>false</c>.
+/// </param>
 public sealed record BicepTemplateInspectionResult(
     bool ContainsRedisResource,
     string RedisReference,
     bool HasUnpinnedModelDeployment,
-    string UnpinnedModelReference);
+    string UnpinnedModelReference,
+    bool HasInvalidKvRefIdentity = false,
+    string KvRefIdentityReference = "");

@@ -121,6 +121,18 @@ public static class BicepDeployRejectionCodes
     /// </summary>
     public const string CogSvcSoftLockPersistent = "cogsvc-soft-lock-persistent";
 
+    /// <summary>
+    /// HANDLER-10 (Wave 2 pre-dispatch remediation 2026-08-27) — F16 verbatim.
+    /// The active Bicep template contains a literal
+    /// <c>keyVaultReferenceIdentity: 'SystemAssigned'</c> assignment.
+    /// Spaarke's convention (ADR-028 + spec.md FR-33 T1) is UAMI-scoped
+    /// kvRefIdentity; SystemAssigned combined with UAMI-only identity
+    /// attached silently breaks every <c>@Microsoft.KeyVault(...)</c>
+    /// runtime resolution. Fail QuarantineRequired — deploying would leave
+    /// the App Service in a broken-but-Green state.
+    /// </summary>
+    public const string KvRefIdentityInvalid = "kv-ref-identity-invalid";
+
     /// <summary>Race with a concurrent Cosmos writer — reconciler will observe winning state.</summary>
     public const string ConcurrentWriteConflict = "concurrent-write-conflict";
 

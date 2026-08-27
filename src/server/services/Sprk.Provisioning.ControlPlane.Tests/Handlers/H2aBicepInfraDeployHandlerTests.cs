@@ -487,6 +487,30 @@ public sealed class H2aBicepInfraDeployHandlerTests
         repo.LastWrittenRun!.Status.Should().Be(RunStatus.Quarantined);
     }
 
+    // ---------- HANDLER-10 kvRefIdentity invalid detector (Wave 2 pre-dispatch remediation 2026-08-27) ----------
+
+    [Fact]
+    public async Task Handler10_InvalidKvRefIdentity_FailsQuarantineRequired_NoRunnerCall()
+    {
+        var run = BuildRun();
+        var repo = new FakeRepository(run, etag: "etag-h10");
+        var runner = FakeBicepDeployRunner.Success(BuildOutputs());
+        var inspector = FakeBicepTemplateInspector.WithInvalidKvRefIdentity(
+            "modules/app-service.bicep:120: keyVaultReferenceIdentity: 'SystemAssigned'");
+        var handler = BuildHandler(repo, runner, FakeArmKeyVaultRefProbe.Match(),
+            new FakeUpgradeDriftDetector(), inspector);
+
+        var result = await handler.HandleAsync(BuildEnvelope(), CancellationToken.None);
+
+        var failure = result.Should().BeOfType<HandlerResult.Failure>().Subject;
+        failure.Class.Should().Be(FailureClass.QuarantineRequired);
+        failure.RejectionCode.Should().Be(BicepDeployRejectionCodes.KvRefIdentityInvalid);
+        failure.Diagnostic.Should().Contain("SystemAssigned");
+        failure.Diagnostic.Should().Contain("ADR-028");
+        runner.CallCount.Should().Be(0, "runner MUST NOT fire on kvRefIdentity-invalid detection");
+        repo.LastWrittenRun!.Status.Should().Be(RunStatus.Quarantined);
+    }
+
     // ---------- HANDLER-06 CogSvc-soft-lock routing (Wave 2 pre-dispatch remediation 2026-08-27) ----------
 
     [Fact]
@@ -900,6 +924,13 @@ public sealed class H2aBicepInfraDeployHandlerTests
         public static FakeBicepTemplateInspector WithUnpinnedModel(string deployment, string version)
             => new(new BicepTemplateInspectionResult(false, string.Empty, true,
                 $"modules/openai.bicep: deployment '{deployment}' version '{version}'"));
+
+        // HANDLER-10 (Wave 2 pre-dispatch remediation 2026-08-27) — F16 verbatim.
+        public static FakeBicepTemplateInspector WithInvalidKvRefIdentity(string reference)
+            => new(new BicepTemplateInspectionResult(
+                false, string.Empty, false, string.Empty,
+                HasInvalidKvRefIdentity: true,
+                KvRefIdentityReference: reference));
 
         public Task<BicepTemplateInspectionResult> InspectAsync(
             BicepDeployRequest request, CancellationToken ct)

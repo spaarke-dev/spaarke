@@ -343,6 +343,19 @@ public sealed class H2aBicepInfraDeployHandler : IProvisioningHandler
                 return await FailAsync(run, etag, FailureClass.QuarantineRequired,
                     BicepDeployRejectionCodes.ModelVersionNotPinned, diagnostic, cancellationToken).ConfigureAwait(false);
             }
+            if (inspection.HasInvalidKvRefIdentity)
+            {
+                // HANDLER-10 (Wave 2 pre-dispatch remediation 2026-08-27) — F16 verbatim.
+                var diagnostic =
+                    "Bicep template contains an invalid keyVaultReferenceIdentity assignment " +
+                    "(literal 'SystemAssigned') — violates ADR-028 + spec.md FR-33 T1 (Spaarke convention " +
+                    "is UAMI-scoped keyVaultReferenceIdentity; SystemAssigned combined with UAMI-only " +
+                    "identity silently breaks every @Microsoft.KeyVault(...) runtime resolution). " +
+                    $"Reference: {inspection.KvRefIdentityReference}. Deploying would leave the App " +
+                    "Service in a broken-but-Green state; QuarantineRequired.";
+                return await FailAsync(run, etag, FailureClass.QuarantineRequired,
+                    BicepDeployRejectionCodes.KvRefIdentityInvalid, diagnostic, cancellationToken).ConfigureAwait(false);
+            }
         }
         catch (Exception ex) when (ex is not OperationCanceledException)
         {
