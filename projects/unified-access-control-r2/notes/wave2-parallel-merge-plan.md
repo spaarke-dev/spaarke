@@ -596,3 +596,155 @@ all three. **Consider making that the standard dispatch pattern** for this proje
 ad-hoc choice — and consider whether `∥-safe` should be split into "disjoint modify targets" vs "no
 shared-file coordination needed", because they are different properties and only the first is what the
 POMLs currently assert.
+
+---
+
+# WAVE A (dispatched 2026-08-27) — 011 · 013 · 015 · 018 · 020 · 081
+
+## A1. 🔴 DISPATCH DEFECT FOUND — agent worktrees are cut from `master`, not from this branch
+
+**`isolation: worktree` cuts from the repo's default checkout, NOT from the invoking session's branch.**
+Verified: task 018's worktree had merge-base `3b87b07bc` (a master commit) with this branch, and
+`tests/Spaarke.ArchTests/RouteAuthorizationGuardTests.cs` **did not exist** in it — task 074's forcing
+function lives only here. 081 independently detected the same thing, verified its HEAD was fully
+contained in `origin/master` (so nothing was lost), and **reset its agent branch onto `2b3b07de2`**.
+Confirmed: 081's merge-base with this branch is now exactly `2b3b07de2`.
+
+**Blast radius this wave: contained, and verified rather than assumed.** `git diff 3b87b07bc..HEAD`
+over all twelve Wave A target files returns **empty** — none were touched by this branch's 35 commits,
+so every agent edited byte-identical files and their diffs apply cleanly.
+
+**But two consequences are real and recur on every future dispatch:**
+1. **Agents cannot run task 074's guard** — it is invisible to them. So no agent can self-verify that
+   its gating satisfies Rule A/Rule B. They must report needed guard edits; the main session applies
+   them against the real file. This is already the standing instruction, which is why it held.
+2. **Agent test baselines are NOT this branch's baselines.** 018 reported 11,166 passing and a 6-failure
+   ArchTest baseline; 081 reported 11,191 and **9** (matching here, because it had reset). Both were
+   right *for their own tree*. Both established their baseline empirically instead of comparing against
+   a number from elsewhere — that is the only reason the difference was harmless.
+3. **A stale-tree agent can reason from stale facts.** Concrete instance: 018's tree lacks 072's
+   `["share"]` key, so the A-23 rationale ("`share`/`attach` are not policy keys") is now half-false
+   here. Deletion still correct on zero-callers grounds, but the *argument* had to be corrected.
+
+**Action for the next dispatch:** either verify the base immediately after spawn (`git merge-base
+<agent-branch> HEAD`) and instruct a reset before work begins, or state in every agent prompt that its
+tree is master-based and it must not reason about project-branch-only facts.
+
+## A2. Wave A worktree inventory
+
+| Task | Worktree branch | Commits | Base | Status |
+|---|---|---|---|---|
+| **081** classify the caller | `worktree-agent-a6469d6b786a2b792` | `15b5dc6a3` → `14869cd61` | ✅ reset to `2b3b07de2` | ✅ shipped · both gates PASS · 0 violations |
+| **018** dead filters + `in`-clause bound | `worktree-agent-a50b2ed919feb5169` | `2d189cfde` (+A-23 pending) | ⚠️ master `3b87b07bc` | 🔄 **A-23 half incomplete — agent resumed** |
+| 011 · 013 · 015 · 020 | — | — | ⚠️ master-based | 🔄 running |
+
+## A3. ArchTest edit #13 — 081's census comment (apply WITH 081's code, not before)
+
+`RouteAuthorizationGuardTests.cs:324-330` describes the tenant-container-resolver defect in the
+**present tense** ("an authenticated caller in tenant A **can** resolve tenant B's SPE container id").
+081 fixed it, so after merge that comment documents a live vulnerability that no longer exists —
+the same stale-claim class this project has now hit nine times.
+
+**Ordering constraint: do NOT flip this to past tense before 081's code is in the tree, or the file
+lies in the other direction.** Replacement text for lines 325-330:
+
+> `READ, filed as task 081 and FIXED there (commit 15b5dc6a3): it took tenantId from the QUERY STRING and treated the caller's JWT tid claim as a mere fallback, so an authenticated caller in tenant A could resolve tenant B's SPE container id. Now gated on positively-classified app-only AND an operator allow-list, with denial before any resolver call; the tid fallback is gone.`
+
+Lines 331-333 (why it stays out of `GovernedFiles`) remain accurate. **No waiver to remove** — the file
+was never in `GovernedFiles`. `ExpectedEndpointFileCount = 111` stays correct for 081 (it added no
+route); it becomes **110** only via 073's deletion, exactly as §2 edit #2 already sequences.
+
+## A4. 081 — why its gate is sound, and the one thing it rests on
+
+Verified in main session against the agent's source, not accepted on report:
+
+- **`idtyp` is provably unusable.** Zero `optionalClaims` anywhere in the repo — every `idtyp` grep hit
+  is ADR-028 prose or a substring false positive (`owneridtype`, `personidtype`). So the POML's premise
+  that `AuditEnrichmentMiddleware` "reads `idtyp`" is true of the *code* and inert in *practice*.
+- **The load-bearing signal is therefore `sub == oid`**, and that is correct Entra behaviour: app-only
+  tokens carry `sub == oid == ` the service principal's object id, while a user token's `sub` is a
+  pairwise identifier scoped to (user, app) and never equals `oid`. Unlike `idtyp` it needs no tenant
+  configuration.
+- **The trap is closed structurally, not by discipline.** The delegated-scope branch runs BEFORE any
+  application branch, so nothing carrying `scp` can be classified `Application` — a human signing into
+  the L2 app registration is `UserDelegated` and denied. `appid` alone can never grant.
+- **`Indeterminate = 0`**, so a default-constructed value denies. Absence is never evidence of app-only.
+- `roles` deliberately excluded as a determinant: it appears in user-delegated tokens too, and the usual
+  "`roles` present AND `scp` absent" formulation smuggles in an absence test.
+
+**The residual, stated by the agent and worth honouring:** no live token was ever decoded. If a real L2
+UAMI token violated `sub == oid`, the probe 403s → InfraFault — **fail-closed and visible**, but H13
+would not reach Ready. **Decode one real probe token at or before the first live H13 run.**
+
+**Operator prerequisite, not a code change:** the allow-list must be populated with the L2 UAMI app id
+per customer BFF, or the route 403s everyone (deliberate). This is a hand-off to
+`customer-provisioning-orchestration-r1`.
+
+## A5. 081's best finding — a rewire with no test behind it
+
+081 deleted `AuditEnrichmentMiddleware`'s four private claim readers and repointed it at the new
+classifier, then found **the file had no tests at all**: parity was argued in a comment and proved by
+nothing. It added 8 tests pinning all five audit scope fields, and perturbation P8 (swap
+`ObjectId`↔`TenantId`) turns 5 of them red.
+
+> Without that, swapping two audit fields would have **compiled, passed all 11,183 tests, and silently
+> corrupted the audit trail feeding customer SIEMs.**
+
+This is AP-8 with a different victim: not a test encoding the wrong rule, but a refactor whose safety
+claim rested on prose. It also hardened a pre-existing `FakeResolver` that answered *any* tenant with
+one canned result — **the match-everything double from the 075 batch, found again in a different file.**
+That double shape has now appeared four times in this project. It is not a coincidence; it is the
+default shape a hand-written fake takes unless someone forces it to throw.
+
+## A6. 018 — the two dead filters are always-deny, and one is booby-trapped
+
+018 deleted `AccessibleRecordSetAuthorizationFilter` (−154) and chunked the `in`-clause (≤500-value
+sibling conditions under the existing `or` filter, so the union is exact and no id is dropped). It
+**structurally avoided** the cap-direction trap rather than getting the direction right by luck: with no
+truncation there is no cap to point the wrong way, and NFR-03 has nothing to surface.
+
+Verified in main session:
+- `AddAccessibleRecordSetAuthorizationFilter` has **zero call-sites** — every hit is inside its own file,
+  including a **commented-out usage example at `:15`**.
+- `WorkforcePrincipal.HttpContextItemsKey` is **read** only by the deleted filter (`:102`) and
+  **written nowhere in `src/**`**. Every other `HttpContextItemsKey` hit belongs to a different type
+  (`CallerPrincipal`, `ResolvedTenantEnvironment`, `RecordSearchAuthorization`,
+  `SemanticSearchAuthorization`) and is live.
+
+**So both orphans are always-deny BY CONSTRUCTION, not merely unattached** — and `:15` was an active
+invitation for the next author to attach one to a live route, which would have 403'd it unconditionally.
+That is a stronger deletion argument than "dead code" and belongs in the PR description.
+
+**Scoping error to own: mine.** I built 018's modify-set from `<relevant-files>` and missed
+`<constraint source="task-003">` at POML line 44, which requires deleting the **A-23** filter
+(`Api/Filters/OfficeDocumentAccessFilter.cs`) as well. The agent stayed in scope and reported instead of
+widening — correct behaviour. Resumed with the modify-set widened. Verified before resuming: A-23 has
+zero call-sites, no source test references (only compiled `bin/` binaries), and the file is
+byte-identical across both trees.
+
+## A7. NFR-03 is still violated on the 018 seam — and 015 owns it
+
+018 flagged as out-of-scope, correctly, that **paging is still absent** on this seam: rows past one page
+are silently dropped. That is precisely the silent cap NFR-03 forbids. So closing the `in`-clause bound
+does **not** close NFR-03 here. **Task 015 is the owner** and is running now — check its report against
+this specifically. Recorded in `spec.md` FR-17 (commit `a09949cc9`).
+
+## A8. Wave A additions to §5 follow-ups
+
+- **Decode a live L2 UAMI probe token** and confirm `sub == oid` before the first live H13 run (081).
+- **Populate the operator allow-list** per customer BFF — hand-off to
+  `customer-provisioning-orchestration-r1` (081).
+- **`WorkforcePrincipal.HttpContextItemsKey` is now dead** (`ExternalCallerContext.cs:160`) — harmless
+  unused `static readonly object`, left in place because another agent owns that file this wave.
+- **081's `HandleAsync` carries 5 concerns** — kept inline deliberately (a filter would be a NEW
+  component for ONE route per §11, and a `*AuthorizationFilter` would fall under Rule B, which demands
+  an authorization *decision service* this config-driven gate does not use). Accepted, documented.
+- **081 residuals**: no test exercises the real HTTP pipeline (all endpoint tests call `HandleAsync`
+  directly, so nothing proves ASP.NET routes/authenticates through to the gate); rate limiting and
+  concurrency unverified; nothing proves the denial log line reaches a sink.
+- **018 residuals**: that 500 is the correct Dataverse per-condition limit is documented guidance, not
+  measured; total FetchXML payload size is still unbounded; no end-to-end execution against a real
+  `ServiceClient`.
+
+**All of these belong on task 047's Dataverse/Entra live-assertion list**, which is now carrying
+residuals from 075, 018 and 081.
