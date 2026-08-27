@@ -169,8 +169,33 @@ prereqs:
     owner: Spaarke platform admin (or customer for CustomerOwned Model 2)
     consequence_of_absence: F9 — auto-support-ticket path unavailable when quota bump denied.
     check_recipe:
-      cli: az rest --method get --url "https://management.azure.com/providers/Microsoft.Support/supportTickets?api-version=2020-04-01" -o none
-      expect: HTTP 200; HTTP 403 = no plan
+      cli: |
+        # PRQ-09 fix (2026-08-27): distinguish 200 (OK) vs 403 (no plan) vs other
+        # (network / auth / transient 500). Prior recipe used `-o none` which discarded
+        # the HTTP status — every non-200 became an opaque exit-1 that operator MIGHT
+        # read as "no support plan" but was equally likely to be a transient auth issue.
+        # Use --resource + curl-style status inspection via az's --debug output is heavy;
+        # simpler: use `--only-show-errors` + exit-code inspection, and probe stderr for
+        # ForbiddenError signature vs other errors.
+        stderr=$(az rest --method get \
+          --url "https://management.azure.com/providers/Microsoft.Support/supportTickets?api-version=2020-04-01" \
+          --only-show-errors -o none 2>&1)
+        rc=$?
+        if [ "$rc" -eq 0 ]; then
+          echo "OK: support plan present (HTTP 200)"
+          exit 0
+        fi
+        # Non-zero exit: classify by stderr fingerprint.
+        # az returns ForbiddenError / SubscriptionNotRegistered for missing support plan.
+        if echo "$stderr" | grep -qiE "(ForbiddenError|AuthorizationFailed|no support plan|SubscriptionHasNoSupport)"; then
+          echo "NO_SUPPORT_PLAN (HTTP 403): $stderr"
+          exit 1
+        fi
+        # Anything else (network, transient 5xx, token expiry) — treat as transient
+        # and surface distinct diagnostic so operator does not misread as no-plan.
+        echo "TRANSIENT_OR_AUTH_ERROR: $stderr"
+        exit 1
+      expect: HTTP 200 (support plan present) → OK; ForbiddenError/AuthorizationFailed/SubscriptionHasNoSupport in stderr → NO_SUPPORT_PLAN; any other non-zero → TRANSIENT_OR_AUTH_ERROR (distinct diagnostic — remediation is retry/auth-refresh, NOT support-plan purchase)
     remediation: Azure Portal → Help + Support → Support plans → Purchase Basic minimum.
     related_findings: [F9]
 
