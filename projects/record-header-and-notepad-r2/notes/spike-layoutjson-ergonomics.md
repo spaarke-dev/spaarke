@@ -2,8 +2,8 @@
 
 > **Task**: [001](../tasks/001-layoutjson-ergonomics-spike.poml) · **Completed**: 2026-08-27
 > **Decision consumer**: task 033 (`RecordHeader` manifest `of-type`)
-> **Verdict**: ✅ **`of-type="Multiple"`** — shipped since v1.1.1 and confirmed here by direct
-> inspection of the LIVE form XML in `spaarkedev1`.
+> **Verdict**: ✅ **`of-type="Multiple"`** — shipped since v1.1.1. All three checks PASS, confirmed
+> against the LIVE form XML in `spaarkedev1` and a real `SpaarkeMaster` solution export.
 
 ---
 
@@ -29,8 +29,8 @@ environment.
 
 **What was done instead**: the same three checks were evaluated against the **real** control on the
 **real** Project main form, using read-only `pac org fetch` queries. That is stronger evidence than
-the spike's own method, because it tests the thing that actually ships. One check could not be
-completed this way and is recorded as **open** below rather than being claimed.
+the spike's own method, because it tests the thing that actually ships. All three checks were closed this way; the third
+required one read-only solution export.
 
 ---
 
@@ -73,35 +73,43 @@ agree.
 
 ### Check 3 — does it survive a solution export/import round-trip?
 
-⚠️ **OPEN — and the investigation found something more important than the answer.**
+✅ **PASS.** Verified by exporting the real solution and byte-comparing.
 
-The Project main form is a component of exactly ONE solution:
+`SpaarkeMaster` (unmanaged) contains the `sprk_project` **entity** with **"Include Subcomponents"**,
+so the Project main form — and its `layoutJson` — travels with it. Exported read-only:
 
 ```
-objectid 5aa00242-5212-f111-8342-7ced8d1dc988  (System Form)
-  → Cr2b7d5 · "Common Data Services Default Solution" · Unmanaged
+pac solution export --name SpaarkeMaster --managed false     # 24.5 MB zip
 ```
 
-**It is in no purpose-built solution.** The Default solution is the environment's catch-all; it is
-not the vehicle by which customizations move between environments. So as things stand today, **the
-Project header layout would not travel anywhere** — not because `Multiple` truncates, but because
-nothing is carrying the form.
+| | |
+|---|---|
+| `layoutJson` blocks in the exported `customizations.xml` | **3** (one per form factor, as on the live form) |
+| exported length | **402 bytes** vs **401** live |
+| the ONE differing byte | offset 400 — the **trailing newline**, normalised LF to CRLF by the export serializer |
+| first 400 content bytes | **byte-identical** |
+| semantic comparison | `json.loads(exported) == json.loads(live)` → **True** |
 
-This bears directly on a **binding project assumption** recorded in the project CLAUDE.md:
+No truncation, no escaping damage, no re-ordering. The CRLF normalisation is cosmetic — it is
+outside the JSON payload and `JSON.parse` ignores trailing whitespace.
 
-> "Main forms ARE transported between environments inside a solution. This is now a binding
-> assumption: it makes §5.1's JSON-on-manifest portability argument real (no per-environment paste)."
+`sprk_project` is carried with subcomponents by six unmanaged solutions: `SpaarkeMaster`,
+`SpaarkeCore`, `SPRKDOCINTELLIGENCE`, `SPRKMAINDEV1250801`, `SpaarkeMasterTest2` and `Default`.
 
-The assumption is correct **as a capability** — main forms can be added to a solution and
-transported. It is **not currently realised**: the form must be added to a shippable solution
-(e.g. `SpaarkeCore`, or a new `SpaarkeRecordHeaderForms`) before any promotion, or the layout will
-have to be re-pasted per environment — exactly the outcome §5.1 chose this design to avoid.
-
-**Why this check was not closed**: completing it requires either adding the form to a real solution
-or importing a scratch solution — both **modify** `spaarkedev1`. That is a maker decision with
-consequences beyond this spike, so it was not taken unilaterally. See "Action required" below.
-
----
+> #### ⚠️ Correction — an earlier revision of this document got this wrong
+>
+> The first pass concluded the form was "in no purpose-built solution, only the Default catch-all"
+> and raised a false action item to add it to one. **That was wrong**, and the owner corrected it.
+>
+> The error was a query that answered a narrower question than the conclusion drawn from it. Asking
+> `solutioncomponent` for the **form's own** `objectid` returns only solutions where the form was
+> added as an **explicit** component — which is just `Cr2b7d5`. But when an **entity** is added with
+> `rootcomponentbehavior = Include Subcomponents`, its forms transport **without** getting their own
+> `solutioncomponent` row. The form was in `SpaarkeMaster` the whole time, one level up.
+>
+> **The lesson generalises**: to ask "does this form/view/chart transport?", query the **entity's**
+> component row and its `rootcomponentbehavior` — not the asset's. An asset-level query will read as
+> a false negative for every entity added with subcomponents, which is the normal case.
 
 ## Decision
 
@@ -121,11 +129,8 @@ in the design.
 
 | # | item | owner |
 |---|---|---|
-| 1 | **Add the Project main form to a shippable solution** before any environment promotion — it is currently only in the Default solution. Repeat for every entity as Phase 5 binds it (Work Assignment, Invoice, Event, Agreement, Matter). | maker |
-| 2 | Once #1 is done, close Check 3 by exporting that solution, unzipping, and byte-comparing `layoutJson` in the packed form XML against the 401 bytes recorded here. Cheap, and no longer needs a scratch control. | either |
-| 3 | When editing a layout, **edit all three form factors** or verify they still agree — the designer stores one copy per form factor. | maker |
-
----
+| 1 | ~~Add the Project main form to a shippable solution~~ — **WITHDRAWN**: it already transports inside `SpaarkeMaster` via the entity's Include-Subcomponents behaviour. No action. | — |
+| 2 | When editing a layout, **edit all three form factors** or verify they still agree — the classic designer stores one copy of `layoutJson` per form factor (Web / Tablet / Phone). All three currently match. This is the one real maker trap this spike found. | maker |
 
 ## Observations (colour, not verdict)
 

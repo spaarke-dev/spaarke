@@ -165,13 +165,20 @@
     Instead the three checks were evaluated against the REAL control on the REAL Project main form
     using read-only `pac org fetch` -- stronger evidence than the proxy the spike proposed.
 
-    Checks 1 and 2 PASS (multi-line editor confirmed by the retained trailing newline; 401 bytes
-    stored byte-intact, valid JSON, three byte-identical form-factor copies). Check 3
-    (export/import round trip) is OPEN, and the investigation surfaced something more consequential:
-    the Project main form belongs to NO shippable solution -- only the Default catch-all -- so the
-    layout would not transport at all today. That is a live gap against the project CLAUDE.md
-    binding assumption about form transport, and it is recorded as Action Required 1 in the findings
-    doc. Closing check 3 requires modifying spaarkedev1, which was not done unilaterally.
+    ALL THREE CHECKS PASS. Check 1 (multi-line editor) confirmed by the retained trailing newline;
+    check 2 by 401 bytes stored byte-intact as valid JSON in three byte-identical form-factor copies;
+    check 3 by a read-only `pac solution export` of SpaarkeMaster -- the exported layoutJson differs
+    from the live value by exactly ONE byte (trailing newline normalised LF to CRLF), all 400 content
+    bytes identical, JSON semantically equal.
+
+    CORRECTION: a first pass wrongly concluded the form was in no shippable solution and raised a
+    false action item. Querying `solutioncomponent` for the FORM's objectid finds only solutions
+    where the form was added EXPLICITLY; an entity added with Include Subcomponents carries its forms
+    with no row of their own. sprk_project is in SpaarkeMaster that way. To ask whether an asset
+    transports, query the ENTITY's component row and its rootcomponentbehavior.
+
+    The one real maker trap found: the classic designer stores a SEPARATE copy of layoutJson per form
+    factor (Web/Tablet/Phone). All three currently agree; editing one silently diverges the others.
 
     Findings + evidence: notes/spike-layoutjson-ergonomics.md
   </notes>

@@ -117,25 +117,24 @@ place to change behaviour blind. 15 tests. Full run **826/826 across 52 suites**
 
 ---
 
-## 🔴 NEW — the Project form is in NO shippable solution (found by task 001, 2026-08-27)
+## ✅ Form transport VERIFIED (task 001, 2026-08-27)
 
-`pac org fetch` on `solutioncomponent` shows the Project main form
-(`5aa00242-5212-f111-8342-7ced8d1dc988`) belongs to exactly one solution: **`Cr2b7d5` — "Common Data
-Services Default Solution"**, the environment catch-all. It is in no purpose-built solution.
+`SpaarkeMaster` contains the `sprk_project` **entity** with **"Include Subcomponents"**, so the
+Project main form and its `layoutJson` transport with it. Confirmed by a read-only export and
+byte-comparison: the 3 form-factor copies come through at 402 bytes vs 401 live, differing in
+**one byte** — the trailing newline normalised LF→CRLF. All 400 content bytes identical; JSON
+semantically equal. The project CLAUDE.md portability assumption is **realised**, not just possible.
 
-So today **the header layout would not transport anywhere.** Not because `layoutJson` truncates —
-it is stored byte-intact at 401 bytes — but because nothing is carrying the form. That is a live gap
-against the project CLAUDE.md **binding assumption**: *"Main forms ARE transported between
-environments inside a solution… it makes §5.1's JSON-on-manifest portability argument real (no
-per-environment paste)."* True as a capability; not yet realised in practice.
+> ⚠️ **A first pass got this wrong** and claimed the form was in no shippable solution. The owner
+> corrected it. The error: querying `solutioncomponent` for the **form's own** objectid only finds
+> solutions where the form was added **explicitly**. An entity added with `Include Subcomponents`
+> carries its forms with **no** row of their own. **To ask "does this asset transport?", query the
+> ENTITY's component row and its `rootcomponentbehavior`** — an asset-level query is a false negative
+> for every entity added with subcomponents, which is the normal case.
 
-**Action**: add the Project main form to a shippable solution before any promotion, and repeat for
-every entity as Phase 5 binds it. Full detail + the two other action items in
-[`notes/spike-layoutjson-ergonomics.md`](notes/spike-layoutjson-ergonomics.md).
-
-Also worth knowing from the same query: the classic designer stores a **separate copy of
+**The one real maker trap this found**: the classic designer stores a **separate copy of
 `layoutJson` per form factor** (Web / Tablet / Phone — three today, currently byte-identical). Edit
-one and the others silently diverge.
+one and the others silently diverge, so a layout change must be applied to all three.
 
 ---
 
