@@ -4,6 +4,7 @@ using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
 using Sprk.Bff.Api.Infrastructure.Cache;
+using Sprk.Bff.Api.Infrastructure.Authentication;
 
 namespace Sprk.Bff.Api.Api.Filters;
 
@@ -323,8 +324,9 @@ public class IdempotencyFilter : IEndpointFilter
 
     private static string? GetUserId(HttpContext httpContext)
     {
-        return httpContext.User.FindFirst(ClaimTypes.NameIdentifier)?.Value
-            ?? httpContext.User.FindFirst("oid")?.Value;
+        // Order matters: NameIdentifier carries `sub` under inbound claim mapping and is ALWAYS
+        // present, so the former `?? oid` tail was unreachable. See CallerResolution.
+        return CallerResolution.ResolveObjectId(httpContext.User);
     }
 
     private static string GetTenantId(HttpContext httpContext)
