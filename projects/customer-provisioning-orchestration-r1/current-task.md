@@ -1,5 +1,41 @@
 # Current Task State — customer-provisioning-orchestration-r1
 
+> **Last Updated**: 2026-08-27 SESSION 15 (pre-dispatch comprehensive audit + Wave 0 decisions COMPLETE; Wave 2 IN-FLIGHT). Comprehensive 10-agent audit workflow (`wf_aef5ac94-9dd`, 1.3M subagent tokens) surfaced 127 findings across 7 layers; adversarial-verified with 0 refuted. Synthesized into 172KB master punch list (`notes/pre-dispatch-audit-punchlist-2026-08-27.md`) with 9-wave remediation plan. Wave 0's 10 architectural decisions applied per operator directive "don't wait for me / every issue is a priority" — decisions documented in `notes/wave-0-adr-note-2026-08-27.md` (auditable, revertable). Wave 2 remediation workflow (`wf_5aad7c53-c8f`) launched: 3 parallel implementation lanes (B1 DagAdvancer + B3 handler bodies + B24 endpoints/registry) totaling 25 code-only findings + 3 adversarial verifiers. Task 186 batch dispatch BLOCKED until Waves 0-8 complete + end-to-end verify passes.
+
+## 🎯 SESSION 15 QUICK RECOVERY — 2026-08-27 (READ THIS FIRST — supersedes SESSION 14 below)
+
+| Field | Value |
+|-------|-------|
+| **Session premise** | User called out whack-a-mole pattern of SESSION 13 + SESSION 14: each dispatch attempt discovers new latent gaps, mid-run fixes, re-dispatch, discover more. Directive: "we need this process to work, full stop ... every issue is a priority ... don't wait for me." Comprehensive pre-dispatch audit + fix EVERYTHING before another dispatch attempt. |
+| **Landed** | (1) 10-agent audit workflow `wf_aef5ac94-9dd` — 127 findings, 0 refuted; (2) synthesis subagent `af940cbd5e820de11` — 172KB master punch list with 9-wave plan; (3) Wave 0 ADR-note — 10 architectural decisions applied unilaterally with reversibility documented. Commits `e06be0267` (punch list) + `57ad7fc1f` (ADR-note), both pushed. |
+| **Running background** | Wave 2 workflow `wf_5aad7c53-c8f` — 3 parallel implementation lanes (B1 4 findings, B3 10 findings, B24 8 findings = 22 core code findings, xhigh effort each) + 3 adversarial verifiers. Notification when done. |
+| **Remaining waves after Wave 2** | Wave 3 (prereqs.yaml — 18 findings, subagent-safe) → Wave 4 (SKILL.md aggregate rewrite — 33 findings, MAIN-SESSION-ONLY) → Wave 5 (intake.schema.json — 8 findings) → Wave 6 (batch-mode — 15 findings) → Wave 7 (missing-dimension sweeps — 11 findings) → Wave 8 (runtime resilience — 1 finding). Then end-to-end verify. Then task 186 dispatch. |
+| **Task 186 status** | BLOCKED — do NOT attempt dispatch until Waves 0-8 land + verify passes. |
+| **Locked decisions (SESSION 15 Wave 0 ADR-note)** | 1. tenantId: nonSecretParameters-only (not top-level); 2. Step 1a probe: Dataverse MCP alt-key; 3. Batch confirmation: intake const-string + SHA-256 audit; 4. Step 2/3/4: client-side dry-run + gate BEFORE POST; 5. combined with 3; 6. intake shape: mechanical prune; 7. Drifted: strike from SKILL.md; 8. umbrella; 9. REG-04 credential seam: defer to Wave 2 B24 in-context; 10. auth-v4 coord: ops-note. |
+| **Branch** | `work/customer-provisioning-orchestration-r1` @ `57ad7fc1f` pushed to origin. Wave 2 subagent commits will land on this branch. |
+| **Working tree** | CLEAN at handoff point. Wave 2 subagents will add commits during their run. |
+| **Committed SESSION 15 files** | `notes/pre-dispatch-audit-punchlist-2026-08-27.md` (172KB), `notes/wave-0-adr-note-2026-08-27.md` (180 lines). |
+
+### To resume in fresh session
+
+- **"where was I"** — reads this Quick Recovery + resumes
+- **"continue Wave N"** — resumes at the named wave (check TASK-INDEX + this file for current wave)
+- **Do NOT** — attempt task 186 dispatch. Blocked until Waves 0-8 + end-to-end verify complete.
+
+### Critical Context (2-3 sentences)
+
+**This session is a full pre-dispatch remediation project.** 127 findings across 9 waves; ~168h of aggregate work being executed in parallel where safe (subagent lanes) and serialized where necessary (SKILL.md main-session per §3 Sub-Agent Write Boundary). Task 186 dispatch is the acceptance ceremony that fires AFTER this whole remediation lands + adversarially verifies clean.
+
+### SESSION 15 file inventory (committed to date)
+
+- `projects/customer-provisioning-orchestration-r1/notes/pre-dispatch-audit-punchlist-2026-08-27.md` (new, 172KB) — commit `e06be0267`
+- `projects/customer-provisioning-orchestration-r1/notes/wave-0-adr-note-2026-08-27.md` (new, 180 lines) — commit `57ad7fc1f`
+- (this file) `projects/customer-provisioning-orchestration-r1/current-task.md` — SESSION 15 Quick Recovery block
+
+Wave 2 subagent commits will accumulate below as they land (each with finding-ID commit prefix).
+
+---
+
 > **Last Updated**: 2026-08-27 SESSION 14 (prereqs.yaml comprehensive fix + forcing function COMPLETE) — Second-live batch dispatch of task 186 attempted. Step 0 passed cleanly. Step 0.5 iteration failed to parse `scripts/provisioning-prereqs/prereqs.yaml`. Ultracode workflow `wf_75aa08a8-13e` (3 audit + 3 adversarial verify, 499K tokens) surfaced 3 orthogonal defect classes: (A) 18 YAML syntax defects, (B) 32 recipe-contract violations, (C) 31 placeholder-substitution defects. Class A fixed atomically + forcing function landed (`validate.ps1` parser-parity validator + always-on-PR workflow + lint-staged glob) — end-to-end empirically verified (PASS on fix / FAIL exit-1 on regression / PASS on restore). Class B + C + arch gaps filed as tasks 206 + 207 + 208 + 209 (each with acceptance criteria + audit-source ref). Task 186 UNBLOCKED for Class-A parseability; B + C are pre-existing debt not this dispatch's regression.
 
 ## 🎯 SESSION 14 QUICK RECOVERY — 2026-08-27 (READ THIS FIRST — supersedes SESSION 13 below)
