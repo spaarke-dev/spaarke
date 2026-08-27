@@ -340,8 +340,28 @@ prereqs:
     consequence_of_absence: L2 cannot read/write `sprk_dataverseenvironment` registry rows; registry-driven flows all fail.
     check_recipe:
       cli: |
-        pac org list-users --environment "{adminDvUrl}" --query "[?applicationId=='{l2UamiClientId}'].{name:fullname, role:securityroles}" -o json
-      expect: non-empty; `securityroles` includes `Spaarke Provisioning Registry`
+        # PRQ-07 fix (2026-08-27): `pac org list-users` is not a valid pac subcommand
+        # at CLI 1.46 (pac org group is [who, list, fetch, list-settings, update-settings,
+        # select]). Swap to az rest against Dataverse Web API systemusers + role
+        # association endpoints.
+        # NOTE: `\$filter` and `\$select` are escaped so bash -c does not expand.
+        token=$(az account get-access-token --resource "{adminDvUrl}" --query accessToken -o tsv 2>/dev/null)
+        [ -z "$token" ] && exit 1
+        # Locate the L2 UAMI application user by clientId.
+        users=$(az rest --method get \
+          --uri "{adminDvUrl}/api/data/v9.2/systemusers?\$filter=applicationid%20eq%20{l2UamiClientId}&\$select=fullname,systemuserid" \
+          --headers "Authorization=Bearer $token" 2>/dev/null)
+        [ -z "$users" ] && exit 1
+        echo "$users" | jq -e '(.value | length) > 0' >/dev/null || { echo "APP_USER_NOT_FOUND"; exit 1; }
+        userid=$(echo "$users" | jq -r '.value[0].systemuserid')
+        [ -z "$userid" ] || [ "$userid" = "null" ] && exit 1
+        # Verify the Spaarke Provisioning Registry role is assigned.
+        roles=$(az rest --method get \
+          --uri "{adminDvUrl}/api/data/v9.2/systemusers($userid)/systemuserroles_association?\$select=name" \
+          --headers "Authorization=Bearer $token" 2>/dev/null)
+        echo "$roles" | jq -e '.value[] | select(.name == "Spaarke Provisioning Registry")' >/dev/null || { echo "MISSING_ROLE: Spaarke Provisioning Registry"; exit 1; }
+        echo "OK: userid=$userid role=Spaarke Provisioning Registry"
+      expect: L2 UAMI application user present in admin env (by clientId) with `Spaarke Provisioning Registry` role assigned via systemuserroles_association
     remediation: Path X registration script (per design.md §9.6 FR-38 + DS-8). One-time per env.
     related_findings: [FR-38, DS-8-uami-dv-appuser-maturity, spec.md-MUST-path-x]
 
@@ -523,25 +543,29 @@ prereqs:
     consequence_of_absence: H5 fails with rate-limit error; run blocks until quota window resets.
     check_recipe:
       cli: |
-        # PRQ-03 fix (2026-08-27): assert used < limit numerically. Prior recipe dumped
-        # JSON without asserting the comparison — quota exhaustion silently PASSed until
-        # H5 hit the rate limit mid-run.
-        # PRQ-07 note: `pac admin quota` is not a valid pac subcommand at CLI 1.46.
-        # This recipe is REWRITTEN in a subsequent commit to swap to az rest against the
-        # Power Platform BAP API; the exit-1 numeric-assertion pattern below is preserved.
-        result=$(pac admin quota --query "[?type=='environmentCreation'].{used:current, limit:cap}" -o json 2>/dev/null)
+        # PRQ-07 fix (2026-08-27): `pac admin quota` is not a valid pac subcommand at
+        # CLI 1.46 (pac admin group has [list, list-groups, add-group, create, backup,
+        # ..., set-runtime-state] — no `quota` subcommand). Swap to az rest against the
+        # Power Platform BAP (Business Application Platform) API.
+        #
+        # NOTE: The 4/hr per-tenant Dataverse env-creation rate quota is a ROLLING RATE
+        # LIMIT, not a directly-queryable used/cap counter. The BAP tenant-environments
+        # list yields current environment COUNT (informational). True rate-limit
+        # detection surfaces as HTTP 429 at H5 dispatch — this recipe verifies BAP
+        # reachability + logs current env count as a signal, exit 1 on API failure.
+        token=$(az account get-access-token --resource "https://api.bap.microsoft.com" --query accessToken -o tsv 2>/dev/null)
+        [ -z "$token" ] && exit 1
+        result=$(az rest --method get \
+          --uri "https://api.bap.microsoft.com/providers/Microsoft.BusinessAppPlatform/scopes/admin/environments?api-version=2020-10-01" \
+          --headers "Authorization=Bearer $token" 2>/dev/null)
         [ -z "$result" ] && exit 1
-        used=$(echo "$result" | jq -r '.[0].used')
-        limit=$(echo "$result" | jq -r '.[0].limit')
-        if [ -z "$used" ] || [ -z "$limit" ] || [ "$used" = "null" ] || [ "$limit" = "null" ]; then
-          echo "MALFORMED_QUOTA_RESPONSE"; exit 1
+        count=$(echo "$result" | jq -r '(.value | length)')
+        if [ -z "$count" ] || [ "$count" = "null" ]; then
+          echo "MALFORMED_BAP_RESPONSE"; exit 1
         fi
-        if [ "$used" -ge "$limit" ]; then
-          echo "QUOTA_EXHAUSTED: used=$used limit=$limit"; exit 1
-        fi
-        echo "OK: used=$used limit=$limit"
-      expect: numeric `used` strictly less than numeric `limit` for environmentCreation quota
-    remediation: Wait for quota window; no bump path.
+        echo "OK: tenant_env_count=$count (rate quota 4/hr rolling; not directly queryable)"
+      expect: BAP API reachable; tenant environment count logged (informational — rate limit is 4/hr rolling window, surfaces as HTTP 429 at H5 if exhausted)
+    remediation: Wait for quota window (rolling 1-hour rate); no bump path. If H5 hits 429, exponential backoff at handler level.
 
   - id: PRQ-C-05
     name: Customer admin consent granted for BFF multitenant app (Model 2 only)
