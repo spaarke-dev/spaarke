@@ -61,6 +61,7 @@ using Microsoft.Extensions.DependencyInjection.Extensions;
 using Microsoft.Extensions.Logging;
 using Sprk.Provisioning.ControlPlane.Handlers;
 using Sprk.Provisioning.ControlPlane.Handlers.Preflight;
+using Sprk.Provisioning.ControlPlane.Handlers.RuntimeReferences;
 
 namespace Sprk.Provisioning.ControlPlane.Modules;
 
@@ -111,6 +112,22 @@ public static class HandlersModule
         services.AddScoped<IPreflightQuotaProbe>(sp => new KeyVaultCertBootstrapProbe(
             sp.GetRequiredService<TokenCredential>(),
             sp.GetRequiredService<ILogger<KeyVaultCertBootstrapProbe>>()));
+
+        // HANDLER-03 (Wave 2 pre-dispatch remediation 2026-08-27) — F1
+        // verbatim absorption: pinned Azure OpenAI model freshness probe.
+        // Fails H0 fast if any ADR-020 pin (PinnedModelCatalog.Models) is
+        // Deprecating / already-Deprecated / not-reported in the target
+        // region, sparing the operator the ~20-30 min wait for H2a to fail
+        // with ServiceModelDeprecated. Reuses the shared platform ArmClient
+        // singleton (TryAddSingleton above); reuses the canonical ADR-020
+        // catalog (no second source of truth); reuses the ambient
+        // TimeProvider (test-injectable per docs/standards/TEST-ARCHITECTURE.md).
+        services.TryAddSingleton(TimeProvider.System);
+        services.AddScoped<IPreflightQuotaProbe>(sp => new ArmOpenAiPinFreshnessProbe(
+            sp.GetRequiredService<ArmClient>(),
+            PinnedModelCatalog.Models,
+            sp.GetRequiredService<TimeProvider>(),
+            sp.GetRequiredService<ILogger<ArmOpenAiPinFreshnessProbe>>()));
 
         // FR-34 version-compat matrix (Wave G-8 Batch 10, defect #24) —
         // singleton: the parsed matrix is immutable per process lifetime

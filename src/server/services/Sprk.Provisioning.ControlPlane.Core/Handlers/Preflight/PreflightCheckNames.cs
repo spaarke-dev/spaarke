@@ -32,4 +32,13 @@ public static class PreflightCheckNames
 
     /// <summary>SPE cert-bootstrap secret exists in the platform Key Vault (FR-11 T6).</summary>
     public const string SpeCertBootstrap = "SpeCertBootstrap";
+
+    /// <summary>
+    /// HANDLER-03 (pre-dispatch audit 2026-08-27, Wave 2 remediation) — F1
+    /// verbatim: pinned Azure OpenAI model versions (ADR-020 catalog) are
+    /// still GA / not-Deprecating in the target region + subscription.
+    /// Failing HERE saves the 20-30 min H2a window a `ServiceModelDeprecated`
+    /// deploy would otherwise waste.
+    /// </summary>
+    public const string OpenAiPinFreshness = "OpenAiPinFreshness";
 }

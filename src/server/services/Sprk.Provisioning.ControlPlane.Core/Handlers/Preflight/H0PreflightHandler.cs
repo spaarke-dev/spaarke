@@ -483,6 +483,10 @@ public sealed class H0PreflightHandler : IProvisioningHandler
         PreflightCheckNames.DataverseEnvCreationRate => "quota-dataverse-env-rate",
         PreflightCheckNames.SubscriptionVCpuQuota => "quota-subscription-vcpu",
         PreflightCheckNames.SpeCertBootstrap => "spe-cert-bootstrap-missing",
+        // HANDLER-03 (pre-dispatch audit 2026-08-27) — F1 verbatim rejection
+        // code the punchlist mandates so operators can filter for the
+        // specific fast-fail without string-matching the diagnostic.
+        PreflightCheckNames.OpenAiPinFreshness => "quota-openai-pin-stale",
         _ => $"preflight-{checkName.ToLowerInvariant()}",
     };
 
