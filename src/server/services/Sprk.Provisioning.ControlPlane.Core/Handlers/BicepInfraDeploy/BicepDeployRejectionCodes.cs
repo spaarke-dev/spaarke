@@ -110,6 +110,17 @@ public static class BicepDeployRejectionCodes
     /// </summary>
     public const string ResourceNameTaken = "resource-name-taken";
 
+    /// <summary>
+    /// HANDLER-06 (Wave 2 pre-dispatch remediation 2026-08-27) — F11 verbatim.
+    /// The Cognitive Services scope of the Bicep deploy returned HTTP 409
+    /// RequestConflict after the ArmDeploymentRunner exhausted its retry
+    /// budget (default: 3 retries with [30s, 90s, 180s] backoffs). SESSION 2
+    /// observed this every time a recent CogSvc operation had held the
+    /// soft-lock; the retries usually clear it but persistent conflict means
+    /// operator escalation.
+    /// </summary>
+    public const string CogSvcSoftLockPersistent = "cogsvc-soft-lock-persistent";
+
     /// <summary>Race with a concurrent Cosmos writer — reconciler will observe winning state.</summary>
     public const string ConcurrentWriteConflict = "concurrent-write-conflict";
 

@@ -182,9 +182,33 @@ public sealed class ArmDeploymentRunner : IBicepDeployRunner
                 "tenancyModel={TenancyModel} bicepVer={BicepVersion}",
                 deploymentName, request.CustomerId, request.TenancyModel, request.BicepVersion);
 
-            deployOperation = await subscriptionResource.GetArmDeployments()
-                .CreateOrUpdateAsync(WaitUntil.Completed, deploymentName, content, cancellationToken)
-                .ConfigureAwait(false);
+            // HANDLER-06 (Wave 2 pre-dispatch remediation 2026-08-27) — F11:
+            // wrap the deploy call in RetryOnCogSvcRequestConflictAsync so a
+            // transient CogSvc soft-lock (RequestConflict) does not immediately
+            // fail the whole 20 min deploy. Retries 3 times with [30s, 90s, 180s]
+            // backoffs (default schedule); on exhaustion returns Failure with
+            // the CogSvc-soft-lock-persistent diagnostic prefix so H2a maps to
+            // Resumable + CogSvcSoftLockPersistent (not Quarantine).
+            deployOperation = await RetryOnCogSvcRequestConflictAsync(
+                (attempt, ct) => subscriptionResource.GetArmDeployments()
+                    .CreateOrUpdateAsync(WaitUntil.Completed, deploymentName, content, ct),
+                DefaultCogSvcRetryBackoffs,
+                Task.Delay,
+                _logger,
+                cancellationToken).ConfigureAwait(false);
+        }
+        catch (CogSvcSoftLockPersistentException softLock)
+        {
+            _logger.LogWarning(
+                "ArmDeploymentRunner: CogSvc soft-lock persisted after {Attempts} attempts on deployment " +
+                "'{DeploymentName}' customerId={CustomerId}: {Message}",
+                softLock.AttemptsMade, deploymentName, request.CustomerId, softLock.Message);
+            return new BicepDeployOutcome.Failure(
+                CogSvcSoftLockDiagnosticPrefix + $" ARM deployment '{deploymentName}' for customerId " +
+                $"'{request.CustomerId}' returned HTTP 409 RequestConflict on the Cognitive Services scope " +
+                $"after {softLock.AttemptsMade} attempts across the [30s, 90s, 180s] backoff schedule. " +
+                $"Last message: {softLock.Message}. The soft-lock did not clear within the retry window — " +
+                "operator escalation required (retry later once the concurrent CogSvc operation completes).");
         }
         catch (RequestFailedException ex)
         {
@@ -207,6 +231,96 @@ public sealed class ArmDeploymentRunner : IBicepDeployRunner
 
         return new BicepDeployOutcome.Success(outputs);
     }
+
+    /// <summary>
+    /// HANDLER-06 diagnostic prefix. H2aBicepInfraDeployHandler pattern-
+    /// matches on this to route CogSvc-soft-lock failures to
+    /// <see cref="BicepDeployRejectionCodes.CogSvcSoftLockPersistent"/> +
+    /// <see cref="Handlers.FailureClass.Resumable"/> instead of the default
+    /// <see cref="BicepDeployRejectionCodes.BicepDeployFailed"/> +
+    /// <see cref="Handlers.FailureClass.QuarantineRequired"/>.
+    /// </summary>
+    internal const string CogSvcSoftLockDiagnosticPrefix = "CogSvc-soft-lock-persistent:";
+
+    /// <summary>
+    /// F11 verbatim retry schedule per punchlist: 3 retries with
+    /// [30s, 90s, 180s] backoffs (initial attempt + 3 retries = 4 total
+    /// attempts). Exposed <c>internal</c> so unit tests share the exact
+    /// schedule and validate exhaustion behavior at attempt 4.
+    /// </summary>
+    internal static readonly IReadOnlyList<TimeSpan> DefaultCogSvcRetryBackoffs = new[]
+    {
+        TimeSpan.FromSeconds(30),
+        TimeSpan.FromSeconds(90),
+        TimeSpan.FromSeconds(180),
+    };
+
+    /// <summary>
+    /// HANDLER-06 (Wave 2 pre-dispatch remediation 2026-08-27) — F11 verbatim.
+    /// Wraps a deploy invocation with retry-on-<c>RequestConflict</c>
+    /// (CogSvc soft-lock) semantics: retries up to <c>backoffs.Count</c>
+    /// times, waiting the corresponding backoff duration between attempts.
+    /// Non-<c>RequestConflict</c> failures propagate immediately. After
+    /// exhaustion, throws <see cref="CogSvcSoftLockPersistentException"/>
+    /// carrying the last-attempt error message + total attempts made.
+    ///
+    /// The delay is injected as <paramref name="delay"/> so unit tests can
+    /// substitute a no-op / capture without waiting real wall-clock time.
+    /// </summary>
+    internal static async Task<T> RetryOnCogSvcRequestConflictAsync<T>(
+        Func<int, CancellationToken, Task<T>> action,
+        IReadOnlyList<TimeSpan> backoffs,
+        Func<TimeSpan, CancellationToken, Task> delay,
+        ILogger logger,
+        CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(action);
+        ArgumentNullException.ThrowIfNull(backoffs);
+        ArgumentNullException.ThrowIfNull(delay);
+        ArgumentNullException.ThrowIfNull(logger);
+
+        var maxAttempts = 1 + backoffs.Count; // initial + N retries
+        RequestFailedException? lastConflict = null;
+
+        for (var attempt = 1; attempt <= maxAttempts; attempt++)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            try
+            {
+                return await action(attempt, cancellationToken).ConfigureAwait(false);
+            }
+            catch (RequestFailedException ex) when (IsCogSvcRequestConflict(ex))
+            {
+                lastConflict = ex;
+                if (attempt == maxAttempts)
+                {
+                    // Exhausted — propagate the specific typed exception.
+                    break;
+                }
+                var backoff = backoffs[attempt - 1];
+                logger.LogWarning(
+                    ex,
+                    "ArmDeploymentRunner: CogSvc RequestConflict (attempt {Attempt}/{Max}) — waiting {BackoffSeconds}s before retry (errorCode={ErrorCode})",
+                    attempt, maxAttempts, (int)backoff.TotalSeconds, ex.ErrorCode);
+                await delay(backoff, cancellationToken).ConfigureAwait(false);
+            }
+        }
+
+        throw new CogSvcSoftLockPersistentException(
+            attemptsMade: maxAttempts,
+            message: lastConflict?.Message ?? "unknown",
+            innerException: lastConflict);
+    }
+
+    /// <summary>
+    /// HANDLER-06: detects the CogSvc soft-lock signature —
+    /// <c>HTTP 409</c> with error code containing "RequestConflict".
+    /// Exposed <c>internal</c> for direct test coverage of the boundary rule.
+    /// </summary>
+    internal static bool IsCogSvcRequestConflict(RequestFailedException ex)
+        => ex.Status == 409
+        && !string.IsNullOrEmpty(ex.ErrorCode)
+        && ex.ErrorCode.Contains("RequestConflict", StringComparison.OrdinalIgnoreCase);
 
     /// <summary>
     /// Downloads <c>ArmManifestBlobName</c> (the mutable "latest" pointer),
@@ -333,5 +447,27 @@ public sealed class ArmDeploymentRunner : IBicepDeployRunner
             CosmosEndpoint = hasRoot ? ReadString(root, "cosmosAccountEndpoint") : string.Empty,
             SignalRDeployed = hasRoot && ReadBool(root, "signalrEnabled"),
         };
+    }
+}
+
+/// <summary>
+/// HANDLER-06 (Wave 2 pre-dispatch remediation 2026-08-27) — F11 verbatim.
+/// Thrown by <see cref="ArmDeploymentRunner.RetryOnCogSvcRequestConflictAsync{T}"/>
+/// after the retry budget for a CogSvc soft-lock (HTTP 409 RequestConflict)
+/// is exhausted. <see cref="ArmDeploymentRunner.DeployAsync"/> catches this
+/// and returns a <see cref="BicepDeployOutcome.Failure"/> whose diagnostic
+/// begins with <see cref="ArmDeploymentRunner.CogSvcSoftLockDiagnosticPrefix"/>
+/// so H2aBicepInfraDeployHandler maps it to a Resumable
+/// <c>cogsvc-soft-lock-persistent</c> rejection code (not the default
+/// Quarantine-required <c>bicep-deploy-failed</c>).
+/// </summary>
+internal sealed class CogSvcSoftLockPersistentException : Exception
+{
+    public int AttemptsMade { get; }
+
+    public CogSvcSoftLockPersistentException(int attemptsMade, string message, Exception? innerException)
+        : base(message, innerException)
+    {
+        AttemptsMade = attemptsMade;
     }
 }

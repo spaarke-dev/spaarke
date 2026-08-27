@@ -487,6 +487,51 @@ public sealed class H2aBicepInfraDeployHandlerTests
         repo.LastWrittenRun!.Status.Should().Be(RunStatus.Quarantined);
     }
 
+    // ---------- HANDLER-06 CogSvc-soft-lock routing (Wave 2 pre-dispatch remediation 2026-08-27) ----------
+
+    [Fact]
+    public async Task Handler06_RunnerReturnsSoftLockFailure_MappedToResumable_CogSvcSoftLockPersistent()
+    {
+        var run = BuildRun();
+        var repo = new FakeRepository(run, etag: "etag-h06");
+        // The runner surfaces the CogSvc-soft-lock-persistent prefix; the handler MUST
+        // route to Resumable + CogSvcSoftLockPersistent (NOT the default
+        // QuarantineRequired + BicepDeployFailed).
+        var runner = FakeBicepDeployRunner.Failure(
+            ArmDeploymentRunner.CogSvcSoftLockDiagnosticPrefix +
+            " ARM deployment 'customer-acme-20260827121200' for customerId 'acme' returned HTTP 409 RequestConflict on the Cognitive Services scope after 4 attempts across the [30s, 90s, 180s] backoff schedule.");
+        var handler = BuildHandler(repo, runner, FakeArmKeyVaultRefProbe.Match(),
+            new FakeUpgradeDriftDetector(), FakeBicepTemplateInspector.Clean());
+
+        var result = await handler.HandleAsync(BuildEnvelope(), CancellationToken.None);
+
+        var failure = result.Should().BeOfType<HandlerResult.Failure>().Subject;
+        failure.Class.Should().Be(FailureClass.Resumable,
+            "soft-lock exhaustion is Resumable — the ARM deploy rolls back on 409 so no partial state exists");
+        failure.RejectionCode.Should().Be(BicepDeployRejectionCodes.CogSvcSoftLockPersistent);
+        failure.Diagnostic.Should().Contain("CogSvc-soft-lock-persistent");
+        repo.LastWrittenRun!.Status.Should().Be(RunStatus.Failed,
+            "Resumable failure marks Failed (not Quarantined)");
+    }
+
+    [Fact]
+    public async Task Handler06_RunnerReturnsGenericFailure_StillMappedToQuarantineRequired()
+    {
+        // Regression guard: non-soft-lock runner failures MUST continue to
+        // route to the default QuarantineRequired + BicepDeployFailed.
+        var run = BuildRun();
+        var repo = new FakeRepository(run, etag: "etag-h06-generic");
+        var runner = FakeBicepDeployRunner.Failure("Generic ARM failure — quota exhausted for gpt-4o in eastus");
+        var handler = BuildHandler(repo, runner, FakeArmKeyVaultRefProbe.Match(),
+            new FakeUpgradeDriftDetector(), FakeBicepTemplateInspector.Clean());
+
+        var result = await handler.HandleAsync(BuildEnvelope(), CancellationToken.None);
+
+        var failure = result.Should().BeOfType<HandlerResult.Failure>().Subject;
+        failure.Class.Should().Be(FailureClass.QuarantineRequired);
+        failure.RejectionCode.Should().Be(BicepDeployRejectionCodes.BicepDeployFailed);
+    }
+
     // ---------- T13 runner returns success with incomplete outputs ----------
 
     [Fact]

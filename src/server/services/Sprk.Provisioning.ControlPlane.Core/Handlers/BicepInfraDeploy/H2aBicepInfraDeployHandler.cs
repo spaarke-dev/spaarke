@@ -460,6 +460,19 @@ public sealed class H2aBicepInfraDeployHandler : IProvisioningHandler
 
         if (outcome is BicepDeployOutcome.Failure runnerFailure)
         {
+            // HANDLER-06 (Wave 2 pre-dispatch remediation 2026-08-27) — F11:
+            // route CogSvc-soft-lock exhaustion to Resumable +
+            // CogSvcSoftLockPersistent (operator retries later once the
+            // concurrent CogSvc operation completes; NOT Quarantine because
+            // no partial state was committed — the whole ARM deploy rolls
+            // back on 409 RequestConflict).
+            if (runnerFailure.Diagnostic.StartsWith(
+                    ArmDeploymentRunner.CogSvcSoftLockDiagnosticPrefix, StringComparison.Ordinal))
+            {
+                return await FailAsync(run, etag, FailureClass.Resumable,
+                    BicepDeployRejectionCodes.CogSvcSoftLockPersistent, runnerFailure.Diagnostic, cancellationToken)
+                    .ConfigureAwait(false);
+            }
             return await FailAsync(run, etag, FailureClass.QuarantineRequired,
                 BicepDeployRejectionCodes.BicepDeployFailed, runnerFailure.Diagnostic, cancellationToken)
                 .ConfigureAwait(false);
