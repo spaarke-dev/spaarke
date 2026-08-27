@@ -13,6 +13,72 @@
 
 ---
 
+## ⚖️ AMENDMENT 1 — 2026-08-27, owner decision. Supersedes parts of §5, §6 and §9.
+
+**`unified-access-control-r2` owns P2 (document access) ENTIRELY — model, spec corrections, AND
+implementation. `spaarkeai-compose-r8` must NOT build the parent-fallback, including as an interim.**
+
+Owner reasoning: splitting P2 across two projects loses **both context and attention**, and a second
+implementation of our own evaluator term 5 would have to be reconciled later at higher cost than doing it
+once here.
+
+**What this changes in the text below** — the analysis is unchanged, the addressee is not:
+
+| Section | Original | Now |
+|---|---|---|
+| §5 "the consistency requirement for **your** fallback… scope **your** fallback to Type 1" | written as guidance to compose-r8 | **binding on OUR implementation.** Same constraint, our obligation |
+| §6.1–§6.3 "read before implementing the fallback" | addressed to compose-r8 | **our design constraints.** We close them |
+| §9 item 5 "Before implementing the parent-fallback…" | an ask of compose-r8 | **withdrawn as an ask.** It is our task list |
+| §9 item 6 "Your fallback is welcome and forward-compatible" | invited an interim | **withdrawn.** Do not build it |
+
+**P1 (caller identity, PR #832) is unaffected — 100% compose-r8's, and it is the actual critical path.**
+
+**Why compose-r8 is unblocked without building anything**: what blocks Compose R8 is documents being
+unreadable, and that is what we are now delivering — the two measurements (`prvReadsprk_Document` depth per
+role, and the `# mi-bff-api-dev` application user's business unit), the parent-fallback task with §6's
+constraints applied, and a **separate orphan task**. That last one is why an interim fallback would have
+under-delivered: per compose-r8's own verification, orphans are the dominant case and term 5 gives an orphan
+nothing, so the fallback alone would not have fixed it.
+
+**Still owed BY compose-r8** (unchanged): merge #832 and say when · the `UploadEndpoints.cs` sibling-route
+confirmation · the scope answer on the ~40 claim-reading files outside #832 · the vocabulary split in §4.
+
+---
+
+## ⚖️ AMENDMENT 2 — 2026-08-27, owner decision on task 076: **option (C)**, not (A).
+
+Recorded here because it changes what the upload contract looks like, and compose-r8 touches upload paths.
+
+**Task 076 will implement option (C) — the record-keyed upload contract.** Upload routes take
+`(entity, recordId)` instead of a caller-named container; the server resolves the container from the record
+it is already authorizing. **The client stops deciding entirely.**
+
+The escalation note recommended (A) and called (C) "not deliverable inside 076 as scoped." **That scope
+framing was already stale when written** — it predates task 073 shipping its deletion:
+
+- `UploadEndpoints.cs`'s two container-keyed routes: **073 deletes the file entirely** (218 lines, zero
+  additions). No overlap remains.
+- `GET /api/v1/containers/{containerId}/documents`: **already task 078**, which already depends on 075.
+- `SpeAdmin/Container*Endpoints.cs` (12 routes): **not in scope** — these administer the container itself;
+  there is no owning record to key on.
+- Genuinely left: the **3 OBO routes** at `OBOEndpoints.cs:51/102/137`.
+
+And the client-side comparison inverts: (A) *adds* an upload-time resolver call in ~9 sites and **retains**
+`speContainerIdRef` as a fallback; (C) *removes* the container parameter from those sites. Deletion, not
+addition.
+
+**The decisive argument is not scope.** Under (A) the authorization decision keys on `(entity, recordId)`
+while the container still comes from a client-supplied value — **two keys for one decision, and F-9 proves
+they already diverge in shipped code** (the wizard's eagerly-resolved container is what the bytes use;
+provisioning's correct stamp is discarded). Under (C) both are the same value by construction and **cannot**
+disagree. (C) also removes the *shape* that made 073's vulnerability expressible — `OBOEndpoints.cs:51` is
+the same shape, protected only by running under OBO rather than app-only.
+
+**Two deploy-ordering obligations this creates**: the upload contract change means **client and BFF must
+ship together**, and (C) requires **075 merged first**.
+
+---
+
 ## 0. TL;DR — the five things that matter
 
 1. **`Api/UploadEndpoints.cs`: your oid fix there is MOOT.** Our task 073 **deletes the entire file**. Do

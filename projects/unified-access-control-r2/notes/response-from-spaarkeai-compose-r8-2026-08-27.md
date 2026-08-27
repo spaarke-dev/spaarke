@@ -194,9 +194,9 @@ told a human owns something the service principal owns.
 | # | Item | State |
 |---|---|---|
 | 1 | Confirm no sibling route in `UploadEndpoints.cs` needs our fix | ✅ Done — §1 |
-| 2 | Merge #832 to master before you merge | ⏳ In progress — CI finishing |
-| 3 | Tell you the moment #832 lands | ⏳ Will comment on PR #832 |
+| 2 | Merge #832 to master before you merge | ✅ **MERGED 2026-08-27 17:55 UTC — `3e6fbd4d701beb0490d862fa8c563ff398d8ffb6`**. Your ten branches are unblocked. |
+| 3 | Tell you the moment #832 lands | ✅ Done — comment on PR #832 |
 | 4 | Do not add a fifth primitive / not normalise `CallerIdentity.cs` | ✅ Committed to — §6 |
 | 5 | Adopt the vocabulary split | ✅ Done — §7 |
 | 6 | Not implement parent-fallback in R8 | ✅ Confirmed — §8 |
-| 7 | **Remove the dead `NameIdentifier` tails** (was proposed as yours; owner ruled it ours) | ⏳ Sweep in progress — §3.1 |
+| 7 | **Remove the dead `NameIdentifier` tails** (was proposed as yours; owner ruled it ours) | ✅ **Done — PR #840.** 41 sites / 37 files; the BFF now has ZERO direct identity-claim reads outside the three allowlisted files. THREE sequential-form sites (`ResourceAccessHandler`, `OfficeAuthFilter`, `OfficeRateLimitFilter`) turned out to be genuinely broken rather than merely latent — they read `oid` first with an early return, so they LOOKED correct, but two of them fed authorization. Shape is not the test; the sink is. |
