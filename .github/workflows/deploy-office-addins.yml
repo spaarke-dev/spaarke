@@ -29,7 +29,11 @@ jobs:
 
       - name: Install dependencies
         working-directory: src/client/office-addins
-        run: npm install
+        # --legacy-peer-deps per root CLAUDE.md §12: a bare `npm install` fails here with
+        # ERESOLVE, because @testing-library/react@14 peer-requires React 18 while the
+        # project is on React 19. The repo's build scripts already use these flags; this
+        # workflow was the one place that did not.
+        run: npm install --legacy-peer-deps --no-audit --no-fund
 
       - name: Build Office Add-ins
         working-directory: src/client/office-addins
