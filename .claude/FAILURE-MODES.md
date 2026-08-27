@@ -27,6 +27,7 @@ The distinction matters because the fix is different. Anti-patterns require *unl
 - [AP-5: AbortController in a useEffect whose deps include your own state transition](#ap-5-abortcontroller-in-a-useeffect-whose-deps-include-your-own-state-transition)
 - [AP-6: Interpolating a raw GUID into `@odata.bind` — braces cause "Error in query syntax" (use `cleanGuid`)](#ap-6-interpolating-a-raw-guid-into-odatabind--braces-cause-error-in-query-syntax)
 - [AP-7: Converting a silent fallback into fail-fast, verified with targeted tests only](#ap-7-converting-a-silent-fallback-into-fail-fast-verified-with-targeted-tests-only)
+- [AP-8: A green suite treated as the END of verification rather than the start of it](#ap-8-a-green-suite-treated-as-the-end-of-verification-rather-than-the-start-of-it)
 
 ### Gotchas
 - [G-1: Settings-file schema malformation silently disables permission rules + hooks](#g-1-settings-file-schema-malformation-silently-disables-permission-rules--hooks)
@@ -638,6 +639,45 @@ sibling `DataverseAccessDataSource` already had — so doubles need no credentia
 and cannot break again when tasks 020/022/033 rewrite either branch.
 
 **Evidence**: `projects/spaarke-auth-v4-dataverse-MI/notes/decisions/011-adr009-token-cache-decision.md` §8.
+
+---
+
+### AP-8: A green suite treated as the END of verification rather than the start of it
+
+**Title**: Every verification standard in routine use is a *consistency* check. None of them can detect a test that encodes the **wrong rule** — and the errors that shape is capable of hiding are invisible for exactly as long as the code is loudly broken.
+
+**Date**: 2026-08-26 (`unified-access-control-r2`, Phase 0c parallel batch: tasks 072/073/075/079)
+
+**Classification**: Anti-pattern (verification method insufficient for the claim being made of it)
+
+**What happened**: Across one batch of four authorization tasks, six distinct defects were found in artifacts that **all** of the following reported as healthy: full suite green, ArchTest failure-count at the known baseline, publish size unchanged, CVE clean, and — critically — *perturbation-verified*.
+
+| # | Defect | What reported healthy |
+|---|---|---|
+| 1 | A route re-introduction guard compared `RoutePattern.RawText` against literals pinning `{containerId}`. A re-add spelled `{id}` matches nothing → **guard passes while the vulnerable route is live**. `{id}` was verifiably the likeliest spelling (the surviving sibling and two architecture docs all use it). | tests green |
+| 2 | Route-absence tests immune to parameter-name drift but **false-passing on URL-shape drift** — so the source-scanning rule was load-bearing while the test file's framing implied the behavioural tests were. | tests green |
+| 3 | A test **asserted a guaranteed 25-record outage as intended behaviour**. The guard threw for every container, including the correct owner's; the test constructed exactly that shape and asserted the refusal. | tests green |
+| 4 | Two regression tests **passed vacuously since the day they were written** — the double routed rows by `Flag == true` and *fell back to match-everything* when it found no `Like` condition. Green, fast, correctly named, asserting nothing. | tests green |
+| 5 | An ADR-010 ratchet **consumed to exactly its ceiling** (153/153). Still passing, zero headroom — the next interface added anywhere in the BFF would fail the build blaming an unrelated project. | failure-count parity |
+| 6 | A truncation refusal still vacuous after its own fix: the double ignored `TopCount`, so both tests rested on fixture size. | tests green + a perturbation |
+
+**Root cause**: Two compounding causes.
+
+*The methods are consistency checks.* A green suite proves the code does what its tests say. Failure-count parity proves no new failure. A perturbation proves a branch is **load-bearing**. None of the three can prove the tests say the right thing, and none can see a ratchet consumed but not breached.
+
+*The ordering hides the rest.* In a four-round review of one component, rounds 1–2 found wrong **code** and rounds 3–4 found wrong **verification**. The verification errors were present from round 1 — two of the vacuous tests were written in round 2. They only became *findable* once the code stopped being loudly wrong: while code is obviously broken, a green test reads as "not yet reached" and a design-note sentence reads as "provisional." Both readings are true at the time, and **both stop being true silently**.
+
+**Fix**:
+- Perturb every guard **individually, never in batches** — batching is precisely how #4 hid behind a passing suite.
+- **Read the build result before the test result.** `dotnet test` will reuse a stale assembly and report a false PASS; this happened three times in one batch (an `if (false)` perturbation failing CS0162 under warnings-as-errors, a filter-detach perturbation, and a dangling reference that still reported 32 green).
+- Treat a **test double as primary subject matter**, not scaffolding. A double must *evaluate* the query's real conditions and **throw** on an unmodelled operator — never default permissive. (#4's double failed the same way task 070's production `default:` did.)
+- For a ratchet, assert **headroom**, not parity. "9 failures = baseline" cannot see 153/153.
+- **Re-read any design document written during the defect rounds.** Its claims were formed while the mechanism was still moving — which is how a wrong sentence in an escalation note survived two review passes and would have mis-decided an operator question while every test stayed green.
+- Record what a test **cannot** falsify. A hand-written double pins the query against a model of the platform written by whoever wrote the query; it proves the code matches the double, never that either matches the platform. Six such claims were booked to a live-org task rather than left implicit.
+
+**Prevention**: **"The suite is green" is where to START checking the verification, not where to stop.** When a change is security-relevant, budget a pass whose *subject* is the tests and the documents rather than the code — and expect it to find things, because in this batch it found as many defects as the code-focused passes did. A green suite and an accurate document are **separate claims**; neither implies the other.
+
+**Evidence**: `projects/unified-access-control-r2/notes/wave2-parallel-merge-plan.md` (§3, §3b, §4a, §4b-0, §7b) · `notes/task-072-gate-share-link.md` §5 · `notes/task-075-*` §12 verification debt · commits `bb1e442ea` (072), `dd3e38f6d` (073), `8185c8fcc` (079), `3289844` (075).
 
 ---
 
