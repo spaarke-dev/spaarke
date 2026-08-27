@@ -110,7 +110,26 @@ public static class RollbackTransitions
     public static bool ShouldReleaseCustomerGuard(FailureClass failureClass) =>
         failureClass switch
         {
-            FailureClass.Resumable => false, // Operator may still resume; keep guard held.
+            // EXEC-07 (customer-provisioning-orchestration-r1 Wave 2 B24 punchlist,
+            // 2026-08-27): Resumable maps to terminal RunStatus.Failed. Before
+            // EXEC-07, this held the guard on the failing runId so the operator
+            // could POST /resume — but sprk_currentrunid also stayed pinned to
+            // the failed runId permanently, so a fresh POST /api/runs 409'd
+            // forever until an operator manually PATCHed the registry via pac
+            // data. A single Failed run poisoned the customer indefinitely —
+            // statistically inevitable during F19/F20 hardening (real-world
+            // halt on Session-13's "downstream writes will flow cleanly"
+            // promise). EXEC-07 releases the guard on Failed so a fresh run
+            // is possible. Trade-off: an operator POST /resume of the OLD
+            // runId concurrent with a fresh POST /api/runs for the SAME
+            // customer creates dual dispatch (both against the same customer's
+            // Azure resources). This is an operator-avoidable race — the
+            // resume-path continues to work for the old runId, but the
+            // operator is expected to pick ONE recovery path (resume the
+            // failed run OR start fresh). Ideally ResumeRun would re-acquire
+            // the guard against the resumed runId; that endpoint enhancement
+            // is a follow-on row.
+            FailureClass.Resumable => true, // EXEC-07 (2026-08-27): unblock fresh runs after Failed.
             FailureClass.RetryableWithCleanup => false, // Auto-retry is in-flight; keep guard held.
             FailureClass.QuarantineRequired => false, // BLOCKS new runs per spec FR-24 SCOPE.
             FailureClass.SuccessfulButDrifted => true,  // Run is Completed; customer may start a new run (or repair phase).

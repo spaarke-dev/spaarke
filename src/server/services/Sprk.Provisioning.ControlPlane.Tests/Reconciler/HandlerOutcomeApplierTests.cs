@@ -309,8 +309,16 @@ public sealed class HandlerOutcomeApplierTests
     // -----------------------------------------------------------------------
 
     [Fact]
-    public async Task ApplyHandlerOutcomeAsync_Resumable_TransitionsToFailed_DoesNotReenqueueOrReleaseGuard()
+    public async Task ApplyHandlerOutcomeAsync_Resumable_TransitionsToFailed_ReleasesGuardForFreshRun()
     {
+        // EXEC-07 (customer-provisioning-orchestration-r1 Wave 2 B24 punchlist,
+        // 2026-08-27): Resumable now RELEASES the guard so a Failed run does
+        // NOT permanently poison the customerId. Prior semantic (guard held
+        // "so the operator's resume targets the SAME run") caused a single
+        // Failed run to 409 forever on the next POST /api/runs until an
+        // operator manually PATCHed sprk_currentrunid via pac data. The
+        // resume path (/api/runs/{id}/resume) does not check the guard;
+        // trade-off documented in RollbackTransitions.ShouldReleaseCustomerGuard.
         var enqueuer = new RecordingEnqueuer();
         var guard = new RecordingCustomerRunGuard();
         var sut = BuildSut(out _,
@@ -328,7 +336,10 @@ public sealed class HandlerOutcomeApplierTests
         applied.TargetStatus.Should().Be(RunStatus.Failed);
         applied.Reenqueued.Should().BeFalse("Resumable requires operator POST /api/runs/{id}/resume.");
         enqueuer.Envelopes.Should().BeEmpty();
-        guard.ReleaseCalls.Should().BeEmpty("the guard stays held so the operator's resume targets the SAME run.");
+
+        guard.ReleaseCalls.Should().ContainSingle().Which.Should().Be((run.CustomerId, run.RunId),
+            because: "EXEC-07 — a Failed run must release the guard so a fresh POST /api/runs succeeds " +
+                     "(the resume path still targets the SAME failed runId without a guard check).");
     }
 
     // -----------------------------------------------------------------------
