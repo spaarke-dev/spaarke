@@ -711,9 +711,31 @@ Verified in main session:
   (`CallerPrincipal`, `ResolvedTenantEnvironment`, `RecordSearchAuthorization`,
   `SemanticSearchAuthorization`) and is live.
 
-**So both orphans are always-deny BY CONSTRUCTION, not merely unattached** — and `:15` was an active
-invitation for the next author to attach one to a live route, which would have 403'd it unconditionally.
-That is a stronger deletion argument than "dead code" and belongs in the PR description.
+**A-15 is always-deny BY CONSTRUCTION, not merely unattached** — and `:15` was an active invitation for
+the next author to attach it to a live route, which would then have denied unconditionally. That is a
+stronger deletion argument than "dead code" and belongs in the PR description.
+
+### ⚠️ MY ERROR, corrected by the 018 agent — the two orphans are NOT the same kind of dead
+
+I wrote "**both** orphans are always-deny by construction" into `spec.md` (`a09949cc9`) and into §A6 above.
+**That is true only of A-15.** The agent pushed back and was right; verified in main session:
+`OfficeAuthFilter.UserIdKey` **is** written at `OfficeAuthFilter.cs:126`, by a **live-attached**
+`AddOfficeAuthFilter()` at `Api/Office/OfficeEndpoints.cs:172` (also `:480`, `:499`, `:774`). So **A-23's
+precondition was satisfied — it was unused-but-FUNCTIONAL**, not a loaded trap.
+
+The distinction is load-bearing, in the agent's words: *a reader who merges them draws the wrong lesson
+about which one was dangerous.* Corrected in `spec.md` FR-17. Worth noting the shape — I generalized from
+one verified instance to a second unverified one, in the same sentence, and it read as a stronger finding
+*because* it was a pair. That is the exact move AP-8 warns about, committed by me while writing AP-8 up.
+
+### A-23's deletion had ZERO test-count effect — which is itself the finding
+
+Unit suite bit-identical before and after: **11,166 / 0 / 96 skipped**. A-15's deletion removed its own
+8-test file; **A-23 had no coverage at all, not even its own.** The agent also checked the inverse
+direction — that nothing downstream was orphaned: `AuthorizationService` (8+ live filter consumers),
+`ExtractBearerTokenOrNull` (10 refs), and `ShareLinksRequest`/`ShareAttachRequest` (live on the real
+share endpoints + `OfficeService`) all survive. Publish size **unchanged** at 45.07 MB, which
+independently confirms the earlier +0.11 MB reading was measurement noise, not growth.
 
 **Scoping error to own: mine.** I built 018's modify-set from `<relevant-files>` and missed
 `<constraint source="task-003">` at POML line 44, which requires deleting the **A-23** filter
@@ -748,3 +770,100 @@ this specifically. Recorded in `spec.md` FR-17 (commit `a09949cc9`).
 
 **All of these belong on task 047's Dataverse/Entra live-assertion list**, which is now carrying
 residuals from 075, 018 and 081.
+
+## A9. 011 — the defect was invisible BY SHAPE, and the fix exposed a shared blind spot
+
+**The defect**: the FetchXML guard compared only the *set of entity names*. A **self-join contributes
+only the module's own name**, so an exfiltrating self-join was **byte-identical** to a benign read. No
+amount of scrutiny of that check could have found it — the check had no signal to look at.
+
+**The fix** is two independent checks: (1) entity identity, unchanged, evaluated first, so foreign joins
+still report `DV_FETCHXML_ENTITY_MISMATCH`; (2) new structural join detection refusing any `<link-entity>`
+at any depth via **local-name, case-insensitive, namespace-agnostic** match. Guards perturbed individually:
+delete join detection → 11 fail · delete entity check → 5 fail · make match exact-name → 2 fail · make
+parse-failure permissive → 1 fail. `FetchXmlEntityExtractor` deliberately untouched (shared with
+`DataverseAuthorizationFilter`).
+
+### 🔴 NEW FINDING (main session) — the shared extractor has the blind spot 011 fixed locally
+
+011 chose namespace-agnostic local-name matching *because* "the extractor's exact-`XName` lookup misses
+`<LINK-ENTITY>` and `<x:link-entity>`". Chasing that: `FetchXmlEntityExtractor.cs:94` is
+`document.Descendants("link-entity")`, and **`XName` matching is case-sensitive and namespace-aware**.
+That extractor backs `.AddDataverseAuthorizationFilter(EntitySource.FromFetchXmlBody)` on
+**`POST /api/dataverse/fetch`** (`Api/Dataverse/FetchEndpoints.cs:67`).
+
+So **if** Dataverse accepts a case-variant or namespace-qualified `link-entity`, a joined entity would be
+invisible to that filter and never privilege-checked. The extractor's own header (`:19-21`) states that
+Dataverse RBAC does **not** cascade Read through joins and that a filter missing them "creates a trivial
+information-disclosure path" — while its implementation notes cover nesting, `intersect`, `outer`, and
+case-insensitive *attribute values*, and **never mention element-name case or namespace**.
+
+**This is conditional, not confirmed** — it depends entirely on whether Dataverse's own FetchXML parser
+accepts those forms (XML is case-sensitive by spec, so it plausibly rejects them). **That is precisely the
+question no test in this repo can answer**, and 011 said so. → **task 047 live-assertion list**; do not
+change the shared extractor before 047 answers it, because the blast radius is every `/fetch` caller.
+
+011's own `/fetch` flag was correctly hedged ("flagging, not claiming") and it was right not to claim
+A-17 there — a self-join escalates nothing *entity-wise*. The sharper issue is the element-name form.
+
+### 🔴 NEW FINDING (018) — live Office share routes: Rule A passes, Rule B does not
+
+`POST /office/share/links` (`Api/Office/OfficeEndpoints.cs:1359`) and `/office/share/attach` (`:1378`)
+carry `AddOfficeAuthFilter` — **authentication only**; their own comments say so verbatim ("Authorization:
+OfficeAuthFilter validates user authentication"). Compare `/office/save`, which carries
+`.AddEntityAccessFilter()`. Per-document share permission is a **stub**: `OfficeService.cs:938` reads
+`CanShare = true // In real implementation, check user permissions` — **verified live in source**.
+
+That is exactly the 077 shape (a filter attached, authorizing nothing) on **live routes that mint share
+links and package documents for email**. Tracked as GitHub **#229**. The 018 agent checked whether its
+deletion removed the only thing Rule B was passing on there — **it did not**; the filter was never
+attached, so Rule B's verdict is identical before and after. What the deletion removes is *the impression
+that the mechanism existed*, and `OfficeDocumentAccessFilter` was plausibly #229's intended implementation.
+
+Out of FR-17 scope (Office add-in surface, not the SPA/Teams plane) — **file as a new task**, sibling of
+072. Note 072 gated `share-link` on the documents group; this is the same capability on the Office group,
+still ungated.
+
+## A10. ⚠️ KEEP-path inconsistency INSIDE this wave — resolve before merge
+
+ADR-038's KEEP paths are `tests/integration/{auth,contract,data-mutation,regression,seam,tenant}/**` and
+`tests/unit/domain/**` (`tests/CLAUDE.md`: *"Tests authored elsewhere are anti-pattern by construction"*).
+
+- **011 pivoted correctly** — its POML named `tests/unit/Sprk.Bff.Api.Tests/AccessControl/`, which is
+  **not** a KEEP path; it filed in `tests/integration/auth/**` instead and documented the §6.5 path-C
+  deviation in the file header. Same assembly via the csproj auth glob, so `InternalsVisibleTo` still
+  reaches the guard.
+- **018 did not** — it created `tests/unit/Sprk.Bff.Api.Tests/AccessControl/ScopeInjectorBoundTests.cs`
+  (22 tests), the same non-KEEP path. Confirmed: that directory **does not exist** on this branch today,
+  so 018 would be creating it.
+- **025's POML also targets it** (`.../AccessControl/ExternalAccessEndpointTests.cs`) — so this is a POML
+  authoring defect, not a one-off agent slip. **Fix the POMLs, not just the files.**
+
+Decide at merge: 018's injector is a pure static function → `tests/unit/domain/**` is the right home.
+Do **not** let the wave land with two agents disagreeing about where auth tests live.
+
+## A11. Stale-assembly trap, 5th instance — and a NEW mechanism
+
+011 hit a *phantom test failure that contradicted the source on disk*. Cause: **`Copy-Item` preserves
+`LastWriteTime`**, so restoring a file from a backup moves its timestamp **backwards**; MSBuild then judges
+the stale DLL up-to-date and `dotnet test --no-build` silently runs the **old assembly**. Caught by reading
+the source, then `touch` + rebuild.
+
+Also concretely: **`dotnet build Spaarke.sln` did NOT refresh the BFF test project's output** — the test
+csproj must be built explicitly.
+
+This is the 5th stale-assembly instance across two batches (072's false-PASS perturbation, 075's `if
+(false)` CS0162, 075's dangling reference, 018's re-run, now this) but the **first with a backwards-time
+mechanism** rather than a skipped build. "Read the build result before the test result" does **not** catch
+this one — the build result says *up-to-date*, truthfully, about the wrong file. → **AP-8 addendum or its
+own AP entry** (main-session-only, `.claude/`).
+
+## A12. 011's residual worth escalating — maker-authored views are DATA
+
+011's guard now refuses any `<link-entity>` on the external-module seam. **A maker-authored `savedquery`
+view that surfaces a column through a self-referential lookup emits a same-entity `<link-entity>` and will
+now 400.** A DataGrid can replay a saved query's FetchXML into this seam. **No repo grep can rule this
+out** — it is environment data, not code.
+
+→ Enumerate `savedquery.fetchxml` for registered module entities **per environment** before deploy.
+This is a **deploy-ordering obligation** (§7), not a code fix.
