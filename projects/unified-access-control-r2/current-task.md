@@ -1,6 +1,7 @@
 # Current Task State — `unified-access-control-r2`
 
-> **Last Updated**: 2026-08-27 (by `context-handoff`) — **Wave A COMPLETE 6/6, nothing merged**
+> **Last Updated**: 2026-08-27 (by `context-handoff`) — **MASTER MERGED (incl. #832). Two live defects
+> found and fixed during reconciliation. 10 worktree branches still unmerged.**
 > **Recovery**: read "Quick Recovery" first. History is in [`tasks/TASK-INDEX.md`](tasks/TASK-INDEX.md),
 > the per-task `.poml` files, and `notes/`. "Full State (Detailed)" below is retained history.
 
@@ -10,40 +11,82 @@
 
 | Field | Value |
 |-------|-------|
-| **State** | Wave A **COMPLETE 6/6** (011·013·015·018·020·081). **NOTHING MERGED.** 10 worktree branches held. |
-| **In flight** | ONE agent: `uac-081` hardening round (provenance self-check so claim-ordering stops being a latent invariant). |
-| **Blocked on owner** | **076** resolution point · **FR-01 preview-403** fix + back-catalogue · **A-18** unbound-binding window · **ADR-038 B8** (path B amendment) · accept **P2 ownership** from compose-r8 |
-| **Next Action** | Work items 1–5 of the agreed approach — see "NEXT: THE FIVE WORK ITEMS" below. Start with #1 (post the coordination doc to compose-r8) and #4 (the two Dataverse measurements). |
+| **State** | Wave A **COMPLETE 6/6**. **Master MERGED** (`15385bbdf`) incl. PR **#832**. Branch **GREEN**: BFF 11,186/0/82 · ArchTests 6 fail/112 pass (all other projects) · census passes at 111. Pushed through **`314adad96`**. |
+| **NOT merged** | The **10 worktree branches** (073·079·075·081 + Wave A's 011·013·015·018·020). Gate is now OPEN — #832 landed and 076 is decided. |
+| **In flight** | Nothing. No agents running. |
+| **Next Action** | **Merge tranche 1: 073 + 079.** Expect a modify/delete conflict on `Api/UploadEndpoints.cs` — **take the deletion** (compose-r8 verified no sibling route needs their fix). Then the 13 ArchTest edits + census **111 → 110**. Sequence in `notes/wave2-parallel-merge-plan.md` §2. |
 
-### The two read-first documents
+### 🔴 OWED, and easy to lose — a regression test with a PROVEN gap
 
-1. **[`notes/coordination-compose-r8-2026-08-27.md`](notes/coordination-compose-r8-2026-08-27.md)** — cross-project
-   contract. Conflict register, merge order, the parent-child model, and **§6's three unspecified points**
-   (one security-critical). **Not yet delivered to compose-r8.**
-2. **[`notes/wave2-parallel-merge-plan.md`](notes/wave2-parallel-merge-plan.md)** — the integration checklist.
-   §§A1–A16 cover Wave A. 13 ArchTest edits, census 111→110, 8+ follow-ups.
+**Two filters were fixed but are UNPROTECTED.** `SemanticSearchAuthorizationFilter` and
+`RecordSearchAuthorizationFilter` read `FindFirst("oid") ?? FindFirst(ClaimTypes.NameIdentifier)`, which
+resolved `sub` and **denied every caller** on `POST /api/ai/search` + `/api/ai/search/records`. Fixed
+(`72d40fd75`) to `CallerResolution.ResolveObjectId`.
 
-### 🔴 NEXT: THE FIVE WORK ITEMS (owner-approved 2026-08-27)
+**Perturbation-proven blind, twice:** the fix changed **no** test verdict (11,186/0 before AND after), and
+after making `DocumentDestroyAuthorizationTestFixture` discriminating (`314adad96`) I reverted the filter
+and re-ran the **correct** assembly (`Spe.Integration.Tests`) — **45 dedicated authorization tests still
+green.** So the blindness is not confined to one fixture.
 
-1. **Deliver the coordination doc to compose-r8** — PR #832 / #806 comment or their notes. Contains:
-   `UploadEndpoints.cs` deletion (their fix there is moot) · merge order (#832 FIRST) · the 71-vs-30
-   claim-read gap · the "cascade" vocabulary split · parent-child ownership + §6's three gaps.
-2. **081 hardening** — in flight. On return, verify the collapsed-read test fails against its PREVIOUS
-   commit; if not, the risk model is wrong.
-3. **File the parent-fallback task** (new Phase 0c) — filter-level, Type 1 scoped, applies the parent's
-   **vetoes** (§6.1), states the two-parent rule (§6.2), records that it does **not** cover orphans (§6.3).
-   Closes FR-01's incident, unblocks compose-r8's P2, needs no ADR amendment.
+**Write**: a test constructing a principal in production's MAPPED shape (schema-URI `oid` + divergent
+`ClaimTypes.NameIdentifier` `sub`) asserting the **oid** reaches the authorization decision. Until it
+exists both fixes are correct and unguarded.
+
+### The three read-first documents
+
+1. **[`notes/wave2-parallel-merge-plan.md`](notes/wave2-parallel-merge-plan.md)** — the integration
+   checklist. §§A1–A17 cover Wave A. 13 ArchTest edits, census 111→110, 8+ follow-ups.
+2. **[`notes/coordination-compose-r8-2026-08-27.md`](notes/coordination-compose-r8-2026-08-27.md)** —
+   cross-project contract, **DELIVERED** (PR #832 + #806 comments + their worktree). Carries
+   **Amendment 1** (we own P2 entirely) and **Amendment 2** (076 → option C).
+3. **[`notes/response-from-spaarkeai-compose-r8-2026-08-27.md`](notes/response-from-spaarkeai-compose-r8-2026-08-27.md)**
+   — their reply, **accepted in full**. Their §4 warns our census would not have caught either of their two
+   disclosures (id-space defects with no claim read at all) and offers two extra rules. Their §5 hands over
+   `WorkspaceLayoutService`: three breaks, and *"the claim fix alone would have converted a disclosure into
+   an outage"* — FR-01's shape on a third surface.
+
+### 🔴 NEXT: WORK ITEMS (owner-approved 2026-08-27)
+
+1. ~~Deliver the coordination doc~~ ✅ **DONE** — PR #832 + #806 comments, plus the full doc in their
+   worktree with a provenance header. They replied "accepted in full" within 9 minutes and merged #832
+   within 49.
+2. ~~081 hardening~~ ✅ **DONE** (`1a77288b0` + `41cb87310`). **P12 is the deliverable**: invert the branch
+   ordering with the conjunction intact → 19 tests still green, so execution order is provably no longer
+   the saving function. ⚠️ Retro-check returned **NO** as instructed — my risk model conflated input-shape
+   with source-edit risk; see merge plan §A17.
+3. **File the parent-fallback task** (new Phase 0c) — **now OURS entirely** (owner: no split, P2 is ours).
+   Filter-level, **Type 1 scoped** (terms 2–4 are what give contacts parent access, so "ask Dataverse about
+   the parent" returns nothing for Types 2/3), applies the parent's **vetoes** (§6.1 — pre-veto leaks Secure
+   through children), states the two-parent rule (§6.2), records that it does **not** cover orphans (§6.3).
+   **Also file the separate orphan task** — orphans are the dominant case.
 4. **Two Dataverse measurements** (minutes, gate several decisions):
    **(a)** depth of `prvReadsprk_Document` per role — the census in `design.md:544` covers only
    `prvReadsprk_Project`/`_Matter`, so this is unmeasured; **(b)** the business unit of the
    `# mi-bff-api-dev` application user. Together they decide whether FR-01's 403 is MI-ownership or a
    `RetrievePrincipalAccess` failure (both return a byte-identical fail-closed 403), and whether §5.2's BU
    restructure would break every MI-owned record.
-5. **Then**: #832 merges → we merge master → merge 10 worktrees (needs **076**) → seed **task 082** census
-   → **047** live validation. Also pull **050/052** forward (050 has NO deps) and decide whether **030**
-   starts now, since all of Phase 1 sits behind it.
+5. **MERGE — the gate is open.** ~~#832~~ ✅ merged. ~~master~~ ✅ merged. ~~076 decision~~ ✅ option **C**.
+   Remaining: **merge the 10 worktrees** → 13 ArchTest edits + census **111→110** → **task 082** (narrow it,
+   see below) → **047** live validation. Also pull **050/052** forward (**050 has NO deps**) and decide
+   whether **030** starts now, since all of Phase 1 sits behind it.
 
-### Files modified this session (all committed + pushed through `095ca537c`)
+### Decisions made this session (do not re-litigate)
+
+| Decision | Outcome |
+|---|---|
+| **076 resolution point** | **Option (C)** — record-keyed upload contract; routes take `(entity, recordId)`, server resolves, **client stops deciding**. (A) was rejected: it leaves two keys for one decision and F-9 proves they already diverge. Scope re-measured — the note's "spans three tasks" was **stale**, 073 already deletes the overlap; ~3 OBO routes remain. **076's POML still needs rewriting to C.** |
+| **P2 ownership** | **UAC-r2 owns it ENTIRELY** — model, spec corrections, AND implementation. No split (loses context and attention). compose-r8 will **not** build a fallback; retracted on #806. |
+| **Task 082 scope** | Largely **superseded** — compose-r8's PR **#840** did the tail sweep (41 sites/37 files) and built `tests/Spaarke.ArchTests/CallerIdentityGuardTests.cs`. **Narrow 082** to the §11 four-primitive question + a **classify-by-SINK** audit, and add their two rules: a `Guid.TryParse` whose failure path drops a security predicate, and any caller-id vs `ownerid`/`owninguser`/`createdby` comparison without oid→systemuserid translation. |
+
+### ⚠️ Standing hazard: a CONCURRENT SESSION is committing to this branch
+
+Commits `ef1da3bd4`, `57191820b`, `973f9a459` were **not** mine — another session handled the compose-r8
+correspondence and captured my uncommitted amendments (+66 lines) in its own commit. Nothing was lost, but
+**two sessions writing one tree** is the lost-writes hazard documented for sub-agents, at session level.
+Before touching `RouteAuthorizationGuardTests.cs` (13 pending edits, single file), check `git log` for
+foreign commits.
+
+### Files modified this session (all committed + pushed through `314adad96`)
 
 - `notes/coordination-compose-r8-2026-08-27.md` — **new**, the cross-project contract
 - `tasks/082-caller-identity-primitive-census.poml` — **new**, the §11 ratchet
