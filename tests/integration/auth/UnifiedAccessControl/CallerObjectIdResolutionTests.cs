@@ -230,5 +230,37 @@ public sealed class CallerObjectIdResolutionTests
                 AccessRights = rights,
             });
         }
+
+        /// <summary>
+        /// Added 2026-08-27 during the `work/unified-access-control-r2` merge of master. This method did
+        /// not exist on <see cref="IAccessDataSource"/> when this double was written — it arrives with
+        /// `unified-access-control-r2` commit <c>8ce4b7cac</c> (tasks 070/071/074), which widened the
+        /// interface from document-only to any entity set so the tenant-wide search disclosure could be
+        /// authorized per record.
+        ///
+        /// <para>A **semantic** merge conflict, not a textual one: git merged both sides cleanly because
+        /// they touch different files, and the result did not compile. Caught by reading the BUILD result
+        /// before the test result (see <c>.claude/FAILURE-MODES.md</c> G-12).</para>
+        ///
+        /// <para>Behaviour deliberately mirrors <see cref="GetUserAccessAsync"/>: this double's stated
+        /// purpose is to observe the <c>userId</c> the filter passes through
+        /// <c>AuthorizationService</c> — the seam the oid-vs-sub defect lived at — so the record-scoped
+        /// entry point must record it identically or the test would be blind on that path.</para>
+        /// </summary>
+        public Task<AccessSnapshot> GetRecordAccessAsync(
+            string userId,
+            string entitySetName,
+            Guid recordId,
+            string? userAccessToken,
+            CancellationToken ct = default)
+        {
+            ObservedUserId = userId;
+            return Task.FromResult(new AccessSnapshot
+            {
+                UserId = userId,
+                ResourceId = recordId.ToString(),
+                AccessRights = rights,
+            });
+        }
     }
 }
