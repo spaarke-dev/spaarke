@@ -456,6 +456,48 @@ public sealed class RunsEndpointsTests : IClassFixture<L2WebApplicationFactory>
     }
 
     // -------------------------------------------------------------------------
+    // REG-03 (customer-provisioning-orchestration-r1 Wave 2 B24 punchlist,
+    // 2026-08-27) — ClearQuarantine on Success MUST call
+    // runGuard.ReleaseAsync so a subsequent POST /api/runs for the same
+    // customer succeeds (sprk_currentrunid is cleared alongside the
+    // Quarantined→Failed transition). Without this cascade the operator
+    // hits 409 indefinitely on the next-run attempt.
+    // -------------------------------------------------------------------------
+
+    [Fact]
+    public async Task ClearQuarantine_Success_CallsRunGuardReleaseAsync()
+    {
+        using var factory = new L2WebApplicationFactory();
+        factory.Repository.Seed(new ProvisioningRun
+        {
+            RunId = "run-q",
+            CustomerId = TestCustomerId,
+            EnvironmentId = "env-1",
+            TenancyModel = "Model1Shared",
+            Profile = "spaarke-hosted-model1-trial",
+            Status = RunStatus.Quarantined,
+        });
+
+        // Inject a spy CustomerRunGuard so we can observe the ReleaseAsync call.
+        var spyGuard = new SpyCustomerRunGuard();
+        factory.ReplaceCustomerRunGuard(spyGuard);
+
+        var client = factory.CreateClient();
+        var request = new HttpRequestMessage(
+            HttpMethod.Post,
+            $"/api/runs/run-q/clear-quarantine?customerId={TestCustomerId}&reason=REG-03-test");
+        AttachAuth(request, roles: new[] { "Operator" });
+
+        var response = await client.SendAsync(request);
+
+        response.StatusCode.Should().Be(HttpStatusCode.Accepted);
+        spyGuard.ReleaseCalls
+            .Should().ContainSingle(c => c.CustomerId == TestCustomerId && c.RunId == "run-q",
+                because: "REG-03 — ClearQuarantine Success must cascade into CustomerRunGuard.ReleaseAsync " +
+                         "so the next POST /api/runs for this customer isn't blocked by a stale sprk_currentrunid.");
+    }
+
+    // -------------------------------------------------------------------------
     // Task 061 addition: POST clear-quarantine on a non-Quarantined run
     // returns 409 (wrong-state) — the QuarantineClearService's Conflict path
     // maps to HTTP 409 per POML acceptance §7 negative case.
@@ -951,6 +993,15 @@ public sealed class L2WebApplicationFactory : WebApplicationFactory<Program>
         _registryStub = stub;
     }
 
+    // REG-03 (2026-08-27) — spy CustomerRunGuard for observing ReleaseAsync
+    // calls from the ClearQuarantine Success cascade.
+    private Sprk.Provisioning.ControlPlane.Concurrency.ICustomerRunGuard? _guardStub;
+
+    public void ReplaceCustomerRunGuard(Sprk.Provisioning.ControlPlane.Concurrency.ICustomerRunGuard stub)
+    {
+        _guardStub = stub;
+    }
+
     protected override void ConfigureWebHost(IWebHostBuilder builder)
     {
         // Ensure fail-fast validators in AddCosmosModule + AddServiceBusModule +
@@ -1017,6 +1068,21 @@ public sealed class L2WebApplicationFactory : WebApplicationFactory<Program>
             if (_registryStub is not null)
             {
                 ReplaceRegistryClientRegistration(services, _registryStub);
+            }
+
+            // REG-03 spy injection — when a test registered a spy via
+            // ReplaceCustomerRunGuard, swap out the real guard so the test
+            // can observe ReleaseAsync calls.
+            if (_guardStub is not null)
+            {
+                for (var i = services.Count - 1; i >= 0; i--)
+                {
+                    if (services[i].ServiceType == typeof(Sprk.Provisioning.ControlPlane.Concurrency.ICustomerRunGuard))
+                    {
+                        services.RemoveAt(i);
+                    }
+                }
+                services.AddSingleton(_guardStub);
             }
         });
     }
@@ -1134,6 +1200,34 @@ public sealed class InMemoryHandlerEnqueuer : IHandlerEnqueuer
     {
         Enqueued.Add(envelope);
         return Task.CompletedTask;
+    }
+}
+
+// -----------------------------------------------------------------------------
+// SpyCustomerRunGuard — records TryAcquireAsync / ReleaseAsync invocations for
+// REG-03 test assertions. Returns Success unconditionally so tests focus on
+// the ClearQuarantine cascade behavior, not guard mechanics.
+// -----------------------------------------------------------------------------
+
+internal sealed class SpyCustomerRunGuard : Sprk.Provisioning.ControlPlane.Concurrency.ICustomerRunGuard
+{
+    public List<(string CustomerId, string RunId)> AcquireCalls { get; } = new();
+    public List<(string CustomerId, string RunId)> ReleaseCalls { get; } = new();
+
+    public Task<Sprk.Provisioning.ControlPlane.Concurrency.AcquireResult> TryAcquireAsync(
+        string customerId, string runId, CancellationToken cancellationToken)
+    {
+        AcquireCalls.Add((customerId, runId));
+        return Task.FromResult<Sprk.Provisioning.ControlPlane.Concurrency.AcquireResult>(
+            new Sprk.Provisioning.ControlPlane.Concurrency.AcquireResult.Success(customerId, runId));
+    }
+
+    public Task<Sprk.Provisioning.ControlPlane.Concurrency.ReleaseResult> ReleaseAsync(
+        string customerId, string runId, CancellationToken cancellationToken)
+    {
+        ReleaseCalls.Add((customerId, runId));
+        return Task.FromResult<Sprk.Provisioning.ControlPlane.Concurrency.ReleaseResult>(
+            new Sprk.Provisioning.ControlPlane.Concurrency.ReleaseResult.Released(customerId, runId));
     }
 }
 

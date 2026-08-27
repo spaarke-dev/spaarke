@@ -800,10 +800,12 @@ public static class RunsEndpoints
         string? reason,
         IQuarantineClearService clearService,
         IHandlerEnqueuer enqueuer,
+        ICustomerRunGuard runGuard,
         HttpContext httpContext,
         ILogger<RunsMarker> logger,
         CancellationToken cancellationToken)
     {
+        ArgumentNullException.ThrowIfNull(runGuard);
         if (!TryValidateRouteAndPartition(id, customerId, httpContext, out var validationResult))
         {
             return validationResult;
@@ -851,6 +853,31 @@ public static class RunsEndpoints
             default:
                 throw new UnreachableException(
                     $"QuarantineClearResult exhaustive union changed: {result.GetType().FullName}");
+        }
+
+        // REG-03 (customer-provisioning-orchestration-r1 Wave 2 B24 punchlist,
+        // 2026-08-27): mirror the CancelRun ReleaseAsync semantics so a fresh
+        // POST /api/runs can start immediately after a clear-quarantine.
+        // Without this call, sprk_currentrunid on the registry row stays
+        // pointing at the (now-cleared) runId; the next POST /api/runs for
+        // this customer reads the stale value, DetermineConflictReasonAsync
+        // sees Failed status (not Quarantined), returns AlreadyInFlight
+        // fallback, and the operator hits 409 indefinitely — with no
+        // documented operator-side recovery. ReleaseAsync's stale-value guard
+        // (only clears when current value matches this runId) keeps the
+        // operation safe against concurrent races (parity with CancelRun).
+        var release = await runGuard.ReleaseAsync(customerId!, id, cancellationToken).ConfigureAwait(false);
+        if (release is ReleaseResult.TransientFailure txf)
+        {
+            // Not fatal to the request — the Quarantined→Failed transition
+            // has already landed via clearService above; the FR-24 audit-log
+            // + envelope enqueue must still fire so operators see the
+            // clear-quarantine action. Log for observability so a repeated
+            // failure to release surfaces before the next-run 409 loop.
+            logger.LogWarning(
+                "ClearQuarantine: CustomerRunGuard release transient failure (REG-03) — " +
+                "CustomerId={CustomerId} RunId={RunId} Diagnostic={Diagnostic}",
+                customerId, id, txf.Diagnostic);
         }
 
         // Fire-and-forget dispatch envelope so downstream consumers (log
