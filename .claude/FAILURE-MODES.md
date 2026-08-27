@@ -41,6 +41,7 @@ The distinction matters because the fix is different. Anti-patterns require *unl
 - [G-9: BFF AI Search has TWO index-name settings — `AiSearch:KnowledgeIndexName` (read) and `Analysis:SharedIndexName` (write)](#g-9-bff-ai-search-has-two-index-name-settings)
 - [G-10: HTML5 DnD `dragEnter` fires on ancestors when preview extends beyond pointer](#g-10-html5-dnd-dragenter-fires-on-ancestors-when-preview-extends-beyond-pointer)
 - [G-11: `Xrm.Navigation.navigateTo({ target: 2 })` opens a separate window — cross-window signaling requires sessionStorage, not `window.*`](#g-11-xrmnavigationnavigateto-target-2-opens-a-separate-window--cross-window-signaling-requires-sessionstorage-not-window)
+- [G-12: `dotnet test --no-build` runs a stale assembly while the build *truthfully* reports "up-to-date"](#g-12-dotnet-test---no-build-runs-a-stale-assembly-while-the-build-truthfully-reports-up-to-date)
 
 ---
 
@@ -678,6 +679,46 @@ and cannot break again when tasks 020/022/033 rewrite either branch.
 **Prevention**: **"The suite is green" is where to START checking the verification, not where to stop.** When a change is security-relevant, budget a pass whose *subject* is the tests and the documents rather than the code — and expect it to find things, because in this batch it found as many defects as the code-focused passes did. A green suite and an accurate document are **separate claims**; neither implies the other.
 
 **Evidence**: `projects/unified-access-control-r2/notes/wave2-parallel-merge-plan.md` (§3, §3b, §4a, §4b-0, §7b) · `notes/task-072-gate-share-link.md` §5 · `notes/task-075-*` §12 verification debt · commits `bb1e442ea` (072), `dd3e38f6d` (073), `8185c8fcc` (079), `3289844` (075).
+
+---
+
+### G-12: `dotnet test --no-build` runs a stale assembly while the build *truthfully* reports "up-to-date"
+
+**Title**: A test run can report confident, precise results from a binary that does not contain your change — and unlike the usual "you forgot to build" case, the build output is **not lying**. It correctly reports "up-to-date" about a DLL that MSBuild has correctly concluded needs no rebuild, because the *timestamps it compares* are wrong.
+
+**Date**: 2026-08-27 (`unified-access-control-r2`, task 011; fifth instance across two waves)
+
+**Classification**: Gotcha — the standard defence ("read the build result before the test result") **does not catch this one**, which is exactly why it deserves its own entry rather than a line in AP-8.
+
+**What happened**: Task 011 hit a test failure that **contradicted the source on disk** — the assertion that failed could not fail given the code in the file. Chasing it: the agent had restored a file from a backup copy with `Copy-Item`. `Copy-Item` **preserves `LastWriteTime`**, so the restored file's mtime moved *backwards* to the backup's creation time. MSBuild's incremental check compares source mtime against output mtime, decided the existing DLL was newer than its input, and skipped compilation — truthfully reporting "up-to-date". `dotnet test --no-build` then executed the previous assembly. Resolved with `touch` + rebuild (DLL advanced 23:28 → 23:43).
+
+Separately and independently: **`dotnet build Spaarke.sln` did not refresh the BFF test project's output.** The test csproj had to be built explicitly.
+
+**Root cause**: two distinct mechanisms that produce the same symptom.
+1. **Backwards-moving mtime.** Any operation that preserves timestamps (`Copy-Item`, `cp -p`, `git stash` restores, archive extraction, some editor "revert file" paths) can make a source file *older* than the binary built from a previous version of it. Incremental build is a timestamp comparison; it has no content hash to fall back on.
+2. **Solution-level build ≠ every project's output refreshed.** A `.sln` build refreshes what the solution graph says needs refreshing, which is not necessarily the specific test assembly you are about to run.
+
+**Why the existing rule misses it**: the rule from the 075 batch is *"always read the build result before the test result."* That defends against a **failed or skipped** build being masked by a stale-but-green test summary. Here the build **succeeded** and said the honest thing. The falsehood is upstream, in the filesystem metadata — so no amount of reading build output detects it.
+
+**Fix / detection** — check the artifact, not the log:
+
+```bash
+# Is the assembly actually newer than the source you just edited?
+ls -l --time-style=full-iso path/to/Tests.dll path/to/EditedFile.cs
+# DLL older than the .cs  =>  the test run you are about to trust is meaningless.
+
+# Force it, then confirm the timestamp advanced:
+touch path/to/EditedFile.cs
+dotnet build path/to/The.Tests.csproj        # the TEST csproj, explicitly — not just the .sln
+```
+
+Prefer dropping `--no-build` entirely when a result is load-bearing. When restoring files, avoid timestamp-preserving copies — or `touch` every restored file immediately afterwards.
+
+**Prevention**: **A perturbation is only evidence if the perturbation reached the binary.** This is the fifth stale-assembly incident in this project across two waves — 072 (a filter-detach perturbation reported 12/12 green off a stale BFF assembly), 075 (`if (false)` → CS0162), 075 again (a dangling reference made the test build **fail** while `--no-build` still reported 32 green), 018 (re-run), and now 011 (this mechanism). Every one produced a **confident and wrong** verification result.
+
+That matters disproportionately because perturbation testing is the primary anti-vacuity tool (see [AP-8](#ap-8-a-green-suite-treated-as-the-end-of-verification-rather-than-the-start-of-it)): a stale assembly silently converts *"I proved this guard is load-bearing"* into *"this guard is untested"* — while looking identical. Treat "the perturbation bit" as a claim that requires the binary's timestamp as its receipt.
+
+**Evidence**: `projects/unified-access-control-r2/notes/task-011-fetchxml-join-posture.md` · `notes/wave2-parallel-merge-plan.md` §A11 (five-instance inventory) · commit `15924623d` (011).
 
 ---
 
