@@ -1,6 +1,6 @@
 # Current Task State — record-header-and-notepad-r2
 
-> **Last Updated**: 2026-08-27 (after the RecordHeader inline-lookup swap — v1.1.11 packed, awaiting UAT)
+> **Last Updated**: 2026-08-27 (by `context-handoff` — owner is updating the Phase 5 forms manually)
 > **Recovery**: Read "Quick Recovery" first. Then [`CLAUDE.md`](CLAUDE.md), then [`tasks/TASK-INDEX.md`](tasks/TASK-INDEX.md).
 
 ---
@@ -9,12 +9,47 @@
 
 | Field | Value |
 |-------|-------|
-| **Task** | **033 + 034** complete — `Spaarke.Records.RecordHeader` **v1.1.11** packed, not yet imported |
-| **Phase** | 3 ✅ complete. Phase 5 rollout unblocked. The inline-lookup follow-on is **code-complete**. |
-| **Status** | ✅ **v1.1.11 imported and UAT-PASSED on the Project form** (owner, 2026-08-27): "the PCF is working - looks good". |
-| **Next Action** | **Phase 5 form bindings** — [`notes/rollout-form-binding-cheatsheet.md`](notes/rollout-form-binding-cheatsheet.md) has the verified JSON + per-entity add/hide lists. 050 is already done. |
-| **Blocked by** | Nothing in code. Task 001 ✅ closed 2026-08-27. Phase 5 is maker work. |
-| **Working tree** | clean · **pushed** to `origin/work/record-header-and-notepad-r2` · no PR opened |
+| **Status** | ⏸️ **Waiting on the owner** — manually binding the header to the Phase 5 forms in `spaarkedev1`. |
+| **Control** | `Spaarke.Records.RecordHeader` **v1.1.11** — imported, **UAT-PASSED** on Project |
+| **Next Action** | **Do not start new work.** When the owner reports back, run the post-binding QA in [`notes/rollout-form-binding-cheatsheet.md`](notes/rollout-form-binding-cheatsheet.md) § "After each binding", then mark 051/060/061/070 ✅ in [`tasks/TASK-INDEX.md`](tasks/TASK-INDEX.md). |
+| **If a binding misbehaves** | Ask for the browser console output FIRST. `[RecordHeader] form/metadata diagnostic` → `notOnForm` and `[RecordHeader] field decisions` → `picker` answer most defects in one line. Do not theorise before reading them. |
+| **Board** | **20 of 30 ✅** · remaining: 002, 051, 060, 061, 070, 080, 081, 086, 090 |
+| **Working tree** | clean · in sync with `origin/work/record-header-and-notepad-r2` · 47 commits ahead of master |
+| **PR** | **[#843](https://github.com/spaarke-dev/spaarke/pull/843)** — CI **fully green: 29 pass, 0 fail, 3 skipped** (first run on this branch) |
+
+### What the owner is doing right now
+
+Binding the header to four forms by hand, using
+[`notes/rollout-form-binding-cheatsheet.md`](notes/rollout-form-binding-cheatsheet.md). Project (050)
+is already bound and UAT-passed; 051 Work Assignment, 060 Invoice, 061 Event and 070 Agreement are
+in progress.
+
+**The thing most likely to go wrong**, and the reason the cheat sheet exists: **15 fields across
+those four entities are NOT on their forms** and must be ADDED (then hidden) before binding —
+otherwise every edit to them throws `Field '<name>' not on form`. The POMLs say "MOVE the raw
+fields", which wrongly assumes they are already present. All 39 field names were validated against
+live `spaarkedev1`, so a *missing column* is not a plausible cause of any failure they report.
+
+`sprk_recordsummary` is deliberately absent from all five forms — it is read-only and must stay off.
+
+### Session decisions worth not re-litigating
+
+| decision | why |
+|---|---|
+| **Do NOT rebuild `MatterHeaderPcf`** before the 002 baseline | A baseline must capture the status quo users actually see. Retracted after the owner challenged it — my reasoning did not survive. Expect ONE known lookup delta at 080 from the shared-library upgrade; both 002 and 080 explain it inline |
+| **No "+ New", no entity icon, no group header, no secondary timestamp** in the lookup | Owner decisions, all four. **Decisions, not gaps** — do not "restore parity" |
+| **085 pulled forward** past its `080` dependency | The guide was actively teaching the retired per-entity-PCF recipe; leaving it was a live hazard |
+| **Form transport is REALISED**, not just possible | `SpaarkeMaster` carries `sprk_project` with Include-Subcomponents. I earlier claimed the opposite and was wrong — see the correction below |
+
+### ⚠️ A correction from this session, worth internalising
+
+I reported that the Project form was "in no shippable solution". **That was wrong.** Querying
+`solutioncomponent` for the *form's* objectid only finds solutions where the form was added
+**explicitly**; an entity added with `Include Subcomponents` carries its forms with no row of their
+own. **To ask whether an asset transports, query the ENTITY's component row and its
+`rootcomponentbehavior`** — an asset-level query is a false negative for the normal case.
+
+---
 
 ### ⚠️ Packed and IMPORTED — UAT passed
 
