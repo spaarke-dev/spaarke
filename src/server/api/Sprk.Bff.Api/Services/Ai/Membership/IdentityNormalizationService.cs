@@ -261,23 +261,133 @@ public sealed class IdentityNormalizationService : IIdentityNormalizationService
             }
         }
 
-        // 2. Fallback: verified-email match on contact.emailaddress1. The email is
-        //    tenant-verified by Entra (present on the already-validated workforce token),
-        //    so it is safe as a fallback when contact.azureactivedirectoryobjectid is
-        //    unpopulated for this caller (teams-app-r1 FR-04 / design §5).
-        if (!string.IsNullOrWhiteSpace(verifiedEmail))
+        // 2. Fallback: verified-email match on contact.emailaddress1, consulted only when the oid
+        //    cross-reference found nothing. The decision itself lives in the pure
+        //    DecideWorkforceEmailMatch below — see the block comment there for why.
+        if (string.IsNullOrWhiteSpace(verifiedEmail))
         {
-            var byEmail = await TryResolveContactIdByEmailAsync(verifiedEmail, ct).ConfigureAwait(false);
-            if (byEmail is { } cidByEmail)
-            {
-                _logger.LogDebug(
-                    "Workforce contact resolution: matched contact {ContactId} by verified email",
-                    cidByEmail);
-                return cidByEmail;
-            }
+            return null;
         }
 
-        return null;
+        var matches = await TryResolveContactMatchesByEmailAsync(verifiedEmail, ct).ConfigureAwait(false);
+        if (matches is null)
+        {
+            // The binding state could not be READ. We cannot show the match is not someone else's,
+            // so we do not resolve to it (ADR-003 fail-closed).
+            _logger.LogWarning(
+                "Workforce contact resolution DENIED ({DenyCode}): the contact-by-email query failed, " +
+                "so the oid-binding state of any match is unknown",
+                DenyContactBindingUnreadable);
+            return null;
+        }
+
+        var decision = DecideWorkforceEmailMatch(matches, aadObjectId);
+        switch (decision)
+        {
+            case WorkforceEmailMatchDecision.Resolve:
+                _logger.LogDebug(
+                    "Workforce contact resolution: matched contact {ContactId} by verified email",
+                    matches[0].ContactId);
+                return matches[0].ContactId;
+
+            case WorkforceEmailMatchDecision.NoMatch:
+                return null;
+
+            default:
+                _logger.LogWarning(
+                    "Workforce contact resolution DENIED ({DenyCode}) for caller oid {CallerOid}: {Decision} " +
+                    "({MatchCount} contact(s) carry this email)",
+                    DenyCodeFor(decision), aadObjectId, decision, matches.Count);
+                return null;
+        }
+    }
+
+    // ─────────────────────────────────────────────────────────────────────────
+    // Workforce contact-by-email decision — extracted by task 013 (spec FR-12, finding A-18)
+    // ─────────────────────────────────────────────────────────────────────────
+    //
+    // WHY THIS IS A SEPARATE, PURE FUNCTION. The decision "does this email match resolve to a
+    // principal?" used to be four lines welded to a Dataverse query, so the only way to observe it
+    // was to stand up Dataverse — which is why task 001 could not pin A-18 at all. Extracted here it
+    // is assertable directly: no transport, so no Mock<HttpMessageHandler> (ADR-038 §7 ban B1); no
+    // reflection into privates (ban B8) — internal + InternalsVisibleTo("Sprk.Bff.Api.Tests"), the
+    // convention already used across this assembly (see ExternalParticipationService's grant-filter
+    // builders, extracted by task 007 for the same reason).
+    //
+    // Purity is the point, not a style preference. A test that drives this decision through a
+    // Dataverse double proves only what the double was told to say. A test that calls this function
+    // proves what the code decides.
+
+    /// <summary>Deny code (auth.md <c>{domain}.{area}.{action}.{reason}</c>) for the A-18 hijack:
+    /// the email matched a contact already bound to someone else's oid.</summary>
+    internal const string DenyContactBoundToDifferentOid = "sdap.access.deny.contact_bound_to_different_oid";
+
+    /// <summary>Deny code for an email carried by more than one contact — we refuse to pick.</summary>
+    internal const string DenyContactEmailAmbiguous = "sdap.access.deny.contact_email_ambiguous";
+
+    /// <summary>Deny code for a caller whose own oid is unusable, so no match can be attributed.</summary>
+    internal const string DenyUnidentifiableCaller = "sdap.access.deny.unidentifiable_caller";
+
+    /// <summary>Deny code for a contact-by-email query that could not be read at all.</summary>
+    internal const string DenyContactBindingUnreadable = "sdap.access.deny.contact_binding_unreadable";
+
+    /// <summary>
+    /// One <c>contact</c> row matched by <c>emailaddress1</c>, carrying its current workforce oid
+    /// binding (<c>azureactivedirectoryobjectid</c>; <c>null</c> when the contact is unbound).
+    /// </summary>
+    internal readonly record struct WorkforceContactEmailMatch(Guid ContactId, Guid? BoundAadObjectId);
+
+    /// <summary>The outcome of the workforce contact-by-email fallback.</summary>
+    internal enum WorkforceEmailMatchDecision
+    {
+        /// <summary>No contact carries this email — the caller simply is not a contact here.</summary>
+        NoMatch,
+
+        /// <summary>Exactly one unambiguous, non-hijacking match — resolve to it.</summary>
+        Resolve,
+
+        /// <summary>More than one contact carries this email; deny rather than pick one.</summary>
+        DenyAmbiguousEmail,
+
+        /// <summary>The matched contact is already bound to a DIFFERENT oid — the A-18 hijack.</summary>
+        DenyBoundToDifferentOid,
+
+        /// <summary>The caller's own oid is unusable, so no match can be attributed to them.</summary>
+        DenyUnidentifiableCaller
+    }
+
+    private static string DenyCodeFor(WorkforceEmailMatchDecision decision) => decision switch
+    {
+        WorkforceEmailMatchDecision.DenyBoundToDifferentOid => DenyContactBoundToDifferentOid,
+        WorkforceEmailMatchDecision.DenyAmbiguousEmail => DenyContactEmailAmbiguous,
+        WorkforceEmailMatchDecision.DenyUnidentifiableCaller => DenyUnidentifiableCaller,
+        _ => DenyContactBindingUnreadable
+    };
+
+    /// <summary>
+    /// Decides whether a set of contacts matched by verified email may be resolved to, given the
+    /// caller's own AAD object id.
+    /// </summary>
+    /// <remarks>
+    /// ⚠️ PRE-FIX BEHAVIOUR — this is finding A-18 as it stands, extracted verbatim so task 001's
+    /// characterization can pin it before task 013 flips it. It takes the first row it is handed and
+    /// asks nothing about the binding: neither whether some OTHER row also carries this email, nor
+    /// whether this contact already belongs to a different oid.
+    /// </remarks>
+    internal static WorkforceEmailMatchDecision DecideWorkforceEmailMatch(
+        IReadOnlyList<WorkforceContactEmailMatch> matches,
+        Guid callerOid)
+    {
+        ArgumentNullException.ThrowIfNull(matches);
+
+        if (matches.Count == 0)
+        {
+            return WorkforceEmailMatchDecision.NoMatch;
+        }
+
+        return matches[0].ContactId == Guid.Empty
+            ? WorkforceEmailMatchDecision.NoMatch
+            : WorkforceEmailMatchDecision.Resolve;
     }
 
     // ── Path 2: contact cross-ref via azureactivedirectoryobjectid ─────────
@@ -328,7 +438,16 @@ public sealed class IdentityNormalizationService : IIdentityNormalizationService
 
     // ── Contact-only fallback: contact by verified email (workforce plane) ──
     // teams-app-r1 FR-04: only consulted when the AAD-oid cross-ref returns no contact.
-    private async Task<Guid?> TryResolveContactIdByEmailAsync(
+    //
+    // Reads the BINDING COLUMN and TWO rows, because the decision above cannot be made without
+    // either. TopCount = 2 is not a magic number: it is the cheapest query that can tell "exactly
+    // one" from "more than one", and TopCount = 1 is what made an ambiguous email indistinguishable
+    // from an unambiguous one — the row you get back is simply whichever Dataverse returned first.
+    //
+    // Returns null when the query could not be READ at all, and an empty list when it read fine and
+    // nothing matched. Collapsing those two (as the previous signature did, returning Guid? for
+    // both) is exactly how an unreadable binding state comes to look like a clean miss.
+    private async Task<IReadOnlyList<WorkforceContactEmailMatch>?> TryResolveContactMatchesByEmailAsync(
         string email,
         CancellationToken ct)
     {
@@ -336,8 +455,8 @@ public sealed class IdentityNormalizationService : IIdentityNormalizationService
         {
             var query = new QueryExpression("contact")
             {
-                ColumnSet = new ColumnSet("contactid"),
-                TopCount = 1,
+                ColumnSet = new ColumnSet("contactid", "azureactivedirectoryobjectid"),
+                TopCount = 2,
                 NoLock = true
             };
             query.Criteria.AddCondition(
@@ -349,13 +468,18 @@ public sealed class IdentityNormalizationService : IIdentityNormalizationService
                 .RetrieveMultipleAsync(query, ct)
                 .ConfigureAwait(false);
 
-            if (results.Entities.Count == 0)
+            var matches = new List<WorkforceContactEmailMatch>(results.Entities.Count);
+            foreach (var row in results.Entities)
             {
-                return null;
+                // Dataverse omits null attributes from the returned Entity, so an absent
+                // azureactivedirectoryobjectid means UNBOUND. That is the assumption this whole
+                // guard rests on; it is asserted against the live platform nowhere in this suite.
+                matches.Add(new WorkforceContactEmailMatch(
+                    row.Id,
+                    GetGuidLike(row, "azureactivedirectoryobjectid")));
             }
 
-            var contactId = results.Entities[0].Id;
-            return contactId == Guid.Empty ? null : contactId;
+            return matches;
         }
         catch (OperationCanceledException)
         {
@@ -366,7 +490,7 @@ public sealed class IdentityNormalizationService : IIdentityNormalizationService
             _logger.LogWarning(
                 ex,
                 "IdentityNormalizationService failed to resolve contact by verified email; " +
-                "ContactId will be null");
+                "the caller will NOT be resolved to a contact (fail closed)");
             return null;
         }
     }
