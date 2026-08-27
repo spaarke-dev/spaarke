@@ -1,7 +1,7 @@
 # Current Task State — `unified-access-control-r2`
 
-> **Last Updated**: 2026-08-27 (by `context-handoff`) — **MASTER MERGED (incl. #832). Two live defects
-> found and fixed during reconciliation. 10 worktree branches still unmerged.**
+> **Last Updated**: 2026-08-27 (by `context-handoff`) — **TRANCHE 1 MERGED (073 + 079), ArchTest edits
+> applied, census at 110. 076 rewritten to option (C). 8 worktree branches still unmerged.**
 > **Recovery**: read "Quick Recovery" first. History is in [`tasks/TASK-INDEX.md`](tasks/TASK-INDEX.md),
 > the per-task `.poml` files, and `notes/`. "Full State (Detailed)" below is retained history.
 
@@ -11,10 +11,36 @@
 
 | Field | Value |
 |-------|-------|
-| **State** | Wave A **COMPLETE 6/6**. **Master MERGED** (`15385bbdf`) incl. PR **#832**. Branch **GREEN**: BFF 11,186/0/82 · ArchTests 6 fail/112 pass (all other projects) · census passes at 111. Pushed through **`314adad96`**. |
-| **NOT merged** | The **10 worktree branches** (073·079·075·081 + Wave A's 011·013·015·018·020). Gate is now OPEN — #832 landed and 076 is decided. |
-| **In flight** | Nothing. No agents running. |
-| **Next Action** | **Merge tranche 1: 073 + 079.** Expect a modify/delete conflict on `Api/UploadEndpoints.cs` — **take the deletion** (compose-r8 verified no sibling route needs their fix). Then the 13 ArchTest edits + census **111 → 110**. Sequence in `notes/wave2-parallel-merge-plan.md` §2. |
+| **State** | Wave A **6/6**. Master merged (`15385bbdf`, incl. #832). **Tranche 1 MERGED**: 073 (`904051d29`) + 079 (`229c4f849`), then the **12 ArchTest edits** (`fb77ebef1`). Branch **GREEN**: BFF **11,204/1/79** · ArchTests **6 fail/112 pass** (all other projects) · **census now 110**. |
+| **The 1 BFF failure** | `TenantCacheMetricsTests` — the known flake, **not** a regression. Passes in isolation; 079 touches nothing in the tenant-cache path. Diagnosis corrected in merge plan §5.6 (the accumulators are LOCAL; the *instrument* is global) and **deliberately left unfixed** — see that entry before touching it. |
+| **NOT merged** | **8** worktree branches: **075 · 081** + Wave A's **011 · 013 · 015 · 018 · 020**. |
+| **In flight** | Nothing. No agents running. Local commits **not pushed**. |
+| **Next Action** | **Merge tranche 2: 075.** It is the prerequisite for both 076 and 078, and it is `parallel-safe:false` (introduces the shared resolver seam). Then 081, then Wave A's five. Sequence in `notes/wave2-parallel-merge-plan.md` §2. |
+
+### ✅ Tranche 1 — what to trust, and what NOT to re-derive
+
+- **073's conflict** was the predicted modify/delete on `Api/UploadEndpoints.cs`; **deletion taken**, and
+  verified before taking it: the only change to that file between 073's base and HEAD was #832's oid fix,
+  on a **notification** side-effect (not authorization) — `userOid` resolved `sub`, `Guid.TryParse` then
+  failed, so the notification silently never fired. A dead feature, not a hole, on a deleted route.
+  Sibling notification sites checked: `AgentEndpoints.cs:499-513` uses the **safe** three-term form.
+- **Both agents' test claims reconciled EXACT**: 073 = +7 passed / −3 skipped; 079 = +12 tests. Do not
+  re-measure.
+- **ArchTest edit #13 (081's census comment) is deliberately NOT applied** — its own ordering constraint
+  says apply *with* 081's code. Apply it when 081 merges.
+- **`NoWaiverIsStale` now also catches ABSENT routes**, not just gated ones — the gap that let 071, 073
+  and 079 each leave dead waivers. Negative + positive controls run (seeded waiver → RED; removed →
+  6/112 baseline), per `tests/CLAUDE.md`'s rule for this KEEP path.
+
+### 076 is REWRITTEN to option (C) — do not re-open the decision (`ed4e6539d`)
+
+Record-keyed upload contract: routes take `(entity, recordId)`, the server resolves the container from the
+record it authorizes, the client stops deciding. The escalation note's "(C) is not deliverable in scope"
+was **stale** — re-measured on-branch: 073 deletes `UploadEndpoints.cs`'s three routes, `/api/v1/containers/
+{containerId}/documents` is already 078, SpeAdmin's 12 have no owning record. Left: **one route converted**
+(`OBOEndpoints.cs:51`) and **two deleted** (`:102/:137` — their client first calls
+`GET /api/obo/containers/{id}/drive`, **mapped nowhere**, so the chunked path is dead by 404). Deps are now
+**073 + 075**; tier **opus**; it creates a **client+BFF ship-together** obligation.
 
 ### 🔴 OWED, and easy to lose — a regression test with a PROVEN gap
 
