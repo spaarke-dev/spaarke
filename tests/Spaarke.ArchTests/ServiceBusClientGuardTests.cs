@@ -48,6 +48,23 @@ public class ServiceBusClientGuardTests
                 continue;
             }
 
+            // SCOPE, NOT AN ALLOWLIST (added 2026-08-27, task 042 of sdap-SPE-admin-app-r2).
+            //
+            // This rule exists so the production choice between namespace+managed-identity and a SAS
+            // connection string stays fixable in ONE place. A test that constructs a ServiceBusClient
+            // over a NeverInvokedTokenCredential or a fake FQDN is not making that choice — it is
+            // building a double. Scanning test projects made the guard report three such doubles in
+            // `Sprk.Provisioning.ControlPlane.Tests/**` alongside the real finding, which is how a
+            // guard gets read as noisy and then disabled.
+            //
+            // This is deliberately NOT the allowlist the class doc rules out: it does not exempt any
+            // named production site. Every file under src/server/**, including every ControlPlane
+            // service project, is still scanned. Only `*.Tests` projects are out of scope.
+            if (relative.Contains(".Tests/", StringComparison.OrdinalIgnoreCase))
+            {
+                continue;
+            }
+
             var lines = File.ReadAllLines(file);
             for (var i = 0; i < lines.Length; i++)
             {

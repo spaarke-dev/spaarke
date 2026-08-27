@@ -26,6 +26,9 @@ import {
   Switch,
   Input,
   Divider,
+  MessageBar,
+  MessageBarBody,
+  MessageBarTitle,
   shorthands,
 } from "@fluentui/react-components";
 
@@ -355,6 +358,16 @@ export const ContainerTypeSettingsForm: React.FC<ContainerTypeSettingsFormProps>
           Storage
         </Text>
 
+        {/*
+          FR-E02 / task 051. The blast radius is stated on the control itself, not buried in docs.
+
+          This is the ONLY storage ceiling Graph offers, and it is type-wide: one value governs every
+          container of this type. An admin arriving from a specific container's detail page is very
+          likely to think they are capping that container — they are capping all of them. Graph has no
+          per-container ceiling at all: `fileStorageContainerSettings` carries no storage property on
+          either API version, and a container-scope PATCH returns 200 while silently discarding the
+          value (measured live 2026-08-27 — notes/task-051-findings.md §1).
+        */}
         <Field
           label="Maximum Storage per Container (GB)"
           hint={`Current: ${formatBytes(settings.maxStoragePerBytes)}`}
@@ -372,6 +385,15 @@ export const ContainerTypeSettingsForm: React.FC<ContainerTypeSettingsFormProps>
             style={{ maxWidth: "180px" }}
           />
         </Field>
+
+        <MessageBar intent="warning" style={{ marginTop: tokens.spacingVerticalS }}>
+          <MessageBarBody>
+            <MessageBarTitle>This limit applies to every container of this type</MessageBarTitle>
+            It is not a per-container setting. Changing it changes the ceiling for all existing and
+            future containers of this container type. SharePoint Embedded does not support giving
+            individual containers different storage limits.
+          </MessageBarBody>
+        </MessageBar>
       </div>
 
       <Divider />
