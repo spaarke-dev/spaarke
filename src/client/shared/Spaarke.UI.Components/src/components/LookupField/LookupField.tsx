@@ -2,21 +2,38 @@
  * LookupField.tsx
  * Reusable search-as-you-type lookup field for entity reference searches.
  *
- * Layout:
+ * Layout (OOB inline-lookup parity, 2026-08-27):
  *   ┌───────────────────────────────────────────────┐
- *   │ [Search input: "lit..."]                   [x] │
+ *   │ Look for Practice Area                    [🔍] │  ← icon is a BUTTON
  *   ├───────────────────────────────────────────────┤
- *   │  Litigation                                    │
- *   │  Licensing                                     │
- *   │  Litigation Support                            │
+ *   │  Commercial Transactions                     ▲ │
+ *   │  Intellectual Property Patents               ░ │  ← thin overlay
+ *   │  Intellectual Property Trademarks            ░ │     scrollbar
+ *   │  Mergers & Acquisitions                      ▼ │
+ *   ├───────────────────────────────────────────────┤
+ *   │                                  🔍 Advanced  │  ← pinned, right-aligned
  *   └───────────────────────────────────────────────┘
  *   — OR —
  *   Selected: [Litigation] [x]
  *
+ * ── Why this shape ─────────────────────────────────────────────────────────
+ * Model-driven forms render lookups with a first-party control that Microsoft
+ * exposes NO API to instantiate: `Xrm.Utility.lookupObjects` is a callable
+ * function (it opens the *advanced* dialog), but the INLINE control is a class
+ * the form runtime owns. `ComponentFramework.Factory` carries exactly two
+ * members — `getPopupService` and `requestRender` — so there is no supported
+ * host for it inside a PCF or a Code Page.
+ *
+ * This component therefore REPRODUCES the OOB inline shape with supported
+ * primitives, and escalates to the real OOB dialog via `onAdvanced`. That is
+ * the "proprietary browse + OOB escalation" pattern in
+ * `docs/standards/MODAL-DECISION-CRITERIA.md`.
+ *
  * Constraints:
  *   - Fluent v9: Input, Text, Button, Spinner
- *   - makeStyles with semantic tokens — ZERO hardcoded colors
+ *   - makeStyles with semantic tokens — ZERO hardcoded colors (ADR-021)
  *   - Full keyboard support (arrow keys, Enter, Escape)
+ *   - NO "+ New" in the footer — deliberate; see `onAdvanced` prop docs
  */
 
 import * as React from 'react';
@@ -63,6 +80,26 @@ export interface ILookupFieldProps {
    * which show the option list immediately on focus (no keystroke required).
    */
   openOnFocus?: boolean;
+  /**
+   * Opens the OOB **advanced lookup** dialog (`Xrm.Utility.lookupObjects`).
+   *
+   * When supplied, an **Advanced** action renders right-aligned in the results
+   * footer — the same affordance the OOB inline lookup offers, and the escape
+   * hatch to the full record browser with views, filters and search.
+   *
+   * OMITTED BY DEFAULT ON PURPOSE. The wizard consumers run in Code Pages,
+   * where `lookupObjects` may be unavailable (the BFF navigation adapter
+   * implements `openLookup` as a no-op — see `ui-create-wizard-enhancements-r1`
+   * task 010), so the footer must be opt-in rather than assumed.
+   *
+   * ── Why there is deliberately NO "+ New" ──────────────────────────────
+   * The OOB footer also offers **+ New**. We do not, by owner decision
+   * (2026-08-27): the lookup targets here are taxonomy tables
+   * (`sprk_projecttype_ref`, `sprk_practicearea_ref`, …) that users are not
+   * permitted to add to, and record creation does not belong on this surface.
+   * Do NOT "restore parity" by adding it.
+   */
+  onAdvanced?: () => void | Promise<void>;
 }
 
 // ---------------------------------------------------------------------------
@@ -103,9 +140,57 @@ const useStyles = makeStyles({
     borderLeftColor: tokens.colorNeutralStroke1,
     borderRadius: tokens.borderRadiusMedium,
     overflow: 'hidden',
-    maxHeight: '200px',
-    overflowY: 'auto',
     marginTop: tokens.spacingVerticalXXS,
+    backgroundColor: tokens.colorNeutralBackground1,
+    // Elevate above the following form field the way the OOB dropdown does —
+    // without this the list pushes siblings down instead of overlaying them.
+    boxShadow: tokens.shadow8,
+  },
+  /**
+   * The scrollable region — separated from the container so the Advanced
+   * footer stays PINNED while the options scroll under it (OOB behaviour).
+   *
+   * ~5.5 rows at the current row height, so the cut-off row signals "more
+   * below" rather than the list ending flush.
+   */
+  resultsScroll: {
+    display: 'flex',
+    flexDirection: 'column',
+    gap: '1px',
+    maxHeight: '240px',
+    overflowY: 'auto',
+    // Modern thin overlay scrollbar. Fluent v9 ships no scrollbar tokens, so
+    // this is the standards-track property plus the WebKit fallback, both
+    // driven by semantic colors (ADR-021 — still zero hardcoded colors).
+    scrollbarWidth: 'thin',
+    scrollbarColor: `${tokens.colorNeutralStroke2} transparent`,
+    '::-webkit-scrollbar': {
+      width: '8px',
+    },
+    '::-webkit-scrollbar-track': {
+      backgroundColor: 'transparent',
+    },
+    '::-webkit-scrollbar-thumb': {
+      backgroundColor: tokens.colorNeutralStroke2,
+      borderRadius: tokens.borderRadiusCircular,
+    },
+    '::-webkit-scrollbar-thumb:hover': {
+      backgroundColor: tokens.colorNeutralStroke1,
+    },
+  },
+  /** Pinned footer — Advanced only, right-aligned. No "+ New" (see props). */
+  resultsFooter: {
+    display: 'flex',
+    justifyContent: 'flex-end',
+    alignItems: 'center',
+    paddingTop: tokens.spacingVerticalXXS,
+    paddingBottom: tokens.spacingVerticalXXS,
+    paddingLeft: tokens.spacingHorizontalS,
+    paddingRight: tokens.spacingHorizontalS,
+    borderTopWidth: '1px',
+    borderTopStyle: 'solid',
+    borderTopColor: tokens.colorNeutralStroke2,
+    backgroundColor: tokens.colorNeutralBackground1,
   },
   resultItem: {
     display: 'flex',
@@ -196,6 +281,7 @@ export const LookupField: React.FC<ILookupFieldProps> = ({
   minSearchLength = 1,
   chipIcon,
   openOnFocus = false,
+  onAdvanced,
 }) => {
   const styles = useStyles();
 
@@ -301,6 +387,57 @@ export const LookupField: React.FC<ILookupFieldProps> = ({
     [showResults, results, highlightedIndex, handleSelect]
   );
 
+  /**
+   * Fetch and open the option list for the CURRENT term (usually empty).
+   *
+   * Shared by `openOnFocus` and by the search-icon button, so "browse the
+   * values" behaves identically however the user got there.
+   *
+   * NOTE for consumers: showing the FULL list on an empty query requires
+   * `onSearch('')` to return a useful default set (e.g. top N unfiltered).
+   * A consumer that cannot do that still works — it simply renders the
+   * "No results found" state until the user types.
+   */
+  const runBrowse = React.useCallback(() => {
+    const query = searchTerm.trim();
+    setLoading(true);
+    onSearch(query)
+      .then(items => {
+        setResults(items);
+        setShowResults(items.length > 0);
+        setHighlightedIndex(-1);
+      })
+      .catch(err => {
+        // eslint-disable-next-line no-console
+        console.error('[LookupField] browse search error:', label, err);
+        setResults([]);
+        setShowResults(false);
+      })
+      .finally(() => setLoading(false));
+  }, [searchTerm, onSearch, label]);
+
+  /**
+   * The search icon is a real button (OOB parity): clicking it drops the full
+   * list down, so a user who does not know what to type can still browse.
+   * Toggles, so a second click dismisses.
+   */
+  const handleSearchIconClick = React.useCallback(() => {
+    if (value) {
+      // A committed value occupies the input slot with its chip; the icon is
+      // not rendered in that state, so this is defensive only.
+      return;
+    }
+    if (showResults) {
+      setShowResults(false);
+      return;
+    }
+    if (results.length > 0) {
+      setShowResults(true);
+      return;
+    }
+    runBrowse();
+  }, [value, showResults, results.length, runBrowse]);
+
   const handleFocus = React.useCallback(() => {
     if (value) return;
     if (results.length > 0) {
@@ -375,7 +512,23 @@ export const LookupField: React.FC<ILookupFieldProps> = ({
             onKeyDown={handleKeyDown}
             onFocus={handleFocus}
             placeholder={placeholder ?? `Search ${label.toLowerCase()}...`}
-            contentBefore={<SearchRegular aria-hidden="true" />}
+            // RIGHT-hand side, and a real button — matching the OOB inline
+            // lookup, where the magnifier both signals "this is a lookup" and
+            // opens the full list on click. It was previously a decorative
+            // `contentBefore` glyph.
+            contentAfter={
+              <Button
+                appearance="transparent"
+                size="small"
+                icon={<SearchRegular />}
+                onClick={handleSearchIconClick}
+                aria-label={`Browse ${label}`}
+                aria-expanded={showResults}
+                // Keep focus in the text input so typing continues to work
+                // straight after a browse click.
+                onMouseDown={e => e.preventDefault()}
+              />
+            }
             aria-label={label}
             autoComplete="off"
           />
@@ -389,30 +542,56 @@ export const LookupField: React.FC<ILookupFieldProps> = ({
         </div>
       )}
 
-      {/* Results list */}
+      {/* Results list — scrollable options + pinned footer */}
       {showResults && !value && (
-        <div className={styles.resultsList} role="listbox" aria-label={`${label} search results`}>
-          {results.map((item, index) => (
-            <div
-              key={item.id}
-              className={mergeClasses(
-                styles.resultItem,
-                index === highlightedIndex ? styles.resultItemHighlighted : undefined
-              )}
-              role="option"
-              aria-selected={index === highlightedIndex}
-              tabIndex={0}
-              onClick={() => handleSelect(item)}
-              onKeyDown={e => {
-                if (e.key === 'Enter' || e.key === ' ') {
-                  e.preventDefault();
-                  handleSelect(item);
-                }
-              }}
-            >
-              <Text size={200}>{item.name}</Text>
+        <div className={styles.resultsList}>
+          <div className={styles.resultsScroll} role="listbox" aria-label={`${label} search results`}>
+            {results.map((item, index) => (
+              <div
+                key={item.id}
+                className={mergeClasses(
+                  styles.resultItem,
+                  index === highlightedIndex ? styles.resultItemHighlighted : undefined
+                )}
+                role="option"
+                aria-selected={index === highlightedIndex}
+                tabIndex={0}
+                onClick={() => handleSelect(item)}
+                onKeyDown={e => {
+                  if (e.key === 'Enter' || e.key === ' ') {
+                    e.preventDefault();
+                    handleSelect(item);
+                  }
+                }}
+              >
+                <Text size={200}>{item.name}</Text>
+              </div>
+            ))}
+          </div>
+
+          {/*
+            Advanced — right-aligned, pinned below the scroll region, exactly
+            where the OOB inline lookup puts it. Opt-in via `onAdvanced`.
+            There is deliberately no "+ New" beside it; see the prop docs.
+          */}
+          {onAdvanced ? (
+            <div className={styles.resultsFooter}>
+              <Button
+                appearance="subtle"
+                size="small"
+                icon={<SearchRegular />}
+                onClick={() => {
+                  setShowResults(false);
+                  void onAdvanced();
+                }}
+                // Same reason as the browse icon — do not steal focus before
+                // the click handler runs.
+                onMouseDown={e => e.preventDefault()}
+              >
+                Advanced
+              </Button>
             </div>
-          ))}
+          ) : null}
         </div>
       )}
 
