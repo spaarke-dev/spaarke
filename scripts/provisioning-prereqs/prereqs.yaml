@@ -55,13 +55,16 @@ prereqs:
       cli: |
         # PRQ-01 fix (2026-08-27): acquire Graph token in-line; do NOT reference an
         # undefined bash variable ($graphAppOnlyToken never existed in the invoking shell).
+        # PRQ-08 fix (2026-08-27): jq -e assert response body `id` matches the requested
+        # containerTypeId (silent-PASS on wrong tenant's container type otherwise).
         token=$(az account get-access-token --resource https://graph.microsoft.com --query accessToken -o tsv 2>/dev/null)
         [ -z "$token" ] && exit 1
         result=$(az rest --method get \
           --uri "https://graph.microsoft.com/v1.0/storage/fileStorage/containerTypes/{containerTypeId}" \
           --headers "Authorization=Bearer $token" 2>/dev/null)
         [ -z "$result" ] && exit 1
-      expect: HTTP 200 with matching containerTypeId in body
+        echo "$result" | jq -e '.id == "{containerTypeId}"' >/dev/null || { echo "CONTAINER_TYPE_ID_MISMATCH"; exit 1; }
+      expect: HTTP 200 with response body `.id == {containerTypeId}` (asserted via jq)
     remediation: See `docs/guides/SPAARKE-CUSTOMER-DEPLOYMENT-GUIDE.md` §2.4 lead-time. Container-type creation is out-of-scope for provisioning automation per owner directive 2026-08-24.
     related_findings: [F17-update, T051-h8-*, audit-gap-05-artifacts-storage-missing]
 
@@ -74,13 +77,17 @@ prereqs:
     check_recipe:
       cli: |
         # PRQ-01 fix (2026-08-27): acquire Graph token in-line (same trap as PRQ-T-01).
+        # PRQ-08 fix (2026-08-27): jq -e assert response .value array is non-empty (at
+        # least ONE grant exists). Strict per-app-reg-scope assertion deferred to Wave 4
+        # SKILL.md (needs {bffAppId} substitution wired first).
         token=$(az account get-access-token --resource https://graph.microsoft.com --query accessToken -o tsv 2>/dev/null)
         [ -z "$token" ] && exit 1
         result=$(az rest --method get \
           --uri "https://graph.microsoft.com/beta/storage/fileStorage/containerTypes/{containerTypeId}/applicationPermissionGrants" \
           --headers "Authorization=Bearer $token" 2>/dev/null)
         [ -z "$result" ] && exit 1
-      expect: JSON array of grants; presence of Spaarke BFF app-reg with `writeContent, readContent, delegated` scopes
+        echo "$result" | jq -e '(.value | length) > 0' >/dev/null || { echo "NO_APPLICATION_PERMISSION_GRANTS"; exit 1; }
+      expect: JSON with `.value` array non-empty (asserted via jq); strict per-app-reg scope-name assertion is deferred to Wave 4 (requires {bffAppId} substitution)
     remediation: See `docs/guides/SPAARKE-CUSTOMER-DEPLOYMENT-GUIDE.md` §2.4.
 
   - id: PRQ-T-03
