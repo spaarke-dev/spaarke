@@ -4,7 +4,7 @@
     <title>Spaarke.Records.RecordHeader PCF — new control, new RecordHeaderPcf solution</title>
     <phase>3 Config Resolver + Control</phase>
     <gate>blocked until 031 is complete (Phase 2 tasks 020-024 and the 001 spike outcome must also already be merged per phase ordering)</gate>
-    <status>blocked</status>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>Task tags include pcf; new control + new solution identity consumed by six entities</rigor-reason>
     <model-tier>opus</model-tier>

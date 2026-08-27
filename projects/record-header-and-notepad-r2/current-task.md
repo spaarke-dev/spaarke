@@ -9,22 +9,45 @@
 
 | Field | Value |
 |-------|-------|
-| **Task** | **033 + 034** both code-complete — `Spaarke.Records.RecordHeader` **v1.1.4** |
-| **Phase** | 3 ✅ **complete** → Phase 5 rollout is now unblocked *by code*, blocked only on UAT |
-| **Status** | ⚠️ awaiting owner UAT. **All agent-executable work in this project is done.** |
-| **Next Action** | Owner imports `Solution/bin/RecordHeaderPcf_v1.1.4.0.zip` to **`spaarkedev1`** and runs UAT on the Project form — see the checklist below. |
-| **Blocked by** | Owner UAT. Plus **task 001**, which needs a classic-designer session no build can substitute for. |
-| **Working tree** | **clean**, 21 commits this session |
+| **Task** | **033 + 034** complete — `Spaarke.Records.RecordHeader` **v1.1.8**, UAT-passed on Project |
+| **Phase** | 3 ✅ **complete** → Phase 5 rollout unblocked |
+| **Status** | ✅ **Project form UAT passed** (2026-08-27). One open UX item, non-blocking. |
+| **Next Action** | Phase 5 rollout — **maker work**: bind `sprk_workassignment` (051), then Invoice + Event, Agreement, Matter last. |
+| **Blocked by** | Nothing in code. **Task 001** still needs a classic-designer session no build can substitute for. |
+| **Working tree** | clean, 33 commits this session |
 
-### What the owner needs to exercise
+### UAT outcome — 5 rounds, all closed
 
-1. **A `DateOnly` and a `DateAndTime` field** — the v1.1.3 rework; the timezone edge is where it fails if it fails.
-2. **Click a lookup cell** — still the open unknown (MS does not document `Targets` on the Client API payload).
-3. **The sparkle** — new in v1.1.4. It should appear on Project, and its popover should read **"No summary yet."** (that is CORRECT — a separate project populates the column).
-4. **Negative case**: set `summaryField` in `layoutJson` to a nonsense name, publish, reload. The sparkle must **vanish** and the header must **still render every field**. If the header goes blank, the metadata retry (b) did not save it and that is a real defect.
+| round | defect | root cause |
+|---|---|---|
+| 1 | every cell an em-dash | metadata never reached the resolver (2 causes) |
+| 1 | `layoutJson` capped at 100 chars | `SingleLine.Text` → `Multiple` |
+| 2 | bundle +51% over NFR-02 | date picker bundled a 2nd Fluent copy → native `Input` |
+| 3 | DateOnly rendered a time picker | Client API returns **no** `Format` — read from the form |
+| 3 | lookup inert | Client API returns **no** `Targets` — read from the form |
+| 3 | boolean was an em-dash, not a toggle | Switch now always visible when editable |
+| 4 | edit text 12px vs 14px | every editor passed `size="small"` |
+| 4 | fields not saving | **not on the form** — the binding recipe's MOVE-don't-delete rule |
+| 5 | lookup picker threw silently | **`this` detached** — `const f = xrm.Utility.lookupObjects` (G-14) |
 
-**Everything below is verified by build + tests only.** Three clean builds have shipped a broken
-control in this project — treat green as permission to test, not as evidence it works.
+### ⚠️ Open, non-blocking
+
+[`ISSUE-lookup-picker-ux-side-pane.md`](notes/issues/ISSUE-lookup-picker-ux-side-pane.md) — the lookup
+opens the platform's **side-pane** picker; OOB uses an **inline type-ahead**. Functional either way.
+**Settle it before task 080**: Matter is the parity regression test against R1, and R1 renders the
+*other* (inline) LookupField — a strict parity read will flag this.
+
+### The lesson from five rounds
+
+Every defect from round 3 on was "a platform surface did not return what we assumed", and each cost a
+full build → import → UAT cycle to disprove. Two would have been minutes, not days:
+
+- **Read the shipped `.d.ts`.** `@types/xrm` declares `Metadata.AttributeMetadata` as exactly six
+  members — no `Format`, no `Targets`. That settled in seconds what three rounds of inference did not.
+- **Instrument before theorising.** The diagnostic added in v1.1.7 found the round-5 bug on the first
+  click. It should have been round 1's move.
+- **A mock more permissive than the real API tests nothing.** `jest.fn()` needs no receiver, so 19
+  green tests coexisted with a picker that threw on every click in production.
 
 ### 🔴 Read this before touching the bundle
 
