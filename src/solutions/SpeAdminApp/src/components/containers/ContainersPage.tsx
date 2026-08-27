@@ -418,9 +418,30 @@ const ContainerUrlCell: React.FC<{ container: Container; configId?: string }> = 
   );
 };
 
+/**
+ * Column sizing for the containers grid — a MODULE-LEVEL CONSTANT, deliberately.
+ *
+ * 🔴 This was an inline object literal on the `<DataGrid>` until 2026-08-26. A fresh object every
+ * render means Fluent's `useTableColumnSizing` sees new options each time and re-applies
+ * `defaultWidth`, discarding whatever the operator had dragged. Selecting a row re-renders, so the
+ * columns snapped back the instant you clicked one — reported as "the columns collapse back to
+ * their default width when I click the column" (UAT round 8), and the reason widening the Container
+ * ID column to read the value was impossible: the click that started the selection undid the drag.
+ *
+ * A stable reference is the whole fix. Do NOT inline this back, and do not build it with `useMemo`
+ * inside the component either unless the dependency array is genuinely empty — same failure.
+ */
+const COLUMN_SIZING = {
+  displayName: { minWidth: 120, defaultWidth: 200, idealWidth: 200 },
+  id: { minWidth: 120, defaultWidth: 300, idealWidth: 300 },
+  status: { minWidth: 80, defaultWidth: 110, idealWidth: 110 },
+  createdDateTime: { minWidth: 90, defaultWidth: 130, idealWidth: 130 },
+  storageUsedInBytes: { minWidth: 100, defaultWidth: 140, idealWidth: 140 },
+  webUrl: { minWidth: 100, defaultWidth: 140, idealWidth: 140 },
+} as const;
+
 /** Build typed Fluent DataGrid column definitions for Container rows. */
 function buildColumns(
-  onBrowse?: (containerId: string, containerName?: string) => void,
   configId?: string,
 ): TableColumnDefinition<Container>[] {
   return [
@@ -510,26 +531,15 @@ function buildColumns(
         <ContainerUrlCell container={container} configId={configId} />
       ),
     }),
-    createTableColumn<Container>({
-      columnId: "browse",
-      renderHeaderCell: () => "",
-      renderCell: (container) =>
-        onBrowse ? (
-          <Button
-            appearance="subtle"
-            size="small"
-            icon={<FolderOpen20Regular />}
-            onClick={(e) => {
-              e.stopPropagation();
-              onBrowse(container.id, container.displayName);
-            }}
-            title="Browse files"
-            aria-label={`Browse files in ${container.displayName}`}
-          >
-            Browse
-          </Button>
-        ) : null,
-    }),
+    /*
+     * The per-row "Browse" column was REMOVED on 2026-08-26 (UAT round 8). It duplicated the
+     * Browse toolbar button, which already acts on the selected row, and it cost a full column of
+     * horizontal room on a grid whose Container ID column needs every pixel it can get.
+     *
+     * The `onBrowse` PARAMETER went with it. An earlier draft of this comment claimed the
+     * toolbar still used it — it does not; the toolbar calls `setBrowseContainer` directly, so
+     * the parameter was dead the moment the column left. `tsc --noEmit` caught the claim.
+     */
   ];
 }
 
@@ -706,7 +716,7 @@ export const ContainersPage: React.FC<ContainersPageProps> = ({
   // ── Column Definitions (stable reference) ──────────────────────────────────
 
   const columns = React.useMemo(
-    () => buildColumns(onOpenContainer, selectedConfig?.id),
+    () => buildColumns(selectedConfig?.id),
     [onOpenContainer, selectedConfig],
   );
 
@@ -1385,15 +1395,7 @@ const ContainerDataGrid: React.FC<ContainerDataGridProps> = ({
       /* Drag a header edge to resize (UAT round 6). Container IDs and names vary wildly in
          length, so no fixed set of widths suits every tenant — let the operator set them. */
       resizableColumns
-      columnSizingOptions={{
-        displayName: { minWidth: 120, defaultWidth: 200, idealWidth: 200 },
-        id: { minWidth: 120, defaultWidth: 240, idealWidth: 240 },
-        status: { minWidth: 80, defaultWidth: 110, idealWidth: 110 },
-        createdDateTime: { minWidth: 90, defaultWidth: 130, idealWidth: 130 },
-        storageUsedInBytes: { minWidth: 100, defaultWidth: 140, idealWidth: 140 },
-        webUrl: { minWidth: 100, defaultWidth: 140, idealWidth: 140 },
-        browse: { minWidth: 80, defaultWidth: 110, idealWidth: 110 },
-      }}
+      columnSizingOptions={COLUMN_SIZING}
     >
       <DataGridHeader>
         {/* No select-all affordance under single-select — there is nothing to select all of.

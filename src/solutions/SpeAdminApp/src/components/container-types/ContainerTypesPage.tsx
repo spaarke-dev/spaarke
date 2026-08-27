@@ -132,6 +132,24 @@ function normalizeContainerType(raw: ContainerType & { id?: string }): Container
 }
 
 /**
+ * Column sizing — a MODULE-LEVEL CONSTANT. See the identical note in `ContainersPage`: an inline
+ * object literal is a new reference every render, which makes Fluent re-apply `defaultWidth` and
+ * discard the operator's drag the moment anything re-renders (UAT round 8).
+ */
+/** localStorage key holding the container type IDs whose expiry banner has been dismissed. */
+const DISMISSED_EXPIRY_KEY = "speadmin_dismissedTrialExpiry";
+
+const COLUMN_SIZING = {
+  displayName: { minWidth: 140, defaultWidth: 200, idealWidth: 200 },
+  billingClassification: { minWidth: 110, defaultWidth: 160, idealWidth: 160 },
+  billingStatus: { minWidth: 100, defaultWidth: 140, idealWidth: 140 },
+  trialExpiry: { minWidth: 100, defaultWidth: 140, idealWidth: 140 },
+  owningAppId: { minWidth: 140, defaultWidth: 260, idealWidth: 260 },
+  isRegistered: { minWidth: 90, defaultWidth: 120, idealWidth: 120 },
+  createdDateTime: { minWidth: 90, defaultWidth: 130, idealWidth: 130 },
+} as const;
+
+/**
  * Whether a container type can be registered on a consuming tenant.
  *
  * A trial container type "is restricted to work in the developer tenant. It can't be deployed in
@@ -560,6 +578,47 @@ export const ContainerTypesPage: React.FC<ContainerTypesPageProps> = ({
    */
   const [configsOpen, setConfigsOpen] = React.useState(false);
 
+  // ── Dismissed trial-expiry warnings ─────────────────────────────────────────
+
+  /*
+   * Container type IDs whose expiry banner the operator has dismissed (UAT round 8: "how do we
+   * remove the warning message").
+   *
+   * Persisted, and keyed by container type ID rather than being a single global "hide warnings"
+   * flag. Two reasons that distinction matters:
+   *   - An expired trial is a real, permanent condition. There is no state in which it resolves
+   *     itself, so a session-only dismiss would nag forever about something the operator has
+   *     already decided to live with.
+   *   - Keying by ID means a DIFFERENT type expiring later still raises its own banner. A global
+   *     flag would silence that too — turning an acknowledgement of one dead trial into blanket
+   *     deafness, which is how monitoring stops working.
+   */
+  const [dismissedExpiry, setDismissedExpiry] = React.useState<Set<string>>(() => {
+    try {
+      const raw = window.localStorage.getItem(DISMISSED_EXPIRY_KEY);
+      return new Set(raw ? (JSON.parse(raw) as string[]) : []);
+    } catch {
+      return new Set();
+    }
+  });
+
+  const dismissExpiryWarning = React.useCallback((ids: string[]) => {
+    setDismissedExpiry((prev) => {
+      const next = new Set(prev);
+      ids.forEach((id) => next.add(id));
+      try {
+        window.localStorage.setItem(
+          DISMISSED_EXPIRY_KEY,
+          JSON.stringify([...next])
+        );
+      } catch {
+        // A full or blocked localStorage must not break the page — the banner simply returns
+        // on next load, which is the safe direction to fail for a warning.
+      }
+      return next;
+    });
+  }, []);
+
   // ── Column Definitions (stable reference) ──────────────────────────────────
 
   /*
@@ -606,14 +665,17 @@ export const ContainerTypesPage: React.FC<ContainerTypesPageProps> = ({
   const trialExpiry = React.useMemo(() => {
     const rows = containerTypes
       .map((ct) => ({ ct, expiry: assessTrialExpiry(ct, now) }))
-      .filter((r) => r.expiry.needsAttention);
+      .filter((r) => r.expiry.needsAttention)
+      // Dismissed types drop out of the PAGE-LEVEL banner only. Their per-row "Trial expired"
+      // badge in the grid stays — dismissing an alert should quiet the alarm, not edit the record.
+      .filter((r) => !dismissedExpiry.has(r.ct.containerTypeId));
 
     return {
       rows,
       // Expired outranks expiring: one is a live outage, the other is a deadline.
       hasExpired: rows.some((r) => r.expiry.state === "expired"),
     };
-  }, [containerTypes, now]);
+  }, [containerTypes, now, dismissedExpiry]);
 
   // ── Data Loading ────────────────────────────────────────────────────────────
 
@@ -961,6 +1023,28 @@ export const ContainerTypesPage: React.FC<ContainerTypesPageProps> = ({
                 ))}
               </div>
             </MessageBarBody>
+            {/* Dismiss persists per container type — see `dismissedExpiry`. The row badge stays. */}
+            <MessageBarActions
+              containerAction={
+                <Tooltip
+                  content="Hide this warning. It stays hidden for these container types; a different type expiring will still raise its own warning."
+                  relationship="description"
+                >
+                  <Button
+                    appearance="transparent"
+                    size="small"
+                    onClick={() =>
+                      dismissExpiryWarning(
+                        trialExpiry.rows.map((r) => r.ct.containerTypeId)
+                      )
+                    }
+                    aria-label="Dismiss trial expiry warning"
+                  >
+                    Dismiss
+                  </Button>
+                </Tooltip>
+              }
+            />
           </MessageBar>
         </div>
       )}
@@ -1089,15 +1173,7 @@ const ContainerTypeDataGrid: React.FC<ContainerTypeDataGridProps> = ({
       /* Drag a header edge to resize (UAT round 6). The Owning App column holds a GUID and the
          Name column a free-text label — no single default fits both across tenants. */
       resizableColumns
-      columnSizingOptions={{
-        displayName: { minWidth: 140, defaultWidth: 200, idealWidth: 200 },
-        billingClassification: { minWidth: 110, defaultWidth: 160, idealWidth: 160 },
-        billingStatus: { minWidth: 100, defaultWidth: 140, idealWidth: 140 },
-        trialExpiry: { minWidth: 100, defaultWidth: 140, idealWidth: 140 },
-        owningAppId: { minWidth: 140, defaultWidth: 260, idealWidth: 260 },
-        isRegistered: { minWidth: 90, defaultWidth: 120, idealWidth: 120 },
-        createdDateTime: { minWidth: 90, defaultWidth: 130, idealWidth: 130 },
-      }}
+      columnSizingOptions={COLUMN_SIZING}
     >
       <DataGridHeader>
         <DataGridRow>
