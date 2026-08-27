@@ -594,11 +594,11 @@ public sealed class H13E2EAcceptanceGateHandler : IProvisioningHandler
     internal static string MapTrapKindToRejectionCode(TrapKind kind) => kind switch
     {
         TrapKind.T1KeyVaultReferenceIdentity => H13Rejections.TrapT1Failed,
-        TrapKind.T2DataverseAppUser          => H13Rejections.TrapT2Failed,
-        TrapKind.T3GraphAppRoleParity        => H13Rejections.TrapT3Failed,
-        TrapKind.T4ExchangePolicyCount       => H13Rejections.TrapT4Failed,
-        TrapKind.T5SlotMiKvRbac              => H13Rejections.TrapT5Failed,
-        TrapKind.T6SpeConfidentialClient     => H13Rejections.TrapT6Failed,
+        TrapKind.T2DataverseAppUser => H13Rejections.TrapT2Failed,
+        TrapKind.T3GraphAppRoleParity => H13Rejections.TrapT3Failed,
+        TrapKind.T4ExchangePolicyCount => H13Rejections.TrapT4Failed,
+        TrapKind.T5SlotMiKvRbac => H13Rejections.TrapT5Failed,
+        TrapKind.T6SpeConfidentialClient => H13Rejections.TrapT6Failed,
         _ => throw new InvalidOperationException($"Unmapped trap kind '{kind}'."),
     };
 
@@ -608,11 +608,11 @@ public sealed class H13E2EAcceptanceGateHandler : IProvisioningHandler
     /// </summary>
     internal static string MapInvariantKindToRejectionCode(InvariantKind kind) => kind switch
     {
-        InvariantKind.I1NoHardcodedTenant   => H13Rejections.InvariantI1Failed,
+        InvariantKind.I1NoHardcodedTenant => H13Rejections.InvariantI1Failed,
         InvariantKind.I2AiSearchTenantFilter => H13Rejections.InvariantI2Failed,
-        InvariantKind.I3CosmosPartitionKey  => H13Rejections.InvariantI3Failed,
+        InvariantKind.I3CosmosPartitionKey => H13Rejections.InvariantI3Failed,
         InvariantKind.I4SpeContainerResolver => H13Rejections.InvariantI4Failed,
-        InvariantKind.I5GraphTokenTenant    => H13Rejections.InvariantI5Failed,
+        InvariantKind.I5GraphTokenTenant => H13Rejections.InvariantI5Failed,
         _ => throw new InvalidOperationException($"Unmapped invariant kind '{kind}'."),
     };
 

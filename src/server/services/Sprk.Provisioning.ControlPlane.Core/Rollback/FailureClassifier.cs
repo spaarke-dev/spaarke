@@ -58,10 +58,10 @@ public sealed class FailureClassifier : IFailureClassifier
         // RetryableWithCleanup — but keep the SAFE-default at Resumable.
         return exception switch
         {
-            TimeoutException              => FailureClass.Resumable,
-            HttpRequestException          => FailureClass.Resumable,
-            SocketException               => FailureClass.Resumable,
-            _                             => FailureClass.Resumable,
+            TimeoutException => FailureClass.Resumable,
+            HttpRequestException => FailureClass.Resumable,
+            SocketException => FailureClass.Resumable,
+            _ => FailureClass.Resumable,
         };
     }
 }

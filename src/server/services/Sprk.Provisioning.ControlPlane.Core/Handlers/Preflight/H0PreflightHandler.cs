@@ -406,18 +406,18 @@ public sealed class H0PreflightHandler : IProvisioningHandler
         switch (compat.Verdict)
         {
             case VersionCompatVerdict.Red:
-            {
-                const string rejectionCode = "upgrade-compat-red";
-                _logger.LogWarning(
-                    "H0 upgrade blocked by version-compat matrix (Red): runId={RunId} customerId={CustomerId} " +
-                    "currentBff={CurrentBff} currentSolutions={CurrentSolutions} targetBff={TargetBff} targetSolutions={TargetSolutions}",
-                    run.RunId, run.CustomerId, currentBff, currentSolutions, targetBff, targetSolutions);
-                await MarkFailedAsync(
-                    run, etag, rejectionCode, compat.Diagnostic,
-                    evidence: BuildCompatEvidence(compat, currentBff, currentSolutions, targetBff, targetSolutions),
-                    cancellationToken).ConfigureAwait(false);
-                return new HandlerResult.Failure(FailureClass.Resumable, rejectionCode, compat.Diagnostic);
-            }
+                {
+                    const string rejectionCode = "upgrade-compat-red";
+                    _logger.LogWarning(
+                        "H0 upgrade blocked by version-compat matrix (Red): runId={RunId} customerId={CustomerId} " +
+                        "currentBff={CurrentBff} currentSolutions={CurrentSolutions} targetBff={TargetBff} targetSolutions={TargetSolutions}",
+                        run.RunId, run.CustomerId, currentBff, currentSolutions, targetBff, targetSolutions);
+                    await MarkFailedAsync(
+                        run, etag, rejectionCode, compat.Diagnostic,
+                        evidence: BuildCompatEvidence(compat, currentBff, currentSolutions, targetBff, targetSolutions),
+                        cancellationToken).ConfigureAwait(false);
+                    return new HandlerResult.Failure(FailureClass.Resumable, rejectionCode, compat.Diagnostic);
+                }
 
             case VersionCompatVerdict.Yellow:
                 // Warn-but-allow: the run proceeds, but the operator manual-step
@@ -479,11 +479,11 @@ public sealed class H0PreflightHandler : IProvisioningHandler
 
     private static string BuildRejectionCode(string checkName) => checkName switch
     {
-        PreflightCheckNames.AzureOpenAiTpmHeadroom     => "quota-openai-tpm",
-        PreflightCheckNames.DataverseEnvCreationRate   => "quota-dataverse-env-rate",
-        PreflightCheckNames.SubscriptionVCpuQuota      => "quota-subscription-vcpu",
-        PreflightCheckNames.SpeCertBootstrap           => "spe-cert-bootstrap-missing",
-        _                                              => $"preflight-{checkName.ToLowerInvariant()}",
+        PreflightCheckNames.AzureOpenAiTpmHeadroom => "quota-openai-tpm",
+        PreflightCheckNames.DataverseEnvCreationRate => "quota-dataverse-env-rate",
+        PreflightCheckNames.SubscriptionVCpuQuota => "quota-subscription-vcpu",
+        PreflightCheckNames.SpeCertBootstrap => "spe-cert-bootstrap-missing",
+        _ => $"preflight-{checkName.ToLowerInvariant()}",
     };
 
     private async Task MarkFailedAsync(
