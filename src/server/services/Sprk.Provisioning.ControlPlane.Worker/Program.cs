@@ -672,6 +672,15 @@ builder.Services.AddSingleton<ISolutionImporter>(sp =>
 // AddHttpClient<IDataverseEnvCreator, BapRestEnvironmentCreator>()) applies
 // directly, no manual factory lambda / named client required.
 builder.Services.AddHttpClient<ISolutionVerifier, DataverseWebApiSolutionVerifier>();
+// HANDLER-07 + HANDLER-08 (Wave 2 pre-dispatch remediation 2026-08-27):
+// required-applications installer + org-settings applier + their canonical
+// manifests. Wave 2 ships scaffolds (log + return Success); the incremental
+// change to real `pac application install` / `pac org update-settings`
+// shell-outs lands without touching H6.
+builder.Services.AddSingleton<IRequiredApplicationsInstaller, PacRequiredApplicationsInstaller>();
+builder.Services.AddSingleton<IRequiredApplicationsManifest, StaticRequiredApplicationsManifest>();
+builder.Services.AddSingleton<IOrgSettingsContractApplier, PacOrgSettingsContractApplier>();
+builder.Services.AddSingleton<IOrgSettingsContractManifest, StaticOrgSettingsContractManifest>();
 builder.Services.AddScoped<H6SolutionImportHandler>();
 
 // Task 050: H7 Dataverse env-var values handler + 1 collaborator seam

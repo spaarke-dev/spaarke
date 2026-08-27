@@ -120,6 +120,10 @@ public sealed class H6SolutionImportHandler : IProvisioningHandler
     private readonly ISolutionCatalog _catalog;
     private readonly ISolutionImporter _importer;
     private readonly ISolutionVerifier _verifier;
+    private readonly IRequiredApplicationsInstaller _requiredAppsInstaller;
+    private readonly IRequiredApplicationsManifest _requiredAppsManifest;
+    private readonly IOrgSettingsContractApplier _orgSettingsApplier;
+    private readonly IOrgSettingsContractManifest _orgSettingsManifest;
     private readonly SolutionImportOptions _options;
     private readonly TimeProvider _timeProvider;
     private readonly ILogger<H6SolutionImportHandler> _logger;
@@ -133,12 +137,25 @@ public sealed class H6SolutionImportHandler : IProvisioningHandler
     /// constructor shapes). <see cref="TimeProvider"/> is injected (per
     /// docs/standards/TEST-ARCHITECTURE.md — "TimeProvider over Stopwatch")
     /// for deterministic testability.
+    ///
+    /// HANDLER-07 + HANDLER-08 (Wave 2 pre-dispatch remediation 2026-08-27) —
+    /// F13 + F14 verbatim absorption: the required-applications installer
+    /// (msft_PowerBI_Anchor) + Org Settings contract applier
+    /// (maxuploadfilesize=25MB) both run BEFORE
+    /// CanonicalSolutionCatalog resolve so a missing pre-req fails H6 fast
+    /// with a specific rejection code instead of surfacing 5 min into the
+    /// solution import as MissingDependency / "Webresource content size is
+    /// too big".
     /// </summary>
     public H6SolutionImportHandler(
         IProvisioningRunRepository repository,
         ISolutionCatalog catalog,
         ISolutionImporter importer,
         ISolutionVerifier verifier,
+        IRequiredApplicationsInstaller requiredAppsInstaller,
+        IRequiredApplicationsManifest requiredAppsManifest,
+        IOrgSettingsContractApplier orgSettingsApplier,
+        IOrgSettingsContractManifest orgSettingsManifest,
         IOptions<SolutionImportOptions> options,
         TimeProvider timeProvider,
         ILogger<H6SolutionImportHandler> logger)
@@ -147,6 +164,10 @@ public sealed class H6SolutionImportHandler : IProvisioningHandler
         ArgumentNullException.ThrowIfNull(catalog);
         ArgumentNullException.ThrowIfNull(importer);
         ArgumentNullException.ThrowIfNull(verifier);
+        ArgumentNullException.ThrowIfNull(requiredAppsInstaller);
+        ArgumentNullException.ThrowIfNull(requiredAppsManifest);
+        ArgumentNullException.ThrowIfNull(orgSettingsApplier);
+        ArgumentNullException.ThrowIfNull(orgSettingsManifest);
         ArgumentNullException.ThrowIfNull(options);
         ArgumentNullException.ThrowIfNull(timeProvider);
         ArgumentNullException.ThrowIfNull(logger);
@@ -155,6 +176,10 @@ public sealed class H6SolutionImportHandler : IProvisioningHandler
         _catalog = catalog;
         _importer = importer;
         _verifier = verifier;
+        _requiredAppsInstaller = requiredAppsInstaller;
+        _requiredAppsManifest = requiredAppsManifest;
+        _orgSettingsApplier = orgSettingsApplier;
+        _orgSettingsManifest = orgSettingsManifest;
         _options = options.Value;
         _timeProvider = timeProvider;
         _logger = logger;
@@ -299,6 +324,79 @@ public sealed class H6SolutionImportHandler : IProvisioningHandler
                 "Handler did NOT invoke Deploy-DataverseSolutions.ps1.";
             return await FailAsync(run, etag, FailureClass.Resumable,
                 SolutionImportRejectionCodes.MissingClientSecret, diagnostic, cancellationToken).ConfigureAwait(false);
+        }
+
+        // (7.5) HANDLER-07 (Wave 2 pre-dispatch remediation 2026-08-27) — F13:
+        //       ensure the canonical Power Platform applications (e.g.
+        //       msft_PowerBI_Anchor) are installed on the target env BEFORE
+        //       the importer fires. Fresh Production-tier envs lack this by
+        //       default → SpaarkeMaster env-var dep on powerbimashupparameter
+        //       → MissingDependency 5 min into the import. Runs BEFORE the
+        //       importer + BEFORE the org-settings apply (order matters —
+        //       admin-plane apps + admin-plane settings can be applied
+        //       independently, but co-locating both gates here keeps the
+        //       pre-import surface small + explicit).
+        try
+        {
+            var appsRequest = new RequiredApplicationsInstallRequest(
+                TenantId: tenantId,
+                ClientId: clientId,
+                ClientSecret: clientSecret,
+                TargetDataverseUrl: targetDataverseUrl,
+                RequiredApplicationNames: _requiredAppsManifest.RequiredApplicationNames);
+            var appsOutcome = await _requiredAppsInstaller
+                .EnsureInstalledAsync(appsRequest, cancellationToken).ConfigureAwait(false);
+            if (appsOutcome is RequiredApplicationsInstallOutcome.Failure appsFailure)
+            {
+                return await FailAsync(run, etag, FailureClass.Resumable,
+                    SolutionImportRejectionCodes.MissingRequiredApplication, appsFailure.Diagnostic, cancellationToken)
+                    .ConfigureAwait(false);
+            }
+        }
+        catch (OperationCanceledException) { throw; }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex,
+                "H6 required-applications installer infrastructure fault: runId={RunId} customerId={CustomerId}",
+                envelope.RunId, envelope.CustomerId);
+            return await FailAsync(run, etag, FailureClass.Resumable,
+                SolutionImportRejectionCodes.MissingRequiredApplication,
+                $"Required-applications installer infrastructure error: {ex.GetType().Name}: {ex.Message}.",
+                cancellationToken).ConfigureAwait(false);
+        }
+
+        // (7.6) HANDLER-08 (Wave 2 pre-dispatch remediation 2026-08-27) — F14:
+        //       apply the canonical Org Settings contract (e.g.
+        //       maxuploadfilesize=25_600_000) BEFORE the importer fires.
+        //       Fresh Production-tier envs default 5MB → UniversalDocumentUpload
+        //       PCF bundle exceeds this → import fails 5 min in.
+        try
+        {
+            var orgSettingsRequest = new OrgSettingsContractApplyRequest(
+                TenantId: tenantId,
+                ClientId: clientId,
+                ClientSecret: clientSecret,
+                TargetDataverseUrl: targetDataverseUrl,
+                OrgSettings: _orgSettingsManifest.OrgSettings);
+            var orgSettingsOutcome = await _orgSettingsApplier
+                .ApplyAsync(orgSettingsRequest, cancellationToken).ConfigureAwait(false);
+            if (orgSettingsOutcome is OrgSettingsContractOutcome.Failure orgFailure)
+            {
+                return await FailAsync(run, etag, FailureClass.Resumable,
+                    SolutionImportRejectionCodes.OrgSettingsContractFailed, orgFailure.Diagnostic, cancellationToken)
+                    .ConfigureAwait(false);
+            }
+        }
+        catch (OperationCanceledException) { throw; }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex,
+                "H6 org-settings applier infrastructure fault: runId={RunId} customerId={CustomerId}",
+                envelope.RunId, envelope.CustomerId);
+            return await FailAsync(run, etag, FailureClass.Resumable,
+                SolutionImportRejectionCodes.OrgSettingsContractFailed,
+                $"Org-settings applier infrastructure error: {ex.GetType().Name}: {ex.Message}.",
+                cancellationToken).ConfigureAwait(false);
         }
 
         // (8) Invoke the importer. Long-running (up to 60 min per POML) —

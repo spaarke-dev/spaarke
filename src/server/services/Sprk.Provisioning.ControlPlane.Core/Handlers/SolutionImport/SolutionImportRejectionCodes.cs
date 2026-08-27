@@ -154,6 +154,27 @@ public static class SolutionImportRejectionCodes
     /// </summary>
     public const string RetiredSolutionReintroduction = "retired-solution-reintroduction";
 
+    /// <summary>
+    /// HANDLER-07 (Wave 2 pre-dispatch remediation 2026-08-27) — F13 verbatim.
+    /// One or more required Power Platform applications (e.g.
+    /// msft_PowerBI_Anchor) could not be installed on the target Dataverse
+    /// env within the pre-import ensure step. Solution import would fail
+    /// 5 min in with MissingDependency; H6 fails fast (Resumable) with the
+    /// specific app-name list so the operator can pre-install manually
+    /// before re-running.
+    /// </summary>
+    public const string MissingRequiredApplication = "missing-required-application";
+
+    /// <summary>
+    /// HANDLER-08 (Wave 2 pre-dispatch remediation 2026-08-27) — F14 verbatim.
+    /// Org Settings contract (e.g. maxuploadfilesize=25MB) could not be
+    /// applied on the target Dataverse env within the pre-import ensure
+    /// step. UniversalDocumentUpload PCF bundle would fail 5 min in with
+    /// "Webresource content size is too big"; H6 fails fast (Resumable)
+    /// with the specific setting name + expected value.
+    /// </summary>
+    public const string OrgSettingsContractFailed = "org-settings-contract-failed";
+
     /// <summary>Race with a concurrent Cosmos writer — reconciler will observe winning state. Resumable — resume re-runs H6 which short-circuits on idempotency.</summary>
     public const string ConcurrentWriteConflict = "concurrent-write-conflict";
 

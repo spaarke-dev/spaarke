@@ -752,7 +752,9 @@ EventsPage               Events Page              1.0.0.0           77777777-888
         ISolutionImporter importer,
         ISolutionVerifier verifier,
         string? clientSecret = ClientSecret,
-        Sprk.Provisioning.ControlPlane.Handlers.Credentials.WorkerCredentialSelectionOptions? credentials = null)
+        Sprk.Provisioning.ControlPlane.Handlers.Credentials.WorkerCredentialSelectionOptions? credentials = null,
+        IRequiredApplicationsInstaller? requiredAppsInstaller = null,
+        IOrgSettingsContractApplier? orgSettingsApplier = null)
     {
         var options = Options.Create(new SolutionImportOptions
         {
@@ -764,10 +766,135 @@ EventsPage               Events Page              1.0.0.0           77777777-888
             // semantics unchanged.
             Credentials = credentials ?? new Sprk.Provisioning.ControlPlane.Handlers.Credentials.WorkerCredentialSelectionOptions(),
         });
+        // HANDLER-07 + HANDLER-08 (Wave 2 pre-dispatch remediation
+        // 2026-08-27): default to the production scaffold + static manifests
+        // so existing tests remain unaffected (scaffolds return Success
+        // unconditionally). HANDLER-07/08-specific tests inject
+        // Failure-returning fakes explicitly.
         return new H6SolutionImportHandler(
-            repo, catalog, importer, verifier, options,
+            repo, catalog, importer, verifier,
+            requiredAppsInstaller ?? new PacRequiredApplicationsInstaller(NullLogger<PacRequiredApplicationsInstaller>.Instance),
+            new StaticRequiredApplicationsManifest(),
+            orgSettingsApplier ?? new PacOrgSettingsContractApplier(NullLogger<PacOrgSettingsContractApplier>.Instance),
+            new StaticOrgSettingsContractManifest(),
+            options,
             TimeProvider.System,
             NullLogger<H6SolutionImportHandler>.Instance);
+    }
+
+    // ---------- HANDLER-07 required-applications gate (Wave 2 pre-dispatch remediation 2026-08-27) ----------
+
+    private sealed class StubRequiredApplicationsInstaller : IRequiredApplicationsInstaller
+    {
+        private readonly RequiredApplicationsInstallOutcome _outcome;
+        public int CallCount { get; private set; }
+        public RequiredApplicationsInstallRequest? LastRequest { get; private set; }
+        public StubRequiredApplicationsInstaller(RequiredApplicationsInstallOutcome outcome) => _outcome = outcome;
+        public Task<RequiredApplicationsInstallOutcome> EnsureInstalledAsync(
+            RequiredApplicationsInstallRequest request, CancellationToken ct)
+        {
+            CallCount++;
+            LastRequest = request;
+            return Task.FromResult(_outcome);
+        }
+    }
+
+    private sealed class StubOrgSettingsContractApplier : IOrgSettingsContractApplier
+    {
+        private readonly OrgSettingsContractOutcome _outcome;
+        public int CallCount { get; private set; }
+        public OrgSettingsContractApplyRequest? LastRequest { get; private set; }
+        public StubOrgSettingsContractApplier(OrgSettingsContractOutcome outcome) => _outcome = outcome;
+        public Task<OrgSettingsContractOutcome> ApplyAsync(
+            OrgSettingsContractApplyRequest request, CancellationToken ct)
+        {
+            CallCount++;
+            LastRequest = request;
+            return Task.FromResult(_outcome);
+        }
+    }
+
+    [Fact]
+    public async Task Handler07_RequiredApps_FailureFromInstaller_FailsResumable_NoImporterCall()
+    {
+        var run = BuildRun();
+        var repo = new FakeRepository(run, etag: "etag-h07");
+        var catalog = new CanonicalSolutionCatalog();
+        var importer = FakeSolutionImporter.Success();
+        var verifier = FakeSolutionVerifier.AllPresent(BuildExpectedManifest(catalog));
+        var failingInstaller = new StubRequiredApplicationsInstaller(
+            new RequiredApplicationsInstallOutcome.Failure("msft_PowerBI_Anchor install timed out at 6min poll."));
+        var handler = BuildHandler(repo, catalog, importer, verifier,
+            requiredAppsInstaller: failingInstaller);
+
+        var result = await handler.HandleAsync(BuildEnvelope(), CancellationToken.None);
+
+        var failure = result.Should().BeOfType<HandlerResult.Failure>().Subject;
+        failure.Class.Should().Be(FailureClass.Resumable);
+        failure.RejectionCode.Should().Be(SolutionImportRejectionCodes.MissingRequiredApplication);
+        failure.Diagnostic.Should().Contain("msft_PowerBI_Anchor");
+        importer.CallCount.Should().Be(0, "importer MUST NOT fire when required-apps gate fails");
+        failingInstaller.CallCount.Should().Be(1);
+        failingInstaller.LastRequest!.RequiredApplicationNames.Should().Contain("msft_PowerBI_Anchor");
+    }
+
+    [Fact]
+    public async Task Handler07_RequiredApps_Success_ProceedsToImporter()
+    {
+        var run = BuildRun();
+        var repo = new FakeRepository(run, etag: "etag-h07-ok");
+        var catalog = new CanonicalSolutionCatalog();
+        var importer = FakeSolutionImporter.Success();
+        var verifier = FakeSolutionVerifier.AllPresent(BuildExpectedManifest(catalog));
+        var okInstaller = new StubRequiredApplicationsInstaller(
+            new RequiredApplicationsInstallOutcome.Success(new[] { "msft_PowerBI_Anchor" }));
+        var handler = BuildHandler(repo, catalog, importer, verifier,
+            requiredAppsInstaller: okInstaller);
+
+        var result = await handler.HandleAsync(BuildEnvelope(), CancellationToken.None);
+
+        result.Should().BeOfType<HandlerResult.Success>();
+        okInstaller.CallCount.Should().Be(1);
+        importer.CallCount.Should().Be(1, "importer MUST fire when required-apps gate passes");
+    }
+
+    // ---------- HANDLER-08 org-settings contract gate (Wave 2 pre-dispatch remediation 2026-08-27) ----------
+
+    [Fact]
+    public async Task Handler08_OrgSettings_FailureFromApplier_FailsResumable_NoImporterCall()
+    {
+        var run = BuildRun();
+        var repo = new FakeRepository(run, etag: "etag-h08");
+        var catalog = new CanonicalSolutionCatalog();
+        var importer = FakeSolutionImporter.Success();
+        var verifier = FakeSolutionVerifier.AllPresent(BuildExpectedManifest(catalog));
+        var failingApplier = new StubOrgSettingsContractApplier(
+            new OrgSettingsContractOutcome.Failure("maxuploadfilesize apply failed: pac org update-settings exit 1."));
+        var handler = BuildHandler(repo, catalog, importer, verifier,
+            orgSettingsApplier: failingApplier);
+
+        var result = await handler.HandleAsync(BuildEnvelope(), CancellationToken.None);
+
+        var failure = result.Should().BeOfType<HandlerResult.Failure>().Subject;
+        failure.Class.Should().Be(FailureClass.Resumable);
+        failure.RejectionCode.Should().Be(SolutionImportRejectionCodes.OrgSettingsContractFailed);
+        failure.Diagnostic.Should().Contain("maxuploadfilesize");
+        importer.CallCount.Should().Be(0, "importer MUST NOT fire when org-settings gate fails");
+        failingApplier.CallCount.Should().Be(1);
+        failingApplier.LastRequest!.OrgSettings.Should().ContainKey("maxuploadfilesize");
+        failingApplier.LastRequest.OrgSettings["maxuploadfilesize"].Should().Be("25600000");
+    }
+
+    [Fact]
+    public void StaticManifests_MatchCanonicalR1Values()
+    {
+        // Regression guard: the canonical values ship in the constants.
+        StaticRequiredApplicationsManifest.DefaultRequiredApplicationNames
+            .Should().Contain("msft_PowerBI_Anchor");
+        StaticOrgSettingsContractManifest.DefaultOrgSettings
+            .Should().ContainKey("maxuploadfilesize");
+        StaticOrgSettingsContractManifest.DefaultOrgSettings["maxuploadfilesize"]
+            .Should().Be("25600000", "F14 verbatim: 25 MB = 25,600,000 bytes");
     }
 
     private static HandlerEnvelope BuildEnvelope() => new()
