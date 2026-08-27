@@ -127,6 +127,68 @@ vacuous passes in this project's previous batch.)
 
 ---
 
+## 5b. Hardening round — the sub/oid collapse (commit `1a77288b0`)
+
+Review escalated a latent risk: the classifier's safety against a collapsed `sub`/`oid` read was held
+**only by statement order** (the delegated-scope branch happening to `return` before the application
+branches). That is a latent invariant, not a defence — undocumented, and silently removable by a
+plausible refactor.
+
+**The refactor is not hypothetical.** `spaarkeai-compose-r8` (PR #832) verified FOUR sites in this BFF
+that resolve the caller as Entra `sub` where Dataverse requires `oid`, and that **the two shapes which
+look most correct are the broken ones**: `oid ?? NameIdentifier` resolves `sub` (the short `oid` claim
+does not survive inbound mapping, and `NameIdentifier` is *sub's* mapped form, not oid's), and
+`FindFirst("oid")` alone resolves null. Applied here, `objectId` becomes `sub`, `sub == oid` is
+always-true, and every caller without an `scp` claim is classified `Application`.
+
+Three independent defences; statement order is deliberately **not** one of them:
+
+1. **Provenance self-check** — claim resolution now reports which claim type supplied each value. Same
+   claim type for both ⇒ the equality is a self-comparison ⇒ `Indeterminate`, never `Application`.
+2. **Explicit conjunction** — both application branches state `!hasDelegatedScope` in their own
+   condition. The early return is kept as well (belt and braces).
+3. **Disjointness assertion** — `ObjectIdClaimTypes` ∩ `SubjectClaimTypes` = ∅ asserted by a test, so
+   overlapping the lists fails the build at the moment the mistake is made.
+
+Plus a prominent doc warning naming the anti-pattern, stating that `objectId` MUST NOT be read via
+`ClaimTypes.NameIdentifier` under any circumstance and why, citing PR #832.
+
+### Perturbation matrix
+
+| # | Perturbation | Result |
+|---|---|---|
+| **P9** | Overlap the lists — the literal #832 "harmonization" (`ObjectIdClaimTypes = [oid, NameIdentifier]`) | ✅ 4 RED. Critically, `Kind` stayed **`Indeterminate`** — the failure was on the `ObjectId`-is-null assertion, so **layer 1 contained the damage** while layer 3 (disjointness) flagged the edit |
+| **P10** | Overlap the lists **AND** disable the provenance check | ✅ RED with `Kind == Application` — **isolates layer 1 as the thing preventing the bypass** |
+| **P11** | Remove `!hasDelegatedScope` from both application branches (ordering intact) | ✅ all 19 GREEN — the early return alone suffices ⇒ the conjunction is genuine belt-and-braces |
+| **P12** | Move the delegated-scope branch **below** the application branches (conjunction intact) | ✅ all 19 GREEN — **the conjunction alone suffices; statement order is now genuinely redundant.** This is the proof the protection became structural |
+| **P13** | Remove the conjunction **AND** invert the ordering | ✅ 2 RED (`DelegatedScopeWins_*`, `ContradictoryToken_*`) — the suite notices when all protection is gone |
+
+### ⚠️ Would the collapsed-read test have failed against the PREVIOUS commit? **NO.**
+
+Asked explicitly, answered empirically: `CallerIdentity.cs` from `14869cd61` was restored, the new tests
+run against it → **19/19 PASS**, including `TheBugShapeFromPr832_*`.
+
+**Why, and what it means.** The bug-shape *principal* (`oid` absent, `NameIdentifier` present) was
+**already safe** on the previous commit, because the `objectId` read was already correctly paired
+(`oid` + `objectidentifier`). With neither claim present, `objectId` was null and the old rule-5 guard
+`!IsNullOrWhiteSpace(objectId)` already rejected the branch → `Indeterminate`.
+
+So the risk was mis-modelled in one specific respect: **the bug SHAPE alone is not the danger — the
+danger requires the SOURCE EDIT.** No input principal can trigger the collapse while the two claim-type
+lists are disjoint.
+
+What *does* discriminate the two commits, verified: applying the #832 refactor
+(`FirstNonBlank(principal, ClaimObjectId, ClaimTypes.NameIdentifier)`) to the **old** classifier yields
+**`Kind == Application`** — the bypass, with nothing to stop it. The same refactor against the **new**
+classifier yields `Indeterminate` (P9) *and* fails the build (disjointness test). That is precisely the
+gap this round closes.
+
+Consequence for how to read the new tests: `TheBugShapeFromPr832_*` is a **regression pin** (it locks in
+that `NameIdentifier` must never satisfy the `oid` read), not a commit-discriminating test. The
+discriminating evidence is P9/P10.
+
+---
+
 ## 6. Step 9.5 quality gates
 
 **`code-review`: PASS** — 0 Critical, 2 Warnings, 3 Suggestions.
