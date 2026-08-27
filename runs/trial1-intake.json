@@ -7,6 +7,5 @@
   "region": "westus2",
   "openAiRegion": "westus3",
   "tier": "shared-trial",
-  "operatorUpn": "ralph.schroeder@spaarke.com",
   "notes": "First E2E Model 1 platform stand-up — permanent trial env (per SESSION 11 Q4 BINDING). Batch dispatch of task 186. openAiRegion=westus3 per canonical Spaarke split (customer.bicep openAiLocation param); PRQ-E-14 preflight pre-verifies pinned model:version pairs are available + non-Deprecated in westus3 before H2a executes. environmentId omitted intentionally — Step 1f auto-creates the sprk_dataverseenvironment placeholder via Dataverse MCP. skipExternalPrereqs omitted — Step 0.5 iterates prereqs.yaml (PRQ-T-*/PRQ-S-*/PRQ-E-*)."
 }
