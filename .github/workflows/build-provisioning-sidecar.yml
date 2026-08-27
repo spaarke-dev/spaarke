@@ -96,7 +96,11 @@ jobs:
             ${{ env.IMAGE_NAME }}:${{ steps.tags.outputs.sha_tag }}
 
       - name: Run Trivy vulnerability scanner (image)
-        uses: aquasecurity/trivy-action@master
+        # Pinned, not @master. Tracking master meant an upstream change landed straight
+        # into this hard gate: the action began rejecting its own `path` input
+        # ("must be a literal path ... must not contain newline characters") and every
+        # sidecar build failed at the scan step, before login or push.
+        uses: aquasecurity/trivy-action@v0.36.0
         with:
           scan-type: 'image'
           image-ref: '${{ env.IMAGE_NAME }}:${{ steps.tags.outputs.sha_tag }}'
