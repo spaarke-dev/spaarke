@@ -468,6 +468,36 @@ jobs:
   build-test:
     name: Build & Test
     runs-on: windows-latest
+    # ── PORT FIX, 2026-08-27 — first run of this job here hung for SIX HOURS ──
+    # Run 33038499955: 04:09:05 -> 10:09:16, killed by GitHub's default 360-min
+    # job timeout, reported as `cancelled`, which took `CI / Router` red with it.
+    # The tests THEMSELVES completed — 4.1 MB of coverage was uploaded — so
+    # `dotnet test` finished testing and then never exited.
+    #
+    # The difference from sdap-ci, where this identical job takes ~25 min, is
+    # tier1's WORKFLOW-LEVEL env, which this ported job silently inherited:
+    #   APPLICATIONINSIGHTS_CONNECTION_STRING=InstrumentationKey=0000...
+    #   Redis__AllowInMemoryFallback=true
+    # Both were added for tier1's integration-smoke jobs as startup-validation
+    # workarounds (37ef38c2f, fd657e0b2). sdap-ci sets NEITHER. A bogus App
+    # Insights connection string is a well-known way to block process exit: the
+    # SDK initialises, then retries a telemetry flush against a dead endpoint on
+    # shutdown.
+    #
+    # Cleared below to restore parity with sdap-ci — which is this port's whole
+    # premise. Both fixes here are correct whichever var is actually to blame,
+    # and if it still hangs with parity env restored, the cause is elsewhere and
+    # the bounded timeout means we learn that in 60 minutes instead of six hours.
+    #
+    # The real cleanup is to scope those two vars to the two smoke jobs that need
+    # them instead of declaring them workflow-level, where they leak into every
+    # job added later. Deliberately not done in this PR: it would change the
+    # existing tier1 jobs during a window whose entire purpose is comparing
+    # verdicts. File it for after sdap-ci.yml is deleted.
+    timeout-minutes: 60
+    env:
+      APPLICATIONINSIGHTS_CONNECTION_STRING: ''
+      Redis__AllowInMemoryFallback: ''
     # 2026-07-10 (redesign-r2 audit F-5 completion): job-level continue-on-error
     # REMOVED. The 2026-06-24 "informational-only" posture predated the two-pass
     # classifier + reliability registry and silently swallowed the classifier's
@@ -696,6 +726,13 @@ jobs:
   eval-gate:
     name: Eval Gate (Golden Utterances)
     runs-on: windows-latest
+    # Bounded + env parity with sdap-ci, same reasoning as build-test above:
+    # tier1's workflow-level env does not exist in sdap-ci, and an unbounded job
+    # burns 6 hours before anyone learns it hung.
+    timeout-minutes: 20
+    env:
+      APPLICATIONINSIGHTS_CONNECTION_STRING: ''
+      Redis__AllowInMemoryFallback: ''
     steps:
       - name: Checkout
         uses: actions/checkout@v6
@@ -733,6 +770,13 @@ jobs:
   tenant-isolation:
     name: Tenant Isolation (I1–I5 invariants)
     runs-on: windows-latest
+    # Bounded + env parity with sdap-ci, same reasoning as build-test above:
+    # tier1's workflow-level env does not exist in sdap-ci, and an unbounded job
+    # burns 6 hours before anyone learns it hung.
+    timeout-minutes: 20
+    env:
+      APPLICATIONINSIGHTS_CONNECTION_STRING: ''
+      Redis__AllowInMemoryFallback: ''
     steps:
       - name: Checkout
         uses: actions/checkout@v6
@@ -797,6 +841,13 @@ jobs:
   compose-fidelity-gate:
     name: Compose Fidelity Gate (Corpus Round-Trip)
     runs-on: windows-latest
+    # Bounded + env parity with sdap-ci, same reasoning as build-test above:
+    # tier1's workflow-level env does not exist in sdap-ci, and an unbounded job
+    # burns 6 hours before anyone learns it hung.
+    timeout-minutes: 30
+    env:
+      APPLICATIONINSIGHTS_CONNECTION_STRING: ''
+      Redis__AllowInMemoryFallback: ''
     steps:
       - name: Checkout (with Git-LFS corpus fixtures)
         uses: actions/checkout@v6
