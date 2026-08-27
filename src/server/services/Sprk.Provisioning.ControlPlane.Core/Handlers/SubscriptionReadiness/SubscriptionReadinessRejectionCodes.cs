@@ -101,6 +101,16 @@ public static class SubscriptionReadinessRejectionCodes
     /// resume.
     /// </summary>
     public const string RunDeletedDuringCheck = "subready-run-deleted-during-check";
+
+    /// <summary>
+    /// HANDLER-04 (Wave 2 pre-dispatch remediation 2026-08-27) — F6 verbatim.
+    /// One or more required Azure resource providers did NOT reach
+    /// <c>Registered</c> state within the H1 poll timeout (default 5 min).
+    /// Diagnostic cites which providers failed + their observed
+    /// registrationState so the operator can escalate manually via
+    /// <c>az provider register</c> under an elevated identity.
+    /// </summary>
+    public const string ProviderRegistrationFailed = "subready-provider-registration-failed";
 }
 
 /// <summary>

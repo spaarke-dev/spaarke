@@ -176,6 +176,102 @@ public sealed class H1SubscriptionReadinessHandlerTests
         enqueuer.Sent.Should().BeEmpty();
     }
 
+    // ---------- HANDLER-04 provider-registration (Wave 2 pre-dispatch remediation 2026-08-27) ----------
+
+    [Fact]
+    public async Task Handler04_ProviderRegistration_Success_InvokedWithConfiguredProviders_AndProceeds()
+    {
+        var run = BuildRun(tenancy: "SpaarkeOwned");
+        var repo = new FakeRepository(run, etag: "etag-h04-ok");
+        var enqueuer = new FakeEnqueuer();
+        var probe = FakeProbe.AllPass();
+        var options = new SubscriptionReadinessOptions
+        {
+            RequiredResourceProviders = new List<string> { "Microsoft.KeyVault", "Microsoft.Storage" },
+            PollInterval = TimeSpan.FromSeconds(1),
+            PollTotalTimeout = TimeSpan.FromSeconds(30),
+        };
+        var handler = NewHandler(repo, enqueuer, probe, options);
+
+        var result = await handler.HandleAsync(BuildEnvelope(), CancellationToken.None);
+
+        result.Should().BeOfType<HandlerResult.Success>();
+        probe.ReachabilityCalls.Should().Be(1);
+        probe.ProviderRegistrationCalls.Should().Be(1, "HANDLER-04 provider-registration step MUST fire after reachability");
+        probe.LastRequestedProviders.Should().BeEquivalentTo(new[] { "Microsoft.KeyVault", "Microsoft.Storage" });
+    }
+
+    [Fact]
+    public async Task Handler04_ProviderRegistration_EmptyList_Skipped()
+    {
+        var run = BuildRun(tenancy: "SpaarkeOwned");
+        var repo = new FakeRepository(run, etag: "etag-h04-skip");
+        var enqueuer = new FakeEnqueuer();
+        var probe = FakeProbe.AllPass();
+        var options = new SubscriptionReadinessOptions
+        {
+            RequiredResourceProviders = new List<string>(),
+        };
+        var handler = NewHandler(repo, enqueuer, probe, options);
+
+        var result = await handler.HandleAsync(BuildEnvelope(), CancellationToken.None);
+
+        result.Should().BeOfType<HandlerResult.Success>();
+        probe.ProviderRegistrationCalls.Should().Be(0, "empty required-provider list MUST short-circuit the step");
+    }
+
+    [Fact]
+    public async Task Handler04_ProviderRegistration_ProbeReportsFailure_FailsResumable_ProviderRegistrationFailed()
+    {
+        var run = BuildRun(tenancy: "SpaarkeOwned");
+        var repo = new FakeRepository(run, etag: "etag-h04-fail");
+        var enqueuer = new FakeEnqueuer();
+        var probe = new FakeProbe
+        {
+            ReachabilityResult = new SubscriptionReadinessCheckResult(true, "ok", null),
+            ProviderRegistrationResult = new SubscriptionReadinessCheckResult(
+                false,
+                "Provider registration did NOT reach 'Registered' within 300s for 1 of 2 required providers: Microsoft.Cache=Registering.",
+                null),
+        };
+        var options = new SubscriptionReadinessOptions
+        {
+            RequiredResourceProviders = new List<string> { "Microsoft.KeyVault", "Microsoft.Cache" },
+        };
+        var handler = NewHandler(repo, enqueuer, probe, options);
+
+        var result = await handler.HandleAsync(BuildEnvelope(), CancellationToken.None);
+
+        var failure = result.Should().BeOfType<HandlerResult.Failure>().Subject;
+        failure.Class.Should().Be(FailureClass.Resumable);
+        failure.RejectionCode.Should().Be(SubscriptionReadinessRejectionCodes.ProviderRegistrationFailed);
+        failure.Diagnostic.Should().Contain("Microsoft.Cache=Registering");
+        probe.LighthouseCalls.Should().Be(0, "provider-registration failure MUST short-circuit the Lighthouse branch");
+        enqueuer.Sent.Should().BeEmpty();
+        repo.LastWrittenRun!.Status.Should().Be(RunStatus.Failed);
+    }
+
+    [Fact]
+    public async Task Handler04_ProviderRegistration_RunsBeforeLighthouse_OnCustomerOwned()
+    {
+        var run = BuildRun(tenancy: "CustomerOwned");
+        var repo = new FakeRepository(run, etag: "etag-h04-order");
+        var enqueuer = new FakeEnqueuer();
+        var probe = FakeProbe.AllPass();
+        var options = new SubscriptionReadinessOptions
+        {
+            RequiredResourceProviders = new List<string> { "Microsoft.KeyVault" },
+        };
+        var handler = NewHandler(repo, enqueuer, probe, options);
+
+        var result = await handler.HandleAsync(BuildEnvelope(), CancellationToken.None);
+
+        result.Should().BeOfType<HandlerResult.Success>();
+        probe.ReachabilityCalls.Should().Be(1);
+        probe.ProviderRegistrationCalls.Should().Be(1);
+        probe.LighthouseCalls.Should().Be(1, "CustomerOwned Lighthouse check MUST still fire after provider-registration success");
+    }
+
     // ---------- AC-5 Idempotency (durable no-op) ----------
 
     [Fact]
@@ -481,12 +577,24 @@ public sealed class H1SubscriptionReadinessHandlerTests
     private static H1SubscriptionReadinessHandler NewHandler(
         IProvisioningRunRepository repository,
         IHandlerEnqueuer enqueuer,
-        ISubscriptionReadinessProbe probe)
+        ISubscriptionReadinessProbe probe,
+        SubscriptionReadinessOptions? options = null)
     {
+        // HANDLER-04 (Wave 2 pre-dispatch remediation 2026-08-27): default
+        // to an EMPTY required-provider list so the existing test suite's
+        // FakeProbe.RegisterAndPollRequiredProvidersAsync is never invoked
+        // (handler skips the step when the list is empty). Tests that
+        // exercise HANDLER-04's provider-registration branch supply a
+        // populated list explicitly.
+        var boundOptions = options ?? new SubscriptionReadinessOptions
+        {
+            RequiredResourceProviders = new List<string>(),
+        };
         return new H1SubscriptionReadinessHandler(
             repository,
             enqueuer,
             probe,
+            Microsoft.Extensions.Options.Options.Create(boundOptions),
             NullLogger<H1SubscriptionReadinessHandler>.Instance);
     }
 
@@ -591,9 +699,16 @@ public sealed class H1SubscriptionReadinessHandlerTests
             = new(true, "ok", null);
         public SubscriptionReadinessCheckResult LighthouseResult { get; set; }
             = new(true, "ok", null);
+        // HANDLER-04 (Wave 2 pre-dispatch remediation 2026-08-27) — provider
+        // registration result. Pass-through default so existing tests
+        // exercise the unaffected happy path.
+        public SubscriptionReadinessCheckResult ProviderRegistrationResult { get; set; }
+            = new(true, "ok", null);
 
         public int ReachabilityCalls { get; private set; }
         public int LighthouseCalls { get; private set; }
+        public int ProviderRegistrationCalls { get; private set; }
+        public IReadOnlyList<string>? LastRequestedProviders { get; private set; }
 
         public static FakeProbe AllPass() => new();
 
@@ -609,6 +724,19 @@ public sealed class H1SubscriptionReadinessHandlerTests
         {
             LighthouseCalls++;
             return Task.FromResult(LighthouseResult);
+        }
+
+        public Task<SubscriptionReadinessCheckResult> RegisterAndPollRequiredProvidersAsync(
+            string subscriptionId,
+            string tenantId,
+            IReadOnlyList<string> requiredProviders,
+            TimeSpan pollInterval,
+            TimeSpan totalTimeout,
+            CancellationToken cancellationToken)
+        {
+            ProviderRegistrationCalls++;
+            LastRequestedProviders = requiredProviders;
+            return Task.FromResult(ProviderRegistrationResult);
         }
     }
 }

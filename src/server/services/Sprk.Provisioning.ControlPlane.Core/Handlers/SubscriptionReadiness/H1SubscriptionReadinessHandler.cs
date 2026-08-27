@@ -80,6 +80,7 @@
 
 using System.Diagnostics;
 using System.Text.Json;
+using Microsoft.Extensions.Options;
 using Sprk.Provisioning.ControlPlane.Enqueue;
 using Sprk.Provisioning.ControlPlane.Models;
 using Sprk.Provisioning.ControlPlane.Repositories;
@@ -121,6 +122,7 @@ public sealed class H1SubscriptionReadinessHandler : IProvisioningHandler
     private readonly IProvisioningRunRepository _repository;
     private readonly IHandlerEnqueuer _enqueuer;
     private readonly ISubscriptionReadinessProbe _probe;
+    private readonly SubscriptionReadinessOptions _options;
     private readonly ILogger<H1SubscriptionReadinessHandler> _logger;
 
     /// <inheritdoc/>
@@ -132,21 +134,25 @@ public sealed class H1SubscriptionReadinessHandler : IProvisioningHandler
     /// <param name="repository">Cosmos-backed run state store (task 037).</param>
     /// <param name="enqueuer">Service Bus enqueuer used to dispatch H2a on success (wave-C4 temporary bridge — see file header).</param>
     /// <param name="probe">The ARM readiness probe — <see cref="ArmSubscriptionReadinessProbe"/> in production (task 121, Wave G-2; real Azure.ResourceManager SDK calls).</param>
+    /// <param name="options">HANDLER-04 options — canonical required-provider list + poll timeout / interval (Wave 2 pre-dispatch remediation).</param>
     /// <param name="logger">Structured logger.</param>
     public H1SubscriptionReadinessHandler(
         IProvisioningRunRepository repository,
         IHandlerEnqueuer enqueuer,
         ISubscriptionReadinessProbe probe,
+        IOptions<SubscriptionReadinessOptions> options,
         ILogger<H1SubscriptionReadinessHandler> logger)
     {
         ArgumentNullException.ThrowIfNull(repository);
         ArgumentNullException.ThrowIfNull(enqueuer);
         ArgumentNullException.ThrowIfNull(probe);
+        ArgumentNullException.ThrowIfNull(options);
         ArgumentNullException.ThrowIfNull(logger);
 
         _repository = repository;
         _enqueuer = enqueuer;
         _probe = probe;
+        _options = options.Value;
         _logger = logger;
     }
 
@@ -309,6 +315,64 @@ public sealed class H1SubscriptionReadinessHandler : IProvisioningHandler
                 FailureClass.Resumable,
                 SubscriptionReadinessRejectionCodes.SubscriptionUnreachable,
                 reachabilityResult.Diagnostic);
+        }
+
+        // (5.5) HANDLER-04 (Wave 2 pre-dispatch remediation 2026-08-27) — F6:
+        //       register + poll canonical Azure resource providers on the
+        //       target subscription BEFORE H2a's ~20 min Bicep deploy fails
+        //       with `MissingSubscriptionRegistration` on a random RP. Runs
+        //       after reachability (subscription must be reachable) but
+        //       BEFORE Lighthouse (delegation doesn't imply RPs registered).
+        //       Skipped only when the required-provider list is empty
+        //       (operator opt-out via config; not the default path).
+        if (_options.RequiredResourceProviders.Count > 0)
+        {
+            SubscriptionReadinessCheckResult providerResult;
+            try
+            {
+                providerResult = await _probe.RegisterAndPollRequiredProvidersAsync(
+                    subscriptionId,
+                    tenantId,
+                    (IReadOnlyList<string>)_options.RequiredResourceProviders.ToList(),
+                    _options.PollInterval,
+                    _options.PollTotalTimeout,
+                    cancellationToken).ConfigureAwait(false);
+            }
+            catch (Exception ex) when (ex is not OperationCanceledException)
+            {
+                _logger.LogError(
+                    ex,
+                    "H1 subscription-readiness probe (provider registration) threw unexpected exception: " +
+                    "runId={RunId} customerId={CustomerId} subscriptionId={SubscriptionId}",
+                    envelope.RunId, envelope.CustomerId, subscriptionId);
+                var diagnostic =
+                    $"Subscription-readiness probe (provider registration) infrastructure error: {ex.GetType().Name}: {ex.Message}. " +
+                    "This is Resumable — operator resolves the ARM SDK / connectivity issue and " +
+                    "POSTs /api/runs/{id}/resume.";
+                await MarkFailedAsync(
+                    run, etag, SubscriptionReadinessRejectionCodes.ProbeInfrastructureError,
+                    diagnostic, evidence: null, cancellationToken).ConfigureAwait(false);
+                return new HandlerResult.Failure(
+                    FailureClass.Resumable,
+                    SubscriptionReadinessRejectionCodes.ProbeInfrastructureError,
+                    diagnostic);
+            }
+
+            if (!providerResult.Passed)
+            {
+                _logger.LogWarning(
+                    "H1 subscription readiness failed (provider registration): runId={RunId} customerId={CustomerId} " +
+                    "subscriptionId={SubscriptionId}",
+                    envelope.RunId, envelope.CustomerId, subscriptionId);
+                await MarkFailedAsync(
+                    run, etag, SubscriptionReadinessRejectionCodes.ProviderRegistrationFailed,
+                    providerResult.Diagnostic, providerResult.Evidence, cancellationToken)
+                    .ConfigureAwait(false);
+                return new HandlerResult.Failure(
+                    FailureClass.Resumable,
+                    SubscriptionReadinessRejectionCodes.ProviderRegistrationFailed,
+                    providerResult.Diagnostic);
+            }
         }
 
         // (6) Lighthouse delegation check — CustomerOwned only.

@@ -160,6 +160,14 @@ builder.Services.AddSingleton<ISubscriptionReadinessProbe>(sp =>
     var logger = sp.GetRequiredService<ILogger<ArmSubscriptionReadinessProbe>>();
     return new ArmSubscriptionReadinessProbe(armClient, logger);
 });
+// HANDLER-04 (Wave 2 pre-dispatch remediation 2026-08-27): bind
+// SubscriptionReadinessOptions with the canonical required-provider list
+// H1 registers + polls before H2a's Bicep deploy. Sensible defaults ship
+// in the options class; operators override via config section
+// `SubscriptionReadiness:RequiredResourceProviders` if the platform
+// composition changes.
+builder.Services.Configure<SubscriptionReadinessOptions>(
+    builder.Configuration.GetSection("SubscriptionReadiness"));
 builder.Services.AddScoped<H1SubscriptionReadinessHandler>();
 
 // Task 044 / task 123: H2a Bicep infra-deploy handler + four collaborator
