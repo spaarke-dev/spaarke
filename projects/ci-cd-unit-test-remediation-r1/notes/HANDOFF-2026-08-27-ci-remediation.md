@@ -13,9 +13,26 @@ This is **ad-hoc direct repair, not a tracked project** — an explicit owner de
 | Field | Value |
 |---|---|
 | **Work** | CI/CD remediation — master was red, projects reporting breakage |
-| **Status** | master GREEN; 2 PRs open and green, awaiting merge |
-| **Next Action** | Merge **#833** then **#835** then **#836**. All three are green. Then start the shadow-observation window (below). |
-| **Branch when saved** | `fix/sidecar-net10-base` (clean) |
+| **Status** | **All six PRs merged.** master green except one documented owner-action item (below). |
+| **Next Action** | Start the **shadow-observation window** (step 2 below). Nothing else should land until it completes. |
+| **Branch when saved** | `docs/sidecar-42a-amendment` (PR #837, docs-only) |
+
+> **Updated 2026-08-27 16:2x** — #833, #835, #836 merged. Verified on master: tier1 carries exactly its 8 jobs with **no** `build-test`; tier2 carries `full-unit-tests`; `Deploy Office Add-ins` flipped red → green. One workflow is still red on master and it is **not** a regression — see "Remaining red" below.
+
+### Remaining red (owner action, not a code defect)
+
+`Build Provisioning Sidecar` fails on master at the `Azure login (OIDC)` step:
+
+```
+AADSTS700213: No matching federated identity record found for presented
+assertion subject 'repo:spaarke-dev/spaarke:ref:refs/heads/master'
+```
+
+Everything #836 fixed passes — build, Trivy, size (212 MB compressed). The image simply is not published. It was green on the PR because the publish leg is gated `if: github.event_name != 'pull_request'`.
+
+The ACR itself **is** provisioned (`sprkcontrolplanedevacr.azurecr.io`, var populated 2026-08-21) — the workflow's comment claiming otherwise was stale and is corrected in #837. The one missing piece is the federated credential. Fix: `docs/guides/GITHUB-ACTIONS-AZURE-OIDC-SETUP.md`, five subjects, one `az` loop.
+
+Deliberately **not** papered over with a `vars.SIDECAR_ACR_LOGIN_SERVER != ''` skip — that goes green while silently never publishing.
 
 ### Owner's north star (binding — drove several decisions)
 
@@ -35,36 +52,41 @@ This is **ad-hoc direct repair, not a tracked project** — an explicit owner de
 | #829 | retry classifier — measure determinism instead of assuming it |
 | #830 | trivy pin, npm convention, manifest trigger, nightly graph-parity gating |
 
-### Open — all green, ready to merge
+| #833 | 3 gates → tier1; full suite → tier2. Verified on master post-merge. |
+| #835 | build `@spaarke/auth` before add-ins + trigger path. `Deploy Office Add-ins` now green on master. |
+| #836 | sidecar on .NET 10 LTS + measured size gate. |
+
+### Open
 | PR | Branch | What |
 |---|---|---|
-| **#833** | `ci/tier1-gate-port` | 3 gates → tier1; full suite → tier2. **26 pass / 0 fail** |
-| **#835** | `fix/ci-office-addins-workspace-dep` | build `@spaarke/auth` before add-ins + trigger path. **21 pass / 0 fail** |
-| **#836** | `fix/sidecar-net10-base` | sidecar on .NET 10 LTS + measured size gate. **23 pass / 0 fail** |
+| **#837** | `docs/sidecar-42a-amendment` | docs-only. design.md §4.2a → v3.7 (base image + measured 212 MB) + corrects the stale ACR comment. |
 
 ### Open issue
 - **#827** — thread tenant through the job spine (RecordMatchService I2 waiver expires when `spaarke-records-index` goes multi-tenant). Prerequisite for shared tenancy, not a follow-up.
 
-### master workflow health
+### master workflow health (post-merge, 2026-08-27)
 ```
 SDAP CI                     success     (was 60% failure rate)
 CI (Router)                 success
 nightly-health              success     (9/9 jobs — first fully green night)
-Build Provisioning Sidecar  failure     -> fixed by #836, not yet merged
-Deploy Office Add-ins       failure     -> fixed by #835, not yet merged
+Deploy Office Add-ins       success     <- flipped by #835
+Build Provisioning Sidecar  failure     <- build/Trivy/size all PASS; only the
+                                           publish leg fails, on the missing
+                                           OIDC federated credential. Owner
+                                           action; see "Remaining red" above.
 ```
 
 ---
 
 ## Next actions, in order
 
-1. **Merge #833, #835, #836.** All green. Verify master's own runs afterwards.
+1. ~~**Merge #833, #835, #836.**~~ ✅ **Done 2026-08-27.** master runs verified afterwards; results in the health block above.
 2. **Shadow window** — run tier1 and `sdap-ci.yml` in parallel across a few days of real PRs and confirm the verdicts agree. **Cannot be compressed**; see "the port broke twice" below.
 3. **Delete `sdap-ci.yml`** (tasks 071 / 075 / 077). Removes the duplicate *and* its ~30 min leg.
 4. **Enable branch protection** with `CI / Router` as the single required check. **OWNER DECISION — do not do unprompted.** This is what makes the north star hold; without it everything drifts red again. Sequence last: flipping it while a flaky gate remains blocks the team rather than annoying them.
 
 ### Still owed to the owner
-- **`design.md` §4.2a amendment** — owner APPROVED adding it. §4.2a names `mcr.microsoft.com/powershell:7.4-mariner` explicitly; #836 deviates. Path A per root CLAUDE.md §6.5. Held pending the size number, which is now known (212 MB) — **so this is now unblocked and should be written.**
+- ~~**`design.md` §4.2a amendment**~~ ✅ **Written 2026-08-27 — PR #837.** One correction to what this handoff originally said: it filed the amendment as **Path A** (project-scoped exception). That was wrong. Path A means the guidance is still correct in general and we have a narrow reason to deviate — but `powershell:7.4-mariner` is not a valid-but-inconvenient choice, it is **end-of-life** (MCR publishes a `7.4-mariner-2.0-EOL` tag beside the pinned one). The design text was factually wrong, so it was written as **Path B (amendment)**. Filing it as an exception would have left a dead image standing as the documented default. Heuristic worth keeping: *Path A when the rule still holds and you are the special case; Path B when the rule itself has stopped being true.*
 - **Five Azure OIDC federated credentials** — owner action, cannot be done from here. Runbook shipped at [`docs/guides/GITHUB-ACTIONS-AZURE-OIDC-SETUP.md`](../../../docs/guides/GITHUB-ACTIONS-AZURE-OIDC-SETUP.md). Only remaining red workflow after #835/#836 merge (`publish-provisioning-arm-artifacts`).
 
 ---
