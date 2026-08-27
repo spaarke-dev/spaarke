@@ -7,6 +7,10 @@ on:
       - work/SDAP-outlook-office-add-in
     paths:
       - 'src/client/office-addins/**'
+      # The add-ins consume @spaarke/auth as a `file:` dependency and build it from
+      # source (dist/ is gitignored), so a change there changes what ships here.
+      # Without this path the add-ins would keep deploying against a stale auth lib.
+      - 'src/client/shared/Spaarke.Auth/**'
       - '.github/workflows/deploy-office-addins.yml'
   workflow_dispatch:
 
@@ -26,6 +30,21 @@ jobs:
           node-version: '18'
           cache: 'npm'
           cache-dependency-path: src/client/office-addins/package-lock.json
+
+      # @spaarke/auth is a `file:../shared/Spaarke.Auth` dependency whose package.json
+      # points main at `dist/index.js` — and `dist/` is gitignored
+      # (src/client/shared/Spaarke.Auth/.gitignore:5). On a developer machine it exists
+      # from a previous build, so this is invisible locally. On a fresh CI checkout it
+      # does not, `npm install` links a package with no built output, and webpack fails
+      # with "Can't resolve '@spaarke/auth'".
+      #
+      # Build the dependency first. This must stay AHEAD of the add-ins install: npm
+      # resolves the file: link at install time.
+      - name: "Build @spaarke/auth (file: dependency — dist/ is gitignored)"
+        working-directory: src/client/shared/Spaarke.Auth
+        run: |
+          npm install --legacy-peer-deps --no-audit --no-fund
+          npm run build
 
       - name: Install dependencies
         working-directory: src/client/office-addins

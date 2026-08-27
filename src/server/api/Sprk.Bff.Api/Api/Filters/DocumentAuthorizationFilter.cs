@@ -3,6 +3,7 @@ using Microsoft.AspNetCore.Http.HttpResults;
 using Spaarke.Core.Auth;
 using Sprk.Bff.Api.Infrastructure.Errors;
 using Sprk.Bff.Api.Infrastructure.Auth;
+using Sprk.Bff.Api.Infrastructure.Authentication;
 
 namespace Sprk.Bff.Api.Api.Filters;
 
@@ -45,8 +46,12 @@ public class DocumentAuthorizationFilter : IEndpointFilter
     {
         var httpContext = context.HttpContext;
 
-        // Extract user ID from claims
-        var userId = httpContext.User.FindFirst(ClaimTypes.NameIdentifier)?.Value;
+        // The caller's Entra OBJECT ID (`oid`) — the identifier IAccessDataSource matches against
+        // Dataverse `systemuser.azureactivedirectoryobjectid`. Reading ClaimTypes.NameIdentifier
+        // directly (as this did until UAT 2026-08-26 / D-6) yields `sub` under inbound claim
+        // mapping — a pairwise, non-GUID id that can never match a systemuser, so EVERY caller on
+        // EVERY route carrying this filter was denied. See Infrastructure/Authentication/CallerResolution.
+        var userId = CallerResolution.ResolveObjectId(httpContext.User);
         if (string.IsNullOrEmpty(userId))
         {
             return Results.Problem(

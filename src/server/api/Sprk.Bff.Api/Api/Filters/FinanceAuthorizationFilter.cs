@@ -2,6 +2,7 @@ using System.Security.Claims;
 using Spaarke.Core.Auth;
 using Sprk.Bff.Api.Infrastructure.Errors;
 using Sprk.Bff.Api.Infrastructure.Auth;
+using Sprk.Bff.Api.Infrastructure.Authentication;
 
 namespace Sprk.Bff.Api.Api.Filters;
 
@@ -51,8 +52,8 @@ public class FinanceAuthorizationFilter : IEndpointFilter
     {
         var httpContext = context.HttpContext;
 
-        // Extract user ID from claims
-        var userId = httpContext.User.FindFirst(ClaimTypes.NameIdentifier)?.Value;
+        // Entra `oid`, not `sub` — see CallerResolution (UAT 2026-08-26 / D-6 class).
+        var userId = CallerResolution.ResolveObjectId(httpContext.User);
         if (string.IsNullOrEmpty(userId))
         {
             return Results.Problem(

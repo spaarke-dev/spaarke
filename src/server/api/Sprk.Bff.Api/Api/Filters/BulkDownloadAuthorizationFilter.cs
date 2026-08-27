@@ -2,6 +2,7 @@ using System.Security.Claims;
 using Spaarke.Core.Auth;
 using Sprk.Bff.Api.Infrastructure.Auth;
 using Sprk.Bff.Api.Models.Documents;
+using Sprk.Bff.Api.Infrastructure.Authentication;
 
 namespace Sprk.Bff.Api.Api.Filters;
 
@@ -120,7 +121,8 @@ public sealed class BulkDownloadAuthorizationFilter : IEndpointFilter
         }
 
         // Step 2: caller identity. Required before any per-document decision can be made at all.
-        var callerId = httpContext.User.FindFirst(ClaimTypes.NameIdentifier)?.Value;
+        // Entra `oid`, not `sub` — see CallerResolution (UAT 2026-08-26 / D-6 class).
+        var callerId = CallerResolution.ResolveObjectId(httpContext.User);
         if (string.IsNullOrEmpty(callerId))
         {
             _logger?.LogWarning("Bulk download authorization denied: no NameIdentifier claim");

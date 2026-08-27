@@ -9,6 +9,7 @@ using ApiRegardingRecordType = Sprk.Bff.Api.Api.Events.Dtos.RegardingRecordType;
 using ApiUpdateEventRequest = Sprk.Bff.Api.Api.Events.Dtos.UpdateEventRequest;
 using DataverseCreateEventRequest = Spaarke.Dataverse.CreateEventRequest;
 using DataverseUpdateEventRequest = Spaarke.Dataverse.UpdateEventRequest;
+using Sprk.Bff.Api.Infrastructure.Authentication;
 
 namespace Sprk.Bff.Api.Api.Events;
 
@@ -397,8 +398,7 @@ public static class EventEndpoints
             // NullMembershipEventPublisher peer logs + returns (ADR-032 P2).
             // Publisher contract guarantees no exceptions propagate here.
             var traceId = httpContext.TraceIdentifier;
-            var oid = httpContext.User.FindFirstValue(ClaimTypes.NameIdentifier)
-                ?? httpContext.User.FindFirstValue("oid");
+            var oid = CallerResolution.ResolveObjectId(httpContext.User);
             if (Guid.TryParse(oid, out var callerOid))
             {
                 var membershipEvent = new MembershipChangedEvent
