@@ -180,12 +180,25 @@ jobs:
         # no stored key), so they additionally require `Storage Blob Data
         # Contributor` on the account. Contributor is not a superset of it.
         #
-        # Grant (least privilege -- account scope, not subscription):
+        # APPLIED 2026-08-27 -- `Storage Blob Data Contributor` granted to the
+        # deployment app (github-actions-spe-infrastructure,
+        # 8c85a481-f3a0-46de-b84e-3ede8a4d60c3) at RESOURCE-GROUP scope:
+        #
         #   az role assignment create \
-        #     --assignee <AZURE_CLIENT_ID app> \
+        #     --assignee 8c85a481-f3a0-46de-b84e-3ede8a4d60c3 \
         #     --role "Storage Blob Data Contributor" \
-        #     --scope /subscriptions/<sub>/resourceGroups/rg-spaarke-platform-dev\
-        # /providers/Microsoft.Storage/storageAccounts/sprkcpartifactsdev
+        #     --scope /subscriptions/<sub>/resourceGroups/rg-spaarke-platform-dev
+        #
+        # RG scope rather than single-account scope is deliberate (owner
+        # decision): it covers future artifact accounts in this RG without a
+        # second grant. Still well short of subscription scope.
+        #
+        # Verified: this workflow ran green end-to-end after the grant --
+        # Azure Login, both blob uploads, and manifest generation.
+        #
+        # NOTE if you are running this from Git Bash on Windows: MSYS rewrites a
+        # leading /subscriptions/... into a Windows path and az fails with a
+        # confusing `MissingSubscription`. Prefix with MSYS_NO_PATHCONV=1.
         run: |
           az storage blob upload \
             --account-name "${{ vars.PROVISIONING_ARTIFACTS_STORAGE_ACCOUNT }}" \
