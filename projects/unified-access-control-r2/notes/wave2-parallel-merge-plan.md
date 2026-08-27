@@ -1247,3 +1247,63 @@ adr-check **0 Violations**.
 Prior caveats unchanged: no live token decoded (`sub == oid` rests on documented Entra behaviour), no test
 exercises the real HTTP pipeline, and the allow-list remains an operator prerequisite for
 `customer-provisioning-orchestration-r1`.
+
+---
+
+## A18. 🔴 ADR-010 — 075's report does NOT match the merged state. Measured, not inferred.
+
+**§4c above says 075 "deleted `IRecordContainerResolver` and registered the concrete class (ADR-010
+compliant anyway)". The merged tree still has it.** Both `IRecordContainerResolver.cs` and
+`ISecurableEntityRegistry.cs` are present, and `Program.cs:62-63` registers both by interface.
+
+Measured on either side of 075's merge commit, rather than reasoned about:
+
+| Tree | `ADR010_DITests` 1:1 interface count |
+|---|---|
+| ceiling | **153** |
+| HEAD~1 (tranche 1 landed, 075 NOT merged) | **155** — master's +2, not ours |
+| HEAD (075 merged) | **157** — **075 adds exactly +2** |
+
+So the pre-existing failure really was master's, and it stopped being only master's the moment 075 landed.
+
+**Not a CI blocker, and say so precisely**: `ADR010_DITests` is **not** in `ci-tier1-blocking.yml`'s
+`arch-tests` filter — that filter names 11 facts (ADR-001, ADR-002, ADR-007 ×2, ADR-009 ×2, ADR-013, and
+074's four), and ADR-010 is absent. It is also already red on master. Neither fact makes it ours to ignore.
+
+### The two interfaces are DIFFERENT cases — do not treat them as a pair
+
+| Interface | Substituted in tests? | Second impl? | Verdict |
+|---|---|---|---|
+| `ISecurableEntityRegistry` | **YES** — `Substitute.For<ISecurableEntityRegistry>()` at `RecordContainerResolverTests.cs:186` and `:360` | no | **Genuine seam → CLAUDE.md §6.5 path A.** It reads LIVE Dataverse attribute metadata; without the seam the resolver's decision table cannot be tested at all. Document the exception; do not delete |
+| `IRecordContainerResolver` | **NO** — zero test doubles anywhere | no | 🔴 **Textbook ADR-010 violation → path C, pivot to comply.** Its only uses are `RecordContainerResolver : IRecordContainerResolver`, one ctor injection in `CommunicationContainerResolver`, and the DI line. This is the one §4c claimed was already deleted |
+
+### The fix, and the one trap in it
+
+Delete the interface, register the concrete (`AddScoped<RecordContainerResolver>()`), inject the concrete
+into `CommunicationContainerResolver`. **The trap**: `IRecordContainerResolver.cs` also declares
+`public sealed record OwningSecureRecord` (`:86`), which callers use — so this is NOT a file delete. Move
+`OwningSecureRecord` to `SecureContainerDecision.cs` (where `ContainerDecision` /
+`ContainerDecisionOutcome` already live, so it is also more cohesive) and transplant the interface's
+substantial contract XML — the fail-closed refusal semantics and the `container_ownership_ambiguous`
+reasoning — onto the concrete's methods. That documentation is load-bearing; losing it would be a worse
+outcome than the interface.
+
+**Do NOT raise the ceiling to 157 to make this green.** That would launder master's two unjustified
+interfaces under our justification. After the fix we sit at **156** = master's +2 (not ours to explain)
+plus our **1 documented seam**. A ceiling bump needs whoever added master's two to account for them.
+
+### Sequencing note (why this is not fixed in 075's merge commit)
+
+Deferred by ONE step, deliberately and recorded here so it cannot get lost: master is 22 commits ahead
+including **PR #840** — `fix(api)!: remove every remaining NameIdentifier identity fallback (41 sites) +
+build guard`, a BREAKING change that may touch the same files and adds a build guard we must satisfy. The
+ADR-010 fix edits `Program.cs`, which master's merge also touches. Doing the refactor before that merge
+means doing it twice. Order: merge master → verify → then this.
+
+### Side finding, docs-vs-code (CLAUDE.md §2: code wins, fix the docs)
+
+`tests/CLAUDE.md` states Moq is the standard *"(NOT NSubstitute — codebase standard)"*. NSubstitute is
+**referenced** (`Sprk.Bff.Api.Tests.csproj:20`, v5.3.0) and used in **3** files, two of which predate 075
+(`SseStreamingIntegrationTests.cs`, `FinancialCalculationToolHandlerTests.cs`). So 075 did not introduce a
+banned library — the directive is stale. Moq is genuinely dominant; the parenthetical overstates it to a
+ban. Fix the directive's wording, not the tests.
