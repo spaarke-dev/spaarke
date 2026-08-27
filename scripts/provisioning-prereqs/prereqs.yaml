@@ -286,12 +286,30 @@ prereqs:
     consequence_of_absence: H4-shared handler cannot extract credentials from source services (F19 automation blocked); H4b handler cannot bind KV refs (F20 automation blocked).
     check_recipe:
       cli: |
-        for svc in openai docintel search servicebus storage redis; do
-          az role assignment list --assignee {l2UamiPrincipalId} \
-            --scope "$(az resource show --resource-group rg-spaarke-shared-{env} --name sprkshared{env}-$svc --query id -o tsv)" \
-            --query "[].roleDefinitionName" -o tsv
+        # PRQ-03 fix (2026-08-27): assert the EXACT required role per service.
+        # Prior loop dumped every roleDefinitionName without asserting the SPECIFIC
+        # role required per svc — ANY role assignment (even irrelevant) would satisfy
+        # a naive exit-1-on-empty guard. F19/F20 silent-pass class.
+        # Per-service required role map from task 200 Deferred Item #1 (SESSION 4 handoff).
+        declare -A svc_roles=(
+          [openai]="Cognitive Services User"
+          [docintel]="Cognitive Services User"
+          [search]="Search Service Contributor"
+          [servicebus]="Azure Service Bus Data Owner"
+          [storage]="Storage Account Contributor"
+          [redis]="Redis Cache Contributor"
+        )
+        failed=0
+        for svc in "${!svc_roles[@]}"; do
+          scope=$(az resource show --resource-group rg-spaarke-shared-{env} --name sprkshared{env}-$svc --query id -o tsv 2>/dev/null)
+          if [ -z "$scope" ]; then echo "$svc=RESOURCE_NOT_FOUND"; failed=1; continue; fi
+          expected_role="${svc_roles[$svc]}"
+          found=$(az role assignment list --assignee {l2UamiPrincipalId} --scope "$scope" \
+            --query "[?roleDefinitionName=='$expected_role'].roleDefinitionName" -o tsv 2>/dev/null)
+          if [ -z "$found" ]; then echo "$svc=MISSING_ROLE:$expected_role"; failed=1; else echo "$svc=OK($found)"; fi
         done
-      expect: each row contains the appropriate role name
+        [ "$failed" -eq 0 ] || exit 1
+      expect: each service reports OK with its required role (openai/docintel=Cognitive Services User, search=Search Service Contributor, servicebus=Azure Service Bus Data Owner, storage=Storage Account Contributor, redis=Redis Cache Contributor)
     remediation: Extend `stacks/model1-shared.bicep` role-assignment module (task 200 Deferred Item #1). List of role/service pairs in `current-task.md` SESSION 4 handoff §RECOMMENDED.
     related_findings: [T200-h4shared-*, F19, F20]
 
@@ -352,10 +370,17 @@ prereqs:
     consequence_of_absence: L2 cannot enqueue or dequeue provisioning messages — dispatcher DOA.
     check_recipe:
       cli: |
-        az role assignment list --assignee {l2UamiPrincipalId} \
-          --scope "$(az servicebus namespace show -g rg-spaarke-platform-{env} -n {sbNamespace} --query id -o tsv)" \
-          --query "[?roleDefinitionName=='Azure Service Bus Data Sender' || roleDefinitionName=='Azure Service Bus Data Receiver'].roleDefinitionName" -o tsv
-      expect: both `Sender` and `Receiver` present
+        # PRQ-03 fix (2026-08-27): assert BOTH Sender AND Receiver (AND condition).
+        # Prior recipe queried OR — a single role would silent-pass and dispatcher would
+        # DOA at first message enqueue OR at first message dequeue.
+        scope=$(az servicebus namespace show -g rg-spaarke-platform-{env} -n {sbNamespace} --query id -o tsv 2>/dev/null)
+        [ -z "$scope" ] && exit 1
+        roles=$(az role assignment list --assignee {l2UamiPrincipalId} --scope "$scope" \
+          --query "[?roleDefinitionName=='Azure Service Bus Data Sender' || roleDefinitionName=='Azure Service Bus Data Receiver'].roleDefinitionName" -o tsv 2>/dev/null)
+        echo "$roles" | grep -q "Azure Service Bus Data Sender" || { echo "MISSING: Sender"; exit 1; }
+        echo "$roles" | grep -q "Azure Service Bus Data Receiver" || { echo "MISSING: Receiver"; exit 1; }
+        echo "OK: Sender+Receiver present"
+      expect: both `Azure Service Bus Data Sender` AND `Azure Service Bus Data Receiver` present
     remediation: Author role-assignment module in `platform-controlplane.bicep` (DS-5 c5.1 sb-data-receiver-rbac-nowhere).
     related_findings: [c5.1-sb-data-receiver-rbac-nowhere]
 
@@ -420,9 +445,23 @@ prereqs:
     consequence_of_absence: "H2a fails with `InsufficientQuota - gpt-5.x - GlobalStandard: limit is 0` on fresh subs."
     check_recipe:
       cli: |
-        az cognitiveservices usage list --location {region} \
-          --query "[?contains(name.value,'GlobalStandard') && contains(name.value,'gpt-5')].{model:name.value, limit:limit, current:currentValue}" -o json
-      expect: for each pinned frontier model, `limit >= (current + expected_call_load)`
+        # PRQ-03 fix (2026-08-27): assert numeric limit > current (headroom) for every
+        # returned frontier tier. Prior recipe dumped JSON but never asserted the numeric
+        # comparison — fresh-sub gpt-5* limit=0 would silent-pass, and H2a fails with
+        # `InsufficientQuota - gpt-5.x - GlobalStandard: limit is 0` mid-deploy.
+        result=$(az cognitiveservices usage list --location {region} \
+          --query "[?contains(name.value,'GlobalStandard') && contains(name.value,'gpt-5')].{model:name.value, limit:limit, current:currentValue}" -o json 2>/dev/null)
+        [ -z "$result" ] && exit 1
+        count=$(echo "$result" | jq 'length')
+        if [ "$count" -eq 0 ]; then echo "NO_FRONTIER_TIER_ENTRIES"; exit 1; fi
+        # Any entry with limit <= current is a headroom failure.
+        no_headroom=$(echo "$result" | jq -r '.[] | select(.limit <= .current) | "\(.model)=\(.current)/\(.limit)"')
+        if [ -n "$no_headroom" ]; then
+          echo "$no_headroom" | while read line; do echo "NO_HEADROOM: $line"; done
+          exit 1
+        fi
+        echo "$result" | jq -r '.[] | "\(.model)=\(.current)/\(.limit) OK"'
+      expect: every returned frontier model (gpt-5*) has numeric limit strictly greater than currentValue (headroom for expected call load)
     remediation: Support ticket via `az support tickets create` (requires PRQ-S-02 Support Plan). Fresh subs auto-grant mini/embedding tiers generously (500+ TPM) but zero TPM for frontier tiers.
     related_findings: [F5, NFR-12]
 
@@ -434,9 +473,24 @@ prereqs:
     consequence_of_absence: "`ServiceModelDeprecated` at H2a deploy."
     check_recipe:
       cli: |
-        az cognitiveservices model list --location {region} \
-          --query "[?kind=='OpenAI' && model.version=='{pinnedVer}'].model.lifecycleStatus" -o tsv
-      expect: "`GenerallyAvailable` or `Legacy` (reject `Deprecating` or `Deprecated`)"
+        # PRQ-03 fix (2026-08-27): iterate the pinned model:version list explicitly.
+        # Prior recipe used a single {pinnedVer} placeholder that was never substituted
+        # AND could not represent the actual pin list (3 pinned models).
+        # This mirrors PRQ-E-14 pattern; keep pin list in sync with openai.bicep 'deployments'.
+        failed=0
+        for pin in gpt-4o:2024-11-20 gpt-4o-mini:2024-07-18 text-embedding-3-large:1; do
+          model=${pin%:*}; ver=${pin#*:}
+          status=$(az cognitiveservices model list --location {region} \
+            --query "[?kind=='OpenAI' && model.name=='$model' && model.version=='$ver'].model.lifecycleStatus" -o tsv 2>/dev/null)
+          if [ -z "$status" ]; then echo "$pin=NOT_AVAILABLE_IN_REGION"; failed=1; continue; fi
+          case "$status" in
+            Deprecated|Deprecating) echo "$pin=$status"; failed=1;;
+            GenerallyAvailable|Legacy|Preview) echo "$pin=$status OK";;
+            *) echo "$pin=UNKNOWN_STATUS:$status"; failed=1;;
+          esac
+        done
+        [ "$failed" -eq 0 ] || exit 1
+      expect: every pinned model reports `GenerallyAvailable` or `Legacy` (reject `Deprecating`, `Deprecated`, `NOT_AVAILABLE_IN_REGION`)
     remediation: Bump pinned version in `stacks/model1-shared.bicep` / `customer.bicep` OpenAI deployment set.
     related_findings: [F1, F4, L-o1-model-status-lexicon]
 
@@ -462,8 +516,25 @@ prereqs:
     owner: Spaarke platform admin
     consequence_of_absence: H5 fails with rate-limit error; run blocks until quota window resets.
     check_recipe:
-      cli: pac admin quota --query "[?type=='environmentCreation'].{used:current, limit:cap}" -o json
-      expect: "`used < limit`"
+      cli: |
+        # PRQ-03 fix (2026-08-27): assert used < limit numerically. Prior recipe dumped
+        # JSON without asserting the comparison — quota exhaustion silently PASSed until
+        # H5 hit the rate limit mid-run.
+        # PRQ-07 note: `pac admin quota` is not a valid pac subcommand at CLI 1.46.
+        # This recipe is REWRITTEN in a subsequent commit to swap to az rest against the
+        # Power Platform BAP API; the exit-1 numeric-assertion pattern below is preserved.
+        result=$(pac admin quota --query "[?type=='environmentCreation'].{used:current, limit:cap}" -o json 2>/dev/null)
+        [ -z "$result" ] && exit 1
+        used=$(echo "$result" | jq -r '.[0].used')
+        limit=$(echo "$result" | jq -r '.[0].limit')
+        if [ -z "$used" ] || [ -z "$limit" ] || [ "$used" = "null" ] || [ "$limit" = "null" ]; then
+          echo "MALFORMED_QUOTA_RESPONSE"; exit 1
+        fi
+        if [ "$used" -ge "$limit" ]; then
+          echo "QUOTA_EXHAUSTED: used=$used limit=$limit"; exit 1
+        fi
+        echo "OK: used=$used limit=$limit"
+      expect: numeric `used` strictly less than numeric `limit` for environmentCreation quota
     remediation: Wait for quota window; no bump path.
 
   - id: PRQ-C-05
@@ -491,8 +562,22 @@ prereqs:
     owner: Spaarke platform admin (auto-applied by H6)
     consequence_of_absence: F14 — SpaarkeMaster solution import fails 5min in on Spaarke.Controls.UniversalDocumentUpload (`Webresource content size too big`).
     check_recipe:
-      cli: pac org list-settings --environment {dvUrl} --name maxuploadfilesize --query value -o tsv
-      expect: "`>= 25600000`"
+      cli: |
+        # PRQ-03 fix (2026-08-27): assert numeric threshold >= 25600000. Prior recipe
+        # dumped `value` without comparison — default 5MB (5242880) silent-PASSed and
+        # F14 (SpaarkeMaster import fail 5min in on UniversalDocumentUpload
+        # "Webresource content size too big") reproduced on every fresh env.
+        value=$(pac org list-settings --environment {dvUrl} --name maxuploadfilesize --query value -o tsv 2>/dev/null)
+        if [ -z "$value" ]; then echo "SETTING_NOT_FOUND"; exit 1; fi
+        # Must be an integer >= 25600000.
+        case "$value" in
+          ''|*[!0-9]*) echo "NON_NUMERIC_VALUE:$value"; exit 1;;
+        esac
+        if [ "$value" -lt 25600000 ]; then
+          echo "TOO_SMALL: maxuploadfilesize=$value (required >= 25600000)"; exit 1
+        fi
+        echo "OK: maxuploadfilesize=$value"
+      expect: numeric integer value `>= 25600000` (25 MB)
     remediation: "`pac org update-settings --name maxuploadfilesize --value 25600000`. Add Org Settings Contract to r1 handler catalog."
     related_findings: [F14]
 
