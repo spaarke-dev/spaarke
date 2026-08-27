@@ -320,47 +320,25 @@ public class SearchContainersTests
     }
 
     // =========================================================================
-    // Pagination Token Encoding Tests
+    // Pagination
     // =========================================================================
-
-    [Theory]
-    [InlineData(null, 25, "25")]   // first page size=25 → next token = "25"
-    [InlineData("25", 25, "50")]  // page 2, size=25 → next token = "50"
-    [InlineData("0", 10, "10")]   // from=0, size=10 → next token = "10"
-    public void SkipTokenEncoding_ProducesCorrectNextOffset(
-        string? currentSkipToken, int pageSize, string expectedNextToken)
-    {
-        // Arrange — mirrors the token decoding / encoding logic in SearchContainersAsync
-        var from = 0;
-        if (!string.IsNullOrWhiteSpace(currentSkipToken) &&
-            int.TryParse(currentSkipToken, out var parsedFrom))
-        {
-            from = Math.Max(0, parsedFrom);
-        }
-
-        // Act — simulate what SearchContainersAsync does when moreResultsAvailable=true
-        var nextFrom = from + pageSize;
-        var nextSkipToken = nextFrom.ToString();
-
-        // Assert
-        nextSkipToken.Should().Be(expectedNextToken);
-    }
-
-    [Fact]
-    public void SkipTokenDecoding_MalformedToken_DefaultsToZeroOffset()
-    {
-        // Arrange — a non-numeric or corrupted skip token should not crash the service
-        var malformedToken = "abc-not-a-number";
-
-        // Act — mirrors the decoding in SearchContainersAsync
-        var from = 0;
-        if (!string.IsNullOrWhiteSpace(malformedToken) &&
-            int.TryParse(malformedToken, out var parsedFrom))
-        {
-            from = Math.Max(0, parsedFrom);
-        }
-
-        // Assert — malformed token falls back to from=0 (first page)
-        from.Should().Be(0, "a malformed skip token should default to page 0");
-    }
+    //
+    // REMOVED 2026-08-27 by task 042 — `SkipTokenEncoding_ProducesCorrectNextOffset` and
+    // `SkipTokenDecoding_MalformedToken_DefaultsToZeroOffset`.
+    //
+    // Both pinned a NUMERIC from-offset skip-token scheme (`from + pageSize`, read back with
+    // `int.TryParse`) and their comments claimed to "mirror the token decoding / encoding logic in
+    // SearchContainersAsync". Production does not do that and has not for some time: it forwards
+    // Graph's OPAQUE OData `$skiptoken` straight through
+    // (`SpeAdminGraphService.SearchContainersAsync`, `&$skiptoken={Uri.EscapeDataString(skipToken)}`),
+    // and the method's own remarks state "The previous numeric `from`-offset token has no meaning
+    // here." There is no `int.TryParse` anywhere in it.
+    //
+    // They passed only because they never called production — they re-implemented the dead scheme
+    // inside the test body and asserted against their own copy (ADR-038 §7 B6). Worse than useless:
+    // a reader trusting them would learn a contract that no longer exists.
+    //
+    // Real coverage lives at the contract tier:
+    //   SpeAdminSearchContractTests.SearchContainers_WhenGraphReturnsANextLink_SurfacesOnlyTheOpaqueSkipToken
+    //   SpeAdminSearchContractTests.SearchContainers_WhenGraphReportsNoNextLink_ReportsNoNextPage
 }
