@@ -309,10 +309,16 @@ public sealed class IdentityNormalizationService : IIdentityNormalizationService
     // WHY THIS IS A SEPARATE, PURE FUNCTION. The decision "does this email match resolve to a
     // principal?" used to be four lines welded to a Dataverse query, so the only way to observe it
     // was to stand up Dataverse — which is why task 001 could not pin A-18 at all. Extracted here it
-    // is assertable directly: no transport, so no Mock<HttpMessageHandler> (ADR-038 §7 ban B1); no
-    // reflection into privates (ban B8) — internal + InternalsVisibleTo("Sprk.Bff.Api.Tests"), the
-    // convention already used across this assembly (see ExternalParticipationService's grant-filter
-    // builders, extracted by task 007 for the same reason).
+    // is assertable directly, with no transport and therefore no Mock<HttpMessageHandler>
+    // (ADR-038 §7 ban B1).
+    //
+    // ⚠️ ADR-038 §7 ban B8 — READ THIS RATHER THAN COPYING IT. B8 bans testing internals via *either*
+    // reflection *or* [InternalsVisibleTo]. This member is internal and IS exercised through
+    // InternalsVisibleTo("Sprk.Bff.Api.Tests"), so it is a B8 DEVIATION, not B8 compliance. It is
+    // pending a CLAUDE.md §6.5 decision (task 013 flagged it; the reviewer picks a project-scoped
+    // exception or a B8 amendment). The neighbouring comment on ExternalParticipationService's
+    // grant-filter builders claims this construct is B8-compliant because there is "no reflection into
+    // privates" — that reading is wrong, and this comment exists so it stops propagating from here.
     //
     // Purity is the point, not a style preference. A test that drives this decision through a
     // Dataverse double proves only what the double was told to say. A test that calls this function
@@ -340,10 +346,31 @@ public sealed class IdentityNormalizationService : IIdentityNormalizationService
     internal const string DenyContactResolutionUnspecified = "sdap.access.deny.contact_resolution_unspecified";
 
     /// <summary>
-    /// One <c>contact</c> row matched by <c>emailaddress1</c>, carrying its current workforce oid
-    /// binding (<c>azureactivedirectoryobjectid</c>; <c>null</c> when the contact is unbound).
+    /// NOT a deny — an operational alarm. Emitted when contacts matched by email but none carried an
+    /// oid binding value at all, meaning the no-hijack check had nothing to compare and is inert in
+    /// this environment. A control that cannot fire should say so rather than look like it passed.
     /// </summary>
-    internal readonly record struct WorkforceContactEmailMatch(Guid ContactId, Guid? BoundAadObjectId);
+    internal const string GuardInertNoBindingColumn = "sdap.access.warn.oid_binding_column_absent";
+
+    /// <summary>
+    /// One <c>contact</c> row matched by <c>emailaddress1</c>, carrying its current workforce oid
+    /// binding (<c>azureactivedirectoryobjectid</c>).
+    /// </summary>
+    /// <param name="ContactId">The matched contact.</param>
+    /// <param name="BoundAadObjectId">
+    /// The oid this contact belongs to, or <c>null</c> when it is genuinely UNBOUND (the attribute is
+    /// absent or null — Dataverse omits null attributes from a returned row).
+    /// </param>
+    /// <param name="BindingUnreadable">
+    /// <c>true</c> when the attribute was PRESENT but did not yield a usable oid. This is a third
+    /// state, not a flavour of unbound: "nobody owns this contact" and "somebody owns it but we cannot
+    /// tell who" have opposite safe answers, and collapsing them into <c>null</c> is the value-level
+    /// version of exactly the fail-open this task closed at the query level.
+    /// </param>
+    internal readonly record struct WorkforceContactEmailMatch(
+        Guid ContactId,
+        Guid? BoundAadObjectId,
+        bool BindingUnreadable = false);
 
     /// <summary>The outcome of the workforce contact-by-email fallback.</summary>
     internal enum WorkforceEmailMatchDecision
@@ -360,18 +387,69 @@ public sealed class IdentityNormalizationService : IIdentityNormalizationService
         /// <summary>The matched contact is already bound to a DIFFERENT oid — the A-18 hijack.</summary>
         DenyBoundToDifferentOid,
 
+        /// <summary>
+        /// The contact carries a binding value we could not read as an oid. We cannot show it is the
+        /// caller's, so we do not hand it over.
+        /// </summary>
+        DenyBindingUnreadable,
+
         /// <summary>The caller's own oid is unusable, so no match can be attributed to them.</summary>
         DenyUnidentifiableCaller
     }
+
+    /// <summary>
+    /// Test seam over <see cref="DenyCodeFor"/>. Exists because the deny→code table is the only thing
+    /// separating one deny from another in the audit trail, so it needs asserting as a TABLE — every
+    /// outcome, unique codes, nothing falling through — rather than one Dataverse scenario at a time.
+    /// </summary>
+    internal static string DenyCodeForTesting(WorkforceEmailMatchDecision decision)
+        => DenyCodeFor(decision);
 
     private static string DenyCodeFor(WorkforceEmailMatchDecision decision) => decision switch
     {
         WorkforceEmailMatchDecision.DenyBoundToDifferentOid => DenyContactBoundToDifferentOid,
         WorkforceEmailMatchDecision.DenyAmbiguousEmail => DenyContactEmailAmbiguous,
         WorkforceEmailMatchDecision.DenyUnidentifiableCaller => DenyUnidentifiableCaller,
+        WorkforceEmailMatchDecision.DenyBindingUnreadable => DenyContactBindingUnreadable,
         // NoMatch / Resolve have their own arms at the call site and never reach here.
         _ => DenyContactResolutionUnspecified
     };
+
+    /// <summary>
+    /// Reads a contact's workforce oid binding as a THREE-state value: bound to an oid, genuinely
+    /// unbound, or present-but-unreadable.
+    /// </summary>
+    /// <remarks>
+    /// Deliberately NOT <see cref="GetGuidLike"/>. That helper answers "give me a Guid if you can",
+    /// which is right for the identity fields it serves (a missing business unit is simply missing) and
+    /// wrong here: it maps an attribute that is present but not a usable oid to the same <c>null</c> as
+    /// an absent one, so a contact carrying a malformed or zero binding would read as UNBOUND and be
+    /// handed to whoever's email matched. That is the same fail-open as A-18, one layer down, and it is
+    /// the reason this is a separate reader rather than a reuse.
+    /// <para>
+    /// <c>Guid.Empty</c> counts as unreadable, not unbound. Dataverse stores an unset uniqueidentifier
+    /// as NULL and omits it from the returned row, so an explicit all-zero oid is anomalous data rather
+    /// than an ordinary "not yet bound" — and the safe reading of anomalous identity data is to refuse.
+    /// </para>
+    /// </remarks>
+    internal static (Guid? Bound, bool Unreadable) ReadOidBinding(Entity row, string attribute)
+    {
+        // Absent attribute == unbound. Dataverse omits null attributes from a returned Entity.
+        if (!row.Contains(attribute))
+        {
+            return (null, false);
+        }
+
+        return row[attribute] switch
+        {
+            null => (null, false),
+            Guid g when g != Guid.Empty => (g, false),
+            string s when Guid.TryParse(s, out var parsed) && parsed != Guid.Empty => (parsed, false),
+            // Present, but not something we can call an oid: a malformed string, an all-zero Guid, an
+            // unexpected type. Somebody may own this contact; we cannot tell who.
+            _ => (null, true)
+        };
+    }
 
     /// <summary>
     /// Decides whether a set of contacts matched by verified email may be resolved to, given the
@@ -433,6 +511,14 @@ public sealed class IdentityNormalizationService : IIdentityNormalizationService
         if (callerOid == Guid.Empty)
         {
             return WorkforceEmailMatchDecision.DenyUnidentifiableCaller;
+        }
+
+        // The binding attribute was there but unreadable. "Nobody owns this contact" and "somebody owns
+        // it but we cannot tell who" have opposite safe answers, so they get separate outcomes; reading
+        // the second as the first is how a bound contact gets handed over.
+        if (match.BindingUnreadable)
+        {
+            return WorkforceEmailMatchDecision.DenyBindingUnreadable;
         }
 
         // The finding itself: the contact already belongs to a different person.
@@ -523,20 +609,38 @@ public sealed class IdentityNormalizationService : IIdentityNormalizationService
                 .ConfigureAwait(false);
 
             var matches = new List<WorkforceContactEmailMatch>(results.Entities.Count);
+            var anyRowCarriedTheBindingColumn = false;
             foreach (var row in results.Entities)
             {
-                // Dataverse omits null attributes from the returned Entity, so an absent
-                // azureactivedirectoryobjectid means UNBOUND. That is the assumption this whole
-                // guard rests on; it is asserted against the live platform nowhere in this suite.
-                matches.Add(new WorkforceContactEmailMatch(
-                    row.Id,
-                    GetGuidLike(row, "azureactivedirectoryobjectid")));
+                anyRowCarriedTheBindingColumn |= row.Contains("azureactivedirectoryobjectid");
+                var (bound, unreadable) = ReadOidBinding(row, "azureactivedirectoryobjectid");
+                matches.Add(new WorkforceContactEmailMatch(row.Id, bound, unreadable));
+            }
+
+            // ⚠️ The guard's inert-mode alarm. This service states ~390 lines above that
+            // contact.azureactivedirectoryobjectid "isn't provisioned in every environment" — and where
+            // it is missing or universally empty, EVERY row reads UNBOUND and the no-hijack check
+            // passes everything while reading, in code and in tests, exactly like a control that fired.
+            // That is pre-fix behaviour restored by CONFIGURATION rather than by a code change, so no
+            // test can catch it and only an operator can. Hence a log line: an inert security control
+            // must be visible, not assumed.
+            if (matches.Count > 0 && !anyRowCarriedTheBindingColumn)
+            {
+                _logger.LogWarning(
+                    "[WF-AUTH] {DenyCode}: matched {MatchCount} contact(s) by verified email but NOT ONE " +
+                    "carried an azureactivedirectoryobjectid value, so the no-hijack oid check had " +
+                    "nothing to compare and cannot discriminate. If this recurs, verify the column is " +
+                    "provisioned and populated in this environment — otherwise FR-12 is inert here.",
+                    GuardInertNoBindingColumn, matches.Count);
             }
 
             return matches;
         }
-        catch (OperationCanceledException)
+        catch (OperationCanceledException) when (ct.IsCancellationRequested)
         {
+            // Guarded: HttpClient reports a TIMEOUT as TaskCanceledException, an
+            // OperationCanceledException. An unguarded arm would rethrow a Dataverse timeout instead of
+            // failing closed through the arm below. Only real cancellation propagates.
             throw;
         }
         catch (Exception ex)

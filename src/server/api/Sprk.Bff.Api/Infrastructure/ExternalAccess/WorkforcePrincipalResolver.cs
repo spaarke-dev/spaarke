@@ -166,8 +166,12 @@ public sealed class WorkforcePrincipalResolver : IWorkforcePrincipalResolver
                 .TryResolveContactByWorkforceIdentityAsync(callerOid, verifiedEmail, ct)
                 .ConfigureAwait(false);
         }
-        catch (OperationCanceledException)
+        catch (OperationCanceledException) when (ct.IsCancellationRequested)
         {
+            // Guarded deliberately. HttpClient surfaces a TIMEOUT as TaskCanceledException, which is an
+            // OperationCanceledException — so an unguarded arm here would rethrow a Dataverse timeout
+            // and produce exactly the un-auditable 500 the arm below exists to eliminate. Only a real
+            // cancellation (the caller went away) propagates; a timeout is a failure, and it denies.
             throw;
         }
         catch (Exception ex)

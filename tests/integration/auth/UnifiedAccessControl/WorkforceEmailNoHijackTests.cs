@@ -185,6 +185,93 @@ public class WorkforceEmailNoHijackTests
             .Should().Be(IdentityNormalizationService.WorkforceEmailMatchDecision.Resolve);
     }
 
+    /// <summary>
+    /// A binding that is PRESENT but unreadable denies. "Nobody owns this contact" and "somebody owns
+    /// it but we cannot tell who" have opposite safe answers, and the first version of this fix
+    /// collapsed the second into the first — the value-level twin of A-18, found by the task-013
+    /// code-review gate rather than by these tests.
+    /// </summary>
+    [Fact]
+    public void DecideWorkforceEmailMatch_BindingPresentButUnreadable_Denies()
+    {
+        var matches = new[] { new IdentityNormalizationService.WorkforceContactEmailMatch(
+            VictimContactId, BoundAadObjectId: null, BindingUnreadable: true) };
+
+        IdentityNormalizationService.DecideWorkforceEmailMatch(matches, CallerOid)
+            .Should().Be(IdentityNormalizationService.WorkforceEmailMatchDecision.DenyBindingUnreadable);
+    }
+
+    /// <summary>
+    /// Perturbs the unreadable flag alone — the identical row with a READABLE absent binding resolves.
+    /// Proves the deny came from the flag and not from the null oid it sits beside.
+    /// </summary>
+    [Fact]
+    public void DecideWorkforceEmailMatch_PerturbUnreadableFlagToReadable_Resolves()
+    {
+        IdentityNormalizationService.DecideWorkforceEmailMatch(
+            new[] { new IdentityNormalizationService.WorkforceContactEmailMatch(VictimContactId, null, true) },
+            CallerOid)
+            .Should().Be(IdentityNormalizationService.WorkforceEmailMatchDecision.DenyBindingUnreadable);
+
+        IdentityNormalizationService.DecideWorkforceEmailMatch(
+            new[] { new IdentityNormalizationService.WorkforceContactEmailMatch(VictimContactId, null, false) },
+            CallerOid)
+            .Should().Be(IdentityNormalizationService.WorkforceEmailMatchDecision.Resolve,
+                "only the unreadable flag changed");
+    }
+
+    /// <summary>
+    /// The tri-state read itself. An ABSENT attribute is unbound (Dataverse omits nulls); a malformed
+    /// string, an all-zero Guid, or an unexpected type is unreadable — NOT unbound. Getting this table
+    /// wrong is invisible at the decision layer because both produce a null oid.
+    /// </summary>
+    [Theory]
+    [InlineData("absent", false, false)]      // attribute not on the row at all → unbound
+    [InlineData("explicit-null", false, false)]
+    [InlineData("valid-guid", true, false)]
+    [InlineData("valid-guid-string", true, false)]
+    [InlineData("malformed-string", false, true)]
+    [InlineData("empty-guid", false, true)]
+    [InlineData("wrong-type", false, true)]
+    public void ReadOidBinding_ClassifiesTheThreeStates(string shape, bool expectBound, bool expectUnreadable)
+    {
+        var row = new Entity("contact") { Id = VictimContactId };
+        switch (shape)
+        {
+            case "explicit-null": row["azureactivedirectoryobjectid"] = null; break;
+            case "valid-guid": row["azureactivedirectoryobjectid"] = VictimOid; break;
+            case "valid-guid-string": row["azureactivedirectoryobjectid"] = VictimOid.ToString("D"); break;
+            case "malformed-string": row["azureactivedirectoryobjectid"] = "not-a-guid"; break;
+            case "empty-guid": row["azureactivedirectoryobjectid"] = Guid.Empty; break;
+            case "wrong-type": row["azureactivedirectoryobjectid"] = 42; break;
+        }
+
+        var (bound, unreadable) = IdentityNormalizationService.ReadOidBinding(
+            row, "azureactivedirectoryobjectid");
+
+        (bound is not null).Should().Be(expectBound);
+        unreadable.Should().Be(expectUnreadable);
+    }
+
+    /// <summary>
+    /// End to end: a contact carrying a malformed binding is NOT handed over. Reaches the fallback
+    /// because the oid cross-reference only matches Guid-typed bindings.
+    /// </summary>
+    [Fact]
+    public async Task TryResolveContactByWorkforceIdentity_ContactWithAMalformedBinding_ResolvesNothing()
+    {
+        var row = new Entity("contact") { Id = VictimContactId };
+        row["contactid"] = VictimContactId;
+        row["azureactivedirectoryobjectid"] = "not-a-guid";
+
+        var log = new CapturingLogger<IdentityNormalizationService>();
+        var resolved = await CreateSutWithContacts(log, row).TryResolveContactByWorkforceIdentityAsync(
+            CallerOid, SharedEmail, CancellationToken.None);
+
+        resolved.Should().BeNull("we cannot show this contact is not someone else's");
+        log.Messages.Should().ContainMatch("*sdap.access.deny.contact_binding_unreadable*");
+    }
+
     // ─────────────────────────────────────────────────────────────────────────────
     // The query — does it actually READ what the decision needs?
     // ─────────────────────────────────────────────────────────────────────────────
@@ -414,10 +501,11 @@ public class WorkforceEmailNoHijackTests
             CallerOid, SharedEmail, CancellationToken.None);
 
         resolved.Should().BeNull();
-        // No Verify(..., Times.Never) needed: an unmodelled write would already have thrown.
-        dataverse.Verify(
-            x => x.RetrieveMultipleAsync(It.IsAny<QueryExpression>(), It.IsAny<CancellationToken>()),
-            Times.Exactly(2));
+        // No Verify(..., Times.Never) needed and no call-count assertion wanted: MockBehavior.Strict
+        // already carries the property under test, because IDataverseService composes
+        // IGenericEntityService — so Create/Update/Upsert/Delete/UpdateRecordFields are all unmodelled
+        // and would each throw. Pinning an exact READ count would only couple this test to how many
+        // queries the path happens to make.
     }
 
     // ─────────────────────────────────────────────────────────────────────────────
@@ -442,6 +530,89 @@ public class WorkforceEmailNoHijackTests
             "*sdap.access.deny.contact_bound_to_different_oid*",
             "ADR-003 requires a machine-readable deny code; without it this deny is indistinguishable " +
             "from an ordinary non-contact caller");
+    }
+
+    /// <summary>
+    /// EVERY deny outcome must carry its own code. Three of the five were asserted nowhere until the
+    /// task-013 code-review gate pointed it out, which mattered because the suite's whole argument is
+    /// that the emitted code is the only thing distinguishing these denies — so a mislabelled one is
+    /// invisible by construction. Driven through the pure decision + mapper rather than through five
+    /// Dataverse setups, so the table itself is what is under test.
+    /// </summary>
+    [Theory]
+    [InlineData("hijack", "sdap.access.deny.contact_bound_to_different_oid")]
+    [InlineData("ambiguous", "sdap.access.deny.contact_email_ambiguous")]
+    [InlineData("unidentifiable", "sdap.access.deny.unidentifiable_caller")]
+    [InlineData("unreadable-binding", "sdap.access.deny.contact_binding_unreadable")]
+    public void EveryDenyOutcome_MapsToItsOwnDistinctCode(string scenario, string expectedCode)
+    {
+        var (matches, callerOid) = scenario switch
+        {
+            "hijack" => (Match(VictimContactId, VictimOid), CallerOid),
+            "ambiguous" => (new[] { Match1(VictimContactId, null), Match1(OtherContactId, null) }, CallerOid),
+            "unidentifiable" => (Match(VictimContactId, null), Guid.Empty),
+            _ => (new[] { new IdentityNormalizationService.WorkforceContactEmailMatch(
+                    VictimContactId, null, true) }, CallerOid)
+        };
+
+        var decision = IdentityNormalizationService.DecideWorkforceEmailMatch(matches, callerOid);
+        decision.ToString().Should().StartWith("Deny", "every scenario here must deny");
+
+        IdentityNormalizationService.DenyCodeForTesting(decision).Should().Be(expectedCode);
+    }
+
+    /// <summary>
+    /// No two deny outcomes may share a code, and none may fall through to the unspecified fallback.
+    /// Asserted as a set rather than case-by-case so ADDING an outcome without a code fails here
+    /// instead of silently inheriting another deny's identity in the audit trail.
+    /// </summary>
+    [Fact]
+    public void EveryDenyOutcome_HasAUniqueCodeAndNoneFallsThroughToUnspecified()
+    {
+        var denies = Enum.GetValues<IdentityNormalizationService.WorkforceEmailMatchDecision>()
+            .Where(d => d.ToString().StartsWith("Deny", StringComparison.Ordinal))
+            .ToArray();
+
+        denies.Should().HaveCountGreaterThan(3);
+
+        var codes = denies.Select(IdentityNormalizationService.DenyCodeForTesting).ToArray();
+        codes.Should().OnlyHaveUniqueItems("a shared code makes two different denies indistinguishable");
+        codes.Should().NotContain(
+            IdentityNormalizationService.DenyContactResolutionUnspecified,
+            "a deny outcome with no code of its own is an unlabelled deny");
+        codes.Should().AllSatisfy(c => c.Should().MatchRegex(
+            @"^sdap\.access\.deny\.[a-z0-9_]+$", "auth.md deny-code format {domain}.{area}.{action}.{reason}"));
+    }
+
+    /// <summary>
+    /// The inert-guard alarm (code-review finding C-2). Where <c>azureactivedirectoryobjectid</c> is
+    /// unprovisioned or universally empty, every row reads UNBOUND and this control passes everything
+    /// while looking — in code and in every test above — exactly like a control that fired. No test can
+    /// catch that, because it is configuration rather than code. So it must be loud in the log.
+    /// </summary>
+    [Fact]
+    public async Task ContactMatchedButNoRowCarriedABinding_WarnsThatTheGuardIsInert()
+    {
+        var log = new CapturingLogger<IdentityNormalizationService>();
+        var resolved = await CreateSutWithContacts(log, ContactRow(VictimContactId, boundOid: null))
+            .TryResolveContactByWorkforceIdentityAsync(CallerOid, SharedEmail, CancellationToken.None);
+
+        resolved.Should().Be(VictimContactId, "the caller is still resolved — this is a warning, not a deny");
+        log.Messages.Should().ContainMatch("*sdap.access.warn.oid_binding_column_absent*");
+    }
+
+    /// <summary>
+    /// …and it must NOT cry wolf when the column IS populated. Without this half, the alarm above could
+    /// fire on every request and would be tuned out precisely when it mattered.
+    /// </summary>
+    [Fact]
+    public async Task ContactMatchedWithABindingPresent_DoesNotWarnAboutAnInertGuard()
+    {
+        var log = new CapturingLogger<IdentityNormalizationService>();
+        await CreateSutWithContacts(log, ContactRow(VictimContactId, VictimOid))
+            .TryResolveContactByWorkforceIdentityAsync(CallerOid, SharedEmail, CancellationToken.None);
+
+        log.Messages.Should().NotContainMatch("*sdap.access.warn.oid_binding_column_absent*");
     }
 
     /// <summary>
@@ -525,12 +696,11 @@ public class WorkforceEmailNoHijackTests
     }
 
     /// <summary>
-    /// Cancellation is NOT a deny — it must propagate. A catch-all that swallowed
-    /// <see cref="OperationCanceledException"/> into a deny would turn every client disconnect into a
-    /// logged authorization failure, burying the real ones.
+    /// REAL cancellation is not a deny — it propagates. A catch-all that swallowed it would turn every
+    /// client disconnect into a logged authorization failure, burying the real ones.
     /// </summary>
     [Fact]
-    public async Task ResolveAsync_WhenContactResolutionIsCancelled_PropagatesRatherThanDenying()
+    public async Task ResolveAsync_WhenTheCallerActuallyCancelled_PropagatesRatherThanDenying()
     {
         var identity = new Mock<IIdentityNormalizationService>(MockBehavior.Strict);
         identity
@@ -538,10 +708,37 @@ public class WorkforceEmailNoHijackTests
                 It.IsAny<Guid>(), It.IsAny<string?>(), It.IsAny<CancellationToken>()))
             .ThrowsAsync(new OperationCanceledException());
 
+        using var cancelled = new CancellationTokenSource();
+        await cancelled.CancelAsync();
+
         var act = async () => await CreateResolver(identity.Object).ResolveAsync(
-            WorkforceToken(CallerOid, SharedEmail), CancellationToken.None);
+            WorkforceToken(CallerOid, SharedEmail), cancelled.Token);
 
         await act.Should().ThrowAsync<OperationCanceledException>();
+    }
+
+    /// <summary>
+    /// A TIMEOUT is not a cancellation, even though HttpClient reports one as
+    /// <see cref="TaskCanceledException"/> — which IS an <see cref="OperationCanceledException"/>.
+    /// Without the <c>when (ct.IsCancellationRequested)</c> filter, an unguarded rethrow arm catches
+    /// this and produces exactly the un-auditable 500 the deny arm exists to eliminate. Surfaced by the
+    /// task-013 code-review gate; the token here is NOT cancelled, which is the whole distinction.
+    /// </summary>
+    [Fact]
+    public async Task ResolveAsync_WhenDataverseTimesOut_DeniesRatherThanPropagatingA500()
+    {
+        var identity = new Mock<IIdentityNormalizationService>(MockBehavior.Strict);
+        identity
+            .Setup(x => x.TryResolveContactByWorkforceIdentityAsync(
+                It.IsAny<Guid>(), It.IsAny<string?>(), It.IsAny<CancellationToken>()))
+            .ThrowsAsync(new TaskCanceledException("The request was canceled due to the configured HttpClient.Timeout"));
+
+        var result = await CreateResolver(identity.Object).ResolveAsync(
+            WorkforceToken(CallerOid, SharedEmail), CancellationToken.None);
+
+        result.IsResolved.Should().BeFalse();
+        result.Principal.Should().BeNull();
+        result.DenyReason.Should().Be(WorkforceDenyReason.PrincipalNotResolved);
     }
 
     // ─────────────────────────────────────────────────────────────────────────────
@@ -587,12 +784,34 @@ public class WorkforceEmailNoHijackTests
     /// behaviour, deliberately unchanged by this task. A deactivated contact bound to a different oid
     /// is still denied (the guard runs first), but a deactivated UNBOUND contact still resolves.</item>
     ///
-    /// <item><b>"Unreadable" versus "no match" is an AUDIT distinction, not a decision one.</b> Both
-    /// deny. Mutation testing found this: making the unreadable path return an empty list instead of
-    /// null killed no test, because the outcome was identical either way. It is now pinned through the
-    /// emitted deny code (<see cref="TryResolveContactByWorkforceIdentity_UnreadableBindingState_EmitsADistinctDenyCode"/>),
-    /// which is the honest claim — the security posture does not depend on the distinction; the
-    /// ability to tell a Dataverse outage from an ordinary non-contact caller does.</item>
+    /// <item><b>An unreadable QUERY versus "no match" is an AUDIT distinction, not a decision one.</b>
+    /// Both deny. Mutation testing found this: making the unreadable-query path return an empty list
+    /// instead of null killed no test, because the outcome was identical either way. It is pinned
+    /// through the emitted deny code, which is the honest claim — the security posture does not depend
+    /// on that distinction; the ability to tell a Dataverse outage from an ordinary non-contact caller
+    /// does. Note this is the QUERY-level state only: an unreadable per-row BINDING
+    /// (<c>BindingUnreadable</c>) genuinely does change the decision, and is pinned as such.</item>
+    ///
+    /// <item><b>🔴 THE GUARD IS INERT WHERE THE BINDING COLUMN IS NOT PROVISIONED — and nothing here
+    /// can detect it.</b> This service states, 390 lines above the guard, that
+    /// <c>contact.azureactivedirectoryobjectid</c> "isn't provisioned in every environment". Where it
+    /// is absent or universally empty, EVERY row reads unbound, the no-hijack check passes everything,
+    /// and it looks — in code, and in every test in this file — exactly like a control that fired. That
+    /// is pre-fix behaviour restored by CONFIGURATION rather than by a code change, so no unit test can
+    /// catch it. Mitigated only by the runtime alarm
+    /// (<see cref="ContactMatchedButNoRowCarriedABinding_WarnsThatTheGuardIsInert"/>), which makes it
+    /// visible to an operator; it does not make it safe. Surfaced by the task-013 code-review gate,
+    /// not by these tests.</item>
+    ///
+    /// <item><b>🔴 UNBOUND CONTACTS REMAIN PERMANENTLY HIJACKABLE, BY DESIGN OF FR-12.</b> The guard
+    /// denies a contact bound to a DIFFERENT oid. It resolves an unbound one — which spec FR-12
+    /// explicitly requires ("an email matching an unbound contact … still resolves"). But this plane
+    /// never WRITES a binding, whereas the CIAM path binds on first login and so closes its own
+    /// window after one use. Consequently A-18's original scenario — a token carrying
+    /// <c>email=victim@firm.example</c> inheriting the victim's grants — stays live indefinitely for
+    /// any contact that has grants but no workforce oid. Escalated per CLAUDE.md §6 rather than
+    /// resolved here: whether to bind-on-first-resolve is a spec decision, not an implementation
+    /// choice.</item>
     /// </list>
     ///
     /// <para><b>How the above was established.</b> Every guard in this fix was mutated individually
@@ -604,8 +823,18 @@ public class WorkforceEmailNoHijackTests
     /// ignored <c>TopCount</c> and <see cref="ColumnSet"/>, the unreadable one because the outcome
     /// genuinely did not change — and both are fixed above rather than explained away.</para>
     /// </summary>
-    [Fact]
-    public void WhatTheseTestsCannotFalsify() => true.Should().BeTrue();
+    /// <remarks>
+    /// Documentation only — deliberately NOT a <c>[Fact]</c> and not a method. It was a
+    /// <c>[Fact]</c> asserting <c>true.Should().BeTrue()</c> until the task-013 adr-check gate
+    /// correctly called that a coverage-filler (ADR-038 §7 ban B10) wearing a name that promised a
+    /// behaviour it never checked (ban B13); it was then briefly an unreferenced private method, which
+    /// the code-review gate correctly called prose parked in dead code. A const is what it always was:
+    /// a documentation anchor the limits above hang from, with no pretence of executing.
+    /// </remarks>
+    private const string WhatTheseTestsCannotFalsify =
+        "See the XML documentation on this member and on the class — the limits of this suite are " +
+        "stated there deliberately, so they travel with the tests instead of living in a PR " +
+        "description nobody re-reads.";
 
     // ─────────────────────────────────────────────────────────────────────────────
     // Helpers — deliberately STRICT: an unmodelled call throws, it does not default permissive
