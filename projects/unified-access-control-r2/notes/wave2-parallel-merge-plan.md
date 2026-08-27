@@ -1138,3 +1138,80 @@ either tested through `InternalsVisibleTo` or not tested at all). Needs an ADR T
   **hid "Build succeeded"**. Cousin of [G-12] — the verification instrument lying, not the code.
 - **A mutation harness run against a dirty tree wiped uncommitted gate fixes** via its `git checkout --`
   cleanup. Caught by grep rather than assumed. Commit before running destructive harnesses.
+
+## A17. 081 HARDENING — the ordering is now provably redundant, and my risk model was wrong
+
+Owner-directed after the owner correctly rejected my framing. I had written that a latent risk in
+`CallerIdentity` was *"saved by"* the delegated-scope branch running before the application branch. That is
+a **latent invariant, not a defence** — a safety property holding by accident of statement order,
+documented nowhere, that a plausible refactor silently removes.
+
+Commits `1a77288b0` (harden) + `41cb87310` (docs), base `2b3b07de2` unchanged, `CallerIdentity.cs` +
+its tests only (+197/−7).
+
+### Three layers, and the proof that order stopped mattering
+
+1. **Provenance self-check** — resolution now returns *which claim type* supplied each value. Same claim
+   type for both ⇒ the equality is a self-comparison ⇒ `Indeterminate`, never `Application`.
+2. **Explicit conjunction** — `!hasDelegatedScope` now stated in **both** application branches' own
+   conditions (rules 4 and 5). Early return kept as well.
+3. **Disjointness assertion** — `ObjectIdClaimTypes ∩ SubjectClaimTypes = ∅` asserted by a test, so
+   overlapping the lists fails the build **at the moment the mistake is made**.
+
+| # | Perturbation | Result |
+|---|---|---|
+| P9 | Overlap the lists — the literal #832 refactor | 4 RED, and `Kind` **stayed `Indeterminate`** — layer 1 contained the damage, layer 3 flagged the edit |
+| P10 | Overlap **+** disable the provenance check | RED with `Kind == Application` — isolates layer 1 as the specific defence |
+| P11 | Remove the conjunction, ordering intact | **19 GREEN** — early return alone suffices |
+| **P12** | **Invert the ordering, conjunction intact** | **19 GREEN — the conjunction alone suffices. Order is now genuinely redundant.** |
+| P13 | Remove conjunction **and** invert ordering | 2 RED — the suite notices total loss |
+
+**P12 is the deliverable.** The owner's question was "shouldn't this be fixed so the execution order is the
+saving function" — the answer is now that order is *no longer* the saving function at all, and that is
+demonstrated rather than asserted.
+
+### 🔴 MY RISK MODEL WAS WRONG — the agent's retro-check said NO, as instructed
+
+I asked it to confirm the new collapsed-read test would have failed against its previous commit, and to
+say so if not. **It would not** — restored `CallerIdentity.cs` from `14869cd61`, ran the new tests, got
+**19/19 pass**, including `TheBugShapeFromPr832_*`.
+
+Why: **the bug-shape *principal* was already safe.** With the `objectId` read already correctly paired,
+a token carrying `NameIdentifier` but no `oid`/`objectidentifier` yields `objectId == null`, and the old
+rule-5 guard `!IsNullOrWhiteSpace(objectId)` already rejected the branch. **No input principal can trigger
+the collapse while the lists are disjoint.**
+
+So the threat is a **source edit**, not a crafted token. My *risk statement* said that correctly ("if
+someone later normalises it…"), but **the test I prescribed conflated the two** — I asked for an
+input-shape test to prove a source-edit risk. Those are different threat models and the input-shape test
+cannot discriminate. P9/P10 are the discriminating evidence; `TheBugShapeFromPr832_*` is a **regression
+pin** (it locks in that `NameIdentifier` must never satisfy the `oid` read), not commit-discriminating
+evidence. Recorded in the agent's notes so the two are not later confused.
+
+Verified both directions: the #832 refactor against the **old** classifier yields `Kind == Application`
+(bypass unimpeded); against the **new** one it yields `Indeterminate` **and** fails the build. That gap is
+what this round closed.
+
+Consequence worth keeping: the provenance check is **unreachable today** and deliberately kept live, so the
+failure mode remains a denial even if the disjointness test is ever deleted. Documented in code.
+
+### Verification + two accepted trade-offs
+
+Build 0 warnings → `Spaarke.Core.Tests` **64/64** → `Sprk.Bff.Api.Tests` **11,191 / 0** → `Spaarke.ArchTests`
+**9 fail / 105 pass, identical to baseline**. Step 9.5 re-run: code-review **0 Critical / 0 Warnings**,
+adr-check **0 Violations**.
+
+- ⚠️ **`ObjectIdClaimTypes` / `SubjectClaimTypes` are `public` purely for testability.** The repo
+  convention is `internal` + `InternalsVisibleTo`, but `Spaarke.Core.csproj` carries no such entry and
+  adding one would modify a csproj otherwise reported as pristine. **This is the SECOND independent hit on
+  ADR-038's B1/B8 contradiction this wave** — task 013 escalated it (§A16) after nine tests drove an
+  `internal` pure function. B8 bans `InternalsVisibleTo` tests; the only alternative is widening public
+  API for tests. Two tasks, two files, same fork. **Strengthens 013's path-B amendment case materially** —
+  decide it once, for both.
+- `CallerIdentity.cs` grew 244 → 361 lines, ~65% XML doc, still one responsibility. Legitimate per
+  `COMPONENT-COMPLEXITY.md` (a large *cohesive* file is fine); the growth **is** the threat-model warning.
+  Accepted, not decomposed.
+
+Prior caveats unchanged: no live token decoded (`sub == oid` rests on documented Entra behaviour), no test
+exercises the real HTTP pipeline, and the allow-list remains an operator prerequisite for
+`customer-provisioning-orchestration-r1`.
