@@ -89,8 +89,11 @@ public sealed class StateReconcilerServiceTests
     }
 
     [Fact]
-    public async Task Tick_WithH2aCompleted_EnqueuesH2b_H4_H5_ThreeWayFanOut()
+    public async Task Tick_WithH2aCompleted_EnqueuesH2b_H4_H4Shared_H5_FourWayFanOut()
     {
+        // Post-HANDLER-01 (Wave 2, 2026-08-27): DAG expanded so H2a completion
+        // unlocks 4 handlers: H2b (AI Search) + H4 (per-tenant KV) + H4-shared
+        // (shared KV extract-from-source, F19 absorption) + H5 (Dataverse env).
         var run = MakeRun(RunStatus.Running, "H0", "H1", "H2a");
         var scanner = new StubActiveRunScanner(new[] { run });
         var enqueuer = new DedupingRecordingEnqueuer();
@@ -98,10 +101,10 @@ public sealed class StateReconcilerServiceTests
 
         await sut.RunTickAsync(CancellationToken.None);
 
-        enqueuer.TotalCalls.Should().Be(3);
+        enqueuer.TotalCalls.Should().Be(4);
         enqueuer.DistinctEnvelopes.Select(e => e.HandlerId).Should().BeEquivalentTo(
-            new[] { "H2b", "H4", "H5" },
-            "design.md §4.1 3-way fan-out after H2a.");
+            new[] { "H2b", "H4", "H4-shared", "H5" },
+            "design.md §4.1 + HANDLER-01: 4-way fan-out after H2a includes H4-shared.");
     }
 
     // -----------------------------------------------------------------------
@@ -128,18 +131,19 @@ public sealed class StateReconcilerServiceTests
             sut1.RunTickAsync(CancellationToken.None),
             sut2.RunTickAsync(CancellationToken.None));
 
-        // Assert — both instances invoked EnqueueAsync for each of the 3
-        // ready handlers (6 total call attempts) but the dedup-enqueuer
-        // collapses to 3 distinct MessageIds. This is EXACTLY the production
+        // Assert — both instances invoked EnqueueAsync for each of the 4
+        // ready handlers (8 total call attempts) but the dedup-enqueuer
+        // collapses to 4 distinct MessageIds. This is EXACTLY the production
         // Service Bus dedup contract: identical envelopes -> identical
         // MessageId -> queue retains one.
-        sharedEnqueuer.TotalCalls.Should().Be(6,
-            "each of 2 reconciler instances sends 3 envelopes.");
-        sharedEnqueuer.DistinctMessageIds.Should().HaveCount(3,
-            "level-1 idempotency at Service Bus wire dedups the 6 calls to 3 unique messages " +
-            "(one per ready handler H2b/H4/H5).");
+        // Post-HANDLER-01 (Wave 2, 2026-08-27): 4-way fan-out includes H4-shared.
+        sharedEnqueuer.TotalCalls.Should().Be(8,
+            "each of 2 reconciler instances sends 4 envelopes.");
+        sharedEnqueuer.DistinctMessageIds.Should().HaveCount(4,
+            "level-1 idempotency at Service Bus wire dedups the 8 calls to 4 unique messages " +
+            "(one per ready handler H2b/H4/H4-shared/H5).");
         sharedEnqueuer.DistinctEnvelopes.Select(e => e.HandlerId).Should().BeEquivalentTo(
-            new[] { "H2b", "H4", "H5" });
+            new[] { "H2b", "H4", "H4-shared", "H5" });
     }
 
     [Fact]
@@ -231,8 +235,9 @@ public sealed class StateReconcilerServiceTests
     [Fact]
     public async Task Tick_EnqueuerThrowsForOneHandler_OtherHandlersStillEnqueue()
     {
-        // Sibling-isolation: an enqueue failure on one handler in a 3-way
-        // fan-out must not block the other two.
+        // Sibling-isolation: an enqueue failure on one handler in a 4-way
+        // fan-out must not block the other three.
+        // Post-HANDLER-01 (Wave 2, 2026-08-27): 4-way fan-out includes H4-shared.
         var run = MakeRun(RunStatus.Running, "H0", "H1", "H2a");
         var scanner = new StubActiveRunScanner(new[] { run });
         var enqueuer = new SelectivelyThrowingEnqueuer(throwForHandlerId: "H4");
@@ -242,8 +247,8 @@ public sealed class StateReconcilerServiceTests
         await act.Should().NotThrowAsync();
 
         enqueuer.SuccessfullyEnqueued.Select(e => e.HandlerId).Should().BeEquivalentTo(
-            new[] { "H2b", "H5" },
-            "H4 threw but H2b + H5 in the same fan-out must still enqueue.");
+            new[] { "H2b", "H4-shared", "H5" },
+            "H4 threw but H2b + H4-shared + H5 in the same fan-out must still enqueue.");
     }
 
     // -----------------------------------------------------------------------
