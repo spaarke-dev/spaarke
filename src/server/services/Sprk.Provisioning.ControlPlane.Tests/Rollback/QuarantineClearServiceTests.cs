@@ -35,9 +35,9 @@ namespace Sprk.Provisioning.ControlPlane.Tests.Rollback;
 public sealed class QuarantineClearServiceTests
 {
     private const string TestCustomerId = "test-customer";
-    private const string TestRunId      = "00000000-0000-0000-0000-000000000001";
-    private const string TestActorOid   = "22222222-2222-2222-2222-222222222222";
-    private const string TestReason     = "operator manually restored missing SPE container-type";
+    private const string TestRunId = "00000000-0000-0000-0000-000000000001";
+    private const string TestActorOid = "22222222-2222-2222-2222-222222222222";
+    private const string TestReason = "operator manually restored missing SPE container-type";
 
     // -----------------------------------------------------------------------
     // Happy path

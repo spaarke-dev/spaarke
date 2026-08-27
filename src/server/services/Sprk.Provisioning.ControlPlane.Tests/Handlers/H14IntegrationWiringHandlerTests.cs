@@ -158,8 +158,11 @@ public sealed class H14IntegrationWiringHandlerTests
         var expectedKey = "h14-acme-prerecorded-key";
         run.CompletedPhases.Add(new CompletedPhase
         {
-            Phase = "H14", IdempotencyKey = expectedKey,
-            StartedAt = DateTimeOffset.UtcNow.AddMinutes(-1), CompletedAt = DateTimeOffset.UtcNow, JobId = "prior-run",
+            Phase = "H14",
+            IdempotencyKey = expectedKey,
+            StartedAt = DateTimeOffset.UtcNow.AddMinutes(-1),
+            CompletedAt = DateTimeOffset.UtcNow,
+            JobId = "prior-run",
         });
         var repo = new FakeRepository(run, etag: "etag-5");
         var applier = FakeApplier.Applied(2);
@@ -181,8 +184,11 @@ public sealed class H14IntegrationWiringHandlerTests
         var expectedH14aKey = H14aExchangePolicySubHandler.BuildIdempotencyKey(CustomerId, new[] { BffAppRegId, UamiClientId });
         run.CompletedPhases.Add(new CompletedPhase
         {
-            Phase = "H14a", IdempotencyKey = expectedH14aKey,
-            StartedAt = DateTimeOffset.UtcNow.AddMinutes(-5), CompletedAt = DateTimeOffset.UtcNow.AddMinutes(-4), JobId = "prior-run",
+            Phase = "H14a",
+            IdempotencyKey = expectedH14aKey,
+            StartedAt = DateTimeOffset.UtcNow.AddMinutes(-5),
+            CompletedAt = DateTimeOffset.UtcNow.AddMinutes(-4),
+            JobId = "prior-run",
         });
         var repo = new FakeRepository(run, etag: "etag-6");
         var applier = FakeApplier.Applied(2);
@@ -230,7 +236,11 @@ public sealed class H14IntegrationWiringHandlerTests
         var handler = BuildHandler(repo, FakeApplier.Applied(2), FakeReader.Success(SigningKey), FakeGraphCreator.Success(), FakeDvRegistrar.Created());
         var wrongEnvelope = new HandlerEnvelope
         {
-            HandlerId = "H0", RunId = RunId, CustomerId = CustomerId, ParametersJson = "{}", EnqueuedAt = DateTimeOffset.UtcNow,
+            HandlerId = "H0",
+            RunId = RunId,
+            CustomerId = CustomerId,
+            ParametersJson = "{}",
+            EnqueuedAt = DateTimeOffset.UtcNow,
         };
 
         var act = async () => await handler.HandleAsync(wrongEnvelope, CancellationToken.None);
