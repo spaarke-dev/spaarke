@@ -18,6 +18,7 @@ using Sprk.Bff.Api.Services.Ai.PublicContracts;
 using Sprk.Bff.Api.Services.Compose.Operations;
 using Sprk.Bff.Api.Services.Documents;
 using Sprk.Bff.Api.Services.Jobs;
+using Sprk.Bff.Api.Infrastructure.Authentication;
 
 namespace Sprk.Bff.Api.Services.Compose;
 
@@ -2771,7 +2772,10 @@ public class ComposeService : IComposeService
                 if (canonicalId is { } canonical)
                 {
                     entity[CanonicalDocumentAttribute] = new EntityReference(DocumentLogicalName, canonical);
-                    var ownerOid = httpContext.User?.FindFirst("oid")?.Value;
+                    // Was `FindFirst("oid")` with no schema form: under inbound claim mapping the short
+                    // claim does not exist, so this resolved NULL and NotifyLinkedCopyAsync bailed with
+                    // "no resolvable uploader oid" — the linked-copy notification was never delivered.
+                    var ownerOid = CallerResolution.ResolveObjectId(httpContext.User);
                     await _dedupDetector
                         .NotifyLinkedCopyAsync(ownerOid, canonical, effectiveFileName, cancellationToken)
                         .ConfigureAwait(false);

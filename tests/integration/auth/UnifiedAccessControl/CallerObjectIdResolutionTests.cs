@@ -74,13 +74,17 @@ public sealed class CallerObjectIdResolutionTests
     }
 
     [Fact]
-    public void ResolveObjectId_FallsBackToNameIdentifier_OnlyWhenNoOidExists()
+    public void ResolveObjectId_NEVER_FallsBackToNameIdentifier()
     {
-        // The tail exists for non-Entra principals (test fixtures, API-key schemes). It is a
-        // compatibility affordance, NOT a rescue: a real Entra caller reaching it yields a `sub`.
+        // THE structural assertion. An earlier version ended this chain with a NameIdentifier tail —
+        // the OFFICE_009 pattern, where a correct source is placed in front of a broken read and the
+        // broken read is left in place. A fallback does not remove a wrong approach, it RANKS it, and
+        // silent fall-through is the defect itself. If this test ever fails, someone re-added the tail.
         var user = Principal(new Claim(ClaimTypes.NameIdentifier, Sub));
 
-        CallerResolution.ResolveObjectId(user).Should().Be(Sub);
+        CallerResolution.ResolveObjectId(user).Should().BeNull(
+            "NameIdentifier carries `sub`, which can never match a systemuser — resolving it here would "
+            + "hand Dataverse an identifier guaranteed to fail, which is the original defect");
     }
 
     [Fact]
@@ -88,6 +92,34 @@ public sealed class CallerObjectIdResolutionTests
     {
         CallerResolution.ResolveObjectId(Principal(new Claim("tid", "t"))).Should().BeNull(
             "call sites must answer 401 for an unidentifiable caller — never 403");
+    }
+
+    [Fact]
+    public void ResolveObjectIdGuid_ParsesTheOid_AndRejectsASub()
+    {
+        // Several sites hand-rolled Guid.TryParse over a value that could never parse — which silently
+        // skipped the work it guarded (a membership event never published) or 401'd every caller.
+        CallerResolution.ResolveObjectIdGuid(Principal(new Claim("oid", Oid)))
+            .Should().Be(Guid.Parse(Oid));
+
+        CallerResolution.ResolveObjectIdGuid(Principal(new Claim(ClaimTypes.NameIdentifier, Sub)))
+            .Should().BeNull("a pairwise `sub` is not a GUID and must not be coerced into one");
+    }
+
+    // ── ResolveOpaqueCallerKey: the one place `sub` is CORRECT ────────────────────────────────────
+
+    [Fact]
+    public void ResolveOpaqueCallerKey_PrefersOid_ButAcceptsSub()
+    {
+        // A rate-limit partition / idempotency scope / cache key legitimately accepts `sub`: it is
+        // stable per (user, application), which is exactly what partitioning needs. The separate name
+        // is the point — misuse should be visible in review rather than hidden in a chain.
+        CallerResolution.ResolveOpaqueCallerKey(Principal(
+            new Claim("oid", Oid), new Claim(ClaimTypes.NameIdentifier, Sub)))
+            .Should().Be(Oid, "prefer the stable id when it exists");
+
+        CallerResolution.ResolveOpaqueCallerKey(Principal(new Claim(ClaimTypes.NameIdentifier, Sub)))
+            .Should().Be(Sub, "unlike ResolveObjectId, falling back here is correct by design");
     }
 
     // ── The filter: what identifier actually reaches IAccessDataSource ────────────────────────────

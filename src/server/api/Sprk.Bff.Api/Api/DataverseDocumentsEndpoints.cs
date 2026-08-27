@@ -37,8 +37,7 @@ public static class DataverseDocumentsEndpoints
             CancellationToken ct) =>
         {
             var traceId = context.TraceIdentifier;
-            var userId = context.User.FindFirstValue(ClaimTypes.NameIdentifier)
-                ?? context.User.FindFirstValue("oid");
+            var userId = CallerResolution.ResolveObjectId(context.User);
 
             try
             {

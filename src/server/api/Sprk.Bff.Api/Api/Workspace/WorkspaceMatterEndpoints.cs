@@ -8,6 +8,7 @@ using Sprk.Bff.Api.Configuration;
 using Sprk.Bff.Api.Services.Ai;
 using Sprk.Bff.Api.Services.Ai.PublicContracts;
 using Sprk.Bff.Api.Services.Workspace;
+using Sprk.Bff.Api.Infrastructure.Authentication;
 
 namespace Sprk.Bff.Api.Api.Workspace;
 
@@ -93,8 +94,7 @@ public static class WorkspaceMatterEndpoints
     {
         // UserId is guaranteed non-null by WorkspaceAuthorizationFilter (stored in Items)
         var userId = httpContext.Items["UserId"]?.ToString()
-            ?? httpContext.User.FindFirst("oid")?.Value
-            ?? httpContext.User.FindFirst(ClaimTypes.NameIdentifier)?.Value
+            ?? CallerResolution.ResolveObjectId(httpContext.User)
             ?? "unknown";
 
         logger.LogInformation(

@@ -35,7 +35,7 @@ public class Phase2IntegrationTests
     {
         var claims = new List<Claim>
         {
-            new(ClaimTypes.NameIdentifier, userId),
+            new("oid", userId), new(ClaimTypes.NameIdentifier, "pairwise-sub-not-an-oid-AAAbbbCCC"),
             new("roles", "Admin")
         };
         return new ClaimsPrincipal(new ClaimsIdentity(claims, "TestAuth"));
@@ -45,7 +45,7 @@ public class Phase2IntegrationTests
     {
         var claims = new List<Claim>
         {
-            new(ClaimTypes.NameIdentifier, userId)
+            new("oid", userId), new(ClaimTypes.NameIdentifier, "pairwise-sub-not-an-oid-AAAbbbCCC")
         };
         return new ClaimsPrincipal(new ClaimsIdentity(claims, "TestAuth"));
     }
@@ -57,7 +57,7 @@ public class Phase2IntegrationTests
     {
         var claims = new List<Claim>
         {
-            new(ClaimTypes.NameIdentifier, userId),
+            new("oid", userId), new(ClaimTypes.NameIdentifier, "pairwise-sub-not-an-oid-AAAbbbCCC"),
             new("roles", "SystemAdmin")
         };
         return new ClaimsPrincipal(new ClaimsIdentity(claims, "TestAuth"));
@@ -134,7 +134,7 @@ public class Phase2IntegrationTests
             // Arrange — ClaimsIdentity with role claim type
             var claims = new List<Claim>
             {
-                new(ClaimTypes.NameIdentifier, "role-user-001"),
+                new("oid", "role-user-001"), new(ClaimTypes.NameIdentifier, "pairwise-sub-not-an-oid-AAAbbbCCC"),
                 new(ClaimTypes.Role, "Admin")
             };
             var user = new ClaimsPrincipal(new ClaimsIdentity(claims, "TestAuth"));

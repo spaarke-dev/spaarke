@@ -39,7 +39,7 @@ public class PlaybookAuthorizationFilterTests
     {
         var claims = new List<Claim>
         {
-            new(ClaimTypes.NameIdentifier, userId.ToString())
+            new("oid", userId.ToString()), new(ClaimTypes.NameIdentifier, "pairwise-sub-not-an-oid-AAAbbbCCC")
         };
         var identity = new ClaimsIdentity(claims, "TestAuth");
         return new ClaimsPrincipal(identity);
