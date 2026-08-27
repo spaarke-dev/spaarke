@@ -8,23 +8,49 @@
 // startup on invalid values (NFR-05 parity with ReconcilerOptions +
 // CosmosModule + ServiceBusModule).
 //
-// AUTH SHAPE (parity with H7 DataverseWebApiEnvVarValuesWriter + H6/H10):
-//   Confidential-client (BFF app-reg client-credentials via
-//   Azure.Identity.ClientSecretCredential) against the admin Dataverse
-//   environment that hosts the registry. NOT MI/UAMI — the L2 App Service's
-//   UAMI is not itself a Dataverse Application User on the admin env; the BFF
-//   app-reg IS (that's the only SP with a systemuser record on the admin env
-//   that reads/writes sprk_dataverseenvironment). This matches how H7 talks
-//   to the CUSTOMER env with the BFF app-reg's client-credentials for the same
-//   reason — the guard talks to the ADMIN env with the same shape.
+// AUTH SHAPE — PATH X (REG-02 migration, 2026-08-27, Wave 2 pre-dispatch
+// remediation punch REG-02 + Wave 0 Decision 9):
+//   DefaultAzureCredential pinned to the L2 UAMI via
+//   `ManagedIdentityClientId`, scoped to `{TargetDataverseUrl}/.default` —
+//   VERBATIM shape of DataverseEnvironmentRegistryClient.AcquireTokenAsync
+//   (Sprk.Provisioning.ControlPlane.Core/Registry/DataverseEnvironmentRegistryClient.cs).
+//   The L2 UAMI is registered as a Dataverse Application User on the admin
+//   env by task 111's Grant-ControlPlaneIdentity.ps1 — the exact
+//   prerequisite already in place for the registry client — so no new grant
+//   is required.
 //
-// FUTURE MIGRATION:
-//   When the L2 App Service's UAMI is granted a systemuser record on the admin
-//   env (paired with an app-user creation script similar to H10's pattern for
-//   customer envs), swap the ClientSecretCredential for DefaultAzureCredential
-//   and delete the ClientId/ClientSecret fields. This is an incremental change
-//   isolated to the CustomerRunGuardOptions + DataverseRegistryConcurrencyStore
-//   auth call sites — the ICustomerRunGuard contract stays intact.
+//   The Path X migration is the ONLY way I5 concurrency-serialization
+//   actually works in the secret-free production. Before this row landed,
+//   the guard bound `TenantId + ClientId + ClientSecret` for a
+//   `ClientSecretCredential` — those settings are OMITTED from secret-free
+//   deployments (auth-v4 SS9.1 empty-is-the-signal rule), so
+//   `Enabled=true` combined with `requireSecretFreeIdentity=true` failed
+//   at Validate(), and the operator's only path was to keep the guard
+//   Enabled=false (the ADR-032 kill-switch), which meant two simultaneous
+//   POST /api/runs for the same customer both succeeded → catastrophic
+//   race per spec §4D I5.
+//
+// FIELD-REMOVAL NOTE:
+//   `TenantId`, `ClientId`, `ClientSecret` were REMOVED in this row. The
+//   Bicep app-settings for those three keys ceased to be emitted; the
+//   `CustomerRunGuard__ClientSecret` KV-ref was deleted from
+//   `legacyClientSecretAppSettings`. Any downstream code binding those
+//   settings via IConfiguration will surface as an unbound-property warning
+//   at boot — grep for `CustomerRunGuard:TenantId` / `CustomerRunGuard:ClientId`
+//   / `CustomerRunGuard:ClientSecret` before adding them back.
+//
+// URL COLLAPSE (REG-05 companion):
+//   REG-05 required a cross-check that `TargetDataverseUrl` and
+//   `DataverseEnvironmentRegistry:AdminEnvironmentUrl` point at the same
+//   admin env. This row collapses to a single URL: the guard now READS
+//   `DataverseEnvironmentRegistry:AdminEnvironmentUrl` as its
+//   `TargetDataverseUrl` fallback in the module composer, and
+//   `CustomerRunGuardModule.PostConfigure` throws when the two are set
+//   to different hosts. Preference order:
+//     1. `CustomerRunGuard:TargetDataverseUrl` (if set explicitly)
+//     2. `DataverseEnvironmentRegistry:AdminEnvironmentUrl` (fallback)
+//   Test hosts that do not register the registry module keep working by
+//   setting `TargetDataverseUrl` directly.
 // -----------------------------------------------------------------------------
 
 namespace Sprk.Provisioning.ControlPlane.Concurrency;
@@ -32,7 +58,9 @@ namespace Sprk.Provisioning.ControlPlane.Concurrency;
 /// <summary>
 /// Bound options for the I5 concurrency guard
 /// (<see cref="ICustomerRunGuard"/> / <see cref="CustomerRunGuard"/>). Section
-/// name = <c>CustomerRunGuard</c>.
+/// name = <c>CustomerRunGuard</c>. Path X credential model (REG-02) — the
+/// guard authenticates via <c>DefaultAzureCredential</c> pinned to the L2
+/// UAMI's <see cref="ManagedIdentityClientId"/>; NO ClientSecret is bound.
 /// </summary>
 public sealed class CustomerRunGuardOptions
 {
@@ -42,28 +70,24 @@ public sealed class CustomerRunGuardOptions
     /// <summary>
     /// Admin Dataverse environment URL (e.g. <c>https://spaarke-admin.crm.dynamics.com</c>).
     /// Must be an absolute URI. Required when <see cref="Enabled"/> is true.
+    /// When absent, <see cref="CustomerRunGuardModule"/> falls back to
+    /// <c>DataverseEnvironmentRegistry:AdminEnvironmentUrl</c> so a single
+    /// setting drives both admin-env clients (REG-05 URL collapse).
     /// </summary>
     public string? TargetDataverseUrl { get; set; }
 
     /// <summary>
-    /// Entra tenant id used to acquire the confidential-client token.
-    /// Required when <see cref="Enabled"/> is true.
+    /// L2 UAMI clientId used to pin
+    /// <see cref="Azure.Identity.DefaultAzureCredentialOptions.ManagedIdentityClientId"/>.
+    /// Optional in this section — <see cref="CustomerRunGuardModule"/> falls
+    /// back to <c>ManagedIdentity:ClientId</c> when this is null (parity with
+    /// <c>DataverseEnvironmentRegistryOptions.ManagedIdentityClientId</c> and
+    /// <c>CosmosModule.cs</c>). When both are absent, the impl relies on the
+    /// default DefaultAzureCredential chain (AzureCliCredential for local dev;
+    /// on deployed App Service without a UAMI attached the token call fails
+    /// loud on first invocation).
     /// </summary>
-    public string? TenantId { get; set; }
-
-    /// <summary>
-    /// BFF Entra app-registration client id (the SP registered as a Dataverse
-    /// systemuser on the admin env). Required when <see cref="Enabled"/> is true.
-    /// </summary>
-    public string? ClientId { get; set; }
-
-    /// <summary>
-    /// BFF Entra app-registration client secret. Populated via App Service
-    /// KV reference (<c>@Microsoft.KeyVault(SecretUri=...)</c>) — cleartext
-    /// value NEVER traverses Cosmos or logs. Required when <see cref="Enabled"/>
-    /// is true.
-    /// </summary>
-    public string? ClientSecret { get; set; }
+    public string? ManagedIdentityClientId { get; set; }
 
     /// <summary>
     /// Dataverse entity-set name for the registry table. Default
@@ -80,16 +104,15 @@ public sealed class CustomerRunGuardOptions
     public TimeSpan RequestTimeout { get; set; } = TimeSpan.FromSeconds(30);
 
     /// <summary>
-    /// Kill-switch. Defaults to <c>false</c> so a fresh L2 deployment without
-    /// the admin-env credentials configured does not crash at boot; the guard
-    /// detects the disabled state and returns <see cref="AcquireResult.Success"/>
-    /// unconditionally per the null-object kill-switch pattern (ADR-032). A
-    /// WARN-level log fires on every acquire attempt so operators notice.
-    /// Production deployments MUST set this to <c>true</c> after wiring the
-    /// KV references. Test hosts leave this false — the endpoint tests replace
-    /// <see cref="ICustomerRunGuard"/> with an in-memory fake.
+    /// Kill-switch. Defaults to <c>true</c> as of REG-02 (2026-08-27, Wave 2
+    /// pre-dispatch remediation) because Path X removes the last credential-
+    /// missing failure mode — Enabled=true is now safe on every deployment
+    /// shape (secret-free and legacy alike), and I5 same-customer serialization
+    /// is a load-bearing invariant per spec.md §4D I5 / FR-32. The ADR-032
+    /// kill-switch semantics remain in <see cref="CustomerRunGuard"/> for
+    /// explicit test-host opt-out and for the rare rollback scenario.
     /// </summary>
-    public bool Enabled { get; set; }
+    public bool Enabled { get; set; } = true;
 
     /// <summary>
     /// Startup validation applied by <see cref="CustomerRunGuardModule"/>.
@@ -103,34 +126,21 @@ public sealed class CustomerRunGuardOptions
             // Kill-switch: no validation of Dataverse-connection fields when
             // disabled. Enables staged rollout (module registers, guard
             // returns Success unconditionally, operator flips Enabled=true
-            // once KV wiring is verified).
+            // once TargetDataverseUrl + UAMI grant are verified).
             return;
         }
 
         if (string.IsNullOrWhiteSpace(TargetDataverseUrl))
         {
             throw new InvalidOperationException(
-                $"Configuration '{SectionName}:TargetDataverseUrl' is required when '{SectionName}:Enabled' is true.");
+                $"Configuration '{SectionName}:TargetDataverseUrl' is required when '{SectionName}:Enabled' is true. " +
+                $"REG-02 (2026-08-27): the module also falls back to '{DataverseEnvironmentRegistryConfigKeys.AdminEnvironmentUrl}' " +
+                "when this key is unset — set one or the other (both are cross-checked to be the same host when both are set).");
         }
         if (!Uri.TryCreate(TargetDataverseUrl, UriKind.Absolute, out _))
         {
             throw new InvalidOperationException(
                 $"Configuration '{SectionName}:TargetDataverseUrl' must be an absolute URI (actual: '{TargetDataverseUrl}').");
-        }
-        if (string.IsNullOrWhiteSpace(TenantId))
-        {
-            throw new InvalidOperationException(
-                $"Configuration '{SectionName}:TenantId' is required when '{SectionName}:Enabled' is true.");
-        }
-        if (string.IsNullOrWhiteSpace(ClientId))
-        {
-            throw new InvalidOperationException(
-                $"Configuration '{SectionName}:ClientId' is required when '{SectionName}:Enabled' is true.");
-        }
-        if (string.IsNullOrWhiteSpace(ClientSecret))
-        {
-            throw new InvalidOperationException(
-                $"Configuration '{SectionName}:ClientSecret' is required when '{SectionName}:Enabled' is true.");
         }
         if (string.IsNullOrWhiteSpace(EntitySetName))
         {
@@ -143,4 +153,16 @@ public sealed class CustomerRunGuardOptions
                 $"Configuration '{SectionName}:RequestTimeout' must be between 1 second and 5 minutes (actual: {RequestTimeout}).");
         }
     }
+}
+
+/// <summary>
+/// Config-key constants for cross-module references — kept here so
+/// CustomerRunGuardOptions error messages can cite the exact
+/// DataverseEnvironmentRegistry key name without introducing a compile-time
+/// dependency on the Registry namespace.
+/// </summary>
+internal static class DataverseEnvironmentRegistryConfigKeys
+{
+    /// <summary>Matches <c>DataverseEnvironmentRegistryOptions.SectionName + ":AdminEnvironmentUrl"</c>.</summary>
+    public const string AdminEnvironmentUrl = "DataverseEnvironmentRegistry:AdminEnvironmentUrl";
 }

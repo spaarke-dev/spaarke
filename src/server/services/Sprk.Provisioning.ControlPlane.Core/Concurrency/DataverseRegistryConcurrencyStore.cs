@@ -7,13 +7,17 @@
 // sprk_dataverseenvironment row to read + PATCH sprk_currentrunid with
 // If-Match ETag guarding.
 //
-// AUTH:
-//   Confidential-client (BFF app-reg client-credentials via
-//   Azure.Identity.ClientSecretCredential). Same shape as H7's
-//   DataverseWebApiEnvVarValuesWriter — the L2 App Service's UAMI is not
-//   itself a Dataverse Application User on the admin env; the BFF app-reg is
-//   the SP with a systemuser record. Future migration to DefaultAzureCredential
-//   (UAMI) is documented in CustomerRunGuardOptions.cs FUTURE MIGRATION note.
+// AUTH — PATH X (REG-02 migration, 2026-08-27, Wave 2 pre-dispatch remediation):
+//   DefaultAzureCredential pinned to the L2 UAMI via
+//   `ManagedIdentityClientId`, scoped to `{TargetDataverseUrl}/.default` —
+//   VERBATIM shape of DataverseEnvironmentRegistryClient.AcquireTokenAsync.
+//   The L2 UAMI is registered as a Dataverse Application User on the admin
+//   env by task 111's Grant-ControlPlaneIdentity.ps1 — the exact prerequisite
+//   already in place for the sibling registry client — so no new grant is
+//   required. NO ClientSecret. See CustomerRunGuardOptions.cs REG-02 header
+//   for the failure-mode this closes (secret-free deployments could not
+//   Enable the guard, forcing the ADR-032 kill-switch and defeating the
+//   entire I5 concurrency invariant).
 //
 // DATAVERSE SEMANTICS:
 //   - Lookup by alt-key: GET /{entitySet}?$filter=sprk_customerid eq '{id}'
@@ -291,12 +295,23 @@ public sealed class DataverseRegistryConcurrencyStore : IRegistryConcurrencyStor
         return true;
     }
 
+    // REG-02 (2026-08-27) — Path X token acquisition. Matches
+    // DataverseEnvironmentRegistryClient.AcquireTokenAsync verbatim: pin
+    // DefaultAzureCredential to the L2 UAMI via ManagedIdentityClientId (the
+    // UAMI is the same identity registered as an admin-env Application User
+    // by task 111's Grant-ControlPlaneIdentity.ps1). NO ClientSecret. On
+    // local dev without a UAMI attached the DefaultAzureCredential chain
+    // falls through to AzureCliCredential.
     private async Task<AccessToken> AcquireTokenAsync(Uri envUri, CancellationToken cancellationToken)
     {
         var scopeBase = new Uri(envUri, "/").ToString().TrimEnd('/');
         var scope = $"{scopeBase}/.default";
-        var credential = new ClientSecretCredential(
-            _options.TenantId!, _options.ClientId!, _options.ClientSecret!);
+        var credOptions = new DefaultAzureCredentialOptions();
+        if (!string.IsNullOrWhiteSpace(_options.ManagedIdentityClientId))
+        {
+            credOptions.ManagedIdentityClientId = _options.ManagedIdentityClientId;
+        }
+        var credential = new DefaultAzureCredential(credOptions);
         return await credential.GetTokenAsync(
             new TokenRequestContext(new[] { scope }), cancellationToken).ConfigureAwait(false);
     }

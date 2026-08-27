@@ -147,14 +147,14 @@ param exchangeCertKvSecretName string = 'Exchange-Connect-Cert'
 @description('Client (application) ID of the Exchange Online connect app registration the sidecar authenticates as (app-only Connect-ExchangeOnline). Not a secret -- passed as a plain sitecontainer environment variable. Empty default is valid at author time; the H3 Entra app-reg handler output supplies the real value at customer/platform onboarding.')
 param exchangeConnectAppId string = ''
 
-@description('Entra tenant ID of the ADMIN Dataverse environment for the CustomerRunGuard concurrency guard (Sprk.Provisioning.ControlPlane.Core/Concurrency/CustomerRunGuardOptions.cs). Emitted as the CustomerRunGuard__TenantId app-setting. Consumed only when customerRunGuardEnabled=true; validated at Worker boot via CustomerRunGuardOptions.Validate (customer-provisioning-orchestration-r1 task 203b, punch list row A27 / r1-gap-analysis c5-6).')
+@description('DEPRECATED (REG-02 Path X migration 2026-08-27, Wave 2 pre-dispatch remediation). No longer wired into any app setting -- retained as an author-time null-op so existing bicepparam files do not fail on unknown-parameter until callers are cleaned up in a follow-on wave. The CustomerRunGuard now authenticates via DefaultAzureCredential pinned to the L2 UAMI (same identity as DataverseEnvironmentRegistryClient), so no TenantId is bound.')
 param customerRunGuardTenantId string = ''
 
-@description('BFF Entra app-registration client (application) ID used by the CustomerRunGuard to authenticate to the admin Dataverse env via confidential-client credentials (SAME app-reg H6/H7 use for solution-import + env-var writes; multitenant BFF app-reg registered as a Dataverse Application User on the admin env). Emitted as the CustomerRunGuard__ClientId app-setting. Consumed only when customerRunGuardEnabled=true (customer-provisioning-orchestration-r1 task 203b, punch list row A27).')
+@description('DEPRECATED (REG-02 Path X migration 2026-08-27, Wave 2 pre-dispatch remediation). No longer wired into any app setting -- retained as an author-time null-op for bicepparam back-compat. Path X removes the confidential-client flow entirely; the guard uses the L2 UAMI directly (registered as a Dataverse Application User on the admin env by task 111 Grant-ControlPlaneIdentity.ps1).')
 param customerRunGuardClientId string = ''
 
-@description('Kill-switch for the CustomerRunGuard (Sprk.Provisioning.ControlPlane.Core/Concurrency/CustomerRunGuardOptions.cs Enabled). Emitted as the CustomerRunGuard__Enabled app-setting. Default false keeps the null-object return-Success path per ADR-032 -- flip to true once the admin-env credentials are seeded on the platform KV AND the customerRunGuardTenantId + customerRunGuardClientId params are supplied. Production deployments MUST set true once I5 same-customer serialization becomes load-bearing (spec.md §4D I5 / FR-32; customer-provisioning-orchestration-r1 task 203b, punch list row A27).')
-param customerRunGuardEnabled bool = false
+@description('Kill-switch for the CustomerRunGuard (Sprk.Provisioning.ControlPlane.Core/Concurrency/CustomerRunGuardOptions.cs Enabled). Emitted as the CustomerRunGuard__Enabled app-setting. Default TRUE as of REG-02 Path X migration (2026-08-27, Wave 2 pre-dispatch remediation) -- the credential model no longer requires a ClientSecret KV-ref, so Enabled=true is safe on every deployment shape (secret-free and legacy alike) and I5 same-customer serialization becomes load-bearing on the very first deployment (spec.md §4D I5 / FR-32). The ADR-032 null-object path remains inside CustomerRunGuard itself for explicit test-host opt-out and the rare rollback scenario -- flip this param to false ONLY if the L2 UAMI is not yet registered as an admin-env Dataverse Application User (task 111 output required).')
+param customerRunGuardEnabled bool = true
 
 @description('A44.5 (customer-provisioning-orchestration-r1 task 205i, 2026-08-25 -- the H7/task-142 half of punch row A30 sentinel contract; param NAME chosen to match the A38b pattern planned for customer.bicep -- introduced HERE first because A38b had not landed at authoring time; A38b executor: adopt this exact name). When TRUE this Worker deploys on the SECRET-FREE identity contract (ADR-028 Amendment A4 / auth-v4 SS10.2): ALL THREE BFF-API-ClientSecret KV-reference app settings (EnvVarValues__ClientSecret, SolutionImportOptions__ClientSecret, CustomerRunGuard__ClientSecret) are OMITTED -- omission is the signal, NEVER a sentinel (auth-v4 SS9.1: an unresolvable KV-ref reaches the app as a literal string, which the credential path fails on opaquely with AADSTS7000215) -- and the FR-39 ordered-credential chain settings are emitted instead (EnvVarValues__Credentials__Order__0=ManagedIdentityFederated + __RequireSecretFreeIdentity=true, same pair for SolutionImportOptions -- the exact analogue of the BFF Graph__Credentials__* live contract). Gating ALL THREE refs together (not just H7 task-142 one) avoids the A38 partial-omit trap: a secret-free stamp must carry ZERO references to the deleted secret. Default FALSE preserves current (task 142 / 204a / 203b) behavior byte-for-byte for prong-3 unmigrated environments per the SS6.5 resolution record. CAVEAT: the CustomerRunGuard C# credential seam is a FOLLOW-ON row (A44.5 scope is strictly H7/H6) -- on secret-free envs customerRunGuardEnabled MUST stay false until it lands (CustomerRunGuardOptions.Validate fails loud if enabled with no secret; the ADR-032 null-object default keeps boot safe).')
 param requireSecretFreeIdentity bool = false
@@ -174,6 +174,12 @@ param requireSecretFreeIdentity bool = false
 //     app-reg trusts the UAMI via the H3-created FIC).
 // ============================================================================
 
+// REG-02 Path X migration (2026-08-27, Wave 2 pre-dispatch remediation): the
+// CustomerRunGuard__ClientSecret KV-ref was REMOVED from this array. The guard
+// now authenticates via DefaultAzureCredential pinned to the L2 UAMI (see
+// CustomerRunGuardOptions.cs REG-02 header). Only H6 (SolutionImport) + H7
+// (EnvVarValues) retain the legacy KV-ref on prong-3 unmigrated envs; both
+// gate on requireSecretFreeIdentity=false.
 var legacyClientSecretAppSettings = [
   {
     name: 'EnvVarValues__ClientSecret'
@@ -181,10 +187,6 @@ var legacyClientSecretAppSettings = [
   }
   {
     name: 'SolutionImportOptions__ClientSecret'
-    value: '@Microsoft.KeyVault(VaultName=${keyVaultName};SecretName=${bffApiClientSecretName})'
-  }
-  {
-    name: 'CustomerRunGuard__ClientSecret'
     value: '@Microsoft.KeyVault(VaultName=${keyVaultName};SecretName=${bffApiClientSecretName})'
   }
 ]
@@ -374,36 +376,45 @@ resource appService 'Microsoft.Web/sites@2023-01-01' = {
         { name: 'SolutionImportOptions__ProvisioningArtifactsContainerUri', value: artifactsStorageContainerUri }
 
         // ---------------------------------------------------------------
-        // CustomerRunGuard (task 203b, punch list row A27 / r1-gap-analysis
-        // c5-6): I5 same-customer serialization guard (spec.md §4D I5 /
-        // FR-32). Bound from IConfiguration section "CustomerRunGuard" via
-        // AddCustomerRunGuard() in Worker/Program.cs (Sprk.Provisioning.
-        // ControlPlane.Core/Concurrency/CustomerRunGuardModule.cs +
-        // CustomerRunGuardOptions.cs). Uses the ADMIN Dataverse env
-        // (adminDataverseEnvironmentUrl above -- SAME registry env the
-        // DataverseEnvironmentRegistry client talks to) with confidential-
-        // client credentials against the SHARED BFF app-reg (SAME app-reg
-        // H6/H7 use for solution-import + env-var writes). ClientSecret
-        // sources from the same BFF-API-ClientSecret KV secret (BINDING
-        // never-delete).
+        // CustomerRunGuard (task 203b + REG-02 Path X migration 2026-08-27,
+        // Wave 2 pre-dispatch remediation): I5 same-customer serialization
+        // guard (spec.md §4D I5 / FR-32). Bound from IConfiguration section
+        // "CustomerRunGuard" via AddCustomerRunGuard() in Worker/Program.cs
+        // (Sprk.Provisioning.ControlPlane.Core/Concurrency/CustomerRunGuardModule.cs
+        // + CustomerRunGuardOptions.cs).
         //
-        // Enabled=false by default per null-object kill-switch pattern
-        // (ADR-032): a fresh L2 deployment without the admin-env credentials
-        // wired stays boot-safe (the null-object returns Success
-        // unconditionally, WARN-log on each acquire). Flip to true once
-        // customerRunGuardTenantId + customerRunGuardClientId + the KV
-        // secret are all in place -- CustomerRunGuardOptions.Validate()
-        // fails fast at boot on missing fields when Enabled=true.
+        // PATH X CREDENTIAL MODEL (REG-02):
+        //   Uses the ADMIN Dataverse env (adminDataverseEnvironmentUrl below
+        //   -- SAME registry env the DataverseEnvironmentRegistry client
+        //   talks to) with the L2 UAMI via DefaultAzureCredential (NO
+        //   confidential-client, NO ClientSecret). Task 111
+        //   Grant-ControlPlaneIdentity.ps1 registers the L2 UAMI as a
+        //   Dataverse Application User on the admin env -- the exact
+        //   prerequisite already in place for the registry client. Removed
+        //   settings vs the previous shape:
+        //     - CustomerRunGuard__TenantId    (Path X: no cross-tenant hop)
+        //     - CustomerRunGuard__ClientId    (Path X: UAMI, not app-reg)
+        //     - CustomerRunGuard__ClientSecret (Path X: no secret)
+        //
+        // ENABLED=TRUE DEFAULT (REG-02):
+        //   Path X removes the last credential-missing failure mode, so
+        //   Enabled=true is now safe on every deployment shape (secret-free
+        //   and legacy alike). I5 same-customer serialization is a load-
+        //   bearing invariant per §4D I5 / FR-32 -- two simultaneous POST
+        //   /api/runs for the same customer both succeeding is catastrophic
+        //   (H2a resource-group race, H4/H4b KV write race, H5 duplicate
+        //   env-create, H10 duplicate systemuser row). The ADR-032 kill-
+        //   switch lives INSIDE CustomerRunGuard (returns Success when
+        //   Enabled=false) so operator test hosts + the rare rollback
+        //   scenario stay ergonomic.
+        //
+        // TargetDataverseUrl OMISSION (REG-05 URL collapse):
+        //   Can be omitted here -- CustomerRunGuardModule.PostConfigure
+        //   falls back to DataverseEnvironmentRegistry__AdminEnvironmentUrl
+        //   (the SAME admin env the sibling client uses). Emitted explicitly
+        //   here for backwards compat + operator readability.
         // ---------------------------------------------------------------
-        // A44.5 (task 205i): the CustomerRunGuard__ClientSecret KV-ref moved
-        // to legacyClientSecretAppSettings (concat + ternary at the bottom of
-        // this array) -- OMITTED when requireSecretFreeIdentity=true. The
-        // guard's own MI-FIC seam is a FOLLOW-ON row; on secret-free envs
-        // customerRunGuardEnabled MUST stay false until it lands (see the
-        // requireSecretFreeIdentity param description).
         { name: 'CustomerRunGuard__TargetDataverseUrl', value: adminDataverseEnvironmentUrl }
-        { name: 'CustomerRunGuard__TenantId', value: customerRunGuardTenantId }
-        { name: 'CustomerRunGuard__ClientId', value: customerRunGuardClientId }
         { name: 'CustomerRunGuard__Enabled', value: string(customerRunGuardEnabled) }
 
         // ---------------------------------------------------------------

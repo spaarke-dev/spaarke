@@ -415,13 +415,12 @@ public sealed class CustomerRunGuardTests
         var options = Options.Create(new CustomerRunGuardOptions
         {
             Enabled = enabled,
-            // Non-enabled path skips validation, so we don't need to populate
-            // the DV connection fields for the enabled-true tests either — the
-            // in-memory store bypasses Dataverse entirely.
+            // REG-02 Path X (2026-08-27): TenantId / ClientId / ClientSecret
+            // fields were REMOVED — the store authenticates via DefaultAzureCredential
+            // pinned to a UAMI (ManagedIdentityClientId). The in-memory store
+            // bypasses Dataverse entirely so no real credential is exercised.
             TargetDataverseUrl = enabled ? "https://spaarke-admin-test.crm.dynamics.com" : null,
-            TenantId = enabled ? "11111111-1111-1111-1111-111111111111" : null,
-            ClientId = enabled ? "22222222-2222-2222-2222-222222222222" : null,
-            ClientSecret = enabled ? "unit-test-secret" : null,
+            ManagedIdentityClientId = enabled ? "22222222-2222-2222-2222-222222222222" : null,
         });
         return new CustomerRunGuard(store, repo, options, NullLogger<CustomerRunGuard>.Instance);
     }
