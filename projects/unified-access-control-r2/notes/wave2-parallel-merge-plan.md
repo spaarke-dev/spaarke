@@ -538,9 +538,41 @@ construction cannot see a ratchet that was consumed but not breached.
    workspace (`@fluentui/react-icons` unresolvable through the `@spaarke/ui-components` `file:` link).
    079 confirmed by reproducing on unmodified HEAD. So 079's client regression assertion is
    **currently unenforced**.
-6. **Flaky test, diagnosed** — `TenantCacheMetricsTests` failed 1 of 3 full runs: asserts exact
-   equality against **process-global static** meter counters while xUnit runs classes in parallel. Not
-   caused by 079, but new fixtures raise the race probability.
+6. **Flaky test — FIRED AGAIN on the 079 merge, and the diagnosis above was imprecise. Corrected here.**
+   `TenantCacheMetricsTests.GetAsync_MissThenHit_IncrementsMissesThenHits` failed in the full run
+   immediately after merging 079 (2026-08-27), then **passed in isolation** — 2 of ~5 full runs now.
+   079's change set touches nothing in the tenant-cache path; its new fixtures only raise parallel load,
+   exactly as predicted.
+
+   **The imprecision matters because it points the fixer at the wrong thing.** The original wording —
+   *"asserts exact equality against process-global static meter counters"* — reads as though the
+   accumulators were shared. They are **local variables** (`TenantCacheMetricsTests.cs:31`), incremented
+   by a callback on a **local** `MeterListener`. What is process-global is the **instrument**:
+   `CacheMetrics.HitsCounter` / `MissesCounter` are `static readonly` on one process-wide `Meter`
+   (`Telemetry/CacheMetrics.cs:40-52`), and the listener subscribes **by instrument**, not by emitter.
+   So any test running in parallel that exercises a `MetricsDistributedCache`-decorated cache lands in
+   *this* test's local accumulators. Mechanism: **local accumulator, global instrument, parallel emitters.**
+
+   **Direction of the error is determined analytically, not by reproducing it**: a parallel emitter can
+   only ever ADD, so the failure is always an **over-count**, never an under-count.
+
+   **Tags cannot rescue it.** Every decorator emission carries the same `tier=raw`
+   (`MetricsDistributedCache.cs:26-27, 180-189`), so no tag distinguishes this test's cache instance from
+   another test's.
+
+   🔴 **Do NOT "fix" this by relaxing to `Should().BeGreaterOrEqualTo(1)`.** The exactly-once assertion IS
+   the invariant the test exists for — the file's own header (`:18-23`) records that the R7-S7 sub-gap #2
+   closure moved emission to the decorator precisely so cache I/O is *"counted exactly once"*. Weakening
+   the assertion deletes the test's reason to exist while leaving it green, which is worse than the flake.
+
+   **And there is no cheap non-weakening test-only fix on this stack.** xUnit **2.9.x** (per
+   `tests/CLAUDE.md`) has no per-collection `DisableParallelization` — that is xUnit v3. Serializing via a
+   shared `[Collection]` would require finding and annotating *every* class in
+   `Sprk.Bff.Api.Tests` that can emit `cache.*`, which is fragile and wide;
+   `DisableTestParallelization` assembly-wide is far too heavy (the suite is 3m19s). The genuine fix is a
+   **production seam** — inject the metrics sink into `MetricsDistributedCache` so the test can supply its
+   own `Meter` — and that is a §11 new-surface decision for a test-only reason, not something to slip into
+   a merge commit. **Left unfixed deliberately; escalated rather than hacked.**
 7. **`RouteAuthorizationGuardTests.cs` waiver-absence rule** (item 12 above) if not done inline.
 
 ## 6. Integration verification — nothing is verified until this runs HERE
