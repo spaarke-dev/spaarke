@@ -152,7 +152,20 @@ An earlier draft of this plan proposed Parental/configurable cascading on `sprk_
 **That was wrong**, and the correction is recorded here rather than silently replaced because the
 reasoning matters:
 
-1. **Cascade propagates EVENTS, not evaluated access.** `Assign` fires on a parent **owner change**;
+1. **Role-scope access to the parent does NOT inherit — this is the decisive one.**
+   *(Corrected 2026-08-27 from an earlier, partly-wrong statement in this plan: I wrote that
+   cascade "propagates events, not evaluated access" and that pre-existing shares never replay.
+   That is true for plain Cascade-Share on a NON-parental relationship, but a properly configured
+   PARENTAL relationship (Reparent + Share = Cascade All) applies inherited access at child
+   create / lookup-set time — so a document filed under an already-shared matter DOES inherit.
+   Parent owning-TEAM access inherits too. Source: `.claude/agent-memory/researcher/
+   dataverse-cascade-share-parent-child-access-2026-08-18.md`, verified against MS Learn.)*
+   **What survives the correction, and defeats cascade anyway:** access reaching the parent via
+   **security-role / privilege-depth scope does not inherit to children — ever.** That is the
+   normal case. Cascade delivers the rule only for owner, owning-team and explicitly-shared
+   principals. Additional pitfall from the same source: **POA bloat** — parental sharing writes a
+   POA row per principal × record; the documented mitigation is team ownership over per-user shares.
+ `Assign` fires on a parent **owner change**;
    `Share`/`Unshare` fire on **new explicit shares** (pre-existing shares do not replay). A user who
    reaches the Matter through **role or business-unit scope** — the normal case — receives **nothing**
    on its documents. Cascade therefore cannot express "has access to the parent ⇒ has access to the
@@ -265,6 +278,13 @@ Fix by routing every site through the D-1 resolvers. **Not 20 hand-written chain
 `sprk_relatedproject` are **invoice-flow reference lookups, never the filing parent** — and no
 first-party code writes them at all. Note also a documentation discrepancy to reconcile first: the ERD
 says `Delete=Restrict`, the solution XML says `RemoveLink`.
+
+> **P2 coordination note (2026-08-27)**: this is NOT greenfield. `unified-access-control-r2` /
+> `dataverse-access-unification-r1` already have an active, documented decision process for this exact
+> pattern (raised there for `sprk_todo`), and their open question — *which single parent path should
+> own the ONE allowed parental relationship, and is that desirable versus a code-share model given
+> POA bloat* — is the same fork P2 faces. **Align with that project before designing P2 independently;
+> they may be the right owner.**
 
 ### Workstream E — Explicitly OUT of scope here (file separately)
 
