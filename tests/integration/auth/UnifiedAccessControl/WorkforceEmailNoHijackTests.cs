@@ -1,5 +1,6 @@
 using System.Security.Claims;
 using FluentAssertions;
+using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Options;
 using Microsoft.Xrm.Sdk;
@@ -325,6 +326,31 @@ public class WorkforceEmailNoHijackTests
     }
 
     /// <summary>
+    /// The mirror of the test above, and the half that makes the pair load-bearing: a binding stored
+    /// in the Web-API STRING form that belongs to someone ELSE must still DENY. Read the two together
+    /// — same textual form, opposite outcomes. A read that quietly ignored string-typed bindings would
+    /// pass the positive test (the contact resolves, as expected) while failing this one, because the
+    /// victim's contact would read as unbound and be handed over. That is the fail-OPEN direction, so
+    /// it is the direction that needs the assertion.
+    /// </summary>
+    [Fact]
+    public async Task TryResolveContactByWorkforceIdentity_AnotherPersonsBindingStoredAsAString_StillDenies()
+    {
+        var row = new Entity("contact") { Id = VictimContactId };
+        row["contactid"] = VictimContactId;
+        row["azureactivedirectoryobjectid"] = VictimOid.ToString("D").ToUpperInvariant();
+
+        var sut = CreateSutWithContacts(row);
+
+        var resolved = await sut.TryResolveContactByWorkforceIdentityAsync(
+            CallerOid, SharedEmail, CancellationToken.None);
+
+        resolved.Should().BeNull(
+            "a binding is a binding whichever transport wrote it — reading only Guid-typed values " +
+            "would make every Web-API-written binding invisible to the guard");
+    }
+
+    /// <summary>
     /// A contact-by-email query that cannot be READ must not resolve. Genuinely unchanged by task 013,
     /// asserted because the refactor moved this failure path: the helper used to return
     /// <c>Guid?</c> for both "query failed" and "nothing matched", and a change that turned
@@ -392,6 +418,59 @@ public class WorkforceEmailNoHijackTests
         dataverse.Verify(
             x => x.RetrieveMultipleAsync(It.IsAny<QueryExpression>(), It.IsAny<CancellationToken>()),
             Times.Exactly(2));
+    }
+
+    // ─────────────────────────────────────────────────────────────────────────────
+    // Deny codes — ADR-003 MUST, and the only thing that distinguishes the deny reasons
+    // ─────────────────────────────────────────────────────────────────────────────
+
+    /// <summary>
+    /// The A-18 deny must be identifiable in the audit trail, not merely absent from the result.
+    /// Every deny on this path returns the same <c>null</c>, so the emitted code is the ONLY thing
+    /// telling "this caller is not a contact here" apart from "someone tried to take over a bound
+    /// contact" — and only the second is worth waking somebody for.
+    /// </summary>
+    [Fact]
+    public async Task TryResolveContactByWorkforceIdentity_HijackDeny_EmitsItsMachineReadableDenyCode()
+    {
+        var log = new CapturingLogger<IdentityNormalizationService>();
+        var sut = CreateSutWithContacts(log, ContactRow(VictimContactId, VictimOid));
+
+        await sut.TryResolveContactByWorkforceIdentityAsync(CallerOid, SharedEmail, CancellationToken.None);
+
+        log.Messages.Should().ContainMatch(
+            "*sdap.access.deny.contact_bound_to_different_oid*",
+            "ADR-003 requires a machine-readable deny code; without it this deny is indistinguishable " +
+            "from an ordinary non-contact caller");
+    }
+
+    /// <summary>
+    /// An unreadable binding state emits its OWN code — and a clean miss emits none. This pair is what
+    /// makes the "query failed" / "nothing matched" distinction load-bearing rather than cosmetic:
+    /// both deny, so the decision alone cannot tell them apart, and collapsing them would hide a
+    /// Dataverse outage inside the ordinary noise of callers who simply are not contacts.
+    /// </summary>
+    [Fact]
+    public async Task TryResolveContactByWorkforceIdentity_UnreadableBindingState_EmitsADistinctDenyCode()
+    {
+        var failing = new Mock<IDataverseService>(MockBehavior.Strict);
+        failing
+            .Setup(x => x.RetrieveMultipleAsync(It.IsAny<QueryExpression>(), It.IsAny<CancellationToken>()))
+            .ThrowsAsync(new InvalidOperationException("Dataverse unavailable"));
+
+        var failLog = new CapturingLogger<IdentityNormalizationService>();
+        await CreateSut(failing.Object, failLog)
+            .TryResolveContactByWorkforceIdentityAsync(CallerOid, SharedEmail, CancellationToken.None);
+
+        failLog.Messages.Should().ContainMatch("*sdap.access.deny.contact_binding_unreadable*");
+
+        // …and the clean miss must NOT claim the binding was unreadable.
+        var missLog = new CapturingLogger<IdentityNormalizationService>();
+        await CreateSutWithContacts(missLog).TryResolveContactByWorkforceIdentityAsync(
+            CallerOid, SharedEmail, CancellationToken.None);
+
+        missLog.Messages.Should().NotContainMatch("*sdap.access.deny.contact_binding_unreadable*",
+            "nothing matched — that is not an outage");
     }
 
     // ─────────────────────────────────────────────────────────────────────────────
@@ -507,7 +586,23 @@ public class WorkforceEmailNoHijackTests
     /// <item><b>Inactive contacts.</b> The query carries no <c>statecode</c> filter — pre-existing
     /// behaviour, deliberately unchanged by this task. A deactivated contact bound to a different oid
     /// is still denied (the guard runs first), but a deactivated UNBOUND contact still resolves.</item>
+    ///
+    /// <item><b>"Unreadable" versus "no match" is an AUDIT distinction, not a decision one.</b> Both
+    /// deny. Mutation testing found this: making the unreadable path return an empty list instead of
+    /// null killed no test, because the outcome was identical either way. It is now pinned through the
+    /// emitted deny code (<see cref="TryResolveContactByWorkforceIdentity_UnreadableBindingState_EmitsADistinctDenyCode"/>),
+    /// which is the honest claim — the security posture does not depend on the distinction; the
+    /// ability to tell a Dataverse outage from an ordinary non-contact caller does.</item>
     /// </list>
+    ///
+    /// <para><b>How the above was established.</b> Every guard in this fix was mutated individually
+    /// against this suite (drop the ambiguity deny; drop the empty-caller deny; neutralise the
+    /// bound-to-different-oid comparison; drop the binding column from the <see cref="ColumnSet"/>;
+    /// narrow <c>TopCount</c> back to 1; degrade the unreadable path to a clean miss; read Guid-typed
+    /// bindings only; let the resolver rethrow instead of denying). Each kills at least one test here.
+    /// Two of those mutations survived the first pass — the <c>TopCount</c> one because the double
+    /// ignored <c>TopCount</c> and <see cref="ColumnSet"/>, the unreadable one because the outcome
+    /// genuinely did not change — and both are fixed above rather than explained away.</para>
     /// </summary>
     [Fact]
     public void WhatTheseTestsCannotFalsify() => true.Should().BeTrue();
@@ -539,6 +634,24 @@ public class WorkforceEmailNoHijackTests
         return row;
     }
 
+    /// <summary>
+    /// Returns the row as the query actually asked for it — attributes outside the
+    /// <see cref="ColumnSet"/> are dropped, exactly as Dataverse drops them. Without this the double
+    /// would answer questions the production query never asked, and a query that stopped selecting
+    /// <c>azureactivedirectoryobjectid</c> would keep passing every test that depends on it.
+    /// </summary>
+    private static Entity Project(Entity row, ColumnSet columns)
+    {
+        if (columns.AllColumns) return row;
+
+        var projected = new Entity(row.LogicalName) { Id = row.Id };
+        foreach (var column in columns.Columns)
+        {
+            if (row.Contains(column)) projected[column] = row[column];
+        }
+        return projected;
+    }
+
     private static bool HasEmailCondition(QueryExpression q)
         => q.Criteria.Conditions.Any(c => c.AttributeName == "emailaddress1");
 
@@ -552,6 +665,11 @@ public class WorkforceEmailNoHijackTests
     /// is how a test passes while asserting nothing.
     /// </summary>
     private static IdentityNormalizationService CreateSutWithContacts(params Entity[] contacts)
+        => CreateSutWithContacts(logger: null, contacts);
+
+    private static IdentityNormalizationService CreateSutWithContacts(
+        CapturingLogger<IdentityNormalizationService>? logger,
+        params Entity[] contacts)
     {
         var dataverse = new Mock<IDataverseService>(MockBehavior.Strict);
 
@@ -582,17 +700,20 @@ public class WorkforceEmailNoHijackTests
                 It.Is<QueryExpression>(q => HasEmailCondition(q)), It.IsAny<CancellationToken>()))
             .ReturnsAsync((QueryExpression q, CancellationToken _) =>
             {
-                // Honors TopCount, so a query that narrowed back to one row would show up here as a
-                // lost ambiguity signal rather than being silently compensated for.
+                // Honors BOTH TopCount and ColumnSet, because a double that ignores them cannot
+                // detect a change in what the query DOES — only in what it is for. Narrow the read
+                // back to one row and ambiguity silently disappears; stop selecting the binding
+                // column and every contact arrives looking unbound. Both are fail-OPEN regressions
+                // in the production query that a permissive double would wave through.
                 var collection = new EntityCollection();
                 foreach (var row in contacts.Take(q.TopCount ?? contacts.Length))
                 {
-                    collection.Entities.Add(row);
+                    collection.Entities.Add(Project(row, q.ColumnSet));
                 }
                 return collection;
             });
 
-        return CreateSut(dataverse.Object);
+        return CreateSut(dataverse.Object, logger);
     }
 
     private static (IdentityNormalizationService Sut, List<QueryExpression> Captured) CreateSutCapturingQueries(
@@ -613,13 +734,37 @@ public class WorkforceEmailNoHijackTests
         return (CreateSut(dataverse.Object), captured);
     }
 
-    private static IdentityNormalizationService CreateSut(IDataverseService dataverse)
+    private static IdentityNormalizationService CreateSut(
+        IDataverseService dataverse,
+        CapturingLogger<IdentityNormalizationService>? logger = null)
         => new(
             dataverse,
             new NoOpTenantCache(),
             Array.Empty<IIdentityOrganizationResolver>(),
             Options.Create(new MembershipOptions()),
-            NullLogger<IdentityNormalizationService>.Instance);
+            logger ?? (ILogger<IdentityNormalizationService>)NullLogger<IdentityNormalizationService>.Instance);
+
+    /// <summary>
+    /// Records formatted log messages. Deny codes are asserted through the real
+    /// <see cref="ILogger"/> path rather than by exposing a test-only hook, so what the test reads is
+    /// what an operator would read in App Insights.
+    /// </summary>
+    private sealed class CapturingLogger<T> : ILogger<T>
+    {
+        public List<string> Messages { get; } = new();
+
+        public IDisposable? BeginScope<TState>(TState state) where TState : notnull => null;
+
+        public bool IsEnabled(LogLevel logLevel) => true;
+
+        public void Log<TState>(
+            LogLevel logLevel,
+            EventId eventId,
+            TState state,
+            Exception? exception,
+            Func<TState, Exception?, string> formatter)
+            => Messages.Add(formatter(state, exception));
+    }
 
     /// <summary>
     /// Resolver over a strict identity double, with a Dataverse double that resolves NO systemuser —
