@@ -39,7 +39,7 @@ Interactive Claude Code skill for provisioning a **new Spaarke customer environm
 | L2 REST surface | `POST /api/runs`, `GET /api/runs/{id}`, `POST /api/runs/{id}/resume`, `POST /api/runs/{id}/clear-quarantine` |
 | L2 audience (token) | `api://spaarke.com/provisioning-controlplane-{env}` |
 | Operator role required | `Operator` app-role (mutating) OR `Reader` (poll-only) |
-| Handler catalog | 15 handlers: H0 preflight → H0.5 consent-callback → H1..H14 provisioning steps (see [`docs/guides/SPAARKE-CUSTOMER-DEPLOYMENT-GUIDE.md`](../../../docs/guides/SPAARKE-CUSTOMER-DEPLOYMENT-GUIDE.md) §H0–H14) |
+| Handler catalog | 20 handlers per run (Model 1 Shared: 19 — skips H0.5; Model 2 Dedicated: 19 — skips H11): H0 / H0.5 / H1 / H2a / H2b / H3 / H4 / H4-shared / H4b / H5 / H6 / H7 / H8 / H9 / H10 / H11 / H12a / H12b / H12c / H13 / H14. Per `HandlerIds.Dispatchable` in `Sprk.Provisioning.ControlPlane.Core` — 21 registered including H0 which is entry-point (not in Dispatchable). See [`docs/guides/SPAARKE-CUSTOMER-DEPLOYMENT-GUIDE.md`](../../../docs/guides/SPAARKE-CUSTOMER-DEPLOYMENT-GUIDE.md) §H0–H14. |
 | Trap catalog | 6 traps T1-T6 (see design §4B) — each handler asserts its trap clear before reporting success |
 | Tenant-isolation invariants | 5 invariants I1-I5 (see design §4D) — asserted by ArchTests + verified at H13 acceptance |
 | Estimated wall-clock (Model 2 fresh stamp) | ≤ 1 hour (NFR-03) if no lead-time gates (Azure quota / SPE 24h / customer admin consent) |
@@ -475,59 +475,36 @@ Wait for "yes" (bare "y" is insufficient at every gate in this skill — spec §
 
 ---
 
-### Step 2: Preflight (invokes L2 H0 handler)
+### Step 2: Client-side Dry-Run + Preflight Planning (no server mutation)
 
+> **CRITICAL architectural correction (EXEC-02 / SKILL-03 / ISH-03 fix, SESSION 15 Wave 4)**: Step 2 is now CLIENT-SIDE ONLY. Earlier drafts of this skill POSTed to `/api/runs` with a fictional `mode:"preflight"` field — but `CreateRunRequest` (`RunsEndpoints.cs:861-880`) accepts NO `mode` field, silently DROPPED both `tenantId` (I1 invariant violation) and `mode`, and unconditionally enqueued H0 → the full H1..H14 cascade via the reconciler. Step 3's confirmation gate was therefore theatrical: by the time the operator typed "proceed with provisioning," H1-H2a had already fired. The redesign: Step 2 stays client-side (validates + shows plan); Step 3 gate fires BEFORE any L2 POST; Step 4 issues the SINGLE actual POST to `/api/runs`.
+>
 > **BEFORE this step**, if the target Azure subscription was created within the last 90 days (i.e. "fresh sub"), invoke **Step 2.5 (Fresh-Sub Deployment Feasibility Check)** first. Fresh subs have region/quota/model gotchas that L2's H0 handler does NOT currently check for; skipping Step 2.5 leads to preflight failure loops that the operator cannot escape without editing Bicep. See "Fresh-Sub Automation Gaps" section at end of this file for the full evidence base (customer-provisioning-orchestration-r1 lessons learned 2026-08-22).
 
-Preflight is idempotent + fast (<30s). It:
-- Validates quota (Azure OpenAI regional TPM per NFR-12; App Service tier; SPE container-type headroom)
-- Runs DNS pre-check for reserved sub-domains
-- Verifies customer's tenant is reachable + admin consent status (Model 2 only)
-- Confirms operator's grants against target subscription (Model 2 only)
+Step 2 performs **client-side validation only** (no L2 POST). It:
+- Re-validates intake JSON against `intake.schema.json` (idempotent with Step 1.0 batch validate; belt-and-suspenders for interactive mode)
+- Runs Step 0.5 iteration once more if any prereqs are scoped `once_per_customer_pre_intake` (per EXEC-10 scoping — none in current manifest, but reserved for future extensibility)
+- Performs the SPAARKE customer-run history probe (Step 1a semantics — Dataverse MCP alt-key GET on `sprk_dataverseenvironment` filtered by `sprk_customerid`) to detect upgrade-mode
+- Builds the run plan (handler list per profile + estimated cost + estimated duration)
+- Displays the plan to the operator
 
-Invocation:
-
-```powershell
-$body = @{
-  customerId     = $customerId
-  tenantId       = $tenantId
-  environmentId  = $environmentId  # REQUIRED per punch list A10 / DS-5 c6-2 — L2 400s without this
-  tenancyModel   = $tenancyModel
-  profile        = $profile         # MUST be one of the 3 enum values validated at Step 1e (per A09 / DS-5 c6-1)
-  mode           = "preflight"      # H0-only run; does NOT enqueue H1-H14
-} | ConvertTo-Json
-
-$response = Invoke-RestMethod `
-  -Uri "$l2Base/api/runs" `
-  -Method POST `
-  -Headers @{ Authorization = "Bearer $token" } `
-  -Body $body -ContentType "application/json"
-
-# response: { runId: "...", customerId: "...", status: "NotStarted", location: "/api/runs/{runId}?customerId=..." }
-# Note: status is "NotStarted" (per RunStatus enum), NOT "Accepted" — earlier drafts of this skill
-# listed the fictional "Accepted" state (SKILL-10 fix).
-$runId = $response.runId
-```
-
-L2 returns 202 Accepted within 100ms (FR-22 R20). Poll `GET /api/runs/{runId}?customerId={customerId}` at 5s intervals until the run has H0 in `CompletedPhases` (Success outcome) OR RunStatus transitions to `Failed`. Cap total wait at 60s (H0 is fast); if exceeded, escalate.
-
-Present H0 outcome:
+The plan is presented; NOTHING mutates on L2 or in Azure. The operator sees the full picture BEFORE the confirmation gate fires.
 
 ```
-PREFLIGHT (H0) RESULT
-  Duration: 8.2s
-  [PASS] Azure OpenAI TPM headroom OK (projected 187/2000 sum-across-models)
-  [PASS] App Service plan tier available in westus2
-  [PASS] SPE container-type headroom OK (7,442 of 10,000 remaining)
-  [PASS] DNS pre-check: trial-acme-2026-08-18.spaarke.com not reserved
-  [PASS] Customer tenant reachable (Model 1 shared)
-  [PASS] Estimated cost: $412/mo (within $430 Model 1 marginal envelope)
-  [PASS] Estimated duration: 42 min (H1-H14, no lead-time gates)
-
-Preflight passed. Proceed to Step 3 (confirmation gate)? (yes/no)
+PREFLIGHT (client-side) RESULT
+  Duration: 3.2s
+  [PASS] Intake JSON valid (14 fields present, all required)
+  [PASS] Step 0.5 pre-intake prereqs — 26 of 26 checked
+  [PASS] Customer history — new customerId (fresh provision, not upgrade)
+  [PLAN] Handlers to execute (Model1Shared: ~19 handlers)
+  [PLAN] Estimated duration: 42 min (H1-H14 sequential critical path)
+  [PLAN] Estimated cost impact: +$412/mo (Model 1 marginal, within $430 envelope)
+  [PLAN] Manual gates likely: none for Model 1 Shared
 ```
 
-If H0 FAILS, present the failure + escalation instructions (per §4C 4-class taxonomy). Do NOT proceed to Step 3.
+**Note**: server-side preflight (H0 handler) will run automatically when Step 4 POSTs `/api/runs`; H0 is the FIRST handler in the L2 DAG per `DagAdvancer.cs`. There is no separate "preflight-only" run mode — that concept was a skill fiction. If the operator wants H0-only re-verification WITHOUT triggering H1+, the actual mechanism is `POST /api/runs/{runId}/preflight?customerId={cid}` per `RunsEndpoints.cs:188` on an EXISTING run (upgrade-mode use case).
+
+If Step 2 client-side validation FAILS, present the failure + escalation instructions. Do NOT proceed to Step 3.
 
 ---
 
@@ -666,7 +643,8 @@ RUN PLAN
   tenancyModel:  Model1Shared
   profile:       dev
 
-  Handlers to execute (13 for Model1Shared / 17 for Model2Dedicated):
+  Handlers to execute (Model 1 Shared: 19 / Model 2 Dedicated: 19 — 20 total, minus 1 per tenancy model):
+    H0        preflight (unconditional; first handler in DAG per DagAdvancer.cs)
     H0.5      consent-callback (Model 2 only — skipping for Model 1)
     H1        resource-group provisioning
     H2a       Bicep infra apply (30-min timeout)
@@ -678,10 +656,10 @@ RUN PLAN
     H5        Dataverse environment creation (20-min timeout for Model 2)
     H6        Dataverse solutions import (8 solutions, dependency-ordered)
     H7        env-var writes to customer env
-    H8        SPE container-type creation (24h replication, gate H8.a re-verifies)
-    H9        BFF deploy to customer stamp (blue-green via staging slot; runs AFTER H4-shared + H4b so BFF boots with config in place)
+    H8        SPE container-type creation (empirically near-instant, 25h fallback ceiling; H8.a re-verifies)
+    H9        BFF deploy to customer stamp (blue-green via staging slot; runs AFTER H4-shared + H4b so BFF boots with config in place — HANDLER-01 DAG fix SESSION 15)
     H10       Dataverse App User creation (UAMI-based)
-    H11       demo user provisioning (Model 1 only for trial users)
+    H11       demo user provisioning (Model 1 only — trial users; skipping for Model 2)
     H12a      AI seed chain (playbooks + embeddings)
     H12b      playbook consumers seed
     H12c      agents seed
@@ -693,8 +671,8 @@ RUN PLAN
 
   Manual gates you MAY encounter mid-run:
     - Model 2 admin consent URL (H0.5) — customer admin clicks
-    - Azure quota bump (if H1 hits soft cap) — operator opens support ticket
-    - SPE container replication wait (H8) — 24h; H8.a resumes automatically
+    - Azure quota bump (if H1 hits soft cap) — operator opens support ticket; advance via /gates/{gateId}/advance (SKILL-07 fix)
+    - SPE container replication wait (H8) — empirically near-instant per operator memory feedback_spe_container_timing; 25h fallback ceiling in the SKILL, rarely fires
 
   DESTRUCTIVE OPERATIONS: none in fresh-provisioning mode. Upgrade mode may
   overwrite Bicep-managed resources with drift; if this is an upgrade run,
@@ -711,9 +689,44 @@ Wait for the literal string `proceed with provisioning`. Anything else — inclu
 
 ---
 
-### Step 4: Execute Loop — poll → advance
+### Step 4: Execute — issue THE single POST + poll → advance
 
-Once "proceed with provisioning" received AND the Step 4 POST /api/runs from Step 2 has landed (see Step 2 note — POST /api/runs unconditionally enqueues H0; there is no server-side preflight-only mode), poll for run progress. L2's state reconciler auto-advances the DAG as each handler completes — `POST /api/runs/{id}/resume` is ONLY for retry of a `Failed` run per `RunsEndpoints.cs:232-244`, NOT a transition trigger.
+Once Step 3's `proceed with provisioning` phrase captured (interactive) OR `confirmationAcknowledgment` field validated (batch), Step 4 issues THE single POST that mutates L2 state. L2 unconditionally enqueues H0 → reconciler dispatches H1 → H2a → ... → H13 → H14 without further operator input.
+
+#### 4.0. Enqueue
+
+Per Wave 0 Decision 1 (`tenantId` flows via `nonSecretParameters`) + Decision 6 (mechanical prune to match `CreateRunRequest` top-level shape) + Decision 3 (`confirmationAcknowledgment` in nonSecretParameters). `CreateRunRequest` (`RunsEndpoints.cs:861-880`) accepts EXACTLY `customerId, environmentId, tenancyModel, profile, nonSecretParameters` — no `tenantId` top-level, no `mode`.
+
+```powershell
+$intakeFileSha256 = if ($BatchIntakeFile) { (Get-FileHash -Path $BatchIntakeFile -Algorithm SHA256).Hash } else { $null }
+
+$body = @{
+  customerId    = $customerId
+  environmentId = $environmentId          # created at Step 1f
+  tenancyModel  = $tenancyModel           # Model1Shared | Model2Dedicated
+  profile       = $profile                # one of 3 enum values per Step 1e
+  nonSecretParameters = @{
+    tenantId                    = $tenantId          # I1 invariant per Wave 0 Decision 1
+    confirmationAcknowledgment  = $confirmationPhrase # verbatim "proceed with provisioning"
+    intakeFileSha256            = $intakeFileSha256   # batch-mode audit trail (null in interactive)
+    region                      = $region
+    openAiRegion                = $openAiRegion
+    tier                        = $tier
+    operatorUpn                 = $operatorUpn
+    # other operator-supplied intake fields go here (mechanical prune per Wave 0 Decision 6)
+  }
+} | ConvertTo-Json -Depth 5
+
+$response = Invoke-RestMethod `
+  -Uri "$l2Base/api/runs" `
+  -Method POST `
+  -Headers @{ Authorization = "Bearer $token" } `
+  -Body $body -ContentType "application/json"
+
+$runId = $response.runId  # response shape: { runId, customerId, status:"NotStarted", location:"/api/runs/{runId}?customerId=..." }
+```
+
+L2 returns 202 within 100ms and the reconciler picks up H0 within ~5s. L2's state reconciler then auto-advances the DAG — `POST /api/runs/{id}/resume` is ONLY for retry of a `Failed` run per `RunsEndpoints.cs:232-244`, NOT a transition trigger.
 
 #### 4a. Poll loop
 
