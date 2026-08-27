@@ -1,6 +1,75 @@
 # Current Task State — customer-provisioning-orchestration-r1
 
-> **Last Updated**: 2026-08-27 SESSION 15 (pre-dispatch comprehensive audit + Wave 0 decisions COMPLETE; Wave 2 IN-FLIGHT). Comprehensive 10-agent audit workflow (`wf_aef5ac94-9dd`, 1.3M subagent tokens) surfaced 127 findings across 7 layers; adversarial-verified with 0 refuted. Synthesized into 172KB master punch list (`notes/pre-dispatch-audit-punchlist-2026-08-27.md`) with 9-wave remediation plan. Wave 0's 10 architectural decisions applied per operator directive "don't wait for me / every issue is a priority" — decisions documented in `notes/wave-0-adr-note-2026-08-27.md` (auditable, revertable). Wave 2 remediation workflow (`wf_5aad7c53-c8f`) launched: 3 parallel implementation lanes (B1 DagAdvancer + B3 handler bodies + B24 endpoints/registry) totaling 25 code-only findings + 3 adversarial verifiers. Task 186 batch dispatch BLOCKED until Waves 0-8 complete + end-to-end verify passes.
+> **Last Updated**: 2026-08-27 SESSION 15 END (97 of 127 findings landed across ~50 commits — 76% of pre-dispatch remediation complete). Waves 2/2.5/3/4/5/6/7/8 all COMPLETE at the subagent-safe layer + Wave 4 SKILL.md rewrite complete for all 40 findings the punchlist scoped to it. **Remaining: ~15 SKILL.md-touching items in Waves 5/6/7 deferred to next-session main-session pass** (per Sub-Agent Write Boundary §3 — SKILL.md main-session-only) + a handful of code partial-fix closeouts + end-to-end verify + task 186 dispatch. All work pushed to origin @ `9e9dfdbc1`. L2 test suite: 1889/1890 (was 1792 baseline, +97 net new tests).
+
+## 🎯 SESSION 15 END — HANDOFF FOR NEXT SESSION (READ THIS FIRST)
+
+### What landed (97 findings, ~50 commits)
+
+| Wave | Scope | Findings | Landed |
+|---|---|---|---|
+| Wave 2 | L2 code (DagAdvancer, RunsEndpoints, registry write path) | 22 + 1 test-regression fix | ✅ (20 subagent + 1 main-session commits, `7b1f398cd`→`05e3f6c80`+`fb4ef3289`) |
+| Wave 2.5 | Scaffold fills (HANDLER-03/07/08/09/13 → live Azure/pac impls) | 5 | ✅ (5 commits) |
+| Wave 3 | prereqs.yaml + task POML hardening | 11 | ✅ (11 commits, `75537850a`..`21e5f27f1`) |
+| Wave 4 | SKILL.md aggregate rewrite (7 batches A-G) | 40 | ✅ (7 main-session commits, `5bea26de6`..`866b1c885`) |
+| Wave 5 | intake.schema.json + code (ISH-02/07/08/09/11) | 5 | ✅ (5 commits) |
+| Wave 6 | Batch-mode intake schema additions (BAT-10) | 1 subagent-safe | ✅ (1 commit, `dc77381f8`) |
+| Wave 7 | Missing-dimension code + procedures runbook | 10 (7 fixed + 3 partial) | ✅ (partial fixes acknowledged; runbook at `docs/procedures/provisioning-completeness-sweeps-2026-08-27.md`) |
+| Wave 8 | EXEC-09 Model1Shared vs Model2Dedicated DAG parity | 1 partial | ✅ (test-net-only in commit `0079ae55d`) |
+
+### What remains for NEXT-SESSION main-session pass (~15 items)
+
+**SKILL.md-touching (main-session-only per §3 Sub-Agent Write Boundary):**
+
+1. **ISH-10 [HIGH]** — SKILL.md Step 0c: rewrite Operator-role probe. Currently sends `profile:"dev"` which is NOT in intake schema enum (spaarke-hosted-model1-trial | spaarke-hosted-model2 | customer-owned-model2). Replace with Reader-scoped `GET /api/runs?customerId=__probe__` OR dedicated `/api/whoami`. Est: 45m.
+2. **ISH-12 [MEDIUM]** — SKILL.md + prereqs.yaml + spaarke-constants.yaml rename: `intake.schema.json.environment` → `controlPlaneEnv` (disambiguates from H2a stamp `environmentName`). Est: 30m.
+3. **COMP-14 [HIGH]** — SKILL.md Step 0.5a: fail-fast if `intake.environment` empty/null BEFORE Step 0.5b substitution (currently substitutes empty `{env}` → prereqs.yaml recipes hit `spaarke-prov--kv`). Est: 20m.
+4. **BAT-01 through BAT-09 [CRITICAL/HIGH]** — SKILL.md batch-mode wiring. intake.schema.json ALREADY carries 8 batch-policy fields (added Wave 6 subagent commit `dc77381f8`: `mcpDisconnectPolicy`, `acknowledgeUpgradeMode`, `confirmationAcknowledgment`, `skipDataverseMcp`, `postmortemFile`, `abandonOnFailure`, etc.). SKILL Steps 0d, 1a, 1g, 2, 4b, 5a-d, 7b prompts need `if ($script:SkipInteractiveIntake) { <use batch source or fail-fast> } else { <existing prompt> }` wraps + `$script:SkipInteractiveIntake` plumbing. Est: 2-4h (9 findings but mechanical once pattern established).
+5. **Step 2 body-construction (nice-to-have)** — SKILL Step 2 code block should map intake top-level `subscriptionId` → `nonSecretParameters['subscriptionId']` AND intake `openAiRegion` → `nonSecretParameters['openAiLocation']` (per ISH-02 + ISH-08 code work — the seams are proven, operator-facing wiring TBD). Est: 15m.
+
+**Code partial-fix closeouts:**
+
+6. **COMP-03 [MEDIUM]** — L2 code: `KnownProfiles` const + endpoint validation + ArchTest. Design decision needed: reject unknown profile with 400 vs warn+accept. Wave 7 flagged as partial pending design call. Est: 1h + design call.
+7. **COMP-06 / ROLLBACK-1 [HIGH]** — L2 code: fix `sprk_currentrunid` lock-leak in `QuarantineClearService.ClearAsync` (couples to REG-04 credential seam per Wave 0 Decision 9 — should land alongside or immediately after any REG-04-adjacent work). Est: 1h.
+8. **COMP-10 [MEDIUM]** — L2 code: `H0Options.CostEnvelopeAbortsPreflight` field + intake schema addition + red-path test. Wave 7 flagged as partial. Est: 1h.
+
+### Post-remediation sequencing
+
+Once above 8 items land + full L2 test suite still green:
+
+9. **End-to-end verify workflow** — adversarial dry-run of the fixed state: 3-5 skeptic verifiers pressure-test the full skill flow against actual L2 code, actual prereqs.yaml, actual intake schema. Confirm no cross-fix regression.
+10. **Task 186 dispatch re-attempt** — `/provision-environment trial1 --batch runs/trial1-intake.json`.
+
+### To resume in fresh session
+
+- **"where was I"** — reads this Quick Recovery
+- **"continue SESSION 15 remainder"** — starts on item 1 (ISH-10) above, proceeds sequentially
+- **"start End-to-end verify"** — skips remaining items; runs verify workflow against current state (NOT recommended — SKILL.md batch-mode wiring is critical for task 186 dispatch)
+
+### Locked decisions carried forward (Wave 0 ADR-note @ `notes/wave-0-adr-note-2026-08-27.md`)
+
+1. tenantId: nonSecretParameters-only
+2. Step 1a probe: Dataverse MCP alt-key
+3. Batch confirmation: `confirmationAcknowledgment` const-string + SHA-256 audit
+4. Step 2/3/4: client-side dry-run + gate BEFORE POST
+5-8. See ADR-note
+9. REG-04 credential seam: Path X (Wave 2 REG-02 landed the migration)
+10. auth-v4 rotation coord: cross-worktree ops-note (not blocking)
+
+### SESSION 15 verifier findings (non-blocking, all `safe_to_advance: true`)
+
+- Bash-4 associative array assumption in PRQ-E-06 (Windows Git Bash + Linux CI satisfy; macOS default bash 3.2 would not — not a current operator profile)
+- Commit-message hygiene drift from shared-index races (3 commits during Wave 2.5+3; substance correct, subject lines misleading in `git log`)
+- 1 over-scope commit in Wave 2 (accepted atomic-green)
+- Various partial-fix items promoted to next-session main-session pass (enumerated above)
+
+### Branch state
+
+`work/customer-provisioning-orchestration-r1` @ `9e9dfdbc1`. Pushed to origin. Ahead of master by ~50 commits (SESSION 12 baseline + all SESSION 13/14/15 work).
+
+---
+
+> **Prior update (superseded above)**: 2026-08-27 SESSION 15 (pre-dispatch comprehensive audit + Wave 0 decisions COMPLETE; Wave 2 IN-FLIGHT). Comprehensive 10-agent audit workflow (`wf_aef5ac94-9dd`, 1.3M subagent tokens) surfaced 127 findings across 7 layers; adversarial-verified with 0 refuted. Synthesized into 172KB master punch list (`notes/pre-dispatch-audit-punchlist-2026-08-27.md`) with 9-wave remediation plan. Wave 0's 10 architectural decisions applied per operator directive "don't wait for me / every issue is a priority" — decisions documented in `notes/wave-0-adr-note-2026-08-27.md` (auditable, revertable). Wave 2 remediation workflow (`wf_5aad7c53-c8f`) launched: 3 parallel implementation lanes (B1 DagAdvancer + B3 handler bodies + B24 endpoints/registry) totaling 25 code-only findings + 3 adversarial verifiers. Task 186 batch dispatch BLOCKED until Waves 0-8 complete + end-to-end verify passes.
 
 ## 🎯 SESSION 15 QUICK RECOVERY — 2026-08-27 (READ THIS FIRST — supersedes SESSION 14 below)
 
