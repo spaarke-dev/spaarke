@@ -1,139 +1,227 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <task id="076" project="unified-access-control-r2">
   <metadata>
-    <title>Route every container call site through the resolver, and suppress the wizard's BU cascade for secure records</title>
+    <title>Record-keyed upload contract: the server resolves the container from the record it is already authorizing, and the client stops deciding</title>
     <phase>0c Secure Documents — Wave 2</phase>
     <status>pending</status>
     <rigor>FULL</rigor>
-    <rigor-reason>Modifies 7+ client sites plus server ingest on the path that decides where secure content is stored. A missed call site is a silent isolation failure.</rigor-reason>
-    <model-tier>sonnet</model-tier>
-    <model-tier-reason>Mechanical once task 075's seam exists — find every site, route it through, prove none remain. The judgement was spent in 075.</model-tier-reason>
+    <rigor-reason>Changes a live client↔BFF route contract on the path that decides where secure content is stored, and converts three ungated upload routes into gated ones. Both a security boundary and a deploy-ordering hazard.</rigor-reason>
+    <model-tier>opus</model-tier>
+    <model-tier-reason>REVISED 2026-08-27 with the option-(C) decision. This is no longer "route N call sites onto an existing seam" — it is a contract change spanning client and server with a ship-together obligation and a route-shape decision that 073/074/078 all key off. Was `sonnet` when the task was mechanical routing.</model-tier-reason>
     <effort>high</effort>
-    <effort-reason>Breadth rather than depth: many call sites across client and server, each individually simple, with completeness as the hard part.</effort-reason>
+    <effort-reason>The discovery is spent — the call-site inventory is complete and verified (§2). What remains is well-specified execution plus one design decision (route shape). Not `xhigh`: nothing here is an unbounded root-cause hunt.</effort-reason>
     <parallel-group>wave2</parallel-group>
     <parallel-safe>false</parallel-safe>
-    <parallel-reason>Depends on 075's seam and touches many shared client services; concurrent edits would conflict.</parallel-reason>
-    <deps>075</deps>
-    <tags>bff-api, pcf, react, dataverse, security</tags>
-    <estimated-effort>5-7 hours</estimated-effort>
-    <origin>Filed 2026-08-25. Design §5.1c: the same user-BU→container chain is repeated in at least seven places, plus the server-side archive path. Additionally `EntityCreationService.applyUserBuDefaults` stamps `sprk_containerid` onto secure projects today, which both defeats isolation and collided with provisioning's idempotency marker.</origin>
+    <parallel-reason>Changes a route contract consumed by three client upload clients and edits `RouteAuthorizationGuardTests.cs`, which several Wave 2 tasks also edit.</parallel-reason>
+    <deps>073, 075</deps>
+    <tags>bff-api, api, pcf, react, dataverse, security</tags>
+    <estimated-effort>8-12 hours</estimated-effort>
+    <origin>Filed 2026-08-25 as "route every call site through the resolver". **Rewritten 2026-08-27** after the task escalated (`notes/task-076-callsite-inventory-and-ESCALATION.md`) and the owner chose **option (C)** over the escalation note's recommended (A). Rationale recorded in `notes/coordination-compose-r8-2026-08-27.md` AMENDMENT 2.</origin>
   </metadata>
 
-  <prompt>The resolver from task 075 only matters if nothing bypasses it. Route every container-resolution call site through it, and stop the creation wizard from stamping a shared BU container onto secure projects.</prompt>
+  <prompt>Today the client picks a container and the server obeys. Invert it: upload routes take the owning record, the server resolves the container from the record it is already authorizing, and the client's container-picking code is deleted rather than corrected.</prompt>
 
-  <role>SPAARKE full-stack engineer. The deliverable is completeness — every path, proven, with no survivors.</role>
+  <role>SPAARKE full-stack engineer. The deliverable is a contract change proven complete by DELETION — no client supplies a container to an upload route afterward, and a grep proves it.</role>
 
-  <goal>No code decides which container to use except through task 075's resolver. The creation wizard no longer writes a BU container id onto secure records. Completeness is demonstrated, not asserted.</goal>
+  <goal>Upload routes are keyed on `(entity, recordId)`. The server resolves the container through task 075's resolver, from the same record it authorizes. No client code decides which container to upload into. The creation wizard no longer writes `sprk_containerid`. Task 074's three Pending OBO upload waivers are deleted because the routes are gated, not because the rule was relaxed.</goal>
 
   <context>
-    <background>THE CALL SITES, per design §5.1c and the workflow review — treat this list as a STARTING POINT and prove it complete, because prior counts in this project have been wrong every time:
+    <background>⭐ **READ THIS FIRST — THIS TASK WAS REWRITTEN. Options (A) and (B) are CLOSED. Do not re-open them.**
 
-Client (the user-BU → `businessunit.sprk_containerid` chain), at least seven:
-- `CreateMatterWizard/main.tsx`
-- `sprk_wizard_commands.js`
-- `useWizardPageBootstrap.ts`
-- `WorkspaceGrid.tsx`
-- `SemanticSearchControl/NavigationService.ts`
-- `EntityCreationService.applyUserBuDefaults`
-- the five `*WizardDialog.tsx` callers
-Canonical client resolver: `xrmProvider.getSpeContainerIdFromBusinessUnit`.
+The escalation note recommended **(A)** — keep the client resolving a BU container at wizard-open as a *fallback*, and add a resolver call at each upload point. The owner chose **(C)**. The reasoning, which you should not re-litigate:
 
-Server:
-- `IncomingCommunicationProcessor` — the global `ArchiveContainerId` used by email/communication ingest. **This is the one easiest to forget**: no client, no wizard, no UI. If it is missed, secure attachments land in the shared archive.
+- **The decisive argument is not scope; it is one key versus two.** Under (A) the authorization decision keys on `(entity, recordId)` while the container still comes from a client-supplied value — **two keys for one decision.** Finding F-9 proves they already diverge in shipped code: `CreateProjectWizard` uploads into the container resolved when the wizard *opened*, while provisioning's correct stamp is discarded. Under (C) the authorization key and the container are the same value by construction and **cannot** disagree.
+- **(C) removes the SHAPE that made 073's vulnerability expressible.** `OBOEndpoints.cs:51` is the same "write into a caller-named container" shape 073 deletes from the app-only twin; it survives only because it runs under OBO rather than app-only.
+- **(C) fixes the highest-value site by deleting it.** F-5 (`AssociateToStep.tsx:154-160`) is an already-record-aware resolver that **fails OPEN** — reads the record's `sprk_containerid`, falls through to the BU container on *any* failure. Under (A) it becomes a corrected call site you must keep correct forever. Under (C) it stops existing.
+- **The client-side comparison inverts.** (A) *adds* a resolver call at ~9 sites and *retains* `speContainerIdRef` as a fallback. (C) *removes* the container parameter. Deletion, not addition.
+- **The escalation note's scope objection was already stale when written** — see §1.
 
-⭐ **THE CREATE-PROJECT WIZARD DEFECT, traced end-to-end 2026-08-25 — read this before touching the wizard.** The ordering is already correct and does NOT need changing; the bug is a discarded return value, and it is roughly two lines.
+═══════════════════════════════════════════════════════════════════════
+§1 — THE SERVER SURFACE, RE-MEASURED 2026-08-27. It is one route converted and two deleted.
+═══════════════════════════════════════════════════════════════════════
 
-Verified sequence inside `CreateProjectWizard.tsx` `onFinish`:
+The escalation note called (C) *"not deliverable inside 076 as scoped"* because it *"spans task 073's authorization + this task's routing + the OBO upload trio's waivers."* **That framing predates task 073 shipping its deletion.** Verified on this branch today:
 
-| # | Action | Line |
+| Container-keyed route | Verified state | 076's work |
 |---|---|---|
-| 1 | Resolve BU cascade defaults | 542-544 |
-| 2 | `createProject(...)` — record created, `sprk_issecure` written | 561 |
-| 3 | Work assignment / Event / Association | 575, 626, 665 |
-| 4 | **Secure provisioning** (`provisionSecureProject`) | 688-698 |
-| 5 | **File upload to SPE** | 708-712 |
-| 6 | `createDocumentRecords` + RAG indexing | 721, 739 |
+| `PUT /api/containers/{containerId}/files/{*path}` (`UploadEndpoints.cs:24`) | **073 deletes the file entirely** — 218 lines, zero additions | none |
+| `POST /api/containers/{containerId}/upload` (`UploadEndpoints.cs:113`) | same | none |
+| `PUT /api/upload-session/chunk` (`UploadEndpoints.cs:164`) | same | none |
+| `PUT /api/obo/containers/{id}/files/{*path}` (`OBOEndpoints.cs:51`) | **THE live client upload route** — 11 call sites per 074's waiver | ✅ **convert** |
+| `POST /api/obo/drives/{driveId}/upload-session` (`OBOEndpoints.cs:102`) | **unreachable — see below** | ✅ **delete** |
+| `PUT /api/obo/upload-session/chunk` (`OBOEndpoints.cs:137`) | **unreachable — see below** | ✅ **delete** |
+| `GET /api/v1/containers/{containerId}/documents` (`DataverseDocumentsEndpoints.cs:533`) | **already task 078**, which already depends on 075 | out of scope |
+| `SpeAdmin/Container*Endpoints.cs` (12 routes) | administer the **container itself**; there is no owning record to key on | out of scope |
 
-Two facts that together make this cheap to fix:
-- **The "Add file(s)" step transfers ZERO bytes.** `FileUploadZone` validates and stages `File` objects in React state (`ADD_FILES` reducer); there is no fetch/XHR in it. The first byte moves on **Finish**.
-- **Provisioning already runs BEFORE the upload** — step 4 precedes step 5 above.
+**The chunked OBO pair is dead, and the right treatment is DELETE not CONVERT — verify this before designing anything.** Its only client, `Spaarke.SdapClient/src/operations/UploadOperation.ts:94-110`, first calls `GET /api/obo/containers/{containerId}/drive` at `:98` to obtain a drive id. **That route is mapped NOWHERE** — verified 2026-08-27; the only occurrences of the string in the BFF are two comments (`DocumentsEndpoints.cs:16`, `SpeFileStoreDtos.cs:15`). So `createUploadSession` throws `'Failed to get container drive'` before it ever reaches `:110`. Task 074's own waiver text says the same thing independently. Confirm it yourself, then delete the pair and its client rather than giving a dead path a new contract.
 
-So moving the Secure toggle earlier in the step order fixes nothing. **The actual defect**: `provisionSecureProject` RETURNS the new container id (`provisioningService.ts:46`), but `CreateProjectWizard.tsx:700-704` consumes only `success` and `errorMessage` — **the container id is discarded**, and `speContainerIdRef` is never refreshed. The upload at `:712` therefore uses `context.speContainerId`, resolved ONCE when the wizard opened (`CreateRecordWizard.tsx:221-227`) from `systemuser._businessunitid_value` → `businessunit.sprk_containerid`. Net effect: **a secure project's files are PUT into the shared BU container while the project row points at its own isolated one**, and `createDocumentRecords` (`:726`) stamps the BU container id onto the `sprk_document` rows.
+Related and NOT a contradiction: the merge plan's follow-up #2 reports `CreateUploadSessionAsync` / `UploadChunkAsync` as having zero production callers. Those are the **app-only** `SpeFileStore` methods (`SpeFileStore.cs:86/92`), whose only caller is `UploadEndpoints.cs:140` — which 073 deletes. The **OBO** variants (`*AsUserAsync`, `SpeFileStore.cs:288/296`) are live via `OBOEndpoints.cs:119/172`. Deleting the two OBO routes makes BOTH pairs dead; say so in the notes and hand the `UploadSessionManager` cleanup to that follow-up rather than doing it here.
 
-The fix is to consume `provisionResult.data.speContainerId` at `:712` and `:726`. Two further notes: the wizard's own inline BU resolver at `src/solutions/CreateProjectWizard/src/main.tsx:88-98` is an **8th client call site** not in the list below; and a provisioning failure is non-fatal by design (`:700-704` only adds a success-screen warning), while an absent `authFetch`/`bffBaseUrl` skips provisioning with **no warning at all** — yet the success screen still claims (`:816-817`) the container was provisioned.
+═══════════════════════════════════════════════════════════════════════
+§2 — THE CLIENT SURFACE. Three upload clients; twelve container suppliers.
+═══════════════════════════════════════════════════════════════════════
 
-THE WIZARD WRITE-BACK, two related problems:
-1. `EntityCreationService.applyUserBuDefaults` (`src/client/shared/Spaarke.UI.Components/src/services/EntityCreationService.ts`) applies `sprk_containerid` to secure projects. It must not.
-2. `src/solutions/DocumentUploadWizard/sprk_subgrid_commands.js` overwrites `sprk_project.sprk_containerid` with the BU container when the field is not on the form. This defeats a correct resolver *after the fact* — a stamped project silently reverts to shared storage.
+The escalation note's inventory (`notes/task-076-callsite-inventory-and-ESCALATION.md` §3) is complete and is your starting point — it corrected the original POML from "7 client sites" to **12 resolution sites + 2 write-back sites + 9 server sites**. Re-grep anyway; every count asserted in this project has been wrong at least once.
 
-Both were implicated in the 409 provisioning regression, because `sprk_containerid` was shared state written by two different mechanisms. Provisioning now keys idempotency on ownership instead (task 021), but the write-back still corrupts the isolation marker.
+**The structure (C) exposes, which (A) obscured**: those 12 sites do not each upload. They **supply a container to one of three upload clients**:
 
-WHY COMPLETENESS IS THE DELIVERABLE. Because SPE permissions are additive-only, a single missed call site means secure content sits in a shared container permanently, and no later permission change can retract it. Partial completion here is not partial credit — it is the same failure as no completion, for whichever path was missed.
+| # | Upload client | Route it calls | Verified |
+|---|---|---|---|
+| U1 | `Spaarke.UI.Components/src/services/EntityCreationService.ts:493` (`uploadFilesToSpe`) | `PUT /api/obo/containers/{containerId}/files/{fileName}` | 2026-08-27 |
+| U2 | `Spaarke.UI.Components/src/services/document-upload/SdapApiClient.ts:101` (`uploadFile`) | same | 2026-08-27 |
+| U3 | `Spaarke.SdapClient/src/operations/UploadOperation.ts:27` | same | 2026-08-27 |
+| — | `UploadOperation.ts:110` (chunked) | dead — see §1 | 2026-08-27 |
 
-INV-7: strategy 1's resolution stays client-side. Routing through the shared decision must respect that; consume 075's client half rather than moving BU resolution to the server.</background>
+So the client cutover is **three signatures**, and the 12 suppliers then have nothing to supply. That is why (C) is smaller than (A) on the client, not larger.
+
+**Classify each of the 12, do not blanket-delete.** A supplier that exists only to feed U1/U2/U3 is deleted. A supplier that feeds a **non-upload** consumer is NOT this task's to remove — it belongs to whoever owns that read:
+
+- `SemanticSearchControl/.../NavigationService.ts:354-362` builds a user→BU→container chain and passes `&containerId=` **on a navigation URL**, not an upload.
+- `LegalWorkspace/.../WorkspaceGrid.tsx:535-537` and `src/client/webresources/js/sprk_analysis_commands.js:58` likewise choose a container for a **read/command**, not bytes.
+
+For each, write one line: *deleted (fed only uploads)* / *retained, owned by task 078* / *retained, needs a new task — filed as X*. **A supplier left unclassified is a survivor**, and survivors are what this task exists to eliminate.
+
+**Two harmful writes — delete both, unchanged from the original scope:**
+
+- **W1** `Spaarke.UI.Components/src/services/EntityCreationService.ts:327` (`applyDefaultContainerId`, via `applyUserBuDefaults:374`) stamps the acting user's BU container onto the new row — **including secure projects**. Verified independently: `CreateProjectWizard/projectService.ts:283-285` sets only `sprk_issecure`, then `:290-293` calls `applyUserBuDefaults` **unconditionally**, with no suppression.
+- **W2** `src/solutions/DocumentUploadWizard/sprk_subgrid_commands.js` overwrites `sprk_project.sprk_containerid` with the BU container when the field is not on the form — defeating a correct resolver *after the fact*.
+
+**An id-space smell to classify, not assume** (compose-r8's second finding class — caller-id vs other-id passed without translation): `SdapApiClient.uploadFile` interpolates `request.driveId` into the `{containerId}` route slot (`:101`) while logging it as `containerId: request.driveId` (`:95`), and the route handler then calls `ResolveDriveIdAsync(id)` on it (`OBOEndpoints.cs:65-67`). Either the field name is wrong or the value is. Determine which before the cutover — under (C) both ids leave the client, so this resolves by deletion, but the answer tells you whether U2 was ever actually working.
+
+═══════════════════════════════════════════════════════════════════════
+§3 — THE SERVER-SIDE ARCHIVE PATH (strategy 2). Unchanged by A-vs-C; still 076's.
+═══════════════════════════════════════════════════════════════════════
+
+Seven sites remain after 075 routed two. **This is the one easiest to forget** — no client, no wizard, no UI. If missed, secure correspondence lands in the shared archive container.
+
+| File : line | Status |
+|---|---|
+| `Services/Communication/IncomingCommunicationProcessor.cs:868` (attachments) | ✅ routed in 075 |
+| `Services/Communication/IncomingCommunicationProcessor.cs:991` (`.eml`) | ✅ routed in 075 |
+| `Services/Communication/CommunicationService.cs:460 / 1259 / 1574 / 2054 / 2146` | 🔲 **076** |
+| `Services/Communication/MessageAttachmentMaterializer.cs:114` | 🔲 **076** |
+| `Services/Communication/CommunicationService.cs:2368` | ⚠️ its comment claims the legacy path "is no longer used here" while five siblings still read it — **do not trust the comment; verify** |
+
+The mechanism is already built and proven in 075: `CommunicationContainerResolver` + `ResolveContainerForContentAsync`, which resolves each site's regarding context itself.
+
+═══════════════════════════════════════════════════════════════════════
+§4 — WHY COMPLETENESS IS STILL THE DELIVERABLE, and why (C) makes it cheaper to prove
+═══════════════════════════════════════════════════════════════════════
+
+SharePoint Embedded permissions are **additive-only**. A single missed path puts secure content in a shared container **permanently** — no later permission change retracts it. Partial completion is not partial credit.
+
+But (C) changes what the proof looks like, and this is the practical payoff. Under (A) the proof is *"every one of N sites calls the resolver"* — an assertion about behaviour that has to be re-proven whenever anyone adds a site. Under (C) the proof is *"no client supplies a container to an upload route"* — a **grep for absence**, and a new site cannot regress it because the parameter is gone from the contract.
+
+**Zero secure projects exist in any environment** (`TASK-INDEX.md:110`, re-verified), so no bytes are misplaced today and there is nothing to migrate. **The window closes on FIRST USE, not on a date** — which makes this more urgent to land, not less. State that explicitly wherever you cite F-9, or a reader checks App Insights, finds nothing, and downgrades a live-but-unfired defect to a non-issue.
+
+═══════════════════════════════════════════════════════════════════════
+§5 — DEPLOY ORDERING. Two obligations (C) creates that (A) did not.
+═══════════════════════════════════════════════════════════════════════
+
+1. **Client and BFF must ship together.** The upload contract changes on both sides. A BFF deployed ahead of the client 404s every upload; a client deployed ahead of the BFF does the same. Say this in the PR description and in the notes — it is the single most likely way this task causes an outage.
+2. **075 must be merged first** (the resolver), and **073 first** (it deletes `UploadEndpoints.cs`, removing the app-only twin from the surface you are reshaping).
+
+═══════════════════════════════════════════════════════════════════════
+§6 — WHAT (C) DOES TO TASK 074'S WAIVERS. This is the forcing-function payoff.
+═══════════════════════════════════════════════════════════════════════
+
+`tests/Spaarke.ArchTests/RouteAuthorizationGuardTests.cs` carries three `Pending` waivers owned by `"073/075/076"` (`:235`, `:240`, `:244`). All three **disappear**: one route becomes gated, two are deleted. `NoWaiverIsStale` fails the build if you gate a route and leave its waiver behind, so this is enforced, not remembered.
+
+The waiver at `:235` states the constraint that (C) satisfies, in its own words: *"Attaching `DocumentAuthorizationFilter` makes `ExtractResourceId` hand back a CONTAINER id, which is not an `sprk_documents` GUID, so `RetrievePrincipalAccess` returns None and 100% of uploads deny."* Under (C) the route hands back `(entity, recordId)` and the decision becomes answerable.
+
+**Observation, NOT scope**: `POST /api/v1/documents` carries a **Permanent** waiver reading *"CREATE. There is no pre-existing resource to authorize"* (`:268`) — the same reasoning as the OBO upload waiver you are about to delete. Under (C) that reasoning weakens for the byte-upload but the row-create waiver is untouched here. Note it for the wrap-up; do not act on it.</background>
     <relevant-files>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Api/OBOEndpoints.cs</file>
       <file role="modify">src/client/shared/Spaarke.UI.Components/src/services/EntityCreationService.ts</file>
+      <file role="modify">src/client/shared/Spaarke.UI.Components/src/services/document-upload/SdapApiClient.ts</file>
+      <file role="modify">src/client/shared/Spaarke.SdapClient/src/operations/UploadOperation.ts</file>
+      <file role="modify">src/solutions/DocumentUploadWizard/src/components/AssociateToStep.tsx</file>
       <file role="modify">src/solutions/DocumentUploadWizard/sprk_subgrid_commands.js</file>
-      <file role="modify">src/client/pcf/SemanticSearchControl/SemanticSearchControl/services/NavigationService.ts</file>
-      <file role="modify">src/server/api/Sprk.Bff.Api/ — IncomingCommunicationProcessor archive path</file>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Services/Communication/CommunicationService.cs</file>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Services/Communication/MessageAttachmentMaterializer.cs</file>
+      <file role="modify">tests/Spaarke.ArchTests/RouteAuthorizationGuardTests.cs</file>
+      <file role="reference">src/server/api/Sprk.Bff.Api/Api/Filters/EntityAccessFilter.cs</file>
+      <file role="reference">projects/unified-access-control-r2/notes/task-076-callsite-inventory-and-ESCALATION.md</file>
+      <file role="reference">projects/unified-access-control-r2/notes/coordination-compose-r8-2026-08-27.md</file>
       <file role="reference">projects/unified-access-control-r2/design.md</file>
     </relevant-files>
   </context>
 
   <constraints>
-    <constraint source="build-plan">PROVE completeness. Grep for every container-id resolution and every `sprk_containerid` write across `src/client/**`, `src/solutions/**`, and `src/server/**`, and show the evidence. Prior route/site counts in this project were wrong every single time they were asserted rather than grepped.</constraint>
-    <constraint source="project">Do NOT add an `issecure` test at individual call sites. Call sites ask the resolver; they do not make the decision. A call site containing the word `issecure` is a review failure.</constraint>
-    <constraint source="ADR-003">Where a call site cannot resolve a container for a secure record, it must fail visibly — not silently proceed with a BU or archive container.</constraint>
-    <constraint source="project">The creation wizard must not write `sprk_containerid` for secure records at all. Removing the write is preferred over conditioning it.</constraint>
-    <constraint source="project">Respect INV-7 — BU resolution stays client-side; consume 075's client half.</constraint>
+    <constraint source="owner-decision 2026-08-27">Implement **option (C)**. Do NOT implement (A) or (B), and do NOT re-open the decision — it was made against the accurate framing after the escalation note's scope objection was found stale. If execution surfaces a fact that genuinely invalidates (C), that is an escalation (see `escalation`), not a quiet pivot.</constraint>
+    <constraint source="project">The authorization key and the container MUST be the same value. The route takes `(entity, recordId)`; the server resolves the container from that record via 075's resolver. A route that accepts BOTH a record and a container is a failed implementation of this task.</constraint>
+    <constraint source="§11 reuse">Do not build a new record-authorization mechanism. `Api/Filters/EntityAccessFilter.cs` already authorizes `(entityType, recordId)` for the caller via `CallerRecordAccessProbe` — extend that, or state in ≤2 sentences why it cannot serve. A second probe is a review failure.</constraint>
+    <constraint source="ADR-003">A secure record with no container FAILS CLOSED and loudly — never a fallback to the BU or archive container. This is 075's behaviour; your job is not to soften it at the route.</constraint>
+    <constraint source="ADR-008">Authorization is an endpoint filter, not handler code and not middleware.</constraint>
+    <constraint source="project">Delete rather than convert where the path is dead — the chunked OBO pair (§1). Verify the `GET /api/obo/containers/{id}/drive` 404 yourself before deleting.</constraint>
+    <constraint source="project">The creation wizard must not write `sprk_containerid` at all (W1), and the DocumentUploadWizard write-back (W2) must go. Removing the write is required, not conditioning it.</constraint>
+    <constraint source="project">No client code contains an `issecure` test, and no client code names a container for an upload. Either one in the final diff is a review failure.</constraint>
+    <constraint source="task-074">Delete the three `Pending` OBO upload waivers (`RouteAuthorizationGuardTests.cs:235/240/244`). Do NOT convert any of them to `Permanent` to make a build go green — that inverts the forcing function.</constraint>
+    <constraint source="deploy">State the client+BFF ship-together obligation in the PR description AND the task notes. This is the outage risk.</constraint>
+    <constraint source="CLAUDE.md §10">State the Placement Justification citing `.claude/constraints/bff-extensions.md`; verify publish size (≤60 MB ceiling; baseline ~44.96 MB incl. PDBs — state the PDB convention) and run the CVE check.</constraint>
     <constraint source="CLAUDE.md §12">PCF builds use `npm run build:prod`, never `npm run build`. Bump PCF versions in all four locations if any PCF ships.</constraint>
   </constraints>
 
   <knowledge>
     <files>
+      <file>projects/unified-access-control-r2/notes/task-076-callsite-inventory-and-ESCALATION.md</file>
+      <file>projects/unified-access-control-r2/notes/coordination-compose-r8-2026-08-27.md</file>
       <file>projects/unified-access-control-r2/SECURE-DOCUMENTS-BUILD-PLAN.md</file>
       <file>projects/unified-access-control-r2/design.md</file>
-      <file>projects/unified-access-control-r2/notes/secure-project-workflow-review-2026-08-24.md</file>
+      <file>.claude/constraints/bff-extensions.md</file>
       <file>src/client/pcf/CLAUDE.md</file>
     </files>
   </knowledge>
 
   <steps mode="directional">
-    <step order="0">Grep the full call-site inventory — every container resolution and every `sprk_containerid` write, client, solutions and server. Record it. Compare against the list in this task and report any additions found.</step>
-    <step order="1">Route each site through 075's resolver.</step>
-    <step order="2">Remove the wizard's `sprk_containerid` write for secure records (`EntityCreationService`), and fix the DocumentUploadWizard write-back that overwrites a stamped container.</step>
-    <step order="3">Route the server-side ingest/archive path through the server half of the resolver.</step>
-    <step order="4">Re-grep to prove no unrouted site remains. This is the acceptance evidence.</step>
-    <step order="5">Tests: creating a document against a secure record targets that record's container; against a non-secure record, the BU cascade is unchanged; the wizard no longer stamps secure records.</step>
-    <step order="6">Build (`build:prod` for PCF), tests, publish size, CVE.</step>
+    <step order="0">Verify the three §1 facts on the merged branch before designing: `UploadEndpoints.cs` is gone (073); 075's resolver is present; `GET /api/obo/containers/{id}/drive` is mapped nowhere. If any is false, the plan's shape changed — say so before proceeding.</step>
+    <step order="1">Design the route contract and write it down first: the literal shape carrying `(entity, recordId)`, which filter makes the decision, how 075's resolver is reached from it, and what a secure record with no container returns to the client. One paragraph, in the notes, before code.</step>
+    <step order="2">Convert `PUT /api/obo/containers/{id}/files/{*path}` to the record-keyed contract and attach the authorization filter.</step>
+    <step order="3">Delete the chunked OBO pair (`OBOEndpoints.cs:102/137`) and its dead client (`UploadOperation.ts:94-122`).</step>
+    <step order="4">Cut the three client upload clients (U1/U2/U3) over to the new contract — signatures take `(entity, recordId)`, not a container.</step>
+    <step order="5">Classify all 12 container suppliers: delete the upload-only ones; for each retained one write the owning task. Unclassified = survivor.</step>
+    <step order="6">Delete W1 and W2.</step>
+    <step order="7">Route the seven remaining server-side Communication sites (§3) through 075's `CommunicationContainerResolver`.</step>
+    <step order="8">Delete the three `Pending` OBO waivers in `RouteAuthorizationGuardTests.cs`.</step>
+    <step order="9">Tests that FAIL without the change: an upload against a secure record lands in that record's own container; an upload against a secure record with no container FAILS rather than falling back; a non-secure record is unchanged; a caller without access to the record is DENIED (the negative case — this route was ungated before, so it is the one with no prior coverage at all). Perturbation-check at least the deny case: break the gate, confirm a test goes red.</step>
+    <step order="10">Re-grep for absence — no client supplies a container to an upload route, no `sprk_containerid` client write survives. This grep IS the acceptance evidence.</step>
+    <step order="11">Build (`build:prod` for PCF), full test run, publish size, CVE. Record the contract, the ship-together obligation, and the classification table in notes.</step>
   </steps>
 
   <escalation>
-    <trigger>If a call site resolves a container in a context where the owning record is not known — so the resolver cannot be asked — STOP and surface it. That is a modelling gap; guessing the container in an unknown context is exactly how shared-container co-mingling happened.</trigger>
+    <trigger>If an upload path genuinely has NO owning record at the moment the bytes move — so `(entity, recordId)` cannot be supplied — STOP and surface it. That is the modelling gap option (C) exists to close; if one survives, the contract needs a different shape (a server-issued upload ticket, say), and that is an owner decision, not an implementation detail. Do NOT reintroduce a client-supplied container "just for that one path" — that is option (B) arriving through the back door, and (B) was rejected.</trigger>
+    <trigger>If converting the route forces a second authorization mechanism because `EntityAccessFilter` / `CallerRecordAccessProbe` cannot serve the route shape, STOP. Two mechanisms deciding one thing is the failure class every finding in this project came from.</trigger>
+    <trigger>If `GET /api/obo/containers/{id}/drive` turns out to be reachable after all (a proxy, a rewrite, a deployed web resource), the chunked pair is LIVE, not dead — stop and re-plan §1 rather than deleting a live upload path.</trigger>
   </escalation>
 
   <justification>
-    <existing>Task 075 provides the resolver; the client BU-resolution chain and the server archive path already exist.</existing>
-    <extension>This is pure routing of existing call sites onto the new seam plus removal of a harmful write. No new component.</extension>
-    <cost-of-doing-nothing>Task 075's resolver decides nothing if callers bypass it. Any missed site places secure content in a shared container permanently — SPE cannot retract it — and the wizard write-back would silently revert correctly-stamped projects to shared storage.</cost-of-doing-nothing>
+    <existing>075 provides the resolver and its reverse mapping. `EntityAccessFilter` + `CallerRecordAccessProbe` already authorize `(entityType, recordId)` for the caller. The upload routes, the three client upload clients, and the BU cascade all exist.</existing>
+    <extension>This is a contract change plus deletions on existing surface: one route reshaped, two deleted, three client signatures changed, two harmful writes and ~9 container suppliers removed. The only genuinely new thing is the filter wiring on the converted route, and that extends an existing filter rather than adding one.</extension>
+    <cost-of-doing-nothing>Concrete, named, and currently live: `PUT /api/obo/containers/{id}/files/{*path}` accepts a caller-named container with no per-resource decision, and `AssociateToStep.tsx:154-160` silently redirects secure content to the shared BU container on any read failure. Because SPE permissions are additive-only, the first secure project created with files puts those bytes in shared storage permanently — the window closes on first use, not on a date.</cost-of-doing-nothing>
   </justification>
 
   <outputs>
-    <output type="code">All client container call sites routed through the resolver</output>
-    <output type="code">Server ingest/archive path routed through the resolver</output>
-    <output type="code">Wizard `sprk_containerid` write removed for secure records; DocumentUploadWizard write-back fixed</output>
-    <output type="doc">notes — full call-site inventory with grep evidence, before and after</output>
+    <output type="code">`PUT /api/obo/…` upload route keyed on `(entity, recordId)`, gated, resolving its container server-side via 075</output>
+    <output type="code">Chunked OBO pair and its dead client deleted</output>
+    <output type="code">Three client upload clients cut over; upload-only container suppliers deleted</output>
+    <output type="code">W1 + W2 removed; seven server-side Communication sites routed</output>
+    <output type="code">Three `Pending` OBO waivers deleted from `RouteAuthorizationGuardTests.cs`</output>
+    <output type="test">tests/ — secure→own container, secure+null→fail closed, non-secure unchanged, **no-access caller denied**</output>
+    <output type="doc">notes — the contract, the classification table for all 12 suppliers, the ship-together obligation, before/after grep evidence</output>
   </outputs>
 
   <acceptance-criteria>
-    <criterion>Every container-resolution call site goes through task 075's resolver — proven by a re-grep showing no survivors.</criterion>
-    <criterion>No call site contains its own `issecure` test.</criterion>
-    <criterion>The creation wizard does not write `sprk_containerid` for secure records.</criterion>
-    <criterion>The DocumentUploadWizard write-back can no longer overwrite a stamped secure container.</criterion>
-    <criterion>The server-side ingest/archive path is routed (the easiest one to miss — verify explicitly).</criterion>
-    <criterion>A document created against a secure record targets that record's own container, proven by a test.</criterion>
-    <criterion>Non-secure behaviour is unchanged.</criterion>
+    <criterion>The upload route takes `(entity, recordId)` and resolves its container server-side through 075's resolver. No upload route accepts a caller-named container.</criterion>
+    <criterion>The upload route carries a per-resource authorization decision, and a caller without access to the owning record is denied — proven by a test that fails without the gate.</criterion>
+    <criterion>An upload against a secure record lands in that record's own container; against a secure record with a null container it FAILS rather than falling back — both proven by tests.</criterion>
+    <criterion>Non-secure upload behaviour is unchanged.</criterion>
+    <criterion>A grep proves NO client code supplies a container to an upload route, and no client `sprk_containerid` write survives. This absence-grep is the completeness evidence.</criterion>
+    <criterion>All 12 container suppliers are classified in the notes — deleted, or retained with the owning task named. None unclassified.</criterion>
+    <criterion>The chunked OBO pair is deleted, with the `GET /api/obo/containers/{id}/drive` 404 verified first-hand rather than taken from this POML.</criterion>
+    <criterion>The seven server-side Communication sites are routed (the ones with no client and no UI — verify explicitly).</criterion>
+    <criterion>`RouteAuthorizationGuardTests.cs` has zero `Pending` waivers owned by 073/075/076, and none were converted to `Permanent`.</criterion>
+    <criterion>The client+BFF ship-together obligation is stated in the PR description and the notes.</criterion>
   </acceptance-criteria>
 
-  <notes>Completeness is the entire deliverable. Because SPE permissions are additive-only, one missed call site is a permanent isolation failure for whatever flows through it — there is no later fix. Grep, do not remember.</notes>
+  <notes>Completeness is still the entire deliverable — one missed path is a permanent isolation failure, because SPE cannot retract it. What option (C) changes is the *proof*: it is an argument from absence (no client names a container) rather than an argument from behaviour (every site calls the resolver), and absence is the one a future contributor cannot silently regress. Grep, do not remember.</notes>
 </task>
