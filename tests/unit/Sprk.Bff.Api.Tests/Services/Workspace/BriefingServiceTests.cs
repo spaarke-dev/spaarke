@@ -23,6 +23,7 @@ using Sprk.Bff.Api.Services.Ai.Membership;
 using Sprk.Bff.Api.Services.Ai.Membership.Models;
 using Sprk.Bff.Api.Services.Workspace;
 using Xunit;
+using Sprk.Bff.Api.Services.Identity;
 
 namespace Sprk.Bff.Api.Tests.Services.Workspace;
 
@@ -330,6 +331,7 @@ public class BriefingServiceTests
         var portfolio = new PortfolioService(
             _portfolioCacheMock.Object,
             _portfolioEntityServiceMock.Object,
+            StubSystemUserIdentityResolver.Instance,
             NullLogger<PortfolioService>.Instance);
 
         return new BriefingService(

@@ -6,6 +6,7 @@ using Sprk.Bff.Api.Infrastructure.Validation;
 using Sprk.Bff.Api.Models.Ai;
 using Sprk.Bff.Api.Services;
 using Sprk.Bff.Api.Services.Ai;
+using Sprk.Bff.Api.Infrastructure.Authentication;
 
 namespace Sprk.Bff.Api.Api;
 
@@ -59,8 +60,9 @@ public static class UploadEndpoints
                     "upload.small");
 
                 // Fire-and-forget: create notification for the uploading user (must not block response)
-                var userOid = context.User.FindFirst(ClaimTypes.NameIdentifier)?.Value
-                    ?? context.User.FindFirst("oid")?.Value;
+                // Named `userOid` but resolved `sub` — NameIdentifier is always present under
+                // inbound claim mapping, so the `?? oid` tail never ran. See CallerResolution.
+                var userOid = CallerResolution.ResolveObjectId(context.User);
 
                 if (!string.IsNullOrEmpty(userOid) && Guid.TryParse(userOid, out var azureAdOid))
                 {

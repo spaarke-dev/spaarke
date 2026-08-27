@@ -368,7 +368,7 @@ public class UpdateContainerTypeSettingsTests
 
         var claims = new List<Claim>
         {
-            new(ClaimTypes.NameIdentifier, "admin-789"),
+            new("oid", "admin-789"), new(ClaimTypes.NameIdentifier, "pairwise-sub-not-an-oid-AAAbbbCCC"),
             new("roles", "SystemAdmin")
         };
         var httpContext = new DefaultHttpContext

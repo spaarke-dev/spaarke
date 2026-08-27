@@ -33,7 +33,7 @@ public class IdempotencyFilterTests
     {
         var claims = new List<Claim>
         {
-            new(ClaimTypes.NameIdentifier, userId),
+            new("oid", userId), new(ClaimTypes.NameIdentifier, "pairwise-sub-not-an-oid-AAAbbbCCC"),
             new("tid", tenantId)
         };
         var identity = new ClaimsIdentity(claims, "TestAuth");

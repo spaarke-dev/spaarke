@@ -3,6 +3,7 @@ using Sprk.Bff.Api.Api.Filters;
 using Sprk.Bff.Api.Api.Workspace.Contracts;
 using Sprk.Bff.Api.Api.Workspace.Models;
 using Sprk.Bff.Api.Services.Workspace;
+using Sprk.Bff.Api.Infrastructure.Authentication;
 
 namespace Sprk.Bff.Api.Api.Workspace;
 
@@ -118,8 +119,7 @@ public static class WorkspaceEndpoints
     {
         // userId is guaranteed non-null by WorkspaceAuthorizationFilter (stored in Items)
         var userId = httpContext.Items["UserId"]?.ToString()
-            ?? httpContext.User.FindFirst("oid")?.Value
-            ?? httpContext.User.FindFirst(ClaimTypes.NameIdentifier)?.Value;
+            ?? CallerResolution.ResolveObjectId(httpContext.User);
 
         if (string.IsNullOrEmpty(userId))
         {
@@ -187,8 +187,7 @@ public static class WorkspaceEndpoints
         CancellationToken ct)
     {
         var userId = httpContext.Items["UserId"]?.ToString()
-            ?? httpContext.User.FindFirst("oid")?.Value
-            ?? httpContext.User.FindFirst(ClaimTypes.NameIdentifier)?.Value;
+            ?? CallerResolution.ResolveObjectId(httpContext.User);
 
         if (string.IsNullOrEmpty(userId))
         {
@@ -241,8 +240,7 @@ public static class WorkspaceEndpoints
     {
         // userId is guaranteed non-null by WorkspaceAuthorizationFilter (stored in Items)
         var userId = httpContext.Items["UserId"]?.ToString()
-            ?? httpContext.User.FindFirst("oid")?.Value
-            ?? httpContext.User.FindFirst(ClaimTypes.NameIdentifier)?.Value;
+            ?? CallerResolution.ResolveObjectId(httpContext.User);
 
         if (string.IsNullOrEmpty(userId))
         {

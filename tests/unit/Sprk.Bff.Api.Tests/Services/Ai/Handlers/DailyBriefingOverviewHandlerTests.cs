@@ -16,6 +16,8 @@ using Sprk.Bff.Api.Services.Ai.Membership;
 using Sprk.Bff.Api.Services.Ai.Membership.Models;
 using Sprk.Bff.Api.Services.Workspace;
 using Xunit;
+using Sprk.Bff.Api.Services.Identity;
+using Sprk.Bff.Api.Tests.Services.Workspace;
 
 namespace Sprk.Bff.Api.Tests.Services.Ai.Handlers;
 
@@ -67,6 +69,7 @@ public sealed class DailyBriefingOverviewHandlerTests
         var portfolio = new PortfolioService(
             _portfolioCacheMock.Object,
             _portfolioEntityServiceMock.Object,
+            StubSystemUserIdentityResolver.Instance,
             NullLogger<PortfolioService>.Instance);
 
         var briefingService = new BriefingService(

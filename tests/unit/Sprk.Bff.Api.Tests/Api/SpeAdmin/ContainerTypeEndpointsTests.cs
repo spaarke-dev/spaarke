@@ -246,7 +246,7 @@ public class ContainerTypeEndpointsTests
 
         var claims = new List<Claim>
         {
-            new(ClaimTypes.NameIdentifier, "admin-456"),
+            new("oid", "admin-456"), new(ClaimTypes.NameIdentifier, "pairwise-sub-not-an-oid-AAAbbbCCC"),
             new("roles", "SystemAdmin")
         };
         var httpContext = new DefaultHttpContext

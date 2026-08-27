@@ -4,6 +4,7 @@ using Spaarke.Core.Auth;
 using Spaarke.Dataverse;
 using Sprk.Bff.Api.Infrastructure.Auth;
 using Sprk.Bff.Api.Models;
+using Sprk.Bff.Api.Infrastructure.Authentication;
 
 namespace Sprk.Bff.Api.Api;
 
@@ -219,8 +220,7 @@ public static class PermissionsEndpoints
     /// The ONLY identity source for these endpoints — never a request-supplied value.
     /// </summary>
     private static string? ResolveCallerId(HttpContext httpContext) =>
-        httpContext.User.FindFirst("oid")?.Value
-        ?? httpContext.User.FindFirst(ClaimTypes.NameIdentifier)?.Value;
+        CallerResolution.ResolveObjectId(httpContext.User);
 
     /// <summary>
     /// The single fail-closed capability shape: every capability false.

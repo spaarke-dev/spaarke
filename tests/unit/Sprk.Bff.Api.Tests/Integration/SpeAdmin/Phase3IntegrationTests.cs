@@ -47,7 +47,7 @@ public class Phase3IntegrationTests
     {
         var claims = new List<Claim>
         {
-            new(ClaimTypes.NameIdentifier, userId),
+            new("oid", userId), new(ClaimTypes.NameIdentifier, "pairwise-sub-not-an-oid-AAAbbbCCC"),
             new("roles", "Admin")
         };
         return new ClaimsPrincipal(new ClaimsIdentity(claims, "test"));
@@ -57,7 +57,7 @@ public class Phase3IntegrationTests
     {
         var claims = new List<Claim>
         {
-            new(ClaimTypes.NameIdentifier, userId)
+            new("oid", userId), new(ClaimTypes.NameIdentifier, "pairwise-sub-not-an-oid-AAAbbbCCC")
         };
         return new ClaimsPrincipal(new ClaimsIdentity(claims, "test"));
     }
@@ -149,7 +149,7 @@ public class Phase3IntegrationTests
 
         var systemAdminUser = new ClaimsPrincipal(new ClaimsIdentity(new[]
         {
-            new Claim(ClaimTypes.NameIdentifier, "sysadmin-001"),
+            new Claim("oid", "sysadmin-001"), new Claim(ClaimTypes.NameIdentifier, "pairwise-sub-not-an-oid-AAAbbbCCC"),
             new Claim("roles", "SystemAdmin")
         }, "test"));
 
