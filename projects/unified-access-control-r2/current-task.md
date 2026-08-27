@@ -1,21 +1,70 @@
 # Current Task State — `unified-access-control-r2`
 
-> **Last Updated**: 2026-08-26 (077 + 080 complete, 081 BLOCKED on an owner decision that is now made)
+> **Last Updated**: 2026-08-27 (**Wave A dispatched** — 6 agents; batch 073/079/075 still unmerged)
 > **Recovery**: read "Quick Recovery" first. History is in [`tasks/TASK-INDEX.md`](tasks/TASK-INDEX.md),
 > the per-task `.poml` files, and `notes/`. "Full State (Detailed)" below is retained history.
 
 ---
 
-## 🟠 IN FLIGHT — 3 PARALLEL AGENTS IN SEPARATE WORKTREES (dispatched 2026-08-26)
+## 🟢 CI IS GREEN — the Router gate was repaired and the fix is ON MASTER (2026-08-27)
 
-**Work is NOT all in this worktree right now.** Three `task-execute` agents were dispatched with
-`isolation: worktree`, so each has its own checkout and its own commits:
+`CI / Router` had **never** succeeded on this branch (17 runs, 0 successes). Commit `f695ce38f` fixed
+three defects and the gate is now **green**, verified as a real green rather than a docs-only skip:
+all 15 jobs ran, including all four Tier 1 blocking jobs, and **Tier 2 `Full Unit Tests` ran to
+completion** instead of dying at the old 6-minute wall — the first time CI has actually executed the
+full unit suite on this branch.
 
-| Agent | Tasks | Model | Why isolated |
+All three fixes are **content-verified live on `origin/master`** (not merely commit-ancestry):
+`ci-tier2-advisory.yml:243` `timeout-minutes: 30` · only `workflow_call:` at `:23` (the self-colliding
+`pull_request:` trigger is gone) · `ci-router.yml:274` builds an adjudication set that excludes tier2,
+with `allowed-skips: tier1` at `:294`. They reached master via the auth-v4 → master chain, not our PR.
+
+**`SDAP CI` is still red, and it is NOT ours** — one failing job, `Tenant Isolation (I1–I5)`, failing
+identically on master at `74ee9b6b1` (FR-28/I1, FR-29/I2, FR-32/I5). **PR #828 already fixes exactly
+those three.** Do not file a duplicate. Note the job calls itself *merge-blocking* while master is red
+on it, so repo-wide it currently gates nothing.
+
+**CI coordination**: another agent owns `sdap-ci.yml` + `scripts/ci/classify-and-retry.ps1` (PRs #829,
+#830). **Zero file overlap** with ours — verified. Do NOT touch `.github/workflows/**` from this
+project without re-checking. Useful thing to pass them: the Router now excludes tier2 **by
+construction**, so retry logic on the advisory tier cannot redden the gate however it concludes.
+
+---
+
+## 🟠 IN FLIGHT — WAVE A: 6 PARALLEL AGENTS IN SEPARATE WORKTREES (dispatched 2026-08-27)
+
+**Work is NOT all in this worktree right now.** Six `task-execute` agents dispatched with
+`isolation: worktree`, each with its own checkout and commits. Selected for **fully disjoint
+modify-sets** — that disjointness is the safety property, not the POMLs' `∥-safe` flag.
+
+| Agent | Task | Model | Exclusive modify-set |
 |---|---|---|---|
-| `wave2-075-076` | **075 → 076** sequential (Wave 2) | opus | 075 is `∥-safe:false` and creates the shared resolver seam |
-| `task-073` | **073** container upload | opus | — |
-| `task-079` | **079** version OBO routes | opus | — |
+| `uac-081` | **081** classify the caller | opus/xhigh | `Endpoints/Diagnostics/TenantContainerResolverEndpoint.cs`, `Infrastructure/Logging/AuditEnrichmentMiddleware.cs`, NEW `Spaarke.Core/Auth/` primitive |
+| `uac-011` | **011** same-entity self-join | sonnet/high | `Api/ExternalAccess/ExternalModuleDataEndpoints.cs` |
+| `uac-013` | **013** workforce `oid` no-hijack | sonnet/high | `Infrastructure/ExternalAccess/WorkforcePrincipalResolver.cs`, `Services/Ai/Membership/IdentityNormalizationService.cs` |
+| `uac-015` | **015** membership paging | sonnet/high | `Services/Ai/Membership/MembershipResolverService.cs`, `Infrastructure/ExternalAccess/AccessibleRecordSetService.cs` |
+| `uac-018` | **018** dead filter + `in`-clause bound | sonnet/high | `Api/ExternalAccess/AccessibleRecordSetAuthorizationFilter.cs`, `Api/ExternalAccess/Tier2ScopeFilterInjector.cs` |
+| `uac-020` | **020** org-grant SPE cleanup | sonnet/high | `Api/ExternalAccess/RevokeExternalAccessEndpoint.cs`, `Dtos/RevokeAccessResponse.cs`, `tests/.../SpeRevokeMatcherTests.cs` |
+
+**Pre-dispatch conflict check PASSED** (Step 0.5 hot-path, all six touch BFF): zero overlap with every
+open PR (#806/#828/#829/#830/#636/#526) **and** zero overlap with the three unmerged worktree branches
+(073 `dd3e38f6d`, 079 `8185c8fcc`, 075 `3289844`).
+
+### Held back from Wave A — with reasons (do NOT dispatch these blind)
+
+| Task | Why held |
+|---|---|
+| **012** | Contends `FileAccessEndpoints.cs`, which **072 just rewrote** (share-link now gated on `Share`, bounded expiry, anonymous opt-in). Its POML predates 072 — **re-scope before running**, part of it may already be satisfied |
+| **024**, **025** | Both contend `SpeRevokeMatcherTests.cs` + `RevokeExternalAccessEndpoint.cs` with 020 |
+| **028** | Contends `AccessibleRecordSetService.cs` with 015 |
+| **029** | Contends `ExternalProjectDataEndpoints.cs` + `ExternalAccessModule.cs` with 028; `spec.md` with 023 |
+| **023** | Contends `spec.md` with 029 |
+| **027** | Modifies `ci-tier2-advisory.yml` — **the file we just fixed**, on the CI hot path with another agent live. Needs coordination, not parallelism |
+| **076** | 🔔 escalated — owner decision outstanding |
+| **078** | Deps on 075 (unmerged) and gated on 047 |
+| **047** | Operator-driven — needs a live deploy + real secure project; not autonomous-safe |
+| **026** | ∥-safe and free, but held so the main session stays clear for escalations + the merge |
+| **030/031/040** | Edit `.claude/**` → main-session-only (root §3) |
 
 **Why worktrees rather than shared-worktree parallelism** (the POMLs' `∥-safe:true` does not cover
 these): sub-agents share ONE worktree by default, so concurrent edits to a shared file are **lost
@@ -23,22 +72,28 @@ writes, not git conflicts** — and 073 + 079 BOTH need waivers deleted from
 `RouteAuthorizationGuardTests.cs`, while either may want a new `OperationAccessPolicy` key. Concurrent
 `dotnet build` in one worktree also contends on `bin`/`obj`.
 
-**MAIN-SESSION-OWNED files — the agents were told NOT to touch these and to report needed changes:**
-`Spaarke.Core/Auth/OperationAccessPolicy.cs` · `Api/Filters/DocumentAuthorizationFilter.cs` ·
-`Infrastructure/Graph/SpeFileStore.cs` · `tests/Spaarke.ArchTests/RouteAuthorizationGuardTests.cs` ·
-`current-task.md` · `tasks/TASK-INDEX.md`. Same boundary pattern as the `.claude/` rule (root §3).
+**MAIN-SESSION-OWNED files — every agent (both batches) was told NOT to touch these and to report
+needed changes instead:** `Spaarke.Core/Auth/OperationAccessPolicy.cs` ·
+`Api/Filters/DocumentAuthorizationFilter.cs` · `Infrastructure/Graph/SpeFileStore.cs` ·
+`tests/Spaarke.ArchTests/RouteAuthorizationGuardTests.cs` · `current-task.md` ·
+`tasks/TASK-INDEX.md` · `spec.md` · **`.github/workflows/**` (CI hot path, another agent is live)**.
+Same boundary pattern as the `.claude/` rule (root §3).
 
 ### ⛔ READ THE MERGE PLAN FIRST: [`notes/wave2-parallel-merge-plan.md`](notes/wave2-parallel-merge-plan.md)
 
 That file is the complete integration checklist — worktree inventory, the 12 ArchTest edits, a
-must-fix false-PASS vector in a new guard, 7 follow-ups to file, and the verification sequence.
-**Nothing is merged yet.** Status as of the last update: **073 ✅ shipped, both gates returned** ·
-**079 ✅ shipped, gates unconfirmed** · **Wave 2 (075→076) 🔄 still running**.
+must-fix false-PASS vector in a new guard, 8 follow-ups to file, and the verification sequence.
+**Nothing is merged yet.** Batch status: **073 ✅ shipped, both gates returned** (`dd3e38f6d`) ·
+**079 ✅ shipped, ⛔ NEITHER GATE RAN — both owed on the combined diff** (`8185c8fcc`) ·
+**075 ✅ shipped, gate PASSED after 4 rounds / 10 defects / 0 in round 4** (`3289844`) ·
+**076 🔔 ESCALATED, not implemented — owner decision outstanding.**
 
-The single hard blocker: task 074's guard is **+5 red** and 3 of those 5 are on
-`ci-tier1-blocking.yml`'s filter, so it cannot merge red. Cause is known to the line (a `GovernedFile`
-entry for the deleted `Api/UploadEndpoints.cs`, whose `ScanFile` does an unguarded `File.ReadAllText`
-— that one entry accounts for 4 of the 5).
+⚠️ **CORRECTED 2026-08-27 — task 074's guard is NOT "currently +5 red".** It is green at HEAD here:
+`Api/UploadEndpoints.cs` still exists in this worktree, and CI's Tier 1 arch-tests job passes. The +5
+is the **post-merge** state that appears the moment 073's deletion lands. The merge plan's sequencing
+(§2 edits applied in the same tranche as 073, census last) is correct either way — only the tense was
+wrong. Cause is still known to the line: the `GovernedFile` entry for the deleted
+`Api/UploadEndpoints.cs`, whose `ScanFile` does an unguarded `File.ReadAllText`, accounts for 4 of 5.
 
 **Merge-back obligations when they report:**
 1. Apply each reported `OperationAccessPolicy` key centrally (073 and 079 may both want one).

@@ -35,16 +35,16 @@ Number gaps (020–029, 045–049, 059, 070–079, 084–089) are intentional in
 | ✅ 008 | Delegation rule — Write-on-target | FR-07 / A-6 | 001 | — | ❌ | sonnet | high |
 | ✅ 009 | Scope-check external To Do PATCH (+H-8a) | FR-08 / A-7 | 001 | — | ❌ | sonnet | high |
 | ✅ 010 | Idempotent grant + revoke-all | FR-09 / A-11 | 001 | — | ❌ | **opus** | **xhigh** |
-| 🔲 011 | Reject same-entity self-join | FR-10 / A-17 | 001 | — | ❌ | sonnet | high |
+| 🔄 011 | Reject same-entity self-join | FR-10 / A-17 | 001 | **Wave A** | ❌ | sonnet | high |
 | 🔲 012 | Track or disable anonymous share links | FR-11 / A-14 | 002 | — | ❌ | sonnet | high |
-| 🔲 013 | Workforce email `oid` no-hijack | FR-12 / A-18 | 001 | — | ❌ | sonnet | high |
+| 🔄 013 | Workforce email `oid` no-hijack | FR-12 / A-18 | 001 | **Wave A** | ❌ | sonnet | high |
 | ✅ 014 | Cache key includes auth mode | FR-13 / A-19 | 001 | **P0-B** | ✅ | sonnet | high |
-| 🔲 015 | Deterministic + complete membership paging | FR-14 / A-10 | 001 | — | ❌ | sonnet | high |
+| 🔄 015 | Deterministic + complete membership paging | FR-14 / A-10 | 001 | **Wave A** | ❌ | sonnet | high |
 | ✅ 016 | Close-project cascade (contact + org) | FR-15 / A-12 | 001 | — | ❌ | sonnet | high |
 | ✅ 017 | SPE revoke matcher + H-8b relic | FR-16 / A-13 | 001,010 | — | ❌ | sonnet | high |
-| 🔲 018 | Remove dead filter + bound `in`-clause | FR-17 / A-15,A-16 | 001 | — | ❌ | sonnet | high |
+| 🔄 018 | Remove dead filter + bound `in`-clause | FR-17 / A-15,A-16 | 001 | **Wave A** | ❌ | sonnet | high |
 | ✅ 019 | Fix `LookupUserMembership` `["*"]` | FR-17 / A-22 | 001 | **P0-B** | ✅ | sonnet | high |
-| 🔲 **020** | **Org-grant SPE member cleanup** | **FR-16b** / 017 §6 | 017 | — | ❌ | sonnet | high |
+| 🔄 **020** | **Org-grant SPE member cleanup** | **FR-16b** / 017 §6 | 017 | **Wave A** | ❌ | sonnet | high |
 
 **Critical path**: 001 → {003, 014} → 004 → {005, 006} · plus 001 → 010 → 017 → **020** · plus 002 → 012
 
@@ -125,7 +125,7 @@ task 009 — 028 from its escalation, 029 from the read/write asymmetry its fix 
 | 🔲 **078** | **Authorize `GET /api/v1/containers/{containerId}/documents`** | 1 | Lists **any** container's documents behind `RequireAuthorization()` alone — the read-side twin of 073. Needs 075's container→record mapping | **075** | ✅ | **opus** | high |
 | 🔄 **079** | **Gate the two drive-keyed OBO *version* routes** (`DocumentVersionEndpoints.cs:44,84`) | 1 | Two MORE routes of 071's shape, incl. **prior-version BYTES**. Unlike 071's four these have a **live caller** (`versionHistory.ts:81`), so they must be GATED not deleted. Found by a **caller** inventory, not a route inventory. No shipping dependency (owner, 2026-08-26) | 071 | ✅ | **opus** | high |
 | ✅ **080** | **Restore cross-record search** — `scope=all` FILTERED per row, not refused | 1 | 070 refused `scope=all` on the premise "no caller needs it". **That premise was FALSE** — the code page emits it for the "All" row, for blank-label rows, and for *every* search after the user types a query. Authorizes the PAGE, not the corpus, so no dependency on 031 | **070** | ❌ | **opus** | **xhigh** |
-| 🔲 **081** | **Classify the caller**, then scope the tenant-container-resolver diagnostic | 1 | **Live on master.** Takes `tenantId` from the QUERY STRING and treats the caller's JWT `tid` as a mere *fallback* → tenant A resolves tenant B's SPE container id. The 400-vs-200 "not served by this stamp" split is also a **tenant-enumeration oracle**. Found by 074's census forcing a new-file classification | — | ❌ | **opus** | **xhigh** |
+| 🔄 **081** | **Classify the caller**, then scope the tenant-container-resolver diagnostic | 1 | **Live on master.** Takes `tenantId` from the QUERY STRING and treats the caller's JWT `tid` as a mere *fallback* → tenant A resolves tenant B's SPE container id. The 400-vs-200 "not served by this stamp" split is also a **tenant-enumeration oracle**. Found by 074's census forcing a new-file classification | — | ❌ | **opus** | **xhigh** |
 
 **Wave 1 (070–074) is parallel-capable** — 071/073/074 are `parallel-safe: true`; 070 and 072 touch shared authorization surface and serialize. **Wave 2**: 075 → 076 strictly. Wave 1 and Wave 2 can run concurrently.
 
