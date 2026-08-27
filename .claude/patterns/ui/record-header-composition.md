@@ -9,6 +9,11 @@
 > [`projects/record-header-and-notepad-r2/design.md`](../../../projects/record-header-and-notepad-r2/design.md).
 > The authoring guide below still documents the retired per-entity recipe; it is rewritten as part of R2.
 
+> **Lookup cells**: the header's editable lookup is the shared inline `LookupField` — load
+> [`inline-lookup-field.md`](inline-lookup-field.md) before touching one. It also explains the two
+> same-named components (`LookupField` vs `RecordHeaderLookupField`), which is the easiest mistake
+> to make in this area.
+
 ## Canonical code
 
 - **Shared primitives**: [`src/client/shared/Spaarke.UI.Components/src/components/HeaderToolbar/`](../../../src/client/shared/Spaarke.UI.Components/src/components/HeaderToolbar/) · [`.../RecordHeader/`](../../../src/client/shared/Spaarke.UI.Components/src/components/RecordHeader/) · [`.../hooks/`](../../../src/client/shared/Spaarke.UI.Components/src/hooks/) (`useRecordFieldValues`, `useRelatedCount`, `useRecordHeaderToolbarActions`, `toolbarLaunchDefaults`)

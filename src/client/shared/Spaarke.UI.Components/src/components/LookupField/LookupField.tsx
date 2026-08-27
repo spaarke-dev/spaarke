@@ -41,6 +41,7 @@ import { Input, Text, Button, Spinner, Field, makeStyles, tokens, mergeClasses }
 import type { InputProps } from '@fluentui/react-components';
 import { DismissRegular, SearchRegular } from '@fluentui/react-icons';
 import type { ILookupItem } from '../../types/LookupTypes';
+import { thinScrollbarStyle } from '../../theme/scrollbar';
 
 // ---------------------------------------------------------------------------
 // Props
@@ -222,24 +223,12 @@ const useStyles = makeStyles({
     gap: '1px',
     maxHeight: '240px',
     overflowY: 'auto',
-    // Modern thin overlay scrollbar. Fluent v9 ships no scrollbar tokens, so
-    // this is the standards-track property plus the WebKit fallback, both
-    // driven by semantic colors (ADR-021 — still zero hardcoded colors).
-    scrollbarWidth: 'thin',
-    scrollbarColor: `${tokens.colorNeutralStroke2} transparent`,
-    '::-webkit-scrollbar': {
-      width: '8px',
-    },
-    '::-webkit-scrollbar-track': {
-      backgroundColor: 'transparent',
-    },
-    '::-webkit-scrollbar-thumb': {
-      backgroundColor: tokens.colorNeutralStroke2,
-      borderRadius: tokens.borderRadiusCircular,
-    },
-    '::-webkit-scrollbar-thumb:hover': {
-      backgroundColor: tokens.colorNeutralStroke1,
-    },
+    // The Spaarke thin scrollbar — the SHARED one, not a local copy. An earlier
+    // revision hand-rolled an almost-identical block here before noticing this
+    // helper existed (CLAUDE.md §11: extend, don't re-derive). It is also the
+    // reason the `::-webkit-scrollbar` rules live on THIS element rather than a
+    // parent: those pseudo-elements do not cascade. See `thin-scrollbar.md`.
+    ...thinScrollbarStyle,
   },
   /** Pinned footer — Advanced only, right-aligned. No "+ New" (see props). */
   resultsFooter: {
