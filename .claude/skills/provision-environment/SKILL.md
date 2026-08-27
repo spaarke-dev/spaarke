@@ -91,6 +91,12 @@ git --version                # ≥ 2.40
 
 Parse each version; compare against minimum. On mismatch, print the missing/stale tool + install/upgrade instructions.
 
+**COMP-15 addition (SESSION 15 Wave 4) — batch-mode contract test**: when invoked with `--batch`, ALSO verify:
+- `az account show` exits 0 within 5s (proves `az login` is live and token cache is not stale). If fails, HARD STOP with: "Batch dispatch requires a fresh `az login` session. Run `az login --scope api://spaarke.com/provisioning-controlplane-$env/.default` interactively before re-invoking."
+- Dataverse MCP is contactable via `mcp__dataverse__describe` OR intake explicitly sets `"skipDataverseMcp": true` (deferring registry ops to raw Web API fallback path per Fallback Matrix F1). Silent MCP unavailability in batch mode causes Step 6a registry update to fail silently — the batch-mode audit trail depends on this contract holding at Step 0.
+
+The interactive-mode counterpart of these checks lives in 0b/0d; batch mode reruns them at 0a to fail-fast on subagent environments that lack the necessary tooling.
+
 #### 0b. Operator AAD identity
 
 ```powershell
@@ -148,7 +154,32 @@ git status --porcelain          # note uncommitted changes (informational; not b
 
 Runs create `runs/{runId}.md` in the operator's cwd. If cwd is not a git repo, warn: "handoff report will be written to cwd but won't be checkpointed to git — consider running from repo root."
 
-#### 0f. Report + gate
+#### 0f. L2 deployment probe (COMP-04 addition SESSION 15 — verifies deployed L2 image is current AND contains H4-shared/H4b)
+
+Before iterating prereqs.yaml or issuing the run POST, verify L2 App Service is:
+- Reachable (`az webapp show` state == Running)
+- Healthy (`/healthz` returns 200)
+- Current image (build-tag assertion — the deployed image must contain the SESSION 15 Wave 2 HANDLER-01 DAG fix; without it, H4-shared/H4b never dispatch and the whole r1 F19/F20 automation is inert on the dispatched run)
+
+```powershell
+$l2WebAppName = "spaarke-provisioning-controlplane-$env"
+$l2Rg = "rg-spaarke-platform-$env"
+$state = az webapp show -g $l2Rg -n $l2WebAppName --query state -o tsv 2>$null
+if ($state -ne 'Running') {
+  Write-Error "[skill] L2 App Service '$l2WebAppName' is '$state' (expected 'Running'). Deploy L2 before /provision-environment."
+  exit 1
+}
+# /healthz — includes JSON body with build-tag
+$health = Invoke-RestMethod -Uri "$l2Base/healthz" -Method GET -TimeoutSec 10 2>$null
+$expectedBuildTag = 'SESSION-15-wave-2-handler-01'  # placeholder — replace with real build-tag emit convention when deploy pipeline stamps it
+if ($health.buildTag -and $health.buildTag -notmatch $expectedBuildTag) {
+  Write-Warning "[skill] L2 build-tag mismatch (got '$($health.buildTag)', expected match on '$expectedBuildTag'). Deployed image may lack the SESSION 15 Wave 2 fixes (HANDLER-01 DAG, REG-01 registry PATCH, ISH-01 tenantId validation). Run may HALT deep in the DAG. Deploy latest L2 image before proceeding."
+}
+```
+
+Note: build-tag emission from the L2 deploy pipeline is a follow-on — until it lands, this probe is informational (warns on mismatch, does not HARD STOP). Deploy pipeline stamping is tracked separately as a Wave 8-adjacent follow-on.
+
+#### 0g. Report + gate
 
 Present the operator with a summary:
 
@@ -1037,7 +1068,33 @@ Note: `sprk_tenantid` MUST NOT be re-written here — it's set at placeholder-cr
 
 #### 6b. Write handoff report
 
-`runs/{runId}.md` in the operator's cwd. Structure:
+`runs/{runId}.md` in the operator's cwd. Per PLX-12 (SESSION 15 Wave 4), the template shown below is the SHAPE ONLY — the skill MUST substitute every `{token}` before writing. Direct `Set-Content` of the template verbatim would ship an audit-trail artifact with literal `{runId}` etc. text (mandatory audit-trail per SKILL.md line 60 would be corrupted).
+
+Skill substitution block (immediately before `Set-Content`):
+
+```powershell
+$template = @'
+<TEMPLATE-CONTENT-HERE — literal below>
+'@
+$report = $template `
+  -replace '\{runId\}',           $runId `
+  -replace '\{customerId\}',      $customerId `
+  -replace '\{tenantId\}',        $tenantId `
+  -replace '\{tenancyModel\}',    $tenancyModel `
+  -replace '\{profile\}',         $profile `
+  -replace '\{startedAt\}',       $run.StartedOn.ToString('o') `
+  -replace '\{completedAt\}',     $run.CompletedOn.ToString('o') `
+  -replace '\{duration\}',        ("{0:hh\:mm\:ss}" -f ($run.CompletedOn - $run.StartedOn)) `
+  -replace '\{l2Base\}',          $l2Base `
+  -replace '\{amount\}',          $costMonthly `
+  -replace '\{escalation notes if any\}', $escalationNotes `
+  -replace '\{timestamp\}',       (Get-Date -Format 'o') `
+  -replace '\{version\}',         $deployedBffVersion `
+  -replace '\{URL\}',             $customerFacingUrl
+Set-Content -Path "runs/$runId.md" -Value $report
+```
+
+Template shape:
 
 ```markdown
 # Provisioning Run {runId}
