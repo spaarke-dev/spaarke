@@ -27,7 +27,12 @@
 import * as fs from 'fs';
 import * as path from 'path';
 import { extractConfiguredAttributeNames, resolveHeaderConfig } from '../configResolution';
-import type { HeaderAttributeMetadata, HeaderFormMetadata, ResolvedHeaderConfig, ResolvedHeaderField } from '../configResolution';
+import type {
+  HeaderAttributeMetadata,
+  HeaderFormMetadata,
+  ResolvedHeaderConfig,
+  ResolvedHeaderField,
+} from '../configResolution';
 import type { RecordHeaderFieldRenderer } from '../../../types/RecordHeaderConfiguration';
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -397,10 +402,7 @@ describe('resolveHeaderConfig', () => {
       ['span null (invalid ⇒ renderer default 1)', null, 3, 1],
       ['span NaN (invalid ⇒ renderer default 1)', NaN, 3, 1],
     ])('%s', (_label, span, columns, expected) => {
-      const result = resolveHeaderConfig(
-        manifest([{ name: 'sprk_matternumber', span }], { columns }),
-        matterMetadata
-      );
+      const result = resolveHeaderConfig(manifest([{ name: 'sprk_matternumber', span }], { columns }), matterMetadata);
       expect(result.fields[0].span).toBe(expected);
     });
 
@@ -486,7 +488,12 @@ describe('resolveHeaderConfig', () => {
         {},
         { attributes: null },
         { attributes: [] },
-        { entityLogicalName: 'sprk_x', primaryIdAttribute: 'sprk_xid', primaryNameAttribute: 'sprk_xname', attributes: {} },
+        {
+          entityLogicalName: 'sprk_x',
+          primaryIdAttribute: 'sprk_xid',
+          primaryNameAttribute: 'sprk_xname',
+          attributes: {},
+        },
       ];
 
       for (const input of exoticInputs) {
@@ -499,7 +506,12 @@ describe('resolveHeaderConfig', () => {
     });
 
     it('renders a usable header even when metadata is entirely empty (never blank-by-exception)', () => {
-      const empty = { entityLogicalName: 'sprk_thing', primaryIdAttribute: '', primaryNameAttribute: '', attributes: {} };
+      const empty = {
+        entityLogicalName: 'sprk_thing',
+        primaryIdAttribute: '',
+        primaryNameAttribute: '',
+        attributes: {},
+      };
       const result = resolveHeaderConfig(undefined, empty as HeaderFormMetadata);
       expect(result.title).toBe('Thing');
       expect(result.columns).toBe(3);
@@ -809,7 +821,10 @@ describe('resolveHeaderConfig', () => {
 
   describe('title resolution — config ?? entity display name ?? humanized logical name', () => {
     it('uses the config title when present', () => {
-      const result = resolveHeaderConfig(manifest([{ name: 'sprk_projectname' }], { title: 'Custom' }), projectMetadata);
+      const result = resolveHeaderConfig(
+        manifest([{ name: 'sprk_projectname' }], { title: 'Custom' }),
+        projectMetadata
+      );
       expect(result.title).toBe('Custom');
     });
 
@@ -841,10 +856,7 @@ describe('resolveHeaderConfig', () => {
       ['a null title', null],
       ['a numeric title', 42],
     ])('ignores %s and falls back to the entity display name', (_label, title) => {
-      const result = resolveHeaderConfig(
-        manifest([{ name: 'sprk_projectname' }], { title }),
-        projectMetadata
-      );
+      const result = resolveHeaderConfig(manifest([{ name: 'sprk_projectname' }], { title }), projectMetadata);
       expect(result.title).toBe('Project');
     });
   });
@@ -1122,9 +1134,9 @@ describe('resolveHeaderConfig', () => {
     });
 
     it('trims names and skips a non-string summaryField', () => {
-      expect(
-        extractConfiguredAttributeNames('{"summaryField":99,"fields":[{"name":"  sprk_openeddate  "}]}')
-      ).toEqual(['sprk_openeddate']);
+      expect(extractConfiguredAttributeNames('{"summaryField":99,"fields":[{"name":"  sprk_openeddate  "}]}')).toEqual([
+        'sprk_openeddate',
+      ]);
     });
   });
 });

@@ -348,21 +348,18 @@ export function useRecordHeaderFields(options: IUseRecordHeaderFieldsOptions): I
   }, []);
 
   // ── Lookup save (form buffer) ──────────────────────────────────────────────
-  const saveLookup = React.useCallback(
-    (fieldName: string, item: ILookupItem | null, entityType: string): void => {
-      const attribute = requireFormAttribute(fieldName);
-      // Xrm lookup value shape: `[{ id, name, entityType }]`. `null` clears.
-      const nextValue = item ? [{ id: item.id, name: item.name, entityType }] : null;
-      attribute.setValue(nextValue);
-      setPendingLookup(prev => ({ ...prev, [fieldName]: item }));
-      logger.logDebug(LOG_COMPONENT, 'staged lookup edit', {
-        field: fieldName,
-        item,
-        dirty: !!attribute.getIsDirty?.(),
-      });
-    },
-    []
-  );
+  const saveLookup = React.useCallback((fieldName: string, item: ILookupItem | null, entityType: string): void => {
+    const attribute = requireFormAttribute(fieldName);
+    // Xrm lookup value shape: `[{ id, name, entityType }]`. `null` clears.
+    const nextValue = item ? [{ id: item.id, name: item.name, entityType }] : null;
+    attribute.setValue(nextValue);
+    setPendingLookup(prev => ({ ...prev, [fieldName]: item }));
+    logger.logDebug(LOG_COMPONENT, 'staged lookup edit', {
+      field: fieldName,
+      item,
+      dirty: !!attribute.getIsDirty?.(),
+    });
+  }, []);
 
   // ── Generic value save (form buffer) — task 033 (r2) ───────────────────────
   // Same `requireFormAttribute` gate as the two paths above, so the FR-14

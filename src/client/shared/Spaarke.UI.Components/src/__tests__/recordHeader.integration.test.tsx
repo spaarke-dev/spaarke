@@ -161,8 +161,7 @@ function installXrm(config: {
   // masked the bug". This mock WAS that mask: it returned a count annotation
   // alongside an EMPTY entities array, so the badges could only ever read 0.
   // Returning rows of the requested length is what the platform actually does.
-  const rows = (n: number): Record<string, string>[] =>
-    Array.from({ length: n }, (_unused, i) => ({ id: `row-${i}` }));
+  const rows = (n: number): Record<string, string>[] => Array.from({ length: n }, (_unused, i) => ({ id: `row-${i}` }));
 
   mockRetrieveMultipleRecords = jest.fn((entity: string) => {
     if (entity === 'sprk_todo') {
@@ -580,9 +579,7 @@ describe('RecordHeader composition — integration (Phase 1 as a whole)', () => 
     // byte-for-byte because this string IS an external API contract (NFR-07):
     // SmartTodo's own `useLaunchContext` parses `action=openTodos` to pre-filter
     // the Kanban, so a changed separator or key silently breaks the launch.
-    expect(pageInput.data).toBe(
-      `action=openTodos&regardingType=${MATTER_ENTITY}&regardingId=${MATTER_ID}`
-    );
+    expect(pageInput.data).toBe(`action=openTodos&regardingType=${MATTER_ENTITY}&regardingId=${MATTER_ID}`);
     // 85% × 85% modal per Layout 1 canonical standard.
     expect(navOptions).toEqual(LAYOUT_1_MODAL);
   });

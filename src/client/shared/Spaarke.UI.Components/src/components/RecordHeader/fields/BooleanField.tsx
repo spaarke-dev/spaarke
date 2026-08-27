@@ -261,11 +261,7 @@ export const BooleanField: React.FC<IBooleanFieldProps> = ({
         // Read-only cell — no `onSave`, or explicitly `disabled`. Keeps the
         // em-dash empty state (FR-11) that the contract suite asserts, and
         // deliberately carries no `role="button"`: there is nothing to click.
-        <div
-          className={styles.value}
-          title={displayLabel}
-          data-testid="record-header-boolean-field-value"
-        >
+        <div className={styles.value} title={displayLabel} data-testid="record-header-boolean-field-value">
           {displayLabel}
         </div>
       )}

@@ -571,11 +571,7 @@ describe('RecordHeaderView — DEF-1 regression: lookups and the $select', () =>
           recordId={RECORD_ID}
           layoutJson={JSON.stringify({
             _version: '1.0',
-            fields: [
-              { name: 'sprk_projecttype_ref' },
-              { name: 'sprk_openeddate' },
-              { name: 'sprk_highpriority' },
-            ],
+            fields: [{ name: 'sprk_projecttype_ref' }, { name: 'sprk_openeddate' }, { name: 'sprk_highpriority' }],
           })}
         />
       </FluentProvider>
@@ -653,9 +649,12 @@ describe('buildRequestedAttributeNames', () => {
   const control = (name: string) => ({ name });
 
   it('unions form controls with configured names, form order first', () => {
-    expect(
-      buildRequestedAttributeNames([control('a'), control('b')], ['c', 'sprk_recordsummary'])
-    ).toEqual(['a', 'b', 'c', 'sprk_recordsummary']);
+    expect(buildRequestedAttributeNames([control('a'), control('b')], ['c', 'sprk_recordsummary'])).toEqual([
+      'a',
+      'b',
+      'c',
+      'sprk_recordsummary',
+    ]);
   });
 
   it('de-duplicates across the two sources', () => {
@@ -1024,9 +1023,7 @@ describe('applyFormControlHints', () => {
   });
 
   it('fills missing lookup targets from getEntityTypes()', () => {
-    const out = applyFormControlHints(META, [
-      { name: 'sprk_projecttype', entityTypes: ['sprk_projecttype_ref'] },
-    ]);
+    const out = applyFormControlHints(META, [{ name: 'sprk_projecttype', entityTypes: ['sprk_projecttype_ref'] }]);
     expect(out.attributes.sprk_projecttype.targets).toEqual(['sprk_projecttype_ref']);
   });
 
@@ -1052,9 +1049,7 @@ describe('applyFormControlHints', () => {
       ...META,
       attributes: { ...META.attributes, sprk_projecttype: { attributeType: 'Lookup', targets: [] } },
     } as never;
-    const out = applyFormControlHints(withEmpty, [
-      { name: 'sprk_projecttype', entityTypes: ['sprk_projecttype_ref'] },
-    ]);
+    const out = applyFormControlHints(withEmpty, [{ name: 'sprk_projecttype', entityTypes: ['sprk_projecttype_ref'] }]);
     expect(out.attributes.sprk_projecttype.targets).toEqual(['sprk_projecttype_ref']);
   });
 

@@ -550,7 +550,6 @@ export class FieldMappingHandler {
       return false;
     }
   }
-
 }
 
 /**

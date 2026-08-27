@@ -143,10 +143,10 @@ export async function resolveLookupTargetKeys(target: string): Promise<ILookupTa
     if (!idAttribute || !nameAttribute) {
       // Loud, because this is silent otherwise: the cell renders an empty
       // dropdown and looks like the table has no rows.
-      console.warn(
-        `[lookupSearch] '${target}': metadata returned no primary id/name attribute — search disabled.`,
-        { idAttribute, nameAttribute }
-      );
+      console.warn(`[lookupSearch] '${target}': metadata returned no primary id/name attribute — search disabled.`, {
+        idAttribute,
+        nameAttribute,
+      });
       return null;
     }
     return { idAttribute, nameAttribute };

@@ -387,9 +387,7 @@ export const NumberField: React.FC<INumberFieldProps> = ({
             input={{ className: styles.editInputRaw }}
             data-testid="record-header-number-field-input"
           />
-          {saving ? (
-            <Spinner size="tiny" aria-label="Saving" data-testid="record-header-number-field-spinner" />
-          ) : null}
+          {saving ? <Spinner size="tiny" aria-label="Saving" data-testid="record-header-number-field-spinner" /> : null}
         </div>
       ) : (
         <div

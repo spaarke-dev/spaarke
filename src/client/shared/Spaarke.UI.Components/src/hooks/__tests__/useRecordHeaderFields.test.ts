@@ -290,9 +290,7 @@ describe('useRecordHeaderFields', () => {
 
       const { result } = await renderLoaded();
 
-      await expect(result.current.saveText('hdr_absent', 'value')).rejects.toThrow(
-        "Field 'hdr_absent' not on form"
-      );
+      await expect(result.current.saveText('hdr_absent', 'value')).rejects.toThrow("Field 'hdr_absent' not on form");
     });
 
     it('saveLookup THROWS (it used to console.warn and silently drop the edit)', async () => {
@@ -336,9 +334,7 @@ describe('useRecordHeaderFields', () => {
 
       const { result } = await renderLoaded();
 
-      expect(() => result.current.saveLookup('hdr_owner', PICKED, 'hdr_account')).toThrow(
-        'Form buffer unavailable'
-      );
+      expect(() => result.current.saveLookup('hdr_owner', PICKED, 'hdr_account')).toThrow('Form buffer unavailable');
     });
   });
 

@@ -110,7 +110,7 @@ describe('buildLookupSearchOptions', () => {
     expect(options).toContain(`$filter=contains(${MATTER_TYPE.nameAttribute},'Lit')`);
   });
 
-  it("escapes a quote the ODATA way — doubled, NOT percent-encoded", () => {
+  it('escapes a quote the ODATA way — doubled, NOT percent-encoded', () => {
     // `encodeURIComponent` deliberately leaves `'` alone (it is in the
     // unescaped set, alongside `-_.!~*()`), so the doubling is the only thing
     // protecting this literal. The two mechanisms are not interchangeable and

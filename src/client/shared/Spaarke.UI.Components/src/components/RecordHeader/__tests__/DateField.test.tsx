@@ -27,8 +27,7 @@ const formatExpected = (iso: string, opts: Intl.DateTimeFormatOptions): string =
   new Intl.DateTimeFormat(undefined, opts).format(new Date(iso));
 
 /** The editor input — one control now, whatever the `format`. */
-const editorInput = (): HTMLInputElement =>
-  screen.getByTestId('record-header-date-field-input') as HTMLInputElement;
+const editorInput = (): HTMLInputElement => screen.getByTestId('record-header-date-field-input') as HTMLInputElement;
 
 describe('DateField', () => {
   // ──────────────────────────────────────────────────────────────────────
@@ -276,9 +275,7 @@ describe('DateField', () => {
     );
 
     // Draft reverted to the wall-clock form of the ORIGINAL value.
-    await waitFor(() =>
-      expect(editorInput().value).toBe(toInputValue(new Date(ISO_DATE_ONLY), 'date'))
-    );
+    await waitFor(() => expect(editorInput().value).toBe(toInputValue(new Date(ISO_DATE_ONLY), 'date')));
   });
 
   // ──────────────────────────────────────────────────────────────────────
@@ -356,9 +353,7 @@ describe('DateField', () => {
   // ──────────────────────────────────────────────────────────────────────
 
   it('renders NO marker when required=true (D-10: DateField never shows the asterisk)', () => {
-    renderWithProviders(
-      <DateField label="Invoice Date" span={1} format="date" value={ISO_DATE_ONLY} required />
-    );
+    renderWithProviders(<DateField label="Invoice Date" span={1} format="date" value={ISO_DATE_ONLY} required />);
     expect(screen.queryByText('*')).not.toBeInTheDocument();
   });
 

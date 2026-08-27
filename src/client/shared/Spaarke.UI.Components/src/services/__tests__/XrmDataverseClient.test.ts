@@ -380,8 +380,8 @@ describe('XrmDataverseClient', () => {
 
     it('misses the cache for a different entity name (per-entity keying)', async () => {
       const xrm = makeMockXrm();
-      xrm.Utility!.getEntityMetadata
-        .mockResolvedValueOnce({
+      xrm
+        .Utility!.getEntityMetadata.mockResolvedValueOnce({
           PrimaryIdAttribute: 'sprk_matterid',
           PrimaryNameAttribute: 'sprk_matternumber',
           Attributes: [],

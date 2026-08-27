@@ -122,7 +122,6 @@ describe('BooleanField', () => {
     const root = screen.getByTestId('record-header-boolean-field');
     expect(root.getAttribute('data-editable')).toBe('true');
 
-
     const switchEl = screen.getByTestId('record-header-boolean-field-switch') as HTMLInputElement;
     expect(switchEl).toBeInTheDocument();
     expect(switchEl.checked).toBe(true);
@@ -132,7 +131,6 @@ describe('BooleanField', () => {
   it('renders the Switch unchecked for a false value', async () => {
     const onSave = jest.fn().mockResolvedValue(undefined);
     renderWithProviders(<BooleanField span={1} label="High Priority" value={false} onSave={onSave} />);
-
 
     const switchEl = screen.getByTestId('record-header-boolean-field-switch') as HTMLInputElement;
     expect(switchEl.checked).toBe(false);
@@ -147,7 +145,6 @@ describe('BooleanField', () => {
       const onSave = jest.fn().mockResolvedValue(undefined);
       renderWithProviders(<BooleanField span={1} label="High Priority" value={false} onSave={onSave} />);
 
-
       const switchEl = screen.getByTestId('record-header-boolean-field-switch') as HTMLInputElement;
       await act(async () => {
         await userEvent.click(switchEl);
@@ -160,7 +157,6 @@ describe('BooleanField', () => {
     it('Enter commits the draft via onSave', async () => {
       const onSave = jest.fn().mockResolvedValue(undefined);
       renderWithProviders(<BooleanField span={1} label="High Priority" value={false} onSave={onSave} />);
-
 
       const switchEl = screen.getByTestId('record-header-boolean-field-switch') as HTMLInputElement;
       await act(async () => {
@@ -177,7 +173,6 @@ describe('BooleanField', () => {
     it('Escape cancels with zero onSave calls and reverts the Switch', async () => {
       const onSave = jest.fn().mockResolvedValue(undefined);
       renderWithProviders(<BooleanField span={1} label="High Priority" value={false} onSave={onSave} />);
-
 
       const switchEl = screen.getByTestId('record-header-boolean-field-switch') as HTMLInputElement;
       await act(async () => {
@@ -203,7 +198,6 @@ describe('BooleanField', () => {
       const onSave = jest.fn().mockResolvedValue(undefined);
       renderWithProviders(<BooleanField span={1} label="High Priority" value={false} onSave={onSave} />);
 
-
       const switchEl = screen.getByTestId('record-header-boolean-field-switch') as HTMLInputElement;
       await act(async () => {
         await userEvent.click(switchEl);
@@ -219,7 +213,6 @@ describe('BooleanField', () => {
     it('committing an unchanged draft is a no-op — onSave is called zero times', async () => {
       const onSave = jest.fn().mockResolvedValue(undefined);
       renderWithProviders(<BooleanField span={1} label="High Priority" value={false} onSave={onSave} />);
-
 
       const switchEl = screen.getByTestId('record-header-boolean-field-switch') as HTMLInputElement;
       await act(async () => {
@@ -238,7 +231,6 @@ describe('BooleanField', () => {
           })
       );
       renderWithProviders(<BooleanField span={1} label="High Priority" value={false} onSave={onSave} />);
-
 
       const switchEl = screen.getByTestId('record-header-boolean-field-switch') as HTMLInputElement;
       await act(async () => {
@@ -268,7 +260,6 @@ describe('BooleanField', () => {
   it('a rejected onSave reverts the draft and stays in edit mode', async () => {
     const onSave = jest.fn().mockRejectedValue(new Error('save failed'));
     renderWithProviders(<BooleanField span={1} label="High Priority" value={false} onSave={onSave} />);
-
 
     const switchEl = screen.getByTestId('record-header-boolean-field-switch') as HTMLInputElement;
     await act(async () => {

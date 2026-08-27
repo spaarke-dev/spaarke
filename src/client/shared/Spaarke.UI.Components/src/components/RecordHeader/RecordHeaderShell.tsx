@@ -153,8 +153,12 @@ const LoadingSkeleton: React.FC<{ className: string; cellClassName: string; colu
 
   return (
     <Skeleton className={className} aria-label="Loading record header" data-testid="record-header-shell-skeleton">
-      {cellIndexes.map((index) => (
-        <SkeletonItem key={index} className={cellClassName} data-testid={`record-header-shell-skeleton-cell-${index}`} />
+      {cellIndexes.map(index => (
+        <SkeletonItem
+          key={index}
+          className={cellClassName}
+          data-testid={`record-header-shell-skeleton-cell-${index}`}
+        />
       ))}
     </Skeleton>
   );
@@ -209,7 +213,11 @@ export const RecordHeaderShell: React.FC<IRecordHeaderShellProps> = ({
       <HeaderToolbar {...toolbar} />
       <div className={styles.body} data-testid="record-header-shell-body">
         {isLoading ? (
-          <LoadingSkeleton className={skeletonClassName} cellClassName={styles.skeletonCell} columns={resolvedColumns} />
+          <LoadingSkeleton
+            className={skeletonClassName}
+            cellClassName={styles.skeletonCell}
+            columns={resolvedColumns}
+          />
         ) : (
           children
         )}

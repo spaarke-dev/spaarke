@@ -192,8 +192,7 @@ describe('LookupField — the panels must OVERLAY, never displace (no layout jum
   // jsdom does not do layout, so this cannot be asserted by measuring. What it
   // CAN check is the property that causes it — and `position: absolute` is the
   // whole fix, so pinning it is pinning the bug.
-  const positionOf = (el: Element | null): string =>
-    el ? window.getComputedStyle(el).position : '<not rendered>';
+  const positionOf = (el: Element | null): string => (el ? window.getComputedStyle(el).position : '<not rendered>');
 
   it('the results list is absolutely positioned', async () => {
     renderField();

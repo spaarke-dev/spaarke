@@ -114,8 +114,7 @@ const useTextFieldStyles = makeStyles({
 export const TextField: React.FC<ITextFieldProps> = ({ label, value, span, required, onSave, disabled }) => {
   const styles = useTextFieldStyles();
 
-  const displayValue =
-    value === null || value === undefined || value === '' ? EMPTY_VALUE_PLACEHOLDER : String(value);
+  const displayValue = value === null || value === undefined || value === '' ? EMPTY_VALUE_PLACEHOLDER : String(value);
   const editable = typeof onSave === 'function' && disabled !== true;
 
   // Edit-mode state

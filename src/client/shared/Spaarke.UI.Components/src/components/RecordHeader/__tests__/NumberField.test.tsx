@@ -183,7 +183,15 @@ describe('NumberField', () => {
     it('enters edit mode on click when onSave alone is supplied, showing the RAW unformatted number', async () => {
       const onSave = jest.fn().mockResolvedValue(undefined);
       renderWithProviders(
-        <NumberField span={1} label="Total Amount" value={12500.5} kind="money" precision={2} currencySymbol="$" onSave={onSave} />
+        <NumberField
+          span={1}
+          label="Total Amount"
+          value={12500.5}
+          kind="money"
+          precision={2}
+          currencySymbol="$"
+          onSave={onSave}
+        />
       );
       const valueEl = screen.getByTestId('record-header-number-field-value');
       expect(valueEl.textContent).toBe('$12,500.50');

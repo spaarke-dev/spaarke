@@ -708,10 +708,7 @@ export const LookupField: React.FC<ILookupFieldProps> = ({
 
       {/* Empty results */}
       {showEmpty && (
-        <Text
-          size={100}
-          className={mergeClasses(styles.overlayBelowField, styles.panelSurface, styles.emptyText)}
-        >
+        <Text size={100} className={mergeClasses(styles.overlayBelowField, styles.panelSurface, styles.emptyText)}>
           No results found
         </Text>
       )}

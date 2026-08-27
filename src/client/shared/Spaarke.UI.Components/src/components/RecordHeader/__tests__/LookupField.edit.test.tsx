@@ -96,14 +96,23 @@ describe('LookupField — editable mode (FR-15, FR-15a)', () => {
     it('is read-only when onSave + targets are supplied but disabled=true', () => {
       const onSave = jest.fn();
       renderWithProviders(
-        <LookupField label="Matter Type" value={sampleValue} span={1} targets={[MATTER_TYPE_TARGET]} onSave={onSave} disabled />
+        <LookupField
+          label="Matter Type"
+          value={sampleValue}
+          span={1}
+          targets={[MATTER_TYPE_TARGET]}
+          onSave={onSave}
+          disabled
+        />
       );
       expect(screen.getByTestId('record-header-lookup-field').getAttribute('data-editable')).toBe('false');
     });
 
     it('is read-only when onSave is supplied without a non-empty targets array', () => {
       const onSave = jest.fn();
-      renderWithProviders(<LookupField label="Matter Type" value={sampleValue} span={1} onSave={onSave} targets={[]} />);
+      renderWithProviders(
+        <LookupField label="Matter Type" value={sampleValue} span={1} onSave={onSave} targets={[]} />
+      );
       expect(screen.getByTestId('record-header-lookup-field').getAttribute('data-editable')).toBe('false');
     });
 
@@ -211,7 +220,9 @@ describe('LookupField — editable mode (FR-15, FR-15a)', () => {
 
   describe('selection round-trip', () => {
     it('a resolved selection calls onSave exactly once with the exact form-buffer payload shape', async () => {
-      stubLookupObjects(async () => [{ id: '22222222-2222-2222-2222-222222222222', name: 'Corporate', entityType: MATTER_TYPE_TARGET }]);
+      stubLookupObjects(async () => [
+        { id: '22222222-2222-2222-2222-222222222222', name: 'Corporate', entityType: MATTER_TYPE_TARGET },
+      ]);
       const onSave = jest.fn();
       renderWithProviders(
         <LookupField label="Matter Type" value={sampleValue} span={1} targets={[MATTER_TYPE_TARGET]} onSave={onSave} />
@@ -242,9 +253,7 @@ describe('LookupField — editable mode (FR-15, FR-15a)', () => {
         await userEvent.click(screen.getByTestId('record-header-lookup-field-value'));
       });
 
-      expect(onSave).toHaveBeenCalledWith(
-        expect.objectContaining({ id: '3fa85f64-5717-4562-b3fc-2c963f66afa6' })
-      );
+      expect(onSave).toHaveBeenCalledWith(expect.objectContaining({ id: '3fa85f64-5717-4562-b3fc-2c963f66afa6' }));
     });
   });
 

@@ -165,10 +165,7 @@ export function toCellSpan(span: number): 1 | 2 | 3 {
  * @param summaryField Effective summary attribute, or `null` when it is absent
  *                     from metadata and MUST NOT be selected.
  */
-export function buildSelectFields(
-  fields: ReadonlyArray<ResolvedHeaderField>,
-  summaryField?: string | null
-): string[] {
+export function buildSelectFields(fields: ReadonlyArray<ResolvedHeaderField>, summaryField?: string | null): string[] {
   const seen = new Set<string>();
   const result: string[] = [];
   const push = (key: string): void => {
@@ -219,10 +216,7 @@ export function buildMetadataAttributeNames(configuredNames: ReadonlyArray<strin
  * populates these columns, so at R2 ship time "exists but empty" is the normal
  * case and must not read as a broken affordance.
  */
-export function summaryFieldExists(
-  entityMetadata: EntityMetadata | null,
-  summaryField: string
-): boolean {
+export function summaryFieldExists(entityMetadata: EntityMetadata | null, summaryField: string): boolean {
   const attributes = entityMetadata?.attributes;
   if (!attributes || summaryField.length === 0) return false;
   return Object.prototype.hasOwnProperty.call(attributes, summaryField);
@@ -287,11 +281,7 @@ export const RecordHeaderView: React.FC<IRecordHeaderViewProps> = ({
     () => buildMetadataAttributeNames(extractConfiguredAttributeNames(layoutJson)),
     [layoutJson]
   );
-  const {
-    formMetadata,
-    entityMetadata,
-    loading: metadataLoading,
-  } = useHeaderFormMetadata(entityName, configuredNames);
+  const { formMetadata, entityMetadata, loading: metadataLoading } = useHeaderFormMetadata(entityName, configuredNames);
 
   // ── 2. Config resolution (pure; at most one console.warn per resolve) ──────
   // Memoized so a malformed `layoutJson` warns ONCE per config change rather
@@ -390,12 +380,7 @@ export const RecordHeaderView: React.FC<IRecordHeaderViewProps> = ({
             // Which lookup SURFACE this cell chose. 'display' on a field the
             // maker expects to edit means one of the two halves above is
             // missing — read `readOnly` and `targets` on the same line.
-            picker:
-              f.renderer !== 'lookup'
-                ? undefined
-                : !f.readOnly && attr?.targets?.length
-                  ? 'inline'
-                  : 'display',
+            picker: f.renderer !== 'lookup' ? undefined : !f.readOnly && attr?.targets?.length ? 'inline' : 'display',
           };
         })
       );
@@ -414,12 +399,7 @@ export const RecordHeaderView: React.FC<IRecordHeaderViewProps> = ({
       >
         <FieldGrid columns={columns}>
           {(resolved?.fields ?? []).map(field => (
-            <HeaderFieldCell
-              key={field.name}
-              field={field}
-              fieldsApi={fieldsApi}
-              entityMetadata={entityMetadata}
-            />
+            <HeaderFieldCell key={field.name} field={field} fieldsApi={fieldsApi} entityMetadata={entityMetadata} />
           ))}
         </FieldGrid>
       </RecordHeaderShell>

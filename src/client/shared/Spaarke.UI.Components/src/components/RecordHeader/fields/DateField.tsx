@@ -169,9 +169,7 @@ function parseDateValue(value: string | Date | null | undefined): { date: Date |
     date = value;
   } else {
     const bare = BARE_DATE_RE.exec(value);
-    date = bare
-      ? new Date(Number(bare[1]), Number(bare[2]) - 1, Number(bare[3]), 0, 0, 0, 0)
-      : new Date(value);
+    date = bare ? new Date(Number(bare[1]), Number(bare[2]) - 1, Number(bare[3]), 0, 0, 0, 0) : new Date(value);
   }
   return isNaN(date.getTime()) ? { date: null, invalid: true } : { date, invalid: false };
 }
@@ -191,9 +189,7 @@ function formatDisplayValue(date: Date, format: 'date' | 'datetime'): string {
 export function toInputValue(date: Date | null, format: 'date' | 'datetime'): string {
   if (!date) return '';
   const datePart = `${date.getFullYear()}-${pad2(date.getMonth() + 1)}-${pad2(date.getDate())}`;
-  return format === 'datetime'
-    ? `${datePart}T${pad2(date.getHours())}:${pad2(date.getMinutes())}`
-    : datePart;
+  return format === 'datetime' ? `${datePart}T${pad2(date.getHours())}:${pad2(date.getMinutes())}` : datePart;
 }
 
 /**

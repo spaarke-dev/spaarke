@@ -229,9 +229,7 @@ function projectOptions(optionSet: any): OptionSetOption[] | undefined {
   // Client-API "key:value pair" bag — `{ 1: 'Yes', 0: 'No' }`. Detected only
   // when the value is a plain object whose keys are all numeric and whose
   // values are all primitives (never objects, which would be the Web-API shape).
-  const options: any[] | undefined = Array.isArray(optionSet)
-    ? optionSet
-    : (optionSet?.Options ?? optionSet?.options);
+  const options: any[] | undefined = Array.isArray(optionSet) ? optionSet : (optionSet?.Options ?? optionSet?.options);
 
   if (!Array.isArray(options)) {
     if (typeof optionSet === 'object') {
@@ -281,8 +279,7 @@ function projectOptions(optionSet: any): OptionSetOption[] | undefined {
  * options — the root cause of the RecordHeader v1.1.0 UAT defect.
  */
 function projectAttribute(attr: any): EntityAttributeMetadata {
-  const attributeType =
-    normalizeAttributeType(attr?.AttributeType ?? attr?.attributeType) ?? UNKNOWN_ATTRIBUTE_TYPE;
+  const attributeType = normalizeAttributeType(attr?.AttributeType ?? attr?.attributeType) ?? UNKNOWN_ATTRIBUTE_TYPE;
 
   // Format is most relevant for String attributes; preserve when present.
   const format =

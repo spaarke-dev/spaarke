@@ -307,8 +307,7 @@ export function readFormControlOrder(): IFormControlProjection[] {
       // `"date"` / `"datetime"` — the string the Client API metadata does NOT
       // give us. Normalized here so downstream only ever sees the Web-API
       // vocabulary the resolver compares against.
-      format =
-        typeof attribute?.getFormat === 'function' ? normalizeFormFormat(attribute.getFormat()) : undefined;
+      format = typeof attribute?.getFormat === 'function' ? normalizeFormFormat(attribute.getFormat()) : undefined;
     } catch {
       requiredLevel = undefined;
       format = undefined;

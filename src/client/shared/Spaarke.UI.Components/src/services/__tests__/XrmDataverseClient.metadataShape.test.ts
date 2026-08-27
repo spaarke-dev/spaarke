@@ -219,10 +219,7 @@ describe('XrmDataverseClient — metadata transport (RC-1)', () => {
     xrm.Utility!.getEntityMetadata.mockResolvedValue(CLIENT_API_PAYLOAD);
     (window as any).Xrm = xrm;
 
-    await new XrmDataverseClient().retrieveEntityMetadata('sprk_project', [
-      'sprk_openeddate',
-      'sprk_projecttype_ref',
-    ]);
+    await new XrmDataverseClient().retrieveEntityMetadata('sprk_project', ['sprk_openeddate', 'sprk_projecttype_ref']);
 
     expect(xrm.Utility!.getEntityMetadata).toHaveBeenCalledWith('sprk_project', [
       // normalized: de-duplicated + sorted
