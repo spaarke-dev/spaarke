@@ -1,8 +1,73 @@
 # Current Task State — `unified-access-control-r2`
 
-> **Last Updated**: 2026-08-27 (**Wave A dispatched** — 6 agents; batch 073/079/075 still unmerged)
+> **Last Updated**: 2026-08-27 (by `context-handoff`) — **Wave A COMPLETE 6/6, nothing merged**
 > **Recovery**: read "Quick Recovery" first. History is in [`tasks/TASK-INDEX.md`](tasks/TASK-INDEX.md),
 > the per-task `.poml` files, and `notes/`. "Full State (Detailed)" below is retained history.
+
+---
+
+## Quick Recovery (READ THIS FIRST)
+
+| Field | Value |
+|-------|-------|
+| **State** | Wave A **COMPLETE 6/6** (011·013·015·018·020·081). **NOTHING MERGED.** 10 worktree branches held. |
+| **In flight** | ONE agent: `uac-081` hardening round (provenance self-check so claim-ordering stops being a latent invariant). |
+| **Blocked on owner** | **076** resolution point · **FR-01 preview-403** fix + back-catalogue · **A-18** unbound-binding window · **ADR-038 B8** (path B amendment) · accept **P2 ownership** from compose-r8 |
+| **Next Action** | Work items 1–5 of the agreed approach — see "NEXT: THE FIVE WORK ITEMS" below. Start with #1 (post the coordination doc to compose-r8) and #4 (the two Dataverse measurements). |
+
+### The two read-first documents
+
+1. **[`notes/coordination-compose-r8-2026-08-27.md`](notes/coordination-compose-r8-2026-08-27.md)** — cross-project
+   contract. Conflict register, merge order, the parent-child model, and **§6's three unspecified points**
+   (one security-critical). **Not yet delivered to compose-r8.**
+2. **[`notes/wave2-parallel-merge-plan.md`](notes/wave2-parallel-merge-plan.md)** — the integration checklist.
+   §§A1–A16 cover Wave A. 13 ArchTest edits, census 111→110, 8+ follow-ups.
+
+### 🔴 NEXT: THE FIVE WORK ITEMS (owner-approved 2026-08-27)
+
+1. **Deliver the coordination doc to compose-r8** — PR #832 / #806 comment or their notes. Contains:
+   `UploadEndpoints.cs` deletion (their fix there is moot) · merge order (#832 FIRST) · the 71-vs-30
+   claim-read gap · the "cascade" vocabulary split · parent-child ownership + §6's three gaps.
+2. **081 hardening** — in flight. On return, verify the collapsed-read test fails against its PREVIOUS
+   commit; if not, the risk model is wrong.
+3. **File the parent-fallback task** (new Phase 0c) — filter-level, Type 1 scoped, applies the parent's
+   **vetoes** (§6.1), states the two-parent rule (§6.2), records that it does **not** cover orphans (§6.3).
+   Closes FR-01's incident, unblocks compose-r8's P2, needs no ADR amendment.
+4. **Two Dataverse measurements** (minutes, gate several decisions):
+   **(a)** depth of `prvReadsprk_Document` per role — the census in `design.md:544` covers only
+   `prvReadsprk_Project`/`_Matter`, so this is unmeasured; **(b)** the business unit of the
+   `# mi-bff-api-dev` application user. Together they decide whether FR-01's 403 is MI-ownership or a
+   `RetrievePrincipalAccess` failure (both return a byte-identical fail-closed 403), and whether §5.2's BU
+   restructure would break every MI-owned record.
+5. **Then**: #832 merges → we merge master → merge 10 worktrees (needs **076**) → seed **task 082** census
+   → **047** live validation. Also pull **050/052** forward (050 has NO deps) and decide whether **030**
+   starts now, since all of Phase 1 sits behind it.
+
+### Files modified this session (all committed + pushed through `095ca537c`)
+
+- `notes/coordination-compose-r8-2026-08-27.md` — **new**, the cross-project contract
+- `tasks/082-caller-identity-primitive-census.poml` — **new**, the §11 ratchet
+- `notes/wave2-parallel-merge-plan.md` — §§A1–A16 (Wave A findings)
+- `spec.md` — FR-17 corrections (FR-25→NFR-03; both dead filters; the A-23 always-deny retraction)
+- `.claude/FAILURE-MODES.md` — **G-12** (stale assembly behind a truthful "up-to-date" build)
+- `.claude/constraints/azure-deployment.md` — publish-size five-field convention made binding
+- `.claude/CHANGELOG.md` — entries for both `.claude/` changes
+- `src/.../Membership/IIdentityNormalizationService.cs` — removed the load-bearing false security claim
+- `tasks/{024,043,025}-*.poml` — carry-forward constraints from 020/015/011
+- `tasks/TASK-INDEX.md` — Wave A → 🔄, task 082 filed
+
+### Critical context
+
+**Every agent worktree was cut from `master`, not this branch** (`isolation: worktree` uses the repo's
+default checkout). Verified harmless for Wave A — none of the 12 target files differ between trees — but
+agents cannot see task 074's guard and their test baselines are not ours. **Verify the base on every future
+dispatch.** Only 081 reset onto the project branch.
+
+**The batch's transferable lesson (AP-8 + G-12):** a green suite proves the code does what its tests say,
+never that the tests say the right rule. This wave found tests **pinning a defect as the contract** (015),
+a double **collapsing three entities into one** (020), a **method name asserting a security property it
+does not provide** (013's `ExtractVerifiedEmail`), and — only visible from the orchestrator position —
+**three agents reporting incoherent publish sizes while each was individually correct**.
 
 ---
 
