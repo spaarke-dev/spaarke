@@ -150,15 +150,28 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          size_bytes=$(docker image inspect "${{ env.IMAGE_NAME }}:${{ steps.tags.outputs.sha_tag }}" --format='{{.Size}}')
-          size_mb=$(( size_bytes / 1024 / 1024 ))
-          echo "Local (uncompressed layer) image size: ${size_mb} MB"
-          echo "Note: design.md's 250 MB ceiling is on the COMPRESSED registry size; this is an" \
-               "early sanity check, not the authoritative measurement -- verify against" \
-               "'az acr repository show-manifests' post-push if this step ever needs to gate."
-          echo "Sidecar image size: ${size_mb} MB (uncompressed)" >> "$GITHUB_STEP_SUMMARY"
-          if [ "$size_mb" -gt 350 ]; then
-            echo "::error::Uncompressed size ${size_mb} MB is implausibly large relative to the 250 MB compressed ceiling -- investigate before push."
+          # MEASURE the compressed size rather than guessing it from the
+          # uncompressed one. design.md §4.2a's ceiling is on the COMPRESSED
+          # registry size, and this step used to gate on a 350 MB uncompressed
+          # proxy for it -- a guess calibrated against the old base image. When the
+          # base changed the proxy went stale immediately and failed a build whose
+          # real compressed size it had never measured.
+          #
+          # `docker save | gzip` is what a registry push actually stores, so this
+          # compares like with like against the 250 MB ceiling.
+          uncompressed_mb=$(( $(docker image inspect "${{ env.IMAGE_NAME }}:${{ steps.tags.outputs.sha_tag }}" --format='{{.Size}}') / 1024 / 1024 ))
+          compressed_bytes=$(docker save "${{ env.IMAGE_NAME }}:${{ steps.tags.outputs.sha_tag }}" | gzip -c | wc -c)
+          compressed_mb=$(( compressed_bytes / 1024 / 1024 ))
+
+          echo "Uncompressed: ${uncompressed_mb} MB | Compressed: ${compressed_mb} MB (ceiling 250 MB)"
+          {
+            echo "### Sidecar image size"
+            echo "- Compressed: **${compressed_mb} MB** (design.md §4.2a ceiling: 250 MB)"
+            echo "- Uncompressed: ${uncompressed_mb} MB"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+          if [ "$compressed_mb" -gt 250 ]; then
+            echo "::error::Compressed size ${compressed_mb} MB exceeds the 250 MB ceiling (design.md §4.2a)."
             exit 1
           fi
 
