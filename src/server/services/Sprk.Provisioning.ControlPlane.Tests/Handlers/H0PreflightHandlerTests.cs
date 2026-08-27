@@ -54,14 +54,27 @@
 //       upgrade-compat-matrix-unavailable); no probe fires.
 //   (Non-upgrade runs implicitly assert the matrix is NEVER queried: the
 //   default matrix stub used by T1–T9 throws on any call.)
+//
+//   HANDLER-03 (F1) OpenAI pin-freshness — Wave 2.5 live-impl-replaces-scaffold:
+//   H03-A Stub-probe test proves H0 rejection-code mapping:
+//         PreflightCheckNames.OpenAiPinFreshness → "quota-openai-pin-stale".
+//   H03-B Real-probe end-to-end test wires ArmOpenAiPinFreshnessProbe (real
+//         Azure.ResourceManager.CognitiveServices SDK) against a fake ARM HTTP
+//         transport returning lifecycleStatus="Deprecating" for gpt-4o@2024-08-06;
+//         asserts H0 returns Failure(Resumable, "quota-openai-pin-stale") with
+//         model name + pinned version in the diagnostic + evidence payload.
+//         Proves the probe genuinely reaches ARM (URL asserted) — closes the
+//         "verify probe is not stubbed" gap called out on the punchlist.
 // -----------------------------------------------------------------------------
 
+using System.Net;
 using System.Text.Json;
 using FluentAssertions;
 using Microsoft.Extensions.Logging.Abstractions;
 using Sprk.Provisioning.ControlPlane.Enqueue;
 using Sprk.Provisioning.ControlPlane.Handlers;
 using Sprk.Provisioning.ControlPlane.Handlers.Preflight;
+using Sprk.Provisioning.ControlPlane.Handlers.RuntimeReferences;
 using Sprk.Provisioning.ControlPlane.Models;
 using Sprk.Provisioning.ControlPlane.Repositories;
 using Xunit;
@@ -402,6 +415,208 @@ public sealed class H0PreflightHandlerTests
         probes.All(p => ((FakeProbe)p).CallCount == 0).Should().BeTrue();
         enqueuer.Sent.Should().BeEmpty();
         repo.LastWrittenRun!.Status.Should().Be(RunStatus.Failed);
+    }
+
+    // ---------- HANDLER-03 (F1) OpenAiPinFreshness → quota-openai-pin-stale ----------
+    //
+    // Wave 2.5 live-impl-replaces-scaffold coverage (pre-dispatch audit
+    // 2026-08-27 punchlist HANDLER-03). Wave 2 landed the probe + the H0
+    // BuildRejectionCode case + probe-level Evaluate() unit tests but had NO
+    // handler-level integration proof that a Deprecating pin flows through
+    // H0PreflightHandler as Failure(Resumable, "quota-openai-pin-stale", ...).
+    // These two tests close that gap:
+    //   * H03-A — stub-probe test proves the H0 rejection-code mapping
+    //     verbatim (parity with the T4–T7 [Theory] but for the fifth probe).
+    //     The stub returns Passed=false; H0 must map CheckName
+    //     "OpenAiPinFreshness" → RejectionCode "quota-openai-pin-stale".
+    //   * H03-B — real-probe + fake-ARM-transport end-to-end test proves
+    //     ArmOpenAiPinFreshnessProbe genuinely calls the Azure Resource
+    //     Manager `Microsoft.CognitiveServices/.../models` endpoint (not a
+    //     hard-coded Passed), correctly parses lifecycleStatus="Deprecating"
+    //     on a real ADR-020-pinned model, and that H0 surfaces the per-pin
+    //     diagnostic (model name + pinned version) verbatim through the
+    //     ErrorDetail + preflight-quota-openai-pin-stale gate-state evidence.
+    //     Parity with ArmCognitiveServicesTpmProbeTests.CheckAsync_CallsRealArmUsageEndpoint;
+    //     reuses the shared ArmSdkTestFakes (CLAUDE.md §11 — extend, don't
+    //     duplicate).
+
+    [Fact]
+    public async Task OpenAiPinFreshnessProbeFailure_H0MapsToQuotaOpenAiPinStaleRejectionCode()
+    {
+        // Arrange — five probes, only the pin-freshness one fails. Fake stub
+        // returns the exact per-pin diagnostic shape the real probe emits so
+        // the assertion on ErrorDetail is meaningful.
+        var run = BuildRunWithTenant();
+        var repo = new FakeRepository(run, etag: "etag-h03a");
+        var enqueuer = new FakeEnqueuer();
+        var probes = new IPreflightQuotaProbe[]
+        {
+            FakeProbe.Pass(PreflightCheckNames.AzureOpenAiTpmHeadroom),
+            FakeProbe.Pass(PreflightCheckNames.DataverseEnvCreationRate),
+            FakeProbe.Pass(PreflightCheckNames.SubscriptionVCpuQuota),
+            FakeProbe.Pass(PreflightCheckNames.SpeCertBootstrap),
+            FakeProbe.Fail(
+                PreflightCheckNames.OpenAiPinFreshness,
+                "ADR-020 pinned OpenAI model freshness check FAILED for 1 of 3 pinned deployments in region 'westus3'. " +
+                "gpt-4o@2024-08-06: lifecycleStatus='Deprecating' inferenceDeprecationOn=2026-11-30T00:00:00Z. " +
+                "ADR-020 pin bump required BEFORE next provisioning run (H2a would otherwise fail with ServiceModelDeprecated)."),
+        };
+        var handler = CreateHandler(repo, enqueuer, probes);
+
+        // Act
+        var result = await handler.HandleAsync(BuildEnvelope(), CancellationToken.None);
+
+        // Assert — Failure(Resumable, quota-openai-pin-stale) with the probe
+        // diagnostic surfaced verbatim + Cosmos state marked Failed with the
+        // exact gate-state key.
+        var failure = result.Should().BeOfType<HandlerResult.Failure>().Subject;
+        failure.Class.Should().Be(FailureClass.Resumable);
+        failure.RejectionCode.Should().Be("quota-openai-pin-stale");
+        failure.Diagnostic.Should().Contain("gpt-4o@2024-08-06")
+            .And.Contain("Deprecating")
+            .And.Contain("ADR-020 pin bump");
+
+        repo.LastWrittenRun.Should().NotBeNull();
+        repo.LastWrittenRun!.Status.Should().Be(RunStatus.Failed);
+        repo.LastWrittenRun.ErrorDetail.Should().Contain("quota-openai-pin-stale");
+        repo.LastWrittenRun.GateStates.Should().ContainKey("preflight-quota-openai-pin-stale");
+        enqueuer.Sent.Should().BeEmpty("H0 blocks the run on any preflight probe failure — no H0.5 dispatch");
+    }
+
+    [Fact]
+    public async Task OpenAiPinFreshness_EndToEnd_RealProbeAgainstDeprecatingArmResponse_H0FailsWithQuotaOpenAiPinStale()
+    {
+        // Arrange — a run with region + subscriptionId + tenantId so the real
+        // probe can dispatch its ARM SDK call.
+        const string region = "westus3";
+        const string subscriptionId = "22222222-3333-4444-5555-666666666666";
+
+        var run = BuildRunWithTenant();
+        run.Parameters.NonSecret["region"] = region;
+        run.Parameters.NonSecret["subscriptionId"] = subscriptionId;
+        var repo = new FakeRepository(run, etag: "etag-h03b");
+        var enqueuer = new FakeEnqueuer();
+
+        // Fake ARM transport returns a `Microsoft.CognitiveServices/models`
+        // page where the gpt-4o@2024-08-06 pin is scheduled to deprecate and
+        // its lifecycleStatus is "Deprecating". Inference-deprecation date is
+        // set far in the future (500 days) so the "window-expired" branch
+        // does NOT also fire — the failure is unambiguously the deprecating
+        // status. Other two pins are healthy so exactly ONE pin fails.
+        var pathHits = new List<string>();
+        var armHandler = ArmSdkTestFakes.NewHandler(request =>
+        {
+            var path = request.RequestUri!.AbsolutePath;
+            pathHits.Add(path);
+            path.Should().Contain("Microsoft.CognitiveServices",
+                "the probe MUST call the real Azure.ResourceManager.CognitiveServices endpoint " +
+                "(SubscriptionResource.GetModelsAsync), not a hard-coded stub");
+            path.Should().Contain("/models",
+                "the probe MUST call the models-list endpoint per Azure.ResourceManager.CognitiveServices " +
+                "1.5.2 XML docs: `/subscriptions/{sub}/providers/Microsoft.CognitiveServices/locations/{location}/models`");
+
+            var farFutureIso = DateTimeOffset.UtcNow.AddDays(500).ToString("O");
+            return ArmSdkTestFakes.JsonResponse(HttpStatusCode.OK, $$"""
+                {
+                  "value": [
+                    {
+                      "kind": "OpenAI",
+                      "skuName": "Standard",
+                      "model": {
+                        "publisher": "OpenAI",
+                        "format": "OpenAI",
+                        "name": "gpt-4o",
+                        "version": "2024-08-06",
+                        "skus": [],
+                        "deprecation": { "inference": "{{farFutureIso}}" },
+                        "lifecycleStatus": "Deprecating"
+                      }
+                    },
+                    {
+                      "kind": "OpenAI",
+                      "skuName": "Standard",
+                      "model": {
+                        "publisher": "OpenAI",
+                        "format": "OpenAI",
+                        "name": "gpt-4o-mini",
+                        "version": "2024-07-18",
+                        "skus": [],
+                        "lifecycleStatus": "GenerallyAvailable"
+                      }
+                    },
+                    {
+                      "kind": "OpenAI",
+                      "skuName": "Standard",
+                      "model": {
+                        "publisher": "OpenAI",
+                        "format": "OpenAI",
+                        "name": "text-embedding-3-large",
+                        "version": "1",
+                        "skus": [],
+                        "lifecycleStatus": "GenerallyAvailable"
+                      }
+                    }
+                  ]
+                }
+                """);
+        });
+
+        var realPinnedProbe = new ArmOpenAiPinFreshnessProbe(
+            ArmSdkTestFakes.NewArmClient(armHandler),
+            PinnedModelCatalog.Models,
+            TimeProvider.System,
+            NullLogger<ArmOpenAiPinFreshnessProbe>.Instance);
+
+        // Compose alongside the four other probes as no-ops so the H0
+        // orchestration decision is driven by the pin-freshness verdict
+        // alone.
+        var probes = new IPreflightQuotaProbe[]
+        {
+            FakeProbe.Pass(PreflightCheckNames.AzureOpenAiTpmHeadroom),
+            FakeProbe.Pass(PreflightCheckNames.DataverseEnvCreationRate),
+            FakeProbe.Pass(PreflightCheckNames.SubscriptionVCpuQuota),
+            FakeProbe.Pass(PreflightCheckNames.SpeCertBootstrap),
+            realPinnedProbe,
+        };
+        var handler = CreateHandler(repo, enqueuer, probes);
+
+        // Act
+        var result = await handler.HandleAsync(BuildEnvelope(), CancellationToken.None);
+
+        // Assert — the probe truly reached the ARM SDK, and the H0 handler
+        // translated the probe verdict into the exact rejection code +
+        // diagnostic + gate-state the punchlist mandates.
+        pathHits.Should().NotBeEmpty(
+            "the real ArmOpenAiPinFreshnessProbe must dispatch at least one HTTP call to Azure " +
+            "Resource Manager — proving CheckAsync is NOT stubbed");
+
+        var failure = result.Should().BeOfType<HandlerResult.Failure>().Subject;
+        failure.Class.Should().Be(FailureClass.Resumable);
+        failure.RejectionCode.Should().Be("quota-openai-pin-stale");
+        // Diagnostic MUST carry the specific ADR-020 pinned model name +
+        // pinned version that failed so the operator's remediation is
+        // deterministic (F1 lesson: "F1 pin freshness probe" must tell the
+        // operator WHICH pin to bump).
+        failure.Diagnostic.Should().Contain("gpt-4o@2024-08-06")
+            .And.Contain("Deprecating");
+
+        // Cosmos state — Failed + gate-state keyed by rejection code, with
+        // per-pin evidence payload the operator can inspect via the L2 GET
+        // /api/runs/{id} without pulling logs.
+        repo.LastWrittenRun.Should().NotBeNull();
+        repo.LastWrittenRun!.Status.Should().Be(RunStatus.Failed);
+        repo.LastWrittenRun.ErrorDetail.Should().Contain("quota-openai-pin-stale");
+        repo.LastWrittenRun.GateStates.Should().ContainKey("preflight-quota-openai-pin-stale");
+
+        var evidence = repo.LastWrittenRun.GateStates["preflight-quota-openai-pin-stale"].Evidence;
+        evidence.Should().NotBeNull("the H0 handler MUST persist the probe's headroom payload as gate-state evidence");
+        var evidenceJson = evidence!.Value.GetRawText();
+        evidenceJson.Should().Contain("gpt-4o@2024-08-06",
+            "the per-pin breakdown must identify the specific failing pin by name + version");
+        evidenceJson.Should().Contain("deprecating-status",
+            "the machine-stable reason code must accompany the human-readable diagnostic");
+
+        enqueuer.Sent.Should().BeEmpty("H0 blocks the run on any preflight probe failure — no H0.5 dispatch");
     }
 
     // ---------- helpers ----------
