@@ -148,6 +148,17 @@ bug structurally impossible rather than merely fixed.
 
 #### ⛔ REVISED 2026-08-27 — cascade is NOT the mechanism. Do not implement it.
 
+> **Vocabulary (adopted 2026-08-27 at `unified-access-control-r2`'s request — their §4).** "Cascade" was
+> naming two different mechanisms across the two projects and we nearly reached opposite conclusions from
+> the same word. Throughout this document:
+>
+> - **"Parental cascade"** = the Dataverse-native relationship feature (`Reparent + Share = Cascade All`).
+>   ❌ Correctly rejected — role-scope and privilege-depth access never inherits, and that is the normal case.
+> - **"parent-fallback" / "inherited term"** = the BFF-computed mechanism (evaluate the right on the parent).
+>   ✅ Still the model — and it is **term 5 of `unified-access-control-r2`'s evaluator**, which that project
+>   owns (Phase 3, tasks 050–058, FR-26/FR-27). We are NOT implementing it in R8.
+
+
 An earlier draft of this plan proposed Parental/configurable cascading on `sprk_matter_document`.
 **That was wrong**, and the correction is recorded here rather than silently replaced because the
 reasoning matters:
@@ -340,8 +351,8 @@ distinguish "working" from "vacuous".
 | Q1 | ~~Which lookup is the filing parent?~~ **ANSWERED**: `sprk_matter` / `sprk_project` are the filing parents; `sprk_relatedmatter` / `sprk_relatedproject` are invoice-flow references that no first-party code writes. | closed |
 | Q2 | ~~Should Delete cascade?~~ **MOOT** — cascade dropped entirely (D-2). Separately: the ERD says `Delete=Restrict` while the solution XML says `RemoveLink`; reconcile the docs. | doc fix |
 | Q3 | What is the rule for orphan documents (null parent)? | **owner decision** |
-| Q4 | Confirm the `WorkspaceLayoutEndpoints` ownership bypass empirically before asserting it | A-2 |
-| Q6 | Does parent-fallback authorization apply to **writes** or reads only? | **owner decision** (D-3t) |
-| Q7 | Orphan-document rule — deny, owner-only, or container-level fallback? Dominant case, not an edge. | **owner decision** (D-2t) |
+| Q4 | ~~Confirm the `WorkspaceLayoutEndpoints` ownership bypass~~ **ANSWERED 2026-08-27** — confirmed, and worse than filed: THREE independent breaks (list disclosure via TryParse-gated condition; by-id guard inert because `ownerid` was absent from `SelectColumns`, gating UPDATE+DELETE too; and no row was ever user-owned because `CreateLayoutAsync` writes app-only). Fixed under owner option A in `7db7e91e3`. | closed |
+| Q6 | ~~Does parent-fallback apply to writes or reads only?~~ **ANSWERED by `unified-access-control-r2` §5**: term 5 is "child takes its core ancestor's rights" — the SAME right, no mapping, no reduction. No read/write fork. | closed |
+| Q7 | Orphan-document rule — deny, owner-only, or container-level fallback? Dominant case, not an edge. **Q3 is a duplicate of this row; collapsed here.** `unified-access-control-r2` §6.3 reaches the same conclusion independently: inheritance gives orphans nothing, and neither project had a task for it. They are filing one. | **owner decision** (D-2t) · now co-owned |
 | Q8 | Which ownership regime for creation — server paths make SP-owned rows, client paths make user-owned. | **owner decision** (D-5t) |
 | Q5 | Does MIW 4.14.2 set `TokenValidationParameters.RoleClaimType` internally? Decides whether ControlPlane 403s after an E flip. Cannot be answered from this repo — verify at runtime. | E |
