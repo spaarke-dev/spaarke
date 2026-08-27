@@ -266,6 +266,79 @@ public sealed class CallerIdentityTests
         CallerIdentity.FromPrincipal(principal).Kind.Should().Be(CallerKind.Indeterminate);
     }
 
+    // ============ PR #832 hardening: the oid-vs-NameIdentifier collapse ============
+    //
+    // Sibling project spaarkeai-compose-r8 (PR #832) verified four sites in this BFF that resolve the
+    // caller as Entra `sub` where Dataverse requires `oid`, and that the two shapes which look MOST
+    // correct are the broken ones. If someone "harmonizes" this classifier's objectId read to
+    // `oid ?? NameIdentifier`, then in the mapped world objectId and subject BOTH resolve from
+    // NameIdentifier, `sub == oid` becomes always-true, and every caller without an scp claim is
+    // classified Application. These three tests pin the three defences that make that structural.
+
+    [Fact]
+    public void TheBugShapeFromPr832_OidAbsentNameIdentifierPresent_IsIndeterminate_NotApplication()
+    {
+        // The exact principal shape PR #832 describes: the short `oid` claim did not survive inbound
+        // mapping, and NameIdentifier (which is *sub's* mapped form, not oid's) is present. No scp.
+        var principal = Authenticated(
+            ("appid", OperatorAppId),
+            (ClaimTypes.NameIdentifier, ServicePrincipalObjectId),
+            ("tid", TenantId));
+
+        var caller = CallerIdentity.FromPrincipal(principal);
+
+        caller.Kind.Should().Be(CallerKind.Indeterminate);
+        caller.IsApplication.Should().BeFalse(
+            "with no resolvable oid there is no sub/oid pair to compare, so no app-only determination " +
+            "can be made — this must not degrade into 'Application'");
+        caller.ObjectId.Should().BeNull(
+            "NameIdentifier must NEVER satisfy the oid read — it is sub's mapped form");
+    }
+
+    [Fact]
+    public void ObjectIdAndSubjectClaimTypes_AreDisjoint_SoTheTwoReadsCannotCollapse()
+    {
+        // The structural defence. Overlapping these two lists is the single edit that would make
+        // `sub == oid` a self-comparison; this test turns that edit into a build failure.
+        CallerIdentity.ObjectIdClaimTypes.Should().NotIntersectWith(
+            CallerIdentity.SubjectClaimTypes,
+            "if any claim type appears in BOTH lists, the sub == oid equality in rule (5) can compare " +
+            "one claim against itself and is then always true (PR #832)");
+
+        CallerIdentity.ObjectIdClaimTypes.Should().NotContain(
+            ClaimTypes.NameIdentifier,
+            "NameIdentifier is sub's mapped form, NOT oid's — oid's mapped form is " +
+            "http://schemas.microsoft.com/identity/claims/objectidentifier");
+
+        CallerIdentity.SubjectClaimTypes.Should().Contain(
+            ClaimTypes.NameIdentifier, "NameIdentifier belongs to the SUBJECT list");
+
+        CallerIdentity.ObjectIdClaimTypes.Should().Contain(
+            "http://schemas.microsoft.com/identity/claims/objectidentifier",
+            "the oid read must cover the mapped form, or it silently resolves null when mapping is on");
+    }
+
+    [Fact]
+    public void DelegatedScopeWins_EvenWhenSubEqualsOid_RegardlessOfBranchOrder()
+    {
+        // Pins the OUTCOME that statement order used to protect. A token carrying a delegated scope AND
+        // sub == oid must be UserDelegated: every application branch now states `!hasDelegatedScope` in
+        // its own condition, so this holds even if the branches are reordered. Removing BOTH the
+        // conjunction and the ordering turns this red.
+        var principal = Authenticated(
+            ("appid", OperatorAppId),
+            ("scp", "user_impersonation"),
+            ("oid", ServicePrincipalObjectId),
+            ("sub", ServicePrincipalObjectId));
+
+        var caller = CallerIdentity.FromPrincipal(principal);
+
+        caller.Kind.Should().Be(CallerKind.UserDelegated);
+        caller.IsApplication.Should().BeFalse(
+            "a delegated scope claim means a user may be behind the token; sub == oid must not " +
+            "override that, whatever order the branches appear in");
+    }
+
     // ---------------------------------------------------------------- helpers
 
     /// <summary>

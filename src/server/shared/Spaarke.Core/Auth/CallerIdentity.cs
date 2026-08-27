@@ -56,7 +56,52 @@ public enum CallerKind
 /// names survive), but the mapping is process-global state
 /// (<c>Microsoft.IdentityModel.Tokens.DefaultInboundClaimTypeMap</c>) that other components can flip,
 /// so reading only one form is a latent, environment-dependent bug. This mirrors the convention already
-/// used across the BFF (e.g. <c>ChatDocumentEndpoints</c>, <c>AuditEnrichmentMiddleware</c>).</para>
+/// used across the BFF (e.g. <c>ChatDocumentEndpoints</c>).</para>
+///
+/// <para>
+/// ⚠️⚠️ <b>DO NOT "HARMONIZE" THE <c>oid</c> READ WITH THE REST OF THE BFF. READ THIS FIRST.</b> ⚠️⚠️
+/// </para>
+///
+/// <para><b><c>objectId</c> MUST NOT be read via <see cref="ClaimTypes.NameIdentifier"/> under any
+/// circumstance.</b> <see cref="ClaimTypes.NameIdentifier"/>
+/// (<c>http://schemas.xmlsoap.org/ws/2005/05/identity/claims/nameidentifier</c>) is the mapped form of
+/// <c>sub</c> — <b>not</b> of <c>oid</c>. <c>oid</c>'s mapped form is
+/// <c>http://schemas.microsoft.com/identity/claims/objectidentifier</c>. The correct pairings are fixed
+/// in <see cref="ObjectIdClaimTypes"/> and <see cref="SubjectClaimTypes"/>, which are asserted DISJOINT
+/// by a unit test.</para>
+///
+/// <para><b>This is not hypothetical — it has already shipped four times in this BFF.</b> Sibling project
+/// <c>spaarkeai-compose-r8</c> (PR #832) verified four sites here that resolve the caller as Entra
+/// <c>sub</c> where Dataverse requires <c>oid</c>, and found that <b>the two shapes that look MOST
+/// correct are the broken ones</b>:</para>
+/// <list type="bullet">
+///   <item><c>FindFirst("oid") ?? FindFirst(ClaimTypes.NameIdentifier)</c> resolves <b><c>sub</c></b> —
+///     the short <c>oid</c> claim does not survive inbound mapping, so it falls through to
+///     <c>NameIdentifier</c>, which is <c>sub</c>'s mapped form.</item>
+///   <item><c>FindFirst("oid")</c> alone resolves <b>null</b> in the mapped world.</item>
+/// </list>
+///
+/// <para><b>Why that would be catastrophic HERE specifically.</b> If <c>objectId</c> were changed to fall
+/// back to <c>NameIdentifier</c>, then in the mapped world <c>objectId</c> and <c>subject</c> would BOTH
+/// resolve from <c>NameIdentifier</c> — the <c>sub == oid</c> equality in rule (5) would be comparing one
+/// claim against ITSELF, would be <b>always true</b>, and every caller lacking a delegated scope claim
+/// would be classified <see cref="CallerKind.Application"/>. Combined with an <c>appid</c> allow-list
+/// that is exactly the operator bypass this type exists to prevent.</para>
+///
+/// <para>Three independent defences make that structural rather than accidental. Statement ORDER is
+/// deliberately not one of them:</para>
+/// <list type="number">
+///   <item><b>Provenance self-check</b> (rule 5) — the classifier records WHICH claim type each value
+///     resolved from. If <c>subject</c> and <c>objectId</c> came from the same claim type, the equality
+///     carries no information and the result is <see cref="CallerKind.Indeterminate"/> (deny), never
+///     <c>Application</c>. This detects the mistake itself, not one of its downstream consequences.</item>
+///   <item><b>Explicit conjunction</b> — every application branch requires
+///     <c>!hasDelegatedScope</c> in its own condition, so no application classification depends on an
+///     earlier <c>return</c> having already fired.</item>
+///   <item><b>Disjointness test</b> — <see cref="ObjectIdClaimTypes"/> ∩
+///     <see cref="SubjectClaimTypes"/> = ∅ is asserted by a test, so overlapping the two lists fails the
+///     build at the moment the mistake is made.</item>
+/// </list>
 /// </summary>
 public sealed class CallerIdentity
 {
@@ -81,6 +126,26 @@ public sealed class CallerIdentity
 
     /// <summary><c>idtyp</c> value Entra emits for a user token.</summary>
     private const string IdentityTypeUser = "user";
+
+    /// <summary>
+    /// Claim types consulted, in order, to resolve the caller's <c>oid</c> (directory object id).
+    ///
+    /// <para><b>MUST remain disjoint from <see cref="SubjectClaimTypes"/>.</b> Exposed publicly for
+    /// exactly one reason: so a unit test can assert that disjointness, making the
+    /// <c>oid ?? NameIdentifier</c> anti-pattern a BUILD FAILURE rather than a silent authorization
+    /// bypass. See the ⚠️ block on this type. Adding
+    /// <see cref="ClaimTypes.NameIdentifier"/> here is the specific mistake PR #832 documents.</para>
+    /// </summary>
+    public static readonly IReadOnlyList<string> ObjectIdClaimTypes =
+        [ClaimObjectId, ClaimObjectIdUri];
+
+    /// <summary>
+    /// Claim types consulted, in order, to resolve the caller's <c>sub</c> (subject).
+    /// <see cref="ClaimTypes.NameIdentifier"/> belongs HERE — it is <c>sub</c>'s mapped form, not
+    /// <c>oid</c>'s. MUST remain disjoint from <see cref="ObjectIdClaimTypes"/>.
+    /// </summary>
+    public static readonly IReadOnlyList<string> SubjectClaimTypes =
+        [ClaimSubject, ClaimTypes.NameIdentifier];
 
     private CallerIdentity(
         CallerKind kind,
@@ -170,9 +235,14 @@ public sealed class CallerIdentity
         }
 
         var applicationId = FirstNonBlank(principal, ClaimAppId, ClaimAzp, ClaimAppIdUri);
-        var objectId = FirstNonBlank(principal, ClaimObjectId, ClaimObjectIdUri);
         var tenantId = FirstNonBlank(principal, ClaimTenantId, ClaimTenantIdUri, ClaimTenantIdAlt);
         var identityType = FirstNonBlank(principal, ClaimIdentityType);
+
+        // Resolved WITH PROVENANCE — the claim type each value actually came from is needed by rule (5)
+        // to tell a real sub/oid equality from one where both reads collapsed onto the same claim.
+        var objectIdResolution = FirstNonBlankWithProvenance(principal, ObjectIdClaimTypes);
+        var subjectResolution = FirstNonBlankWithProvenance(principal, SubjectClaimTypes);
+        var objectId = objectIdResolution.Value;
 
         // (2) POSITIVE user-side determination FIRST. Presence of a delegated scope claim is checked by
         //     presence (not value), matching the pre-existing BFF convention: an empty scp is still a
@@ -200,18 +270,46 @@ public sealed class CallerIdentity
         }
 
         // (4) Strongest app-only signal — optional claim, expected absent in this deployment.
-        if (string.Equals(identityType, IdentityTypeApp, StringComparison.OrdinalIgnoreCase))
+        //
+        //     `!hasDelegatedScope` is stated EXPLICITLY rather than inherited from the early return in
+        //     rule (2). Both are kept on purpose: if someone reorders these branches, this condition
+        //     still refuses to classify a delegated-scope token as an application. Statement order is
+        //     belt; this conjunction is braces.
+        if (!hasDelegatedScope
+            && string.Equals(identityType, IdentityTypeApp, StringComparison.OrdinalIgnoreCase))
         {
             return new CallerIdentity(
                 CallerKind.Application, applicationId, objectId, tenantId, "idtyp=app");
         }
 
         // (5) Structural app-only signal — always available because sub and oid are core claims.
-        var subject = FirstNonBlank(principal, ClaimSubject, ClaimTypes.NameIdentifier);
-        if (!string.IsNullOrWhiteSpace(subject)
+        //     Same explicit `!hasDelegatedScope` conjunction as rule (4), for the same reason.
+        var subject = subjectResolution.Value;
+        if (!hasDelegatedScope
+            && !string.IsNullOrWhiteSpace(subject)
             && !string.IsNullOrWhiteSpace(objectId)
             && string.Equals(subject, objectId, StringComparison.OrdinalIgnoreCase))
         {
+            // PROVENANCE SELF-CHECK. `sub == oid` is only evidence of an app-only token when the two
+            // values came from DIFFERENT claims. If both reads resolved from the SAME claim type, we did
+            // not compare sub against oid — we compared one claim against itself, which is trivially
+            // true and says nothing about caller kind. That is precisely the state the
+            // `oid ?? NameIdentifier` anti-pattern produces (PR #832), and treating it as an app-only
+            // determination would hand the operator capability to any token lacking an scp claim.
+            //
+            // Unreachable while ObjectIdClaimTypes and SubjectClaimTypes stay disjoint — which a unit
+            // test asserts. It is a tripwire for the refactor, deliberately kept live at runtime so the
+            // failure mode is a DENIAL rather than a bypass even if that test is ever deleted.
+            if (string.Equals(
+                    objectIdResolution.ClaimType, subjectResolution.ClaimType, StringComparison.Ordinal))
+            {
+                return new CallerIdentity(
+                    CallerKind.Indeterminate, applicationId, objectId, tenantId,
+                    $"sub and oid both resolved from the same claim type " +
+                    $"('{objectIdResolution.ClaimType}') — the equality is vacuous, so no app-only " +
+                    "determination can be made (see PR #832 / the oid-vs-NameIdentifier warning)");
+            }
+
             return new CallerIdentity(
                 CallerKind.Application, applicationId, objectId, tenantId,
                 "sub equals oid — app-only token shape");
@@ -229,16 +327,35 @@ public sealed class CallerIdentity
     /// because every consumer here treats a blank claim as no claim.
     /// </summary>
     private static string? FirstNonBlank(ClaimsPrincipal principal, params string[] claimTypes)
+        => FirstNonBlankWithProvenance(principal, claimTypes).Value;
+
+    /// <summary>
+    /// Same resolution as <see cref="FirstNonBlank"/>, but ALSO reports which claim type supplied the
+    /// value.
+    ///
+    /// <para><b>Why provenance is tracked.</b> Two independently-resolved values being equal is only
+    /// evidence about the token when they came from different claims. Returning the matched claim type
+    /// lets rule (5) distinguish a genuine <c>sub == oid</c> match from a degenerate self-comparison
+    /// caused by two lookups collapsing onto the same claim — the failure mode PR #832 documents. Without
+    /// it, that collapse is indistinguishable from a real app-only token.</para>
+    /// </summary>
+    /// <returns>
+    /// The first non-blank value and its claim type, or <c>(null, null)</c> when none match. "Absent" and
+    /// "present but blank" are deliberately collapsed, because every consumer here treats a blank claim
+    /// as no claim — and a blank value must never satisfy the equality in rule (5).
+    /// </returns>
+    private static (string? Value, string? ClaimType) FirstNonBlankWithProvenance(
+        ClaimsPrincipal principal, IReadOnlyList<string> claimTypes)
     {
         foreach (var claimType in claimTypes)
         {
             var value = principal.FindFirst(claimType)?.Value;
             if (!string.IsNullOrWhiteSpace(value))
             {
-                return value;
+                return (value, claimType);
             }
         }
 
-        return null;
+        return (null, null);
     }
 }
