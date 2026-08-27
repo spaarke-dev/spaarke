@@ -1132,14 +1132,42 @@ describe('RecordHeaderView — a lookup is editable once targets resolve', () =>
     attributes: { sprk_projecttype: { attributeType: 'Lookup', displayName: 'Project Type' } },
   };
 
+  // ═════════════════════════════════════════════════════════════════════════
+  // NOTE ON THE ASSERTION FORM (changed 2026-08-27, unchanged in intent)
+  // ═════════════════════════════════════════════════════════════════════════
+  // These tests pin the v1.1.6 UAT fix: the lookup must become editable once
+  // `targets` reach the cell, from metadata OR from the form control.
+  //
+  // What "editable" LOOKS like changed when the editable path swapped from the
+  // side-pane picker to the inline dropdown. It is no longer `data-editable`
+  // on the display renderer — it is the presence of the inline field's own
+  // browse affordance. The regression being guarded is identical; only the
+  // surface that proves it moved. The negative case below is stronger than
+  // before: it now also pins that a targetless lookup FALLS BACK to the
+  // display renderer rather than rendering a search box it cannot serve.
+  //
+  // The inline field presents in TWO shapes — a search input with a "Browse
+  // <label>" button while empty, and a chip with a "Clear <label>" button once
+  // a value is committed — so "did the inline field render?" must accept
+  // either. The shared RECORD fixture populates Project Type, so the chip is
+  // the shape that actually shows up here.
+  //
+  // Matched by PREFIX, not by full label: `installXrm` makes every form control
+  // report `getLabel() => 'Form <logicalname>'`, and the form label outranks
+  // the metadata displayName — so the label here is NOT "Project Type". Pinning
+  // the exact string would tie this assertion to that fixture detail.
+  const inlineField = () => screen.queryByRole('button', { name: /^(Browse|Clear) / });
+
   it('is NOT editable when neither metadata nor the form supplies targets', async () => {
     mockRetrieveEntityMetadata.mockResolvedValue(META_NO_TARGETS);
     installXrm(['sprk_projecttype']);
 
     renderView(LAYOUT);
 
+    // Falls back to the display renderer, which reports the missing half.
     const cell = await screen.findByTestId('record-header-lookup-field');
     expect(cell.getAttribute('data-editable')).toBe('false');
+    expect(inlineField()).toBeNull();
   });
 
   it('becomes editable when the form control supplies them (the UAT fix)', async () => {
@@ -1148,8 +1176,22 @@ describe('RecordHeaderView — a lookup is editable once targets resolve', () =>
 
     renderView(LAYOUT);
 
+    // The INLINE field renders — and only renders — once a target resolves.
+    await waitFor(() => expect(inlineField()).toBeInTheDocument());
+    expect(screen.queryByTestId('record-header-lookup-field')).toBeNull();
+  });
+
+  it('renders the display renderer, not the inline one, when the layout marks it readOnly', async () => {
+    // Both halves are required. A resolved target alone must not make a
+    // read-only field editable.
+    mockRetrieveEntityMetadata.mockResolvedValue(META_NO_TARGETS);
+    installXrm(['sprk_projecttype'], { entityTypes: { sprk_projecttype: ['sprk_projecttype_ref'] } });
+
+    renderView(JSON.stringify({ _version: '1.0', fields: [{ name: 'sprk_projecttype', readOnly: true }] }));
+
     const cell = await screen.findByTestId('record-header-lookup-field');
-    await waitFor(() => expect(cell.getAttribute('data-editable')).toBe('true'));
+    expect(cell.getAttribute('data-editable')).toBe('false');
+    expect(inlineField()).toBeNull();
   });
 });
 
@@ -1294,7 +1336,8 @@ describe('RecordHeaderView — hints survive a page with no control collection',
   it('makes the lookup editable — the other half of the same regression', async () => {
     renderView(LAYOUT);
 
-    const cell = await screen.findByTestId('record-header-lookup-field');
-    await waitFor(() => expect(cell.getAttribute('data-editable')).toBe('true'));
+    // Editable now means the INLINE field rendered — see the note on assertion
+    // form in the "a lookup is editable once targets resolve" describe above.
+    await waitFor(() => expect(screen.queryByRole('button', { name: 'Browse Project Type' })).toBeInTheDocument());
   });
 });

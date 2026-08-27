@@ -71,6 +71,25 @@ export type { INumberFieldProps, NumberFieldKind } from './fields';
 // confirmed none of these five symbols collides with an existing export, so
 // all re-export un-aliased (`src/components/index.ts` does `export * from
 // './RecordHeader'`, so they surface at the top-level barrel too).
+// Inline-lookup search machinery (record-header-and-notepad-r2 FR-15a, 2026-08-27).
+//
+// The Dataverse half of an OOB-shaped inline lookup: target-table metadata
+// resolution, the OData search builder, and the single library-wide
+// `Xrm.Utility.lookupObjects` call site. Exported here (not from `services/`)
+// because it is header-renderer machinery bound to the FR-15 targets contract.
+// A repo-wide grep confirmed none of these symbols collides with an existing
+// export, so all re-export un-aliased.
+export {
+  useLookupTargetSearch,
+  searchLookupTarget,
+  openAdvancedLookup,
+  resolveLookupTargetKeys,
+  buildLookupSearchOptions,
+  escapeODataLiteral,
+  LOOKUP_SEARCH_PAGE_SIZE,
+} from './lookupSearch';
+export type { IUseLookupTargetSearchResult, ILookupTargetKeys } from './lookupSearch';
+
 export { resolveHeaderConfig, extractConfiguredAttributeNames } from './configResolution';
 export type {
   ResolvedHeaderConfig,

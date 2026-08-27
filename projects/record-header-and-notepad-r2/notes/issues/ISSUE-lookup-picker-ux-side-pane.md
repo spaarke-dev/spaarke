@@ -1,10 +1,42 @@
 # ISSUE — the lookup opens the side-pane picker, not the OOB inline dropdown
 
 > **Raised**: 2026-08-27 by owner, UAT round 5 of RecordHeader v1.1.8
-> **Status**: 🔵 **IN PROGRESS** — owner chose inline (option 2). Shared component **done** (`fff55ef3b`);
-> the RecordHeader swap itself is **not** done. Full work spec in
-> [`current-task.md`](../../current-task.md) § "RecordHeader lookup swap".
+> **Status**: ✅ **RESOLVED in v1.1.9** — shared component upgraded (`fff55ef3b`) **and** the
+> RecordHeader swapped over. **Awaiting UAT.**
 > **Severity**: low-medium — a visible departure from OOB on every lookup cell, on every entity.
+
+---
+
+## ✅ Resolution (v1.1.9, 2026-08-27)
+
+Option **2** — switch to the inline component — implemented in three parts, all in the shared
+library so every future header consumer inherits them:
+
+| part | what |
+|---|---|
+| [`components/LookupField`](../../../../src/client/shared/Spaarke.UI.Components/src/components/LookupField/LookupField.tsx) | OOB affordances (right-side browse button · modern thin scrollbar · pinned right-aligned **Advanced** · deliberately **no "+ New"**) **+ a new `span` prop**, so it drops into `FieldGrid` without R1's hand-rolled wrapper `div` |
+| [`RecordHeader/lookupSearch.ts`](../../../../src/client/shared/Spaarke.UI.Components/src/components/RecordHeader/lookupSearch.ts) **(new)** | the Dataverse half — target metadata resolution, the OData search builder, and the **single library-wide `Xrm.Utility.lookupObjects` call site** |
+| `RecordHeaderView` | picks the surface per cell: inline when editable **and** a target resolved, display renderer otherwise |
+
+**The three costed items from the work spec, as they actually landed:**
+
+1. **`onSearch`** — needed the target's `primaryNameAttribute`, so it is a real second
+   `retrieveEntityMetadata` call (page-session cached). Read from metadata, never inferred; both
+   conventions (`sprk_name` **and** `sprk_mattertypename`) are pinned by test.
+2. **`span`** — added as a **prop** on the shared component (the preferred option), not a wrapper in
+   the view. Omitting it emits no `gridColumn` at all, so the twelve flex-laid-out wizard consumers
+   are unchanged — guarded by a test.
+3. **`onAdvanced`** — routed through `openAdvancedLookup`, which is now the only place
+   `lookupObjects` is called. `RecordHeaderLookupField` was refactored to delegate to it rather than
+   keep a second copy of the G-14 `this`-binding discipline.
+
+**Docs amended in the same commit** (CLAUDE.md §6.5 path B, not a silent divergence): `spec.md`
+FR-15a + FR-26 + scope + criterion 15, and `design.md` §6.5 → new §6.5a.
+
+**Task 080 parity improved**: the "identical except lookups" caveat is **withdrawn** — both controls
+now render the same shared component, so Matter parity can be compared unqualified.
+
+---
 
 ---
 

@@ -172,5 +172,38 @@
  *   went untested. The mock is now `this`-sensitive and throws the real
  *   TypeError when detached; verified by reverting the fix (3 of 19 fail on
  *   the old code, 19 of 19 pass on the new).
+ *
+ * 1.1.9 (2026-08-27) - editable lookups now render the INLINE type-ahead
+ *   dropdown instead of the platform side pane. v1.1.8's picker worked, but it
+ *   worked by opening `Xrm.Utility.lookupObjects`, whose UX is the side pane -
+ *   and OOB Dataverse renders a lookup as an inline dropdown under the field.
+ *   A header that departs from that on every lookup cell of every entity reads
+ *   as broken rather than as different (UAT round 5).
+ *   Hosting the platform's OWN inline control is NOT possible and this was
+ *   settled empirically, so do not re-investigate: `ComponentFramework.Factory`
+ *   exposes exactly two members (`getPopupService`, `requestRender`) and there
+ *   is no public constructor for the inline lookup - it is a class the form
+ *   runtime owns. `lookupObjects` is callable only because it is a plain
+ *   function opening the ADVANCED DIALOG. So the shape is reproduced with
+ *   supported primitives, and **Advanced** escalates to that real dialog - the
+ *   "proprietary browse + OOB escalation" pattern in MODAL-DECISION-CRITERIA.
+ *   Three moving parts, all in the shared library so every future header
+ *   consumer inherits them:
+ *     - `components/LookupField` gained the OOB affordances (right-side browse
+ *       button, modern thin scrollbar, pinned right-aligned Advanced footer,
+ *       and deliberately NO "+ New") plus a `span` prop so it composes into
+ *       `FieldGrid` without a hand-rolled wrapper div.
+ *     - NEW `RecordHeader/lookupSearch.ts` owns the Dataverse half: target-table
+ *       metadata resolution, the OData search builder, and the SINGLE
+ *       library-wide `Xrm.Utility.lookupObjects` call site (so the G-14
+ *       `this`-binding discipline cannot drift back out of one copy).
+ *     - `RecordHeaderView` picks the surface per cell. Read-only or
+ *       target-less lookups keep the display renderer, which navigates.
+ *   The target's primary NAME attribute is READ from metadata, never inferred:
+ *   `sprk_projecttype_ref` uses `sprk_name` but `sprk_mattertype_ref` uses
+ *   `sprk_mattertypename`. That second `retrieveEntityMetadata` call is
+ *   load-bearing, not overhead - and it is page-session cached.
+ *   Reverses FR-15a / design.md 6.5, updated in the same commit per CLAUDE.md
+ *   6.5 path B rather than diverging silently.
  */
-export const CONTROL_VERSION = '1.1.8';
+export const CONTROL_VERSION = '1.1.9';

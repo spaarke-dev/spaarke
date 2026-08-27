@@ -1,6 +1,6 @@
 # Current Task State — record-header-and-notepad-r2
 
-> **Last Updated**: 2026-08-27 (by `context-handoff` — after the shared `LookupField` OOB-parity work)
+> **Last Updated**: 2026-08-27 (after the RecordHeader inline-lookup swap — v1.1.9 packed, awaiting UAT)
 > **Recovery**: Read "Quick Recovery" first. Then [`CLAUDE.md`](CLAUDE.md), then [`tasks/TASK-INDEX.md`](tasks/TASK-INDEX.md).
 
 ---
@@ -9,17 +9,37 @@
 
 | Field | Value |
 |-------|-------|
-| **Task** | **033 + 034** complete — `Spaarke.Records.RecordHeader` **v1.1.8**, UAT-passed on Project |
-| **Phase** | 3 ✅ complete. Phase 5 rollout unblocked. One **in-flight follow-on** (below). |
-| **Status** | ✅ Project UAT passed. Shared `LookupField` upgraded to OOB parity + committed. **The RecordHeader has NOT yet been switched to it.** |
-| **Next Action** | **Switch the RecordHeader lookup cell to the inline `LookupField`** — 3 concrete work items, fully specified in "RecordHeader lookup swap" below. |
+| **Task** | **033 + 034** complete — `Spaarke.Records.RecordHeader` **v1.1.9** packed, not yet imported |
+| **Phase** | 3 ✅ complete. Phase 5 rollout unblocked. The inline-lookup follow-on is **code-complete**. |
+| **Status** | ✅ Inline lookup swap DONE. `RecordHeaderPcf_v1.1.9.0.zip` is built and packed on disk. |
+| **Next Action** | **Import + UAT v1.1.9 on `spaarkedev1`** — the four checks in "UAT v1.1.9" below. |
 | **Blocked by** | Nothing in code. **Task 001** still needs a classic-designer session no build can substitute for. |
-| **Working tree** | clean · 35 commits · **pushed** to `origin/work/record-header-and-notepad-r2` · no PR opened |
+| **Working tree** | clean · **pushed** to `origin/work/record-header-and-notepad-r2` · no PR opened |
 
-### ⚠️ Un-deployed work exists
+### ⚠️ Packed but NOT imported
 
-`fff55ef3b` changed the shared library. **Nothing has been rebuilt or imported since.** The
-RecordHeader zip on disk (`v1.1.8`) predates it. See "Update radius" for who is affected.
+`Solution/bin/RecordHeaderPcf_v1.1.9.0.zip` is built from the current tree (bundle **115,381 B**,
+46% of the 250 KB NFR-02 ceiling — up from 99,068 B at v1.1.3, which is the inline lookup's cost).
+
+```
+pac solution import --path "src/client/pcf/RecordHeader/Solution/bin/RecordHeaderPcf_v1.1.9.0.zip" --publish-changes
+```
+
+Import to **`spaarkedev1`** — never `spaarke-model1-prod`. Hard-refresh (Ctrl+Shift+R) and confirm
+the footer reads **v1.1.9**.
+
+### UAT v1.1.9 — what changed, what to check
+
+1. **Project Type opens an INLINE dropdown under the field**, not the right-side pane.
+2. **The magnifier on the right of the field is clickable** — it drops the full list with no typing.
+3. **The list scrolls** (thin modern scrollbar) with **Advanced** pinned bottom-right; Advanced opens
+   the OOB dialog. There is **no "+ New"** — deliberate.
+4. **Everything else is unchanged** — date still saves as date-only, priority still a toggle, 14px
+   edit text, sparkle still present.
+
+If a lookup renders as plain text with no search box, open the console: the per-cell diagnostic now
+prints `picker: 'inline' | 'display'` per field. `'display'` means one of the two required halves is
+missing — read `readOnly` and `targets` on the same line.
 
 ### UAT outcome — 5 rounds, all closed
 
@@ -118,70 +138,82 @@ duplicate) · `CreateProjectWizard/CreateProjectStep` · `CreateRecordWizard/ste
 | `src/solutions/SmartTodo` | `AddTodoBar` → CreateTodo path |
 | `src/solutions/Notepad` | `hooks/discoverMemoNavProps` |
 | **`src/client/pcf/MatterHeader`** | ⚠️ imports `dist/components/LookupField/LookupField` **directly** (`MatterHeaderView.tsx:61`) — **its lookups change appearance on next rebuild**, relevant to task 080 parity |
-| `src/client/pcf/RecordHeader` | not yet — still uses the *other* component (see below) |
+| **`src/client/pcf/RecordHeader`** | ✅ **DONE in v1.1.9** — now renders the inline component on the editable path (packed, not yet imported) |
 
 **None of these are urgent** — the change is additive and every consumer keeps working unchanged
 except that its lookup gains the right-side browse icon and the modern scrollbar. But a reviewer
 asking "what does this PR touch?" should be given this list, not the short one.
+
+⚠️ **`MatterHeader` is the one with a schedule attached.** Task 080 baselines Matter parity against
+`MatterHeaderPcf` v1.0.20 — so rebuild it BEFORE capturing that baseline, or the diff will attribute
+the shared component's new browse button and scrollbar to the RecordHeader migration.
 
 ⚠️ **PCFs bundle `dist/`, not source.** Rebuild the shared lib first (`ensure-dist-fresh` prebuild
 handles it for wired PCFs). A stale `dist/` silently ships old code.
 
 ---
 
-## 🎯 NEXT: RecordHeader lookup swap — exactly what remains
+## ✅ DONE: RecordHeader lookup swap (v1.1.9, 2026-08-27)
 
-**Goal**: `RecordHeaderView`'s `case 'lookup'` renders the inline `components/LookupField` instead of
-the side-pane `RecordHeaderLookupField`, with **Advanced** escalating to the existing (working)
-`lookupObjects` call.
+`RecordHeaderView`'s `case 'lookup'` now renders the inline `components/LookupField` when the field
+is editable **and** a target resolved; read-only or target-less lookups keep the display renderer.
 
-**Two components, do not confuse them** (project CLAUDE.md warns about this):
+**Two components, still easy to confuse** (project CLAUDE.md warns about this):
 
 | path | what | used by |
 |---|---|---|
-| `components/RecordHeader/fields/LookupField.tsx` (alias `RecordHeaderLookupField`) | side-pane picker | RecordHeader **today** |
-| `components/LookupField/LookupField.tsx` | inline type-ahead, **just upgraded** | 12 wizard steps + MatterHeader |
+| `components/LookupField/LookupField.tsx` | inline type-ahead — **now the editable path** | RecordHeader · MatterHeader · 12 wizard steps |
+| `components/RecordHeader/fields/LookupField.tsx` (alias `RecordHeaderLookupField`) | display + navigate | RecordHeader's read-only / target-less path |
 
-### The three work items
+### How the three costed items landed
 
-**1. `onSearch` — the real work.** The inline component needs a search callback; the header has none.
-It must query the TARGET table by its primary name:
+1. **`onSearch`** — new shared `RecordHeader/lookupSearch.ts`. It resolves the TARGET entity's
+   `primaryIdAttribute` / `primaryNameAttribute` with a second `retrieveEntityMetadata` call
+   (page-session cached, so one round trip per distinct target however many cells use it). The
+   non-uniform convention — `sprk_projecttype_ref` → `sprk_name` but `sprk_mattertype_ref` →
+   `sprk_mattertypename` — is pinned by a test that would fail if either were inferred.
+2. **`span`** — added as a **prop on the shared component** (the preferred option), not a wrapper in
+   the view. Omitted ⇒ no `gridColumn` emitted at all, so the flex-laid-out wizard consumers are
+   byte-identical; both branches are guarded by tests.
+3. **`onAdvanced`** — routed through `openAdvancedLookup`, now the **only** `lookupObjects` call site
+   in the shared library. `RecordHeaderLookupField` was refactored to delegate to it. That
+   consolidation is the point: **G-14 recurred precisely because the lesson lived in one copy and
+   not the other.**
 
-```
-$select={targetPrimaryId},{targetPrimaryName}
-&$filter=contains({targetPrimaryName},'{escaped}')
-&$orderby={targetPrimaryName} asc&$top=10
-```
+### Also done
 
-- `targets[0]` already resolves (v1.1.6, via `getControl(name).getEntityTypes()` — proven in UAT).
-- ⚠️ **The target's `primaryNameAttribute` is NOT known yet.** Today only the HOST entity's metadata is
-  fetched. This needs a **second `retrieveEntityMetadata` call for the target entity** — page-session
-  cached already, so cheap, but it is a genuine new fetch, not a prop change.
-- ⚠️ **The naming convention is non-uniform** — `sprk_projecttype_ref` and `sprk_eventtype_ref` use
-  `sprk_name`, while `sprk_mattertype_ref` uses `sprk_mattertypename`. **Read it from metadata; do not
-  infer.** (design.md §621, live-verified.)
-- R1's `MatterHeaderView.searchLookup` (lines ~181-197) is a working reference for the OData shape —
-  but it hard-codes `LOOKUP_META`, which R2 must not do.
+- **Docs amended, not diverged** (CLAUDE.md §6.5 path B): `spec.md` FR-15a (rewritten) + FR-26 +
+  scope bullet + criterion 15; `design.md` §6.5 kept verbatim under an AMENDED banner with a new
+  **§6.5a** carrying the reversal, its evidence, and an honest cost ledger.
+- **Task 080 parity IMPROVED** — the "identical except lookups" caveat is **withdrawn**. Both
+  controls now render the same shared component, so Matter parity is compared unqualified. ⚠️ But
+  rebuild `MatterHeaderPcf` before baselining: it picks up the browse button + scrollbar too.
 
-**2. `span`** — `components/LookupField` has **no `span` prop**, and `FieldGrid` requires each cell to
-self-apply `gridColumn` (FR-03). R1 hand-rolled `<div style={{ gridColumn: 'span 1' }}>` around it
-(`MatterHeaderView.tsx:278-287`). Either add a `span` prop to the shared component (cleaner, benefits
-everyone) or wrap it in the view. **Prefer the prop.**
+### Tests
 
-**3. `onAdvanced`** — pass a callback that opens `xrm.Utility.lookupObjects({ entityTypes: [targets[0]] })`
-and stages the pick. **Call it directly on `xrm.Utility`** — never via a local alias (FAILURE-MODES
-**G-14**; that exact bug cost UAT round 5, and R1 four releases before it).
+| suite | result |
+|---|---|
+| `lookupSearch.test.ts` (**new**, 22 tests) | ✅ pure builder · both name conventions · `this`-sensitive `lookupObjects` stub |
+| `components/LookupField` (15 → **17**) | ✅ +2 for `span` present/absent |
+| `RecordHeader/*` shared (12 suites) | ✅ 477 |
+| `RecordHeader` PCF | ✅ **96** (2 rewritten, 1 added — see below) |
+| shared lib full run | 3206 passed · **8 red suites, all pre-existing and outside R2's scope** |
 
-### Also decide
+⚠️ **Two PCF tests were re-expressed, not deleted.** They pinned "targets resolve → editable" via
+`data-editable="true"` on the display renderer. The regression is unchanged but its observable moved
+to "the inline field rendered". A third test was ADDED for the read-only branch, so both halves of
+the editable gate are now pinned. The 8 red suites were verified unrelated: a workspace `rowHeight`
+regression, a locked-hash guard, a registry mismatch, a BU-chain mismatch.
 
-- **Read-only lookups** keep using the display-only `RecordHeaderLookupField` — only the editable path
-  changes. Do not delete that component.
-- **FR-15a / design.md §6.5 say "OOB picker (modal)"** — this reverses that. Per CLAUDE.md §6.5 this
-  is a **path B** change: update `spec.md` FR-15a + `design.md` §6.5 in the same PR, don't silently
-  diverge.
-- **Task 080 parity**: after the swap, RecordHeader and R1's MatterHeader render the *same* inline
-  component, so the §6.5 parity caveat ("identical except lookups open the OOB picker") can be
-  **deleted** rather than qualified. Good outcome — note it in 080.
+### Settled — do NOT re-investigate
+
+Hosting the OOB inline control is **not possible**. `ComponentFramework.Factory` has exactly two
+members (`getPopupService`, `requestRender`). `lookupObjects` is callable only because it is a plain
+function opening the **dialog**; the inline lookup is a class the form runtime owns, with no public
+constructor. `MscrmControls.AdvancedLookupWrapper` wraps the dialog. `MscrmTools/PCF-Controls` is
+**GPL-3.0** and renders its own dropdown anyway. Full evidence in `design.md` §6.5a.
+
+---
 
 ### The lesson from five rounds
 

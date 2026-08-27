@@ -16,7 +16,9 @@
  *
  *   config resolution   → `resolveHeaderConfig`            (task 031)
  *   field staging       → `useRecordHeaderFields`          (task 022)
- *   editable lookups    → `RecordHeaderLookupField`        (task 023, OOB picker)
+ *   editable lookups    → `LookupField` + `useLookupTargetSearch`
+ *                                                          (inline, 2026-08-27)
+ *   read-only lookups   → `RecordHeaderLookupField`        (task 023)
  *   toolbar             → `useRecordHeaderToolbarActions`  (task 024)
  *   card + skeleton     → `RecordHeaderShell columns`      (task 032)
  *   renderers           → the `fields/` barrel             (task 015)
@@ -63,12 +65,19 @@ import {
   TextareaField,
   extractConfiguredAttributeNames,
   resolveHeaderConfig,
+  useLookupTargetSearch,
 } from '@spaarke/ui-components/dist/components/RecordHeader';
 import type {
   ILookupFieldValue,
   ResolvedHeaderConfig,
   ResolvedHeaderField,
 } from '@spaarke/ui-components/dist/components/RecordHeader';
+// The INLINE search-as-you-type lookup — a DIFFERENT component from the
+// `RecordHeaderLookupField` imported above, and the project CLAUDE.md warns
+// they are easy to confuse. This one reproduces the OOB inline dropdown; that
+// one is the display/navigate renderer, kept for the read-only path below.
+import { LookupField } from '@spaarke/ui-components/dist/components/LookupField/LookupField';
+import type { ILookupItem } from '@spaarke/ui-components/dist/types/LookupTypes';
 import type { NumberFieldKind } from '@spaarke/ui-components/dist/components/RecordHeader';
 import type { EntityMetadata } from '@spaarke/ui-components/dist/services/IDataverseClient';
 // Per-hook deep paths, NOT the `dist/hooks` barrel: that barrel re-exports
@@ -376,8 +385,17 @@ export const RecordHeaderView: React.FC<IRecordHeaderViewProps> = ({
             format: attr?.format,
             targets: attr?.targets,
             readOnly: f.readOnly,
-            // A lookup needs BOTH halves to open its picker.
+            // A lookup needs BOTH halves to become editable.
             editable: !f.readOnly && (f.renderer !== 'lookup' || !!attr?.targets?.length),
+            // Which lookup SURFACE this cell chose. 'display' on a field the
+            // maker expects to edit means one of the two halves above is
+            // missing — read `readOnly` and `targets` on the same line.
+            picker:
+              f.renderer !== 'lookup'
+                ? undefined
+                : !f.readOnly && attr?.targets?.length
+                  ? 'inline'
+                  : 'display',
           };
         })
       );
@@ -457,6 +475,29 @@ const HeaderFieldCell: React.FC<IHeaderFieldCellProps> = ({ field, fieldsApi, en
     [saveLookup, name]
   );
 
+  // ── Inline-lookup wiring ───────────────────────────────────────────────────
+  // `targets[0]` is the TARGET TABLE, resolved from metadata or the form
+  // control — never a constant (FR-15). Undefined for the six non-lookup
+  // renderers, which is exactly why the hook below is safe to call for every
+  // cell: with no target it does no work and issues no request.
+  const lookupTarget = renderer === 'lookup' ? attribute?.targets?.[0] : undefined;
+
+  // Unlike `handleSaveLookup`, this DOES pass `null` through. The inline
+  // dropdown reports a genuine clear (the chip's dismiss button) and a
+  // type-over of a committed value the same way, and both should stage —
+  // `saveLookup(…, null, …)` calls `setValue(null)`, which is how R1's Matter
+  // header has always behaved.
+  const handlePickLookup = React.useCallback(
+    (item: ILookupItem | null): void => {
+      saveLookup(name, item, lookupTarget ?? '');
+    },
+    [saveLookup, name, lookupTarget]
+  );
+
+  // Hooks must run unconditionally — this sits ABOVE the renderer switch by
+  // necessity, not by preference.
+  const { search: searchLookup, openAdvanced } = useLookupTargetSearch(lookupTarget, label, handlePickLookup);
+
   switch (renderer) {
     case 'textarea':
       return (
@@ -471,22 +512,69 @@ const HeaderFieldCell: React.FC<IHeaderFieldCellProps> = ({ field, fieldsApi, en
       );
 
     case 'lookup': {
-      // FR-15 — targets come from METADATA, never hard-coded. `targets[0]` is
-      // what the OOB picker uses (023); see the task notes on polymorphic
-      // lookups.
+      // FR-15 — targets come from METADATA, never hard-coded. See the task
+      // notes on polymorphic lookups for why only `targets[0]` is used.
       const targets = attribute?.targets;
       const current = displayLookup(name);
+
+      // ── Editable → the INLINE dropdown (2026-08-27) ────────────────────────
+      // Reverses FR-15a's original "OOB picker (modal)" decision, which shipped
+      // in v1.1.8 and opened the platform SIDE PANE. OOB renders lookups as an
+      // inline type-ahead, and a header that departs from that on every lookup
+      // cell of every entity reads as broken rather than different (UAT round
+      // 5). Hosting the platform's own inline control is not possible —
+      // `ComponentFramework.Factory` exposes no way to instantiate it — so the
+      // shape is reproduced with supported primitives and **Advanced**
+      // escalates to the real OOB dialog. That is the "proprietary browse + OOB
+      // escalation" pattern in MODAL-DECISION-CRITERIA.md.
+      //
+      // Requires BOTH halves, same as the picker did: a save path (the layout
+      // did not mark the field read-only) AND a resolved target. Without a
+      // target there is nothing to search, so the cell falls through to the
+      // display renderer below, whose console.warn names which half is missing.
+      if (!readOnly && lookupTarget) {
+        return (
+          <LookupField
+            span={span}
+            label={label}
+            required={required}
+            value={current}
+            onChange={handlePickLookup}
+            onSearch={searchLookup}
+            // Opt-in footer. Supplied here because a form-hosted PCF always has
+            // `Xrm.Utility.lookupObjects`; the wizard consumers in Code Pages
+            // deliberately omit it. There is NO "+ New" beside it — owner
+            // decision, guarded by a test in the shared lib.
+            onAdvanced={openAdvanced}
+            // Browse-without-typing: an empty term returns the target's first
+            // N rows, matching the OOB dropdown.
+            minSearchLength={0}
+            openOnFocus
+          />
+        );
+      }
+
       const value: ILookupFieldValue | null = current
         ? { id: current.id, name: current.name, entityType: targets?.[0] ?? '' }
         : null;
       return (
+        // ── Read-only, or editable-but-targetless ─────────────────────────────
+        // Renders the value and navigates to the related record on click.
+        //
+        // `onSave` is still passed on the targetless branch even though the
+        // component cannot become editable without targets. That is deliberate
+        // and diagnostic: it makes the component's own warning report
+        // `hasOnSave: true, hasTargets: false`, which names the actual missing
+        // half. Suppressing it would report the field as merely read-only and
+        // send the next investigation to the wrong place — the exact confusion
+        // that made UAT round 5 read as "a locked field linked to the OOB one".
+        //
         // NOTE: no `required` here — deliberately. Unlike its six siblings the
         // 023 lookup renderer does not accept a `required` prop, and that is BY
         // DESIGN: `rendererContract.test.tsx` explicitly holds this renderer out
-        // of the FR-10 contract suite (its value shape and commit model differ —
-        // the OOB picker has no draft state). Since the `*` marker is
-        // TextField-only per D-10, the prop is inert on every sibling anyway, so
-        // omitting it is visually identical. Not a gap to patch.
+        // of the FR-10 contract suite (its value shape and commit model differ).
+        // Since the `*` marker is TextField-only per D-10, the prop is inert on
+        // every sibling anyway, so omitting it is visually identical.
         <RecordHeaderLookupField
           label={label}
           span={span}

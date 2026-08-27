@@ -364,7 +364,16 @@ These are required regardless of config mechanism — and note that **the withdr
 1. **Empty-string handling — ✅ ADOPTED.** Em-dash `''` everywhere. `TextField` currently renders `''` as an empty box while `TextareaField` and `OptionSetField` em-dash it; align `TextField` to the majority. Touches a shipped component Matter consumes, so parity QA must cover it.
 2. **Required marker — ⬜ NOT adopted in R2.** Only `TextField` renders the `*` today, and it stays that way. **Known consequence**: once `required` is config- and metadata-driven, a required date / number / option-set / boolean / lookup cell shows **no** visual required indicator, so required-ness is invisible on every renderer except text. Dataverse still enforces it on save, so this is a discoverability gap, not a data-integrity one. Revisit if UAT flags it.
 
-### 6.5 Lookup editing — use the OOB picker (owner decision 2026-08-25)
+### 6.5 Lookup editing
+
+> ## 🔄 AMENDED 2026-08-27 (owner, after UAT round 5) — read this first
+>
+> **The 2026-08-25 decision below was implemented, shipped as v1.1.8, and then
+> reversed on the evidence.** Editable lookups now render an **inline type-ahead**
+> that reproduces the OOB shape, with **Advanced** escalating to the OOB dialog.
+> The original section is retained unedited beneath this box because its
+> reasoning is sound and its mechanism is still exactly what **Advanced** does —
+> only the default surface changed. See **§6.5a**.
 
 R1's header renders a **custom** inline type-ahead for lookups. Every other lookup in the app uses the native Dataverse picker. R2 adopts the OOB one.
 
@@ -393,6 +402,37 @@ The returned shape is already what `saveLookup` stages into the form buffer, so 
 - `entityTypes` must come from metadata `Targets` (§5.4) — one more reason FR-21's `targets` projection is load-bearing.
 
 **Read-only lookups** still render via the display-only `fields/LookupField`; only the editable path changes.
+
+---
+
+### 6.5a Lookup editing — inline, with OOB escalation (owner decision 2026-08-27, AMENDS §6.5)
+
+**What UAT showed.** §6.5's premise was *"every other lookup in the app uses the native Dataverse picker."* That is true of the *dialog*, but it is **not** how OOB renders a lookup **on a form**: the OOB form control drops an **inline type-ahead list under the field**, and reserves the dialog for **Advanced**. So adopting `lookupObjects` as the *default* surface did not converge on OOB behaviour — it diverged from it, on every lookup cell of every entity. The owner reported it as a defect, not a preference.
+
+**Why we cannot simply host the OOB control.** Settled empirically 2026-08-27; do not re-investigate:
+
+- `ComponentFramework.Factory` exposes exactly two members — `getPopupService`, `requestRender` (`@types/powerapps-component-framework@1.3.18`, read off disk). There is no `createComponent` / `bindDOMElement`.
+- `Xrm.Utility.lookupObjects` is callable *because it is a plain function that opens the dialog*. The **inline** lookup is a control class the **form runtime owns**, with no public constructor. That asymmetry is Microsoft's, not a gap in our code.
+- `MscrmControls.AdvancedLookupWrapper` (present in the org's `customcontrol` catalog) wraps the **dialog** — the surface `lookupObjects` already opens.
+- `MscrmTools/PCF-Controls` is **GPL-3.0** (unusable as a dependency here) and its own lookup renders a custom dropdown rather than hosting the platform control — independent corroboration.
+
+**Decision.** Reproduce the OOB *shape* with supported primitives and escalate to the real dialog for **Advanced** — the "proprietary browse + OOB escalation" pattern already sanctioned by [`MODAL-DECISION-CRITERIA.md`](../../docs/standards/MODAL-DECISION-CRITERIA.md).
+
+| | surface |
+|---|---|
+| editable lookup, target resolved | `components/LookupField` — inline type-ahead, right-side browse button, scrollable options, pinned right-aligned **Advanced** |
+| **Advanced** | `Xrm.Utility.lookupObjects` — §6.5's mechanism, unchanged |
+| read-only, or no target resolved | `RecordHeader/fields/LookupField` — display + navigate (unchanged) |
+
+**No "+ New."** The OOB footer offers it; ours does not, by owner decision. These lookups target taxonomy tables users are not permitted to add to, and record creation does not belong on this surface. Guarded by a test so nobody "restores parity" later.
+
+**What this costs — the honest ledger:**
+
+- **§6.5's "deletes code" benefit is reversed.** The OData search builder comes back, and it is now *more* than R1 had: R1 hard-coded `LOOKUP_META`, whereas R2 must resolve the target's `primaryNameAttribute` from metadata, because the convention is not uniform (`sprk_projecttype_ref` → `sprk_name`, but `sprk_mattertype_ref` → `sprk_mattertypename`). That is a **second `retrieveEntityMetadata` call** per distinct target — page-session cached, so one round trip regardless of how many cells or headers use it.
+- It lives in the shared library ([`RecordHeader/lookupSearch.ts`](../../src/client/shared/Spaarke.UI.Components/src/components/RecordHeader/lookupSearch.ts)), not in the PCF, so it is written once for every future header consumer — and it is now the **single library-wide `lookupObjects` call site**, which is the point: FAILURE-MODES **G-14** recurred precisely because that lesson lived in one copy and not the other.
+- We lose the picker's Recent-records tab and its **+ New** on the default surface. **Advanced** still reaches both.
+
+**Parity, revisited.** §6.5 required qualifying FR-26's pixel-parity criterion (*"identical except lookup cells now open the OOB picker"*). That qualification is **withdrawn** — R1's Matter header renders the same inline `components/LookupField`, so after this change Matter's lookups are the same component in both controls. Task 080 should compare them **unqualified**.
 
 #### The picker's "+ New" — modal or navigate-away?
 

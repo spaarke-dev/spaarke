@@ -92,6 +92,11 @@ import { Link, Text, makeStyles, mergeClasses, tokens } from '@fluentui/react-co
 import { Link24Regular } from '@fluentui/react-icons';
 
 import { getXrm } from '../../../utils/xrmContext';
+// The `Xrm.Utility.lookupObjects` call lives in ONE place library-wide (see the
+// G-14 comment there). This renderer and the inline `components/LookupField`
+// escalation path both go through it, so the `this`-binding discipline cannot
+// drift back out of one of them.
+import { openAdvancedLookup } from '../lookupSearch';
 
 // ---------------------------------------------------------------------------
 // Public types
@@ -323,58 +328,22 @@ export const LookupField: React.FC<ILookupFieldProps> = ({ label, value, span, t
 
     openingRef.current = true;
     try {
-      const xrm = getXrm();
-      if (typeof xrm?.Utility?.lookupObjects !== 'function') {
-        // Host doesn't expose the picker (test env, unsupported surface) —
-        // graceful no-op per the component's "never throws on click" contract.
-        // WARN, though: silently doing nothing on click is indistinguishable
-        // from a dead control, and cost a full UAT round to diagnose.
-        console.warn(
-          `[RecordHeaderLookupField] "${label}": Xrm.Utility.lookupObjects is unavailable — picker cannot open.`
-        );
+      // Delegated: the `this`-binding discipline, the cancel semantics and the
+      // GUID normalization all live in `lookupSearch.openAdvancedLookup`, which
+      // never throws and resolves `null` on cancel / failure.
+      const picked = await openAdvancedLookup(target, label);
+      if (!picked) {
+        // Cancelled, resolved empty, or failed — no-op. `onSave` is
+        // intentionally NOT called with `null` here; clearing is not staged by
+        // cancel.
         return;
       }
-
-      // ══════════════════════════════════════════════════════════════════════
-      // Call `lookupObjects` DIRECTLY on `xrm.Utility` — never through a local
-      // alias. Aliasing detaches the method from its receiver, and the Xrm
-      // implementation reads `this._clientApiExecutor` internally, so a
-      // detached call dies with:
-      //   TypeError: Cannot read properties of undefined (reading '_clientApiExecutor')
-      //
-      // This is the SAME `this`-binding trap R1 hit on
-      // `Xrm.Navigation.navigateTo`, where v1.0.2–v1.0.5 aliased the method and
-      // shipped four releases of a silent no-op; see the CRITICAL comment in
-      // `useRecordHeaderToolbarActions.ts` and the gotcha in the project
-      // CLAUDE.md. Task 023 reintroduced it here in a different Xrm namespace,
-      // and the `catch {}` below swallowed the TypeError on every click, so the
-      // cell looked merely read-only rather than broken.
-      //
-      // Do NOT "simplify" this back to `const lookupObjects = xrm.Utility...`.
-      const results = await xrm.Utility.lookupObjects({
-        entityTypes: [target],
-        defaultEntityType: target,
-        allowMultiSelect: false,
-      });
-
-      if (!results || results.length === 0) {
-        // Cancelled or resolved empty — no-op. `onSave` is intentionally NOT
-        // called with `null` here; clearing is not staged by cancel.
-        return;
-      }
-
-      const picked = results[0];
-      // Normalize the same way CommunicationActionsApp.tsx:420 does, so
-      // pending values compare consistently with useRecordFieldValues
-      // projections (brace-stripped, lowercased GUID).
-      const id = String(picked.id).replace(/[{}]/g, '').toLowerCase();
-
-      await onSave!({ id, name: picked.name, entityType: picked.entityType });
+      await onSave!(picked);
     } catch (err) {
-      // Xrm surfaces its own error UX for picker/save failures, so the "never
-      // throw on click" contract still holds — but do NOT swallow silently.
-      // A bare `catch {}` here made every picker failure look identical to a
-      // control that simply is not wired.
+      // `onSave` itself can reject (the form-buffer gate throws when the field
+      // is not on the form). The "never throw on click" contract still holds,
+      // but do NOT swallow silently — a bare `catch {}` made every failure look
+      // identical to a control that simply is not wired.
       console.warn(`[RecordHeaderLookupField] "${label}": picker or save failed.`, {
         targets,
         error: err,

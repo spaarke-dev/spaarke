@@ -164,6 +164,26 @@ describe('LookupField — "+ New" is deliberately absent', () => {
   });
 });
 
+describe('LookupField — FieldGrid span (record-header FR-03)', () => {
+  // `FieldGrid` never touches `gridColumn` on its children — each cell owns
+  // its own span. Before this prop existed, a grid consumer had to hand-roll a
+  // wrapper div (which is what `MatterHeaderView` still does).
+  const gridCell = (container: HTMLElement): HTMLElement | null =>
+    container.querySelector<HTMLElement>('[style*="grid-column"]');
+
+  it('applies gridColumn to its own wrapper when span is supplied', () => {
+    const { container } = renderField({ span: 2 });
+    expect(gridCell(container)?.style.gridColumn).toBe('span 2');
+  });
+
+  it('emits NO gridColumn when span is omitted', () => {
+    // Load-bearing for the twelve Create*Wizard consumers: they lay out with
+    // flex, and an unconditional `gridColumn` would be inherited style noise.
+    const { container } = renderField();
+    expect(gridCell(container)).toBeNull();
+  });
+});
+
 describe('LookupField — pre-existing behaviour still holds', () => {
   it('renders the label and the required marker', () => {
     renderField({ required: true });

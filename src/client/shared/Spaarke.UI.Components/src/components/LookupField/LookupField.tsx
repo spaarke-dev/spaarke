@@ -100,6 +100,20 @@ export interface ILookupFieldProps {
    * Do NOT "restore parity" by adding it.
    */
   onAdvanced?: () => void | Promise<void>;
+  /**
+   * Number of `FieldGrid` columns this cell should occupy (1..3), applied as
+   * an inline `gridColumn: span N` on this component's own wrapper.
+   *
+   * `FieldGrid` is renderer-agnostic — it never touches `gridColumn` on its
+   * children, so each cell owns its span (record-header FR-03). Without this
+   * prop a consumer has to hand-roll a wrapper `<div style={{ gridColumn }}>`
+   * around the field, which is what `MatterHeaderView` does today.
+   *
+   * OMIT outside a CSS grid. When undefined no `gridColumn` is emitted at all,
+   * so every pre-existing consumer (the twelve `Create*Wizard` steps, which
+   * lay out with flex) is byte-identical.
+   */
+  span?: 1 | 2 | 3;
 }
 
 // ---------------------------------------------------------------------------
@@ -282,8 +296,14 @@ export const LookupField: React.FC<ILookupFieldProps> = ({
   chipIcon,
   openOnFocus = false,
   onAdvanced,
+  span,
 }) => {
   const styles = useStyles();
+
+  // Undefined `span` emits NO inline style at all — see the prop docs. This is
+  // what keeps the flex-laid-out wizard consumers unchanged.
+  const gridColumnStyle: React.CSSProperties | undefined =
+    span === undefined ? undefined : { gridColumn: `span ${span}` };
 
   const [searchTerm, setSearchTerm] = React.useState('');
   const [results, setResults] = React.useState<ILookupItem[]>([]);
@@ -485,7 +505,7 @@ export const LookupField: React.FC<ILookupFieldProps> = ({
   const showEmpty = !loading && !value && results.length === 0 && searchTerm.trim().length >= minSearchLength;
 
   return (
-    <div className={styles.wrapper} ref={wrapperRef}>
+    <div className={styles.wrapper} ref={wrapperRef} style={gridColumnStyle}>
       <Field label={renderLabel()} required={required}>
         {value ? (
           <div className={styles.selectedChip}>
