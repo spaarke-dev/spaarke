@@ -93,6 +93,7 @@ using System.Diagnostics;
 using System.Globalization;
 using Microsoft.Extensions.Options;
 using Sprk.Provisioning.ControlPlane.Enqueue;
+using Sprk.Provisioning.ControlPlane.Handlers.RuntimeReferences;
 using Sprk.Provisioning.ControlPlane.Models;
 using Sprk.Provisioning.ControlPlane.Repositories;
 
@@ -147,6 +148,7 @@ public sealed class H2aBicepInfraDeployHandler : IProvisioningHandler
     private readonly IUpgradeDriftDetector _driftDetector;
     private readonly IBicepTemplateInspector _templateInspector;
     private readonly IResourceNameAvailabilityProbe _nameAvailabilityProbe;
+    private readonly IOpenAiDeploymentSetRecomposer _openaiRecomposer;
     private readonly BicepInfraDeployOptions _options;
     private readonly ILogger<H2aBicepInfraDeployHandler> _logger;
 
@@ -164,6 +166,7 @@ public sealed class H2aBicepInfraDeployHandler : IProvisioningHandler
         IUpgradeDriftDetector driftDetector,
         IBicepTemplateInspector templateInspector,
         IResourceNameAvailabilityProbe nameAvailabilityProbe,
+        IOpenAiDeploymentSetRecomposer openaiRecomposer,
         IOptions<BicepInfraDeployOptions> options,
         ILogger<H2aBicepInfraDeployHandler> logger)
     {
@@ -173,6 +176,7 @@ public sealed class H2aBicepInfraDeployHandler : IProvisioningHandler
         ArgumentNullException.ThrowIfNull(driftDetector);
         ArgumentNullException.ThrowIfNull(templateInspector);
         ArgumentNullException.ThrowIfNull(nameAvailabilityProbe);
+        ArgumentNullException.ThrowIfNull(openaiRecomposer);
         ArgumentNullException.ThrowIfNull(options);
         ArgumentNullException.ThrowIfNull(logger);
 
@@ -182,6 +186,7 @@ public sealed class H2aBicepInfraDeployHandler : IProvisioningHandler
         _driftDetector = driftDetector;
         _templateInspector = templateInspector;
         _nameAvailabilityProbe = nameAvailabilityProbe;
+        _openaiRecomposer = openaiRecomposer;
         _options = options.Value;
         _logger = logger;
     }
@@ -448,6 +453,46 @@ public sealed class H2aBicepInfraDeployHandler : IProvisioningHandler
                     "Verify az CLI is on PATH + the operator has 'Reader' RBAC on the target subscription.";
                 return await FailAsync(run, etag, FailureClass.Resumable,
                     BicepDeployRejectionCodes.UpgradeModeDrift, diagnostic, cancellationToken).ConfigureAwait(false);
+            }
+        }
+
+        // (8.5) HANDLER-13 (Wave 2 pre-dispatch remediation 2026-08-27) — F5:
+        //       OpenAI deployment-set auto-recompose. When configured to
+        //       AutoRecompose (opt-in), drop zero-TPM models from the deploy
+        //       set BEFORE the runner fires so a fresh-sub with only mini +
+        //       embedding TPM does not fail H2a on frontier-tier deploys.
+        //       Strict policy (default) skips the recomposer entirely,
+        //       matching pre-Wave-2 behavior. Any recomposer infra fault is
+        //       fail-safe — logged, then proceed with the full set.
+        if (_options.OpenAiDeploymentSetPolicy == OpenAiDeploymentSetPolicy.AutoRecompose)
+        {
+            try
+            {
+                var recomposeRequest = new OpenAiDeploymentSetRecomposeRequest(
+                    SubscriptionId: subscriptionId,
+                    Region: location,
+                    FullPinnedSet: PinnedModelCatalog.Models);
+                var recomposeResult = await _openaiRecomposer
+                    .RecomposeAsync(recomposeRequest, cancellationToken).ConfigureAwait(false);
+                if (recomposeResult.DroppedModelIds.Count > 0)
+                {
+                    _logger.LogWarning(
+                        "H2a OpenAI deployment-set auto-recomposed: runId={RunId} customerId={CustomerId} " +
+                        "droppedModels={Dropped} preservedCount={PreservedCount} note={Note}",
+                        envelope.RunId, envelope.CustomerId,
+                        string.Join(",", recomposeResult.DroppedModelIds),
+                        recomposeResult.PreservedSet.Count,
+                        recomposeResult.OperatorNote);
+                }
+            }
+            catch (Exception ex) when (ex is not OperationCanceledException)
+            {
+                // Fail-safe — log + proceed with the full deploy set. The
+                // ARM deploy itself will surface real TPM-zero failures if any.
+                _logger.LogWarning(ex,
+                    "H2a OpenAI deployment-set recomposer infra fault (proceeding with full set): " +
+                    "runId={RunId} customerId={CustomerId}",
+                    envelope.RunId, envelope.CustomerId);
             }
         }
 

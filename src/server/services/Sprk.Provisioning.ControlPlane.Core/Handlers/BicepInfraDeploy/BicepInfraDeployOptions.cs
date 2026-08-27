@@ -137,4 +137,43 @@ public sealed class BicepInfraDeployOptions
     /// <c>keyVaultReferenceIdentity</c>. Defaults to 60 seconds.
     /// </summary>
     public TimeSpan ArmProbeTimeout { get; set; } = TimeSpan.FromSeconds(60);
+
+    /// <summary>
+    /// HANDLER-13 (Wave 2 pre-dispatch remediation 2026-08-27) — F5 verbatim.
+    /// Policy for the OpenAI model-deployment set on a fresh subscription
+    /// with mixed model-tier TPM grants.
+    ///   - <c>Strict</c> (default) — the customer.bicep template deploys
+    ///     the full canonical model set; H2a fails if any pin has zero
+    ///     auto-granted TPM (matching pre-Wave-2 behavior; the frontier-
+    ///     tier customer waits for a support ticket).
+    ///   - <c>AutoRecompose</c> — H2a inspects auto-granted TPM per model
+    ///     and drops zero-TPM models from the deploy set with an operator-
+    ///     visible warning. Trades frontier-tier coverage for immediate
+    ///     H2a success on fresh subs where only mini + embedding TPM was
+    ///     auto-granted.
+    /// </summary>
+    public OpenAiDeploymentSetPolicy OpenAiDeploymentSetPolicy { get; set; }
+        = OpenAiDeploymentSetPolicy.Strict;
+}
+
+/// <summary>
+/// HANDLER-13 (Wave 2 pre-dispatch remediation 2026-08-27) — F5 verbatim.
+/// Deployment-set policy for the customer OpenAI account.
+/// </summary>
+public enum OpenAiDeploymentSetPolicy
+{
+    /// <summary>
+    /// Deploy the full canonical model set unconditionally. Fresh subs
+    /// without frontier-tier TPM (gpt-5.4 / gpt-5-pro) fail H2a's OpenAI
+    /// step and require a support ticket for TPM before re-running.
+    /// </summary>
+    Strict = 0,
+
+    /// <summary>
+    /// Read auto-granted TPM per model and DROP zero-TPM models from the
+    /// deployment set before H2a fires. Records an operator-visible
+    /// warning in the run's Cosmos notes. Trades frontier coverage for
+    /// fresh-sub deploy success.
+    /// </summary>
+    AutoRecompose = 1,
 }

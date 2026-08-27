@@ -259,6 +259,10 @@ builder.Services.AddSingleton<IResourceNameAvailabilityProbe>(sp =>
     var logger = sp.GetRequiredService<ILogger<ArmResourceNameAvailabilityProbe>>();
     return new ArmResourceNameAvailabilityProbe(armClient, logger);
 });
+// HANDLER-13 (Wave 2 pre-dispatch remediation 2026-08-27): OpenAI
+// deployment-set auto-recompose seam. Invoked only when
+// BicepInfraDeploy:OpenAiDeploymentSetPolicy = AutoRecompose.
+builder.Services.AddSingleton<IOpenAiDeploymentSetRecomposer, ArmOpenAiDeploymentSetRecomposer>();
 builder.Services.AddScoped<H2aBicepInfraDeployHandler>();
 
 // Task 045: H2b AI Search index-provisioning handler + collaborator seams
