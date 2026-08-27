@@ -23,6 +23,11 @@
       "format": "uuid",
       "description": "Customer Entra tenant ID (Model 2) or Spaarke tenant ID (Model 1). NEVER default — enforces §4D I1 (FR-28) tenant-isolation invariant."
     },
+    "subscriptionId": {
+      "type": "string",
+      "format": "uuid",
+      "description": "Target Azure subscription id. REQUIRED for Model2Dedicated (customer's own subscription per ADR-027 D4 subscription-per-customer). Model1Shared MAY omit — the skill auto-defaults to the Spaarke shared subscription at CreateRun time. Consumed by H1/H2a/H2b/H4/H4b/H4Shared/H8/H9/H13/H14 via nonSecretParameters['subscriptionId']. Missing at H1 dispatch → hard-stop with MissingSubscriptionId within ~20s of a Model 2 run; operator's only recovery is a manual Cosmos edit (no post-CreateRun add-nonSecret endpoint). Fail-fast in intake instead. Validated by the Model2Dedicated allOf below."
+    },
     "tenancyModel": {
       "type": "string",
       "enum": ["Model1Shared", "Model2Dedicated"],
@@ -140,6 +145,16 @@
           "profile": { "enum": ["spaarke-hosted-model2", "customer-owned-model2"] }
         }
       }
+    },
+    {
+      "description": "ISH-02 — subscriptionId REQUIRED for Model2Dedicated (customer's own subscription per ADR-027 D4). Model1Shared runs auto-default the Spaarke shared sub-id in-skill at CreateRun time, so subscriptionId is OPTIONAL at intake for Model 1.",
+      "if": {
+        "properties": { "tenancyModel": { "const": "Model2Dedicated" } },
+        "required": ["tenancyModel"]
+      },
+      "then": {
+        "required": ["subscriptionId"]
+      }
     }
   ],
   "examples": [
@@ -164,6 +179,7 @@
     {
       "customerId": "acme-corp",
       "tenantId": "12345678-1234-1234-1234-123456789012",
+      "subscriptionId": "abcdef01-2345-6789-abcd-ef0123456789",
       "tenancyModel": "Model2Dedicated",
       "environment": "prod",
       "profile": "customer-owned-model2",

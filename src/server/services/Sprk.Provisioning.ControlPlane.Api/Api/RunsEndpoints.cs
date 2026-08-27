@@ -352,6 +352,33 @@ public static class RunsEndpoints
                 "would fail the H0 preflight envelope with missing-tenant-id — surface at intake instead.");
         }
 
+        // ISH-02 (customer-provisioning-orchestration-r1 Wave 5 punchlist,
+        // 2026-08-27): for Model2Dedicated runs, subscriptionId MUST be present
+        // in nonSecretParameters (per ADR-027 D4 subscription-per-customer +
+        // intake.schema.json Model2Dedicated allOf). Ten downstream handlers
+        // (H1, H2a, H2b, H4, H4b, H4Shared, H8, H9, H13, H14) read
+        // NonSecret["subscriptionId"] and hard-stop on absence — H1 typically
+        // fails within ~20s with MissingSubscriptionId, and the operator has
+        // no post-CreateRun add-nonSecret endpoint to recover.
+        //
+        // Model1Shared is EXEMPT — the skill's Step 2 auto-injects the Spaarke
+        // shared subscription id for Model 1 flows (documented in
+        // intake.schema.json subscriptionId description) so intake need not
+        // carry it. Testing this branch: PostRuns_Model2Missing_SubscriptionId_Returns400
+        // in RunsEndpointsTests.
+        if (string.Equals(request.TenancyModel, "Model2Dedicated", StringComparison.OrdinalIgnoreCase)
+            && (!request.NonSecretParameters.TryGetValue("subscriptionId", out var subscriptionIdValue)
+                || string.IsNullOrWhiteSpace(subscriptionIdValue)))
+        {
+            return BadRequest(httpContext,
+                "nonSecretParameters['subscriptionId'] is required for tenancyModel='Model2Dedicated' " +
+                "(ADR-027 D4 subscription-per-customer). Ten downstream handlers (H1/H2a/H2b/H4/H4b/" +
+                "H4Shared/H8/H9/H13/H14) read run.Parameters.NonSecret['subscriptionId']; a missing value " +
+                "would fail H1 subscription-readiness with MissingSubscriptionId within ~20s and leave " +
+                "the operator with no add-nonSecret recovery path. Fail-fast at intake instead. " +
+                "Model1Shared runs are exempt — the skill auto-injects the Spaarke shared sub-id.");
+        }
+
         var runId = Guid.NewGuid().ToString("D").ToLowerInvariant();
         var now = DateTimeOffset.UtcNow;
 

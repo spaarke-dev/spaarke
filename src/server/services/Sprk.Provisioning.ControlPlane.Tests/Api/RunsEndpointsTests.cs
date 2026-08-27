@@ -745,6 +745,151 @@ public sealed class RunsEndpointsTests : IClassFixture<L2WebApplicationFactory>
         factory.Enqueuer.Enqueued.Should().BeEmpty();
     }
 
+    // -------------------------------------------------------------------------
+    // ISH-02 (customer-provisioning-orchestration-r1 Wave 5 punchlist,
+    // 2026-08-27) — Model2Dedicated CreateRun MUST fail-fast with 400 when
+    // nonSecretParameters['subscriptionId'] is absent. Ten downstream handlers
+    // hard-stop on absence with MissingSubscriptionId; surfacing at intake
+    // saves a minimum ~20s H1 dispatch + gives operators a fixable diagnostic.
+    // Mirrors the intake.schema.json Model2Dedicated allOf constraint.
+    // -------------------------------------------------------------------------
+
+    [Fact]
+    public async Task PostRuns_Model2Dedicated_MissingSubscriptionId_Returns400()
+    {
+        using var factory = new L2WebApplicationFactory();
+        var client = factory.CreateClient();
+
+        var request = new HttpRequestMessage(HttpMethod.Post, "/api/runs")
+        {
+            Content = JsonContent.Create(new
+            {
+                customerId = TestCustomerId,
+                environmentId = "env-1",
+                tenancyModel = "Model2Dedicated",
+                profile = "customer-owned-model2",
+                nonSecretParameters = new Dictionary<string, string>
+                {
+                    // ISH-02: tenantId supplied but subscriptionId absent → 400 for Model 2.
+                    ["tenantId"] = "11111111-1111-1111-1111-111111111111",
+                },
+            }),
+        };
+        AttachAuth(request, roles: new[] { "Operator" });
+
+        var response = await client.SendAsync(request);
+
+        response.StatusCode.Should().Be(HttpStatusCode.BadRequest,
+            "ISH-02 — Model 2 CreateRun MUST fail-fast when subscriptionId is absent (ADR-027 D4).");
+        var body = await response.Content.ReadAsStringAsync();
+        body.Should().Contain("subscriptionId",
+            "the diagnostic must name the missing key so the operator can fix the intake.");
+        body.Should().Contain("Model2Dedicated",
+            "the diagnostic must scope the rule to Model 2 so Model 1 operators are not confused.");
+
+        // Neither the Cosmos row nor the Service Bus envelope should be created.
+        factory.Repository.CreatedRuns.Should().BeEmpty();
+        factory.Enqueuer.Enqueued.Should().BeEmpty();
+    }
+
+    [Fact]
+    public async Task PostRuns_Model1Shared_MissingSubscriptionId_Returns202()
+    {
+        // ISH-02 exemption — Model 1 does NOT require subscriptionId at intake
+        // (the skill auto-injects the Spaarke shared sub-id at CreateRun time).
+        using var factory = new L2WebApplicationFactory();
+        var client = factory.CreateClient();
+
+        var request = new HttpRequestMessage(HttpMethod.Post, "/api/runs")
+        {
+            Content = JsonContent.Create(new
+            {
+                customerId = TestCustomerId,
+                environmentId = "env-1",
+                tenancyModel = "Model1Shared",
+                profile = "spaarke-hosted-model1-trial",
+                nonSecretParameters = new Dictionary<string, string>
+                {
+                    ["tenantId"] = "11111111-1111-1111-1111-111111111111",
+                    // NO subscriptionId — Model 1 exemption per ISH-02.
+                },
+            }),
+        };
+        AttachAuth(request, roles: new[] { "Operator" });
+
+        var response = await client.SendAsync(request);
+
+        response.StatusCode.Should().Be(HttpStatusCode.Accepted,
+            "ISH-02 — Model 1 runs are exempt from the subscriptionId requirement at intake.");
+    }
+
+    [Fact]
+    public async Task PostRuns_Model2Dedicated_EmptySubscriptionId_Returns400()
+    {
+        // ISH-02: whitespace-only subscriptionId is treated identically to missing.
+        using var factory = new L2WebApplicationFactory();
+        var client = factory.CreateClient();
+
+        var request = new HttpRequestMessage(HttpMethod.Post, "/api/runs")
+        {
+            Content = JsonContent.Create(new
+            {
+                customerId = TestCustomerId,
+                environmentId = "env-1",
+                tenancyModel = "Model2Dedicated",
+                profile = "customer-owned-model2",
+                nonSecretParameters = new Dictionary<string, string>
+                {
+                    ["tenantId"] = "11111111-1111-1111-1111-111111111111",
+                    ["subscriptionId"] = "   ",
+                },
+            }),
+        };
+        AttachAuth(request, roles: new[] { "Operator" });
+
+        var response = await client.SendAsync(request);
+
+        response.StatusCode.Should().Be(HttpStatusCode.BadRequest);
+        factory.Repository.CreatedRuns.Should().BeEmpty();
+    }
+
+    [Fact]
+    public async Task PostRuns_Model2Dedicated_ValidSubscriptionId_Returns202_AndFlowsToRunParameters()
+    {
+        // ISH-02 happy path: Model 2 with subscriptionId proceeds + value round-trips
+        // into RunParameters.NonSecret so downstream handlers can read it.
+        using var factory = new L2WebApplicationFactory();
+        var client = factory.CreateClient();
+        var expectedSubscriptionId = "abcdef01-2345-6789-abcd-ef0123456789";
+
+        var request = new HttpRequestMessage(HttpMethod.Post, "/api/runs")
+        {
+            Content = JsonContent.Create(new
+            {
+                customerId = TestCustomerId,
+                environmentId = "env-1",
+                tenancyModel = "Model2Dedicated",
+                profile = "customer-owned-model2",
+                nonSecretParameters = new Dictionary<string, string>
+                {
+                    ["tenantId"] = "11111111-1111-1111-1111-111111111111",
+                    ["subscriptionId"] = expectedSubscriptionId,
+                },
+            }),
+        };
+        AttachAuth(request, roles: new[] { "Operator" });
+
+        var response = await client.SendAsync(request);
+
+        response.StatusCode.Should().Be(HttpStatusCode.Accepted);
+        factory.Repository.CreatedRuns.Should().ContainSingle();
+        var stored = factory.Repository.CreatedRuns.Single();
+        stored.Parameters.NonSecret
+            .Should().ContainKey("subscriptionId")
+            .WhoseValue.Should().Be(expectedSubscriptionId,
+                because: "ISH-02 — subscriptionId must round-trip from intake → Cosmos so H1/H2a/etc can read it.");
+    }
+
     [Fact]
     public async Task PostRuns_EmptyTenantIdInNonSecretParameters_Returns400()
     {
