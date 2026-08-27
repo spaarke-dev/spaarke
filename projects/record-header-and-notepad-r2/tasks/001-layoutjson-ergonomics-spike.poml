@@ -4,7 +4,7 @@
     <title>layoutJson ergonomics spike — Multiple vs SingleLine.Text on the classic form designer</title>
     <phase>0 Spike + Baseline</phase>
     <gate>startable</gate>
-    <status>not-started</status>
+    <status>completed</status>
     <rigor>STANDARD</rigor>
     <rigor-reason>Spike producing a findings doc plus a throwaway test manifest; no shipped code is modified, but the task performs solution import/export operations against spaarkedev1 and has explicit constraints (Step 3.5.5: new-file creation + explicit constraints = STANDARD).</rigor-reason>
     <model-tier>sonnet</model-tier>
@@ -149,6 +149,31 @@
     pre-approved. Modern-designer behavior may be observed and noted as color, but the verdict is the
     classic designer per FR-01 acceptance. Keep the scratch payload free of apostrophes too, so a designer
     escaping quirk cannot masquerade as truncation.
+  </notes>
+
+  <notes>
+    COMPLETED 2026-08-27 via an ESCALATED DEVIATION (owner approved option A). This POML is
+    `mode="prescriptive"`, so the deviation was raised per task-execute Step Mode + CLAUDE.md 6
+    rather than improvised.
+
+    The written procedure (scaffold a throwaway PCF, import a scratch solution to spaarkedev1, bind
+    a dev form, operator designer session) was NOT run. Between authoring and execution the spike's
+    single decision -- layoutJson of-type -- had already been made, shipped (v1.1.1) and exercised
+    across six UAT rounds: `SingleLine.Text` is capped at 100 chars by the classic designer and the
+    real layout is 401 bytes, so `Multiple` was selected empirically as DEF-2.
+
+    Instead the three checks were evaluated against the REAL control on the REAL Project main form
+    using read-only `pac org fetch` -- stronger evidence than the proxy the spike proposed.
+
+    Checks 1 and 2 PASS (multi-line editor confirmed by the retained trailing newline; 401 bytes
+    stored byte-intact, valid JSON, three byte-identical form-factor copies). Check 3
+    (export/import round trip) is OPEN, and the investigation surfaced something more consequential:
+    the Project main form belongs to NO shippable solution -- only the Default catch-all -- so the
+    layout would not transport at all today. That is a live gap against the project CLAUDE.md
+    binding assumption about form transport, and it is recorded as Action Required 1 in the findings
+    doc. Closing check 3 requires modifying spaarkedev1, which was not done unilaterally.
+
+    Findings + evidence: notes/spike-layoutjson-ergonomics.md
   </notes>
 
   <execution>

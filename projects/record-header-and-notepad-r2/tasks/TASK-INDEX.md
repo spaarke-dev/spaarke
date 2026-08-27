@@ -13,8 +13,10 @@
 
 | Task | Title | Rigor | Tier | Parallel | Deps | Status |
 |---|---|---|---|---|---|---|
-| [001](001-layoutjson-ergonomics-spike.poml) | `layoutJson` ergonomics spike | STANDARD | sonnet | ❌ | — | 🔲 |
+| [001](001-layoutjson-ergonomics-spike.poml) | `layoutJson` ergonomics spike | STANDARD | sonnet | ❌ | — | ✅ † |
 | [002](002-capture-matter-parity-baseline.poml) | Capture Matter v1.0.20 parity baseline | STANDARD | sonnet | ❌ | 040 † | 🔲 |
+
+> † **001 closed by escalated deviation** (owner-approved 2026-08-27): the of-type decision was already shipped and was verified against the LIVE Project form by read-only query rather than by the written scratch-control procedure. Checks 1-2 PASS; check 3 (solution round-trip) is **OPEN** — the Project form is in NO shippable solution, only the Default catch-all. See [`notes/spike-layoutjson-ergonomics.md`](../notes/spike-layoutjson-ergonomics.md).
 
 > † **Ordering trap**: the shipped Matter header currently returns HTTP 400 (see 040), so there may be nothing to screenshot. Run 040 first, or capture the baseline from a pre-deletion build.
 

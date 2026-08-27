@@ -12,8 +12,8 @@
 | **Task** | **033 + 034** complete — `Spaarke.Records.RecordHeader` **v1.1.11** packed, not yet imported |
 | **Phase** | 3 ✅ complete. Phase 5 rollout unblocked. The inline-lookup follow-on is **code-complete**. |
 | **Status** | ✅ **v1.1.11 imported and UAT-PASSED on the Project form** (owner, 2026-08-27): "the PCF is working - looks good". |
-| **Next Action** | **Task 002** — but read the baseline decision below first; it changes what you capture. |
-| **Blocked by** | Nothing in code. **Task 001** still needs a classic-designer session no build can substitute for. |
+| **Next Action** | **Task 002** — but read the baseline decision below first; it changes what you capture. **Task 001 is now ✅.** |
+| **Blocked by** | Nothing in code. Task 001 ✅ closed 2026-08-27. Phase 5 is maker work. |
 | **Working tree** | clean · **pushed** to `origin/work/record-header-and-notepad-r2` · no PR opened |
 
 ### ⚠️ Packed and IMPORTED — UAT passed
@@ -114,6 +114,28 @@ not exist (the BFF nav adapter implements `openLookup` as a no-op).
 
 **Wrote the component's FIRST test suite** — it had 12 consumers and zero tests, which is the wrong
 place to change behaviour blind. 15 tests. Full run **826/826 across 52 suites**.
+
+---
+
+## 🔴 NEW — the Project form is in NO shippable solution (found by task 001, 2026-08-27)
+
+`pac org fetch` on `solutioncomponent` shows the Project main form
+(`5aa00242-5212-f111-8342-7ced8d1dc988`) belongs to exactly one solution: **`Cr2b7d5` — "Common Data
+Services Default Solution"**, the environment catch-all. It is in no purpose-built solution.
+
+So today **the header layout would not transport anywhere.** Not because `layoutJson` truncates —
+it is stored byte-intact at 401 bytes — but because nothing is carrying the form. That is a live gap
+against the project CLAUDE.md **binding assumption**: *"Main forms ARE transported between
+environments inside a solution… it makes §5.1's JSON-on-manifest portability argument real (no
+per-environment paste)."* True as a capability; not yet realised in practice.
+
+**Action**: add the Project main form to a shippable solution before any promotion, and repeat for
+every entity as Phase 5 binds it. Full detail + the two other action items in
+[`notes/spike-layoutjson-ergonomics.md`](notes/spike-layoutjson-ergonomics.md).
+
+Also worth knowing from the same query: the classic designer stores a **separate copy of
+`layoutJson` per form factor** (Web / Tablet / Phone — three today, currently byte-identical). Edit
+one and the others silently diverge.
 
 ---
 
