@@ -1,4 +1,4 @@
-// -----------------------------------------------------------------------------
+﻿// -----------------------------------------------------------------------------
 // DataverseRegistryConcurrencyStore.cs
 //
 // L2 CONTROL-PLANE production IRegistryConcurrencyStore impl (task 059).
@@ -8,12 +8,19 @@
 // If-Match ETag guarding.
 //
 // AUTH:
-//   Confidential-client (BFF app-reg client-credentials via
-//   Azure.Identity.ClientSecretCredential). Same shape as H7's
-//   DataverseWebApiEnvVarValuesWriter — the L2 App Service's UAMI is not
-//   itself a Dataverse Application User on the admin env; the BFF app-reg is
-//   the SP with a systemuser record. Future migration to DefaultAzureCredential
-//   (UAMI) is documented in CustomerRunGuardOptions.cs FUTURE MIGRATION note.
+//   The L2 App Service's user-assigned managed identity, via
+//   DefaultAzureCredential pinned with ManagedIdentityClientId — identical to
+//   DataverseEnvironmentRegistryClient.AcquireTokenAsync, which reaches the same
+//   admin environment with the same identity.
+//
+//   MIGRATED 2026-08-27. Was a confidential client on the BFF app-reg + client
+//   secret, which ADR-028 A4 forbids (E-3, the transitional carve-out, CLOSED
+//   2026-08-24). The FUTURE MIGRATION note gated the swap on the L2 UAMI holding
+//   a systemuser record on the admin env — verified satisfied:
+//   sprk-controlplane-dev-uami (app id 965a4a01-...) is the enabled application
+//   user '# sprk-controlplane-dev-uami' with the Spaarke Provisioning Registry
+//   role. The precondition had been met without the code following, so the
+//   comment above described a blocker that no longer existed.
 //
 // DATAVERSE SEMANTICS:
 //   - Lookup by alt-key: GET /{entitySet}?$filter=sprk_customerid eq '{id}'
@@ -76,6 +83,7 @@ public sealed class DataverseRegistryConcurrencyStore : IRegistryConcurrencyStor
         _httpClientFactory = httpClientFactory;
         _options = options.Value;
         _logger = logger;
+
     }
 
     /// <inheritdoc/>
@@ -291,15 +299,37 @@ public sealed class DataverseRegistryConcurrencyStore : IRegistryConcurrencyStor
         return true;
     }
 
+    // Path X token acquisition: DefaultAzureCredential pinned via ManagedIdentityClientId (the L2
+    // UAMI). NO TenantId set — the L2 UAMI and the admin Dataverse env both live in the SPAARKE
+    // platform tenant, so token issuance targets the UAMI's own tenant intrinsically.
+    //
+    // Deliberately IDENTICAL to DataverseEnvironmentRegistryClient.AcquireTokenAsync, which hits
+    // the same admin environment with the same identity. That method was already on managed
+    // identity; this one was still on ClientSecretCredential, so the two disagreed about how the
+    // control plane authenticates to one environment. Keeping them character-for-character the
+    // same is the point — a second, subtly different credential path is how "fixable in one place"
+    // stops being true (ADR-028 A4).
+    //
+    // Was: new ClientSecretCredential(TenantId, ClientId, ClientSecret) — the BFF's own app
+    // registration bound to a secret. The FUTURE MIGRATION note in CustomerRunGuardOptions gated
+    // the swap on "the L2 App Service's UAMI is granted a systemuser record on the admin env".
+    // Verified satisfied 2026-08-27: sprk-controlplane-dev-uami (app id 965a4a01-…) is the enabled
+    // application user "# sprk-controlplane-dev-uami" holding the Spaarke Provisioning Registry
+    // role. The precondition had been met without the code following.
     private async Task<AccessToken> AcquireTokenAsync(Uri envUri, CancellationToken cancellationToken)
     {
         var scopeBase = new Uri(envUri, "/").ToString().TrimEnd('/');
         var scope = $"{scopeBase}/.default";
-        var credential = new ClientSecretCredential(
-            _options.TenantId!, _options.ClientId!, _options.ClientSecret!);
+        var credOptions = new DefaultAzureCredentialOptions();
+        if (!string.IsNullOrWhiteSpace(_options.ManagedIdentityClientId))
+        {
+            credOptions.ManagedIdentityClientId = _options.ManagedIdentityClientId;
+        }
+        var credential = new DefaultAzureCredential(credOptions);
         return await credential.GetTokenAsync(
             new TokenRequestContext(new[] { scope }), cancellationToken).ConfigureAwait(false);
     }
+
 
     private static string BuildPatchBody(string? currentRunIdValue)
     {
