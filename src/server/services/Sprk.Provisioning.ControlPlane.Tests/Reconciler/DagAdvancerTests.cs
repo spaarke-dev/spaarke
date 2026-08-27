@@ -40,6 +40,7 @@
 // -----------------------------------------------------------------------------
 
 using FluentAssertions;
+using Sprk.Provisioning.ControlPlane.Handlers;
 using Sprk.Provisioning.ControlPlane.Models;
 using Sprk.Provisioning.ControlPlane.Reconciler;
 using Xunit;
@@ -382,6 +383,60 @@ public sealed class DagAdvancerTests
         var act = () => _sut.ComputeReadyHandlers(null!);
 
         act.Should().Throw<ArgumentNullException>();
+    }
+
+    // -----------------------------------------------------------------------
+    // HANDLER-12 parity — HandlerIds.Dispatchable ↔ HandlerDependencies keys
+    //
+    // Exactly the regression net HANDLER-01 was born from: HandlerIds.H4Shared
+    // + HandlerIds.H4b were in Dispatchable + had keyed-DI registrations + had
+    // handler classes on disk, but no entry in DagAdvancer.HandlerDependencies
+    // meant the reconciler NEVER dispatched them. Any future Dispatchable
+    // addition without a paired DAG entry will now fail at build time here.
+    // -----------------------------------------------------------------------
+
+    [Fact]
+    public void HandlerDependencies_ContainsEveryDispatchableIdExceptEntryPoints_Parity()
+    {
+        // Every reconciler-dispatchable handler (i.e. Dispatchable minus entry
+        // points that transport-layer triggers dispatch) MUST have a
+        // HandlerDependencies entry — otherwise ComputeReadyHandlers can never
+        // return it and the reconciler silently drops it forever.
+        var expectedKeys = HandlerIds.Dispatchable
+            .Except(DagAdvancer.EntryPointHandlers)
+            .OrderBy(id => id, StringComparer.Ordinal)
+            .ToArray();
+
+        var actualKeys = DagAdvancer.HandlerDependencies.Keys
+            .Except(DagAdvancer.EntryPointHandlers)
+            .OrderBy(id => id, StringComparer.Ordinal)
+            .ToArray();
+
+        actualKeys.Should().BeEquivalentTo(expectedKeys,
+            "HANDLER-12: every id in HandlerIds.Dispatchable (except entry points H0/H0.5) " +
+            "MUST appear as a key in DagAdvancer.HandlerDependencies. A future Dispatchable " +
+            "addition without a paired DAG entry silently drops from reconciler dispatch — " +
+            "exactly the F19/F20-automation-inert failure mode that HANDLER-01 fixed.");
+    }
+
+    [Fact]
+    public void HandlerDependencies_DoesNotContainUnknownIds_ReverseParity()
+    {
+        // Reverse direction: every HandlerDependencies key (except entry points,
+        // which are documented-for-completeness) MUST resolve to a real
+        // Dispatchable id. A stray key (typo, deleted handler) would cause the
+        // reconciler to try to dispatch a non-registered handler → NoHandler
+        // dead-letter at task 102's dispatcher.
+        var strayKeys = DagAdvancer.HandlerDependencies.Keys
+            .Except(DagAdvancer.EntryPointHandlers)
+            .Except(HandlerIds.Dispatchable)
+            .ToArray();
+
+        strayKeys.Should().BeEmpty(
+            "HANDLER-12 reverse parity: any DAG key not in HandlerIds.Dispatchable is a " +
+            "typo or orphan (stray keys: {0}). Either add the id to Dispatchable + register " +
+            "a keyed handler, or remove the DAG key.",
+            string.Join(", ", strayKeys));
     }
 
     // -----------------------------------------------------------------------
