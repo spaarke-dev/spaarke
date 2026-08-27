@@ -1,161 +1,188 @@
-# Incident 2026-08-26 — every BFF-created document 403s on preview/view
+# Incident 2026-08-26 — every document 403s: `DocumentAuthorizationFilter` reads `sub`, not `oid`
 
-> **From**: `spaarke-auth-v4-dataverse-MI` (archived 2026-08-25). Filed here because the cause is
-> `f076b1e38` — this project's task-002/FR-01 document authorization filter — not the credential migration.
-> **Status**: diagnosed, NOT fixed. Deliberately left to you: it is your filter, your FR-01, and reverting a
-> deliberate security narrowing from outside the project would be wrong.
-> **Reported by**: operator, live on `spaarkedev1`, 2026-08-26.
+> **From**: `spaarke-auth-v4-dataverse-MI` (archived 2026-08-25). Filed here because the defect is in
+> `Api/Filters/DocumentAuthorizationFilter.cs`, added by `f076b1e38` (this project, task 002 / FR-01).
+> **Status**: root cause proven from live logs. **NOT fixed** — you own the file and the fix.
+> **Severity**: total document-access outage on `spaarkedev1`. Every user, every document, five routes.
 
----
-
-## Symptom
-
-Creating/saving a document succeeds. **Opening its preview immediately fails**, on two independent surfaces:
-
-```
-GET /api/documents/1d761626-b8a1-f111-aaad-7ced8ddc4a05/view-url    → 403
-GET /api/documents/02d7362b-bba1-f111-aaad-70a8a590c51c/preview-url → 403
-{status: 403, code: undefined, message: 'Access denied', correlationId: 'b2b07896-…'}
-```
-
-UI: *"You do not have permission to access this file."* — on a document the operator had **just created**,
-whose AI Profile (TL;DR + Summary) renders fine beside the error.
-
-Auth is healthy: `[SpaarkeAuth] Token acquired via in-memory-cache(browser-msal)` precedes each call.
+> ## ⚠️ THIS DOCUMENT WAS REWRITTEN 2026-08-26
+> An earlier revision blamed **document ownership** — service-owned `sprk_document` rows colliding with the
+> new per-document Read gate. **That diagnosis was WRONG** and is retracted in full. It was plausible,
+> internally consistent, and disproved in one step the moment the operator tested a document *they
+> personally own* and it 403'd too. If you read the earlier version, discard it; §"Retracted" records what
+> it claimed and why it was wrong, because a silently-replaced falsehood teaches nobody.
 
 ---
 
-## Root cause
+## Root cause — one line
 
-`f076b1e38` (2026-08-24 21:23, **`fix(auth)!`** — you marked it breaking) added
-`.AddDocumentAuthorizationFilter("read")` to the five URL-minting reads in `FileAccessEndpoints.cs`.
-That filter enforces the **caller's own Dataverse Read on the `sprk_document` row**.
-
-**BFF-created document rows are owned by a service application user, not by the human who caused the
-creation.** So the caller has no ownership-derived Read, and the filter denies.
-
-Your own comment on those lines predicts the symptom exactly:
-
-> *"a caller with container access but no Read on the `sprk_document` row previously succeeded and now
-> gets 403. That caller seeing another client's document is precisely the disclosure this project exists
-> to close (spec FR-01), so the narrowing is the point, not a side effect."*
-
-**The narrowing is doing what it says. The problem is the population it catches.** The intended target was
-"a caller reading *another client's* document." The actual population is **every user opening a document
-they just created themselves**, because the BFF stamps the service identity as owner.
-
----
-
-## It is NOT the auth-v4 credential migration — the check that settles it
-
-The obvious hypothesis is that auth-v4 changed document ownership. It did not change the *class*, and this
-is the query that shows it:
-
-```sql
-SELECT TOP 6 d.createdon, o.fullname AS owner_name, o.applicationid
-FROM sprk_document d JOIN systemuser o ON d.ownerid = o.systemuserid
-WHERE d.createdon < '2026-08-13' ORDER BY d.createdon DESC
+```csharp
+// Api/Filters/DocumentAuthorizationFilter.cs:49
+var userId = httpContext.User.FindFirst(ClaimTypes.NameIdentifier)?.Value;
 ```
 
-| createdon | owner | applicationid |
+`MapInboundClaims` is not disabled anywhere in `src/`, so it defaults to **true** and
+`ClaimTypes.NameIdentifier` silently aliases the **`sub`** claim — Entra's *pairwise, per-application*
+subject identifier. It is not a GUID and it is not the user's directory object id.
+
+`DataverseAccessDataSource.GetUserAccessAsync` expects an **Azure AD OID**. Its own log parameter says so:
+`AzureAdOid=`. Given a `sub`, no `systemuser` matches, the class is documented *"fail-closed: returns
+`AccessRights.None` on errors"* — and every caller is denied every document.
+
+**`DocumentAuthorizationFilter` is the sole outlier in the codebase.** Every peer filter reads `oid` first:
+
+| Filter | Line | Pattern |
 |---|---|---|
-| 2026-08-26 *(the failing doc)* | `# mi-bff-api-dev` | `5967251e-…` (UAMI) |
-| 2026-08-12 | Ralph Schroeder | *null* — user-created, not via the BFF path |
-| **2026-08-06** | **`SDAP-BFF-SPE-API`** | `1e40baad-…` (app registration) |
-| **2026-08-06** | **`SDAP-BFF-SPE-API`** | `1e40baad-…` |
-| **2026-08-05** | **`SDAP-BFF-SPE-API`** | `1e40baad-…` |
+| `AiAuthorizationFilter` | 58 | `oid ?? objectidentifier ?? …` |
+| `AnalysisAuthorizationFilter` | 94 | `oid ?? objectidentifier ?? …` |
+| `AgentAuthorizationFilter` | 53 | `oid ?? objectidentifier ?? …` |
+| `AiAuthorizationService` | 229 | `oid ?? objectidentifier ?? …` |
+| **`DocumentAuthorizationFilter`** | **49** | **`ClaimTypes.NameIdentifier` only** ← |
 
-BFF-created rows were owned by an **application user** well before auth-v4. auth-v4 changed *which*
-application user (`SDAP-BFF-SPE-API` → `# mi-bff-api-dev`); it did not introduce service ownership.
+---
 
-**The user never had ownership-based Read on these rows. What changed on 2026-08-24 is that something
-started enforcing it.**
+## Live proof — both identities, one request
 
-⚠️ One consequence worth pricing in: because the ownership pattern is old, **the back catalogue is affected
-too**, not just newly-created documents. Any `sprk_document` owned by either service identity is currently
-unreadable through these five routes by a caller who lacks a share or a team grant.
+Captured via `az webapp log tail` while the operator reproduced (2026-08-27T02:58Z):
+
+```
+[UAC-DIAG] GetUserAccessAsync START: AzureAdOid=d12L59FRq5S6dJP4qZ-wuS3RS5TYJnXdFpPUZH-rkjg …
+AUTHORIZATION DENIED: User d12L59FR…rkjg denied read on 02d7362b-… by OperationAccessRule
+    Reason: sdap.access.deny.insufficient_rights (AccessRights: None)
+
+[UAC-DIAG] RetrievePrincipalAccess SUCCESS: User=1d02f31c-1872-f011-b4cb-7c1e52671ad0,
+    Resource=02d7362b-…, GrantedAccess=Read, Write, Delete, Create, Append, AppendTo, Share
+Access snapshot retrieved for user c74ac1af-ff3b-46fb-83e7-3063616e959c:
+    AccessRights=Read, Write, Delete, Create, Append, AppendTo, Share, Teams=5, Roles=1
+[AI-AUTH] Access check PASSED: UserId=c74ac1af-… AccessRights=Read, Write, …
+```
+
+Two identities for one human, resolving oppositely:
+
+| value | claim | outcome |
+|---|---|---|
+| `d12L59FRq5S6dJP4qZ-wuS3RS5TYJnXdFpPUZH-rkjg` | **`sub`** (base64url, not a GUID) | **DENIED**, `AccessRights: None` |
+| `c74ac1af-ff3b-46fb-83e7-3063616e959c` | **`oid`** | **PASSED**, full rights, Teams=5 Roles=1 |
+
+**`RetrievePrincipalAccess` is working correctly.** It returns `Read, Write, Delete, Create, Append,
+AppendTo, Share` for this user on this exact document. The lookup is not broken and rights are not missing —
+the filter simply asks about the wrong principal.
+
+---
+
+## Retracted: the ownership theory, and why it was wrong
+
+The first diagnosis was that `f076b1e38`'s narrowing was catching **service-owned rows** — BFF-created
+`sprk_document` records are owned by an application user (`# mi-bff-api-dev` now, `SDAP-BFF-SPE-API` before
+2026-08-13), so the human had no ownership-derived Read.
+
+Every fact in that chain was true. The conclusion was still wrong:
+
+- **Disproving step**: the operator opened `8f6b371f-8a96-f111-b8db-0022482fb5a7` — created 2026-08-12,
+  `ownerid` = *Ralph Schroeder*, a document he personally owns. **It 403'd too.** Ownership cannot explain a
+  denial on a self-owned row.
+- The logs then showed why: rights were never the question. `RetrievePrincipalAccess` grants full access;
+  the filter asked about a principal that does not exist.
+
+Worth stating plainly because it is the trap this endpoint class sets: **a 403 here is ambiguous by
+construction.** Fail-closed means a *failed lookup* and a *genuine denial* emit the identical status, body
+and reason code. The ownership theory fit every client-side observation perfectly. Only `[UAC-DIAG]`
+separated them — the client cannot, and neither can a reviewer reasoning from the symptom.
 
 ---
 
 ## Blast radius
 
-All five URL-minting reads gated by `f076b1e38`, plus the write it also gated:
+All five URL-minting reads gated by `f076b1e38`, plus the write:
 
 ```
-GET /api/documents/{id}/preview-url     ← confirmed failing
-GET /api/documents/{id}/view-url        ← confirmed failing
+GET /api/documents/{id}/preview-url    ← confirmed
+GET /api/documents/{id}/view-url       ← confirmed
 GET /api/documents/{id}/preview
 GET /api/documents/{id}/office
 GET /api/documents/{id}/open-links
     …/analyze (write)
 ```
 
-Confirmed reproducing from **two independent clients** — the document form preview
-(`useDocumentPreview`) and `SemanticSearchApiService.getPreviewUrl` — so it is server-side, not a
-client-specific regression.
+Reproduced from two independent clients (`useDocumentPreview`, `SemanticSearchApiService.getPreviewUrl`) —
+server-side, not client-specific. Reached dev because auth-v4 deployed the BFF from a master-merged branch
+on 08-24/08-25, carrying `f076b1e38` with it.
 
 ---
 
-## ⚠️ Read this before diagnosing further: the 403 is ambiguous by design
+## The fix
 
-`DataverseAccessDataSource` is documented **"Implements fail-closed security: returns `AccessRights.None`
-on errors"**. So a **failed access lookup** and a **genuine denial** produce the *identical* 403 with the
-identical body. You cannot tell them apart from the client.
-
-This matters because there is a second, non-obvious candidate cause sitting right next to the first — your
-own comment at `DataverseAccessDataSource.cs:443`:
-
-> *"RetrievePrincipalAccess 'may not be available' with delegated tokens. **That claim is unverified**…
-> rather than bet the fix on it, any RetrievePrincipalAccess failure falls back to the original…"*
-
-If `RetrievePrincipalAccess` is failing under the OBO/delegated token, the fallback and the fail-closed
-default would produce this same 403 **even for a user who does have rights**. That is a materially
-different bug with a different fix.
-
-**Do not assume which one this is.** The `[UAC-DIAG]` logging you added distinguishes them:
-
-```bash
-az webapp log tail -g rg-spaarke-dev -n spaarke-bff-dev \
-  --subscription 484bc857-3802-427f-9ea5-ca47b43db0f0 | grep -E "UAC-DIAG|AUTHORIZATION (DENIED|GRANTED)|Fail-closed"
+```csharp
+var userId = httpContext.User.FindFirst("oid")?.Value
+    ?? httpContext.User.FindFirst("http://schemas.microsoft.com/identity/claims/objectidentifier")?.Value
+    ?? httpContext.User.FindFirst(ClaimTypes.NameIdentifier)?.Value;
 ```
 
-Reproduce the preview while that runs. `AUTHORIZATION DENIED … (AccessRights: None)` alongside a clean
-`GetUserAccessAsync` = genuine denial (ownership). A `Fail-closed` line or a `RetrievePrincipalAccess`
-failure = the lookup broke and the rights question was never actually answered.
-
-*(The Kudu docker log carries only container lifecycle, not app logs — a live stream during a repro is the
-only way to capture this. I could not capture it myself without an operator reproducing.)*
+Mirrors the four peers exactly. Risk is minimal in the strict sense that the filter currently denies
+*everyone* — it can only begin resolving correctly — and the logs already prove the right id yields the
+right answer.
 
 ---
 
-## Candidate fixes
+## ⚠️ The regression test is the part that matters
 
-Access resolution goes through **`RetrievePrincipalAccess`**, which honours Dataverse sharing (POA) — so
-both of the first two options genuinely grant Read.
+Credit to the reviewing project for this; it is the durable half of the incident.
 
-| # | Fix | Assessment |
-|---|---|---|
-| **1** | **BFF sets `ownerid` to the calling user** when creating a document on their behalf | **Recommended.** The user *is* the owner in every sense that matters; the service identity owning it is an artifact of how the write is executed, not a statement about the data. Also fixes the back catalogue's root cause going forward and needs no per-row grant. |
-| **2** | **Share the row with the caller on create** (POA grant) | Works, and `RetrievePrincipalAccess` will see it — but it is a per-row side-effect that must never be missed, on every create path, forever. More moving parts than #1. |
-| **3** | **Filter treats service-owned rows specially** | ❌ Weakest. It reintroduces exactly the hole FR-01 closes: "owned by the service" would become a blanket bypass, and every BFF-created row is service-owned. |
+**The auth fixtures set `oid` and `NameIdentifier` to the same constant**, which is why ~11,932 tests were
+green while every document request 403'd. Confirmed in this project's own fixture:
 
-**Either way there is a back-catalogue question** — existing service-owned rows need a one-time remediation
-(re-own or share), or they stay unreadable through these routes. Worth deciding explicitly rather than
-discovering later.
+```csharp
+// tests/integration/auth/UnifiedAccessControl/DocumentDestroyAuthorizationTestFixture.cs:203-204
+new Claim("oid", WorkspaceTestConstants.TestUserId),
+new Claim(ClaimTypes.NameIdentifier, WorkspaceTestConstants.TestUserId),   // ← identical
+```
+
+With both claims equal the two are **indistinguishable**, so no test can detect reading the wrong one. A
+regression test written against this fixture would pass before *and* after the fix — rebuilding the blind
+spot rather than covering it.
+
+**The divergent pattern already exists in-repo**, so this is closing an inconsistency, not inventing a
+convention:
+
+```csharp
+// CommunicationCreateRecordThreadContractTests.cs:292-293
+new Claim("oid", "test-user-oid"),
+new Claim(ClaimTypes.NameIdentifier, "test-user-id"),   // ← divergent
+```
+
+`ExternalAccessContractTests.cs:505-507` is also collapsed and worth the same sweep.
+
+Recommendation: assert the filter resolves the **`oid` specifically** — not merely that access is granted —
+so a future fixture change cannot silently re-collapse the two.
 
 ---
 
-## How it reached dev
+## On the root fix (`MapInboundClaims = false`) — sequencing
 
-`f076b1e38` merged to master 2026-08-24 21:23. `spaarke-auth-v4-dataverse-MI` deployed the BFF from a
-master-merged branch several times on 08-24/08-25, so **auth-v4's deploys carried this change to
-`spaarkedev1`** — the same way they carried `code-quality-and-assurance-r3`'s CORS narrowing, which
-produced the UAT blocker two days earlier (`projects/spaarke-auth-v4-dataverse-MI/notes/uat-findings-2026-08-24.md`).
+The reviewing project proposes disabling `MapInboundClaims` globally so `ClaimTypes.NameIdentifier` stops
+aliasing `sub` and the class cannot recur. **Agreed on direction** — this has now bitten three times (F8
+here, `OfficeEndpoints` 2026-08-25, this today), and per-site fixes only ever catch the site that already
+failed.
 
-Not a complaint about your change — it is correctly scoped and correctly marked breaking. It is a note that
-**dev deploys are shared**, so a deliberate narrowing lands for everyone the moment any project deploys,
-which compresses the window between "merged" and "someone hits it" to whenever the next unrelated deploy
-happens.
+Measured blast radius before recommending order:
+
+```
+74 sites read ClaimTypes.NameIdentifier across src/server, in 12+ files
+only ~28 have an oid fallback nearby
+```
+
+With the flag off, all 74 return **null**. Sites with `?? oid` are unaffected; roughly half are not, and
+those move from silently-wrong to null-identity.
+
+**The sequencing point: the fixture sweep is a PREREQUISITE, not a companion.** While `oid ==
+NameIdentifier` in the fixtures, the suite stays green whichever claim any site reads — so a 74-site change
+would ship with **zero verification of the thing it changes**. Diverge the fixtures first and the root fix
+becomes checkable; do it in the other order and you are changing auth resolution at 74 sites on a
+fail-closed surface with a suite that provably cannot see the bug class.
+
+Suggested order: **(1)** one-line fix here + divergent-value regression test → **(2)** fixture sweep
+repo-wide → **(3)** audit the 74 sites and add `oid` fallbacks → **(4)** flip `MapInboundClaims = false`.
+Steps 2–4 are F8's scope and deserve their own funding rather than riding a hotfix.
 
 ---
 
@@ -163,8 +190,11 @@ happens.
 
 | | |
 |---|---|
-| Failing doc | `1d761626-b8a1-f111-aaad-7ced8ddc4a05`, created 2026-08-26T21:39:38, owner **`# mi-bff-api-dev`** |
-| Filter commit | `f076b1e38` 2026-08-24 21:23 — `fix(auth)!: gate analyze (write) + the five URL-minting reads` |
-| Filter | `Api/Filters/DocumentAuthorizationFilter.cs` → `Spaarke.Core/Auth/AuthorizationService.cs` → `IAccessDataSource` |
-| Rights source | `DataverseAccessDataSource` → `RetrievePrincipalAccess` (honours sharing), fail-closed to `AccessRights.None` |
-| Correlation IDs | `b2b07896-c869-4b96-8dea-fd49f8088794` (view-url) |
+| Defect | `Api/Filters/DocumentAuthorizationFilter.cs:49` |
+| Introduced | `f076b1e38` 2026-08-24 21:23 — `fix(auth)!: gate analyze (write) + the five URL-minting reads` |
+| Chain | filter → `Spaarke.Core/Auth/AuthorizationService.cs` → `IAccessDataSource` → `DataverseAccessDataSource` → `RetrievePrincipalAccess` |
+| Fail-closed | `DataverseAccessDataSource.cs:14` — *"returns AccessRights.None on errors"* |
+| Denied id | `d12L59FRq5S6dJP4qZ-wuS3RS5TYJnXdFpPUZH-rkjg` (`sub`) |
+| Granted id | `c74ac1af-ff3b-46fb-83e7-3063616e959c` (`oid`) → systemuser `1d02f31c-1872-f011-b4cb-7c1e52671ad0` |
+| Self-owned doc that still 403'd | `8f6b371f-8a96-f111-b8db-0022482fb5a7` (owner: Ralph Schroeder) |
+| Capture | `az webapp log tail -g rg-spaarke-dev -n spaarke-bff-dev \| grep -E "UAC-DIAG\|AUTHORIZATION"` |
