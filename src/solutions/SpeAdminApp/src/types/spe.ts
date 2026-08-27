@@ -377,6 +377,38 @@ export interface UpdateConsumingTenantRequest {
 export type ContainerStatus = "active" | "inactive" | "deleted";
 
 /**
+ * Archive state, from Graph's `archivalDetails.archiveStatus` (FR-E01, task 050).
+ *
+ * ⚠️ There is deliberately no `"notArchived"` member — Graph's `siteArchiveStatus` enum has none on
+ * either API version, and a container that is not archived simply omits `archivalDetails`. So the
+ * absence of a value here is the ONLY way "not archived" is expressed, and it is indistinguishable
+ * from "Graph did not report". Never render `undefined` as a positive claim that content is online.
+ *
+ * All three values are transitional or terminal states of an ASYNCHRONOUS operation:
+ *   recentlyArchived → fullyArchived   (archiving, in progress → done)
+ *   reactivating     → (field absent)  (unarchiving, in progress → done)
+ */
+export type ContainerArchiveStatus =
+  | "recentlyArchived"
+  | "fullyArchived"
+  | "reactivating";
+
+/**
+ * Body of the 202 returned by the archive / unarchive endpoints (FR-E01).
+ *
+ * ⚠️ The shape exists to make "accepted ≠ done" impossible to miss. `pending` is always true today —
+ * Graph has no synchronous path for these actions — and `expectedNextState` names the state the
+ * container is moving into, so the UI can say what is happening rather than implying it finished.
+ */
+export interface ArchivalActionAccepted {
+  message: string;
+  /** Always true: Graph performs archival asynchronously. */
+  pending: boolean;
+  /** The state the container transitions into — `recentlyArchived` or `reactivating`. */
+  expectedNextState: ContainerArchiveStatus;
+}
+
+/**
  * SPE Container — returned by the Graph API and proxied through
  * GET /api/spe/containers?configId={id}.
  */
@@ -389,8 +421,26 @@ export interface Container {
   description?: string;
   /** Container type ID this container belongs to */
   containerTypeId: string;
-  /** Current status */
-  status: ContainerStatus;
+  /**
+   * Current status — or `null` meaning **NOT REPORTED**.
+   *
+   * 🔑 Always `null` on list rows: Graph drops `status` from container collection rows even when
+   * `$select` asks for it (measured 2026-08-27, task 050). Populated on the detail fetch.
+   *
+   * This was a required `ContainerStatus` until 2026-08-27, and both the server mapper and the grid
+   * cell defaulted it to `"active"`. The server's fallback fired for 100% of responses because it
+   * searched the wrong place for the field, so the Status column asserted "Active" for every
+   * container regardless of truth. **Do not reintroduce a `?? "active"` anywhere.** Render the absent
+   * case explicitly (spec NFR-06).
+   */
+  status: ContainerStatus | null;
+  /**
+   * Archive state (FR-E01), or absent when there is no archive state to show.
+   *
+   * ⚠️ A **separate dimension** from {@link status} — a container can be `active` and
+   * `fullyArchived` at once. Do not merge them into a single badge value.
+   */
+  archiveStatus?: ContainerArchiveStatus;
   /** Whether the container is locked (read-only) */
   isItemVersioningEnabled?: boolean;
   /** Creation date ISO string */

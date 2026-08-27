@@ -25,7 +25,7 @@
   <goal>Archive and restore both succeed against a Spaarke Dev container, and archived state is visible in the Containers grid.</goal>
 
   <context>
-    <background>Spec FR-E01 / §4.3. GA February 2026. Important boundary: the per-container-TYPE opt-in is PowerShell (Set-SPOContainerType -IsArchiveEnabled) and is NOT this app's job — the app manages archived CONTAINERS, not the opt-in. If the container type has not opted in, archival calls will fail, and the UI must explain that rather than presenting a generic error.</background>
+    <background>Spec FR-E01 / §4.3. GA February 2026 — note this refers to the CAPABILITY; the Graph archive/unarchive actions are BETA-ONLY (absent from the v1.0 CSDL, verified 2026-08-27). Important boundary: the per-container-TYPE opt-in is PowerShell and is NOT this app's job — the app manages archived CONTAINERS, not the opt-in. CORRECTED 2026-08-27 during execution: this said "Set-SPOContainerType -IsArchiveEnabled", which does not exist on that cmdlet in any module version. The real command is `Set-SPOContainerTypeConfiguration -ContainerTypeId &lt;guid&gt; -IsArchiveEnabled $true` and it needs SPO module >= 16.0.27515.12000. If the container type has not opted in, archival calls fail with 403 notAllowed ("...does not currently support archiving"), and the UI must explain that rather than presenting a generic error.</background>
     <relevant-files>
       <file role="modify">src/server/api/Sprk.Bff.Api/Infrastructure/Graph/SpeAdminGraphService.cs</file>
       <file role="modify">src/server/api/Sprk.Bff.Api/Api/SpeAdmin/ContainerEndpoints.cs</file>

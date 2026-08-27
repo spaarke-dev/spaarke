@@ -1,7 +1,7 @@
 # Current Task State — sdap-SPE-admin-app-r2
 
-> **Last Updated**: 2026-08-27 (by `context-handoff`)
-> **Recovery**: read Quick Recovery, then §1 (the open escalation). §6 is preserved history.
+> **Last Updated**: 2026-08-27 (by `task-execute`, mid-task 050)
+> **Recovery**: read Quick Recovery, then §0 (task 050) and §1 (the older open escalation).
 
 ---
 
@@ -9,27 +9,115 @@
 
 | Field | Value |
 |---|---|
-| **Task** | 042 **complete** (was partial; finished this session). No task active. |
-| **Phase** | Workstream D done. Wave W15+ (E-tasks) next. |
-| **Status** | Branch clean, **committed but NOT pushed**. In sync with `origin/master` otherwise. |
-| **Head** | `1b1d03b23` |
-| **Next Action** | `git push`, then **task 050** (container archival) — see §2 |
-| **Blocking?** | No. One **escalation awaits your decision** (§1) but it does not block 050. |
+| **Task** | **050 — container archival** (FR-E01), implementation complete, gates running |
+| **Phase** | Wave W15 — Workstream E |
+| **Status** | 042 pushed (`b2aff6e5a`). 050 code written, BFF build 0/0, 16/16 archival contract tests pass |
+| **Next Action** | Finish gates: full test run, vite build, publish size. Then commit + escalate the opt-in (§0.4) |
+| **Blocking?** | 050's `<escalation><trigger>` **HAS FIRED** — see §0.4. Everything not gated on it is done. |
 
-### Files modified this session
+### Files modified — task 050
 | File | Purpose |
 |---|---|
-| 15 SpeAdmin test files | 9 deleted whole, 6 pruned — see §3 |
-| `tests/unit/domain/SpeAdmin/SpeAdminDtoMappingTests.cs` | **new** — 4 relocated mapper tests |
-| `tests/Spaarke.ArchTests/ADR007_NestedDomainRecordTests.cs` | **new** — 2 rules + controls, replaces 6 ad-hoc reflection tests |
-| `tests/Spaarke.ArchTests/CosmosProvisioningSecretGuardTests.cs` | **repaired a dead guard** — see §1 |
-| `tests/Spaarke.ArchTests/ServiceBusClientGuardTests.cs` | scoped off `.Tests` projects |
-| `projects/…/notes/manual-test-plan.md` | **new** — relocated plan, annotated |
-| `projects/…/notes/test-retirement-inventory.md` | **new** — full classification record |
+| `Infrastructure/Graph/SpeAdminGraphService.cs` | `ArchiveContainerAsync` / `UnarchiveContainerAsync` + `ForConfig` wrappers, `ArchivalNotEnabledException`, `ReadContainerStatus` + `ReadArchiveStatus`, `Status` → nullable |
+| `Api/SpeAdmin/ContainerEndpoints.cs` | `POST …/archive` + `…/unarchive`, 409 remediation payload, `ContainerDto.ArchiveStatus` |
+| `tests/integration/contract/SpeAdmin/SpeAdminContainerArchivalContractTests.cs` | **new** — 16 tests incl. 2 negative controls |
+| `SpeAdminApp/src/types/spe.ts` | `ContainerArchiveStatus`, `ArchivalActionAccepted`, `status` nullable |
+| `SpeAdminApp/src/services/speApiClient.ts` | `containers.archive` / `.unarchive` |
+| `SpeAdminApp/src/components/containers/ContainersPage.tsx` | Archive/Restore toolbar + ConfirmModal + Archive column + Status honesty fix |
+| `SpeAdminApp/src/components/containers/ContainerDetail.tsx` | Status absent-state + Archive row |
+| `projects/…/notes/task-050-findings.md` | **new** — all measurements |
 
 ### Critical context
-Merged `origin/master` (was 9 behind; CI files only). **SpeAdmin tests 722 → 207**, build 0/0, 207/207
-pass, 0 skipped. Task 042 is done. The one thing needing you is §1.
+Archival is **beta-only** in Graph — and that is fine, the container surface is *already* pinned to
+beta by task 020's measured decision, so **no ADR conflict and no §6.5 gate**. Two defects were found
+and fixed on the way (§0.2, §0.3). The feature cannot be live-verified: the container type has not
+opted in and that is an operator action (§0.4).
+
+---
+
+## 0. Task 050 — container archival (FR-E01)
+
+### 0.1 🔴 The documented PowerShell remediation does not exist
+
+POML AC-4 requires the not-opted-in error to "name the PowerShell remediation". Every source in the
+repo — POML, spec FR-E01, `design.md` §4.3, `knowledge/sharepoint-embedded/` — says
+`Set-SPOContainerType -IsArchiveEnabled`. **That parameter does not exist on that cmdlet in any
+module version** (verified by reflecting the cmdlet types out of the module assembly).
+
+The real one is **`Set-SPOContainerTypeConfiguration -ContainerTypeId <guid> -IsArchiveEnabled $true`**,
+and it needs SPO module **≥ 16.0.27515.12000** (the commonly-installed 16.0.26413.0 has no archive
+parameter on any cmdlet). Following the POML literally would have shipped an error message telling an
+admin to run a command that does not exist — the project's signature defect, inside the feature meant
+to remove it. Full detail: [`notes/task-050-findings.md`](notes/task-050-findings.md) §1.
+
+**The four source docs still carry the wrong cmdlet.** Correcting them is not done yet — see §0.5.
+
+### 0.2 🔴 `status` was fabricated as "active" for 100% of responses, everywhere
+
+`SpeContainerSummary.Status` defaulted to `"active"` and all four mapping sites ended `: "active"`.
+`status` is in the **v1.0 schema**, so the Graph SDK models it as a **typed property** and Kiota never
+puts it in `AdditionalData` — which is where all four readers looked. The lookup could not match on any
+path, so the literal fired every time: GET-single (Graph really returns `active`), CREATE (Graph really
+returns `inactive`), and both LIST paths. A brand-new, not-yet-activated container was reported active.
+The client had a second `?? "active"` on top. Both fixed; `Status` is now `string?` and renders
+"Not reported". Regression-guarded by two contract tests.
+
+### 0.3 Kiota shape guess — caught by a test, not by review
+
+`archivalDetails` arrives as **`Microsoft.Kiota.Abstractions.Serialization.UntypedObject`**, not
+`JsonElement` and not `IDictionary<string,object>`. My first `ReadArchiveStatus` handled the latter two
+and returned null for every real response. Caught because the contract test asserted the *mapped value*
+rather than that the code ran. (Scalars differ — `storageUsedInBytes` arrives as `decimal`, so task
+024's storage fix is genuinely working; checked while I was in there.)
+
+### 0.4 🔔 ESCALATION FIRED — archive/restore cannot be live-verified from here
+
+Live probe on a **throwaway container** (NFR-07: provisioned, activated, probed, torn down 204/204):
+
+```
+POST /beta/storage/fileStorage/containers/{id}/archive
+  → 403 notAllowed: "Archival operation cannot proceed because this
+                     application does not currently support archiving."
+```
+
+The 403 is **semantic, not routing** — the beta action exists and is reachable; the container type has
+not opted in. So AC-1 and AC-2 (archive succeeds / restore returns to active) are **not verified**.
+
+Enabling it is an operator action and I did not do it: it is a tenant-level change to a **shared**
+container type (`Spaarke PAYGO 1`) other projects use, and it needs the module upgrade in §0.1.
+Recipe to finish the verification is in `notes/task-050-findings.md` §7.
+
+⚠️ **Watch item**: `archivalDetails` has never been seen on the wire — omitted from LIST and from
+GET-single even with an explicit `$select` that `@odata.context` echoes back. If it is still absent
+after a successful archive, the property is unserved and the grid must source archive state from the
+action outcome + `Get-SPOContainer -ArchiveStatus` instead. The code isolates this in one mapper.
+
+### 0.5 Gates — all green
+
+| Gate | Result |
+|---|---|
+| BFF build | **0 errors / 0 warnings** |
+| BFF tests | **10,661 passed / 0 failed** / 95 skipped |
+| SpeAdmin contract tests | **92/92**, incl. 16 new archival |
+| ArchTests | **106/111** — the same 5 pre-existing `customer-provisioning-orchestration-r1` failures as before this task; none mine, none in Tier-1's blocking set |
+| Client typecheck | **124 errors = baseline exactly** (`git stash` diff), 0 new |
+| Vite build | ✅ 19.2 s; strings verified present in `dist/speadmin.html` |
+| Publish size | **45.08 MB** incl PDBs (44.16 excl). Baseline 44.96 → **+0.12 MB**. Ceiling 60 |
+| CVE | none |
+| ADR-check | 0 violations, 1 warning (test path — resolved path C, see below) |
+
+**Docs corrected** (all 5 that carried the non-existent cmdlet): `spec.md` FR-E01, `design.md` §4.3,
+`knowledge/sharepoint-embedded/docs/learn-containers.md`, `notes/spe-platform-research-2026-08-20.md`
+(annotated, left as historical record), and the 050 POML.
+
+**Deviation — test location.** The POML nominated `tests/unit/Sprk.Bff.Api.Tests/Api/SpeAdmin/`;
+task 042 established that is **not** a KEEP path, so tests written there would be deletion candidates
+at the `/test-diet` gate (task 090). Written to `tests/integration/contract/SpeAdmin/` instead — same
+assembly, no csproj change. §6.5 path C (comply); the POML predates 042's finding.
+
+### 0.6 Remaining on 050
+Nothing in code. **The one open item is the operator opt-in in §0.4** — until then AC-1/AC-2 stay
+unverified and 050 is 🔄, not ✅, in `TASK-INDEX.md`.
 
 ---
 

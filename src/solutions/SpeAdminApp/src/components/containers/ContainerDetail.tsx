@@ -464,10 +464,39 @@ const DetailsTab: React.FC<{ container: Container }> = ({ container }) => {
       </Text>
       <Divider />
       <PropertyRow label="Status">
-        <Badge color={statusBadgeColor(container.status)} appearance="filled" size="small">
-          {container.status.charAt(0).toUpperCase() + container.status.slice(1)}
-        </Badge>
+        {/*
+          Graph DOES return status on the detail fetch (measured live 2026-08-27) — unlike the list,
+          where it is always absent. So this normally renders a real badge. The absent branch is not
+          defensive padding: until 2026-08-27 the server discarded Graph's value and substituted
+          "active" on every path, so this row asserted "Active" for containers Graph had reported as
+          inactive. If the value is ever genuinely missing, saying so beats inventing one.
+        */}
+        {container.status ? (
+          <Badge color={statusBadgeColor(container.status)} appearance="filled" size="small">
+            {container.status.charAt(0).toUpperCase() + container.status.slice(1)}
+          </Badge>
+        ) : (
+          <Text italic style={{ color: tokens.colorNeutralForeground3 }}>
+            Not reported
+          </Text>
+        )}
       </PropertyRow>
+      {/* Archive state (FR-E01) — a separate dimension from Status; shown only when there is one. */}
+      {container.archiveStatus && (
+        <PropertyRow label="Archive">
+          <Badge
+            color={container.archiveStatus === "reactivating" ? "informative" : "warning"}
+            appearance="outline"
+            size="small"
+          >
+            {container.archiveStatus === "fullyArchived"
+              ? "Archived"
+              : container.archiveStatus === "recentlyArchived"
+                ? "Archiving…"
+                : "Restoring…"}
+          </Badge>
+        </PropertyRow>
+      )}
       <PropertyRow label="Versioning">
         <Text>{container.isItemVersioningEnabled ? "Enabled" : "Disabled"}</Text>
       </PropertyRow>

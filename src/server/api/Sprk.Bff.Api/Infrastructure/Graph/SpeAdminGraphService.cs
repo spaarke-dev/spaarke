@@ -89,6 +89,42 @@ public sealed class SpeAdminGraphService
     /// absent state, never a blank (NFR-06). Never synthesise it from the container id — the id
     /// encodes the site GUID but not the tenant host, so any derived URL would be a fabricated value.
     /// </param>
+    /// <param name="Status">
+    /// The container's lifecycle status (<c>active</c> / <c>inactive</c>), or null meaning
+    /// <b>NOT REPORTED</b>.
+    ///
+    /// 🔑 <b>Null on every LIST row. Populated by CREATE and GET-single.</b> Measured live
+    /// 2026-08-27 (task 050 — see notes/task-050-findings.md §4): the containers collection accepts
+    /// <c>$select=…,status</c>, answers <b>200</b>, and returns rows carrying only <c>id</c> and
+    /// <c>displayName</c>. Without <c>$select</c> it returns seven properties, <c>status</c> not among
+    /// them. The same shape as <see cref="WebUrl"/> — asked, accepted, silently dropped.
+    ///
+    /// This was <c>string Status = "active"</c> until 2026-08-27, and all four mapping sites ended
+    /// <c>: "active"</c>. Because Graph never returns <c>status</c> on a LIST, that fallback fired for
+    /// <b>100% of grid rows</b> — the Containers grid asserted "Active" for every container in the
+    /// tenant, whatever its real state. Absent collapsed into a benign value; §2.4, shipping.
+    ///
+    /// Do NOT "fix" a null here by adding <c>status</c> to the LIST <c>$select</c>. It is already
+    /// there and Graph drops it. Render null as an explicit absent state (spec NFR-06).
+    /// </param>
+    /// <param name="ArchiveStatus">
+    /// Archive state from <c>archivalDetails.archiveStatus</c> — one of <c>recentlyArchived</c>,
+    /// <c>fullyArchived</c>, <c>reactivating</c> — or null meaning <b>not archived, or not reported</b>
+    /// (FR-E01, task 050).
+    ///
+    /// Graph's <c>siteArchiveStatus</c> enum has <b>no</b> <c>notArchived</c> member on either API
+    /// version, so a non-archived container is expressed by the <i>absence</i> of
+    /// <c>archivalDetails</c>. Null here therefore does not distinguish "not archived" from "Graph did
+    /// not tell us" — treat it as "no archive state to show", never as a positive claim of active
+    /// content.
+    ///
+    /// ⚠️ This is a <b>separate dimension from <paramref name="Status"/></b>. A container can be
+    /// <c>status: active</c> and <c>fullyArchived</c> at the same time; they are different Graph
+    /// properties answering different questions. Do not merge them into one column value.
+    ///
+    /// Beta-only, like the <c>archive</c>/<c>unarchive</c> actions themselves. The container surface
+    /// is already pinned to beta by task 020's measured decision, so this adds no new version risk.
+    /// </param>
     public sealed record SpeContainerSummary(
         string Id,
         string DisplayName,
@@ -96,8 +132,9 @@ public sealed class SpeAdminGraphService
         string ContainerTypeId,
         DateTimeOffset? CreatedDateTime,
         long? StorageUsedInBytes,
-        string Status = "active",
-        string? WebUrl = null);
+        string? Status = null,
+        string? WebUrl = null,
+        string? ArchiveStatus = null);
 
     /// <summary>
     /// A single file or folder item returned from the Graph drive items API.
@@ -732,7 +769,7 @@ public sealed class SpeAdminGraphService
                     config.QueryParameters.Select = new[]
                     {
                         "id", "displayName", "description", "containerTypeId",
-                        "createdDateTime", "storageUsedInBytes", "status"
+                        "createdDateTime", "storageUsedInBytes", "status", "archivalDetails"
                     };
                 }, ct),
             ct);
@@ -743,7 +780,6 @@ public sealed class SpeAdminGraphService
             {
                 foreach (var container in response.Value)
                 {
-                    var status = container.AdditionalData?.TryGetValue("status", out var s) == true && s is string ss ? ss : "active";
                     results.Add(new SpeContainerSummary(
                         container.Id ?? string.Empty,
                         container.DisplayName ?? string.Empty,
@@ -753,7 +789,11 @@ public sealed class SpeAdminGraphService
                         // LIST returns real consumption on beta (measured live, task 020). Null
                         // means NOT REPORTED and must never render as 0 B.
                         StorageUsedInBytes: ReadStorageUsedInBytes(container.AdditionalData),
-                        Status: status));
+                        // Null on a LIST, always — Graph drops `status` from collection rows even
+                        // when $select asks for it (task 050 §4). This used to read `: "active"`,
+                        // which fabricated the grid's entire Status column.
+                        Status: ReadContainerStatus(container.Status, container.AdditionalData),
+                        ArchiveStatus: ReadArchiveStatus(container.AdditionalData)));
                 }
             }
 
@@ -1066,7 +1106,7 @@ public sealed class SpeAdminGraphService
                         config.QueryParameters.Select = new[]
                         {
                             "id", "displayName", "description", "containerTypeId",
-                            "createdDateTime", "storageUsedInBytes", "status"
+                            "createdDateTime", "storageUsedInBytes", "status", "archivalDetails"
                         };
 
                         if (top.HasValue && top.Value > 0)
@@ -1083,7 +1123,6 @@ public sealed class SpeAdminGraphService
         {
             foreach (var container in response.Value)
             {
-                var status = container.AdditionalData?.TryGetValue("status", out var s) == true && s is string ss ? ss : "active";
                 items.Add(new SpeContainerSummary(
                     container.Id ?? string.Empty,
                     container.DisplayName ?? string.Empty,
@@ -1091,7 +1130,9 @@ public sealed class SpeAdminGraphService
                     container.ContainerTypeId?.ToString() ?? containerTypeId,
                     container.CreatedDateTime,
                     StorageUsedInBytes: ReadStorageUsedInBytes(container.AdditionalData),
-                    Status: status));
+                    // Null on a LIST, always — see ListContainersAsync for the measurement.
+                    Status: ReadContainerStatus(container.Status, container.AdditionalData),
+                    ArchiveStatus: ReadArchiveStatus(container.AdditionalData)));
             }
         }
 
@@ -1167,7 +1208,6 @@ public sealed class SpeAdminGraphService
             "SPE container created: Id={ContainerId}, DisplayName='{DisplayName}', ContainerTypeId={ContainerTypeId}",
             created.Id, created.DisplayName, containerTypeId);
 
-        var createdStatus = created.AdditionalData?.TryGetValue("status", out var csvs) == true && csvs is string csvsStr ? csvsStr : "active";
         return new SpeContainerSummary(
             Id: created.Id ?? string.Empty,
             DisplayName: created.DisplayName ?? displayName,
@@ -1178,7 +1218,12 @@ public sealed class SpeAdminGraphService
             // and hardcoded null — but an inference is not a measurement, and if Graph ever does
             // report a value here we would still have been discarding it.
             StorageUsedInBytes: ReadStorageUsedInBytes(created.AdditionalData),
-            Status: createdStatus);
+            // CREATE genuinely returns this — measured 2026-08-27, a fresh container comes back
+            // `status: inactive` until /activate is called. So unlike the LIST paths this is a real
+            // read, and the old `: "active"` fallback was actively wrong here: it reported a
+            // brand-new, not-yet-activated container as active.
+            Status: ReadContainerStatus(created.Status, created.AdditionalData),
+            ArchiveStatus: ReadArchiveStatus(created.AdditionalData));
     }
 
     /// <summary>
@@ -1209,7 +1254,7 @@ public sealed class SpeAdminGraphService
                         config.QueryParameters.Select = new[]
                         {
                             "id", "displayName", "description", "containerTypeId",
-                            "createdDateTime", "storageUsedInBytes", "status"
+                            "createdDateTime", "storageUsedInBytes", "status", "archivalDetails"
                         };
                         // The container URL (FR-C10). `fileStorageContainer` exposes no URL property
                         // in either API version — it lives on the `drive` navigation property.
@@ -1229,7 +1274,6 @@ public sealed class SpeAdminGraphService
                 return null;
             }
 
-            var containerStatus = container.AdditionalData?.TryGetValue("status", out var sv) == true && sv is string svs ? svs : "active";
             return new SpeContainerSummary(
                 container.Id ?? string.Empty,
                 container.DisplayName ?? string.Empty,
@@ -1240,9 +1284,13 @@ public sealed class SpeAdminGraphService
                 // is normally null. Read anyway: if Graph starts returning it, we get it for free
                 // instead of discarding it for another year.
                 StorageUsedInBytes: ReadStorageUsedInBytes(container.AdditionalData),
-                Status: containerStatus,
+                // GET-single DOES return status (measured live 2026-08-27) — it was being discarded
+                // and replaced with a hardcoded "active" because the old reader looked in
+                // AdditionalData for a property the SDK models as typed. See ReadContainerStatus.
+                Status: ReadContainerStatus(container.Status, container.AdditionalData),
                 // FR-C10. GET-single is the ONLY call that can carry this — see SpeContainerSummary.
-                WebUrl: ReadContainerWebUrl(container.Drive?.WebUrl, container.AdditionalData));
+                WebUrl: ReadContainerWebUrl(container.Drive?.WebUrl, container.AdditionalData),
+                ArchiveStatus: ReadArchiveStatus(container.AdditionalData));
         }
         catch (ODataError odataError) when (odataError.ResponseStatusCode == (int)HttpStatusCode.NotFound)
         {
@@ -2299,6 +2347,30 @@ public sealed class SpeAdminGraphService
         var client = await GetClientForConfigAsync(config, ct).ConfigureAwait(false);
         try { return await PermanentDeleteContainerAsync(client, containerId, ct).ConfigureAwait(false); }
         catch (ODataError ex) { throw ex.ToSpaarkeStorageException($"PermanentDeleteContainer({containerId})"); }
+    }
+
+    /// <summary>Archives a container (FR-E01). See <see cref="ArchiveContainerAsync"/>.</summary>
+    /// <remarks>
+    /// <see cref="ArchivalNotEnabledException"/> is deliberately allowed to propagate rather than
+    /// being wrapped into <c>SpaarkeStorageException</c> like every other Graph failure here. Wrapping
+    /// it would flatten the one diagnosis the endpoint needs to distinguish back into an anonymous
+    /// 403, which is the exact information loss this task set out to fix.
+    /// </remarks>
+    public async Task<bool> ArchiveContainerForConfigAsync(
+        ContainerTypeConfig config, string containerId, CancellationToken ct = default)
+    {
+        var client = await GetClientForConfigAsync(config, ct).ConfigureAwait(false);
+        try { return await ArchiveContainerAsync(client, containerId, ct).ConfigureAwait(false); }
+        catch (ODataError ex) { throw ex.ToSpaarkeStorageException($"ArchiveContainer({containerId})"); }
+    }
+
+    /// <summary>Unarchives a container (FR-E01). See <see cref="UnarchiveContainerAsync"/>.</summary>
+    public async Task<bool> UnarchiveContainerForConfigAsync(
+        ContainerTypeConfig config, string containerId, CancellationToken ct = default)
+    {
+        var client = await GetClientForConfigAsync(config, ct).ConfigureAwait(false);
+        try { return await UnarchiveContainerAsync(client, containerId, ct).ConfigureAwait(false); }
+        catch (ODataError ex) { throw ex.ToSpaarkeStorageException($"UnarchiveContainer({containerId})"); }
     }
 
     public async Task<IReadOnlyList<SecurityAlertResult>> GetSecurityAlertsForConfigAsync(
@@ -4171,6 +4243,153 @@ public sealed class SpeAdminGraphService
     }
 
     /// <summary>
+    /// Reads a container's lifecycle status as the wire string Graph uses (<c>active</c> /
+    /// <c>inactive</c>), or null when Graph did not report one.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// 🔴 <b>Why this takes the typed property first.</b> Until 2026-08-27 all four container mapping
+    /// sites read status as
+    /// <c>additionalData.TryGetValue("status", out var s) &amp;&amp; s is string ss ? ss : "active"</c>.
+    /// <c>status</c> is in the <b>v1.0 schema</b>, so Graph SDK 6.5.0 generates it as a strongly-typed
+    /// <c>Status</c> property on <c>FileStorageContainer</c> — and Kiota therefore <b>never</b> puts it
+    /// in <c>AdditionalData</c>. The lookup could not match on any code path, so the <c>: "active"</c>
+    /// fallback fired <b>100% of the time, everywhere</b> — LIST, GET-single and CREATE alike.
+    /// </para>
+    /// <para>
+    /// Measured consequences (live, 2026-08-27): GET-single returns <c>status: "active"</c> and CREATE
+    /// returns <c>status: "inactive"</c> — both were discarded and replaced with the literal
+    /// <c>"active"</c>. A brand-new container that had not yet been activated was reported as active.
+    /// This is the same class of defect as task 022's discarded <c>deletedDateTime</c>: the value was
+    /// on the wire the whole time and the reader looked in the wrong place.
+    /// </para>
+    /// <para>
+    /// <c>AdditionalData</c> is still consulted as a fallback so that a value Graph adds to the beta
+    /// surface later — one the v1.0-modelled enum cannot represent — is surfaced verbatim rather than
+    /// silently dropped. Null is returned when neither source has a value: <b>null means NOT REPORTED
+    /// and must never render as "Active"</b> (spec NFR-06).
+    /// </para>
+    /// </remarks>
+    internal static string? ReadContainerStatus(
+        FileStorageContainerStatus? typed, IDictionary<string, object>? additionalData)
+    {
+        // A raw wire value wins when present: it is what Graph actually said, and it survives values
+        // the generated enum predates. UnknownFutureValue is the enum admitting it does not know.
+        if (additionalData is not null &&
+            additionalData.TryGetValue("status", out var raw) && raw is not null)
+        {
+            var text = raw switch
+            {
+                string s when !string.IsNullOrWhiteSpace(s) => s,
+                System.Text.Json.JsonElement je when je.ValueKind == System.Text.Json.JsonValueKind.String
+                    => je.GetString(),
+                _ => null,
+            };
+
+            if (!string.IsNullOrWhiteSpace(text))
+            {
+                return text;
+            }
+        }
+
+        if (typed is null or FileStorageContainerStatus.UnknownFutureValue)
+        {
+            return null;
+        }
+
+        // Graph's wire form is camelCase ("active"), the generated enum is PascalCase.
+        var name = typed.Value.ToString();
+        return string.IsNullOrEmpty(name)
+            ? null
+            : char.ToLowerInvariant(name[0]) + name[1..];
+    }
+
+    /// <summary>
+    /// Reads <c>archivalDetails.archiveStatus</c> — <c>recentlyArchived</c> / <c>fullyArchived</c> /
+    /// <c>reactivating</c> — or null when the container is not archived, or Graph did not report.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <c>archivalDetails</c> is <b>beta-only</b> and absent from the v1.0 schema, so the SDK does not
+    /// generate a typed property for it and it can only arrive through <c>AdditionalData</c> — the
+    /// mirror image of <see cref="ReadContainerStatus"/>. Both readers exist because guessing which
+    /// side a field lands on is what produced the defect above.
+    /// </para>
+    /// <para>
+    /// ⚠️ <b>Null is genuinely ambiguous here and that is a platform fact, not a shortcut.</b> Graph's
+    /// <c>siteArchiveStatus</c> enum has no <c>notArchived</c> member on either version, so a
+    /// non-archived container is expressed by omitting <c>archivalDetails</c> entirely. Null therefore
+    /// cannot distinguish "not archived" from "not reported". Callers must render it as "no archive
+    /// state to show" and never as a positive assertion that content is online.
+    /// </para>
+    /// <para>
+    /// As of 2026-08-27 <c>archivalDetails</c> has <b>never been observed on the wire</b> — it is
+    /// omitted from LIST and from GET-single even with an explicit <c>$select</c> that
+    /// <c>@odata.context</c> echoes back, on a tenant whose container type has not opted into
+    /// archival. Whether it appears once the opt-in is set is the open question in
+    /// notes/task-050-findings.md §7. Every shape Kiota can produce is accepted here so that answer
+    /// does not depend on a second guess.
+    /// </para>
+    /// </remarks>
+    internal static string? ReadArchiveStatus(IDictionary<string, object>? additionalData)
+    {
+        if (additionalData is null ||
+            !additionalData.TryGetValue("archivalDetails", out var raw) ||
+            raw is null)
+        {
+            return null;
+        }
+
+        static string? Clean(string? s) => string.IsNullOrWhiteSpace(s) ? null : s;
+
+        switch (raw)
+        {
+            // ── The shape Kiota 2.0 actually produces ──
+            //
+            // MEASURED, not assumed (2026-08-27). Kiota materialises an un-modelled COMPLEX property
+            // as `UntypedObject`; only scalars arrive as native CLR types (`storageUsedInBytes` comes
+            // through as `decimal`, which is why ReadStorageUsedInBytes works without this branch).
+            //
+            // The first draft of this method handled `JsonElement` and `IDictionary<string, object>`
+            // and returned null for every real response — two guesses, both wrong, exactly the
+            // failure task 022 recorded when `deletedDateTime` was tested `is string` while Kiota had
+            // stored a `DateTime`. It was caught only because a contract test asserted the mapped
+            // value instead of asserting that the code ran.
+            case UntypedObject untyped
+                when untyped.GetValue().TryGetValue("archiveStatus", out var node):
+                return node switch
+                {
+                    UntypedString us => Clean(us.GetValue()),
+                    _ => null,
+                };
+
+            // ── Shapes Kiota does not currently produce, kept deliberately ──
+            //
+            // A serializer change, a different Graph version, or a hand-built AdditionalData in a
+            // test could produce either of these. They cost three lines and they are the difference
+            // between "archive state silently disappears" and "archive state keeps working".
+            case System.Text.Json.JsonElement je
+                when je.ValueKind == System.Text.Json.JsonValueKind.Object
+                     && je.TryGetProperty("archiveStatus", out var statusEl)
+                     && statusEl.ValueKind == System.Text.Json.JsonValueKind.String:
+                return Clean(statusEl.GetString());
+
+            case IDictionary<string, object> nested
+                when nested.TryGetValue("archiveStatus", out var nestedStatus):
+                return nestedStatus switch
+                {
+                    string s => Clean(s),
+                    System.Text.Json.JsonElement nje
+                        when nje.ValueKind == System.Text.Json.JsonValueKind.String => Clean(nje.GetString()),
+                    _ => null,
+                };
+
+            default:
+                return null;
+        }
+    }
+
+    /// <summary>
     /// Reads a container's SharePoint URL from the expanded <c>drive</c> navigation property.
     /// </summary>
     /// <param name="typedDriveWebUrl">
@@ -5666,6 +5885,181 @@ public sealed class SpeAdminGraphService
                 "Deleted container {ContainerId} not found in recycle bin (404 on restore)", containerId);
             return false;
         }
+    }
+
+    /// <summary>
+    /// Thrown when an archive or unarchive call is refused because the container TYPE has not opted
+    /// into archival. Distinct from a generic authorization failure: nothing about the caller's
+    /// permissions can fix it — an operator must enable the capability on the container type.
+    /// </summary>
+    /// <remarks>
+    /// Spec FR-E01 / task 050. The opt-in is deliberately OUT of this app's scope (it is a
+    /// SharePoint PowerShell action, not a Graph one), so the only useful thing the app can do is say
+    /// precisely what is wrong and what fixes it. Carrying this as its own exception type keeps the
+    /// endpoint from having to re-sniff Graph error codes.
+    /// </remarks>
+    public sealed class ArchivalNotEnabledException(string containerId, string? graphMessage)
+        : Exception(
+            $"Archival is not enabled for the container type owning container '{containerId}'. " +
+            (graphMessage is { Length: > 0 } ? $"Graph reported: {graphMessage}" : "Graph reported no detail."))
+    {
+        public string ContainerId { get; } = containerId;
+
+        /// <summary>Graph's own message, preserved verbatim for the ProblemDetails payload.</summary>
+        public string? GraphMessage { get; } = graphMessage;
+    }
+
+    /// <summary>
+    /// Archives an SPE container (FR-E01), reducing its storage cost and de-prioritising its content
+    /// in Copilot results. Calls the Graph <b>beta</b> action
+    /// <c>POST /storage/fileStorage/containers/{id}/archive</c>.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <b>Beta-only, and that is not drift.</b> The <c>archive</c> and <c>unarchive</c> actions are
+    /// absent from the v1.0 CSDL entirely (read from <c>$metadata</c>, 2026-08-27) and exist only on
+    /// beta. The container surface is already pinned to beta by task 020's measured decision —
+    /// <see cref="SpeContainerGraphBaseUrl"/>, guarded by
+    /// <c>SpeAdminGraphVersionContractTests</c> — so this introduces no new version exposure.
+    /// "GA February 2026" refers to the capability in the admin centre and PowerShell, NOT to Graph
+    /// v1.0.
+    /// </para>
+    /// <para>
+    /// Issued through <see cref="SendGraphJsonAsync"/> because Graph SDK 6.5.0 generates from v1.0 and
+    /// therefore models no <c>Archive</c> request builder. That helper keeps the SDK's auth, retry and
+    /// — critically — its <c>ODataError</c> mapping, so failures still translate normally.
+    /// </para>
+    /// <para>
+    /// ⚠️ <b>Asynchronous.</b> A successful call does not mean the content is archived. The container
+    /// enters <c>recentlyArchived</c> and moves to <c>fullyArchived</c> later. Callers must not report
+    /// completion on the strength of this returning.
+    /// </para>
+    /// <para>ADR-007: no Graph SDK types cross this boundary.</para>
+    /// </remarks>
+    /// <exception cref="ArchivalNotEnabledException">
+    /// The container type has not opted into archival. Measured live 2026-08-27: Graph answers
+    /// <c>403 notAllowed — "Archival operation cannot proceed because this application does not
+    /// currently support archiving."</c> The 403 is semantic, not routing: the action exists and is
+    /// reachable; the capability is switched off.
+    /// </exception>
+    /// <returns><c>true</c> when Graph accepted the archive; <c>false</c> when the container was not found.</returns>
+    public async Task<bool> ArchiveContainerAsync(
+        GraphServiceClient graphClient,
+        string containerId,
+        CancellationToken ct = default)
+        => await PostContainerLifecycleActionAsync(graphClient, containerId, "archive", ct)
+            .ConfigureAwait(false);
+
+    /// <summary>
+    /// Returns an archived SPE container to active use (FR-E01). Calls the Graph <b>beta</b> action
+    /// <c>POST /storage/fileStorage/containers/{id}/unarchive</c>.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// 🔑 <b><c>unarchive</c> is NOT <c>restore</c>.</b> Both actions exist on <c>fileStorageContainer</c>
+    /// and they do different things:
+    /// <c>restore</c> recovers a <i>soft-deleted</i> container from <c>deletedContainers</c> — that is
+    /// <see cref="RestoreContainerAsync"/>, already shipped. <c>unarchive</c> reverses <i>archival</i>
+    /// on a container that was never deleted. Naming this method Restore-anything would have collided
+    /// with a real and different operation.
+    /// </para>
+    /// <para>
+    /// ⚠️ <b>Asynchronous, and visibly so.</b> The container enters <c>reactivating</c> and is not
+    /// usable when this returns. Graph's own enum models the intermediate state, so reporting
+    /// "restored" on the return of this call would assert something Graph is explicitly telling us is
+    /// not yet true.
+    /// </para>
+    /// </remarks>
+    /// <exception cref="ArchivalNotEnabledException">The container type has not opted into archival.</exception>
+    /// <returns><c>true</c> when Graph accepted the request; <c>false</c> when the container was not found.</returns>
+    public async Task<bool> UnarchiveContainerAsync(
+        GraphServiceClient graphClient,
+        string containerId,
+        CancellationToken ct = default)
+        => await PostContainerLifecycleActionAsync(graphClient, containerId, "unarchive", ct)
+            .ConfigureAwait(false);
+
+    /// <summary>
+    /// Shared body for the <c>archive</c> / <c>unarchive</c> beta actions — identical request shape,
+    /// identical failure modes, so they share one implementation rather than two copies that drift.
+    /// </summary>
+    private async Task<bool> PostContainerLifecycleActionAsync(
+        GraphServiceClient graphClient,
+        string containerId,
+        string action,
+        CancellationToken ct)
+    {
+        ArgumentNullException.ThrowIfNull(graphClient);
+        ArgumentException.ThrowIfNullOrWhiteSpace(containerId);
+
+        _logger.LogInformation(
+            "Container {ContainerId}: issuing {Action} (Graph beta action)", containerId, action);
+
+        var url =
+            $"{ResolveGraphBaseUrl(graphClient)}/storage/fileStorage/containers/" +
+            $"{Uri.EscapeDataString(containerId)}/{action}";
+
+        try
+        {
+            await ExecuteWithRetryAsync(
+                () => SendGraphJsonAsync(graphClient, HttpMethod.Post, url, "{}", ct),
+                ct).ConfigureAwait(false);
+
+            _logger.LogInformation(
+                "Container {ContainerId}: {Action} accepted by Graph. NOTE: the operation is " +
+                "asynchronous — acceptance is not completion.", containerId, action);
+
+            return true;
+        }
+        catch (ODataError ex) when (IsArchivalNotEnabled(ex))
+        {
+            // Deliberately NOT folded into the generic 403 path. A caller who is told "forbidden"
+            // will go and audit their own permissions, which cannot possibly fix this.
+            _logger.LogWarning(
+                "Container {ContainerId}: {Action} refused — the container type has not opted into " +
+                "archival. Graph: {GraphMessage}",
+                containerId, action, ex.Error?.Message);
+
+            throw new ArchivalNotEnabledException(containerId, ex.Error?.Message);
+        }
+        catch (ODataError ex) when (ex.ResponseStatusCode == (int)System.Net.HttpStatusCode.NotFound)
+        {
+            _logger.LogInformation(
+                "Container {ContainerId} not found (404 on {Action})", containerId, action);
+            return false;
+        }
+    }
+
+    /// <summary>
+    /// Recognises Graph's "archival is not switched on for this container type" refusal.
+    /// </summary>
+    /// <remarks>
+    /// Keys on the machine-readable <c>code</c> (<c>notAllowed</c>) with the message only as a
+    /// secondary signal. Matching on the English sentence alone would break the day Microsoft rewords
+    /// it, and would fail outright under a non-English service locale — a detector that silently stops
+    /// detecting is worse than none, because the not-opted-in case would then fall through to the
+    /// generic 403 branch and produce precisely the misleading "check your permissions" error this
+    /// task exists to eliminate.
+    /// </remarks>
+    private static bool IsArchivalNotEnabled(ODataError ex)
+    {
+        if (ex.ResponseStatusCode is not ((int)System.Net.HttpStatusCode.Forbidden
+            or (int)System.Net.HttpStatusCode.BadRequest))
+        {
+            return false;
+        }
+
+        if (!string.Equals(ex.Error?.Code, "notAllowed", StringComparison.OrdinalIgnoreCase))
+        {
+            return false;
+        }
+
+        // `notAllowed` is not archival-specific, so require the message to be about archiving before
+        // claiming this diagnosis. If Graph localises the message the code-only match is lost and we
+        // fall through to the generic path — a worse message, but never a WRONG one.
+        var message = ex.Error?.Message;
+        return message is not null
+            && message.Contains("archiv", StringComparison.OrdinalIgnoreCase);
     }
 
     /// <summary>

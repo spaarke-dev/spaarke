@@ -25,6 +25,7 @@ import type {
   ContainerTypePermission,
   ContainerTypeOwner,
   Container,
+  ArchivalActionAccepted,
   ContainerCustomProperty,
   ContainerPermission,
   ContainerPermissionUpsert,
@@ -732,6 +733,48 @@ export const speApiClient = {
     unlock(containerId: string, configId: string): Promise<Container> {
       return postAction<Container>(
         "/spe/containers/" + containerId + "/unlock" + qs({ configId }),
+      );
+    },
+
+    /**
+     * POST /api/spe/containers/{containerId}/archive?configId={id}
+     * Archive a container (FR-E01) — up to 75% storage cost reduction.
+     *
+     * ⚠️ Returns **202 Accepted**, not 200. Graph performs archival asynchronously: the container
+     * enters `recentlyArchived` and reaches `fullyArchived` later. Resolving does NOT mean the
+     * container is archived — callers must not report completion, only acceptance.
+     *
+     * Returns `ArchivalActionAccepted`, not `Container`: the server has nothing newer to hand back
+     * at this point, and returning a `Container` would imply the row was re-read post-change.
+     *
+     * Throws on 409 when the container TYPE has not opted into archival — an operator action, not a
+     * caller-permission problem. The ProblemDetails carries a `remediation` field with the exact
+     * PowerShell.
+     */
+    archive(
+      containerId: string,
+      configId: string,
+    ): Promise<ArchivalActionAccepted> {
+      return postAction<ArchivalActionAccepted>(
+        "/spe/containers/" + containerId + "/archive" + qs({ configId }),
+      );
+    },
+
+    /**
+     * POST /api/spe/containers/{containerId}/unarchive?configId={id}
+     * Return an archived container to active use (FR-E01).
+     *
+     * 🔑 NOT `recycleBin.restore` — that recovers a soft-DELETED container. This reverses ARCHIVAL
+     * on a container that was never deleted. Graph models them as two distinct actions.
+     *
+     * ⚠️ Also asynchronous: the container enters `reactivating` and is not usable on resolve.
+     */
+    unarchive(
+      containerId: string,
+      configId: string,
+    ): Promise<ArchivalActionAccepted> {
+      return postAction<ArchivalActionAccepted>(
+        "/spe/containers/" + containerId + "/unarchive" + qs({ configId }),
       );
     },
 
