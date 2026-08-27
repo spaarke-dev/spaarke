@@ -62,11 +62,6 @@
       "enum": ["shared-trial", "smb", "enterprise", "dedicated"],
       "description": "Cost-envelope tier hint for H0 preflight cost-envelope check. Optional."
     },
-    "operatorUpn": {
-      "type": "string",
-      "format": "email",
-      "description": "Operator UPN for audit trail. Optional — if omitted, resolved from `az ad signed-in-user show`."
-    },
     "skipExternalPrereqs": {
       "type": "boolean",
       "default": false,
@@ -75,6 +70,50 @@
     "notes": {
       "type": "string",
       "description": "Free-form intake notes archived to provisioning-runs/{customerId}-{runId}/intake.md. Optional."
+    },
+    "confirmationAcknowledgment": {
+      "type": "string",
+      "const": "proceed with provisioning",
+      "description": "REQUIRED for batch dispatch. Literal attestation phrase — batch equivalent of the interactive Step 3 confirmation gate. Per wave-0-adr-note-2026-08-27.md Decision 3 (BAT-03): NFR-11 auditability preserved via two-layer evidence — (1) operator TYPED the phrase into the intake file (typing = intent expression); (2) SHA-256 hash of the intake JSON is captured in the L2 audit record + Step 7 postmortem. Interactive mode still requires stdin-typed phrase per skill Step 3 (unchanged). Any value other than the exact literal MUST cause the skill to HARD STOP before POST /api/runs."
+    },
+    "mcpDisconnectPolicy": {
+      "type": "string",
+      "enum": ["failFast", "proceedWithFallback"],
+      "default": "failFast",
+      "description": "Batch policy for skill Step 0d Dataverse MCP disconnect (BAT-04). `failFast` → exit non-zero with runs/{runId}-mcp-disconnect.json diagnostic. `proceedWithFallback` → use `pac data` + raw Web API PS fallback path (Fallback Matrix F1). Ignored in interactive mode (operator answers yes/no prompt)."
+    },
+    "acknowledgeUpgradeMode": {
+      "type": "boolean",
+      "default": false,
+      "description": "Batch acknowledgement that customerId may have prior runs (BAT-05). If Step 1a upgrade probe finds a `sprk_dataverseenvironment` row with `sprk_provisionedon != null` AND this flag is false → HARD STOP with runs/{runId}-upgrade-required.json. Set true only when operator has consciously chosen upgrade-mode semantics per §14A upgrade model. Ignored in interactive mode (operator answers upgrade-confirmation prompt)."
+    },
+    "onFailedPolicy": {
+      "type": "string",
+      "enum": ["autoResumeOnce", "abandon"],
+      "default": "abandon",
+      "description": "Batch policy for skill Step 4b Failed row (BAT-07). `autoResumeOnce` → POST /api/runs/{id}/resume ONCE after Failed → if still Failed, exit non-zero. `abandon` → immediately write runs/{runId}-failed.json + exit non-zero (skips resume). Ignored in interactive mode (operator answers resume/abandon prompt)."
+    },
+    "onQuarantinedPolicy": {
+      "type": "string",
+      "enum": ["failFast"],
+      "default": "failFast",
+      "description": "Batch policy for skill Step 4b Quarantined row (BAT-07). ALWAYS `failFast` in batch (enum-of-one for forward compat) — write structured JSON diagnostic to runs/{runId}-quarantine.json and exit with distinct non-zero code (3). Quarantine is never auto-cleared in batch mode; operator MUST manually invoke QuarantineClearService via a separate maintenance workflow."
+    },
+    "onManualGatePolicy": {
+      "type": "string",
+      "enum": ["waitAndExit", "pollUntilTimeout", "failFast"],
+      "default": "waitAndExit",
+      "description": "Batch policy for skill Step 5 Manual Gate Handling (BAT-08). `waitAndExit` → write runs/{runId}-WAITING.md + runs/{runId}-gate.json + exit code 4 (operator resumes via `--resume` flag after clearing gate). `pollUntilTimeout` → poll GET /api/runs/{id} at 10s cadence until gate clears or configured timeout (currently 30 min hard-cap); exit 0 on clear, exit 4 on timeout. `failFast` → immediately exit code 4 (no wait, no polling). Applies to H0.5 admin consent · H1 quota bump · H8 SPE 24h · any WaitingOnGate transition."
+    },
+    "costEnvelopePolicy": {
+      "type": "string",
+      "enum": ["abortOnOverrun", "warnAndProceed"],
+      "default": "abortOnOverrun",
+      "description": "Batch policy for H0 preflight cost-envelope check (COMP-10). `abortOnOverrun` → H0 fail-fast if projected monthly cost exceeds tier ceiling; run enters Failed(cost-overrun) before any side-effecting handler dispatches. `warnAndProceed` → log warning to runs/{runId}-cost-warning.json but continue dispatch (Model 1 shared-trial ONLY — MUST reject for Model2Dedicated + prod). Default `abortOnOverrun` per binding NFR intent."
+    },
+    "postmortemFile": {
+      "type": "string",
+      "description": "Optional path to a pre-authored lessons-learned template (BAT-09). If provided + valid → skill Step 7b uses as base and appends run-specific data. If provided + invalid (missing required sections) → HARD STOP with runs/{runId}-postmortem-invalid.json. If omitted → skill auto-generates minimum lessons-learned.md from run outcome. Path is relative to repo root."
     }
   },
   "allOf": [
@@ -113,8 +152,14 @@
       "region": "westus2",
       "openAiRegion": "westus3",
       "tier": "shared-trial",
-      "operatorUpn": "ralph.schroeder@spaarke.com",
-      "notes": "First E2E Model 1 platform stand-up — permanent trial env (per SESSION 11 Q4 BINDING)."
+      "notes": "First E2E Model 1 platform stand-up — permanent trial env (per SESSION 11 Q4 BINDING).",
+      "confirmationAcknowledgment": "proceed with provisioning",
+      "mcpDisconnectPolicy": "proceedWithFallback",
+      "acknowledgeUpgradeMode": true,
+      "onFailedPolicy": "abandon",
+      "onQuarantinedPolicy": "failFast",
+      "onManualGatePolicy": "waitAndExit",
+      "costEnvelopePolicy": "abortOnOverrun"
     },
     {
       "customerId": "acme-corp",
@@ -125,7 +170,11 @@
       "region": "westus2",
       "openAiRegion": "westus3",
       "tier": "dedicated",
-      "operatorUpn": "ralph.schroeder@spaarke.com"
+      "confirmationAcknowledgment": "proceed with provisioning",
+      "acknowledgeUpgradeMode": false,
+      "onFailedPolicy": "abandon",
+      "onManualGatePolicy": "waitAndExit",
+      "costEnvelopePolicy": "abortOnOverrun"
     }
   ]
 }
