@@ -100,6 +100,16 @@ public static class BicepDeployRejectionCodes
     /// </summary>
     public const string BicepDeployOutputsIncomplete = "bicep-deploy-outputs-incomplete";
 
+    /// <summary>
+    /// HANDLER-05 (Wave 2 pre-dispatch remediation 2026-08-27) — F10 verbatim.
+    /// One of H2a's globally-namespaced resource names (Storage account /
+    /// Service Bus namespace / Key Vault when covered) is already taken by
+    /// another tenant / subscription. Deploy would fail 90-180s into
+    /// H2a's Bicep run; H2a fails fast (Resumable) with the specific
+    /// (kind, name, reason) so the operator can rename before re-running.
+    /// </summary>
+    public const string ResourceNameTaken = "resource-name-taken";
+
     /// <summary>Race with a concurrent Cosmos writer — reconciler will observe winning state.</summary>
     public const string ConcurrentWriteConflict = "concurrent-write-conflict";
 

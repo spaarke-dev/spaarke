@@ -146,6 +146,7 @@ public sealed class H2aBicepInfraDeployHandler : IProvisioningHandler
     private readonly IArmKeyVaultRefProbe _armProbe;
     private readonly IUpgradeDriftDetector _driftDetector;
     private readonly IBicepTemplateInspector _templateInspector;
+    private readonly IResourceNameAvailabilityProbe _nameAvailabilityProbe;
     private readonly BicepInfraDeployOptions _options;
     private readonly ILogger<H2aBicepInfraDeployHandler> _logger;
 
@@ -162,6 +163,7 @@ public sealed class H2aBicepInfraDeployHandler : IProvisioningHandler
         IArmKeyVaultRefProbe armProbe,
         IUpgradeDriftDetector driftDetector,
         IBicepTemplateInspector templateInspector,
+        IResourceNameAvailabilityProbe nameAvailabilityProbe,
         IOptions<BicepInfraDeployOptions> options,
         ILogger<H2aBicepInfraDeployHandler> logger)
     {
@@ -170,6 +172,7 @@ public sealed class H2aBicepInfraDeployHandler : IProvisioningHandler
         ArgumentNullException.ThrowIfNull(armProbe);
         ArgumentNullException.ThrowIfNull(driftDetector);
         ArgumentNullException.ThrowIfNull(templateInspector);
+        ArgumentNullException.ThrowIfNull(nameAvailabilityProbe);
         ArgumentNullException.ThrowIfNull(options);
         ArgumentNullException.ThrowIfNull(logger);
 
@@ -178,6 +181,7 @@ public sealed class H2aBicepInfraDeployHandler : IProvisioningHandler
         _armProbe = armProbe;
         _driftDetector = driftDetector;
         _templateInspector = templateInspector;
+        _nameAvailabilityProbe = nameAvailabilityProbe;
         _options = options.Value;
         _logger = logger;
     }
@@ -352,6 +356,52 @@ public sealed class H2aBicepInfraDeployHandler : IProvisioningHandler
                 BicepDeployRejectionCodes.BicepDeployFailed, diagnostic, cancellationToken).ConfigureAwait(false);
         }
 
+        // (7.5) HANDLER-05 (Wave 2 pre-dispatch remediation 2026-08-27) — F10:
+        //       check globally-namespaced resource names for availability
+        //       BEFORE the ~20 min Bicep deploy tries to create them and
+        //       fails 90-180s in on a global collision (F10 verbatim: burned
+        //       16m35s on the SESSION 2 first deploy because a Service Bus
+        //       `-sb` suffix was already reserved globally). Runs AFTER the
+        //       inspector (per punchlist: "wire into H2aBicepInfraDeployHandler
+        //       after inspector but before runner") and BEFORE the upgrade-
+        //       drift branch since an upgrade run against existing resources
+        //       will NOT collide (the customer's own resources will report as
+        //       "unavailable — already owned by you", which the probe
+        //       correctly treats as a domain conflict; skip the check on
+        //       upgrade runs to avoid a false positive).
+        if (!TryGetNonEmpty(parameters, ProvisionedOnParameterKey, out _))
+        {
+            try
+            {
+                var nameCheckRequest = new ResourceNameAvailabilityRequest(
+                    SubscriptionId: subscriptionId,
+                    Names: BuildGloballyNamespacedNameChecks(envelope.CustomerId, environmentName));
+                var nameResult = await _nameAvailabilityProbe
+                    .CheckAvailabilityAsync(nameCheckRequest, cancellationToken).ConfigureAwait(false);
+                if (nameResult is ResourceNameAvailabilityResult.Conflict conflict)
+                {
+                    var diagnostic =
+                        $"Globally-namespaced resource name collision: {conflict.Kind} name '{conflict.ConflictingName}' " +
+                        $"is unavailable ({conflict.Reason}). H2a fails fast per HANDLER-05 (F10 remediation) — " +
+                        "operator must rename the resource in the Bicep template (or wait for the current owner " +
+                        "to release the name) before re-running H2a. Sparing the 20 min deploy window a global-name " +
+                        "collision would otherwise burn.";
+                    return await FailAsync(run, etag, FailureClass.Resumable,
+                        BicepDeployRejectionCodes.ResourceNameTaken, diagnostic, cancellationToken).ConfigureAwait(false);
+                }
+            }
+            catch (Exception ex) when (ex is not OperationCanceledException)
+            {
+                // Infra fault (ARM SDK connection drop, etc.) — do NOT block
+                // the deploy on a probe-side outage; log + proceed. The Bicep
+                // deploy itself will surface real collisions if any exist.
+                _logger.LogWarning(ex,
+                    "H2a resource-name availability probe infra fault (proceeding): " +
+                    "runId={RunId} customerId={CustomerId}",
+                    envelope.RunId, envelope.CustomerId);
+            }
+        }
+
         // (8) Upgrade-mode branch: if `provisionedOn` is populated, run
         //     what-if FIRST + REJECT on drift.
         if (TryGetNonEmpty(parameters, ProvisionedOnParameterKey, out var provisionedOnRaw))
@@ -484,6 +534,45 @@ public sealed class H2aBicepInfraDeployHandler : IProvisioningHandler
         return await MarkCompleteAsync(run, etag, idempotencyKey, outputs, envelope, cancellationToken)
             .ConfigureAwait(false);
     }
+
+    /// <summary>
+    /// HANDLER-05 (Wave 2 pre-dispatch remediation 2026-08-27): builds the
+    /// list of (kind, name) tuples the resource-name availability probe
+    /// checks BEFORE the Bicep deploy fires. Names MUST mirror the
+    /// customer.bicep naming convention verbatim (any drift = false
+    /// positives / negatives):
+    ///   - Storage: <c>take(toLower(replace('sprk{customerId}{env}sa', '-', '')), 24)</c>
+    ///     (customer.bicep line 141)
+    ///   - Service Bus namespace: <c>sprk-{customerId}-{env}-sb</c>
+    ///     (F10 verbatim mention: "Service Bus `-sb` suffix was already reserved
+    ///     globally"; matches customer.bicep's serviceBusNamespaceName pattern)
+    /// Key Vault is omitted for now (see <see cref="ResourceNameKind.KeyVault"/>
+    /// enum comment — Azure.ResourceManager.KeyVault not currently a project
+    /// dependency). Exposed <c>internal</c> so unit tests can validate the
+    /// naming logic without invoking the handler.
+    /// </summary>
+    internal static IReadOnlyList<ResourceNameCheckEntry> BuildGloballyNamespacedNameChecks(
+        string customerId,
+        string environmentName)
+    {
+        var baseName = $"sprk{customerId}{environmentName}";
+        // Storage: lowercase + no hyphens + 24-char cap (customer.bicep line 141).
+        var storageName = TruncateTo(
+            $"{baseName}sa".ToLowerInvariant().Replace("-", string.Empty, StringComparison.Ordinal),
+            24);
+        // Service Bus namespace: keep hyphens for readability (SB name rules
+        // allow hyphens); 50-char cap per ARM (well within customer id +
+        // env-name budget). F10 verbatim reference.
+        var sbName = $"sprk-{customerId}-{environmentName}-sb";
+        return new[]
+        {
+            new ResourceNameCheckEntry(ResourceNameKind.StorageAccount, storageName),
+            new ResourceNameCheckEntry(ResourceNameKind.ServiceBusNamespace, sbName),
+        };
+    }
+
+    private static string TruncateTo(string value, int max)
+        => value.Length <= max ? value : value.Substring(0, max);
 
     /// <summary>
     /// Computes the deterministic H2a idempotency key:

@@ -243,6 +243,105 @@ public sealed class H2aBicepInfraDeployHandlerTests
         repo.LastWrittenRun!.Status.Should().Be(RunStatus.Failed);
     }
 
+    // ---------- HANDLER-05 resource-name availability (Wave 2 pre-dispatch remediation 2026-08-27) ----------
+
+    [Fact]
+    public async Task Handler05_NameAvailability_Conflict_FailsResumable_NoRunnerCall()
+    {
+        var run = BuildRun();
+        var repo = new FakeRepository(run, etag: "etag-h05-conflict");
+        var runner = FakeBicepDeployRunner.Success(BuildOutputs());
+        var nameProbe = FakeResourceNameAvailabilityProbe.Conflict(
+            ResourceNameKind.ServiceBusNamespace,
+            "sprk-acme-prod-sb",
+            "AlreadyExists: The specified service namespace is already taken.");
+        var handler = BuildHandler(
+            repo, runner, FakeArmKeyVaultRefProbe.Match(),
+            new FakeUpgradeDriftDetector(), FakeBicepTemplateInspector.Clean(),
+            nameProbe: nameProbe);
+
+        var result = await handler.HandleAsync(BuildEnvelope(), CancellationToken.None);
+
+        var failure = result.Should().BeOfType<HandlerResult.Failure>().Subject;
+        failure.Class.Should().Be(FailureClass.Resumable);
+        failure.RejectionCode.Should().Be(BicepDeployRejectionCodes.ResourceNameTaken);
+        failure.Diagnostic.Should().Contain("sprk-acme-prod-sb");
+        failure.Diagnostic.Should().Contain("AlreadyExists");
+        failure.Diagnostic.Should().Contain("ServiceBusNamespace");
+        runner.CallCount.Should().Be(0, "runner MUST NOT fire on a name-availability conflict");
+        nameProbe.CallCount.Should().Be(1);
+        repo.LastWrittenRun.Should().NotBeNull();
+        repo.LastWrittenRun!.Status.Should().Be(RunStatus.Failed);
+    }
+
+    [Fact]
+    public async Task Handler05_NameAvailability_AllAvailable_ProceedsToRunner()
+    {
+        var run = BuildRun();
+        var repo = new FakeRepository(run, etag: "etag-h05-ok");
+        var runner = FakeBicepDeployRunner.Success(BuildOutputs());
+        var nameProbe = FakeResourceNameAvailabilityProbe.AllAvailable();
+        var handler = BuildHandler(
+            repo, runner, FakeArmKeyVaultRefProbe.Match(),
+            new FakeUpgradeDriftDetector(), FakeBicepTemplateInspector.Clean(),
+            nameProbe: nameProbe);
+
+        var result = await handler.HandleAsync(BuildEnvelope(), CancellationToken.None);
+
+        result.Should().BeOfType<HandlerResult.Success>();
+        nameProbe.CallCount.Should().Be(1);
+        runner.CallCount.Should().Be(1);
+    }
+
+    [Fact]
+    public async Task Handler05_NameAvailability_UpgradeMode_SkipsCheck()
+    {
+        // Existing customer upgrade would collide with ITSELF (correct: an upgrade
+        // does not re-provision, the resources already exist under the customer).
+        // Handler MUST NOT invoke the name-availability probe on upgrade runs.
+        var run = BuildRun(includeProvisionedOn: true);
+        var repo = new FakeRepository(run, etag: "etag-h05-upgrade");
+        var runner = FakeBicepDeployRunner.Success(BuildOutputs());
+        var nameProbe = FakeResourceNameAvailabilityProbe.Conflict(
+            ResourceNameKind.StorageAccount, "sprkacmeprodsa", "would-collide-if-checked");
+        var handler = BuildHandler(
+            repo, runner, FakeArmKeyVaultRefProbe.Match(),
+            new FakeUpgradeDriftDetector(), FakeBicepTemplateInspector.Clean(),
+            nameProbe: nameProbe);
+
+        var result = await handler.HandleAsync(BuildEnvelope(), CancellationToken.None);
+
+        result.Should().BeOfType<HandlerResult.Success>();
+        nameProbe.CallCount.Should().Be(0, "upgrade runs MUST skip name-availability check to avoid self-collision false-positive");
+    }
+
+    [Fact]
+    public void Handler05_BuildGloballyNamespacedNameChecks_MirrorsCustomerBicepNamingConvention()
+    {
+        // customer.bicep line 141: take(toLower(replace('sprk{customer}{env}sa', '-', '')), 24)
+        // F10 verbatim: Service Bus namespace uses `-sb` suffix (customer.bicep pattern)
+        var checks = H2aBicepInfraDeployHandler.BuildGloballyNamespacedNameChecks("acme", "prod");
+
+        checks.Should().HaveCount(2);
+        checks[0].Kind.Should().Be(ResourceNameKind.StorageAccount);
+        checks[0].RequestedName.Should().Be("sprkacmeprodsa");
+        checks[1].Kind.Should().Be(ResourceNameKind.ServiceBusNamespace);
+        checks[1].RequestedName.Should().Be("sprk-acme-prod-sb");
+    }
+
+    [Fact]
+    public void Handler05_BuildGloballyNamespacedNameChecks_StorageNameTruncatedTo24Chars()
+    {
+        // Long customerId should trigger the 24-char cap on the storage name
+        // (customer.bicep line 141 verbatim: take(..., 24)).
+        var checks = H2aBicepInfraDeployHandler.BuildGloballyNamespacedNameChecks(
+            "verylongcustomerid", "staging");
+
+        var storage = checks.Single(c => c.Kind == ResourceNameKind.StorageAccount);
+        storage.RequestedName.Length.Should().BeLessThanOrEqualTo(24);
+        storage.RequestedName.Should().StartWith("sprk");
+    }
+
     // ---------- T7 Redis presence ----------
 
     [Fact]
@@ -537,15 +636,21 @@ public sealed class H2aBicepInfraDeployHandlerTests
         FakeArmKeyVaultRefProbe probe,
         FakeUpgradeDriftDetector driftDetector,
         FakeBicepTemplateInspector inspector,
-        string? runNotesDir = null)
+        string? runNotesDir = null,
+        FakeResourceNameAvailabilityProbe? nameProbe = null)
     {
         var options = Options.Create(new BicepInfraDeployOptions
         {
             RunNotesDirectory = runNotesDir
                 ?? Path.Combine(Path.GetTempPath(), "h2a-tests-" + Guid.NewGuid().ToString("N")),
         });
+        // HANDLER-05 (Wave 2 pre-dispatch remediation 2026-08-27): the
+        // resource-name-availability probe defaults to "all available" so
+        // existing tests remain unaffected. HANDLER-05-specific tests supply
+        // a Conflict-returning fake explicitly.
+        var effectiveNameProbe = nameProbe ?? FakeResourceNameAvailabilityProbe.AllAvailable();
         return new H2aBicepInfraDeployHandler(
-            repo, runner, probe, driftDetector, inspector, options,
+            repo, runner, probe, driftDetector, inspector, effectiveNameProbe, options,
             NullLogger<H2aBicepInfraDeployHandler>.Instance);
     }
 
@@ -700,6 +805,35 @@ public sealed class H2aBicepInfraDeployHandlerTests
             BicepDeployRequest request, CancellationToken ct)
         {
             CallCount++;
+            return Task.FromResult(_result);
+        }
+    }
+
+    /// <summary>
+    /// HANDLER-05 (Wave 2 pre-dispatch remediation 2026-08-27) — probe fake.
+    /// Default constructor returns AllAvailable; static helpers construct
+    /// Conflict-returning fakes for the F10 negative-branch tests.
+    /// </summary>
+    private sealed class FakeResourceNameAvailabilityProbe : IResourceNameAvailabilityProbe
+    {
+        private readonly ResourceNameAvailabilityResult _result;
+        public int CallCount { get; private set; }
+        public ResourceNameAvailabilityRequest? LastRequest { get; private set; }
+
+        private FakeResourceNameAvailabilityProbe(ResourceNameAvailabilityResult result) => _result = result;
+
+        public static FakeResourceNameAvailabilityProbe AllAvailable()
+            => new(new ResourceNameAvailabilityResult.AllAvailable());
+
+        public static FakeResourceNameAvailabilityProbe Conflict(
+            ResourceNameKind kind, string name, string reason)
+            => new(new ResourceNameAvailabilityResult.Conflict(kind, name, reason));
+
+        public Task<ResourceNameAvailabilityResult> CheckAvailabilityAsync(
+            ResourceNameAvailabilityRequest request, CancellationToken ct)
+        {
+            CallCount++;
+            LastRequest = request;
             return Task.FromResult(_result);
         }
     }

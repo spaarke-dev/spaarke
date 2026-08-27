@@ -248,6 +248,17 @@ builder.Services.AddSingleton<IUpgradeDriftDetector>(sp =>
     return new ArmWhatIfDriftDetector(armClient, artifactsContainer, options, logger);
 });
 builder.Services.AddSingleton<IBicepTemplateInspector, FileBicepTemplateInspector>();
+// HANDLER-05 (Wave 2 pre-dispatch remediation 2026-08-27): resource-name
+// availability probe wired into H2a's precondition chain (after inspector,
+// before runner). Reuses the shared platform ArmClient singleton — no
+// second credential chain.
+builder.Services.AddSingleton<IResourceNameAvailabilityProbe>(sp =>
+{
+    var credential = sp.GetRequiredService<TokenCredential>();
+    var armClient = new Azure.ResourceManager.ArmClient(credential);
+    var logger = sp.GetRequiredService<ILogger<ArmResourceNameAvailabilityProbe>>();
+    return new ArmResourceNameAvailabilityProbe(armClient, logger);
+});
 builder.Services.AddScoped<H2aBicepInfraDeployHandler>();
 
 // Task 045: H2b AI Search index-provisioning handler + collaborator seams
