@@ -353,6 +353,39 @@ export const RecordHeaderView: React.FC<IRecordHeaderViewProps> = ({
 
   const columns = resolved?.columns ?? 3;
 
+  // ── Per-cell decision diagnostic (UAT round 4) ────────────────────────────
+  // The form/metadata diagnostic in `useHeaderFormMetadata` reports what the
+  // control READ. This reports what it DECIDED per field, which is the other
+  // half UAT kept needing: a lookup that renders a value but will not open its
+  // picker, or a DateOnly column that renders a time picker, are both invisible
+  // from the outside. `renderer` + `targets` + `editable` explain either in one
+  // line. Fires once per resolve (memoized upstream), not per render.
+  React.useEffect(() => {
+    if (!resolved || !entityMetadata) return;
+    try {
+      console.info(
+        '[RecordHeader] field decisions',
+        resolved.fields.map(f => {
+          const attr = entityMetadata.attributes?.[f.name];
+          return {
+            field: f.name,
+            renderer: f.renderer,
+            attributeType: attr?.attributeType,
+            // For a date cell this is the whole story: anything but 'DateOnly'
+            // renders `datetime-local`.
+            format: attr?.format,
+            targets: attr?.targets,
+            readOnly: f.readOnly,
+            // A lookup needs BOTH halves to open its picker.
+            editable: !f.readOnly && (f.renderer !== 'lookup' || !!attr?.targets?.length),
+          };
+        })
+      );
+    } catch {
+      /* diagnostics must never affect rendering */
+    }
+  }, [resolved, entityMetadata]);
+
   return (
     <div className={styles.root}>
       <RecordHeaderShell

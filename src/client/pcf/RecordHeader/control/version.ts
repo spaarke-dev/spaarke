@@ -147,4 +147,4 @@
  *   one to read first: form-buffer staging needs `getAttribute`, so anything
  *   listed there cannot be edited and will throw "Field not on form" on save.
  */
-export const CONTROL_VERSION = '1.1.6';
+export const CONTROL_VERSION = '1.1.7';

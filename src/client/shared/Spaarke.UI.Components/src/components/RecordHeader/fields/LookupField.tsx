@@ -328,6 +328,11 @@ export const LookupField: React.FC<ILookupFieldProps> = ({ label, value, span, t
       if (typeof lookupObjects !== 'function') {
         // Host doesn't expose the picker (test env, unsupported surface) —
         // graceful no-op per the component's "never throws on click" contract.
+        // WARN, though: silently doing nothing on click is indistinguishable
+        // from a dead control, and cost a full UAT round to diagnose.
+        console.warn(
+          `[RecordHeaderLookupField] "${label}": Xrm.Utility.lookupObjects is unavailable — picker cannot open.`
+        );
         return;
       }
 
@@ -350,13 +355,19 @@ export const LookupField: React.FC<ILookupFieldProps> = ({ label, value, span, t
       const id = String(picked.id).replace(/[{}]/g, '').toLowerCase();
 
       await onSave!({ id, name: picked.name, entityType: picked.entityType });
-    } catch {
-      // Xrm surfaces its own error UX for picker/save failures; swallow here
-      // to preserve the "no throw" contract (mirrors the read-only path).
+    } catch (err) {
+      // Xrm surfaces its own error UX for picker/save failures, so the "never
+      // throw on click" contract still holds — but do NOT swallow silently.
+      // A bare `catch {}` here made every picker failure look identical to a
+      // control that simply is not wired.
+      console.warn(`[RecordHeaderLookupField] "${label}": picker or save failed.`, {
+        targets,
+        error: err,
+      });
     } finally {
       openingRef.current = false;
     }
-  }, [editable, targets, onSave]);
+  }, [editable, targets, onSave, label, hasTargets, disabled]);
 
   // ── Read-only mode (unchanged): click navigates via Xrm.Navigation ───────
   const handleNavigateClick = React.useCallback(
@@ -403,9 +414,20 @@ export const LookupField: React.FC<ILookupFieldProps> = ({ label, value, span, t
         void openPicker();
         return;
       }
+      // NOT editable → this click NAVIGATES to the related record instead of
+      // opening the picker. That is the designed read-only behaviour, but from
+      // the outside it is indistinguishable from a broken picker ("a locked
+      // value that is just linked to the OOB field" — UAT, v1.1.6). Say which
+      // half is missing: no `onSave` means the layout marked the field
+      // readOnly; no `targets` means neither entity metadata nor the form
+      // control supplied the lookup's target table.
+      console.warn(
+        `[RecordHeaderLookupField] "${label}": read-only, so this click navigates rather than opening the picker.`,
+        { hasOnSave: typeof onSave === 'function', hasTargets, targets, disabled }
+      );
       handleNavigateClick(event);
     },
-    [editable, openPicker, handleNavigateClick]
+    [editable, openPicker, handleNavigateClick, label, onSave, hasTargets, targets, disabled]
   );
 
   const handleKeyDown = React.useCallback(
