@@ -76,7 +76,13 @@ public class ADR007_NestedDomainRecordTests
     /// </summary>
     private static IEnumerable<string> GraphTypesIn(Type type)
     {
-        if (type.Namespace?.StartsWith("Microsoft.Graph", StringComparison.Ordinal) == true)
+        // `Microsoft.SharePoint` is here for the same reason as `Microsoft.Graph`: the SPE Admin
+        // register path talks to the SharePoint REST API, and an SDK type from it crossing the facade
+        // is the identical ADR-007 leak. Added 2026-08-27 — the first pass checked only Graph, which
+        // is why `RegisterContainerTypeResult_HasNoSharePointSdkTypeReferences` could not retire into
+        // this rule. It can now.
+        if (type.Namespace?.StartsWith("Microsoft.Graph", StringComparison.Ordinal) == true
+            || type.Namespace?.StartsWith("Microsoft.SharePoint", StringComparison.Ordinal) == true)
         {
             yield return type.FullName ?? type.Name;
             yield break;
