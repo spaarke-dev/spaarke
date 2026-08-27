@@ -12,15 +12,27 @@
 
 ## 1. The two problems, stated separately
 
-They were found together and share a root cause, but they are independent and must not be conflated.
+They were found together, but they are **independent problems with independent fixes**, and they are
+**deliberately sequenced**. Owner direction, 2026-08-27: *"Let's not conflate the two. We need to solve
+the core access issue first. And then solve the 'cascade ownership issue' second."*
 
-| | Problem | One-line statement |
-|---|---|---|
-| **P1** | **Caller-identity resolution** | Large parts of the BFF resolve the caller as Entra `sub` where Dataverse requires Entra `oid`, producing denials, 401s, over-disclosure, silent no-ops and uncorrelatable audit — depending on what each site does with the value. |
-| **P2** | **Document access model** | `sprk_document` is the practical file-level security boundary, but nothing grants access to it. Access does not flow from the parent record (verified: zero parental relationships), there is no per-document sharing, and 74% of documents are owned by service principals. |
+| | Problem | One-line statement | Priority |
+|---|---|---|---|
+| **P1** | **Caller-identity resolution — `oid` vs `sub`** | Large parts of the BFF resolve the caller as Entra `sub` where Dataverse requires Entra `oid`, producing denials, 401s, over-disclosure, silent no-ops and uncorrelatable audit — depending on what each site does with the value. **This is the triggering defect and it is LIVE in dev.** | **FIRST — ship it** |
+| **P2** | **Document ownership inheritance** | `sprk_document` rows are owned by a service principal, which blocks any user without org-level Dataverse rights. Position: documents are child records and should **inherit ownership from their parent** (matter, project, …). | **SECOND — after P1 ships** |
 
-**P1 makes the gate ask the wrong question. P2 means the answer would be wrong anyway.** Fixing P1 alone
-leaves the boundary nominal; fixing P2 alone leaves it asking about the wrong person. Both are required.
+### 🚦 The rule this section exists to enforce
+
+**P1 is the deliverable. P2 is the follow-on.** P1 does not wait on any P2 question, any P2 decision, or
+any P2 design debate. The two problems touch the same routes, which makes them easy to conflate — and
+this plan already drifted once into P2 mechanism design while P1 sat unmerged and dev stayed broken.
+
+**P1 is "done" when**: every identified site resolves the caller correctly, the fixtures can detect a
+regression, it is merged, and it is deployed. Not before.
+
+Note that P1 alone does not make document access *correct* — it makes the gate ask about the right
+person. Whether the answer is right is P2. **That is not a reason to hold P1**; it is the reason P2
+exists as separate work.
 
 ---
 
@@ -224,7 +236,16 @@ Fix by routing every site through the D-1 resolvers. **Not 20 hand-written chain
 | C-2 | Correct the three false "MIW defaults mapping off" comments. Prose that misstates the mapping state is how this returns a fourth time. |
 | C-3 | Delete the shadowed fallbacks rather than leaving them ranked (the OFFICE_009 lesson). |
 
-### Workstream D — Document access model (P2)
+### Workstream D — Document ownership inheritance (P2) — **PARKED until P1 ships**
+
+> **Do not start this while P1 is unmerged.** Owner direction 2026-08-27: solve the core access
+> issue first, the ownership issue second. The analysis below is preserved so no one re-derives it,
+> not because it is next. **The open questions in this workstream do NOT gate P1.**
+
+> **Framing (owner, 2026-08-27)**: documents are child records and should *inherit ownership* from
+> their parent. The parent-fallback-authorization mechanism described in D-2 is an *alternative*
+> way to reach the same goal without changing ownership — that choice is a P2 design decision to
+> make when P2 starts, NOT a reason to reopen anything now.
 
 **Revised 2026-08-27** after the ownership/parentage audit. Cascade tasks are struck; see D-2 for why.
 
