@@ -46,10 +46,13 @@
       Spec success criterion 15: Matter renders identically to v1.0.20 EXCEPT that lookup cells open the
       inline dropdown. ⚠️ UPDATED 2026-08-27: the lookup EXCLUSION is WITHDRAWN — FR-15a was amended and both
       controls now render the same shared inline `components/LookupField`, so task 080 diffs lookups too.
-      CONSEQUENCE FOR THIS TASK: the shared component was upgraded on 2026-08-27 (right-side browse button,
-      overlaying dropdown, thin scrollbar, pinned Advanced), and the DEPLOYED MatterHeaderPcf still bundles the
-      pre-upgrade `dist/`. Rebuild + redeploy MatterHeaderPcf BEFORE capturing, or record explicitly which build
-      the baseline came from — otherwise task 080 will attribute a shared-library change to the migration.
+      CONSEQUENCE FOR THIS TASK: capture the baseline from the CURRENTLY DEPLOYED MatterHeaderPcf, i.e. the
+      status quo users actually see. Do NOT rebuild it first (owner decision 2026-08-27; an earlier note here
+      recommended rebuilding and was WRONG -- rebuilding changes the "before" side to a build that never
+      shipped, which makes it a worse baseline, not a better one). The deployed build bundles the
+      PRE-2026-08-27 shared LookupField, so its lookups lack the browse button, the overlaying dropdown and the
+      pinned Advanced footer. That delta is KNOWN, INTENDED, and caused by a shared-library upgrade rather than
+      by the migration. RECORD IT EXPLICITLY in the baseline doc so task 080 reads the diff correctly.
       plan.md flags this task as "genuinely blocking". FR-23 RS-1 documents that the shipped header 400s
       today; task 040 owns the fix. The baseline therefore has two halves: static facts recoverable from
       code + form XML (capturable regardless), and runtime screenshots (blocked until the header loads).

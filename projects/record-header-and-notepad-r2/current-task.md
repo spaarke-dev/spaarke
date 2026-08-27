@@ -138,24 +138,20 @@ one and the others silently diverge, so a layout change must be applied to all t
 
 ---
 
-## 🔴 OPEN DECISION — read before running task 002
+## ✅ DECIDED — task 002 baseline (owner, 2026-08-27)
 
-**The Matter parity baseline is now ambiguous, and capturing it wrong silently corrupts task 080.**
+**Capture the baseline from the CURRENTLY DEPLOYED MatterHeaderPcf. Do NOT rebuild it first.**
 
-The shared `components/LookupField` was upgraded on 2026-08-27. The **deployed** `MatterHeaderPcf`
-still bundles the pre-upgrade `dist/`. So:
+An earlier note here recommended rebuilding so the diff would be apples-to-apples. The owner
+challenged it and was right: a parity baseline should capture the status quo users actually see, and
+rebuilding changes the "before" side to a build that never shipped — a worse baseline, not a better
+one. The secondary justification ("it verifies the shared component") was also weak: RecordHeader
+already proved that component in a PCF host through UAT; the genuinely untested surface is the 12
+**Code Page** wizard consumers, about which MatterHeader says nothing.
 
-| if you baseline… | task 080's diff will… |
-|---|---|
-| the currently-deployed MatterHeaderPcf | flag the lookup cells — and you must re-introduce the exclusion we just withdrew |
-| a REBUILT + redeployed MatterHeaderPcf | be apples-to-apples; parity assessed unqualified |
-
-**Recommendation: rebuild + redeploy `MatterHeaderPcf` first, then capture.** It costs one build+import
-of a control that task 081 retires — but it also **verifies the upgraded shared component actually works
-inside MatterHeader**, which nothing has done yet (MatterHeader is running month-old `dist`). Finding a
-break there on a soon-to-be-retired control is far cheaper than finding it at 080.
-
-Both 002 and 080 now carry this caveat inline, so whoever runs them sees it without reading this file.
+**Expect exactly one known delta at 080**: the deployed MatterHeaderPcf bundles the pre-2026-08-27
+shared `LookupField`, so its lookups lack the browse button, the overlaying dropdown and the Advanced
+footer. Caused by a shared-library upgrade, not by the migration. Both 002 and 080 carry this inline.
 
 ---
 

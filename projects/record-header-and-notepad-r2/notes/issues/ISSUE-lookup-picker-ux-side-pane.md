@@ -7,6 +7,20 @@
 
 ---
 
+## Final OOB-delta decisions (owner, 2026-08-27) — all CLOSED
+
+| OOB feature | decision |
+|---|---|
+| per-row entity icon | ❌ **dropped** — "not critical, cleaner without it" |
+| entity-name group header (`Project Types`) | ❌ **dropped** — same |
+| `+ New` in the footer | ❌ **excluded** — taxonomy targets users cannot add to |
+| per-row secondary line (`3/5/2026 11:31 AM`) | ❌ **dropped** — it is the record's modified timestamp; OOB uses it to disambiguate same-named records, and Spaarke's taxonomy targets have unique names, so it buys nothing |
+
+**None of these are gaps. Do not "restore parity" by adding them back.** The inline lookup is
+deliberately a *reduced* OOB shape, not a copy of it.
+
+---
+
 ## ✅ Resolution (v1.1.9, 2026-08-27)
 
 Option **2** — switch to the inline component — implemented in three parts, all in the shared

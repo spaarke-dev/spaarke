@@ -69,7 +69,7 @@
   <constraints>
     <constraint source="project">FR-25 scope: re-bind ONLY the "Matter main form" 4fa382f2-c273-f011-b4cb-6045bdd6a665 — NEVER the legacy "Information" form.</constraint>
     <constraint source="project">Do NOT delete, remove from the environment, or otherwise retire the old MatterHeaderPcf control in this task — that is task 081's prescriptive two-step procedure. This task only removes the old control from the sprk_matternumber field's control list on the main form; the control itself stays importable/re-addable as the rollback path.</constraint>
-    <constraint source="project">Parity is assessed UNQUALIFIED (spec criterion 15, updated 2026-08-27). Both controls now render the same shared inline `components/LookupField`, so the former lookup-interaction exclusion no longer applies. ⚠️ BUT: the shared component was upgraded on 2026-08-27 (right-side browse button, overlaying dropdown, thin scrollbar, pinned Advanced). If the task-002 baseline was captured from a MatterHeaderPcf build that PREDATES that upgrade, its lookups will differ — rebuild + redeploy MatterHeaderPcf and re-capture the baseline, or the diff will blame this migration for a shared-library change. Confirm which build the baseline came from BEFORE diffing.</constraint>
+    <constraint source="project">Parity is assessed UNQUALIFIED (spec criterion 15, updated 2026-08-27). Both controls now render the same shared inline `components/LookupField`, so the former lookup-interaction exclusion no longer applies. ⚠️ EXPECT ONE KNOWN DELTA: the task-002 baseline comes from the deployed MatterHeaderPcf, which bundles the PRE-2026-08-27 shared LookupField, so its lookups lack the browse button, the overlaying dropdown and the pinned Advanced footer. That difference is caused by a SHARED-LIBRARY upgrade, not by this migration -- treat it as expected-and-explained, not a regression, and do NOT rebuild MatterHeaderPcf to erase it (owner decision 2026-08-27: the baseline must reflect the status quo users actually saw).</constraint>
     <constraint source="project">This task modifies form configuration and QA notes only. If parity QA surfaces a code defect, do NOT patch code inside this task — record it, STOP, and escalate per CLAUDE.md §6.</constraint>
     <constraint source="ADR-021">Parity is assessed in BOTH light and dark themes; high contrast is spot-checked (NFR-03).</constraint>
     <constraint source="project">NFR-01/NFR-02 are measured THIS WAVE: bundle ≤250 KB minified, TTI ≤300 ms warm / ≤800 ms cold on the Matter form.</constraint>
@@ -130,7 +130,7 @@
       <steps>
         <step>Open the same Matter record used by the task-002 baseline</step>
         <step>Capture screenshots light and dark; diff against the baseline field-by-field (labels, values, spans, typography, spacing, toolbar, footer)</step>
-        <step>Include the lookup cells in the diff — the exclusion was withdrawn 2026-08-27. First confirm the baseline came from a MatterHeaderPcf build that includes the 2026-08-27 shared-LookupField upgrade; if not, re-capture it.</step>
+        <step>Include the lookup cells in the diff -- the exclusion was withdrawn 2026-08-27. Expect ONE known delta (browse button / overlay / Advanced footer) from the shared-library upgrade; everything else must match.</step>
         <step>Check the console for JavaScript errors</step>
       </steps>
       <expected>Renders identically to the baseline, lookups included; no console errors (spec criterion 15)</expected>
