@@ -256,6 +256,27 @@ public sealed class H2aBicepInfraDeployHandler : IProvisioningHandler
                 BicepDeployRejectionCodes.MissingBicepVersion, diagnostic, cancellationToken).ConfigureAwait(false);
         }
 
+        // (4.5) EXEC-04 (pre-dispatch audit 2026-08-27, Wave 2 remediation):
+        //       fail fast on blank TenancyModel. A silent fallback to
+        //       "Model2Dedicated" here would deploy an entire per-customer
+        //       stack (~$400/mo baseline) for a Model 1 shared trial customer —
+        //       cost blow-up + tenancy-invariant violation (§4D I1 no-silent-
+        //       default) detectable only at H13 (E13 cost-envelope checker),
+        //       AFTER Bicep succeeded. Fail here, before any Bicep parameter
+        //       assembly, so the operator gets a specific rejection code + no
+        //       Azure API call happens with a defaulted tenancy model.
+        if (string.IsNullOrWhiteSpace(run.TenancyModel))
+        {
+            var diagnostic =
+                $"ProvisioningRun.TenancyModel is blank / whitespace for customerId '{envelope.CustomerId}'. " +
+                "H2a MUST NOT silently default to 'Model2Dedicated' — that would deploy an entire per-customer " +
+                "stack for a Model 1 shared trial (~$400/mo cost blow-up + tenancy invariant violation, only " +
+                "detectable at H13 E13-cost-envelope). Upstream (intake schema + L2 CreateRun endpoint) MUST " +
+                "populate TenancyModel with a valid value ('Model1Shared' or 'Model2Dedicated') before H2a dispatches.";
+            return await FailAsync(run, etag, FailureClass.Resumable,
+                BicepDeployRejectionCodes.MissingTenancyModel, diagnostic, cancellationToken).ConfigureAwait(false);
+        }
+
         var idempotencyKey = BuildIdempotencyKey(envelope.CustomerId, bicepVer);
 
         // (5) Level-3 idempotency: durable no-op on duplicate.
@@ -287,7 +308,8 @@ public sealed class H2aBicepInfraDeployHandler : IProvisioningHandler
             CustomerId: envelope.CustomerId,
             TenantId: tenantId,
             SubscriptionId: subscriptionId,
-            TenancyModel: string.IsNullOrWhiteSpace(run.TenancyModel) ? "Model2Dedicated" : run.TenancyModel,
+            // EXEC-04: guarded above (step 4.5) — TenancyModel is non-empty here.
+            TenancyModel: run.TenancyModel,
             BicepVersion: bicepVer,
             EnvironmentName: environmentName,
             Location: location,

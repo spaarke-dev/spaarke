@@ -215,6 +215,34 @@ public sealed class H2aBicepInfraDeployHandlerTests
         runner.CallCount.Should().Be(0);
     }
 
+    // ---------- EXEC-04 blank TenancyModel (Wave 2 pre-dispatch remediation 2026-08-27) ----------
+
+    [Theory]
+    [InlineData(null)]
+    [InlineData("")]
+    [InlineData("   ")]
+    public async Task BlankTenancyModel_FailsResumable_NoRunnerCall(string? tenancyModel)
+    {
+        var run = BuildRun(tenancyModel: tenancyModel!);
+        var repo = new FakeRepository(run, etag: "etag-exec04");
+        var runner = FakeBicepDeployRunner.Success(BuildOutputs());
+        var inspector = FakeBicepTemplateInspector.Clean();
+        var handler = BuildHandler(repo, runner, FakeArmKeyVaultRefProbe.Match(),
+            new FakeUpgradeDriftDetector(), inspector);
+
+        var result = await handler.HandleAsync(BuildEnvelope(), CancellationToken.None);
+
+        var failure = result.Should().BeOfType<HandlerResult.Failure>().Subject;
+        failure.Class.Should().Be(FailureClass.Resumable);
+        failure.RejectionCode.Should().Be(BicepDeployRejectionCodes.MissingTenancyModel);
+        failure.Diagnostic.Should().Contain("silently default");
+        failure.Diagnostic.Should().Contain("Model 1 shared trial");
+        runner.CallCount.Should().Be(0, "H2a MUST NOT invoke deploy runner on blank TenancyModel");
+        inspector.CallCount.Should().Be(0, "structural inspector fires AFTER TenancyModel guard");
+        repo.LastWrittenRun.Should().NotBeNull();
+        repo.LastWrittenRun!.Status.Should().Be(RunStatus.Failed);
+    }
+
     // ---------- T7 Redis presence ----------
 
     [Fact]

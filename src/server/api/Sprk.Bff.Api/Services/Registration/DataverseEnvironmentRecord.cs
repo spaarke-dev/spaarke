@@ -146,7 +146,15 @@ public class DataverseEnvironmentRecord
         // task 023 v3 additions (3)
         "sprk_currentrunid", "sprk_tenancymodel", "sprk_tenantid",
         // task 023 v3.3 additions (3)
-        "sprk_bffversion", "sprk_solutionversion", "sprk_ClientCacheBustToken"
+        // REG-06 (2026-08-27): Dataverse logical names are ALWAYS lowercase — the schema
+        // SchemaName may be PascalCase (`sprk_ClientCacheBustToken`) but the OData wire
+        // form used in $select / property reads / PATCH bodies is lowercase
+        // (`sprk_clientcachebusttoken`). Verified via Dataverse MCP describe against admin
+        // env spaarkedev1 (2026-08-27). PascalCase here silently broke the read path
+        // (TryGetProperty returned false → ClientCacheBustToken always null) and would
+        // 400 on future writes. All AllColumns entries are lowercase per this rule (see
+        // ArchTest DataverseEnvironmentRecordTests.AllColumns_AreLowerCaseLogicalNames).
+        "sprk_bffversion", "sprk_solutionversion", "sprk_clientcachebusttoken"
     };
 
     /// <summary>
@@ -214,7 +222,8 @@ public class DataverseEnvironmentRecord
             // task 023 v3.3 additions
             BffVersion = json.TryGetProperty("sprk_bffversion", out var bvProp) ? bvProp.GetString() : null,
             SolutionVersion = json.TryGetProperty("sprk_solutionversion", out var svProp) ? svProp.GetString() : null,
-            ClientCacheBustToken = json.TryGetProperty("sprk_ClientCacheBustToken", out var ccbtProp) ? ccbtProp.GetString() : null,
+            // REG-06: lowercase logical name (verified via Dataverse MCP describe 2026-08-27).
+            ClientCacheBustToken = json.TryGetProperty("sprk_clientcachebusttoken", out var ccbtProp) ? ccbtProp.GetString() : null,
         };
     }
 }

@@ -47,6 +47,16 @@ public static class BicepDeployRejectionCodes
     /// <summary>Run parameter <c>bicepVer</c> missing — idempotency key requires the bicep-repo git SHA.</summary>
     public const string MissingBicepVersion = "missing-bicep-version";
 
+    /// <summary>
+    /// EXEC-04 (pre-dispatch audit 2026-08-27): the run's
+    /// <see cref="Models.ProvisioningRun.TenancyModel"/> is blank / whitespace.
+    /// H2a MUST fail fast (spec.md §4D I1 no-silent-default): a blank value
+    /// silently deploying a per-customer Model 2 stack for a Model 1 shared
+    /// trial would be a ~$400/mo/customer cost blow-up + tenancy invariant
+    /// violation only detectable at H13. Wave 2 remediation.
+    /// </summary>
+    public const string MissingTenancyModel = "missing-tenancy-model";
+
     /// <summary>Envelope resolved no ProvisioningRun document in the customer partition.</summary>
     public const string RunNotFound = "run-not-found";
 
