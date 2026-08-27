@@ -179,6 +179,21 @@ public class DocumentDestroyAuthorizationTestFixture : WorkspaceTestFixture
     internal sealed class TenantBearingFakeAuthHandler : AuthenticationHandler<AuthenticationSchemeOptions>
     {
         public const string SchemeName = "TenantBearingFakeAuth";
+
+        /// <summary>
+        /// The claim type .NET rewrites <c>oid</c> to when inbound claim-type mapping is enabled — which
+        /// is the default and what this app runs. Production principals carry THIS, not the short form.
+        /// </summary>
+        private const string OidSchemaClaim = "http://schemas.microsoft.com/identity/claims/objectidentifier";
+
+        /// <summary>
+        /// Stands in for Entra's <c>sub</c>: pairwise per (user, application), base64url-shaped, and
+        /// joining to nothing outside this app. Deliberately UNLIKE
+        /// <see cref="WorkspaceTestConstants.TestUserId"/> — if the two were equal, a filter resolving
+        /// the wrong claim would still get the right answer and no test could see it. That is exactly
+        /// how a deny-everyone outage passed 11,186 tests.
+        /// </summary>
+        private const string PairwiseSubject = "d12L59FRq8kZ0m2Xr7bTn4wPqLzYhVcJ8sNdEuRkjg";
         public const string TenantId = "00000000-0000-0000-0000-0000000000t1";
 
         public TenantBearingFakeAuthHandler(
@@ -198,10 +213,31 @@ public class DocumentDestroyAuthorizationTestFixture : WorkspaceTestFixture
             if (string.IsNullOrWhiteSpace(authHeader))
                 return Task.FromResult(AuthenticateResult.Fail("Empty Authorization header"));
 
+            // ⚠️ REWRITTEN 2026-08-27. This previously issued `oid` and ClaimTypes.NameIdentifier as
+            // the SAME constant (WorkspaceTestConstants.TestUserId), and issued `oid` in its SHORT form.
+            // Both were wrong, and together they made every auth test in this fixture's blast radius
+            // structurally unable to distinguish correct caller resolution from broken:
+            //
+            //   1. IDENTICAL VALUES — reading `oid` or `sub` returned the same string, so a filter that
+            //      resolved the WRONG claim still got the right answer and the test passed.
+            //   2. SHORT `oid` — this app runs with inbound claim-type mapping ON (the default), so .NET
+            //      renames `oid` to the schema URI below and `sub` to ClaimTypes.NameIdentifier. The
+            //      short form therefore DOES NOT EXIST in production. A fixture that supplies it lets
+            //      `FindFirst("oid")` succeed in tests while returning null in production.
+            //
+            // Together those hid a real deny-everyone outage: SemanticSearchAuthorizationFilter and
+            // RecordSearchAuthorizationFilter both read `FindFirst("oid") ?? FindFirst(NameIdentifier)`
+            // and therefore authorized on a pairwise `sub` that joins to no systemuser. The suite was
+            // 11,186/0 both before and after that fix — not one test changed verdict.
+            //
+            // This now reproduces PRODUCTION's mapped claim shape, with DIVERGENT values so that
+            // resolving the wrong claim is detectable. Do not re-collapse them, and do not re-add the
+            // short form "to be safe" — CallerResolution reads both forms, so correct code needs neither
+            // accommodation. See Infrastructure/Authentication/CallerResolution and PR #832.
             var claims = new[]
             {
-                new Claim("oid", WorkspaceTestConstants.TestUserId),
-                new Claim(ClaimTypes.NameIdentifier, WorkspaceTestConstants.TestUserId),
+                new Claim(OidSchemaClaim, WorkspaceTestConstants.TestUserId),
+                new Claim(ClaimTypes.NameIdentifier, PairwiseSubject),
                 new Claim(ClaimTypes.Name, "Test User"),
                 new Claim("name", "Test User"),
                 new Claim("roles", "SystemAdmin"),
