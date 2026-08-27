@@ -1,5 +1,134 @@
 # Current Task State — `spaarkeai-compose-r8`
 
+> **Last Updated**: 2026-08-27 (by `context-handoff`)
+> **Recovery**: read Quick Recovery, then the plan doc it points to. Nothing else is required.
+
+---
+
+## Quick Recovery (READ THIS FIRST)
+
+| Field | Value |
+|---|---|
+| **Active work** | **P1 — caller-identity resolution (`oid` vs `sub`)**. NOT Compose R8 tasks. |
+| **Status** | Code complete and pushed. **NOT merged, NOT deployed.** |
+| **Next Action** | Get **PR #832** reviewed + merged, then **deploy the BFF**. Dev still runs the broken build — every document request 403s, and `PortfolioService` returns every active matter in the org to any caller. |
+| **Plan of record** | [`notes/caller-identity-and-document-access-plan.md`](notes/caller-identity-and-document-access-plan.md) — §2 is verified evidence, **do NOT re-derive it** |
+| **UAT record** | [`notes/uat-2026-08-26.md`](notes/uat-2026-08-26.md) |
+
+### ⚠️ TWO WORKTREES — do not confuse them
+
+| Worktree | Branch | Holds |
+|---|---|---|
+| `c:\code_files\spaarke-wt-spaarkeai-compose-r8` | `work/spaarkeai-compose-r8` | Compose R8 + **the plan/UAT docs**. PR **#806** (draft, 100 commits). |
+| `c:\tmp\spaarke-auth-oid` | `fix/caller-oid-resolution` | **The P1 fix**, branched off `master`. PR **#832**. |
+
+Both clean, 0 unpushed at this checkpoint.
+
+> P1 is deliberately NOT inside #806 — it must merge without waiting for all of R8. An earlier partial
+> version of it IS also in #806 (commit `c1ced7f3d`), and the two **will conflict** (that copy
+> cross-references `TenantResolution`, which is R8-only). Decide before merging: revert the auth change
+> out of #806, or land #832 first and let #806 rebase.
+
+### Critical context
+
+`ClaimTypes.NameIdentifier` carries the Entra **`sub`** (pairwise, non-GUID) under inbound claim
+mapping, which this app leaves ON. Dataverse joins the caller on **`oid`**. Reading the wrong one
+denies / 401s / over-discloses / silently no-ops depending on what each site does with the value.
+Confirmed from production logs — plan §2.1.
+
+---
+
+## P1 — DONE (pushed, PR #832)
+
+- **Three resolvers, one per purpose** in `CallerResolution.cs`: `ResolveObjectId` (oid or **null → 401**;
+  deliberately **no `NameIdentifier` tail**) · `ResolveObjectIdGuid` · `ResolveOpaqueCallerKey` (the one
+  place `sub` is correct — partition/idempotency/cache keys).
+- **35 sites** routed through them. The list was **derived, not guessed** — a classifier that reassembles
+  multi-line `??` chains and asks which source is reached first (38 broken / 47 correct).
+- **`PortfolioService` disclosure closed properly** — the claim AND the id-space bug (`ownerid` holds a
+  *systemuserid*, not an oid). Reuses the existing `ISystemUserIdentityResolver` singleton. **Fails closed.**
+- **Fixtures**: the 6 that depended on the removed tail now mint a realistic `oid` plus a deliberately
+  **sub-shaped, non-GUID** `NameIdentifier`.
+- **Tests: 11,162 passed / 0 failed / 96 skipped.**
+
+**The prediction that proved itself:** removing the tail broke *exactly* 18 tests, every one minting a
+`NameIdentifier`-only principal. No production caller has that shape (Entra always carries `oid`;
+`ApiKeyAuthenticationHandler` mints neither and correctly 401s). The tail's only consumer was the
+fixtures that hid the bug.
+
+---
+
+## P1 — REMAINS
+
+| # | Item | Notes |
+|---|---|---|
+| 1 | **Merge + deploy** | The only thing that ends the live outage. Resolve the #806 conflict first. |
+| 2 | `WorkspaceLayout` ownership bypass | **Agent-traced, NOT empirically confirmed.** Do not assert it as fact until verified. |
+| 3 | Broader fixture de-collapse (~39 more) | A blanket regex broke things and was reverted — do this surgically, file by file. |
+| 4 | Census ArchTest | Fail the build on a *new* file reading `NameIdentifier` for identity. Copy `SourceScan` + `CredentialGuardTests`. |
+| 5 | Three false comments | They assert "MIW v3+ defaults `MapInboundClaims=false`" — contradicted by the production logs. Recurrence vector. |
+
+**Deliberately NOT changed** — correct already (sequential oid-first extractors with early returns;
+statement-scoped analysis flags them as false positives): `OfficeAuthFilter`, `OfficeRateLimitFilter`,
+`ResourceAccessHandler`.
+
+---
+
+## P2 — PARKED (owner direction, 2026-08-27)
+
+> *"Let's not conflate the two. We need to solve the core access issue first. And then solve the
+> 'cascade ownership issue' second."*
+
+Document ownership inheritance. **Does not gate P1.** Analysis preserved in plan Workstream D. Two
+things a fresh session must not re-derive:
+
+- **Cascade cannot express the rule** — role-scope access to the parent never inherits to children, and
+  that is the normal case. Verified: **zero of 27** `sprk_document` relationships are Parental.
+- **P2 may not be ours** — `unified-access-control-r2` / `dataverse-access-unification-r1` already hold
+  an active decision process on this exact fork. Align before designing.
+
+Open owner decisions: **Q6** (parent-fallback on writes or reads only) · **Q7** (orphan-document rule) ·
+**Q8** (creation-ownership regime).
+
+---
+
+## Session gotchas worth keeping
+
+1. **Enumerate SINKS, not call forms.** A form-based grep missed `FindFirstValue` entirely and would
+   never have found `PortfolioService` — it contains no claim read at all.
+2. **My own tooling had three bugs**, each producing confident false positives: string-literal-blind
+   comment stripping ate the `//` inside the schema URI; constant indirection was invisible; and
+   `AltOidClaimType` *contains* `OidClaimType`, so naive substitution corrupted it. Spot-check a site you
+   expect to be CLEAN before trusting any classifier output.
+3. **Blanket regex over test fixtures is not worth it** — it wrote bare `ClaimTypes` where the original
+   was fully qualified, and matched `new(...)` in non-`Claim` contexts. Reverted; done surgically instead.
+4. **`.claude/agent-memory/` is excluded by ripgrep's ignore rules** — every sweep missed a directly
+   relevant researcher deep-dive living there.
+5. **`git diff -w` does not catch line re-flowing.** A CI commit labelled "whitespace" changed 114
+   non-whitespace lines; only byte-level token comparison settled it.
+6. **A failed query is not a negative result** — bit me twice this session (an OData metadata error
+   printing "NONE"; a Python decode failure reporting files as added/removed).
+7. **Test stubs must not return null** where the code now fails closed — every test would then pass
+   against an empty result, i.e. for the wrong reason. That is precisely the failure mode that let this
+   bug through 11,932 green tests.
+
+---
+
+## Compose R8 (the original project) — status
+
+47 of 51 tasks resolved. UAT 2026-08-26 found 6 defects: **D-1, D-2, D-3, D-6 fixed** (in PR #806);
+**D-4/D-5 root-caused but NOT fixed** — the annotation path still anchors by text search and needs an
+`agreement-review` Action-mirror schema change + `documentText` supply + threading the anchor through.
+Track D 070–072 worktrees staged, agents never dispatched. Task 090 wrap-up not started. Task 059 tenant
+sign-off still open.
+
+---
+
+## Full State — PRIOR checkpoint (2026-08-26, Compose R8 UAT + deploy)
+
+> Superseded as the ACTIVE task by the P1 work above, but still the record for the Compose R8
+> project itself, which is not finished. Retained verbatim.
+
 > **Last Updated**: 2026-08-26 (by `context-handoff`) · **Committed through**: `670d31db2` · **pushed, 0 unpushed**
 > **Branch**: `work/spaarkeai-compose-r8` · **Recovery**: read "Quick Recovery" first.
 > Everything below is recoverable from files alone.
