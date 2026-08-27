@@ -72,11 +72,26 @@ concurrency:
 
 env:
   IMAGE_NAME: provisioning-sidecar
-  # ACR_LOGIN_SERVER: FQDN of the platform ACR (e.g. sprkplatformacr.azurecr.io).
-  # NOT YET PROVISIONED as of this workflow's authoring -- task 101 (Wave G-1)
-  # authors the ACR resource + sitecontainer Bicep wiring. This is a repo
-  # VARIABLE (not a secret -- a login-server FQDN is not confidential),
-  # populated once task 101 lands. See notes/sidecar-ci-workflow-coord-pr.md § 4.
+  # ACR_LOGIN_SERVER: FQDN of the platform ACR. A repo VARIABLE, not a secret --
+  # a login-server FQDN is not confidential.
+  #
+  # PROVISIONED. `SIDECAR_ACR_LOGIN_SERVER` was populated 2026-08-21
+  # (sprkcontrolplanedevacr.azurecr.io). This comment previously read "NOT YET
+  # PROVISIONED ... populated once task 101 lands", which was true when the
+  # workflow was authored and stale afterwards -- stale enough to mislead: it
+  # invites the reader to explain a red push leg as "the ACR does not exist yet"
+  # and stop looking. It is not that.
+  #
+  # The push leg's ONE remaining blocker is an Entra federated identity
+  # credential for subject `repo:spaarke-dev/spaarke:ref:refs/heads/master`,
+  # which does not exist yet -- so `Azure login (OIDC)` fails AADSTS700213 on
+  # every master push and the two steps after it skip. Build + Trivy + size all
+  # pass; the image simply is not published. Owner action, five subjects total,
+  # runbook: docs/guides/GITHUB-ACTIONS-AZURE-OIDC-SETUP.md.
+  #
+  # Deliberately NOT gated behind an `if: vars.SIDECAR_ACR_LOGIN_SERVER != ''`
+  # skip. That would turn the job green while silently never publishing, which
+  # is worse than an honest red pointing at a documented one-time fix.
   ACR_LOGIN_SERVER: ${{ vars.SIDECAR_ACR_LOGIN_SERVER }}
 
 jobs:
