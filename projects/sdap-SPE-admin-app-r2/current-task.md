@@ -1,7 +1,7 @@
 # Current Task State — sdap-SPE-admin-app-r2
 
-> **Last Updated**: 2026-08-27 (by `task-execute`, mid-task 050)
-> **Recovery**: read Quick Recovery, then §0 (task 050) and §1 (the older open escalation).
+> **Last Updated**: 2026-08-27 (by `context-handoff`)
+> **Recovery**: read Quick Recovery, then §1 (the next task) and §2 (the one thing needing the operator).
 
 ---
 
@@ -9,138 +9,70 @@
 
 | Field | Value |
 |---|---|
-| **Task** | **052 — item recycle bin: DISCOVERY COMPLETE, implementation not started.** 050 + 051 complete and pushed; **PR [#842](https://github.com/spaarke-dev/spaarke/pull/842)** open |
+| **Task** | **052 — item recycle bin** (FR-E03). Discovery complete, **implementation not started** |
 | **Phase** | Wave W17 — Workstream E |
-| **Status** | All 052 API semantics measured live on throwaway containers. Nothing written to `src/` yet |
-| **Next Action** | Implement 052 per the plan in [`notes/task-052-findings.md`](notes/task-052-findings.md) §3. **Read §2 first — the two operations have opposite failure semantics** |
-| **Blocking?** | No. **050's archival opt-in still awaits you** (§0.4) — still the only open operator item. |
+| **Status** | Tree clean. Branch is **identical to origin/master** (0 ahead / 0 behind) — everything through 052-discovery is merged |
+| **Next Action** | Implement 052 from [`notes/task-052-findings.md`](notes/task-052-findings.md) **§3**. **Read §2 of that file first** — restore and delete fail in opposite ways |
+| **Blocking?** | No. One operator item waits (§2) but does not block 052 |
+
+### Recent commits (all merged to master)
+| Commit | What |
+|---|---|
+| `30e6fd9cf` | branch tip == master tip |
+| `c12fbeaf6` | **PR #842 merged** — tasks 041/042/050/051 + 052 discovery |
+| `9c39444a2` | 052 discovery — measured recycle-bin semantics |
+| `e831eb269` | 051 — storage quota (FR-E02, amended) |
+| `e10de0811` | ISS-002 + DEF-001 filed |
+| `71a49e739` | 050 — container archival + fabricated-status fix |
+
+### Critical context
+Tasks 050 and 051 shipped; **both escalation triggers fired and both were answered.** 052's discovery is
+done and measured live — the spec's 207 premise is half wrong (§1). Nothing is uncommitted.
 
 ---
 
-## 0B. Task 052 — discovery done, and the spec's premise is half wrong
+## 1. ▶ NEXT: task 052 — implement from measured semantics
 
-**Measured live on throwaway containers** (uploaded real files → deleted them → probed → torn down
-204/204). No pre-existing container mutated.
+Everything below is **measured live** on throwaway containers (files uploaded → deleted → probed →
+containers torn down 204/204, NFR-07). Full detail + implementation plan:
+[`notes/task-052-findings.md`](notes/task-052-findings.md).
 
-🔴 **`restore` and `delete` have OPPOSITE failure semantics:**
+### 🔴 The finding that shapes the work: restore and delete fail in OPPOSITE ways
 
 | | all ids valid | any id invalid | body |
 |---|---|---|---|
-| **restore** | **207** | **400 `badArgument`** — nothing restored, **atomic** | ids that SUCCEEDED |
-| **delete** (permanent) | **204** | **204 — and it purges the valid ones anyway**, non-atomic | **none** |
+| **`restore`** | **207** | **400 `badArgument`** — nothing restored, **atomic** | ids that **SUCCEEDED** |
+| **`delete`** (permanent) | **204** | **204 — and it purges the valid ones anyway**, non-atomic | **none** |
 
 - Spec FR-E03's *"207 partial success, per-item outcomes"* is **half right**. Restore's 207 lists only
-  the ids that worked — partial failure is expressed by **absence**, as `requested − returned`. There is
+  the ids that worked — partial failure is expressed by **absence** (`requested − returned`). There is
   no per-item error object. Treating 207 as success hides the items that did not restore.
-- 🔴 **Permanent delete has no 207 and no per-item reporting at all** — `204` whether it purged
+- 🔴 **Permanent delete has no 207 and no per-item reporting at all** — 204 whether it purged
   everything, some, or nothing. For an **irreversible** operation that is the worst reporting shape
-  found in this project. The implementation must **re-list and diff**, never trust the 204 (the same
-  discipline task 051 applied to the quota write).
+  found in this project. **Re-list and diff; never trust the 204** (same discipline task 051 applied to
+  the quota write).
 
-⚠️ `restore` / `delete` are **beta-only** (absent from the v1.0 CSDL) — the knowledge corpus wrongly
-cites v1.0 and needs the same correction task 050 made for archival. No ADR issue; container surface is
-already beta-pinned.
+### Four traps to carry in
+1. **Do not treat 207 as success.** Diff requested vs returned ids.
+2. **Do not trust delete's 204.** Re-list and diff.
+3. **`deletedBy` and `title` are OpenType extras absent from the CSDL** → arrive via `AdditionalData`
+   → `deletedBy` will be an **`UntypedObject`**. Third time this project has had to measure that shape
+   (022 `deletedDateTime`, 050 `archivalDetails`). Copy the reader pattern from `ReadArchiveStatus`.
+4. **Live-fixture uploads** go through `/drives/{driveId}/root:/{name}:/content`.
+   `/containers/{id}/drive/root:/…` answers `400 "API not found"`.
 
-⚠️ `deletedBy` and `title` are **OpenType extras absent from the CSDL** → `AdditionalData` →
-`deletedBy` will be an **`UntypedObject`** (3rd time this project has had to measure that shape).
+⚠️ `restore`/`delete` are **beta-only** (no recycleBin actions in the v1.0 CSDL). The knowledge corpus
+wrongly cites v1.0 — needs the same correction task 050 made for archival. No ADR issue; the container
+surface is already beta-pinned by task 020.
 
-⚠️ Live-fixture uploads go through `/drives/{driveId}/root:/{name}:/content` —
-`/containers/{id}/drive/root:/…` answers `400 "API not found"`.
-
-### ✅ Side question closed — the `communications`/`emails`/`exports` folder origin
-
-`communications` (2026-03-11) and `emails` (2026-01-13) were created by **"SharePoint App"** — Spaarke's
-own app-only identity, i.e. the platform's email/communications pipeline. `exports` (2026-03-22) was
-created by **Ralph Schroeder** interactively. Nothing foreign. This closes the third evidence bullet in
-the live-tenant safety note; its other two reasons (repeatability, shared tenant) are unaffected, so the
-throwaway-container rule stands. 052 never needed it for safety — the 041 fixture provisions its own
-container.
+⚠️ **Keep the two recycle bins distinct** (spec D3): deleted-CONTAINERS (task 022, shipped) vs
+per-container deleted-ITEMS (this task).
 
 ---
 
-## 0A. Task 051 — the escalation and the answer
+## 2. 🔔 The one item needing the operator — task 050's archival opt-in
 
-**Trigger fired**: `maxStoragePerContainerInBytes` is **container-TYPE scope only**. Confirmed twice —
-CSDL (`fileStorageContainerSettings` has no storage property on either version; the writable ceiling is
-on `fileStorageContainerTypeSettings`) and live.
-
-🔴 **And worse than wrong-scope**: `PATCH /containers/{id}` with the ceiling — nested under `settings`
-AND top-level — returns **200 OK both times and silently discards it**. Read-back shows no such
-property. Third instance of the accepted-200-silently-dropped shape (task 028 `$expand=drive`, task 050
-`$select=status`). **The POML's own constraint — "every ceiling write MUST be confirmed by read-back,
-not by a 200 response" — is what caught it.**
-
-**Operator decision: option A** — type-scope ceiling (one knob, all containers of the type) + per-container
-`drive.quota` reporting, labelled honestly as type-wide.
-
-**Bonus finding**: `drive.quota.used` is available on **GET-single**, closing the gap tasks 020/024
-documented (`storageUsedInBytes` is beta-only AND LIST-only). Verified live: 868,906,006 bytes on
-`Spaarke Inc`, consistent with task 024's measured 861 MB.
-
-**Scope was smaller than the POML assumed** — tasks 023/025 already built the type-scope ceiling
-read+write+validation end-to-end (labelled "Storage ceiling per container"). Remaining work is the
-read-back verification, the per-container quota surface, and honest UI labelling.
-
-Detail: [`notes/task-051-findings.md`](notes/task-051-findings.md).
-
-### Files modified — task 050
-| File | Purpose |
-|---|---|
-| `Infrastructure/Graph/SpeAdminGraphService.cs` | `ArchiveContainerAsync` / `UnarchiveContainerAsync` + `ForConfig` wrappers, `ArchivalNotEnabledException`, `ReadContainerStatus` + `ReadArchiveStatus`, `Status` → nullable |
-| `Api/SpeAdmin/ContainerEndpoints.cs` | `POST …/archive` + `…/unarchive`, 409 remediation payload, `ContainerDto.ArchiveStatus` |
-| `tests/integration/contract/SpeAdmin/SpeAdminContainerArchivalContractTests.cs` | **new** — 16 tests incl. 2 negative controls |
-| `SpeAdminApp/src/types/spe.ts` | `ContainerArchiveStatus`, `ArchivalActionAccepted`, `status` nullable |
-| `SpeAdminApp/src/services/speApiClient.ts` | `containers.archive` / `.unarchive` |
-| `SpeAdminApp/src/components/containers/ContainersPage.tsx` | Archive/Restore toolbar + ConfirmModal + Archive column + Status honesty fix |
-| `SpeAdminApp/src/components/containers/ContainerDetail.tsx` | Status absent-state + Archive row |
-| `projects/…/notes/task-050-findings.md` | **new** — all measurements |
-
-### Critical context
-Archival is **beta-only** in Graph — and that is fine, the container surface is *already* pinned to
-beta by task 020's measured decision, so **no ADR conflict and no §6.5 gate**. Two defects were found
-and fixed on the way (§0.2, §0.3). The feature cannot be live-verified: the container type has not
-opted in and that is an operator action (§0.4).
-
----
-
-## 0. Task 050 — container archival (FR-E01)
-
-### 0.1 🔴 The documented PowerShell remediation does not exist
-
-POML AC-4 requires the not-opted-in error to "name the PowerShell remediation". Every source in the
-repo — POML, spec FR-E01, `design.md` §4.3, `knowledge/sharepoint-embedded/` — says
-`Set-SPOContainerType -IsArchiveEnabled`. **That parameter does not exist on that cmdlet in any
-module version** (verified by reflecting the cmdlet types out of the module assembly).
-
-The real one is **`Set-SPOContainerTypeConfiguration -ContainerTypeId <guid> -IsArchiveEnabled $true`**,
-and it needs SPO module **≥ 16.0.27515.12000** (the commonly-installed 16.0.26413.0 has no archive
-parameter on any cmdlet). Following the POML literally would have shipped an error message telling an
-admin to run a command that does not exist — the project's signature defect, inside the feature meant
-to remove it. Full detail: [`notes/task-050-findings.md`](notes/task-050-findings.md) §1.
-
-**The four source docs still carry the wrong cmdlet.** Correcting them is not done yet — see §0.5.
-
-### 0.2 🔴 `status` was fabricated as "active" for 100% of responses, everywhere
-
-`SpeContainerSummary.Status` defaulted to `"active"` and all four mapping sites ended `: "active"`.
-`status` is in the **v1.0 schema**, so the Graph SDK models it as a **typed property** and Kiota never
-puts it in `AdditionalData` — which is where all four readers looked. The lookup could not match on any
-path, so the literal fired every time: GET-single (Graph really returns `active`), CREATE (Graph really
-returns `inactive`), and both LIST paths. A brand-new, not-yet-activated container was reported active.
-The client had a second `?? "active"` on top. Both fixed; `Status` is now `string?` and renders
-"Not reported". Regression-guarded by two contract tests.
-
-### 0.3 Kiota shape guess — caught by a test, not by review
-
-`archivalDetails` arrives as **`Microsoft.Kiota.Abstractions.Serialization.UntypedObject`**, not
-`JsonElement` and not `IDictionary<string,object>`. My first `ReadArchiveStatus` handled the latter two
-and returned null for every real response. Caught because the contract test asserted the *mapped value*
-rather than that the code ran. (Scalars differ — `storageUsedInBytes` arrives as `decimal`, so task
-024's storage fix is genuinely working; checked while I was in there.)
-
-### 0.4 🔔 ESCALATION FIRED — archive/restore cannot be live-verified from here
-
-Live probe on a **throwaway container** (NFR-07: provisioned, activated, probed, torn down 204/204):
+050 shipped but **FR-E01 acceptance criteria 1 and 2 are NOT met**, so 050 is 🔄 not ✅.
 
 ```
 POST /beta/storage/fileStorage/containers/{id}/archive
@@ -148,185 +80,106 @@ POST /beta/storage/fileStorage/containers/{id}/archive
                      application does not currently support archiving."
 ```
 
-The 403 is **semantic, not routing** — the beta action exists and is reachable; the container type has
-not opted in. So AC-1 and AC-2 (archive succeeds / restore returns to active) are **not verified**.
+Semantic, not routing — the beta action exists and is reachable; the container type has not opted in.
 
-Enabling it is an operator action and I did not do it: it is a tenant-level change to a **shared**
-container type (`Spaarke PAYGO 1`) other projects use, and it needs the module upgrade in §0.1.
-Recipe to finish the verification is in `notes/task-050-findings.md` §7.
-
-⚠️ **Watch item**: `archivalDetails` has never been seen on the wire — omitted from LIST and from
-GET-single even with an explicit `$select` that `@odata.context` echoes back. If it is still absent
-after a successful archive, the property is unserved and the grid must source archive state from the
-action outcome + `Get-SPOContainer -ArchiveStatus` instead. The code isolates this in one mapper.
-
-### 0.5 Gates — all green
-
-| Gate | Result |
-|---|---|
-| BFF build | **0 errors / 0 warnings** |
-| BFF tests | **10,661 passed / 0 failed** / 95 skipped |
-| SpeAdmin contract tests | **92/92**, incl. 16 new archival |
-| ArchTests | **106/111** — the same 5 pre-existing `customer-provisioning-orchestration-r1` failures as before this task; none mine, none in Tier-1's blocking set |
-| Client typecheck | **124 errors = baseline exactly** (`git stash` diff), 0 new |
-| Vite build | ✅ 19.2 s; strings verified present in `dist/speadmin.html` |
-| Publish size | **45.08 MB** incl PDBs (44.16 excl). Baseline 44.96 → **+0.12 MB**. Ceiling 60 |
-| CVE | none |
-| ADR-check | 0 violations, 1 warning (test path — resolved path C, see below) |
-
-**Docs corrected** (all 5 that carried the non-existent cmdlet): `spec.md` FR-E01, `design.md` §4.3,
-`knowledge/sharepoint-embedded/docs/learn-containers.md`, `notes/spe-platform-research-2026-08-20.md`
-(annotated, left as historical record), and the 050 POML.
-
-**Deviation — test location.** The POML nominated `tests/unit/Sprk.Bff.Api.Tests/Api/SpeAdmin/`;
-task 042 established that is **not** a KEEP path, so tests written there would be deletion candidates
-at the `/test-diet` gate (task 090). Written to `tests/integration/contract/SpeAdmin/` instead — same
-assembly, no csproj change. §6.5 path C (comply); the POML predates 042's finding.
-
-### 0.6 Remaining on 050
-Nothing in code. **The one open item is the operator opt-in in §0.4** — until then AC-1/AC-2 stay
-unverified and 050 is 🔄, not ✅, in `TASK-INDEX.md`.
-
----
-
-## 1. 🔔 OPEN ESCALATION — a CATASTROPHIC-severity secret guard was dead, and now reports real findings
-
-**This is the most important thing in this file.**
-
-`CosmosProvisioningSecretGuardTests` (FR-27) was **not failing — it was not running.** Its loader pointed
-at `src/server/services/Sprk.Provisioning.ControlPlane/`, a directory that **does not exist**; L2 was
-split into `.Api` / `.Core` / `.Sidecar` / `.Worker`. Both Facts threw `FileNotFoundException` every run.
-
-**Why this mattered more than a broken test**: it did not report *"I cannot check this."* It reported a
-failure under the DisplayName **"types have no string-typed secret-shape properties"** — so a reader
-would reasonably conclude the secret rule had been evaluated and had something to say. It had never run.
-The invariant is documented **CATASTROPHIC** (Cosmos is a queryable audit log; a cleartext secret there
-leaks to any Reader), and it has been dark since the split.
-
-**Repaired** (loads every `Sprk.Provisioning.ControlPlane*` assembly — the scan comment always said
-`*`, only the loader was single). It now reports **8 secret-shaped properties**:
-
-| Property | My read |
-|---|---|
-| `SolutionVerificationRequest.ClientSecret` | 🔴 **real value** — KV-resolved, used to build a `ClientSecretCredential` |
-| `ExchangePolicySidecarClient+SharedSecretResolution.Secret` | 🔴 likely real value |
-| `ExchangePolicySidecarReadClient+SharedSecretResolution.Secret` | 🔴 likely real value |
-| `PendingKvSecretWrite.SecretName` | probably a NAME (allowed — root CLAUDE.md §9) |
-| `TrapVerificationRequest.KeyVaultName` | probably a NAME |
-| `SlotKeyVaultRefSnapshot.KeyVaultReferenceIdentity` | probably an identity ref, not a value |
-| `PerEnvYamlEntry.Key` / `PerEnvSettingEntry.Key` | probably a settings key name |
-
-**I did NOT refine the regex to silence the last five.** Loosening a CATASTROPHIC security detector in
-another team's code, based on my inference about which properties hold names vs values, risks silently
-removing protection if I'm wrong once. That is the exact failure mode this project exists to remove.
-
-### All 5 remaining ArchTest failures are real findings, all in `customer-provisioning-orchestration-r1`
-
-| Failure | Finding |
-|---|---|
-| **FR-27** | the 8 above |
-| **FR-F1 / FR-F2** | 4 unlisted `ClientSecretCredential` sites: `DataverseWebApiSolutionVerifier.cs:55`, `DataverseWebApiSolutionImporter.cs:185`, `DataverseWebApiEnvVarValuesWriter.cs:84`, `DataverseRegistryConcurrencyStore.cs:298` |
-| **ServiceBus** | `ServiceBusModule.cs:144` — a real second production construction site |
-| **ADR-010** | 1:1 interface ceiling drifted 153 → 155 (2 new interfaces, unidentified) |
-
-**Deliberately not forced green.** FR-F2's own message says *"A failure here is NOT a prompt to update
-the number."* Adding FR-27 exclusions would re-dark the guard just repaired.
-
-⚠️ **None of the five block CI.** Tier-1's blocking subset is 7 named tests; none are these. They live in
-Tier 2 / `adr-audit.yml`.
-
-**Recommendation**: file against `customer-provisioning-orchestration-r1`; `ClientSecret` first.
-
----
-
-## 2. Next Action — push, then task 050
-
-```bash
-git push
+**To finish the verification** (operator action — tenant-level change to a **shared** container type):
+```powershell
+Update-Module Microsoft.Online.SharePoint.PowerShell      # need >= 16.0.27515.12000
+Connect-SPOService -Url https://spaarkedev1-admin.sharepoint.com
+Set-SPOContainerTypeConfiguration -ContainerTypeId 8a6ce34c-6055-4681-8f87-2f4f9f921c06 -IsArchiveEnabled $true
 ```
-Then **050 — container archival**. Unblocked (deps 020 + 040 complete).
 
-⚠️ **050, 051, 052 all modify `SpeAdminGraphService.cs`** → all `∥-safe: false` → **one at a time, main
-session.** They also all write into `tests/unit/Sprk.Bff.Api.Tests/Api/SpeAdmin/`.
+⚠️ **`Set-SPOContainerType -IsArchiveEnabled` does not exist** — that parameter is on
+`Set-SPOContainerTypeConfiguration`. All 5 repo docs corrected by task 050.
 
-⚠️ **052 is destructive** (item recycle bin). The 041 fixture (`LiveIntegrationFixture`) provisions and
-tears down its own container — use it; do not hand-run against a pre-existing container (NFR-07).
+⚠️ **Watch item**: `archivalDetails` has **never been seen on the wire**, even with an explicit
+`$select` that `@odata.context` echoes. If it is still absent after a successful archive, the property
+is unserved and the grid must source archive state from the action outcome +
+`Get-SPOContainer -ArchiveStatus` instead. The code isolates this in one mapper.
 
 ---
 
-## 3. Task 042 result
+## 3. What shipped (042 / 050 / 051) — and the three defects fixed
 
-| Metric | Before | After |
+| Task | Outcome |
+|---|---|
+| **042** | SpeAdmin tests **722 → 207 cases**, 0 skipped. Keepers **relocated, not deleted** |
+| **050** | Container archival — archive/restore, archive state in grid, ADR-050 confirmation, 16 contract tests |
+| **051** | Storage quota (FR-E02 **amended**) — type-scope ceiling + per-container read-only quota, 8 contract tests |
+
+**Three defects found and fixed:**
+
+1. **`status` fabricated as `"active"` for 100% of responses.** It is a *typed* SDK property, so the
+   `AdditionalData` lookup behind all four mapping sites could never match — the `: "active"` fallback
+   fired every time, including GET and CREATE where Graph really returns the value. Client had a second
+   `?? "active"`. Now nullable → "Not reported".
+2. **A CATASTROPHIC secret guard was dead, not passing** (`CosmosProvisioningSecretGuardTests`) —
+   repaired; now reports 8 findings in another project's code. **Filed as ISS-002 / [#839](https://github.com/spaarke-dev/spaarke/issues/839).**
+3. **Two documented PowerShell remediations were wrong** — corrected across 5 docs.
+
+**FR-E02 was amended** (operator chose option A): Graph has **no per-container ceiling**, and
+`PATCH /containers/{id}` carrying it returns **200 while silently discarding the value**. The task's own
+*"confirm by read-back, not by a 200"* constraint is what caught it.
+
+### Open filings
+| ID | What | Where |
 |---|---|---|
-| SpeAdmin test **cases** | **722** (721 pass, 1 skip) | **207** (207 pass, **0 skip**) |
-| Files | 15 in the non-KEEP location | 6 |
-| `Spaarke.ArchTests` | 108 (102 pass / 6 fail) | 111 (106 pass / **5** fail) |
-
-**Deleted whole (9)**: Phase2, Phase3, MultiAppSupport (the `Integration/SpeAdmin/` dir is gone),
-MultiTenant, ContainerColumn, ContainerTypeEndpoints, ContainerTypePermission, RecycleBin,
-**SecurityEndpoint** (your call — verified nothing external referenced it first).
-
-**Pruned (6)**: Register −27, UpdateSettings −18, SearchItems −12, SearchContainers −18, Bulk −15,
-CustomProperty −12. AMBIGUOUS tests **retained and marked** `// AMBIGUOUS (task 042):` for `/test-diet`
-at task 090.
-
-**Relocated, not deleted**: 4 mapper tests → `tests/unit/domain/SpeAdmin/`; 6 ad-hoc ADR-007 reflection
-guards → one generalised ArchTest rule; both manual test plans → `notes/manual-test-plan.md`.
-
-### Three findings from 042 (full detail in `notes/test-retirement-inventory.md`)
-
-1. **34 tests were green against a feature that cannot execute.** `GetClientForOwningAppAsync`,
-   `ValidateOwningAppSecretsAsync`, `FetchOwningAppSecretAsync` have **zero callers** in `src/`
-   (grep-verified). Task 010's UNWORKABLE verdict at the test layer. The dead code is **still
-   DI-registered and shipped** — a CLAUDE.md §11 removal candidate, out of 042's scope.
-2. **2nd instance of tests defending a defect.** Two skip-token tests pinned a *numeric* offset scheme
-   while claiming to mirror production, which forwards an *opaque* token. (1st was task 023's ten tests.)
-3. **`ADR007_GraphIsolationTests` gap** — its allowlist exempts any namespace *containing*
-   `Infrastructure.Graph`, so every nested domain record was unguarded. New rule closes it; return-type
-   sibling narrowed to exempt `GraphServiceClient` (a factory returning a client is its contract), reason
-   documented inline.
-
-### Coverage gaps filed (real, pre-existing, none created by 042)
-Security endpoints (no contract test at all) · Bulk operations (validation only ever mirror-tested; the
-file's docstring claimed to cover `BulkOperationService`, which no test ever constructed) · container
-columns · register error codes · CT-006 app-permissions · audit-logging on create · the
-`NameIdentifier`/`sub` userId fallback.
+| **ISS-002** | 5 ArchTest findings incl. the dead secret guard | [#839](https://github.com/spaarke-dev/spaarke/issues/839) → `customer-provisioning-orchestration-r1` |
+| **DEF-001** | 3 owning-app methods with **zero callers**, still DI-registered and shipped | `notes/cross-project-handoffs.md` — §11 delete-or-document decision by task 090 |
 
 ---
 
-## 4. Unrelated pre-existing flake — finally adjudicated
+## 4. ⚠️ Repo/CI health — worth raising, not caused by this project
 
-`SseStreamingIntegrationTests.Cancellation_NoLingeringBackgroundTask_AfterClientAbort` fails in the
-full-project run and **passes in isolation** (167 ms) → order/timing-dependent, **flaky, not a
-regression**. Two earlier CI runs never settled this because I cancelled both with my own pushes.
-Recorded, not fixed. Relevant to master's `classify-and-retry.ps1` determinism work (PR #830).
+- **Branch protection on master is DISABLED.** The `merge-to-master` skill documents it as protected
+  since 2026-06-02; it is not. Consequence: `gh pr merge --auto` had no required checks to gate on, so
+  **PR #842 merged instantly rather than on CI-green**. The merge is backed by local verification
+  (build 0/0 · 10,683 tests · ArchTests 112/117 with the same 5 pre-existing), not by CI.
+- **Four consecutive master SDAP CI runs were cancelled** (20:10 → 20:52), so **no completed Code
+  Quality / ADR-Violations verdict on master since 17:55** across PRs #842, #841, #838, #840 —
+  including #840, a `!` breaking change touching 41 identity sites.
+- **PR #841 is the fix** (*"key router concurrency on sha for master"*) and is now on master; the run at
+  `30e6fd9cf` is the first under it.
+- ✅ **#840 verified locally against this work**: merged clean, build 0/0, **10,683 tests pass**,
+  ArchTests **112 pass / 5 fail** (117 total — #840 added 6 new `CallerIdentityGuardTests`, all
+  passing). The semantic risk flagged for `SpeAdminTenantScope.cs` did **not** materialise.
 
 ---
 
 ## 5. Verification recipes worth reusing
 
-- **Prove a failure is pre-existing**: `git stash -u` → run → `git stash pop`. Used twice this session;
-  it is what turned "6 ArchTest failures" from an accusation into a fact.
-- **Baseline before deleting tests**: `dotnet test … --filter "FullyQualifiedName~SpeAdmin"`. Never
-  inherit a count from a POML — 042's said "14 files / 359 tests"; actual was **29 files / 722 cases**.
-- `dotnet test tests/integration/seam/` fails **MSB1003** — that path is globbed into
-  `Sprk.Bff.Api.Tests` via `<Compile Include="..\..\integration\seam\**\*.cs">`. Run the csproj.
-- **All 8 KEEP categories compile into `Sprk.Bff.Api.Tests`** via csproj globs → relocating a test to a
-  KEEP path is a file move, **no csproj change**.
+- **Prove a failure is pre-existing**: `git stash -u` → run → `git stash pop`. Also used for the client
+  typecheck baseline (124 errors — compare counts, not impressions).
+- **Read Graph's own CSDL before believing a doc**: `curl https://graph.microsoft.com/{v1.0,beta}/$metadata`,
+  no token. Settled the archival version question (050) and the quota-scope question (051) definitively.
+- **Reflect a PowerShell module rather than trusting its docs**: `Save-Module` to scratch →
+  `Assembly.LoadFrom` → enumerate `CmdletAttribute` types → read parameters. Catch
+  `ReflectionTypeLoadException` and use `.Types` (missing deps are normal). This is what proved
+  `Set-SPOContainerType -IsArchiveEnabled` does not exist.
+- **`gh pr view --json files` caps at 100 files.** Use
+  `gh api --paginate repos/{owner}/{repo}/pulls/{n}/files` — two PRs (177 and 348 files) were silently
+  truncated during conflict-check.
+- **Test a "does the API reject X" hypothesis with a WELL-FORMED invalid value.** A malformed id gets
+  rejected on format and looks identical to rejection on existence — this nearly produced the wrong
+  conclusion about 052's 207.
+- **Live probing needs no new setup**: app-only token as owning app `170c98e1` via the
+  `spe-owning-app-secret` in `sprk-prod-kv`. Working probe scripts are in the session scratchpad
+  (`probe_archive.py`, `probe051.py`, `probe052*.py`) — the recipe is in `notes/live-verification-credential.md`.
 
 ---
 
 ## 6. Orchestration lessons (preserved)
 
-1. `parallel-safe: true` describes the work, not the bookkeeping — both Wave A POMLs write `TASK-INDEX.md`.
-2. An agent once silently skipped an instruction; caught only by `git status`. **Improved**: all 7 agents
-   this session reported honestly, and one *correctly refused* a deletion I ordered — my ArchTest rule
-   checked `Microsoft.Graph*` but not `Microsoft.SharePoint`, so it kept that guard. I then extended the
-   rule. Give agents the standing to push back and they will.
-3. A CI observation and a `git push` cannot be interleaved — two runs lost to my own pushes.
-4. Stale POML `<status>`/`<deps>` have misled three times. `TASK-INDEX.md` is authoritative.
-5. **Partition agent file-sets disjointly and forbid them running `dotnet build`** — concurrent builds on
-   one project corrupt `bin`/`obj`. The orchestrator builds centrally, once.
+1. `parallel-safe: true` describes the work, not the bookkeeping.
+2. Agents given explicit standing to push back will — one correctly refused a deletion I ordered.
+3. **A CI observation and a `git push` cannot be interleaved.** Compounded this session: master merges
+   cancel each other's runs.
+4. Stale POML `<status>`/`<deps>` have misled four times. `TASK-INDEX.md` is authoritative.
+5. Partition agent file-sets disjointly and forbid them running `dotnet build`.
+6. **The POML constraints earned their keep twice** — 051's *"confirm by read-back, not by a 200"* and
+   050's escalation trigger both caught real platform defects. Read `<constraints>` before `<steps>`.
+7. **Bash working directory persists across calls** and drifts into the scratchpad after probe runs —
+   prefix with `cd /c/code_files/spaarke-wt-sdap-SPE-admin-app-r2` when it matters.
 
 ---
 
@@ -334,13 +187,17 @@ Recorded, not fixed. Relevant to master's `classify-and-retry.ps1` determinism w
 
 | Task | Status |
 |---|---|
-| **042** | ✅ complete |
-| **050** | 🔲 **next** — `∥-safe: false` |
-| **051**, **052** | 🔲 unblocked; 052 destructive |
-| **090** | 🔲 `/test-diet` is a BINDING gate; it re-examines every AMBIGUOUS marker left by 042 |
+| 041, 042, 050, 051 | ✅ / 🔄 complete — see §3 (050 is 🔄 pending the operator opt-in) |
+| **052** | ▶ **NEXT** — discovery done, implementation not started |
+| 060, 061, 062 | 🔲 |
+| **090** | 🔲 `/test-diet` is a BINDING gate; also decides **DEF-001** and re-examines every `// AMBIGUOUS (task 042):` marker |
 | 025, 026, 029 | 🔄 **PARTIAL, not open** — do not restart |
 
 **Not in the POML backlog**: the client typecheck+vitest gap · I2 cross-tenant search bleed (waived on
-the deployment, not fixed — `JobContract` has no tenant field) · container-type DELETE does not exist ·
-the `communications`/`emails`/`exports` folder origin (now answerable in one click via the File
-Browser's **Modified By** column — worth doing **before** 052, which is destructive).
+the deployment, not fixed) · container-type DELETE does not exist · Security-endpoint contract coverage
+(no test exists anywhere — escalated in 042).
+
+✅ **Closed this session**: the `communications`/`emails`/`exports` folder origin — `communications`
+(2026-03-11) and `emails` (2026-01-13) were created by **"SharePoint App"**, Spaarke's own app-only
+identity; `exports` (2026-03-22) by the operator interactively. Nothing foreign. The
+throwaway-container rule stands on its other two reasons (repeatability, shared tenant).
