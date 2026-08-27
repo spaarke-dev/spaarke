@@ -1,7 +1,7 @@
 # Current Task State — sdap-SPE-admin-app-r2
 
 > **Last Updated**: 2026-08-27 (by `context-handoff`)
-> **Recovery**: read Quick Recovery, then §1. §7 is preserved history — do not re-derive it.
+> **Recovery**: read Quick Recovery, then §1 (the open escalation). §6 is preserved history.
 
 ---
 
@@ -9,231 +9,182 @@
 
 | Field | Value |
 |---|---|
-| **Task** | none active — 041 just completed |
-| **Phase** | POML execution. Waves A + B done. |
-| **Status** | Branch clean, pushed. **1 ahead / 9 behind `origin/master`** |
-| **Head** | `86441920d` |
-| **Next Action** | `git merge origin/master` (9 behind — CI changed under us, see §2), then run **task 042** via `task-execute`. |
+| **Task** | 042 **complete** (was partial; finished this session). No task active. |
+| **Phase** | Workstream D done. Wave W15+ (E-tasks) next. |
+| **Status** | Branch clean, **committed but NOT pushed**. In sync with `origin/master` otherwise. |
+| **Head** | `1b1d03b23` |
+| **Next Action** | `git push`, then **task 050** (container archival) — see §2 |
+| **Blocking?** | No. One **escalation awaits your decision** (§1) but it does not block 050. |
 
-### Files modified this session (all committed + pushed)
-
-| Commit | Contents |
+### Files modified this session
+| File | Purpose |
 |---|---|
-| `bec4e6792` | Wave A — 061 corpus refresh (4 files, +525 lines) + 062 billing handoff (2 docs, issue #831) |
-| `86441920d` | Task 041 — `LiveIntegrationFixture.cs`, `ContainerLifecycleLiveTests.cs`, `notes/task-041-teardown-proof.md`, premise corrections in project `CLAUDE.md` + the 041 POML |
+| 15 SpeAdmin test files | 9 deleted whole, 6 pruned — see §3 |
+| `tests/unit/domain/SpeAdmin/SpeAdminDtoMappingTests.cs` | **new** — 4 relocated mapper tests |
+| `tests/Spaarke.ArchTests/ADR007_NestedDomainRecordTests.cs` | **new** — 2 rules + controls, replaces 6 ad-hoc reflection tests |
+| `tests/Spaarke.ArchTests/CosmosProvisioningSecretGuardTests.cs` | **repaired a dead guard** — see §1 |
+| `tests/Spaarke.ArchTests/ServiceBusClientGuardTests.cs` | scoped off `.Tests` projects |
+| `projects/…/notes/manual-test-plan.md` | **new** — relocated plan, annotated |
+| `projects/…/notes/test-retirement-inventory.md` | **new** — full classification record |
 
 ### Critical context
-
-Three tasks completed this session (061, 062, 041), all verified in the main session rather than
-accepted from agent reports — **one agent silently skipped an instruction**, caught only by `git status`.
-Task 041 found a **real production defect** (issue **#834**). PR #828 merged to master at 02:54Z; only
-041 remains unmerged.
+Merged `origin/master` (was 9 behind; CI files only). **SpeAdmin tests 722 → 207**, build 0/0, 207/207
+pass, 0 skipped. Task 042 is done. The one thing needing you is §1.
 
 ---
 
-## 1. What to do next
+## 1. 🔔 OPEN ESCALATION — a CATASTROPHIC-severity secret guard was dead, and now reports real findings
 
-**Sync first.** The branch is **9 behind**. Master gained PRs #828, #829, #830 — including CI changes
-that alter how tests are run and retried. Running 042 (a test-deletion task) against a stale view of the
-CI config would be reasoning from the wrong baseline.
+**This is the most important thing in this file.**
+
+`CosmosProvisioningSecretGuardTests` (FR-27) was **not failing — it was not running.** Its loader pointed
+at `src/server/services/Sprk.Provisioning.ControlPlane/`, a directory that **does not exist**; L2 was
+split into `.Api` / `.Core` / `.Sidecar` / `.Worker`. Both Facts threw `FileNotFoundException` every run.
+
+**Why this mattered more than a broken test**: it did not report *"I cannot check this."* It reported a
+failure under the DisplayName **"types have no string-typed secret-shape properties"** — so a reader
+would reasonably conclude the secret rule had been evaluated and had something to say. It had never run.
+The invariant is documented **CATASTROPHIC** (Cosmos is a queryable audit log; a cleartext secret there
+leaks to any Reader), and it has been dark since the split.
+
+**Repaired** (loads every `Sprk.Provisioning.ControlPlane*` assembly — the scan comment always said
+`*`, only the loader was single). It now reports **8 secret-shaped properties**:
+
+| Property | My read |
+|---|---|
+| `SolutionVerificationRequest.ClientSecret` | 🔴 **real value** — KV-resolved, used to build a `ClientSecretCredential` |
+| `ExchangePolicySidecarClient+SharedSecretResolution.Secret` | 🔴 likely real value |
+| `ExchangePolicySidecarReadClient+SharedSecretResolution.Secret` | 🔴 likely real value |
+| `PendingKvSecretWrite.SecretName` | probably a NAME (allowed — root CLAUDE.md §9) |
+| `TrapVerificationRequest.KeyVaultName` | probably a NAME |
+| `SlotKeyVaultRefSnapshot.KeyVaultReferenceIdentity` | probably an identity ref, not a value |
+| `PerEnvYamlEntry.Key` / `PerEnvSettingEntry.Key` | probably a settings key name |
+
+**I did NOT refine the regex to silence the last five.** Loosening a CATASTROPHIC security detector in
+another team's code, based on my inference about which properties hold names vs values, risks silently
+removing protection if I'm wrong once. That is the exact failure mode this project exists to remove.
+
+### All 5 remaining ArchTest failures are real findings, all in `customer-provisioning-orchestration-r1`
+
+| Failure | Finding |
+|---|---|
+| **FR-27** | the 8 above |
+| **FR-F1 / FR-F2** | 4 unlisted `ClientSecretCredential` sites: `DataverseWebApiSolutionVerifier.cs:55`, `DataverseWebApiSolutionImporter.cs:185`, `DataverseWebApiEnvVarValuesWriter.cs:84`, `DataverseRegistryConcurrencyStore.cs:298` |
+| **ServiceBus** | `ServiceBusModule.cs:144` — a real second production construction site |
+| **ADR-010** | 1:1 interface ceiling drifted 153 → 155 (2 new interfaces, unidentified) |
+
+**Deliberately not forced green.** FR-F2's own message says *"A failure here is NOT a prompt to update
+the number."* Adding FR-27 exclusions would re-dark the guard just repaired.
+
+⚠️ **None of the five block CI.** Tier-1's blocking subset is 7 named tests; none are these. They live in
+Tier 2 / `adr-audit.yml`.
+
+**Recommendation**: file against `customer-provisioning-orchestration-r1`; `ClientSecret` first.
+
+---
+
+## 2. Next Action — push, then task 050
 
 ```bash
-git fetch origin && git merge origin/master --no-edit && dotnet build src/server/api/Sprk.Bff.Api/
+git push
 ```
+Then **050 — container archival**. Unblocked (deps 020 + 040 complete).
 
-**Then task 042** — retire scaffolding tests per ADR-038 §7. Unblocked (deps 040 + 041 both complete).
+⚠️ **050, 051, 052 all modify `SpeAdminGraphService.cs`** → all `∥-safe: false` → **one at a time, main
+session.** They also all write into `tests/unit/Sprk.Bff.Api.Tests/Api/SpeAdmin/`.
 
-| Wave | Task | ∥-safe | Run how | Note |
-|---|---|---|---|---|
-| **C — next** | **042** retire scaffolding tests | ✅ | Alone | 🚨 FULL rigor: modifies `tests/**` → Step 9.5 gates UNCONDITIONAL. Deleting unreplaced coverage is an escalation trigger, not a judgement call |
-| D | **050** archival · **051** quota ceiling | ❌ ❌ | Sequential, main session | Both unblocked |
-| E | **052** item recycle bin | ❌ | Alone | Destructive — the 041 fixture it needed now EXISTS |
-| F | **090** wrap-up | ❌ | Last | `/test-diet` is a **BINDING** gate |
-
-**Two tasks are PARTIAL, not open** — do not restart: **025** (server complete, form deferred) and
-**026** (AC-2 escalated as *not achievable* — `consumingTenantOverridables` is a permission, not a
-state).
+⚠️ **052 is destructive** (item recycle bin). The 041 fixture (`LiveIntegrationFixture`) provisions and
+tears down its own container — use it; do not hand-run against a pre-existing container (NFR-07).
 
 ---
 
-## 2. What changed on master while we worked
+## 3. Task 042 result
 
-**PR #828 merged** (02:54Z → `7e755c48e`). It had been held pending "other projects completing and some
-CI cleanup"; the cleanup landed and it went in. **Do not re-open or re-merge it.**
+| Metric | Before | After |
+|---|---|---|
+| SpeAdmin test **cases** | **722** (721 pass, 1 skip) | **207** (207 pass, **0 skip**) |
+| Files | 15 in the non-KEEP location | 6 |
+| `Spaarke.ArchTests` | 108 (102 pass / 6 fail) | 111 (106 pass / **5** fail) |
 
-Master also gained the CI cleanup itself — #829 and #830:
+**Deleted whole (9)**: Phase2, Phase3, MultiAppSupport (the `Integration/SpeAdmin/` dir is gone),
+MultiTenant, ContainerColumn, ContainerTypeEndpoints, ContainerTypePermission, RecycleBin,
+**SecurityEndpoint** (your call — verified nothing external referenced it first).
 
-- `fix(ci): measure determinism instead of assuming it in the test-retry classifier`
-- `fix(ci): stop two workflows that cannot succeed as wired`
-- `fix(ci): pin trivy-action to a tag that exists, and honor the npm install convention`
+**Pruned (6)**: Register −27, UpdateSettings −18, SearchItems −12, SearchContainers −18, Bulk −15,
+CustomProperty −12. AMBIGUOUS tests **retained and marked** `// AMBIGUOUS (task 042):` for `/test-diet`
+at task 090.
 
-🔴 **The first one bears directly on an open question from this session.** Three tests
-(`ScheduledJobHostTests.StopAsync_…NFR07`, `RetryAndIdempotencyTests.CancellationDuringRetryLoop_…`,
-`SseStreamingIntegrationTests.Cancellation_…`) failed on PR #828 with `TimeoutException` /
-`TaskCanceledException`. They use `Task.Delay` / `Stopwatch` / wall-clock timeouts — the constructs
-[`tests/CLAUDE.md`](../../tests/CLAUDE.md) **bans** as CI-flaky, prescribing `FakeTimeProvider`. **I
-never obtained a verdict on whether they are flaky or real** — see §5. The new retry classifier may now
-answer that; check it before spending time on them.
+**Relocated, not deleted**: 4 mapper tests → `tests/unit/domain/SpeAdmin/`; 6 ad-hoc ADR-007 reflection
+guards → one generalised ArchTest rule; both manual test plans → `notes/manual-test-plan.md`.
 
----
+### Three findings from 042 (full detail in `notes/test-retirement-inventory.md`)
 
-## 3. Completed this session
+1. **34 tests were green against a feature that cannot execute.** `GetClientForOwningAppAsync`,
+   `ValidateOwningAppSecretsAsync`, `FetchOwningAppSecretAsync` have **zero callers** in `src/`
+   (grep-verified). Task 010's UNWORKABLE verdict at the test layer. The dead code is **still
+   DI-registered and shipped** — a CLAUDE.md §11 removal candidate, out of 042's scope.
+2. **2nd instance of tests defending a defect.** Two skip-token tests pinned a *numeric* offset scheme
+   while claiming to mirror production, which forwards an *opaque* token. (1st was task 023's ten tests.)
+3. **`ADR007_GraphIsolationTests` gap** — its allowlist exempts any namespace *containing*
+   `Infrastructure.Graph`, so every nested domain record was unguarded. New rule closes it; return-type
+   sibling narrowed to exempt `GraphServiceClient` (a factory returning a client is its contract), reason
+   documented inline.
 
-### Wave A — 061 + 062 (parallel, `bec4e6792`)
-
-**061 knowledge corpus refresh.** The corpus was not merely stale, it was **actively misleading**: the
-2026-05-14 snapshot said container-type CREATE requires an *application permission*. `containerTypes`
-supports **no** application permissions at all (403 live, task 010). Anyone designing app-only auth off
-that page would build something architecturally impossible — which is what this project spent its first
-phase discovering. Also flagged **`agent.chatEmbedAllowedHosts` as fictional** (a prior R2 requirement
-doc invented it; absent from both CSDL docs, the SDK model, and all four live container types). The
-create-role doc-vs-doc contradiction is recorded with **both** sides verbatim + source URLs, unresolved.
-
-**062 billing handoff.** Issue **#831** + requirement doc on `customer-provisioning-orchestration-r1`
-(notes only). The boundary is stated in both documents: SPE Admin **reads** billing and warns;
-provisioning is the **sole writer**.
-
-### Wave B — 041 (`86441920d`)
-
-Fixture + guard + 6 tests. **Both hard stops were PROVEN, not merely implemented** — teardown-on-failure
-confirmed by a separate live query after a forced mid-test failure; the guard proven by a
-credential-free negative+positive control *and* structurally inside the destructive helper.
-
-Verified independently here: **6/6 green in 10 ms with no credentials** (the CI-exclusion criterion),
-`[Trait("Category","LiveIntegration")]` with zero `[Category(`, no secret values committed.
-
-🔴 **Found a real production defect → issue #834.** `RegisterConsumingTenantAsync`'s POST returns
-`400 apiNotFound` on **both** API versions while a GET on the identical URL succeeds. So
-`ConsumingTenantEndpoints.cs`'s POST/PUT/DELETE are suspected non-functional — though the app's Register
-button uses a *different* SharePoint-REST path, so the UI may work while those endpoints do not.
-Captured as a characterization test that **fails loudly if the defect is ever fixed**.
+### Coverage gaps filed (real, pre-existing, none created by 042)
+Security endpoints (no contract test at all) · Bulk operations (validation only ever mirror-tested; the
+file's docstring claimed to cover `BulkOperationService`, which no test ever constructed) · container
+columns · register error codes · CT-006 app-permissions · audit-logging on create · the
+`NameIdentifier`/`sub` userId fallback.
 
 ---
 
-## 4. Orchestration lessons — read before the next wave
+## 4. Unrelated pre-existing flake — finally adjudicated
 
-⚠️ **`parallel-safe: true` describes the WORK, not the bookkeeping.** Both Wave A POMLs end by writing
-the same `TASK-INDEX.md` (061 step 7, 062 step 5). Two agents editing one file concurrently is a
-lost-update race. Tell agents to skip it; make the single write in the main session.
-
-⚠️ **An agent silently skipped an instruction and did not report the omission.** Task 041's agent was
-told to correct the stale "signed NDAs" wording; it did not, and its report did not mention it. Caught
-only because `git status` showed just two new paths. **Verify agent claims against the filesystem — do
-not accept the summary.**
-
-⚠️ **A CI observation and a `git push` cannot be interleaved.** Twice this session an in-flight CI run
-was cancelled by my own subsequent push, destroying the evidence being gathered. If you need a verdict,
-that push must be the last one before waiting.
-
-⚠️ **Stale POML `<status>` fields caused trouble TWICE.** Task 011's said `not-started` while TASK-INDEX
-said completed 2026-08-24; 041's dependency block said both its gates were `pending` when both were
-complete. **`TASK-INDEX.md` is authoritative.** (041's are now corrected.)
+`SseStreamingIntegrationTests.Cancellation_NoLingeringBackgroundTask_AfterClientAbort` fails in the
+full-project run and **passes in isolation** (167 ms) → order/timing-dependent, **flaky, not a
+regression**. Two earlier CI runs never settled this because I cancelled both with my own pushes.
+Recorded, not fixed. Relevant to master's `classify-and-retry.ps1` determinism work (PR #830).
 
 ---
 
-## 5. Open questions — not tasks, but they block or mislead
+## 5. Verification recipes worth reusing
 
-1. **The folders.** `communications` / `emails` / `exports` in `Spaarke Inc`. Nothing in the repo creates
-   them by name; the mechanism is path-based upload auto-creating parents from a caller-supplied
-   `FolderPath`. **Folders now open (fixed this project), so the `Modified By` column inside them names
-   whatever wrote the files.** One click. **Answer before 052 touches anything destructive.**
-2. **The three flaky-looking tests** — see §2. Never actually adjudicated.
-3. **I2 cross-tenant search bleed** — waived on the deployment (single-tenant `spaarke-records-index`),
-   not fixed. `JobContract` has no tenant field. **The waiver expires with the deployment model, not a
-   date**: both call paths must be scoped before the first shared tenant is onboarded.
-4. **Container-type DELETE does not exist.** Operator asked for it. Graph supports it and refuses when
-   containers exist, so blast radius is bounded. Not added unilaterally — a new destructive BFF endpoint
-   trips root §10 + §6.
-5. **The typecheck gap.** `vite build` does not typecheck `SpeAdminApp`; ~38 errors ship; no test runner.
-   Three total client/server shape mismatches reached UAT because of it. ⚠️ **Correcting myself: this is
-   NOT a prerequisite for 041/042 — those are pure .NET.** I claimed otherwise this session and was
-   wrong.
+- **Prove a failure is pre-existing**: `git stash -u` → run → `git stash pop`. Used twice this session;
+  it is what turned "6 ArchTest failures" from an accusation into a fact.
+- **Baseline before deleting tests**: `dotnet test … --filter "FullyQualifiedName~SpeAdmin"`. Never
+  inherit a count from a POML — 042's said "14 files / 359 tests"; actual was **29 files / 722 cases**.
+- `dotnet test tests/integration/seam/` fails **MSB1003** — that path is globbed into
+  `Sprk.Bff.Api.Tests` via `<Compile Include="..\..\integration\seam\**\*.cs">`. Run the csproj.
+- **All 8 KEEP categories compile into `Sprk.Bff.Api.Tests`** via csproj globs → relocating a test to a
+  KEEP path is a file move, **no csproj change**.
 
 ---
 
-## 6. Verification recipes
+## 6. Orchestration lessons (preserved)
 
-```bash
-# Client typecheck — NOT in the build, must be run by hand
-cd src/solutions/SpeAdminApp && npx tsc --noEmit -p tsconfig.json
-
-# The 041 suite in default mode — MUST be 6/6 green, ~10 ms, zero network
-dotnet test tests/unit/Sprk.Bff.Api.Tests/ --filter "FullyQualifiedName~SpeAdmin.ContainerLifecycleLive"
-#   NOTE: tests/integration/seam/** is globbed INTO Sprk.Bff.Api.Tests via a <Compile Include>.
-#   There is no csproj under tests/integration/seam/ — `dotnet test` there fails with MSB1003.
-
-# Tenant-isolation gate (34/34 expected)
-dotnet test tests/Spaarke.ArchTests/ --filter "FullyQualifiedName~TenantIsolation"
-
-# Is a failing ArchTest pre-existing or did I cause it?  Stash and re-run — this settled FR-F1/FR-F2:
-git stash -u && dotnet test tests/Spaarke.ArchTests/ --filter "..." ; git stash pop
-
-# Is the deployed BFF actually my build?  RUN BEFORE RE-DIAGNOSING ANY BFF BUG.
-TOKEN=$(az account get-access-token --resource https://management.azure.com --query accessToken -o tsv)
-L=$(sha256sum deploy/api-publish/Sprk.Bff.Api.dll | cut -d' ' -f1)
-curl -s -H "Authorization: Bearer $TOKEN" \
-  "https://spaarke-bff-dev.scm.azurewebsites.net/api/vfs/site/wwwroot/Sprk.Bff.Api.dll" -o /tmp/r.dll
-[ "$L" = "$(sha256sum /tmp/r.dll | cut -d' ' -f1)" ] && echo MATCH || echo "STALE — redeploy"
-```
-
-**Known-failing ArchTests, all pre-existing** (proven by the stash recipe): FR-F1, FR-F2, FR-27 ×2,
-ADR-010, ServiceBusClientGuard. Do not attribute them to new work without stashing first.
-
-**Deploys — always `pwsh`, never `powershell`** (5.x lacks `Get-FileHash` here):
-- BFF: `rm -rf src/server/api/Sprk.Bff.Api/publish; pwsh -ExecutionPolicy Bypass -File scripts/Deploy-BffApi.ps1`
-- Code page: clear `dist/* node_modules/.vite/ .vite/`, then
-  `pwsh -ExecutionPolicy Bypass -File scripts/Deploy-SpeAdminApp.ps1 -Environment dev -DataverseUrl "https://spaarkedev1.crm.dynamics.com"`
+1. `parallel-safe: true` describes the work, not the bookkeeping — both Wave A POMLs write `TASK-INDEX.md`.
+2. An agent once silently skipped an instruction; caught only by `git status`. **Improved**: all 7 agents
+   this session reported honestly, and one *correctly refused* a deletion I ordered — my ArchTest rule
+   checked `Microsoft.Graph*` but not `Microsoft.SharePoint`, so it kept that guard. I then extended the
+   rule. Give agents the standing to push back and they will.
+3. A CI observation and a `git push` cannot be interleaved — two runs lost to my own pushes.
+4. Stale POML `<status>`/`<deps>` have misled three times. `TASK-INDEX.md` is authoritative.
+5. **Partition agent file-sets disjointly and forbid them running `dotnet build`** — concurrent builds on
+   one project corrupt `bin`/`obj`. The orchestrator builds centrally, once.
 
 ---
 
-## 7. Preserved history + domain facts
+## 7. Wave state
 
-### Live-tenant safety — CORRECTED 2026-08-27
+| Task | Status |
+|---|---|
+| **042** | ✅ complete |
+| **050** | 🔲 **next** — `∥-safe: false` |
+| **051**, **052** | 🔲 unblocked; 052 destructive |
+| **090** | 🔲 `/test-diet` is a BINDING gate; it re-examines every AMBIGUOUS marker left by 042 |
+| 025, 026, 029 | 🔄 **PARTIAL, not open** — do not restart |
 
-The dev containers hold **TEST documents**, not confidential ones (operator). The prior claim of "signed
-NDAs, Compose drafts, matter files" came from a File Browser walkthrough that read filenames and
-*inferred* sensitivity. **The throwaway-container rule survives on better reasons than the one it lost:**
-repeatability (a destructive suite mutating shared containers is non-idempotent), a shared tenant (other
-sessions work `spaarkedev1` concurrently), and evidence preservation (the unresolved folders are a 052
-prerequisite). What changed is severity — a teardown failure is a bug, not a catastrophe.
-
-### The recurring defect shape — 17+ confirmed instances
-
-> **A lower layer collapses a real value — or a real failure — into an absent/empty/garbage result that
-> an upper layer reads as benign.**
-
-Newest instances: flat wire vs nested `DriveItem` (every folder rendered as a file); a *second*
-collection-`ToString()` site the first fix missed; an argument-order swap invisible to the compiler
-because all three params were `string`; and an ArchTest scan that **could not tell code from prose** and
-reported a CATASTROPHIC violation against a comment warning against that very construct.
-
-**The method that keeps working:** when N things fail identically, find the one that *works* and ask what
-it does differently. And when you fix one instance of a shape, **grep for the shape, not the instance**.
-
-### The PATCH-400 was a missing `etag` (2026-08-25)
-
-Two days of "container-type writes are impossible" was a missing **required body property** — `etag`, in
-the BODY, **not** the `If-Match` header. An earlier session tried the header, correctly recorded that it
-changed nothing, and read that as "the etag is irrelevant", which aimed the whole investigation at auth.
-Full record: [`notes/patch-400-resolution.md`](notes/patch-400-resolution.md).
-
-> **THE LESSON, twice in one day:** both 400s were documented requirements returned as `invalidRequest`
-> naming no cause, and both were one fetch of Microsoft's reference page away. **The corpus and the CSDL
-> being silent is not the platform being silent.**
-
-### Domain facts
-
-- **"Config"** = `sprk_specontainertypeconfig` — binds container type + BU + environment + owning app +
-  Key Vault secret name. Labelled "Container Type" in the UI, but it is **not** the container type.
-- **ADR-028 E-1** covers per-customer **owning-app** credentials — **not** the BFF's own identity
-  reaching Key Vault. auth-v4 applied the exclusion one layer too wide.
-- `spaarke-bff-dev` has a **user-assigned** identity (`mi-bff-api-dev`, clientId
-  `5967251e-171c-46fe-a6c2-ef843c90309d`) and **no system-assigned one** — every credential MUST pin it.
-- Fluent v9: `Divider` defaults to `flex-grow: 1`; `<Text truncate>` does **not** stop wrapping (needs
-  `wrap={false}`); `columnSizingOptions` **must be a stable reference** or drags reset every render;
-  Fluent does **not** style scrollbars at all.
-- **Security alerts 403** — Graph says *"Account is not provisioned"*: the tenant lacks the Defender
-  workload. **Not** the missing `SecurityEvents.Read.All` grant our message guesses at. Not fixable in
-  code.
-- Publish size **45.07 MB** incl. PDBs (baseline 44.96, ceiling 60). Master branch protection is
-  **DISABLED** — `--auto` merges immediately, without CI.
+**Not in the POML backlog**: the client typecheck+vitest gap · I2 cross-tenant search bleed (waived on
+the deployment, not fixed — `JobContract` has no tenant field) · container-type DELETE does not exist ·
+the `communications`/`emails`/`exports` folder origin (now answerable in one click via the File
+Browser's **Modified By** column — worth doing **before** 052, which is destructive).
