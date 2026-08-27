@@ -161,15 +161,44 @@ jobs:
           subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
 
       - name: Push compiled ARM JSON blobs to provisioning-artifacts (OIDC, no stored key)
-        # PROVISIONING_ARTIFACTS_STORAGE_ACCOUNT: NOT YET PROVISIONED as of this
-        # workflow's authoring (2026-08-19) -- SAME open live-ceremony item task
-        # 116 already documented (notes/h9-artifact-publish-ci-coord-pr.md § 3).
-        # This is a repo VARIABLE (a storage-account name is not confidential),
-        # matching the vars.SIDECAR_ACR_LOGIN_SERVER / this-same-variable
-        # precedent. Until the account + container + RBAC grant land, both
-        # upload steps below fail cleanly (missing/empty account name) --
-        # this workflow has no other jobs/steps depending on it, so the
-        # failure is fully contained here.
+        # PROVISIONING_ARTIFACTS_STORAGE_ACCOUNT is a repo VARIABLE (a
+        # storage-account name is not confidential), matching the
+        # vars.SIDECAR_ACR_LOGIN_SERVER precedent.
+        #
+        # PROVISIONED (comment corrected 2026-08-27). This previously read "NOT
+        # YET PROVISIONED as of this workflow's authoring (2026-08-19)". The
+        # variable was populated 2026-08-21 with `sprkcpartifactsdev`
+        # (rg-spaarke-platform-dev), and the `provisioning-artifacts` container
+        # exists. Same stale-comment failure mode as the one corrected in
+        # build-provisioning-sidecar.yml: it invites the reader to explain a red
+        # step as "the account doesn't exist yet" and stop looking.
+        #
+        # The remaining blocker is RBAC, and specifically the management-plane
+        # vs data-plane split: the GitHub SP holds `Contributor` at subscription
+        # scope, which manages the storage account but does NOT grant blob data
+        # access. These uploads use `--auth-mode login` (Entra data-plane auth,
+        # no stored key), so they additionally require `Storage Blob Data
+        # Contributor` on the account. Contributor is not a superset of it.
+        #
+        # APPLIED 2026-08-27 -- `Storage Blob Data Contributor` granted to the
+        # deployment app (github-actions-spe-infrastructure,
+        # 8c85a481-f3a0-46de-b84e-3ede8a4d60c3) at RESOURCE-GROUP scope:
+        #
+        #   az role assignment create \
+        #     --assignee 8c85a481-f3a0-46de-b84e-3ede8a4d60c3 \
+        #     --role "Storage Blob Data Contributor" \
+        #     --scope /subscriptions/<sub>/resourceGroups/rg-spaarke-platform-dev
+        #
+        # RG scope rather than single-account scope is deliberate (owner
+        # decision): it covers future artifact accounts in this RG without a
+        # second grant. Still well short of subscription scope.
+        #
+        # Verified: this workflow ran green end-to-end after the grant --
+        # Azure Login, both blob uploads, and manifest generation.
+        #
+        # NOTE if you are running this from Git Bash on Windows: MSYS rewrites a
+        # leading /subscriptions/... into a Windows path and az fails with a
+        # confusing `MissingSubscription`. Prefix with MSYS_NO_PATHCONV=1.
         run: |
           az storage blob upload \
             --account-name "${{ vars.PROVISIONING_ARTIFACTS_STORAGE_ACCOUNT }}" \

@@ -81,7 +81,25 @@ Build Provisioning Sidecar  failure     <- build/Trivy/size all PASS; only the
 ## Next actions, in order
 
 1. ~~**Merge #833, #835, #836.**~~ ✅ **Done 2026-08-27.** master runs verified afterwards; results in the health block above.
-2. **Shadow window** — run tier1 and `sdap-ci.yml` in parallel across a few days of real PRs and confirm the verdicts agree. **Cannot be compressed**; see "the port broke twice" below.
+2. **Shadow window — 20 agreeing code PRs, floor ≥5 calendar days.** Run tier1 and `sdap-ci.yml` in parallel and confirm the verdicts agree.
+
+   **Binding, per `spec.md` MUST Rules + "Shadow-window exit criterion".** Amended 2026-08-27 (Path B, owner-approved) from the original *"14 days of new-tier stability"*. Calendar time is a proxy for evidence and a poor one — it advances whether or not anything is being tested, while every server-code PR pays `sdap-ci.yml`'s **~40-minute** duplicate leg for the window's full duration. Counting agreeing PRs ties the exit to the thing actually being measured.
+
+   > Two earlier revisions of this handoff were wrong here: the first said "a few days" (understated the then-binding 14-day MUST); the second said "14 days" (correct at the time, superseded the same day by the amendment). Current criterion is the one stated above.
+
+   **Counts toward the 20** only if the PR is a **code PR** (`docs_only == false`; on docs-only PRs tier1/tier2 are correctly skipped so there is no verdict to compare) **and** both systems reached a terminal conclusion (cancelled/superseded runs don't count).
+
+   | `sdap-ci` | tier1 | Meaning |
+   |---|---|---|
+   | red | **green** | **FALSE GREEN — disqualifying.** Reset the count to zero and diagnose. |
+   | green | **red** | False red. Doesn't disqualify, but log it and understand it before branch protection. |
+   | agree | agree | Counts. |
+
+   **≥5 calendar-day floor** so a single high-volume day can't satisfy it — some failure modes only appear across day boundaries.
+
+   Related rule, NOT amended: `spec.md` — MUST NOT restore the `Release` matrix before Phase 2 deletion has merged AND the surviving suite is green ≥7 days. Different clock.
+
+   **Cannot be compressed below the floor**; see "the port broke twice" below for the evidence base.
 3. **Delete `sdap-ci.yml`** (tasks 071 / 075 / 077). Removes the duplicate *and* its ~30 min leg.
 4. **Enable branch protection** with `CI / Router` as the single required check. **OWNER DECISION — do not do unprompted.** This is what makes the north star hold; without it everything drifts red again. Sequence last: flipping it while a flaky gate remains blocks the team rather than annoying them.
 
