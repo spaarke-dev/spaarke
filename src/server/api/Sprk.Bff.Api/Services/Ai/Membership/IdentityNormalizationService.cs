@@ -369,10 +369,28 @@ public sealed class IdentityNormalizationService : IIdentityNormalizationService
     /// caller's own AAD object id.
     /// </summary>
     /// <remarks>
-    /// ⚠️ PRE-FIX BEHAVIOUR — this is finding A-18 as it stands, extracted verbatim so task 001's
-    /// characterization can pin it before task 013 flips it. It takes the first row it is handed and
-    /// asks nothing about the binding: neither whether some OTHER row also carries this email, nor
-    /// whether this contact already belongs to a different oid.
+    /// <para><b>The rule (spec FR-12, closing finding A-18).</b> An email match may be resolved to
+    /// only when it is unambiguous and the contact is not already somebody else's. This is the same
+    /// rule the CIAM plane has enforced since ADR-028 Amendment A1
+    /// (<c>ExternalParticipationService.ResolveExternalContactAsync</c> — "no email hijack of a bound
+    /// Contact"); the workforce plane simply never had it. Each plane checks its OWN binding column:
+    /// CIAM compares <c>sprk_externalobjectid</c> against the CIAM <c>oid</c>, this compares
+    /// <c>azureactivedirectoryobjectid</c> against the workforce <c>oid</c>.</para>
+    ///
+    /// <para><b>Why an UNBOUND contact still resolves.</b> That is the legitimate Type-2 onboarding
+    /// path — a customer employee with no <c>azureactivedirectoryobjectid</c> yet. Denying it would
+    /// break the feature this guard exists to protect, and the escalation trigger on this task asked
+    /// precisely this question. The distinction that carries the security property is
+    /// <i>unbound</i> (nobody's yet) versus <i>bound to a different oid</i> (already someone's) —
+    /// not "has a binding at all".</para>
+    ///
+    /// <para><b>Why comparison is on parsed <see cref="Guid"/>s.</b> An oid compared as a string
+    /// carries a case and formatting assumption that no test written against a self-authored double
+    /// can falsify. Comparing parsed Guids removes the assumption instead of testing it.</para>
+    ///
+    /// <para><b>Nothing here writes a binding.</b> A denied match must not confirm or create one, and
+    /// neither must a resolved one on this path — only an oid-verified resolution may bind, and this
+    /// fallback is by definition not oid-verified.</para>
     /// </remarks>
     internal static WorkforceEmailMatchDecision DecideWorkforceEmailMatch(
         IReadOnlyList<WorkforceContactEmailMatch> matches,
@@ -385,9 +403,36 @@ public sealed class IdentityNormalizationService : IIdentityNormalizationService
             return WorkforceEmailMatchDecision.NoMatch;
         }
 
-        return matches[0].ContactId == Guid.Empty
-            ? WorkforceEmailMatchDecision.NoMatch
-            : WorkforceEmailMatchDecision.Resolve;
+        // Several contacts carry this email. Picking one is a coin-flip over whose grants the caller
+        // inherits, so refuse (ADR-003 fail-closed). This branch is reachable only because the query
+        // reads two rows; under TopCount = 1 the second contact simply never arrives.
+        if (matches.Count > 1)
+        {
+            return WorkforceEmailMatchDecision.DenyAmbiguousEmail;
+        }
+
+        var match = matches[0];
+        if (match.ContactId == Guid.Empty)
+        {
+            return WorkforceEmailMatchDecision.NoMatch;
+        }
+
+        // A caller we cannot name cannot be shown to own anything. Today's only caller
+        // (WorkforcePrincipalResolver) denies a missing oid before reaching here, so this guards the
+        // public interface rather than a live path — which is the point: the next caller gets the
+        // rule for free instead of re-deriving it.
+        if (callerOid == Guid.Empty)
+        {
+            return WorkforceEmailMatchDecision.DenyUnidentifiableCaller;
+        }
+
+        // The finding itself: the contact already belongs to a different person.
+        if (match.BoundAadObjectId is { } bound && bound != callerOid)
+        {
+            return WorkforceEmailMatchDecision.DenyBoundToDifferentOid;
+        }
+
+        return WorkforceEmailMatchDecision.Resolve;
     }
 
     // ── Path 2: contact cross-ref via azureactivedirectoryobjectid ─────────
