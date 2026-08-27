@@ -99,7 +99,7 @@ az ad signed-in-user show --query "{oid:id, upn:userPrincipalName}" -o json
 ```
 
 Assertions:
-- `tenantId` MUST equal the Spaarke tenant ID (`a221a95e-6fa6-4f6b-9a3c-19a1c1a56d7e` — verify from environment; fail-fast if mismatched)
+- `tenantId` MUST equal the Spaarke tenant ID (`a221a95e-6abc-4434-aecc-e48338a1b2f2` — verify from environment; fail-fast if mismatched)
 - `user.name` MUST be a real UPN (not a service-principal ObjectId)
 - If the returned identity is a service principal, HARD STOP with message: "L3 skill requires operator's own AAD identity per NFR-11. Run `az login` interactively. Refusing to proceed under SP auth."
 
@@ -1239,7 +1239,7 @@ IF L2 call returns 5xx OR times out:
 **Role**: `Operator` app-role on the control-plane app-reg `api://spaarke.com/provisioning-controlplane-{env}`. Assigned via:
 
 ```
-az ad app show --id api://spaarke-provisioning-controlplane-dev --query "id"
+az ad app show --id api://spaarke.com/provisioning-controlplane-dev --query "id"
 # → objectId of the app-reg's SP
 az rest --method POST --uri "https://graph.microsoft.com/v1.0/servicePrincipals/{spObjId}/appRoleAssignments" `
   --body '{ "principalId":"{operatorObjId}", "resourceId":"{spObjId}", "appRoleId":"{operatorRoleGuid}" }'
