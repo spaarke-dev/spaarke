@@ -1,8 +1,34 @@
 # ISSUE — the lookup opens the side-pane picker, not the OOB inline dropdown
 
 > **Raised**: 2026-08-27 by owner, UAT round 5 of RecordHeader v1.1.8
-> **Status**: 🟠 open — **cosmetic/UX, not a defect.** The picker works; it is the wrong *kind* of picker.
-> **Severity**: low-medium — it is a visible departure from OOB behaviour on every lookup cell, on every entity.
+> **Status**: 🔵 **IN PROGRESS** — owner chose inline (option 2). Shared component **done** (`fff55ef3b`);
+> the RecordHeader swap itself is **not** done. Full work spec in
+> [`current-task.md`](../../current-task.md) § "RecordHeader lookup swap".
+> **Severity**: low-medium — a visible departure from OOB on every lookup cell, on every entity.
+
+---
+
+## ✅ Decision (owner, 2026-08-27) — inline, reproduced not hosted
+
+**Hosting the OOB inline control is not possible.** `ComponentFramework.Factory` has exactly two
+members (`getPopupService`, `requestRender`) — no `createComponent`. `lookupObjects` is a callable
+*function* (the advanced **dialog**); the inline lookup is a control class the **form runtime owns**,
+with no public constructor. `MscrmControls.AdvancedLookupWrapper` wraps the dialog, not the inline
+control. `MscrmTools/PCF-Controls` is **GPL-3.0** (unusable as a dependency) and its own lookup
+renders a custom dropdown rather than hosting the platform control.
+
+So: reproduce the OOB shape with supported primitives, escalate to the real dialog for **Advanced**.
+
+`components/LookupField` now does exactly that — right-side icon button that opens the full list,
+independently-scrolling options with a modern thin scrollbar, and a pinned right-aligned **Advanced**
+footer (opt-in `onAdvanced`). **No "+ New"** by owner decision, guarded by a test.
+
+Option 3 (per-field `"picker"` config) remains **unbuilt and unjustified** — CLAUDE.md §11 wants a
+concrete failure named first.
+
+---
+
+## Original analysis (retained)
 
 ---
 

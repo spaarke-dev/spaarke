@@ -1,6 +1,6 @@
 # Current Task State — record-header-and-notepad-r2
 
-> **Last Updated**: 2026-08-26 (after task **034** — sparkle wiring, v1.1.4)
+> **Last Updated**: 2026-08-27 (by `context-handoff` — after the shared `LookupField` OOB-parity work)
 > **Recovery**: Read "Quick Recovery" first. Then [`CLAUDE.md`](CLAUDE.md), then [`tasks/TASK-INDEX.md`](tasks/TASK-INDEX.md).
 
 ---
@@ -10,11 +10,16 @@
 | Field | Value |
 |-------|-------|
 | **Task** | **033 + 034** complete — `Spaarke.Records.RecordHeader` **v1.1.8**, UAT-passed on Project |
-| **Phase** | 3 ✅ **complete** → Phase 5 rollout unblocked |
-| **Status** | ✅ **Project form UAT passed** (2026-08-27). One open UX item, non-blocking. |
-| **Next Action** | Phase 5 rollout — **maker work**: bind `sprk_workassignment` (051), then Invoice + Event, Agreement, Matter last. |
+| **Phase** | 3 ✅ complete. Phase 5 rollout unblocked. One **in-flight follow-on** (below). |
+| **Status** | ✅ Project UAT passed. Shared `LookupField` upgraded to OOB parity + committed. **The RecordHeader has NOT yet been switched to it.** |
+| **Next Action** | **Switch the RecordHeader lookup cell to the inline `LookupField`** — 3 concrete work items, fully specified in "RecordHeader lookup swap" below. |
 | **Blocked by** | Nothing in code. **Task 001** still needs a classic-designer session no build can substitute for. |
-| **Working tree** | clean, 33 commits this session |
+| **Working tree** | clean · 35 commits · **pushed** to `origin/work/record-header-and-notepad-r2` · no PR opened |
+
+### ⚠️ Un-deployed work exists
+
+`fff55ef3b` changed the shared library. **Nothing has been rebuilt or imported since.** The
+RecordHeader zip on disk (`v1.1.8`) predates it. See "Update radius" for who is affected.
 
 ### UAT outcome — 5 rounds, all closed
 
@@ -30,12 +35,138 @@
 | 4 | fields not saving | **not on the form** — the binding recipe's MOVE-don't-delete rule |
 | 5 | lookup picker threw silently | **`this` detached** — `const f = xrm.Utility.lookupObjects` (G-14) |
 
-### ⚠️ Open, non-blocking
+---
 
-[`ISSUE-lookup-picker-ux-side-pane.md`](notes/issues/ISSUE-lookup-picker-ux-side-pane.md) — the lookup
-opens the platform's **side-pane** picker; OOB uses an **inline type-ahead**. Functional either way.
-**Settle it before task 080**: Matter is the parity regression test against R1, and R1 renders the
-*other* (inline) LookupField — a strict parity read will flag this.
+## 🔵 IN FLIGHT — inline lookup (started 2026-08-27)
+
+Owner raised [`ISSUE-lookup-picker-ux-side-pane.md`](notes/issues/ISSUE-lookup-picker-ux-side-pane.md):
+the header lookup opens the platform **side-pane**, but OOB uses an **inline type-ahead**. Owner chose
+inline, and specified it should carry the OOB look and feel.
+
+### Settled first: you CANNOT host the OOB inline control
+
+Do not re-investigate this. Evidence, all verified 2026-08-27:
+
+- **`ComponentFramework.Factory` has exactly two members** — `getPopupService`, `requestRender`
+  (`@types/powerapps-component-framework@1.3.18`, on disk). No `createComponent`, no `bindDOMElement`.
+- `Xrm.Utility.lookupObjects` is a **callable function** → any host can open the *advanced dialog*.
+  The **inline** lookup is a **control class the form runtime owns** → no public constructor. That
+  asymmetry is Microsoft's choice, not a gap in our code.
+- `MscrmControls.AdvancedLookupWrapper` (found in the org's `customcontrol` catalog) wraps the
+  **advanced dialog** — the surface `lookupObjects` already opens. Not the inline dropdown.
+- **`MscrmTools/PCF-Controls` is GPL-3.0** → cannot be a dependency in a commercial product. Its
+  "Lookup as Dropdown" renders its **own** dropdown rather than hosting the platform control —
+  independent corroboration from the XrmToolBox author.
+
+**Conclusion**: reproduce the OOB *shape* with supported primitives and escalate to the real OOB
+dialog for Advanced. That is the "proprietary browse + OOB escalation" pattern already sanctioned by
+[`MODAL-DECISION-CRITERIA.md`](../../docs/standards/MODAL-DECISION-CRITERIA.md).
+
+### ✅ DONE — `components/LookupField` upgraded (commit `fff55ef3b`)
+
+The shared search-as-you-type now matches the OOB inline shape. **All four owner points landed:**
+
+| owner spec | implementation |
+|---|---|
+| right-side lookup icon | moved `contentBefore` glyph → `contentAfter` **Button** |
+| click icon → all values drop down | fetches with the empty term, opens; second click toggles; `aria-expanded` |
+| modern scroll | options scroll independently — `scrollbar-width: thin` + WebKit fallback, semantic tokens only; ~5.5 rows |
+| **Advanced**, right-aligned footer | pinned below the scroll region; new **opt-in** `onAdvanced` prop |
+| **no “+ New”** | absent by owner decision — targets are taxonomy tables users cannot add to. **Guard test pins it.** |
+
+Also: the list now elevates (`shadow8`) over the following field instead of pushing it down.
+
+**`onAdvanced` is opt-in on purpose** — wizard consumers run in Code Pages where `lookupObjects` may
+not exist (the BFF nav adapter implements `openLookup` as a no-op).
+
+**Wrote the component's FIRST test suite** — it had 12 consumers and zero tests, which is the wrong
+place to change behaviour blind. 15 tests. Full run **826/826 across 52 suites**.
+
+---
+
+## 📡 Update radius — who else gets this
+
+`components/LookupField` is **shared**. The change is live for every consumer on their next build.
+Nothing below has been rebuilt yet.
+
+**12 direct consumers** (all `Create*Wizard` steps in the shared lib): `CreateEventWizard/CreateEventStep` ·
+`CreateInvoiceWizard/CreateInvoiceStep` · `CreateMatterWizard/AssignResourcesStep` ·
+`CreateMatterWizard/CreateRecordStep` · `CreateMatterWizard/LookupField` (25-line AI-badge wrapper, not a
+duplicate) · `CreateProjectWizard/CreateProjectStep` · `CreateRecordWizard/steps/AssignResourcesStep` ·
+`CreateReportCardWizard/CreateReportCardStep` · `CreateTodoWizard/CreateTodoStep` ·
+`CreateWorkAssignmentWizard/AssignWorkStep` · `CreateWorkAssignmentWizard/CreateFollowOnEventStep` ·
+`CreateWorkAssignmentWizard/EnterInfoStep` ← **the owner's screenshot**
+
+**Shipped surfaces that must be rebuilt to pick it up:**
+
+| surface | why |
+|---|---|
+| `src/solutions/CreateMatterWizard` | Code Page bundling the wizard steps |
+| `src/solutions/CreateProjectWizard` | ditto |
+| `src/solutions/CreateWorkAssignmentWizard` | ditto — the screenshot surface |
+| `src/solutions/SpaarkeAi` | `QuickStartModal`, `ContextPaneController` launch the wizards |
+| `src/solutions/LegalWorkspace` | `CreateProject/CloseProjectDialog` |
+| **`src/client/pcf/MatterHeader`** | ⚠️ imports `dist/components/LookupField/LookupField` directly (`MatterHeaderView.tsx:61`) — **its lookups change appearance on next rebuild**, relevant to task 080 parity |
+| `src/client/pcf/RecordHeader` | not yet — it still uses the *other* component (see below) |
+
+⚠️ **PCFs bundle `dist/`, not source.** Rebuild the shared lib first (`ensure-dist-fresh` prebuild
+handles it for wired PCFs). A stale `dist/` silently ships old code.
+
+---
+
+## 🎯 NEXT: RecordHeader lookup swap — exactly what remains
+
+**Goal**: `RecordHeaderView`'s `case 'lookup'` renders the inline `components/LookupField` instead of
+the side-pane `RecordHeaderLookupField`, with **Advanced** escalating to the existing (working)
+`lookupObjects` call.
+
+**Two components, do not confuse them** (project CLAUDE.md warns about this):
+
+| path | what | used by |
+|---|---|---|
+| `components/RecordHeader/fields/LookupField.tsx` (alias `RecordHeaderLookupField`) | side-pane picker | RecordHeader **today** |
+| `components/LookupField/LookupField.tsx` | inline type-ahead, **just upgraded** | 12 wizard steps + MatterHeader |
+
+### The three work items
+
+**1. `onSearch` — the real work.** The inline component needs a search callback; the header has none.
+It must query the TARGET table by its primary name:
+
+```
+$select={targetPrimaryId},{targetPrimaryName}
+&$filter=contains({targetPrimaryName},'{escaped}')
+&$orderby={targetPrimaryName} asc&$top=10
+```
+
+- `targets[0]` already resolves (v1.1.6, via `getControl(name).getEntityTypes()` — proven in UAT).
+- ⚠️ **The target's `primaryNameAttribute` is NOT known yet.** Today only the HOST entity's metadata is
+  fetched. This needs a **second `retrieveEntityMetadata` call for the target entity** — page-session
+  cached already, so cheap, but it is a genuine new fetch, not a prop change.
+- ⚠️ **The naming convention is non-uniform** — `sprk_projecttype_ref` and `sprk_eventtype_ref` use
+  `sprk_name`, while `sprk_mattertype_ref` uses `sprk_mattertypename`. **Read it from metadata; do not
+  infer.** (design.md §621, live-verified.)
+- R1's `MatterHeaderView.searchLookup` (lines ~181-197) is a working reference for the OData shape —
+  but it hard-codes `LOOKUP_META`, which R2 must not do.
+
+**2. `span`** — `components/LookupField` has **no `span` prop**, and `FieldGrid` requires each cell to
+self-apply `gridColumn` (FR-03). R1 hand-rolled `<div style={{ gridColumn: 'span 1' }}>` around it
+(`MatterHeaderView.tsx:278-287`). Either add a `span` prop to the shared component (cleaner, benefits
+everyone) or wrap it in the view. **Prefer the prop.**
+
+**3. `onAdvanced`** — pass a callback that opens `xrm.Utility.lookupObjects({ entityTypes: [targets[0]] })`
+and stages the pick. **Call it directly on `xrm.Utility`** — never via a local alias (FAILURE-MODES
+**G-14**; that exact bug cost UAT round 5, and R1 four releases before it).
+
+### Also decide
+
+- **Read-only lookups** keep using the display-only `RecordHeaderLookupField` — only the editable path
+  changes. Do not delete that component.
+- **FR-15a / design.md §6.5 say "OOB picker (modal)"** — this reverses that. Per CLAUDE.md §6.5 this
+  is a **path B** change: update `spec.md` FR-15a + `design.md` §6.5 in the same PR, don't silently
+  diverge.
+- **Task 080 parity**: after the swap, RecordHeader and R1's MatterHeader render the *same* inline
+  component, so the §6.5 parity caveat ("identical except lookups open the OOB picker") can be
+  **deleted** rather than qualified. Good outcome — note it in 080.
 
 ### The lesson from five rounds
 
