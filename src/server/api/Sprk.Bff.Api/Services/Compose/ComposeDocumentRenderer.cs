@@ -1813,6 +1813,25 @@ public sealed partial class ComposeDocumentRenderer
             }
 
             var href = id.Substring(HyperlinkPendingIdPrefix.Length);
+
+            // An INTERNAL cross-reference ("see Section 4.2") targets a BOOKMARK, not a relationship:
+            // Word writes it as `w:anchor` and it has NO entry in document.xml.rels. So there is nothing
+            // to resolve and — the point ADR-049 I-2 turns on — nothing to RE-DERIVE: the anchor is a
+            // self-contained scalar available verbatim at capture time, so it must be carried, not lost.
+            // Before UAT 2026-08-26 (D-1) this fell to the `Uri.TryCreate` else-branch below, because
+            // "#Section2" is not an absolute Uri — every internal cross-reference was silently delinked
+            // and reported as `hyperlink-target-dropped`.
+            // The bookmark it names is guaranteed to still be there: it is cloned with an untouched block,
+            // or restored from the base by ComposeBlockMerge.CarryUnmodeledConstructs (task 041) on an
+            // edited one. A dangling `w:anchor` does not make Word report a damaged file either, so this
+            // needs no equivalent of the embedded-object relationship-resolution gate.
+            if (href.Length > 1 && href[0] == '#')
+            {
+                hyperlink.Id = null;                        // the sentinel id must never persist
+                hyperlink.Anchor = SanitizeText(href[1..]); // client-controlled: same gate as body text
+                continue;
+            }
+
             if (Uri.TryCreate(href, UriKind.Absolute, out var uri))
             {
                 hyperlink.Id = mainPart.AddHyperlinkRelationship(uri, isExternal: true).Id;

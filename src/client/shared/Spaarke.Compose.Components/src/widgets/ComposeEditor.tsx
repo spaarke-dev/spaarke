@@ -148,6 +148,7 @@ import { authenticatedFetch } from '@spaarke/auth';
 import { InsertionMark } from './marks/InsertionMark';
 import { DeletionMark } from './marks/DeletionMark';
 import { TrackChangesExtension, trackChangesPluginKey } from './marks/TrackChangesExtension';
+import { RedlineCueExtension, REDLINE_CUE_CLASS } from './marks/RedlineCueExtension';
 import { CommentAnchorMark } from './marks/CommentAnchorMark';
 import { QaHighlightExtension } from './marks/QaHighlightExtension';
 import { SelectedCommentExtension, selectedCommentPluginKey } from './marks/SelectedCommentExtension';
@@ -1440,23 +1441,33 @@ const useStyles = makeStyles({
       // The deleted text is a non-editable widget reinserted for display only.
       userSelect: 'none',
     },
-    // U1 R2 (UAT 2026-07-20): a small lightbulb at the FRONT of each pending redline signals "click me
-    // for the rationale". A redline renders as a deletion span (struck original) immediately followed by
-    // an insertion span (new text) — the rule below puts ONE bulb on whichever span comes first and
-    // SUPPRESSES the duplicate on the insertion half of a deletion→insertion pair, so a pair shows a
-    // single cue. Semantic token color; no text-decoration bleed onto the glyph.
-    '& .compose-mark-insertion::before, & .compose-mark-deletion::before': {
-      content: '"\\1F4A1"', // 💡
-      fontSize: '0.8em',
-      marginRight: '2px',
+    // U1 R2 (UAT 2026-07-20): a lightbulb at the FRONT of each pending redline signals "click me for
+    // the rationale". REWORKED for UAT 2026-08-26 item 5 — the cue is now a ProseMirror WIDGET
+    // DECORATION (marks/RedlineCueExtension.ts), not a `::before` pseudo-element on the mark spans.
+    //
+    // WHY THE PSEUDO-ELEMENT HAD TO GO (all three reported in one UAT round):
+    //   • `.compose-mark-deletion` above sets `line-through`, making it a DECORATING BOX. Per CSS Text
+    //     Decoration L3 §2.2 that line paints across every in-flow inline DESCENDANT and a descendant
+    //     CANNOT switch it off — so the old `textDecorationLine: 'none'` was a silent no-op and the
+    //     bulb rendered STRUCK THROUGH, reading as deleted content.
+    //   • `0.8em` against body text is ~9-11px — the user reported it as hidden.
+    //   • The `.compose-mark-deletion + .compose-mark-insertion::before` de-duplication only holds when
+    //     the insertion is ONE span and is the deletion's immediate sibling. FR-15 inline markup breaks
+    //     both (a `<strong>` splits the insertion into several spans; a LEADING `<strong>` stops `+`
+    //     matching at all) → up to THREE bulbs. Formatted AI legal edits take that path by design.
+    // A widget is a SIBLING of the mark spans, so it is structurally outside every decorating box —
+    // it cannot inherit strikethrough no matter how these rules evolve.
+    [`& .${REDLINE_CUE_CLASS}`]: {
+      // LOAD-BEARING: an ATOMIC inline-level box. Text decorations are not propagated into one (L3
+      // §2.2), which is what actually prevents the strikethrough — `text-decoration: none` does not.
+      display: 'inline-block',
+      fontSize: tokens.fontSizeBase400, // was '0.8em' — too small to notice (UAT 2026-08-26)
+      lineHeight: '1', // keep the larger glyph from inflating the document's line boxes
+      marginRight: tokens.spacingHorizontalXXS, // was a hard-coded '2px'
       color: tokens.colorNeutralForeground3,
-      textDecorationLine: 'none',
       cursor: 'pointer',
       userSelect: 'none',
-      verticalAlign: 'baseline',
-    },
-    '& .compose-mark-deletion + .compose-mark-insertion::before': {
-      content: 'none', // the pair's cue already sits on the leading deletion span
+      verticalAlign: 'text-bottom',
     },
     // UAT round-5 #5 — the BASE advisory comment anchor is LIGHT GRAY; it turns YELLOW only when its
     // thread is selected (the `compose-mark-comment-anchor-selected` view decoration below, painted by
@@ -2470,6 +2481,11 @@ export const ComposeEditor = React.forwardRef<ComposeEditorHandle, ComposeEditor
         // COMPOSE_R4_STEP_INTERCEPTOR registration; supplies the classifier callbacks + feeds
         // the log `serializeOperationLog()` sends on save). Read-only step→operation capture.
         trackChangesExtension, // Item 4 — live Track Changes decoration overlay (additive, view-only)
+        RedlineCueExtension, // UAT 2026-08-26 item 5 — the AI-rationale lightbulb, as a widget
+        // decoration rather than a `::before` on the mark spans. Unconfigured and view-only: it
+        // observes insertion/deletion marks and never modifies the document. Deliberately NOT folded
+        // into trackChangesExtension, which goes dark when the Track Changes toggle is off — an AI
+        // rationale must stay reachable regardless of that toggle.
       ],
       content: '<p></p>',
       // editorProps to apply Fluent v9 inherited foreground; semantic-token

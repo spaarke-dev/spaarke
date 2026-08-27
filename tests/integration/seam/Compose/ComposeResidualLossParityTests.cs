@@ -116,6 +116,17 @@ public sealed class ComposeResidualLossParityTests
         // over-claim direction testable: if the published document ever calls these lost, parity fails.
         new object?[] { "bookmark", "bookmarkStart", null },
         new object?[] { "sdt", "sdt", "hard-tier-sdt-flattened" },
+        // UAT 2026-08-26 (D-1). An INTERNAL cross-reference ("see Section 2") — `w:hyperlink w:anchor`,
+        // the shape every legal document is full of and the one shape this corpus had ZERO of: before this
+        // row, all 24 fixtures contained exactly ONE hyperlink and no `w:anchor` at all, so the "untouched
+        // blocks are 100% preserved" measurement had never once seen a cross-reference.
+        // Before the fix this row read `untouched: 1/1 · edited: 0/1 · codes: (none)` — a SILENT loss, the
+        // same signature that exposed the inline `w:sdt`. The projection nulled the anchor while the read
+        // walk still emitted a live `#anchor` href into the editor, so `formattingUnchanged` could never
+        // match and even an UNTOUCHED paragraph was re-authored. `expectedCode: null` now holds the
+        // COMPOSE-WRITE-RESIDUAL-LOSS §3 "hyperlinks are carried" claim in BOTH directions — it fails if
+        // the anchor is ever dropped again, AND if a false warning is ever minted for it.
+        new object?[] { "hyperlinkInternal", "hyperlink", null },
     };
 
     // ═══════════════════════════════════════════════════════════════════════════════════════════════
@@ -302,6 +313,11 @@ public sealed class ComposeResidualLossParityTests
                  + "<w:date/></w:sdtPr><w:sdtContent>"
                  + "<w:r><w:t xml:space=\"preserve\">1 March 2026</w:t></w:r>"
                  + "</w:sdtContent></w:sdt>",
+        // Self-contained on purpose: `w:anchor` needs no entry in document.xml.rels, which the raw-zip
+        // BuildDocument below does not write. The bookmark travels with it so the anchor cannot dangle.
+        "hyperlinkInternal" => "<w:bookmarkStart w:id=\"9\" w:name=\"Section2\"/><w:bookmarkEnd w:id=\"9\"/>"
+            + "<w:hyperlink w:anchor=\"Section2\">"
+            + "<w:r><w:t xml:space=\"preserve\">Section 2</w:t></w:r></w:hyperlink>",
         "bookmark" => "<w:bookmarkStart w:id=\"1\" w:name=\"_Ref1\"/>"
                       + "<w:r><w:t xml:space=\"preserve\">anchored text</w:t></w:r>"
                       + "<w:bookmarkEnd w:id=\"1\"/>",

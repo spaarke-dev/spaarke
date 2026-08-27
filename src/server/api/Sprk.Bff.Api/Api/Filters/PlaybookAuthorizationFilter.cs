@@ -1,6 +1,7 @@
 using System.Security.Claims;
 using Sprk.Bff.Api.Models.Ai;
 using Sprk.Bff.Api.Services.Ai;
+using Sprk.Bff.Api.Infrastructure.Authentication;
 
 namespace Sprk.Bff.Api.Api.Filters;
 
@@ -90,9 +91,10 @@ public class PlaybookAuthorizationFilter : IEndpointFilter
     {
         var httpContext = context.HttpContext;
 
-        // Extract user ID from claims
-        var userIdClaim = httpContext.User.FindFirst(ClaimTypes.NameIdentifier)?.Value
-            ?? httpContext.User.FindFirst("oid")?.Value;
+        // Order matters: NameIdentifier carries `sub` (non-GUID) under inbound claim mapping and is
+        // ALWAYS present, so the former `?? oid` tail never ran and the Guid.TryParse below always
+        // failed. See CallerResolution.
+        var userIdClaim = CallerResolution.ResolveObjectId(httpContext.User);
         if (string.IsNullOrEmpty(userIdClaim) || !Guid.TryParse(userIdClaim, out var userId))
         {
             return Results.Problem(

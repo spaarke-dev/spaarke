@@ -2,9 +2,18 @@
 //
 // HYPERLINKS: the R5 representation (ComposeInlineRun.Href → BuildRun sentinel →
 // ResolveHyperlinkRelationships external relationship) is REUSED, not rebuilt — external http/https/mailto
-// links already round-trip. Task 024 closes the SILENT-loss gaps: an INTERNAL bookmark link ("#anchor")
-// now flattens LOUDLY (`internal-link-flattened` — bookmark targets are not model data; 026 owns
-// bookmarks), and an unresolvable/protocol-neutralized target counts `hyperlink-target-dropped`.
+// links already round-trip. Task 024 closed the SILENT-loss gaps by counting an unresolvable /
+// protocol-neutralized target as `hyperlink-target-dropped`.
+//
+// AMENDED by UAT 2026-08-26 (D-1): task 024 also FLATTENED an internal bookmark link ("#anchor") and
+// warned `internal-link-flattened`, reasoning that "bookmark targets are not model data". That was wrong
+// on both halves. (a) `w:anchor` IS a self-contained scalar — nothing to re-derive, so ADR-049 I-2 says
+// carry it; the bookmark survives independently via clone or CarryUnmodeledConstructs. (b) Nulling it in
+// the MODEL while the read walk still emitted a live `#anchor` href into the EDITOR made
+// `formattingUnchanged` unable to match, so an UNTOUCHED paragraph containing a cross-reference was
+// re-authored on every save — breaching the "untouched blocks are preserved" invariant, and surfacing to
+// the user as `hyperlink-target-dropped`. The internal link is now CARRIED. `internal-link-flattened` has
+// no producer and is retired.
 //
 // COMMENTS were silently lost before this task (body anchors fell through default cases; the comments
 // part survived the carrier but nothing referenced it). Now: ComposeContentModel.Comments carries the
@@ -134,15 +143,17 @@ public sealed class ComposeHyperlinkCommentSeamTests
         // Point comment → adjacent Start+End pair.
         AnchorFacts(projection.Model).ElementAt(2).Should().Be("Defined Terms apply.|<Start:2>|<End:2>");
 
-        // External link carried; internal link flattens LOUDLY (text kept, no Href).
+        // BOTH links carried (UAT 2026-08-26 / D-1).
         var linkPara = projection.Model.Blocks[0];
         linkPara.Runs.Single(r => r.Text == "clause library").Href.Should().Be(ExternalUrl);
-        linkPara.Runs.Single(r => r.Text == "Section 2").Href.Should().BeNull(
-            "bookmark targets are not model data — the internal link drops, loudly");
-        projection.Warnings.Should().ContainSingle(w => w.Code == "internal-link-flattened")
-            .Which.Count.Should().Be(1);
+        linkPara.Runs.Single(r => r.Text == "Section 2").Href.Should().Be("#Section2",
+            "an internal cross-reference is a self-contained scalar (w:anchor) — carried, not re-derived. "
+            + "Nulling it here is what made formattingUnchanged unable to match, re-authoring an UNTOUCHED "
+            + "paragraph on every save.");
+        projection.Warnings.Should().NotContain(w => w.Code == "internal-link-flattened",
+            "the code is retired — nothing flattens an internal link any more");
         projection.Warnings.Should().NotContain(w => w.Code == "hyperlink-target-dropped",
-            "the external link resolved — nothing else dropped");
+            "both links resolved — nothing dropped");
     }
 
     // ═══════════════════════════════════════════════════════════════════════════════════════════════
@@ -199,9 +210,12 @@ public sealed class ComposeHyperlinkCommentSeamTests
         var hyperlink = body.Descendants<Hyperlink>().Single(h => h.InnerText == "clause library");
         main.HyperlinkRelationships.Single(r => r.Id == hyperlink.Id!.Value).Uri.ToString()
             .Should().Be(ExternalUrl);
-        // The internal link flattened to plain text (loudly, at projection time).
-        body.Descendants<Hyperlink>().Should().ContainSingle("only the external link survives as a hyperlink");
-        body.InnerText.Should().Contain("Section 2", "the internal link's TEXT is kept");
+        // The internal link survives as a real hyperlink carrying w:anchor (UAT 2026-08-26 / D-1).
+        var internalLink = body.Descendants<Hyperlink>().Single(h => h.Anchor?.Value is not null);
+        internalLink.Anchor!.Value.Should().Be("Section2");
+        internalLink.Id.Should().BeNull("an anchor link has no relationship — the sentinel id must not persist");
+        internalLink.InnerText.Should().Contain("Section 2");
+        body.Descendants<Hyperlink>().Should().HaveCount(2, "both the external and the internal link survive");
 
         var sourceErrors = ValidationErrorCounts(source);
         ValidationErrorCounts(rendered)

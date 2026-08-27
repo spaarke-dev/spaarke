@@ -1,5 +1,6 @@
 using System.Security.Claims;
 using Sprk.Bff.Api.Infrastructure.Errors;
+using Sprk.Bff.Api.Infrastructure.Authentication;
 
 namespace Sprk.Bff.Api.Api.Filters;
 
@@ -116,9 +117,9 @@ public class SpeAdminAuthorizationFilter : IEndpointFilter
         var httpContext = context.HttpContext;
 
         // Verify the user identity is present (base authentication must already have run)
-        var userId = httpContext.User.FindFirst(ClaimTypes.NameIdentifier)?.Value
-            ?? httpContext.User.FindFirst("oid")?.Value
-            ?? httpContext.User.FindFirst("sub")?.Value;
+        // Order matters: NameIdentifier already carries `sub` under inbound claim mapping, so both
+        // tails below were unreachable and this resolved to `sub`. See CallerResolution.
+        var userId = CallerResolution.ResolveObjectId(httpContext.User);
 
         if (string.IsNullOrEmpty(userId))
         {

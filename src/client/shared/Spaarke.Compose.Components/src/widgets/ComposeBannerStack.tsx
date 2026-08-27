@@ -324,7 +324,10 @@ const SAVE_DEGRADATION_COPY: Record<string, string> = {
   'tab-flattened': 'Some tab stops were simplified.',
   'table-formatting-flattened': 'Some table formatting was simplified.',
   'line-break-flattened': 'A line break was simplified.',
-  'internal-link-flattened': 'An internal link was simplified.',
+  // 'internal-link-flattened' RETIRED (UAT 2026-08-26 / D-1). An internal cross-reference is no longer
+  // flattened — `w:anchor` is a self-contained scalar and is now carried, so the code has no producer.
+  // Retiring the copy in the same change is the Direction-B rule: a taxonomy that advertises a code
+  // nothing can emit is the same over-claim as a residual-loss doc that under-reports.
 };
 
 // UAT-07b: short NOUN labels for the common formatting-simplification codes, used to build ONE concise,
@@ -338,7 +341,7 @@ const SAVE_DEGRADATION_LABEL: Record<string, string> = {
   'tab-flattened': 'tab stops',
   'table-formatting-flattened': 'table formatting',
   'line-break-flattened': 'line breaks',
-  'internal-link-flattened': 'internal links',
+  // 'internal-link-flattened' RETIRED — see SAVE_DEGRADATION_COPY above.
 };
 
 /** One human-readable line per warning; known codes get friendly copy (+ ×N when repeated). */

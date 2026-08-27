@@ -2622,15 +2622,25 @@ public sealed class ComposeDocxProjectionBuilder
                     break;
                 case Hyperlink h:
                     var resolved = ResolveHyperlinkHref(h, ctx.MainPart);
-                    if (resolved is not null && resolved.StartsWith('#'))
-                    {
-                        // Task 024: an INTERNAL bookmark link — bookmark targets are not model data (026
-                        // owns bookmarks), so carrying the anchor would dangle. TEXT kept, link dropped
-                        // LOUDLY (the read walk still renders it as a live #anchor href — read-path only).
-                        ctx.AddWarning("internal-link-flattened", 1);
-                        resolved = null;
-                    }
-                    else if (resolved is null && (h.Id?.Value is { Length: > 0 } || h.DocLocation?.Value is { Length: > 0 }))
+                    // UAT 2026-08-26 (D-1): the internal-bookmark branch that used to sit here NULLED
+                    // `resolved` and warned `internal-link-flattened`, on the premise — stated in its own
+                    // comment — that "the read walk still renders it as a live #anchor href — read-path
+                    // only". That premise was FALSE: ComposeEditor does `setContent(projection.html)`, so
+                    // the read walk's HTML *is* the editable document. The result was a read/write
+                    // asymmetry with two compounding costs:
+                    //   1. The editor held `href="#Section2"` while the model held null, so
+                    //      `formattingUnchanged` could NEVER match — an untouched paragraph containing a
+                    //      cross-reference fell to the rebuild tier, its canonical key diverged from the
+                    //      base, and the merge planned Render instead of Clone. That paragraph therefore
+                    //      lost the byte-verbatim clone guarantee ON EVERY SAVE — taking any footnote ref
+                    //      / inline w:sdt / text box sharing it along. That is a direct breach of the R8
+                    //      invariant "untouched blocks are preserved", not merely an edited-block loss.
+                    //   2. On save the "#Section2" href failed `Uri.TryCreate(..., Absolute)` in the
+                    //      renderer and was reported to the user as `hyperlink-target-dropped`.
+                    // Carrying the anchor is ADR-049 I-2-clean (a self-contained scalar, no markup on the
+                    // wire) and the bookmark it names survives independently — see the renderer's
+                    // ResolveHyperlinkRelationships for why it cannot dangle.
+                    if (resolved is null && (h.Id?.Value is { Length: > 0 } || h.DocLocation?.Value is { Length: > 0 }))
                     {
                         // Unresolvable relationship, protocol-neutralized target (GPT §13 allowlist), or a
                         // docLocation-only link (Step-9.5 F9): text kept, link dropped LOUDLY (was silent).

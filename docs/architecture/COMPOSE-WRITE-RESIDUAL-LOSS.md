@@ -44,9 +44,10 @@ preservation is a consequence of not rewriting, not a feature list.
 ## 2. What is lost, and what you are told
 
 When you edit the paragraph a construct sits in, that paragraph is re-authored from the editor's content
-model — and the model does not carry these. Each loss is **reported by name** on the save; none is
-silent — at **every** block position, including the awkward ones where the save cannot tell two of your
-paragraphs apart ([§5](#the-hole-under-the-list-found-2026-08-25-closed-2026-08-26)).
+model — and the model does not carry these. Each loss is **reported by name** on the save — at **every**
+block position, including the awkward ones where the save cannot tell two of your paragraphs apart
+([§5](#the-hole-under-the-list-found-2026-08-25-closed-2026-08-26)) — with a single known exception,
+called out explicitly in the last row of the table rather than left for someone to discover.
 
 | Construct | What happens when you edit its paragraph | Warning code |
 |---|---|---|
@@ -55,6 +56,13 @@ paragraphs apart ([§5](#the-hole-under-the-list-found-2026-08-25-closed-2026-08
 | Footnote reference (`w:footnoteReference`) | Reference removed; the footnote text remains in `footnotes.xml` | `unrepresented-footnote-reference` |
 | Endnote reference (`w:endnoteReference`) | Reference removed; the endnote text remains in `endnotes.xml` | `unrepresented-endnote-reference` |
 | Content control (`w:sdt`) — party name, effective date, dropdown | Flattened to plain text. A **block-level** control keeps its shell where it can be reconstructed; an **inline** one does not | `hard-tier-sdt-flattened` |
+| **Hyperlink display attributes** — `w:docLocation`, `w:tgtFrame`, `w:tooltip`, `w:history`. The link's **target** is carried (§3); these four are not | The link still works and still points where it did; a custom hover tooltip, a target frame, a sub-document location, and the visited-state flag are dropped | **none — this one IS silent** (see the exception below) |
+
+> **The one exception to "nothing is silent" (recorded 2026-08-26, D-1).** The four hyperlink display
+> attributes above are dropped without a warning code. They are scalars and carrying them is
+> straightforward — this is a known gap, not a designed loss, and it is listed here rather than omitted
+> precisely because an unlisted silent loss is the failure mode §5 exists to prevent. Everything else in
+> this table is reported by name.
 
 **The prior version is always recoverable.** Every save creates a new SPE version, so a paragraph you did
 not mean to flatten can be retrieved from version history.
@@ -75,7 +83,8 @@ of the list is enforced too — if a future change starts losing one, the parity
 | **Embedded objects** (`w:drawing`, `w:object`, `w:pict`) — a picture, chart, shape or OLE embed | The object's own OOXML subtree is carried **verbatim**, so properties nobody enumerated survive for the same reason cloning an untouched block preserves them. The picture's bytes never travel: they stay in their own package part and only the reference moves, and the save **resolves that reference against the document before authoring it** — a subtree naming a relationship the package does not have is refused rather than written, because a file Word reports as *damaged* is worse than a missing picture. Works for a keystroke edit too, without the object's markup ever reaching the browser: when the posted content model does not carry it, the object is restored from the paragraph's pre-edit base (fixed task 056). **Not** a text box — that stays in §2 |
 | **Content-control shell** | The control's identity and binding survive even when its inner content cannot be modelled |
 | Paragraph + run properties | Inherited from the base paragraph rather than re-derived |
-| Comments, tracked changes, hyperlinks | Carried on the content model itself |
+| Comments, tracked changes | Carried on the content model itself |
+| **Hyperlinks** — external (`r:id`) and internal cross-references (`w:anchor`) | Carried on the content model as the run's target. An **internal** cross-reference ("see Section 4.2") is carried as its bookmark name: a self-contained scalar, so there is nothing to re-derive and nothing that can dangle — the bookmark it names survives independently, by clone or by `CarryUnmodeledConstructs`. **This row previously read "hyperlinks · carried on the content model itself" and was FALSE for internal links** — the projection nulled the anchor while the read walk still emitted a live `#anchor` href into the editor, so `formattingUnchanged` could never match and a paragraph holding a cross-reference was re-authored **on every save even when untouched**, taking any footnote ref / inline `w:sdt` / text box in that paragraph with it. That is the §1 untouched-block guarantee, not a §3 edited-block loss, which is why it is called out here rather than quietly corrected (found by UAT 2026-08-26 D-1; fixed same day, pinned by the `hyperlinkInternal` parity family). **Not** the link's `w:docLocation`, `w:tgtFrame`, `w:tooltip` or `w:history` — those are dropped on any re-authored hyperlink, external ones included, and are named in §2 |
 
 > **What a carried object does *not* keep.** Its POSITION inside the paragraph, in one case. When the
 > object round-trips through the content model — every server-side path, including an AI edit — the position

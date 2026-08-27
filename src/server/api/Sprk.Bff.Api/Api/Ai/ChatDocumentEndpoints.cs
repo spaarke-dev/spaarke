@@ -983,7 +983,9 @@ public static class ChatDocumentEndpoints
         // exfiltrate any communication's .eml by id. Mirror the sibling eml-render endpoint, which adds
         // DocumentAuthorizationFilter("read") for exactly this reason — applied here in-handler because the
         // resource id is resolved from the body (documentId) / lookup (communicationId), not a route value.
-        var callerUserId = httpContext.User.FindFirst(ClaimTypes.NameIdentifier)?.Value;
+        // Entra `oid`, not `sub` — this feeds AuthorizationContext.UserId below, so the same
+        // D-6 defect applied here in-handler. See CallerResolution.
+        var callerUserId = CallerResolution.ResolveObjectId(httpContext.User);
         if (string.IsNullOrEmpty(callerUserId))
         {
             return Results.Problem(statusCode: 401, title: "Unauthorized", detail: "User identity not found in token claims");

@@ -1,5 +1,6 @@
 using System.Security.Claims;
 using Sprk.Bff.Api.Services.Workspace;
+using Sprk.Bff.Api.Infrastructure.Authentication;
 
 namespace Sprk.Bff.Api.Api.Filters;
 
@@ -47,8 +48,8 @@ public class WorkspaceLayoutAuthorizationFilter : IEndpointFilter
     {
         var httpContext = context.HttpContext;
 
-        // 1. Extract user ID from claims
-        var userId = httpContext.User.FindFirst(ClaimTypes.NameIdentifier)?.Value;
+        // 1. Entra `oid`, not `sub` — see CallerResolution (UAT 2026-08-26 / D-6 class).
+        var userId = CallerResolution.ResolveObjectId(httpContext.User);
         if (string.IsNullOrEmpty(userId))
         {
             return Results.Problem(
