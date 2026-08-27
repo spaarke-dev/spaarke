@@ -1,6 +1,7 @@
 using System.Security.Claims;
 using Spaarke.Core.Auth;
 using Sprk.Bff.Api.Infrastructure.Auth;
+using Sprk.Bff.Api.Infrastructure.Authentication;
 using Sprk.Bff.Api.Models.Ai.RecordSearch;
 using Sprk.Bff.Api.Models.Ai.SemanticSearch;
 
@@ -157,8 +158,16 @@ public class RecordSearchAuthorizationFilter : IEndpointFilter
         // Step 3: the caller. Identity AND the bearer token — the token is what makes the downstream
         // Dataverse evaluation run AS THE CALLER rather than as the application. Without it the row
         // check would fail closed anyway; refusing here produces a clearer 401.
-        var callerObjectId = httpContext.User.FindFirst(ObjectIdClaimType)?.Value
-            ?? httpContext.User.FindFirst(ClaimTypes.NameIdentifier)?.Value;
+        // ⚠️ FIXED 2026-08-27 during the master merge. This previously read
+        //     FindFirst("oid") ?? FindFirst(ClaimTypes.NameIdentifier)
+        // which resolved the caller's Entra `sub`, NOT its `oid`. This app runs with inbound claim-type
+        // mapping ON (the default), so .NET renames `oid` to the schema URI and `sub` to
+        // ClaimTypes.NameIdentifier — meaning FindFirst("oid") is ALWAYS null here and the fallback
+        // always fired. `sub` is pairwise per (user, application) and joins to no `systemuser`, so the
+        // downstream Dataverse evaluation matched nothing and this filter denied every caller.
+        // Fails closed, so it read as "authorization working" rather than as an outage.
+        // See Infrastructure/Authentication/CallerResolution and PR #832.
+        var callerObjectId = CallerResolution.ResolveObjectId(httpContext.User);
 
         if (string.IsNullOrEmpty(callerObjectId))
         {
