@@ -211,6 +211,9 @@ public sealed class RunsEndpointsTests : IClassFixture<L2WebApplicationFactory>
                 nonSecretParameters = new Dictionary<string, string>
                 {
                     ["display-name"] = "Acme Corp",
+                    // ISH-01 (Wave 2 pre-dispatch remediation): tenantId is the
+                    // canonical propagation path (Wave 0 Decision 1).
+                    ["tenantId"] = "11111111-1111-1111-1111-111111111111",
                 },
             }),
         };
@@ -284,6 +287,11 @@ public sealed class RunsEndpointsTests : IClassFixture<L2WebApplicationFactory>
                     environmentId = "env-1",
                     tenancyModel = "Model1Shared",
                     profile = "spaarke-hosted-model1-trial",
+                    nonSecretParameters = new Dictionary<string, string>
+                    {
+                        // ISH-01 — tenantId required (Wave 0 Decision 1).
+                        ["tenantId"] = "11111111-1111-1111-1111-111111111111",
+                    },
                 }),
             };
             AttachAuth(r, roles: new[] { "Operator" });
@@ -656,6 +664,113 @@ public sealed class RunsEndpointsTests : IClassFixture<L2WebApplicationFactory>
     }
 
     // -------------------------------------------------------------------------
+    // ISH-01 (customer-provisioning-orchestration-r1 Wave 2 B24 punchlist,
+    // 2026-08-27, Wave 0 Decision 1) — POST /api/runs MUST validate that
+    // nonSecretParameters['tenantId'] is present + non-empty. Per Wave 0
+    // Decision 1 the canonical tenantId propagation path is via
+    // nonSecretParameters; a missing value would fail the H0 dispatch with
+    // missing-tenant-id, wasting the entire H0 preflight window.
+    // -------------------------------------------------------------------------
+
+    [Fact]
+    public async Task PostRuns_MissingTenantIdInNonSecretParameters_Returns400()
+    {
+        using var factory = new L2WebApplicationFactory();
+        var client = factory.CreateClient();
+
+        var request = new HttpRequestMessage(HttpMethod.Post, "/api/runs")
+        {
+            Content = JsonContent.Create(new
+            {
+                customerId = TestCustomerId,
+                environmentId = "env-1",
+                tenancyModel = "Model1Shared",
+                profile = "spaarke-hosted-model1-trial",
+                // ISH-01: NO nonSecretParameters at all → tenantId missing.
+            }),
+        };
+        AttachAuth(request, roles: new[] { "Operator" });
+
+        var response = await client.SendAsync(request);
+
+        response.StatusCode.Should().Be(HttpStatusCode.BadRequest,
+            "ISH-01 — CreateRun must fail-fast when nonSecretParameters['tenantId'] is absent.");
+        var body = await response.Content.ReadAsStringAsync();
+        body.Should().Contain("tenantId", "the diagnostic must name the missing key so the operator can fix the intake.");
+
+        // Neither the Cosmos row nor the Service Bus envelope should be created.
+        factory.Repository.CreatedRuns.Should().BeEmpty();
+        factory.Enqueuer.Enqueued.Should().BeEmpty();
+    }
+
+    [Fact]
+    public async Task PostRuns_EmptyTenantIdInNonSecretParameters_Returns400()
+    {
+        using var factory = new L2WebApplicationFactory();
+        var client = factory.CreateClient();
+
+        var request = new HttpRequestMessage(HttpMethod.Post, "/api/runs")
+        {
+            Content = JsonContent.Create(new
+            {
+                customerId = TestCustomerId,
+                environmentId = "env-1",
+                tenancyModel = "Model1Shared",
+                profile = "spaarke-hosted-model1-trial",
+                nonSecretParameters = new Dictionary<string, string>
+                {
+                    // ISH-01: present but whitespace-only → still fail-fast.
+                    ["tenantId"] = "   ",
+                },
+            }),
+        };
+        AttachAuth(request, roles: new[] { "Operator" });
+
+        var response = await client.SendAsync(request);
+
+        response.StatusCode.Should().Be(HttpStatusCode.BadRequest);
+        factory.Repository.CreatedRuns.Should().BeEmpty();
+    }
+
+    [Fact]
+    public async Task PostRuns_ValidTenantIdInNonSecretParameters_Returns202_AndFlowsToRunParameters()
+    {
+        using var factory = new L2WebApplicationFactory();
+        var client = factory.CreateClient();
+        var expectedTenantId = "aabbccdd-1122-3344-5566-778899aabbcc";
+
+        var request = new HttpRequestMessage(HttpMethod.Post, "/api/runs")
+        {
+            Content = JsonContent.Create(new
+            {
+                customerId = TestCustomerId,
+                environmentId = "env-1",
+                tenancyModel = "Model1Shared",
+                profile = "spaarke-hosted-model1-trial",
+                nonSecretParameters = new Dictionary<string, string>
+                {
+                    ["tenantId"] = expectedTenantId,
+                },
+            }),
+        };
+        AttachAuth(request, roles: new[] { "Operator" });
+
+        var response = await client.SendAsync(request);
+
+        response.StatusCode.Should().Be(HttpStatusCode.Accepted,
+            "ISH-01 — with a valid tenantId in nonSecretParameters the endpoint proceeds to 202.");
+
+        // ISH-01 round-trip proof: tenantId lands in the RUN's NonSecret map so
+        // every downstream handler can read it (Wave 0 Decision 1 canonical path).
+        factory.Repository.CreatedRuns.Should().ContainSingle();
+        var stored = factory.Repository.CreatedRuns.Single();
+        stored.Parameters.NonSecret
+            .Should().ContainKey("tenantId")
+            .WhoseValue.Should().Be(expectedTenantId,
+                because: "ISH-01 — tenantId must round-trip from intake → Cosmos so handlers can read it.");
+    }
+
+    // -------------------------------------------------------------------------
     // Helpers
     // -------------------------------------------------------------------------
 
@@ -702,6 +817,16 @@ public sealed class L2WebApplicationFactory : WebApplicationFactory<Program>
         // replace the seams that would call them.
         builder.UseSetting("Cosmos:AccountEndpoint", "https://l2-test.documents.azure.com:443/");
         builder.UseSetting("ServiceBus:FullyQualifiedNamespace", "l2-test.servicebus.windows.net");
+
+        // REG-02 (Wave 2 pre-dispatch remediation, 2026-08-27) — the
+        // CustomerRunGuardOptions.Enabled default flipped to true, so the real
+        // guard's Options.Validate() would fail-fast at boot without a URL.
+        // Test hosts opt out via the ADR-032 kill-switch: guard returns
+        // AcquireResult.Success unconditionally when Enabled=false, so the
+        // in-memory Repository seam handles CreateRun without an admin-env
+        // Dataverse call. This preserves the pre-REG-02 test semantics
+        // (no I5 guard interference in RunsEndpointsTests).
+        builder.UseSetting("CustomerRunGuard:Enabled", "false");
 
         // Testing environment — TelemetryModule's AzureMonitorGuard skips
         // exporter wiring silently on non-Development/Production envs.

@@ -331,6 +331,25 @@ public static class RunsEndpoints
             return BadRequest(httpContext, "profile is required.");
         }
 
+        // ISH-01 (customer-provisioning-orchestration-r1 Wave 2 B24 punchlist,
+        // 2026-08-27, Wave 0 Decision 1): validate that tenantId is present in
+        // nonSecretParameters. tenantId is the CANONICAL propagation path per
+        // Wave 0 Decision 1 — every downstream handler reads
+        // run.Parameters.NonSecret["tenantId"] to satisfy §4D I1 (no
+        // hardcoded-tenant); a missing value causes the very first handler to
+        // fail Resumable with missing-tenant-id, wasting the whole H0 dispatch.
+        // Fail-fast at intake with a clear 400 instead of surfacing the same
+        // error deep inside the DAG.
+        if (request.NonSecretParameters is null
+            || !request.NonSecretParameters.TryGetValue("tenantId", out var tenantIdValue)
+            || string.IsNullOrWhiteSpace(tenantIdValue))
+        {
+            return BadRequest(httpContext,
+                "nonSecretParameters['tenantId'] is required (§4D I1 tenant-isolation invariant). " +
+                "Every downstream handler reads run.Parameters.NonSecret['tenantId']; a missing value " +
+                "would fail the H0 preflight envelope with missing-tenant-id — surface at intake instead.");
+        }
+
         var runId = Guid.NewGuid().ToString("D").ToLowerInvariant();
         var now = DateTimeOffset.UtcNow;
 
