@@ -1185,7 +1185,15 @@ public static class ContainerEndpoints
 
         [property: System.Text.Json.Serialization.JsonIgnore(
             Condition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull)]
-        string? ArchiveStatus = null)
+        string? ArchiveStatus = null,
+
+        /// <summary>
+        /// Per-container storage quota (FR-E02). Present on the DETAIL response only — Graph reports it
+        /// on the expanded drive, which a LIST cannot carry. Omitted when absent, like WebUrl.
+        /// </summary>
+        [property: System.Text.Json.Serialization.JsonIgnore(
+            Condition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull)]
+        ContainerQuotaDto? Quota = null)
     {
         /// <summary>Maps a <see cref="SpeAdminGraphService.SpeContainerSummary"/> domain record to a DTO.</summary>
         public static ContainerDto FromSummary(SpeAdminGraphService.SpeContainerSummary summary) =>
@@ -1198,6 +1206,39 @@ public static class ContainerEndpoints
                 summary.StorageUsedInBytes,
                 summary.Status,
                 summary.WebUrl,
-                summary.ArchiveStatus);
+                summary.ArchiveStatus,
+                ContainerQuotaDto.FromDomain(summary.Quota));
+    }
+
+    /// <summary>
+    /// Per-container storage quota (FR-E02, task 051).
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// 🔑 <b><see cref="Total"/> is a container-TYPE setting, not a per-container one.</b> It is the
+    /// type's <c>maxStoragePerContainerInBytes</c> as it applies to this container, so it is identical
+    /// for every container of the type. Clients MUST label it in a way that does not imply this one
+    /// container can be given a different cap — it cannot. Graph exposes no per-container ceiling:
+    /// <c>fileStorageContainerSettings</c> has no storage property on either API version, and a
+    /// container-scope PATCH returns 200 while discarding the value (measured 2026-08-27).
+    /// </para>
+    /// <para>
+    /// <see cref="Used"/> is the only consumption figure available on a single-container fetch —
+    /// <c>storageUsedInBytes</c> is LIST-only (tasks 020/024). It is a genuinely different reading
+    /// from that field, not a duplicate: this one includes the drive's own accounting and is paired
+    /// with <see cref="Deleted"/>.
+    /// </para>
+    /// </remarks>
+    public sealed record ContainerQuotaDto(
+        long? Total,
+        long? Used,
+        long? Remaining,
+        long? Deleted,
+        string? State)
+    {
+        public static ContainerQuotaDto? FromDomain(SpeAdminGraphService.SpeContainerQuota? quota) =>
+            quota is null
+                ? null
+                : new ContainerQuotaDto(quota.Total, quota.Used, quota.Remaining, quota.Deleted, quota.State);
     }
 }

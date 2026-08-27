@@ -394,6 +394,33 @@ export type ContainerArchiveStatus =
   | "reactivating";
 
 /**
+ * Per-container storage quota, from the container drive's `quota` facet (FR-E02, task 051).
+ *
+ * 🔑 **`total` is a container-TYPE setting.** It is the type's `maxStoragePerContainerInBytes` as it
+ * applies to this container, so it is the SAME for every container of that type. Do not label it in a
+ * way that implies this one container can be capped differently — Graph has no per-container ceiling:
+ * `fileStorageContainerSettings` carries no storage property on either API version, and a
+ * container-scope PATCH returns 200 while discarding the value (measured 2026-08-27).
+ *
+ * `used` is the only consumption figure available on a single-container fetch — `storageUsedInBytes`
+ * is LIST-only (tasks 020/024).
+ *
+ * Every field is nullable: null means **NOT REPORTED**, never zero (spec NFR-06).
+ */
+export interface ContainerQuota {
+  /** The ceiling in bytes — sourced from the container TYPE. */
+  total?: number | null;
+  /** Bytes consumed. */
+  used?: number | null;
+  /** Bytes remaining, as Graph computes it — NOT `total - used` (deleted items still count). */
+  remaining?: number | null;
+  /** Bytes held by deleted items that still count against the quota. */
+  deleted?: number | null;
+  /** Graph's own assessment, e.g. `normal`, `nearing`, `critical`, `exceeded`. */
+  state?: string | null;
+}
+
+/**
  * Body of the 202 returned by the archive / unarchive endpoints (FR-E01).
  *
  * ⚠️ The shape exists to make "accepted ≠ done" impossible to miss. `pending` is always true today —
@@ -441,6 +468,11 @@ export interface Container {
    * `fullyArchived` at once. Do not merge them into a single badge value.
    */
   archiveStatus?: ContainerArchiveStatus;
+  /**
+   * Per-container storage quota (FR-E02). **Detail responses only** — Graph reports it on the
+   * expanded drive, which a list cannot carry.
+   */
+  quota?: ContainerQuota;
   /** Whether the container is locked (read-only) */
   isItemVersioningEnabled?: boolean;
   /** Creation date ISO string */

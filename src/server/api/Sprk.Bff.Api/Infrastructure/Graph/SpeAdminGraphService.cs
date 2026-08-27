@@ -125,6 +125,11 @@ public sealed class SpeAdminGraphService
     /// Beta-only, like the <c>archive</c>/<c>unarchive</c> actions themselves. The container surface
     /// is already pinned to beta by task 020's measured decision, so this adds no new version risk.
     /// </param>
+    /// <param name="Quota">
+    /// Per-container storage quota from the container drive's <c>quota</c> facet — the ONLY
+    /// per-container storage surface Graph exposes (FR-E02, task 051). Null on a LIST; populated on
+    /// GET-single, which expands the drive.
+    /// </param>
     public sealed record SpeContainerSummary(
         string Id,
         string DisplayName,
@@ -134,7 +139,45 @@ public sealed class SpeAdminGraphService
         long? StorageUsedInBytes,
         string? Status = null,
         string? WebUrl = null,
-        string? ArchiveStatus = null);
+        string? ArchiveStatus = null,
+        SpeContainerQuota? Quota = null);
+
+    /// <summary>
+    /// A container's storage quota, read from the drive's <c>quota</c> facet (FR-E02, task 051).
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// 🔑 <b>This is the only per-container storage surface Graph has, and it is READ-ONLY.</b>
+    /// <c>maxStoragePerContainerInBytes</c> — the writable ceiling — lives on
+    /// <c>fileStorageContainerTypeSettings</c>, i.e. the container <b>TYPE</b>, and is absent from
+    /// <c>fileStorageContainerSettings</c> on both API versions. <see cref="Total"/> here is that
+    /// type-level ceiling as it applies to this container.
+    /// </para>
+    /// <para>
+    /// 🔴 <b>Do not add a per-container ceiling write.</b> Measured live 2026-08-27 on a throwaway
+    /// container: <c>PATCH /containers/{id}</c> with <c>maxStoragePerContainerInBytes</c> — both
+    /// nested under <c>settings</c> and top-level — returns <b>200 OK</b> and <b>silently discards
+    /// the value</b>; the read-back carries no such property. A control built on that would report
+    /// success forever and change nothing. To change the ceiling, PATCH the container TYPE, which
+    /// changes it for every container of that type. See notes/task-051-findings.md §1.
+    /// </para>
+    /// <para>
+    /// <see cref="Used"/> matters beyond the quota display: <c>storageUsedInBytes</c> is
+    /// <b>LIST-only</b> (tasks 020/024 — absent from GET-single even with an explicit <c>$select</c>),
+    /// so this is the only consumption figure available on a single-container fetch.
+    /// </para>
+    /// </remarks>
+    /// <param name="Total">The ceiling in bytes, sourced from the container TYPE's setting. Null = not reported.</param>
+    /// <param name="Used">Bytes consumed. Null = not reported — never render null as 0 (spec NFR-06).</param>
+    /// <param name="Remaining">Bytes left. Graph computes this; it is NOT derived here.</param>
+    /// <param name="Deleted">Bytes held by deleted items still counting against the quota.</param>
+    /// <param name="State">Graph's own assessment, e.g. <c>normal</c>, <c>nearing</c>, <c>critical</c>, <c>exceeded</c>.</param>
+    public sealed record SpeContainerQuota(
+        long? Total,
+        long? Used,
+        long? Remaining,
+        long? Deleted,
+        string? State);
 
     /// <summary>
     /// A single file or folder item returned from the Graph drive items API.
@@ -1264,7 +1307,13 @@ public sealed class SpeAdminGraphService
                         // on the containers COLLECTION the identical expand is accepted, returns 200,
                         // and is silently dropped, so "the expand is valid" could not be assumed from
                         // the list's behaviour. See notes/task-028-findings.md §1.
-                        config.QueryParameters.Expand = new[] { "drive($select=webUrl)" };
+                        //
+                        // `quota` added 2026-08-27 (task 051 / FR-E02). Verified live that the
+                        // two-field nested $select still returns BOTH — the same check task 028 made
+                        // for `webUrl` alone, for the same reason: on the containers COLLECTION this
+                        // identical expand is accepted, answers 200, and is silently dropped, so
+                        // "the request was accepted" proves nothing about the response.
+                        config.QueryParameters.Expand = new[] { "drive($select=webUrl,quota)" };
                     }, ct),
                 ct);
 
@@ -1290,7 +1339,10 @@ public sealed class SpeAdminGraphService
                 Status: ReadContainerStatus(container.Status, container.AdditionalData),
                 // FR-C10. GET-single is the ONLY call that can carry this — see SpeContainerSummary.
                 WebUrl: ReadContainerWebUrl(container.Drive?.WebUrl, container.AdditionalData),
-                ArchiveStatus: ReadArchiveStatus(container.AdditionalData));
+                ArchiveStatus: ReadArchiveStatus(container.AdditionalData),
+                // FR-E02. Also the only consumption figure available on a single-container fetch —
+                // storageUsedInBytes is LIST-only (tasks 020/024).
+                Quota: ReadContainerQuota(container.Drive));
         }
         catch (ODataError odataError) when (odataError.ResponseStatusCode == (int)HttpStatusCode.NotFound)
         {
@@ -4243,6 +4295,45 @@ public sealed class SpeAdminGraphService
     }
 
     /// <summary>
+    /// Maps the expanded drive's <c>quota</c> facet to the domain record, or null when the drive or
+    /// its quota was not returned (FR-E02, task 051).
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <c>quota</c> IS modelled by the SDK (<c>Microsoft.Graph.Models.Quota</c> on <c>Drive</c>), so
+    /// this reads typed properties rather than <c>AdditionalData</c> — the opposite of
+    /// <see cref="ReadArchiveStatus"/>, and the distinction that task 050 got wrong in both directions
+    /// before measuring. Checked, not assumed.
+    /// </para>
+    /// <para>
+    /// Returns null when the whole facet is absent rather than a record of nulls, so a caller can tell
+    /// "no quota reported" from "quota reported, values unknown". Absent is expected on any path that
+    /// does not expand the drive — including every LIST row.
+    /// </para>
+    /// <para>
+    /// <c>Remaining</c> is taken from Graph rather than computed as <c>Total - Used</c>: the live facet
+    /// also carries <c>Deleted</c> (bytes held by deleted items that still count), so a local
+    /// subtraction would disagree with Graph whenever a recycle bin is non-empty — and would look
+    /// authoritative while doing it.
+    /// </para>
+    /// </remarks>
+    internal static SpeContainerQuota? ReadContainerQuota(Drive? drive)
+    {
+        var quota = drive?.Quota;
+        if (quota is null)
+        {
+            return null;
+        }
+
+        return new SpeContainerQuota(
+            Total: quota.Total,
+            Used: quota.Used,
+            Remaining: quota.Remaining,
+            Deleted: quota.Deleted,
+            State: quota.State);
+    }
+
+    /// <summary>
     /// Reads a container's lifecycle status as the wire string Graph uses (<c>active</c> /
     /// <c>inactive</c>), or null when Graph did not report one.
     /// </summary>
@@ -5341,8 +5432,79 @@ public sealed class SpeAdminGraphService
             var billingStatus = NormalizeEnumMemberName(
                 updated.BillingStatus?.ToString() ?? ReadAdditionalString(updated, "billingStatus"));
 
+            var mappedSettings = MapContainerTypeSettings(updated.Settings);
+
+            /*
+             * READ-BACK VERIFICATION (task 051 / FR-E02 constraint: "every ceiling write MUST be
+             * confirmed by read-back, not by a 200 response").
+             *
+             * 🔴 Why this is not paranoia. Measured live 2026-08-27 on a throwaway container:
+             * PATCHing `maxStoragePerContainerInBytes` at CONTAINER scope returns 200 OK and silently
+             * discards the value — the response body comes back carrying the other settings and simply
+             * omitting that one. A 200 from this API is not evidence that anything was written.
+             *
+             * The container-TYPE PATCH used here DOES persist (proven live by task 023: 499 written →
+             * 499 read back → restored). So this check is expected to pass. It exists because the cost
+             * of it silently ceasing to be true is an admin who sets a storage cap, sees a success
+             * toast, and has no cap — which is §2.4 exactly.
+             *
+             * It compares what we ASKED for against what the response REPORTS, for the fields we set.
+             * That is enough to catch the observed failure mode (silent drop), and unlike an extra GET
+             * it costs no additional round-trip and cannot itself race another writer.
+             */
+            if (mappedSettings is null)
+            {
+                /*
+                 * Graph returned a success with NO settings object. We cannot confirm the write, and
+                 * we cannot refute it either — so this warns rather than throws.
+                 *
+                 * That asymmetry is deliberate. Throwing here would assert a failure we have not
+                 * established, which is the same species of dishonesty as reporting an unverified
+                 * success — just pointing the other way. The live type PATCH always echoes settings
+                 * (task 023), so this branch means something changed upstream and deserves to be
+                 * visible in logs, not converted into a user-facing error we cannot substantiate.
+                 */
+                _logger.LogWarning(
+                    "Container type {ContainerTypeId} settings update returned success with no settings " +
+                    "object — the write could NOT be verified. Expected Graph to echo the settings.",
+                    containerTypeId);
+            }
+            else
+            {
+                var unwritten = new List<string>();
+
+                if (maxStoragePerContainerInBytes.HasValue &&
+                    mappedSettings.MaxStoragePerContainerInBytes != maxStoragePerContainerInBytes.Value)
+                {
+                    unwritten.Add(
+                        $"maxStoragePerContainerInBytes (requested {maxStoragePerContainerInBytes.Value}, " +
+                        $"Graph reports {mappedSettings.MaxStoragePerContainerInBytes?.ToString() ?? "absent"})");
+                }
+
+                if (itemMajorVersionLimit.HasValue &&
+                    mappedSettings.ItemMajorVersionLimit != itemMajorVersionLimit.Value)
+                {
+                    unwritten.Add(
+                        $"itemMajorVersionLimit (requested {itemMajorVersionLimit.Value}, " +
+                        $"Graph reports {mappedSettings.ItemMajorVersionLimit?.ToString() ?? "absent"})");
+                }
+
+                if (unwritten.Count > 0)
+                {
+                    // Thrown, not logged-and-returned. A caller that receives a settings object cannot
+                    // tell it apart from a successful write, and the endpoint would report success.
+                    //
+                    // This is the shape actually measured on the container-scope PATCH: settings came
+                    // back populated with the OTHER fields and simply omitted the one we set. A check
+                    // that only looked for "did we get a 200" — or even "did we get settings" — would
+                    // have passed it.
+                    throw new SettingsNotPersistedException(containerTypeId, unwritten);
+                }
+            }
+
             _logger.LogInformation(
-                "Successfully updated container type settings for {ContainerTypeId}", containerTypeId);
+                "Successfully updated container type settings for {ContainerTypeId} " +
+                "(write verified against Graph's own read of the settings)", containerTypeId);
 
             return new ContainerTypeSettingsResult(
                 Id: updated.Id ?? containerTypeId,
@@ -5351,7 +5513,7 @@ public sealed class SpeAdminGraphService
                 // Was `?? DateTimeOffset.UtcNow` — a container type of unknown age rendered as
                 // "created today". Handed here by task 030; unknown now stays unknown.
                 CreatedDateTime: updated.CreatedDateTime,
-                Settings: MapContainerTypeSettings(updated.Settings),
+                Settings: mappedSettings,
                 BillingStatus: billingStatus);
         }
         catch (ODataError odataError) when (odataError.ResponseStatusCode == (int)HttpStatusCode.NotFound)
@@ -5885,6 +6047,27 @@ public sealed class SpeAdminGraphService
                 "Deleted container {ContainerId} not found in recycle bin (404 on restore)", containerId);
             return false;
         }
+    }
+
+    /// <summary>
+    /// Thrown when Graph accepted a settings write with a success status but did not persist one or
+    /// more of the values (FR-E02, task 051).
+    /// </summary>
+    /// <remarks>
+    /// A distinct type because the caller must NOT report success. Every other failure here arrives as
+    /// a non-2xx; this one arrives as 200, which is precisely what makes it dangerous — the operator
+    /// sees a confirmation and the setting is unchanged.
+    /// </remarks>
+    public sealed class SettingsNotPersistedException(string containerTypeId, IReadOnlyList<string> unwrittenFields)
+        : Exception(
+            $"Graph accepted the settings update for container type '{containerTypeId}' but did not " +
+            $"persist: {string.Join("; ", unwrittenFields)}. The write was NOT applied despite the " +
+            "success response.")
+    {
+        public string ContainerTypeId { get; } = containerTypeId;
+
+        /// <summary>The fields requested that Graph's own response does not reflect.</summary>
+        public IReadOnlyList<string> UnwrittenFields { get; } = unwrittenFields;
     }
 
     /// <summary>

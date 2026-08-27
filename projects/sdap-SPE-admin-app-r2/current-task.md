@@ -9,11 +9,38 @@
 
 | Field | Value |
 |---|---|
-| **Task** | **050 — container archival** (FR-E01), implementation complete, gates running |
-| **Phase** | Wave W15 — Workstream E |
-| **Status** | 042 pushed (`b2aff6e5a`). 050 code written, BFF build 0/0, 16/16 archival contract tests pass |
-| **Next Action** | Finish gates: full test run, vite build, publish size. Then commit + escalate the opt-in (§0.4) |
-| **Blocking?** | 050's `<escalation><trigger>` **HAS FIRED** — see §0.4. Everything not gated on it is done. |
+| **Task** | **051 complete** (as amended). 050 complete. Both pushed. |
+| **Phase** | Wave W16 done → **W17 (task 052, item recycle bin) next** |
+| **Status** | All gates green: build 0/0 · **10,669 tests pass / 0 fail** · ArchTests 106/111 (same 5 pre-existing) · client typecheck 0 new · publish **45.08 MB** (+0.12 vs baseline, ceiling 60) |
+| **Next Action** | **Task 052 — item recycle bin.** ⚠️ Destructive → use the 041 `LiveIntegrationFixture` (provisions + tears down its own container). Resolve the `communications`/`emails`/`exports` folder origin **first** |
+| **Blocking?** | No. **050's archival opt-in (§0.4) still awaits you** — that is the only open operator item. |
+
+---
+
+## 0A. Task 051 — the escalation and the answer
+
+**Trigger fired**: `maxStoragePerContainerInBytes` is **container-TYPE scope only**. Confirmed twice —
+CSDL (`fileStorageContainerSettings` has no storage property on either version; the writable ceiling is
+on `fileStorageContainerTypeSettings`) and live.
+
+🔴 **And worse than wrong-scope**: `PATCH /containers/{id}` with the ceiling — nested under `settings`
+AND top-level — returns **200 OK both times and silently discards it**. Read-back shows no such
+property. Third instance of the accepted-200-silently-dropped shape (task 028 `$expand=drive`, task 050
+`$select=status`). **The POML's own constraint — "every ceiling write MUST be confirmed by read-back,
+not by a 200 response" — is what caught it.**
+
+**Operator decision: option A** — type-scope ceiling (one knob, all containers of the type) + per-container
+`drive.quota` reporting, labelled honestly as type-wide.
+
+**Bonus finding**: `drive.quota.used` is available on **GET-single**, closing the gap tasks 020/024
+documented (`storageUsedInBytes` is beta-only AND LIST-only). Verified live: 868,906,006 bytes on
+`Spaarke Inc`, consistent with task 024's measured 861 MB.
+
+**Scope was smaller than the POML assumed** — tasks 023/025 already built the type-scope ceiling
+read+write+validation end-to-end (labelled "Storage ceiling per container"). Remaining work is the
+read-back verification, the per-container quota surface, and honest UI labelling.
+
+Detail: [`notes/task-051-findings.md`](notes/task-051-findings.md).
 
 ### Files modified — task 050
 | File | Purpose |

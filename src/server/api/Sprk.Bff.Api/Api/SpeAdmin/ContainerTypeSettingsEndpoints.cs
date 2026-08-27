@@ -220,6 +220,40 @@ public static class ContainerTypeSettingsEndpoints
                 Settings = ContainerTypeSettingsDto.FromDomain(result.Settings)
             });
         }
+        catch (SpeAdminGraphService.SettingsNotPersistedException ex)
+        {
+            /*
+             * Graph answered 2xx and did not write. Reporting this as a success would be the §2.4
+             * defect in its purest form — an operator sets a storage cap, sees a confirmation, and has
+             * no cap. 502 Bad Gateway is the honest code: the request was valid and authorized, and
+             * the UPSTREAM service failed to do what it acknowledged.
+             *
+             * Measured 2026-08-27: a container-SCOPE quota PATCH does exactly this (200, value
+             * discarded). The container-TYPE path used here does persist, so this branch should never
+             * fire — it exists so that if that ever stops being true, it surfaces as a loud failure
+             * rather than a silent one. See notes/task-051-findings.md §1.
+             */
+            logger.LogError(
+                ex,
+                "PUT /api/spe/containertypes/{TypeId}/settings — Graph returned success but did NOT " +
+                "persist: {Unwritten}. TraceId: {TraceId}",
+                typeId, string.Join("; ", ex.UnwrittenFields), context.TraceIdentifier);
+
+            return Results.Problem(
+                title: "Settings Not Applied",
+                detail:
+                    $"Microsoft Graph accepted the update for container type '{typeId}' but did not " +
+                    "apply it. The settings are unchanged. This is an upstream failure, not a problem " +
+                    "with the values submitted — retrying with the same values is reasonable. " +
+                    $"Not applied: {string.Join("; ", ex.UnwrittenFields)}.",
+                statusCode: StatusCodes.Status502BadGateway,
+                extensions: new Dictionary<string, object?>
+                {
+                    ["traceId"] = context.TraceIdentifier,
+                    ["errorCode"] = "spe.containertypes.settings.not_persisted",
+                    ["unwrittenFields"] = ex.UnwrittenFields,
+                });
+        }
         catch (SpaarkeStorageException sse)
         {
             logger.LogError(
