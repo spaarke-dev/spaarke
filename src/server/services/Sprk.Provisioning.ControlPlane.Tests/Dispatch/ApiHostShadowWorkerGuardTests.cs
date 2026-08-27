@@ -214,6 +214,20 @@ public sealed class ApiHostShadowWorkerGuardTests : IClassFixture<ApiHostShadowW
             builder.UseSetting("Cosmos:AccountEndpoint", "https://l2-test.documents.azure.com:443/");
             builder.UseSetting("ServiceBus:FullyQualifiedNamespace", "l2-test.servicebus.windows.net");
 
+            // REG-02 (Wave 2 pre-dispatch remediation, 2026-08-27) — Path X
+            // migration flipped CustomerRunGuard:Enabled default to true; the
+            // guard's PostConfigure now fails-fast at boot without a URL. Test
+            // hosts opt out via the ADR-032 kill-switch (Enabled=false); the
+            // DI graph is inspected without touching a Dataverse env.
+            builder.UseSetting("CustomerRunGuard:Enabled", "false");
+
+            // REG-07 (Wave 2 pre-dispatch remediation, 2026-08-27) — the Api
+            // Program.cs now registers DataverseEnvironmentRegistryClient
+            // (Path X); its options.Validate() requires AdminEnvironmentUrl.
+            // Provide a stub URL so boot succeeds — no HTTP is invoked in
+            // these DI-inspection tests.
+            builder.UseSetting("DataverseEnvironmentRegistry:AdminEnvironmentUrl", "https://l2-test.crm.dynamics.com");
+
             // Testing environment -- TelemetryModule's AzureMonitorGuard skips
             // exporter wiring silently on non-Development/Production envs.
             builder.UseEnvironment("Testing");

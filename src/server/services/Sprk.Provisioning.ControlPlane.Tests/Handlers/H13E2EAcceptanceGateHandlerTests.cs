@@ -684,6 +684,19 @@ public sealed class H13E2EAcceptanceGateHandlerTests
         public Task<RegistryUpdateOutcome> UpdateSetupStatusAsync(
             RegistrySetupStatusUpdate update, CancellationToken cancellationToken)
             => Task.FromResult<RegistryUpdateOutcome>(new RegistryUpdateOutcome.Success());
+
+        // REG-01 (customer-provisioning-orchestration-r1 Wave 2 B24, 2026-08-27):
+        // H13 step 9.5 invokes UpdateColumnsAsync to promote run-derived values
+        // into the sprk_dataverseenvironment row BEFORE the Ready transition.
+        // The fake accepts any column set + returns Success so H13 tests focus
+        // on the aggregation logic + gate-decision behavior.
+        public Task<RegistryUpdateOutcome> UpdateColumnsAsync(
+            string environmentId,
+            IReadOnlyDictionary<string, object?> columns,
+            string customerIdForLog,
+            string runIdForLog,
+            CancellationToken cancellationToken)
+            => Task.FromResult<RegistryUpdateOutcome>(new RegistryUpdateOutcome.Success());
     }
 
     private sealed class FakeValidator : IE2EValidationRunner
