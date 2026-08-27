@@ -16,6 +16,7 @@
 | **Next Action** | **None for this project.** Everything below belongs to *other* owners. |
 
 **26 of 26 active tasks complete** · 3 deferred (Power BI 040–042, owner decision DEF-001).
+Merged to master: PR [#814](https://github.com/spaarke-dev/spaarke/pull/814) + [#816](https://github.com/spaarke-dev/spaarke/pull/816). Deployed and **UAT PASSED** on `spaarkedev1`.
 
 ---
 
@@ -94,9 +95,10 @@ the thing it changes. Suggested order: (1) one-line filter fix + divergent-value
 
 The BFF on dev is unchanged by this session — **no deploy, no config change was made after the archive**.
 `spaarke-auth-v4-dataverse-MI` remains fully merged (`HEAD` contained in `origin/master`), tree clean.
-Merged to master: PR [#814](https://github.com/spaarke-dev/spaarke/pull/814) + [#816](https://github.com/spaarke-dev/spaarke/pull/816). Deployed and **UAT PASSED** on `spaarkedev1`.
 
-### Critical context
+---
+
+## Critical context — the project's own outcome
 
 `BFF-API-ClientSecret` is gone from app settings **and** Key Vault. Every BFF-identity confidential client —
 **including OBO** — authenticates via a Managed-Identity federated credential.
