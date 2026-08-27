@@ -28,6 +28,19 @@ public static class WorkspaceTestConstants
     /// <summary>The Entra ID object ID claim used by the WorkspaceAuthorizationFilter.</summary>
     public const string TestUserId = "test-user-00000000-0000-0000-0000-000000000001";
 
+    /// <summary>
+    /// The Dataverse <c>systemuserid</c> that <see cref="TestUserId"/> resolves to — the value
+    /// <c>ownerid</c> actually holds.
+    /// </summary>
+    /// <remarks>
+    /// <b>This MUST stay different from <see cref="TestUserId"/>.</b> An Entra oid and a Dataverse
+    /// systemuserid are separate identifiers for the same person, and code that confuses them fails
+    /// only in environments where they differ — i.e. every real one. Fixtures that issue a single
+    /// value for both make that entire bug class untestable, which is precisely how the 2026-08-26
+    /// authorization defect survived a green suite. Keep them divergent.
+    /// </remarks>
+    public const string TestSystemUserId = "9f2c1b7e-4d8a-4a6f-9c3e-5b1d0e7a2f48";
+
     /// <summary>Test bearer token value for fake authentication header.</summary>
     public const string TestBearerToken = "workspace-test-token";
 }
@@ -276,7 +289,7 @@ public class WorkspaceTestFixture : WebApplicationFactory<Program>
             // these tests would assert against an empty portfolio (passing for the wrong reason).
             services.RemoveAll<ISystemUserIdentityResolver>();
             services.AddSingleton<ISystemUserIdentityResolver>(
-                new FixtureSystemUserIdentityResolver(WorkspaceTestConstants.TestUserId));
+                new FixtureSystemUserIdentityResolver(WorkspaceTestConstants.TestSystemUserId));
         });
     }
 
