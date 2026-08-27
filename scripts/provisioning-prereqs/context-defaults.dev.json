@@ -1,0 +1,140 @@
+{
+  "$schema": "./context-defaults.schema.json",
+  "_comment_purpose": "ISH-09 (customer-provisioning-orchestration-r1 Wave 5 punchlist, 2026-08-27). Companion documentation for the /provision-environment SKILL.md Step 0.5b substitution map. Records every {token} that prereqs.yaml recipes reference, the source that populates it, and the current expected shape for the dev environment. Read this file BEFORE adding a new prereqs.yaml recipe — it tells you whether a new {token} needs (a) a runtime az-derived derivation added to SKILL.md Step 0.5b, (b) a per-env constant added to spaarke-constants.yaml per_env_constants.dev, or (c) an intake-schema field the operator supplies at intake time.",
+  "_comment_authority": "spaarke-constants.yaml + SKILL.md Step 0.5b are the RUNTIME authorities — the skill actually reads those. This file is DOCUMENTATION-ONLY and does NOT bind runtime substitution. Kept in sync via validate.ps1 cross-check (a token in prereqs.yaml missing from this map fails author-time validation).",
+  "environment": "dev",
+  "tokenMap": {
+    "customerId": {
+      "source": "intake",
+      "shape": "kebab-case string, 3-32 chars, starts with letter",
+      "populatedBy": "intake.schema.json customerId property (skill Step 1a)",
+      "note": "Session variable; per-customer prereqs (once_per_customer) reference this."
+    },
+    "runId": {
+      "source": "runtime",
+      "shape": "GUID lowercase",
+      "populatedBy": "L2 CreateRun endpoint at intake",
+      "note": "Not used in Step 0.5b prereqs (only in server-side logs); documented here for completeness."
+    },
+    "env": {
+      "source": "intake",
+      "shape": "dev | demo | prod",
+      "populatedBy": "intake.schema.json environment property (also -Env CLI arg)",
+      "note": "Feeds most name_templates in spaarke-constants.yaml (l2UamiName, sbNamespace, artifactsStorageName, acrName, platformKvName, platformResourceGroup, registryDvUrl)."
+    },
+    "region": {
+      "source": "intake",
+      "shape": "Azure region string (e.g. westus2, westus3, eastus2)",
+      "populatedBy": "intake.schema.json region property; aliased to openAiRegion in Step 0.5b",
+      "note": "Currently interchangeable with openAiRegion at substitution time — canonical Spaarke split is platform=westus2, openai=westus3."
+    },
+    "openAiRegion": {
+      "source": "intake",
+      "shape": "Azure OpenAI region (defaults to westus3 when omitted)",
+      "populatedBy": "intake.schema.json openAiRegion property; SKILL.md Step 0.5b applies westus3 default",
+      "note": "Referenced by PRQ-E-14 OpenAI model catalog + drives H2a OpenAiLocation override (see H2aBicepInfraDeployHandler.OpenAiLocationParameterKey)."
+    },
+    "subId": {
+      "source": "runtime-az",
+      "shape": "Azure subscription GUID",
+      "populatedBy": "az account show --query id -o tsv",
+      "note": "Aliased to {sub} at substitution time. For Model 2 dedicated stamps intake.schema.json.subscriptionId is the operator-supplied override; Model 1 shared trials read the operator's default subscription."
+    },
+    "sub": {
+      "source": "runtime-az",
+      "shape": "Alias for {subId}",
+      "populatedBy": "az account show --query id -o tsv",
+      "note": "Kept for pre-PLX-08 recipe compatibility; new recipes SHOULD use {subId}."
+    },
+    "l2UamiPrincipalId": {
+      "source": "runtime-az",
+      "shape": "Managed Identity object id (GUID)",
+      "populatedBy": "az identity show -g rg-spaarke-platform-{env} -n sprk-controlplane-{env}-uami --query principalId",
+      "note": "L2 control-plane UAMI — required for all outbound RBAC checks (PRQ-S-04, PRQ-E-05..07, PRQ-E-11)."
+    },
+    "l2UamiClientId": {
+      "source": "runtime-az",
+      "shape": "Managed Identity clientId (GUID)",
+      "populatedBy": "az identity show ... --query clientId",
+      "note": "Fed into Dataverse systemuser lookup (PRQ-E-10) — Application-User applicationid == this clientId."
+    },
+    "l2UamiSpId": {
+      "source": "runtime-az",
+      "shape": "Service principal object id for the UAMI (GUID)",
+      "populatedBy": "az ad sp show --id {l2UamiClientId} --query id -o tsv",
+      "note": "Used for Graph app-role assignment lookups (PRQ-E-09)."
+    },
+    "graphAppId": {
+      "source": "constants",
+      "shape": "Fixed Microsoft Graph appId",
+      "populatedBy": "spaarke-constants.yaml microsoft_constants.graphAppId",
+      "note": "Invariant across all Entra tenants — hardcoded as 00000003-0000-0000-c000-000000000000."
+    },
+    "sbNamespace": {
+      "source": "constants-template",
+      "shape": "spaarke-servicebus-{env}",
+      "populatedBy": "spaarke-constants.yaml name_templates.sbNamespace with {env} substitution",
+      "note": "Referenced by PRQ-E-06 (Service Bus SB Data Sender/Receiver RBAC) + PRQ-E-08 (queue existence)."
+    },
+    "sbName": {
+      "source": "constants-template",
+      "shape": "Same as {sbNamespace}",
+      "populatedBy": "Alias used by some pre-existing recipe strings",
+      "note": "TODO reconcile with {sbNamespace} — currently only appears in one recipe reference body (PRQ-E-08 example body). Safe to consolidate."
+    },
+    "artifactsStorageId": {
+      "source": "runtime-az",
+      "shape": "Azure resource id of the platform artifacts storage account",
+      "populatedBy": "az storage account show -g rg-spaarke-platform-{env} -n sprk{env}artifacts --query id -o tsv",
+      "note": "Full resource id (not just name) — RBAC scope for PRQ-E-05 (Storage Blob Data Reader)."
+    },
+    "acrId": {
+      "source": "runtime-az",
+      "shape": "Azure resource id of the platform ACR",
+      "populatedBy": "az acr show -g rg-spaarke-platform-{env} -n sprk{env}acr --query id -o tsv",
+      "note": "RBAC scope for PRQ-E-06 (AcrPull for L2 worker sidecar image pulls)."
+    },
+    "bffAppServiceId": {
+      "source": "runtime-az",
+      "shape": "Azure resource id of the BFF App Service (per-env)",
+      "populatedBy": "az webapp list -g rg-spaarke-platform-{env} --query \"[?starts_with(name,'sprksharedprod-api') || starts_with(name,'spaarke-bff-{env}')].id\" -o tsv",
+      "note": "RBAC scope for PRQ-E-07 (Website Contributor for slot swaps)."
+    },
+    "kvResourceId": {
+      "source": "runtime-az",
+      "shape": "Azure resource id of the platform Key Vault",
+      "populatedBy": "az keyvault show -g rg-spaarke-platform-{env} -n sprk-{env}-kv --query id -o tsv",
+      "note": "RBAC scope for PRQ-E-11 (Key Vault Secrets User for the L2 UAMI on the platform KV)."
+    },
+    "containerTypeId": {
+      "source": "constants-per-env-operator",
+      "shape": "SPE container-type GUID",
+      "populatedBy": "spaarke-constants.yaml per_env_constants.dev.containerTypeId (operator MUST populate before first Step 0.5 run)",
+      "note": "SPE container-type on the Spaarke tenant. Never changes once created (owner directive 2026-08-24 SPE never_delete). If null, SKILL.md Step 0.5b hard-stops with a targeted operator-facing error."
+    },
+    "bffAppId": {
+      "source": "constants-per-env-operator",
+      "shape": "Entra app registration appId for the BFF (per-tenancy tier)",
+      "populatedBy": "spaarke-constants.yaml per_env_constants.dev.bffMultiTenantAppId (operator populates after Register-EntraAppRegistrations.ps1)",
+      "note": "One per tenancy tier, shared across all Model 1 customers. Currently referenced only in PRQ-T-02 tightening (Wave 4 deferred)."
+    },
+    "dvUrl": {
+      "source": "runtime-context",
+      "shape": "Customer Dataverse environment URL",
+      "populatedBy": "Runtime — read from customer sprk_dataverseenvironment row post-Step 1f",
+      "note": "Only appears in per-customer once_per_customer scoped prereqs (deferred to H0 server-side per EXEC-10)."
+    },
+    "adminDvUrl": {
+      "source": "constants-per-env-template",
+      "shape": "Central-managing Dataverse env URL",
+      "populatedBy": "spaarke-constants.yaml name_templates.registryDvUrl.dev",
+      "note": "Registry env — per operator memory feedback_no_central_managing_env_yet, spaarkedev1 doubles as dev + registry until a central-managing env exists."
+    },
+    "pinnedVer": {
+      "source": "recipe-internal",
+      "shape": "OpenAI model:version tuple string",
+      "populatedBy": "PRQ-E-14 recipe now iterates in-line — single-placeholder pattern deleted per Wave 3 PRQ-03 refactor.",
+      "note": "No substitution required; the recipe body owns the pin loop internally."
+    }
+  }
+}

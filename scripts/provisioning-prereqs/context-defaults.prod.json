@@ -1,0 +1,118 @@
+{
+  "$schema": "./context-defaults.schema.json",
+  "_comment_purpose": "ISH-09 (customer-provisioning-orchestration-r1 Wave 5 punchlist, 2026-08-27). Prod-environment companion of context-defaults.dev.json — the token map is identical in SHAPE (same 20 tokens sourced the same way); only the SOURCE VALUES differ per env. This file exists so a prod-only substitution regression is easy to spot in diff review, and so validate.ps1 can cross-check both dev + prod against prereqs.yaml without treating dev as canonical.",
+  "_comment_authority": "spaarke-constants.yaml + SKILL.md Step 0.5b are the RUNTIME authorities — the skill actually reads those. This file is DOCUMENTATION-ONLY.",
+  "environment": "prod",
+  "tokenMap": {
+    "customerId": {
+      "source": "intake",
+      "shape": "kebab-case string, 3-32 chars, starts with letter",
+      "populatedBy": "intake.schema.json customerId property"
+    },
+    "runId": {
+      "source": "runtime",
+      "shape": "GUID lowercase",
+      "populatedBy": "L2 CreateRun endpoint at intake"
+    },
+    "env": {
+      "source": "intake",
+      "shape": "'prod' (for this file)",
+      "populatedBy": "intake.schema.json environment property"
+    },
+    "region": {
+      "source": "intake",
+      "shape": "Azure region string",
+      "populatedBy": "intake.schema.json region property; aliased to openAiRegion in Step 0.5b"
+    },
+    "openAiRegion": {
+      "source": "intake",
+      "shape": "Azure OpenAI region (defaults to westus3)",
+      "populatedBy": "intake.schema.json openAiRegion property"
+    },
+    "subId": {
+      "source": "runtime-az",
+      "shape": "Azure subscription GUID",
+      "populatedBy": "az account show --query id -o tsv (prod subscription context)"
+    },
+    "sub": {
+      "source": "runtime-az",
+      "shape": "Alias for {subId}",
+      "populatedBy": "az account show --query id -o tsv"
+    },
+    "l2UamiPrincipalId": {
+      "source": "runtime-az",
+      "shape": "Managed Identity object id (GUID)",
+      "populatedBy": "az identity show -g rg-spaarke-platform-prod -n sprk-controlplane-prod-uami --query principalId"
+    },
+    "l2UamiClientId": {
+      "source": "runtime-az",
+      "shape": "Managed Identity clientId (GUID)",
+      "populatedBy": "az identity show ... --query clientId"
+    },
+    "l2UamiSpId": {
+      "source": "runtime-az",
+      "shape": "Service principal object id",
+      "populatedBy": "az ad sp show --id {l2UamiClientId} --query id -o tsv"
+    },
+    "graphAppId": {
+      "source": "constants",
+      "shape": "Fixed Microsoft Graph appId (invariant across envs)",
+      "populatedBy": "spaarke-constants.yaml microsoft_constants.graphAppId"
+    },
+    "sbNamespace": {
+      "source": "constants-template",
+      "shape": "spaarke-servicebus-prod",
+      "populatedBy": "spaarke-constants.yaml name_templates.sbNamespace with env=prod"
+    },
+    "sbName": {
+      "source": "constants-template",
+      "shape": "Same as {sbNamespace}",
+      "populatedBy": "Alias — should consolidate onto {sbNamespace}"
+    },
+    "artifactsStorageId": {
+      "source": "runtime-az",
+      "shape": "Azure resource id",
+      "populatedBy": "az storage account show -g rg-spaarke-platform-prod -n sprkprodartifacts --query id -o tsv"
+    },
+    "acrId": {
+      "source": "runtime-az",
+      "shape": "Azure resource id",
+      "populatedBy": "az acr show -g rg-spaarke-platform-prod -n sprkprodacr --query id -o tsv"
+    },
+    "bffAppServiceId": {
+      "source": "runtime-az",
+      "shape": "Azure resource id",
+      "populatedBy": "az webapp list --resource-group rg-spaarke-platform-prod ..."
+    },
+    "kvResourceId": {
+      "source": "runtime-az",
+      "shape": "Azure resource id",
+      "populatedBy": "az keyvault show -g rg-spaarke-platform-prod -n sprk-prod-kv --query id -o tsv"
+    },
+    "containerTypeId": {
+      "source": "constants-per-env-operator",
+      "shape": "SPE container-type GUID",
+      "populatedBy": "spaarke-constants.yaml per_env_constants.prod.containerTypeId (operator MUST populate)"
+    },
+    "bffAppId": {
+      "source": "constants-per-env-operator",
+      "shape": "Entra appId",
+      "populatedBy": "spaarke-constants.yaml per_env_constants.prod.bffMultiTenantAppId"
+    },
+    "dvUrl": {
+      "source": "runtime-context",
+      "shape": "Customer Dataverse URL",
+      "populatedBy": "Runtime — per-customer sprk_dataverseenvironment row"
+    },
+    "adminDvUrl": {
+      "source": "constants-per-env-template",
+      "shape": "Central-managing Dataverse URL for prod",
+      "populatedBy": "spaarke-constants.yaml name_templates.registryDvUrl.prod (currently placeholder — not yet provisioned)"
+    },
+    "pinnedVer": {
+      "source": "recipe-internal",
+      "shape": "OpenAI model:version tuple string",
+      "populatedBy": "PRQ-E-14 recipe iterates in-line — no substitution required"
+    }
+  }
+}

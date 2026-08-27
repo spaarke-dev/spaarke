@@ -16,6 +16,12 @@
     6. SPE never_delete guard (PRQ-T-01, PRQ-T-02 must retain never_delete: true —
        owner directive 2026-08-24 BINDING; 24h SPE replication penalty)
     7. intake.schema.json is valid JSON
+    8. context-defaults.{dev,prod}.json parse as JSON (ISH-09)
+    9. Every {token} referenced in prereqs.yaml has a documented entry in
+       context-defaults.dev.json tokenMap (ISH-09 author-time cross-check) —
+       missing tokens would eventually surface as unresolved-placeholder
+       [skill-config] errors at Step 0.5b runtime; catching them here shortens
+       the feedback loop for authors adding new recipes.
 
   Exits 0 on success, 1 on any failure with actionable per-issue diagnostics.
 
@@ -32,7 +38,11 @@
 [CmdletBinding()]
 param(
   [string] $ManifestPath = (Join-Path $PSScriptRoot 'prereqs.yaml'),
-  [string] $IntakeSchemaPath = (Join-Path $PSScriptRoot 'intake.schema.json')
+  [string] $IntakeSchemaPath = (Join-Path $PSScriptRoot 'intake.schema.json'),
+  # ISH-09 (Wave 5 punchlist, 2026-08-27): maintainer-facing companion doc
+  # of the SKILL.md Step 0.5b substitution map + spaarke-constants.yaml.
+  [string] $ContextDefaultsDevPath  = (Join-Path $PSScriptRoot 'context-defaults.dev.json'),
+  [string] $ContextDefaultsProdPath = (Join-Path $PSScriptRoot 'context-defaults.prod.json')
 )
 
 $ErrorActionPreference = 'Stop'
@@ -126,6 +136,60 @@ if (Test-Path $IntakeSchemaPath) {
   }
 } else {
   Write-Host "  [SKIP] intake.schema.json not found at $IntakeSchemaPath (not fatal — only enforced when present)" -ForegroundColor Yellow
+}
+
+# --- 5. context-defaults.{dev,prod}.json parse (ISH-09) ---
+$contextDefaultsByEnv = @{}
+foreach ($ctx in @(
+  @{ Env = 'dev';  Path = $ContextDefaultsDevPath  },
+  @{ Env = 'prod'; Path = $ContextDefaultsProdPath }
+)) {
+  if (-not (Test-Path $ctx.Path)) {
+    Write-Host "  [SKIP] context-defaults.$($ctx.Env).json not found at $($ctx.Path) (not fatal — only enforced when present)" -ForegroundColor Yellow
+    continue
+  }
+  try {
+    $contextDefaultsByEnv[$ctx.Env] = Get-Content -Raw -Path $ctx.Path | ConvertFrom-Json -Depth 16
+    Write-Host "  [PASS] context-defaults.$($ctx.Env).json is valid JSON" -ForegroundColor Green
+  } catch {
+    $fail += "context-defaults.$($ctx.Env).json is not valid JSON: $($_.Exception.Message)"
+  }
+}
+
+# --- 6. Cross-check: every {token} in prereqs.yaml recipes is documented in
+# context-defaults.dev.json tokenMap (ISH-09 author-time diagnostic).
+# The DEV map is treated as the authoritative token-shape reference; PROD is
+# expected to mirror shape (same keys, per-env source values only). A token
+# missing from dev's tokenMap would eventually surface as an unresolved-
+# placeholder [skill-config] error at Step 0.5b runtime — catching it here
+# shortens the loop for authors adding new recipes.
+if ($contextDefaultsByEnv.ContainsKey('dev') -and $m -and $m.prereqs) {
+  $documentedTokens = @{}
+  foreach ($prop in $contextDefaultsByEnv['dev'].tokenMap.PSObject.Properties) {
+    $documentedTokens[$prop.Name] = $true
+  }
+  $referencedTokens = @{}
+  foreach ($p in $m.prereqs) {
+    if ($p.check_recipe -and $p.check_recipe.cli) {
+      $matches = [regex]::Matches([string]$p.check_recipe.cli, '\{([a-zA-Z_][a-zA-Z0-9_]*)\}')
+      foreach ($mm in $matches) {
+        $referencedTokens[$mm.Groups[1].Value] = $true
+      }
+    }
+  }
+  $missing = @()
+  foreach ($tokenName in $referencedTokens.Keys) {
+    if (-not $documentedTokens.ContainsKey($tokenName)) {
+      $missing += $tokenName
+    }
+  }
+  if ($missing.Count -gt 0) {
+    foreach ($token in $missing) {
+      $fail += "context-defaults.dev.json tokenMap missing entry for '{$token}' — referenced by prereqs.yaml. Add a documentation entry (source, shape, populatedBy) so maintainers know how to derive it, then extend SKILL.md Step 0.5b substitution chain accordingly."
+    }
+  } else {
+    Write-Host "  [PASS] All $($referencedTokens.Count) prereqs.yaml {tokens} documented in context-defaults.dev.json" -ForegroundColor Green
+  }
 }
 
 # --- Report ---
