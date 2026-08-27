@@ -31,8 +31,8 @@
 # increment `manifest_version` for content changes only.
 
 schema_version: 1
-manifest_version: 1
-last_updated: 2026-08-24
+manifest_version: 2
+last_updated: 2026-08-27
 author_task: customer-provisioning-orchestration-r1 / task 202
 cross_ref_markdown: docs/guides/PROVISIONING-PREREQUISITES.md
 cross_ref_deployment_guide: docs/guides/SPAARKE-CUSTOMER-DEPLOYMENT-GUIDE.md
@@ -247,6 +247,94 @@ prereqs:
       expect: contains `Owner` OR (`Contributor` + `User Access Administrator`)
     remediation: Grant via Azure Portal → Subscription → Access control (IAM). Operator runs `/provision-environment` under their own AAD identity per NFR-11.
     related_findings: [F15, F18, NFR-11]
+
+  - id: PRQ-S-15
+    name: L2 App Service + Worker outbound egress reaches every downstream endpoint
+    scope: once_per_subscription
+    frequency: once per L2 deploy (re-run after VNet / NSG / firewall / Private-Endpoint changes)
+    owner: Spaarke platform admin
+    consequence_of_absence: |
+      COMP-02 (customer-provisioning-orchestration-r1 Wave 7 completeness sweep, 2026-08-27).
+      A customer stamp whose subscription has SafeList / NSG / Private-Endpoint
+      restrictions applied to the L2 App Service will silently HANG on outbound
+      TCP for 60+s per handler, then surface a generic HttpRequestException.
+      FailureClassifier maps HttpRequestException to Resumable so the run does
+      NOT quarantine — but every H1/H3/H5/H6/H7/H9/H10/H11 dispatch pays the
+      60s stall, turning a 20-min provision into a >2h grind before the
+      operator abandons. Fail-fast at prereqs instead.
+    check_recipe:
+      cli: |
+        # PRQ-S-15 (COMP-02): probe every downstream endpoint the L2 App
+        # Service must reach. MUST be executed FROM THE L2 App Service (via
+        # `az webapp ssh` or SCM console-run) — a local operator probe from
+        # a laptop proves nothing about the deployed egress path. Each probe
+        # is a bare TCP-level reachability check; auth is deliberately NOT
+        # attempted (a 401/403 response is proof of network reachability,
+        # which is what this prereq validates).
+        set -e
+        endpoints=(
+          "https://management.azure.com/"
+          "https://graph.microsoft.com/v1.0/"
+          "https://{customerDataverseHost}/api/data/v9.2/"
+          "https://{platformKvName}.vault.azure.net/"
+          "https://{customerKvName}.vault.azure.net/"
+          "https://{cosmosAccountName}.documents.azure.com/"
+          "https://{acrName}.azurecr.io/v2/"
+          "https://{serviceBusFqn}/"
+        )
+        for e in "${endpoints[@]}"; do
+          code=$(curl -sS -o /dev/null -w "%{http_code}" --max-time 10 "$e" || echo "TIMEOUT")
+          echo "$e -> $code"
+          [ "$code" = "TIMEOUT" ] && { echo "EGRESS_TIMEOUT: $e"; exit 1; }
+          [ "$code" = "000" ]     && { echo "EGRESS_UNREACHABLE: $e"; exit 1; }
+        done
+      expect: every endpoint returns any HTTP status (401/403/404 acceptable — proves reachability); NO `TIMEOUT` or `000` (DNS / TCP-level unreachable).
+    remediation: Add the L2 App Service's outbound IP (or the delegated subnet) to each downstream service's firewall allow-list; if VNet-integrated, ensure Private-Endpoint DNS zones resolve for management.azure.com / graph.microsoft.com / *.crm.dynamics.com / *.vault.azure.net / *.documents.azure.com / *.servicebus.windows.net / *.azurecr.io.
+    related_findings: [COMP-02]
+
+  - id: PRQ-S-16
+    name: Service Bus namespace is Standard tier or higher AND DLQ drain recipe documented
+    scope: once_per_subscription
+    frequency: once per L2 deploy
+    owner: Spaarke platform admin
+    consequence_of_absence: |
+      COMP-09 (customer-provisioning-orchestration-r1 Wave 7 completeness sweep, 2026-08-27).
+      Basic tier does NOT support sessions (required for §4D I5 same-customer
+      FIFO ordering) NOR level-1 duplicate detection (required by
+      ServiceBusHandlerEnqueuer.ComputeMessageId per task 107). Basic-tier
+      deploy = silent per-customer message-interleaving + retry-storm on the
+      §4C RetryableWithCleanup path.
+
+      The Standard 256 KB per-message cap is now enforced client-side by
+      ServiceBusModuleOptions.MaxEnvelopeBodyBytes (default 224 KB — see
+      COMP-09 code) so an oversize envelope fails fast at enqueue. Premium
+      raises the cap to 1 MB.
+
+      DLQ has no operator drain path today — a poison-message backlog
+      accumulates silently. Runbook must document the `az servicebus queue
+      subscription` peek + delete recipe.
+    check_recipe:
+      cli: |
+        # PRQ-S-16 (COMP-09): assert SB namespace tier + session-enabled queue
+        # + duplicate-detection window match the enforcement invariants.
+        set -e
+        tier=$(az servicebus namespace show --name "{serviceBusNamespaceName}" --resource-group "{platformRg}" --query "sku.tier" -o tsv 2>/dev/null)
+        [ "$tier" = "Basic" ] && { echo "SB_TIER_BASIC: sessions + dedup unsupported"; exit 1; }
+        [ -z "$tier" ]         && { echo "SB_NAMESPACE_NOT_FOUND"; exit 1; }
+        session=$(az servicebus queue show --namespace-name "{serviceBusNamespaceName}" --resource-group "{platformRg}" --name "sprk-provisioning-jobs" --query "requiresSession" -o tsv 2>/dev/null)
+        [ "$session" != "true" ] && { echo "SB_QUEUE_SESSIONLESS: §4D I5 violation"; exit 1; }
+        dedup=$(az servicebus queue show --namespace-name "{serviceBusNamespaceName}" --resource-group "{platformRg}" --name "sprk-provisioning-jobs" --query "requiresDuplicateDetection" -o tsv 2>/dev/null)
+        [ "$dedup" != "true" ] && { echo "SB_QUEUE_NO_DEDUP: level-1 idempotency broken"; exit 1; }
+        echo "SB_OK tier=$tier sessions=$session dedup=$dedup"
+      expect: |
+        `SB_OK tier=Standard sessions=true dedup=true` (or `tier=Premium`).
+    remediation: |
+      1. `az servicebus namespace update --sku Standard` (or Premium for the 1 MB cap).
+      2. Recreate the queue with `--enable-session true --enable-duplicate-detection true --duplicate-detection-history-time-window PT1H` if not currently set.
+      3. DLQ drain recipe (operator runbook):
+         `az servicebus queue subscription show --namespace-name ... --queue-name sprk-provisioning-jobs/$deadletterqueue` — peek dead-lettered messages;
+         resubmit via a bespoke replay script once root cause is fixed. Silent-fail warning: a DLQ backlog without an alert is invisible.
+    related_findings: [COMP-09]
 
   # ============================================================================
   # ONCE-PER-ENV (Spaarke platform env: dev / prod — before ANY customer stamp)
