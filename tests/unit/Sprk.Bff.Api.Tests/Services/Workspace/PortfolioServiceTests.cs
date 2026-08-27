@@ -11,6 +11,7 @@ using Spaarke.Dataverse;
 using Sprk.Bff.Api.Api.Workspace.Contracts;
 using Sprk.Bff.Api.Services.Workspace;
 using Xunit;
+using Sprk.Bff.Api.Services.Identity;
 
 namespace Sprk.Bff.Api.Tests.Services.Workspace;
 
@@ -212,6 +213,7 @@ public class PortfolioServiceTests
     private PortfolioService CreateSut() => new(
         _cacheMock.Object,
         _entityServiceMock.Object,
+        StubSystemUserIdentityResolver.Instance,
         NullLogger<PortfolioService>.Instance,
         _timeProvider);
 

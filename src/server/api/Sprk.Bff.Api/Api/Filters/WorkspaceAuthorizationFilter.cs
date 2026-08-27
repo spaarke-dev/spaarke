@@ -1,4 +1,5 @@
 using System.Security.Claims;
+using Sprk.Bff.Api.Infrastructure.Authentication;
 
 namespace Sprk.Bff.Api.Api.Filters;
 
@@ -35,8 +36,7 @@ public class WorkspaceAuthorizationFilter : IEndpointFilter
         var httpContext = context.HttpContext;
 
         // Resolve user ID — prefer Entra "oid" claim for stability
-        var userId = httpContext.User.FindFirst("oid")?.Value
-                  ?? httpContext.User.FindFirst(ClaimTypes.NameIdentifier)?.Value;
+        var userId = CallerResolution.ResolveObjectId(httpContext.User);
 
         if (string.IsNullOrEmpty(userId))
         {

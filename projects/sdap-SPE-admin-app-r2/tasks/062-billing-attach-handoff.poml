@@ -4,7 +4,7 @@
     <title>Raise billing-profile attach as a requirement on customer-provisioning-orchestration-r1</title>
     <phase>6 Hygiene + cross-cutting</phase>
     <gate>029 complete</gate>
-    <status>not-started</status>
+    <status>completed</status>
     <rigor>MINIMAL</rigor>
     <rigor-reason>Cross-project coordination and documentation. No code, no tests.</rigor-reason>
     <model-tier>sonnet</model-tier>

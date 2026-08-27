@@ -397,12 +397,21 @@ const MetricCard: React.FC<MetricCardProps> = ({ icon, label, value, subtext, va
 
 interface ConfigCountGridProps {
   containerCountByConfig: Record<string, number>;
+  /** configId → display labels. Missing entries fall back to the raw ID. */
+  configLabels: Record<string, { name: string; containerTypeName: string }>;
 }
 
 /**
  * ConfigCountGrid — displays per-config container counts from the dashboard metrics.
+ *
+ * Shows the configuration NAME and its container type rather than the bare Dataverse GUID that
+ * `containerCountByConfig` is keyed by (operator-directed, UAT 2026-08-26). The GUID is still
+ * available on the row's `title` — it is what support tickets and log lines quote.
  */
-const ConfigCountGrid: React.FC<ConfigCountGridProps> = ({ containerCountByConfig }) => {
+const ConfigCountGrid: React.FC<ConfigCountGridProps> = ({
+  containerCountByConfig,
+  configLabels,
+}) => {
   const styles = useStyles();
   const entries = Object.entries(containerCountByConfig);
 
@@ -424,15 +433,23 @@ const ConfigCountGrid: React.FC<ConfigCountGridProps> = ({ containerCountByConfi
     <table className={styles.activityTable} aria-label="Container counts by config">
       <thead>
         <tr className={styles.tableHeaderRow}>
-          <th className={styles.tableHeaderCell}>Config ID</th>
+          <th className={styles.tableHeaderCell}>Configuration</th>
+          <th className={styles.tableHeaderCell}>Container Type</th>
           <th className={styles.tableHeaderCell}>Container Count</th>
         </tr>
       </thead>
       <tbody>
-        {entries.map(([configId, count]) => (
-          <tr key={configId} className={styles.tableRow}>
-            <td className={styles.tableCell} title={configId}>
-              {configId}
+        {entries.map(([configId, count]) => {
+          const label = configLabels[configId];
+          return (
+          <tr key={configId} className={styles.tableRow} title={configId}>
+            <td className={styles.tableCell}>
+              {/* Unresolved is shown as the ID, never as blank — a config we could not name is
+                  still a config with containers in it. */}
+              {label?.name ?? configId}
+            </td>
+            <td className={styles.tableCell}>
+              {label?.containerTypeName ?? "—"}
             </td>
             <td className={styles.tableCell}>
               {count === -1 ? (
@@ -442,7 +459,8 @@ const ConfigCountGrid: React.FC<ConfigCountGridProps> = ({ containerCountByConfi
               )}
             </td>
           </tr>
-        ))}
+          );
+        })}
       </tbody>
     </table>
   );
@@ -477,6 +495,44 @@ export const DashboardPage: React.FC = () => {
   const [isLoading, setIsLoading] = React.useState(false);
   const [isRefreshing, setIsRefreshing] = React.useState(false);
   const [error, setError] = React.useState<string | null>(null);
+
+  /**
+   * configId → its human-readable name and container type, for the per-config counts table.
+   *
+   * `containerCountByConfig` is keyed by the Dataverse GUID of `sprk_specontainertypeconfig`, and
+   * the table showed that GUID raw — the operator's reasonable question at UAT was "what is Config
+   * ID?". A GUID names nothing to a human. Resolved from the same config list the header picker
+   * uses, so the label here matches the label they picked with.
+   *
+   * A failure here is deliberately silent: the table falls back to showing the ID, which is what it
+   * did before. Losing a display name must not cost anyone their container counts.
+   */
+  const [configLabels, setConfigLabels] = React.useState<
+    Record<string, { name: string; containerTypeName: string }>
+  >({});
+
+  React.useEffect(() => {
+    let cancelled = false;
+    void (async () => {
+      try {
+        const configs = await speApiClient.configs.list();
+        if (cancelled) return;
+        const map: Record<string, { name: string; containerTypeName: string }> = {};
+        for (const c of configs) {
+          map[c.id] = {
+            name: c.name,
+            containerTypeName: c.containerTypeName,
+          };
+        }
+        setConfigLabels(map);
+      } catch {
+        // Fall back to raw IDs — see the note above.
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   // ── Load Metrics ───────────────────────────────────────────────────────────
 
@@ -703,7 +759,8 @@ export const DashboardPage: React.FC = () => {
             </MessageBar>
           )}
 
-          <Divider />
+          {/* flexGrow:0 is load-bearing. Fluent v9 Divider defaults to flex-grow:1 so it can fill its track; inside these column layouts that made it grow VERTICALLY, and because the rule is centred in the divider box it rendered as space-line-space — the "big space gap" reported on Dashboard, Search, Security and Audit Log (UAT 2026-08-26). The pages without a Divider had no gap. flexShrink:0 alone never addressed it. */}
+          <Divider style={{ flexGrow: 0, flexShrink: 0 }} />
 
           {/* ── Per-Config Container Counts ── */}
           <section className={styles.section}>
@@ -718,7 +775,10 @@ export const DashboardPage: React.FC = () => {
               )}
             </div>
 
-            <ConfigCountGrid containerCountByConfig={metrics.containerCountByConfig} />
+            <ConfigCountGrid
+              containerCountByConfig={metrics.containerCountByConfig}
+              configLabels={configLabels}
+            />
           </section>
         </>
       )}

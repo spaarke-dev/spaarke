@@ -1,7 +1,8 @@
 # Current Task State — sdap-SPE-admin-app-r2
 
-> **Last Updated**: 2026-08-25 (by `context-handoff`)
-> **Recovery**: read "Quick Recovery" first. History lives in [`tasks/TASK-INDEX.md`](tasks/TASK-INDEX.md).
+> **Last Updated**: 2026-08-27 02:05 UTC (by `context-handoff`)
+> **Recovery**: read "Quick Recovery" first, then §1 (the wave plan you were asked to run).
+> §7 is preserved history from earlier sessions — do not re-derive it.
 
 ---
 
@@ -9,226 +10,234 @@
 
 | Field | Value |
 |---|---|
-| **Task** | **none in progress.** Workstreams A–C **DONE** + 060. Remaining: 041, 042, 050, 051, 052, 061, 062, 090. |
-| **Status** | ✅ **MERGED TO MASTER · CI GREEN · DEPLOYED TO DEV (code page AND BFF)** |
-| **Branch** | `work/sdap-SPE-admin-app-r2` — clean, 0 unpushed, level with origin |
-| **Next Action** | **041** (LiveIntegration suite + throwaway container fixture) → 042 → 051/050/052 → 061/062 → **090** (`/test-diet` is a BINDING gate). See §7 for a suggested re-ordering. |
+| **Phase** | UAT remediation **finished**; returning to **POML task execution** |
+| **Status** | App is **FUNCTIONAL** and deployed to dev. 8 UAT rounds closed. |
+| **Branch** | `work/sdap-SPE-admin-app-r2` · clean · pushed · 0 behind `origin/master` |
+| **Head** | `4a5982ef2` |
+| **Open PR** | [#828](https://github.com/spaarke-dev/spaarke/pull/828) → master · **MERGEABLE** · see §2 before merging |
+| **Next Action** | Run **Wave A** (§1): `061` + `062` in parallel via `task-execute`. Then `041` alone. |
 
-### ✅ Shipped and verified live (2026-08-25)
+### Operator's standing instruction (2026-08-27)
 
-| | |
-|---|---|
-| Merged to master | `d1f4470cd..ec28cd3b2`, verified ancestors of master head |
-| CI | **green** (`SDAP CI on 220252a81: success`) — it was **failing before** this merge |
-| Code page | **spaarkedev1**, web resource `sprk_speadmin` (2,302 KB) |
-| BFF | **spaarke-bff-dev** — hash-verified 4/4 files, healthy, CORS gate passed |
-| **Proof the BFF is current** | `GET /api/spe/containertypes/test/owners` → **401** (route is new today; was **404** before) |
+> *"continue with `/task-execute` working in parallel and autonomous where possible"*
 
-**Open it**: `https://spaarkedev1.crm.dynamics.com/WebResources/sprk_speadmin`
-
-**Worth walking**: settings saves that now persist (the etag fix) · container URL + Purview routing ·
-the Owners tab · Manage-Permissions landing on the right screen · the expired-trial warning.
+Parallel = ONE message with MULTIPLE `Skill` invocations. Never sequential. Per project
+[`CLAUDE.md`](CLAUDE.md), **every** task goes through `task-execute` — never read a POML and implement
+by hand.
 
 ---
 
-## 1. 🔑 THE headline finding — the PATCH-400 was a missing `etag`
+## 1. The wave plan — start here
 
-**Two days of "container-type writes are impossible" was a missing required body property.**
+**8 tasks open.** Statuses below are from `tasks/TASK-INDEX.md`, which is authoritative and richer than
+the POML `<status>` fields (see the ⚠️ in §5).
 
-Graph's Update API lists **`etag` as REQUIRED in the request BODY**, and Microsoft's own
-*"Example 2: Update without ETag"* documents the response as `400 Bad Request` — our exact symptom.
+| Wave | Tasks | ∥-safe | Run how | Gate |
+|---|---|---|---|---|
+| **A — do this first** | **061** (refresh SPE knowledge corpus) · **062** (billing-attach handoff) | ✅ ✅ | **Parallel**, 2 agents | W18 is the ONLY `/goal`-eligible span. MINIMAL rigor. Deps (025/029) satisfied. |
+| **B** | **041** (LiveIntegration suite + throwaway container fixture) | ✅ | **Alone** | ⚠️ Live tenant. NOT goal-eligible. Builds the fixture 052 depends on. |
+| **C** | **042** (retire scaffolding tests) | ✅ | Alone, after 041 | ADR-038 deletion-safety; escalation trigger on unreplaced coverage |
+| **D** | **050** (archival) · **051** (quota ceiling) | ❌ ❌ | **Sequential, main session** | Both unblocked (deps done). Not parallel-safe. |
+| **E** | **052** (item recycle bin) | ❌ | Alone, after 041 | 🚨 **Destructive.** Throwaway container only |
+| **F** | **090** (wrap-up) | ❌ | Last | `/test-diet` is a **BINDING** gate |
+
+**Why 061+062 first**: both `MINIMAL` rigor, both `∥-safe ✅`, both W18, dependencies satisfied, and W18 is
+the only wave `task-create` marked goal-eligible. It is the one place "parallel and autonomous" is
+already sanctioned by the plan rather than by improvisation.
+
+### 🚨 The scheduling constraint that governs every wave
+
+Project [`CLAUDE.md`](CLAUDE.md): nearly every task modifies `SpeAdminGraphService.cs` (4,911 LOC).
+**At most ONE task per wave may modify it.** Realistic concurrency is **2–3 agents, not 6**. Check each
+POML's `<outputs>` before dispatching a wave.
+
+### Two tasks are PARTIAL, not open — do not restart them
+
+- **025** — server complete, **form deferred**. FR-C07 named a property that does not exist
+  (`agent.chatEmbedAllowedHosts`) and omitted one that does (`sharingCapability`).
+- **026** — **AC-2 escalated, not achievable**: `consumingTenantOverridables` is a *permission*, not a
+  state, and cannot be read from an owning tenant. Do not "fix" this by trying harder.
+
+---
+
+## 2. PR #828 — read before merging
+
+**Tenant Isolation now passes (34/34, was 31/34).** But **Build & Test (Debug) failed**, and three
+failures are `TimeoutException` / `TaskCanceledException` in:
+
+- `ScheduledJobHostTests.StopAsync_CancelsInFlightJobWithinDrainTimeout_NFR07`
+- `RetryAndIdempotencyTests.CancellationDuringRetryLoop_StopsImmediately_DoesNotSleepThroughToken`
+- `SseStreamingIntegrationTests.Cancellation_NoLingeringBackgroundTask_AfterClientAbort`
+
+**None of them touch anything this branch changed** (a PowerShell script, an ArchTest, a comment in
+`RecordMatchService.cs`, and SpeAdminApp `.tsx`). All three use `Task.Delay` / `Stopwatch` / wall-clock
+timeouts — exactly the constructs [`tests/CLAUDE.md`](../../tests/CLAUDE.md) **bans** as *"sources of
+flakiness on shared CI runners"*, prescribing `FakeTimeProvider` instead.
+
+**A re-run of the failed jobs was in flight when this handoff was written.** Check it before merging:
+
+```bash
+gh run view 33029952218 --json status,conclusion --jq '"\(.status)/\(.conclusion)"'
+gh run view 33029952218 --json jobs --jq '.jobs[] | select(.conclusion=="failure") | .name'
+```
+
+- **Green on re-run** → flaky confirmed; merge #828.
+- **Same three fail again** → still almost certainly pre-existing, but confirm against master's own
+  Build & Test history before blaming this branch.
+
+> ⚠️ **Branch protection is DISABLED.** `gh pr merge --auto --merge` merges **immediately**, without
+> waiting for CI. The `Tenant Isolation` job is labelled *merge-blocking* and cannot block anything.
+> That is how PR #826 merged with a red gate. Verify checks **before** invoking merge, not after.
+
+---
+
+## 3. The recurring defect shape — read before debugging anything here
+
+> **A lower layer collapses a real value — or a real failure — into an absent/empty/garbage result
+> that an upper layer reads as benign.**
+
+Confirmed **17** times in this project. The four newest:
+
+- **Flat wire vs nested client type.** `SpeContainerItemSummary` sends `isFolder`/`mimeType`/
+  `createdByDisplayName`; `DriveItem` declares `folder`/`file.mimeType`/`lastModifiedBy.user.displayName`.
+  `isFolder(item)` tests `!!item.folder` → **false for every item**. Every folder rendered as a file and
+  could not be opened. Third instance of this exact shape after `id`→`containerTypeId` and five
+  `{items,count}` envelopes.
+- **A second `.ToString()` on a collection.** The 2026-08-26 fix patched `MapConsumingTenant` and missed
+  `MapContainerTypePermission` — the path the Permissions tab actually reads.
+- **Argument-order swap.** `items.download(containerId, itemId, configId)` called as
+  `(containerId, configId, item.id)`. Three `string` params, so the compiler saw nothing; a 404 resolves
+  rather than throws; the catch wrote to `console.error`. Auditing the same shape found `items.delete`
+  swapped identically — **broken and unreported**.
+- **A scan that could not tell code from prose.** The I5 ArchTest reported a CATASTROPHIC credential
+  violation against a **doc comment warning against that very construct**.
+
+**The method that keeps working:** when N things fail identically, find the one that *works* and ask what
+it does differently. And when you fix one instance of a shape, **grep for the shape**, not the instance.
+
+---
+
+## 4. Highest-value work that is NOT in the POML backlog
+
+**1. Add `tsc --noEmit` to the SpeAdminApp build + a test runner.** `vite build` does **not** typecheck;
+~38 type errors ship; `lint` invokes an uninstalled ESLint. **Three total client/server shape mismatches
+reached operator UAT for exactly this reason** — all three were invisible to the build and obvious to
+`tsc`. Every typecheck in rounds 5–8 was run by hand. Roughly an afternoon; closes the hole that
+generated most of the last four UAT rounds. **Recommend doing this before 050/051/052.**
+
+**2. I2 cross-tenant search bleed — waived, not fixed.** `RecordMatchService` queries with no tenant
+predicate. Waived on an owner ruling that `spaarke-records-index` is single-tenant. The waiver expires
+with the **deployment model, not a date**: both call paths must be scoped before the first shared tenant
+is onboarded. `JobContract` has no tenant field — that is the real work.
+
+**3. Container-type DELETE does not exist.** Operator asked for it. Graph supports
+`DELETE /storage/fileStorage/containerTypes/{id}` and refuses when containers still exist, so blast
+radius is bounded by Graph. Not added unilaterally: a new destructive BFF endpoint trips root §10 +
+§6.
+
+**4. `Publish Dataverse Solutions Manifest`** has failed on master for ≥3 commits. Unowned.
+
+---
+
+## 5. Traps that cost real time here
+
+⚠️ **POML `<status>` fields are STALE — trust `TASK-INDEX.md`.** Task 011's POML says `not-started`;
+TASK-INDEX says ✅ completed 2026-08-24 with a detailed note. Reading the POML alone would restart
+finished work.
+
+⚠️ **Hash-check the deployed BFF DLL before re-diagnosing any BFF bug.** A landed fix was silently
+reverted 52 minutes later by another session's deploy, and the recurrence looked exactly like a wrong
+diagnosis. Recipe in §6.
+
+⚠️ **We have NEVER deployed with slots.** `config/environments.json` declares `appServiceSlot: staging`;
+zero slots exist. Do not claim slot-swap rollback.
+
+⚠️ **Another session is active on this branch.** Commit `4a5982ef2` (the I2 waiver) and PR #828 were
+authored elsewhere while this session worked. `git fetch` and re-read before assuming your view is
+current.
+
+⚠️ **Nine POML premise errors, nine for nine** in earlier waves. Verify a task's premise against
+code/CSDL **before** implementing it.
+
+---
+
+## 6. Verification recipes
+
+```bash
+# Is the deployed BFF actually my build?  RUN BEFORE RE-DIAGNOSING ANY BFF BUG.
+TOKEN=$(az account get-access-token --resource https://management.azure.com --query accessToken -o tsv)
+L=$(sha256sum deploy/api-publish/Sprk.Bff.Api.dll | cut -d' ' -f1)
+curl -s -H "Authorization: Bearer $TOKEN" \
+  "https://spaarke-bff-dev.scm.azurewebsites.net/api/vfs/site/wwwroot/Sprk.Bff.Api.dll" -o /tmp/r.dll
+[ "$L" = "$(sha256sum /tmp/r.dll | cut -d' ' -f1)" ] && echo MATCH || echo "STALE — redeploy"
+
+# What is ACTUALLY published to Dataverse (never trust the deploy message):
+#   webresourceset(5f86c079-cd1f-f111-88b3-7ced8d1dc988)?$select=content -> base64 decode -> grep
+#   NOTE: grep the bundle for camelCase JS identifiers, not kebab-case CSS —
+#   Griffel emits `scrollbarWidth` and converts at runtime. I got this wrong once.
+
+# Client typecheck (NOT in the build — must be run by hand):
+cd src/solutions/SpeAdminApp && npx tsc --noEmit -p tsconfig.json
+
+# Tenant-isolation gate:
+dotnet test tests/Spaarke.ArchTests/ --filter "FullyQualifiedName~TenantIsolation"
+```
+
+**Deploys — always `pwsh`, never `powershell`** (5.x lacks `Get-FileHash` in this harness):
+
+- BFF: `rm -rf src/server/api/Sprk.Bff.Api/publish; pwsh -ExecutionPolicy Bypass -File scripts/Deploy-BffApi.ps1`
+- Code page: clear `dist/* node_modules/.vite/ .vite/` first, then
+  `pwsh -ExecutionPolicy Bypass -File scripts/Deploy-SpeAdminApp.ps1 -Environment dev -DataverseUrl "https://spaarkedev1.crm.dynamics.com"`
+
+### Domain facts learned live
+
+- **"Config"** = `sprk_specontainertypeconfig` — binds container type + business unit + environment +
+  owning app + Key Vault secret name. Labelled "Container Type" in the UI, but it is **not** the
+  container type.
+- **ADR-028 E-1** covers per-customer **owning-app** credentials — **not** the BFF's own identity
+  reaching Key Vault. auth-v4 applied the exclusion one layer too wide.
+- `spaarke-bff-dev` has a **user-assigned** identity (`mi-bff-api-dev`, clientId
+  `5967251e-171c-46fe-a6c2-ef843c90309d`) and **no system-assigned one** — every credential MUST pin the
+  client id.
+- Fluent v9: **`Divider` defaults to `flex-grow: 1`**; **`<Text truncate>` does NOT stop wrapping**
+  (needs `wrap={false}`); **`columnSizingOptions` must be a stable reference** or drags reset on every
+  render; Fluent **does not style scrollbars at all**.
+- Publish size **45.07 MB** incl. PDBs (baseline 44.96, ceiling 60).
+
+---
+
+## 7. Preserved history — earlier sessions
+
+### 🔑 The PATCH-400 was a missing `etag` (2026-08-25)
+
+Two days of "container-type writes are impossible" was a missing **required body property**. Graph's
+Update API lists `etag` as REQUIRED **in the body**.
 
 | Identical no-op PATCH | |
 |---|---|
 | without `etag` | **400** |
-| with `etag` in the body | **200** ✅ (beta AND v1.0) |
-| round-trip: wrote 499 → read back **499 PERSISTED** → restored 500 | ✅ **task 023 AC-2** |
+| with `etag` in the body | **200** (beta AND v1.0) |
 
-⚠️ **It is a BODY property, NOT the `If-Match` header.** An earlier session tried the header, correctly
+⚠️ It is a **BODY property, NOT the `If-Match` header.** An earlier session tried the header, correctly
 recorded that it changed nothing, and read that as "the etag is irrelevant" — which aimed the whole
-investigation at auth. The recorded hypothesis ("only the owning app may modify its container type")
-was **wrong**, and disproving it would have cost a throwaway container type or a change to the
-**production SPA registration**. Neither was needed.
+investigation at auth. Full record: [`notes/patch-400-resolution.md`](notes/patch-400-resolution.md).
 
-Fix: `UpdateContainerTypeSettingsAsync` is a read-modify-write (GET → etag → PATCH) and **throws rather
-than sending a doomed write** when Graph returns no etag. Full record:
-[`notes/patch-400-resolution.md`](notes/patch-400-resolution.md).
+> **THE LESSON, twice in one day:** both 400s were documented requirements returned as `invalidRequest`
+> naming no cause, and both were one fetch of Microsoft's reference page away. **The corpus and the CSDL
+> being silent is not the platform being silent.**
 
-**Unblocked 023 (✅ complete), 025, 026, 029.** ⚠️ 025's form rebinding and 026's AC-2 finding were never
-about the 400 — this removed the blocker, not their scope.
+### Other prior findings
 
-> ### 📌 THE LESSON — and it happened TWICE in one day
-> Both 400s (settings PATCH, owner POST) were **documented requirements** returned as `invalidRequest` /
-> *"One of the provided arguments is not acceptable"*, naming no cause. Both were **one fetch of
-> Microsoft's reference page away**. The corpus and the CSDL being silent is not the platform being silent.
-> **→ Read the vendor's doc for the exact operation BEFORE hypothesising about auth.**
-
----
-
-## 2. Tasks closed this session
-
-| Task | Outcome |
-|---|---|
-| **011** | GET/CREATE/SAVE moved to the delegated path (all three were app-only ⇒ guaranteed 403) |
-| **023** | ✅ **COMPLETE** — AC-2 proven live by the etag fix |
-| **027** | ✅ **COMPLETE** — owners verified live: add **201**, remove **204**, list back to 0 |
-| **028** | ✅ container URL + Purview routing |
-| **060** | ✅ dead stub deleted, misfiled endpoints moved (9 routes diffed byte-identical) |
-| **2 unowned UI defects** | ✅ Manage-Permissions deep link; expired-trial invisibility |
-
-### 🔴 Premise errors found (9 for 9 — assume the next POML is wrong too)
-
-- **027**: "supersedes the ContainerTypePermissions screen" — **false**. `applicationPermissions`
-  (which APPS may access) vs `permissions` (which PEOPLE own) are orthogonal. **Retired nothing.**
-  Guarded structurally: route is `/owners`, separate DTOs, separate tab.
-- **027**: `permissions` is **beta-only** while container types are **delegated-only** — those axes had
-  never crossed. Added `GraphClientFactory.ForUserBetaAsync` (same OBO exchange, same cached token, only
-  the base address differs ⇒ **no ADR-028 A4/E-3 surface**).
-- **028**: `fileStorageContainer` has **no URL property in either version**; on the COLLECTION Graph
-  accepts `$expand=drive($select=webUrl)`, returns **200**, echoes it in `@odata.context`, and **omits it
-  from every row**. The natural implementation ships an empty column backed by a 200.
-- **027 correction**: I recorded the 3-owner limit as "unsourced". **Microsoft documents it** (max 3,
-  4th → 400), plus: only `owner` is a valid role, and only existing owners / SPE Admins / Global Admins
-  may add one.
-
----
-
-## 3. Live-tenant facts (verified 2026-08-25 — do not re-derive)
-
-Four container types, **each owned by a different app**:
-
-| Type | id | owningApp | billing |
-|---|---|---|---|
-| Spaarke PAYGO 1 | `8a6ce34c-6055-4681-8f87-2f4f9f921c06` | `170c98e1` | standard / **valid** |
-| Spaarke DMS-SPE Trial | `ef8e5d5b-f9c1-4cdb-9b4f-8ca50d070255` | `2c708318` | trial / valid · **expired 2025-10-10** |
-| Spaarke DMS Dev 1 | `5c1ea58e-1052-49db-841a-6ecc3a2269ad` | `fd1325aa` | directToCustomer / valid |
-| Spaarke Demo Documents | `362f90b3-7b72-4ab1-bb4c-20a1399ca838` | `da03fe1a` | standard / valid |
-
-- **`billingStatus` is `valid` on all four** — matching the operator's M365 screenshot. The "Unknown"
-  seen in local review was a **fixture artefact**, not a code defect. Task 029's mapping is correct.
-- **An expired trial still reports `billingStatus: valid`** — billing health and usability are
-  independent. That is why the expiry work keys off `expirationDateTime`.
-- **Zero owners on every container type.** Bootstrapping one needs a directory-role holder.
-- Listing containers of a type the caller's app does not own → **403**.
-
-### 🔑 Live verification recipe
-
-`notes/verify-container-type-owners.py` and `notes/delegated-diagnostics.py` (device-code,
-**auto-renewing** — three codes expired unused before that was added). Delegated needs ~30s of operator
-time at <https://microsoft.com/devicelogin>. App-only works for containers/files/storage but is **403 on
-container types**. Graph's OData `$metadata` needs **no token** and has settled four tasks — reach for it
-first.
-
-⏰ The `spe-owning-app-secret` credential **expires 2028-08-24**.
-
----
-
-## 4. ⚠️ Deploy procedure — I got this wrong; do not repeat it
-
-**Use the skills**: `/bff-deploy` for the BFF · `/code-page-deploy` for code pages (operator direction,
-2026-08-25).
-
-- 🔴 **We have NEVER deployed with slots.** `config/environments.json` declares
-  `appServiceSlot: staging`, and **`spaarke-bff-dev` has ZERO slots**. I passed `-UseSlotDeploy`, the
-  deploy failed at step 3/7 with `ResourceNotFound`, and — worse — I had told the operator the deploy was
-  *safe because of* the slot-swap rollback that field implied. Nothing was deployed; the claim was still
-  wrong. **Plain `Deploy-BffApi.ps1`, no slot flags.**
-- **Invoke with `pwsh`**, not `powershell` — 5.x lacks `Get-FileHash` (logged 2026-05-27 incident).
-- **Clean `deploy/api-publish` + `src/.../publish` first** (MSB3030 nested-publish guard).
-- **Hash-verify vs health check are different signals**: hash-verify passing + healthz timing out means
-  the deploy WORKED and the app is still booting (Linux cold start 90–120s). **Do not redeploy there.**
-- **Verify by route probe**: any `RequireAuthorization` route must return **401**, never 404.
-
-### SPE Admin is NOT a special case (operator asked)
-
-| Family | Build | Count | Deploy |
-|---|---|---|---|
-| `src/client/code-pages/` | Webpack | 6 | what `/code-page-deploy` documents |
-| `src/solutions/` | **Vite single-file** | 30+ | **one `Deploy-*.ps1` per solution** |
-
-SpeAdminApp is the second family; per-solution scripts are the norm there (`Deploy-CalendarSidePane.ps1`,
-`Deploy-DailyBriefing.ps1`, `Deploy-EventsPage.ps1`, ~15 more). **Drift worth fixing**:
-`/code-page-deploy`'s `appliesTo` claims `**/solutions/**` but its body documents only the Webpack
-convention.
-
----
-
-## 5. ⚠️ Repo hazards hit this session
-
-1. **The main repo regenerates stale build artifacts.** `c:/code_files/spaarke` had **140 untracked
-   `.js`/`.d.ts` files from Feb–June** inside `Spaarke.UI.Components/src/`. Rollup resolved
-   `themeStorage` to the stale June `.js` (predating `getDisplaySizePreference`) and the code-page build
-   **failed**. My worktree built fine on the identical commit. I removed the 140 and preserved the one
-   tracked file (`src/__mocks__/diff.js`, a hand-written mock). **They will come back** the next time
-   `tsc` runs in that library.
-   → *Deploying from master rather than the worktree is what surfaced this.*
-2. **Master moves constantly** — it advanced **5 times** during this session (102 commits, then 5, 55,
-   and more). **Re-verify your commits are ancestors immediately before building/deploying**; I once
-   started a deploy on a commit I had never tested.
-3. **`git stash` hazard**: other projects' stashes live in this repo. Never `git stash pop` blindly.
-4. **Pushing repeatedly cancels your own in-flight CI runs** (concurrency group).
-
----
-
-## 6. Master was RED before this merge — and is green now
-
-`Spe.Integration.Tests` asserted six endpoints auth-v4 had **deliberately deleted** (commit `c17e856f4`:
-a per-resource auth requirement on collection routes, *"structurally unsatisfiable"*). auth-v4 updated
-`EndpointGroupingTests.cs` but missed that project. Proven pre-existing by running them against pristine
-master in a throwaway worktree.
-
-**Two were passing vacuously**: they asserted a no-access user gets 403 while *every* user got 403. They
-could not fail. Removed, with the reasoning recorded at the point of absence. Coverage is not lost —
-auth-v4 added 65 tests under `tests/integration/seam/Auth/**`.
-
-⚠️ **The auth-v4 merge also broke 66 SpeAdmin contract tests** — `DataverseWebApiClient` gained credential
-selection in its ctor and now requires `TENANT_ID` when MI is disabled. Fixed by passing the
-`UnusableCredential` each test already defines (takes the "selection bypassed" branch, and still throws if
-anything genuinely asks for a token). **A clean textual merge is not a clean semantic one.**
-
----
-
-## 7. Remaining work
-
-| Order | Task | Note |
-|---|---|---|
-| 1 | **041** LiveIntegration suite + throwaway container | Provisions the throwaway container that makes 052 safe; 042 depends on it |
-| 2 | **042** retire scaffolding tests | ⚠️ `UpdateContainerTypeSettingsTests.cs` flagged B16 — renaming 4 DTO props broke every test in it without one catching the defect |
-| 3 | **051** quota ceiling · **050** archival · **052** item recycle bin | Real ceilings measured: **25 TiB** standard, **200 MiB** trial. 052 is irreversible-ops — throwaway container ONLY |
-| 4 | **061** knowledge corpus · **062** billing handoff | |
-| 5 | **090** wrap-up | 🔔 `/test-diet` is a BINDING gate |
-
-### 🔴 Two gaps I would put AHEAD of parts of that list
-
-1. **SpeAdminApp has NO test runner** — no vitest, no jest, and its `lint` script invokes an ESLint that
-   is not installed. Every client-side assessment (billing, trial expiry, overridables parser, compliance
-   module) is verified by **`tsc` alone**. Given this project keeps finding defects specifically in client
-   logic — row selection that never worked, an empty billing badge, a deep link that went nowhere — this
-   is the largest remaining blind spot.
-2. **Deployment has no task in the WBS.** It rides 090 by default. Both surfaces are now deployed
-   manually; if iterative deploys are wanted, that should be its own task.
-
-### Smaller, recorded
-
-- **027**: the owners list renders a **raw GUID** — Graph returns `grantedToV2.user` with only `id`, no
-  name/email. Honest but not useful. Fixing = an N+1 `/users/{id}` resolve on a list capped at 3.
-- **025**: settings **form** still bound to the Dataverse config record, not the Graph settings DTO.
-- **026**: AC-2 stands independently of the 400 — `consumingTenantOverridables` is a **permission**, not a
-  state, and an owning tenant structurally cannot read a consuming tenant's overrides.
-- **021**: the `sprk_graphendpoint` Dataverse column still exists (schema change = operator action).
-- **013**: Alerts still 403 — needs a **Defender workload**, not a permission. No grant can fix it.
-
----
-
-## 8. Recurring defect shape — the through-line
-
-*A lower layer collapses a real value (or a failure) into an absent/empty result that an upper layer reads
-as benign.*
-
-Found in: 003 (Dataverse outage → green dashboard) · 005 (audit table silently 0 rows) · 022 (`is string`
-could never match Kiota's `DateTime`) · 024 (861 MB rendered as "0 B") · 029 (`billingStatus` in 0 files
-repo-wide) · 030 (row selection never worked) · **028 (Graph itself does it — 200 plus a context header
-claiming a field it omits)** · **the PATCH-400 (a documented requirement returned as a generic "arguments"
-message)**.
-
-**Verify a task's premise before implementing to it.** Nine POMLs, nine wrong-or-incomplete premises.
+- **Master was red before our merge** — 6 tests asserted endpoints auth-v4 deliberately deleted; two
+  passed **vacuously** (asserting a no-access user gets 403 while *every* user got 403).
+- **A remembered failure mode is a hypothesis, not a diagnosis** — 66 test failures were blamed on a
+  remembered WireMock/MimeKit issue; reading the actual exception took one command and showed a ctor
+  change.
+- **Security alerts 403** — Graph says *"Account is not provisioned"*: the tenant lacks the Defender
+  workload. **Not** the missing `SecurityEvents.Read.All` grant our message guesses at. Not fixable in
+  code; the wording could be sharpened.
+- **Those folders** (`communications` / `emails` / `exports`) — nothing in the repo creates them by name.
+  The mechanism is path-based upload (`Drives[id].Root.ItemWithPath(path)`), which auto-creates parents
+  from a caller-supplied `FolderPath`. Now that folders open, **the `Modified By` column inside them names
+  whatever wrote the files** — one click, and it should be answered **before 052 touches anything
+  destructive**.

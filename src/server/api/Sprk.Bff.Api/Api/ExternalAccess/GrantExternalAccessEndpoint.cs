@@ -4,6 +4,7 @@ using Sprk.Bff.Api.Api.ExternalAccess.Dtos;
 using Sprk.Bff.Api.Infrastructure.Cache;
 using Sprk.Bff.Api.Infrastructure.Errors;
 using Sprk.Bff.Api.Infrastructure.ExternalAccess;
+using Sprk.Bff.Api.Infrastructure.Authentication;
 
 namespace Sprk.Bff.Api.Api.ExternalAccess;
 
@@ -328,8 +329,7 @@ public static class GrantExternalAccessEndpoint
     /// audited <c>sprk_grantedby</c> lookup requires. NOTE: the oid is NOT itself a systemuserid.
     /// </summary>
     internal static string? ResolveCallerSystemUserId(HttpContext httpContext)
-        => httpContext.User.FindFirst("oid")?.Value
-            ?? httpContext.User.FindFirst(ClaimTypes.NameIdentifier)?.Value;
+        => CallerResolution.ResolveObjectId(httpContext.User);
 
     /// <summary>
     /// Maps the caller's Azure AD object id (<paramref name="callerOid"/>) to their Dataverse

@@ -4,6 +4,7 @@ using Microsoft.Xrm.Sdk;
 using Microsoft.Xrm.Sdk.Query;
 using Spaarke.Dataverse;
 using Sprk.Bff.Api.Api.Workspace.Contracts;
+using Sprk.Bff.Api.Services.Identity;
 
 namespace Sprk.Bff.Api.Services.Workspace;
 
@@ -55,6 +56,9 @@ public class PortfolioService
 {
     private readonly IDistributedCache _cache;
     private readonly IGenericEntityService _genericEntityService;
+    // Translates the caller's Entra oid into the Dataverse systemuserid that `ownerid` holds.
+    // Reused (already a registered singleton) rather than re-implemented — root CLAUDE.md section 11.
+    private readonly ISystemUserIdentityResolver _systemUserIdentityResolver;
     private readonly ILogger<PortfolioService> _logger;
     private readonly TimeProvider _timeProvider;
 
@@ -80,11 +84,13 @@ public class PortfolioService
     public PortfolioService(
         IDistributedCache cache,
         IGenericEntityService genericEntityService,
+        ISystemUserIdentityResolver systemUserIdentityResolver,
         ILogger<PortfolioService> logger,
         TimeProvider? timeProvider = null)
     {
         _cache = cache ?? throw new ArgumentNullException(nameof(cache));
         _genericEntityService = genericEntityService ?? throw new ArgumentNullException(nameof(genericEntityService));
+        _systemUserIdentityResolver = systemUserIdentityResolver ?? throw new ArgumentNullException(nameof(systemUserIdentityResolver));
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
         _timeProvider = timeProvider ?? TimeProvider.System;
     }
@@ -290,11 +296,37 @@ public class PortfolioService
         // Active matters only
         query.Criteria.AddCondition("statecode", ConditionOperator.Equal, 0);
 
-        // Owned by the specified user (matches LegalWorkspace client-side filter pattern)
-        if (Guid.TryParse(userId, out var userGuid))
+        // Owned by the specified user.
+        //
+        // TWO defects lived in the three lines this replaces, and the second survived the first's fix.
+        //
+        // (1) `userId` used to arrive as the Entra `sub` (a pairwise, non-GUID identifier — see
+        //     CallerResolution). Guid.TryParse therefore ALWAYS failed, and because the parse guarded
+        //     the FILTER rather than the query, failing silently DROPPED the ownership condition. This
+        //     query runs on the app identity (IGenericEntityService is a singleton, so Dataverse
+        //     row-level security never trims it), so every caller received EVERY active matter in the
+        //     org. A guard meant to scope the result removed the scoping instead.
+        //
+        // (2) `ownerid` holds a Dataverse **systemuserid**, NOT an Entra oid — a different id space.
+        //     So merely fixing (1) would make the filter match ZERO rows: an empty portfolio instead of
+        //     an over-shared one. Still wrong, just quieter. The oid must be translated first.
+        //
+        // Fail CLOSED: an unresolvable caller yields no rows rather than an unfiltered query. That is
+        // the opposite of the original behaviour and is the point.
+        var systemUserId = await _systemUserIdentityResolver
+            .ResolveSystemUserIdAsync(userId, ct)
+            .ConfigureAwait(false);
+
+        if (systemUserId is not { } ownerSystemUserId)
         {
-            query.Criteria.AddCondition("ownerid", ConditionOperator.Equal, userGuid);
+            _logger.LogWarning(
+                "PortfolioService: caller {UserId} could not be resolved to a systemuser; returning no matters "
+                + "rather than an unfiltered org-wide result.",
+                userId);
+            return Array.Empty<MatterRecord>();
         }
+
+        query.Criteria.AddCondition("ownerid", ConditionOperator.Equal, ownerSystemUserId);
 
         EntityCollection results;
         try

@@ -484,3 +484,180 @@ jobs:
           name: tier1-auth-smoke-results
           path: ./TestResults/auth-smoke.trx
           if-no-files-found: warn
+
+  # ==========================================================================
+  # PORTED GATES — from sdap-ci.yml (ci/tier1-gate-port, 2026-08-27)
+  # ==========================================================================
+  # Three gates that existed ONLY in sdap-ci.yml and are the reason it could not
+  # simply be deleted. Copied verbatim apart from an added timeout, so a
+  # disagreement between the two workflows during the shadow window can only mean
+  # a real difference, never a porting slip.
+  #
+  # WHY ONLY THREE. sdap-ci's `build-test` was ported here first and removed
+  # again: it is a ~28-MINUTE full-solution test run, and this workflow's contract
+  # (header, spec NFR-01) is a p95 ≤ 3 min BLOCKING surface. Putting it here would
+  # have blown that budget by an order of magnitude and parked a half-hour job in
+  # the blocking path of every push — the opposite of what the tiered split is
+  # for. It also duplicated `full-unit-tests`, which already runs the full suite
+  # in ci-tier2-advisory.yml. That job absorbed sdap-ci's two-pass classifier
+  # instead; the full suite now runs ONCE, advisory, in the tier it belongs to.
+  #
+  # These three earn their place here: all are fast, and all three are gates whose
+  # failure should stop a merge — a cross-tenant leak, a regressed golden
+  # utterance, or a Compose round-trip that loses document bytes.
+  #
+  # Each carries an explicit timeout. The original three arrived without one,
+  # which is how the removed build-test burned six hours before anyone learned it
+  # had hung, and surfaced as `cancelled` rather than `failure` (issue #813).
+  # ==========================================================================
+
+  eval-gate:
+    name: Eval Gate (Golden Utterances)
+    runs-on: windows-latest
+    # Bounded. tier1's original jobs all carry timeouts; these arrived without one,
+    # which is how a hang cost 6 hours instead of announcing itself. Sized off
+    # measured sdap-ci durations with headroom (issue #813: a timeout set at the
+    # edge of the estimate becomes unreachable and reads `cancelled`, not `failure`).
+    timeout-minutes: 20
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Setup .NET 10
+        uses: actions/setup-dotnet@v6
+        with:
+          dotnet-version: '10.x'
+
+      - name: Cache NuGet packages
+        uses: actions/cache@v5
+        continue-on-error: true  # cache is an optimization, never a gate
+        with:
+          path: ~/.nuget/packages
+          key: ${{ runner.os }}-nuget-${{ hashFiles('**/Directory.Packages.props', '**/*.csproj') }}
+          restore-keys: |
+            ${{ runner.os }}-nuget-
+
+      - name: Golden-utterance eval gate (NFR-02 — merge-blocking)
+        shell: pwsh
+        run: dotnet test tests/unit/Sprk.Bff.Api.Tests/Sprk.Bff.Api.Tests.csproj -c Debug --filter "Category=GoldenUtteranceEval"
+
+
+  # ──────────────────────────────────────────────────────────────────────────
+  # customer-provisioning-orchestration-r1 task 088 (r1 task 064 gate wiring)
+  # — Tenant-isolation invariants I1..I5 (FR-28..FR-32 + design.md §4D).
+  # BLOCKING from day 1 (r1 task 065 audit sweep = 0 findings baseline).
+  #
+  # Deliberately a SEPARATE self-contained job (same rationale as eval-gate
+  # + compose-fidelity-gate in this file): existing jobs carry
+  # continue-on-error: true (2026-06-24 informational posture) which would
+  # swallow a tenant-isolation red. This gate must NEVER be advisory —
+  # cross-tenant leak is a security incident, not a warning.
+  # ──────────────────────────────────────────────────────────────────────────
+  tenant-isolation:
+    name: Tenant Isolation (I1–I5 invariants)
+    runs-on: windows-latest
+    # Bounded. tier1's original jobs all carry timeouts; these arrived without one,
+    # which is how a hang cost 6 hours instead of announcing itself. Sized off
+    # measured sdap-ci durations with headroom (issue #813: a timeout set at the
+    # edge of the estimate becomes unreachable and reads `cancelled`, not `failure`).
+    timeout-minutes: 20
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Setup .NET 10
+        uses: actions/setup-dotnet@v6
+        with:
+          dotnet-version: '10.x'
+
+      - name: Cache NuGet packages
+        uses: actions/cache@v5
+        continue-on-error: true  # cache is an optimization, never a gate
+        with:
+          path: ~/.nuget/packages
+          key: ${{ runner.os }}-nuget-${{ hashFiles('**/Directory.Packages.props', '**/*.csproj') }}
+          restore-keys: |
+            ${{ runner.os }}-nuget-
+
+      - name: Tenant-isolation invariants (I1..I5 — merge-blocking)
+        # Filter by namespace: all 5 files live in
+        # Spaarke.ArchTests.TenantIsolation.* — this catches I1..I5 as a
+        # cohesive set + auto-picks-up any new I{N}_* tests r1 adds in the
+        # future without a workflow edit.
+        shell: pwsh
+        run: |
+          dotnet test tests/Spaarke.ArchTests/Spaarke.ArchTests.csproj `
+            -c Release `
+            --filter "FullyQualifiedName~Spaarke.ArchTests.TenantIsolation" `
+            --logger "trx;LogFileName=tenant-isolation-results.trx" `
+            --results-directory ./TestResults
+
+      - name: Upload tenant-isolation TRX
+        if: always()
+        uses: actions/upload-artifact@v6
+        with:
+          name: tenant-isolation-results
+          path: ./TestResults/tenant-isolation-results.trx
+          if-no-files-found: warn
+
+
+  # ──────────────────────────────────────────────────────────────────────────
+  # Compose fidelity gate (FR-08, spaarkeai-compose-r6 tasks 060/061 +
+  # ADR-049 R6 amendment point 3) — RELEASE-GATING.
+  #
+  # Runs the corpus round-trip fidelity harness
+  # (tests/integration/seam/Compose/ComposeFidelityGateHarnessTests.cs):
+  # every `.docx` under tests/fixtures/compose-corpus/ is driven through one
+  # full render-on-save wire round trip (load → edit → save → reopen) and
+  # classified pass/warn/fail. FAIL-class results fail their xUnit Theory —
+  # that non-zero `dotnet test` exit IS the gate; no continue-on-error here
+  # by design (an advisory gate would defeat spec FR-08).
+  #
+  # Deliberately a SEPARATE self-contained job (same rationale as eval-gate):
+  # existing jobs are owned by ci-cd-unit-test-remediation-r1 and are not
+  # modified. `lfs: true` on checkout pulls the Git-LFS `.docx` corpus bytes
+  # (same mechanism as PR #690's build-test fix); a missing-LFS checkout
+  # fails LOUDLY via ComposeCorpusFixtureLocator's PK-signature guard — it
+  # can never silently skip the gate. The per-document breakdown
+  # (fidelity-gate-result.json, written next to the test assembly by the
+  # harness's result sink) is uploaded as an artifact even on red.
+  # ──────────────────────────────────────────────────────────────────────────
+  compose-fidelity-gate:
+    name: Compose Fidelity Gate (Corpus Round-Trip)
+    runs-on: windows-latest
+    # Bounded. tier1's original jobs all carry timeouts; these arrived without one,
+    # which is how a hang cost 6 hours instead of announcing itself. Sized off
+    # measured sdap-ci durations with headroom (issue #813: a timeout set at the
+    # edge of the estimate becomes unreachable and reads `cancelled`, not `failure`).
+    timeout-minutes: 30
+    steps:
+      - name: Checkout (with Git-LFS corpus fixtures)
+        uses: actions/checkout@v6
+        with:
+          lfs: true  # smudge tests/fixtures/compose-corpus/*.docx — real bytes, not LFS pointers
+
+      - name: Setup .NET 10
+        uses: actions/setup-dotnet@v6
+        with:
+          dotnet-version: '10.x'
+
+      - name: Cache NuGet packages
+        uses: actions/cache@v5
+        continue-on-error: true  # cache is an optimization, never a gate
+        with:
+          path: ~/.nuget/packages
+          key: ${{ runner.os }}-nuget-${{ hashFiles('**/Directory.Packages.props', '**/*.csproj') }}
+          restore-keys: |
+            ${{ runner.os }}-nuget-
+
+      - name: Fidelity gate (corpus round-trip — merge-blocking)
+        shell: pwsh
+        run: dotnet test tests/unit/Sprk.Bff.Api.Tests/Sprk.Bff.Api.Tests.csproj -c Debug --filter "FullyQualifiedName~FidelityGate"
+
+      - name: Upload fidelity-gate-result.json (per-document breakdown)
+        uses: actions/upload-artifact@v6
+        if: always()   # the breakdown matters MOST when the gate is red
+        with:
+          name: fidelity-gate-result
+          path: tests/unit/Sprk.Bff.Api.Tests/bin/**/fidelity-gate-result.json
+          if-no-files-found: warn  # absent only if the run crashed pre-sink; the test step is already red then
