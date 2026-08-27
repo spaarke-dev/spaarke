@@ -767,16 +767,20 @@ EventsPage               Events Page              1.0.0.0           77777777-888
             Credentials = credentials ?? new Sprk.Provisioning.ControlPlane.Handlers.Credentials.WorkerCredentialSelectionOptions(),
         });
         // HANDLER-07 + HANDLER-08 (Wave 2 pre-dispatch remediation
-        // 2026-08-27; HANDLER-08 lifted to LIVE impl 2026-08-27 Wave 2.5):
+        // 2026-08-27; both lifted to LIVE impls 2026-08-27 Wave 2.5):
         // default to Success-returning stubs so existing H6 orchestration
         // tests remain focused on H6-level flow (parity with pre-Wave-2.5
         // scaffold behavior that also returned Success unconditionally).
         // HANDLER-07/08-specific H6 tests inject Failure-returning fakes
-        // explicitly. Direct coverage of the LIVE `PacOrgSettingsContractApplier`
-        // shell-out lives in <see cref="PacOrgSettingsContractApplierTests"/>.
+        // explicitly. Direct coverage of the LIVE
+        // `PacRequiredApplicationsInstaller` shell-out lives in
+        // <see cref="PacRequiredApplicationsInstallerTests"/>; the LIVE
+        // `PacOrgSettingsContractApplier` shell-out in
+        // <see cref="PacOrgSettingsContractApplierTests"/>.
         return new H6SolutionImportHandler(
             repo, catalog, importer, verifier,
-            requiredAppsInstaller ?? new PacRequiredApplicationsInstaller(NullLogger<PacRequiredApplicationsInstaller>.Instance),
+            requiredAppsInstaller ?? new StubRequiredApplicationsInstaller(
+                new RequiredApplicationsInstallOutcome.Success(StaticRequiredApplicationsManifest.DefaultRequiredApplicationNames)),
             new StaticRequiredApplicationsManifest(),
             orgSettingsApplier ?? new StubOrgSettingsContractApplier(
                 new OrgSettingsContractOutcome.Success(StaticOrgSettingsContractManifest.DefaultOrgSettings)),
