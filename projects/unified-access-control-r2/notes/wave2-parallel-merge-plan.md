@@ -867,3 +867,101 @@ out** — it is environment data, not code.
 
 → Enumerate `savedquery.fetchxml` for registered module entities **per environment** before deploy.
 This is a **deploy-ordering obligation** (§7), not a code fix.
+
+## A13. 🔴 SYSTEMIC — the publish-size gate is measuring in two incompatible conventions
+
+Only visible from the orchestrator position, because **every individual report was internally correct.**
+
+| Agent | Base | Reported | Compared against | Delta |
+|---|---|---|---|---|
+| 011 | `3b87b07bc` | **45.07 MB** incl. PDBs | 44.96 | +0.11 |
+| 018 | `3b87b07bc` | **45.07 MB** incl. PDBs | 44.96 | +0.11 |
+| 020 | `3b87b07bc` | **43.78 MB** incl. PDBs | 43.69 | +0.09 |
+
+**Identical base commit. Identical stated method ("compressed incl. PDBs"). 1.29 MB apart.**
+
+The POMLs carry the same split — baselines cluster at **~43.65–43.71 MB** (24 POMLs) and **44.96 MB**
+(31 POMLs), a ~1.3 MB gap. Each agent compared against whichever cluster its own POML cited, got a small
+delta, and correctly reported "within ceiling". Each was right. **The set is incoherent.**
+
+Root CLAUDE.md §10 states the baseline as **44.96 MB incl. PDBs / 44.05 excl.** — a 0.91 MB PDB delta. The
+~43.7 cluster sits *below even the excl-PDB figure*, so it is a **third** convention, not the excl-PDB one.
+
+**Why this matters even though nothing is near the 60 MB ceiling:** §10's escalation rule is "≥+5 MB
+single-task delta → justify; ≥55 MB cumulative → architecture review". With two conventions differing by
+1.3 MB in circulation, a genuine regression can be absorbed as a convention artifact, and a convention
+change can be misread as a regression. The gate still bounds the absolute worst case; it no longer
+reliably detects **drift**, which is the thing it was added for.
+
+**Action (main session, not an agent):** pin ONE convention — exact command, RID, configuration,
+compression level, PDB in/out — in `.claude/constraints/azure-deployment.md`, then re-baseline every POML
+citing the stale cluster. Until then, treat cross-task size comparisons as unreliable and compare only
+within a convention.
+
+**This is AP-8 again, at the orchestration layer.** Six agents each ran the §10 check correctly and each
+reported a passing number. The defect is in the *relationship* between their answers, which no agent can
+see and no per-task gate can catch.
+
+## A14. 020 — verified, and its own double failed a NEW way
+
+Verified in main session, all three load-bearing claims:
+- **`GrantMembershipAsync` is still at ZERO callers** (the project's binding rule) — the only hits are its
+  definition (`SpeContainerMembershipService.cs:59`) and two doc comments, one of which
+  (`RevokeExternalAccessEndpoint.cs:247`) states exactly that. Rule holds.
+- **The M1/M2 paging false assurance IS inherited** — `SpeContainerMembershipService.cs:167-168` is a
+  single `.Containers[id].Permissions.GetAsync(ct)` with **no `@odata.nextLink` loop**. So a per-member
+  `NoPermissionFound` can be wrong on a multi-page container. The agent documented this in the method
+  XML doc, the test-class header AND its notes rather than papering over it — and correctly declined to
+  fix it here, because forking the matcher is exactly what task 017 deleted.
+- **The `sprk_enddate` read-side asymmetry IS real** — the grant query passes `TodayUtc`
+  (`ExternalParticipationService.cs:578`) while the membership query is `statecode eq 0` alone (`:620`).
+  So **a membership ended by date but never deactivated still confers inherited access.** Revoke
+  deliberately over-includes (fail-closed); the READ path is the exposure. → task 043 must decide.
+
+**Two design refusals worth keeping**, both correct:
+- It did **not** add a fifth enum state, because `PartiallyRemoved` "would be a state whose *name* sounds
+  acceptable." That is the permissive-default instinct caught at the naming layer.
+- It did **not** add per-member cache invalidation, because the member list only exists when a
+  `ContainerId` was supplied — so it would fire on some org revokes and not others, and an inconsistent
+  invalidation contract is worse than a uniform documented 60s TTL. Deferred to 043.
+
+`MembersEnumerated` is nullable so that `null` = "could not establish the list", which `(0,0,0,0)` cannot
+express — pinned by a serialization test specifically because a `WhenWritingNull` option added *elsewhere*
+would omit the field and silently break a client's `=== null` check. Good defensive reasoning about a
+change that would arrive from outside the file.
+
+### The double-defect class has a 5th instance with a NEW mechanism
+
+020's own test double derived member emails from **the first 8 GUID chars, which all three fixture members
+shared** — so "three members" was **one email, three times**, and the fan-out was never actually tested.
+Fixed by *stating* identities in a map rather than deriving them.
+
+Note this is **not** match-everything. The previous four were permissive fallbacks; this one **collapsed
+three distinct entities into one**. Same family — a double that models what the code is *for* rather than
+what it *does* — different failure mode. Derived test identities are a trap of their own: they look
+rigorous and silently alias.
+
+Both of 020's doubles now **throw** on unmodelled input (wrong entity set, missing `statecode`/org-id
+predicate, null `$top`, unknown contact), and the contact-path double throws if the junction is queried at
+all.
+
+### 020 → 024 hand-off is unusually good — honour it
+
+020 left the test file's structure intact (existing 17 tests untouched except the one that *pinned the
+gap*, flipped in place with its position preserved; new work in marked regions with their own fixtures).
+And it named the convergence: **one *paged* read + local email match + delete-by-permission-id fixes both
+the M1/M2 paging false assurance AND the N+1 020 introduced** (N members = N full permission-list reads —
+negligible at 1 member/org today, real at the 200 bound). Also flagged that
+`RemoveAllExternalMembersAsync` is **not** reusable, since it removes *every* external member. Put this in
+024's POML.
+
+### 020's un-falsifiable list → task 047
+
+Three ways cleanup reports a healthy-looking `NoPermissionFound` for a member who still has access:
+(1) the paging gap; (2) SPE permission lists are **eventually consistent**, so a removed permission may
+remain observable for a window; (3) the match is case-insensitive but **not alias/proxy-address aware**, so
+a member invited under an address other than `contact.emailaddress1` reads as absent. All three need live
+SPE.
+
+Also: `ExternalParticipationService.cs:610-612` carries a now-resolved caveat ("*confirm against the
+created junction schema*") — §2 of 020's notes verified it. Delete at merge (outside 020's modify-set).
