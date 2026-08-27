@@ -1,7 +1,8 @@
 # Current Task State — sdap-SPE-admin-app-r2
 
-> **Last Updated**: 2026-08-26 16:55 UTC (by `context-handoff`)
-> **Recovery**: read "Quick Recovery" first. §1–§6 are this session; §7 is preserved history.
+> **Last Updated**: 2026-08-27 02:05 UTC (by `context-handoff`)
+> **Recovery**: read "Quick Recovery" first, then §1 (the wave plan you were asked to run).
+> §7 is preserved history from earlier sessions — do not re-derive it.
 
 ---
 
@@ -9,98 +10,161 @@
 
 | Field | Value |
 |---|---|
-| **Phase** | Post-deployment **UAT remediation** — not POML task execution |
-| **Status** | in-progress — the app is **FUNCTIONAL** and deployed to dev |
-| **Branch** | `work/sdap-SPE-admin-app-r2` · clean · pushed · 1 behind `origin/master` |
-| **Head** | `8e0983b33` |
-| **Next Action** | Move the container-type **configs UI** out of [`settings/SettingsPage.tsx`](../../src/solutions/SpeAdminApp/src/components/settings/SettingsPage.tsx) into [`container-types/ContainerTypesPage.tsx`](../../src/solutions/SpeAdminApp/src/components/container-types/ContainerTypesPage.tsx) behind an **Edit** toolbar button. The tab is **already relabelled "Environments"** in `AppShell.tsx`, so navigation promises this move — until the UI physically moves, **config editing is unreachable**. This is the only half-done item. |
+| **Phase** | UAT remediation **finished**; returning to **POML task execution** |
+| **Status** | App is **FUNCTIONAL** and deployed to dev. 8 UAT rounds closed. |
+| **Branch** | `work/sdap-SPE-admin-app-r2` · clean · pushed · 0 behind `origin/master` |
+| **Head** | `4a5982ef2` |
+| **Open PR** | [#828](https://github.com/spaarke-dev/spaarke/pull/828) → master · **MERGEABLE** · see §2 before merging |
+| **Next Action** | Run **Wave A** (§1): `061` + `062` in parallel via `task-execute`. Then `041` alone. |
 
-### Deployed right now (dev)
+### Operator's standing instruction (2026-08-27)
 
-| Surface | State |
-|---|---|
-| BFF `spaarke-bff-dev` | hash-verified live · `/healthz` 200 · publish 45.03 MB (ceiling 60) |
-| Code page `sprk_speadmin` on **spaarkedev1** | 2,307 KB · published |
+> *"continue with `/task-execute` working in parallel and autonomous where possible"*
 
-**Open it**: `https://spaarkedev1.crm.dynamics.com/WebResources/sprk_speadmin`
-
-### 🚨 Two hazards that WILL bite
-
-1. **The dev BFF is contended.** On 2026-08-25 another session redeployed `spaarke-bff-dev` **52 minutes after** our fix landed, silently reverting it. UAT then failed with the *identical* original error and looked like our diagnosis had been wrong. **Before re-diagnosing any BFF bug, hash-compare the deployed DLL against the local build** (§6). Six deployments hit that app service in one day; only one was ours.
-2. **Dataverse solution-import contention.** The code-page deploy failed once with `0x80071151 — another [Import] running`. Content uploads but does **not** publish. Re-run the same command, then verify `modifiedon`.
+Parallel = ONE message with MULTIPLE `Skill` invocations. Never sequential. Per project
+[`CLAUDE.md`](CLAUDE.md), **every** task goes through `task-execute` — never read a POML and implement
+by hand.
 
 ---
 
-## 1. What this session did
+## 1. The wave plan — start here
 
-Five UAT rounds against the deployed app. **Two root causes explained thirteen reported symptoms.**
+**8 tasks open.** Statuses below are from `tasks/TASK-INDEX.md`, which is authoritative and richer than
+the POML `<status>` fields (see the ⚠️ in §5).
 
-| # | Fix | Commit |
-|---|---|---|
-| 1 | Key Vault credential pinned to the UAMI — recovered 5 dead screens | `d80efbbba` |
-| 2 | Audit-log contract (envelope + every field name + `$top`) + `PageErrorBoundary` | `d80efbbba` |
-| 3 | Four more envelope mismatches (search ×2, security alerts, container permissions) | `962ba102e` |
-| 4 | Header/nav — title, spelled-out labels, right-align, tab order | `3983252a6` |
-| 5 | Container-type `id` → `containerTypeId` — fixed the Register dropdown | `0ec6952de` |
-| 6 | Four layout gaps + stringified permission scopes | `fbd88d5ce` |
-| 7 | File Browser folded into Containers; Settings → Environments | `8e0983b33` |
+| Wave | Tasks | ∥-safe | Run how | Gate |
+|---|---|---|---|---|
+| **A — do this first** | **061** (refresh SPE knowledge corpus) · **062** (billing-attach handoff) | ✅ ✅ | **Parallel**, 2 agents | W18 is the ONLY `/goal`-eligible span. MINIMAL rigor. Deps (025/029) satisfied. |
+| **B** | **041** (LiveIntegration suite + throwaway container fixture) | ✅ | **Alone** | ⚠️ Live tenant. NOT goal-eligible. Builds the fixture 052 depends on. |
+| **C** | **042** (retire scaffolding tests) | ✅ | Alone, after 041 | ADR-038 deletion-safety; escalation trigger on unreplaced coverage |
+| **D** | **050** (archival) · **051** (quota ceiling) | ❌ ❌ | **Sequential, main session** | Both unblocked (deps done). Not parallel-safe. |
+| **E** | **052** (item recycle bin) | ❌ | Alone, after 041 | 🚨 **Destructive.** Throwaway container only |
+| **F** | **090** (wrap-up) | ❌ | Last | `/test-diet` is a **BINDING** gate |
 
-**Merged to master as PR #824** (`3b87b07bc`) — that covers #1–#3 only.
-⚠️ **Commits #4–#7 are branch-only and NOT on master.**
+**Why 061+062 first**: both `MINIMAL` rigor, both `∥-safe ✅`, both W18, dependencies satisfied, and W18 is
+the only wave `task-create` marked goal-eligible. It is the one place "parallel and autonomous" is
+already sanctioned by the plan rather than by improvisation.
 
----
+### 🚨 The scheduling constraint that governs every wave
 
-## 2. The recurring defect shape — read before debugging anything here
+Project [`CLAUDE.md`](CLAUDE.md): nearly every task modifies `SpeAdminGraphService.cs` (4,911 LOC).
+**At most ONE task per wave may modify it.** Realistic concurrency is **2–3 agents, not 6**. Check each
+POML's `<outputs>` before dispatching a wave.
 
-> **A lower layer collapses a real value — or a real failure — into an absent/empty/garbage result that an upper layer reads as benign.**
+### Two tasks are PARTIAL, not open — do not restart them
 
-Confirmed **thirteen** times in this project. Three from this session:
-
-- `.ToString()` on a Graph **collection** returned the collection's *type name*, so every permission scope rendered as `System.Collections.Generic.List\`1[System.String]`. Nothing errored.
-- The wire sends container-type `id`; the client read `containerTypeId` → `undefined` on every type. Display survived because the *other* fields happened to match, so the list looked correct while everything keyed on the identifier failed silently.
-- Five endpoints return `{items, count}` envelopes while the client declared bare arrays. TypeScript believed the annotation, because a declared return type is an assertion about JSON that **nothing verifies**.
-
-**The method that worked:** when N screens fail identically, find the one that *works* and ask what it does differently. Container Types worked (delegated path, never touches Key Vault) while five app-only screens failed — that split named the bug without reading a single log line.
-
----
-
-## 3. Remaining UAT items (operator-approved, not yet built)
-
-1. **Configs UI move** — see Next Action. Half-done; navigation already promises it.
-2. **Container Types master-detail** — details are in a cramped side pane; move below the list. Apply the *same* pattern to Containers so it is learned once.
-3. **Fold Search into Containers** — Search is homeless because it *is*: it searches within the selected container type, which is exactly what Containers scopes. Takes nav 7 → 6.
-4. **Dashboard** — "Config ID" column → container type **Name** (`containerTypeName` is already returned; display-only).
-5. **Container Types → shared DataGrid component** — its own task; land it *after* the master-detail rework, not beside it.
-6. Container list should show the **container id**; Environments page title description onto a second line.
-
-### ⚠️ Flagged, awaiting an operator decision
-
-**Single-select on the Containers grid.** The operator asked for it; I deliberately did **not** do it. Their stated reason ("since can't browse multiples") is fully satisfied by gating **Browse** on exactly one selection — whereas single-select would *also* disable Activate/Lock/Unlock/Delete across multiple containers and strand `BulkOperationService` behind an unreachable UI. Flip it only on explicit confirmation.
+- **025** — server complete, **form deferred**. FR-C07 named a property that does not exist
+  (`agent.chatEmbedAllowedHosts`) and omitted one that does (`sharingCapability`).
+- **026** — **AC-2 escalated, not achievable**: `consumingTenantOverridables` is a *permission*, not a
+  state, and cannot be read from an owning tenant. Do not "fix" this by trying harder.
 
 ---
 
-## 4. Not code defects — do not chase
+## 2. PR #828 — read before merging
 
-- **Security alerts 403.** Graph says *"Account is not provisioned"* — the tenant lacks the Defender/security workload. That is **not** the missing `SecurityEvents.Read.All` grant our error message guesses at. Our wording is misleading and could be sharpened; the failure itself is not fixable in code.
-- **File Browser folders** (`Communications`, `Emails`, `Exports`). **Nothing in this repo creates them** — searched every `.cs`/`.ts`/`.tsx`; the only hits are API route names. Their origin is a question about the tenant, not a bug. **Resolve before task 052 (item recycle bin) touches anything destructive.**
-- **Folders "don't open"** — the grid wires folder navigation to `onDoubleClick`; single click only selects. Unconfirmed by the operator.
+**Tenant Isolation now passes (34/34, was 31/34).** But **Build & Test (Debug) failed**, and three
+failures are `TimeoutException` / `TaskCanceledException` in:
+
+- `ScheduledJobHostTests.StopAsync_CancelsInFlightJobWithinDrainTimeout_NFR07`
+- `RetryAndIdempotencyTests.CancellationDuringRetryLoop_StopsImmediately_DoesNotSleepThroughToken`
+- `SseStreamingIntegrationTests.Cancellation_NoLingeringBackgroundTask_AfterClientAbort`
+
+**None of them touch anything this branch changed** (a PowerShell script, an ArchTest, a comment in
+`RecordMatchService.cs`, and SpeAdminApp `.tsx`). All three use `Task.Delay` / `Stopwatch` / wall-clock
+timeouts — exactly the constructs [`tests/CLAUDE.md`](../../tests/CLAUDE.md) **bans** as *"sources of
+flakiness on shared CI runners"*, prescribing `FakeTimeProvider` instead.
+
+**A re-run of the failed jobs was in flight when this handoff was written.** Check it before merging:
+
+```bash
+gh run view 33029952218 --json status,conclusion --jq '"\(.status)/\(.conclusion)"'
+gh run view 33029952218 --json jobs --jq '.jobs[] | select(.conclusion=="failure") | .name'
+```
+
+- **Green on re-run** → flaky confirmed; merge #828.
+- **Same three fail again** → still almost certainly pre-existing, but confirm against master's own
+  Build & Test history before blaming this branch.
+
+> ⚠️ **Branch protection is DISABLED.** `gh pr merge --auto --merge` merges **immediately**, without
+> waiting for CI. The `Tenant Isolation` job is labelled *merge-blocking* and cannot block anything.
+> That is how PR #826 merged with a red gate. Verify checks **before** invoking merge, not after.
 
 ---
 
-## 5. Structural finding — why these bugs shipped
+## 3. The recurring defect shape — read before debugging anything here
 
-**`vite build` does not typecheck.** `SpeAdminApp` ships with **38 pre-existing type errors** and has **no test runner** (`lint` invokes an uninstalled ESLint). A total client/server shape mismatch reached UAT because nothing between developer and operator checks shapes.
+> **A lower layer collapses a real value — or a real failure — into an absent/empty/garbage result
+> that an upper layer reads as benign.**
 
-Correcting an earlier claim of mine in this file's history: I once wrote that client logic was "verified by `tsc` alone". **`tsc` is not in the build path at all.**
+Confirmed **17** times in this project. The four newest:
 
-**Restructuring on this foundation will keep producing UAT rounds like these.** Recommend a task adding `tsc --noEmit` to the build plus a vitest runner **before** the remaining UX work.
+- **Flat wire vs nested client type.** `SpeContainerItemSummary` sends `isFolder`/`mimeType`/
+  `createdByDisplayName`; `DriveItem` declares `folder`/`file.mimeType`/`lastModifiedBy.user.displayName`.
+  `isFolder(item)` tests `!!item.folder` → **false for every item**. Every folder rendered as a file and
+  could not be opened. Third instance of this exact shape after `id`→`containerTypeId` and five
+  `{items,count}` envelopes.
+- **A second `.ToString()` on a collection.** The 2026-08-26 fix patched `MapConsumingTenant` and missed
+  `MapContainerTypePermission` — the path the Permissions tab actually reads.
+- **Argument-order swap.** `items.download(containerId, itemId, configId)` called as
+  `(containerId, configId, item.id)`. Three `string` params, so the compiler saw nothing; a 404 resolves
+  rather than throws; the catch wrote to `console.error`. Auditing the same shape found `items.delete`
+  swapped identically — **broken and unreported**.
+- **A scan that could not tell code from prose.** The I5 ArchTest reported a CATASTROPHIC credential
+  violation against a **doc comment warning against that very construct**.
+
+**The method that keeps working:** when N things fail identically, find the one that *works* and ask what
+it does differently. And when you fix one instance of a shape, **grep for the shape**, not the instance.
+
+---
+
+## 4. Highest-value work that is NOT in the POML backlog
+
+**1. Add `tsc --noEmit` to the SpeAdminApp build + a test runner.** `vite build` does **not** typecheck;
+~38 type errors ship; `lint` invokes an uninstalled ESLint. **Three total client/server shape mismatches
+reached operator UAT for exactly this reason** — all three were invisible to the build and obvious to
+`tsc`. Every typecheck in rounds 5–8 was run by hand. Roughly an afternoon; closes the hole that
+generated most of the last four UAT rounds. **Recommend doing this before 050/051/052.**
+
+**2. I2 cross-tenant search bleed — waived, not fixed.** `RecordMatchService` queries with no tenant
+predicate. Waived on an owner ruling that `spaarke-records-index` is single-tenant. The waiver expires
+with the **deployment model, not a date**: both call paths must be scoped before the first shared tenant
+is onboarded. `JobContract` has no tenant field — that is the real work.
+
+**3. Container-type DELETE does not exist.** Operator asked for it. Graph supports
+`DELETE /storage/fileStorage/containerTypes/{id}` and refuses when containers still exist, so blast
+radius is bounded by Graph. Not added unilaterally: a new destructive BFF endpoint trips root §10 +
+§6.
+
+**4. `Publish Dataverse Solutions Manifest`** has failed on master for ≥3 commits. Unowned.
+
+---
+
+## 5. Traps that cost real time here
+
+⚠️ **POML `<status>` fields are STALE — trust `TASK-INDEX.md`.** Task 011's POML says `not-started`;
+TASK-INDEX says ✅ completed 2026-08-24 with a detailed note. Reading the POML alone would restart
+finished work.
+
+⚠️ **Hash-check the deployed BFF DLL before re-diagnosing any BFF bug.** A landed fix was silently
+reverted 52 minutes later by another session's deploy, and the recurrence looked exactly like a wrong
+diagnosis. Recipe in §6.
+
+⚠️ **We have NEVER deployed with slots.** `config/environments.json` declares `appServiceSlot: staging`;
+zero slots exist. Do not claim slot-swap rollback.
+
+⚠️ **Another session is active on this branch.** Commit `4a5982ef2` (the I2 waiver) and PR #828 were
+authored elsewhere while this session worked. `git fetch` and re-read before assuming your view is
+current.
+
+⚠️ **Nine POML premise errors, nine for nine** in earlier waves. Verify a task's premise against
+code/CSDL **before** implementing it.
 
 ---
 
 ## 6. Verification recipes
 
 ```bash
-# Is the deployed BFF actually my build?  RUN THIS BEFORE RE-DIAGNOSING ANY BFF BUG.
+# Is the deployed BFF actually my build?  RUN BEFORE RE-DIAGNOSING ANY BFF BUG.
 TOKEN=$(az account get-access-token --resource https://management.azure.com --query accessToken -o tsv)
 L=$(sha256sum deploy/api-publish/Sprk.Bff.Api.dll | cut -d' ' -f1)
 curl -s -H "Authorization: Bearer $TOKEN" \
@@ -108,7 +172,15 @@ curl -s -H "Authorization: Bearer $TOKEN" \
 [ "$L" = "$(sha256sum /tmp/r.dll | cut -d' ' -f1)" ] && echo MATCH || echo "STALE — redeploy"
 
 # What is ACTUALLY published to Dataverse (never trust the deploy message):
-#   webresourceset(5f86c079-cd1f-f111-88b3-7ced8d1dc988)?$select=content  -> base64 decode -> grep
+#   webresourceset(5f86c079-cd1f-f111-88b3-7ced8d1dc988)?$select=content -> base64 decode -> grep
+#   NOTE: grep the bundle for camelCase JS identifiers, not kebab-case CSS —
+#   Griffel emits `scrollbarWidth` and converts at runtime. I got this wrong once.
+
+# Client typecheck (NOT in the build — must be run by hand):
+cd src/solutions/SpeAdminApp && npx tsc --noEmit -p tsconfig.json
+
+# Tenant-isolation gate:
+dotnet test tests/Spaarke.ArchTests/ --filter "FullyQualifiedName~TenantIsolation"
 ```
 
 **Deploys — always `pwsh`, never `powershell`** (5.x lacks `Get-FileHash` in this harness):
@@ -117,15 +189,20 @@ curl -s -H "Authorization: Bearer $TOKEN" \
 - Code page: clear `dist/* node_modules/.vite/ .vite/` first, then
   `pwsh -ExecutionPolicy Bypass -File scripts/Deploy-SpeAdminApp.ps1 -Environment dev -DataverseUrl "https://spaarkedev1.crm.dynamics.com"`
 
-> **We have NEVER deployed with slots.** `config/environments.json` declares `appServiceSlot: staging`; **zero slots exist**. Do not claim slot-swap rollback as a safety property — I did once, and it was wrong.
-
 ### Domain facts learned live
 
-- **"Config"** = `sprk_specontainertypeconfig` — binds container type + business unit + environment + owning app registration + Key Vault secret name. Relabelled "Container Type" in the UI, but it is **not** the container type; that is why the picker cannot simply become the Container Types list.
-- **ADR-028 E-1** covers per-customer **owning-app** credentials — **not** the BFF's own identity reaching Key Vault to fetch them. auth-v4 applied the exclusion one layer too wide; that is how the last bare `DefaultAzureCredential` in `src/` survived its sweep.
-- `spaarke-bff-dev` has a **user-assigned** identity (`mi-bff-api-dev`, clientId `5967251e-171c-46fe-a6c2-ef843c90309d`) and **no system-assigned one**, so every credential MUST pin the client id. `ManagedIdentityCredentialFactory` exists for exactly this.
-- Fluent v9 **`Divider` defaults to `flex-grow: 1`** — in a column layout it grows *vertically* and renders space-line-space. `flexShrink: 0` does not help.
-- Master **branch protection is disabled** (the `merge-to-master` skill still claims it is on).
+- **"Config"** = `sprk_specontainertypeconfig` — binds container type + business unit + environment +
+  owning app + Key Vault secret name. Labelled "Container Type" in the UI, but it is **not** the
+  container type.
+- **ADR-028 E-1** covers per-customer **owning-app** credentials — **not** the BFF's own identity
+  reaching Key Vault. auth-v4 applied the exclusion one layer too wide.
+- `spaarke-bff-dev` has a **user-assigned** identity (`mi-bff-api-dev`, clientId
+  `5967251e-171c-46fe-a6c2-ef843c90309d`) and **no system-assigned one** — every credential MUST pin the
+  client id.
+- Fluent v9: **`Divider` defaults to `flex-grow: 1`**; **`<Text truncate>` does NOT stop wrapping**
+  (needs `wrap={false}`); **`columnSizingOptions` must be a stable reference** or drags reset on every
+  render; Fluent **does not style scrollbars at all**.
+- Publish size **45.07 MB** incl. PDBs (baseline 44.96, ceiling 60).
 
 ---
 
@@ -133,28 +210,34 @@ curl -s -H "Authorization: Bearer $TOKEN" \
 
 ### 🔑 The PATCH-400 was a missing `etag` (2026-08-25)
 
-Two days of "container-type writes are impossible" was a missing **required body property**. Graph's Update API lists `etag` as REQUIRED **in the body**, and Microsoft's own *"Example 2: Update without ETag"* documents the 400.
+Two days of "container-type writes are impossible" was a missing **required body property**. Graph's
+Update API lists `etag` as REQUIRED **in the body**.
 
 | Identical no-op PATCH | |
 |---|---|
 | without `etag` | **400** |
 | with `etag` in the body | **200** (beta AND v1.0) |
-| round-trip: wrote 499 → read back 499 → restored 500 | ✅ task 023 AC-2 |
 
-⚠️ It is a **BODY property, NOT the `If-Match` header.** An earlier session tried the header, correctly recorded that it changed nothing, and read that as "the etag is irrelevant" — which aimed the whole investigation at auth. Full record: [`notes/patch-400-resolution.md`](notes/patch-400-resolution.md).
+⚠️ It is a **BODY property, NOT the `If-Match` header.** An earlier session tried the header, correctly
+recorded that it changed nothing, and read that as "the etag is irrelevant" — which aimed the whole
+investigation at auth. Full record: [`notes/patch-400-resolution.md`](notes/patch-400-resolution.md).
 
-> **THE LESSON, and it happened twice in one day:** both 400s were documented requirements returned as `invalidRequest` naming no cause, and both were one fetch of Microsoft's reference page away. **The corpus and the CSDL being silent is not the platform being silent.**
+> **THE LESSON, twice in one day:** both 400s were documented requirements returned as `invalidRequest`
+> naming no cause, and both were one fetch of Microsoft's reference page away. **The corpus and the CSDL
+> being silent is not the platform being silent.**
 
 ### Other prior findings
 
-- **Nine POML premise errors, nine for nine** — task 027's core premise (supersession) was simply false. Verify a task's premise against code/CSDL before implementing it.
-- **Master was red before our merge** — 6 tests asserted endpoints auth-v4 deliberately deleted; two were passing **vacuously** (asserting a no-access user gets 403 while *every* user got 403).
-- **A remembered failure mode is a hypothesis, not a diagnosis** — 66 test failures were blamed on a remembered WireMock/MimeKit issue; reading the actual exception took one command and showed a ctor change.
-
----
-
-## 8. Remaining POML backlog (untouched this session)
-
-**041** (LiveIntegration suite + throwaway container fixture) → **042** → **051 / 050 / 052** → **061 / 062** → **090** (wrap-up; `/test-diet` is a **BINDING** gate).
-
-> ⚠️ Project [`CLAUDE.md`](CLAUDE.md): **destructive tests MUST use a dedicated throwaway container.** The existing containers hold real working documents — signed NDAs, Compose drafts, matter files.
+- **Master was red before our merge** — 6 tests asserted endpoints auth-v4 deliberately deleted; two
+  passed **vacuously** (asserting a no-access user gets 403 while *every* user got 403).
+- **A remembered failure mode is a hypothesis, not a diagnosis** — 66 test failures were blamed on a
+  remembered WireMock/MimeKit issue; reading the actual exception took one command and showed a ctor
+  change.
+- **Security alerts 403** — Graph says *"Account is not provisioned"*: the tenant lacks the Defender
+  workload. **Not** the missing `SecurityEvents.Read.All` grant our message guesses at. Not fixable in
+  code; the wording could be sharpened.
+- **Those folders** (`communications` / `emails` / `exports`) — nothing in the repo creates them by name.
+  The mechanism is path-based upload (`Drives[id].Root.ItemWithPath(path)`), which auto-creates parents
+  from a caller-supplied `FolderPath`. Now that folders open, **the `Modified By` column inside them names
+  whatever wrote the files** — one click, and it should be answered **before 052 touches anything
+  destructive**.
