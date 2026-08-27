@@ -3,7 +3,7 @@
   <metadata>
     <title>Authorize PUT /api/containers/{containerId}/files/{*path} against the owning record — it currently writes app-only into any caller-named container</title>
     <phase>0c Secure Documents — Wave 1</phase>
-    <status>pending</status>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>An unauthorized write path into arbitrary SPE containers, executed as the managed identity. Integrity and containment both depend on this.</rigor-reason>
     <model-tier>opus</model-tier>
@@ -97,5 +97,30 @@ INTERACTION WITH WAVE 2. Task 075 introduces the record-aware resolver. If 075 h
     <criterion>No SPE container permission is granted to any user as part of this fix.</criterion>
   </acceptance-criteria>
 
-  <notes>This is an integrity and containment fix more than a confidentiality one, which is why it is easy to under-rate. A per-project container that anyone can write into is not a containment boundary.</notes>
+  <notes>This is an integrity and containment fix more than a confidentiality one, which is why it is easy to under-rate. A per-project container that anyone can write into is not a containment boundary.
+
+COMPLETION (2026-08-26) — RETIRED, NOT GATED. Full reasoning: notes/task-073-container-keyed-write-retirement.md.
+
+The prescribed fix (resolve container -> owning record, then authorize Write) was NOT implemented, because the premise behind it turned out to be false and the alternative was strictly better:
+
+1. THE POML'S CALLER ASSUMPTION WAS WRONG. The constraint "this route is used by upload flows" does not hold. A repo-wide sweep (client, solutions, dataverse web resources, server, tests, scripts, .http, Postman; literals + template joins + route-builder maps; plus a check for any /api/obo -> /api rewrite) found ZERO callers of all three routes in this file. Every live upload flow uses the OBO sibling PUT /api/obo/containers/{id}/files/{*path} — 11 wizard sites via EntityCreationService.ts:493, Spaarke.SdapClient UploadOperation.ts:27, document-upload/SdapApiClient.ts:101.
+
+2. GATING WOULD HAVE FORKED TASK 075'S MAPPING. Task 075 owns the bidirectional container<->record mapping and its constraints forbid a second one. 075 is being built in a different worktree and its seam does not exist here, so gating meant either duplicating the mapping (forbidden) or blocking. Deletion needs neither, and satisfies "exactly one container-to-record mapping" by adding ZERO.
+
+3. DELETION IS THE GUARD'S OWN REMEDY #2 and task 071's established precedent in this project.
+
+Deleted Api/UploadEndpoints.cs entirely (all three routes) + its MapUploadEndpoints() call. Absence asserted by tests/integration/regression/MiContainerKeyedWriteRouteRetirementTests.cs — 7 tests whose load-bearing assertion enumerates EndpointDataSource to prove NO HANDLER EXISTS, not a status code (perturbation showed the vulnerable code returned 403, so a status-code test would have passed against it).
+
+TWO ESCALATIONS THIS TASK DID NOT ANTICIPATE:
+- POST /api/containers/{containerId}/upload returned a Graph PRE-AUTHENTICATED UploadUrl — a bearer-free write credential into a caller-named container, usable outside the BFF until expiry. Worse than the route the task was named after.
+- The named PUT route passed its containerId into UploadSmallAsync's driveId parameter (graphClient.Drives[driveId]), so the blast radius was any DRIVE the MI could address, not just SPE containers of the container type.
+- Minor: the chunk stub logged that pre-authenticated URL at information level.
+
+NOT DONE, HANDED BACK (see notes §6):
+- Task 073 owns FIVE waivers, not four. The two in Api/DocumentsEndpoints.cs are untouched: PUT /api/drives/{driveId}/upload (unreachable — upstream route deleted) and DELETE /api/drives/{driveId}/items/{itemId} (a REACHABLE destroy path with a caller in src/dataverse/webresources/spaarke_documents/DocumentOperations.js whose deployment status cannot be verified from the repo). Needs a follow-up task that first resolves whether that web resource is deployed.
+- RouteAuthorizationGuardTests.cs needs 4 main-session edits (+5 guard failures until then): delete the Api/UploadEndpoints.cs GovernedFile entry, ExpectedEndpointFileCount 111 -> 110, delete the 3 Pending waivers, remove the 3 strings from PolicyOnlyRoutes.
+- getContainerIdForEntity (xrmUploadServiceAdapter.ts:177, bffUploadServiceAdapter.ts:192) GETs /api/containers/{entityName}/{entityId}, which is registered NOWHERE — dead-but-wired; relevant to task 076.
+- GET /api/v1/containers/{containerId}/documents left UNOWNED: it is a collection READ whose control is result trimming (Wave 3), not a per-resource gate.
+
+VERIFICATION: build 0 warnings; full suite 11,179 passed / 0 failed / 79 skipped (+7 mine, -3 previously-skipped removed); perturbation 5 red / 2 controls green then reverted; ArchTests 14 failed = 9 known baseline + 5 Task 074 guard (remediation above); publish 45.08 MB compressed incl. PDBs, delta 0.00 MB, ceiling 60; CVE clean. No SPE container permission granted to any user.</notes>
 </task>

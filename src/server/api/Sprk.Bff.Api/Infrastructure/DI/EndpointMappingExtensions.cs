@@ -141,7 +141,33 @@ public static class EndpointMappingExtensions
         app.MapFileAccessEndpoints();
         app.MapDocumentsEndpoints();
         app.MapDocumentsBulkEndpoints();
-        app.MapUploadEndpoints();
+
+        // MapUploadEndpoints() REMOVED — unified-access-control-r2 task 073 (Phase 0c Wave 1).
+        // Api/UploadEndpoints.cs is deleted; its three app-only (managed-identity) routes were
+        // retired rather than gated:
+        //
+        //   PUT  /api/containers/{containerId}/files/{*path}
+        //   POST /api/containers/{containerId}/upload
+        //   PUT  /api/upload-session/chunk
+        //
+        // All three took an SPE key straight off the route and wrote as the MANAGED IDENTITY, so
+        // SPE performed no caller-side check, and their only gate was RequireAuthorization(
+        // "canwritefiles") -> ResourceAccessRequirement -> ResourceAccessHandler, which resolves
+        // DOCUMENT rights from a CONTAINER id (ExtractResourceId treats containerId / driveId /
+        // documentId / id interchangeably). Real mechanism, wrong resource domain.
+        //
+        // RETIRED, NOT GATED, because a repo-wide caller sweep found ZERO callers: every live upload
+        // flow uses the OBO sibling PUT /api/obo/containers/{id}/files/{*path} (11 call sites via
+        // EntityCreationService.ts:493, Spaarke.SdapClient UploadOperation.ts:27, document-upload
+        // SdapApiClient.ts:101). Gating instead would have required a container->owning-record
+        // mapping that tasks 075/076 own, i.e. a second copy of that mapping — which task 075's
+        // constraints forbid. Deletion is remedy #2 in RouteAuthorizationGuardTests' own remedy list
+        // and follows task 071's precedent for the OBO drive-keyed routes.
+        //
+        // Absence is asserted by tests/integration/regression/
+        // MiContainerKeyedWriteRouteRetirementTests.cs. Do not re-add these routes: the supported
+        // user-context path is /api/obo/**, and the supported app-only path is the in-process
+        // SpeFileStore facade (Workers/, Services/Email, Services/Communication all call it directly).
         app.MapOBOEndpoints();
 
         // OBO (user-context) document version-history: list + open-prior-version, READ-ONLY —
