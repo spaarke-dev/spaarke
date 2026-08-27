@@ -53,9 +53,14 @@ prereqs:
     consequence_of_absence: H8 (SPE root container creation) fails with 404 on containerType lookup; downstream file-storage flows all fail.
     check_recipe:
       cli: |
-        az rest --method get \
+        # PRQ-01 fix (2026-08-27): acquire Graph token in-line; do NOT reference an
+        # undefined bash variable ($graphAppOnlyToken never existed in the invoking shell).
+        token=$(az account get-access-token --resource https://graph.microsoft.com --query accessToken -o tsv 2>/dev/null)
+        [ -z "$token" ] && exit 1
+        result=$(az rest --method get \
           --uri "https://graph.microsoft.com/v1.0/storage/fileStorage/containerTypes/{containerTypeId}" \
-          --headers "Authorization=Bearer $graphAppOnlyToken"
+          --headers "Authorization=Bearer $token" 2>/dev/null)
+        [ -z "$result" ] && exit 1
       expect: HTTP 200 with matching containerTypeId in body
     remediation: See `docs/guides/SPAARKE-CUSTOMER-DEPLOYMENT-GUIDE.md` §2.4 lead-time. Container-type creation is out-of-scope for provisioning automation per owner directive 2026-08-24.
     related_findings: [F17-update, T051-h8-*, audit-gap-05-artifacts-storage-missing]
@@ -68,9 +73,13 @@ prereqs:
     consequence_of_absence: H8 succeeds but subsequent file-storage operations 403.
     check_recipe:
       cli: |
-        az rest --method get \
+        # PRQ-01 fix (2026-08-27): acquire Graph token in-line (same trap as PRQ-T-01).
+        token=$(az account get-access-token --resource https://graph.microsoft.com --query accessToken -o tsv 2>/dev/null)
+        [ -z "$token" ] && exit 1
+        result=$(az rest --method get \
           --uri "https://graph.microsoft.com/beta/storage/fileStorage/containerTypes/{containerTypeId}/applicationPermissionGrants" \
-          --headers "Authorization=Bearer $graphAppOnlyToken"
+          --headers "Authorization=Bearer $token" 2>/dev/null)
+        [ -z "$result" ] && exit 1
       expect: JSON array of grants; presence of Spaarke BFF app-reg with `writeContent, readContent, delegated` scopes
     remediation: See `docs/guides/SPAARKE-CUSTOMER-DEPLOYMENT-GUIDE.md` §2.4.
 
@@ -457,10 +466,14 @@ prereqs:
     consequence_of_absence: H0.5 consent-callback times out; H10 admin-consent verification fails.
     check_recipe:
       cli: |
-        az rest --method get \
-          --url "https://graph.microsoft.com/v1.0/servicePrincipals(appId='{bffAppId}')/appRoleAssignments" \
-          --headers "Authorization=Bearer $customerTenantToken"
-      expect: non-empty in customer tenant
+        # PRQ-02 fix (2026-08-27): SERVER-SIDE-ONLY. This check requires a token issued
+        # by the CUSTOMER tenant (not the Spaarke operator tenant) — the operator does
+        # NOT hold such credentials at Step 0.5 time. The H0.5 handler in L2 control-plane
+        # performs this verification via its own multitenant app-only token flow.
+        # Operator-side check is intentionally skipped (explicit exit 0).
+        echo "PRQ-C-05: server-side-only — verified by H0.5 handler in L2 control-plane"
+        exit 0
+      expect: (server-side only — H0.5 handler in L2 control-plane verifies via multitenant app-only token flow; operator-side check intentionally skipped because operator does not hold a customer-tenant token at Step 0.5 time)
     remediation: Skill Step 5a auto-emits consent URL + polls callback (H0.5). Model 1 uses shared multitenant BFF app — Spaarke tenant consents once.
 
   - id: PRQ-C-06
