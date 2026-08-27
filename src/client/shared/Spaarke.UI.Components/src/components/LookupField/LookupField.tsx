@@ -38,6 +38,7 @@
 
 import * as React from 'react';
 import { Input, Text, Button, Spinner, Field, makeStyles, tokens, mergeClasses } from '@fluentui/react-components';
+import type { InputProps } from '@fluentui/react-components';
 import { DismissRegular, SearchRegular } from '@fluentui/react-icons';
 import type { ILookupItem } from '../../types/LookupTypes';
 
@@ -114,6 +115,25 @@ export interface ILookupFieldProps {
    * lay out with flex) is byte-identical.
    */
   span?: 1 | 2 | 3;
+  /**
+   * Fluent `Input` appearance for the search box. Defaults to `'outline'` —
+   * the boxed look this component has always had.
+   *
+   * ── Use `'filled-darker'` to match an OOB Dataverse FORM field ────────────
+   * Verified against the shipped Fluent v9 source rather than inferred:
+   *   - `filled-darker` sets `backgroundColor: colorNeutralBackground3` (the
+   *     same gray the record-header read cells already use) and `filled` sets
+   *     `borderColor: colorTransparentStroke`, so there is NO border box; and
+   *   - the 2px brand focus underline is an `::after` on the input's BASE
+   *     style — not on the `outline`/`underline` variants — so it renders for
+   *     every appearance, animating in on `:focus-within`.
+   * Together that is exactly OOB's "no border, gray fill, blue line on focus".
+   *
+   * The default is deliberately NOT changed: the twelve `Create*Wizard`
+   * consumers sit beside plain `outline` inputs in Code Page forms, where a
+   * form-field look would make the lookup the odd one out.
+   */
+  appearance?: InputProps['appearance'];
 }
 
 // ---------------------------------------------------------------------------
@@ -297,6 +317,7 @@ export const LookupField: React.FC<ILookupFieldProps> = ({
   openOnFocus = false,
   onAdvanced,
   span,
+  appearance = 'outline',
 }) => {
   const styles = useStyles();
 
@@ -527,6 +548,7 @@ export const LookupField: React.FC<ILookupFieldProps> = ({
           </div>
         ) : (
           <Input
+            appearance={appearance}
             value={searchTerm}
             onChange={handleSearchChange}
             onKeyDown={handleKeyDown}

@@ -205,5 +205,28 @@
  *   load-bearing, not overhead - and it is page-session cached.
  *   Reverses FR-15a / design.md 6.5, updated in the same commit per CLAUDE.md
  *   6.5 path B rather than diverging silently.
+ *
+ * 1.1.10 (2026-08-27) - the lookup INPUT now looks like an OOB form field:
+ *   no border box, gray fill, brand-blue underline on focus. Side-by-side with
+ *   OOB, v1.1.9's boxed `outline` input was the remaining visible difference.
+ *   No custom CSS - this is Fluent's `appearance="filled-darker"`, and the
+ *   choice was verified against the SHIPPED @fluentui/react-input source
+ *   rather than inferred:
+ *     - `filled-darker` sets backgroundColor colorNeutralBackground3, which is
+ *       the same gray the sibling read cells already use, and the `filled`
+ *       modifier sets borderColor colorTransparentStroke - hence no box;
+ *     - the 2px brand focus underline is an `::after` on the input's BASE
+ *       style, NOT on the outline/underline variants, so it renders for every
+ *       appearance and animates in on :focus-within.
+ *   Added as an opt-in `appearance` prop on the shared component defaulting to
+ *   'outline', so the twelve Create*Wizard consumers are untouched - they sit
+ *   beside plain outline inputs in Code Page forms, where a form-field look
+ *   would make the lookup the odd one out.
+ *   Placeholder now matches OOB verbatim: "Look for Project Type" rather than
+ *   the component's generic "Search project type...".
+ *   NOT done (deliberate, needs a decision): OOB also shows a per-row entity
+ *   icon, a secondary timestamp line, a "Project Types" group header, and
+ *   "+ New". The first three each need data we do not currently fetch; "+ New"
+ *   is excluded by owner decision and stays excluded.
  */
-export const CONTROL_VERSION = '1.1.9';
+export const CONTROL_VERSION = '1.1.10';

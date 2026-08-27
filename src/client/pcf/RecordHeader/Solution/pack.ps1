@@ -28,7 +28,7 @@ Set-Location $PSScriptRoot
 # ADR-020 version-sync location 5 of 5. Keep in lockstep with:
 #   control/ControlManifest.Input.xml, control/version.ts, Solution/solution.xml,
 #   Solution/Controls/sprk_Spaarke.Records.RecordHeader/ControlManifest.xml
-$version = "1.1.9.0"
+$version = "1.1.10.0"
 $solutionName = "RecordHeaderPcf"
 $controlSchemaName = "sprk_Spaarke.Records.RecordHeader"
 # ABSOLUTE paths throughout. `Set-Location` updates PowerShell's location but NOT

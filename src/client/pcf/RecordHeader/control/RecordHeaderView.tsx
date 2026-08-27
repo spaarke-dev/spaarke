@@ -541,6 +541,15 @@ const HeaderFieldCell: React.FC<IHeaderFieldCellProps> = ({ field, fieldsApi, en
             value={current}
             onChange={handlePickLookup}
             onSearch={searchLookup}
+            // OOB form-field look: no border box, gray fill, brand underline on
+            // focus. Not a custom style — `filled-darker` IS
+            // `colorNeutralBackground3`, the same gray the sibling read cells
+            // use, and Fluent draws the focus underline for every appearance.
+            appearance="filled-darker"
+            // OOB's own wording, verbatim — "Look for Project Type", not the
+            // component's generic "Search project type...". Sentence case is
+            // wrong here: the label is a proper field name.
+            placeholder={`Look for ${label}`}
             // Opt-in footer. Supplied here because a form-hosted PCF always has
             // `Xrm.Utility.lookupObjects`; the wizard consumers in Code Pages
             // deliberately omit it. There is NO "+ New" beside it — owner

@@ -184,6 +184,30 @@ describe('LookupField — FieldGrid span (record-header FR-03)', () => {
   });
 });
 
+describe('LookupField — Input appearance', () => {
+  // Griffel class names are not resolvable to computed styles under jsdom, so
+  // asserting "the background is gray" is not available here. What IS worth
+  // guarding — and is the actual regression risk — is that the DEFAULT never
+  // silently changes: twelve wizard consumers rely on it. Comparing class names
+  // between renders tests exactly that, without pinning Fluent's internals.
+  const inputClass = (container: HTMLElement): string =>
+    (container.querySelector('.fui-Input') as HTMLElement).className;
+
+  it('defaults to the boxed outline look — the twelve wizard consumers depend on it', () => {
+    const { container: implicitDefault } = renderField();
+    const { container: explicitOutline } = renderField({ appearance: 'outline' });
+
+    expect(inputClass(implicitDefault)).toBe(inputClass(explicitOutline));
+  });
+
+  it('filled-darker produces a DIFFERENT input style — the OOB form-field look', () => {
+    const { container: outline } = renderField();
+    const { container: filled } = renderField({ appearance: 'filled-darker' });
+
+    expect(inputClass(filled)).not.toBe(inputClass(outline));
+  });
+});
+
 describe('LookupField — pre-existing behaviour still holds', () => {
   it('renders the label and the required marker', () => {
     renderField({ required: true });
