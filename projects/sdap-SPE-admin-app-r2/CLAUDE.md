@@ -100,10 +100,28 @@ Realistic concurrency is 2–3 agents, not 6. See [`plan.md`](plan.md) §3.
 
 ✅ `spaarkedev1` ("Spaarke Dev", config "Spaarke PAYGO 1") is available for live testing.
 
-> ⚠️ **Destructive tests MUST use a dedicated throwaway container.** The existing containers hold **real
-> working documents** — signed NDAs, Compose drafts, matter files. Delete / permanent-delete /
+> ⚠️ **Destructive tests MUST use a dedicated throwaway container.** Delete / permanent-delete /
 > recycle-bin-purge / restore paths provision and tear down their own container. Read-only and additive
 > operations may use the existing ones.
+>
+> **Corrected 2026-08-27 (operator).** This rule previously justified itself by asserting the dev
+> containers hold *"signed NDAs, Compose drafts, matter files"*, implying confidential content. **They
+> hold TEST documents.** The claim came from a File Browser walkthrough that read filenames and inferred
+> sensitivity — an unexamined assertion about another layer, which is the failure mode this project has
+> hit repeatedly.
+>
+> **The rule survives the correction, on better reasons than the one it lost:**
+> 1. **Repeatability.** A destructive suite that mutates shared pre-existing containers is
+>    non-idempotent — run it twice, get different results. This is the real reason, and it holds no
+>    matter what the documents are.
+> 2. **The tenant is shared.** Other sessions and projects work `spaarkedev1` concurrently; destroying
+>    containers mid-UAT disrupts them regardless of content sensitivity.
+> 3. **Evidence.** The `Spaarke Inc` container holds the `communications` / `emails` / `exports` folders
+>    whose origin is still unresolved and is a prerequisite for task 052. Destroying it destroys the
+>    investigation.
+>
+> What DID change: a teardown failure is a bug to fix, not a catastrophe. Task 041's escalation trigger
+> calling it *"the one failure in this project that is not recoverable"* was overstated.
 
 ---
 

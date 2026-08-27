@@ -4,7 +4,7 @@
     <title>LiveIntegration suite with a throwaway-container fixture</title>
     <phase>4 Workstream D — Build the harness</phase>
     <gate>011 complete, 040 complete</gate>
-    <status>not-started</status>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>TEST-MODIFYING override row (root CLAUDE.md §8): tasks modifying tests/** run code-review + adr-check UNCONDITIONALLY. Also exercises destructive tenant operations.</rigor-reason>
     <model-tier>sonnet</model-tier>
@@ -17,14 +17,14 @@
     <estimated-effort>6-8 hours</estimated-effort>
   </metadata>
 
-  <prompt>Build a LiveIntegration suite covering the operations WireMock cannot meaningfully fake — consent, registration, permission, and role flows. Destructive paths must provision and tear down their own throwaway container; the existing Spaarke Dev containers hold real working documents.</prompt>
+  <prompt>Build a LiveIntegration suite covering the operations WireMock cannot meaningfully fake — consent, registration, permission, and role flows. Destructive paths must provision and tear down their own throwaway container (see the corrected background for why the rule stands).</prompt>
 
   <role>SPAARKE platform developer. Expert in xUnit fixtures, test isolation, and safe testing against live tenants. Follow ADR-038 strictly.</role>
 
-  <goal>A category-gated live suite exists, runs green against Spaarke Dev, is excluded from the default CI run, and never touches a container holding real content.</goal>
+  <goal>A category-gated live suite exists, runs green against Spaarke Dev, is excluded from the default CI run, and never touches a pre-existing container.</goal>
 
   <context>
-    <background>Spec FR-D02 / NFR-07. The Spaarke Dev containers hold signed NDAs, Compose drafts, and matter files — the 2026-08-20 File Browser walkthrough confirmed it. Delete, permanent-delete, recycle-bin-purge, and restore paths must therefore provision their own container. Read-only and additive operations may use the existing ones.</background>
+    <background>Spec FR-D02 / NFR-07. Delete, permanent-delete, recycle-bin-purge, and restore paths must provision their own container. Read-only and additive operations may use the existing ones. CORRECTED 2026-08-27 (operator): this background previously asserted the Spaarke Dev containers hold "signed NDAs, Compose drafts, and matter files" on the strength of a File Browser walkthrough that read filenames and inferred sensitivity. They hold TEST documents. The throwaway-container rule stands on repeatability (a destructive suite mutating shared containers is non-idempotent), a shared tenant (other sessions work spaarkedev1 concurrently), and evidence preservation (the unresolved communications/emails/exports folders are a task-052 prerequisite) — not on confidentiality. See projects/sdap-SPE-admin-app-r2/CLAUDE.md "Live-tenant safety".</background>
     <relevant-files>
       <file role="new">tests/integration/seam/SpeAdmin/LiveIntegrationFixture.cs</file>
       <file role="new">tests/integration/seam/SpeAdmin/ContainerLifecycleLiveTests.cs</file>
@@ -32,13 +32,13 @@
       <file role="canonical-reference">tests/unit/Sprk.Bff.Api.Tests/Api/SpeAdmin/Fixtures/GraphWireMockFixture.cs</file>
     </relevant-files>
     <dependencies>
-      <dependency task="011" status="pending">The delegated auth path — role and permission flows need it.</dependency>
-      <dependency task="040" status="pending">The WireMock fixture, whose conventions this suite mirrors.</dependency>
+      <dependency task="011" status="complete">The delegated auth path — role and permission flows need it.</dependency>
+      <dependency task="040" status="complete">The WireMock fixture, whose conventions this suite mirrors.</dependency>
     </dependencies>
   </context>
 
   <constraints>
-    <constraint source="NFR-07">Scope: destructive operations. Delete, permanent-delete, recycle-bin-purge, and restore MUST target a container the fixture provisioned. NEVER a container holding real content. This is the highest-consequence rule in the task.</constraint>
+    <constraint source="NFR-07">Scope: destructive operations. Delete, permanent-delete, recycle-bin-purge, and restore MUST target a container the fixture provisioned. NEVER a pre-existing one. This is the highest-consequence rule in the task.</constraint>
     <constraint source="project">Scope: teardown. The fixture MUST tear down its container even when a test fails — use fixture disposal, not end-of-test cleanup that a failure skips.</constraint>
     <constraint source="project">Scope: CI. The suite MUST be excluded from the default CI run by category, so a missing tenant or credential never breaks the main pipeline.</constraint>
     <constraint source="project">Scope: category convention. Use [Trait("Category", "LiveIntegration")] — the repo convention. MUST NOT use [Category(...)].</constraint>
@@ -75,7 +75,7 @@
   </steps>
 
   <escalation>
-    <trigger>If the fixture cannot reliably provision or tear down its own container, STOP. Do NOT fall back to running destructive tests against an existing container — the Spaarke Dev containers hold real working documents and this is the one failure in this project that is not recoverable.</trigger>
+    <trigger>If the fixture cannot reliably provision or tear down its own container, STOP. Do NOT fall back to running destructive tests against an existing container. (The tail of this trigger previously called that "the one failure in this project that is not recoverable" — overstated; the dev documents are test documents. The STOP still stands: see the corrected background.)</trigger>
     <trigger>If a destructive operation cannot be tested without an admin role the executing identity lacks, STOP and escalate with the role named rather than broadening permissions.</trigger>
   </escalation>
 
