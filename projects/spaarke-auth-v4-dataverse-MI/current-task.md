@@ -1,7 +1,9 @@
 # Current Task State — spaarke-auth-v4-dataverse-MI
 
-> **Last Updated**: 2026-08-24 (task 090 close-out)
-> **Recovery**: nothing to recover — **the project is closed.**
+> **Last Updated**: 2026-08-26 (context-handoff — post-archive session)
+> **Recovery**: the project is CLOSED and ARCHIVED. Nothing here is open work.
+> ⚠️ A **post-archive incident** was diagnosed on 2026-08-26 — see §POST-ARCHIVE below. It is **not this
+> project's to fix**, but a returning reader should know it exists before touching document access on dev.
 
 ---
 
@@ -14,6 +16,84 @@
 | **Next Action** | **None for this project.** Everything below belongs to *other* owners. |
 
 **26 of 26 active tasks complete** · 3 deferred (Power BI 040–042, owner decision DEF-001).
+
+---
+
+## §POST-ARCHIVE — 2026-08-26 incident (diagnosed here, owned elsewhere)
+
+> **Do not reopen this project for it.** Recorded because this session produced the diagnosis and the
+> evidence is time-limited.
+
+**Symptom**: total document-access outage on `spaarkedev1` — every user, every document, 403 *"You do not
+have permission to access this file."* on all five URL-minting reads (`preview-url`, `view-url`, `preview`,
+`office`, `open-links`) plus `analyze`.
+
+**Root cause** — `Api/Filters/DocumentAuthorizationFilter.cs:49`:
+
+```csharp
+var userId = httpContext.User.FindFirst(ClaimTypes.NameIdentifier)?.Value;
+```
+
+`MapInboundClaims` is unset in `src/` so it defaults **true**, making `ClaimTypes.NameIdentifier` silently
+alias **`sub`** — Entra's pairwise per-application subject id. `DataverseAccessDataSource` expects an
+**`oid`** (its log parameter is literally `AzureAdOid=`). No `systemuser` matches → fail-closed →
+`AccessRights.None` → everyone denied.
+
+It is the **sole outlier**: `AiAuthorizationFilter:58`, `AnalysisAuthorizationFilter:94`,
+`AgentAuthorizationFilter:53` and `AiAuthorizationService:229` all read `oid` first.
+
+**Proven from live logs**, both identities in one request:
+
+```
+sub d12L59FR…rkjg  → DENIED, AccessRights: None
+oid c74ac1af-…     → RetrievePrincipalAccess SUCCESS,
+                     GrantedAccess=Read,Write,Delete,Create,Append,AppendTo,Share
+```
+
+`RetrievePrincipalAccess` works correctly. The filter asks about the wrong principal.
+
+### ⚠️ I got this wrong first — recorded because the trap is the lesson
+
+The initial diagnosis blamed **document ownership** (BFF-created rows owned by a service identity vs the new
+per-document Read gate, introduced by `f076b1e38`). Every fact in that chain was true; the conclusion was
+still wrong. It collapsed the moment the operator opened a document **they personally own**
+(`8f6b371f-8a96-f111-b8db-0022482fb5a7`) and it 403'd too.
+
+This is [lessons-learned §2 shape #1](notes/lessons-learned.md) landing on this session: **fail-closed makes
+a failed lookup and a genuine denial emit an identical 403** — same status, body, reason code. The client
+cannot distinguish them and neither can a reviewer reasoning from the symptom. Only `[UAC-DIAG]` separated
+them.
+
+### Ownership + status
+
+- **Owned by `unified-access-control-r2`** — their file, their `f076b1e38`, and **they are fixing it**.
+- Full write-up committed to **their** branch: `595497659` →
+  `projects/unified-access-control-r2/notes/incident-2026-08-26-document-preview-403.md`
+- **Not fixed from here** deliberately: a security filter on another project's active surface.
+
+### The durable half — test blind spot
+
+~11,932 tests were green through a total outage because the auth fixtures set `oid` and `NameIdentifier` to
+the **same constant** (`DocumentDestroyAuthorizationTestFixture.cs:203-204`), making the two
+indistinguishable. Any regression test must use **divergent** values — the pattern already exists at
+`CommunicationCreateRecordThreadContractTests.cs:292-293`.
+
+### Sequencing recommendation carried to their F8
+
+A root fix (`MapInboundClaims = false`, so `NameIdentifier` stops aliasing `sub` globally) was proposed and
+is directionally right — this class has now bitten three times (F8, `OfficeEndpoints` 2026-08-25, this).
+Measured blast radius: **74 sites** read `ClaimTypes.NameIdentifier` across `src/server`, only ~28 with an
+`oid` fallback nearby.
+
+**The fixture sweep is a PREREQUISITE, not a companion.** While `oid == NameIdentifier` in fixtures, the
+suite stays green whichever claim any site reads — so a 74-site change would ship with zero verification of
+the thing it changes. Suggested order: (1) one-line filter fix + divergent-value test → (2) fixture sweep →
+(3) audit the 74 sites → (4) flip the flag.
+
+### If you return to this
+
+The BFF on dev is unchanged by this session — **no deploy, no config change was made after the archive**.
+`spaarke-auth-v4-dataverse-MI` remains fully merged (`HEAD` contained in `origin/master`), tree clean.
 Merged to master: PR [#814](https://github.com/spaarke-dev/spaarke/pull/814) + [#816](https://github.com/spaarke-dev/spaarke/pull/816). Deployed and **UAT PASSED** on `spaarkedev1`.
 
 ### Critical context
