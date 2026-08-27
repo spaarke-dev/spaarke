@@ -437,3 +437,394 @@ jobs:
           name: tier1-auth-smoke-results
           path: ./TestResults/auth-smoke.trx
           if-no-files-found: warn
+
+  # ==========================================================================
+  # PORTED GATES — moved here from sdap-ci.yml (ci/tier1-gate-port, 2026-08-27)
+  # ==========================================================================
+  # These four jobs are the blocking gates that existed ONLY in sdap-ci.yml.
+  # They are the reason sdap-ci could not simply be deleted: the tiered
+  # replacement had no equivalent, so retiring the monolith would have silently
+  # dropped tenant-isolation, the eval gate, the Compose fidelity gate, and the
+  # full two-pass test run.
+  #
+  # They are copied VERBATIM, deliberately. No path-gating, no runner change, no
+  # consolidation of the duplicated setup steps. The point of this step is that
+  # tier1 and sdap-ci reach the SAME verdict on the same commit; any edit made
+  # while porting would make a disagreement ambiguous — porting bug, or real
+  # difference? Optimisation (path-gating these, sharing the NuGet cache setup,
+  # collapsing the four windows-latest runners) comes AFTER sdap-ci.yml is
+  # deleted, not before.
+  #
+  # SHADOW PERIOD — while both workflows exist, every PR runs these gates TWICE
+  # and PR CI time rises accordingly. That is the cost of a safe comparison and
+  # it is temporary: deleting sdap-ci.yml (ci-cd-unit-test-remediation-r1 tasks
+  # 071/075/077) removes the duplicate AND the ~30 min sdap-ci leg, landing well
+  # below where this started.
+  #
+  # DO NOT delete sdap-ci.yml until these have agreed with their counterparts
+  # across a few days of real PRs.
+  # ==========================================================================
+
+  build-test:
+    name: Build & Test
+    runs-on: windows-latest
+    # 2026-07-10 (redesign-r2 audit F-5 completion): job-level continue-on-error
+    # REMOVED. The 2026-06-24 "informational-only" posture predated the two-pass
+    # classifier + reliability registry and silently swallowed the classifier's
+    # verdict (a failed job still produced a green run — observed live on master
+    # run 29126132011). The full solution is 0-failures as of ef5d098b4; genuine
+    # timing flakes belong in tests/.reliability-registry.json, not in a
+    # job-level swallow.
+    strategy:
+      # When one matrix configuration fails (e.g., a flaky timing test in
+      # Release), the default fail-fast=true cancels the sibling Debug job
+      # mid-flight. The cancelled Debug then shows COMPLETED/CANCELLED — and
+      # because Debug is the only REQUIRED status check, the PR becomes
+      # un-mergeable even though Debug would have passed on its own. We want
+      # each matrix configuration to run to its own conclusion.
+      fail-fast: false
+      matrix:
+        # 2026-06-24 — Release matrix entry temporarily removed due to high
+        # CI-flake rate on shared runners (timing/scheduling tests). Debug-only
+        # build still validates compilation + unit tests. Tracked under
+        # projects/test-architecture-reset-r1/ for permanent resolution.
+        # Restore Release here AFTER that audit lands a stable test suite.
+        configuration: [Debug]
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+        with:
+          fetch-depth: 0  # Required for GitVersion and better diff analysis
+          lfs: true  # smudge tests/fixtures/compose-corpus/*.docx — real bytes, not LFS pointers (else ~200 Compose corpus seam tests fail on pointer files; mirrors compose-fidelity-gate job)
+
+      - name: Setup .NET 10
+        uses: actions/setup-dotnet@v6
+        with:
+          dotnet-version: '10.x'
+
+      - name: Setup .NET Framework targeting pack
+        shell: pwsh
+        run: |
+          # Ensure .NET Framework 4.8 targeting pack is available for plugin projects
+          if (!(Test-Path "C:\Program Files (x86)\Reference Assemblies\Microsoft\Framework\.NETFramework\v4.8")) {
+            Write-Warning ".NET Framework 4.8 targeting pack not found. Plugin build may fail."
+          }
+
+      - name: Cache NuGet packages
+        uses: actions/cache@v5
+        continue-on-error: true  # Prevents Debug/Release matrix race on shared cache key from failing the job (PR #337 hit this 2026-06-03 — Release lost the cache-save race to concurrent Debug at 00:18:47)
+        with:
+          path: ~/.nuget/packages
+          key: ${{ runner.os }}-nuget-${{ hashFiles('**/Directory.Packages.props', '**/*.csproj') }}
+          restore-keys: |
+            ${{ runner.os }}-nuget-
+
+      - name: Restore dependencies
+        run: dotnet restore --verbosity minimal
+
+      - name: Build
+        # WarningsAsErrors policy is centralized in Directory.Build.props
+        # (TreatWarningsAsErrors=true + WarningsNotAsErrors=CS0109;CS0618;CS1998;CS8601;CS8604).
+        # The previous CLI -warnaserror overrode WarningsNotAsErrors. See
+        # docs/assessments/bff-warning-suppression-analysis-2026-06-01.md.
+        run: dotnet build -c ${{ matrix.configuration }} --no-restore
+
+      # ------------------------------------------------------------------
+      # Two-pass test runner — see scripts/ci/classify-and-retry.ps1 + docs/
+      # procedures/testing-and-code-quality.md.
+      #
+      # Pass 1 runs the full suite. The classifier reads the TRX and emits a
+      # filter covering EVERY failure. Pass 2 re-runs those on a fresh
+      # execution, and only a test that fails BOTH passes fails the build —
+      # two consecutive failures on different runs is no longer noise.
+      #
+      # Changed 2026-08-26: the classifier used to fail the build immediately
+      # for any failure absent from tests/.reliability-registry.json, calling it
+      # "deterministic". Absence from an allowlist is not evidence of
+      # determinism, and the inference was usually wrong — tests failed that way
+      # on three separate runs and every one of them passes locally. It also
+      # meant a single unregistered failure denied the registered ones their
+      # retry. The registry is now reporting only; it does not gate the retry.
+      # ------------------------------------------------------------------
+      - name: Test with coverage (pass 1)
+        id: test-pass-1
+        continue-on-error: true   # let classifier decide; don't abort here on test failures
+        shell: pwsh
+        run: |
+          # LogFilePrefix (NOT LogFileName): each test project writes its own
+          # uniquely-named TRX. A fixed LogFileName made every project in the
+          # solution OVERWRITE the same file, so the classifier only ever saw
+          # the last project's results — failures in the other test projects
+          # were invisible to CI (redesign-r2 e2e audit finding F-5, 2026-07-10).
+          dotnet test -c ${{ matrix.configuration }} --no-build `
+            --logger "trx;LogFilePrefix=pass1" `
+            --results-directory ./TestResults/pass1 `
+            --collect:"XPlat Code Coverage" --settings config/coverlet.runsettings
+
+      - name: Classify pass-1 failures (decide on retry)
+        id: classify
+        shell: pwsh
+        run: ./scripts/ci/classify-and-retry.ps1 -TrxDirectory ./TestResults/pass1
+
+      - name: Retry pass-1 failures (pass 2)
+        id: test-pass-2
+        if: steps.classify.outputs.retry_needed == 'true'
+        continue-on-error: true   # final verdict step decides; capture TRX either way
+        shell: pwsh
+        run: |
+          # LogFilePrefix for the same reason as pass 1 (audit finding F-5).
+          dotnet test -c ${{ matrix.configuration }} --no-build `
+            --filter "${{ steps.classify.outputs.retry_filter }}" `
+            --logger "trx;LogFilePrefix=pass2" `
+            --results-directory ./TestResults/pass2
+
+      - name: Final test verdict
+        shell: pwsh
+        run: |
+          $retryRan = "${{ steps.classify.outputs.retry_needed }}" -eq "true"
+          if (-not $retryRan) {
+            # The classifier requests a retry for ANY pass-1 failure, so
+            # retry_needed=false means pass 1 was clean (or produced no TRX,
+            # which the classifier reports separately).
+            Write-Host "Pass 1 clean — no retry was needed"
+            exit 0
+          }
+          # Aggregate ALL pass-2 TRX files (one per test project under
+          # LogFilePrefix naming — audit finding F-5).
+          $trxFiles = @(Get-ChildItem -Path ./TestResults/pass2 -Filter "*.trx" -Recurse -ErrorAction SilentlyContinue)
+          if ($trxFiles.Count -eq 0) {
+            Write-Host "::error::Retry pass 2 ran but no TRX files were produced — dotnet test likely crashed"
+            exit 1
+          }
+          $nsUri = "http://microsoft.com/schemas/VisualStudio/TeamTest/2010"
+          $stillFailing = @()
+          $executedNames = New-Object System.Collections.Generic.List[string]
+          $passed = 0
+          foreach ($trx in $trxFiles) {
+            $xml = [xml](Get-Content $trx.FullName -Raw)
+            $nsm = New-Object System.Xml.XmlNamespaceManager $xml.NameTable
+            $nsm.AddNamespace("x", $nsUri)
+            $stillFailing += @($xml.SelectNodes("//x:UnitTestResult[@outcome='Failed']", $nsm))
+            $passed += $xml.SelectNodes("//x:UnitTestResult[@outcome='Passed']", $nsm).Count
+            foreach ($r in $xml.SelectNodes("//x:UnitTestResult", $nsm)) {
+              $executedNames.Add($r.GetAttribute("testName")) | Out-Null
+            }
+          }
+          if ($stillFailing.Count -gt 0) {
+            Write-Host "::error::Retry pass failed: $($stillFailing.Count) test(s) still failing after a second attempt — treating as real regression"
+            $stillFailing | ForEach-Object {
+              Write-Host "  - $($_.GetAttribute('testName'))"
+            }
+            exit 1
+          }
+
+          # COVERAGE GUARD — "did not re-run" is not "passed".
+          # A --filter term can silently match zero tests (renamed, deleted, or a
+          # [Theory] whose DisplayName differs from its FullyQualifiedName). Without
+          # this check a vanished test would turn a red build green, which is worse
+          # than the false-accusation bug this two-pass design was rewritten to fix.
+          $expected = "${{ steps.classify.outputs.retry_methods }}" -split ';' | Where-Object { $_ }
+          $notReRun = @()
+          foreach ($method in $expected) {
+            $covered = $executedNames | Where-Object { $_ -eq $method -or $_.StartsWith("$method(") }
+            if (-not $covered) { $notReRun += $method }
+          }
+          if ($notReRun.Count -gt 0) {
+            Write-Host "::error::Retry pass is INCONCLUSIVE: $($notReRun.Count) test method(s) failed pass 1 but did not execute in pass 2. Not treating absence as success."
+            $notReRun | ForEach-Object { Write-Host "  - $_" }
+            Write-Host "Most likely the pass-2 --filter did not match: the test was renamed or deleted between runs, or its TRX testName differs from its FullyQualifiedName."
+            exit 1
+          }
+
+          Write-Host "Retry pass clean: $passed test(s) retried, all $($expected.Count) failing method(s) re-executed and passed"
+
+      - name: Upload test results
+        uses: actions/upload-artifact@v6
+        if: always()
+        with:
+          name: test-results-${{ matrix.configuration }}
+          path: ./TestResults/
+
+      - name: Upload coverage reports
+        uses: actions/upload-artifact@v6
+        if: always()
+        with:
+          name: coverage-${{ matrix.configuration }}
+          path: ./TestResults/**/coverage.cobertura.xml
+
+  # ──────────────────────────────────────────────────────────────────────────
+  # Golden-utterance eval gate (NFR-02, spaarke-ai-architecture-redesign-r1
+  # task 026 / FR-P1-07) — MERGE-BLOCKING from P1 onward.
+  #
+  # Deliberately a SEPARATE job with NO continue-on-error: build-test carries
+  # job-level `continue-on-error: true` (2026-06-24 informational posture),
+  # which would swallow a failing eval step placed inside it — with branch
+  # protection currently disabled on this repo, the workflow-run conclusion is
+  # the only mechanical merge signal, and this job is what turns it red when
+  # any Category=GoldenUtteranceEval test fails. When branch protection /
+  # rulesets are re-enabled, mark "Eval Gate (Golden Utterances)" as a
+  # REQUIRED status check. Activation plan + rationale:
+  # tests/integration/contract/Eval/README.md.
+  #
+  # Families joined to this gate via the Category=GoldenUtteranceEval trait (no
+  # YAML change needed to register a family — the trait IS the registration):
+  #   • Golden-utterance suite + P2 loop/injection (r1 tasks 011/026/037)
+  #   • D-F0(e) Resourcefulness family (r2 task 031 / FR-A1-02) —
+  #     ResourcefulnessEvalSuiteTests: no_fabrication is asserted MECHANICALLY
+  #     against the ADR-040 ledger ToolChain (ResourcefulnessFabricationOracle);
+  #     the four family dimensions are LLM-judge-scored on the live eval-gate run.
+  #   • Origin-classification family (r2 task 033 / FR-A1-04, Policy v2 E-1..E-6)
+  #     — OriginClassificationEvalSuiteTests: hard-equality assertions against the
+  #     real RequestOriginClassifier + ConfirmationPolicyEngine (deterministic
+  #     production code, never an LLM judge).
+  #   • ContextEnvelope budget-breach-fails-eval (r2 task 054 / FR-B-05) —
+  #     ContextBudgetBreachEvalTests: a per-slice or envelope-ceiling breach is
+  #     mechanically DETECTED (never silently truncated) against the real
+  #     EnvelopeBudget checker.
+  #   • Memory-write capture→recall family (r2 task 057 / FR-B-08 / FR-30) —
+  #     MemoryWriteCaptureRecallEvalTests.
+  #
+  # spec FR-D-02 / NFR-02 (r2 spaarke-ai-architecture-redesign-r2 task 071):
+  # ALL of the above families gate the merge — any single family red fails this
+  # job. Memory-poisoning eval families are explicitly OUT OF SCOPE here —
+  # DEFERRED to the separate memory-governance project per spec FR-B-10
+  # (spaarke-ai-architecture-redesign-r2/spec.md item 38). Do NOT add a
+  # memory-poisoning family to this trait/gate until that governance project
+  # ships it.
+  # ──────────────────────────────────────────────────────────────────────────
+  eval-gate:
+    name: Eval Gate (Golden Utterances)
+    runs-on: windows-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Setup .NET 10
+        uses: actions/setup-dotnet@v6
+        with:
+          dotnet-version: '10.x'
+
+      - name: Cache NuGet packages
+        uses: actions/cache@v5
+        continue-on-error: true  # cache is an optimization, never a gate
+        with:
+          path: ~/.nuget/packages
+          key: ${{ runner.os }}-nuget-${{ hashFiles('**/Directory.Packages.props', '**/*.csproj') }}
+          restore-keys: |
+            ${{ runner.os }}-nuget-
+
+      - name: Golden-utterance eval gate (NFR-02 — merge-blocking)
+        shell: pwsh
+        run: dotnet test tests/unit/Sprk.Bff.Api.Tests/Sprk.Bff.Api.Tests.csproj -c Debug --filter "Category=GoldenUtteranceEval"
+
+
+  # ──────────────────────────────────────────────────────────────────────────
+  # customer-provisioning-orchestration-r1 task 088 (r1 task 064 gate wiring)
+  # — Tenant-isolation invariants I1..I5 (FR-28..FR-32 + design.md §4D).
+  # BLOCKING from day 1 (r1 task 065 audit sweep = 0 findings baseline).
+  #
+  # Deliberately a SEPARATE self-contained job (same rationale as eval-gate
+  # + compose-fidelity-gate in this file): existing jobs carry
+  # continue-on-error: true (2026-06-24 informational posture) which would
+  # swallow a tenant-isolation red. This gate must NEVER be advisory —
+  # cross-tenant leak is a security incident, not a warning.
+  # ──────────────────────────────────────────────────────────────────────────
+  tenant-isolation:
+    name: Tenant Isolation (I1–I5 invariants)
+    runs-on: windows-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Setup .NET 10
+        uses: actions/setup-dotnet@v6
+        with:
+          dotnet-version: '10.x'
+
+      - name: Cache NuGet packages
+        uses: actions/cache@v5
+        continue-on-error: true  # cache is an optimization, never a gate
+        with:
+          path: ~/.nuget/packages
+          key: ${{ runner.os }}-nuget-${{ hashFiles('**/Directory.Packages.props', '**/*.csproj') }}
+          restore-keys: |
+            ${{ runner.os }}-nuget-
+
+      - name: Tenant-isolation invariants (I1..I5 — merge-blocking)
+        # Filter by namespace: all 5 files live in
+        # Spaarke.ArchTests.TenantIsolation.* — this catches I1..I5 as a
+        # cohesive set + auto-picks-up any new I{N}_* tests r1 adds in the
+        # future without a workflow edit.
+        shell: pwsh
+        run: |
+          dotnet test tests/Spaarke.ArchTests/Spaarke.ArchTests.csproj `
+            -c Release `
+            --filter "FullyQualifiedName~Spaarke.ArchTests.TenantIsolation" `
+            --logger "trx;LogFileName=tenant-isolation-results.trx" `
+            --results-directory ./TestResults
+
+      - name: Upload tenant-isolation TRX
+        if: always()
+        uses: actions/upload-artifact@v6
+        with:
+          name: tenant-isolation-results
+          path: ./TestResults/tenant-isolation-results.trx
+          if-no-files-found: warn
+
+
+  # ──────────────────────────────────────────────────────────────────────────
+  # Compose fidelity gate (FR-08, spaarkeai-compose-r6 tasks 060/061 +
+  # ADR-049 R6 amendment point 3) — RELEASE-GATING.
+  #
+  # Runs the corpus round-trip fidelity harness
+  # (tests/integration/seam/Compose/ComposeFidelityGateHarnessTests.cs):
+  # every `.docx` under tests/fixtures/compose-corpus/ is driven through one
+  # full render-on-save wire round trip (load → edit → save → reopen) and
+  # classified pass/warn/fail. FAIL-class results fail their xUnit Theory —
+  # that non-zero `dotnet test` exit IS the gate; no continue-on-error here
+  # by design (an advisory gate would defeat spec FR-08).
+  #
+  # Deliberately a SEPARATE self-contained job (same rationale as eval-gate):
+  # existing jobs are owned by ci-cd-unit-test-remediation-r1 and are not
+  # modified. `lfs: true` on checkout pulls the Git-LFS `.docx` corpus bytes
+  # (same mechanism as PR #690's build-test fix); a missing-LFS checkout
+  # fails LOUDLY via ComposeCorpusFixtureLocator's PK-signature guard — it
+  # can never silently skip the gate. The per-document breakdown
+  # (fidelity-gate-result.json, written next to the test assembly by the
+  # harness's result sink) is uploaded as an artifact even on red.
+  # ──────────────────────────────────────────────────────────────────────────
+  compose-fidelity-gate:
+    name: Compose Fidelity Gate (Corpus Round-Trip)
+    runs-on: windows-latest
+    steps:
+      - name: Checkout (with Git-LFS corpus fixtures)
+        uses: actions/checkout@v6
+        with:
+          lfs: true  # smudge tests/fixtures/compose-corpus/*.docx — real bytes, not LFS pointers
+
+      - name: Setup .NET 10
+        uses: actions/setup-dotnet@v6
+        with:
+          dotnet-version: '10.x'
+
+      - name: Cache NuGet packages
+        uses: actions/cache@v5
+        continue-on-error: true  # cache is an optimization, never a gate
+        with:
+          path: ~/.nuget/packages
+          key: ${{ runner.os }}-nuget-${{ hashFiles('**/Directory.Packages.props', '**/*.csproj') }}
+          restore-keys: |
+            ${{ runner.os }}-nuget-
+
+      - name: Fidelity gate (corpus round-trip — merge-blocking)
+        shell: pwsh
+        run: dotnet test tests/unit/Sprk.Bff.Api.Tests/Sprk.Bff.Api.Tests.csproj -c Debug --filter "FullyQualifiedName~FidelityGate"
+
+      - name: Upload fidelity-gate-result.json (per-document breakdown)
+        uses: actions/upload-artifact@v6
+        if: always()   # the breakdown matters MOST when the gate is red
+        with:
+          name: fidelity-gate-result
+          path: tests/unit/Sprk.Bff.Api.Tests/bin/**/fidelity-gate-result.json
+          if-no-files-found: warn  # absent only if the run crashed pre-sink; the test step is already red then
