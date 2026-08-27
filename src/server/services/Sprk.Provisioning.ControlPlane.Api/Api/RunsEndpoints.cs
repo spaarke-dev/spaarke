@@ -302,6 +302,7 @@ public static class RunsEndpoints
         IProvisioningRunRepository repository,
         IHandlerEnqueuer enqueuer,
         ICustomerRunGuard runGuard,
+        Sprk.Provisioning.ControlPlane.Registry.IDataverseEnvironmentRegistryClient registryClient,
         HttpContext httpContext,
         ILogger<RunsMarker> logger,
         CancellationToken cancellationToken)
@@ -309,6 +310,7 @@ public static class RunsEndpoints
         ArgumentNullException.ThrowIfNull(repository);
         ArgumentNullException.ThrowIfNull(enqueuer);
         ArgumentNullException.ThrowIfNull(runGuard);
+        ArgumentNullException.ThrowIfNull(registryClient);
 
         if (request is null)
         {
@@ -396,6 +398,92 @@ public static class RunsEndpoints
                     {
                         ["correlationId"] = httpContext.TraceIdentifier,
                     });
+        }
+
+        // REG-07 (customer-provisioning-orchestration-r1 Wave 2 B24 punchlist,
+        // 2026-08-27): validate the operator-supplied environmentId against the
+        // registry BEFORE writing to Cosmos. Prevents:
+        //   - Unknown environmentId (typo, or Step-1f partially failed and
+        //     returned a stale GUID) → H1–H12 run to completion, H13 PATCHes
+        //     the wrong row (§4D I1 cross-customer bleed) or 404s with no
+        //     recovery path (H13 marks Resumable but Cosmos still carries the
+        //     wrong environmentId).
+        //   - CustomerId mismatch → same cross-customer bleed risk.
+        //   - SetupStatus != InProgress → row is already finalized (Ready)
+        //     or in a rollback state; a second run should never overwrite it.
+        //
+        // Best-effort: a registry lookup infra fault (client throws) is treated
+        // as inconclusive — CreateRun proceeds so the operator isn't blocked
+        // by a transient registry outage. The concurrency guard already gates
+        // dual-dispatch; H13's own row-id write will catch a wrong-row PATCH
+        // as NotFound. Silent fallback lets operators complete provisioning
+        // when the registry is degraded — Cosmos write + audit trail are the
+        // fallback source of truth. Null-Object registry (P2 fallback per
+        // ADR-032) returns null → the strict check is skipped (WARN in logs).
+        try
+        {
+            var snapshot = await registryClient
+                .LookupByEnvironmentIdAsync(request.EnvironmentId, cancellationToken)
+                .ConfigureAwait(false);
+            if (snapshot is not null)
+            {
+                if (!string.Equals(snapshot.CustomerId, request.CustomerId, StringComparison.OrdinalIgnoreCase))
+                {
+                    // Best-effort release the guard we just acquired so the operator
+                    // can retry with the correct customerId without waiting for
+                    // an idle-timeout / reconciler pass.
+                    _ = await runGuard.ReleaseAsync(request.CustomerId, runId, cancellationToken).ConfigureAwait(false);
+                    logger.LogWarning(
+                        "CreateRun: 400 — REG-07 customerId mismatch. RequestedCustomerId={RequestedCustomerId} " +
+                        "RegistryCustomerId={RegistryCustomerId} EnvironmentId={EnvironmentId}",
+                        request.CustomerId, snapshot.CustomerId, request.EnvironmentId);
+                    return BadRequest(httpContext,
+                        $"REG-07: environmentId '{request.EnvironmentId}' belongs to customer " +
+                        $"'{snapshot.CustomerId}', not requested customer '{request.CustomerId}' " +
+                        "(§4D I1 cross-customer bleed guard).");
+                }
+                if (!string.Equals(snapshot.SetupStatus, "InProgress", StringComparison.OrdinalIgnoreCase))
+                {
+                    _ = await runGuard.ReleaseAsync(request.CustomerId, runId, cancellationToken).ConfigureAwait(false);
+                    logger.LogWarning(
+                        "CreateRun: 400 — REG-07 setupStatus mismatch. RequestedCustomerId={CustomerId} " +
+                        "EnvironmentId={EnvironmentId} SetupStatus={SetupStatus}",
+                        request.CustomerId, request.EnvironmentId, snapshot.SetupStatus);
+                    return BadRequest(httpContext,
+                        $"REG-07: environmentId '{request.EnvironmentId}' has setupStatus='{snapshot.SetupStatus}' " +
+                        "(expected 'InProgress'). Row is already finalized or in a rollback state; " +
+                        "a new run cannot overwrite it. Use clear-quarantine or an operator-side " +
+                        "registry reset before retrying.");
+                }
+            }
+            else
+            {
+                // Null snapshot from the real client means the row does not
+                // exist (or the client is the Null-Object fallback). We only
+                // hard-fail on absence when the registry lookup returned a
+                // definitive 'row not found' — since LookupByEnvironmentIdAsync
+                // and NullDataverseEnvironmentRegistryClient both return null,
+                // we cannot distinguish here without extra flavor on the
+                // outcome type. Rather than block CreateRun on the ambiguity,
+                // log at Warning and let H13's own row-id PATCH catch the
+                // truly-missing row (NotFound → Resumable, operator can retry
+                // after Step-1f re-runs).
+                logger.LogWarning(
+                    "CreateRun: REG-07 registry lookup returned null for environmentId={EnvironmentId} " +
+                    "(row missing OR Null-Object registry). Proceeding — H13 will fail Resumable if the row " +
+                    "is truly missing.",
+                    request.EnvironmentId);
+            }
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            // Registry-lookup infra fault — do NOT block CreateRun. Cosmos +
+            // audit trail are the fallback source of truth; the concurrency
+            // guard prevents dual-dispatch even if the strict check was
+            // skipped.
+            logger.LogWarning(ex,
+                "CreateRun: REG-07 registry lookup infra fault for environmentId={EnvironmentId} — proceeding without strict check.",
+                request.EnvironmentId);
         }
 
         var run = new ProvisioningRun

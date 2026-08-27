@@ -732,6 +732,135 @@ public sealed class RunsEndpointsTests : IClassFixture<L2WebApplicationFactory>
         factory.Repository.CreatedRuns.Should().BeEmpty();
     }
 
+    // -------------------------------------------------------------------------
+    // REG-07 (customer-provisioning-orchestration-r1 Wave 2 B24 punchlist,
+    // 2026-08-27) — CreateRun MUST cross-check environmentId against the
+    // registry AFTER concurrency-guard acquire + BEFORE Cosmos write.
+    //   - customerId mismatch → 400 + guard released.
+    //   - setupStatus != InProgress → 400 + guard released.
+    //   - lookup fault → proceed (fault-tolerance branch).
+    //   - unknown envId (null snapshot) → proceed (Null-Object indistinguishable).
+    // -------------------------------------------------------------------------
+
+    [Fact]
+    public async Task PostRuns_Reg07_CustomerIdMismatch_Returns400()
+    {
+        using var factory = new L2WebApplicationFactory();
+        // Register a stub registry that returns a snapshot for a DIFFERENT customerId.
+        var stub = new StubRegistryClient
+        {
+            Snapshot = new Sprk.Provisioning.ControlPlane.Registry.DataverseEnvironmentRegistrySnapshot(
+                EnvironmentId: "env-1",
+                CustomerId: "OTHER-CUSTOMER",
+                TenantId: "11111111-1111-1111-1111-111111111111",
+                SetupStatus: "InProgress",
+                CurrentRunId: null),
+        };
+        factory.ReplaceRegistryClient(stub);
+
+        var client = factory.CreateClient();
+        var request = new HttpRequestMessage(HttpMethod.Post, "/api/runs")
+        {
+            Content = JsonContent.Create(new
+            {
+                customerId = TestCustomerId,
+                environmentId = "env-1",
+                tenancyModel = "Model1Shared",
+                profile = "spaarke-hosted-model1-trial",
+                nonSecretParameters = new Dictionary<string, string>
+                {
+                    ["tenantId"] = "11111111-1111-1111-1111-111111111111",
+                },
+            }),
+        };
+        AttachAuth(request, roles: new[] { "Operator" });
+
+        var response = await client.SendAsync(request);
+
+        response.StatusCode.Should().Be(HttpStatusCode.BadRequest,
+            "REG-07 — cross-customer environmentId must fail-fast with 400.");
+        var body = await response.Content.ReadAsStringAsync();
+        body.Should().Contain("REG-07");
+        body.Should().Contain("OTHER-CUSTOMER");
+        factory.Repository.CreatedRuns.Should().BeEmpty(
+            because: "REG-07 must reject BEFORE the Cosmos write.");
+    }
+
+    [Fact]
+    public async Task PostRuns_Reg07_SetupStatusReady_Returns400()
+    {
+        using var factory = new L2WebApplicationFactory();
+        // Row exists + belongs to this customer but is already Ready — a
+        // second run would overwrite a finalized registry state.
+        var stub = new StubRegistryClient
+        {
+            Snapshot = new Sprk.Provisioning.ControlPlane.Registry.DataverseEnvironmentRegistrySnapshot(
+                EnvironmentId: "env-1",
+                CustomerId: TestCustomerId,
+                TenantId: "11111111-1111-1111-1111-111111111111",
+                SetupStatus: "Ready",
+                CurrentRunId: null),
+        };
+        factory.ReplaceRegistryClient(stub);
+
+        var client = factory.CreateClient();
+        var request = new HttpRequestMessage(HttpMethod.Post, "/api/runs")
+        {
+            Content = JsonContent.Create(new
+            {
+                customerId = TestCustomerId,
+                environmentId = "env-1",
+                tenancyModel = "Model1Shared",
+                profile = "spaarke-hosted-model1-trial",
+                nonSecretParameters = new Dictionary<string, string>
+                {
+                    ["tenantId"] = "11111111-1111-1111-1111-111111111111",
+                },
+            }),
+        };
+        AttachAuth(request, roles: new[] { "Operator" });
+
+        var response = await client.SendAsync(request);
+
+        response.StatusCode.Should().Be(HttpStatusCode.BadRequest);
+        var body = await response.Content.ReadAsStringAsync();
+        body.Should().Contain("setupStatus='Ready'");
+        factory.Repository.CreatedRuns.Should().BeEmpty();
+    }
+
+    [Fact]
+    public async Task PostRuns_Reg07_LookupInfraFault_Proceeds_To_202()
+    {
+        // Fault-tolerance branch: registry lookup infra fault MUST NOT block
+        // CreateRun (concurrency guard + Cosmos audit trail are the fallback).
+        using var factory = new L2WebApplicationFactory();
+        var stub = new StubRegistryClient { ThrowOnLookup = new InvalidOperationException("registry-down") };
+        factory.ReplaceRegistryClient(stub);
+
+        var client = factory.CreateClient();
+        var request = new HttpRequestMessage(HttpMethod.Post, "/api/runs")
+        {
+            Content = JsonContent.Create(new
+            {
+                customerId = TestCustomerId,
+                environmentId = "env-1",
+                tenancyModel = "Model1Shared",
+                profile = "spaarke-hosted-model1-trial",
+                nonSecretParameters = new Dictionary<string, string>
+                {
+                    ["tenantId"] = "11111111-1111-1111-1111-111111111111",
+                },
+            }),
+        };
+        AttachAuth(request, roles: new[] { "Operator" });
+
+        var response = await client.SendAsync(request);
+
+        response.StatusCode.Should().Be(HttpStatusCode.Accepted,
+            "REG-07 — lookup infra fault is a soft-fault; CreateRun MUST NOT block operators on a degraded registry.");
+        factory.Repository.CreatedRuns.Should().ContainSingle();
+    }
+
     [Fact]
     public async Task PostRuns_ValidTenantIdInNonSecretParameters_Returns202_AndFlowsToRunParameters()
     {
@@ -809,6 +938,19 @@ public sealed class L2WebApplicationFactory : WebApplicationFactory<Program>
     public InMemoryHandlerEnqueuer Enqueuer { get; } = new();
     public TestAuditLogSink AuditLogSink { get; } = new();
 
+    // REG-07 (customer-provisioning-orchestration-r1 Wave 2 B24, 2026-08-27):
+    // tests that exercise the registry cross-check inject their own stub via
+    // ReplaceRegistryClient BEFORE calling CreateClient(). Leaving this null
+    // means the real Path X DataverseEnvironmentRegistryClient stays
+    // registered; its outbound HTTP call to the stub URL will fault → CreateRun
+    // catches the fault and proceeds (REG-07 fault-tolerance branch).
+    private Sprk.Provisioning.ControlPlane.Registry.IDataverseEnvironmentRegistryClient? _registryStub;
+
+    public void ReplaceRegistryClient(Sprk.Provisioning.ControlPlane.Registry.IDataverseEnvironmentRegistryClient stub)
+    {
+        _registryStub = stub;
+    }
+
     protected override void ConfigureWebHost(IWebHostBuilder builder)
     {
         // Ensure fail-fast validators in AddCosmosModule + AddServiceBusModule +
@@ -827,6 +969,16 @@ public sealed class L2WebApplicationFactory : WebApplicationFactory<Program>
         // Dataverse call. This preserves the pre-REG-02 test semantics
         // (no I5 guard interference in RunsEndpointsTests).
         builder.UseSetting("CustomerRunGuard:Enabled", "false");
+
+        // REG-07 (Wave 2 pre-dispatch remediation, 2026-08-27) — the Api
+        // Program.cs now registers DataverseEnvironmentRegistryClient (Path X);
+        // its options.Validate() requires AdminEnvironmentUrl. Provide a stub
+        // URL to satisfy the fail-fast validator — the actual HTTP calls are
+        // never invoked because REG-07's fault-tolerance branch swallows
+        // registry-lookup exceptions and lets CreateRun proceed. The tests
+        // that rely on strict registry checks would need a fake registered
+        // via ConfigureServices below.
+        builder.UseSetting("DataverseEnvironmentRegistry:AdminEnvironmentUrl", "https://l2-test.crm.dynamics.com");
 
         // Testing environment — TelemetryModule's AzureMonitorGuard skips
         // exporter wiring silently on non-Development/Production envs.
@@ -859,7 +1011,28 @@ public sealed class L2WebApplicationFactory : WebApplicationFactory<Program>
             // Wire the ILoggerProvider that captures QuarantineCleared records
             // so the FR-24 audit-log assertion has a deterministic sink.
             services.AddSingleton<ILoggerProvider>(AuditLogSink);
+
+            // REG-07 stub injection — when a test registered a stub via
+            // ReplaceRegistryClient, swap out the real Path X client.
+            if (_registryStub is not null)
+            {
+                ReplaceRegistryClientRegistration(services, _registryStub);
+            }
         });
+    }
+
+    private static void ReplaceRegistryClientRegistration(
+        IServiceCollection services,
+        Sprk.Provisioning.ControlPlane.Registry.IDataverseEnvironmentRegistryClient stub)
+    {
+        for (var i = services.Count - 1; i >= 0; i--)
+        {
+            if (services[i].ServiceType == typeof(Sprk.Provisioning.ControlPlane.Registry.IDataverseEnvironmentRegistryClient))
+            {
+                services.RemoveAt(i);
+            }
+        }
+        services.AddSingleton(stub);
     }
 
     private static void ReplaceSingleton<TService>(IServiceCollection services, TService instance)
@@ -962,6 +1135,34 @@ public sealed class InMemoryHandlerEnqueuer : IHandlerEnqueuer
         Enqueued.Add(envelope);
         return Task.CompletedTask;
     }
+}
+
+// -----------------------------------------------------------------------------
+// StubRegistryClient — test-only IDataverseEnvironmentRegistryClient for the
+// REG-07 CreateRun cross-check tests. Returns a pre-canned Snapshot from
+// LookupByEnvironmentIdAsync (or throws when ThrowOnLookup is set). All other
+// methods return safe defaults so nothing else in the DAG breaks.
+// -----------------------------------------------------------------------------
+
+internal sealed class StubRegistryClient : Sprk.Provisioning.ControlPlane.Registry.IDataverseEnvironmentRegistryClient
+{
+    public Sprk.Provisioning.ControlPlane.Registry.DataverseEnvironmentRegistrySnapshot? Snapshot { get; set; }
+    public Exception? ThrowOnLookup { get; set; }
+
+    public Task<Sprk.Provisioning.ControlPlane.Registry.DataverseEnvironmentRegistrySnapshot?> LookupByEnvironmentIdAsync(
+        string environmentId, CancellationToken cancellationToken)
+    {
+        if (ThrowOnLookup is { } ex) throw ex;
+        return Task.FromResult(Snapshot);
+    }
+
+    public Task<Sprk.Provisioning.ControlPlane.Registry.DataverseEnvironmentRegistrySnapshot?> LookupByTenantIdAsync(
+        string tenantId, CancellationToken cancellationToken)
+        => Task.FromResult<Sprk.Provisioning.ControlPlane.Registry.DataverseEnvironmentRegistrySnapshot?>(null);
+
+    public Task<Sprk.Provisioning.ControlPlane.Registry.RegistryUpdateOutcome> UpdateSetupStatusAsync(
+        Sprk.Provisioning.ControlPlane.Registry.RegistrySetupStatusUpdate update, CancellationToken cancellationToken)
+        => Task.FromResult<Sprk.Provisioning.ControlPlane.Registry.RegistryUpdateOutcome>(new Sprk.Provisioning.ControlPlane.Registry.RegistryUpdateOutcome.Success());
 }
 
 // -----------------------------------------------------------------------------

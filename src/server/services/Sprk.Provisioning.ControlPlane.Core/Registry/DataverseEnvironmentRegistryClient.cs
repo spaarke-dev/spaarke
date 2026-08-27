@@ -228,6 +228,78 @@ public sealed class DataverseEnvironmentRegistryClient : IDataverseEnvironmentRe
     }
 
     /// <inheritdoc/>
+    public async Task<DataverseEnvironmentRegistrySnapshot?> LookupByEnvironmentIdAsync(
+        string environmentId, CancellationToken cancellationToken)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(environmentId);
+
+        // Non-GUID → null. No OData URI emitted (parity with
+        // UpdateSetupStatusAsync's GUID guard shape).
+        if (!Guid.TryParse(environmentId, out var envRowId))
+        {
+            _logger.LogWarning(
+                "DataverseEnvironmentRegistryClient LookupByEnvironmentIdAsync received a non-GUID environmentId='{EnvironmentId}' — returning null.",
+                environmentId);
+            return null;
+        }
+
+        var envUri = BuildEnvUri();
+        var token = await AcquireTokenAsync(envUri, cancellationToken).ConfigureAwait(false);
+
+        // KeyLookup by row id via OData segment — no $filter needed.
+        var relative =
+            $"/api/data/v9.2/{_options.EntitySetName}({envRowId})?" +
+            $"$select={EnvironmentRowIdColumn},{CustomerIdColumn},{TenantIdColumn}," +
+            $"{SetupStatusColumn},{CurrentRunIdColumn}";
+        var requestUri = new Uri(envUri, relative);
+
+        var httpClient = _httpClientFactory.CreateClient(HttpClientName);
+        httpClient.Timeout = _options.RequestTimeout;
+
+        HttpResponseMessage response;
+        try
+        {
+            using var request = BuildRequest(HttpMethod.Get, requestUri, token.Token);
+            response = await httpClient.SendAsync(request, cancellationToken).ConfigureAwait(false);
+        }
+        catch (OperationCanceledException)
+        {
+            throw;
+        }
+        catch (Exception ex) when (ex is HttpRequestException or TaskCanceledException)
+        {
+            _logger.LogWarning(ex,
+                "DataverseEnvironmentRegistryClient LookupByEnvironmentIdAsync infrastructure fault for environmentId={EnvironmentId}",
+                envRowId);
+            throw new InvalidOperationException(
+                $"Registry lookup infrastructure error: {ex.GetType().Name}: {ex.Message}", ex);
+        }
+
+        try
+        {
+            if (response.StatusCode == HttpStatusCode.NotFound)
+            {
+                return null;
+            }
+            if (!response.IsSuccessStatusCode)
+            {
+                var body = await SafeReadBodyAsync(response, cancellationToken).ConfigureAwait(false);
+                throw new InvalidOperationException(
+                    $"Registry lookup by environmentId returned {(int)response.StatusCode} {response.StatusCode}. Body: {Truncate(body, 400)}");
+            }
+
+            var payload = await response.Content.ReadAsStringAsync(cancellationToken).ConfigureAwait(false);
+            using var doc = JsonDocument.Parse(string.IsNullOrWhiteSpace(payload) ? "{}" : payload);
+            // Row-id keyLookup returns the row inline (not under 'value').
+            return ParseSnapshot(doc.RootElement);
+        }
+        finally
+        {
+            response.Dispose();
+        }
+    }
+
+    /// <inheritdoc/>
     public async Task<RegistryUpdateOutcome> UpdateSetupStatusAsync(
         RegistrySetupStatusUpdate update, CancellationToken cancellationToken)
     {

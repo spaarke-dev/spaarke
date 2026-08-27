@@ -131,6 +131,35 @@ public interface IDataverseEnvironmentRegistryClient
             "(or an explicit test fake override)."));
 
     /// <summary>
+    /// REG-07 (customer-provisioning-orchestration-r1 Wave 2 B24 punchlist,
+    /// 2026-08-27) — looks up a <c>sprk_dataverseenvironment</c> row by its
+    /// GUID row id (<c>sprk_dataverseenvironmentid</c>). Mirror of
+    /// <see cref="LookupByTenantIdAsync"/> but keyed on the environment row id
+    /// (not the tenant id). Consumed by <c>RunsEndpoints.CreateRun</c> after
+    /// concurrency-guard acquire + before Cosmos write, to assert that the
+    /// operator-supplied <c>environmentId</c> actually names a row for the
+    /// requested customer + is in the <c>InProgress</c> setup state.
+    ///
+    /// Prevents a Step-1f-partial-failure or operator-typo <c>environmentId</c>
+    /// from letting H1–H12 run to completion + H13 PATCH the wrong row (which
+    /// would be a §4D I1 cross-customer bleed) or 404 in H13 with no recovery
+    /// path.
+    ///
+    /// DEFAULT IMPLEMENTATION NOTE (§11 minimal-churn): returns null so any
+    /// caller that reaches an un-overridden fake keeps working with the
+    /// null-check they already have from
+    /// <see cref="LookupByTenantIdAsync"/>. The real client + Null-Object
+    /// both override.
+    /// </summary>
+    /// <param name="environmentId">The Dataverse row id (GUID string). Non-GUID inputs surface as null (no OData URI is emitted).</param>
+    /// <param name="cancellationToken">Cancellation token.</param>
+    /// <returns>The matching snapshot, or <c>null</c> when no row exists for the given id.</returns>
+    Task<DataverseEnvironmentRegistrySnapshot?> LookupByEnvironmentIdAsync(
+        string environmentId,
+        CancellationToken cancellationToken)
+        => Task.FromResult<DataverseEnvironmentRegistrySnapshot?>(null);
+
+    /// <summary>
     /// REG-01 (customer-provisioning-orchestration-r1 Wave 2 B24 punchlist,
     /// 2026-08-27) — PATCHes an arbitrary column set on a <c>sprk_dataverseenvironment</c>
     /// row in a SINGLE Dataverse request. Consumed by H13 IMMEDIATELY BEFORE

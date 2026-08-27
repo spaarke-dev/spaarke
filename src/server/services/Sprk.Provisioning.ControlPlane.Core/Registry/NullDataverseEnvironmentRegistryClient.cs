@@ -115,6 +115,22 @@ public sealed class NullDataverseEnvironmentRegistryClient : IDataverseEnvironme
     }
 
     /// <inheritdoc/>
+    public Task<DataverseEnvironmentRegistrySnapshot?> LookupByEnvironmentIdAsync(
+        string environmentId, CancellationToken cancellationToken)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(environmentId);
+
+        _logger.LogWarning(
+            "NullDataverseEnvironmentRegistryClient in use — LookupByEnvironmentIdAsync returning null " +
+            "for environmentId={EnvironmentId}. REG-07 (2026-08-27): callers use this to sanity-check " +
+            "CreateRun-supplied environmentId against the registry; a null response short-circuits the check " +
+            "and lets the run proceed on trust — swap to the real DataverseEnvironmentRegistryClient in production.",
+            environmentId);
+
+        return Task.FromResult<DataverseEnvironmentRegistrySnapshot?>(null);
+    }
+
+    /// <inheritdoc/>
     public Task<RegistryUpdateOutcome> UpdateColumnsAsync(
         string environmentId,
         IReadOnlyDictionary<string, object?> columns,
