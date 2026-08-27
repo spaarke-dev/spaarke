@@ -503,11 +503,13 @@ $response = Invoke-RestMethod `
   -Headers @{ Authorization = "Bearer $token" } `
   -Body $body -ContentType "application/json"
 
-# response: { runId: "...", status: "Accepted" }
+# response: { runId: "...", customerId: "...", status: "NotStarted", location: "/api/runs/{runId}?customerId=..." }
+# Note: status is "NotStarted" (per RunStatus enum), NOT "Accepted" — earlier drafts of this skill
+# listed the fictional "Accepted" state (SKILL-10 fix).
 $runId = $response.runId
 ```
 
-L2 returns 202 Accepted within 100ms (FR-22 R20). Poll `GET /api/runs/{runId}` at 5s intervals until H0 reaches `Succeeded` or `Failed`. Cap total wait at 60s (H0 is fast); if exceeded, escalate.
+L2 returns 202 Accepted within 100ms (FR-22 R20). Poll `GET /api/runs/{runId}?customerId={customerId}` at 5s intervals until the run has H0 in `CompletedPhases` (Success outcome) OR RunStatus transitions to `Failed`. Cap total wait at 60s (H0 is fast); if exceeded, escalate.
 
 Present H0 outcome:
 
@@ -709,45 +711,50 @@ Wait for the literal string `proceed with provisioning`. Anything else — inclu
 
 ---
 
-### Step 4: Execute Loop — enqueue → poll → advance
+### Step 4: Execute Loop — poll → advance
 
-Once "proceed with provisioning" received, transition the run from `Preflight-Only` to `Executing`:
-
-```powershell
-Invoke-RestMethod `
-  -Uri "$l2Base/api/runs/$runId/resume" `
-  -Method POST `
-  -Headers @{ Authorization = "Bearer $token" } `
-  -Body (@{ mode = "execute" } | ConvertTo-Json) -ContentType "application/json"
-```
-
-L2 begins enqueuing H0.5..H14 per its state machine + reconciler (FR-22).
+Once "proceed with provisioning" received AND the Step 4 POST /api/runs from Step 2 has landed (see Step 2 note — POST /api/runs unconditionally enqueues H0; there is no server-side preflight-only mode), poll for run progress. L2's state reconciler auto-advances the DAG as each handler completes — `POST /api/runs/{id}/resume` is ONLY for retry of a `Failed` run per `RunsEndpoints.cs:232-244`, NOT a transition trigger.
 
 #### 4a. Poll loop
 
-Poll `GET /api/runs/{runId}` at **10s intervals** (per H1 15-30s guidance; 10s is slightly more responsive without overwhelming L2). Auto-refresh the token when a 401 appears (see Fallback Matrix).
+Poll `GET /api/runs/{runId}?customerId={customerId}` at **10s intervals**. The `?customerId=` query parameter is MANDATORY per `RunsEndpoints.cs:582` (`TryValidateRouteAndPartition` returns 400 if missing).
+
+```powershell
+# URL-encode customerId per RFC 3986; assume already-safe kebab-case per Step 1a validation but escape defensively
+$encodedCustomerId = [Uri]::EscapeDataString($customerId)
+$run = Invoke-RestMethod `
+  -Uri "$l2Base/api/runs/$runId`?customerId=$encodedCustomerId" `
+  -Method GET `
+  -Headers @{ Authorization = "Bearer $token" }
+```
+
+Auto-refresh the token when a 401 appears (see Fallback Matrix F2) — silently re-acquire via `az account get-access-token` and retry ONCE. Do NOT prompt the operator on transient 401.
+
+**Reconciler liveness check (EXEC-05)**: if 3 consecutive polls return identical `updatedAt` on the run doc AND the current handler is not one of the long-running ones (H2a bicep = 30min, H8 SPE 25h fallback, H12a AI-seed = 15min), fetch `$l2Base/healthz` to verify L2 is still up, then issue `POST /api/runs/{runId}/resume?customerId={cid}` (which per RunsEndpoints.cs re-enqueues the CurrentPhase envelope). This nudges a stuck reconciler; do NOT auto-retry if it doesn't unstick within another 3 polls — escalate as Fallback F3.
 
 Track TodoWrite entries for each handler as it enters/exits `Running`:
 - `Handler H2a (bicep-apply) — Running`
-- `Handler H2a (bicep-apply) — Succeeded (28m 14s)`
+- `Handler H2a (bicep-apply) — Completed (28m 14s)`
 - `Handler H6 (dv-solutions) — Running`
 - ...
 
-Present progress to the operator every ~5 completed handlers OR on any state transition (`WaitingOnGate`, `Failed`, `Quarantined`).
+Present progress to the operator every ~5 completed handlers OR on any state transition (`WaitingOnGate`, `Failed`, `Quarantined`, `Cancelled`).
 
-#### 4b. Handle each terminal state
+#### 4b. Handle each terminal state (RunStatus enum per `ProvisioningRun.cs:212-239`)
 
-The run's `status` field transitions through:
+The run's `status` field transitions through the actual enum values — NOT the fictional Accepted/Executing/Succeeded/Drifted values earlier drafts of this skill listed:
 
 | Status | Meaning | Skill action |
 |---|---|---|
-| `Accepted` | 202 returned; work not started | Poll |
-| `Executing` | Handlers running | Poll; update TodoWrite |
-| `WaitingOnGate` | Handler paused pending external condition | See Step 5 (manual gate handling) |
-| `Succeeded` | All handlers completed + H13 acceptance passed | See Step 6 (completion handoff) |
-| `Failed` | Handler failed with `Retryable*` or `Resumable` class | Present failure + `POST /api/runs/{id}/resume` option to operator |
-| `Quarantined` | Handler failed with `QuarantineRequired` class | HARD STOP; require `POST /api/runs/{id}/clear-quarantine` with reason |
-| `Drifted` | H13 detected `Successful-but-drifted` state | Present drift report + `resumeFromPhase` option |
+| `NotStarted` | POST /api/runs returned 202; H0 not yet dequeued from Service Bus | Poll |
+| `Running` | Handlers actively executing per the reconciler DAG | Poll; update TodoWrite; apply EXEC-05 liveness nudge if stuck |
+| `WaitingOnGate` | Handler paused pending external condition (H0.5 admin consent, H1 quota, H8 SPE replication) | See Step 5 (manual gate handling) |
+| `Completed` | All handlers completed + H13 acceptance passed | See Step 6 (completion handoff) |
+| `Failed` | Handler failed with `Retryable*` or `Resumable` class per §4C rollback taxonomy | Present failure + `POST /api/runs/{id}/resume?customerId=` option to operator |
+| `Cancelled` | Operator called `POST /api/runs/{id}/cancel`; sprk_currentrunid released (EXEC-07 fix) | Report cancellation; no auto-restart |
+| `Quarantined` | Handler failed with `QuarantineRequired` class | HARD STOP; require `POST /api/runs/{id}/clear-quarantine?customerId=` with reason + audit trail |
+
+There is NO `Drifted` state — drift is detected inline by H13 and surfaces as `Failed` with a specific rejection code (upgrade-drift-detected).
 
 Do NOT auto-retry `Failed` runs. Auto-retry hides operator-actionable diagnostics. Ask.
 
@@ -766,11 +773,19 @@ Some handlers reach `WaitingOnGate` because they require operator-visible action
   Reason:  The multi-tenant BFF app-reg needs admin consent on the customer's
            Entra tenant before H5 can create a Dataverse Application User.
 
-  ACTION FOR CUSTOMER ADMIN (send this URL to the customer):
-    https://login.microsoftonline.com/{customerTenantId}/adminconsent
-      ?client_id={bff-multi-tenant-app-id}
-      &redirect_uri=https://spaarke-bff-prod.azurewebsites.net/api/onboarding/consent-callback
-      &state={runId}
+  ACTION FOR CUSTOMER ADMIN (send this URL to the customer — skill substitutes {tokens} before display):
+    URL construction:
+      $bffAppId = $constants.spaarke.bffMultiTenantAppId  # from spaarke-constants.yaml per PLX-13
+      $callback = "$($constants.spaarke.bffProdBase)/api/onboarding/consent-callback"
+      $consentUrl = "https://login.microsoftonline.com/$tenantId/adminconsent" +
+                    "?client_id=$bffAppId&redirect_uri=$([Uri]::EscapeDataString($callback))&state=$runId"
+      Write-Host $consentUrl
+
+    Example (shape only — real values substituted at runtime):
+      https://login.microsoftonline.com/<customer-tenant-guid>/adminconsent
+        ?client_id=<multitenant-bff-app-id>
+        &redirect_uri=https%3A%2F%2Fspaarke-bff-prod.azurewebsites.net%2Fapi%2Fonboarding%2Fconsent-callback
+        &state=<runId>
 
   The customer admin clicks, signs in with a Global Admin account, and consents.
   H0.5 will auto-detect the callback (HMAC-verified) and advance the run.
@@ -795,26 +810,31 @@ Some handlers reach `WaitingOnGate` because they require operator-visible action
     1. Open Azure Portal → Subscription → Usage + Quotas → filter by {quota-name}
     2. Request quota increase (may require Microsoft support ticket)
     3. Wait for approval email (usually 15-60 min for standard bumps)
-    4. Return here and type 'resume' to retry H1
+    4. Return here and type 'advance' to have L2 re-verify quota + release the gate
 
-  The skill will hold at this gate until you type 'resume' or 'abandon'.
+  Skill call on 'advance': POST /api/runs/{runId}/gates/{gateId}/advance?customerId={cid}
+  (NOT /resume — /resume is for retrying a Failed run per RunsEndpoints.cs:232-244.)
 ```
 
-#### 5c. H8 SPE 24h replication wait
+#### 5c. H8 SPE container-type replication (per operator memory `feedback_spe_container_timing`, MS's documented 24h wait is near-instantaneous in practice)
 
 ```
 🔔 MANUAL GATE: SPE container-type replication in progress (H8)
 
   Handler: H8 spe-container-create
-  Reason:  Container-type created successfully but Microsoft-side replication
-           takes ~24h before H8.a can verify or H9 can bind BFF to the container.
+  Reason:  Container-type created successfully; H8.a needs Microsoft-side replication
+           to complete before it can verify or H9 can bind BFF to the container.
 
-  ACTION: none required — this is expected. The skill will exit and re-invoke
-          H8.a automatically 25 hours from now.
+  ACTION: none required. The skill polls H8.a on this schedule:
+    - Minutes 0-15: every 30-60s (empirical: near-instant per operator memory
+      `feedback_spe_container_timing`; 2026-08-22 Model 1 Prod stand-up saw
+      replication complete within ~2 min)
+    - Minutes 15-60: every 5 min
+    - Hour 1+: alert operator + fall back to 25h ceiling (defensive; almost
+      never fires in practice)
 
-  Alternatively, keep the skill running and it will poll every hour.
-
-  Estimated resume time: {timestamp + 25h}
+  The skill will not exit the session; it stays on this gate until H8.a succeeds
+  OR operator types 'abandon'.
 ```
 
 #### 5d. Generic pattern for any other `WaitingOnGate`
@@ -825,17 +845,18 @@ Some handlers reach `WaitingOnGate` because they require operator-visible action
   Reason: {gate reason from L2 response}
   Action: {gate.instructions from L2 response}
 
-  Type 'resume' when the action is complete (L2 will re-verify).
+  Type 'advance' when the action is complete — skill will POST
+  /api/runs/{runId}/gates/{gateId}/advance?customerId={cid} and let L2 re-verify.
   Type 'abandon' to quarantine the run.
 ```
 
-**IMPORTANT**: NEVER auto-advance past a gate by trusting the operator's assertion. Always call `POST /api/runs/{id}/resume` and let L2 re-verify the underlying condition (Dataverse query, Graph query, Azure resource state). If verification fails, the run stays at `WaitingOnGate`.
+**IMPORTANT**: NEVER auto-advance past a gate by trusting the operator's assertion. Always call `POST /api/runs/{id}/gates/{gateId}/advance?customerId={cid}` (per `RunsEndpoints.cs` GateAdvance handler) and let L2 re-verify the underlying condition (Dataverse query, Graph query, Azure resource state). If verification fails, the run stays at `WaitingOnGate`. `/resume` is ONLY for retrying a Failed run — using it for gate advance either does nothing (if run is still WaitingOnGate) or wastes a retry budget entry (if run has since transitioned to Failed).
 
 ---
 
 ### Step 6: Completion Handoff
 
-When the run reaches `Succeeded` (H13 acceptance passed):
+When the run reaches `Completed` (H13 acceptance passed — this is the terminal-success RunStatus per `ProvisioningRun.cs:212-239`; earlier drafts of this skill used the fictional `Succeeded`):
 
 #### 6a. Update `sprk_dataverseenvironment` registry
 
@@ -875,7 +896,7 @@ If MCP is disconnected, the fallback matrix triggers `pac data update` OR raw We
 - **Started**: {startedAt}
 - **Completed**: {completedAt}
 - **Wall-clock duration**: {duration}
-- **Status**: Succeeded / Failed / Quarantined / Drifted
+- **Status**: Completed / Failed / Cancelled / Quarantined (per `RunStatus` enum; no `Drifted` — drift surfaces as `Failed` + rejection code)
 - **L2 run URL**: {l2Base}/api/runs/{runId}
 
 ## Handler outcomes
@@ -954,14 +975,14 @@ If MCP is disconnected, the fallback matrix triggers `pac data update` OR raw We
 
 ### Step 7: Postmortem — write `lessons-learned.md` (MANDATORY) — added by task 203c per punch-list row A04
 
-Runs UNCONDITIONALLY after Step 6 (Completion Handoff) regardless of outcome — `Succeeded`, `Failed`, `Quarantined`, `Drifted`, or manual-abort. Written BEFORE the run folder is committed to git so the postmortem is captured with the same commit as the artifacts. Consumes the 203a-authored template at [`provisioning-runs/_templates/lessons-learned.md`](../../provisioning-runs/_templates/lessons-learned.md). Skipping this step silently regresses the two-level lessons process (in-flight direct-apply per root CLAUDE.md §7 wrap-up + this per-run postmortem).
+Runs UNCONDITIONALLY after Step 6 (Completion Handoff) regardless of outcome — `Completed`, `Failed`, `Cancelled`, `Quarantined`, or manual-abort (no `Drifted` state — drift surfaces as `Failed` + upgrade-drift-detected rejection code). Written BEFORE the run folder is committed to git so the postmortem is captured with the same commit as the artifacts. Consumes the 203a-authored template at [`provisioning-runs/_templates/lessons-learned.md`](../../provisioning-runs/_templates/lessons-learned.md). Skipping this step silently regresses the two-level lessons process (in-flight direct-apply per root CLAUDE.md §7 wrap-up + this per-run postmortem).
 
 Trigger conditions (each writes a distinct postmortem):
-- `Succeeded` (Ready reached) — capture what worked + manual gates encountered + recommendations
-- `Failed` (any handler unrecoverable per §4C taxonomy) — capture root cause + fix location + blocks-future-runs flag
+- `Completed` (H13 acceptance passed; sprk_setupstatus=Ready reached) — capture what worked + manual gates encountered + recommendations
+- `Failed` (any handler unrecoverable per §4C taxonomy; includes drift-detected via `upgrade-drift-detected` rejection code) — capture root cause + fix location + blocks-future-runs flag
+- `Cancelled` (operator called POST /api/runs/{id}/cancel) — capture stop point + rationale
 - `Quarantined` (rollback classified `NeedsHumanIntervention`) — capture quarantine reason + owner
-- `Drifted` (H13 detected registry drift post-run) — capture drift shape + reconciliation plan
-- Manual abort (operator stopped mid-run) — capture stop point + rationale
+- Manual abort (operator stopped skill session mid-run without calling cancel) — capture stop point + rationale
 
 #### 7a. Copy template + prefill run metadata
 
@@ -1348,7 +1369,7 @@ Dry-run is intended for pre-flight validation before a real customer deployment 
 | Handler retried past its retry budget | Auto-retry logic in the skill | REMOVED — the skill never auto-retries. Operator sees failures + decides. |
 | Manual gate auto-advanced by trusting operator assertion | Skill said "y" advances the run without L2 re-verifying | ALWAYS call `POST /api/runs/{id}/resume`; L2 re-verifies the underlying condition (Dataverse / Graph / Azure state). If verification fails, the run stays at `WaitingOnGate` regardless of operator input. |
 | `Quarantined` run silently ignored by operator (walked away) | Skill session ended before quarantine surfaced | Quarantine is written to Cosmos + surfaces on next `/provision-environment {customerId}` invocation. Skill presents it as the first order of business + refuses to start new runs until cleared. |
-| Handoff report not written on failure | Skill treated failure as "no report needed" | Report is written on ALL terminal states (Succeeded, Failed, Quarantined, Drifted). Failure reports capture the failure mode + diagnostic + resumption instructions. |
+| Handoff report not written on failure | Skill treated failure as "no report needed" | Report is written on ALL terminal RunStatus values (Completed, Failed, Cancelled, Quarantined — no Drifted; drift surfaces as Failed + rejection code). Failure reports capture the failure mode + diagnostic + resumption instructions. |
 | Registry update via MCP fails silently — run marked complete but registry stale | MCP disconnect between preflight + completion; skill didn't check | Fallback matrix triggers immediately on MCP failure; registry MUST be updated before completion is reported. If BOTH MCP + fallback fail, run is marked `CompleteButRegistryStale` and operator must manually update via `pac data update`. |
 | Token expires mid-run; skill fails hard | No auto-refresh | Fallback matrix documents `az account get-access-token` auto-refresh on 401 (see Fallback Matrix section, task 076 owns). |
 | L2 unreachable mid-run — skill panics | No graceful degradation | Fallback matrix documents escalation + resume-from-Cosmos-state pattern; L2's crash-recovery (I6) re-runs orphaned runs on restart. |
