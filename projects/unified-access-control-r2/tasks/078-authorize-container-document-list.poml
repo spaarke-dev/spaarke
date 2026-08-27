@@ -34,8 +34,14 @@ THE MAPPING IS SHARED, NOT NEW. Task 075 builds the record-aware container resol
 
 SEQUENCING. Depends on task 075 for the mapping. If 075 has not landed, do not build a private lookup — coordinate.</background>
     <relevant-files>
-      <file role="modify">src/server/api/Sprk.Bff.Api/ — the container documents endpoint</file>
-      <file role="reference">src/server/api/Sprk.Bff.Api/Api/UploadEndpoints.cs</file>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Api/DataverseDocumentsEndpoints.cs</file>
+      <!-- UploadEndpoints.cs was listed here as the reference for "the read-side twin of 073". Task 073
+           DELETED that file on 2026-08-27 (it retired the three routes rather than gating them), so the
+           reference is dead. The retirement REASONING is what mattered and it now lives in
+           tests/integration/regression/MiContainerKeyedWriteRouteRetirementTests.cs. Read that instead —
+           and note the asymmetry it implies for THIS task: 073 could delete because its routes had no
+           legitimate caller; this one has callers, so it must be GATED. -->
+      <file role="reference">tests/integration/regression/MiContainerKeyedWriteRouteRetirementTests.cs</file>
       <file role="reference">src/server/shared/Spaarke.Core/Auth/AuthorizationService.cs</file>
     </relevant-files>
   </context>
