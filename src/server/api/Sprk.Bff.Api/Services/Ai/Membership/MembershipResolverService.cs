@@ -74,11 +74,17 @@ public sealed class MembershipResolverService : IMembershipResolverService
     internal const string CacheResource = "membership-resolved";
 
     /// <summary>
-    /// Cache schema version per ADR-009. Bumped to 3 (r5 2026-07-09) alongside the
-    /// distinct='true' completeness fix (see <see cref="BuildFetchXml"/>) so that empty
-    /// membership results cached under the buggy query are orphaned rather than served.
+    /// Cache schema version per ADR-009. Bumped to 4 (unified-access-control-r2 task 015,
+    /// finding A-10 / spec FR-14) alongside the paging-determinism fix: the continuation-token
+    /// format changed from a bare skip-count to a versioned <c>(page, paging-cookie)</c> pair,
+    /// and page contents changed shape (a stable <c>&lt;order&gt;</c> + real page/count paging
+    /// replaced the malformed top+page/count mix). Entries cached under the OLD query shape
+    /// carry silently-truncated id sets, so they must be orphaned rather than served.
+    /// <para>
+    /// Prior bump: 3 (r5 2026-07-09) for the distinct='true' completeness fix.
+    /// </para>
     /// </summary>
-    private const int CacheVersion = 3;
+    private const int CacheVersion = 4;
 
     /// <summary>Phase 1A per-user cache TTL (FR-1A.8).</summary>
     internal static readonly TimeSpan CacheTtl = TimeSpan.FromMinutes(5);
@@ -251,17 +257,17 @@ public sealed class MembershipResolverService : IMembershipResolverService
         }
 
         // ── d) Build FetchXml ──────────────────────────────────────────────
-        // Strategy: <fetch top='{limit + 1}' distinct='true'> select id + each
-        // descriptor's lookup field, OR-joined conditions over (field, identity-value).
-        // top = limit + 1 lets us detect "has more" without a separate count query.
+        // Strategy: <fetch count='{limit}' page='{n}' [paging-cookie]> selecting the row id
+        // + each descriptor's lookup field, ordered by the primary id, with OR-joined
+        // conditions over (field, identity-value). See BuildFetchXml for the A-10 rationale.
         var effectiveLimit = ClampLimit(effectiveOptions.Limit);
-        var fetchSkip = DecodeContinuationSkip(effectiveOptions.ContinuationToken);
+        var cursor = DecodeContinuation(effectiveOptions.ContinuationToken);
         var (fetchXml, fetchSummary) = BuildFetchXml(
             normalizedEntity,
             descriptors,
             identity,
             effectiveLimit,
-            fetchSkip,
+            cursor,
             systemUserId);
 
         if (fetchSummary.ConditionCount == 0)
@@ -293,17 +299,11 @@ public sealed class MembershipResolverService : IMembershipResolverService
             .ConfigureAwait(false);
 
         // ── f) Materialize: dedupe + sort + byRole map ──────────────────────
-        var (ids, byRole, hasMore) = MaterializeResults(
-            entityCollection,
-            descriptors,
-            effectiveLimit);
+        var (ids, byRole) = MaterializeResults(entityCollection, descriptors);
 
         // ── g) Paging — emit continuationToken if more rows exist ──────────
-        string? nextToken = null;
-        if (hasMore)
-        {
-            nextToken = EncodeContinuationSkip(fetchSkip + effectiveLimit);
-        }
+        var nextToken = BuildNextContinuationToken(
+            entityCollection, cursor, effectiveLimit, normalizedEntity);
 
         // ── R3 Part 1D — transitive expansion (only when requested) ────────
         // Validation + per-related-entity FetchXml join. Throws
@@ -337,9 +337,10 @@ public sealed class MembershipResolverService : IMembershipResolverService
         _logger.LogInformation(
             "MembershipResolverService resolved systemUserId={SystemUserId} entity={EntityType} " +
             "in {ElapsedMs}ms (descriptors={DescriptorCount}, conditions={ConditionCount}, " +
-            "rows={RowCount}, roles={RoleCount}, hasMore={HasMore}, relatedEntities={RelatedCount})",
+            "rows={RowCount}, roles={RoleCount}, page={Page}, hasMore={HasMore}, relatedEntities={RelatedCount})",
             systemUserId, normalizedEntity, sw.ElapsedMilliseconds,
-            descriptors.Count, fetchSummary.ConditionCount, ids.Count, byRole.Count, hasMore,
+            descriptors.Count, fetchSummary.ConditionCount, ids.Count, byRole.Count,
+            cursor.Page, nextToken is not null,
             relatedByRole?.Count ?? 0);
 
         return response;
@@ -425,13 +426,13 @@ public sealed class MembershipResolverService : IMembershipResolverService
 
         // ── b) Build FetchXml via the EXISTING engine (reuse, not fork) ─────
         var effectiveLimit = ClampLimit(effectiveOptions.Limit);
-        var fetchSkip = DecodeContinuationSkip(effectiveOptions.ContinuationToken);
+        var cursor = DecodeContinuation(effectiveOptions.ContinuationToken);
         var (fetchXml, fetchSummary) = BuildFetchXml(
             normalizedEntity,
             descriptors,
             identity,
             effectiveLimit,
-            fetchSkip,
+            cursor,
             systemUserId: Guid.Empty);
 
         if (fetchSummary.ConditionCount == 0)
@@ -454,16 +455,10 @@ public sealed class MembershipResolverService : IMembershipResolverService
             .RetrieveMultipleAsync(fetch, ct)
             .ConfigureAwait(false);
 
-        var (ids, byRole, hasMore) = MaterializeResults(
-            entityCollection,
-            descriptors,
-            effectiveLimit);
+        var (ids, byRole) = MaterializeResults(entityCollection, descriptors);
 
-        string? nextToken = null;
-        if (hasMore)
-        {
-            nextToken = EncodeContinuationSkip(fetchSkip + effectiveLimit);
-        }
+        var nextToken = BuildNextContinuationToken(
+            entityCollection, cursor, effectiveLimit, normalizedEntity);
 
         // ── d) Build + cache response. RelatedByRole stays null — the
         // contact-anchored path does not do transitive expansion (task 022
@@ -627,7 +622,7 @@ public sealed class MembershipResolverService : IMembershipResolverService
         IReadOnlyList<MembershipDescriptor> descriptors,
         PersonIdentity identity,
         int limit,
-        int skip,
+        MembershipPageCursor cursor,
         Guid systemUserId)
     {
         // The set of attributes we need to project — entity id + each descriptor's
@@ -644,13 +639,34 @@ public sealed class MembershipResolverService : IMembershipResolverService
         // even for a user who owns 45 matters. This query has no <link-entity>, so each match
         // is exactly one row (no multiplication), and MaterializeResults already dedupes by id
         // (HashSet). distinct was therefore a no-op for dedup and actively broke id retrieval.
-        sb.Append("<fetch top='").Append(limit + 1).Append('\'');
-        if (skip > 0)
+        //
+        // PAGING (unified-access-control-r2 task 015 — finding A-10 / spec FR-14).
+        // The previous shape was `top='{limit+1}'` PLUS, on continuation, `page='N' count='{limit+1}'`.
+        // Three defects, all fixed here by adopting ONE scheme — Dataverse's documented
+        // page/count paging with a paging cookie:
+        //   (1) MIXING top WITH page/count is malformed FetchXml paging: `top` and the
+        //       page/count pair are mutually exclusive. We now emit count/page ONLY,
+        //       never `top`.
+        //   (2) `top={limit+1}` was used as a has-more SENTINEL, but the sentinel row was
+        //       then discarded by MaterializeResults while the next page started at
+        //       row limit+2 — so exactly one row was silently dropped at every page
+        //       boundary. has-more now comes from the platform's own
+        //       EntityCollection.MoreRecords signal, so NO data row is ever consumed to
+        //       answer "is there more?".
+        //   (3) NO <order> meant Dataverse was free to return an ARBITRARY subset for a
+        //       given page — pages could overlap or skip rows entirely, and which rows a
+        //       capped query returned was not reproducible. We now order by the entity's
+        //       primary id, which is the only guaranteed-unique (total, stable) sort key
+        //       on an arbitrary Dataverse entity. Ordering by a NON-unique column (e.g.
+        //       createdon) would leave ties free to reorder between pages and re-open the
+        //       same defect.
+        sb.Append("<fetch count='").Append(limit).Append('\'');
+        sb.Append(" page='").Append(cursor.Page).Append('\'');
+        if (!string.IsNullOrEmpty(cursor.PagingCookie))
         {
-            // FetchXml paging via 'page' attribute — page is 1-based with fixed
-            // 'count'. Convert skip → page (skip MUST be a multiple of limit).
-            var page = (skip / Math.Max(1, limit)) + 1;
-            sb.Append(" page='").Append(page).Append("' count='").Append(limit + 1).Append('\'');
+            // The cookie is platform-issued XML; it MUST be escaped to embed it in an
+            // attribute value (the SDK's own paging samples do the same).
+            sb.Append(" paging-cookie='").Append(EscapeXml(cursor.PagingCookie)).Append('\'');
         }
         sb.Append("><entity name='").Append(EscapeXml(entityType)).Append("'>");
 
@@ -664,6 +680,12 @@ public sealed class MembershipResolverService : IMembershipResolverService
                 sb.Append("<attribute name='").Append(EscapeXml(d.Field)).Append("' />");
             }
         }
+
+        // ── Stable total order (FR-14) — MUST precede <filter> per the FetchXml schema
+        // sequence (attribute*, order*, filter*, link-entity*).
+        sb.Append("<order attribute='")
+          .Append(EscapeXml(PrimaryIdAttribute(entityType)))
+          .Append("' descending='false' />");
 
         // OR-joined filter over (field, identity-value) pairs.
         sb.Append("<filter type='or'>");
@@ -754,6 +776,28 @@ public sealed class MembershipResolverService : IMembershipResolverService
         return (sb.ToString(), summary);
     }
 
+    /// <summary>
+    /// The logical name of <paramref name="entityType"/>'s primary-id attribute, used as
+    /// the stable total sort key for paging (FR-14). Dataverse names a table's primary key
+    /// <c>{entityLogicalName}id</c> — this holds by construction for every <c>sprk_*</c>
+    /// custom table (the resolver's actual targets: matter / project / work assignment /
+    /// document / event / …) and for the standard tables the membership resolver touches
+    /// (<c>account</c>, <c>contact</c>).
+    /// <para>
+    /// The convention is NOT universal across the whole Dataverse catalogue — a handful of
+    /// system tables deviate (e.g. <c>activitypointer</c>'s key is <c>activityid</c>). If the
+    /// resolver is ever pointed at such a table, Dataverse REJECTS the query with a 400
+    /// ("invalid attribute in order") and <see cref="IDataverseService.RetrieveMultipleAsync(FetchExpression, CancellationToken)"/>
+    /// throws — the caller then denies (ADR-003 fail-closed) instead of receiving a partial
+    /// set that looks complete. That is the deliberate failure mode: LOUD and safe, not
+    /// silent under-grant. Deriving the key from live metadata instead would require
+    /// extending <c>IMembershipFieldDiscoveryService</c>/<c>DiscoveryResult</c>, which is
+    /// outside this task's file scope — recorded in the task notes as the follow-up.
+    /// </para>
+    /// </summary>
+    internal static string PrimaryIdAttribute(string entityType)
+        => entityType.Trim().ToLowerInvariant() + "id";
+
     private static int AppendCondition(StringBuilder sb, string field, Guid value)
     {
         if (value == Guid.Empty)
@@ -788,17 +832,29 @@ public sealed class MembershipResolverService : IMembershipResolverService
 
     // ── Result materialization ─────────────────────────────────────────────
     /// <summary>
-    /// Walks the EntityCollection and produces:
-    ///   - distinct, sorted ids[] (truncated to limit)
-    ///   - byRole map: role → list of ids the user has that role on
-    ///   - hasMore: true when more rows exist beyond the requested limit
+    /// Walks the EntityCollection for ONE page and produces:
+    ///   - distinct, ascending-sorted ids[] for this page
+    ///   - byRole map: role → list of ids the user has that role on (this page)
+    /// <para>
+    /// A-10 / FR-14 fix: this method NO LONGER truncates the page and NO LONGER derives
+    /// has-more. Both were the off-by-one. Previously it received <c>top = limit + 1</c>
+    /// rows, kept <c>limit</c> of them, and reported <c>hasMore = count &gt; limit</c> — the
+    /// (limit+1)th row was DISCARDED here while the caller advanced the cursor past it, so
+    /// that row was never served by any page. has-more is now the platform's
+    /// <see cref="EntityCollection.MoreRecords"/> flag, read by the caller; a page's rows are
+    /// ALL kept.
+    /// </para>
+    /// <para>
+    /// A page is never trimmed even if the platform over-returns relative to
+    /// <c>count</c>: dropping rows here is precisely the silent under-grant A-10 describes,
+    /// and page/count advances by page NUMBER, so a dropped row would never be re-served.
+    /// Over-return is instead logged by the caller and de-duplicated across pages.
+    /// </para>
     /// </summary>
     private static (IReadOnlyList<Guid> Ids,
-                    IReadOnlyDictionary<string, IReadOnlyList<Guid>> ByRole,
-                    bool HasMore) MaterializeResults(
+                    IReadOnlyDictionary<string, IReadOnlyList<Guid>> ByRole) MaterializeResults(
         EntityCollection entityCollection,
-        IReadOnlyList<MembershipDescriptor> descriptors,
-        int limit)
+        IReadOnlyList<MembershipDescriptor> descriptors)
     {
         // Initialize byRole with every role as an empty list — empty buckets help
         // clients distinguish "queried, no matches" from "not in the query".
@@ -833,22 +889,21 @@ public sealed class MembershipResolverService : IMembershipResolverService
             }
         }
 
-        // Detect "has more" using the top=limit+1 sentinel.
-        var hasMore = allIds.Count > limit;
+        // Sort ids ascending for a deterministic PUBLIC output shape. NOTE: this is a
+        // presentation sort over the rows of ONE page — it is deliberately NOT the paging
+        // sort key. Page boundaries are decided server-side by the <order> on the primary id
+        // under Dataverse's own uniqueidentifier collation, which does NOT match .NET's
+        // Guid.CompareTo byte ordering. The code therefore never re-derives a page boundary
+        // client-side; it only stabilises the order of ids WITHIN the page it was handed.
+        var sortedIds = allIds.OrderBy(g => g).ToList();
 
-        // Sort ids ascending for deterministic output, then truncate to limit.
-        var sortedIds = allIds.OrderBy(g => g).Take(limit).ToList();
-        var keptSet = new HashSet<Guid>(sortedIds);
-
-        // Truncate byRole buckets to only the ids we kept in sortedIds.
         var byRoleFinal = new Dictionary<string, IReadOnlyList<Guid>>(StringComparer.Ordinal);
         foreach (var (role, set) in byRoleAccum)
         {
-            var kept = set.Where(keptSet.Contains).OrderBy(g => g).ToList();
-            byRoleFinal[role] = kept;
+            byRoleFinal[role] = set.OrderBy(g => g).ToList();
         }
 
-        return (sortedIds, byRoleFinal, hasMore);
+        return (sortedIds, byRoleFinal);
     }
 
     /// <summary>
@@ -1055,6 +1110,16 @@ public sealed class MembershipResolverService : IMembershipResolverService
             sb.Append("<attribute name='").Append(EscapeXml(field)).Append("' />");
         }
 
+        // Stable total order (FR-14, same defect class as the primary query). This query is
+        // single-page (top only, no continuation), so <order> does not affect completeness —
+        // but WITHOUT it, `top` selects an ARBITRARY MaxLimit-sized subset when a caller has
+        // more related rows than the cap, and re-running the same request can return a
+        // different subset. Ordering by the primary id makes "which rows the cap kept"
+        // reproducible.
+        sb.Append("<order attribute='")
+          .Append(EscapeXml(PrimaryIdAttribute(relatedEntity)))
+          .Append("' descending='false' />");
+
         sb.Append("<filter type='or'>");
         foreach (var field in backRefLookups)
         {
@@ -1185,49 +1250,132 @@ public sealed class MembershipResolverService : IMembershipResolverService
     }
 
     /// <summary>
-    /// Encodes the skip-count as a base64url continuation token. Opaque to
-    /// callers — they round-trip the value via
-    /// <see cref="MembershipResolveOptions.ContinuationToken"/>.
+    /// Decides whether another page exists and, if so, encodes the cursor for it.
+    /// <para>
+    /// has-more is the platform's <see cref="EntityCollection.MoreRecords"/> flag — the
+    /// authoritative signal, and crucially one that costs no data row (the old
+    /// <c>top = limit + 1</c> sentinel consumed one). The <c>returned &gt;= pageSize</c>
+    /// disjunct is a deliberate belt: a provider that returns a FULL page while reporting
+    /// <c>MoreRecords = false</c> would otherwise silently truncate the caller's set — the
+    /// exact A-10 failure. The cost of the belt is one extra round trip returning zero rows
+    /// when a result set happens to be an exact multiple of the page size; the cost of
+    /// omitting it is an undetectable under-grant, so the trade is not close.
+    /// </para>
     /// </summary>
-    private static string EncodeContinuationSkip(int skip)
+    private string? BuildNextContinuationToken(
+        EntityCollection collection,
+        MembershipPageCursor cursor,
+        int pageSize,
+        string entityType)
     {
-        var bytes = BitConverter.GetBytes(skip);
-        return Convert.ToBase64String(bytes)
+        var returned = collection.Entities.Count;
+
+        if (returned > pageSize)
+        {
+            // Never trimmed (see MaterializeResults) — surfaced so an over-returning
+            // provider is diagnosable rather than silently reshaping the page.
+            _logger.LogWarning(
+                "MembershipResolverService: page {Page} for entity={EntityType} returned {Returned} rows " +
+                "for count={PageSize}. Rows are kept (never trimmed) and de-duplicated across pages.",
+                cursor.Page, entityType, returned, pageSize);
+        }
+
+        var hasMore = collection.MoreRecords || returned >= pageSize;
+        if (!hasMore)
+        {
+            return null;
+        }
+
+        return EncodeContinuation(new MembershipPageCursor(cursor.Page + 1, collection.PagingCookie));
+    }
+
+    /// <summary>
+    /// One position in the membership result stream: the 1-based FetchXml page number plus
+    /// the platform-issued paging cookie for the PREVIOUS page (empty on the first page).
+    /// This replaces the old bare skip-count, which could not express Dataverse paging at all.
+    /// </summary>
+    internal readonly record struct MembershipPageCursor(int Page, string? PagingCookie)
+    {
+        internal static MembershipPageCursor First => new(1, null);
+    }
+
+    /// <summary>Continuation-token format marker. Bumped when the token layout changes.</summary>
+    private const string ContinuationTokenVersion = "v2";
+
+    /// <summary>
+    /// Encodes a cursor as an opaque base64url continuation token. Callers round-trip the
+    /// value via <see cref="MembershipResolveOptions.ContinuationToken"/> and MUST NOT parse it.
+    /// </summary>
+    private static string EncodeContinuation(MembershipPageCursor cursor)
+    {
+        // "v2|{page}|{cookie}" — the cookie may itself contain '|', so it is the LAST
+        // field and is never split.
+        var payload = string.Concat(
+            ContinuationTokenVersion,
+            "|",
+            cursor.Page.ToString(CultureInfo.InvariantCulture),
+            "|",
+            cursor.PagingCookie ?? string.Empty);
+
+        return Convert.ToBase64String(Encoding.UTF8.GetBytes(payload))
             .TrimEnd('=')
             .Replace('+', '-')
             .Replace('/', '_');
     }
 
     /// <summary>
-    /// Decodes a previously-emitted continuation token back to a skip-count.
-    /// Returns 0 for null/empty/invalid tokens (i.e., treat as "first page").
+    /// Decodes a previously-emitted continuation token.
+    /// <para>
+    /// A-10 / FR-14: a malformed token now THROWS <see cref="ArgumentException"/> (surfaced as
+    /// 400 by <c>MembershipEndpoints</c>) instead of silently decoding to "skip 0". The old
+    /// fail-soft behaviour turned a corrupt or stale cursor into a silent restart at page 1 —
+    /// a paging caller would then re-read page 1 forever, or stop early believing it had seen
+    /// everything. Neither is acceptable for a set that gates authorization: an unusable
+    /// cursor is a caller error and must be reported, never guessed.
+    /// </para>
     /// </summary>
-    private static int DecodeContinuationSkip(string? token)
+    private static MembershipPageCursor DecodeContinuation(string? token)
     {
         if (string.IsNullOrWhiteSpace(token))
         {
-            return 0;
+            return MembershipPageCursor.First;
         }
+
+        static ArgumentException Invalid(string reason) => new(
+            $"continuationToken is not a valid membership continuation token ({reason}). " +
+            "Pass the exact value returned in a prior response's continuationToken, or omit it " +
+            "to start from the first page.",
+            "options");
+
+        string payload;
         try
         {
-            var normalized = token.Replace('-', '+').Replace('_', '/');
+            var normalized = token.Trim().Replace('-', '+').Replace('_', '/');
             switch (normalized.Length % 4)
             {
+                case 1: throw Invalid("bad base64url length");
                 case 2: normalized += "=="; break;
                 case 3: normalized += "="; break;
             }
-            var bytes = Convert.FromBase64String(normalized);
-            if (bytes.Length != sizeof(int))
-            {
-                return 0;
-            }
-            var skip = BitConverter.ToInt32(bytes, 0);
-            return skip < 0 ? 0 : skip;
+            payload = Encoding.UTF8.GetString(Convert.FromBase64String(normalized));
         }
         catch (FormatException)
         {
-            return 0;
+            throw Invalid("not base64url");
         }
+
+        // Split into at most 3 parts so a cookie containing '|' survives intact.
+        var parts = payload.Split('|', 3);
+        if (parts.Length != 3 || !string.Equals(parts[0], ContinuationTokenVersion, StringComparison.Ordinal))
+        {
+            throw Invalid("unrecognised token version");
+        }
+        if (!int.TryParse(parts[1], NumberStyles.None, CultureInfo.InvariantCulture, out var page) || page < 1)
+        {
+            throw Invalid("page out of range");
+        }
+
+        return new MembershipPageCursor(page, parts[2].Length == 0 ? null : parts[2]);
     }
 
     // ── Cache helpers ──────────────────────────────────────────────────────
