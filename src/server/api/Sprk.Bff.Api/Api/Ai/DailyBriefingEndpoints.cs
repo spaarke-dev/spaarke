@@ -1,4 +1,4 @@
-﻿using Sprk.Bff.Api.Infrastructure.Authentication;
+using Sprk.Bff.Api.Infrastructure.Authentication;
 using System.Text;
 using System.Text.Json.Serialization;
 using Sprk.Bff.Api.Configuration;

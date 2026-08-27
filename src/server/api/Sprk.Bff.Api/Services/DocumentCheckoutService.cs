@@ -1,4 +1,4 @@
-﻿using Sprk.Bff.Api.Infrastructure.Authentication;
+using Sprk.Bff.Api.Infrastructure.Authentication;
 using System.Net.Http.Headers;
 using System.Net.Http.Json;
 using System.Security.Claims;

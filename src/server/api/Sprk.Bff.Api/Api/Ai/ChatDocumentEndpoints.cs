@@ -1,4 +1,4 @@
-﻿using System.Diagnostics;
+using System.Diagnostics;
 using System.Runtime.ExceptionServices;
 using System.Security.Claims;
 using System.Text;

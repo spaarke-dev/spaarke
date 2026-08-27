@@ -1,4 +1,4 @@
-﻿using Sprk.Bff.Api.Infrastructure.Authentication;
+using Sprk.Bff.Api.Infrastructure.Authentication;
 using System.Diagnostics;
 using System.Security.Claims;
 using System.Security.Cryptography;

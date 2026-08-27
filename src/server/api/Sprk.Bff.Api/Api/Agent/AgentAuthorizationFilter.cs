@@ -1,4 +1,4 @@
-﻿using Sprk.Bff.Api.Infrastructure.Authentication;
+using Sprk.Bff.Api.Infrastructure.Authentication;
 using System.Security.Claims;
 
 namespace Sprk.Bff.Api.Api.Agent;

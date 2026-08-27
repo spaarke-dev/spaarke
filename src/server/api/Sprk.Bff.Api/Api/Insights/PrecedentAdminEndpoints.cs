@@ -1,4 +1,4 @@
-﻿using Sprk.Bff.Api.Infrastructure.Authentication;
+using Sprk.Bff.Api.Infrastructure.Authentication;
 using System.Security.Claims;
 using Microsoft.AspNetCore.Mvc;
 using Sprk.Bff.Api.Api.Filters;

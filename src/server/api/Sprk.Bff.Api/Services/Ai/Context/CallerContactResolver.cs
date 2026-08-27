@@ -1,4 +1,4 @@
-﻿// spaarke-ai-architecture-redesign-r2 task AIR2-055 (FR-B-06): Caller-contact self-assignment
+// spaarke-ai-architecture-redesign-r2 task AIR2-055 (FR-B-06): Caller-contact self-assignment
 // resolution — deterministic claims→Dataverse-contact mapping, server-side only, feeding the
 // ContextEnvelope User slice's CallerContactId (ADR-039 "no runtime judgment for what should be
 // data" — "assign it to me" stops being model guesswork).

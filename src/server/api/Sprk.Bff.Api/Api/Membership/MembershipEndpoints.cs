@@ -1,4 +1,4 @@
-﻿// R3 Part 1 — User-Record Membership Resolution (user-facing endpoint)
+// R3 Part 1 — User-Record Membership Resolution (user-facing endpoint)
 // Task 035 (2026-06-21): GET /api/users/me/memberships/{entityType} — the public
 // surface defined by spec.md FR-1A.9. Resolves the calling user's
 // systemuser → 6-path PersonIdentity (task 031) → membership rows on the target

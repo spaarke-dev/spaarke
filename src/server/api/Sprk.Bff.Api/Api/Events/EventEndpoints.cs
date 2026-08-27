@@ -1,4 +1,4 @@
-﻿using System.Security.Claims;
+using System.Security.Claims;
 using Microsoft.AspNetCore.Mvc;
 using Spaarke.Dataverse;
 using Sprk.Bff.Api.Api.Events.Dtos;

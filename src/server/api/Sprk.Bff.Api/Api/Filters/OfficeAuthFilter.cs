@@ -1,4 +1,4 @@
-﻿using Sprk.Bff.Api.Infrastructure.Authentication;
+using Sprk.Bff.Api.Infrastructure.Authentication;
 using System.Security.Claims;
 using Microsoft.AspNetCore.Http.HttpResults;
 using Sprk.Bff.Api.Infrastructure.Errors;
