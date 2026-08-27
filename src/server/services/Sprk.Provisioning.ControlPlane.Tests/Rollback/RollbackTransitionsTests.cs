@@ -35,9 +35,9 @@ public sealed class RollbackTransitionsTests
     // -----------------------------------------------------------------------
 
     [Theory]
-    [InlineData(FailureClass.Resumable,            RunStatus.Failed)]
+    [InlineData(FailureClass.Resumable, RunStatus.Failed)]
     [InlineData(FailureClass.RetryableWithCleanup, RunStatus.Failed)]
-    [InlineData(FailureClass.QuarantineRequired,   RunStatus.Quarantined)]
+    [InlineData(FailureClass.QuarantineRequired, RunStatus.Quarantined)]
     [InlineData(FailureClass.SuccessfulButDrifted, RunStatus.Completed)]
     public void MapToRunStatus_MatchesSection4CTable(FailureClass failureClass, RunStatus expected)
     {
@@ -46,9 +46,9 @@ public sealed class RollbackTransitionsTests
     }
 
     [Theory]
-    [InlineData(FailureClass.Resumable,            false)]  // Operator resumes via POST /api/runs/{id}/resume.
+    [InlineData(FailureClass.Resumable, false)]  // Operator resumes via POST /api/runs/{id}/resume.
     [InlineData(FailureClass.RetryableWithCleanup, true)]   // Auto-retry — handler idempotency owns cleanup.
-    [InlineData(FailureClass.QuarantineRequired,   false)]  // Operator clears via POST /api/runs/{id}/clear-quarantine.
+    [InlineData(FailureClass.QuarantineRequired, false)]  // Operator clears via POST /api/runs/{id}/clear-quarantine.
     [InlineData(FailureClass.SuccessfulButDrifted, false)]  // Operator re-runs affected phases via POST /api/runs/{id}/resume.
     public void ShouldReEnqueue_MatchesSection4CRetryPolicy(FailureClass failureClass, bool expected)
     {
@@ -57,9 +57,9 @@ public sealed class RollbackTransitionsTests
     }
 
     [Theory]
-    [InlineData(FailureClass.Resumable,            false)]  // Operator may still resume — keep guard.
+    [InlineData(FailureClass.Resumable, false)]  // Operator may still resume — keep guard.
     [InlineData(FailureClass.RetryableWithCleanup, false)]  // Auto-retry in flight — keep guard.
-    [InlineData(FailureClass.QuarantineRequired,   false)]  // spec FR-24 SCOPE: BLOCK new runs until cleared.
+    [InlineData(FailureClass.QuarantineRequired, false)]  // spec FR-24 SCOPE: BLOCK new runs until cleared.
     [InlineData(FailureClass.SuccessfulButDrifted, true)]   // Run is Completed — customer may start a new run.
     public void ShouldReleaseCustomerGuard_MatchesSpecFR24Scope(FailureClass failureClass, bool expected)
     {

@@ -75,6 +75,19 @@ public class RecordMatchService : IRecordMatchService
             SearchMode = SearchMode.Any
         };
 
+        // TENANT SCOPING — deliberately absent, and waived rather than fixed. This query carries
+        // no tenant predicate. spaarke-records-index is single-tenant today (owner ruling
+        // 2026-08-26), so there is no other tenant's content to return, and the I2 tenant-isolation
+        // ArchTest waives this file on exactly that basis.
+        //
+        // The index schema DOES carry a filterable tenantId field (SearchIndexDocument.cs:22,
+        // documented as enforcing isolation per FR-12) — this query just never uses it. Adding the
+        // predicate here alone would not be a fix: the background path reaches this method via
+        // AttachmentClassificationJobHandler, and JobContract has no tenant field to supply one.
+        //
+        // If spaarke-records-index ever serves more than one tenant, scoping BOTH call paths is a
+        // prerequisite, not a follow-up. See ExcludedFileRelPaths in I2_AiSearchTenantIdFilterTests.
+        //
         // Apply record type filter
         if (!string.Equals(request.RecordTypeFilter, "all", StringComparison.OrdinalIgnoreCase))
         {

@@ -279,6 +279,109 @@ function qs(params: Record<string, string | number | boolean | undefined | null>
 // speApiClient - one object containing all endpoint groups
 // ---------------------------------------------------------------------------
 
+/**
+ * A container type exactly as the BFF sends it.
+ *
+ * The wire calls the identifier `id`; the client model calls it `containerTypeId`. Nothing mapped
+ * between them until 2026-08-26, so `ct.containerTypeId` was `undefined` on every container type in
+ * the app. Display survived (`displayName` and the billing fields happen to match), which is why the
+ * list LOOKED correct — but anything keyed on the identifier silently failed. The Register wizard was
+ * the visible casualty: every `<Option value={ct.containerTypeId}>` carried `undefined`, so the
+ * dropdown could not resolve a selection and the operator "could not select a container type".
+ *
+ * Mapping in this layer keeps the wire name where it belongs and lets component code go on using the
+ * domain name.
+ */
+interface WireContainerType {
+  id: string;
+  displayName: string;
+  description?: string;
+  billingClassification?: string;
+  billingStatus?: string;
+  createdDateTime?: string;
+  owningAppId?: string;
+  expiryDateTime?: string;
+  settings?: unknown;
+  /** Present only if a future server revision starts sending the domain name too. */
+  containerTypeId?: string;
+}
+
+/**
+ * Projects the wire shape onto the client model.
+ *
+ * `azureTenantId` and `isRegistered` are NOT set here: the endpoint does not send them. They stay
+ * undefined so the UI can say "Unknown" — which is what the Registered column already does, and is
+ * the honest answer, unlike defaulting to `false` ("this type is not registered") on the strength of
+ * a field the server never sent.
+ */
+function mapContainerType(w: WireContainerType): ContainerType {
+  return {
+    ...(w as unknown as ContainerType),
+    containerTypeId: w.containerTypeId ?? w.id,
+  };
+}
+
+/**
+ * The wire shape of a drive item, as `SpeContainerItemSummary` actually serialises it.
+ *
+ * 🔴 It is FLAT. `DriveItem` — the type every file-browser component consumes — is Graph-shaped and
+ * NESTED. Nothing converted between them, and because the response was cast rather than parsed,
+ * TypeScript reported nothing.
+ *
+ * The damage was total and silent, and it is the third instance of this exact defect in this
+ * project (`id`→`containerTypeId`, the five `{items,count}` envelopes, now this):
+ *
+ *   - `isFolder` (flat) vs `folder` (nested) — `isFolder(item)` checks `!!item.folder`, so it was
+ *     false for EVERY item. Every folder rendered as a File, with a File icon, sorted among the
+ *     files, and — since only folders are links — could not be opened at all. That is the operator's
+ *     "File Browser folders are not click-openable", and it is also why the `Communications` /
+ *     `Emails` / `Exports` investigation stalled: the app could not open them because it did not
+ *     believe they were folders.
+ *   - `mimeType` (flat) vs `file.mimeType` (nested) — the Type column had nothing to report.
+ *   - `createdByDisplayName` (flat) vs `lastModifiedBy.user.displayName` (nested) — "Modified By"
+ *     rendered an em-dash on every row, which reads as "nobody" rather than "not mapped".
+ *
+ * Note the last one is not a pure rename: the server sends CREATED-by and the grid asks for
+ * MODIFIED-by. They are different facts, so `createdBy` is populated here and `lastModifiedBy` is
+ * deliberately left undefined rather than being filled with the wrong person's name.
+ */
+interface WireDriveItem {
+  id: string;
+  name: string;
+  size?: number;
+  createdDateTime?: string;
+  lastModifiedDateTime?: string;
+  createdByDisplayName?: string;
+  isFolder?: boolean;
+  mimeType?: string;
+  webUrl?: string;
+  /** Present only if a future server revision starts sending the nested Graph shape directly. */
+  folder?: { childCount?: number };
+  file?: { mimeType?: string };
+}
+
+/** Projects the flat wire item onto the nested `DriveItem` the components expect. */
+function mapDriveItem(w: WireDriveItem): DriveItem {
+  const isFolder = w.isFolder ?? w.folder !== undefined;
+
+  return {
+    id: w.id,
+    name: w.name,
+    size: w.size,
+    createdDateTime: w.createdDateTime ?? "",
+    lastModifiedDateTime: w.lastModifiedDateTime ?? "",
+    webUrl: w.webUrl,
+    // Exactly one of these is present, which is how Graph itself distinguishes the two and what
+    // every consumer here tests against.
+    folder: isFolder ? (w.folder ?? {}) : undefined,
+    file: isFolder ? undefined : { mimeType: w.mimeType ?? w.file?.mimeType },
+    createdBy: w.createdByDisplayName
+      ? { user: { displayName: w.createdByDisplayName } }
+      : undefined,
+    // lastModifiedBy is NOT set — see the note above. The server does not send it.
+  };
+}
+
 export const speApiClient = {
   // =========================================================================
   // Configuration - Business Units
@@ -392,8 +495,9 @@ export const speApiClient = {
      * List all container types for the given config.
      */
     list(configId: string): Promise<ContainerType[]> {
-      return get<{ items: ContainerType[]; count: number }>("/spe/containertypes" + qs({ configId }))
-        .then(r => r.items);
+      return get<{ items: WireContainerType[]; count: number }>(
+        "/spe/containertypes" + qs({ configId }),
+      ).then((r) => r.items.map(mapContainerType));
     },
 
     /**
@@ -401,7 +505,9 @@ export const speApiClient = {
      * Get details for a single container type.
      */
     get(typeId: string, configId: string): Promise<ContainerType> {
-      return get<ContainerType>("/spe/containertypes/" + typeId + qs({ configId }));
+      return get<WireContainerType>(
+        "/spe/containertypes/" + typeId + qs({ configId }),
+      ).then(mapContainerType);
     },
 
     /**
@@ -412,7 +518,10 @@ export const speApiClient = {
       configId: string,
       body: { displayName: string; billingClassification: string },
     ): Promise<ContainerType> {
-      return post<typeof body, ContainerType>("/spe/containertypes" + qs({ configId }), body);
+      return post<typeof body, WireContainerType>(
+        "/spe/containertypes" + qs({ configId }),
+        body,
+      ).then(mapContainerType);
     },
 
     /**
@@ -424,10 +533,10 @@ export const speApiClient = {
       configId: string,
       body: Record<string, unknown>,
     ): Promise<ContainerType> {
-      return put<Record<string, unknown>, ContainerType>(
+      return put<Record<string, unknown>, WireContainerType>(
         "/spe/containertypes/" + typeId + "/settings" + qs({ configId }),
         body,
-      );
+      ).then(mapContainerType);
     },
 
     /**
@@ -664,10 +773,23 @@ export const speApiClient = {
      * GET /api/spe/containers/{containerId}/permissions?configId={id}
      * List all permission entries on a container.
      */
-    list(containerId: string, configId: string): Promise<ContainerPermission[]> {
-      return get<ContainerPermission[]>(
+    async list(
+      containerId: string,
+      configId: string,
+    ): Promise<ContainerPermission[]> {
+      // Envelope: `{ items, count }` (ContainerPermissionListResponse), not a bare array. This one
+      // had not surfaced in UAT yet only because nobody had opened Manage Permissions.
+      const page = await get<{ items?: ContainerPermission[] }>(
         "/spe/containers/" + containerId + "/permissions" + qs({ configId }),
       );
+      if (!page || !Array.isArray(page.items)) {
+        throw new Error(
+          "The permissions service returned an unrecognized response shape (expected an object " +
+            "with an 'items' array). Permissions could not be read; this is NOT a report that the " +
+            "container has none.",
+        );
+      }
+      return page.items;
     },
 
     /**
@@ -772,17 +894,18 @@ export const speApiClient = {
   // =========================================================================
 
   items: {
+    /** @see mapDriveItem — the wire shape is FLAT; `DriveItem` is nested. */
     /**
      * GET /api/spe/containers/{containerId}/items?configId={id}&folderId={folderId}
      * List items (files and folders) in a container folder.
      * Omit folderId to list the root folder.
      */
-    list(
+    async list(
       containerId: string,
       configId: string,
       options?: { folderId?: string; top?: number; skip?: number },
     ): Promise<DriveItem[]> {
-      return get<DriveItem[]>(
+      const wire = await get<WireDriveItem[]>(
         "/spe/containers/" + containerId + "/items" + qs({
           configId,
           folderId: options?.folderId,
@@ -790,15 +913,23 @@ export const speApiClient = {
           skip: options?.skip,
         }),
       );
+      if (!Array.isArray(wire)) {
+        throw new Error(
+          "Unexpected shape from GET /spe/containers/{id}/items — expected an array.",
+        );
+      }
+      return wire.map(mapDriveItem);
     },
 
     /**
      * GET /api/spe/containers/{containerId}/items/{itemId}?configId={id}
      * Get details for a single drive item.
      */
-    get(containerId: string, itemId: string, configId: string): Promise<DriveItem> {
-      return get<DriveItem>(
-        "/spe/containers/" + containerId + "/items/" + itemId + qs({ configId }),
+    async get(containerId: string, itemId: string, configId: string): Promise<DriveItem> {
+      return mapDriveItem(
+        await get<WireDriveItem>(
+          "/spe/containers/" + containerId + "/items/" + itemId + qs({ configId }),
+        ),
       );
     },
 
@@ -807,18 +938,20 @@ export const speApiClient = {
      * Upload a file to a container folder.
      * Caller must provide FormData with the file attached as the "file" field.
      */
-    upload(
+    async upload(
       containerId: string,
       configId: string,
       formData: FormData,
       options?: { folderId?: string },
     ): Promise<DriveItem> {
-      return postFormData<DriveItem>(
-        "/spe/containers/" + containerId + "/items/upload" + qs({
-          configId,
-          folderId: options?.folderId,
-        }),
-        formData,
+      return mapDriveItem(
+        await postFormData<WireDriveItem>(
+          "/spe/containers/" + containerId + "/items/upload" + qs({
+            configId,
+            folderId: options?.folderId,
+          }),
+          formData,
+        ),
       );
     },
 
@@ -855,18 +988,20 @@ export const speApiClient = {
      * POST /api/spe/containers/{containerId}/folders?configId={id}&parentId={parentId}
      * Create a new folder inside a container.
      */
-    createFolder(
+    async createFolder(
       containerId: string,
       configId: string,
       body: { name: string },
       options?: { parentId?: string },
     ): Promise<DriveItem> {
-      return post<typeof body, DriveItem>(
-        "/spe/containers/" + containerId + "/folders" + qs({
-          configId,
-          parentId: options?.parentId,
-        }),
-        body,
+      return mapDriveItem(
+        await post<typeof body, WireDriveItem>(
+          "/spe/containers/" + containerId + "/folders" + qs({
+            configId,
+            parentId: options?.parentId,
+          }),
+          body,
+        ),
       );
     },
   },
@@ -917,27 +1052,101 @@ export const speApiClient = {
   // Search
   // =========================================================================
 
+  /**
+   * Both search calls answer with a paged envelope of FLAT DTOs, while the results grids consume a
+   * NESTED shape (`{ container }` / `{ item }`). Two mismatches at once, and both were silent:
+   * TypeScript believed the old `Promise<…[]>` annotation, so the page stored an object where it
+   * expected an array and died on `.filter` — the "i.filter is not a function" seen in UAT
+   * 2026-08-25. Adapting here keeps the grids untouched and puts the wire-to-view translation in the
+   * one layer whose job it is.
+   */
   search: {
     /**
      * POST /api/spe/search/containers?configId={id}
      * Search for containers matching a query.
      */
-    containers(configId: string, body: SearchRequest): Promise<ContainerSearchResult[]> {
-      return post<SearchRequest, ContainerSearchResult[]>(
-        "/spe/search/containers" + qs({ configId }),
-        body,
-      );
+    async containers(
+      configId: string,
+      body: SearchRequest,
+    ): Promise<ContainerSearchResult[]> {
+      const page = await post<
+        SearchRequest,
+        {
+          items?: Array<{
+            id: string;
+            displayName: string;
+            description?: string;
+            containerTypeId?: string;
+          }>;
+        }
+      >("/spe/search/containers" + qs({ configId }), body);
+
+      if (!page || !Array.isArray(page.items)) {
+        throw new Error(
+          "The container search service returned an unrecognized response shape (expected an " +
+            "object with an 'items' array). No results could be read, which is not the same as " +
+            "there being no matches.",
+        );
+      }
+
+      // status / createdDateTime / storageUsedInBytes are deliberately left undefined — search does
+      // not report them, and defaulting them here would put invented values on an admin screen.
+      return page.items.map((c) => ({
+        container: {
+          id: c.id,
+          displayName: c.displayName,
+          description: c.description,
+          containerTypeId: c.containerTypeId,
+        },
+      }));
     },
 
     /**
      * POST /api/spe/search/items?configId={id}
      * Search for drive items matching a query.
      */
-    items(configId: string, body: SearchRequest): Promise<DriveItemSearchResult[]> {
-      return post<SearchRequest, DriveItemSearchResult[]>(
-        "/spe/search/items" + qs({ configId }),
-        body,
-      );
+    async items(
+      configId: string,
+      body: SearchRequest,
+    ): Promise<DriveItemSearchResult[]> {
+      const page = await post<
+        SearchRequest,
+        {
+          items?: Array<{
+            id: string;
+            name: string;
+            size?: number;
+            lastModifiedDateTime?: string;
+            containerId?: string;
+            containerName?: string;
+            webUrl?: string;
+            mimeType?: string;
+          }>;
+        }
+      >("/spe/search/items" + qs({ configId }), body);
+
+      if (!page || !Array.isArray(page.items)) {
+        throw new Error(
+          "The item search service returned an unrecognized response shape (expected an object " +
+            "with an 'items' array). No results could be read, which is not the same as there " +
+            "being no matches.",
+        );
+      }
+
+      return page.items.map((i) => ({
+        item: {
+          id: i.id,
+          name: i.name,
+          size: i.size,
+          lastModifiedDateTime: i.lastModifiedDateTime,
+          webUrl: i.webUrl,
+          // A drive item is a FILE when search reported a mime type, and a folder otherwise. This is
+          // the only signal the search projection carries, and the grid uses it to pick the icon.
+          ...(i.mimeType ? { file: { mimeType: i.mimeType } } : {}),
+        },
+        containerId: i.containerId ?? "",
+        containerName: i.containerName,
+      }));
     },
   },
 
@@ -984,8 +1193,18 @@ export const speApiClient = {
      * GET /api/spe/security/alerts?configId={id}
      * List security alerts for the tenant.
      */
-    listAlerts(configId: string): Promise<SecurityAlert[]> {
-      return get<SecurityAlert[]>("/spe/security/alerts" + qs({ configId }));
+    async listAlerts(configId: string): Promise<SecurityAlert[]> {
+      // Envelope: `{ items, count }` (SecurityAlertsResponse), not a bare array.
+      const page = await get<{ items?: SecurityAlert[] }>(
+        "/spe/security/alerts" + qs({ configId }),
+      );
+      if (!page || !Array.isArray(page.items)) {
+        throw new Error(
+          "The security service returned an unrecognized response shape (expected an object with " +
+            "an 'items' array). Alerts could not be read — do not read this as 'no alerts'.",
+        );
+      }
+      return page.items;
     },
 
     /**
@@ -1029,8 +1248,15 @@ export const speApiClient = {
     /**
      * GET /api/spe/audit?configId={id}&from={date}&to={date}&category={cat}
      * Query the audit log with optional date/category filters.
+     *
+     * The endpoint answers with a paged ENVELOPE — `{ items, count, top, skip }` — not a bare array.
+     * This call previously declared `Promise<AuditLogEntry[]>` and handed the envelope object straight
+     * to the page, which stored it in an array-typed state and then called `.slice()` on it. That threw
+     * `TypeError: entries.slice is not a function` during render, and with no error boundary above it
+     * the whole app unmounted — the white screen reported in UAT on 2026-08-25. TypeScript could not
+     * catch it: the declared return type was simply an assertion about JSON that nothing verified.
      */
-    query(options: {
+    async query(options: {
       configId: string;
       from?: string;
       to?: string;
@@ -1038,7 +1264,7 @@ export const speApiClient = {
       top?: number;
       skip?: number;
     }): Promise<AuditLogEntry[]> {
-      return get<AuditLogEntry[]>(
+      const page = await get<{ items?: AuditLogEntry[] }>(
         "/spe/audit" + qs({
           configId: options.configId,
           from: options.from,
@@ -1048,6 +1274,18 @@ export const speApiClient = {
           skip: options.skip,
         }),
       );
+
+      // Verify the shape rather than trusting the type parameter. An unexpected body must surface as a
+      // visible error, NOT as an empty array — "no audit entries" is a claim about the tenant's history
+      // that this client is in no position to make just because it failed to understand the response.
+      if (!page || !Array.isArray(page.items)) {
+        throw new Error(
+          "The audit log service returned an unrecognized response shape (expected an object with an " +
+            "'items' array). The entries could not be read, and this is not the same as there being none.",
+        );
+      }
+
+      return page.items;
     },
   },
 

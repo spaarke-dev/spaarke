@@ -236,7 +236,14 @@ export const SecureScoreCard: React.FC<SecureScoreCardProps> = ({
     );
   }
 
-  const pct = Math.round(score.percentage);
+  // Derive the percentage instead of reading `score.percentage`. The endpoint's SecureScoreDto
+  // carries only currentScore, maxScore and averageComparativeScores — it has never sent a
+  // `percentage`, so reading one produced Math.round(undefined) = NaN, rendered to operators as the
+  // "NaN%" badge seen in UAT 2026-08-25. The value is fully derivable from two fields we do get.
+  const pct =
+    score.maxScore > 0
+      ? Math.round((score.currentScore / score.maxScore) * 100)
+      : 0;
   const color = scoreColor(pct);
   const badgeColor = scoreBadgeColor(pct);
 
@@ -293,9 +300,17 @@ export const SecureScoreCard: React.FC<SecureScoreCardProps> = ({
           <Text size={200} className={styles.progressLabelText}>
             Security posture
           </Text>
-          <Text size={200} className={styles.progressLabelText}>
-            As of {new Date(score.createdDateTime).toLocaleDateString()}
-          </Text>
+          {/*
+            The endpoint does not return a snapshot date, so this rendered "As of Invalid Date" —
+            a caption that looks like a broken timestamp rather than an absent one. Show the label
+            only when a date actually arrives; say nothing otherwise.
+          */}
+          {score.createdDateTime &&
+          !Number.isNaN(new Date(score.createdDateTime).getTime()) ? (
+            <Text size={200} className={styles.progressLabelText}>
+              As of {new Date(score.createdDateTime).toLocaleDateString()}
+            </Text>
+          ) : null}
         </div>
         <ProgressBar
           value={score.currentScore / score.maxScore}

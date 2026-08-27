@@ -72,12 +72,16 @@ import {
   Copy16Regular,
   CheckmarkCircle16Filled,
   Link16Regular,
+  Dismiss20Regular,
 } from "@fluentui/react-icons";
 import { useBuContext } from "../../contexts/BuContext";
 import { speApiClient, describeApiError } from "../../services/speApiClient";
 import { copyToClipboard } from "../../services/clipboard";
 import type { Container, ContainerStatus } from "../../types/spe";
 import { ContainerDetail } from "./ContainerDetail";
+import { FileBrowserPage } from "../files/FileBrowserPage";
+import { useResizablePane, PaneSplitter } from "../layout/ResizablePane";
+import { useGridStyles } from "../layout/gridStyles";
 import {
   CONTAINER_URL_LABEL,
   CONTAINER_URL_ABSENT_LABEL,
@@ -172,7 +176,9 @@ const useStyles = makeStyles({
     color: tokens.colorNeutralForeground1,
   },
 
+  /** `display: block` so the scope line sits below the title — see ContainerTypesPage. */
   pageSubtitle: {
+    display: "block",
     color: tokens.colorNeutralForeground2,
   },
 
@@ -217,6 +223,45 @@ const useStyles = makeStyles({
     paddingBottom: tokens.spacingVerticalM,
     paddingLeft: tokens.spacingHorizontalXL,
     paddingRight: tokens.spacingHorizontalXL,
+  },
+
+  /**
+   * Browse pane below the list. Capped at half the viewport so the container list stays visible
+   * and usable while browsing — the point of the split is to see both, not to trade one for the
+   * other.
+   */
+  browsePane: {
+    display: "flex",
+    flexDirection: "column",
+    flex: "1 1 50%",
+    minHeight: "220px",
+    maxHeight: "55%",
+    overflow: "hidden",
+    borderTopWidth: "1px",
+    borderTopStyle: "solid",
+    borderTopColor: tokens.colorNeutralStroke2,
+    backgroundColor: tokens.colorNeutralBackground1,
+  },
+
+  browsePaneHeader: {
+    display: "flex",
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    gap: tokens.spacingHorizontalM,
+    paddingLeft: tokens.spacingHorizontalL,
+    paddingRight: tokens.spacingHorizontalM,
+    paddingTop: tokens.spacingVerticalS,
+    paddingBottom: tokens.spacingVerticalS,
+    backgroundColor: tokens.colorNeutralBackground2,
+    flexShrink: 0,
+  },
+
+  /** minHeight:0 is required, or the embedded page's own scroll container never scrolls. */
+  browsePaneBody: {
+    flex: "1 1 auto",
+    minHeight: 0,
+    overflow: "hidden",
   },
 
   /** DataGrid fills its parent. */
@@ -373,9 +418,30 @@ const ContainerUrlCell: React.FC<{ container: Container; configId?: string }> = 
   );
 };
 
+/**
+ * Column sizing for the containers grid — a MODULE-LEVEL CONSTANT, deliberately.
+ *
+ * 🔴 This was an inline object literal on the `<DataGrid>` until 2026-08-26. A fresh object every
+ * render means Fluent's `useTableColumnSizing` sees new options each time and re-applies
+ * `defaultWidth`, discarding whatever the operator had dragged. Selecting a row re-renders, so the
+ * columns snapped back the instant you clicked one — reported as "the columns collapse back to
+ * their default width when I click the column" (UAT round 8), and the reason widening the Container
+ * ID column to read the value was impossible: the click that started the selection undid the drag.
+ *
+ * A stable reference is the whole fix. Do NOT inline this back, and do not build it with `useMemo`
+ * inside the component either unless the dependency array is genuinely empty — same failure.
+ */
+const COLUMN_SIZING = {
+  displayName: { minWidth: 120, defaultWidth: 200, idealWidth: 200 },
+  id: { minWidth: 120, defaultWidth: 300, idealWidth: 300 },
+  status: { minWidth: 80, defaultWidth: 110, idealWidth: 110 },
+  createdDateTime: { minWidth: 90, defaultWidth: 130, idealWidth: 130 },
+  storageUsedInBytes: { minWidth: 100, defaultWidth: 140, idealWidth: 140 },
+  webUrl: { minWidth: 100, defaultWidth: 140, idealWidth: 140 },
+} as const;
+
 /** Build typed Fluent DataGrid column definitions for Container rows. */
 function buildColumns(
-  onBrowse?: (containerId: string, containerName?: string) => void,
   configId?: string,
 ): TableColumnDefinition<Container>[] {
   return [
@@ -383,8 +449,32 @@ function buildColumns(
       columnId: "displayName",
       renderHeaderCell: () => "Name",
       renderCell: (container) => (
-        <Text weight="semibold" truncate>
+        <Text weight="semibold" truncate wrap={false}>
           {container.displayName}
+        </Text>
+      ),
+    }),
+    createTableColumn<Container>({
+      columnId: "id",
+      renderHeaderCell: () => "Container ID",
+      /*
+       * Operator-requested (UAT 2026-08-26). The container ID is what every Graph call, support
+       * ticket and log line identifies a container by, and until now the only place to read one was
+       * the detail panel. Monospace because these are opaque base64-ish strings that get compared
+       * character by character; the full value is on the title attribute since the cell truncates.
+       */
+      renderCell: (container) => (
+        <Text
+          truncate
+          wrap={false}
+          title={container.id}
+          style={{
+            fontFamily: tokens.fontFamilyMonospace,
+            fontSize: tokens.fontSizeBase200,
+            color: tokens.colorNeutralForeground2,
+          }}
+        >
+          {container.id}
         </Text>
       ),
     }),
@@ -441,26 +531,15 @@ function buildColumns(
         <ContainerUrlCell container={container} configId={configId} />
       ),
     }),
-    createTableColumn<Container>({
-      columnId: "browse",
-      renderHeaderCell: () => "",
-      renderCell: (container) =>
-        onBrowse ? (
-          <Button
-            appearance="subtle"
-            size="small"
-            icon={<FolderOpen20Regular />}
-            onClick={(e) => {
-              e.stopPropagation();
-              onBrowse(container.id, container.displayName);
-            }}
-            title="Browse files"
-            aria-label={`Browse files in ${container.displayName}`}
-          >
-            Browse
-          </Button>
-        ) : null,
-    }),
+    /*
+     * The per-row "Browse" column was REMOVED on 2026-08-26 (UAT round 8). It duplicated the
+     * Browse toolbar button, which already acts on the selected row, and it cost a full column of
+     * horizontal room on a grid whose Container ID column needs every pixel it can get.
+     *
+     * The `onBrowse` PARAMETER went with it. An earlier draft of this comment claimed the
+     * toolbar still used it — it does not; the toolbar calls `setBrowseContainer` directly, so
+     * the parameter was dead the moment the column left. `tsc --noEmit` caught the claim.
+     */
   ];
 }
 
@@ -622,10 +701,22 @@ export const ContainersPage: React.FC<ContainersPageProps> = ({
   const [createOpen, setCreateOpen] = React.useState(false);
   const [createSaving, setCreateSaving] = React.useState(false);
 
+  /**
+   * The container currently open in the browse pane below the list, or null when the pane is
+   * closed. File Browser stopped being a top-level tab on 2026-08-26: it could only ever work on a
+   * container chosen HERE, so as a peer tab it was either greyed out or showed a "pick a container"
+   * prompt — a tab whose job was to tell you to go to another tab. It is now the bottom half of
+   * this page.
+   */
+  const [browseContainer, setBrowseContainer] = React.useState<{
+    id: string;
+    name?: string;
+  } | null>(null);
+
   // ── Column Definitions (stable reference) ──────────────────────────────────
 
   const columns = React.useMemo(
-    () => buildColumns(onOpenContainer, selectedConfig?.id),
+    () => buildColumns(selectedConfig?.id),
     [onOpenContainer, selectedConfig],
   );
 
@@ -684,12 +775,25 @@ export const ContainersPage: React.FC<ContainersPageProps> = ({
   // ── Row Click Handler (opens detail panel) ───────────────────────────────────
 
   /**
-   * Opens the ContainerDetail side panel for the clicked container.
-   * This is triggered by clicking on the non-checkbox area of a row.
+   * Opens the ContainerDetail pane for the clicked container.
+   * This is triggered by clicking on the non-radio area of a row.
+   *
+   * Closes the browse pane first. Since 2026-08-26 both panes dock BELOW the list rather than
+   * overlaying it from the right, so two open at once would leave the grid a sliver between them.
+   * They are alternative views of one container — its metadata, or its files — so showing one at a
+   * time is also the honest model.
    */
   const handleRowClick = React.useCallback((containerId: string) => {
+    setBrowseContainer(null);
     setDetailContainerId(containerId);
   }, []);
+
+  /*
+   * Drag-to-resize for the two bottom panes (UAT round 6). They are mutually exclusive, so ONE
+   * height serves both — dragging the browse pane and then opening details keeps the size the
+   * operator just chose, rather than snapping back to a default.
+   */
+  const bottomPane = useResizablePane({ defaultHeight: 380, minHeight: 160 });
 
   // ── Toolbar Action Handlers ─────────────────────────────────────────────────
 
@@ -895,6 +999,38 @@ export const ContainersPage: React.FC<ContainersPageProps> = ({
           </ToolbarButton>
         </Tooltip>
 
+        {/*
+          Browse opens the file browser in the pane below, for the ONE selected container.
+          Deliberately requires exactly one selection: browsing is a single-container act, so with
+          two rows ticked there is no defensible answer to "browse which?".
+        */}
+        <Tooltip
+          content={
+            selectedContainers.length === 1
+              ? `Browse files in "${selectedContainers[0].displayName}"`
+              : selectedContainers.length > 1
+                ? "Select a single container to browse its files"
+                : "Select a container to browse its files"
+          }
+          relationship="description"
+        >
+          <ToolbarButton
+            icon={<FolderOpen20Regular />}
+            onClick={() => {
+              // Mutually exclusive with the detail pane — see handleRowClick.
+              setDetailContainerId(null);
+              setBrowseContainer({
+                id: selectedContainers[0].id,
+                name: selectedContainers[0].displayName,
+              });
+            }}
+            disabled={selectedContainers.length !== 1 || actionInProgress || loading}
+            aria-label="Browse files in the selected container"
+          >
+            <span className={styles.buttonLabel}>Browse</span>
+          </ToolbarButton>
+        </Tooltip>
+
         <ToolbarDivider />
 
         {/* Activate */}
@@ -1084,6 +1220,50 @@ export const ContainersPage: React.FC<ContainersPageProps> = ({
         )}
       </div>
 
+      {/*
+        ── Browse pane (the former File Browser tab) ──
+        Renders only when a container has been chosen, so the page costs nothing until asked for.
+        FileBrowserPage already took (containerId, configId, containerName) as props, so it embeds
+        here unchanged — it never needed to be a route.
+      */}
+      {browseContainer && (
+        <PaneSplitter
+          label="the file browser"
+          height={bottomPane.height}
+          onPointerDown={bottomPane.onPointerDown}
+          onKeyDown={bottomPane.onKeyDown}
+          isDragging={bottomPane.isDragging}
+        />
+      )}
+      {browseContainer && (
+        <div
+          className={styles.browsePane}
+          style={{ height: `${bottomPane.height}px`, flex: "0 0 auto", maxHeight: "none" }}
+        >
+          <div className={styles.browsePaneHeader}>
+            <Text size={300} weight="semibold">
+              Files in &ldquo;{browseContainer.name ?? browseContainer.id}&rdquo;
+            </Text>
+            <Tooltip content="Close the file browser" relationship="label">
+              <Button
+                appearance="subtle"
+                size="small"
+                icon={<Dismiss20Regular />}
+                onClick={() => setBrowseContainer(null)}
+                aria-label="Close the file browser"
+              />
+            </Tooltip>
+          </div>
+          <div className={styles.browsePaneBody}>
+            <FileBrowserPage
+              containerId={browseContainer.id}
+              configId={selectedConfig.id}
+              containerName={browseContainer.name}
+            />
+          </div>
+        </div>
+      )}
+
       {/* ── Create Container Dialog ── */}
       <CreateContainerDialog
         open={createOpen}
@@ -1093,10 +1273,20 @@ export const ContainersPage: React.FC<ContainersPageProps> = ({
       />
 
       {/* ── Container Detail Panel ── */}
+      {detailContainerId !== null && (
+        <PaneSplitter
+          label="container details"
+          height={bottomPane.height}
+          onPointerDown={bottomPane.onPointerDown}
+          onKeyDown={bottomPane.onKeyDown}
+          isDragging={bottomPane.isDragging}
+        />
+      )}
       <ContainerDetail
         containerId={detailContainerId}
         onClose={() => setDetailContainerId(null)}
         onBrowseFiles={onOpenContainer}
+        paneHeight={bottomPane.height}
       />
     </div>
   );
@@ -1111,8 +1301,15 @@ export const ContainersPage: React.FC<ContainersPageProps> = ({
  * Extracted to keep ContainersPage readable and allow future feature extension.
  *
  * Row interaction model:
- *   - Clicking the checkbox cell toggles multi-select (toolbar actions).
- *   - Clicking any non-checkbox cell opens the ContainerDetail side panel.
+ *   - Clicking the radio cell selects that container (toolbar actions act on it).
+ *   - Clicking any non-radio cell opens the ContainerDetail side panel.
+ *
+ * ⚠️ **Single-select, operator-directed (UAT 2026-08-26).** This grid was multi-select until then.
+ * The consequence is deliberate and worth knowing before "restoring" it: Activate / Lock / Unlock /
+ * Delete now act on exactly one container per invocation, and `BulkOperationService` — which those
+ * toolbar actions call, and which batches across many containers — no longer has a UI that can
+ * feed it more than one. The service is intact and still batches; only the reachable input narrowed.
+ * Reverting to `multiselect` here restores bulk behaviour with no other change.
  */
 interface ContainerDataGridProps {
   containers: Container[];
@@ -1132,11 +1329,10 @@ const ContainerDataGrid: React.FC<ContainerDataGridProps> = ({
   onRowClick,
   className,
 }) => {
+  const grid = useGridStyles();
   const {
     getRows,
     selection: {
-      allRowsSelected,
-      toggleAllRows,
       toggleRow,
       isRowSelected,
     },
@@ -1147,7 +1343,7 @@ const ContainerDataGrid: React.FC<ContainerDataGridProps> = ({
     },
     [
       useTableSelection({
-        selectionMode: "multiselect",
+        selectionMode: "single",
         selectedItems: selectedIds,
         onSelectionChange,
       }),
@@ -1158,14 +1354,14 @@ const ContainerDataGrid: React.FC<ContainerDataGridProps> = ({
     const isSelected = isRowSelected(row.rowId);
     return {
       ...row,
-      // Row click opens the detail panel — checkbox is handled separately
+      // Row click opens the detail panel — the radio cell is handled separately
       onClick: (e: React.MouseEvent) => {
-        // If the click target is the selection checkbox cell, toggle selection instead
+        // If the click target is the selection radio cell, toggle selection instead
         const target = e.target as HTMLElement;
-        const isCheckbox =
+        const isSelectionCell =
           target.tagName === "INPUT" ||
           target.closest("[data-selection-cell]") !== null;
-        if (isCheckbox) {
+        if (isSelectionCell) {
           toggleRow(e, row.rowId);
         } else {
           onRowClick(row.item.id);
@@ -1190,31 +1386,25 @@ const ContainerDataGrid: React.FC<ContainerDataGridProps> = ({
       items={containers}
       columns={columns}
       sortable={false}
-      selectionMode="multiselect"
+      selectionMode="single"
       selectedItems={selectedIds}
       onSelectionChange={onSelectionChange}
       getRowId={(container) => container.id}
       className={className}
       aria-label="Containers"
+      /* Drag a header edge to resize (UAT round 6). Container IDs and names vary wildly in
+         length, so no fixed set of widths suits every tenant — let the operator set them. */
+      resizableColumns
+      columnSizingOptions={COLUMN_SIZING}
     >
       <DataGridHeader>
-        <DataGridRow
-          selectionCell={{
-            checkboxIndicator: {
-              "aria-label": "Select all containers",
-            },
-          }}
-          aria-selected={allRowsSelected}
-          onClick={(e: React.MouseEvent<HTMLTableRowElement>) => toggleAllRows(e)}
-          onKeyDown={(e: React.KeyboardEvent<HTMLTableRowElement>) => {
-            if (e.key === " " || e.key === "Enter") {
-              e.preventDefault();
-              toggleAllRows(e as unknown as React.MouseEvent);
-            }
-          }}
-        >
+        {/* No select-all affordance under single-select — there is nothing to select all of.
+            Fluent renders an empty leading cell to keep the columns aligned with the rows. */}
+        <DataGridRow>
           {({ renderHeaderCell }) => (
-            <DataGridHeaderCell>{renderHeaderCell()}</DataGridHeaderCell>
+            <DataGridHeaderCell className={grid.headerCell}>
+              {renderHeaderCell()}
+            </DataGridHeaderCell>
           )}
         </DataGridRow>
       </DataGridHeader>
@@ -1225,7 +1415,8 @@ const ContainerDataGrid: React.FC<ContainerDataGridProps> = ({
             <DataGridRow<Container>
               key={rowId}
               selectionCell={{
-                checkboxIndicator: {
+                type: "radio",
+                radioIndicator: {
                   "aria-label": `Select ${item.displayName}`,
                 },
               }}
@@ -1235,7 +1426,9 @@ const ContainerDataGrid: React.FC<ContainerDataGridProps> = ({
               appearance={row?.appearance}
               tabIndex={0}
             >
-              {({ renderCell }) => <DataGridCell>{renderCell(item)}</DataGridCell>}
+              {({ renderCell }) => (
+                <DataGridCell className={grid.cell}>{renderCell(item)}</DataGridCell>
+              )}
             </DataGridRow>
           );
         }}

@@ -7,6 +7,9 @@ import {
 import { resolveTheme, setupThemeListener } from "./providers/ThemeProvider";
 import { BuProvider, useBuContext } from "./contexts/BuContext";
 import { AppShell, type SpeAdminPage } from "./components/layout/AppShell";
+import { PageErrorBoundary } from "./components/layout/PageErrorBoundary";
+import { useResizablePane, PaneSplitter } from "./components/layout/ResizablePane";
+import { useThinScrollbars } from "./components/layout/scrollbarStyles";
 import { DashboardPage } from "./components/dashboard/DashboardPage";
 import { FileBrowserPage } from "./components/files/FileBrowserPage";
 import { SettingsPage } from "./components/settings/SettingsPage";
@@ -171,6 +174,9 @@ const AppContent: React.FC<AppContentProps> = ({
   // Container type selected for detail panel — set when user clicks a row in ContainerTypesPage.
   const [detailContainerTypeId, setDetailContainerTypeId] = React.useState<string | null>(null);
 
+  /** Drag-to-resize state for the Container Types detail pane (UAT round 6). */
+  const typeDetailPane = useResizablePane({ defaultHeight: 340, minHeight: 160 });
+
   /** Called by ContainersPage when the user opens a container for browsing. */
   const handleOpenContainerInBrowser = React.useCallback(
     (containerId: string, containerName?: string) => {
@@ -200,6 +206,13 @@ const AppContent: React.FC<AppContentProps> = ({
        * ContainersPage:       task SPE-033 (placeholder still shown)
        * ContainerTypesPage:   task SPE-061
        */}
+      {/*
+       * Wraps the routed page only — never the shell. A render crash inside one page must not take
+       * the nav rail and pickers down with it, because navigating away is the operator's escape
+       * hatch. Before this boundary existed, any such crash unmounted the entire app and showed a
+       * blank white page (UAT 2026-08-25, Audit Log).
+       */}
+      <PageErrorBoundary pageKey={activePage}>
       {activePage === "dashboard" ? (
         <DashboardPage />
       ) : activePage === "file-browser" ? (
@@ -225,13 +238,41 @@ const AppContent: React.FC<AppContentProps> = ({
           initialDetailContainerId={params.containerId}
         />
       ) : activePage === "container-types" ? (
-        <>
-          <ContainerTypesPage onOpenDetail={setDetailContainerTypeId} />
+        /*
+         * Master-detail, stacked (UAT 2026-08-26). The detail pane used to be a fixed 440px
+         * overlay on the right with a modal backdrop; it is now a docked bottom pane. This flex
+         * column is what makes the list SHRINK when the pane opens instead of being covered by it
+         * — the inner wrapper gives ContainerTypesPage a correctly-sized box for its `height: 100%`
+         * to resolve against, and ContainerTypeDetail renders null when nothing is selected, so the
+         * list gets the full height back on close.
+         */
+        <div
+          style={{
+            display: "flex",
+            flexDirection: "column",
+            height: "100%",
+            overflow: "hidden",
+          }}
+        >
+          <div style={{ flex: "1 1 auto", minHeight: 0, overflow: "hidden" }}>
+            <ContainerTypesPage onOpenDetail={setDetailContainerTypeId} />
+          </div>
+          {/* Splitter renders only alongside the pane it resizes. */}
+          {detailContainerTypeId !== null && (
+            <PaneSplitter
+              label="container type details"
+              height={typeDetailPane.height}
+              onPointerDown={typeDetailPane.onPointerDown}
+              onKeyDown={typeDetailPane.onKeyDown}
+              isDragging={typeDetailPane.isDragging}
+            />
+          )}
           <ContainerTypeDetail
             containerTypeId={detailContainerTypeId}
             onClose={() => setDetailContainerTypeId(null)}
+            paneHeight={typeDetailPane.height}
           />
-        </>
+        </div>
       ) : (
         // Placeholder for any remaining pages not yet implemented
         <div
@@ -255,6 +296,7 @@ const AppContent: React.FC<AppContentProps> = ({
           </Text>
         </div>
       )}
+      </PageErrorBoundary>
     </AppShell>
   );
 };
@@ -264,6 +306,10 @@ const AppContent: React.FC<AppContentProps> = ({
 // ─────────────────────────────────────────────────────────────────────────────
 
 export const App: React.FC = () => {
+  // Global thin-scrollbar styling — see scrollbarStyles.ts for the two-mechanism rationale
+  // and why this is app-local rather than in @spaarke/ui-components.
+  useThinScrollbars();
+
   const [theme, setTheme] = React.useState(resolveTheme);
 
   // Parse URL parameters once on mount (stable across renders)
