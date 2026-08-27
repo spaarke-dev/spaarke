@@ -40,7 +40,27 @@ Only the first unblocks the currently-red workflow. **The rest will fail identic
 
 `AZURE_CLIENT_ID` is a write-only GitHub secret; it cannot be read back from the UI or the API.
 
-Azure portal → **Microsoft Entra ID → App registrations → All applications**. Find the deployment app (named `spaarke-*`). Its **Application (client) ID** must equal the value stored in `AZURE_CLIENT_ID`.
+**As of 2026-08-27 the app is `github-actions-spe-infrastructure`, appId `8c85a481-f3a0-46de-b84e-3ede8a4d60c3`** — verified via the sign-in-log method below, and corroborated by it already holding the three `environment:*` credentials and `Contributor` on subscription `484bc857-3802-427f-9ea5-ca47b43db0f0`.
+
+> **Correction (2026-08-27)**: this section previously said to look for an app "named `spaarke-*`". That is wrong and actively misleading — the deployment app's name does **not** begin with `spaarke`, so an `az ad app list --filter "startswith(displayName,'spaarke')"` sweep returns 14 apps and silently excludes the right one.
+
+### Identify it empirically (do not eyeball the list)
+
+The failed exchange is recorded in the Entra sign-in logs, which name the app that presented the assertion. This is evidence, not inference:
+
+```bash
+az rest --method GET --url \
+  "https://graph.microsoft.com/beta/auditLogs/signIns?\$filter=signInEventTypes/any(t:%20t%20eq%20'servicePrincipal')&\$top=20" \
+  -o json | grep -iE "appDisplayName|appId|errorCode"
+```
+
+Look for the entry with `"errorCode": 700213` whose timestamp matches the failed workflow run. Its `appId` is the value in `AZURE_CLIENT_ID`.
+
+Corroborate before writing — the right app should already have `Contributor` (or equivalent) on the target subscription:
+
+```bash
+az role assignment list --assignee "$APP_ID" --all -o table
+```
 
 If you cannot confirm the match, do not guess — adding credentials to the wrong app leaves the original error unchanged and adds a misleading entry to a second app.
 
@@ -48,13 +68,26 @@ If you cannot confirm the match, do not guess — adding credentials to the wron
 
 ## 4. Step 2 — create the credentials
 
-### Option A — Azure CLI (all five at once)
+> **Check what already exists first (added 2026-08-27).** Three of the five subjects were already present when this guide was first written, so the loop below as originally published would attempt to recreate them and error partway:
+>
+> ```bash
+> az ad app federated-credential list --id "$APP_ID" --query "[].subject" -o tsv
+> ```
+>
+> As of 2026-08-27 the app holds `environment:dev`, `environment:staging`, `environment:production`, and is missing **only** `ref:refs/heads/master` (the cause of the live `AADSTS700213`) and `pull_request`. The loop below skips subjects that already exist, so it is safe to run whole.
+
+### Option A — Azure CLI (idempotent; skips existing)
 
 ```bash
 APP_ID="<Application (client) ID from Step 1>"
 
+EXISTING=$(az ad app federated-credential list --id "$APP_ID" --query "[].subject" -o tsv)
+
 for SUB in "ref:refs/heads/master" "pull_request" \
            "environment:dev" "environment:staging" "environment:production"; do
+  if grep -qx "repo:spaarke-dev/spaarke:$SUB" <<<"$EXISTING"; then
+    echo "skip (exists): $SUB"; continue
+  fi
   NAME="gh-$(echo "$SUB" | tr ':/' '--')"
   az ad app federated-credential create --id "$APP_ID" --parameters "{
     \"name\": \"$NAME\",
