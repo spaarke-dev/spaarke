@@ -965,3 +965,79 @@ SPE.
 
 Also: `ExternalParticipationService.cs:610-612` carries a now-resolved caveat ("*confirm against the
 created junction schema*") — §2 of 020's notes verified it. Delete at merge (outside 020's modify-set).
+
+## A15. 015 — the strongest instance of this batch's theme yet
+
+**Nine existing tests were not vacuous. They were pinning the defect as the contract.** Their Moq setups
+matched the *literal argument* `options: null` — and `options: null` **is** A-10 (first page only, token
+discarded). They would have stayed green for exactly as long as the bug stood, and gone red the moment
+anyone fixed it.
+
+That is a rung above everything else found here. A vacuous test asserts nothing; **this asserted the
+wrong thing, precisely and on purpose-looking terms.** And the repair choice matters: the agent replaced
+the matcher with one asserting *real paging options* rather than loosening to `It.IsAny` — loosening
+would have converted "pins the bug" into "pins nothing," which reads as a fix and is not one.
+
+### Anti-vacuity design worth copying
+
+The cap pair: perturbation "cap never flagged" and "cap always flagged at ceiling" each fail exactly
+**1** test. Both cases return **exactly 5,000 ids**, so *no count assertion can separate them* — only
+`Capped` does, and it fails in **both directions**. Page size (500) is held strictly below the ceiling
+(5,000) specifically so the two cannot collapse into one another. That is a guard designed against its
+own vacuity, not just perturbed after the fact.
+
+Perturbation P3 also caught a weak test of the agent's own: *"a record beyond the first page"* was picking
+by construction order and passing **by luck** against a single-page build. Fixed to ask the simulator for
+the record it actually places last.
+
+### `Capped` closes NFR-03's DETECTION half — the SURFACING half is still open
+
+I assigned the NFR-03 gap to 015 (§A7). Precise status now: 015 added `AccessibleRecordSet.Capped` /
+`CapLimit`, so a cap is **knowable** where before it was silent. But NFR-03 requires *"the user sees
+**Only 5,000 records displayed**"* — and **nothing renders `Capped`**. So NFR-03 is **half closed**:
+server-side detection exists, user-visible surfacing does not. Do not mark NFR-03 satisfied.
+`Capped` also covers the membership term only, not the unpaged grant term → **task 028** widens it.
+
+### 🔴 F-1 VERIFIED — the A-10 shape is live on two MORE surfaces
+
+There are exactly **three** `options: null` callers of the membership resolver. 015 fixed the one in its
+modify-set; **two live ones remain**:
+
+| Caller | Status |
+|---|---|
+| `Infrastructure/ExternalAccess/AccessibleRecordSetService.cs:193` | ✅ fixed by 015 |
+| `Services/Ai/Narrators/DailyBriefingCollector.cs:628` | 🔴 **still `options: null`, reads only `.Ids`** |
+| `Services/Workspace/BriefingService.cs:292` | 🔴 **still `options: null`, reads only `.Ids`** |
+
+**Severity differs from A-10 and should be stated honestly.** On the accessible-record-set path an
+under-grant is an authorization under-grant. On the Briefing path it is a **silent completeness failure**:
+a daily briefing quietly omits every matter past the first page and tells the user nothing. Not a
+disclosure — fail-closed security-wise — but it is NFR-03's exact prohibition ("caps must never be
+silent") on a **shipped, user-facing** surface. **File as a task**; both files were outside 015's scope.
+
+### Keyset paging is not expressible — good constraint to have recorded
+
+Keyset would have been the better scheme; **Dataverse does not support `gt`/`lt` on a
+`uniqueidentifier`**, so it cannot be written. Hence page/count + paging cookie + `<order>` on the
+primary id, with has-more from `EntityCollection.MoreRecords` so **no data row is consumed to answer it**.
+
+### 015's 10-item un-falsifiable list → task 047, and I closed part of #2 here
+
+Everything is asserted against a simulator, so *the simulator's model of Dataverse* is what is under test.
+Item **#2 was flagged the highest-value live check**: the `<order>` key is `{entity}id` **derived by
+convention**, with nothing proving that column exists on the nine target entities. A wrong name is a
+400 — fail-closed and loud, but undetected until it fires in production.
+
+**Partially closed in main session** (the agent had no reason to consult these): the convention holds
+**9/9**. Eight are confirmed in `docs/data-model/`; `sprk_todoid` is absent there but confirmed twice
+elsewhere — live server code `TodoGenerationService.cs:761` uses `ColumnSet("sprk_todoid", …)`, and
+`docs/architecture/spaarke-todo-architecture.md:32` marks it PK. The `docs/data-model/` miss is a
+**documentation-placement gap for `sprk_todo`, not a schema gap** (worth folding into task 026).
+
+**Residual for 047 is now narrower and better posed**: not *"does the column exist"* (answered, 9/9) but
+*"does Dataverse accept `<order>` on it for this query shape, and is `page`/`count` paging honoured at
+all"* — because if `page` is ignored for this shape, every test still passes and production re-serves
+page 1 forever (015's item #1). Remaining items: GUID collation, paging-cookie escaping/expiry/replay,
+whether `MoreRecords` is populated for FetchXml via `ServiceClient`, concurrent writes, whether the 5,000
+ceiling is ever reached in production, OR-filter matching, the transitive `includeRelated` `in` operator,
+and whether an **impersonated** read pages identically — that last one is the seam tasks 034/036 build on.
