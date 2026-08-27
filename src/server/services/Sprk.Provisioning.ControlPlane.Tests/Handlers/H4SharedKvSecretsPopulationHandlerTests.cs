@@ -628,6 +628,48 @@ public sealed class H4SharedKvSecretsPopulationHandlerTests
         accessor.WriteCount.Should().Be(6);
     }
 
+    // ---------- HANDLER-09 operator KV RBAC bootstrap (Wave 2 pre-dispatch remediation 2026-08-27; live impl Wave 2.5) ----------
+
+    [Fact]
+    public async Task Handler09_SharedOperatorKvRbacBootstrap_Failure_FailsResumable_NoAccessorWriteCall()
+    {
+        // Parity with the H4 HANDLER-09 test — H4-shared MUST fail-fast when
+        // the operator KV RBAC bootstrap fails on the SHARED vault, and the
+        // per-entry pipeline (extractor / accessor.Read / accessor.Write) MUST
+        // NOT fire. F18 verbatim: shared KV alongside per-tenant KV both need
+        // bootstrap; a bootstrap failure on the shared vault means every
+        // subsequent SecretClient.SetSecretAsync on it will 403.
+        var run = BuildRun();
+        var repo = new FakeRepository(run, etag: "etag-h09-shared");
+        var manifest = FakeManifest.Success(BuildSharedEntries());
+        var accessor = new FakeAccessor();
+        var probe = FakeArmProbe.Match();
+        var extractor = FakeExtractor.Static(new Dictionary<string, string>());
+        var failingBootstrapper = new StubSharedOperatorKvRbacBootstrapper(
+            new OperatorKvRbacBootstrapOutcome.Failure(
+                "Insufficient permission — could not PUT role assignment on shared vault."));
+
+        var handler = new H4SharedKvSecretsPopulationHandler(
+            repo, manifest, accessor, probe, extractor,
+            FakeMarkerApplier.Success(),
+            failingBootstrapper,
+            Options.Create(new KvSecretsPopulationOptions()),
+            NullLogger<H4SharedKvSecretsPopulationHandler>.Instance);
+
+        var result = await handler.HandleAsync(BuildEnvelope(), CancellationToken.None);
+
+        var failure = result.Should().BeOfType<HandlerResult.Failure>().Subject;
+        failure.Class.Should().Be(FailureClass.Resumable);
+        failure.RejectionCode.Should().Be(SharedKvSecretsPopulationRejectionCodes.OperatorKvRbacBootstrapFailed);
+        failure.Diagnostic.Should().Contain("Insufficient permission");
+        extractor.CallCount.Should().Be(0, "extractor MUST NOT fire when the shared-vault bootstrap fails");
+        accessor.WriteCount.Should().Be(0, "shared-KV writer MUST NOT fire when the shared-vault bootstrap fails");
+        failingBootstrapper.CallCount.Should().Be(1);
+        failingBootstrapper.LastRequest!.RoleDefinitionId.Should().Be(KvBuiltInRoleIds.SecretsOfficer);
+        failingBootstrapper.LastRequest.KeyVaultName.Should().Be(SharedKeyVaultName,
+            "bootstrap request must target the SHARED KV name, not the per-tenant KV");
+    }
+
     // ---------- helpers ----------
 
     private static H4SharedKvSecretsPopulationHandler BuildHandler(
@@ -639,12 +681,15 @@ public sealed class H4SharedKvSecretsPopulationHandlerTests
         FakeMarkerApplier? markerApplier = null,
         KvSecretsPopulationOptions? options = null)
     {
-        // HANDLER-09 (Wave 2 pre-dispatch remediation 2026-08-27): default
-        // to the production scaffold IOperatorKvRbacBootstrapper.
+        // HANDLER-09 (Wave 2 pre-dispatch remediation 2026-08-27; live impl
+        // Wave 2.5): default to a Success-returning IOperatorKvRbacBootstrapper
+        // stub so existing tests are unaffected by the scaffold-to-live
+        // transition. The live-Azure path is proven by
+        // ArmOperatorKvRbacBootstrapperTests.cs (fake-transport ArmClient).
         return new H4SharedKvSecretsPopulationHandler(
             repo, manifest, accessor, probe, extractor,
             markerApplier ?? FakeMarkerApplier.Success(),
-            new ArmOperatorKvRbacBootstrapper(NullLogger<ArmOperatorKvRbacBootstrapper>.Instance),
+            new StubSharedOperatorKvRbacBootstrapper(new OperatorKvRbacBootstrapOutcome.Success(WasFreshlyGranted: false)),
             Options.Create(options ?? new KvSecretsPopulationOptions()),
             NullLogger<H4SharedKvSecretsPopulationHandler>.Instance);
     }
@@ -661,7 +706,7 @@ public sealed class H4SharedKvSecretsPopulationHandlerTests
         var h = new H4SharedKvSecretsPopulationHandler(
             repo, manifest, accessor, probe, extractor,
             FakeMarkerApplier.Success(),
-            new ArmOperatorKvRbacBootstrapper(NullLogger<ArmOperatorKvRbacBootstrapper>.Instance),
+            new StubSharedOperatorKvRbacBootstrapper(new OperatorKvRbacBootstrapOutcome.Success(WasFreshlyGranted: false)),
             Options.Create(new KvSecretsPopulationOptions()),
             logger);
         return (h, logs);
@@ -841,6 +886,32 @@ public sealed class H4SharedKvSecretsPopulationHandlerTests
 
         public Task<SecretFreeMarkerApplyOutcome> ApplyAsync(
             SecretFreeMarkerApplyRequest request, CancellationToken ct)
+        {
+            CallCount++;
+            LastRequest = request;
+            return Task.FromResult(_outcome);
+        }
+    }
+
+    /// <summary>
+    /// HANDLER-09 (Wave 2 pre-dispatch remediation 2026-08-27; live impl Wave
+    /// 2.5) — stub <see cref="IOperatorKvRbacBootstrapper"/> for the shared
+    /// handler tests (per-file copy, matching this file's private-fakes
+    /// convention). The Wave-2 scaffold-default previously constructed a real
+    /// <see cref="ArmOperatorKvRbacBootstrapper"/> with just an ILogger; the
+    /// live impl now requires an ArmClient (parity with sibling H4 collaborators
+    /// task 121/123/125), so BuildHandler / BuildHandlerWithLogCapture pass
+    /// this stub with Success(WasFreshlyGranted=false) instead. The live-Azure
+    /// path is covered by <c>ArmOperatorKvRbacBootstrapperTests.cs</c>.
+    /// </summary>
+    private sealed class StubSharedOperatorKvRbacBootstrapper : IOperatorKvRbacBootstrapper
+    {
+        private readonly OperatorKvRbacBootstrapOutcome _outcome;
+        public int CallCount { get; private set; }
+        public OperatorKvRbacBootstrapRequest? LastRequest { get; private set; }
+        public StubSharedOperatorKvRbacBootstrapper(OperatorKvRbacBootstrapOutcome outcome) => _outcome = outcome;
+        public Task<OperatorKvRbacBootstrapOutcome> EnsureGrantedAsync(
+            OperatorKvRbacBootstrapRequest request, CancellationToken ct)
         {
             CallCount++;
             LastRequest = request;

@@ -959,13 +959,18 @@ public sealed class H4KvSecretsPopulationHandlerTests
         FakeMarkerApplier? markerApplier = null,
         KvSecretsPopulationOptions? options = null)
     {
-        // HANDLER-09 (Wave 2 pre-dispatch remediation 2026-08-27): default
-        // to the production scaffold IOperatorKvRbacBootstrapper — returns
-        // Success unconditionally so existing tests remain unaffected.
+        // HANDLER-09 (Wave 2 pre-dispatch remediation 2026-08-27; live impl
+        // Wave 2.5): default to a Success-returning IOperatorKvRbacBootstrapper
+        // stub so existing tests are unaffected by the scaffold-to-live
+        // transition. Non-HANDLER-09 tests exercise the OTHER seams; the
+        // bootstrap step is a no-op success gate. The live-Azure path is
+        // proven by ArmOperatorKvRbacBootstrapperTests.cs (fake-transport
+        // ArmClient) and by the H4/H4-shared HANDLER-09 tests here that inject
+        // an explicit StubOperatorKvRbacBootstrapper.
         return new H4KvSecretsPopulationHandler(
             repo, manifest, writer, patcher, probe, granter,
             markerApplier ?? FakeMarkerApplier.Success(),
-            new ArmOperatorKvRbacBootstrapper(NullLogger<ArmOperatorKvRbacBootstrapper>.Instance),
+            new StubOperatorKvRbacBootstrapper(new OperatorKvRbacBootstrapOutcome.Success(WasFreshlyGranted: false)),
             Options.Create(options ?? new KvSecretsPopulationOptions()),
             NullLogger<H4KvSecretsPopulationHandler>.Instance);
     }

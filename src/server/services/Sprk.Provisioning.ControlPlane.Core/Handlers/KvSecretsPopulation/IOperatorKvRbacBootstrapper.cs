@@ -18,10 +18,14 @@
 //
 // PRODUCTION IMPL:
 //   <see cref="ArmOperatorKvRbacBootstrapper"/> uses Azure.ResourceManager.
-//   Authorization to PUT a role assignment. Wave 2 ships as a scaffold
-//   returning Success unconditionally with an informational log line; the
-//   real ARM PUT lands as an incremental change without touching H4 or
-//   H4-shared.
+//   Authorization's RoleAssignmentCollection.CreateOrUpdateAsync to PUT the
+//   role assignment (Wave 2.5 lived-impl-replaces-scaffold — the Wave-2
+//   log-and-return-Success stub was replaced with a real ARM PUT while the
+//   seam + rejection code + handler wiring stayed unchanged). Idempotent —
+//   a deterministic role-assignment name lets ARM's own idempotent PUT
+//   semantics collapse re-invocations; 409 "RoleAssignmentExists" is caught
+//   as defense-in-depth for manually-named assignments covering the same
+//   triple.
 // -----------------------------------------------------------------------------
 
 namespace Sprk.Provisioning.ControlPlane.Handlers.KvSecretsPopulation;
