@@ -138,8 +138,12 @@ is unserved and the grid must source archive state from the action outcome +
 - **Four consecutive master SDAP CI runs were cancelled** (20:10 → 20:52), so **no completed Code
   Quality / ADR-Violations verdict on master since 17:55** across PRs #842, #841, #838, #840 —
   including #840, a `!` breaking change touching 41 identity sites.
-- **PR #841 is the fix** (*"key router concurrency on sha for master"*) and is now on master; the run at
-  `30e6fd9cf` is the first under it.
+- **PR #841 is the fix** (*"key router concurrency on sha for master"*) and is now on master.
+  ✅ **RESOLVED 2026-08-27**: the run at `30e6fd9cf` — the first under the fix, containing this
+  project's work **plus** #840 — completed **success**, uncancelled. **Code Quality passed**, which is
+  the first completed verdict on that gate since 17:55 and confirms the 5 pre-existing ArchTest
+  failures do not fail it. (`ADR Violations Report` shows `skipped`, not failed — it is conditional and
+  does not run on master pushes.) The cancellation pattern appears fixed; nothing further to chase.
 - ✅ **#840 verified locally against this work**: merged clean, build 0/0, **10,683 tests pass**,
   ArchTests **112 pass / 5 fail** (117 total — #840 added 6 new `CallerIdentityGuardTests`, all
   passing). The semantic risk flagged for `SpeAdminTenantScope.cs` did **not** materialise.
