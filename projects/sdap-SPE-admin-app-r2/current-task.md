@@ -9,11 +9,52 @@
 
 | Field | Value |
 |---|---|
-| **Task** | **051 complete** (as amended). 050 complete. Both pushed. |
-| **Phase** | Wave W16 done → **W17 (task 052, item recycle bin) next** |
-| **Status** | All gates green: build 0/0 · **10,669 tests pass / 0 fail** · ArchTests 106/111 (same 5 pre-existing) · client typecheck 0 new · publish **45.08 MB** (+0.12 vs baseline, ceiling 60) |
-| **Next Action** | **Task 052 — item recycle bin.** ⚠️ Destructive → use the 041 `LiveIntegrationFixture` (provisions + tears down its own container). Resolve the `communications`/`emails`/`exports` folder origin **first** |
-| **Blocking?** | No. **050's archival opt-in (§0.4) still awaits you** — that is the only open operator item. |
+| **Task** | **052 — item recycle bin: DISCOVERY COMPLETE, implementation not started.** 050 + 051 complete and pushed; **PR [#842](https://github.com/spaarke-dev/spaarke/pull/842)** open |
+| **Phase** | Wave W17 — Workstream E |
+| **Status** | All 052 API semantics measured live on throwaway containers. Nothing written to `src/` yet |
+| **Next Action** | Implement 052 per the plan in [`notes/task-052-findings.md`](notes/task-052-findings.md) §3. **Read §2 first — the two operations have opposite failure semantics** |
+| **Blocking?** | No. **050's archival opt-in still awaits you** (§0.4) — still the only open operator item. |
+
+---
+
+## 0B. Task 052 — discovery done, and the spec's premise is half wrong
+
+**Measured live on throwaway containers** (uploaded real files → deleted them → probed → torn down
+204/204). No pre-existing container mutated.
+
+🔴 **`restore` and `delete` have OPPOSITE failure semantics:**
+
+| | all ids valid | any id invalid | body |
+|---|---|---|---|
+| **restore** | **207** | **400 `badArgument`** — nothing restored, **atomic** | ids that SUCCEEDED |
+| **delete** (permanent) | **204** | **204 — and it purges the valid ones anyway**, non-atomic | **none** |
+
+- Spec FR-E03's *"207 partial success, per-item outcomes"* is **half right**. Restore's 207 lists only
+  the ids that worked — partial failure is expressed by **absence**, as `requested − returned`. There is
+  no per-item error object. Treating 207 as success hides the items that did not restore.
+- 🔴 **Permanent delete has no 207 and no per-item reporting at all** — `204` whether it purged
+  everything, some, or nothing. For an **irreversible** operation that is the worst reporting shape
+  found in this project. The implementation must **re-list and diff**, never trust the 204 (the same
+  discipline task 051 applied to the quota write).
+
+⚠️ `restore` / `delete` are **beta-only** (absent from the v1.0 CSDL) — the knowledge corpus wrongly
+cites v1.0 and needs the same correction task 050 made for archival. No ADR issue; container surface is
+already beta-pinned.
+
+⚠️ `deletedBy` and `title` are **OpenType extras absent from the CSDL** → `AdditionalData` →
+`deletedBy` will be an **`UntypedObject`** (3rd time this project has had to measure that shape).
+
+⚠️ Live-fixture uploads go through `/drives/{driveId}/root:/{name}:/content` —
+`/containers/{id}/drive/root:/…` answers `400 "API not found"`.
+
+### ✅ Side question closed — the `communications`/`emails`/`exports` folder origin
+
+`communications` (2026-03-11) and `emails` (2026-01-13) were created by **"SharePoint App"** — Spaarke's
+own app-only identity, i.e. the platform's email/communications pipeline. `exports` (2026-03-22) was
+created by **Ralph Schroeder** interactively. Nothing foreign. This closes the third evidence bullet in
+the live-tenant safety note; its other two reasons (repeatability, shared tenant) are unaffected, so the
+throwaway-container rule stands. 052 never needed it for safety — the 041 fixture provisions its own
+container.
 
 ---
 
