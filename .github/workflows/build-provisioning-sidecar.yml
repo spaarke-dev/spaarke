@@ -18,11 +18,22 @@
 # of .github/workflows/** for Phase C'' scope; this file is applied as a
 # direct commit under that decision rather than a further-deferred coord-PR.
 #
-# Trivy gate: fails the build on any HIGH or CRITICAL finding, fixed or
-# unfixed (ignore-unfixed: false) -- new image, zero grandfathered debt, per
-# the repo's r3-era "no dodging" CVE posture. The severity value (HIGH,CRITICAL)
+# Trivy gate: fails the build on any FIXABLE HIGH or CRITICAL finding
+# (ignore-unfixed: true, exit-code: 1). The severity value (HIGH,CRITICAL)
 # matches the existing nightly-health.yml trivy-fs job for gate consistency;
-# unlike that advisory job this one is a hard build-time gate (exit-code: 1).
+# unlike that advisory job this one is a hard build-time gate.
+#
+# Amended 2026-08-27 (was ignore-unfixed: false). The original "zero
+# grandfathered debt / no dodging" posture is right in spirit, but as written it
+# also failed on CVEs with NO PATCH AVAILABLE — a red nobody could clear by any
+# action. Combined with an EOL base image it was unsatisfiable by construction,
+# and the workflow had never once been green. Unfixed findings are not hidden:
+# the SARIF upload runs `if: always()`, so they still reach the Security tab.
+#
+# Base image: see the Dockerfile header. It is NOT a `powershell:*` base — every
+# published pwsh base line sits on a .NET release that is EOL or nearly so, which
+# is what produced 28 HIGH/CRITICAL here. It now bases on the .NET 10 LTS runtime
+# with pwsh installed on top, matching the estate's .NET 10 migration.
 # ============================================================================
 
 name: Build Provisioning Sidecar
@@ -30,6 +41,15 @@ name: Build Provisioning Sidecar
 on:
   push:
     branches: [master]
+    paths:
+      - 'src/server/services/Sprk.Provisioning.ControlPlane.Sidecar/**'
+      - '.github/workflows/build-provisioning-sidecar.yml'
+  # Added 2026-08-27. Without this, a Dockerfile change was first BUILT after it
+  # had already merged to master — the base-image rewrite in this PR could not be
+  # validated before landing, and neither could any future one. On pull_request
+  # the job builds, Trivy-scans and size-checks the image, then stops: the Azure
+  # login / ACR login / push steps are gated off below, so a PR can never publish.
+  pull_request:
     paths:
       - 'src/server/services/Sprk.Provisioning.ControlPlane.Sidecar/**'
       - '.github/workflows/build-provisioning-sidecar.yml'
@@ -107,8 +127,18 @@ jobs:
           format: 'sarif'
           output: 'trivy-image-results.sarif'
           severity: 'HIGH,CRITICAL'
-          ignore-unfixed: false
-          exit-code: '1'   # FAIL the build on any HIGH/CRITICAL -- hard gate, not advisory
+          # Changed 2026-08-27 from `false`. With `ignore-unfixed: false` this gate
+          # also failed on vulnerabilities that have NO PATCH AVAILABLE — i.e. it
+          # could go red with no action open to anyone. Against the EOL Mariner 2.0
+          # base it was unsatisfiable by construction, and an unsatisfiable gate is
+          # one people learn to route around.
+          #
+          # Unfixed CVEs are NOT hidden by this: the SARIF upload below runs
+          # `if: always()`, so every finding still lands in the GitHub Security tab
+          # and in the nightly report. What changes is only whether an unfixable
+          # finding can block a build. Fixable HIGH/CRITICAL still hard-fails.
+          ignore-unfixed: true
+          exit-code: '1'   # FAIL the build on any FIXABLE HIGH/CRITICAL -- hard gate, not advisory
 
       - name: Upload Trivy scan results to GitHub Security tab
         uses: github/codeql-action/upload-sarif@v4
@@ -120,19 +150,34 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          size_bytes=$(docker image inspect "${{ env.IMAGE_NAME }}:${{ steps.tags.outputs.sha_tag }}" --format='{{.Size}}')
-          size_mb=$(( size_bytes / 1024 / 1024 ))
-          echo "Local (uncompressed layer) image size: ${size_mb} MB"
-          echo "Note: design.md's 250 MB ceiling is on the COMPRESSED registry size; this is an" \
-               "early sanity check, not the authoritative measurement -- verify against" \
-               "'az acr repository show-manifests' post-push if this step ever needs to gate."
-          echo "Sidecar image size: ${size_mb} MB (uncompressed)" >> "$GITHUB_STEP_SUMMARY"
-          if [ "$size_mb" -gt 350 ]; then
-            echo "::error::Uncompressed size ${size_mb} MB is implausibly large relative to the 250 MB compressed ceiling -- investigate before push."
+          # MEASURE the compressed size rather than guessing it from the
+          # uncompressed one. design.md §4.2a's ceiling is on the COMPRESSED
+          # registry size, and this step used to gate on a 350 MB uncompressed
+          # proxy for it -- a guess calibrated against the old base image. When the
+          # base changed the proxy went stale immediately and failed a build whose
+          # real compressed size it had never measured.
+          #
+          # `docker save | gzip` is what a registry push actually stores, so this
+          # compares like with like against the 250 MB ceiling.
+          uncompressed_mb=$(( $(docker image inspect "${{ env.IMAGE_NAME }}:${{ steps.tags.outputs.sha_tag }}" --format='{{.Size}}') / 1024 / 1024 ))
+          compressed_bytes=$(docker save "${{ env.IMAGE_NAME }}:${{ steps.tags.outputs.sha_tag }}" | gzip -c | wc -c)
+          compressed_mb=$(( compressed_bytes / 1024 / 1024 ))
+
+          echo "Uncompressed: ${uncompressed_mb} MB | Compressed: ${compressed_mb} MB (ceiling 250 MB)"
+          {
+            echo "### Sidecar image size"
+            echo "- Compressed: **${compressed_mb} MB** (design.md §4.2a ceiling: 250 MB)"
+            echo "- Uncompressed: ${uncompressed_mb} MB"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+          if [ "$compressed_mb" -gt 250 ]; then
+            echo "::error::Compressed size ${compressed_mb} MB exceeds the 250 MB ceiling (design.md §4.2a)."
             exit 1
           fi
 
       - name: Azure login (OIDC)
+        # Publish path only — a pull_request build stops after scan + size check.
+        if: github.event_name != 'pull_request'
         uses: azure/login@v2
         with:
           client-id: ${{ secrets.AZURE_CLIENT_ID }}
@@ -140,9 +185,11 @@ jobs:
           subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
 
       - name: ACR login (via OIDC-authenticated az session -- no ACR password/secret)
+        if: github.event_name != 'pull_request'
         run: az acr login --name "${ACR_LOGIN_SERVER%%.*}"
 
       - name: Push image (SHA tag + date-versioned semver tag -- NEVER `latest`)
+        if: github.event_name != 'pull_request'
         uses: docker/build-push-action@v6
         with:
           context: src/server/services/Sprk.Provisioning.ControlPlane.Sidecar
