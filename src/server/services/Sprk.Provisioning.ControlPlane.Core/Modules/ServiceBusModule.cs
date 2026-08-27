@@ -193,4 +193,32 @@ public sealed class ServiceBusModuleOptions
     /// (e.g. <c>{ "H4": "01:00:00", "H8": "00:15:00" }</c>).
     /// </summary>
     public Dictionary<string, TimeSpan>? HandlerTimeToLive { get; set; }
+
+    /// <summary>
+    /// COMP-09 (customer-provisioning-orchestration-r1 Wave 7 completeness sweep,
+    /// 2026-08-27) — per-message body cap enforced BEFORE
+    /// <see cref="Azure.Messaging.ServiceBus.ServiceBusSender.SendMessageAsync(Azure.Messaging.ServiceBus.ServiceBusMessage, System.Threading.CancellationToken)"/>.
+    /// The Service Bus Standard tier caps message size at 256 KB total
+    /// (body + user + system properties). This option sets the BODY-ONLY
+    /// ceiling — the enqueuer applies the cap to the serialized
+    /// <see cref="Sprk.Provisioning.ControlPlane.Enqueue.HandlerEnvelope"/>
+    /// JSON body BEFORE the AMQP framing overhead is added.
+    ///
+    /// <para>
+    /// Default 229,376 bytes (224 KB) leaves ~32 KB of headroom for
+    /// application-property + Service-Bus system-property overhead — the
+    /// biggest observed application-property surface in this control plane
+    /// is JobType + HandlerId + RunId + EnqueuedAt (&lt; 300 bytes total),
+    /// so 32 KB is generous. Override via config only if the Service Bus
+    /// namespace is Premium (1 MB per-message cap).
+    /// </para>
+    ///
+    /// <para>
+    /// Consequence-if-unfixed (from COMP-09 finding): H4b's BulkAppSettings
+    /// envelope can balloon when a customer has many app-settings; a
+    /// 300 KB envelope would silently 413 at enqueue time. Handler never
+    /// dispatches; run silently stalls at WaitingOnGate-equivalent.
+    /// </para>
+    /// </summary>
+    public int MaxEnvelopeBodyBytes { get; set; } = 224 * 1024;
 }
