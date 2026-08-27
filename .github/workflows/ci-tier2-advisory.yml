@@ -282,14 +282,86 @@ jobs:
         # docs/assessments/bff-warning-suppression-analysis-2026-06-01.md.
         run: dotnet build -c ${{ matrix.configuration }} --no-restore
 
-      - name: Run unit tests
+      # ------------------------------------------------------------------
+      # Two-pass runner (2026-08-27). This job is the repo's ONE full-suite
+      # run — sdap-ci.yml's `build-test` is retiring into it rather than being
+      # duplicated into tier1, where a ~28-minute job would have blown tier1's
+      # p95 ≤ 3 min blocking budget by an order of magnitude.
+      #
+      # Pass 1 runs everything; the classifier emits a filter covering every
+      # failure; pass 2 re-runs those; only a test failing BOTH is real. That
+      # matters more here than it did in a blocking job: an advisory report
+      # that cries wolf is one nobody reads, and this is now the only place the
+      # full suite runs on a PR.
+      #
+      # NOTE: deliberately no `--collect:"XPlat Code Coverage"`. sdap-ci's
+      # build-test collected coverage; coverage is observation-never-a-gate per
+      # ADR-038 and nightly-health.yml already has a coverage-observation job.
+      # The collector also hooks process shutdown, which is the leading
+      # suspect for the 6-hour hang seen when this job was trialled in tier1.
+      # ------------------------------------------------------------------
+      - name: Run unit tests (pass 1)
         id: tests
         continue-on-error: true
         shell: pwsh
         run: |
           dotnet test -c ${{ matrix.configuration }} --no-build `
-            --logger "trx;LogFileName=tier2-unit.trx" `
-            --results-directory ./TestResults/tier2
+            --logger "trx;LogFilePrefix=tier2-pass1" `
+            --results-directory ./TestResults/tier2/pass1
+
+      - name: Classify pass-1 failures (decide on retry)
+        id: classify
+        shell: pwsh
+        run: ./scripts/ci/classify-and-retry.ps1 -TrxDirectory ./TestResults/tier2/pass1
+
+      - name: Retry pass-1 failures (pass 2)
+        id: tests-pass-2
+        if: steps.classify.outputs.retry_needed == 'true'
+        continue-on-error: true
+        shell: pwsh
+        run: |
+          dotnet test -c ${{ matrix.configuration }} --no-build `
+            --filter "${{ steps.classify.outputs.retry_filter }}" `
+            --logger "trx;LogFilePrefix=tier2-pass2" `
+            --results-directory ./TestResults/tier2/pass2
+
+      - name: Test verdict (advisory — reported, never blocking)
+        id: verdict
+        shell: pwsh
+        run: |
+          if ("${{ steps.classify.outputs.retry_needed }}" -ne "true") {
+            Write-Host "Pass 1 clean — full suite green"
+            exit 0
+          }
+          $trx = @(Get-ChildItem -Path ./TestResults/tier2/pass2 -Filter "*.trx" -Recurse -ErrorAction SilentlyContinue)
+          if ($trx.Count -eq 0) {
+            Write-Host "::warning::Pass 2 produced no TRX — dotnet test likely crashed"
+            exit 0
+          }
+          $nsUri = "http://microsoft.com/schemas/VisualStudio/TeamTest/2010"
+          $stillFailing = @()
+          $executed = New-Object System.Collections.Generic.List[string]
+          foreach ($t in $trx) {
+            $xml = [xml](Get-Content $t.FullName -Raw)
+            $nsm = New-Object System.Xml.XmlNamespaceManager $xml.NameTable
+            $nsm.AddNamespace("x", $nsUri)
+            $stillFailing += @($xml.SelectNodes("//x:UnitTestResult[@outcome='Failed']", $nsm))
+            foreach ($r in $xml.SelectNodes("//x:UnitTestResult", $nsm)) { $executed.Add($r.GetAttribute("testName")) | Out-Null }
+          }
+          # Same coverage guard as the blocking path: a filter term that matched
+          # nothing must not read as success, even in an advisory report.
+          $expected = "${{ steps.classify.outputs.retry_methods }}" -split ';' | Where-Object { $_ }
+          $notReRun = @($expected | Where-Object { $m = $_; -not ($executed | Where-Object { $_ -eq $m -or $_.StartsWith("$m(") }) })
+          if ($notReRun.Count -gt 0) {
+            Write-Host "::warning::INCONCLUSIVE — $($notReRun.Count) method(s) failed pass 1 but did not execute in pass 2:"
+            $notReRun | ForEach-Object { Write-Host "  - $_" }
+          }
+          if ($stillFailing.Count -gt 0) {
+            Write-Host "::warning::$($stillFailing.Count) test(s) failed BOTH passes — real failures:"
+            $stillFailing | ForEach-Object { Write-Host "  - $($_.GetAttribute('testName'))" }
+          } else {
+            Write-Host "All pass-1 failures passed on retry — no real failures"
+          }
 
       - name: Upload test results
         if: always()

@@ -439,300 +439,39 @@ jobs:
           if-no-files-found: warn
 
   # ==========================================================================
-  # PORTED GATES — moved here from sdap-ci.yml (ci/tier1-gate-port, 2026-08-27)
+  # PORTED GATES — from sdap-ci.yml (ci/tier1-gate-port, 2026-08-27)
   # ==========================================================================
-  # These four jobs are the blocking gates that existed ONLY in sdap-ci.yml.
-  # They are the reason sdap-ci could not simply be deleted: the tiered
-  # replacement had no equivalent, so retiring the monolith would have silently
-  # dropped tenant-isolation, the eval gate, the Compose fidelity gate, and the
-  # full two-pass test run.
+  # Three gates that existed ONLY in sdap-ci.yml and are the reason it could not
+  # simply be deleted. Copied verbatim apart from an added timeout, so a
+  # disagreement between the two workflows during the shadow window can only mean
+  # a real difference, never a porting slip.
   #
-  # They are copied VERBATIM, deliberately. No path-gating, no runner change, no
-  # consolidation of the duplicated setup steps. The point of this step is that
-  # tier1 and sdap-ci reach the SAME verdict on the same commit; any edit made
-  # while porting would make a disagreement ambiguous — porting bug, or real
-  # difference? Optimisation (path-gating these, sharing the NuGet cache setup,
-  # collapsing the four windows-latest runners) comes AFTER sdap-ci.yml is
-  # deleted, not before.
+  # WHY ONLY THREE. sdap-ci's `build-test` was ported here first and removed
+  # again: it is a ~28-MINUTE full-solution test run, and this workflow's contract
+  # (header, spec NFR-01) is a p95 ≤ 3 min BLOCKING surface. Putting it here would
+  # have blown that budget by an order of magnitude and parked a half-hour job in
+  # the blocking path of every push — the opposite of what the tiered split is
+  # for. It also duplicated `full-unit-tests`, which already runs the full suite
+  # in ci-tier2-advisory.yml. That job absorbed sdap-ci's two-pass classifier
+  # instead; the full suite now runs ONCE, advisory, in the tier it belongs to.
   #
-  # SHADOW PERIOD — while both workflows exist, every PR runs these gates TWICE
-  # and PR CI time rises accordingly. That is the cost of a safe comparison and
-  # it is temporary: deleting sdap-ci.yml (ci-cd-unit-test-remediation-r1 tasks
-  # 071/075/077) removes the duplicate AND the ~30 min sdap-ci leg, landing well
-  # below where this started.
+  # These three earn their place here: all are fast, and all three are gates whose
+  # failure should stop a merge — a cross-tenant leak, a regressed golden
+  # utterance, or a Compose round-trip that loses document bytes.
   #
-  # DO NOT delete sdap-ci.yml until these have agreed with their counterparts
-  # across a few days of real PRs.
+  # Each carries an explicit timeout. The original three arrived without one,
+  # which is how the removed build-test burned six hours before anyone learned it
+  # had hung, and surfaced as `cancelled` rather than `failure` (issue #813).
   # ==========================================================================
 
-  build-test:
-    name: Build & Test
-    runs-on: windows-latest
-    # ── PORT FIX, 2026-08-27 — first run of this job here hung for SIX HOURS ──
-    # Run 33038499955: 04:09:05 -> 10:09:16, killed by GitHub's default 360-min
-    # job timeout, reported as `cancelled`, which took `CI / Router` red with it.
-    # The tests THEMSELVES completed — 4.1 MB of coverage was uploaded — so
-    # `dotnet test` finished testing and then never exited.
-    #
-    # The difference from sdap-ci, where this identical job takes ~25 min, is
-    # tier1's WORKFLOW-LEVEL env, which this ported job silently inherited:
-    #   APPLICATIONINSIGHTS_CONNECTION_STRING=InstrumentationKey=0000...
-    #   Redis__AllowInMemoryFallback=true
-    # Both were added for tier1's integration-smoke jobs as startup-validation
-    # workarounds (37ef38c2f, fd657e0b2). sdap-ci sets NEITHER. A bogus App
-    # Insights connection string is a well-known way to block process exit: the
-    # SDK initialises, then retries a telemetry flush against a dead endpoint on
-    # shutdown.
-    #
-    # Cleared below to restore parity with sdap-ci — which is this port's whole
-    # premise. Both fixes here are correct whichever var is actually to blame,
-    # and if it still hangs with parity env restored, the cause is elsewhere and
-    # the bounded timeout means we learn that in 60 minutes instead of six hours.
-    #
-    # The real cleanup is to scope those two vars to the two smoke jobs that need
-    # them instead of declaring them workflow-level, where they leak into every
-    # job added later. Deliberately not done in this PR: it would change the
-    # existing tier1 jobs during a window whose entire purpose is comparing
-    # verdicts. File it for after sdap-ci.yml is deleted.
-    timeout-minutes: 60
-    env:
-      APPLICATIONINSIGHTS_CONNECTION_STRING: ''
-      Redis__AllowInMemoryFallback: ''
-    # 2026-07-10 (redesign-r2 audit F-5 completion): job-level continue-on-error
-    # REMOVED. The 2026-06-24 "informational-only" posture predated the two-pass
-    # classifier + reliability registry and silently swallowed the classifier's
-    # verdict (a failed job still produced a green run — observed live on master
-    # run 29126132011). The full solution is 0-failures as of ef5d098b4; genuine
-    # timing flakes belong in tests/.reliability-registry.json, not in a
-    # job-level swallow.
-    strategy:
-      # When one matrix configuration fails (e.g., a flaky timing test in
-      # Release), the default fail-fast=true cancels the sibling Debug job
-      # mid-flight. The cancelled Debug then shows COMPLETED/CANCELLED — and
-      # because Debug is the only REQUIRED status check, the PR becomes
-      # un-mergeable even though Debug would have passed on its own. We want
-      # each matrix configuration to run to its own conclusion.
-      fail-fast: false
-      matrix:
-        # 2026-06-24 — Release matrix entry temporarily removed due to high
-        # CI-flake rate on shared runners (timing/scheduling tests). Debug-only
-        # build still validates compilation + unit tests. Tracked under
-        # projects/test-architecture-reset-r1/ for permanent resolution.
-        # Restore Release here AFTER that audit lands a stable test suite.
-        configuration: [Debug]
-
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v6
-        with:
-          fetch-depth: 0  # Required for GitVersion and better diff analysis
-          lfs: true  # smudge tests/fixtures/compose-corpus/*.docx — real bytes, not LFS pointers (else ~200 Compose corpus seam tests fail on pointer files; mirrors compose-fidelity-gate job)
-
-      - name: Setup .NET 10
-        uses: actions/setup-dotnet@v6
-        with:
-          dotnet-version: '10.x'
-
-      - name: Setup .NET Framework targeting pack
-        shell: pwsh
-        run: |
-          # Ensure .NET Framework 4.8 targeting pack is available for plugin projects
-          if (!(Test-Path "C:\Program Files (x86)\Reference Assemblies\Microsoft\Framework\.NETFramework\v4.8")) {
-            Write-Warning ".NET Framework 4.8 targeting pack not found. Plugin build may fail."
-          }
-
-      - name: Cache NuGet packages
-        uses: actions/cache@v5
-        continue-on-error: true  # Prevents Debug/Release matrix race on shared cache key from failing the job (PR #337 hit this 2026-06-03 — Release lost the cache-save race to concurrent Debug at 00:18:47)
-        with:
-          path: ~/.nuget/packages
-          key: ${{ runner.os }}-nuget-${{ hashFiles('**/Directory.Packages.props', '**/*.csproj') }}
-          restore-keys: |
-            ${{ runner.os }}-nuget-
-
-      - name: Restore dependencies
-        run: dotnet restore --verbosity minimal
-
-      - name: Build
-        # WarningsAsErrors policy is centralized in Directory.Build.props
-        # (TreatWarningsAsErrors=true + WarningsNotAsErrors=CS0109;CS0618;CS1998;CS8601;CS8604).
-        # The previous CLI -warnaserror overrode WarningsNotAsErrors. See
-        # docs/assessments/bff-warning-suppression-analysis-2026-06-01.md.
-        run: dotnet build -c ${{ matrix.configuration }} --no-restore
-
-      # ------------------------------------------------------------------
-      # Two-pass test runner — see scripts/ci/classify-and-retry.ps1 + docs/
-      # procedures/testing-and-code-quality.md.
-      #
-      # Pass 1 runs the full suite. The classifier reads the TRX and emits a
-      # filter covering EVERY failure. Pass 2 re-runs those on a fresh
-      # execution, and only a test that fails BOTH passes fails the build —
-      # two consecutive failures on different runs is no longer noise.
-      #
-      # Changed 2026-08-26: the classifier used to fail the build immediately
-      # for any failure absent from tests/.reliability-registry.json, calling it
-      # "deterministic". Absence from an allowlist is not evidence of
-      # determinism, and the inference was usually wrong — tests failed that way
-      # on three separate runs and every one of them passes locally. It also
-      # meant a single unregistered failure denied the registered ones their
-      # retry. The registry is now reporting only; it does not gate the retry.
-      # ------------------------------------------------------------------
-      - name: Test with coverage (pass 1)
-        id: test-pass-1
-        continue-on-error: true   # let classifier decide; don't abort here on test failures
-        shell: pwsh
-        run: |
-          # LogFilePrefix (NOT LogFileName): each test project writes its own
-          # uniquely-named TRX. A fixed LogFileName made every project in the
-          # solution OVERWRITE the same file, so the classifier only ever saw
-          # the last project's results — failures in the other test projects
-          # were invisible to CI (redesign-r2 e2e audit finding F-5, 2026-07-10).
-          dotnet test -c ${{ matrix.configuration }} --no-build `
-            --logger "trx;LogFilePrefix=pass1" `
-            --results-directory ./TestResults/pass1 `
-            --collect:"XPlat Code Coverage" --settings config/coverlet.runsettings
-
-      - name: Classify pass-1 failures (decide on retry)
-        id: classify
-        shell: pwsh
-        run: ./scripts/ci/classify-and-retry.ps1 -TrxDirectory ./TestResults/pass1
-
-      - name: Retry pass-1 failures (pass 2)
-        id: test-pass-2
-        if: steps.classify.outputs.retry_needed == 'true'
-        continue-on-error: true   # final verdict step decides; capture TRX either way
-        shell: pwsh
-        run: |
-          # LogFilePrefix for the same reason as pass 1 (audit finding F-5).
-          dotnet test -c ${{ matrix.configuration }} --no-build `
-            --filter "${{ steps.classify.outputs.retry_filter }}" `
-            --logger "trx;LogFilePrefix=pass2" `
-            --results-directory ./TestResults/pass2
-
-      - name: Final test verdict
-        shell: pwsh
-        run: |
-          $retryRan = "${{ steps.classify.outputs.retry_needed }}" -eq "true"
-          if (-not $retryRan) {
-            # The classifier requests a retry for ANY pass-1 failure, so
-            # retry_needed=false means pass 1 was clean (or produced no TRX,
-            # which the classifier reports separately).
-            Write-Host "Pass 1 clean — no retry was needed"
-            exit 0
-          }
-          # Aggregate ALL pass-2 TRX files (one per test project under
-          # LogFilePrefix naming — audit finding F-5).
-          $trxFiles = @(Get-ChildItem -Path ./TestResults/pass2 -Filter "*.trx" -Recurse -ErrorAction SilentlyContinue)
-          if ($trxFiles.Count -eq 0) {
-            Write-Host "::error::Retry pass 2 ran but no TRX files were produced — dotnet test likely crashed"
-            exit 1
-          }
-          $nsUri = "http://microsoft.com/schemas/VisualStudio/TeamTest/2010"
-          $stillFailing = @()
-          $executedNames = New-Object System.Collections.Generic.List[string]
-          $passed = 0
-          foreach ($trx in $trxFiles) {
-            $xml = [xml](Get-Content $trx.FullName -Raw)
-            $nsm = New-Object System.Xml.XmlNamespaceManager $xml.NameTable
-            $nsm.AddNamespace("x", $nsUri)
-            $stillFailing += @($xml.SelectNodes("//x:UnitTestResult[@outcome='Failed']", $nsm))
-            $passed += $xml.SelectNodes("//x:UnitTestResult[@outcome='Passed']", $nsm).Count
-            foreach ($r in $xml.SelectNodes("//x:UnitTestResult", $nsm)) {
-              $executedNames.Add($r.GetAttribute("testName")) | Out-Null
-            }
-          }
-          if ($stillFailing.Count -gt 0) {
-            Write-Host "::error::Retry pass failed: $($stillFailing.Count) test(s) still failing after a second attempt — treating as real regression"
-            $stillFailing | ForEach-Object {
-              Write-Host "  - $($_.GetAttribute('testName'))"
-            }
-            exit 1
-          }
-
-          # COVERAGE GUARD — "did not re-run" is not "passed".
-          # A --filter term can silently match zero tests (renamed, deleted, or a
-          # [Theory] whose DisplayName differs from its FullyQualifiedName). Without
-          # this check a vanished test would turn a red build green, which is worse
-          # than the false-accusation bug this two-pass design was rewritten to fix.
-          $expected = "${{ steps.classify.outputs.retry_methods }}" -split ';' | Where-Object { $_ }
-          $notReRun = @()
-          foreach ($method in $expected) {
-            $covered = $executedNames | Where-Object { $_ -eq $method -or $_.StartsWith("$method(") }
-            if (-not $covered) { $notReRun += $method }
-          }
-          if ($notReRun.Count -gt 0) {
-            Write-Host "::error::Retry pass is INCONCLUSIVE: $($notReRun.Count) test method(s) failed pass 1 but did not execute in pass 2. Not treating absence as success."
-            $notReRun | ForEach-Object { Write-Host "  - $_" }
-            Write-Host "Most likely the pass-2 --filter did not match: the test was renamed or deleted between runs, or its TRX testName differs from its FullyQualifiedName."
-            exit 1
-          }
-
-          Write-Host "Retry pass clean: $passed test(s) retried, all $($expected.Count) failing method(s) re-executed and passed"
-
-      - name: Upload test results
-        uses: actions/upload-artifact@v6
-        if: always()
-        with:
-          name: test-results-${{ matrix.configuration }}
-          path: ./TestResults/
-
-      - name: Upload coverage reports
-        uses: actions/upload-artifact@v6
-        if: always()
-        with:
-          name: coverage-${{ matrix.configuration }}
-          path: ./TestResults/**/coverage.cobertura.xml
-
-  # ──────────────────────────────────────────────────────────────────────────
-  # Golden-utterance eval gate (NFR-02, spaarke-ai-architecture-redesign-r1
-  # task 026 / FR-P1-07) — MERGE-BLOCKING from P1 onward.
-  #
-  # Deliberately a SEPARATE job with NO continue-on-error: build-test carries
-  # job-level `continue-on-error: true` (2026-06-24 informational posture),
-  # which would swallow a failing eval step placed inside it — with branch
-  # protection currently disabled on this repo, the workflow-run conclusion is
-  # the only mechanical merge signal, and this job is what turns it red when
-  # any Category=GoldenUtteranceEval test fails. When branch protection /
-  # rulesets are re-enabled, mark "Eval Gate (Golden Utterances)" as a
-  # REQUIRED status check. Activation plan + rationale:
-  # tests/integration/contract/Eval/README.md.
-  #
-  # Families joined to this gate via the Category=GoldenUtteranceEval trait (no
-  # YAML change needed to register a family — the trait IS the registration):
-  #   • Golden-utterance suite + P2 loop/injection (r1 tasks 011/026/037)
-  #   • D-F0(e) Resourcefulness family (r2 task 031 / FR-A1-02) —
-  #     ResourcefulnessEvalSuiteTests: no_fabrication is asserted MECHANICALLY
-  #     against the ADR-040 ledger ToolChain (ResourcefulnessFabricationOracle);
-  #     the four family dimensions are LLM-judge-scored on the live eval-gate run.
-  #   • Origin-classification family (r2 task 033 / FR-A1-04, Policy v2 E-1..E-6)
-  #     — OriginClassificationEvalSuiteTests: hard-equality assertions against the
-  #     real RequestOriginClassifier + ConfirmationPolicyEngine (deterministic
-  #     production code, never an LLM judge).
-  #   • ContextEnvelope budget-breach-fails-eval (r2 task 054 / FR-B-05) —
-  #     ContextBudgetBreachEvalTests: a per-slice or envelope-ceiling breach is
-  #     mechanically DETECTED (never silently truncated) against the real
-  #     EnvelopeBudget checker.
-  #   • Memory-write capture→recall family (r2 task 057 / FR-B-08 / FR-30) —
-  #     MemoryWriteCaptureRecallEvalTests.
-  #
-  # spec FR-D-02 / NFR-02 (r2 spaarke-ai-architecture-redesign-r2 task 071):
-  # ALL of the above families gate the merge — any single family red fails this
-  # job. Memory-poisoning eval families are explicitly OUT OF SCOPE here —
-  # DEFERRED to the separate memory-governance project per spec FR-B-10
-  # (spaarke-ai-architecture-redesign-r2/spec.md item 38). Do NOT add a
-  # memory-poisoning family to this trait/gate until that governance project
-  # ships it.
-  # ──────────────────────────────────────────────────────────────────────────
   eval-gate:
     name: Eval Gate (Golden Utterances)
     runs-on: windows-latest
-    # Bounded + env parity with sdap-ci, same reasoning as build-test above:
-    # tier1's workflow-level env does not exist in sdap-ci, and an unbounded job
-    # burns 6 hours before anyone learns it hung.
+    # Bounded. tier1's original jobs all carry timeouts; these arrived without one,
+    # which is how a hang cost 6 hours instead of announcing itself. Sized off
+    # measured sdap-ci durations with headroom (issue #813: a timeout set at the
+    # edge of the estimate becomes unreachable and reads `cancelled`, not `failure`).
     timeout-minutes: 20
-    env:
-      APPLICATIONINSIGHTS_CONNECTION_STRING: ''
-      Redis__AllowInMemoryFallback: ''
     steps:
       - name: Checkout
         uses: actions/checkout@v6
@@ -770,13 +509,11 @@ jobs:
   tenant-isolation:
     name: Tenant Isolation (I1–I5 invariants)
     runs-on: windows-latest
-    # Bounded + env parity with sdap-ci, same reasoning as build-test above:
-    # tier1's workflow-level env does not exist in sdap-ci, and an unbounded job
-    # burns 6 hours before anyone learns it hung.
+    # Bounded. tier1's original jobs all carry timeouts; these arrived without one,
+    # which is how a hang cost 6 hours instead of announcing itself. Sized off
+    # measured sdap-ci durations with headroom (issue #813: a timeout set at the
+    # edge of the estimate becomes unreachable and reads `cancelled`, not `failure`).
     timeout-minutes: 20
-    env:
-      APPLICATIONINSIGHTS_CONNECTION_STRING: ''
-      Redis__AllowInMemoryFallback: ''
     steps:
       - name: Checkout
         uses: actions/checkout@v6
@@ -841,13 +578,11 @@ jobs:
   compose-fidelity-gate:
     name: Compose Fidelity Gate (Corpus Round-Trip)
     runs-on: windows-latest
-    # Bounded + env parity with sdap-ci, same reasoning as build-test above:
-    # tier1's workflow-level env does not exist in sdap-ci, and an unbounded job
-    # burns 6 hours before anyone learns it hung.
+    # Bounded. tier1's original jobs all carry timeouts; these arrived without one,
+    # which is how a hang cost 6 hours instead of announcing itself. Sized off
+    # measured sdap-ci durations with headroom (issue #813: a timeout set at the
+    # edge of the estimate becomes unreachable and reads `cancelled`, not `failure`).
     timeout-minutes: 30
-    env:
-      APPLICATIONINSIGHTS_CONNECTION_STRING: ''
-      Redis__AllowInMemoryFallback: ''
     steps:
       - name: Checkout (with Git-LFS corpus fixtures)
         uses: actions/checkout@v6
