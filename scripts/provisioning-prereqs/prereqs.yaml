@@ -172,7 +172,7 @@ prereqs:
           echo "$ns=$(az provider show --namespace $ns --query registrationState -o tsv)"
         done
       expect: every namespace prints `Registered`
-    remediation: `az provider register --namespace <ns>` then poll every 30s for 5 min. If still `NotRegistered`, try `az rest --method post ...?force=true`; if still failing, register via Azure Portal (some fresh subs require silent auth flow).
+    remediation: "`az provider register --namespace <ns>` then poll every 30s for 5 min. If still `NotRegistered`, try `az rest --method post ...?force=true`; if still failing, register via Azure Portal (some fresh subs require silent auth flow)."
     related_findings: [F6]
 
   - id: PRQ-S-04
@@ -184,7 +184,7 @@ prereqs:
     check_recipe:
       cli: az role assignment list --assignee {l2UamiPrincipalId} --scope "/subscriptions/{subId}" --query "[?roleDefinitionName=='Contributor']" -o tsv
       expect: non-empty
-    remediation: `az role assignment create --assignee {l2UamiPrincipalId} --scope /subscriptions/{subId} --role Contributor`.
+    remediation: "`az role assignment create --assignee {l2UamiPrincipalId} --scope /subscriptions/{subId} --role Contributor`."
     related_findings: [audit-gap-02-l2-uami-contributor]
 
   - id: PRQ-S-05
@@ -211,7 +211,7 @@ prereqs:
     consequence_of_absence: H2a ARM-JSON publish workflow + H9 BFF-zip publish workflow both fail cleanly (empty account name). Blocks EVERY new customer stamp.
     check_recipe:
       cli: az storage account show --name "sprk{env}artifacts" --query "properties.provisioningState" -o tsv
-      expect: `Succeeded`
+      expect: "`Succeeded`"
     remediation: Author `infrastructure/bicep/modules/controlplane-artifacts-storage.bicep` + wire into `platform-controlplane.bicep` (Wave G-8 Batch 2 / audit-gap-05).
     related_findings: [audit-gap-05-artifacts-storage-missing, h2a-bicep-precompile-ci-coord-pr]
 
@@ -223,7 +223,7 @@ prereqs:
     consequence_of_absence: Sidecar image cannot be pushed; H14a (Exchange PS) permanently blocked; workflow references `vars.SIDECAR_ACR_LOGIN_SERVER` placeholder.
     check_recipe:
       cli: az acr show --name "sprk{env}acr" --query "provisioningState" -o tsv
-      expect: `Succeeded`
+      expect: "`Succeeded`"
     remediation: Author `infrastructure/bicep/modules/controlplane-acr.bicep` + wire into `platform-controlplane.bicep` (Wave G-8 Batch 2 / audit-gap-10).
     related_findings: [audit-gap-10-acr-sidecar-chain, sidecar-ci-workflow-coord-pr, T108-*]
 
@@ -287,7 +287,7 @@ prereqs:
     check_recipe:
       cli: az rest --method get --url "https://graph.microsoft.com/v1.0/servicePrincipals(appId='{graphAppId}')/appRoleAssignments?$filter=principalId eq {l2UamiSpId}" --query "value[].id" -o tsv
       expect: non-empty array; count matches expected role list in `GraphAppRoles.cs`
-    remediation: Run `Grant-ControlPlaneIdentity.ps1` (audit-gap DS-5 c5.8). ⚠ Prerequisite: 11 of 14 null GUIDs in `GraphAppRoles.cs` completed via `spec.md` MUST rule.
+    remediation: "Run `Grant-ControlPlaneIdentity.ps1` (audit-gap DS-5 c5.8). ⚠ Prerequisite: 11 of 14 null GUIDs in `GraphAppRoles.cs` completed via `spec.md` MUST rule."
     related_findings: [c5.8-l2-uami-graph-and-dataverse-grants, T3-graph-app-role-parity]
 
   - id: PRQ-E-08
@@ -350,20 +350,21 @@ prereqs:
     consequence_of_absence: Session receiver against non-session queue throws at `StartProcessingAsync`; L1 dedup silently swallows §4C retries.
     check_recipe:
       cli: az servicebus queue show -g rg-spaarke-platform-{env} --namespace-name {sbNamespace} -n sprk-provisioning-jobs --query "{sessions:requiresSession, dedup:requiresDuplicateDetection}" -o json
-      expect: `{"sessions": true, "dedup": true}`
-    remediation: `az servicebus queue delete` + recreate via Bicep (task 108). WARNING — creation-time-only settings; existing messages lost.
+      expect: '`{"sessions": true, "dedup": true}`'
+    remediation: "`az servicebus queue delete` + recreate via Bicep (task 108). WARNING — creation-time-only settings; existing messages lost."
     related_findings: [T108-*, queue-recreate-runbook]
 
   - id: PRQ-E-13
-    name: `sprk_dataverseenvironment` placeholder record exists with `sprk_environmentid`
-    scope: once_per_env (per customer being provisioned; created BEFORE POST /api/runs)
+    name: "`sprk_dataverseenvironment` placeholder record exists with `sprk_environmentid`"
+    scope: once_per_env  # NOTE: per customer being provisioned; created BEFORE POST /api/runs
+    # (Scope annotation moved to YAML comment 2026-08-27 so validate.ps1 enum check accepts the bare enum value.)
     frequency: per customer, per new run
     owner: operator (via skill Step 1 intake — task 203 wires the create step)
     consequence_of_absence: L2 `POST /api/runs` returns 400 (missing `environmentId`); c6-3-skill-registry-prereq.
     check_recipe:
       cli: pac data list --entity sprk_dataverseenvironment --filter "sprk_customerid eq '{customerId}'" --query "[0].sprk_environmentid" -o tsv
       expect: non-empty GUID
-    remediation: `pac data create --entity sprk_dataverseenvironment --file placeholder.json` (task 203 authors the placeholder step in skill Step 1).
+    remediation: "`pac data create --entity sprk_dataverseenvironment --file placeholder.json` (task 203 authors the placeholder step in skill Step 1)."
     related_findings: [c6-2-skill-environment-id, c6-3-skill-registry-prereq, T028-registry-poco-extension-owed]
 
   - id: PRQ-E-14
@@ -399,7 +400,7 @@ prereqs:
     scope: once_per_customer
     frequency: per run (Step 2 preflight)
     owner: Spaarke platform admin (or auto-support-ticket if plan present)
-    consequence_of_absence: H2a fails with `InsufficientQuota - gpt-5.x - GlobalStandard: limit is 0` on fresh subs.
+    consequence_of_absence: "H2a fails with `InsufficientQuota - gpt-5.x - GlobalStandard: limit is 0` on fresh subs."
     check_recipe:
       cli: |
         az cognitiveservices usage list --location {region} \
@@ -413,12 +414,12 @@ prereqs:
     scope: once_per_customer
     frequency: per run (Step 2 preflight) — pins deprecate ~4-6 months after GA
     owner: Spaarke platform admin
-    consequence_of_absence: `ServiceModelDeprecated` at H2a deploy.
+    consequence_of_absence: "`ServiceModelDeprecated` at H2a deploy."
     check_recipe:
       cli: |
         az cognitiveservices model list --location {region} \
           --query "[?kind=='OpenAI' && model.version=='{pinnedVer}'].model.lifecycleStatus" -o tsv
-      expect: `GenerallyAvailable` or `Legacy` (reject `Deprecating` or `Deprecated`)
+      expect: "`GenerallyAvailable` or `Legacy` (reject `Deprecating` or `Deprecated`)"
     remediation: Bump pinned version in `stacks/model1-shared.bicep` / `customer.bicep` OpenAI deployment set.
     related_findings: [F1, F4, L-o1-model-status-lexicon]
 
@@ -433,8 +434,8 @@ prereqs:
         az rest --method post \
           --url "https://management.azure.com/subscriptions/{sub}/providers/Microsoft.ServiceBus/checkNameAvailability?api-version=2022-10-01-preview" \
           --body '{"name":"{sbName}","type":"Microsoft.ServiceBus/namespaces"}'
-      expect: `{"nameAvailable": true}`
-    remediation: Adjust resource base name in bicepparam. Reserved suffixes to avoid: `-sb` (Service Bus namespace).
+      expect: '`{"nameAvailable": true}`'
+    remediation: "Adjust resource base name in bicepparam. Reserved suffixes to avoid: `-sb` (Service Bus namespace)."
     related_findings: [F10]
 
   - id: PRQ-C-04
@@ -445,7 +446,7 @@ prereqs:
     consequence_of_absence: H5 fails with rate-limit error; run blocks until quota window resets.
     check_recipe:
       cli: pac admin quota --query "[?type=='environmentCreation'].{used:current, limit:cap}" -o json
-      expect: `used < limit`
+      expect: "`used < limit`"
     remediation: Wait for quota window; no bump path.
 
   - id: PRQ-C-05
@@ -470,8 +471,8 @@ prereqs:
     consequence_of_absence: F14 — SpaarkeMaster solution import fails 5min in on Spaarke.Controls.UniversalDocumentUpload (`Webresource content size too big`).
     check_recipe:
       cli: pac org list-settings --environment {dvUrl} --name maxuploadfilesize --query value -o tsv
-      expect: `>= 25600000`
-    remediation: `pac org update-settings --name maxuploadfilesize --value 25600000`. Add Org Settings Contract to r1 handler catalog.
+      expect: "`>= 25600000`"
+    remediation: "`pac org update-settings --name maxuploadfilesize --value 25600000`. Add Org Settings Contract to r1 handler catalog."
     related_findings: [F14]
 
   - id: PRQ-C-07
@@ -486,5 +487,5 @@ prereqs:
           pac application list --environment {dvUrl} | Select-String "$app"
         done
       expect: each app present
-    remediation: `pac application install --application-name msft_PowerBI_Anchor` (~6 min).
+    remediation: "`pac application install --application-name msft_PowerBI_Anchor` (~6 min)."
     related_findings: [F13]

@@ -1,0 +1,72 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="207" project="customer-provisioning-orchestration-r1">
+  <metadata>
+    <title>Resolve 31 placeholder-substitution defects in scripts/provisioning-prereqs/prereqs.yaml + extend SKILL Step 0.5b substitution block</title>
+    <phase>Post-Live-Fire remediation — prereqs manifest correctness</phase>
+    <gate>startable</gate>
+    <status>not-started</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Modifies both `scripts/provisioning-prereqs/prereqs.yaml` (recipe fixes) AND `.claude/skills/provision-environment/SKILL.md` Step 0.5b (substitution block extension). Skill-directives hot-path per root CLAUDE.md §10. Main-session-only per §3 Sub-Agent Write Boundary.</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Mechanical per-placeholder: decide substitution strategy (skill-side substitution block extension / runtime derivation from az context / hardcoded Spaarke constant / defer to post-intake scope) + implement + verify. Substitution-block extension in skill Step 0.5b is a well-scoped edit.</model-tier-reason>
+    <effort>xhigh</effort>
+    <effort-reason>31 placeholder tokens across 19 prereqs. Each needs strategy decision. Plus a scope-placement decision for PRQ-E-13 (declared once_per_env but references {customerId} only known post-intake — either move to once_per_customer scope OR extend skill to run some prereqs post-intake). Also fix PRQ-E-07 unescaped `$filter` bash-expansion.</effort-reason>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <deps>199, 206</deps>
+    <tags>provisioning, prereqs-manifest, placeholder-substitution, skill-directive</tags>
+    <estimated-effort>3-5h (per-placeholder decisions + skill Step 0.5b substitution block extension + verification)</estimated-effort>
+  </metadata>
+
+  <prompt>SKILL Step 0.5b substitution block currently substitutes only `{env}` and `{openAiRegion}` in `check_recipe.cli`. But the manifest contains 19 additional placeholder tokens that run literally as shell strings, causing silent false-fails or opaque `az` errors:
+
+`{containerTypeId}`, `{l2UamiPrincipalId}`, `{l2UamiSpId}`, `{l2UamiClientId}`, `{subId}`, `{sub}`, `{artifactsStorageId}`, `{acrId}`, `{bffAppServiceId}`, `{kvResourceId}`, `{sbNamespace}`, `{sbName}`, `{adminDvUrl}`, `{dvUrl}`, `{bffAppId}`, `{graphAppId}`, `{customerId}`, `{region}`, `{pinnedVer}`
+
+Plus PRQ-E-07 has an unescaped `$filter` inside its OData URL that bash `-c` wrapper expands to empty string, collapsing the query.
+
+Plus PRQ-E-13 is scoped `once_per_env` but references `{customerId}` — only known post-Step-1 intake. Step 0.5b runs BEFORE Step 1. Placement mismatch.
+
+Per-placeholder resolution strategy (from audit note § Class C):
+- **Skill-side substitution extension**: `{env}`, `{openAiRegion}`, `{region}` (rename to `{openAiRegion}`), `{containerTypeId}` (add to skill from env config; distinct per env)
+- **Runtime derivation from az context**: `{subId}` / `{sub}` → `$(az account show --query id -o tsv)`; `{l2UamiPrincipalId}` → `$(az identity show --name <l2-uami> --query principalId)`; `{l2UamiClientId}` → `--query clientId`; `{artifactsStorageId}`/`{acrId}`/`{bffAppServiceId}`/`{kvResourceId}`/`{sbNamespace}` → per-service `az … show --query id`
+- **Hardcoded Spaarke constant**: `{graphAppId}` → `00000003-0000-0000-c000-000000000000` (invariant Microsoft Graph app id)
+- **Scope-placement change**: PRQ-E-13 → move from `once_per_env` to `once_per_customer` (or introduce a new `once_per_customer_pre_intake` phase); requires SKILL Step 1 to iterate customer-scoped prereqs AFTER intake but BEFORE preflight
+
+Bash-expansion fix for PRQ-E-07: escape as `\$filter` OR single-quote the URL so bash `-c` doesn't expand.</prompt>
+
+  <role>Main-session operator (skill-directives hot-path + prereqs manifest hot-path).</role>
+
+  <goal>Every placeholder token in `scripts/provisioning-prereqs/prereqs.yaml check_recipe.cli` is either substituted by SKILL Step 0.5b at runtime, derived at runtime from az context inside the recipe itself, hardcoded as a Spaarke constant, or explicitly documented as a scope-placement follow-on. PRQ-E-07 shell-expansion bug fixed. PRQ-E-13 either re-scoped or the skill extended to run customer-scoped prereqs post-intake.</goal>
+
+  <context>
+    <background>
+      Task 199 SESSION 14 established the parseable manifest baseline + `validate.ps1` forcing function. Task 206 sweeps recipe-contract violations (exit 1 guards). This task 207 sweeps placeholder-substitution defects — the other independent correctness class the audit surfaced.
+
+      Both 206 and 207 are pre-requisites for prereqs.yaml Step 0.5 iteration to actually deliver value at operator invocation. Without both, Step 0.5 either false-passes (206 gap) or false-fails (207 gap) on every recipe. Combined, the manifest becomes the forcing function it was designed to be.
+    </background>
+    <relevant-files>
+      <file role="target-recipes">scripts/provisioning-prereqs/prereqs.yaml</file>
+      <file role="target-substitution-block">.claude/skills/provision-environment/SKILL.md § Step 0.5b</file>
+      <file role="audit-source">projects/customer-provisioning-orchestration-r1/notes/prereqs-yaml-audit-2026-08-27.md</file>
+      <file role="forcing-function">scripts/provisioning-prereqs/validate.ps1</file>
+    </relevant-files>
+    <dependencies>
+      <dependency task="199" status="completed">SESSION 14 baseline.</dependency>
+      <dependency task="206" status="not-started">Recipe-contract sweep. Sequenced BEFORE 207 because exit-1 guards make placeholder-caused false-fails LOUD (currently silent). Order matters.</dependency>
+    </dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="skill-Step-0.5b">Any new substitution token added to Step 0.5b must have a clear derivation source (intake field, `az` context command, or Spaarke constant). Do NOT add tokens whose value is undecidable at Step 0.5 time (that would just move the false-fail into the substitution block).</constraint>
+    <constraint source="scope-taxonomy">If PRQ-E-13 needs to run post-intake, the fix is either (a) re-scope to `once_per_customer` (which currently defers to L2 H0 server-side per skill design) OR (b) introduce a new post-intake pre-preflight phase in the skill. Option (b) is a substantive skill change and warrants its own escalation via §6.5.</constraint>
+    <constraint source="root-CLAUDE-md-3">Sub-Agent Write Boundary — SKILL.md edits main-session-only.</constraint>
+  </constraints>
+
+  <acceptance-criteria>
+    <criterion>No `{placeholder}` token remains in `scripts/provisioning-prereqs/prereqs.yaml check_recipe.cli` that SKILL Step 0.5b substitution block does NOT resolve OR the recipe itself does not derive at runtime.</criterion>
+    <criterion>PRQ-E-07 uses `\$filter` or single-quoted URL so bash `-c` does not expand the `$filter` variable.</criterion>
+    <criterion>PRQ-E-13 either has scope corrected to `once_per_customer` (deferring to L2 H0 server-side) OR skill Step 0.5 flow is extended with post-intake iteration phase.</criterion>
+    <criterion>`validate.ps1` PASSES.</criterion>
+    <criterion>Smoke test: run a customer-scoped intake through Step 0.5 iteration; all applicable prereqs either resolve substitutions or explicitly defer to post-intake per skill design.</criterion>
+  </acceptance-criteria>
+</task>

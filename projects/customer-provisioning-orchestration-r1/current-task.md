@@ -1,5 +1,46 @@
 # Current Task State — customer-provisioning-orchestration-r1
 
+> **Last Updated**: 2026-08-27 SESSION 14 (prereqs.yaml comprehensive fix + forcing function COMPLETE) — Second-live batch dispatch of task 186 attempted. Step 0 passed cleanly. Step 0.5 iteration failed to parse `scripts/provisioning-prereqs/prereqs.yaml`. Ultracode workflow `wf_75aa08a8-13e` (3 audit + 3 adversarial verify, 499K tokens) surfaced 3 orthogonal defect classes: (A) 18 YAML syntax defects, (B) 32 recipe-contract violations, (C) 31 placeholder-substitution defects. Class A fixed atomically + forcing function landed (`validate.ps1` parser-parity validator + always-on-PR workflow + lint-staged glob) — end-to-end empirically verified (PASS on fix / FAIL exit-1 on regression / PASS on restore). Class B + C + arch gaps filed as tasks 206 + 207 + 208 + 209 (each with acceptance criteria + audit-source ref). Task 186 UNBLOCKED for Class-A parseability; B + C are pre-existing debt not this dispatch's regression.
+
+## 🎯 SESSION 14 QUICK RECOVERY — 2026-08-27 (READ THIS FIRST — supersedes SESSION 13 below)
+
+| Field | Value |
+|-------|-------|
+| **Just completed** | (1) Fixed 18 YAML defects in `scripts/provisioning-prereqs/prereqs.yaml` (15 backtick-start + 3 embedded `: ` colon-space traps + 1 scope-enum defect on line 359); (2) Authored `scripts/provisioning-prereqs/validate.ps1` (parser-parity validator using powershell-yaml — SAME parser skill Step 0.5a uses at runtime — plus top-level shape + per-prereq required-field + scope enum + unique-id + SPE never_delete PRQ-T-01 guard + intake.schema.json JSON validity); (3) Authored `.github/workflows/provisioning-prereqs-validate.yml` (always-on-PR gate; mirrors workflows-validate.yml pattern); (4) Extended `.lintstagedrc.mjs` with new glob invoking validator on git-commit; (5) Empirically verified forcing function end-to-end (PASS on fix / FAIL exit-1 on deliberately-broken / PASS on restore); (6) Wrote comprehensive audit note `notes/prereqs-yaml-audit-2026-08-27.md`; (7) Filed 4 follow-on POMLs 206/207/208/209 with acceptance criteria + audit-source refs; (8) Updated TASK-INDEX header + row-count 161→165 + appended 4 SESSION-14 rows. |
+| **Next actionable** | **Re-dispatch task 186 batch mode**. In fresh session (or same after commit): `/provision-environment trial1 --batch runs/trial1-intake.json`. Skill Steps 0 + 0.5 + 1.0 will now flow cleanly through the fixed manifest. Then Step 1f placeholder create (spaarkedev1 registry, schema deployed SESSION 13) → Step 1g intake summary → Step 2 preflight (L2 H0) → Step 3 confirmation gate (`proceed with provisioning`) → Step 4 execute loop H1-H14. 16-24h calendar (spans 24h SPE gate — near-instant in practice per user memory). |
+| **Class-A blockers cleared** | Manifest parseable under both powershell-yaml AND pyyaml (verified). Round-trip OK. validate.ps1 exit 0 on fixed manifest. |
+| **Class-B + C pre-existing debt filed** | Task 206 (recipe-contract silent-PASS remediation — 32 recipes across 27 prereqs). Task 207 (placeholder-substitution — 31 tokens across 19 prereqs + PRQ-E-07 bash-expansion + PRQ-E-13 scope-placement). Task 208 (integrate validator into ci-router.yml single-gate per FR-A01). Task 209 (restore master branch protection — HTTP 404 DISABLED per adversarial-verify discovery). |
+| **Locked decisions (SESSION 14)** | (1) Fix pattern for backtick-start values: double-quote wrap (or single-quote if value contains double-quotes); (2) `scope:` field is bare enum only — annotations use YAML comments (`scope: once_per_env  # note`); (3) Forcing function architecture: parser-parity (powershell-yaml everywhere), always-on-PR (mirrors workflows-validate.yml), shape-contract validation beyond parse; (4) SPE never_delete guard scoped to PRQ-T-01 only (the container-type itself; PRQ-T-02 permissions grant is re-grantable). |
+| **Branch** | `work/customer-provisioning-orchestration-r1` — pending SESSION 14 commit at HEAD |
+| **Working tree pending** | Modified: `scripts/provisioning-prereqs/prereqs.yaml`, `.lintstagedrc.mjs`, `projects/customer-provisioning-orchestration-r1/tasks/TASK-INDEX.md`, `projects/customer-provisioning-orchestration-r1/current-task.md`. New: `scripts/provisioning-prereqs/validate.ps1`, `.github/workflows/provisioning-prereqs-validate.yml`, `projects/customer-provisioning-orchestration-r1/notes/prereqs-yaml-audit-2026-08-27.md`, `projects/customer-provisioning-orchestration-r1/tasks/206-prereqs-yaml-recipe-contract-remediation.poml`, `projects/customer-provisioning-orchestration-r1/tasks/207-prereqs-yaml-placeholder-substitution-remediation.poml`, `projects/customer-provisioning-orchestration-r1/tasks/208-integrate-prereqs-validator-into-ci-router.poml`, `projects/customer-provisioning-orchestration-r1/tasks/209-restore-master-branch-protection.poml`. Committing as one atomic SESSION 14 fix + follow-on-filing. |
+
+### To resume in fresh session — say ONE of these
+
+- **"dispatch task 186 batch"** — main session runs `/provision-environment trial1 --batch runs/trial1-intake.json`; skill now flows through 0 → 0.5 → 1.0 → 1f → 1g → 2 → 3 → 4
+- **"start task 206"** — remediate 32 recipe-contract violations (recipes must `exit 1` per SKILL Step 0.5b — SESSION 12 contract never applied beyond PRQ-E-14)
+- **"start task 207"** — remediate 31 placeholder-substitution defects (skill Step 0.5b substitution block extension + PRQ-E-07 bash-expansion + PRQ-E-13 scope-placement)
+- **"where was I"** — reads this Quick Recovery + resumes
+
+### Critical Context (2-3 sentences)
+
+**Task 186 is unblocked at the parseability layer.** SESSION 14 chose to apply the comprehensive syntax fix + forcing function atomically (per owner directive "comprehensive actual fix, not one-time get-around") while filing the 32 recipe-contract + 31 placeholder defects as follow-ons — those are pre-existing debt in the manifest, not new discoveries from this dispatch, and they require systematic per-recipe work + skill Step 0.5b extension that shouldn't happen mid-dispatch. The forcing function ensures the class-A defect can never regress: validate.ps1 (parser-parity with powershell-yaml) runs on every PR + author-time git-commit.
+
+### SESSION 14 file inventory (pending commit)
+
+- `scripts/provisioning-prereqs/prereqs.yaml` — 19 defect lines corrected (18 syntax + 1 scope enum)
+- `scripts/provisioning-prereqs/validate.ps1` (new) — parser-parity + shape-contract validator
+- `.github/workflows/provisioning-prereqs-validate.yml` (new) — always-on-PR CI gate
+- `.lintstagedrc.mjs` — new glob for provisioning-prereqs manifest → validate.ps1 at author-time
+- `projects/customer-provisioning-orchestration-r1/notes/prereqs-yaml-audit-2026-08-27.md` (new) — comprehensive audit findings + follow-on scope
+- `projects/customer-provisioning-orchestration-r1/tasks/206-prereqs-yaml-recipe-contract-remediation.poml` (new)
+- `projects/customer-provisioning-orchestration-r1/tasks/207-prereqs-yaml-placeholder-substitution-remediation.poml` (new)
+- `projects/customer-provisioning-orchestration-r1/tasks/208-integrate-prereqs-validator-into-ci-router.poml` (new)
+- `projects/customer-provisioning-orchestration-r1/tasks/209-restore-master-branch-protection.poml` (new)
+- `projects/customer-provisioning-orchestration-r1/tasks/TASK-INDEX.md` — header rewrite + 4 new rows
+- `projects/customer-provisioning-orchestration-r1/current-task.md` — this SESSION 14 Quick Recovery block
+
+---
+
 > **Last Updated**: 2026-08-27 SESSION 13 (task 199 reconciliation COMPLETE) — First live batch dispatch of task 186 attempted, HALTED pre-Step-0.5 via §6.5 escalation on 3 discoveries: (1) task 023 registry-schema script never deployed to any env despite ✅ status; (2) L2 code's `sprk_customerid` alt-key column missing entirely (never authored anywhere); (3) SKILL.md Step 1f/6a referenced 3 fictional fields (`sprk_profile`, `sprk_upgrademode`, wrong `sprk_setupstatus` int). All three fixed in-session as task 199 (see notes/task-199 outputs). spaarkedev1 now has all 12 task-023 columns + `sprk_customerid` (30 sprk_ columns total) + `sprk_customerid_key` alt-key registered. SKILL.md Step 1f rewritten with correct required NOT-NULL fields + enum-int setupstatus. Task 186 UNBLOCKED for next-session re-dispatch.
 
 ## 🎯 SESSION 13 QUICK RECOVERY — 2026-08-27 (READ THIS FIRST — supersedes SESSION 12 FINAL below)

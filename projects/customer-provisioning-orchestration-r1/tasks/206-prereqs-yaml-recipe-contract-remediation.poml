@@ -1,0 +1,73 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="206" project="customer-provisioning-orchestration-r1">
+  <metadata>
+    <title>Remediate 32 recipe-contract violations in scripts/provisioning-prereqs/prereqs.yaml (SESSION 12 exit-1 contract was written but never applied beyond PRQ-E-14)</title>
+    <phase>Post-Live-Fire remediation — prereqs manifest correctness</phase>
+    <gate>startable</gate>
+    <status>not-started</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Modifies the manifest that gates every customer provisioning run (Step 0.5). A silent-PASS false positive on any recipe here is the exact failure mode the manifest exists to catch (F16/F19/F20/T108/F14 root causes). Each recipe fix requires understanding what "success" looks like for that specific check + adding an appropriate `exit 1` guard.</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Mechanical per-recipe: convert `az command` to `result=$(az command); [ -n "$result" ] || exit 1` or similar with the specific assertion the `expect:` field describes. No architectural judgment beyond honoring the SKILL Step 0.5b author contract.</model-tier-reason>
+    <effort>xhigh</effort>
+    <effort-reason>32 recipes across 27 prereqs. Each requires reading the recipe, understanding its assertion, authoring the exit-1 guard, verifying the guard behaves correctly (exits on failure, exits 0 on success). Non-trivial testing per recipe. Brownfield analysis of what each `az` / `pac` call actually returns on success vs failure.</effort-reason>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <deps>199</deps>
+    <tags>provisioning, prereqs-manifest, silent-fail-remediation, skill-directive, recipe-hardening</tags>
+    <estimated-effort>4-6h (careful per-recipe work; cannot batch mechanically)</estimated-effort>
+  </metadata>
+
+  <prompt>Every prereq in `scripts/provisioning-prereqs/prereqs.yaml` EXCEPT PRQ-E-14 violates the SKILL Step 0.5b recipe-author contract: recipes MUST explicitly `exit 1` on any internal failure condition, not rely on `az`/`pac` empty-output-implies-fail. The audit surfaced 32 specific violations. Full per-recipe defect list + proposed fix pattern is in `projects/customer-provisioning-orchestration-r1/notes/prereqs-yaml-audit-2026-08-27.md` § Class B, sourced from workflow `wf_75aa08a8-13e` transcript.
+
+The most consequential violations (each silently PASSES on the exact defect the prereq exists to catch):
+- PRQ-C-02 — OpenAI model lifecycle status → silent PASS on Deprecated (the EXACT SESSION 12 regression that motivated the contract)
+- PRQ-E-06 — L2 UAMI RBAC on source Azure services → silent PASS on absent role assignments (F19/F20 root cause)
+- PRQ-E-09 — KV canonical secret catalog presence → silent PASS on partial-seeding (F16 root cause)
+- PRQ-E-12 — Service Bus queue requiresSession + requiresDuplicateDetection → silent PASS on wrong settings (T108 recreate-ceremony)
+- PRQ-C-06 — Dataverse maxuploadfilesize ≥25MB → silent PASS on default 5MB (F14 SpaarkeMaster import fail)
+- PRQ-C-07 — uses PowerShell `Select-String` inside `bash -c` wrapper → silently emits "command not found" every iteration; loop exits 0 regardless of app presence
+
+Apply the exit-1 guard pattern to every recipe. Verify each via manual invocation on a canary state (broken + fixed).</prompt>
+
+  <role>Main-session operator (skill-directive hot-path — `scripts/provisioning-prereqs/prereqs.yaml` is not under `.claude/` but the file governs skill Step 0.5 behavior and is treated as skill-adjacent).</role>
+
+  <goal>Every prereq in prereqs.yaml `check_recipe.cli` explicitly `exit 1` on any failure condition its `expect:` field describes. The SESSION 14 `validate.ps1` forcing function continues to PASS. A companion smoke test proves that a synthesized failure state (e.g., a fake absent role assignment) triggers `exit 1` on the affected recipe.</goal>
+
+  <context>
+    <background>
+      SESSION 12 (2026-08-26 authoring of prereqs.yaml v3.3) rewrote SKILL Step 0.5b to reject the empty-output-implies-fail pattern. The stated reason: PRQ-C-02 (OpenAI model catalog check) silently passed when westus2 returned zero models, because the classifier defaulted to non-empty output = pass and fell through to a generic "output could be anything" branch. The FIX was to make recipes exit-code-first: recipe MUST explicitly `exit 1`.
+
+      SESSION 14 (2026-08-27) discovered — via the first-live Step 0.5 iteration — that ONLY PRQ-E-14 was updated to honor the new contract. Every other recipe still uses empty-output-implies-fail or relies on `az`'s undocumented HTTP-status-to-exit mapping. This means Step 0.5 will iterate cleanly (parseability fixed by task 199), report PASS on almost everything, and hand back a false green signal to the operator.
+
+      This task is the systematic sweep to actually implement what SESSION 12 declared.
+
+      **Non-goal**: this task does NOT fix placeholder-substitution defects (see task 207). Placeholder tokens like `{l2UamiPrincipalId}` will remain as literals in recipes until task 207 lands. The exit-1 guards authored here will help by making the false-fail loud rather than silent, but the eventual fix requires both classes remediated.
+    </background>
+    <relevant-files>
+      <file role="target">scripts/provisioning-prereqs/prereqs.yaml</file>
+      <file role="skill-contract">.claude/skills/provision-environment/SKILL.md § Step 0.5b</file>
+      <file role="audit-source">projects/customer-provisioning-orchestration-r1/notes/prereqs-yaml-audit-2026-08-27.md</file>
+      <file role="forcing-function">scripts/provisioning-prereqs/validate.ps1</file>
+      <file role="reference-implementation">PRQ-E-14 recipe in prereqs.yaml (the ONE prereq that honors the contract)</file>
+    </relevant-files>
+    <dependencies>
+      <dependency task="199" status="completed">Task 199 SESSION 14 established the parseable manifest baseline + forcing function. Task 206 sweeps recipes on top of that baseline.</dependency>
+    </dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="skill-Step-0.5b">Recipe MUST explicitly `exit 1` on any failure condition it detects internally. Silent empty output no longer implicitly passes.</constraint>
+    <constraint source="validate.ps1-forcing-function">Every edit MUST leave the manifest parseable AND the forcing function passing. Run `pwsh -File scripts/provisioning-prereqs/validate.ps1` after each recipe edit.</constraint>
+    <constraint source="check_recipe.expect-field">Each recipe's `expect:` field describes what success looks like. The exit-1 guard MUST assert against that expect condition, not just non-empty output.</constraint>
+    <constraint source="reference-pattern">PRQ-E-14 (currently the only compliant recipe) is the reference implementation. Use its shape as the template.</constraint>
+  </constraints>
+
+  <acceptance-criteria>
+    <criterion>Every recipe in `scripts/provisioning-prereqs/prereqs.yaml check_recipe.cli` has an explicit `exit 1` failure path corresponding to its `expect:` assertion.</criterion>
+    <criterion>PRQ-C-07 uses bash-native commands (grep -q, [ -n "$var" ], etc.) — NO PowerShell cmdlets under bash -c wrapper.</criterion>
+    <criterion>Running `pwsh -File scripts/provisioning-prereqs/validate.ps1` PASSES (exit 0) after all edits.</criterion>
+    <criterion>Smoke test: pick 3 recipes, synthesize a failing state (mock env var, mock az output, etc.), verify each recipe now exits 1 loudly with actionable message.</criterion>
+    <criterion>Companion PR description enumerates each recipe modified + the specific assertion added.</criterion>
+  </acceptance-criteria>
+</task>

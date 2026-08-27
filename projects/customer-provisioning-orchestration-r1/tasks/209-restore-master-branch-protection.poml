@@ -1,0 +1,62 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="209" project="customer-provisioning-orchestration-r1">
+  <metadata>
+    <title>Restore master branch protection with CI / Router as required check + document admin-bypass policy</title>
+    <phase>Post-Live-Fire remediation — repo governance</phase>
+    <gate>startable</gate>
+    <status>not-started</status>
+    <rigor>STANDARD</rigor>
+    <rigor-reason>Ops task — modifies GitHub repo settings via `gh api` PATCH, no code files. But repo-governance-critical: without this, ALL required-status-check work is advisory.</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Well-defined ops task — enable branch protection, list required checks, decide admin-bypass posture, document in a governance note.</model-tier-reason>
+    <effort>medium</effort>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <deps>208</deps>
+    <tags>ops, repo-governance, branch-protection, single-gate</tags>
+    <estimated-effort>1h (ops call + governance-note commit)</estimated-effort>
+  </metadata>
+
+  <prompt>SESSION 14 (task 199) adversarial-verify surfaced: `gh api repos/spaarke-dev/spaarke/branches/master/protection` returns HTTP 404 "Branch protection has been disabled on this repository." Zero required status checks are actually enforced. Every CI workflow — including all the tier1/tier2 gates + the SESSION 14 provisioning-prereqs-validate + all other spec-declared required checks — runs as advisory.
+
+This task restores branch protection with the CI / Router single-gate configuration + documents the admin-bypass posture. Post-task 208 (which routes prereqs validation through CI / Router), only ONE required check remains: `CI / Router`.
+
+Also address: even with protection restored, admin-bypass push is unhandled (default). Two options: (a) block admin bypass entirely, or (b) require admin bypass to leave a git-note or PR-comment audit trail. Owner decides.
+
+The task itself is small — the value is in getting the enforcement teeth back on the repo. Without this, the SESSION 14 forcing function is documentation not enforcement.</prompt>
+
+  <role>Main-session operator with repo admin permission (required for `gh api PATCH /repos/{owner}/{repo}/branches/{branch}/protection`).</role>
+
+  <goal>Master branch protection is restored on `spaarke-dev/spaarke`. Required status check is exactly `CI / Router` per FR-A01. Admin-bypass posture is either blocked or explicitly documented with audit-trail expectation. Every CI check that was silently advisory becomes actually enforced.</goal>
+
+  <context>
+    <background>
+      Discovery is from adversarial-verify of the SESSION 14 forcing function proposal. The forcing function itself (`validate.ps1` + workflow + lint-staged glob) delivers value regardless of protection state (visible in PR checks tab, exit-1 on defect, author-time relief), but its FORCING role — merge-blocking — depends on protection being live.
+
+      This task is scheduled AFTER task 208 (router integration) so that the required-checks-list is authoritative before flipping enforcement on.
+    </background>
+    <relevant-files>
+      <file role="target">GitHub repo `spaarke-dev/spaarke` branch protection settings (via `gh api`)</file>
+      <file role="reference">spec-FR-A01 (single-gate contract)</file>
+      <file role="reference">projects/customer-provisioning-orchestration-r1/notes/prereqs-yaml-audit-2026-08-27.md § Class D</file>
+      <file role="governance-note-target">docs/procedures/ci-cd-workflow.md OR new docs/procedures/branch-protection-policy.md</file>
+    </relevant-files>
+    <dependencies>
+      <dependency task="208" status="not-started">Router integration must land first so the required-checks list is authoritative (single check `CI / Router`, not a growing list).</dependency>
+    </dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="spec-FR-A01">Required status checks list is exactly `CI / Router` — no parallel required checks.</constraint>
+    <constraint source="operator-authority">Only repo admin can flip branch protection. If Claude does not have admin, escalate + provide the exact `gh api PATCH` command for the operator to run.</constraint>
+    <constraint source="root-CLAUDE-md-executing-actions-with-care">Restoring branch protection is a governance-critical action visible to all contributors. Present the planned settings + get explicit operator sign-off before invoking `gh api PATCH`.</constraint>
+  </constraints>
+
+  <acceptance-criteria>
+    <criterion>`gh api repos/spaarke-dev/spaarke/branches/master/protection` returns HTTP 200 (protection live).</criterion>
+    <criterion>Required status checks = `[CI / Router]` (exactly one entry per FR-A01).</criterion>
+    <criterion>Admin-bypass posture documented (blocked, or trail-required) in a governance note that ships with the PR.</criterion>
+    <criterion>A test PR attempting to merge WITHOUT `CI / Router` green is actually blocked by the protection.</criterion>
+    <criterion>Audit-trail plan documented for admin bypass (if bypass allowed): git-note pattern, PR comment convention, or Slack channel notification.</criterion>
+  </acceptance-criteria>
+</task>

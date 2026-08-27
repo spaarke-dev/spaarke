@@ -91,6 +91,15 @@ export default {
   // Prettier: format staged JSON, YAML files
   "**/*.{json,yaml,yml}": "prettier --write",
 
+  // Provisioning prereqs manifest: run the SAME validator CI runs (parser parity
+  // with .claude/skills/provision-environment SKILL.md Step 0.5a), so author-time
+  // signal == CI signal. Catches yaml parse defects, missing required fields,
+  // scope enum typos, duplicate ids, and SPE never_delete regressions BEFORE
+  // they land in the manifest. Added 2026-08-27 after the 18-defect regression.
+  "scripts/provisioning-prereqs/{prereqs.yaml,intake.schema.json}": () => [
+    "pwsh -NoProfile -File scripts/provisioning-prereqs/validate.ps1",
+  ],
+
   // dotnet format: format staged C# files (scoped to staged files only)
   "**/*.cs": (files) => {
     // dotnet format --include accepts a space-separated list of file paths

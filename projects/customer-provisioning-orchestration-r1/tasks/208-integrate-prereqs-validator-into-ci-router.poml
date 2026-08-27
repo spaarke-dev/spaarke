@@ -1,0 +1,71 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="208" project="customer-provisioning-orchestration-r1">
+  <metadata>
+    <title>Integrate provisioning-prereqs-validate workflow into ci-router.yml single-gate per FR-A01 (currently runs as parallel advisory check)</title>
+    <phase>Post-Live-Fire remediation — CI governance</phase>
+    <gate>startable</gate>
+    <status>not-started</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Modifies `.github/workflows/ci-router.yml` (ci-workflows hot-path per root CLAUDE.md §10) + `.github/workflows/ci-tier1-blocking.yml` + `.github/workflows/provisioning-prereqs-validate.yml`. Main-session-only per §3.</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Mechanical workflow-file edits — well-defined YAML shape changes. Model complexity in the AGGREGATE change (touching 3 workflow files atomically) but each edit is small.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <deps>199</deps>
+    <tags>ci-workflows, provisioning, prereqs-manifest, single-gate-integration, hot-path</tags>
+    <estimated-effort>1-2h (workflow edits + PR verification that CI / Router still emits correctly)</estimated-effort>
+  </metadata>
+
+  <prompt>SESSION 14 (task 199) authored `.github/workflows/provisioning-prereqs-validate.yml` as a standalone dedicated workflow — always-on-PR, exits 1 on defect. But adversarial verify (forcing-function-coverage lens, workflow `wf_75aa08a8-13e`) flagged two architectural gaps:
+
+1. **Wrong integration point per FR-A01**: spec `FR-A01` (single required status check) mandates exactly ONE required check named `CI / Router` that is never stuck-pending. Adding `provisioning-prereqs-validate` as a parallel required check violates the single-gate contract. Even if the operator adds it to branch protection later, they now must maintain TWO required checks and remember to add the new one.
+
+2. **Router doesn't classify `scripts/**`**: `ci-router.yml classify` job's `filters:` block covers `bff` / `spaarke_ai` / `docs` / `ci_workflows` but NOT `scripts/**`. A PR modifying only `scripts/provisioning-prereqs/prereqs.yaml` today triggers no Tier 1/2 tests. The SESSION 14 gap that let the 18-defect regression through was precisely this.
+
+The correct integration (per verifier's recipe):
+- **Extend ci-router.yml classify job** with `provisioning_prereqs:` output covering `scripts/provisioning-prereqs/**` AND `.claude/skills/provision-environment/**`
+- **Add validator as a step or sub-job in ci-tier1-blocking.yml** gated on `needs.classify.outputs.provisioning_prereqs == 'true'` — piggybacks on the existing Tier 1 arch-tests job for near-zero marginal cost
+- **Update ci-router.yml `router-result` job** so `provisioning_prereqs` participates in the single-gate aggregation
+- **Retire the standalone provisioning-prereqs-validate.yml** OR keep it as always-on-PR for the "docs-only PR still gets prereqs validation" case (decide based on whether ci-router's docs-only path skips it)
+
+Preserve parser parity: whatever runs in tier1 MUST invoke `scripts/provisioning-prereqs/validate.ps1` (which uses `powershell-yaml` — the exact SKILL Step 0.5a runtime parser). Do NOT substitute a different parser under the hood.</prompt>
+
+  <role>Main-session operator (ci-workflows hot-path).</role>
+
+  <goal>The prereqs validator participates in the CI / Router single-gate aggregation per FR-A01. A PR touching `scripts/provisioning-prereqs/**` or `.claude/skills/provision-environment/**` triggers the validator, and its failure blocks merge via the ONE required check `CI / Router` (not via a parallel required check). Parser parity with SKILL Step 0.5a is preserved end-to-end.</goal>
+
+  <context>
+    <background>
+      SESSION 14 (task 199) authored the validator + standalone workflow as an atomic fix for the discovered 18-defect regression. Router integration was deliberately deferred to keep task 199 scope tight (fix parseability + establish forcing function; enhance forcing function architecture later).
+
+      This task 208 completes the architectural correction identified by the adversarial forcing-function-coverage lens.
+    </background>
+    <relevant-files>
+      <file role="target">.github/workflows/ci-router.yml (classify job filters + router-result aggregation)</file>
+      <file role="target">.github/workflows/ci-tier1-blocking.yml (add validator step/sub-job)</file>
+      <file role="target">.github/workflows/provisioning-prereqs-validate.yml (retire OR retain per docs-only-path decision)</file>
+      <file role="reference">.github/workflows/workflows-validate.yml (always-on-PR pattern the current workflow mirrors)</file>
+      <file role="reference-implementation">scripts/provisioning-prereqs/validate.ps1</file>
+      <file role="audit-source">projects/customer-provisioning-orchestration-r1/notes/prereqs-yaml-audit-2026-08-27.md § Class D</file>
+    </relevant-files>
+    <dependencies>
+      <dependency task="199" status="completed">SESSION 14 validator + standalone workflow baseline.</dependency>
+    </dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="spec-FR-A01">Exactly ONE required status check named `CI / Router`. Adding parallel required checks is forbidden.</constraint>
+    <constraint source="parser-parity">Whatever runs in CI MUST invoke `validate.ps1` (powershell-yaml). NO substituting YamlDotNet, pyyaml, or js-yaml under the hood — that would break the parser-parity guarantee that motivated the choice.</constraint>
+    <constraint source="root-CLAUDE-md-10">ci-workflows hot-path: this task modifies CI workflows. `/conflict-check` before PR.</constraint>
+  </constraints>
+
+  <acceptance-criteria>
+    <criterion>`ci-router.yml classify` job has a `provisioning_prereqs` output covering `scripts/provisioning-prereqs/**` + `.claude/skills/provision-environment/**`.</criterion>
+    <criterion>`ci-tier1-blocking.yml` has a step or sub-job that runs `validate.ps1` gated on `needs.classify.outputs.provisioning_prereqs == 'true'`.</criterion>
+    <criterion>`ci-router.yml router-result` job includes prereqs validation in the single-gate aggregation.</criterion>
+    <criterion>A test PR modifying only `scripts/provisioning-prereqs/prereqs.yaml` triggers validation via `CI / Router`.</criterion>
+    <criterion>A test PR NOT touching `scripts/provisioning-prereqs/**` still passes `CI / Router` cleanly (no stuck-pending).</criterion>
+    <criterion>The retired-or-retained decision on `provisioning-prereqs-validate.yml` is documented in the PR description with rationale.</criterion>
+  </acceptance-criteria>
+</task>

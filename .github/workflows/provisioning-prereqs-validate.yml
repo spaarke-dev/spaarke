@@ -1,0 +1,54 @@
+# Forcing-function CI gate for scripts/provisioning-prereqs/prereqs.yaml.
+#
+# Runs the SAME `powershell-yaml` parser as .claude/skills/provision-environment
+# SKILL.md Step 0.5a, so "parses here" == "parses at operator invocation" (parser parity).
+# Mirrors workflows-validate.yml's "always run on PR, no paths filter" pattern to
+# guarantee the check never gets stuck-pending (the failure mode that let the
+# 2026-08-27 18-defect regression through).
+#
+# Also validates:
+#   - Top-level shape (schema_version, manifest_version, last_updated, prereqs[])
+#   - Per-prereq required fields (id, name, scope, owner, consequence_of_absence,
+#     check_recipe.cli, remediation)
+#   - Scope enum (once_per_tenant | once_per_subscription | once_per_env | once_per_customer)
+#   - Unique prereq ids
+#   - SPE never_delete guard on PRQ-T-01 (24h replication penalty; owner directive 2026-08-24)
+#   - intake.schema.json is valid JSON
+#
+# Follow-on (filed as separate task): route through ci-router.yml's classify job
+# and add to the CI / Router single-gate required check per FR-A01. Until then,
+# this workflow runs as an advisory check.
+#
+# Fast (~30s cold): pwsh preinstalled on ubuntu-latest; Install-Module powershell-yaml ~8s;
+# parse+validation <1s; ajv-cli npx ~15s.
+
+name: provisioning-prereqs-validate
+
+on:
+  pull_request:
+  push:
+    branches: [master]
+  merge_group:
+
+permissions:
+  contents: read
+
+jobs:
+  validate:
+    name: prereqs.yaml + intake.schema.json
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Validate manifest (powershell-yaml parser parity + shape contract)
+        shell: pwsh
+        run: ./scripts/provisioning-prereqs/validate.ps1
+
+      - name: Validate intake.schema.json is a valid JSON Schema (Draft 2020-12)
+        shell: bash
+        run: |
+          npx --yes ajv-cli@5 compile \
+            --spec=draft2020 \
+            -s scripts/provisioning-prereqs/intake.schema.json
