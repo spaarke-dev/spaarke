@@ -24,7 +24,21 @@
 
 Plus PRQ-E-07 has an unescaped `$filter` inside its OData URL that bash `-c` wrapper expands to empty string, collapsing the query.
 
-Plus PRQ-E-13 is scoped `once_per_env` but references `{customerId}` — only known post-Step-1 intake. Step 0.5b runs BEFORE Step 1. Placement mismatch.
+Plus PRQ-E-13 is scoped `once_per_env` but references `{customerId}` — only known post-Step-1 intake. Step 0.5b runs BEFORE Step 1. Placement mismatch. **PRQ-05 resolution (2026-08-27)**: PRQ-E-13 was DELETED from prereqs.yaml (see commit d5ba336bf); placeholder-record verification lives in SKILL.md Step 1f exclusively. This task 207 therefore no longer needs to fix PRQ-E-13.
+
+**PRQ-11 amendment (2026-08-27) — four `$var` bash-expansion sites explicitly enumerated:**
+
+The Step 0.5b invocation `& bash -c $recipe` runs each recipe in a fresh bash subshell with NO pre-defined variables. Any `$name` in the recipe body is expanded by bash to the empty string, silently corrupting the CLI call. The 4 known sites:
+
+1. **PRQ-T-01 line 58 (pre-fix)** — `Authorization=Bearer $graphAppOnlyToken` — `$graphAppOnlyToken` never defined; produced `Authorization=Bearer ` (empty Bearer) → silent 401. **Resolution**: rewrite recipe to acquire token in-line via `token=$(az account get-access-token --resource https://graph.microsoft.com --query accessToken -o tsv); [ -z "$token" ] && exit 1`. See PRQ-01 (commit 75537850a).
+
+2. **PRQ-T-02 line 73 (pre-fix)** — same `$graphAppOnlyToken` trap. Same resolution. See PRQ-01.
+
+3. **PRQ-C-05 line 462 (pre-fix)** — `Authorization=Bearer $customerTenantToken` — `$customerTenantToken` never defined AND is infeasible operator-side (operator does NOT hold customer-tenant credentials). **Resolution**: PRQ-C-05 marked server-side-only (H0.5 handler in L2 control-plane verifies via multitenant app-only token flow); operator-side check reduced to `echo … ; exit 0` skip. See PRQ-02 (commit 75537850a).
+
+4. **PRQ-E-07 line 288** — `?$filter=principalId eq {l2UamiSpId}` — the `$filter` OData query string parameter is unescaped so bash `-c` expands it to empty, collapsing the query to `?=principalId eq ...` (garbage). **Resolution**: escape as `\$filter=principalId%20eq%20...` (URL-encoded spaces) OR wrap the URI arg in single quotes so bash does not expand.
+
+Same class also proactively applied to PRQ-E-08 in PRQ-07 rewrite (which uses `\$filter` and `\$select`).
 
 Per-placeholder resolution strategy (from audit note § Class C):
 - **Skill-side substitution extension**: `{env}`, `{openAiRegion}`, `{region}` (rename to `{openAiRegion}`), `{containerTypeId}` (add to skill from env config; distinct per env)
@@ -65,8 +79,9 @@ Bash-expansion fix for PRQ-E-07: escape as `\$filter` OR single-quote the URL so
   <acceptance-criteria>
     <criterion>No `{placeholder}` token remains in `scripts/provisioning-prereqs/prereqs.yaml check_recipe.cli` that SKILL Step 0.5b substitution block does NOT resolve OR the recipe itself does not derive at runtime.</criterion>
     <criterion>PRQ-E-07 uses `\$filter` or single-quoted URL so bash `-c` does not expand the `$filter` variable.</criterion>
-    <criterion>PRQ-E-13 either has scope corrected to `once_per_customer` (deferring to L2 H0 server-side) OR skill Step 0.5 flow is extended with post-intake iteration phase.</criterion>
+    <criterion>PRQ-E-13 either has scope corrected to `once_per_customer` (deferring to L2 H0 server-side) OR skill Step 0.5 flow is extended with post-intake iteration phase. **PRQ-05 resolution (2026-08-27)**: PRQ-E-13 was DELETED from prereqs.yaml; placeholder-record verification lives in SKILL.md Step 1f only. This criterion is SATISFIED by deletion.</criterion>
     <criterion>`validate.ps1` PASSES.</criterion>
     <criterion>Smoke test: run a customer-scoped intake through Step 0.5 iteration; all applicable prereqs either resolve substitutions or explicitly defer to post-intake per skill design.</criterion>
+    <criterion source="PRQ-11 amendment 2026-08-27">**No `$var` reference in `check_recipe.cli` is undefined at recipe-invocation time.** Every `$name` in a recipe MUST be either (a) defined in-recipe via `var=$(...)` before use, (b) explicitly documented in the recipe as intake-supplied via SKILL Step 0.5b substitution (in which case the token is `{name}` not `$name`), OR (c) a well-known bash special variable ($?, $$, $*, etc. — none currently used). The four historical trap sites (PRQ-T-01 `$graphAppOnlyToken`, PRQ-T-02 `$graphAppOnlyToken`, PRQ-C-05 `$customerTenantToken`, PRQ-E-07 `$filter` OData param) enumerated in the prompt block MUST all be resolved. Verification: a `grep -nE '\$[a-zA-Z_][a-zA-Z0-9_]*' scripts/provisioning-prereqs/prereqs.yaml` produces ONLY references that are defined in-recipe or are documented substitution-block outputs.</criterion>
   </acceptance-criteria>
 </task>
