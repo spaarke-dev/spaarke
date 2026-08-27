@@ -1,0 +1,85 @@
+# Spaarke platform constants used by /provision-environment SKILL.md Step 0.5b
+# substitution loop. Authored 2026-08-27 SESSION 15 Wave 4 per PLX-13.
+#
+# Design: keep this file MINIMAL. Only invariant values that never change per-env
+# (Microsoft platform GUIDs, canonical resource-name templates) belong here.
+# Everything per-env, per-tenant, per-customer is DERIVED at runtime from az /
+# pac / Dataverse MCP context — hardcoding those would just create drift.
+#
+# Consumers (as of SESSION 15):
+#   - .claude/skills/provision-environment/SKILL.md Step 0 (loads this file)
+#   - .claude/skills/provision-environment/SKILL.md Step 0.5b (substitutes tokens
+#     into check_recipe.cli before bash -c invocation)
+#   - Step 5a (constructs Model 2 admin-consent URL)
+
+schema_version: 1
+manifest_version: 1
+last_updated: 2026-08-27
+author_session: customer-provisioning-orchestration-r1 SESSION 15 Wave 4
+
+# --- INVARIANT Microsoft platform GUIDs (never change across envs, tenants, time) ---
+microsoft_constants:
+  # Microsoft Graph enterprise-app appId — same value in every Entra tenant
+  # See: https://learn.microsoft.com/en-us/azure/active-directory/develop/permissions-consent-overview
+  graphAppId: 00000003-0000-0000-c000-000000000000
+
+  # ARM management-plane audience — same across all Azure clouds except sovereign
+  armAudience: https://management.azure.com/
+
+# --- Canonical resource-name TEMPLATES (interpolated per-env at runtime) ---
+# These are BUILD RULES, not values. The skill fills {env} / {customerId} at runtime.
+name_templates:
+  # L2 control-plane UAMI (per-env). Deploy-ControlPlane.ps1 uses this pattern.
+  l2UamiName: sprk-controlplane-{env}-uami
+
+  # L2 control-plane App Service (per-env). Matches infrastructure/bicep/platform-controlplane.
+  l2AppServiceName: spaarke-provisioning-controlplane-{env}
+
+  # Platform resource group (per-env). Matches customer.bicep + Deploy-ControlPlane.ps1.
+  platformResourceGroup: rg-spaarke-platform-{env}
+
+  # Service Bus namespace (per-env). Matches Deploy-ControlPlane.ps1:185 default.
+  sbNamespace: spaarke-servicebus-{env}
+
+  # Platform storage account for artifacts (per-env). Naming: sprk{env}artifacts (lowercase, no dash — Azure Storage rule).
+  artifactsStorageName: sprk{env}artifacts
+
+  # Platform ACR for L2 sidecar image (per-env).
+  acrName: sprk{env}acr
+
+  # Platform KV (per-env). Matches Bicep params.
+  platformKvName: sprk-{env}-kv
+
+  # Registry env Dataverse URL (per-env). Per operator memory feedback_no_central_managing_env_yet,
+  # spaarkedev1 doubles as engineering dev + customer registry until a central-managing env exists.
+  # Future r2 evaluation: introduce dedicated registry envs.
+  registryDvUrl:
+    dev: https://spaarkedev1.crm.dynamics.com
+    demo: https://spaarke-demo.crm.dynamics.com  # placeholder; not yet provisioned
+    prod: https://spaarke-registry-prod.crm.dynamics.com  # placeholder; not yet provisioned
+
+# --- Per-env unique GUIDs (require operator to populate before first provisioning run) ---
+# These are NOT derivable via az — the operator (or an install script) must set them once per env
+# and check them into this file. If null, Step 0.5b prereq checks referencing them HARD STOP with
+# an actionable error pointing here.
+per_env_constants:
+  dev:
+    # SPE container-type GUID registered on the Spaarke tenant. Once created via Graph API,
+    # never changes (per operator directive 2026-08-24 SPE never_delete + 24h replication).
+    containerTypeId: null  # TODO: operator populate; see docs/guides/SPAARKE-CUSTOMER-DEPLOYMENT-GUIDE.md §2.4
+
+    # Model 1 multitenant BFF app-reg (per-tenancy tier). One per tier, shared across all Model 1 customers.
+    bffMultiTenantAppId: null  # TODO: operator populate after Register-EntraAppRegistrations.ps1 run
+
+    # Base URL of the deployed BFF (used for admin-consent redirect_uri per PLX-11).
+    bffProdBase: https://spaarke-bff-dev.azurewebsites.net  # placeholder — verify against real App Service name
+
+  demo:
+    containerTypeId: null
+    bffMultiTenantAppId: null
+    bffProdBase: https://spaarke-bff-demo.azurewebsites.net
+
+  prod:
+    containerTypeId: null
+    bffMultiTenantAppId: null
+    bffProdBase: https://spaarke-bff-prod.azurewebsites.net

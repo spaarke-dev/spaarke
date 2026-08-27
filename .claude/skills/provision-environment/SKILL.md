@@ -189,7 +189,41 @@ If the module is unavailable AND cannot be installed (offline / restricted-netwo
 
 #### 0.5b. Iterate the manifest
 
+Per SESSION 15 Wave 4 (SKILL-08 + PLX-01..14 + PRQ-06):
+- Substitution block extended from 2 tokens ({env}, {openAiRegion}) to the full set of ~15 tokens the recipes reference. Values are DERIVED (via `az` + Spaarke constants file) rather than hardcoded — this survives per-env drift.
+- Author-time regex sanity check (PLX-14): if a recipe references an unresolved `{token}`, the skill emits a targeted `[skill-config]` error identifying the missing substitution BEFORE invoking `bash -c` (turns silent literal-in-cli az errors into loud maintainer diagnostics).
+- Defense-in-depth expect-field classifier (PRQ-06): REMOVED. Belt-and-braces was well-intentioned but the belt was broken (only matched FIRST backticked token) and the braces made it worse (false-fails on prose-literal expects like `>= 25600000`). Assertion semantics now live in the recipe itself (per Wave 3 PRQ-03 assertion-recompute + task 206 exit-1 contract). Recipes exit 1 on real failure; classifier trust falls back to exit code.
+
 ```powershell
+# --- Load Spaarke constants (PLX-13) ---
+$constantsPath = Join-Path $repoRoot 'scripts/provisioning-prereqs/spaarke-constants.yaml'
+$constants = Get-Content $constantsPath -Raw | ConvertFrom-Yaml
+
+# --- Derive runtime tokens (per PLX-01..07 substitution strategy) ---
+$graphAppId       = $constants.microsoft_constants.graphAppId
+$subId            = az account show --query id -o tsv
+$l2UamiName       = $constants.name_templates.l2UamiName -replace '\{env\}', $env
+$platformRg       = $constants.name_templates.platformResourceGroup -replace '\{env\}', $env
+$l2UamiJson       = az identity show -g $platformRg -n $l2UamiName -o json | ConvertFrom-Json
+$l2UamiPrincipalId = $l2UamiJson.principalId
+$l2UamiClientId    = $l2UamiJson.clientId
+$l2UamiSpId        = az ad sp show --id $l2UamiClientId --query id -o tsv
+$sbNamespace       = $constants.name_templates.sbNamespace -replace '\{env\}', $env
+$artifactsStorage  = az storage account show -g $platformRg -n ($constants.name_templates.artifactsStorageName -replace '\{env\}', $env) --query id -o tsv 2>$null
+$acrId             = az acr show -g $platformRg -n ($constants.name_templates.acrName -replace '\{env\}', $env) --query id -o tsv 2>$null
+$bffAppServiceId   = az webapp list -g $platformRg --query "[?starts_with(name,'sprksharedprod-api') || starts_with(name,'spaarke-bff-$env')].id" -o tsv | Select-Object -First 1
+$kvResourceId      = az keyvault show -g $platformRg -n ($constants.name_templates.platformKvName -replace '\{env\}', $env) --query id -o tsv 2>$null
+$containerTypeId   = $constants.per_env_constants.$env.containerTypeId
+$bffAppId          = $constants.per_env_constants.$env.bffMultiTenantAppId
+$adminDvUrl        = $constants.name_templates.registryDvUrl.$env
+$openAiRegionResolved = if ($openAiRegion) { $openAiRegion } else { 'westus3' }  # canonical Spaarke split per operator memory
+
+# Sanity: per_env_constants that require operator population MUST be set
+if (-not $containerTypeId) {
+  Write-Error "[skill-config] scripts/provisioning-prereqs/spaarke-constants.yaml per_env_constants.$env.containerTypeId is null. Operator MUST populate before Step 0.5 iteration. See docs/guides/SPAARKE-CUSTOMER-DEPLOYMENT-GUIDE.md §2.4 for how to obtain the SPE container-type GUID."
+  exit 1
+}
+
 $repoRoot = git rev-parse --show-toplevel
 $manifestPath = Join-Path $repoRoot 'scripts/provisioning-prereqs/prereqs.yaml'
 $manifest = Get-Content $manifestPath -Raw | ConvertFrom-Yaml
@@ -197,47 +231,64 @@ $manifest = Get-Content $manifestPath -Raw | ConvertFrom-Yaml
 # Determine which scopes are checkable this early
 $scopesToCheck = @('once_per_tenant', 'once_per_subscription')
 if ($env) { $scopesToCheck += 'once_per_env' }  # $env from arg or batch intake
+# Per EXEC-10 / PRQ-05: once_per_customer prereqs are deferred to server-side H0
+# (they reference {customerId} which is only known post-intake; scope-mismatch prereqs
+# like the deleted PRQ-E-13 have been removed from prereqs.yaml in Wave 3).
 
 $results = @()
 foreach ($prereq in $manifest.prereqs) {
   if ($prereq.scope -notin $scopesToCheck) { continue }
 
-  # Substitute placeholders in check_recipe.cli. Add more here as needed.
+  # Full substitution chain (SKILL-08 + PLX-01..10). Missing token → literal-in-cli
+  # (caught by the regex sanity check below).
   $recipe = $prereq.check_recipe.cli `
-    -replace '\{env\}', $env `
-    -replace '\{openAiRegion\}', $openAiRegion  # populated from batch intake or default 'westus3'
+    -replace '\{env\}',                $env `
+    -replace '\{openAiRegion\}',       $openAiRegionResolved `
+    -replace '\{region\}',             $openAiRegionResolved `
+    -replace '\{subId\}',              $subId `
+    -replace '\{sub\}',                $subId `
+    -replace '\{l2UamiPrincipalId\}',  $l2UamiPrincipalId `
+    -replace '\{l2UamiClientId\}',     $l2UamiClientId `
+    -replace '\{l2UamiSpId\}',         $l2UamiSpId `
+    -replace '\{graphAppId\}',         $graphAppId `
+    -replace '\{sbNamespace\}',        $sbNamespace `
+    -replace '\{artifactsStorageId\}', $artifactsStorage `
+    -replace '\{acrId\}',              $acrId `
+    -replace '\{bffAppServiceId\}',    $bffAppServiceId `
+    -replace '\{kvResourceId\}',       $kvResourceId `
+    -replace '\{containerTypeId\}',    $containerTypeId `
+    -replace '\{bffAppId\}',           $bffAppId `
+    -replace '\{adminDvUrl\}',         $adminDvUrl
+
+  # --- PLX-14 author-time sanity check ---
+  # If any {token} literal survives substitution, the SKILL substitution chain
+  # is out of date vs the manifest. Fail LOUD with the offending token instead of
+  # invoking bash -c with a corrupt CLI.
+  if ($recipe -match '\{[a-zA-Z_][a-zA-Z_0-9]*\}') {
+    Write-Error "[skill-config] Recipe for $($prereq.id) references unresolved placeholder '$($Matches[0])'. Extend the substitution block at .claude/skills/provision-environment/SKILL.md § Step 0.5b (currently at ~line 200) with a derivation for this token, or verify it belongs in spaarke-constants.yaml per_env_constants.$env.*."
+    $passed = $false
+    $output = "[skill-config] unresolved placeholder: $($Matches[0])"
+    $results += @{ Id = $prereq.id; Name = $prereq.name; Scope = $prereq.scope; Passed = $passed; ExitCode = -1; Output = $output; Consequence = $prereq.consequence_of_absence; Remediation = $prereq.remediation }
+    continue
+  }
 
   Write-Host "  [CHECK] $($prereq.id) $($prereq.name)" -ForegroundColor Yellow
 
   # Run the recipe via `bash -c` (portable across az CLI + shell for-loops that
-  # many recipes use — PRQ-S-03, PRQ-E-06, PRQ-E-13 all include for/if/exit
-  # shell syntax that PowerShell's Invoke-Expression does NOT natively handle).
-  # Git Bash ships with `git` on Windows; `bash` is native on Linux/macOS.
+  # many recipes use — PRQ-S-03, PRQ-E-06 all include for/if/exit shell syntax
+  # that PowerShell's Invoke-Expression does NOT natively handle). Git Bash
+  # ships with `git` on Windows; `bash` is native on Linux/macOS.
   #
   # PASS/FAIL SIGNAL IS THE RECIPE'S EXIT CODE (not output shape).
   # Recipes MUST explicitly `exit 1` on any failure condition. Silent empty
-  # output no longer implicitly passes — this closes the SESSION 12 gap where
-  # PRQ-C-02 (OpenAI model catalog check) silently passed when westus2 returned
-  # zero models because the empty-result-classification defaulted to non-empty
-  # check which then fell through to the 'output could be anything' branch.
-  # PRQ-E-14 (added SESSION 12; PRQ-E-13 was pre-existing for the
-  # sprk_dataverseenvironment placeholder record — id-collision preserved) uses
-  # explicit `exit 1` and depends on this exit-code-first semantic.
+  # output no longer implicitly passes — this closed the SESSION 12 gap where
+  # PRQ-C-02 (OpenAI model catalog check) silently passed. Wave 3 (SESSION 15)
+  # applied the exit-1 contract across every recipe per task 206 + PRQ-03 (each
+  # recipe now recomputes its assertion inline).
   $output = & bash -c $recipe 2>&1 | Out-String
   $exitCode = $LASTEXITCODE
 
   $passed = ($exitCode -eq 0)
-
-  # DEFENSE-IN-DEPTH: for recipes whose expect field cites a concrete match
-  # pattern, verify output matches even when exit was 0. Guards against
-  # recipes that silently return 0 without producing expected content.
-  $expected = $prereq.check_recipe.expect
-  if ($passed -and $expected -match "``([^``]+)``") {
-    if ($output -notmatch [regex]::Escape($Matches[1])) {
-      $passed = $false
-      $output += "`n[classifier] Recipe exited 0 but output did not contain expected pattern '$($Matches[1])'"
-    }
-  }
 
   $results += @{
     Id = $prereq.id
@@ -253,11 +304,16 @@ foreach ($prereq in $manifest.prereqs) {
 ```
 
 **Recipe author contract** (BINDING for every entry in `prereqs.yaml`):
-- Recipe MUST explicitly `exit 1` on any failure condition it detects internally (empty query result, unexpected value, missing account, etc.).
-- Recipe MUST NOT rely on the classifier to interpret empty output as failure.
-- `check_recipe.expect` is a HUMAN-readable description AND (optionally) an in-backticks pattern that defense-in-depth verifies. Ambiguous prose expects are still accepted but do NOT provide the second layer of validation.
+- Recipe MUST explicitly `exit 1` on any failure condition it detects internally (empty query result, unexpected value, missing account, wrong role, wrong setting, wrong region, wrong pin, etc.). Wave 3 SESSION 15 applied this contract across every recipe per task 206 + PRQ-03.
+- Recipe MUST NOT rely on the classifier to interpret empty output as failure. Wave 4 SESSION 15 REMOVED the defense-in-depth expect-field classifier (PRQ-06) — assertion semantics live in the recipe itself; classifier trust falls back to exit code.
+- `check_recipe.expect` is a HUMAN-readable description of what success looks like — no longer machine-enforced. Ambiguous prose expects are fine.
 - Multi-line shell scripts (`for/if/echo/exit`) are supported natively via the `bash -c` wrapper.
-- Placeholders currently substituted: `{env}`, `{openAiRegion}`. Extend the substitution block above when adding new ones — do NOT bake context-dependent literals into recipe.cli.
+- **Placeholders currently substituted** (SKILL-08 + PLX-01..14 SESSION 15 extension — 17 tokens):
+  - Runtime-derived from az: `{subId}`, `{sub}`, `{l2UamiPrincipalId}`, `{l2UamiClientId}`, `{l2UamiSpId}`, `{artifactsStorageId}`, `{acrId}`, `{bffAppServiceId}`, `{kvResourceId}`
+  - Interpolated from name_templates: `{sbNamespace}`
+  - Loaded from Spaarke constants file: `{graphAppId}` (invariant Microsoft), `{containerTypeId}` + `{bffAppId}` (per_env populated by operator), `{adminDvUrl}` (per_env template)
+  - Session/intake variables: `{env}`, `{openAiRegion}`, `{region}` (aliased to openAiRegion)
+- **PLX-14 author-time sanity check**: adding a new placeholder to `prereqs.yaml` REQUIRES extending the substitution chain in this section AND (if per_env or invariant) adding to `spaarke-constants.yaml`. If you forget, Step 0.5b emits `[skill-config] unresolved placeholder` and HARD STOPs before invoking bash — targeted diagnostic, no cryptic az CLI parse error.
 
 #### 0.5c. Report + HARD STOP
 
