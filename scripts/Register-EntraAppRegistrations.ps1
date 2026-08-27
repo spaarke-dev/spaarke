@@ -28,7 +28,14 @@
       - Tenant: a221a95e-6abc-4434-aecc-e48338a1b2f2
 
 .PARAMETER TenantId
-    Entra ID tenant ID. Default: a221a95e-6abc-4434-aecc-e48338a1b2f2
+    Entra ID tenant ID. REQUIRED — there is deliberately no default.
+
+    A hardcoded Spaarke-tenant default lived here until 2026-08-26. Running the script for a
+    customer without -TenantId would have created that customer's app registration in the SPAARKE
+    tenant, giving Spaarke users access to the customer's Dataverse environment. That is the
+    cross-tenant identity leak tenant-isolation invariant I1 exists to prevent
+    (design.md §4D I1 / spec FR-28); it was specified as removed in design v3.3 and the code change
+    was never applied. Enforced by Spaarke.ArchTests.TenantIsolation.I1_NoHardcodedTenantTests.
 
 .PARAMETER KeyVaultName
     Key Vault name for storing secrets. Default: sprk-platform-prod-kv
@@ -99,7 +106,9 @@
 #>
 
 param(
-    [string]$TenantId = "a221a95e-6abc-4434-aecc-e48338a1b2f2",
+    # No default: see .PARAMETER TenantId above and §4D I1. Mandatory, so an omitted -TenantId
+    # stops and asks rather than silently provisioning into whichever tenant was hardcoded.
+    [Parameter(Mandatory = $true)][string]$TenantId,
     [string]$KeyVaultName = "sprk-platform-prod-kv",
     [string]$ProductionApiDomain = "api.spaarke.com",
     [string]$DataverseOrgUrl = "",

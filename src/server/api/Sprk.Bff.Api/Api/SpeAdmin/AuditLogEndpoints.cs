@@ -68,8 +68,13 @@ public static class AuditLogEndpoints
         [FromQuery] DateTimeOffset? from,
         [FromQuery] DateTimeOffset? to,
         [FromQuery] string? category,
-        [FromQuery(Name = "$top")] int? top,
-        [FromQuery(Name = "$skip")] int? skip,
+        // Plain `top`/`skip`, NOT `$top`/`$skip`. The client has always sent the plain names, as does
+        // every other SpeAdmin endpoint — this handler was the only `$`-prefixed binding in the app, so
+        // the client's requested page size never bound and the server silently substituted its own
+        // default of 50. The UI then labelled the result "1–25 of 50" and paginated within it as though
+        // 50 were the whole answer. Nothing errored; the number was just quietly someone else's.
+        [FromQuery] int? top,
+        [FromQuery] int? skip,
         DataverseWebApiClient dataverseClient,
         ILogger<Program> logger,
         HttpContext context,
@@ -124,7 +129,7 @@ public static class AuditLogEndpoints
 
             var response = new AuditLogPageResponse
             {
-                Items = entries,
+                Items = entries.Select(AuditLogEntryDto.FromDataverse).ToList(),
                 Top = pageSize,
                 Skip = pageSkip,
                 Count = entries.Count
@@ -219,7 +224,7 @@ public static class AuditLogEndpoints
     {
         /// <summary>Audit log entries for the requested page.</summary>
         [JsonPropertyName("items")]
-        public List<AuditLogEntry> Items { get; set; } = [];
+        public List<AuditLogEntryDto> Items { get; set; } = [];
 
         /// <summary>Number of entries returned in this page.</summary>
         [JsonPropertyName("count")]
@@ -235,8 +240,78 @@ public static class AuditLogEndpoints
     }
 
     /// <summary>
+    /// The client-facing audit row. Field names are the contract the SPE Admin app has always been
+    /// written against (<c>src/solutions/SpeAdminApp/src/types/spe.ts</c>).
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <b>Why this type exists.</b> Before it, the handler serialized <see cref="AuditLogEntry"/> —
+    /// the Dataverse <i>deserialization</i> target — straight to the browser, so the wire carried
+    /// <c>sprk_operation</c>, <c>sprk_performedby</c>, <c>sprk_speauditlogid</c> and so on, while the
+    /// client read <c>operation</c>, <c>performedBy</c>, <c>id</c>. <b>Every field name differed</b>,
+    /// which means the grid could only ever have rendered blank rows with undefined React keys — a
+    /// full page of confident, well-formed nothing. Projecting explicitly also stops a future Dataverse
+    /// column rename from silently reshaping a public response.
+    /// </para>
+    /// <para>
+    /// <b>On <c>responseSummary</c>:</b> the client renders it in a tooltip, but
+    /// <c>sprk_responsesummary</c> is deliberately NOT in this handler's <c>$select</c> and is not added
+    /// here. Task 005 established empirically that naming a column Dataverse does not have 400s the
+    /// entire query (<c>sprk_targetresource</c> did exactly that), and this column has not been verified
+    /// against the live schema. The client falls back to the status code, so the cost of leaving it out
+    /// is a slightly less informative tooltip; the cost of guessing wrong is the whole screen.
+    /// </para>
+    /// </remarks>
+    private sealed class AuditLogEntryDto
+    {
+        [JsonPropertyName("id")]
+        public string Id { get; init; } = "";
+
+        [JsonPropertyName("operation")]
+        public string Operation { get; init; } = "";
+
+        /// <summary>Human-readable category label, not the raw option-set integer.</summary>
+        [JsonPropertyName("category")]
+        public string Category { get; init; } = "";
+
+        [JsonPropertyName("targetResourceId")]
+        public string TargetResourceId { get; init; } = "";
+
+        [JsonPropertyName("targetResourceName")]
+        public string TargetResourceName { get; init; } = "";
+
+        [JsonPropertyName("responseStatus")]
+        public int ResponseStatus { get; init; }
+
+        [JsonPropertyName("performedBy")]
+        public string PerformedBy { get; init; } = "";
+
+        [JsonPropertyName("performedOn")]
+        public string PerformedOn { get; init; } = "";
+
+        /// <summary>
+        /// Projects a Dataverse row onto the client contract. Nulls collapse to empty strings
+        /// deliberately: the client's column comparators call <c>.localeCompare</c> unguarded, so a null
+        /// arriving here would throw inside the grid's sort handler rather than at this boundary.
+        /// </summary>
+        public static AuditLogEntryDto FromDataverse(AuditLogEntry e) => new()
+        {
+            Id = e.Id?.ToString() ?? "",
+            Operation = e.Operation ?? "",
+            Category = e.CategoryLabel,
+            TargetResourceId = e.TargetResourceId ?? "",
+            TargetResourceName = e.TargetResourceName ?? "",
+            ResponseStatus = e.ResponseStatus ?? 0,
+            PerformedBy = e.PerformedBy ?? "",
+            PerformedOn = e.PerformedOn?.UtcDateTime.ToString("o") ?? "",
+        };
+    }
+
+    /// <summary>
     /// Audit log entry deserialized from the sprk_speauditlog Dataverse entity set.
     /// Property names match Dataverse logical attribute names returned by the Web API.
+    /// This type is an INTERNAL deserialization target — it must never be serialized to a client;
+    /// project it through <see cref="AuditLogEntryDto"/> instead.
     /// </summary>
     private sealed class AuditLogEntry
     {

@@ -4672,13 +4672,15 @@ public sealed class SpeAdminGraphService
     private static SpeConsumingTenant MapPermissionGrantToConsumingTenant(
         Microsoft.Graph.Models.FileStorageContainerTypeAppPermissionGrant perm)
     {
-        var delegated = perm.DelegatedPermissions is not null
-            ? (IReadOnlyList<string>)[perm.DelegatedPermissions.ToString()!]
-            : (IReadOnlyList<string>)[];
-
-        var application = perm.ApplicationPermissions is not null
-            ? (IReadOnlyList<string>)[perm.ApplicationPermissions.ToString()!]
-            : (IReadOnlyList<string>)[];
+        // `DelegatedPermissions` / `ApplicationPermissions` are COLLECTIONS on the Graph SDK type,
+        // not single values. Calling ToString() on a collection returns its TYPE NAME, so this used
+        // to emit a one-element list containing the literal text
+        // "System.Collections.Generic.List`1[System.String]" — which is what the Permissions tab
+        // displayed to operators (UAT 2026-08-26). Every granted scope was replaced by the name of
+        // the container that held it, and nothing errored: a well-formed response, confidently wrong.
+        // Enumerate instead, and drop blanks so an empty grant reads as empty rather than as [""].
+        var delegated = ToScopeList(perm.DelegatedPermissions);
+        var application = ToScopeList(perm.ApplicationPermissions);
 
         return new SpeConsumingTenant(
             AppId: perm.AppId ?? string.Empty,
@@ -4686,6 +4688,36 @@ public sealed class SpeAdminGraphService
             TenantId: null,    // Graph API does not return tenant ID on permission grants
             DelegatedPermissions: delegated,
             ApplicationPermissions: application);
+    }
+
+    /// <summary>
+    /// Flattens a Graph permission-scope collection into plain strings.
+    /// </summary>
+    /// <remarks>
+    /// Written against <see cref="System.Collections.IEnumerable"/> rather than the SDK's concrete
+    /// element type on purpose: across Graph SDK versions these scopes have been modelled as strings
+    /// and as enum members, and both render correctly through <c>ToString()</c> per ELEMENT. What is
+    /// never correct is <c>ToString()</c> on the collection itself, which is the bug this replaces.
+    /// </remarks>
+    private static IReadOnlyList<string> ToScopeList(object? scopes)
+    {
+        if (scopes is null) return [];
+
+        // Guard the string case FIRST: string is itself IEnumerable, so falling through would
+        // enumerate it one CHARACTER at a time and turn "Files.Read.All" into fourteen scopes.
+        if (scopes is string single)
+            return string.IsNullOrWhiteSpace(single) ? [] : [single];
+
+        if (scopes is not System.Collections.IEnumerable items) return [];
+
+        var result = new List<string>();
+        foreach (var item in items)
+        {
+            var text = item?.ToString();
+            if (!string.IsNullOrWhiteSpace(text)) result.Add(text);
+        }
+
+        return result;
     }
 
     // =========================================================================
@@ -4770,22 +4802,28 @@ public sealed class SpeAdminGraphService
     /// Maps a Graph SDK FileStorageContainerTypeAppPermissionGrant to the
     /// SpeContainerTypePermission domain record.
     ///
-    /// DelegatedPermissions and ApplicationPermissions are enum values on the Graph SDK type.
-    /// They are converted to their string representation for the domain model.
     /// Null values are normalized to empty lists (ADR-007: no Graph SDK types in public surface).
     /// </summary>
+    /// <remarks>
+    /// 🔴 This is the SECOND site of the collection-<c>ToString()</c> bug, and it is the one the
+    /// Container Types → Permissions tab actually reads. The first was fixed on 2026-08-26 in
+    /// <c>MapConsumingTenant</c>; this one survived that pass and kept rendering
+    /// <c>System.Collections.Generic.List`1[System.Nullable`1[…FileStorageContainerTypeAppPermission]]</c>
+    /// in every Delegated and Application cell (UAT 2026-08-26, round 6).
+    ///
+    /// The header used to assert "DelegatedPermissions and ApplicationPermissions are enum values
+    /// on the Graph SDK type". Under Graph SDK 6.x they are <c>List&lt;…?&gt;</c> — collections of
+    /// nullable enums. That stale claim is exactly what made <c>.ToString()</c> on them look
+    /// correct: a comment describing another layer, still being trusted after that layer changed.
+    /// Deferring to <see cref="ToScopeList"/> removes the assumption entirely — it handles the
+    /// single-value, collection and null shapes without needing to know which one the SDK is using
+    /// this version.
+    /// </remarks>
     private static SpeContainerTypePermission MapContainerTypePermission(
         Microsoft.Graph.Models.FileStorageContainerTypeAppPermissionGrant perm)
     {
-        // DelegatedPermissions and ApplicationPermissions are typed enums in the Graph SDK.
-        // Convert to string list for the domain model, filtering out null/empty values.
-        var delegated = perm.DelegatedPermissions is not null
-            ? [perm.DelegatedPermissions.ToString()!]
-            : (IReadOnlyList<string>)[];
-
-        var application = perm.ApplicationPermissions is not null
-            ? [perm.ApplicationPermissions.ToString()!]
-            : (IReadOnlyList<string>)[];
+        var delegated = ToScopeList(perm.DelegatedPermissions);
+        var application = ToScopeList(perm.ApplicationPermissions);
 
         return new SpeContainerTypePermission(
             AppId: perm.AppId ?? string.Empty,

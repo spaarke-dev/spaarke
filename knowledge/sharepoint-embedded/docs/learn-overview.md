@@ -1,9 +1,25 @@
 ---
 source: https://learn.microsoft.com/en-us/sharepoint/dev/embedded/overview
 fetched: 2026-05-14
+refreshed: 2026-08-26
+refreshed-by: sdap-SPE-admin-app-r2 (task 061), per knowledge/REFRESH-PROCEDURE.md
+refresh-scope: >
+  Added the SharePoint admin center "Apps" experience (GA early July 2026 — postdates the 2026-05-14
+  curation entirely) and the Purview compliance boundary (SPE compliance is delivered through Purview,
+  not through container-level app APIs — a decision-relevant finding for anyone considering building
+  hold/retention/eDiscovery UI on top of SPE). Original 2026-05-14 overview snapshot retained below
+  unchanged.
 ---
 
 # SharePoint Embedded Overview | Microsoft Learn
+
+> ## 🔄 2026-08-26 refresh summary
+>
+> - [The admin-center Apps experience — GA early July 2026](#-the-admin-center-apps-experience--ga-early-july-2026-verified)
+>   postdates the original curation by nearly two months and materially changes how container types get
+>   created in practice.
+> - [The Purview compliance boundary](#the-purview-compliance-boundary--do-not-build-compliance-features-into-an-spe-app)
+>   — a build-vs-don't-build decision other consumers of this corpus will likely face too.
 
 Microsoft SharePoint Embedded is a cloud-based file and document management system suitable for use in any application. SharePoint Embedded is a new API-only solution that enables app developers to harness the power of the Microsoft 365 file and document storage platform for any app, and is suitable for enterprises building line-of-business applications and ISVs building multitenant applications.
 
@@ -45,6 +61,10 @@ This includes settings from Microsoft Purview compliance, risk, and security set
 - Data loss prevention (DLP)
 - Retention policies, sensitivity labels, conditional access
 
+> See [The Purview compliance boundary](#the-purview-compliance-boundary--do-not-build-compliance-features-into-an-spe-app)
+> below for what this means in practice for an application built on SPE — in particular, why building
+> compliance UI on top of these APIs is usually the wrong move.
+
 ## Understanding the costs and billing for SharePoint Embedded content
 
 Microsoft 365 customers have different entitlements related to storage, usage, and features depending on the licenses the customer has purchased.
@@ -65,3 +85,74 @@ Follow manual set-up on SharePoint Embedded from the following Microsoft Learnin
 
 - [Microsoft Learning: SharePoint Embedded - overview & configuration](https://learn.microsoft.com/en-us/training/modules/sharepoint-embedded-setup)
 - [Microsoft Learning: SharePoint Embedded - building applications](https://learn.microsoft.com/en-us/training/modules/sharepoint-embedded-create-app)
+
+---
+
+## 🔵 The admin-center Apps experience — GA early July 2026 — VERIFIED
+
+**Source**: [MC1290827 — Create a line-of-business SharePoint Embedded app in SharePoint admin
+center](https://mc.merill.net/message/MC1290827); `sdap-SPE-admin-app-r2`
+`notes/spe-platform-research-2026-08-20.md` §4, `design.md` §4.2.
+
+Microsoft shipped a unified SharePoint Embedded **Apps** page inside the SharePoint admin center — rolled
+out end of June 2026, complete early July 2026. This entirely postdates the 2026-05-14 curation of this
+corpus and is the single most consequential platform addition since then for anyone building an
+SPE admin surface.
+
+What it provides, directly in the Microsoft admin UI (no code):
+
+- Create and install SPE apps **without Global admin consent**
+- "Installed apps" (deployed in the org) vs "Owned apps" (created by the org) — two distinct views
+- Create a new Entra app registration or attach an existing one, during app creation
+- Assign up to **three owners** for app settings and billing
+- Select a **permanent** billing type — "User org" or "Owner org" — at creation (not changeable after,
+  consistent with the container-type billing-classification permanence documented in
+  `learn-containertypes.md`)
+
+**Decision-relevant framing for anyone building a custom SPE admin tool** (`sdap-SPE-admin-app-r2`
+design.md §4.2, §4.2b): this experience directly overlaps container-type creation and registration
+screens — the same functional area a custom admin app would otherwise need to build from scratch. It is
+a credible alternative for container-type *lifecycle management specifically*. It does **not** cover
+container-level operations (file browse, per-container permissions, columns, custom properties, quota) —
+those remain squarely outside Microsoft's own admin surface and are where a custom app still adds real
+value. Before scoping a "recreate this in our own admin app" project, check whether the admin-center
+Apps page already covers the specific screen you're about to build.
+
+## The Purview compliance boundary — do NOT build compliance features into an SPE app
+
+**Source**: [Plan security, compliance, and
+governance](https://learn.microsoft.com/en-us/sharepoint/dev/embedded/plan/security-compliance-governance);
+[Create eDiscovery holds](https://learn.microsoft.com/en-us/purview/ediscovery-create-holds); [Retention
+for SharePoint and OneDrive](https://learn.microsoft.com/en-us/purview/retention-policies-sharepoint);
+`sdap-SPE-admin-app-r2` `notes/spe-platform-research-2026-08-20.md` §3c, `design.md` §4.2c.
+
+**Finding: SharePoint Embedded compliance is delivered through Microsoft Purview, not through
+container-level app APIs.**
+
+- Retention policies scoped to **all SharePoint sites** apply to all SPE containers automatically.
+- Purview **eDiscovery** can search, hold, and export SPE content. Tenant-wide, this needs no
+  SPE-specific configuration (configure eDiscovery Search for all SharePoint sites). Scoped to specific
+  containers, an admin chooses sites under the SharePoint sites workload and supplies the **container
+  URL** — see `learn-containers.md` for how to obtain it, since this is the one piece of information an
+  SPE app genuinely needs to surface for this workflow.
+- **Legal holds** preserve copies into a hidden Recoverable Items folder — the same mechanism used for
+  SharePoint/OneDrive; no SPE-specific hold API exists or is needed.
+- **Retention labels** are supported on SPE content; Microsoft's own guidance favors retention
+  policies/labels over eDiscovery holds for long-term retention unrelated to an active investigation.
+- Container content inherits the **full compliance posture of the host tenant** — same DLP, same
+  conditional access, same audit logging as any other SharePoint/OneDrive content.
+
+**Practical implication for anyone building an SPE admin application**: resist building hold, retention,
+or eDiscovery management screens on top of SPE APIs. It duplicates an existing, audited compliance
+surface with a narrower, harder-to-audit one, and Microsoft is not asking application developers to
+re-implement this — Purview already governs it uniformly across SharePoint, OneDrive, and SPE.
+`sdap-SPE-admin-app-r2` explicitly evaluated and rejected building this
+(`design.md` §4.2c: *"do NOT build hold/retention management into SPE Admin... it fails [Spaarke's
+reuse-over-new-component rule] outright"*), and instead limited its own scope to: (1) in-app guidance
+routing admins to the Purview compliance portal, and (2) surfacing the container's **URL**, which is the
+one value Purview's own eDiscovery scoping UI actually needs and which SPE's container APIs do not
+otherwise expose (see `learn-containers.md`).
+
+**Not verified by any Spaarke project as of this refresh**: whether per-container hold/retention *state*
+is queryable back from Graph for a read-only status column (e.g., "this container is under an active
+legal hold"). If you need that, spike it — don't assume either way.

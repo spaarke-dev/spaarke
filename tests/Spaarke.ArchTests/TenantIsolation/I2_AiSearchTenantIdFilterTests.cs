@@ -118,12 +118,45 @@ public class I2_AiSearchTenantIdFilterTests
     /// for task 065 — the schema mapper's exact filter shape needs the audit
     /// sweep to confirm.
     /// </para>
+    /// <para>
+    /// <b>RecordMatchService.cs</b> — queries <c>spaarke-records-index</c> to suggest Dataverse
+    /// record matches for inbound attachments. Waived 2026-08-26 on an explicit owner ruling that
+    /// the index is <b>single-tenant</b>; with one tenant's content indexed there is no second
+    /// tenant's content for an unfiltered query to return.
+    /// </para>
+    /// <para>
+    /// <b>Read the next two sentences before touching this entry.</b> This is a waiver on the
+    /// DEPLOYMENT, not a statement that the code is correct. The index schema
+    /// (<c>SearchIndexDocument.cs:22</c>) carries a filterable <c>tenantId</c> field whose own
+    /// comment says it enforces isolation per FR-12 — the query simply never uses it. So the code
+    /// cannot enforce isolation even in principle, and today's safety rests entirely on there
+    /// being only one tenant.
+    /// </para>
+    /// <para>
+    /// <b>Why waive rather than partially fix.</b> Neither call path can supply a tenant today:
+    /// the endpoint path reads no claims, and the background path's <c>JobContract</c> has no
+    /// tenant field at all (3 call sites in <c>AttachmentClassificationJobHandler</c>). Filtering
+    /// only the path that happens to have a tenant would turn this assertion green while the job
+    /// path still returned unscoped results — a silenced alarm, which is strictly worse than an
+    /// honest red. Threading tenant through the job spine is the real fix and is tracked
+    /// separately.
+    /// </para>
+    /// <para>
+    /// <b>Reviewer obligation — this waiver expires with the deployment model, not on a date.</b>
+    /// The customer-provisioning Model 1 shared-trial tier is the live path to a shared index.
+    /// Before the first shared tenant is onboarded, this entry MUST be removed and the filter
+    /// enforced on BOTH call paths. Anyone making <c>spaarke-records-index</c> multi-tenant owns
+    /// that change in the same PR.
+    /// </para>
     /// </remarks>
     private static readonly HashSet<string> ExcludedFileRelPaths = new(StringComparer.OrdinalIgnoreCase)
     {
         "src/server/api/Sprk.Bff.Api/Infrastructure/Resilience/ResilientSearchClient.cs",
         "src/server/api/Sprk.Bff.Api/Services/Ai/Safety/Citations/InternalIndexProvider.cs",
         "src/server/api/Sprk.Bff.Api/Services/Ai/ReferenceIndexingService.cs",
+        // Single-tenant deployment waiver — see the RecordMatchService paragraphs above.
+        // Remove before spaarke-records-index serves more than one tenant.
+        "src/server/api/Sprk.Bff.Api/Services/RecordMatching/RecordMatchService.cs",
     };
 
     [Fact(DisplayName = "FR-29/§4D I2: every SearchClient.SearchAsync<T> caller has a 'tenantId eq' filter in the same file")]
