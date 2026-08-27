@@ -29,8 +29,21 @@ public enum EnvironmentSetupStatus
 }
 
 /// <summary>
+/// Tenancy model values (maps to sprk_tenancymodel local Choice option-set;
+/// added by customer-provisioning-orchestration-r1 task 023 v3 addition per
+/// design.md §3A A1). Model1Shared = trial/SMB shared-platform tier;
+/// Model2Dedicated = regulated/enterprise dedicated stamp.
+/// </summary>
+public enum TenancyModel
+{
+    Model1Shared = 0,
+    Model2Dedicated = 1
+}
+
+/// <summary>
 /// Read model for a sprk_dataverseenvironment record from Dataverse.
-/// Maps all 16 entity columns.
+/// Maps all 30 entity columns as of 2026-08-27 SESSION 13
+/// (17 v2 baseline + 12 v3.3 additions via task 023 + 1 sprk_customerid alt-key via task 199).
 /// ADR-010: Concrete type, no interface.
 /// </summary>
 public class DataverseEnvironmentRecord
@@ -52,6 +65,40 @@ public class DataverseEnvironmentRecord
     public int? DefaultDurationDays { get; set; }
     public string? LicenseConfigJson { get; set; }
     public string? AdminEmails { get; set; }
+
+    // ---- customer-provisioning-orchestration-r1 task 199 (2026-08-27) ----
+    /// <summary>Customer short-id (kebab-case). ALT-KEY on sprk_customerid_key. Used by L2 CustomerRunGuard + DataverseRegistryConcurrencyStore.</summary>
+    public string? CustomerId { get; set; }
+
+    // ---- task 023 v2-rolled-forward additions (design.md §6.1) ----
+    /// <summary>Azure subscription hosting this customer environment. ADR-044: canonical bare-lowercase GUID.</summary>
+    public string? AzureSubscriptionId { get; set; }
+    /// <summary>Azure resource group name (pattern: rg-spaarke-{customerId}-{env}).</summary>
+    public string? ResourceGroupName { get; set; }
+    /// <summary>BFF App Service name (pattern: sprk-{customerId}-{env}-api).</summary>
+    public string? AppServiceName { get; set; }
+    /// <summary>Customer Key Vault name (Model 1 shared vs Model 2 per-customer; canonical per §7.9).</summary>
+    public string? KeyVaultName { get; set; }
+    /// <summary>SPE container-type ID (distinct from SpeContainerId which is the container instance).</summary>
+    public string? ContainerTypeId { get; set; }
+    /// <summary>H13 acceptance-gate first-transition-to-Ready timestamp. Non-null indicates upgrade-mode for subsequent handler runs.</summary>
+    public DateTimeOffset? ProvisionedOn { get; set; }
+
+    // ---- task 023 v3 additions (design.md §4D I5, §3A A1, D18) ----
+    /// <summary>Active ProvisioningRun ID (Cosmos document ID). L2 sets null→newRunId; conflict = 409. Cleared on terminal state. ADR-044 canonical.</summary>
+    public string? CurrentRunId { get; set; }
+    /// <summary>Deployment tenancy tier. Drives Bicep composition + handler behavior (§4.1a).</summary>
+    public TenancyModel? TenancyModelValue { get; set; }
+    /// <summary>Entra tenant ID. Model 1: Spaarke tenant. Model 2: customer tenant via H0.5 consent. IMMUTABLE post-placeholder-create (§4D I1). ADR-044 canonical.</summary>
+    public string? TenantId { get; set; }
+
+    // ---- task 023 v3.3 additions (design.md §14A upgrade model, §7.9 cache-bust) ----
+    /// <summary>BFF version pinned to this customer environment (semantic, e.g. 1.4.2). H0 upgrade-mode preflight reads this.</summary>
+    public string? BffVersion { get; set; }
+    /// <summary>Dataverse solution version pinned to this customer environment (semantic, e.g. 2.1.0). H0 upgrade-mode preflight companion.</summary>
+    public string? SolutionVersion { get; set; }
+    /// <summary>Cache-bust token distributed to clients after upgrade so they invalidate cached bundles (localStorage 60-min TTL). H7 sets a new value on upgrade.</summary>
+    public string? ClientCacheBustToken { get; set; }
 
     /// <summary>
     /// Parses sprk_licenseconfigjson into a typed LicenseConfig object.
@@ -79,15 +126,27 @@ public class DataverseEnvironmentRecord
 
     /// <summary>
     /// All Dataverse columns to include in $select queries.
+    /// Extended by customer-provisioning-orchestration-r1 task 199 (2026-08-27) with the 12 v3.3
+    /// columns from task 023 + sprk_customerid alt-key. Total: 30 columns.
     /// </summary>
     public static readonly string[] AllColumns =
     {
+        // v2 baseline (17 including PK)
         "sprk_dataverseenvironmentid", "sprk_name", "sprk_environmenttype",
         "sprk_dataverseurl", "sprk_mdaappid", "sprk_description",
         "sprk_isactive", "sprk_isdefault", "sprk_setupstatus",
         "sprk_envaccountdomain", "sprk_businessunitname", "sprk_teamname",
         "sprk_specontainerid", "sprk_securitygroupid", "sprk_defaultdurationdays",
-        "sprk_licenseconfigjson", "sprk_adminemails"
+        "sprk_licenseconfigjson", "sprk_adminemails",
+        // task 199 (2026-08-27): sprk_customerid alt-key
+        "sprk_customerid",
+        // task 023 v2-rolled-forward (6)
+        "sprk_azuresubscriptionid", "sprk_resourcegroupname", "sprk_appservicename",
+        "sprk_keyvaultname", "sprk_containertypeid", "sprk_provisionedon",
+        // task 023 v3 additions (3)
+        "sprk_currentrunid", "sprk_tenancymodel", "sprk_tenantid",
+        // task 023 v3.3 additions (3)
+        "sprk_bffversion", "sprk_solutionversion", "sprk_ClientCacheBustToken"
     };
 
     /// <summary>
@@ -137,6 +196,25 @@ public class DataverseEnvironmentRecord
                 ? ddProp.GetInt32() : null,
             LicenseConfigJson = json.TryGetProperty("sprk_licenseconfigjson", out var lcProp) ? lcProp.GetString() : null,
             AdminEmails = json.TryGetProperty("sprk_adminemails", out var aeProp) ? aeProp.GetString() : null,
+            // task 199 (2026-08-27): sprk_customerid alt-key
+            CustomerId = json.TryGetProperty("sprk_customerid", out var ciProp) ? ciProp.GetString() : null,
+            // task 023 v2-rolled-forward
+            AzureSubscriptionId = json.TryGetProperty("sprk_azuresubscriptionid", out var asiProp) ? asiProp.GetString() : null,
+            ResourceGroupName = json.TryGetProperty("sprk_resourcegroupname", out var rgnProp) ? rgnProp.GetString() : null,
+            AppServiceName = json.TryGetProperty("sprk_appservicename", out var asnProp) ? asnProp.GetString() : null,
+            KeyVaultName = json.TryGetProperty("sprk_keyvaultname", out var kvnProp) ? kvnProp.GetString() : null,
+            ContainerTypeId = json.TryGetProperty("sprk_containertypeid", out var ctiProp) ? ctiProp.GetString() : null,
+            ProvisionedOn = json.TryGetProperty("sprk_provisionedon", out var poProp) && poProp.ValueKind == JsonValueKind.String
+                ? DateTimeOffset.Parse(poProp.GetString()!) : null,
+            // task 023 v3 additions
+            CurrentRunId = json.TryGetProperty("sprk_currentrunid", out var criProp) ? criProp.GetString() : null,
+            TenancyModelValue = json.TryGetProperty("sprk_tenancymodel", out var tmProp2) && tmProp2.ValueKind == JsonValueKind.Number
+                ? (TenancyModel)tmProp2.GetInt32() : null,
+            TenantId = json.TryGetProperty("sprk_tenantid", out var tiProp) ? tiProp.GetString() : null,
+            // task 023 v3.3 additions
+            BffVersion = json.TryGetProperty("sprk_bffversion", out var bvProp) ? bvProp.GetString() : null,
+            SolutionVersion = json.TryGetProperty("sprk_solutionversion", out var svProp) ? svProp.GetString() : null,
+            ClientCacheBustToken = json.TryGetProperty("sprk_ClientCacheBustToken", out var ccbtProp) ? ccbtProp.GetString() : null,
         };
     }
 }
