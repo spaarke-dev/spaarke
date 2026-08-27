@@ -11,12 +11,12 @@
 |-------|-------|
 | **Task** | **033 + 034** complete — `Spaarke.Records.RecordHeader` **v1.1.11** packed, not yet imported |
 | **Phase** | 3 ✅ complete. Phase 5 rollout unblocked. The inline-lookup follow-on is **code-complete**. |
-| **Status** | ✅ Inline lookup swap DONE. `RecordHeaderPcf_v1.1.11.0.zip` is built and packed on disk. |
-| **Next Action** | **Import + UAT v1.1.11 on `spaarkedev1`** — the four checks in "UAT v1.1.11" below. |
+| **Status** | ✅ **v1.1.11 imported and UAT-PASSED on the Project form** (owner, 2026-08-27): "the PCF is working - looks good". |
+| **Next Action** | **Task 002** — but read the baseline decision below first; it changes what you capture. |
 | **Blocked by** | Nothing in code. **Task 001** still needs a classic-designer session no build can substitute for. |
 | **Working tree** | clean · **pushed** to `origin/work/record-header-and-notepad-r2` · no PR opened |
 
-### ⚠️ Packed but NOT imported
+### ⚠️ Packed and IMPORTED — UAT passed
 
 `Solution/bin/RecordHeaderPcf_v1.1.11.0.zip` is built from the current tree (bundle **116,422 B**,
 46% of the 250 KB NFR-02 ceiling — up from 99,068 B at v1.1.3, which is the inline lookup's cost).
@@ -28,7 +28,7 @@ pac solution import --path "src/client/pcf/RecordHeader/Solution/bin/RecordHeade
 Import to **`spaarkedev1`** — never `spaarke-model1-prod`. Hard-refresh (Ctrl+Shift+R) and confirm
 the footer reads **v1.1.11**.
 
-### UAT v1.1.11 — what changed, what to check
+### UAT v1.1.11 — ✅ PASSED (owner, 2026-08-27). Retained as the regression checklist
 
 1. **Project Type opens an INLINE dropdown under the field**, not the right-side pane.
 2. **The magnifier on the right of the field is clickable** — it drops the full list with no typing.
@@ -114,6 +114,27 @@ not exist (the BFF nav adapter implements `openLookup` as a no-op).
 
 **Wrote the component's FIRST test suite** — it had 12 consumers and zero tests, which is the wrong
 place to change behaviour blind. 15 tests. Full run **826/826 across 52 suites**.
+
+---
+
+## 🔴 OPEN DECISION — read before running task 002
+
+**The Matter parity baseline is now ambiguous, and capturing it wrong silently corrupts task 080.**
+
+The shared `components/LookupField` was upgraded on 2026-08-27. The **deployed** `MatterHeaderPcf`
+still bundles the pre-upgrade `dist/`. So:
+
+| if you baseline… | task 080's diff will… |
+|---|---|
+| the currently-deployed MatterHeaderPcf | flag the lookup cells — and you must re-introduce the exclusion we just withdrew |
+| a REBUILT + redeployed MatterHeaderPcf | be apples-to-apples; parity assessed unqualified |
+
+**Recommendation: rebuild + redeploy `MatterHeaderPcf` first, then capture.** It costs one build+import
+of a control that task 081 retires — but it also **verifies the upgraded shared component actually works
+inside MatterHeader**, which nothing has done yet (MatterHeader is running month-old `dist`). Finding a
+break there on a soon-to-be-retired control is far cheaper than finding it at 080.
+
+Both 002 and 080 now carry this caveat inline, so whoever runs them sees it without reading this file.
 
 ---
 

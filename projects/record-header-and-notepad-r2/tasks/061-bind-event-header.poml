@@ -140,10 +140,10 @@
         <step>Verify the form's Save button activates (dirty) with NO PCF re-render or loading-skeleton flash</step>
         <step>Edit sprk_eventstatus via the Fluent Dropdown and verify it offers the 8 options Draft → Archived</step>
         <step>Edit sprk_plannedstart via the Fluent picker (date and time); toggle sprk_highpriority</step>
-        <step>Click the sprk_eventtype_ref cell and verify the OOB Xrm.Utility.lookupObjects picker opens; select a value and verify it stages to the form buffer</step>
+        <step>Click the sprk_eventtype_ref cell and verify the INLINE type-ahead dropdown opens under the field (NOT the side pane); type to filter, and click the right-side magnifier to browse with no typing; verify the pinned **Advanced** action opens the OOB Xrm.Utility.lookupObjects dialog and that there is NO "+ New"; select a value and verify it stages to the form buffer</step>
         <step>Click the form's own Save and refresh the page</step>
       </steps>
-      <expected>All edits persist after form Save; no flash during staging; lookup cell opens the native picker</expected>
+      <expected>All edits persist after form Save; no flash during staging; the lookup cell opens the INLINE dropdown (FR-15a as amended 2026-08-27 — NOT the side-pane picker), with Advanced escalating to the OOB dialog. Opening the dropdown must NOT push the fields below it down the form.</expected>
     </test>
     <test name="Toolbar parity + launch contracts">
       <steps>

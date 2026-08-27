@@ -21,9 +21,11 @@
   <prompt>
     Re-bind the Matter (sprk_matter) main form from the old MatterHeaderPcf control to the new Spaarke Record
     Header, reproducing R1 v1.0.20's exact 5-field layout, then run the parity regression QA against the
-    task-002 baseline — light AND dark — with the lookup interaction explicitly EXCLUDED from the diff (FR-15a:
-    lookups now open the OOB picker instead of the inline dropdown; this is an INTENDED change, not a
-    regression). Your go/no-go verdict gates task 081, the irreversible retirement.
+    task-002 baseline — light AND dark. Your go/no-go verdict gates task 081, the irreversible retirement.
+
+    ⚠️ UPDATED 2026-08-27: the lookup-exclusion carve-out this task previously carried is **WITHDRAWN**.
+    FR-15a was amended — the header now renders the SAME shared inline `components/LookupField` that R1's
+    MatterHeader already renders, so parity is assessed UNQUALIFIED. See the baseline caveat below.
   </prompt>
 
   <role>
@@ -67,7 +69,7 @@
   <constraints>
     <constraint source="project">FR-25 scope: re-bind ONLY the "Matter main form" 4fa382f2-c273-f011-b4cb-6045bdd6a665 — NEVER the legacy "Information" form.</constraint>
     <constraint source="project">Do NOT delete, remove from the environment, or otherwise retire the old MatterHeaderPcf control in this task — that is task 081's prescriptive two-step procedure. This task only removes the old control from the sprk_matternumber field's control list on the main form; the control itself stays importable/re-addable as the rollback path.</constraint>
-    <constraint source="project">The parity criterion EXCLUDES the lookup interaction (spec criterion 15): Matter Type and Practice Area cells now open the OOB Xrm.Utility.lookupObjects picker instead of R1's inline type-ahead dropdown — INTENDED per FR-15a. Everything else must match the baseline.</constraint>
+    <constraint source="project">Parity is assessed UNQUALIFIED (spec criterion 15, updated 2026-08-27). Both controls now render the same shared inline `components/LookupField`, so the former lookup-interaction exclusion no longer applies. ⚠️ BUT: the shared component was upgraded on 2026-08-27 (right-side browse button, overlaying dropdown, thin scrollbar, pinned Advanced). If the task-002 baseline was captured from a MatterHeaderPcf build that PREDATES that upgrade, its lookups will differ — rebuild + redeploy MatterHeaderPcf and re-capture the baseline, or the diff will blame this migration for a shared-library change. Confirm which build the baseline came from BEFORE diffing.</constraint>
     <constraint source="project">This task modifies form configuration and QA notes only. If parity QA surfaces a code defect, do NOT patch code inside this task — record it, STOP, and escalate per CLAUDE.md §6.</constraint>
     <constraint source="ADR-021">Parity is assessed in BOTH light and dark themes; high contrast is spot-checked (NFR-03).</constraint>
     <constraint source="project">NFR-01/NFR-02 are measured THIS WAVE: bundle ≤250 KB minified, TTI ≤300 ms warm / ≤800 ms cold on the Matter form.</constraint>
@@ -128,10 +130,10 @@
       <steps>
         <step>Open the same Matter record used by the task-002 baseline</step>
         <step>Capture screenshots light and dark; diff against the baseline field-by-field (labels, values, spans, typography, spacing, toolbar, footer)</step>
-        <step>Exclude the lookup interaction from the diff (OOB picker replaces the inline dropdown — intended, FR-15a)</step>
+        <step>Include the lookup cells in the diff — the exclusion was withdrawn 2026-08-27. First confirm the baseline came from a MatterHeaderPcf build that includes the 2026-08-27 shared-LookupField upgrade; if not, re-capture it.</step>
         <step>Check the console for JavaScript errors</step>
       </steps>
-      <expected>Renders identically to the baseline except the sanctioned lookup-interaction change; no console errors (spec criterion 15)</expected>
+      <expected>Renders identically to the baseline, lookups included; no console errors (spec criterion 15)</expected>
     </test>
     <test name="R1 behaviours survive">
       <steps>
@@ -139,7 +141,7 @@
         <step>Click Notepad — 25% × 35% modal scoped to this Matter</step>
         <step>Click To Do — SmartTodo opens with the openTodos filter for this Matter</step>
         <step>Click the sparkle — popover renders from sprk_recordsummary ("No summary yet" where empty)</step>
-        <step>Click Matter Type and Practice Area cells — OOB Xrm.Utility.lookupObjects picker opens; selection stages to the form buffer</step>
+        <step>Click Matter Type and Practice Area cells — the INLINE type-ahead dropdown opens under the field (NOT the side pane), the right-side magnifier browses without typing, the pinned Advanced action opens the OOB Xrm.Utility.lookupObjects dialog, there is NO "+ New", and opening the dropdown does not push the fields below it down. Selection stages to the form buffer.</step>
       </steps>
       <expected>All R1 live-QA behaviours intact; launch contracts byte-identical (NFR-07)</expected>
     </test>

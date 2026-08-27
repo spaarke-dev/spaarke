@@ -1,8 +1,8 @@
 # ISSUE — the lookup opens the side-pane picker, not the OOB inline dropdown
 
 > **Raised**: 2026-08-27 by owner, UAT round 5 of RecordHeader v1.1.8
-> **Status**: ✅ **RESOLVED in v1.1.9** — shared component upgraded (`fff55ef3b`) **and** the
-> RecordHeader swapped over. **Awaiting UAT.**
+> **Status**: ✅ **CLOSED — UAT PASSED (owner, 2026-08-27, v1.1.11)**: "the PCF is working - looks good".
+> Shipped across v1.1.9 (swap) → v1.1.10 (OOB input styling) → v1.1.11 (overlay + focus underline).
 > **Severity**: low-medium — a visible departure from OOB on every lookup cell, on every entity.
 
 ---

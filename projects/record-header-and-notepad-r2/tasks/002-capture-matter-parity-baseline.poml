@@ -44,7 +44,12 @@
       Spec Dependencies section: "MatterHeaderPcf v1.0.20 baseline captured (screenshots light + dark,
       exact 5-field layout + spans, bound field) before any code change — it is the parity target."
       Spec success criterion 15: Matter renders identically to v1.0.20 EXCEPT that lookup cells open the
-      OOB picker (FR-15a — intended change; the lookup interaction is excluded from the parity diff).
+      inline dropdown. ⚠️ UPDATED 2026-08-27: the lookup EXCLUSION is WITHDRAWN — FR-15a was amended and both
+      controls now render the same shared inline `components/LookupField`, so task 080 diffs lookups too.
+      CONSEQUENCE FOR THIS TASK: the shared component was upgraded on 2026-08-27 (right-side browse button,
+      overlaying dropdown, thin scrollbar, pinned Advanced), and the DEPLOYED MatterHeaderPcf still bundles the
+      pre-upgrade `dist/`. Rebuild + redeploy MatterHeaderPcf BEFORE capturing, or record explicitly which build
+      the baseline came from — otherwise task 080 will attribute a shared-library change to the migration.
       plan.md flags this task as "genuinely blocking". FR-23 RS-1 documents that the shipped header 400s
       today; task 040 owns the fix. The baseline therefore has two halves: static facts recoverable from
       code + form XML (capturable regardless), and runtime screenshots (blocked until the header loads).

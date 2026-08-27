@@ -18,6 +18,19 @@
     <estimated-effort>3-4 hours</estimated-effort>
   </metadata>
 
+  <!--
+    ⚠️ SUPERSEDED 2026-08-27 — this task is COMPLETE and its body is retained verbatim as the
+    historical record. Do NOT edit it, and do NOT use it as the current contract.
+
+    What it built (the OOB `Xrm.Utility.lookupObjects` picker as the header's DEFAULT editable
+    lookup surface) shipped as v1.1.8 and was then REVERSED after UAT round 5: `lookupObjects`
+    opens the SIDE PANE, whereas OOB renders a lookup ON A FORM as an inline type-ahead and
+    reserves the dialog for **Advanced**.
+
+    Current contract: spec.md FR-15a (amended) + design.md §6.5a + `.claude/patterns/ui/inline-lookup-field.md`.
+    The `lookupObjects` mechanism this task introduced survives — it is now reached via **Advanced**
+    only, and lives in ONE place library-wide (`RecordHeader/lookupSearch.ts::openAdvancedLookup`).
+  -->
   <prompt>Replace the custom inline type-ahead in the record-header path with the OOB Dataverse picker (FR-15, FR-15a): extend the display-only `RecordHeader/fields/LookupField.tsx` with an edit mode that opens `Xrm.Utility.lookupObjects({ entityTypes: [Targets[0]], allowMultiSelect: false })` on click — proven at `src/client/pcf/CommunicationActions/CommunicationActions/CommunicationActionsApp.tsx:405-413`. The returned `{ id, name, entityType }` IS already the form-buffer `setValue` payload, so the write path (task 022's `saveLookup`) is unchanged. The cell owns its own `span` (R1 hand-rolled a wrapper `div` at `MatterHeaderView.tsx:290-309` because the editable top-level `LookupField` has no `span` prop — the extended renderer needs no wrapper). This DELETES the custom OData `$filter`/`$top=10` search builder from the header path.</prompt>
   <role>SPAARKE platform developer. Fluent UI v9 field renderers inside virtual PCF platform-library constraints; Xrm.Utility.lookupObjects. Follow ADRs strictly.</role>
   <goal>`RecordHeader/fields/LookupField.tsx` supports an editable mode: current value displayed in the cell; click opens the native lookup picker; selection flows to `onSave` as `{ id, name, entityType }` for form-buffer staging; read-only mode (no `onSave`) behaves exactly as today. No OData lookup-search builder exists anywhere in the shared RecordHeader path. Unit tests + shared-lib build green.</goal>
