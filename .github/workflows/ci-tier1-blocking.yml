@@ -237,6 +237,14 @@ jobs:
   #   - ADR-007 EndpointsShouldNotReferenceGraphSdk        — Graph seam (endpoints)
   #   - ADR-009 MemoryCacheShouldNotBeSingleton            — Redis-first caching
   #   - ADR-009 NoHybridCachingLibraries                   — bans hybrid cache libs
+  #   - CallerIdentityGuard Rule1/Rule2 (+ 4 self-checks)   — caller-identity resolution.
+  #     Added 2026-08-27. Rule 1 bans a new direct identity-claim read; Rule 2 bans an
+  #     ownership predicate gated on a Guid.TryParse. Both are source scans (deterministic,
+  #     no assembly load, no drifting counter), so they meet this job's stated bar.
+  #     ARMED IN THE SAME PR THAT ADDS THEM, deliberately: the credential guard added on
+  #     2026-08-21 was never placed in this filter, so it has been red since the day it
+  #     shipped while CI reported green (issue #839). A guard that cannot fail the build
+  #     is not a guard.
   #   - ADR-013 CrudCodeMustNotDependOnAiInternalTypes     — AI facade boundary (FR-C6;
   #     documented AI-API-surface exceptions grandfathered in the test itself per
   #     projects/sdap-bff-api-remediation-fix/EXECUTION-LOG.md tasks 050/053)
@@ -280,7 +288,7 @@ jobs:
           dotnet test tests/Spaarke.ArchTests/Spaarke.ArchTests.csproj \
             -c Debug \
             --no-build \
-            --filter "FullyQualifiedName=Spaarke.ArchTests.ADR001_MinimalApiTests.NoAzureFunctionsPackages|FullyQualifiedName=Spaarke.ArchTests.ADR002_PluginTests.EndpointsShouldNotReferencePluginInterfaces|FullyQualifiedName=Spaarke.ArchTests.ADR007_GraphIsolationTests.ControllersShouldNotReferenceGraphSdk|FullyQualifiedName=Spaarke.ArchTests.ADR007_GraphIsolationTests.EndpointsShouldNotReferenceGraphSdk|FullyQualifiedName=Spaarke.ArchTests.ADR009_CachingTests.MemoryCacheShouldNotBeSingleton|FullyQualifiedName=Spaarke.ArchTests.ADR009_CachingTests.NoHybridCachingLibraries|FullyQualifiedName=Spaarke.ArchTests.ADR013_AiBoundaryTests.CrudCodeMustNotDependOnAiInternalTypes" \
+            --filter "FullyQualifiedName=Spaarke.ArchTests.ADR001_MinimalApiTests.NoAzureFunctionsPackages|FullyQualifiedName=Spaarke.ArchTests.ADR002_PluginTests.EndpointsShouldNotReferencePluginInterfaces|FullyQualifiedName=Spaarke.ArchTests.ADR007_GraphIsolationTests.ControllersShouldNotReferenceGraphSdk|FullyQualifiedName=Spaarke.ArchTests.ADR007_GraphIsolationTests.EndpointsShouldNotReferenceGraphSdk|FullyQualifiedName=Spaarke.ArchTests.ADR009_CachingTests.MemoryCacheShouldNotBeSingleton|FullyQualifiedName=Spaarke.ArchTests.ADR009_CachingTests.NoHybridCachingLibraries|FullyQualifiedName=Spaarke.ArchTests.ADR013_AiBoundaryTests.CrudCodeMustNotDependOnAiInternalTypes|FullyQualifiedName=Spaarke.ArchTests.CallerIdentityGuardTests.Rule1_NoDirectIdentityClaimReadOutsideTheAllowlist|FullyQualifiedName=Spaarke.ArchTests.CallerIdentityGuardTests.Rule2_NoOwnershipPredicateGatedOnAGuidTryParse|FullyQualifiedName=Spaarke.ArchTests.CallerIdentityGuardTests.NegativeControl_TheRuleActuallyMatchesTheDefect|FullyQualifiedName=Spaarke.ArchTests.CallerIdentityGuardTests.NegativeControl_CommentStrippingRespectsStringLiterals|FullyQualifiedName=Spaarke.ArchTests.CallerIdentityGuardTests.EveryAllowlistEntryCarriesAReason|FullyQualifiedName=Spaarke.ArchTests.CallerIdentityGuardTests.EveryAllowlistEntryStillExists" \
             --logger "trx;LogFileName=arch-must-not.trx" \
             --results-directory ./TestResults
         shell: bash

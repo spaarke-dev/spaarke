@@ -661,23 +661,53 @@ jobs:
       - name: Aggregate & post deduplicated PR comment
         uses: actions/github-script@v8
         env:
+          # Each job reports TWICE, and the two disagree by design:
+          #
+          #   needs.<job>.result          the JOB conclusion. Every Tier 2 job carries
+          #                               `continue-on-error: true`, which forces this to
+          #                               `success` even when the job's work failed.
+          #   needs.<job>.outputs.result  the job's OWN verdict, computed in its `Report result`
+          #                               step from `steps.<id>.outcome` — which is evaluated
+          #                               BEFORE continue-on-error is applied, so it is truthful.
+          #
+          # This block read only the first for six of the seven jobs, so the report said
+          # "pass" unconditionally — Tier 2 could not express a failure at all. Observed on
+          # PR #832 (2026-08-27): the comment read "✅ ADR Compliance (NetArchTest): pass"
+          # while six ArchTests were red on that exact tree, including the credential guard
+          # whose stated purpose is to fail the build on a new secret-bearing client.
+          # A green light that cannot turn red is worse than no light.
           FORMAT_RESULT: ${{ needs.format.result }}
+          FORMAT_OUTPUT: ${{ needs.format.outputs.result }}
           LINT_RESULT: ${{ needs.lint.result }}
+          LINT_OUTPUT: ${{ needs.lint.outputs.result }}
           UNIT_RESULT: ${{ needs.full-unit-tests.result }}
+          UNIT_OUTPUT: ${{ needs.full-unit-tests.outputs.result }}
           ADR_RESULT: ${{ needs.adr-compliance.result }}
+          ADR_OUTPUT: ${{ needs.adr-compliance.outputs.result }}
           MARKDOWN_RESULT: ${{ needs.markdown-link-validator.result }}
           MARKDOWN_OUTPUT: ${{ needs.markdown-link-validator.outputs.result }}
           LASTREVIEW_RESULT: ${{ needs.last-reviewed-stamp.result }}
+          LASTREVIEW_OUTPUT: ${{ needs.last-reviewed-stamp.outputs.result }}
           PLUGIN_RESULT: ${{ needs.plugin-size.result }}
+          PLUGIN_OUTPUT: ${{ needs.plugin-size.outputs.result }}
         with:
           script: |
-            // Map a `needs.<job>.result` value to an emoji+label.
-            // Possible values: success, failure, cancelled, skipped.
+            // The job's OWN verdict wins when it reported one, because `continue-on-error`
+            // masks the job conclusion to `success`. Fall back to the job result only for
+            // states the job cannot self-report: skipped, cancelled, or a crash before the
+            // `Report result` step ran (in which case the output is empty — treated as a
+            // failure, not a pass, so an infrastructure fault is never read as green).
             function fmt(name, result, outputResult) {
               if (outputResult === 'skip') return `- ⏭️ **${name}**: pending (CICD-044 follow-up)`;
-              if (result === 'success') return `- ✅ **${name}**: pass`;
               if (result === 'skipped') return `- ⏭️ **${name}**: skipped`;
               if (result === 'cancelled') return `- ⚪ **${name}**: cancelled`;
+              if (outputResult === 'pass') return `- ✅ **${name}**: pass`;
+              if (outputResult === 'fail') return `- ⚠️ **${name}**: fail (advisory — not blocking)`;
+              if (!outputResult) {
+                return result === 'success'
+                  ? `- ✅ **${name}**: pass`
+                  : `- ⚠️ **${name}**: fail (advisory — not blocking)`;
+              }
               return `- ⚠️ **${name}**: fail (advisory — not blocking)`;
             }
 
@@ -687,13 +717,13 @@ jobs:
             comment += 'for the binding contract._\n\n';
 
             comment += '### Results\n\n';
-            comment += fmt('Format (dotnet format)',       process.env.FORMAT_RESULT)     + '\n';
-            comment += fmt('Lint (ESLint + Prettier)',     process.env.LINT_RESULT)       + '\n';
-            comment += fmt('Full Unit Tests (Debug)',      process.env.UNIT_RESULT)       + '\n';
-            comment += fmt('ADR Compliance (NetArchTest)', process.env.ADR_RESULT)        + '\n';
-            comment += fmt('Markdown Link Validator',      process.env.MARKDOWN_RESULT, process.env.MARKDOWN_OUTPUT) + '\n';
-            comment += fmt('Last Reviewed Stamp',          process.env.LASTREVIEW_RESULT) + '\n';
-            comment += fmt('Plugin Size (ADR-002)',        process.env.PLUGIN_RESULT)     + '\n';
+            comment += fmt('Format (dotnet format)',       process.env.FORMAT_RESULT,     process.env.FORMAT_OUTPUT)     + '\n';
+            comment += fmt('Lint (ESLint + Prettier)',     process.env.LINT_RESULT,       process.env.LINT_OUTPUT)       + '\n';
+            comment += fmt('Full Unit Tests (Debug)',      process.env.UNIT_RESULT,       process.env.UNIT_OUTPUT)       + '\n';
+            comment += fmt('ADR Compliance (NetArchTest)', process.env.ADR_RESULT,        process.env.ADR_OUTPUT)        + '\n';
+            comment += fmt('Markdown Link Validator',      process.env.MARKDOWN_RESULT,   process.env.MARKDOWN_OUTPUT)   + '\n';
+            comment += fmt('Last Reviewed Stamp',          process.env.LASTREVIEW_RESULT, process.env.LASTREVIEW_OUTPUT) + '\n';
+            comment += fmt('Plugin Size (ADR-002)',        process.env.PLUGIN_RESULT,     process.env.PLUGIN_OUTPUT)     + '\n';
 
             comment += '\n---\n\n';
             comment += '### How to investigate\n\n';

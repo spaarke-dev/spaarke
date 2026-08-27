@@ -1,5 +1,6 @@
 using Microsoft.Extensions.AI;
 using Microsoft.Extensions.DependencyInjection;
+using Sprk.Bff.Api.Infrastructure.Authentication;
 using Sprk.Bff.Api.Models.Ai.Chat;
 
 namespace Sprk.Bff.Api.Services.Ai.Chat;
@@ -316,8 +317,7 @@ internal sealed class AgentToolCatalogProjector
                     // user-scoped chat handlers (ManagePinnedContextHandler) see the owning user.
                     // ADR-015: deterministic identifier only; never user message text. Null when
                     // standalone chat (no authenticated user) or when the oid claim is missing.
-                    var oidClaim = httpContext?.User?.FindFirst("oid")?.Value
-                        ?? httpContext?.User?.FindFirst("http://schemas.microsoft.com/identity/claims/objectidentifier")?.Value;
+                    var oidClaim = CallerResolution.ResolveObjectId(httpContext?.User);
                     Func<ChatInvocationContext> contextFactory = () => new ChatInvocationContext
                     {
                         ChatSessionId = sessionIdGuid,

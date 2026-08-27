@@ -168,22 +168,36 @@ public class AiAuthorizationServiceTests
     }
 
     [Fact]
-    public async Task AuthorizeAsync_UserWithNameIdentifierClaim_ReturnsAuthorized()
+    public async Task AuthorizeAsync_UserWithOnlyNameIdentifierClaim_IsNotAuthorized()
     {
-        // Arrange
-        var userId = "user-123";
+        // INVERTED 2026-08-27. This test previously asserted that a NameIdentifier-only principal
+        // WAS authorized — it encoded the defect as the expected behaviour, which is why the suite
+        // stayed green through it. Under inbound claim mapping NameIdentifier carries the pairwise
+        // `sub`, which matches no `systemuser.azureactivedirectoryobjectid`. Authorizing on it means
+        // authorizing an identifier Dataverse can never resolve.
+        //
+        // The stub is deliberately left PERMISSIVE (any id gets Read) so this test fails if the
+        // resolver ever falls back again — a restrictive stub would pass for the wrong reason.
         var documentId = Guid.NewGuid();
-        var user = CreateUserWithNameIdentifier(userId);
+        var user = CreateUserWithNameIdentifier("d12L59FRq8kZ0m2Xr7bTn4wPqLzYhVcJ8sNdEuRkjg");
 
         _accessDataSourceMock
-            .Setup(x => x.GetUserAccessAsync(userId, documentId.ToString(), It.IsAny<string?>(), It.IsAny<CancellationToken>()))
-            .ReturnsAsync(CreateAccessSnapshot(userId, documentId.ToString(), AccessRights.Read));
+            .Setup(x => x.GetUserAccessAsync(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<string?>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync((string uid, string rid, string? _, CancellationToken __) =>
+                CreateAccessSnapshot(uid, rid, AccessRights.Read));
 
         // Act
         var result = await _service.AuthorizeAsync(user, new[] { documentId }, CreateMockHttpContext());
 
         // Assert
-        result.Success.Should().BeTrue();
+        result.Success.Should().BeFalse(
+            "a caller carrying only NameIdentifier (i.e. `sub`) is unidentifiable to Dataverse and "
+            + "must not be authorized, however permissive the access source is");
+
+        _accessDataSourceMock.Verify(
+            x => x.GetUserAccessAsync(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<string?>(), It.IsAny<CancellationToken>()),
+            Times.Never,
+            "authorization must not even be consulted for an unidentifiable caller");
     }
 
     #endregion

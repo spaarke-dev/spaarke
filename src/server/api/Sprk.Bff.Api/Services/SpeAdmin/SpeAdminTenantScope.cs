@@ -1,3 +1,4 @@
+using Sprk.Bff.Api.Infrastructure.Authentication;
 using System.Security.Claims;
 using System.Text.Json.Serialization;
 using Spaarke.Dataverse;
@@ -139,8 +140,7 @@ public class SpeAdminTenantScope
     /// </remarks>
     internal async Task<Guid?> ResolveCallerBusinessUnitAsync(ClaimsPrincipal? user, CancellationToken ct)
     {
-        var oid = user?.FindFirstValue("oid")
-            ?? user?.FindFirstValue("http://schemas.microsoft.com/identity/claims/objectidentifier");
+        var oid = CallerResolution.ResolveObjectId(user);
 
         if (string.IsNullOrWhiteSpace(oid) || !Guid.TryParse(oid, out var callerOid))
         {
