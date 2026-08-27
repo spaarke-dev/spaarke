@@ -113,4 +113,30 @@ public sealed class NullDataverseEnvironmentRegistryClient : IDataverseEnvironme
 
         return Task.FromResult<RegistryUpdateOutcome>(new RegistryUpdateOutcome.Success());
     }
+
+    /// <inheritdoc/>
+    public Task<RegistryUpdateOutcome> UpdateColumnsAsync(
+        string environmentId,
+        IReadOnlyDictionary<string, object?> columns,
+        string customerIdForLog,
+        string runIdForLog,
+        CancellationToken cancellationToken)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(environmentId);
+        ArgumentNullException.ThrowIfNull(columns);
+
+        // ADR-032 P2 quiet no-op + WARN — parity with UpdateSetupStatusAsync +
+        // UpdateCredentialModeAsync. REG-01 (2026-08-27): a Null-Object active
+        // while H13 tries to promote columns means sprk_provisionedon /
+        // sprk_bffversion / etc. are NOT persisted. WARN makes that visible so
+        // operators can wire the real client before H13 fires in production.
+        _logger.LogWarning(
+            "NullDataverseEnvironmentRegistryClient in use — UpdateColumnsAsync returning Success " +
+            "WITHOUT issuing a real Dataverse PATCH. environmentId={EnvironmentId} columnCount={ColumnCount} " +
+            "columnNames={ColumnNames} customerId={CustomerId} runId={RunId}. The REG-01 promoted-columns " +
+            "are NOT persisted until the real DataverseEnvironmentRegistryClient is the active registration.",
+            environmentId, columns.Count, string.Join(",", columns.Keys), customerIdForLog, runIdForLog);
+
+        return Task.FromResult<RegistryUpdateOutcome>(new RegistryUpdateOutcome.Success());
+    }
 }

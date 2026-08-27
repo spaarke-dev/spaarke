@@ -531,7 +531,65 @@ public sealed class H13E2EAcceptanceGateHandler : IProvisioningHandler
                 cancellationToken).ConfigureAwait(false);
         }
 
-        // (10) All gates green. Transition registry Setup Status → Ready.
+        // (9.5) REG-01 (Wave 2 pre-dispatch remediation, 2026-08-27) — promote
+        //       run-derived values into the sprk_dataverseenvironment row BEFORE
+        //       flipping status to Ready. Assembles a best-effort column set
+        //       from run.Parameters.NonSecret + run.InterStepState. sprk_provisionedon
+        //       is ALWAYS set (H13's write moment) because it is the load-bearing
+        //       column for H0 upgrade-mode detection on the next run — a null
+        //       sprk_provisionedon breaks §14A upgrade model. Other columns are
+        //       populated when the source values exist; null columns are safely
+        //       omitted (never overwrite an existing value with null).
+        //
+        //       FAIL-FIRST: if the columns-PATCH fails, this handler returns
+        //       Resumable (H13Rejections.RegistryUpdateFailed) — sprk_setupstatus
+        //       STAYS at InProgress rather than silently mark Ready with stale
+        //       mirror data. Downstream consumers reading the registry (H0
+        //       upgrade-mode via provisionedOn, operator dashboards) require
+        //       truthful column values.
+        var promotedColumns = BuildPromotedColumnsForReady(run, DateTimeOffset.UtcNow);
+        if (promotedColumns.Count > 0)
+        {
+            RegistryUpdateOutcome columnsOutcome;
+            try
+            {
+                columnsOutcome = await _registryClient.UpdateColumnsAsync(
+                    run.EnvironmentId, promotedColumns,
+                    envelope.CustomerId, envelope.RunId,
+                    cancellationToken).ConfigureAwait(false);
+            }
+            catch (Exception ex) when (ex is not OperationCanceledException)
+            {
+                _logger.LogError(ex,
+                    "H13 promoted-columns PATCH infra fault: runId={RunId} customerId={CustomerId} columnNames={ColumnNames}",
+                    envelope.RunId, envelope.CustomerId, string.Join(",", promotedColumns.Keys));
+                return await FailAsync(run, etag, FailureClass.Resumable,
+                    H13Rejections.RegistryUpdateFailed,
+                    $"Promoted-columns PATCH infra fault (BEFORE Ready transition — status stays InProgress): " +
+                    $"{ex.GetType().Name}: {ex.Message}. Columns attempted: {string.Join(",", promotedColumns.Keys)}.",
+                    cancellationToken).ConfigureAwait(false);
+            }
+
+            if (columnsOutcome is RegistryUpdateOutcome.Failure colFail)
+            {
+                return await FailAsync(run, etag, FailureClass.Resumable,
+                    H13Rejections.RegistryUpdateFailed,
+                    $"Promoted-columns PATCH rejected (BEFORE Ready transition — status stays InProgress): " +
+                    $"{colFail.Diagnostic}. Columns attempted: {string.Join(",", promotedColumns.Keys)}.",
+                    cancellationToken).ConfigureAwait(false);
+            }
+            if (columnsOutcome is RegistryUpdateOutcome.NotFound colMissing)
+            {
+                return await FailAsync(run, etag, FailureClass.Resumable,
+                    H13Rejections.RegistryUpdateFailed,
+                    $"Promoted-columns PATCH target row not found (BEFORE Ready transition — status stays InProgress): " +
+                    $"{colMissing.Diagnostic}. environmentId={run.EnvironmentId}.",
+                    cancellationToken).ConfigureAwait(false);
+            }
+            // Success → fall through to (10) below.
+        }
+
+        // (10) All gates green + promoted columns landed. Transition registry Setup Status → Ready.
         var envUpdate = new RegistrySetupStatusUpdateRequest(
             CustomerId: envelope.CustomerId,
             RunId: envelope.RunId,
@@ -621,6 +679,81 @@ public sealed class H13E2EAcceptanceGateHandler : IProvisioningHandler
         InvariantKind.I5GraphTokenTenant => H13Rejections.InvariantI5Failed,
         _ => throw new InvalidOperationException($"Unmapped invariant kind '{kind}'."),
     };
+
+    /// <summary>
+    /// REG-01 (customer-provisioning-orchestration-r1 Wave 2 B24 punchlist,
+    /// 2026-08-27) — assembles the promoted-columns dictionary for the pre-
+    /// Ready PATCH. Best-effort — only writes what we actually have; unknown
+    /// values are OMITTED (never overwrite with null). sprk_provisionedon is
+    /// ALWAYS set (H13's write moment) because it is the load-bearing column
+    /// for H0 upgrade-mode detection on the next run (§14A).
+    ///
+    /// Column-to-source mapping (source keys shown in comments):
+    ///   sprk_provisionedon       ← <paramref name="readyStamp"/> (always)
+    ///   sprk_bffversion          ← run.Parameters.NonSecret["bffVersion"]
+    ///   sprk_solutionversion     ← run.Parameters.NonSecret["solutionVersion"]
+    ///   sprk_azuresubscriptionid ← run.Parameters.NonSecret["azureSubscriptionId"]
+    ///   sprk_resourcegroupname   ← run.Parameters.NonSecret["resourceGroupName"]
+    ///   sprk_appservicename      ← run.Parameters.NonSecret["appServiceName"]
+    ///   sprk_keyvaultname        ← run.Parameters.NonSecret["keyVaultName"]
+    ///   sprk_containertypeid     ← run.InterStepState.ContainerTypeId (H10 output)
+    ///                              (falls back to run.Parameters.NonSecret["containerTypeId"])
+    ///   sprk_clientcachebusttoken ← run.Parameters.NonSecret["clientCacheBustToken"]
+    ///
+    /// Column NAMES are lowercase Dataverse logical names (REG-06 rule).
+    /// Internal for pure-function test coverage.
+    /// </summary>
+    internal static IReadOnlyDictionary<string, object?> BuildPromotedColumnsForReady(
+        ProvisioningRun run, DateTimeOffset readyStamp)
+    {
+        ArgumentNullException.ThrowIfNull(run);
+        var columns = new Dictionary<string, object?>(StringComparer.Ordinal)
+        {
+            // Always — H0 upgrade-mode detection depends on it.
+            ["sprk_provisionedon"] = readyStamp,
+        };
+
+        // Optional string parameters from run.Parameters.NonSecret. Omit-when-
+        // absent so a partial-fill H13 does NOT clobber an existing value with
+        // null (e.g. an upgrade run that carries no new resourceGroupName).
+        var nonSecret = run.Parameters?.NonSecret ?? new Dictionary<string, string>();
+        AddIfPresent(columns, nonSecret, "bffVersion", "sprk_bffversion");
+        AddIfPresent(columns, nonSecret, "solutionVersion", "sprk_solutionversion");
+        AddIfPresent(columns, nonSecret, "azureSubscriptionId", "sprk_azuresubscriptionid");
+        AddIfPresent(columns, nonSecret, "resourceGroupName", "sprk_resourcegroupname");
+        AddIfPresent(columns, nonSecret, "appServiceName", "sprk_appservicename");
+        AddIfPresent(columns, nonSecret, "keyVaultName", "sprk_keyvaultname");
+        AddIfPresent(columns, nonSecret, "clientCacheBustToken", "sprk_clientcachebusttoken");
+
+        // ContainerTypeId: prefer InterStepState (H10 output — the authoritative
+        // source per design.md §6.2); fall back to a run parameter if InterStepState
+        // isn't populated (test hosts, upgrade-only runs that don't re-run H10).
+        var containerTypeId = run.InterStepState?.ContainerTypeId;
+        if (string.IsNullOrWhiteSpace(containerTypeId)
+            && nonSecret.TryGetValue("containerTypeId", out var fallback)
+            && !string.IsNullOrWhiteSpace(fallback))
+        {
+            containerTypeId = fallback;
+        }
+        if (!string.IsNullOrWhiteSpace(containerTypeId))
+        {
+            columns["sprk_containertypeid"] = containerTypeId;
+        }
+
+        return columns;
+
+        static void AddIfPresent(
+            IDictionary<string, object?> columns,
+            IDictionary<string, string> nonSecret,
+            string paramKey,
+            string columnName)
+        {
+            if (nonSecret.TryGetValue(paramKey, out var raw) && !string.IsNullOrWhiteSpace(raw))
+            {
+                columns[columnName] = raw;
+            }
+        }
+    }
 
     private static bool TryGetNonEmpty(
         IDictionary<string, string> parameters, string key, out string value)

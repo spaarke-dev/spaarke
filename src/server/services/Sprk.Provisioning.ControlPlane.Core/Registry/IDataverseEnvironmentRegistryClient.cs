@@ -129,6 +129,50 @@ public interface IDataverseEnvironmentRegistryClient
             $"UpdateCredentialModeAsync is not implemented by '{GetType().Name}' — the A38a " +
             "sprk_credentialmode marker write requires the real DataverseEnvironmentRegistryClient " +
             "(or an explicit test fake override)."));
+
+    /// <summary>
+    /// REG-01 (customer-provisioning-orchestration-r1 Wave 2 B24 punchlist,
+    /// 2026-08-27) — PATCHes an arbitrary column set on a <c>sprk_dataverseenvironment</c>
+    /// row in a SINGLE Dataverse request. Consumed by H13 IMMEDIATELY BEFORE
+    /// the terminal Ready-transition write to promote run-derived values
+    /// (sprk_provisionedon, sprk_bffversion, sprk_solutionversion,
+    /// sprk_azuresubscriptionid, sprk_resourcegroupname, sprk_appservicename,
+    /// sprk_keyvaultname, sprk_containertypeid, sprk_clientcachebusttoken)
+    /// so the row reflects reality rather than the Step-1f placeholder values.
+    ///
+    /// FAIL-FIRST DESIGN: if this PATCH fails, H13 keeps status=InProgress
+    /// (Resumable failure) instead of silently marking Ready with stale mirror
+    /// data. Downstream consumers reading the registry (H0 upgrade-mode
+    /// detection, operator dashboards) depend on the promoted columns being
+    /// truthful — a Ready row with placeholder columns is a §14A upgrade-model
+    /// break: upgrade mode NEVER triggers, H0 always runs as fresh-provision.
+    ///
+    /// DEFAULT IMPLEMENTATION NOTE (§11 minimal-churn): fails loud so any
+    /// test fake accidentally hit at runtime surfaces immediately. The real
+    /// client + Null-Object both override.
+    /// </summary>
+    /// <param name="environmentId">The Dataverse row id (GUID string).</param>
+    /// <param name="columns">
+    /// Column name → value dictionary. Column names are Dataverse LOGICAL
+    /// names (lowercase; e.g. <c>sprk_clientcachebusttoken</c>). Values are
+    /// serialized as JSON — strings ship as strings, DateTimeOffset ships as
+    /// ISO 8601 UTC, booleans as JSON booleans, numbers as JSON numbers.
+    /// Null values ship as JSON null (Dataverse clears the column). Empty
+    /// dictionary → no-op Success (caller decided nothing was worth writing).
+    /// </param>
+    /// <param name="customerIdForLog">Customer id — log correlation only. Not sent to Dataverse.</param>
+    /// <param name="runIdForLog">Run id — log correlation only. Not sent to Dataverse.</param>
+    /// <param name="cancellationToken">Cancellation token.</param>
+    Task<RegistryUpdateOutcome> UpdateColumnsAsync(
+        string environmentId,
+        IReadOnlyDictionary<string, object?> columns,
+        string customerIdForLog,
+        string runIdForLog,
+        CancellationToken cancellationToken)
+        => Task.FromResult<RegistryUpdateOutcome>(new RegistryUpdateOutcome.Failure(
+            $"UpdateColumnsAsync is not implemented by '{GetType().Name}' — the REG-01 " +
+            "promoted-columns write requires the real DataverseEnvironmentRegistryClient " +
+            "(or an explicit test fake override)."));
 }
 
 /// <summary>

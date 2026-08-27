@@ -400,9 +400,179 @@ public sealed class DataverseEnvironmentRegistryClient : IDataverseEnvironmentRe
         }
     }
 
+    /// <inheritdoc/>
+    public async Task<RegistryUpdateOutcome> UpdateColumnsAsync(
+        string environmentId,
+        IReadOnlyDictionary<string, object?> columns,
+        string customerIdForLog,
+        string runIdForLog,
+        CancellationToken cancellationToken)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(environmentId);
+        ArgumentNullException.ThrowIfNull(columns);
+
+        // Empty dictionary → no-op Success. Caller decided nothing was worth
+        // writing; do NOT issue an empty-body PATCH (Dataverse would reject as
+        // 400 "at least one property required") — the caller's intent is clearer.
+        if (columns.Count == 0)
+        {
+            _logger.LogDebug(
+                "DataverseEnvironmentRegistryClient.UpdateColumnsAsync no-op (empty column set): " +
+                "environmentId={EnvironmentId} customerId={CustomerId} runId={RunId}",
+                environmentId, customerIdForLog, runIdForLog);
+            return new RegistryUpdateOutcome.Success();
+        }
+
+        // GUID guard — parity with UpdateSetupStatusAsync / UpdateCredentialModeAsync.
+        if (!Guid.TryParse(environmentId, out var envRowId))
+        {
+            return new RegistryUpdateOutcome.Failure(
+                $"EnvironmentId '{environmentId}' is not a valid GUID — refusing to build an OData URI from it.");
+        }
+
+        var envUri = BuildEnvUri();
+
+        AccessToken token;
+        try
+        {
+            token = await AcquireTokenAsync(envUri, cancellationToken).ConfigureAwait(false);
+        }
+        catch (OperationCanceledException)
+        {
+            throw;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex,
+                "DataverseEnvironmentRegistryClient columns-PATCH token acquisition failed for env={EnvUrl}",
+                envUri);
+            return new RegistryUpdateOutcome.Failure(
+                $"Token acquisition failed: {ex.GetType().Name}: {ex.Message}");
+        }
+
+        var relative = $"/api/data/v9.2/{_options.EntitySetName}({envRowId})";
+        var requestUri = new Uri(envUri, relative);
+        var bodyJson = BuildColumnsPatchBody(columns);
+
+        var httpClient = _httpClientFactory.CreateClient(HttpClientName);
+        httpClient.Timeout = _options.RequestTimeout;
+
+        try
+        {
+            using var request = BuildRequest(HttpMethod.Patch, requestUri, token.Token);
+            request.Headers.Add("Prefer", "return=minimal");
+            request.Content = new StringContent(bodyJson, Encoding.UTF8, "application/json");
+
+            using var response = await httpClient.SendAsync(request, cancellationToken).ConfigureAwait(false);
+            if (response.IsSuccessStatusCode)
+            {
+                _logger.LogInformation(
+                    "DataverseEnvironmentRegistryClient columns-PATCH ok: environmentId={EnvironmentId} " +
+                    "columnCount={ColumnCount} columnNames={ColumnNames} customerId={CustomerId} runId={RunId}",
+                    envRowId, columns.Count, string.Join(",", columns.Keys),
+                    customerIdForLog, runIdForLog);
+                return new RegistryUpdateOutcome.Success();
+            }
+
+            if (response.StatusCode == HttpStatusCode.NotFound)
+            {
+                var body = await SafeReadBodyAsync(response, cancellationToken).ConfigureAwait(false);
+                return new RegistryUpdateOutcome.NotFound(
+                    $"PATCH {relative} returned 404 NotFound. Body: {Truncate(body, 400)}");
+            }
+
+            var errBody = await SafeReadBodyAsync(response, cancellationToken).ConfigureAwait(false);
+            return new RegistryUpdateOutcome.Failure(
+                $"PATCH {relative} ({columns.Count} columns: {string.Join(",", columns.Keys)}) " +
+                $"returned {(int)response.StatusCode} {response.StatusCode}. Body: {Truncate(errBody, 400)}");
+        }
+        catch (OperationCanceledException)
+        {
+            throw;
+        }
+        catch (Exception ex) when (ex is HttpRequestException or TaskCanceledException)
+        {
+            _logger.LogWarning(ex,
+                "DataverseEnvironmentRegistryClient columns-PATCH infrastructure fault for environmentId={EnvironmentId}",
+                envRowId);
+            return new RegistryUpdateOutcome.Failure(
+                $"PATCH infrastructure error: {ex.GetType().Name}: {ex.Message}");
+        }
+    }
+
     // -------------------------------------------------------------------------
     // Internals
     // -------------------------------------------------------------------------
+
+    // REG-01 — arbitrary-columns PATCH body. Column NAMES are the dictionary
+    // keys (must be Dataverse lowercase logical names). VALUES are serialized
+    // per JSON type: strings → strings, DateTimeOffset → ISO 8601 UTC,
+    // bool → JSON bool, integer types → JSON number, null → JSON null (clears
+    // the column). Internal for pure-function test coverage.
+    internal static string BuildColumnsPatchBody(IReadOnlyDictionary<string, object?> columns)
+    {
+        using var stream = new MemoryStream();
+        using (var writer = new Utf8JsonWriter(stream))
+        {
+            writer.WriteStartObject();
+            foreach (var (name, value) in columns)
+            {
+                if (string.IsNullOrWhiteSpace(name))
+                {
+                    throw new InvalidOperationException(
+                        "UpdateColumnsAsync received an entry with an empty column name.");
+                }
+                switch (value)
+                {
+                    case null:
+                        writer.WriteNull(name);
+                        break;
+                    case string s:
+                        writer.WriteString(name, s);
+                        break;
+                    case bool b:
+                        writer.WriteBoolean(name, b);
+                        break;
+                    case DateTimeOffset dto:
+                        // ISO 8601 UTC (round-trip) — Dataverse DateTime columns
+                        // accept the format via OData v4.
+                        writer.WriteString(name, dto.ToUniversalTime().ToString("O", System.Globalization.CultureInfo.InvariantCulture));
+                        break;
+                    case DateTime dt:
+                        writer.WriteString(name, dt.ToUniversalTime().ToString("O", System.Globalization.CultureInfo.InvariantCulture));
+                        break;
+                    case int i:
+                        writer.WriteNumber(name, i);
+                        break;
+                    case long l:
+                        writer.WriteNumber(name, l);
+                        break;
+                    case double d:
+                        writer.WriteNumber(name, d);
+                        break;
+                    case decimal dec:
+                        writer.WriteNumber(name, dec);
+                        break;
+                    case Guid g:
+                        // Dataverse string-column columns holding a GUID want
+                        // canonical bare-lowercase (ADR-044). Callers can
+                        // pass a string if they need braces.
+                        writer.WriteString(name, g.ToString("D").ToLowerInvariant());
+                        break;
+                    default:
+                        // Fallback: use ToString() invariant. Callers should
+                        // convert to a supported primitive before calling
+                        // (this branch keeps a clear FAIL surface — a "System.Object"
+                        // string in the row indicates the caller passed
+                        // something unexpected).
+                        writer.WriteString(name, Convert.ToString(value, System.Globalization.CultureInfo.InvariantCulture) ?? string.Empty);
+                        break;
+                }
+            }
+            writer.WriteEndObject();
+        }
+        return Encoding.UTF8.GetString(stream.ToArray());
+    }
 
     private Uri BuildEnvUri()
     {
