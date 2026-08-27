@@ -1,6 +1,6 @@
 # Current Task State — `spaarkeai-compose-r8`
 
-> **Last Updated**: 2026-08-26 (by `context-handoff`) · **Committed through**: `6d6ff750d` · **10 commits ahead of origin, NOT pushed**
+> **Last Updated**: 2026-08-26 (by `context-handoff`) · **Committed through**: `670d31db2` · **pushed, 0 unpushed**
 > **Branch**: `work/spaarkeai-compose-r8` · **Recovery**: read "Quick Recovery" first.
 > Everything below is recoverable from files alone.
 
@@ -10,10 +10,69 @@
 
 | Field | Value |
 |-------|-------|
-| **Task** | **058 merged and verified.** **059 code-complete, awaiting human sign-off** (security-sensitive, CLAUDE.md §6). |
-| **Status** | Builds clean · BFF **11,391 passed / 0 failed / 97 skipped** · ArchTests **62/62** · integration **96 P / 6 S**. No client code changed by either task, so the jest suites were not re-run. |
-| **Progress** | **45 of 56 complete**, 4 open, 1 blocked |
-| **Next Action** | **Sign off 059** (§8 of `notes/059-tenant-header-decisions.md` — two questions). Then Track D (**070–073**), then **090** wrap-up. |
+| **Task** | **DEPLOYED TO DEV — owner is mid-UAT.** No task in progress. |
+| **Status** | 47 of 51 resolved. Tree clean, everything pushed, merged with `origin/master` (12 behind again — other projects merging). BFF **11,931 / 0 / 96** · integration **103 / 6** · ArchTests **9 failed / 101 passed — ALL 9 PRE-EXISTING ON MASTER** (verified against a clean `origin/master` checkout: 9 failed / 95 passed). |
+| **Next Action** | **WAIT for UAT results.** While waiting: fix the misleading *"came from an earlier session"* copy (see 🔴 OPEN BUG below). Then Track D **070/071/072** (worktrees staged at `C:\code_files\spaarke-wt-07{0,1,2}`, **agents NOT dispatched**), then **090**. **059 still needs owner sign-off.** |
+
+---
+
+## 🚀 DEPLOYED TO DEV 2026-08-26 — first deploy of Tracks A/B/C
+
+| Component | Result |
+|---|---|
+| **BFF** `spaarke-bff-dev` | 45.14 MB · SHA-256 hash-verified · `/healthz` 200 · 2/2 CORS origins |
+| **SpaarkeAi** `sprk_spaarkeai` | rebuilt + published, 5,725 KB. ⚠️ the previous `dist` was **Aug 21** — deploying it would have shipped a 5-day-old client against the new BFF. **ALWAYS rebuild before deploying.** |
+| **Action mirrors** (4 Track C rows) | `target_para_id` **False → True** in `outputSchema` + `systemPrompt`. Verified 3 ways: PATCH result, independent re-read, second dry run = 0 changes (idempotent). |
+| **Route-surface proof** | **All 17 authenticated Compose routes → 401, zero 404s** against the DEPLOYED app. Stronger than 073's two local oracles. |
+
+**Track B is still DISARMED** — `SessionFileStore:BlobEndpoint` empty; dev has no storage account, UAMI has no storage role.
+
+---
+
+## 🔴 THE BIG FINDING: Track C was UN-DEPLOYABLE, not un-deployed
+
+UAT hit two symptoms — a refusal banner on *make more concise*, and a *"Where should this suggestion go?"*
+confirm dialog on *draft alternative*. **One root cause**: the deployed Action rows were the **2026-07-28**
+versions asking the model for `target_text` and never for `target_para_id`. No anchor ⇒ every LIVE edit fell
+into task 053's **replay** population ⇒ banner (prose didn't match) or confirm dialog (prose matched).
+
+**The recorded prerequisite was never executable.** `Deploy-AnalysisAction.ps1` cannot deploy
+`infra/dataverse/actions/*.action.json` for three independent, individually-fatal reasons:
+1. it reads a `{actions:[...]}` wrapper — the mirrors are **bare objects**;
+2. it hard-requires `actionTypeName` and skips without it — **0 of 17** mirrors carry it;
+3. it writes `sprk_ActionTypeId@odata.bind` — **that column does not exist on the entity**.
+
+**The column is missing BY DESIGN — verified, not assumed.** R7 task 028 / FR-07 removed the ActionTypeId
+expand (*"Action is no longer the dispatch axis — orchestrator reads `node.sprk_executortype` directly"*,
+`AnalysisActionService.cs:235`/`:343`); live metadata shows **65 attributes with no action-type lookup**;
+the only surviving `sprk_ActionTypeId` reference in the whole BFF is a **stale comment**
+(`InsightsActionRouter.cs:290` — the 6th stale-comment defect this project has hit). **Re-adding that column
+would restore a retired dispatch axis — a regression against FR-07, not a fix.** `seed-data/manifest.yaml`
+already recorded the gap: step `actions-r7`, **`deployer: null`**.
+
+**Closed by NEW `scripts/Deploy-ActionMirrors.ps1`** — deploys all 17 mirrors, binds no action type, `-DryRun`
+shows a per-field before/after, idempotent, and refuses to invent a row when no `sprk_actioncode` matches.
+
+> **Lesson worth keeping**: the model contract lives in **Dataverse DATA** (`sprk_outputschemajson` +
+> `sprk_systemprompt`), read at runtime. Shipping BFF + client code cannot move it. Any task that changes an
+> Action's schema/prompt is **not deployed** until the mirror is pushed.
+
+---
+
+## 🔴 OPEN BUG — misleading copy on a live anchorless edit (NEXT THING TO FIX)
+
+Both UAT symptoms rendered *"This suggestion came from an earlier session, before suggestions carried a
+paragraph reference"* — to a user who had just selected the text a second earlier. That copy is **literally
+true of the payload** (it genuinely had no anchor) and **completely wrong about the user's action**.
+
+Root: everything anchorless is classified `legacy-replay`. The classifier must distinguish
+**"no anchor because it predates anchors"** (replay — ask, don't place) from **"no anchor on a LIVE edit"**
+(a model-contract failure — different words, and arguably a retry rather than a prompt). Sites:
+`ComposeBannerStack.tsx:937-942` (banner) and `ComposeWorkspace.tsx:5340-5341` (dialog); classification in
+`usePendingRedline.ts`. Note the fallback bound is structural and CORRECT — an anchored edit cannot reach
+that dialog; only the wording and the live-vs-replay split are wrong.
+
+---
 
 ### 058 — nested/conditional merge fields now carry (merged 2026-08-26)
 
@@ -73,12 +132,12 @@ fallback the only tenant path those tests ever exercised. Repaired the fixture, 
 (`bff-extensions.md` §F.2). Two further tests were passing **vacuously** and now assert something
 real. Full record: [`notes/059-tenant-header-decisions.md`](notes/059-tenant-header-decisions.md).
 
-### This session — 9 tasks landed, all committed, nothing at risk
+### Landed across the last two sessions — all committed AND pushed (PR #806)
 `052` demote text-search · `053` bounded confirmable fallback · `053b` null-identifier edits reach the
 document · `061` lazy re-index · `062` retention + availability · `063` durable erasure · `064` retire the
-orphaned edit-batch surface · `047b` never-silent hole · `052b` stale-detection durability.
-
-Ten commits, tree clean, **nothing pushed** — push is the operator's call (PR #806 is open).
+orphaned edit-batch surface · `047b` never-silent hole · `052b` stale-detection durability · **`059`
+tenant-selection security (awaiting sign-off)** · **`058` nested-field carry** · **`073` endpoint
+decomposition** · **`074` CLOSED do-not-delete** · **deploy + `Deploy-ActionMirrors.ps1`**.
 
 ### Critical context in one paragraph
 **Track C (AI edit placement) and Track B (durable session files) are both COMPLETE.** Text search is no
@@ -346,9 +405,19 @@ UAMI holds no storage role. Unchanged by this deploy.
   cannot tell that apart from a real content change — unzip and `diff -r` before committing one.
 - **Run the two client suites SEQUENTIALLY, not concurrently.** 052b saw 2 and 12 spurious failures
   running `Spaarke.Compose.Components` and `SpaarkeAi` at the same time; both green run one after the other.
-- **Verify every agent report.** This session that caught: a wrong publish number already committed to a
-  note, a stale test fixture, a misleading `parallel-safe` flag, and two of an agent's own tests that its
-  mutation pass proved were passing vacuously.
+- **Verify every agent report.** Caught so far: a wrong publish number already committed to a note, a stale
+  test fixture, a misleading `parallel-safe` flag, two of an agent's own tests passing vacuously, and a
+  "regenerates byte-identically" claim that was false (ZIP mtimes).
+- **An agent whose worktree you remove will report DATA LOSS.** After collecting + committing 073 the
+  worktree was removed; the agent then re-notified with an urgent "the deliverable is no longer on disk".
+  Nothing was lost — verify with `git ls-tree -r --name-only HEAD | grep <artifact>` and move on. **Collect,
+  commit, THEN remove** — and expect the alarm.
+- **`gh`/OData/metadata queries that ERROR can print a false negative.** A `contains()` filter is unsupported
+  on Metadata Entities; the failed call left `$m` null and the script printed "NONE — no attribute exists",
+  which would have become evidence for re-adding a column. **A failed query is not a negative result.**
+- **Model-contract changes live in Dataverse DATA, not code.** `sprk_outputschemajson` + `sprk_systemprompt`
+  on `sprk_analysisaction` are read at RUNTIME. Deploying BFF + client cannot move them. Use
+  `scripts/Deploy-ActionMirrors.ps1`.
 
 ---
 
