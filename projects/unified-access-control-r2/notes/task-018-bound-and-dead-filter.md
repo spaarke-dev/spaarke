@@ -87,6 +87,9 @@ there is no truncation to make visible.
 
 ## 3. A-15 / A-23 — dead filter removal
 
+**Both filters are removed. They are NOT the same kind of dead, and the difference matters** — see
+the asymmetry note at the end of this section. Do not treat them as one finding.
+
 ### A-15 `AccessibleRecordSetAuthorizationFilter` — REMOVED
 
 Reachability proof (not a reading):
@@ -102,6 +105,15 @@ Because **zero routes attach it**, removal cannot change any route's authorizati
 no route whose "is a filter attached / does the filter consult an authorization service" answer
 depended on it.
 
+**The sharper argument for deletion — it was always-deny by construction, not merely unattached.**
+The filter's first act is to read `WorkforcePrincipal.HttpContextItemsKey` and fail closed (401) when
+it is absent. Nothing in `src/**` ever *writes* that key. So had anyone attached this gate to a route,
+that route would have returned **401 unconditionally, for every caller** — it could never have
+reached its own accessible-set check. And `AccessibleRecordSetAuthorizationFilter.cs:15` carried a
+**commented-out usage example** (`.AddAccessibleRecordSetAuthorizationFilter("sprk_project",
+"projectId")`), which is an active invitation for the next author to do exactly that. "Dead code"
+undersells it: this was a loaded trap with instructions attached.
+
 Deleted with it: `tests/unit/Sprk.Bff.Api.Tests/Api/ExternalAccess/AccessibleRecordSetAuthorizationFilterTests.cs`
 (tests of the deleted SUT). This is under `tests/unit/**`, **not** `tests/integration/{auth,regression,
 data-mutation,tenant}/**`, so the ADR-038 / FR-B06 "deletion requires same-PR replacement" rule does
@@ -110,12 +122,64 @@ not apply.
 `ADR008_AuthorizationTests.EndpointFiltersShouldExist` only asserts `Assert.NotEmpty` over ~23
 remaining filters — unaffected.
 
+### A-23 `OfficeDocumentAccessFilter` — REMOVED (`Api/Filters/OfficeDocumentAccessFilter.cs`, 216 lines)
+
+**Deletion rests on zero call-sites, and on nothing else.** `AddOfficeDocumentAccessFilter` and
+`OfficeDocumentAccessFilter` have no references anywhere in source — every grep hit was inside the
+file itself. The compiler confirms it: `Sprk.Bff.Api` builds Release + `--warnaserror` at 0 warnings
+with the file gone, and the full unit suite is bit-identical at 11166/11262, so the filter had **no
+test coverage at all** — not even its own.
+
+> ⚠️ **Do NOT reuse the original A-23 rationale.** Task 003 filed A-23 on 2026-08-21 arguing that the
+> doc-comment operations `"share"`/`"attach"` were not registered policy keys. **Task 072 registered
+> `["share"] = AccessRights.Share` on 2026-08-26** (`OperationAccessPolicy.cs:248`), so on the project
+> branch `"share"` *is* a valid key (`"attach"` still is not). The conclusion is unchanged — delete on
+> zero-callers grounds — but that half of the reasoning is spent and must not be repeated.
+
+### The asymmetry between the two orphans (do not conflate them)
+
+| | A-15 `AccessibleRecordSetAuthorizationFilter` | A-23 `OfficeDocumentAccessFilter` |
+|---|---|---|
+| Attached to any route? | No | No |
+| Precondition satisfied if attached? | **NO** — reads `WorkforcePrincipal.HttpContextItemsKey`, written nowhere in `src/**` | **YES** — reads `OfficeAuthFilter.UserIdKey`, which IS written (`OfficeAuthFilter.cs:126`) by a live-attached `AddOfficeAuthFilter()` (`OfficeEndpoints.cs:172`) |
+| Behaviour if attached | **401 unconditionally, every caller** — always-deny by construction | Would actually run; outcome depends on the operation's policy registration (not analyzed here — see the stale-reasoning warning above) |
+| Had a commented-out usage example inviting attachment | **Yes** (`:15`) | No |
+
+A-15 was a loaded trap; A-23 was an unused-but-functional component. Both warranted deletion, for
+**different** reasons. Recording this because a future reader who flattens them into "two dead filters"
+will draw the wrong lesson about which one was dangerous.
+
+### Observation surfaced by the A-23 deletion — NOT a regression, and already tracked
+
+`OfficeDocumentAccessFilter` was written for the Office share endpoints (its doc comment names
+`ShareLinksRequest` / `ShareAttachRequest`). Those endpoints are **live** — `POST /office/share/links`
+(`OfficeEndpoints.cs:1363`) and `POST /office/share/attach` (`:1381`) — and they carry
+`AddOfficeRateLimitFilter` + `AddOfficeAuthFilter` (authentication: establishes *who*), but **no
+per-document authorization filter**. Contrast `POST /office/save` (`:167`), which does carry
+`.AddEntityAccessFilter()`.
+
+This is the exact shape the two-rule forcing function exists for: **Rule A passes** on those routes (a
+filter IS attached) while **Rule B** — does a filter consult an authorization service — does not.
+
+Per-document share permission is instead checked in the service layer at `OfficeService.cs:967`, and
+that check is a **stub**: `SimulateSharePermissionCheckAsync` (`:1032`), carrying
+`// TRACKED: GitHub #229 - Replace with Dataverse security role check` (`:1037`). Related stub:
+`CanShare = true // In real implementation, check user permissions` (`:938`).
+
+**My deletion does not regress this.** The filter was never attached, so Rule B's verdict on those
+routes is identical before and after — I am not removing the only thing Rule B was passing on, because
+Rule B was already failing there. What the deletion *does* remove is the misleading impression that the
+mechanism existed. `OfficeDocumentAccessFilter` was plausibly the intended implementation of
+**GitHub #229**; deleting it is still correct (dead code is not a plan), but #229 should be the place
+that intent now lives. Flagged for the Office/DMS owner — **out of scope for FR-17** (different
+surface: Office add-in, not the SPA/Teams external plane) and **verify on the project branch first**,
+since this worktree is master-based and may be stale here as it was on task 072.
+
 ### Residual (NOT done — outside this task's modify-set)
 
 | Item | File | Why deferred |
 |---|---|---|
 | `WorkforcePrincipal.HttpContextItemsKey` is now read by nothing | `Infrastructure/ExternalAccess/ExternalCallerContext.cs:160` | `Infrastructure/ExternalAccess/**` is owned by another agent this wave. Harmless (unused `static readonly object`); cosmetic follow-up. |
-| **A-23** `OfficeDocumentAccessFilter` — second orphaned filter | `Api/Filters/OfficeDocumentAccessFilter.cs` (216 lines) | Outside this task's assigned modify-set. **Confirmed orphaned**: `AddOfficeDocumentAccessFilter` has zero call-sites in `src/**`. Still needs deletion per the task-003 scope addition. |
 
 ---
 
