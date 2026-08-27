@@ -97,17 +97,32 @@ duplicate) · `CreateProjectWizard/CreateProjectStep` · `CreateRecordWizard/ste
 `CreateWorkAssignmentWizard/AssignWorkStep` · `CreateWorkAssignmentWizard/CreateFollowOnEventStep` ·
 `CreateWorkAssignmentWizard/EnterInfoStep` ← **the owner's screenshot**
 
-**Shipped surfaces that must be rebuilt to pick it up:**
+**Shipped surfaces that must be rebuilt to pick it up — 12 solutions + 1 PCF.**
+
+> ⚠️ **Corrected 2026-08-27.** A first pass listed only 5 solutions; a full repo scan found **12**.
+> Every one below was verified to import wizard components from `src/`, not merely mention them.
+> Do not trust a narrow grep for this — the radius is wider than it looks.
 
 | surface | why |
 |---|---|
-| `src/solutions/CreateMatterWizard` | Code Page bundling the wizard steps |
+| `src/solutions/CreateWorkAssignmentWizard` | Code Page hosting the wizard steps — **the owner's screenshot** |
+| `src/solutions/CreateMatterWizard` | ditto |
 | `src/solutions/CreateProjectWizard` | ditto |
-| `src/solutions/CreateWorkAssignmentWizard` | ditto — the screenshot surface |
+| `src/solutions/CreateEventWizard` | ditto |
+| `src/solutions/CreateInvoiceWizard` | ditto |
+| `src/solutions/CreateReportCardWizard` | ditto |
+| `src/solutions/CreateTodoWizard` | ditto |
+| `src/solutions/WorkspaceLayoutWizard` | hosts wizard components |
 | `src/solutions/SpaarkeAi` | `QuickStartModal`, `ContextPaneController` launch the wizards |
 | `src/solutions/LegalWorkspace` | `CreateProject/CloseProjectDialog` |
-| **`src/client/pcf/MatterHeader`** | ⚠️ imports `dist/components/LookupField/LookupField` directly (`MatterHeaderView.tsx:61`) — **its lookups change appearance on next rebuild**, relevant to task 080 parity |
-| `src/client/pcf/RecordHeader` | not yet — it still uses the *other* component (see below) |
+| `src/solutions/SmartTodo` | `AddTodoBar` → CreateTodo path |
+| `src/solutions/Notepad` | `hooks/discoverMemoNavProps` |
+| **`src/client/pcf/MatterHeader`** | ⚠️ imports `dist/components/LookupField/LookupField` **directly** (`MatterHeaderView.tsx:61`) — **its lookups change appearance on next rebuild**, relevant to task 080 parity |
+| `src/client/pcf/RecordHeader` | not yet — still uses the *other* component (see below) |
+
+**None of these are urgent** — the change is additive and every consumer keeps working unchanged
+except that its lookup gains the right-side browse icon and the modern scrollbar. But a reviewer
+asking "what does this PR touch?" should be given this list, not the short one.
 
 ⚠️ **PCFs bundle `dist/`, not source.** Rebuild the shared lib first (`ensure-dist-fresh` prebuild
 handles it for wired PCFs). A stale `dist/` silently ships old code.
