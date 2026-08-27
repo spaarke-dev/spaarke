@@ -52,6 +52,16 @@ builder.Services.AddSingleton<Azure.Core.TokenCredential>(sp =>
 // Data Access Layer - Document storage resolution
 builder.Services.AddScoped<Sprk.Bff.Api.Infrastructure.Dataverse.IDocumentStorageResolver, Sprk.Bff.Api.Infrastructure.Dataverse.DocumentStorageResolver>();
 
+// Record-aware SPE container resolution — unified-access-control-r2 task 075.
+// The ONE mapping between a record and the container its content belongs in, in both directions:
+// forward for storage placement (a secure record resolves to its OWN sprk_containerid or FAILS CLOSED),
+// reverse for authorizing container-keyed routes (tasks 073/078).
+// UNCONDITIONAL on purpose: a feature-gated isolation seam is absent exactly when the gate is off, and an
+// absent resolver means callers silently fall back to a shared container. There is no acceptable null
+// object here, so no ADR-032 kill-switch applies.
+builder.Services.AddScoped<Sprk.Bff.Api.Infrastructure.Dataverse.ISecurableEntityRegistry, Sprk.Bff.Api.Infrastructure.Dataverse.SecurableEntityRegistry>();
+builder.Services.AddScoped<Sprk.Bff.Api.Infrastructure.Dataverse.IRecordContainerResolver, Sprk.Bff.Api.Infrastructure.Dataverse.RecordContainerResolver>();
+
 // Authentication & Authorization (Azure AD JWT + authorization policies)
 builder.Services.AddAuthorizationModule(builder.Configuration);
 
