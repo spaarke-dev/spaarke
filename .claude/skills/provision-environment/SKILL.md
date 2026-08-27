@@ -392,19 +392,33 @@ Cross-check: `tenancyModel` × `profile` MUST be consistent — `Model1Shared` p
 
 The L2 API's `POST /api/runs` REQUIRES `environmentId` (the `sprk_dataverseenvironment` record GUID). L2 returns 400 without it (per DS-5 c6-2). This step creates the placeholder record BEFORE the POST so the GUID is available.
 
-Preferred path — Dataverse MCP (`mcp__dataverse__create_record`):
+**Registry env (until central-managing env exists — 2026-08-26 owner directive)**: use `spaarkedev1` for `environment=dev`, `spaarke-demo` for `environment=demo`. Production registry env is NOT YET provisioned; treat as an r2 follow-on. The Spaarke dev registry env doubles as the engineering dev env — this is intentional for now. See operator memory `feedback_no_central_managing_env_yet`.
+
+**Preferred path — Dataverse MCP** (`mcp__dataverse__create_record`). The payload MUST include the 4 NOT-NULL fields (`sprk_name`, `sprk_environmenttype`, `sprk_dataverseurl`, `sprk_isactive`, `sprk_isdefault`) OR Dataverse returns 400. Registry columns added in task 023 (deployed 2026-08-26 SESSION 13) + `sprk_customerid` added by companion `scripts/Add-CustomerIdColumn.ps1` (task 199 reconciliation) provide the remaining fields.
 
 ```powershell
-# Assumes MCP connected to the registry env (spaarkedev1 for dev; spaarke-demo for demo; production registry for prod)
+# environment (intake) -> sprk_environmenttype enum (per DataverseEnvironmentRecord.cs EnvironmentType)
+$envTypeMap = @{ 'dev' = 0; 'demo' = 1; 'sandbox' = 2; 'trial' = 3; 'partner' = 4; 'training' = 5; 'prod' = 6 }
+$envType    = $envTypeMap[$environment]
+
+# tenancyModel (intake) -> sprk_tenancymodel option-set integer (Model1Shared=0, Model2Dedicated=1)
+$tenancyModelMap = @{ 'Model1Shared' = 0; 'Model2Dedicated' = 1 }
+$tenancyModelInt = $tenancyModelMap[$tenancyModel]
+
 $placeholderPayload = @{
   entityName = 'sprk_dataverseenvironment'
   attributes = @{
-    sprk_customerid    = $customerId
-    sprk_tenantid      = $tenantId
-    sprk_tenancymodel  = $tenancyModel
-    sprk_profile       = $profile
-    sprk_setupstatus   = 'Provisioning'  # per FR-18 initial state
-    sprk_upgrademode   = 'Auto'
+    # --- Required fields (NOT NULL per live schema) ---
+    sprk_name             = $customerId                                 # Recommended: customerId doubles as human-readable name; H10 may replace with friendly name at completion
+    sprk_environmenttype  = $envType                                    # Choice: enum int per environment
+    sprk_dataverseurl     = "https://placeholder-$customerId.crm.dynamics.com"  # H5 promotes this to the real URL when it creates the customer's Dataverse env
+    sprk_isactive         = $true
+    sprk_isdefault        = $false
+    # --- r1 registry extension (task 023 v3.3 columns) ---
+    sprk_customerid       = $customerId                                 # ALT-KEY for L2 CustomerRunGuard + DataverseRegistryConcurrencyStore lookup
+    sprk_tenantid         = $tenantId
+    sprk_tenancymodel     = $tenancyModelInt                            # option-set integer, NOT string
+    sprk_setupstatus      = 1                                           # 1=InProgress per EnvironmentSetupStatus enum (NotStarted=0, InProgress=1, Ready=2, Issue=3)
   }
 }
 $mcpResponse = mcp__dataverse__create_record @placeholderPayload
@@ -415,7 +429,7 @@ Fallback path (per §4.3a.5) — if MCP disconnected, use `pac data create`:
 
 ```powershell
 $environmentId = pac data create --entity sprk_dataverseenvironment `
-  --attributes "sprk_customerid=$customerId;sprk_tenantid=$tenantId;sprk_tenancymodel=$tenancyModel;sprk_profile=$profile;sprk_setupstatus=Provisioning;sprk_upgrademode=Auto" `
+  --attributes "sprk_name=$customerId;sprk_environmenttype=$envType;sprk_dataverseurl=https://placeholder-$customerId.crm.dynamics.com;sprk_isactive=true;sprk_isdefault=false;sprk_customerid=$customerId;sprk_tenantid=$tenantId;sprk_tenancymodel=$tenancyModelInt;sprk_setupstatus=1" `
   --query 'sprk_dataverseenvironmentid' -o tsv
 ```
 
@@ -428,7 +442,19 @@ if (-not ($environmentId -match '^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[
 }
 ```
 
-The placeholder is later promoted to real state by H10 (setup registry update) when the run reaches `Ready`. This creates the audit trail from "run enqueued" → "run complete" in a single sprk_dataverseenvironment lifecycle.
+**Fields intentionally NOT set at placeholder-create time** (populated by later handlers, per task 023 constraint "no code path that reads/writes these columns beyond what already exists in DataverseEnvironmentRecord.cs"):
+- `sprk_currentrunid` — set by L2 CustomerRunGuard as part of the run enqueue (§4D I5)
+- `sprk_azuresubscriptionid`, `sprk_resourcegroupname`, `sprk_appservicename`, `sprk_keyvaultname`, `sprk_containertypeid` — populated by H2a Bicep composition
+- `sprk_bffversion`, `sprk_solutionversion` — populated by H9 BFF deploy + H6 solution import
+- `sprk_ClientCacheBustToken` — populated by H7 env-var writes
+- `sprk_provisionedon` — set by H13 acceptance gate on transition to Ready
+- `sprk_setupstatus = 2 (Ready)` — set by H13 via `DataverseRegistrySetupStatusUpdater` at completion (also clears `sprk_currentrunid`)
+
+The placeholder is later promoted to real state by H10/H13 (setup registry update) when the run reaches `Ready`. This creates the audit trail from "run enqueued" → "run complete" in a single sprk_dataverseenvironment lifecycle.
+
+**Fields deliberately NOT in the placeholder** (deprecated / never landed — do NOT re-add these):
+- `sprk_profile` — never authored in any script or code; skill previously referenced it but grep-zero across `src/**` (removed 2026-08-26 SESSION 13 per task 199 reconciliation)
+- `sprk_upgrademode` — DERIVED from `sprk_provisionedon IS NOT NULL` by H4 KV secrets handler (`IKvSecretsWriter.UpgradeMode`); never persisted as a column
 
 #### 1g. Show intake summary
 
@@ -439,7 +465,7 @@ INTAKE SUMMARY
   tenancyModel:    Model1Shared
   environment:     dev
   profile:         spaarke-hosted-model1-trial
-  environmentId:   a1b2c3d4-...  (placeholder sprk_dataverseenvironment record, sprk_setupstatus=Provisioning)
+  environmentId:   a1b2c3d4-...  (placeholder sprk_dataverseenvironment record, sprk_setupstatus=1 InProgress)
   L2 API:          https://spaarke-provisioning-controlplane-dev.azurewebsites.net
 
 Proceed to preflight (H0)? (yes/no)
@@ -813,22 +839,25 @@ When the run reaches `Succeeded` (H13 acceptance passed):
 
 #### 6a. Update `sprk_dataverseenvironment` registry
 
-Via Dataverse MCP (primary) OR fallback (see Fallback Matrix):
+Via Dataverse MCP (primary) OR fallback (see Fallback Matrix).
+
+**In practice** this write is issued server-side by L2 via `DataverseRegistrySetupStatusUpdater` at H13 acceptance (per §4C rollback + §14A upgrade model; see `src/server/services/Sprk.Provisioning.ControlPlane.Core/Handlers/E2EAcceptance/DataverseRegistrySetupStatusUpdater.cs`). The operator-side skill re-verifies the state was written and, on missing update (rare), applies the same PATCH from the operator's session as a belt-and-suspenders repair. Use the row's `sprk_customerid` alt-key for the lookup.
 
 ```
 mcp__dataverse__update_record(
   entityName: "sprk_dataverseenvironment",
-  recordId: {resolved from customerId},
+  recordId: {resolved from customerId via sprk_customerid alt-key},
   fields: {
-    sprk_provisionedon: "{completedAt ISO timestamp}",
-    sprk_currentrunid: null,             // clear the concurrency lock
-    sprk_bffversion: "{deployedBffVersion}",
-    sprk_solutionversion: "{deployedSolutionVersion}",
-    sprk_tenantid: "{tenantId}",
-    sprk_setupstatus: 200000004          // "Ready" per option-set integer
+    sprk_provisionedon:    "{completedAt ISO timestamp}",
+    sprk_currentrunid:     null,        // clear the concurrency lock (§4D I5)
+    sprk_bffversion:       "{deployedBffVersion}",
+    sprk_solutionversion:  "{deployedSolutionVersion}",
+    sprk_setupstatus:      2            // 2 = Ready per EnvironmentSetupStatus enum (NotStarted=0, InProgress=1, Ready=2, Issue=3) — DataverseEnvironmentRecord.cs:23-29
   }
 )
 ```
+
+Note: `sprk_tenantid` should NOT be re-written here — it's set at placeholder create (Step 1f) and Never changes for the customer's lifetime. Overwriting risks silent tenant-isolation invariant violation (§4D I1).
 
 If MCP is disconnected, the fallback matrix triggers `pac data update` OR raw Web API PATCH. Both work with the operator's `az` token (no re-auth needed).
 
@@ -1020,17 +1049,20 @@ IF mcp__dataverse__* call fails with connection error:
          --filter "sprk_customerid eq '{customerId}'" `
          --select sprk_dataverseenvironmentid,sprk_currentrunid,sprk_setupstatus
 
-       # Write (Step 6 registry update)
+       # Write (Step 6 registry update — setupstatus 2 = Ready per EnvironmentSetupStatus enum)
        pac data update --entity sprk_dataverseenvironment `
          --id {envRecordId} `
-         --data '{"sprk_provisionedon":"{timestamp}","sprk_setupstatus":200000004,"sprk_currentrunid":null}'
+         --data '{"sprk_provisionedon":"{timestamp}","sprk_setupstatus":2,"sprk_currentrunid":null}'
 
   4. Fallback B (if pac unavailable OR command shape not supported): raw Web API PS
-       $dvUrl = "https://{customerEnv}.crm.dynamics.com"
+       # NOTE: registry updates target the REGISTRY env (spaarkedev1 for dev),
+       # NOT the customer's just-provisioned env. `sprk_dataverseenvironment`
+       # is the central catalog per operator memory feedback_no_central_managing_env_yet.
+       $dvUrl = "https://spaarkedev1.crm.dynamics.com"  # registry env
        $dvToken = az account get-access-token --resource $dvUrl --query accessToken -o tsv
        $body = @{
          sprk_provisionedon = "{timestamp}"
-         sprk_setupstatus   = 200000004
+         sprk_setupstatus   = 2         # 2 = Ready per EnvironmentSetupStatus enum
          sprk_currentrunid  = $null
        } | ConvertTo-Json
        Invoke-RestMethod `

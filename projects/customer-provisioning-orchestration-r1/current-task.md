@@ -1,5 +1,41 @@
 # Current Task State — customer-provisioning-orchestration-r1
 
+> **Last Updated**: 2026-08-27 SESSION 13 (task 199 reconciliation COMPLETE) — First live batch dispatch of task 186 attempted, HALTED pre-Step-0.5 via §6.5 escalation on 3 discoveries: (1) task 023 registry-schema script never deployed to any env despite ✅ status; (2) L2 code's `sprk_customerid` alt-key column missing entirely (never authored anywhere); (3) SKILL.md Step 1f/6a referenced 3 fictional fields (`sprk_profile`, `sprk_upgrademode`, wrong `sprk_setupstatus` int). All three fixed in-session as task 199 (see notes/task-199 outputs). spaarkedev1 now has all 12 task-023 columns + `sprk_customerid` (30 sprk_ columns total) + `sprk_customerid_key` alt-key registered. SKILL.md Step 1f rewritten with correct required NOT-NULL fields + enum-int setupstatus. Task 186 UNBLOCKED for next-session re-dispatch.
+
+## 🎯 SESSION 13 QUICK RECOVERY — 2026-08-27 (READ THIS FIRST — supersedes SESSION 12 FINAL below)
+
+| Field | Value |
+|-------|-------|
+| **Just completed** | Task 199 reconciliation: (1) deployed task 023 script against spaarkedev1 — 12 columns added; (2) authored + ran `scripts/Add-CustomerIdColumn.ps1` — added missing 13th column + alt-key; (3) rewrote SKILL.md Step 1f payload (drop `sprk_profile`/`sprk_upgrademode`, add 5 required NOT-NULL fields, enum-int setupstatus, tenancymodel option-set int); (4) fixed Step 6a (setupstatus=2, alt-key lookup, immutable-tenantId note); (5) fixed Fallback Matrix (correct setupstatus int, registry-env pointer). Saved operator memory `feedback_no_central_managing_env_yet`. Filed task 199 POML + updated TASK-INDEX (186 dep→199, new row 199). |
+| **Next actionable** | **Re-dispatch task 186 batch mode**. In fresh session: `/provision-environment trial1 --batch runs/trial1-intake.json`. Intake JSON already authored (SESSION 12) + schema-validated. Skill fixes will now flow cleanly through Step 1f placeholder create. Then Step 2 preflight (H0), Step 3 confirmation gate (`proceed with provisioning`), Step 4 execute loop H1-H14. 16-24h calendar (spans 24h SPE gate — near-instant in practice per user memory). |
+| **All blockers cleared** | Task 199 ✅ complete (schema deployed + skill fixed + POML filed). spaarkedev1 schema verified via raw Web API: 30 sprk_ columns + `sprk_customerid_key` alt-key present. Previous SESSION 12 blockers also all clear (see below). |
+| **Locked decisions (SESSION 13)** | (1) spaarkedev1 IS the registry env for `environment=dev` (owner directive — no separate central-managing env exists yet; filed as future r2 evaluation); (2) `sprk_customerid` = String(64), Recommended, ALT-KEY on `sprk_customerid_key`; (3) placeholder-create payload uses `sprk_setupstatus=1` (InProgress), completion updates to `2` (Ready); (4) `sprk_tenancymodel` option-set integer values Model1Shared=0, Model2Dedicated=1; (5) `sprk_tenantid` is IMMUTABLE post-placeholder-create (never re-write in Step 6a per §4D I1). |
+| **Branch** | `work/customer-provisioning-orchestration-r1` — pending SESSION 13 commit at HEAD |
+| **Working tree pending** | Modified: `.claude/skills/provision-environment/SKILL.md`, `projects/customer-provisioning-orchestration-r1/tasks/TASK-INDEX.md`, `projects/customer-provisioning-orchestration-r1/current-task.md`. New: `scripts/Add-CustomerIdColumn.ps1`, `projects/customer-provisioning-orchestration-r1/tasks/199-reconcile-registry-schema-and-skill-alignment.poml`. Committing as one atomic SESSION 13 reconciliation. |
+| **Filed follow-on (deferred, non-blocking)** | (1) Extend `DataverseEnvironmentRecord.cs::AllColumns` to include the 13 new columns — per task 023's original "consumers land in later tasks" constraint. Not blocking 186. (2) Update SKILL.md line 63 + 1337 KV credential-lifecycle language — E-3 CLOSED 2026-08-24 (auth-v4 task 033 deleted both KV copies of `BFF-API-ClientSecret`) so the "never purge soft-deleted rollback copies" language is stale. Not blocking anything. (3) Design central-managing Dataverse env for r2 — owner-flagged as "good idea to evaluate". |
+
+### To resume in fresh session — say ONE of these
+
+- **"dispatch task 186 batch"** — main session runs `/provision-environment trial1 --batch runs/trial1-intake.json`; skill flows through Steps 0 → 0.5 → 1 (batch loads + 1f now works with fixed payload) → 2 preflight H0 → Step 3 gate (`proceed with provisioning`) → Step 4 execute loop
+- **"dispatch task 186 interactive"** — same skill without `--batch`; operator types intake values live at 1a-1e prompts
+- **"continue provisioning-orchestration-r1"** — `/project-continue` full context load
+- **"where was I"** — reads this Quick Recovery + resumes
+
+### Critical Context (2-3 sentences)
+
+**Task 186 is now GENUINELY ready.** The SESSION 13 halt was the exact kind of discovery pre-flight is supposed to catch — 3 latent misalignments (task 023 script never deployed + missing 13th column + skill drift) all surfaced at Step 0 pre-Step-0.5, all fixed atomically as task 199, all verified live on spaarkedev1 (schema query shows 30 sprk_ columns + alt-key). Next dispatch will flow through the same skill invocation cleanly.
+
+### SESSION 13 file inventory (pending commit)
+
+- `.claude/skills/provision-environment/SKILL.md` — Step 1f + Step 6a + Fallback Matrix corrections
+- `scripts/Add-CustomerIdColumn.ps1` (new) — companion to `Extend-DataverseEnvironmentSchema-v3.3.ps1`; adds 13th column + alt-key; idempotent
+- `projects/customer-provisioning-orchestration-r1/tasks/199-reconcile-registry-schema-and-skill-alignment.poml` (new) — post-hoc POML documenting reconciliation
+- `projects/customer-provisioning-orchestration-r1/tasks/TASK-INDEX.md` — row 199 added; 186 dep updated to include 199
+- `projects/customer-provisioning-orchestration-r1/current-task.md` — this SESSION 13 Quick Recovery block
+- (memory) `feedback_no_central_managing_env_yet.md` — persisted mid-session
+
+---
+
 > **Last Updated**: 2026-08-26 SESSION 12 FINAL (context-handoff — user ending session for fresh context) — Task 186 is FULLY UNBLOCKED. All prerequisites cleared including the OpenAI region gap caught + fixed this session. Branch @ `f9962816d` = origin, 15 ahead of master (12 behind — master moved via other projects, non-blocking; merge at project close per §14A upgrade model). Working tree CLEAN. All work pushed. Next actionable is task 186 dispatch via `/provision-environment trial1` (interactive) or `/provision-environment trial1 --batch runs/trial1-intake.json` (batch — needs main-session to author the intake JSON first from SESSION 11 locked values). No pending main-session work.
 
 ## 🎯 SESSION 12 FINAL QUICK RECOVERY — 2026-08-26 (READ THIS FIRST — supersedes SESSION 12 END below)
