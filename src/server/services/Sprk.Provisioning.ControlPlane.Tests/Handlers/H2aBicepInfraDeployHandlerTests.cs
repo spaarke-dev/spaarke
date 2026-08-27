@@ -718,6 +718,101 @@ public sealed class H2aBicepInfraDeployHandlerTests
         runner.LastRequest!.RequireSecretFreeIdentity.Should().BeFalse();
     }
 
+    // ---------- ISH-08 OpenAI location override (Wave 5 punchlist, 2026-08-27) ----------
+
+    [Fact]
+    public async Task Ish08_OpenAiLocation_Absent_RunnerRequestCarriesNull_DefaultBicepParamWins()
+    {
+        var run = BuildRun();
+        // Explicitly ensure no openAiLocation key present.
+        run.Parameters.NonSecret.Remove(H2aBicepInfraDeployHandler.OpenAiLocationParameterKey);
+        var repo = new FakeRepository(run, etag: "etag-ish08-absent");
+        var runner = FakeBicepDeployRunner.Success(BuildOutputs());
+        var handler = BuildHandler(repo, runner, FakeArmKeyVaultRefProbe.Match(),
+            new FakeUpgradeDriftDetector(), FakeBicepTemplateInspector.Clean());
+
+        await handler.HandleAsync(BuildEnvelope(), CancellationToken.None);
+
+        runner.LastRequest.Should().NotBeNull();
+        runner.LastRequest!.OpenAiLocation.Should().BeNull(
+            "ISH-08 — absent NonSecret key must yield null so customer.bicep's openAiLocation default wins.");
+    }
+
+    [Fact]
+    public async Task Ish08_OpenAiLocation_Populated_FlowsIntoRunnerRequest()
+    {
+        var run = BuildRun();
+        run.Parameters.NonSecret[H2aBicepInfraDeployHandler.OpenAiLocationParameterKey] = "eastus2";
+        var repo = new FakeRepository(run, etag: "etag-ish08-populated");
+        var runner = FakeBicepDeployRunner.Success(BuildOutputs());
+        var handler = BuildHandler(repo, runner, FakeArmKeyVaultRefProbe.Match(),
+            new FakeUpgradeDriftDetector(), FakeBicepTemplateInspector.Clean());
+
+        await handler.HandleAsync(BuildEnvelope(), CancellationToken.None);
+
+        runner.LastRequest!.OpenAiLocation.Should().Be("eastus2",
+            "ISH-08 — populated NonSecret['openAiLocation'] must flow onto BicepDeployRequest so the runner overrides the Bicep default.");
+    }
+
+    [Fact]
+    public async Task Ish08_OpenAiLocation_Whitespace_TreatedAsAbsent()
+    {
+        var run = BuildRun();
+        run.Parameters.NonSecret[H2aBicepInfraDeployHandler.OpenAiLocationParameterKey] = "   ";
+        var repo = new FakeRepository(run, etag: "etag-ish08-whitespace");
+        var runner = FakeBicepDeployRunner.Success(BuildOutputs());
+        var handler = BuildHandler(repo, runner, FakeArmKeyVaultRefProbe.Match(),
+            new FakeUpgradeDriftDetector(), FakeBicepTemplateInspector.Clean());
+
+        await handler.HandleAsync(BuildEnvelope(), CancellationToken.None);
+
+        runner.LastRequest!.OpenAiLocation.Should().BeNull(
+            "ISH-08 — whitespace-only override is treated as absent (Bicep default wins).");
+    }
+
+    [Fact]
+    public void Ish08_BuildParametersPayload_AbsentOpenAiLocation_OmitsKey()
+    {
+        // Overrides via null (pre-ISH-08 signature parity) — the ARM parameters
+        // payload MUST omit openAiLocation entirely so the Bicep default wins.
+        var request = new BicepDeployRequest(
+            CustomerId: "acme",
+            TenantId: "00000000-1111-2222-3333-444444444444",
+            SubscriptionId: "22222222-3333-4444-5555-666666666666",
+            TenancyModel: "Model2Dedicated",
+            BicepVersion: "abc",
+            EnvironmentName: "prod",
+            Location: "westus2",
+            SignalREnabled: false,
+            RequireSecretFreeIdentity: false,
+            OpenAiLocation: null);
+        var payload = ArmDeploymentRunner.BuildParametersPayload(request);
+        var json = payload.ToString();
+        json.Should().NotContain("openAiLocation",
+            "ISH-08 — absent override must NOT surface in the ARM parameters payload (Bicep default wins).");
+    }
+
+    [Fact]
+    public void Ish08_BuildParametersPayload_PopulatedOpenAiLocation_IncludesKey()
+    {
+        var request = new BicepDeployRequest(
+            CustomerId: "acme",
+            TenantId: "00000000-1111-2222-3333-444444444444",
+            SubscriptionId: "22222222-3333-4444-5555-666666666666",
+            TenancyModel: "Model2Dedicated",
+            BicepVersion: "abc",
+            EnvironmentName: "prod",
+            Location: "westus2",
+            SignalREnabled: false,
+            RequireSecretFreeIdentity: false,
+            OpenAiLocation: "eastus2");
+        var payload = ArmDeploymentRunner.BuildParametersPayload(request);
+        var json = payload.ToString();
+        json.Should().Contain("\"openAiLocation\"",
+            "ISH-08 — populated override MUST appear in the ARM parameters payload so it overrides the Bicep default.");
+        json.Should().Contain("eastus2");
+    }
+
     // ---------- T16 handler-id mismatch ----------
 
     [Fact]

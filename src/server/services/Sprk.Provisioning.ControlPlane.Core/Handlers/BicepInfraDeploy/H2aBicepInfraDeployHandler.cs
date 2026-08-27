@@ -120,6 +120,17 @@ public sealed class H2aBicepInfraDeployHandler : IProvisioningHandler
     /// <summary>Non-secret parameter key carrying the target Azure region. Defaults to <c>westus2</c> when absent.</summary>
     public const string LocationParameterKey = "location";
 
+    /// <summary>
+    /// ISH-08 (customer-provisioning-orchestration-r1 Wave 5 punchlist,
+    /// 2026-08-27): non-secret parameter key carrying the Azure OpenAI region
+    /// override. When populated, this value overrides customer.bicep's
+    /// <c>openAiLocation</c> parameter default (currently <c>westus3</c>).
+    /// When absent, the Bicep parameter default wins — bit-identical to
+    /// pre-ISH-08 behavior. The intake schema's <c>openAiRegion</c> field
+    /// flows into this key via the skill Step 2 body-construction map.
+    /// </summary>
+    public const string OpenAiLocationParameterKey = "openAiLocation";
+
     /// <summary>Non-secret parameter key carrying the SignalR feature flag (ADR-032). Defaults to <c>false</c> when absent.</summary>
     public const string SignalREnabledParameterKey = "signalrEnabled";
 
@@ -312,6 +323,11 @@ public sealed class H2aBicepInfraDeployHandler : IProvisioningHandler
         var requireSecretFreeIdentity = TryGetNonEmpty(parameters, RequireSecretFreeIdentityParameterKey, out var secretFreeRaw)
             && bool.TryParse(secretFreeRaw, out var secretFreeParsed)
             && secretFreeParsed;
+        // ISH-08: optional OpenAI region override (see OpenAiLocationParameterKey doc).
+        // Absence => null => Bicep parameter default (westus3) wins.
+        var openAiLocation = TryGetNonEmpty(parameters, OpenAiLocationParameterKey, out var openAiLoc)
+            ? openAiLoc
+            : null;
 
         var request = new BicepDeployRequest(
             CustomerId: envelope.CustomerId,
@@ -323,7 +339,8 @@ public sealed class H2aBicepInfraDeployHandler : IProvisioningHandler
             EnvironmentName: environmentName,
             Location: location,
             SignalREnabled: signalrEnabled,
-            RequireSecretFreeIdentity: requireSecretFreeIdentity);
+            RequireSecretFreeIdentity: requireSecretFreeIdentity,
+            OpenAiLocation: openAiLocation);
 
         // (7) Structural pre-flight — Redis presence + model-version pin.
         //     These are cheap file reads; fail fast before ARM traffic.

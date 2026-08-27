@@ -86,6 +86,15 @@ public interface IBicepDeployRunner
 /// effective. Defaults to <c>false</c> — bit-identical to pre-A38b behavior — so existing
 /// callers that do not supply it are unaffected.
 /// </param>
+/// <param name="OpenAiLocation">
+/// ISH-08 (customer-provisioning-orchestration-r1 Wave 5 punchlist, 2026-08-27):
+/// Optional Azure OpenAI region override. When non-empty, overrides customer.bicep's
+/// <c>openAiLocation</c> parameter default (<c>westus3</c>). When empty / null, the
+/// Bicep parameter default wins — bit-identical to pre-ISH-08 behavior so existing
+/// callers that do not supply it are unaffected. Populated by
+/// <see cref="H2aBicepInfraDeployHandler"/> from
+/// <c>run.Parameters.NonSecret[H2aBicepInfraDeployHandler.OpenAiLocationParameterKey]</c>.
+/// </param>
 public sealed record BicepDeployRequest(
     string CustomerId,
     string TenantId,
@@ -95,7 +104,8 @@ public sealed record BicepDeployRequest(
     string EnvironmentName,
     string Location,
     bool SignalREnabled,
-    bool RequireSecretFreeIdentity = false);
+    bool RequireSecretFreeIdentity = false,
+    string? OpenAiLocation = null);
 
 /// <summary>
 /// Discriminated result of <see cref="IBicepDeployRunner.DeployAsync"/>.

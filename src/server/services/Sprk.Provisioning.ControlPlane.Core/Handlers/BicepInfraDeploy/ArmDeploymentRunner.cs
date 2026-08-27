@@ -385,6 +385,15 @@ public sealed class ArmDeploymentRunner : IBicepDeployRunner
             ["signalrEnabled"] = new { value = request.SignalREnabled },
             ["requireSecretFreeIdentity"] = new { value = request.RequireSecretFreeIdentity },
         };
+        // ISH-08 (Wave 5 punchlist, 2026-08-27): forward openAiLocation ONLY
+        // when the caller populated it. Omitting the key lets customer.bicep's
+        // openAiLocation param default (currently westus3, per bicep line 43)
+        // win — bit-identical to pre-ISH-08 behavior. Verified in
+        // ArmDeploymentRunnerTests.BuildParametersPayload_* coverage.
+        if (!string.IsNullOrWhiteSpace(request.OpenAiLocation))
+        {
+            payload["openAiLocation"] = new { value = request.OpenAiLocation };
+        }
         return BinaryData.FromObjectAsJson(payload);
     }
 
