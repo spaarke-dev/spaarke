@@ -871,29 +871,65 @@ Some handlers reach `WaitingOnGate` because they require operator-visible action
 
 When the run reaches `Completed` (H13 acceptance passed — this is the terminal-success RunStatus per `ProvisioningRun.cs:212-239`; earlier drafts of this skill used the fictional `Succeeded`):
 
-#### 6a. Update `sprk_dataverseenvironment` registry
+#### 6a. Update `sprk_dataverseenvironment` registry — TWO-STEP: read then update (HARD-STOP on any failure)
 
-Via Dataverse MCP (primary) OR fallback (see Fallback Matrix).
+Per REG-04 (SESSION 15) — Step 6a is NOT belt-and-suspenders. The server-side updater at H13 writes ONLY `sprk_setupstatus` + `sprk_currentrunid` release (per `DataverseRegistrySetupStatusUpdater.cs`). The remaining Ready-state columns (`sprk_provisionedon`, `sprk_bffversion`, `sprk_solutionversion`, and per REG-01 also `sprk_azuresubscriptionid`, `sprk_resourcegroupname`, `sprk_appservicename`, `sprk_keyvaultname`, `sprk_containertypeid`, `sprk_ClientCacheBustToken`) are written by REG-01's H13 pre-Ready PATCH sub-step (SESSION 15 Wave 2 commit `328981ba2`) or, if that PATCH failed (leaving RunStatus=Running-blocked, not Completed), by the operator-side skill here. Either way, Step 6a re-verifies and, on drift, applies the missing PATCH from the operator's session.
 
-**In practice** this write is issued server-side by L2 via `DataverseRegistrySetupStatusUpdater` at H13 acceptance (per §4C rollback + §14A upgrade model; see `src/server/services/Sprk.Provisioning.ControlPlane.Core/Handlers/E2EAcceptance/DataverseRegistrySetupStatusUpdater.cs`). The operator-side skill re-verifies the state was written and, on missing update (rare), applies the same PATCH from the operator's session as a belt-and-suspenders repair. Use the row's `sprk_customerid` alt-key for the lookup.
+Per Wave 0 Decision 2 (Dataverse MCP alt-key probe as the canonical registry lookup):
 
+```powershell
+# Step 1: lookup — resolve environmentId GUID. Prefer the value captured at Step 1f
+# (skill session-local $environmentId). Fallback: query by sprk_customerid alt-key
+# in case Step 1f state was lost across a compact/handoff.
+if ([string]::IsNullOrWhiteSpace($environmentId)) {
+  $lookup = mcp__dataverse__read_query(query = @"
+    <fetch top="1">
+      <entity name="sprk_dataverseenvironment">
+        <attribute name="sprk_dataverseenvironmentid" />
+        <filter><condition attribute="sprk_customerid" operator="eq" value="$customerId" /></filter>
+      </entity>
+    </fetch>
+"@)
+  $environmentId = $lookup.rows[0].sprk_dataverseenvironmentid
+}
+if (-not ($environmentId -match '^[0-9a-fA-F-]{36}$')) {
+  Write-Error "Step 6a HARD STOP: could not resolve environmentId for customerId=$customerId"
+  exit 1
+}
+
+# Step 2: update — write the promoted columns (idempotent PATCH).
+try {
+  mcp__dataverse__update_record(
+    entityName = "sprk_dataverseenvironment",
+    recordId   = $environmentId,
+    fields = @{
+      sprk_provisionedon            = $completedAtIso     # from run.CompletedOn
+      sprk_bffversion               = $deployedBffVersion  # from run.InterStepState.BffVersion
+      sprk_solutionversion          = $deployedSolutionVer # from run.InterStepState.SolutionVersion
+      sprk_azuresubscriptionid      = $azureSubId
+      sprk_resourcegroupname        = $rgName
+      sprk_appservicename           = $appServiceName
+      sprk_keyvaultname             = $kvName
+      sprk_containertypeid          = $containerTypeId
+      sprk_ClientCacheBustToken     = $cacheBustToken
+      # sprk_setupstatus + sprk_currentrunid are ALREADY set by the server (H13 updater).
+      # If drift detected (they're not), operator MUST HARD STOP + escalate — do NOT overwrite blindly.
+    }
+  )
+} catch {
+  # F1 fallback path (Dataverse MCP disconnect) — use raw Web API PATCH with operator's az token
+  $dvUrl = $constants.spaarke[$environment].registryDvUrl  # spaarkedev1 for dev per operator memory
+  $dvToken = az account get-access-token --resource $dvUrl --query accessToken -o tsv
+  $body = @{ sprk_provisionedon = $completedAtIso; sprk_bffversion = $deployedBffVersion; ... } | ConvertTo-Json
+  Invoke-RestMethod -Uri "$dvUrl/api/data/v9.2/sprk_dataverseenvironments($environmentId)" `
+    -Method PATCH -Headers @{ Authorization = "Bearer $dvToken"; "OData-Version" = "4.0"; "If-Match" = "*" } `
+    -Body $body -ContentType "application/json"
+}
 ```
-mcp__dataverse__update_record(
-  entityName: "sprk_dataverseenvironment",
-  recordId: {resolved from customerId via sprk_customerid alt-key},
-  fields: {
-    sprk_provisionedon:    "{completedAt ISO timestamp}",
-    sprk_currentrunid:     null,        // clear the concurrency lock (§4D I5)
-    sprk_bffversion:       "{deployedBffVersion}",
-    sprk_solutionversion:  "{deployedSolutionVersion}",
-    sprk_setupstatus:      2            // 2 = Ready per EnvironmentSetupStatus enum (NotStarted=0, InProgress=1, Ready=2, Issue=3) — DataverseEnvironmentRecord.cs:23-29
-  }
-)
-```
 
-Note: `sprk_tenantid` should NOT be re-written here — it's set at placeholder create (Step 1f) and Never changes for the customer's lifetime. Overwriting risks silent tenant-isolation invariant violation (§4D I1).
+Note: `sprk_tenantid` MUST NOT be re-written here — it's set at placeholder-create (Step 1f) and NEVER changes for the customer's lifetime. Overwriting risks silent §4D I1 tenant-isolation invariant violation.
 
-If MCP is disconnected, the fallback matrix triggers `pac data update` OR raw Web API PATCH. Both work with the operator's `az` token (no re-auth needed).
+**HARD STOP**: any failure at Step 6a is unrecoverable at handoff time. Operator must NOT skip. If MCP is disconnected AND raw Web API fallback errors, the run's registry state is stale — operator MUST manually resolve via `pac data update` or Portal before the customer is handed the environment.
 
 #### 6b. Write handoff report
 
