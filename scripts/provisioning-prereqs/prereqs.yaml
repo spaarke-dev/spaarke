@@ -175,11 +175,19 @@ prereqs:
     consequence_of_absence: F6 — `az deployment sub create` fails on unregistered provider even after `az provider register` reports success.
     check_recipe:
       cli: |
+        # PRQ-04 fix (2026-08-27): rewrite loop with `failed=0` flag so a single
+        # unregistered namespace makes the recipe exit 1. Prior version echoed each
+        # state but always exited 0 — F6 (the failure this prereq exists to catch)
+        # would silent-pass.
+        failed=0
         for ns in Microsoft.Web Microsoft.Storage Microsoft.KeyVault Microsoft.CognitiveServices Microsoft.Search \
                   Microsoft.ServiceBus Microsoft.Cache Microsoft.DocumentDB Microsoft.OperationalInsights \
                   Microsoft.Insights Microsoft.ManagedIdentity Microsoft.ContainerRegistry; do
-          echo "$ns=$(az provider show --namespace $ns --query registrationState -o tsv)"
+          state=$(az provider show --namespace $ns --query registrationState -o tsv 2>/dev/null)
+          echo "$ns=$state"
+          if [ "$state" != "Registered" ]; then failed=1; fi
         done
+        [ "$failed" -eq 0 ] || exit 1
       expect: every namespace prints `Registered`
     remediation: "`az provider register --namespace <ns>` then poll every 30s for 5 min. If still `NotRegistered`, try `az rest --method post ...?force=true`; if still failing, register via Azure Portal (some fresh subs require silent auth flow)."
     related_findings: [F6]
