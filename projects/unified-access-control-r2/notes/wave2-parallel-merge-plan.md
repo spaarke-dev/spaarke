@@ -1041,3 +1041,100 @@ page 1 forever (015's item #1). Remaining items: GUID collation, paging-cookie e
 whether `MoreRecords` is populated for FetchXml via `ServiceClient`, concurrent writes, whether the 5,000
 ceiling is ever reached in production, OR-filter matching, the transitive `includeRelated` `in` operator,
 and whether an **impersonated** read pages identically — that last one is the seam tasks 034/036 build on.
+
+## A16. 013 — WAVE A COMPLETE (6/6), and the finding that outranks the task
+
+### 🔴🔴 `ExtractVerifiedEmail` VERIFIES NOTHING — verified in main session
+
+`WorkforcePrincipalResolver.ExtractVerifiedEmail` (`:178-186`) performs **zero verification**. It returns
+the first present claim of `email` → `preferred_username` → `upn` → `ClaimTypes.Email`. Its own doc
+comment asserts *"tenant-verified email/UPN"* and *"Entra populates it from the verified primary email"* —
+that is a statement about **Entra's** behaviour, not a check performed anywhere in this codebase.
+`preferred_username` and `upn` are documented by Microsoft as **mutable and unsuitable for authorization**,
+and they sit in the fallback chain.
+
+**The premise is not hypothetical — multitenancy is mandated here**, verified:
+- `design.md:96` — Type 2 (customer employee, no licence, has contact) signs in via **workforce Entra
+  (multitenant, per-customer consent)**
+- `notes/design-register.md:129` — **E-6**: "Multitenant app registration + per-customer admin consent for
+  Type 2 workforce sign-in"
+- `ADR-028` **A2** — Teams-host collaboration users MUST authenticate against a **multitenant** app
+  registration
+
+"Tenant-verified by Entra" is a single-tenant property. The Type 2 door and the Teams host are both
+multitenant **by design**, and that is exactly the population reaching this code.
+
+### 🔴 The third site BYPASSES 013's fix by construction
+
+`AccessibleRecordSetService.cs:208-213` (verified):
+
+```csharp
+if (grantContactId is null && !string.IsNullOrWhiteSpace(principal.Email))
+{
+    grantContactId = await _participations
+        .ResolveExternalContactAsync(oid: null, email: principal.Email, ct)   // ← oid: null
+```
+
+…then unions that contact's grants. `principal.Email` is `ExtractVerifiedEmail`'s output
+(`CallerPrincipalResolver.cs:444`).
+
+013 hardened `TryResolveContactByWorkforceIdentityAsync`. This is a **different method**, and passing
+`oid: null` bypasses the new guard **by construction**. Worse, the two compose badly: 013's guard makes a
+mismatched caller resolve to **no** `ContactId` — which is precisely the condition (`grantContactId is
+null`) that opens this email-only fallback. **A denied caller can fall through into the ungated path.**
+
+⚠️ **Stated honestly — verified vs inferred.** VERIFIED: the code shapes above, the multitenant mandate,
+and that project fact #1 makes this filter the entire security boundary on BFF reads. **INFERRED and NOT
+yet proven**: that the `email` claim is actually attacker-controllable in *this* registration's live
+configuration (013's own un-falsifiable #2 — needs live Entra), and that the deny→fallthrough composition
+is reachable end-to-end rather than blocked earlier. **Both are testable. Neither has been tested.**
+Do not report this as an exploited hole; report it as a hole that nothing currently prevents.
+
+**This is the third instance of "a name or comment asserts a security property the implementation does not
+provide"** — after 077's decorative filter (a filter *was* attached, so four human sweeps called it gated)
+and 022's three false "enforcement happens elsewhere" comments. Here the assertion is in the **method
+name**, which is worse: a name is read far more often than a body.
+
+### Main-session fix applied
+
+`IIdentityNormalizationService.cs:44-51` carried the load-bearing false claim — *"tenant-verified by
+Entra, so no oid-binding / first-login hijack protection is required here (that concern is specific to the
+CIAM external path)"*. **That sentence is why this path shipped without the protection CIAM has.**
+Rewritten to record what is actually true, what 013 closed, what remains open, and the bypass. Outside
+013's modify-set, so main session applied it.
+
+### 013's two escalations — BOTH need an owner
+
+**1 (§6) — FR-12 does not fully close A-18.** The guard denies *bound* contacts and resolves *unbound*
+ones, exactly as FR-12 mandates. But **this plane never writes a binding**, whereas CIAM binds on first
+login and thereby closes its own window. So A-18's original scenario stays live **indefinitely** for any
+contact holding grants but no workforce oid. Options: bind-on-first-resolve (mirror CIAM) · require an
+out-of-band invite token · accept + document. **Spec decision. Do not mark A-18 closed.**
+
+**2 (§6.5) — ADR-038 ban B8.** Nine tests drive an `internal` pure function via `InternalsVisibleTo`; B8
+bans that. The reviewer recommends **path B (amendment)**: ~10 sibling sites repo-wide do the same and
+describe it as *"the convention already used across this codebase"*, so **B8 currently bans what the
+codebase practices**, and B1/B8 contradict each other for this exact case (a pure internal function is
+either tested through `InternalsVisibleTo` or not tested at all). Needs an ADR Tensions entry in
+`design.md`/`spec.md` per §6.5 — at the point of decision, not deferred.
+
+### Other 013 findings for triage
+
+- **CIAM is now the weaker plane** — `ExternalParticipationService.cs:384` still `$top=1` silently picks
+  one on an ambiguous email; `:313` compares oids **as strings**.
+- **Cross-plane blind spot** — workforce reads only `azureactivedirectoryobjectid`, CIAM only
+  `sprk_externalobjectid`. **A contact bound on one plane reads as unbound to the other.**
+- `TryResolveContactIdAsync` keeps `TopCount = 1` with no ambiguity guard.
+- **The guard is silently INERT** where `contact.azureactivedirectoryobjectid` is unprovisioned — it passes
+  everything and looks identical to one that fired. No test can catch it (configuration, not code); only
+  the new WARN makes it visible.
+
+### Process notes worth keeping
+
+- **13 mutations, all killed.** Three survived initially and the agent **fixed the cause rather than the
+  report** — including a double that ignored `TopCount`/`ColumnSet` (it now projects like Dataverse). Same
+  double-defect class as 020 and 075: **6th instance**.
+- **A false green in its own tooling**: an early harness run reported all-8-detected only because `tail -3`
+  **hid "Build succeeded"**. Cousin of [G-12] — the verification instrument lying, not the code.
+- **A mutation harness run against a dirty tree wiped uncommitted gate fixes** via its `git checkout --`
+  cleanup. Caught by grep rather than assumed. Commit before running destructive harnesses.
