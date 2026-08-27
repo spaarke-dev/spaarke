@@ -12,7 +12,7 @@
 | **Task** | **033 + 034** complete — `Spaarke.Records.RecordHeader` **v1.1.11** packed, not yet imported |
 | **Phase** | 3 ✅ complete. Phase 5 rollout unblocked. The inline-lookup follow-on is **code-complete**. |
 | **Status** | ✅ **v1.1.11 imported and UAT-PASSED on the Project form** (owner, 2026-08-27): "the PCF is working - looks good". |
-| **Next Action** | **Task 002** — but read the baseline decision below first; it changes what you capture. **Task 001 is now ✅.** |
+| **Next Action** | **Phase 5 form bindings** — [`notes/rollout-form-binding-cheatsheet.md`](notes/rollout-form-binding-cheatsheet.md) has the verified JSON + per-entity add/hide lists. 050 is already done. |
 | **Blocked by** | Nothing in code. Task 001 ✅ closed 2026-08-27. Phase 5 is maker work. |
 | **Working tree** | clean · **pushed** to `origin/work/record-header-and-notepad-r2` · no PR opened |
 
@@ -135,6 +135,20 @@ semantically equal. The project CLAUDE.md portability assumption is **realised**
 **The one real maker trap this found**: the classic designer stores a **separate copy of
 `layoutJson` per form factor** (Web / Tablet / Phone — three today, currently byte-identical). Edit
 one and the others silently diverge, so a layout change must be applied to all three.
+
+---
+
+## 📋 Phase 5 is unblocked — verified cheat sheet ready
+
+[`notes/rollout-form-binding-cheatsheet.md`](notes/rollout-form-binding-cheatsheet.md) — every field
+in all five layouts validated against LIVE `spaarkedev1`, plus per-entity add/hide lists.
+
+**All 39 fields exist.** The real risk is different from what the POMLs assume: they say "MOVE the
+raw fields", but **15 fields across four entities are NOT on their form at all** and must be ADDED
+first — otherwise every edit to them throws `Field '<name>' not on form`. Agreement is the heaviest
+(5 of 6 missing) and has no records to QA against.
+
+`sprk_recordsummary` exists on all five and correctly stays OFF the forms — it is read-only.
 
 ---
 
