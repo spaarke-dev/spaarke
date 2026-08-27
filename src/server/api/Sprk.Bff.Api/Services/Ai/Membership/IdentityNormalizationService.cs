@@ -332,6 +332,14 @@ public sealed class IdentityNormalizationService : IIdentityNormalizationService
     internal const string DenyContactBindingUnreadable = "sdap.access.deny.contact_binding_unreadable";
 
     /// <summary>
+    /// Fallback code for a deny outcome with no code of its own. Exists so that adding a
+    /// <see cref="WorkforceEmailMatchDecision"/> value and forgetting its code produces an
+    /// obviously-unlabelled deny rather than silently inheriting some other deny's identity —
+    /// mislabelling a deny in the audit trail is worse than admitting it is unlabelled.
+    /// </summary>
+    internal const string DenyContactResolutionUnspecified = "sdap.access.deny.contact_resolution_unspecified";
+
+    /// <summary>
     /// One <c>contact</c> row matched by <c>emailaddress1</c>, carrying its current workforce oid
     /// binding (<c>azureactivedirectoryobjectid</c>; <c>null</c> when the contact is unbound).
     /// </summary>
@@ -361,7 +369,8 @@ public sealed class IdentityNormalizationService : IIdentityNormalizationService
         WorkforceEmailMatchDecision.DenyBoundToDifferentOid => DenyContactBoundToDifferentOid,
         WorkforceEmailMatchDecision.DenyAmbiguousEmail => DenyContactEmailAmbiguous,
         WorkforceEmailMatchDecision.DenyUnidentifiableCaller => DenyUnidentifiableCaller,
-        _ => DenyContactBindingUnreadable
+        // NoMatch / Resolve have their own arms at the call site and never reach here.
+        _ => DenyContactResolutionUnspecified
     };
 
     /// <summary>
