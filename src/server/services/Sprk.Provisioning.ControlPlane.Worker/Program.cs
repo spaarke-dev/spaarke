@@ -261,8 +261,21 @@ builder.Services.AddSingleton<IResourceNameAvailabilityProbe>(sp =>
 });
 // HANDLER-13 (Wave 2 pre-dispatch remediation 2026-08-27): OpenAI
 // deployment-set auto-recompose seam. Invoked only when
-// BicepInfraDeploy:OpenAiDeploymentSetPolicy = AutoRecompose.
-builder.Services.AddSingleton<IOpenAiDeploymentSetRecomposer, ArmOpenAiDeploymentSetRecomposer>();
+// BicepInfraDeploy:OpenAiDeploymentSetPolicy = AutoRecompose. LIVE
+// production impl (2026-08-27 follow-on to scaffold commit 74197c02e) —
+// reads Azure.ResourceManager.CognitiveServices regional usage via the
+// shared UAMI-pinned TokenCredential singleton, drops zero-TPM pinned
+// models, and returns a preserved-set + operator-visible note. Factory
+// lambda parity with the sibling ARM collaborator registrations above
+// (HANDLER-05 name-availability, upgrade-drift-detector) — one per-
+// registration probe-local ArmClient, no shared ArmClient DI singleton.
+builder.Services.AddSingleton<IOpenAiDeploymentSetRecomposer>(sp =>
+{
+    var credential = sp.GetRequiredService<TokenCredential>();
+    var armClient = new Azure.ResourceManager.ArmClient(credential);
+    var logger = sp.GetRequiredService<ILogger<ArmOpenAiDeploymentSetRecomposer>>();
+    return new ArmOpenAiDeploymentSetRecomposer(armClient, logger);
+});
 builder.Services.AddScoped<H2aBicepInfraDeployHandler>();
 
 // Task 045: H2b AI Search index-provisioning handler + collaborator seams
@@ -519,9 +532,19 @@ builder.Services.AddSingleton<ISecretFreeMarkerApplier>(sp =>
     var logger = sp.GetRequiredService<ILogger<ArmSecretFreeMarkerApplier>>();
     return new ArmSecretFreeMarkerApplier(armClient, registryClient, logger);
 });
-// HANDLER-09 (Wave 2 pre-dispatch remediation 2026-08-27): operator KV
-// RBAC bootstrapper — shared singleton consumed by BOTH H4 and H4-shared.
-builder.Services.AddSingleton<IOperatorKvRbacBootstrapper, ArmOperatorKvRbacBootstrapper>();
+// HANDLER-09 (Wave 2 pre-dispatch remediation 2026-08-27; live impl Wave 2.5
+// 2026-08-27): operator KV RBAC bootstrapper — shared singleton consumed by
+// BOTH H4 and H4-shared. Real Azure.ResourceManager.Authorization
+// RoleAssignmentCollection PUT (replaced the Wave-2 log-and-return-Success
+// scaffold). ArmClient factory-lambda-constructed with the shared UAMI-pinned
+// TokenCredential (parity with sibling H4 collaborators above).
+builder.Services.AddSingleton<IOperatorKvRbacBootstrapper>(sp =>
+{
+    var credential = sp.GetRequiredService<TokenCredential>();
+    var armClient = new Azure.ResourceManager.ArmClient(credential);
+    var logger = sp.GetRequiredService<ILogger<ArmOperatorKvRbacBootstrapper>>();
+    return new ArmOperatorKvRbacBootstrapper(armClient, logger);
+});
 builder.Services.AddScoped<H4KvSecretsPopulationHandler>();
 
 // Task 200: H4-shared handler + two new collaborator seams (source-service

@@ -396,18 +396,17 @@ prereqs:
     remediation: "`az servicebus queue delete` + recreate via Bicep (task 108). WARNING — creation-time-only settings; existing messages lost."
     related_findings: [T108-*, queue-recreate-runbook]
 
-  - id: PRQ-E-13
-    name: "`sprk_dataverseenvironment` placeholder record exists with `sprk_environmentid`"
-    scope: once_per_env  # NOTE: per customer being provisioned; created BEFORE POST /api/runs
-    # (Scope annotation moved to YAML comment 2026-08-27 so validate.ps1 enum check accepts the bare enum value.)
-    frequency: per customer, per new run
-    owner: operator (via skill Step 1 intake — task 203 wires the create step)
-    consequence_of_absence: L2 `POST /api/runs` returns 400 (missing `environmentId`); c6-3-skill-registry-prereq.
-    check_recipe:
-      cli: pac data list --entity sprk_dataverseenvironment --filter "sprk_customerid eq '{customerId}'" --query "[0].sprk_environmentid" -o tsv
-      expect: non-empty GUID
-    remediation: "`pac data create --entity sprk_dataverseenvironment --file placeholder.json` (task 203 authors the placeholder step in skill Step 1)."
-    related_findings: [c6-2-skill-environment-id, c6-3-skill-registry-prereq, T028-registry-poco-extension-owed]
+  # PRQ-05 fix (2026-08-27): PRQ-E-13 DELETED — scope mismatch (declared once_per_env
+  # but references {customerId} that is only known after Step 1 intake, which runs
+  # AFTER Step 0.5 iteration). Also references `pac data list` which is not a valid
+  # pac subcommand at CLI 1.46.
+  #
+  # Placeholder-record verification moves entirely into SKILL.md Step 1f (post-intake
+  # post-placeholder-create verification of the returned sprk_environmentid GUID).
+  # Wave 4 SKILL.md rewrite adds an explicit assertion note in Step 1f. This prereqs.yaml
+  # entry is not the right home for a customer-scoped check.
+  #
+  # See notes/pre-dispatch-audit-punchlist-2026-08-27.md PRQ-05.
 
   - id: PRQ-E-14
     name: OpenAI region availability + model deployability (pre-H2a Bicep deploy)

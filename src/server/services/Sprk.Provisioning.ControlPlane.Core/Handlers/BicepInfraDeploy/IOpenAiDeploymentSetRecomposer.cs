@@ -22,12 +22,13 @@
 // note.
 //
 // PRODUCTION IMPL:
-//   <see cref="ArmOpenAiDeploymentSetRecomposer"/> ships as a Wave 2
-//   scaffold — invocations under AutoRecompose policy return the input
-//   list unchanged with an informational log line. The live TPM-read +
-//   drop logic lands as an incremental change without touching H2a or
-//   the seam (paralleling the HANDLER-07 / HANDLER-08 / HANDLER-09
-//   scaffold-to-production trajectory).
+//   <see cref="ArmOpenAiDeploymentSetRecomposer"/> is the LIVE production
+//   implementation — queries the Azure.ResourceManager.CognitiveServices
+//   regional usage endpoint via <c>SubscriptionResource.GetUsagesAsync</c>
+//   and drops zero-TPM pinned models from the requested set. (The Wave-2
+//   log-and-return scaffold was superseded 2026-08-27 in the same session
+//   as the scaffold commit 74197c02e per the "Wave 2 scope + deviation"
+//   paragraph that explicitly anticipated this follow-on.)
 // -----------------------------------------------------------------------------
 
 using Sprk.Provisioning.ControlPlane.Handlers.RuntimeReferences;

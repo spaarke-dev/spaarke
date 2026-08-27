@@ -799,9 +799,19 @@ public sealed class H2aBicepInfraDeployHandlerTests
         // a Conflict-returning fake explicitly.
         var effectiveNameProbe = nameProbe ?? FakeResourceNameAvailabilityProbe.AllAvailable();
         // HANDLER-13 (Wave 2 pre-dispatch remediation 2026-08-27): default
-        // to the scaffold recomposer. Existing tests use the default
-        // OpenAiDeploymentSetPolicy = Strict which skips the recomposer.
+        // to the live-production recomposer wired against a throw-if-called
+        // fake transport. Existing tests use the default
+        // OpenAiDeploymentSetPolicy = Strict which skips the recomposer, so
+        // the transport is never actually hit; if a regression accidentally
+        // invokes it under a Strict-policy test, the fake handler throws
+        // loudly rather than silently masking a broken code path.
+        var throwingArmClient = ArmSdkTestFakes.NewArmClient(
+            ArmSdkTestFakes.NewHandler(_ =>
+                throw new InvalidOperationException(
+                    "H2a Strict-policy test path invoked the OpenAI deployment-set " +
+                    "recomposer's ARM transport — Strict MUST skip the recomposer.")));
         var effectiveRecomposer = recomposer ?? new ArmOpenAiDeploymentSetRecomposer(
+            throwingArmClient,
             NullLogger<ArmOpenAiDeploymentSetRecomposer>.Instance);
         return new H2aBicepInfraDeployHandler(
             repo, runner, probe, driftDetector, inspector, effectiveNameProbe,
