@@ -14,11 +14,21 @@
 //   H2a (Bicep infra deploy)
 //     ↓
 //     ├── H2b (AI Search indexes)
-//     ├── H4 (KV secrets + T1 patch)
+//     ├── H4-shared (shared-tier KV secrets population — task 200 / F19)
+//     │     │
+//     │     └──┐
+//     │        ↓
+//     ├── H4 (per-tenant KV secrets + T1 patch)
+//     │     │
+//     │     ├──→ H4b (BulkAppSettings — task 201 / F20/F20a; needs H4 + H4-shared)
+//     │     │     │
+//     │     │     └──→ (feeds H9 below)
+//     │     │
 //     │     ↓
 //     │     H3 (Entra app-reg — needs KV for secret storage)
-//     │       ├── H8 (SPE container-type)
-//     │       └── H9 (BFF deploy)
+//     │       ├── H8 (SPE container-type — Graph-based; does NOT need H4-shared / H4b)
+//     │       └── H9 (BFF deploy — needs H3 AND H4b so KV refs + batched
+//     │                app-settings are landed before BFF boot / F20 chain)
 //     └── H5 (Dataverse env create)
 //           ↓
 //           H6 (solution import)
@@ -80,6 +90,21 @@ public sealed class DagAdvancer : IDagAdvancer
     /// <summary>Handler identifier for H4 KV secrets population + T1 patch.</summary>
     public const string HandlerH4 = HandlerIds.H4;
 
+    /// <summary>
+    /// Handler identifier for H4-shared (task 200) — shared-tier KV secrets
+    /// population via source-service SDK extraction. Runs in parallel with H4
+    /// and gates H4b's batched app-settings landing (which in turn gates H9).
+    /// </summary>
+    public const string HandlerH4Shared = HandlerIds.H4Shared;
+
+    /// <summary>
+    /// Handler identifier for H4b (task 201) — BulkAppSettings thin wrapper.
+    /// Runs AFTER H4 + H4-shared, BEFORE H9; kills the F20/F20a progressive
+    /// fail-fast chain by landing ALL required BFF app-settings in ONE
+    /// batched call → ONE App Service restart cycle before BFF zip-deploy.
+    /// </summary>
+    public const string HandlerH4b = HandlerIds.H4b;
+
     /// <summary>Handler identifier for H5 Dataverse env creation.</summary>
     public const string HandlerH5 = HandlerIds.H5;
 
@@ -132,12 +157,14 @@ public sealed class DagAdvancer : IDagAdvancer
             [HandlerH2a] = new[] { HandlerH1 },
             [HandlerH2b] = new[] { HandlerH2a },
             [HandlerH4] = new[] { HandlerH2a },
+            [HandlerH4Shared] = new[] { HandlerH2a },                       // Task 200 / F19 — shared-KV population runs parallel with H4.
             [HandlerH5] = new[] { HandlerH2a },
             [HandlerH3] = new[] { HandlerH4 },                              // Needs KV for secret storage.
+            [HandlerH4b] = new[] { HandlerH4, HandlerH4Shared },            // Task 201 / F20 — batched app-settings needs BOTH per-tenant + shared KV populated.
             [HandlerH6] = new[] { HandlerH5 },
             [HandlerH7] = new[] { HandlerH6 },
-            [HandlerH8] = new[] { HandlerH3 },
-            [HandlerH9] = new[] { HandlerH3 },                              // Also needs H4 KV transitively via H3.
+            [HandlerH8] = new[] { HandlerH3 },                              // H8 is Graph-based SPE container-type creation; does NOT consume shared-BFF KV — no H4b/H4-shared dep.
+            [HandlerH9] = new[] { HandlerH3, HandlerH4b },                  // EXEC-01: BFF boot needs KV refs + batched app-settings; gate on H4b (which transitively gates on H4 + H4-shared).
             [HandlerH10] = new[] { HandlerH7 },
             [HandlerH11] = new[] { HandlerH10 },
             [HandlerH12a] = new[] { HandlerH11 },
