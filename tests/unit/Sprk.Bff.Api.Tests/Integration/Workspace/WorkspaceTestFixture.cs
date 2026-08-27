@@ -16,6 +16,7 @@ using Microsoft.Extensions.Options;
 using Moq;
 using Spaarke.Dataverse;
 using Sprk.Bff.Api.Services.Workspace;
+using Sprk.Bff.Api.Services.Identity;
 
 namespace Sprk.Bff.Api.Tests.Integration.Workspace;
 
@@ -266,6 +267,16 @@ public class WorkspaceTestFixture : WebApplicationFactory<Program>
 
             services.RemoveAll<IDataverseService>();
             services.AddSingleton(dataverseServiceMock.Object);
+
+            // PortfolioService now translates the caller's Entra oid into the Dataverse systemuserid
+            // that `ownerid` actually holds, and fails CLOSED when the caller cannot be resolved —
+            // deliberately, because the previous behaviour was to DROP the ownership filter and return
+            // every active matter in the org to any caller. The mocked IDataverseService above answers
+            // matter queries, not systemuser lookups, so without this the real resolver returns null and
+            // these tests would assert against an empty portfolio (passing for the wrong reason).
+            services.RemoveAll<ISystemUserIdentityResolver>();
+            services.AddSingleton<ISystemUserIdentityResolver>(
+                new FixtureSystemUserIdentityResolver(WorkspaceTestConstants.TestUserId));
         });
     }
 
