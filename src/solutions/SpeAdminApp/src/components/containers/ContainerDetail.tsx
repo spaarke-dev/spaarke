@@ -88,6 +88,11 @@ export interface ContainerDetailProps {
   onClose: () => void;
   /** Optional callback to open the container in the file browser. */
   onBrowseFiles?: (containerId: string, containerName?: string) => void;
+  /**
+   * Pane height in pixels, owned by the host's `useResizablePane` so the splitter above can drag
+   * it. Omitted falls back to the CSS default in `styles.panel`.
+   */
+  paneHeight?: number;
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -113,6 +118,27 @@ function formatBytes(bytes: number | undefined): string {
   }
   return `${value.toFixed(1)} ${units[unitIndex]}`;
 }
+
+/**
+ * Renders a byte count, or an explicit "Not reported" when Graph did not supply one (FR-E02).
+ *
+ * The distinction is load-bearing and this project has paid for it twice: an em-dash reads as "the
+ * column is broken" and a substituted `0 B` reads as "this container is empty", which is a different
+ * and false claim. Null means we were not told (spec NFR-06).
+ */
+const StorageValue: React.FC<{ bytes: number | null | undefined }> = ({ bytes }) =>
+  bytes === undefined || bytes === null ? (
+    <Tooltip
+      content="Microsoft Graph did not report a figure for this container. This is not the same as zero."
+      relationship="label"
+    >
+      <Text italic style={{ color: tokens.colorNeutralForeground3 }}>
+        Not reported
+      </Text>
+    </Tooltip>
+  ) : (
+    <Text>{formatBytes(bytes)}</Text>
+  );
 
 /** Format an ISO date string to a localised short date + time. */
 function formatDateTime(iso: string | undefined): string {
@@ -151,26 +177,27 @@ function statusBadgeColor(
 // ─────────────────────────────────────────────────────────────────────────────
 
 const useStyles = makeStyles({
-  /** Translucent backdrop covering the page behind the panel. */
-  backdrop: {
-    position: "fixed",
-    inset: 0,
-    zIndex: 200,
-    backgroundColor: tokens.colorBackgroundOverlay,
-  },
-
-  /** Panel container — fixed right-side overlay, 420px wide. */
+  /**
+   * Panel container — a docked BOTTOM pane, full width of the page.
+   *
+   * 🔴 Changed 2026-08-26 (UAT), matching `ContainerTypeDetail`. This was a 420px fixed overlay on
+   * the right with a modal backdrop. The same pattern is now used on both list screens so it is
+   * learned once: select a row, its detail docks beneath the list, the list stays live above it.
+   *
+   * Sized by the flex column in `ContainersPage` — hence `flex: 0 0 auto` rather than `position:
+   * fixed`. Renders null when no container is selected, so the list reclaims the height on close.
+   */
   panel: {
-    position: "fixed",
-    top: 0,
-    right: 0,
-    bottom: 0,
-    width: "420px",
-    zIndex: 201,
-    boxShadow: tokens.shadow64,
+    flex: "0 0 auto",
+    height: "45%",
+    minHeight: "260px",
     display: "flex",
     flexDirection: "column",
     backgroundColor: tokens.colorNeutralBackground1,
+    borderTopWidth: "1px",
+    borderTopStyle: "solid",
+    borderTopColor: tokens.colorNeutralStroke2,
+    boxShadow: tokens.shadow16,
   },
 
   /** Header rendered inside SidePaneShell's header slot. */
@@ -458,10 +485,39 @@ const DetailsTab: React.FC<{ container: Container }> = ({ container }) => {
       </Text>
       <Divider />
       <PropertyRow label="Status">
-        <Badge color={statusBadgeColor(container.status)} appearance="filled" size="small">
-          {container.status.charAt(0).toUpperCase() + container.status.slice(1)}
-        </Badge>
+        {/*
+          Graph DOES return status on the detail fetch (measured live 2026-08-27) — unlike the list,
+          where it is always absent. So this normally renders a real badge. The absent branch is not
+          defensive padding: until 2026-08-27 the server discarded Graph's value and substituted
+          "active" on every path, so this row asserted "Active" for containers Graph had reported as
+          inactive. If the value is ever genuinely missing, saying so beats inventing one.
+        */}
+        {container.status ? (
+          <Badge color={statusBadgeColor(container.status)} appearance="filled" size="small">
+            {container.status.charAt(0).toUpperCase() + container.status.slice(1)}
+          </Badge>
+        ) : (
+          <Text italic style={{ color: tokens.colorNeutralForeground3 }}>
+            Not reported
+          </Text>
+        )}
       </PropertyRow>
+      {/* Archive state (FR-E01) — a separate dimension from Status; shown only when there is one. */}
+      {container.archiveStatus && (
+        <PropertyRow label="Archive">
+          <Badge
+            color={container.archiveStatus === "reactivating" ? "informative" : "warning"}
+            appearance="outline"
+            size="small"
+          >
+            {container.archiveStatus === "fullyArchived"
+              ? "Archived"
+              : container.archiveStatus === "recentlyArchived"
+                ? "Archiving…"
+                : "Restoring…"}
+          </Badge>
+        </PropertyRow>
+      )}
       <PropertyRow label="Versioning">
         <Text>{container.isItemVersioningEnabled ? "Enabled" : "Disabled"}</Text>
       </PropertyRow>
@@ -486,9 +542,64 @@ const DetailsTab: React.FC<{ container: Container }> = ({ container }) => {
         Storage
       </Text>
       <Divider />
+      {/*
+        Storage (FR-E02, task 051).
+
+        `quota.used` is preferred over `storageUsedInBytes` here because Graph does NOT return
+        storageUsedInBytes on a single-container GET at all — it is beta-only AND list-only (tasks
+        020/024). The quota facet, expanded from the drive, is the only consumption figure this view
+        can get. Falls back to storageUsedInBytes so the row still works if the drive expand is ever
+        dropped from the response.
+      */}
       <PropertyRow label="Storage Used">
-        <Text>{formatBytes(container.storageUsedInBytes)}</Text>
+        <StorageValue
+          bytes={container.quota?.used ?? container.storageUsedInBytes}
+        />
       </PropertyRow>
+
+      {/*
+        The ceiling. Deliberately labelled "Storage Limit (per container)" with an explanatory note,
+        NOT "Storage Limit for this container".
+
+        Graph has no per-container ceiling: `maxStoragePerContainerInBytes` lives on the container
+        TYPE and applies uniformly to every container of that type. A container-scope PATCH returns
+        200 and silently discards the value (measured live 2026-08-27, notes/task-051-findings.md §1).
+        So this value is identical across every container here, and presenting it as this container's
+        own cap would invite an admin to look for an edit control that cannot exist.
+      */}
+      {container.quota?.total !== undefined && container.quota?.total !== null && (
+        <PropertyRow label="Storage Limit">
+          <div>
+            <Text>{formatBytes(container.quota.total)}</Text>
+            <br />
+            <Text
+              size={200}
+              italic
+              style={{ color: tokens.colorNeutralForeground3 }}
+            >
+              Set on the container type — applies to every container of this type
+            </Text>
+          </div>
+        </PropertyRow>
+      )}
+
+      {container.quota?.remaining !== undefined && container.quota?.remaining !== null && (
+        <PropertyRow label="Remaining">
+          {/* Graph's own figure, not total − used: deleted items still count against the quota. */}
+          <Text>{formatBytes(container.quota.remaining)}</Text>
+        </PropertyRow>
+      )}
+
+      {Boolean(container.quota?.deleted) && (
+        <PropertyRow label="Held by deleted items">
+          <Tooltip
+            content="Deleted items still count against the storage quota until they are permanently removed."
+            relationship="label"
+          >
+            <Text>{formatBytes(container.quota?.deleted ?? undefined)}</Text>
+          </Tooltip>
+        </PropertyRow>
+      )}
 
       <ComplianceSection webUrl={container.webUrl} />
     </div>
@@ -509,6 +620,7 @@ export const ContainerDetail: React.FC<ContainerDetailProps> = ({
   containerId,
   onClose,
   onBrowseFiles,
+  paneHeight,
 }) => {
   const styles = useStyles();
   const { selectedConfig } = useBuContext();
@@ -682,16 +794,14 @@ export const ContainerDetail: React.FC<ContainerDetailProps> = ({
 
   return (
     <>
-      {/* Translucent backdrop — click to close */}
+      {/* Panel — docked beneath the list. No backdrop, and no longer `aria-modal`: the grid above
+          stays both interactive and reachable by assistive tech while this is open. */}
       <div
-        className={styles.backdrop}
-        onClick={onClose}
-        role="presentation"
-        aria-hidden="true"
-      />
-
-      {/* Panel */}
-      <div className={styles.panel} role="dialog" aria-modal="true" aria-label="Container details">
+        className={styles.panel}
+        style={paneHeight !== undefined ? { height: `${paneHeight}px` } : undefined}
+        role="complementary"
+        aria-label="Container details"
+      >
         <SidePaneShell header={panelHeader} footer={panelFooter}>
           {/* Tab list */}
           <TabList

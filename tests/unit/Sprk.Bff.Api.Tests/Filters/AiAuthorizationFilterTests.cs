@@ -34,15 +34,31 @@ public class AiAuthorizationFilterTests
     private static AuthorizationResult DeniedResult(string reason = "NO_ACCESS") =>
         AuthorizationResult.Denied(reason);
 
-    private static ClaimsPrincipal CreateUser(string userId = "user-123")
+    /// <summary>
+    /// A realistic authenticated caller: the supplied id is issued as the Entra <c>oid</c>, and a
+    /// DIVERGENT, sub-shaped <see cref="ClaimTypes.NameIdentifier"/> is issued alongside it.
+    /// </summary>
+    /// <remarks>
+    /// This helper used to mint <see cref="ClaimTypes.NameIdentifier"/> ONLY — a principal shape no
+    /// Entra caller ever has, since a real token always carries <c>oid</c> and routes <c>sub</c> to
+    /// NameIdentifier under inbound claim mapping. Because the filter read NameIdentifier, the tests
+    /// passed; because the stub keyed on the same string, they could not tell a correct read from a
+    /// broken one. The divergent value is load-bearing: if the resolver ever falls back to
+    /// NameIdentifier again, it returns SubClaim, the stub does not match, and these tests fail.
+    /// </remarks>
+    private static ClaimsPrincipal CreateUser(string userId = "9d4f7a12-6c3b-4e58-b0d1-2a7f5e9c4813")
     {
         var claims = new List<Claim>
         {
-            new(ClaimTypes.NameIdentifier, userId)
+            new("oid", userId),
+            new(ClaimTypes.NameIdentifier, SubClaim)
         };
         var identity = new ClaimsIdentity(claims, "TestAuth");
         return new ClaimsPrincipal(identity);
     }
+
+    /// <summary>Entra's pairwise <c>sub</c> — never a GUID, never a systemuser match.</summary>
+    private const string SubClaim = "d12L59FRq8kZ0m2Xr7bTn4wPqLzYhVcJ8sNdEuRkjg";
 
     private static ClaimsPrincipal CreateAnonymousUser()
     {

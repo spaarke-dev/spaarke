@@ -15,51 +15,130 @@
 #   sidecar's IExchangePolicyApplier seam is the R22 migration point for the
 #   day (if ever) Microsoft ships a REST equivalent.
 #
-# What this image deliberately does NOT contain (Trivy surface minimization):
-#   - NO Az / Az.* modules
-#   - NO Azure CLI (`az`)
-#   - NO Power Platform CLI (`pac`)
-#   - NO .NET SDK / runtime (`dotnet`)
-#   - NO Python / Node
-# Attack surface = pwsh runtime + one signed Microsoft PowerShell module.
+# Attack surface = .NET runtime + pwsh + one signed Microsoft PowerShell module.
+# Deliberately absent: Az / Az.* modules, Azure CLI, Power Platform CLI,
+# Python, Node, and the .NET SDK (present only in the discarded build stage).
 #
-# Size target (design.md §4.2a): ~200-230 MB compressed. Ceiling 250 MB.
-# Not the rejected "~50 MB" aspiration — that floor is not achievable with
-# the EXO module baked in, and DS-1b §3 explicitly rejects it.
-#
-# Build: monthly rebuild cadence (pwsh + one signed module — quiet CVE loop,
-# not az CLI's Python tree). CI: task 115 authors the GitHub Actions workflow
-# (Trivy-gated push to ACR).
+# Size: ceiling 250 MB compressed, enforced by the CI workflow's size step.
 # -----------------------------------------------------------------------------
 
-# Base: pwsh 7.4 on Mariner 2.0 — signed Microsoft base image, security-patched
-# monthly, no distro package manager surface beyond `tdnf` (Mariner default).
-# Compressed size ~110-130 MB (per DS-1b §3 measurement).
-FROM mcr.microsoft.com/powershell:7.4-mariner-2.0
+# =============================================================================
+# WHY THIS IS NOT A `mcr.microsoft.com/powershell:*` BASE  (rewritten 2026-08-27)
+# =============================================================================
+# The image previously used `mcr.microsoft.com/powershell:7.4-mariner-2.0`, whose
+# header claimed "no .NET runtime" and "security-patched monthly". Both had
+# stopped being true:
+#
+#   * It DID ship a .NET runtime. PowerShell 7 IS a .NET application, so the base
+#     necessarily carries one — .NET 8.0.10, months behind. Trivy found 28
+#     HIGH/CRITICAL there, and essentially nowhere else. The "Trivy surface
+#     minimization" comment listed `dotnet` as excluded while it was in fact the
+#     entire vulnerability surface.
+#   * Mariner 2.0 is END OF LIFE. MCR publishes a `7.4-mariner-2.0-EOL` tag
+#     beside the one we pinned. An EOL base accumulates unfixed CVEs by
+#     definition, so the monthly rebuild cadence was pulling nothing.
+#
+# The obvious fix — bump to `powershell:7.4-azurelinux-3.0` — buys very little.
+# The PowerShell base lines map onto .NET releases:
+#
+#     pwsh 7.4  ->  .NET 8   (EOL 2026-11-10 — weeks away; the very deadline
+#                             that drove this repo's dotnet-10-upgrade-r1)
+#     pwsh 7.5  ->  .NET 9   (STS, an even shorter runway)
+#     pwsh 7.6  ->  .NET 10  (LTS) — NO base image published for it
+#
+# So every available `powershell:*` tag lands on a runtime that is already EOL or
+# about to be, and we would be back here within months — the exact churn this
+# change is meant to end.
+#
+# Instead: base on the .NET 10 LTS runtime image directly and install PowerShell
+# 7.6 as a dotnet tool on top. That inverts the dependency — we pick the runtime
+# (supported to Nov 2028) and layer pwsh onto it, rather than accepting whichever
+# runtime a pwsh base image happens to carry. It also puts the sidecar on the
+# SAME .NET 10 LTS the rest of the estate migrated to, so there is one runtime
+# story instead of two.
+#
+# Revisit when Microsoft publishes a `powershell:7.6-azurelinux-3.0` base: at
+# that point a single-stage FROM may be simpler than this two-stage build. It is
+# not a correctness issue either way.
+# =============================================================================
+
+# -----------------------------------------------------------------------------
+# Stage 1 — acquire PowerShell as a dotnet tool.
+#
+# `dotnet tool install` is an SDK command, so it needs the SDK image; the SDK is
+# discarded with this stage and never reaches the final image. --tool-path (not
+# --global) keeps the install location explicit rather than $HOME-dependent, so
+# it does not matter which user the runtime image runs as.
+#
+# PINNED, never floating — same supply-chain rule the EXO module pin follows.
+# The package is a signed Microsoft NuGet artifact.
+# -----------------------------------------------------------------------------
+FROM mcr.microsoft.com/dotnet/sdk:10.0-azurelinux3.0 AS pwsh-tool
+
+ARG PWSH_VERSION=7.6.5
+
+RUN dotnet tool install --tool-path /opt/powershell PowerShell --version ${PWSH_VERSION}
+
+# -----------------------------------------------------------------------------
+# Stage 2 — runtime image.
+# -----------------------------------------------------------------------------
+FROM mcr.microsoft.com/dotnet/runtime:10.0-azurelinux3.0
+
+COPY --from=pwsh-tool /opt/powershell /opt/powershell
+
+# pwsh on PATH for the ENTRYPOINT and for the module install below.
+ENV PATH="/opt/powershell:${PATH}"
+
+# Modules live at a fixed path we own, rather than inside the tool's
+# version-stamped .store/ directory (which would move on every PWSH_VERSION bump).
+# PowerShell adds its own $PSHOME modules to the search path at startup, so
+# setting this does not hide the built-ins.
+ENV PSModulePath="/opt/spaarke/psmodules"
 
 # -----------------------------------------------------------------------------
 # ExchangeOnlineManagement module — PINNED (never `latest`).
 #
 # Pin rationale: the sidecar's H14a script relies on stable Connect-ExchangeOnline
 # parameter surface (specifically -Certificate accepting X509Certificate2).
-# Any pin bump is a coordinated PR (task 115's CI pins the same version for
-# supply-chain integrity), NOT a passive `Update-Module` at build time.
+# Any pin bump is a coordinated PR, NOT a passive `Update-Module` at build time.
 #
-# Pin: 3.5.1 (2024-05 release, stable -Certificate mode support). CI (task 115)
-# will verify the pinned version resolves on rebuild; a bump requires an
-# explicit code change here + a smoke re-run of task 162's live verification.
+# Pin: 3.5.1 (2024-05 release, stable -Certificate mode support).
 # -----------------------------------------------------------------------------
 ARG EXO_MODULE_VERSION=3.5.1
 
-# Install to a well-known path so Listener.ps1 can Import-Module deterministically.
-# Save-Module places the module at <path>/ExchangeOnlineManagement/<version>/.
-# Adds ~70-90 MB compressed (per DS-1b §3 measurement).
-RUN pwsh -NoProfile -NonInteractive -Command \
+RUN mkdir -p /opt/spaarke/psmodules \
+    && pwsh -NoProfile -NonInteractive -Command \
         "Set-PSRepository -Name PSGallery -InstallationPolicy Trusted; \
          Save-Module -Name ExchangeOnlineManagement \
                      -RequiredVersion ${EXO_MODULE_VERSION} \
-                     -Path /opt/microsoft/powershell/7/Modules \
+                     -Path /opt/spaarke/psmodules \
                      -Force"
+
+# -----------------------------------------------------------------------------
+# BUILD-TIME CONTRACT CHECK — added 2026-08-27 with the base change.
+#
+# The two things this rewrite could plausibly break are module RESOLUTION (the
+# module path moved off the pwsh base image's /opt/microsoft/... layout) and
+# EXO 3.5.1's COMPATIBILITY with pwsh 7.6. Both would otherwise surface only at
+# runtime, inside a sitecontainer, during a real provisioning run — the worst
+# place to discover them.
+#
+# Asserting here turns both into a red CI build instead. This does NOT replace
+# the task-162 live verification, which is the only thing that can prove
+# Connect-ExchangeOnline actually authenticates against real Exchange; it just
+# means a broken image cannot reach that stage.
+# -----------------------------------------------------------------------------
+RUN pwsh -NoProfile -NonInteractive -Command \
+        "\$ErrorActionPreference = 'Stop'; \
+         Import-Module ExchangeOnlineManagement; \
+         if (-not (Get-Command Connect-ExchangeOnline -ErrorAction SilentlyContinue)) { \
+             throw 'Connect-ExchangeOnline not found after Import-Module'; \
+         } \
+         \$p = (Get-Command Connect-ExchangeOnline).Parameters; \
+         if (-not \$p.ContainsKey('Certificate')) { \
+             throw '-Certificate parameter absent; the sidecar auth mode depends on it'; \
+         } \
+         Write-Host \"OK: pwsh \$(\$PSVersionTable.PSVersion), EXO module resolved, -Certificate present\""
 
 # -----------------------------------------------------------------------------
 # Application layout

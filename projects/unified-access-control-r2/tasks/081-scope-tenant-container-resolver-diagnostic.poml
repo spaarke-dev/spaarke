@@ -1,0 +1,226 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="081" project="unified-access-control-r2">
+  <metadata>
+    <title>Classify the caller, then scope the tenant-container-resolver diagnostic — the query string currently overrides the JWT tid claim</title>
+    <phase>0c Secure Documents — Wave 1 (added mid-wave)</phase>
+    <status>pending</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Cross-tenant read on an authenticated BFF route, plus a new shared authorization primitive in `Spaarke.Core.Auth` that the unified evaluator will consume. Tenant isolation is the one boundary this platform cannot get wrong.</rigor-reason>
+    <model-tier>opus</model-tier>
+    <model-tier-reason>REVISED 2026-08-26. The original said "sonnet — the fix is small and unambiguous"; that was true of the *rejected* fix (option A, attach the existing tenant filter). The chosen fix creates a shared classification seam in `Spaarke.Core.Auth` and turns on a claim-semantics subtlety (see `background` § THE TRAP) where the obvious implementation is silently wrong. Security + shared-seam = opus per root CLAUDE.md §8.5.</model-tier-reason>
+    <effort>xhigh</effort>
+    <effort-reason>Small surface, but Step 0 is empirical brownfield work — you must determine what the L2 UAMI token actually carries before choosing the discriminator, and the whole design hangs on that answer.</effort-reason>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Adds a file under `Spaarke.Core/Auth/**`, which this project's CLAUDE.md marks `parallel-safe:false` unconditionally — two agents editing an authorization path concurrently produces a silent merge mess. Also edits BFF middleware.</parallel-reason>
+    <deps></deps>
+    <tags>bff-api, api, auth, security, tenant-isolation, spaarke-core</tags>
+    <estimated-effort>3-5 hours</estimated-effort>
+    <origin>Found 2026-08-26 by task 080 while reconciling task 074's endpoint-file census after merging 285 commits of master. The census forced classification of two new route-registering files; reading one of them surfaced this. NOT found by any route inventory — the file did not exist when the four prior enumerations ran.</origin>
+    <revision>REWRITTEN 2026-08-26 after the escalation trigger fired and the owner chose **option B (classify the caller)**. The prior version prescribed option A (`tid` must match) which BREAKS the shipped L2 probe — see `notes/task-081-tenant-diagnostic-BLOCKED.md`. Two factual errors in the intervening handoff are corrected in `background` § WHAT ALREADY EXISTS; do not carry them forward.</revision>
+  </metadata>
+
+  <prompt>`GET /api/diagnostics/tenant-container-resolver` reads `tenantId` from the query string and falls back to the caller's JWT `tid` claim only when the query parameter is absent. The caller-supplied value is passed straight to `ITenantContainerResolver.ResolveAsync`, with no check on WHO is entitled to ask about that tenant. Asking about a foreign tenant is a legitimate OPERATOR capability here — so the fix is not "bind to the claim", it is "establish what kind of caller this is, and let only operators name a tenant."</prompt>
+
+  <role>SPAARKE BFF security engineer.</role>
+
+  <goal>Only an allow-listed operator service principal can name a `tenantId` on this route. Every user-delegated caller is denied outright. The L2 H13 I4 probe keeps working, untouched, on its existing Managed Identity. The caller-kind classification is a reusable primitive in `Spaarke.Core.Auth`, not an inline claim read.</goal>
+
+  <context>
+    <background>## THE DEFECT
+
+`src/server/api/Sprk.Bff.Api/Endpoints/Diagnostics/TenantContainerResolverEndpoint.cs:89-94`:
+
+```csharp
+var tenantId = httpContext.Request.Query["tenantId"].FirstOrDefault();
+if (string.IsNullOrWhiteSpace(tenantId))
+{
+    tenantId = httpContext.User?.FindFirst("tid")?.Value ?? ...;   // FALLBACK, not authority
+}
+...
+result = await resolver.ResolveAsync(tenantId, cancellationToken);  // caller-supplied, unchecked
+```
+
+The route carries `RequireAuthorization()` + `RequireRateLimiting("graph-read")` and nothing else. Any
+authenticated Spaarke end user can pass `?tenantId={someone-else}` and receive that tenant's SPE
+container id.
+
+**Two distinct disclosures, and the second is easy to miss:**
+
+1. **The container id** — the handle SPE operations are addressed by. Not catastrophic alone, but it is
+   not the caller's.
+2. **A tenant-enumeration oracle** — the documented mapping is "tenant not served by this stamp → 400"
+   while a served tenant returns 200, so the STATUS CODE ALONE tells an authenticated caller which
+   tenants this stamp hosts. That is customer-list disclosure, and it survives removing the container id
+   from the payload.
+
+**Why it passed review.** The file's own doc comment (line 32-33) asserts *"missing/invalid JWT → 401 via
+standard auth middleware (`RequireAuthorization` — parity with all other BFF endpoints)"*. True, and not
+the point: `RequireAuthorization()` establishes THAT the caller is authenticated, never WHICH tenant's
+data they may ask for. Same shape as this project's other findings — an authorization statement that is
+accurate about the wrong question.
+
+## WHY OPTION A (the previously prescribed fix) IS REJECTED
+
+Making the JWT `tid` the authority is a one-line change (`AddTenantAuthorizationFilter`, which already
+reads `tenantId` from query parameters — `Api/Filters/TenantAuthorizationFilter.cs:135`). **It denies the
+shipped L2 probe 100% of the time.**
+`src/server/services/Sprk.Provisioning.ControlPlane.Core/Handlers/E2EAcceptance/SpeContainerResolverInvariantProbe.cs`
+is, by design, ONE tenant's identity asking about ANOTHER tenant's resolution:
+
+- Its ADR-alignment header: *"ADR-028 UAMI outbound: probe uses the shared TokenCredential singleton
+  (DefaultAzureCredential pinned to L2 UAMI) — parity with sibling probes 173 (I2) and 174 (I3)"* → an
+  **app-only machine identity in the L2 control-plane tenant**.
+- It sends `?tenantId={request.TenantId}` → the **customer** tenant.
+- Its verdict *depends* on the endpoint echoing the requested tenant back.
+
+So the bug is not that the parameter exists. **The bug is that nothing distinguishes the operator from an
+end user.** Option C (move the probe to a named inbound API key) was considered and rejected: it swaps a
+Managed Identity for a static shared key, makes this probe the odd one out in a fleet whose own comments
+cite "parity with sibling probes", and destroys attribution — an API key says "a holder of the key", MI
+says *which principal* performed a cross-tenant read, which on this route is the log line you most want.
+
+## WHAT ALREADY EXISTS — read this before writing anything (CLAUDE.md §11)
+
+⚠️ **Two claims in the 2026-08-26 handoff were WRONG. Verified false; do not act on them:**
+
+- ❌ *"There are zero reads of `idtyp`/`appid` as claims anywhere in `src/server`."* **False.**
+- ❌ *"`src/server/api/Sprk.Bff.Api/CLAUDE.md` falsely claims `AuditEnrichmentMiddleware` enriches with
+  `appid`."* **False — that doc is correct.** No doc fix needed there.
+
+What is actually there: `src/server/api/Sprk.Bff.Api/Infrastructure/Logging/AuditEnrichmentMiddleware.cs`
+already reads `appid`/`azp` (:102-104) and already classifies caller kind (:129-145,
+`IsOnBehalfOfFlow` — reads `idtyp`, `scp`, `oid`). It is a **`private static` method inside a logging
+middleware**, so it is unreachable, and it answers a *logging* question ("is this OBO-eligible?"), not an
+authorization one. It has **no tests and no other consumers** (verified by grep), so promoting it is
+low-risk.
+
+Per CLAUDE.md §11 this task must **promote and extend that logic into one classifier that both consumers
+share** — not add a second, parallel claim reader. After this task there must be exactly ONE place in the
+codebase that decides what kind of caller a `ClaimsPrincipal` is.
+
+## THE TRAP — the obvious implementation is silently wrong
+
+`appid` / `azp` is **present in user-delegated tokens too**. It identifies the CLIENT APPLICATION that
+requested the token, not the caller's kind. So this gate:
+
+```csharp
+if (allowedAppIds.Contains(appId)) { /* may name any tenant */ }   // WRONG
+```
+
+...lets a **human** signed into the L2 control-plane's app registration name an arbitrary tenant. The
+allow-list must be satisfiable ONLY by a token no interactive user can hold. The gate is therefore a
+**conjunction**: a POSITIVE app-only determination AND `appid` ∈ allow-list.
+
+And "positive" is load-bearing: do NOT infer app-only from the *absence* of `scp`/`oid`, because a
+malformed or unexpected token then classifies as a service principal. Absence ⇒ `Indeterminate` ⇒ deny.
+`IsOnBehalfOfFlow`'s `hasDelegatedScope && hasUserOid` shape is acceptable for logging (two-valued,
+biased toward "not OBO") and is NOT acceptable here — that bias points the wrong way for authorization.
+
+## WHY THIS IS NOT THROWN AWAY BY THE UNIFIED EVALUATOR
+
+Two separable pieces with different lifespans:
+
+- **The classification primitive is PERMANENT.** The evaluator cannot decide whether ADR-034 membership
+  derivation applies without knowing whether the caller is a service principal or a person. It needs
+  this seam regardless of task 081.
+- **The policy** ("these appids may ask about another tenant, on this route") is route-specific and
+  small. Tenant-scope authority is **upstream of** the evaluator: the evaluator answers
+  `(recordId → rights)` and never "which tenant may you ask about." Different axis, not duplicated work.
+
+**Hence the binding placement constraint below.** `Spaarke.Core` cannot reference BFF `Infrastructure/**`
+(one-way layering, enforced by `tests/Spaarke.ArchTests/LayerDependencyTests.cs`). Put the primitive in
+BFF `Infrastructure/Auth/` and the evaluator — which lives in `Spaarke.Core/Auth/AuthorizationService.cs`
+— cannot consume it, and someone rebuilds it. This is exactly the trap that shrank task 032's scope when
+`CallerRecordAccessProbe` landed BFF-side.
+
+`Spaarke.Core/Auth/` already holds `AuthorizationService.cs`, `IAuthorizationRule.cs`,
+`OperationAccessPolicy.cs`. `Spaarke.Core.csproj` is `net10.0` with no AspNetCore FrameworkReference —
+`System.Security.Claims.ClaimsPrincipal` is BCL, so **no new package reference is needed**. Verify that.
+</background>
+    <relevant-files>
+      <file role="create">src/server/shared/Spaarke.Core/Auth/CallerIdentity.cs — the classification primitive (name at your discretion; MUST live in this directory / the `Spaarke.Core.Auth` namespace)</file>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Endpoints/Diagnostics/TenantContainerResolverEndpoint.cs — the gate + the two stale doc claims (class summary line 32-33; `WithDescription` line 59-61)</file>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Infrastructure/Logging/AuditEnrichmentMiddleware.cs — `IsOnBehalfOfFlow` becomes a thin call to the new primitive; ONE classifier, two consumers</file>
+      <file role="reference">src/server/services/Sprk.Provisioning.ControlPlane.Core/Handlers/E2EAcceptance/SpeContainerResolverInvariantProbe.cs — the caller that must keep working. DO NOT EDIT (another project's active worktree)</file>
+      <file role="reference">src/server/api/Sprk.Bff.Api/Api/Filters/TenantAuthorizationFilter.cs — the existing tenant-match filter; option A. Read it to understand why it is not the answer here</file>
+      <file role="reference">src/server/shared/Spaarke.Core/Auth/AuthorizationService.cs — the evaluator that will consume the primitive; place the new type beside it</file>
+      <file role="reference">tests/Spaarke.ArchTests/LayerDependencyTests.cs — the fitness function enforcing the layering that dictates placement</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="project" priority="binding">**PLACEMENT.** The caller-kind primitive MUST live in `src/server/shared/Spaarke.Core/Auth/` (namespace `Spaarke.Core.Auth`). NOT in BFF `Infrastructure/Auth/`, NOT inline in the endpoint. If placement in `Spaarke.Core` turns out to require a new package reference or an AspNetCore FrameworkReference, STOP and escalate rather than relocating it to the BFF.</constraint>
+    <constraint source="project" priority="binding">**ONE CLASSIFIER.** After this task, exactly one place in the codebase decides caller kind from a `ClaimsPrincipal`. `AuditEnrichmentMiddleware.IsOnBehalfOfFlow` must delegate to it, not duplicate it. A second parallel claim reader fails this task.</constraint>
+    <constraint source="ADR-003">Fail closed. `Indeterminate` classification → DENY. Never infer app-only from the absence of a user claim.</constraint>
+    <constraint source="project">**Deny user principals outright.** A provisioning invariant diagnostic has no end-user use case. Do NOT implement "a user may ask about their own tenant" — that is the rejected option A's shape, it adds reachable surface for zero benefit, and it re-opens the enumeration oracle to every authenticated user for their own stamp. This is stricter than the ORIGINAL version of this POML prescribed; the change is deliberate.</constraint>
+    <constraint source="project">**An empty or absent allow-list DENIES everyone.** "Empty means allow all" is the classic failure of this pattern, and it fails open on a fresh environment where config has not been set yet.</constraint>
+    <constraint source="project">**The allow-list must not be satisfiable by a user-delegated token.** See `background` § THE TRAP. `appid` alone is insufficient; the check is a conjunction with a positive app-only determination.</constraint>
+    <constraint source="project">**Do NOT edit the L2 probe.** Option B's whole advantage over option C is that the probe is untouched — it keeps its Managed Identity and its `?tenantId=` convention. `customer-provisioning-orchestration-r1` owns that file and has an active worktree. If you find yourself needing to change it, the design has drifted — escalate.</constraint>
+    <constraint source="ADR-028">No new `.WithClientSecret(...)` site, and no inbound static key. The operator identity stays a Managed Identity.</constraint>
+    <constraint source="ADR-010">No interface for the primitive unless a second implementation genuinely exists. A static classifier or a sealed type is the expected shape.</constraint>
+    <constraint source="CLAUDE.md §10">BFF-touching: state the Placement Justification in the PR, verify publish size ≤60 MB (baseline ~44.96 MB incl. PDBs), run `dotnet list package --vulnerable --include-transitive`, and add/update tests under `tests/unit/Sprk.Bff.Api.Tests/`.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/unified-access-control-r2/notes/task-081-tenant-diagnostic-BLOCKED.md</file>
+      <file>projects/unified-access-control-r2/notes/task-080-cross-record-search.md</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+      <file>src/server/shared/CLAUDE.md</file>
+    </files>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="0">**Empirically determine the discriminator.** Decode a real L2 UAMI token (or the probe's token-acquisition path + Entra docs for the `DefaultAzureCredential` client-credentials flow against a BFF `.default` scope) and establish which claims are actually present: `idtyp`, `roles`, `scp`, `oid`, `sub`, `appid`, `azp`. Choose the POSITIVE app-only signal from what is really there. Record the evidence in notes — the entire design hangs on this answer, and guessing it is how this task ships a bypass.</step>
+    <step order="1">Reproduce the defect: authenticate as tenant A, request `?tenantId={B}`, observe resolution. This is the test that must go red-then-green.</step>
+    <step order="2">Write the primitive in `Spaarke.Core/Auth/`. Three outcomes minimum — user-delegated / application (carrying the app id) / indeterminate. Pure function over `ClaimsPrincipal`, no ambient state, no `HttpContext`.</step>
+    <step order="3">Repoint `AuditEnrichmentMiddleware.IsOnBehalfOfFlow` at the primitive. Its two-valued logging answer is a projection of the three-valued classification — preserve its current behaviour for logging (indeterminate logs as not-OBO) while the authorization path treats indeterminate as deny. Note that asymmetry in a comment so it does not read as an inconsistency.</step>
+    <step order="4">Gate the endpoint: application ∧ allow-listed → may name any `tenantId`; everything else → 403 BEFORE any resolver call. Deny with a uniform response so a denied caller learns nothing about which tenants exist. Config key + its absence-denies semantics documented at the read site.</step>
+    <step order="5">Correct the two stale doc claims on the endpoint (class summary "parity with all other BFF endpoints" assurance; `WithDescription`'s "falling back to the caller's JWT tid claim").</step>
+    <step order="6">Tests — see `acceptance-criteria` for the closed set. Perturbation-verify: neutralize the app-only determination (accept `appid` alone) and confirm the delegated-token test goes RED. If it does not, the trap is still live.</step>
+    <step order="7">Verify the L2 probe path still resolves: an app-only allow-listed token naming a foreign tenant gets 200 with the tenant echoed. Build, full test run, publish size, CVE scan.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If Step 0 finds NO claim that positively distinguishes app-only from user-delegated in the tokens this BFF actually receives, STOP. Do not fall back to inferring app-only from absence, and do not fall back to `appid`-only. That would ship the trap. Escalate — the answer is then an app role / required scope on the L2 app registration, which needs the other project's agreement.</trigger>
+    <trigger>If placing the primitive in `Spaarke.Core` requires an AspNetCore FrameworkReference or a new package, STOP and escalate. Do not relocate it BFF-side — that silently forfeits the reason this task is worth doing now.</trigger>
+    <trigger>If the fix cannot be made without editing the L2 probe, STOP. The design has drifted back toward option C.</trigger>
+  </escalation>
+
+  <justification>
+    <existing>`AuditEnrichmentMiddleware.IsOnBehalfOfFlow` (:129-145) already classifies caller kind from `idtyp`/`scp`/`oid`, and `ResolveAppId` (:102-104) already reads `appid`/`azp` — both `private static` inside a logging middleware, unreachable by any authorization path. `TenantAuthorizationFilter` already enforces tenant-claim matching (option A) but cannot express "operators may name a tenant."</existing>
+    <extension>PROMOTE the middleware's existing claim logic into `Spaarke.Core.Auth` and have the middleware consume it. Net new *logic* is the three-valued result and the allow-list policy; the claim reading is moved, not written twice. The alternative — a second claim reader in the BFF — is what §11 exists to prevent.</extension>
+    <cost-of-doing-nothing>Any authenticated user of any tenant can enumerate which tenants this stamp serves and resolve their SPE container ids. On a multi-tenant platform that is customer-list disclosure. Live on master today.</cost-of-doing-nothing>
+  </justification>
+
+  <outputs>
+    <output type="code">src/server/shared/Spaarke.Core/Auth/ — the caller-kind primitive</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Endpoints/Diagnostics/TenantContainerResolverEndpoint.cs — gate + doc corrections</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Infrastructure/Logging/AuditEnrichmentMiddleware.cs — delegates to the primitive</output>
+    <output type="test">tests/unit/Spaarke.Core.Tests/ — classifier unit tests incl. the delegated-token-carrying-an-allow-listed-appid case</output>
+    <output type="test">tests/unit/Sprk.Bff.Api.Tests/ — endpoint gate tests</output>
+    <output type="doc">projects/unified-access-control-r2/notes/task-081-*.md — Step 0's claim evidence, and why option B does not need to touch the probe</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion>A user-delegated caller is DENIED — including when its `appid` IS in the allow-list. This is the trap test; it must fail without the positive app-only determination.</criterion>
+    <criterion>An app-only caller whose `appid` is NOT in the allow-list is denied.</criterion>
+    <criterion>An app-only caller whose `appid` IS in the allow-list resolves a foreign tenant successfully, with the tenant echoed — i.e. the L2 H13 I4 probe contract is intact.</criterion>
+    <criterion>An empty allow-list denies everyone, including an otherwise-valid app-only caller.</criterion>
+    <criterion>An absent/unconfigured allow-list denies everyone (distinct from the empty case — a fresh environment must not fail open).</criterion>
+    <criterion>A caller with no resolvable tenant claim and no query parameter is denied, not defaulted to an ambient tenant.</criterion>
+    <criterion>An indeterminate classification is denied.</criterion>
+    <criterion>**The enumeration oracle is closed for unauthorized callers**: served and not-served tenants are indistinguishable to a DENIED caller, because denial happens before any resolver call. Note this is scoped to denied callers — a permitted operator MUST still see 400-vs-200, since distinguishing served from not-served is the probe's entire purpose. (The original version of this criterion was unscoped and would have broken the probe.)</criterion>
+    <criterion>Exactly ONE classifier exists: grep confirms no `FindFirst("idtyp")` / `FindFirst("appid")` / `FindFirst("azp")` outside the primitive, except pre-existing outbound-token-inspection sites (`GraphClientFactory.cs:238`, `AuthorizationModule.cs:160`, `MiddlewarePipelineExtensions.cs:114-115` — these read tokens the BFF SENDS or logs, not inbound caller kind; leave them alone and say so).</criterion>
+    <criterion>`Spaarke.Core.csproj` gains no new `PackageReference` and no `FrameworkReference`.</criterion>
+    <criterion>The primitive is consumable from `Spaarke.Core/Auth/AuthorizationService.cs` — demonstrated by it compiling in that assembly, not by adding a speculative call site.</criterion>
+    <criterion>ArchTests: `LayerDependencyTests` green, and task 074's census stays green (this task changes no route count).</criterion>
+    <criterion>Both stale doc claims on the endpoint corrected.</criterion>
+    <criterion>Build clean; `dotnet test` on the two touched unit projects + `Spaarke.ArchTests`; publish size ≤60 MB reported with the PDB convention stated; no new HIGH CVE.</criterion>
+  </acceptance-criteria>
+
+  <notes>Found by the census ratchet, not by a route inventory — the file post-dates all four prior enumerations of this surface. Third hole task 074's forcing function produced (after 077 and 078), and the first that came from being *made to classify* a new file rather than from a rule firing directly.
+
+The owner's framing when choosing B: *"whether we fix in 081 or add to UAC evaluator either way we need this to be included — if 081 is a quick win but then ends up having to be replaced or redone as part of the evaluator then don't waste time."* The placement constraint is the entire answer to that. Get it wrong and this IS wasted time.</notes>
+</task>

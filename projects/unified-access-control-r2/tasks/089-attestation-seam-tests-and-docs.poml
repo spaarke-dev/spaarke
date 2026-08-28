@@ -1,0 +1,84 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="089" project="unified-access-control-r2">
+  <metadata>
+    <title>Attestation seam tests + architecture documentation (FR-32 closure)</title>
+    <phase>5 Attestation</phase>
+    <gate>blocked — requires 081 + 082 merged</gate>
+    <status>pending</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Modifies tests/** — FULL unconditionally (TEST-MODIFYING override).</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Closed scenario list; doc drafting from merged code.</model-tier-reason>
+    <effort>medium</effort>
+    <parallel-group>phase5-wave4</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <parallel-reason>Touches tests/** + docs/** only; solo wave at phase end.</parallel-reason>
+    <deps>087, 088</deps>
+    <tags>testing, integration-test, auth, documentation</tags>
+    <estimated-effort>2-3 hours</estimated-effort>
+  </metadata>
+
+  <prompt>Close Phase 5: end-to-end attestation seam tests (event-log lifecycle -> replay answer at the seam) and the architecture documentation of the attestation model — event log + replay + versioning + the no-materialization rule + the coverage boundary + known gaps (GDPR, retention inheritance, pre-history incompleteness).</prompt>
+  <role>SPAARKE platform developer. ADR-038 seam testing; docs-architecture conventions. Follow ADRs strictly.</role>
+  <goal>Seam tests proving the project's success criterion 9 (point-in-time attestation answerable) through the public surfaces (endpoints/entry points, not internals); an attestation section in the canonical access-control architecture doc; both green/merged.</goal>
+
+  <context>
+    <background>spec.md FR-32 + success criterion 9; design.md §7. The unit-level replay tests live in 082; this task proves the WHOLE chain at the seam: a real grant via the real endpoint produces an event, and replay over that history answers correctly — plus the documentation that makes the mechanism maintainable (the versioning policy is a behavioural contract future evaluator changes must honor).</background>
+    <relevant-files>
+      <file role="modify">tests/integration/seam/ (extend the existing suite with attestation seam tests per suite convention)</file>
+      <file role="modify">docs/architecture/uac-access-control.md (or canonical successor — the doc task 058 updated)</file>
+      <file role="canonical-reference">projects/unified-access-control-r2/notes/phase5-evaluator-versioning.md</file>
+    </relevant-files>
+    <dependencies>
+      <dependency task="081" status="pending">Event hooks.</dependency>
+      <dependency task="082" status="pending">Replay + versioning.</dependency>
+    </dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-038">KEEP-path seam tests; MAINTAIN-class (they pin the attestation contract); scope: whole task.</constraint>
+    <constraint source="CLAUDE.md-§2">Docs cite implementing files; known gaps stated as gaps, not omitted. Scope: doc section.</constraint>
+    <constraint source="project">Tests use only public surfaces (endpoints/entry points) — no reaching into the appender or historical source directly. Scope: test design.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>attestation closure</topic>
+    <files>
+      <file>docs/adr/ADR-038-testing-strategy.md</file>
+      <file>projects/unified-access-control-r2/design.md</file>
+      <file>projects/unified-access-control-r2/spec.md</file>
+    </files>
+    <patterns>
+      <pattern name="integration-tests" location=".claude/patterns/testing/integration-tests.md">Seam structure.</pattern>
+    </patterns>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="0">Context + rigor declaration.</step>
+    <step order="1">Seam tests per the closed set below.</step>
+    <step order="2">Write the attestation architecture section (event log, replay, versioning policy, coverage boundary, no-materialization rationale citing 06 §F4, known gaps).</step>
+    <step order="3">Full suite green in CI; update TASK-INDEX.md.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If the seam test exposes an event kind 081 missed or a replay input 082 cannot reconstruct, STOP and file against that task per CLAUDE.md §6 — do not narrow the test.</trigger>
+  </escalation>
+
+  <outputs>
+    <output type="test">tests/integration/seam/ (attestation tests)</output>
+    <output type="docs">docs/architecture/uac-access-control.md (attestation section)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">End-to-end: grant via endpoint on T1, revoke on T2 (fixture-clocked), replay(T1) shows the principal with the granted level and provenance; replay(T3) shows None — all via public surfaces.</criterion>
+    <criterion testable="true">Deny lifecycle: deny-add/remove events replay correctly across their boundaries.</criterion>
+    <criterion testable="true">Negative: replay for a date before recorded history returns the explicit-incomplete marker (asserted at the seam).</criterion>
+    <criterion testable="true">Negative: no test (and no code path it exercises) creates a derived-access row — schema-level assertion that only sprk_accessevent rows were written.</criterion>
+    <criterion testable="true">The architecture doc's attestation section exists, cites files, and states the GDPR/retention/pre-history gaps.</criterion>
+    <criterion testable="true">Full suite green in CI.</criterion>
+  </acceptance-criteria>
+
+  <notes>spec.md FR-32; success criterion 9. Final phase task before wrap-up.</notes>
+
+  <execution><skill>.claude/skills/task-execute/SKILL.md</skill></execution>
+</task>

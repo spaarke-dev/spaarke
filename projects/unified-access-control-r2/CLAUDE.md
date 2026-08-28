@@ -17,7 +17,7 @@ Spaarke has **two disjoint authorization systems** sharing a data resolver and n
 
 ## The five facts that govern every decision here
 
-1. **On the SPA/Teams surface, the BFF filter is the ENTIRE security boundary.** Reads are app-only, so Dataverse row-level security is inert. A bug here is a disclosure — a client seeing another client's matter — not a nuisance. On the MDA, Dataverse enforces natively and we write no code.
+1. **Wherever a read goes through the BFF, the BFF filter is the ENTIRE security boundary.** Reads are app-only, so Dataverse row-level security is inert. A bug here is a disclosure — a client seeing another client's matter — not a nuisance. ⚠️ **Ask "does this read go through the BFF?", NOT "is this the MDA?"** — this was previously written as "on the MDA, Dataverse enforces natively and we write no code", which is **false for MDA-hosted PCFs that read via the BFF**. Proven 2026-08-25: a non-admin denied Read on all 442 documents by Dataverse saw a matter's full document list, and opened and downloaded the files, through `SemanticSearchControl` → `POST /api/ai/search` on an **MDA form**. Native MDA forms/grids/views *are* Dataverse-enforced; embedded PCFs are not. See design §4.1 correction + [`notes/task-046-secure-project-owner-role.md`](notes/task-046-secure-project-owner-role.md) §7b.
 2. **Being referenced by a lookup grants ZERO access in Dataverse.** Access comes only from ownership, role privilege, team membership, share (POA), or the user hierarchy.
 3. **Dataverse has NO per-record deny** (verified against current Microsoft docs, 2026-08-20). Isolation = scope the baseline, grant additively. Never "restrict a row".
 4. **A `contact` is not a security principal.** It cannot be a POA share target and cannot be impersonated. That is *why* the contact plane must compute access rather than store it.
@@ -25,9 +25,10 @@ Spaarke has **two disjoint authorization systems** sharing a data resolver and n
 
 ## The model
 
-| Surface | Enforced by |
+| Surface / read path | Enforced by |
 |---|---|
-| MDA | Dataverse natively (role depth × owner/BU/team + sharing) — **no code** |
+| MDA — **native** forms, grids, views | Dataverse natively (role depth × owner/BU/team + sharing) — **no code** |
+| MDA — **embedded PCFs reading via the BFF** | ⚠️ The BFF evaluator. **Same exposure as SPA** — not Dataverse |
 | SPA / Teams | The BFF evaluator — **the only boundary** |
 
 | Type | Door | Record permission from |

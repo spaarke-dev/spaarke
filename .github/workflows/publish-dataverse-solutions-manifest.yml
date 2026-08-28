@@ -74,12 +74,24 @@
 
 name: Publish Dataverse Solutions Manifest
 
+# RELEASE-TIME ONLY — deliberately no `push` trigger.
+#
+# This workflow uploads 8 pre-built managed solution ZIPs and publishes the manifest
+# H6 reads. It does not BUILD the ZIPs, and it cannot: `src/solutions/*` are unpacked
+# solution folders (customizations.xml, entities/, ...) with no .cdsproj, and no
+# workflow in this repo packs them. The ZIPs come from a local
+# `pac solution pack` run, per docs/procedures/SPAARKE-SOLUTION-RELEASE-PROCESS.md
+# step 9: build + verify drift-free locally, THEN run this workflow.
+#
+# It previously also triggered on `push: master` for `src/solutions/**`. On a push
+# runner the ZIPs have never existed, so the "Locate + validate the 8 canonical
+# solution ZIPs" step found 0 of 8 and the workflow failed on every solution change
+# — 3 of 3 recent runs, 100%. The trigger contradicted the workflow's own contract
+# (and its own error message, which tells you to go pack the solutions first).
+#
+# Removing the trigger is the fix. Do NOT add a `push` trigger back without also
+# adding a pack step — the two have to arrive together or this returns to permanent red.
 on:
-  push:
-    branches: [master]
-    paths:
-      - 'src/solutions/**'
-      - '.github/workflows/publish-dataverse-solutions-manifest.yml'
   workflow_dispatch:
     inputs:
       targetEnvironment:

@@ -57,6 +57,27 @@ Every task that touches `src/server/api/Sprk.Bff.Api/` (or `Spaarke.Core` / `Spa
 4. **MUST** verify no new HIGH-severity CVEs via `dotnet list package --vulnerable --include-transitive` if NuGet packages were added or upgraded.
 5. **MUST** cross-reference CLAUDE.md §10 in the task notes / PR description (e.g., "BFF Hygiene §10 + NFR-01 verified: publish size = X MB, delta = Y MB, no new HIGH CVEs").
 
+### ⚠️ Measurement convention is BINDING, not descriptive (added 2026-08-27 by `unified-access-control-r2` Wave A)
+
+**The number is meaningless unless it was produced the same way as the number you compare it to.** Report **all five** of these alongside the size, every time:
+
+| Must state | Canonical value for the baseline |
+|---|---|
+| Command | `dotnet publish -c Release src/server/api/Sprk.Bff.Api/ -o deploy/api-publish/` |
+| RID / deployment mode | **framework-dependent linux-x64** (NOT self-contained, NOT win-x64) |
+| Configuration | **Release** (a Debug publish is not comparable) |
+| Compression | **`Compress-Archive -CompressionLevel Optimal`** over `deploy/api-publish/*` |
+| PDBs | **included** for the 44.96 figure; 44.05 excludes them — say which |
+
+**Why this became binding — a real incident, not a hypothetical.** On 2026-08-27 three sub-agents on the **identical base commit**, each stating *"compressed incl. PDBs"*, reported **45.07 / 45.07 / 43.78 MB** — a **1.29 MB spread on the same tree**. Cause: the POML corpus carried **two baseline clusters** (~43.65–43.71 MB across 24 POMLs and 44.96 MB across 31), so each agent compared against whichever its own POML cited, computed a small delta (+0.11, +0.11, +0.09), and correctly concluded "within ceiling". *Every individual report was internally consistent and correct.* The set was incoherent, and the defect was visible only by comparing reports across agents.
+
+**Consequence, and why it matters even far below the ceiling**: the ≤60 MB HARD STOP still bounds the worst case regardless of convention. But the **≥+5 MB single-task escalation below is a drift detector**, and a 1.3 MB convention gap in circulation means a genuine regression can be absorbed as a convention artifact — or a convention change misread as a regression. The gate keeps its floor and loses its sensitivity, which is the half it was actually added for.
+
+**Therefore**:
+- **MUST** state all five fields above. A bare "45.07 MB" is an incomplete report and a reviewer should reject it.
+- **MUST NOT** compare across conventions. If the cited baseline's convention is unstated or differs, re-measure the baseline yourself on the merge-base commit rather than differencing two incomparable numbers.
+- When authoring POMLs, cite **44.96 MB incl. PDBs** (the canonical baseline above). POMLs citing the ~43.7 cluster are **stale** and should be re-baselined on next touch.
+
 **Threshold for escalation**:
 - Diff ≥ +5 MB single-task: explicit justification required in PR description; reviewer must explicitly accept.
 - Cumulative size ≥ 55 MB: escalate to architecture review BEFORE merging the task that would tip it over.

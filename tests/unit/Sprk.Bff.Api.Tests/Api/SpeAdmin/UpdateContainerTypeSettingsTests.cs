@@ -1,13 +1,5 @@
-using System.Security.Claims;
 using FluentAssertions;
-using Microsoft.AspNetCore.Http;
-using Microsoft.AspNetCore.Routing;
-using Microsoft.Extensions.Logging;
-using Moq;
-using Sprk.Bff.Api.Api;
-using Sprk.Bff.Api.Api.SpeAdmin;
 using Sprk.Bff.Api.Infrastructure.Graph;
-using Sprk.Bff.Api.Models.SpeAdmin;
 using Xunit;
 
 namespace Sprk.Bff.Api.Tests.Api.SpeAdmin;
@@ -16,186 +8,16 @@ namespace Sprk.Bff.Api.Tests.Api.SpeAdmin;
 /// Unit tests for ContainerTypeSettingsEndpoints (SPE-052).
 ///
 /// Tests cover:
-///   - Endpoint registration shape and method signatures
-///   - UpdateContainerTypeSettingsRequest DTO shape and properties
-///   - ContainerTypeSettingsResponseDto DTO shape and properties
-///   - ContainerTypeSettingsResult domain record
-///   - ValidSharingCapabilities set (ADR-007: input validation rules)
-///   - Validation logic: configId required, invalid sharingCapability, invalid majorVersionLimit
-///   - Auth filter: inherited from parent group (not per-endpoint)
-///   - Error code naming convention
+///   - ValidSharingCapabilities set (ADR-007: input validation rules) and the validation logic
+///     that consumes it (configId / sharingCapability)
+///
+/// Note (task 042): DTO-shape, domain-record, auth-filter, and error-code-naming tests previously
+/// here were removed as build-class scaffolding (ADR-038 §7). ADR-007 Graph SDK isolation for nested
+/// domain records under this facade is covered generically by
+/// tests/Spaarke.ArchTests/ADR007_NestedDomainRecordTests.cs.
 /// </summary>
 public class UpdateContainerTypeSettingsTests
 {
-    #region Endpoint Registration Tests
-
-
-    #endregion
-
-    #region Request DTO Tests
-
-    [Fact]
-    public void UpdateContainerTypeSettingsRequest_AllPropertiesCanBeNull()
-    {
-        // All fields optional — null means "do not change this setting"
-        var request = new UpdateContainerTypeSettingsRequest();
-
-        request.SharingCapability.Should().BeNull("SharingCapability is optional");
-        request.IsItemVersioningEnabled.Should().BeNull("IsItemVersioningEnabled is optional");
-        request.ItemMajorVersionLimit.Should().BeNull("ItemMajorVersionLimit is optional");
-        request.MaxStoragePerContainerInBytes.Should().BeNull("StorageUsedInBytes is optional");
-    }
-
-    [Fact]
-    public void UpdateContainerTypeSettingsRequest_AcceptsAllSettingsWhenProvided()
-    {
-        var request = new UpdateContainerTypeSettingsRequest
-        {
-            SharingCapability = "externalUserSharingOnly",
-            IsItemVersioningEnabled = true,
-            ItemMajorVersionLimit = 50,
-            MaxStoragePerContainerInBytes = 1_073_741_824L // 1 GB
-        };
-
-        request.SharingCapability.Should().Be("externalUserSharingOnly");
-        request.IsItemVersioningEnabled.Should().BeTrue();
-        request.ItemMajorVersionLimit.Should().Be(50);
-        request.MaxStoragePerContainerInBytes.Should().Be(1_073_741_824L);
-    }
-
-    [Fact]
-    public void UpdateContainerTypeSettingsRequest_SharingCapabilityOnly()
-    {
-        // Partial request — only sharing capability
-        var request = new UpdateContainerTypeSettingsRequest
-        {
-            SharingCapability = "disabled"
-        };
-
-        request.SharingCapability.Should().Be("disabled");
-        request.IsItemVersioningEnabled.Should().BeNull("not set");
-        request.ItemMajorVersionLimit.Should().BeNull("not set");
-        request.MaxStoragePerContainerInBytes.Should().BeNull("not set");
-    }
-
-    [Fact]
-    public void UpdateContainerTypeSettingsRequest_VersioningSettingsOnly()
-    {
-        // Partial request — only versioning settings
-        var request = new UpdateContainerTypeSettingsRequest
-        {
-            IsItemVersioningEnabled = false,
-            ItemMajorVersionLimit = 10
-        };
-
-        request.SharingCapability.Should().BeNull("not set");
-        request.IsItemVersioningEnabled.Should().BeFalse();
-        request.ItemMajorVersionLimit.Should().Be(10);
-        request.MaxStoragePerContainerInBytes.Should().BeNull("not set");
-    }
-
-    #endregion
-
-    #region Response DTO Tests
-
-    [Fact]
-    public void ContainerTypeSettingsResponseDto_ConstructsWithAllFields()
-    {
-        var now = DateTimeOffset.UtcNow;
-        var dto = new ContainerTypeSettingsResponseDto
-        {
-            Id = "ct-guid-001",
-            DisplayName = "Legal Documents Type",
-            BillingClassification = "standard",
-            CreatedDateTime = now
-        };
-
-        dto.Id.Should().Be("ct-guid-001");
-        dto.DisplayName.Should().Be("Legal Documents Type");
-        dto.BillingClassification.Should().Be("standard");
-        dto.CreatedDateTime.Should().Be(now);
-    }
-
-    [Fact]
-    public void ContainerTypeSettingsResponseDto_BillingClassificationCanBeNull()
-    {
-        var dto = new ContainerTypeSettingsResponseDto
-        {
-            Id = "ct-guid-002",
-            DisplayName = "Test Type",
-            CreatedDateTime = DateTimeOffset.UtcNow
-        };
-
-        dto.BillingClassification.Should().BeNull("BillingClassification is optional");
-    }
-
-    [Fact]
-    public void ContainerTypeSettingsResponseDto_IsNotGraphSdkType()
-    {
-        // ADR-007: DTO must be in Spaarke namespace, not Microsoft.Graph
-        var type = typeof(ContainerTypeSettingsResponseDto);
-
-        type.Namespace.Should().StartWith("Sprk.Bff.Api", "must be in Spaarke namespace, not Graph SDK");
-
-        var props = type.GetProperties();
-        foreach (var prop in props)
-        {
-            prop.PropertyType.Namespace.Should().NotStartWith("Microsoft.Graph.Models",
-                $"property {prop.Name} must not leak Graph SDK types (ADR-007)");
-        }
-    }
-
-    #endregion
-
-    #region Domain Record Tests
-
-    [Fact]
-    public void ContainerTypeSettingsResult_IsDomainRecord_NotGraphSdkType()
-    {
-        // ADR-007: Domain record must not expose Graph SDK types
-        var type = typeof(SpeAdminGraphService.ContainerTypeSettingsResult);
-
-        type.IsClass.Should().BeTrue("records are classes in C#");
-        type.Namespace.Should().StartWith("Sprk.Bff.Api", "must be in Spaarke namespace");
-
-        var props = type.GetProperties();
-        foreach (var prop in props)
-        {
-            prop.PropertyType.Namespace.Should().NotStartWith("Microsoft.Graph.Models",
-                $"property {prop.Name} must not leak Graph SDK types (ADR-007)");
-        }
-    }
-
-    [Fact]
-    public void ContainerTypeSettingsResult_ConstructsCorrectly()
-    {
-        var now = DateTimeOffset.UtcNow;
-        var result = new SpeAdminGraphService.ContainerTypeSettingsResult(
-            Id: "ct-guid-456",
-            DisplayName: "Corporate Docs Type",
-            BillingClassification: "standard",
-            CreatedDateTime: now);
-
-        result.Id.Should().Be("ct-guid-456");
-        result.DisplayName.Should().Be("Corporate Docs Type");
-        result.BillingClassification.Should().Be("standard");
-        result.CreatedDateTime.Should().Be(now);
-    }
-
-    [Fact]
-    public void ContainerTypeSettingsResult_BillingClassificationCanBeNull()
-    {
-        var result = new SpeAdminGraphService.ContainerTypeSettingsResult(
-            Id: "ct-id",
-            DisplayName: "Name",
-            BillingClassification: null,
-            CreatedDateTime: DateTimeOffset.UtcNow);
-
-        result.BillingClassification.Should().BeNull("BillingClassification is optional");
-    }
-
-    #endregion
-
     #region ValidSharingCapabilities Tests
 
     [Theory]
@@ -246,32 +68,22 @@ public class UpdateContainerTypeSettingsTests
     [Fact]
     public void ValidSharingCapabilities_HasExactlyFourEntries()
     {
+        // The count is the arity of Microsoft.Graph.Models.SharingCapabilities (minus the
+        // UnknownFutureValue forward-compat sentinel), not a hand-picked number — the set is built
+        // from Enum.GetNames<SharingCapabilities>() in SpeAdminGraphService. The real four are
+        // disabled / externalUserSharingOnly / existingExternalUserSharingOnly /
+        // externalUserAndGuestSharing (negative-controlled in SharingCapability_InvalidValues_FailValidation
+        // below for the three wrong names — view/edit/full — this allow-list carried until 2026-08-24).
+        // If the Graph SDK ever adds a member, this test failing is informative: it means the allow-list
+        // grew and callers should learn about the new value, not that the test itself is wrong.
         SpeAdminGraphService.ValidSharingCapabilities
-            .Should().HaveCount(4, "exactly 4 sharing capabilities are allowed: disabled, view, edit, full");
+            .Should().HaveCount(4, "the set is derived from Microsoft.Graph.Models.SharingCapabilities " +
+                "(excluding UnknownFutureValue), which currently has 4 real members");
     }
 
     #endregion
 
     #region Validation Logic Tests
-
-    [Fact]
-    public void ConfigId_Validation_EmptyGuidIsInvalid()
-    {
-        // PUT endpoint checks: if (configId is null || configId == Guid.Empty) → 400
-        var emptyGuid = Guid.Empty;
-        var isInvalid = emptyGuid == Guid.Empty;
-
-        isInvalid.Should().BeTrue("Guid.Empty must be recognized as invalid");
-    }
-
-    [Fact]
-    public void ConfigId_Validation_ValidGuidIsAccepted()
-    {
-        var validGuid = Guid.NewGuid();
-        var isValid = validGuid != Guid.Empty;
-
-        isValid.Should().BeTrue("any non-empty GUID is valid for configId");
-    }
 
     [Theory]
     [InlineData("disabled")]
@@ -303,140 +115,6 @@ public class UpdateContainerTypeSettingsTests
         var isValid = SpeAdminGraphService.ValidSharingCapabilities.Contains(capability);
 
         isValid.Should().BeFalse($"'{capability}' is not a valid sharing capability and should fail validation");
-    }
-
-    [Theory]
-    [InlineData(0)]
-    [InlineData(-1)]
-    [InlineData(-100)]
-    public void MajorVersionLimit_ZeroOrNegative_IsInvalid(int limit)
-    {
-        // Endpoint checks: if (request.ItemMajorVersionLimit.HasValue && request.ItemMajorVersionLimit.Value <= 0) → 400
-        var isInvalid = limit <= 0;
-
-        isInvalid.Should().BeTrue($"majorVersionLimit '{limit}' must be rejected (not positive)");
-    }
-
-    [Theory]
-    [InlineData(1)]
-    [InlineData(10)]
-    [InlineData(100)]
-    [InlineData(500)]
-    public void MajorVersionLimit_PositiveValues_AreValid(int limit)
-    {
-        var isValid = limit > 0;
-
-        isValid.Should().BeTrue($"majorVersionLimit '{limit}' is a valid positive integer");
-    }
-
-    #endregion
-
-    #region Authorization Filter Tests
-
-
-    [Fact]
-    public async Task SpeAdminAuthorizationFilter_ReturnsUnauthorized_WhenNoUserId()
-    {
-        // Arrange: filter with anonymous user (no identity claims)
-        var logger = new Mock<ILogger<Sprk.Bff.Api.Api.Filters.SpeAdminAuthorizationFilter>>();
-        var filter = new Sprk.Bff.Api.Api.Filters.SpeAdminAuthorizationFilter(logger.Object);
-
-        var httpContext = new DefaultHttpContext
-        {
-            User = new ClaimsPrincipal(new ClaimsIdentity()) // anonymous
-        };
-
-        var contextMock = new Mock<EndpointFilterInvocationContext>();
-        contextMock.Setup(c => c.HttpContext).Returns(httpContext);
-
-        EndpointFilterDelegate next = _ => ValueTask.FromResult<object?>(Results.Ok("should not reach"));
-
-        // Act
-        var result = await filter.InvokeAsync(contextMock.Object, next);
-
-        // Assert
-        result.Should().NotBeNull();
-        (result as IResult).Should().NotBeNull("filter must return an IResult");
-    }
-
-    [Fact]
-    public async Task SpeAdminAuthorizationFilter_CallsNext_WhenUserIsAdmin()
-    {
-        // Arrange: authenticated admin user
-        var logger = new Mock<ILogger<Sprk.Bff.Api.Api.Filters.SpeAdminAuthorizationFilter>>();
-        var filter = new Sprk.Bff.Api.Api.Filters.SpeAdminAuthorizationFilter(logger.Object);
-
-        var claims = new List<Claim>
-        {
-            new(ClaimTypes.NameIdentifier, "admin-789"),
-            new("roles", "SystemAdmin")
-        };
-        var httpContext = new DefaultHttpContext
-        {
-            User = new ClaimsPrincipal(new ClaimsIdentity(claims, "TestAuth"))
-        };
-
-        var contextMock = new Mock<EndpointFilterInvocationContext>();
-        contextMock.Setup(c => c.HttpContext).Returns(httpContext);
-
-        var nextCalled = false;
-        EndpointFilterDelegate next = _ =>
-        {
-            nextCalled = true;
-            return ValueTask.FromResult<object?>(Results.Ok("admin reached"));
-        };
-
-        // Act
-        var result = await filter.InvokeAsync(contextMock.Object, next);
-
-        // Assert
-        nextCalled.Should().BeTrue("admin user must reach the next handler");
-        result.Should().NotBeNull();
-    }
-
-    #endregion
-
-    #region Error Code Tests
-
-    [Fact]
-    public void ErrorCodes_FollowSpeNamingConvention()
-    {
-        // Verify all error codes used in this endpoint follow the spe.containertypes.settings.{reason} pattern.
-        var expectedErrorCodes = new[]
-        {
-            "spe.containertypes.settings.config_id_required",
-            "spe.containertypes.settings.invalid_sharing_capability",
-            "spe.containertypes.settings.invalid_major_version_limit",
-            "spe.containertypes.settings.config_not_found",
-            "spe.containertypes.settings.graph_error",
-            "spe.containertypes.settings.unexpected_error"
-        };
-
-        foreach (var code in expectedErrorCodes)
-        {
-            code.Should().StartWith("spe.", $"all SPE Admin error codes start with 'spe.'");
-            code.Should().Contain("containertypes.settings",
-                $"container type settings error codes include 'containertypes.settings'");
-            code.Should().MatchRegex(@"^[a-z_\.]+$",
-                "error codes are lowercase with dots and underscores only");
-        }
-    }
-
-    #endregion
-
-    #region Graph Service Method Existence Tests
-
-
-    [Fact]
-    public void SpeAdminGraphService_HasValidSharingCapabilities_PublicStaticField()
-    {
-        // Verify the validation set is public and static (accessible by endpoint without instantiation)
-        var field = typeof(SpeAdminGraphService)
-            .GetField("ValidSharingCapabilities",
-                System.Reflection.BindingFlags.Public | System.Reflection.BindingFlags.Static);
-
-        field.Should().NotBeNull("ValidSharingCapabilities must be a public static field");
-        field!.IsStatic.Should().BeTrue("must be static for access without instantiation");
     }
 
     #endregion

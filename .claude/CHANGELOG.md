@@ -23,6 +23,31 @@ If you're not sure whether to add an entry, add one. Too granular is better than
 
 ## [Unreleased]
 
+### Added — FAILURE-MODES **G-12**: a stale test assembly behind a *truthful* "up-to-date" build (2026-08-27, `unified-access-control-r2` Wave A)
+
+**Fifth stale-assembly incident in this project across two waves — and the first that the existing defence does not catch.**
+
+The standing rule from the 075 batch is *"always read the build result before the test result."* That defends against a **failed or skipped** build masked by a stale-but-green test summary. G-12 is different: the build **succeeds** and honestly reports "up-to-date", because the falsehood is in **filesystem metadata**, not in the build.
+
+- **Mechanism 1 — backwards-moving mtime.** `Copy-Item` (and `cp -p`, archive extraction, some editor "revert file" paths) **preserves `LastWriteTime`**. Restoring a file from a backup therefore moves its mtime *backwards*, MSBuild's incremental timestamp comparison concludes the existing DLL is newer than its input, compilation is skipped, and `dotnet test --no-build` executes the **previous** assembly. Task 011 hit this as a test failure that *contradicted the source on disk*.
+- **Mechanism 2 —** `dotnet build Spaarke.sln` **did not refresh the BFF test project's output**; the test csproj had to be built explicitly.
+
+**Why it earns its own entry rather than a line under AP-8**: perturbation testing is the primary anti-vacuity tool, and a stale assembly silently converts *"I proved this guard is load-bearing"* into *"this guard is untested"* — while looking identical. All five incidents produced **confident, wrong** verification results. Detection is by artifact, not by log: compare the DLL's mtime against the source you just edited.
+
+**Changed**: `.claude/FAILURE-MODES.md` — TOC entry + `### G-12`; anchor verified against the heading.
+
+### Changed — publish-size measurement convention is now BINDING, not descriptive (2026-08-27, `unified-access-control-r2` Wave A)
+
+**Root CLAUDE.md §10's publish-size gate was measuring in two incompatible conventions, and every individual report was correct.**
+
+Three sub-agents on the **identical base commit**, each stating *"compressed incl. PDBs"*, reported **45.07 / 45.07 / 43.78 MB** — a **1.29 MB spread on the same tree**. Cause: the POML corpus carries **two baseline clusters** (~43.65–43.71 MB across 24 POMLs, 44.96 MB across 31), so each agent compared against whichever its own POML cited, computed a small delta, and correctly concluded "within ceiling". The set was incoherent; the defect was visible **only by comparing reports across agents**, which no per-task gate can do.
+
+The convention *was* already written down — but as a parenthetical describing how the **baseline** had been measured, not as a requirement on **your** measurement. That is the gap all three fell into.
+
+**Changed**: `.claude/constraints/azure-deployment.md` § "BFF Publish-Size Per-Task Verification Rule (NFR-01)" — added a binding five-field reporting contract (command · RID/deployment mode · configuration · compression level · PDBs in/out), a MUST NOT on cross-convention comparison, the incident record, and an instruction to re-baseline POMLs citing the stale ~43.7 cluster.
+
+**Impact on the gate**: the ≤60 MB HARD STOP was never at risk. What was degraded is the **≥+5 MB single-task drift detector** — with a 1.3 MB convention gap circulating, a real regression can be absorbed as a convention artifact and vice versa. The gate kept its floor and lost the sensitivity it was added for.
+
 ### Fixed — ADR-038 Amendment A1: `tests/Spaarke.ArchTests/**` is now the EIGHTH KEEP path (2026-08-24, `spaarke-auth-v4-dataverse-MI` task 090)
 
 **Closed a contradiction that lived inside ADR-038 itself**, and that had been mitigated at the skill layer

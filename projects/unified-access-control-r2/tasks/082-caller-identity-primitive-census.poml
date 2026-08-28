@@ -1,0 +1,121 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="082" project="unified-access-control-r2">
+  <metadata>
+    <title>Caller-identity census — a downward ratchet on direct claim reads, and the §11 consolidation decision</title>
+    <phase>0c Secure Documents — post-merge</phase>
+    <status>pending</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Adds a build-blocking ArchTest over the authorization surface and makes a §11 consolidation decision affecting four existing primitives. A wrong allow-list entry silently licenses the exact defect the ratchet exists to stop.</rigor-reason>
+    <model-tier>opus</model-tier>
+    <model-tier-reason>The judgement is which of ~71 claim-read sites are legitimate versus latent instances of the sub/oid confusion. That is a per-site security classification, not a mechanical sweep.</model-tier-reason>
+    <effort>xhigh</effort>
+    <effort-reason>Brownfield classification of ~71 sites against a defect class that has already shipped four times, plus seeding a ratchet whose initial count must be exactly right or the build is red on arrival.</effort-reason>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Touches tests/Spaarke.ArchTests/** (main-session-coordinated) and must run AFTER PR #832 and this project's ten worktree branches merge, or the seeded count is wrong.</parallel-reason>
+    <deps>073, 079, 075, 081, PR-832</deps>
+    <tags>bff-api, auth, security, testing, arch-test</tags>
+    <estimated-effort>6-10 hours</estimated-effort>
+    <origin>Filed 2026-08-27. Two independent triggers converged. (1) Root CLAUDE.md §11: after task 081 and PR #832 land there are FOUR caller-identity primitives — `CallerResolution` (BFF Infrastructure/Authentication, oid), `CallerIdentity` (Spaarke.Core/Auth, caller KIND, new in 081), `CallerPrincipalResolver` (external-access principal), `WorkforcePrincipalResolver` (workforce→systemuser-or-contact). They are complementary, not duplicative — but §11 requires the question be ANSWERED, and "we'll look at it later" is how four becomes six. (2) Measured while designing this: a ripgrep for direct identity-claim reads across `src/server` matches **71 files**, while PR #832 — whose title is "resolve the caller's Entra oid, not sub, in authorization filters" — covers **30** `src/server` files. Roughly 40 are outside its scope, including ~10 further `*AuthorizationFilter.cs` files. The sibling project verified FOUR broken shapes and that the two MOST plausible-looking ones are the broken ones, so an unaudited population of ~40 is a live risk, not a hygiene concern.</origin>
+  </metadata>
+
+  <prompt>Four primitives now answer "who is calling", and ~71 files read identity claims directly. A sibling project proved this exact surface carries a defect where the two most correct-looking idioms are the broken ones. Turn the count into a build-blocking ratchet that can only go down, classify every grandfathered site with a written reason, and make the §11 consolidation decision explicitly instead of deferring it.</prompt>
+
+  <role>SPAARKE authorization engineer building a forcing function, attentive to the difference between a census that documents drift and one that prevents it.</role>
+
+  <goal>A new site that reads an identity claim directly FAILS the build. Every existing site is either migrated to a named primitive or grandfathered with a written reason and a classification. The four-primitive question is answered in writing — consolidate, or justify each as distinct.</goal>
+
+  <context>
+    <background>WHY A RATCHET AND NOT A COUNT.
+
+The proven precedent in this repo is `tests/Spaarke.ArchTests/CredentialGuardTests.cs`, which FAILS THE BUILD on a new `.WithClientSecret(...)` site, plus `CredentialCensusTests` which pins the construction-site count. That pair works: ADR-028 A4's secret-free invariant has held because a violation is a red build, not a review comment. Task 074's endpoint census is the same instrument on a different surface and has fired twice, correctly both times.
+
+THE DEFECT CLASS THIS EXISTS TO STOP (verified by `spaarkeai-compose-r8`, PR #832):
+  - `oid ?? NameIdentifier` resolves **sub**, because the short `oid` claim does not survive inbound
+    claim mapping and `ClaimTypes.NameIdentifier` is **sub's** mapped form, not oid's.
+  - `FindFirst("oid")` alone resolves **null** under inbound mapping.
+  - Four sites shipped with this. The two shapes that look MOST correct are the broken ones.
+
+WHY THE COUNT IS THE PROBLEM. 71 files reading identity claims directly means 71 opportunities to make that mistake, and no mechanism notices. The number must be allowed to DECREASE and never increase.
+
+CRITICAL CLASSIFICATION JUDGEMENT — do not treat every claim read as a defect. Legitimate reads exist: `tid` for a tenant check, `appid` for app identification, `sub` as a cache key. The defect is specifically **reading a claim to obtain the caller's Dataverse-usable object id**. Classify each site; do not sweep.
+
+THE FOUR PRIMITIVES, and why they are probably NOT duplicative:
+  | Primitive | Answers |
+  |---|---|
+  | `CallerResolution` | the caller's Dataverse-usable oid |
+  | `CallerIdentity` (`Spaarke.Core.Auth`, task 081) | caller KIND (user-delegated / application / indeterminate) + oid, appid, tid |
+  | `CallerPrincipalResolver` | the external-access principal — plane, contact, accessible sets |
+  | `WorkforcePrincipalResolver` | workforce identity → systemuser or contact |
+Kind ≠ oid ≠ plane ≠ contact resolution. The likely correct answer is "four distinct responsibilities, keep all four, ban a fifth" — but §11 requires that be ARGUED, with grep evidence, not assumed.
+
+⚠️ `CallerIdentity` CARRIES A HARD RULE. Its app-only discriminator is `sub == oid`. Its `objectId` MUST NOT be read via `ClaimTypes.NameIdentifier` — the substitution makes the comparison `sub == sub`, always true, classifying every caller as an application and opening an operator-only gate. Task 081 hardens this with a provenance self-check. The census MUST NOT "harmonize" that file toward the house idiom.</background>
+    <relevant-files>
+      <file role="create">tests/Spaarke.ArchTests/CallerIdentityCensusTests.cs</file>
+      <file role="reference">tests/Spaarke.ArchTests/CredentialGuardTests.cs — the proven ratchet shape; copy its structure</file>
+      <file role="reference">tests/Spaarke.ArchTests/RouteAuthorizationGuardTests.cs — task 074's census + waiver-with-reason pattern</file>
+      <file role="reference">src/server/shared/Spaarke.Core/Auth/CallerIdentity.cs — task 081's primitive; READ ITS DOC COMMENT before classifying it</file>
+      <file role="reference">src/server/api/Sprk.Bff.Api/Infrastructure/Authentication/CallerResolution.cs — PR #832's primitive</file>
+      <file role="reference">projects/unified-access-control-r2/notes/coordination-compose-r8-2026-08-27.md §3, §3a — the measurement and the cross-project agreement</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="project">SEED THE COUNT LAST, and only after PR #832 plus this project's ten worktree branches have merged. A ratchet seeded against the wrong tree is red on arrival and will be "fixed" by loosening it — which is the failure this task exists to prevent.</constraint>
+    <constraint source="project">CLASSIFY, do not sweep. Every grandfathered site gets a written reason AND a classification: (a) legitimate non-oid read (tid / appid / cache key), (b) correct oid read via a primitive, (c) correct oid read done inline — migration candidate, (d) SUSPECTED INSTANCE of the sub/oid defect. Report every (d) separately and loudly; do not fix them in this task.</constraint>
+    <constraint source="project">The rule MUST carry a negative control (a seeded violation proves the detector fires) and a positive control (it does NOT fire on the sanctioned shape). Per tests/CLAUDE.md, this is binding for `tests/Spaarke.ArchTests/**` — a guard that flags the code it protects gets deleted rather than obeyed.</constraint>
+    <constraint source="project">Do NOT modify `Spaarke.Core/Auth/CallerIdentity.cs`. Read its doc comment; it documents the `oid ?? NameIdentifier` anti-pattern deliberately. If the census logic would flag it, the census logic is wrong.</constraint>
+    <constraint source="CLAUDE.md §11">Answer the four-primitive question in writing with grep evidence for the "existing / extension / cost-of-doing-nothing" triad. A justification that cannot name a concrete failure mode for cost-of-doing-nothing means the primitive should be merged into a sibling.</constraint>
+    <constraint source="ADR-038">This is a structural fitness function under `tests/Spaarke.ArchTests/**` — the EIGHTH KEEP path (Amendment A1). Naming convention B13 and setup-ratio B15 do NOT apply; the rule's name states the invariant it enforces.</constraint>
+    <constraint source="ADR-003">Fail closed: an unparseable or unclassifiable site must FAIL the census, never be silently skipped. Task 074 learned this — "unparseable registrations FAIL rather than being skipped".</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/unified-access-control-r2/notes/coordination-compose-r8-2026-08-27.md</file>
+      <file>projects/unified-access-control-r2/notes/wave2-parallel-merge-plan.md</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+      <file>tests/CLAUDE.md</file>
+    </files>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="0">Confirm PR #832 and the ten worktree branches have merged. If not, STOP — the seed would be wrong. This is a hard gate, not a preference.</step>
+    <step order="1">Re-run the detection over the merged tree. Do not reuse the 71 measured on 2026-08-27; it will have moved.</step>
+    <step order="2">Classify every site (a)/(b)/(c)/(d) per the constraint. Report all (d) findings separately — they are new security findings, not census bookkeeping.</step>
+    <step order="3">Write the ratchet with its negative + positive controls. Seed the count. Verify it goes red on a seeded new site and green on the sanctioned shape.</step>
+    <step order="4">Answer the §11 four-primitive question in writing. Recommend consolidate-or-keep per primitive with grep evidence.</step>
+    <step order="5">Build, full suite, publish size per the FIVE-FIELD convention in `.claude/constraints/azure-deployment.md` (command · RID/mode · configuration · compression level · PDBs in/out), CVE scan.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If classification finds ANY site in category (d) — a suspected live instance of the sub/oid defect outside PR #832's scope — STOP and surface it before finishing the census. A live authorization defect outranks the forcing function that would have caught it, and it may belong to `spaarkeai-compose-r8` rather than here.</trigger>
+    <trigger>If the honest classification is that two of the four primitives ARE duplicative, STOP and surface it. Merging two caller-identity primitives is not a census task — it is its own change with its own blast radius.</trigger>
+  </escalation>
+
+  <justification>
+    <existing>`CredentialGuardTests` + `CredentialCensusTests` (ADR-028 A4 secret-free invariant) and task 074's `RouteAuthorizationGuardTests` census are the same instrument on other surfaces. This extends a proven pattern; it invents nothing.</existing>
+    <extension>Cannot extend either existing census — `CredentialGuardTests` governs credential construction, 074 governs route authorization. Neither can express "who may read an identity claim", and widening either would blur what its failures mean. Task 074's own notes warn against exactly that blurring.</extension>
+    <cost-of-doing-nothing>A fifth caller-identity primitive, and further inline claim reads, arrive silently. Concretely: the `oid ?? NameIdentifier` idiom has ALREADY shipped four times in this codebase and was found by a sibling project, not by us — and ~40 claim-reading files sit outside that project's audited scope. Without a ratchet the next instance is found the same way: by someone else, later, in production.</cost-of-doing-nothing>
+  </justification>
+
+  <outputs>
+    <output type="test">tests/Spaarke.ArchTests/CallerIdentityCensusTests.cs</output>
+    <output type="notes">projects/unified-access-control-r2/notes/task-082-caller-identity-census.md — the classification table, the §11 answer, and every category (d) finding</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion>A newly added direct identity-claim read FAILS the build, proven by a seeded violation (negative control).</criterion>
+    <criterion>The sanctioned shape — consuming a named primitive — does NOT fail, proven by a positive control.</criterion>
+    <criterion>Every grandfathered site carries a written reason and a classification (a)/(b)/(c)/(d).</criterion>
+    <criterion>Every category (d) site is reported as a separate security finding, not absorbed into the census.</criterion>
+    <criterion>The §11 four-primitive question is answered in writing, per primitive, with grep evidence.</criterion>
+    <criterion>`Spaarke.Core/Auth/CallerIdentity.cs` is unmodified and is not flagged by the census.</criterion>
+    <criterion>Count seeded against the merged tree; suite green; publish size reported in the five-field convention.</criterion>
+  </acceptance-criteria>
+
+  <notes>This task exists because "that's a §11 consolidation question" is how a real problem gets buried. The owner's instruction on 2026-08-27 was explicit: a mechanism, not a note.
+
+The number to drive down is the count of files reading identity claims directly. It was 71 on 2026-08-27 against an unmerged tree; PR #832 covered 30 `src/server` files. Do not treat 71 as the seed — measure the merged tree.
+</notes>
+</task>

@@ -1,5 +1,6 @@
 using System.Net;
-using System.Net.Http.Headers;
+// using System.Net.Http.Headers; — orphaned by task 073's removal of UploadEndpoints_RequiresValidPath,
+// which was the file's only AuthenticationHeaderValue user.
 using System.Text.Json;
 using FluentAssertions;
 using Microsoft.AspNetCore.Mvc.Testing;
@@ -39,22 +40,14 @@ public class EndpointGroupingTests : IClassFixture<CustomWebAppFactory>
         problemDetails.TryGetProperty("status", out _).Should().BeTrue();
     }
 
-    [Fact(Skip = "Requires fully mocked Graph/Dataverse services - endpoint returns 404 without proper registration")]
-    public async Task UploadEndpoints_ReturnsProblemDetailsOnError()
-    {
-        // Attempt to create upload session without proper auth
-        var response = await _client.PostAsync("/api/containers/invalid-id/upload?path=test.txt", null);
-
-        response.StatusCode.Should().BeOneOf(HttpStatusCode.BadRequest, HttpStatusCode.Unauthorized);
-
-        var content = await response.Content.ReadAsStringAsync();
-        var problemDetails = JsonSerializer.Deserialize<JsonElement>(content);
-
-        // Should have RFC 7807 Problem Details structure
-        problemDetails.TryGetProperty("type", out _).Should().BeTrue();
-        problemDetails.TryGetProperty("title", out _).Should().BeTrue();
-        problemDetails.TryGetProperty("status", out _).Should().BeTrue();
-    }
+    // UploadEndpoints_ReturnsProblemDetailsOnError REMOVED 2026-08-26 (unified-access-control-r2
+    // task 073): it exercised POST /api/containers/{containerId}/upload, one of the three app-only
+    // container-keyed write routes retired with Api/UploadEndpoints.cs. It was already
+    // [Fact(Skip=...)], so it proved nothing — and per the same reasoning recorded below for
+    // DocumentsEndpoints_ListContainersRequiresValidContainerTypeId, a skipped test against a route
+    // that no longer exists is worse than no test, because it reads as coverage.
+    // Replacement (route ABSENCE, which is what is worth protecting now):
+    // tests/integration/regression/MiContainerKeyedWriteRouteRetirementTests.cs.
 
     [Fact]
     public async Task UserEndpoints_WithoutAuth_Return401()
@@ -72,32 +65,9 @@ public class EndpointGroupingTests : IClassFixture<CustomWebAppFactory>
     // dead endpoints deleted with obligation 031-A. It was already [Fact(Skip=...)], so it was
     // proving nothing — a skipped test against a route that no longer exists is worse than no test,
     // because it reads as coverage.
-    [Fact(Skip = "Requires fully mocked Graph/Dataverse services - endpoint returns 404 without proper registration")]
-    public async Task UploadEndpoints_RequiresValidPath()
-    {
-        // Must include auth header to pass RequireAuthorization() gate first,
-        // then the endpoint handler validates the path parameter.
-        _client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", "test-token");
-
-        // Invalid path with no filename
-        var response = await _client.PostAsync("/api/containers/test-id/upload?path=", null);
-
-        // Auth gate may still reject (authorization policy "canwritefiles" may fail)
-        // so accept either 400 (validation) or 401/403 (auth policy)
-        response.StatusCode.Should().BeOneOf(
-            HttpStatusCode.BadRequest,
-            HttpStatusCode.Unauthorized,
-            HttpStatusCode.Forbidden);
-
-        var content = await response.Content.ReadAsStringAsync();
-        var problemDetails = JsonSerializer.Deserialize<JsonElement>(content);
-
-        if (response.StatusCode == HttpStatusCode.BadRequest)
-        {
-            problemDetails.TryGetProperty("detail", out var detail).Should().BeTrue();
-            detail.GetString().Should().Contain("path");
-        }
-    }
+    // UploadEndpoints_RequiresValidPath REMOVED 2026-08-26 (unified-access-control-r2 task 073):
+    // same subject as above — POST /api/containers/{containerId}/upload, retired with
+    // Api/UploadEndpoints.cs. Also already [Fact(Skip=...)].
 
     [Fact(Skip = "Requires fully mocked Graph/Dataverse services - endpoint returns 404 without proper registration")]
     public async Task UserEndpoints_CapabilitiesRequiresContainerId()
@@ -114,27 +84,18 @@ public class EndpointGroupingTests : IClassFixture<CustomWebAppFactory>
         detail.GetString().Should().Contain("containerId");
     }
 
-    [Theory(Skip = "Requires fully mocked Graph/Dataverse services - endpoints return 404 without proper registration")]
-    [InlineData("/api/containers")]
-    [InlineData("/api/containers/test-id/drive")]
-    [InlineData("/api/containers/test-id/upload")]
-    public async Task DocumentEndpoints_ExistAndReturnConsistentErrorFormat(string endpoint)
-    {
-        var response = await _client.GetAsync(endpoint);
-
-        // Should return a valid HTTP status (not 404)
-        response.StatusCode.Should().NotBe(HttpStatusCode.NotFound);
-
-        if (response.StatusCode >= HttpStatusCode.BadRequest)
-        {
-            var content = await response.Content.ReadAsStringAsync();
-            content.Should().NotBeEmpty();
-
-            var problemDetails = JsonSerializer.Deserialize<JsonElement>(content);
-            problemDetails.TryGetProperty("type", out _).Should().BeTrue();
-            problemDetails.TryGetProperty("title", out _).Should().BeTrue();
-        }
-    }
+    // DocumentEndpoints_ExistAndReturnConsistentErrorFormat REMOVED 2026-08-26
+    // (unified-access-control-r2 task 073). Its assertion was `NotBe(404)` — "these routes exist" —
+    // over three InlineData cases, and ALL THREE subjects have since been deleted:
+    //   /api/containers                  — one of the six dead endpoints removed by
+    //                                      spaarke-auth-v4-dataverse-MI task 090 (obligation 031-A)
+    //   /api/containers/test-id/drive    — GET /api/containers/{containerId}/drive, deleted
+    //                                      2026-08-25 (commit c17e856f4)
+    //   /api/containers/test-id/upload   — retired by THIS task with Api/UploadEndpoints.cs
+    // So the test asserted the existence of nothing, while [Theory(Skip=...)] kept it from ever
+    // saying so. Route ABSENCE is now the invariant worth holding, and it is asserted in
+    // tests/integration/regression/MiContainerKeyedWriteRouteRetirementTests.cs (this task) and
+    // tests/integration/regression/OboDriveKeyedRouteRetirementTests.cs (task 071).
 
     [Fact]
     public async Task EmlRenderEndpoint_Unauthenticated_Returns401AndLeaksNoHtml()

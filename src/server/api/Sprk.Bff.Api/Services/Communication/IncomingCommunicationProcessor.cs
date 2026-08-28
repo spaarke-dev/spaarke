@@ -865,15 +865,6 @@ public sealed class IncomingCommunicationProcessor
             "Processing {Count} file attachments for incoming communication {CommunicationId}",
             fileAttachments.Count, communicationId);
 
-        var driveId = _options.ArchiveContainerId;
-        if (string.IsNullOrWhiteSpace(driveId))
-        {
-            _logger.LogWarning(
-                "ArchiveContainerId not configured; skipping attachment processing for {CommunicationId}",
-                communicationId);
-            return;
-        }
-
         var processedCount = 0;
 
         // FR-D1 / FR-06: resolve the RAG grounding key ONCE for this communication — every attachment
@@ -881,11 +872,24 @@ public sealed class IncomingCommunicationProcessor
         var parentEntity = await RegardingParentEntityMapper.ResolveAsync(
             _genericEntityService, communicationId, _logger, ct);
 
-        // SpeFileStore + IEmailAttachmentProcessor are Scoped — resolve them once per message from
-        // one scope (R4 / R10); shared across this message's attachments (stateless per unit of work).
+        // SpeFileStore + IEmailAttachmentProcessor + CommunicationContainerResolver are Scoped — resolve
+        // them once per message from one scope (R4 / R10); shared across this message's attachments
+        // (stateless per unit of work).
         using var scope = _scopeFactory.CreateScope();
         var speFileStore = scope.ServiceProvider.GetRequiredService<SpeFileStore>();
         var attachmentProcessor = scope.ServiceProvider.GetRequiredService<IEmailAttachmentProcessor>();
+
+        // unified-access-control-r2 task 075, STRATEGY 2. The archive container is no longer read straight
+        // from config: if this communication regards a SECURE record, its attachments belong in that record's
+        // own container, and if that container is missing they are not written anywhere at all. Reading
+        // _options.ArchiveContainerId directly here is what put secure attachments in the shared archive.
+        var driveId = await ResolveContainerForContentAsync(
+            scope, communicationId, "attachment processing", ct);
+
+        if (string.IsNullOrWhiteSpace(driveId))
+        {
+            return;
+        }
 
         foreach (var attachment in fileAttachments)
         {
@@ -982,30 +986,100 @@ public sealed class IncomingCommunicationProcessor
     }
 
     /// <summary>
+    /// unified-access-control-r2 task 075, STRATEGY 2 — decide where this communication's content belongs,
+    /// instead of reading <c>Communication:ArchiveContainerId</c> directly.
+    ///
+    /// <para>Returns the container to write into, or <c>null</c> meaning <b>write nothing anywhere</b>. The
+    /// caller MUST treat null as "skip", never as "use the archive container".</para>
+    ///
+    /// <para><b>The transient / permanent split, and why it matters here.</b> Two very different failures can
+    /// stop this returning a container:</para>
+    /// <list type="bullet">
+    /// <item><description><b>Permanent</b> — a regarding is secure and has no container of its own, or the
+    /// communication regards two secure records with different containers. Retrying cannot fix either; a
+    /// container does not appear because we asked again. So these are logged at Error and become a SKIP. The
+    /// bytes are not written, which is the fail-closed outcome, and the <c>sprk_communication</c> row itself
+    /// is already captured in Dataverse where row-level security applies. Throwing instead would produce a
+    /// retry loop that can never succeed AND would lose the message capture.</description></item>
+    /// <item><description><b>Transient</b> — Dataverse or the metadata service is unreachable, so
+    /// securability is UNKNOWN. These PROPAGATE, because a retry genuinely may succeed and because treating
+    /// "I could not find out" as "not secure" is the same isolation failure as a wrong answer. This is a
+    /// deliberate trade of availability for isolation on this path (the securable-entity list is cached for
+    /// 6h, so the exposure window is narrow).</description></item>
+    /// </list>
+    /// </summary>
+    private async Task<string?> ResolveContainerForContentAsync(
+        IServiceScope scope,
+        Guid communicationId,
+        string operation,
+        CancellationToken ct)
+    {
+        var containerResolver = scope.ServiceProvider
+            .GetRequiredService<Engine.CommunicationContainerResolver>();
+
+        try
+        {
+            var containerId = await containerResolver
+                .ResolveContainerAsync(communicationId, _options.ArchiveContainerId, ct)
+                .ConfigureAwait(false);
+
+            if (string.IsNullOrWhiteSpace(containerId))
+            {
+                // Unreachable for a secure record by construction — the resolver throws first — so this is
+                // only ever the pre-existing unconfigured-archive case.
+                _logger.LogWarning(
+                    "No SPE container resolved (ArchiveContainerId not configured and no secure regarding); "
+                    + "skipping {Operation} for {CommunicationId}",
+                    operation, communicationId);
+                return null;
+            }
+
+            return containerId;
+        }
+        catch (Infrastructure.Exceptions.SdapProblemException ex) when (
+            ex.Code is "secure_record_container_missing" or "communication_secure_container_ambiguous")
+        {
+            _logger.LogError(
+                ex,
+                "[SECURE-CONTAINER] REFUSING {Operation} for communication {CommunicationId}: {Code}. The "
+                + "content was NOT written to the shared archive container — SPE permissions are "
+                + "additive-only, so anything written there could never be retracted. The communication "
+                + "record itself is captured; only its SPE content is withheld. Resolve the secure record's "
+                + "container, then re-run archival for this communication.",
+                operation, communicationId, ex.Code);
+
+            return null;
+        }
+    }
+
+    /// <summary>
     /// Archives the incoming email as a .eml file in SPE and creates a sprk_document record.
     /// Follows the same pattern as CommunicationService.ArchiveToSpeAsync.
     /// </summary>
     private async Task ArchiveEmlAsync(
         Message message, string mailboxEmail, Guid communicationId, CancellationToken ct)
     {
-        var driveId = _options.ArchiveContainerId;
-        if (string.IsNullOrWhiteSpace(driveId))
-        {
-            _logger.LogWarning(
-                "ArchiveContainerId not configured; skipping .eml archival for {CommunicationId}",
-                communicationId);
-            return;
-        }
-
         // Use GraphMessageToEmlConverter for proper RFC 2822 .eml with preserved headers
         // (InternetMessageId, In-Reply-To, References) and inline attachments
         var emlResult = _emlConverter.ConvertToEml(message);
 
         var spePath = $"/communications/{communicationId:N}/{emlResult.FileName}";
         using var emlStream = new MemoryStream(emlResult.Content);
-        // SpeFileStore is Scoped — resolve it per-operation from a scope (R4).
+        // SpeFileStore + CommunicationContainerResolver are Scoped — resolve per-operation from a scope (R4).
         using var scope = _scopeFactory.CreateScope();
         var speFileStore = scope.ServiceProvider.GetRequiredService<SpeFileStore>();
+
+        // unified-access-control-r2 task 075, STRATEGY 2. A .eml is the FULL message body — for a secure
+        // matter it is at least as disclosing as any attachment, and it was previously archived to the
+        // shared container unconditionally.
+        var driveId = await ResolveContainerForContentAsync(
+            scope, communicationId, ".eml archival", ct);
+
+        if (string.IsNullOrWhiteSpace(driveId))
+        {
+            return;
+        }
+
         var fileHandle = await speFileStore.UploadSmallAsync(driveId, spePath, emlStream, ct);
 
         _logger.LogInformation(

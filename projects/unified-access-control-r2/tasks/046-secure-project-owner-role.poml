@@ -3,7 +3,7 @@
   <metadata>
     <title>Create the Secure Project Owner security role, assign it to the Secure Project owner team, and REMOVE System Administrator from that team</title>
     <phase>0b Review remediation</phase>
-    <status>pending</status>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>Dataverse security-role configuration on the business unit that the entire Secure Project isolation model depends on. Getting the depth wrong either breaks ownership assignment (provisioning fails closed) or over-grants on the BU whose reachability NFR-05 exists to guard.</rigor-reason>
     <model-tier>opus</model-tier>
@@ -125,5 +125,17 @@ WHAT MUST REMAIN TRUE AFTERWARDS:
     <criterion>The child-entity ownership question is answered from live metadata, with a recommendation.</criterion>
   </acceptance-criteria>
 
-  <notes>Design 5.1a's privilege list is a hypothesis to test, not a spec to implement — in particular USER depth may suffice for a team that owns the records, which would be tighter than the Business Unit depth currently written down and would narrow NFR-05's exemption. The task's value is the empirical answer plus the runbook, not the clicks.</notes>
+  <notes>Design 5.1a's privilege list is a hypothesis to test, not a spec to implement — in particular USER depth may suffice for a team that owns the records, which would be tighter than the Business Unit depth currently written down and would narrow NFR-05's exemption. The task's value is the empirical answer plus the runbook, not the clicks.
+
+COMPLETED 2026-08-25. Full write-up: notes/task-046-secure-project-owner-role.md
+
+The hypothesis was wrong in BOTH dimensions. Empirical minimum is ONE privilege: prvReadsprk_Project at USER (Basic) depth -- not seven at Business Unit depth. Dataverse named the one it needed when it was absent ("Principal team ... is missing prvReadsprk_Project privilege", with privilegeCount matching the role's real count, which is what proved the message was current rather than cached). Write proved unnecessary: the team is an ownership anchor and never an actor -- the BFF app user performs every mutation. Role e4ebabd9-b4a0-f111-aaac-000d3a99d1d7 is on that one team only (0 users, 0 other teams); System Administrator removed; team still memberless; assignment re-proven AFTER the removal.
+
+ESCALATION TRIGGER 3 FIRED, in a stronger form than written. The trigger anticipated child records being owned in a reachable BU. What was found is that the SECURE PROJECT ITSELF is reachable: Test User 1 -- an ordinary non-admin in the root BU -- read a real sprk_issecure=true record owned by the secure team, because Spaarke Basic User holds prvReadsprk_Project at Deep depth and Deep at root reaches every descendant BU. This is design 5.2's unremediated blocking prerequisite, now proven end-to-end rather than inferred from a depth census. The negative control passed (a Basic-depth principal WAS denied on the same record), which is what establishes that BU containment works once no ordinary role holds Deep or Global. The fix -- BU restructure per 5.2, or narrowing Deep to Local -- was deliberately NOT applied: editing an ordinary end-user role changes every user's effective access and is an owner decision, and the constraints forbid widening or otherwise papering over a failure to make it disappear.
+
+Two acceptance criteria are not met, both for that same external reason: "a non-admin cannot read a secure project" FAILS, and the share-then-read half of the sharing criterion is UNTESTABLE (every human with sprk_project Read holds Deep or Global, so no record exists that they cannot already read -- nothing to discriminate against). Nothing was stripped from any ordinary role.
+
+Child-entity question answered from live relationship metadata: 18 Spaarke business entities via 19 lookups, not the 3 named in this POML; sprk_document carries TWO (sprk_project and sprk_relatedproject). Nothing assigns children to the secure team, so they are unisolated independently of the depth defect. Filed as a separate task per the step-7 instruction -- extending task 021's assign is the wrong shape, since children are created continuously long after provisioning returns.
+
+Method note worth carrying forward: Dataverse's principal-privilege cache lags role edits by about one operation, and an early pass produced a false "assignment allowed with zero privileges". Re-probe until stable across 3+ polls and cross-check privilegeCount in any denial against the role's real count. Also: creating a role injects ~9 privileges at Global depth; AddPrivilegesRole re-injects the SharePoint four; ReplacePrivilegesRole does NOT remove them; only RemovePrivilegeRole does, one per call, with an entity-reference payload.
 </task>

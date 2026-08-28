@@ -4,7 +4,7 @@
     <title>Refresh the knowledge/sharepoint-embedded/ corpus</title>
     <phase>6 Hygiene + cross-cutting</phase>
     <gate>025 complete</gate>
-    <status>not-started</status>
+    <status>completed</status>
     <rigor>MINIMAL</rigor>
     <rigor-reason>Documentation refresh only — no code, no tests, no behavioural surface.</rigor-reason>
     <model-tier>sonnet</model-tier>

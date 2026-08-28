@@ -45,10 +45,34 @@ public interface IIdentityNormalizationService
     /// Dataverse <c>contact</c>, for the contact-only branch of the workforce→principal
     /// resolver (ADR-028 Amendment A2 · teams-app-r1 FR-04). Reuses the existing AAD-oid→contact
     /// cross-reference (<c>contact.azureactivedirectoryobjectid == oid</c>) and, when that field is
-    /// unpopulated for the caller, falls back to a <b>verified-email</b> match on
-    /// <c>contact.emailaddress1</c>. The email is taken from the already-validated workforce token
-    /// (tenant-verified by Entra), so no oid-binding / first-login hijack protection is required here
-    /// (that concern is specific to the CIAM external path in <c>ExternalParticipationService</c>).
+    /// unpopulated for the caller, falls back to an email match on <c>contact.emailaddress1</c>.
+    ///
+    /// <para>⚠️ <b>CORRECTED 2026-08-27 (task 013 / finding A-18).</b> This comment previously read:
+    /// <i>"The email is taken from the already-validated workforce token (tenant-verified by Entra),
+    /// so no oid-binding / first-login hijack protection is required here (that concern is specific to
+    /// the CIAM external path)."</i> <b>That is the exact assumption A-18 disproved, and it was load-bearing
+    /// — it is why this path shipped without the protection the CIAM path has.</b></para>
+    ///
+    /// <para>Two things make it false. (1) The email is NOT verified by anything in this codebase:
+    /// <c>WorkforcePrincipalResolver.ExtractVerifiedEmail</c> performs no verification — despite its name
+    /// — it returns the first present claim of <c>email</c> → <c>preferred_username</c> → <c>upn</c> →
+    /// <c>ClaimTypes.Email</c>. <c>preferred_username</c> and <c>upn</c> are mutable and Microsoft
+    /// documents them as unsuitable for authorization. (2) "Tenant-verified by Entra" does not hold for a
+    /// <b>multitenant</b> registration, and multitenant workforce sign-in is REQUIRED here, not incidental
+    /// — it is the Type 2 door (design.md §Principal types), prerequisite E-6, and ADR-028 Amendment A2
+    /// for the Teams host.</para>
+    ///
+    /// <para>Task 013 added the oid-binding guard to this method
+    /// (<c>DecideWorkforceEmailMatch</c>: deny when the contact is bound to a different oid, when the
+    /// email is ambiguous, when the caller oid is unusable, or when the binding is unreadable).
+    /// <b>Unbound contacts still resolve, per FR-12</b> — and because this plane never WRITES a binding
+    /// (unlike CIAM, which binds on first login and thereby closes its own window), the A-18 exposure
+    /// remains open indefinitely for any contact holding grants but no workforce oid. That is an open
+    /// escalation, not a closed finding: <b>do not mark A-18 closed on the strength of task 013 alone.</b></para>
+    ///
+    /// <para>🔴 This guard does NOT cover every caller of the email→contact path. See
+    /// <c>AccessibleRecordSetService</c>, which calls <c>ResolveExternalContactAsync(oid: null, …)</c> —
+    /// a different method that bypasses this guard by construction.</para>
     /// </summary>
     /// <param name="aadObjectId">The workforce token's AAD object id (<c>oid</c> claim). Primary key.</param>
     /// <param name="verifiedEmail">

@@ -1159,6 +1159,188 @@ public class SemanticSearchServiceTests
 
     #endregion
 
+    #region Associated-Only Parent-Id Regression Tests (unified-access-control-r2 task 070)
+
+    // ---------------------------------------------------------------------------------------
+    // REGRESSION: every associated-only row must carry the parent id the query was keyed by.
+    //
+    // MapDocumentEntityToSearchResult used to recover the parent from a switch over the entity
+    // type covering only `matter` / `project` / `invoice`, returning (null, null) otherwise —
+    // while SearchAssociatedOnlyAsync's dispatch also accepts `workassignment` and every
+    // `sprk_`-prefixed logical name ("both occur in the wild"). Rows for those five values came
+    // back with ParentEntityId == null.
+    //
+    // That was harmless until task 070 began authorizing RESULTS by parent id: a null parent
+    // correctly fails closed, so the endpoint dropped every row and answered HTTP 200 with an
+    // empty list — a Matter form silently showing no documents for five of the eight accepted
+    // entity types.
+    //
+    // The document these tests hand back carries matter/project/invoice lookup ids pointing at an
+    // UNRELATED record (StaleLookupParentId). That divergence is the instrument: it makes the
+    // *source* of ParentEntityId observable. The contract is that the id comes from the parent the
+    // query was keyed by — SearchAssociatedOnlyAsync queries BY that FK, so every returned row is
+    // a child of it by construction — and never from the row's own lookup fields. Re-deriving from
+    // the row is precisely the shape of the defect, so any return to it turns all eight cases red.
+    // ---------------------------------------------------------------------------------------
+
+    /// <summary>The parent record the associated-only query is keyed by.</summary>
+    private static readonly Guid AssociatedOnlyParentId =
+        Guid.Parse("11111111-1111-1111-1111-111111111111");
+
+    /// <summary>
+    /// An unrelated record id planted in the document's own lookup fields. Nothing may map it into
+    /// <c>ParentEntityId</c>; see the region comment.
+    /// </summary>
+    private const string StaleLookupParentId = "99999999-9999-9999-9999-999999999999";
+
+    private const string TestMatterName = "Acme Holdings v. Widget Co.";
+    private const string TestProjectName = "Q3 Data Migration";
+    private const string TestInvoiceName = "INV-2026-0042";
+
+    [Theory]
+    [InlineData("matter")]
+    [InlineData("sprk_matter")]
+    [InlineData("project")]
+    [InlineData("sprk_project")]
+    [InlineData("invoice")]
+    [InlineData("sprk_invoice")]
+    [InlineData("workassignment")]
+    [InlineData("sprk_workassignment")]
+    public async Task SearchAsync_AssociatedOnlyForAnyDispatchedEntityType_PopulatesParentEntityIdWithRequestedParent(
+        string entityType)
+    {
+        // Arrange
+        var service = CreateService();
+        SetupAssociatedOnlyDocuments(entityType, AssociatedOnlyParentId, CreateAssociatedDocument());
+        var request = CreateAssociatedOnlyRequest(entityType, AssociatedOnlyParentId);
+
+        // Act
+        var result = await service.SearchAsync(request, TestTenantId);
+
+        // Assert — the row survives (only the lookup query this entityType dispatches to was given
+        // documents, so reaching the response also proves the dispatch chose the right one), and it
+        // carries the parent the caller asked about, which is what result-level authorization keys on.
+        result.Results.Should().ContainSingle();
+        result.Results[0].ParentEntityId.Should().Be(AssociatedOnlyParentId.ToString());
+        result.Results[0].ParentEntityType.Should().Be(entityType);
+    }
+
+    [Theory]
+    [InlineData("matter", TestMatterName)]
+    [InlineData("sprk_matter", TestMatterName)]
+    [InlineData("project", TestProjectName)]
+    [InlineData("sprk_project", TestProjectName)]
+    [InlineData("invoice", TestInvoiceName)]
+    [InlineData("sprk_invoice", TestInvoiceName)]
+    // Work assignments have no display-name lookup on DocumentEntity. The documented trade-off is
+    // that an unmapped type loses the friendly NAME, not the row — so null name, row still present.
+    [InlineData("workassignment", null)]
+    [InlineData("sprk_workassignment", null)]
+    public async Task SearchAsync_AssociatedOnlyForAnyDispatchedEntityType_ResolvesParentDisplayNameFromMatchingLookup(
+        string entityType, string? expectedParentName)
+    {
+        // Arrange
+        var service = CreateService();
+        SetupAssociatedOnlyDocuments(entityType, AssociatedOnlyParentId, CreateAssociatedDocument());
+        var request = CreateAssociatedOnlyRequest(entityType, AssociatedOnlyParentId);
+
+        // Act
+        var result = await service.SearchAsync(request, TestTenantId);
+
+        // Assert — sourcing the id from the query key must not have cost the display name. Anchors
+        // the other half of the fix: the type switch still selects which lookup holds the name.
+        result.Results.Should().ContainSingle();
+        result.Results[0].ParentEntityName.Should().Be(expectedParentName);
+        result.Results[0].Name.Should().Be("Engagement Letter.pdf");
+    }
+
+    /// <summary>
+    /// A document as the associated-only path receives it from Dataverse, with one deliberate
+    /// distortion: its own matter/project/invoice lookup ids point at an unrelated record so the
+    /// origin of <c>ParentEntityId</c> is observable. See the region comment.
+    /// </summary>
+    private static DocumentEntity CreateAssociatedDocument() => new()
+    {
+        Id = "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa",
+        Name = "Engagement Letter.pdf",
+        FileName = "Engagement Letter.pdf",
+        DocumentType = "contract",
+        CreatedOn = new DateTime(2026, 8, 1, 12, 0, 0, DateTimeKind.Utc),
+        ModifiedOn = new DateTime(2026, 8, 2, 12, 0, 0, DateTimeKind.Utc),
+        MatterId = StaleLookupParentId,
+        MatterName = TestMatterName,
+        ProjectId = StaleLookupParentId,
+        ProjectName = TestProjectName,
+        InvoiceId = StaleLookupParentId,
+        InvoiceName = TestInvoiceName
+    };
+
+    private static SemanticSearchRequest CreateAssociatedOnlyRequest(string entityType, Guid parentId) => new()
+    {
+        Scope = SearchScope.Entity,
+        EntityType = entityType,
+        EntityId = parentId.ToString(),
+        AssociatedOnly = true
+    };
+
+    /// <summary>
+    /// Points every parent-lookup query at an empty result, then gives documents to ONLY the query
+    /// <paramref name="entityType"/> should dispatch to — and only for <paramref name="parentId"/>.
+    /// </summary>
+    private void SetupAssociatedOnlyDocuments(string entityType, Guid parentId, params DocumentEntity[] documents)
+    {
+        _dataverseServiceMock
+            .Setup(x => x.GetDocumentsByMatterAsync(
+                It.IsAny<Guid>(), It.IsAny<Guid?>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(Array.Empty<DocumentEntity>());
+        _dataverseServiceMock
+            .Setup(x => x.GetDocumentsByProjectAsync(
+                It.IsAny<Guid>(), It.IsAny<Guid?>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(Array.Empty<DocumentEntity>());
+        _dataverseServiceMock
+            .Setup(x => x.GetDocumentsByInvoiceAsync(
+                It.IsAny<Guid>(), It.IsAny<Guid?>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(Array.Empty<DocumentEntity>());
+        _dataverseServiceMock
+            .Setup(x => x.GetDocumentsByWorkAssignmentAsync(
+                It.IsAny<Guid>(), It.IsAny<Guid?>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(Array.Empty<DocumentEntity>());
+
+        switch (entityType.ToLowerInvariant())
+        {
+            case "matter" or "sprk_matter":
+                _dataverseServiceMock
+                    .Setup(x => x.GetDocumentsByMatterAsync(
+                        parentId, It.IsAny<Guid?>(), It.IsAny<CancellationToken>()))
+                    .ReturnsAsync(documents);
+                break;
+            case "project" or "sprk_project":
+                _dataverseServiceMock
+                    .Setup(x => x.GetDocumentsByProjectAsync(
+                        parentId, It.IsAny<Guid?>(), It.IsAny<CancellationToken>()))
+                    .ReturnsAsync(documents);
+                break;
+            case "invoice" or "sprk_invoice":
+                _dataverseServiceMock
+                    .Setup(x => x.GetDocumentsByInvoiceAsync(
+                        parentId, It.IsAny<Guid?>(), It.IsAny<CancellationToken>()))
+                    .ReturnsAsync(documents);
+                break;
+            case "workassignment" or "sprk_workassignment":
+                _dataverseServiceMock
+                    .Setup(x => x.GetDocumentsByWorkAssignmentAsync(
+                        parentId, It.IsAny<Guid?>(), It.IsAny<CancellationToken>()))
+                    .ReturnsAsync(documents);
+                break;
+            default:
+                throw new ArgumentOutOfRangeException(
+                    nameof(entityType), entityType,
+                    "Test setup does not know which lookup query this entityType dispatches to.");
+        }
+    }
+
+    #endregion
+
     #region Helper Methods
 
     private void SetupMockEmbedding()

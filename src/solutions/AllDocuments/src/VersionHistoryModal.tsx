@@ -136,10 +136,14 @@ export interface VersionHistoryModalProps {
   documentName: string;
   /** File extension (e.g. "docx", "pdf") — drives open-vs-download behavior. */
   fileType?: string;
-  /** SPE drive id (sprk_graphdriveid on the sprk_document record). */
-  driveId: string;
-  /** SPE item id (sprk_graphitemid on the sprk_document record). */
-  itemId: string;
+  /**
+   * The `sprk_document` row id (sprk_documentid).
+   *
+   * unified-access-control-r2 task 079: this replaced the `driveId`/`itemId` pair.
+   * The server resolves the SPE drive/item off the row AFTER authorizing the caller
+   * for it, so the client no longer names the SPE item it wants to read.
+   */
+  documentId: string;
 }
 
 // ---------------------------------------------------------------------------
@@ -151,8 +155,7 @@ export const VersionHistoryModal: React.FC<VersionHistoryModalProps> = ({
   onClose,
   documentName,
   fileType,
-  driveId,
-  itemId,
+  documentId,
 }) => {
   const styles = useStyles();
   const [versions, setVersions] = React.useState<IVersionInfo[]>([]);
@@ -166,7 +169,7 @@ export const VersionHistoryModal: React.FC<VersionHistoryModalProps> = ({
     setIsLoading(true);
     setError(null);
     try {
-      const result = await listVersions(driveId, itemId);
+      const result = await listVersions(documentId);
       setVersions(result ?? []);
     } catch (err) {
       console.error("[AllDocuments] version list fetch error:", err);
@@ -174,7 +177,7 @@ export const VersionHistoryModal: React.FC<VersionHistoryModalProps> = ({
     } finally {
       setIsLoading(false);
     }
-  }, [driveId, itemId]);
+  }, [documentId]);
 
   React.useEffect(() => {
     if (open) {
@@ -188,7 +191,7 @@ export const VersionHistoryModal: React.FC<VersionHistoryModalProps> = ({
       setOpeningId(versionId);
       setError(null);
       try {
-        await openPriorVersionReadOnly(driveId, itemId, versionId, documentName, fileType);
+        await openPriorVersionReadOnly(documentId, versionId, documentName, fileType);
         setViewedVersionId(versionId);
       } catch (err) {
         console.error("[AllDocuments] open prior version error:", err);
@@ -197,7 +200,7 @@ export const VersionHistoryModal: React.FC<VersionHistoryModalProps> = ({
         setOpeningId(null);
       }
     },
-    [driveId, itemId, documentName, fileType]
+    [documentId, documentName, fileType]
   );
 
   return (

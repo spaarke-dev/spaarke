@@ -1,0 +1,287 @@
+# Task 075 — Record-aware container resolver
+
+> **Status**: shipped · **Date**: 2026-08-26 · **Rigor**: FULL (opus @ xhigh)
+> Wave 2 of Phase 0c Secure Documents. Task 076 routes the call sites onto this seam.
+
+---
+
+## 1. Step 0 — what was verified before designing anything
+
+| Claim in the POML | Verified how | Result |
+|---|---|---|
+| No server path reads `sprk_project.sprk_containerid` outside provisioning | `grep -rn "sprk_containerid" src/server/ --include=*.cs` | **CONFIRMED.** Every hit is either provisioning (`ProvisionProjectEndpoint`), a doc-comment, a `sprk_document`/`sprk_container` column list, or `WorkingDocumentService`/`AnalysisChatContextResolver` reading it off a **matter** for Compose/analysis output — none of which is the upload decision. Nothing consumed the stamp as a storage decision. |
+| `sprk_issecure` exists on exactly 3 entities | Not hard-coded — see §3.3. The registry derives it from live metadata at runtime, so the count is whatever Dataverse says. | Design does not depend on the number |
+| Strategy 2 (`ArchiveContainerId`) is the easy one to forget | `grep -rn "ArchiveContainerId"` | **Wider than the POML said** — see §6 finding F-1. Not 2 sites (`IncomingCommunicationProcessor:868,991`) but **9** across 3 files. |
+| Strategy 3 (document's own pointers) needs no change | Read `Infrastructure/Dataverse/DocumentStorageResolver.cs` | **CONFIRMED** — it answers `documentId → (DriveId, ItemId)`, a different question. Untouched. |
+
+---
+
+## 2. The seam, in one paragraph
+
+`IRecordContainerResolver` answers **both** directions of one mapping:
+
+```
+ResolveForRecordAsync(entityLogicalName, recordId, nonSecureFallbackContainerId)  →  ContainerResolution
+ResolveOwningRecordAsync(containerId)                                            →  OwningSecureRecord?
+```
+
+The forward direction **throws** rather than returning a sentinel when a secure record has no
+container of its own. The reverse direction is what tasks 073 and 078 authorize against.
+
+### Why the forward direction throws
+
+A discriminated result (`Resolved | FailClosed`) relies on every caller checking the discriminant.
+The POML's `<role>` asks for a seam "impossible to bypass **by accident**", and the entire failure
+mode being removed is a *silent* substitution. A caller that ignores a return value proceeds with a
+shared container; a caller that ignores an exception does not proceed at all. So:
+
+- **secure + own container present** → returns it (`Source = SecureRecordOwnContainer`)
+- **secure + own container absent/blank** → **throws** `SdapProblemException("secure_record_container_missing", 409)`
+- **not secure** → returns the caller's fallback (`Source = NonSecureFallback`)
+- **not secure + no fallback** → returns `ContainerId = null`, `Source = Unresolved` — preserves the
+  existing "log a warning and skip" behaviour of the archive path, which is a config-absence case,
+  not a security case.
+
+**The load-bearing invariant**: `Source == Unresolved` ⟹ the record is **not** secure. There is no
+input for which a secure record yields `Unresolved`, because that branch throws first. Pinned by a
+test (`Unresolved_IsUnreachable_ForASecureRecord`).
+
+### Fail-closed also covers "I could not find out"
+
+If securability cannot be *determined* — the metadata probe throws, the record read throws, the
+record is missing — the resolver **throws**. It never treats "unknown" as "not secure". This is
+build-plan rule 1 ("any error, null, or missing config denies") applied to the question *is this
+record secure?* rather than only to the question *where is its container?* An unknown-securability
+answer silently read as "not secure" is the same isolation failure with an extra step.
+
+---
+
+## 3. Components
+
+### 3.1 `SecureContainerDecision` — the pure decision
+
+`Infrastructure/Dataverse/SecureContainerDecision.cs`. One `static` method, no I/O, no dependencies:
+
+```csharp
+Decide(bool isSecure, string? ownContainerId, string? fallbackContainerId) → Outcome
+```
+
+Everything else in this task is data-fetching that funnels into this call. Both the resolver and the
+ingest path reach the decision through it, so there is exactly one place in C# where the rule lives.
+
+### 3.2 `RecordContainerResolver` — the data-fetching half
+
+`Infrastructure/Dataverse/RecordContainerResolver.cs`. Registered **Scoped**, unconditionally, in
+`Program.cs` next to `IDocumentStorageResolver` (§5). Deps: `ISecurableEntityRegistry`,
+`IGenericEntityService`, `ILogger`. No Graph types — ADR-007 respected; this component never touches
+SPE, it only decides which container id to hand to `SpeFileStore`.
+
+### 3.3 `SecurableEntityRegistry` — the metadata-derived list
+
+`Infrastructure/Dataverse/SecurableEntityRegistry.cs`. The POML forbids a hard-coded list ("a fourth
+securable entity must not silently bypass the resolver"). Derivation is a single
+`RetrieveMetadataChangesRequest` filtered to the attribute `sprk_issecure`, projecting only logical
+names; any entity that comes back carrying the attribute is securable.
+
+- Cached in the shared `IDistributedCache` for 6h under `sdap:dv:securable-entities`, matching the
+  `MetadataService` precedent (ADR-029, one Redis per BFF).
+- **Cache failure is graceful; metadata failure is not.** An unreachable Redis falls through to a
+  live query (same as `MetadataService`). An unreachable *Dataverse metadata service* throws — see
+  "fail-closed also covers I could not find out" above.
+- A **negative** result is cached too, so the common non-securable case costs one lookup per 6h
+  rather than one metadata round-trip per upload.
+
+### 3.4 The reverse direction, and the ambiguity case that matters
+
+`ResolveOwningRecordAsync(containerId)` queries each securable entity for rows whose
+`sprk_containerid` equals the given container, then:
+
+| Claimants found | Answer | Why |
+|---|---|---|
+| none | `null` — "not a record-owned container" | A BU/archive container. 073/078 decide what to do with that; the resolver does not guess. |
+| exactly one, and it is secure | that record | The intended case |
+| one secure claimant **plus** any non-secure claimant | **throws** | A secure record's container is also some non-secure record's container. That is co-mingling — the exact condition this wave exists to prevent — so it must be loud, not resolved. |
+| more than one secure claimant | **throws** | Two secure records sharing one container is an isolation violation |
+| claimants exist but none is secure | `null` | Shared container, as above |
+
+This matters **today**, not hypothetically: three live projects carry the ROOT BU's container id
+(POML `<origin>`). Under the old code that is invisible. Under this mapping, the moment one of those
+projects becomes secure, the reverse lookup refuses instead of answering.
+
+---
+
+## 4. INV-7 and the client/server split — the honest account
+
+**This is the part the POML told me to surface rather than absorb quietly, so it is stated in full.**
+
+The decision now exists **twice**: once in C# (`SecureContainerDecision.Decide`) and once in
+TypeScript (`decideContainer` in `RecordContainerResolver.ts`). A single implementation *is*
+technically possible — put the decision on the server and have the client ask over HTTP. I built the
+two-half version instead, for three specific reasons:
+
+1. **A recordId → containerId HTTP endpoint is a new disclosure primitive, and this project has a
+   live finding of exactly that shape.** Task 070 deliberately *stopped* emitting `driveId` /
+   `speFileId` to clients. Task 081 is open on master because
+   `Endpoints/Diagnostics/TenantContainerResolverEndpoint.cs` — a route whose purpose is "resolve the
+   SPE container id" — takes `tenantId` from the query string and leaks another tenant's container.
+   Adding a second container-id-resolving route while the first one is an open cross-tenant finding
+   is the wrong direction.
+2. **It would need a record-scoped authorization filter that does not exist.** `AddDocumentAuthorizationFilter`
+   resolves rights for `sprk_documents` GUIDs. Pointing it at a project/matter id is precisely
+   finding #4's wrong-resource-domain defect (`ResourceAccessHandler.ExtractResourceId` accepts
+   `containerId`/`driveId`/`documentId`/`id` interchangeably), which task 074 pinned in
+   `PolicyOnlyRoutes` rather than accept.
+3. **The BFF is not reachable from every client surface.** Task 076's own analysis notes that an
+   absent `authFetch`/`bffBaseUrl` skips provisioning silently. A resolver that *requires* the BFF
+   would have to fail closed on every upload — including non-secure ones — whenever the BFF is
+   unreachable. The client can answer both halves of the question from host-context `Xrm.WebApi`
+   under the user's own Dataverse security, with no BFF dependency
+   (`docs/standards/DATA-ACCESS-DECISION-CRITERIA.md`).
+
+There is also a census cost: `RouteAuthorizationGuardTests.ExpectedEndpointFileCount` is pinned at
+111, so a new endpoint file fails the build until classified. That is the ratchet working correctly,
+and it is a reason to be sure a new route is warranted — not by itself a reason to avoid one.
+
+### How drift is prevented — a fixture, not a promise
+
+`tests/fixtures/secure-container-decision-table.json` is a machine-readable decision table with 14
+cases. **Both** halves' test suites load **that same file** and drive their own pure decision
+function against it:
+
+- C# — `tests/integration/auth/UnifiedAccessControl/SecureContainerDecisionTableTests.cs`
+- TS — `src/client/shared/Spaarke.UI.Components/src/services/__tests__/RecordContainerResolver.test.ts`
+
+Consequences, all mechanical:
+
+- Change one half's behaviour → that half's test fails against the fixture.
+- Change the fixture to match one half → the **other** half's test fails.
+- Add a case to the fixture → both halves must implement it.
+- Each suite asserts the fixture's **case count** and that every case name was exercised, so a suite
+  cannot silently stop reading the file and pass vacuously (the same "vacuous pass" guard task 074
+  used in `ScannerAccountsForEveryRegistrationInTheGovernedFiles`).
+
+The residual is honest and bounded: the fixture pins **behaviour**, not source. Two halves can still
+diverge in what they *fetch* (which columns, which entity) — only their decisions are pinned. Closing
+that would take the record-keyed upload contract in §7.
+
+---
+
+## 5. Placement Justification (root CLAUDE.md §10)
+
+**In the BFF.** Criteria from `.claude/constraints/bff-extensions.md`:
+
+- **Is it a client concern?** No. The reverse mapping (container → owning record) is an
+  authorization input for tasks 073/078 and can only be trusted server-side. The forward mapping is
+  needed in-proc by server ingest, which has no client at all.
+- **Does it belong in Provisioning ControlPlane?** No — this is a per-request read on the document
+  path, not environment setup. Provisioning *writes* the stamp; this *reads* it.
+- **New package?** None. Uses `MetadataService`'s existing SDK surface and `IGenericEntityService`.
+- **New DI registration?** Three, all Scoped, all unconditional (no feature gate → no ADR-032
+  Null-Object question arises).
+- **Publish size**: see §8.
+
+**Component justification (root CLAUDE.md §11), three questions:**
+
+1. **Existing** — `IDocumentStorageResolver` (documentId → drive/item pointers, i.e. strategy 3);
+   `MetadataService` (entity metadata projection); the client BU cascade
+   (`getSpeContainerIdFromBusinessUnit`). Verified by grep, not assumed.
+2. **Extension** — cannot extend any of them. `IDocumentStorageResolver` answers a different
+   question about a different entity (an existing `sprk_document`, not the owning record) and has no
+   notion of record security. `MetadataService` is a metadata projector, not a storage decision — but
+   it *is* reused as this component's metadata source rather than issuing its own
+   `RetrieveEntityRequest`. The BU cascade is client-side by design (INV-7) and has no notion of
+   record security. This component is the join.
+3. **Cost-of-doing-nothing** — a concrete, current behaviour: `IncomingCommunicationProcessor:868`
+   PUTs an inbound email attachment into `Communication:ArchiveContainerId` regardless of whether the
+   communication's regarding is a secure matter. Because SPE permissions are additive-only, that byte
+   is then readable by every member of the shared archive container and **no later permission change
+   can retract it**.
+
+---
+
+## 6. Findings the POML did not anticipate
+
+### F-1 · Strategy 2 is 9 call sites in 3 files, not 2 in 1
+
+The POML and design §5.1c both name `IncomingCommunicationProcessor:868, 991`. Actual inventory:
+
+| File | Lines | What |
+|---|---|---|
+| `Services/Communication/IncomingCommunicationProcessor.cs` | 868, 991 | inbound attachments; inbound `.eml` |
+| `Services/Communication/CommunicationService.cs` | 460, 1259, 1574, 2054, 2146 | outbound archive + 4 more |
+| `Services/Communication/MessageAttachmentMaterializer.cs` | 114 | message attachments |
+
+Task 075 routes the two the POML names (its `<outputs>` scope: "the ingest/archive path"). **The other
+seven are task 076's**, and 076's POML lists only `IncomingCommunicationProcessor` — so 076 will
+under-count unless told. Flagged to the orchestrator; see the final report.
+
+### F-2 · `CommunicationService.cs:2368` already says the legacy path "is no longer used here"
+
+A comment claims `_options.ArchiveContainerId` is no longer used at that site while five other sites
+in the same file still read it. Whoever routes that file must not trust the comment.
+
+### F-3 · The reverse mapping is ambiguous on live data *right now*
+
+Three projects share the root BU's container id. Handled (§3.4) by refusing rather than guessing, but
+it means the reverse direction is **not** a total function on the current dev data, and task 073 must
+treat `null` ("no record owns this container") as its own decision rather than an error.
+
+### F-4 · A securable record is not the same thing as an *upload context*
+
+The resolver answers about the record it is given. A document uploaded against a
+`sprk_communication` whose regarding is a secure matter will resolve to the archive container unless
+the caller asks about the **parent**. That is why the ingest wiring resolves the communication's
+primary regarding first (`RegardingFieldMap.All` priority order) and asks about *that*. Any other
+child-entity upload path has the same trap, and it is the shape of 076's escalation trigger.
+
+---
+
+## 7. What this task deliberately does NOT do
+
+- **It does not change the upload contract.** The architecturally cleaner end state is a
+  **record-keyed** upload (`PUT …/records/{entity}/{id}/files/…`): the server resolves the container
+  from the record it is already authorizing, the client never decides, and the two-implementation
+  question in §4 disappears entirely. That is a contract change spanning 073's authorization and
+  076's routing, so it is recorded here as the recommended direction rather than smuggled in.
+- **It does not migrate anything.** Zero secure projects exist (build plan §2). The escalation
+  trigger for pre-existing shared-container content did not fire.
+- **It does not touch `sprk_issecure` in the authorization/read path** — Wave 3.
+- **It does not grant SPE container permissions.** `GrantMembershipAsync` still has zero callers.
+
+---
+
+## 8. Verification
+
+| Gate | Result |
+|---|---|
+| `dotnet build src/server/api/Sprk.Bff.Api/` | ✅ 0 warnings, 0 errors |
+| `dotnet test tests/unit/Sprk.Bff.Api.Tests/` | ✅ **11,196 passed / 0 failed / 82 skipped** — baseline was 11,172/0/82, delta **+24** = exactly the new C# tests |
+| New C# tests | 24 passed (`SecureContainerDecisionTableTests` 4, `RecordContainerResolverTests` 20) |
+| New TS tests | 35 passed (`RecordContainerResolver.test.ts`) |
+| `dotnet test tests/Spaarke.ArchTests/` | ✅ 9 failed / 105 passed — **exact known master baseline** (FR-27 ×2, FR-28, FR-29, FR-32, FR-F1, FR-F2, ADR-010, ServiceBusClientGuard). **Zero delta.** All four task-074 route-authorization facts pass, including the pinned 111-file census — this task adds no endpoint file and registers no route |
+| Publish size | **45.10 MB compressed incl. PDBs** vs 45.08 MB baseline → **+0.02 MB**. Ceiling 60 MB; escalation threshold +5 MB single-task. Uncompressed 137.61 MB / 135.33 MB excl. PDBs (stated because the baseline convention is *compressed*, which is a trap: the raw directory is ~3× the quoted figure) |
+| `dotnet list package --vulnerable --include-transitive` | ✅ no vulnerable packages, any severity |
+| `npx tsc --noEmit` | 3 pre-existing errors, none in this task's files (`@spaarke/auth` / `@spaarke/sdap-client` sibling workspace packages are not built in this worktree) |
+| `npx eslint` on the new TS | ✅ clean |
+
+## 9. Perturbation results
+
+A perturbation that does not bite is not evidence until the perturbed source is confirmed present in
+the built artifact, so **every** run below did an explicit `dotnet build` of BOTH the API and the test
+project first — `dotnet test` will otherwise happily reuse a stale assembly and report a false PASS
+(this produced a false pass on task 072).
+
+| # | What was broken | Expected | Actual |
+|---|---|---|---|
+| 1 | `SecureContainerDecision.Decide` — secure + no own container returns `ResolvedFallback(fallback)` instead of `FailClosed`. The exact historical defect. | fail-closed tests go red | ✅ **9 red / 15 pass**: `a secure record with NO container FAILS CLOSED even though a fallback is available`, all 4 blank-form theory cases, `'unresolved' is unreachable for a secure record` (×2, table + code), `the C# decision matches every case in the shared decision table`, `a resolved outcome always carries a container id` |
+| 2 | `RecordContainerResolver.ResolveOwningRecordAsync` — the co-mingling refusal condition changed to `secureClaimants.Count > 99` (never true) | reverse ambiguity tests go red | ✅ **2 red / 18 pass**: `two secure records claiming one container refuses`, `a secure record SHARING its container with a non-secure record refuses` |
+| 3 | `decideContainer` in TypeScript — same defect as #1, injected into the client half only | the shared-fixture cases go red on the TS side | ✅ **11 red / 24 pass**: the 3 `*-FAILS-CLOSED` fixture cases, the vacuous-pass guard, the secure-record invariant, and all 6 client-resolver fail-closed assertions |
+
+Perturbation #3 is the one that matters most for §4: it proves the shared fixture genuinely pins
+**both** halves rather than each half marking its own homework. Perturbation #2's first attempt used
+`if (false)`, which **failed to compile** (`CS0162 Unreachable code detected` — warnings are errors
+here). Worth recording: that is the failure mode the explicit-build rule exists to catch. Had the
+build error been ignored, `dotnet test` would have run the previous assembly and reported green,
+which reads exactly like "the perturbation did not bite".
+
+All three perturbations were reverted and the suites re-run green (24 C# / 35 TS) before commit.

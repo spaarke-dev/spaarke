@@ -7,6 +7,7 @@ using Sprk.Bff.Api.Infrastructure.Errors;
 using Sprk.Bff.Api.Infrastructure.Graph;
 using Sprk.Bff.Api.Services.Ai.Membership.Events;
 using Sprk.Bff.Api.Telemetry;
+using Sprk.Bff.Api.Infrastructure.Authentication;
 
 namespace Sprk.Bff.Api.Api;
 
@@ -36,8 +37,7 @@ public static class DataverseDocumentsEndpoints
             CancellationToken ct) =>
         {
             var traceId = context.TraceIdentifier;
-            var userId = context.User.FindFirstValue(ClaimTypes.NameIdentifier)
-                ?? context.User.FindFirstValue("oid");
+            var userId = CallerResolution.ResolveObjectId(context.User);
 
             try
             {
@@ -317,7 +317,8 @@ public static class DataverseDocumentsEndpoints
             CancellationToken ct) =>
         {
             var traceId = context.TraceIdentifier;
-            var userId = context.User.FindFirst(ClaimTypes.NameIdentifier)?.Value;
+            // Entra `oid` so audit rows correlate with the Dataverse systemuser (not `sub`).
+            var userId = CallerResolution.ResolveObjectId(context.User);
 
             // Start telemetry tracking (FR-03: audit logging)
             var stopwatch = documentTelemetry.RecordDownloadStart(id, userId);
