@@ -1,7 +1,8 @@
 # Issue #863 — session ownership: what was actually wrong, and what is now in the tree
 
-> **Status**: production code COMPLETE and building · guard test GREEN and proven non-vacuous ·
-> **11 test failures remain**, all named below · **one open decision needs the owner** (§5).
+> **Status**: production code COMPLETE · guard test (5) and denial suite (8) GREEN, both proven
+> non-vacuous · errorCode decision RESOLVED (§5) · **22 test failures remain**, all one fixture
+> family, characterised in §7 with the repair for each shape.
 > **Date**: 2026-08-28 · **Project**: `spaarkeai-compose-r8` · **Origin**: task 059 §6a.
 
 ---
