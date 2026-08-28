@@ -577,7 +577,7 @@ public class ReAnalysisFlowTestFixture : WebApplicationFactory<Program>
                     new Sprk.Bff.Api.Models.Ai.Chat.ChatMessage(
                         "msg-002", TestSessionId, ChatMessageRole.Assistant,
                         "Here are the findings.", 20, now.AddMinutes(-1), 2)
-                ]));
+                ]) { OwnerOid = TestSessionOwner.Oid });
 
         // Error session -- same structure but different ID
         MockDataverseRepository

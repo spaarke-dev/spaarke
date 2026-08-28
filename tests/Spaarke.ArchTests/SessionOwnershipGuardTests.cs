@@ -49,6 +49,12 @@ public class SessionOwnershipGuardTests
                 + "The handler answers 404 for a prior session the caller does not own — deliberately "
                 + "the same answer as a missing one, so the route is not an existence oracle.",
 
+            ["Api/ComposeActiveDocumentEndpoints.cs"] =
+                "POST /api/compose/active-document takes sessionId in the body and MUTATES that "
+                + "session. The document session it mints INHERITS the parent's owner, so an "
+                + "unchecked parent would hand the caller a child session owned by someone else. "
+                + "Denies with the same answer as not-found.",
+
             ["Api/Agent/AgentEndpoints.cs"] =
                 "POST /api/agent/message takes ConversationReference (a session id) in the body. A "
                 + "reference the caller does not own is treated exactly like a stale one: mint a new "

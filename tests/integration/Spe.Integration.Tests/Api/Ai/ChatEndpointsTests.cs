@@ -924,7 +924,7 @@ public class ChatEndpointsTestFixture : WebApplicationFactory<Program>
                     new Sprk.Bff.Api.Models.Ai.Chat.ChatMessage(
                         "msg-002", TestSessionId, ChatMessageRole.Assistant,
                         "Hi there!", 10, now.AddMinutes(-1), 2)
-                ]));
+                ]) { OwnerOid = TestSessionOwner.Oid });
 
         // GetSessionAsync — returns null for any other session ID (triggers 404)
         MockDataverseRepository

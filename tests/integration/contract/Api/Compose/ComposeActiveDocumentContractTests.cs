@@ -564,7 +564,9 @@ public sealed class ComposeActiveDocumentFixture : WebApplicationFactory<Program
     public HttpClient CreateAuthenticatedClient()
     {
         var client = CreateClient(new WebApplicationFactoryClientOptions { AllowAutoRedirect = false });
-        client.DefaultRequestHeaders.Add("X-Test-User", Guid.NewGuid().ToString());
+        // Issue #863: a STABLE test user. A fresh Guid per client meant the caller identity
+        // changed between the seed and the request, so an ownership check could never pass.
+        client.DefaultRequestHeaders.Add("X-Test-User", TestSessionOwner.Oid);
         // The register endpoint reads the tenant from the `tid` claim only (task 059). The fake auth
         // handler emits it, so no tenant header is sent — as in production.
         client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", "test-token");

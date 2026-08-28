@@ -91,6 +91,27 @@ internal static class ComposeActiveDocumentEndpoints
         {
             var (session, sessionKey) = await ResolveSessionAsync(sessionManager, tenantId, body.SessionId, ct)
                 .ConfigureAwait(false);
+
+            // Issue #863 — this route takes its session id in the BODY, so SessionOwnershipFilter
+            // (route-value based) does not cover it; the check lives here and the route is
+            // enumerated in SessionOwnershipGuardTests.BodyScopedSessionRoutes. It matters twice
+            // over: registering an active document MUTATES the named session, and the document
+            // session minted below INHERITS this one's owner — so an unchecked parent would hand a
+            // caller a child session owned by someone else.
+            // Not-yours and not-found are deliberately the same answer (see the filter's remarks).
+            if (session is not null
+                && !string.Equals(
+                    session.OwnerOid,
+                    CallerResolution.ResolveObjectId(httpContext.User),
+                    StringComparison.Ordinal))
+            {
+                logger.LogWarning(
+                    "Compose active-document DENIED: session={SessionId} tenant={TenantId} is not " +
+                    "owned by the caller. Answered 404. TraceId={TraceId}",
+                    body.SessionId, tenantId, httpContext.TraceIdentifier);
+                session = null;
+            }
+
             if (session is null)
             {
                 logger.LogWarning(
@@ -260,7 +281,18 @@ internal static class ComposeActiveDocumentEndpoints
             CreatedAt: now,
             LastActivity: now,
             Messages: [],
-            HostContext: chatSession.HostContext);
+            HostContext: chatSession.HostContext)
+        {
+            // Issue #863 — the document session INHERITS its parent chat session's owner. It is a
+            // child of that conversation, minted on the caller's behalf, and every later request to
+            // it goes through SessionOwnershipFilter.
+            //
+            // Without this the session is created UNOWNED, which fails closed — so the very next
+            // dispatch to the Compose document the user just registered would 404 for the user who
+            // registered it. Caught by ComposeDocSessionDispatchSeamTests (the DEF-11 regression
+            // guard), which is exactly the class of defect that guard exists to hold.
+            OwnerOid = chatSession.OwnerOid,
+        };
 
         await sessionManager.UpdateSessionCacheAsync(documentSession, ct).ConfigureAwait(false);
     }

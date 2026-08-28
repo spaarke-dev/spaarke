@@ -182,7 +182,7 @@ public class AnalysisPromoteEndpointContractTests : IClassFixture<AnalysisPromot
             Messages: Array.Empty<ChatMessage>(),
             HostContext: new ChatHostContext(
                 EntityType: "sprk_analysisoutput",
-                EntityId: existingAnalysisId.ToString()));
+                EntityId: existingAnalysisId.ToString())) { OwnerOid = TestSessionOwner.Oid };
 
         var client = _fx.CreateAuthenticatedClient();
         var response = await client.PostAsJsonAsync("/api/ai/analysis/promote", new
