@@ -11,6 +11,29 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
 
 /**
+ * Minimal structural typing for the subset of a bound `Xrm.Page` attribute
+ * that shared-lib consumers need at runtime — staging a form-buffer edit
+ * (`setValue`) and, where the caller needs it, reading the current value or
+ * dirty state. `getValue`/`getIsDirty` are optional because not every
+ * consumer of {@link getXrmPage} needs them (declared narrower where they
+ * do — see `FieldMappingHandler.ts`'s local `IXrmPageAttributeLike`).
+ */
+export interface XrmPageAttributeLike {
+  setValue(value: unknown): void;
+  getValue?(): unknown;
+  getIsDirty?(): boolean;
+}
+
+/**
+ * Minimal structural typing for the subset of `Xrm.Page` (the deprecated
+ * but still-functional form-buffer API) that shared-lib consumers need.
+ * Declared inline so this module does not take a dependency on `@types/xrm`.
+ */
+export interface XrmPageLike {
+  getAttribute(name: string): XrmPageAttributeLike | null | undefined;
+}
+
+/**
  * Minimal XrmContext interface for type safety.
  * Subset of Xrm SDK types needed by shared components.
  */
@@ -19,6 +42,7 @@ export interface XrmContext {
   Navigation?: XrmNavigation;
   Utility?: XrmUtility;
   App?: XrmApp;
+  Page?: XrmPageLike;
 }
 
 /**
@@ -128,12 +152,58 @@ export interface PageInput {
 }
 
 /**
+ * Options accepted by {@link XrmUtility.lookupObjects} — the OOB Dataverse
+ * lookup picker dialog (`Xrm.Utility.lookupObjects`). Structurally typed to
+ * the subset shared-lib consumers need; declared inline so this module does
+ * not take a dependency on `@types/xrm` (mirrors {@link XrmPageLike} above).
+ *
+ * @see record-header-and-notepad-r2 FR-15 / FR-15a
+ * @see CommunicationActionsApp.tsx:405-424 — the canonical call-shape precedent
+ */
+export interface LookupObjectsOptions {
+  /** Target table logical name(s) the picker searches / allows selecting from. */
+  entityTypes: string[];
+  /** Which entity type's view is shown first when `entityTypes` has more than one. */
+  defaultEntityType?: string;
+  /** `false` restricts the picker to a single selection. */
+  allowMultiSelect?: boolean;
+}
+
+/**
+ * A single record selected via {@link XrmUtility.lookupObjects}. This shape
+ * IS the Xrm lookup value the form buffer expects — `[{ id, name, entityType }]`
+ * — so no translation layer sits between the picker result and
+ * `Xrm.Page.getAttribute(n).setValue([...])` (see `useRecordHeaderFields.saveLookup`).
+ */
+export interface LookupObjectsResultItem {
+  /** GUID of the selected record. May arrive brace-wrapped — callers normalize. */
+  id: string;
+  /** Display name (primary attribute) of the selected record. */
+  name: string;
+  /** Logical name of the entity the selected record belongs to. */
+  entityType: string;
+}
+
+/**
  * Utility interface for global context and user settings
  */
 export interface XrmUtility {
   getGlobalContext(): GlobalContext;
   showProgressIndicator?(message: string): void;
   closeProgressIndicator?(): void;
+  /**
+   * Opens the native Dataverse lookup picker dialog (Records / Recent /
+   * Advanced / "+ New" per the target table's own Dataverse configuration).
+   * Resolves with the selected record(s), or an empty array when the user
+   * cancels — it never rejects on cancel. Optional because callers must
+   * feature-detect (`typeof xrm.Utility?.lookupObjects === 'function'`)
+   * before invoking, the same optionality precedent as
+   * `showProgressIndicator` above.
+   *
+   * @see record-header-and-notepad-r2 FR-15 / FR-15a
+   * @see CommunicationActionsApp.tsx:405-424 — the canonical call-shape precedent
+   */
+  lookupObjects?(options: LookupObjectsOptions): Promise<LookupObjectsResultItem[]>;
 }
 
 export interface GlobalContext {
@@ -271,6 +341,59 @@ export function getXrm(): XrmContext | undefined {
   }
 
   return undefined;
+}
+
+/**
+ * Get `Xrm.Page` — the deprecated-but-functional form-buffer API used to
+ * stage field edits (`getAttribute(name).setValue(value)`) without an
+ * immediate `Xrm.WebApi.updateRecord` round trip, avoiding a PCF re-render
+ * flash (see `.claude/patterns/pcf/pcf-build-scaffold.md` gotcha #10).
+ *
+ * THE single shared accessor (FR-20) — consolidates the two near-identical
+ * private `getXrmPage()` duplicates that previously lived in
+ * `FieldMappingHandler.ts` and `MatterHeaderView.tsx`. Deliberately walks
+ * only window -> parent (NOT the third `top` frame {@link getXrm} also
+ * checks) — this mirrors exactly what both former duplicates did, per the
+ * "no behavior change at either call site beyond swapping the accessor"
+ * constraint (FR-20 task notes). Widen to a 3-frame walk in a follow-up if a
+ * side-pane host ever needs `Xrm.Page` from `window.top`.
+ *
+ * NEVER throws — returns `null` when `Xrm.Page` is not reachable on either
+ * frame (Xrm not yet injected, or a cross-origin SecurityError accessing
+ * `window.parent`).
+ *
+ * @returns `Xrm.Page` (structurally typed as {@link XrmPageLike}), or `null`
+ *
+ * @example
+ * ```typescript
+ * const attr = getXrmPage()?.getAttribute('sprk_mattername');
+ * attr?.setValue('New Name'); // stages in the form buffer
+ * ```
+ */
+export function getXrmPage(): XrmPageLike | null {
+  // Try window.Xrm.Page first (PCF controls or direct script access)
+  try {
+    const windowXrm = (window as unknown as { Xrm?: XrmContext }).Xrm;
+    if (windowXrm?.Page) {
+      return windowXrm.Page;
+    }
+  } catch {
+    // window.Xrm not available
+  }
+
+  // Try parent.Xrm.Page for Custom Pages running in a single iframe
+  try {
+    if (typeof window !== 'undefined' && window.parent && window.parent !== window) {
+      const parentXrm = (window.parent as unknown as { Xrm?: XrmContext }).Xrm;
+      if (parentXrm?.Page) {
+        return parentXrm.Page;
+      }
+    }
+  } catch {
+    // Cross-origin access denied - expected in some environments
+  }
+
+  return null;
 }
 
 /**

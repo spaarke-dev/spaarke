@@ -100,6 +100,14 @@ export interface EntityAttributeMetadata {
   isPrimaryId?: boolean;
   /** Option set values (Picklist, Status, State only). */
   optionSet?: OptionSetOption[];
+  /**
+   * Lookup target entity logical names, populated for Lookup/Customer/Owner
+   * attributes from the Xrm `Targets` metadata array. `targets[0]` is the
+   * primary target — used by the RecordHeader OOB `Xrm.Utility.lookupObjects`
+   * picker's `entityTypes` (FR-15a). `undefined` for non-lookup attributes
+   * (never an empty array).
+   */
+  targets?: string[];
 }
 
 /**
@@ -167,8 +175,16 @@ export interface IDataverseClient {
    * Implementations SHOULD cache aggressively (the BFF caches 6h per FR-BFF-03).
    *
    * @param entityName - Logical name of the entity.
+   * @param attributes - OPTIONAL explicit attribute logical names to project.
+   *        Callers that already know the attributes they need SHOULD pass them:
+   *        `XrmDataverseClient` forwards the list to
+   *        `Xrm.Utility.getEntityMetadata(entityName, attributes)`, which is the
+   *        documented way to guarantee the `Attributes` collection comes back
+   *        populated (and keeps the payload small). Omit to request the whole
+   *        entity. Implementations MAY ignore the hint, but MUST still return
+   *        at least the requested attributes when they exist.
    */
-  retrieveEntityMetadata(entityName: string): Promise<EntityMetadata>;
+  retrieveEntityMetadata(entityName: string, attributes?: string[]): Promise<EntityMetadata>;
 
   /**
    * Execute a FetchXML query against an entity.

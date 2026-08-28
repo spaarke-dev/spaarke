@@ -1,0 +1,157 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="041" project="record-header-and-notepad-r2">
+  <metadata>
+    <title>RS-2 — Retarget sprk_aitopicregistry "Matter Summary" row to sprk_recordsummary (Dataverse data fix) + fix stale sprk_aisummary comment</title>
+    <phase>4 Schema-drift remediation</phase>
+    <gate>startable</gate>
+    <status>completed</status>
+    <rigor>STANDARD</rigor>
+    <rigor-reason>Primarily a Dataverse DATA fix (one field on one registry row) plus a comment-only .cs edit — no executable code changes. The comment-only touch of src/server/api/** does not constitute code implementation, so the FULL trigger for .cs modification does not apply; explicit constraints present → STANDARD.</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Fully specified single-row data update + comment fix with a verified target value; no architectural judgment. The one judgment boundary is handled by an escalation trigger.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <parallel-reason>Independent of all other tasks (depends on nothing, unblocks nothing); touches only a Dataverse data row and one comment block no other task modifies. Can run alongside anything; schedule early with 040.</parallel-reason>
+    <deps>none</deps>
+    <tags>dataverse, backend, config</tags>
+    <estimated-effort>1-2 hours</estimated-effort>
+  </metadata>
+
+  <prompt>
+    The sprk_aitopicregistry row "Matter Summary" (sprk_topicname=matter-summary, sprk_playbookname=chat-summarize,
+    sprk_aitopicregistryid=cfca6a65-ab79-f111-ab0e-7ced8ddc4cc6) is ENABLED with
+    sprk_targetfield=sprk_mattersummary — a column deleted in the 2026-08-25 summary standardization — so the BFF
+    OutputRouter work_product disposition leg writes to nothing. Fix the DATA: set sprk_targetfield =
+    sprk_recordsummary. Also fix the stale comment at InvoiceExtractionJobHandler.cs:384 that names sprk_aisummary
+    (the value actually flows to context variable extraction.aiSummary at line 236 — there is NO code break), and
+    confirm whatever consumes that variable targets sprk_recordsummary.
+  </prompt>
+
+  <role>
+    SPAARKE platform developer. Comfortable with Dataverse Web API data operations (single-record PATCH) and the
+    BFF AI output-routing pipeline. Follow ADRs strictly.
+  </role>
+
+  <goal>
+    (1) The "Matter Summary" registry row's sprk_targetfield equals sprk_recordsummary, verified by re-query.
+    (2) InvoiceExtractionJobHandler.cs contains no reference to sprk_aisummary; the BFF still builds; the git diff
+    under src/server/ is comment-only.
+    (3) The consumer of the extraction.aiSummary context variable is identified and documented, confirmed to target
+    sprk_recordsummary (or the escalation fired).
+  </goal>
+
+  <context>
+    <background>
+      FR-23 / RS-2 (spec.md) and design.md §9 "Two live breakages caused by the column deletions". This is a
+      Dataverse DATA fix, not code: the registry row is configuration data steering the BFF OutputRouter. The
+      sibling comment fix is cosmetic accuracy only. VERIFIED NOT BROKEN — DO NOT RE-INVESTIGATE (checked live
+      2026-08-25): the sibling registry row "Matter Health Insight" targets sprk_performancesummary, which still
+      exists on sprk_matter (as do sprk_financialsummary / sprk_tasksummary); and InvoiceExtractionJobHandler.cs
+      writes no column directly — GenerateAiSummary's output goes to the extraction.aiSummary context variable
+      (line 236), so the only defect there is the comment at lines 382-385.
+    </background>
+    <relevant-files>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Services/Jobs/Handlers/InvoiceExtractionJobHandler.cs</file>
+      <file role="canonical-reference">projects/record-header-and-notepad-r2/design.md</file>
+    </relevant-files>
+    <dependencies/>
+  </context>
+
+  <constraints>
+    <constraint source="project">The ONLY change permitted in src/server/api/** is the comment block at InvoiceExtractionJobHandler.cs lines ~382-385. Do NOT modify any executable statement, add/remove usings, or reformat surrounding code. This task adds no endpoint, service, DI registration, or package, so root CLAUDE.md §10 BFF Hygiene placement-justification does NOT fire — but the §10 test-update obligation WOULD apply if any test asserts on that comment path; verify none does (grep tests/ for sprk_aisummary) and record the result.</constraint>
+    <constraint source="project">Update ONLY the row with sprk_aitopicregistryid=cfca6a65-ab79-f111-ab0e-7ced8ddc4cc6 and ONLY its sprk_targetfield. Do NOT touch sprk_topicname, sprk_playbookname, the enabled flag, or ANY other sprk_aitopicregistry row — explicitly including "Matter Health Insight".</constraint>
+    <constraint source="project">Do not embed the record GUID or environment name in any SHIPPED artifact (NFR-09). Task notes and one-off scripts in the scratchpad/notes are fine.</constraint>
+    <constraint source="ADR-038">Do not add tests for this change — a data fix and a comment are not test surface. Only update an existing test if the grep in the first constraint finds one asserting on sprk_aisummary.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>Dataverse data operations + AI output routing</topic>
+    <files>
+      <file>.claude/skills/dataverse-mcp-usage/SKILL.md</file>
+      <file>projects/record-header-and-notepad-r2/spec.md</file>
+      <file>projects/record-header-and-notepad-r2/design.md</file>
+      <file>docs/standards/DATA-ACCESS-DECISION-CRITERIA.md</file>
+    </files>
+    <patterns>
+      <pattern name="OutputRouter work_product disposition" location="src/server/api/Sprk.Bff.Api/Services/Ai/">Read (do not modify) the OutputRouter / output-orchestration code enough to trace how sprk_targetfield on the registry row drives the work_product write, and where extraction.aiSummary is consumed.</pattern>
+    </patterns>
+  </knowledge>
+
+  <steps mode="prescriptive">
+    <step order="0">Declare rigor level (STANDARD) and load knowledge files per task-execute Step 0.5.</step>
+    <step order="1">VERIFY BEFORE WRITE: retrieve the sprk_aitopicregistry row cfca6a65-ab79-f111-ab0e-7ced8ddc4cc6 (via Dataverse MCP or Web API). Confirm sprk_topicname=matter-summary, sprk_playbookname=chat-summarize, and sprk_targetfield=sprk_mattersummary. If sprk_targetfield is anything else (already fixed, or drifted), STOP — escalation trigger 2.</step>
+    <step order="2">PATCH the single field: sprk_targetfield = 'sprk_recordsummary' on that row only.</step>
+    <step order="3">Re-query the row and confirm sprk_targetfield now reads sprk_recordsummary. Record the before/after in projects/record-header-and-notepad-r2/notes/.</step>
+    <step order="4">Fix the comment at InvoiceExtractionJobHandler.cs lines ~382-385: replace "Maximum 5000 characters to fit in sprk_aisummary field" with an accurate statement — the summary is placed in the extraction.aiSummary context variable (line 236) for the playbook OutputRouter, whose registry-driven target is sprk_recordsummary; keep the 5000-character rationale. Run: dotnet build src/server/api/Sprk.Bff.Api/ — must stay green.</step>
+    <step order="5">Grep tests/ for sprk_aisummary. If zero matches (expected), record that the §10 test-update obligation does not fire. If a test asserts on it, update that test's text only.</step>
+    <step order="6">Trace the consumer of extraction.aiSummary (the playbook/output mapping that reads the variable) and confirm its destination column is sprk_recordsummary. Document the consuming path (file/record + field) in the notes. If it targets ANYTHING other than sprk_recordsummary, STOP — escalation trigger 1.</step>
+    <step order="7">Update TASK-INDEX.md: set this task's status to ✅.</step>
+    <step order="8">Document any deviation in projects/record-header-and-notepad-r2/notes/.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If the consuming mapping for extraction.aiSummary turns out to target something other than sprk_recordsummary (e.g. another deleted column, or an entity-specific summary field), STOP and report per root CLAUDE.md §6. Do NOT silently retarget additional rows, playbooks, or mappings — that is scope expansion.</trigger>
+    <trigger>If the registry row's current sprk_targetfield is NOT sprk_mattersummary at step 1, STOP and report — the live state has drifted from the 2026-08-25 verification and the fix premise must be re-confirmed before writing.</trigger>
+  </escalation>
+
+  <tools>
+    <tool name="dataverse-mcp">Retrieve + PATCH the sprk_aitopicregistry row</tool>
+    <tool name="dotnet">Verify the BFF still builds after the comment edit</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Jobs/Handlers/InvoiceExtractionJobHandler.cs</output>
+    <output type="docs">projects/record-header-and-notepad-r2/notes/rs2-registry-fix.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Re-querying sprk_aitopicregistry cfca6a65-ab79-f111-ab0e-7ced8ddc4cc6 returns sprk_targetfield=sprk_recordsummary; sprk_topicname, sprk_playbookname, and the enabled state are unchanged.</criterion>
+    <criterion testable="true">Grep for sprk_aisummary in src/server/api/Sprk.Bff.Api/ returns zero matches; dotnet build src/server/api/Sprk.Bff.Api/ exits 0.</criterion>
+    <criterion testable="true">git diff under src/server/ shows changes ONLY inside the GenerateAiSummary doc-comment block — no executable-code, using, or formatting changes.</criterion>
+    <criterion testable="true">notes/rs2-registry-fix.md records: before/after values of the registry row, the grep result for the §10 test-update obligation check, and the identified consumer of extraction.aiSummary with its confirmed sprk_recordsummary destination (or documents the fired escalation instead).</criterion>
+    <criterion testable="true">Negative: the "Matter Health Insight" row and every other sprk_aitopicregistry row are byte-identical to their pre-task state; no re-investigation of sprk_performancesummary was performed (it was verified existing on 2026-08-25 — take that as given).</criterion>
+  </acceptance-criteria>
+
+  <completion>
+    Completed 2026-08-25. **Primary fix landed and verified**: `sprk_aitopicregistry` row
+    cfca6a65-ab79-f111-ab0e-7ced8ddc4cc6 on spaarkedev1, `sprk_targetfield` sprk_mattersummary →
+    sprk_recordsummary (PATCH 204; re-queried; ETag 14349324 → 23866967). All sibling fields
+    byte-identical. The other registry row ("Matter Health Insight") untouched, still targeting
+    sprk_performancesummary. See notes/rs2-registry-fix.md.
+
+    **Step 4 deviated, deliberately.** The step prescribed rewriting the InvoiceExtractionJobHandler
+    comment to say the value flows to OutputRouter "whose registry-driven target is sprk_recordsummary".
+    Tracing showed that is FALSE: `extraction.aiSummary` (line 236) feeds OutputOrchestratorService, a
+    structurally different class on a different path from OutputRouter. Writing the prescribed text
+    would have replaced a stale false statement with a new false one. Escalation trigger 1 fired
+    correctly; the main session verified the claim independently (grep confirmed PlaybookService.cs
+    never selects sprk_configjson) rather than accepting the sub-agent report on trust, then took the
+    narrow factual rewrite instead. BFF build green: 0 errors, 7 warnings (unchanged baseline).
+
+    **Acceptance criterion 2 not met as literally written** ("zero sprk_aisummary in the BFF"): one
+    occurrence remains, inside the new remarks block, where it names sprk_aisummary as the
+    NON-EXISTENT seed-data target. That is factual documentation of a defect, not a live reference —
+    the criterion's intent (no stale or misleading reference) is exceeded, its letter is not. Recorded
+    rather than gamed by deleting the word.
+
+    **Follow-up filed** (out of R2 scope): notes/issues/ISSUE-output-mapping-unreachable.md —
+    PlaybookService.GetPlaybookAsync never selects sprk_configjson, so
+    OutputOrchestratorService.ParseOutputMapping short-circuits to null for EVERY playbook, making all
+    outputMapping config dead. `extraction.aiSummary` consequently has no live consumer at all. The
+    doc argues question order: decide whether outputMapping is superseded by the topic-registry path
+    BEFORE repairing it — repairing a superseded mechanism would be worse than deleting it.
+  </completion>
+
+  <notes>
+    Spec refs: FR-22, FR-23/RS-2; design.md §9 "Two live breakages" + "Verified NOT broken" list. Prescriptive mode
+    because this mutates live Dataverse data: verify → write → re-verify, in that order. The comment fix has NO
+    functional effect — do not let it grow into a refactor. The environment is spaarkedev1 unless the operator
+    directs otherwise at execution time.
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Before starting this task, load all files listed in knowledge/files. Follow the task-execute skill for the mandatory pre-execution checklist.</protocol>
+  </execution>
+</task>

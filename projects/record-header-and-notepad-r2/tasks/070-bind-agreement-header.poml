@@ -1,0 +1,218 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="070" project="record-header-and-notepad-r2">
+  <metadata>
+    <title>Seed an Agreement record, bind Spaarke Record Header to the Agreement main form + acceptance QA</title>
+    <phase>5 Rollout</phase>
+    <gate>blocked — startable when 024, 034, 060 and 061 are ✅ (toolbar map entries + control + wave 2 complete)</gate>
+    <status>not-started</status>
+    <rigor>STANDARD</rigor>
+    <rigor-reason>Operator/maker configuration + QA task — no .cs/.ts/.tsx files are modified. The pcf tag denotes the control under test, not code implementation, so the tag-based FULL trigger is deliberately overridden per plan.md Phase 5 ("Form binding is operator/maker work, not agent work"). task-execute may re-evaluate.</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Well-specified configuration + QA run following the proven R1 maker recipe; the record seeding is a simple data create.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Operator/maker task in the live spaarkedev1 environment — sequential human form edits + publishes; not agent-automatable. Wave 3 runs alone.</parallel-reason>
+    <deps>024, 034, 060, 061</deps>
+    <tags>pcf, dataverse, config, deploy</tags>
+    <estimated-effort>1.5-2.5 hours</estimated-effort>
+  </metadata>
+
+  <prompt>
+    Agreement (sprk_agreement) has ZERO records in spaarkedev1, so first seed one QA record, then bind the
+    Spaarke Record Header PCF to the "Agreement main form" with the owner-confirmed layoutJson and run the
+    full per-form acceptance QA. Agreement is the first entity whose toolbar depends on task 024's map entries
+    (sprk_agreement → sprk_regardingagreement in BOTH SUPPORTED_TODO_PARENTS and SUPPORTED_MEMO_PARENTS), so
+    the To Do and Notepad badges are themselves under test here (FR-24, spec criterion 15a).
+  </prompt>
+
+  <role>
+    SPAARKE platform operator/maker with Dataverse form-designer and data-entry access to spaarkedev1. Follow
+    ADRs strictly. Expertise: model-driven-app form configuration, PCF control binding, browser-based UI QA.
+  </role>
+
+  <goal>
+    One seeded Agreement record exists; the "Agreement main form" (59d88274-a1a0-f111-aaac-000d3a99d1d7)
+    renders the Spaarke Record Header with the configured 6-field layout and the FULL toolbar (sparkle +
+    working To Do + working Notepad); all 9 per-form success criteria plus criterion 15a pass; QA evidence +
+    wave-3 measurements are recorded in projects/record-header-and-notepad-r2/notes/rollout-sprk_agreement.md.
+  </goal>
+
+  <context>
+    <background>
+      Agreement was added to the rollout on 2026-08-25 (design.md §9.2). Live-verified: PK sprk_agreementid,
+      primary name sprk_name (required), entity set sprk_agreements, 0 records. The owner created the
+      "Agreement main form" and the sprk_regardingagreement lookups on both sprk_todo and sprk_memo on
+      2026-08-25, so Agreement gets the full toolbar — but ONLY once task 024's map entries ship. Agreement
+      has NO Boolean fields at all (no sprk_highpriority / sprk_monitor / sprk_issecure), so its layout
+      deliberately carries no boolean cell. Its only date field is sprk_effectivedate (DateOnly). Note:
+      Agreement is NOT the FR-16 auto-hide test case (both lookups exist now) — criterion 15b is verified
+      elsewhere against a To-Do-but-not-Memo parent.
+    </background>
+    <relevant-files>
+      <file role="canonical-reference">projects/record-header-and-notepad-r1/notes/matter-form-binding-instructions.md</file>
+      <file role="canonical-reference">projects/record-header-and-notepad-r2/design.md</file>
+      <file role="canonical-reference">projects/record-header-and-notepad-r2/spec.md</file>
+      <file role="canonical-reference">src/client/shared/Spaarke.UI.Components/src/hooks/toolbarLaunchDefaults.ts</file>
+      <file role="canonical-reference">src/client/shared/Spaarke.UI.Components/src/types/RecordHeaderConfiguration.ts</file>
+      <file role="new">projects/record-header-and-notepad-r2/notes/rollout-sprk_agreement.md</file>
+    </relevant-files>
+    <dependencies>
+      <dependency task="024" status="pending">sprk_agreement → sprk_regardingagreement added to BOTH SUPPORTED_TODO_PARENTS (11 → 12) and SUPPORTED_MEMO_PARENTS (6 → 7) — without this the To Do and Notepad slots auto-hide on Agreement</dependency>
+      <dependency task="034" status="pending">Completed RecordHeader PCF importable as the RecordHeaderPcf solution (a build containing task 024's map entries must be the one imported)</dependency>
+      <dependency task="060" status="pending">Wave-2 Invoice binding complete</dependency>
+      <dependency task="061" status="pending">Wave-2 Event binding complete</dependency>
+    </dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="project">FR-25 scope: bind ONLY the "Agreement main form" 59d88274-a1a0-f111-aaac-000d3a99d1d7 — NEVER the legacy "Information" form (e009a1da-…).</constraint>
+    <constraint source="project">This task modifies form configuration, one seeded data record and QA notes only. If QA surfaces a code defect in the control, shared library or toolbar maps, do NOT patch code inside this task — record it, STOP, and escalate per CLAUDE.md §6.</constraint>
+    <constraint source="project">The layout carries NO boolean cell — Agreement has no Boolean fields at all. Do not add one to "match" the other entities.</constraint>
+    <constraint source="ADR-021">All QA visual checks in this task verify Fluent v9 semantic-token theming — dark mode and high contrast must render with no hard-coded colors (NFR-03).</constraint>
+    <constraint source="project">NFR-01/NFR-02 are measured THIS WAVE (wave 3 = this task alone): bundle ≤250 KB minified, TTI ≤300 ms warm / ≤800 ms cold.</constraint>
+    <constraint source="project">NFR-07: do not alter the Notepad/SmartTodo launch contracts while QA-ing them — regardingEntity/regardingId and action=openTodos&amp;regardingType=…&amp;regardingId=… are external API.</constraint>
+    <constraint source="project">NFR-09: the form GUID above and the seeded record's id are environment data — acceptable in acceptance criteria and notes only, never in any shipped artifact.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>PCF form binding + rollout QA + QA data seeding</topic>
+    <files>
+      <file>.claude/constraints/pcf.md</file>
+      <file>.claude/adr/ADR-021-fluent-design-system.md</file>
+      <file>src/client/pcf/CLAUDE.md</file>
+      <file>docs/guides/PCF-DEPLOYMENT-GUIDE.md</file>
+      <file>.claude/skills/ui-test/SKILL.md</file>
+      <file>.claude/patterns/pcf/control-initialization.md</file>
+      <file>.claude/patterns/pcf/fluent-v9-modern-theming.md</file>
+    </files>
+    <patterns>
+      <pattern name="Maker binding recipe (proven in R1)" location="projects/record-header-and-notepad-r1/notes/matter-form-binding-instructions.md">
+        Follow this sequence exactly, substituting Agreement's form/field names. Design.md §5.1.2 is the R2-updated version of the same recipe.
+      </pattern>
+    </patterns>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="0">Context + rigor declaration. Verify 024, 034, 060 and 061 are ✅ AND that the RecordHeaderPcf solution version imported in spaarkedev1 contains task 024's toolbar map entries (check the solution/control version against task 034's deployment notes).</step>
+    <step order="1">SEED: create one Agreement record in spaarkedev1 (form or Web API): sprk_name = "QA Seed — Agreement Header R2", plus sprk_agreementtype, sprk_effectivedate and sprk_regardingmatter → an existing Matter (populating the lookup makes the lookup-cell QA meaningful). Record its id in the notes file. The entity has 0 records — QA is impossible without this.</step>
+    <step order="2">Verify the layoutJson below against the shipped RecordHeaderConfiguration v1.0 types (task 030 output) before pasting.</step>
+    <step order="3">make.powerapps.com → Solutions → Tables → sprk_agreement → Forms → "Agreement main form" (59d88274-a1a0-f111-aaac-000d3a99d1d7) — NEVER the legacy "Information" form → ⋯ → Edit form → Edit in classic.</step>
+    <step order="4">Click the field the control will replace (sprk_name) → Controls tab → Add Control → "Spaarke Record Header" → Add → tick Web (and Phone/Tablet). If sprk_name is not in the target section, place the control on the first field of the section it should replace and note the deviation.</step>
+    <step order="5">Leave layoutJson BLANK first: Save → Publish → verify tier-2 derived defaults render on the seeded record. Then set layoutJson to static value {{{ → Save → Publish → verify console.warn + derived defaults, never blank.</step>
+    <step order="6">Set layoutJson to a static value and paste the final JSON:
+{ "_version": "1.0", "title": "Agreement", "columns": 3,
+  "fields": [
+    { "name": "sprk_name", "span": 2, "required": true },
+    { "name": "sprk_agreementtype", "span": 1 },
+    { "name": "sprk_effectivedate", "span": 1 },
+    { "name": "statuscode", "span": 1 },
+    { "name": "sprk_regardingmatter", "span": 1 },
+    { "name": "sprk_agreementdescription", "span": 3 } ] }
+(summaryField omitted deliberately — it defaults to sprk_recordsummary via RECORDSUMMARY_FIELD. No boolean cell — the entity has none.) Set Header title / Show version footer (Yes during QA).</step>
+    <step order="7">MOVE the section other raw fields so they do not render twice; keep sprk_name (invisible behind the PCF).  They MUST remain on the form (a separate collapsed section, or controls set not-visible) - do NOT remove them from the form. Inline editing stages through the form buffer via Xrm.Page.getAttribute(name).setValue(v), and getAttribute returns null for a field with no control on the form, so requireFormAttribute throws "Field not on form". Corrected 2026-08-26: the shipped R1 Matter form keeps every edited field on the form; only the read-only sparkle field is absent. Save → Publish.</step>
+    <step order="8">Run the per-form acceptance QA on the seeded record (ui-tests below) — the To Do and Notepad badges are UNDER TEST here (first consumer of task 024's map entries; spec criterion 15a) — including the loud-failure negative test with a real entity field absent from the form (e.g. sprk_activesignalcount if not on the form).</step>
+    <step order="9">Wave-3 measurement: bundle.js bytes after npm run build:prod; TTI via browser perf trace cold + warm on the Agreement form.</step>
+    <step order="10">Write QA evidence (screenshots light + dark, criterion checklist, seeded-record id, measurements) to projects/record-header-and-notepad-r2/notes/rollout-sprk_agreement.md.</step>
+    <step order="11">Update TASK-INDEX.md: set this task's status to ✅.</step>
+    <step order="12">Document any deviation in projects/record-header-and-notepad-r2/notes/.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If the To Do or Notepad badge does not render, or opening it fails to scope to the Agreement record, task 024's map entries are missing or wrong in the deployed build — STOP and escalate; do not QA around it and do not patch toolbarLaunchDefaults.ts inside this task.</trigger>
+    <trigger>If seeding the Agreement record fails (e.g. required fields or permissions), STOP and escalate rather than QA-ing on the empty entity.</trigger>
+    <trigger>If the wave-3 measurement breaches NFR-01/NFR-02 (bundle &gt;250 KB minified, or TTI &gt;300 ms warm / &gt;800 ms cold), STOP the rollout — do not proceed to task 080 — and escalate per CLAUDE.md §6.</trigger>
+  </escalation>
+
+  <ui-tests>
+    <test name="Configured layout renders at configured spans (no boolean cell)">
+      <url>https://{org}.crm.dynamics.com/main.aspx?appid={app-id}&amp;pagetype=entityrecord&amp;etn=sprk_agreement&amp;id={seeded-record-id}</url>
+      <steps>
+        <step>Open the seeded Agreement record on the Agreement main form</step>
+        <step>Verify the header renders exactly the 6 configured fields at spans 2/1/1/1/1/3 in a 3-column grid</step>
+        <step>Verify sprk_effectivedate renders as a locale date, statuscode as its option label, sprk_regardingmatter as the linked Matter's name</step>
+        <step>Verify NO boolean cell renders (the entity has no Boolean fields)</step>
+        <step>Verify the version footer is present and check the console for JavaScript errors</step>
+      </steps>
+      <expected>Layout matches the pasted layoutJson; no console errors; version footer shows the shipped version</expected>
+    </test>
+    <test name="Full toolbar on Agreement (FR-24 / spec criterion 15a)">
+      <steps>
+        <step>Verify the toolbar shows title, sparkle, To Do badge AND Notepad badge — none auto-hidden</step>
+        <step>Click the sparkle — popover renders "No summary yet" (sprk_recordsummary exists but is unpopulated)</step>
+        <step>Click To Do — SmartTodo opens filtered to this record (action=openTodos&amp;regardingType=sprk_agreement&amp;regardingId=…); create a To Do and verify it lands regarding this Agreement</step>
+        <step>Click Notepad — opens scoped to this record in the 25% × 35% modal; save a note and verify it persists against this Agreement</step>
+      </steps>
+      <expected>Full toolbar functional — the sprk_regardingagreement wiring from task 024 works end-to-end</expected>
+    </test>
+    <test name="Inline edit stages to the form buffer with no re-render flash">
+      <steps>
+        <step>Edit sprk_name inline and commit with Enter</step>
+        <step>Verify the form's Save button activates (dirty) with NO PCF re-render or loading-skeleton flash</step>
+        <step>Edit statuscode via the Fluent Dropdown; pick a sprk_effectivedate via the Fluent date picker</step>
+        <step>Click the sprk_regardingmatter cell and verify the INLINE type-ahead dropdown opens under the field (NOT the side pane); type to filter, and click the right-side magnifier to browse with no typing; verify the pinned **Advanced** action opens the OOB Xrm.Utility.lookupObjects dialog and that there is NO "+ New"; select a Matter and verify it stages</step>
+        <step>Click the form's own Save and refresh the page</step>
+      </steps>
+      <expected>All edits persist after form Save; no flash during staging; the lookup cell opens the INLINE dropdown (FR-15a as amended 2026-08-27 — NOT the side-pane picker), with Advanced escalating to the OOB dialog. Opening the dropdown must NOT push the fields below it down the form.</expected>
+    </test>
+    <test name="Config degradation (negative paths)">
+      <steps>
+        <step>With layoutJson absent: header renders tier-2 derived defaults (primary name first, span 2)</step>
+        <step>With layoutJson = {{{ : console.warn logged, derived defaults render, form never blanks, nothing throws</step>
+        <step>With a layout field not on the form: attempted edit throws "Field '…' not on form" — the input is never silently dropped</step>
+      </steps>
+      <expected>Both bad-config paths degrade gracefully (NFR-10); the missing-field path fails loudly (FR-14)</expected>
+    </test>
+    <test name="Dark Mode Compliance (ADR-021)">
+      <steps>
+        <step>Toggle dark mode in the model-driven app settings</step>
+        <step>Verify header background, text, field renderers, sparkle popover and modals adapt (no white-on-dark, no black-on-light)</step>
+        <step>Verify icons use currentColor; spot-check high contrast mode</step>
+      </steps>
+      <expected>All colors come from Fluent v9 semantic tokens per ADR-021 / NFR-03</expected>
+    </test>
+  </ui-tests>
+
+  <tools>
+    <tool name="browser">make.powerapps.com classic form designer + live-record QA (ui-test skill / Chrome integration)</tool>
+    <tool name="pac">Solution verification (pac solution list)</tool>
+    <tool name="npm">Bundle measurement via npm run build:prod in the RecordHeader PCF folder</tool>
+  </tools>
+
+  <outputs>
+    <output type="docs">projects/record-header-and-notepad-r2/notes/rollout-sprk_agreement.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">A seeded Agreement record exists in spaarkedev1 with sprk_name, sprk_agreementtype, sprk_effectivedate and sprk_regardingmatter populated; its id is recorded in the notes file.</criterion>
+    <criterion testable="true">Given the published Agreement main form, when the seeded record opens, then the header renders the 6 configured fields at spans 2/1/1/1/1/3 with NO boolean cell (spec criterion 1; design §9.2).</criterion>
+    <criterion testable="true">The FULL toolbar renders — title, sparkle, To Do badge, Notepad badge — and both badges work end-to-end against the seeded record via sprk_regardingagreement (spec criterion 15a / FR-24).</criterion>
+    <criterion testable="true">To Do opens SmartTodo filtered to this record; Notepad opens scoped to this record in the 25% × 35% modal (spec criterion 4).</criterion>
+    <criterion testable="true">Sparkle shows with "No summary yet" (sprk_recordsummary exists, 0 populated) (spec criterion 18 analog / FR-17).</criterion>
+    <criterion testable="true">Given an inline edit to any configured field, when committed, then it stages to the form buffer, the form goes dirty with NO PCF re-render flash, and the form's Save persists it (spec criterion 2).</criterion>
+    <criterion testable="true">sprk_regardingmatter opens the INLINE type-ahead dropdown (FR-15a as amended 2026-08-27 — NOT the side-pane picker); its Advanced action opens the OOB Xrm.Utility.lookupObjects dialog; selection from either stages to the form buffer.</criterion>
+    <criterion testable="true">Negative: malformed layoutJson ({{{) AND absent layoutJson each produce console.warn + derived defaults — never a blank form, never a throw (spec criterion 5).</criterion>
+    <criterion testable="true">Negative: a layoutJson field not present on the form fails loudly on edit with the "Field '…' not on form" throw (spec criterion 6).</criterion>
+    <criterion testable="true">Version footer present (spec criterion 7).</criterion>
+    <criterion testable="true">Bundle ≤250 KB minified and TTI ≤300 ms warm / ≤800 ms cold measured this wave (spec criteria 8-9).</criterion>
+    <criterion testable="true">Dark mode + high contrast render correctly with semantic tokens only (ADR-021 / NFR-03).</criterion>
+    <criterion testable="true">notes/rollout-sprk_agreement.md exists with the criterion checklist, light+dark screenshots, seeded-record id, and the wave-3 bundle/TTI numbers.</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    Spec refs: FR-24, FR-25, Success Criteria 1-9 + 15a, design §9.2. Agreement is NOT the FR-16 auto-hide
+    test case anymore (both regarding lookups exist) — criterion 15b is verified against a To-Do-but-not-Memo
+    parent (contact, sprk_document, sprk_organization, sprk_analysis or sprk_communication) wherever FR-16 QA
+    runs. The "+ New" behaviour inside the OOB lookup picker is NOT controllable from the PCF and is out of R2
+    scope (design §6.5) — do not QA-fail on it navigating away. Next: task 080 (Matter migration — the parity
+    regression test), then 081 (retirement).
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>
+      Before starting this task, load all files listed in &lt;knowledge&gt;&lt;files&gt;.
+      Follow the task-execute skill for the mandatory pre-execution checklist.
+    </protocol>
+  </execution>
+</task>

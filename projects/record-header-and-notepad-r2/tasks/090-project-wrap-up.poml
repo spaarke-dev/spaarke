@@ -1,0 +1,129 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="090" project="record-header-and-notepad-r2">
+  <metadata>
+    <title>Project wrap-up — final gates, /test-diet, README/plan close-out, lessons learned, INDEX + archive</title>
+    <phase>6 Documentation + wrap</phase>
+    <gate>blocked</gate>
+    <status>not-started</status>
+    <rigor>STANDARD</rigor>
+    <rigor-reason>Documentation/close-out task, but it runs binding project-close gates (/test-diet per root CLAUDE.md §7, final code-review + adr-check) and has explicit constraints — STANDARD, not MINIMAL.</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Well-specified checklist execution per task-create Step 3.7; no architectural judgment.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Final serial gate — must run after every other task completes; reconciles and mutates project-wide state (README, plan, TASK-INDEX, current-task, projects/INDEX.md) that concurrent tasks would race on.</parallel-reason>
+    <deps>086</deps>
+    <tags>documentation, wrap-up</tags>
+    <estimated-effort>2-3 hours</estimated-effort>
+  </metadata>
+
+  <prompt>
+    Close out record-header-and-notepad-r2 per task-create Step 3.7: run the final quality gates, invoke /test-diet
+    (the BINDING project-close gate from root CLAUDE.md §7), set the README to Complete, write lessons-learned,
+    update the active-project registry, and archive ephemeral artifacts.
+  </prompt>
+
+  <role>
+    SPAARKE platform developer executing the standard project close-out protocol. Follow root CLAUDE.md §7 and
+    task-create Step 3.7 exactly.
+  </role>
+
+  <goal>
+    The project is verifiably closed: all tasks ✅ in TASK-INDEX.md, README/plan at Complete/100%, /test-diet report
+    written to notes/test-diet-report.md and cited by the wrap-up PR, lessons-learned appended, projects/INDEX.md
+    updated, ephemeral artifacts archived, current-task.md reset to "none".
+  </goal>
+
+  <context>
+    <background>
+      Mandatory final task per task-create Step 3.7. R2 added/modified tests (renderer contract suite, resolver
+      unit tests, MatterHeader test retargeting in 040), so the §7 project-close test-diet gate has real material
+      to classify: MAINTAIN-class tests stay at their KEEP path (resolveHeaderConfig pure-function tests are an
+      explicit ADR-038 KEEP category per plan §1), SCAFFOLDING-class tests are flagged for deletion, AMBIGUOUS ones
+      go to the reviewer. /test-diet is READ-ONLY — it emits git rm / git mv commands for the reviewer; it does not
+      auto-execute them.
+    </background>
+    <relevant-files>
+      <file role="modify">projects/record-header-and-notepad-r2/README.md</file>
+      <file role="modify">projects/record-header-and-notepad-r2/plan.md</file>
+      <file role="modify">projects/record-header-and-notepad-r2/current-task.md</file>
+      <file role="modify">projects/record-header-and-notepad-r2/tasks/TASK-INDEX.md</file>
+      <file role="modify">projects/record-header-and-notepad-r2/notes/lessons-learned.md</file>
+      <file role="modify">projects/INDEX.md</file>
+    </relevant-files>
+    <dependencies>
+      <dependency task="086" status="pending">Last content task — wrap-up runs only when 001-086 are all complete.</dependency>
+    </dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="CLAUDE.md §7">/test-diet MUST be invoked BEFORE marking the project complete. Skipping it is a HARD WARNING; the wrap-up PR description MUST cite notes/test-diet-report.md or document an explicit skip rationale.</constraint>
+    <constraint source="project">/test-diet output is advisory to the reviewer: do NOT auto-execute its git rm / git mv commands. Surface them in the report and PR description only.</constraint>
+    <constraint source="project">Lessons-learned goes in the per-project notes/lessons-learned.md (the 51+-project convention) — do NOT create a new central lessons store; cross-project promotion into FAILURE-MODES.md/ADRs belongs to doc-drift-audit, not this task.</constraint>
+    <constraint source="project">This task fixes only Critical findings from the final gates; anything smaller is recorded in notes/ for follow-up, not silently expanded into new work.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>Project close-out</topic>
+    <files>
+      <file>.claude/skills/test-diet/SKILL.md</file>
+      <file>.claude/skills/repo-cleanup/SKILL.md</file>
+      <file>docs/adr/ADR-038-testing-strategy.md</file>
+      <file>projects/record-header-and-notepad-r2/plan.md</file>
+      <file>projects/record-header-and-notepad-r2/spec.md</file>
+    </files>
+    <patterns>
+      <pattern name="wrap-up checklist" location=".claude/skills/task-create/SKILL.md">Step 3.7 defines the six mandatory wrap-up items this task executes in order.</pattern>
+    </patterns>
+  </knowledge>
+
+  <steps mode="prescriptive">
+    <step order="0">Declare rigor level (STANDARD). Verify tasks 001-086 all show ✅ in TASK-INDEX.md — if any is not complete, STOP; wrap-up cannot start.</step>
+    <step order="1">Run final quality gates over the project's changed code: /code-review and /adr-check. Fix Critical findings; record non-critical findings in notes/.</step>
+    <step order="2">Invoke /test-diet (BINDING gate, root CLAUDE.md §7): reconcile tests added/modified during R2 against the ADR-038 §7 build-vs-maintain classifier. Output lands at projects/record-header-and-notepad-r2/notes/test-diet-report.md with the reviewer's git rm / git mv command list. Read-only — do not execute the commands.</step>
+    <step order="3">Run /repo-cleanup projects/record-header-and-notepad-r2; review the report; archive notes/handoffs/ (if any) to .archive/; approve removal of notes/debug|spikes|drafts content.</step>
+    <step order="4">Update README.md: Status → Complete, Phase → Complete, Progress → 100%, Completed Date + Last Updated → today, check all graduation criteria, add a changelog completion entry. Update plan.md: Status → Complete, all milestones → ✅.</step>
+    <step order="5">Append to notes/lessons-learned.md — one lesson per entry with a one-line summary; record BOTH corrections (things that went wrong) and confirmed non-obvious approaches (things that worked and why they mattered), covering at minimum: the RS-1/RS-2 live-breakage handling, the barrel-serialization decision, and the layoutJson ergonomics spike outcome.</step>
+    <step order="6">Update projects/INDEX.md (active-project registry): mark record-header-and-notepad-r2 complete/closed per the registry's row convention.</step>
+    <step order="7">Set TASK-INDEX.md task 090 → ✅ (all rows now ✅) and reset current-task.md to "none — project complete".</step>
+    <step order="8">Prepare the wrap-up PR description: cite notes/test-diet-report.md (or the documented skip rationale), the final gate results, and the spec's 24 success criteria status.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If /test-diet classifies any R2 test as SCAFFOLDING that a spec success criterion depends on (e.g. the renderer contract suite backing FR-10, or the resolveHeaderConfig unit tests backing criterion 14), STOP and surface the conflict to the reviewer per root CLAUDE.md §6 instead of listing it for deletion.</trigger>
+  </escalation>
+
+  <tools>
+    <tool name="skills">/code-review, /adr-check, /test-diet, /repo-cleanup</tool>
+    <tool name="git">Status verification; wrap-up PR preparation</tool>
+  </tools>
+
+  <outputs>
+    <output type="docs">projects/record-header-and-notepad-r2/notes/test-diet-report.md</output>
+    <output type="docs">projects/record-header-and-notepad-r2/notes/lessons-learned.md</output>
+    <output type="docs">projects/record-header-and-notepad-r2/README.md</output>
+    <output type="docs">projects/INDEX.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">notes/test-diet-report.md exists, classifies the tests R2 added/modified per ADR-038 §7, and is cited in the wrap-up PR description (or the PR documents an explicit skip rationale). None of its git rm / git mv commands were auto-executed.</criterion>
+    <criterion testable="true">README.md shows Status: Complete, Progress: 100%, a Completed Date, all graduation criteria checked, and a changelog entry; plan.md shows Status: Complete with all milestones ✅.</criterion>
+    <criterion testable="true">notes/lessons-learned.md contains R2 entries including both corrections and confirmed approaches.</criterion>
+    <criterion testable="true">projects/INDEX.md reflects the project as complete; TASK-INDEX.md shows every task ✅; current-task.md reads "none — project complete".</criterion>
+    <criterion testable="true">Final /code-review and /adr-check were run with zero unresolved Critical findings; non-critical findings are recorded in notes/.</criterion>
+    <criterion testable="true">Negative: no test file was deleted or moved by this task itself; repo-cleanup removals were limited to ephemeral notes/ content per the skill's report.</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    Mandatory per task-create Step 3.7; the /test-diet obligation is the binding project-close gate from root
+    CLAUDE.md §7 (ci-cd-unit-test-remediation-r1, FR-B09). Archive-worthy artifacts: the 002 parity baseline
+    screenshots (keep — referenced by the FR-26 acceptance evidence), notes/issues/ (keep — owner-directed
+    standalone evaluation), handoffs (archive).
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Before starting this task, load all files listed in knowledge/files. Follow the task-execute skill for the mandatory pre-execution checklist.</protocol>
+  </execution>
+</task>

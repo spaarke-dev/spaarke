@@ -174,6 +174,99 @@ describe('useRecordHeaderToolbarActions', () => {
     expect(keys).toEqual(['checkmark']);
   });
 
+  // ── FR-16 + FR-24 Slot auto-hide on null regarding filter (R2 task 024) ──
+  //
+  // Closed matrix per the task's acceptance criteria: a slot is omitted
+  // (not merely badge-idled) when its `SUPPORTED_*_PARENTS` map has no entry
+  // for the current entity. `enabled` flags stay ANDed with the filter check
+  // — an explicit `false` still wins even on a fully-supported entity.
+
+  it('contact (To-Do-supported, NOT Memo-supported): checkmark present, annotation OMITTED — FR-16 auto-hide case', async () => {
+    installXrm({ todoCount: 2 });
+    const { result } = renderHook(() =>
+      useRecordHeaderToolbarActions({
+        entity: 'contact',
+        recordId: MATTER_GUID,
+      })
+    );
+
+    await flushPromises();
+    await flushPromises();
+
+    const keys = result.current.toolbarProps.iconSlots.map(s => s.key);
+    expect(keys).toEqual(['checkmark']);
+  });
+
+  it('sprk_agreement: BOTH slots present — FR-24 (Agreement is in both maps, not the auto-hide case)', async () => {
+    installXrm({ todoCount: 1, memoCount: 1 });
+    const { result } = renderHook(() =>
+      useRecordHeaderToolbarActions({
+        entity: 'sprk_agreement',
+        recordId: MATTER_GUID,
+      })
+    );
+
+    await flushPromises();
+    await flushPromises();
+
+    const keys = result.current.toolbarProps.iconSlots.map(s => s.key);
+    expect(keys).toEqual(['checkmark', 'annotation']);
+  });
+
+  it('sprk_matter: BOTH slots present — regression, existing fully-supported behavior preserved', async () => {
+    installXrm({ todoCount: 1, memoCount: 1 });
+    const { result } = renderHook(() =>
+      useRecordHeaderToolbarActions({
+        entity: MATTER_ENTITY,
+        recordId: MATTER_GUID,
+      })
+    );
+
+    await flushPromises();
+    await flushPromises();
+
+    const keys = result.current.toolbarProps.iconSlots.map(s => s.key);
+    expect(keys).toEqual(['checkmark', 'annotation']);
+  });
+
+  it('account (in neither map): NEITHER slot present, with `enabled` left at defaults', async () => {
+    installXrm({ todoCount: 999, memoCount: 999 }); // must not be read
+    const { result } = renderHook(() =>
+      useRecordHeaderToolbarActions({
+        entity: 'account',
+        recordId: MATTER_GUID,
+      })
+    );
+
+    await flushPromises();
+    await flushPromises();
+
+    expect(result.current.toolbarProps.iconSlots).toHaveLength(0);
+
+    // Neither query issued — both filters are null for this entity.
+    const todoCallLog = mockRetrieveMultipleRecords.mock.calls.filter(c => c[0] === 'sprk_todo');
+    const memoCallLog = mockRetrieveMultipleRecords.mock.calls.filter(c => c[0] === 'sprk_memo');
+    expect(todoCallLog).toHaveLength(0);
+    expect(memoCallLog).toHaveLength(0);
+  });
+
+  it('enabled:{checkmark:false} on a fully-supported entity still omits the slot — explicit flag not overridden by a non-null filter', async () => {
+    installXrm({ todoCount: 5 });
+    const { result } = renderHook(() =>
+      useRecordHeaderToolbarActions({
+        entity: MATTER_ENTITY, // fully supported — todoFilter is non-null
+        recordId: MATTER_GUID,
+        enabled: { checkmark: false },
+      })
+    );
+
+    await flushPromises();
+    await flushPromises();
+
+    const keys = result.current.toolbarProps.iconSlots.map(s => s.key);
+    expect(keys).toEqual(['annotation']);
+  });
+
   // ── FR-09 Checkmark → SmartTodo webresource + LAYOUT_1_MODAL ──────────────
 
   it('checkmark onClick calls Xrm.Navigation.navigateTo with SmartTodo webresource + LAYOUT_1_MODAL', async () => {
@@ -291,7 +384,11 @@ describe('useRecordHeaderToolbarActions', () => {
     expect(todoCallLog[0][1]).not.toContain('_regardingobjectid_value');
   });
 
-  it('checkmark badge = 0 for an UNSUPPORTED parent (playbook is not in SUPPORTED_TODO_PARENTS)', async () => {
+  it('checkmark slot is OMITTED for an UNSUPPORTED todo parent (playbook is not in SUPPORTED_TODO_PARENTS) — FR-16', async () => {
+    // Pre-FR-16 behavior asserted `checkmark?.badge === 0` (slot still
+    // rendered, badge idled). FR-16 (R2 task 024) changes this: a null
+    // regarding filter now omits the slot entirely, since the launcher would
+    // otherwise open a SmartTodo scoped to a parent sprk_todo cannot reference.
     installXrm({ todoCount: 999 });
     const { result } = renderHook(() =>
       useRecordHeaderToolbarActions({
@@ -304,7 +401,7 @@ describe('useRecordHeaderToolbarActions', () => {
     await flushPromises();
 
     const checkmark = result.current.toolbarProps.iconSlots.find(s => s.key === 'checkmark');
-    expect(checkmark?.badge).toBe(0);
+    expect(checkmark).toBeUndefined();
 
     // No sprk_todo query issued when the parent is unsupported.
     const todoCallLog = mockRetrieveMultipleRecords.mock.calls.filter(c => c[0] === 'sprk_todo');
@@ -363,10 +460,16 @@ describe('useRecordHeaderToolbarActions', () => {
     expect(memoCallLog[0][1]).toContain('_sprk_regardingmatter_value eq');
   });
 
-  // ── FR-11 + ADR-024 Unsupported memo parent → memo badge = 0, no query ───
+  // ── FR-11 + ADR-024 + FR-16 Unsupported memo parent → slot omitted, no query ───
 
-  it('annotation badge = 0 for an UNSUPPORTED parent (sprk_document not in SUPPORTED_MEMO_PARENTS)', async () => {
-    installXrm({ memoCount: 999 }); // even if the mock returns 999, we should NOT read it
+  it('annotation slot is OMITTED for an UNSUPPORTED memo parent (sprk_document not in SUPPORTED_MEMO_PARENTS) — FR-16', async () => {
+    // Pre-FR-16 behavior asserted `annotation?.badge === 0` (slot still
+    // rendered, badge idled). FR-16 (R2 task 024) changes this: a null
+    // regarding filter now omits the slot entirely, since the launcher would
+    // otherwise open a Notepad scoped to a parent sprk_memo cannot reference.
+    // sprk_document IS in SUPPORTED_TODO_PARENTS (unchanged), so the checkmark
+    // slot still renders — this is the FR-16 test case (To-Do-but-not-Memo).
+    installXrm({ memoCount: 999, todoCount: 2 }); // even if the mock returns 999, we should NOT read it
     const { result } = renderHook(() =>
       useRecordHeaderToolbarActions({
         entity: UNSUPPORTED_ENTITY,
@@ -377,8 +480,10 @@ describe('useRecordHeaderToolbarActions', () => {
     await flushPromises();
     await flushPromises();
 
+    const keys = result.current.toolbarProps.iconSlots.map(s => s.key);
+    expect(keys).toEqual(['checkmark']);
     const annotation = result.current.toolbarProps.iconSlots.find(s => s.key === 'annotation');
-    expect(annotation?.badge).toBe(0);
+    expect(annotation).toBeUndefined();
 
     // Verify NO sprk_memo query was issued — the hook must idle when the
     // parent entity is not in SUPPORTED_MEMO_PARENTS (memo filter = null).

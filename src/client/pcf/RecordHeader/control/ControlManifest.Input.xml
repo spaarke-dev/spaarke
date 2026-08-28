@@ -1,0 +1,65 @@
+<?xml version="1.0" encoding="utf-8" ?>
+<manifest>
+  <!-- NOTE: no attribute VALUE in this file may contain an apostrophe.
+       `pac solution import` rejects the solution with noAposStringType.
+       Apostrophes inside XML comments (like this one's) are fine. -->
+  <control namespace="Spaarke.Records" constructor="RecordHeader" version="1.1.11"
+           display-name-key="Spaarke Record Header"
+           description-key="Configuration-driven record header card plus toolbar for any Dataverse entity. Entity and record are self-detected from the form context. Field layout comes from the layoutJson property, or is derived from entity metadata when that property is blank."
+           control-type="virtual">
+
+    <!-- Bound field: any SingleLine.Text field on the host entity. The PCF replaces
+         this fields rendering with the custom header card. The bound value itself is
+         not semantically important - the PCF reads the entity + record from
+         context.mode.contextInfo. usage=bound + required=true is what makes the PCF
+         appear in Dataverses form designer Add component to field gallery. -->
+    <property name="boundField" display-name-key="Bound field"
+              description-key="Any SingleLine.Text field on the host entity. PCF replaces this fields rendering with the record header card. Bind to the entitys primary name column for standard placement."
+              of-type="SingleLine.Text" usage="bound" required="true" />
+
+    <!-- Header title rendered inline with the toolbar icons. Overrides both the
+         layoutJson title and the metadata-derived entity display name. -->
+    <property name="title" display-name-key="Header title"
+              description-key="Title text shown inline with the toolbar icons. Defaults to the layoutJson title, then to the entity display name, when left blank."
+              of-type="SingleLine.Text" usage="input" required="false" />
+
+    <!-- Show/hide the version footer. Defaults to true (visible) to preserve the
+         current diagnostic value; makers can hide the footer in polished forms. -->
+    <property name="showVersion" display-name-key="Show version footer"
+              description-key="When enabled, renders the vX.Y.Z build stamp at the bottom of the header. Disable for a cleaner production look."
+              of-type="TwoOptions" usage="input" required="false" default-value="true" />
+
+    <!-- FR-01: the RecordHeaderConfiguration v1.0 JSON layout, pasted by a maker
+         into the form designer control-properties panel.
+
+         of-type MUST be Multiple, NOT SingleLine.Text. This is the outcome of the
+         task-001 ergonomics spike, decided by UAT rather than by the spike:
+         v1.1.0 shipped SingleLine.Text and the classic form designer REJECTED
+         every realistic layout with "The layout json property cannot be more
+         than 100 characters". SingleLine.Text is capped at 100 chars in that
+         designer; a minimal RecordHeaderConfiguration is ~150 bytes and the
+         6-field sprk_project layout is ~310. Multiple (Multiple Lines of Text)
+         carries the value with no such cap.
+         Do NOT revert this to SingleLine.Text - see
+         projects/record-header-and-notepad-r2/notes/decisions/001-layoutjson-of-type.md.
+
+         A blank, malformed, or wrong-version value NEVER blanks the form - the
+         resolver falls back to metadata-derived defaults with one console.warn. -->
+    <property name="layoutJson" display-name-key="Layout JSON"
+              description-key="RecordHeaderConfiguration v1.0 JSON describing title, columns, summaryField and the ordered field list. Leave blank to derive a default layout from entity metadata. A malformed value falls back to those defaults and logs a warning."
+              of-type="Multiple" usage="input" required="false" />
+
+    <resources>
+      <code path="index.ts" order="1"/>
+      <!-- Platform-provided libraries (not bundled) per ADR-022 -->
+      <platform-library name="React" version="16.14.0" />
+      <platform-library name="Fluent" version="9.46.2" />
+    </resources>
+
+    <feature-usage>
+      <uses-feature name="WebAPI" required="true" />
+      <uses-feature name="Utility" required="true" />
+      <uses-feature name="Navigation" required="true" />
+    </feature-usage>
+  </control>
+</manifest>
