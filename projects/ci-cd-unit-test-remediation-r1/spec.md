@@ -124,6 +124,20 @@ The original FR-B01..FR-B07 framing attacked symptoms (coverage %, specific anti
 
 Owner clarification 2026-06-26 (recorded after task 053 deletion completed): "The assessment said we have way over-engineered the unit testing. The current 9-file deletion (179 tests removed) doesn't accomplish the goals of the project. My understanding is there are two categories of unit tests: (1) build tests created during the build process that validate aspects of the build, and (2) integrate/maintain tests that ship to long-term ownership. The protocol should ensure we reconcile (1) and (2) at project close, AND apply that protocol retroactively to existing components. There ARE clear best practices for what's build-only vs integrate/maintain."
 
+#### FR-B10 — owner decisions, 2026-08-28 (binding)
+
+Task 082's classification landed at **358 DELETE / 1,455 AMBIGUOUS / 5,306 KEEP** across 7,119 methods — below the 1,500–3,000 *projection*. Three owner decisions close it out:
+
+1. **358 is accepted as the deliverable.** *"We need to be safe, not sorry."* This is **not** a deviation: FR-B10's own MUST above is qualitative and states plainly that *"numeric reduction is a signal, not a gate."* The 1,500–3,000 figure was a projection about what mechanical detection would find, and that projection was wrong — 9 of the 17 bans require intent, and B6 (mirror tests) is undetectable by pattern while plausibly being the largest real bucket. Missing a projection is not missing a requirement.
+
+2. **The CICD-082b deep-judgment pass will NOT happen.** The owner stated directly that there is no realistic chance of a human reading 7,119 tests — *"just keeping it honest."* FR-B10 step (2) above is therefore **retired, not deferred**; recording it as "deferred" would be a fiction that leaves the requirement looking satisfiable. Residual cleanup happens incrementally through **`/test-diet`** at project close (FR-B09), which reconciles the tests each project actually touched — a small, reviewable set — rather than the whole suite at once. That is the sustainable mechanism; the one-time deep pass never was.
+
+3. **A bad name is not grounds for deletion.** The 1,123 `B13-name-missing-scenario` methods MUST NOT be deleted where the test is *otherwise useful, effective, and executable*. ADR-038's own remedy column for B13 reads **"rename per convention or delete"** — rename first. This re-scopes task **085**, which was written as "final sweep + deletion" but whose actual content is rename decisions. See its POML note.
+
+**Consequence, stated honestly**: the "≤3,500 surviving BFF unit tests" figure elsewhere in this spec is **not reachable** by the deletion path now sanctioned (358 + at most 282 = ~640 removals against 7,119). It should be read as a retired aspiration, not an open commitment. The qualitative MUST — surviving tests are useful per ADR-038 §7 — remains binding and is served by `/test-diet` over time.
+
+---
+
 This directive expands FR-B scope from FR-B01..FR-B07 to FR-B01..FR-B10. Phase 2 task 053 (narrow 9-file deletion) is preserved as a foundation; FR-B08/B09/B10 are additive deliverables required before Phase 3 cutover (071).
 
 **Stream C — Hot-path coordination**
