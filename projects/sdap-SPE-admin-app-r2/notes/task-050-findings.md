@@ -208,7 +208,11 @@ gated on it was completed.
 
 ```powershell
 Update-Module Microsoft.Online.SharePoint.PowerShell      # need >= 16.0.27515.12000
-Connect-SPOService -Url https://spaarkedev1-admin.sharepoint.com
+Connect-SPOService -Url https://spaarke-admin.sharepoint.com     # NOT spaarkedev1-admin — the SharePoint tenant is
+#                                                        # `spaarke`, verified from a container's drive
+#                                                        # webUrl (https://spaarke.sharepoint.com/...).
+#                                                        # The Dataverse org name (spaarkedev1) and the
+#                                                        # SharePoint tenant name are different things.
 Set-SPOContainerTypeConfiguration -ContainerTypeId 8a6ce34c-6055-4681-8f87-2f4f9f921c06 -IsArchiveEnabled $true
 Get-SPOContainerTypeConfiguration -ContainerTypeId 8a6ce34c-6055-4681-8f87-2f4f9f921c06   # confirm
 ```
