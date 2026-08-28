@@ -70,16 +70,31 @@ public sealed class MessageAttachmentMaterializer
     private readonly CommunicationOptions _options;
     private readonly ILogger<MessageAttachmentMaterializer> _logger;
 
+    /// <summary>
+    /// The record-aware container decision (unified-access-control-r2 task 076). Injected directly —
+    /// both this type and the resolver are registered Scoped (<c>CommunicationModule</c>), so no
+    /// scope-factory dance is needed here (unlike <c>CommunicationService</c>, which is not Scoped).
+    ///
+    /// <para>OPTIONAL so existing test constructions stay compilable, but the registration is NOT
+    /// feature-gated. A null resolver means the container decision cannot be made, and
+    /// <see cref="MaterializeAsync"/> therefore REFUSES rather than falling back to the shared archive
+    /// container — the CLAUDE.md §10 F.1 asymmetric-registration trap is that an absent isolation seam
+    /// silently becomes "use the shared container", which is the exact defect this routing removes.</para>
+    /// </summary>
+    private readonly Engine.CommunicationContainerResolver? _containerResolver;
+
     public MessageAttachmentMaterializer(
         ISpeFileOperations speFileStore,
         IGenericEntityService genericEntityService,
         IOptions<CommunicationOptions> options,
-        ILogger<MessageAttachmentMaterializer> logger)
+        ILogger<MessageAttachmentMaterializer> logger,
+        Engine.CommunicationContainerResolver? containerResolver = null)
     {
         _speFileStore = speFileStore;
         _genericEntityService = genericEntityService;
         _options = options.Value;
         _logger = logger;
+        _containerResolver = containerResolver;
     }
 
     /// <summary>
@@ -108,10 +123,50 @@ public sealed class MessageAttachmentMaterializer
             return MaterializeAttachmentResult.Rejected(policyProblem);
         }
 
-        // ── Resolve the SPE drive/container (same source as the email archive path) ──
-        var driveId = !string.IsNullOrWhiteSpace(request.DriveId)
+        // ── Resolve the SPE drive/container — RECORD-AWARE as of task 076 ───────────────────────
+        //
+        // This used to be `request.DriveId ?? _options.ArchiveContainerId`, so a chat attachment on a
+        // message regarding a SECURE matter landed in the shared archive container. SPE permissions
+        // are additive-only, so that placement cannot be retracted by any later permission change.
+        // Task 075 fixed the email inbound-attachment twin; this is the messaging-channel one.
+        //
+        // ⚠️ NOTE THE ORDER. `request.DriveId` is now the FALLBACK, not the winner. If the resolver
+        // ran only when `request.DriveId` was absent, the isolation fix would be caller-bypassable —
+        // any caller supplying a drive id would silently reinstate the defect. A secure regarding's
+        // own container must beat every caller-supplied value; a NON-SECURE message keeps exactly its
+        // previous behaviour, because `request.DriveId ?? ArchiveContainerId` is what gets passed in
+        // as INV-7's tier-3 default.
+        if (_containerResolver is null)
+        {
+            // Refuse rather than fall back. An absent isolation seam that degrades to "use the shared
+            // container" is the CLAUDE.md §10 F.1 anti-pattern in its most damaging form.
+            _logger.LogError(
+                "Cannot materialize attachment '{FileName}' for communication {CommunicationId}: the " +
+                "record-aware container resolver is unavailable, so it cannot be determined whether the " +
+                "message regards a secure record. Refusing rather than using the shared archive container. " +
+                "CorrelationId: {CorrelationId}",
+                request.FileName, request.CommunicationId, request.CorrelationId);
+
+            return MaterializeAttachmentResult.Rejected(Problem(
+                status: 500,
+                errorCode: "ATTACHMENT_STORE_NOT_CONFIGURED",
+                title: "Attachment store not configured",
+                detail: "The storage container for this message could not be determined, so the "
+                        + "attachment was not stored.",
+                correlationId: request.CorrelationId));
+        }
+
+        var fallbackDriveId = !string.IsNullOrWhiteSpace(request.DriveId)
             ? request.DriveId!
             : _options.ArchiveContainerId;
+
+        // Throws SdapProblemException for a secure regarding with no container of its own
+        // (secure_record_container_missing, 409) or ambiguous ownership — fail closed by design, and
+        // deliberately NOT caught here: swallowing it into a "not configured" rejection would turn a
+        // correct refusal into what reads like a deployment problem.
+        var driveId = await _containerResolver
+            .ResolveContainerAsync(request.CommunicationId, fallbackDriveId, cancellationToken);
+
         if (string.IsNullOrWhiteSpace(driveId))
         {
             return MaterializeAttachmentResult.Rejected(Problem(

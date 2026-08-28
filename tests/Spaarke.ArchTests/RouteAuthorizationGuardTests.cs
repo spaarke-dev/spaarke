@@ -266,15 +266,31 @@ public class RouteAuthorizationGuardTests
         // 🔎 CITATION FIXED 2026-08-27: this block previously cited "ADR-008 §6.5". ADR-008 has no §6.5 —
         // §6.5 is root CLAUDE.md's ADR Conflict Resolution Protocol. Pre-existing error, corrected here.
         //
-        // ⚠️ 076's rewrite to option (C) (2026-08-27) changes the DISPOSITION of all three: the first is
-        // CONVERTED to a record-keyed contract and gated; the other two are DELETED, because their client
-        // (Spaarke.SdapClient UploadOperation.ts:98) first calls GET /api/obo/containers/{id}/drive, which
-        // is mapped NOWHERE — the chunked path is dead by 404. So all three entries below should be gone
-        // when 076 lands, and none should become Permanent.
-        new Waiver("PUT /api/obo/containers/{id}/files/{*path}", WaiverKind.Pending, "075/076",
-            "Finding #2 — writes into a caller-named container. Authorization subject is the OWNING RECORD, "
-            + "not a document that does not exist yet; 11 live call sites via EntityCreationService.ts:493. "
-            + "Latent: OBO means SPE denies without a container ACL and no user holds one."),
+        // ⚠️ CORRECTED 2026-08-28 when 076 landed. This block previously PREDICTED that all three
+        // entries would be gone — "the first is CONVERTED to a record-keyed contract and gated". Two of
+        // three came true (the chunked pair was deleted; see the 076 block below). The prediction about
+        // the FIRST one did not, and the prediction is corrected here rather than left to read as an
+        // unmet promise.
+        //
+        // 076 DID build the gated record-keyed replacement —
+        //   PUT  /api/obo/records/{entityLogicalName}/{recordId}/files/{*path}
+        //   POST /api/obo/records/{entityLogicalName}/{recordId}/upload-session
+        // both carrying .AddRecordRouteAccessAuthorizationFilter(...). What it could not do is DELETE the
+        // container-keyed route, because three live client upload paths have no owning record at the
+        // moment the bytes move, so they have nothing to key the new contract on. Deleting would break
+        // them; adding a container parameter to the new routes for their benefit is option (B), rejected.
+        // So the waiver stays, re-pointed to the owner decision that unblocks it. It is a WORK ITEM and
+        // must not become Permanent — see maintenance rule 4 above.
+        new Waiver("PUT /api/obo/containers/{id}/files/{*path}", WaiverKind.Pending, "076-ESCALATED",
+            "Finding #2 — writes into a caller-named container with no per-resource decision. Task 076 "
+            + "shipped the gated record-keyed replacement (PUT/POST /api/obo/records/{entityLogicalName}/"
+            + "{recordId}/...), so this route is now LEGACY rather than the only option. It survives "
+            + "solely because three client paths upload bytes before any owning record exists — "
+            + "EmailComposer local attachments, the Analysis wizard's standalone document, and "
+            + "DocumentUploadWizard 'skip associate'. That is a modelling gap (record-after-bytes), not a "
+            + "missing filter, and closing it is an owner decision: create the record first, or issue a "
+            + "server-side upload ticket. Deletes when the last of those three moves. Latent meanwhile: "
+            + "OBO means SPE denies without a container ACL and no user holds one."),
 
         // ---------- task 076: TWO WAIVERS REMOVED 2026-08-27, the routes were DELETED ----------
         //
@@ -1100,18 +1116,39 @@ public class RouteAuthorizationGuardTests
         // reaching either one; and the chunk route had no client at all, because even that client PUT
         // straight to Graph's session.uploadUrl. Both waivers were deleted with them.
         //
-        // The 1 survivor is PUT /api/obo/containers/{id}/files/{*path} — the LIVE upload route, which
-        // 076 CONVERTS to the record-keyed contract rather than deleting. Its waiver goes when the
-        // conversion lands, and it must not become Permanent.
+        // 1 → 3: task 076 ADDED the record-keyed upload pair, and did NOT delete the container-keyed
+        // route it was built to replace. Both halves of that sentence are deliberate:
+        //
+        //   +1  PUT  /api/obo/records/{entityLogicalName}/{recordId}/files/{*path}   GATED
+        //   +1  POST /api/obo/records/{entityLogicalName}/{recordId}/upload-session  GATED
+        //
+        // Both carry .AddRecordRouteAccessAuthorizationFilter(...), so Rule A sees them as Filter and
+        // neither needs a waiver — which is the shape 076 exists to produce: the caller names the owning
+        // RECORD, the filter authorizes the caller against it, and the container is then resolved from
+        // that same record server-side.
+        //
+        // The upload-session route also RESTORES a capability rather than only re-keying one: files
+        // >= 4 MiB had no working upload path at all after the dead chunked pair was deleted earlier in
+        // this task (the small route is capped at PathValidator.SmallUploadMaxBytes).
+        //
+        // ⚠️ WHY THE COUNT IS 3 AND NOT 2. PUT /api/obo/containers/{id}/files/{*path} SURVIVES, and its
+        // Pending waiver survives with it — deliberately, and this is the honest state rather than a
+        // passing grade. Three live client upload paths have NO owning record at the moment the bytes
+        // move (EmailComposer local attachments, the Analysis wizard's standalone document,
+        // DocumentUploadWizard "skip associate"), so deleting the route would break them and giving the
+        // record-keyed routes a container parameter "for just those three" is option (B), which was
+        // rejected. That is a MODELLING gap escalated to the owner, not a routing gap 076 could close.
+        // The waiver must NOT be converted to Permanent while it stands: it is a work item.
         //
         // Update this number when routes are added or removed here — that is the ratchet working, not a
-        // nuisance. Note the retroactive-validation test above is unaffected by the deletions: it feeds
-        // the scanner INLINE source text, so it still proves the rule catches finding #2's shape even
-        // though that route no longer exists in the file.
+        // nuisance. Note the retroactive-validation test above is unaffected by any of this: it feeds
+        // the scanner INLINE source text, so it still proves the rule catches finding #2's shape.
         Assert.True(
-            ScanFile("Api/OBOEndpoints.cs").Count == 1,
-            "Expected 1 registration in OBOEndpoints.cs after task 076 deleted the dead chunked pair, "
-            + "leaving only the live upload route. A drop here would make that route invisible.");
+            ScanFile("Api/OBOEndpoints.cs").Count == 3,
+            "Expected 3 registrations in OBOEndpoints.cs after task 076: the legacy container-keyed "
+            + "upload route (still ungated, still waived, pending an owner decision on the three "
+            + "no-owning-record client paths) plus the two GATED record-keyed routes that replace it. "
+            + "A drop here would make one of them invisible.");
     }
 
     // =============================================================================================

@@ -90,10 +90,20 @@ public class EntityAccessFilter : IEndpointFilter
     /// Association target type → Dataverse entity SET (plural collection) name.
     /// </summary>
     /// <remarks>
-    /// A closed map with a fail-closed miss, replacing the previous <c>IsValidEntityType</c> boolean:
+    /// <para>A closed map with a fail-closed miss, replacing the previous <c>IsValidEntityType</c> boolean:
     /// validating a type and then resolving its collection are the same question, and keeping them in
     /// one table means a type can never be accepted without a collection to check it against. Short
-    /// aliases are retained because the previous implementation accepted them.
+    /// aliases are retained because the previous implementation accepted them.</para>
+    ///
+    /// <para><b>This is THE map for logical-name → entity-set on the caller-rights path</b>
+    /// (unified-access-control-r2 task 076). It is read by this filter AND by
+    /// <see cref="RecordRouteAccessAuthorizationFilter"/> through <see cref="TryResolveEntitySet"/>.
+    /// The codebase already carried three logical/short-name → entity-set maps before 076
+    /// (here, <c>SemanticSearchAuthorizationFilter.AuthorizableEntitySets</c>, and
+    /// <c>RecordSearchAuthorizationFilter</c>'s dynamically-built one), which is already over the
+    /// CLAUDE.md §11 line. A FOURTH is not acceptable, so the record-keyed upload route reuses this
+    /// one rather than declaring its own — the two filters differ in where they read the target from
+    /// and which right they demand, not in what an entity's collection is called.</para>
     /// </remarks>
     private static readonly IReadOnlyDictionary<string, string> EntitySetByType =
         new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
@@ -107,6 +117,36 @@ public class EntityAccessFilter : IEndpointFilter
             ["sprk_invoice"] = "sprk_invoices",
             ["invoice"] = "sprk_invoices"
         };
+
+    /// <summary>
+    /// Resolve an entity logical name (or short alias) to its Dataverse entity SET, for
+    /// <see cref="CallerRecordAccessProbe.GetCallerRightsAsync"/>, which needs the PLURAL collection.
+    /// </summary>
+    /// <returns>
+    /// <see langword="true"/> and the collection name when the type is one whose per-record access
+    /// this codebase can evaluate; <see langword="false"/> otherwise. A <see langword="false"/> return
+    /// is a DENIAL at every call site, never a pass-through — see
+    /// <see cref="RecordRouteAccessAuthorizationFilter"/>.
+    /// </returns>
+    /// <remarks>
+    /// Exposed (task 076) so the record-keyed upload route can share this table instead of adding a
+    /// fourth copy of it. Deliberately a <c>TryResolve</c> rather than an exposed dictionary: handing
+    /// out the map would let a caller enumerate it and then decide for itself what a miss means, and
+    /// the whole point of the closed-map-with-fail-closed-miss shape is that a miss has exactly one
+    /// legal interpretation.
+    /// </remarks>
+    internal static bool TryResolveEntitySet(string? entityLogicalNameOrAlias, out string entitySet)
+    {
+        if (!string.IsNullOrWhiteSpace(entityLogicalNameOrAlias)
+            && EntitySetByType.TryGetValue(entityLogicalNameOrAlias.Trim(), out var resolved))
+        {
+            entitySet = resolved;
+            return true;
+        }
+
+        entitySet = string.Empty;
+        return false;
+    }
 
     public EntityAccessFilter(
         CallerRecordAccessProbe probe,
@@ -160,7 +200,7 @@ public class EntityAccessFilter : IEndpointFilter
 
         // Resolve the target's Dataverse collection. A type with no entry is rejected — validating the
         // type and knowing where to look it up are the same question (see EntitySetByType).
-        if (!EntitySetByType.TryGetValue(targetEntity.EntityType, out var entitySet))
+        if (!TryResolveEntitySet(targetEntity.EntityType, out var entitySet))
         {
             _logger?.LogWarning(
                 "Entity access check failed: Invalid entity type '{EntityType}'. " +
