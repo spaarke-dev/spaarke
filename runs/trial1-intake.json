@@ -7,5 +7,8 @@
   "region": "westus2",
   "openAiRegion": "westus3",
   "tier": "shared-trial",
-  "notes": "First E2E Model 1 platform stand-up — permanent trial env (per SESSION 11 Q4 BINDING). Batch dispatch of task 186. openAiRegion=westus3 per canonical Spaarke split (customer.bicep openAiLocation param); PRQ-E-14 preflight pre-verifies pinned model:version pairs are available + non-Deprecated in westus3 before H2a executes. environmentId omitted intentionally — Step 1f auto-creates the sprk_dataverseenvironment placeholder via Dataverse MCP. skipExternalPrereqs omitted — Step 0.5 iterates prereqs.yaml (PRQ-T-*/PRQ-S-*/PRQ-E-*)."
+  "estimatedMonthlyUsd": 412,
+  "confirmationAcknowledgment": "proceed with provisioning",
+  "costEnvelopePolicy": "abortOnOverrun",
+  "notes": "First E2E Model 1 platform stand-up — permanent trial env (per SESSION 11 Q4 BINDING). Batch dispatch of task 186. openAiRegion=westus3 per canonical Spaarke split (customer.bicep openAiLocation param); PRQ-E-14 preflight pre-verifies pinned model:version pairs are available + non-Deprecated in westus3 before H2a executes. environmentId omitted intentionally — Step 1f auto-creates the sprk_dataverseenvironment placeholder via Dataverse MCP. skipExternalPrereqs omitted — Step 0.5 iterates prereqs.yaml (PRQ-T-*/PRQ-S-*/PRQ-E-*). SESSION 18 Bucket A: confirmationAcknowledgment (BAT-03 attestation, required for batch), estimatedMonthlyUsd=$412/mo (Model 1 marginal within $430 shared-trial ceiling per SKILL Step 2 BAT-10), costEnvelopePolicy=abortOnOverrun (default; H0 fails Resumable on overrun). These three fields exercise the COMP-10 end-to-end wiring for the first prod dispatch."
 }

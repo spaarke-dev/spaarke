@@ -65,6 +65,62 @@ public sealed class IntakeSchemaProfileParityTests
             "drift causes silent batch-vs-endpoint validation asymmetry. Update BOTH surfaces together.");
     }
 
+    /// <summary>
+    /// Bucket A HIGH#2 (SESSION 18): confirmationAcknowledgment carries the BAT-03 batch-mode
+    /// operator attestation phrase (the batch equivalent of the interactive Step 3 confirmation
+    /// gate — Wave 0 Decision 3 / NFR-11 auditability). It has a schema `const` of "proceed with
+    /// provisioning" AND is enforced by SKILL.md Step 1.0 line 515-517. Prior to this fix the
+    /// field was in `properties` but NOT in the top-level `required[]` array — so ajv batch
+    /// validation silently passed intakes that were missing the phrase, and the operator only
+    /// discovered the gap when the skill hard-stopped mid-dispatch. This test asserts the
+    /// field stays required at ajv-validation time, so a future well-meaning removal fails
+    /// the build here instead of failing silently in prod.
+    /// </summary>
+    [Fact]
+    public void ConfirmationAcknowledgment_IsRequired_InIntakeSchema()
+    {
+        var required = ReadStringArrayFromSchema("required");
+
+        required.Should().Contain(
+            "confirmationAcknowledgment",
+            "intake.schema.json top-level `required[]` MUST include `confirmationAcknowledgment` — " +
+            "the field carries the BAT-03 batch-mode operator attestation (const 'proceed with " +
+            "provisioning'). Without it in `required[]`, ajv validation silently passes intakes " +
+            "that would then hard-stop at SKILL.md Step 1.0 line 515. See Bucket A HIGH#2 SESSION 18.");
+    }
+
+    // -------------------------------------------------------------------------
+    // Helpers (additional)
+    // -------------------------------------------------------------------------
+
+    private static IReadOnlyList<string> ReadStringArrayFromSchema(string dotPath)
+    {
+        var schemaPath = ResolveRepoRelativePath(IntakeSchemaRelativePath);
+        Assert.True(File.Exists(schemaPath),
+            $"Expected intake schema at '{schemaPath}'. If moved, update IntakeSchemaRelativePath.");
+
+        using var doc = JsonDocument.Parse(File.ReadAllText(schemaPath));
+        var current = doc.RootElement;
+        foreach (var segment in dotPath.Split('.'))
+        {
+            Assert.True(current.TryGetProperty(segment, out var next),
+                $"intake.schema.json missing property path segment '{segment}' (full path '{dotPath}').");
+            current = next;
+        }
+
+        Assert.True(current.ValueKind == JsonValueKind.Array,
+            $"Expected '{dotPath}' to be a JSON array; got {current.ValueKind}.");
+
+        var results = new List<string>(current.GetArrayLength());
+        foreach (var element in current.EnumerateArray())
+        {
+            Assert.True(element.ValueKind == JsonValueKind.String,
+                $"Expected string elements in '{dotPath}'; got {element.ValueKind}.");
+            results.Add(element.GetString()!);
+        }
+        return results;
+    }
+
     // -------------------------------------------------------------------------
     // Helpers
     // -------------------------------------------------------------------------

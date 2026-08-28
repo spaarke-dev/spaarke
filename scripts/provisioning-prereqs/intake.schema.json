@@ -9,7 +9,8 @@
     "tenantId",
     "tenancyModel",
     "controlPlaneEnv",
-    "profile"
+    "profile",
+    "confirmationAcknowledgment"
   ],
   "additionalProperties": false,
   "properties": {

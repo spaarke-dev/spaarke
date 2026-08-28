@@ -503,6 +503,7 @@ if ($BatchIntakeFile) {
   $region         = $intake.region              # optional platform region (default westus2)
   $openAiRegion   = $intake.openAiRegion        # optional AOAI region (default westus3); consumed by Step 4.0 openAiLocation mapping
   $tier           = $intake.tier                # optional
+  $estimatedMonthlyUsd = $intake.estimatedMonthlyUsd  # COMP-10 (SESSION 17) + Bucket A HIGH#8 (SESSION 18): consumed by Step 4.0 nonSecretParameters + H0 cost-envelope gate. Null in interactive mode → H0 log-only skips (unchanged interactive behavior).
   $notes          = $intake.notes               # optional
   $operatorUpn    = az ad signed-in-user show --query userPrincipalName -o tsv  # NEVER trust an operatorUpn field in the JSON (would risk NFR-11 spoof)
   $script:SkipInteractiveIntake = $true         # gates 1a-1e prompts below
@@ -551,9 +552,14 @@ Sample intake (see [`intake.schema.json`](../../scripts/provisioning-prereqs/int
   "controlPlaneEnv": "dev",
   "profile": "spaarke-hosted-model1-trial",
   "region": "westus2",
-  "tier": "shared-trial"
+  "tier": "shared-trial",
+  "estimatedMonthlyUsd": 412,
+  "confirmationAcknowledgment": "proceed with provisioning",
+  "costEnvelopePolicy": "abortOnOverrun"
 }
 ```
+
+The `confirmationAcknowledgment` literal is REQUIRED for batch dispatch (intake.schema.json `const` + top-level `required[]` — Bucket A HIGH#2 SESSION 18); a missing/wrong value hard-stops Step 1.0 (line 515-517). `estimatedMonthlyUsd` + `costEnvelopePolicy` feed the COMP-10 H0 cost-envelope gate end-to-end (Bucket A HIGH#8 SESSION 18); omitting them causes H0 to log-only skip.
 
 Interactive-mode operators skip this section entirely — proceed to 1a.
 
@@ -1079,14 +1085,19 @@ $body = @{
     confirmationAcknowledgment  = $confirmationPhrase     # verbatim "proceed with provisioning"
     intakeFileSha256            = $intakeFileSha256       # batch-mode audit trail (null in interactive)
     region                      = $region                 # primary platform region (e.g. westus2) — distinct from openAiLocation
-    tier                        = $tier
+    tier                        = $tier                   # COMP-10 gate input (H0Options.GetCeilingUsd lookup key)
+    estimatedMonthlyUsd         = $estimatedMonthlyUsd    # COMP-10 gate input (Bucket A HIGH#8 SESSION 18); null → H0 log-only skips
+    costEnvelopePolicy          = $script:BatchCostEnvelopePolicy  # COMP-10 gate policy (Bucket A HIGH#8 SESSION 18); default 'abortOnOverrun' in batch loader. Interactive mode leaves $script:BatchCostEnvelopePolicy null → H0 treats null as abortOnOverrun-equivalent per its default branch.
     operatorUpn                 = $operatorUpn
     # other operator-supplied intake fields (notes, etc.) can be added here; the L2 side
     # treats nonSecretParameters as a bag and ignores unknown keys (§4D-adjacent design).
-    # DO NOT include the *Policy fields (mcpDisconnectPolicy / acknowledgeUpgradeMode / onFailedPolicy
-    # / onQuarantinedPolicy / onManualGatePolicy / costEnvelopePolicy / postmortemFile) — those are
-    # SKILL-LOCAL batch policies (BAT-01..09), NOT L2 payload. They control this skill's control
-    # flow at Steps 0d/1a/1g/4b/5/7b and would just be noise on the L2 audit record.
+    # DO NOT include the SKILL-LOCAL batch policy fields (mcpDisconnectPolicy / acknowledgeUpgradeMode /
+    # onFailedPolicy / onQuarantinedPolicy / onManualGatePolicy / postmortemFile) — those are
+    # BAT-01..09 control-flow knobs, NOT L2 payload. They control this skill's control flow at
+    # Steps 0d/1a/1g/4b/5/7b and would be noise on the L2 audit record.
+    # NOTE (Bucket A HIGH#8 SESSION 18): costEnvelopePolicy is deliberately IN the payload — the
+    # server-side H0 cost-envelope gate needs it to branch abort-vs-warnAndProceed. Prior guidance
+    # to exclude it left COMP-10 fully un-wired end-to-end (H0 always hit the disabled/skip branch).
   }
 } | ConvertTo-Json -Depth 5
 
@@ -1425,9 +1436,20 @@ try {
     }
   )
 } catch {
-  # F1 fallback path (Dataverse MCP disconnect) — use raw Web API PATCH with operator's az token
-  $dvUrl = $constants.spaarke[$environment].registryDvUrl  # spaarkedev1 for dev per operator memory
+  # F1 fallback path (Dataverse MCP disconnect) — use raw Web API PATCH with operator's az token.
+  # Bucket A HIGH#13 SESSION 18 fix: previously read `$constants.spaarke[$environment].registryDvUrl`
+  # which was a PHANTOM shape ($constants.spaarke.* never existed in spaarke-constants.yaml — the
+  # real path is $constants.name_templates.registryDvUrl.{env}, matching Step 0.5b line 347). The
+  # bug guaranteed $dvUrl=$null → az token call failed → PATCH threw uncaught → Steps 6b + 6c
+  # never ran → operator lost the mandatory handoff artifact (SKILL.md line 60 MUST).
+  $dvUrl = $constants.name_templates.registryDvUrl.$environment  # e.g. https://spaarkedev1.crm.dynamics.com for dev per operator memory feedback_no_central_managing_env_yet
+  if ([string]::IsNullOrWhiteSpace($dvUrl)) {
+    throw "Step 6a HARD STOP (Bucket A HIGH#13): registry env dvUrl not resolvable for controlPlaneEnv='$environment' — verify scripts/provisioning-prereqs/spaarke-constants.yaml name_templates.registryDvUrl.$environment is populated. Registry PATCH cannot proceed; write runs/{runId}-registry-stale.md skeleton and escalate per Fallback F3."
+  }
   $dvToken = az account get-access-token --resource $dvUrl --query accessToken -o tsv
+  if ([string]::IsNullOrWhiteSpace($dvToken)) {
+    throw "Step 6a HARD STOP: az token acquisition failed for resource '$dvUrl' — operator's AAD context lost between Step 0b and Step 6a. Run 'az login', then invoke skill with -Resume {runId} to retry registry PATCH."
+  }
   $body = @{ sprk_provisionedon = $completedAtIso; sprk_bffversion = $deployedBffVersion; ... } | ConvertTo-Json
   Invoke-RestMethod -Uri "$dvUrl/api/data/v9.2/sprk_dataverseenvironments($environmentId)" `
     -Method PATCH -Headers @{ Authorization = "Bearer $dvToken"; "OData-Version" = "4.0"; "If-Match" = "*" } `
