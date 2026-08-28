@@ -9,32 +9,55 @@
 
 | Field | Value |
 |---|---|
-| **Task** | **090 — wrap-up** — the ONLY task left. 🔲 not started |
-| **Phase** | Project close |
-| **Status** | 052 ✅ complete + live-verified and committed (`a3a897ba2`). Tree clean |
-| **Next Action** | 🔔 **Operator decision first** — see §0. Then run `090-wrapup`, whose **`/test-diet` gate is BINDING** (CLAUDE.md §7) |
-| **Rigor** | 090 is TEST-MODIFYING → quality gates run **unconditionally** |
+| **Task** | **090 — wrap-up.** 🔲 **HELD by operator instruction**: do not start until all work is done AND UAT has passed |
+| **Phase** | Project close (gated) |
+| **Status** | 052 ✅ · 025 ✅ · 042's Security escalation ✅ resolved. Tree clean, pushed |
+| **Next Action** | Nothing is implementable without input — see §0. All remaining items are **one decision**, **one operator action**, and a **UAT pass** |
+| **Rigor** | 090 is TEST-MODIFYING → quality gates run **unconditionally** when it does run |
 
-### 🔔 §0. Decision needed before 090 can close the project
+### 🔔 §0. What is actually left
 
-**24 of 30 tasks ✅. One 🔲 (090). Five 🔄 PARTIAL — and closing the project decides what happens to them.**
+**26 of 30 tasks ✅ · 3 🔄 · 1 🔲 (090, held).** All code work that could be done without input is done.
 
-| Task | Why it is partial | Closable as-is? |
-|---|---|---|
-| **050** | Archival code shipped + contract-tested, but **AC-1/AC-2 need the operator's opt-in** (§2). Escalation fired and is unanswered | Needs the operator's call |
-| **025** | Server complete; form deferred. FR-C07 named a property that does not exist | Likely yes — documented |
-| **026** | AC-2 **not achievable from an owning tenant** (platform limit) | Likely yes — escalated + answered |
-| **029** | `billingStatus` appeared nowhere on the wire | Likely yes — documented |
-| **042** | 722 → 356 SpeAdmin cases; 8 files deferred | 090's `/test-diet` is exactly where this resolves |
+#### (a) ONE decision — task 026 AC-2
 
-**Do not start 090 without deciding on 050** — the wrap-up PR has to state whether FR-E01 ships
-unverified or the project waits for the tenant change.
+*"Show the owner value and the consuming tenant's effective override, both labelled."* The effective
+value lives on `fileStorageContainerTypeRegistration.settings`, which hangs off `fileStorage` and is
+**scoped to the calling tenant** — so an owning tenant can read its own registration and never a
+remote consuming tenant's. In Spaarke Dev the owning tenant *is* the consuming tenant, so a
+cross-tenant override cannot even be produced to test against.
+
+| Path | What it means |
+|---|---|
+| 1. **Drop AC-2** | Accept that an owning-tenant console cannot report remote overrides. The honest surface is the permission list + warning already shipped |
+| 2. **Re-scope + new task** ⭐ | "Show what is effective in *this* tenant's registration", built on `GET /storage/fileStorage/containerTypeRegistrations`. Buildable and verifiable in Spaarke Dev — but answers a *different question* than FR-C08 asks, so it needs its own task and an FR-C08 amendment |
+| 3. **Product decision** | Decide whether SPE Admin should ever claim to show cross-tenant override state given the API cannot support it |
+
+**Recommendation: 2, as a separate task.** Full reasoning in
+[`notes/task-026-findings.md`](notes/task-026-findings.md) §6.
+
+#### (b) ONE operator action — task 050's archival opt-in (§2)
+
+#### (c) UAT items — none are blockers, all need a live session
+
+| Item | What it needs |
+|---|---|
+| **029 AC-1** | Confirm Spaarke Dev's container types actually return `billingStatus`. Container types are **delegated-only**, so this needs an interactive device-code sign-in — a few minutes, not a permission gap. If Graph omits it, all four render "Unknown", which is correct NFR-06 behaviour but satisfies AC-1 only degenerately |
+| **025 AC-2** | One settings save against Spaarke Dev to confirm each of the nine persists. 051's read-back verification would *report* a silent discard as 502 + `unwrittenFields` |
+| **052 / 050 / 051** | UI walkthrough of the new surfaces (recycle-bin tab, archive column, quota rows, settings form) |
+
+#### (d) Held for 090's `/test-diet` — do not action early
+
+~104 scaffolding methods across 6 files (classified, not removed); the 20 `SecurityEndpointTests`
+(their replacement now exists, so the hold reason is gone); and `SearchItemsTests`, which needs an
+offline Dataverse double or removal — see §4.
 
 ### Recent commits
 | Commit | What |
 |---|---|
+| `a55a147e5` | **025 settings form + 042 Security contract coverage** |
+| `2c8b7dbdb` | checkpoint — 052 complete |
 | `a3a897ba2` | **052 — item recycle bin (FR-E03)**, live-verified |
-| (merge) | master merged in — 96 commits, 0 conflicts, build 0/0 |
 | `c12fbeaf6` | **PR #842 merged** — 041/042/050/051 + 052 discovery |
 
 ⚠️ **`grep` for `🔲`/`🔄` in this repo's TASK-INDEX silently returns nothing** — the shell mangles the
@@ -180,14 +203,16 @@ PowerShell remediations (corrected across 5 docs).
 
 ## 7. Wave state — enumerated from TASK-INDEX 2026-08-27 (30 rows)
 
-**24 ✅ · 5 🔄 PARTIAL · 1 🔲**
+**26 ✅ · 3 🔄 · 1 🔲 (held)**
 
 | Task | Status |
 |---|---|
-| 041, 051, **052**, 060, 061, 062 + 18 others | ✅ |
+| 041, 051, **052**, **025**, 060, 061, 062 + 19 others | ✅ |
 | 050 | 🔄 — code shipped + contract-tested; **pending the operator opt-in (§2)** |
-| 025, 026, 029, 042 | 🔄 **PARTIAL, not open** — do not restart; each is documented, 042 resolves at `/test-diet` |
-| **090** | 🔲 **the only remaining task** — `/test-diet` BINDING gate; also decides **DEF-001** and re-examines every `// AMBIGUOUS (task 042):` marker |
+| 026 | 🔄 — **AC-2 needs a decision** (§0a). No code is blocked; the platform cannot satisfy the AC as written |
+| 042 | 🔄 — Security escalation **resolved**; ~104 scaffolding methods held for `/test-diet` at 090 |
+| 029 | ⏳ **UAT only** — code complete; AC-1's live render needs a device-code session (§0c) |
+| **090** | 🔲 **HELD** by operator instruction until all work is done and UAT passed. `/test-diet` BINDING gate; also decides **DEF-001** and every `// AMBIGUOUS (task 042):` marker |
 
 ⚠️ My previous handoff listed 060/061/062 as 🔲. **They were already ✅** — stale, exactly the failure
 lesson #4 records. TASK-INDEX is authoritative; re-enumerate rather than trusting a prior summary.
