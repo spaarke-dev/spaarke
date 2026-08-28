@@ -1,8 +1,59 @@
 # Current Task State — customer-provisioning-orchestration-r1
 
-> **Last Updated**: 2026-08-27 SESSION 16 END (12 of ~15 remaining SKILL.md-touching items landed in this session; 109 of 127 findings landed cumulative — ~86% of pre-dispatch remediation complete). SESSION 16 executed the entire deferred SKILL.md main-session pass: COMP-14 (env fail-fast) + ISH-10 (Step 0c operator role probe rewrite) + Step 4.0 body construction (subscriptionId + openAiRegion→openAiLocation) + BAT-01..10 batch-mode wiring (Steps 0d/1a/1g/2/3/4b/5/7b). SKILL.md grew 1658 → ~2106 lines (+448 lines). Remaining: **3 code partial-fix closeouts** (COMP-03, COMP-06/ROLLBACK-1, COMP-10) + **ISH-12 [MEDIUM] deferred** (`environment`→`controlPlaneEnv` rename; touches 3+ files, better as separate task) + end-to-end verify + task 186 dispatch.
+> **Last Updated**: 2026-08-28 SESSION 18 END (context-handoff checkpoint).
+>
+> **Cumulative state**: 29 of 30 SESSION-18 adversarial verify workflow findings CLOSED (13 HIGH + 10 MED + 4 LOW + 2 opportunistic). Plus ISH-12 rename landed. Plus SESSION 17's 3 code partial-fix closeouts (COMP-03/06/10) landed. **~140 of ~157 total findings cumulative — pre-dispatch remediation ~89% complete.** L2 test suite: **1922 pass / 0 failed / 1 skipped** (was 1889 pre-SESSION-17, +33 net new tests across SESSIONS 17-18).
+>
+> **ONE remaining item**: MED#10 H13 Cosmos-first refactor — deferred to fresh session per user direction (concrete refactor plan filed).
+>
+> **After MED#10**: task 186 dispatch (`/provision-environment trial1 --batch runs/trial1-intake.json` via L3 skill).
 
-## 🎯 SESSION 16 END — HANDOFF FOR NEXT SESSION (READ THIS FIRST)
+## 🎯 Quick Recovery (READ THIS FIRST)
+
+| Field | Value |
+|-------|-------|
+| **Task** | Pre-task-186 remediation — MED#10 H13 Cosmos-first refactor |
+| **Step** | 1 of 1: refactor H13.HandleAsync so Cosmos-Completed lands BEFORE registry PATCHes |
+| **Status** | queued for fresh session |
+| **Next Action** | In a fresh session, load [`notes/session-18-handoff-med10-refactor.md`](notes/session-18-handoff-med10-refactor.md) and execute the refactor per its concrete plan (extract `PrepareRunStateForCompletion` + `WriteCompletionToCosmosAsync` helpers; reorder in HandleAsync ~line 550-638; invert failing tests; update SKILL Step 6a runbook to include sprk_setupstatus recovery). Est ~2.5-3h. |
+
+### Files Modified This Session (SESSION 18)
+
+**Committed + pushed (6 commits, all landed on `origin/work/customer-provisioning-orchestration-r1`):**
+
+| Commit | Files | Scope |
+|---|---|---|
+| `6baf1fbfd` | 5 | ISH-12 `intake.schema.json.environment` → `controlPlaneEnv` rename |
+| `97e18c227` | 4 | Bucket A (5 pre-dispatch blockers: HIGH#1/#2/#8/#13 + MED#12) + `ConfirmationAcknowledgment_IsRequired_InIntakeSchema` parity test |
+| `f5438373a` | 11 | Bucket B credential cluster (5 HIGH: #3/#4/#5/#11 + MED#14): `EntraAppRegRequest.RequireSecretFreeIdentity`, `Register-EntraAppRegistrations.ps1` `-AllowClientSecretMint` opt-in, manifest.yaml `app_settings: []`, `Seed-CustomerKeyVault.generated.ps1` guard |
+| `00341e7c2` | 1 | SESSION 18 first handoff artifact |
+| `1c8b02fbc` | 9 | Bucket B final 5 HIGHs: HIGH#12 H0 warnAndProceed, HIGH#6 HandlerOutcomeApplier terminal release, HIGH#7 DataverseRegistrySetupStatusUpdater single-writer, HIGH#10 SKILL Step 6a→6c handoff-resilience, HIGH#9 prereqs.yaml exit-1 hardening (15 recipes) + `validate-recipe-authoring.ps1` |
+| `f5ef16231` | 17 | Bucket B MED/LOW cluster (10 MED + 4 LOW): MED#3 I1 allow-list, MED#4/#5/#7 H0 strict-mode, MED#9 PRQ-C-07 grep, MED#11 Conflict release, MED#12 orphan sweep, MED#13 H8 25h polling, LOW#1 docstring, LOW#2 verified, LOW#3 order swap, LOW#4 token refresh |
+| `a3b0eef24` | 1 | MED#10 refactor handoff artifact for fresh session |
+
+**Working tree**: CLEAN. All work pushed to origin.
+
+### Critical Context (must-know for fresh session)
+
+- **Task 186 dispatch is BLOCKED on MED#10** — user mandate is "clear ALL issues"; MED#10 is the last one. Only after it lands can `/provision-environment trial1 --batch runs/trial1-intake.json` be invoked.
+- **MED#10 documented mitigation is IN PLACE** — the current H13 flow logs a warning when the split-brain window fires; the post-HIGH#7 fix ensures no customer lockout. But the full Cosmos-first refactor is the technically-correct answer per user's push-back. Concrete plan in [`session-18-handoff-med10-refactor.md`](notes/session-18-handoff-med10-refactor.md).
+- **Sub-Agent Write Boundary applies** — MED#10 refactor touches `.claude/skills/provision-environment/SKILL.md` (Step 6a runbook update for sprk_setupstatus recovery) — that section MUST be edited by main-session, not a subagent.
+- **Standing binding rules unchanged**: BFF-API-ClientSecret is GONE (never re-introduce); Dataverse-ClientSecret never-delete before 2026-11-23; operator uses OWN AAD identity (never SP) per NFR-11.
+
+### To resume in fresh session
+
+- **"where was I"** → reads this Quick Recovery
+- **"do MED#10"** → loads `notes/session-18-handoff-med10-refactor.md` and starts the refactor
+- **"dispatch task 186"** → REJECTED until MED#10 lands; user's "clear ALL issues" mandate is binding
+- **Full workflow report**: `C:\Users\RALPHS~1\AppData\Local\Temp\claude\c--code-files-spaarke-wt-customer-provisioning-orchestration-r1\5aa5d91f-cd2d-4c24-88ae-ae9649a3fe2f\tasks\wepdcb8we.output` (adversarial verify workflow full output — all 30 findings with per-finding failure scenarios)
+
+---
+
+## 📚 Historical (SESSION 16 END — kept for context)
+
+> **Prior state**: 12 of ~15 remaining SKILL.md-touching items landed; 109 of 127 findings landed cumulative — ~86% of pre-dispatch remediation complete. SESSION 16 executed the entire deferred SKILL.md main-session pass: COMP-14 (env fail-fast) + ISH-10 (Step 0c operator role probe rewrite) + Step 4.0 body construction (subscriptionId + openAiRegion→openAiLocation) + BAT-01..10 batch-mode wiring (Steps 0d/1a/1g/2/3/4b/5/7b). SKILL.md grew 1658 → ~2106 lines (+448 lines). Remaining (per SESSION 16 handoff): 3 code partial-fix closeouts + ISH-12 deferred + end-to-end verify + task 186 dispatch. SESSION 17 landed COMP-03/06/10; SESSION 18 landed ISH-12 + full adversarial verify workflow + 29-of-30 findings closure. Only MED#10 remains.
+
+## 🎯 SESSION 16 END — HANDOFF (SUPERSEDED BY SESSION 18 QUICK RECOVERY ABOVE)
 
 ### SESSION 16 landed (12 items, 1 commit expected)
 
