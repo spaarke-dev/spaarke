@@ -659,7 +659,7 @@ jobs:
       contents: read
     steps:
       - name: Aggregate & post deduplicated PR comment
-        uses: actions/github-script@v8
+        uses: actions/github-script@v9
         env:
           # Each job reports TWICE, and the two disagree by design:
           #
