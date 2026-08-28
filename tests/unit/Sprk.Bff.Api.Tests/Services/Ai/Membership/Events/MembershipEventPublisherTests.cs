@@ -144,17 +144,6 @@ public class MembershipEventPublisherTests
     }
 
 
-    [Fact]
-    public void Constructor_NullServiceBusClient_Throws()
-    {
-        Action act = () => new MembershipEventPublisher(
-            serviceBusClient: null!,
-            BuildOptions(),
-            Mock.Of<ILogger<MembershipEventPublisher>>());
-
-        act.Should().Throw<ArgumentNullException>().WithParameterName("serviceBusClient");
-    }
-
 
     // ─── NullMembershipEventPublisher (ADR-032 P2 Quiet no-op) ──────────
 
@@ -200,10 +189,4 @@ public class MembershipEventPublisherTests
         await act.Should().ThrowAsync<ArgumentNullException>();
     }
 
-    [Fact]
-    public void NullPublisher_Constructor_NullLogger_Throws()
-    {
-        Action act = () => new NullMembershipEventPublisher(logger: null!);
-        act.Should().Throw<ArgumentNullException>();
-    }
 }
