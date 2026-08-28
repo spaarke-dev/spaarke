@@ -44,14 +44,24 @@
 //                                             non-GUID at UpdateSetupStatusAsync.
 //
 // CALLER CONTRACT (H13):
-//   - The updater is invoked from H13's step (10) after every trap / invariant
-//     / naming / cost / validation check has reported Passed. This impl trusts
-//     that aggregation — it does NOT independently re-verify probes (would
-//     duplicate H13 logic + create dual-source-of-truth risk).
-//   - H13's step (10) catches any exception this method throws and classifies
-//     as Resumable (H13Rejections.RegistryUpdateFailed); this impl therefore
-//     surfaces infra faults by mapping the wire client's typed outcomes to
-//     the domain-level IRegistrySetupStatusUpdater outcomes (no exception
+//   - The updater is invoked from H13's step (11) AFTER Cosmos-Completed has
+//     already landed (MED#10 SESSION-19 Cosmos-first ordering, customer-
+//     provisioning-orchestration-r1 adversarial e2e verify workflow wepdcb8we).
+//     Prior to MED#10 this ran at step (10) BEFORE the Cosmos write, which
+//     produced a documented split-brain window on ReplaceRunAsync Conflict.
+//     Post-MED#10, this write is BEST-EFFORT — a failure here is caught by
+//     H13 and logged as a REGISTRY-STALE warning; the run IS complete (Cosmos
+//     is authoritative) and the operator SKILL Step 6a
+//     (.claude/skills/provision-environment/SKILL.md) picks up the residual
+//     PATCH via re-verify + apply-drift-fix.
+//   - The updater STILL performs full aggregation trust — every trap /
+//     invariant / naming / cost / validation check has reported Passed BEFORE
+//     H13 reaches this call. This impl does NOT independently re-verify probes
+//     (would duplicate H13 logic + create dual-source-of-truth risk).
+//   - H13 catches any exception this method throws and logs a REGISTRY-STALE
+//     warning instead of failing the run (MED#10 Cosmos-first). This impl
+//     still surfaces infra faults by mapping the wire client's typed outcomes
+//     to the domain-level IRegistrySetupStatusUpdater outcomes (no exception
 //     bubbling for Web API domain errors — those are Failure).
 //
 // COMPANION UPDATE (spec.md FR-23):

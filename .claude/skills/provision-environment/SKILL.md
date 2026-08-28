@@ -1435,7 +1435,24 @@ When the run reaches `Completed` (H13 acceptance passed — this is the terminal
 
 #### 6a. Update `sprk_dataverseenvironment` registry — TWO-STEP: read then update (HARD-STOP on any failure)
 
-Per REG-04 (SESSION 15) — Step 6a is NOT belt-and-suspenders. The server-side updater at H13 writes ONLY `sprk_setupstatus` + `sprk_currentrunid` release (per `DataverseRegistrySetupStatusUpdater.cs`). The remaining Ready-state columns (`sprk_provisionedon`, `sprk_bffversion`, `sprk_solutionversion`, and per REG-01 also `sprk_azuresubscriptionid`, `sprk_resourcegroupname`, `sprk_appservicename`, `sprk_keyvaultname`, `sprk_containertypeid`, `sprk_ClientCacheBustToken`) are written by REG-01's H13 pre-Ready PATCH sub-step (SESSION 15 Wave 2 commit `328981ba2`) or, if that PATCH failed (leaving RunStatus=Running-blocked, not Completed), by the operator-side skill here. Either way, Step 6a re-verifies and, on drift, applies the missing PATCH from the operator's session.
+Per REG-04 (SESSION 15) and MED#10 (SESSION 19 — customer-provisioning-orchestration-r1 adversarial e2e verify workflow wepdcb8we, H13 Cosmos-first refactor): Step 6a is NOT belt-and-suspenders — it is the operator-side reconciliation for registry state that may have been PATCHed BEST-EFFORT by H13 after Cosmos-Completed already landed.
+
+**Post-MED#10 semantic change** (binding, since SESSION 19): H13 writes to Cosmos FIRST (`RunStatus = Completed`), then attempts the registry PATCHes (promoted-columns → `sprk_setupstatus = Ready`) AFTER. If either registry PATCH fails, H13 logs a `REGISTRY-STALE (MED#10 SESSION-19)` warning + returns `HandlerResult.Success` — the run IS complete (Cosmos is authoritative), but the registry may show ANY combination of the following stale states:
+
+| State | Cosmos | Registry columns (promoted) | Registry `sprk_setupstatus` |
+|---|---|---|---|
+| Full success (green path) | Completed | Ready-values | Ready |
+| Columns PATCH failed | Completed | stale/missing | InProgress (short-circuited) |
+| Setupstatus PATCH failed (columns OK) | Completed | Ready-values | InProgress |
+| Both PATCHes failed | Completed | stale/missing | InProgress |
+
+Step 6a MUST cover ALL FOUR cases. It:
+1. Reads the current `sprk_dataverseenvironment` row via Dataverse MCP (or Web API fallback).
+2. Compares observed columns to the run's Ready-state values (from `run.CompletedOn`, `run.InterStepState.*`, `run.Parameters.NonSecret.*`).
+3. Writes the missing columns (idempotent PATCH — no-op if H13 already landed them).
+4. Additionally sets `sprk_setupstatus = 'Ready'` **IFF** the observed value is `InProgress` (indicating H13's setupstatus PATCH did not land). This is the MED#10-driven addition to the operator recovery recipe. On observed `Ready`, do NOT re-write (H13 already succeeded — a no-op re-write burns a Dataverse RU with no state change).
+
+Prior REG-04 language "if that PATCH failed (leaving RunStatus=Running-blocked, not Completed), by the operator-side skill here" is NO LONGER TRUE after MED#10. RunStatus is Completed regardless of registry state; the operator-side skill picks up the residual registry PATCH in every failure combination above.
 
 Per Wave 0 Decision 2 (Dataverse MCP alt-key probe as the canonical registry lookup):
 
@@ -1491,27 +1508,63 @@ if (-not $script:RegistryStale -and -not ($environmentId -match '^[0-9a-fA-F-]{3
   Write-Warning "Step 6a HARD-WARN (Bucket B HIGH#10): $script:RegistryStaleDiagnostic. Handoff will still be written."
 }
 
-# Step 2: update — write the promoted columns (idempotent PATCH).
+# Step 2a: OBSERVE current registry state BEFORE writing (MED#10 SESSION-19).
+# Because H13 (post-MED#10 Cosmos-first refactor) may have left the registry
+# in any of four stale states (see REG-04 table above), the operator recipe
+# reads the current sprk_setupstatus + observes column values BEFORE issuing
+# a PATCH. This drives the include-vs-exclude-sprk_setupstatus decision at
+# Step 2b (line ~1520 below).
 if (-not $script:RegistryStale) {
+  try {
+    $current = mcp__dataverse__read_query(query = @"
+      <fetch top="1">
+        <entity name="sprk_dataverseenvironment">
+          <attribute name="sprk_setupstatus" />
+          <attribute name="sprk_provisionedon" />
+          <filter><condition attribute="sprk_dataverseenvironmentid" operator="eq" value="$environmentId" /></filter>
+        </entity>
+      </fetch>
+"@)
+    $observedSetupStatus = $current.rows[0].sprk_setupstatus  # e.g. 'InProgress' if H13's setupstatus PATCH did not land
+  } catch {
+    # Non-fatal for the write path — if the read failed, default to including
+    # sprk_setupstatus in the PATCH (safe default: H13 may have missed it).
+    $observedSetupStatus = 'InProgress'
+    Write-Warning "Step 6a pre-observe read failed; defaulting to include sprk_setupstatus in the recovery PATCH. Diagnostic: $($_.Exception.Message)"
+  }
+}
+
+# Step 2b: update — write the promoted columns AND (conditionally) sprk_setupstatus.
+if (-not $script:RegistryStale) {
+  # MED#10 SESSION-19: include sprk_setupstatus IFF H13's setupstatus PATCH did
+  # NOT land (observed value is anything other than 'Ready'). If H13 already
+  # landed Ready, do NOT re-write it (RU-cost + audit-noise for no state change).
+  $fields = @{
+    sprk_provisionedon            = $completedAtIso     # from run.CompletedOn
+    sprk_bffversion               = $deployedBffVersion  # from run.InterStepState.BffVersion
+    sprk_solutionversion          = $deployedSolutionVer # from run.InterStepState.SolutionVersion
+    sprk_azuresubscriptionid      = $azureSubId
+    sprk_resourcegroupname        = $rgName
+    sprk_appservicename           = $appServiceName
+    sprk_keyvaultname             = $kvName
+    sprk_containertypeid          = $containerTypeId
+    sprk_ClientCacheBustToken     = $cacheBustToken
+    # sprk_currentrunid release is routed via ICustomerRunGuard.ReleaseAsync
+    # per Bucket B HIGH#6/#7 SESSION 18 — do NOT clear it from this operator-side PATCH.
+    # If drift detected on any set-once column, operator MUST HARD STOP + escalate — do NOT overwrite blindly.
+  }
+  if ($observedSetupStatus -ne 'Ready') {
+    # MED#10 SESSION-19 recovery: H13 either short-circuited the setupstatus
+    # PATCH after a columns PATCH failure OR the setupstatus PATCH itself
+    # failed. Either way, the operator-side reconciliation now sets it.
+    $fields.sprk_setupstatus = 'Ready'
+    Write-Warning "Step 6a MED#10 recovery: observed sprk_setupstatus='$observedSetupStatus' — including in recovery PATCH (H13's server-side setupstatus PATCH did not land)."
+  }
   try {
     mcp__dataverse__update_record(
       entityName = "sprk_dataverseenvironment",
       recordId   = $environmentId,
-      fields = @{
-        sprk_provisionedon            = $completedAtIso     # from run.CompletedOn
-        sprk_bffversion               = $deployedBffVersion  # from run.InterStepState.BffVersion
-        sprk_solutionversion          = $deployedSolutionVer # from run.InterStepState.SolutionVersion
-        sprk_azuresubscriptionid      = $azureSubId
-        sprk_resourcegroupname        = $rgName
-        sprk_appservicename           = $appServiceName
-        sprk_keyvaultname             = $kvName
-        sprk_containertypeid          = $containerTypeId
-        sprk_ClientCacheBustToken     = $cacheBustToken
-        # sprk_setupstatus is set by the server (H13 updater).
-        # sprk_currentrunid release is ALSO routed via ICustomerRunGuard.ReleaseAsync
-        # per Bucket B HIGH#6/#7 SESSION 18 — do NOT clear it from this operator-side PATCH.
-        # If drift detected on any set-once column, operator MUST HARD STOP + escalate — do NOT overwrite blindly.
-      }
+      fields = $fields
     )
   } catch {
     # F1 fallback path (Dataverse MCP disconnect) — use raw Web API PATCH with operator's az token.
@@ -1530,7 +1583,11 @@ if (-not $script:RegistryStale) {
       if ([string]::IsNullOrWhiteSpace($dvToken)) {
         throw "az token acquisition failed for resource '$dvUrl' — operator's AAD context lost between Step 0b and Step 6a (run 'az login')"
       }
-      $body = @{ sprk_provisionedon = $completedAtIso; sprk_bffversion = $deployedBffVersion; ... } | ConvertTo-Json
+      # MED#10 SESSION-19: also honor the include-sprk_setupstatus decision in
+      # the Web API fallback body (same rule as Step 2b MCP path above).
+      $bodyHash = @{ sprk_provisionedon = $completedAtIso; sprk_bffversion = $deployedBffVersion; sprk_solutionversion = $deployedSolutionVer; sprk_azuresubscriptionid = $azureSubId; sprk_resourcegroupname = $rgName; sprk_appservicename = $appServiceName; sprk_keyvaultname = $kvName; sprk_containertypeid = $containerTypeId; sprk_ClientCacheBustToken = $cacheBustToken }
+      if ($observedSetupStatus -ne 'Ready') { $bodyHash.sprk_setupstatus = 'Ready' }
+      $body = $bodyHash | ConvertTo-Json
       Invoke-RestMethod -Uri "$dvUrl/api/data/v9.2/sprk_dataverseenvironments($environmentId)" `
         -Method PATCH -Headers @{ Authorization = "Bearer $dvToken"; "OData-Version" = "4.0"; "If-Match" = "*" } `
         -Body $body -ContentType "application/json"

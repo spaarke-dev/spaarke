@@ -531,22 +531,52 @@ public sealed class H13E2EAcceptanceGateHandler : IProvisioningHandler
                 cancellationToken).ConfigureAwait(false);
         }
 
-        // (9.5) REG-01 (Wave 2 pre-dispatch remediation, 2026-08-27) — promote
-        //       run-derived values into the sprk_dataverseenvironment row BEFORE
-        //       flipping status to Ready. Assembles a best-effort column set
-        //       from run.Parameters.NonSecret + run.InterStepState. sprk_provisionedon
-        //       is ALWAYS set (H13's write moment) because it is the load-bearing
-        //       column for H0 upgrade-mode detection on the next run — a null
-        //       sprk_provisionedon breaks §14A upgrade model. Other columns are
-        //       populated when the source values exist; null columns are safely
-        //       omitted (never overwrite an existing value with null).
+        // (9.5) MED#10 SESSION-19 COSMOS-FIRST ORDERING (customer-provisioning-
+        //       orchestration-r1 adversarial e2e verify workflow wepdcb8we).
         //
-        //       FAIL-FIRST: if the columns-PATCH fails, this handler returns
-        //       Resumable (H13Rejections.RegistryUpdateFailed) — sprk_setupstatus
-        //       STAYS at InProgress rather than silently mark Ready with stale
-        //       mirror data. Downstream consumers reading the registry (H0
-        //       upgrade-mode via provisionedOn, operator dashboards) require
-        //       truthful column values.
+        //       PRINCIPLE: write your OWN state (Cosmos, ETag-protected, your
+        //       partition) BEFORE mutating someone else's (the Dataverse registry).
+        //       If your OWN write fails, no external state was touched — safe to
+        //       resume without cleanup.
+        //
+        //       This eliminates the SESSION 18 documented split-brain window
+        //       where MarkCompleteAsync's ReplaceRunAsync Conflict would leave
+        //       the registry PATCHed to Ready but Cosmos still at Running.
+        //
+        //       NEW SEQUENCE:
+        //         (a) Prepare run state in-memory (mutations, gate stamps).
+        //         (b) Cosmos ReplaceRunAsync (SINGLE authoritative write).
+        //             → Conflict/NotFound → return Failure — NO registry mutation.
+        //         (c) Registry PATCHes (promoted columns → setupstatus=Ready) are
+        //             BEST-EFFORT. On failure, return HandlerResult.Success and
+        //             log a REGISTRY-STALE warning; the run IS complete (Cosmos
+        //             is authoritative) but the operator SKILL Step 6a
+        //             (.claude/skills/provision-environment/SKILL.md) picks up
+        //             the residual PATCH via re-verify + apply-drift-fix.
+        //
+        //       Trade-off: promoted-columns / setupstatus values may briefly lag
+        //       Cosmos-Completed. Downstream registry readers (H0 upgrade-mode
+        //       via sprk_provisionedon, operator dashboards) see the lag; the
+        //       operator SKILL Step 6a closes it. Cosmos-Completed with brief
+        //       registry lag is strictly better than the SESSION 18 alternative
+        //       of registry-Ready + Cosmos-Running for the same window.
+        PrepareRunStateForCompletion(
+            run, idempotencyKey, envelope, trapResult, invariantResult, costReport,
+            validationOutcome, namingOutcome);
+
+        var cosmosResult = await WriteCompletionToCosmosAsync(
+            run, etag, idempotencyKey, cancellationToken).ConfigureAwait(false);
+        if (cosmosResult is HandlerResult.Failure)
+        {
+            // Cosmos write lost race (Conflict) or row deleted (NotFound).
+            // NO registry PATCH attempted — safe to resume.
+            return cosmosResult;
+        }
+
+        // (10) Cosmos-Completed landed. Registry PATCHes are BEST-EFFORT.
+        //      A failure here leaves the registry stale (log-warn); the operator
+        //      SKILL Step 6a picks up the residual. Do NOT re-flip Cosmos back
+        //      to Failed — that would churn state and violate Cosmos-first.
         var promotedColumns = BuildPromotedColumnsForReady(run, DateTimeOffset.UtcNow);
         if (promotedColumns.Count > 0)
         {
@@ -560,36 +590,30 @@ public sealed class H13E2EAcceptanceGateHandler : IProvisioningHandler
             }
             catch (Exception ex) when (ex is not OperationCanceledException)
             {
-                _logger.LogError(ex,
-                    "H13 promoted-columns PATCH infra fault: runId={RunId} customerId={CustomerId} columnNames={ColumnNames}",
-                    envelope.RunId, envelope.CustomerId, string.Join(",", promotedColumns.Keys));
-                return await FailAsync(run, etag, FailureClass.Resumable,
-                    H13Rejections.RegistryUpdateFailed,
-                    $"Promoted-columns PATCH infra fault (BEFORE Ready transition — status stays InProgress): " +
-                    $"{ex.GetType().Name}: {ex.Message}. Columns attempted: {string.Join(",", promotedColumns.Keys)}.",
-                    cancellationToken).ConfigureAwait(false);
+                LogRegistryStaleWarning(
+                    "promoted-columns PATCH threw", run, envelope,
+                    $"{ex.GetType().Name}: {ex.Message}", promotedColumns.Keys, ex);
+                return SuccessSummaryLog(idempotencyKey, run, envelope, trapResult, invariantResult, costReport, stopwatch, registryStale: true);
             }
 
             if (columnsOutcome is RegistryUpdateOutcome.Failure colFail)
             {
-                return await FailAsync(run, etag, FailureClass.Resumable,
-                    H13Rejections.RegistryUpdateFailed,
-                    $"Promoted-columns PATCH rejected (BEFORE Ready transition — status stays InProgress): " +
-                    $"{colFail.Diagnostic}. Columns attempted: {string.Join(",", promotedColumns.Keys)}.",
-                    cancellationToken).ConfigureAwait(false);
+                LogRegistryStaleWarning(
+                    "promoted-columns PATCH rejected", run, envelope,
+                    colFail.Diagnostic, promotedColumns.Keys, exception: null);
+                return SuccessSummaryLog(idempotencyKey, run, envelope, trapResult, invariantResult, costReport, stopwatch, registryStale: true);
             }
             if (columnsOutcome is RegistryUpdateOutcome.NotFound colMissing)
             {
-                return await FailAsync(run, etag, FailureClass.Resumable,
-                    H13Rejections.RegistryUpdateFailed,
-                    $"Promoted-columns PATCH target row not found (BEFORE Ready transition — status stays InProgress): " +
-                    $"{colMissing.Diagnostic}. environmentId={run.EnvironmentId}.",
-                    cancellationToken).ConfigureAwait(false);
+                LogRegistryStaleWarning(
+                    "promoted-columns PATCH target row not found", run, envelope,
+                    $"{colMissing.Diagnostic}. environmentId={run.EnvironmentId}",
+                    promotedColumns.Keys, exception: null);
+                return SuccessSummaryLog(idempotencyKey, run, envelope, trapResult, invariantResult, costReport, stopwatch, registryStale: true);
             }
-            // Success → fall through to (10) below.
         }
 
-        // (10) All gates green + promoted columns landed. Transition registry Setup Status → Ready.
+        // (11) sprk_setupstatus → Ready. Best-effort — operator SKILL Step 6a picks up on failure.
         var envUpdate = new RegistrySetupStatusUpdateRequest(
             CustomerId: envelope.CustomerId,
             RunId: envelope.RunId,
@@ -604,38 +628,95 @@ public sealed class H13E2EAcceptanceGateHandler : IProvisioningHandler
         }
         catch (Exception ex) when (ex is not OperationCanceledException)
         {
-            _logger.LogError(ex,
-                "H13 registry-update infra fault: runId={RunId} customerId={CustomerId}",
-                envelope.RunId, envelope.CustomerId);
-            return await FailAsync(run, etag, FailureClass.Resumable,
-                H13Rejections.RegistryUpdateFailed,
-                $"Registry Setup Status → Ready PATCH infra fault: {ex.GetType().Name}: {ex.Message}.",
-                cancellationToken).ConfigureAwait(false);
+            LogRegistryStaleWarning(
+                "setupstatus=Ready PATCH threw", run, envelope,
+                $"{ex.GetType().Name}: {ex.Message}", columnKeys: null, ex);
+            return SuccessSummaryLog(idempotencyKey, run, envelope, trapResult, invariantResult, costReport, stopwatch, registryStale: true);
         }
 
         if (updateOutcome is RegistrySetupStatusUpdateOutcome.Failure updateFail)
         {
-            return await FailAsync(run, etag, FailureClass.Resumable,
-                H13Rejections.RegistryUpdateFailed,
-                $"Registry Setup Status → Ready PATCH rejected: {updateFail.Diagnostic}.",
-                cancellationToken).ConfigureAwait(false);
+            LogRegistryStaleWarning(
+                "setupstatus=Ready PATCH rejected", run, envelope,
+                updateFail.Diagnostic, columnKeys: null, exception: null);
+            return SuccessSummaryLog(idempotencyKey, run, envelope, trapResult, invariantResult, costReport, stopwatch, registryStale: true);
         }
 
-        // (11) Advance Cosmos state.
-        stopwatch.Stop();
+        // (12) Full success — Cosmos-Completed AND registry-Ready both landed.
+        return SuccessSummaryLog(idempotencyKey, run, envelope, trapResult, invariantResult, costReport, stopwatch, registryStale: false);
+    }
+
+    /// <summary>
+    /// MED#10 SESSION-19 helper — emits the H13 success-summary log and returns
+    /// <see cref="HandlerResult.Success"/>. Centralized so the (12) full-success
+    /// path AND every (10)/(11) registry-stale fallback path produce a consistent
+    /// operator-visible summary. Stopwatch is stopped here (no double-stop).
+    /// </summary>
+    private HandlerResult SuccessSummaryLog(
+        string idempotencyKey,
+        ProvisioningRun run,
+        HandlerEnvelope envelope,
+        TrapCatalogVerificationResult trapResult,
+        InvariantCatalogVerificationResult invariantResult,
+        CostEnvelopeReport? costReport,
+        Stopwatch stopwatch,
+        bool registryStale)
+    {
+        if (stopwatch.IsRunning)
+        {
+            stopwatch.Stop();
+        }
         _logger.LogInformation(
             "H13 E2E acceptance succeeded: runId={RunId} customerId={CustomerId} durationMs={DurationMs} " +
-            "traps={TrapSummary} invariants={InvariantSummary} costSummary={CostSummary} costAdvisory={CostAdvisory}",
+            "traps={TrapSummary} invariants={InvariantSummary} costSummary={CostSummary} costAdvisory={CostAdvisory} " +
+            "registryStale={RegistryStale}",
             envelope.RunId, envelope.CustomerId, stopwatch.ElapsedMilliseconds,
             trapResult.ToLogSummary(), invariantResult.ToLogSummary(),
             costReport?.Summary ?? "(none)",
-            costReport?.ExceedsAdvisoryThreshold ?? false);
+            costReport?.ExceedsAdvisoryThreshold ?? false,
+            registryStale);
+        return new HandlerResult.Success(idempotencyKey);
+    }
 
-        return await MarkCompleteAsync(
-            run, etag, idempotencyKey, envelope,
-            trapResult, invariantResult, costReport,
-            validationOutcome, namingOutcome,
-            cancellationToken).ConfigureAwait(false);
+    /// <summary>
+    /// MED#10 SESSION-19 helper — emits the structured REGISTRY-STALE warning
+    /// consumed by the operator SKILL Step 6a runbook
+    /// (<c>.claude/skills/provision-environment/SKILL.md</c>). Structured
+    /// properties: <c>runId</c>, <c>customerId</c>, <c>environmentId</c>,
+    /// <c>failedPatch</c> (one of "promoted-columns" / "setupstatus=Ready"),
+    /// <c>columnNames</c> (optional, promoted-columns only), <c>diagnostic</c>.
+    /// The operator's Kusto alert on this shape can route to on-call without
+    /// re-parsing the message text.
+    /// </summary>
+    private void LogRegistryStaleWarning(
+        string failedPatch,
+        ProvisioningRun run,
+        HandlerEnvelope envelope,
+        string diagnostic,
+        IEnumerable<string>? columnKeys,
+        Exception? exception)
+    {
+        var columnNames = columnKeys is null ? "(none)" : string.Join(",", columnKeys);
+        if (exception is null)
+        {
+            _logger.LogWarning(
+                "H13 REGISTRY-STALE (MED#10 SESSION-19): {FailedPatch} — Cosmos is Completed but registry PATCH did not land. " +
+                "runId={RunId} customerId={CustomerId} environmentId={EnvironmentId} " +
+                "columnNames={ColumnNames} diagnostic={Diagnostic}. " +
+                "Operator SKILL Step 6a (.claude/skills/provision-environment/SKILL.md) picks up the residual PATCH.",
+                failedPatch, envelope.RunId, envelope.CustomerId, run.EnvironmentId,
+                columnNames, diagnostic);
+        }
+        else
+        {
+            _logger.LogWarning(exception,
+                "H13 REGISTRY-STALE (MED#10 SESSION-19): {FailedPatch} — Cosmos is Completed but registry PATCH did not land. " +
+                "runId={RunId} customerId={CustomerId} environmentId={EnvironmentId} " +
+                "columnNames={ColumnNames} diagnostic={Diagnostic}. " +
+                "Operator SKILL Step 6a (.claude/skills/provision-environment/SKILL.md) picks up the residual PATCH.",
+                failedPatch, envelope.RunId, envelope.CustomerId, run.EnvironmentId,
+                columnNames, diagnostic);
+        }
     }
 
     /// <summary>
@@ -811,15 +892,30 @@ public sealed class H13E2EAcceptanceGateHandler : IProvisioningHandler
         return new HandlerResult.Failure(failureClass, rejectionCode, diagnostic);
     }
 
-    private async Task<HandlerResult> MarkCompleteAsync(
-        ProvisioningRun run, string etag, string idempotencyKey, HandlerEnvelope envelope,
+    /// <summary>
+    /// MED#10 SESSION-19 helper (extracted from prior <c>MarkCompleteAsync</c>) —
+    /// mutates the in-memory <see cref="ProvisioningRun"/> to reflect terminal
+    /// H13 acceptance success. Sets <see cref="ProvisioningRun.Status"/> to
+    /// <see cref="RunStatus.Completed"/>, stamps <see cref="ProvisioningRun.CompletedOn"/>,
+    /// appends the H13 <see cref="CompletedPhase"/> row, stamps every H13 gate
+    /// as <see cref="GateState.Verified"/>, and attaches the advisory-drift
+    /// <c>ErrorDetail</c> when cost drift exceeded the advisory threshold.
+    ///
+    /// PURE (in-memory only). No I/O. Feeds <see cref="WriteCompletionToCosmosAsync"/>
+    /// which is the SINGLE Cosmos write in the Cosmos-first sequence.
+    /// </summary>
+    private void PrepareRunStateForCompletion(
+        ProvisioningRun run,
+        string idempotencyKey,
+        HandlerEnvelope envelope,
         TrapCatalogVerificationResult trapResult,
         InvariantCatalogVerificationResult invariantResult,
         CostEnvelopeReport? costReport,
         E2EValidationOutcome validationOutcome,
-        NamingConformanceOutcome namingOutcome,
-        CancellationToken cancellationToken)
+        NamingConformanceOutcome namingOutcome)
     {
+        _ = trapResult; _ = invariantResult; _ = validationOutcome; _ = namingOutcome;
+
         var completedAt = DateTimeOffset.UtcNow;
         var startedAt = completedAt - TimeSpan.FromMilliseconds(1);
 
@@ -838,6 +934,13 @@ public sealed class H13E2EAcceptanceGateHandler : IProvisioningHandler
 
         // Record every H13 gate as Verified — operators can grep the run for
         // each of the 6 gates independently without opening the full doc.
+        // NOTE (MED#10 SESSION-19): RegistryReadyTransitioned is stamped Verified
+        // OPTIMISTICALLY here — the registry PATCH runs AFTER this method returns
+        // AND after WriteCompletionToCosmosAsync. If the registry PATCH fails,
+        // the H13 REGISTRY-STALE warning fires and the operator SKILL Step 6a
+        // picks up the residual PATCH. The gate name reflects H13's action
+        // ("I attempted the transition per contract"), not Dataverse's observed
+        // state which the operator SKILL reconciles.
         var verified = new GateEntry
         {
             Status = GateState.Verified,
@@ -850,9 +953,7 @@ public sealed class H13E2EAcceptanceGateHandler : IProvisioningHandler
         run.GateStates[H13Gates.NamingConformanceVerified] = verified;
         run.GateStates[H13Gates.CostEnvelopeVerified] = new GateEntry
         {
-            Status = costReport is not null && costReport.ExceedsAdvisoryThreshold
-                ? GateState.Verified   // Advisory-warn is Verified (Ready still transitions) — the warning is captured in the ErrorDetail advisory suffix + summary.
-                : GateState.Verified,
+            Status = GateState.Verified,   // Advisory-warn is Verified (Ready still transitions) — the warning is captured in the ErrorDetail advisory suffix + summary.
             VerifiedAt = completedAt,
             VerifierHandler = HandlerIdentifier,
         };
@@ -866,67 +967,53 @@ public sealed class H13E2EAcceptanceGateHandler : IProvisioningHandler
                               $"(drift {costReport.DriftFraction:P1} > threshold {_options.CostDriftAdvisoryThreshold:P0}). " +
                               "Advisory-only per project deviation note; Ready transitioned despite drift.";
         }
+    }
+
+    /// <summary>
+    /// MED#10 SESSION-19 helper (extracted from prior <c>MarkCompleteAsync</c>) —
+    /// the SINGLE Cosmos write in the Cosmos-first sequence. Called AFTER
+    /// <see cref="PrepareRunStateForCompletion"/> has mutated the run in-memory
+    /// and BEFORE any registry PATCH. Returns:
+    /// <list type="bullet">
+    ///   <item><description><see langword="null"/> on Success — caller proceeds to registry PATCHes.</description></item>
+    ///   <item><description><see cref="HandlerResult.Failure"/> Resumable on Conflict / NotFound — caller returns it verbatim; NO registry mutation is attempted (this is the whole point of Cosmos-first).</description></item>
+    /// </list>
+    /// </summary>
+    private async Task<HandlerResult?> WriteCompletionToCosmosAsync(
+        ProvisioningRun run, string etag, string idempotencyKey,
+        CancellationToken cancellationToken)
+    {
+        _ = idempotencyKey;
 
         var replace = await _repository.ReplaceRunAsync(run, etag, cancellationToken).ConfigureAwait(false);
         if (replace is ReplaceRunResult.Conflict conflict)
         {
-            // Bucket B MED#10 SESSION 18 (customer-provisioning-orchestration-r1
-            // adversarial e2e verify workflow wepdcb8we): DOCUMENTED SPLIT-BRAIN WINDOW.
-            //
-            // H13's current sequence is (9) promoted-columns PATCH → (10)
-            // TransitionToReadyAsync PATCH (setupstatus=Ready) → (11) MarkCompleteAsync
-            // which reaches THIS ReplaceRunAsync call. If ReplaceRunAsync returns
-            // Conflict here, the registry has ALREADY been PATCHed to Ready but
-            // Cosmos remains at RunStatus.Running (from the concurrent winner).
-            // Downstream observable state (transient, ~milliseconds):
-            //   - Registry: sprk_setupstatus=Ready
-            //   - Cosmos:   status=Running (or the winner's terminal transition,
-            //               depending on when the winner's ReplaceRunAsync landed)
-            //   - Guard:    STILL HELD (Bucket B HIGH#7 SESSION 18 dropped
-            //               ClearCurrentRunId from the registry PATCH, so the
-            //               guard's release path is exclusively
-            //               ICustomerRunGuard.ReleaseAsync via HandlerOutcomeApplier
-            //               per Bucket B HIGH#6).
-            //
-            // EVENTUAL CONVERGENCE: the concurrent winner's own MarkCompleteAsync
-            // will succeed on its ReplaceRunAsync (this Conflict IS the winner's
-            // write landing), then HandlerOutcomeApplier fires the guard release,
-            // closing the window. The registry PATCH is idempotent — the winner
-            // will re-run it (setupstatus=Ready is unchanged; a no-op).
-            //
-            // FULL COSMOS-FIRST REFACTOR (deferred): the skeptic's ideal fix
-            // reorders as (1) Cosmos ReplaceRunAsync FIRST → (2) registry PATCHes
-            // AFTER. That eliminates the split-brain entirely, at the cost of a
-            // substantial H13 refactor (MarkCompleteAsync must split into
-            // PrepareRunStateForCompletion + WriteCompletionToCosmos + the
-            // registry PATCH must move OUT of the caller). Tracked as follow-up
-            // work; this comment documents the current post-HIGH#7 mitigation
-            // for the operator monitoring the log.
+            // MED#10 SESSION-19 Cosmos-first ordering: Conflict here means the
+            // concurrent winner already advanced the run. Because Cosmos is
+            // FIRST in this sequence, NO registry PATCH has been attempted by
+            // THIS caller — the registry is untouched. The concurrent winner
+            // owns the eventual registry PATCH.
             _logger.LogWarning(
-                "H13 success state write LOST optimistic-concurrency race (Bucket B MED#10 documented split-brain window fired): " +
-                "runId={RunId} customerId={CustomerId} winningStatus={WinningStatus} " +
-                "registryState=Ready (already PATCHed) guardState=StillHeld (per Bucket B HIGH#7). " +
-                "Concurrent winner will complete + HandlerOutcomeApplier will release the guard, " +
-                "closing the split-brain within milliseconds.",
+                "H13 Cosmos-first Completed write lost optimistic-concurrency race — NO registry PATCH attempted (MED#10 SESSION-19 eliminated the split-brain window): " +
+                "runId={RunId} customerId={CustomerId} winningStatus={WinningStatus}",
                 run.RunId, run.CustomerId, conflict.Current.Run.Status);
             return new HandlerResult.Failure(
                 FailureClass.Resumable, H13Rejections.ConcurrentWriteConflict,
                 $"Concurrent write advanced run '{run.RunId}' between H13 read + write. " +
                 $"Winning status: {conflict.Current.Run.Status}. Resume will re-run H13. " +
-                "Note: registry was PATCHed to Ready but Cosmos Conflicted — this is the " +
-                "Bucket B MED#10 SESSION 18 documented split-brain window; eventual convergence " +
-                "via the concurrent winner's own applier release closes it in milliseconds.");
+                "MED#10 SESSION-19 Cosmos-first ordering guarantees NO registry mutation " +
+                "was attempted — the registry is untouched by this attempt.");
         }
         if (replace is ReplaceRunResult.NotFound)
         {
             _logger.LogWarning(
-                "H13 success state write raced with row delete: runId={RunId} customerId={CustomerId}",
+                "H13 Cosmos-first Completed write raced with row delete: runId={RunId} customerId={CustomerId}",
                 run.RunId, run.CustomerId);
             return new HandlerResult.Failure(
                 FailureClass.Resumable, H13Rejections.RunDeletedDuringAcceptance,
                 $"ProvisioningRun '{run.RunId}' was deleted while H13 was in flight.");
         }
 
-        return new HandlerResult.Success(idempotencyKey);
+        return null;
     }
 }
