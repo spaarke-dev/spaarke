@@ -1,7 +1,7 @@
 <task id="CICD-091" project="ci-cd-unit-test-remediation-r1">
   <metadata>
     <title>Tier 2 Full Unit Tests: fix the 5 real-clock timing failures (#848)</title>
-    <status>not-started</status>
+    <status>partial</status>
     <estimated-effort>3-5 hours</estimated-effort>
     <phase>4 - Deliverable defect repair (adopted 2026-08-28)</phase>
     <stream>A - CI tiering remediation</stream>
@@ -35,6 +35,36 @@
     <step order="3">Convert to FakeTimeProvider per tests/CLAUDE.md "TimeProvider over Stopwatch". Stopwatch / DateTime.UtcNow / Task.Delay are BANNED in tests by that directive; these predate it.</step>
     <step order="4">Re-run the Tier 2 unit job. Confirm green AND confirm runtime did not regress: these tests currently WAIT on real clocks, so FakeTimeProvider should make them faster, not slower.</step>
   </steps>
+
+  <notes date="2026-08-28">
+    PARTIAL — 4 of the 5 fixed. Full findings: notes/091-realclock-findings.md.
+
+    Two premises in #848 were wrong and are corrected there:
+    (1) FakeTimeProvider is NOT "referenced nowhere" (per #795) — it is already used in 16 files,
+        including RetryAndIdempotencyTests itself; and ScheduledJobHost ALREADY took an optional
+        TimeProvider and routed every sleep through it. The production work was done; the tests had
+        simply never adopted it. This task changed ZERO production files.
+    (2) ReAnalysisFlowTests.ReAnalysis_HappyPath_... is NOT a real-clock timing test. It has no
+        Stopwatch, no clock, no timing assertion, and it reproduces DETERMINISTICALLY on a dev
+        machine — HttpClient's 100s default timeout while the SSE path attempts a LIVE Azure Search
+        call. It surfaces in a job named "Full Unit Tests" because ci-tier2-advisory.yml pass 1 is
+        bare `dotnet test` with no project filter, so the whole solution (integration tests
+        included) runs there. That is a real defect in this project's own deliverable.
+
+    ESCALATED, not fixed: repairing it means editing ci-tier2-advisory.yml, and the shadow window
+    forbids tier-file edits while it runs ("changing the configuration invalidates what was
+    observed" — window was 6/20 PRs at the time). It is also an owner call, since filtering
+    integration tests out of Tier 2 means they run nowhere on a PR. The test is advisory and
+    blocks no one meanwhile. Recommendation in the findings note; sequence after cutover (071).
+
+    ALSO FOUND, deliberately not fixed (out of scope, both documented in the findings note):
+    - ScheduledJobHost.TriggerNowAsync passes CancellationToken.None to RunManualTriggerAsync while
+      its own comment claims it uses the host stoppingToken — manual-trigger jobs cannot observe
+      host shutdown, so StopAsync waits out the full drain timeout. Latent NFR-07 gap, no coverage.
+    - TickAsync refreshes before the due-check and recomputes NextFireUtc from `now` EXCLUSIVE, so
+      RefreshInterval shorter than the cron period starves dispatch under jitter-free timing. Real
+      deployments escape it only via sleep jitter.
+  </notes>
 
   <acceptance-criteria>
     <criterion testable="true">Tier 2 `Full Unit Tests (Debug)` reports 0 failures</criterion>

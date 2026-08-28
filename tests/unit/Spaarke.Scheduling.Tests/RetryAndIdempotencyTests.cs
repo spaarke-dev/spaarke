@@ -1,6 +1,7 @@
 using System.Diagnostics;
 using FluentAssertions;
 using Microsoft.Extensions.Logging.Abstractions;
+using Microsoft.Extensions.Time.Testing;
 using Spaarke.Scheduling;
 using Xunit;
 
@@ -197,28 +198,39 @@ public class RetryAndIdempotencyTests
 
         var options = new ScheduledJobHostOptions
         {
-            RefreshInterval = TimeSpan.FromMilliseconds(200),
+            // RefreshInterval MUST exceed the 1s cron period under a virtual clock: TickAsync
+            // refreshes first and recomputes NextFireUtc from `now` exclusive, so a 200ms refresh
+            // stepped by an exactly periodic 200ms virtual advance starves the job forever. Real
+            // time only escapes that by sleep jitter. See VirtualClockOptions in ScheduledJobHostTests.
+            RefreshInterval = TimeSpan.FromSeconds(30),
             ShutdownDrainTimeout = TimeSpan.FromSeconds(3),
             MaxLoopSleep = TimeSpan.FromMilliseconds(200),
             RetryPolicy = policy
         };
 
-        var host = new ScheduledJobHost(registry, store, options, NullLogger<ScheduledJobHost>.Instance);
+        // Virtual clock: the 5s retry delay above is now 5s of VIRTUAL time that this test
+        // simply never grants. See the assertion note below for why that is the whole point.
+        var time = new FakeTimeProvider(DateTimeOffset.Parse("2026-08-28T12:00:00Z"));
+        var host = new ScheduledJobHost(registry, store, options, NullLogger<ScheduledJobHost>.Instance, time);
 
         await host.StartAsync(CancellationToken.None);
-        await startedTcs.Task.WaitAsync(TimeSpan.FromSeconds(5));
 
-        // Cancellation must short-circuit the 5s retry-loop sleep AND any in-flight ExecuteAsync.
-        var sw = Stopwatch.StartNew();
+        // Advance only until attempt #1 has run. It throws, which puts the host into its 5s
+        // retry sleep — and then we stop advancing, so virtual time freezes mid-sleep.
+        await AdvanceUntilAsync(time, () => startedTcs.Task.IsCompleted,
+            "the every-second cron MUST dispatch 'cancellable-retry' once virtual time reaches its occurrence");
+
         await host.StopAsync(CancellationToken.None);
-        sw.Stop();
 
-        // CI runners get 5x headroom; the 5s ceiling tests cancellation responsiveness
-        // (NOT total elapsed time), which still holds under both budgets.
-        var cancelCeiling = _isCi ? TimeSpan.FromSeconds(25) : TimeSpan.FromSeconds(5);
-        sw.Elapsed.Should().BeLessThan(cancelCeiling,
-            "retry-loop sleep MUST honor cancellation (NFR-07) — would block past this if unhonored");
-
+        // Task 091 (#848): this replaces a `sw.Elapsed < (CI ? 25s : 5s)` wall-clock ceiling, and
+        // it is a STRICTLY STRONGER check rather than a weaker one. The retry sleep is 5s of
+        // virtual time that was never advanced, so if the sleep had ignored the cancellation token
+        // StopAsync could not have returned at all — it would deadlock until the drain timeout and
+        // the record below would not say "Cancelled". Completing at all is therefore proof that the
+        // wake-up came from the token and not from elapsed time, which is exactly the NFR-07
+        // property the old ceiling could only ever approximate. (The production loop routes every
+        // sleep through the injected TimeProvider specifically so this is provable — see the
+        // comment on ScheduledJobHost.TickAsync's idle sleep.)
         var run = store.RunRecords.FirstOrDefault(r => r.JobId == "cancellable-retry");
         run.Should().NotBeNull();
         run!.Result.Should().NotBeNull();
@@ -324,6 +336,35 @@ public class RetryAndIdempotencyTests
     // CI runners can be 3-5x slower than local; multiply tight timeouts to
     // avoid flake without changing per-test call sites or weakening intent.
     // GitHub Actions sets CI=true; local dev runs unscaled.
+    /// <summary>Virtual-clock increment per <see cref="AdvanceUntilAsync"/> step (matches MaxLoopSleep).</summary>
+    private static readonly TimeSpan VirtualStep = TimeSpan.FromMilliseconds(200);
+
+    /// <summary>
+    /// Advances the host's VIRTUAL clock in fixed steps until <paramref name="predicate"/> holds.
+    /// Bounded by step COUNT, not elapsed real time, so a loaded runner cannot make it give up
+    /// early — virtual time moves only when this method moves it. Added by task 091 (#848); see
+    /// the fuller rationale on the twin helper in <c>ScheduledJobHostTests</c>.
+    /// </summary>
+    private static async Task AdvanceUntilAsync(
+        FakeTimeProvider time,
+        Func<bool> predicate,
+        string because,
+        int maxSteps = 400)
+    {
+        for (var step = 0; step < maxSteps; step++)
+        {
+            if (predicate()) return;
+            time.Advance(VirtualStep);
+            await Task.Delay(1).ConfigureAwait(false);
+        }
+
+        if (!predicate())
+        {
+            throw new TimeoutException(
+                $"Predicate did not become true within {maxSteps} virtual steps of {VirtualStep} — {because}");
+        }
+    }
+
     private static readonly bool _isCi =
         string.Equals(Environment.GetEnvironmentVariable("CI"), "true", StringComparison.OrdinalIgnoreCase);
 

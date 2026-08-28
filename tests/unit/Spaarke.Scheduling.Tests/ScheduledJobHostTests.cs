@@ -1,6 +1,7 @@
 using System.Diagnostics;
 using FluentAssertions;
 using Microsoft.Extensions.Logging.Abstractions;
+using Microsoft.Extensions.Time.Testing;
 using Spaarke.Scheduling;
 using Xunit;
 
@@ -12,12 +13,30 @@ public class ScheduledJobHostTests
     // rapidly so tests stay sub-second. The host transparently supports both 5- and 6-field
     // cron via ScheduledJobHost.ParseCron — see also CronosParsingTests + the ParseCron test.
 
-    private static ScheduledJobHostOptions FastOptions(TimeSpan? drainTimeout = null) => new()
+    private static ScheduledJobHostOptions FastOptions(
+        TimeSpan? drainTimeout = null,
+        TimeSpan? refreshInterval = null) => new()
     {
-        RefreshInterval = TimeSpan.FromMilliseconds(200),
+        RefreshInterval = refreshInterval ?? TimeSpan.FromMilliseconds(200),
         ShutdownDrainTimeout = drainTimeout ?? TimeSpan.FromSeconds(2),
         MaxLoopSleep = TimeSpan.FromMilliseconds(200)
     };
+
+    /// <summary>
+    /// Options for virtual-clock tests: tick often, refresh rarely.
+    /// </summary>
+    /// <remarks>
+    /// RefreshInterval MUST exceed the cron period (1s for the "every second" test schedule).
+    /// <see cref="ScheduledJobHost.TickAsync"/> refreshes first and recomputes NextFireUtc from
+    /// <c>now</c> EXCLUSIVE, so a refresh that lands on the same instant as a due job pushes that
+    /// job to the following occurrence. With the default 200ms RefreshInterval and an exactly
+    /// periodic 200ms virtual step the two resonate: refresh fires on every tick that could have
+    /// dispatched, and the job starves indefinitely. Real time escapes this only by jitter —
+    /// sleeps overshoot, so the alignment drifts. Virtual time has no jitter, so the test states
+    /// the intended configuration explicitly instead of relying on that accident.
+    /// </remarks>
+    private static ScheduledJobHostOptions VirtualClockOptions(TimeSpan? drainTimeout = null) =>
+        FastOptions(drainTimeout, refreshInterval: TimeSpan.FromSeconds(30));
 
     private static BackgroundJobDefinition EverySecond(string jobId, bool enabled = true) =>
         new(JobId: jobId,
@@ -216,22 +235,22 @@ public class ScheduledJobHostTests
         var store = new InMemoryBackgroundJobStore();
         store.AddOrReplaceJob(EverySecond("slow"));
 
-        var host = new ScheduledJobHost(registry, store, FastOptions(TimeSpan.FromSeconds(3)),
-            NullLogger<ScheduledJobHost>.Instance);
+        var (host, time) = HostWithVirtualClock(registry, store, VirtualClockOptions(TimeSpan.FromSeconds(3)));
 
         await host.StartAsync(CancellationToken.None);
-        await startedTcs.Task.WaitAsync(TimeSpan.FromSeconds(5));
+        await AdvanceUntilAsync(time, () => startedTcs.Task.IsCompleted,
+            "the every-second cron MUST dispatch 'slow' once virtual time reaches its next occurrence");
 
-        var stopSw = Stopwatch.StartNew();
         await host.StopAsync(CancellationToken.None);
-        stopSw.Stop();
 
         observed.Should().BeTrue("the in-flight job MUST observe cancellation (NFR-07)");
-        // 5s = 3s drain + 2s overhead locally; CI runners need ~5x overhead headroom.
-        var drainCeiling = _isCi ? TimeSpan.FromSeconds(25) : TimeSpan.FromSeconds(5);
-        stopSw.Elapsed.Should().BeLessThan(drainCeiling,
-            "StopAsync MUST drain within ShutdownDrainTimeout + reasonable overhead (NFR-07: 30s hard ceiling)");
 
+        // Task 091 (#848): the old `stopSw.Elapsed < (CI ? 25s : 5s)` ceiling is deliberately gone.
+        // It measured the runner, not the host — and it could only ever fail for the wrong reason,
+        // because a drain that did NOT cancel promptly is already caught by the run-record
+        // assertions below: base.StopAsync cancels the stopping token, so a job that observed it
+        // records Success=false + "Cancelled", while one that sat out the 3s ShutdownDrainTimeout
+        // would not. The behaviour is the assertion; elapsed wall-clock never was.
         var slowRun = store.RunRecords.FirstOrDefault(r => r.JobId == "slow");
         slowRun.Should().NotBeNull();
         slowRun!.Result.Should().NotBeNull();
@@ -253,14 +272,15 @@ public class ScheduledJobHostTests
         store.AddOrReplaceJob(new BackgroundJobDefinition(
             "bad", "Bad", "", true, "not-a-cron-expression", null));
 
-        var host = new ScheduledJobHost(registry, store, FastOptions(), NullLogger<ScheduledJobHost>.Instance);
+        var (host, time) = HostWithVirtualClock(registry, store, VirtualClockOptions());
 
         await host.StartAsync(CancellationToken.None);
-        await WaitUntilAsync(() => good.InvocationCount > 0, TimeSpan.FromSeconds(5));
+        await AdvanceUntilAsync(time, () => good.InvocationCount > 0,
+            "a valid cron MUST still dispatch even though a sibling definition has an unparseable expression");
         await host.StopAsync(CancellationToken.None);
 
         good.InvocationCount.Should().BeGreaterThan(0);
-        bad.InvocationCount.Should().Be(0);
+        bad.InvocationCount.Should().Be(0, "an unparseable cron MUST be skipped, not dispatched");
     }
 
     [Fact(Skip = "CI cron-tick flake — passes locally; needs TimeProvider refactor (see PR #415)")]
@@ -553,13 +573,61 @@ public class ScheduledJobHostTests
         await act.Should().NotThrowAsync();
     }
 
-    // CI runners can be 3-5x slower than local; multiply tight timeouts to
-    // avoid flake without changing per-test call sites or weakening intent.
-    // GitHub Actions sets CI=true; local dev runs unscaled.
+    /// <summary>
+    /// Advances the host's VIRTUAL clock in fixed steps until <paramref name="predicate"/> holds.
+    /// </summary>
+    /// <remarks>
+    /// <para>Replaces the old <c>WaitUntilAsync</c> (task 091 / #848), which polled a real
+    /// <see cref="Stopwatch"/> against a wall-clock deadline scaled 5x on CI. That helper made
+    /// every host test a bet on how fast the runner could schedule a cron tick — the bet lost
+    /// often enough that six tests in this file were left permanently <c>[Fact(Skip)]</c> and the
+    /// whole assembly had parallelisation disabled.</para>
+    /// <para>The bound here is a step COUNT over virtual time, not elapsed real time. A loaded
+    /// runner makes each yield slower; it cannot make the loop give up early, because virtual
+    /// time only moves when this method moves it. <see cref="ScheduledJobHost"/> routes every
+    /// sleep through its injected <see cref="TimeProvider"/>, which is what makes this work.</para>
+    /// <para>The <c>Task.Delay(1)</c> is a thread-scheduling handshake letting the host loop's
+    /// timer continuation observe the advance — it is not a timing assertion, and no test
+    /// asserts on how long it took.</para>
+    /// </remarks>
+    private static async Task AdvanceUntilAsync(
+        FakeTimeProvider time,
+        Func<bool> predicate,
+        string because,
+        int maxSteps = 400)
+    {
+        for (var step = 0; step < maxSteps; step++)
+        {
+            if (predicate()) return;
+            time.Advance(VirtualStep);
+            await Task.Delay(1).ConfigureAwait(false);
+        }
+
+        if (!predicate())
+        {
+            throw new TimeoutException(
+                $"Predicate did not become true within {maxSteps} virtual steps of {VirtualStep} — {because}");
+        }
+    }
+
+    /// <summary>Virtual-clock increment per <see cref="AdvanceUntilAsync"/> step (matches MaxLoopSleep).</summary>
+    private static readonly TimeSpan VirtualStep = TimeSpan.FromMilliseconds(200);
+
+    // CI runners can be 3-5x slower than local; scale the bound rather than weakening intent.
     private static readonly bool _isCi =
         string.Equals(Environment.GetEnvironmentVariable("CI"), "true", StringComparison.OrdinalIgnoreCase);
 
-    /// <summary>Polls a predicate until satisfied or the deadline elapses (xUnit-friendly wait helper).</summary>
+    /// <summary>
+    /// Polls a predicate against the REAL clock. Retained (task 091 / #848) only for waits that do
+    /// NOT depend on a cron tick — i.e. the <c>TriggerNowAsync</c> tests, which dispatch manually and
+    /// simply need the fire-and-track background task to finish. Those never flaked, because nothing
+    /// about them is scheduled.
+    /// </summary>
+    /// <remarks>
+    /// Cron-driven tests MUST use <see cref="AdvanceUntilAsync"/> instead — waiting on the wall clock
+    /// for a scheduled tick is what made this file flaky and left six tests <c>[Fact(Skip)]</c>.
+    /// Note this is a completion wait, not a timing assertion: no caller asserts on elapsed time.
+    /// </remarks>
     private static async Task WaitUntilAsync(Func<bool> predicate, TimeSpan timeout, string? because = null)
     {
         var effectiveTimeout = _isCi ? TimeSpan.FromTicks(timeout.Ticks * 5) : timeout;
@@ -573,5 +641,16 @@ public class ScheduledJobHostTests
         {
             throw new TimeoutException($"Predicate did not become true within {effectiveTimeout}{(because is null ? "" : " — " + because)}");
         }
+    }
+
+    /// <summary>Host wired to a virtual clock — the only shape used by tests that need a tick to fire.</summary>
+    private static (ScheduledJobHost Host, FakeTimeProvider Time) HostWithVirtualClock(
+        ScheduledJobRegistry registry,
+        IBackgroundJobStore store,
+        ScheduledJobHostOptions options)
+    {
+        var time = new FakeTimeProvider(DateTimeOffset.Parse("2026-08-28T12:00:00Z"));
+        var host = new ScheduledJobHost(registry, store, options, NullLogger<ScheduledJobHost>.Instance, time);
+        return (host, time);
     }
 }

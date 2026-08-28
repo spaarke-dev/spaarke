@@ -10,10 +10,20 @@
 
 | Field | Value |
 |---|---|
-| **Active task** | none — between tasks |
-| **Project state** | 47 tasks · 29 complete · 10 open · 7 closed · 1 partial |
+| **Active task** | 091 🟡 partial (PR #884 open) |
+| **Project state** | 47 tasks · 29 complete · 9 open · 7 closed · 2 partial |
 | **Status** | in-progress |
-| **Next Action** | **1.** Merge PRs #847, #843, #865, #866, #867 as each goes green (owner pre-approved). **2.** Then start any of tasks 091–095 — all parallel-safe, none gate cutover. |
+| **Next Action** | **1.** Merge PR **#884** (task 091) when green. **2.** Then start **092, 093, 094 or 095** — all parallel-safe, none gate cutover. |
+
+> **2026-08-28 update**: the five-PR merge queue is **DONE** — #843, #847, #865, #866, #867 all merged.
+> ArchTests now 136/136 on master (#865 armed ADR-038 B4 + B1 as blocking guards).
+>
+> **Task 091 is 4/5 and PARTIAL.** The 5th failure (`ReAnalysisFlowTests`) is a *different defect*:
+> not a timing test at all, it reproduces deterministically and fails on HttpClient's 100s timeout
+> while making a **live Azure Search call** — surfacing in a job named "Full Unit Tests" because
+> `ci-tier2-advisory.yml` pass 1 is bare `dotnet test` with no project filter. Fixing it requires a
+> tier-file edit, which the **shadow-window freeze forbids**, so it is escalated and sequenced after
+> cutover (071). Details: `notes/091-realclock-findings.md`.
 
 ### Critical context
 

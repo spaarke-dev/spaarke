@@ -110,7 +110,7 @@
 | 087 | fix-adr-009-imemorycache-endpoints | FULL | ✅ | **false** (hot-path BFF production) | none | 071 (ADR-009 arch test passes locally) |
 | 088 | fix-adr-007-graph-isolation-endpoints | FULL | ⛔ | **false** (hot-path BFF production) | none (can start anytime) | **071** |
 | 081 | build-test-diet-skill | FULL | ✅ | **false** (`.claude/` write — runs in parallel with 080 via main-session sequencing) | (Phase 2 complete) | 090 |
-| 091 | fix-tier2-realclock-test-failures (#848) | FULL | 🔲 | true | none | 090 |
+| 091 | fix-tier2-realclock-test-failures (#848) | FULL | 🟡 | true | none | 090 | 4/5 fixed; 5th is a different defect (live Azure Search call in a "unit test" job) — escalated, blocked on the shadow window per the tier-file freeze. See `notes/091-realclock-findings.md`. |
 | 092 | make-prettier-check-reproducible (#850) | FULL | 🔲 | true | none | 090 |
 | 093 | fix-markdown-link-validator-scope (#849) | STANDARD | 🔲 | true | none | 090 |
 | 094 | extend-adr038-ban-enforcement (#864) | FULL | 🔲 | true | 865 | 090 |
