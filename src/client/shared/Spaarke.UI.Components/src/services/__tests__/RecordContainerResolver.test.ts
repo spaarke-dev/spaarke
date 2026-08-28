@@ -306,7 +306,7 @@ describe('resolveContainerForRecord', () => {
 
   it.each([null, undefined])(
     'FAILS CLOSED when the record read resolves to %p (C-3: parity with the C# half)',
-    async (empty) => {
+    async empty => {
       // C-3 regression. `IWebApiLike.retrieveRecord` is typed non-nullable and satisfied STRUCTURALLY, so
       // TypeScript warns at no call site if an implementation resolves null/undefined — and the shipped
       // adapters are not the only implementations (PCF context.webAPI, host shims, mocks). Without the
