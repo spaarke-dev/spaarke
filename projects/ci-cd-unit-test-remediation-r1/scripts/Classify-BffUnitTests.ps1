@@ -88,6 +88,22 @@ function Remove-CsComments {
     return [regex]::Replace($noBlock, '(?m)//.*$', '')
 }
 
+# Braces inside string and char literals must NOT be counted when finding a method's
+# end. Round 5: PublishStatusUpdate_MultipleUpdates_MaintainCorrectOrder contains
+# `json.IndexOf('}', sequenceStart)` inside a Moq callback -- that char literal closed
+# the lambda's depth early, so the captured body ended at line 170 and the real
+# assertions on lines 185-186 (BeEquivalentTo + BeInAscendingOrder) were never seen.
+# The test then scored "no assertion" and was headed for DELETE. This corrupts body
+# capture for EVERY method containing a brace in a literal, so it is fixed at the
+# counting step rather than per-case.
+function Get-BraceCountingLine {
+    param([string] $Line)
+    $s = [regex]::Replace($Line, '(?<!\\)"(?:[^"\\]|\\.)*"', '""')   # string literals
+    $s = [regex]::Replace($s, "'(?:[^'\\]|\\.)'", "''")               # char literals
+    $s = [regex]::Replace($s, '//.*$', '')                            # trailing comment
+    return $s
+}
+
 Write-Host "Classifying tests under $TestRoot against ADR-038 §7 ..." -ForegroundColor Cyan
 
 $files = Get-ChildItem -Path $TestRoot -Filter *.cs -Recurse -File
@@ -157,8 +173,9 @@ foreach ($file in $files) {
             $depth = 0; $started = $false
             for ($k = $sigIdx; $k -lt [math]::Min($sigIdx + 400, $lines.Count); $k++) {
                 $line = $lines[$k]
-                $opens  = ([regex]::Matches($line, '\{')).Count
-                $closes = ([regex]::Matches($line, '\}')).Count
+                $countLine = Get-BraceCountingLine $line
+                $opens  = ([regex]::Matches($countLine, '\{')).Count
+                $closes = ([regex]::Matches($countLine, '\}')).Count
                 if (-not $started -and $opens -gt 0) { $started = $true }
                 if ($started) {
                     $bodyLines += $line
@@ -216,12 +233,34 @@ foreach ($file in $files) {
         foreach ($m in [regex]::Matches($bodyCode, '\.(?:And|Which)\s*\.\s*(\w+)\s*\(')) { $assertForms += $m.Groups[1].Value }
         $hasVerifyExpression = $bodyCode -match '\.Verify\w*\(\s*\w+\s*=>'
 
+        # `NotBeNull` is only trivial when its SUBJECT is the bare result of the act.
+        # Round 5 adjudication of the 18-row residue: NotBeNull on a NAVIGATED expression
+        # is a real behavioral assertion, and three of the survivors were exactly that --
+        #   insRun.RunProperties!.Bold.Should().NotBeNull()          -> "the Bold mark WAS applied"
+        #   ...Element("entity")!.Element("filter").Should().NotBeNull() -> "a filter WAS appended"
+        #   requestType.GetProperty("SearchIndexed").Should().NotBeNull() -> dual-write field preserved
+        # versus the genuinely contentless `result.Should().NotBeNull()`, which only says
+        # "it returned something". Distinguish by whether the subject is a bare identifier.
+        $navigatedNotNull = $false
+        foreach ($m in [regex]::Matches($bodyCode, '(?m)^(?<subj>.*?)\.Should\(\)\s*\.\s*(NotBeNull|NotNull)\b')) {
+            $subj = $m.Groups['subj'].Value
+            $subj = [regex]::Replace($subj, '^\s*(var\s+\w+\s*=\s*|return\s+)?', '')
+            if ($subj.Trim() -notmatch '^[A-Za-z_]\w*!?$') { $navigatedNotNull = $true; break }
+        }
+
         $trivialOnly = ($assertForms.Count -gt 0) -and
                        (-not $hasVerifyExpression) -and
+                       (-not $navigatedNotNull) -and
                        (@($assertForms | Where-Object { $_ -notin $trivialForms }).Count -eq 0)
 
-        # Does this method delegate its assertion to a helper in the same file?
-        $delegatesAssertion = $false
+        # A call to an `Assert*`-named method is an assertion by any reasonable reading,
+        # even when the helper is declared in a BASE CLASS or shared fixture that the
+        # same-file scan below cannot see. Round 5: Telemetry_DoesNotLogInputValues and
+        # Telemetry_DoesNotLogInvoiceContent_OrMonetaryValues -- ADR-015 PII-leak
+        # regression tests -- assert entirely through AssertTelemetryRespectsAdr015(...),
+        # inherited, and were the last two rows headed for DELETE.
+        # `Assert[A-Z]` does not match `Assert.Equal(` because a '.' follows there.
+        $delegatesAssertion = $bodyCode -cmatch '\bAssert[A-Z]\w*\s*\('
         foreach ($h in (Get-AssertingHelperNames -Path $file.FullName -FileTextCode $fileTextCode)) {
             if ($h -eq $methodName) { continue }   # a test asserting in its own body is not delegation
             if ($bodyCode -match "\b$([regex]::Escape($h))\s*\(") { $delegatesAssertion = $true; break }
@@ -293,6 +332,18 @@ foreach ($file in $files) {
         # round 1's failure mode (LoadSessionAsync_BothMiss_ReturnsNull, whose contract was
         # a null outcome) recurring in a different bucket: a NEGATIVE expected outcome
         # reads as "no expectation" to a counter. Route to review, never to DELETE.
+        # ADR-032 Null-Object peers, detected STRUCTURALLY rather than by name. Round 5:
+        # NullMembershipCacheInvalidator_LogsAndReturns and
+        # NullHost_ExecuteAsync_LogsAndReturnsImmediately both survived to the DELETE
+        # residue because the round-4 NAME heuristic below does not match "LogsAndReturns"
+        # / "ReturnsImmediately". This class has now been rescued three times under three
+        # different namings, which is the signal that a name list was the wrong instrument.
+        # Constructing a `Null*` peer and exercising it without asserting IS the ADR-032 P2
+        # quiet-semantics contract.
+        elseif ($assertCount -eq 0 -and $bodyCode -cmatch '\bnew\s+Null\w+\s*\(') {
+            $bucket = 'AMBIGUOUS-b10-absence-contract'
+            $rationale = 'Exercises an ADR-032 Null-Object peer with no assertion — quiet-semantics contract, review not delete'
+        }
         elseif (($assertCount -eq 0 -or $trivialOnly) -and
                 $methodName -match '(?i)(NoOp|No_Op|DoesNotThrow|DoNotThrow|Quiet|Tolerat|Ignor|Succeed|Complet|Safe|Never)') {
             $bucket = 'AMBIGUOUS-b10-absence-contract'
