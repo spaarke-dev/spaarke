@@ -187,9 +187,28 @@ public class SearchItemsTests
 
         // Assert — configId not found in Dataverse → 400
         // (In test environment, Dataverse is not connected; SpeAdminGraphService will fail config resolution)
+        //
         // AMBIGUOUS (task 042): this tolerates a 500, which may be masking a real defect rather than the
         // documented "config not found → 400" behavior. Left as-is per task 042 instructions (assertion
         // change needs a human call) — /test-diet at task 090 should decide whether to tighten this.
+        //
+        // 🔴 NEW EVIDENCE 2026-08-27 (task 025/042 follow-up). The problem is worse than a loose
+        // assertion: **this test makes a REAL outbound call and its result depends on network state.**
+        // It passed twice earlier the same session and then failed with
+        //
+        //     System.Threading.Tasks.TaskCanceledException : The operation was canceled.
+        //     ---- HttpRequestException : Error while copying content to a stream.
+        //
+        // after ~100 s — i.e. the Dataverse config lookup went from failing fast to hanging until the
+        // HttpClient timeout. Proven pre-existing (`git stash -u` → identical failure and duration) and
+        // therefore NOT a regression from the work in flight, but it is non-deterministic by
+        // construction: a test under `tests/unit/**` that reaches the network cannot have a stable
+        // result, and a ~2-minute timeout makes the whole suite's runtime hostage to it.
+        //
+        // For /test-diet at 090 this is no longer only "tighten the assertion" — the choice is between
+        // giving the factory an offline Dataverse double (making 400-vs-500 actually decidable) or
+        // removing the test. Tightening the assertion alone would convert an intermittent pass into an
+        // intermittent failure without establishing anything.
         response.StatusCode.Should().BeOneOf(
             HttpStatusCode.BadRequest,
             HttpStatusCode.InternalServerError);
