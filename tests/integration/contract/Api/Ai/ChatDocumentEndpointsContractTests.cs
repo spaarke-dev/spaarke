@@ -555,7 +555,7 @@ public class ChatDocumentEndpointsContractTests : IClassFixture<ChatDocumentEndp
             Messages: Array.Empty<ChatMessage>(),
             HostContext: null,
             AdditionalDocumentIds: null,
-            UploadedFiles: uploadedFiles);
+            UploadedFiles: uploadedFiles) { OwnerOid = TestSessionOwner.Oid };
 
     private static MultipartFormDataContent BuildMultipartForm(string filename, string content)
     {

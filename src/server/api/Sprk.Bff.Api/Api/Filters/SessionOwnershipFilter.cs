@@ -43,6 +43,37 @@ namespace Sprk.Bff.Api.Api.Filters;
 public static class SessionOwnershipFilterExtensions
 {
     /// <summary>
+    /// The stable <c>errorCode</c> (ADR-019) this filter answers with. ONE code for all three
+    /// denial reasons — missing session, unowned session, someone else's session — because
+    /// distinguishing them on the wire is the existence oracle the 404 exists to avoid.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <b>This code supersedes per-route "session not found" codes on every <c>{sessionId}</c>
+    /// route</b>, because the filter runs before the handler and therefore before the handler's own
+    /// not-found branch. The known casualty is <c>dispatch.session-not-found</c> on
+    /// <c>POST /api/ai/chat/sessions/{sessionId}/dispatch</c>; a client matching that string must
+    /// match this one instead. Owner-approved 2026-08-28 (issue #863) as the honest option: the
+    /// alternative — passing through on not-found so the handler could still answer its own code —
+    /// would have told a caller which session ids exist, which is the disclosure this whole change
+    /// closes.
+    /// </para>
+    /// <para>
+    /// Anything that needs to tell the three cases apart reads the server log line, never the
+    /// response.
+    /// </para>
+    /// </remarks>
+    public const string NotFoundOrNotOwnedErrorCode = "session.not-found-or-not-owned";
+
+    /// <summary>
+    /// Stable <c>errorCode</c> for a principal carrying no <c>tid</c> claim. Deliberately the SAME
+    /// string <c>SummarizeSessionEndpoint</c> and <c>DispatchSessionEndpoint</c> already publish —
+    /// the filter now answers this ahead of them on every <c>{sessionId}</c> route, and reusing
+    /// their code keeps that transparent to clients instead of introducing a third spelling.
+    /// </summary>
+    public const string TenantMissingErrorCode = "auth.tid-missing";
+
+    /// <summary>
     /// Requires that the caller owns the session identified by the route's <c>{sessionId}</c> value.
     /// Answers <c>401</c> when the caller carries no Entra <c>oid</c>, and <c>404</c> when the session
     /// is missing, unowned, or owned by someone else.
@@ -58,8 +89,29 @@ public static class SessionOwnershipFilterExtensions
     {
         return builder.AddEndpointFilter(async (context, next) =>
         {
-            var httpContext = context.HttpContext;
+            var sessionManager = context.HttpContext.RequestServices
+                .GetRequiredService<ChatSessionManager>();
 
+            var denial = await EvaluateAsync(context.HttpContext, sessionManager);
+            return denial ?? await next(context);
+        });
+    }
+
+    /// <summary>
+    /// The whole decision: returns the denial <see cref="IResult"/>, or <see langword="null"/> to
+    /// allow the request through.
+    /// </summary>
+    /// <remarks>
+    /// <b>Separated from the filter lambda so tests exercise THIS code rather than a copy of its
+    /// branch</b> — the same reason <c>ChatEndpoints.DeleteSessionAsync</c> was made <c>internal</c>
+    /// for the task-059 tenant tests. A test that re-implements the condition it is checking stays
+    /// green through the exact edit that breaks production.
+    /// </remarks>
+    internal static async Task<IResult?> EvaluateAsync(
+        HttpContext httpContext,
+        ChatSessionManager sessionManager)
+    {
+        {
             var callerOid = CallerResolution.ResolveObjectId(httpContext.User);
             if (string.IsNullOrEmpty(callerOid))
             {
@@ -99,13 +151,25 @@ public static class SessionOwnershipFilterExtensions
             var tenantId = TenantResolution.ResolveTenantId(httpContext.User);
             if (string.IsNullOrEmpty(tenantId))
             {
+                // 401 + `auth.tid-missing`, reusing the code SummarizeSessionEndpoint and
+                // DispatchSessionEndpoint already document rather than inventing one. Running
+                // ahead of the handlers makes this answer uniform across every {sessionId} route;
+                // several previously answered 400 here, which was never a contract anyone relied
+                // on and is the less accurate of the two — a principal whose tenant cannot be
+                // established is unidentifiable, not malformed (same doctrine as
+                // CallerResolution: null means 401).
                 return Results.Problem(
-                    statusCode: 400,
-                    title: "Bad Request",
-                    detail: "Tenant ID not found in token claims (tid).");
+                    statusCode: 401,
+                    title: "Unauthorized",
+                    detail: "Tenant ID not found in token claims (tid).",
+                    type: "https://tools.ietf.org/html/rfc7235#section-3.1",
+                    extensions: new Dictionary<string, object?>
+                    {
+                        ["errorCode"] = TenantMissingErrorCode,
+                        ["correlationId"] = httpContext.TraceIdentifier
+                    });
             }
 
-            var sessionManager = httpContext.RequestServices.GetRequiredService<ChatSessionManager>();
             var session = await sessionManager.GetSessionAsync(
                 tenantId, sessionId, httpContext.RequestAborted);
 
@@ -119,17 +183,39 @@ public static class SessionOwnershipFilterExtensions
                 {
                     var logger = httpContext.RequestServices
                         .GetService<ILogger<SessionOwnershipFilterMarker>>();
+
+                    // The log is the ONLY place the three cases are distinguished. An operator
+                    // needs to tell "expired" from "someone probing colleagues' sessions"; a caller
+                    // must not be able to.
                     logger?.LogWarning(
                         "Session ownership DENIED: session={SessionId}, tenant={TenantId}, " +
-                        "owned={IsOwned}. Answered 404.",
-                        sessionId, tenantId, !string.IsNullOrEmpty(session.OwnerOid));
+                        "owned={IsOwned}, corr={CorrelationId}. Answered 404 with errorCode={ErrorCode}.",
+                        sessionId, tenantId, !string.IsNullOrEmpty(session.OwnerOid),
+                        httpContext.TraceIdentifier, NotFoundOrNotOwnedErrorCode);
                 }
 
-                return Results.NotFound(new { error = $"Session {sessionId} not found" });
+                // ADR-019: ProblemDetails with a stable errorCode + correlationId, so a client can
+                // tell THIS 404 from any other on the route, and the response can be joined to the
+                // log line above. See NotFoundOrNotOwnedErrorCode for what this supersedes.
+                return Results.Problem(
+                    statusCode: 404,
+                    title: "Not Found",
+                    // ADR-019: no identifier in the detail string. Asserted by
+                    // DispatchSessionEndpointContractTests — an echoed id both leaks into logs and
+                    // sinks that were never scoped for it, and, here specifically, would hand the
+                    // caller back confirmation of the very id they were probing with.
+                    detail: "The chat session was not found.",
+                    type: "https://tools.ietf.org/html/rfc7231#section-6.5.4",
+                    extensions: new Dictionary<string, object?>
+                    {
+                        ["errorCode"] = NotFoundOrNotOwnedErrorCode,
+                        ["correlationId"] = httpContext.TraceIdentifier
+                    });
             }
 
-            return await next(context);
-        });
+            // Owned by the caller — allow.
+            return null;
+        }
     }
 }
 

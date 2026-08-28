@@ -26,6 +26,7 @@ using System.Net.Http.Headers;
 using System.Net.Http.Json;
 using System.Security.Claims;
 using System.Text.Encodings.Web;
+using Sprk.Bff.Api.Api.Filters;
 using FluentAssertions;
 using Microsoft.AspNetCore.Authentication;
 using Microsoft.AspNetCore.Hosting;
@@ -175,7 +176,12 @@ public sealed class ComposeDocSessionDispatchSeamTests : IClassFixture<ComposeDo
         dispatch.StatusCode.Should().Be(HttpStatusCode.NotFound,
             "an unregistered document session does not resolve — this is the DEF-11 defect the fix removes " +
             "for registered sessions");
-        (await dispatch.Content.ReadAsStringAsync()).Should().Contain("dispatch.session-not-found");
+        // Issue #863: the denial now comes from SessionOwnershipFilter, ahead of the handler, so the
+        // code is the single `session.not-found-or-not-owned` rather than the route's own. The
+        // BEHAVIOUR this test guards — an unregistered document session does not resolve — is
+        // unchanged, which is the point: the DEF-11 regression guard still holds.
+        (await dispatch.Content.ReadAsStringAsync())
+            .Should().Contain(SessionOwnershipFilterExtensions.NotFoundOrNotOwnedErrorCode);
     }
 }
 
@@ -398,7 +404,10 @@ internal sealed class ComposeDocSessionFakeAuthHandler : AuthenticationHandler<A
         }
 
         var oid = Request.Headers["X-Test-User"].ToString();
-        if (string.IsNullOrWhiteSpace(oid)) oid = Guid.NewGuid().ToString();
+        // Issue #863 (fixture repair): the fallback was Guid.NewGuid(), so every request with no
+        // X-Test-User header arrived as a DIFFERENT user. Entra never issues a per-request oid,
+        // and an ownership key that changes every call makes ownership untestable.
+        if (string.IsNullOrWhiteSpace(oid)) oid = TestSessionOwner.Oid;
 
         var claims = new List<Claim>
         {

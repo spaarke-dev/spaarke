@@ -390,7 +390,10 @@ internal sealed class AgreementReviewSeamFakeAuthHandler : AuthenticationHandler
         }
 
         var oid = Request.Headers["X-Test-User"].ToString();
-        if (string.IsNullOrWhiteSpace(oid)) oid = Guid.NewGuid().ToString();
+        // Issue #863 (fixture repair): the fallback was Guid.NewGuid(), so every request with no
+        // X-Test-User header arrived as a DIFFERENT user. Entra never issues a per-request oid,
+        // and an ownership key that changes every call makes ownership untestable.
+        if (string.IsNullOrWhiteSpace(oid)) oid = TestSessionOwner.Oid;
 
         var claims = new List<Claim>
         {

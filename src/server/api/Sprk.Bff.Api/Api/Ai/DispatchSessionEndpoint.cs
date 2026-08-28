@@ -73,6 +73,12 @@ public static class DispatchSessionEndpoint
     private const string ErrorCodeBindingRequired = "dispatch.binding-required";
     private const string ErrorCodeBindingIdInvalid = "dispatch.binding-id-invalid";
     private const string ErrorCodeInvalidArgs = "dispatch.invalid-args";
+    // Issue #863: reachable only on an expiry RACE now. SessionOwnershipFilter loads and
+    // ownership-checks the session before this handler runs, answering
+    // SessionOwnershipFilterExtensions.NotFoundOrNotOwnedErrorCode for an ordinary missing session.
+    // A session can still expire between the two, so the branch stays — but a client that used to
+    // match this string must now match the filter's code. Kept rather than deleted because the race
+    // is real; do not treat a hit on this code as "session never existed".
     private const string ErrorCodeSessionNotFound = "dispatch.session-not-found";
     private const string ErrorCodeInternalError = "dispatch.internal-error";
 

@@ -22,8 +22,18 @@
 /// </remarks>
 internal static class TestSessionOwner
 {
-    /// <summary>The owner every fixture authenticates as. Stable across requests, by contract.</summary>
-    public const string Oid = "00000000-0000-0000-0000-00000000600d";
+    /// <summary>
+    /// The owner every fixture authenticates as. Stable across requests, by contract.
+    /// </summary>
+    /// <remarks>
+    /// Deliberately the value three existing fixtures already hardcoded
+    /// (<c>ChatAckEndpointsContractTests</c>, <c>ChatDocumentEndpointsContractTests</c>,
+    /// <c>SummarizeSessionEndpointContractTests</c>) rather than a fresh one. Picking a new value
+    /// would have meant editing those three to agree with a constant, when the constant can simply
+    /// agree with them — fewer files touched, and the suites that were already consistent stay
+    /// untouched.
+    /// </remarks>
+    public const string Oid = "00000000-0000-0000-0000-000000000aaa";
 
     /// <summary>
     /// A DIFFERENT user in the same tenant — for asserting that ownership actually denies. A test

@@ -243,5 +243,5 @@ public sealed class SessionDurableFileStoreSeamTests : IClassFixture<ChatDocumen
             Messages: Array.Empty<ChatMessage>(),
             HostContext: null,
             AdditionalDocumentIds: null,
-            UploadedFiles: null);
+            UploadedFiles: null) { OwnerOid = TestSessionOwner.Oid };
 }

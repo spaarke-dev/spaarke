@@ -213,7 +213,7 @@ public class AnalysisForkEndpointContractTests : IClassFixture<AnalysisForkEndpo
         CreatedAt: DateTimeOffset.UtcNow,
         LastActivity: DateTimeOffset.UtcNow,
         Messages: Array.Empty<ChatMessage>(),
-        HostContext: null);
+        HostContext: null) { OwnerOid = TestSessionOwner.Oid };
 }
 
 /// <summary>
