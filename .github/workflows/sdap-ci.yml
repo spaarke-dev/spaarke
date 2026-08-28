@@ -34,7 +34,22 @@ permissions:
   actions: read
 
 concurrency:
-  group: sdap-ci-${{ github.ref }}
+  # CHANGED 2026-08-28: the key was `github.ref`, so back-to-back master merges
+  # cancelled each other's run. This is the same defect PR #841 fixed in
+  # ci-router.yml; sdap-ci.yml never received it.
+  #
+  # For the router the consequence was a spurious RED (alls-green treats a
+  # cancelled dependency as a hard failure). Here it is quieter but works
+  # against the very thing sdap-ci.yml is still alive for: a cancelled run is
+  # not a verdict, so scripts/ci/shadow-window-status.ps1 correctly scores it as
+  # absent data and SKIPS that PR. Every cancellation silently drops one of the
+  # 20 agreeing PRs the window needs, which delays the retirement this workflow
+  # is waiting on. Observed on merge commit 8ef15a69 (PR #857), whose SDAP CI
+  # run was cancelled by the PR #852 merge four seconds later.
+  #
+  # PRs group by number (a new push should still cancel the previous run);
+  # master/merge_group group by SHA so each commit keeps its own verdict.
+  group: sdap-ci-${{ github.event.pull_request.number || github.sha }}
   cancel-in-progress: true
 
 env:
