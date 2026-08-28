@@ -1,21 +1,22 @@
 # Current Task State — customer-provisioning-orchestration-r1
 
-> **Last Updated**: 2026-08-28 SESSION 18 END (context-handoff checkpoint).
+> **Last Updated**: 2026-08-28 SESSION 19 END (MED#10 landed).
 >
-> **Cumulative state**: 29 of 30 SESSION-18 adversarial verify workflow findings CLOSED (13 HIGH + 10 MED + 4 LOW + 2 opportunistic). Plus ISH-12 rename landed. Plus SESSION 17's 3 code partial-fix closeouts (COMP-03/06/10) landed. **~140 of ~157 total findings cumulative — pre-dispatch remediation ~89% complete.** L2 test suite: **1922 pass / 0 failed / 1 skipped** (was 1889 pre-SESSION-17, +33 net new tests across SESSIONS 17-18).
+> **Cumulative state**: **30 of 30 SESSION-18 adversarial verify workflow findings CLOSED** (13 HIGH + 10 MED + 4 LOW + 2 opportunistic + MED#10). Plus ISH-12 rename landed. Plus SESSION 17's 3 code partial-fix closeouts (COMP-03/06/10) landed. **~141 of ~157 total findings cumulative — pre-dispatch remediation ~90% complete.** L2 test suite: **1924 pass / 0 failed / 1 skipped** (+2 new MED#10 tests: `H13_CosmosConflict_DoesNotMutateRegistry_BucketB_MED10` + `H13_CosmosSuccess_ThenColumnsFailure_ReturnsSuccessWithLog_BucketB_MED10`).
 >
-> **ONE remaining item**: MED#10 H13 Cosmos-first refactor — deferred to fresh session per user direction (concrete refactor plan filed).
+> **Bucket B FULLY CLOSED.** No remaining SESSION-18 workflow findings.
 >
-> **After MED#10**: task 186 dispatch (`/provision-environment trial1 --batch runs/trial1-intake.json` via L3 skill).
+> **Next**: task 186 dispatch (`/provision-environment trial1 --batch runs/trial1-intake.json` via L3 skill) — UNBLOCKED per user "clear ALL issues" mandate now satisfied.
 
 ## 🎯 Quick Recovery (READ THIS FIRST)
 
 | Field | Value |
 |-------|-------|
-| **Task** | Pre-task-186 remediation — MED#10 H13 Cosmos-first refactor |
-| **Step** | 1 of 1: refactor H13.HandleAsync so Cosmos-Completed lands BEFORE registry PATCHes |
-| **Status** | queued for fresh session |
-| **Next Action** | In a fresh session, load [`notes/session-18-handoff-med10-refactor.md`](notes/session-18-handoff-med10-refactor.md) and execute the refactor per its concrete plan (extract `PrepareRunStateForCompletion` + `WriteCompletionToCosmosAsync` helpers; reorder in HandleAsync ~line 550-638; invert failing tests; update SKILL Step 6a runbook to include sprk_setupstatus recovery). Est ~2.5-3h. |
+| **Task** | Task 186 dispatch — `/provision-environment trial1 --batch runs/trial1-intake.json` |
+| **Step** | 1 of 1: invoke the L3 skill; L2 executes handlers H0 → H13 |
+| **Status** | UNBLOCKED (MED#10 landed in SESSION 19 commit `e426191eb`) |
+| **Next Action** | Invoke `/provision-environment trial1 --batch runs/trial1-intake.json` via the L3 skill (never bypass — root CLAUDE.md §4 mandatory task-execute protocol). Skill's Step 0 runs prereqs; Step 0.5 iterates `scripts/provisioning-prereqs/prereqs.yaml`; Step 1.0 loads the pre-validated intake; Step 2 preflight; Step 3 confirmation gate (literal `proceed with provisioning`); Step 4-6 execute loop + handoff. Estimated wall-clock ≤ 1h (NFR-03) absent Azure quota / SPE 24h / admin-consent lead-time gates. |
+| **MED#10 landing** | Commit `e426191eb` (SESSION 19). H13 handler now writes Cosmos-Completed FIRST, then attempts registry PATCHes best-effort. On Cosmos Conflict → return Failure Resumable with NO registry mutation attempted. On registry PATCH failure → REGISTRY-STALE warning log + Success; operator SKILL Step 6a recovery includes sprk_setupstatus. |
 
 ### Files Modified This Session (SESSION 18)
 
@@ -30,21 +31,23 @@
 | `1c8b02fbc` | 9 | Bucket B final 5 HIGHs: HIGH#12 H0 warnAndProceed, HIGH#6 HandlerOutcomeApplier terminal release, HIGH#7 DataverseRegistrySetupStatusUpdater single-writer, HIGH#10 SKILL Step 6a→6c handoff-resilience, HIGH#9 prereqs.yaml exit-1 hardening (15 recipes) + `validate-recipe-authoring.ps1` |
 | `f5ef16231` | 17 | Bucket B MED/LOW cluster (10 MED + 4 LOW): MED#3 I1 allow-list, MED#4/#5/#7 H0 strict-mode, MED#9 PRQ-C-07 grep, MED#11 Conflict release, MED#12 orphan sweep, MED#13 H8 25h polling, LOW#1 docstring, LOW#2 verified, LOW#3 order swap, LOW#4 token refresh |
 | `a3b0eef24` | 1 | MED#10 refactor handoff artifact for fresh session |
+| `f755c2d88` | 1 | current-task.md context-handoff checkpoint (SESSION 18 close) |
+| **`e426191eb`** | **4** | **SESSION 19 — MED#10 H13 Cosmos-first refactor (H13 handler + tests + DataverseRegistrySetupStatusUpdater header + SKILL Step 6a runbook). L2 suite 1924 pass / 0 fail. Bucket B fully closed.** |
 
 **Working tree**: CLEAN. All work pushed to origin.
 
 ### Critical Context (must-know for fresh session)
 
-- **Task 186 dispatch is BLOCKED on MED#10** — user mandate is "clear ALL issues"; MED#10 is the last one. Only after it lands can `/provision-environment trial1 --batch runs/trial1-intake.json` be invoked.
-- **MED#10 documented mitigation is IN PLACE** — the current H13 flow logs a warning when the split-brain window fires; the post-HIGH#7 fix ensures no customer lockout. But the full Cosmos-first refactor is the technically-correct answer per user's push-back. Concrete plan in [`session-18-handoff-med10-refactor.md`](notes/session-18-handoff-med10-refactor.md).
-- **Sub-Agent Write Boundary applies** — MED#10 refactor touches `.claude/skills/provision-environment/SKILL.md` (Step 6a runbook update for sprk_setupstatus recovery) — that section MUST be edited by main-session, not a subagent.
-- **Standing binding rules unchanged**: BFF-API-ClientSecret is GONE (never re-introduce); Dataverse-ClientSecret never-delete before 2026-11-23; operator uses OWN AAD identity (never SP) per NFR-11.
+- **Task 186 dispatch is UNBLOCKED** — MED#10 landed in SESSION 19 commit `e426191eb`. All 30 SESSION-18 workflow findings are closed. User's "clear ALL issues" mandate is satisfied.
+- **H13 is now Cosmos-first** — Cosmos-Completed lands BEFORE registry PATCHes. On Cosmos Conflict, NO registry mutation is attempted (whole point of Cosmos-first). On registry PATCH failure, H13 emits REGISTRY-STALE warning log + returns Success; operator SKILL Step 6a recovery picks up the residual PATCH (now includes `sprk_setupstatus`). See handoff artifact [`notes/session-18-handoff-med10-refactor.md`](notes/session-18-handoff-med10-refactor.md) for the pre-refactor plan (kept for archive).
+- **Sub-Agent Write Boundary applies** — task 186 skill invocation touches nothing under `.claude/`; the L3 skill runs main-session driving L2 REST API calls. If any follow-on remediation needs `.claude/**` edits (post-dispatch findings), main-session-only.
+- **Standing binding rules unchanged**: BFF-API-ClientSecret is GONE (never re-introduce); Dataverse-ClientSecret never-delete before 2026-11-23; operator uses OWN AAD identity (never SP) per NFR-11; task 186 dispatch MUST invoke `/provision-environment` skill per root CLAUDE.md §4 — never bypass with direct L2 REST calls.
 
 ### To resume in fresh session
 
 - **"where was I"** → reads this Quick Recovery
-- **"do MED#10"** → loads `notes/session-18-handoff-med10-refactor.md` and starts the refactor
-- **"dispatch task 186"** → REJECTED until MED#10 lands; user's "clear ALL issues" mandate is binding
+- **"dispatch task 186"** → invoke `/provision-environment trial1 --batch runs/trial1-intake.json` via the L3 skill (never bypass)
+- **"verify MED#10"** → run `dotnet test src/server/services/Sprk.Provisioning.ControlPlane.Tests/` — expect 1924 pass / 0 fail / 1 skipped, including the 2 new `_BucketB_MED10` tests
 - **Full workflow report**: `C:\Users\RALPHS~1\AppData\Local\Temp\claude\c--code-files-spaarke-wt-customer-provisioning-orchestration-r1\5aa5d91f-cd2d-4c24-88ae-ae9649a3fe2f\tasks\wepdcb8we.output` (adversarial verify workflow full output — all 30 findings with per-finding failure scenarios)
 
 ---
