@@ -7,6 +7,7 @@ using Sprk.Bff.Api.Infrastructure.Auth;
 using Sprk.Bff.Api.Models.Ai.RecordSearch;
 using Sprk.Bff.Api.Models.Ai.SemanticSearch;
 using Sprk.Bff.Api.Services.Ai.RecordSearch;
+using Sprk.Bff.Api.Infrastructure.Authentication;
 
 namespace Sprk.Bff.Api.Api.Ai;
 
@@ -127,8 +128,12 @@ public static class RecordSearchEndpoints
                 detail: "Authorization context not available.");
         }
 
-        var callerObjectId = httpContext.User.FindFirst("oid")?.Value
-            ?? httpContext.User.FindFirst(ClaimTypes.NameIdentifier)?.Value;
+        // Was `FindFirst("oid") ?? FindFirst(ClaimTypes.NameIdentifier)` until 2026-08-27. Inbound claim
+        // mapping (ON) renames `oid` to the .../objectidentifier schema URI, so the first term was always
+        // null and this resolved `sub` — pairwise per user+app, matching no Dataverse systemuser. It
+        // reaches the per-row authorization check at :280, so this was not a logging concern. Must stay
+        // identical to the filter's resolution; CallerResolution is what keeps the two halves in step.
+        var callerObjectId = CallerResolution.ResolveObjectId(httpContext.User);
         var callerToken = TokenHelper.ExtractBearerTokenOrNull(httpContext);
 
         if (string.IsNullOrEmpty(callerObjectId) || string.IsNullOrEmpty(callerToken))

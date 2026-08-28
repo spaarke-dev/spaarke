@@ -1,3 +1,4 @@
+using Sprk.Bff.Api.Infrastructure.Authentication;
 using System.Text.Json;
 using System.Text.Json.Serialization;
 using Microsoft.AspNetCore.Mvc;
@@ -2999,8 +3000,7 @@ public static class ChatEndpoints
     /// </summary>
     private static Guid? ExtractUserId(HttpContext httpContext)
     {
-        var oid = httpContext.User.FindFirst("oid")?.Value
-            ?? httpContext.User.FindFirst("http://schemas.microsoft.com/identity/claims/objectidentifier")?.Value;
+        var oid = CallerResolution.ResolveObjectId(httpContext.User);
         return Guid.TryParse(oid, out var userId) ? userId : null;
     }
 

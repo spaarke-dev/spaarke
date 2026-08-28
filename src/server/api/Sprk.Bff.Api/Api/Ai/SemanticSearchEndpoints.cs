@@ -6,6 +6,7 @@ using Sprk.Bff.Api.Api.Filters;
 using Sprk.Bff.Api.Infrastructure.Auth;
 using Sprk.Bff.Api.Models.Ai.SemanticSearch;
 using Sprk.Bff.Api.Services.Ai.SemanticSearch;
+using Sprk.Bff.Api.Infrastructure.Authentication;
 
 namespace Sprk.Bff.Api.Api.Ai;
 
@@ -646,12 +647,25 @@ public static class SemanticSearchEndpoints
     }
 
     /// <summary>
-    /// Extract the caller's object id from Azure AD token claims. Mirrors the filter's extraction so both
-    /// halves of the decision identify the caller identically.
+    /// Extract the caller's Entra object id. Mirrors the filter's extraction so both halves of the decision
+    /// identify the caller identically — and that mirror is load-bearing, because this value reaches the
+    /// per-row authorization check at <c>:569</c>, not just a log line.
     /// </summary>
+    /// <remarks>
+    /// Was <c>FindFirst("oid") ?? FindFirst(ClaimTypes.NameIdentifier)</c> until 2026-08-27. Under this
+    /// app's inbound claim mapping (ON, the default) .NET renames <c>oid</c> to the
+    /// <c>.../objectidentifier</c> schema URI, so <c>FindFirst("oid")</c> is ALWAYS null and the tail ran
+    /// every time — resolving <c>sub</c>, which is pairwise per user+app and joins no Dataverse
+    /// <c>systemuser</c>. Fixed via <see cref="CallerResolution.ResolveObjectId"/>, which pairs both names
+    /// correctly.
+    ///
+    /// <para>Caught by <c>CallerIdentityGuardTests.Rule1</c> (PR #840) AFTER the sibling filter had already
+    /// been fixed — the filter fix alone silently BROKE the mirror this comment asserts, leaving the gate
+    /// resolving <c>oid</c> and the handler resolving <c>sub</c>. A mechanical ratchet caught what review
+    /// did not.</para>
+    /// </remarks>
     private static string? ExtractCallerObjectId(HttpContext httpContext) =>
-        httpContext.User.FindFirst("oid")?.Value
-        ?? httpContext.User.FindFirst(ClaimTypes.NameIdentifier)?.Value;
+        CallerResolution.ResolveObjectId(httpContext.User);
 
     /// <summary>
     /// Extract tenant ID from Azure AD token claims.

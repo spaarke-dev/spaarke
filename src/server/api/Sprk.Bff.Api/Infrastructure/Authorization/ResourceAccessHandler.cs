@@ -1,3 +1,4 @@
+using Sprk.Bff.Api.Infrastructure.Authentication;
 using System.Diagnostics;
 using System.Security.Claims;
 using Microsoft.AspNetCore.Authorization;
@@ -104,31 +105,25 @@ public class ResourceAccessHandler : AuthorizationHandler<ResourceAccessRequirem
     }
 
     /// <summary>
-    /// Extracts user ID from claims. Checks both Azure AD 'oid' claim and standard NameIdentifier.
+    /// Resolves the caller's Entra object id. Returns <see langword="null"/> when the caller cannot be
+    /// identified — the handler then fails the requirement.
     /// </summary>
+    /// <remarks>
+    /// <para><b>The NameIdentifier and sub fallbacks were removed on 2026-08-27.</b> This value flows
+    /// into <c>AuthorizationContext.UserId</c> and is evaluated against Dataverse, which matches on
+    /// <c>systemuser.azureactivedirectoryobjectid</c>. Under inbound claim mapping both fallbacks
+    /// resolve the same pairwise <c>sub</c>, which matches no systemuser — so they could only ever
+    /// authorize the wrong principal or deny. Written as sequential early-returns rather than a
+    /// <c>??</c> chain, this read as "oid first, correct", which is how it survived the first sweep.
+    /// Shape is not the test; what the value is USED FOR is the test.</para>
+    /// </remarks>
     private string? ExtractUserId(ClaimsPrincipal user)
     {
-        // Try Azure AD object identifier (OID) first
-        var oid = user.FindFirst("oid")?.Value
-               ?? user.FindFirst("http://schemas.microsoft.com/identity/claims/objectidentifier")?.Value;
+        var oid = CallerResolution.ResolveObjectId(user);
 
         if (!string.IsNullOrWhiteSpace(oid))
         {
             return oid;
-        }
-
-        // Fallback to standard NameIdentifier
-        var nameId = user.FindFirst(ClaimTypes.NameIdentifier)?.Value;
-        if (!string.IsNullOrWhiteSpace(nameId))
-        {
-            return nameId;
-        }
-
-        // Fallback to sub claim (OIDC)
-        var sub = user.FindFirst("sub")?.Value;
-        if (!string.IsNullOrWhiteSpace(sub))
-        {
-            return sub;
         }
 
         return null;

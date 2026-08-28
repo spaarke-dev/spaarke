@@ -12,6 +12,7 @@ using Sprk.Bff.Api.Infrastructure.Graph;
 using Sprk.Bff.Api.Models;
 using Sprk.Bff.Api.Services;
 using Sprk.Bff.Api.Services.Communication;
+using Sprk.Bff.Api.Infrastructure.Authentication;
 
 namespace Sprk.Bff.Api.Api;
 
@@ -733,8 +734,12 @@ public static class FileAccessEndpoints
                     "CreateShareLink minting an ANONYMOUS link | DocumentId: {DocumentId} | "
                     + "Caller: {CallerObjectId} | ExpiresAt: {ExpiresAt} | TraceId: {TraceId}",
                     documentId,
-                    context.User.FindFirst("oid")?.Value
-                        ?? context.User.FindFirst(ClaimTypes.NameIdentifier)?.Value,
+                    // The comment above is the whole point: "the caller's oid is what makes it
+                    // attributable". Until 2026-08-27 this read `FindFirst("oid") ?? NameIdentifier`,
+                    // which under inbound claim mapping resolved `sub` — pairwise per user+app and
+                    // joinable to nothing. The audit line for minting an ANONYMOUS link was therefore
+                    // recording a pseudonym, defeating exactly the attributability task 072 added it for.
+                    CallerResolution.ResolveObjectId(context.User),
                     expiresAt,
                     context.TraceIdentifier);
             }

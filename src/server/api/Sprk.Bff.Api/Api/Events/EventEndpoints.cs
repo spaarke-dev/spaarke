@@ -652,8 +652,7 @@ public static class EventEndpoints
     /// </summary>
     private static string? ExtractOid(HttpContext httpContext)
     {
-        return httpContext.User.FindFirst("oid")?.Value
-            ?? httpContext.User.FindFirst("http://schemas.microsoft.com/identity/claims/objectidentifier")?.Value;
+        return CallerResolution.ResolveObjectId(httpContext.User);
     }
 
     /// <summary>
