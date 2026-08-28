@@ -267,3 +267,46 @@ for someone's decision not to look closer.
    the half that mattered for arming.
 3. **Arming** `SessionFileStore:BlobEndpoint` is no longer gated by *this* task once (1) lands — but
    the four operator steps in `current-task.md` are still outstanding and unrelated to it.
+
+---
+
+## 9. OWNER SIGN-OFF — 2026-08-28
+
+**(1) Merge: APPROVED.** Owner: *"yes we need to proceed and fully address these issues correctly."*
+Status moves from *awaiting sign-off* to **signed off**; 059 may merge with #806.
+
+**(2) Cross-user DELETE gap: FIX IT, do not accept.** Owner overrode the "accept for now" recommendation:
+*"fix it correctly to match what we need functionally."* So the residual is NOT accepted.
+
+What that means concretely — this is a schema change, and it is NOT a 059 amendment:
+
+- `ChatSession` gains an owner field (`OwnerOid`, the Entra `oid` — NOT `sub`, which is pairwise and
+  joins nothing; see the caller-identity work in #832/#840 for why that distinction is load-bearing).
+- Populated at session creation, persisted across **Redis + Cosmos + Dataverse**.
+- `DeleteSessionAsync` gains an owner check.
+- **The policy question that makes this non-trivial**: sessions created BEFORE the field exists have no
+  owner. Failing closed locks users out of their own history; failing open leaves the gap. A migration
+  or grandfather window has to be chosen deliberately — that decision is the actual work, not the field.
+
+→ **Filed as its own task/issue.** 059 stays as-is (it removed the cross-tenant half); this closes the
+within-tenant half.
+
+**(3) `RagEndpoints` body-supplied `TenantId`: DOCUMENT + DEFER.** Owner asked *"is this really a risk?"*
+Evidence gathered 2026-08-28:
+
+- The endpoint is authenticated by `ApiKeyAuthenticationHandler` (`RagApiKey` scheme) — a **shared
+  secret**, not a user identity.
+- The principal it mints carries **only** `ClaimTypes.Name` and `auth_scheme`
+  (`ApiKeyAuthenticationHandler.cs:92-96`) — **there is no tenant claim to validate the body against.**
+  Nothing was bypassed; there is nothing there.
+
+**Verdict: a real but DIFFERENT and lower-severity class than 059.** 059's defect was that *any
+authenticated end user* could name a tenant. This is a *machine* credential for "background jobs,
+scheduled indexing, bulk operations" (`RagEndpoints.cs:144`) that legitimately spans tenants — naming
+the tenant is its purpose, not a bypass. The risk is that it is **one unscoped shared secret**: a leak
+grants cross-tenant reach, and no audit trail distinguishes legitimate from spoofed tenant use.
+
+The correct fix is a change to the **key model** — per-tenant keys, or a tenant claim minted onto the
+API-key principal and enforced against the body — which is a separate piece of work with its own
+blast radius. **Documented and deferred**, per the owner's "if not then document but defer."
+

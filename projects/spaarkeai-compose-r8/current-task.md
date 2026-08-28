@@ -18,6 +18,41 @@
 | **Verify with** | `dotnet build src/server/api/Sprk.Bff.Api/` + the Compose seam/op-log suites |
 | **⚠️ 074 is CLOSED as DO-NOT-DELETE** | `ComposeShadowPatchEngine` is load-bearing. Deleting it fails as **silent data loss** — the mutation experiment returned HTTP 200 with 107/151 op-log tests failing. Do not revisit; see the reframe box. |
 
+### 📋 Owner decisions taken 2026-08-28 — all recorded, none pending
+
+| Item | Decision |
+|---|---|
+| **059** (security — tenant self-naming) | ✅ **SIGNED OFF, may merge.** Recorded in `notes/059-tenant-header-decisions.md` §9. |
+| **059 cross-user DELETE gap** | ❌ owner **overrode** the "accept residual" recommendation → **fix it**. Filed as **#863** (schema change: `ChatSession` gains `OwnerOid`, persisted across Redis+Cosmos+Dataverse; the hard part is the migration policy for pre-existing unowned sessions, not the field). |
+| **059 `RagEndpoints`** | 📄 **document + defer.** Evidence: the API-key principal carries NO tenant claim at all (`ApiKeyAuthenticationHandler.cs:92-96`), so nothing was bypassed. It is a machine credential that legitimately spans tenants — a different, lower class than 059. Correct fix is the key model. |
+| **#853** (live-anchorless prompt vs retry) | ✅ **keep the prompt.** Closed on the issue. Tripwire noted: if `'live-anchorless'` fires often, the *anchor supply* has regressed — do not re-tune the copy. |
+| **ADR-038 enforcement** | Filed **#864**. The 17 bans are documented and **nothing fails a build**; 24 touched files use the banned `Mock<HttpMessageHandler>` (4 added here, 20 pre-existing). Start with B4 + B13 — both at **zero** today, so a guard arms green. |
+
+### 🍽️ `/test-diet` run early (report: `notes/test-diet-report.md`)
+
+Run at owner request to answer *"do we have too many tests?"* with data. **Re-run at 090** — the skill is
+a project-close gate and this project is still active.
+
+**Answer: volume is not the problem, distribution is.** 187 test methods across 26 added files; the
+project added **one** file outside a KEEP path and **deleted three**. The real finding is the unenforced
+ban (#864) plus the pattern coverage exposed the same day: the `usePendingRedline` anchorless suite had
+**29 tests, 23 of them on the same population** — the live path a user actually hits had **zero**. Test
+count hides that; branch coverage finds it.
+
+### 🔴 BEFORE EXTRACTING ANYTHING — coordination constraint from `unified-access-control-r2` (#858)
+
+UAC-r2 owns a security fix in **`ComposeService.cs`**: create-on-save writes bytes into a CLIENT-NAMED
+SPE container. They explicitly told compose-r8 **not** to implement it, and asked only to be told when
+the file is stable enough to edit.
+
+**They do not know 070 is about to restructure it.** I told them (#858 comment 2026-08-28) and proposed:
+
+> **070 extracts every cluster EXCEPT cluster 2 (create-on-save / promotion).** `PromoteIfEphemeralAsync`
+> (3169-3670) + record-resolution helpers (4036-4285) stay at their current line numbers until their fix
+> lands. Costs us one deferred extraction; unblocks them completely.
+
+⚠️ **Do NOT extract cluster 2 until UAC-r2 replies on #858.** Everything else is clear to proceed.
+
 ### ✅ #853 FIXED (`220ddd18e`) — live-anchorless is no longer called a replay
 
 The discriminator was never missing: `MaterializeOrigin` was destructured at `usePendingRedline.ts:907`
