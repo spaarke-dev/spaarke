@@ -16,7 +16,7 @@
   <owner-rescope date="2026-08-28" binding="true">
     **RE-SCOPED BY OWNER — this task is NOT a deletion sweep.**
 
-    Task 082's inventory showed this task's actual content is **1,123 `B13-name-missing-scenario`
+    Task 082's inventory showed this task's actual content is **1,124 `B13-name-missing-scenario`
     methods**, not scaffolding to delete. ADR-038 §7's own remedy column for B13 reads
     **"rename per convention or delete"** — rename comes FIRST.
 
