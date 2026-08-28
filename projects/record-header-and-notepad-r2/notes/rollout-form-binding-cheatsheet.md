@@ -38,13 +38,20 @@ the sparkle will appear everywhere.
 
 | Task | Entity | Form bound? | Fields to ADD first | Already on form |
 |---|---|---|---|---|
-| 050 | `sprk_project` | ✅ **already bound** | — | 6 of 6 |
-| 051 | `sprk_workassignment` | ❌ | **4** | 3 of 7 |
-| 060 | `sprk_invoice` | ❌ | **3** | 4 of 7 |
-| 061 | `sprk_event` | ❌ | **3** | 5 of 8 |
-| 070 | `sprk_agreement` | ❌ | **5** | 1 of 6 |
+| 050 | `sprk_project` | ✅ bound + UAT-passed | — | 6 of 6 |
+| 051 | `sprk_workassignment` | ✅ bound — QA outstanding | **4** | 3 of 7 |
+| 060 | `sprk_invoice` | ✅ bound — QA outstanding | **3** | 4 of 7 |
+| 061 | `sprk_event` | ⏭️ **DEFERRED — do not bind** | **3** | 5 of 8 |
+| 070 | `sprk_agreement` | ✅ bound — QA outstanding | **5** | 1 of 6 |
+
+> **Updated 2026-08-28.** Bindings confirmed by the owner for 051 / 060 / 070; the per-entity renderer
+> QA below has not been reported back yet. **061 is deferred** — see its section.
 
 Agreement is the heaviest lift and also has **no records** — seed one before QA.
+
+**To change a field set after binding** (add / remove / reorder / resize), see
+[`RECORD-HEADER-PCF-AUTHORING-GUIDE.md` § "Changing which fields the header shows"](../../../docs/guides/RECORD-HEADER-PCF-AUTHORING-GUIDE.md#changing-which-fields-the-header-shows).
+No rebuild or redeploy — it is form config only. Adding a field is the one change with an extra step.
 
 ---
 
@@ -108,7 +115,22 @@ Check the currency renders with a symbol and correct precision — not a bare `1
 
 ---
 
-## 061 · Event
+## 061 · Event — ⏭️ DEFERRED 2026-08-28, do not bind from this sheet
+
+**`sprk_event` is not a like-for-like binding.** One form serves several record kinds (actions, tasks,
+and others). `layoutJson` is a property of a **form**, not of a record type, so a single field set
+cannot serve all of them — every kind opened on that form would get the same header.
+
+There is no conditional/per-type layout tier today. Resolving this means an explicit choice:
+
+- **a form per record kind**, each with its own `layoutJson` (works now, more forms to maintain), or
+- **the union of fields**, accepting that irrelevant cells render as em-dashes for some kinds, or
+- **build a per-type resolver tier** — the resolver is deliberately tier-shaped so this could slot in
+  without touching renderers, but it does not exist and is not R2 scope.
+
+Being addressed separately. The layout below is **retained for reference only** — it was validated
+against live metadata and is correct as far as field existence goes, but it encodes the
+one-size-fits-all assumption that caused the deferral.
 
 Form: **`eaf22dcb-9aff-f011-8406-7c1e525abd8b`** · Bind to: **`sprk_eventname`**
 

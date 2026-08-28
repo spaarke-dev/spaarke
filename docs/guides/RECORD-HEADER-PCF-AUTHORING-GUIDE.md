@@ -121,6 +121,99 @@ byte-identical. Change one, change all three.
 
 ---
 
+## Changing which fields the header shows
+
+**This is the day-2 operation, and it is the answer to "how do I adjust the fields?"** — you edit the
+`layoutJson` on the form. There is no other mechanism. The layout is the single source of truth for
+what the header displays.
+
+### ✅ No rebuild, no redeploy, no solution import
+
+Changing the field set is **form configuration only**. You do not rebuild the PCF, bump a version,
+re-pack a solution, or re-import anything. Edit the JSON in the form designer → Save → Publish → hard
+refresh. The control reads its layout at render time.
+
+The only reason to touch the PCF itself is to change *behaviour* (a new renderer type, a toolbar
+change) — never to change *which fields appear*.
+
+### The four changes you will actually make
+
+| Goal | Edit | Extra step? |
+|---|---|---|
+| **Remove** a field | Delete its object from `fields[]` | None. Leave the field on the form — hidden and unused is harmless |
+| **Reorder** fields | Move the objects; `fields[]` renders in array order | None |
+| **Resize / relabel** | Change `span`, `label`, `renderer`, `maxLines`, `readOnly`, `required` | None |
+| **Add** a field | Add an object to `fields[]` | 🚨 **Yes — see below** |
+
+### 🚨 Adding a field: it must exist on the form first
+
+This is the one change that breaks if you do only half of it.
+
+1. **Add the field to the form** (any section) — then **hide it** (untick *Visible by default*, or park
+   it in a collapsed section).
+2. **Then** add it to `fields[]`.
+
+**Why**: inline edits stage through the form buffer via `Xrm.Page.getAttribute(name).setValue(v)`, and
+`getAttribute` returns `null` for a field with no control on the form. A field named in `layoutJson`
+but absent from the form **renders fine and reads its value fine** — it only throws
+`Field '<name>' not on form` the moment someone edits it. That asymmetry is what makes it worth
+calling out: it passes a casual look and fails in a user's hands.
+
+Mark the field `"readOnly": true` and you can skip the add — read-only cells never touch the form
+buffer. Everything editable needs the control present.
+
+### Getting the logical names right
+
+Guessing logical names is the most common way to produce a broken layout, and the failure is loud:
+**a `$select` is all-or-nothing**, so one wrong column blanks *every* cell in the header (G-12).
+
+Verify against live metadata before pasting:
+
+```bash
+# read-only; lists the real logical names for an entity
+pac org fetch --xml "<fetch top='1'><entity name='sprk_project'><all-attributes/></entity></fetch>"
+```
+
+Known traps on these tables: `sprk_project`'s primary name is **`sprk_projectnumber`**, not
+`sprk_projectname` (both exist). Event's datetime pair is `sprk_plannedstart` / `sprk_plannedend` —
+`scheduledstart`, `scheduledend`, and `sprk_location` **do not exist** despite live client code
+elsewhere referencing them.
+
+### Asking Claude Code to write the layout
+
+This is the expected workflow — the JSON is fiddly and the traps above are exactly what an agent
+should be checking. Give it:
+
+- **the entity logical name** (`sprk_invoice`)
+- **the fields you want, in display order**, and roughly how wide each should be
+- **the form** you are binding (name or GUID) if it is not the default main form
+
+It should come back with the JSON **and** a list of which named fields are not yet on that form and
+therefore need the add-then-hide step. If it hands you JSON without that list, ask for it — that list
+is the part that prevents the failure above.
+
+A worked per-entity example for the current rollout lives in
+[`notes/rollout-form-binding-cheatsheet.md`](../../projects/record-header-and-notepad-r2/notes/rollout-form-binding-cheatsheet.md).
+
+### Verify the change landed
+
+Open a record, open the browser console, and read **`[RecordHeader] form/metadata diagnostic`**.
+**`notOnForm` must not list any field you intend to edit.** That single line confirms the add-then-hide
+step in one look, and is faster than clicking every cell.
+
+### ⚠️ One layout per form factor, not per record type
+
+`layoutJson` is a property of a *form*, so every record opened on that form gets the same field set.
+There is no built-in "show these fields for type A, those for type B" conditional.
+
+This matters for tables used for several distinct record kinds on one form — `sprk_event` is the live
+example, covering actions, tasks and others. The options are to give each type its own form (each with
+its own layout), or to configure the union of fields and accept blanks. **A conditional/per-type layout
+tier is not implemented**; the resolver is deliberately tier-shaped so one could be added without
+touching renderers, but that is future work, not a current capability.
+
+---
+
 ## Configuration reference
 
 Full schema: [`RecordHeaderConfiguration.ts`](../../src/client/shared/Spaarke.UI.Components/src/types/RecordHeaderConfiguration.ts).

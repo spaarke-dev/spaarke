@@ -62,13 +62,17 @@
 
 | Task | Entity | Exercises | Tier | Deps | Status |
 |---|---|---|---|---|---|
-| [050](050-bind-project-header.poml) | `sprk_project` | date · boolean · optionset | sonnet | 034 | 🔲 |
-| [051](051-bind-workassignment-header.poml) | `sprk_workassignment` | date · boolean · optionset | sonnet | 034 | 🔲 |
-| [060](060-bind-invoice-header.poml) | `sprk_invoice` | **currency** · date · boolean | sonnet | 050, 051 | 🔲 |
-| [061](061-bind-event-header.poml) | `sprk_event` | **datetime** · lookup · optionset | sonnet | 050, 051 | 🔲 |
-| [070](070-bind-agreement-header.poml) | `sprk_agreement` | toolbar map; **seed a record first** | sonnet | 024, 060, 061 | 🔲 |
+| [050](050-bind-project-header.poml) | `sprk_project` | date · boolean · optionset | sonnet | 034 | ✅ |
+| [051](051-bind-workassignment-header.poml) | `sprk_workassignment` | date · boolean · optionset | sonnet | 034 | ✅ ◆ |
+| [060](060-bind-invoice-header.poml) | `sprk_invoice` | **currency** · date · boolean | sonnet | 050, 051 | ✅ ◆ |
+| [061](061-bind-event-header.poml) | `sprk_event` | **datetime** · lookup · optionset | sonnet | 050, 051 | ⏭️ ◇ |
+| [070](070-bind-agreement-header.poml) | `sprk_agreement` | toolbar map; **seed a record first** | sonnet | 024, 060, ~~061~~ | ✅ ◆ |
 | [080](080-migrate-matter-header.poml) | `sprk_matter` | **parity QA** vs the 002 baseline | opus | 002, 070 | 🔲 |
 | [081](081-retire-matterheaderpcf.poml) | — | Retire old control (irreversible) | opus | 080 | 🔲 |
+
+> ◆ **Bound, renderer QA outstanding** (owner confirmed the bindings 2026-08-28). What is confirmed is that the control is on the form; what has **not** been reported back is the per-entity renderer verification each task exists to exercise — **Invoice's currency** (symbol + precision, the first real Money test), **Agreement's toolbar slot auto-hide**, and Work Assignment's date/boolean/optionset set. Run the "After each binding" checklist in [`notes/rollout-form-binding-cheatsheet.md`](../notes/rollout-form-binding-cheatsheet.md) and flip these to a plain ✅. **Agreement has 0 records — seed one first or there is nothing to QA.**
+
+> ◇ **061 deferred 2026-08-28 (owner)** — `sprk_event` is not a like-for-like binding. One form serves several record kinds (actions, tasks, …), and `layoutJson` is a property of a *form*, not of a record type, so a single field set cannot fit all of them. Resolving it means either a form per type or an accepted union of fields — a design decision, not a paste. Being addressed separately. **This also removes `sprk_event` as the datetime + lookup exercise**, so `sprk_plannedstart`/`sprk_plannedend` datetime rendering is now unproven on a live form; 080 (Matter) is the next opportunity to cover it. `070` proceeded without it — the `061` dependency was sequencing for renderer coverage, not a hard prerequisite.
 
 ### Phase 6 — Docs + Wrap
 
