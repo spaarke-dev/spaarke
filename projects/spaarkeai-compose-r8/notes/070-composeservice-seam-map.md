@@ -125,7 +125,85 @@ clusters, which are entangled with the save fork itself.
 at the end): `dotnet build src/server/api/Sprk.Bff.Api/` · the Compose seam + op-log suites · DI count
 unchanged.
 
+## Coverage measurement (2026-08-28) — the evidence that decides extraction order
+
+The POML's own risk statement is the reason this was measured before moving code:
+
+> *"a decomposition that subtly reorders a guard or drops a branch reintroduces a defect the project
+> just spent seven tasks removing, **and the tests would still pass if the branch was never covered**."*
+
+Coverage is **observation, not a gate** (ADR-038). It is used here to answer one question: *would a
+dropped branch actually be caught?*
+
+**Method**: `dotnet test tests/unit/Sprk.Bff.Api.Tests --filter "FullyQualifiedName~Compose"` with
+coverlet scoped to `[Sprk.Bff.Api]Sprk.Bff.Api.Services.Compose.*`. **1,783 tests** (that project
+compiles `tests/integration/{seam,contract,regression,auth,…}/**` via `<Compile Include>` at
+`Sprk.Bff.Api.Tests.csproj:139`, so the seam suite is included).
+
+⚠️ **Measurement trap, hit and corrected.** The first run excluded `CompilerGeneratedAttribute`, which
+is what `async` state machines are marked with — so it silently dropped the body of **every async
+method** and reported `SaveAsync` as *11 lines, 0 branches*. `ComposeService` is almost entirely async.
+Do not exclude that attribute when measuring this file. The numbers below are from the corrected run.
+
+| Cluster | lines | line % | branches | **branch %** |
+|---|---|---|---|---|
+| 9 **SaveAsync (the fork)** | 409 | 94.9% | 178 | **86.0%** |
+| 7 memory capture | 60 | 91.7% | 24 | **95.8%** |
+| 6 annotations | 69 | 87.0% | 46 | **89.1%** |
+| 5b background profile dispatch | 98 | 87.8% | 26 | **88.5%** |
+| 8 paraId / reference helpers | 49 | 93.9% | 16 | **87.5%** |
+| 2b record resolution helpers | 108 | 82.4% | 26 | **80.8%** |
+| 2a create-on-save / promotion | 269 | 87.4% | 82 | **76.8%** |
+| 1 re-anchor / stale-base | 277 | 76.2% | 124 | **76.6%** |
+| 3 save baseline + concurrency | 134 | 73.1% | 48 | **75.0%** |
+| 4a PDF intake | 49 | 87.8% | 40 | **75.0%** |
+| 4b PDF source markers | 112 | 61.6% | 28 | **75.0%** |
+| 5a profile etag + retrigger | 61 | 60.7% | 14 | **64.3%** |
+| **whole file** | 2,277 | **86.6%** | — | — |
+
+**This inverts the planned extraction order.** Cluster 1 (re-anchor) was scheduled first because it is
+structurally cleanest — but at **76.6% branch** it is mid-pack, not safest. Order by the evidence
+instead: **7 → 6 → 5b → 8 → 2b → 2a → 1 → 3 → 4 → 5a**. Cluster 1's clean 5-dependency spec still
+stands; it just should not go first.
+
+**`SaveAsync` is the best-covered code in the file** — 94.9% line / 86.0% branch, with only 21
+uncovered lines across 8 runs and a single run ≥4 lines (**1533–1536**). The POML's fear is real in
+principle and largely unfounded here: a dropped branch in the fork would very likely be caught. This
+also strengthens the "leave the fork whole" recommendation — it is both cohesive *and* well guarded.
+
+**Weakest link: cluster 5a (profile etag + retrigger), 64.3% branch.** Small (61 lines) but it should
+be extracted **last**, or given tests first.
+
+**Caveat, stated because it cuts one way**: only tests matching `~Compose` were run, so anything
+exercising `ComposeService` under another name is missing. Real coverage is therefore **≥** these
+numbers — the bias is conservative, which is the safe direction for this decision.
+
 ## Findings recorded, not fixed
+
+Per the POML constraint — record, do not fix inside the restructure.
+
+**F-070-01 — three Compose contract tests hang (~63s) instead of returning, then fail on timeout.**
+
+`ComposeSupersedeEndpointContractTests.Supersede_WhenSessionUnknown_Returns404` ·
+`ComposeMemoryResumeEndpointContractTests.SaveAnnotations_WhenSessionUnknown_Returns404` ·
+`ComposeCreateOnSaveEndpointContractTests.CreateOnSave_WhenSpeCreateSucceeds_Returns200CarryingPersistedOutcome`
+
+All three fail with `TaskCanceledException` → `HttpRequestException: Error while copying content to a
+stream` → `IOException: The client aborted the request`. Three tests take **2m06s**, i.e. each hangs
+about a minute and then times out. Not a logic failure — a hang.
+
+Ownership, established rather than assumed:
+
+- **Two are pre-existing on master.** Re-run in a master-equivalent worktree (`fix/archtest-guard-adjudication`, verified `git diff origin/master...HEAD -- src/server/api/Sprk.Bff.Api/` is empty): `Supersede_…` and `SaveAnnotations_…` fail there **identically**. Not introduced by compose-r8, and not by the current session, which changed no BFF code.
+- **One is compose-r8's own**: `CreateOnSave_WhenSpeCreateSucceeds_…` does not exist on master (`git show origin/master:…` → 0 occurrences; 1 on this branch).
+- **Probably environmental, NOT confirmed.** A ~63s hang is the shape of an outbound call waiting on a
+  network/DNS timeout, and CI's most recent full unit run reported only ONE `Sprk.Bff.Api.Tests`
+  failure — a different test (`StorageRetryPolicyTests`). So these likely pass in CI. **I did not
+  confirm the cause**; do not treat "environmental" as established.
+
+Impact on the measurement above: none material — 1,780 of 1,783 passed, and all three are endpoint
+contract tests, not the service-level tests that produce the coverage.
+
 
 Per the POML constraint, anything that looks like a defect during this work goes here and gets filed
 against its owning task. **None found yet** — this entry exists so the absence is deliberate rather than
