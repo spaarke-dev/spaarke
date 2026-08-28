@@ -1,7 +1,7 @@
 <task id="CICD-084" project="ci-cd-unit-test-remediation-r1">
   <metadata>
     <title>Deep cleanup PR 2/3 — medium-confidence DELETE bucket (coverage-fillers + pass-through + internal-method tests; ~500-1000 tests expected)</title>
-    <status>not-started</status>
+    <status>closed-not-worth-executing</status>
     <estimated-effort>3 hours</estimated-effort>
     <phase>2.5 - Deep cleanup</phase>
     <stream>B - Test reset (extended)</stream>
@@ -12,6 +12,32 @@
     <blocks>085</blocks>
     <tags>testing, deletion, deep-cleanup, sliced-PR, build-vs-maintain</tags>
   </metadata>
+
+  <closure-record date="2026-08-28" resolution="CLOSED — 246 of 247 rows were false positives">
+    The standing rule from task 083 requires a clean per-row verification pass, over EVERY
+    row of a bucket, before that bucket may be deleted. That pass was run (see
+    notes/b10-verification-round5.md and PR #862) and found SIX more classifier defects,
+    all over-calls. B10 went 247 -> 1.
+
+    The single genuine row is OpenAiClient_InitializesWithCircuitBreaker:
+        var client = new OpenAiClient(...); Assert.NotNull(client);
+    Textbook B10. One test does not justify a task, a PR, or a review cycle.
+
+    Among the 246 rescued: ADR-015 PII-leak regression tests (asserting through an
+    inherited AssertTelemetryRespectsAdr015 helper), the deny-by-default guard on a
+    grounded-tool allow-list, SSE ordering and reconnection contracts, a dual-write
+    migration invariant, Compose shadow-patch engine behavior, and the ADR-032
+    Null-Object quiet-semantics family for the third time.
+
+    Defect #11 (braces inside string/char literals corrupting body capture) was not
+    confined to this bucket -- fixing it moved the suite-wide method count from 7,076 to
+    7,263, meaning the parser had been mis-reading the test tree generally.
+
+    This closure is consistent with the FR-B10 owner decisions in PR #852: numeric
+    reduction is a signal, not a gate, and /test-diet at project close is the sanctioned
+    mechanism for residual cleanup. The durable artifact of 082/083/084 is the classifier,
+    which /test-diet inherits.
+  </closure-record>
 
   <prompt>
     Second deep-cleanup PR per spec FR-B10. Delete medium-confidence DELETE bucket — typically coverage-fillers (tests that exist solely to push coverage % up), pass-through wrapper tests (testing trivial delegation), and internal/private method tests (via InternalsVisibleTo or reflection). Bucket boundaries finalized at task start based on 082 + 083 outcomes.
