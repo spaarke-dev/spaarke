@@ -1,4 +1,4 @@
-using Sprk.Bff.Api.Infrastructure.Authentication;
+﻿using Sprk.Bff.Api.Infrastructure.Authentication;
 using System.Security.Claims;
 using System.Text;
 using Microsoft.Extensions.AI;
@@ -6,7 +6,6 @@ using Sprk.Bff.Api.Configuration;
 using Sprk.Bff.Api.Models.Ai;
 using Sprk.Bff.Api.Services.Ai;
 using Sprk.Bff.Api.Services.Ai.Chat;
-using Sprk.Bff.Api.Infrastructure.Authentication;
 
 namespace Sprk.Bff.Api.Api.Agent;
 

@@ -14,7 +14,6 @@
 > decisions about it belong in your own notes, citing this file.
 
 ---
-# Cross-project coordination — `unified-access-control-r2` ⟷ `spaarkeai-compose-r8`
 
 > **Written 2026-08-27 by `unified-access-control-r2`.** Addressed to whoever executes
 > `spaarkeai-compose-r8` / PR **#832** (`fix/caller-oid-resolution`) and PR **#806**.

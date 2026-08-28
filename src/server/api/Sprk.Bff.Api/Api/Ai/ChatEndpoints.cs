@@ -1,4 +1,4 @@
-using Sprk.Bff.Api.Infrastructure.Authentication;
+﻿using Sprk.Bff.Api.Infrastructure.Authentication;
 using System.Text.Json;
 using System.Text.Json.Serialization;
 using Microsoft.AspNetCore.Mvc;
@@ -22,7 +22,6 @@ using Sprk.Bff.Api.Telemetry;
 // Microsoft.Extensions.AI.ChatMessage is the AI framework conversation message.
 using AiChatMessage = Microsoft.Extensions.AI.ChatMessage;
 using DvChatMessage = Sprk.Bff.Api.Models.Ai.Chat.ChatMessage;
-using Sprk.Bff.Api.Infrastructure.Authentication;
 
 namespace Sprk.Bff.Api.Api.Ai;
 
