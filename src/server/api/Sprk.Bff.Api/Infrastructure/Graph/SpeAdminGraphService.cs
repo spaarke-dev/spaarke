@@ -2265,6 +2265,7 @@ public sealed class SpeAdminGraphService
             {
                 _ when method == HttpMethod.Get => Method.GET,
                 _ when method == HttpMethod.Post => Method.POST,
+                _ when method == HttpMethod.Patch => Method.PATCH,
                 _ when method == HttpMethod.Delete => Method.DELETE,
                 _ => throw new ArgumentOutOfRangeException(nameof(method), method, "Unsupported Graph method."),
             },
@@ -2637,8 +2638,7 @@ public sealed class SpeAdminGraphService
         _logger.LogInformation(
             "Updating {Count} custom properties on container {ContainerId}", properties.Count, containerId);
 
-        // Build the customProperties payload via AdditionalData.
-        // Kiota will serialize this as: { "customProperties": { "KeyName": { "value": "...", "isSearchable": false } } }
+        // Build the property map. It becomes the BODY ROOT — see the URL note below.
         var customPropertiesDict = new Dictionary<string, object>(properties.Count);
         foreach (var prop in properties)
         {
@@ -2649,21 +2649,37 @@ public sealed class SpeAdminGraphService
             };
         }
 
-        var patch = new Microsoft.Graph.Models.FileStorageContainer
-        {
-            AdditionalData = new Dictionary<string, object>
-            {
-                ["customProperties"] = customPropertiesDict
-            }
-        };
+        // 🔴 This write was aimed at the wrong URL and had NEVER worked. It PATCHed the CONTAINER
+        // with a { "customProperties": { ... } } wrapper, and Graph rejects that outright:
+        //
+        //     400 invalidRequest: Unsupported request body property: customProperties.
+        //
+        // Proven live on a throwaway container 2026-08-28 (UAT question "do the + Add functions
+        // work?"). customProperties is its own sub-resource: the PATCH goes to
+        // /containers/{id}/customProperties and the property map IS the body root, unwrapped.
+        // The same probe confirmed the semantics we depend on:
+        //   - partial writes MERGE (an untouched property survives), so a delta save is not
+        //     destructive despite the endpoint being exposed as PUT;
+        //   - setting a name to null REMOVES that property.
+        //
+        // Why the read path never caught it: reads go through GET ?$select=customProperties on the
+        // container, which is a different, valid shape. A working read beside a broken write is
+        // exactly how this stayed invisible.
+        // The v1.0 SDK models customProperties for READING (container.CustomProperties) but exposes no
+        // request builder for WRITING to the sub-resource, so this goes through SendGraphJsonAsync —
+        // the same RequestAdapter path the container-type permission calls already use, which keeps
+        // the SDK's auth, retry and ODataError mapping intact.
+        var url = $"{ResolveGraphBaseUrl(graphClient)}/storage/fileStorage/containers/" +
+                  $"{Uri.EscapeDataString(containerId)}/customProperties";
+        var payload = JsonSerializer.Serialize(customPropertiesDict);
 
         try
         {
             await ExecuteWithRetryAsync(
                 async () =>
                 {
-                    await graphClient.Storage.FileStorage.Containers[containerId]
-                        .PatchAsync(patch, cancellationToken: ct);
+                    using var _ = await SendGraphJsonAsync(
+                        graphClient, HttpMethod.Patch, url, payload, ct).ConfigureAwait(false);
                     return (object?)null;
                 },
                 ct);
