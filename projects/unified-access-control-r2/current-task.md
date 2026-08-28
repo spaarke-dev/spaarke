@@ -15,8 +15,28 @@
 | **State** | **GREEN.** BFF **10,746/0/77** · ArchTests **6 fail/121 pass/127** (all 17 blocking facts pass) · census **110** · **0 behind origin/master**, 71 ahead, 7 merge commits. |
 | **Merged this session** | 073 (`904051d29`) · 079 (`229c4f849`) · 12 ArchTest edits (`fb77ebef1`) · 075 (`4ff112398`) · **origin/master** (`c992a2494`) · ADR-010 fix (`38329a4c2`) |
 | **NOT merged** | **6** branches: **081** + Wave A's **011 · 013 · 015 · 018 · 020** |
-| **Not pushed** | 71 commits. **PR #825 will need a push** — its CONFLICTING state is already resolved locally by the master merge |
-| **Next Action** | Merge **081**, then Wave A's five. Then **ArchTest edit #13** (081's census comment — deferred by its own ordering constraint). Then 076 (deps 073+075 now both in). |
+| **MERGED TO MASTER** | ✅ **2026-08-28** at `1a2fc335d`. PR **#825 MERGED**. Tier 1 **8/8 green** on the merge SHA, zero failures anywhere. Main repo `C:/code_files/spaarke` synced to the same SHA. Worktree clean and 0/0 vs master |
+| **Next Action** | Merge **081**, then Wave A's five. Then **ArchTest edit #13** (081's census comment — deferred by its own ordering constraint). Then 076 (deps 073+075 are both on master now). |
+
+### ⚠️ MERGED WITH ONE NAMED RESIDUAL — it is an acceptance criterion on task 047
+
+The `/push-to-github` Step 1.7 real-Dataverse gate found that 075's `SecurableEntityRegistry` issues a
+**live Dataverse metadata query on EVERY inbound communication archive**, and that a metadata failure
+**propagates by design** — the ingest catch (`IncomingCommunicationProcessor.ResolveContainerForContentAsync`)
+handles only `secure_record_container_missing` / `communication_secure_container_ambiguous`. So a
+privilege failure would BREAK inbound processing, not degrade it.
+
+**Excluded before merging** (verified live via Dataverse MCP, 2026-08-27): `sprk_issecure` AND
+`sprk_containerid` exist on `sprk_project`, `sprk_matter` AND `sprk_workassignment`. The
+`sprk_contact`-class name error — the exact regression Step 1.7 exists for — is ruled out.
+
+**Still open**: can the BFF's own Dataverse application user execute that metadata query. Recorded as a
+**criterion on `tasks/047`**, not just here.
+
+**Owner decision, do not re-open blind**: NOT hardening the catch. Widening it is isolation-safe (nothing
+is written) but converts a loud availability break into a **silent completeness failure** — records
+captured, SPE content quietly dropped — which is worse for an archival feature. If that hedge is ever
+wanted, the correct form marks the communication archive-failed in DATA, not only in logs.
 
 ### 🔴 The find that matters most from this session
 
