@@ -127,6 +127,34 @@ export type ConfidenceBand = 'high' | 'medium' | 'low';
 export type MaterializeOrigin = 'live' | 'replay';
 
 /**
+ * WHY a suggestion reached the prose-matching fallback with no anchor. Two populations that look
+ * IDENTICAL in the payload and mean opposite things to the person reading the message.
+ *
+ *  - `'legacy-replay'` — a genuine pre-anchor ledger entry, re-materialized from durable state
+ *    (`origin: 'replay'`). It really does predate paragraph anchoring. "This came from an earlier
+ *    session" is true, and "re-run it" is a remedy that works.
+ *  - `'live-anchorless'` — a suggestion produced by THIS dispatch (`origin: 'live'`) that arrived
+ *    without a `target_para_id` anyway. Every Action mirror has asked for one since task 051, so this
+ *    is a model-contract failure, not history.
+ *
+ * <b>Why this type exists (UAT 2026-08-26, issue #853).</b> Both UAT symptoms told a user who had
+ * selected text one second earlier that their suggestion "came from an earlier session, before
+ * suggestions carried a paragraph reference". That copy was literally true of the payload and
+ * completely wrong about the user's action — the worst kind of wrong, because it names a cause the
+ * user cannot act on and hides the one that is actually failing.
+ *
+ * The discriminator was never missing: {@link MaterializeOrigin} is a fact about the CALL and was
+ * already threaded into `resolveTargetedPlacement` and destructured there. It was simply not read.
+ * That is a breach of this project's binding invariant 7 — <i>deterministic information available at
+ * capture time MUST be carried, not re-derived</i> — in its purest form: nothing needed deriving, the
+ * value was in scope.
+ *
+ * FAIL-CLOSED follows {@link MaterializeOrigin}: an undeclared origin is `'replay'`, so an
+ * unannotated caller gets the historical story rather than being accused of a contract failure.
+ */
+export type AnchorlessSource = 'legacy-replay' | 'live-anchorless';
+
+/**
  * FR-13 (client-derived) — deterministic confidence-band derivation, ported from the retired server
  * `ComposeDraftDisposition.DeriveConfidenceBand` (task 030, removed per §6.5 Path B / commit
  * `675d2d161`). Same both/one/neither truth table as the server version, over two grounding signals:
@@ -232,11 +260,15 @@ export interface PendingRedlineError {
    *  - `'legacy-replay'` — a REPLAYED pre-anchor ledger entry (FR-C06) whose quoted prose could not be
    *    located. Here prose really was compared, and the honest answer is that the entry predates
    *    paragraph anchoring and should be re-run.
+   *  - `'live-anchorless'` (issue #853) — a suggestion from THIS dispatch that arrived with no anchor.
+   *    Prose was compared and failed, exactly as for a replay, but the CAUSE is a model-contract
+   *    failure rather than history — so "came from an earlier session" would be a fabrication about
+   *    the user's own action. See {@link AnchorlessSource}.
    *
    * Defaulted at every construction site rather than left optional-and-forgotten: the banner switches
-   * on it, and an absent value would silently pick one of the two stories.
+   * on it, and an absent value would silently pick one of the stories.
    */
-  source: 'anchored' | 'legacy-replay';
+  source: 'anchored' | AnchorlessSource;
   /** Tier 3 — the target snippet; shown truncated in UI, never logged. */
   targetText: string;
   matchCount: number;
@@ -340,11 +372,14 @@ export interface PendingRedlineLegacyProposal {
    *
    *  - `'legacy-replay'` (task 053) — a pre-anchor ledger entry whose quoted prose we LOCATED. The
    *    question is "we found this wording; is that the clause you meant?" — we have a candidate.
+   *  - `'live-anchorless'` (issue #853) — the same question over the same located candidate, but for a
+   *    suggestion produced by THIS dispatch. The QUESTION is identical, so the mechanics are shared;
+   *    only the explanation of why we are asking differs. See {@link AnchorlessSource}.
    *  - `'unidentified-target'` (task 053b) — a post-052 edit whose `target_para_id` arrived NULL. We
    *    have no candidate at all: the question is "the assistant couldn't identify which paragraph to
    *    change — place it here?", answered against the passage the USER selected.
    */
-  reason: 'legacy-replay' | 'unidentified-target';
+  reason: AnchorlessSource | 'unidentified-target';
   /**
    * Tier 3 — the document text the proposal would strike, as it reads NOW. Shown truncated; never
    * logged. EMPTY when {@link placement} is `'insert-at-cursor'`: nothing would be struck.
@@ -805,7 +840,7 @@ function applyRedlineSpans(
  * `matchedText` it never matched.
  */
 type TargetedProposal =
-  | { status: 'proposed'; reason: 'legacy-replay'; matchedText: string; quotedTarget: string }
+  | { status: 'proposed'; reason: AnchorlessSource; matchedText: string; quotedTarget: string }
   | {
       status: 'proposed';
       reason: 'unidentified-target';
@@ -831,7 +866,11 @@ type TargetedPlacement =
       proposedAgainst: string | null;
     }
   | TargetedProposal
-  | { status: 'not_found' | 'ambiguous' | 'target_deleted'; matchCount: number; source: 'anchored' | 'legacy-replay' };
+  | {
+      status: 'not_found' | 'ambiguous' | 'target_deleted';
+      matchCount: number;
+      source: 'anchored' | AnchorlessSource;
+    };
 
 /**
  * Clamp a position into the live document's addressable interior. Positions handed to this hook come
@@ -914,15 +953,26 @@ function planAndApplyTargeted(args: {
     // with an anchored payload is therefore not a branch to guard but a value that cannot be built.
     const replayTarget = classifyAnchorlessReplay(payload);
     if (replayTarget !== null) {
+      // Issue #853 — WHY there is no anchor. The payload cannot tell us: a pre-anchor ledger entry and
+      // a live suggestion that simply failed to return `target_para_id` are byte-identical here. The
+      // CALL can, and already told us — `origin` has been in scope since 052b and was being dropped on
+      // the floor, so both populations rendered the replay copy. A user who had selected the text one
+      // second earlier was informed it "came from an earlier session". See {@link AnchorlessSource}.
+      //
+      // Mechanics below are deliberately UNCHANGED for both values: prose was matched either way, the
+      // candidate is equally uncertain either way, and the same confirmation is the right guard. Only
+      // the explanation differs. Widening this to also skip the confirmation for `'live-anchorless'`
+      // would be a behaviour change, and it is not one this fix is entitled to make.
+      const anchorlessSource: AnchorlessSource = origin === 'live' ? 'live-anchorless' : 'legacy-replay';
       const outcome = resolveAnchorlessReplay(editor, replayTarget);
       if (outcome.kind === 'unresolved') {
-        return { status: outcome.reason, matchCount: outcome.matchCount, source: 'legacy-replay' };
+        return { status: outcome.reason, matchCount: outcome.matchCount, source: anchorlessSource };
       }
       if (confirmed !== 'anchorless-replay') {
         // NOTHING is placed. The user is shown what would be struck and decides.
         return {
           status: 'proposed',
-          reason: 'legacy-replay',
+          reason: anchorlessSource,
           matchedText: outcome.matchedText,
           quotedTarget: outcome.quotedTarget,
         };
@@ -1224,7 +1274,10 @@ export function usePendingRedline(
                   contextText: placement.contextText,
                 }
               : {
-                  reason: 'legacy-replay' as const,
+                  // Issue #853 — CARRY the classifier's answer; do not re-assert 'legacy-replay'.
+                  // Hardcoding it here would re-introduce the bug one layer down, where it would be
+                  // harder to see, because the classifier above would look correct.
+                  reason: placement.reason,
                   matchedText: placement.matchedText,
                   quotedTarget: placement.quotedTarget,
                   placement: 'matched-span' as const,
@@ -1450,7 +1503,8 @@ export function usePendingRedline(
                     contextText: placement.contextText,
                   }
                 : {
-                    reason: 'legacy-replay',
+                    // Issue #853 — carry, don't re-assert. See the sibling site in `materialize`.
+                    reason: placement.reason,
                     matchedText: placement.matchedText,
                     quotedTarget: placement.quotedTarget,
                     proposedText: newText,

@@ -536,3 +536,109 @@ describe('FR-C07 — every unresolved-target error names which channel failed', 
     editor.destroy();
   });
 });
+
+// ---------------------------------------------------------------------------
+// Issue #853 — WHY there is no anchor. Same mechanics, two populations, two stories.
+//
+// Every test above omits `origin`, so they all run the fail-closed 'replay' default. That is exactly
+// how the bug survived: the whole suite exercised one population and the other one — the LIVE one, the
+// only one a user actually hits since task 051 anchored every new suggestion — had no test at all.
+// ---------------------------------------------------------------------------
+describe('usePendingRedline — live-anchorless is not legacy-replay (#853)', () => {
+  const LIVE = { ...PROV, origin: 'live' as const };
+
+  it('a LIVE anchorless edit whose prose IS found is attributed to the assistant, not to history', () => {
+    const { editor, referenceMap } = makeDoc();
+    const { result } = renderHook(() => usePendingRedline(editor, referenceMap));
+
+    let status: string | undefined;
+    act(() => {
+      status = result.current.materialize({ target_text: 'thirty days notice', new_text: 'sixty days notice' }, LIVE);
+    });
+
+    // Mechanics UNCHANGED — still proposed, still nothing placed. Only the attribution differs.
+    expect(status).toBe('proposed');
+    expect(markCount(editor)).toBe(0);
+    expect(result.current.legacyProposal).toMatchObject({
+      reason: 'live-anchorless',
+      matchedText: 'thirty days notice',
+      quotedTarget: 'thirty days notice',
+    });
+    editor.destroy();
+  });
+
+  it('a LIVE anchorless edit whose prose is NOT found reports live-anchorless on the banner', () => {
+    const { editor, referenceMap } = makeDoc();
+    const { result } = renderHook(() => usePendingRedline(editor, referenceMap));
+
+    act(() => {
+      result.current.materialize({ target_text: 'a clause that is not here', new_text: 'x' }, LIVE);
+    });
+
+    expect(result.current.error).toMatchObject({ kind: 'not_found', source: 'live-anchorless' });
+    editor.destroy();
+  });
+
+  it('a LIVE anchorless AMBIGUOUS target reports live-anchorless, and still refuses to guess', () => {
+    const { editor, referenceMap } = makeDoc();
+    const { result } = renderHook(() => usePendingRedline(editor, referenceMap));
+
+    act(() => {
+      result.current.materialize({ target_text: 'shall indemnify', new_text: 'shall defend' }, LIVE);
+    });
+
+    expect(result.current.error).toMatchObject({ kind: 'ambiguous', source: 'live-anchorless' });
+    expect(markCount(editor)).toBe(0);
+    editor.destroy();
+  });
+
+  it('FAIL-CLOSED: an UNDECLARED origin is still treated as a replay, never as a live failure', () => {
+    // Omitting origin must not accuse the assistant of a contract failure it may not have committed.
+    // This is the same asymmetry MaterializeOrigin already chose: the worst an omission costs is a
+    // confirmation; the worst a wrong 'live' costs is a false statement about what happened.
+    const { editor, referenceMap } = makeDoc();
+    const { result } = renderHook(() => usePendingRedline(editor, referenceMap));
+
+    act(() => {
+      result.current.materialize({ target_text: 'thirty days notice', new_text: 'sixty days notice' }, PROV);
+    });
+
+    expect(result.current.legacyProposal).toMatchObject({ reason: 'legacy-replay' });
+    editor.destroy();
+  });
+
+  it('an EXPLICIT replay origin stays legacy-replay', () => {
+    const { editor, referenceMap } = makeDoc();
+    const { result } = renderHook(() => usePendingRedline(editor, referenceMap));
+
+    act(() => {
+      result.current.materialize(
+        { target_text: 'thirty days notice', new_text: 'sixty days notice' },
+        { ...PROV, origin: 'replay' as const }
+      );
+    });
+
+    expect(result.current.legacyProposal).toMatchObject({ reason: 'legacy-replay' });
+    editor.destroy();
+  });
+
+  it('confirming a LIVE anchorless proposal places exactly what was shown — the guard is unchanged', () => {
+    // The confirmation is not a consolation prize for the replay population; it is the bound. A live
+    // suggestion that lost its anchor is MORE suspect, not less, so it keeps the same guard.
+    const { editor, referenceMap } = makeDoc();
+    const { result } = renderHook(() => usePendingRedline(editor, referenceMap));
+
+    act(() => {
+      result.current.materialize({ target_text: 'thirty days notice', new_text: 'sixty days notice' }, LIVE);
+    });
+    expect(markCount(editor)).toBe(0);
+
+    act(() => {
+      result.current.applyLegacyProposal();
+    });
+
+    expect(textOf(editor, 'AAAA0001')).toContain('sixty days notice');
+    expect(result.current.legacyProposal).toBeNull();
+    editor.destroy();
+  });
+});

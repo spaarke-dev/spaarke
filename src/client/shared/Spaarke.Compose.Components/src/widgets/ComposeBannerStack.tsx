@@ -50,6 +50,7 @@ import type {
 } from './ComposeWorkspace.types';
 import type { ComposeAssistantToWorkspaceFlow } from '../types/compose-contracts';
 import type { PendingRedlineError } from './hooks/usePendingRedline';
+import { describeRedlineError } from './redlineFailureCopy';
 
 export interface ComposeBannerStackProps {
   errorMessage: string | null;
@@ -931,21 +932,7 @@ export function ComposeBannerStack(props: ComposeBannerStackProps): React.JSX.El
                     references — re-run it", which is a remedy the user can act on in one click.
 
                 See `projects/spaarkeai-compose-r8/notes/wording-differs-elimination-trace.md`. */}
-            {pendingRedlineError.kind === 'target_deleted'
-              ? (pendingRedlineError.failedCount ?? 0) > 1
-                ? `${pendingRedlineError.failedCount} of ${pendingRedlineError.totalCount} suggested edits referred to text that no longer exists in this document. Nothing was changed for them.`
-                : `The text this suggestion referred to no longer exists.`
-              : pendingRedlineError.kind === 'ambiguous'
-                ? pendingRedlineError.source === 'legacy-replay'
-                  ? `This suggestion came from an earlier session and quoted wording that appears in ${pendingRedlineError.matchCount} places, so we won't guess which one it meant. Re-run it on the passage you want.`
-                  : `This suggested edit matches ${pendingRedlineError.matchCount} places in the document. Select the exact passage and try again.`
-                : pendingRedlineError.source === 'legacy-replay'
-                  ? (pendingRedlineError.failedCount ?? 0) > 1
-                    ? `${pendingRedlineError.failedCount} of ${pendingRedlineError.totalCount} suggestions came from an earlier session, before suggestions carried a paragraph reference, and the text they quoted is no longer in this document. Nothing was changed — re-run them to get suggestions that point at real paragraphs.`
-                    : `This suggestion came from an earlier session, before suggestions carried a paragraph reference, and the text it quoted is no longer in this document. Nothing was changed — re-run it to get a suggestion that points at a real paragraph.`
-                  : (pendingRedlineError.failedCount ?? 0) > 1
-                    ? `${pendingRedlineError.failedCount} of ${pendingRedlineError.totalCount} suggested edits named a paragraph or section this document doesn't have. Nothing was changed for them — you can still review, edit, and save.`
-                    : `This suggested edit named a paragraph or section this document doesn't have (${pendingRedlineError.targetText || 'no target given'}). Nothing was changed — select the passage you want and try again.`}
+            {describeRedlineError(pendingRedlineError)}
           </MessageBarBody>
           {onClearRedlineError ? (
             <MessageBarActions

@@ -94,6 +94,7 @@ import {
 // r8 task 055 — the paraId-vs-citation precedence shared with the AI-edit path and the
 // advisory-comment path, so the whole-document review-flag path cannot drift from either.
 import { resolveAnchorParaIds } from './composeAnchorResolution';
+import { describeAnchorlessProposal } from './redlineFailureCopy';
 import type { ComposeActionEnqueue } from './ComposeAiToolbar';
 // spaarkeai-compose-r1 task 093: deep-import from `@spaarke/ai-widgets/events`
 // rather than the barrel `@spaarke/ai-widgets` to skip the barrel's side-effect
@@ -5336,9 +5337,11 @@ export function ComposeWorkspace(props: ComposeWorkspaceProps): React.JSX.Elemen
             </>
           ) : (
             <>
-              {redlineLegacyProposal.proposedCount > 1
-                ? `${redlineLegacyProposal.proposedCount} of ${redlineLegacyProposal.totalCount} suggestions in this set came from an earlier session, before suggestions carried a paragraph reference. We found the wording they quoted — check the first one below before placing them.`
-                : 'This suggestion came from an earlier session, before suggestions carried a paragraph reference. We found the wording it quoted, but we cannot confirm it is the clause that was meant.'}
+              {describeAnchorlessProposal({
+                source: redlineLegacyProposal.reason,
+                proposedCount: redlineLegacyProposal.proposedCount,
+                totalCount: redlineLegacyProposal.totalCount,
+              })}
               <br />
               <br />
               {'It would replace: “'}
