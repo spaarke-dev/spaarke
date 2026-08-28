@@ -178,7 +178,7 @@
     <PackageReference Include="Azure.ResourceManager.Search" Version="1.3.0" />
     <PackageReference Include="Azure.ResourceManager.ServiceBus" Version="1.1.0" />
     <PackageReference Include="Azure.ResourceManager.Storage" Version="1.4.2" />
-    <PackageReference Include="Azure.ResourceManager.Redis" Version="1.4.0" />
+    <PackageReference Include="Azure.ResourceManager.Redis" Version="1.5.1" />
 
     <!-- Azure.Search.Documents — task 124 (Wave G-2) SDK port of H2b's Model-2
          index provisioner (SearchIndexClientProvisioner, replacing
