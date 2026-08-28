@@ -11,30 +11,19 @@
 |---|---|
 | **Task** | **090 — wrap-up.** 🔲 **HELD by operator instruction**: do not start until all work is done AND UAT has passed |
 | **Phase** | Project close (gated) |
-| **Status** | 052 ✅ · 025 ✅ · 042's Security escalation ✅ resolved. Tree clean, pushed |
-| **Next Action** | Nothing is implementable without input — see §0. All remaining items are **one decision**, **one operator action**, and a **UAT pass** |
+| **Status** | **All code complete.** 052 ✅ · 025 ✅ · 026 ✅ (amended) · 042 Security escalation ✅. Deployed + awaiting UAT |
+| **Next Action** | **UAT** (§0c) + the 050 operator action (§2). 090 stays held until UAT passes |
 | **Rigor** | 090 is TEST-MODIFYING → quality gates run **unconditionally** when it does run |
 
 ### 🔔 §0. What is actually left
 
-**26 of 30 tasks ✅ · 3 🔄 · 1 🔲 (090, held).** All code work that could be done without input is done.
+**27 of 30 tasks ✅ · 2 🔄 (029 UAT-only, 050 operator) · 1 🔲 (090, held).** All code work is done.
 
-#### (a) ONE decision — task 026 AC-2
+#### (a) ✅ ANSWERED — task 026 AC-2 dropped (operator, 2026-08-27)
 
-*"Show the owner value and the consuming tenant's effective override, both labelled."* The effective
-value lives on `fileStorageContainerTypeRegistration.settings`, which hangs off `fileStorage` and is
-**scoped to the calling tenant** — so an owning tenant can read its own registration and never a
-remote consuming tenant's. In Spaarke Dev the owning tenant *is* the consuming tenant, so a
-cross-tenant override cannot even be produced to test against.
-
-| Path | What it means |
-|---|---|
-| 1. **Drop AC-2** | Accept that an owning-tenant console cannot report remote overrides. The honest surface is the permission list + warning already shipped |
-| 2. **Re-scope + new task** ⭐ | "Show what is effective in *this* tenant's registration", built on `GET /storage/fileStorage/containerTypeRegistrations`. Buildable and verifiable in Spaarke Dev — but answers a *different question* than FR-C08 asks, so it needs its own task and an FR-C08 amendment |
-| 3. **Product decision** | Decide whether SPE Admin should ever claim to show cross-tenant override state given the API cannot support it |
-
-**Recommendation: 2, as a separate task.** Full reasoning in
-[`notes/task-026-findings.md`](notes/task-026-findings.md) §6.
+Cross-tenant override display is **dropped, not deferred** — it is not something the platform can do.
+Spec FR-C08 amended. **No code change was needed**: the shipped UI already renders the overridable
+*permission* list and states plainly that overrides applied in another tenant are not visible here.
 
 #### (b) ONE operator action — task 050's archival opt-in (§2)
 
@@ -67,49 +56,13 @@ once already; it is the same one-observation-cached-as-truth failure the project
 
 ---
 
-## 1. ▶ IN FLIGHT: task 052
+## 1. ✅ Task 052 — complete and live-verified
 
-### 1.1 What is DONE (builds clean, not yet tested)
-
-| Layer | Added |
-|---|---|
-| `SpeAdminGraphService.cs` | `SpeRecycleBinItem`, `SpeRecycleBinItemOutcome`, `SpeRecycleBinRestoreResult`, `SpeRecycleBinDeleteResult`, `RecycleBinRestoreRejectedException`; `ListRecycleBinItemsAsync` / `RestoreRecycleBinItemsAsync` / `PermanentDeleteRecycleBinItemsAsync` + 3 `…ForConfigAsync` wrappers; helpers `RecycleBinItemsUrl`, `TryMapItemNamesAsync`, `ReadReturnedIds`, `ParseRecycleBinItem` |
-| `Api/SpeAdmin/RecycleBinEndpoints.cs` | 3 routes under the existing `/api/spe` group + 5 DTOs + 3 shared helpers |
-
-**No `Program.cs` change and no new DI registration** — `MapRecycleBinEndpoints` was already wired
-(`Api/SpeAdminEndpoints.cs:50`). Clean §10 outcome. **No new NuGet.**
-
-### 1.2 Design decisions worth keeping
-
-1. **Raw JSON via `SendGraphJsonAsync` for all three ops**, not Kiota request builders. The beta
-   actions force it anyway, and it **dissolves** discovery trap #3 — `deletedBy` never becomes an
-   `UntypedObject` because we parse the response ourselves. Better than writing a third reader.
-2. **Restore → 200 only when ALL restored; 207 otherwise.** Graph's 207 lists only successes, so
-   partial failure = `requested − returned`. Never collapse.
-3. **Restore rejection → 409 Conflict**, not 400. Well-formed request; stale client view; atomic, so
-   nothing was restored. Carries `remediation` + `requestedIds` + `graphMessage`.
-4. **Delete never trusts the 204.** Lists the bin BEFORE and AFTER and diffs. The before-list is what
-   separates "purged by us" from "was never here" — without it a never-present id reports as purged.
-5. **Unverified delete → 207 with `verified: false`**, NOT 5xx. The delete WAS issued and data may be
-   gone; an error status would imply nothing happened. 207 + explicit flag asserts nothing unestablished.
-6. **Batch cap 200 ids** — a deliberate guard on an irreversible op.
-
-### 1.3 Remaining steps
-
-| # | Work |
-|---|---|
-| 5 | Contract tests (WireMock): 207-all, 207-partial, 400-rejected, delete-204-that-purged-nothing, delete-unverified, empty-bin, `deletedBy` mapping |
-| 6 | Client: recycle-bin **items** surface distinct from deleted-CONTAINERS; per-item outcomes; ADR-050 `ConfirmModal` naming what is destroyed |
-| 7 | `dotnet test` + client typecheck/build |
-| 8 | Live verify on a **throwaway** container (NFR-07) — upload → delete → list → restore some → purge others |
-| 9 | Step 9.5 gates (`code-review` + `adr-check`); publish size; TASK-INDEX ✅; notes |
-
-### 1.4 Traps still live
-- Live-fixture uploads go through `/drives/{driveId}/root:/{name}:/content`.
-  `/containers/{id}/drive/root:/…` answers `400 "API not found"`.
-- `restore`/`delete` are **beta-only**; knowledge corpus wrongly cites v1.0 — needs the same
-  correction task 050 made for archival.
-- Keep the two recycle bins distinct (spec D3).
+Full record: [`notes/task-052-findings.md`](notes/task-052-findings.md) §5. Design decisions worth
+carrying: restore and permanent delete fail in OPPOSITE ways, so delete re-lists the bin and diffs
+BEFORE and AFTER rather than trusting its 204; an unverifiable re-read returns 207 + `verified:false`,
+never a 5xx; and Graph's error CODE for a rejected restore is not stable, so the detector keys on the
+400 STATUS.
 
 ---
 
