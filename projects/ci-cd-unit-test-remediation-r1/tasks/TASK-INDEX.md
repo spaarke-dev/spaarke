@@ -111,7 +111,7 @@
 | 088 | fix-adr-007-graph-isolation-endpoints | FULL | ⛔ | **false** (hot-path BFF production) | none (can start anytime) | **071** |
 | 081 | build-test-diet-skill | FULL | ✅ | **false** (`.claude/` write — runs in parallel with 080 via main-session sequencing) | (Phase 2 complete) | 090 |
 | 091 | fix-tier2-realclock-test-failures (#848) | FULL | 🟡 | true | none | 090 | 4/5 fixed; 5th is a different defect (live Azure Search call in a "unit test" job) — escalated, blocked on the shadow window per the tier-file freeze. See `notes/091-realclock-findings.md`. |
-| 092 | make-prettier-check-reproducible (#850) | FULL | 🔲 | true | none | 090 |
+| 092 | make-prettier-check-reproducible (#850) | FULL | ✅ | true | none | 090 | Root cause: `endOfLine: crlf` backed by nothing — CI flagged 1,907 of 1,911 `.ts/.tsx` on line endings alone. Fixed to `auto`; verified 0 on both CRLF and LF trees. Freeze-safe. `notes/092-prettier-reproducibility.md`. |
 | 093 | fix-markdown-link-validator-scope (#849) | STANDARD | ✅ | true | none | 090 | Corpus 100,220 → 922 files; broken 1,212 → 267 (all verified real). Freeze-safe — no workflow touched. `notes/093-link-validator-scope.md`. |
 | 094 | extend-adr038-ban-enforcement (#864) | FULL | 🔲 | true | 865 | 090 |
 | 095 | client-test-ci-workflow-phase1 (#851) | STANDARD | 🔲 | true | none | 090 |
