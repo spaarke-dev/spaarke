@@ -5,27 +5,13 @@ namespace Sprk.Bff.Api.Configuration;
 /// <summary>
 /// Configuration options for demo user provisioning.
 /// Bound from appsettings.json section "DemoProvisioning".
-/// Supports multiple demo environments via the Environments array.
+/// Per-environment config is resolved via <see cref="DataverseEnvironmentRecord"/> /
+/// DataverseEnvironmentService (sprk_dataverseenvironment Dataverse entity) — see
+/// DemoExpirationService.ResolveDefaultEnvironmentAsync and RegistrationEndpoints.
 /// </summary>
 public class DemoProvisioningOptions
 {
     public const string SectionName = "DemoProvisioning";
-
-    /// <summary>
-    /// Available demo environments. DEPRECATED: Environment config is now stored
-    /// in sprk_dataverseenvironment Dataverse entity. This array is retained for
-    /// backward compatibility with DemoExpirationService and RegistrationDataverseService
-    /// until they are migrated to use DataverseEnvironmentService.
-    /// </summary>
-    [Obsolete("Use DataverseEnvironmentService instead. Will be removed after DemoExpirationService migration.")]
-    public DemoEnvironmentConfig[] Environments { get; set; } = Array.Empty<DemoEnvironmentConfig>();
-
-    /// <summary>
-    /// Name of the default environment. DEPRECATED: Environment selection is now
-    /// via lookup on sprk_registrationrequest → sprk_dataverseenvironment.
-    /// </summary>
-    [Obsolete("Use DataverseEnvironmentService instead. Will be removed after DemoExpirationService migration.")]
-    public string DefaultEnvironment { get; set; } = string.Empty;
 
     /// <summary>
     /// UPN domain for demo user accounts (e.g., "demo.spaarke.com").

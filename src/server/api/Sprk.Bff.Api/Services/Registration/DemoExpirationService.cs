@@ -21,6 +21,7 @@ public sealed class DemoExpirationService : BackgroundService
     private readonly RegistrationDataverseService _dataverseService;
     private readonly RegistrationEmailService _emailService;
     private readonly IGraphClientFactory _graphClientFactory;
+    private readonly DataverseEnvironmentService _environmentService;
     private readonly DemoProvisioningOptions _options;
     private readonly ILogger<DemoExpirationService> _logger;
 
@@ -29,6 +30,7 @@ public sealed class DemoExpirationService : BackgroundService
         RegistrationDataverseService dataverseService,
         RegistrationEmailService emailService,
         IGraphClientFactory graphClientFactory,
+        DataverseEnvironmentService environmentService,
         IOptions<DemoProvisioningOptions> options,
         ILogger<DemoExpirationService> logger)
     {
@@ -36,6 +38,7 @@ public sealed class DemoExpirationService : BackgroundService
         _dataverseService = dataverseService ?? throw new ArgumentNullException(nameof(dataverseService));
         _emailService = emailService ?? throw new ArgumentNullException(nameof(emailService));
         _graphClientFactory = graphClientFactory ?? throw new ArgumentNullException(nameof(graphClientFactory));
+        _environmentService = environmentService ?? throw new ArgumentNullException(nameof(environmentService));
         _options = options?.Value ?? throw new ArgumentNullException(nameof(options));
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
     }
@@ -166,16 +169,19 @@ public sealed class DemoExpirationService : BackgroundService
             // Step 2: Remove from Demo Team in Dataverse
             try
             {
-                var defaultEnv = ResolveDefaultEnvironment();
+                var defaultEnv = await ResolveDefaultEnvironmentAsync(ct);
+                var teamName = defaultEnv.TeamName
+                    ?? throw new InvalidOperationException(
+                        $"Default Dataverse environment {defaultEnv.Id} is missing TeamName.");
                 var systemUserId = await _dataverseService.ResolveSystemUserIdByAadObjectIdAsync(aadObjectId, ct);
 
                 if (systemUserId.HasValue)
                 {
                     _logger.LogInformation(
                         "[Expire] Removing systemuser {SystemUserId} from team {TeamName} for request {RequestId}",
-                        systemUserId.Value, defaultEnv.TeamName, request.Id);
-                    await _dataverseService.RemoveUserFromTeamAsync(defaultEnv.TeamName, systemUserId.Value, ct);
-                    _logger.LogInformation("[Expire] Removed from team {TeamName}", defaultEnv.TeamName);
+                        systemUserId.Value, teamName, request.Id);
+                    await _dataverseService.RemoveUserFromTeamAsync(teamName, systemUserId.Value, ct);
+                    _logger.LogInformation("[Expire] Removed from team {TeamName}", teamName);
                 }
                 else
                 {
@@ -210,11 +216,14 @@ public sealed class DemoExpirationService : BackgroundService
             // Step 4: Revoke SPE container access
             try
             {
-                var defaultEnv = ResolveDefaultEnvironment();
+                var defaultEnv = await ResolveDefaultEnvironmentAsync(ct);
+                var speContainerId = defaultEnv.SpeContainerId
+                    ?? throw new InvalidOperationException(
+                        $"Default Dataverse environment {defaultEnv.Id} is missing SpeContainerId.");
                 _logger.LogInformation(
                     "[Expire] Revoking SPE container access for user {AadObjectId} on container {ContainerId}",
-                    aadObjectId, defaultEnv.SpeContainerId);
-                await RevokeSpeContainerAccessAsync(defaultEnv.SpeContainerId, aadObjectId, ct);
+                    aadObjectId, speContainerId);
+                await RevokeSpeContainerAccessAsync(speContainerId, aadObjectId, ct);
                 _logger.LogInformation("[Expire] Revoked SPE container access");
             }
             catch (Exception ex)
@@ -340,12 +349,18 @@ public sealed class DemoExpirationService : BackgroundService
     }
 
     /// <summary>
-    /// Resolves the default demo environment configuration.
+    /// Resolves the default demo environment from Dataverse via <see cref="DataverseEnvironmentService"/>.
+    /// Preserves the prior selection semantics (single "default env" applied to every expired record for
+    /// team removal + SPE revoke) that this service inherited from the removed <c>[Obsolete]</c>
+    /// <c>DemoProvisioningOptions.Environments</c> + <c>DefaultEnvironment</c> pair. Each caller wraps
+    /// this in its own try/catch so one lookup failure does not block other records.
+    /// Throws <see cref="InvalidOperationException"/> if no active environments are configured.
+    /// customer-provisioning-orchestration-r1 task 080.
     /// </summary>
-    private DemoEnvironmentConfig ResolveDefaultEnvironment()
+    private async Task<DataverseEnvironmentRecord> ResolveDefaultEnvironmentAsync(CancellationToken ct)
     {
-        return _options.Environments.FirstOrDefault(e => e.Name == _options.DefaultEnvironment)
-            ?? _options.Environments.First();
+        var envs = await _environmentService.GetActiveEnvironmentsAsync(ct);
+        return DataverseEnvironmentRecord.SelectDefault(envs);
     }
 
     /// <summary>

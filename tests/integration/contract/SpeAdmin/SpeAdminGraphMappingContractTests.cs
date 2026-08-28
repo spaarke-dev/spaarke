@@ -49,9 +49,19 @@ public class SpeAdminGraphMappingContractTests
         await CreateSut().ListContainersAsync(graph.CreateGraphClient(), ContainerTypeId);
 
         // Assert — the exact field set, as a set. A rename or a dropped field fails here.
+        //
+        // `archivalDetails` added 2026-08-27 (task 050 / FR-E01). Verified live first that adding it
+        // does NOT cause Graph to drop the other selected fields — `storageUsedInBytes` still came
+        // back with the wider $select. That check was not ceremony: task 028 found Graph silently
+        // dropping `$expand=drive` from list rows while answering 200, so "the request was accepted"
+        // proves nothing about what comes back.
+        //
+        // ⚠️ Graph does NOT return `status` or `archivalDetails` on a collection regardless of this
+        // $select (measured 2026-08-27). They are requested anyway so the values arrive if Microsoft
+        // ever serves them; the mapping treats their absence as NOT REPORTED, never as a default.
         graph.SelectFieldsFor(ContainersPath).Should().BeEquivalentTo(
             "id", "displayName", "description", "containerTypeId",
-            "createdDateTime", "storageUsedInBytes", "status");
+            "createdDateTime", "storageUsedInBytes", "status", "archivalDetails");
     }
 
     [Fact]
@@ -106,14 +116,35 @@ public class SpeAdminGraphMappingContractTests
         container.Description.Should().Be("Working documents");
         container.ContainerTypeId.Should().Be(ContainerTypeId);
         container.CreatedDateTime.Should().Be(DateTimeOffset.Parse("2026-03-04T09:15:00Z"));
+
+        // This assertion had NO diagnostic power until 2026-08-27: the mapper hardcoded "active" when
+        // it could not find the field, so it passed whether or not the stubbed `"status": "active"`
+        // above was ever read. It now passes because the value is genuinely mapped. Left in place —
+        // a green assertion that only became meaningful once the code was fixed is worth keeping as
+        // the positive half of the pair with ListContainers_WhenGraphOmitsStatus_ReportsNull.
         container.Status.Should().Be("active");
     }
 
     [Fact]
-    public async Task ListContainers_WhenGraphOmitsStatus_DefaultsToActive()
+    public async Task ListContainers_WhenGraphOmitsStatus_ReportsNull_NotAFabricatedActive()
     {
-        // Arrange — status arrives via AdditionalData, so its absence is a real branch, not a
-        // language guarantee.
+        // 🔴 REGRESSION GUARD — this test previously pinned a live defect, and its NAME asserted the
+        // defect as intended behaviour: `ListContainers_WhenGraphOmitsStatus_DefaultsToActive`.
+        // Inverted by task 050 (2026-08-27). Third instance in this project of a test defending a
+        // defect (task 023's ten settings tests and task 042's pair of skip-token tests were the
+        // others), and the most confident of the three, because a green test named "_DefaultsToActive"
+        // reads as a decision someone made on purpose.
+        //
+        // The defect: all four container mapping sites ended `: "active"`. Worse, the old comment
+        // below reasoned that "status arrives via AdditionalData, so its absence is a real branch" —
+        // that premise was FALSE. `status` is in the v1.0 schema, so the Graph SDK models it as a
+        // TYPED property and Kiota never places it in AdditionalData. The lookup could not match on
+        // any path, so the fallback fired for 100% of responses on LIST, GET-single and CREATE alike.
+        // The Containers grid asserted "Active" for every container in the tenant, and a freshly
+        // created container that Graph had just reported as `inactive` was reported active.
+        //
+        // Graph does not return `status` on a collection at all (measured live 2026-08-27), so null
+        // is the honest and permanent answer here. If this fails with "active", the fallback is back.
         using var graph = new GraphWireMockFixture();
         graph.StubGet(ContainersPath, """{"value":[{"id":"b!c","displayName":"No status"}]}""");
 
@@ -121,7 +152,9 @@ public class SpeAdminGraphMappingContractTests
         var result = await CreateSut().ListContainersAsync(graph.CreateGraphClient(), ContainerTypeId);
 
         // Assert
-        result.Should().ContainSingle().Which.Status.Should().Be("active");
+        result.Should().ContainSingle().Which.Status.Should().BeNull(
+            "null means NOT REPORTED; 'active' would be a fabrication indistinguishable from a real " +
+            "reading (spec NFR-06)");
     }
 
     [Fact]

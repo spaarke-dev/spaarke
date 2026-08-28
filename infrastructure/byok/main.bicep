@@ -521,9 +521,14 @@ resource directLineChannel 'Microsoft.BotService/botServices/channels@2022-09-15
 // KEY VAULT SECRETS (Store connection strings and keys)
 // ============================================================================
 
+// Canonical secret name per scripts/canonical-secret-catalog/manifest.yaml
+// (AzureOpenAI-ApiKey). Task 086 (customer-provisioning-orchestration-r1)
+// aligned the historical orphan-flat spelling `openai-api-key` to canonical
+// per spec.md FR-36 + §7.9 R2. The alias was deleted from the dev vault by
+// task 085's Phase H alias-collapse chain (0 code binds pre-check verified).
 resource secretOpenAiKey 'Microsoft.KeyVault/vaults/secrets@2023-07-01' = {
   parent: keyVault
-  name: 'openai-api-key'
+  name: 'AzureOpenAI-ApiKey'
   properties: {
     value: openAi.listKeys().key1
   }
@@ -531,7 +536,7 @@ resource secretOpenAiKey 'Microsoft.KeyVault/vaults/secrets@2023-07-01' = {
 
 resource secretSearchAdminKey 'Microsoft.KeyVault/vaults/secrets@2023-07-01' = {
   parent: keyVault
-  name: 'aisearch-admin-key'
+  name: 'AiSearch--AdminKey'
   properties: {
     value: aiSearch.listAdminKeys().primaryKey
   }

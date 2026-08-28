@@ -1,37 +1,201 @@
 // infrastructure/bicep/stacks/model1-shared.bicep
-// Shared Spaarke infrastructure for multi-tenant hosted environments (Model 1)
-// Deploys shared Azure resources that serve multiple customers
+// ============================================================================
+// MODEL 1 FIRST-CLASS TRIAL-TIER STACK (spec.md §3A A1 · customer-provisioning-orchestration-r1 task 032)
+// ============================================================================
+//
+// PURPOSE — first-class per-onboarding composition for the Model 1 (trial/SMB) tier.
+// One `az deployment sub create` per Model 1 tenant onboarding:
+//   1. Deploys the SHARED PLATFORM RG (idempotent — already exists after 1st tenant) and
+//      shared modules (App Service Plan + OpenAI + AI Search + Redis + Service Bus +
+//      Monitoring + Doc Intelligence + shared KV + shared BFF App Service).
+//   2. Deploys a NEW PER-TENANT RG and per-tenant dedicated modules (UAMI + per-tenant KV +
+//      per-tenant Storage + per-tenant Cosmos + per-tenant App Insights).
+//   3. Writes per-tenant reference secrets (Dataverse URL + SPE container ID + tenantId)
+//      into the per-tenant KV for BFF runtime consumption (H4 completes the full secret
+//      surface via canonical secret-catalog manifest).
+//
+// PATH A EXCEPTION — ADR-027 (spec.md § ADR Tensions row 6):
+//   ADR-027 mandates "one Azure subscription per customer" (D4 subscription-isolation +
+//   billing unit). This stack is the documented Path A exception for the Model 1 trial/SMB
+//   tier per spec.md §3A A1 / design.md §3A rationale. The three fixed-floor Azure resources
+//   (App Service Plan, Azure OpenAI provisioned TPM, Azure AI Search) impose ~$400/mo floor
+//   that makes strict per-customer stamps uneconomic for trial/SMB prospects (NFR-04). The
+//   deviation is scoped narrowly to the 🟡 fixed-floor row in design.md §7.2 disposition
+//   table; Model 2 stack (`model2-full.bicep`) remains strict per-customer dedicated.
+//
+//   Logical isolation replaces subscription-level isolation via 5 BINDING code-level
+//   invariants (spec.md §4D — enforced by ArchTests per r3 forcing-function pattern):
+//     * §4D I1 (FR-28): no hardcoded default tenant in provisioning scripts
+//     * §4D I2 (FR-29): every AI Search query includes unconditional `tenantId eq` filter
+//     * §4D I3 (FR-30): every Cosmos read/write includes `/tenantId` partition-key predicate
+//     * §4D I4 (FR-31): SPE container IDs derived from per-tenant context (never fallback)
+//     * §4D I5 (FR-32): Graph tokens acquired per-tenant scoped (no default-tenant fallback)
+//   These invariants land in Wave C6 (5 ArchTests I1–I5 per r3 task 040 pattern) and this
+//   stack's operational safety is COUPLED to them landing. Bicep-level network isolation is
+//   not feasible for shared fixed-floor resources — logical isolation at the code layer is
+//   the whole point of the Path A exception.
+//
+// PLACEMENT DECISION (CLAUDE.md §10 / §11):
+//   Kept as a SEPARATE stack (spec.md § New Components row 5) rather than adding Model 1
+//   conditionals to `customer.bicep`. Merging into customer.bicep would reintroduce the
+//   shared-vs-dedicated conditional-registration anti-pattern (§10 §F.1 / ADR-032 P1). The
+//   separate stack keeps Model 2 (customer.bicep + model2-full.bicep) strictly ADR-027
+//   compliant and confines the Path A exception to this file.
+//
+// SHARED-VS-DEDICATED DISPOSITION (design.md §7.2 authoritative table):
+//   🔴 Always dedicated (this stack per-tenant): UAMI, KV secrets, Storage, Cosmos, App Insights
+//        Also 🔴 in both tiers but NOT provisioned here: Dataverse env (H5), SPE container (H8),
+//        Entra app config (H3). These are PASS-THROUGH references — their identifiers are
+//        accepted as params and echoed into per-tenant KV as reference secrets for the BFF.
+//   🟡 Fixed-floor levers (this stack SHARED, metered per D19): App Service Plan, Azure OpenAI,
+//        Azure AI Search — the reason Path A exists.
+//   🟢 Safely shareable (this stack SHARED): Service Bus, App Insights (shared), Content Safety,
+//        Doc Intelligence, SignalR (optional). Also 🟢 in Model 2 but STILL dedicated there.
+//   🔵 Per-environment (this stack SHARED): Redis Cache per Q-E FR-12 — deployed by the shared
+//        module here for env bootstrap; shared across ALL customers in the env.
+//
+// SUPERSEDES: the 309-line shared-only scaffold that previously lived here (which composed
+// only the shared platform infrastructure, had no per-tenant hooks, and did not cite the
+// ADR-027 Path A exception in header comments). Deviations relative to the scaffold + the
+// intentional interpretation of POML step 3 "shared modules invoked ONCE at platform scope
+// (idempotent)" are documented in
+// projects/customer-provisioning-orchestration-r1/notes/task-032-deviations.md.
+// ============================================================================
 
 targetScope = 'subscription'
 
 // ============================================================================
-// PARAMETERS
+// PARAMETERS — SHARED PLATFORM GROUP
+// (invoked idempotently; already exist after the FIRST Model 1 tenant onboarding
+//  per POML step 3. `az deployment sub create` no-ops shared modules on re-run.)
 // ============================================================================
 
-@description('Environment name')
+@description('Environment name — drives shared resource naming and RG.')
 @allowed(['dev', 'staging', 'prod'])
 param environment string
 
-@description('Primary Azure region')
+@description('Primary Azure region for MOST resources (App Service Plan, KV, Cosmos, Redis, SB, Storage, Doc Intel, AI Search, UAMI, App Insights, LogAn — both shared + per-tenant).')
 param location string = 'eastus'
 
-@description('App Service Plan SKU (shared across customers)')
+@description('SHARED PLATFORM — Azure OpenAI region (separate from `location` because gpt-5 family GA is region-specific). Defaults to `location` for back-compat. Override to `westus3` when `location` is `westus2` (r2 pattern: spaarke-openai-prod in West US 3, spaarke-bff-prod in West US 2). Discovered 2026-08-22 during Model 1 Prod stand-up (customer-provisioning-orchestration-r1): gpt-5 family is fully GA in eastus + westus3 but absent from westus2.')
+param sharedOpenAiLocation string = location
+
+@description('SHARED PLATFORM — Resource group name for shared infrastructure. Canonical: rg-spaarke-shared-{env}.')
+param sharedResourceGroupName string = 'rg-spaarke-shared-${environment}'
+
+@description('SHARED PLATFORM — Base name for shared resources. Canonical: sprkshared{env}.')
+param sharedBaseName string = 'sprkshared${environment}'
+
+@description('SHARED PLATFORM — Key Vault name. Canonical per r3 task 063 (§7.9 Phase G): sprk-{env}-kv. Parameterized so operators can override for codified exceptions (naming-exception-registry.md).')
+param sharedKeyVaultName string = 'sprk-${environment}-kv'
+
+@description('SHARED PLATFORM — App Service Plan name (fixed-floor per §3A A1; shared across all Model 1 tenants).')
+param sharedAppServicePlanName string = '${sharedBaseName}-plan'
+
+@description('SHARED PLATFORM — Azure OpenAI resource name (fixed-floor per §3A A1; multi-tenant, per-tenant metering via D19 token-metering layer).')
+param sharedOpenAiName string = '${sharedBaseName}-openai'
+
+@description('SHARED PLATFORM — Azure AI Search service name (fixed-floor per §3A A1; multi-tenant via §4D I2 unconditional tenantId filter).')
+param sharedAiSearchName string = '${sharedBaseName}-search'
+
+@description('SHARED PLATFORM — Redis Cache name (per-env per Q-E FR-12).')
+param sharedRedisName string = '${sharedBaseName}-redis'
+
+@description('SHARED PLATFORM — Service Bus namespace name. AVOID -sb suffix — Azure reserves it globally on Service Bus namespaces (NamespaceUnavailable / InvalidSuffix). Canonical: sprkshared{env}-servicebus. Discovered 2026-08-22 during Model 1 Prod first-live deploy (customer-provisioning-orchestration-r1 finding F10) — see lessons-learned doc.')
+param sharedServiceBusName string = '${sharedBaseName}-servicebus'
+
+@description('SHARED PLATFORM — Storage account name (shared cross-tenant buffers: temp-files, ai-chunks, customer-exports). Per-tenant storage is separate.')
+param sharedStorageAccountName string = take(toLower(replace('${sharedBaseName}sa', '-', '')), 24)
+
+@description('SHARED PLATFORM — Doc Intelligence resource name.')
+param sharedDocIntelligenceName string = '${sharedBaseName}-docintel'
+
+@description('SHARED PLATFORM — BFF App Service name (single multi-tenant deployment serving all Model 1 tenants; per-request tenant context resolved from tid claim per §4D I5).')
+param sharedBffAppServiceName string = '${sharedBaseName}-api'
+
+@description('SHARED PLATFORM — UAMI name for the shared multi-tenant BFF App Service (T5 structural fix per task 029; ONE stable identity bound to prod + staging slots so slot-swap does NOT rotate downstream RBAC / Dataverse App User / Graph app-role grants). Convention: sprk-{env}-shared-bff-uami.')
+param sharedBffUamiName string = 'sprk-${environment}-shared-bff-uami'
+
+@description('SHARED PLATFORM — App Service Plan SKU (fixed-floor lever per §3A A1).')
 @allowed(['S1', 'S2', 'S3', 'P1v3', 'P2v3', 'P3v3'])
-param appServiceSku string = 'S1'
+param sharedAppServicePlanSku string = 'S1'
 
-@description('Azure AI Search SKU (shared, multi-index)')
+@description('SHARED PLATFORM — Azure AI Search SKU (fixed-floor lever per §3A A1).')
 @allowed(['standard', 'standard2', 'standard3'])
-param aiSearchSku string = 'standard'
+param sharedAiSearchSku string = 'standard'
 
-@description('Redis Cache SKU (shared)')
+@description('SHARED PLATFORM — Redis Cache SKU.')
 @allowed(['Standard', 'Premium'])
-param redisSku string = 'Standard'
+param sharedRedisSku string = 'Standard'
 
-@description('Tags applied to all resources')
-param tags object = {
+@description('SHARED PLATFORM — Tags applied to shared-platform resources.')
+param sharedTags object = {
   environment: environment
   application: 'spaarke'
   deploymentModel: 'model1'
+  scope: 'platform-shared'
+  managedBy: 'bicep'
+}
+
+@description('Principal ID of the fleet-scoped L2 control-plane UAMI (sprk-controlplane-{env}-uami, provisioned by infrastructure/bicep/platform-controlplane.bicep). REQUIRED for the following RBAC grants (customer-provisioning-orchestration-r1 task 203b, punch list rows A20 + A21): (1) H4-shared handler needs six data-plane roles on the shared SOURCE services (Cognitive Services User on OpenAI + DocIntel; Search Service Contributor on AI Search; Azure Service Bus Data Owner on the shared SB namespace; Storage Account Contributor on the shared SA; Redis Cache Contributor on the shared Redis) to read current API keys/connection strings and mirror them into per-tenant KVs; (2) H4b + H9 handlers need Website Contributor on the shared BFF App Service (Kudu docker-log fetch + zip-deploy). Empty default skips ALL grants -- an operator MUST supply the L2 UAMI principalId for Model 1 live provisioning to succeed.')
+param controlPlaneUamiPrincipalId string = ''
+
+// ============================================================================
+// PARAMETERS — PER-TENANT DEDICATED GROUP
+// (created NEW for each Model 1 tenant onboarding; §7.2 🔴 always-dedicated row.)
+// ============================================================================
+
+@description('PER-TENANT — Customer identifier (lowercase, alphanumeric, 3–10 chars). Drives per-tenant resource naming and tags.')
+@minLength(3)
+@maxLength(10)
+param perTenantCustomerId string
+
+@description('PER-TENANT — Entra tenant ID (customer\'s AAD tenant) — used for logical isolation invariants (§4D I1/I2/I5). MUST NOT default to Spaarke tenant per §4D I1 (FR-28) — this parameter has NO default value by design.')
+param perTenantTenantId string
+
+@description('PER-TENANT — UAMI name (task 028 uami.bicep). Convention per uami.bicep header: sprk-{env}-{customerId}-uami.')
+param perTenantUamiName string = 'sprk-${environment}-${perTenantCustomerId}-uami'
+
+@description('PER-TENANT — Key Vault name. Canonical per Phase G naming: sprk-{customerId}-{env}-kv (max 24 chars per KV name limit).')
+param perTenantKvName string = take('sprk-${perTenantCustomerId}-${environment}-kv', 24)
+
+@description('PER-TENANT — Storage account name. Convention: sprk{customerId}{env}sa (lowercase, no hyphens, max 24 chars).')
+param perTenantStorageName string = take(toLower(replace('sprk${perTenantCustomerId}${environment}sa', '-', '')), 24)
+
+@description('PER-TENANT — Cosmos DB account name. Convention per customer.bicep + design.md §7.1: spaarke-{customerId}-{env}-cosmos (max 44 chars).')
+param perTenantCosmosName string = take('spaarke-${perTenantCustomerId}-${environment}-cosmos', 44)
+
+@description('PER-TENANT — Per-tenant App Insights name (metering + tracing attribution). Convention: sprk-{customerId}-{env}-insights.')
+param perTenantAppInsightsName string = 'sprk-${perTenantCustomerId}-${environment}-insights'
+
+@description('PER-TENANT — Log Analytics workspace name for per-tenant App Insights. Convention: sprk-{customerId}-{env}-logs.')
+param perTenantLogAnalyticsName string = 'sprk-${perTenantCustomerId}-${environment}-logs'
+
+@description('PER-TENANT — Dataverse environment URL (from H5 handler — NOT provisioned by this stack; PASS-THROUGH written into per-tenant KV as reference secret for BFF runtime consumption).')
+param perTenantDataverseUrl string = ''
+
+@description('PER-TENANT — SPE container ID (from H8 handler — NOT provisioned by this stack; PASS-THROUGH written into per-tenant KV as reference secret for BFF runtime consumption).')
+param perTenantSpeContainerId string = ''
+
+@description('PER-TENANT — Storage SKU (per-tenant dedicated).')
+@allowed(['Standard_LRS', 'Standard_GRS', 'Standard_ZRS'])
+param perTenantStorageSku string = 'Standard_LRS'
+
+@description('PER-TENANT — Storage containers for per-tenant document processing.')
+param perTenantStorageContainers array = ['temp-files', 'document-processing', 'ai-chunks']
+
+@description('PER-TENANT — KV SKU.')
+@allowed(['standard', 'premium'])
+param perTenantKvSku string = 'standard'
+
+@description('PER-TENANT — Tags applied to per-tenant dedicated resources.')
+param perTenantTags object = {
+  customer: perTenantCustomerId
+  tenantId: perTenantTenantId
+  environment: environment
+  application: 'spaarke'
+  deploymentModel: 'model1'
+  scope: 'per-tenant-dedicated'
   managedBy: 'bicep'
 }
 
@@ -39,78 +203,99 @@ param tags object = {
 // VARIABLES
 // ============================================================================
 
-var resourceGroupName = 'rg-spaarke-shared-${environment}'
-var baseName = 'sprkshared${environment}'
-
-// Ensure storage account name is valid
-var storageAccountName = take(toLower(replace('${baseName}sa', '-', '')), 24)
+// Per-tenant RG name — distinct from shared RG so per-tenant teardown does not
+// affect shared platform. Naming follows the Model 2 pattern but suffixed
+// `-model1` to distinguish tier without ambiguity.
+var perTenantResourceGroupName = 'rg-spaarke-${perTenantCustomerId}-${environment}-model1'
 
 // ============================================================================
-// RESOURCE GROUP
+// RESOURCE GROUPS (subscription-scope declarations)
 // ============================================================================
 
-resource rg 'Microsoft.Resources/resourceGroups@2023-07-01' = {
-  name: resourceGroupName
+resource sharedRg 'Microsoft.Resources/resourceGroups@2023-07-01' = {
+  name: sharedResourceGroupName
   location: location
-  tags: tags
+  tags: sharedTags
+}
+
+resource perTenantRg 'Microsoft.Resources/resourceGroups@2023-07-01' = {
+  name: perTenantResourceGroupName
+  location: location
+  tags: perTenantTags
 }
 
 // ============================================================================
-// MONITORING (Shared - all customers)
+// SHARED PLATFORM — MONITORING (deploy first; other shared modules reference)
 // ============================================================================
 
-module monitoring '../modules/monitoring.bicep' = {
-  scope: rg
+module sharedMonitoring '../modules/monitoring.bicep' = {
+  scope: sharedRg
   name: 'monitoring-shared'
   params: {
-    appInsightsName: '${baseName}-insights'
-    logAnalyticsName: '${baseName}-logs'
+    appInsightsName: '${sharedBaseName}-insights'
+    logAnalyticsName: '${sharedBaseName}-logs'
     location: location
-    retentionInDays: 180  // Longer retention for multi-tenant
-    tags: tags
+    retentionInDays: 180 // Longer retention for multi-tenant shared platform
+    tags: sharedTags
   }
 }
 
 // ============================================================================
-// KEY VAULT (Shared secrets + per-customer secrets)
+// SHARED PLATFORM — KEY VAULT (BFF app-only secrets; cross-tenant runtime secrets)
+// Per-tenant secrets live in per-tenant KV below; this shared KV holds BFF-scoped
+// secrets used by the multi-tenant BFF instance (shared OpenAI key, shared AI
+// Search admin key, Redis connection string, etc.).
 // ============================================================================
 
-module keyVault '../modules/key-vault.bicep' = {
-  scope: rg
+module sharedKeyVault '../modules/key-vault.bicep' = {
+  scope: sharedRg
   name: 'keyVault-shared'
   params: {
-    keyVaultName: '${baseName}-kv'
+    keyVaultName: sharedKeyVaultName
     location: location
     sku: 'standard'
-    tags: tags
+    // A25 fix (customer-provisioning-orchestration-r1 task 203b, punch list
+    // row A25 / wave-4-drift-5): grant the sharedBffUami "Key Vault Secrets
+    // User" on the shared platform KV so the shared multi-tenant BFF can
+    // resolve @Microsoft.KeyVault(VaultName=sprk-{env}-kv;SecretName=...) refs
+    // at boot (Redis-ConnectionString, ServiceBus-ConnectionString,
+    // Storage-ConnectionString, AzureOpenAI-ApiKey, AiSearch--AdminKey,
+    // DocumentIntelligence-ApiKey emitted by the sharedBffApi module below).
+    // Uses userAssignedIdentityPrincipalId (canonical Phase-C UAMI param per
+    // key-vault.bicep task 030); Bicep resolves the topological dependency on
+    // sharedBffUami (declared below) via output-ref graph -- no circular dep
+    // because uami.bicep has no dependency on this KV.
+    userAssignedIdentityPrincipalId: sharedBffUami.outputs.principalId
+    tags: sharedTags
   }
 }
 
 // ============================================================================
-// REDIS CACHE (Shared - partitioned by customer prefix)
+// SHARED PLATFORM — REDIS CACHE (per-env per Q-E FR-12; NOT per-tenant)
 // ============================================================================
 
-module redis '../modules/redis.bicep' = {
-  scope: rg
+module sharedRedis '../modules/redis.bicep' = {
+  scope: sharedRg
   name: 'redis-shared'
   params: {
-    redisName: '${baseName}-redis'
+    redisName: sharedRedisName
     location: location
-    sku: redisSku
-    capacity: redisSku == 'Premium' ? 1 : 2  // C2 for Standard, P1 for Premium
-    tags: tags
+    sku: sharedRedisSku
+    capacity: sharedRedisSku == 'Premium' ? 1 : 2 // C2 for Standard, P1 for Premium
+    tags: sharedTags
   }
 }
 
 // ============================================================================
-// SERVICE BUS (Shared namespace)
+// SHARED PLATFORM — SERVICE BUS (shared namespace; per-tenant partitioning via
+// SessionId / MessageId patterns at the BFF layer)
 // ============================================================================
 
-module serviceBus '../modules/service-bus.bicep' = {
-  scope: rg
+module sharedServiceBus '../modules/service-bus.bicep' = {
+  scope: sharedRg
   name: 'serviceBus-shared'
   params: {
-    serviceBusName: '${baseName}-sb'
+    serviceBusName: sharedServiceBusName
     location: location
     sku: 'Standard'
     queueNames: [
@@ -120,190 +305,532 @@ module serviceBus '../modules/service-bus.bicep' = {
       'customer-onboarding'
       'sdap-communication'
     ]
-    tags: tags
+    tags: sharedTags
   }
 }
 
 // ============================================================================
-// STORAGE ACCOUNT (Shared - partitioned by container)
+// SHARED PLATFORM — STORAGE (shared cross-tenant buffers)
+// Per-tenant document processing storage is separate (see per-tenant modules below).
 // ============================================================================
 
-module storage '../modules/storage-account.bicep' = {
-  scope: rg
+module sharedStorage '../modules/storage-account.bicep' = {
+  scope: sharedRg
   name: 'storage-shared'
   params: {
-    storageAccountName: storageAccountName
+    storageAccountName: sharedStorageAccountName
     location: location
-    sku: 'Standard_GRS'  // Geo-redundant for production
+    sku: 'Standard_GRS' // Geo-redundant for shared platform storage
     containers: [
       'temp-files'
       'document-processing'
       'ai-chunks'
       'customer-exports'
     ]
-    tags: tags
+    tags: sharedTags
   }
 }
 
 // ============================================================================
-// APP SERVICE PLAN (Shared compute)
+// SHARED PLATFORM — APP SERVICE PLAN (fixed-floor lever per §3A A1)
 // ============================================================================
 
-module appServicePlan '../modules/app-service-plan.bicep' = {
-  scope: rg
+module sharedAppServicePlan '../modules/app-service-plan.bicep' = {
+  scope: sharedRg
   name: 'appServicePlan-shared'
   params: {
-    planName: '${baseName}-plan'
+    planName: sharedAppServicePlanName
     location: location
-    sku: appServiceSku
+    sku: sharedAppServicePlanSku
     os: 'Linux'
-    tags: tags
+    tags: sharedTags
   }
 }
 
 // ============================================================================
-// SPRK.BFF.API (Single deployment serving all customers)
+// SHARED PLATFORM — AI SERVICES (fixed-floor levers per §3A A1)
+// Multi-tenant safety relies on §4D I2 (tenantId filter on AI Search) enforced
+// at BFF query construction — see header ADR-027 Path A rationale.
 // ============================================================================
 
-module bffApi '../modules/app-service.bicep' = {
-  scope: rg
-  name: 'bffApi-shared'
-  params: {
-    appServiceName: '${baseName}-api'
-    appServicePlanId: appServicePlan.outputs.planId
-    location: location
-    keyVaultName: keyVault.outputs.keyVaultName
-    enableManagedIdentity: true
-    appSettings: {
-      // Multi-tenant mode
-      MULTI_TENANT_MODE: 'true'
-
-      // Redis (shared)
-      Redis__Enabled: 'true'
-      Redis__ConnectionString: '@Microsoft.KeyVault(VaultName=${keyVault.outputs.keyVaultName};SecretName=redis-connection-string)'
-      Redis__InstanceName: 'spaarke:'  // Prefix for key isolation
-
-      // Service Bus
-      ConnectionStrings__ServiceBus: '@Microsoft.KeyVault(VaultName=${keyVault.outputs.keyVaultName};SecretName=servicebus-connection-string)'
-
-      // Storage
-      ConnectionStrings__Storage: '@Microsoft.KeyVault(VaultName=${keyVault.outputs.keyVaultName};SecretName=storage-connection-string)'
-
-      // AI Services (shared)
-      OPENAI_ENDPOINT: openAi.outputs.openAiEndpoint
-      OPENAI_API_KEY: '@Microsoft.KeyVault(VaultName=${keyVault.outputs.keyVaultName};SecretName=openai-api-key)'
-      AI_SEARCH_ENDPOINT: aiSearch.outputs.searchServiceEndpoint
-      AI_SEARCH_API_KEY: '@Microsoft.KeyVault(VaultName=${keyVault.outputs.keyVaultName};SecretName=aisearch-admin-key)'
-
-      // Document Intelligence
-      DOC_INTELLIGENCE_ENDPOINT: docIntelligence.outputs.docIntelligenceEndpoint
-      DOC_INTELLIGENCE_KEY: '@Microsoft.KeyVault(VaultName=${keyVault.outputs.keyVaultName};SecretName=docintel-key)'
-
-      // Monitoring
-      APPLICATIONINSIGHTS_CONNECTION_STRING: monitoring.outputs.connectionString
-      ApplicationInsightsAgent_EXTENSION_VERSION: '~3'
-    }
-    tags: tags
-  }
-}
-
-// ============================================================================
-// AI SERVICES (Shared - multi-tenant)
-// ============================================================================
-
-module openAi '../modules/openai.bicep' = {
-  scope: rg
+module sharedOpenAi '../modules/openai.bicep' = {
+  scope: sharedRg
   name: 'openAi-shared'
   params: {
-    openAiName: '${baseName}-openai'
-    location: location
-    // TODO: Wire disablePublicNetworkAccess when model1 gets VNet support
+    openAiName: sharedOpenAiName
+    location: sharedOpenAiLocation // Can differ from primary `location` — see param doc above
+    // Higher capacity than Model 2 dedicated — serves multiple Model 1 tenants
+    // with per-tenant budget enforcement via D19/A2 token-metering layer.
+    //
+    // 3-tier deployment set (Fast / Standard / Reasoning + Embeddings) matches
+    // BFF's ModelSelector (Services/Ai/ModelSelector.cs) + ModelTierDeploymentResolver
+    // (Services/Ai/LinearConsumers/ModelTierDeploymentResolver.cs, ADR-039 canonical).
+    //
+    // customer-provisioning-orchestration-r1 Model 1 Prod stand-up (2026-08-22):
+    // BUMPED to gpt-5 family. Previous pins (gpt-4o:2024-08-06 + gpt-4o-mini:2024-07-18
+    // + missing reasoning deployment) surfaced two problems at prod-deploy time:
+    //   (1) Both gpt-4o + gpt-4o-mini pins deprecated by Microsoft on 2026-03-31,
+    //       blocked from new deployment ("ServiceModelDeprecated" preflight error)
+    //   (2) Reasoning tier was declared in BFF (`o1-mini` default in ModelSelector.cs
+    //       line 70 + `AiModelTier.Reasoning` enum in ModelTierDeploymentResolver)
+    //       but had NO Bicep deployment — Reasoning-tagged Actions were falling
+    //       back to Standard silently.
+    //
+    // Deployment NAMES are preserved from the legacy set (`gpt-4o`, `gpt-4o-mini`,
+    // `o1-mini`) so ~15 BFF files referencing those strings need no change; Azure
+    // OpenAI decouples deployment name from underlying model — standard pattern.
+    // The MODELS are modernized to current GA (not Legacy) versions.
+    // Deployment set REVISED 2026-08-22 (customer-provisioning-orchestration-r1
+    // Model 1 Prod first-live stand-up) for AUTO-ALLOCATED QUOTA COMPATIBILITY:
+    //
+    // Fresh Azure subs in West US 3 get these auto-allocated (verified via
+    // `az cognitiveservices usage list -l westus3`):
+    //   - gpt-5-mini GlobalStandard: 500 TPM (>= our 300 use)
+    //   - text-embedding-3-large STANDARD SKU: 350 TPM (our exact ask)
+    // Fresh subs get ZERO for:
+    //   - gpt-5.4 GlobalStandard (needs support ticket for bump)
+    //   - gpt-5-pro GlobalStandard (needs support ticket for bump)
+    //   - text-embedding-3-large GlobalStandard (needs support ticket)
+    //
+    // TEMPORARY 2-tier stack (Fast + Standard both on gpt-5-mini):
+    // - `gpt-4o` alias runs gpt-5-mini @ 200 TPM (Standard tier — technically a mini
+    //   in the Standard slot; behavior close to legacy gpt-4o for most workloads,
+    //   comparable in reasoning + tool-calling; ideal target is gpt-5.4)
+    // - `gpt-4o-mini` alias runs gpt-5-mini @ 100 TPM (Fast tier — its natural home)
+    // - Reasoning tier UNFILLED (BFF's ModelTierDeploymentResolver line 47-49 auto-
+    //   falls back to Standard when Reasoning model is not configured — documented
+    //   behavior; ideal target is gpt-5-pro)
+    // - Embeddings on Standard SKU (works for our scale; ideal target is GlobalStandard
+    //   for consistency with rest of set once quota approved)
+    //
+    // UPGRADE PATH to full P5 (do this AFTER filing support ticket + Microsoft
+    // approving these quotas — probably 1-24 hrs; not blocking prod stand-up):
+    //   1. Change 'gpt-4o' alias: model 'gpt-5-mini' → 'gpt-5.4', capacity 200 → 150
+    //   2. Add back the 'o1-mini' alias: model 'gpt-5-pro', GlobalStandard, capacity 50
+    //   3. Change text-embedding-3-large SKU: 'Standard' → 'GlobalStandard'
+    //   4. Re-run `az deployment sub create` (idempotent — reconciles the deployments)
+    //
+    // Deployment ALIAS names preserved (`gpt-4o`, `gpt-4o-mini`) so ~15 BFF files
+    // referencing those strings need zero change; Azure OpenAI decouples deployment
+    // name from underlying model — standard pattern.
     deployments: [
       {
-        name: 'gpt-4o'
-        model: 'gpt-4o'
-        version: '2024-08-06'
-        capacity: 150  // Higher capacity for multi-tenant
+        name: 'gpt-4o' // BFF deployment alias (ModelSelector Standard/ScopeGeneration/Default; ModelTierDeploymentResolver Standard tier)
+        model: 'gpt-5-mini'
+        version: '2025-08-07' // GA, retirement 2027-02-09
+        sku: 'GlobalStandard'
+        capacity: 200 // From auto-allocated gpt-5-mini GlobalStandard 500 TPM pool (100 more for `gpt-4o-mini` alias below = 300 of 500)
       }
       {
-        name: 'gpt-4o-mini'
-        model: 'gpt-4o-mini'
-        version: '2024-07-18'
-        capacity: 200 // >= 200 TPM required for beta scale
+        name: 'gpt-4o-mini' // BFF deployment alias (ModelSelector Fast tier: Classification/EntityResolution/Validation/Explanation/ToolHandler)
+        model: 'gpt-5-mini'
+        version: '2025-08-07' // GA, retirement 2027-02-09
+        sku: 'GlobalStandard'
+        capacity: 100 // From auto-allocated gpt-5-mini GlobalStandard 500 TPM pool
       }
       {
         name: 'text-embedding-3-large'
         model: 'text-embedding-3-large'
-        version: '1'
+        version: '1' // GA, retirement 2028-02-09
+        sku: 'Standard' // Auto-allocated 350 TPM (GlobalStandard is 0 on fresh sub — upgrade after quota approval)
         capacity: 350
       }
-      // text-embedding-3-small removed (deprecated, replaced by text-embedding-3-large)
+      // Reasoning tier `o1-mini` alias INTENTIONALLY OMITTED — gpt-5-pro GlobalStandard
+      // TPM is 0 on fresh sub, needs quota approval. BFF's ModelTierDeploymentResolver
+      // line 47-49 documented fallback: `Reasoning` tier requests fall back to
+      // `StandardModel` when ReasoningModel not configured. Zero code impact.
     ]
-    tags: tags
+    tags: sharedTags
   }
 }
 
-module aiSearch '../modules/ai-search.bicep' = {
-  scope: rg
+module sharedAiSearch '../modules/ai-search.bicep' = {
+  scope: sharedRg
   name: 'aiSearch-shared'
   params: {
-    searchServiceName: '${baseName}-search'
+    searchServiceName: sharedAiSearchName
     location: location
-    sku: aiSearchSku
-    replicaCount: environment == 'prod' ? 2 : 1  // HA for production
+    sku: sharedAiSearchSku
+    // HA replicas for production shared platform
+    replicaCount: environment == 'prod' ? 2 : 1
     partitionCount: 1
     semanticSearch: 'standard'
-    tags: tags
+    tags: sharedTags
   }
 }
 
-module docIntelligence '../modules/doc-intelligence.bicep' = {
-  scope: rg
+module sharedDocIntelligence '../modules/doc-intelligence.bicep' = {
+  scope: sharedRg
   name: 'docIntelligence-shared'
   params: {
-    docIntelligenceName: '${baseName}-docintel'
+    docIntelligenceName: sharedDocIntelligenceName
     location: location
     sku: 'S0'
-    tags: tags
+    tags: sharedTags
   }
 }
 
 // ============================================================================
-// OUTPUTS
+// SHARED PLATFORM — BFF UAMI (T5 structural fix per task 029)
+// ONE stable identity for the shared multi-tenant BFF App Service. Bound to
+// prod + staging slots so slot-swap does NOT rotate downstream RBAC /
+// Dataverse App User / Graph app-role grants. Per-tenant UAMIs (perTenantUami
+// below) are still emitted for per-tenant KV secret access + per-tenant Graph
+// app-role parity + per-tenant Dataverse App User registration — this shared
+// UAMI is a DIFFERENT concern (the BFF process identity).
 // ============================================================================
 
-output resourceGroupName string = rg.name
-output location string = location
-output environment string = environment
+module sharedBffUami '../modules/uami.bicep' = {
+  scope: sharedRg
+  name: 'uami-shared-bff'
+  params: {
+    name: sharedBffUamiName
+    location: location
+    tags: sharedTags
+  }
+}
 
-// API
-output apiUrl string = bffApi.outputs.appServiceUrl
-output apiPrincipalId string = bffApi.outputs.appServicePrincipalId
-output appServicePlanId string = appServicePlan.outputs.planId
+// ============================================================================
+// SHARED PLATFORM — BFF APP SERVICE (single multi-tenant deployment)
+// The multi-tenant BFF resolves per-request tenant context from the caller's
+// AAD tid claim (§4D I5). Per-tenant secrets (Dataverse URL, SPE container ID)
+// are read from per-tenant KVs at runtime, keyed by tenant context.
+// ============================================================================
 
-// Key Vault
-output keyVaultName string = keyVault.outputs.keyVaultName
-output keyVaultUri string = keyVault.outputs.keyVaultUri
+module sharedBffApi '../modules/app-service.bicep' = {
+  scope: sharedRg
+  name: 'bffApi-shared'
+  params: {
+    appServiceName: sharedBffAppServiceName
+    appServicePlanId: sharedAppServicePlan.outputs.planId
+    location: location
+    // T5 structural fix (task 029): UAMI-only, no SA-MI. keyVaultName +
+    // enableManagedIdentity params were removed from app-service.bicep.
+    // KV Secrets User grant to the shared BFF UAMI landed in the sharedKeyVault
+    // module invocation above (customer-provisioning-orchestration-r1 task 203b,
+    // punch list row A25 / wave-4-drift-5) via userAssignedIdentityPrincipalId
+    // -- the shared BFF now resolves @Microsoft.KeyVault(...) refs at boot.
+    userAssignedIdentityResourceId: sharedBffUami.outputs.id
+    appSettings: {
+      // Multi-tenant mode marker consumed by BFF at boot for per-request
+      // tenant-context resolution (§4D I5).
+      MULTI_TENANT_MODE: 'true'
 
-// AI Services
-output openAiEndpoint string = openAi.outputs.openAiEndpoint
-output aiSearchEndpoint string = aiSearch.outputs.searchServiceEndpoint
-output docIntelligenceEndpoint string = docIntelligence.outputs.docIntelligenceEndpoint
+      // Redis (shared per-env)
+      Redis__Enabled: 'true'
+      Redis__ConnectionString: '@Microsoft.KeyVault(VaultName=${sharedKeyVault.outputs.keyVaultName};SecretName=redis-connection-string)'
+      Redis__InstanceName: 'spaarke:' // Prefix for key isolation
 
-// Monitoring
-output appInsightsName string = monitoring.outputs.appInsightsName
-output logAnalyticsWorkspaceId string = monitoring.outputs.logAnalyticsWorkspaceId
+      // Service Bus (shared)
+      ConnectionStrings__ServiceBus: '@Microsoft.KeyVault(VaultName=${sharedKeyVault.outputs.keyVaultName};SecretName=servicebus-connection-string)'
 
-// Connection strings (store in Key Vault via post-deployment script)
+      // Storage (shared)
+      ConnectionStrings__Storage: '@Microsoft.KeyVault(VaultName=${sharedKeyVault.outputs.keyVaultName};SecretName=storage-connection-string)'
+
+      // AI Services (shared) — multi-tenant safety enforced at BFF query layer
+      // via §4D I2 (unconditional `tenantId eq` filter on every AI Search query).
+      OPENAI_ENDPOINT: sharedOpenAi.outputs.openAiEndpoint
+      // Canonical secret name per canonical-secret-catalog manifest (task 086 FR-36).
+      OPENAI_API_KEY: '@Microsoft.KeyVault(VaultName=${sharedKeyVault.outputs.keyVaultName};SecretName=AzureOpenAI-ApiKey)'
+      AI_SEARCH_ENDPOINT: sharedAiSearch.outputs.searchServiceEndpoint
+      AI_SEARCH_API_KEY: '@Microsoft.KeyVault(VaultName=${sharedKeyVault.outputs.keyVaultName};SecretName=AiSearch--AdminKey)'
+
+      // Document Intelligence (shared)
+      DOC_INTELLIGENCE_ENDPOINT: sharedDocIntelligence.outputs.docIntelligenceEndpoint
+      // Canonical secret name per canonical-secret-catalog manifest (task 086 FR-36).
+      DOC_INTELLIGENCE_KEY: '@Microsoft.KeyVault(VaultName=${sharedKeyVault.outputs.keyVaultName};SecretName=DocumentIntelligence-ApiKey)'
+
+      // Monitoring (shared)
+      APPLICATIONINSIGHTS_CONNECTION_STRING: sharedMonitoring.outputs.connectionString
+      ApplicationInsightsAgent_EXTENSION_VERSION: '~3'
+    }
+    tags: sharedTags
+  }
+}
+
+// ============================================================================
+// PER-TENANT DEDICATED — USER-ASSIGNED MANAGED IDENTITY (task 028)
+// One long-lived identity per Model 1 tenant, bound to KV/Storage/Cosmos RBAC
+// per task 030 (deferred). Even though the BFF is shared (Model 1), per-tenant
+// UAMI enables per-tenant Graph app-role parity + per-tenant Dataverse App User
+// registration + fine-grained per-tenant KV secret access. Also structurally
+// eliminates T5 slot-swap parity issues for any per-tenant App Service that
+// may be added in future (out of scope now — BFF is shared).
+// ============================================================================
+
+module perTenantUami '../modules/uami.bicep' = {
+  scope: perTenantRg
+  name: 'uami-${perTenantCustomerId}'
+  params: {
+    name: perTenantUamiName
+    location: location
+    tags: perTenantTags
+  }
+}
+
+// ============================================================================
+// PER-TENANT DEDICATED — KEY VAULT (per-tenant secrets)
+// Holds per-tenant secrets: dataverse-url (from H5), spe-container-id (from H8),
+// tenant-id, plus H4-populated app-only credentials. NOT the same as the shared
+// platform KV which holds BFF-scoped shared secrets.
+// ============================================================================
+
+module perTenantKv '../modules/key-vault.bicep' = {
+  scope: perTenantRg
+  name: 'kv-${perTenantCustomerId}'
+  params: {
+    keyVaultName: perTenantKvName
+    location: location
+    sku: perTenantKvSku
+    tags: perTenantTags
+  }
+}
+
+// ============================================================================
+// PER-TENANT DEDICATED — STORAGE (per-tenant document processing)
+// Per §7.2 🔴 always-dedicated row: per-tenant Storage keeps document processing
+// artefacts tenant-scoped even in Model 1 (Storage has no fixed floor, so no
+// economic pressure to share). The shared storage account above holds cross-
+// tenant buffers only.
+// ============================================================================
+
+module perTenantStorage '../modules/storage-account.bicep' = {
+  scope: perTenantRg
+  name: 'storage-${perTenantCustomerId}'
+  params: {
+    storageAccountName: perTenantStorageName
+    location: location
+    sku: perTenantStorageSku
+    containers: perTenantStorageContainers
+    enableTestDocumentLifecycle: false
+    tags: perTenantTags
+  }
+}
+
+// ============================================================================
+// PER-TENANT DEDICATED — COSMOS DB (per-tenant AI sessions / audit / memory)
+// Per §7.2 🔴 always-dedicated (v3.2 correction: dedicated in BOTH tiers — only
+// the fixed-floor levers are shared under §3A A1, and Cosmos serverless has no
+// fixed floor). §4D I3 (FR-30) partition-key `/tenantId` predicate MUST be on
+// every read/write — enforced by ArchTest at code level.
+// ============================================================================
+
+module perTenantCosmos '../modules/cosmos-db.bicep' = {
+  scope: perTenantRg
+  name: 'cosmos-${perTenantCustomerId}'
+  params: {
+    accountName: perTenantCosmosName
+    location: location
+    databaseName: 'spaarke-ai'
+    // Data-plane RBAC deferred: shared BFF System-Assigned MI + per-tenant UAMI
+    // both need Cosmos Data Contributor. Task 030 wires per-tenant UAMI RBAC to
+    // per-tenant Cosmos; shared BFF MI RBAC is a separate concern owned by the
+    // shared-platform bootstrap flow. Leaving empty here yields a data-plane-
+    // access-empty account that later RBAC modules populate.
+    appServicePrincipalId: ''
+    tags: perTenantTags
+  }
+}
+
+// ============================================================================
+// PER-TENANT DEDICATED — APP INSIGHTS (metering + tracing attribution)
+// Per-tenant App Insights lets per-tenant queries + per-tenant cost dashboards
+// scope cleanly without cross-tenant contamination in Log Analytics.
+// ============================================================================
+
+module perTenantMonitoring '../modules/monitoring.bicep' = {
+  scope: perTenantRg
+  name: 'monitoring-${perTenantCustomerId}'
+  params: {
+    appInsightsName: perTenantAppInsightsName
+    logAnalyticsName: perTenantLogAnalyticsName
+    location: location
+    retentionInDays: 90
+    tags: perTenantTags
+  }
+}
+
+// ============================================================================
+// PER-TENANT REFERENCE SECRETS — Dataverse URL, SPE container ID, tenant ID
+// Passed as PASS-THROUGH params from H5 (Dataverse env creation) and H8 (SPE
+// container-type creation) — this stack does NOT provision those resources.
+//
+// DELIBERATE ARCHITECTURAL BOUNDARY: Bicep does NOT write these values into the
+// per-tenant KV. That job belongs to handler H4 per design.md §4.1 handler
+// catalog (H4 = "Key Vault secrets population + canonical naming applied at
+// seed time via canonical secret-catalog manifest — Phase H per r3 task 063").
+// Bicep provisions infrastructure; H4 populates secrets from the canonical
+// manifest. Splitting the responsibility here keeps the secret surface single-
+// source (Phase H manifest) rather than split between Bicep + manifest — which
+// was the drift pattern that motivated r3 task 063's canonical remediation.
+//
+// This stack echoes the pass-through references as OUTPUTS so H4 can consume
+// them from the deployment output when invoked by the L2 control-plane.
+// ============================================================================
+
+// ============================================================================
+// L2 CONTROL-PLANE UAMI -- RBAC ON SHARED SOURCE SERVICES + BFF APP SERVICE
+// (customer-provisioning-orchestration-r1 task 203b, punch list rows A20 + A21)
+//
+// A20: H4-shared handler (task 200) reads current API keys / connection strings
+//      from the shared source services (OpenAI + DocIntel + AI Search + SB +
+//      Storage + Redis) via SDK calls; each branch requires a matching data-
+//      plane role on the source resource. Task 200 "Deferred #1" -- landed here.
+// A21: H4b (task 201) fetches Kudu docker logs from the shared BFF App Service;
+//      H9 (task 132) zip-deploys to the same site. Website Contributor covers
+//      both. Task 201 "Deferred #1" -- landed here.
+//
+// Split into modules/model1-shared-l2-rbac.bicep -- BCP139 forces this stack
+// (targetScope='subscription') to declare RG-nested role assignments via a
+// module invoked with `scope: sharedRg`. Same mechanism-forced pattern as
+// modules/controlplane-sb-rbac.bicep (that one is BCP165 cross-RG; this one is
+// BCP139 sub -> RG).
+// ============================================================================
+
+module model1SharedL2Rbac '../modules/model1-shared-l2-rbac.bicep' = {
+  scope: sharedRg
+  name: 'l2-rbac-shared-${environment}'
+  params: {
+    controlPlaneUamiPrincipalId: controlPlaneUamiPrincipalId
+    sharedOpenAiName: sharedOpenAiName
+    sharedDocIntelligenceName: sharedDocIntelligenceName
+    sharedAiSearchName: sharedAiSearchName
+    sharedServiceBusName: sharedServiceBusName
+    sharedStorageAccountName: sharedStorageAccountName
+    sharedRedisName: sharedRedisName
+    sharedBffAppServiceName: sharedBffAppServiceName
+  }
+  dependsOn: [
+    // Ensure the source resources exist before RBAC binds. Module invocation
+    // depends-on aggregates each shared resource's parent module.
+    sharedOpenAi
+    sharedDocIntelligence
+    sharedAiSearch
+    sharedServiceBus
+    sharedStorage
+    sharedRedis
+    sharedBffApi
+  ]
+}
+
+// ============================================================================
+// BFF RUNTIME UAMI -- MI-ONLY RBAC on Service Bus + AI Search
+// (auth-v4 PROVISIONING-CHANGE-REQUEST §10.1 Δ1 + Δ2 + §10.3; punch rows
+//  A36 + A37)
+//
+// Grants the SHARED BFF runtime UAMI (sharedBffUami) the four data-plane
+// role assignments required by the auth-v4 §10.2 live contract:
+//   A36 Service Bus:  Data Sender + Data Receiver
+//   A37 AI Search:    Index Data Contributor + Service Contributor
+//
+// Same BCP139 forcing-function as model1SharedL2Rbac above; invoked with
+// `scope: sharedRg`. Different principal from A20 (this stack's L2 UAMI
+// grants remain in model1SharedL2Rbac).
+// ============================================================================
+
+module sharedBffRuntimeRbac '../modules/bff-runtime-rbac.bicep' = {
+  scope: sharedRg
+  name: 'bff-runtime-rbac-shared-${environment}'
+  params: {
+    bffUamiPrincipalId: sharedBffUami.outputs.principalId
+    serviceBusNamespaceName: sharedServiceBusName
+    searchServiceName: sharedAiSearchName
+  }
+  dependsOn: [
+    // Ensure both target resources exist before RBAC binds.
+    sharedServiceBus
+    sharedAiSearch
+  ]
+}
+
+// NOTE (2026-08-25, A37 dispatch reconciling A36 concurrent-add):
+//   A36's agent landed after A37 and added a REDUNDANT second invocation of
+//   the SAME module here with the SAME symbol name (`sharedBffRuntimeRbac`) --
+//   would have hard-errored bicep build with BCP028 duplicate identifier +
+//   was also missing the required `searchServiceName` param. The single
+//   invocation above already binds A36 SB roles + A37 Search roles together
+//   (bff-runtime-rbac.bicep is comprehensive by design per the coordination
+//   instruction in the A37 dispatch). A36's block deleted here; A36 role
+//   coverage preserved unchanged.
+
+// ============================================================================
+// OUTPUTS — SHARED PLATFORM
+// ============================================================================
+
+output sharedResourceGroupName string = sharedRg.name
+output sharedLocation string = location
+output sharedEnvironment string = environment
+
+// Shared BFF endpoint (multi-tenant)
+output sharedApiUrl string = sharedBffApi.outputs.appServiceUrl
+// T5 structural fix (task 029): sharedApiPrincipalId is the stable UAMI
+// principal, not the removed SA-MI. Downstream consumers MUST bind here.
+output sharedApiPrincipalId string = sharedBffUami.outputs.principalId
+output sharedApiUamiResourceId string = sharedBffUami.outputs.id
+output sharedApiUamiClientId string = sharedBffUami.outputs.clientId
+output sharedAppServicePlanId string = sharedAppServicePlan.outputs.planId
+
+// Shared KV
+output sharedKeyVaultName string = sharedKeyVault.outputs.keyVaultName
+output sharedKeyVaultUri string = sharedKeyVault.outputs.keyVaultUri
+
+// Shared AI Service endpoints
+output sharedOpenAiEndpoint string = sharedOpenAi.outputs.openAiEndpoint
+output sharedAiSearchEndpoint string = sharedAiSearch.outputs.searchServiceEndpoint
+output sharedDocIntelligenceEndpoint string = sharedDocIntelligence.outputs.docIntelligenceEndpoint
+
+// Shared monitoring
+output sharedAppInsightsName string = sharedMonitoring.outputs.appInsightsName
+output sharedLogAnalyticsWorkspaceId string = sharedMonitoring.outputs.logAnalyticsWorkspaceId
+
+// Shared connection strings (populate KV via post-deployment script — matches
+// existing shared stack behavior; secrets should be stored in KV, not returned
+// as outputs in production. Kept behind `#disable-next-line` for post-deploy
+// automation only.)
 #disable-next-line outputs-should-not-contain-secrets
-output redisConnectionString string = redis.outputs.redisConnectionString
+output sharedRedisConnectionString string = sharedRedis.outputs.redisConnectionString
 #disable-next-line outputs-should-not-contain-secrets
-output serviceBusConnectionString string = serviceBus.outputs.serviceBusConnectionString
+output sharedServiceBusConnectionString string = sharedServiceBus.outputs.serviceBusConnectionString
 #disable-next-line outputs-should-not-contain-secrets
-output storageConnectionString string = storage.outputs.connectionString
+output sharedStorageConnectionString string = sharedStorage.outputs.connectionString
 #disable-next-line outputs-should-not-contain-secrets
-output openAiKey string = openAi.outputs.openAiKey
+output sharedOpenAiKey string = sharedOpenAi.outputs.openAiKey
 #disable-next-line outputs-should-not-contain-secrets
-output aiSearchAdminKey string = aiSearch.outputs.searchServiceAdminKey
+output sharedAiSearchAdminKey string = sharedAiSearch.outputs.searchServiceAdminKey
 #disable-next-line outputs-should-not-contain-secrets
-output docIntelligenceKey string = docIntelligence.outputs.docIntelligenceKey
+output sharedDocIntelligenceKey string = sharedDocIntelligence.outputs.docIntelligenceKey
+
+// ============================================================================
+// OUTPUTS — PER-TENANT DEDICATED
+// ============================================================================
+
+output perTenantResourceGroupName string = perTenantRg.name
+output perTenantCustomerId string = perTenantCustomerId
+output perTenantTenantId string = perTenantTenantId
+
+// Per-tenant UAMI (task 028 outputs)
+output perTenantUamiId string = perTenantUami.outputs.id
+output perTenantUamiName string = perTenantUami.outputs.name
+output perTenantUamiPrincipalId string = perTenantUami.outputs.principalId
+output perTenantUamiClientId string = perTenantUami.outputs.clientId
+
+// Per-tenant KV
+output perTenantKvName string = perTenantKv.outputs.keyVaultName
+output perTenantKvUri string = perTenantKv.outputs.keyVaultUri
+
+// Per-tenant Storage
+output perTenantStorageAccountName string = perTenantStorage.outputs.storageAccountName
+output perTenantStoragePrimaryEndpoint string = perTenantStorage.outputs.primaryEndpoint
+
+// Per-tenant Cosmos
+output perTenantCosmosAccountName string = perTenantCosmos.outputs.accountName
+output perTenantCosmosAccountEndpoint string = perTenantCosmos.outputs.accountEndpoint
+output perTenantCosmosDatabaseName string = perTenantCosmos.outputs.databaseName
+
+// Per-tenant App Insights
+output perTenantAppInsightsName string = perTenantMonitoring.outputs.appInsightsName
+output perTenantLogAnalyticsWorkspaceId string = perTenantMonitoring.outputs.logAnalyticsWorkspaceId
+
+// Per-tenant pass-through references (echo for downstream tooling)
+output perTenantDataverseUrl string = perTenantDataverseUrl
+output perTenantSpeContainerId string = perTenantSpeContainerId

@@ -153,12 +153,39 @@ This directive expands FR-B scope from FR-B01..FR-B07 to FR-B01..FR-B10. Phase 2
 ### MUST Rules
 
 - ✅ MUST keep existing Azure deployment workflows functionally untouched (`deploy-bff-api.yml` trigger audit only; `deploy-promote.yml`, `deploy-infrastructure.yml`, `deploy-office-addins.yml` zero changes)
-- ✅ MUST keep `sdap-ci.yml` running in parallel through Phase 2; retire only post-cutover after 14 days of new-tier stability
+- ✅ MUST keep `sdap-ci.yml` running in parallel through Phase 2; retire only post-cutover after **20 code PRs on which both systems returned the same blocking verdict** (see "Shadow-window exit criterion" below). *(Amended 2026-08-27 — was "after 14 days of new-tier stability". Path B per root CLAUDE.md §6.5; owner-approved.)*
 - ✅ MUST enforce deletion-safety via path check at Step 9.5 (FR-B06); no CSV consultation at runtime
 - ❌ MUST NOT restore `Release` matrix before Phase 2 deletion has merged AND surviving suite green ≥7 days
 - ❌ MUST NOT add commit-marker skip mechanism to Tier 1 (FR-A05)
 - ❌ MUST NOT introduce coverage-% targets to any new directive file (binding for ≥6 months)
 - ❌ MUST NOT redesign BFF DI registry or SpaarkeAi widget/route registries in this project — OUT of scope
+
+#### Shadow-window exit criterion (amended 2026-08-27, Path B per root CLAUDE.md §6.5)
+
+**Was**: "14 days of new-tier stability."
+**Now**: **20 code PRs on which `sdap-ci.yml` and `CI (Router)` returned the same blocking verdict**, with **zero false greens** among them.
+
+**Why the change.** Calendar days are a proxy for evidence, and a poor one — the metric moves whether or not anything is being tested. Fourteen quiet days over a holiday prove close to nothing; four busy days prove a great deal. Meanwhile the window is not free: every PR touching server code pays `sdap-ci.yml`'s ~40-minute duplicate leg for the window's full duration, which works directly against this project's north star ("CI must not hold up high-frequency master pushes"). A criterion that can be satisfied by a slow week costs real time and buys no confidence.
+
+Counting PRs ties the exit to the thing actually being measured: agreement between two systems on real diffs.
+
+**Definitions** — a PR counts toward the 20 only if:
+- it is a **code PR** (`docs_only == false` per `ci-router.yml`'s classifier — on docs-only PRs tier1/tier2 are correctly skipped, so there is no verdict to compare); **and**
+- both systems reached a terminal conclusion (cancelled/superseded runs do not count).
+
+**Verdict comparison**, per counted PR:
+
+| `sdap-ci` | tier1 | Meaning |
+|---|---|---|
+| red | **green** | **FALSE GREEN — disqualifying.** tier1 would pass a real break. Reset the count to zero and diagnose before resuming. |
+| green | **red** | False red. Does not disqualify, but log it — it burns the "no constant reds" goal and must be understood before branch protection is enabled. |
+| agree | agree | Counts toward the 20. |
+
+**Floor**: the window must also span **≥5 calendar days** regardless of PR count, so a single high-volume day cannot satisfy it. This preserves the one thing the original rule got right — that some failure modes (flaky gates, runner capacity, scheduled-job interactions) only appear across day boundaries.
+
+**Unchanged**: the sibling rule below (no `Release` matrix restore before Phase 2 deletion has merged AND surviving suite green ≥7 days) is a different clock and is NOT amended.
+
+**Evidence base for distrusting a short window**: during the 2026-08-27 remediation the tier1 gate port broke **twice** in ways invisible in the diff — a 6-hour hang, then 275 startup failures — from byte-identical copies of jobs that ran correctly elsewhere. The differences were environmental (a workflow-level `env` var present-but-empty vs absent). That is the class of defect this window exists to catch, and it is why the criterion is agreement-on-real-diffs rather than elapsed time.
 
 ### Existing Patterns
 

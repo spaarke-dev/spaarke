@@ -4,7 +4,7 @@
     <title>Retire scaffolding-class SpeAdmin tests per ADR-038</title>
     <phase>4 Workstream D — Build the harness</phase>
     <gate>040 complete, 041 complete</gate>
-    <status>not-started</status>
+    <status>partial</status>
     <rigor>FULL</rigor>
     <rigor-reason>TEST-MODIFYING override row (root CLAUDE.md §8): unconditional code-review + adr-check. Tags include testing and deletion.</rigor-reason>
     <model-tier>sonnet</model-tier>
@@ -31,8 +31,8 @@
       <file role="canonical-reference">docs/adr/ADR-038-testing-strategy.md</file>
     </relevant-files>
     <dependencies>
-      <dependency task="040" status="pending">WireMock coverage — real replacement for the mapping surface.</dependency>
-      <dependency task="041" status="pending">Live coverage — real replacement for the flows the manual plan described.</dependency>
+      <dependency task="040" status="complete">WireMock coverage — real replacement for the mapping surface.</dependency>
+      <dependency task="041" status="complete">Live coverage — real replacement for the flows the manual plan described.</dependency>
     </dependencies>
   </context>
 

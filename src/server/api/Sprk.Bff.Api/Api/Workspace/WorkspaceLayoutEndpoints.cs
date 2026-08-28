@@ -1,6 +1,7 @@
 using System.Security.Claims;
 using Microsoft.Net.Http.Headers;
 using Sprk.Bff.Api.Services.Workspace;
+using Sprk.Bff.Api.Infrastructure.Authentication;
 
 namespace Sprk.Bff.Api.Api.Workspace;
 
@@ -560,8 +561,7 @@ public static class WorkspaceLayoutEndpoints
     /// </summary>
     private static string? GetUserId(HttpContext httpContext)
         => httpContext.Items["UserId"]?.ToString()
-           ?? httpContext.User.FindFirst("oid")?.Value
-           ?? httpContext.User.FindFirst(ClaimTypes.NameIdentifier)?.Value;
+           ?? CallerResolution.ResolveObjectId(httpContext.User);
 
     /// <summary>
     /// Returns a 401 Unauthorized ProblemDetails response.

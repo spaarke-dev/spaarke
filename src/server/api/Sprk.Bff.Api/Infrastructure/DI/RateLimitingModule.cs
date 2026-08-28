@@ -1,4 +1,5 @@
 using System.Threading.RateLimiting;
+using Sprk.Bff.Api.Infrastructure.Authentication;
 
 namespace Sprk.Bff.Api.Infrastructure.DI;
 
@@ -283,8 +284,15 @@ public static class RateLimitingModule
 
     private static string GetUserId(HttpContext context)
     {
-        return context.User?.FindFirst("oid")?.Value
-               ?? context.User?.FindFirst("sub")?.Value
+        // A rate-limit PARTITION KEY is one of the few places `sub` is genuinely correct — it is stable
+        // per (user, application), which is exactly what partitioning needs. Hence ResolveOpaqueCallerKey
+        // rather than ResolveObjectId. This value must never reach Dataverse or an audit field.
+        //
+        // It previously read `FindFirst("oid") ?? FindFirst("sub")` with NEITHER mapped form. Under
+        // inbound claim-type mapping (on by default, and on here) BOTH of those claims are renamed, so
+        // both legs returned null and every caller fell through to the IP address — per-user rate
+        // limiting had silently degraded to per-IP, sharing one bucket behind any NAT.
+        return CallerResolution.ResolveOpaqueCallerKey(context.User)
                ?? context.Connection.RemoteIpAddress?.ToString()
                ?? "unknown";
     }

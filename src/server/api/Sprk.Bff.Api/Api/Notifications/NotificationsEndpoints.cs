@@ -1,3 +1,4 @@
+using Sprk.Bff.Api.Infrastructure.Authentication;
 using System.Text.Json;
 using Microsoft.AspNetCore.Mvc;
 using Sprk.Bff.Api.Configuration;
@@ -77,8 +78,7 @@ public static class NotificationsEndpoints
         CancellationToken ct)
     {
         // Derive the target identity SERVER-SIDE — the oid claim of the validated JWT ONLY.
-        var oid = context.User.FindFirst("oid")?.Value
-            ?? context.User.FindFirst("http://schemas.microsoft.com/identity/claims/objectidentifier")?.Value;
+        var oid = CallerResolution.ResolveObjectId(context.User);
 
         if (string.IsNullOrWhiteSpace(oid))
         {
@@ -125,8 +125,7 @@ public static class NotificationsEndpoints
         // Derive the caller's identity SERVER-SIDE — the oid claim of the validated JWT ONLY. Mirrors
         // NegotiateAsync above. MUST NOT accept a target userId/oid parameter (no cross-user reads,
         // ADR-028) — there is no such parameter on this handler's signature.
-        var oid = context.User.FindFirst("oid")?.Value
-            ?? context.User.FindFirst("http://schemas.microsoft.com/identity/claims/objectidentifier")?.Value;
+        var oid = CallerResolution.ResolveObjectId(context.User);
 
         if (string.IsNullOrWhiteSpace(oid))
         {
@@ -195,8 +194,7 @@ public static class NotificationsEndpoints
     {
         // Derive the caller's identity SERVER-SIDE — the oid claim of the validated JWT ONLY (mirrors
         // GetPendingAsync). No target-user parameter exists on this signature (ADR-028).
-        var oid = context.User.FindFirst("oid")?.Value
-            ?? context.User.FindFirst("http://schemas.microsoft.com/identity/claims/objectidentifier")?.Value;
+        var oid = CallerResolution.ResolveObjectId(context.User);
 
         if (string.IsNullOrWhiteSpace(oid))
         {

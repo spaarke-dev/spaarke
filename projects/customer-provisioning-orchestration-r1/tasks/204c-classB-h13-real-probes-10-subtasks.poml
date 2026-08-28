@@ -1,0 +1,154 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="204c" project="customer-provisioning-orchestration-r1">
+  <metadata>
+    <title>Class-B B07 H13 real probes (10 sub-tasks — T1/T2/T3/T4/T5/T6 traps + I2/I3/I4/I5 invariants) — HARD-BLOCKS TASK 186 E2E</title>
+    <phase>Pre-Live-Fire — Class-B H13 acceptance-gate real probes (task 186 blocker)</phase>
+    <gate>blocked</gate>
+    <status>not-started</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Every sub-task modifies `tests/**` (per-probe unit tests) AND touches `src/server/services/Sprk.Provisioning.ControlPlane.Core/Handlers/E2EAcceptance/` DI wiring. Per root CLAUDE.md §8 TEST-MODIFYING override row (2026-06-26): tasks tagged `testing` / `integration-test` trigger FULL rigor UNCONDITIONALLY. Also `l2-controlplane` + `blocks-186` = highest-severity acceptance-gate work.</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Per root CLAUDE.md §8.5: brownfield/root-cause OR complex-but-fully-specified work → Sonnet @ xhigh. This task IS brownfield real-probe authoring against Azure ARM/Cosmos/Graph/SPE APIs against a well-defined interface contract (`IE2ETrapVerifier` / `IE2EInvariantVerifier`). Sub-tasks 171-180 (already numbered in TASK-INDEX for pipeline visibility) are the reference model for what a single probe looks like — this task orchestrates all 10.</model-tier-reason>
+    <effort>xhigh</effort>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>All 10 sub-tasks touch the same DI module `E2EAcceptanceModule.cs` for verifier swap-in — concurrent writes would race. Cannot run alongside 204a/b/d/e that might touch overlapping L2 code.</parallel-reason>
+    <deps>202, 170, 184, 185</deps>
+    <tags>l2-controlplane, testing, integration-test, blocks-186, class-b-verified-open, e2e-acceptance</tags>
+    <estimated-effort>40-80 hours across 10 sub-tasks (if any sub-task exceeds 10h, split into 204c-N standalone POML per escalation trigger)</estimated-effort>
+  </metadata>
+
+  <prompt>Replace the remaining 10 Placeholder verifiers in H13's acceptance-gate suite with real probes, one sub-task per verifier. This is the concrete work behind punch-list row B07 (H13 all-placeholders) — I1 already REAL (task 170 `PackagedScriptTenantLiteralInvariantVerifier`); `DataverseRegistrySetupStatusUpdater` already REAL (task 184); this task delivers T1/T2/T3/T4/T5/T6 traps + I2/I3/I4/I5 invariants. Each sub-task follows the pattern established by `ArmSubscriptionReadinessProbe` (real probe) + task 170 (DI-swap in `E2EAcceptanceModule.cs`): (a) author real probe implementing `IE2ETrapVerifier` or `IE2EInvariantVerifier`; (b) swap in DI at `E2EAcceptanceModule` in place of `PlaceholderTrapVerifier` / `PlaceholderInvariantVerifier` for the SPECIFIC id; (c) unit tests (Pass / Fail / InfraFault outcomes); (d) commit per sub-task; (e) annotate punch list. HARD-BLOCKS task 186: without these 10 sub-tasks, `sprk_dataverseenvironment.SetupStatus` never reaches Ready and E2E fails.</prompt>
+
+  <role>SPAARKE platform developer. Expert in: task 170's real-probe + DI-swap ceremony pattern (`PackagedScriptTenantLiteralInvariantVerifier` reference); `IE2ETrapVerifier` + `IE2EInvariantVerifier` seam contracts; `E2EAcceptanceModule` verifier-registration surface; the 10 subject areas — KV `keyVaultReferenceIdentity` (T1), slot MI KV RBAC (T2), Graph app-role parity (T3), Exchange policy count (T4), slot MI KV RBAC role assignment (T5), SPE confidential-client (T6), Cosmos partition-key (I2), Dataverse App User pair (I3), SPE container ID tenant-derivation (I4), Graph per-tenant token scope (I5); DS-4 §6 H13 placeholder deep-dive rows; task 185 H13 aggregation wiring (this task feeds probes into that aggregator).</role>
+
+  <goal>All 10 Placeholder verifiers replaced with real implementations, each swapped into `E2EAcceptanceModule` DI, each with Pass/Fail/InfraFault outcome tests, each committed atomically per sub-task, each annotated in `notes/task-202-punch-list.md` B07 row's sub-task breakdown. `dotnet build` + `dotnet test` green. H13 aggregation gate (task 185) is now capable of returning Pass on a real customer stamp — task 186 can fire.
+
+Per-sub-task deliverable (10 total):
+- T1: `KeyVaultReferenceIdentityTrapProbe` (ARM.AppService read `Data.KeyVaultReferenceIdentity` on production + staging slots, compare to UAMI resource id)
+- T2: real probe per DS-4 §6 T2 row
+- T3: `GraphAppRoleParityProbe` (14 role assignments live via Graph REST)
+- T4: `ExchangePolicyCountProbe` (sidecar read route per task 180 pipelining)
+- T5: `SlotMIKvRbacRoleAssignmentProbe` (per DS-4 §6 T5 row)
+- T6: `SpeConfidentialClientTrapProbe` (app-only token cert check per DS-4 §6 T6 row)
+- I2: `AiSearchTenantFilterInvariantProbe` (unconditional tenantId eq filter enforcement per §4D I2 / FR-29)
+- I3: `CosmosPartitionKeyInvariantProbe` (partition-key predicate enforcement per §4D I3 / FR-30)
+- I4: `SpeContainerTenantDerivationInvariantProbe` (`ITenantContainerResolver` usage per §4D I4 / FR-31)
+- I5: `GraphTokenTenantScopeInvariantProbe` (per-tenant token acquisition per §4D I5 / FR-32)</goal>
+
+  <context>
+    <background>Task 202's Class-B verification matrix row B07: "PARTIAL — 10 sub-tasks OPEN (task 204c scope)". I1 landed via task 170 (`PackagedScriptTenantLiteralInvariantVerifier`). `DataverseRegistrySetupStatusUpdater` landed via task 184. The 10 remaining probes were sequenced as tasks 171/172/175/177/178/180 (T1-T6) + 173/174/176/179 (I2-I5) in TASK-INDEX.md pipelining visibility, but NONE of them landed (per Worker `Program.cs:847` comment + `PlaceholderInvariantVerifier.cs` retirement banner).
+
+**Why this is task 186's HARD BLOCKER**: task 185 wired the H13 aggregation gate to sum 11 probes → 3 runners → Ready writer. Aggregation returns Pass only when all 11 probes return Pass. With 10 placeholders returning `InfraFault` unconditionally, aggregation NEVER passes, `SetupStatus` NEVER reaches Ready, and task 186 E2E fails at Wave G-7 acceptance. Task 186's dependency chain (185 → 184 → 113 → 162 → this task) is real.
+
+**Sub-sub-phase escalation**: task 202 amendment notes "if any single T{N} or I{N} probe exceeds ~10h, sub-sub-phase 204c into 204c-{index}. Do NOT bundle 10 handlers into one megatask." The 40-80h range presumes ~4-8h per probe (I1's task 170 landed at ~6-9h per its own POML estimate); this task's executor SHOULD split into 204c-1 through 204c-10 individual POMLs if the first sub-task's real complexity exceeds ~8h. Splitting is a legitimate operator choice, not a task failure.
+
+**Reference pattern**: `ArmSubscriptionReadinessProbe.cs` (H1 real probe landed by wave G — see punch list B06 `✅ APPLIED`) demonstrates the exact shape: probe class implements interface, unit tests cover Pass/Fail/InfraFault, DI registration in H1 handler's module. Task 170's `PackagedScriptTenantLiteralInvariantVerifier` + swap in `E2EAcceptanceModule.cs` is the H13-specific reference.</background>
+    <relevant-files>
+      <file role="input">projects/customer-provisioning-orchestration-r1/notes/task-202-punch-list.md B07 row + Class-B verification matrix</file>
+      <file role="canonical-reference">src/server/services/Sprk.Provisioning.ControlPlane.Core/Handlers/E2EAcceptance/PackagedScriptTenantLiteralInvariantVerifier.cs (I1 real impl — reference pattern)</file>
+      <file role="canonical-reference">src/server/services/Sprk.Provisioning.ControlPlane.Core/Handlers/E2EAcceptance/E2EAcceptanceModule.cs (DI-swap surface — verifier registration)</file>
+      <file role="canonical-reference">src/server/services/Sprk.Provisioning.ControlPlane.Core/Handlers/SubscriptionReadiness/ArmSubscriptionReadinessProbe.cs (H1 real ARM probe — reference for cloud-API probes)</file>
+      <file role="canonical-reference">src/server/services/Sprk.Provisioning.ControlPlane.Core/Handlers/E2EAcceptance/DataverseRegistrySetupStatusUpdater.cs (task 184 real writer — H13 acceptance-target transition)</file>
+      <file role="modify">src/server/services/Sprk.Provisioning.ControlPlane.Core/Handlers/E2EAcceptance/PlaceholderTrapVerifier.cs (retire T1-T6 branches OR delete + swap DI)</file>
+      <file role="modify">src/server/services/Sprk.Provisioning.ControlPlane.Core/Handlers/E2EAcceptance/PlaceholderInvariantVerifier.cs (retire I2-I5 branches OR delete + swap DI)</file>
+      <file role="modify">src/server/services/Sprk.Provisioning.ControlPlane.Core/Handlers/E2EAcceptance/E2EAcceptanceModule.cs (10 DI swaps)</file>
+      <file role="modify-tests">tests/unit/Sprk.Provisioning.ControlPlane.Core.Tests/E2EAcceptance/ (10 new test files, Pass/Fail/InfraFault per probe)</file>
+      <file role="reference">projects/customer-provisioning-orchestration-r1/notes/design-study-ds4-handler-audit.md §6 H13 placeholder deep-dive (per-probe row specs)</file>
+      <file role="reference">projects/customer-provisioning-orchestration-r1/tasks/171-t1-keyvaultreferenceidentity-trap-probe-pipelined-with-h2a-h4.poml (sub-task reference — T1 exact spec)</file>
+      <file role="reference">projects/customer-provisioning-orchestration-r1/tasks/173-i2-ai-search-tenant-filter-probe-pipelined-with-h2b.poml (sub-task reference — I2 exact spec)</file>
+      <file role="update">projects/customer-provisioning-orchestration-r1/notes/task-202-punch-list.md B07 row (per-sub-task annotation)</file>
+    </relevant-files>
+    <dependencies>
+      <dependency task="202" status="complete">Punch list authored; B07 sub-task breakdown 2026-08-24 SESSION 7</dependency>
+      <dependency task="170" status="complete">I1 real probe + DI-swap pattern established — canonical reference</dependency>
+      <dependency task="184" status="complete">DataverseRegistrySetupStatusUpdater real writer — H13's acceptance-target transition</dependency>
+      <dependency task="185" status="pending">H13 aggregation wiring — this task's outputs feed into 185's aggregator</dependency>
+    </dependencies>
+    <blocks>
+      <blocked-task task="186" reason="Task 186 E2E cannot succeed without all 10 probes returning real Pass — SetupStatus stays non-Ready otherwise" />
+    </blocks>
+  </context>
+
+  <constraints>
+    <constraint source="task-202 punch list verification obligation">Executor MUST grep-verify EACH sub-task's actual code state BEFORE applying — some of the pre-numbered tasks 171/172/173/174/175/176/177/178/179/180 may have partially landed via mid-batch work. If any sub-task's probe already exists, annotate `already-applied` + skip.</constraint>
+    <constraint source="root CLAUDE.md §10 BFF hygiene">N/A — L2 changes only, not BFF. But if any probe unexpectedly needs BFF code (e.g., calling a BFF endpoint for state check), STOP and escalate — probes should be READ-ONLY against Azure APIs, not against BFF.</constraint>
+    <constraint source="root CLAUDE.md §8 test-modifying rigor override">Every sub-task adds/modifies `tests/**` — TEST-MODIFYING row triggers FULL rigor + `code-review` + `adr-check` at Step 9.5 UNCONDITIONALLY.</constraint>
+    <constraint source=".claude/constraints/testing.md">Probe tests MUST cover: Pass (real-world condition met) / Fail (real-world condition violated — the class-of-bug the probe exists to catch) / InfraFault (Azure API unreachable, retryable). No "always-Pass" fake tests — task 202's whole point is not accepting fake probes.</constraint>
+    <constraint source="DS-4 §6 H13 placeholder deep-dive">Each probe performs INDEPENDENT re-verification, not trust of the handler's own reported success. That's the entire point of a terminal acceptance gate. Do NOT short-circuit by reading `RunStatus.HandlerReports[X].Outcome` — go re-read the underlying Azure/Cosmos/Graph/SPE surface.</constraint>
+    <constraint source="§4D tenant-isolation invariants I2-I5">I2/I3/I4/I5 probes MUST ArchTest-scan the actual code call sites, not runtime traffic. I2 (AI Search tenantId eq filter), I3 (Cosmos partition-key predicate), I4 (`ITenantContainerResolver` usage for SPE), I5 (per-tenant Graph token acquisition). These are STATIC checks + LIVE checks combined.</constraint>
+    <constraint source="root CLAUDE.md §11 Component Justification">Each probe is a NEW class — but the seam (`IE2ETrapVerifier` / `IE2EInvariantVerifier`) already exists. §11 (1) Existing overlap: PlaceholderTrapVerifier/PlaceholderInvariantVerifier — this task REPLACES them; (2) Extension: not applicable — placeholder is a stub for the real probe; (3) Cost-of-doing-nothing: acceptance gate cannot go green → task 186 fails → project's stated FR-18/SC#5 (E2E provisioning demonstration) remains undemonstrated.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>Class-B B07 H13 real probes (10 sub-tasks)</topic>
+    <files>
+      <file>projects/customer-provisioning-orchestration-r1/spec.md</file>
+      <file>projects/customer-provisioning-orchestration-r1/design.md</file>
+      <file>projects/customer-provisioning-orchestration-r1/CLAUDE.md</file>
+      <file>projects/customer-provisioning-orchestration-r1/notes/task-202-punch-list.md</file>
+      <file>projects/customer-provisioning-orchestration-r1/notes/design-study-ds4-handler-audit.md</file>
+      <file>.claude/constraints/testing.md</file>
+      <file>.claude/patterns/testing/god-class-ratchet.md</file>
+    </files>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="0" name="Rigor + load">Emit RIGOR LEVEL (FULL, sonnet/xhigh, TEST-MODIFYING). Read `notes/task-202-punch-list.md` B07 + verification matrix. Read `notes/design-study-ds4-handler-audit.md` §6 H13 placeholder deep-dive (per-probe row specs). Read canonical references (PackagedScriptTenantLiteralInvariantVerifier + ArmSubscriptionReadinessProbe + E2EAcceptanceModule + DataverseRegistrySetupStatusUpdater).</step>
+    <step order="0.5" name="Sub-task complexity check">Read task 171 POML (T1 spec) end-to-end. Estimate T1's real effort. If estimate ≤ 8h → proceed with in-task 10-probe execution. If estimate &gt; 8h → SPLIT: author 10 standalone POMLs (`204c-1-t1.poml` through `204c-10-i5.poml`) using task 171 as the exact template, sequence them in TASK-INDEX, and this 204c POML becomes an orchestration record. Escalation trigger `sub-task-effort-exceeded` fires here.</step>
+    <step order="1" name="T1 KV keyVaultReferenceIdentity">Author `KeyVaultReferenceIdentityTrapProbe` per task 171 spec. Swap in `E2EAcceptanceModule` for T1. Unit tests. Commit `feat(H13): T1 real probe`. Annotate punch list.</step>
+    <step order="2" name="T2 slot MI KV RBAC">Author real probe per DS-4 §6 T2 row (task 172 spec). Swap. Tests. Commit. Annotate.</step>
+    <step order="3" name="T3 Graph app-role parity">Author `GraphAppRoleParityProbe` per task 178 spec (14 role assignments via Graph REST). Swap. Tests. Commit. Annotate.</step>
+    <step order="3.5" name="Checkpoint">Run context-handoff — 3 of 10 probes complete.</step>
+    <step order="4" name="T4 Exchange policy count">Author `ExchangePolicyCountProbe` per task 180 spec (sidecar read route). Swap. Tests. Commit. Annotate.</step>
+    <step order="5" name="T5 slot MI KV RBAC role assignment">Author real probe per task 172 pipelining (or dedicated task 178 spec if different). Swap. Tests. Commit. Annotate.</step>
+    <step order="6" name="T6 SPE confidential-client">Author `SpeConfidentialClientTrapProbe` per task 175 spec (app-only token cert check). Swap. Tests. Commit. Annotate.</step>
+    <step order="6.5" name="Checkpoint">Run context-handoff — 6 of 10 probes complete (all T-traps done).</step>
+    <step order="7" name="I2 AI Search tenant filter">Author `AiSearchTenantFilterInvariantProbe` per task 173 spec (§4D I2 / FR-29). Swap. Tests. Commit. Annotate.</step>
+    <step order="8" name="I3 Cosmos partition-key">Author `CosmosPartitionKeyInvariantProbe` per task 174 spec (§4D I3 / FR-30). Swap. Tests. Commit. Annotate.</step>
+    <step order="9" name="I4 SPE container tenant derivation">Author `SpeContainerTenantDerivationInvariantProbe` per task 176 spec (`ITenantContainerResolver` per §4D I4 / FR-31). Swap. Tests. Commit. Annotate.</step>
+    <step order="10" name="I5 Graph token tenant scope">Author `GraphTokenTenantScopeInvariantProbe` per task 179 spec (per-tenant Graph token per §4D I5 / FR-32). Swap. Tests. Commit. Annotate.</step>
+    <step order="11" name="Build + verify + retirement">`dotnet build src/server/services/Sprk.Provisioning.ControlPlane.Core/` — 0 warnings 0 errors. `dotnet test` — green (10 new test suites). Retire `PlaceholderTrapVerifier.cs` + `PlaceholderInvariantVerifier.cs` per Wave G-6 retired-on-disk-with-banner convention (per punch list B21 spec-amendment convention).</step>
+    <step order="11.5" name="Quality gates">FULL rigor + TEST-MODIFYING → invoke `code-review` + `adr-check` skills per root CLAUDE.md §8. Address any Critical findings.</step>
+    <step order="12" name="Report">Update `current-task.md` + `TASK-INDEX.md`; annotate `notes/task-202-punch-list.md` B07 row: `applied — 10 sub-tasks landed 2026-XX-XX`. Notify task 186 gate check that B07 no longer blocks.</step>
+  </steps>
+
+  <escalation>
+    <trigger name="sub-task-effort-exceeded" phase="Step 0.5">If task 171 T1 real-effort estimate exceeds ~8h (or any subsequent sub-task exceeds ~10h in-flight), SPLIT this task into 204c-1 through 204c-10 standalone POMLs. Do NOT force 10 probes into one megatask. Splitting is a legitimate operator choice per task 202 SESSION 7 amendment escalation-triggers section; this 204c POML then becomes an orchestration record referencing the 10 sub-POMLs. Task 186 dependency changes to `204c-1..204c-10 all complete` from `204c complete`.</trigger>
+    <trigger>If any probe requires BFF code (calling a BFF endpoint for state check), STOP + escalate — probes should be READ-ONLY against Azure APIs (ARM / Cosmos / Graph / SPE), not against BFF. Redesign the probe.</trigger>
+    <trigger>If any tenant-isolation invariant (I2/I3/I4/I5) probe surfaces a REAL production bug (unconditional tenantId filter missing, partition-key omitted, hard-coded container path, static-tenant Graph token), STOP + escalate per project CLAUDE.md § Human Escalation Triggers ("tenant-isolation invariant failure outside expected ArchTest work"). Fix path is per-invariant; do NOT let the probe silently return Pass on broken code.</trigger>
+    <trigger>If any probe cannot be exercised against live Azure at author-time (subject handler not yet live-deployed), author against FAKES per DS-4 §6 "buildable earlier against fakes" note + flag LIVE-verification gap explicitly for task 186 Phase F rerun. Do NOT block this task indefinitely.</trigger>
+  </escalation>
+
+  <tools>
+    <tool name="dotnet">build/test</tool>
+    <tool name="grep">verification of pre-numbered task landings + injection-site enumeration</tool>
+    <tool name="az">reference reads against Azure ARM/Cosmos/Graph/SPE for probe design</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/server/services/Sprk.Provisioning.ControlPlane.Core/Handlers/E2EAcceptance/ (10 real probe classes)</output>
+    <output type="tests">tests/unit/Sprk.Provisioning.ControlPlane.Core.Tests/E2EAcceptance/ (10 test files, Pass/Fail/InfraFault per probe)</output>
+    <output type="dispose">PlaceholderTrapVerifier.cs + PlaceholderInvariantVerifier.cs (retire per Wave G-6 on-disk-with-banner convention)</output>
+    <output type="annotation">projects/customer-provisioning-orchestration-r1/notes/task-202-punch-list.md B07 row (per-sub-task outcomes)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">All 10 Placeholder verifiers replaced with real implementations; PlaceholderTrapVerifier + PlaceholderInvariantVerifier retired (on-disk-with-banner or deleted per B21 convention).</criterion>
+    <criterion testable="true">Each of 10 probes has Pass/Fail/InfraFault outcome tests confirming a FAILING real-world condition produces Fail (not InfraFault, not false Pass).</criterion>
+    <criterion testable="true">Each of 10 probes registered in `E2EAcceptanceModule.cs` in place of its Placeholder counterpart.</criterion>
+    <criterion testable="true">`dotnet build src/server/services/Sprk.Provisioning.ControlPlane.Core/` and `dotnet build tests/unit/Sprk.Provisioning.ControlPlane.Core.Tests/` exit 0 with 0 warnings.</criterion>
+    <criterion testable="true">`dotnet test` — all 10 new probe test suites green.</criterion>
+    <criterion testable="true">`notes/task-202-punch-list.md` B07 row annotated with 10 per-sub-task outcomes + overall row status `applied`.</criterion>
+    <criterion testable="true">Step 11.5 quality gates (code-review + adr-check) invoked; TEST-MODIFYING rigor override honored.</criterion>
+    <criterion testable="true">Task 186's E2E gate check no longer flags B07 as blocking (B07 verification matrix row shows `applied`).</criterion>
+  </acceptance-criteria>
+
+  <notes>Justification (CLAUDE.md §11): Existing — `IE2ETrapVerifier` + `IE2EInvariantVerifier` seams already exist; `E2EAcceptanceModule` registration surface already exists; task 170's `PackagedScriptTenantLiteralInvariantVerifier` establishes the pattern. Extension — this task INSTANTIATES 10 real probes against the existing seam, replacing 10 placeholders. Not new components in the §11 sense; new instances of an established pattern. Cost-of-doing-nothing — H13 acceptance gate returns InfraFault for 10 of 11 checks → aggregation never Pass → SetupStatus never Ready → task 186 E2E fails → project's FR-18/SC#5 stated goal (E2E customer provisioning demonstration) remains undemonstrated. THIS IS the load-bearing task that unblocks the terminal acceptance ceremony.
+
+**Splitting note**: if 204c splits into 204c-1..204c-10, this POML becomes the orchestration record with `<sub-tasks>` element listing the 10 standalone POMLs. Task 186's dependency updates accordingly.</notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+  </execution>
+</task>

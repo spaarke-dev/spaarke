@@ -84,7 +84,7 @@ public sealed class SendWorkspaceArtifactHandlerTests : TypedToolHandlerTestFixt
     private SendWorkspaceArtifactHandler CreateHandler() => new(
         _guidProvider.Object,
         _timeProvider,
-        new WorkspaceLayoutService(_entityService.Object, CreateLogger<WorkspaceLayoutService>()),
+        new WorkspaceLayoutService(_entityService.Object, global::Sprk.Bff.Api.Tests.Services.Workspace.StubSystemUserIdentityResolver.Instance, CreateLogger<WorkspaceLayoutService>()),
         _dataverse.Object,
         _ackCoordinator.Object,
         _sessionManager,

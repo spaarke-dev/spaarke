@@ -1,6 +1,7 @@
 using System.Security.Claims;
 using System.Text.Json.Serialization;
 using Spaarke.Dataverse;
+using Sprk.Bff.Api.Infrastructure.Authentication;
 
 namespace Sprk.Bff.Api.Services.SpeAdmin;
 
@@ -143,8 +144,7 @@ public class SpeAuditService
         return user.FindFirstValue("preferred_username")
             ?? user.FindFirstValue("upn")
             ?? user.FindFirstValue(ClaimTypes.Upn)
-            ?? user.FindFirstValue("oid")
-            ?? user.FindFirstValue(ClaimTypes.NameIdentifier)
+            ?? CallerResolution.ResolveObjectId(user)
             ?? user.Identity?.Name
             ?? "unknown";
     }

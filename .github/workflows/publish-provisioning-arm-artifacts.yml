@@ -1,0 +1,284 @@
+# ============================================================================
+# publish-provisioning-arm-artifacts.yml — Pre-compile customer-stamp Bicep
+# templates to ARM JSON and publish them as versioned artifacts for H2a.
+# ============================================================================
+#
+# WHY THIS WORKFLOW EXISTS (customer-provisioning-orchestration-r1 task 117,
+# Phase C'' Wave G-1, design.md DS-1b §1 H2a row / §4A / §4.2a):
+#
+#   H2a's ARM SDK port (task 123, Wave G-2) deploys the customer Azure stamp
+#   via Azure.ResourceManager.Resources.ArmDeploymentResource.CreateOrUpdateAsync
+#   -- but the ARM SDK deploys ARM *JSON*, not raw .bicep source. Under Option D
+#   (DS-1b), the L2 main-site App Service is a stock code-based deploy with
+#   ZERO shells (no bicep CLI, no az CLI, no pac -- design.md §4.2a) -- so the
+#   Bicep -> ARM-JSON compile CANNOT happen at provision time inside L2. It
+#   must happen here, in CI, once per source change, with the result shipped
+#   as a versioned artifact H2a's handler downloads and deploys as-is.
+#
+#   Bundling the `bicep` binary into the L2 runtime was explicitly REJECTED
+#   (DS-1b §1 H2a row) to preserve Option D's zero-shell/zero-extra-binary
+#   constraint on the main site -- this workflow is the alternative the design
+#   study chose instead.
+#
+# TEMPLATE SCOPE (verified against
+# Sprk.Provisioning.ControlPlane.Handlers.BicepInfraDeploy.FileBicepTemplateInspector.
+# ResolveTemplatePath, the authoritative C# source for which template H2a
+# deploys per TenancyModel):
+#   - infrastructure/bicep/customer.bicep            (DEFAULT -- Model2Dedicated
+#     and any TenancyModel value other than 'Model1Shared')
+#   - infrastructure/bicep/stacks/model1-shared.bicep (TenancyModel == 'Model1Shared')
+#   Both templates compose exclusively local relative-path `module` references
+#   (infrastructure/bicep/modules/*.bicep) -- no `Microsoft.Resources/templateSpecs`
+#   / template-spec-by-id references were found in either template's module
+#   graph, so `az bicep build` fully flattens each into nested
+#   `Microsoft.Resources/deployments` resources within a SINGLE ARM JSON file.
+#   (The POML's escalation trigger -- a module referencing a template spec by
+#   id, which would force a nested-template strategy change on H2a's handler
+#   design -- does NOT fire; see this task's coordination note for the local
+#   `az bicep build` verification that confirmed this.)
+#
+# STORAGE TARGET: the SAME `provisioning-artifacts` blob container task 116
+# established for the H9 BFF artifact (bff-api-{buildId}.zip + latest.json)
+# -- one container, one consumption story for H2a's future Azure.Storage.Blobs
+# client. See projects/customer-provisioning-orchestration-r1/notes/
+# h2a-bicep-precompile-ci-coord-pr.md for the full design + the open
+# live-ceremony item (the platform storage account does not exist yet --
+# same escalation task 116 already filed; NOT duplicated here as a second
+# ask, just re-flagged for whichever Bicep task lands the storage account).
+#
+# Governance: r1 holds DIRECT-COMMIT ownership of .github/workflows/** for
+# Phase C'' scope as of commit 8281045052 (see projects/customer-provisioning-
+# orchestration-r1/CLAUDE.md "Coordination with other worktrees" section) --
+# this is authored directly, not as a coordination note for another worktree
+# to apply (same posture as tasks 115/116).
+# ============================================================================
+
+name: Publish Provisioning ARM Artifacts
+
+on:
+  push:
+    branches: [master]
+    paths:
+      - 'infrastructure/bicep/customer.bicep'
+      - 'infrastructure/bicep/stacks/model1-shared.bicep'
+      - 'infrastructure/bicep/modules/**'
+      - '.github/workflows/publish-provisioning-arm-artifacts.yml'
+  workflow_dispatch: {}
+
+permissions:
+  contents: read
+  id-token: write  # Required for OIDC-based Azure login (no stored storage-account key)
+
+concurrency:
+  group: publish-provisioning-arm-artifacts-${{ github.ref }}
+  cancel-in-progress: false  # Never cancel an in-flight artifact publish
+
+jobs:
+  compile-and-publish:
+    name: Compile Bicep -> ARM JSON and publish
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Compute build identifiers (buildId + sha)
+        id: build-id
+        shell: bash
+        run: |
+          set -euo pipefail
+          # Same convention as build-provisioning-sidecar.yml (task 115) and
+          # deploy-bff-api.yml's H9 extension (task 116): date + monotonic
+          # run-number -- deterministic, stable, human-sortable, and immune to
+          # same-day-dispatch collisions. sha is carried separately.
+          build_id="$(date -u +%Y.%m.%d)-${{ github.run_number }}"
+          echo "build_id=${build_id}" >> "$GITHUB_OUTPUT"
+          echo "sha=${{ github.sha }}" >> "$GITHUB_OUTPUT"
+
+      - name: az bicep install (pin the CLI's bundled Bicep compiler explicitly)
+        shell: bash
+        run: |
+          set -euo pipefail
+          az bicep install
+          az bicep version
+
+      - name: Record Bicep CLI version
+        id: bicep-version
+        shell: bash
+        run: |
+          set -euo pipefail
+          ver="$(az bicep version | sed -n 's/^Bicep CLI version \([0-9.]*\).*/\1/p')"
+          echo "version=${ver}" >> "$GITHUB_OUTPUT"
+
+      - name: Compile customer.bicep -> ARM JSON
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p ./out
+          az bicep build \
+            --file infrastructure/bicep/customer.bicep \
+            --outfile "./out/customer-arm-${{ steps.build-id.outputs.build_id }}.json"
+
+      - name: Compile stacks/model1-shared.bicep -> ARM JSON
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p ./out
+          az bicep build \
+            --file infrastructure/bicep/stacks/model1-shared.bicep \
+            --outfile "./out/model1-shared-arm-${{ steps.build-id.outputs.build_id }}.json"
+
+      # Both `az bicep build` invocations above run WITHOUT continue-on-error:
+      # a Bicep compile failure means there is no valid ARM JSON to publish at
+      # all, so this job fails fast and hard here -- unlike task 116's r3
+      # gates (which are advisory-in-manifest, hard-fail-at-the-end), a broken
+      # Bicep source is not something a downstream H2a consumer can route
+      # around.
+
+      - name: Compute SHA-256 + size for each compiled artifact
+        id: hashes
+        shell: bash
+        run: |
+          set -euo pipefail
+          customer_file="./out/customer-arm-${{ steps.build-id.outputs.build_id }}.json"
+          shared_file="./out/model1-shared-arm-${{ steps.build-id.outputs.build_id }}.json"
+
+          customer_sha256="$(sha256sum "${customer_file}" | cut -d' ' -f1)"
+          shared_sha256="$(sha256sum "${shared_file}" | cut -d' ' -f1)"
+          customer_size="$(stat -c%s "${customer_file}")"
+          shared_size="$(stat -c%s "${shared_file}")"
+
+          echo "customer_sha256=${customer_sha256}" >> "$GITHUB_OUTPUT"
+          echo "shared_sha256=${shared_sha256}" >> "$GITHUB_OUTPUT"
+          echo "customer_size=${customer_size}" >> "$GITHUB_OUTPUT"
+          echo "shared_size=${shared_size}" >> "$GITHUB_OUTPUT"
+
+      - name: Azure Login (OIDC)
+        uses: azure/login@v2
+        with:
+          client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+
+      - name: Push compiled ARM JSON blobs to provisioning-artifacts (OIDC, no stored key)
+        # PROVISIONING_ARTIFACTS_STORAGE_ACCOUNT is a repo VARIABLE (a
+        # storage-account name is not confidential), matching the
+        # vars.SIDECAR_ACR_LOGIN_SERVER precedent.
+        #
+        # PROVISIONED (comment corrected 2026-08-27). This previously read "NOT
+        # YET PROVISIONED as of this workflow's authoring (2026-08-19)". The
+        # variable was populated 2026-08-21 with `sprkcpartifactsdev`
+        # (rg-spaarke-platform-dev), and the `provisioning-artifacts` container
+        # exists. Same stale-comment failure mode as the one corrected in
+        # build-provisioning-sidecar.yml: it invites the reader to explain a red
+        # step as "the account doesn't exist yet" and stop looking.
+        #
+        # The remaining blocker is RBAC, and specifically the management-plane
+        # vs data-plane split: the GitHub SP holds `Contributor` at subscription
+        # scope, which manages the storage account but does NOT grant blob data
+        # access. These uploads use `--auth-mode login` (Entra data-plane auth,
+        # no stored key), so they additionally require `Storage Blob Data
+        # Contributor` on the account. Contributor is not a superset of it.
+        #
+        # APPLIED 2026-08-27 -- `Storage Blob Data Contributor` granted to the
+        # deployment app (github-actions-spe-infrastructure,
+        # 8c85a481-f3a0-46de-b84e-3ede8a4d60c3) at RESOURCE-GROUP scope:
+        #
+        #   az role assignment create \
+        #     --assignee 8c85a481-f3a0-46de-b84e-3ede8a4d60c3 \
+        #     --role "Storage Blob Data Contributor" \
+        #     --scope /subscriptions/<sub>/resourceGroups/rg-spaarke-platform-dev
+        #
+        # RG scope rather than single-account scope is deliberate (owner
+        # decision): it covers future artifact accounts in this RG without a
+        # second grant. Still well short of subscription scope.
+        #
+        # Verified: this workflow ran green end-to-end after the grant --
+        # Azure Login, both blob uploads, and manifest generation.
+        #
+        # NOTE if you are running this from Git Bash on Windows: MSYS rewrites a
+        # leading /subscriptions/... into a Windows path and az fails with a
+        # confusing `MissingSubscription`. Prefix with MSYS_NO_PATHCONV=1.
+        run: |
+          az storage blob upload \
+            --account-name "${{ vars.PROVISIONING_ARTIFACTS_STORAGE_ACCOUNT }}" \
+            --container-name provisioning-artifacts \
+            --name "customer-arm-${{ steps.build-id.outputs.build_id }}.json" \
+            --file "./out/customer-arm-${{ steps.build-id.outputs.build_id }}.json" \
+            --auth-mode login \
+            --overwrite false
+
+          az storage blob upload \
+            --account-name "${{ vars.PROVISIONING_ARTIFACTS_STORAGE_ACCOUNT }}" \
+            --container-name provisioning-artifacts \
+            --name "model1-shared-arm-${{ steps.build-id.outputs.build_id }}.json" \
+            --file "./out/model1-shared-arm-${{ steps.build-id.outputs.build_id }}.json" \
+            --auth-mode login \
+            --overwrite false
+
+      - name: Generate manifest (versioned + latest pointer -- AFTER both blobs upload)
+        shell: bash
+        run: |
+          set -euo pipefail
+          cat > ./provisioning-arm-manifest.json <<EOF
+          {
+            "buildId": "${{ steps.build-id.outputs.build_id }}",
+            "sha": "${{ steps.build-id.outputs.sha }}",
+            "publishedAt": "$(date -u +%Y-%m-%dT%H:%M:%SZ)",
+            "bicepCliVersion": "${{ steps.bicep-version.outputs.version }}",
+            "templates": {
+              "customer": {
+                "sourcePath": "infrastructure/bicep/customer.bicep",
+                "resolutionHint": "Default template -- selected by FileBicepTemplateInspector.ResolveTemplatePath for any TenancyModel value other than 'Model1Shared' (currently: 'Model2Dedicated').",
+                "armJsonBlobName": "customer-arm-${{ steps.build-id.outputs.build_id }}.json",
+                "sha256": "${{ steps.hashes.outputs.customer_sha256 }}",
+                "sizeBytes": ${{ steps.hashes.outputs.customer_size }}
+              },
+              "model1-shared": {
+                "sourcePath": "infrastructure/bicep/stacks/model1-shared.bicep",
+                "resolutionHint": "Selected by FileBicepTemplateInspector.ResolveTemplatePath when TenancyModel == 'Model1Shared' (case-insensitive).",
+                "armJsonBlobName": "model1-shared-arm-${{ steps.build-id.outputs.build_id }}.json",
+                "sha256": "${{ steps.hashes.outputs.shared_sha256 }}",
+                "sizeBytes": ${{ steps.hashes.outputs.shared_size }}
+              }
+            }
+          }
+          EOF
+          cat ./provisioning-arm-manifest.json
+
+          # Versioned copy -- immutable audit trail, one per buildId, never
+          # overwritten (parity with the individual ARM JSON blobs above).
+          az storage blob upload \
+            --account-name "${{ vars.PROVISIONING_ARTIFACTS_STORAGE_ACCOUNT }}" \
+            --container-name provisioning-artifacts \
+            --name "provisioning-arm-${{ steps.build-id.outputs.build_id }}.json" \
+            --file "./provisioning-arm-manifest.json" \
+            --auth-mode login \
+            --overwrite false
+
+          # Mutable "latest" pointer -- H2a's default resolution point (task
+          # 123's handler reads this unless a run is pinned to a specific
+          # buildId). Named distinctly from H9's own "latest.json" (task 116)
+          # since both live in the SAME provisioning-artifacts container and
+          # must not collide.
+          az storage blob upload \
+            --account-name "${{ vars.PROVISIONING_ARTIFACTS_STORAGE_ACCOUNT }}" \
+            --container-name provisioning-artifacts \
+            --name "provisioning-arm-latest.json" \
+            --file "./provisioning-arm-manifest.json" \
+            --auth-mode login \
+            --overwrite true
+
+      - name: Summary
+        if: always()
+        shell: bash
+        run: |
+          {
+            echo "### Provisioning ARM artifact publish"
+            echo "- Build ID: \`${{ steps.build-id.outputs.build_id }}\`"
+            echo "- SHA: \`${{ steps.build-id.outputs.sha }}\`"
+            echo "- customer-arm-${{ steps.build-id.outputs.build_id }}.json: ${{ steps.hashes.outputs.customer_size }} bytes"
+            echo "- model1-shared-arm-${{ steps.build-id.outputs.build_id }}.json: ${{ steps.hashes.outputs.shared_size }} bytes"
+            echo "- Manifest: provisioning-arm-${{ steps.build-id.outputs.build_id }}.json + provisioning-arm-latest.json"
+            echo "- Container: provisioning-artifacts (account: \`${{ vars.PROVISIONING_ARTIFACTS_STORAGE_ACCOUNT }}\`)"
+          } >> "$GITHUB_STEP_SUMMARY"

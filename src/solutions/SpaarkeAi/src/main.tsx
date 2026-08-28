@@ -44,6 +44,12 @@ import {
   buildBffApiUrl,
 } from "@spaarke/auth";
 import { setRuntimeConfig } from "./config/runtimeConfig";
+// customer-provisioning-orchestration-r1 task 087 (FR-36 close-pattern): fetch the
+// per-env public config bundle (bffUrl / msalClientId / tenantId / featureFlags) from
+// the BFF at bootstrap BEFORE MSAL init. The endpoint is short-cached (60s + ETag)
+// and anonymous, so it does NOT block the auth path — its purpose is to make feature
+// flags flow at runtime instead of being baked at build time (one build, N envs).
+import { fetchPublicConfig } from "./config/publicConfig";
 import { ensureAuthInitialized } from "./services/authInit";
 import { initNotificationsClient } from "./services/notificationsBootstrap";
 import { App } from "./App";
@@ -422,6 +428,17 @@ async function bootstrap(): Promise<void> {
   } catch {
     // localStorage may be unavailable (private browsing) — non-fatal
   }
+
+  // -------------------------------------------------------------------------
+  // 1a. Public runtime config bundle (FR-36 close-pattern —
+  //     customer-provisioning-orchestration-r1 task 087). Fetches /api/config
+  //     for the per-env feature-flag map BEFORE MSAL init so downstream code
+  //     can read flags without a build-time bake. Non-blocking on error: a
+  //     failure leaves the feature-flag map empty and `getFeatureFlag(name,
+  //     default)` falls back to the caller's default. The endpoint is anonymous
+  //     + short-cached (60s + ETag) — safe to call before auth init.
+  // -------------------------------------------------------------------------
+  await fetchPublicConfig(config.bffBaseUrl);
 
   // -------------------------------------------------------------------------
   // 2. Auth initialization — single MSAL instance via @spaarke/auth

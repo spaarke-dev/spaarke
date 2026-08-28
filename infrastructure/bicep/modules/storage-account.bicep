@@ -24,8 +24,11 @@ param disableSharedKeyAccess bool = false
 @description('Subnet ID for VNet network rule (empty = allow all)')
 param allowedSubnetId string = ''
 
-@description('App Service principal ID for Storage Blob Data Contributor RBAC role')
+@description('App Service principal ID for Storage Blob Data Contributor RBAC role. HISTORICALLY the per-customer BFF App Service SystemAssigned MI; task 029 removed the SystemAssigned MI from `modules/app-service.bicep`. Task 030 canonical replacement is `userAssignedIdentityPrincipalId` below. Retained for legacy callers as interim safety net per plan.md §3 — remove post-Phase F acceptance.')
 param appServicePrincipalId string = ''
+
+@description('Principal ID of the per-customer User-Assigned Managed Identity (from `modules/uami.bicep`, task 028) granted Storage Blob Data Contributor (built-in role `ba92f5b4-2d11-453d-a403-e96b0029c9fe`) on this Storage account. Task 030 canonical target per ADR-028 (UAMI-first data-plane access). Empty default skips the assignment (caller-side wiring). Emitted assignment sets principalType=ServicePrincipal.')
+param userAssignedIdentityPrincipalId string = ''
 
 @description('Tags for the resource')
 param tags object = {}
@@ -148,6 +151,8 @@ resource lifecyclePolicy 'Microsoft.Storage/storageAccounts/managementPolicies@2
 // Storage Blob Data Contributor built-in role ID
 var storageBlobDataContributorRoleId = 'ba92f5b4-2d11-453d-a403-e96b0029c9fe'
 
+// interim per plan.md §3 — remove post-Phase F acceptance (UAMI grants proven).
+// See `key-vault.bicep` "interim" comment for full rationale (task 029 removed SA-MI).
 resource storageBlobRbac 'Microsoft.Authorization/roleAssignments@2022-04-01' = if (!empty(appServicePrincipalId)) {
   // Use a deterministic GUID based on storage + principal + role to avoid conflicts
   name: guid(storageAccount.id, appServicePrincipalId, storageBlobDataContributorRoleId)
@@ -155,6 +160,20 @@ resource storageBlobRbac 'Microsoft.Authorization/roleAssignments@2022-04-01' = 
   properties: {
     roleDefinitionId: subscriptionResourceId('Microsoft.Authorization/roleDefinitions', storageBlobDataContributorRoleId)
     principalId: appServicePrincipalId
+    principalType: 'ServicePrincipal'
+  }
+}
+
+// Canonical Phase-C grant per task 030 + ADR-028: UAMI is granted Storage Blob Data
+// Contributor. Stable across App Service slot swaps (T5 fix). principalType=ServicePrincipal
+// avoids Azure Graph propagation-delay "principal not found" deploy failures. Idempotent
+// guid() name.
+resource uamiStorageBlobRbac 'Microsoft.Authorization/roleAssignments@2022-04-01' = if (!empty(userAssignedIdentityPrincipalId)) {
+  name: guid(storageAccount.id, userAssignedIdentityPrincipalId, storageBlobDataContributorRoleId)
+  scope: storageAccount
+  properties: {
+    roleDefinitionId: subscriptionResourceId('Microsoft.Authorization/roleDefinitions', storageBlobDataContributorRoleId)
+    principalId: userAssignedIdentityPrincipalId
     principalType: 'ServicePrincipal'
   }
 }

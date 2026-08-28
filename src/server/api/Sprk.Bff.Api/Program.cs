@@ -2,6 +2,8 @@ using Azure.Monitor.OpenTelemetry.AspNetCore;      // R7-S7: UseAzureMonitor() e
 using Sprk.Bff.Api.Api.Membership;                 // R3 task 035 — AddMembershipApi() pairing
 using Sprk.Bff.Api.Api.Reporting;
 using Sprk.Bff.Api.Api.Dataverse;                  // Dataverse passthrough endpoints (Phase B)
+using Sprk.Bff.Api.Endpoints.Diagnostics;          // G-8 Batch 6 — I4 tenant-container-resolver diagnostic (customer-provisioning-r1)
+using Sprk.Bff.Api.Endpoints.Onboarding;           // task 042 — H0.5 consent-callback (customer-provisioning-r1)
 using Sprk.Bff.Api.Infrastructure.DI;
 using Sprk.Bff.Api.Infrastructure.Startup;         // R2 FR-06: AzureMonitorGuard
 using Sprk.Bff.Api.Services.Ai.LinearConsumers;    // R7 Wave 12 — Linear AI Consumer library
@@ -210,6 +212,21 @@ builder.Services.AddAgentModule(builder.Configuration);
 // match to avoid the RB-T028-03/04/05/06 asymmetric-registration anti-pattern. R1 has
 // no feature gates per project CLAUDE.md.
 builder.Services.AddComposeModule();
+
+// Onboarding surface (customer-provisioning-orchestration-r1, task 042) —
+// H0.5 consent-callback endpoint (Anonymous+HMAC) + Service Bus enqueuer
+// to the L2 provisioning queue. Placement Justification per CLAUDE.md §10:
+// the callback IS the extension point (design.md D18) — cannot live elsewhere;
+// scoped to a single new Endpoints/Onboarding/ folder (bounded per spec
+// ADR-010 tension row); NO AI-internal injection (ADR-013 forcing-function).
+builder.Services.AddOnboardingModule(builder.Configuration, builder.Environment);
+
+// Diagnostics surface (customer-provisioning-orchestration-r1, G-8 Batch 6 fix #18) —
+// ITenantContainerResolver for GET /api/diagnostics/tenant-container-resolver, the
+// BFF-side dependency of the L2 H13 I4 invariant probe. Unconditional per ADR-032 /
+// bff-extensions.md §F.1 (endpoint maps unconditionally). READ-ONLY; no AI-internal
+// types (ADR-013); zero new packages. See Endpoints/Diagnostics/DiagnosticsModule.cs.
+builder.Services.AddDiagnosticsModule();
 
 // CORS (secure, fail-closed configuration)
 builder.Services.AddCorsModule(builder.Configuration, builder.Environment);

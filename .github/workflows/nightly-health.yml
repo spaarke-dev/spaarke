@@ -531,7 +531,11 @@ jobs:
         uses: actions/checkout@v6
 
       - name: Run Trivy filesystem scan
-        uses: aquasecurity/trivy-action@0.28.0
+        # Pinned to a tag that EXISTS. This previously read `@0.28.0`, which is not a
+        # tag in aquasecurity/trivy-action — the release is `v0.28.0`, with the `v`.
+        # GitHub reports the miss as "Unable to resolve action ... unable to find version",
+        # so the step never ran and the nightly job was red every night.
+        uses: aquasecurity/trivy-action@v0.36.0
         with:
           scan-type: 'fs'
           scan-ref: '.'
@@ -655,12 +659,96 @@ jobs:
           path: dotnet-audit.txt
           retention-days: 14
 
+  # -----------------------------------------------------------------------
+  # customer-provisioning-orchestration-r1 task 067 — Nightly Graph app-role
+  # parity for UAMI SP ↔ GraphAppRoles.cs (14 roles). T3 silent-fail-trap
+  # safety net. Coord-PR spec: projects/customer-provisioning-orchestration-r1
+  # /notes/graph-app-role-parity-coord-pr.md (detail) + notes/phase-h-ci-wiring-coord-pr.md §3 (umbrella).
+  # -----------------------------------------------------------------------
+  graph-app-role-parity:
+    name: Graph App-Role Parity (UAMI SP vs GraphAppRoles.cs)
+    runs-on: ubuntu-latest
+    # Advisory during rollout window (per r3 deferral doc — do NOT flip
+    # blocking until zero-findings baseline holds ≥ 7 nightly runs).
+    continue-on-error: true
+    permissions:
+      id-token: write         # OIDC federated credential for Azure login
+      contents: read
+    env:
+      # UAMI_SP_OBJECT_ID: SERVICE PRINCIPAL OBJECT ID (not appId) of the
+      # target customer's UAMI. Stored per-environment in GH Actions secrets.
+      UAMI_SP_OBJECT_ID: ${{ secrets.NIGHTLY_UAMI_SP_OBJECT_ID }}
+      # AZURE_TENANT_ID: the Entra tenant hosting the UAMI (§4D I5 —
+      # explicit tenantId; no ambient default).
+      AZURE_TENANT_ID: ${{ secrets.NIGHTLY_AZURE_TENANT_ID }}
+    steps:
+      # This job was wired ahead of the environment it watches. None of the four
+      # NIGHTLY_* secrets it needs have ever existed in this repo, so `azure/login`
+      # failed every night with "Not all values are present" and the nightly report
+      # carried a permanent red that had nothing to do with code health.
+      #
+      # Skipping instead of deleting: the parity check guards a real T3 silent-fail
+      # trap (a customer UAMI whose Graph app-roles have drifted from
+      # GraphAppRoles.cs grants nothing and reports nothing), and the provisioning
+      # pipeline it covers has not been stood up yet. Deleting would mean
+      # re-authoring it later; this way it arms itself the moment the secrets exist.
+      #
+      # To enable: create NIGHTLY_GRAPH_READER_CLIENT_ID, NIGHTLY_AZURE_TENANT_ID,
+      # NIGHTLY_SUBSCRIPTION_ID and NIGHTLY_UAMI_SP_OBJECT_ID as repository secrets.
+      # No workflow change is needed — the guard below flips on its own.
+      - name: Check whether this job is configured
+        id: guard
+        run: |
+          missing=""
+          [ -n "${{ secrets.NIGHTLY_GRAPH_READER_CLIENT_ID }}" ] || missing="$missing NIGHTLY_GRAPH_READER_CLIENT_ID"
+          [ -n "${{ secrets.NIGHTLY_AZURE_TENANT_ID }}" ]        || missing="$missing NIGHTLY_AZURE_TENANT_ID"
+          [ -n "${{ secrets.NIGHTLY_SUBSCRIPTION_ID }}" ]        || missing="$missing NIGHTLY_SUBSCRIPTION_ID"
+          [ -n "${{ secrets.NIGHTLY_UAMI_SP_OBJECT_ID }}" ]      || missing="$missing NIGHTLY_UAMI_SP_OBJECT_ID"
+          if [ -n "$missing" ]; then
+            echo "configured=false" >> "$GITHUB_OUTPUT"
+            echo "::notice::Graph app-role parity SKIPPED — not configured. Missing secret(s):$missing"
+          else
+            echo "configured=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      - uses: actions/checkout@v6
+        if: steps.guard.outputs.configured == 'true'
+
+      - name: Setup .NET SDK (pin to global.json)
+        if: steps.guard.outputs.configured == 'true'
+        uses: actions/setup-dotnet@v6
+        with:
+          global-json-file: global.json
+
+      - name: Azure login (OIDC federated MI)
+        if: steps.guard.outputs.configured == 'true'
+        uses: azure/login@v2
+        with:
+          client-id: ${{ secrets.NIGHTLY_GRAPH_READER_CLIENT_ID }}
+          tenant-id: ${{ secrets.NIGHTLY_AZURE_TENANT_ID }}
+          subscription-id: ${{ secrets.NIGHTLY_SUBSCRIPTION_ID }}
+
+      - name: Restore + build nightly test project
+        if: steps.guard.outputs.configured == 'true'
+        run: |
+          dotnet restore tests/integration/Sprk.Provisioning.ControlPlane.NightlyTests/
+          dotnet build tests/integration/Sprk.Provisioning.ControlPlane.NightlyTests/ \
+            -c Release --no-restore
+
+      - name: Run Graph app-role parity test
+        if: steps.guard.outputs.configured == 'true'
+        # xunit forwards the diff-formatted Assert.Fail message into the
+        # workflow log — no --logger-html needed for triage.
+        run: |
+          dotnet test tests/integration/Sprk.Provisioning.ControlPlane.NightlyTests/ \
+            -c Release --no-build --logger "console;verbosity=normal"
+
   # -------------------------------------------------------------------------
   # report: create/update single tracking issue
   # -------------------------------------------------------------------------
   report:
     name: Update tracking issue
-    needs: [flake-hunt, bundle-size, vuln-scan, full-integration, coverage-observation, trivy-fs, dep-audit]
+    needs: [flake-hunt, bundle-size, vuln-scan, full-integration, coverage-observation, trivy-fs, dep-audit, graph-app-role-parity]
     if: always()
     runs-on: ubuntu-latest
     timeout-minutes: 10
@@ -682,6 +770,7 @@ jobs:
           COVERAGE_PCT: ${{ needs.coverage-observation.outputs.coverage_pct }}
           TRIVY_HIGH_OR_CRITICAL: ${{ needs.trivy-fs.outputs.high_or_critical_count }}
           DEP_VULN_COUNT: ${{ needs.dep-audit.outputs.vuln_count }}
+          GRAPH_PARITY_RESULT: ${{ needs.graph-app-role-parity.result }}
         shell: bash
         run: |
           set -euo pipefail
@@ -742,6 +831,16 @@ jobs:
 
           Combined: \`dotnet list package --vulnerable --include-transitive\` + \`npm audit\`
           across key client packages.
+
+          ## Graph app-role parity (UAMI SP vs GraphAppRoles.cs — advisory)
+          - Result: **${GRAPH_PARITY_RESULT:-?}**
+
+          Job carries \`continue-on-error: true\` during rollout (per
+          customer-provisioning-orchestration-r1 task 067/088 coord-notes) —
+          SKIPPED is expected until \`NIGHTLY_UAMI_SP_OBJECT_ID\` /
+          \`NIGHTLY_AZURE_TENANT_ID\` / \`NIGHTLY_GRAPH_READER_CLIENT_ID\` /
+          \`NIGHTLY_SUBSCRIPTION_ID\` secrets are populated. Flip to blocking
+          after ≥7 consecutive GREEN/SKIPPED nightly runs.
 
           ---
           _Generated by \`.github/workflows/nightly-health.yml\`. Each night a new comment is appended; the issue stays open until a clean night._

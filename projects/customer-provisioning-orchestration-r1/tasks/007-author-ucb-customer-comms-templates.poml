@@ -1,0 +1,107 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="007" project="customer-provisioning-orchestration-r1">
+  <metadata>
+    <title>Author 6 U-CB customer-comms templates in docs/deployment/customer-comms/ (U-CB-1..U-CB-6)</title>
+    <phase>A Doc Consolidation + Audits</phase>
+    <gate>startable</gate>
+    <status>not-started</status>
+    <rigor>MINIMAL</rigor>
+    <rigor-reason>Documentation-only template authoring. New markdown files; no code changes; no tests. Per root CLAUDE.md §8 rigor table, docs-only = MINIMAL. Owner Assumption: text-only markdown, no HTML/branded email.</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Standard doc authoring with well-defined breaking-change classes (§14A.4). Per Step 3.5.5b default = sonnet.</model-tier-reason>
+    <effort>medium</effort>
+    <parallel-group>groupA-parallel</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <deps>none</deps>
+    <tags>docs, deploy</tags>
+    <estimated-effort>3-4 hours</estimated-effort>
+  </metadata>
+
+  <prompt>
+Author 6 customer-communication templates in docs/deployment/customer-comms/, one per U-CB breaking-change class per spec.md FR-34 + §14A.4: U-CB-1 (column removal), U-CB-2 (vector dimension change), U-CB-3 (permission additions), U-CB-4 (SPE schema change), U-CB-5 (KV secret cascading rotation), U-CB-6 (client secret expiry). Each template is plain-text markdown for operator use; no HTML, no branded email formatting (per Assumptions).
+  </prompt>
+
+  <role>SPAARKE platform documentation author. Familiar with the 6 U-CB breaking-change classes per §14A.4, customer-comms tone, and Spaarke's upgrade model (BFF/Solution/Bicep classes).</role>
+
+  <goal>docs/deployment/customer-comms/ contains 6 template files (U-CB-1-column-removal.md, U-CB-2-vector-dim-change.md, U-CB-3-permission-additions.md, U-CB-4-spe-schema.md, U-CB-5-kv-secret-cascading.md, U-CB-6-client-secret-expiry.md) each containing: (a) breaking-change summary + trigger conditions, (b) customer impact + timeline, (c) operator-required customer action + confirmation-of-receipt mechanism, (d) rollback semantics if applicable, (e) plain-text markdown only per Assumptions.</goal>
+
+  <context>
+    <background>
+Per spec.md FR-34 + § New Components row 14 + design.md §14A.4. Without the templates, U-CB breaking-change deploys blindside customers (severity: customer trust). Phase A publication provides the operator with ready-to-send content. Owner Assumption (spec.md): text-only markdown, no HTML/branded email; operator adapts per customer channel (email/portal/Slack/etc).
+    </background>
+    <relevant-files>
+      <file role="new">docs/deployment/customer-comms/U-CB-1-column-removal.md</file>
+      <file role="new">docs/deployment/customer-comms/U-CB-2-vector-dim-change.md</file>
+      <file role="new">docs/deployment/customer-comms/U-CB-3-permission-additions.md</file>
+      <file role="new">docs/deployment/customer-comms/U-CB-4-spe-schema.md</file>
+      <file role="new">docs/deployment/customer-comms/U-CB-5-kv-secret-cascading.md</file>
+      <file role="new">docs/deployment/customer-comms/U-CB-6-client-secret-expiry.md</file>
+      <file role="canonical-reference">projects/customer-provisioning-orchestration-r1/design.md</file>
+      <file role="canonical-reference">projects/customer-provisioning-orchestration-r1/spec.md</file>
+    </relevant-files>
+    <dependencies>
+      <dependency task="none" status="complete">Phase A is startable</dependency>
+    </dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="spec.md">SCOPE: Exactly 6 templates — one per U-CB-N class per §14A.4. Fewer OR more is a defect.</constraint>
+    <constraint source="spec.md">SCOPE: Plain-text markdown only (per Assumptions). Do NOT introduce HTML/branded/table-styled email formatting.</constraint>
+    <constraint source="spec.md">SCOPE: Each template MUST cover: summary + trigger + customer impact + timeline + required customer action + confirmation-of-receipt + rollback. A missing section is a defect.</constraint>
+    <constraint source="project">SCOPE: Do NOT prescribe customer-facing SLAs or contractual language; the templates are operational text, not legal/marketing copy.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>Upgrade breaking-change classes + customer-comms tone</topic>
+    <files>
+      <file>projects/customer-provisioning-orchestration-r1/spec.md</file>
+      <file>projects/customer-provisioning-orchestration-r1/design.md</file>
+      <file>projects/customer-provisioning-orchestration-r1/CLAUDE.md</file>
+    </files>
+    <patterns>
+      <pattern name="Spaarke plain-markdown template" location="docs/deployment/">Front-matter (Purpose + Applies-when + Owner) → Body sections per constraint → Placeholders in {curly-braces} for operator substitution.</pattern>
+    </patterns>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="0" name="Context + rigor declaration">Emit the 🔒 RIGOR LEVEL block. Load design.md §14A.4 U-CB definitions.</step>
+    <step order="1" name="Enumerate U-CB classes">Confirm the 6 classes per §14A.4: U-CB-1 column removal, U-CB-2 vector dim change, U-CB-3 permission additions, U-CB-4 SPE schema, U-CB-5 KV secret cascading, U-CB-6 client secret expiry.</step>
+    <step order="2" name="Design common template shape">Define the 7-section shape (summary/trigger/impact/timeline/action/confirmation/rollback) as the shared skeleton.</step>
+    <step order="3" name="Author U-CB-1..U-CB-6">Draft each template with U-CB-specific content; use {placeholders} for customer-name/date/version details operators fill.</step>
+    <step order="4" name="Publish">Write all 6 files under docs/deployment/customer-comms/.</step>
+    <step order="5" name="Cross-reference">Ensure the new authoritative deploy guide (task 001) + version-compatibility matrix (task 006) reference these templates; add cross-refs bidirectionally.</step>
+    <step order="6" name="Index update">Update TASK-INDEX.md: set task 007 status to ✅.</step>
+    <step order="7" name="Deviations">Document any deviation in projects/customer-provisioning-orchestration-r1/notes/.</step>
+  </steps>
+
+  <justification>
+    <existing>No prior customer-comms template surface exists in docs/deployment/ per spec.md § New Components row 14 (grep-confirmed).</existing>
+    <extension>No — no existing template surface covers upgrade breaking-change customer communication; extending general release-notes would conflate reference docs with per-change customer-facing copy.</extension>
+    <cost-of-doing-nothing>Without the templates, U-CB breaking-change deploys blindside customers (severity: customer trust — cited verbatim in spec.md § New Components row 14). Operator has to hand-author comms per incident under time pressure, producing inconsistent tone + missed rollback semantics.</cost-of-doing-nothing>
+  </justification>
+
+  <tools>
+    <tool name="terminal">basic file operations</tool>
+  </tools>
+
+  <outputs>
+    <output type="docs">docs/deployment/customer-comms/U-CB-1-column-removal.md</output>
+    <output type="docs">docs/deployment/customer-comms/U-CB-2-vector-dim-change.md</output>
+    <output type="docs">docs/deployment/customer-comms/U-CB-3-permission-additions.md</output>
+    <output type="docs">docs/deployment/customer-comms/U-CB-4-spe-schema.md</output>
+    <output type="docs">docs/deployment/customer-comms/U-CB-5-kv-secret-cascading.md</output>
+    <output type="docs">docs/deployment/customer-comms/U-CB-6-client-secret-expiry.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Given docs/deployment/customer-comms/, when listing, then exactly 6 files matching U-CB-{1..6}-*.md exist.</criterion>
+    <criterion testable="true">Given each template, when scanning sections, then all 7 mandated sections (summary/trigger/impact/timeline/action/confirmation/rollback) are present.</criterion>
+    <criterion testable="true">Given each template, when reading, then plain-text markdown only — no HTML tags, no inline styles, no image/table formatting beyond markdown-basic.</criterion>
+    <criterion testable="true">Given the version-compatibility matrix (task 006), when reading remediation section, then it cross-references the appropriate U-CB template.</criterion>
+    <criterion testable="true">Negative: git diff shows only the 6 new template files + cross-ref updates — no code/Bicep/script touched.</criterion>
+  </acceptance-criteria>
+
+  <notes>Spec FR-34 + § New Components row 14 + Assumptions row 7. Paired with task 006 (matrix) and task 001 (deploy guide) to form the customer-facing documentation surface.</notes>
+
+  <execution><skill>.claude/skills/task-execute/SKILL.md</skill></execution>
+</task>

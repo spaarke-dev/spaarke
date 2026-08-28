@@ -5,6 +5,7 @@ using Microsoft.Xrm.Sdk.Query;
 using Spaarke.Dataverse;
 using Sprk.Bff.Api.Services.Communication;
 using Sprk.Bff.Api.Services.Communication.Models;
+using Sprk.Bff.Api.Infrastructure.Authentication;
 
 namespace Sprk.Bff.Api.Api.Office;
 
@@ -128,8 +129,7 @@ public static class OfficeCommunicationsEndpoints
         CancellationToken ct)
     {
         var traceId = context.TraceIdentifier;
-        var userId = context.User.FindFirstValue(System.Security.Claims.ClaimTypes.NameIdentifier)
-            ?? context.User.FindFirstValue("oid");
+        var userId = CallerResolution.ResolveObjectId(context.User);
 
         // Defensive: empty / whitespace path segment should never reach us (the route
         // template requires a value), but guard anyway.
@@ -254,8 +254,7 @@ public static class OfficeCommunicationsEndpoints
         CancellationToken ct)
     {
         var traceId = context.TraceIdentifier;
-        var userId = context.User.FindFirstValue(System.Security.Claims.ClaimTypes.NameIdentifier)
-            ?? context.User.FindFirstValue("oid");
+        var userId = CallerResolution.ResolveObjectId(context.User);
 
         if (string.IsNullOrWhiteSpace(internetMessageId))
         {
@@ -381,8 +380,7 @@ public static class OfficeCommunicationsEndpoints
         CancellationToken ct)
     {
         var traceId = context.TraceIdentifier;
-        var userId = context.User.FindFirstValue(System.Security.Claims.ClaimTypes.NameIdentifier)
-            ?? context.User.FindFirstValue("oid");
+        var userId = CallerResolution.ResolveObjectId(context.User);
 
         logger.LogInformation(
             "Listing linked todos for sprk_communication {CommunicationId}, " +

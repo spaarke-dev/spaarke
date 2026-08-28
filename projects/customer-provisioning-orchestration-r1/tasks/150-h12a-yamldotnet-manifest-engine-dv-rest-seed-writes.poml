@@ -1,0 +1,132 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="150" project="customer-provisioning-orchestration-r1">
+  <metadata>
+    <title>H12a: YamlDotNet manifest engine + DV-REST seed writes</title>
+    <phase>C'' Wave G-5 -- Seed</phase>
+    <gate>passed</gate>
+    <status>completed</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Replaces a shell-out to a script requiring a second PowerShell module (powershell-yaml) -- a DS-1b matrix-correction item; feeds the AI seed chain (ADR-039 playbook consumers).</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Well-specified port reusing an EXISTING in-process idiom (H12c's RuntimeReferencesWriter) -- Sonnet @ high per DS-1b's 4-5 person-day estimate.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>waveG5-parallel</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <deps>141</deps>
+    <tags>l2-controlplane, job-handler, option-d, sdk-port, ai</tags>
+    <estimated-effort>8-12 hours</estimated-effort>
+  </metadata>
+
+  <prompt>Port H12aAiSeedChainHandler.cs's collaborator InvokeSeedManifestScriptRunner (seed-data/Invoke-SeedManifest.ps1, 536 lines: Install-Module powershell-yaml + Dataverse Web API Invoke-RestMethod under ambient az token) to YamlDotNet (manifest parse) + Dataverse Web API HttpClient writes -- THE EXACT PATTERN H12c's RuntimeReferencesWriter ALREADY USES IN-PROCESS (reuse that idiom, do not invent a new one). Seed manifests become embedded content files in the payload (needed under every architecture option, not merely Option D). This CLOSES the DS-1b matrix-correction finding: 'DS-1 §1.2 exactly one PowerShell module is wrong -- Invoke-SeedManifest.ps1:162-165 requires powershell-yaml (a second module)' -- YamlDotNet eliminates that second-module dependency entirely.</prompt>
+
+  <role>SPAARKE platform developer. Expert in YamlDotNet manifest parsing and the Dataverse Web API upsert idiom H12c already proves in-process.</role>
+
+  <goal>H12aAiSeedChainHandler.cs's manifest-driven seed collaborator is a pure .NET implementation: YamlDotNet parses the seed manifest (now an embedded content file, not a filesystem path), and Dataverse Web API HttpClient writes perform the seed upserts, following the SAME in-process pattern H12c's RuntimeReferencesWriter already ships. manifest-hash idempotency (re-running an unchanged manifest is a no-op) and per-step outcome classification are preserved from the script's existing semantics.</goal>
+
+  <context>
+    <background>DS-1b §1 (H12a row, collaborator #22) explicitly names the reuse target: 'YamlDotNet (manifest parse) + Dataverse Web API HttpClient (the EXACT pattern H12c's RuntimeReferencesWriter already uses in-process); seed manifests become content files in the payload (needed under every option).' DS-1b §1's 'Matrix corrections to DS-1's fact base' section flags the powershell-yaml second-module finding this task's YamlDotNet port directly resolves.</background>
+    <relevant-files>
+      <file role="modify">src/server/services/Sprk.Provisioning.ControlPlane.Core/Handlers/AiSeedChain/H12aAiSeedChainHandler.cs</file>
+      <file role="new">src/server/services/Sprk.Provisioning.ControlPlane.Core/Handlers/AiSeedChain/YamlSeedManifestEngine.cs</file>
+      <file role="new">src/server/services/Sprk.Provisioning.ControlPlane.Core/Handlers/AiSeedChain/DataverseWebApiSeedWriter.cs</file>
+      <file role="canonical-reference">scripts/seed-data/Invoke-SeedManifest.ps1</file>
+      <file role="canonical-reference">src/server/services/Sprk.Provisioning.ControlPlane.Core/Handlers/RuntimeReferences/H12cRuntimeReferencesHandler.cs (the in-process idiom to reuse)</file>
+    </relevant-files>
+    <dependencies>
+      <dependency task="141" status="pending">H6 must have imported the solutions/tables H12a seeds into</dependency>
+    </dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="design.md §4.1b">Handler runtime classification (Option D hybrid, DS-1b Sec.2): 12 handlers are pure .NET SDK/REST under DefaultAzureCredential pinned to the L2 UAMI (Class A); H14a is the sole Class-C residual (Exchange sidecar); H7/H10/H11/H12c are already native. No ProcessStartInfo/shell-out collaborator may remain in this handler's target state.</constraint>
+    <constraint source="spec.md MUST rules (post-line-254 block)">No new ProcessStartInfo/shell-out collaborator may be introduced by this task. Option D's entire point is deleting the pwsh/az/pac dependency from the L2 runtime, not adding to it (the sole designed exception is the H14a Exchange sidecar).</constraint>
+    <constraint source="DS-1b §1 H12a row">REUSE H12c's exact in-process Dataverse Web API upsert idiom -- do not invent a second, parallel Dataverse-write helper for H12a when one already exists and is proven.</constraint>
+    <constraint source=".claude/adr/ADR-039-grounded-execution-closed-catalogs.md">H12a seeds playbook consumers per ADR-039's single-AI-routing-surface model -- verify the seed manifest's playbook-consumer entries match the ADR-039 shape (spaarke-playbook-embeddings retired).</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>H12a YamlDotNet manifest engine port</topic>
+    <files>
+      <file>projects/customer-provisioning-orchestration-r1/spec.md</file>
+      <file>projects/customer-provisioning-orchestration-r1/design.md</file>
+      <file>projects/customer-provisioning-orchestration-r1/CLAUDE.md</file>
+      <file>projects/customer-provisioning-orchestration-r1/notes/design-study-ds4-handler-audit.md</file>
+      <file>projects/customer-provisioning-orchestration-r1/notes/design-study-ds1b-option-d-hybrid-deep-dive.md</file>
+      <file>.claude/adr/ADR-039-grounded-execution-closed-catalogs.md</file>
+    </files>
+    <patterns>
+      <pattern name="In-process Dataverse Web API upsert (reuse)" location="src/server/services/Sprk.Provisioning.ControlPlane.Core/Handlers/RuntimeReferences/">H12c's RuntimeReferencesWriter already proves the exact HttpClient + DefaultAzureCredential upsert pattern H12a's seed writer reuses.</pattern>
+    </patterns>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="0" name="Rigor + load">Emit RIGOR LEVEL (FULL). Read Invoke-SeedManifest.ps1 in full plus H12c's RuntimeReferencesWriter in full as the reuse target.</step>
+    <step order="1" name="Manifest as content">Move the seed manifest(s) into embedded content files consumed at runtime (not a filesystem path).</step>
+    <step order="2" name="YamlSeedManifestEngine">Author the YamlDotNet-based parser producing the same in-memory manifest shape the script's downstream logic consumed.</step>
+    <step order="3" name="DataverseWebApiSeedWriter">Author the writer reusing H12c's exact upsert idiom for the seed rows this manifest declares.</step>
+    <step order="4" name="Idempotency">Preserve manifest-hash idempotency semantics (re-run of an unchanged manifest = no-op) per the script's existing behavior.</step>
+    <step order="5" name="Wire up">Replace InvokeSeedManifestScriptRunner in H12a's owning module with the new implementation.</step>
+    <step order="6" name="Tests">manifest-hash idempotency tests + per-step outcome tests per DS-4 §7's test-effort note.</step>
+    <step order="7" name="Build + verify">dotnet build 0 errors; dotnet test green; grep 'powershell-yaml\|ProcessStartInfo' in the new files returns 0 matches.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If the seed manifest's YAML shape uses a feature YamlDotNet's default deserializer does not support out-of-the-box (a custom PowerShell-yaml-specific extension), STOP and escalate to determine whether the manifest itself should be simplified or a custom YamlDotNet type converter is warranted — do not silently drop unsupported manifest fields.</trigger>
+  </escalation>
+
+  <tools>
+    <tool name="dotnet">build/test</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/server/services/Sprk.Provisioning.ControlPlane.Core/Handlers/AiSeedChain/YamlSeedManifestEngine.cs</output>
+    <output type="code">src/server/services/Sprk.Provisioning.ControlPlane.Core/Handlers/AiSeedChain/DataverseWebApiSeedWriter.cs</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">grep 'powershell-yaml\|Install-Module\|ProcessStartInfo' in the new H12a collaborator files returns 0 matches.</criterion>
+    <criterion testable="true">A test confirms re-running the seed process against an UNCHANGED manifest is a no-op (manifest-hash idempotency).</criterion>
+    <criterion testable="true">A test confirms the writer reuses H12c's upsert idiom (same request-shape pattern, verified by comparing the constructed HTTP requests' shape) rather than a parallel implementation.</criterion>
+    <criterion testable="true">dotnet build exits 0; dotnet test exits 0.</criterion>
+  </acceptance-criteria>
+
+  <notes>Justification (CLAUDE.md §11): Existing -- H12c's RuntimeReferencesWriter already proves the exact in-process Dataverse upsert pattern this task's writer reuses; nothing new to invent there. Extension -- adding YamlDotNet as the manifest-parse layer (replacing a second PowerShell module dependency) while reusing the proven writer idiom is the minimal correct move. Cost-of-doing-nothing -- H12a cannot execute under Option D's zero-shell main site; separately, the powershell-yaml second-module dependency (a DS-1b matrix-correction finding) would otherwise persist as an unnecessary Option-D image-spec gap even under a fat-container fallback.</notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+  </execution>
+
+  <notes-completion>
+    Completed 2026-08-20 (Wave G-5 Batch G-5A). Deleted InvokeSeedManifestScriptRunner.cs
+    (ProcessStartInfo shell-out); new YamlSeedManifestEngine.cs (YamlDotNet parse +
+    Kahn's-algorithm topological sort, embedded-resource read) + new
+    DataverseWebApiSeedWriter.cs (ISeedManifestRunner impl reusing
+    DataverseWebApiModelDeploymentReferenceWriter's H12c idiom verbatim — HttpClient +
+    DefaultAzureCredential, find-by-filter existence check, JsonContent POST).
+
+    SCOPE BOUNDARY (documented at file-header level, ADR-039 Path A per adr-check):
+    the writer directly seeds the 4 manifest artifacts whose deployer.idempotencyMode
+    is "existence-check-then-insert" AND whose authoritativeSource is a flat JSON
+    content file with no relationship wiring (type-lookups/knowledge/skills/output-types
+    — 44 rows total against an empty env). The remaining 8 artifacts (4 R7 per-file
+    directory loaders already PENDING under the retired PS script; playbooks-mvp /
+    action-outputschema-patches / playbook-consumers — N:N relationship-association
+    writes, a materially different operation shape than H12c's flat-upsert idiom this
+    task's constraint scoped the writer to reuse; aimodeldeployment — H12c-owned
+    placeholder) report the SAME PENDING/PLACEHOLDER marker semantics
+    Invoke-SeedManifest.ps1 already emitted for its own deployer:null artifacts — no
+    observability regression, and no ADR-039 retired-artifact re-introduction (that
+    defense-in-depth scan stays in FileSeedManifestReader, untouched by this task).
+    Relationship-wiring support for the 3 remaining seeded-content artifacts is a
+    legitimate, cleanly-separable follow-on task.
+
+    Quality gates: /code-review (0 critical/warning; 4 low-severity AI-smell notes, all
+    convention-consistent) + /adr-check (5 compliant, 1 documented Path-A warning on
+    ADR-039 scope boundary above, 0 violations) both run per root CLAUDE.md §8 FULL
+    rigor. L2 unit suite: 1044/1044 passing (baseline 1005 + task 151's +19 + this
+    task's +20 new tests). Pre-existing, unrelated ArchTest gap noted: 2
+    CosmosProvisioningSecretGuardTests fail looking for the retired pre-split
+    `Sprk.Provisioning.ControlPlane` project bin dir (superseded by the .Core/.Api/.Worker
+    split, predates this task, out of scope to fix here).
+  </notes-completion>
+</task>

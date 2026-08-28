@@ -1,0 +1,102 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="012" project="customer-provisioning-orchestration-r1">
+  <metadata>
+    <title>Extend scripts/Deploy-DataverseSolutions.ps1 to invoke Package Deployer for dependency-ordered import (8 solutions)</title>
+    <phase>B Gap Automation Script Hardening</phase>
+    <gate>startable</gate>
+    <status>completed</status>
+    <rigor>STANDARD</rigor>
+    <rigor-reason>Modifies existing PowerShell script; not BFF code; introduces Package Deployer invocation. Per root CLAUDE.md §8, script hardening with explicit constraints = STANDARD.</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Well-scoped extension with a clear pattern (Package Deployer CLI + dependency-ordered import). Per Step 3.5.5b default = sonnet.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>groupB-parallel</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <deps>none</deps>
+    <tags>powershell, dataverse, deploy</tags>
+    <estimated-effort>4-6 hours</estimated-effort>
+  </metadata>
+
+  <prompt>
+Extend scripts/Deploy-DataverseSolutions.ps1 to invoke Microsoft Package Deployer for dependency-ordered import of the 8 authoritative solutions per spec.md FR-09 + §11.1a. Ordering: SpaarkeCore (Tier 1) → webresources (Tier 2) → CalendarSidePane / DocumentUploadWizard / EventCommands / EventDetailSidePane / EventsPage / LegalWorkspace (Tier 3 parallel-safe). Upgrade mode retires the holding solution. This is the H6 handler's underlying invocation.
+  </prompt>
+
+  <role>SPAARKE platform DevOps engineer fluent with Microsoft Package Deployer, Dataverse managed-solution lifecycle, PAC CLI, and PowerShell 7.4+. Familiar with $SolutionImportOrder convention.</role>
+
+  <goal>scripts/Deploy-DataverseSolutions.ps1 extended to: (a) invoke Package Deployer for the 8 authoritative solutions in dependency order per $SolutionImportOrder, (b) support fresh-install AND upgrade modes (upgrade retires holding solution per spec FR-09), (c) verify each solution imports at correct version before proceeding to next dep tier, (d) fail fast + emit diagnostic on any solution import error, (e) exit 0 only when all 8 solutions successfully imported at expected versions.</goal>
+
+  <context>
+    <background>
+Per spec.md FR-09 + §11.1a + design.md § handlers H6. The current Deploy-DataverseSolutions.ps1 imports solutions but does not use Package Deployer (which provides dependency handling + upgrade-mode retire-holding-solution semantics). H6 handler needs Package Deployer for reliable dependency-ordered import. Q2 owner clarification confirmed 8 solutions (not "~10").
+    </background>
+    <relevant-files>
+      <file role="modify">scripts/Deploy-DataverseSolutions.ps1</file>
+      <file role="canonical-reference">projects/customer-provisioning-orchestration-r1/notes/solutions-reconciliation-2026-08.md</file>
+      <file role="canonical-reference">projects/customer-provisioning-orchestration-r1/design.md</file>
+    </relevant-files>
+    <dependencies>
+      <dependency task="none" status="complete">Phase B is startable (task 008 audit is Phase A parallel but not a hard prereq)</dependency>
+    </dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="spec.md">SCOPE: Import EXACTLY the 8 authoritative solutions per $SolutionImportOrder — Q2 owner clarification. Importing 10 or an ad-hoc subset is a defect.</constraint>
+    <constraint source="spec.md">SCOPE: Dependency ordering per §11.1a: SpaarkeCore (Tier 1) MUST complete before webresources (Tier 2); both MUST complete before Tier 3 parallel-safe imports.</constraint>
+    <constraint source="spec.md">SCOPE: Upgrade mode retires the holding solution (per FR-09); fresh-install mode does not (no holding solution to retire).</constraint>
+    <constraint source="project">SCOPE: Per-solution version verification (target-vs-imported) MUST occur before moving to next dependency tier; blind ordering is a defect.</constraint>
+    <constraint source="project">SCOPE: On any solution import error, script exits non-zero with the failing solution name + Package Deployer diagnostic. Silent continue is a defect.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>Package Deployer + Dataverse solution lifecycle</topic>
+    <files>
+      <file>projects/customer-provisioning-orchestration-r1/spec.md</file>
+      <file>projects/customer-provisioning-orchestration-r1/design.md</file>
+      <file>projects/customer-provisioning-orchestration-r1/CLAUDE.md</file>
+      <file>.claude/constraints/data.md</file>
+      <file>.claude/patterns/dataverse/</file>
+    </files>
+    <patterns>
+      <pattern name="Dependency-ordered import" location="scripts/Deploy-DataverseSolutions.ps1">Tier map → per-tier loop → per-solution import + verify → block Tier N+1 until Tier N verified.</pattern>
+    </patterns>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="0" name="Context + rigor declaration">Emit the 🔒 RIGOR LEVEL block. Load spec.md FR-09 + §11.1a + design.md H6.</step>
+    <step order="1" name="Baseline">Read current Deploy-DataverseSolutions.ps1; enumerate current import mechanism + $SolutionImportOrder contents.</step>
+    <step order="2" name="Confirm Package Deployer availability">Verify `pac package deploy` availability (PAC CLI ≥ 1.35 per operator setup) OR PackageDeployer.exe path for the target env.</step>
+    <step order="3" name="Design tier map">Encode Tier 1 / Tier 2 / Tier 3 dependency map per §11.1a in a $SolutionTiers hashtable.</step>
+    <step order="4" name="Refactor import loop">Rewrite import loop: per-tier → per-solution `pac package deploy` (or equivalent) → verify version via `pac solution list` → block next tier if verification fails.</step>
+    <step order="5" name="Add upgrade-mode branch">Detect upgrade mode via param OR presence of prior-version rows; retire holding solution per FR-09 upgrade-mode semantics.</step>
+    <step order="6" name="Test">Run against dev Dataverse env (fresh + upgrade scenarios); verify all 8 solutions land at expected versions; verify upgrade mode retires holding solution.</step>
+    <step order="7" name="Failure-mode test">Simulate a solution import error (e.g., missing dependency); verify script exits non-zero with clear diagnostic and does NOT proceed to next tier.</step>
+    <step order="8" name="Index update">Update TASK-INDEX.md: set task 012 status to ✅.</step>
+    <step order="9" name="Deviations">Document any deviation in projects/customer-provisioning-orchestration-r1/notes/.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If any of the 8 solutions cannot be imported via Package Deployer (e.g., PAC version doesn't support required flags, or a solution's version metadata drifted from $SolutionImportOrder), STOP and escalate per CLAUDE.md §6 rather than switching to raw Web API import. Raw fallback loses dependency-ordering guarantees that H6 handler depends on.</trigger>
+  </escalation>
+
+  <tools>
+    <tool name="pwsh">PowerShell 7.4+</tool>
+    <tool name="pac">PAC CLI for solution operations</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">scripts/Deploy-DataverseSolutions.ps1 (Package Deployer + dependency-ordered)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Given a fresh dev Dataverse env, when running the script, then all 8 solutions import in dependency order and script exits 0.</criterion>
+    <criterion testable="true">Given a re-run against the same env, when running, then script detects "already at version" state, retires holding solution if in upgrade mode, and exits 0.</criterion>
+    <criterion testable="true">Given a simulated Tier 1 (SpaarkeCore) import error, when running, then script exits non-zero BEFORE attempting Tier 2/3 imports; diagnostic includes solution name + Package Deployer error.</criterion>
+    <criterion testable="true">Given the script, when scanning code, then $SolutionImportOrder is the single source for the 8 solutions — no ad-hoc list literal.</criterion>
+    <criterion testable="true">Negative: git diff scope = scripts/Deploy-DataverseSolutions.ps1 only.</criterion>
+    <criterion testable="true">Negative: no solution outside the 8 authoritative set is imported (Q2 owner clarification enforced).</criterion>
+  </acceptance-criteria>
+
+  <notes>Spec FR-09 + §11.1a + Q2. Wave C4 H6 handler consumes this script. Completed 2026-08-17: tier-grouped fail-fast import loop + Package Deployer upgrade semantics via `pac solution import --stage-and-upgrade` + per-tier version verification gate + Get-SolutionVersionFromZip helper + -Mode {Auto|FreshInstall|Upgrade} parameter + docstring "10" -> "8" corrections. Deviation rationale (chose --stage-and-upgrade over `pac package deploy` package-project assembly): notes/task-012-deviations.md.</notes>
+
+  <execution><skill>.claude/skills/task-execute/SKILL.md</skill></execution>
+</task>

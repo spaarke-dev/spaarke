@@ -91,6 +91,25 @@ public class DataverseEnvironmentRecord
     };
 
     /// <summary>
+    /// Selects the default environment from a list of active environments. Returns the record
+    /// where <see cref="IsDefault"/> is true; if none is marked default, falls back to the first
+    /// entry. Throws <see cref="InvalidOperationException"/> if the list is empty.
+    ///
+    /// Preserves the historical selection semantics from the (now removed) usages of
+    /// <c>DemoProvisioningOptions.Environments</c> + <c>DemoProvisioningOptions.DefaultEnvironment</c>
+    /// so that DemoExpirationService and RegistrationDataverseService can migrate onto
+    /// <see cref="DataverseEnvironmentService"/> without functional regression. See
+    /// customer-provisioning-orchestration-r1 tasks 080 and 081.
+    /// </summary>
+    public static DataverseEnvironmentRecord SelectDefault(IReadOnlyList<DataverseEnvironmentRecord> envs)
+    {
+        ArgumentNullException.ThrowIfNull(envs);
+        if (envs.Count == 0)
+            throw new InvalidOperationException("No active Dataverse environments configured.");
+        return envs.FirstOrDefault(e => e.IsDefault) ?? envs[0];
+    }
+
+    /// <summary>
     /// Maps an OData JSON element to a DataverseEnvironmentRecord.
     /// Follows the same pattern as RegistrationDataverseService.MapToRecord.
     /// </summary>

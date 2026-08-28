@@ -1,0 +1,218 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="200" project="customer-provisioning-orchestration-r1">
+  <metadata>
+    <title>Implement H4SharedKvSecretsPopulationHandler: seed shared KV from source Azure services via SDK-native extraction (F19 automation)</title>
+    <phase>H-Prime — Absorb F19/F20 first-live findings into handler catalog</phase>
+    <gate>blocked</gate>
+    <status>not-started</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Task tags include 'l2-controlplane','job-handler','auth','azure-deployment'; introduces a NEW handler primitive (source-extraction pattern for shared-tier KV); modifies task 084's shipped canonical manifest schema + generator (additive but multi-file); .cs implementation on all 4 L2 projects (`.Core` handler + seams, `.Worker` DI, `.Tests` unit tests, `.Core` DI catalog); auth-sensitive (writes 6+ secrets that gate BFF startup); any bug produces silent BFF fail-fast at boot (F20 pattern).</rigor-reason>
+    <model-tier>opus</model-tier>
+    <model-tier-reason>Per project CLAUDE.md §Model tier defaults: Opus for Phase H canonical secret-catalog manifest generator + high-blast-radius extensions. H4-shared introduces the source-extraction primitive that Model 2 Dedicated will also consume; getting the schema right the first time avoids Model-2 churn. Also modifies task 084's shipped generator (delicate — must preserve determinism + all 4 fan-outs).</model-tier-reason>
+    <effort>xhigh</effort>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Modifies task 084 shipped manifest + generator. Depends on task 084 landed 2026-08-17 (`70abd9992`). Blocks task 201 (H4b) — H4b's KV-refs resolve to secrets H4-shared seeds. Serial: 084 (done) → 200 (this task) → 201.</parallel-reason>
+    <deps>036, 044, 084</deps>
+    <tags>l2-controlplane, job-handler, auth, azure-deployment, config</tags>
+    <estimated-effort>6-10 hours</estimated-effort>
+  </metadata>
+
+  <prompt>Implement H4SharedKvSecretsPopulationHandler in `Sprk.Provisioning.ControlPlane.Core\Handlers\KvSecretsPopulation\` alongside the existing H4 handler (task 047). H4-shared is the SIBLING of H4: same `KvSecretsPopulationOptions`, same `IKvSecretsWriter` (SDK-based `SecretClientKvWriter`), same `IArmKeyVaultRefProbe`, same `IKvSecretManifest` reader — but seeds the SHARED-tier KV by EXTRACTING credentials from source Azure services via Azure.ResourceManager SDK (AI Search admin key, Cognitive Services key1, Service Bus root SAS, Storage connection string, Redis composed connection string). Additively extends task 084's canonical secret-catalog manifest with a new `value_source: "from-shared-service"` enum value + conditional scalar `service_ref:` field on shared-tier entries. Idempotent: verify existing secret matches current source; only rotate on drift (audit-logged). All source extractors use Azure.ResourceManager.* SDK (NOT `az` CLI shell-out) for testability and pattern-alignment with H4.</prompt>
+
+  <role>SPAARKE platform developer. Expert in the L2 4-project scaffold (`Sprk.Provisioning.ControlPlane.{Api,Worker,Core,Tests}`), the `IProvisioningHandler` contract (returns `HandlerResult`, NOT exceptions for domain failures), Azure.ResourceManager SDK (`ArmClient` extension methods for Search/CognitiveServices/ServiceBus/Storage/Redis), Azure Key Vault + RBAC (Secrets Officer for write; Secrets User for read), the 3-file DI dance (`HandlerIds.cs` + `HandlerDispatchRegistrationModule.cs` + `.Worker\Program.cs`), and the H4 exemplar (H4KvSecretsPopulationHandler.cs — the canonical reference). Follow ADRs strictly.</role>
+
+  <goal>Files exist and the following contract is satisfied: (a) `Sprk.Provisioning.ControlPlane.Core\Handlers\KvSecretsPopulation\H4SharedKvSecretsPopulationHandler.cs` implements `IProvisioningHandler`; (b) new seam `ISourceServiceKeyExtractor` at same folder with `SdkSourceServiceKeyExtractor` impl using Azure.ResourceManager SDK; (c) `IKvSecretValueResolver` gains new strategy for `value_source: "from-shared-service"` OR (equivalently) H4-shared handler resolves values directly via `ISourceServiceKeyExtractor` and passes to `IKvSecretsWriter`; (d) canonical manifest schema at `scripts/canonical-secret-catalog/manifest.yaml` extended with `from-shared-service` enum value + optional scalar `service_ref:` field (conditionally required when `value_source == from-shared-service`); (e) `Invoke-CatalogGenerator.ps1` extended: `$AllowedValueSources` gains new value, `Test-ManifestShape` enforces conditional-required rule for `service_ref`, `-Verify` still exits 0 on unchanged inputs; (f) initial 6-entry F19 manifest additions committed (AiSearch--AdminKey, DocumentIntelligence-ApiKey, AzureOpenAI-ApiKey, servicebus-connection-string, storage-connection-string, redis-connection-string all with `value_source: "from-shared-service"` + `service_ref:`); (g) new `HandlerIds.H4Shared` const + entry in `Dispatchable` list; (h) `HandlerDispatchRegistrationModule.cs` gains keyed factory forwarder; (i) `.Worker\Program.cs` gains concrete DI registrations (Options bind, seam Singletons, handler Scoped); (j) `Sprk.Provisioning.ControlPlane.Tests\Handlers\H4SharedKvSecretsPopulationHandlerTests.cs` with hand-rolled fakes (per H4 test file exemplar) covering: 6-source-type happy path, source-drift rotation, existing-and-matching NO-OP, source-service-unreachable Quarantine, BINDING guard (never-delete secrets are NOT in H4-shared's target set), idempotency, cleartext-secret leak scan, manifest v1 backwards compat (entries without `service_ref` skipped, not errored); (k) `HandlerRegistrationCompletenessTests` still passes; (l) `dotnet build src/server/services/Sprk.Provisioning.ControlPlane.Core/` + `dotnet build src/server/services/Sprk.Provisioning.ControlPlane.Worker/` + `dotnet test src/server/services/Sprk.Provisioning.ControlPlane.Tests/` all exit 0.</goal>
+
+  <context>
+    <background>
+Per lessons-learned-model1-prod-standup-2026-08-22.md finding F19 + Automation Gaps roadmap item 12 in `.claude/skills/provision-environment/SKILL.md`: Bicep provisions the shared KV `sprk-{env}-kv` but leaves it EMPTY. All 6 BFF `@Microsoft.KeyVault(...)` references point to non-existent secrets. Even after F16 fixes (RBAC + kvRefIdentity), refs cannot resolve. BFF fails-fast at boot on the downstream config chain (F20/F20a).
+
+Session 2 (2026-08-24) manually seeded 6 secrets to `sprk-prod-kv` by extracting from source services via ad-hoc az CLI. Recipe worked; this task codifies the recipe as an IProvisioningHandler using Azure.ResourceManager SDK (NOT az CLI shell-out — aligns with H4's `SecretClientKvWriter` pattern).
+
+**The 6 F19 extraction recipes** (validated live SESSION 2; codify as SDK calls):
+| Canonical name | SDK call |
+|---|---|
+| `AiSearch--AdminKey` | `armClient.GetSearchServiceResource(id).GetAdminKeys().Value.PrimaryKey` |
+| `DocumentIntelligence-ApiKey` | `armClient.GetCognitiveServicesAccountResource(id).GetKeys().Value.Key1` |
+| `AzureOpenAI-ApiKey` | `armClient.GetCognitiveServicesAccountResource(id).GetKeys().Value.Key1` |
+| `servicebus-connection-string` | `armClient.GetServiceBusNamespaceResource(id).GetServiceBusNamespaceAuthorizationRules().Get("RootManageSharedAccessKey").GetKeys().Value.PrimaryConnectionString` |
+| `storage-connection-string` | `armClient.GetStorageAccountResource(id).GetKeys().First(k => k.KeyName == "key1").Value` composed as `DefaultEndpointsProtocol=https;AccountName=X;AccountKey=Y;EndpointSuffix=core.windows.net` |
+| `redis-connection-string` | `armClient.GetRedisResource(id)` for host+port; `.GetKeys().Value.PrimaryKey`; compose as `{host}:{port},password={key},ssl=True,abortConnect=False` |
+
+**L2 project layout confirmed via recon 2026-08-24**: handlers live in `Sprk.Provisioning.ControlPlane.Core\Handlers\<Family>\`. H4 is at `.Core\Handlers\KvSecretsPopulation\H4KvSecretsPopulationHandler.cs`. Seam interfaces + impls co-located same folder. The `.Worker` project owns dispatch (`Dispatch\ProvisioningHandlerDispatcher.cs`) + concrete DI registration (`.Worker\Program.cs`). Keyed factory forwarder lives in `.Core\Handlers\HandlerDispatchRegistrationModule.cs`. HandlerIds catalog + Dispatchable list in `.Core\Handlers\HandlerIds.cs`. Tests in `.Tests\Handlers\<HandlerName>Tests.cs` (flat folder) using xunit + FluentAssertions + hand-rolled fakes (per H4 exemplar).
+
+**Canonical manifest extension (additive, safe)**: Recon 2026-08-24 confirmed tasks 085 + 086 only read `canonical_name` + `aliases` from manifest entries. Generator uses `ContainsKey` (not strict-schema) shape check — unknown fields silently ignored. Adding `from-shared-service` enum value + optional `service_ref:` field does NOT break 085/086. But: any new required field MUST be added to `$RequiredSecretFields` (line 131-134 of Invoke-CatalogGenerator.ps1) OR handled as CONDITIONALLY required. Approach: extend `$AllowedValueSources` (line ~135) with `from-shared-service`; extend `Test-ManifestShape` with a conditional check: `if ($secret.value_source -eq 'from-shared-service' -and -not $secret.ContainsKey('service_ref')) { throw "..." }`. Generator outputs unchanged for existing entries; new shared-service entries emit into `Seed-CustomerKeyVault.generated.ps1` a new branch that documents "handler-populated" (comment-only; the actual writes come from H4-shared handler at run time, NOT from the seeder script).
+
+**CLUSTER FINDING (from SESSION 2 handoff)**: F17 + F19 + F20 share ONE root cause — Bicep provisions Model 1 Prod infra but does NOT seed BFF runtime state. H4-shared (this task) + H4b (task 201) + H9 (task 052) together close this gap. Sequencing: H4-shared → H4b → H9 → BFF starts with all config in place (kills F20 progressive fail-fast).
+    </background>
+    <relevant-files>
+      <file role="new">src/server/services/Sprk.Provisioning.ControlPlane.Core/Handlers/KvSecretsPopulation/H4SharedKvSecretsPopulationHandler.cs</file>
+      <file role="new">src/server/services/Sprk.Provisioning.ControlPlane.Core/Handlers/KvSecretsPopulation/ISourceServiceKeyExtractor.cs</file>
+      <file role="new">src/server/services/Sprk.Provisioning.ControlPlane.Core/Handlers/KvSecretsPopulation/SdkSourceServiceKeyExtractor.cs</file>
+      <file role="new">src/server/services/Sprk.Provisioning.ControlPlane.Core/Handlers/KvSecretsPopulation/SharedKvSecretsPopulationOptions.cs (or extend existing KvSecretsPopulationOptions)</file>
+      <file role="new">src/server/services/Sprk.Provisioning.ControlPlane.Tests/Handlers/H4SharedKvSecretsPopulationHandlerTests.cs</file>
+      <file role="modify">src/server/services/Sprk.Provisioning.ControlPlane.Core/Handlers/HandlerIds.cs (add H4Shared const + append to Dispatchable list)</file>
+      <file role="modify">src/server/services/Sprk.Provisioning.ControlPlane.Core/Handlers/HandlerDispatchRegistrationModule.cs (add keyed factory forwarder near H4 line ~106)</file>
+      <file role="modify">src/server/services/Sprk.Provisioning.ControlPlane.Worker/Program.cs (add concrete DI registrations near H4 block lines 394-478: Options bind, seam Singletons, handler Scoped)</file>
+      <file role="modify">scripts/canonical-secret-catalog/manifest.yaml (add 6 F19 entries with value_source: from-shared-service + service_ref)</file>
+      <file role="modify">scripts/canonical-secret-catalog/Invoke-CatalogGenerator.ps1 (extend $AllowedValueSources + Test-ManifestShape conditional required rule)</file>
+      <file role="regenerate">scripts/canonical-secret-catalog/generated/* (all 4 files — run `Invoke-CatalogGenerator.ps1` after manifest edit; commit regenerated outputs atomically)</file>
+      <file role="canonical-reference">src/server/services/Sprk.Provisioning.ControlPlane.Core/Handlers/KvSecretsPopulation/H4KvSecretsPopulationHandler.cs (task 047 — the H4 exemplar; H4-shared mirrors ctor shape, HandlerResult return semantics, idempotency-key format, BINDING guard)</file>
+      <file role="canonical-reference">src/server/services/Sprk.Provisioning.ControlPlane.Core/Handlers/KvSecretsPopulation/SecretClientKvWriter.cs (H4's writer — H4-shared reuses this seam directly)</file>
+      <file role="canonical-reference">src/server/services/Sprk.Provisioning.ControlPlane.Core/Handlers/BicepInfraDeploy/ArmKeyVaultRefProbe.cs (H4's post-condition probe — H4-shared reuses)</file>
+      <file role="canonical-reference">src/server/services/Sprk.Provisioning.ControlPlane.Tests/Handlers/H4KvSecretsPopulationHandlerTests.cs (test exemplar — xunit + FluentAssertions + hand-rolled fakes)</file>
+      <file role="canonical-reference">src/server/services/Sprk.Provisioning.ControlPlane.Tests/Dispatch/HandlerRegistrationCompletenessTests.cs (enforces every Dispatchable const has keyed registration; will fail if H4Shared const added without keyed forwarder)</file>
+      <file role="canonical-reference">projects/customer-provisioning-orchestration-r1/notes/lessons-learned-model1-prod-standup-2026-08-22.md (F19 evidence + validated recipes)</file>
+    </relevant-files>
+    <dependencies>
+      <dependency task="036" status="completed">L2 project scaffold (Wave C3) — 4-project split lands</dependency>
+      <dependency task="044" status="completed">H2a Bicep deploy — Shared KV + source Azure services must exist in target env</dependency>
+      <dependency task="084" status="completed">Canonical secret-catalog manifest + generator (landed 2026-08-17 `70abd9992`) — H4-shared extends its schema additively</dependency>
+    </dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-004">Single `IProvisioningHandler` implementation returning `Task&lt;HandlerResult&gt;`. Domain failures are `HandlerResult.Failure(FailureClass, RejectionCode, Diagnostic)` — do NOT throw exceptions for expected failure modes (missing per-env parameter, source-service 403, drift). Exception-throw only for programmer errors (null argument, invalid state).</constraint>
+    <constraint source="ADR-010">Register in L2 control-plane, NOT BFF. Handler class in `.Core`; concrete DI in `.Worker\Program.cs`; keyed forwarder in `.Core\Handlers\HandlerDispatchRegistrationModule.cs`.</constraint>
+    <constraint source="ADR-028">Auth ceremony 21 MUSTs. L2 UAMI must hold data-plane read on each source (BICEP HARDENING FOLLOW-ON per escalation trigger below): `Cognitive Services User` (openai + docintel), `Search Service Contributor` (search-admin-key), `Azure Service Bus Data Owner` (SB RootManageSharedAccessKey list), `Storage Account Contributor` (storage key1 list), `Redis Cache Contributor` (Redis list-keys). H4-shared uses `TokenCredential` (defaults to `DefaultAzureCredential` per env; MI in Azure, dev-cred locally) — SAME as H4.</constraint>
+    <constraint source="ADR-036">Reuse background-job infrastructure; return `HandlerResult`; fire-and-forget from L2 dispatcher.</constraint>
+    <constraint source="project">Idempotency key: `kv-shared-{env}-{secretsVer}` — secretsVer is manifest hash from canonical secret-catalog (source-scoped entries subset).</constraint>
+    <constraint source="project-recon-2026-08-24">Manifest schema extension is ADDITIVE (safe per recon confirming 085/086 only read `canonical_name` + `aliases`): add `from-shared-service` to `$AllowedValueSources` enum in `Invoke-CatalogGenerator.ps1`; add optional scalar `service_ref:` field; `Test-ManifestShape` gets conditional required rule: if `value_source == from-shared-service` then `service_ref` MUST be present. NO change to `$RequiredSecretFields` (line 131-134) — `service_ref` is CONDITIONALLY required, not always required.</constraint>
+    <constraint source="project-recon-2026-08-24">Regenerated outputs MUST be committed atomically with manifest edits — `Invoke-CatalogGenerator.ps1 -Verify` MUST exit 0 after the task lands. This is the shipped determinism contract task 084 established.</constraint>
+    <constraint source="project">Source-extraction uses Azure.ResourceManager SDK (NOT `az` CLI shell-out). Rationale: (a) aligns with H4's SecretClientKvWriter SDK pattern; (b) testable via seam mocking (hand-rolled fake `ISourceServiceKeyExtractor` per H4 test exemplar); (c) no process spawn overhead; (d) type-safe error handling (ARM SDK throws `RequestFailedException` with structured status codes — cleanly maps to HandlerResult.Failure).</constraint>
+    <constraint source="project">Per-source-type extraction is declarative: `SdkSourceServiceKeyExtractor` dispatches on `SourceServiceType` enum (parsed from manifest `service_ref` format like `search:sprksharedprod-search` or `cognitiveservices:sprksharedprod-openai`). NO ad-hoc bash. NO shelling out to per-secret one-off scripts.</constraint>
+    <constraint source="project">Idempotency: for each entry, compare current KV value against fresh source extraction; NO-OP if match (do NOT write same value twice — creates useless KV version bloat), rotate + audit-log if drift. Drift may indicate source-key rotation in Azure Portal (legitimate) OR unauthorized change (audit signal).</constraint>
+    <constraint source="project">BINDING guard: NEVER write to Dataverse-ClientSecret or BFF-API-ClientSecret via this handler. Those two secrets have `never_delete: true` in manifest AND are NOT emitted as Bicep resources (comments only per task 084 design). H4-shared asserts these secret names never appear in shared-service-scoped manifest entries at handler startup validation.</constraint>
+    <constraint source="spec.md §7.9">Canonical KV secret naming applied at seed time: env-agnostic names; secret names MUST match the App Service `@Microsoft.KeyVault(SecretName=...)` references exactly (case-sensitive).</constraint>
+    <constraint source="spec.md NFR-05">BFF /health must fail fast at boot on any Tier-1 IOptions misconfig. H4-shared runs BEFORE H4b (task 201) + BEFORE H9 (task 052) so BFF boots with KV refs already resolvable.</constraint>
+    <constraint source="F15+F18-remediation">Handler assumes L2 UAMI has already been granted `Key Vault Secrets Officer` on the shared KV via H4-preflight (task-TODO for operator-RBAC bootstrap; F15/F18 both fixed manually SESSION 2 — pre-check MUST run BEFORE H4-shared writes; if pre-check hasn't landed as a handler, escalate per §6).</constraint>
+    <constraint source="project">Post-condition: after all H4-shared writes, invoke `IArmKeyVaultRefProbe` (reused from H2a/H4) to verify each canonical name resolves via the App Service KV-ref binding. Failure → `HandlerResult.Failure(QuarantineRequired, "SharedSecretRefUnresolvable", diagnostic)` pointing to F16 / operator-RBAC gaps.</constraint>
+    <constraint source="root-CLAUDE-md-§10">L2 handlers register in L2 DI, NOT in BFF (§10 BFF Hygiene). Publish-size verification applies to BFF only.</constraint>
+    <constraint source="root-CLAUDE-md-§11">NEW-surface justification field completed per §11 three-question gate (see &lt;justification&gt; below).</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>L2 handler that extracts credentials from source Azure services via Azure.ResourceManager SDK and seeds them to shared KV under canonical names — sibling to H4</topic>
+    <files>
+      <file>.claude/adr/ADR-004-job-contract.md</file>
+      <file>.claude/adr/ADR-010-di-minimalism.md</file>
+      <file>.claude/adr/ADR-028-spaarke-auth-architecture.md</file>
+      <file>.claude/adr/ADR-036-background-job-infrastructure.md</file>
+      <file>.claude/constraints/jobs.md</file>
+      <file>.claude/constraints/auth.md</file>
+      <file>.claude/constraints/azure-deployment.md</file>
+      <file>.claude/constraints/config.md</file>
+      <file>projects/customer-provisioning-orchestration-r1/spec.md</file>
+      <file>projects/customer-provisioning-orchestration-r1/design.md</file>
+      <file>projects/customer-provisioning-orchestration-r1/notes/lessons-learned-model1-prod-standup-2026-08-22.md</file>
+      <file>.claude/skills/provision-environment/SKILL.md</file>
+      <file>docs/guides/SPAARKE-CUSTOMER-DEPLOYMENT-GUIDE.md</file>
+      <file>scripts/canonical-secret-catalog/README.md</file>
+      <file>scripts/canonical-secret-catalog/manifest.yaml (extension target — read to understand v1 shape before editing)</file>
+      <file>scripts/canonical-secret-catalog/Invoke-CatalogGenerator.ps1 (extension target — read $RequiredSecretFields + $AllowedValueSources + Test-ManifestShape before editing)</file>
+    </files>
+    <patterns>
+      <pattern name="sibling-handler-shape" location="src/server/services/Sprk.Provisioning.ControlPlane.Core/Handlers/KvSecretsPopulation/H4KvSecretsPopulationHandler.cs">Task 047 H4 — canonical reference. Reuse: KvSecretsPopulationOptions, IKvSecretsWriter, IArmKeyVaultRefProbe, IKvSecretManifest, IIdempotencyService pattern, HandlerResult return semantics.</pattern>
+      <pattern name="test-shape" location="src/server/services/Sprk.Provisioning.ControlPlane.Tests/Handlers/H4KvSecretsPopulationHandlerTests.cs">xunit + FluentAssertions + hand-rolled fakes. H4-shared tests mirror this exactly; add per-source-type extractor mock.</pattern>
+      <pattern name="di-3-file-dance" location="src/server/services/Sprk.Provisioning.ControlPlane.Core/Handlers/HandlerDispatchRegistrationModule.cs + Sprk.Provisioning.ControlPlane.Core/Handlers/HandlerIds.cs + Sprk.Provisioning.ControlPlane.Worker/Program.cs">HandlerRegistrationCompletenessTests enforces: every const in Dispatchable list MUST have keyed forwarder in registration module. New H4Shared const → new keyed line → new concrete registration.</pattern>
+      <pattern name="canonical-manifest-extension" location="scripts/canonical-secret-catalog/">Task 084 shipped deliverable. Extension is additive: `$AllowedValueSources` + conditional field validation. --Verify determinism preserved.</pattern>
+    </patterns>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="0" name="Rigor + load">Emit RIGOR LEVEL (FULL). Load knowledge files. Read H4 exemplar (task 047 handler + tests) end-to-end for ctor shape, HandlerResult semantics, idempotency-key format, BINDING guard code path.</step>
+    <step order="1" name="Manifest schema extension">Extend `Invoke-CatalogGenerator.ps1`: add `from-shared-service` to `$AllowedValueSources`; add conditional required rule to `Test-ManifestShape` (if `value_source == from-shared-service` then `service_ref` MUST be present). Add 6 F19 entries to `manifest.yaml` with `value_source: from-shared-service` + `service_ref: search:sprksharedprod-search` (etc. per env-scoped naming convention). Run `pwsh Invoke-CatalogGenerator.ps1 -DryRun`; inspect planned outputs.</step>
+    <step order="2" name="Regenerate outputs">Run `pwsh Invoke-CatalogGenerator.ps1` (write mode); confirm all 4 generated files updated. Run `-Verify` to confirm byte-identical regen.</step>
+    <step order="3" name="ISourceServiceKeyExtractor seam">Author interface `ISourceServiceKeyExtractor.cs` in `.Core\Handlers\KvSecretsPopulation\`: `Task&lt;string&gt; ExtractAsync(SharedKvSecretSource source, CancellationToken ct)`. `SharedKvSecretSource` is a record: `{ SourceType (enum: AiSearchAdminKey|CognitiveServicesKey1|ServiceBusRootSas|StorageConnectionString|RedisComposed), ServiceRef, ResourceGroup?, SubscriptionId? }`. Errors surface as `RequestFailedException` propagation (handler wraps into HandlerResult.Failure).</step>
+    <step order="4" name="SdkSourceServiceKeyExtractor impl">Author `SdkSourceServiceKeyExtractor.cs` — inject `ArmClient` (reused from H4 DI). Dispatch on `SourceType` enum: 6 branches, each ~10 lines. Each branch uses Azure.ResourceManager.* SDK per the table in &lt;context&gt;. Redis-composed branch composes the `{host}:{port},password={key},ssl=True,abortConnect=False` format string.</step>
+    <step order="5" name="H4SharedKvSecretsPopulationHandler impl">Author main handler mirroring H4 shape. Ctor injects: IProvisioningRunRepository, IKvSecretManifest, IKvSecretsWriter (reused), IArmKeyVaultRefProbe (reused), ISourceServiceKeyExtractor (new), IOptions&lt;KvSecretsPopulationOptions&gt; (reused OR new sibling if divergent config needed), ILogger. HandleAsync flow: (a) load manifest entries with `value_source == from-shared-service`; (b) BINDING guard: assert no entry name in never-delete list; (c) for each entry: ExtractAsync fresh source value → read current KV value → NO-OP on match, WriteAsync + audit on drift or absence; (d) invoke IArmKeyVaultRefProbe post-condition; (e) return `HandlerResult.Success(idempotencyKey)` or `HandlerResult.Failure(QuarantineRequired, code, diagnostic)`; (f) idempotency key `kv-shared-{env}-{secretsVer}`. HandlerId const: `HandlerIds.H4Shared`.</step>
+    <step order="6" name="DI 3-file registration">(a) `.Core\Handlers\HandlerIds.cs`: add `public const string H4Shared = "h4-shared";` near H4 const line ~59; append to `Dispatchable` list (line ~122-125). (b) `.Core\Handlers\HandlerDispatchRegistrationModule.cs`: add keyed forwarder `services.AddKeyedScoped&lt;IProvisioningHandler&gt;(HandlerIds.H4Shared, (sp,_) =&gt; sp.GetRequiredService&lt;H4SharedKvSecretsPopulationHandler&gt;());` near line ~107. (c) `.Worker\Program.cs`: add concrete registrations near H4 block (lines ~394-478): `AddSingleton&lt;ISourceServiceKeyExtractor, SdkSourceServiceKeyExtractor&gt;` + `AddScoped&lt;H4SharedKvSecretsPopulationHandler&gt;()`.</step>
+    <step order="7" name="Unit tests">Author `H4SharedKvSecretsPopulationHandlerTests.cs` in `.Tests\Handlers\` (flat folder per H4 test exemplar). xunit + FluentAssertions + hand-rolled fakes. Tests: (a) 6-source-type happy path — mocked extractor returns known values for all 6 F19 entries; handler writes all 6 to KV; probe verifies; returns Success; (b) source-drift rotation — KV has "old", extractor returns "new" → WriteAsync called + audit log entry; (c) existing-and-matching NO-OP — KV value == extractor value → no WriteAsync call, no audit; (d) source-service-unreachable Quarantine — mocked extractor throws RequestFailedException(403) → HandlerResult.Failure(QuarantineRequired, "SourceServiceExtractionFailed", diagnostic naming service); (e) BINDING guard — synthetic manifest with Dataverse-ClientSecret as `value_source: from-shared-service` → handler validation fails at startup with "BindingPreCheckViolation"; (f) idempotency-key match — second run same (env, secretsVer) short-circuits via IIdempotencyService (mirror H4 pattern); (g) cleartext-secret leak scan — assert Cosmos parameters + all log statements contain 0 substrings from test-extractor return values; (h) manifest v1 backwards compat — entries without `value_source == from-shared-service` skipped by H4-shared (they belong to H4 per-tenant flow), no error.</step>
+    <step order="8" name="Build + test">Run: `dotnet build src/server/services/Sprk.Provisioning.ControlPlane.Core/` + `dotnet build src/server/services/Sprk.Provisioning.ControlPlane.Worker/` + `dotnet test src/server/services/Sprk.Provisioning.ControlPlane.Tests/`. All exit 0. HandlerRegistrationCompletenessTests must pass (new H4Shared const has keyed forwarder).</step>
+    <step order="9" name="Regenerated-outputs Verify">Run `pwsh scripts/canonical-secret-catalog/Invoke-CatalogGenerator.ps1 -Verify`; exit 0 required. If drift: regenerate + commit.</step>
+    <step order="10" name="Handler-catalog update (main-session)">Update handler catalog in `.claude/skills/provision-environment/SKILL.md` Step 3 enumeration: H4-shared row already listed there from SESSION 3; verify accuracy vs implemented handler (main-session-only per root CLAUDE.md §3 sub-agent write boundary).</step>
+    <step order="11" name="TASK-INDEX update (main-session)">Update TASK-INDEX.md: task 200 status 🔲 → ✅ with commit hash.</step>
+    <step order="12" name="Deviations">Document any deviation in projects/customer-provisioning-orchestration-r1/notes/task-200-completion-notes.md.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If task 084's `Invoke-CatalogGenerator.ps1` structure has drifted (e.g., `$AllowedValueSources` variable name renamed, `Test-ManifestShape` signature changed), STOP and diff against the SESSION 4 recon findings before editing.</trigger>
+    <trigger>If any source Azure service returns 403 during H4-shared happy-path testing against Model 1 Prod (extractor gets Forbidden despite L2 UAMI existing), STOP and escalate — root cause is L2 UAMI missing one of the 5 RBAC assignments (`Cognitive Services User` / `Search Service Contributor` / `Azure Service Bus Data Owner` / `Storage Account Contributor` / `Redis Cache Contributor`). This is a Bicep hardening follow-on — file separate task for `stacks/model1-shared.bicep` (or `platform-shared.bicep`) to emit these role assignments for the L2 UAMI. Do NOT retry-loop; do NOT proceed to task 201.</trigger>
+    <trigger>If `IArmKeyVaultRefProbe` verify-step fails after H4-shared writes (secret is on KV but App Service can't resolve the ref), STOP and escalate — F16 remediation gap OR kvRefIdentity misconfig OR shared UAMI RBAC not granted on shared KV. Do NOT proceed to H4b.</trigger>
+    <trigger>If manifest schema extension breaks `-Verify` (regenerated outputs differ from on-disk after commit), STOP and diagnose: (a) generator emitter added output but forgot to re-verify; (b) new field emitted with different ordering; (c) determinism contract violated.</trigger>
+    <trigger>If a new source-type is proposed later (not in the 6 F19 set) but no `SdkSourceServiceKeyExtractor` recipe exists for it, STOP and escalate — manifest MUST NOT get ahead of extractor. Add recipe + test first; then manifest entry.</trigger>
+    <trigger>If `HandlerRegistrationCompletenessTests` fails after DI 3-file edits, one of the three files is missing an update — diff all three against H4's exemplar and correct before proceeding.</trigger>
+  </escalation>
+
+  <justification>
+    <existing>Closest neighbors: (a) H4 per-tenant handler (task 047, landed) — writes to per-tenant KV using literal or resolved values from `IKvSecretManifest`; NO source-extraction. (b) Manual ad-hoc bash extracted 6 F19 secrets SESSION 2 — no automation. (c) `scripts/canonical-secret-catalog/manifest.yaml` (task 084, landed 2026-08-17 `70abd9992`) — has canonical names + `value_source` enum + never-delete flags, but NO source-extraction schema (`from-shared-service` value not in current allow-list). Grep for `ISourceServiceKeyExtractor` returns none across codebase.</existing>
+    <extension>No — H4 per-tenant CANNOT be extended to also do source-extraction because (a) different KV scope (shared vs per-tenant), (b) different idempotency semantics (H4 rotation-safe by default; H4-shared verifies against fresh source every run and rotates on drift — CANNOT collapse these into one handler without conditional branches on every step), (c) different failure mode diagnostics (H4 write failure = permission/quota; H4-shared write failure = also permission/quota BUT ALSO source-service-unreachable + drift-detected + probe-verify-failure). Two sibling handlers keep each contract tight. Additively extending the shipped manifest (option A per Session 4 discussion) is the correct extension — the manifest schema was designed for this per task 084's `$AllowedValueSources` enum pattern.</extension>
+    <cost-of-doing-nothing>Without H4-shared as a handler: (1) Every new Model 1 shared-tier deploy requires MANUAL ad-hoc bash to seed 6 secrets (SESSION 2 burned ~30 min; multiplied across N future customer stand-ups = N × 30 min waste). (2) Every source-service key rotation (Azure Portal → regenerate key1) silently breaks BFF startup until an operator manually re-seeds the KV — no drift detection today. (3) Model 2 Dedicated tier (per-customer, future) hits the SAME F19 pattern with per-customer source services; without H4-shared's source-extraction primitive, we would re-invent it for M2. Concrete observed failure mode SESSION 2: BFF exits with code 134 (SIGABRT) via `Unhandled exception. System.InvalidOperationException` for any of the 6 KV-referenced app settings not resolvable. F20 chain progressively reveals more.</cost-of-doing-nothing>
+  </justification>
+
+  <tools>
+    <tool name="dotnet">Build and test .NET projects</tool>
+    <tool name="pwsh">Extend Invoke-CatalogGenerator.ps1 (task 084 artifact) + run `-DryRun` and `-Verify`</tool>
+    <tool name="terminal">Run az CLI ad-hoc for verification only (NOT for handler impl — handler uses SDK)</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/server/services/Sprk.Provisioning.ControlPlane.Core/Handlers/KvSecretsPopulation/H4SharedKvSecretsPopulationHandler.cs</output>
+    <output type="code">src/server/services/Sprk.Provisioning.ControlPlane.Core/Handlers/KvSecretsPopulation/ISourceServiceKeyExtractor.cs</output>
+    <output type="code">src/server/services/Sprk.Provisioning.ControlPlane.Core/Handlers/KvSecretsPopulation/SdkSourceServiceKeyExtractor.cs</output>
+    <output type="test">src/server/services/Sprk.Provisioning.ControlPlane.Tests/Handlers/H4SharedKvSecretsPopulationHandlerTests.cs</output>
+    <output type="modified-code">src/server/services/Sprk.Provisioning.ControlPlane.Core/Handlers/HandlerIds.cs</output>
+    <output type="modified-code">src/server/services/Sprk.Provisioning.ControlPlane.Core/Handlers/HandlerDispatchRegistrationModule.cs</output>
+    <output type="modified-code">src/server/services/Sprk.Provisioning.ControlPlane.Worker/Program.cs</output>
+    <output type="config">scripts/canonical-secret-catalog/manifest.yaml (6 new entries + no other edits)</output>
+    <output type="code">scripts/canonical-secret-catalog/Invoke-CatalogGenerator.ps1 ($AllowedValueSources + Test-ManifestShape conditional rule)</output>
+    <output type="regenerated">scripts/canonical-secret-catalog/generated/* (all 4 files — atomically committed with source edits)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Given a manifest with 6 shared-service entries + shared KV empty + L2 UAMI has Cognitive Services User / Search Service Contributor / Azure Service Bus Data Owner / Storage Account Contributor / Redis Cache Contributor on source services, when HandleAsync runs, then all 6 secrets are written to KV under canonical names via IKvSecretsWriter; each write is preceded by an ISourceServiceKeyExtractor call.</criterion>
+    <criterion testable="true">Idempotency-NO-OP: given the same manifest + KV state, second HandleAsync invocation performs 6 source-extractions (to verify) + 0 KV writes.</criterion>
+    <criterion testable="true">Idempotency-DRIFT-ROTATE: given a mocked source-drift for one entry, HandleAsync performs 1 rotation write + 0 writes for the other 5; audit log records rotation with entry name + old-value-hash + new-value-hash (never the values themselves).</criterion>
+    <criterion testable="true">BINDING guard: given a synthetic manifest that lists Dataverse-ClientSecret as `value_source: from-shared-service`, HandleAsync fails startup validation with "BindingPreCheckViolation" BEFORE any extractor or writer is called.</criterion>
+    <criterion testable="true">Post-condition ref-resolution: after all writes, IArmKeyVaultRefProbe verifies each canonical secret name resolves via the App Service KV-ref binding; failure → HandlerResult.Failure(QuarantineRequired, "SharedSecretRefUnresolvable", diagnostic).</criterion>
+    <criterion testable="true">Source-unreachable Quarantine: given mocked ISourceServiceKeyExtractor that throws RequestFailedException(status: 403), HandleAsync returns HandlerResult.Failure(QuarantineRequired, "SourceServiceExtractionFailed", diagnostic naming the failed service).</criterion>
+    <criterion testable="true">Idempotency-key match: two invocations for the same (env, secretsVer) — second call short-circuits before source extraction (kv-shared-{env}-{secretsVer} match).</criterion>
+    <criterion testable="true">Cleartext-secret leak scan: unit test greps Cosmos parameters + interStepState + all log statements for known secret patterns (test-manifest secret values); assert 0 matches.</criterion>
+    <criterion testable="true">Manifest v1 backwards compat: entries in the manifest WITHOUT `value_source: from-shared-service` are skipped by H4-shared (they belong to H4 per-tenant flow); no error, no warning.</criterion>
+    <criterion testable="true">Handler registers in L2 DI via 3-file dance (HandlerIds const + keyed forwarder + concrete Worker registration); HandlerRegistrationCompletenessTests passes.</criterion>
+    <criterion testable="true">`dotnet build src/server/services/Sprk.Provisioning.ControlPlane.Core/` + `dotnet build src/server/services/Sprk.Provisioning.ControlPlane.Worker/` + `dotnet test src/server/services/Sprk.Provisioning.ControlPlane.Tests/` all exit 0.</criterion>
+    <criterion testable="true">`pwsh scripts/canonical-secret-catalog/Invoke-CatalogGenerator.ps1 -Verify` exits 0 after manifest + generator edits + regeneration.</criterion>
+    <criterion testable="true">Handler catalog in `.claude/skills/provision-environment/SKILL.md` Step 3 enumeration lists H4-shared row accurately (main-session-only write).</criterion>
+    <criterion testable="true">Sequencing verified: H4-shared runs BEFORE H4b (task 201) AND BEFORE H9 (task 052) in the L2 state machine's handler DAG.</criterion>
+  </acceptance-criteria>
+
+  <notes>Reference: lessons-learned-model1-prod-standup-2026-08-22.md finding F19 + Automation Gaps roadmap item 12 + spec.md FR-36 canonical-manifest + design.md §4.1 H4 (sibling). Companion task: 201 (H4b-BulkAppSettings, per SESSION 4 Option A design).
+
+## POML corrections (2026-08-24 SESSION 4)
+
+**Original SESSION 3 POML (commit 1b54beaa9) had these design errors** — corrected in this rewrite:
+
+1. **File paths assumed 1-project scaffold** (`src/server/services/Sprk.Provisioning.ControlPlane/`); reality is 4-project split (`.Api / .Core / .Worker / .Tests`). Recon 2026-08-24 confirmed handlers live in `.Core\Handlers\<Family>\`, DI is 3-file dance across `.Core` + `.Worker`.
+
+2. **Manifest schema field name conflict** — proposed `source: { type, service-ref }` OVERLAPPED with existing `value_source` enum in task 084 manifest. Recon confirmed correct extension is additive: add `from-shared-service` value to `$AllowedValueSources` + optional conditional-required scalar `service_ref:` field. Existing tasks 085/086 unaffected (they only read `canonical_name` + `aliases`).
+
+3. **Extractor pattern wrong** — proposed `AzCliSourceExtractor` shell-out; H4 exemplar (SecretClientKvWriter) uses Azure.ResourceManager SDK. This task correctly uses `SdkSourceServiceKeyExtractor` for testability + pattern alignment.
+
+4. **Handler class name** — corrected `H4SharedKvSourceExtractionHandler` → `H4SharedKvSecretsPopulationHandler` (mirrors H4 family; same folder `KvSecretsPopulation`; reuses shared seams).
+
+5. **HandlerResult contract** — original assumed exception-based failure; recon confirmed `IProvisioningHandler.HandleAsync` returns `Task&lt;HandlerResult&gt;` (discriminated union Success/Failure with FailureClass + RejectionCode).
+
+**Design decisions locked in via SESSION 4 discussion + AskUserQuestion answers**:
+- Extension is ADDITIVE (safe per recon)
+- SDK-based extractor (NOT az CLI)
+- Sibling to H4 in same folder (reuse seams)
+- BINDING guard preserves never-delete secrets integrity
+
+**Bicep hardening implied (follow-on task — NOT in scope of task 200)**: L2 UAMI needs 5 new RBAC assignments on source services. Filed as escalation trigger; task follows.
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+  </execution>
+</task>

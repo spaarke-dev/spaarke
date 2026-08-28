@@ -1,0 +1,83 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="182" project="customer-provisioning-orchestration-r1">
+  <metadata>
+    <title>INamingConformanceChecker pure-C# port</title>
+    <phase>C'' Wave G-7 -- Acceptance</phase>
+    <gate>blocked</gate>
+    <status>not-started</status>
+    <rigor>STANDARD</rigor>
+    <rigor-reason>Trivial pure-string-check port (0 az/REST calls in the source script per DS-4) -- STANDARD per root CLAUDE.md §8.</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Trivial mechanical port -- Sonnet @ high given its role wiring into H13's terminal gate, but the work itself is small.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>waveG7-parallel</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <deps>none</deps>
+    <tags>l2-controlplane, job-handler, testing</tags>
+    <estimated-effort>3-4 hours</estimated-effort>
+  </metadata>
+
+  <prompt>Port NamingConformanceScriptRunner (naming-conformance-check.ps1, 200 lines; 0 az/REST calls -- pure local string/convention checks per DS-4 §6) to a trivial pure-C# INamingConformanceChecker implementation. This is the second-easiest probe in the H13 suite after I1 (task 170) -- no live Azure dependency at all.</prompt>
+
+  <role>SPAARKE platform developer. Expert in trivial pure-function ports (string/naming-convention checks, no I/O).</role>
+
+  <goal>INamingConformanceChecker exists as a pure C# port of naming-conformance-check.ps1's convention rules, with zero Azure SDK/REST dependency. Given a resource-name string violating the canonical naming convention (per docs/architecture/AZURE-RESOURCE-NAMING-CONVENTION.md), it returns Fail; given a conformant name, Pass.</goal>
+
+  <context>
+    <background>DS-4 §6 explicitly notes this script makes '0 az/REST calls' -- the entire port is a pure-function string/regex-rules translation, the same convention rules this project's Phase G (tasks 018-021, already ✅) already baked into provisioning-time naming.</background>
+    <relevant-files>
+      <file role="new">src/server/services/Sprk.Provisioning.ControlPlane.Core/Handlers/E2EAcceptance/NamingConformanceChecker.cs</file>
+      <file role="canonical-reference">scripts/naming-conformance-check.ps1</file>
+      <file role="canonical-reference">docs/architecture/AZURE-RESOURCE-NAMING-CONVENTION.md</file>
+    </relevant-files>
+    <dependencies>
+    </dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="DS-4 §6 naming row">Zero Azure SDK/REST dependency -- this is a pure string/regex-rules port, do not introduce any live call.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>INamingConformanceChecker pure-C# port</topic>
+    <files>
+      <file>projects/customer-provisioning-orchestration-r1/spec.md</file>
+      <file>projects/customer-provisioning-orchestration-r1/design.md</file>
+      <file>projects/customer-provisioning-orchestration-r1/CLAUDE.md</file>
+      <file>projects/customer-provisioning-orchestration-r1/notes/design-study-ds4-handler-audit.md</file>
+      <file>projects/customer-provisioning-orchestration-r1/notes/design-study-ds4-handler-audit.md</file>
+      <file>docs/architecture/AZURE-RESOURCE-NAMING-CONVENTION.md</file>
+    </files>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="0" name="Rigor + load">Emit RIGOR LEVEL (STANDARD). Read naming-conformance-check.ps1 in full.</step>
+    <step order="1" name="Port rules">Translate the script's string/regex convention rules to C#.</step>
+    <step order="2" name="Wire up">Register in H13's owning module in place of NamingConformanceScriptRunner.</step>
+    <step order="3" name="Tests">Table-driven conformant/non-conformant name tests covering every rule the script checks.</step>
+    <step order="4" name="Build + verify">dotnet build 0 errors; dotnet test green.</step>
+  </steps>
+
+  <escalation>
+  </escalation>
+
+  <tools>
+    <tool name="dotnet">build/test</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/server/services/Sprk.Provisioning.ControlPlane.Core/Handlers/E2EAcceptance/NamingConformanceChecker.cs</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">grep 'ProcessStartInfo' in NamingConformanceChecker.cs returns 0 matches.</criterion>
+    <criterion testable="true">A table-driven test covers every naming rule the source script checks, with both conformant and non-conformant examples.</criterion>
+    <criterion testable="true">dotnet build exits 0; dotnet test exits 0.</criterion>
+  </acceptance-criteria>
+
+  <notes>Justification (CLAUDE.md §11): Existing -- the convention rules already exist, correctly, in naming-conformance-check.ps1 and in this project's own AZURE-RESOURCE-NAMING-CONVENTION.md doc. Extension -- a trivial mechanical translation, no redesign. Cost-of-doing-nothing -- this checker cannot execute under Option D's zero-shell main site; H13's naming-conformance gate (part of the acceptance criteria per this project's plan.md §7) is unenforceable.</notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+  </execution>
+</task>

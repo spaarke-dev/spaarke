@@ -1,0 +1,98 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="032" project="customer-provisioning-orchestration-r1">
+  <metadata>
+    <title>Author NEW infrastructure/bicep/stacks/model1-shared.bicep — first-class trial-tier stack (§3A A1)</title>
+    <phase>C Wave C2 — Bicep + UAMI</phase>
+    <gate>startable</gate>
+    <status>not-started</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Deployment-touching new stack composition; the Model 1 tier is a first-class business path per §3A A1. task-create Step 3.5.5 FULL (deploy tag; azure-deployment scope).</rigor-reason>
+    <model-tier>opus</model-tier>
+    <model-tier-reason>Brief rubric: high-blast-radius Bicep authoring; Model 1 shared-tier IS the ADR-027 Path A exception (documented in spec.md § ADR Tensions row 6). Getting the shared-vs-dedicated boundary right is architectural and must NOT reintroduce the shared-vs-dedicated conditional-registration anti-pattern in customer.bicep — Opus for D3 + §3A A1 compliance judgment.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>waveC2-parallel</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <deps>none</deps>
+    <tags>azure, bicep, azure-deployment, deploy</tags>
+    <estimated-effort>4-6 hours</estimated-effort>
+  </metadata>
+
+  <prompt>Author (or refactor if a scaffold exists — inspect first) infrastructure/bicep/stacks/model1-shared.bicep as the first-class Model 1 trial-tier composition per §3A A1: SHARED App Service Plan + SHARED Azure OpenAI + SHARED AI Search (in a Spaarke platform subscription); DEDICATED Dataverse env + SPE container + KV + Storage + UAMI (task 028) per trial customer. Logical tenant isolation enforced by §4D I2/I3 invariants (unconditional tenantId filter on AI Search; partition-key on Cosmos). NO conditionals in customer.bicep — this is a separate stack per spec.md § New Components row 5.</prompt>
+  <role>SPAARKE platform developer with Bicep stack composition expertise. Understand ADR-027 subscription-isolation + Model 1 Path A exception. Model 1 forces trial/SMB customers through a SHARED cost floor; Model 2 forces regulated/enterprise through DEDICATED-stamp isolation. This stack is the Model 1 first-class citizen.</role>
+  <goal>infrastructure/bicep/stacks/model1-shared.bicep exists as the Model 1 first-class stack: composes shared platform-scope resources (App Service Plan + OpenAI + AI Search) with per-tenant dedicated resources (Dataverse + SPE + KV + Storage + UAMI). az bicep build passes; az deployment group what-if against a Spaarke platform subscription shows the shared platform resources + per-tenant dedicated additions correctly scoped.</goal>
+
+  <context>
+    <background>Spec FR-04 + §3A A1 + spec.md § ADR Tensions row 6 (ADR-027 Path A exception, Model 1 scope): Model 1 trial tier requires shared fixed-floor resources (App Service Plan + OpenAI + AI Search) to make the cost model viable for trial/SMB prospects. D3 (v3) rewrites tenancy to include both tiers; §4D invariants (I2 unconditional tenantId filter on AI Search; I3 partition-key on Cosmos) enforce logical isolation at the code level. Without this first-class stack, either Spaarke forces trial through Model 2 dedicated (uneconomic per PROJECT-UPDATE §5) or refuses trial customers (business loss). NOTE: a 309-line stacks/model1-shared.bicep already exists on disk — inspect first; refactor to first-class per §3A A1 rather than net-new author if the file is present.</background>
+    <relevant-files>
+      <file role="new">infrastructure/bicep/stacks/model1-shared.bicep</file>
+      <file role="canonical-reference">infrastructure/bicep/stacks/model2-full.bicep</file>
+      <file role="canonical-reference">infrastructure/bicep/stacks/model1-customer.bicep</file>
+      <file role="canonical-reference">infrastructure/bicep/customer.bicep</file>
+      <file role="canonical-reference">infrastructure/bicep/modules/uami.bicep (task 028 output)</file>
+      <file role="canonical-reference">infrastructure/bicep/modules/app-service-plan.bicep</file>
+      <file role="canonical-reference">infrastructure/bicep/modules/openai.bicep</file>
+      <file role="canonical-reference">infrastructure/bicep/modules/ai-search.bicep</file>
+    </relevant-files>
+    <dependencies>
+      <dependency task="none" status="complete">No prerequisite r1 task — parallel-safe within Wave C2 (does NOT overlap customer.bicep files touched by task 027).</dependency>
+    </dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-027">Path A exception (spec.md § ADR Tensions row 6): Model 1 shared-tier is a documented deviation from "one Azure subscription per customer". Rationale: D3 rewrites tenancy; §4D I2/I3 invariants enforce logical isolation. Scope of exception: Model 1 stack ONLY; Model 2 preserves ADR-027 strict per-customer subscription.</constraint>
+    <constraint source="project">Scope (this task only): compose shared + dedicated resources for Model 1 as a separate stack. Do NOT reintroduce Model 1 conditionals in customer.bicep — that is the anti-pattern spec.md § New Components row 5 explicitly rejects (matches §10 §F.1 shared-vs-dedicated conditional-registration).</constraint>
+    <constraint source="project">MUST consume uami.bicep (task 028) for the per-tenant dedicated UAMI resource. Model 1 tenant isolation LOGICAL, not subscription-level — but each tenant still gets its own UAMI + KV + Storage + Dataverse env + SPE container.</constraint>
+    <constraint source="project">MUST rely on §4D I2 (unconditional tenantId filter on AI Search) + §4D I3 (partition-key on Cosmos) + §4D I5 (per-tenant Graph token) for LOGICAL tenant isolation at the code level. Bicep-level isolation is NOT feasible for shared resources; that is the whole point of the ADR-027 Path A exception.</constraint>
+    <constraint source="project">MUST accept a shared-platform-subscription context parameter set + a per-tenant context parameter set — do NOT mix the two into one.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>Model 1 shared-tier stack composition; ADR-027 Path A exception</topic>
+    <files>
+      <file>projects/customer-provisioning-orchestration-r1/spec.md</file>
+      <file>projects/customer-provisioning-orchestration-r1/design.md</file>
+      <file>projects/customer-provisioning-orchestration-r1/CLAUDE.md</file>
+      <file>.claude/adr/ADR-027-subscription-isolation-and-dataverse-solution-management.md</file>
+      <file>.claude/constraints/azure-deployment.md</file>
+    </files>
+    <patterns>
+      <pattern name="model2-full.bicep sibling" location="infrastructure/bicep/stacks/model2-full.bicep">Mirror the parameter surface convention (env, customerId, tenant) but SPLIT into shared-platform + per-tenant param groups.</pattern>
+      <pattern name="Existing model1-shared.bicep (309 lines on disk)" location="infrastructure/bicep/stacks/model1-shared.bicep">INSPECT FIRST — if present, refactor to first-class §3A A1 composition; do not overwrite blindly.</pattern>
+    </patterns>
+  </knowledge>
+
+  <steps mode="prescriptive">
+    <step order="0" name="Context + rigor declaration">Output the RIGOR LEVEL declaration (FULL + reason). Load spec.md FR-04 + §3A A1 + § ADR Tensions row 6, ADR-027.</step>
+    <step order="1">INSPECT existing infrastructure/bicep/stacks/model1-shared.bicep (309 lines) — catalog current composition. If it already implements §3A A1, this task becomes a review-and-refine; if not, refactor to first-class.</step>
+    <step order="2">Design the parameter surface: two groups — sharedPlatform (subscriptionId, rgName, sharedAppServicePlanName, sharedOpenAiName, sharedAiSearchName) and perTenant (customerId, tenantId, kvName, storageName, dataverseEnvName, speContainerId, uamiName).</step>
+    <step order="3">Compose module invocations: shared modules invoked ONCE at platform scope (idempotent — already exist for existing trial customers); per-tenant modules invoked per-tenant scope (KV + Storage + UAMI + Dataverse env registration).</step>
+    <step order="4">Bind the App Service (from customer.bicep or a Model 1-specific slim variant) to the shared App Service Plan via serverFarmId reference; bind per-tenant UAMI (task 028); wire per-tenant AI Search query template referencing tenantId filter.</step>
+    <step order="5">Cite the ADR-027 Path A exception + §4D I2/I3 logical isolation in header comments so future readers understand the deviation.</step>
+    <step order="6">Run az bicep build stacks/model1-shared.bicep — verify 0 errors, 0 warnings.</step>
+    <step order="7">Run az deployment group what-if against dev shared platform subscription — verify per-tenant additions do NOT duplicate shared resources.</step>
+    <step order="8">Update TASK-INDEX.md: set this task's status to ✅.</step>
+    <step order="9">Document deviation (e.g. inspected the 309-line existing scaffold, delta from §3A A1) in projects/customer-provisioning-orchestration-r1/notes/.</step>
+  </steps>
+
+  <justification>
+    <existing>A 309-line scaffold exists at infrastructure/bicep/stacks/model1-shared.bicep on disk (verified via ls). It may or may not already implement §3A A1 first-class composition — this task inspects and refactors to first-class where needed. The task remains "NEW-surface" per brief because §3A A1 first-class composition is a new architectural commitment; spec.md § New Components row 5 lists model1-shared.bicep as a NEW-component.</existing>
+    <extension>No — customer.bicep + model2-full.bicep are dedicated-stamp composition. Extending them with Model 1 conditionals reintroduces the shared-vs-dedicated conditional-registration anti-pattern (§10 §F.1). A separate stack is the correct extension boundary.</extension>
+    <cost-of-doing-nothing>Without a first-class Model 1 stack, Spaarke either forces trial/SMB prospects through Model 2 dedicated cost floor (uneconomic per PROJECT-UPDATE §5 — dedicated stamp floor is roughly $400/mo per customer) or refuses to serve them (business loss). spec.md § New Components row 5 is the concrete cost.</cost-of-doing-nothing>
+  </justification>
+
+  <outputs>
+    <output type="code">infrastructure/bicep/stacks/model1-shared.bicep</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Given the stack, az bicep build succeeds with 0 errors + 0 warnings.</criterion>
+    <criterion testable="true">Given az deployment group what-if against dev shared platform subscription for a NEW trial tenant, per-tenant resources (KV, Storage, UAMI, Dataverse env) are ADDED while shared resources (App Service Plan, OpenAI, AI Search) are NOT duplicated.</criterion>
+    <criterion testable="true">Given the stack, parameter surface is split into sharedPlatform + perTenant groups; NO mixing.</criterion>
+    <criterion testable="true">Given the header comments, ADR-027 Path A exception + §4D I2/I3 logical isolation rationale are cited.</criterion>
+    <criterion testable="true">Negative: customer.bicep NOT modified in this task — no Model 1 conditionals introduced there.</criterion>
+  </acceptance-criteria>
+
+  <notes>Maps spec.md FR-04 / §3A A1 acceptance. §4D I2/I3 (invariant ArchTests) are what makes logical tenant isolation trustworthy on shared resources — this task's success is coupled to their landing (Wave C6). Cost target: shared platform floor ≤ $400/mo; per-tenant marginal ≤ $430/mo per NFR-04.</notes>
+
+  <execution><skill>.claude/skills/task-execute/SKILL.md</skill></execution>
+</task>

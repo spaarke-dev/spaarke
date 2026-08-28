@@ -1,3 +1,4 @@
+using Sprk.Bff.Api.Infrastructure.Authentication;
 using System.Security.Claims;
 using Sprk.Bff.Api.Infrastructure.Errors;
 using Sprk.Bff.Api.Models.Ai;
@@ -55,9 +56,7 @@ public class AiAuthorizationFilter : IEndpointFilter
         // Extract Azure AD Object ID from claims.
         // DataverseAccessDataSource requires the 'oid' claim to lookup user in Dataverse.
         // Fallback chain matches other authorization filters in the codebase.
-        var userId = user.FindFirst("oid")?.Value
-            ?? user.FindFirst("http://schemas.microsoft.com/identity/claims/objectidentifier")?.Value
-            ?? user.FindFirst(ClaimTypes.NameIdentifier)?.Value;
+        var userId = CallerResolution.ResolveObjectId(user);
 
         if (string.IsNullOrEmpty(userId))
         {

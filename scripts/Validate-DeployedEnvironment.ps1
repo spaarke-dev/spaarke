@@ -9,6 +9,11 @@
       2. BFF API Health  -  /healthz and /ping return 200
       3. CORS Origin  -  BFF API CORS configuration includes the Dataverse org URL
       4. Dev Value Leakage  -  no dev-only identifiers remain in env var values
+      5. Naming Conformance (H13)  -  invokes scripts/naming-conformance-check.ps1 against
+                                      r1-owned surfaces (bicep + seeder + appsettings.template
+                                      + config); exit 0 required for H13 acceptance to pass.
+                                      Per customer-provisioning-orchestration-r1 spec FR-35 +
+                                      SC #17 + design.md H13. Added by r1 task 021.
 
     This is the capstone validation tool for the production environment setup project.
     Run this after deploying to any non-dev environment to catch configuration issues.
@@ -16,6 +21,7 @@
     Prerequisites:
       - Azure CLI authenticated (`az login`)
       - PAC CLI authenticated to the target Dataverse environment (`pac auth create`)
+      - PowerShell 7.4+ available in PATH (naming-conformance-check.ps1 uses Set-StrictMode Latest)
 
 .PARAMETER DataverseUrl
     The Dataverse organization URL (e.g., https://myorg.crm.dynamics.com).
@@ -34,6 +40,18 @@
 .NOTES
     Project: production-environment-setup-r2
     Task: ENV-050  -  Create Validate-DeployedEnvironment.ps1 validation script
+
+    Extension:
+      Project: customer-provisioning-orchestration-r1
+      Task: 021  -  Wire naming-conformance-check.ps1 into H13 acceptance (spec FR-35 + SC #17).
+                    The r3-owned check (scripts/naming-conformance-check.ps1, r3 task 063) is
+                    invoked as-is; this script MUST NOT modify it. Exceptions codified in
+                    projects/customer-provisioning-orchestration-r1/notes/naming-exception-registry.md
+                    are honored by construction: the r3 check hardcodes `spaarke-spekvcert` as
+                    the legacy vault exception, and grandfathers PascalCase secrets like
+                    `BFF-API-ClientSecret` / `Dataverse-ClientSecret` via R2 casing-drift
+                    semantics (flags only multiple casings). No exception-registry file
+                    argument is required or supported.
 #>
 
 [CmdletBinding()]
@@ -353,6 +371,72 @@ function Test-DevValueLeakage {
 }
 
 # ─────────────────────────────────────────────────────────────────────
+# Check 5: Naming Conformance (H13 acceptance gate)
+# ─────────────────────────────────────────────────────────────────────
+# Per customer-provisioning-orchestration-r1 spec FR-35 + SC #17 + design.md H13.
+# Invokes the r3-owned repo-scanner scripts/naming-conformance-check.ps1 (r3 task 063).
+# SCOPE: r1-owned surfaces only. The r3 check's default -Path auto-discovers exactly
+# these: infrastructure/bicep/**/*.bicep + scripts/Seed-ProductionKeyVault.ps1 +
+# src/server/api/Sprk.Bff.Api/appsettings.template.json + config/environments.json.
+# It does NOT touch live Azure resources — no live-dev sweep occurs by construction
+# (satisfies owner directive #3).
+# EXCEPTIONS: Codified in projects/customer-provisioning-orchestration-r1/notes/
+# naming-exception-registry.md and honored by the r3 check's built-in logic
+# (`spaarke-spekvcert` vault + PascalCase secret grandfathering via R2 casing-drift).
+# EXIT: Any non-zero exit surfaces as `Fail` via Add-TestResult; the final-verdict block
+# then exits the outer script with 1, which propagates as an H13 acceptance-gate failure.
+
+function Test-NamingConformance {
+    Write-TestHeader "CHECK 5: Naming Conformance (H13 acceptance)"
+
+    $checkScript = Join-Path $PSScriptRoot 'naming-conformance-check.ps1'
+    if (-not (Test-Path $checkScript)) {
+        Add-TestResult -Group 'H13 Naming' -Test 'naming-conformance-check.ps1 available' -Status 'Fail' `
+            -Message "Expected r3 check at '$checkScript' but not found. r3 task 063 owns this file; restore from origin/master before re-running H13."
+        return
+    }
+
+    Add-TestResult -Group 'H13 Naming' -Test 'naming-conformance-check.ps1 available' -Status 'Pass' `
+        -Message "Located at $checkScript"
+
+    try {
+        # Invoke r3 check with default -Path (auto-discovers r1-owned surfaces).
+        # Merge all output streams so violation table + PASS/FAIL header are captured.
+        $output = & $checkScript 2>&1 | Out-String
+        $exitCode = $LASTEXITCODE
+
+        if ($exitCode -eq 0) {
+            # r3 script prints "naming-conformance-check: PASS — N file(s) scanned, 0 violations."
+            $summaryLine = ($output -split "`n" | Where-Object { $_ -match 'naming-conformance-check:' } | Select-Object -First 1).Trim()
+            Add-TestResult -Group 'H13 Naming' -Test 'naming-conformance-check exit 0' -Status 'Pass' `
+                -Message $(if ($summaryLine) { $summaryLine } else { 'r3 gate returned exit 0 — no violations.' })
+            Add-TestResult -Group 'H13 Naming' -Test 'H13 acceptance gate (naming)' -Status 'Pass' `
+                -Message "Exceptions honored by construction (spaarke-spekvcert + PascalCase grandfathering per naming-exception-registry.md)."
+        }
+        else {
+            # Non-zero exit: capture the violation snippet for the diagnostic. The r3 script's
+            # Format-Table output already cites Rule + Name + File + expected canonical form
+            # ("R1 env-token-in-name" / "R2 casing-drift" / "R3 vault-name-drift"). Truncate to
+            # keep the report readable; full detail is on stdout for the operator.
+            $snippet = ($output.Trim() -split "`n" | Select-Object -First 20) -join "`n        "
+            Add-TestResult -Group 'H13 Naming' -Test 'naming-conformance-check exit 0' -Status 'Fail' `
+                -Message "H13 FAIL: naming-conformance-check exit $exitCode.`n        See full output above. First lines:`n        $snippet"
+            Add-TestResult -Group 'H13 Naming' -Test 'H13 acceptance gate (naming)' -Status 'Fail' `
+                -Message "H13 blocks acceptance. Remediate the flagged resource per docs/architecture/AZURE-RESOURCE-NAMING-CONVENTION.md or, if the name is a codified carve-out, add it to projects/customer-provisioning-orchestration-r1/notes/naming-exception-registry.md AND coordinate with r3 to extend the built-in gate exceptions."
+            # Also echo the raw script output so nothing is swallowed.
+            Write-Host ""
+            Write-Host "  --- naming-conformance-check.ps1 output ---" -ForegroundColor DarkGray
+            Write-Host $output -ForegroundColor DarkGray
+            Write-Host "  -------------------------------------------" -ForegroundColor DarkGray
+        }
+    }
+    catch {
+        Add-TestResult -Group 'H13 Naming' -Test 'naming-conformance-check invocation' -Status 'Fail' `
+            -Message "Invocation threw before returning an exit code: $($_.Exception.Message). Verify pwsh 7.4+ is available and the r3 script is executable."
+    }
+}
+
+# ─────────────────────────────────────────────────────────────────────
 # Execution
 # ─────────────────────────────────────────────────────────────────────
 
@@ -372,6 +456,7 @@ Test-DataverseEnvironmentVariables
 Test-BffApiHealth
 Test-CorsOrigin
 Test-DevValueLeakage
+Test-NamingConformance   # H13 acceptance gate — customer-provisioning-orchestration-r1 task 021
 
 # ─────────────────────────────────────────────────────────────────────
 # Results Summary

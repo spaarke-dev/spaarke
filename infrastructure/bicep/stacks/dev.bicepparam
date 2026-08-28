@@ -8,7 +8,8 @@ param environment = 'dev'
 param location = 'westus2'
 param dataverseUrl = 'https://spaarkedev1.crm.dynamics.com'
 
-// Dev: P1v3. Aligned with the live dev tier 2026-08-20 by spaarke-auth-v4-dataverse-MI task 001.
+// Dev: P1v3. Aligned with the live dev tier 2026-08-20 by spaarke-auth-v4-dataverse-MI task 001,
+// concurred by r1 DS-5 IaC-alignment sweep (task 109).
 //
 // IMPORTANT CONTEXT -- this stack does NOT currently describe the running dev
 // environment. With customerId='spaarkedev1' + environment='dev' it would create

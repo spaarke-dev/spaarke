@@ -154,6 +154,18 @@ public sealed class GraphClientFactory : IGraphClientFactory
                     "Creating app-only Graph client with DefaultAzureCredential (system-assigned MI or dev credential chain)");
             }
 
+            // customer-provisioning-orchestration-r1 §4D tenant-isolation invariant I5 / FR-32
+            // (task 065): pin the credential to a specific tenant so it does not silently
+            // resolve to the MI-host's default tenant. Today this is the Spaarke tenant
+            // (single-tenant BFF) and the resolved tenant is unchanged; the assignment is a
+            // forcing-function requirement so a future multi-tenant switch is safe from
+            // implicit-tenant credential-context bugs. `_tenantId` is read from
+            // AZURE_TENANT_ID / TENANT_ID configuration in the ctor above (line 53).
+            if (!string.IsNullOrWhiteSpace(_tenantId))
+            {
+                credentialOptions.TenantId = _tenantId;
+            }
+
             credential = new DefaultAzureCredential(credentialOptions);
         }
         else

@@ -1,0 +1,99 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="108" project="customer-provisioning-orchestration-r1">
+  <metadata>
+    <title>Bicep: recreate sprk-provisioning-jobs queue with sessions + dedup (C5.4/C4.6) + drain-verify runbook</title>
+    <phase>C'' Wave G-1 -- Foundation</phase>
+    <gate>startable</gate>
+    <status>authoring-complete-live-recreate-pending</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Live queue delete+recreate is a destructive Azure operation with an irreversible in-flight-message-loss window; touches Bicep AND live Azure state per the parent task's Wave G-1 description. FULL + prescriptive steps.</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Well-specified IaC diff (Bicep resource block) plus a scripted, documented live-surgery sequence -- not itself an architectural decision (already locked), Sonnet @ high.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <deps>none</deps>
+    <tags>l2-controlplane, dispatcher, azure-deployment, deploy</tags>
+    <estimated-effort>4-6 hours</estimated-effort>
+  </metadata>
+
+  <prompt>Declare the sprk-provisioning-jobs queue in platform-controlplane.bicep (it currently appears in NO Bicep file -- grep-verified 0 hits in infrastructure/; the fleet namespace is out-of-stamp and modules/service-bus.bicep applies uniform properties to ITS OWN queue list, wrong shape for this queue) as a child resource of an `existing` reference to the fleet Service Bus namespace, with requiresDuplicateDetection:true, duplicateDetectionHistoryTimeWindow:'PT1H', requiresSession:true (per the owner-locked session-serialized dispatch decision, DS-2/DS-2b), lockDuration:'PT5M', maxDeliveryCount:10, deadLetteringOnMessageExpiration:true. Both requiresDuplicateDetection and requiresSession are CREATE-TIME-ONLY properties in Azure Service Bus -- the existing live queue (created via bare az servicebus queue create defaults: dedup OFF, sessions OFF) CANNOT be patched. Execute the documented delete-and-recreate live sequence as a runbook (not automated tooling): discard the 1 stale H0 envelope belonging to the C4.5-deleted dead test run, az servicebus queue delete, deploy the Bicep-declared queue, verify properties + that namespace-scope RBAC survived deletion (no re-grant needed).</prompt>
+
+  <role>SPAARKE platform developer / Azure infrastructure operator. Expert in Azure Service Bus queue create-time-only properties, Bicep `existing` cross-scope resource references, and safe destructive-operation runbooks.</role>
+
+  <goal>platform-controlplane.bicep declares the sprk-provisioning-jobs queue as a Bicep-managed resource with sessions ON, dedup ON (PT1H window), matching the DS-2-locked session-serialized dispatch decision. A documented runbook (this task's notes + a checked-in script if warranted) executes the live delete-recreate on the dev stamp: az servicebus queue show confirms the property values post-recreate.</goal>
+
+  <context>
+    <background>DS-5 §C4.6 (grep-verified) confirms: infrastructure/bicep/modules/service-bus.bicep:39 sets requiresDuplicateDetection:false uniformly for its managed queues (default queueNames ['sdap-jobs','document-indexing'] at :15) and sprk-provisioning-jobs is in NEITHER that list NOR any other Bicep file. The live queue was created via bare az CLI defaults. ServiceBusHandlerEnqueuer.cs's header (lines 11-45) documents it ALREADY sets SessionId=CustomerId on every message specifically so 'a future toggle to requiresSession=true works without code change' -- this task is that toggle. DS-2 §2.3 point 5 calls this queue recreation a HARD PREREQUISITE for task 102's session processor (a session receiver against a non-session queue fails loudly at StartProcessingAsync, which is the correct NFR-05 posture, but only once this task lands).</background>
+    <relevant-files>
+      <file role="modify">infrastructure/bicep/platform-controlplane.bicep</file>
+      <file role="canonical-reference">infrastructure/bicep/modules/service-bus.bicep</file>
+      <file role="canonical-reference">infrastructure/bicep/modules/membership-topic.bicep</file>
+      <file role="canonical-reference">src/server/services/Sprk.Provisioning.ControlPlane.Core/Enqueue/ServiceBusHandlerEnqueuer.cs</file>
+    </relevant-files>
+    <dependencies>
+    </dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="spec.md FR-22">L2 handler execution is session-serialized per customer: ServiceBusSessionProcessor with SessionId=CustomerId, MaxConcurrentCallsPerSession=1 is a HARD-CODED correctness invariant (not a tunable) protecting the 39 ETag-guarded ReplaceRunAsync call sites from cross-handler races (DS-2b Sec.0-1). Retry authority is Sec.4C RollbackTransitions, never an SB Abandon-loop.</constraint>
+    <constraint source="DS-5 §C4.6">requiresDuplicateDetection and requiresSession are CREATE-TIME-ONLY Azure Service Bus queue properties -- the live queue MUST be deleted and recreated, not patched. duplicateDetectionHistoryTimeWindow MUST be &gt;= the longest reconciler retry re-enqueue window for the same paramHash -- PT1H is the documented safe floor (handlers run &lt;=30-60 min per DS-2b §1.2).</constraint>
+    <constraint source="DS-5 §C4.6">Blast radius: destructive to in-flight messages -- SAFE TODAY (exactly 1 stale H0 envelope belonging to the C4.5-deleted dead test run exists). This is a one-time safe window; document the runbook so a FUTURE queue-property change (post-go-live) is a coordinated drain, not an ad-hoc delete.</constraint>
+    <constraint source="CLAUDE.md §11">Three-question component-justification gate applies to any NEW class/interface/Bicep resource/script this task introduces. Existing/Extension/Cost-of-doing-nothing are pre-answered in &lt;notes&gt; below; cite them verbatim in the PR description per root CLAUDE.md §11 enforcement table.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>Provisioning queue recreation with sessions + dedup</topic>
+    <files>
+      <file>projects/customer-provisioning-orchestration-r1/spec.md</file>
+      <file>projects/customer-provisioning-orchestration-r1/design.md</file>
+      <file>projects/customer-provisioning-orchestration-r1/CLAUDE.md</file>
+      <file>projects/customer-provisioning-orchestration-r1/notes/design-study-ds4-handler-audit.md</file>
+      <file>projects/customer-provisioning-orchestration-r1/notes/design-study-ds5-cat456-remediation.md</file>
+      <file>projects/customer-provisioning-orchestration-r1/notes/design-study-ds2-dispatcher-design.md</file>
+    </files>
+  </knowledge>
+
+  <steps mode="prescriptive">
+    <step order="0" name="Rigor + load">Emit RIGOR LEVEL (FULL). Read DS-5 §C5.4/§C4.6 in full plus membership-topic.bicep as the RBAC-pattern reference (task 110 reuses it).</step>
+    <step order="1" name="Bicep resource">In platform-controlplane.bicep, add `resource sbNamespace 'Microsoft.ServiceBus/namespaces@...' existing = { name: serviceBusNamespaceName }` (new param) plus a child `queues` resource 'sprk-provisioning-jobs' with the exact property block from this task's prompt.</step>
+    <step order="2" name="Validate">az bicep build -- zero new errors.</step>
+    <step order="3" name="What-if">az deployment sub what-if confirms the queue as Create (or, if a same-named queue already exists live, confirms Bicep would attempt an in-place property change that Azure will REJECT for create-time-only properties -- this confirms the delete-first requirement empirically before touching live state).</step>
+    <step order="4" name="Pre-check">az servicebus queue message-count (or portal) confirms exactly the 1 expected stale message; discard/purge it.</step>
+    <step order="5" name="Delete">az servicebus queue delete --name sprk-provisioning-jobs (dev namespace).</step>
+    <step order="6" name="Deploy">az deployment sub create with the Bicep template -- creates the queue with the new properties.</step>
+    <step order="7" name="Verify">az servicebus queue show --query 'requiresDuplicateDetection,requiresSession,duplicateDetectionHistoryTimeWindow' -- confirms true/true/PT1H.</step>
+    <step order="8" name="RBAC survival check">Confirm namespace-scope RBAC (to be granted in task 110) is unaffected by the queue-level delete/recreate (namespace-scope grants are not queue-scoped).</step>
+  </steps>
+
+  <escalation>
+    <trigger>If az servicebus queue message-count shows MORE than the 1 expected stale message at step 4 (indicating live traffic this task's authors did not anticipate), STOP before deleting -- escalate per CLAUDE.md §6 rather than discarding unknown in-flight work. This is destructive and irreversible.</trigger>
+  </escalation>
+
+  <tools>
+    <tool name="az servicebus">queue show/delete/message-count</tool>
+    <tool name="az bicep">build/what-if</tool>
+    <tool name="az deployment">sub create</tool>
+  </tools>
+
+  <outputs>
+    <output type="infra">infrastructure/bicep/platform-controlplane.bicep (modified)</output>
+    <output type="runbook">projects/customer-provisioning-orchestration-r1/notes/queue-recreate-runbook-2026-08.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">az bicep build infrastructure/bicep/platform-controlplane.bicep exits 0.</criterion>
+    <criterion testable="true">grep 'requiresSession' infrastructure/bicep/platform-controlplane.bicep shows true; grep 'requiresDuplicateDetection' shows true; grep 'duplicateDetectionHistoryTimeWindow' shows PT1H.</criterion>
+    <criterion testable="true">Post-recreate: az servicebus queue show --name sprk-provisioning-jobs --query requiresSession returns true (live verification on dev).</criterion>
+    <criterion testable="true">Post-recreate: az servicebus queue show --name sprk-provisioning-jobs --query requiresDuplicateDetection returns true.</criterion>
+    <criterion testable="true">The runbook note documents the exact delete/recreate command sequence + the pre-check message count observed, for repeatability on prod/other stamps.</criterion>
+  </acceptance-criteria>
+
+  <notes>Justification (CLAUDE.md §11): Existing -- the queue exists live today with wrong (default) properties; service-bus.bicep's uniform-queue-properties shape does not fit this queue (different dedup/session requirements than sdap-jobs/document-indexing). Extension -- cannot extend service-bus.bicep's shared queue list without forcing this queue's properties onto unrelated queues, or vice versa; a dedicated resource block in platform-controlplane.bicep (the L2 stamp's own file) is correct. Cost-of-doing-nothing -- task 102's session processor throws immediately at StartProcessingAsync against a non-session queue; L1 SB dedup stays permanently inert, leaving task 107's attempt-field fix with nothing to protect against.
+
+Completion note (2026-08-19): Steps 0-2 executed (Bicep authored + az bicep build 0 errors). Step 3 (what-if) executed in a narrower, resource-group-scoped form directly against the new module -- empirically confirms Azure evaluates requiresSession/requiresDuplicateDetection as a Modify (not Create) against the live queue, proving the create-time-only constraint behaviorally. Steps 4-8 (live pre-check/delete/deploy/verify/RBAC-check) NOT executed per explicit dispatch-level instruction ("this task is AUTHORING the Bicep + runbook; live execution is a separate ceremony run by the operator") -- fully documented as a runbook instead: projects/customer-provisioning-orchestration-r1/notes/queue-recreate-runbook-2026-08.md. Shipped as a module (infrastructure/bicep/modules/controlplane-sb-queue.bicep) rather than an inline resource per Path C deviation (BCP165 cross-resource-group constraint) -- see notes/task-108-deviations.md. Acceptance criteria 1, 2, 5 MET; criteria 3-4 (live post-recreate verification) deferred to the separate live-ceremony run. Runbook's §5 documents the PT1H-dedup-vs-§4C-retry interaction (task 107 dependency) and recommends sequencing live execution after task 107 ships.</notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+  </execution>
+</task>

@@ -377,6 +377,65 @@ export interface UpdateConsumingTenantRequest {
 export type ContainerStatus = "active" | "inactive" | "deleted";
 
 /**
+ * Archive state, from Graph's `archivalDetails.archiveStatus` (FR-E01, task 050).
+ *
+ * ⚠️ There is deliberately no `"notArchived"` member — Graph's `siteArchiveStatus` enum has none on
+ * either API version, and a container that is not archived simply omits `archivalDetails`. So the
+ * absence of a value here is the ONLY way "not archived" is expressed, and it is indistinguishable
+ * from "Graph did not report". Never render `undefined` as a positive claim that content is online.
+ *
+ * All three values are transitional or terminal states of an ASYNCHRONOUS operation:
+ *   recentlyArchived → fullyArchived   (archiving, in progress → done)
+ *   reactivating     → (field absent)  (unarchiving, in progress → done)
+ */
+export type ContainerArchiveStatus =
+  | "recentlyArchived"
+  | "fullyArchived"
+  | "reactivating";
+
+/**
+ * Per-container storage quota, from the container drive's `quota` facet (FR-E02, task 051).
+ *
+ * 🔑 **`total` is a container-TYPE setting.** It is the type's `maxStoragePerContainerInBytes` as it
+ * applies to this container, so it is the SAME for every container of that type. Do not label it in a
+ * way that implies this one container can be capped differently — Graph has no per-container ceiling:
+ * `fileStorageContainerSettings` carries no storage property on either API version, and a
+ * container-scope PATCH returns 200 while discarding the value (measured 2026-08-27).
+ *
+ * `used` is the only consumption figure available on a single-container fetch — `storageUsedInBytes`
+ * is LIST-only (tasks 020/024).
+ *
+ * Every field is nullable: null means **NOT REPORTED**, never zero (spec NFR-06).
+ */
+export interface ContainerQuota {
+  /** The ceiling in bytes — sourced from the container TYPE. */
+  total?: number | null;
+  /** Bytes consumed. */
+  used?: number | null;
+  /** Bytes remaining, as Graph computes it — NOT `total - used` (deleted items still count). */
+  remaining?: number | null;
+  /** Bytes held by deleted items that still count against the quota. */
+  deleted?: number | null;
+  /** Graph's own assessment, e.g. `normal`, `nearing`, `critical`, `exceeded`. */
+  state?: string | null;
+}
+
+/**
+ * Body of the 202 returned by the archive / unarchive endpoints (FR-E01).
+ *
+ * ⚠️ The shape exists to make "accepted ≠ done" impossible to miss. `pending` is always true today —
+ * Graph has no synchronous path for these actions — and `expectedNextState` names the state the
+ * container is moving into, so the UI can say what is happening rather than implying it finished.
+ */
+export interface ArchivalActionAccepted {
+  message: string;
+  /** Always true: Graph performs archival asynchronously. */
+  pending: boolean;
+  /** The state the container transitions into — `recentlyArchived` or `reactivating`. */
+  expectedNextState: ContainerArchiveStatus;
+}
+
+/**
  * SPE Container — returned by the Graph API and proxied through
  * GET /api/spe/containers?configId={id}.
  */
@@ -389,8 +448,31 @@ export interface Container {
   description?: string;
   /** Container type ID this container belongs to */
   containerTypeId: string;
-  /** Current status */
-  status: ContainerStatus;
+  /**
+   * Current status — or `null` meaning **NOT REPORTED**.
+   *
+   * 🔑 Always `null` on list rows: Graph drops `status` from container collection rows even when
+   * `$select` asks for it (measured 2026-08-27, task 050). Populated on the detail fetch.
+   *
+   * This was a required `ContainerStatus` until 2026-08-27, and both the server mapper and the grid
+   * cell defaulted it to `"active"`. The server's fallback fired for 100% of responses because it
+   * searched the wrong place for the field, so the Status column asserted "Active" for every
+   * container regardless of truth. **Do not reintroduce a `?? "active"` anywhere.** Render the absent
+   * case explicitly (spec NFR-06).
+   */
+  status: ContainerStatus | null;
+  /**
+   * Archive state (FR-E01), or absent when there is no archive state to show.
+   *
+   * ⚠️ A **separate dimension** from {@link status} — a container can be `active` and
+   * `fullyArchived` at once. Do not merge them into a single badge value.
+   */
+  archiveStatus?: ContainerArchiveStatus;
+  /**
+   * Per-container storage quota (FR-E02). **Detail responses only** — Graph reports it on the
+   * expanded drive, which a list cannot carry.
+   */
+  quota?: ContainerQuota;
   /** Whether the container is locked (read-only) */
   isItemVersioningEnabled?: boolean;
   /** Creation date ISO string */
@@ -685,34 +767,49 @@ export type AuditCategory =
 
 /**
  * Audit log entry from the sprk_speauditlog Dataverse table.
- * Returned by GET /api/spe/audit.
+ * Returned inside the `items` array of GET /api/spe/audit.
+ *
+ * Corrected 2026-08-25. This interface used to declare thirteen required fields, seven of which the
+ * endpoint has never sent — it described the Dataverse table rather than the response. The required
+ * markers were doing real harm: they told every reader that `businessUnitId` would be there, so a
+ * consumer could reach for it and get `undefined` with no type error anywhere. Optional now means
+ * "this endpoint does not return it", which is a fact about the wire, not a wish about the schema.
  */
 export interface AuditLogEntry {
   /** Primary key GUID (sprk_speauditlogid) */
   id: string;
   /** Operation name, e.g. "CreateContainer" (sprk_operation) */
   operation: string;
-  /** Category of the operation (sprk_category) */
-  category: AuditCategory;
+  /**
+   * Human-readable category LABEL resolved server-side from the `sprk_category` option set —
+   * e.g. "Container type", not the `AuditCategory` filter value "ContainerType". The two are
+   * deliberately different: this one is for display, `AuditCategory` is what the filter sends.
+   */
+  category: string;
   /** ID of the affected resource (sprk_targetresourceid) */
   targetResourceId: string;
   /** Name of the affected resource (sprk_targetresourcename) */
   targetResourceName: string;
   /** HTTP status code of the operation response (sprk_responsestatus) */
   responseStatus: number;
-  /** Response summary or error message (sprk_responsesummary) */
-  responseSummary: string;
-  /** Environment context ID (sprk_environmentid) */
-  environmentId: string;
-  /** Environment display name (denormalized) */
+  /**
+   * Response summary or error message (sprk_responsesummary).
+   * NOT currently returned — the column is absent from the endpoint's `$select` because it has not
+   * been verified against the live Dataverse schema, and naming a column that does not exist 400s
+   * the entire query (task 005 found exactly that with `sprk_targetresource`).
+   */
+  responseSummary?: string;
+  /** Environment context ID (sprk_environmentid). Not returned by GET /api/spe/audit. */
+  environmentId?: string;
+  /** Environment display name (denormalized). Not returned by GET /api/spe/audit. */
   environmentName?: string;
-  /** Container type config context ID (sprk_containertypeconfigid) */
-  containerTypeConfigId: string;
-  /** Config display name (denormalized) */
+  /** Container type config context ID. Not returned — it is the query's input, not its output. */
+  containerTypeConfigId?: string;
+  /** Config display name (denormalized). Not returned by GET /api/spe/audit. */
   containerTypeConfigName?: string;
-  /** Business Unit context ID (sprk_businessunitid) */
-  businessUnitId: string;
-  /** Business Unit display name (denormalized) */
+  /** Business Unit context ID (sprk_businessunitid). Not returned by GET /api/spe/audit. */
+  businessUnitId?: string;
+  /** Business Unit display name (denormalized). Not returned by GET /api/spe/audit. */
   businessUnitName?: string;
   /** User who performed the operation (sprk_performedby) */
   performedBy: string;
@@ -829,20 +926,38 @@ export interface SearchRequest {
 }
 
 /** Search result item for container search */
+/**
+ * A container that matched a search.
+ *
+ * Corrected 2026-08-25. `container` used to be typed as a full `Container`, which was never true:
+ * Graph Search returns a projection, and the endpoint's `SearchContainerDto` carries only id,
+ * displayName, description and containerTypeId. `status`, `createdDateTime` and
+ * `storageUsedInBytes` are NOT available on a search result — the grid renders them as "—" rather
+ * than inventing an "active"/epoch default, because a fabricated status on a security-admin screen
+ * is worse than a visible blank.
+ */
 export interface ContainerSearchResult {
-  /** Container that matched the search */
-  container: Container;
-  /** Relevance score */
+  /** Container that matched the search — a PROJECTION, not a full container record. */
+  container: Partial<Container> & Pick<Container, "id" | "displayName">;
+  /** Relevance score. Not currently reported by the endpoint. */
   score?: number;
 }
 
-/** Search result item for drive item search */
+/**
+ * A drive item that matched a search.
+ *
+ * Same correction as {@link ContainerSearchResult}: the endpoint's `SearchItemDto` returns id, name,
+ * size, lastModifiedDateTime, containerId, containerName, webUrl and mimeType — so `createdDateTime`
+ * and `lastModifiedBy` are absent here even though a fully-read `DriveItem` has them.
+ */
 export interface DriveItemSearchResult {
-  /** Drive item that matched */
-  item: DriveItem;
+  /** Drive item that matched — a PROJECTION, not a full drive item. */
+  item: Partial<DriveItem> & Pick<DriveItem, "id" | "name">;
   /** Container the item belongs to */
   containerId: string;
-  /** Relevance score */
+  /** Display name of the owning container, when search reported one. */
+  containerName?: string;
+  /** Relevance score. Not currently reported by the endpoint. */
   score?: number;
   /** Search result hit highlights */
   hitHighlightedSummary?: string;
@@ -946,16 +1061,21 @@ export interface BulkPermissionsRequest {
 
 /** Secure score from GET /api/spe/security/score */
 export interface SecureScore {
-  /** Score ID */
-  id: string;
+  /** Score ID. NOT returned by GET /api/spe/security/score. */
+  id?: string;
   /** Current score */
   currentScore: number;
   /** Maximum possible score */
   maxScore: number;
-  /** Percentage (currentScore / maxScore * 100) */
-  percentage: number;
-  /** Date of this score snapshot */
-  createdDateTime: string;
+  /**
+   * Percentage (currentScore / maxScore * 100).
+   * NOT returned by the endpoint — `SecureScoreDto` carries only currentScore, maxScore and
+   * averageComparativeScores. Marked optional 2026-08-25 after the card rendered "NaN%" for reading
+   * a field that was never on the wire; the card now derives it from the two scores.
+   */
+  percentage?: number;
+  /** Date of this score snapshot. NOT returned by the endpoint. */
+  createdDateTime?: string;
   /** Individual control scores */
   controlScores?: Array<{
     controlName: string;

@@ -175,6 +175,12 @@ columns, custom properties, and quota remain Spaarke's. This is the largest scop
 
 Reduces storage cost by **up to 75%** and improves Copilot result relevance by de-prioritising inactive
 content. Admins opt in per container type via PowerShell `Set-SPOContainerType -IsArchiveEnabled`, then
+
+> 🔴 **Corrected 2026-08-27 (task 050).** Left above as the record of what this research concluded on
+> 2026-08-20. **That cmdlet+parameter pair does not exist.** The real one is
+> `Set-SPOContainerTypeConfiguration -ContainerTypeId <guid> -IsArchiveEnabled $true`, SPO module
+> ≥ 16.0.27515.12000. See `task-050-findings.md` §1.
+
 manage archived containers via new Graph APIs and SharePoint admin center options.
 
 **Spaarke fit**: containers are provisioned per project/matter (`ProvisionProjectEndpoint`,

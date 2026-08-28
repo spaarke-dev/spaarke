@@ -1,0 +1,79 @@
+Archived: 2026-08-25
+Final status: Completed
+Closing PR: #822 (https://github.com/spaarke-dev/spaarke/pull/822)
+Worktree: c:/code_files/spaarke-wt-spaarke-auth-v4-dataverse-MI (PRESERVED — operator decision 2026-08-25: kept as a live dev environment for near-term use. NOT removed by this skill; clean up separately if ever desired.)
+Remote branch: work/spaarke-auth-v4-dataverse-MI (still on origin — history retained for audit)
+Issue: #800 (closed, reason=COMPLETED, 2026-08-25T18:28:30Z)
+
+Start Date: 2026-08-17
+Closed Date: 2026-08-25 (PR #822 merge date)
+Tasks: 26 of 26 active complete · 3 deferred (Power BI 040-042, owner decision DEF-001)
+Graduation walk: 14 verified with evidence · 1 waived · 1 partial (#9) · 0 not-met
+
+OUTCOME
+  BFF-API-ClientSecret eliminated from app settings AND Key Vault. Every
+  BFF-identity confidential client -- including OBO, which three prior audits
+  concluded could never be secret-free -- authenticates via a Managed-Identity
+  federated credential. Service Bus SAS + AI Search admin key migrated alongside.
+  Verified IN LIVE USE, not merely configured: notes/decisions/mi-proof-dataverse-side.md
+
+  Root cause of the three failed predecessors was ONE SENTENCE --
+  constraints/auth.md:108, "OAuth spec requires confidential client + secret."
+  OAuth requires a confidential CREDENTIAL; a secret is one of three ways to
+  satisfy it, and Microsoft ranks it last.
+
+MERGED PRs
+  #814 core · #816 Office add-in defects · #817 wrap-up · #818 carried-forward
+  closures · #819 runbook promotion · #820 correction · #821 -CutoverBffSettings
+  guard · #822 CORS forcing function
+
+FORCING FUNCTIONS LEFT BEHIND (the point of the project)
+  - tests/Spaarke.ArchTests/** is now the EIGHTH KEEP PATH via ADR-038
+    Amendment A1 -- closing a gap where the mandatory /test-diet close gate would
+    have recommended deleting the very mechanism the ADR prescribes.
+  - FR-F1 credential ban + FR-F2 credential census. Criterion 12 was EXERCISED,
+    not asserted: a deliberate 9th secret-bearing client made both fire, naming
+    the exact file:line.
+  - CORS drift gate: declaration (config/environments.json requiredCorsOrigins)
+    + deploy-time assertion (Deploy-BffApi.ps1 step 6/4) + fitness tests.
+    Also exercised -- seeded origin produced exit 1 on a real deploy.
+  - Guard on Deploy-AllIndexes.ps1 -CutoverBffSettings.
+  ArchTests: 69/69.
+
+DATED ITEMS -- 2026-11-22 / 2026-11-23 (when Key Vault recovery lapses)
+  1. Rotate Dataverse-Checkout-20251218 (partial value in git history since
+     2026-03-09; valid to 2027-12-18).
+  2. Obligation 051-E code half -- drop the Service Bus SAS branch +
+     PostConfigure back-fill, updating ServiceBusClientGuardTests in the same
+     commit; includes appsettings.template.json's stale reference.
+  BOTH WAIT DELIBERATELY: doing either sooner converts a 2-minute config
+  rollback into a redeploy on a fail-closed surface.
+
+ROLLBACK (config-only, ~2 min; there is NO slot to swap back to -- task 032
+deleted it, so a code rollback means a redeploy with a real outage window)
+  az keyvault secret recover --vault-name spaarke-spekvcert --name BFF-API-ClientSecret   (until 2026-11-22)
+  restore the 4 app settings (fingerprint b09a140a603e)
+  add ClientSecret back to Graph__Credentials__Order
+  set Graph__Credentials__RequireSecretFreeIdentity=false -- DELIBERATELY, so the
+  deviation is recorded rather than hidden
+  Service Bus / AI Search rollback secrets recoverable until 2026-11-23
+  (fingerprints 3db62606e51e / f20f0def4444)
+
+TIME-SENSITIVE
+  Entra sign-in logs retain 30 days. notes/decisions/mi-proof-dataverse-side.md
+  is the DURABLE ARTIFACT -- the query itself stops working around 2026-09-24.
+
+WHERE THE REASONING LIVES
+  notes/lessons-learned.md ................ the retrospective; §2 catalogues EIGHT
+                                            shapes in which a status code
+                                            establishes nothing on this codebase
+  notes/decisions/mi-proof-dataverse-side.md three-layer live proof + re-run recipe
+  notes/decisions/033-secret-removal.md ... the removal and the near-miss
+  notes/uat-findings-2026-08-24.md ........ six UAT findings, none an auth-v4 regression
+  current-task.md ......................... carried-forward items with owners
+  spec.md § Success Criteria .............. the graduation walk, evidence per criterion
+
+  The one method worth carrying forward: find the log line, the Graph status, or
+  a byte-level artifact -- and if you cannot, REMOVE THE FALLBACK AND LET SUCCESS
+  BE THE PROOF. The second half proved stronger than the first, and it is how
+  every cutover here was established.

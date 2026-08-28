@@ -1,0 +1,94 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="013" project="customer-provisioning-orchestration-r1">
+  <metadata>
+    <title>Harden scripts/Deploy-Release.ps1 Phase 4 — customerId-driven, remove spaarkedev1 hardcode</title>
+    <phase>B Gap Automation Script Hardening</phase>
+    <gate>startable</gate>
+    <status>not-started</status>
+    <rigor>STANDARD</rigor>
+    <rigor-reason>Modifies existing PowerShell script (not BFF code); hard-coded string removal + parameterization. Per root CLAUDE.md §8, script hardening with explicit constraints = STANDARD.</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Mechanical parameterization; no cross-cutting refactor. Per Step 3.5.5b default = sonnet.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>groupB-parallel</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <deps>none</deps>
+    <tags>powershell, deploy</tags>
+    <estimated-effort>3-4 hours</estimated-effort>
+  </metadata>
+
+  <prompt>
+Harden scripts/Deploy-Release.ps1 Phase 4 to be customerId-driven per spec.md Gap 2 + R16. Remove the `spaarkedev1` hardcode; introduce mandatory -CustomerId parameter; every Phase 4 code-page deployment site derives its target env from resolved customer registry lookup, not from a baked-in constant. This is the H9 handler's underlying deploy invocation.
+  </prompt>
+
+  <role>SPAARKE platform DevOps engineer fluent with Deploy-Release.ps1 architecture (multi-phase deploy orchestrator), Spaarke's customer registry (sprk_dataverseenvironment), and PowerShell 7.4+.</role>
+
+  <goal>scripts/Deploy-Release.ps1 Phase 4: (a) -CustomerId is mandatory (removed spaarkedev1 default), (b) every Phase 4 deployment target derives env from customer-registry lookup, (c) re-run against a customer produces the correct customer's env deploys (verified by log lines), (d) attempting to run without -CustomerId errors with mandatory-parameter diagnostic, (e) H9 handler (Wave C4) can invoke against any customerId without editing the script.</goal>
+
+  <context>
+    <background>
+Per spec.md Gap 2 + R16 + design.md § handlers H9. Current Deploy-Release.ps1 Phase 4 has `spaarkedev1` (or equivalent) hardcoded as the target env; H9 handler cannot re-use it across customers without editing. Gap 2 hardening makes it parameterized so H9 wraps it cleanly.
+    </background>
+    <relevant-files>
+      <file role="modify">scripts/Deploy-Release.ps1</file>
+      <file role="canonical-reference">projects/customer-provisioning-orchestration-r1/design.md</file>
+      <file role="canonical-reference">projects/customer-provisioning-orchestration-r1/spec.md</file>
+    </relevant-files>
+    <dependencies>
+      <dependency task="none" status="complete">Phase B is startable</dependency>
+    </dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="spec.md">SCOPE: Phase 4 -CustomerId parameter is Mandatory; no default value; no `spaarkedev1` (or equivalent) hardcode remains in Phase 4 code paths.</constraint>
+    <constraint source="spec.md">SCOPE: Env resolution MUST go through customer-registry lookup (sprk_dataverseenvironment) — hardcoded env name lookup is a defect.</constraint>
+    <constraint source="project">SCOPE: This task modifies ONLY Phase 4 of Deploy-Release.ps1. Do NOT rewrite Phase 1/2/3/5 (they are out of scope; other phases have separate hardening tasks or remain as-is).</constraint>
+    <constraint source="project">SCOPE: The script MUST fail fast on -CustomerId missing (exit non-zero with mandatory-param diagnostic). Silent default to dev is a defect.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>Multi-customer parameterization + Spaarke registry lookup</topic>
+    <files>
+      <file>projects/customer-provisioning-orchestration-r1/spec.md</file>
+      <file>projects/customer-provisioning-orchestration-r1/design.md</file>
+      <file>projects/customer-provisioning-orchestration-r1/CLAUDE.md</file>
+    </files>
+    <patterns>
+      <pattern name="Mandatory-param PS pattern" location="scripts/">`[Parameter(Mandatory)][string]$CustomerId` — PS runtime enforces; script exits non-zero if missing.</pattern>
+    </patterns>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="0" name="Context + rigor declaration">Emit the 🔒 RIGOR LEVEL block. Load spec.md Gap 2 + R16 + design.md H9.</step>
+    <step order="1" name="Baseline">Read Phase 4 of Deploy-Release.ps1; identify every `spaarkedev1` reference (or equivalent hardcode); note surrounding target-env resolution logic.</step>
+    <step order="2" name="Introduce -CustomerId">Add `[Parameter(Mandatory)][string]$CustomerId` to Phase 4 entry-point OR script param block; remove any default that reintroduces the hardcode.</step>
+    <step order="3" name="Registry lookup">Replace every hardcoded env reference in Phase 4 with a customer-registry lookup (via PAC / az / dataverse cmdlet — pick the pattern already used elsewhere in the script).</step>
+    <step order="4" name="Emit target log">Add explicit log line at Phase 4 start: "Phase 4 target: customerId={id} env={resolvedEnv}" for auditability.</step>
+    <step order="5" name="Test — happy path">Run `Deploy-Release.ps1 -CustomerId {devCustomer}` on Phase 4; verify correct env is targeted per log line.</step>
+    <step order="6" name="Test — missing param">Run without -CustomerId; verify script exits non-zero with mandatory-param diagnostic (does not fall through to old hardcode).</step>
+    <step order="7" name="Grep verification">Grep Phase 4 code paths for `spaarkedev1`; verify zero remaining occurrences.</step>
+    <step order="8" name="Index update">Update TASK-INDEX.md: set task 013 status to ✅.</step>
+    <step order="9" name="Deviations">Document any deviation in projects/customer-provisioning-orchestration-r1/notes/.</step>
+  </steps>
+
+  <tools>
+    <tool name="pwsh">PowerShell 7.4+</tool>
+    <tool name="pac">PAC CLI for env lookup pattern</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">scripts/Deploy-Release.ps1 Phase 4 (hardened)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Given Deploy-Release.ps1, when grepping Phase 4 code paths for `spaarkedev1` (or equivalent hardcode), then zero occurrences remain.</criterion>
+    <criterion testable="true">Given script invocation without -CustomerId, when running, then it exits non-zero with a mandatory-parameter diagnostic before any deployment side-effect.</criterion>
+    <criterion testable="true">Given `Deploy-Release.ps1 -CustomerId {id}` on Phase 4, when running, then the log includes "Phase 4 target: customerId={id} env={resolvedEnv}" and the resolvedEnv matches the customer's sprk_dataverseenvironment row.</criterion>
+    <criterion testable="true">Negative: git diff scope is Phase 4 code paths of Deploy-Release.ps1 only — Phase 1/2/3/5 unchanged.</criterion>
+    <criterion testable="true">Negative: no silent default env; missing -CustomerId errors, does not fall back to legacy hardcode.</criterion>
+  </acceptance-criteria>
+
+  <notes>Spec Gap 2 + R16. Wave C4 H9 handler consumes this script.</notes>
+
+  <execution><skill>.claude/skills/task-execute/SKILL.md</skill></execution>
+</task>

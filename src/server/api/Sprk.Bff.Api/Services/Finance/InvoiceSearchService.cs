@@ -38,6 +38,7 @@ public interface IInvoiceSearchService
 public sealed class InvoiceSearchService : IInvoiceSearchService
 {
     private readonly SearchIndexClient _searchIndexClient;
+    private readonly IConfiguration _configuration;
     private readonly IInvoiceAi? _invoiceAi;
     private readonly ILogger<InvoiceSearchService> _logger;
 
@@ -56,10 +57,12 @@ public sealed class InvoiceSearchService : IInvoiceSearchService
 
     public InvoiceSearchService(
         SearchIndexClient searchIndexClient,
+        IConfiguration configuration,
         ILogger<InvoiceSearchService> logger,
         IInvoiceAi? invoiceAi = null)
     {
         _searchIndexClient = searchIndexClient ?? throw new ArgumentNullException(nameof(searchIndexClient));
+        _configuration = configuration ?? throw new ArgumentNullException(nameof(configuration));
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
         _invoiceAi = invoiceAi; // Nullable: AI feature flags may be disabled. RequireAi() throws at use site.
     }
@@ -114,8 +117,9 @@ public sealed class InvoiceSearchService : IInvoiceSearchService
             // Step 2: Get SearchClient for the index
             var searchClient = _searchIndexClient.GetSearchClient(IndexName);
 
-            // Step 3: Build filter expression
-            var filter = BuildFilter(matterId);
+            // Step 3: Build filter expression (unconditional tenantId scoping + optional matter)
+            var tenantId = _configuration["AzureAd:TenantId"] ?? string.Empty;
+            var filter = BuildFilter(tenantId, matterId);
 
             // Step 4: Build search options (hybrid search with semantic reranking)
             var searchOptions = BuildSearchOptions(queryEmbedding, filter, top);
@@ -149,16 +153,34 @@ public sealed class InvoiceSearchService : IInvoiceSearchService
     }
 
     /// <summary>
-    /// Build OData filter expression for matter filtering.
+    /// Build OData filter expression combining unconditional tenant scoping with the optional
+    /// matter filter.
     /// </summary>
-    private static string? BuildFilter(Guid? matterId)
+    /// <remarks>
+    /// customer-provisioning-orchestration-r1 §4D tenant-isolation invariant I2 / FR-29
+    /// (task 065): every AI Search query on the invoices index carries an unconditional
+    /// <c>tenantId eq '{tenantId}'</c> filter. The canonical tenant source is
+    /// <c>AzureAd:TenantId</c> — the BFF is bound to one Dataverse environment which is
+    /// itself tied to one Azure AD tenant. Once the invoice index moves to a
+    /// shared-index-multi-tenant shape, this filter prevents leaking invoices across
+    /// customer boundaries (CATASTROPHIC per §4D). When <paramref name="tenantId"/> is empty
+    /// (misconfigured environment / local dev), the tenant clause is omitted rather than
+    /// generating an invalid filter — this is safe today (single-tenant BFF); once multi-tenant,
+    /// the boot-time IOptions validation guarantees AzureAd:TenantId is non-empty (r3 task 061).
+    /// </remarks>
+    private static string? BuildFilter(string tenantId, Guid? matterId)
     {
+        var clauses = new List<string>();
+        if (!string.IsNullOrEmpty(tenantId))
+        {
+            clauses.Add($"tenantId eq '{tenantId.Replace("'", "''")}'");
+        }
         if (matterId.HasValue)
         {
-            return $"matterId eq '{matterId.Value}'";
+            clauses.Add($"matterId eq '{matterId.Value}'");
         }
 
-        return null;
+        return clauses.Count == 0 ? null : string.Join(" and ", clauses);
     }
 
     /// <summary>
