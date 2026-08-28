@@ -1,7 +1,10 @@
 # Task 076 — record-keyed upload contract (option C)
 
-> **Status**: in progress. Step 0 verified, Step 1 (this design) written before code.
-> **Date**: 2026-08-27
+> **Status**: server half SHIPPED. Client cutover **ESCALATED** — see §5.
+> **Dates**: designed 2026-08-27 · server half + escalation 2026-08-28
+> **Corrections applied 2026-08-28**: the route-contract table's two container rows, and the INV-7
+> section, were both **wrong** in the 2026-08-27 draft. Corrected in place, with the error kept visible
+> in §2 rather than quietly overwritten — the wrong version was cited downstream.
 
 ---
 
@@ -13,145 +16,242 @@
 | 075's resolver is present | `find` | ✅ `Infrastructure/Dataverse/RecordContainerResolver.cs` + `SecureContainerDecision.cs` + `Services/Communication/Engine/CommunicationContainerResolver.cs` |
 | `GET /api/obo/containers/{id}/drive` mapped nowhere | grep of `src/server/**` | ✅ **three comments, zero `Map*` calls** (`DocumentsEndpoints.cs:16`, `UploadSessionManager.cs:105`, `SpeFileStoreDtos.cs:15`) |
 
-The third fact clears escalation trigger 3: the chunked OBO pair is dead, so **delete** is correct
-and **convert** would be giving a dead path a new contract.
-
-**Client upload call sites re-grepped** (the POML says every count in this project has been wrong at
-least once — this one was right): exactly three, matching U1/U2/U3.
-
-| # | Site | Route |
-|---|---|---|
-| U1 | `Spaarke.UI.Components/src/services/EntityCreationService.ts:493` | `PUT /api/obo/containers/{id}/files/{name}` |
-| U2 | `Spaarke.UI.Components/src/services/document-upload/SdapApiClient.ts:101` | same |
-| U3 | `Spaarke.SdapClient/src/operations/UploadOperation.ts:27` | same |
-| — | `UploadOperation.ts:98` | `GET …/drive` — **dead**, 404 |
+The third fact cleared escalation trigger 3, so the chunked OBO pair was **deleted** rather than given a
+new contract. That deletion landed in the earlier half of this task (commit `ed5d9e776`).
 
 ---
 
-## 🔴 A fact the POML did not measure — and it changes the shape of the work
-
-### The finding
-
-**Option (C) requires a server-side resolution of the caller's business-unit container, and that
-capability does not exist. INV-7 says it deliberately does not exist.**
-
-The POML's §1 measures the work as *"one route converted and two deleted"*. That is the complete
-account of the **route** surface, and it is accurate. It is not the complete account of the
-**contract**, because of what the server needs in order to answer the question the client stops
-answering.
-
-075's resolver signature is:
-
-```csharp
-ResolveForRecordAsync(string entityLogicalName, Guid recordId, string? nonSecureFallbackContainerId, ct)
-```
-
-That third parameter is load-bearing. `SecureContainerDecision.Decide` routes a **secure** record to
-its own container and everything else to `nonSecureFallbackContainerId` — and deliberately never
-consults a non-secure record's own stamped column:
-
-> *"A non-secure record's OWN stamped container is deliberately never consulted — only the fallback.
-> Reading it would silently redirect content for any record carrying a stale stamp, and stale stamps
-> demonstrably exist because the creation wizard's BU cascade writes that column today."*
-
-Today the client computes that fallback. Verified — **every** upload site passes a BU-derived value:
-
-| Caller | What it passes |
-|---|---|
-| `LegalWorkspace/CreateProject/ProjectWizardDialog.tsx:121` | `getSpeContainerIdFromBusinessUnit(webApi)` |
-| `LegalWorkspace/CreateMatter/WizardDialog.tsx:135` | same |
-| `LegalWorkspace/CreateEvent/EventWizardDialog.tsx:103` | same |
-| `SmartTodo/SmartTodoApp.tsx:643` | same |
-| `EmailComposer/createXrmEmailComposeHandlers.ts:255` | `bu.containerId` |
-| `CreateProjectWizard.tsx:712`, `CreateEventWizard.tsx:401`, `CreateAnalysisWizardWidget.tsx:778` | `context.speContainerId` — resolved from the BU at wizard-open (this is finding **F-9**) |
-
-Under (C) the client stops sending it. The bytes still have to land somewhere for a **non-secure**
-record, and acceptance criterion 4 says *"Non-secure upload behaviour is unchanged."* So the server
-must resolve the acting caller's BU container itself.
-
-**It cannot today.** Grepped `src/server/api/Sprk.Bff.Api/**` for `sprk_containerid`: every hit is
-provisioning (writing a project's own container), 075's resolver (consuming a fallback it is given),
-or a doc comment. There is no server-side `user → businessunit → sprk_containerid` chain.
-
-And that absence is deliberate. **design.md:450, INV-7**:
-
-> *"Acting user's BU → `businessunit.sprk_containerid` … **The BFF deliberately does not resolve this
-> server-side (INV-7)**"*
-
-### Why I am proceeding rather than stopping
-
-The POML forbids the smaller alternative in terms that leave no room:
-
-> *"A route that accepts BOTH a record and a container is a failed implementation of this task."*
-
-and the escalation trigger names it directly:
-
-> *"Do NOT reintroduce a client-supplied container 'just for that one path' — that is option (B)
-> arriving through the back door, and (B) was rejected."*
-
-So there is exactly one permitted reading, and it is: **the server resolves the fallback too.** This
-is not a pivot away from (C) — it is what (C) *means* once the third parameter is accounted for. The
-owner's decision that "the client stops deciding" is only true if the server can decide the whole
-question.
-
-### Why 075's three INV-7 reasons do not block this
-
-075 §4 defended client-side resolution with three reasons, all written the same day. Each was aimed
-at a **client-facing recordId→containerId HTTP endpoint** — which option (C) does not add. Taking
-them in turn:
-
-| 075's reason | Does it bite under (C)? |
-|---|---|
-| 1. *"A recordId → containerId HTTP endpoint is a new disclosure primitive"* — cites task 070 (stopped emitting `driveId`/`speFileId`) and task 081 (a container-resolving route that leaked cross-tenant) | **No — inverted.** Under (C) the container id never leaves the server. The route consumes it internally and returns file metadata. (C) is *strictly better* on this axis than (A), which keeps container ids flowing to clients. |
-| 2. *"It would need a record-scoped authorization filter that does not exist"* | **No.** `Api/Filters/EntityAccessFilter.cs` authorizes `(entityType, recordId)` via `CallerRecordAccessProbe` and already covers `sprk_matter` / `sprk_project` / `sprk_invoice` / `account` / `contact`. The POML's §11 constraint names it as the thing to extend. This is what clears escalation trigger 2. |
-| 3. *"The BFF is not reachable from every client surface"* — a BFF-dependent resolver would fail closed on every upload when the BFF is down | **No — not on this path.** The upload **is** a BFF call (`PUT /api/obo/…`). If the BFF is unreachable the upload fails regardless; resolving the container inside that same request adds no new dependency. Reason 3 is correct for the *non-upload* container consumers (the wizard's `sprk_containerid` stamp, navigation URLs), which this task does not move. |
-
-So INV-7 is **narrowed, not abolished**: BU resolution stays client-side for record *stamping* and
-for the non-upload consumers; it moves server-side for the *upload* path only. That is the smallest
-change consistent with (C), and it is recorded here as a **CLAUDE.md §6.5 path A** deviation
-(project-scoped exception, INV-7 is a project design invariant rather than an ADR).
-
-### 🔔 Owner: this is the one thing to confirm
-
-The deviation is narrow and defensible, but INV-7 was reaffirmed in writing on 2026-08-27 by 075. If
-the intent was that the BFF *never* resolves a BU container under any circumstances, then (C) is not
-implementable as written and the contract needs a different shape — which is an owner decision, not
-an implementation detail. Flagged here rather than absorbed silently.
-
----
-
-## Step 1 — the route contract
+## 1 — The route contract (CORRECTED)
 
 ```
-PUT /api/obo/records/{entityLogicalName}/{recordId}/files/{*path}
+PUT  /api/obo/records/{entityLogicalName}/{recordId:guid}/files/{*path}
+POST /api/obo/records/{entityLogicalName}/{recordId:guid}/upload-session?path=…&conflictBehavior=…
 ```
 
 | Concern | Resolution |
 |---|---|
-| **Authorization** | `EntityAccessFilter` (extended) on `(entityLogicalName, recordId)` via `CallerRecordAccessProbe`. ADR-008: a filter, not handler code. A caller without access to the record is denied **before** any container resolution or Graph call. |
-| **Container** | `RecordContainerResolver.ResolveForRecordAsync(entity, recordId, fallback, ct)` where `fallback` is the caller's BU container resolved server-side (new — see above). |
-| **Secure record, has container** | Resolves to the record's own container. |
-| **Secure record, no container** | `SdapProblemException("secure_record_container_missing", 409)` — fail closed and loud. **No fallback.** The client surfaces the operator-actionable message; it must not retry into a shared container. |
-| **Non-secure record** | The caller's BU container — behaviour unchanged from today. |
+| **Authorization** | `RecordRouteAccessAuthorizationFilter` (new, `Api/Filters/`) on `(entityLogicalName, recordId)` via the existing `CallerRecordAccessProbe`, demanding the existing `entity.associate_document` right (`AccessRights.AppendTo`). ADR-008: a filter, not handler code. Denied **before** any container resolution or Graph call. |
+| **Container** | `RecordContainerResolver.ResolveForRecordAsync(entityLogicalName, recordId, ct)` — the **two-argument** overload. **No caller-supplied fallback is passed, and there is no parameter through which one could be.** |
+| **Secure record, has container** | Its own container. |
+| **Secure record, no container** | `secure_record_container_missing` (409) — fail closed and loud. **No fallback.** The business-unit read is deliberately never reached for a secure record, so the fail-closed path cannot acquire a usable fallback. |
+| **Non-secure record** | ~~The caller's BU container~~ → **the RECORD's own `owningbusinessunit` → `businessunit.sprk_containerid`.** |
+| **Business unit has no container** | `Unresolved` → the route returns 409. An upload cannot "skip" the way an ingest path can. |
 | **Record does not exist** | `container_record_not_found` (404). |
-| **Ambiguous / indeterminate ownership** | 409, per 075's contract. Not softened here. |
+| **Ambiguous / indeterminate ownership** | 409, per 075's contract. Not softened. |
+| **Entity logical name not authorizable** | **403 `entity_type_not_authorizable`.** A miss in the shared map DENIES; it is never a pass-through. |
 
-The authorization key and the container are now the same value by construction: both derive from
+The authorization key and the container are the same value by construction: both derive from
 `(entityLogicalName, recordId)`, and no code path lets them disagree.
+
+### The §11 decision on the filter — extend, do not add a fourth map
+
+The codebase already had **three** logical/short-name → entity-set maps before this task, which is
+itself over the §11 line: `EntityAccessFilter.EntitySetByType`,
+`SemanticSearchAuthorizationFilter.AuthorizableEntitySets`, and `RecordSearchAuthorizationFilter`'s
+dynamically-built one. A fourth was not acceptable.
+
+So `EntityAccessFilter` gained `internal static bool TryResolveEntitySet(...)` and the new filter reads
+**that** table. The new filter declares no map, no probe, and no `OperationAccessPolicy` key of its own.
+
+A separate filter TYPE was still necessary, and this is the ≤2-sentence answer the POML's §11 constraint
+asks for: `EntityAccessFilter` reads its caller id from `HttpContext.Items[OfficeAuthFilter.UserIdKey]`
+(401 without it — the OBO upload routes carry no `OfficeAuthFilter`), reads its target from a
+deserialized Office `SaveRequest` body (the upload routes' body is raw bytes), and **calls `next()` when
+it finds no target** — a deliberate fail-OPEN that is right for Office and catastrophic on an upload.
+The mechanism is shared; the three input/failure behaviours are not.
 
 ---
 
-## Deploy ordering — the outage risk (POML §5)
+## 2 — INV-7, corrected. The client sites were in BREACH of it, not compliant with it.
 
-**The client and the BFF MUST ship together.** The upload contract changes on both sides:
+**The 2026-08-27 draft of this note claimed INV-7 "deliberately does not exist server-side" and framed
+server-side BU resolution as a `§6.5` path-A deviation from it. That was wrong**, and it is corrected
+here rather than deleted because the wrong version was cited while it stood.
 
-- BFF ahead of client → the client still calls `PUT /api/obo/containers/{id}/files/…`, which no
-  longer exists → **404 on every upload**.
-- Client ahead of BFF → the client calls `PUT /api/obo/records/{entity}/{id}/files/…`, which does
-  not exist yet → **404 on every upload**.
+The real INV-7 is **`projects/spaarke-multi-container-multi-index-r1/design.md:82-88`**:
 
-There is no compatibility window and no feature flag. This must be stated in the PR description.
-It is the single most likely way this task causes an outage.
+> **INV-7 — Resolution chain (canonical order).** For any record needing a container/index:
+> 1. **Record's own field** (if set) — wins
+> 2. **Parent's BU's field** (for Documents: parent record's BU; for Matters etc.: own BU) — cascading default
+> 3. **Tenant-level default** (server fallback, defined in BFF config) — last resort
 
-**Merge prerequisites, both satisfied**: 073 (deletes `UploadEndpoints.cs`, the app-only twin) and
-075 (the resolver) are **both on master** as of this task's start.
+INV-7 therefore **already specifies, line for line, the model task 076 implements**. It never prohibited
+server-side resolution — clause 3 explicitly names *a server fallback in BFF config* — and it explicitly
+sources the business unit from the **parent record**, not the acting user.
+
+**Consequence**: the seven client sites resolving `getUserId() → systemuser.businessunitid →
+businessunit.sprk_containerid` were **violating INV-7 clause 2**, because they used the *acting user's*
+business unit rather than the *record's*. Task 076 brings the code into line with INV-7. It is not a
+deviation from it, and it needs no `§6.5` exception. (`Communication:ArchiveContainerId` is INV-7 clause
+3 — which is why the ingest paths pass it *in* as a fallback rather than reading it as the decision.)
+
+**Where the "client-side" misreading came from**, worth recording so it is not re-derived: INV-7's next
+sentence says the chain *"is implemented at create-time (plugins + wizard)"* — a statement about WHERE
+the chain runs. That project's `CLAUDE.md` forbids Dataverse plugins, so "plugins + wizard" collapsed to
+"wizard", and `SaveComposeDocumentRequest.ContainerId`'s comment came to read *"the resolver stays in the
+wizards"*. A note about implementation **location** got cited downstream as a limit on **capability**.
+
+⚠️ **"INV-7" is an overloaded label** — at least four unrelated invariants in this repo carry that
+number (ADR-028's single-`PublicClientApplication` rule, SpaarkeAi's `buildBffApiUrl` rule, this
+resolution chain, and more). **Always cite the source project.**
+
+---
+
+## 3 — The seven server-side Communication sites, classified
+
+The POML's §3 hypothesis — *"these are server-side ingest, no owning record exists when bytes move, so
+`Communication:ArchiveContainerId` is correct and they need no change"* — is **partially wrong**. Two of
+the seven are genuine byte-writes with the `sprk_communication` id already in scope.
+
+Line numbers verified first-hand; **five differ from the POML's §3 table**, noted per row.
+
+| # | Site (verified) | POML said | Bytes move? | Owning record in scope? | Classification |
+|---|---|---|---|---|---|
+| 1 | `CommunicationService.cs:461` `ArchiveExistingAttachmentsAsync` | 460 | No — Dataverse rows only | Yes | **ALREADY CORRECT — no change.** Pointer *recording*: the bytes already sit at `(sprk_graphdriveid, sprk_graphitemid)` and :476 records where. Routing it would stamp a container the item is not in → dangling pointer, 404 on download. |
+| 2 | `CommunicationService.cs:1259` `SendAsync` step 6 | 1259 ✅ | No — Dataverse rows only | Yes | **NEEDS A DIFFERENT FIX — not routing, and NOT 076's.** The drive id is a guess for attachments whose bytes were never written here; the correct value is the *source document's* own `GraphDriveId`, which `DownloadAndBuildAttachmentsAsync` reads and discards at :2422. A container resolver would produce a *different* wrong pointer. Filed as follow-up. |
+| 3 | `CommunicationService.cs:1573` `SendAsUserAsync` step 6 | 1574 | No | Yes | Byte-identical to #2. Same disposition. |
+| 4 | `CommunicationService.cs:2053` `ArchiveToSpeAsync` | 2054 | **YES** (`UploadSmallAsync`, :2066) | Yes (param, :2035) | 🔧 **ROUTED — the real gap.** The outbound/on-demand `.eml` twin of the inbound one 075 already fixed. A `.eml` is the FULL message body. Three callers, all with `communicationId`: `ArchiveExistingAsync:295`, `SendAsync:1240`, `SendAsUserAsync:1554`. |
+| 5 | `CommunicationService.cs:2145` `FetchEmlAttachmentsForEmbedAsync` | 2146 | No — download only (:2156) | Yes | **ALREADY CORRECT — no change.** Read-side *lookup*: names where to FIND existing bytes. Routing it would look in the wrong container, 404, and the catch at :2175 would silently drop the attachment from the archived `.eml`. |
+| 6 | `CommunicationService.cs:2367` (comment) | 2368 | No | n/a | **CORRECT BY CONSTRUCTION — comment claim VERIFIED TRUE.** Read 2342-2572 in full: the only `driveId` assignment is :2422 `docRecord.GraphDriveId` and a missing one **throws** (`ATTACHMENT_MISSING_SPE_REF`, :2426). No `ArchiveContainerId` expression exists in the method. ⚠️ But its *rationale* at :2364-2366 — *"Containers in Spaarke are per Business Unit (not per matter)"* — is **stale and contradicts INV-7 clause 1**. Left alone (out of scope) but flagged: a reader could cite it to justify a wrong decision. |
+| 7 | `MessageAttachmentMaterializer.cs:114` `MaterializeAsync` | 114 ✅ | **YES** (`UploadSmallAsync`, :130) | Yes (`request.CommunicationId`, :259) | 🔧 **ROUTED.** The messaging-channel twin of the email inbound-attachment path 075 fixed. No production caller today (registered-but-unwired), so zero live blast radius — but leaving it plants exactly the bug 075 removed. |
+
+**Net: 3 need no change · 1 correct by construction · 2 routed here · 2 handed off.**
+
+### Site 7 detail — the override order is load-bearing
+
+`request.DriveId` **used to win** over the archive container. If the resolver had been added only "below"
+that override, the isolation fix would have been **caller-bypassable** — any caller supplying a drive id
+would silently reinstate the defect. So `request.DriveId ?? ArchiveContainerId` is now passed *in* as the
+INV-7 clause-3 fallback, and a secure regarding's own container beats it. Non-secure behaviour is
+byte-identical to before.
+
+Both routed sites **refuse** rather than fall back when the resolver is unavailable: an absent isolation
+seam that degrades to "use the shared container" is the CLAUDE.md §10 F.1 anti-pattern in its most
+damaging form.
+
+---
+
+## 4 — What shipped
+
+| Deliverable | State |
+|---|---|
+| Record-keyed `PUT …/files/{*path}`, gated | ✅ |
+| Record-keyed `POST …/upload-session`, gated — **restores >= 4 MiB uploads server-side** | ✅ |
+| `RecordRouteAccessAuthorizationFilter`, reusing `EntityAccessFilter`'s map + `CallerRecordAccessProbe` | ✅ |
+| Communication sites 4 + 7 routed | ✅ |
+| ArchTest registration-count pin 1 → 3, with the reason | ✅ |
+| Tests: 6 gate + 5 two-arg-overload, perturbation-checked | ✅ |
+| Client cutover (3 upload clients + ~20 suppliers) | ❌ **ESCALATED — §5** |
+| Delete W1/W2 client `sprk_containerid` writes | ❌ **BLOCKED on §5** |
+| Delete the container-keyed route + its waiver | ❌ **BLOCKED on §5** |
+
+### Test coverage gap found in the earlier half
+
+**No test covered the two-argument overload.** All 14 pre-existing `ResolveForRecordAsync` calls in
+`RecordContainerResolverTests.cs` pass `nonSecureFallbackContainerId` explicitly, so the record's-own-BU
+derivation added by the earlier half of 076 — and the load-bearing fact that the BU read is **skipped**
+for a secure record — were entirely unpinned. Closed by
+`tests/integration/auth/UnifiedAccessControl/RecordKeyedUploadAuthorizationTests.cs`.
+
+### Perturbation check (POML step 9) — both breaks reddened the right tests
+
+| Perturbation | Result |
+|---|---|
+| A — rights check disabled (`if (false && …)`) | ✅ **exactly 2 FAIL**: `…NoRightsOnTheOwningRecord…`, `…HoldsOnlyRead…`. 9 pass. |
+| B — unmapped-entity branch `return await next(context)` | ✅ **exactly 1 FAIL**: `…EntityTypeIsNotAuthorizable…`. 10 pass. |
+| Restored | ✅ 45/45 across all three UAC container suites |
+
+---
+
+## 5 — 🔔 ESCALATION: three client upload paths have no owning record
+
+**The POML's first escalation trigger has fired.** It reads:
+
+> *"If an upload path genuinely has NO owning record at the moment the bytes move — so `(entity,
+> recordId)` cannot be supplied — STOP and surface it. … Do NOT reintroduce a client-supplied container
+> 'just for that one path' — that is option (B) arriving through the back door."*
+
+Three do, verified first-hand:
+
+| Path | Evidence |
+|---|---|
+| **EmailComposer local attachment** — `createXrmEmailComposeHandlers.ts:255` | `onUploadLocalAttachment(file)` has no record. The `sprk_document` is created **after** the upload and **deliberately unassociated**; the code's own comment: *"the email may have no persisted regarding yet"*. |
+| **Analysis wizard standalone document** — `CreateAnalysisWizardWidget.tsx:778` | Uploads, then `createDocumentRecords('', '', '', …)` (empty entity set / id / nav-prop → standalone). The `sprk_analysis` row is created later. |
+| **DocumentUploadWizard "skip associate"** — `DocumentUploadWizardDialog.tsx:238-242` | `effectiveParentEntityType`/`Id` are `""` by design; the container falls back to `buContainerIdRef.current`. The user explicitly declined a parent. |
+
+The other 6 of 9 `uploadFilesToSpe` call sites DO create the record first and are cleanly convertible.
+
+**Why the server half shipped anyway**: the record-keyed routes are correct and additive under every
+resolution of this question, and they are what the other 6 sites will move onto. Nothing about them
+changes depending on how the three gaps are resolved.
+
+**Why the client did NOT cut over**: changing `uploadFilesToSpe`'s signature to `(entityLogicalName,
+recordId)` leaves those three with no callable upload path, and deleting the container-keyed route breaks
+them outright. Giving the record-keyed routes a container parameter for their benefit is option (B).
+There is no fourth move that is not a silent regression.
+
+### Two further blockers surfaced while verifying, both owner-visible
+
+**(a) Three upload target entities are not in the shared map.** `sprk_workassignment`
+(`workAssignmentService.ts:545`), `sprk_event` (`CreateEventWizard.tsx:401`) and `sprk_todo` are live
+upload targets absent from `EntityAccessFilter.EntitySetByType`, so the new route would **deny** them.
+Adding them is §11-clean (extending the existing table, not a fourth) — but that table is **shared with
+the Office save path**, where the additions would turn a current 400 into a real authorization check.
+That is a behaviour change to a shipped surface and belongs to whoever owns it, not to a silent edit here.
+
+**(b) The client needs the resulting `driveId` BACK.** `createDocumentRecords` writes
+`sprk_graphdriveid: containerId` (`EntityCreationService.ts:621`) and `indexFile()` needs
+`ISpeFileMetadata.driveId`. So the brief's *"the container id never leaves the server"* cannot hold
+literally while the client still creates the `sprk_document` row. **This is not option (B)**: accepting a
+container in the REQUEST lets the caller choose where bytes go (the vulnerability); returning the one the
+SERVER chose tells the caller where they landed (a fact it must record). The routes therefore return the
+server's chosen drive id. Eliminating even that means moving `sprk_document` creation server-side across
+9 wizard call sites — a separate project.
+
+### Options for the owner
+
+| | Option | Cost | Consequence |
+|---|---|---|---|
+| **1** | **Create the record before the bytes** in all three paths (persist the email draft / create `sprk_analysis` first / require a parent) | 3 wizard reorderings + map additions per (a) | Cleanest. The container-keyed route and its waiver both die. Changes user-visible wizard flow. |
+| **2** | **Server-issued upload ticket** — a gated `POST /api/obo/upload-tickets` mints a short-lived server-side container binding for parentless content | New endpoint + state | Keeps the flows; the client still never names a container. Effectively a new contract shape. |
+| **3** | **Accept a bounded parentless route** — keep the container-keyed route permanently for the three, gated by *something* | Low | ⚠️ Effectively option (B) with a boundary. Not recommended: it preserves the shape 073 deleted from the app-only twin. |
+
+**Recommendation: option 1**, path by path, with option 2 only if a flow genuinely cannot persist a
+parent first. Either way the map additions in (a) are a prerequisite and should be their own task.
+
+---
+
+## 6 — DEPLOY ORDERING (unchanged, and now narrower)
+
+Because the client did **not** cut over, this specific merge is **additive and safe to deploy alone** —
+two new routes, no existing contract changed. The three clients keep working.
+
+**But the moment the client cutover lands, the ship-together obligation is absolute:**
+
+- BFF ahead of client → the client still calls `PUT /api/obo/containers/{id}/files/…`; once that route is
+  deleted → **404 on every upload**.
+- Client ahead of BFF → the client calls `PUT /api/obo/records/{entity}/{id}/files/…` → **404 on every
+  upload**.
+
+No compatibility window, no feature flag. State this in the cutover PR description. It is the single most
+likely way this work causes an outage.
+
+**Merge prerequisites**, both satisfied: 073 (deleted `UploadEndpoints.cs`) and 075 (the resolver).
+
+---
+
+## 7 — Placement Justification (CLAUDE.md §10, `.claude/constraints/bff-extensions.md`)
+
+**In the BFF, and it could not be anywhere else.** The two new routes are the OBO upload surface: they
+need the caller's delegated token for the Graph write and the Dataverse `RetrievePrincipalAccess`
+question. Both already live in `Sprk.Bff.Api`.
+
+- **New endpoints**: 2. Both extend the existing `OBOEndpoints` group; no new file, no new group.
+- **New services**: 1 filter type (`RecordRouteAccessAuthorizationFilter`). It adds no probe, no map,
+  no `OperationAccessPolicy` key, and no interface — ADR-010 concrete, instantiated per-request by its
+  own extension method exactly as `DocumentAuthorizationFilter` is.
+- **New DI registrations**: **0.** `CallerRecordAccessProbe` and `RecordContainerResolver` are both
+  already registered unconditionally (`ExternalAccessModule.cs:110`, `Program.cs:63`), so there is no
+  §10 F.1 asymmetric-registration question to answer.
+- **New packages**: 0. **CRUD→AI dependencies**: 0.
+- **Test obligation (§10 bullet 6)**: 11 new tests + 3 existing suites repaired.

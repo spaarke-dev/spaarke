@@ -2050,12 +2050,6 @@ public sealed class CommunicationService : ICommunicationEnvelopeReader
         // Content-type: UploadSmallAsync does not accept an explicit content-type; Graph/SPE infers it
         // from the object's ".eml" path extension → message/rfc822 (mirrors InferContentType's mapping),
         // so the archived object downloads/opens as an email file in Outlook (UAT #4c).
-        var driveId = _options.ArchiveContainerId;
-        if (string.IsNullOrWhiteSpace(driveId))
-        {
-            throw new InvalidOperationException("ArchiveContainerId not configured for SPE archival");
-        }
-
         var spePath = $"/communications/{communicationId:N}/{emlResult.FileName}";
 
         using var stream = new MemoryStream(emlResult.Content);
@@ -2063,6 +2057,42 @@ public sealed class CommunicationService : ICommunicationEnvelopeReader
         using var speScope = (_scopeFactory ?? throw new InvalidOperationException(
             "IServiceScopeFactory is required to resolve SpeFileStore for SPE archival.")).CreateScope();
         var speFileStore = speScope.ServiceProvider.GetRequiredService<SpeFileStore>();
+
+        // ── ROUTED 2026-08-28 (unified-access-control-r2 task 076) ──────────────────────────────
+        // This USED to read `_options.ArchiveContainerId` directly, which put a SECURE matter's
+        // archived .eml into the shared archive container. A .eml is the FULL message body, so it is
+        // at least as disclosing as any attachment — and because SharePoint Embedded permissions are
+        // additive-only, no later permission change can retract it.
+        //
+        // Task 075 fixed the INBOUND .eml (IncomingCommunicationProcessor.ArchiveEmlAsync) with
+        // exactly this call and exactly this reasoning. This is its OUTBOUND / on-demand twin, which
+        // 075 did not reach: three callers land here — ArchiveExistingAsync (on-demand, which also
+        // re-archives inbound mail), SendAsync, and SendAsUserAsync.
+        //
+        // ArchiveContainerId is still the answer for a non-secure communication — it is INV-7's
+        // tier-3 server-side default (projects/spaarke-multi-container-multi-index-r1/design.md
+        // §82-88), which is why it is passed IN as the fallback rather than read as the decision.
+        // The resolver consults the communication's securable regarding first.
+        //
+        // Resolved off `speScope` rather than injected: CommunicationContainerResolver is Scoped and
+        // this class is not, which is the same reason SpeFileStore is resolved here. The decision
+        // therefore had to move BELOW the scope creation — it used to sit above it.
+        var containerResolver = speScope.ServiceProvider
+            .GetRequiredService<Engine.CommunicationContainerResolver>();
+
+        // Throws SdapProblemException on a secure regarding with no container of its own
+        // (secure_record_container_missing) or ambiguous ownership — fail closed, never the shared
+        // archive. Returns null only when nothing is secure AND no archive container is configured.
+        var driveId = await containerResolver
+            .ResolveContainerAsync(communicationId, _options.ArchiveContainerId, ct);
+
+        if (string.IsNullOrWhiteSpace(driveId))
+        {
+            // Same exception and message as before the routing change, so the three callers'
+            // existing handling is unchanged: ArchiveExistingAsync translates it to
+            // ARCHIVE_NOT_CONFIGURED (500) and both send paths treat it as non-fatal.
+            throw new InvalidOperationException("ArchiveContainerId not configured for SPE archival");
+        }
         var fileHandle = await speFileStore.UploadSmallAsync(driveId, spePath, stream, ct);
 
         _logger.LogInformation(
