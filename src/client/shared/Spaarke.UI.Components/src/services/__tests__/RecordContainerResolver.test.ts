@@ -67,12 +67,7 @@ function resolveRepoRoot(): string {
 }
 
 function loadTable(): DecisionTable {
-  const fixture = path.join(
-    resolveRepoRoot(),
-    'tests',
-    'fixtures',
-    'secure-container-decision-table.json'
-  );
+  const fixture = path.join(resolveRepoRoot(), 'tests', 'fixtures', 'secure-container-decision-table.json');
 
   if (!fs.existsSync(fixture)) {
     throw new Error(
@@ -127,7 +122,7 @@ describe('decideContainer — driven by the shared decision table', () => {
   const table = loadTable();
   const exercised: string[] = [];
 
-  it.each(table.cases.map((c) => [c.name, c] as const))('%s', (_name, testCase) => {
+  it.each(table.cases.map(c => [c.name, c] as const))('%s', (_name, testCase) => {
     const actual = decideContainer({
       isSecure: testCase.isSecure,
       ownContainerId: testCase.ownContainerId,
@@ -157,7 +152,7 @@ describe('decideContainer — driven by the shared decision table', () => {
     // weaker claim and easy to satisfy by accident; the actual requirement is that an AVAILABLE
     // shared container is deliberately not used.
     const withFallback = table.cases.filter(
-      (c) =>
+      c =>
         c.isSecure &&
         c.expect.outcome === 'fail-closed' &&
         typeof c.fallbackContainerId === 'string' &&
@@ -170,16 +165,15 @@ describe('decideContainer — driven by the shared decision table', () => {
   it("'unresolved' is unreachable for a secure record", () => {
     // The load-bearing invariant: 'unresolved' is the benign config-absence outcome that callers
     // may skip quietly on. A secure record must never reach it.
-    for (const c of table.cases.filter((x) => x.isSecure)) {
+    for (const c of table.cases.filter(x => x.isSecure)) {
       expect(c.expect.outcome).not.toBe('unresolved');
     }
 
     for (const own of [null, undefined, '', '   ', '\t']) {
       for (const fallback of [null, undefined, '', '   ', SHARED_BU_CONTAINER]) {
-        expect(
-          decideContainer({ isSecure: true, ownContainerId: own, fallbackContainerId: fallback })
-            .outcome
-        ).toBe('fail-closed');
+        expect(decideContainer({ isSecure: true, ownContainerId: own, fallbackContainerId: fallback }).outcome).toBe(
+          'fail-closed'
+        );
       }
     }
   });
@@ -225,7 +219,7 @@ describe('resolveContainerForRecord', () => {
 
   it.each([null, undefined, '', '   ', '\t'])(
     'fails closed for a secure record whose container is %p',
-    async (containerId) => {
+    async containerId => {
       await expect(
         resolveContainerForRecord({
           webApi: webApiReturning({ sprk_issecure: true, sprk_containerid: containerId }),
@@ -393,9 +387,7 @@ describe('isSecurableEntity', () => {
   it('picks up a FOURTH securable entity with no code change', async () => {
     // The reason the list is not a constant: a new securable entity must not silently resolve
     // through the shared fallback, which SPE's additive-only permissions would make irreversible.
-    await expect(isSecurableEntity(probe(['sprk_somethingnew']), 'sprk_somethingnew')).resolves.toBe(
-      true
-    );
+    await expect(isSecurableEntity(probe(['sprk_somethingnew']), 'sprk_somethingnew')).resolves.toBe(true);
   });
 
   it('memoises answers but never memoises a failure', async () => {
