@@ -109,62 +109,101 @@ document on a pre-deploy session will lose the ability to resume that session** 
 one; `LoadAsync` degrades to minting rather than erroring, so they get a working document, not a
 failure.
 
-## 5. 🔔 OPEN — needs the owner before merge
+## 5. RESOLVED - the errorCode decision (owner-approved 2026-08-28, option A)
 
-**The filter's 404 body replaces documented per-route error codes.** `ComposeDocSessionDispatchSeamTests`
-caught it: the dispatch route answers a *stable* ADR-019 `errorCode` of `dispatch.session-not-found`,
-and the ownership filter now returns its own generic `{ "error": "Session … not found" }` **before**
-the handler runs. So a client matching on `dispatch.session-not-found` stops seeing it.
+The filter runs before the handler, so its 404 body replaces documented per-route codes. Approved
+resolution: **the filter answers with ONE stable code**, `session.not-found-or-not-owned`, for all
+three denial reasons. Distinguishing missing / unowned / someone-else's on the wire is the existence
+oracle the 404-not-403 choice exists to prevent, so they must not be told apart. The operator can
+still tell them apart - in the log line, which records `owned=true|false` and the correlationId.
 
-This is a wire-contract change, not a test to fix, and the filter cannot know each route's code.
-Three options:
+Known casualty: `dispatch.session-not-found`. **The client is unaffected** -
+`dispatchConsumer.mapDispatchHttpError` reads the `errorCode` extension generically and never
+branched on the string, so nothing client-side needed changing. Verified, not assumed.
 
-| | Approach | Cost |
+For a missing `tid` the filter answers **401 + `auth.tid-missing`** - reusing the code
+`SummarizeSessionEndpoint` and `DispatchSessionEndpoint` already publish rather than inventing a
+third spelling. Running ahead of the handlers makes this uniform across every `{sessionId}` route;
+several previously answered 400, which is the less accurate reading (a principal whose tenant cannot
+be established is unidentifiable, not malformed - the same doctrine as `CallerResolution`).
+
+**An existing assertion caught a real defect in the filter's first draft**: it interpolated the
+session id into the ProblemDetails `detail` string, which `DispatchSessionEndpointContractTests`
+already forbade under ADR-019. On this route the rule is doubly load-bearing - echoing the id hands
+the caller confirmation of the very id they probed with. Fixed; the assertion kept, with a note
+saying what it caught.
+
+## 6. The denial tests exist now - `tests/integration/auth/Ai/SessionOwnershipTests.cs`
+
+**8 tests, all green.** The guard proves the filter is *attached*; these prove it *denies*:
+
+| Test | What it pins |
+|---|---|
+| `Evaluate_ForADifferentUserInTheSameTenant_Denies404AndLeavesTheSessionIntact` | The core denial, asserted about the VICTIM's session so a check that merely reports the right owner cannot satisfy it |
+| `Evaluate_ForADifferentUser_UsesTheSameAnswerAsAMissingSession` | The two are indistinguishable - if they ever diverge the route becomes an existence oracle |
+| `Evaluate_ForAPreIssue863SessionWithNoOwner_DeniesEveryone` | The migration decision, executable |
+| `Evaluate_ForACallerWithNoObjectIdClaim_Answers401NotAnUnfilteredPass` | An identity check that falls open when identity is absent is not a check |
+| `Evaluate_ForTheRightOidInTheWrongTenant_Denies` | Ownership layers on top of tenant isolation, it does not replace it |
+| `Evaluate_ForTheOwner_Allows` | **The positive control** - a filter that denied everyone would pass every other test here |
+| `ListRecentSessions_ForAnUnidentifiableCaller_ReturnsNothingRatherThanTheTenantList` | Fail-closed: the pre-#863 shape returned the whole tenant |
+| `CreateSession_WithoutAnOwner_IsRefusedRatherThanMintedUnowned` | An unowned session is broken on arrival, not a lax default |
+
+**Proven non-vacuous in both directions.** Removing the ownership comparison from `EvaluateAsync`
+turns 2 of them red; restoring it turns them green. Removing one `.AddSessionOwnershipFilter()` line
+turns `SessionOwnershipGuardTests.Rule1` red.
+
+The decision was extracted into `EvaluateAsync` so the tests exercise the shipping code rather than a
+copy of its branch - the same reason `ChatEndpoints.DeleteSessionAsync` was made `internal` for the
+059 tenant tests.
+
+**Deliberately not tested, and said so rather than left silent**: the Cosmos owner predicate (needs
+an emulator; covered structurally by guard Rule 2, which also asserts the `NOT IS_DEFINED` escape
+hatch has not returned) and the warm-tier round-trip (the obvious test needs reflection over private
+mappers, which ADR-038 B8 bans; covered by guard Rule 3).
+
+## 7. Test state - honest
+
+**BFF suite: 11,448 passing / 22 failing** (85 -> 59 -> 27 -> 22 across the repair passes).
+
+Every repair so far has been a **fixture** repair per `bff-extensions.md` SS F.2, never an assertion
+relaxation. What the fixtures were doing, and why it matters beyond this change:
+
+- Eight fake auth handlers minted a fresh oid **per request** (`Guid.NewGuid()`), or fell back to one
+  when a test header was absent. Entra never does that - stability per (user, tenant) is the entire
+  property that makes an oid an ownership key. Those suites had been exercising "created by one user,
+  read by another" on *every call*, invisibly, because nothing checked.
+- 16 files passed a bare `new DefaultHttpContext()` - an anonymous principal, a request shape no
+  `RequireAuthorization()` route can produce. **This is why `LoadAsync` could not tell whose session
+  it was resuming: the tests it was written against never had a caller identity, so the code was
+  never written to need one.**
+- 54 files constructed a `ChatSession` with no owner (two syntactic shapes - `new ChatSession(` and
+  target-typed `new(`; the second was missed on the first sweep).
+- `ChatAckEndpointsContractTests`' minimal host mapped a `{sessionId}` route without registering
+  `ChatSessionManager` - the same unconditional-registration rule as RB-T028-03..06 (root SS10
+  bullet 6). The filter makes that latent gap loud, which is the rule working.
+
+**The 22 remaining are one family**, and none is an ownership-logic failure: fixtures that leave
+`Session = null` (or seed an unowned one) and therefore stop at the filter instead of reaching the
+branch under assertion. Three shapes:
+
+| Shape | Example | Repair |
 |---|---|---|
-| **A** | Filter emits ProblemDetails with ONE stable code (`session.not-found-or-not-owned`) | Clients matching per-route codes must be updated; one honest code thereafter |
-| **B** | Filter re-uses each route's documented code via endpoint metadata | More machinery; the code has to be declared at registration, which is another thing to forget |
-| **C** | Filter passes through on not-found and only blocks on wrong-owner | ✗ **Rejected** — reintroduces the existence oracle §3 avoids |
+| Validation test with no seeded session | `DispatchSessionEndpointContractTests.Post_MissingBindingId_Returns400` | Seed an owned session - a real request to a session route always resolves one |
+| Session-not-found tests asserting the old per-route code | `ComposeMemoryResumeEndpointContractTests.SaveAnnotations_WhenSessionUnknown_Returns404` | Assert the filter's code (SS5) |
+| Malformed `{sessionId}` expecting 400 | `...Post_InvalidGuidSessionId_Returns400` | Now 404 - truthful (an id that cannot be a GUID cannot name a session) and it keeps ONE answer for every id the caller does not own |
 
-**Recommendation: A**, and update the two dispatch tests plus any client matching. Not taken
-unilaterally because it changes an on-the-wire contract.
+The `SummarizeSessionEndpointContractTests` cluster was repaired this way and is now 12/12; the
+remaining suites (ReviewMemo x6, AgreementReview seam x7, Dispatch x3, ChatDocument x2, others x4)
+take the identical treatment.
 
-## 6. Test state — honest
+**One unrelated pre-existing failure** is in the list and should not be attributed here:
+`AccessControl.DocumentDestroyAuthorizationTests.CheckoutFamilyRoute...(route: "checkin")` touches no
+session route.
 
-Production code builds. `SessionOwnershipGuardTests` — 5/5, and **proven non-vacuous**: removing one
-`.AddSessionOwnershipFilter()` line turns Rule 1 red; restoring it turns it green.
-
-Compose suites: **1772 passed / 11 failed** (was 30 failed at first run). The repairs so far were all
-**fixture** repairs per `bff-extensions.md` §F.2, not assertion relaxations:
-
-- Six fake auth handlers minted `Guid.NewGuid()` as the oid **per request**. Entra never does that —
-  an `oid` is stable per user per tenant, which is the whole property that makes it an ownership key.
-  Those suites had been silently exercising "created by one user, read by another" on *every call*,
-  and nothing noticed because nothing checked. Replaced with `TestSessionOwner.Oid`.
-- 16 files passed a bare `new DefaultHttpContext()` — an anonymous principal, a request shape no
-  `RequireAuthorization()` route can produce. Replaced with `TestHttpContexts.Authenticated()`.
-  **This is why `LoadAsync` could not tell whose session it was resuming: the tests it was written
-  against never had a caller identity, so the code was never written to need one.**
-- 41 files constructed `ChatSession` with no owner; seeded with `TestSessionOwner.Oid`.
-
-**The 11 that remain**, with cause:
-
-| Suite | n | Cause |
-|---|---|---|
-| `ComposeDispatchEndpointContractTests` | 6 | §5 — the errorCode contract. Blocked on that decision. |
-| `ComposeDocSessionDispatchSeamTests` | 2 | §5, same. |
-| `ComposeSupersedeEndpointContractTests.Supersede_WhenSessionUnknown_Returns404` | 1 | 2-minute client-abort/timeout, NOT an ownership assertion — needs its own look; may pre-date this change. |
-| `ComposeMemoryResumeEndpointContractTests.SaveAnnotations_WhenSessionUnknown_Returns404` | 1 | same shape as above. |
-| `ComposeCreateOnSaveEndpointContractTests.CreateOnSave_WhenSpeCreateSucceeds…` | 1 | not yet diagnosed. |
-
-**Not yet written**: the behaviour tests that prove denial — a second user cannot read, delete or
-list the first user's session — under `tests/integration/auth/Ai/`. The guard test proves the filter
-is *attached*; it does not prove it *denies*. Those must be observed to fail against the pre-fix code
-first, per the 059 discipline. **This is the largest remaining gap and it is the half that matters.**
-
-## 7. Coordination
+## 8. Coordination
 
 `unified-access-control-r2` maintains the caller-identity census and owns access control
-(`CallerIdentityGuardTests` allowlist, rows 2–3). This adds **no fourth resolver** — it consumes the
-existing `CallerResolution` primitive — so it is not the coordination event that census names. They
-should still see it: it adds an authorization filter over ~28 routes, and #858 already has them
+(`CallerIdentityGuardTests` allowlist rows 2-3). This adds **no fourth resolver** - it consumes the
+existing `CallerResolution` primitive - so it is not the coordination event that census names. They
+should still see it: it adds an authorization filter over 28 routes, and #858 already has them
 working inside `ComposeService.cs`.
