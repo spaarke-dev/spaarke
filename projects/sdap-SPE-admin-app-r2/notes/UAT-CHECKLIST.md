@@ -55,6 +55,60 @@ design (FR-E02 amended) and the form says so on the control.
 
 ---
 
+## 1A. 🔁 Re-test — fixed after UAT round 1 (2026-08-28)
+
+### 1A.1 — Security tab
+
+**Security tab.** Three changes; the third is the one that matters.
+
+| # | Check | Expected |
+|---|---|---|
+| a | **"Secure Score" appears ONCE**, not twice stacked | One header row: 🛡 Secure Score · 114.8 / 265 |
+| b | **Donut chart** replaces the bar and the separate 43% badge | Ring with `43%` in the middle, caption explaining what the measure is. Toggle **dark mode** — the arc colour is a Fluent palette token and must follow the theme |
+| c | 🔴 **The access-denied message** | See below |
+
+For (c), the message previously said *"The most common cause is a missing SecurityEvents.Read.All
+grant"* on every denial — while Graph's own words were *"Account is not provisioned"* and that grant
+was **already made** in task 013. It sent you to re-check something already correct.
+
+| What Graph says | Expected message now |
+|---|---|
+| `…not provisioned` | Names the **tenant licensing/provisioning** condition and says explicitly that granting the permission **will not** change it. Points at security.microsoft.com |
+| anything else | Names **both** candidates (grant, or conditional-access/tenant policy) and says the app **cannot tell them apart** |
+
+❌ **Fail** if the screen asserts a single confident cause that Graph did not state.
+
+### 1A.2 — 🔴 Add Property (was broken; never worked)
+
+**Containers → select a container → Custom Properties → Add Property.**
+
+This path PATCHed the wrong URL and Graph rejected every write with
+`400 Unsupported request body property: customProperties`. Reads worked the whole time, which is why
+the screen looked healthy. Fixed and proven against real Graph; this is the end-to-end confirmation.
+
+| # | Step | Expected |
+|---|---|---|
+| a | Add a property, Save | Succeeds. The property appears in the list |
+| b | Reload the page | The property is **still there** — it was really persisted, not just echoed into the UI |
+| c | Add a **second** property, leaving the first alone | **Both** are listed. Graph merges partial writes, so the first must survive |
+| d | Remove a property | Only that one goes; the others remain |
+
+🔴 **(c) is the one to watch.** If adding the second property makes the first disappear, stop and
+report it — that is silent data loss.
+
+### 1A.3 — the other `+ Add` buttons
+
+Probed live 2026-08-28. Status going into this round:
+
+| Surface | Status |
+|---|---|
+| **Add Column** | ✅ Proven against real Graph (201, reads back). Exercise once to confirm the UI wiring |
+| **Add Property** | ✅ Fixed — see 1A.2 |
+| **Add Permission** | ⚠️ **Unproven.** The probe identity could not resolve a user to grant to, so it was **skipped, not passed**. Exercise this deliberately and report the result |
+| **Add Owner** | ⚠️ Contract-tested only. A bogus UPN returned **403**, not the 404 our tests assume — possibly an artifact of the probe identity. If Add Owner misbehaves with a bad UPN, capture the exact message |
+
+---
+
 ## 2. Task 052 — the item recycle bin (new)
 
 **Containers → select a container → Recycle Bin tab.**

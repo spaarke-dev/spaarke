@@ -122,6 +122,40 @@ remediation**, not a crash or a false success.
    identically to `false`, so unreported settings get a "Not reported" badge **and are omitted from
    the save**. An unknown must not become a write.
 
+### UAT round 1 (2026-08-28) — fixed and redeployed
+
+- 🔴 **5th fabrication defect — a fabricated CAUSE, not a value.** The Security screen said *"The most
+  common cause is a missing `SecurityEvents.Read.All` grant"* on **every** denial. Graph's actual
+  words were *"Account is not provisioned"*, and task 013 had **already granted** that permission. The
+  screen sent the operator to re-check something demonstrably correct, to fix a condition no grant can
+  fix. `AccessDeniedSummary` now branches on what Graph reported; when the cause is genuinely
+  ambiguous it says **"cannot tell"** and names both candidates.
+- 🔴 **6th — `Add Property` was aimed at the wrong URL and had NEVER worked.** It PATCHed the
+  **container** with a `{customProperties:{…}}` wrapper → `400 Unsupported request body property`.
+  The write belongs at `PATCH /containers/{id}/customProperties` with the map as the **body root**.
+  Probed both shapes back to back: ours 400, correct shape 200.
+  **Why it hid**: reads use `GET ?$select=customProperties`, a different valid shape that works. A
+  working read beside a broken write survives inspection indefinitely.
+- **Semantics established by probe** (now in the code comments): partial writes **MERGE** — an
+  untouched property survives, which is what makes the PUT-shaped endpoint non-destructive; a `null`
+  value **removes** a property.
+- **UI**: duplicate "Secure Score" header removed; the bar + badge + caption (three renderings of one
+  number) collapsed into a donut. Hand-rolled ~30-line SVG — no chart library in this app.
+
+### `+ Add` evidence status (answers the UAT question directly)
+
+| Surface | Contract test | Real Graph |
+|---|---|---|
+| Add Column | ❌ | ✅ **201, reads back** |
+| Add Property | ✅ 3 new | ✅ after fix |
+| Add Permission | ❌ | ⚠️ **SKIPPED, not passed** — probe identity lacks `User.Read.All` so no grant subject could be resolved |
+| Add Owner | ✅ 6 | ⚠️ negative path only (operator decision — no grant sent at the real container type) |
+
+⚠️ **Do not read "skipped" as "works".** Add Permission has **no evidence of either kind**.
+⚠️ The bogus-UPN lookup returned **403**, not the **404** `AddOwner_WhenTheUpnResolvesToNobody` stubs.
+That may be an artifact of probing as the owning app rather than the BFF identity — **flagged, not
+concluded.** Worth resolving before trusting Add Owner's error path.
+
 ### Defects found in passing
 
 - 🔴 **4th fabrication defect** — `extractSettingsFromConfig` invented every missing settings value
@@ -178,7 +212,22 @@ callers, still DI-registered) · every `// AMBIGUOUS (task 042):` marker.
 - **Throwaway teardown uses `DELETE /storage/fileStorage/deletedContainers/{id}`** — an earlier probe
   used a `permanentDelete` action, got 400, and leaked a container.
 - **Verify a client build actually contains the change**: `grep` the built bundle for a known string
-  **and** a negative control for a string that should be gone.
+  **and** a negative control for a string that should be gone. Better still, read the bytes back
+  **out of Dataverse** — the deploy script reported the same "2335 KB" for two different builds, so
+  size proves nothing. Recipe: `scratchpad/verify_deployed_page.py`.
+- **A working READ beside a broken WRITE is invisible.** `Add Property` read correctly and wrote
+  nothing for the life of the project. When verifying a CRUD surface, never let the read stand in for
+  the write — they are frequently different URLs.
+- **Probe BOTH shapes before declaring code broken.** When our payload got a 400, the next step was
+  testing the alternative shape on the same container, not writing up a defect. Had the alternative
+  also failed, the finding would have been "Graph rejects this operation", which is a different
+  conclusion with a different fix.
+- 🔴 **`git stash pop` in a shared-`.git` worktree can pop ANOTHER project's stash.** A failed `cd`
+  meant my `git stash` never ran, but the `&&`-chained `pop` still fired and applied
+  `customer-provisioning-orchestration-r1`'s WIP into this tree — removing it from their stash list.
+  Recovered by re-stashing with a provenance message and diffing to prove it byte-identical.
+  **Never chain `stash`/`pop` behind a `cd`, and check `git stash list` before popping.** For
+  baselines, prefer a throwaway worktree — it cannot touch shared state.
 
 ---
 
