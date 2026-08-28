@@ -302,16 +302,26 @@ public class RouteAuthorizationGuardTests
         // 079 perturbation-proved the gates are what keeps Rule A green here, not a waiver: removing them
         // makes Rule A FAIL naming the two NEW route keys, which the old drive-keyed waivers do not cover.
 
-        // ---------- PENDING — found by this rule; now owned by task 078 ----------
-        new Waiver("GET /api/v1/containers/{containerId}/documents", WaiverKind.Pending, "078",
-            "FOUND BY THIS RULE ON ITS FIRST RUN and present in no Wave 1 task. Lists the documents of an "
-            + "arbitrary container id behind RequireAuthorization() alone — no filter, no resource policy. "
-            + "This is the sixth miss on a surface that has been recounted four times. Owner re-pointed "
-            + "UNOWNED -> 078 on 2026-08-27: the entry suggested folding it into 073, and 073 has now "
-            + "landed having correctly NOT done so — this is a collection READ whose control is result "
-            + "trimming against the caller's accessible-record set, which is a different mechanism from the "
-            + "per-resource write gate 073 owned. Task 078 owns it and already depends on 075's "
-            + "container->record mapping."),
+        // ---------- task 078: ONE WAIVER REMOVED 2026-08-28, the route is now GATED ----------
+        //
+        // GET /api/v1/containers/{containerId}/documents — the sixth miss, and the one this rule found
+        // itself on its first run — now carries .AddContainerDocumentAuthorizationFilter()
+        // (DataverseDocumentsEndpoints.cs:605). The filter resolves container -> OWNING RECORD through
+        // task 075's RecordContainerResolver.ResolveOwningRecordAsync (the one such mapping, reverse
+        // direction) and requires the caller's Read on that record via
+        // AuthorizationService.GetCallerRecordAccessAsync, evaluated OBO as the caller. A container that
+        // resolves to no owning record is REFUSED (ADR-003), not listed.
+        //
+        // Deleted rather than converted to Permanent: the waiver stopped being TRUE, which is the forcing
+        // function working. Converting it would have inverted the mechanism — see task 074's constraint.
+        //
+        // Note the earlier entry's own suggestion — that the control here is result trimming (Wave 3) —
+        // was right about the SHARED-container case and wrong that it made a per-resource gate impossible.
+        // The route names one resource, so it has an authorization subject; the shared case is precisely
+        // what the filter refuses, because trimming does not exist yet.
+        //
+        // 078 perturbation-proved the gate is what keeps Rule A green here, not a waiver: removing
+        // .AddContainerDocumentAuthorizationFilter() makes Rule A FAIL naming this route again.
 
         // ---------- PERMANENT ----------
         new Waiver("POST /api/v1/documents", WaiverKind.Permanent, "-",

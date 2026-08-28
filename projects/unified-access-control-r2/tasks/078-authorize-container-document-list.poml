@@ -3,7 +3,7 @@
   <metadata>
     <title>Authorize GET /api/v1/containers/{containerId}/documents — lists any container's documents behind RequireAuthorization() alone</title>
     <phase>0c Secure Documents — Wave 1 (added mid-wave)</phase>
-    <status>pending</status>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>An unauthenticated-by-resource read of document metadata keyed by a caller-supplied container id — the read-side twin of task 073's write-side hole.</rigor-reason>
     <model-tier>opus</model-tier>
@@ -90,5 +90,51 @@ SEQUENCING. Depends on task 075 for the mapping. If 075 has not landed, do not b
     <criterion>Task 074's waiver for this route is deleted, not merely updated.</criterion>
   </acceptance-criteria>
 
-  <notes>Found by the forcing function on its first run, in a project that had already enumerated this surface four times by hand. That is the argument for task 074 in one sentence.</notes>
+  <notes>Found by the forcing function on its first run, in a project that had already enumerated this surface four times by hand. That is the argument for task 074 in one sentence.
+
+COMPLETED 2026-08-28. Full write-up: notes/task-078-container-document-list-gate.md.
+
+Gated by a new endpoint filter (ADR-008), `Api/Filters/ContainerDocumentAuthorizationFilter.cs`, attached at
+`DataverseDocumentsEndpoints.cs:605`. Reuses THREE existing seams and adds none: task 075's
+`RecordContainerResolver.ResolveOwningRecordAsync` (container->record, its first consumer),
+`SemanticSearchAuthorizationFilter.TryResolveAuthorizableEntitySet` (the one entity-set map), and task 070's
+`AuthorizationService.GetCallerRecordAccessAsync` (the rights decision, OBO as the caller). Concrete
+`RecordContainerResolver` per ADR-010 — no interface added. Task 074's waiver DELETED, not converted.
+
+TWO STALE CLAIMS IN THIS POML, both corrected in the notes rather than worked around:
+
+(1) The relevant-files comment asserts "this one has callers, so it must be GATED". FALSE — the route has
+    ZERO callers anywhere in src/, tests/ or scripts/ (inventory in notes §3). It was gated anyway, per
+    instruction; the zero-caller fact is what makes the fail-closed refusal safe.
+
+(2) The cost-of-doing-nothing claims any caller "can enumerate the document metadata of any container by
+    id". The STRUCTURAL hole was real, but the data path is blocked by an unrelated pre-existing type bug:
+    `sprk_containerid` is NVARCHAR holding an SPE `b!...` id, while the route does `Guid.TryParse` and the
+    service does `Guid.Parse` (notes §4). So the route currently 400s or returns empty for every input.
+    Gating first is still the correct order — the type bug is one line from being fixed.
+
+ESCALATION TRIGGER FIRED (notes §2). Containers that map to no record DO legitimately exist — every shared
+business-unit / archive container; verified live per RecordContainerResolver.cs:61 and :267. This task
+REFUSES them (ADR-003, and this POML's own acceptance criterion) and did NOT invent an owner. That
+contradicts task 075's stated assumption at RecordContainerResolver.cs:415-425 that 078 would ALLOW on null
+("breaking task 078 for every normal container"); the zero-caller inventory is what makes refusing safe.
+SUCCESSOR OBLIGATION: listing a SHARED container's documents needs Wave 3 result trimming
+(AccessibleRecordSetService), not a relaxation of this gate.
+
+STEP 9.5 REVIEW FOUND ONE REAL DEFECT (notes §5), now fixed: the denial was a four-way ORACLE. A distinct
+errorCode per branch plus the resolver's propagating 409 ("More than one record claims this container") let
+an unauthorized caller partition container ids by ownership state BEFORE any rights check. Collapsed to one
+`Denied(correlationId)` — one status, one detail, one code — with the resolver's SdapProblemException caught
+and folded in; new guard AllResourceSideRefusals_AreIndistinguishableToTheCaller. Also fixed: missing bearer
+token now answers 401 before the resolver's Dataverse round trips (was a 403 mislabel); and a FALSE claim in
+my own comment ("task 073 consumed the forward direction" — git log shows 075 delivered its own forward
+consumer; 073 consumed neither direction).
+
+Perturbation-checked FIVE ways (notes §6), all bit: rights check disabled; allow-on-null; per-branch error
+code re-introduced; resolver 409 allowed to propagate; filter removed -> ArchTest Rule A fails naming the
+route. All restored.
+
+Verification: build 0 warnings; 7/7 task tests; 41/41 with resolver neighbours; 10/10 RouteAuthorizationGuardTests;
+ArchTests 121 passed / 6 failed == clean-tree baseline (proven by git stash); publish 45.12 MB compressed
+incl. PDBs (+0.16 vs 44.96 baseline, ceiling 60); no vulnerable packages; no packages added.
 </task>
