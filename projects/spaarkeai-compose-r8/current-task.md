@@ -11,9 +11,19 @@
 
 | Field | Value |
 |---|---|
-| **Active work** | **Compose R8 product work — PR #806.** The CI/ArchTest detour is finished. |
-| **Next Action** | Fix the **live-anchorless classifier bug** (issue **#853**, and §"🔴 OPEN BUG" below). Everything anchorless is classified `legacy-replay`, so a user who selected text a second earlier is told the suggestion "came from an earlier session". Sites: classification in `usePendingRedline.ts`; copy at `ComposeBannerStack.tsx:937-942` and `ComposeWorkspace.tsx:5340-5341`. **The fallback bound is structurally CORRECT — only the wording and the live-vs-replay split are wrong. Do not loosen the anchor requirement.** |
-| **Verify with** | `cd src/client/shared/Spaarke.Compose.Components && npm test` (1317 tests, all green as of 2026-08-28) |
+| **Active work** | **Track D — task 070**, decompose `ComposeService.cs`. First 🔲 in TASK-INDEX. |
+| **Next Action** | Invoke `task-execute` on `tasks/070-decompose-compose-service.poml`. **FULL rigor, opus/xhigh, `∥ ❌` (sequential — do NOT dispatch agents).** Read the ⚠️ reframe box above the Track D table FIRST: the POML's two stated criteria ("under 2,000 lines", "delete its waiver") are BOTH obsolete — `GodClassGuardTests.cs` no longer exists (LOC ratchet retired 2026-08-20) and there are no waivers left. Binding criterion is now: **extract each cluster with its own reason-to-change, and state that reason per unit. Line count is an observation, not a target.** Follow the **073 exemplar** (✅ shipped): split by responsibility, prove behaviour with two byte-identical oracles + an independent diff, make the oracle permanent as a contract test, and observe both tests failing first by mutation. 073 deliberately left one 677-line file whole because it was cohesive — that is a legitimate outcome, per §11.5. |
+| **Verify with** | `dotnet build src/server/api/Sprk.Bff.Api/` + the Compose seam/op-log suites |
+| **⚠️ 074 is CLOSED as DO-NOT-DELETE** | `ComposeShadowPatchEngine` is load-bearing. Deleting it fails as **silent data loss** — the mutation experiment returned HTTP 200 with 107/151 op-log tests failing. Do not revisit; see the reframe box. |
+
+### ✅ #853 FIXED (`220ddd18e`) — live-anchorless is no longer called a replay
+
+The discriminator was never missing: `MaterializeOrigin` was destructured at `usePendingRedline.ts:907`
+and never read — invariant 7 breached in its purest form. New `AnchorlessSource` selected from
+`origin` and **carried** (both proposal sites had hardcoded `'legacy-replay'`). Copy extracted to
+`redlineFailureCopy.ts`; 19 new tests, non-vacuity proven. **Mechanics unchanged** — the confirmation
+guard still applies to live-anchorless. 🔔 Owner question left open on #853: should a live-anchorless
+edit *retry* instead of prompting? Not decided unilaterally.
 
 ### ✅ Issue #839 CLOSED OUT — PR #847 open, 131/131 ArchTests pass
 
