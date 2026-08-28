@@ -59,9 +59,13 @@ public sealed class StandingGrantRuntimeUnionSeamTests
             .Setup(d => d.RetrieveAsync(ContactEntity, ContactId, It.IsAny<string[]>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync(() => Contact(flagHeld)); // re-evaluated each call → reflects the current toggle
 
+        // PagedOptions, not the literal `null` this setup used to match: `options: null` was the
+        // A-10 defect itself (first page only, continuation token discarded), so matching on it
+        // pinned the bug. The matcher below asserts the composer passes real paging options, which
+        // pins the fix instead — a regression to `null` no longer matches and this seam goes red.
         var membership = new Mock<IMembershipResolverService>();
         membership
-            .Setup(m => m.ResolveByContactAsync(ContactId, ProjectEntity, null, It.IsAny<CancellationToken>()))
+            .Setup(m => m.ResolveByContactAsync(ContactId, ProjectEntity, PagedOptions, It.IsAny<CancellationToken>()))
             .ReturnsAsync(MembershipOf(StandingOnlyProject)); // allowlist-filtered result (NFR-05, task 021)
 
         // ── production slice: real reader + real composer over the real compose surface ───────────
@@ -110,6 +114,14 @@ public sealed class StandingGrantRuntimeUnionSeamTests
             Times.Exactly(6)); // 3 ComposeAsync + 3 IsRecordAccessibleAsync
         dataverse.VerifyNoOtherCalls();
     }
+
+    /// <summary>
+    /// The membership options the composer must pass per FR-14 (task 015): real paging options at
+    /// the agreed page size, never <c>null</c>.
+    /// </summary>
+    private static MembershipResolveOptions? PagedOptions =>
+        It.Is<MembershipResolveOptions?>(o =>
+            o != null && o.Limit == AccessibleRecordSetService.MembershipPageSize);
 
     [Fact]
     public async Task StandingGrant_Toggle_InvalidatesPerContactDataCache_SoNextEvaluationIsNotStale()

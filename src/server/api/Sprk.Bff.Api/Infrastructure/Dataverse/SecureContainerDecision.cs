@@ -13,8 +13,11 @@ namespace Sprk.Bff.Api.Infrastructure.Dataverse;
 ///
 /// <para><b>The three outcomes, and the invariant between them.</b>
 /// <see cref="ContainerDecisionOutcome.ResolvedSecure"/> uses the record's own container.
-/// <see cref="ContainerDecisionOutcome.ResolvedFallback"/> uses the caller's non-secure default (the
-/// business-unit cascade on the client per INV-7; <c>Communication:ArchiveContainerId</c> on the server).
+/// <see cref="ContainerDecisionOutcome.ResolvedFallback"/> uses the non-secure default — as of task 076
+/// the container stamped on the RECORD's own <c>owningbusinessunit</c>, resolved server-side by
+/// <see cref="RecordContainerResolver"/>; <c>Communication:ArchiveContainerId</c> for server-side ingest,
+/// which has no owning record. (Before 076 this was the ACTING USER's business unit, resolved on the
+/// client — the person uploading rather than the thing being uploaded to.)
 /// <see cref="ContainerDecisionOutcome.Unresolved"/> means no container is available AND the record is not
 /// secure — the benign config-absence case that callers may skip on.
 /// <see cref="ContainerDecisionOutcome.FailClosed"/> means refuse.</para>
@@ -50,7 +53,7 @@ public static class SecureContainerDecision
     /// </param>
     /// <param name="ownContainerId">The record's own <c>sprk_containerid</c>, if any.</param>
     /// <param name="fallbackContainerId">
-    /// The caller's non-secure default — the business-unit cascade on the client, or
+    /// The non-secure default — the record's own <c>owningbusinessunit</c> container (task 076), or
     /// <c>Communication:ArchiveContainerId</c> for server-side ingest. Consulted ONLY when the record is not
     /// secure.
     /// </param>

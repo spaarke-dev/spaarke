@@ -98,104 +98,34 @@ public static class OBOEndpoints
         }).RequireRateLimiting("graph-write").RequireAuthorization();
 
 
-        // POST: create upload session (as user)
-        app.MapPost("/api/obo/drives/{driveId}/upload-session", async (
-            string driveId,
-            string path,
-            string? conflictBehavior,
-            HttpContext ctx,
-            [FromServices] SpeFileStore speFileStore,
-            CancellationToken ct) =>
-        {
-            if (string.IsNullOrWhiteSpace(path))
-            {
-                return ProblemDetailsHelper.ValidationError("path query parameter is required");
-            }
-
-            try
-            {
-                var behavior = Sprk.Bff.Api.Models.ConflictBehaviorExtensions.ParseConflictBehavior(conflictBehavior);
-                var session = await GraphCallScope.Run(
-                    () => speFileStore.CreateUploadSessionAsUserAsync(ctx, driveId, path, behavior, ct),
-                    "obo.upload.session.create");
-
-                return session == null
-                    ? TypedResults.Problem(statusCode: 500, title: "Failed to create upload session")
-                    : TypedResults.Ok(session);
-            }
-            catch (UnauthorizedAccessException)
-            {
-                return TypedResults.Unauthorized();
-            }
-            catch (SpaarkeStorageException ex)
-            {
-                return ex.ToProblemDetails();
-            }
-        }).RequireRateLimiting("graph-write").RequireAuthorization();
-
-        // PUT: upload chunk (as user)
-        app.MapPut("/api/obo/upload-session/chunk", async (
-            HttpRequest request,
-            HttpContext ctx,
-            [FromServices] SpeFileStore speFileStore,
-            CancellationToken ct) =>
-        {
-            // Get required headers
-            var uploadSessionUrl = request.Headers["Upload-Session-Url"].FirstOrDefault();
-            var contentRange = request.Headers["Content-Range"].FirstOrDefault();
-
-            if (string.IsNullOrWhiteSpace(uploadSessionUrl))
-            {
-                return ProblemDetailsHelper.ValidationError("Upload-Session-Url header is required");
-            }
-
-            if (string.IsNullOrWhiteSpace(contentRange))
-            {
-                return ProblemDetailsHelper.ValidationError("Content-Range header is required");
-            }
-
-            try
-            {
-                var userToken = TokenHelper.ExtractBearerToken(ctx);
-
-                // Read chunk data from request body
-                using var ms = new MemoryStream();
-                await request.Body.CopyToAsync(ms, ct);
-                var chunkData = ms.ToArray();
-
-                if (chunkData.Length == 0)
-                {
-                    return ProblemDetailsHelper.ValidationError("Request body cannot be empty");
-                }
-
-                var result = await GraphCallScope.Run(
-                    () => speFileStore.UploadChunkAsUserAsync(userToken, uploadSessionUrl, contentRange, chunkData, ct),
-                    "obo.upload.chunk");
-
-                return result.StatusCode switch
-                {
-                    200 => TypedResults.Ok(result.CompletedItem), // Upload complete
-                    201 => TypedResults.Created("", result.CompletedItem), // Upload complete
-                    202 => TypedResults.Accepted("", result.CompletedItem), // More chunks expected
-                    400 => TypedResults.BadRequest("Invalid chunk or Content-Range"),
-                    413 => TypedResults.Problem(statusCode: 413, title: "Chunk too large"),
-                    499 => TypedResults.Problem(statusCode: 499, title: "Client closed request"),
-                    _ => TypedResults.Problem(statusCode: 500, title: "Upload failed")
-                };
-            }
-            catch (UnauthorizedAccessException)
-            {
-                return TypedResults.Unauthorized();
-            }
-            catch (SpaarkeStorageException ex)
-            {
-                return ex.ToProblemDetails();
-            }
-            catch (Exception)
-            {
-                return TypedResults.Problem(statusCode: 500, title: "Upload chunk failed");
-            }
-        }).RequireRateLimiting("graph-write").RequireAuthorization();
+        // ─────────────────────────────────────────────────────────────────────────────────────────
+        // DELETED 2026-08-27 (task 076): POST /api/obo/drives/{driveId}/upload-session and
+        // PUT /api/obo/upload-session/chunk — the chunked OBO pair.
+        //
+        // DELETED rather than converted to the record-keyed contract, because the path was DEAD and
+        // giving a dead path a new contract is worse than removing it. Verified first-hand rather
+        // than taken from the task POML:
+        //
+        //   1. The pair's only client was Spaarke.SdapClient's UploadOperation.createUploadSession,
+        //      which FIRST called `GET /api/obo/containers/{id}/drive` to obtain a drive id.
+        //   2. That route is mapped NOWHERE in the BFF — grep of src/server/** returns three prose
+        //      comments and zero Map* calls. So createUploadSession threw 'Failed to get container
+        //      drive' on the 404 and never reached the upload-session call at all.
+        //   3. The chunk route was deader still: even that client never called it. Its uploadChunk
+        //      PUT went straight to Graph's own `session.uploadUrl`, not to the BFF.
+        //
+        // ⚠️ WHAT THIS DOES NOT FIX. Files >= 4 MiB have NO working upload path, before or after
+        // this deletion. PathValidator.SmallUploadMaxBytes caps the small route at 4 MiB
+        // (enforced at UploadSessionManager.cs:131) and the chunked path was the only alternative.
+        // The client's own SdapApiClient.uploadFile routes >= 4 MiB to the dead path, so large
+        // uploads fail today with a misleading 'Failed to get container drive'. Deleting makes the
+        // failure honest; it does not make large uploads work. A record-keyed upload-session route
+        // is follow-up work and is NOT in task 076's scope — see
+        // projects/unified-access-control-r2/notes/task-076-record-keyed-upload-contract.md.
+        //
+        // Both routes carried Pending waivers in RouteAuthorizationGuardTests owned by "073/075/076";
+        // those are deleted with them, because the routes are gone — not because the rule relaxed.
+        // ─────────────────────────────────────────────────────────────────────────────────────────
 
         // ─────────────────────────────────────────────────────────────────────────────────────────
         // DELETED 2026-08-26 (task 071): PATCH /api/obo/drives/{driveId}/items/{itemId},

@@ -149,10 +149,15 @@ public class OfficeAuthFilter : IEndpointFilter
     /// <remarks>
     /// <para><b>The NameIdentifier and sub fallbacks were removed on 2026-08-27.</b> The value this
     /// returns is stored in <see cref="UserIdKey"/> and consumed as the caller identity by
-    /// <c>OfficeDocumentAccessFilter</c>, <c>EntityAccessFilter</c> and <c>JobOwnershipFilter</c> —
-    /// all of which authorize against Dataverse, which matches on
-    /// <c>systemuser.azureactivedirectoryobjectid</c>. Under inbound claim mapping both fallbacks
-    /// resolve the same pairwise <c>sub</c>, matching no systemuser.</para>
+    /// <c>EntityAccessFilter</c> and <c>JobOwnershipFilter</c>, and by nine handlers in
+    /// <c>Api/Office/OfficeEndpoints.cs</c> that read the key directly — all of which authorize
+    /// against Dataverse, which matches on <c>systemuser.azureactivedirectoryobjectid</c>. Under
+    /// inbound claim mapping both fallbacks resolve the same pairwise <c>sub</c>, matching no
+    /// systemuser.</para>
+    /// <para>A third filter, <c>OfficeDocumentAccessFilter</c>, was also named here until task 018
+    /// deleted it (2026-08-27) as unused-but-functional: nothing ever attached it to a route. Note
+    /// this list is NOT only filters — the direct handler reads carry the same requirement, so
+    /// weakening this resolver breaks authorization at call sites no filter inventory would find.</para>
     /// <para>Contrast <c>OfficeRateLimitFilter</c>, which legitimately accepts <c>sub</c> because a
     /// rate-limit partition only needs stability, not resolvability. Same claim, different purpose —
     /// which is why the two now call differently named resolvers instead of sharing one chain.</para>
