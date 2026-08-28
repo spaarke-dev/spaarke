@@ -114,10 +114,13 @@ export interface SearchResult {
   fileSize?: number | null;
   summary: string | null;
   tldr: string | null;
-  /** SPE driveItem ID. Needed alongside driveId to invoke AI analysis. */
-  speFileId?: string;
-  /** SPE drive ID. Needed alongside speFileId to invoke AI analysis. */
-  driveId?: string;
+  // NOTE (unified-access-control-r2, task 070): `speFileId` / `driveId` were
+  // REMOVED from this contract. `POST /api/ai/search` no longer returns raw
+  // SharePoint Embedded pointers to any client — under the broker-only
+  // decision, file and AI access go through document-id-keyed BFF routes that
+  // carry the standard authorization gate. Do NOT re-add these fields; AI
+  // analysis is invoked with `documentId` alone (see DocumentEmailWizard's
+  // `runCombinedSummary` → `POST /api/ai/analysis/execute { documentIds }`).
   /**
    * v1.1.50 — Relationship origin tag, used to drive the list-view
    * Relationship + Similarity pill styling (Items 3 + 5).

@@ -50,6 +50,12 @@ public class AccessCacheCharacterizationTests
     {
         public List<string?> TokensReceived { get; } = new();
 
+        /// <summary>Tokens received by <see cref="GetRecordAccessAsync"/> — kept separate from
+        /// <see cref="TokensReceived"/> so a future record-access characterization test can assert this
+        /// path's call count without disturbing the GetUserAccessAsync assertions already in this file.
+        /// </summary>
+        public List<string?> RecordAccessTokensReceived { get; } = new();
+
         public AccessRights RightsToReturn { get; set; } = AccessRights.None;
 
         public Task<AccessSnapshot> GetUserAccessAsync(
@@ -64,6 +70,28 @@ public class AccessCacheCharacterizationTests
             {
                 UserId = userId,
                 ResourceId = resourceId,
+                AccessRights = RightsToReturn
+            });
+        }
+
+        /// <summary>
+        /// Mirrors <see cref="GetUserAccessAsync"/> for the entity-agnostic path (unified-access-control-r2
+        /// task 070): records the token (a recorder that ignores a method is a recorder that lies) and
+        /// returns <see cref="RightsToReturn"/>, same as the document-scoped method.
+        /// </summary>
+        public Task<AccessSnapshot> GetRecordAccessAsync(
+            string userId,
+            string entitySetName,
+            Guid recordId,
+            string? userAccessToken,
+            CancellationToken ct = default)
+        {
+            RecordAccessTokensReceived.Add(userAccessToken);
+
+            return Task.FromResult(new AccessSnapshot
+            {
+                UserId = userId,
+                ResourceId = recordId.ToString(),
                 AccessRights = RightsToReturn
             });
         }

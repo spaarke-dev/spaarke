@@ -1,0 +1,149 @@
+{
+  "$comment": [
+    "unified-access-control-r2 task 075 — THE SHARED DECISION TABLE for record-aware container resolution.",
+    "",
+    "WHY THIS FILE EXISTS. The decision 'which SPE container does this record's content belong in?' is",
+    "implemented TWICE, because INV-7 keeps business-unit resolution client-side while server-side email",
+    "ingest has no client at all. Two implementations of an isolation rule is a known failure mode, so the",
+    "rule is pinned HERE, in one machine-readable place, and BOTH halves' test suites drive their own pure",
+    "decision function against THIS file:",
+    "",
+    "  C#  tests/integration/auth/UnifiedAccessControl/SecureContainerDecisionTableTests.cs",
+    "  TS  src/client/shared/Spaarke.UI.Components/src/services/__tests__/RecordContainerResolver.test.ts",
+    "",
+    "Consequences, all mechanical rather than promised:",
+    "  * change one half's behaviour  -> that half's test fails against this file",
+    "  * change this file to match one half -> the OTHER half's test fails",
+    "  * add a case here -> both halves must implement it",
+    "  * both suites assert caseCount and that every case name was exercised, so a suite cannot silently",
+    "    stop reading this file and still pass",
+    "",
+    "DO NOT edit a case to make a build go green. A case is a claim about isolation behaviour; if the claim",
+    "is wrong, say why in the case's 'why' field and change both halves in the same commit.",
+    "",
+    "SPE permissions are additive-only (no inheritance break on a file), so a secure record's content placed",
+    "in a shared container cannot be retracted by any later permission change. That is why 'fail-closed' is",
+    "the expected outcome rather than 'fall back'."
+  ],
+  "caseCount": 14,
+  "outcomes": {
+    "resolved-secure": "Use the record's own sprk_containerid. source = secure-record-own-container.",
+    "resolved-fallback": "Use the caller-supplied non-secure fallback (client: BU cascade; server: ArchiveContainerId). source = non-secure-fallback.",
+    "unresolved": "No container available and the record is NOT secure. Caller keeps its existing skip/warn behaviour. This outcome is UNREACHABLE for a secure record.",
+    "fail-closed": "Refuse loudly. Never substitute a shared container."
+  },
+  "cases": [
+    {
+      "name": "secure-with-own-container-and-fallback",
+      "isSecure": true,
+      "ownContainerId": "b!secure-own-container-0000000000",
+      "fallbackContainerId": "b!shared-bu-container-000000000000",
+      "expect": { "outcome": "resolved-secure", "containerId": "b!secure-own-container-0000000000" },
+      "why": "The whole point of the seam: provisioning stamped a container and it is now read."
+    },
+    {
+      "name": "secure-with-own-container-no-fallback",
+      "isSecure": true,
+      "ownContainerId": "b!secure-own-container-0000000000",
+      "fallbackContainerId": null,
+      "expect": { "outcome": "resolved-secure", "containerId": "b!secure-own-container-0000000000" },
+      "why": "A secure record never needs the fallback, so its absence is irrelevant."
+    },
+    {
+      "name": "secure-with-null-container-FAILS-CLOSED",
+      "isSecure": true,
+      "ownContainerId": null,
+      "fallbackContainerId": "b!shared-bu-container-000000000000",
+      "expect": { "outcome": "fail-closed" },
+      "why": "THE most important case in the task. A fallback is AVAILABLE and must NOT be used. Falling back here is precisely how secure content lands in a shared container, permanently and invisibly - the upload would succeed."
+    },
+    {
+      "name": "secure-with-empty-container-FAILS-CLOSED",
+      "isSecure": true,
+      "ownContainerId": "",
+      "fallbackContainerId": "b!shared-bu-container-000000000000",
+      "expect": { "outcome": "fail-closed" },
+      "why": "Dataverse returns an empty string as readily as null for an unset NVARCHAR. Treating empty as 'set' would resolve to a blank container id and the failure would surface as a confusing Graph error rather than a refusal."
+    },
+    {
+      "name": "secure-with-whitespace-container-FAILS-CLOSED",
+      "isSecure": true,
+      "ownContainerId": "   ",
+      "fallbackContainerId": "b!shared-bu-container-000000000000",
+      "expect": { "outcome": "fail-closed" },
+      "why": "Whitespace is the shape a hand-edited or trimmed-in-transit field takes. Blank is blank."
+    },
+    {
+      "name": "secure-with-no-container-and-no-fallback-FAILS-CLOSED",
+      "isSecure": true,
+      "ownContainerId": null,
+      "fallbackContainerId": null,
+      "expect": { "outcome": "fail-closed" },
+      "why": "Must be fail-closed, NOT unresolved. 'Unresolved' is the benign config-absence outcome and callers are allowed to skip quietly on it; a secure record must never reach that path."
+    },
+    {
+      "name": "secure-with-own-container-identical-to-fallback",
+      "isSecure": true,
+      "ownContainerId": "b!shared-bu-container-000000000000",
+      "fallbackContainerId": "b!shared-bu-container-000000000000",
+      "expect": { "outcome": "resolved-secure", "containerId": "b!shared-bu-container-000000000000" },
+      "why": "LIVE DATA CASE. Three existing projects carry the ROOT business unit's container id, so 'a container id is set' is the false positive task 047 warns about. The decision layer cannot detect this - equality here is a data defect, not a decision defect - so it resolves and reports source=secure-record-own-container. Detecting the equality is task 047's live assertion, and the reverse mapping refuses on the co-mingling it implies."
+    },
+    {
+      "name": "secure-with-padded-own-container-is-trimmed",
+      "isSecure": true,
+      "ownContainerId": "  b!secure-own-container-0000000000  ",
+      "fallbackContainerId": null,
+      "expect": { "outcome": "resolved-secure", "containerId": "b!secure-own-container-0000000000" },
+      "why": "Both halves must trim identically, or the same record resolves to two different container ids depending on which half asked."
+    },
+    {
+      "name": "non-secure-with-fallback",
+      "isSecure": false,
+      "ownContainerId": null,
+      "fallbackContainerId": "b!shared-bu-container-000000000000",
+      "expect": { "outcome": "resolved-fallback", "containerId": "b!shared-bu-container-000000000000" },
+      "why": "The existing business-unit cascade, unchanged. Acceptance criterion: non-secure behaviour is not altered by this task."
+    },
+    {
+      "name": "non-secure-with-padded-fallback-is-trimmed",
+      "isSecure": false,
+      "ownContainerId": null,
+      "fallbackContainerId": "  b!shared-bu-container-000000000000  ",
+      "expect": { "outcome": "resolved-fallback", "containerId": "b!shared-bu-container-000000000000" },
+      "why": "Same trimming rule on the fallback side."
+    },
+    {
+      "name": "non-secure-with-no-fallback-is-unresolved",
+      "isSecure": false,
+      "ownContainerId": null,
+      "fallbackContainerId": null,
+      "expect": { "outcome": "unresolved" },
+      "why": "Preserves today's behaviour where an unconfigured Communication:ArchiveContainerId logs a warning and skips. A config absence on a non-secure path is not a security event and must not start throwing."
+    },
+    {
+      "name": "non-secure-with-empty-fallback-is-unresolved",
+      "isSecure": false,
+      "ownContainerId": null,
+      "fallbackContainerId": "",
+      "expect": { "outcome": "unresolved" },
+      "why": "Unconfigured options bind as empty strings, not null."
+    },
+    {
+      "name": "non-secure-IGNORES-its-own-stamped-container",
+      "isSecure": false,
+      "ownContainerId": "b!some-stale-stamp-00000000000000",
+      "fallbackContainerId": "b!shared-bu-container-000000000000",
+      "expect": { "outcome": "resolved-fallback", "containerId": "b!shared-bu-container-000000000000" },
+      "why": "DELIBERATE. A non-secure record's own sprk_containerid is NOT consulted. Reading it would silently redirect content for any record carrying a stale stamp - and stale stamps demonstrably exist (the wizard's BU cascade writes this column today, which is what task 076 removes). The non-secure answer stays the business-unit cascade, exactly as before."
+    },
+    {
+      "name": "non-secure-with-own-container-and-no-fallback-is-unresolved",
+      "isSecure": false,
+      "ownContainerId": "b!some-stale-stamp-00000000000000",
+      "fallbackContainerId": null,
+      "expect": { "outcome": "unresolved" },
+      "why": "The tempting bug: with no fallback available, reaching for the record's own stamp looks helpful. It is the previous case's defect with nothing to mask it. Unresolved is the honest answer."
+    }
+  ]
+}

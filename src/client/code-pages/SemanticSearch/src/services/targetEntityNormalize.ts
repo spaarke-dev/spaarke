@@ -110,7 +110,21 @@ export function buildSearchRequestFragment(row: AiSearchIndexRow): SearchRequest
   }
 
   // Empty/missing label — defensive default (data-quality issue).
+  //
+  // unified-access-control-r2 task 080: this branch is no longer SILENT. A blank
+  // `sprk_targetentitytype` label on an `sprk_aisearchindex` row is a configuration
+  // defect, and falling back to the widest scope without saying so meant a
+  // mis-seeded row quietly changed what the page searched. The fallback itself is
+  // retained — throwing here would break the whole page over one bad row, and the
+  // BFF now authorizes `scope: 'all'` results row by row against each document's
+  // parent, so the widening is filtered rather than tenant-wide. What changes is
+  // that the misconfiguration is now visible to whoever is looking.
   if (normalized === null) {
+    console.warn(
+      '[SemanticSearch] sprk_aisearchindex row has a blank sprk_targetentitytype label; ' +
+        `falling back to cross-record scope for index "${searchIndexName}". ` +
+        'Fix the Choice label on that row to restore the intended entity scope.'
+    );
     return { scope: 'all', searchIndexName };
   }
 

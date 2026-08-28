@@ -77,7 +77,15 @@ public class SemanticSearchIntegrationTests : IClassFixture<SemanticSearchTestFi
         {
             Query = "test search query",
             Scope = "documentIds",
-            DocumentIds = new List<string> { "doc-1", "doc-2", "doc-3" }
+            // Real GUIDs. These were "doc-1"/"doc-2"/"doc-3" — placeholder strings that were fine while
+            // documentIds were never resolved to anything. unified-access-control-r2 task 070
+            // authorizes each id against Dataverse, so a non-GUID is now a malformed payload (400).
+            DocumentIds = new List<string>
+            {
+                "00000000-0000-0000-0000-0000000000d1",
+                "00000000-0000-0000-0000-0000000000d2",
+                "00000000-0000-0000-0000-0000000000d3"
+            }
         };
 
         // Act
@@ -178,7 +186,12 @@ public class SemanticSearchIntegrationTests : IClassFixture<SemanticSearchTestFi
         var request = new SemanticSearchRequest
         {
             Scope = "documentIds",
-            DocumentIds = new List<string> { "doc-1", "doc-2" }
+            // Real GUIDs — see the note on the sibling test above.
+            DocumentIds = new List<string>
+            {
+                "00000000-0000-0000-0000-0000000000d1",
+                "00000000-0000-0000-0000-0000000000d2"
+            }
         };
 
         // Act
@@ -198,9 +211,18 @@ public class SemanticSearchIntegrationTests : IClassFixture<SemanticSearchTestFi
     #region POST /api/ai/search - Validation Tests (400)
 
     [Fact]
-    public async Task Search_ScopeAll_Returns_200()
+    public async Task Search_ScopeAll_Returns_200_Filtered()
     {
-        // Arrange - scope=all enabled in R3 for system-wide document search
+        // Behaviour history, because this test has now asserted three different things:
+        //   R3            — 200, unfiltered. "scope=all enabled for system-wide document search."
+        //                   Combined with a filter that authorized nothing, that WAS the disclosure.
+        //   task 070      — 403. Refused outright, as a stop-gap.
+        //   task 080      — 200, FILTERED per row. Cross-record search is a capability Spaarke offers
+        //                   (owner decision 2026-08-26); task 070's premise that no caller needed it
+        //                   was false. The rows are now authorized individually against their parents.
+        //
+        // A 200 here is therefore NOT a regression to R3: what makes it safe is the row-level
+        // enforcement asserted in SemanticSearchAuthorizationTests, not the status code.
         var client = _fixture.CreateAuthenticatedClient(TestTenantId);
         var request = new SemanticSearchRequest
         {
@@ -211,13 +233,31 @@ public class SemanticSearchIntegrationTests : IClassFixture<SemanticSearchTestFi
         // Act
         var response = await client.PostAsJsonAsync("/api/ai/search", request, _jsonOptions);
 
-        // Assert - scope=all is now supported in R3
+        // Assert
         response.StatusCode.Should().Be(HttpStatusCode.OK);
+    }
 
-        var content = await response.Content.ReadFromJsonAsync<SemanticSearchResponse>(_jsonOptions);
-        content.Should().NotBeNull();
-        content!.Results.Should().NotBeNull();
-        content.Metadata.Should().NotBeNull();
+    [Fact]
+    public async Task Count_ScopeAll_Returns_403_BecauseACountCannotBeFiltered()
+    {
+        // The asymmetry is deliberate and load-bearing. /search may serve scope=all because it can drop
+        // rows the caller cannot read. A COUNT has nothing to drop — the only number it can produce is
+        // derived from the unfiltered corpus, which discloses how many documents exist tenant-wide.
+        //
+        // Note this runs against AlwaysPermitAccessDataSource, so the 403 is NOT a lack of access: it is
+        // the scope being unsupported on this route, which is the stronger claim.
+        var client = _fixture.CreateAuthenticatedClient(TestTenantId);
+        var request = new SemanticSearchRequest
+        {
+            Query = "test query",
+            Scope = "all"
+        };
+
+        // Act
+        var response = await client.PostAsJsonAsync("/api/ai/search/count", request, _jsonOptions);
+
+        // Assert
+        response.StatusCode.Should().Be(HttpStatusCode.Forbidden);
     }
 
     [Fact]
@@ -385,10 +425,16 @@ public class SemanticSearchIntegrationTests : IClassFixture<SemanticSearchTestFi
 
     #endregion
 
-    #region POST /api/ai/search - Scope=All Tests (R3)
+    #region POST /api/ai/search - Scope=All is refused (unified-access-control-r2 task 070)
+
+    // These two tests have asserted 200 (R3, unfiltered — the disclosure), then 403 (task 070, refused),
+    // and now 200 again (task 080, filtered per row). Both run against AlwaysPermitAccessDataSource, so
+    // they establish that the SCOPE is accepted — they say nothing about filtering, which is deliberately
+    // asserted where access can be denied (SemanticSearchAuthorizationTests). Keeping the separation
+    // means a stub that accidentally permits everything cannot make a filtering test pass.
 
     [Fact]
-    public async Task Search_ScopeAll_ResponseIncludesMetadata()
+    public async Task Search_ScopeAll_Returns200_WhenAccessIsPermitted()
     {
         // Arrange
         var client = _fixture.CreateAuthenticatedClient(TestTenantId);
@@ -403,19 +449,15 @@ public class SemanticSearchIntegrationTests : IClassFixture<SemanticSearchTestFi
 
         // Assert
         response.StatusCode.Should().Be(HttpStatusCode.OK);
-
-        var content = await response.Content.ReadFromJsonAsync<SemanticSearchResponse>(_jsonOptions);
-        content!.Metadata.Should().NotBeNull();
-        content.Metadata.TotalResults.Should().BeGreaterOrEqualTo(0);
-        content.Metadata.SearchDurationMs.Should().BeGreaterOrEqualTo(0);
-        content.Metadata.AppliedFilters.Should().NotBeNull();
-        content.Metadata.AppliedFilters!.Scope.Should().Be("all");
     }
 
     [Fact]
     public async Task Search_ScopeAll_WithEntityTypesFilter_Returns200()
     {
-        // Arrange - scope=all with entityTypes filter narrows results to specific entity types
+        // An entityTypes filter narrows the QUERY; it never established that the caller may see what the
+        // query returns, which is why it did not rehabilitate scope=all under task 070. What makes
+        // scope=all servable now is the per-row parent authorization, not this filter — the filter is
+        // still only a relevance narrowing and is asserted here purely as an accepted request shape.
         var client = _fixture.CreateAuthenticatedClient(TestTenantId);
         var request = new
         {
@@ -432,10 +474,6 @@ public class SemanticSearchIntegrationTests : IClassFixture<SemanticSearchTestFi
 
         // Assert
         response.StatusCode.Should().Be(HttpStatusCode.OK);
-
-        var content = await response.Content.ReadFromJsonAsync<SemanticSearchResponse>(_jsonOptions);
-        content.Should().NotBeNull();
-        content!.Results.Should().NotBeNull();
     }
 
     #endregion
@@ -587,6 +625,15 @@ public class SemanticSearchTestFixture : WebApplicationFactory<Program>
             // Replace the real semantic search service with mock
             services.RemoveAll<ISemanticSearchService>();
             services.AddSingleton<ISemanticSearchService>(new MockSemanticSearchService());
+
+            // This class tests the search CONTRACT — metadata shape, applied filters, hybrid modes,
+            // validation codes — not authorization. Authorization is covered by
+            // SemanticSearchAuthorizationTests, whose stub denies by default so its negative cases are
+            // real. Here access is granted unconditionally so a contract assertion cannot pass or fail
+            // for access reasons. The type name says so out loud: an always-permit double is the exact
+            // shape of the bug task 070 fixed, so it must never be mistaken for an authorization test.
+            services.RemoveAll<IAccessDataSource>();
+            services.AddSingleton<IAccessDataSource>(new AlwaysPermitAccessDataSource());
         });
 
         builder.UseEnvironment("Testing");
@@ -630,6 +677,40 @@ public class SemanticSearchTestFixture : WebApplicationFactory<Program>
 /// Mock semantic search service for integration testing.
 /// Returns predictable responses for testing.
 /// </summary>
+/// <summary>
+/// Grants every caller full rights on every record. For CONTRACT tests only.
+/// </summary>
+/// <remarks>
+/// This is deliberately the shape of the defect unified-access-control-r2 task 070 fixed — an
+/// authorization source that always says yes — and it is named so that can never be read as an
+/// oversight. It exists so contract assertions (metadata shape, applied filters, hybrid modes,
+/// validation codes) are not entangled with access decisions. Any test whose subject is authorization
+/// belongs in <c>SemanticSearchAuthorizationTests</c>, whose stub denies by default; using this double
+/// there would make every negative test pass for the wrong reason.
+/// </remarks>
+internal sealed class AlwaysPermitAccessDataSource : IAccessDataSource
+{
+    private static AccessSnapshot Permit(string userId, string resourceId) => new()
+    {
+        UserId = userId,
+        ResourceId = resourceId,
+        // Every declared flag, so no contract test can fail for want of a right.
+        AccessRights = Enum.GetValues<AccessRights>().Aggregate(AccessRights.None, (a, b) => a | b),
+        TeamMemberships = Array.Empty<string>(),
+        Roles = Array.Empty<string>(),
+        CachedAt = DateTimeOffset.UtcNow
+    };
+
+    public Task<AccessSnapshot> GetUserAccessAsync(
+        string userId, string resourceId, string? userAccessToken = null, CancellationToken ct = default) =>
+        Task.FromResult(Permit(userId, resourceId));
+
+    public Task<AccessSnapshot> GetRecordAccessAsync(
+        string userId, string entitySetName, Guid recordId, string? userAccessToken,
+        CancellationToken ct = default) =>
+        Task.FromResult(Permit(userId, recordId.ToString()));
+}
+
 internal class MockSemanticSearchService : ISemanticSearchService
 {
     public Task<SemanticSearchResponse> SearchAsync(

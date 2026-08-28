@@ -33,6 +33,25 @@ export {
 export { AppInsightsService } from './AppInsightsService';
 export { reportClientError, setClientErrorTelemetryHook } from './reportClientError';
 export type { ClientErrorContext } from './reportClientError';
+// Record-aware SPE container resolution — unified-access-control-r2 task 075.
+// THE client-side decision: a secure record's content goes in its OWN container, or nowhere.
+// Call sites must consume this rather than testing `sprk_issecure` themselves (task 076).
+export {
+  resolveContainerForRecord,
+  decideContainer,
+  isSecurableEntity,
+  SecureContainerUnresolvedError,
+  SECURE_FLAG_ATTRIBUTE,
+  CONTAINER_ATTRIBUTE,
+  __resetSecurableEntityCache,
+} from './RecordContainerResolver';
+export type {
+  ContainerResolution,
+  ContainerSource,
+  ResolveContainerArgs,
+  IEntityMetadataProbe,
+} from './RecordContainerResolver';
+
 export { EntityCreationService } from './EntityCreationService';
 export type {
   IFileUploadResult,

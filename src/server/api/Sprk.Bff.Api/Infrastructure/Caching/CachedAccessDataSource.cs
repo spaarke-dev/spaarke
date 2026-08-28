@@ -141,6 +141,77 @@ public class CachedAccessDataSource : IAccessDataSource
         return snapshot;
     }
 
+    /// <inheritdoc />
+    public async Task<AccessSnapshot> GetRecordAccessAsync(
+        string userId,
+        string entitySetName,
+        Guid recordId,
+        string? userAccessToken,
+        CancellationToken ct = default)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(userId, nameof(userId));
+        ArgumentException.ThrowIfNullOrWhiteSpace(entitySetName, nameof(entitySetName));
+
+        // Do NOT cache a denial caused by a missing token: it is a property of the REQUEST, not of the
+        // caller's access, and caching it would deny a later well-formed request for the whole TTL.
+        // Delegate straight through — the inner implementation is the one that fails closed.
+        if (recordId == Guid.Empty || string.IsNullOrWhiteSpace(userAccessToken))
+        {
+            return await _inner.GetRecordAccessAsync(userId, entitySetName, recordId, userAccessToken, ct);
+        }
+
+        // DISTINCT key namespace ("record", not "access") AND the entity set is part of the key.
+        //
+        // This matters: GetUserAccessAsync's key is `...:access:{authMode}:{userId}:{resourceId}` with no
+        // entity type, because that path is document-only by contract. Reusing that shape for arbitrary
+        // entities would make the key ambiguous about WHICH RECORD was asked about — a snapshot for one
+        // table answering for another table's record of the same id. Separate prefix + entity set makes
+        // that structurally impossible rather than merely unlikely.
+        //
+        // No authMode discriminator: this method denies without a caller token, so every cached entry is
+        // an OBO answer by construction.
+        var cacheKey = $"sdap:auth:record:{entitySetName}:{userId}:{recordId}";
+        var sw = Stopwatch.StartNew();
+
+        try
+        {
+            var cachedJson = await _cache.GetStringAsync(cacheKey, ct);
+            sw.Stop();
+
+            if (cachedJson != null)
+            {
+                var cached = JsonSerializer.Deserialize<CachedAccessSnapshot>(cachedJson, JsonOptions);
+                if (cached != null)
+                {
+                    _logger.LogDebug(
+                        "[AUTH-CACHE] HIT record access: UserId={UserId}, EntitySet={EntitySet}, " +
+                        "RecordId={RecordId}, Latency={LatencyMs}ms",
+                        userId, entitySetName, recordId, sw.ElapsedMilliseconds);
+                    CacheMetrics.RecordHit(sw.Elapsed.TotalMilliseconds, "auth-access");
+
+                    return cached.ToAccessSnapshot();
+                }
+            }
+
+            CacheMetrics.RecordMiss(sw.Elapsed.TotalMilliseconds, "auth-access");
+        }
+        catch (Exception ex)
+        {
+            sw.Stop();
+            _logger.LogWarning(ex,
+                "[AUTH-CACHE] Error reading record access cache: UserId={UserId}, EntitySet={EntitySet}, " +
+                "RecordId={RecordId}. Falling through to Dataverse.",
+                userId, entitySetName, recordId);
+            CacheMetrics.RecordMiss(sw.Elapsed.TotalMilliseconds, "auth-access");
+        }
+
+        var snapshot = await _inner.GetRecordAccessAsync(userId, entitySetName, recordId, userAccessToken, ct);
+
+        _ = CacheSnapshotAsync(cacheKey, snapshot, ResourceAccessTtl);
+
+        return snapshot;
+    }
+
     /// <summary>
     /// Caches the full access snapshot for a user+resource combination.
     /// </summary>

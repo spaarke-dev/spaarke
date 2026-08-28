@@ -111,6 +111,40 @@ THE `SecureProject__BusinessUnitName` SETTING IS ABSENT ON PURPOSE-BY-ACCIDENT. 
     <criterion>A project that carried a wizard-cascaded container id at create time still provisioned — the live proof the 409 regression is closed.</criterion>
     <criterion>The e2e spec's skipped cases are re-authored and its three staleness bugs fixed.</criterion>
     <criterion>The notes state explicitly what remains unproven (document isolation, FR-28's share).</criterion>
+
+    <!-- ADDED 2026-08-27 at the tranche-2 merge, per the `/push-to-github` Step 1.7 real-Dataverse gate.
+         This is the ONE named residual that gate could not close before merging task 075 to master, and it
+         is recorded here so live validation covers it deliberately rather than by luck. -->
+    <criterion>🔴 **`SecurableEntityRegistry`'s metadata query succeeds under the BFF's OWN Dataverse
+      application user** (`# mi-bff-api-dev`), not merely under an operator identity. This was merged
+      UNVERIFIED and it is the highest-value unknown in this task.
+
+      **Why it matters more than it looks.** The registry issues a LIVE Dataverse metadata query
+      (`SecurableEntityRegistry.QueryMetadataAsync`) on EVERY inbound communication archive, via
+      `IncomingCommunicationProcessor.ResolveContainerForContentAsync` →
+      `CommunicationContainerResolver` → `RecordContainerResolver.IsSecurableAsync`. A metadata failure
+      **propagates by design** (`SecurableEntityRegistry.cs:72-74`: *"NOT wrapped in a try/catch that
+      returns an empty set. A metadata failure must propagate"*), and the ingest call site's catch is
+      NARROW — it handles only `secure_record_container_missing` and
+      `communication_secure_container_ambiguous`. So a metadata-privilege failure does not degrade
+      archival; it BREAKS inbound processing.
+
+      **What is already excluded, so do not re-do it.** The entity/attribute names were verified against
+      LIVE Dataverse on 2026-08-27 via the Dataverse MCP: `sprk_issecure` and `sprk_containerid` are
+      present on `sprk_project`, `sprk_matter` AND `sprk_workassignment`. The `sprk_contact`-class
+      name-error failure mode is therefore ruled out. What remains is strictly the **privilege**
+      question — can the BFF's application user execute the metadata query.
+
+      **Bonus live observation from that same check, worth confirming at scale**: the sampled
+      `sprk_matter` and `sprk_workassignment` rows carry the IDENTICAL `sprk_containerid`
+      (`b!vzGDfDpd7km_-_H38Q6ZfbotQXLPXF9Ci71VoQmIOHUKlvxOqBsHQLrROZ5KySLh`), and both are
+      `sprk_issecure=false`. That corroborates the premise behind this whole wave — everything currently
+      shares one container — on two entities beyond the three projects already cited in task 075's origin.
+
+      **Deliberately NOT hardened before merge** (owner decision, 2026-08-27): widening the ingest catch
+      would convert a loud availability break into a SILENT completeness failure — records captured, SPE
+      content quietly dropped — which is the worse direction for an archival feature. If that hedge is
+      ever wanted, the correct form marks the communication archive-failed in DATA, not only in logs.</criterion>
   </acceptance-criteria>
 
   <notes>Assert INEQUALITY against the shared container, not presence of a value — the cascade populates the field with shared storage, so "a container id is set" is exactly the false positive to avoid. Depends on 046 for the ownership half to mean anything.</notes>

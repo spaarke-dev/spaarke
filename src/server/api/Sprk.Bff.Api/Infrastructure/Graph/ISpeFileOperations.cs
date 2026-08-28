@@ -97,7 +97,10 @@ public interface ISpeFileOperations
     /// </summary>
     /// <remarks>
     /// spaarkeai-compose-r6 task 050 (spec FR-07 / Success Criterion 4): the user-context
-    /// version-history list backing <c>GET /api/obo/drives/{driveId}/items/{itemId}/versions</c>.
+    /// version-history list backing <c>GET /api/documents/{documentId}/versions</c> (re-keyed from
+    /// the drive-keyed route by unified-access-control-r2 task 079 — the caller names a document row
+    /// and the drive/item below come off that row AFTER the per-document gate, so a caller can no
+    /// longer address an arbitrary SPE item).
     /// Same Graph call shape as <see cref="GetCurrentVersionIdAsUserAsync"/>, but returns the
     /// FULL mapped list instead of just the newest id (per task 002's inventory,
     /// <c>notes/spe-versioning-verify.md</c> §3). Read-only — no restore/branch surface.

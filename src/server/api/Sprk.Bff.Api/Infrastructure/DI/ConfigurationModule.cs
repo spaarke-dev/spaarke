@@ -157,6 +157,19 @@ public static class ConfigurationModule
             .ValidateDataAnnotations()
             .ValidateOnStart();
 
+        // Sharing-link bounds for POST /api/documents/{documentId}/share-link
+        // (unified-access-control-r2 task 072). ValidateOnStart is load-bearing here rather than
+        // cosmetic: the [Range] ceilings ARE the security guarantee — a minted SPE URL survives
+        // Dataverse revocation, so lifetime is this route's only revocation mechanism, and an operator
+        // must not be able to configure an effectively-permanent link. Failing startup on a bad value is
+        // the right direction; silently clamping would hide the misconfiguration. An absent section binds
+        // valid defaults (14d / 7d / anonymous enabled) and boots.
+        services
+            .AddOptions<ShareLinkOptions>()
+            .Bind(configuration.GetSection(ShareLinkOptions.SectionName))
+            .ValidateDataAnnotations()
+            .ValidateOnStart();
+
         // FR-P2-06 (task 035): the FR-46/FR-47 classifier-stack option bindings
         // (candidate-selector thresholds + reranker tuning knobs) were DELETED with
         // the dispatcher stack — no code reads their configuration sections anymore.

@@ -86,7 +86,15 @@ public class SystemIntegrationTests : IClassFixture<IntegrationTestFixture>
         var endpointGroups = new Dictionary<string, string[]>
         {
             ["User Endpoints"] = ["/api/me", "/api/me/capabilities"],
-            ["OBO Endpoints"] = ["/api/obo/containers/test/children"]
+            // `/api/obo/containers/test/children` was removed from this list on 2026-08-26:
+            // unified-access-control-r2 task 071 deleted GET /api/obo/containers/{id}/children along
+            // with three other drive-keyed OBO routes that reached existing SPE content with no
+            // per-document authorization decision. Same rationale as the auth-v4 pruning above: a
+            // deleted endpoint returns a bare routing 404, which is not a statement about endpoint
+            // GROUPING — the thing this test exists to check. The OBO group's surviving GET routes
+            // live in DocumentVersionEndpoints; its remaining OBOEndpoints routes are PUT/POST, which
+            // this GET-only probe cannot exercise. Route absence is asserted directly by
+            // tests/integration/regression/OboDriveKeyedRouteRetirementTests.cs.
         };
 
         foreach (var (groupName, endpoints) in endpointGroups)
