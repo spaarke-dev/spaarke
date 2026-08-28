@@ -482,7 +482,20 @@ public sealed class H3EntraAppRegHandler : IProvisioningHandler
                 TenantId: tenantId,
                 VaultName: keyVaultName,
                 UamiPrincipalId: uamiPrincipalId,
-                Profile: run.Profile ?? string.Empty);
+                Profile: run.Profile ?? string.Empty,
+                // Bucket B HIGH#3 SESSION 18 (customer-provisioning-orchestration-r1
+                // adversarial verify workflow wepdcb8we): both current Model 2
+                // profiles are secret-free per ADR-028 A4 + auth-v4 task 033
+                // (2026-08-24) + .claude/constraints/provisioning.md § KV
+                // credential lifecycle rule 1 (BFF-API-ClientSecret is GONE,
+                // never re-introduce). We pass true EXPLICITLY here — even
+                // though it is the DTO default — because (a) the intent is
+                // load-bearing enough to be visible at the call site, and (b)
+                // if the DTO default ever changes, this call site continues to
+                // request the correct behavior. If a future non-secret-free
+                // profile is introduced, THIS is the line that decides —
+                // opt-in with `false` after documenting the exception path.
+                RequireSecretFreeIdentity: true);
             outcome = await _provisioner.ProvisionAsync(request, cancellationToken).ConfigureAwait(false);
         }
         catch (CrossTenantFicRefusedException ex)

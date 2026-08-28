@@ -181,14 +181,11 @@ This document is **generated** from `scripts/canonical-secret-catalog/manifest.y
 - **Never-delete (BINDING)**: YES (BINDING)
 - **Value source**: from-existing-kv
 - **Tags**: auth, bff, binding-never-delete
-- **Exception note**: DELETED from KV 2026-08-24 (auth-v4 task 033, ADR-028 E-3 CLOSED). Entry retained to BLOCK re-creation — H4 omits in secret-free envs; never seed a sentinel value (§9.1 opaque AADSTS7000215 — the ordered selector cannot distinguish a sentinel from a real secret). Soft-deleted copies (BFF-API-ClientSecret + bff-api-client-secret) recoverable to 2026-11-22 — DO-NOT-PURGE before then. Grandfathered PascalCase per §7.9 R2 (never gain a second casing).
+- **Exception note**: DELETED from KV 2026-08-24 (auth-v4 task 033, ADR-028 E-3 CLOSED). Entry retained to BLOCK re-creation — H4 omits in secret-free envs; never seed a sentinel value (§9.1 opaque AADSTS7000215 — the ordered selector cannot distinguish a sentinel from a real secret). Soft-deleted copies (BFF-API-ClientSecret + bff-api-client-secret) recoverable to 2026-11-22 — DO-NOT-PURGE before then. Grandfathered PascalCase per §7.9 R2 (never gain a second casing). Bucket B HIGH#5 SESSION 18 (customer-provisioning-orchestration-r1 adversarial verify workflow wepdcb8we): app_settings EMPTIED — this KV secret is a HARD BLOCK entry only; no live BFF app-setting may reference it. Prior list [AzureAd__ClientSecret, Graph__ClientSecret] caused the generated Configure-AppServiceSettings script to re-introduce E-3-removed settings pointing at a soft-deleted KV secret (silent 404 → App Service hydrates literal @KV(...) string → confidential-client init throws AADSTS7000215 per §9.1). Enforced by Test-CatalogInvariants.ps1 (§rule: any secret whose exception_note contains 'E-3 CLOSED' MUST have app_settings: []).
 - **Consumers**:
   - BFF: AzureAd:ClientSecret (backing)
   - BFF: Graph:ClientSecret (local-dev fallback per ADR-028)
   - BFF: OBO ConfidentialClientApplication
-- **App-setting keys**:
-  - `AzureAd__ClientSecret`
-  - `Graph__ClientSecret`
 
 ### `BingSearch-ApiKey`
 
@@ -310,16 +307,12 @@ This document is **generated** from `scripts/canonical-secret-catalog/manifest.y
 - **Never-delete (BINDING)**: YES (BINDING)
 - **Value source**: from-existing-kv
 - **Tags**: auth, binding-never-delete, dataverse
-- **Exception note**: Rollback-window hold per §6.5 resolution 2026-08-25 (sunset 2026-11-23); retirement owned by auth-v4 runbook (obligation 051-E). E-3 closure removed the Dataverse__ClientSecret app setting 2026-08-24; the KV secret is retained solely as auth-v4's rollback copy through the soak window. Grandfathered PascalCase per §7.9 R2 (never gain a second casing). DO-NOT-DELETE before sunset; retirement follows auth-v4 runbook.
+- **Exception note**: Rollback-window hold per §6.5 resolution 2026-08-25 (sunset 2026-11-23); retirement owned by auth-v4 runbook (obligation 051-E). E-3 closure removed the Dataverse__ClientSecret app setting 2026-08-24; the KV secret is retained solely as auth-v4's rollback copy through the soak window. Grandfathered PascalCase per §7.9 R2 (never gain a second casing). DO-NOT-DELETE before sunset; retirement follows auth-v4 runbook. Bucket B HIGH#5 + MED#14 SESSION 18 (customer-provisioning-orchestration-r1 adversarial verify workflow wepdcb8we): app_settings EMPTIED — the KV secret is a rollback slot ONLY, no live BFF app-setting may reference it. Prior list [Dataverse__ClientSecret, AzureAd__ClientSecret, AgentToken__ClientSecret] was the source of the E-3-removed settings resurrection in the generated Configure-AppServiceSettings script. Enforced by Test-CatalogInvariants.ps1 (§rule: any secret whose exception_note contains 'E-3 CLOSED' or '§10 rollback' MUST have app_settings: []).
 - **Consumers**:
   - BFF: AgentToken:ClientSecret
   - BFF: AzureAd:ClientSecret
   - BFF: Dataverse:ClientSecret
   - L2 control-plane: dataverseClientSecretName (controlplane-app-service.bicep)
-- **App-setting keys**:
-  - `AgentToken__ClientSecret`
-  - `AzureAd__ClientSecret`
-  - `Dataverse__ClientSecret`
 
 ### `Dataverse-ServiceUrl`
 

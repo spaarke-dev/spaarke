@@ -136,13 +136,29 @@ param(
     # minted a client secret unconditionally. After task 033 removed the BFF-identity secret, that would
     # have re-minted a per-customer secret on every customer-provisioning onboarding — which ADR-028
     # exception E-3 explicitly does not license ("E-3 is transitional and does not license expansion").
-    # Task 030 saw this and deliberately left it: the secret was still the live rollback mechanism then,
-    # and FR-C3 assigns this file to task 033.
     #
-    # NOT defaulted to on. Flipping the default would silently change behaviour for every existing
-    # caller of a script that provisions identities — including customer-provisioning-orchestration-r1,
-    # whose Wave G-3 consumes it. Opt-in keeps the change visible at the call site.
-    [switch]$SkipClientSecret
+    # Bucket B HIGH#4 update (customer-provisioning-orchestration-r1 SESSION 18, adversarial e2e verify
+    # workflow wepdcb8we): the SESSION 18 constraint (.claude/constraints/provisioning.md § KV credential
+    # lifecycle rule 1) closed the "silent absence = mint" branch — see the AllowClientSecretMint param
+    # below. -SkipClientSecret is now REDUNDANT with the default (both go to the safe branch), but
+    # remains for backward-compat scripting and for making operator intent explicit. Passing -SkipClientSecret
+    # AND -AllowClientSecretMint together is contradictory and throws.
+    [switch]$SkipClientSecret,
+
+    # ── Bucket B HIGH#4 opt-in (customer-provisioning-orchestration-r1 SESSION 18) ──
+    # Explicit opt-in to mint a NEW BFF-API-ClientSecret + write it to Key Vault. Required to reach the
+    # mint branch — silent absence now defaults to skip (the SESSION 18 flip). Because auth-v4 task 033
+    # (2026-08-24) DELETED both KV copies of BFF-API-ClientSecret and pinned Graph:Credentials:Order to
+    # [ManagedIdentityFederated] with RequireSecretFreeIdentity=true, the ONLY legitimate reason to mint
+    # is the prong-3-unmigrated exception (constraint doc rule 3): an environment still carrying
+    # ClientSecret in its live credential order that has not yet cut over to FIC. That case requires a
+    # documented -MintReason.
+    [switch]$AllowClientSecretMint,
+
+    # Free-form audit string. REQUIRED when -AllowClientSecretMint is passed. Recorded in the KV secret's
+    # ContentType tag for post-hoc audit (which operator on which date opted into the prong-3 mint
+    # exception, referencing which decision doc).
+    [string]$MintReason = ""
 )
 
 $ErrorActionPreference = "Stop"
@@ -162,6 +178,29 @@ if (($ficArgsSupplied -gt 0 -or $ForceFederatedCredentialUpdate -or $AllowUnveri
 if ($FicOnly) {
     $SkipBffApi = $true
     $CreateFederatedCredential = $true
+}
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Bucket B HIGH#4 (customer-provisioning-orchestration-r1 SESSION 18) —
+# BFF-API-ClientSecret mint gate. Silent absence of BOTH flags = skip
+# (the SESSION 18 default flip). Explicit -AllowClientSecretMint requires
+# -MintReason. -SkipClientSecret + -AllowClientSecretMint is contradictory.
+# See .claude/constraints/provisioning.md § KV credential lifecycle rule 1.
+# ─────────────────────────────────────────────────────────────────────────────
+if ($AllowClientSecretMint -and $SkipClientSecret) {
+    throw "Contradictory: -SkipClientSecret and -AllowClientSecretMint cannot both be passed. Pick one. Silent absence of both = skip (safe default per Bucket B HIGH#4 SESSION 18)."
+}
+if ($AllowClientSecretMint -and [string]::IsNullOrWhiteSpace($MintReason)) {
+    throw "-AllowClientSecretMint requires -MintReason '<audit string>'. Reason is recorded in KV secret tags for post-hoc audit. Example: -MintReason 'prong-3-unmigrated customer per ADR-028 A4 exception; documented at projects/xxx/notes/rollback-2026-09-15.md'."
+}
+if (-not $AllowClientSecretMint) {
+    # Bucket B HIGH#4 SESSION 18: silent absence of -AllowClientSecretMint FORCES skip-mint.
+    # This closes the pre-2026-08-27 default-mint window that reintroduced BFF-API-ClientSecret on
+    # every customer onboarding after auth-v4 task 033 (2026-08-24) deleted both KV copies.
+    if (-not $SkipClientSecret) {
+        Write-Host "[Bucket B HIGH#4 SESSION 18] -AllowClientSecretMint not passed — forcing -SkipClientSecret (safe default per .claude/constraints/provisioning.md § KV credential lifecycle rule 1). To mint, pass -AllowClientSecretMint -MintReason '<audit string>'." -ForegroundColor Yellow
+    }
+    $SkipClientSecret = $true
 }
 
 # ─────────────────────────────────────────────────────────────────────────────

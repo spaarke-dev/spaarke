@@ -478,6 +478,51 @@ function Test-BindingNeverDeleteInvariant {
     }
 }
 
+function Test-E3ClosedNoAppSettingsInvariant {
+    <#
+        Bucket B HIGH#5 + MED#14 invariant (customer-provisioning-orchestration-r1
+        SESSION 18, adversarial verify workflow wepdcb8we +
+        .claude/constraints/provisioning.md § KV credential lifecycle rule 1):
+
+        Any secret whose exception_note contains 'E-3 CLOSED' MUST have empty
+        app_settings. Rationale: these entries are ROLLBACK SLOTS ONLY. The KV
+        secret is retained during the auth-v4 soak window (through 2026-11-23)
+        but NO live BFF app-setting may reference it — the setting was removed
+        by E-3 closure on 2026-08-24. A future edit that puts an app_settings
+        entry back on such a secret would regenerate the Configure-AppServiceSettings
+        script pointing App Service KV-refs at a soft-deleted secret → silent 404
+        → App Service hydrates the literal @KV(...) string → confidential-client
+        init throws AADSTS7000215 per §9.1 opaque failure.
+
+        Enforcement: this function throws BEFORE any artifact is written, so a
+        regression is caught at generator time (author writes the manifest edit,
+        runs the generator, generator refuses; author must fix manifest).
+        Same shape as Test-BindingNeverDeleteInvariant + Test-DevExceptionInvariant.
+    #>
+    param([hashtable]$Data)
+
+    $violations = @()
+    foreach ($s in $Data.secrets) {
+        $canonical = [string]$s.canonical_name
+        $exceptionNote = if ($s.ContainsKey('exception_note')) { [string]$s.exception_note } else { '' }
+        $appSettings = @()
+        if ($s.ContainsKey('app_settings') -and $null -ne $s.app_settings) {
+            $appSettings = @($s.app_settings)
+        }
+
+        $isE3Closed = $exceptionNote -match 'E-3 CLOSED' -or $exceptionNote -match 'DELETED from KV 2026-08-24'
+        if ($isE3Closed -and $appSettings.Count -gt 0) {
+            $violations += "'$canonical' has exception_note marking it E-3 CLOSED (auth-v4 task 033 removed the app setting 2026-08-24) BUT app_settings=[$(($appSettings) -join ', ')] is non-empty. Re-populating app_settings on an E-3-closed secret would regenerate Configure-AppServiceSettings to hydrate App Service KV-refs pointing at a soft-deleted secret — silent 404 at boot, AADSTS7000215 at first token request. Set app_settings: [] (rollback-slot-only) and document in exception_note."
+        }
+    }
+
+    if ($violations.Count -gt 0) {
+        $header = "E-3-closed app_settings invariant violated. Generator refuses to write outputs. Bucket B HIGH#5/MED#14 SESSION 18."
+        $body   = ($violations -join "`n  - ")
+        throw "$header`n  - $body`n`nSee: .claude/constraints/provisioning.md § KV credential lifecycle rule 1 · customer-provisioning-orchestration-r1 adversarial verify workflow wepdcb8we"
+    }
+}
+
 function Test-DevExceptionInvariant {
     <#
         The `spaarke-spekvcert` DO-NOT-RENAME exception per §7.9 R3 lives in
@@ -604,6 +649,35 @@ function Set-VaultSecret {
         [string]`$Description,
         [string]`$Category
     )
+    # ---------------------------------------------------------------------
+    # Bucket B HIGH#11 guard (customer-provisioning-orchestration-r1 SESSION 18,
+    # adversarial e2e verify workflow wepdcb8we) + .claude/constraints/provisioning.md
+    # § KV credential lifecycle rule 1:
+    #
+    # BindingNeverDelete secrets (BFF-API-ClientSecret, Dataverse-ClientSecret) are
+    # retained as ROLLBACK SLOTS ONLY on their canonical platform vault. This seeder
+    # MUST NEVER CREATE them anywhere. Prior to this guard, if the target vault did
+    # NOT already contain the secret, the `-SkipExisting` early-out at line 66 fell
+    # through and the placeholder Set-VaultSecret call at line 703 (from the
+    # from-existing-kv emission branch) would seed placeholder-value-source-is-existing-kv
+    # into a secret-free customer vault — a silent contract violation.
+    #
+    # The guard is written as fail-loud REFUSAL (not silent skip) so an operator
+    # running the seeder against the wrong vault gets a diagnostic pointing them
+    # at the rollback runbook, not a phantom success. Enforcement is defense-in-depth
+    # — the emission branches also skip these secrets in most modes — but a single
+    # code path centralizes the invariant.
+    # ---------------------------------------------------------------------
+    if (`$script:BindingNeverDelete -contains `$Name) {
+        `$existing = az keyvault secret show --vault-name `$VaultName --name `$Name --query 'name' --output tsv 2>`$null
+        if (-not `$existing) {
+            Write-Host "  REFUSED: `$Name (BINDING never-delete; not present in target vault '`$VaultName' — this seeder MUST NOT create it. Auth-v4 task 033 (2026-08-24) deleted both KV copies of BFF-API-ClientSecret; Dataverse-ClientSecret is retained ONLY on its canonical platform vault as rollback per auth-v4 §10. If a rollback genuinely requires re-seeding, use the auth-v4 rollback runbook — NOT this generator-emitted seeder.)" -ForegroundColor Yellow
+            return
+        }
+        Write-Host "  SKIP: `$Name (BINDING never-delete; already present in vault, live value preserved)" -ForegroundColor Gray
+        return
+    }
+
     if (`$SkipExisting) {
         `$existing = az keyvault secret show --vault-name `$VaultName --name `$Name --query 'name' --output tsv 2>`$null
         if (`$existing) {
@@ -1273,12 +1347,14 @@ try {
     $data = Read-Manifest -Path $Manifest
     Test-ManifestShape -Data $data
     Test-BindingNeverDeleteInvariant -Data $data
+    Test-E3ClosedNoAppSettingsInvariant -Data $data
     Test-DevExceptionInvariant -Data $data
     Test-PerEnvSettingsShape -Data $data
 
     $perEnvCount = if ($data.ContainsKey('per_env_settings') -and $null -ne $data.per_env_settings) { $data.per_env_settings.Count } else { 0 }
     Write-Info "  Manifest shape:    OK ($($data.secrets.Count) secrets, $perEnvCount per_env_settings)"
     Write-Info "  BINDING never-delete guard: OK ($($script:BindingNeverDelete -join ', '))"
+    Write-Info "  E-3-closed no-app-settings guard: OK"
     Write-Info "  Dev exception guard:        OK (spaarke-spekvcert)"
     Write-Info ''
 

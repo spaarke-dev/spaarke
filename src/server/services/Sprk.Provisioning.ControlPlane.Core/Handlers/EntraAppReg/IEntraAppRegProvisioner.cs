@@ -104,12 +104,30 @@ public sealed record PendingKvSecretWrite(string VaultName, string SecretName, s
 /// auth-v4 §3.1 (Spaarke-hosted: Spaarke's own tenant; customer-owned: this
 /// request's <see cref="TenantId"/>).
 /// </param>
+/// <param name="RequireSecretFreeIdentity">
+/// Bucket B HIGH#3 (customer-provisioning-orchestration-r1 SESSION 18, adversarial
+/// e2e verify workflow wepdcb8we) + <c>.claude/constraints/provisioning.md</c>
+/// § KV credential lifecycle rule 1: when <c>true</c> (DEFAULT — secure by default),
+/// <see cref="GraphAppRegistrationProvisioner.ProvisionAsync"/> MUST NOT mint a new
+/// <c>BFF-API-ClientSecret</c> nor stage a <see cref="PendingKvSecretWrite"/> for it —
+/// per ADR-028 A4 secret-free identity contract + auth-v4 task 033 (2026-08-24)
+/// deletion of both KV copies. Both current Model 2 profiles
+/// (<c>spaarke-hosted-model2</c> + <c>customer-owned-model2</c>) are secret-free
+/// per constraint rule 3, so <see cref="H3EntraAppRegHandler.HandleModel2Async"/>
+/// passes <c>true</c> unconditionally. The parameter is threaded through the
+/// request DTO (not read from an ambient option) so the intent is visible at
+/// every call site + any future non-secret-free profile can opt IN explicitly
+/// by passing <c>false</c>. A silent default of <c>false</c> is FORBIDDEN — this
+/// is the load-bearing safety default; changing it re-opens the exact silent-
+/// mint path the verify workflow surfaced.
+/// </param>
 public sealed record EntraAppRegRequest(
     string CustomerId,
     string TenantId,
     string VaultName,
     string UamiPrincipalId,
-    string Profile);
+    string Profile,
+    bool RequireSecretFreeIdentity = true);
 
 /// <summary>Inputs to a Model 1 shared-app-reg verification invocation.</summary>
 /// <param name="SharedAppId">The shared multitenant BFF app-reg's Entra <c>appId</c> (from <see cref="EntraAppRegOptions.SharedBffAppRegistrationId"/>).</param>

@@ -688,9 +688,16 @@ Per D17. Rollback = quarantine + operator decision (repair or teardown). This ma
     -Region "westus2"
 
 # Phase 3 — identity + secrets
+# BINDING: -SkipClientSecret is the DEFAULT since Bucket B HIGH#4 SESSION 18 (customer-provisioning-
+# orchestration-r1 adversarial verify workflow wepdcb8we). The script REFUSES to mint a new
+# BFF-API-ClientSecret without an explicit `-AllowClientSecretMint -MintReason '<audit string>'` pair.
+# Passing -SkipClientSecret here is redundant with the default but preserved for explicit operator
+# intent per the auth-v4 task 033 (2026-08-24) closure of the BFF-API-ClientSecret lifecycle. See
+# .claude/constraints/provisioning.md § KV credential lifecycle rule 1.
 .\scripts\Register-EntraAppRegistrations.ps1 `
     -CustomerId "acme" `
-    -TenantId "<customer-tenant-guid>"     # MANDATORY per I1 (code fix 1834b77bc)
+    -TenantId "<customer-tenant-guid>" `   # MANDATORY per I1 (code fix 1834b77bc)
+    -SkipClientSecret                      # BINDING per Bucket B HIGH#4 (session 18); silent-absence default now = skip anyway
 
 # H4 KV secret population is performed inside Provision-Customer.ps1 in the interim path
 # When Phase H canonical catalog manifest lands, seeder invocation is `scripts/canonical-secret-catalog/Seed-Secrets.ps1`

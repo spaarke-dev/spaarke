@@ -175,8 +175,30 @@ public sealed class GraphAppRegistrationProvisioner : IEntraAppRegProvisioner
             // (3) Ensure service principal.
             await EnsureServicePrincipalAsync(graph, app.AppId!, cancellationToken).ConfigureAwait(false);
 
-            // (4) Ensure client secret (skip-if-valid).
-            var secretText = await EnsureClientSecretAsync(graph, app, cancellationToken).ConfigureAwait(false);
+            // (4) Ensure client secret (skip-if-valid) — GATED on
+            //     RequireSecretFreeIdentity. Bucket B HIGH#3 SESSION 18: when
+            //     true (secure default per EntraAppRegRequest doc), NEVER call
+            //     Graph AddPassword — the mint itself is forbidden, not just
+            //     the KV write. This closes the E-3 / auth-v4 task 033 (2026-
+            //     08-24) contract at the earliest possible layer: no cleartext
+            //     ever exists in-process for a secret-free profile. A prior
+            //     draft placed the guard only at the pendingWrites.Add site,
+            //     which still executed the network call + held cleartext long
+            //     enough for an accidental log line to leak it — the constraint
+            //     rules out that entire window, not just the KV write itself.
+            string secretText = string.Empty;
+            if (!request.RequireSecretFreeIdentity)
+            {
+                secretText = await EnsureClientSecretAsync(graph, app, cancellationToken).ConfigureAwait(false);
+            }
+            else
+            {
+                _logger.LogInformation(
+                    "H3 skipped BFF-API-ClientSecret mint (RequireSecretFreeIdentity=true, ADR-028 A4 / " +
+                    ".claude/constraints/provisioning.md KV credential lifecycle rule 1). " +
+                    "customerId={CustomerId} profile={Profile}",
+                    request.CustomerId, request.Profile);
+            }
 
             // (5) FIC — Model 2 ONLY, auth-v4 §3.1 recipe.
             var ficFailure = await EnsureFederatedIdentityCredentialAsync(
@@ -186,17 +208,22 @@ public sealed class GraphAppRegistrationProvisioner : IEntraAppRegProvisioner
                 return ficFailure;
             }
 
-            // (6) STAGE (do NOT write yet) the 3 KV secrets for the customer's
+            // (6) STAGE (do NOT write yet) the KV secrets for the customer's
             //     own target vault — DS-4 §3 BINDING ordering: KV writes only
             //     commit AFTER admin-consent verification succeeds (see
             //     IEntraAppRegProvisioner.CommitPendingSecretsAsync doc +
             //     file-header). Cleartext (ClientSecret) stays in-process only.
+            //     Bucket B HIGH#3 SESSION 18: the ClientSecret write is
+            //     unreachable when RequireSecretFreeIdentity=true (secretText
+            //     stays empty above), but the guard here is also explicit for
+            //     defense-in-depth — should a future edit accidentally reroute
+            //     secretText, this second layer refuses the KV write.
             var pendingWrites = new List<PendingKvSecretWrite>
             {
                 new(request.VaultName, ClientIdSecretName, app.AppId!),
                 new(request.VaultName, AudienceSecretName, $"api://{app.AppId}"),
             };
-            if (!string.IsNullOrEmpty(secretText))
+            if (!request.RequireSecretFreeIdentity && !string.IsNullOrEmpty(secretText))
             {
                 pendingWrites.Add(new PendingKvSecretWrite(request.VaultName, ClientSecretName, secretText));
             }

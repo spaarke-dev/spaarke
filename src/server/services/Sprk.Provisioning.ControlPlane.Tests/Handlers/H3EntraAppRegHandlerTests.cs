@@ -130,6 +130,21 @@ public sealed class H3EntraAppRegHandlerTests
         // Request threaded to the provisioner carried the UAMI principalId (FIC subject) + profile.
         provisioner.LastProvisionRequest!.UamiPrincipalId.Should().Be(UamiObjectId);
         provisioner.LastProvisionRequest.Profile.Should().Be("spaarke-hosted-model2");
+
+        // Bucket B HIGH#3 SESSION 18 (customer-provisioning-orchestration-r1 adversarial
+        // e2e verify workflow wepdcb8we) + .claude/constraints/provisioning.md § KV
+        // credential lifecycle rule 1: H3 MUST request the secret-free identity path
+        // on every Model 2 dispatch — BFF-API-ClientSecret was DELETED from KV by
+        // auth-v4 task 033 (2026-08-24) and re-introduction is a HARD-fail contract
+        // violation. This assertion locks the H3 handler's explicit-true call site
+        // so a future refactor that drops the parameter or flips the DTO default
+        // to false will fail the build here rather than silently re-open the
+        // silent-mint path the verify workflow surfaced.
+        provisioner.LastProvisionRequest.RequireSecretFreeIdentity.Should().BeTrue(
+            "H3 handler MUST always request secret-free identity for Model 2 dispatches — " +
+            "both spaarke-hosted-model2 and customer-owned-model2 profiles are secret-free " +
+            "per ADR-028 A4. Any dispatch with RequireSecretFreeIdentity=false would let " +
+            "GraphAppRegistrationProvisioner mint a BFF-API-ClientSecret contra auth-v4 §10.");
     }
 
     // ---------- AC-M1-1 Model 1 happy path ----------

@@ -111,12 +111,17 @@ secrets:
       is retained solely as auth-v4's rollback copy through the soak window.
       Grandfathered PascalCase per §7.9 R2 (never gain a second casing).
       DO-NOT-DELETE before sunset; retirement follows auth-v4 runbook.
+      Bucket B HIGH#5 + MED#14 SESSION 18 (customer-provisioning-orchestration-r1
+      adversarial verify workflow wepdcb8we): app_settings EMPTIED — the KV
+      secret is a rollback slot ONLY, no live BFF app-setting may reference it.
+      Prior list [Dataverse__ClientSecret, AzureAd__ClientSecret, AgentToken__ClientSecret]
+      was the source of the E-3-removed settings resurrection in the generated
+      Configure-AppServiceSettings script. Enforced by Test-CatalogInvariants.ps1
+      (§rule: any secret whose exception_note contains 'E-3 CLOSED' or
+      '§10 rollback' MUST have app_settings: []).
     aliases: []
     value_source: "from-existing-kv"
-    app_settings:
-      - "Dataverse__ClientSecret"
-      - "AzureAd__ClientSecret"
-      - "AgentToken__ClientSecret"
+    app_settings: []
     tags: ["auth", "dataverse", "binding-never-delete"]
 
   - canonical_name: "BFF-API-ClientSecret"
@@ -140,11 +145,19 @@ secrets:
       copies (BFF-API-ClientSecret + bff-api-client-secret) recoverable to
       2026-11-22 — DO-NOT-PURGE before then. Grandfathered PascalCase per
       §7.9 R2 (never gain a second casing).
+      Bucket B HIGH#5 SESSION 18 (customer-provisioning-orchestration-r1
+      adversarial verify workflow wepdcb8we): app_settings EMPTIED — this KV
+      secret is a HARD BLOCK entry only; no live BFF app-setting may reference
+      it. Prior list [AzureAd__ClientSecret, Graph__ClientSecret] caused the
+      generated Configure-AppServiceSettings script to re-introduce E-3-removed
+      settings pointing at a soft-deleted KV secret (silent 404 → App Service
+      hydrates literal @KV(...) string → confidential-client init throws
+      AADSTS7000215 per §9.1). Enforced by Test-CatalogInvariants.ps1
+      (§rule: any secret whose exception_note contains 'E-3 CLOSED' MUST have
+      app_settings: []).
     aliases: []
     value_source: "from-existing-kv"
-    app_settings:
-      - "AzureAd__ClientSecret"
-      - "Graph__ClientSecret"
+    app_settings: []
     tags: ["auth", "bff", "binding-never-delete"]
 
   # ==========================================================================
