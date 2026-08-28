@@ -108,11 +108,11 @@
 | 080 | codify-build-vs-maintain-criteria | FULL | ✅ | **false** (`.claude/` write) | (Phase 2 complete) | 082 |
 | 086 | fix-ci-router-startup-failure | FULL | ✅ | **false** (hot-path `.github/workflows/`) | none | 071 (workflow infrastructure unblocked; SC-12 still gated on 087+088 underlying-test fixes) |
 | 087 | fix-adr-009-imemorycache-endpoints | FULL | ✅ | **false** (hot-path BFF production) | none | 071 (ADR-009 arch test passes locally) |
-| 088 | fix-adr-007-graph-isolation-endpoints | FULL | 🔲 | **false** (hot-path BFF production) | none (can start anytime) | **071** |
+| 088 | fix-adr-007-graph-isolation-endpoints | FULL | ⛔ | **false** (hot-path BFF production) | none (can start anytime) | **071** |
 | 081 | build-test-diet-skill | FULL | ✅ | **false** (`.claude/` write — runs in parallel with 080 via main-session sequencing) | (Phase 2 complete) | 090 |
 | 082 | rerun-inventory-broader-criteria | STANDARD | ✅ | true | 080 | 083 |
 | 083 | deep-cleanup-pr-1 (B4 ctor null-guards — bucket revised) | FULL | ✅ | **false** (strict serial) | 082 | 084 |
-| 084 | deep-cleanup-pr-2 (medium-confidence DELETE bucket) | FULL | 🔲 | **false** (strict serial) | 083 | 085 |
+| 084 | deep-cleanup-pr-2 (medium-confidence DELETE bucket) | FULL | ⛔ | **false** (strict serial) | 083 | 085 |
 | 085 | deep-cleanup-pr-3 (final sweep + dotnet build/test verification) | FULL | 🔲 | **false** (strict serial; unblocks Phase 3) | 084 | 070 → 071 |
 
 > **Parallel Groups added for Phase 2.5**:
