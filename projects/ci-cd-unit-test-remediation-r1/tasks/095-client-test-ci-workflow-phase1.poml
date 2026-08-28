@@ -1,7 +1,7 @@
 <task id="CICD-095" project="ci-cd-unit-test-remediation-r1">
   <metadata>
     <title>Client tests: add a jest workflow so the 707 client test files actually RUN (#851) - Phase 1 plumbing only</title>
-    <status>not-started</status>
+    <status>completed</status>
     <estimated-effort>3-5 hours</estimated-effort>
     <phase>4 - Deliverable defect repair (adopted 2026-08-28)</phase>
     <stream>A - CI tiering remediation</stream>
@@ -37,6 +37,41 @@
     <step order="5">STOP THERE. Fixing the failing tests, and any jest test-architecture work, is explicitly OUT of scope for this task and this project. File what the baseline finds and hand it on with the numbers.</step>
     <step order="6">Promotion into Tier 2 as a real gate happens only AFTER the shadow window closes and AFTER the baseline is green. Do not promote in this task.</step>
   </steps>
+
+  <notes date="2026-08-28">
+    COMPLETE (Phase 1 plumbing). Full write-up: notes/095-client-test-baseline.md.
+
+    Gap verified independently and slightly worse than #851 stated: 730 tracked client test files
+    (not 707) across 40 packages (not 39), and ZERO workflows run jest — confirmed by
+    `grep -rln "jest" .github/workflows/`. Also: there is NO npm workspace root, so all 40
+    packages install independently. That fact drove the trigger decision.
+
+    SHIPPED: .github/workflows/client-tests.yml — discover (dynamic matrix by SCANNING for a real
+    jest test script, so it cannot drift as packages are added; rejects the npm-init stub; fails
+    loudly on zero discovered rather than reporting a vacuous green) -> test (per-package,
+    continue-on-error, fail-fast false, max-parallel 8, install-failure recorded DISTINCTLY from
+    test-failure so a stale lockfile is not misreported as failing tests) -> summarize (per-package
+    table into the job summary + 90-day artifact, with an explicit incomplete-baseline warning if
+    fewer legs report than were discovered).
+
+    DELIBERATE: does NOT run on pull_request. 40 packages with no workspace root = 40 npm installs;
+    hanging that off every PR would contend for runners with the very PRs the shadow window is
+    accumulating, against north star #2 ("CI must not hold up high-frequency pushes"). Phase 1 is
+    to SEE the surface, not gate it, and a nightly baseline sees it equally well. Triggers are
+    schedule (07:00 UTC, one hour after nightly-health at 06:00 so they do not collide) +
+    workflow_dispatch. Adding pull_request is Phase 2 promotion, not an oversight.
+
+    FREEZE-SAFE: new file only; no existing workflow touched, so the tier-file freeze is not
+    engaged. In no blocking filter; every step continue-on-error.
+
+    BASELINE: workflow_dispatch requires the workflow on the DEFAULT branch, so the full
+    40-package table is generated after this PR merges and then recorded in the notes. Local
+    spot-check validating the exact CI command shape found Spaarke.SdapClient FAILING at import
+    time (1 suite failed, 0 tests ran) — exactly the class of finding this exists to surface.
+
+    SCOPE HELD: no jest test file was modified. Fixing the failures is explicitly NOT this task
+    and NOT this project — spec keeps "React/PCF Jest test architecture" out of scope.
+  </notes>
 
   <acceptance-criteria>
     <criterion testable="true">client-tests.yml exists and runs jest across all 39 packages</criterion>
