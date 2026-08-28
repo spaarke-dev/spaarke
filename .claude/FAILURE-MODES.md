@@ -27,6 +27,7 @@ The distinction matters because the fix is different. Anti-patterns require *unl
 - [AP-5: AbortController in a useEffect whose deps include your own state transition](#ap-5-abortcontroller-in-a-useeffect-whose-deps-include-your-own-state-transition)
 - [AP-6: Interpolating a raw GUID into `@odata.bind` — braces cause "Error in query syntax" (use `cleanGuid`)](#ap-6-interpolating-a-raw-guid-into-odatabind--braces-cause-error-in-query-syntax)
 - [AP-7: Converting a silent fallback into fail-fast, verified with targeted tests only](#ap-7-converting-a-silent-fallback-into-fail-fast-verified-with-targeted-tests-only)
+- [AP-8: A green suite treated as the END of verification rather than the start of it](#ap-8-a-green-suite-treated-as-the-end-of-verification-rather-than-the-start-of-it)
 
 ### Gotchas
 - [G-1: Settings-file schema malformation silently disables permission rules + hooks](#g-1-settings-file-schema-malformation-silently-disables-permission-rules--hooks)
@@ -40,6 +41,7 @@ The distinction matters because the fix is different. Anti-patterns require *unl
 - [G-9: BFF AI Search has TWO index-name settings — `AiSearch:KnowledgeIndexName` (read) and `Analysis:SharedIndexName` (write)](#g-9-bff-ai-search-has-two-index-name-settings)
 - [G-10: HTML5 DnD `dragEnter` fires on ancestors when preview extends beyond pointer](#g-10-html5-dnd-dragenter-fires-on-ancestors-when-preview-extends-beyond-pointer)
 - [G-11: `Xrm.Navigation.navigateTo({ target: 2 })` opens a separate window — cross-window signaling requires sessionStorage, not `window.*`](#g-11-xrmnavigationnavigateto-target-2-opens-a-separate-window--cross-window-signaling-requires-sessionstorage-not-window)
+- [G-12: `dotnet test --no-build` runs a stale assembly while the build *truthfully* reports "up-to-date"](#g-12-dotnet-test---no-build-runs-a-stale-assembly-while-the-build-truthfully-reports-up-to-date)
 
 ---
 
@@ -638,6 +640,85 @@ sibling `DataverseAccessDataSource` already had — so doubles need no credentia
 and cannot break again when tasks 020/022/033 rewrite either branch.
 
 **Evidence**: `projects/spaarke-auth-v4-dataverse-MI/notes/decisions/011-adr009-token-cache-decision.md` §8.
+
+---
+
+### AP-8: A green suite treated as the END of verification rather than the start of it
+
+**Title**: Every verification standard in routine use is a *consistency* check. None of them can detect a test that encodes the **wrong rule** — and the errors that shape is capable of hiding are invisible for exactly as long as the code is loudly broken.
+
+**Date**: 2026-08-26 (`unified-access-control-r2`, Phase 0c parallel batch: tasks 072/073/075/079)
+
+**Classification**: Anti-pattern (verification method insufficient for the claim being made of it)
+
+**What happened**: Across one batch of four authorization tasks, six distinct defects were found in artifacts that **all** of the following reported as healthy: full suite green, ArchTest failure-count at the known baseline, publish size unchanged, CVE clean, and — critically — *perturbation-verified*.
+
+| # | Defect | What reported healthy |
+|---|---|---|
+| 1 | A route re-introduction guard compared `RoutePattern.RawText` against literals pinning `{containerId}`. A re-add spelled `{id}` matches nothing → **guard passes while the vulnerable route is live**. `{id}` was verifiably the likeliest spelling (the surviving sibling and two architecture docs all use it). | tests green |
+| 2 | Route-absence tests immune to parameter-name drift but **false-passing on URL-shape drift** — so the source-scanning rule was load-bearing while the test file's framing implied the behavioural tests were. | tests green |
+| 3 | A test **asserted a guaranteed 25-record outage as intended behaviour**. The guard threw for every container, including the correct owner's; the test constructed exactly that shape and asserted the refusal. | tests green |
+| 4 | Two regression tests **passed vacuously since the day they were written** — the double routed rows by `Flag == true` and *fell back to match-everything* when it found no `Like` condition. Green, fast, correctly named, asserting nothing. | tests green |
+| 5 | An ADR-010 ratchet **consumed to exactly its ceiling** (153/153). Still passing, zero headroom — the next interface added anywhere in the BFF would fail the build blaming an unrelated project. | failure-count parity |
+| 6 | A truncation refusal still vacuous after its own fix: the double ignored `TopCount`, so both tests rested on fixture size. | tests green + a perturbation |
+
+**Root cause**: Two compounding causes.
+
+*The methods are consistency checks.* A green suite proves the code does what its tests say. Failure-count parity proves no new failure. A perturbation proves a branch is **load-bearing**. None of the three can prove the tests say the right thing, and none can see a ratchet consumed but not breached.
+
+*The ordering hides the rest.* In a four-round review of one component, rounds 1–2 found wrong **code** and rounds 3–4 found wrong **verification**. The verification errors were present from round 1 — two of the vacuous tests were written in round 2. They only became *findable* once the code stopped being loudly wrong: while code is obviously broken, a green test reads as "not yet reached" and a design-note sentence reads as "provisional." Both readings are true at the time, and **both stop being true silently**.
+
+**Fix**:
+- Perturb every guard **individually, never in batches** — batching is precisely how #4 hid behind a passing suite.
+- **Read the build result before the test result.** `dotnet test` will reuse a stale assembly and report a false PASS; this happened three times in one batch (an `if (false)` perturbation failing CS0162 under warnings-as-errors, a filter-detach perturbation, and a dangling reference that still reported 32 green).
+- Treat a **test double as primary subject matter**, not scaffolding. A double must *evaluate* the query's real conditions and **throw** on an unmodelled operator — never default permissive. (#4's double failed the same way task 070's production `default:` did.)
+- For a ratchet, assert **headroom**, not parity. "9 failures = baseline" cannot see 153/153.
+- **Re-read any design document written during the defect rounds.** Its claims were formed while the mechanism was still moving — which is how a wrong sentence in an escalation note survived two review passes and would have mis-decided an operator question while every test stayed green.
+- Record what a test **cannot** falsify. A hand-written double pins the query against a model of the platform written by whoever wrote the query; it proves the code matches the double, never that either matches the platform. Six such claims were booked to a live-org task rather than left implicit.
+
+**Prevention**: **"The suite is green" is where to START checking the verification, not where to stop.** When a change is security-relevant, budget a pass whose *subject* is the tests and the documents rather than the code — and expect it to find things, because in this batch it found as many defects as the code-focused passes did. A green suite and an accurate document are **separate claims**; neither implies the other.
+
+**Evidence**: `projects/unified-access-control-r2/notes/wave2-parallel-merge-plan.md` (§3, §3b, §4a, §4b-0, §7b) · `notes/task-072-gate-share-link.md` §5 · `notes/task-075-*` §12 verification debt · commits `bb1e442ea` (072), `dd3e38f6d` (073), `8185c8fcc` (079), `3289844` (075).
+
+---
+
+### G-12: `dotnet test --no-build` runs a stale assembly while the build *truthfully* reports "up-to-date"
+
+**Title**: A test run can report confident, precise results from a binary that does not contain your change — and unlike the usual "you forgot to build" case, the build output is **not lying**. It correctly reports "up-to-date" about a DLL that MSBuild has correctly concluded needs no rebuild, because the *timestamps it compares* are wrong.
+
+**Date**: 2026-08-27 (`unified-access-control-r2`, task 011; fifth instance across two waves)
+
+**Classification**: Gotcha — the standard defence ("read the build result before the test result") **does not catch this one**, which is exactly why it deserves its own entry rather than a line in AP-8.
+
+**What happened**: Task 011 hit a test failure that **contradicted the source on disk** — the assertion that failed could not fail given the code in the file. Chasing it: the agent had restored a file from a backup copy with `Copy-Item`. `Copy-Item` **preserves `LastWriteTime`**, so the restored file's mtime moved *backwards* to the backup's creation time. MSBuild's incremental check compares source mtime against output mtime, decided the existing DLL was newer than its input, and skipped compilation — truthfully reporting "up-to-date". `dotnet test --no-build` then executed the previous assembly. Resolved with `touch` + rebuild (DLL advanced 23:28 → 23:43).
+
+Separately and independently: **`dotnet build Spaarke.sln` did not refresh the BFF test project's output.** The test csproj had to be built explicitly.
+
+**Root cause**: two distinct mechanisms that produce the same symptom.
+1. **Backwards-moving mtime.** Any operation that preserves timestamps (`Copy-Item`, `cp -p`, `git stash` restores, archive extraction, some editor "revert file" paths) can make a source file *older* than the binary built from a previous version of it. Incremental build is a timestamp comparison; it has no content hash to fall back on.
+2. **Solution-level build ≠ every project's output refreshed.** A `.sln` build refreshes what the solution graph says needs refreshing, which is not necessarily the specific test assembly you are about to run.
+
+**Why the existing rule misses it**: the rule from the 075 batch is *"always read the build result before the test result."* That defends against a **failed or skipped** build being masked by a stale-but-green test summary. Here the build **succeeded** and said the honest thing. The falsehood is upstream, in the filesystem metadata — so no amount of reading build output detects it.
+
+**Fix / detection** — check the artifact, not the log:
+
+```bash
+# Is the assembly actually newer than the source you just edited?
+ls -l --time-style=full-iso path/to/Tests.dll path/to/EditedFile.cs
+# DLL older than the .cs  =>  the test run you are about to trust is meaningless.
+
+# Force it, then confirm the timestamp advanced:
+touch path/to/EditedFile.cs
+dotnet build path/to/The.Tests.csproj        # the TEST csproj, explicitly — not just the .sln
+```
+
+Prefer dropping `--no-build` entirely when a result is load-bearing. When restoring files, avoid timestamp-preserving copies — or `touch` every restored file immediately afterwards.
+
+**Prevention**: **A perturbation is only evidence if the perturbation reached the binary.** This is the fifth stale-assembly incident in this project across two waves — 072 (a filter-detach perturbation reported 12/12 green off a stale BFF assembly), 075 (`if (false)` → CS0162), 075 again (a dangling reference made the test build **fail** while `--no-build` still reported 32 green), 018 (re-run), and now 011 (this mechanism). Every one produced a **confident and wrong** verification result.
+
+That matters disproportionately because perturbation testing is the primary anti-vacuity tool (see [AP-8](#ap-8-a-green-suite-treated-as-the-end-of-verification-rather-than-the-start-of-it)): a stale assembly silently converts *"I proved this guard is load-bearing"* into *"this guard is untested"* — while looking identical. Treat "the perturbation bit" as a claim that requires the binary's timestamp as its receipt.
+
+**Evidence**: `projects/unified-access-control-r2/notes/task-011-fetchxml-join-posture.md` · `notes/wave2-parallel-merge-plan.md` §A11 (five-instance inventory) · commit `15924623d` (011).
 
 ---
 

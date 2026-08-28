@@ -16,12 +16,39 @@ public record OpenLinksResponse(
 );
 
 /// <summary>
-/// Response for POST /api/documents/{documentId}/share-link (email-communication-solution-r5 R2 item 12).
-/// The recipient-openable SPE sharing link URL.
+/// Request body for POST /api/documents/{documentId}/share-link (unified-access-control-r2 task 072).
+/// </summary>
+/// <remarks>
+/// <para>
+/// Optional in full — the route previously took no body at all and its live caller posts <c>{}</c>, so an
+/// absent or empty body binds to the SAFE defaults (organization scope). That is deliberate: the
+/// dangerous option must be something a caller ASKS for, never something it gets by omission.
+/// </para>
+/// </remarks>
+public record ShareLinkRequest(
+    /// <summary>
+    /// <c>true</c> → mint an <c>anonymous</c> (anyone-with-the-link) URL that opens for recipients outside
+    /// the tenant. <c>false</c>/omitted (default) → mint an <c>organization</c>-scoped URL that requires a
+    /// tenant sign-in. Anonymous additionally requires <c>Documents:ShareLinks:AnonymousLinksEnabled</c>
+    /// and is capped at the shorter anonymous lifetime.
+    /// </summary>
+    bool? AllowExternalRecipients = null
+);
+
+/// <summary>
+/// Response for POST /api/documents/{documentId}/share-link (email-communication-solution-r5 R2 item 12;
+/// expiry + scope added by unified-access-control-r2 task 072).
 /// </summary>
 public record ShareLinkResponse(
     /// <summary>The sharing link URL (Graph createLink WebUrl) that opens the file.</summary>
-    string Url
+    string Url,
+    /// <summary>
+    /// When the link stops working (UTC, ISO-8601). Never null — task 072 removed the non-expiring path,
+    /// and this is surfaced so a sender can see the lifetime rather than assume it is permanent.
+    /// </summary>
+    DateTimeOffset ExpiresAt,
+    /// <summary>The Graph link scope actually granted — <c>"organization"</c> or <c>"anonymous"</c>.</summary>
+    string Scope
 );
 
 public record UpdateFileRequest(

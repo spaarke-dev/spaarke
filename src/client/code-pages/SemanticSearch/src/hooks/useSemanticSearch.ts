@@ -260,15 +260,45 @@ export function useSemanticSearch(): UseSemanticSearchReturn {
 
       if (requestFragment) {
         // Phase G path — fragment wins.
-        bffScope = requestFragment.scope;
-        bffEntityType = requestFragment.entityType;
-        // The fragment does NOT carry entityId — the dropdown is the user
-        // selecting an index/scope, not narrowing to a specific record.
-        // Leave entityId undefined unless the legacy entityId is also set
-        // and the fragment scope is 'entity' (allows combining "dropdown
-        // picks Matter index" + "URL envelope brought a matter ID").
-        bffEntityId =
+        //
+        // The fragment does NOT carry entityId — the dropdown is the user selecting
+        // an index/scope, not narrowing to a specific record. An entityId is only
+        // available when the page was LAUNCHED from a record (URL envelope), which
+        // lets us combine "dropdown picks the Matter index" + "envelope brought a
+        // matter ID".
+        const fragmentEntityId =
           requestFragment.scope === 'entity' && currentEntityIdRef.current ? currentEntityIdRef.current : undefined;
+
+        if (requestFragment.scope === 'entity' && !fragmentEntityId) {
+          // unified-access-control-r2 task 080 — degrade to cross-record search.
+          //
+          // `scope: 'entity'` means "search WITHIN this one parent record", so it is
+          // only expressible when we actually have that record's id. Sending it
+          // without one used to be a silent no-op and is now a hard 400
+          // (ENTITY_ID_REQUIRED) — the BFF authorization filter requires a real
+          // record to evaluate the caller's access against.
+          //
+          // A dropdown row selected without an envelope means "search every document
+          // whose parent is of this type", which is a CROSS-RECORD search, not a
+          // record-scoped one. `scope: 'all'` is the shape for that, and as of task
+          // 080 the BFF authorizes those results row by row against each document's
+          // parent — so this is a filtered search, not the tenant-wide read that task
+          // 070 closed.
+          //
+          // The entity-TYPE narrowing is dropped rather than moved to
+          // `filters.entityTypes`, because that field's server-side allow-list
+          // (ValidEntityTypes: matter/project/invoice/account/contact) does not
+          // contain the types that reach this branch — 'document', 'event' and
+          // 'workassignment' would each be rejected with 400 INVALID_ENTITY_TYPES.
+          // Reconciling those three vocabularies is task 080 follow-up F-2.
+          bffScope = 'all';
+          bffEntityType = undefined;
+        } else {
+          bffScope = requestFragment.scope;
+          bffEntityType = requestFragment.entityType;
+        }
+
+        bffEntityId = fragmentEntityId;
         effectiveSearchIndexName = requestFragment.searchIndexName ?? null;
       } else {
         // Legacy path — multi-container-multi-index-r1 UAT 2026-06-09 fix.
@@ -373,10 +403,21 @@ export function useSemanticSearch(): UseSemanticSearchReturn {
 
     const lmFragment = currentRequestFragmentRef.current;
     if (lmFragment) {
-      lmBffScope = lmFragment.scope;
-      lmBffEntityType = lmFragment.entityType;
-      lmBffEntityId =
+      const lmFragmentEntityId =
         lmFragment.scope === 'entity' && currentEntityIdRef.current ? currentEntityIdRef.current : undefined;
+
+      // Same degradation as search() — see the long note there. Kept in both places
+      // deliberately: if the two branches disagree about what shape to send, the first
+      // page and the next page would be authorized against different scopes.
+      if (lmFragment.scope === 'entity' && !lmFragmentEntityId) {
+        lmBffScope = 'all';
+        lmBffEntityType = undefined;
+      } else {
+        lmBffScope = lmFragment.scope;
+        lmBffEntityType = lmFragment.entityType;
+      }
+
+      lmBffEntityId = lmFragmentEntityId;
       lmEffectiveSearchIndexName = lmFragment.searchIndexName ?? null;
     } else {
       const ENTITY_SCOPES = ['matter', 'project', 'invoice', 'account', 'contact', 'document'];

@@ -30,6 +30,13 @@ public class AuthorizationServiceCharacterizationTests
     {
         public List<(string UserId, string ResourceId, string? UserAccessToken)> Calls { get; } = new();
 
+        /// <summary>Calls received by <see cref="GetRecordAccessAsync"/> — kept separate from
+        /// <see cref="Calls"/> because this method carries an extra dimension (<c>entitySetName</c>) the
+        /// document-scoped method doesn't have. No test currently exercises this path; it exists so a
+        /// future entity-scoped characterization test can observe it rather than have the recorder
+        /// silently drop the call.</summary>
+        public List<(string UserId, string EntitySetName, Guid RecordId, string? UserAccessToken)> RecordCalls { get; } = new();
+
         public AccessRights RightsToReturn { get; set; } = AccessRights.Read;
 
         public Task<AccessSnapshot> GetUserAccessAsync(
@@ -44,6 +51,28 @@ public class AuthorizationServiceCharacterizationTests
             {
                 UserId = userId,
                 ResourceId = resourceId,
+                AccessRights = RightsToReturn
+            });
+        }
+
+        /// <summary>
+        /// Mirrors <see cref="GetUserAccessAsync"/> for the entity-agnostic path (unified-access-control-r2
+        /// task 070): records the call into <see cref="RecordCalls"/> and returns
+        /// <see cref="RightsToReturn"/>, same as the document-scoped method.
+        /// </summary>
+        public Task<AccessSnapshot> GetRecordAccessAsync(
+            string userId,
+            string entitySetName,
+            Guid recordId,
+            string? userAccessToken,
+            CancellationToken ct = default)
+        {
+            RecordCalls.Add((userId, entitySetName, recordId, userAccessToken));
+
+            return Task.FromResult(new AccessSnapshot
+            {
+                UserId = userId,
+                ResourceId = recordId.ToString(),
                 AccessRights = RightsToReturn
             });
         }
@@ -76,6 +105,33 @@ public class AuthorizationServiceCharacterizationTests
             {
                 UserId = userId,
                 ResourceId = resourceId,
+                AccessRights = rights
+            });
+        }
+
+        /// <summary>
+        /// Mirrors <see cref="GetUserAccessAsync"/> for the entity-agnostic path (unified-access-control-r2
+        /// task 070): the same per-caller match — grants <c>rightsWhenMatched</c> only when
+        /// <paramref name="userAccessToken"/> equals <c>tokenWithAccess</c> — recorded into the same
+        /// <see cref="TokensReceived"/> list the document-scoped method uses.
+        /// </summary>
+        public Task<AccessSnapshot> GetRecordAccessAsync(
+            string userId,
+            string entitySetName,
+            Guid recordId,
+            string? userAccessToken,
+            CancellationToken ct = default)
+        {
+            TokensReceived.Add(userAccessToken);
+
+            var rights = string.Equals(userAccessToken, tokenWithAccess, StringComparison.Ordinal)
+                ? rightsWhenMatched
+                : AccessRights.None;
+
+            return Task.FromResult(new AccessSnapshot
+            {
+                UserId = userId,
+                ResourceId = recordId.ToString(),
                 AccessRights = rights
             });
         }

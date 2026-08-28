@@ -8,9 +8,12 @@
  *       the exact bytes from the OBO content endpoint and shows the honest
  *       "Viewing a prior version (read-only)" banner; NO restore/branch
  *       affordance exists anywhere in the modal.
- *   (3) negative (ADR-028): the affordance ONLY ever calls the OBO endpoint
- *       pair (`/api/obo/drives/...`) — never the admin/app-only container
- *       surface.
+ *   (3) negative (ADR-028 + unified-access-control-r2 task 079): the affordance
+ *       ONLY ever calls the per-document, gated endpoint pair
+ *       (`/api/documents/{documentId}/versions...`) — never the admin/app-only
+ *       container surface, and never the DELETED drive-keyed shape
+ *       (`/api/obo/drives/{driveId}/items/{itemId}/versions`), which read an
+ *       arbitrary SPE item with no per-document authorization.
  *   (4) dark-mode (ADR-021): the affordance renders under BOTH webLightTheme
  *       and webDarkTheme without errors — all styling is Fluent v9 theme
  *       tokens (structural check, matching the repo's established pattern,
@@ -58,7 +61,8 @@ const FIXTURE_VERSIONS = [
   { id: '2.0', eTag: 'e2', lastModifiedDateTime: '2026-07-20T09:00:00Z', size: 524288 },
 ];
 
-const OBO_LIST_PATH = '/api/obo/drives/drive-1/items/item-1/versions';
+const DOCUMENT_ID = '11111111-1111-1111-1111-111111111111';
+const VERSIONS_PATH = `/api/documents/${DOCUMENT_ID}/versions`;
 
 function installFetchMock(): void {
   mockAuthenticatedFetch.mockReset();
@@ -84,8 +88,7 @@ function renderModal(theme = webLightTheme): ReturnType<typeof render> {
         onClose={() => undefined}
         documentName="Master Services Agreement.pdf"
         fileType="pdf"
-        driveId="drive-1"
-        itemId="item-1"
+        documentId={DOCUMENT_ID}
       />
     </FluentProvider>
   );
@@ -121,8 +124,8 @@ test('open-version-list: renders label / timestamp / size from the OBO list endp
   // Timestamp renders (locale-formatted; year is stable across locales)
   expect(screen.getAllByText(/2026/).length).toBeGreaterThan(0);
 
-  // Fetched via @spaarke/auth authenticatedFetch at the task-050 OBO path
-  expect(mockAuthenticatedFetch).toHaveBeenCalledWith(OBO_LIST_PATH);
+  // Fetched via @spaarke/auth authenticatedFetch at the gated per-document path
+  expect(mockAuthenticatedFetch).toHaveBeenCalledWith(VERSIONS_PATH);
 });
 
 // ---------------------------------------------------------------------------
@@ -141,9 +144,9 @@ test('open-prior-version-read-only: v3 opens read-only (exact bytes) with the ho
   // Open v3
   fireEvent.click(screen.getByRole('button', { name: /open version 3\.0 read-only/i }));
 
-  // Exact-bytes content fetch at the OBO content path
+  // Exact-bytes content fetch at the gated per-document content path
   await waitFor(() =>
-    expect(mockAuthenticatedFetch).toHaveBeenCalledWith(`${OBO_LIST_PATH}/3.0/content`)
+    expect(mockAuthenticatedFetch).toHaveBeenCalledWith(`${VERSIONS_PATH}/3.0/content`)
   );
 
   // Honest read-only banner
@@ -165,24 +168,32 @@ test('open-prior-version-read-only: v3 opens read-only (exact bytes) with the ho
 });
 
 // ---------------------------------------------------------------------------
-// (3) negative — OBO endpoints ONLY (ADR-028)
+// (3) negative — the GATED per-document pair ONLY (ADR-028 + task 079)
 // ---------------------------------------------------------------------------
 
-test('negative: only the task-050 OBO endpoint pair is ever called — never the admin/app-only surface', async () => {
+test('negative: only the gated per-document pair is called — never the admin surface, never the deleted drive-keyed shape', async () => {
   renderModal();
   await screen.findByText('Version 3.0');
   fireEvent.click(screen.getByRole('button', { name: /open version 3\.0 read-only/i }));
   await waitFor(() =>
-    expect(mockAuthenticatedFetch).toHaveBeenCalledWith(`${OBO_LIST_PATH}/3.0/content`)
+    expect(mockAuthenticatedFetch).toHaveBeenCalledWith(`${VERSIONS_PATH}/3.0/content`)
   );
 
   const calledUrls = mockAuthenticatedFetch.mock.calls.map((c) => String(c[0]));
   expect(calledUrls.length).toBeGreaterThan(0);
   for (const url of calledUrls) {
-    // Every call is on the USER-CONTEXT (OBO) surface
-    expect(url).toMatch(/^\/api\/obo\/drives\/drive-1\/items\/item-1\/versions/);
+    // Every call is on the gated, per-document surface, keyed by the document ROW id
+    expect(url).toMatch(
+      new RegExp(`^/api/documents/${DOCUMENT_ID}/versions`)
+    );
     // Never the admin/app-only container surface (ContainerItemEndpoints)
     expect(url).not.toMatch(/containers/i);
+    // Never the DELETED drive-keyed shape. unified-access-control-r2 task 079: that pair took an
+    // arbitrary (driveId, itemId) off the route and served version metadata and PRIOR-VERSION
+    // BYTES with no per-document authorization. A client that reverts to it is asking the server
+    // for a route that no longer exists — this assertion is what makes that a test failure rather
+    // than a 404 discovered in production.
+    expect(url).not.toMatch(/\/api\/obo\/drives\//);
   }
 });
 

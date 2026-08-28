@@ -90,135 +90,22 @@ public class UploadSessionManager
         }
     }
 
-    public async Task<UploadSessionDto?> CreateUploadSessionAsync(
-        string containerId,
-        string path,
-        CancellationToken ct = default)
-    {
-        using var activity = Activity.Current;
-        activity?.SetTag("operation", "CreateUploadSession");
-        activity?.SetTag("containerId", containerId);
-        activity?.SetTag("filePath", path);
+    // ---------------------------------------------------------------------------------------------
+    // APP-ONLY CHUNKED UPLOAD (CreateUploadSessionAsync + UploadChunkAsync) — DELETED 2026-08-27
+    // by unified-access-control-r2, following task 073.
+    //
+    // Their only caller was Api/UploadEndpoints.cs, which 073 deleted outright. They were reported as
+    // "0 production callers" BEFORE 073 as well (merge plan follow-up #2) — 073 is what made that
+    // provably true rather than nearly true, and the retirement regression guard
+    // (tests/integration/regression/MiContainerKeyedWriteRouteRetirementTests.cs) is what keeps the
+    // routes from coming back and reviving them.
+    //
+    // NOT deleted, and do not confuse them with these: the OBO twins CreateUploadSessionAsUserAsync /
+    // UploadChunkAsUserAsync below are LIVE via OBOEndpoints.cs:119/172. They are 076's to remove, and
+    // only because their client path is dead by 404 (GET /api/obo/containers/{id}/drive is mapped
+    // nowhere) — a different reason from these two, which had no caller at all.
+    // ---------------------------------------------------------------------------------------------
 
-        _logger.LogInformation("Creating upload session for container {ContainerId} at path {Path}",
-            containerId, path);
-
-        try
-        {
-            var graphClient = _factory.ForApp();
-
-            // First, get the drive for this container
-            var drive = await graphClient.Storage.FileStorage.Containers[containerId].Drive
-                .GetAsync(cancellationToken: ct);
-
-            if (drive?.Id == null)
-            {
-                _logger.LogError("Failed to get drive for container {ContainerId}", containerId);
-                return null;
-            }
-
-            var createUploadSessionPostRequestBody = new Microsoft.Graph.Drives.Item.Items.Item.CreateUploadSession.CreateUploadSessionPostRequestBody
-            {
-                Item = new DriveItemUploadableProperties
-                {
-                    AdditionalData = new Dictionary<string, object>
-                    {
-                        { "@microsoft.graph.conflictBehavior", "rename" }
-                    }
-                }
-            };
-
-            var session = await graphClient.Drives[drive.Id].Root
-                .ItemWithPath(path)
-                .CreateUploadSession
-                .PostAsync(createUploadSessionPostRequestBody, cancellationToken: ct);
-
-            if (session == null)
-            {
-                _logger.LogError("Failed to create upload session - Graph API returned null");
-                return null;
-            }
-
-            _logger.LogInformation("Created upload session {UploadUrl} for file {Path}",
-                session.UploadUrl, path);
-
-            return new UploadSessionDto(
-                session.UploadUrl!,
-                session.ExpirationDateTime ?? DateTimeOffset.UtcNow.AddHours(24));
-        }
-        catch (ServiceException ex) when (ex.ResponseStatusCode == (int)System.Net.HttpStatusCode.NotFound)
-        {
-            _logger.LogWarning("Container {ContainerId} not found", containerId);
-            return null;
-        }
-        catch (ServiceException ex) when (ex.ResponseStatusCode == (int)System.Net.HttpStatusCode.TooManyRequests)
-        {
-            _logger.LogWarning("Graph API throttling encountered, retry with backoff: {Error}", ex.Message);
-            throw new InvalidOperationException("Service temporarily unavailable due to rate limiting", ex);
-        }
-        catch (ServiceException ex)
-        {
-            _logger.LogError(ex, "Graph API error creating upload session: {Error}", ex.Message);
-            throw new InvalidOperationException($"Failed to create upload session: {ex.Message}", ex);
-        }
-        catch (Exception ex)
-        {
-            _logger.LogError(ex, "Unexpected error creating upload session: {Error}", ex.Message);
-            throw;
-        }
-    }
-
-    public async Task<HttpResponseMessage> UploadChunkAsync(
-        UploadSessionDto session,
-        Stream file,
-        long start,
-        long length,
-        CancellationToken ct = default)
-    {
-        using var activity = Activity.Current;
-        activity?.SetTag("operation", "UploadChunk");
-        activity?.SetTag("start", start);
-        activity?.SetTag("length", length);
-
-        _logger.LogInformation("Uploading chunk from {Start} to {End}", start, start + length - 1);
-
-        try
-        {
-            using var httpClient = _httpClientFactory.CreateClient("GraphUploadSession");
-            using var request = new HttpRequestMessage(HttpMethod.Put, session.UploadUrl);
-
-            // Read chunk data
-            var buffer = new byte[length];
-            var bytesRead = await file.ReadAsync(buffer, 0, (int)length, ct);
-
-            if (bytesRead != length)
-            {
-                _logger.LogWarning("Read {BytesRead} bytes but expected {Length}", bytesRead, length);
-            }
-
-            request.Content = new ByteArrayContent(buffer, 0, bytesRead);
-            request.Content.Headers.ContentLength = bytesRead;
-            request.Content.Headers.ContentRange = new System.Net.Http.Headers.ContentRangeHeaderValue(start, start + bytesRead - 1);
-
-            var response = await httpClient.SendAsync(request, ct);
-
-            if (!response.IsSuccessStatusCode && response.StatusCode != System.Net.HttpStatusCode.Accepted)
-            {
-                _logger.LogWarning("Chunk upload returned status {StatusCode}", response.StatusCode);
-            }
-            else
-            {
-                _logger.LogInformation("Successfully uploaded chunk from {Start} to {End}", start, start + bytesRead - 1);
-            }
-
-            return response;
-        }
-        catch (Exception ex)
-        {
-            _logger.LogError(ex, "Error uploading chunk: {Error}", ex.Message);
-            throw;
-        }
-    }
 
     // =============================================================================
     // USER CONTEXT METHODS (OBO Flow)

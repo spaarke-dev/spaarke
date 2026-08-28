@@ -99,6 +99,13 @@ Build Provisioning Sidecar  failure     <- build/Trivy/size all PASS; only the
 
    Related rule, NOT amended: `spec.md` — MUST NOT restore the `Release` matrix before Phase 2 deletion has merged AND the surviving suite is green ≥7 days. Different clock.
 
+      **Check progress**: `pwsh scripts/ci/shadow-window-status.ps1`. Read-only, holds no state — every
+   number is derived live from the GitHub API, so it cannot drift and needs no upkeep. No cron, no
+   workflow, no tracking file. Its `-Since` default is load-bearing: it starts the window after PR #841
+   (the last CI-config change). Counting earlier would score the pre-remediation period, when `sdap-ci`
+   itself was failing ~60% of runs — that reads as a wall of "false greens" that are nothing of the
+   sort, and the window could never close. Verified: 5 such rows dated 08-18..08-26.
+
    **Cannot be compressed below the floor**; see "the port broke twice" below for the evidence base.
 3. **Delete `sdap-ci.yml`** (tasks 071 / 075 / 077). Removes the duplicate *and* its ~30 min leg.
 4. **Enable branch protection** with `CI / Router` as the single required check. **OWNER DECISION — do not do unprompted.** This is what makes the north star hold; without it everything drifts red again. Sequence last: flipping it while a flaky gate remains blocks the team rather than annoying them.

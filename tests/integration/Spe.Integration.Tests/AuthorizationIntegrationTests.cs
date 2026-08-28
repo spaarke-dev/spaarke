@@ -336,6 +336,31 @@ internal class MockAccessDataSource : IAccessDataSource
             CachedAt = DateTimeOffset.UtcNow
         });
     }
+
+    /// <summary>
+    /// Entity-agnostic record access (unified-access-control-r2 task 070). Mirrors
+    /// <see cref="GetUserAccessAsync"/>: this double reports one configured rights value, so the
+    /// entity set is validated for shape but does not vary the answer.
+    /// </summary>
+    public Task<AccessSnapshot> GetRecordAccessAsync(
+        string userId, string entitySetName, Guid recordId, string? userAccessToken,
+        CancellationToken ct = default)
+    {
+        if (_expectedUserId != null && userId != _expectedUserId)
+        {
+            throw new InvalidOperationException($"Expected userId '{_expectedUserId}' but got '{userId}'");
+        }
+
+        return Task.FromResult(new AccessSnapshot
+        {
+            UserId = userId,
+            ResourceId = recordId.ToString(),
+            AccessRights = _accessRights,
+            TeamMemberships = _teamMemberships,
+            Roles = _roles,
+            CachedAt = DateTimeOffset.UtcNow
+        });
+    }
 }
 
 /// <summary>
