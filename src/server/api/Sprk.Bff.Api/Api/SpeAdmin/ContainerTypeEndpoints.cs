@@ -30,11 +30,26 @@ namespace Sprk.Bff.Api.Api.SpeAdmin;
 public static class ContainerTypeEndpoints
 {
     /// <summary>
-    /// Valid billing classification values accepted by the Graph API and this endpoint.
-    /// Defined as a static set for O(1) lookup during request validation.
+    /// Valid billing classification values, transcribed from Graph's own enum.
     /// </summary>
+    /// <remarks>
+    /// 🔴 This list was <c>{ "standard", "premium" }</c> and was wrong in both directions
+    /// (UAT 2026-08-28). Graph's <c>fileStorageContainerBillingClassification</c> enum is
+    /// <c>standard · trial · directToCustomer · unknownFutureValue</c> — verified in the beta CSDL:
+    /// <b>"premium" does not exist</b>, and <b>"trial" and "directToCustomer" were both rejected by
+    /// this validator</b> even though the client offers exactly those three and Graph accepts them.
+    ///
+    /// So an operator creating a trial container type — the documented path for a new
+    /// environment — was blocked by our own allow-list, with a message naming a value Graph has
+    /// never accepted. <c>unknownFutureValue</c> is deliberately excluded: it is an OData
+    /// forward-compatibility sentinel, not a classification anyone may request.
+    ///
+    /// The billing classification is <b>permanent</b> — a trial type can never become standard, and
+    /// standard can never become passthrough (see the container-type knowledge doc). Getting this
+    /// list wrong is therefore not a cosmetic validation bug; it decides what an operator can build.
+    /// </remarks>
     private static readonly HashSet<string> ValidBillingClassifications =
-        new(StringComparer.OrdinalIgnoreCase) { "standard", "premium" };
+        new(StringComparer.OrdinalIgnoreCase) { "standard", "trial", "directToCustomer" };
 
     /// <summary>
     /// Registers the container type list, get-by-ID, and create endpoints on the provided route group.
@@ -418,7 +433,9 @@ public static class ContainerTypeEndpoints
                 "POST /api/spe/containertypes — invalid billingClassification '{BillingClassification}'. TraceId: {TraceId}",
                 request.BillingClassification, context.TraceIdentifier);
             return Results.Problem(
-                detail: $"Invalid billingClassification '{request.BillingClassification}'. Accepted values: standard, premium.",
+                detail: $"Invalid billingClassification '{request.BillingClassification}'. "
+                      + "Accepted values: standard, trial, directToCustomer. "
+                      + "This choice is permanent — a container type cannot be reclassified after creation.",
                 statusCode: StatusCodes.Status400BadRequest,
                 title: "Bad Request",
                 extensions: new Dictionary<string, object?> { ["errorCode"] = "spe.containertypes.invalid_billing_classification" });
@@ -438,6 +455,44 @@ public static class ContainerTypeEndpoints
                 extensions: new Dictionary<string, object?> { ["errorCode"] = "spe.containertypes.config_not_found" });
         }
 
+        // 🔴 owningAppId is REQUIRED by Graph and was never sent. That is the whole of the UAT
+        // 2026-08-28 failure: "invalidRequest: One of the provided arguments is not acceptable."
+        // Graph's beta CSDL marks fileStorageContainerType.owningAppId Nullable="false", and the
+        // documented create body carries it alongside name and billingClassification.
+        //
+        // Resolution order: what the caller explicitly asked for, else the owning app registered on
+        // the config (multi-app mode), else the config's own client id (single-app mode) — the same
+        // precedence ContainerTypeConfig.HasOwningApp encodes.
+        var owningAppId = FirstNonBlank(request.OwningAppId, config.OwningAppId, config.ClientId);
+        if (string.IsNullOrWhiteSpace(owningAppId))
+        {
+            // Refuse locally rather than send a request we already know Graph will reject. A 400 that
+            // names the missing field is worth more than relaying "one of the provided arguments is
+            // not acceptable", which does not say WHICH one.
+            logger.LogWarning(
+                "POST /api/spe/containertypes — no owningAppId could be resolved for config {ConfigId}. TraceId: {TraceId}",
+                configId, context.TraceIdentifier);
+            return Results.Problem(
+                detail: "No owning application could be determined for this container type. Graph "
+                      + "requires 'owningAppId' on create. Supply it in the request, or register an "
+                      + $"owning app on config '{configId}'.",
+                statusCode: StatusCodes.Status400BadRequest,
+                title: "Owning App Required",
+                extensions: new Dictionary<string, object?> { ["errorCode"] = "spe.containertypes.owning_app_required" });
+        }
+
+        if (!Guid.TryParse(owningAppId, out _))
+        {
+            // Graph types owningAppId as Edm.Guid. A non-GUID produces the same opaque
+            // "not acceptable" from Graph, so name it here instead.
+            return Results.Problem(
+                detail: $"The owning application id '{owningAppId}' is not a valid GUID. Graph requires "
+                      + "'owningAppId' to be the application (client) id of the owning app registration.",
+                statusCode: StatusCodes.Status400BadRequest,
+                title: "Owning App Invalid",
+                extensions: new Dictionary<string, object?> { ["errorCode"] = "spe.containertypes.owning_app_invalid" });
+        }
+
         try
         {
             // DELEGATED — see the GET handler above. Graph container-type CREATE is delegated-only and
@@ -447,6 +502,7 @@ public static class ContainerTypeEndpoints
                 context,
                 request.DisplayName,
                 request.BillingClassification,
+                owningAppId,
                 ct);
 
             logger.LogInformation(
@@ -803,4 +859,15 @@ public static class ContainerTypeEndpoints
             traceId: traceId,
             title: "Additional permission required");
     }
+
+    /// <summary>
+    /// Returns the first candidate that is neither null nor whitespace, or null when none is.
+    /// </summary>
+    /// <remarks>
+    /// Used to resolve <c>owningAppId</c> by precedence. A plain <c>??</c> chain would be wrong here:
+    /// these values arrive from JSON and Dataverse, where "absent" is frequently an EMPTY STRING
+    /// rather than null, and <c>??</c> would happily select <c>""</c> and send it to Graph.
+    /// </remarks>
+    private static string? FirstNonBlank(params string?[] candidates) =>
+        candidates.FirstOrDefault(c => !string.IsNullOrWhiteSpace(c));
 }

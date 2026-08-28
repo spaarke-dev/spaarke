@@ -1880,10 +1880,11 @@ public sealed class SpeAdminGraphService
     }
 
     public async Task<SpeContainerTypeSummary> CreateContainerTypeForUserAsync(
-        HttpContext httpContext, string displayName, string? billingClassification, CancellationToken ct = default)
+        HttpContext httpContext, string displayName, string? billingClassification, string owningAppId,
+        CancellationToken ct = default)
     {
         var client = await GetDelegatedClientForContainerTypesAsync(httpContext, ct).ConfigureAwait(false);
-        try { return await CreateContainerTypeAsync(client, displayName, billingClassification, ct).ConfigureAwait(false); }
+        try { return await CreateContainerTypeAsync(client, displayName, billingClassification, owningAppId, ct).ConfigureAwait(false); }
         catch (ODataError ex) { throw ex.ToSpaarkeStorageException($"CreateContainerType({displayName},delegated)"); }
     }
 
@@ -2323,10 +2324,19 @@ public sealed class SpeAdminGraphService
     }
 
     public async Task<SpeContainerTypeSummary> CreateContainerTypeForConfigAsync(
-        ContainerTypeConfig config, string displayName, string? billingClassification, CancellationToken ct = default)
+        ContainerTypeConfig config, string displayName, string? billingClassification,
+        string? owningAppId = null, CancellationToken ct = default)
     {
+        ArgumentNullException.ThrowIfNull(config);
+
+        // Same precedence as the delegated endpoint: explicit argument, else the config's registered
+        // owning app (multi-app mode), else its own client id (single-app mode).
+        var resolvedOwningAppId = owningAppId;
+        if (string.IsNullOrWhiteSpace(resolvedOwningAppId)) resolvedOwningAppId = config.OwningAppId;
+        if (string.IsNullOrWhiteSpace(resolvedOwningAppId)) resolvedOwningAppId = config.ClientId;
+
         var client = await GetClientForConfigAsync(config, ct).ConfigureAwait(false);
-        try { return await CreateContainerTypeAsync(client, displayName, billingClassification, ct).ConfigureAwait(false); }
+        try { return await CreateContainerTypeAsync(client, displayName, billingClassification, resolvedOwningAppId!, ct).ConfigureAwait(false); }
         catch (ODataError ex) { throw ex.ToSpaarkeStorageException($"CreateContainerType({displayName})"); }
     }
 
@@ -4189,34 +4199,55 @@ public sealed class SpeAdminGraphService
         GraphServiceClient graphClient,
         string displayName,
         string? billingClassification,
+        string owningAppId,
         CancellationToken ct = default)
     {
         ArgumentNullException.ThrowIfNull(graphClient);
         ArgumentException.ThrowIfNullOrWhiteSpace(displayName);
+        ArgumentException.ThrowIfNullOrWhiteSpace(owningAppId);
 
         _logger.LogInformation(
-            "Creating SPE container type '{DisplayName}' with billingClassification '{BillingClassification}'",
-            displayName, billingClassification ?? "standard");
+            "Creating SPE container type '{DisplayName}' (billingClassification '{BillingClassification}', owningAppId {OwningAppId})",
+            displayName, billingClassification ?? "standard", owningAppId);
 
-        // Parse billingClassification string to the Graph SDK enum.
-        // FileStorageContainerBillingClassification values: Standard, Premium (case-insensitive parse).
-        // Invalid values will be rejected by the endpoint before reaching here.
+        // Parse billingClassification to the Graph SDK enum. Graph's enum is
+        // standard · trial · directToCustomer · unknownFutureValue (beta CSDL).
+        //
+        // 🔴 This used to fall through to null on an unparseable value, so a request for a TRIAL
+        // container type would silently create a STANDARD one and report success. Billing
+        // classification is permanent and cannot be changed afterwards, so a silent substitution
+        // here is unrecoverable — the operator would have to delete and start over, if the type is
+        // even deletable. Fail loudly instead.
         Microsoft.Graph.Models.FileStorageContainerBillingClassification? billingEnum = null;
-        if (!string.IsNullOrWhiteSpace(billingClassification) &&
-            Enum.TryParse<Microsoft.Graph.Models.FileStorageContainerBillingClassification>(
-                billingClassification,
-                ignoreCase: true,
-                out var parsed))
+        if (!string.IsNullOrWhiteSpace(billingClassification))
         {
+            if (!Enum.TryParse<Microsoft.Graph.Models.FileStorageContainerBillingClassification>(
+                    billingClassification, ignoreCase: true, out var parsed))
+            {
+                throw new ArgumentException(
+                    $"Billing classification '{billingClassification}' is not a value the Graph SDK "
+                    + "recognises. Valid values are standard, trial, directToCustomer. Refusing to "
+                    + "create the container type, because defaulting here would silently produce a "
+                    + "classification that can never be changed.",
+                    nameof(billingClassification));
+            }
+
             billingEnum = parsed;
         }
 
         // Build the Graph SDK request body.
         // NOTE: FileStorageContainerType uses "Name" (not "DisplayName") as the display label.
+        //
+        // 🔴 OwningAppId was MISSING here and is REQUIRED — the cause of the UAT 2026-08-28 failure
+        // "invalidRequest: One of the provided arguments is not acceptable". Graph's beta CSDL marks
+        // owningAppId Nullable="false", and the documented create body carries it. Every container
+        // type is owned by exactly one Entra app registration, fixed at creation; without it Graph
+        // has no owner to assign and rejects the whole request without naming the field.
         var body = new Microsoft.Graph.Models.FileStorageContainerType
         {
             Name = displayName,
-            BillingClassification = billingEnum
+            BillingClassification = billingEnum,
+            OwningAppId = Guid.Parse(owningAppId)
         };
 
         var created = await ExecuteWithRetryAsync(
