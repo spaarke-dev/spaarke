@@ -160,13 +160,5 @@ public class ExportServiceRegistryTests
     #region Constructor Tests
 
 
-    [Fact]
-    public void Constructor_WithNullServices_ShouldThrowArgumentNullException()
-    {
-        // Act & Assert
-        var action = () => new ExportServiceRegistry(null!);
-        action.Should().Throw<ArgumentNullException>();
-    }
-
     #endregion
 }

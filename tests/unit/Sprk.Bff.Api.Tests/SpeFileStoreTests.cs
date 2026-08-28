@@ -113,17 +113,10 @@ public class SpeFileStoreTests
         result.Should().BeOfType<List<FileHandleDto>>();
     }
 
-    [Fact(Skip = "Graph SDK sealed classes cannot be mocked - NullReferenceException from null GraphServiceClient")]
-    public async Task CreateUploadSessionAsync_ShouldReturnUploadSessionDto()
-    {
-        // Arrange
-        var containerId = "container123";
-        var path = "test/largefile.pdf";
-
-        // Act
-        var result = await _sut.CreateUploadSessionAsync(containerId, path);
-
-        // Assert
-        result.Should().BeNull(); // Expected for simplified implementation
-    }
+    // CreateUploadSessionAsync_ShouldReturnUploadSessionDto DELETED 2026-08-27 — the method under test is
+    // gone (app-only chunked upload, dead once task 073 removed its only caller). The test was already
+    // Skip'd for unmockable Graph SDK sealed classes, so it had been asserting nothing for some time; it
+    // is removed because its SUBJECT is gone, not because it was skipped. Not a KEEP-path deletion —
+    // tests/unit/Sprk.Bff.Api.Tests/ is not tests/unit/domain/**, so ADR-038's replacement obligation
+    // does not attach.
 }

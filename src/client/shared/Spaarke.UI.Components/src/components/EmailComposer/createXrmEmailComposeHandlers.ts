@@ -348,8 +348,18 @@ export function createXrmEmailComposeHandlers(options?: {
       : undefined;
 
   // Recipient-openable SPE sharing link for a linked document (R2 item 12): POST the documentId to
-  // the BFF, which resolves the doc's drive/item + creates an anonymous view link. Best-effort —
+  // the BFF, which resolves the doc's drive/item + creates a view link. Best-effort —
   // returns null on any non-2xx so the send keeps the prior (internal) URL. Only wired with auth + BFF.
+  //
+  // `allowExternalRecipients: true` is REQUIRED as of unified-access-control-r2 task 072. The BFF route
+  // now defaults to an `organization`-scoped link (a tenant sign-in is needed to open it); an omitted
+  // flag would silently produce links that external recipients cannot open, which is the one thing this
+  // feature exists to do. The route authorizes `share` on the document and bounds the lifetime either
+  // way, so opting in does not widen who may mint a link — it selects the audience.
+  //
+  // Two non-2xx paths both degrade gracefully to the prior internal URL via the `!resp.ok` check below:
+  // 403 when the caller lacks Share on the document, and 403 when the environment has anonymous links
+  // switched off (Documents:ShareLinks:AnonymousLinksEnabled=false). Neither blocks the send.
   const onResolveShareLink =
     authenticatedFetch && bffBaseUrl
       ? async (documentId: string): Promise<string | null> => {
@@ -357,7 +367,11 @@ export function createXrmEmailComposeHandlers(options?: {
             const base = bffBaseUrl.replace(/\/+$/, '');
             const resp = await authenticatedFetch(
               `${base}/api/documents/${encodeURIComponent(documentId)}/share-link`,
-              { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' }
+              {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ allowExternalRecipients: true }),
+              }
             );
             if (!resp.ok) return null;
             const data = (await resp.json()) as { url?: string };

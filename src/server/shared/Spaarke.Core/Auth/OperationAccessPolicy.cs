@@ -217,7 +217,35 @@ public static class OperationAccessPolicy
         // "delete" — destruction of the authorized record. Delete alone, not Delete|Write: Dataverse
         // models these as independent rights and a principal holding Delete without Write may still
         // legitimately destroy. Requiring both would deny that caller for no security gain.
-        ["delete"] = AccessRights.Delete
+        ["delete"] = AccessRights.Delete,
+
+        // ========================================================================
+        // RECORD-SCOPED SHARING OPERATION (unified-access-control-r2 task 072)
+        // ========================================================================
+        // "share" — minting a shareable credential for the authorized record
+        // (POST /api/documents/{documentId}/share-link). The right is NOT a judgement call: this table
+        // already answers it twice for the same act — "driveitem.createlink" (Share) and its legacy alias
+        // "share_document" (Share). Task 072 follows that precedent rather than re-deriving it, and it
+        // matches Graph's own permission model for driveitem.createLink.
+        //
+        // Why a BARE name and not simply reusing "driveitem.createlink": the resource differs. The
+        // driveitem.* family authorizes an SPE item; DocumentAuthorizationFilter authorizes an
+        // sprk_document ROW, which is the record-scoped convention established by task 003 and spelled
+        // out above ("reusing a driveitem.* key here would misdescribe the resource"). The rights
+        // coincide; the subject does not.
+        //
+        // Why Share and not Read — the eight sibling routes on this group carry "read": those routes
+        // return content TO AN AUTHENTICATED CALLER the platform can still identify and revoke. This one
+        // mints a URL that outlives revocation and, for anonymous scope, is openable by parties with no
+        // Spaarke identity at all. Reading a document and publishing a durable handle to it are different
+        // acts, and Dataverse models the second as Share.
+        //
+        // ⚠️ Same RPA dependency as "write"/"delete" above: DataverseAccessDataSource's fallback probe
+        // (QueryReadAccessByProbeAsync) caps rights at Read by construction, so on a RetrievePrincipalAccess
+        // outage every "share" gate denies and share-link minting is unavailable rather than degraded.
+        // That is the correct fail-closed direction and the same trade tasks 008/022 accepted; it is
+        // recorded here so the behaviour is not mistaken for a bug. Watch the RPA-FALLBACK log marker.
+        ["share"] = AccessRights.Share
     };
 
     /// <summary>

@@ -224,6 +224,63 @@ public class AuthorizationService : IAuthorizationService
         // (GetUserAccessAsync:159-227) and queries Dataverse AS THE USER rather than as the app.
         return await _accessDataSource.GetUserAccessAsync(userId, resourceId, userAccessToken, ct);
     }
+
+    /// <summary>
+    /// Resolves the caller's rights on a record of an ARBITRARY entity type — the sibling of
+    /// <see cref="GetCallerAccessAsync"/>, which is document-only.
+    /// </summary>
+    /// <param name="userId">The caller's Entra object id (<c>oid</c>).</param>
+    /// <param name="entitySetName">
+    /// The Dataverse entity SET (plural) name of the target — e.g. <c>sprk_matters</c>. Callers pass a
+    /// value from an explicit allow-list; nothing here pluralizes or guesses a logical name.
+    /// </param>
+    /// <param name="recordId">The target record's id.</param>
+    /// <param name="userAccessToken">
+    /// The caller's bearer token. No default, for the same forcing-function reason as
+    /// <see cref="GetCallerAccessAsync"/>: app-only evaluation must be an explicit, reviewable choice
+    /// at the call site rather than something a new caller inherits by omission (finding A-4).
+    /// </param>
+    /// <param name="ct">Cancellation token.</param>
+    /// <remarks>
+    /// <para><b>Why (unified-access-control-r2 task 070).</b> <see cref="GetCallerAccessAsync"/> resolves
+    /// through a Dataverse call whose target is hard-coded to <c>sprk_documents</c>, so it cannot answer
+    /// "may this caller read this <i>matter</i>?". <c>POST /api/ai/search</c> with <c>scope=entity</c>
+    /// must answer exactly that before returning a matter's documents — that check is what makes
+    /// "access flows from the parent" an enforced property rather than a stated intention.</para>
+    ///
+    /// <para><b>Not a second policy.</b> Same authority, same evaluation-as-the-caller, wider reach.
+    /// Fail-closed behaviour is identical: an absent token yields <see cref="AccessRights.None"/> and
+    /// the data source is never consulted app-only.</para>
+    /// </remarks>
+    public async Task<AccessSnapshot> GetCallerRecordAccessAsync(
+        string userId,
+        string entitySetName,
+        Guid recordId,
+        string? userAccessToken,
+        CancellationToken ct = default)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(userId, nameof(userId));
+        ArgumentException.ThrowIfNullOrWhiteSpace(entitySetName, nameof(entitySetName));
+
+        if (string.IsNullOrWhiteSpace(userAccessToken))
+        {
+            _logger.LogWarning(
+                "RECORD ACCESS DENIED (no caller token): User {UserId} on {EntitySet}({RecordId}) — a " +
+                "caller-scoped snapshot requires the caller's bearer token; refusing to fall back to " +
+                "app-only evaluation (fail closed). Returning AccessRights.None.",
+                userId, entitySetName, recordId);
+
+            return new AccessSnapshot
+            {
+                UserId = userId,
+                ResourceId = recordId.ToString(),
+                AccessRights = AccessRights.None
+            };
+        }
+
+        return await _accessDataSource.GetRecordAccessAsync(
+            userId, entitySetName, recordId, userAccessToken, ct);
+    }
 }
 
 public class AuthorizationContext

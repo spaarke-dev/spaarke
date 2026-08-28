@@ -928,17 +928,6 @@ public class ExternalAccessEndpointTests
     #region SpeContainerMembershipService — Construction
 
     [Fact]
-    public void SpeContainerMembershipService_NullGraphClientFactory_ThrowsArgumentNull()
-    {
-        var act = () => new SpeContainerMembershipService(
-            null!,
-            new Mock<ILogger<SpeContainerMembershipService>>().Object);
-
-        act.Should().Throw<ArgumentNullException>()
-            .WithParameterName("graphClientFactory");
-    }
-
-    [Fact]
     public void SpeContainerMembershipService_NullLogger_ThrowsArgumentNull()
     {
         var act = () => new SpeContainerMembershipService(

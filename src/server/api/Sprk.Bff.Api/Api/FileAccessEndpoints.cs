@@ -1,14 +1,18 @@
 using System.IO;
+using System.Security.Claims;
 using System.Text.Json;
+using Microsoft.Extensions.Options;
 using Spaarke.Core.Auth;
 using Spaarke.Core.Utilities;
 using Spaarke.Dataverse;
 using Sprk.Bff.Api.Api.Filters;
+using Sprk.Bff.Api.Configuration;
 using Sprk.Bff.Api.Infrastructure.Exceptions;
 using Sprk.Bff.Api.Infrastructure.Graph;
 using Sprk.Bff.Api.Models;
 using Sprk.Bff.Api.Services;
 using Sprk.Bff.Api.Services.Communication;
+using Sprk.Bff.Api.Infrastructure.Authentication;
 
 namespace Sprk.Bff.Api.Api;
 
@@ -113,13 +117,27 @@ public static class FileAccessEndpoints
         // Recipient-openable SPE sharing link for a document (email-communication-solution-r5 R2 item
         // 12). OBO — the caller's own SPE access authorizes the createLink. Used by the email composer's
         // "Link" attachments so an emailed link opens the actual file (incl. for external recipients).
+        //
+        // Per-document authorization (unified-access-control-r2 task 072, spec FR-01). This was the ONE
+        // route on this group with no filter — and the one that mints a credential. Its authority was the
+        // caller's container-scoped OBO access, which is coarser than per-document Dataverse rights: the
+        // exact coarseness the id-keyed routes in this file exist to close (see the header comment).
+        //
+        // "share", not "read" like the eight siblings: those return content to a caller the platform can
+        // still identify and revoke. This one mints a URL that OUTLIVES revocation. Rationale + the
+        // precedent it follows (driveitem.createlink / share_document, both already Share) are recorded on
+        // the ["share"] entry in OperationAccessPolicy.
         docs.MapPost("/{documentId}/share-link", CreateShareLink)
+            .AddDocumentAuthorizationFilter("share")
             .WithName("CreateDocumentShareLink")
             .WithTags("File Access")
-            .WithDescription("Create a recipient-openable SPE sharing link (Graph createLink, view/anonymous) for a document.")
+            .WithDescription("Create a recipient-openable SPE sharing link (Graph createLink) for a document. "
+                           + "Requires Share on the document. Organization-scoped by default; set "
+                           + "allowExternalRecipients=true for an anonymous link. Always expires.")
             .Produces<ShareLinkResponse>(StatusCodes.Status200OK)
             .Produces(StatusCodes.Status400BadRequest)
             .Produces(StatusCodes.Status401Unauthorized)
+            .Produces(StatusCodes.Status403Forbidden)
             .Produces(StatusCodes.Status404NotFound)
             .Produces(StatusCodes.Status409Conflict)
             .Produces(StatusCodes.Status502BadGateway);
@@ -653,14 +671,32 @@ public static class FileAccessEndpoints
 
         /// <summary>
         /// POST /api/documents/{documentId}/share-link
-        /// Creates a recipient-openable SPE sharing link (Graph createLink, view/anonymous) for the
-        /// document, so an emailed "Link" opens the actual file — including for external recipients
-        /// (email-communication-solution-r5 R2 item 12). OBO: the caller's own SPE access authorizes it.
+        /// Creates a recipient-openable SPE sharing link (Graph createLink) for the document, so an
+        /// emailed "Link" opens the actual file — including, on request, for external recipients
+        /// (email-communication-solution-r5 R2 item 12). OBO: the caller's own SPE access performs the
+        /// createLink; per-document authorization is the <c>"share"</c> filter on the route.
         /// </summary>
+        /// <remarks>
+        /// <para>
+        /// <b>unified-access-control-r2 task 072.</b> Three things changed and they are independent:
+        /// the route gained a per-document <c>share</c> gate (it had none); the link gained a bounded
+        /// expiry (it was <c>expiration: null</c> — permanent); and <c>anonymous</c> stopped being the
+        /// silent default (it is now an explicit request, capped harder, and logged).
+        /// </para>
+        /// <para>
+        /// <b>Why expiry is the load-bearing control.</b> A minted SPE URL is not revocable through
+        /// Dataverse — removing the caller's rights afterwards does not invalidate it. This file's header
+        /// already records that as unsolved in general. Task 072 does not solve it in general; it removes
+        /// the worst instance (permanent + anonymous + ungated) and bounds the rest.
+        /// </para>
+        /// </remarks>
         static async Task<IResult> CreateShareLink(
             string documentId,
+            ShareLinkRequest? request,
             IDocumentDataverseService dataverseService,
             SpeFileStore speFileStore,
+            IOptionsMonitor<ShareLinkOptions> shareLinkOptions,
+            TimeProvider timeProvider,
             ILogger<Program> logger,
             HttpContext context,
             CancellationToken ct)
@@ -686,15 +722,36 @@ public static class FileAccessEndpoints
             // Reuses the same SPE-pointer validation as open-links (404/409 on missing/malformed pointers).
             ValidateSpePointers(document.GraphDriveId, document.GraphItemId, documentId, document.HasFile);
 
+            var (scope, expiresAt) = ResolveShareLinkPolicy(
+                request, shareLinkOptions.CurrentValue, timeProvider, documentId, logger, context);
+            var wantsExternalReach = scope == AnonymousScope;
+
+            if (wantsExternalReach)
+            {
+                // Warning, not Information: this is the one branch that publishes a handle reachable by
+                // parties with no Spaarke identity. The caller's oid is what makes it attributable.
+                logger.LogWarning(
+                    "CreateShareLink minting an ANONYMOUS link | DocumentId: {DocumentId} | "
+                    + "Caller: {CallerObjectId} | ExpiresAt: {ExpiresAt} | TraceId: {TraceId}",
+                    documentId,
+                    // The comment above is the whole point: "the caller's oid is what makes it
+                    // attributable". Until 2026-08-27 this read `FindFirst("oid") ?? NameIdentifier`,
+                    // which under inbound claim mapping resolved `sub` — pairwise per user+app and
+                    // joinable to nothing. The audit line for minting an ANONYMOUS link was therefore
+                    // recording a pseudonym, defeating exactly the attributability task 072 added it for.
+                    CallerResolution.ResolveObjectId(context.User),
+                    expiresAt,
+                    context.TraceIdentifier);
+            }
+
             try
             {
-                // view + anonymous: opens the file, works for external recipients (owner-approved scope,
-                // R2 item 12). Non-expiring for now. Requires the tenant SPE/SharePoint external-sharing
-                // policy to allow "Anyone" links; if disabled Graph throws → mapped to 502 below and the
-                // caller (composer) falls back to the prior link (best-effort, never blocks the send).
+                // Requires the tenant SPE/SharePoint external-sharing policy to allow "Anyone" links when
+                // scope is anonymous; if disabled Graph throws → mapped to 502 below and the caller
+                // (composer) falls back to the prior link (best-effort, never blocks the send).
                 var url = await speFileStore.CreateSharingLinkAsUserAsync(
                     context, document.GraphDriveId!, document.GraphItemId!,
-                    linkType: "view", scope: "anonymous", expiration: null, ct: ct);
+                    linkType: "view", scope: scope, expiration: expiresAt, ct: ct);
 
                 if (string.IsNullOrWhiteSpace(url))
                 {
@@ -703,9 +760,11 @@ public static class FileAccessEndpoints
                         $"Graph returned no sharing link for document {documentId}", 502);
                 }
 
-                logger.LogInformation("CreateShareLink succeeded | DocumentId: {DocumentId} | TraceId: {TraceId}",
-                    documentId, context.TraceIdentifier);
-                return TypedResults.Ok(new ShareLinkResponse(url));
+                logger.LogInformation(
+                    "CreateShareLink succeeded | DocumentId: {DocumentId} | Scope: {Scope} | "
+                    + "ExpiresAt: {ExpiresAt} | TraceId: {TraceId}",
+                    documentId, scope, expiresAt, context.TraceIdentifier);
+                return TypedResults.Ok(new ShareLinkResponse(url, expiresAt, scope));
             }
             // ADR-007: endpoints must NOT reference Microsoft.Graph SDK types directly (the Graph
             // request/response + error types stay isolated in Infrastructure.Graph). We still want the
@@ -1072,6 +1131,57 @@ public static class FileAccessEndpoints
     /// never flipped) — use it only to distinguish "never uploaded" (HasFile=false) from
     /// "partial/failed upload" (HasFile=true) when DriveId/ItemId is missing.
     /// </summary>
+    /// <summary>Graph link scopes used by the share-link route.</summary>
+    private const string AnonymousScope = "anonymous";
+    private const string OrganizationScope = "organization";
+
+    /// <summary>
+    /// Decides the sharing scope and expiry for one share-link request (unified-access-control-r2
+    /// task 072). Extracted from the handler because it is the one piece of genuine POLICY on that
+    /// route — it changes for product/compliance reasons, while the rest of the handler changes for SPE
+    /// plumbing reasons. Separate reasons-to-change, per docs/standards/COMPONENT-COMPLEXITY.md.
+    /// </summary>
+    /// <returns>The Graph link scope, and the instant the link stops working.</returns>
+    /// <exception cref="SdapProblemException">
+    /// 403 when external reach is requested but disabled for this environment.
+    /// </exception>
+    private static (string Scope, DateTimeOffset ExpiresAt) ResolveShareLinkPolicy(
+        ShareLinkRequest? request,
+        ShareLinkOptions options,
+        TimeProvider timeProvider,
+        string documentId,
+        ILogger logger,
+        HttpContext context)
+    {
+        var wantsExternalReach = request?.AllowExternalRecipients == true;
+
+        // Refuse rather than downgrade. A silent downgrade to organization scope yields a link that
+        // looks fine to the sender and is dead on arrival for the external recipient — the failure
+        // mode hardest to diagnose from a support ticket.
+        if (wantsExternalReach && !options.AnonymousLinksEnabled)
+        {
+            logger.LogWarning(
+                "CreateShareLink refused an anonymous link: Documents:ShareLinks:AnonymousLinksEnabled "
+                + "is false | DocumentId: {DocumentId} | TraceId: {TraceId}",
+                documentId, context.TraceIdentifier);
+
+            throw new SdapProblemException(
+                "anonymous_links_disabled", "Anonymous Links Disabled",
+                "This environment does not permit anyone-with-the-link sharing. Remove "
+                + "allowExternalRecipients to mint an organization-scoped link instead.", 403);
+        }
+
+        // Scope is organization unless the caller explicitly asked for external reach. The dangerous
+        // option must be requested, never inherited from omission.
+        var lifetimeDays = wantsExternalReach
+            ? options.AnonymousMaxLifetimeDays
+            : options.MaxLifetimeDays;
+
+        return (
+            wantsExternalReach ? AnonymousScope : OrganizationScope,
+            timeProvider.GetUtcNow().AddDays(lifetimeDays));
+    }
+
     private static void ValidateSpePointers(string? driveId, string? itemId, string documentId, bool hasFile)
     {
         // Validate driveId exists

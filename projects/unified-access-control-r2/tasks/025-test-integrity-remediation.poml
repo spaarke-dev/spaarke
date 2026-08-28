@@ -28,6 +28,16 @@
       <file role="modify">tests/integration/auth/UnifiedAccessControl/SpeRevokeMatcherTests.cs</file>
       <file role="modify">tests/integration/auth/UnifiedAccessControl/OperationAccessPolicyCompletenessTests.cs</file>
       <file role="modify">tests/unit/Sprk.Bff.Api.Tests/AccessControl/ExternalAccessEndpointTests.cs</file>
+      <!-- ⚠️ CORRECTED 2026-08-27 (task 011 + Wave A §A10). `tests/unit/Sprk.Bff.Api.Tests/AccessControl/`
+           is NOT an ADR-038 KEEP path. The KEEP paths are tests/integration/{auth,contract,data-mutation,
+           regression,seam,tenant}/** and tests/unit/domain/** — and tests/CLAUDE.md states "Tests authored
+           elsewhere are anti-pattern by construction." Task 011 hit this same wrong path in its own POML,
+           correctly pivoted to tests/integration/auth/** as a CLAUDE.md §6.5 path-C deviation, and kept
+           InternalsVisibleTo reach because the csproj auth glob puts it in the same assembly. Do the same:
+           if the file above exists at that path, MOVE it to the correct KEEP path as part of this task
+           (that is squarely in scope for a test-INTEGRITY task); if it does not exist, create it at
+           tests/integration/auth/UnifiedAccessControl/. Endpoint-authorization tests are auth tests. -->
+      <file role="modify">tests/integration/auth/UnifiedAccessControl/ExternalAccessEndpointTests.cs</file>
       <file role="new">tests/integration/auth/UnifiedAccessControl/CallerRecordAccessProbeTests.cs</file>
       <file role="canonical-reference">projects/unified-access-control-r2/notes/review-2026-08-24-findings.md</file>
     </relevant-files>

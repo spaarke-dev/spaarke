@@ -13,6 +13,27 @@
     <tags>testing, deletion, deep-cleanup, sliced-PR, build-vs-maintain, gates-cutover</tags>
   </metadata>
 
+  <owner-rescope date="2026-08-28" binding="true">
+    **RE-SCOPED BY OWNER — this task is NOT a deletion sweep.**
+
+    Task 082's inventory showed this task's actual content is **1,124 `B13-name-missing-scenario`
+    methods**, not scaffolding to delete. ADR-038 §7's own remedy column for B13 reads
+    **"rename per convention or delete"** — rename comes FIRST.
+
+    BINDING: a test MUST NOT be deleted because its name lacks the
+    {Method}_{Scenario}_{Expected} triple, where the test is otherwise **useful, effective and
+    executable**. A bad name is a naming defect, not a scaffolding defect. Deleting on name alone
+    destroys working regression cover to satisfy a convention.
+
+    Also note the owner decision at spec.md FR-B10: the CICD-082b deep-judgment pass is RETIRED,
+    not deferred — there is no capacity for a human read of 7,119 tests. Residual cleanup runs
+    through `/test-diet` per project close (FR-B09).
+
+    Practical effect: after 083 (76 high-confidence) and 084 (282 coverage-fillers), this task has
+    little deletion left. It should either be (a) rewritten as a naming-remediation task, or
+    (b) closed as superseded by `/test-diet`. Operator's call — do NOT execute it as written.
+  </owner-rescope>
+
   <prompt>
     Third and final deep-cleanup PR per spec FR-B10. Delete remaining DELETE-tagged tests from broader inventory. Resolve AMBIGUOUS bucket via judgment (each ambiguous test: read + decide keep or delete; document rationale). Run FULL dotnet test on surviving suite (not just a sample) to verify zero regressions vs pre-cleanup. Confirm final BFF unit test count is ≤3,500 (≥48% reduction from ~6,695). This PR's merge UNBLOCKS task 071 cutover.
   </prompt>

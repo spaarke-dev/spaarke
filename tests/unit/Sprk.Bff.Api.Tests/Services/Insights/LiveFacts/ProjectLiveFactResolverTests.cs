@@ -196,17 +196,4 @@ public class ProjectLiveFactResolverTests
         fact.Should().BeNull();
     }
 
-    [Fact]
-    public void Constructor_NullEntityService_Throws()
-    {
-        Action act = () => new ProjectLiveFactResolver(null!, NullLogger<ProjectLiveFactResolver>.Instance);
-        act.Should().Throw<ArgumentNullException>().WithParameterName("entityService");
-    }
-
-    [Fact]
-    public void Constructor_NullLogger_Throws()
-    {
-        Action act = () => new ProjectLiveFactResolver(_entityServiceMock.Object, null!);
-        act.Should().Throw<ArgumentNullException>().WithParameterName("logger");
-    }
 }

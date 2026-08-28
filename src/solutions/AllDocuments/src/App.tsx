@@ -371,15 +371,19 @@ export const App: React.FC = () => {
           </div>
         )}
 
-        {/* Version-history modal (task 051) — OBO list + open prior version read-only */}
+        {/* Version-history modal (task 051) — OBO list + open prior version read-only.
+            Keyed by the document ROW id since unified-access-control-r2 task 079; the server
+            resolves the SPE drive/item off the row after authorizing the caller for it.
+            The SPE-pointer guard is kept purely as UX — it avoids offering version history for a
+            document with no file attached, which the server would answer 409. The server still
+            fails closed on its own; this guard is not the control. */}
         {versionHistoryDoc && versionHistoryDoc.sprk_graphdriveid && versionHistoryDoc.sprk_graphitemid && (
           <VersionHistoryModal
             open={true}
             onClose={() => setVersionHistoryDoc(null)}
             documentName={versionHistoryDoc.sprk_documentname}
             fileType={versionHistoryDoc.sprk_filetype}
-            driveId={versionHistoryDoc.sprk_graphdriveid}
-            itemId={versionHistoryDoc.sprk_graphitemid}
+            documentId={versionHistoryDoc.sprk_documentid}
           />
         )}
       </div>

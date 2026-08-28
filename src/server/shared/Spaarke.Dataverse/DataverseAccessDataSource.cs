@@ -369,6 +369,205 @@ public class DataverseAccessDataSource : IAccessDataSource
         }
     }
 
+    /// <summary>The entity set targeted by the document-scoped <see cref="GetUserAccessAsync"/> path.</summary>
+    private const string DocumentEntitySetName = "sprk_documents";
+
+    /// <inheritdoc />
+    public async Task<AccessSnapshot> GetRecordAccessAsync(
+        string userId,
+        string entitySetName,
+        Guid recordId,
+        string? userAccessToken,
+        CancellationToken ct = default)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(userId, nameof(userId));
+        ArgumentException.ThrowIfNullOrWhiteSpace(entitySetName, nameof(entitySetName));
+
+        AccessSnapshot Denied(string reason)
+        {
+            _logger.LogWarning(
+                "[UAC-DIAG] RECORD-ACCESS DENIED ({Reason}): User={UserId}, EntitySet={EntitySet}, Record={RecordId}",
+                reason, userId, entitySetName, recordId);
+
+            return new AccessSnapshot
+            {
+                UserId = userId,
+                ResourceId = recordId.ToString(),
+                AccessRights = AccessRights.None,
+                TeamMemberships = Array.Empty<string>(),
+                Roles = Array.Empty<string>(),
+                CachedAt = DateTimeOffset.UtcNow
+            };
+        }
+
+        // Fail closed on a missing record id — an unresolvable target cannot be proven accessible.
+        if (recordId == Guid.Empty)
+        {
+            return Denied("empty_record_id");
+        }
+
+        // Fail closed on a missing caller token. NEVER degrade to app-only: on BFF-served surfaces
+        // reads are app-only, so Dataverse row-level security is inert and app-only answers "yes"
+        // for every caller — finding A-2, the exact disclosure this seam exists to prevent.
+        if (string.IsNullOrWhiteSpace(userAccessToken))
+        {
+            return Denied("no_caller_token");
+        }
+
+        try
+        {
+            var dataverseToken = await GetDataverseTokenViaOBOAsync(userAccessToken, ct);
+
+            // Resolve oid -> systemuserid. Done with an EXPLICIT per-request token rather than by
+            // mutating _httpClient.DefaultRequestHeaders (which GetUserAccessAsync does): that field is
+            // shared across concurrent requests, so setting it here would race another caller's identity
+            // onto this request. RetrievePrincipalAccess is bound to the principal, so a wrong
+            // systemuserid would silently authorize the wrong person.
+            var dataverseUserId = await LookupDataverseUserIdAsync(dataverseToken, userId, ct);
+            if (string.IsNullOrEmpty(dataverseUserId))
+            {
+                return Denied("caller_not_a_dataverse_user");
+            }
+
+            // AUTHORITATIVE: Dataverse's own answer for this principal on this record.
+            var rights = await TryRetrievePrincipalAccessAsync(
+                dataverseUserId, entitySetName, recordId.ToString(), dataverseToken, ct);
+
+            if (rights is null)
+            {
+                // RetrievePrincipalAccess gave no answer. Degrade to the retrieval probe, which grants
+                // at most Read and only when the caller can genuinely retrieve the record — still
+                // Dataverse's answer, just a narrower one.
+                //
+                // The probe is retained rather than denying outright because a systematic RPA outage
+                // would otherwise deny EVERY caller on the flagship Matter form. A form that shows a
+                // user nothing gets reverted, and reverting reopens the disclosure this closes — so the
+                // safe-looking choice is the less safe one. The probe cannot over-grant: Read only,
+                // conditional on Dataverse permitting the read.
+                var probed = await ProbeRecordReadAccessAsync(entitySetName, recordId, dataverseToken, ct);
+                rights = probed ? AccessRights.Read : AccessRights.None;
+            }
+
+            _logger.LogInformation(
+                "[UAC-DIAG] RECORD-ACCESS: User={UserId}, EntitySet={EntitySet}, Record={RecordId}, Rights={Rights}",
+                userId, entitySetName, recordId, rights.Value);
+
+            return new AccessSnapshot
+            {
+                UserId = userId,
+                ResourceId = recordId.ToString(),
+                AccessRights = rights.Value,
+                TeamMemberships = Array.Empty<string>(),
+                Roles = Array.Empty<string>(),
+                CachedAt = DateTimeOffset.UtcNow
+            };
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(
+                exception: ex,
+                message: "[UAC-DIAG] RECORD-ACCESS ERROR for User={UserId}, EntitySet={EntitySet}, " +
+                         "Record={RecordId}. Fail-closed: returning AccessRights.None",
+                userId, entitySetName, recordId);
+
+            return Denied("exception");
+        }
+    }
+
+    /// <summary>
+    /// Entity-agnostic retrieval probe: <c>true</c> iff the caller can retrieve the record, which means
+    /// Dataverse granted at least Read. Selects <c>createdon</c> because every Dataverse table has it —
+    /// this avoids needing each entity's primary-key attribute name, which would have to be guessed.
+    /// </summary>
+    private async Task<bool> ProbeRecordReadAccessAsync(
+        string entitySetName,
+        Guid recordId,
+        string dataverseToken,
+        CancellationToken ct)
+    {
+        try
+        {
+            var url = $"{entitySetName}({recordId})?$select=createdon";
+
+            using var requestMessage = new HttpRequestMessage(HttpMethod.Get, url)
+            {
+                Headers = { Authorization = new AuthenticationHeaderValue("Bearer", dataverseToken) }
+            };
+
+            var response = await _httpClient.SendAsync(requestMessage, ct);
+
+            if (response.IsSuccessStatusCode)
+            {
+                return true;
+            }
+
+            _logger.LogWarning(
+                "[UAC-DIAG] RECORD-PROBE denied: {StatusCode} for EntitySet={EntitySet}, Record={RecordId}",
+                response.StatusCode, entitySetName, recordId);
+
+            return false;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(
+                exception: ex,
+                message: "[UAC-DIAG] RECORD-PROBE threw for EntitySet={EntitySet}, Record={RecordId}. " +
+                         "Fail-closed: no access.",
+                entitySetName, recordId);
+
+            return false;
+        }
+    }
+
+    /// <summary>
+    /// Looks up the Dataverse systemuserid for an Azure AD Object ID using an EXPLICIT token, so the
+    /// call does not depend on (or mutate) <c>_httpClient.DefaultRequestHeaders</c>.
+    /// </summary>
+    private async Task<string?> LookupDataverseUserIdAsync(
+        string dataverseToken,
+        string azureAdObjectId,
+        CancellationToken ct)
+    {
+        try
+        {
+            var url = $"systemusers?$filter=azureactivedirectoryobjectid eq '{azureAdObjectId}'"
+                      + "&$select=systemuserid";
+
+            using var requestMessage = new HttpRequestMessage(HttpMethod.Get, url)
+            {
+                Headers = { Authorization = new AuthenticationHeaderValue("Bearer", dataverseToken) }
+            };
+
+            var response = await _httpClient.SendAsync(requestMessage, ct);
+            if (!response.IsSuccessStatusCode)
+            {
+                _logger.LogWarning(
+                    "[UAC-DIAG] systemuser lookup failed: {StatusCode} for AzureAdOid={AzureAdOid}",
+                    response.StatusCode, azureAdObjectId);
+                return null;
+            }
+
+            using var doc = System.Text.Json.JsonDocument.Parse(
+                await response.Content.ReadAsStringAsync(ct));
+
+            if (!doc.RootElement.TryGetProperty("value", out var value)
+                || value.GetArrayLength() == 0)
+            {
+                return null;
+            }
+
+            return value[0].TryGetProperty("systemuserid", out var id) ? id.GetString() : null;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(
+                exception: ex,
+                message: "[UAC-DIAG] systemuser lookup threw for AzureAdOid={AzureAdOid}. Fail-closed: null.",
+                azureAdObjectId);
+            return null;
+        }
+    }
+
     /// <summary>
     /// Looks up the Dataverse systemuserid for a given Azure AD Object ID.
     /// </summary>
@@ -458,7 +657,10 @@ public class DataverseAccessDataSource : IAccessDataSource
         CancellationToken ct)
     {
         // AUTHORITATIVE: ask Dataverse what rights this principal holds on this record.
-        var principalRights = await TryRetrievePrincipalAccessAsync(userId, resourceId, dataverseToken, ct);
+        // This overload of the question is document-scoped by contract (see IAccessDataSource
+        // .GetUserAccessAsync); GetRecordAccessAsync is the entity-agnostic sibling (task 070).
+        var principalRights = await TryRetrievePrincipalAccessAsync(
+            userId, DocumentEntitySetName, resourceId, dataverseToken, ct);
 
         if (principalRights.HasValue)
         {
@@ -493,8 +695,16 @@ public class DataverseAccessDataSource : IAccessDataSource
     /// <c>null</c> when the function could not be used — the signal to fall back. The distinction
     /// matters: <c>None</c> is an authoritative "no rights", <c>null</c> is "no answer".
     /// </returns>
+    /// <param name="entitySetName">
+    /// The Dataverse entity SET (plural) name of the target record — e.g. <c>sprk_documents</c>,
+    /// <c>sprk_matters</c>. Parameterised by unified-access-control-r2 task 070: this was hard-coded to
+    /// <c>sprk_documents</c>, which is what made the whole authorization seam document-only and left
+    /// <c>scope=entity</c> on <c>POST /api/ai/search</c> with nothing it could ask. Callers pass a value
+    /// from an explicit allow-list; nothing here pluralizes or guesses.
+    /// </param>
     private async Task<AccessRights?> TryRetrievePrincipalAccessAsync(
         string userId,
+        string entitySetName,
         string resourceId,
         string dataverseToken,
         CancellationToken ct)
@@ -502,11 +712,11 @@ public class DataverseAccessDataSource : IAccessDataSource
         try
         {
             // GET systemusers(<systemuserid>)/Microsoft.Dynamics.CRM.RetrievePrincipalAccess(Target=@p1)
-            //     ?@p1={"@odata.id":"sprk_documents(<recordid>)"}
+            //     ?@p1={"@odata.id":"<entitySetName>(<recordid>)"}
             // The function is bound to the PRINCIPAL; Target names the record. The response carries a
             // comma-separated rights string ("ReadAccess,WriteAccess,AppendToAccess,...") — exactly the
             // shape MapDataverseAccessRights and PrincipalAccessResponse were written to consume.
-            var target = $"{{\"@odata.id\":\"sprk_documents({resourceId})\"}}";
+            var target = $"{{\"@odata.id\":\"{entitySetName}({resourceId})\"}}";
             var url = $"systemusers({userId})/Microsoft.Dynamics.CRM.RetrievePrincipalAccess(Target=@p1)"
                       + $"?@p1={Uri.EscapeDataString(target)}";
 

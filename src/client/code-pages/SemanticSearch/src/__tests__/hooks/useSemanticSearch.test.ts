@@ -397,6 +397,96 @@ describe('useSemanticSearch', () => {
 
   // --- search() error handling ---
 
+  describe('scope degradation for record-less fragments (task 080)', () => {
+    // `scope: 'entity'` means "search WITHIN this one parent record", so it is only expressible when
+    // we actually have that record's id. A dropdown row selected without a URL envelope has none —
+    // it means "search every document whose parent is of this type", which is a CROSS-RECORD search.
+    //
+    // Sending `scope: 'entity'` with no entityId used to be a silent no-op; the BFF authorization
+    // filter now rejects it with 400 ENTITY_ID_REQUIRED, because there is no record to evaluate the
+    // caller's access against. These tests pin the degradation that keeps the page working.
+
+    const fragmentWithoutRecord = {
+      scope: 'entity' as const,
+      entityType: 'workassignment',
+      searchIndexName: 'idx-wa',
+    };
+
+    function lastRequestBody() {
+      return mockSearch.mock.calls[mockSearch.mock.calls.length - 1][0] as Record<string, unknown>;
+    }
+
+    it('degrades an entity fragment with no entityId to cross-record scope', async () => {
+      mockSearch.mockResolvedValue(makeResponse([], 0));
+      const { result } = renderHook(() => useSemanticSearch());
+
+      await act(async () => {
+        result.current.search('contracts', defaultFilters, null, null, null, fragmentWithoutRecord);
+      });
+
+      const body = lastRequestBody();
+      expect(body.scope).toBe('all');
+      expect(body.entityId).toBeUndefined();
+      // The entity-TYPE narrowing is dropped rather than moved to filters.entityTypes: the server's
+      // ValidEntityTypes allow-list (matter/project/invoice/account/contact) does not contain
+      // 'workassignment', so forwarding it would be a 400 INVALID_ENTITY_TYPES. Task 080 follow-up F-2.
+      expect(body.entityType).toBeUndefined();
+    });
+
+    it('keeps entity scope when the URL envelope supplied a record id', async () => {
+      mockSearch.mockResolvedValue(makeResponse([], 0));
+      const { result } = renderHook(() => useSemanticSearch());
+      const matterId = '11111111-1111-1111-1111-111111111111';
+
+      await act(async () => {
+        result.current.search('contracts', defaultFilters, null, null, matterId, {
+          scope: 'entity',
+          entityType: 'matter',
+          searchIndexName: 'idx-matter',
+        });
+      });
+
+      const body = lastRequestBody();
+      expect(body.scope).toBe('entity');
+      expect(body.entityType).toBe('matter');
+      expect(body.entityId).toBe(matterId);
+    });
+
+    it('passes an explicit all-scope fragment through unchanged', async () => {
+      mockSearch.mockResolvedValue(makeResponse([], 0));
+      const { result } = renderHook(() => useSemanticSearch());
+
+      await act(async () => {
+        result.current.search('contracts', defaultFilters, null, null, null, {
+          scope: 'all',
+          searchIndexName: 'idx-all',
+        });
+      });
+
+      expect(lastRequestBody().scope).toBe('all');
+    });
+
+    it('applies the same degradation on loadMore so both pages use one scope', async () => {
+      // If search() and loadMore() disagreed about the shape to send, the first page and the next
+      // would be authorized against different scopes — one filtered, one rejected.
+      mockSearch.mockResolvedValue(makeResponse([makeResult('doc-1')], 5));
+      const { result } = renderHook(() => useSemanticSearch());
+
+      await act(async () => {
+        result.current.search('contracts', defaultFilters, null, null, null, fragmentWithoutRecord);
+      });
+
+      await act(async () => {
+        result.current.loadMore();
+      });
+
+      const body = lastRequestBody();
+      expect(body.scope).toBe('all');
+      expect(body.entityType).toBeUndefined();
+      expect(body.entityId).toBeUndefined();
+    });
+  });
+
   describe('search() — error handling', () => {
     it('should transition to error state on API failure', async () => {
       const apiError: ApiError = {
