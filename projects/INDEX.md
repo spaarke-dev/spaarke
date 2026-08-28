@@ -174,7 +174,12 @@ This section surfaces where parallel projects collide on the same hot-path surfa
 > **Exit criterion** (`projects/ci-cd-unit-test-remediation-r1/spec.md`): 20 code PRs where both systems returned the same blocking verdict, zero false greens, ≥5 calendar days.
 > **Check progress**: `pwsh scripts/ci/shadow-window-status.ps1` (read-only, live, no state).
 >
-> **Need to change one of the three?** Escalate to the owner first — do not open the PR. A genuine defect fix is legitimate (one landed 2026-08-27: PR #841), but each one restarts the clock, so it must be a deliberate decision rather than a drive-by.
+> **Need to change one of the three?**
+>
+> - **GATE REPAIR — allowed, disclose and proceed.** If a gate is silently not enforcing (reporting green when it should report red, or a guard present but not armed), **fix it**. Do not wait. A freeze that protects a broken gate is worse than no freeze: it preserves a false green, which is the single failure mode this whole project exists to remove. Disclose in a note to `ci-cd-unit-test-remediation-r1`, and the window re-baselines from your merge.
+> - **ANYTHING ELSE — escalate first**, don't open the PR.
+>
+> *This carve-out was added 2026-08-27 after the original absolute wording failed its first two encounters with reality — within hours, and in both cases the "violation" was a repair. See the disclosure record below.*
 >
 > **Other CI files are NOT frozen** — `sdap-ci.yml`, `nightly-health.yml`, deploy workflows, and new workflow files are all fair game under the normal coordination rules below. Note that `sdap-ci.yml` is scheduled for deletion once the window closes, so investing in it has a short payback.
 >
@@ -189,7 +194,18 @@ This section surfaces where parallel projects collide on the same hot-path surfa
 > | Azure OIDC federated credentials created | `azure/login` now works on `master` + `pull_request`. Formerly `AADSTS700213` |
 > | `Storage Blob Data Contributor` granted (RG `rg-spaarke-platform-dev`) | Blob-publishing workflows can upload. `Contributor` alone never granted data-plane access |
 >
-> **If your PR is older than 2026-08-27, rebase onto master before diagnosing any CI failure** — you may be reading a red that was already fixed.
+> **If your PR predates 2026-08-27, sync with master before diagnosing any CI failure** — you may be reading a red that was already fixed. **Use `git merge origin/master`, not rebase**, unless you know your branch has no merge commits and no reviewer depending on its SHAs. (The original wording here said "rebase + `--force-with-lease`" as a blanket instruction; `unified-access-control-r2` correctly rejected it — their branch carries 7 merge commits that a rebase would flatten, on a shared PR branch mid-review. Blanket rebase advice was wrong and is withdrawn.)
+>
+> ### Disclosure record — frozen files touched 2026-08-27 (both ACCEPTED, no violation)
+>
+> Neither project could have complied: this banner was still an unmerged PR (#845) when both acted. Both disclosed voluntarily and unprompted.
+>
+> | Project | What | Adjudication |
+> |---|---|---|
+> | `spaarkeai-compose-r8` (PR #840, merged 20:52) | `ci-tier2-advisory.yml` aggregator read `needs.<job>.result` — which every Tier 2 job masks to `success` via `continue-on-error` — instead of each job's truthful `outputs.result`. **Every line of the Tier 2 report read `pass` unconditionally; it could not express a failure.** Also armed 6 `CallerIdentityGuardTests` facts in tier1's blocking filter. | **ACCEPTED, keep both.** The tier2 fix repairs a gate that could not fail — strictly better, and verdict-neutral (run conclusions unchanged; the window compares conclusions, not comment text). The tier1 arming is verdict-affecting and was disclosed as such; it is also correct — `CredentialGuardTests` landed 2026-08-21 unarmed and CI reported green over red for six days (issue #839). A guard that is present but not armed is theater. |
+> | `unified-access-control-r2` | `ci-tier1-blocking.yml` — one line, a **merge-conflict resolution** taking the union of both sides' arch-test facts (their 4 task-074 + master's 6 from #840 = 17). | **ACCEPTED.** Dropping either side would have silently disarmed a blocking gate. Taking the union is the only correct resolution; this is not an authored config change. |
+>
+> **Window re-baselines** rather than treating either as a breach. It was 3 PRs old — the cheapest possible moment. New start: after PR #825 merges (it carries the tier1 union above). Re-run `shadow-window-status.ps1 -Since <that merge time>`.
 
 **`ci-cd-unit-test-remediation-r1` REACTIVATED 2026-08-27** (was: dormant since 2026-06-28). Per the temporary-by-default clause below, ownership of `.github/workflows/**` **reverts to it** from `customer-provisioning-orchestration-r1`. Direct repair, not a revived project pipeline; state in `projects/ci-cd-unit-test-remediation-r1/notes/HANDOFF-2026-08-27-ci-remediation.md`. **3 active projects touch CI workflows in scope**: `customer-provisioning-orchestration-r1` (took direct, temporary-by-default ownership of `.github/workflows/**` 2026-08-19 after ci-cd-r1's window closed — modified `sdap-ci.yml` + `nightly-health.yml`, added NEW `build-provisioning-sidecar.yml`), `spaarke-redis-cache-remediation-r2` (adds NEW `.github/workflows/redis-key-rotation.yml` — no existing-file conflict), `spaarke-ai-architecture-redesign-r1` (adds ONE self-contained `eval-gate` job to `sdap-ci.yml` — zero existing lines modified; task 026, NFR-02 merge gate; coordinate with `customer-provisioning-orchestration-r1` before restructuring that file), and `spaarke-SPA-external-access-platform-r2` (extends `deploy-external-spa.yml` for per-app SWA deploy + adds Teams manifest packaging — **shares this workflow with `teams-app-r1`, which also adds a Teams-app deploy workflow paralleling it**; coordinate file ownership + naming with teams-app-r1 before opening a CI PR).
 
@@ -202,8 +218,19 @@ This section surfaces where parallel projects collide on the same hot-path surfa
 | Project | Note |
 |---|---|
 | `spaarkeai-compose-r8` (PR #806) | Reported to be working its own CI issues. **Not registered in the Active Projects table** — a provisional row is added there, but only `spaarkeai-compose-r8` can complete its own hot-path declaration (BFF / SpaarkeAi / CI / Skills), so **that project must self-register** per the Maintenance Contract. Two things to act on now: (1) its PR predates 2026-08-27, so **rebase onto master before diagnosing any CI red** — several failure classes were fixed that day and the red may already be gone; (2) if the fix requires touching one of the three frozen tier files, **escalate before opening the PR**. |
-| `unified-access-control-r2` (PR #825) | Went `CONFLICTING` on 2026-08-27 when the CI fixes landed on master — needs `git rebase origin/master` + `--force-with-lease`. Not caused by their own work. **`ci-cd-unit-test-remediation-r1` task 088 is deliberately waiting on this PR** rather than asking r2 to reschedule: 088 sweeps 18 endpoint files and 3 of them (`FileAccessEndpoints.cs`, `OBOEndpoints.cs`, `DataverseDocumentsEndpoints.cs`) overlap #825, which is a tenant-disclosure security fix. The mechanical sweep rebases onto the security fix, never the reverse. **No action required from r2 — merge on your own schedule.** |
-| `fix/caller-oid-resolution` (branch) | Also modifies `DataverseDocumentsEndpoints.cs`; same 088 overlap. |
+| `unified-access-control-r2` (PR #825) | Conflict with master **already resolved by r2 via `git merge origin/master`** — deliberately, NOT rebase: the branch carries 7 merge commits (worktree merges 073/079/075 + master merges) that a rebase would flatten, and `--force-with-lease` would rewrite a shared PR branch mid-review. **An earlier revision of this row advised rebase; that advice was wrong for this branch and is withdrawn.** #825 now needs only a push (71 commits). **`ci-cd-unit-test-remediation-r1` task 088 is deliberately waiting on it** — see the file table below. **No action required from r2; merge on your own schedule.** |
+| `fix/caller-oid-resolution` (branch) | Also modifies `DataverseDocumentsEndpoints.cs` — so that file has **two** claimants besides 088. |
+
+**Task 088 ↔ `unified-access-control-r2` file overlap** — corrected 2026-08-27 from r2's own coordination note (`projects/unified-access-control-r2/notes/coordination-task-088-file-overlap-2026-08-27.md`), which is authoritative here and found **more** overlap than this project's scan did. A branch-diff scan sees only *pushed* commits; it cannot see pending tasks or unpushed local work, which is why the owning project's declaration beats an outside scan:
+
+| File (in 088's `<files-to-modify>`) | Status per r2 |
+|---|---|
+| `Api/FileAccessEndpoints.cs` | Theirs — in #825 **and** still queued (task 012 pending) |
+| `Api/OBOEndpoints.cs` | Theirs — task 076 (option C) **converts one route and DELETES two of three**; a mechanical Graph-strip here is work on code about to be removed |
+| `Api/DataverseDocumentsEndpoints.cs` | Theirs — tasks 076 + 078 pending. This project originally attributed it to `fix/caller-oid-resolution` alone; **both** hold it |
+| `Api/UploadEndpoints.cs` | Theirs — **being DELETED** (dead app-only chunked-upload chain). 088 would edit a file that ceases to exist |
+
+**Ordering principle, generalised** (r2's §4, adopted): *a mechanical cross-cutting sweep FOLLOWS semantic changes, never leads them.* Rebasing a `using`-strip across 18 files is near-free; rebasing a tenant-disclosure security fix through a mechanical sweep is not, and every hand-resolved conflict on an authorization path is a chance to reintroduce the hole. Also note **#825's pushed diff is stale** — re-run any overlap analysis after r2 pushes.
 
 ### Skill Directives (`.claude/skills/**`, `.claude/constraints/**`)
 
