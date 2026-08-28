@@ -171,7 +171,45 @@ public class ADR010_DITests
         // land unreviewed, which is the opposite of what this ratchet is for. Left at 153.
         // The blind spot is booked onto tasks 060/061 (the forcing-function tasks), where a
         // cross-assembly credential census belongs.
-        const int knownOneToOneCeiling = 153;
+        //
+        // ───────── Ceiling raised 153 → 155, 2026-08-27 (issue #839, spaarkeai-compose-r8) ─────────
+        // This test began FAILING at 155 once the Tier 2 aggregator was repaired and stopped
+        // reporting every ADR line as `pass` regardless of outcome (PR #840). The failure is
+        // inherited from master, not from the branch that raised the ceiling: that branch adds no
+        // interface to any assembly.
+        //
+        // ⚠️ READ THE NET NUMBER CAREFULLY. It is +2, and that is misleading: SEVEN 1:1 interfaces
+        // were added and FIVE were removed. The removals bought headroom that hid five of the
+        // additions from the ratchet entirely. A ceiling on a net count cannot see this; only the
+        // list diff can. Anyone maintaining this number should diff the printed lists, not trust
+        // the delta. (Method: check out the prior ceiling commit, set the ceiling to 0 so the list
+        // prints, capture both lists, `comm` them.)
+        //
+        // Diff vs 5c3652f8d (the 2026-08-12 re-arm):
+        //   ADDED (7):
+        //     IFileSummarizeAi          -> FileSummarizeAi             ADR-013 / CLAUDE.md §10
+        //     IPreferenceMemoryCapture  -> PreferenceMemoryCapture       bullet 3 REQUIRE CRUD→AI
+        //       Both live in Services/Ai/PublicContracts/. These interfaces are not optional
+        //       indirection — the facade boundary is a binding architecture rule, and removing them
+        //       would violate it. 2 impls exist for IPreferenceMemoryCapture.
+        //     IProvisioningEnqueuer     -> ServiceBusProvisioningEnqueuer   test seam (2 doubles)
+        //     ITenantContainerResolver  -> OptionsTenantContainerResolver   test seam (1 double)
+        //     IAdvisoryCapabilityRunner -> AdvisoryCapabilityRunner         test seam (1 double)
+        //       Each is mocked/faked in tests, which is ADR-010's own testing-seam exception.
+        //     ITenantBudgetPolicy       -> TenantBudgetPolicy         ⚠️ WEAKEST — see below
+        //     ITenantTokenLedger        -> InMemoryTenantTokenLedger  ⚠️ WEAKEST — see below
+        //   REMOVED (5): IConfidenceScoringService, IEmailTemplateService, IOwnershipValidator,
+        //     IScopeCopyService, IScopeInheritanceService.
+        //
+        // ⚠️ The two weak seams are grandfathered here but NOT endorsed. Neither has a second
+        // implementation nor a test double today; their justification is documented future
+        // evolution (ITenantTokenLedger's impl is named InMemory* with a Redis successor named per
+        // ADR-009; ITenantBudgetPolicy is a fail-open pre-call gate). "Future flexibility" is
+        // exactly the reasoning CLAUDE.md §11 question 3 rejects. They are grandfathered rather
+        // than fixed because the AI-metering surface belongs to another project and converting it
+        // to concrete registration is a behavior-affecting refactor outside an ArchTest
+        // adjudication branch. Tracked so it is not lost — see the #839 PR description.
+        const int knownOneToOneCeiling = 155;
 
         Assert.True(
             oneToOneInterfaces.Count <= knownOneToOneCeiling,
