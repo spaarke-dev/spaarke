@@ -1,7 +1,8 @@
 # Current Task State — `unified-access-control-r2`
 
-> **Last Updated**: 2026-08-27 (by `context-handoff`) — **TRANCHE 1 MERGED (073 + 079), ArchTest edits
-> applied, census at 110. 076 rewritten to option (C). 8 worktree branches still unmerged.**
+> **Last Updated**: 2026-08-27 (by `context-handoff`) — **TRANCHE 1 + 2 MERGED (073·079·075). MASTER
+> MERGED (22 commits incl. breaking #840), whose new guard caught a LIVE defect of ours. 076 rewritten to
+> option (C). 6 worktree branches left.**
 > **Recovery**: read "Quick Recovery" first. History is in [`tasks/TASK-INDEX.md`](tasks/TASK-INDEX.md),
 > the per-task `.poml` files, and `notes/`. "Full State (Detailed)" below is retained history.
 
@@ -11,52 +12,50 @@
 
 | Field | Value |
 |-------|-------|
-| **State** | Wave A **6/6**. Master merged (`15385bbdf`, incl. #832). **Tranche 1 MERGED**: 073 (`904051d29`) + 079 (`229c4f849`), then the **12 ArchTest edits** (`fb77ebef1`). Branch **GREEN**: BFF **11,204/1/79** · ArchTests **6 fail/112 pass** (all other projects) · **census now 110**. |
-| **The 1 BFF failure** | `TenantCacheMetricsTests` — the known flake, **not** a regression. Passes in isolation; 079 touches nothing in the tenant-cache path. Diagnosis corrected in merge plan §5.6 (the accumulators are LOCAL; the *instrument* is global) and **deliberately left unfixed** — see that entry before touching it. |
-| **NOT merged** | **8** worktree branches: **075 · 081** + Wave A's **011 · 013 · 015 · 018 · 020**. |
-| **In flight** | Nothing. No agents running. Local commits **not pushed**. |
-| **Next Action** | **Merge tranche 2: 075.** It is the prerequisite for both 076 and 078, and it is `parallel-safe:false` (introduces the shared resolver seam). Then 081, then Wave A's five. Sequence in `notes/wave2-parallel-merge-plan.md` §2. |
+| **State** | **GREEN.** BFF **10,746/0/77** · ArchTests **6 fail/121 pass/127** (all 17 blocking facts pass) · census **110** · **0 behind origin/master**, 71 ahead, 7 merge commits. |
+| **Merged this session** | 073 (`904051d29`) · 079 (`229c4f849`) · 12 ArchTest edits (`fb77ebef1`) · 075 (`4ff112398`) · **origin/master** (`c992a2494`) · ADR-010 fix (`38329a4c2`) |
+| **NOT merged** | **6** branches: **081** + Wave A's **011 · 013 · 015 · 018 · 020** |
+| **Not pushed** | 71 commits. **PR #825 will need a push** — its CONFLICTING state is already resolved locally by the master merge |
+| **Next Action** | Merge **081**, then Wave A's five. Then **ArchTest edit #13** (081's census comment — deferred by its own ordering constraint). Then 076 (deps 073+075 now both in). |
 
-### ✅ Tranche 1 — what to trust, and what NOT to re-derive
+### 🔴 The find that matters most from this session
 
-- **073's conflict** was the predicted modify/delete on `Api/UploadEndpoints.cs`; **deletion taken**, and
-  verified before taking it: the only change to that file between 073's base and HEAD was #832's oid fix,
-  on a **notification** side-effect (not authorization) — `userOid` resolved `sub`, `Guid.TryParse` then
-  failed, so the notification silently never fired. A dead feature, not a hole, on a deleted route.
-  Sibling notification sites checked: `AgentEndpoints.cs:499-513` uses the **safe** three-term form.
-- **Both agents' test claims reconciled EXACT**: 073 = +7 passed / −3 skipped; 079 = +12 tests. Do not
-  re-measure.
-- **ArchTest edit #13 (081's census comment) is deliberately NOT applied** — its own ordering constraint
-  says apply *with* 081's code. Apply it when 081 merges.
-- **`NoWaiverIsStale` now also catches ABSENT routes**, not just gated ones — the gap that let 071, 073
-  and 079 each leave dead waivers. Negative + positive controls run (seeded waiver → RED; removed →
-  6/112 baseline), per `tests/CLAUDE.md`'s rule for this KEEP path.
+**#840's `CallerIdentityGuardTests.Rule1` (now BLOCKING) went red on our code, and it was right.** Three
+sites still read `FindFirst("oid") ?? FindFirst(ClaimTypes.NameIdentifier)` — which resolves `sub`:
 
-### 076 is REWRITTEN to option (C) — do not re-open the decision (`ed4e6539d`)
+| Site | Sink |
+|---|---|
+| `Api/Ai/SemanticSearchEndpoints.cs:653` | **per-row authorization** at `:569` |
+| `Api/Ai/RecordSearchEndpoints.cs:130` | **per-row authorization** at `:280` |
+| `Api/FileAccessEndpoints.cs:736` | the ANONYMOUS share-link audit line |
 
-Record-keyed upload contract: routes take `(entity, recordId)`, the server resolves the container from the
-record it authorizes, the client stops deciding. The escalation note's "(C) is not deliverable in scope"
-was **stale** — re-measured on-branch: 073 deletes `UploadEndpoints.cs`'s three routes, `/api/v1/containers/
-{containerId}/documents` is already 078, SpeAdmin's 12 have no owning record. Left: **one route converted**
-(`OBOEndpoints.cs:51`) and **two deleted** (`:102/:137` — their client first calls
-`GET /api/obo/containers/{id}/drive`, **mapped nowhere**, so the chunked path is dead by 404). Deps are now
-**073 + 075**; tier **opus**; it creates a **client+BFF ship-together** obligation.
+**My earlier fix (`72d40fd75`) was incomplete.** It fixed the two search *filters*; these are the
+*handlers* on the same routes — and `SemanticSearchEndpoints.cs:650-651` documents the invariant
+("Mirrors the filter's extraction so both halves … identify the caller identically"), so fixing only the
+filter **silently broke the mirror**. All three now use `CallerResolution.ResolveObjectId`. #840 swept 41
+sites on master and could not see our modified copies; the merge carried the un-swept versions forward —
+the same semantic-merge class as `99d5aa3c6`.
 
-### 🔴 OWED, and easy to lose — a regression test with a PROVEN gap
+### 🔴 Still OWED — the regression test, with a PROVEN gap
 
-**Two filters were fixed but are UNPROTECTED.** `SemanticSearchAuthorizationFilter` and
-`RecordSearchAuthorizationFilter` read `FindFirst("oid") ?? FindFirst(ClaimTypes.NameIdentifier)`, which
-resolved `sub` and **denied every caller** on `POST /api/ai/search` + `/api/ai/search/records`. Fixed
-(`72d40fd75`) to `CallerResolution.ResolveObjectId`.
+Unchanged and still the easiest thing to lose. `SemanticSearchAuthorizationFilter` +
+`RecordSearchAuthorizationFilter` (and now their handlers) are fixed but **unguarded**: 45 dedicated
+authorization tests in `Spe.Integration.Tests` stay green with the broken read restored (perturbation-
+proven twice, once against the wrong assembly). Write a test with production's MAPPED shape (schema-URI
+`oid` + divergent `NameIdentifier` `sub`) asserting the **oid** reaches the decision.
 
-**Perturbation-proven blind, twice:** the fix changed **no** test verdict (11,186/0 before AND after), and
-after making `DocumentDestroyAuthorizationTestFixture` discriminating (`314adad96`) I reverted the filter
-and re-ran the **correct** assembly (`Spe.Integration.Tests`) — **45 dedicated authorization tests still
-green.** So the blindness is not confined to one fixture.
+### Decisions NOT to re-litigate
 
-**Write**: a test constructing a principal in production's MAPPED shape (schema-URI `oid` + divergent
-`ClaimTypes.NameIdentifier` `sub`) asserting the **oid** reaches the authorization decision. Until it
-exists both fixes are correct and unguarded.
+- **076 → option (C)** (`ed4e6539d`). Deps now **073 + 075**, tier **opus**, creates a **client+BFF
+  ship-together** obligation. The escalation note's scope objection was measured and found stale.
+- **P2 (parent-child) is ours entirely** — no split.
+- **082 narrowed** — #840 built the ratchet; keep the §11 four-primitive question + classify-by-sink.
+- **ADR-010 ceiling NOT raised.** Fixed our unjustified interface (157→156); the residual is master's +2
+  plus our one documented seam (`ISecurableEntityRegistry`, genuinely substituted). Raising it would
+  launder master's two. See merge plan **A18**.
+- **TenantCacheMetrics flake FIXED**, not deferred — AsyncLocal correlation token, test-side only, with a
+  concurrent-emitter control that failed on first write and taught the real caveat. It mattered because
+  `deploy-bff-api.yml:304` runs the suite **once, no retry** — it could fail a DEPLOY, not CI.
 
 ### The three read-first documents
 
