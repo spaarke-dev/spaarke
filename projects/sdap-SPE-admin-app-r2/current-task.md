@@ -12,6 +12,7 @@
 | **Task** | **090 — wrap-up.** 🔲 **HELD by operator instruction** until all work is done AND UAT passes |
 | **Status** | **All code complete and DEPLOYED to Spaarke Dev.** Tree clean, branch pushed, PR [#859](https://github.com/spaarke-dev/spaarke/pull/859) open |
 | **Tasks** | **26 ✅ · 3 🔄 (029, 042, 050) · 1 🔲 (090)** of 30 — enumerated from TASK-INDEX, not from memory |
+| **Master** | ✅ Merged + verified green 2026-08-28 (see Repo state below). Re-merge before the 090 PR |
 | **Next Action** | **(a)** Re-run `scratchpad/probe050_optedin.py` on/after **2026-08-29** — the 24 h replication retry (§1.1). **(b)** Operator runs [`notes/UAT-CHECKLIST.md`](notes/UAT-CHECKLIST.md) (§1.2) |
 | **Blocked?** | Nothing is code-blocked. Both open threads are *waiting*, not stuck |
 | **Rigor** | 090 is TEST-MODIFYING → quality gates run **unconditionally** when it runs |
@@ -24,9 +25,24 @@
 | New 052 routes | **401** (registered + protected); a fake route still **404**, proving the 401s are real registrations and not a blanket auth wall |
 | Code page `sprk_speadmin` | Published, 2335 KB, byte-identical to the artifact whose strings I verified |
 
-### ⚠️ Repo state
-Branch is **13 ahead / 13 behind** `origin/master` — master moved again after this session's merge.
-**Merge master before the 090 PR**, then re-run the ArchTest baseline.
+### ✅ Repo state — master merged 2026-08-28, verified green
+
+Branch is **16 ahead / 0 behind** `origin/master` (@ `c86ed1b35`). Two merges, both **zero-conflict**
+(zero file overlap with master's 86 changed files).
+
+| Check | Result |
+|---|---|
+| `dotnet build -c Release` | **0 errors / 0 warnings** — survives master deleting `AccessibleRecordSetAuthorizationFilter` + `OfficeDocumentAccessFilter` and adding `CallerIdentity` |
+| SpeAdmin tests (258) | **257 pass**. The 1 failure is `SearchItemsTests`, the known pre-existing real-outbound-Dataverse test — failed at **1 m 41 s**, the same timeout signature already recorded below |
+| ArchTests | **5 fail — ALL pre-existing on master**, proven by running plain `origin/master` in a throwaway worktree. None are SpeAdmin; all are provisioning / DI / ServiceBus |
+
+⚠️ **ArchTest baseline caveat.** The throwaway-worktree baseline reported **6** failures, not 5. The
+extra one (`FR-27 positive`) is an **artifact of the method, not a master defect** — a fresh worktree
+has never built the provisioning DLLs, and that ArchTest inspects compiled L2 assemblies. It says so
+in its own failure message. Build the L2 projects first, or expect a phantom 6th failure.
+
+**Re-merge master immediately before the 090 PR** — it moved twice during this session's test runs
+(the `.git` is shared across ~80 worktrees, so `origin/master` advances under you).
 
 ---
 
@@ -140,7 +156,15 @@ callers, still DI-registered) · every `// AMBIGUOUS (task 042):` marker.
 ## 4. Recipes that earned their keep
 
 - **Prove a failure is pre-existing**: `git stash -u` → run → `git stash pop`. Used for both the
-  ArchTest baseline and `SearchItemsTests`.
+  ArchTest baseline and `SearchItemsTests`. **Once the work is committed, stash no longer works** —
+  use a throwaway worktree instead: `git worktree add -f --detach /c/tmp/base origin/master`, run,
+  then `git worktree remove --force`. ⚠️ **Build the projects the test inspects first.** ArchTests
+  that load compiled assemblies (the provisioning L2 guards) fail spuriously in a fresh worktree and
+  the failure looks exactly like a real violation. Read the failure MESSAGE before believing the
+  count — it names the missing assembly.
+- **`git diff --name-only A..B` is a two-dot DIFF, not a range.** For "what changed on master since we
+  diverged" you need three dots: `A...B`. The two-dot form lists your own files as differences and
+  manufactures a false conflict report.
 - **Read Graph's own CSDL before believing a doc**: `curl https://graph.microsoft.com/{v1.0,beta}/$metadata`, no token.
 - **Publish size is measured COMPRESSED.** Uncompressed is ~138 MB and looks catastrophic;
   `Compress-Archive -CompressionLevel Optimal` reproduces the ~45 MB gated figure.
