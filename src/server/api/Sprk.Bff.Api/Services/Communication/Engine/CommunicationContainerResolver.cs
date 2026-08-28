@@ -7,9 +7,9 @@ namespace Sprk.Bff.Api.Services.Communication.Engine;
 /// <summary>
 /// unified-access-control-r2 task 075, strategy 2 — the adapter between the communication family's
 /// polymorphic regarding (ADR-024, <see cref="RegardingFieldMap"/>) and the record-aware container decision
-/// (<see cref="IRecordContainerResolver"/>).
+/// (<see cref="RecordContainerResolver"/>).
 ///
-/// <para><b>Why an adapter is needed.</b> <see cref="IRecordContainerResolver"/> answers about a record you
+/// <para><b>Why an adapter is needed.</b> <see cref="RecordContainerResolver"/> answers about a record you
 /// can name. The email/communication ingest path cannot name one: it has a <c>sprk_communication</c> id and a
 /// single global <c>Communication:ArchiveContainerId</c>, and <c>sprk_communication</c> does not carry
 /// <c>sprk_issecure</c>. Something has to decide WHICH record the decision is about, and that is
@@ -29,13 +29,13 @@ namespace Sprk.Bff.Api.Services.Communication.Engine;
 /// </summary>
 public sealed class CommunicationContainerResolver
 {
-    private readonly IRecordContainerResolver _containerResolver;
+    private readonly RecordContainerResolver _containerResolver;
     private readonly IGenericEntityService _entityService;
     private readonly ISecurableEntityRegistry _securableEntities;
     private readonly ILogger<CommunicationContainerResolver> _logger;
 
     public CommunicationContainerResolver(
-        IRecordContainerResolver containerResolver,
+        RecordContainerResolver containerResolver,
         IGenericEntityService entityService,
         ISecurableEntityRegistry securableEntities,
         ILogger<CommunicationContainerResolver> logger)

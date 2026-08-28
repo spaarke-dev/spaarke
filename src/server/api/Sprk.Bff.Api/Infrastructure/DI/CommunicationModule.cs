@@ -553,7 +553,7 @@ public static class CommunicationModule
         services.AddSingleton<IncomingCommunicationProcessor>();
 
         // unified-access-control-r2 task 075, strategy 2 — the adapter from a communication's polymorphic
-        // regarding to the record-aware container decision. SCOPED, because IRecordContainerResolver and
+        // regarding to the record-aware container decision. SCOPED, because RecordContainerResolver and
         // IGenericEntityService are Scoped; IncomingCommunicationProcessor is a Singleton and resolves this
         // per-message from IServiceScopeFactory, exactly as it already does for SpeFileStore.
         //

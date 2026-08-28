@@ -6,7 +6,8 @@ using Sprk.Bff.Api.Infrastructure.Exceptions;
 namespace Sprk.Bff.Api.Infrastructure.Dataverse;
 
 /// <summary>
-/// Dataverse-backed <see cref="IRecordContainerResolver"/>. All of the logic that decides anything lives in
+/// Dataverse-backed record-aware SPE container mapping, in BOTH directions. All of the logic that decides
+/// anything lives in
 /// <see cref="SecureContainerDecision"/>; this type is the data-fetching half plus the reverse lookup.
 ///
 /// <para>Registered <b>Scoped</b> and <b>unconditionally</b> (Program.cs, beside
@@ -15,7 +16,7 @@ namespace Sprk.Bff.Api.Infrastructure.Dataverse;
 /// back to the shared container — so there is no ADR-032 Null-Object question to answer here, because there
 /// is no acceptable null object.</para>
 /// </summary>
-public sealed class RecordContainerResolver : IRecordContainerResolver
+public sealed class RecordContainerResolver
 {
     /// <summary>The stamped container column, on both the securable records and the business unit.</summary>
     private const string ContainerColumn = "sprk_containerid";

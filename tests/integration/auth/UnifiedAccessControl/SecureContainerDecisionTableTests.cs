@@ -137,7 +137,7 @@ public class SecureContainerDecisionTableTests
     [Fact(DisplayName = "Task 075: a resolved outcome always carries a container id, and a non-resolved one never does")]
     public void ResolvedOutcomes_AlwaysCarryAContainerId()
     {
-        // Guards the contract IRecordContainerResolver documents. A ResolvedSecure with a null container id
+        // Guards the contract RecordContainerResolver documents. A ResolvedSecure with a null container id
         // would satisfy every outcome assertion above and still hand a null container to SpeFileStore.
         string?[] values = [null, "", "  ", "b!x", "  b!x  "];
 

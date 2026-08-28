@@ -110,3 +110,16 @@ public enum ContainerDecisionOutcome
 /// <see cref="ContainerDecisionOutcome.ResolvedFallback"/>.
 /// </summary>
 public sealed record ContainerDecision(ContainerDecisionOutcome Outcome, string? ContainerId);
+
+/// <summary>
+/// The secure record that owns a container, as returned by
+/// <see cref="RecordContainerResolver.ResolveOwningRecordAsync"/>.
+/// </summary>
+/// <remarks>
+/// Moved here from <c>IRecordContainerResolver.cs</c> on 2026-08-27 when that 1:1 interface was removed
+/// per ADR-010 (register concretes unless a seam is required — it had no second implementation and no test
+/// double). It lives beside <see cref="ContainerDecision"/> because both are this resolver's value types.
+/// </remarks>
+/// <param name="EntityLogicalName">The owning record's entity logical name.</param>
+/// <param name="RecordId">The owning record's id — the authorization subject for tasks 073 / 078.</param>
+public sealed record OwningSecureRecord(string EntityLogicalName, Guid RecordId);
