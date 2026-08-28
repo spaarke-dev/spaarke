@@ -331,7 +331,15 @@ jobs:
     runs-on: ubuntu-latest
     continue-on-error: true  # 2026-06-24: CI informational-only until test-architecture-reset-r1 lands. See projects/test-architecture-reset-r1/design.md.
     permissions:
-      contents: write   # Auto-format push-back on PRs
+      # 2026-08-28: downgraded write -> read. The Prettier push-back step was removed.
+      # It committed to contributor PR branches as github-actions[bot]; 163 such commits
+      # landed in 60 days. Because a GITHUB_TOKEN push cannot re-trigger workflows, the
+      # resulting head SHA carried ZERO check-runs and a permanently `pending` combined
+      # status -- the same shape as a paths-ignore-skipped required check, and it would
+      # have made every auto-formatted PR unmergeable the moment `CI / Router` becomes
+      # required. The mechanism was also fully redundant: .husky/pre-commit already runs
+      # `prettier --write` on staged .ts/.tsx via .lintstagedrc.mjs.
+      contents: read
     steps:
       - name: Configure git line endings
         run: git config --global core.autocrlf true
@@ -371,19 +379,9 @@ jobs:
         run: npm install --legacy-peer-deps --no-audit --no-fund --ignore-scripts
 
       - name: Prettier auto-fix
+        # Workspace-local only. The push-back step was REMOVED 2026-08-28 — see the
+        # `permissions:` comment on this job for the full rationale.
         run: npx prettier --write "src/client/**/*.{ts,tsx}" --no-error-on-unmatched-pattern
-
-      - name: Push Prettier fixes
-        if: github.event_name == 'pull_request'
-        run: |
-          if [ -n "$(git diff --name-only)" ]; then
-            git config user.name "github-actions[bot]"
-            git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-            git add -u
-            git commit -m "style: auto-format Prettier (CI)"
-            git push
-            echo "::notice::Prettier fixes auto-committed and pushed to PR branch."
-          fi
 
       - name: Prettier format check
         run: npx prettier --check "src/client/**/*.{ts,tsx}" --no-error-on-unmatched-pattern
@@ -487,7 +485,12 @@ jobs:
     needs: build-test
     continue-on-error: true  # 2026-06-24: CI informational-only until test-architecture-reset-r1 lands. See projects/test-architecture-reset-r1/design.md.
     permissions:
-      contents: write   # Auto-format push-back on PRs
+      # 2026-08-28: downgraded write -> read. The `dotnet format` push-back step was
+      # removed for the reasons documented on the `client-quality` job above. This one
+      # additionally ran `git pull --rebase` against the contributor's PR branch, which
+      # can rewrite history on a shared branch mid-review. .husky/pre-commit already runs
+      # `dotnet format --include` on staged .cs files via .lintstagedrc.mjs.
+      contents: read
 
     steps:
       - name: Checkout
@@ -504,21 +507,9 @@ jobs:
         run: dotnet restore --verbosity minimal
 
       - name: Auto-fix whitespace formatting
+        # Workspace-local only. The push-back step was REMOVED 2026-08-28 — see the
+        # `permissions:` comment on this job for the full rationale.
         run: dotnet format whitespace --verbosity minimal
-
-      - name: Push dotnet format fixes
-        if: github.event_name == 'pull_request'
-        shell: bash
-        run: |
-          git pull --rebase || true
-          if [ -n "$(git diff --name-only)" ]; then
-            git config user.name "github-actions[bot]"
-            git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-            git add -u
-            git commit -m "style: auto-format dotnet whitespace (CI)"
-            git push
-            echo "::notice::dotnet format fixes auto-committed and pushed to PR branch."
-          fi
 
       - name: Format verification
         # `dotnet format whitespace` restricts to whitespace-only checks; excludes
