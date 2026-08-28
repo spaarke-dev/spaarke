@@ -368,12 +368,14 @@ public class RouteAuthorizationGuardTests
     //
     //   Endpoints/Diagnostics/TenantContainerResolverEndpoint.cs
     //     MapGet + RequireAuthorization() and nothing else. Classifying it surfaced a CROSS-TENANT
-    //     READ, filed as task 081: it takes tenantId from the QUERY STRING and treats the caller's
-    //     JWT `tid` claim as a mere fallback, so an authenticated caller in tenant A can resolve
-    //     tenant B's SPE container id by passing ?tenantId={B}. The 400-vs-200 split on "tenant not
-    //     served by this stamp" is also a tenant-enumeration oracle. Its own doc comment claims
-    //     "parity with all other BFF endpoints" for auth and it carries a Placement Justification, so
-    //     it passed review with this in it.
+    //     READ, filed as task 081 and FIXED there (15b5dc6a3, hardened by 1a77288b0): it TOOK tenantId
+    //     from the QUERY STRING and TREATED the caller's JWT `tid` claim as a mere fallback, so an
+    //     authenticated caller in tenant A COULD resolve tenant B's SPE container id by passing
+    //     ?tenantId={B}. The 400-vs-200 split on "tenant not served by this stamp" WAS also a
+    //     tenant-enumeration oracle. Now gated on a positively-classified app-only caller AND an
+    //     operator allow-list, denying before any resolver call; the `tid` fallback is gone. Its own
+    //     doc comment claimed "parity with all other BFF endpoints" for auth and it carried a
+    //     Placement Justification, so it passed review with the defect in it.
     //     NOT added to GovernedFiles — this guard's governed scope is per-DOCUMENT/record
     //     authorization, and a tenant-scoping defect is a different class. Task 081 owns the fix;
     //     forcing it in here would blur what Rule A means.
