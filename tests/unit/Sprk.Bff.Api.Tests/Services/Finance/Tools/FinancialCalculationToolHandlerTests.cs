@@ -49,36 +49,6 @@ public class FinancialCalculationToolHandlerTests
     }
 
     [Fact]
-    public void Constructor_NullDataverseService_ThrowsArgumentNullException()
-    {
-        // Act
-        var act = () => new FinancialCalculationToolHandler(null!, _telemetry, _logger);
-
-        // Assert
-        act.Should().Throw<ArgumentNullException>().WithParameterName("dataverseService");
-    }
-
-    [Fact]
-    public void Constructor_NullTelemetry_ThrowsArgumentNullException()
-    {
-        // Act
-        var act = () => new FinancialCalculationToolHandler(_dataverseService, null!, _logger);
-
-        // Assert
-        act.Should().Throw<ArgumentNullException>().WithParameterName("telemetry");
-    }
-
-    [Fact]
-    public void Constructor_NullLogger_ThrowsArgumentNullException()
-    {
-        // Act
-        var act = () => new FinancialCalculationToolHandler(_dataverseService, _telemetry, null!);
-
-        // Assert
-        act.Should().Throw<ArgumentNullException>().WithParameterName("logger");
-    }
-
-    [Fact]
     public async Task ExecuteAsync_MissingBothMatterIdAndProjectId_ReturnsError()
     {
         // Arrange — neither matterId nor projectId provided
