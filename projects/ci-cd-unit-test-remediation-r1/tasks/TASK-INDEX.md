@@ -112,7 +112,7 @@
 | 081 | build-test-diet-skill | FULL | ✅ | **false** (`.claude/` write — runs in parallel with 080 via main-session sequencing) | (Phase 2 complete) | 090 |
 | 091 | fix-tier2-realclock-test-failures (#848) | FULL | 🔲 | true | none | 090 |
 | 092 | make-prettier-check-reproducible (#850) | FULL | 🔲 | true | none | 090 |
-| 093 | fix-markdown-link-validator-scope (#849) | STANDARD | 🔲 | true | none | 090 |
+| 093 | fix-markdown-link-validator-scope (#849) | STANDARD | ✅ | true | none | 090 | Corpus 100,220 → 922 files; broken 1,212 → 267 (all verified real). Freeze-safe — no workflow touched. `notes/093-link-validator-scope.md`. |
 | 094 | extend-adr038-ban-enforcement (#864) | FULL | 🔲 | true | 865 | 090 |
 | 095 | client-test-ci-workflow-phase1 (#851) | STANDARD | 🔲 | true | none | 090 |
 | 082 | rerun-inventory-broader-criteria | STANDARD | ✅ | true | 080 | 083 |
