@@ -142,6 +142,34 @@ remediation**, not a crash or a false success.
 - **UI**: duplicate "Secure Score" header removed; the bar + badge + caption (three renderings of one
   number) collapsed into a donut. Hand-rolled ~30-line SVG — no chart library in this app.
 
+### UAT round 2 (2026-08-28) — container-type create
+
+Creating `Spaarke Model 1 Trial PAYGO` failed with `invalidRequest: One of the provided arguments is
+not acceptable` — an error that names no argument. **Three** defects on one path:
+
+- 🔴 **7th — `owningAppId` was never sent, and Graph requires it.** Beta CSDL marks
+  `fileStorageContainerType.owningAppId` `Nullable="false"`; the documented create body carries it.
+  Now resolved as request → `config.OwningAppId` → `config.ClientId`, with a **400 naming the field**
+  when none resolves rather than relaying Graph's anonymous rejection.
+- 🔴 **8th — the billing allow-list was wrong in BOTH directions.** It was `{standard, premium}`.
+  Graph's enum is `standard · trial · directToCustomer · unknownFutureValue`. **"premium" has never
+  existed**, and **`trial` + `directToCustomer` were rejected by our own validator** while the client
+  offers exactly those three. The documented path for a new environment was closed by our own code.
+- 🔴 **9th — an unparseable classification silently became `standard`.** A request for a **trial**
+  type would have created a **standard** one and reported success. The classification is
+  **permanent**, so that substitution is unrecoverable. Now throws before anything reaches Graph.
+
+⚠️ **SCOPE OF PROOF — this fix is REASONED, NOT PROVEN.** Container-type create is delegated-only and
+an app-only token gets **403** (consistent with task 010 on the sibling LIST endpoint), so the
+argument error is **unreachable from a probe**. Recorded in
+[`notes/probe_containertype_create.py`](notes/probe_containertype_create.py). Evidence is the beta
+CSDL + Microsoft's documented body; **UAT with a delegated token is the verification.** If it still
+fails, the next hypothesis is a tenant/licensing precondition — not the payload.
+
+**Trial-type platform limits** (Microsoft docs, relevant to this attempt): one trial container type
+per tenant at a time · 5 containers · 1 GB each · expires after 30 days · cannot be deployed to other
+consuming tenants. A failure saying a trial type already exists is correct behaviour, not our bug.
+
 ### `+ Add` evidence status (answers the UAT question directly)
 
 | Surface | Contract test | Real Graph |

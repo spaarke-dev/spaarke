@@ -96,6 +96,33 @@ the screen looked healthy. Fixed and proven against real Graph; this is the end-
 🔴 **(c) is the one to watch.** If adding the second property makes the first disappear, stop and
 report it — that is silent data loss.
 
+### 1A.2b — 🔴 Create Container Type (UAT round 2 — the `owningAppId` failure)
+
+**Container Types → Create.** This is the one that blocked standing up
+`Spaarke Model 1 Trial PAYGO`.
+
+⚠️ **This fix is REASONED, NOT PROVEN.** Container-type create is delegated-only; an app-only token
+gets `403`, so the failure could not be reproduced from a probe the way the Add Property bug was.
+The fix rests on Graph's beta CSDL (`owningAppId` `Nullable="false"`) plus Microsoft's documented
+create body. **Your delegated session is the verification.** If it still fails, capture the full
+message — the next hypothesis is a tenant/licensing precondition, not the payload.
+
+| # | Step | Expected |
+|---|---|---|
+| a | Create with **Trial** classification | Succeeds. Previously our own validator rejected `trial` outright while allowing `premium`, which Graph has never had |
+| b | Create with **directToCustomer** (passthrough) | Accepted by validation. May still fail at Graph for billing-profile reasons — that is a *different*, legitimate error |
+| c | Check the created type's **owning app** | Defaults to the owning app on the selected config. You do **not** need a new app registration — one app can own several container types |
+| d | If no owning app can be resolved | A **400 naming `owningAppId`**, not a relayed "one of the provided arguments is not acceptable" |
+
+> **Trial limits** (from Microsoft's docs, worth knowing before you test): **one trial container type
+> per tenant at a time**, max 5 containers, 1 GB each, expires after 30 days, and it cannot be
+> deployed to other consuming tenants. If (a) fails saying a trial type already exists, that is
+> correct platform behaviour, not our bug.
+
+🔴 **Do not ignore a success that names the wrong classification.** Billing classification is
+**permanent** — a trial type can never become standard. Confirm the created type shows the
+classification you chose.
+
 ### 1A.3 — the other `+ Add` buttons
 
 Probed live 2026-08-28. Status going into this round:
