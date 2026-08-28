@@ -4,6 +4,9 @@
 > wizards"* actually means.
 > **Status**: 🔲 **WORK REQUIRED. Not unified-access-control-r2 scope.** Needs handover to
 > `spaarkeai-compose-r8` (PR #806) or its own task.
+> **GitHub Issue**: https://github.com/spaarke-dev/spaarke/issues/858 (filed 2026-08-27 — the
+> two-write rule per `/project-defer-issue-tracking`; `push-to-github` Step 1.6 audits for unfiled
+> entries, so this link is what stops it warning).
 > **Severity**: same *shape* as task 073's finding (write into a caller-named container), on a
 > second surface. Not independently exploitable today — see "Exposure" below.
 
