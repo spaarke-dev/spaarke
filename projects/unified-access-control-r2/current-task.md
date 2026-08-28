@@ -1,10 +1,8 @@
 # Current Task State — `unified-access-control-r2`
 
-> **Last Updated**: 2026-08-27 (by `context-handoff`) — **TRANCHE 1 + 2 MERGED (073·079·075). MASTER
-> MERGED (22 commits incl. breaking #840), whose new guard caught a LIVE defect of ours. 076 rewritten to
-> option (C). 6 worktree branches left.**
-> **Recovery**: read "Quick Recovery" first. History is in [`tasks/TASK-INDEX.md`](tasks/TASK-INDEX.md),
-> the per-task `.poml` files, and `notes/`. "Full State (Detailed)" below is retained history.
+> **Last Updated**: 2026-08-28 (by `context-handoff`) — **MERGED TO MASTER. Wave 1 + Wave 2 complete
+> (070–081 less 076/078). 6 task branches remain.**
+> **Recovery**: read "Quick Recovery" first, then the ⚠️ merge rule below it — it cost a defect this session.
 
 ---
 
@@ -12,70 +10,60 @@
 
 | Field | Value |
 |-------|-------|
-| **State** | **GREEN.** BFF **10,746/0/77** · ArchTests **6 fail/121 pass/127** (all 17 blocking facts pass) · census **110** · **0 behind origin/master**, 71 ahead, 7 merge commits. |
-| **Merged this session** | 073 (`904051d29`) · 079 (`229c4f849`) · 12 ArchTest edits (`fb77ebef1`) · 075 (`4ff112398`) · **origin/master** (`c992a2494`) · ADR-010 fix (`38329a4c2`) |
-| **NOT merged** | **6** branches: **081** + Wave A's **011 · 013 · 015 · 018 · 020** |
-| **MERGED TO MASTER** | ✅ **2026-08-28** at `1a2fc335d`. PR **#825 MERGED**. Tier 1 **8/8 green** on the merge SHA, zero failures anywhere. Main repo `C:/code_files/spaarke` synced to the same SHA. Worktree clean and 0/0 vs master |
-| **Next Action** | Merge **081**, then Wave A's five. Then **ArchTest edit #13** (081's census comment — deferred by its own ordering constraint). Then 076 (deps 073+075 are both on master now). |
+| **State** | ✅ **MERGED TO MASTER.** Worktree clean, **0/0 vs `origin/master`**. Main repo `C:/code_files/spaarke` synced. PR **#825 MERGED**. |
+| **Verified** | build **0/0** · BFF **10,756 / 0 / 77** · ArchTests **6 fail / 121 pass** · census **110** · Tier 1 **8/8 green** on the merge SHA |
+| **The 6 ArchTest failures are NOT ours** | FR-27 ×2, ADR-010, `ServiceBusClientGuard`, FR-F1, FR-F2 — other projects' surfaces. ADR-010 sits at **156** = master's +2 (theirs to explain) + our **1 justified seam** (`ISecurableEntityRegistry`, genuinely substituted). **Do NOT raise the ceiling** — that launders master's two. |
+| **Merged this session** | 073 · 079 · 075 (full branch) · master (×3, incl. breaking **#840**) · 12 ArchTest edits · ADR-010 · flake fix · dead-code removal |
+| **Remaining** | **6 task branches** (table below) + ArchTest edit **#13** + tasks **076**, **078**, then Phase 1+ |
+| **Next Action** | Merge the 6 remaining branches **BY BRANCH NAME** (see ⚠️ below), starting with **081** — then apply ArchTest edit #13 (081's census comment, deferred by its own ordering constraint). |
 
-### ⚠️ MERGED WITH ONE NAMED RESIDUAL — it is an acceptance criterion on task 047
+### ⚠️ MERGE BY BRANCH, NEVER BY COMMIT SHA — this cost a real defect this session
 
-The `/push-to-github` Step 1.7 real-Dataverse gate found that 075's `SecurableEntityRegistry` issues a
-**live Dataverse metadata query on EVERY inbound communication archive**, and that a metadata failure
-**propagates by design** — the ingest catch (`IncomingCommunicationProcessor.ResolveContainerForContentAsync`)
-handles only `secure_record_container_missing` / `communication_secure_container_ambiguous`. So a
-privilege failure would BREAK inbound processing, not degrade it.
+`git log --grep` finds *a* commit; **the branch tip is the deliverable.** I merged 075 by SHA and shipped a
+version missing **3 fail-open fixes** in the container-isolation component (corrected in `202435a4f`; full
+account in merge plan **A19**). The mechanism is structural here: an agent's FIRST commit is the feature,
+and **Step 9.5's gates then make it iterate** — so grep-then-SHA reliably selects the *pre-review* version.
 
-**Excluded before merging** (verified live via Dataverse MCP, 2026-08-27): `sprk_issecure` AND
-`sprk_containerid` exist on `sprk_project`, `sprk_matter` AND `sprk_workassignment`. The
-`sprk_contact`-class name error — the exact regression Step 1.7 exists for — is ruled out.
+**The 6 remaining branches, verified by content 2026-08-28:**
 
-**Still open**: can the BFF's own Dataverse application user execute that metadata query. Recorded as a
-**criterion on `tasks/047`**, not just here.
+| Task | Branch | Tip | Unmerged commits |
+|---|---|---|---|
+| **011** reject same-entity self-join | `worktree-agent-a883a01048c746823` | `15924623d` | 1 |
+| **013** workforce email/oid no-hijack | `worktree-agent-a1905b30c1c467af3` | `ceb75146d` | **5** ⚠️ |
+| **015** membership paging deterministic | `worktree-agent-a5cce09f225ae4265` | `8f749ab5d` | 1 |
+| **018** remove dead filter (A-23) | `worktree-agent-a50b2ed919feb5169` | `37f691ca1` | 2 |
+| **020** org-grant SPE member cleanup | `worktree-agent-aa9346e2aa2b6af05` | `472141c36` | 1 |
+| **081** classify the caller | `worktree-agent-a6469d6b786a2b792` | `41cb87310` | **4** ⚠️ |
 
-**Owner decision, do not re-open blind**: NOT hardening the catch. Widening it is isolation-safe (nothing
-is written) but converts a loud availability break into a **silent completeness failure** — records
-captured, SPE content quietly dropped — which is worse for an archival feature. If that hedge is ever
-wanted, the correct form marks the communication archive-failed in DATA, not only in logs.
+013 and 081 carry the most tail — exactly the shape that bit 075. 073/079/075 are all confirmed **0
+unmerged**.
 
-### 🔴 The find that matters most from this session
+### 🔴 STILL OWED — a regression test whose gap is PROVEN, not suspected
 
-**#840's `CallerIdentityGuardTests.Rule1` (now BLOCKING) went red on our code, and it was right.** Three
-sites still read `FindFirst("oid") ?? FindFirst(ClaimTypes.NameIdentifier)` — which resolves `sub`:
+`SemanticSearchAuthorizationFilter` + `RecordSearchAuthorizationFilter` **and their handlers** were fixed
+to `CallerResolution.ResolveObjectId`, but nothing guards them. Perturbation-proven twice: restore the
+broken read and **45 dedicated authorization tests in `Spe.Integration.Tests` stay green**.
+**Write**: a principal in production's MAPPED shape (schema-URI `oid` + *divergent* `NameIdentifier` `sub`)
+asserting the **oid** reaches the authorization decision.
 
-| Site | Sink |
-|---|---|
-| `Api/Ai/SemanticSearchEndpoints.cs:653` | **per-row authorization** at `:569` |
-| `Api/Ai/RecordSearchEndpoints.cs:130` | **per-row authorization** at `:280` |
-| `Api/FileAccessEndpoints.cs:736` | the ANONYMOUS share-link audit line |
+### The session's most instructive find (don't lose the lesson)
 
-**My earlier fix (`72d40fd75`) was incomplete.** It fixed the two search *filters*; these are the
-*handlers* on the same routes — and `SemanticSearchEndpoints.cs:650-651` documents the invariant
-("Mirrors the filter's extraction so both halves … identify the caller identically"), so fixing only the
-filter **silently broke the mirror**. All three now use `CallerResolution.ResolveObjectId`. #840 swept 41
-sites on master and could not see our modified copies; the merge carried the un-swept versions forward —
-the same semantic-merge class as `99d5aa3c6`.
-
-### 🔴 Still OWED — the regression test, with a PROVEN gap
-
-Unchanged and still the easiest thing to lose. `SemanticSearchAuthorizationFilter` +
-`RecordSearchAuthorizationFilter` (and now their handlers) are fixed but **unguarded**: 45 dedicated
-authorization tests in `Spe.Integration.Tests` stay green with the broken read restored (perturbation-
-proven twice, once against the wrong assembly). Write a test with production's MAPPED shape (schema-URI
-`oid` + divergent `NameIdentifier` `sub`) asserting the **oid** reaches the decision.
+**#840's `CallerIdentityGuardTests.Rule1` — now blocking — caught three surviving
+`FindFirst("oid") ?? NameIdentifier` reads in our files**, two feeding *per-row authorization*
+(`SemanticSearchEndpoints.cs:653` → `:569`, `RecordSearchEndpoints.cs:130` → `:280`). My earlier fix had
+covered the **filters** only, and `SemanticSearchEndpoints.cs:650` documents the invariant —
+*"Mirrors the filter's extraction so both halves… identify the caller identically"* — so fixing one half
+**silently broke the mirror**. A mechanical ratchet caught what review did not.
 
 ### Decisions NOT to re-litigate
 
-- **076 → option (C)** (`ed4e6539d`). Deps now **073 + 075**, tier **opus**, creates a **client+BFF
-  ship-together** obligation. The escalation note's scope objection was measured and found stale.
-- **P2 (parent-child) is ours entirely** — no split.
+- **076 → option (C)**, record-keyed upload contract. Deps **073 + 075** (both on master). Tier **opus**.
+  Creates a **client + BFF ship-together** obligation. Status restored to `pending`.
+- **P2 (parent–child) is ours entirely** — no split.
 - **082 narrowed** — #840 built the ratchet; keep the §11 four-primitive question + classify-by-sink.
-- **ADR-010 ceiling NOT raised.** Fixed our unjustified interface (157→156); the residual is master's +2
-  plus our one documented seam (`ISecurableEntityRegistry`, genuinely substituted). Raising it would
-  launder master's two. See merge plan **A18**.
-- **TenantCacheMetrics flake FIXED**, not deferred — AsyncLocal correlation token, test-side only, with a
-  concurrent-emitter control that failed on first write and taught the real caveat. It mattered because
-  `deploy-bff-api.yml:304` runs the suite **once, no retry** — it could fail a DEPLOY, not CI.
+- **Do not harden the ingest catch** — see the 047 residual below.
+- **A18 is RETRACTED by A19** — §4c was right; my merge was wrong.
+
 
 ### The three read-first documents
 
