@@ -209,7 +209,17 @@ public class ADR010_DITests
         // than fixed because the AI-metering surface belongs to another project and converting it
         // to concrete registration is a behavior-affecting refactor outside an ArchTest
         // adjudication branch. Tracked so it is not lost — see the #839 PR description.
-        const int knownOneToOneCeiling = 155;
+        //
+        // 155 -> 156, same day, on merging master: ISecurableEntityRegistry ->
+        // SecurableEntityRegistry (unified-access-control-r2 task 075). ACCEPTED as an
+        // external-dependency seam: it wraps a live Dataverse metadata retrieval, and its XML doc
+        // states an implementation contract the interface exists to impose — "Implementations MUST
+        // throw rather than return an empty or partial set when the answer cannot be determined",
+        // because "I could not find out whether this entity is securable" read as "it is not
+        // securable" places content in a shared container, which SPE's additive-only permission
+        // model makes irreversible. That is a contract, not indirection. Worth noting as the
+        // ratchet behaving correctly: the count moved for a real reason and named the interface.
+        const int knownOneToOneCeiling = 156;
 
         Assert.True(
             oneToOneInterfaces.Count <= knownOneToOneCeiling,
