@@ -95,9 +95,7 @@ export class SecureContainerUnresolvedError extends Error {
       `${entityLogicalName} '${recordId}' is marked secure but has no SharePoint Embedded container ` +
         `of its own. Its content cannot be stored in a shared container, so this operation was ` +
         `refused${
-          fallbackWasAvailable
-            ? ' — a shared fallback container was available and was deliberately NOT used'
-            : ''
+          fallbackWasAvailable ? ' — a shared fallback container was available and was deliberately NOT used' : ''
         }. Provision the record's own container before uploading to it.`
     );
     this.name = 'SecureContainerUnresolvedError';
@@ -142,9 +140,7 @@ export function decideContainer(input: {
 
     // FAIL CLOSED. Note what is deliberately NOT reachable from this branch: the fallback. It may
     // well be non-empty and usable. Using it is the defect.
-    return own === undefined
-      ? { outcome: 'fail-closed' }
-      : { outcome: 'resolved-secure', containerId: own };
+    return own === undefined ? { outcome: 'fail-closed' } : { outcome: 'resolved-secure', containerId: own };
   }
 
   // A non-secure record's OWN stamped container is deliberately never consulted — only the
@@ -153,9 +149,7 @@ export function decideContainer(input: {
   // today (which task 076 removes). Non-secure behaviour is unchanged by this task, on purpose.
   const fallback = normalize(input.fallbackContainerId);
 
-  return fallback === undefined
-    ? { outcome: 'unresolved' }
-    : { outcome: 'resolved-fallback', containerId: fallback };
+  return fallback === undefined ? { outcome: 'unresolved' } : { outcome: 'resolved-fallback', containerId: fallback };
 }
 
 /**
@@ -198,10 +192,7 @@ export function __resetSecurableEntityCache(): void {
  *         never be read as "it is not securable" — that is the same isolation failure with an extra
  *         step.
  */
-export async function isSecurableEntity(
-  probe: IEntityMetadataProbe,
-  entityLogicalName: string
-): Promise<boolean> {
+export async function isSecurableEntity(probe: IEntityMetadataProbe, entityLogicalName: string): Promise<boolean> {
   const key = entityLogicalName.trim().toLowerCase();
   if (key === '') return false;
 
@@ -212,8 +203,7 @@ export async function isSecurableEntity(
   const metadata = await probe.retrieveEntityMetadata(key);
 
   const securable =
-    !!metadata?.attributes &&
-    Object.prototype.hasOwnProperty.call(metadata.attributes, SECURE_FLAG_ATTRIBUTE);
+    !!metadata?.attributes && Object.prototype.hasOwnProperty.call(metadata.attributes, SECURE_FLAG_ATTRIBUTE);
 
   securableMemo.set(key, securable);
   return securable;
@@ -248,9 +238,7 @@ export interface ResolveContainerArgs {
  * @throws Propagates any metadata or record-read failure, because an undetermined securability
  *         answer must not resolve to a shared container.
  */
-export async function resolveContainerForRecord(
-  args: ResolveContainerArgs
-): Promise<ContainerResolution> {
+export async function resolveContainerForRecord(args: ResolveContainerArgs): Promise<ContainerResolution> {
   const { webApi, metadataProbe, entityLogicalName, recordId, fallbackContainerId } = args;
 
   const entity = (entityLogicalName ?? '').trim().toLowerCase();
@@ -262,7 +250,12 @@ export async function resolveContainerForRecord(
   // also means non-securable entities cost ZERO extra Dataverse round trips beyond the memoised
   // metadata probe, which is what keeps this cheap enough to sit on every upload path.
   if (!(await isSecurableEntity(metadataProbe, entity))) {
-    return toResolution(decideContainer({ isSecure: false, fallbackContainerId }), entity, recordId, fallbackContainerId);
+    return toResolution(
+      decideContainer({ isSecure: false, fallbackContainerId }),
+      entity,
+      recordId,
+      fallbackContainerId
+    );
   }
 
   const id = (recordId ?? '').replace(/^\{|\}$/g, '').trim();
@@ -308,10 +301,6 @@ function toResolution(
     case 'unresolved':
       return { source: 'unresolved' };
     case 'fail-closed':
-      throw new SecureContainerUnresolvedError(
-        entityLogicalName,
-        recordId,
-        !!normalize(fallbackContainerId)
-      );
+      throw new SecureContainerUnresolvedError(entityLogicalName, recordId, !!normalize(fallbackContainerId));
   }
 }
