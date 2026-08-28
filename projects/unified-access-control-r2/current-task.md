@@ -11,7 +11,8 @@
 | Field | Value |
 |-------|-------|
 | **State** | Worktree on `work/unified-access-control-r2` at `babf5f7ee` — 1 commit ahead of master (the design.md INV-7 correction). Five agents working in **isolated git worktrees**, each committing to its own branch. |
-| **Next Action** | ⏳ **Wait for the five agent completions, then MERGE BY BRANCH NAME** (never by cherry-picking a SHA — an agent's first commit is the pre-review version). See §AGENTS IN FLIGHT for the per-branch acceptance checks. |
+| **Next Action** | 🔴 **READ [`notes/SESSION-STATUS-2026-08-28.md`](notes/SESSION-STATUS-2026-08-28.md) FIRST — §6.5 holds the owner's answers to Q1–Q5 and is the implementation contract.** Then: (1) create tasks **084** (Office save — row 9) and **085** (SpeAdmin container items — row 10, THREE routes incl. `POST …/folders`); (2) implement Q1's no-record branch — server-derived acting-user BU, never client-supplied; (3) widen `EntityAccessFilter.EntitySetByType` with `sprk_workassignment`/`sprk_event`/`sprk_todo` + a test each, then re-verify the Office save surface (shared map); (4) 083 closes with the DELETEs (rows 4/5) + row 8 conversion + the landed guard; (5) set 012 to `completed-with-escalation`, **not ✅**. |
+| **All six agents DONE, all branches merged** | test-suite repair · sink guard · 076 server half · 078 complete · 012 analysis · plus upstream #860/#862. 14+ commits ahead of master, zero conflicts. |
 | **Owner directive this session** | Run 083 **and** 012/076/078 (CI-coordination scope), parallel where possible; and **fix** the unreliable local test suite rather than working around it. |
 
 ### ⚠️ MERGE HAZARD — `current-task.md` itself

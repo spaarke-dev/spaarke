@@ -232,6 +232,113 @@ the live-Azure `Spe.Integration.Tests` are unaffected; **not yet verified agains
 
 ---
 
+## 6.5. ✅ OWNER ANSWERS — 2026-08-28. These resolve Q1–Q5. Implement to these.
+
+### Q1 → acting user's BU, but the SERVER derives it. No upload ticket needed.
+
+Owner: *"the current is to use the client-derived container id — meaning the user's business unit…
+most of this is most always going to be correct because record/document owner is the team the user is
+assigned to… If that is true, then user's business unit container id is correct."*
+
+**Accepted for the three no-record paths only, with the mechanism changed.** The distinction that must
+not be lost:
+
+> the user's BU container is the correct **VALUE** ≠ the **CLIENT** should send a container id
+
+The server already reads Dataverse and can resolve the acting user's BU itself. That accepts the answer
+while preserving the invariant, and it means **option (1)'s upload ticket is NOT required.** Exposure is
+bounded: a caller can only write into their own BU's container, which they are entitled to anyway.
+
+**The resolution order to implement:**
+```
+record exists + secure    -> the record's OWN sprk_containerid, or FAIL CLOSED (never any fallback)
+record exists, non-secure -> the RECORD's owningbusinessunit -> businessunit.sprk_containerid   [built, 076]
+NO record yet             -> the ACTING USER's businessunitid -> businessunit.sprk_containerid   [NEW]
+                             server-derived, never client-supplied
+server-side ingest        -> Communication:ArchiveContainerId
+```
+
+⚠️ **Correction the owner should carry forward** (verified live against Dataverse 2026-08-27): *"the user
+isn't going to have access to the record/document if they are not in the team"* does **not** hold in the
+case that matters most. **Users sit in the Operations subtree while secure records are owned in
+`Secure Projects`**, so for a secure record the acting user's BU is provably the WRONG container. Access
+also arrives via sharing (POA), role depth and the user hierarchy — not only team membership. And the root
+`Spaarke` BU **shares its container with `Spaarke Business Unit 1`**, so a BU container is not itself an
+isolation boundary. Hence acting-user BU is admissible **only** where no record exists, and **never** for
+secure content.
+
+### Q2 → yes, create tasks 084 (Office) and 085 (SpeAdmin)
+
+Owner: *"yes can create 084, 085 for these new tasks."* 083 closes with the deletions + row 8 + the guard.
+
+### Q3 → accept the bounded residual risk. Container-level revocation is the policy.
+
+Owner: *"for SPE there is not file-level permission — it is only container level; we will handle revocation
+of direct SPE link file access at the container level for both internal and external users; the secondary
+level is app permission revocation since file access is through Document record as the front door."*
+
+**Accepted → option (a): accept + document.** But record the gap explicitly, because it is an exception to
+the model just described rather than something the model covers:
+
+🔴 **An anonymous share link escapes BOTH named controls.** It requires **no container membership** (that is
+what anonymous means) and it **does not go through the Document record front door**. So container-level
+revocation does **not** invalidate an already-minted link, and neither does app-permission revocation. The
+**≤7-day expiry remains the only revocation this route has.** That is precisely why `ShareLinkOptions`
+`[Range]`-validates the ceiling — an operator must not be able to configure an unbounded one.
+
+Residual risk, stated for the record: a ≤7-day window in which an anyone-with-the-link URL to one document
+exists and cannot be retracted, even after that document's access is revoked. Minting requires
+`AccessRights.Share` on that specific document and is audited at Warning with the caller's identity.
+**012 → `completed-with-escalation`, NOT ✅.** Track-and-revoke (Q3 option b) stays available as
+separately-scoped follow-on if the residual window is later judged too wide.
+
+### Q4 → yes, add them. It is file access.
+
+Owner: *"access in terms of file access? if that is the access then yes these need to be included."*
+Confirmed: an entity type absent from `EntityAccessFilter.EntitySetByType` makes the record-keyed upload
+route **DENY** (fail closed). So `sprk_workassignment`, `sprk_event` and `sprk_todo` uploads would be
+rejected outright. Add all three **with a test per newly-admitted type**, and note the map is shared with
+the Office save path — so 084 must re-verify that surface after the widening.
+
+### Q5 → follows Q1
+
+Returning the server's **CHOSEN** container/drive id to the client is fine and necessary (the client needs
+`driveId` for `sprk_graphdriveid` + `indexFile()`). **Accepting one in the request is the vulnerability.**
+Recorded as the invariant wording.
+
+---
+
+## 6.6. Where the SPE folders come from (owner question, 2026-08-28)
+
+The owner observed unexplained folders in SPE Admin — `communications`, `emails`, `exports`, **"New Word
+Document from Word Web Add In 8"**, **"Word Document Office Add In 3"**. Two mechanisms:
+
+**Explicit** — `POST /api/spe/containers/{id}/folders` → `CreateFolderAsync`
+(`Infrastructure/Graph/SpeAdminGraphService.cs:977`, admin "New Folder" button; the third live site in
+row 10).
+
+**Implicit — this is what the owner is seeing.** Graph creates intermediate folders automatically when a
+file is uploaded to a *path*. Confirmed sites:
+
+| Folder | Created by |
+|---|---|
+| `exports` | `Api/Ai/ChatWordExportEndpoints.cs:152` — `uploadPath = $"exports/{request.Filename}"` |
+| `chat-uploads` | `Api/Ai/ChatDocumentEndpoints.cs:1158` |
+| `communications`, `emails` | the Communication archive path (`ArchiveContainerId`) |
+| **document-title-named folders** | the **Office add-in save path** — `Workers/Office/UploadFinalizationWorker.cs:641-643` builds `$"{folderPath}/{fileName}"` from the job payload |
+
+**So nobody clicked "New Folder" for the two Word ones — the Office save path is passing a document title
+as `folderPath`, creating one folder per saved document.** ⚠️ Mechanism and the `exports`/`chat-uploads`
+cases are CONFIRMED; the Office `folderPath` origin is a strong inference from
+`UploadFinalizationWorker.cs:620,641` — **task 084 must confirm it at the payload's source**
+(`OfficeJobQueue.cs` / `OfficeService.SaveAsync`) before changing behaviour.
+
+**These folders are row 9 made visible** — the observable footprint of the same Office save path that takes
+its container from a client-supplied body field. Worth stating in 084's justification: the defect already
+has visible operational consequences, not just theoretical ones.
+
+---
+
 ## 7. Recommended resolution, in one line each
 
 | Q | Recommendation |
