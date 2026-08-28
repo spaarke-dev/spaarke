@@ -353,6 +353,10 @@ public class DispatchSessionEndpointContractTests : IClassFixture<DispatchSessio
     public async Task Post_NonGuidBindingId_Returns400_BindingIdInvalid()
     {
         _fx.Reset();
+        // Issue #863: seed an OWNED session. SessionOwnershipFilter runs ahead of the handler,
+        // so a test that leaves Session null no longer reaches the validation it asserts on --
+        // and a real request to a session route always resolves a session the caller owns.
+        _fx.Sessions.Session = BuildSession(TestSessionId, fileId: "file-001");
         var client = _fx.CreateAuthenticatedClient();
 
         var response = await client.PostAsJsonAsync(
@@ -370,6 +374,10 @@ public class DispatchSessionEndpointContractTests : IClassFixture<DispatchSessio
     public async Task Post_MissingBindingId_Returns400_BindingRequired()
     {
         _fx.Reset();
+        // Issue #863: seed an OWNED session. SessionOwnershipFilter runs ahead of the handler,
+        // so a test that leaves Session null no longer reaches the validation it asserts on --
+        // and a real request to a session route always resolves a session the caller owns.
+        _fx.Sessions.Session = BuildSession(TestSessionId, fileId: "file-001");
         var client = _fx.CreateAuthenticatedClient();
 
         var response = await client.PostAsJsonAsync(
@@ -501,8 +509,13 @@ public class DispatchSessionEndpointContractTests : IClassFixture<DispatchSessio
             "/api/ai/chat/sessions/not-a-guid/dispatch",
             new { bindingId = TestBindingId.ToString() });
 
-        response.StatusCode.Should().Be(HttpStatusCode.BadRequest);
-        (await response.Content.ReadAsStringAsync()).Should().Contain("sessionId.invalid");
+        // Issue #863: SessionOwnershipFilter runs before the handler's GUID-format check, so
+        // a malformed id is answered "not found" rather than "invalid". Truthful -- an id that
+        // cannot be a GUID cannot name a session -- and it keeps ONE answer for every id the
+        // caller does not own, which is what stops the route being an existence oracle.
+        response.StatusCode.Should().Be(HttpStatusCode.NotFound);
+        (await response.Content.ReadAsStringAsync())
+            .Should().Contain(SessionOwnershipFilterExtensions.NotFoundOrNotOwnedErrorCode);
     }
 
     // ─────────────────────────────────────────────────────────────────────────

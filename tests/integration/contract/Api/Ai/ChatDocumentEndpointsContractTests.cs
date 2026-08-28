@@ -10,6 +10,7 @@ using Azure.Search.Documents;
 using Azure.Search.Documents.Indexes;
 using Azure.Search.Documents.Models;
 using FluentAssertions;
+using Sprk.Bff.Api.Api.Filters;
 using Microsoft.AspNetCore.Authentication;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Hosting;
@@ -322,6 +323,11 @@ public class ChatDocumentEndpointsContractTests : IClassFixture<ChatDocumentEndp
         // FeatureDisabledException and emits the canonical 503 (ADR-018/ADR-019), never a
         // dead SSE stream.
         _fx.Reset();
+
+        // Issue #863: the kill-switch contract is asserted on a session the caller OWNS -- the
+        // filter runs first, so without a seeded session this never reaches the 503 branch.
+        _fx.Sessions.Session = BuildSession(TestSessionId, uploadedFiles: null);
+
         var client = _fx.CreateAuthenticatedClient();
 
         var response = await client.PostAsJsonAsync(
@@ -344,8 +350,13 @@ public class ChatDocumentEndpointsContractTests : IClassFixture<ChatDocumentEndp
             "/api/ai/chat/sessions/not-a-guid/events/document-uploaded",
             new { fileIds = new[] { "file-1" } });
 
-        response.StatusCode.Should().Be(HttpStatusCode.BadRequest);
-        (await response.Content.ReadAsStringAsync()).Should().Contain("sessionId.invalid");
+        // Issue #863: SessionOwnershipFilter runs before the handler's GUID-format check, so a
+        // malformed id is answered "not found" rather than "invalid" -- truthful (an id that cannot
+        // be a GUID cannot name a session) and it keeps ONE answer for every id the caller does not
+        // own, which is what stops the route being an existence oracle.
+        response.StatusCode.Should().Be(HttpStatusCode.NotFound);
+        (await response.Content.ReadAsStringAsync())
+            .Should().Contain(SessionOwnershipFilterExtensions.NotFoundOrNotOwnedErrorCode);
     }
 
     [Fact]
