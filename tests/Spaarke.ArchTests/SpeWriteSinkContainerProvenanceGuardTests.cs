@@ -217,13 +217,14 @@ public class SpeWriteSinkContainerProvenanceGuardTests
     //     deleted, add its new home before deleting the old entry, because this rule cannot tell those two
     //     cases apart.
     //
-    // STATE AT THE TIME OF WRITING (2026-08-28). The suite is GREEN, and it is green only BECAUSE nine
+    // STATE AT THE TIME OF WRITING (2026-08-28). The suite is GREEN, and it is green only BECAUSE eleven
     // ClientSupplied entries carry owning tasks. That is the honest state of the codebase, not a passing
-    // grade. Two of those nine (rows 20/24/25 Office, rows 6/7/8 SpeAdmin) are NEW — found by writing this
-    // guard, absent from every prior sweep and from task 083's §2 table.
+    // grade. Several of them (rows 20/24/25 Office, rows 6/7/8 SpeAdmin) are NEW — found by writing this
+    // guard, absent from every prior sweep and from task 083's §2 table. (This paragraph said "nine" twice
+    // on the day it was written, when there were twelve entries; see the COUNT CORRECTED note below.)
     //
-    // DISCOVERED INVENTORY, 2026-08-28. Lines are INFORMATIONAL (see the keying note on SinkSite) and were
-    // verified by hand against the tree on that date:
+    // DISCOVERED INVENTORY, refreshed 2026-08-28 by the folder-removal change. Lines are INFORMATIONAL
+    // (see the keying note on SinkSite) and were verified by hand against the tree on that date:
     //
     //   Api/Ai/ChatDocumentEndpoints.cs:1160                      UploadSmallAsUserAsync              config
     //   Api/Ai/ChatWordExportEndpoints.cs:154                     UploadSmallAsUserAsync              config
@@ -235,9 +236,9 @@ public class SpeWriteSinkContainerProvenanceGuardTests
     //   Api/SpeAdmin/ContainerItemEndpoints.cs:1067               UploadFileToContainerForConfigAsync CLIENT  <-- NEW
     //   Services/Ai/WorkingDocumentService.cs:172                 UploadSmallAsync                    record*
     //   Services/Communication/CommunicationService.cs:2066       UploadSmallAsync                    config
-    //   Services/Communication/IncomingCommunicationProcessor.cs:914   UploadSmallAsync               record
-    //   Services/Communication/IncomingCommunicationProcessor.cs:1083  UploadSmallAsync               record
-    //   Services/Communication/MessageAttachmentMaterializer.cs:130    UploadSmallAsync               DEAD
+    //   Services/Communication/IncomingCommunicationProcessor.cs:921   UploadSmallAsync               record
+    //   Services/Communication/IncomingCommunicationProcessor.cs:1093  UploadSmallAsync               record
+    //   (Services/Communication/MessageAttachmentMaterializer.cs      — FILE DELETED 2026-08-28, was DEAD)
     //   Services/Compose/ComposeService.cs:442                    ReplaceFileContentAsUserAsync       CLIENT
     //   Services/Compose/ComposeService.cs:1448                   ReplaceFileContentAsUserAsync       record
     //   Services/Compose/ComposeService.cs:1484                   UploadSmallAsUserAsync              CLIENT
@@ -248,8 +249,8 @@ public class SpeWriteSinkContainerProvenanceGuardTests
     //   Services/Office/OfficeStorageUploader.cs:86               DeleteFileAsync                     record
     //   Services/Workspace/MatterPreFillService.cs:334            UploadSmallAsUserAsync              config
     //   Services/Workspace/ProjectPreFillService.cs:304           UploadSmallAsUserAsync              config
-    //   Workers/Office/UploadFinalizationWorker.cs:646            UploadSmallAsync                    CLIENT  <-- NEW
-    //   Workers/Office/UploadFinalizationWorker.cs:1205           UploadSmallAsync                    CLIENT  <-- NEW
+    //   (Workers/Office/UploadFinalizationWorker.cs:646           — SINK DELETED 2026-08-28, was UNREACHABLE)
+    //   Workers/Office/UploadFinalizationWorker.cs:1146           UploadSmallAsync                    CLIENT  <-- now ordinal 1
     //                                                                        (* reads the stamped column directly)
     //
     // CORRECTIONS TO THE 2026-08-28 MANUAL SWEEP, recorded here because the same errors will otherwise be
@@ -272,7 +273,15 @@ public class SpeWriteSinkContainerProvenanceGuardTests
     private static readonly IReadOnlyList<SinkSite> AllowList = new[]
     {
         // ---------------------------------------------------------------------------------------------
-        // ClientSupplied — the work list. Nine sites, all owned.
+        // ClientSupplied — the work list. ELEVEN sites, all owned.
+        //
+        // COUNT CORRECTED 2026-08-28. This header and the STATE AT THE TIME OF WRITING note below both
+        // said "nine" on the day the guard was written, when the block actually held TWELVE entries. The
+        // prose count was never enforced by anything — Rule A pins AllowList.Count against the DISCOVERED
+        // set, not against a number written in a comment — so the error survived review. It is now eleven
+        // because the unreachable UploadFinalizationWorker sink was deleted. If you change this block,
+        // recount; a hand-maintained number in a comment is exactly the kind of census this guard was
+        // built to distrust.
         // ---------------------------------------------------------------------------------------------
         new SinkSite("Api/DocumentsEndpoints.cs", "UploadSmallAsync", 1,
             Provenance.ClientSupplied, "083 (row 4)",
@@ -375,21 +384,28 @@ public class SpeWriteSinkContainerProvenanceGuardTests
             + "and a container is a failed implementation'), and it is why presence of an authorization "
             + "filter is not evidence about container provenance — the two guards ask different questions."),
 
+        // ⚠️ ORDINAL SHIFT, 2026-08-28 — READ BEFORE EDITING. This file used to declare TWO UploadSmallAsync
+        // sites: ordinal 1 was the worker's own private UploadToSpeAsync (the "traditional upload flow"),
+        // ordinal 2 was the email-attachment upload. The traditional-flow branch was DELETED as unreachable
+        // (OfficeJobQueue is the payload's sole producer and always sets TempFileLocation = "spe://…", so the
+        // branch guarding it could never be false), which took its sink with it. The attachment site is
+        // therefore now ordinal 1 — the entry below is the SURVIVING LIVE site, not the old ordinal 1.
+        //
+        // This is exactly the case the MAINTENANCE PROCEDURE's rule 5 warns about: a deletion and a move are
+        // indistinguishable from here, so the reclassification is written down rather than left to be
+        // re-derived. The prior ordinal-2 entry's substance is preserved below.
         new SinkSite("Workers/Office/UploadFinalizationWorker.cs", "UploadSmallAsync", 1,
             Provenance.ClientSupplied, "083 (NEW row 9)",
-            "payload.ContainerId on the queued finalization job, seeded by the same SaveRequest.ContainerId",
-            "The async half of the Office save path re-derives the drive from the job payload and writes "
-            + "app-only (ADR-003; ADR-036 background jobs). Downstream of the OfficeStorageUploader site: "
-            + "same client-supplied value, now laundered through a queue message, which is the shape most "
-            + "likely to be mistaken for server-derived by a reader who starts at the worker."),
-
-        new SinkSite("Workers/Office/UploadFinalizationWorker.cs", "UploadSmallAsync", 2,
-            Provenance.ClientSupplied, "083 (NEW row 9)",
-            "the drive resolved from the same payload.ContainerId, reused for attachments",
-            "Email attachments are uploaded into a subfolder of the parent email in the SAME drive that the "
-            + "client-named container resolved to (ADR-003; ADR-036). Listed separately from ordinal 1 "
-            + "because a fix that threads (entity, recordId) through the job payload has to reach BOTH "
-            + "sites, and a single per-file entry would let the second be forgotten."),
+            "the drive resolved from payload.ContainerId, seeded by SaveRequest.ContainerId, reused for attachments",
+            "Email attachments are uploaded into the SAME drive that the client-named container resolved to "
+            + "(ADR-003; ADR-036 background jobs). This is the async half of the Office save path: the "
+            + "client-supplied container is laundered through a queue message, which is the shape most "
+            + "likely to be mistaken for server-derived by a reader who starts at the worker. A fix that "
+            + "threads (entity, recordId) through the job payload must reach this site AND the synchronous "
+            + "OfficeStorageUploader one. As of 2026-08-28 the attachment now lands FLAT in the container "
+            + "root with the parent document id folded into the filename — that change removed the implicit "
+            + "folder creation, and it did NOT change the container provenance, which is why this entry "
+            + "stays ClientSupplied and owned."),
 
         // ---------------------------------------------------------------------------------------------
         // ServerDerivedRecord — the sanctioned shape. These are the sites the guard must NOT push away.
@@ -435,6 +451,45 @@ public class SpeWriteSinkContainerProvenanceGuardTests
             + "and is best-effort/non-fatal (ADR-003; ADR-007). Server-derived even though it sits two lines "
             + "from a ClientSupplied sink in the same file, which is the clearest argument in this list for "
             + "per-site rather than per-file classification."),
+
+        // ── ADDED 2026-08-28, and NOT by the change that brought me here. ────────────────────────────
+        // These two sites were UNDECLARED on work/unified-access-control-r2, so Rule A was already RED
+        // before the folder-removal change touched anything: task 076 added the record-keyed upload pair
+        // (PUT /api/obo/records/{entity}/{recordId:guid}/files/{*path} and its upload-session sibling)
+        // without adding declarations. Verified pre-existing by stashing the folder-removal work and
+        // re-running the guard on a clean tree: same two failures, same 1-failed/8-passed.
+        //
+        // Declared rather than left red for two reasons. (1) Rule A's non-vacuity half —
+        // discovered.Count == AllowList.Count — sits BEHIND the undeclared-sites assertion, so while
+        // these were red the count check never executed and NO change to this allow-list could be
+        // verified. A guard whose second half is unreachable is not a guard. (2) A red baseline makes a
+        // newly-broken declaration indistinguishable from the old break in CI.
+        //
+        // Both are the SANCTIONED shape, traced not assumed — hence ServerDerivedRecord and no owning
+        // task. This is a declaration gap being closed, not a hole being waived.
+        new SinkSite("Api/OBOEndpoints.cs", "UploadSmallAsUserAsync", 2,
+            Provenance.ServerDerivedRecord, "",
+            "RecordContainerResolver.ResolveForRecordAsync(entityLogicalName, recordId) -> decision.ContainerId",
+            "The task-076 record-keyed upload route: the container is derived from the RECORD named in the "
+            + "route, and the code comment at the resolution site is explicit that no fallback may be "
+            + "passed because \"the caller regains the ability to choose\" if one is (ADR-003 fail-closed; "
+            + "ADR-007 SpeFileStore). An Unresolved decision returns 409 rather than defaulting, and a "
+            + "secure record with no container of its own throws secure_record_container_missing. Note "
+            + "what is and is not client-supplied here: {*path} IS the caller's, but this guard classifies "
+            + "the CONTAINER's origin, and the container is the record's. Contrast ordinal 1 in this same "
+            + "file — the container-KEYED route — which is ClientSupplied and deliberately still present "
+            + "for the three upload paths that have no owning record."),
+
+        new SinkSite("Api/OBOEndpoints.cs", "CreateUploadSessionAsUserAsync", 1,
+            Provenance.ServerDerivedRecord, "",
+            "RecordContainerResolver.ResolveForRecordAsync(entityLogicalName, recordId) -> decision.ContainerId",
+            "The >=4 MiB sibling of the record-keyed upload route, resolving the container identically — "
+            + "the source calls it \"identical resolution to the small route, deliberately: one contract, "
+            + "two sizes\" (ADR-003; ADR-007). Listed separately because it is a distinct sink NAME whose "
+            + "blast radius differs: opening the upload session is the act that reserves the destination "
+            + "item, and unlike the simple PUT this path DOES carry an @microsoft.graph.conflictBehavior "
+            + "(caller-selectable fail/replace/rename), so a 'replace' here is an explicit caller choice "
+            + "rather than the silent overwrite the path-keyed PUT performs."),
 
         new SinkSite("Services/Ai/WorkingDocumentService.cs", "UploadSmallAsync", 1,
             Provenance.ServerDerivedRecord, "",
@@ -497,15 +552,18 @@ public class SpeWriteSinkContainerProvenanceGuardTests
         // ---------------------------------------------------------------------------------------------
         // Dead — expected to be deleted, not classified forever.
         // ---------------------------------------------------------------------------------------------
-        new SinkSite("Services/Communication/MessageAttachmentMaterializer.cs", "UploadSmallAsync", 1,
-            Provenance.Dead, "083 (delete-rather-than-convert)",
-            "request.DriveId ?? _options.ArchiveContainerId",
-            "EVIDENCE OF DEADNESS: the only reference to MessageAttachmentMaterializer outside its own file "
-            + "is the DI registration at Infrastructure/DI/CommunicationModule.cs:226 plus its unit tests — "
-            + "zero production call sites. Recorded rather than ignored because the `request.DriveId ??` "
-            + "override is a CALLER-NAMED drive waiting for its first caller: the moment one appears this "
-            + "becomes a live ClientSupplied site (ADR-003; ADR-045). Task 083's own constraint is DELETE "
-            + "rather than convert where a path is dead."),
+        // Services/Communication/MessageAttachmentMaterializer.cs :: UploadSmallAsync #1 — ENTRY DELETED
+        // 2026-08-28 because THE SITE WAS DELETED, which is rule 5 of the MAINTENANCE PROCEDURE working as
+        // intended: this list shrinks by sites being fixed or removed, never by entries being softened.
+        //
+        // The class had zero production call sites (only the CommunicationModule registration and its own
+        // unit tests referenced it), it minted folders — its path was
+        // "/communications/{id:N}/attachments/{name}", and in SPE every folder segment of an upload path is
+        // created implicitly by Graph — and its `request.DriveId ??` override was a caller-named drive
+        // waiting for its first caller (ADR-003; ADR-045). Deleted rather than converted, per this
+        // classification's own stated expectation that Dead sites "are expected to be DELETED, not
+        // classified forever". Recovery guidance for a future messaging revival is recorded at the
+        // deletion site in Infrastructure/DI/CommunicationModule.cs.
 
         new SinkSite("Services/Email/EmailAttachmentProcessor.cs", "UploadSmallAsync", 1,
             Provenance.Dead, "083 (delete-rather-than-convert)",

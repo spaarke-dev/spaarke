@@ -166,7 +166,6 @@ public class OfficeService : IOfficeService
                 ContentType = request.ContentType.ToString(),
                 TargetEntity = request.TargetEntity,
                 ContainerId = request.ContainerId,
-                FolderPath = request.FolderPath,
                 Email = request.Email,
                 Attachment = request.Attachment,
                 Document = request.Document,
@@ -248,7 +247,10 @@ public class OfficeService : IOfficeService
                         {
                             throw new InvalidOperationException("Attachment content is required for attachment saves");
                         }
-                        fileName = request.Attachment.FileName;
+                        // SANITIZED — see the note on the Document branch below. The client-supplied
+                        // attachment name becomes the SPE upload path verbatim, and any '/' in it makes
+                        // Graph create a folder.
+                        fileName = OfficeEmailEnricher.SanitizeFileName(request.Attachment.FileName);
                         break;
 
                     case SaveContentType.Document when request.Document != null:
@@ -263,7 +265,27 @@ public class OfficeService : IOfficeService
                         {
                             throw new InvalidOperationException("Document content is required for document saves");
                         }
-                        fileName = request.Document.FileName;
+                        // ══ SANITIZED 2026-08-28 — THIS IS THE FOLDER-MINTING DEFECT, ROOT CAUSE ══════
+                        // The add-in's "Document Name" box is free text (SaveFlow.tsx) and its value
+                        // arrives here as request.Document.FileName with NO client-side cleaning. It then
+                        // becomes the SPE upload path verbatim (OfficeStorageUploader → UploadSmallAsync →
+                        // Drives[id].Root.ItemWithPath(path)), and Graph creates EVERY '/'-delimited
+                        // segment of an upload path as a folder.
+                        //
+                        // So a user typing a date — "New Word Document from Word Web Add In 8/24/2026" —
+                        // produced a folder "New Word Document from Word Web Add In 8", containing a
+                        // folder "24", containing an extension-less file "2026". That is the origin of the
+                        // mystery folders in SPE Admin: not Word Online writing directly to the container,
+                        // and not a folder prefix in our code, but OUR OWN app-only upload of a filename
+                        // with slashes in it. Confirmed against production sprk_document rows (created by
+                        // the BFF service identities, in the reported container) — the app-only upload is
+                        // also why SPE Admin showed no human creator, which is what made it look external.
+                        //
+                        // The EMAIL branch above never had this bug because GenerateEmlFileName sanitizes.
+                        // The asymmetry was the defect; the document and attachment branches now use the
+                        // same sanitizer. Removing the hardcoded folder prefixes elsewhere in this change
+                        // does NOT subsume this — a filename is a path, so it needs its own guard.
+                        fileName = OfficeEmailEnricher.SanitizeFileName(request.Document.FileName);
                         break;
 
                     default:
@@ -286,7 +308,6 @@ public class OfficeService : IOfficeService
                 // Upload to SPE
                 var (uploadSuccess, driveId, itemId, webUrl, uploadError) = await _storageUploader.UploadToSpeAsync(
                     containerId,
-                    request.FolderPath,
                     fileName,
                     contentStream,
                     cancellationToken);

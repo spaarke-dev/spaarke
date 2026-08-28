@@ -26,10 +26,12 @@ public record SaveRequest
     /// </summary>
     public string? ContainerId { get; init; }
 
-    /// <summary>
-    /// Target folder path within the container.
-    /// </summary>
-    public string? FolderPath { get; init; }
+    // FolderPath DELETED 2026-08-28 (stop minting SPE folders on upload paths). It was client-supplied
+    // and always null: no producer under src/client/** ever set it (zero hits for `folderPath` there),
+    // and no server code constructed one. Its only effect, had a client ever sent it, would have been to
+    // make Graph implicitly create the named folder inside the container as a side effect of the upload —
+    // which is the defect this change removes. Do not reintroduce it; a deliberate folder is what the SPE
+    // Admin "New Folder" action is for.
 
     /// <summary>
     /// Email-specific metadata (required when ContentType is Email).

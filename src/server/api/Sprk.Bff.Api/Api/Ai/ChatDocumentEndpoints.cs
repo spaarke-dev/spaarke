@@ -1155,7 +1155,10 @@ public static class ChatDocumentEndpoints
             var driveId = await speFileStore.ResolveDriveIdAsync(containerId, httpContext.RequestAborted);
 
             using var uploadStream = new MemoryStream(binaryContent);
-            var uploadPath = $"chat-uploads/{filename}";
+            // FLAT CONTAINER ROOT — see the twin comment in ChatWordExportEndpoints. The "chat-uploads/"
+            // prefix implicitly minted a folder on every upload and provided no uniqueness (no session key
+            // in the path), so two sessions persisting the same filename already overwrote one another.
+            var uploadPath = filename;
 
             var uploadResult = await speFileStore.UploadSmallAsUserAsync(
                 httpContext,

@@ -2046,11 +2046,24 @@ public sealed class CommunicationService : ICommunicationEnvelopeReader
         var emlResult = _channelDispatcher.ResolveArchiver(request.CommunicationType)
             .GenerateEml(request, partialResponse, emlAttachments);
 
-        // 2. Upload to SPE at /communications/{commId:N}/{fileName}.eml.
+        // 2. Upload to SPE at {commId:N}_{fileName}.eml — FLAT, in the container root.
+        //
+        // WHY THE GUID MOVED FROM A FOLDER SEGMENT INTO THE FILENAME. In SPE, uploading to a PATH makes
+        // Graph implicitly create every folder segment in it, so "/communications/{id}/…" minted a
+        // `communications` folder plus a per-communication subfolder on every archival. But the {id}
+        // segment was ALSO the only thing keeping two communications' identically-named .eml files apart:
+        // UploadSmallAsync resolves to graphClient.Drives[…].Root.ItemWithPath(path).Content.PutAsync,
+        // Graph's path-keyed simple PUT, which accepts NO @microsoft.graph.conflictBehavior and is a
+        // silent, unconditional REPLACE. Flattening to a bare {fileName} would therefore have been silent
+        // DATA LOSS. Folding the id into the filename keeps the write flat AND keeps it unique — the same
+        // filename-carries-the-uniqueness approach EmailAttachmentProcessor.GenerateUniqueFileName already
+        // uses (Services/Email/EmailAttachmentProcessor.cs).
+        //
         // Content-type: UploadSmallAsync does not accept an explicit content-type; Graph/SPE infers it
         // from the object's ".eml" path extension → message/rfc822 (mirrors InferContentType's mapping),
-        // so the archived object downloads/opens as an email file in Outlook (UAT #4c).
-        var spePath = $"/communications/{communicationId:N}/{emlResult.FileName}";
+        // so the archived object downloads/opens as an email file in Outlook (UAT #4c). The prefix is
+        // added ahead of the name, so the ".eml" extension remains the last segment and inference holds.
+        var spePath = $"{communicationId:N}_{emlResult.FileName}";
 
         using var stream = new MemoryStream(emlResult.Content);
         // SpeFileStore is Scoped — resolve it per-operation (R9); scope lives to method end.

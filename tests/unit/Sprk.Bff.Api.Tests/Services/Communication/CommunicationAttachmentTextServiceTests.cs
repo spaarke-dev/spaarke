@@ -32,7 +32,7 @@ namespace Sprk.Bff.Api.Tests.Services.Communication;
 /// (<see cref="ICallerSystemUserResolver"/>), the SPE facade (<see cref="ISpeFileOperations"/>, ADR-007), and the
 /// shared cache-aware extractor (<see cref="ITextExtractor"/>) are mocked at the module boundary — no live
 /// Dataverse/SPE/Document-Intelligence is provisioned, and these side effects have no other observable surface
-/// (same rationale + shape as <c>MessageAttachmentMaterializerTests</c> / <c>CommunicationThreadReadService</c> tests).
+/// (same rationale + shape as the <c>CommunicationThreadReadService</c> tests).
 /// </summary>
 public class CommunicationAttachmentTextServiceTests
 {

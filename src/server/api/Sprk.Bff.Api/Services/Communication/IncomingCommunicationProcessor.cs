@@ -908,8 +908,15 @@ public sealed class IncomingCommunicationProcessor
 
             try
             {
-                // Upload attachment to SPE
-                var spePath = $"/communications/{communicationId:N}/attachments/{fileName}";
+                // Upload attachment to SPE — FLAT, in the container root, with the communication id folded
+                // into the FILENAME. The old "/communications/{id}/attachments/{name}" path implicitly
+                // minted three folder levels (Graph creates every segment of an upload path in SPE), but
+                // the {id} segment was also the ONLY thing stopping two emails' identically-named
+                // attachments — image001.png is the canonical case — from silently replacing each other:
+                // UploadSmallAsync is Graph's path-keyed simple PUT, which takes no conflictBehavior and
+                // unconditionally overwrites. Uniqueness therefore has to survive the flattening, so it
+                // moves into the name (cf. EmailAttachmentProcessor.GenerateUniqueFileName).
+                var spePath = $"{communicationId:N}_{fileName}";
                 using var stream = new MemoryStream(attachment.ContentBytes!);
                 var fileHandle = await speFileStore.UploadSmallAsync(driveId, spePath, stream, ct);
 
@@ -1063,7 +1070,10 @@ public sealed class IncomingCommunicationProcessor
         // (InternetMessageId, In-Reply-To, References) and inline attachments
         var emlResult = _emlConverter.ConvertToEml(message);
 
-        var spePath = $"/communications/{communicationId:N}/{emlResult.FileName}";
+        // FLAT container root, communication id folded into the filename — same reasoning as the
+        // attachment leg above: the folder segments were minted implicitly by Graph on every upload, and
+        // the {id} segment was carrying the uniqueness that the path-keyed PUT does not provide.
+        var spePath = $"{communicationId:N}_{emlResult.FileName}";
         using var emlStream = new MemoryStream(emlResult.Content);
         // SpeFileStore + CommunicationContainerResolver are Scoped — resolve per-operation from a scope (R4).
         using var scope = _scopeFactory.CreateScope();

@@ -27,17 +27,22 @@ public class OfficeStorageUploader
     /// <summary>
     /// Uploads content to SPE and returns the DriveId, ItemId, WebUrl, and any error.
     /// </summary>
+    /// <remarks>
+    /// Uploads FLAT into the container root. The dormant <c>folderPath</c> parameter was deleted along
+    /// with <c>SaveRequest.FolderPath</c>: it was client-supplied, no client ever sent it (zero hits for
+    /// <c>folderPath</c> under <c>src/client/**</c>), and in SPE any folder segment in an upload path is
+    /// created implicitly by Graph — so the only thing the plumbing could do was mint folders nobody
+    /// asked for. Reinstating a caller-chosen folder would also reinstate that side effect.
+    /// </remarks>
     public async Task<(bool Success, string? DriveId, string? ItemId, string? WebUrl, string? Error)> UploadToSpeAsync(
         string containerId,
-        string? folderPath,
         string fileName,
         Stream content,
         CancellationToken cancellationToken)
     {
         _logger.LogDebug(
-            "Uploading to SPE container {ContainerId}, path {FolderPath}/{FileName}",
+            "Uploading to SPE container {ContainerId}, file {FileName} (flat container root)",
             containerId,
-            folderPath ?? "root",
             fileName);
 
         try
@@ -45,13 +50,8 @@ public class OfficeStorageUploader
             // Resolve container to drive ID
             var driveId = await _speFileStore.ResolveDriveIdAsync(containerId, cancellationToken);
 
-            // Build the full path
-            var path = string.IsNullOrEmpty(folderPath)
-                ? fileName
-                : $"{folderPath.TrimEnd('/')}/{fileName}";
-
-            // Upload using SpeFileStore (ADR-007)
-            var result = await _speFileStore.UploadSmallAsync(driveId, path, content, cancellationToken);
+            // Upload using SpeFileStore (ADR-007) — the file name IS the path; no folder segments.
+            var result = await _speFileStore.UploadSmallAsync(driveId, fileName, content, cancellationToken);
 
             if (result != null)
             {

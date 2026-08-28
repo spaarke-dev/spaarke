@@ -166,7 +166,12 @@ public class WorkingDocumentService : IWorkingDocumentService
             };
         }
 
-        var path = $"/analysis-outputs/{analysisId}/{fileName}";
+        // FLAT container root. "/analysis-outputs/{analysisId}/" implicitly minted two folder levels on
+        // every save (in SPE, Graph creates every segment of an upload path), while the {analysisId}
+        // segment was the only thing keeping two analyses' identically-named outputs apart — the
+        // path-keyed simple PUT behind UploadSmallAsync takes no conflictBehavior and silently replaces.
+        // The id therefore moves into the filename rather than being dropped.
+        var path = $"{analysisId}_{fileName}";
         using var stream = new MemoryStream(content);
 
         var uploadResult = await speFileStore.UploadSmallAsync(driveId, path, stream, cancellationToken);

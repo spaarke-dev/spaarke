@@ -149,7 +149,14 @@ public static class ChatWordExportEndpoints
 
             // Upload using user's OBO context for proper authorization
             using var docxStream = new MemoryStream(docxBytes);
-            var uploadPath = $"exports/{request.Filename}";
+            // FLAT CONTAINER ROOT. In SPE, uploading to a PATH makes Graph implicitly create every folder
+            // segment in it, so the old "exports/" prefix minted an `exports` folder nobody asked for. The
+            // prefix bought no collision protection either — there was no per-export key in it, so two
+            // exports of the same filename already replaced one another (UploadSmallAsUserAsync resolves to
+            // Graph's path-keyed simple PUT, which takes NO @microsoft.graph.conflictBehavior and is
+            // therefore a silent, unconditional REPLACE). Dropping the prefix changes where the item lands,
+            // not whether it can collide.
+            var uploadPath = request.Filename;
 
             var uploadResult = await speFileStore.UploadSmallAsUserAsync(
                 httpContext,
