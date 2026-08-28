@@ -1,0 +1,48 @@
+<task id="CICD-095" project="ci-cd-unit-test-remediation-r1">
+  <metadata>
+    <title>Client tests: add a jest workflow so the 707 client test files actually RUN (#851) - Phase 1 plumbing only</title>
+    <status>not-started</status>
+    <estimated-effort>3-5 hours</estimated-effort>
+    <phase>4 - Deliverable defect repair (adopted 2026-08-28)</phase>
+    <stream>A - CI tiering remediation</stream>
+    <rigor-level>STANDARD</rigor-level>
+    <model-tier>sonnet</model-tier>
+    <effort>high</effort>
+    <autonomous>true</autonomous>
+    <parallel-safe>true</parallel-safe>
+    <dependencies>none</dependencies>
+    <blocks>090</blocks>
+    <tags>ci-workflows, testing, client, jest</tags>
+    <tracking-issue>#851</tracking-issue>
+  </metadata>
+
+  <adoption-note date="2026-08-28">
+    ADOPTED INTO THIS PROJECT, NOT DEFERRED. Owner direction 2026-08-28: "if an issue is
+    important, then it should be added to this project NOT deferred to others."
+
+    SCOPE SPLIT, deliberately. The spec puts "React/PCF Jest test architecture" OUT of scope and it STAYS out: how those tests are designed and organized is not this project business. But "no workflow runs jest at all" is a CI GAP, and CI is precisely what this project owns. 707 test files across 39 packages, zero enforced, while 923 server .cs files do run. One package has been red since 2026-06-11 under a green board.
+
+    This is a DEFECT REPORT AGAINST THIS PROJECT OWN DELIVERABLE, not new scope. The project
+    cannot honestly close while something it shipped is known-broken. That is north star #1
+    ("fix it right the first time") and #3 ("no constant reds").
+  </adoption-note>
+
+  <goal>Jest runs in CI across all 39 client packages and reports honestly. The failures are baselined and visible. No test-architecture remediation is attempted.</goal>
+
+  <steps mode="directional">
+    <step order="1">NEW workflow file (client-tests.yml). New files are NOT covered by the tier-file freeze, and adding jest to Tier 2 now is the single most expensive available move: it would inject an unknown red into the shadow window.</step>
+    <step order="2">continue-on-error on day one. The point of Phase 1 is to SEE the surface, not to gate on it.</step>
+    <step order="3">Baseline all 39 packages. The per-package pass/fail table IS the artifact of this task.</step>
+    <step order="4">Use `npm install --legacy-peer-deps --no-audit --no-fund`, NOT `npm ci` -- root CLAUDE.md 12: roughly 14 of 16 Vite solutions have stale lockfiles and `npm ci` fails on them.</step>
+    <step order="5">STOP THERE. Fixing the failing tests, and any jest test-architecture work, is explicitly OUT of scope for this task and this project. File what the baseline finds and hand it on with the numbers.</step>
+    <step order="6">Promotion into Tier 2 as a real gate happens only AFTER the shadow window closes and AFTER the baseline is green. Do not promote in this task.</step>
+  </steps>
+
+  <acceptance-criteria>
+    <criterion testable="true">client-tests.yml exists and runs jest across all 39 packages</criterion>
+    <criterion testable="true">continue-on-error is set; the workflow cannot block a PR</criterion>
+    <criterion testable="true">Per-package baseline table published in project notes</criterion>
+    <criterion testable="true">No jest test file is modified by this task</criterion>
+    <criterion testable="true">Not added to the Tier 1 or Tier 2 blocking filters</criterion>
+  </acceptance-criteria>
+</task>
