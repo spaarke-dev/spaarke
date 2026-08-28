@@ -77,6 +77,54 @@ observed failing first by mutation**. For 070 the equivalent is:
 - DI registration count stated explicitly and unchanged.
 - Publish size reported (ADR-029), no new NuGet, no new HIGH CVE.
 
+## Cluster 1 — executable extraction spec (analysis done; move not yet made)
+
+Verified 2026-08-28, so the next session executes rather than re-derives.
+
+**Target**: `internal sealed class ComposeReanchorCoordinator` in
+`src/server/api/Sprk.Bff.Api/Services/Compose/ComposeReanchorCoordinator.cs`.
+Constructed in the `ComposeService` ctor from fields it already holds. **No DI registration** —
+that is the ADR-010 constraint, and the whole reason this is a collaborator rather than a service.
+
+**Source range**: lines **2593–3065** (ends immediately before `ResolveRevisionAuthor` at 3066, which
+belongs to cluster 9 and stays).
+
+**Exactly 5 dependencies** — verified by scanning every `_field` reference in the range:
+
+| Field | Declared | Type |
+|---|---|---|
+| `_spe` | 118 | `ISpeFileOperations` |
+| `_logger` | 122 | `ILogger<ComposeService>` — pass as `ILogger` so the collaborator does not re-open the category |
+| `_patchEngine` | 176 | `ComposeShadowPatchEngine` |
+| `_baselineParaIdStamper` | 195 | `ComposeBaselineParaIdStamper` |
+| `_reanchorService` | 227 | `AnnotationReanchorService?` (nullable — kill-switch, ADR-032) |
+
+⚠️ `_username` appears in a `grep` of the range but is a **false positive**: the hits at 3062/3071 are
+the literal `preferred_username` inside `ResolveRevisionAuthor`'s doc comment and body, which is
+*outside* the cluster. Do not add a sixth dependency for it.
+
+**Public surface of the new type — exactly 2 methods.** Everything else becomes private:
+
+| Member | Line | Becomes |
+|---|---|---|
+| `ReanchorStaleSaveAsync` | 2593 | `internal` (called from `SaveAsync:1401`) |
+| `ApplyBestEffortByParagraph` | 2842 | `internal` (called from `SaveAsync:1473`) |
+| `TryApplyPatchUnit` | 2977 | private |
+| `IndexOfParaId` | 3006 | private static |
+| `BuildAllOrphanSummary` | 3027 | private static |
+
+**Only 2 call sites change** — both inside `SaveAsync`, both a prefix insertion:
+`SaveAsync:1401` → `_reanchorCoordinator.ReanchorStaleSaveAsync(...)`,
+`SaveAsync:1473` → `_reanchorCoordinator.ApplyBestEffortByParagraph(...)`. Argument lists unchanged.
+
+This is why cluster 1 is first: a 470-line move with a 5-field constructor and two prefix edits is the
+lowest-risk way to prove the mechanism before touching the baseline/concurrency and create-on-save
+clusters, which are entangled with the save fork itself.
+
+**Verify after this one extraction, before starting cluster 4** (POML step 3 — after *each*, not once
+at the end): `dotnet build src/server/api/Sprk.Bff.Api/` · the Compose seam + op-log suites · DI count
+unchanged.
+
 ## Findings recorded, not fixed
 
 Per the POML constraint, anything that looks like a defect during this work goes here and gets filed
