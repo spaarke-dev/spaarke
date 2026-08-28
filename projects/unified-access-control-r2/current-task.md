@@ -103,6 +103,45 @@ must take route values and must not depend on `OfficeAuthFilter`.
 `CallerRecordAccessProbe.GetCallerRightsAsync` (`:205`) needs the **plural** entity set and fail-closes to
 `AccessRights.None`.
 
+### 🔴 ESCALATION FIRED + OWNER DECISION (2026-08-28) — read `notes/task-083-sink-inventory.md`
+
+083's escalation trigger 3 fired (">~3 unlisted instances → STOP and re-plan"). **Owner chose: "widen the
+guard first, then re-plan."** So the guard is the instrument, not the last step — its discovered list
+supersedes every inventory including §2's and the notes file's.
+
+**Full findings + evidence: [`notes/task-083-sink-inventory.md`](notes/task-083-sink-inventory.md).** Headlines:
+
+- **Rows 4/5 are NOT live holes** — my earlier reporting was wrong. "app-only" describes only the outbound
+  Graph leg; the routes require a caller token, so trigger 2 cannot fire. Unexploitable today only by
+  **value-space disjointness** (a `b!…` drive id is not a GUID, so `sprk_documents({driveId})` 403s) —
+  luck, not design. **DELETE both.**
+- **Rows 7/8 are not this class** — config-derived, but record-blind. Row 7 has **zero callers** → DELETE.
+  Row 8 is live (`SprkChat.tsx:2014`) → CONVERT via the session's `HostContext`.
+- **ROW 9 (new, LIVE)**: `POST /api/office/save` — `SaveRequest.ContainerId` from the client BODY, **MI**
+  write, gated on `TargetEntity` (a *different* value), and `TargetEntity` is **optional** —
+  `EntityAccessFilter.cs:148-159` returns `next(context)` when absent. Verified in the main session.
+- **ROW 10 (new, LIVE)**: SpeAdmin container items — mapped on the **root app**, not the `/api/spe` admin
+  group, so no admin-role filter and no tenant-scope filter; `configId` is a bearer capability.
+- **Root cause of four missed recounts**: the ArchTest census is a hand-maintained list of **12 files**,
+  and both live rows' files are absent from it.
+
+**Sixth agent dispatched**: `sink-guard` (opus, isolated worktree) building
+`tests/Spaarke.ArchTests/SpeWriteSinkContainerProvenanceGuardTests.cs` — a **NEW file** (zero conflict with
+the two in-flight waiver edits) that INVERTS the census: scans every BFF `.cs` for SPE write sinks and
+fails on any unclassified site, so incompleteness becomes a build failure. Its report must include every
+delta vs the S1–S23 table **in both directions** — anything it finds that the manual sweep missed is the
+most valuable output.
+
+### Next actions, in order
+
+1. **Wait for `sink-guard`'s discovered list** → that gives the true count, which is the re-plan input.
+2. Re-plan: file **084** for the live rows (9, 10) — executed HERE, per the owner's standing "no
+   offloading" directive; acceptance criteria forbid handing any row to another project.
+3. 083 lands: DELETE rows 4, 5, 7 · CONVERT row 8 · the widened guard · `design.md` INV-7 ✅ done.
+4. Merge the five agent branches BY BRANCH NAME. Keep MY `current-task.md`; discard theirs.
+5. Row 6 (Compose, now **three** sinks not one: `ComposeService.cs:1482/1484`, `:1515`, `:442`) stays
+   behind PR #806.
+
 ### Prior verified baseline (unchanged)
 
 build **0/0** · ArchTests **121 pass / 6 fail** (not ours; PR #847 fixes exactly those) · publish
