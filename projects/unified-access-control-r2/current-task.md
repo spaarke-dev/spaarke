@@ -1,9 +1,8 @@
 # Current Task State — `unified-access-control-r2`
 
-> **Last Updated**: 2026-08-27 (by `context-handoff`) — **MERGED TO MASTER. Next session runs task 083
-> on FABLE.**
-> **Recovery**: read "Quick Recovery", then §083, then §076. The merge-by-branch rule is history (all
-> branches in) but keep it for the next parallel wave.
+> **Last Updated**: 2026-08-28 — **FIVE PARALLEL AGENTS IN FLIGHT.** Orchestration state below is the
+> thing to recover; everything after §083 is prior context that has not changed.
+> **Recovery**: read "Quick Recovery", then "§AGENTS IN FLIGHT", then §083, then §076.
 
 ---
 
@@ -11,10 +10,104 @@
 
 | Field | Value |
 |-------|-------|
-| **State** | ✅ **MERGED TO MASTER** at `8e799f5ec`. Worktree clean, **0/0**. Main repo `master` ref synced (its checkout `ci/task-084-b10-verification` left untouched). |
-| **PR** | **#861 open as DRAFT** — CI **fully green**: 23 success / 1 neutral (Trivy) / **0 failures**, all 8 Tier 1 blocking jobs pass, `Tier 2 / Full Unit Tests` **SUCCESS**, and `Tenant Isolation (I1–I5)` now green (was red on master). |
-| **Next Action** | 🔴 **Run task 083** — [`tasks/083-container-selection-authorization-sweep.poml`](tasks/083-container-selection-authorization-sweep.poml). It is **`<model-tier>fable</model-tier>` @ `xhigh`** — switch with `/model` before starting, or dispatch it as a Fable subagent. **Do not run it on a lower tier**; CLAUDE.md §8.5 requires the escalation. |
-| **Verified on master** | build **0/0** · ArchTests **121 pass / 6 fail** (the recorded not-ours baseline, all in `Sprk.Provisioning.ControlPlane.Core`; **PR #847 fixes exactly those**) · publish **45.11 MB** compressed incl. PDBs (+0.15 vs 44.96, ceiling 60) · CVE clean |
+| **State** | Worktree on `work/unified-access-control-r2` at `babf5f7ee` — 1 commit ahead of master (the design.md INV-7 correction). Five agents working in **isolated git worktrees**, each committing to its own branch. |
+| **Next Action** | ⏳ **Wait for the five agent completions, then MERGE BY BRANCH NAME** (never by cherry-picking a SHA — an agent's first commit is the pre-review version). See §AGENTS IN FLIGHT for the per-branch acceptance checks. |
+| **Owner directive this session** | Run 083 **and** 012/076/078 (CI-coordination scope), parallel where possible; and **fix** the unreliable local test suite rather than working around it. |
+
+### ⚠️ MERGE HAZARD — `current-task.md` itself
+
+Every agent invokes `task-execute`, which rewrites **this file** in its own worktree. Four or five
+divergent versions of a scratch state file will conflict on merge. **Resolution: keep MINE, discard
+theirs** (`git checkout --ours` on this path) — the orchestrator's copy is authoritative. Do not spend
+time merging them.
+
+### ⚠️ SHARED FILE — `tests/Spaarke.ArchTests/RouteAuthorizationGuardTests.cs`
+
+Three tasks edit it, each owning ONE far-apart waiver entry, so the hunks merge cleanly:
+
+| Lines | Waiver | Owner |
+|---|---|---|
+| ~234, ~239 | `PUT /api/drives/{driveId}/upload`, `DELETE /api/drives/{driveId}/items/{itemId}` (both `UNOWNED`) | task **083** (main session) |
+| ~274 | `PUT /api/obo/containers/{id}/files/{*path}` (`075/076`) | task **076** agent |
+| ~306 | `GET /api/v1/containers/{containerId}/documents` (`078`) | task **078** agent |
+
+Each was instructed: delete, never convert to `Permanent`; no reordering or reformatting (that is what
+would collide). Also in that file: a registration-count pin on `Api/OBOEndpoints.cs` that 076 must update
+with a *reason*, not just a matching number.
+
+---
+
+## §AGENTS IN FLIGHT (2026-08-28)
+
+| Agent | Task | Model | Isolation | Deliverable |
+|---|---|---|---|---|
+| `sweep-083` | 083 steps 1–3 | **fable** | main worktree, **READ-ONLY** | Trace rows 7/8 · caller-grep rows 4/5 · the app-only contract decision · sweep for unlisted sinks |
+| `task-076` | 076 remainder | opus | worktree branch | Route conversion + >=4 MiB upload-session + client cutover + W1/W2 + 7 Communication sites + waiver |
+| `task-078` | 078 | opus | worktree branch | Authorize `GET /api/v1/containers/{containerId}/documents` + waiver |
+| `task-012` | 012 | sonnet | worktree branch | Gap analysis first — the work may already be done by task 072 |
+| `test-signal` | local-suite repair | opus | worktree branch | Make outbound HTTP in tests fail fast + name the escaping URL |
+
+**Why 083's edits stay in the main session**: the POML is `parallel-safe:false` and its reason is real —
+concurrent agents on one authorization surface produce silent lost writes. Only the *read-only*
+investigation was parallelised.
+
+**Model-tier gate (CLAUDE.md §8.5)**: 083 is `<model-tier>fable</model-tier>`. Session is Opus 5, so the
+judgment-critical part was dispatched to an actual **Fable** subagent rather than arguing that opus and
+fable are the same escalation class.
+
+### 🔴 CONFLICT-CHECK RESULT — corrects the POML's blocking claim
+
+Paginated (`gh api --paginate`, because `gh pr view --json files` **caps at 100 silently**) across all 10
+open non-dependabot PRs. Only **#806** overlaps, and it touches MORE than the POML recorded:
+
+| 083 row | File | #806 | Verdict |
+|---|---|---|---|
+| 4, 5 | `DocumentsEndpoints.cs` | absent | ✅ unblocked |
+| 8 | `Api/Ai/ChatDocumentEndpoints.cs` | modified, **0 line changes** | ✅ effectively unblocked |
+| 7 | `Api/Ai/ChatWordExportEndpoints.cs` | **5+/9−** | ⚠️ soft, 14 lines |
+| 6 | 3 Compose files | `ComposeEndpoints.cs` **46+/2671−**, updated today | 🛑 hard blocked |
+
+`RouteAuthorizationGuardTests.cs` is clean across every open PR. **#847 does NOT touch it** (it fixes the
+6 `Sprk.Provisioning.ControlPlane.Core` ArchTest failures, which are the known not-ours master baseline).
+
+### ✅ DONE THIS SESSION (committed at `babf5f7ee`)
+
+`design.md`'s INV-7 claim corrected — **083 step 7 / acceptance criterion met.** And the finding is
+stronger than the POML's: **INV-7 was misread, and it already mandates our model.** Source
+(`spaarke-multi-container-multi-index-r1/design.md:82-88`) reads *record's own field → parent record's
+BU → tenant default (server fallback in BFF config)* — line for line the owner's model. So the seven
+client sites were **in breach of** INV-7, and our design.md cited INV-7 as the reason to leave them that
+way. The "stays in the wizards" phrasing came from INV-7's next line, *"implemented at create-time
+(plugins + wizard)"* — about WHERE the chain runs; that project's CLAUDE.md bans plugins, so it collapsed
+to "wizard". ⚠️ **"INV-7" is an overloaded label** — four unrelated invariants share the number; always
+cite the source project.
+
+### 🔎 STALE POML CLAIM RESOLVED (both 076 and 083 cite it)
+
+`TryResolveParentEntitySet` **does not exist**. The real symbol is
+`SemanticSearchAuthorizationFilter.TryResolveAuthorizableEntitySet` (`:192`, `internal static`, with
+`AuthorizableEntitySets` at `:144`). Worse: there are **THREE** logical-name→entity-set maps and §11 says
+a second is already a review failure —
+
+| Map | Keys on |
+|---|---|
+| `EntityAccessFilter.EntitySetByType:98` (private) | LOGICAL names (`account`, `sprk_matter`) |
+| `SemanticSearchAuthorizationFilter.AuthorizableEntitySets:144` (internal) | SHORT names (`matter`) |
+| `RecordSearchAuthorizationFilter:246` | built dynamically |
+
+Different key spaces, so not interchangeable. **Decision passed to the 076 agent**: the new route keys on
+a LOGICAL name (that is what `ResolveForRecordAsync` takes), so **extend `EntityAccessFilter`** — a fourth
+map is an automatic review failure. Caveat found: `EntityAccessFilter` today reads its target from an
+Office `SaveRequest` **body** and leans on `OfficeAuthFilter` for the user id, so the route-keyed variant
+must take route values and must not depend on `OfficeAuthFilter`.
+`CallerRecordAccessProbe.GetCallerRightsAsync` (`:205`) needs the **plural** entity set and fail-closes to
+`AccessRights.None`.
+
+### Prior verified baseline (unchanged)
+
+build **0/0** · ArchTests **121 pass / 6 fail** (not ours; PR #847 fixes exactly those) · publish
+**45.11 MB** compressed incl. PDBs (+0.15 vs 44.96, ceiling 60) · CVE clean · PR **#861** open as draft,
+CI was fully green (23 success / 1 neutral / 0 failures).
 
 ### ⚠️ The local test suite is NOT trustworthy on this machine — CI is
 
