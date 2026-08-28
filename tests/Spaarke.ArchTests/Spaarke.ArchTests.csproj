@@ -76,8 +76,17 @@
       If a secret-shaped POCO is ever added to one of them, add it here — the loader will not
       tell you it is missing, it will simply scan less.
     -->
+    <!--
+      RESTORE THEN BUILD. `Targets="Build"` alone fails with NETSDK1004 ("Assets file
+      project.assets.json not found") in every job that restores only this project rather
+      than the full solution. Observed 2026-08-28 on the Tier 1 `tenant-isolation` job and
+      on a clean local worktree. Those jobs are correct to restore narrowly; it is this
+      target that reaches outside the restore graph, so it is this target's job to bring its
+      own assets. Restore is a no-op when the assets file is already current, so the
+      full-solution path pays nothing.
+    -->
     <MSBuild Projects="@(_L2Project)"
-             Targets="Build"
+             Targets="Restore;Build"
              Properties="Configuration=$(Configuration)"
              ContinueOnError="false" />
   </Target>
