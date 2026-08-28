@@ -1,7 +1,8 @@
 # Current Task State — `spaarkeai-compose-r8`
 
-> **Last Updated**: 2026-08-27 (by `context-handoff`)
-> **Recovery**: read Quick Recovery, then the plan doc it points to. Nothing else is required.
+> **Last Updated**: 2026-08-27 22:10 (by `context-handoff`)
+> **Recovery**: read Quick Recovery. The P1 authorization work is DONE, MERGED and DEPLOYED —
+> do not re-open it. Active work is the ArchTest guard adjudication.
 
 ---
 
@@ -9,118 +10,103 @@
 
 | Field | Value |
 |---|---|
-| **Active work** | **P1 — caller-identity resolution (`oid` vs `sub`)**. NOT Compose R8 tasks. |
-| **Status** | Code complete and pushed. **NOT merged, NOT deployed.** |
-| **Next Action** | Get **PR #832** reviewed + merged, then **deploy the BFF**. Dev still runs the broken build — every document request 403s, and `PortfolioService` returns every active matter in the org to any caller. |
-| **Plan of record** | [`notes/caller-identity-and-document-access-plan.md`](notes/caller-identity-and-document-access-plan.md) — §2 is verified evidence, **do NOT re-derive it** |
-| **UAT record** | [`notes/uat-2026-08-26.md`](notes/uat-2026-08-26.md) |
+| **Active work** | **Issue #839 — ArchTest guard adjudication.** Branch `fix/archtest-guard-adjudication` in `c:\tmp\spaarke-auth-oid`. |
+| **Status** | 3 of 6 ArchTest failures fixed + pushed. No PR opened yet. Clean, 0 unpushed. |
+| **Next Action** | Fix the remaining 3: **FR-27** (8 secret-shaped properties — verify each, 5 look like the regex matching a NAME not a value; do NOT loosen the regex), **ADR-010** (1:1 interface ceiling drifted 153 → 155; identify the 2 new interfaces), **ServiceBusClientGuard** (`ControlPlane.Core/Modules/ServiceBusModule.cs:144` — route through `ServiceBusClientFactory`). Then open the PR. |
+| **Verify with** | `dotnet test tests/Spaarke.ArchTests/Spaarke.ArchTests.csproj` |
 
-### ⚠️ TWO WORKTREES — do not confuse them
+### ✅ The authorization emergency is OVER — merged and deployed, owner-confirmed
 
-| Worktree | Branch | Holds |
+| PR | Merge | Deployed | What |
+|---|---|---|---|
+| **#832** | `3e6fbd4d7` | dev, 45.07 MB | 38 broken caller-identity sites + 2 disclosures + `WorkspaceLayoutService` (3 breaks) |
+| **#840** | `30e6fd9cf` | dev, 45.08 MB | remaining 41 `NameIdentifier` fallbacks · `CallerIdentityGuardTests` · Tier-2 aggregator repair |
+
+Owner confirmed **"files are now showing"**. `/healthz` 200. **Do not re-investigate the oid/sub defect.**
+
+### Worktrees
+
+| Worktree | Branch | State |
 |---|---|---|
-| `c:\code_files\spaarke-wt-spaarkeai-compose-r8` | `work/spaarkeai-compose-r8` | Compose R8 + **the plan/UAT docs**. PR **#806** (draft, 100 commits). |
-| `c:\tmp\spaarke-auth-oid` | `fix/caller-oid-resolution` | **The P1 fix**, branched off `master`. PR **#832**. |
-
-Both clean, 0 unpushed at this checkpoint.
-
-> P1 is deliberately NOT inside #806 — it must merge without waiting for all of R8. An earlier partial
-> version of it IS also in #806 (commit `c1ced7f3d`), and the two **will conflict** (that copy
-> cross-references `TenantResolution`, which is R8-only). Decide before merging: revert the auth change
-> out of #806, or land #832 first and let #806 rebase.
-
-### Critical context
-
-`ClaimTypes.NameIdentifier` carries the Entra **`sub`** (pairwise, non-GUID) under inbound claim
-mapping, which this app leaves ON. Dataverse joins the caller on **`oid`**. Reading the wrong one
-denies / 401s / over-discloses / silently no-ops depending on what each site does with the value.
-Confirmed from production logs — plan §2.1.
+| `c:\code_files\spaarke-wt-spaarkeai-compose-r8` | `work/spaarkeai-compose-r8` | PR **#806**. Synced with master, **11,462/0/95**. Clean, 0 unpushed, 0 behind. |
+| `c:\tmp\spaarke-auth-oid` | `fix/caller-identity-sweep-clean` → now `fix/archtest-guard-adjudication` | Active work. Clean, 0 unpushed. |
 
 ---
 
-## P1 — DONE (pushed, PR #832)
+## Active work — issue #839 detail
 
-- **Three resolvers, one per purpose** in `CallerResolution.cs`: `ResolveObjectId` (oid or **null → 401**;
-  deliberately **no `NameIdentifier` tail**) · `ResolveObjectIdGuid` · `ResolveOpaqueCallerKey` (the one
-  place `sub` is correct — partition/idempotency/cache keys).
-- **35 sites** routed through them. The list was **derived, not guessed** — a classifier that reassembles
-  multi-line `??` chains and asks which source is reached first (38 broken / 47 correct).
-- **`PortfolioService` disclosure closed properly** — the claim AND the id-space bug (`ownerid` holds a
-  *systemuserid*, not an oid). Reuses the existing `ISystemUserIdentityResolver` singleton. **Fails closed.**
-- **Fixtures**: the 6 that depended on the removed tail now mint a realistic `oid` plus a deliberately
-  **sub-shaped, non-GUID** `NameIdentifier`.
-- **Tests: 11,162 passed / 0 failed / 96 skipped.**
+**Fixed and pushed (3 commits):**
 
-**The prediction that proved itself:** removing the tail broke *exactly* 18 tests, every one minting a
-`NameIdentifier`-only principal. No production caller has that shape (Entra always carries `oid`;
-`ApiKeyAuthenticationHandler` mints neither and correctly 401s). The tail's only consumer was the
-fixtures that hid the bug.
+1. `ed7fd7629` — **the Cosmos guard now actually RUNS.** It was still dead: the loader was repaired by
+   `spe-admin-app-r2`, but nothing built the L2 DLLs it inspects, so it threw `FileNotFoundException`
+   every CI run. The csproj claimed "CI's full-sln build satisfies this" — false; Tier 2 builds only the
+   ArchTests project. Fixed with a `BuildL2ForCosmosGuard` MSBuild target (no `ProjectReference`, so the
+   two original design reasons still hold). Proof it works: its **positive control now passes**.
+2. `acd2b873a` — **FR-F1/FR-F2 closed.** `DataverseRegistryConcurrencyStore` was the one real ADR-028 A4
+   violation (BFF's own app-reg + client secret). Its own FUTURE MIGRATION note gated the fix on the L2
+   UAMI being a Dataverse Application User — **that was already true and the code never followed**
+   (verified live: `sprk-controlplane-dev-uami`, app id `965a4a01-…`, enabled, `Spaarke Provisioning
+   Registry` role). Migrated to `DefaultAzureCredential`, identical to the sibling
+   `DataverseEnvironmentRegistryClient`. The other 3 sites are genuine E-1 (customer registrations,
+   per-request) → allowlist + census entries. Bicep + KV reference removed end-to-end.
+3. `46fe89d7d` — self-registered in `projects/INDEX.md`. **⚠️ Overlaps PR #845** (provisional row for the
+   same project); whichever merges second takes mine, it is a superset.
+
+**Remaining 3 — with the trap in each:**
+
+- **FR-27** — 8 secret-shaped properties. Only 3 look like real secret VALUES
+  (`SharedSecretResolution.Secret` ×2, `SolutionVerificationRequest.ClientSecret`); 5 look like the regex
+  matching a property NAME (`PerEnvSettingEntry.Key`, `TrapVerificationRequest.KeyVaultName`,
+  `PendingKvSecretWrite.SecretName`, …). **Do NOT narrow the regex** — it is a CATASTROPHIC-severity
+  detector. Adjudicate per-property with evidence. NOTE: the rule is about **Cosmos-persisted** POCOs, and
+  `SolutionVerificationRequest` is a transient request record never written to Cosmos — check persistence
+  before classifying.
+- **ADR-010** — ceiling 153 → 155. Identify the 2 added 1:1 interfaces; either justify + raise with docs,
+  or register concrete.
+- **ServiceBusClientGuard** — `ServiceBusModule.cs:144` `return new ServiceBusClient(fqn, credential);`
+  Route through `ServiceBusClientFactory.CreateForNamespace`.
 
 ---
 
-## P1 — REMAINS
+## ⚠️ Cross-project constraints — READ BEFORE TOUCHING CI OR AUTH
 
-| # | Item | Notes |
-|---|---|---|
-| 1 | **Merge + deploy** | The only thing that ends the live outage. Resolve the #806 conflict first. |
-| 2 | `WorkspaceLayout` ownership bypass | **Agent-traced, NOT empirically confirmed.** Do not assert it as fact until verified. |
-| 3 | Broader fixture de-collapse (~39 more) | A blanket regex broke things and was reverted — do this surgically, file by file. |
-| 4 | Census ArchTest | Fail the build on a *new* file reading `NameIdentifier` for identity. Copy `SourceScan` + `CredentialGuardTests`. |
-| 5 | Three false comments | They assert "MIW v3+ defaults `MapInboundClaims=false`" — contradicted by the production logs. Recurrence vector. |
+### CI shadow window (`ci-cd-unit-test-remediation-r1` owns `.github/workflows/**`)
 
-**Deliberately NOT changed** — correct already (sequential oid-first extractors with early returns;
-statement-scoped analysis flags them as false positives): `OfficeAuthFilter`, `OfficeRateLimitFilter`,
-`ResourceAccessHandler`.
+**FROZEN**: `ci-router.yml`, `ci-tier1-blocking.yml`, `ci-tier2-advisory.yml`. My #840 edited two of them
+and merged 5 minutes into the window; **disclosed and adjudicated ACCEPTED — no violation** (the freeze was
+an unmerged PR at the time). The freeze now carries a **GATE REPAIR carve-out**: if a gate is silently not
+enforcing, fix it and disclose. **I committed to disclosing before using it rather than self-authorising.**
+Window is being re-baselined after #825; my branch adds no workflow changes.
 
----
+### `unified-access-control-r2` owns parent→child access (their Amendment 1)
 
-## P2 — PARKED (owner direction, 2026-08-27)
+**R8 must NOT implement the parent-fallback, even as an interim.** Their §5 closed our Q6 (term 5 grants
+the SAME right — no read/write fork). Vocabulary: **"Parental cascade"** = the Dataverse feature (rejected);
+**"parent-fallback"** = their computed term 5. Docs: `notes/coordination-from-unified-access-control-r2-*.md`
++ `notes/response-to-unified-access-control-r2-*.md`.
 
-> *"Let's not conflate the two. We need to solve the core access issue first. And then solve the
-> 'cascade ownership issue' second."*
+### Sync #806 with `git merge origin/master`, NEVER rebase
 
-Document ownership inheritance. **Does not gate P1.** Analysis preserved in plan Workstream D. Two
-things a fresh session must not re-derive:
-
-- **Cascade cannot express the rule** — role-scope access to the parent never inherits to children, and
-  that is the normal case. Verified: **zero of 27** `sprk_document` relationships are Parental.
-- **P2 may not be ours** — `unified-access-control-r2` / `dataverse-access-unification-r1` already hold
-  an active decision process on this exact fork. Align before designing.
-
-Open owner decisions: **Q6** (parent-fallback on writes or reads only) · **Q7** (orphan-document rule) ·
-**Q8** (creation-ownership regime).
+It is a shared branch under review carrying merge commits. Also: a clean `mergeable` status is **not** a
+clean build — the last sync returned MERGEABLE and then failed to compile (both sides had added the same
+`using`, CS0105 ×4). Deduplicate after every sync.
 
 ---
 
 ## Session gotchas worth keeping
 
-1. **Enumerate SINKS, not call forms.** A form-based grep missed `FindFirstValue` entirely and would
-   never have found `PortfolioService` — it contains no claim read at all.
-2. **My own tooling had three bugs**, each producing confident false positives: string-literal-blind
-   comment stripping ate the `//` inside the schema URI; constant indirection was invisible; and
-   `AltOidClaimType` *contains* `OidClaimType`, so naive substitution corrupted it. Spot-check a site you
-   expect to be CLEAN before trusting any classifier output.
-3. **Blanket regex over test fixtures is not worth it** — it wrote bare `ClaimTypes` where the original
-   was fully qualified, and matched `new(...)` in non-`Claim` contexts. Reverted; done surgically instead.
-4. **`.claude/agent-memory/` is excluded by ripgrep's ignore rules** — every sweep missed a directly
-   relevant researcher deep-dive living there.
-5. **`git diff -w` does not catch line re-flowing.** A CI commit labelled "whitespace" changed 114
-   non-whitespace lines; only byte-level token comparison settled it.
-6. **A failed query is not a negative result** — bit me twice this session (an OData metadata error
-   printing "NONE"; a Python decode failure reporting files as added/removed).
-7. **Test stubs must not return null** where the code now fails closed — every test would then pass
-   against an empty result, i.e. for the wrong reason. That is precisely the failure mode that let this
-   bug through 11,932 green tests.
-
----
-
-## Compose R8 (the original project) — status
-
-47 of 51 tasks resolved. UAT 2026-08-26 found 6 defects: **D-1, D-2, D-3, D-6 fixed** (in PR #806);
-**D-4/D-5 root-caused but NOT fixed** — the annotation path still anchors by text search and needs an
-`agreement-review` Action-mirror schema change + `documentText` supply + threading the anchor through.
-Track D 070–072 worktrees staged, agents never dispatched. Task 090 wrap-up not started. Task 059 tenant
-sign-off still open.
+1. **The shell cwd resets between Bash calls.** Several greps/builds silently ran in the WRONG worktree and
+   reported stale results. **`cd` explicitly at the start of every command.**
+2. **`io.open(p,'w')` truncates before the write.** A Python edit that hit an encoding error left a
+   committed doc at **0 bytes**. Recovered via `git checkout --`. Prefer the Edit tool for structured edits.
+3. **Classify by SINK, not by expression shape.** Three sites written `oid`-first with early returns READ
+   as correct and were cleared twice; two of them fed authorization and were broken.
+4. **A guard not in the Tier 1 filter cannot fail the build.** `CredentialGuardTests` shipped red and CI
+   reported green for 6 days. Arm a guard in the same PR that adds it.
+5. **Verify a comment before repeating it as fact.** Three comment blocks said the L2 UAMI was not a
+   Dataverse Application User. It had been for some time. One query settled it.
+6. **Prove non-vacuity.** Every guard/test added this session was verified to FAIL against the pre-fix code
+   (re-broken sites, probe files) before being accepted.
 
 ---
 
