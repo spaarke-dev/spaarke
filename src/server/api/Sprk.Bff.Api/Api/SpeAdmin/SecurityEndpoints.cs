@@ -30,6 +30,51 @@ namespace Sprk.Bff.Api.Api.SpeAdmin;
 public static class SecurityEndpoints
 {
     /// <summary>
+    /// Composes the access-denied summary from what Graph ACTUALLY reported, instead of leading with a
+    /// single guess on every denial.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// The previous text opened with <c>"The most common cause is a missing SecurityEvents.Read.All
+    /// grant"</c> on EVERY denial. UAT on 2026-08-28 showed why that is a defect and not just wording:
+    /// Graph's own words were <c>"Unauthorized request - Account is not provisioned"</c>, and task 013
+    /// had ALREADY granted <c>SecurityEvents.Read.All</c>. So the screen sent the operator to re-check a
+    /// grant that was demonstrably already present, to fix a condition that no grant can fix.
+    /// </para>
+    /// <para>
+    /// That is this project's signature defect wearing a different hat: a layer asserting a confident
+    /// cause it has not established. The denial IS established (we are inside a 403 filter). WHICH cause
+    /// produced it is not — unless Graph names it, which in the "not provisioned" case it does.
+    /// </para>
+    /// <para>
+    /// So: branch on Graph's message. Assert only what Graph established, and offer the rest as
+    /// candidates the app explicitly cannot distinguish. <c>ToProblemDetails</c> appends Graph's verbatim
+    /// text after this summary, so the operator always sees the raw signal too.
+    /// </para>
+    /// </remarks>
+    internal static string AccessDeniedSummary(SpaarkeStorageException ex)
+    {
+        ArgumentNullException.ThrowIfNull(ex);
+
+        // Graph's wording for "this tenant has no Security API to talk to". It is a tenant
+        // provisioning/licensing condition, NOT a permission condition — granting anything leaves it
+        // unchanged. Naming it precisely is the difference between a 5-minute check and a wild goose chase.
+        if ((ex.Message ?? string.Empty).Contains("not provisioned", StringComparison.OrdinalIgnoreCase))
+        {
+            return "The tenant is not provisioned for the Graph Security API. This is a tenant "
+                 + "licensing/provisioning condition, NOT a missing permission — granting "
+                 + "SecurityEvents.Read.All will not change it. Verify in the Microsoft 365 Security "
+                 + "Center (security.microsoft.com) whether this tenant has a security subscription "
+                 + "that exposes the Security API.";
+        }
+
+        // Genuinely ambiguous. Say so rather than picking a favourite.
+        return "Access denied to the Graph Security API. This app cannot tell which of two causes "
+             + "produced it: the app registration lacks SecurityEvents.Read.All, or a conditional-access "
+             + "or tenant policy blocked the call. Check the grant first, then policy.";
+    }
+
+    /// <summary>
     /// Registers the security alerts and secure score endpoints on the /api/spe route group.
     /// Called from <see cref="SpeAdminEndpoints.MapSpeAdminEndpoints"/>.
     /// </summary>
@@ -153,16 +198,14 @@ public static class SecurityEndpoints
             when (ex.StatusCode == StatusCodes.Status403Forbidden)
         {
             logger.LogWarning(
-                "Graph Security API access denied for configId {ConfigId}. " +
-                "App registration may lack SecurityEvents.Read.All. TraceId={TraceId}",
-                configId, context.TraceIdentifier);
+                "Graph Security API access denied for alerts (configId {ConfigId}). " +
+                "Graph code={GraphCode} message={GraphMessage}. TraceId={TraceId}",
+                configId, ex.ErrorCode, ex.Message, context.TraceIdentifier);
 
-            // The catch is filtered to 403, so "access denied" IS established. WHICH grant is missing is
-            // not — a 403 can also be conditional access or a tenant policy — so the hint stays a hint and
-            // the helper appends what Graph actually reported (task 013 grants SecurityEvents.Read.All).
+            // The catch is filtered to 403, so "access denied" IS established. WHICH cause produced it is
+            // not — so the summary is derived from Graph's own words. See AccessDeniedSummary.
             return ex.ToProblemDetails(
-                summary: "Access denied to the Graph Security API. "
-                         + "The most common cause is a missing SecurityEvents.Read.All grant.",
+                summary: AccessDeniedSummary(ex),
                 errorCode: "spe.security.alerts.graph_access_denied",
                 statusCode: StatusCodes.Status403Forbidden,
                 traceId: context.TraceIdentifier,
@@ -272,13 +315,12 @@ public static class SecurityEndpoints
         {
             logger.LogWarning(
                 "Graph Security API access denied for secure score (configId {ConfigId}). " +
-                "App registration may lack SecurityEvents.Read.All. TraceId={TraceId}",
-                configId, context.TraceIdentifier);
+                "Graph code={GraphCode} message={GraphMessage}. TraceId={TraceId}",
+                configId, ex.ErrorCode, ex.Message, context.TraceIdentifier);
 
-            // See the note on the alerts path above — 403 is established, the specific missing grant is not.
+            // See the note on the alerts path above — 403 is established, the specific cause is not.
             return ex.ToProblemDetails(
-                summary: "Access denied to the Graph Security API. "
-                         + "The most common cause is a missing SecurityEvents.Read.All grant.",
+                summary: AccessDeniedSummary(ex),
                 errorCode: "spe.security.score.graph_access_denied",
                 statusCode: StatusCodes.Status403Forbidden,
                 traceId: context.TraceIdentifier,

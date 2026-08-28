@@ -5,6 +5,7 @@ using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Graph.Models.ODataErrors;
 using Spaarke.Dataverse;
+using Sprk.Bff.Api.Api.SpeAdmin;
 using Sprk.Bff.Api.Infrastructure.Graph;
 using Xunit;
 
@@ -306,6 +307,60 @@ public class SpeAdminSecurityContractTests
             configuration: configuration,
             logger: NullLogger<SpeAdminGraphService>.Instance,
             tokenProvider: null);
+    }
+
+    // ─────────────────────────────────────────────────────────────────────────
+    // The access-denied EXPLANATION (UAT 2026-08-28)
+    //
+    // These guard a defect that shipped and reached an operator: on every denial the screen said
+    // "The most common cause is a missing SecurityEvents.Read.All grant" — while Graph's actual
+    // words were "Account is not provisioned", and task 013 had already granted that permission.
+    // The screen confidently sent the operator to re-check a grant that was present, to fix a
+    // condition no grant can fix.
+    //
+    // Same failure class the rest of this file guards, one level up: not a fabricated VALUE, but a
+    // fabricated CAUSE. Wording is the deliverable on an error surface, so it is what gets asserted.
+    // ─────────────────────────────────────────────────────────────────────────
+
+    [Fact]
+    [Trait("Category", "SpeAdminGraphContract")]
+    public void AccessDeniedSummary_WhenGraphSaysNotProvisioned_DoesNotBlameAMissingGrant()
+    {
+        var ex = new SpaarkeStorageException(
+            "GetSecurityAlerts(maxAlerts=50): Unauthorized request - Account is not provisioned.",
+            statusCode: 403,
+            errorCode: "Unauthorized");
+
+        var summary = SecurityEndpoints.AccessDeniedSummary(ex);
+
+        // 🔴 THE ONE THAT MATTERS. Graph named the cause: the tenant is not provisioned. Telling the
+        // operator to grant a permission here is not a harmless extra hint — it is a wrong
+        // instruction that costs a support cycle and ends with "the app is broken".
+        summary.Should().ContainEquivalentOf("not provisioned");
+        summary.Should().ContainEquivalentOf("will not change it",
+            because: "the operator must be told explicitly that granting the permission is NOT the fix");
+        summary.Should().NotContainEquivalentOf("most common cause",
+            because: "Graph stated the cause; presenting a guess alongside it re-introduces the defect");
+    }
+
+    [Fact]
+    [Trait("Category", "SpeAdminGraphContract")]
+    public void AccessDeniedSummary_WhenGraphGivesAGenericDenial_OffersBothCausesWithoutPickingOne()
+    {
+        var ex = new SpaarkeStorageException(
+            "Insufficient privileges to complete the operation.",
+            statusCode: 403,
+            errorCode: "accessDenied");
+
+        var summary = SecurityEndpoints.AccessDeniedSummary(ex);
+
+        // Here the cause genuinely IS ambiguous, so both candidates are named and neither is asserted.
+        // "Cannot tell" is the honest report; picking a favourite is what produced the UAT defect.
+        summary.Should().ContainEquivalentOf("SecurityEvents.Read.All");
+        summary.Should().ContainEquivalentOf("conditional-access",
+            because: "a 403 is equally consistent with policy, so the operator must know to check it");
+        summary.Should().ContainEquivalentOf("cannot tell",
+            because: "the app must say it does not know, rather than implying it does");
     }
 
     private sealed class UnusedHttpClientFactory : IHttpClientFactory
