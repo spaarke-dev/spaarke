@@ -135,7 +135,7 @@ jobs:
           }
 
       - name: Cache NuGet packages
-        uses: actions/cache@v5
+        uses: actions/cache@v6
         continue-on-error: true  # Prevents Debug/Release matrix race on shared cache key from failing the job (PR #337 hit this 2026-06-03 — Release lost the cache-save race to concurrent Debug at 00:18:47)
         with:
           path: ~/.nuget/packages
@@ -329,7 +329,7 @@ jobs:
           dotnet-version: '10.x'
 
       - name: Cache NuGet packages
-        uses: actions/cache@v5
+        uses: actions/cache@v6
         continue-on-error: true  # cache is an optimization, never a gate
         with:
           path: ~/.nuget/packages
@@ -370,7 +370,7 @@ jobs:
           node-version: '20'
 
       - name: Cache root npm dependencies
-        uses: actions/cache@v5
+        uses: actions/cache@v6
         with:
           path: ~/.npm
           key: ${{ runner.os }}-npm-root-${{ hashFiles('package-lock.json') }}
@@ -378,7 +378,7 @@ jobs:
             ${{ runner.os }}-npm-root-
 
       - name: Cache PCF npm dependencies
-        uses: actions/cache@v5
+        uses: actions/cache@v6
         with:
           path: ~/.npm
           key: ${{ runner.os }}-npm-pcf-${{ hashFiles('src/client/pcf/package-lock.json') }}
@@ -641,7 +641,7 @@ jobs:
           dotnet-version: '10.x'
 
       - name: Cache NuGet packages
-        uses: actions/cache@v5
+        uses: actions/cache@v6
         continue-on-error: true  # cache is an optimization, never a gate
         with:
           path: ~/.nuget/packages
@@ -885,7 +885,7 @@ jobs:
           dotnet-version: '10.x'
 
       - name: Cache NuGet packages
-        uses: actions/cache@v5
+        uses: actions/cache@v6
         continue-on-error: true  # cache is an optimization, never a gate
         with:
           path: ~/.nuget/packages
