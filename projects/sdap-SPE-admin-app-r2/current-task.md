@@ -11,8 +11,8 @@
 |---|---|
 | **Task** | **090 — wrap-up.** 🔲 **HELD by operator instruction**: do not start until all work is done AND UAT has passed |
 | **Phase** | Project close (gated) |
-| **Status** | **All code complete.** 052 ✅ · 025 ✅ · 026 ✅ (amended) · 042 Security escalation ✅. Deployed + awaiting UAT |
-| **Next Action** | **UAT** (§0c) + the 050 operator action (§2). 090 stays held until UAT passes |
+| **Status** | **All code complete + DEPLOYED to Spaarke Dev.** BFF `spaarke-bff-dev` (45.12 MB, SHA-256 verified, healthz 200, 3 new routes 401-not-404) · code page `sprk_speadmin` published (2335 KB). PR [#859](https://github.com/spaarke-dev/spaarke/pull/859). **Awaiting UAT** |
+| **Next Action** | **Run [`notes/UAT-CHECKLIST.md`](notes/UAT-CHECKLIST.md)** + the 050 operator action (§2). 090 stays held until UAT passes |
 | **Rigor** | 090 is TEST-MODIFYING → quality gates run **unconditionally** when it does run |
 
 ### 🔔 §0. What is actually left
