@@ -581,6 +581,28 @@ public sealed class DataverseEnvironmentRegistryClient : IDataverseEnvironmentRe
     // per JSON type: strings → strings, DateTimeOffset → ISO 8601 UTC,
     // bool → JSON bool, integer types → JSON number, null → JSON null (clears
     // the column). Internal for pure-function test coverage.
+    /// <summary>
+    /// Bucket B MED#3 SESSION 18 (customer-provisioning-orchestration-r1 adversarial
+    /// e2e verify workflow wepdcb8we): I1 immutability allow-list. These three
+    /// columns are set once at placeholder-create (Step 1f) and NEVER re-written
+    /// per tenant-isolation invariant I1 (design.md §4D). Prior to this guard,
+    /// <see cref="UpdateColumnsAsync"/> accepted an arbitrary caller-supplied
+    /// dictionary with no server-side allow-list — a future handler that added
+    /// e.g. <c>columns["sprk_tenantid"] = run.Parameters.NonSecret["tenantId"]</c>
+    /// to a promoted-columns dictionary would silently rewrite the placeholder's
+    /// tenant id, breaking I1 with no audit trail. This block-list bakes the
+    /// invariant into code so a violation fails LOUDLY at build time (unit test)
+    /// or at runtime (InvalidOperationException surfaced as
+    /// <see cref="RegistryUpdateOutcome.Failure"/>) instead of being caught
+    /// only by operator discipline.
+    /// </summary>
+    internal static readonly IReadOnlySet<string> ImmutableColumnsBlockList = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
+    {
+        EnvironmentRowIdColumn,  // sprk_dataverseenvironmentid — row primary key, never mutable
+        CustomerIdColumn,        // sprk_customerid — set once at placeholder-create, alt-key
+        TenantIdColumn,          // sprk_tenantid — I1 tenant-isolation invariant, set once
+    };
+
     internal static string BuildColumnsPatchBody(IReadOnlyDictionary<string, object?> columns)
     {
         using var stream = new MemoryStream();
@@ -593,6 +615,17 @@ public sealed class DataverseEnvironmentRegistryClient : IDataverseEnvironmentRe
                 {
                     throw new InvalidOperationException(
                         "UpdateColumnsAsync received an entry with an empty column name.");
+                }
+                // Bucket B MED#3 SESSION 18 (adversarial e2e verify wepdcb8we):
+                // I1 immutability block-list. See ImmutableColumnsBlockList XML doc.
+                if (ImmutableColumnsBlockList.Contains(name))
+                {
+                    throw new InvalidOperationException(
+                        $"UpdateColumnsAsync received forbidden column '{name}'. Columns " +
+                        $"[{string.Join(", ", ImmutableColumnsBlockList)}] are I1-immutable per design.md §4D — " +
+                        "set once at placeholder-create (Step 1f) and NEVER re-writable. " +
+                        "This is a Bucket B MED#3 SESSION 18 guard baking I1 into code — " +
+                        "if you legitimately need to write one of these, the invariant is wrong, not this guard.");
                 }
                 switch (value)
                 {

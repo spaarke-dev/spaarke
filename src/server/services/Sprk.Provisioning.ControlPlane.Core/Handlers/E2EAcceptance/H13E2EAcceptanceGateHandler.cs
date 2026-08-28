@@ -870,14 +870,52 @@ public sealed class H13E2EAcceptanceGateHandler : IProvisioningHandler
         var replace = await _repository.ReplaceRunAsync(run, etag, cancellationToken).ConfigureAwait(false);
         if (replace is ReplaceRunResult.Conflict conflict)
         {
+            // Bucket B MED#10 SESSION 18 (customer-provisioning-orchestration-r1
+            // adversarial e2e verify workflow wepdcb8we): DOCUMENTED SPLIT-BRAIN WINDOW.
+            //
+            // H13's current sequence is (9) promoted-columns PATCH → (10)
+            // TransitionToReadyAsync PATCH (setupstatus=Ready) → (11) MarkCompleteAsync
+            // which reaches THIS ReplaceRunAsync call. If ReplaceRunAsync returns
+            // Conflict here, the registry has ALREADY been PATCHed to Ready but
+            // Cosmos remains at RunStatus.Running (from the concurrent winner).
+            // Downstream observable state (transient, ~milliseconds):
+            //   - Registry: sprk_setupstatus=Ready
+            //   - Cosmos:   status=Running (or the winner's terminal transition,
+            //               depending on when the winner's ReplaceRunAsync landed)
+            //   - Guard:    STILL HELD (Bucket B HIGH#7 SESSION 18 dropped
+            //               ClearCurrentRunId from the registry PATCH, so the
+            //               guard's release path is exclusively
+            //               ICustomerRunGuard.ReleaseAsync via HandlerOutcomeApplier
+            //               per Bucket B HIGH#6).
+            //
+            // EVENTUAL CONVERGENCE: the concurrent winner's own MarkCompleteAsync
+            // will succeed on its ReplaceRunAsync (this Conflict IS the winner's
+            // write landing), then HandlerOutcomeApplier fires the guard release,
+            // closing the window. The registry PATCH is idempotent — the winner
+            // will re-run it (setupstatus=Ready is unchanged; a no-op).
+            //
+            // FULL COSMOS-FIRST REFACTOR (deferred): the skeptic's ideal fix
+            // reorders as (1) Cosmos ReplaceRunAsync FIRST → (2) registry PATCHes
+            // AFTER. That eliminates the split-brain entirely, at the cost of a
+            // substantial H13 refactor (MarkCompleteAsync must split into
+            // PrepareRunStateForCompletion + WriteCompletionToCosmos + the
+            // registry PATCH must move OUT of the caller). Tracked as follow-up
+            // work; this comment documents the current post-HIGH#7 mitigation
+            // for the operator monitoring the log.
             _logger.LogWarning(
-                "H13 success state write LOST optimistic-concurrency race: " +
-                "runId={RunId} customerId={CustomerId} winningStatus={WinningStatus}",
+                "H13 success state write LOST optimistic-concurrency race (Bucket B MED#10 documented split-brain window fired): " +
+                "runId={RunId} customerId={CustomerId} winningStatus={WinningStatus} " +
+                "registryState=Ready (already PATCHed) guardState=StillHeld (per Bucket B HIGH#7). " +
+                "Concurrent winner will complete + HandlerOutcomeApplier will release the guard, " +
+                "closing the split-brain within milliseconds.",
                 run.RunId, run.CustomerId, conflict.Current.Run.Status);
             return new HandlerResult.Failure(
                 FailureClass.Resumable, H13Rejections.ConcurrentWriteConflict,
                 $"Concurrent write advanced run '{run.RunId}' between H13 read + write. " +
-                $"Winning status: {conflict.Current.Run.Status}. Resume will re-run H13.");
+                $"Winning status: {conflict.Current.Run.Status}. Resume will re-run H13. " +
+                "Note: registry was PATCHed to Ready but Cosmos Conflicted — this is the " +
+                "Bucket B MED#10 SESSION 18 documented split-brain window; eventual convergence " +
+                "via the concurrent winner's own applier release closes it in milliseconds.");
         }
         if (replace is ReplaceRunResult.NotFound)
         {

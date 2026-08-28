@@ -568,9 +568,17 @@ public sealed class CrashRecoveryStartupServiceTests
     private sealed class StubActiveRunScanner : IActiveRunScanner
     {
         private readonly IReadOnlyList<ProvisioningRun> _runs;
-        public StubActiveRunScanner(IEnumerable<ProvisioningRun> runs) => _runs = runs.ToList();
+        private readonly IReadOnlyList<ProvisioningRun> _terminalRuns;
+        public StubActiveRunScanner(IEnumerable<ProvisioningRun> runs, IEnumerable<ProvisioningRun>? terminalRuns = null)
+        {
+            _runs = runs.ToList();
+            _terminalRuns = terminalRuns?.ToList() ?? (IReadOnlyList<ProvisioningRun>)Array.Empty<ProvisioningRun>();
+        }
         public Task<IReadOnlyList<ProvisioningRun>> QueryActiveRunsAsync(CancellationToken ct)
             => Task.FromResult(_runs);
+        // Bucket B MED#12 SESSION 18: orphan-guard sweep.
+        public Task<IReadOnlyList<ProvisioningRun>> QueryStaleTerminalRunsAsync(TimeSpan minAge, CancellationToken ct)
+            => Task.FromResult(_terminalRuns);
     }
 
     private sealed class ThrowingActiveRunScanner : IActiveRunScanner
@@ -578,6 +586,9 @@ public sealed class CrashRecoveryStartupServiceTests
         private readonly Exception _exception;
         public ThrowingActiveRunScanner(Exception exception) => _exception = exception;
         public Task<IReadOnlyList<ProvisioningRun>> QueryActiveRunsAsync(CancellationToken ct)
+            => throw _exception;
+        // Bucket B MED#12 SESSION 18: throwing scanner throws on this path too.
+        public Task<IReadOnlyList<ProvisioningRun>> QueryStaleTerminalRunsAsync(TimeSpan minAge, CancellationToken ct)
             => throw _exception;
     }
 

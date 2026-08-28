@@ -696,6 +696,146 @@ public sealed class H0PreflightHandlerTests
         enqueuer.Sent.Should().ContainSingle();
     }
 
+    [Theory]
+    [InlineData("missing-tier", null, "3000")]                   // tier absent → strict-mode fail
+    [InlineData("unknown-tier", "some-invented-tier", "500")]    // tier not in ceiling table → strict-mode fail
+    [InlineData("missing-estimate", "dedicated", null)]          // estimate absent → strict-mode fail
+    [InlineData("unparseable-estimate", "dedicated", "not-a-number")] // estimate not decimal → strict-mode fail
+    public async Task CostEnvelope_Model2Dedicated_FailsClosed_On_Missing_Or_Invalid_Inputs_BucketB_MED4_MED5(
+        string scenario, string? tier, string? estimate)
+    {
+        // Bucket B MED#4/#5 SESSION 18 (customer-provisioning-orchestration-r1
+        // adversarial e2e verify workflow wepdcb8we): Model2Dedicated MUST fail
+        // CLOSED on any missing/invalid cost-gate input (default
+        // RequireCostEnvelopeForModel2Dedicated=true). Dedicated-stamp
+        // tenancies burn real budget, so a silent skip on a Model2Dedicated
+        // run is a security-adjacent hole. The four scenarios cover:
+        //   - missing-tier: no tier param at all
+        //   - unknown-tier: tier value not in default table AND not configured
+        //   - missing-estimate: no estimatedMonthlyUsd param
+        //   - unparseable-estimate: estimatedMonthlyUsd is not a decimal
+        var run = BuildRunWithTenant();
+        // BuildRun() defaults TenancyModel="Model2Dedicated" + tier="dedicated" + estimate="3000" (safe defaults).
+        // Override each param independently: null means REMOVE (exercise the missing branch); non-null means SET.
+        if (tier is null)
+        {
+            run.Parameters.NonSecret.Remove(H0PreflightHandler.TierParameterKey);
+        }
+        else
+        {
+            run.Parameters.NonSecret[H0PreflightHandler.TierParameterKey] = tier;
+        }
+        if (estimate is null)
+        {
+            run.Parameters.NonSecret.Remove(H0PreflightHandler.EstimatedMonthlyUsdParameterKey);
+        }
+        else
+        {
+            run.Parameters.NonSecret[H0PreflightHandler.EstimatedMonthlyUsdParameterKey] = estimate;
+        }
+        var repo = new FakeRepository(run, etag: $"etag-med4-med5-{scenario}");
+        var enqueuer = new FakeEnqueuer();
+        var probes = AllPassProbes();
+        var handler = CreateHandler(repo, enqueuer, probes);
+
+        var result = await handler.HandleAsync(BuildEnvelope(), CancellationToken.None);
+
+        var failure = result.Should().BeOfType<HandlerResult.Failure>(
+            $"scenario={scenario}: Model2Dedicated + strict-mode MUST fail-closed on any invalid cost-gate input").Subject;
+        failure.Class.Should().Be(FailureClass.Resumable,
+            "operator can fix intake + resume");
+        failure.RejectionCode.Should().StartWith("quota-cost-envelope-",
+            $"scenario={scenario}: rejection code MUST be a distinct machine-stable literal (quota-cost-envelope-required-missing / -unknown-tier / -unparseable-estimate) so operators can grep post-hoc");
+        enqueuer.Sent.Should().BeEmpty(
+            "the run must NOT advance past H0 — abort BEFORE any Azure probe fires");
+        repo.LastWrittenRun!.Status.Should().Be(RunStatus.Failed);
+    }
+
+    [Fact]
+    public async Task CostEnvelope_Model1_Missing_Tier_Skips_LogOnly_BucketB_MED4()
+    {
+        // Bucket B MED#4 SESSION 18 non-regression: Model1Shared retains the
+        // pre-Bucket-B log-only skip on missing inputs (the shared-trial user
+        // sees the WARN log inline; blast radius is limited compared to
+        // Model2Dedicated). This test locks the asymmetry — a future refactor
+        // that expands strict-mode to Model1 without owner sign-off would
+        // fail this test.
+        var run = BuildRunWithTenant();
+        run.TenancyModel = "Model1Shared";
+        run.Profile = "spaarke-hosted-model1-trial";
+        // Deliberately omit both tier + estimatedMonthlyUsd.
+        var repo = new FakeRepository(run, etag: "etag-med4-model1-skip");
+        var enqueuer = new FakeEnqueuer();
+        var probes = AllPassProbes();
+        var handler = CreateHandler(repo, enqueuer, probes);
+
+        var result = await handler.HandleAsync(BuildEnvelope(), CancellationToken.None);
+
+        result.Should().BeOfType<HandlerResult.Success>(
+            "Model1Shared retains log-only skip on missing cost-gate inputs (Bucket B MED#4 SESSION 18 asymmetry)");
+        enqueuer.Sent.Should().ContainSingle(
+            "run advances past H0 — gate skipped but H0 itself succeeded");
+    }
+
+    [Fact]
+    public async Task CostEnvelope_Model2Dedicated_StrictModeOff_ReturnsToLogOnlySkip_BucketB_MED4()
+    {
+        // Bucket B MED#4 SESSION 18 escape hatch: H0Options.
+        // RequireCostEnvelopeForModel2Dedicated=false disables strict-mode,
+        // restoring the pre-Bucket-B log-only skip for internal-test envs
+        // where the operator has confirmed cost analytically before dispatch.
+        var run = BuildRunWithTenant();
+        // Model2Dedicated by BuildRun() default.
+        // Deliberately omit tier + estimate.
+        var repo = new FakeRepository(run, etag: "etag-med4-escape");
+        var enqueuer = new FakeEnqueuer();
+        var probes = AllPassProbes();
+        var h0Options = Microsoft.Extensions.Options.Options.Create(new H0Options
+        {
+            CostEnvelopeAbortsPreflight = true,
+            RequireCostEnvelopeForModel2Dedicated = false,  // escape hatch enabled
+        });
+        var handler = CreateHandler(repo, enqueuer, probes, h0Options: h0Options);
+
+        var result = await handler.HandleAsync(BuildEnvelope(), CancellationToken.None);
+
+        result.Should().BeOfType<HandlerResult.Success>(
+            "RequireCostEnvelopeForModel2Dedicated=false MUST restore log-only skip for Model2Dedicated");
+        enqueuer.Sent.Should().ContainSingle();
+    }
+
+    [Theory]
+    [InlineData("warnAndProceed")]     // canonical casing
+    [InlineData("WarnAndProceed")]     // PascalCase typo
+    [InlineData("WARNANDPROCEED")]     // all upper
+    [InlineData("warnandproceed")]     // all lower
+    public async Task CostEnvelopePolicy_CaseInsensitive_Match_BucketB_LOW1(string policyValue)
+    {
+        // Bucket B LOW#1 SESSION 18 (customer-provisioning-orchestration-r1
+        // adversarial e2e verify workflow wepdcb8we): the H0 policy comparison
+        // is OrdinalIgnoreCase, docstring now aligned. This test locks the
+        // case-insensitive semantic so a future refactor that flips to Ordinal
+        // (case-sensitive) fails here rather than silently changing the
+        // operator-facing contract. Uses Model1Shared so the HIGH#12
+        // Model2Dedicated abort-override does not fire.
+        var run = BuildRunWithTenant();
+        run.TenancyModel = "Model1Shared";
+        run.Profile = "spaarke-hosted-model1-trial";
+        run.Parameters.NonSecret[H0PreflightHandler.TierParameterKey] = "shared-trial";
+        run.Parameters.NonSecret[H0PreflightHandler.EstimatedMonthlyUsdParameterKey] = "600";
+        run.Parameters.NonSecret[H0PreflightHandler.CostEnvelopePolicyParameterKey] = policyValue;
+        var repo = new FakeRepository(run, etag: $"etag-low1-{policyValue}");
+        var enqueuer = new FakeEnqueuer();
+        var probes = AllPassProbes();
+        var handler = CreateHandler(repo, enqueuer, probes);
+
+        var result = await handler.HandleAsync(BuildEnvelope(), CancellationToken.None);
+
+        result.Should().BeOfType<HandlerResult.Success>(
+            $"policyValue='{policyValue}' MUST case-insensitively match warnAndProceed and skip the abort branch");
+        enqueuer.Sent.Should().ContainSingle();
+    }
+
     [Fact]
     public async Task CostEnvelope_Model2Dedicated_WarnAndProceedPolicy_ForcesAbortOnOverrun()
     {
@@ -778,9 +918,22 @@ public sealed class H0PreflightHandlerTests
     [InlineData(null)]        // missing tier
     [InlineData("")]          // blank tier
     [InlineData("bogus-tier")] // unknown tier — no ceiling → log-only skip
-    public async Task CostEnvelope_MissingOrUnknownTier_LogOnlySkip(string? tier)
+    public async Task CostEnvelope_Model1_MissingOrUnknownTier_LogOnlySkip(string? tier)
     {
+        // Bucket B MED#5 SESSION 18 (customer-provisioning-orchestration-r1
+        // adversarial e2e verify workflow wepdcb8we): missing/unknown tier
+        // remains a LOG-ONLY skip for Model1Shared (see also
+        // CostEnvelope_Model2Dedicated_FailsClosed_On_Missing_Or_Invalid_Inputs_BucketB_MED4_MED5
+        // for the Model2Dedicated strict-mode variant). This test was renamed
+        // from CostEnvelope_MissingOrUnknownTier_LogOnlySkip and switched to
+        // Model1Shared so the intent (Model 1 log-only skip retained) is
+        // explicit in the name.
         var run = BuildRunWithTenant();
+        run.TenancyModel = "Model1Shared";
+        run.Profile = "spaarke-hosted-model1-trial";
+        // Override BuildRun()'s default tier (dedicated) — this test needs to
+        // clear/replace it to exercise the missing/unknown-tier code path.
+        run.Parameters.NonSecret.Remove(H0PreflightHandler.TierParameterKey);
         if (tier is not null)
         {
             run.Parameters.NonSecret[H0PreflightHandler.TierParameterKey] = tier;
@@ -792,17 +945,25 @@ public sealed class H0PreflightHandlerTests
         var result = await handler.HandleAsync(BuildEnvelope(), CancellationToken.None);
 
         result.Should().BeOfType<HandlerResult.Success>(
-            "COMP-10: missing/unknown tier is a LOG-ONLY skip — never fail-close on plumbing gaps");
+            "Bucket B MED#5 SESSION 18: Model1Shared retains LOG-ONLY skip on missing/unknown tier " +
+            "(Model2Dedicated fail-closes per the separate strict-mode test)");
     }
 
     [Theory]
     [InlineData(null)]        // missing estimatedMonthlyUsd
     [InlineData("")]          // blank
     [InlineData("not-a-number")] // unparseable
-    public async Task CostEnvelope_MissingOrUnparseableEstimate_LogOnlySkip(string? raw)
+    public async Task CostEnvelope_Model1_MissingOrUnparseableEstimate_LogOnlySkip(string? raw)
     {
+        // Bucket B MED#4 SESSION 18: Model1Shared retains LOG-ONLY skip on
+        // missing/unparseable estimatedMonthlyUsd. Model2Dedicated variant
+        // covered by CostEnvelope_Model2Dedicated_FailsClosed_...
         var run = BuildRunWithTenant();
+        run.TenancyModel = "Model1Shared";
+        run.Profile = "spaarke-hosted-model1-trial";
         run.Parameters.NonSecret[H0PreflightHandler.TierParameterKey] = "shared-trial";
+        // Override BuildRun()'s default estimate — this test clears/replaces it.
+        run.Parameters.NonSecret.Remove(H0PreflightHandler.EstimatedMonthlyUsdParameterKey);
         if (raw is not null)
         {
             run.Parameters.NonSecret[H0PreflightHandler.EstimatedMonthlyUsdParameterKey] = raw;
@@ -813,7 +974,7 @@ public sealed class H0PreflightHandlerTests
         var result = await handler.HandleAsync(BuildEnvelope(), CancellationToken.None);
 
         result.Should().BeOfType<HandlerResult.Success>(
-            "COMP-10: missing/unparseable estimatedMonthlyUsd is a LOG-ONLY skip");
+            "Bucket B MED#4 SESSION 18: Model1Shared retains LOG-ONLY skip on missing/unparseable estimatedMonthlyUsd");
     }
 
     // ---------- helpers ----------
@@ -889,6 +1050,15 @@ public sealed class H0PreflightHandlerTests
         };
         run.Parameters.NonSecret["region"] = "eastus";
         run.Parameters.NonSecret["subscriptionId"] = "sub-1";
+        // Bucket B MED#4 SESSION 18: default TenancyModel="Model2Dedicated" now
+        // triggers strict-mode cost-envelope enforcement (H0Options.
+        // RequireCostEnvelopeForModel2Dedicated=true). Populate valid tier +
+        // estimatedMonthlyUsd defaults so tests that don't focus on the
+        // cost-gate (probe failures, tenant guard, etc.) don't trip over it.
+        // Tests that specifically exercise missing/invalid cost-gate inputs
+        // MUST override or clear these defaults explicitly.
+        run.Parameters.NonSecret[H0PreflightHandler.TierParameterKey] = "dedicated";
+        run.Parameters.NonSecret[H0PreflightHandler.EstimatedMonthlyUsdParameterKey] = "3000";  // well under $5000 dedicated ceiling
         return run;
     }
 

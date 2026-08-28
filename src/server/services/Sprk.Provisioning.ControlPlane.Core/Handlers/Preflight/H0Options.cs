@@ -80,6 +80,27 @@ public sealed class H0Options
     public bool CostEnvelopeAbortsPreflight { get; set; } = true;
 
     /// <summary>
+    /// Bucket B MED#4 SESSION 18 (customer-provisioning-orchestration-r1
+    /// adversarial e2e verify workflow wepdcb8we): when <c>true</c> (default),
+    /// H0 FAILS the run when tenancyModel=Model2Dedicated AND any of
+    /// {tier, estimatedMonthlyUsd, ceiling-for-tier} is missing/unknown/
+    /// unparseable. Prior behavior LOG-ONLY skipped those cases for ALL
+    /// tenancies, meaning a dedicated stamp (5000 USD/mo ceiling) could burn
+    /// budget silently if the intake omitted the estimate.
+    ///
+    /// Model2Dedicated is a HIGHER-BLAST-RADIUS tenancy than Model1Shared
+    /// (dedicated Azure sub, dedicated Dataverse env, per-customer stamp) —
+    /// silent skips are appropriate for shared-trial runs where the operator
+    /// sees the WARN log inline, but for Model2Dedicated the cost check is
+    /// a load-bearing precondition (an over-budget run wastes $$$$ of real
+    /// resources before H13 can catch the drift).
+    ///
+    /// When <c>false</c>, all tenancies use the pre-Bucket-B log-only skip
+    /// (opt-out for internal-test envs).
+    /// </summary>
+    public bool RequireCostEnvelopeForModel2Dedicated { get; set; } = true;
+
+    /// <summary>
     /// Per-tier monthly cost ceilings in USD. Missing tiers fall back to
     /// <see cref="DefaultCeilingsUsd"/> via <see cref="GetCeilingUsd"/>.
     /// Matches SKILL.md Step 2 BAT-10 default table.

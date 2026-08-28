@@ -67,4 +67,26 @@ public interface IActiveRunScanner
     /// full before the task completes.
     /// </returns>
     Task<IReadOnlyList<ProvisioningRun>> QueryActiveRunsAsync(CancellationToken cancellationToken);
+
+    /// <summary>
+    /// Bucket B MED#12 SESSION 18 (customer-provisioning-orchestration-r1
+    /// adversarial e2e verify workflow wepdcb8we): returns TERMINAL runs
+    /// (Status ∈ {Completed, Failed, Cancelled, Quarantined}) whose CompletedOn
+    /// is older than <paramref name="minAge"/>. Consumed by the crash-recovery
+    /// orphan-guard sweep — for each such run, the sweep fires
+    /// <see cref="Sprk.Provisioning.ControlPlane.Concurrency.ICustomerRunGuard.ReleaseAsync"/>
+    /// (stale-value-safe) to clear any leaked <c>sprk_currentrunid</c> that
+    /// the primary guard-release paths (HandlerOutcomeApplier terminal
+    /// branch per Bucket B HIGH#6, QuarantineClearService per COMP-06)
+    /// might have missed due to a mid-write host crash / SB lock loss.
+    ///
+    /// The min-age filter prevents interference with in-flight terminal
+    /// transitions — a run that JUST reached Completed at second 0 should
+    /// have its release fire from the normal path; the sweep only picks
+    /// up runs where the release genuinely didn't happen.
+    /// </summary>
+    /// <param name="minAge">Minimum age since CompletedOn — runs younger than this are excluded.</param>
+    /// <param name="cancellationToken">Cancellation token.</param>
+    Task<IReadOnlyList<ProvisioningRun>> QueryStaleTerminalRunsAsync(
+        TimeSpan minAge, CancellationToken cancellationToken);
 }

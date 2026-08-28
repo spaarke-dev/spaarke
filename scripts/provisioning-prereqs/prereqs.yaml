@@ -827,9 +827,28 @@ prereqs:
     consequence_of_absence: F13 — SpaarkeMaster import fails on Power BI dependency; `--skip-dependency-check` does NOT help (not a product-update dep).
     check_recipe:
       cli: |
+        # Bucket B MED#9 SESSION 18 (customer-provisioning-orchestration-r1
+        # adversarial e2e verify workflow wepdcb8we): PRIOR recipe used
+        # `pac application list ... | Select-String "$app"` — Select-String is a
+        # PowerShell CMDLET, NOT a bash command. Under the `bash -c` wrapper in
+        # SKILL.md Step 0.5b it produces `/bin/bash: line N: Select-String:
+        # command not found` (exit 127) on every operator machine. Operators
+        # (correctly) recognize the author bug + skip via -SkipStep0_5, then hit
+        # F13 downstream anyway.
+        # Fix: POSIX-native `grep -q` with explicit exit-1-on-missing per the
+        # Bucket B HIGH#9 recipe author contract (validate-recipe-authoring.ps1).
+        output=$(pac application list --environment {dvUrl} 2>/dev/null)
+        [ -z "$output" ] && { echo "PAC_LIST_EMPTY: pac application list returned empty for {dvUrl}"; exit 1; }
+        failed=0
         for app in msft_PowerBI_Anchor; do
-          pac application list --environment {dvUrl} | Select-String "$app"
+          if echo "$output" | grep -q "$app"; then
+            echo "OK: $app present"
+          else
+            echo "MISSING_APP: $app"
+            failed=1
+          fi
         done
+        [ "$failed" -eq 0 ] || exit 1
       expect: each app present
     remediation: "`pac application install --application-name msft_PowerBI_Anchor` (~6 min)."
     related_findings: [F13]

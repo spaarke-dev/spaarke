@@ -247,6 +247,10 @@ public sealed class ReconcilerEnqueuePayloadAttemptTests
         public StubActiveRunScanner(IEnumerable<ProvisioningRun> runs) => _runs = runs.ToList();
         public Task<IReadOnlyList<ProvisioningRun>> QueryActiveRunsAsync(CancellationToken ct)
             => Task.FromResult(_runs);
+        // Bucket B MED#12 SESSION 18: orphan-guard sweep — this stub is used
+        // by reconciler-payload tests that don't exercise the sweep path.
+        public Task<IReadOnlyList<ProvisioningRun>> QueryStaleTerminalRunsAsync(TimeSpan minAge, CancellationToken ct)
+            => Task.FromResult<IReadOnlyList<ProvisioningRun>>(Array.Empty<ProvisioningRun>());
     }
 
     /// <summary>Records every enqueued envelope in call order -- no dedup (unlike StateReconcilerServiceTests' DedupingRecordingEnqueuer) so tests can inspect each individual dispatch.</summary>

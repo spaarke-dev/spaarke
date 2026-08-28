@@ -326,6 +326,98 @@ public sealed class CrashRecoveryStartupService : IHostedService
             ScanCompleteEventName +
             ": ActiveRunCount={ActiveRunCount} OrphanCount={OrphanCount} ReEnqueuedCount={ReEnqueuedCount} ThresholdSeconds={ThresholdSeconds}.",
             activeRuns.Count, orphanCount, reEnqueuedCount, (long)threshold.TotalSeconds);
+
+        // ---------------------------------------------------------------------
+        // Bucket B MED#12 SESSION 18 (customer-provisioning-orchestration-r1
+        // adversarial e2e verify workflow wepdcb8we): orphan-guard sweep for
+        // terminal runs. HandlerOutcomeApplier writes RunStatus.Failed/Completed
+        // to Cosmos AT ONE POINT + fires ICustomerRunGuard.ReleaseAsync AT A
+        // LATER POINT (Bucket B HIGH#6 explicit-release for terminal Completed;
+        // ShouldReleaseCustomerGuard-gated release for Failure branches). If
+        // the L2 worker process crashes (host restart, OOM, ServiceBus lock
+        // loss + unrelated death) BETWEEN those two operations, Cosmos status
+        // is terminal but sprk_currentrunid is still pinned to the failed
+        // runId. Customer hits 409 forever on POST /api/runs; only manual
+        // operator PATCH clears it. This sweep closes that window by re-firing
+        // ReleaseAsync on every terminal run older than the threshold.
+        //
+        // Stale-value safety: ICustomerRunGuard.ReleaseAsync internally does
+        // LookupAsync → runId-equality check → conditional clear. If the
+        // guard was already released (normal happy path), Release returns
+        // Mismatched (no-op). If the guard still holds this runId (the
+        // orphan case), Release clears it. Either way, the sweep is safe to
+        // fire on every terminal run.
+        // ---------------------------------------------------------------------
+        try
+        {
+            var runGuard = scope.ServiceProvider.GetService<Concurrency.ICustomerRunGuard>();
+            if (runGuard is null)
+            {
+                _logger.LogDebug(
+                    "Bucket B MED#12 orphan-guard sweep skipped — ICustomerRunGuard not registered in this scope. " +
+                    "This is expected in test hosts that don't wire the Concurrency module.");
+            }
+            else
+            {
+                var terminalRuns = await scanner.QueryStaleTerminalRunsAsync(threshold, cancellationToken).ConfigureAwait(false);
+                var releasedCount = 0;
+                var mismatchedCount = 0;
+                foreach (var terminalRun in terminalRuns)
+                {
+                    if (cancellationToken.IsCancellationRequested) { break; }
+                    try
+                    {
+                        var release = await runGuard.ReleaseAsync(terminalRun.CustomerId, terminalRun.RunId, cancellationToken).ConfigureAwait(false);
+                        switch (release)
+                        {
+                            case Concurrency.ReleaseResult.Released:
+                                releasedCount++;
+                                _logger.LogInformation(
+                                    "OrphanGuardRecovered (Bucket B MED#12): terminal run {RunId} (customer {CustomerId}, status {Status}) had leaked sprk_currentrunid pin — released.",
+                                    terminalRun.RunId, terminalRun.CustomerId, terminalRun.Status);
+                                break;
+                            case Concurrency.ReleaseResult.Mismatched:
+                            case Concurrency.ReleaseResult.NotFound:
+                                mismatchedCount++;
+                                break;
+                            case Concurrency.ReleaseResult.TransientFailure tf:
+                                _logger.LogWarning(
+                                    "Bucket B MED#12 orphan-guard release transient failure for terminal run {RunId} (customer {CustomerId}): {Diagnostic}. Next scan will retry.",
+                                    terminalRun.RunId, terminalRun.CustomerId, tf.Diagnostic);
+                                break;
+                        }
+                    }
+                    catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+                    {
+                        throw;
+                    }
+                    catch (Exception ex)
+                    {
+                        _logger.LogWarning(ex,
+                            "Bucket B MED#12 orphan-guard sweep exception for terminal run {RunId} (customer {CustomerId}); continuing with next run.",
+                            terminalRun.RunId, terminalRun.CustomerId);
+                    }
+                }
+                _logger.LogInformation(
+                    "Bucket B MED#12 orphan-guard sweep complete: TerminalRunsScanned={TerminalRunsScanned} " +
+                    "Released={ReleasedCount} MismatchedOrNotFound={MismatchedOrNotFoundCount} " +
+                    "ThresholdSeconds={ThresholdSeconds}.",
+                    terminalRuns.Count, releasedCount, mismatchedCount, (long)threshold.TotalSeconds);
+            }
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            throw;
+        }
+        catch (Exception ex)
+        {
+            // Sweep failure MUST NOT break the primary crash-recovery scan.
+            // The reconciler + active-run scan already ran successfully above;
+            // orphan-guard release is best-effort belt-and-suspenders.
+            _logger.LogWarning(ex,
+                "Bucket B MED#12 orphan-guard sweep failed as a whole; next startup will retry. " +
+                "Primary active-run recovery already completed.");
+        }
     }
 
     /// <summary>

@@ -141,4 +141,75 @@ public class DataverseEnvironmentRegistryClientUpdateColumnsTests
             .WithMessage("*empty column name*",
                 because: "REG-01 fail-loud — an empty column name is a caller bug, not a silent-drop.");
     }
+
+    // -------------------------------------------------------------------------
+    // Bucket B MED#3 SESSION 18 (customer-provisioning-orchestration-r1 adversarial
+    // e2e verify workflow wepdcb8we): I1 immutability allow-list guard.
+    // -------------------------------------------------------------------------
+
+    [Theory]
+    [InlineData("sprk_tenantid")]
+    [InlineData("sprk_customerid")]
+    [InlineData("sprk_dataverseenvironmentid")]
+    [InlineData("SPRK_TENANTID")]                 // case-insensitive guard (OrdinalIgnoreCase)
+    [InlineData("SPRK_CustomerId")]
+    public void BuildColumnsPatchBody_Refuses_I1_Immutable_Columns_BucketB_MED3(string forbiddenColumn)
+    {
+        // BucketB MED#3 SESSION 18 baseline: prior behavior silently accepted any
+        // column name — a future H14 wiring step that added
+        // columns["sprk_tenantid"] = tenantId to a promoted-columns dict would
+        // silently violate I1 with no audit trail. The guard bakes I1 into code
+        // so a violation fails LOUDLY here + at runtime, not by discipline alone.
+        var act = () => DataverseEnvironmentRegistryClient.BuildColumnsPatchBody(
+            new Dictionary<string, object?>
+            {
+                [forbiddenColumn] = "x",
+            });
+
+        act.Should().Throw<InvalidOperationException>()
+            .WithMessage("*I1-immutable*",
+                because: "Bucket B MED#3 SESSION 18: sprk_tenantid / sprk_customerid / " +
+                         "sprk_dataverseenvironmentid are set once at placeholder-create and NEVER " +
+                         "re-writable per design.md §4D I1. Any caller that supplies one of these " +
+                         "MUST fail LOUDLY — the immutability invariant lives in code, not just docs.");
+    }
+
+    [Fact]
+    public void BuildColumnsPatchBody_Permits_Mutable_Columns_Alongside_Immutable_Refusal_BucketB_MED3()
+    {
+        // Belt-and-suspenders: even a mixed dict (mutable + immutable columns)
+        // MUST refuse — the guard fires on the immutable entry as soon as the
+        // loop visits it. Dictionary iteration order is stable in .NET for
+        // OrderedDictionary; for plain Dictionary<string,object?> insertion
+        // order is preserved but not guaranteed by contract, so this test only
+        // asserts the throw, not which mutable columns got serialized before it.
+        var act = () => DataverseEnvironmentRegistryClient.BuildColumnsPatchBody(
+            new Dictionary<string, object?>
+            {
+                ["sprk_bffversion"] = "1.5.0",   // mutable
+                ["sprk_tenantid"] = "would-violate-I1",  // I1-immutable
+            });
+
+        act.Should().Throw<InvalidOperationException>()
+            .WithMessage("*sprk_tenantid*I1-immutable*",
+                because: "Bucket B MED#3: an I1-immutable entry ANYWHERE in the dict aborts the entire " +
+                         "PATCH body build — partial writes would leave the runrecord half-updated.");
+    }
+
+    [Fact]
+    public void ImmutableColumnsBlockList_Contains_ExpectedSetOnly_BucketB_MED3()
+    {
+        // Change-detector: locks the exact block-list contents so a future
+        // well-intentioned addition/removal shows up in code review.
+        DataverseEnvironmentRegistryClient.ImmutableColumnsBlockList
+            .Should().BeEquivalentTo(new[]
+            {
+                "sprk_dataverseenvironmentid",
+                "sprk_customerid",
+                "sprk_tenantid",
+            }, because: "Bucket B MED#3 SESSION 18: exactly these three columns are I1-immutable per " +
+                        "design.md §4D. Adding a new column here means adding a new immutability invariant " +
+                        "to the design doc; removing one means the invariant no longer holds and must be " +
+                        "explicitly repealed in a §6.5 resolution.");
+    }
 }

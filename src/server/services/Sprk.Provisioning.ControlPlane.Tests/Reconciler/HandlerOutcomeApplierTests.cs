@@ -292,9 +292,24 @@ public sealed class HandlerOutcomeApplierTests
             run, ifMatchEtag: "etag-1", outcome: failure, handlerId: "H13", CancellationToken.None);
 
         applied.TargetStatus.Should().Be(RunStatus.Completed);
-        guard.ReleaseCalls.Should().BeEmpty(
-            "OUR write did not land -- the concurrent winner (or its own ApplyHandlerOutcomeAsync call) " +
-            "owns the release decision for its own committed transition; releasing here too would double-release.");
+        // Bucket B MED#11 SESSION 18 (customer-provisioning-orchestration-r1
+        // adversarial e2e verify workflow wepdcb8we) INVERTS the prior test's
+        // expectation: on Conflict where winningStatus == targetStatus AND
+        // ShouldReleaseCustomerGuard(failureClass) is true, fire the release
+        // as stale-value-safe belt-and-suspenders. Prior behavior "skip release
+        // on Conflict" was correct for the common case (both writers race to
+        // the same terminal state), but left a rare hole where a partial-replay
+        // winner never reached its own applier release call (mid-flow host
+        // crash, ServiceBus lock loss). ICustomerRunGuard.ReleaseAsync is
+        // stale-value-safe by contract (Mismatched = no-op), so this
+        // additional release is safe under all winner-ordering permutations.
+        guard.ReleaseCalls.Should().ContainSingle(
+            because: "Bucket B MED#11 SESSION 18: Conflict.Current.Run.Status == targetStatus (both Completed) " +
+                     "AND SuccessfulButDrifted requires guard release per ShouldReleaseCustomerGuard — fire " +
+                     "stale-value-safe belt-and-suspenders release. The concurrent winner's own applier will " +
+                     "also attempt release; ICustomerRunGuard's LookupAsync-equality check ensures one clears " +
+                     "and the other returns Mismatched (no-op).")
+            .Which.Should().Be((TestCustomerId, TestRunId));
     }
 
     // -----------------------------------------------------------------------

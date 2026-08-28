@@ -405,6 +405,9 @@ public sealed class StateReconcilerServiceTests
         public StubActiveRunScanner(IEnumerable<ProvisioningRun> runs) => _runs = runs.ToList();
         public Task<IReadOnlyList<ProvisioningRun>> QueryActiveRunsAsync(CancellationToken ct)
             => Task.FromResult(_runs);
+        // Bucket B MED#12 SESSION 18: reconciler tests don't exercise the sweep.
+        public Task<IReadOnlyList<ProvisioningRun>> QueryStaleTerminalRunsAsync(TimeSpan minAge, CancellationToken ct)
+            => Task.FromResult<IReadOnlyList<ProvisioningRun>>(Array.Empty<ProvisioningRun>());
     }
 
     private sealed class ThrowingActiveRunScanner : IActiveRunScanner
@@ -412,6 +415,9 @@ public sealed class StateReconcilerServiceTests
         private readonly Exception _exception;
         public ThrowingActiveRunScanner(Exception exception) => _exception = exception;
         public Task<IReadOnlyList<ProvisioningRun>> QueryActiveRunsAsync(CancellationToken ct)
+            => throw _exception;
+        // Bucket B MED#12 SESSION 18: throwing scanner throws on this path too.
+        public Task<IReadOnlyList<ProvisioningRun>> QueryStaleTerminalRunsAsync(TimeSpan minAge, CancellationToken ct)
             => throw _exception;
     }
 

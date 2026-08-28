@@ -1117,17 +1117,47 @@ L2 returns 202 within 100ms and the reconciler picks up H0 within ~5s. L2's stat
 Poll `GET /api/runs/{runId}?customerId={customerId}` at **10s intervals**. The `?customerId=` query parameter is MANDATORY per `RunsEndpoints.cs:582` (`TryValidateRouteAndPartition` returns 400 if missing).
 
 ```powershell
-# URL-encode customerId per RFC 3986; assume already-safe kebab-case per Step 1a validation but escape defensively
+# URL-encode customerId per RFC 3986; assume already-safe kebab-case per Step 1a validation but escape defensively.
+# Bucket B LOW#4 SESSION 18 (customer-provisioning-orchestration-r1 adversarial e2e verify workflow wepdcb8we):
+# implement token auto-refresh on 401 with a bounded retry counter — Prior version was prose-only.
+# A Model 2 run entering H0.5 waiting on customer admin consent + 45min operator idle would blow past the
+# ~1h L2-audience token TTL; the naive Invoke-RestMethod call would throw HttpResponseException 401 and
+# either crash the skill (no handoff) or hit an unbounded retry loop with the expired token.
 $encodedCustomerId = [Uri]::EscapeDataString($customerId)
-$run = Invoke-RestMethod `
-  -Uri "$l2Base/api/runs/$runId`?customerId=$encodedCustomerId" `
-  -Method GET `
-  -Headers @{ Authorization = "Bearer $token" }
+$maxConsecutive401 = 3   # after this many, escalate per Fallback F2 (line 1809)
+$consecutive401 = 0
+
+function Invoke-L2PollWithTokenRefresh {
+    param([string]$Uri, [string]$Env)
+    $script:consecutive401 = 0
+    while ($true) {
+        try {
+            return Invoke-RestMethod -Uri $Uri -Method GET -Headers @{ Authorization = "Bearer $script:token" }
+        }
+        catch [System.Net.Http.HttpRequestException] {
+            # PowerShell 7+: HttpRequestException.StatusCode is HttpStatusCode?.
+            $statusCode = $_.Exception.StatusCode
+            if ($statusCode -ne 'Unauthorized') { throw }
+            $script:consecutive401++
+            if ($script:consecutive401 -ge $maxConsecutive401) {
+                throw "Poll loop hit $maxConsecutive401 consecutive 401s after token refresh — escalate per Fallback F2 (line 1809). Operator's AAD context is broken; run 'az login' + rerun skill with -Resume $runId."
+            }
+            Write-Warning "Poll got 401 (attempt $script:consecutive401/$maxConsecutive401) — re-acquiring L2-audience token via 'az account get-access-token' then retrying ONCE."
+            $script:token = az account get-access-token --resource "api://spaarke.com/provisioning-controlplane-$Env" --query accessToken -o tsv 2>$null
+            if ([string]::IsNullOrWhiteSpace($script:token)) {
+                throw "az account get-access-token returned empty for api://spaarke.com/provisioning-controlplane-$Env — az context lost. Run 'az login' + rerun skill with -Resume $runId."
+            }
+            # Loop continues → retry with fresh token.
+        }
+    }
+}
+
+$run = Invoke-L2PollWithTokenRefresh -Uri "$l2Base/api/runs/$runId`?customerId=$encodedCustomerId" -Env $environment
 ```
 
-Auto-refresh the token when a 401 appears (see Fallback Matrix F2) — silently re-acquire via `az account get-access-token` and retry ONCE. Do NOT prompt the operator on transient 401.
-
 **Reconciler liveness check (EXEC-05)**: if 3 consecutive polls return identical `updatedAt` on the run doc AND the current handler is not one of the long-running ones (H2a bicep = 30min, H8 SPE 25h fallback, H12a AI-seed = 15min), fetch `$l2Base/healthz` to verify L2 is still up, then issue `POST /api/runs/{runId}/resume?customerId={cid}` (which per RunsEndpoints.cs re-enqueues the CurrentPhase envelope). This nudges a stuck reconciler; do NOT auto-retry if it doesn't unstick within another 3 polls — escalate as Fallback F3.
+
+**Bucket B MED#8 SESSION 18 clarification for EXEC-05 semantics** (customer-provisioning-orchestration-r1 adversarial e2e verify workflow wepdcb8we): Step 4b at line 1140/1337 documents `/resume` as "ONLY for retrying a Failed run per RunsEndpoints.cs:232-244". EXEC-05's use of `/resume` against a `Running` run is a documented DIVERGENCE from that contract, permitted because: (a) `RunsEndpoints.cs` PostResume does NOT gate on Status — it re-enqueues the CurrentPhase envelope regardless (verified against Reconciler liveness precedent, task 107); (b) the L2 dispatcher's Level-1 Service Bus dedup + Level-3 handler CompletedPhase check ensure the re-enqueued envelope is a no-op if the handler has already completed the current phase; (c) the retry counter mutation in HandlerOutcomeApplier (task 107) only fires on Failure branches, NOT on Running-branch re-dispatches, so EXEC-05 does NOT decrement any retry budget. If a future L2 change adds a status-gate to PostResume (e.g., rejecting non-Failed runs with 409), EXEC-05 breaks and this note must be removed. Verified 2026-08-27 against RunsEndpoints.cs:232-244 (no status gate present).
 
 Track TodoWrite entries for each handler as it enters/exits `Running`:
 - `Handler H2a (bicep-apply) — Running`
@@ -1271,16 +1301,29 @@ After clearing the gate condition, rerun the skill with:
       exit 4
     }
     'pollUntilTimeout' {
-      # Poll GET /api/runs/{id} at 10s cadence until status != WaitingOnGate OR 30-min hard cap
-      $deadline = (Get-Date).AddMinutes(30)
-      Write-Host "[skill] Batch onManualGatePolicy=pollUntilTimeout — polling for gate clear (30 min hard cap)..." -ForegroundColor Cyan
+      # Bucket B MED#13 SESSION 18 (customer-provisioning-orchestration-r1
+      # adversarial e2e verify workflow wepdcb8we): branch the poll cap on
+      # gate identity. Step 5c prose promises H8 SPE container-type replication
+      # a 25h fallback (per MS's documented 24h SLO), but the default 30-min
+      # cap would prematurely exit-4 on a genuinely-slow replication event.
+      # Other gates (H0.5 admin consent, H1 quota bump) legitimately deserve
+      # the 30-min ceiling — operator escalates to Fallback F3 after that.
+      # Empirical practice per operator memory feedback_spe_container_timing:
+      # SPE replication is near-instant (~2 min in 2026-08-22 Model 1 stand-up),
+      # so the 25h ceiling is defensive and almost never fires in real dispatches.
+      $isSpeReplication = ($run.gateId -eq 'spe-replication') -or
+                          ($run.currentHandler -eq 'H8')
+      $capMinutes = if ($isSpeReplication) { 1500 } else { 30 }  # 1500 min = 25h for SPE, 30 min otherwise
+      $capLabel = if ($isSpeReplication) { '25h SPE-replication fallback' } else { '30 min' }
+      $deadline = (Get-Date).AddMinutes($capMinutes)
+      Write-Host "[skill] Batch onManualGatePolicy=pollUntilTimeout — polling gate '$($run.gateId)' for clear ($capLabel hard cap)..." -ForegroundColor Cyan
       while ((Get-Date) -lt $deadline) {
         Start-Sleep -Seconds 10
         $run = Invoke-RestMethod -Uri "$l2Base/api/runs/$runId`?customerId=$encodedCustomerId" -Method GET -Headers @{ Authorization = "Bearer $token" }
         if ($run.status -ne 'WaitingOnGate') { break }
       }
       if ($run.status -eq 'WaitingOnGate') {
-        Write-Warning "[skill] Batch WAITING (BAT-08, pollUntilTimeout hit 30-min cap): run $runId still at gate '$($run.gateId)'. Exit 4."
+        Write-Warning "[skill] Batch WAITING (BAT-08, pollUntilTimeout hit $capLabel cap): run $runId still at gate '$($run.gateId)'. Exit 4."
         exit 4
       }
       # else fall through — status advanced; continue poll loop

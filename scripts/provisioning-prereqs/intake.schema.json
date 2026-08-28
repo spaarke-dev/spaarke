@@ -102,7 +102,7 @@
       "type": "string",
       "enum": ["autoResumeOnce", "abandon"],
       "default": "abandon",
-      "description": "Batch policy for skill Step 4b Failed row (BAT-07). `autoResumeOnce` → POST /api/runs/{id}/resume ONCE after Failed → if still Failed, exit non-zero. `abandon` → immediately write runs/{runId}-failed.json + exit non-zero (skips resume). Ignored in interactive mode (operator answers resume/abandon prompt)."
+      "description": "Batch policy for skill Step 4b Failed row (BAT-07). `autoResumeOnce` → POST /api/runs/{id}/resume ONCE after Failed → if still Failed, exit non-zero. `abandon` → immediately write runs/{runId}-failed.json + exit non-zero (skips resume). Ignored in interactive mode (operator answers resume/abandon prompt). Bucket B LOW#2 SESSION 18 (customer-provisioning-orchestration-r1 adversarial verify workflow wepdcb8we): implementation verified at SKILL.md Step 4b line 1197-1201 — `switch ($script:BatchOnFailedPolicy) { 'autoResumeOnce' { ... POST /api/runs/$runId/resume ... single attempt } }`. If future SKILL.md edit removes this branch, this description is stale — sync both."
     },
     "onQuarantinedPolicy": {
       "type": "string",
