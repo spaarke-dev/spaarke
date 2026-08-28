@@ -137,6 +137,15 @@ public class ChatSessionManager
     /// the empty session in Redis.
     /// </summary>
     /// <param name="tenantId">Tenant ID (multi-tenant isolation).</param>
+    /// <param name="ownerOid">
+    /// Entra <c>oid</c> of the user the session belongs to (issue #863). <b>Required, and
+    /// deliberately positional rather than an optional trailing parameter</b> — an owner that a
+    /// call site can forget to pass is the same defect shape as the 21 tenant-resolution sites
+    /// task 059 removed. Resolve it with
+    /// <see cref="Infrastructure.Authentication.CallerResolution.ResolveObjectId"/> and answer
+    /// <c>401</c> when it is null; never substitute a placeholder, and never mint an unowned
+    /// session, because unowned sessions fail closed for everyone including their creator.
+    /// </param>
     /// <param name="documentId">SPE document ID for the session context (may be null).</param>
     /// <param name="playbookId">Playbook that governs the agent's system prompt and tools.</param>
     /// <param name="hostContext">Optional host context describing where SprkChat is embedded.</param>
@@ -144,11 +153,14 @@ public class ChatSessionManager
     /// <returns>The newly created <see cref="ChatSession"/>.</returns>
     public async Task<ChatSession> CreateSessionAsync(
         string tenantId,
+        string ownerOid,
         string? documentId,
         Guid? playbookId = null,
         ChatHostContext? hostContext = null,
         CancellationToken ct = default)
     {
+        ArgumentException.ThrowIfNullOrWhiteSpace(ownerOid);
+
         var sessionId = Guid.NewGuid().ToString("N");
         var now = DateTimeOffset.UtcNow;
 
@@ -160,7 +172,10 @@ public class ChatSessionManager
             CreatedAt: now,
             LastActivity: now,
             Messages: [],
-            HostContext: hostContext);
+            HostContext: hostContext)
+        {
+            OwnerOid = ownerOid
+        };
 
         _logger.LogInformation(
             "Creating chat session {SessionId} for tenant={TenantId}, document={DocumentId}, playbook={PlaybookId}",
@@ -815,6 +830,13 @@ public class ChatSessionManager
             Id = session.SessionId,
             SessionId = session.SessionId,
             TenantId = session.TenantId,
+
+            // Issue #863 — ownership must survive the warm tier. If this mapping is dropped, a
+            // session that falls out of Redis reloads from Cosmos with OwnerOid == null and then
+            // fails closed for its own owner. Its counterpart is in MapStoredSessionToChatSession;
+            // the pair is asserted by SessionOwnershipTests.
+            OwnerOid = session.OwnerOid,
+
             PlaybookId = session.PlaybookId,
             Messages = messages,
             WidgetStates = [],
@@ -934,6 +956,11 @@ public class ChatSessionManager
                 ? SessionPersistenceService.MapFromStored(stored.UploadedFiles)
                 : null)
         {
+            // Issue #863 — restore ownership from the warm tier. Without this the owner of a
+            // Redis-evicted session is denied access to their own conversation on reload. Null for
+            // Cosmos documents written before #863: those fail closed for everyone, by design.
+            OwnerOid = stored.OwnerOid,
+
             // FR-D4 (task 032) — restore the stored session title from the warm tier.
             Title = stored.Title,
 

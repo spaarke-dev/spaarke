@@ -168,7 +168,7 @@ public sealed class ComposeServiceApplyTemplateTests
         var sut = CreateSut();
 
         var result = await sut.ApplyTemplateAsync(
-            new DefaultHttpContext(), DriveId, SpeItemId, BuildTemplateDotx(), TemplateName, CancellationToken.None);
+            TestHttpContexts.Authenticated(), DriveId, SpeItemId, BuildTemplateDotx(), TemplateName, CancellationToken.None);
 
         // Result mirrors the Save path's version conventions.
         result.DocumentSpeId.Should().Be(SpeItemId);
@@ -208,7 +208,7 @@ public sealed class ComposeServiceApplyTemplateTests
         var sut = CreateSut();
 
         var result = await sut.ApplyTemplateAsync(
-            new DefaultHttpContext(), DriveId, SpeItemId, BuildTemplateDotx(), TemplateName, CancellationToken.None);
+            TestHttpContexts.Authenticated(), DriveId, SpeItemId, BuildTemplateDotx(), TemplateName, CancellationToken.None);
 
         result.ContentModel.Should().NotBeNull("the persisted merged bytes re-project into the canonical model (post-save mirror)");
         result.ContentModel!.Blocks.Should().Contain(
@@ -228,7 +228,7 @@ public sealed class ComposeServiceApplyTemplateTests
 
         // A sectPr-less template cannot supply page chrome — the engine warns template-merge-missing-sectpr.
         var result = await sut.ApplyTemplateAsync(
-            new DefaultHttpContext(), DriveId, SpeItemId, BuildTemplateDotx(includeSectPr: false), TemplateName,
+            TestHttpContexts.Authenticated(), DriveId, SpeItemId, BuildTemplateDotx(includeSectPr: false), TemplateName,
             CancellationToken.None);
 
         result.MergeWarnings.Should().NotBeNull("degradations must surface loudly, never silently");
@@ -242,7 +242,7 @@ public sealed class ComposeServiceApplyTemplateTests
         var sut = CreateSut();
 
         var result = await sut.ApplyTemplateAsync(
-            new DefaultHttpContext(), DriveId, SpeItemId, BuildTemplateDotx(), TemplateName, CancellationToken.None);
+            TestHttpContexts.Authenticated(), DriveId, SpeItemId, BuildTemplateDotx(), TemplateName, CancellationToken.None);
 
         result.MergeWarnings.Should().BeNull("a clean merge carries no warnings (null, not empty)");
     }
@@ -260,7 +260,7 @@ public sealed class ComposeServiceApplyTemplateTests
         var sut = CreateSut();
 
         var act = () => sut.ApplyTemplateAsync(
-            new DefaultHttpContext(), DriveId, SpeItemId, BuildTemplateDotx(), TemplateName, CancellationToken.None);
+            TestHttpContexts.Authenticated(), DriveId, SpeItemId, BuildTemplateDotx(), TemplateName, CancellationToken.None);
 
         (await act.Should().ThrowAsync<InvalidOperationException>())
             .WithMessage("*not found*", "the endpoint maps this to 404");
@@ -281,7 +281,7 @@ public sealed class ComposeServiceApplyTemplateTests
         var sut = CreateSut();
 
         var act = () => sut.ApplyTemplateAsync(
-            new DefaultHttpContext(), DriveId, SpeItemId, BuildTemplateDotx(), TemplateName, CancellationToken.None);
+            TestHttpContexts.Authenticated(), DriveId, SpeItemId, BuildTemplateDotx(), TemplateName, CancellationToken.None);
 
         await act.Should().ThrowAsync<InvalidOperationException>();
     }
@@ -292,7 +292,7 @@ public sealed class ComposeServiceApplyTemplateTests
         var sut = CreateSut();
 
         var act = () => sut.ApplyTemplateAsync(
-            new DefaultHttpContext(), DriveId, SpeItemId, Array.Empty<byte>(), TemplateName, CancellationToken.None);
+            TestHttpContexts.Authenticated(), DriveId, SpeItemId, Array.Empty<byte>(), TemplateName, CancellationToken.None);
 
         await act.Should().ThrowAsync<ArgumentException>("empty template bytes are a caller bug — the endpoint 400s");
     }

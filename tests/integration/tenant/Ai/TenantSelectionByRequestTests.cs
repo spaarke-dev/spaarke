@@ -92,7 +92,7 @@ public sealed class TenantSelectionByRequestTests
     public async Task Delete_WithoutAnyTenantClaim_CannotReachAnotherTenantsSessionViaTheHeader()
     {
         var manager = BuildManager();
-        var victim = await manager.CreateSessionAsync(TenantB, documentId: null);
+        var victim = await manager.CreateSessionAsync(TenantB, TestSessionOwner.Oid, documentId: null);
 
         var httpContext = new DefaultHttpContext { User = PrincipalWithNoTenantClaim() };
         httpContext.Request.Headers["X-Tenant-Id"] = TenantB;
@@ -121,7 +121,7 @@ public sealed class TenantSelectionByRequestTests
         // the header defect latent rather than live, and a future refactor that reorders the chain
         // would turn it live again with nothing else to catch it.
         var manager = BuildManager();
-        var victim = await manager.CreateSessionAsync(TenantB, documentId: null);
+        var victim = await manager.CreateSessionAsync(TenantB, TestSessionOwner.Oid, documentId: null);
 
         var httpContext = new DefaultHttpContext { User = PrincipalIn(TenantA) };
         httpContext.Request.Headers["X-Tenant-Id"] = TenantB;

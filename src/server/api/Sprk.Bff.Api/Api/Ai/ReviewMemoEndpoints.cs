@@ -66,6 +66,7 @@ public static class ReviewMemoEndpoints
 
         // POST /api/ai/chat/sessions/{sessionId}/review-memo
         group.MapPost("/{sessionId}/review-memo", GenerateReviewMemo)
+            .AddSessionOwnershipFilter()
             .AddAiAuthorizationFilter()
             .RequireRateLimiting("ai-batch")
             .WithName("GenerateReviewMemo")
@@ -86,6 +87,7 @@ public static class ReviewMemoEndpoints
 
         // GET /api/ai/chat/sessions/{sessionId}/review-memo (FR-14, task 051)
         group.MapGet("/{sessionId}/review-memo", GetReviewMemo)
+            .AddSessionOwnershipFilter()
             .AddAiAuthorizationFilter()
             .WithName("GetReviewMemo")
             .WithSummary("Read the persisted Review Summary Memo for the session's bound Analysis")
@@ -100,6 +102,7 @@ public static class ReviewMemoEndpoints
 
         // GET /api/ai/chat/sessions/{sessionId}/review-memo/docx (FR-14, task 051)
         group.MapGet("/{sessionId}/review-memo/docx", GetReviewMemoDocx)
+            .AddSessionOwnershipFilter()
             .AddAiAuthorizationFilter()
             .WithName("GetReviewMemoDocx")
             .WithSummary("Render the persisted Review Summary Memo as a downloadable .docx")

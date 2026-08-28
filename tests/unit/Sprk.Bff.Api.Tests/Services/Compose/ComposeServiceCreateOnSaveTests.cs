@@ -124,7 +124,7 @@ public sealed class ComposeServiceCreateOnSaveTests
 
     private static DefaultHttpContext HttpContextWithBearer(string authorization = "Bearer obo-user-token")
     {
-        var ctx = new DefaultHttpContext();
+        var ctx = TestHttpContexts.Authenticated();
         ctx.Request.Headers.Authorization = authorization;
         return ctx;
     }
@@ -245,7 +245,7 @@ public sealed class ComposeServiceCreateOnSaveTests
             DisplayName = "Draft",
         };
 
-        var result = await sut.SaveAsync(request, new DefaultHttpContext(), CancellationToken.None);
+        var result = await sut.SaveAsync(request, TestHttpContexts.Authenticated(), CancellationToken.None);
 
         // Fork B: the drive-item was created (not replaced).
         _spe.Verify(s => s.UploadSmallAsUserAsync(
@@ -300,7 +300,7 @@ public sealed class ComposeServiceCreateOnSaveTests
             DisplayName = "Draft",
         };
 
-        var result = await sut.SaveAsync(request, new DefaultHttpContext(), CancellationToken.None);
+        var result = await sut.SaveAsync(request, TestHttpContexts.Authenticated(), CancellationToken.None);
 
         // The promote create path is the ATOMIC upsert — never the old read-then-CreateAsync.
         _dataverse.Verify(d => d.UpsertAsync(It.IsAny<Entity>(), It.IsAny<CancellationToken>()), Times.Once);
@@ -340,7 +340,7 @@ public sealed class ComposeServiceCreateOnSaveTests
             DisplayName = "Draft",
         };
 
-        var result = await sut.SaveAsync(request, new DefaultHttpContext(), CancellationToken.None);
+        var result = await sut.SaveAsync(request, TestHttpContexts.Authenticated(), CancellationToken.None);
 
         result.DocumentRecordId.Should().Be(recordId);       // the one shared row
         result.WasPromotedThisSave.Should().BeFalse();        // this call did not create it (upsert matched)
@@ -416,7 +416,7 @@ public sealed class ComposeServiceCreateOnSaveTests
 
         var fake = new GatedProfileFake();
         var sut = CreateSutWithBackgroundProfile(fake, out var provider);
-        var httpContext = new DefaultHttpContext();   // no Authorization header
+        var httpContext = TestHttpContexts.Authenticated();   // no Authorization header
         var request = new SaveComposeDocumentRequest
         {
             DocumentSpeId = null,
@@ -493,7 +493,7 @@ public sealed class ComposeServiceCreateOnSaveTests
             TenantId = Tenant,
         };
 
-        var result = await sut.SaveAsync(request, new DefaultHttpContext(), CancellationToken.None);
+        var result = await sut.SaveAsync(request, TestHttpContexts.Authenticated(), CancellationToken.None);
 
         _spe.Verify(s => s.UploadSmallAsUserAsync(
             It.IsAny<HttpContext>(), It.IsAny<string>(), It.IsAny<string>(), It.IsAny<Stream>(), It.IsAny<CancellationToken>()), Times.Never);
@@ -527,7 +527,7 @@ public sealed class ComposeServiceCreateOnSaveTests
             TenantId = Tenant,
         };
 
-        var result = await sut.SaveAsync(request, new DefaultHttpContext(), CancellationToken.None);
+        var result = await sut.SaveAsync(request, TestHttpContexts.Authenticated(), CancellationToken.None);
 
         var completion = result.CompletionState!;
         StateOf(completion, ComposeService.StepRecord).Should().Be(JobAwareState.Completed, "the row was created");
@@ -562,7 +562,7 @@ public sealed class ComposeServiceCreateOnSaveTests
             TenantId = Tenant,
         };
 
-        var result = await sut.SaveAsync(request, new DefaultHttpContext(), CancellationToken.None);
+        var result = await sut.SaveAsync(request, TestHttpContexts.Authenticated(), CancellationToken.None);
 
         _spe.Verify(s => s.ReplaceFileContentAsUserAsync(
             It.IsAny<HttpContext>(), "drive-existing", "spe-existing", It.IsAny<Stream>(), It.IsAny<CancellationToken>()), Times.Once);
@@ -600,7 +600,7 @@ public sealed class ComposeServiceCreateOnSaveTests
             TenantId = Tenant,
         };
 
-        var result = await sut.SaveAsync(request, new DefaultHttpContext(), CancellationToken.None);
+        var result = await sut.SaveAsync(request, TestHttpContexts.Authenticated(), CancellationToken.None);
 
         _dataverse.Verify(d => d.CreateAsync(It.IsAny<Entity>(), It.IsAny<CancellationToken>()), Times.Never);
         // task 013 (FR-07d): the idempotent existing-row branch returns early — no upsert either.
@@ -633,7 +633,7 @@ public sealed class ComposeServiceCreateOnSaveTests
             TenantId = Tenant,
         };
 
-        var result = await sut.SaveAsync(request, new DefaultHttpContext(), CancellationToken.None);
+        var result = await sut.SaveAsync(request, TestHttpContexts.Authenticated(), CancellationToken.None);
 
         result.DocumentRecordId.Should().Be(recordId, "a standalone Document is created without a parent");
         captured.Should().NotBeNull();
@@ -655,7 +655,7 @@ public sealed class ComposeServiceCreateOnSaveTests
             TenantId = Tenant,
         };
 
-        var act = () => sut.SaveAsync(request, new DefaultHttpContext(), CancellationToken.None);
+        var act = () => sut.SaveAsync(request, TestHttpContexts.Authenticated(), CancellationToken.None);
 
         await act.Should().ThrowAsync<ArgumentException>();
     }
@@ -784,7 +784,7 @@ public sealed class ComposeServiceCreateOnSaveTests
             TenantId = Tenant,
         };
 
-        var result = await sut.SaveAsync(request, new DefaultHttpContext(), CancellationToken.None);
+        var result = await sut.SaveAsync(request, TestHttpContexts.Authenticated(), CancellationToken.None);
 
         // The load-bearing invariant: the promoted record + interim success stand even though the
         // best-effort STEP 5 capture threw — CaptureDocumentMemoryAsync swallowed it, no exception
@@ -822,7 +822,7 @@ public sealed class ComposeServiceCreateOnSaveTests
             TenantId = Tenant,
         };
 
-        var result = await sut.SaveAsync(request, new DefaultHttpContext(), CancellationToken.None);
+        var result = await sut.SaveAsync(request, TestHttpContexts.Authenticated(), CancellationToken.None);
 
         result.DocumentRecordId.Should().Be(recordId);
 
@@ -874,7 +874,7 @@ public sealed class ComposeServiceCreateOnSaveTests
             TenantId = Tenant,
         };
 
-        var result = await sut.SaveAsync(request, new DefaultHttpContext(), CancellationToken.None);
+        var result = await sut.SaveAsync(request, TestHttpContexts.Authenticated(), CancellationToken.None);
 
         result.DocumentRecordId.Should().Be(recordId);
         ComposeService.IsInterimCreateOnSaveSuccess(result.CompletionState!).Should().BeTrue(
@@ -903,7 +903,7 @@ public sealed class ComposeServiceCreateOnSaveTests
             TenantId = Tenant,
         };
 
-        var result = await sut.SaveAsync(request, new DefaultHttpContext(), CancellationToken.None);
+        var result = await sut.SaveAsync(request, TestHttpContexts.Authenticated(), CancellationToken.None);
 
         result.DocumentRecordId.Should().Be(recordId);
         capture.CallCount.Should().Be(0, "no defined terms → nothing to distil → the facade is never invoked");

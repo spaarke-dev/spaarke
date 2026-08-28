@@ -950,7 +950,7 @@ public class ChatEndpointsTestFixture : WebApplicationFactory<Program>
                 PlaybookId: TestPlaybookId,
                 CreatedAt: now,
                 LastActivity: now,
-                Messages: Array.Empty<Sprk.Bff.Api.Models.Ai.Chat.ChatMessage>()));
+                Messages: Array.Empty<Sprk.Bff.Api.Models.Ai.Chat.ChatMessage>()) { OwnerOid = TestSessionOwner.Oid });
 
         // ArchiveSessionAsync — no-op (called by DeleteSessionAsync)
         MockDataverseRepository

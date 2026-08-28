@@ -70,7 +70,7 @@ public sealed class ComposeSupersedeEndpointContractTests : IClassFixture<Compos
         var sessions = scope.ServiceProvider.GetRequiredService<ChatSessionManager>();
 
         var session = await sessions.CreateSessionAsync(
-            ComposeSupersedeFixture.TestTenantId, documentId: null, playbookId: null, hostContext: null);
+            ComposeSupersedeFixture.TestTenantId, TestSessionOwner.Oid, documentId: null, playbookId: null, hostContext: null);
 
         var draft = new SessionOutput
         {
@@ -358,7 +358,10 @@ internal sealed class SupersedeFakeAuthHandler : AuthenticationHandler<Authentic
             return Task.FromResult(AuthenticateResult.Fail("No Authorization header"));
         }
 
-        var oid = Guid.NewGuid().ToString();
+        // Issue #863 (fixture repair, bff-extensions.md §F.2): a STABLE oid. This minted a
+        // fresh one per request, which Entra never does — every call arrived as a different
+        // user, so the suite silently exercised cross-user access on every request.
+        var oid = TestSessionOwner.Oid;
         var claims = new List<Claim>
         {
             new("oid", oid),

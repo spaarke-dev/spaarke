@@ -813,10 +813,14 @@ public class SessionPersistenceService : ISessionPersistenceService
     /// <inheritdoc/>
     public async Task<IReadOnlyList<RecentSessionInfo>> ListRecentSessionsAsync(
         string tenantId,
+        string ownerOid,
         int limit,
         CancellationToken ct = default)
     {
-        if (string.IsNullOrEmpty(tenantId))
+        // Issue #863 — an unidentifiable caller gets NOTHING, never the unfiltered tenant list.
+        // Empty-not-throw matches this method's existing degrade-gracefully contract, and the
+        // endpoint answers 401 before ever reaching here; this is the second line of defence.
+        if (string.IsNullOrEmpty(tenantId) || string.IsNullOrWhiteSpace(ownerOid))
         {
             return Array.Empty<RecentSessionInfo>();
         }
@@ -835,13 +839,21 @@ public class SessionPersistenceService : ISessionPersistenceService
             // read downstream, see BuildTabSummary) so the History row can render a preview + message
             // count + tab summary. ORDER BY lastActivity DESC uses the default range index; ISO-8601
             // timestamps sort chronologically as strings.
+            //
+            // Issue #863 — `c.ownerOid = @ownerOid` is the ownership predicate. It is written as an
+            // EQUALITY against the caller's oid, never as `(c.ownerOid = @ownerOid OR NOT IS_DEFINED(
+            // c.ownerOid))`: an IS_DEFINED escape hatch would re-list every pre-#863 session to every
+            // user, which is the exact disclosure this line closes and would do so on the oldest —
+            // therefore most numerous — documents. Sessions without an owner match nobody. Intended.
             var query = new QueryDefinition(
                 "SELECT TOP @limit c.id, c.sessionId, c.lastActivity, c.conversationSummary, " +
                 "c.entityRefs, c.messages[0].content AS firstMessage, c.title, " +
                 "ARRAY_LENGTH(c.messages) AS messageCount, c.tabs " +
-                "FROM c WHERE c.tenantId = @tenantId ORDER BY c.lastActivity DESC")
+                "FROM c WHERE c.tenantId = @tenantId AND c.ownerOid = @ownerOid " +
+                "ORDER BY c.lastActivity DESC")
                 .WithParameter("@limit", capped)
-                .WithParameter("@tenantId", tenantId);
+                .WithParameter("@tenantId", tenantId)
+                .WithParameter("@ownerOid", ownerOid);
 
             using var iterator = container.GetItemQueryIterator<RecentSessionProjection>(
                 query,

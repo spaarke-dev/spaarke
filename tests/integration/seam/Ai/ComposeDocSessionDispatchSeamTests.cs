@@ -94,7 +94,7 @@ public sealed class ComposeDocSessionDispatchSeamTests : IClassFixture<ComposeDo
                     ContentType: "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
                     SizeBytes: 64, SearchDocumentIdsCsv: "browse-mounted-file_s_0",
                     UploadedAt: DateTimeOffset.UtcNow),
-            }));
+            }) { OwnerOid = TestSessionOwner.Oid });
 
         // The client-minted Compose document session — a hyphenated crypto.randomUUID that is NEVER
         // created via POST /api/ai/chat/sessions.

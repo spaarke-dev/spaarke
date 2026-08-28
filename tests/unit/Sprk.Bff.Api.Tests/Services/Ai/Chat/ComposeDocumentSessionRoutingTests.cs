@@ -173,7 +173,7 @@ public class ComposeDocumentSessionRoutingTests
             CreatedAt: now,
             LastActivity: now,
             Messages: new List<Sprk.Bff.Api.Models.Ai.Chat.ChatMessage>())
-        {
+        { OwnerOid = TestSessionOwner.Oid,
             ActiveDocument = activeDocument,
         };
         await _sessionManager.UpdateSessionCacheAsync(session);

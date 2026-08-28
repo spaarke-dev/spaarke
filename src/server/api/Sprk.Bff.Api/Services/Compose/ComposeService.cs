@@ -814,11 +814,44 @@ public class ComposeService : IComposeService
         // new version never changes this key). A mismatched or missing session falls back to
         // the R1 mint-new behavior unchanged (purely additive; see
         // <see cref="IsSameCrossVersionBinding"/>).
+        // Issue #863 — resolved from the PRINCIPAL, never from the request. Compose Load is a
+        // body-scoped session route (the session id arrives in the payload, not the URL), so
+        // SessionOwnershipFilter does not cover it and the check lives here instead; it is
+        // enumerated as such in SessionOwnershipGuardTests.BodyScopedSessionRoutes. Adding an
+        // ownerOid FIELD to the request would recreate exactly the defect task 059 removed —
+        // a caller naming its own identity.
+        var callerOid = CallerResolution.ResolveObjectId(httpContext.User);
+        if (string.IsNullOrEmpty(callerOid))
+        {
+            // Unreachable on a RequireAuthorization() route with an Entra principal. Thrown rather
+            // than defaulted because both alternatives are worse: minting an unowned session makes
+            // the document permanently unopenable for its own author, and resuming without an
+            // identity is the gap itself.
+            throw new UnauthorizedAccessException(
+                "Compose load: the caller carries no Entra oid, so session ownership cannot be established.");
+        }
+
         ChatSession? session = null;
         if (!string.IsNullOrWhiteSpace(request.SessionId))
         {
             var candidate = await _sessions.GetSessionAsync(request.TenantId, request.SessionId, cancellationToken)
                 .ConfigureAwait(false);
+
+            // Issue #863 — a resume is an ACCESS to an existing session, so it takes the same
+            // ownership test as any session-scoped route. Without this, supplying someone else's
+            // SessionId in the Load body resumes their conversation, annotations, defined terms and
+            // action history. Unowned (pre-#863) candidates fail closed and fall through to a fresh
+            // session, which is the graceful outcome: the user gets a working document, not an error.
+            if (candidate is not null
+                && !string.Equals(candidate.OwnerOid, callerOid, StringComparison.Ordinal))
+            {
+                _logger.LogWarning(
+                    "Compose load: session {SessionId} (tenant={TenantId}) is not owned by the caller — " +
+                    "ignoring the supplied SessionId and minting a new session.",
+                    request.SessionId, request.TenantId);
+                candidate = null;
+            }
+
             if (candidate is not null && IsSameCrossVersionBinding(candidate, bindingId, request.MatterId))
             {
                 session = candidate;
@@ -832,6 +865,7 @@ public class ComposeService : IComposeService
 
         session ??= await _sessions.CreateSessionAsync(
                 tenantId: request.TenantId,
+                ownerOid: callerOid,
                 documentId: bindingId,
                 playbookId: null,
                 hostContext: BuildMatterHostContext(request.MatterId),

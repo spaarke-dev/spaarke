@@ -51,6 +51,7 @@ public static class ChatAckEndpoints
             .WithTags("AI Chat");
 
         group.MapPost("/sessions/{sessionId}/ack", HandleAsync)
+            .AddSessionOwnershipFilter()
             .AddAiAuthorizationFilter()
             // ADR-016 / bff-extensions.md §C: same policy as the sibling /summarize
             // endpoint — sliding-window 60/min/user. Cheap in-process dictionary lookup,

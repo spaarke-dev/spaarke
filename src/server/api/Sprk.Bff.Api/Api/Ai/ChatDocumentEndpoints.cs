@@ -139,6 +139,7 @@ public static class ChatDocumentEndpoints
 
         // POST /api/ai/chat/sessions/{sessionId}/documents — upload a document
         group.MapPost("/sessions/{sessionId}/documents", UploadDocumentAsync)
+            .AddSessionOwnershipFilter()
             .AddAiAuthorizationFilter()
             .RequireRateLimiting("ai-upload")
             .DisableAntiforgery()
@@ -161,6 +162,7 @@ public static class ChatDocumentEndpoints
 
         // POST /api/ai/chat/sessions/{sessionId}/documents/{documentId}/persist — save to SPE container
         group.MapPost("/sessions/{sessionId}/documents/{documentId}/persist", PersistDocumentAsync)
+            .AddSessionOwnershipFilter()
             .AddAiAuthorizationFilter()
             .RequireRateLimiting("ai-persist")
             .WithName("PersistChatDocument")
@@ -187,6 +189,7 @@ public static class ChatDocumentEndpoints
         // through its EXISTING upload+link+index pipeline so the drafted-from file lands in the
         // NEW matter's SPE container + an sprk_document links it — no new create-write path.
         group.MapGet("/sessions/{sessionId}/documents/{documentId}/content", GetDocumentContentAsync)
+            .AddSessionOwnershipFilter()
             .AddAiAuthorizationFilter()
             .RequireRateLimiting("ai-context")
             .WithName("GetChatDocumentContent")
@@ -214,6 +217,7 @@ public static class ChatDocumentEndpoints
         // ingest of an already-archived document. Placement: Documents/Chat domain, reuses existing
         // Dataverse + SPE facades, no AI-internal injection (§10 / ADR-013).
         group.MapPost("/sessions/{sessionId}/documents/from-document", IngestArchiveDocumentAsync)
+            .AddSessionOwnershipFilter()
             .AddAiAuthorizationFilter()
             .RequireRateLimiting("ai-upload")
             .WithName("IngestChatDocumentFromArchive")
@@ -239,6 +243,7 @@ public static class ChatDocumentEndpoints
         // signals batch completion here (per-file 202s above can't see batch boundaries or
         // typed-command context); the SERVER owns every routing + bounds decision.
         group.MapPost("/sessions/{sessionId}/events/document-uploaded", FireDocumentUploadedEventAsync)
+            .AddSessionOwnershipFilter()
             .AddAiAuthorizationFilter()
             .RequireRateLimiting("ai-context")
             .WithName("FireDocumentUploadedEvent")

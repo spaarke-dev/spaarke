@@ -82,7 +82,7 @@ public sealed class AgreementReviewKnowledgeScopeSeamTests : IClassFixture<Agree
                 {
                     ExtractedText = "This Mutual NDA governs...",
                 },
-            }));
+            }) { OwnerOid = TestSessionOwner.Oid });
         return sessionId;
     }
 

@@ -127,7 +127,7 @@ public sealed class ComposeActiveDocumentContractTests : IClassFixture<ComposeAc
                 {
                     ExtractedText = extractedText,
                 },
-            });
+            }) { OwnerOid = TestSessionOwner.Oid };
         await _fixture.Sessions.UpdateSessionCacheAsync(seeded);
 
         using var client = _fixture.CreateAuthenticatedClient();
@@ -196,7 +196,7 @@ public sealed class ComposeActiveDocumentContractTests : IClassFixture<ComposeAc
             {
                 new ChatSessionFile(fileA, "a.docx", docType, 256, $"{fileA}_s_0", DateTimeOffset.UtcNow),
                 new ChatSessionFile(fileB, "b.docx", docType, 256, $"{fileB}_s_0", DateTimeOffset.UtcNow),
-            });
+            }) { OwnerOid = TestSessionOwner.Oid };
         await _fixture.Sessions.UpdateSessionCacheAsync(seeded);
 
         using var client = _fixture.CreateAuthenticatedClient();
@@ -265,7 +265,7 @@ public sealed class ComposeActiveDocumentContractTests : IClassFixture<ComposeAc
                     SizeBytes: 64,
                     SearchDocumentIdsCsv: $"{fileId}_s_0",
                     UploadedAt: DateTimeOffset.UtcNow),
-            });
+            }) { OwnerOid = TestSessionOwner.Oid };
         await _fixture.Sessions.UpdateSessionCacheAsync(seeded);
 
         using var client = _fixture.CreateAuthenticatedClient();
@@ -320,7 +320,7 @@ public sealed class ComposeActiveDocumentContractTests : IClassFixture<ComposeAc
                 new ChatSessionFile(fileId, "browse.docx",
                     "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
                     64, $"{fileId}_s_0", DateTimeOffset.UtcNow),
-            }));
+            }) { OwnerOid = TestSessionOwner.Oid });
 
         using var client = _fixture.CreateAuthenticatedClient();
 
@@ -377,7 +377,7 @@ public sealed class ComposeActiveDocumentContractTests : IClassFixture<ComposeAc
                 new ChatSessionFile(fileId, "browse.docx",
                     "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
                     64, $"{fileId}_s_0", DateTimeOffset.UtcNow),
-            }));
+            }) { OwnerOid = TestSessionOwner.Oid });
 
         using var client = _fixture.CreateAuthenticatedClient();
 

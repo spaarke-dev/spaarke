@@ -1164,10 +1164,35 @@ public static class AnalysisEndpoints
                 "Tenant ID not found in token claims (tid).");
         }
 
+        // Issue #863 — the fork's owner. This route takes its session id from the BODY, so
+        // SessionOwnershipFilter (route-value based) does not cover it; the check is here instead
+        // and the route is enumerated in SessionOwnershipGuardTests.BodyScopedSessionRoutes.
+        var forkOwnerOid = CallerResolution.ResolveObjectId(httpContext.User);
+        if (string.IsNullOrEmpty(forkOwnerOid))
+        {
+            return AnalysisProblem(StatusCodes.Status401Unauthorized, "Unauthorized",
+                "User identity not found.");
+        }
+
         var correlationId = httpContext.TraceIdentifier;
 
         // ---- Step 1: snapshot + verify the prior session (read-only — NO mutation yet) ----
         var priorSession = await sessionManager.GetSessionAsync(tenantId, request.PriorSessionId, cancellationToken);
+
+        // Issue #863 — forking READS the prior session's messages into a new one, so it needs the
+        // same ownership test as any other read. Without it, naming a colleague's session id here
+        // copies their conversation into a session you own. Not-found and not-yours are one answer
+        // so the route cannot be used to probe which session ids exist.
+        if (priorSession is not null
+            && !string.Equals(priorSession.OwnerOid, forkOwnerOid, StringComparison.Ordinal))
+        {
+            logger.LogWarning(
+                "Fork DENIED: prior session {SessionId} (tenant={TenantId}) is not owned by the caller. " +
+                "Answered 404 (corr={CorrelationId}).",
+                request.PriorSessionId, tenantId, correlationId);
+            priorSession = null;
+        }
+
         if (priorSession is null)
         {
             // Nothing has been written yet — a missing/expired prior cannot orphan anything.
@@ -1204,6 +1229,10 @@ public static class AnalysisEndpoints
 
             newSession = await sessionManager.CreateSessionAsync(
                 tenantId,
+                // Issue #863 — the forked session belongs to the user who forked it. Resolved above
+                // (non-null past the 401 guard); never inherited from the prior session, whose owner
+                // may be someone else entirely on a shared Analysis.
+                forkOwnerOid,
                 request.DocumentId.ToString(),
                 request.PlaybookId,
                 analysisHostContext,

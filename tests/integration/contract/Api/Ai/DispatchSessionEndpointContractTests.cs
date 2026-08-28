@@ -548,7 +548,7 @@ public class DispatchSessionEndpointContractTests : IClassFixture<DispatchSessio
             Messages: Array.Empty<ChatMessage>(),
             HostContext: null,
             AdditionalDocumentIds: null,
-            UploadedFiles: files);
+            UploadedFiles: files) { OwnerOid = TestSessionOwner.Oid };
     }
 }
 

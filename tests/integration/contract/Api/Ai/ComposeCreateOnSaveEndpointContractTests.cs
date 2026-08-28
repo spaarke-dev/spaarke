@@ -137,7 +137,7 @@ public sealed class ComposeCreateOnSaveEndpointContractTests
         using (var scope = _fixture.Services.CreateScope())
         {
             var sessions = scope.ServiceProvider.GetRequiredService<ChatSessionManager>();
-            var session = await sessions.CreateSessionAsync(ComposeCreateOnSaveFixture.TestTenantId, documentId: null);
+            var session = await sessions.CreateSessionAsync(ComposeCreateOnSaveFixture.TestTenantId, TestSessionOwner.Oid, documentId: null);
             sessionId = session.SessionId;
 
             var cache = scope.ServiceProvider.GetRequiredService<ITenantCache>();
@@ -567,7 +567,7 @@ public sealed class ComposeCreateOnSaveEndpointContractTests
         {
             var sessions = scope.ServiceProvider.GetRequiredService<ChatSessionManager>();
             var session = await sessions.CreateSessionAsync(
-                ComposeCreateOnSaveFixture.TestTenantId, documentId: sentinelDocId);
+                ComposeCreateOnSaveFixture.TestTenantId, TestSessionOwner.Oid, documentId: sentinelDocId);
             unrelatedSessionId = session.SessionId;
         }
 
@@ -794,7 +794,10 @@ internal sealed class CreateOnSaveFakeAuthHandler : AuthenticationHandler<Authen
             return Task.FromResult(AuthenticateResult.Fail("No Authorization header"));
         }
 
-        var oid = Guid.NewGuid().ToString();
+        // Issue #863 (fixture repair, bff-extensions.md §F.2): a STABLE oid. This minted a
+        // fresh one per request, which Entra never does — every call arrived as a different
+        // user, so the suite silently exercised cross-user access on every request.
+        var oid = TestSessionOwner.Oid;
         var claims = new List<Claim>
         {
             new("oid", oid),

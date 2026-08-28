@@ -595,7 +595,7 @@ public class UploadTestFixture : IntegrationTestFixture
             PlaybookId: TestPlaybookId,
             CreatedAt: now,
             LastActivity: now,
-            Messages: []);
+            Messages: []) { OwnerOid = TestSessionOwner.Oid };
 
         // Return a live session for the known test IDs until archived; null otherwise.
         MockDataverseRepository

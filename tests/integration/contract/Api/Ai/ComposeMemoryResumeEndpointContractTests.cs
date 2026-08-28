@@ -124,7 +124,7 @@ public sealed class ComposeMemoryResumeEndpointContractTests
             EntityId: matterId);
 
         var session = await sessions.CreateSessionAsync(
-            ComposeMemoryResumeFixture.TestTenantId,
+            ComposeMemoryResumeFixture.TestTenantId, TestSessionOwner.Oid,
             documentId: speId,
             playbookId: null,
             hostContext: hostContext);
@@ -490,7 +490,10 @@ internal sealed class MemoryResumeFakeAuthHandler : AuthenticationHandler<Authen
             return Task.FromResult(AuthenticateResult.Fail("No Authorization header"));
         }
 
-        var oid = Guid.NewGuid().ToString();
+        // Issue #863 (fixture repair, bff-extensions.md §F.2): a STABLE oid. This minted a
+        // fresh one per request, which Entra never does — every call arrived as a different
+        // user, so the suite silently exercised cross-user access on every request.
+        var oid = TestSessionOwner.Oid;
         var claims = new List<Claim>
         {
             new("oid", oid),

@@ -225,7 +225,7 @@ public class ReviewMemoEndpointContractTests : IClassFixture<ReviewMemoEndpointT
             CreatedAt: DateTimeOffset.UtcNow,
             LastActivity: DateTimeOffset.UtcNow,
             Messages: Array.Empty<ChatMessage>(),
-            HostContext: null);
+            HostContext: null) { OwnerOid = TestSessionOwner.Oid };
 
         var client = _fx.CreateAuthenticatedClient();
         var response = await client.PostAsJsonAsync(
@@ -406,7 +406,7 @@ public class ReviewMemoEndpointContractTests : IClassFixture<ReviewMemoEndpointT
             CreatedAt: DateTimeOffset.UtcNow,
             LastActivity: DateTimeOffset.UtcNow,
             Messages: Array.Empty<ChatMessage>(),
-            HostContext: null);
+            HostContext: null) { OwnerOid = TestSessionOwner.Oid };
 
         var client = _fx.CreateAuthenticatedClient();
         var response = await client.GetAsync($"/api/ai/chat/sessions/{sessionId}/review-memo");

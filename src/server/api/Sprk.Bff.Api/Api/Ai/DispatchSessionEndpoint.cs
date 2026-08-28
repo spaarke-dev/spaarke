@@ -89,6 +89,7 @@ public static class DispatchSessionEndpoint
             .WithTags("AI Chat");
 
         group.MapPost("/sessions/{sessionId}/dispatch", DispatchAsync)
+            .AddSessionOwnershipFilter()
             .AddAiAuthorizationFilter()
             .WithName("DispatchChatSessionBinding")
             .WithSummary("Dispatch a capability Binding by id for a chat session (Click path, FR-P1-04)")

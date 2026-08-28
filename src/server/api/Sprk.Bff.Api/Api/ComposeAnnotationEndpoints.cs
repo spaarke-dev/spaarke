@@ -1,6 +1,7 @@
 using System.Text.Json.Serialization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.Extensions.Caching.Distributed;
+using Sprk.Bff.Api.Api.Filters;
 using Sprk.Bff.Api.Infrastructure.Authentication;
 using Sprk.Bff.Api.Infrastructure.Graph;
 using Sprk.Bff.Api.Models.Ai.Chat;
@@ -70,6 +71,7 @@ internal static class ComposeAnnotationEndpoints
         // ComposeService.GetComposeAnnotationsAsync. Read-only — no SPE/Graph, no AI dispatch
         // (ADR-013/ADR-039). Injects only IComposeService (the CRUD facade), never an AI internal.
         group.MapGet("/sessions/{sessionId}/annotations", GetAnnotations)
+            .AddSessionOwnershipFilter()
             .WithName("ComposeGetAnnotations")
             .WithSummary("Read a Compose session's anchored annotations + defined-terms (FR-29)")
             .RequireRateLimiting("ai-context")
@@ -87,6 +89,7 @@ internal static class ComposeAnnotationEndpoints
         // which writes native OOXML into the .docx). A malformed ADR-040 provenance ledgerRef 400s;
         // a missing session 404s. No SPE/Graph, no AI dispatch (ADR-013/ADR-039).
         group.MapPost("/sessions/{sessionId}/annotations", SaveAnnotations)
+            .AddSessionOwnershipFilter()
             .WithName("ComposeSaveAnnotations")
             .WithSummary("Persist a Compose session's anchored annotations + defined-terms (FR-29)")
             // Mutable session UI state in Redis (no SPE/Graph, no AI dispatch) → read/context bucket,

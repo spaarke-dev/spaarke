@@ -96,6 +96,7 @@ public static class ChatEndpoints
         // in task 050 (handler-level) executes only on requests that already passed auth + rate
         // limiting. No filter bypass is introduced.
         group.MapPost("/sessions/{sessionId}/messages", SendMessageAsync)
+            .AddSessionOwnershipFilter()
             .AddAiAuthorizationFilter()
             .RequireRateLimiting("ai-stream")
             .WithName("SendChatMessage")
@@ -111,6 +112,7 @@ public static class ChatEndpoints
 
         // POST /api/ai/chat/sessions/{sessionId}/refine — SSE-streamed text refinement
         group.MapPost("/sessions/{sessionId}/refine", RefineTextAsync)
+            .AddSessionOwnershipFilter()
             .AddAiAuthorizationFilter()
             .RequireRateLimiting("ai-stream")
             .WithName("RefineText")
@@ -126,6 +128,7 @@ public static class ChatEndpoints
 
         // GET /api/ai/chat/sessions/{sessionId}/history — retrieve message history
         group.MapGet("/sessions/{sessionId}/history", GetHistoryAsync)
+            .AddSessionOwnershipFilter()
             .AddAiAuthorizationFilter()
             .WithName("GetChatHistory")
             .WithSummary("Get chat message history for a session")
@@ -136,6 +139,7 @@ public static class ChatEndpoints
 
         // PATCH /api/ai/chat/sessions/{sessionId}/context — switch document/playbook context
         group.MapMethods("/sessions/{sessionId}/context", ["PATCH"], SwitchContextAsync)
+            .AddSessionOwnershipFilter()
             .AddAiAuthorizationFilter()
             .WithName("SwitchChatContext")
             .WithSummary("Switch the document and/or playbook context for an existing session")
@@ -148,6 +152,7 @@ public static class ChatEndpoints
 
         // PATCH /api/ai/chat/sessions/{sessionId} — rename a session (FR-D4, task 032)
         group.MapMethods("/sessions/{sessionId}", ["PATCH"], RenameSessionAsync)
+            .AddSessionOwnershipFilter()
             .AddAiAuthorizationFilter()
             .WithName("RenameChatSession")
             .WithSummary("Rename a chat session (FR-D4)")
@@ -160,6 +165,7 @@ public static class ChatEndpoints
 
         // DELETE /api/ai/chat/sessions/{sessionId} — delete a session
         group.MapDelete("/sessions/{sessionId}", DeleteSessionAsync)
+            .AddSessionOwnershipFilter()
             .AddAiAuthorizationFilter()
             .WithName("DeleteChatSession")
             .WithSummary("Delete a chat session")
@@ -177,6 +183,7 @@ public static class ChatEndpoints
 
         // GET /api/ai/chat/sessions/{sessionId}/restore — restore session state for three-pane UI
         group.MapGet("/sessions/{sessionId}/restore", RestoreSessionAsync)
+            .AddSessionOwnershipFilter()
             .AddAiAuthorizationFilter()
             .WithName("RestoreSession")
             .WithSummary("Restore a persisted session for the three-pane UI")
@@ -204,6 +211,7 @@ public static class ChatEndpoints
         // PATCH /api/ai/chat/sessions/{sessionId}/tabs — write-through workspace tab persistence (NFR-09, task 065)
         // Endpoint filters match the sibling /messages route (ADR-008): auth + ai-stream rate limit.
         group.MapMethods("/sessions/{sessionId}/tabs", ["PATCH"], SaveTabsAsync)
+            .AddSessionOwnershipFilter()
             .AddAiAuthorizationFilter()
             .RequireRateLimiting("ai-stream")
             .WithName("SaveSessionTabs")
@@ -217,6 +225,7 @@ public static class ChatEndpoints
 
         // GET /api/ai/chat/sessions/{sessionId}/tabs — read persisted workspace tabs (NFR-09, task 065)
         group.MapGet("/sessions/{sessionId}/tabs", GetTabsAsync)
+            .AddSessionOwnershipFilter()
             .AddAiAuthorizationFilter()
             .RequireRateLimiting("ai-stream")
             .WithName("GetSessionTabs")
@@ -237,6 +246,7 @@ public static class ChatEndpoints
         // upstream failure or when the AI feature is disabled. Same auth as the sibling session
         // endpoints.
         group.MapPost("/sessions/{sessionId}/suggest", SuggestFollowupsAsync)
+            .AddSessionOwnershipFilter()
             .AddAiAuthorizationFilter()
             .RequireRateLimiting("ai-stream")
             .WithName("SuggestFollowups")
@@ -253,6 +263,7 @@ public static class ChatEndpoints
         // task 016 HOOK #1). Read-only projection of session.Outputs (ADR-040); same auth as
         // the sibling GET session endpoints.
         group.MapGet("/sessions/{sessionId}/compose-outputs", GetComposeOutputsAsync)
+            .AddSessionOwnershipFilter()
             .AddAiAuthorizationFilter()
             .WithName("GetSessionComposeOutputs")
             .WithSummary("Read stored compose-disposition draft outputs for a session (FR-04)")
@@ -274,6 +285,7 @@ public static class ChatEndpoints
         // re-materializes to nothing); "replace" chains this retraction to a fresh Draft-Alternative
         // dispatch (the client). Same auth as the sibling session-write endpoints (ADR-008).
         group.MapPost("/sessions/{sessionId}/compose-outputs/supersede", SupersedeComposeOutputAsync)
+            .AddSessionOwnershipFilter()
             .AddAiAuthorizationFilter()
             .WithName("SupersedeComposeOutput")
             .WithSummary("Retract/supersede a prior compose draft as a ledger supersession (FR-17)")
@@ -292,6 +304,7 @@ public static class ChatEndpoints
         // only via the ISessionTraceReader PublicContracts facade (ADR-013). Same auth + rate
         // limit as the sibling session-read routes (ADR-008): AddAiAuthorizationFilter + ai-stream.
         group.MapGet("/sessions/{sessionId}/trace", GetSessionTraceAsync)
+            .AddSessionOwnershipFilter()
             .AddAiAuthorizationFilter()
             .RequireRateLimiting("ai-stream")
             .WithName("GetSessionTrace")
@@ -350,6 +363,7 @@ public static class ChatEndpoints
         // PendingInvocations — without this route the dialog's Confirm has no server path
         // and the loop-boundary suspensions (task 034) have no resume surface.
         group.MapPost("/sessions/{sessionId}/gates/{gateId}/resolve", ResolveGateAsync)
+            .AddSessionOwnershipFilter()
             .AddAiAuthorizationFilter()
             .RequireRateLimiting("ai-stream")
             .WithName("ResolveGate")
@@ -369,6 +383,7 @@ public static class ChatEndpoints
 
         // GET /api/ai/chat/sessions/{sessionId}/commands — resolve dynamic command catalog
         group.MapGet("/sessions/{sessionId}/commands", GetCommandsAsync)
+            .AddSessionOwnershipFilter()
             .AddAiAuthorizationFilter()
             .WithName("GetChatCommands")
             .WithSummary("Resolve available slash commands for a chat session")
@@ -415,12 +430,26 @@ public static class ChatEndpoints
                 detail: "Tenant ID not found in token claims (tid).");
         }
 
+        // Issue #863 — the session's owner. Null means the caller carries no Entra oid, which is a
+        // 401 (unidentifiable), never a 403 and never an unowned session: an unowned session fails
+        // closed for everyone afterwards, including the person who just created it.
+        var ownerOid = CallerResolution.ResolveObjectId(httpContext.User);
+        if (string.IsNullOrEmpty(ownerOid))
+        {
+            return Results.Problem(
+                statusCode: 401,
+                title: "Unauthorized",
+                detail: "User identity not found",
+                type: "https://tools.ietf.org/html/rfc7235#section-3.1");
+        }
+
         logger.LogInformation(
             "Creating chat session for tenant={TenantId}, document={DocumentId}, playbook={PlaybookId}",
             tenantId, request.DocumentId, request.PlaybookId);
 
         var session = await sessionManager.CreateSessionAsync(
             tenantId,
+            ownerOid,
             request.DocumentId,
             request.PlaybookId,
             request.HostContext,
@@ -2079,9 +2108,24 @@ public static class ChatEndpoints
                 detail: "Tenant ID not found in token claims (tid).");
         }
 
-        // R4-8 (UAT 2026-07-19): list the tenant's most-recent sessions from the Cosmos warm tier.
+        // Issue #863 — History is the CALLER'S history. Until 2026-08-28 this query was
+        // tenant-scoped only, so every user was shown every other user's sessions: ids, titles and
+        // content previews. That list was also the delivery mechanism for the missing owner check
+        // on DELETE, because it handed out the very ids that route accepted.
+        var ownerOid = CallerResolution.ResolveObjectId(httpContext.User);
+        if (string.IsNullOrEmpty(ownerOid))
+        {
+            return Results.Problem(
+                statusCode: 401,
+                title: "Unauthorized",
+                detail: "User identity not found",
+                type: "https://tools.ietf.org/html/rfc7235#section-3.1");
+        }
+
+        // R4-8 (UAT 2026-07-19): list the caller's most-recent sessions from the Cosmos warm tier.
         // Returns a top-level JSON array (the History dropdown expects `Array.isArray`).
-        var recent = await persistenceService.ListRecentSessionsAsync(tenantId, limit, cancellationToken);
+        var recent = await persistenceService.ListRecentSessionsAsync(
+            tenantId, ownerOid, limit, cancellationToken);
         var sessions = recent
             .Select(s => new RecentSessionDto(
                 Id: s.SessionId,

@@ -238,7 +238,7 @@ public sealed class ComposeCleanApplySeamTests : IClassFixture<ComposeFidelitySe
     {
         using var scope = _fixture.Services.CreateScope();
         var sessions = scope.ServiceProvider.GetRequiredService<ChatSessionManager>();
-        var session = await sessions.CreateSessionAsync(tenant, documentId: speId);
+        var session = await sessions.CreateSessionAsync(tenant, TestSessionOwner.Oid, documentId: speId);
         return session.SessionId;
     }
 

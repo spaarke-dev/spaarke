@@ -589,7 +589,7 @@ public class ReAnalysisFlowTestFixture : WebApplicationFactory<Program>
                 PlaybookId: TestPlaybookId,
                 CreatedAt: now,
                 LastActivity: now,
-                Messages: []));
+                Messages: []) { OwnerOid = TestSessionOwner.Oid });
 
         // Returns null for unknown session IDs (triggers 404)
         MockDataverseRepository

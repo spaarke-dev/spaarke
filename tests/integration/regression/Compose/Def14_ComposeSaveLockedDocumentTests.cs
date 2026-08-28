@@ -237,7 +237,7 @@ public sealed class Def14_UploadSessionManagerOdataTranslationTests
         var sut = BuildManager(HttpStatusCode.Locked, errorCode: "resourceLocked");
 
         var act = () => sut.ReplaceFileContentAsUserAsync(
-            new DefaultHttpContext(), "drive-1", "item-1",
+            TestHttpContexts.Authenticated(), "drive-1", "item-1",
             new MemoryStream(new byte[] { 1, 2, 3 }), CancellationToken.None);
 
         await act.Should().ThrowAsync<DocumentLockedByWordException>(
@@ -250,7 +250,7 @@ public sealed class Def14_UploadSessionManagerOdataTranslationTests
         var sut = BuildManager(HttpStatusCode.PreconditionFailed, errorCode: "preconditionFailed");
 
         var act = () => sut.ReplaceFileContentAsUserAsync(
-            new DefaultHttpContext(), "drive-1", "item-1",
+            TestHttpContexts.Authenticated(), "drive-1", "item-1",
             new MemoryStream(new byte[] { 1, 2, 3 }), ifMatch: "\"stale\"", CancellationToken.None);
 
         await act.Should().ThrowAsync<EtagPreconditionFailedException>(
@@ -267,7 +267,7 @@ public sealed class Def14_UploadSessionManagerOdataTranslationTests
         var sut = BuildManager(HttpStatusCode.Locked, errorCode: "resourceLocked");
 
         var act = () => sut.UploadSmallAsUserAsync(
-            new DefaultHttpContext(), "container-1", "draft.docx",
+            TestHttpContexts.Authenticated(), "container-1", "draft.docx",
             new MemoryStream(new byte[] { 1, 2, 3 }), CancellationToken.None);
 
         await act.Should().ThrowAsync<DocumentLockedByWordException>(
@@ -287,7 +287,7 @@ public sealed class Def14_UploadSessionManagerOdataTranslationTests
         var sut = BuildManager(HttpStatusCode.PreconditionFailed, errorCode: "preconditionFailed");
 
         var act = () => sut.UploadSmallAsUserAsync(
-            new DefaultHttpContext(), "container-1", "draft.docx",
+            TestHttpContexts.Authenticated(), "container-1", "draft.docx",
             new MemoryStream(new byte[] { 1, 2, 3 }), CancellationToken.None);
 
         await act.Should().ThrowAsync<EtagPreconditionFailedException>(
