@@ -9,18 +9,38 @@
 
 | Field | Value |
 |---|---|
-| **Task** | **052 — item recycle bin** (FR-E03). 🔄 **IN PROGRESS** |
-| **Step** | 5 of 11 — BFF server layer DONE + building; next is contract tests |
-| **Status** | Branch merged from master (96 commits, clean, 0 conflicts). Build **0 errors** |
-| **Next Action** | Write `tests/integration/contract/SpeAdmin/SpeAdminRecycleBinItemContractTests.cs` — WireMock cases per §1.3 |
-| **Rigor** | FULL · sonnet-tier @ high · steps `directional` |
+| **Task** | **090 — wrap-up** — the ONLY task left. 🔲 not started |
+| **Phase** | Project close |
+| **Status** | 052 ✅ complete + live-verified and committed (`a3a897ba2`). Tree clean |
+| **Next Action** | 🔔 **Operator decision first** — see §0. Then run `090-wrapup`, whose **`/test-diet` gate is BINDING** (CLAUDE.md §7) |
+| **Rigor** | 090 is TEST-MODIFYING → quality gates run **unconditionally** |
+
+### 🔔 §0. Decision needed before 090 can close the project
+
+**24 of 30 tasks ✅. One 🔲 (090). Five 🔄 PARTIAL — and closing the project decides what happens to them.**
+
+| Task | Why it is partial | Closable as-is? |
+|---|---|---|
+| **050** | Archival code shipped + contract-tested, but **AC-1/AC-2 need the operator's opt-in** (§2). Escalation fired and is unanswered | Needs the operator's call |
+| **025** | Server complete; form deferred. FR-C07 named a property that does not exist | Likely yes — documented |
+| **026** | AC-2 **not achievable from an owning tenant** (platform limit) | Likely yes — escalated + answered |
+| **029** | `billingStatus` appeared nowhere on the wire | Likely yes — documented |
+| **042** | 722 → 356 SpeAdmin cases; 8 files deferred | 090's `/test-diet` is exactly where this resolves |
+
+**Do not start 090 without deciding on 050** — the wrap-up PR has to state whether FR-E01 ships
+unverified or the project waits for the tenant change.
 
 ### Recent commits
 | Commit | What |
 |---|---|
-| (uncommitted) | 052 server layer — service + endpoints |
-| `5ca4ae79a` | checkpoint — master CI green |
+| `a3a897ba2` | **052 — item recycle bin (FR-E03)**, live-verified |
+| (merge) | master merged in — 96 commits, 0 conflicts, build 0/0 |
 | `c12fbeaf6` | **PR #842 merged** — 041/042/050/051 + 052 discovery |
+
+⚠️ **`grep` for `🔲`/`🔄` in this repo's TASK-INDEX silently returns nothing** — the shell mangles the
+emoji and the empty result reads exactly like "no tasks remain". Enumerate with Python + explicit
+`encoding="utf-8"` and `PYTHONIOENCODING=utf-8`. This produced a wrong "all tasks complete" reading
+once already; it is the same one-observation-cached-as-truth failure the project exists to remove.
 
 ---
 
@@ -158,16 +178,19 @@ PowerShell remediations (corrected across 5 docs).
 
 ---
 
-## 7. Wave state
+## 7. Wave state — enumerated from TASK-INDEX 2026-08-27 (30 rows)
+
+**24 ✅ · 5 🔄 PARTIAL · 1 🔲**
 
 | Task | Status |
 |---|---|
-| 041, 042, 051 | ✅ |
-| 050 | 🔄 — code shipped; pending the operator opt-in (§2) |
-| **052** | 🔄 **IN PROGRESS** — server layer done, tests + client remain |
-| 060, 061, 062 | 🔲 |
-| **090** | 🔲 `/test-diet` BINDING gate; also decides **DEF-001** and re-examines every `// AMBIGUOUS (task 042):` marker |
-| 025, 026, 029 | 🔄 **PARTIAL, not open** — do not restart |
+| 041, 051, **052**, 060, 061, 062 + 18 others | ✅ |
+| 050 | 🔄 — code shipped + contract-tested; **pending the operator opt-in (§2)** |
+| 025, 026, 029, 042 | 🔄 **PARTIAL, not open** — do not restart; each is documented, 042 resolves at `/test-diet` |
+| **090** | 🔲 **the only remaining task** — `/test-diet` BINDING gate; also decides **DEF-001** and re-examines every `// AMBIGUOUS (task 042):` marker |
+
+⚠️ My previous handoff listed 060/061/062 as 🔲. **They were already ✅** — stale, exactly the failure
+lesson #4 records. TASK-INDEX is authoritative; re-enumerate rather than trusting a prior summary.
 
 **Not in the POML backlog**: the client typecheck+vitest gap · I2 cross-tenant search bleed (waived on
 the deployment, not fixed) · container-type DELETE does not exist · Security-endpoint contract coverage
