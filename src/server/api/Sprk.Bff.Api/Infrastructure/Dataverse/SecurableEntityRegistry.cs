@@ -18,21 +18,29 @@ namespace Sprk.Bff.Api.Infrastructure.Dataverse;
 /// hard-coded list the task forbids — or interrogating every entity in the org. The attribute-filtered
 /// metadata query asks the question directly in one round trip.</para>
 ///
-/// <para><b>Caching.</b> The projected name set is cached for 6h in the shared
+/// <para><b>Caching (ADR-009).</b> The projected name set is cached for 6h in the shared
 /// <see cref="IDistributedCache"/> under <c>sdap:dv:securable-entities</c>, mirroring
-/// <c>Services.Dataverse.MetadataService</c> (ADR-029 — one Redis per BFF). Negative results are cached too,
-/// so the common non-securable entity costs a cache read rather than a metadata round trip per upload.
-/// Cache <i>failures</i> are graceful — an unreachable Redis falls through to a live query, matching the
-/// MetadataService precedent — but metadata failures are NOT: they propagate, per the interface contract.
-/// The 6h staleness window means a newly-added securable entity is picked up within 6h of a solution
-/// import; that is the same window the metadata endpoint already accepts.</para>
+/// <c>Services.Dataverse.MetadataService</c>. The key is allow-listed as
+/// <see cref="Infrastructure.Cache.SystemCacheKeys.DataverseSecurableEntities"/> with its
+/// SYSTEM-LEVEL EXCEPTION (NFR-08) justification: this is org-wide SCHEMA (which entities can be marked
+/// secure), identical for every caller, so tenant-scoping would defeat the cache without changing any
+/// answer. Cache <i>failures</i> are graceful — an unreachable Redis falls through to a live query, matching
+/// the MetadataService precedent — but metadata failures are NOT: they propagate, per the interface
+/// contract. The 6h staleness window means a newly-added securable entity is picked up within 6h of a
+/// solution import; the same window the metadata endpoint already accepts.</para>
+///
+/// <para><b>An empty result is never cached.</b> An empty set is indistinguishable from a failed query or an
+/// under-privileged identity, and caching it would make every record read as non-secure — resolving to a
+/// shared container — for the full TTL. See <see cref="GetSecurableEntitiesAsync"/>.</para>
 /// </summary>
 public sealed class SecurableEntityRegistry : ISecurableEntityRegistry
 {
     /// <summary>The attribute whose presence makes an entity securable.</summary>
     public const string SecureFlagAttribute = "sprk_issecure";
 
-    internal const string CacheKey = "sdap:dv:securable-entities";
+    // SYSTEM-LEVEL EXCEPTION (NFR-08): org-wide schema, not per-tenant data — allow-listed as
+    // SystemCacheKeys.DataverseSecurableEntities. See the class remarks for the justification.
+    internal const string CacheKey = "sdap:dv:" + Infrastructure.Cache.SystemCacheKeys.DataverseSecurableEntities;
 
     private static readonly TimeSpan CacheTtl = TimeSpan.FromHours(6);
 
@@ -76,21 +84,27 @@ public sealed class SecurableEntityRegistry : ISecurableEntityRegistry
 
         if (names.Count == 0)
         {
-            // Legitimate in an org where the field has never been added — but it is also what a broken
-            // query or an under-privileged identity looks like, and the consequence is that EVERY record is
-            // treated as non-secure. Loud rather than silent; the live end-to-end assertion is task 047.
-            _logger.LogWarning(
-                "[SECURABLE-ENTITIES] Dataverse metadata reports NO entity carrying '{Attribute}'. Every "
-                + "record will therefore be treated as non-secure and resolve to the shared fallback "
-                + "container. This is expected only in an environment where secure records do not exist.",
+            // Legitimate in an org where the field has never been added — but it is ALSO what a broken query
+            // or an under-privileged identity looks like, and the consequence is that every record reads as
+            // non-secure. Under the build plan's rule 1 ("any error, null, or missing config denies"), an
+            // answer that cannot be distinguished from a failure MUST NOT be persisted: caching it would
+            // extend a possible metadata fault into a 6-hour window during which every upload silently
+            // resolves to a shared container. So this returns the empty set WITHOUT caching it — callers on
+            // the isolation path (CommunicationContainerResolver) refuse on it — and it is logged at Error
+            // rather than Warning. The live end-to-end assertion is task 047.
+            _logger.LogError(
+                "[SECURABLE-ENTITIES] Dataverse metadata reports NO entity carrying '{Attribute}'. This is "
+                + "expected ONLY in an environment where secure records do not exist; otherwise it indicates "
+                + "a failed metadata query or an under-privileged identity. NOT CACHED — the next call "
+                + "re-queries, so a transient fault cannot become a 6-hour isolation gap.",
                 SecureFlagAttribute);
+
+            return names;
         }
-        else
-        {
-            _logger.LogInformation(
-                "[SECURABLE-ENTITIES] Derived {Count} securable entity/entities from live metadata: {Entities}",
-                names.Count, string.Join(", ", names.OrderBy(n => n, StringComparer.Ordinal)));
-        }
+
+        _logger.LogInformation(
+            "[SECURABLE-ENTITIES] Derived {Count} securable entity/entities from live metadata: {Entities}",
+            names.Count, string.Join(", ", names.OrderBy(n => n, StringComparer.Ordinal)));
 
         await TrySetInCacheAsync(names, ct).ConfigureAwait(false);
 

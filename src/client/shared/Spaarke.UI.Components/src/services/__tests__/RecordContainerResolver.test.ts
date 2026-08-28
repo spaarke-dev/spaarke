@@ -304,6 +304,43 @@ describe('resolveContainerForRecord', () => {
     ).rejects.toThrow(SecureContainerUnresolvedError);
   });
 
+  it.each([null, undefined])(
+    'FAILS CLOSED when the record read resolves to %p (C-3: parity with the C# half)',
+    async (empty) => {
+      // C-3 regression. `IWebApiLike.retrieveRecord` is typed non-nullable and satisfied STRUCTURALLY, so
+      // TypeScript warns at no call site if an implementation resolves null/undefined — and the shipped
+      // adapters are not the only implementations (PCF context.webAPI, host shims, mocks). Without the
+      // guard, `record?.[flag] === true` is false for both, routing content to the BU fallback container
+      // while the C# resolver throws container_record_not_found on the identical condition. A fail-OPEN
+      // client next to a fail-CLOSED server is the worst of the two.
+      await expect(
+        resolveContainerForRecord({
+          webApi: webApiReturning(empty as unknown as Record<string, unknown>),
+          metadataProbe: probe([SECURE_ENTITY]),
+          entityLogicalName: SECURE_ENTITY,
+          recordId: RECORD_ID,
+          fallbackContainerId: SHARED_BU_CONTAINER,
+        })
+      ).rejects.toThrow(SecureContainerUnresolvedError);
+    }
+  );
+
+  it('treats an EMPTY record object as not-secure but records no container (no silent secure bypass)', async () => {
+    // An empty object is a real read that returned no columns — distinct from null. It cannot assert
+    // security, so it must not resolve to a secure container; the BU fallback is the honest answer and is
+    // what the pre-existing non-secure path already does.
+    const result = await resolveContainerForRecord({
+      webApi: webApiReturning({}),
+      metadataProbe: probe([SECURE_ENTITY]),
+      entityLogicalName: SECURE_ENTITY,
+      recordId: RECORD_ID,
+      fallbackContainerId: SHARED_BU_CONTAINER,
+    });
+
+    expect(result.source).toBe('non-secure-fallback');
+    expect(result.containerId).toBe(SHARED_BU_CONTAINER);
+  });
+
   it('propagates a metadata failure rather than defaulting to not-secure', async () => {
     // The subtle version of the same bug: an unavailable metadata probe read as "not securable"
     // would resolve every record to the shared fallback — the identical isolation failure, with an

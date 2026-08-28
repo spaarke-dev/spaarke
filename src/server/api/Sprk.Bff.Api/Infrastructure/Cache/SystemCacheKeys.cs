@@ -89,6 +89,21 @@ public static class SystemCacheKeys
     public const string DataverseEntityMetadata = "dv-entity-metadata";
 
     /// <summary>
+    /// The set of Dataverse entities carrying <c>sprk_issecure</c>, derived from live attribute metadata
+    /// (unified-access-control-r2 task 075).
+    /// Site: <c>Infrastructure/Dataverse/SecurableEntityRegistry.cs</c>. Raw key:
+    /// <c>sdap:dv:securable-entities</c>.
+    /// Justification: like <see cref="DataverseEntityMetadata"/> this is org-wide SCHEMA, not per-tenant
+    /// data — which entities can be marked secure is a property of the solution, identical for every caller,
+    /// so tenant-scoping would defeat the cache without changing any answer. The cached value is a list of
+    /// entity LOGICAL NAMES only; no record data, no container ids, nothing caller-specific.
+    /// Fail-closed note: an EMPTY result is deliberately never written to this key — an empty set is
+    /// indistinguishable from a failed metadata query, and caching it would make every record read as
+    /// non-secure for the 6h TTL.
+    /// </summary>
+    public const string DataverseSecurableEntities = "dv-securable-entities";
+
+    /// <summary>
     /// SPE dashboard cross-tenant metrics aggregate.
     /// Site: <c>Services/SpeAdmin/SpeDashboardSyncService.cs</c>. Raw key: <c>sdap:spe:dashboard:metrics</c>.
     /// Justification: dashboard metrics aggregate across all tenants/containers in the

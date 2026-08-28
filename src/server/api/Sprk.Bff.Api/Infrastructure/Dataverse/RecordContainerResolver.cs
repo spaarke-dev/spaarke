@@ -1,3 +1,4 @@
+using System.ServiceModel;
 using Microsoft.Xrm.Sdk;
 using Microsoft.Xrm.Sdk.Query;
 using Spaarke.Dataverse;
@@ -6,9 +7,31 @@ using Sprk.Bff.Api.Infrastructure.Exceptions;
 namespace Sprk.Bff.Api.Infrastructure.Dataverse;
 
 /// <summary>
-/// Dataverse-backed record-aware SPE container mapping, in BOTH directions. All of the logic that decides
-/// anything lives in
-/// <see cref="SecureContainerDecision"/>; this type is the data-fetching half plus the reverse lookup.
+/// unified-access-control-r2 task 075 — the ONE record-aware SharePoint Embedded container mapping, in both
+/// directions. All of the logic that DECIDES anything lives in <see cref="SecureContainerDecision"/>; this
+/// type is the data-fetching half plus the reverse lookup.
+///
+/// <para><b>Forward</b> (<see cref="ResolveForRecordAsync"/>): <i>which container does this record's content
+/// belong in?</i> A secure record resolves to its own <c>sprk_containerid</c> or FAILS CLOSED; everything
+/// else resolves to the caller's existing default (the business-unit cascade on the client per INV-7,
+/// <c>Communication:ArchiveContainerId</c> for server-side ingest).</para>
+///
+/// <para><b>Reverse</b> (<see cref="ResolveOwningRecordAsync"/>): <i>which record owns this container?</i>
+/// The authorization subject for the container-keyed routes (tasks 073 / 078). Both directions come from
+/// this one component so there is exactly one mapping in the codebase.</para>
+///
+/// <para><b>Why this exists at all.</b> Provisioning creates a per-project container and stamps its id on the
+/// project row (task 021), and until this landed <b>nothing read it</b>. Uploads resolved from the acting
+/// user's business unit or one global archive container, so a secure project's documents went into a shared
+/// container. SharePoint Embedded permissions are additive-only — inheritance cannot be broken on an
+/// individual file — so no later per-item permission can retract that. The per-project container is the only
+/// isolation mechanism available, and this is what makes the stamp mean something.</para>
+///
+/// <para><b>Fail-closed contract.</b> Any failure to DETERMINE securability (metadata unavailable, record
+/// read failed, empty id, indeterminate ownership) throws rather than defaulting to "not secure". An unknown
+/// answer read as not-secure is the same isolation failure with an extra step. Error codes:
+/// <c>secure_record_container_missing</c> (409), <c>container_record_not_found</c> (404),
+/// <c>container_ownership_ambiguous</c> (409), <c>container_ownership_indeterminate</c> (409).</para>
 ///
 /// <para>Registered <b>Scoped</b> and <b>unconditionally</b> (Program.cs, beside
 /// <see cref="IDocumentStorageResolver"/>). Unconditional registration is deliberate: a feature-gated
@@ -81,11 +104,36 @@ public sealed class RecordContainerResolver
                 statusCode: 404);
         }
 
-        // Any exception from here propagates: a read failure means securability is UNKNOWN, and unknown must
-        // never resolve to the shared fallback.
-        var record = await _entityService
-            .RetrieveAsync(normalizedEntity, recordId, [SecurableEntityRegistry.SecureFlagAttribute, ContainerColumn], ct)
-            .ConfigureAwait(false);
+        // A read failure means securability is UNKNOWN, and unknown must never resolve to the shared
+        // fallback. `IGenericEntityService.RetrieveAsync` returns a non-nullable Entity and the production
+        // implementation THROWS a FaultException on not-found rather than returning null — so the null branch
+        // below is defensive only, and the not-found case is normalized here so callers get the documented
+        // 404 instead of a raw SDK fault surfacing as a 500 or an unwinnable Service Bus retry.
+        Entity? record;
+        try
+        {
+            record = await _entityService
+                .RetrieveAsync(
+                    normalizedEntity,
+                    recordId,
+                    [SecurableEntityRegistry.SecureFlagAttribute, ContainerColumn],
+                    ct)
+                .ConfigureAwait(false);
+        }
+        catch (Exception ex) when (IsRecordNotFound(ex))
+        {
+            _logger.LogWarning(
+                ex,
+                "[SECURE-CONTAINER] {Entity} {RecordId} does not exist; refusing to resolve a container for it.",
+                normalizedEntity, recordId);
+
+            throw new SdapProblemException(
+                code: "container_record_not_found",
+                title: "Cannot resolve a storage container",
+                detail: $"Record '{recordId}' of type '{normalizedEntity}' does not exist, so it cannot be "
+                        + "determined whether it is secure. Refusing rather than using a shared container.",
+                statusCode: 404);
+        }
 
         if (record is null)
         {
@@ -95,6 +143,22 @@ public sealed class RecordContainerResolver
                 detail: $"Record '{recordId}' of type '{normalizedEntity}' was not found, so it cannot be "
                         + "determined whether it is secure. Refusing rather than using a shared container.",
                 statusCode: 404);
+        }
+
+        // ABSENT is not the same as FALSE, and the distinction is worth a log line even though it is not
+        // (yet) an error. Dataverse omits null-valued properties from Web API responses, and FIELD-LEVEL
+        // SECURITY on sprk_issecure returns the row with the attribute masked out rather than failing — both
+        // yield "absent", and GetAttributeValue<bool> maps absent to false, i.e. the shared container. A
+        // blanket throw would be wrong (a securable entity legitimately has NULL rows and that must not fail
+        // every upload), so this is logged distinguishably and the live assertion that sprk_issecure is
+        // neither field-secured nor NULL on any securable row belongs with task 047.
+        if (!record.Contains(SecurableEntityRegistry.SecureFlagAttribute))
+        {
+            _logger.LogWarning(
+                "[SECURE-CONTAINER] '{Attribute}' was ABSENT (not false) on {Entity} {RecordId}. Treating as "
+                + "non-secure. Absent means either an unset column or FIELD-LEVEL SECURITY masking the value "
+                + "for this caller — the latter would silently route content to the shared container.",
+                SecurableEntityRegistry.SecureFlagAttribute, normalizedEntity, recordId);
         }
 
         var isSecure = record.GetAttributeValue<bool>(SecurableEntityRegistry.SecureFlagAttribute);
@@ -153,43 +217,89 @@ public sealed class RecordContainerResolver
         var secureClaimants = new List<OwningSecureRecord>();
         var nonSecureClaimantCount = 0;
 
+        // The LIKE pattern is built ONCE. It is trim-tolerant (leading '%' catches a stored value with
+        // leading whitespace) and selective (the container id itself is in the pattern), and every
+        // LIKE-significant character in the id is bracket-escaped so an SPE drive id cannot act as a
+        // wildcard — see EscapeForLike. The code-side exact-after-trim compare below remains the AUTHORITY;
+        // the filter only narrows what has to be inspected.
+        var containerPattern = $"%{EscapeForLike(normalizedContainer)}%";
+
+        // PASS 1 — who, among the SECURE records, claims this container?
+        //
+        // Both conditions are load-bearing and for different reasons:
+        //   * `sprk_issecure == true` means shared-container noise cannot crowd the signal out of the page.
+        //     Three live projects already share the root business unit's container id, so at BU-container
+        //     scale the noise is hundreds of rows.
+        //   * the container filter makes the probe SELECTIVE. Without it the query returns "any N secure
+        //     records" rather than "claimants of THIS container", the page fills once the org simply HOLDS
+        //     N secure records — the intended steady state, each with its own container — and the
+        //     truncation guard below then fires on every call, for every container, including the correct
+        //     owner's. That is a hard availability cliff at N, and it kills tasks 073 and 078 outright.
         foreach (var entityLogicalName in securableEntities)
         {
-            var query = new QueryExpression(entityLogicalName)
+            var secureQuery = new QueryExpression(entityLogicalName)
             {
-                ColumnSet = new ColumnSet(SecurableEntityRegistry.SecureFlagAttribute),
+                // SELECTED, not merely filtered on, so the match can be re-confirmed in code.
+                ColumnSet = new ColumnSet(ContainerColumn),
                 TopCount = ClaimantProbeLimit,
-                NoLock = true,
                 Criteria = new FilterExpression(LogicalOperator.And)
                 {
                     Conditions =
                     {
-                        new ConditionExpression(ContainerColumn, ConditionOperator.Equal, normalizedContainer)
+                        new ConditionExpression(
+                            SecurableEntityRegistry.SecureFlagAttribute, ConditionOperator.Equal, true),
+                        new ConditionExpression(ContainerColumn, ConditionOperator.Like, containerPattern)
                     }
                 }
             };
 
             // Propagates on failure — an unanswerable ownership question must not read as "unowned", which a
             // caller would treat as "an ordinary shared container".
-            var results = await _entityService.RetrieveMultipleAsync(query, ct).ConfigureAwait(false);
+            var secureResults = await _entityService.RetrieveMultipleAsync(secureQuery, ct).ConfigureAwait(false);
 
-            IEnumerable<Entity> rows = results?.Entities ?? Enumerable.Empty<Entity>();
+            var secureRows = secureResults?.Entities?.ToList() ?? [];
 
-            foreach (var row in rows)
+            foreach (var row in secureRows)
             {
                 if (row is null || row.Id == Guid.Empty)
                 {
                     continue;
                 }
 
-                if (row.GetAttributeValue<bool>(SecurableEntityRegistry.SecureFlagAttribute))
+                // THE MATCH IS MADE IN CODE, NOT BY THE FILTER.
+                //
+                // The forward direction normalizes with Trim(), so a record stamped "  b!x  " stores its
+                // content in b!x. A Dataverse `Equal` filter does not trim the stored value, so filtering on
+                // the trimmed input alone would MISS that row — zero secure claimants, and the fail-open
+                // "this is a shared container" answer. LIKE is deliberately WIDER than the answer (it also
+                // matches a superstring such as b!xyz); this compare is what narrows it back to exact.
+                if (!IsSameContainer(row.GetAttributeValue<string>(ContainerColumn), normalizedContainer))
                 {
-                    secureClaimants.Add(new OwningSecureRecord(entityLogicalName, row.Id));
+                    continue;
                 }
-                else
-                {
-                    nonSecureClaimantCount++;
-                }
+
+                secureClaimants.Add(new OwningSecureRecord(entityLogicalName, row.Id));
+            }
+
+            // Truncation is DETECTABLE and fail-closed. `TopCount` does not populate
+            // `EntityCollection.MoreRecords` (only PageInfo does), so a full page is the only available
+            // signal that a claimant may lie beyond it. With the selective filter above, a full page means
+            // ClaimantProbeLimit-plus SECURE records match this one container — pathological co-mingling in
+            // its own right — so refusing is both honest and the correct answer.
+            if (secureRows.Count >= ClaimantProbeLimit)
+            {
+                _logger.LogError(
+                    "[SECURE-CONTAINER] The secure-claimant probe on '{Entity}' filled its page of {Limit} "
+                    + "rows for container '{Container}'. That many secure records matching one container is "
+                    + "itself co-mingling, and a further claimant may lie beyond the page, so ownership "
+                    + "cannot be established. Refusing rather than answering.",
+                    entityLogicalName, ClaimantProbeLimit, normalizedContainer);
+
+                throw new SdapProblemException(
+                    code: "container_ownership_indeterminate",
+                    title: "Container ownership could not be established",
+                    detail: "Too many secure records match this container for ownership to be determined.",
+                    statusCode: 409);
             }
         }
 
@@ -197,7 +307,80 @@ public sealed class RecordContainerResolver
         {
             // No secure record claims this container, so it is a shared business-unit or archive container.
             // That is an ANSWER, not a failure: the caller decides what it means for them.
+            //
+            // Returning HERE, before pass 2, is deliberate. The co-mingling question only means anything
+            // once a secure claimant exists, and a shared BU container legitimately has hundreds of
+            // non-secure claimants — probing it would fill the page and turn the ordinary shared-container
+            // case into a refusal, breaking task 078 for every normal container.
             return null;
+        }
+
+        // PASS 2 — does any NON-secure record ALSO claim this container? Only asked when a secure claimant
+        // exists, where the expected answer is zero, so a full page here really is co-mingling.
+        foreach (var entityLogicalName in securableEntities)
+        {
+            var coMingleQuery = new QueryExpression(entityLogicalName)
+            {
+                // Same reason as pass 1: the filter is wider than the answer, so the column must come back
+                // for the code-side compare to be possible at all.
+                ColumnSet = new ColumnSet(ContainerColumn),
+                TopCount = ClaimantProbeLimit,
+                Criteria = new FilterExpression(LogicalOperator.And)
+                {
+                    Conditions =
+                    {
+                        new ConditionExpression(ContainerColumn, ConditionOperator.Like, containerPattern)
+                    },
+                    Filters =
+                    {
+                        // `sprk_issecure != true` ALONE IS WRONG, and this nested Or is the fix.
+                        //
+                        // NotEqual is SQL `<> 1`, and `NULL <> 1` evaluates to UNKNOWN, so a row whose flag
+                        // is NULL is EXCLUDED by it. Those rows are legitimate and expected — Dataverse does
+                        // not back-fill a Two Options column on existing rows, and field-level security
+                        // returns the row with the attribute masked rather than erroring (the same fact the
+                        // absent-flag warning in ResolveForRecordAsync exists to surface). Excluding them
+                        // makes a NULL-flagged non-secure claimant invisible, so co-mingling goes undetected
+                        // and the secure record is reported as sole owner of a shared container.
+                        new FilterExpression(LogicalOperator.Or)
+                        {
+                            Conditions =
+                            {
+                                new ConditionExpression(
+                                    SecurableEntityRegistry.SecureFlagAttribute,
+                                    ConditionOperator.NotEqual,
+                                    true),
+                                new ConditionExpression(
+                                    SecurableEntityRegistry.SecureFlagAttribute, ConditionOperator.Null)
+                            }
+                        }
+                    }
+                }
+            };
+
+            var coMingleResults = await _entityService.RetrieveMultipleAsync(coMingleQuery, ct).ConfigureAwait(false);
+
+            var coMingleRows = coMingleResults?.Entities?.ToList() ?? [];
+
+            nonSecureClaimantCount += coMingleRows.Count(row =>
+                row is not null
+                && IsSameContainer(row.GetAttributeValue<string>(ContainerColumn), normalizedContainer));
+
+            if (coMingleRows.Count >= ClaimantProbeLimit)
+            {
+                _logger.LogError(
+                    "[SECURE-CONTAINER] The co-mingling probe on '{Entity}' filled its page of {Limit} rows "
+                    + "for container '{Container}', which a secure record claims. Refusing rather than "
+                    + "under-reporting co-mingling.",
+                    entityLogicalName, ClaimantProbeLimit, normalizedContainer);
+
+                throw new SdapProblemException(
+                    code: "container_ownership_indeterminate",
+                    title: "Container ownership could not be established",
+                    detail: "Too many records match a container claimed by a secure record for co-mingling "
+                            + "to be ruled out.",
+                    statusCode: 409);
+            }
         }
 
         if (secureClaimants.Count > 1 || nonSecureClaimantCount > 0)
@@ -225,4 +408,51 @@ public sealed class RecordContainerResolver
 
         return secureClaimants[0];
     }
+
+    /// <summary>
+    /// Dataverse error code <c>0x80040217 ObjectDoesNotExist</c> as a signed 32-bit integer, which is how
+    /// <see cref="OrganizationServiceFault.ErrorCode"/> exposes it.
+    /// </summary>
+    private const int ObjectDoesNotExistErrorCode = -2147220969;
+
+    /// <summary>
+    /// Whether an exception from a Dataverse retrieve means "the row does not exist", as opposed to a
+    /// transient, schema, or authorization failure. Only the former may be normalized to a 404: mapping a
+    /// timeout to "not found" would turn a retryable condition into a permanent one, and the ingest path
+    /// treats the 404 as permanent (it skips rather than retrying).
+    ///
+    /// <para><b>Typed, not substring-matched.</b> Matching <c>ex.Message</c> for "does not exist" / "was not
+    /// found" fails on two counts. Dataverse fault messages are LOCALIZED, so on a non-English org the
+    /// classification silently stops working and the raw fault escapes — which is the very condition the
+    /// normalization exists to prevent. And it is over-broad: <i>"Attribute sprk_issecure was not found"</i>
+    /// is a schema or field-level-security error, and reporting it to an operator as "the record does not
+    /// exist" misdiagnoses precisely the masked-attribute case the absent-flag warning exists to surface.
+    /// The error code is stable and locale-independent.</para>
+    /// </summary>
+    private static bool IsRecordNotFound(Exception ex)
+        => ex is FaultException<OrganizationServiceFault> fault
+           && fault.Detail?.ErrorCode == ObjectDoesNotExistErrorCode;
+
+    /// <summary>
+    /// Escapes the LIKE-significant characters so a container id cannot behave as a pattern.
+    ///
+    /// <para>Dataverse <see cref="ConditionOperator.Like"/> maps to T-SQL <c>LIKE</c>, where <c>%</c>,
+    /// <c>_</c> and <c>[</c> are significant. <c>_</c> matters in practice rather than in theory: SPE drive
+    /// ids are base64url-ish and routinely contain it, so an unescaped id would match unrelated containers.
+    /// T-SQL's bracket form escapes all three — <c>_</c> → <c>[_]</c>, <c>%</c> → <c>[%]</c>, and <c>[</c> →
+    /// <c>[[]</c> (which must be applied first, or it would re-escape the brackets just introduced).</para>
+    /// </summary>
+    private static string EscapeForLike(string value)
+        => value
+            .Replace("[", "[[]", StringComparison.Ordinal)
+            .Replace("%", "[%]", StringComparison.Ordinal)
+            .Replace("_", "[_]", StringComparison.Ordinal);
+
+    /// <summary>
+    /// The single definition of container equality on the reverse path: exact after trimming, matching the
+    /// forward direction's <c>Trim()</c> normalization. A blank stored value never matches anything.
+    /// </summary>
+    private static bool IsSameContainer(string? storedContainer, string normalizedContainer)
+        => !string.IsNullOrWhiteSpace(storedContainer)
+           && string.Equals(storedContainer.Trim(), normalizedContainer, StringComparison.Ordinal);
 }

@@ -80,7 +80,17 @@ public sealed class CommunicationContainerResolver
                 .ContainerId;
         }
 
-        var secureContainers = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        // ORDINAL, not OrdinalIgnoreCase. This is a security-identity comparison and it must use the SAME
+        // definition of "same container" as RecordContainerResolver.IsSameContainer, which is Ordinal.
+        //
+        // Under OrdinalIgnoreCase, two secure records whose container ids differ only in case collapse to one
+        // entry: Count > 1 never fires, the ambiguity refusal never runs, and Single() writes the bytes into
+        // whichever was inserted first — one of two different secure records' containers, chosen by iteration
+        // order. SPE container ids are base64url and case-significant, so the probability is negligible; the
+        // reason to fix it is that a security-identity comparison must not be defined two ways inside one
+        // feature. (Note Dataverse's own string collation is case-INSENSITIVE, so this comparison is stricter
+        // than the platform — see the verification-debt list in the task notes.)
+        var secureContainers = new HashSet<string>(StringComparer.Ordinal);
 
         foreach (var (entityLogicalName, recordId) in securableRegardings)
         {
@@ -151,7 +161,23 @@ public sealed class CommunicationContainerResolver
 
         if (securableEntities.Count == 0)
         {
-            return found;
+            // An empty set is legitimate in an org where sprk_issecure has never been added — and it is also
+            // exactly what a broken metadata query or an under-privileged identity looks like. Returning
+            // "no securable regarding" here would send the content to the shared archive container on that
+            // reading, so it refuses instead. SecurableEntityRegistry does NOT cache an empty answer, so this
+            // clears as soon as metadata answers properly.
+            _logger.LogError(
+                "[SECURE-CONTAINER] No securable entities are known, so it cannot be determined whether "
+                + "communication {CommunicationId} regards a secure record. Refusing rather than writing its "
+                + "content to the shared archive container.",
+                communicationId);
+
+            throw new Infrastructure.Exceptions.SdapProblemException(
+                code: "securable_entities_unknown",
+                title: "Securability could not be determined",
+                detail: "No entity carrying sprk_issecure is known, so it cannot be established whether this "
+                        + "communication's content belongs in a secure container.",
+                statusCode: 409);
         }
 
         var communication = await _entityService
@@ -164,7 +190,20 @@ public sealed class CommunicationContainerResolver
 
         if (communication is null)
         {
-            return found;
+            // Same shape as above, and it diverges from the RecordContainerResolver's throw on the identical
+            // condition if left as a null return. Without the row there is no regarding, so "not secure" is a
+            // guess — and the guess writes bytes to a shared container.
+            _logger.LogError(
+                "[SECURE-CONTAINER] Communication {CommunicationId} could not be read, so its regarding — and "
+                + "therefore whether its content belongs in a secure container — is unknown. Refusing.",
+                communicationId);
+
+            throw new Infrastructure.Exceptions.SdapProblemException(
+                code: "communication_regarding_unknown",
+                title: "Securability could not be determined",
+                detail: "The communication row could not be read, so it cannot be established whether its "
+                        + "content belongs in a secure container.",
+                statusCode: 409);
         }
 
         foreach (var (entityLogicalName, regardingField) in RegardingFieldMap.All)
