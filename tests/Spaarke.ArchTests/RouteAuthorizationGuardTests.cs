@@ -276,14 +276,19 @@ public class RouteAuthorizationGuardTests
             + "not a document that does not exist yet; 11 live call sites via EntityCreationService.ts:493. "
             + "Latent: OBO means SPE denies without a container ACL and no user holds one."),
 
-        new Waiver("POST /api/obo/drives/{driveId}/upload-session", WaiverKind.Pending, "075/076",
-            "Finding #2 — opens an upload session against an arbitrary drive id. Unreachable today: its "
-            + "client first calls GET /api/obo/containers/{id}/drive, which is mapped NOWHERE."),
-
-        new Waiver("PUT /api/obo/upload-session/chunk", WaiverKind.Pending, "075/076",
-            "Finding #2 — carries NO resource key at all, so no per-route mechanism can apply to it as "
-            + "written. Its authorization has to come from the session it belongs to. Unreachable today "
-            + "for the same reason as the session route above."),
+        // ---------- task 076: TWO WAIVERS REMOVED 2026-08-27, the routes were DELETED ----------
+        //
+        // POST /api/obo/drives/{driveId}/upload-session and PUT /api/obo/upload-session/chunk are gone.
+        // Task 076 DELETED the chunked OBO pair rather than converting it, because the path was dead:
+        // its only client (Spaarke.SdapClient UploadOperation.createUploadSession) began with
+        // GET /api/obo/containers/{id}/drive, which is mapped NOWHERE, so it threw on the 404 before
+        // reaching either route. The chunk route was deader still — even that client PUT straight to
+        // Graph's session.uploadUrl and never called it.
+        //
+        // Deleted rather than left behind per maintenance rule 3, and NOT converted to Permanent:
+        // the routes ceased to exist, which is the forcing function working, not the rule relaxing.
+        // The third member of the trio (PUT /api/obo/containers/{id}/files/{*path}) is still below —
+        // it is the LIVE upload route and 076 converts rather than deletes it.
 
         // ---------- task 079: TWO WAIVERS REMOVED 2026-08-27, the routes were RE-KEYED and gated ----------
         //
@@ -1081,21 +1086,32 @@ public class RouteAuthorizationGuardTests
             + "fail-closed completeness check: a registration the scanner drops is a route whose "
             + "authorization nobody is checking.\n\n" + string.Join("\n", mismatches));
 
-        // Census: 7 → 3, because task 071 DELETED four of them (children / PATCH / content / DELETE —
-        // all had zero callers, and gated document-id-keyed equivalents already ship). The 3 survivors
-        // are the upload trio, which task 071 escalated rather than gated: they CREATE content, so no
-        // sprk_document exists yet to authorize against, and attaching the document filter would deny
-        // 100% of uploads across 9 wizards. They are waived to 075/076 below (re-pointed off 073 on
-        // 2026-08-27 — 073 landed having retired the app-only twin instead of gating these).
+        // Census: 7 → 3 → 1.
+        //
+        // 7 → 3: task 071 DELETED four (children / PATCH / content / DELETE — all had zero callers, and
+        // gated document-id-keyed equivalents already ship). The 3 survivors were the upload trio, which
+        // 071 escalated rather than gated: they CREATE content, so no sprk_document exists yet to
+        // authorize against, and attaching the document filter would deny 100% of uploads across 9
+        // wizards.
+        //
+        // 3 → 1: task 076 DELETED the chunked pair (POST .../upload-session, PUT .../upload-session/chunk)
+        // on 2026-08-27. Not converted — DEAD. Their only client began with
+        // GET /api/obo/containers/{id}/drive, a route mapped NOWHERE, so it threw on that 404 before
+        // reaching either one; and the chunk route had no client at all, because even that client PUT
+        // straight to Graph's session.uploadUrl. Both waivers were deleted with them.
+        //
+        // The 1 survivor is PUT /api/obo/containers/{id}/files/{*path} — the LIVE upload route, which
+        // 076 CONVERTS to the record-keyed contract rather than deleting. Its waiver goes when the
+        // conversion lands, and it must not become Permanent.
         //
         // Update this number when routes are added or removed here — that is the ratchet working, not a
         // nuisance. Note the retroactive-validation test above is unaffected by the deletions: it feeds
         // the scanner INLINE source text, so it still proves the rule catches finding #2's shape even
         // though that route no longer exists in the file.
         Assert.True(
-            ScanFile("Api/OBOEndpoints.cs").Count == 3,
-            "Expected 3 registrations in OBOEndpoints.cs after task 071 retired the four drive-keyed "
-            + "read/mutate routes. A drop here would make the surviving upload trio invisible.");
+            ScanFile("Api/OBOEndpoints.cs").Count == 1,
+            "Expected 1 registration in OBOEndpoints.cs after task 076 deleted the dead chunked pair, "
+            + "leaving only the live upload route. A drop here would make that route invisible.");
     }
 
     // =============================================================================================
