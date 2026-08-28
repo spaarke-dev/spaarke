@@ -126,10 +126,45 @@ POST /beta/storage/fileStorage/containers/{id}/archive
 Semantic, not routing — the action exists and is reachable; the container type has not opted in.
 
 ```powershell
-Update-Module Microsoft.Online.SharePoint.PowerShell      # need >= 16.0.27515.12000
-Connect-SPOService -Url https://spaarkedev1-admin.sharepoint.com
+# 1. Uninstall the MSI "SharePoint Online Management Shell" (Apps & Features) — see blocker below
+# 2. Then, in Windows PowerShell 5.1:
+Install-Module Microsoft.Online.SharePoint.PowerShell -Force -Scope CurrentUser -AllowClobber
+Connect-SPOService -Url https://spaarkedev1-admin.sharepoint.com     # interactive sign-in
 Set-SPOContainerTypeConfiguration -ContainerTypeId 8a6ce34c-6055-4681-8f87-2f4f9f921c06 -IsArchiveEnabled $true
 ```
+
+### 🔴 Attempted 2026-08-27 — got partway, then hit two hard blockers
+
+**Progress made (this de-risks the operator's run):**
+- Installed **16.0.27612.12000** from PSGallery — comfortably above the 16.0.27515.12000 floor.
+- **Confirmed the version floor is real.** Loaded the currently-active **16.0.26413.0** in PS 5.1:
+  `Set-SPOContainerTypeConfiguration` exists but `HasIsArchiveEnabled: False`. Task 050's finding is
+  now verified from two directions — the parameter is absent from `Set-SPOContainerType` in every
+  version *and* absent from `Set-SPOContainerTypeConfiguration` below the floor.
+
+**Blocker 1 — the new module will not load in either host.**
+`16.0.26413.0` is **MSI-installed** at `C:\Program Files\SharePoint Online Management Shell\` and its
+`Microsoft.SharePoint.Client.dll` wins the assembly load, so importing 27612 fails with:
+
+```
+Could not load type 'Microsoft.SharePoint.Client.Sharing.MainLinkAudience'
+from assembly 'Microsoft.SharePoint.Client, Version=16.0.0.0, …'
+```
+
+Identical failure in PS 7 and in PS 5.1, and it persists with the Program Files entry stripped from
+`PSModulePath` — so it is assembly resolution, not module discovery. **Fix: uninstall the MSI**
+("SharePoint Online Management Shell" in Apps & Features). That is an admin action on the operator's
+machine and is not something this session should force.
+
+⚠️ Also note the gallery install landed under **PowerShell 7's** user path
+(`Documents\PowerShell\Modules`), not 5.1's (`Documents\WindowsPowerShell\Modules`). The classic SPO
+module is .NET Framework and only runs under **5.1**, so after the MSI is gone the install must be
+re-run *from `powershell.exe`*, not `pwsh`.
+
+**Blocker 2 — `Connect-SPOService` requires interactive sign-in.** There is no app-only or
+service-principal path for it, and MFA rules out `-Credential`. Even with the module fixed, this step
+needs a human at a browser. **This was always an operator action; the module work above just removes
+the surprises from it.**
 
 ⚠️ **`Set-SPOContainerType -IsArchiveEnabled` does not exist** — that parameter is on
 `Set-SPOContainerTypeConfiguration`. All 5 repo docs corrected by task 050.
@@ -203,13 +238,13 @@ PowerShell remediations (corrected across 5 docs).
 
 ## 7. Wave state — enumerated from TASK-INDEX 2026-08-27 (30 rows)
 
-**26 ✅ · 3 🔄 · 1 🔲 (held)**
+**27 ✅ · 2 🔄 · 1 🔲 (held)**
 
 | Task | Status |
 |---|---|
 | 041, 051, **052**, **025**, 060, 061, 062 + 19 others | ✅ |
 | 050 | 🔄 — code shipped + contract-tested; **pending the operator opt-in (§2)** |
-| 026 | 🔄 — **AC-2 needs a decision** (§0a). No code is blocked; the platform cannot satisfy the AC as written |
+| 026 | ✅ **as AMENDED** — operator dropped cross-tenant override display (not a thing the platform can do). Spec FR-C08 amended; no code change was needed, the shipped UI already states the limit |
 | 042 | 🔄 — Security escalation **resolved**; ~104 scaffolding methods held for `/test-diet` at 090 |
 | 029 | ⏳ **UAT only** — code complete; AC-1's live render needs a device-code session (§0c) |
 | **090** | 🔲 **HELD** by operator instruction until all work is done and UAT passed. `/test-diet` BINDING gate; also decides **DEF-001** and every `// AMBIGUOUS (task 042):` marker |
