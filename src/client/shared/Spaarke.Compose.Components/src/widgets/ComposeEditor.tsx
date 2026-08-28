@@ -1975,8 +1975,7 @@ function distinctiveAnchorPrefix(text: string): string {
 /** Outcome of {@link resolveAdvisoryAnchorSpan} — a resolved span, or a REPORTED failure kind. Never a
  *  silent placement of a should-be-ambiguous target (task 012, DEF-01). */
 type AdvisoryAnchorResolution =
-  | { span: { from: number; to: number }; kind?: undefined }
-  | { span: null; kind: 'not_found' | 'ambiguous' };
+  { span: { from: number; to: number }; kind?: undefined } | { span: null; kind: 'not_found' | 'ambiguous' };
 
 /**
  * UAT round-3 S1 (task 012 DEF-01 precision fix, ai-advanced-capabilities-agreements-r1) — resolve an
@@ -2032,9 +2031,7 @@ function resolveAdvisoryAnchorSpan(editor: Editor, targetText: string): Advisory
  * (UAT-21 — see {@link AdvisoryCommentInput.paraId} for why the two anchors differ here).
  */
 type DeterministicAnchorOutcome =
-  | { span: { from: number; to: number }; kind?: undefined }
-  | { span: null; kind: 'not_found' | 'ambiguous' }
-  | null;
+  { span: { from: number; to: number }; kind?: undefined } | { span: null; kind: 'not_found' | 'ambiguous' } | null;
 
 /** Ordinal-insensitive paraId compare — the map and the document agree in practice, but producers
  *  vary in casing and an exact compare would silently fail to match. */
