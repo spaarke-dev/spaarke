@@ -1,3 +1,4 @@
+using Sprk.Bff.Api.Infrastructure.Authentication;
 using System.Security.Claims;
 using Microsoft.AspNetCore.Mvc;
 using Sprk.Bff.Api.Api.Filters;
@@ -134,9 +135,7 @@ public static class PrecedentAdminEndpoints
 
         // Resolve current admin user identity for the default reviewer fallback.
         // Mirrors the chain used by other authorization filters in this codebase.
-        var callerOid = httpContext.User.FindFirst("oid")?.Value
-            ?? httpContext.User.FindFirst("http://schemas.microsoft.com/identity/claims/objectidentifier")?.Value
-            ?? httpContext.User.FindFirst(ClaimTypes.NameIdentifier)?.Value;
+        var callerOid = CallerResolution.ResolveObjectId(httpContext.User);
 
         // The SpeAdminAuthorizationFilter already rejects requests with no identity,
         // but we re-check defensively so unit tests that bypass the filter still get
@@ -253,9 +252,7 @@ public static class PrecedentAdminEndpoints
                 type: "https://tools.ietf.org/html/rfc7231#section-6.5.1");
         }
 
-        var callerOid = httpContext.User.FindFirst("oid")?.Value
-            ?? httpContext.User.FindFirst("http://schemas.microsoft.com/identity/claims/objectidentifier")?.Value
-            ?? httpContext.User.FindFirst(ClaimTypes.NameIdentifier)?.Value;
+        var callerOid = CallerResolution.ResolveObjectId(httpContext.User);
 
         if (string.IsNullOrWhiteSpace(callerOid))
         {

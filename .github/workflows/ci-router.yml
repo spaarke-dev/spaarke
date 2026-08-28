@@ -72,12 +72,40 @@ concurrency:
   # startup_failure 2026-06-26). Using literal `true` is safe because the
   # `group` key already segregates events:
   #   - PRs: group `ci-router-{pr_number}` — new push cancels previous PR run (desired)
-  #   - master push: group `ci-router-refs/heads/master` — back-to-back master
-  #     pushes (rare) may cancel each other; acceptable since the newer push
-  #     supersedes the older one anyway
-  #   - merge_group: group includes the ephemeral queue ref, so each queued PR
-  #     gets its own group — no cross-cancellation
-  group: ci-router-${{ github.event.pull_request.number || github.ref }}
+  #   - master push: group `ci-router-{sha}` — see below
+  #   - merge_group: `github.sha` is the ephemeral queue commit, so each queued
+  #     PR gets its own group — no cross-cancellation
+  #
+  # CHANGED 2026-08-27: the fallback was `github.ref`, whose comment read
+  # "back-to-back master pushes (rare) may cancel each other; acceptable since
+  # the newer push supersedes the older one anyway". Both halves were wrong.
+  #
+  #   * NOT RARE. On 2026-08-27 four PRs merged inside 35 minutes during a
+  #     routine integration sweep and produced TWO cancellations. Back-to-back
+  #     master merges are the normal mode here, not an edge case.
+  #   * NOT ACCEPTABLE. A cancelled run does not quietly yield to its successor:
+  #     `router-result` aggregates via alls-green, which treats a *cancelled*
+  #     dependency as a hard failure (`allowed-failures` covers failure, not
+  #     cancellation). Run 33096671842 on 7acfec600 is the worked example —
+  #     every Tier 1 gate PASSED (compile, arch, tenant-isolation, compose
+  #     fidelity, eval) and `CI / Router` still reported RED, solely because
+  #     `Classify Tier 1 Surfaces` was cancelled mid-checkout.
+  #
+  # A red that means nothing is the failure mode this project exists to remove,
+  # and once `CI / Router` becomes the required check it stops being cosmetic:
+  # a spurious red BLOCKS the merge.
+  #
+  # Keying master on `github.sha` means runs on DIFFERENT commits never cancel
+  # each other, so every master commit gets its own honest verdict. This is the
+  # same fix ci-tier2-advisory.yml already carries (see its concurrency block,
+  # which documents this identical failure mode) — the router never received it.
+  #
+  # Cost, accepted deliberately: during a sweep, N merges now run N full CI runs
+  # instead of cancelling down to one. That is more runner minutes in exchange
+  # for a correct per-commit verdict. PR behaviour is UNCHANGED — still keyed on
+  # PR number, so a new push still cancels the previous run, which is where the
+  # savings actually matter.
+  group: ci-router-${{ github.event.pull_request.number || github.sha }}
   cancel-in-progress: true
 
 jobs:

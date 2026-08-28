@@ -1,3 +1,4 @@
+using Sprk.Bff.Api.Infrastructure.Authentication;
 using System.Security.Claims;
 
 namespace Sprk.Bff.Api.Api.Agent;
@@ -50,9 +51,7 @@ public class AgentAuthorizationFilter : IEndpointFilter
 
         // Extract Azure AD Object ID from claims.
         // Copilot agent tokens carry the end-user's identity via OBO flow.
-        var userId = user.FindFirst("oid")?.Value
-            ?? user.FindFirst("http://schemas.microsoft.com/identity/claims/objectidentifier")?.Value
-            ?? user.FindFirst(ClaimTypes.NameIdentifier)?.Value;
+        var userId = CallerResolution.ResolveObjectId(user);
 
         if (string.IsNullOrEmpty(userId))
         {

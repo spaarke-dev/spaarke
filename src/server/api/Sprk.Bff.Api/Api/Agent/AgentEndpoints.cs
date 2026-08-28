@@ -1,3 +1,4 @@
+using Sprk.Bff.Api.Infrastructure.Authentication;
 using System.Security.Claims;
 using System.Text;
 using Microsoft.Extensions.AI;
@@ -497,9 +498,7 @@ public static class AgentEndpoints
     /// </summary>
     private static string ExtractUserId(HttpContext httpContext)
     {
-        return httpContext.User.FindFirst("oid")?.Value
-            ?? httpContext.User.FindFirst("http://schemas.microsoft.com/identity/claims/objectidentifier")?.Value
-            ?? httpContext.User.FindFirst(ClaimTypes.NameIdentifier)?.Value
+        return CallerResolution.ResolveObjectId(httpContext.User)
             ?? "unknown";
     }
 
@@ -509,8 +508,7 @@ public static class AgentEndpoints
     /// </summary>
     private static Guid? ExtractUserGuid(HttpContext httpContext)
     {
-        var oid = httpContext.User.FindFirst("oid")?.Value
-            ?? httpContext.User.FindFirst("http://schemas.microsoft.com/identity/claims/objectidentifier")?.Value;
+        var oid = CallerResolution.ResolveObjectId(httpContext.User);
         return Guid.TryParse(oid, out var userId) ? userId : null;
     }
 

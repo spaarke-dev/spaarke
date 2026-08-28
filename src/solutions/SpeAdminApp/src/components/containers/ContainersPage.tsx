@@ -73,11 +73,18 @@ import {
   CheckmarkCircle16Filled,
   Link16Regular,
   Dismiss20Regular,
+  Archive20Regular,
+  ArchiveArrowBack20Regular,
 } from "@fluentui/react-icons";
+import { ConfirmModal } from "@spaarke/ui-components";
 import { useBuContext } from "../../contexts/BuContext";
 import { speApiClient, describeApiError } from "../../services/speApiClient";
 import { copyToClipboard } from "../../services/clipboard";
-import type { Container, ContainerStatus } from "../../types/spe";
+import type {
+  Container,
+  ContainerStatus,
+  ContainerArchiveStatus,
+} from "../../types/spe";
 import { ContainerDetail } from "./ContainerDetail";
 import { FileBrowserPage } from "../files/FileBrowserPage";
 import { useResizablePane, PaneSplitter } from "../layout/ResizablePane";
@@ -127,6 +134,30 @@ function formatDate(iso: string | undefined): string {
     }).format(new Date(iso));
   } catch {
     return iso;
+  }
+}
+
+/**
+ * Human labels for archive state (FR-E01).
+ *
+ * Graph's raw values are camelCase enum members and two of the three describe work still in flight.
+ * The labels keep that visible — "Archiving…" rather than "Archived" for `recentlyArchived` — because
+ * the whole point of surfacing this column is that archival is asynchronous.
+ */
+const ARCHIVE_STATUS_LABEL: Record<ContainerArchiveStatus, string> = {
+  recentlyArchived: "Archiving…",
+  fullyArchived: "Archived",
+  reactivating: "Restoring…",
+};
+
+function archiveStatusExplanation(status: ContainerArchiveStatus): string {
+  switch (status) {
+    case "recentlyArchived":
+      return "Archiving has started but is not finished. Content is still being moved to archival storage.";
+    case "fullyArchived":
+      return "Fully archived. Storage cost is reduced and content is de-prioritised in Copilot results. Restore to make it fully available again.";
+    case "reactivating":
+      return "Restore is in progress. The container is not yet available for normal use.";
   }
 }
 
@@ -435,6 +466,7 @@ const COLUMN_SIZING = {
   displayName: { minWidth: 120, defaultWidth: 200, idealWidth: 200 },
   id: { minWidth: 120, defaultWidth: 300, idealWidth: 300 },
   status: { minWidth: 80, defaultWidth: 110, idealWidth: 110 },
+  archiveStatus: { minWidth: 80, defaultWidth: 110, idealWidth: 110 },
   createdDateTime: { minWidth: 90, defaultWidth: 130, idealWidth: 130 },
   storageUsedInBytes: { minWidth: 100, defaultWidth: 140, idealWidth: 140 },
   webUrl: { minWidth: 100, defaultWidth: 140, idealWidth: 140 },
@@ -481,18 +513,68 @@ function buildColumns(
     createTableColumn<Container>({
       columnId: "status",
       renderHeaderCell: () => "Status",
-      renderCell: (container) => {
-        const status = container.status ?? "active";
-        return (
+      /*
+       * Three states, not two — the same correction the Storage column already carries.
+       *
+       * This cell read `container.status ?? "active"` until 2026-08-27. The server was ALSO
+       * defaulting to "active" (and doing so for 100% of rows, because its reader looked for `status`
+       * in the wrong place), so the fabrication was doubled: even once the server started telling the
+       * truth, this `??` would have kept the lie alive on its own. Graph does not return `status` on
+       * a list at all — measured, task 050 §4 — so "Not reported" is the honest and permanent answer
+       * here, and a real value only appears on the detail view.
+       */
+      renderCell: (container) =>
+        container.status === undefined || container.status === null ? (
+          <Tooltip
+            content="Microsoft Graph does not report container status on a list. Open the container to see its status."
+            relationship="label"
+          >
+            <Text italic style={{ color: tokens.colorNeutralForeground3 }}>
+              Not reported
+            </Text>
+          </Tooltip>
+        ) : (
           <Badge
-            color={statusBadgeColor(status)}
+            color={statusBadgeColor(container.status)}
             appearance="filled"
             size="small"
           >
-            {status.charAt(0).toUpperCase() + status.slice(1)}
+            {container.status.charAt(0).toUpperCase() + container.status.slice(1)}
           </Badge>
-        );
-      },
+        ),
+    }),
+    createTableColumn<Container>({
+      columnId: "archiveStatus",
+      renderHeaderCell: () => "Archive",
+      /*
+       * A SEPARATE column from Status, deliberately. Archive state and lifecycle status are
+       * different Graph properties answering different questions, and a container can be `active`
+       * and `fullyArchived` simultaneously — folding them into one badge would force a choice
+       * between two facts that are both true.
+       *
+       * Absent renders as nothing at all rather than "Not archived": Graph has no `notArchived`
+       * value, so absence cannot distinguish "not archived" from "archival is switched off for this
+       * container type and nothing was ever reported". An empty cell claims neither.
+       */
+      renderCell: (container) =>
+        container.archiveStatus ? (
+          <Tooltip
+            content={archiveStatusExplanation(container.archiveStatus)}
+            relationship="label"
+          >
+            <Badge
+              color={
+                container.archiveStatus === "reactivating"
+                  ? "informative"
+                  : "warning"
+              }
+              appearance="outline"
+              size="small"
+            >
+              {ARCHIVE_STATUS_LABEL[container.archiveStatus]}
+            </Badge>
+          </Tooltip>
+        ) : null,
     }),
     createTableColumn<Container>({
       columnId: "createdDateTime",
@@ -690,6 +772,17 @@ export const ContainersPage: React.FC<ContainersPageProps> = ({
   /** Whether a lifecycle action (activate/lock/unlock/delete) is in flight. */
   const [actionInProgress, setActionInProgress] = React.useState(false);
 
+  /**
+   * Which archival action is awaiting confirmation, or null (FR-E01).
+   *
+   * Archival changes whether content is available, so it is confirmed before it runs — and the
+   * confirmation has to state that consequence, not just ask "are you sure?". Held as state rather
+   * than `window.confirm` (which the Delete action still uses) because ADR-050 requires the canonical
+   * ConfirmModal, and because a native confirm cannot render the differing archive/restore copy.
+   */
+  const [pendingArchival, setPendingArchival] =
+    React.useState<"archive" | "restore" | null>(null);
+
   /** Error message from a failed toolbar action. */
   const [actionError, setActionError] = React.useState<string | null>(null);
 
@@ -865,6 +958,73 @@ export const ContainersPage: React.FC<ContainersPageProps> = ({
     );
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selectedContainers, selectedConfig, hasSelection, actionInProgress, loadContainers]);
+
+  /**
+   * Archive / restore (FR-E01).
+   *
+   * Kept OUT of `runLifecycleAction` on purpose. That helper reports
+   * "{n} containers {verbed}" on success — correct for activate/lock/unlock, which complete before
+   * Graph answers. Archival does not: Graph accepts the request and does the work afterwards, and
+   * the API returns 202 with `pending: true` to say so. Routing these through the same helper would
+   * have produced "3 containers archived" for three containers that are still archiving, which is the
+   * precise failure this project exists to remove — and it would have looked like reuse.
+   */
+  const runArchivalAction = React.useCallback(
+    async (mode: "archive" | "restore"): Promise<void> => {
+      if (!selectedConfig || !hasSelection || actionInProgress) return;
+      setActionInProgress(true);
+      setActionError(null);
+      setActionStatus(null);
+
+      const configId = selectedConfig.id;
+      const ids = selectedContainers.map((c) => c.id);
+
+      try {
+        const results = await Promise.allSettled(
+          ids.map((id) =>
+            mode === "archive"
+              ? speApiClient.containers.archive(id, configId)
+              : speApiClient.containers.unarchive(id, configId),
+          ),
+        );
+
+        const failed = results.filter((r) => r.status === "rejected");
+        const accepted = results.length - failed.length;
+
+        await loadContainers();
+
+        if (failed.length > 0) {
+          const firstError = (failed[0] as PromiseRejectedResult).reason;
+          // describeApiError surfaces the ProblemDetails `detail`, which for the
+          // not-opted-in case already carries the exact PowerShell remediation.
+          const msg = describeApiError(firstError, "One or more operations failed.");
+          setActionError(
+            failed.length === ids.length
+              ? msg
+              : `${failed.length} of ${ids.length} operations failed: ${msg}`,
+          );
+        }
+
+        if (accepted > 0) {
+          const noun = `container${accepted !== 1 ? "s" : ""}`;
+          // "started", never "archived". The operation is in flight; the Archive column shows
+          // "Archiving…" / "Restoring…" until Graph finishes.
+          setActionStatus(
+            mode === "archive"
+              ? `Archiving started for ${accepted} ${noun}. This continues in the background — the Archive column updates as it progresses.`
+              : `Restore started for ${accepted} ${noun}. They remain unavailable until reactivation finishes.`,
+          );
+        }
+      } catch (err) {
+        setActionError(describeApiError(err, "Operation failed. Please try again."));
+      } finally {
+        setActionInProgress(false);
+        setPendingArchival(null);
+      }
+    },
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [selectedContainers, selectedConfig, hasSelection, actionInProgress, loadContainers],
+  );
 
   /**
    * Delete (soft-delete) moves containers to the recycle bin via the Graph API.
@@ -1092,6 +1252,45 @@ export const ContainersPage: React.FC<ContainersPageProps> = ({
 
         <ToolbarDivider />
 
+        {/* Archive / Restore — FR-E01 */}
+        <Tooltip
+          content={
+            hasSelection
+              ? `Archive ${selectedContainers.length} selected container${selectedContainers.length !== 1 ? "s" : ""} — reduces storage cost, makes content unavailable until restored`
+              : "Select containers to archive"
+          }
+          relationship="description"
+        >
+          <ToolbarButton
+            icon={<Archive20Regular />}
+            onClick={() => setPendingArchival("archive")}
+            disabled={isActionsDisabled}
+            aria-label="Archive selected containers"
+          >
+            <span className={styles.buttonLabel}>Archive</span>
+          </ToolbarButton>
+        </Tooltip>
+
+        <Tooltip
+          content={
+            hasSelection
+              ? `Restore ${selectedContainers.length} selected archived container${selectedContainers.length !== 1 ? "s" : ""} to active use`
+              : "Select archived containers to restore"
+          }
+          relationship="description"
+        >
+          <ToolbarButton
+            icon={<ArchiveArrowBack20Regular />}
+            onClick={() => setPendingArchival("restore")}
+            disabled={isActionsDisabled}
+            aria-label="Restore selected archived containers"
+          >
+            <span className={styles.buttonLabel}>Restore</span>
+          </ToolbarButton>
+        </Tooltip>
+
+        <ToolbarDivider />
+
         {/* Delete */}
         <Tooltip
           content={
@@ -1131,6 +1330,72 @@ export const ContainersPage: React.FC<ContainersPageProps> = ({
           </ToolbarButton>
         </Tooltip>
       </Toolbar>
+
+      {/*
+        ── Archive / Restore confirmation (FR-E01, ADR-050 canonical ConfirmModal) ──
+
+        The consequence is stated BEFORE the action, and stated concretely: archiving takes content
+        offline. An admin who reads only the bold first line still learns the thing that would
+        surprise them. `destructive` is set for archive because from the user's point of view the
+        content becomes unavailable — reversible, but not harmless.
+      */}
+      <ConfirmModal
+        open={pendingArchival !== null}
+        busy={actionInProgress}
+        onClose={() => {
+          if (!actionInProgress) setPendingArchival(null);
+        }}
+        onConfirm={() => {
+          if (pendingArchival) void runArchivalAction(pendingArchival);
+        }}
+        title={
+          pendingArchival === "restore"
+            ? "Restore archived containers?"
+            : "Archive containers?"
+        }
+        destructive={pendingArchival === "archive"}
+        confirmLabel={
+          actionInProgress
+            ? "Working…"
+            : pendingArchival === "restore"
+              ? "Restore"
+              : "Archive"
+        }
+        message={
+          pendingArchival === "restore" ? (
+            <>
+              <Text weight="semibold">
+                {selectedContainers.length} container
+                {selectedContainers.length !== 1 ? "s" : ""} will be returned to
+                active use.
+              </Text>
+              <br />
+              <br />
+              Restoring is not instant. Each container enters a{" "}
+              <Text weight="semibold">reactivating</Text> state and stays
+              unavailable until Microsoft 365 finishes bringing its content back
+              online. The Archive column shows progress.
+            </>
+          ) : (
+            <>
+              <Text weight="semibold">
+                Archiving makes container content unavailable until it is
+                restored.
+              </Text>
+              <br />
+              <br />
+              {selectedContainers.length} container
+              {selectedContainers.length !== 1 ? "s" : ""} will be archived.
+              Files stay retained and nothing is deleted, but users cannot open
+              them, and the content is de-prioritised in Copilot results.
+              Storage cost falls by up to 75%.
+              <br />
+              <br />
+              Archiving runs in the background and is reversible with Restore.
+            </>
+          )
+        }
+      />
 
       {/* ── Status / Error Banners ── */}
       {(actionError || actionStatus) && (

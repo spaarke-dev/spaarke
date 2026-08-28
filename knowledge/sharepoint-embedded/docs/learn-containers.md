@@ -74,11 +74,34 @@ In this scenario, both the human resource management application developed by Co
 > behavior.
 
 Archival reduces storage cost by **up to 75%** and improves Copilot result relevance by de-prioritizing
-inactive content. Admins opt in **per container type** via PowerShell
-(`Set-SPOContainerType -IsArchiveEnabled`) — this is a container-*type*-level toggle, not a
-per-container one. Once enabled, individual containers are archived and restored via Graph APIs and
-SharePoint admin center options (specific endpoint names not yet captured in this corpus; verify against
-current Learn docs before implementing).
+inactive content. Admins opt in **per container type** via PowerShell — a container-*type*-level toggle,
+not a per-container one.
+
+> 🔴 **Corrected 2026-08-27 (`sdap-SPE-admin-app-r2` task 050).** This section previously named
+> **`Set-SPOContainerType -IsArchiveEnabled`**. **That parameter does not exist on that cmdlet in any
+> module version** — verified by reflecting the cmdlet types out of the module assembly.
+> `Set-SPOContainerType` takes only `ContainerTypeId, ContainerTypeName, AzureSubscriptionId,
+> ResourceGroup, ApplicationRedirectUrl`. The same wrong cmdlet had propagated into
+> `sdap-SPE-admin-app-r2` spec FR-E01, `design.md` §4.3, and its task-050 POML; all corrected together.
+
+```powershell
+Set-SPOContainerTypeConfiguration -ContainerTypeId <guid> -IsArchiveEnabled $true
+```
+
+`IsArchiveEnabled` is `Nullable<bool>`, **not** a `SwitchParameter` — `$true` is required; a bare
+`-IsArchiveEnabled` will not bind. It also exists on `New-SPOContainerType` for set-at-creation.
+
+⚠️ **Requires SPO module ≥ 16.0.27515.12000.** The widely-installed 16.0.26413.0 exposes no archive
+parameter on **any** cmdlet, so an admin on that version gets "a parameter cannot be found" even with
+the correct cmdlet name.
+
+Once enabled, individual containers are archived and restored via the Graph **beta** actions
+`POST /beta/storage/fileStorage/containers/{id}/archive` and `.../unarchive`, plus SharePoint admin
+centre options. **Both actions are absent from the v1.0 CSDL** — "GA February 2026" refers to the
+capability, not to Graph v1.0. Archive state reads from the beta-only `archivalDetails.archiveStatus`
+(`recentlyArchived` / `fullyArchived` / `reactivating`); there is no `notArchived` member, so a
+non-archived container simply omits the property. `Get-SPOContainer -ArchiveStatus` reads the same
+state outside Graph.
 
 **Why this is flagged as the highest-value new capability for a legal-operations platform** (R2's
 framing, `design.md` §4.3): containers provisioned per project/matter go cold on a predictable lifecycle

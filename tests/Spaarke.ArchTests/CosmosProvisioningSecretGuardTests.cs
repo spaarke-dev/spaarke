@@ -178,37 +178,120 @@ public class CosmosProvisioningSecretGuardTests
     /// <c>src/server/services/Sprk.Provisioning.ControlPlane/bin/**</c>. If the DLL is
     /// absent, the loader throws with an actionable message (build L2 first).
     /// </summary>
-    private static readonly Lazy<Assembly> L2Assembly = new(LoadL2Assembly);
+    private static readonly Lazy<IReadOnlyList<Assembly>> L2Assemblies = new(LoadL2Assemblies);
 
-    private static Assembly LoadL2Assembly()
+    /// <summary>
+    /// Loads EVERY <c>Sprk.Provisioning.ControlPlane*</c> assembly, not one.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <b>REPAIRED 2026-08-27 (task 042 of sdap-SPE-admin-app-r2).</b> This loader looked for a single
+    /// project directory, <c>src/server/services/Sprk.Provisioning.ControlPlane/</c>. **That directory
+    /// does not exist.** L2 was split into <c>.Api</c>, <c>.Core</c>, <c>.Sidecar</c>, <c>.Worker</c>
+    /// and <c>.Tests</c>, and the loader was never updated — so both Facts threw
+    /// <see cref="FileNotFoundException"/> on every run.
+    /// </para>
+    /// <para>
+    /// The failure mode is worth naming, because it is the one this repository keeps hitting: the guard
+    /// did not report "I cannot check this." It reported a <b>test failure attributed to the invariant</b>
+    /// — the error surfaced under the DisplayName "types have no string-typed secret-shape properties",
+    /// so a reader would reasonably think the secret rule was being evaluated and had something to say.
+    /// It was not being evaluated at all. This invariant is documented CATASTROPHIC (Cosmos is a
+    /// queryable audit log; a cleartext secret there leaks to any Reader), and it has been dark since
+    /// the split.
+    /// </para>
+    /// <para>
+    /// The scan comment always said "every type declared in <c>Sprk.Provisioning.ControlPlane*</c>" —
+    /// multi-assembly was the intent from the start; only the loader was single. Loading all of them
+    /// restores the intended coverage rather than narrowing the rule to whichever project happens to
+    /// hold <c>RunParameters</c> today.
+    /// </para>
+    /// <para>
+    /// Still deliberately NOT a <c>&lt;ProjectReference&gt;</c> — see the note in
+    /// <c>Spaarke.ArchTests.csproj</c> (top-level <c>Program</c> collision).
+    /// </para>
+    /// </remarks>
+    private static IReadOnlyList<Assembly> LoadL2Assemblies()
     {
-        var already = AppDomain.CurrentDomain.GetAssemblies()
-            .FirstOrDefault(a => string.Equals(a.GetName().Name, L2AssemblyName, StringComparison.Ordinal));
-        if (already is not null) return already;
+        var loaded = new Dictionary<string, Assembly>(StringComparer.Ordinal);
+
+        foreach (var a in AppDomain.CurrentDomain.GetAssemblies())
+        {
+            var name = a.GetName().Name;
+            if (name is not null && name.StartsWith(L2AssemblyName, StringComparison.Ordinal))
+                loaded[name] = a;
+        }
 
         var repoRoot = ResolveRepoRoot();
-        var binRoot = Path.Combine(repoRoot, "src", "server", "services", L2AssemblyName, "bin");
-        if (!Directory.Exists(binRoot))
+        var servicesRoot = Path.Combine(repoRoot, "src", "server", "services");
+        if (!Directory.Exists(servicesRoot))
         {
-            throw new FileNotFoundException(
-                $"L2 assembly bin directory not found at '{binRoot}'. This ArchTest inspects the " +
-                $"PUBLISHED {L2AssemblyName} DLL — build the L2 project at least once before running " +
-                $"this test:\n  dotnet build src/server/services/{L2AssemblyName}/");
+            throw new DirectoryNotFoundException(
+                $"Services root not found at '{servicesRoot}'. The repository layout changed; " +
+                $"this guard resolves L2 projects by convention from that directory.");
         }
 
-        var candidate = Directory
-            .EnumerateFiles(binRoot, $"{L2AssemblyName}.dll", SearchOption.AllDirectories)
-            .Where(p => !p.Contains($"{Path.DirectorySeparatorChar}ref{Path.DirectorySeparatorChar}", StringComparison.OrdinalIgnoreCase))
-            .OrderByDescending(File.GetLastWriteTimeUtc)
-            .FirstOrDefault();
-        if (candidate is null)
+        // Every L2 project EXCEPT the test project — test doubles legitimately hold fake secrets and
+        // are not persisted to Cosmos, which is what this invariant protects.
+        var projectDirs = Directory
+            .EnumerateDirectories(servicesRoot, $"{L2AssemblyName}*", SearchOption.TopDirectoryOnly)
+            .Where(d => !Path.GetFileName(d).EndsWith(".Tests", StringComparison.Ordinal))
+            .ToList();
+
+        if (projectDirs.Count == 0)
         {
-            throw new FileNotFoundException(
-                $"{L2AssemblyName}.dll not found under '{binRoot}'. Build L2 first:\n" +
-                $"  dotnet build src/server/services/{L2AssemblyName}/");
+            throw new DirectoryNotFoundException(
+                $"No '{L2AssemblyName}*' project directories under '{servicesRoot}'. If L2 was renamed " +
+                $"again, update {nameof(L2AssemblyName)} — do NOT delete this guard, the invariant it " +
+                $"enforces is CATASTROPHIC-severity (cleartext secrets in a queryable Cosmos audit log).");
         }
 
-        return Assembly.LoadFrom(candidate);
+        foreach (var projectDir in projectDirs)
+        {
+            var assemblyName = Path.GetFileName(projectDir);
+            if (loaded.ContainsKey(assemblyName)) continue;
+
+            var binRoot = Path.Combine(projectDir, "bin");
+            if (!Directory.Exists(binRoot)) continue;
+
+            var candidate = Directory
+                .EnumerateFiles(binRoot, $"{assemblyName}.dll", SearchOption.AllDirectories)
+                .Where(p => !p.Contains($"{Path.DirectorySeparatorChar}ref{Path.DirectorySeparatorChar}", StringComparison.OrdinalIgnoreCase))
+                .OrderByDescending(File.GetLastWriteTimeUtc)
+                .FirstOrDefault();
+
+            if (candidate is not null)
+                loaded[assemblyName] = Assembly.LoadFrom(candidate);
+        }
+
+        if (loaded.Count == 0)
+        {
+            throw new FileNotFoundException(
+                $"No '{L2AssemblyName}*' assembly was found built. This ArchTest inspects the COMPILED " +
+                $"L2 DLLs, so the projects must be built at least once:\n" +
+                $"  dotnet build src/server/services/{L2AssemblyName}.Core/\n" +
+                $"Found project directories: {string.Join(", ", projectDirs.Select(Path.GetFileName))}");
+        }
+
+        return loaded.Values.ToList();
+    }
+
+    /// <summary>
+    /// <see cref="Assembly.GetTypes"/> throws <see cref="ReflectionTypeLoadException"/> when any single
+    /// type fails to load — e.g. a reference the ArchTests project does not itself carry. Losing the
+    /// whole assembly's types to one unloadable type would silently shrink this guard's coverage, which
+    /// is exactly the failure this file was just repaired from. Scan what loaded.
+    /// </summary>
+    private static IEnumerable<Type> SafeGetTypes(Assembly assembly)
+    {
+        try
+        {
+            return assembly.GetTypes();
+        }
+        catch (ReflectionTypeLoadException ex)
+        {
+            return ex.Types.Where(t => t is not null)!;
+        }
     }
 
     // -----------------------------------------------------------------------
@@ -274,12 +357,12 @@ public class CosmosProvisioningSecretGuardTests
     [Fact(DisplayName = "FR-27: Sprk.Provisioning.ControlPlane types have no string-typed secret-shape properties (must use KeyVaultSecretRef)")]
     public void L2Types_HaveNoStringTypedSecretShapedProperties()
     {
-        var assembly = L2Assembly.Value;
-
-        // Scan every type declared in Sprk.Provisioning.ControlPlane*.
+        // Scan every type declared in Sprk.Provisioning.ControlPlane* — ALL of them, across every L2
+        // assembly (repaired 2026-08-27; see LoadL2Assemblies).
         // Excluded: types in <see cref="ExcludedTypeFullNames"/> — the
         // KeyVaultSecretRef compliant type + documented Path A exceptions.
-        var typesToScan = assembly.GetTypes()
+        var typesToScan = L2Assemblies.Value
+            .SelectMany(SafeGetTypes)
             .Where(t => t.Namespace is not null
                         && t.Namespace.StartsWith(L2NamespacePrefix, StringComparison.Ordinal))
             .Where(t => t.FullName is null || !ExcludedTypeFullNames.Contains(t.FullName));
@@ -393,7 +476,16 @@ public class CosmosProvisioningSecretGuardTests
         // cleartext string secrets by typing the value as KeyVaultSecretRef.
         // Task POML 025 constraint (line 43): "RunParameters.Secrets typed as
         // IDictionary<string, KeyVaultSecretRef> MUST PASS the test (compliant shape)."
-        var runParameters = L2Assembly.Value.GetType(L2RunParametersFullName, throwOnError: true)!;
+        var runParameters = L2Assemblies.Value
+            .Select(a => a.GetType(L2RunParametersFullName, throwOnError: false))
+            .FirstOrDefault(t => t is not null);
+
+        Assert.True(
+            runParameters is not null,
+            $"'{L2RunParametersFullName}' was not found in any loaded L2 assembly " +
+            $"({string.Join(", ", L2Assemblies.Value.Select(a => a.GetName().Name))}). " +
+            $"If the type moved, update {nameof(L2RunParametersFullName)} — the compliant-shape " +
+            $"invariant still applies wherever it lives.");
         var prop = runParameters.GetProperty(L2SecretsPropertyName);
         Assert.NotNull(prop);
 

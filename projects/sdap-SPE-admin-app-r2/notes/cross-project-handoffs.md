@@ -55,6 +55,80 @@ INDEX were not touched; only its `notes/` folder received the new requirement do
 
 ---
 
+## ISS-002 — ArchTest findings in ControlPlane code → `customer-provisioning-orchestration-r1`
+
+| Field | Value |
+|---|---|
+| **Status** | Open |
+| **Urgency** | **Security-adjacent, not blocking.** None of these are in Tier-1's blocking ArchTest subset; they run in Tier 2 / `adr-audit.yml`. Nothing in either project is stalled on them |
+| **Filed** | 2026-08-27 |
+| **Source** | task 042 (ArchTest suite brought to a known state) + task 050 (re-verified unchanged) |
+| **GitHub Issue** | [#839](https://github.com/spaarke-dev/spaarke/issues/839) |
+| **Findings doc** | [`../../customer-provisioning-orchestration-r1/notes/archtest-findings-from-spe-admin-r2.md`](../../customer-provisioning-orchestration-r1/notes/archtest-findings-from-spe-admin-r2.md) |
+
+**What**: `tests/Spaarke.ArchTests` went 102/108 → **106/111** during task 042. The 5 that remain red are
+all in `customer-provisioning-orchestration-r1`'s code. The headline is that
+`CosmosProvisioningSecretGuardTests` (FR-27) — a **CATASTROPHIC**-severity invariant (no cleartext secret
+in Cosmos, a queryable audit log) — **was dead rather than passing**: its loader pointed at a directory
+that ceased to exist at the L2 split, and it failed under the DisplayName *"types have no string-typed
+secret-shape properties"*, so CI read as though the rule had an opinion. Repaired; it now reports **8
+secret-shaped properties**, of which `SolutionVerificationRequest.ClientSecret` (KV-resolved, builds a
+`ClientSecretCredential`) is the one to adjudicate first. Also: 4 `ClientSecretCredential` sites missing
+from the FR-F1/F2 census, one real second `ServiceBusClient` construction site
+(`ServiceBusModule.cs:144`), and the ADR-010 1:1-interface ceiling drifting 153 → 155.
+
+**Why it matters**: a security detector that reports a *wrong* diagnosis is worse than one that is
+absent, because it consumes the attention that would otherwise notice the gap. This one had been dark
+since the split.
+
+**Deliberately NOT forced green.** Refining the FR-27 shape rule to silence the five probable
+name-vs-value false positives would re-dark the guard just repaired, based on our inference about
+another team's data model. FR-F2's own failure message says *"A failure here is NOT a prompt to update
+the number."* Both decisions are the receiving project's to make — they know which properties hold names.
+
+**What we DID change in shared test code** (already merged, commit `1b1d03b23`): the FR-27 loader now
+enumerates every `Sprk.Provisioning.ControlPlane*` assembly (its scan comment always said `*`; only the
+loader was singular), and `ServiceBusClientGuardTests` now skips `*.Tests` projects — a **scope
+narrowing, not an allowlist**; every file under `src/server/**` including all ControlPlane service
+projects is still scanned, and no named production site is exempt.
+
+**Not fixed here or there.** Findings handoff only. No ControlPlane production code was touched.
+
+---
+
+## DEF-001 — dead owning-app code, still DI-registered and shipped (INTERNAL to this project)
+
+| Field | Value |
+|---|---|
+| **Status** | Open — needs an owner decision, no destination project |
+| **Urgency** | Not blocking. Decide by task 090 (wrap-up) |
+| **Filed** | 2026-08-27 |
+| **Source** | task 042 — [`test-retirement-inventory.md`](test-retirement-inventory.md) |
+
+**What**: three methods on `SpeAdminGraphService` have **zero callers** anywhere in `src/`
+(grep-verified):
+
+| Method | Note |
+|---|---|
+| `GetClientForOwningAppAsync` | no callers |
+| `ValidateOwningAppSecretsAsync` | no callers — **despite a doc comment claiming it is "called during startup validation"** |
+| `FetchOwningAppSecretAsync` | no callers |
+
+Task 042 found **34 tests green against this code**, which is task 010's UNWORKABLE verdict surfacing at
+the test layer: the SPE-084 multi-app OBO path has never executed successfully (see project CLAUDE.md
+"Reopen condition — task 010"). The tests were retired. **The code was not** — it is still registered in
+DI and ships in every deploy.
+
+**Why it is filed rather than fixed**: deletion is a CLAUDE.md §11 judgement (is this dead, or is it
+scaffolding for a Workstream B path that 011/012 will complete?), and it was out of task 042's and task
+050's scope. `ValidateOwningAppSecretsAsync`'s misleading doc comment is itself a small instance of §2.4
+— a comment asserting a call relationship that does not exist.
+
+**Decision needed**: delete under §11, or keep with the doc comments corrected to say the methods are
+currently unreachable and why.
+
+---
+
 ## Notes
 
 - ID scheme follows `.claude/skills/project-defer-issue-tracking/SKILL.md`: `ISS-{NNN}` for capability/work
