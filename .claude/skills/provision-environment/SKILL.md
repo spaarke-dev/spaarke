@@ -115,7 +115,7 @@ Assertions:
 
 ```powershell
 # Acquire token — env is one of {dev, demo, prod}
-$env = "dev"  # populated by -Environment CLI arg / intake.environment / Step 1d prompt
+$env = "dev"  # populated by -Environment CLI arg / intake.controlPlaneEnv / Step 1d prompt (ISH-12 rename SESSION 18)
 $token = az account get-access-token `
   --resource "api://spaarke.com/provisioning-controlplane-$env" `
   --query accessToken -o tsv
@@ -290,14 +290,14 @@ If the module is unavailable AND cannot be installed (offline / restricted-netwo
 **COMP-14 environment fail-fast (SESSION 16)** — Step 0.5b's substitution chain and its `$scopesToCheck += 'once_per_env'` branch both require a non-empty `$env`. When `$env` is null/empty, Step 0.5b silently degrades: `once_per_env` prereqs are skipped (invisible to the operator) and every `{env}` token substitutes to the empty string, producing malformed recipes that either fail with cryptic `az` parse errors OR — worse — false-PASS because the resulting name matches nothing.
 
 Different modes have different `$env` timing:
-- **Batch mode**: `$env` MUST be set by Step 1.0 (from `intake.environment`); a null value here means the intake was malformed and never should have passed schema validation, so HARD STOP.
+- **Batch mode**: `$env` MUST be set by Step 1.0 (from `intake.controlPlaneEnv` — ISH-12 rename SESSION 18); a null value here means the intake was malformed and never should have passed schema validation, so HARD STOP.
 - **Interactive mode**: `$env` is set at Step 1d (after Step 0.5). It is EXPECTED to be null at Step 0.5 time; the `if ($env) { $scopesToCheck += 'once_per_env' }` branch in Step 0.5b handles this by skipping once_per_env prereqs (they get re-checked at Step 2 client-side dry-run once `$env` is known). Emit an INFO message but do NOT fail.
 
 ```powershell
 if ($script:SkipInteractiveIntake) {
-  # BATCH — $env MUST be populated by Step 1.0 from intake.environment
+  # BATCH — $env MUST be populated by Step 1.0 from intake.controlPlaneEnv (ISH-12 rename SESSION 18)
   if ([string]::IsNullOrWhiteSpace($env)) {
-    Write-Error "[skill-config] Step 0.5a HARD STOP (COMP-14): batch-mode `$env is null/empty after Step 1.0 read of intake.environment. This means the intake.json passed schema validation with a null/empty environment field OR the Step 1.0 batch loader dropped it. Correct the intake and rerun. Silent-skip of once_per_env prereqs is FORBIDDEN in batch mode."
+    Write-Error "[skill-config] Step 0.5a HARD STOP (COMP-14): batch-mode `$env is null/empty after Step 1.0 read of intake.controlPlaneEnv. This means the intake.json passed schema validation with a null/empty controlPlaneEnv field OR the Step 1.0 batch loader dropped it. Correct the intake and rerun. Silent-skip of once_per_env prereqs is FORBIDDEN in batch mode."
     exit 1
   }
   if ($env -notin @('dev','demo','prod')) {
@@ -495,7 +495,7 @@ if ($BatchIntakeFile) {
   $customerId     = $intake.customerId
   $tenantId       = $intake.tenantId
   $tenancyModel   = $intake.tenancyModel
-  $environment    = $intake.environment
+  $environment    = $intake.controlPlaneEnv    # ISH-12 rename SESSION 18 — intake field is `controlPlaneEnv`; local var stays `$environment` for existing downstream references
   $env            = $environment                # alias — Step 0.5a fail-fast + Step 0c URL selector read $env
   $profile        = $intake.profile
   $environmentId  = $intake.environmentId       # may be null → 1f auto-creates
@@ -548,7 +548,7 @@ Sample intake (see [`intake.schema.json`](../../scripts/provisioning-prereqs/int
   "customerId": "trial1",
   "tenantId": "a221a95e-6abc-4434-aecc-e48338a1b2f2",
   "tenancyModel": "Model1Shared",
-  "environment": "dev",
+  "controlPlaneEnv": "dev",
   "profile": "spaarke-hosted-model1-trial",
   "region": "westus2",
   "tier": "shared-trial"
@@ -748,7 +748,7 @@ INTAKE SUMMARY
   customerId:      trial-acme-2026-08-18
   tenantId:        12345678-...-...-...  (customer tenant)
   tenancyModel:    Model1Shared
-  environment:     dev
+  controlPlaneEnv: dev
   profile:         spaarke-hosted-model1-trial
   environmentId:   a1b2c3d4-...  (placeholder sprk_dataverseenvironment record, sprk_setupstatus=1 InProgress)
   L2 API:          https://spaarke-provisioning-controlplane-dev.azurewebsites.net

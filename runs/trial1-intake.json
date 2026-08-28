@@ -2,7 +2,7 @@
   "customerId": "trial1",
   "tenantId": "a221a95e-6abc-4434-aecc-e48338a1b2f2",
   "tenancyModel": "Model1Shared",
-  "environment": "dev",
+  "controlPlaneEnv": "dev",
   "profile": "spaarke-hosted-model1-trial",
   "region": "westus2",
   "openAiRegion": "westus3",

@@ -17,7 +17,7 @@
     "env": {
       "source": "intake",
       "shape": "'prod' (for this file)",
-      "populatedBy": "intake.schema.json environment property"
+      "populatedBy": "intake.schema.json controlPlaneEnv property (ISH-12 SESSION 18 rename from `environment` → `controlPlaneEnv`)"
     },
     "region": {
       "source": "intake",

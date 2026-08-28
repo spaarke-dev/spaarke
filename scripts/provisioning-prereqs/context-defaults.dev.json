@@ -19,7 +19,7 @@
     "env": {
       "source": "intake",
       "shape": "dev | demo | prod",
-      "populatedBy": "intake.schema.json environment property (also -Env CLI arg)",
+      "populatedBy": "intake.schema.json controlPlaneEnv property (also -Env CLI arg; ISH-12 SESSION 18 rename from `environment` → `controlPlaneEnv`)",
       "note": "Feeds most name_templates in spaarke-constants.yaml (l2UamiName, sbNamespace, artifactsStorageName, acrName, platformKvName, platformResourceGroup, registryDvUrl)."
     },
     "region": {

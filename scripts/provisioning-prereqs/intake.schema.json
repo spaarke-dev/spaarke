@@ -8,7 +8,7 @@
     "customerId",
     "tenantId",
     "tenancyModel",
-    "environment",
+    "controlPlaneEnv",
     "profile"
   ],
   "additionalProperties": false,
@@ -33,10 +33,10 @@
       "enum": ["Model1Shared", "Model2Dedicated"],
       "description": "Model1Shared = shared trial/SMB tier; Model2Dedicated = dedicated sub + dedicated Dataverse + admin-consent flow"
     },
-    "environment": {
+    "controlPlaneEnv": {
       "type": "string",
       "enum": ["dev", "demo", "prod"],
-      "description": "Session-level env — determines which L2 API base + which Bicep parameter file (NOT the L2 profile enum below)"
+      "description": "ISH-12 (SESSION 18 rename from `environment` → `controlPlaneEnv`): session-level L2 control-plane deployment tier — determines which L2 API base (`api://spaarke.com/provisioning-controlplane-{controlPlaneEnv}`) + which Bicep parameter file. NOT the L2 profile enum below, and NOT the customer Dataverse environment (see `environmentId` which is the `sprk_dataverseenvironment` record GUID). Rename disambiguates the two prior senses of `environment` (control-plane deployment tier vs Dataverse env instance)."
     },
     "profile": {
       "type": "string",
@@ -167,7 +167,7 @@
       "customerId": "trial1",
       "tenantId": "a221a95e-6abc-4434-aecc-e48338a1b2f2",
       "tenancyModel": "Model1Shared",
-      "environment": "dev",
+      "controlPlaneEnv": "dev",
       "profile": "spaarke-hosted-model1-trial",
       "region": "westus2",
       "openAiRegion": "westus3",
@@ -186,7 +186,7 @@
       "tenantId": "12345678-1234-1234-1234-123456789012",
       "subscriptionId": "abcdef01-2345-6789-abcd-ef0123456789",
       "tenancyModel": "Model2Dedicated",
-      "environment": "prod",
+      "controlPlaneEnv": "prod",
       "profile": "customer-owned-model2",
       "region": "westus2",
       "openAiRegion": "westus3",
