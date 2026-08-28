@@ -1,8 +1,9 @@
 # Current Task State — `spaarkeai-compose-r8`
 
-> **Last Updated**: 2026-08-27 22:10 (by `context-handoff`)
+> **Last Updated**: 2026-08-28 (by `context-handoff`)
 > **Recovery**: read Quick Recovery. The P1 authorization work is DONE, MERGED and DEPLOYED —
-> do not re-open it. Active work is the ArchTest guard adjudication.
+> do not re-open it. **Issue #839 is also DONE** (PR #847, awaiting review).
+> Active work returns to **Compose R8 product work on PR #806**.
 
 ---
 
@@ -10,10 +11,36 @@
 
 | Field | Value |
 |---|---|
-| **Active work** | **Issue #839 — ArchTest guard adjudication.** Branch `fix/archtest-guard-adjudication` in `c:\tmp\spaarke-auth-oid`. |
-| **Status** | 3 of 6 ArchTest failures fixed + pushed. No PR opened yet. Clean, 0 unpushed. |
-| **Next Action** | Fix the remaining 3: **FR-27** (8 secret-shaped properties — verify each, 5 look like the regex matching a NAME not a value; do NOT loosen the regex), **ADR-010** (1:1 interface ceiling drifted 153 → 155; identify the 2 new interfaces), **ServiceBusClientGuard** (`ControlPlane.Core/Modules/ServiceBusModule.cs:144` — route through `ServiceBusClientFactory`). Then open the PR. |
-| **Verify with** | `dotnet test tests/Spaarke.ArchTests/Spaarke.ArchTests.csproj` |
+| **Active work** | **Compose R8 product work — PR #806.** The CI/ArchTest detour is finished. |
+| **Next Action** | Fix the **live-anchorless classifier bug** (issue **#853**, and §"🔴 OPEN BUG" below). Everything anchorless is classified `legacy-replay`, so a user who selected text a second earlier is told the suggestion "came from an earlier session". Sites: classification in `usePendingRedline.ts`; copy at `ComposeBannerStack.tsx:937-942` and `ComposeWorkspace.tsx:5340-5341`. **The fallback bound is structurally CORRECT — only the wording and the live-vs-replay split are wrong. Do not loosen the anchor requirement.** |
+| **Verify with** | `cd src/client/shared/Spaarke.Compose.Components && npm test` (1317 tests, all green as of 2026-08-28) |
+
+### ✅ Issue #839 CLOSED OUT — PR #847 open, 131/131 ArchTests pass
+
+All 6 ArchTest failures adjudicated. Do not re-open. Highlights worth keeping:
+
+- **FR-27**: 5 of 8 findings were the regex matching a secret's NAME, not its value. Fixed with a
+  name-vs-reference discriminator applied *after* the value regex — **never narrow the regex**, this is a
+  CATASTROPHIC-severity detector. The real find: `PendingKvSecretWrite(VaultName, SecretName, Value)` — the
+  guard reported the harmless `SecretName` and was blind to `Value`, which its own doc calls CLEARTEXT. New
+  **secret-carrier rule** catches that pairing.
+- **ServiceBusClientGuard**: demanded an architecturally forbidden fix (L2 has zero ProjectReferences and a
+  MUST rule against referencing the BFF). Now one canonical construction site **per deployable**.
+- **ADR-010**: ceiling 153 → 156. Net looked like +2; the diff was **7 added / 5 removed** — removals hid
+  five additions from the ratchet. Evidence posted to #809.
+
+### 📋 Everything else the repaired Tier 2 aggregator exposed is FILED, not carried
+
+| Issue | Finding | Owner |
+|---|---|---|
+| **#848** | 5 unit-test failures; 4 are real-clock timing tests (`Spaarke.Scheduling.Tests`: 9s local vs 5m14s CI) | unclaimed; pairs with #795 |
+| **#849** | 1212 broken markdown links, but **86% of the scanned corpus is historical `projects/**` docs** | unclaimed |
+| **#850** | Prettier: **CI says 1907 files, local says 46** — not developer-reproducible. `npx prettier` is the pattern PR #393 already fixed for ESLint | `ci-cd-unit-test-remediation-r1` |
+| **#853** | The Compose classifier bug above | **this project** |
+
+Two genuine Prettier fixes landed here (`442fa904d`). 17 of 19 flagged files were **CRLF-only** —
+`.gitattributes` doesn't cover `.ts`/`.tsx` and `core.autocrlf=true`, so they're already LF in CI and
+`--write` produces a diff git normalizes away. Don't chase them.
 
 ### ✅ The authorization emergency is OVER — merged and deployed, owner-confirmed
 
