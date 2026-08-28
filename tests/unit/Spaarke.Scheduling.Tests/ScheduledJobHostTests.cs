@@ -130,7 +130,9 @@ public class ScheduledJobHostTests
         store.RunRecords.Should().BeEmpty();
     }
 
-    [Fact(Skip = "CI cron-tick flake — passes locally; needs TimeProvider refactor (see PR #415)")]
+    // Un-skipped 2026-08-28: the TimeProvider refactor the old skip reason waited for shipped in
+    // PR #884. Driving the clock removes the cron-tick race entirely.
+    [Fact]
     public async Task Dispatch_DueJob_RunsHandlerAndRecordsRun()
     {
         var registry = new ScheduledJobRegistry();
@@ -140,11 +142,15 @@ public class ScheduledJobHostTests
         var store = new InMemoryBackgroundJobStore();
         store.AddOrReplaceJob(EverySecond("due-job"));
 
-        var host = new ScheduledJobHost(registry, store, FastOptions(), NullLogger<ScheduledJobHost>.Instance);
+        var (host, time) = HostWithVirtualClock(registry, store, VirtualClockOptions());
 
         await host.StartAsync(CancellationToken.None);
-        await WaitUntilAsync(() => fake.InvocationCount > 0, TimeSpan.FromSeconds(5));
-        await Task.Delay(200); // let run-complete record write
+        await AdvanceUntilAsync(time, () => fake.InvocationCount > 0,
+            "a due job MUST dispatch once virtual time reaches its cron occurrence");
+        // Wait for the completion RECORD, not for a fixed duration — the previous `Task.Delay(200)`
+        // was a guess at how long the write takes, which is the same class of bet as the cron wait.
+        await AdvanceUntilAsync(time, () => store.RunRecords.Any(r => r.JobId == "due-job" && r.Result is not null),
+            "the run-complete record MUST be written after the handler returns");
         await host.StopAsync(CancellationToken.None);
 
         fake.InvocationCount.Should().BeGreaterThan(0);
@@ -157,7 +163,10 @@ public class ScheduledJobHostTests
         run.Result!.Success.Should().BeTrue();
     }
 
-    [Fact(Skip = "2026-06-24 — timing/scheduling flake on CI shared runners. Skipped pending stable rewrite. Follows the precedent set by prior commits 6164472a3 / 8128d32cc that bulk-removed timing assertions to stop CI whack-a-mole.")]
+    // Un-skipped 2026-08-28 (PR #884 TimeProvider refactor). The old skip reason cited the
+    // 6164472a3 / 8128d32cc precedent of bulk-removing timing assertions to stop CI whack-a-mole;
+    // driving the clock is the fix that precedent was substituting for.
+    [Fact]
     public async Task RunContext_CarriesFreshCorrelationIdPerRun_NFR08()
     {
         var registry = new ScheduledJobRegistry();
@@ -167,10 +176,13 @@ public class ScheduledJobHostTests
         var store = new InMemoryBackgroundJobStore();
         store.AddOrReplaceJob(EverySecond("corr-job"));
 
-        var host = new ScheduledJobHost(registry, store, FastOptions(), NullLogger<ScheduledJobHost>.Instance);
+        var (host, time) = HostWithVirtualClock(registry, store, VirtualClockOptions());
 
         await host.StartAsync(CancellationToken.None);
-        await WaitUntilAsync(() => fake.InvocationCount >= 2, TimeSpan.FromSeconds(6));
+        await AdvanceUntilAsync(time, () => fake.InvocationCount >= 2,
+            "two cron occurrences MUST produce two dispatches (NFR-08 needs two runs to compare)");
+        await AdvanceUntilAsync(time, () => store.RunRecords.Count(r => r.JobId == "corr-job") >= 2,
+            "both dispatches MUST persist run records");
         await host.StopAsync(CancellationToken.None);
 
         var corrJobs = store.RunRecords.Where(r => r.JobId == "corr-job").ToList();
@@ -184,7 +196,8 @@ public class ScheduledJobHostTests
         fake.LastContext.Trigger.Should().Be(JobRunTrigger.Scheduled);
     }
 
-    [Fact(Skip = "CI cron-tick flake — passes locally; needs TimeProvider refactor (see PR #415)")]
+    // Un-skipped 2026-08-28 (PR #884 TimeProvider refactor).
+    [Fact]
     public async Task RefreshTick_PicksUpDefinitionAddedAtRuntime()
     {
         var registry = new ScheduledJobRegistry();
@@ -194,17 +207,31 @@ public class ScheduledJobHostTests
         var store = new InMemoryBackgroundJobStore();
         // No definitions seeded yet.
 
-        var host = new ScheduledJobHost(registry, store, FastOptions(), NullLogger<ScheduledJobHost>.Instance);
+        // This test cannot use VirtualClockOptions' long refresh interval — the behaviour under
+        // test IS the refresh tick noticing a runtime addition, so refresh has to fire during the
+        // test. But it also cannot use the default 200ms: TickAsync refreshes BEFORE the due-check
+        // and recomputes NextFireUtc from `now` EXCLUSIVE, so a refresh landing exactly on a due
+        // instant pushes the job to the next occurrence. With a 1s cron and a 200ms virtual step,
+        // due instants fall on whole seconds and a 200ms (or 500ms) refresh lands on them every
+        // time — the job starves forever.
+        //
+        // 700ms is deliberately NOT a divisor of the 1s cron period, so refresh and due-check
+        // drift apart instead of resonating: refreshes land at 800/1600/2300… while the job comes
+        // due at 2000, which no refresh coincides with. Real time escapes this only via jitter;
+        // virtual time has none, so the test states the requirement explicitly.
+        var (host, time) = HostWithVirtualClock(
+            registry, store, FastOptions(refreshInterval: TimeSpan.FromMilliseconds(700)));
 
         await host.StartAsync(CancellationToken.None);
-        await Task.Delay(300); // first refresh ticks elapse with empty state
+        // Let several refresh ticks elapse against empty state, in virtual time.
+        for (var i = 0; i < 5; i++) { time.Advance(VirtualStep); await Task.Delay(1); }
         fake.InvocationCount.Should().Be(0, "no definitions yet => no dispatch");
 
-        // Add the definition at runtime — next refresh tick must pick it up + start scheduling it.
+        // Add the definition at runtime — a later refresh tick must pick it up + schedule it.
         store.AddOrReplaceJob(EverySecond("late-add"));
 
-        await WaitUntilAsync(() => fake.InvocationCount > 0, TimeSpan.FromSeconds(5),
-            because: "the hourly refresh tick (set to 200ms in test) MUST pick up the new definition");
+        await AdvanceUntilAsync(time, () => fake.InvocationCount > 0,
+            "the refresh tick MUST pick up a definition added after the host started");
         await host.StopAsync(CancellationToken.None);
 
         store.RunRecords.Should().Contain(r => r.JobId == "late-add");
@@ -283,7 +310,8 @@ public class ScheduledJobHostTests
         bad.InvocationCount.Should().Be(0, "an unparseable cron MUST be skipped, not dispatched");
     }
 
-    [Fact(Skip = "CI cron-tick flake — passes locally; needs TimeProvider refactor (see PR #415)")]
+    // Un-skipped 2026-08-28 (PR #884 TimeProvider refactor).
+    [Fact]
     public async Task ConfigJson_FlowedToJobRunContextParameters()
     {
         var registry = new ScheduledJobRegistry();
@@ -294,10 +322,11 @@ public class ScheduledJobHostTests
         store.AddOrReplaceJob(new BackgroundJobDefinition(
             "cfg-job", "Cfg", "", true, "* * * * * *", ConfigJson: "{\"foo\":42}"));
 
-        var host = new ScheduledJobHost(registry, store, FastOptions(), NullLogger<ScheduledJobHost>.Instance);
+        var (host, time) = HostWithVirtualClock(registry, store, VirtualClockOptions());
 
         await host.StartAsync(CancellationToken.None);
-        await WaitUntilAsync(() => fake.InvocationCount > 0, TimeSpan.FromSeconds(5));
+        await AdvanceUntilAsync(time, () => fake.InvocationCount > 0,
+            "the job MUST dispatch so its context can be inspected");
         await host.StopAsync(CancellationToken.None);
 
         fake.LastContext.Should().NotBeNull();

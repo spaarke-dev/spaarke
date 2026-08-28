@@ -1,6 +1,6 @@
 # Current Task State — ci-cd-unit-test-remediation-r1
 
-> **Last Updated**: 2026-08-28 18:00 UTC (by `context-handoff`)
+> **Last Updated**: 2026-08-28 (by `context-handoff`)
 > **Recovery**: read "Quick Recovery" first. Full narrative + traps: `C:\Users\RalphSchroeder\.claude\projects\c--code-files-spaarke\memory\session-resume-2026-08-27-ci-remediation.md`
 > **Synopsis** (objectives / scope / end state / how CI runs after): <https://claude.ai/code/artifact/7ca88795-5790-43f3-8432-8d84bd3fdec0>
 
@@ -10,76 +10,112 @@
 
 | Field | Value |
 |---|---|
-| **Active task** | 091 🟡 partial (PR #884 open) |
-| **Project state** | 47 tasks · 29 complete · 9 open · 7 closed · 2 partial |
+| **Active task** | none — between tasks |
+| **Project state** | 47 tasks · 33 complete · 2 open · 7 closed · 2 partial |
 | **Status** | in-progress |
-| **Next Action** | **1.** Merge PR **#884** (task 091) when green. **2.** Then start **092, 093, 094 or 095** — all parallel-safe, none gate cutover. |
-
-> **2026-08-28 update**: the five-PR merge queue is **DONE** — #843, #847, #865, #866, #867 all merged.
-> ArchTests now 136/136 on master (#865 armed ADR-038 B4 + B1 as blocking guards).
->
-> **Task 091 is 4/5 and PARTIAL.** The 5th failure (`ReAnalysisFlowTests`) is a *different defect*:
-> not a timing test at all, it reproduces deterministically and fails on HttpClient's 100s timeout
-> while making a **live Azure Search call** — surfacing in a job named "Full Unit Tests" because
-> `ci-tier2-advisory.yml` pass 1 is bare `dotnet test` with no project filter. Fixing it requires a
-> tier-file edit, which the **shadow-window freeze forbids**, so it is escalated and sequenced after
-> cutover (071). Details: `notes/091-realclock-findings.md`.
+| **Next Action** | **1.** Merge PR **#889** when green (a watcher may already have). **2.** Start **task 094** — the last open defect task. **3.** Cutover chain stays gated on the shadow window. |
 
 ### Critical context
 
-**The cutover chain is blocked on exactly one thing: the shadow window.** Tasks 084, 085 and 088 were all closed on 2026-08-28, which cleared every other blocker on task 071. Check the window with `pwsh scripts/ci/shadow-window-status.ps1` — it was **6/20 PRs, 0.8/5 days, 0 false greens** at session end.
+**The shadow window is now gated on CALENDAR DAYS, not PRs.** It moved 7 → **15/20 agreeing** in a
+single session, but the day span is **1 of 5**. The 20-PR bar will be met well before the 5-day bar.
+Check with `pwsh scripts/ci/shadow-window-status.ps1`. **0 false greens throughout.**
 
-**Do not `--delete-branch` a PR that is another PR's base.** It auto-closes the stacked PR and a closed PR cannot be reopened or re-based. That killed #856 this session (recovered as #857).
+**Task 094 is the only substantive work left, and it is FREEZE-EXPOSED** — arming more ADR-038 bans
+means editing `ci-tier1-blocking.yml`. PR #865 set the precedent: bans at **zero live instances** are
+verdict-neutral and were armed under the banner's own "guard present but not armed" carve-out. Shape
+for 094: measure all 15 remaining bans with the hardened classifier, arm the zero-count ones under
+that precedent, document the rest with live counts.
+
+**Do not `--delete-branch` a PR that is another PR's base** — it auto-closes the stacked PR
+irrecoverably. That killed #856 earlier (recovered as #857).
+
+---
+
+## Shipped this session
+
+| PR | Task | Result |
+|---|---|---|
+| #843 #847 #865 #866 #867 | (queue from prior session) | all merged; ArchTests now **136/136** on master |
+| **#884** | 091 timing tests | 4/5 fixed; 5th escalated (below). Scheduling suite 5m14s → 5s |
+| **#885** | 093 link validator | corpus 100,220 → 922 files; broken 1,212 → **267** (all verified real) |
+| **#886** | 095 client jest | new `client-tests.yml`; 730 test files / 40 packages now run at all |
+| **#888** | 092 prettier | root cause `endOfLine: crlf`; CI flagged 1,907 of 1,911 on line endings alone |
+| **#889** | test-signal hygiene | **OPEN at handoff** — registry exit rule + un-skip 4 |
 
 ---
 
 ## Open work
 
-### A. Five PRs awaiting merge
+### 1. Task 094 — remaining 15 ADR-038 bans (#864) — NOT STARTED
 
-| PR | Contents | Note |
-|---|---|---|
-| #847 | ArchTest guard adjudication | I repaired its two real failures — a build break (`CustomerRunGuardOptions` migrated off a client secret, test not updated) and `NETSDK1004` (`BuildL2ForCosmosGuard` built L2 without restoring → `Targets="Restore;Build"`). 131/131 ArchTests. ⚠️ worktree `C:/tmp/spaarke-auth-oid` holds this branch — I fast-forwarded it so it cannot regress the merge. |
-| #843 | record-header-and-notepad-r2 | I resolved its `FAILURE-MODES.md` conflict as a renumbered union (master keeps low numbers; branch shifts AP-8→AP-9, G-12→G-13, G-13→G-14, G-14→G-15) and added a missing TOC entry. |
-| #865 | **ADR-038 enforcement arm** | B4 + B1 as hard blocking guards, armed in the Tier 1 filter. Touches a frozen tier file under the banner's own "guard present but not armed" carve-out; verdict-neutral (both bans at zero). |
-| #866 | Dependabot reconciliation | Closed 15 stale PRs; ignores FluentAssertions major (Xceed licence requires paid commercial use). |
-| #867 | **Scope adoption** | Known issues become tasks 091–095. |
+FULL rigor, 4–6h. Freeze-exposed (see Critical context). Owner rulings already made — **do not
+re-litigate**: B6 (mirror tests) has no regex signature, so say so plainly rather than shipping a
+weak detector; B13 (~1,124 live) — a bad name is NOT grounds for deletion.
 
-### B. The cutover chain — strictly sequential, gated on the window
+### 2. The cutover chain — gated on the window
 
-`071 cutover → 075 soak (7d) → 077 retire sdap-ci.yml → 076 (30d measurements) → 090 wrapup`
-(076 depends on 071, not on 077.)
+`071 cutover → 075 soak (7d) → 077 retire sdap-ci.yml → 076 (30d) → 090 wrapup`
+(076 depends on 071, not 077.)
 
-### C. Adopted defect tasks — parallel-safe, gate 090 not cutover
+### 3. Escalated, deliberately not fixed
 
-| Task | Issue | Subject |
-|---|---|---|
-| 091 | #848 | Tier 2: 5 real-clock unit-test failures → `FakeTimeProvider` |
-| 092 | #850 | Tier 2 Prettier not developer-reproducible (CI 1907 vs local 46) |
-| 093 | #849 | Link validator: 86% of its own scan corpus is out of scope |
-| 094 | #864 | Remaining 15 ADR-038 bans — arm what can arm green |
-| 095 | #851 | Jest workflow, **Phase 1 plumbing only** — baseline 39 packages, then stop |
+- **091's 5th failure** — `ReAnalysisFlowTests` is NOT a timing test. Reproduces deterministically;
+  fails on HttpClient's 100s timeout while making a **live Azure Search call**. It surfaces in a job
+  named *Full Unit Tests* because tier2 pass 1 is bare `dotnet test` with **no project filter**.
+  Fixing it is a tier-file edit (frozen) **and** an owner call, since filtering integration tests out
+  of Tier 2 means they run nowhere on a PR. Details: `notes/091-realclock-findings.md`.
+- **092's job-output criterion** — printing the repro command needs a tier-file edit. The command
+  lives in `docs/procedures/testing-and-code-quality.md` instead. One-liner, deferred past cutover.
 
-**Why these are in the project and not deferred** (owner-directed): four are defects in this project's own deliverables per the spec's Affected Areas list. #851 is a deliberate split — jest *test architecture* stays out of scope; *"no workflow runs jest at all"* is a CI gap and CI is this project.
+---
+
+## Test-suite improvement review (owner-approved subset)
+
+Assessment: `notes/test-suite-improvement-assessment.md`. Ground-truth pass resolved every
+`<CONFIRM>` in `notes/how-to-improve-the-Spaarke-test-suite.md`.
+
+**Implemented in #889** — A (registry exit rule + 3 stale entries removed), B (un-skip 4 of 10),
+C (`/test-diet` touch-radius + registry lookup), D (test-scope clause in `task-create`), plus
+governance in `constraints/testing.md` §2a/§2b.
+
+**Deferred by owner decision — do not re-propose without new information**: mutation testing
+(conflicts with ADR-038 "coverage is observation, never a gate"), fixed-quota rotation + test-debt
+ledger (standing overhead vs north star #4), auto-quarantine (would grow a graveyard that already
+has **143** `Skip=` + **137** `repaired` residents and no drain).
+
+**Continuing backlog**: **6** skipped tests remain in `Spaarke.Scheduling.Tests`. The virtual-clock
+conversion pattern is proven — see `AdvanceUntilAsync` / `VirtualClockOptions` in
+`ScheduledJobHostTests.cs`.
 
 ---
 
 ## Decisions made this session (do not re-litigate)
 
-1. **084 closed** — 246 of 247 rows were false positives. The one genuine row is `new OpenAiClient(...); Assert.NotNull(client);`.
-2. **085 closed** — 1,124 renames, zero behavioral change, 30+ worktrees of merge conflicts.
-3. **088 closed moot** — its guard passes; the only remaining `Microsoft.Graph` strings are comments, several *documenting* compliance. **Do not re-open on grep evidence** — `HaveDependencyOn` is IL-level and grep is not.
-4. **Standing rule (in spec)** — no DELETE bucket is acted on until it has had one clean verification round over **every** row, via a code path independent of the classifier.
-5. **Shadow window is 20 PRs + ≥5 days**, not 14 days. The script implements the amended rule correctly.
+1. **092's fix is `endOfLine: "auto"`, NOT a `.gitattributes` rule.** The `*.cs text eol=crlf`
+   precedent exists to BACK an already-declared `.editorconfig` policy; nothing declares one for
+   TypeScript, so a gitattributes rule would invent a policy and force CRLF working trees on CI and
+   every non-Windows contributor. **Do not "fix" `endOfLine` back to `crlf` or `lf`** — either value
+   re-breaks one of the two platforms.
+2. **095 does NOT run on `pull_request`, deliberately** — 40 packages × `npm install` would contend
+   with the very PRs the shadow window needs. Adding it is Phase 2 promotion, not an oversight.
+3. **093 kept `knowledge/**` in the validator corpus** despite 67 findings — actively curated
+   (`REFRESH-PROCEDURE.md`), and root CLAUDE.md §15 has the researcher consult it first.
+4. **Registry membership is a statement about a test as it exists today**, not a permanent label
+   (`constraints/testing.md` §2a).
 
 ---
 
-## Files modified this session
+## Traps worth carrying forward
 
-- `.github/workflows/sdap-ci.yml` — removed both auto-commit push-backs; concurrency keyed on SHA
-- `.github/workflows/ci-tier1-blocking.yml` — armed 5 ADR-038 guard facts (disclosed in `projects/INDEX.md`)
-- `.github/dependabot.yml` — FluentAssertions major ignored
-- `tests/Spaarke.ArchTests/Adr038TestBanGuardTests.cs` — new; `SourceScan.cs` — added `TestSourceFiles()`
-- `projects/ci-cd-unit-test-remediation-r1/scripts/Classify-BffUnitTests.ps1` — six rounds of hardening
-- `projects/ci-cd-unit-test-remediation-r1/` — spec, TASK-INDEX, tasks 083–085/088/091–095, notes
-- 54 BFF test methods deleted across 29 files (task 083)
+- **`TickAsync` refreshes BEFORE the due-check** and recomputes `NextFireUtc` from `now`
+  **exclusive**. Under jitter-free virtual time, a refresh interval that divides the cron period
+  starves dispatch **forever**. `VirtualClockOptions` uses 30s;
+  `RefreshTick_PicksUpDefinitionAddedAtRuntime` needs a short-but-**non-divisor** 700ms because the
+  refresh tick is the thing it tests.
+- **`TriggerNowAsync` passes `CancellationToken.None`** while its own comment claims the host
+  stopping token — manual-trigger jobs cannot observe shutdown. Latent NFR-07 gap, no coverage.
+  Reported, not fixed (out of scope).
+- **A trivial fixture can falsely refute a true hypothesis.** The 092 line-ending theory looked
+  disproven by a two-line file; inverting the setting against the real 1,911-file corpus proved it.
+  Prefer inverting a setting over constructing a minimal repro when the corpus is the variable.
