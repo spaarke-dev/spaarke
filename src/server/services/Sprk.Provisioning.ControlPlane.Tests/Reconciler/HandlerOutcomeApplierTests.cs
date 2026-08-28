@@ -87,7 +87,49 @@ public sealed class HandlerOutcomeApplierTests
 
         repository.ReplaceCalls.Should().BeEmpty("handlers own the CompletedPhases append + Cosmos write on Success.");
         enqueuer.Envelopes.Should().BeEmpty();
-        guard.ReleaseCalls.Should().BeEmpty();
+        guard.ReleaseCalls.Should().BeEmpty(
+            "Bucket B HIGH#6 SESSION 18: mid-DAG Success (run.Status = Running) MUST NOT release the guard — " +
+            "release fires ONLY when run.Status is Completed (i.e., H13 terminal completion).");
+    }
+
+    [Fact]
+    public async Task ApplyHandlerOutcomeAsync_Success_WithCompletedStatus_ReleasesCustomerGuardExactlyOnce_BucketB_HIGH6()
+    {
+        // Bucket B HIGH#6 SESSION 18 (customer-provisioning-orchestration-r1
+        // adversarial e2e verify workflow wepdcb8we): the happy-path terminal
+        // completion (H13 writes Cosmos RunStatus.Completed + returns
+        // HandlerResult.Success) MUST release the I5 concurrency guard
+        // explicitly from THIS applier — the policy layer that already owns
+        // Failure-branch releases via ShouldReleaseCustomerGuard. Prior to
+        // this test the release path depended IMPLICITLY on H13's registry
+        // Ready PATCH also clearing sprk_currentrunid as a side effect, which
+        // was structurally unsafe (unconditional PATCH vs ETag-safe
+        // ICustomerRunGuard.ReleaseAsync — see Bucket B HIGH#7). Any future
+        // refactor that moves H13's Ready-writer or drops ClearCurrentRunId
+        // would silently lock the customer forever on every successful
+        // terminal completion.
+        var repository = new RecordingRunRepository();
+        var enqueuer = new RecordingEnqueuer();
+        var guard = new RecordingCustomerRunGuard();
+        var sut = BuildSut(out _, repository: repository, enqueuer: enqueuer, guard: guard);
+        // Terminal H13 completion — run.Status is RunStatus.Completed BEFORE
+        // the applier is called (H13 has already written the terminal
+        // transition to Cosmos).
+        var run = MakeRun(RunStatus.Completed, "H0", "H1", "H2a", "H2b", "H3", "H4", "H5", "H6", "H7", "H8", "H9", "H10", "H11", "H12", "H13");
+
+        var applied = await sut.ApplyHandlerOutcomeAsync(
+            run, ifMatchEtag: "etag-completed", outcome: new HandlerResult.Success("h13-idem"), handlerId: "H13", CancellationToken.None);
+
+        applied.TargetStatus.Should().Be(RunStatus.Completed);
+        applied.Reenqueued.Should().BeFalse();
+        applied.FailureClass.Should().BeNull();
+
+        repository.ReplaceCalls.Should().BeEmpty("H13 owns the Cosmos-Completed write; applier does not double-write.");
+        enqueuer.Envelopes.Should().BeEmpty("terminal Completed does not re-enqueue.");
+        guard.ReleaseCalls.Should().ContainSingle(
+            "Bucket B HIGH#6 SESSION 18: terminal-Completed Success MUST fire ICustomerRunGuard.ReleaseAsync " +
+            "exactly once so the release path does not depend on H13's registry Ready PATCH side effect.")
+            .Which.Should().Be((TestCustomerId, TestRunId));
     }
 
     // -----------------------------------------------------------------------

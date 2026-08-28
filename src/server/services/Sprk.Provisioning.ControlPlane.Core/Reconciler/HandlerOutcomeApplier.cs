@@ -82,11 +82,46 @@ public sealed class HandlerOutcomeApplier : IHandlerOutcomeApplier
 
         // Success path -- handlers own the CompletedPhases append + Cosmos
         // write. The applier does NOT double-write on Success (parity with
-        // the reconciler's "does NOT write to Cosmos" invariant; the write
-        // below fires ONLY on the Failure path where Status transitions per
-        // §4C).
+        // the reconciler's "does NOT write to Cosmos" invariant; the failure
+        // write below fires ONLY on the Failure path where Status transitions
+        // per §4C).
+        //
+        // Bucket B HIGH#6 SESSION 18 (customer-provisioning-orchestration-r1
+        // adversarial e2e verify workflow wepdcb8we): on Success where
+        // run.Status == RunStatus.Completed (i.e. H13 has terminated the run),
+        // fire the I5 concurrency guard release explicitly. Prior to this
+        // guard the ONLY release path on the happy terminal completion was
+        // H13's own registry-Ready PATCH which piggy-backed
+        // `sprk_currentrunid: null` alongside `sprk_setupstatus: 2` — a
+        // fragile coupling: any future refactor that moves the Ready-writer
+        // out of H13 or skips the ClearCurrentRunId=true PATCH parameter
+        // silently locks the customer forever on every successful terminal
+        // completion. This applier is the correct policy owner for the
+        // release (it already owns the Failure-branch releases at line 185
+        // via ShouldReleaseCustomerGuard). Gate on RunStatus.Completed so
+        // mid-DAG per-handler successes (H0..H12 completing an intermediate
+        // step while run.Status stays Running or WaitingOnGate) do NOT
+        // release the guard prematurely. Best-effort: TransientFailure is
+        // log-only for parity with the Failure-branch policy at line 190-197.
         if (outcome is HandlerResult.Success)
         {
+            if (run.Status is RunStatus.Completed)
+            {
+                var terminalRelease = await _runGuard
+                    .ReleaseAsync(run.CustomerId, run.RunId, cancellationToken)
+                    .ConfigureAwait(false);
+                if (terminalRelease is ReleaseResult.TransientFailure terminalReleaseFailure)
+                {
+                    _logger.LogWarning(
+                        "ReconcilerOutcomeTerminalGuardReleaseFailed (Bucket B HIGH#6): " +
+                        "HandlerId={HandlerId} RunId={RunId} CustomerId={CustomerId} " +
+                        "Diagnostic={Diagnostic} — terminal-Completed guard release is best-effort; " +
+                        "H13 registry Ready PATCH (route via ICustomerRunGuard.ReleaseAsync per Bucket B HIGH#7) " +
+                        "remains the backstop.",
+                        handlerId, run.RunId, run.CustomerId, terminalReleaseFailure.Diagnostic);
+                }
+            }
+
             return new HandlerOutcomeApplied(
                 TargetStatus: run.Status,
                 Reenqueued: false,

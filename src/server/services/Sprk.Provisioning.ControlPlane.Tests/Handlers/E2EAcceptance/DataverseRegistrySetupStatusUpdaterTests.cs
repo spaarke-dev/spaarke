@@ -117,12 +117,27 @@ public sealed class DataverseRegistrySetupStatusUpdaterTests
     }
 
     [Fact]
-    public async Task TransitionToReadyAsync_Sets_ClearCurrentRunId_True()
+    public async Task TransitionToReadyAsync_Sets_ClearCurrentRunId_False_SingleWriterInvariant()
     {
-        // Companion update (spec.md FR-23): sprk_currentrunid MUST be cleared
-        // in the same transaction as the Ready write, or the I5 guard's
-        // Dataverse read would still see a stale runId and block the customer's
-        // next run.
+        // Bucket B HIGH#7 SESSION 18 (customer-provisioning-orchestration-r1
+        // adversarial e2e verify workflow wepdcb8we): the Ready PATCH MUST NOT
+        // clear sprk_currentrunid. Two writers on the same column with different
+        // safety models (unconditional PATCH here vs ETag-safe
+        // CustomerRunGuard.ReleaseAsync elsewhere) is a concurrency skew that
+        // produces silent-fail bugs.
+        //
+        // The release now fires from ONE authoritative path — Bucket B HIGH#6's
+        // explicit ICustomerRunGuard.ReleaseAsync call in HandlerOutcomeApplier's
+        // Success-with-RunStatus.Completed branch. That call is ETag-safe and
+        // stale-value-safe (Mismatched = no-op). This test locks the single-
+        // writer invariant so a future edit that re-flips ClearCurrentRunId=true
+        // fails here rather than silently re-opening the two-writer race.
+        //
+        // Historical note: spec.md FR-23 originally read "companion clear of
+        // sprk_currentrunid in the SAME transaction as Ready" — the SESSION 18
+        // adversarial audit re-classified that as a fragile-coupling anti-pattern
+        // now that ICustomerRunGuard.ReleaseAsync (task 059) is the canonical
+        // ETag-safe release primitive.
         var fake = new CapturingFakeClient(new RegistryUpdateOutcome.Success());
         var updater = NewUpdater(fake);
         var request = NewRequest();
@@ -130,8 +145,10 @@ public sealed class DataverseRegistrySetupStatusUpdaterTests
         await updater.TransitionToReadyAsync(request, CancellationToken.None);
 
         fake.LastUpdate.Should().NotBeNull();
-        fake.LastUpdate!.ClearCurrentRunId.Should().BeTrue(
-            "spec.md FR-23 requires companion clear of sprk_currentrunid in the SAME transaction as Ready");
+        fake.LastUpdate!.ClearCurrentRunId.Should().BeFalse(
+            "single-writer invariant: sprk_currentrunid MUST be released via ICustomerRunGuard.ReleaseAsync " +
+            "(from HandlerOutcomeApplier's terminal-Completed branch per Bucket B HIGH#6), NOT piggy-backed " +
+            "on the Ready PATCH. Two writers with different safety models = concurrency race.");
     }
 
     [Fact]

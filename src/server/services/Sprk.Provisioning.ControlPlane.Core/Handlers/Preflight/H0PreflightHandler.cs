@@ -486,13 +486,50 @@ public sealed class H0PreflightHandler : IProvisioningHandler
         var policy = run.Parameters.NonSecret.TryGetValue(CostEnvelopePolicyParameterKey, out var policyRaw)
             ? policyRaw
             : null;
-        if (string.Equals(policy, CostEnvelopePolicyWarnAndProceed, StringComparison.OrdinalIgnoreCase))
+
+        // Bucket B HIGH#12 SESSION 18 (customer-provisioning-orchestration-r1
+        // adversarial e2e verify workflow wepdcb8we): the intake schema
+        // (scripts/provisioning-prereqs/intake.schema.json costEnvelopePolicy
+        // description) declares "warnAndProceed MUST reject for Model2Dedicated";
+        // the SKILL.md batch loader enforces it at Step 1.0 line 533-535 for
+        // skill-dispatched runs. But direct-API callers (retry scripts / ad-hoc
+        // curl / future non-skill orchestrators) bypass that check by POSTing
+        // directly to /api/runs. The server-side gate MUST close the
+        // asymmetry. When tenancyModel=Model2Dedicated is combined with
+        // warnAndProceed, force the fall-through to abortOnOverrun — a
+        // dedicated stamp running uncapped-budget contradicts the schema
+        // invariant regardless of who POSTed the request.
+        //
+        // ControlPlaneEnv=prod is the second dimension the schema names
+        // ("Model 1 shared-trial ONLY"). Not enforced HERE today because
+        // controlPlaneEnv is NOT currently plumbed into run.Parameters.NonSecret
+        // (SKILL.md Step 4.0 nonSecretParameters block lists tenantId /
+        // subscriptionId / openAiLocation / confirmationAcknowledgment /
+        // intakeFileSha256 / region / tier / estimatedMonthlyUsd /
+        // costEnvelopePolicy / operatorUpn — but NOT controlPlaneEnv). Adding
+        // the field here as a defensive-null-check would be dead code; when a
+        // future change plumbs controlPlaneEnv, extend the OR-clause below.
+        var isModel2Dedicated = string.Equals(run.TenancyModel, "Model2Dedicated", StringComparison.Ordinal);
+        if (isModel2Dedicated
+            && string.Equals(policy, CostEnvelopePolicyWarnAndProceed, StringComparison.OrdinalIgnoreCase))
+        {
+            _logger.LogWarning(
+                "H0 cost-envelope gate WARN-AND-PROCEED REJECTED (Bucket B HIGH#12 SESSION 18): " +
+                "tenancyModel=Model2Dedicated MUST NOT permit warnAndProceed per intake.schema.json " +
+                "costEnvelopePolicy description (Model2Dedicated dedicated-stamp runs bar uncapped budget). " +
+                "Forcing fall-through to abortOnOverrun. runId={RunId} customerId={CustomerId} " +
+                "estimated=${Estimated}/mo tier='{Tier}' ceiling=${Ceiling}/mo.",
+                run.RunId, run.CustomerId, estimatedMonthlyUsd, tier, ceiling);
+            policy = null; // Force the abortOnOverrun default branch below.
+        }
+        else if (string.Equals(policy, CostEnvelopePolicyWarnAndProceed, StringComparison.OrdinalIgnoreCase))
         {
             _logger.LogWarning(
                 "H0 cost-envelope gate WARN-AND-PROCEED — estimated ${Estimated}/mo > tier '{Tier}' ceiling " +
                 "${Ceiling}/mo but nonSecret['{PolicyKey}']='{Policy}' explicitly requests proceed " +
-                "(runId={RunId} customerId={CustomerId}). Batch-mode Model2Dedicated intake rejects this pair " +
-                "at Step 1.0 — this branch fires only for interactive Model1 shared-trial or direct-API callers.",
+                "(runId={RunId} customerId={CustomerId}). Only permitted for Model1Shared per intake.schema.json " +
+                "costEnvelopePolicy description; Model2Dedicated + warnAndProceed is rejected above per Bucket B " +
+                "HIGH#12 SESSION 18.",
                 estimatedMonthlyUsd, tier, ceiling, CostEnvelopePolicyParameterKey, policy,
                 run.RunId, run.CustomerId);
             return null;

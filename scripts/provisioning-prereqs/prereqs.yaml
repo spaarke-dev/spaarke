@@ -97,7 +97,14 @@ prereqs:
     owner: Spaarke platform admin
     consequence_of_absence: Outlook add-in deploy step fails; email intake flows non-functional.
     check_recipe:
-      cli: az ad app list --filter "displayName eq 'Spaarke Outlook Add-in {env}'" --query "[0].appId" -o tsv
+      cli: |
+        # Bucket B HIGH#9 SESSION 18 (customer-provisioning-orchestration-r1
+        # adversarial e2e verify workflow wepdcb8we): az CLI returns exit 0
+        # with empty stdout when jmespath `[0]` misses. Wrap in explicit
+        # emptiness check + exit 1 so silent-PASS becomes fail-loud.
+        result=$(az ad app list --filter "displayName eq 'Spaarke Outlook Add-in {env}'" --query "[0].appId" -o tsv 2>/dev/null)
+        [ -z "$result" ] && { echo "APP_REG_NOT_FOUND: Spaarke Outlook Add-in {env}"; exit 1; }
+        echo "OK: $result"
       expect: non-empty GUID
     remediation: See `docs/guides/office-addins-deployment-checklist.md` (Appendix B).
 
@@ -108,7 +115,11 @@ prereqs:
     owner: Spaarke platform admin
     consequence_of_absence: Word add-in deploy step fails.
     check_recipe:
-      cli: az ad app list --filter "displayName eq 'Spaarke Word Add-in {env}'" --query "[0].appId" -o tsv
+      cli: |
+        # Bucket B HIGH#9 SESSION 18 — exit-1 hardening (see PRQ-T-03).
+        result=$(az ad app list --filter "displayName eq 'Spaarke Word Add-in {env}'" --query "[0].appId" -o tsv 2>/dev/null)
+        [ -z "$result" ] && { echo "APP_REG_NOT_FOUND: Spaarke Word Add-in {env}"; exit 1; }
+        echo "OK: $result"
       expect: non-empty GUID
     remediation: See `docs/guides/office-addins-deployment-checklist.md`.
 
@@ -119,7 +130,11 @@ prereqs:
     owner: Spaarke platform admin
     consequence_of_absence: M365 Copilot / declarative-agent surface non-functional; other surfaces unaffected.
     check_recipe:
-      cli: az ad app list --filter "displayName eq 'Spaarke Copilot Bot {env}'" --query "[0].appId" -o tsv
+      cli: |
+        # Bucket B HIGH#9 SESSION 18 — exit-1 hardening (see PRQ-T-03).
+        result=$(az ad app list --filter "displayName eq 'Spaarke Copilot Bot {env}'" --query "[0].appId" -o tsv 2>/dev/null)
+        [ -z "$result" ] && { echo "APP_REG_NOT_FOUND: Spaarke Copilot Bot {env}"; exit 1; }
+        echo "OK: $result"
       expect: non-empty GUID
     remediation: See `docs/guides/M365-COPILOT-DEPLOYMENT-GUIDE.md`.
 
@@ -130,7 +145,11 @@ prereqs:
     owner: Power BI tenant admin
     consequence_of_absence: Power BI Embedded reports show unauthorized; H12b Power BI seed skipped.
     check_recipe:
-      cli: az ad sp list --display-name "Power BI Service" --query "[0].id" -o tsv
+      cli: |
+        # Bucket B HIGH#9 SESSION 18 — exit-1 hardening (see PRQ-T-03).
+        result=$(az ad sp list --display-name "Power BI Service" --query "[0].id" -o tsv 2>/dev/null)
+        [ -z "$result" ] && { echo "SP_NOT_FOUND: Power BI Service"; exit 1; }
+        echo "OK: $result"
       expect: non-empty GUID
     remediation: Power BI Admin Portal → Tenant settings → Service principals.
 
@@ -142,7 +161,11 @@ prereqs:
     never_delete: true
     consequence_of_absence: Model 1 customers cannot authenticate; per spec.md v3.5 MUST rule.
     check_recipe:
-      cli: az ad app list --filter "signInAudience eq 'AzureADMultipleOrgs'" --query "[?startswith(displayName,'spaarke-bff')].appId" -o tsv
+      cli: |
+        # Bucket B HIGH#9 SESSION 18 — exit-1 hardening (see PRQ-T-03).
+        result=$(az ad app list --filter "signInAudience eq 'AzureADMultipleOrgs'" --query "[?startswith(displayName,'spaarke-bff')].appId" -o tsv 2>/dev/null)
+        [ -z "$result" ] && { echo "SHARED_BFF_APPREG_NOT_FOUND: no multitenant app-reg with displayName starting 'spaarke-bff'"; exit 1; }
+        echo "OK: $result"
       expect: non-empty GUID
     remediation: See `docs/guides/SPAARKE-CUSTOMER-DEPLOYMENT-GUIDE.md` §4.3 (Phase D Model 1 shared app-reg).
     related_findings: [spec.md-v3.5-MUST-model-1-no-per-customer-app-reg]
@@ -158,7 +181,14 @@ prereqs:
     owner: Spaarke platform admin
     consequence_of_absence: Cost-envelope estimation unreliable; support-plan expectations wrong.
     check_recipe:
-      cli: az account show --query "subscriptionPolicies" -o json
+      cli: |
+        # NO-EXIT-1-GUARD-JUSTIFIED: this recipe is READ-ONLY INFORMATIONAL —
+        # billing-agreement type is recorded to intake.md, not gated on. An empty
+        # result here means the operator's az context does not have policy read
+        # perms; that is diagnostic, not a HARD STOP. Bucket B HIGH#9 SESSION 18
+        # validate-recipe-authoring.ps1 whitelists this class via the marker
+        # comment above.
+        az account show --query "subscriptionPolicies" -o json
       expect: JSON with `quotaId` populated (starts with `MSDN_`, `EnterpriseAgreement_`, `PayAsYouGo_`, `MicrosoftCustomerAgreement_`)
     remediation: Recorded in `provisioning-runs/{customerId}-{runId}/intake.md`. Informational.
 
@@ -231,7 +261,11 @@ prereqs:
     owner: Spaarke platform admin
     consequence_of_absence: H2a ArmDeploymentRunner 403s on sub-scope deployment.
     check_recipe:
-      cli: az role assignment list --assignee {l2UamiPrincipalId} --scope "/subscriptions/{subId}" --query "[?roleDefinitionName=='Contributor']" -o tsv
+      cli: |
+        # Bucket B HIGH#9 SESSION 18 — exit-1 hardening (see PRQ-T-03).
+        result=$(az role assignment list --assignee {l2UamiPrincipalId} --scope "/subscriptions/{subId}" --query "[?roleDefinitionName=='Contributor']" -o tsv 2>/dev/null)
+        [ -z "$result" ] && { echo "MISSING_ROLE: L2 UAMI has no Contributor on /subscriptions/{subId}"; exit 1; }
+        echo "OK: Contributor assignment present"
       expect: non-empty
     remediation: "`az role assignment create --assignee {l2UamiPrincipalId} --scope /subscriptions/{subId} --role Contributor`."
     related_findings: [audit-gap-02-l2-uami-contributor]
@@ -243,7 +277,20 @@ prereqs:
     owner: sub owner
     consequence_of_absence: Operator's own KV data-plane bootstrap (F15/F18) via `az rest --method put` returns 403.
     check_recipe:
-      cli: az role assignment list --assignee $(az ad signed-in-user show --query id -o tsv) --scope "/subscriptions/{subId}" --query "[].roleDefinitionName" -o tsv
+      cli: |
+        # Bucket B HIGH#9 SESSION 18 — exit-1 hardening + explicit role-set assertion.
+        # The prior recipe dumped role names via -o tsv but had no downstream check that
+        # the correct set was present. Now verify explicitly.
+        roles=$(az role assignment list --assignee $(az ad signed-in-user show --query id -o tsv) --scope "/subscriptions/{subId}" --query "[].roleDefinitionName" -o tsv 2>/dev/null)
+        [ -z "$roles" ] && { echo "NO_ROLE_ASSIGNMENTS: operator has no role on /subscriptions/{subId}"; exit 1; }
+        # Owner is sufficient by itself.
+        if echo "$roles" | grep -q "^Owner$"; then echo "OK: Owner"; exit 0; fi
+        # Otherwise require BOTH Contributor + User Access Administrator.
+        has_contrib=$(echo "$roles" | grep -c "^Contributor$" || true)
+        has_uaa=$(echo "$roles" | grep -c "^User Access Administrator$" || true)
+        if [ "$has_contrib" -ge 1 ] && [ "$has_uaa" -ge 1 ]; then echo "OK: Contributor + User Access Administrator"; exit 0; fi
+        echo "INSUFFICIENT_ROLES: operator has [$(echo "$roles" | tr '\n' ',' | sed 's/,$//')] — requires Owner OR (Contributor + User Access Administrator)"
+        exit 1
       expect: contains `Owner` OR (`Contributor` + `User Access Administrator`)
     remediation: Grant via Azure Portal → Subscription → Access control (IAM). Operator runs `/provision-environment` under their own AAD identity per NFR-11.
     related_findings: [F15, F18, NFR-11]
@@ -347,7 +394,12 @@ prereqs:
     owner: Spaarke platform admin (or L2 IaC deploy)
     consequence_of_absence: H2a ARM-JSON publish workflow + H9 BFF-zip publish workflow both fail cleanly (empty account name). Blocks EVERY new customer stamp.
     check_recipe:
-      cli: az storage account show --name "sprk{env}artifacts" --query "properties.provisioningState" -o tsv
+      cli: |
+        # Bucket B HIGH#9 SESSION 18 — exit-1 hardening (see PRQ-T-03).
+        result=$(az storage account show --name "sprk{env}artifacts" --query "properties.provisioningState" -o tsv 2>/dev/null)
+        [ -z "$result" ] && { echo "STORAGE_NOT_FOUND: sprk{env}artifacts"; exit 1; }
+        [ "$result" != "Succeeded" ] && { echo "BAD_STATE: sprk{env}artifacts provisioningState=$result (expected Succeeded)"; exit 1; }
+        echo "OK: $result"
       expect: "`Succeeded`"
     remediation: Author `infrastructure/bicep/modules/controlplane-artifacts-storage.bicep` + wire into `platform-controlplane.bicep` (Wave G-8 Batch 2 / audit-gap-05).
     related_findings: [audit-gap-05-artifacts-storage-missing, h2a-bicep-precompile-ci-coord-pr]
@@ -359,7 +411,12 @@ prereqs:
     owner: Spaarke platform admin
     consequence_of_absence: Sidecar image cannot be pushed; H14a (Exchange PS) permanently blocked; workflow references `vars.SIDECAR_ACR_LOGIN_SERVER` placeholder.
     check_recipe:
-      cli: az acr show --name "sprk{env}acr" --query "provisioningState" -o tsv
+      cli: |
+        # Bucket B HIGH#9 SESSION 18 — exit-1 hardening (see PRQ-T-03).
+        result=$(az acr show --name "sprk{env}acr" --query "provisioningState" -o tsv 2>/dev/null)
+        [ -z "$result" ] && { echo "ACR_NOT_FOUND: sprk{env}acr"; exit 1; }
+        [ "$result" != "Succeeded" ] && { echo "BAD_STATE: sprk{env}acr provisioningState=$result (expected Succeeded)"; exit 1; }
+        echo "OK: $result"
       expect: "`Succeeded`"
     remediation: Author `infrastructure/bicep/modules/controlplane-acr.bicep` + wire into `platform-controlplane.bicep` (Wave G-8 Batch 2 / audit-gap-10).
     related_findings: [audit-gap-10-acr-sidecar-chain, sidecar-ci-workflow-coord-pr, T108-*]
@@ -371,7 +428,11 @@ prereqs:
     owner: Spaarke platform admin
     consequence_of_absence: H2a / H9 artifact download 403.
     check_recipe:
-      cli: az role assignment list --assignee {l2UamiPrincipalId} --scope "{artifactsStorageId}" --query "[?roleDefinitionName=='Storage Blob Data Reader']" -o tsv
+      cli: |
+        # Bucket B HIGH#9 SESSION 18 — exit-1 hardening (see PRQ-T-03).
+        result=$(az role assignment list --assignee {l2UamiPrincipalId} --scope "{artifactsStorageId}" --query "[?roleDefinitionName=='Storage Blob Data Reader']" -o tsv 2>/dev/null)
+        [ -z "$result" ] && { echo "MISSING_ROLE: L2 UAMI has no Storage Blob Data Reader on {artifactsStorageId}"; exit 1; }
+        echo "OK: Storage Blob Data Reader assignment present"
       expect: non-empty
     remediation: Emit from `platform-controlplane.bicep` role-assignment module (Wave G-8 Batch 2 / audit-gap-03).
 
@@ -382,7 +443,11 @@ prereqs:
     owner: Spaarke platform admin
     consequence_of_absence: Sidecar image pull fails at H14a dispatch.
     check_recipe:
-      cli: az role assignment list --assignee {l2UamiPrincipalId} --scope "{acrId}" --query "[?roleDefinitionName=='AcrPull']" -o tsv
+      cli: |
+        # Bucket B HIGH#9 SESSION 18 — exit-1 hardening (see PRQ-T-03).
+        result=$(az role assignment list --assignee {l2UamiPrincipalId} --scope "{acrId}" --query "[?roleDefinitionName=='AcrPull']" -o tsv 2>/dev/null)
+        [ -z "$result" ] && { echo "MISSING_ROLE: L2 UAMI has no AcrPull on {acrId}"; exit 1; }
+        echo "OK: AcrPull assignment present"
       expect: non-empty
     remediation: Wave G-8 Batch 2 / audit-gap-04.
 
@@ -393,7 +458,11 @@ prereqs:
     owner: Spaarke platform admin
     consequence_of_absence: H4b `KuduContainerLogFetcher` cannot fetch fail-fast diagnostics on BFF boot failure — falls back to generic diagnostic + Kudu URL.
     check_recipe:
-      cli: az role assignment list --assignee {l2UamiPrincipalId} --scope "{bffAppServiceId}" --query "[?roleDefinitionName=='Website Contributor']" -o tsv
+      cli: |
+        # Bucket B HIGH#9 SESSION 18 — exit-1 hardening (see PRQ-T-03).
+        result=$(az role assignment list --assignee {l2UamiPrincipalId} --scope "{bffAppServiceId}" --query "[?roleDefinitionName=='Website Contributor']" -o tsv 2>/dev/null)
+        [ -z "$result" ] && { echo "MISSING_ROLE: L2 UAMI has no Website Contributor on {bffAppServiceId}"; exit 1; }
+        echo "OK: Website Contributor assignment present"
       expect: non-empty
     remediation: Emit from `platform-controlplane.bicep` (task 201 Deferred Item #1).
     related_findings: [T201-h4b-kudu-rbac-deferred]
@@ -440,7 +509,12 @@ prereqs:
     owner: Spaarke platform admin (via `scripts/provisioning/Grant-ControlPlaneIdentity.ps1`)
     consequence_of_absence: L2 handlers H7/H10/H11/H12c cannot authenticate to Graph; every Graph call 403s silently.
     check_recipe:
-      cli: az rest --method get --url "https://graph.microsoft.com/v1.0/servicePrincipals(appId='{graphAppId}')/appRoleAssignments?$filter=principalId eq {l2UamiSpId}" --query "value[].id" -o tsv
+      cli: |
+        # Bucket B HIGH#9 SESSION 18 — exit-1 hardening (see PRQ-T-03).
+        # NOTE: `$filter` is bash-escaped so az receives the literal.
+        result=$(az rest --method get --url "https://graph.microsoft.com/v1.0/servicePrincipals(appId='{graphAppId}')/appRoleAssignments?\$filter=principalId eq {l2UamiSpId}" --query "value[].id" -o tsv 2>/dev/null)
+        [ -z "$result" ] && { echo "MISSING_GRAPH_APPROLES: L2 UAMI has no app-role assignments on Microsoft Graph SP"; exit 1; }
+        echo "OK: at least one Graph app-role assignment present (verify count matches GraphAppRoles.cs list)"
       expect: non-empty array; count matches expected role list in `GraphAppRoles.cs`
     remediation: "Run `Grant-ControlPlaneIdentity.ps1` (audit-gap DS-5 c5.8). ⚠ Prerequisite: 11 of 14 null GUIDs in `GraphAppRoles.cs` completed via `spec.md` MUST rule."
     related_findings: [c5.8-l2-uami-graph-and-dataverse-grants, T3-graph-app-role-parity]
@@ -485,7 +559,16 @@ prereqs:
     owner: Spaarke platform admin (via `scripts/provisioning/Seed-PlatformKeyVault.ps1`)
     consequence_of_absence: L2 config `.ValidateOnStart()` returns non-empty garbage strings (literal `@Microsoft.KeyVault(...)` refs) → T1-family silent fail propagates garbage as secret values.
     check_recipe:
-      cli: az keyvault secret list --vault-name "sprk-{env}-kv" --query "[].name" -o tsv
+      cli: |
+        # Bucket B HIGH#9 SESSION 18 — exit-1 hardening (see PRQ-T-03).
+        # Note: this is a presence-check only (any non-empty result = "vault has SOME secrets").
+        # Full canonical-catalog parity is enforced by the L2 boot-time IdentityConfigurationValidator
+        # + the ArchTest suite — replicating that here would duplicate scope. This gate catches the
+        # obvious silent-fail: an empty vault (fresh env, seeder never ran) that would let L2 boot
+        # with @KV(...) literals as secret values.
+        result=$(az keyvault secret list --vault-name "sprk-{env}-kv" --query "[].name" -o tsv 2>/dev/null)
+        [ -z "$result" ] && { echo "EMPTY_KV: sprk-{env}-kv has zero secrets — seeder never ran (audit-gap-09)"; exit 1; }
+        echo "OK: platform KV populated with $(echo "$result" | wc -l) secret(s) — verify canonical parity via ArchTest"
       expect: contains every canonical secret name listed in `scripts/canonical-secret-catalog/manifest.yaml` § `secrets`
     remediation: Author + run `Seed-PlatformKeyVault.ps1` (audit-gap-09; task 084 canonical manifest already provides source-of-truth).
     related_findings: [audit-gap-09-platform-kv-secrets-unseeded]
@@ -497,7 +580,11 @@ prereqs:
     owner: Spaarke platform admin
     consequence_of_absence: F16 — BFF's `@Microsoft.KeyVault(...)` refs silently unresolvable; `keyVaultReferenceIdentity` binding invalid.
     check_recipe:
-      cli: az role assignment list --assignee {l2UamiPrincipalId} --scope "{kvResourceId}" --query "[?roleDefinitionName=='Key Vault Secrets User']" -o tsv
+      cli: |
+        # Bucket B HIGH#9 SESSION 18 — exit-1 hardening (see PRQ-T-03).
+        result=$(az role assignment list --assignee {l2UamiPrincipalId} --scope "{kvResourceId}" --query "[?roleDefinitionName=='Key Vault Secrets User']" -o tsv 2>/dev/null)
+        [ -z "$result" ] && { echo "MISSING_ROLE: L2 UAMI has no Key Vault Secrets User on {kvResourceId}"; exit 1; }
+        echo "OK: Key Vault Secrets User assignment present"
       expect: non-empty
     remediation: Emit from Bicep (T1 handler enforces at run time; wave-4-drift-5 lesson for `sharedBffUami` Model 1 gap).
     related_findings: [F16, wave-4-drift-5-shared-bff-uami-kv-secrets-user]
@@ -531,7 +618,15 @@ prereqs:
     owner: Spaarke platform admin (via runbook `notes/queue-recreate-runbook-2026-08.md`)
     consequence_of_absence: Session receiver against non-session queue throws at `StartProcessingAsync`; L1 dedup silently swallows §4C retries.
     check_recipe:
-      cli: az servicebus queue show -g rg-spaarke-platform-{env} --namespace-name {sbNamespace} -n sprk-provisioning-jobs --query "{sessions:requiresSession, dedup:requiresDuplicateDetection}" -o json
+      cli: |
+        # Bucket B HIGH#9 SESSION 18 — exit-1 hardening + explicit boolean assertion.
+        result=$(az servicebus queue show -g rg-spaarke-platform-{env} --namespace-name {sbNamespace} -n sprk-provisioning-jobs --query "{sessions:requiresSession, dedup:requiresDuplicateDetection}" -o json 2>/dev/null)
+        [ -z "$result" ] && { echo "QUEUE_NOT_FOUND: sprk-provisioning-jobs (namespace {sbNamespace}, rg rg-spaarke-platform-{env})"; exit 1; }
+        echo "$result" | jq -e '.sessions == true and .dedup == true' >/dev/null || {
+          echo "BAD_STATE: queue does not have requiresSession=true AND requiresDuplicateDetection=true. Actual: $result. Recreate via Bicep (task 108)."
+          exit 1
+        }
+        echo "OK: $result"
       expect: '`{"sessions": true, "dedup": true}`'
     remediation: "`az servicebus queue delete` + recreate via Bicep (task 108). WARNING — creation-time-only settings; existing messages lost."
     related_findings: [T108-*, queue-recreate-runbook]

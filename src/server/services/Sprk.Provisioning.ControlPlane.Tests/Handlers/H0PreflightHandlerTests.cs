@@ -666,14 +666,18 @@ public sealed class H0PreflightHandlerTests
     }
 
     [Fact]
-    public async Task CostEnvelope_OverrunWarnAndProceedPolicy_ProceedsWithoutFail()
+    public async Task CostEnvelope_Model1_OverrunWarnAndProceedPolicy_ProceedsWithoutFail()
     {
-        // Yellow path: same overrun BUT costEnvelopePolicy = warnAndProceed →
-        // proceed. Note: batch-mode Model2Dedicated intake REJECTS this pair
-        // at SKILL.md Step 1.0 (per intake.schema.json costEnvelopePolicy
-        // description); the H0 gate itself only enforces overrun-vs-policy,
-        // not the Model2Dedicated cross-field invariant.
+        // Yellow path (Model 1 shared-trial): same overrun BUT
+        // costEnvelopePolicy = warnAndProceed → proceed. This is the ONLY
+        // legitimate warnAndProceed case per intake.schema.json costEnvelopePolicy
+        // description ("Model 1 shared-trial ONLY"). Model2Dedicated + warnAndProceed
+        // is rejected server-side by the Bucket B HIGH#12 SESSION 18 enforcement
+        // gate — see CostEnvelope_Model2Dedicated_WarnAndProceedPolicy_ForcesAbort
+        // below.
         var run = BuildRunWithTenant();
+        run.TenancyModel = "Model1Shared";  // Bucket B HIGH#12 SESSION 18: warnAndProceed only permitted for Model1Shared
+        run.Profile = "spaarke-hosted-model1-trial";
         run.Parameters.NonSecret[H0PreflightHandler.TierParameterKey] = "shared-trial";
         run.Parameters.NonSecret[H0PreflightHandler.EstimatedMonthlyUsdParameterKey] = "600";
         run.Parameters.NonSecret[H0PreflightHandler.CostEnvelopePolicyParameterKey] =
@@ -686,10 +690,47 @@ public sealed class H0PreflightHandlerTests
         var result = await handler.HandleAsync(BuildEnvelope(), CancellationToken.None);
 
         result.Should().BeOfType<HandlerResult.Success>(
-            "warnAndProceed policy MUST NOT block the run even when over-budget");
+            "warnAndProceed policy on Model1Shared MUST NOT block the run even when over-budget");
         probes.All(p => ((FakeProbe)p).CallCount == 1).Should().BeTrue(
             "warn-and-proceed reaches the probe fan-out");
         enqueuer.Sent.Should().ContainSingle();
+    }
+
+    [Fact]
+    public async Task CostEnvelope_Model2Dedicated_WarnAndProceedPolicy_ForcesAbortOnOverrun()
+    {
+        // Bucket B HIGH#12 SESSION 18 (customer-provisioning-orchestration-r1
+        // adversarial e2e verify workflow wepdcb8we): the intake schema declares
+        // "warnAndProceed MUST reject for Model2Dedicated" and the SKILL.md batch
+        // loader enforces it at Step 1.0. A direct-API caller (retry script /
+        // ad-hoc curl / non-skill orchestrator) that bypasses the skill and POSTs
+        // Model2Dedicated + warnAndProceed + over-budget MUST be caught server-side.
+        // H0 must FORCE the abortOnOverrun branch — a dedicated stamp running
+        // uncapped budget contradicts the schema invariant regardless of who POSTed.
+        var run = BuildRunWithTenant();
+        // BuildRun() already sets TenancyModel="Model2Dedicated" (line 845) — the
+        // exact rogue-dispatch pair this test guards.
+        run.Parameters.NonSecret[H0PreflightHandler.TierParameterKey] = "dedicated";
+        run.Parameters.NonSecret[H0PreflightHandler.EstimatedMonthlyUsdParameterKey] = "9999";
+        run.Parameters.NonSecret[H0PreflightHandler.CostEnvelopePolicyParameterKey] =
+            H0PreflightHandler.CostEnvelopePolicyWarnAndProceed;
+        var repo = new FakeRepository(run, etag: "etag-h12-reject");
+        var enqueuer = new FakeEnqueuer();
+        var probes = AllPassProbes();
+        var handler = CreateHandler(repo, enqueuer, probes);
+
+        var result = await handler.HandleAsync(BuildEnvelope(), CancellationToken.None);
+
+        var failure = result.Should().BeOfType<HandlerResult.Failure>().Subject;
+        failure.Class.Should().Be(FailureClass.Resumable,
+            "cost overrun is Resumable — operator resolves budget / changes policy then resumes");
+        failure.RejectionCode.Should().Be(H0PreflightHandler.CostOverrunRejectionCode,
+            "warnAndProceed on Model2Dedicated is forced through the abortOnOverrun branch, producing " +
+            "the same rejection code as an explicit abortOnOverrun run");
+        enqueuer.Sent.Should().BeEmpty(
+            "the run must NOT advance to H0.5 — abort fires before probe fan-out returns");
+        repo.LastWrittenRun!.Status.Should().Be(RunStatus.Failed,
+            "H0 marks the run Failed(Resumable) so operator can fix + resume");
     }
 
     [Fact]

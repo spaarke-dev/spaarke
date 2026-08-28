@@ -1397,69 +1397,112 @@ Per REG-04 (SESSION 15) — Step 6a is NOT belt-and-suspenders. The server-side 
 Per Wave 0 Decision 2 (Dataverse MCP alt-key probe as the canonical registry lookup):
 
 ```powershell
+# ---------------------------------------------------------------------------
+# Bucket B HIGH#10 SESSION 18 (customer-provisioning-orchestration-r1
+# adversarial e2e verify workflow wepdcb8we): Step 6a MUST NOT throw before
+# Step 6b writes the handoff report. Per SKILL.md line 60 MUST rule, the
+# handoff artifact `runs/{runId}.md` is a NON-NEGOTIABLE audit-trail obligation
+# — it is written on EVERY terminal outcome (success + registry-clean, success +
+# registry-stale, or hard failure). Prior behavior threw on the null-guards or
+# on Invoke-RestMethod PATCH errors → Step 6b + 6c never ran → operator lost
+# the mandatory audit artifact and had no diagnostic pointing at the failure.
+#
+# NEW STRUCTURE (Bucket B HIGH#10):
+#   - Step 6a uses flags $script:RegistryStale + $script:RegistryStaleDiagnostic
+#     to capture failure state INSTEAD OF throwing.
+#   - Step 6b writes the handoff report UNCONDITIONALLY (adding a REGISTRY-STALE
+#     section when the flag is set).
+#   - Step 6c writes a separate `runs/{runId}-registry-stale.md` skeleton with
+#     an actionable manual-recovery recipe (`pac data update` / Portal) when
+#     the flag is set, then exits non-zero AFTER the handoff report is written.
+#
+# The single-writer invariant on sprk_currentrunid (Bucket B HIGH#7) is
+# unaffected — this reshaping is purely about error-path ordering.
+# ---------------------------------------------------------------------------
+$script:RegistryStale = $false
+$script:RegistryStaleDiagnostic = $null
+
 # Step 1: lookup — resolve environmentId GUID. Prefer the value captured at Step 1f
 # (skill session-local $environmentId). Fallback: query by sprk_customerid alt-key
 # in case Step 1f state was lost across a compact/handoff.
 if ([string]::IsNullOrWhiteSpace($environmentId)) {
-  $lookup = mcp__dataverse__read_query(query = @"
-    <fetch top="1">
-      <entity name="sprk_dataverseenvironment">
-        <attribute name="sprk_dataverseenvironmentid" />
-        <filter><condition attribute="sprk_customerid" operator="eq" value="$customerId" /></filter>
-      </entity>
-    </fetch>
+  try {
+    $lookup = mcp__dataverse__read_query(query = @"
+      <fetch top="1">
+        <entity name="sprk_dataverseenvironment">
+          <attribute name="sprk_dataverseenvironmentid" />
+          <filter><condition attribute="sprk_customerid" operator="eq" value="$customerId" /></filter>
+        </entity>
+      </fetch>
 "@)
-  $environmentId = $lookup.rows[0].sprk_dataverseenvironmentid
+    $environmentId = $lookup.rows[0].sprk_dataverseenvironmentid
+  } catch {
+    $script:RegistryStale = $true
+    $script:RegistryStaleDiagnostic = "environmentId lookup failed (MCP): $($_.Exception.Message)"
+    Write-Warning "Step 6a environmentId lookup failed — will write registry-stale diagnostic AFTER handoff report. Diagnostic: $script:RegistryStaleDiagnostic"
+  }
 }
-if (-not ($environmentId -match '^[0-9a-fA-F-]{36}$')) {
-  Write-Error "Step 6a HARD STOP: could not resolve environmentId for customerId=$customerId"
-  exit 1
+if (-not $script:RegistryStale -and -not ($environmentId -match '^[0-9a-fA-F-]{36}$')) {
+  $script:RegistryStale = $true
+  $script:RegistryStaleDiagnostic = "environmentId could not be resolved for customerId=$customerId — value='$environmentId' does not match GUID shape"
+  Write-Warning "Step 6a HARD-WARN (Bucket B HIGH#10): $script:RegistryStaleDiagnostic. Handoff will still be written."
 }
 
 # Step 2: update — write the promoted columns (idempotent PATCH).
-try {
-  mcp__dataverse__update_record(
-    entityName = "sprk_dataverseenvironment",
-    recordId   = $environmentId,
-    fields = @{
-      sprk_provisionedon            = $completedAtIso     # from run.CompletedOn
-      sprk_bffversion               = $deployedBffVersion  # from run.InterStepState.BffVersion
-      sprk_solutionversion          = $deployedSolutionVer # from run.InterStepState.SolutionVersion
-      sprk_azuresubscriptionid      = $azureSubId
-      sprk_resourcegroupname        = $rgName
-      sprk_appservicename           = $appServiceName
-      sprk_keyvaultname             = $kvName
-      sprk_containertypeid          = $containerTypeId
-      sprk_ClientCacheBustToken     = $cacheBustToken
-      # sprk_setupstatus + sprk_currentrunid are ALREADY set by the server (H13 updater).
-      # If drift detected (they're not), operator MUST HARD STOP + escalate — do NOT overwrite blindly.
+if (-not $script:RegistryStale) {
+  try {
+    mcp__dataverse__update_record(
+      entityName = "sprk_dataverseenvironment",
+      recordId   = $environmentId,
+      fields = @{
+        sprk_provisionedon            = $completedAtIso     # from run.CompletedOn
+        sprk_bffversion               = $deployedBffVersion  # from run.InterStepState.BffVersion
+        sprk_solutionversion          = $deployedSolutionVer # from run.InterStepState.SolutionVersion
+        sprk_azuresubscriptionid      = $azureSubId
+        sprk_resourcegroupname        = $rgName
+        sprk_appservicename           = $appServiceName
+        sprk_keyvaultname             = $kvName
+        sprk_containertypeid          = $containerTypeId
+        sprk_ClientCacheBustToken     = $cacheBustToken
+        # sprk_setupstatus is set by the server (H13 updater).
+        # sprk_currentrunid release is ALSO routed via ICustomerRunGuard.ReleaseAsync
+        # per Bucket B HIGH#6/#7 SESSION 18 — do NOT clear it from this operator-side PATCH.
+        # If drift detected on any set-once column, operator MUST HARD STOP + escalate — do NOT overwrite blindly.
+      }
+    )
+  } catch {
+    # F1 fallback path (Dataverse MCP disconnect) — use raw Web API PATCH with operator's az token.
+    # Bucket A HIGH#13 SESSION 18 fix: previously read `$constants.spaarke[$environment].registryDvUrl`
+    # which was a PHANTOM shape ($constants.spaarke.* never existed in spaarke-constants.yaml — the
+    # real path is $constants.name_templates.registryDvUrl.{env}, matching Step 0.5b line 347).
+    #
+    # Bucket B HIGH#10 SESSION 18: nested try/catch here so a fallback failure ALSO writes to the
+    # $script:RegistryStale flag instead of throwing. Step 6b runs unconditionally after this block.
+    try {
+      $dvUrl = $constants.name_templates.registryDvUrl.$environment  # e.g. https://spaarkedev1.crm.dynamics.com for dev per operator memory feedback_no_central_managing_env_yet
+      if ([string]::IsNullOrWhiteSpace($dvUrl)) {
+        throw "registry env dvUrl not resolvable for controlPlaneEnv='$environment' — verify scripts/provisioning-prereqs/spaarke-constants.yaml name_templates.registryDvUrl.$environment is populated"
+      }
+      $dvToken = az account get-access-token --resource $dvUrl --query accessToken -o tsv
+      if ([string]::IsNullOrWhiteSpace($dvToken)) {
+        throw "az token acquisition failed for resource '$dvUrl' — operator's AAD context lost between Step 0b and Step 6a (run 'az login')"
+      }
+      $body = @{ sprk_provisionedon = $completedAtIso; sprk_bffversion = $deployedBffVersion; ... } | ConvertTo-Json
+      Invoke-RestMethod -Uri "$dvUrl/api/data/v9.2/sprk_dataverseenvironments($environmentId)" `
+        -Method PATCH -Headers @{ Authorization = "Bearer $dvToken"; "OData-Version" = "4.0"; "If-Match" = "*" } `
+        -Body $body -ContentType "application/json"
+    } catch {
+      $script:RegistryStale = $true
+      $script:RegistryStaleDiagnostic = "BOTH Dataverse MCP AND raw Web API fallback failed (Bucket B HIGH#10). MCP: $($_.Exception.Message); Web API: $($_.Exception.Message). Manual recovery required via pac data update or Portal — see runs/{runId}-registry-stale.md."
+      Write-Warning "Step 6a fallback failed — will write registry-stale diagnostic AFTER handoff report. Diagnostic: $script:RegistryStaleDiagnostic"
     }
-  )
-} catch {
-  # F1 fallback path (Dataverse MCP disconnect) — use raw Web API PATCH with operator's az token.
-  # Bucket A HIGH#13 SESSION 18 fix: previously read `$constants.spaarke[$environment].registryDvUrl`
-  # which was a PHANTOM shape ($constants.spaarke.* never existed in spaarke-constants.yaml — the
-  # real path is $constants.name_templates.registryDvUrl.{env}, matching Step 0.5b line 347). The
-  # bug guaranteed $dvUrl=$null → az token call failed → PATCH threw uncaught → Steps 6b + 6c
-  # never ran → operator lost the mandatory handoff artifact (SKILL.md line 60 MUST).
-  $dvUrl = $constants.name_templates.registryDvUrl.$environment  # e.g. https://spaarkedev1.crm.dynamics.com for dev per operator memory feedback_no_central_managing_env_yet
-  if ([string]::IsNullOrWhiteSpace($dvUrl)) {
-    throw "Step 6a HARD STOP (Bucket A HIGH#13): registry env dvUrl not resolvable for controlPlaneEnv='$environment' — verify scripts/provisioning-prereqs/spaarke-constants.yaml name_templates.registryDvUrl.$environment is populated. Registry PATCH cannot proceed; write runs/{runId}-registry-stale.md skeleton and escalate per Fallback F3."
   }
-  $dvToken = az account get-access-token --resource $dvUrl --query accessToken -o tsv
-  if ([string]::IsNullOrWhiteSpace($dvToken)) {
-    throw "Step 6a HARD STOP: az token acquisition failed for resource '$dvUrl' — operator's AAD context lost between Step 0b and Step 6a. Run 'az login', then invoke skill with -Resume {runId} to retry registry PATCH."
-  }
-  $body = @{ sprk_provisionedon = $completedAtIso; sprk_bffversion = $deployedBffVersion; ... } | ConvertTo-Json
-  Invoke-RestMethod -Uri "$dvUrl/api/data/v9.2/sprk_dataverseenvironments($environmentId)" `
-    -Method PATCH -Headers @{ Authorization = "Bearer $dvToken"; "OData-Version" = "4.0"; "If-Match" = "*" } `
-    -Body $body -ContentType "application/json"
 }
 ```
 
 Note: `sprk_tenantid` MUST NOT be re-written here — it's set at placeholder-create (Step 1f) and NEVER changes for the customer's lifetime. Overwriting risks silent §4D I1 tenant-isolation invariant violation.
 
-**HARD STOP**: any failure at Step 6a is unrecoverable at handoff time. Operator must NOT skip. If MCP is disconnected AND raw Web API fallback errors, the run's registry state is stale — operator MUST manually resolve via `pac data update` or Portal before the customer is handed the environment.
+**Bucket B HIGH#10 (SESSION 18) reversal of the previous HARD STOP contract**: Step 6a failures no longer HARD STOP before the handoff report. The handoff artifact `runs/{runId}.md` is written UNCONDITIONALLY at Step 6b (per SKILL.md line 60 MUST — operator must have an audit trail on every terminal outcome), and Step 6c writes a separate `runs/{runId}-registry-stale.md` skeleton with an actionable manual-recovery recipe when the registry PATCH failed. Only AFTER both artifacts are written does the skill exit non-zero. The registry state is still stale (operator MUST manually resolve via `pac data update` or Portal), but now the operator has a durable diagnostic pointing them at the recovery path — a significant improvement over the prior behavior of throwing uncaught before any artifact was written.
 
 #### 6b. Write handoff report
 
@@ -1555,7 +1598,90 @@ Template shape:
 - Monitor for 24h via App Insights: {URL}
 ```
 
-#### 6c. Final summary to operator
+#### 6c. Registry-stale diagnostic (Bucket B HIGH#10 SESSION 18)
+
+If `$script:RegistryStale = $true` (Step 6a failed on BOTH the MCP call AND the raw Web API fallback), write a separate `runs/{runId}-registry-stale.md` skeleton with an actionable manual-recovery recipe. This file supplements — does NOT replace — the mandatory `runs/{runId}.md` handoff artifact written at Step 6b.
+
+```powershell
+if ($script:RegistryStale) {
+  $staleReport = @"
+# Registry Stale — Run $runId
+
+**⚠ MANUAL RECOVERY REQUIRED**
+
+The provisioning run reached RunStatus.Completed successfully, but the operator-side
+Step 6a Dataverse registry PATCH FAILED. The customer's `sprk_dataverseenvironment`
+row is missing the promoted Ready-state columns (sprk_provisionedon, sprk_bffversion,
+sprk_solutionversion, sprk_azuresubscriptionid, sprk_resourcegroupname,
+sprk_appservicename, sprk_keyvaultname, sprk_containertypeid, sprk_ClientCacheBustToken).
+
+The customer's Azure resources are provisioned correctly and the L2 control-plane
+has released the I5 concurrency guard (`sprk_currentrunid` via ICustomerRunGuard.
+ReleaseAsync per Bucket B HIGH#6/#7 SESSION 18). Only the operator-side registry
+PATCH failed. Customer-facing functionality works; only the operator dashboards and
+downstream automation that queries these columns are affected.
+
+## Diagnostic
+
+$($script:RegistryStaleDiagnostic)
+
+## Manual Recovery (choose ONE)
+
+### Option A — pac data update (recommended for CLI operators)
+``````powershell
+pac data update `
+    --environment $dvUrl `
+    --entity sprk_dataverseenvironment `
+    --record-id $environmentId `
+    --data '{
+      "sprk_provisionedon":       "$completedAtIso",
+      "sprk_bffversion":          "$deployedBffVersion",
+      "sprk_solutionversion":     "$deployedSolutionVer",
+      "sprk_azuresubscriptionid": "$azureSubId",
+      "sprk_resourcegroupname":   "$rgName",
+      "sprk_appservicename":      "$appServiceName",
+      "sprk_keyvaultname":        "$kvName",
+      "sprk_containertypeid":     "$containerTypeId",
+      "sprk_ClientCacheBustToken":"$cacheBustToken"
+    }'
+``````
+
+### Option B — Power Apps Portal (recommended for GUI operators)
+1. Open https://make.powerapps.com → your environment
+2. Navigate: Tables → sprk_dataverseenvironment → row `$environmentId`
+3. Edit the columns listed above using the values from ``runs/$runId.md`` § Deployed Versions
+4. Save
+
+### Option C — Skill re-invocation with -ResumeRegistryPatch flag
+(Not yet implemented; add to backlog if this failure recurs.)
+
+## Post-recovery verification
+
+After applying either recovery option:
+``````powershell
+mcp__dataverse__read_query(query = "<fetch><entity name='sprk_dataverseenvironment'><attribute name='sprk_provisionedon' /><filter><condition attribute='sprk_dataverseenvironmentid' operator='eq' value='$environmentId' /></filter></entity></fetch>")
+``````
+Expect ``sprk_provisionedon != null``. If null, retry the recovery.
+
+## Do NOT
+
+- **Do NOT touch** `sprk_setupstatus` (already set to Ready by L2 H13)
+- **Do NOT touch** `sprk_currentrunid` (already released by ICustomerRunGuard per Bucket B HIGH#6/#7)
+- **Do NOT touch** `sprk_tenantid` (I1 invariant — set at placeholder-create, NEVER re-writable)
+
+## Escalation
+
+If manual recovery fails repeatedly, file a GitHub Issue with:
+- This file (``runs/$runId-registry-stale.md``)
+- The handoff report (``runs/$runId.md``)
+- The Dataverse error message from the recovery attempt
+"@
+  Set-Content -Path "runs/$runId-registry-stale.md" -Value $staleReport -Encoding utf8
+  Write-Warning "Registry-stale diagnostic written to runs/$runId-registry-stale.md — MANUAL RECOVERY REQUIRED. Handoff report at runs/$runId.md is complete."
+}
+```
+
+#### 6d. Final summary to operator
 
 ```
 ✅ PROVISIONING COMPLETE
@@ -1574,6 +1700,32 @@ Template shape:
     [ ] Verify first user can sign in and load workspace
     [ ] Confirm cost drift alerts configured in Azure
     [ ] Update project #2 (portfolio board) with the new customer entry
+```
+
+**Bucket B HIGH#10 SESSION 18**: When `$script:RegistryStale = $true`, replace the final summary above with the WARNING variant:
+
+```
+⚠ PROVISIONING COMPLETE (REGISTRY STALE)
+
+  Customer:  {customerId}
+  Run ID:    {runId}
+  Duration:  {duration}
+  Status:    Ready (L2), Registry PATCH FAILED (operator-side)
+
+  Handoff report: runs/{runId}.md
+  Registry-stale diagnostic: runs/{runId}-registry-stale.md
+
+  MANUAL RECOVERY REQUIRED — see runs/{runId}-registry-stale.md for the
+  pac data update / Portal recipe. Customer-facing functionality is
+  operational; only operator dashboards + downstream automation affected.
+```
+
+Then exit non-zero (code 5, distinct from the exit-4 gate-timeout and exit-3 quarantine paths at Step 4-5) AFTER both artifacts are written:
+
+```powershell
+if ($script:RegistryStale) {
+  exit 5
+}
 ```
 
 ---

@@ -137,19 +137,45 @@ public sealed class DataverseRegistrySetupStatusUpdater : IRegistrySetupStatusUp
         ArgumentException.ThrowIfNullOrWhiteSpace(request.CustomerId);
         ArgumentException.ThrowIfNullOrWhiteSpace(request.RunId);
 
-        // Companion update (spec.md FR-23): clear sprk_currentrunid in the
-        // SAME transaction as the Ready write. Prevents a partial-success
-        // window where status is Ready but the guard still points at a
-        // completed run (which would block the customer's next run per I5).
+        // Bucket B HIGH#7 SESSION 18 (customer-provisioning-orchestration-r1
+        // adversarial e2e verify workflow wepdcb8we): PRIOR behavior set
+        // ClearCurrentRunId=true so the same PATCH that flipped setupstatus=Ready
+        // also nulled sprk_currentrunid. That was structurally unsafe — the
+        // PATCH runs without an If-Match / compare-and-swap guard, while every
+        // OTHER writer of sprk_currentrunid (CustomerRunGuard.ReleaseAsync,
+        // QuarantineClearService.ClearAsync via COMP-06) uses the stale-value-
+        // safe LookupAsync → runId-equality → TryClearAsync-with-ETag primitive.
+        // Two writers with different safety models on the same column is exactly
+        // the concurrency skew that produces silent-fail bugs in production
+        // (e.g. an operator manual PATCH between H13's read and write would be
+        // clobbered).
+        //
+        // Fix: HIGH#7 flips ClearCurrentRunId=false here. The guard release now
+        // fires from ONE authoritative path — Bucket B HIGH#6's explicit
+        // ICustomerRunGuard.ReleaseAsync call in HandlerOutcomeApplier's
+        // Success-with-RunStatus.Completed branch. That call is ETag-safe and
+        // stale-value-safe (Mismatched = no-op). This PATCH now touches ONLY
+        // sprk_setupstatus, restoring the single-writer invariant on
+        // sprk_currentrunid.
+        //
+        // Concurrency: yes, briefly the row is Ready but sprk_currentrunid still
+        // holds this runId — a millisecond-scale window between this PATCH and
+        // HandlerOutcomeApplier's Release. A concurrent /api/runs POST during
+        // that window sees the guard held and gets a 409 (correct: the release
+        // has not yet fired, so the run is technically still "in flight" from
+        // the guard's perspective). This is preferable to the prior unconditional
+        // clobber which could silently release a guard a different run legitimately
+        // holds.
         var update = new RegistrySetupStatusUpdate(
             EnvironmentId: request.EnvironmentId,
             SetupStatus: ReadyDisplayName,
-            ClearCurrentRunId: true,
+            ClearCurrentRunId: false,
             CustomerIdForLog: request.CustomerId,
             RunIdForLog: request.RunId);
 
         _logger.LogInformation(
-            "DataverseRegistrySetupStatusUpdater PATCHing sprk_setupstatus=Ready + clearing sprk_currentrunid. " +
+            "DataverseRegistrySetupStatusUpdater PATCHing sprk_setupstatus=Ready (sprk_currentrunid release " +
+            "routed via ICustomerRunGuard.ReleaseAsync per Bucket B HIGH#6/#7 SESSION 18). " +
             "customerId={CustomerId} runId={RunId} environmentId={EnvironmentId}.",
             request.CustomerId, request.RunId, request.EnvironmentId);
 
