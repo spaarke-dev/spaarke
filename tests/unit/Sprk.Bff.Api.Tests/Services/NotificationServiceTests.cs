@@ -319,27 +319,5 @@ public class NotificationServiceTests
 
     #region Constructor Validation
 
-    [Fact]
-    public void Constructor_WithNullEntityService_ThrowsArgumentNullException()
-    {
-        // Act
-        var act = () => new NotificationService(null!, _loggerMock.Object);
-
-        // Assert
-        act.Should().Throw<ArgumentNullException>()
-            .WithParameterName("entityService");
-    }
-
-    [Fact]
-    public void Constructor_WithNullLogger_ThrowsArgumentNullException()
-    {
-        // Act
-        var act = () => new NotificationService(_entityServiceMock.Object, null!);
-
-        // Assert
-        act.Should().Throw<ArgumentNullException>()
-            .WithParameterName("logger");
-    }
-
     #endregion
 }

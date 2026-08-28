@@ -60,6 +60,16 @@ $ProtectedPathFragments = @(
     'tests/Spaarke.ArchTests/'      # Amendment A1 -- structural fitness functions
 )
 
+# Strip C# comments so ban detection sees code only. Added by spot-check round 3.
+# Order matters: block comments first, then line comments. String literals containing
+# "//" are rare in this suite and a stray strip only ever LOSES a signal (under-call),
+# which is the safe direction per ADR-038's doubt = KEEP rule.
+function Remove-CsComments {
+    param([string] $Text)
+    $noBlock = [regex]::Replace($Text, '/\*[\s\S]*?\*/', ' ')
+    return [regex]::Replace($noBlock, '(?m)//.*$', '')
+}
+
 Write-Host "Classifying tests under $TestRoot against ADR-038 §7 ..." -ForegroundColor Cyan
 
 $files = Get-ChildItem -Path $TestRoot -Filter *.cs -Recurse -File
@@ -78,9 +88,16 @@ foreach ($file in $files) {
         if ($relPath -like "*$frag*") { $isProtected = $true; break }
     }
 
+    # Comment-stripped view of the file. Ban detection MUST run against code, never
+    # against prose. Spot-check round 3 caught the reason: AiCompletionNodeExecutorTests
+    # carries the header comment "ADR-038 compliance: NO Mock<HttpMessageHandler>", and
+    # both the file-level flag below and the per-method body match fired on it. A file
+    # that DOCUMENTS its compliance was classified as violating it.
+    $fileTextCode = Remove-CsComments $fileText
+
     # File-level signals (apply to every method in the file).
-    $fileHasHttpMessageHandlerMock = $fileText -match 'Mock<\s*HttpMessageHandler\s*>'
-    $fileHasReflection             = $fileText -match 'BindingFlags\.(NonPublic|Instance\s*\|\s*BindingFlags\.NonPublic)'
+    $fileHasHttpMessageHandlerMock = $fileTextCode -match 'Mock<\s*HttpMessageHandler\s*>'
+    $fileHasReflection             = $fileTextCode -match 'BindingFlags\.(NonPublic|Instance\s*\|\s*BindingFlags\.NonPublic)'
 
     for ($i = 0; $i -lt $lines.Count; $i++) {
         if ($lines[$i] -notmatch '^\s*\[\s*(Fact|Theory)\b') { continue }
@@ -111,6 +128,10 @@ foreach ($file in $files) {
         $body       = $bodyLines -join "`n"
         $methodLen  = $bodyLines.Count
 
+        # Ban detection runs against $bodyCode (comments removed); assertion/setup
+        # accounting keeps using $body. See Remove-CsComments for why (round 3).
+        $bodyCode   = Remove-CsComments $body
+
         # --- assertion / setup accounting -------------------------------------
         $assertCount = ([regex]::Matches($body, '\bAssert\.|\.Should\(\)|\bVerify\(|\bVerifyAll\(')).Count
         $mockCount   = ([regex]::Matches($body, '\bMock<|\bnew Mock')).Count
@@ -135,21 +156,73 @@ foreach ($file in $files) {
         # --- ban detection (first match wins; ordered by confidence) ----------
         $bucket = $null; $rationale = $null
 
-        if ($fileHasHttpMessageHandlerMock -and $body -match 'HttpMessageHandler') {
+        # B1 — require the actual Mock<HttpMessageHandler> construction in this method's
+        # code, not a bare mention of the type name. Round 3: the old `-match
+        # 'HttpMessageHandler'` fired on a comment asserting ADR-038 compliance.
+        if ($fileHasHttpMessageHandlerMock -and $bodyCode -match 'Mock<\s*HttpMessageHandler\s*>') {
             $bucket = 'B1-http-message-handler-mock'
             $rationale = 'Mocks HttpMessageHandler — couples the test to wire format (ADR-038 B1)'
         }
-        elseif ($body -match '\b(BuildServiceProvider|GetRequiredService|GetService)\b' -and $assertCount -le 3 -and $body -match 'NotNull|IsType|BeOfType|BeAssignableTo') {
-            $bucket = 'B3-di-registration'
-            $rationale = 'Asserts a service resolves from the container — app start already proves wiring (B3)'
+        # B3 — but NOT the ADR-032 Null-Object kill-switch contract. Those tests assert
+        # WHICH concrete implementation resolves under a given feature-flag state; app
+        # start does not prove that, and root CLAUDE.md §10 / bff-extensions.md §F.1 make
+        # it a binding sub-mechanism (the RB-T028-03..06 defect class). Round 3 caught the
+        # 8 TodoSyncModule FlagOn/FlagOff tests and the 2 CacheModule Redis on/off tests
+        # heading for deletion — they are the regression cover for a real production bug.
+        # B3 requires an actual DI container, and an assertion that goes no further than
+        # "it resolved". Two round-3/4 over-calls fixed here:
+        #   (a) bare `\bGetService\b` collided with DOMAIN methods of the same name.
+        #       ExportServiceRegistry.GetService(ExportFormat.Docx) is a strategy selector
+        #       built with `new`, nothing to do with IServiceProvider. Now the body must
+        #       actually build a container.
+        #   (b) asserting WHICH concrete type resolves is a different contract from
+        #       asserting THAT it resolves, and app start proves only the latter. This
+        #       covers the ADR-032 kill-switch pairs (root CLAUDE.md §10 / bff-extensions
+        #       §F.1, the RB-T028-03..06 defect class) and also phase-pinning stubs like
+        #       BeOfType<StubInsightGraph>. Both land in review, never in DELETE.
+        elseif ($bodyCode -match '\bBuildServiceProvider\b' -and $assertCount -le 3 -and $bodyCode -match 'NotNull|IsType|BeOfType|BeAssignableTo') {
+            $pinsConcreteImpl = $bodyCode -match '(BeOfType|BeAssignableTo|IsType|IsAssignableFrom)\s*<'
+            if ($pinsConcreteImpl) {
+                $bucket = 'AMBIGUOUS-adr032-killswitch'
+                $rationale = 'Resolves a service BUT pins WHICH impl — ADR-032 kill-switch / phase contract, not B3 wiring'
+            } else {
+                $bucket = 'B3-di-registration'
+                $rationale = 'Asserts a service resolves from the container — app start already proves wiring (B3)'
+            }
         }
-        elseif ($body -match 'ArgumentNullException' -and $body -match '\bnew\s+\w+\s*\([^)]*null') {
+        # B4 — the ACT must be the construction itself. Two round-3 over-calls fixed here:
+        #   (a) `-match` is case-INSENSITIVE in PowerShell, so `[^)]*null` matched the
+        #       `Null...` in every ADR-032 Null-Object type name (e.g.
+        #       `new NullMembershipEventPublisher(Mock.Of<ILogger<NullMembershipEventPublisher>>())`).
+        #       Now `-cmatch`, so only the C# keyword `null` counts.
+        #   (b) building a DTO with a null field and then calling a METHOD matched too
+        #       (`new EffortScoreInput(null!, ...)` then `_sut.CalculateEffortScore(input)`).
+        #       Requiring `=> new X(` keeps only tests whose subject is construction.
+        elseif ($bodyCode -match 'ArgumentNullException' -and $bodyCode -cmatch '=>\s*new\s+\w+\s*\([^)]*\bnull\b') {
             $bucket = 'B4-ctor-null-check'
             $rationale = 'Constructor null-guard test — ArgumentNullException.ThrowIfNull covers this (B4)'
         }
-        elseif ($fileHasReflection -and $body -match 'BindingFlags\.NonPublic|GetMethod\(|GetField\(|GetProperty\(') {
+        # B8 — require BindingFlags in THIS method. `GetProperty(` alone also matches
+        # JsonElement.GetProperty("field"), which is JSON navigation, not reflection over
+        # a private member. Round 3: that misread DailyBriefingResponseShapeTests, a golden
+        # fixture locking the widget-consumed JSON contract, as an implementation-shape test.
+        elseif ($fileHasReflection -and $bodyCode -match 'BindingFlags\.') {
             $bucket = 'B8-private-via-reflection'
             $rationale = 'Reaches a private/internal member by reflection — locks implementation shape (B8)'
+        }
+        # Absence-of-throw can BE the contract. Round 4 surfaced this while checking the
+        # ADR-032 rescues: FlagOff_NullTodoGraphSyncHandler_IsQuietNoOp has no assertion
+        # because "completes without throwing" is exactly the ADR-032 P2 quiet semantics
+        # it exists to pin. Same shape as
+        # LogInteractionAsync_CosmosThrows_DoesNotThrowToCallerAndLogsError (audit logging
+        # must not break its caller) — a resilience contract, not coverage filler. This is
+        # round 1's failure mode (LoadSessionAsync_BothMiss_ReturnsNull, whose contract was
+        # a null outcome) recurring in a different bucket: a NEGATIVE expected outcome
+        # reads as "no expectation" to a counter. Route to review, never to DELETE.
+        elseif (($assertCount -eq 0 -or $trivialOnly) -and
+                $methodName -match '(?i)(NoOp|No_Op|DoesNotThrow|DoNotThrow|Quiet|Tolerat|Ignor|Succeed|Complet|Safe|Never)') {
+            $bucket = 'AMBIGUOUS-b10-absence-contract'
+            $rationale = 'No/trivial assertion BUT the name states absence-of-throw as the contract — review, do not auto-delete'
         }
         elseif ($assertCount -eq 0) {
             $bucket = 'B10-coverage-filler'
@@ -192,7 +265,12 @@ foreach ($file in $files) {
         # AMBIGUOUS by construction. The spot-check confirmed the risk:
         # EvaluateAsync_MonthSnapshot_DoesNotTriggerBudgetRules is setup-heavy AND
         # a legitimate behavioral test.
-        $reviewOnlyBuckets = @('B13-name-missing-scenario', 'B15-setup-heavy', 'B7-all-mocks-trivial')
+        # 'AMBIGUOUS-adr032-killswitch' is review-only for a different reason than the
+        # other three: it is not a ban at all. It marks a DI-resolution test that pins
+        # which impl a feature flag selects, i.e. ADR-032 contract cover that B3 would
+        # otherwise eat. Listed here so it can never reach DELETE.
+        $reviewOnlyBuckets = @('B13-name-missing-scenario', 'B15-setup-heavy', 'B7-all-mocks-trivial',
+                               'AMBIGUOUS-adr032-killswitch', 'AMBIGUOUS-b10-absence-contract')
 
         if ($bucket) {
             $classification =
