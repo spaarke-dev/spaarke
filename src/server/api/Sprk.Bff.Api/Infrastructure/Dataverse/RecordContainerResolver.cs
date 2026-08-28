@@ -45,6 +45,16 @@ public sealed class RecordContainerResolver
     private const string ContainerColumn = "sprk_containerid";
 
     /// <summary>
+    /// The record's owning business unit. Dataverse populates this system column on every user- or
+    /// team-owned row, so it needs no extra round trip — it comes back with the record read that
+    /// <see cref="ResolveForRecordAsync"/> already performs.
+    /// </summary>
+    private const string OwningBusinessUnitColumn = "owningbusinessunit";
+
+    /// <summary>The business unit entity, whose <c>sprk_containerid</c> is the non-secure default.</summary>
+    private const string BusinessUnitEntity = "businessunit";
+
+    /// <summary>
     /// How many claimants of one container id to fetch when answering the reverse question. Only needs to be
     /// enough to DISTINGUISH one from many; bounded so a shared business-unit container with thousands of
     /// rows cannot turn an authorization check into a table scan. Three live projects currently share the
@@ -66,6 +76,42 @@ public sealed class RecordContainerResolver
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
     }
 
+    /// <summary>
+    /// Resolve the container for a record with NO caller-supplied fallback — the server derives the
+    /// non-secure default from the record's OWN owning business unit.
+    ///
+    /// <para>This is the overload the upload path uses (task 076). It is what makes "the client stops
+    /// deciding" literally true: the authorization key and the container both derive from
+    /// <c>(entityLogicalName, recordId)</c>, so no code path lets them disagree.</para>
+    ///
+    /// <para><b>Why the RECORD's business unit and not the ACTING USER's.</b> Every client upload site
+    /// resolves <c>getUserId() → systemuser.businessunitid → businessunit.sprk_containerid</c> — the
+    /// person uploading, not the thing being uploaded to. Two users uploading to the same matter put
+    /// its documents in two different containers. Worse for isolation specifically: per
+    /// <c>notes/secure-project-workflow-review-2026-08-24.md</c> §A, users sit in the Operations
+    /// subtree while secure records are owned in <c>Secure Projects</c>, so acting-user resolution
+    /// writes a secure record's content into the general Operations container. Ownership is a
+    /// property of the record, so the container follows the record.</para>
+    ///
+    /// <para><b>Cost</b>: <c>owningbusinessunit</c> rides along on the record read that already
+    /// happens, so a SECURE record costs zero extra round trips (its own container wins and the
+    /// business unit is never consulted). A non-secure record costs one additional read of the
+    /// business unit row.</para>
+    /// </summary>
+    public Task<ContainerDecision> ResolveForRecordAsync(
+        string entityLogicalName,
+        Guid recordId,
+        CancellationToken ct = default)
+        => ResolveForRecordAsync(entityLogicalName, recordId, nonSecureFallbackContainerId: null, ct);
+
+    /// <summary>
+    /// Resolve the container for a record, with an explicit non-secure fallback.
+    ///
+    /// <para>Server-side ingest uses this overload to pass <c>Communication:ArchiveContainerId</c>,
+    /// which has no owning record to derive a business unit from. When
+    /// <paramref name="nonSecureFallbackContainerId"/> is null the resolver derives the fallback from
+    /// the record's own <c>owningbusinessunit</c> — see the parameterless overload.</para>
+    /// </summary>
     public async Task<ContainerDecision> ResolveForRecordAsync(
         string entityLogicalName,
         Guid recordId,
@@ -116,7 +162,7 @@ public sealed class RecordContainerResolver
                 .RetrieveAsync(
                     normalizedEntity,
                     recordId,
-                    [SecurableEntityRegistry.SecureFlagAttribute, ContainerColumn],
+                    [SecurableEntityRegistry.SecureFlagAttribute, ContainerColumn, OwningBusinessUnitColumn],
                     ct)
                 .ConfigureAwait(false);
         }
@@ -164,7 +210,19 @@ public sealed class RecordContainerResolver
         var isSecure = record.GetAttributeValue<bool>(SecurableEntityRegistry.SecureFlagAttribute);
         var ownContainerId = record.GetAttributeValue<string>(ContainerColumn);
 
-        var decision = SecureContainerDecision.Decide(isSecure, ownContainerId, nonSecureFallbackContainerId);
+        // Derive the non-secure default from the RECORD's owning business unit when the caller did not
+        // supply one (task 076). Deliberately skipped for a secure record: its own container wins, so
+        // the read would be wasted, and — more importantly — a secure record must never have a usable
+        // fallback in scope at the decision point. Skipping it means the fail-closed path cannot
+        // accidentally acquire one.
+        var fallbackContainerId = nonSecureFallbackContainerId;
+        if (!isSecure && string.IsNullOrWhiteSpace(fallbackContainerId))
+        {
+            fallbackContainerId = await ResolveOwningBusinessUnitContainerAsync(
+                record, normalizedEntity, recordId, ct).ConfigureAwait(false);
+        }
+
+        var decision = SecureContainerDecision.Decide(isSecure, ownContainerId, fallbackContainerId);
 
         if (decision.Outcome == ContainerDecisionOutcome.FailClosed)
         {
@@ -199,6 +257,57 @@ public sealed class RecordContainerResolver
         }
 
         return decision;
+    }
+
+    /// <summary>
+    /// The non-secure default: the container stamped on the record's OWNING BUSINESS UNIT.
+    ///
+    /// <para>Returns <see langword="null"/> when the business unit has no container stamped, which is a
+    /// legitimate and common state — verified live 2026-08-27, three of six business units have
+    /// <c>sprk_containerid</c> unset. Null flows into
+    /// <see cref="SecureContainerDecision.Decide"/> as "no fallback", which for a NON-SECURE record
+    /// yields <see cref="ContainerDecisionOutcome.Unresolved"/> — the benign
+    /// caller-keeps-its-existing-behaviour case. It can never soften a secure record's refusal,
+    /// because this method is not called for secure records at all.</para>
+    ///
+    /// <para><b>Read failures PROPAGATE.</b> An unreadable business unit means the container is unknown,
+    /// and unknown must not become "no fallback" — that would silently turn a resolvable upload into
+    /// an <c>Unresolved</c> skip. Same fail-closed posture as the rest of this component.</para>
+    /// </summary>
+    private async Task<string?> ResolveOwningBusinessUnitContainerAsync(
+        Entity record,
+        string entityLogicalName,
+        Guid recordId,
+        CancellationToken ct)
+    {
+        // owningbusinessunit is an EntityReference on a user/team-owned row. Absent means the entity is
+        // organization-owned (no owning BU exists) — a real answer, not a failure.
+        if (record.GetAttributeValue<EntityReference>(OwningBusinessUnitColumn) is not { Id: var buId }
+            || buId == Guid.Empty)
+        {
+            _logger.LogInformation(
+                "[SECURE-CONTAINER] {Entity} {RecordId} has no owning business unit, so there is no "
+                + "business-unit container to fall back to.",
+                entityLogicalName, recordId);
+            return null;
+        }
+
+        var businessUnit = await _entityService
+            .RetrieveAsync(BusinessUnitEntity, buId, [ContainerColumn], ct)
+            .ConfigureAwait(false);
+
+        var container = businessUnit?.GetAttributeValue<string>(ContainerColumn);
+
+        if (string.IsNullOrWhiteSpace(container))
+        {
+            _logger.LogInformation(
+                "[SECURE-CONTAINER] The owning business unit {BusinessUnitId} of {Entity} {RecordId} has "
+                + "no '{Column}' stamped, so no container could be derived for its non-secure content.",
+                buId, entityLogicalName, recordId, ContainerColumn);
+            return null;
+        }
+
+        return container;
     }
 
     public async Task<OwningSecureRecord?> ResolveOwningRecordAsync(
