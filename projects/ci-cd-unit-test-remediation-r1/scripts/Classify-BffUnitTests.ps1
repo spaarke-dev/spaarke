@@ -60,6 +60,24 @@ $ProtectedPathFragments = @(
     'tests/Spaarke.ArchTests/'      # Amendment A1 -- structural fitness functions
 )
 
+# An assertion can live in a helper the test delegates to, where a body-local counter
+# cannot see it. Round 5 (084 verification): Engine_ThreadMatch_IsDirectionSymmetric and
+# its three siblings were headed for DELETE with "no assertion" -- their whole body is a
+# call to AssertSymmetric(...), which asserts inWrites.Should().ContainSingle(). Returns
+# the set of method names in a file whose own bodies assert.
+$script:HelperAssertCache = @{}
+function Get-AssertingHelperNames {
+    param([string] $Path, [string] $FileTextCode)
+    if ($script:HelperAssertCache.ContainsKey($Path)) { return $script:HelperAssertCache[$Path] }
+    $set = New-Object System.Collections.Generic.HashSet[string]
+    foreach ($m in [regex]::Matches($FileTextCode, '(?m)^\s*(?:private|protected|internal|public|static)[^\n(]*?\b(\w+)\s*\([^)]*\)\s*(?:=>|\{)')) {
+        $after = $FileTextCode.Substring($m.Index, [math]::Min(3000, $FileTextCode.Length - $m.Index))
+        if ($after -match '\bAssert\.\w+|\.Should\(\)\s*\.\s*\w+|\.Verify\w*\(') { [void] $set.Add($m.Groups[1].Value) }
+    }
+    $script:HelperAssertCache[$Path] = $set
+    return $set
+}
+
 # Strip C# comments so ban detection sees code only. Added by spot-check round 3.
 # Order matters: block comments first, then line comments. String literals containing
 # "//" are rare in this suite and a stray strip only ever LOSES a signal (under-call),
@@ -112,17 +130,41 @@ foreach ($file in $files) {
         if ($lines[$sigIdx] -notmatch '\b(?<name>\w+)\s*\(') { continue }
         $methodName = $Matches['name']
 
-        # Capture the body by brace balance, starting at the first '{' at/after the signature.
-        $depth = 0; $started = $false; $bodyLines = @(); $endIdx = $sigIdx
-        for ($k = $sigIdx; $k -lt [math]::Min($sigIdx + 400, $lines.Count); $k++) {
-            $line = $lines[$k]
-            $opens  = ([regex]::Matches($line, '\{')).Count
-            $closes = ([regex]::Matches($line, '\}')).Count
-            if (-not $started -and $opens -gt 0) { $started = $true }
-            if ($started) {
-                $bodyLines += $line
-                $depth += $opens - $closes
-                if ($depth -le 0) { $endIdx = $k; break }
+        # EXPRESSION-BODIED METHODS. Round 5 (084 verification) found the brace-balance
+        # loop below silently produces an EMPTY body for `public void T() => expr;` --
+        # there is no '{', so $started never flips and $bodyLines stays empty. An empty
+        # body means assertCount 0, which reads as "no assertion" and lands in B10.
+        # 679 methods in this suite are expression-bodied. Two caught in the 22-row
+        # residue: NoisyOr_CombinesIndependentConfidences_Bounded (asserts
+        # BeApproximately) and Union_FirstValue_ReturnsIt (asserts Be) -- both fully
+        # meaningful, both scored assertion-free. Detect '=>' before any '{' and capture
+        # through the terminating ';' instead.
+        $bodyLines = @(); $endIdx = $sigIdx
+        $arrowIdx = -1
+        for ($k = $sigIdx; $k -lt [math]::Min($sigIdx + 6, $lines.Count); $k++) {
+            if ($lines[$k] -match '\{') { break }
+            if ($lines[$k] -match '=>') { $arrowIdx = $k; break }
+        }
+
+        if ($arrowIdx -ge 0) {
+            for ($k = $sigIdx; $k -lt [math]::Min($sigIdx + 60, $lines.Count); $k++) {
+                $bodyLines += $lines[$k]
+                if ($k -ge $arrowIdx -and $lines[$k] -match ';\s*$') { $endIdx = $k; break }
+            }
+        }
+        else {
+            # Capture the body by brace balance, starting at the first '{' at/after the signature.
+            $depth = 0; $started = $false
+            for ($k = $sigIdx; $k -lt [math]::Min($sigIdx + 400, $lines.Count); $k++) {
+                $line = $lines[$k]
+                $opens  = ([regex]::Matches($line, '\{')).Count
+                $closes = ([regex]::Matches($line, '\}')).Count
+                if (-not $started -and $opens -gt 0) { $started = $true }
+                if ($started) {
+                    $bodyLines += $line
+                    $depth += $opens - $closes
+                    if ($depth -le 0) { $endIdx = $k; break }
+                }
             }
         }
         $body       = $bodyLines -join "`n"
@@ -144,14 +186,46 @@ foreach ($file in $files) {
         # including LoadSessionAsync_BothMiss_ReturnsNull, whose entire contract IS
         # "returns null". Spot-check (POML step 8) caught it. Anything that pins a
         # specific expected outcome counts, including a null/empty outcome.
-        $meaningfulXunit = '\bAssert\.(Equal|NotEqual|True|False|Null|NotNull|Empty|NotEmpty|Single|Contains|DoesNotContain|Matches|Throws|ThrowsAsync|Same|NotSame|Collection|Multiple|All|InRange|NotInRange|IsType|IsNotType|IsAssignableFrom|Fail|StartsWith|EndsWith|Subset|Superset|Equivalent)\b'
-        $meaningfulFluent = '\.Should\(\)\s*\.\s*(Be|BeEquivalentTo|BeNull|NotBeNull|BeEmpty|NotBeEmpty|BeTrue|BeFalse|Contain|NotContain|Match|Throw|ThrowAsync|NotThrow|HaveCount|Equal|BeOfType|BeAssignableTo|BeGreaterThan|BeLessThan|BeInRange|StartWith|EndWith|ContainSingle|OnlyContain|BeSameAs)\b'
-        $meaningfulMoq   = '\.Verify\w*\(\s*\w+\s*=>'   # Verify with an expression pins an interaction
+        # ROUND 5 — INVERTED FROM ALLOW-LIST TO DENY-LIST. The allow-list above was the
+        # wrong shape and round 1's fix (add more names) only postponed the failure.
+        #
+        # Every entry was an exact name terminated by \b, so any LONGER assertion that
+        # extends a listed name silently failed to match. The 084 verification pass found
+        # the whole "trivial" sub-bucket built on this: `.Should().NotBe(x)` (93 rows),
+        # `.BeOneOf` (34), `.NotThrowAsync` (19), `.ContainKey` (17), `.MatchRegex` (16),
+        # `.BeApproximately`, `.BeCloseTo`, `.OnlyHaveUniqueItems`, `.ContainInOrder`,
+        # `.AllSatisfy`, `Assert.ThrowsAnyAsync` ... all scored TRIVIAL. Of six sampled
+        # forms the ONLY one the list recognised was `NotBeNull` -- the weakest of them.
+        # An allow-list of exact names can never be complete against a fluent API.
+        #
+        # Inverted: ANY assertion is meaningful UNLESS every assertion in the method is
+        # one of the genuinely-contentless forms below. `NotBeNull`/`NotNull` alone is
+        # ADR-038's actual B10 shape -- "it returned something" is coverage, not behavior.
+        # `BeNull`/`Null` are NOT trivial: a null outcome is a real contract (round 1's
+        # LoadSessionAsync_BothMiss_ReturnsNull).
+        $trivialForms = @('NotBeNull', 'NotNull')
 
-        $trivialOnly = ($assertCount -gt 0) -and
-                       (-not ($body -match $meaningfulXunit)) -and
-                       (-not ($body -match $meaningfulFluent)) -and
-                       (-not ($body -match $meaningfulMoq))
+        # Capture CHAINED continuations too. Round 5: AnalysisAction_Default...IsEmptyNotNull
+        # asserts `.Should().NotBeNull().And.BeEmpty()`. Reading only the form directly
+        # after `.Should()` sees NotBeNull, concludes "trivial", and deletes a test whose
+        # real contract is the .And.BeEmpty() half -- the deny-by-default state of a
+        # grounded-tool ALLOW-LIST. `.And.` / `.Which.` continuations count.
+        $assertForms = @()
+        foreach ($m in [regex]::Matches($bodyCode, '\bAssert\.(\w+)'))                    { $assertForms += $m.Groups[1].Value }
+        foreach ($m in [regex]::Matches($bodyCode, '\.Should\(\)\s*\.\s*(\w+)'))         { $assertForms += $m.Groups[1].Value }
+        foreach ($m in [regex]::Matches($bodyCode, '\.(?:And|Which)\s*\.\s*(\w+)\s*\(')) { $assertForms += $m.Groups[1].Value }
+        $hasVerifyExpression = $bodyCode -match '\.Verify\w*\(\s*\w+\s*=>'
+
+        $trivialOnly = ($assertForms.Count -gt 0) -and
+                       (-not $hasVerifyExpression) -and
+                       (@($assertForms | Where-Object { $_ -notin $trivialForms }).Count -eq 0)
+
+        # Does this method delegate its assertion to a helper in the same file?
+        $delegatesAssertion = $false
+        foreach ($h in (Get-AssertingHelperNames -Path $file.FullName -FileTextCode $fileTextCode)) {
+            if ($h -eq $methodName) { continue }   # a test asserting in its own body is not delegation
+            if ($bodyCode -match "\b$([regex]::Escape($h))\s*\(") { $delegatesAssertion = $true; break }
+        }
 
         # --- ban detection (first match wins; ordered by confidence) ----------
         $bucket = $null; $rationale = $null
@@ -224,6 +298,11 @@ foreach ($file in $files) {
             $bucket = 'AMBIGUOUS-b10-absence-contract'
             $rationale = 'No/trivial assertion BUT the name states absence-of-throw as the contract — review, do not auto-delete'
         }
+        # A test whose assertion lives in a helper is not assertion-free. Round 5.
+        elseif (($assertCount -eq 0 -or $trivialOnly) -and $delegatesAssertion) {
+            $bucket = 'AMBIGUOUS-b10-helper-asserts'
+            $rationale = 'Assertion is delegated to a helper method in the same file — review, do not auto-delete'
+        }
         elseif ($assertCount -eq 0) {
             $bucket = 'B10-coverage-filler'
             $rationale = 'No assertion — executes code without asserting behavior (B10)'
@@ -270,7 +349,8 @@ foreach ($file in $files) {
         # which impl a feature flag selects, i.e. ADR-032 contract cover that B3 would
         # otherwise eat. Listed here so it can never reach DELETE.
         $reviewOnlyBuckets = @('B13-name-missing-scenario', 'B15-setup-heavy', 'B7-all-mocks-trivial',
-                               'AMBIGUOUS-adr032-killswitch', 'AMBIGUOUS-b10-absence-contract')
+                               'AMBIGUOUS-adr032-killswitch', 'AMBIGUOUS-b10-absence-contract',
+                               'AMBIGUOUS-b10-helper-asserts')
 
         if ($bucket) {
             $classification =
