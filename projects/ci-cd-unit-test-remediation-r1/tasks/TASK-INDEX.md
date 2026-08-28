@@ -113,7 +113,7 @@
 | 082 | rerun-inventory-broader-criteria | STANDARD | ✅ | true | 080 | 083 |
 | 083 | deep-cleanup-pr-1 (B4 ctor null-guards — bucket revised) | FULL | ✅ | **false** (strict serial) | 082 | 084 |
 | 084 | deep-cleanup-pr-2 (medium-confidence DELETE bucket) | FULL | ⛔ | **false** (strict serial) | 083 | 085 |
-| 085 | deep-cleanup-pr-3 (final sweep + dotnet build/test verification) | FULL | 🔲 | **false** (strict serial; unblocks Phase 3) | 084 | 070 → 071 |
+| 085 | deep-cleanup-pr-3 (final sweep + dotnet build/test verification) | FULL | ⛔ | **false** (strict serial; unblocks Phase 3) | 084 | 070 → 071 |
 
 > **Parallel Groups added for Phase 2.5**:
 > - **PG-4 codification (main-session sequential)**: 080 → 081 (both `.claude/` writes; serialize per write boundary)
