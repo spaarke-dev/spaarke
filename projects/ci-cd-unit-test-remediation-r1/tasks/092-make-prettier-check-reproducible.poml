@@ -1,0 +1,44 @@
+<task id="CICD-092" project="ci-cd-unit-test-remediation-r1">
+  <metadata>
+    <title>Tier 2 Prettier check is not developer-reproducible: CI 1907 files vs local 46 (#850)</title>
+    <status>not-started</status>
+    <estimated-effort>2-4 hours</estimated-effort>
+    <phase>4 - Deliverable defect repair (adopted 2026-08-28)</phase>
+    <stream>A - CI tiering remediation</stream>
+    <rigor-level>FULL</rigor-level>
+    <model-tier>sonnet</model-tier>
+    <effort>high</effort>
+    <autonomous>true</autonomous>
+    <parallel-safe>true</parallel-safe>
+    <dependencies>none</dependencies>
+    <blocks>090</blocks>
+    <tags>ci-workflows, tier2, tooling</tags>
+    <tracking-issue>#850</tracking-issue>
+  </metadata>
+
+  <adoption-note date="2026-08-28">
+    ADOPTED INTO THIS PROJECT, NOT DEFERRED. Owner direction 2026-08-28: "if an issue is
+    important, then it should be added to this project NOT deferred to others."
+
+    The check lives in ci-tier2-advisory.yml, built by THIS PROJECT. A 40x disagreement between CI and local means a developer cannot reproduce it, therefore cannot fix it, therefore learns to ignore it. That is exactly the "constant reds" failure mode north star #3 forbids.
+
+    This is a DEFECT REPORT AGAINST THIS PROJECT OWN DELIVERABLE, not new scope. The project
+    cannot honestly close while something it shipped is known-broken. That is north star #1
+    ("fix it right the first time") and #3 ("no constant reds").
+  </adoption-note>
+
+  <goal>A developer running the documented local command sees the same file count CI sees, so the check is actionable.</goal>
+
+  <steps mode="directional">
+    <step order="1">Diagnose the 40x gap BEFORE changing anything. Candidates: glob expansion differing between bash and PowerShell; .prettierignore not applied on one path; line-ending normalization counting every file as changed; CI scanning build output that local excludes.</step>
+    <step order="2">CRLF is the leading suspect on this repo -- .gitattributes and core.autocrlf interact with prettier endOfLine. Verify before assuming.</step>
+    <step order="3">Fix the root cause, NOT the count. Do not narrow the CI glob to make the numbers match; that hides the disagreement rather than resolving it.</step>
+    <step order="4">Print the exact local reproduction command in the job output so the next person does not re-derive it.</step>
+  </steps>
+
+  <acceptance-criteria>
+    <criterion testable="true">CI and local report the same file count on the same commit</criterion>
+    <criterion testable="true">The job output names the exact command to reproduce locally</criterion>
+    <criterion testable="true">Remaining unformatted files are either fixed or ignored with a written reason</criterion>
+  </acceptance-criteria>
+</task>

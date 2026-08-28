@@ -1,0 +1,44 @@
+<task id="CICD-091" project="ci-cd-unit-test-remediation-r1">
+  <metadata>
+    <title>Tier 2 Full Unit Tests: fix the 5 real-clock timing failures (#848)</title>
+    <status>not-started</status>
+    <estimated-effort>3-5 hours</estimated-effort>
+    <phase>4 - Deliverable defect repair (adopted 2026-08-28)</phase>
+    <stream>A - CI tiering remediation</stream>
+    <rigor-level>FULL</rigor-level>
+    <model-tier>sonnet</model-tier>
+    <effort>high</effort>
+    <autonomous>true</autonomous>
+    <parallel-safe>true</parallel-safe>
+    <dependencies>none</dependencies>
+    <blocks>090</blocks>
+    <tags>ci-workflows, testing, tier2</tags>
+    <tracking-issue>#848</tracking-issue>
+  </metadata>
+
+  <adoption-note date="2026-08-28">
+    ADOPTED INTO THIS PROJECT, NOT DEFERRED. Owner direction 2026-08-28: "if an issue is
+    important, then it should be added to this project NOT deferred to others."
+
+    The failing job is `Full Unit Tests (Debug)` in ci-tier2-advisory.yml, a workflow THIS PROJECT created. The suite was ALWAYS failing; the aggregator masked every result to `pass` until PR #840 repaired it. A tier this project built, reporting failures this project introduced the reporting for.
+
+    This is a DEFECT REPORT AGAINST THIS PROJECT OWN DELIVERABLE, not new scope. The project
+    cannot honestly close while something it shipped is known-broken. That is north star #1
+    ("fix it right the first time") and #3 ("no constant reds").
+  </adoption-note>
+
+  <goal>The 5 real-clock timing tests pass deterministically in CI, and no test in the touched set uses Stopwatch, DateTime.UtcNow or Task.Delay for a timing assertion.</goal>
+
+  <steps mode="directional">
+    <step order="1">Identify the 5 from run 33131511758, job `Full Unit Tests (Debug)`. Start with RetryAndIdempotencyTests.CancellationDuringRetryLoop_StopsImmediately.</step>
+    <step order="2">For each, confirm the failure is real-clock sensitivity and not a genuine defect. A loaded shared runner is the trigger; passing locally is NOT evidence of correctness.</step>
+    <step order="3">Convert to FakeTimeProvider per tests/CLAUDE.md "TimeProvider over Stopwatch". Stopwatch / DateTime.UtcNow / Task.Delay are BANNED in tests by that directive; these predate it.</step>
+    <step order="4">Re-run the Tier 2 unit job. Confirm green AND confirm runtime did not regress: these tests currently WAIT on real clocks, so FakeTimeProvider should make them faster, not slower.</step>
+  </steps>
+
+  <acceptance-criteria>
+    <criterion testable="true">Tier 2 `Full Unit Tests (Debug)` reports 0 failures</criterion>
+    <criterion testable="true">No Stopwatch / Task.Delay / DateTime.UtcNow remains in the touched tests</criterion>
+    <criterion testable="true">Tier 2 p95 still within the NFR-02 8-minute budget</criterion>
+  </acceptance-criteria>
+</task>

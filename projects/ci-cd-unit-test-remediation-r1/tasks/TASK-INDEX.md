@@ -110,6 +110,11 @@
 | 087 | fix-adr-009-imemorycache-endpoints | FULL | ✅ | **false** (hot-path BFF production) | none | 071 (ADR-009 arch test passes locally) |
 | 088 | fix-adr-007-graph-isolation-endpoints | FULL | ⛔ | **false** (hot-path BFF production) | none (can start anytime) | **071** |
 | 081 | build-test-diet-skill | FULL | ✅ | **false** (`.claude/` write — runs in parallel with 080 via main-session sequencing) | (Phase 2 complete) | 090 |
+| 091 | fix-tier2-realclock-test-failures (#848) | FULL | 🔲 | true | none | 090 |
+| 092 | make-prettier-check-reproducible (#850) | FULL | 🔲 | true | none | 090 |
+| 093 | fix-markdown-link-validator-scope (#849) | STANDARD | 🔲 | true | none | 090 |
+| 094 | extend-adr038-ban-enforcement (#864) | FULL | 🔲 | true | 865 | 090 |
+| 095 | client-test-ci-workflow-phase1 (#851) | STANDARD | 🔲 | true | none | 090 |
 | 082 | rerun-inventory-broader-criteria | STANDARD | ✅ | true | 080 | 083 |
 | 083 | deep-cleanup-pr-1 (B4 ctor null-guards — bucket revised) | FULL | ✅ | **false** (strict serial) | 082 | 084 |
 | 084 | deep-cleanup-pr-2 (medium-confidence DELETE bucket) | FULL | ⛔ | **false** (strict serial) | 083 | 085 |
