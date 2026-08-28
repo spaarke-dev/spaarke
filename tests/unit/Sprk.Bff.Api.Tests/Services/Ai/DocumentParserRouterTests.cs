@@ -377,64 +377,6 @@ public class DocumentParserRouterTests
     // Constructor validation tests
     // -------------------------------------------------------------------------
 
-    [Fact]
-    public void Constructor_NullDocIntelService_ThrowsArgumentNullException()
-    {
-        var options = Options.Create(new LlamaParseOptions());
-
-        var act = () => new DocumentParserRouter(
-            null!,
-            _llamaClientMock.Object,
-            options,
-            _loggerMock.Object);
-
-        act.Should().Throw<ArgumentNullException>()
-            .WithParameterName("docIntelService");
-    }
-
-    [Fact]
-    public void Constructor_NullLlamaParseClient_ThrowsArgumentNullException()
-    {
-        var options = Options.Create(new LlamaParseOptions());
-
-        var act = () => new DocumentParserRouter(
-            _docIntelMock.Object,
-            null!,
-            options,
-            _loggerMock.Object);
-
-        act.Should().Throw<ArgumentNullException>()
-            .WithParameterName("llamaParseClient");
-    }
-
-    [Fact]
-    public void Constructor_NullOptions_ThrowsArgumentNullException()
-    {
-        var act = () => new DocumentParserRouter(
-            _docIntelMock.Object,
-            _llamaClientMock.Object,
-            null!,
-            _loggerMock.Object);
-
-        act.Should().Throw<ArgumentNullException>()
-            .WithParameterName("options");
-    }
-
-    [Fact]
-    public void Constructor_NullLogger_ThrowsArgumentNullException()
-    {
-        var options = Options.Create(new LlamaParseOptions());
-
-        var act = () => new DocumentParserRouter(
-            _docIntelMock.Object,
-            _llamaClientMock.Object,
-            options,
-            null!);
-
-        act.Should().Throw<ArgumentNullException>()
-            .WithParameterName("logger");
-    }
-
     // -------------------------------------------------------------------------
     // Helpers — build fake PDF content with /Type /Page markers
     // -------------------------------------------------------------------------

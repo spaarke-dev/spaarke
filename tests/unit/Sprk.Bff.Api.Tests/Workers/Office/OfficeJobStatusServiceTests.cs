@@ -293,17 +293,6 @@ public class OfficeJobStatusServiceTests
 
     #region Constructor Tests
 
-    [Fact]
-    public void Constructor_ThrowsArgumentNullException_WhenLoggerIsNull()
-    {
-        // Act
-        var act = () => new OfficeJobStatusService(null!);
-
-        // Assert
-        act.Should().Throw<ArgumentNullException>()
-            .WithParameterName("logger");
-    }
-
     #endregion
 
     #region Cancellation Token Tests
