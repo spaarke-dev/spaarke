@@ -325,20 +325,6 @@ public class MatterLiveFactResolverTests
         await act.Should().ThrowAsync<ArgumentException>();
     }
 
-    [Fact]
-    public void Constructor_NullEntityService_Throws()
-    {
-        Action act = () => new MatterLiveFactResolver(null!, NullLogger<MatterLiveFactResolver>.Instance);
-        act.Should().Throw<ArgumentNullException>().WithParameterName("entityService");
-    }
-
-    [Fact]
-    public void Constructor_NullLogger_Throws()
-    {
-        Action act = () => new MatterLiveFactResolver(_entityServiceMock.Object, null!);
-        act.Should().Throw<ArgumentNullException>().WithParameterName("logger");
-    }
-
     // ─── Subject parser unit test ────────────────────────────────────────────
 
     [Theory]

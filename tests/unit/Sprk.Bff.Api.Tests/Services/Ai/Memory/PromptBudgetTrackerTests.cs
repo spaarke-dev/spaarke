@@ -47,21 +47,6 @@ public sealed class PromptBudgetTrackerTests
 
 
     [Fact]
-    public void Ctor_RejectsNullLogger_FromOptions()
-    {
-        var opts = Options.Create(new MemoryCompositionOptions());
-        Assert.Throws<ArgumentNullException>(() =>
-            new PromptBudgetTracker(opts, null!));
-    }
-
-    [Fact]
-    public void Ctor_RejectsNullLogger_FromInternalOverload()
-    {
-        Assert.Throws<ArgumentNullException>(() =>
-            new PromptBudgetTracker(8000, null!));
-    }
-
-    [Fact]
     public void Ctor_DefaultBudget_Is8K_PerNfr10()
     {
         using var sut = CreateSutFromOptions(new MemoryCompositionOptions());

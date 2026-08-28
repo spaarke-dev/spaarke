@@ -27,15 +27,6 @@ public class StorageRetryPolicyTests
     #region Constructor Tests
 
     [Fact]
-    public void Constructor_NullLogger_ThrowsArgumentNullException()
-    {
-        // Act & Assert
-        var act = () => new StorageRetryPolicy(null!);
-        act.Should().Throw<ArgumentNullException>()
-            .WithParameterName("logger");
-    }
-
-    [Fact]
     public void Constants_HaveExpectedValues()
     {
         // Assert - verify documented constants

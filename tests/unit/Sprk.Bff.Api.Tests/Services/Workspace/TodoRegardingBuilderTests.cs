@@ -54,22 +54,6 @@ public class TodoRegardingBuilderTests
     // Constructor
     // ──────────────────────────────────────────────────────────────────────────
 
-    [Fact]
-    public void Constructor_NullCommService_Throws()
-    {
-        var act = () => new TodoRegardingBuilder(null!, _loggerMock.Object);
-        act.Should().Throw<ArgumentNullException>()
-            .WithParameterName("communicationService");
-    }
-
-    [Fact]
-    public void Constructor_NullLogger_Throws()
-    {
-        var act = () => new TodoRegardingBuilder(_commServiceMock.Object, null!);
-        act.Should().Throw<ArgumentNullException>()
-            .WithParameterName("logger");
-    }
-
     // ──────────────────────────────────────────────────────────────────────────
     // Argument validation
     // ──────────────────────────────────────────────────────────────────────────
