@@ -13,7 +13,7 @@
 //
 // Production <see cref="ISolutionVerifier"/> implementation — shells out to
 // `pac solution list --environment {envUrl}` and parses the tabular text
-// output for the 8 authoritative solution unique-names + installed versions
+// output for the 9 authoritative solution unique-names + installed versions
 // + solutionIds.
 //
 // SPEC / DESIGN references:
@@ -51,7 +51,7 @@ namespace Sprk.Provisioning.ControlPlane.Handlers.SolutionImport;
 
 /// <summary>
 /// Shells out to <c>pac solution list --environment {envUrl}</c> and parses
-/// the tabular output for the 8 authoritative solution unique-names +
+/// the tabular output for the 9 authoritative solution unique-names +
 /// versions + solutionIds.
 /// </summary>
 public sealed class PacCliSolutionVerifier : ISolutionVerifier

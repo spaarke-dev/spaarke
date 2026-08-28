@@ -81,7 +81,7 @@ public static class HandlerIds
     /// <summary>H5 -- Dataverse environment creation.</summary>
     public const string H5 = "H5";
 
-    /// <summary>H6 -- Dataverse solution import (8 solutions, dependency-ordered).</summary>
+    /// <summary>H6 -- Dataverse solution import (9 solutions, dependency-ordered).</summary>
     public const string H6 = "H6";
 
     /// <summary>H7 -- Dataverse environment-variable values.</summary>

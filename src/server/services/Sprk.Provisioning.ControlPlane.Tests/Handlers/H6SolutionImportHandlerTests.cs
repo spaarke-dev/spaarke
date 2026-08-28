@@ -103,15 +103,15 @@ public sealed class H6SolutionImportHandlerTests
         repo.LastWrittenRun.CompletedPhases.Should().ContainSingle().Which.Phase.Should().Be("H6");
 
         repo.LastWrittenRun.InterStepState.ImportedSolutions.Should().NotBeNull();
-        repo.LastWrittenRun.InterStepState.ImportedSolutions!.Should().HaveCount(8);
+        repo.LastWrittenRun.InterStepState.ImportedSolutions!.Should().HaveCount(9);
         repo.LastWrittenRun.InterStepState.ImportedSolutions!.Select(s => s.SolutionUniqueName)
-            .Should().Contain(new[] { "SpaarkeCore", "SpaarkeWebResources", "LegalWorkspace" });
+            .Should().Contain(new[] { "SpaarkeCore", "SpaarkeWebResources", "LegalWorkspace", "SpaarkeCorporateCounselApp" });
 
         var gate = repo.LastWrittenRun.GateStates[H6SolutionImportHandler.SolutionsImportedGateId];
         gate.Status.Should().Be(GateState.Verified);
         gate.VerifierHandler.Should().Be("H6");
         gate.Evidence.Should().NotBeNull();
-        gate.Evidence!.Value.GetProperty("solutionCount").GetInt32().Should().Be(8);
+        gate.Evidence!.Value.GetProperty("solutionCount").GetInt32().Should().Be(9);
         gate.Evidence.Value.GetProperty("catalogHash").GetString().Should().Be(catalog.CatalogHash);
 
         importer.CallCount.Should().Be(1);
@@ -563,7 +563,7 @@ public sealed class H6SolutionImportHandlerTests
         // silently pass on an empty match set.
         psEntries.Should().NotBeEmpty(
             $"the R5-binding test regex must parse at least one entry from {scriptPath}");
-        psEntries.Should().HaveCount(8, "the PS script's $SolutionImportOrder is authoritative for the 8 solutions");
+        psEntries.Should().HaveCount(9, "the PS script's $SolutionImportOrder is authoritative for the 9 solutions (SESSION 19 2026-08-28 raised 8→9 by adding SpaarkeCorporateCounselApp Tier 4 MDA)");
 
         // Structural equality: same count + same (folder, solution, tier) tuples
         // in the same order.
@@ -628,7 +628,7 @@ public sealed class H6SolutionImportHandlerTests
     {
         var catalog = new CanonicalSolutionCatalog();
         var match = H6SolutionImportHandler.FindRetiredMatch(catalog);
-        match.Should().BeNull("the 8 authoritative solutions do NOT overlap the retired-artifact list");
+        match.Should().BeNull("the 9 authoritative solutions do NOT overlap the retired-artifact list");
     }
 
     [Fact]
@@ -675,23 +675,26 @@ public sealed class H6SolutionImportHandlerTests
         // Canonical `pac solution list` tabular output (line-format may vary
         // slightly across PAC versions; regex tolerates both with-solutionId
         // and without-solutionId).
+        // SESSION 19 MDA-GAP FIX: 9th row for SpaarkeCorporateCounselApp (Tier 4)
+        // added to align with CanonicalSolutionCatalog's 9-solution expansion.
         var stdoutText = @"
-Unique Name              Friendly Name            Version           Solution Id                            Managed
---------------------------------------------------------------------------------------------------------------
-SpaarkeCore              Spaarke Core             1.0.0.0           11111111-2222-3333-4444-555555555555   True
-SpaarkeWebResources      Spaarke Web Resources    1.0.0.0           22222222-3333-4444-5555-666666666666   True
-CalendarSidePane         Calendar Side Pane       1.0.0.0           33333333-4444-5555-6666-777777777777   True
-DocumentUploadWizard     Document Upload Wizard   1.0.0.0           44444444-5555-6666-7777-888888888888   True
-EventRibbons             Event Ribbon Commands    1.0.0.0           55555555-6666-7777-8888-999999999999   True
-EventDetailSidePane      Event Detail Side Pane   1.0.0.0           66666666-7777-8888-9999-aaaaaaaaaaaa   True
-EventsPage               Events Page              1.0.0.0           77777777-8888-9999-aaaa-bbbbbbbbbbbb   True
-LegalWorkspace           Legal Workspace          1.0.0.0           88888888-9999-aaaa-bbbb-cccccccccccc   True
+Unique Name                  Friendly Name                                            Version           Solution Id                            Managed
+------------------------------------------------------------------------------------------------------------------------------
+SpaarkeCore                  Spaarke Core                                             1.0.0.0           11111111-2222-3333-4444-555555555555   True
+SpaarkeWebResources          Spaarke Web Resources                                    1.0.0.0           22222222-3333-4444-5555-666666666666   True
+CalendarSidePane             Calendar Side Pane                                       1.0.0.0           33333333-4444-5555-6666-777777777777   True
+DocumentUploadWizard         Document Upload Wizard                                   1.0.0.0           44444444-5555-6666-7777-888888888888   True
+EventRibbons                 Event Ribbon Commands                                    1.0.0.0           55555555-6666-7777-8888-999999999999   True
+EventDetailSidePane          Event Detail Side Pane                                   1.0.0.0           66666666-7777-8888-9999-aaaaaaaaaaaa   True
+EventsPage                   Events Page                                              1.0.0.0           77777777-8888-9999-aaaa-bbbbbbbbbbbb   True
+LegalWorkspace               Legal Workspace                                          1.0.0.0           88888888-9999-aaaa-bbbb-cccccccccccc   True
+SpaarkeCorporateCounselApp   Spaarke Corporate Counsel App (Matter Management MDA)    1.0.0.0           99999999-aaaa-bbbb-cccc-dddddddddddd   True
 ";
 
         var catalog = new CanonicalSolutionCatalog();
         var outcome = PacCliSolutionVerifier.ParseListOutput(stdoutText, catalog.Solutions);
         var allPresent = outcome.Should().BeOfType<SolutionVerificationOutcome.AllPresent>().Subject;
-        allPresent.ImportedRecords.Should().HaveCount(8);
+        allPresent.ImportedRecords.Should().HaveCount(9);
         allPresent.ImportedRecords[0].SolutionUniqueName.Should().Be("SpaarkeCore");
         allPresent.ImportedRecords[0].Version.Should().Be("1.0.0.0");
         allPresent.ImportedRecords[0].SolutionId.Should().Be("11111111-2222-3333-4444-555555555555");
@@ -709,16 +712,21 @@ LegalWorkspace           Legal Workspace          1.0.0.0           88888888-999
     public void PacCliSolutionVerifier_ParseListOutput_OneMissing_ReturnsMissingOutcome()
     {
         // Same output as T27 happy but LegalWorkspace omitted.
+        // SESSION 19 MDA-GAP FIX: added 9th row (SpaarkeCorporateCounselApp) so
+        // that LegalWorkspace remains the ONLY missing solution (otherwise both
+        // LegalWorkspace + SpaarkeCorporateCounselApp would be missing and the
+        // ContainSingle assertion would fail).
         var stdoutText = @"
-Unique Name              Friendly Name            Version           Solution Id                            Managed
---------------------------------------------------------------------------------------------------------------
-SpaarkeCore              Spaarke Core             1.0.0.0           11111111-2222-3333-4444-555555555555   True
-SpaarkeWebResources      Spaarke Web Resources    1.0.0.0           22222222-3333-4444-5555-666666666666   True
-CalendarSidePane         Calendar Side Pane       1.0.0.0           33333333-4444-5555-6666-777777777777   True
-DocumentUploadWizard     Document Upload Wizard   1.0.0.0           44444444-5555-6666-7777-888888888888   True
-EventRibbons             Event Ribbon Commands    1.0.0.0           55555555-6666-7777-8888-999999999999   True
-EventDetailSidePane      Event Detail Side Pane   1.0.0.0           66666666-7777-8888-9999-aaaaaaaaaaaa   True
-EventsPage               Events Page              1.0.0.0           77777777-8888-9999-aaaa-bbbbbbbbbbbb   True
+Unique Name                  Friendly Name                                            Version           Solution Id                            Managed
+------------------------------------------------------------------------------------------------------------------------------
+SpaarkeCore                  Spaarke Core                                             1.0.0.0           11111111-2222-3333-4444-555555555555   True
+SpaarkeWebResources          Spaarke Web Resources                                    1.0.0.0           22222222-3333-4444-5555-666666666666   True
+CalendarSidePane             Calendar Side Pane                                       1.0.0.0           33333333-4444-5555-6666-777777777777   True
+DocumentUploadWizard         Document Upload Wizard                                   1.0.0.0           44444444-5555-6666-7777-888888888888   True
+EventRibbons                 Event Ribbon Commands                                    1.0.0.0           55555555-6666-7777-8888-999999999999   True
+EventDetailSidePane          Event Detail Side Pane                                   1.0.0.0           66666666-7777-8888-9999-aaaaaaaaaaaa   True
+EventsPage                   Events Page                                              1.0.0.0           77777777-8888-9999-aaaa-bbbbbbbbbbbb   True
+SpaarkeCorporateCounselApp   Spaarke Corporate Counsel App (Matter Management MDA)    1.0.0.0           99999999-aaaa-bbbb-cccc-dddddddddddd   True
 ";
         var catalog = new CanonicalSolutionCatalog();
         var outcome = PacCliSolutionVerifier.ParseListOutput(stdoutText, catalog.Solutions);

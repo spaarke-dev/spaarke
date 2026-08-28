@@ -113,7 +113,7 @@ The provisioning pipeline is a **hybrid** stack. No single IaC/tool covers both 
 |---|---|---|---|
 | **Azure stamp** (per-customer RG, App Service, KV, Storage, Service Bus, OpenAI, AI Search, Doc Intelligence, App Insights, Cosmos, optional SignalR) | `Azure.ResourceManager.Resources` ARM deployment of CI-pre-compiled `customer.bicep`→ARM-JSON (+ `WhatIfAtSubscriptionScopeAsync` for structured drift detection) | `Provision-Customer.ps1` steps 1–3 (~450 effective lines; steps 4–10 duplicate other handlers' jobs) + the 25 Bicep modules (unchanged — Bicep remains the IaC authoring language) | H2a |
 | **Dataverse environment lifecycle** | BAP admin REST (`api.bap.microsoft.com` … `/scopes/admin/environments`) via `HttpClient` + `DefaultAzureCredential` — the same REST sequence `Provision-Customer.ps1` STEP 5 already uses; TF Power Platform provider remains the deferred design target (M-10) | `pac admin create-environment` path retired from the runtime; H10 App User via Dataverse Web API (already in-process) | H5, H10 |
-| **Managed solution import** (8 solutions, dependency-ordered) | Dataverse Web API `ImportSolution` / `StageAndUpgrade` + `ImportJob` polling; solution ZIPs are **versioned build artifacts in the publish payload** (invariant under every runtime option) | `Deploy-DataverseSolutions.ps1` (parity acceptance tests against recorded outputs — heavy port, Wave D-2) | H6 |
+| **Managed solution import** (9 solutions incl. Matter Management MDA, dependency-ordered) | Dataverse Web API `ImportSolution` / `StageAndUpgrade` + `ImportJob` polling; solution ZIPs are **versioned build artifacts in the publish payload** (invariant under every runtime option) | `Deploy-DataverseSolutions.ps1` (parity acceptance tests against recorded outputs — heavy port, Wave D-2) | H6 |
 | **AI Search indexes** (7 canonical, 3072-dim) | `Azure.Search.Documents.Indexes.SearchIndexClient` with UAMI RBAC auth (deletes admin-key handling); index JSON schemas as content files | `scripts/ai-search/Deploy-AllIndexes.ps1` (script remains the catalog authority for the 7-index list) | H2b |
 | **Config-seed layer** | YamlDotNet manifest engine + Dataverse Web API upserts in-process (the pattern H12c already uses); declarative manifest still names the authoritative source per artifact | `Invoke-SeedManifest.ps1`, per-module seeders (parity references) | H12a / H12b / H12c |
 | **BFF deploy + web resources** | CI-published artifact fetch by `{buildId}` + Kudu/ARM zip-deploy + slot swap via `WebSiteSlotResource.SwapSlotAsync`; **no provision-time build** | `Deploy-Release.ps1` Phase 4 (hardened, `customerId`-driven) retained for the web-resource step | H9 |
@@ -1433,7 +1433,7 @@ Verified against the codebase 2026-06-15 (v2) + refreshed 2026-08-12 (v3) — fu
 
 ### 11.1a Solutions Reconciliation — what actually ships vs what's in the repo (added v3.3 per Q2)
 
-Design v3.1/v3.2 said "~10 managed solutions"; INVENTORY §1 says the same. **The actual authoritative count is 8** per `scripts/Deploy-DataverseSolutions.ps1` `$SolutionImportOrder`. This section resolves the confusion once.
+Design v3.1/v3.2 said "~10 managed solutions"; INVENTORY §1 says the same. **The actual authoritative count is 9** (SESSION 19 2026-08-28 raised from 8 → 9 by adding `SpaarkeCorporateCounselApp` Tier 4 — the `sprk_MatterManagement` MDA that was previously silently absent from the H6 catalog) per `scripts/Deploy-DataverseSolutions.ps1` `$SolutionImportOrder`. This section resolves the confusion once.
 
 **Three different "solution" concepts in the repo — v3.3 disambiguates**:
 
@@ -1441,9 +1441,9 @@ Design v3.1/v3.2 said "~10 managed solutions"; INVENTORY §1 says the same. **Th
 |---|---|---|---|
 | `src/solutions/` folders | **36** | Mix of managed solutions, code-page SPAs (deployed as web resources, not solutions), wizards, and dev-only tools | **Not all** — see reconciliation below |
 | `src/dataverse/solutions/` folders (`spaarke_core`, `spaarke_containers`, `spaarke_documents`) | 3 | Unpacked solution skeletons per INVENTORY §1 ALM note | **No** — these are dev-time unpacked forms, not the source of truth for shipping |
-| `Deploy-DataverseSolutions.ps1` `$SolutionImportOrder` | **8** | Authoritative list the deployer imports (with dependency order + tier) | **Yes — these 8 are what H6 ships** |
+| `Deploy-DataverseSolutions.ps1` `$SolutionImportOrder` | **9** | Authoritative list the deployer imports (with dependency order + tier) — SESSION 19 2026-08-28 added Tier 4 `SpaarkeCorporateCounselApp` (Matter Management MDA) | **Yes — these 9 are what H6 ships** |
 
-**Authoritative 8 managed solutions shipped by H6** (per `Deploy-DataverseSolutions.ps1:125-135`):
+**Authoritative 9 managed solutions shipped by H6** (per `Deploy-DataverseSolutions.ps1:170-185`; SESSION 19 2026-08-28 added `SpaarkeCorporateCounselApp` Tier 4 MDA — the `sprk_MatterManagement` model-driven app):
 
 | Tier | Solution folder | Solution unique name | Dependency |
 |---|---|---|---|
@@ -1455,8 +1455,9 @@ Design v3.1/v3.2 said "~10 managed solutions"; INVENTORY §1 says the same. **Th
 | 3 | `EventDetailSidePane` | `EventDetailSidePane` | Tier 3 — independent |
 | 3 | `EventsPage` | `EventsPage` | Tier 3 — independent |
 | 3 | `LegalWorkspace` | `LegalWorkspace` | Tier 3 — independent |
+| 4 | `SpaarkeCorporateCounselApp` | `SpaarkeCorporateCounselApp` | Tier 4 — MDA app + sitemap + 14 app-module components (`sprk_MatterManagement` MDA); depends on Tier 1 entities + Tier 3 feature forms/ribbons. **SESSION 19 2026-08-28 MDA-GAP FIX** — owner audit surfaced that customer envs were receiving all entities/features but no MDA to sign into. |
 
-**The other ~28 items in `src/solutions/` — what happens to them?**
+**The other ~27 items in `src/solutions/` — what happens to them?**
 
 Most are **code-page SPAs deployed as web resources**, NOT as managed solutions. The deployment mechanism differs:
 
@@ -1465,9 +1466,9 @@ Most are **code-page SPAs deployed as web resources**, NOT as managed solutions.
 - **Non-SPA content** (CopilotAgent = M365 declarative agent manifest, spaarke_insights = solution staging, sprk_communicationconversationpage = internal): deployed via their own specialized tooling
 - **Retired / dev-only**: some folders may not deploy anywhere (verified in Phase A)
 
-**v3.3 obligation on Phase A**: audit each of the ~28 non-deployer-listed items in `src/solutions/` and mark each as (a) code-page deployed via `Deploy-Release.ps1`, (b) feature-solution-scoped inside one of the 8 shipped solutions, (c) dev-only / retired, or (d) unknown-needs-review. Publish results at `notes/solutions-reconciliation-2026-08.md`.
+**v3.3 obligation on Phase A** (amended SESSION 19 2026-08-28 — count 8→9): audit each of the ~27 non-deployer-listed items in `src/solutions/` and mark each as (a) code-page deployed via `Deploy-Release.ps1`, (b) feature-solution-scoped inside one of the 9 shipped solutions, (c) dev-only / retired, or (d) unknown-needs-review. Publish results at `notes/solutions-reconciliation-2026-08.md`.
 
-**Design implication**: r1's H6 handler ships **8 managed solutions**, NOT 10. Every place in the design that says "~10 managed solutions" — §1 Executive Summary, §11.1 disposition table, §11 header, PROJECT-UPDATE §2 — must be reconciled to 8 (or updated to a corrected authoritative count if Phase A reveals additions). **v3.3 correction on the immediate references only**; PROJECT-UPDATE is a companion doc that will need its own update.
+**Design implication**: r1's H6 handler ships **9 managed solutions**, NOT 10 (nor 8 as v3.3 originally said before SESSION 19). Every place in the design that says "~10 managed solutions" — §1 Executive Summary, §11.1 disposition table, §11 header, PROJECT-UPDATE §2 — must be reconciled to 9 (or updated to a corrected authoritative count if Phase A reveals additions). **v3.3 correction on the immediate references only**; PROJECT-UPDATE is a companion doc that will need its own update.
 
 **INVENTORY §1's "10 solutions (386 components)"**: the 386-component count is authoritative (from `Build-SpaarkeMaster.ps1`); the "10 solutions" count is the drift. Reconcile INVENTORY as a Phase A action.
 

@@ -5,7 +5,7 @@
 // wave C4 Batch 3D).
 //
 // PURPOSE:
-//   Imports the 8 authoritative Spaarke managed solutions (spec.md §11.1a +
+//   Imports the 9 authoritative Spaarke managed solutions (spec.md §11.1a +
 //   FR-09) into the per-customer Dataverse env created by H5. Wraps the
 //   wave-0 (task 012) hardened scripts/Deploy-DataverseSolutions.ps1 which
 //   IS the runtime source of truth for the solution list ($SolutionImportOrder
@@ -19,7 +19,7 @@
 //       Package Deployer 8-solution import with dependency ordering + upgrade
 //       mode retires holding solution.
 //   - projects/customer-provisioning-orchestration-r1/spec.md §11.1a:
-//       Authoritative list of 8 solutions per Deploy-DataverseSolutions.ps1
+//       Authoritative list of 9 solutions per Deploy-DataverseSolutions.ps1
 //       $SolutionImportOrder (v3 correction from "~10" to 8).
 //   - projects/customer-provisioning-orchestration-r1/spec.md §4D I1:
 //       No hardcoded default tenant — MUST flow tenantId through explicitly.
@@ -439,7 +439,7 @@ public sealed class H6SolutionImportHandler : IProvisioningHandler
         }
 
         // (9) Post-import verification — POML acceptance criterion #1.
-        //     Independently confirms the 8 catalog solutions are installed +
+        //     Independently confirms the 9 catalog solutions are installed +
         //     builds the Cosmos manifest with actual (version, solutionId).
         var verifyRequest = new SolutionVerificationRequest(
             TargetDataverseUrl: targetDataverseUrl,

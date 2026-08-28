@@ -1,10 +1,19 @@
 // -----------------------------------------------------------------------------
 // CanonicalSolutionCatalog.cs
 //
-// Production <see cref="ISolutionCatalog"/> implementation — hardcodes the 8
+// Production <see cref="ISolutionCatalog"/> implementation — hardcodes the 9
 // authoritative Spaarke managed solutions per spec.md §11.1a + FR-09. IS a
 // C#-side mirror of scripts/Deploy-DataverseSolutions.ps1's $SolutionImportOrder
 // hashtable per task 008 R5 binding.
+//
+// SESSION 19 MDA-GAP FIX (customer-provisioning-orchestration-r1, 2026-08-28):
+// Added Tier 4 `SpaarkeCorporateCounselApp` (owns the sprk_MatterManagement MDA
+// app-module + sitemap + 14 app-module-components per Build-SpaarkeMaster.ps1
+// lines 87-89) after owner audit surfaced that H6 was importing entities +
+// features but no MDA to sign into on the customer env. Solution unique-name
+// verified by Assemble-SpaarkeMasterSolution.ps1 source-solution enumeration.
+// Physical .zip publication to blob storage is a separate live-ceremony
+// backlog item (documented in SolutionImportOptions.cs LIVE-CEREMONY GAP).
 //
 // The mapping (FolderName → SolutionUniqueName) MUST match the PS script's
 // hashtable value → SolutionName mapping exactly. Any drift is caught by
@@ -17,7 +26,7 @@
 //   forbids reintroducing via any solution. Currently the retired surface
 //   is the AI Search index (spaarke-playbook-embeddings) + PS orchestration
 //   dispatcher — neither is currently packaged as a Dataverse solution, but
-//   the guard exists to catch future accidents. The 8 authoritative solutions
+//   the guard exists to catch future accidents. The 9 authoritative solutions
 //   do NOT overlap this list (unit-tested at CI time).
 // -----------------------------------------------------------------------------
 
@@ -28,14 +37,14 @@ using System.Text;
 namespace Sprk.Provisioning.ControlPlane.Handlers.SolutionImport;
 
 /// <summary>
-/// Hardcoded canonical catalog of the 8 authoritative Spaarke managed
+/// Hardcoded canonical catalog of the 9 authoritative Spaarke managed
 /// solutions per spec.md §11.1a. C#-side mirror of
 /// <c>scripts/Deploy-DataverseSolutions.ps1</c>'s <c>$SolutionImportOrder</c>.
 /// </summary>
 public sealed class CanonicalSolutionCatalog : ISolutionCatalog
 {
     /// <summary>
-    /// The 8 authoritative solutions in dependency-tier order. This is the
+    /// The 9 authoritative solutions in dependency-tier order. This is the
     /// C#-side mirror of the PS script's <c>$SolutionImportOrder</c>. Both
     /// MUST be updated in lockstep (unit test enforces).
     /// </summary>
@@ -85,7 +94,17 @@ public sealed class CanonicalSolutionCatalog : ISolutionCatalog
                 FolderName: "LegalWorkspace",
                 SolutionUniqueName: "LegalWorkspace",
                 DisplayName: "Legal Workspace",
-                Tier: 3));
+                Tier: 3),
+
+            // Tier 4 — MDA app + sitemap + app-module components (SESSION 19 MDA-GAP FIX).
+            // Depends on Tier 1 entities + Tier 3 feature forms/ribbons. Ships the
+            // sprk_MatterManagement MDA (id 729afe6d-ca73-f011-b4cb-6045bdd8b757) —
+            // without this, customer envs receive all entities but no MDA to sign into.
+            new CanonicalSolutionEntry(
+                FolderName: "SpaarkeCorporateCounselApp",
+                SolutionUniqueName: "SpaarkeCorporateCounselApp",
+                DisplayName: "Spaarke Corporate Counsel App (Matter Management MDA)",
+                Tier: 4));
 
     /// <summary>
     /// Retired-artifact unique-name substrings whose presence in any catalog

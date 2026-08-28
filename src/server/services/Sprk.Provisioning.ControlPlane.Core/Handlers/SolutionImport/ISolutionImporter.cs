@@ -40,7 +40,7 @@
 //
 // LONG-RUNNING SEMANTICS (design.md § 4.2 fire-and-forget):
 //   The PS script blocks synchronously until Dataverse acknowledges each
-//   tier + all rollup verification passes. 8 solutions × up to 5 min per
+//   tier + all rollup verification passes. 9 solutions × up to 5 min per
 //   large solution = up to 40 min per import. The handler's CancellationToken
 //   threads through the shell-out timeout so the outer polling / timeout
 //   window is authoritative. The pwsh process MUST honor the token
@@ -97,7 +97,7 @@ public sealed record SolutionImportRequest(
 
 /// <summary>
 /// Discriminated result of <see cref="ISolutionImporter.ImportAsync"/>. Success
-/// on exit 0 (all 8 solutions imported + per-tier verified); Failure carries a
+/// on exit 0 (all 9 solutions imported + per-tier verified); Failure carries a
 /// classified <see cref="SolutionImportFailureKind"/> the handler maps to a
 /// §4C class + <see cref="SolutionImportRejectionCodes"/> value.
 /// </summary>
@@ -105,7 +105,7 @@ public abstract record SolutionImportOutcome
 {
     private SolutionImportOutcome() { }
 
-    /// <summary>PS script exited 0 — all 8 solutions imported + per-tier verification passed.</summary>
+    /// <summary>PS script exited 0 — all 9 solutions imported + per-tier verification passed.</summary>
     public sealed record Success() : SolutionImportOutcome;
 
     /// <summary>

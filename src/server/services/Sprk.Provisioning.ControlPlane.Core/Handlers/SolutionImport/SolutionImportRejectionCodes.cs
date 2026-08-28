@@ -9,7 +9,7 @@
 //
 // SPEC / DESIGN references:
 //   - projects/customer-provisioning-orchestration-r1/spec.md FR-09 (H6):
-//       Package Deployer import of the 8 authoritative solutions per §11.1a
+//       Package Deployer import of the 9 authoritative solutions per §11.1a
 //       with Tier 1 → Tier 2 → Tier 3 dependency ordering; upgrade mode
 //       retires the holding solution via --stage-and-upgrade.
 //   - projects/customer-provisioning-orchestration-r1/design.md §4.1 H6:
@@ -28,7 +28,7 @@
 //   - .claude/adr/ADR-039: single AI routing surface — retired dispatcher +
 //       spaarke-playbook-embeddings must never be re-introduced via a
 //       solution. A defense-in-depth catalog scan enforces this at the
-//       handler layer even though the 8 authoritative solutions in the PS
+//       handler layer even though the 9 authoritative solutions in the PS
 //       script's $SolutionImportOrder do not include any retired artifact.
 //
 // STABILITY:

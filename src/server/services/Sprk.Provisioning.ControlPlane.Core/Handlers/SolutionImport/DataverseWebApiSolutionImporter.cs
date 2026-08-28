@@ -21,7 +21,7 @@
 //
 // ARTIFACT PACKAGING (DS-1b §1 H6 row — "solution ZIPs must become versioned
 // publish/content artifacts, not files assumed present on a local shell's
-// filesystem"): the 8 solution ZIPs are resolved from the SAME
+// filesystem"): the 9 solution ZIPs are resolved from the SAME
 // `provisioning-artifacts` blob container task 116 (BFF zip)/117 (ARM JSON)/
 // 132 (H9 artifact) already publish to, via a small solution-specific
 // manifest (`dataverse-solutions-latest.json` by default — see
@@ -95,7 +95,7 @@
 // pattern H7's DataverseWebApiEnvVarValuesWriter uses). Token audience is the
 // target Dataverse env's origin + `/.default` (Dataverse Web API convention,
 // parity with DataverseWebApiHealthProbe / DataverseWebApiEnvVarValuesWriter).
-// Blob-artifact resolution (fetching the 8 solution ZIPs from Spaarke's OWN
+// Blob-artifact resolution (fetching the 9 solution ZIPs from Spaarke's OWN
 // provisioning-artifacts storage account) uses a SEPARATE, unrelated
 // credential — the shared L2 UAMI TokenCredential singleton (ADR-028
 // MI-outbound), injected via the pre-constructed BlobContainerClient (parity
@@ -271,7 +271,7 @@ public sealed class DataverseWebApiSolutionImporter : ISolutionImporter
                 SolutionImportFailureKind.MissingSolutionZips,
                 $"Solution artifact manifest '{_options.SolutionArtifactManifestBlobName}' not found in the " +
                 "'provisioning-artifacts' blob container. H6 refuses to fall back to a local filesystem path — " +
-                "the 8 solution ZIPs must be published as versioned blob artifacts (DS-1b §1 H6 invariant).");
+                "the 9 solution ZIPs must be published as versioned blob artifacts (DS-1b §1 H6 invariant).");
         }
         catch (Exception ex) when (ex is JsonException or InvalidOperationException)
         {
