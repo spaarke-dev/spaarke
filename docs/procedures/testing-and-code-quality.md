@@ -91,6 +91,46 @@ Pre-commit hooks are the first quality layer, catching formatting and lint issue
 
 Pre-commit hooks MUST complete in **< 10 seconds** (lint-staged runs only on staged files, not the full codebase).
 
+### Reproducing the Tier 2 Prettier check locally
+
+The Tier 2 advisory `Lint (ESLint + Prettier)` job runs exactly this from the repo root:
+
+```bash
+npx prettier --check "src/client/**/*.{ts,tsx}" --no-error-on-unmatched-pattern
+```
+
+Run that verbatim and you will see the same result CI sees. To list only the offending
+files, swap `--check` for `--list-different`.
+
+#### Why this used to be irreproducible (fixed 2026-08-28, task CICD-092 / issue #849's sibling #850)
+
+`.prettierrc.json` set **`"endOfLine": "crlf"`**, which nothing else in the repo backed —
+`.editorconfig` scopes `end_of_line = crlf` to `[*.{cs,csx,vb,vbx}]` only, and `.gitattributes`
+has `text eol=crlf` rules only for those same C# types. TypeScript had **no declared
+line-ending policy at all**.
+
+The result was a check that could only ever pass on one platform:
+
+| | Working tree | Prettier expected | Result |
+|---|---|---|---|
+| Windows dev (`core.autocrlf=true`) | CRLF | CRLF | ✅ 0 files |
+| Linux CI (stored bytes) | LF | CRLF | ❌ **1,907 of 1,911 files** |
+
+So CI was flagging essentially every TypeScript file in `src/client/`, for line endings alone,
+while the same command on a developer machine reported a clean tree. A check nobody can
+reproduce is a check nobody can fix, and therefore one people learn to ignore.
+
+**The fix was `"endOfLine": "auto"`**, which accepts whatever line ending a file already has.
+Line endings are then governed where they belong — by Git (`core.autocrlf` + `.gitattributes`) —
+rather than being asserted independently by the formatter for a file type the repo never
+declared a policy for. Verified at 0 differences against both a CRLF working tree and a
+simulated LF checkout.
+
+> **Do not "fix" this back to `crlf` or `lf`.** Either value re-breaks one of the two platforms.
+> If TypeScript ever needs a real line-ending policy, declare it in `.editorconfig` **and**
+> back it with a matching `.gitattributes` `text eol=` rule — the pattern already used for
+> `*.cs` — and only then tighten Prettier to match.
+
 ### Skipping Hooks (Emergency Only)
 
 ```bash
