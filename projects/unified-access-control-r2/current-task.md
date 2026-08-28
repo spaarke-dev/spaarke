@@ -1,9 +1,9 @@
 # Current Task State — `unified-access-control-r2`
 
-> **Last Updated**: 2026-08-27 — **ALL 6 WAVE-A BRANCHES MERGED. Task 076 IN PROGRESS
-> (option C + owner-approved container-model change).**
-> **Recovery**: read "Quick Recovery", then §076 below. The merge-by-branch rule is now history — all
-> branches are in — but keep it for the next parallel wave.
+> **Last Updated**: 2026-08-27 (by `context-handoff`) — **MERGED TO MASTER. Next session runs task 083
+> on FABLE.**
+> **Recovery**: read "Quick Recovery", then §083, then §076. The merge-by-branch rule is history (all
+> branches in) but keep it for the next parallel wave.
 
 ---
 
@@ -11,9 +11,83 @@
 
 | Field | Value |
 |-------|-------|
-| **State** | Worktree clean. **6 commits ahead of `origin/master`**, NOT pushed. Task **076 in progress**. |
-| **Verified on the merged tree** | build **0/0** · BFF **10,895 / 0 / 77** (+139 vs pre-merge) · Core **64/0** · Spe.Integration **409/0/65** · ArchTests **121 pass / 6 fail** (not ours) · census **110** · publish **45.11 MB** compressed incl. PDBs (+0.15, ceiling 60) |
-| **Next Action** | Continue 076 at **Step 2**: convert `PUT /api/obo/containers/{id}/files/{*path}` → `PUT /api/obo/records/{entity}/{recordId}/files/{*path}`, gated by `CallerRecordAccessProbe`. See §076 for the exact remaining list. |
+| **State** | ✅ **MERGED TO MASTER** at `8e799f5ec`. Worktree clean, **0/0**. Main repo `master` ref synced (its checkout `ci/task-084-b10-verification` left untouched). |
+| **PR** | **#861 open as DRAFT** — CI **fully green**: 23 success / 1 neutral (Trivy) / **0 failures**, all 8 Tier 1 blocking jobs pass, `Tier 2 / Full Unit Tests` **SUCCESS**, and `Tenant Isolation (I1–I5)` now green (was red on master). |
+| **Next Action** | 🔴 **Run task 083** — [`tasks/083-container-selection-authorization-sweep.poml`](tasks/083-container-selection-authorization-sweep.poml). It is **`<model-tier>fable</model-tier>` @ `xhigh`** — switch with `/model` before starting, or dispatch it as a Fable subagent. **Do not run it on a lower tier**; CLAUDE.md §8.5 requires the escalation. |
+| **Verified on master** | build **0/0** · ArchTests **121 pass / 6 fail** (the recorded not-ours baseline, all in `Sprk.Provisioning.ControlPlane.Core`; **PR #847 fixes exactly those**) · publish **45.11 MB** compressed incl. PDBs (+0.15 vs 44.96, ceiling 60) · CVE clean |
+
+### ⚠️ The local test suite is NOT trustworthy on this machine — CI is
+
+Local runs show **5 failures that do not exist in CI** (`Tier 2 / Full Unit Tests` = SUCCESS on the exact
+same SHA). Established, not assumed:
+
+1. Reverting `RecordContainerResolver.cs` to its pre-076 state reproduces them identically → not mine.
+2. The failing **set moves between runs** (`SearchItems` dropped out; `ScopePersonas` and
+   `EndpointAuthorizationCharacterization` appeared). A deterministic break does not move.
+3. All take **~100 s** and die with `TaskCanceledException` / *"The client aborted the request"* on an
+   in-memory `WebApplicationFactory` client — a timeout signature, not an assertion failure.
+
+**Root cause, partly found and partly NOT — do not repeat the dead end.** Proven: **5 of 6 "fake" test
+hostnames resolve to LIVE Microsoft Azure IPs** via wildcard DNS (`test.crm.dynamics.com` →
+`13.64.177.224`, `test.search.windows.net` → `20.191.59.83`, plus `test.openai.azure.com`,
+`test.documents.azure.com`, `test.vault.azure.net`; only `test.servicebus.windows.net` is NXDOMAIN). So a
+stray outbound call in a test opens a **real TCP connection to Azure** and hangs to the 100 s default
+instead of failing fast. **313 occurrences across 62 test files** + 3 in
+`Sprk.Provisioning.ControlPlane.Tests`.
+
+**But I DISPROVED that as the cause of the specific hang** — rewriting those hostnames to `.invalid` in
+`ComposeSupersedeEndpointContractTests.cs` and re-running left it at **2 m 6 s, still failing** (edit was
+reverted). Likely because the config is set in more than one place. So:
+- The hostname hazard is **real and worth fixing** (a latent 100 s trap on every stray call) — but it is
+  **test hygiene, not a blocker**: CI is green.
+- ⚠️ Changing those hostnames carries a real risk: URL-shape validation may depend on the genuine
+  `.dynamics.com` / `.azure.com` suffixes. Probe one file before sweeping 313.
+- The **actual** cause of `Supersede_WhenSessionUnknown_Returns404` hanging is **still unknown**. Next
+  diagnostic step: trace what the unknown-session path calls outbound
+  (`ChatEndpoints.cs:270` → `SupersedeComposeOutputAsync`, ~`:1530`).
+
+---
+
+## 🔴 §083 — THE NEXT TASK. Owner-directed, and it supersedes finishing 076 first.
+
+**Owner decision 2026-08-27, verbatim intent**: *"this is turning into a critical issue and trying to
+offload to other projects is very risky because they lack the context… we need to address the full extent
+of this issue here."*
+
+**The defect class**: the client names an SPE container; the server writes bytes into it. SPE permissions
+are **additive-only**, so one survivor puts secure content in a shared container **permanently**.
+
+**At least 5 instances, 2 of them LIVE. Two rows are UNTRACED — tracing them is step 1.**
+
+| # | Path | Status |
+|---|---|---|
+| 1–2 | app-only container route · chunked OBO pair | ✅ deleted (073, 076) |
+| 3 | `PUT /api/obo/containers/{id}/files/{*path}` | 🔄 **076 mid-conversion** (see §076) |
+| **4** | **`PUT /api/drives/{driveId}/upload`** — **app-only MI**, `canwritefiles` policy only | 🔴 **LIVE. DO FIRST.** |
+| **5** | **`DELETE /api/drives/{driveId}/items/{itemId}`** — **a DESTROY**, same gating | 🔴 **LIVE** |
+| 6 | Compose create-on-save `ContainerId` | 🔲 issue **#858**, sequenced behind PR #806 |
+| 7–8 | `ChatWordExportEndpoints.cs:154` · `ChatDocumentEndpoints.cs:1160` | ⚠️ **UNTRACED** |
+
+**Why 4 and 5 outrank Compose**: they write **app-only (MI)**, and 073's whole finding was that app-only
+needs **no container ACL** — so unlike every OBO row these are **live holes, not latent bypasses**. Both
+survived 073 only because they live in `DocumentsEndpoints.cs`, outside its file scope. **Neither is
+blocked by any open PR.**
+
+**The hard sequencing block, verified**: PR **#806** modifies `IComposeService.cs`, `ComposeEndpoints.cs`
+**and** `ComposeService.cs`. Row 6 waits on it. ⚠️ **`gh pr view --json files` CAPS AT 100 SILENTLY** — it
+under-reported #806 (**352** actual) and #843 (**178**). **Always `gh api --paginate` for overlap checks
+in this repo.**
+
+**Issue #858 ownership was CORRECTED** — it originally read as a handoff to compose-r8; the comment
+(`#858#issuecomment-5453509522`) now states UAC-r2 owns the fix, compose-r8 must NOT start it, and the only
+ask of them is notification when #806 clears.
+
+**082 is a DIFFERENT concern** — caller-*identity* claim reads, not container selection. I initially
+advised folding them together; that was wrong. Keep them separate.
+
+---
+
+## §076 — PARTIALLY DONE AND ON MASTER. Finish it inside 083 or before it.
 
 ### ✅ Wave A is fully merged — all 6 branches, BY BRANCH NAME
 
