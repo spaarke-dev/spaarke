@@ -1,8 +1,9 @@
 # Current Task State — `unified-access-control-r2`
 
-> **Last Updated**: 2026-08-28 (by `context-handoff`) — **MERGED TO MASTER. Wave 1 + Wave 2 complete
-> (070–081 less 076/078). 6 task branches remain.**
-> **Recovery**: read "Quick Recovery" first, then the ⚠️ merge rule below it — it cost a defect this session.
+> **Last Updated**: 2026-08-27 — **ALL 6 WAVE-A BRANCHES MERGED. Task 076 IN PROGRESS
+> (option C + owner-approved container-model change).**
+> **Recovery**: read "Quick Recovery", then §076 below. The merge-by-branch rule is now history — all
+> branches are in — but keep it for the next parallel wave.
 
 ---
 
@@ -10,33 +11,120 @@
 
 | Field | Value |
 |-------|-------|
-| **State** | ✅ **MERGED TO MASTER.** Worktree clean, **0/0 vs `origin/master`**. Main repo `C:/code_files/spaarke` synced. PR **#825 MERGED**. |
-| **Verified** | build **0/0** · BFF **10,756 / 0 / 77** · ArchTests **6 fail / 121 pass** · census **110** · Tier 1 **8/8 green** on the merge SHA |
-| **The 6 ArchTest failures are NOT ours** | FR-27 ×2, ADR-010, `ServiceBusClientGuard`, FR-F1, FR-F2 — other projects' surfaces. ADR-010 sits at **156** = master's +2 (theirs to explain) + our **1 justified seam** (`ISecurableEntityRegistry`, genuinely substituted). **Do NOT raise the ceiling** — that launders master's two. |
-| **Merged this session** | 073 · 079 · 075 (full branch) · master (×3, incl. breaking **#840**) · 12 ArchTest edits · ADR-010 · flake fix · dead-code removal |
-| **Remaining** | **6 task branches** (table below) + ArchTest edit **#13** + tasks **076**, **078**, then Phase 1+ |
-| **Next Action** | Merge the 6 remaining branches **BY BRANCH NAME** (see ⚠️ below), starting with **081** — then apply ArchTest edit #13 (081's census comment, deferred by its own ordering constraint). |
+| **State** | Worktree clean. **6 commits ahead of `origin/master`**, NOT pushed. Task **076 in progress**. |
+| **Verified on the merged tree** | build **0/0** · BFF **10,895 / 0 / 77** (+139 vs pre-merge) · Core **64/0** · Spe.Integration **409/0/65** · ArchTests **121 pass / 6 fail** (not ours) · census **110** · publish **45.11 MB** compressed incl. PDBs (+0.15, ceiling 60) |
+| **Next Action** | Continue 076 at **Step 2**: convert `PUT /api/obo/containers/{id}/files/{*path}` → `PUT /api/obo/records/{entity}/{recordId}/files/{*path}`, gated by `CallerRecordAccessProbe`. See §076 for the exact remaining list. |
 
-### ⚠️ MERGE BY BRANCH, NEVER BY COMMIT SHA — this cost a real defect this session
+### ✅ Wave A is fully merged — all 6 branches, BY BRANCH NAME
 
-`git log --grep` finds *a* commit; **the branch tip is the deliverable.** I merged 075 by SHA and shipped a
-version missing **3 fail-open fixes** in the container-isolation component (corrected in `202435a4f`; full
-account in merge plan **A19**). The mechanism is structural here: an agent's FIRST commit is the feature,
-and **Step 9.5's gates then make it iterate** — so grep-then-SHA reliably selects the *pre-review* version.
+011 · 013 · 015 · 018 · 020 · 081, zero conflicts. **ArchTest edit #13 applied** (the last of the 13;
+081's census comment flipped to past tense only after 081's code was in the tree).
 
-**The 6 remaining branches, verified by content 2026-08-28:**
+Each merged test class was verified to **execute**, not merely compile — and that surfaced a
+handoff error worth keeping: **`tests/integration/auth/**` compiles into `Sprk.Bff.Api.Tests`**
+(csproj:101), NOT `Spe.Integration.Tests` as the prior handoff said. Counts: FetchXmlGuardSelfJoin 26 ·
+WorkforceEmailNoHijack 45 · MembershipPagingCharacterization 18 · SpeRevokeMatcher 31 ·
+ScopeInjectorBound 22 · AuditEnrichmentMiddleware 8 · ExternalModuleDataContract 8 ·
+StandingGrantRuntimeUnionSeam 2 · ExternalScopeCharacterization 6.
 
-| Task | Branch | Tip | Unmerged commits |
-|---|---|---|---|
-| **011** reject same-entity self-join | `worktree-agent-a883a01048c746823` | `15924623d` | 1 |
-| **013** workforce email/oid no-hijack | `worktree-agent-a1905b30c1c467af3` | `ceb75146d` | **5** ⚠️ |
-| **015** membership paging deterministic | `worktree-agent-a5cce09f225ae4265` | `8f749ab5d` | 1 |
-| **018** remove dead filter (A-23) | `worktree-agent-a50b2ed919feb5169` | `37f691ca1` | 2 |
-| **020** org-grant SPE member cleanup | `worktree-agent-aa9346e2aa2b6af05` | `472141c36` | 1 |
-| **081** classify the caller | `worktree-agent-a6469d6b786a2b792` | `41cb87310` | **4** ⚠️ |
+Two stale claims the merges created were repaired: the 081 census comment, and
+`OfficeAuthFilter.cs`'s consumer list (018 deleted `OfficeDocumentAccessFilter`, one of the three it
+named — and the list was **already** incomplete, omitting **nine direct handler reads** in
+`OfficeEndpoints.cs`).
 
-013 and 081 carry the most tail — exactly the shape that bit 075. 073/079/075 are all confirmed **0
-unmerged**.
+---
+
+## 🔴 §076 — IN PROGRESS. Read this before touching anything.
+
+### The owner-approved model change (2026-08-27) — this supersedes the POML
+
+Option (C) said "the client stops deciding", but 075's resolver takes a
+`nonSecureFallbackContainerId` **the client supplied** — so (C) was unreachable without the server
+deriving it. Owner directed: **derive it from the record's own owning business unit.**
+
+**What was wrong**: every client upload site resolved `getUserId() → systemuser.businessunitid →
+businessunit.sprk_containerid` — *the person uploading, not the thing uploaded to*. Worse for
+isolation: users sit in the Operations subtree while secure records are owned in `Secure Projects`,
+so acting-user resolution writes secure content into the general **Operations** container.
+
+**INV-7 has no technical basis** — traced. `design.md:450` states it as a constraint; its only
+concrete form is a comment on `SaveComposeDocumentRequest.ContainerId` (`IComposeService.cs:743-751`)
+saying *"the resolver stays in the wizards"* — a **scope boundary** from
+`spaarke-multi-container-multi-index`, cited downstream as a constraint. `design.md:450` still needs
+correcting.
+
+**Verified live against Dataverse** (do not re-derive): `owningbusinessunit` populated on every
+`sprk_project` row · `businessunit.sprk_containerid` populated on 3 of 6 BUs · the **`Secure Project`
+BU has NO container** (correct — secure records use their own) · the **root `Spaarke` BU SHARES its
+container with `Spaarke Business Unit 1`** · `sprk_issecure` is **NULL on 5 of 10 rows** — the
+"ABSENT is not FALSE" case, live.
+
+### ✅ Done in 076
+
+| Step | State |
+|---|---|
+| **0** verify the three §1 facts | ✅ all three confirmed first-hand. `UploadEndpoints.cs` gone · 075's resolver present · `GET /api/obo/containers/{id}/drive` mapped NOWHERE (3 comments, 0 `Map*`) — this cleared escalation trigger 3 |
+| **1** design note | ✅ [`notes/task-076-record-keyed-upload-contract.md`](notes/task-076-record-keyed-upload-contract.md) |
+| **3** delete the dead chunked pair | ✅ `ed5d9e776` — both routes + dead client + 2 waivers; OBO registration pin **3 → 1** |
+| **model change** server-side BU resolution | ✅ `4d375b420` — `RecordContainerResolver` now derives the fallback from `owningbusinessunit` |
+
+### 🔲 Remaining in 076
+
+1. **Step 2 — convert the live route.** `PUT /api/obo/containers/{id}/files/{*path}` →
+   `PUT /api/obo/records/{entity}/{recordId}/files/{*path}`, authorized by
+   **`CallerRecordAccessProbe.GetCallerRightsAsync(bearerToken, entitySet, recordId, ct)`** (fail-closed
+   to `AccessRights.None`) via an endpoint filter per ADR-008. Needs a logical-name → entity-SET map —
+   **reuse `SemanticSearchAuthorizationFilter`'s `TryResolveParentEntitySet`** (task 080 made it
+   `internal` for exactly this); do NOT write a second one (§11).
+2. **NEW — the >4 MB fix (owner-directed).** `POST /api/obo/records/{entity}/{recordId}/upload-session`
+   → authorize record, resolve container, create the Graph session, return `uploadUrl`. **Client chunks
+   directly to Graph's `uploadUrl`** — that part already worked, and the deleted BFF chunk-relay route
+   stays deleted (nothing ever called it; proxying bytes through the BFF is worse).
+3. **Step 4** — cut over U1 `EntityCreationService.ts:493`, U2 `SdapApiClient.ts:101`,
+   U3 `UploadOperation.ts:27` to `(entity, recordId)`.
+4. **Step 5** — classify all 12 container suppliers; unclassified = survivor. Note
+   `NavigationService.ts:354-362`, `WorkspaceGrid.tsx:535-537`, `sprk_analysis_commands.js:58` feed
+   **reads/navigation, not uploads** — those are NOT this task's to delete.
+5. **Step 6** — delete W1 (`EntityCreationService.ts:327` `applyDefaultContainerId`, via
+   `applyUserBuDefaults:374`) and W2 (`DocumentUploadWizard/sprk_subgrid_commands.js`).
+6. **Step 7** — route the 7 server-side Communication sites (`CommunicationService.cs:460/1259/1574/
+   2054/2146`, `MessageAttachmentMaterializer.cs:114`, and verify `:2368`'s "no longer used" comment).
+7. **Step 8** — delete the LAST OBO waiver once the route is gated. **Never** convert it to Permanent.
+8. **Steps 9–11** — tests (incl. the no-access-caller deny case, which has no prior coverage at all),
+   absence-grep, build/publish/CVE.
+
+### ⚠️ 075 built a CLIENT-side resolver that option (C) makes dead
+
+`Spaarke.UI.Components/src/services/RecordContainerResolver.ts` — its header says *"Task 076 routes
+the ~8 client call sites onto this module"*, which is **option (A)'s design**. Under (C) no client
+resolves a container. It currently has **zero production importers** (only its own test + the
+barrel). Decide explicitly in Step 5: delete it, or keep `decideContainer` alone for the
+fixture-parity pin (`tests/fixtures/secure-container-decision-table.json` drives BOTH halves — check
+before deleting, or the C# half's parity test loses its counterpart).
+
+### 🔴 Deploy ordering — the outage risk
+
+**Client + BFF MUST ship together.** No compatibility window, no feature flag: BFF-first 404s every
+upload, client-first 404s every upload. Must be in the PR description.
+
+### Filed, not fixed — hand to compose-r8 (PR #806)
+
+[`notes/finding-compose-create-on-save-client-named-container.md`](notes/finding-compose-create-on-save-client-named-container.md)
+— Compose create-on-save writes into a **client-named container**, the same shape 076 removes from
+uploads. Root cause is a contract gap: `SaveComposeDocumentRequest` carries **no parent-record key**
+(all 16 properties enumerated). But the owning record IS known one step earlier
+(`LoadComposeDocumentRequest.MatterId` + ADR-040 session binding) and isn't threaded to save. Not
+exploitable today (OBO, no user holds a container ACL). `ComposeEndpoints.cs` IS governed as
+`Scope.HandlerAuthorized`, so it is visible and classified. **ADR-049 surface under active
+development — handover, not a drive-by edit.**
+
+### 🔴 STILL OWED — a regression test whose gap is PROVEN
+
+`SemanticSearchAuthorizationFilter` + `RecordSearchAuthorizationFilter` **and their handlers** were
+fixed to `CallerResolution.ResolveObjectId`, but nothing guards them. Perturbation-proven twice:
+restore the broken read and **45 dedicated authorization tests stay green**. Write a principal in
+production's MAPPED shape (schema-URI `oid` + *divergent* `NameIdentifier` `sub`) asserting the
+**oid** reaches the authorization decision.
 
 ### 🔴 STILL OWED — a regression test whose gap is PROVEN, not suspected
 
