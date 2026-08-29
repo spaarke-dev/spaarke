@@ -10,10 +10,10 @@
 
 | Field | Value |
 |---|---|
-| **Active task** | none — between tasks |
-| **Project state** | 47 tasks · 33 complete · 2 open · 7 closed · 2 partial |
-| **Status** | in-progress |
-| **Next Action** | **1.** Merge PR **#889** when green (a watcher may already have). **2.** Start **task 094** — the last open defect task. **3.** Cutover chain stays gated on the shadow window. |
+| **Active task** | none — 094 done, PR **#890** open |
+| **Project state** | 47 tasks · 34 complete · 1 open · 7 closed · 2 partial |
+| **Status** | in-progress — **all defect tasks closed; only the cutover chain remains** |
+| **Next Action** | **1.** Merge PR **#890** when green. **2.** Then WAIT — the cutover chain is gated on the shadow window, and the window is now gated on **calendar days**, not throughput. Nothing else is startable. |
 
 ### Critical context
 
@@ -47,11 +47,20 @@ irrecoverably. That killed #856 earlier (recovered as #857).
 
 ## Open work
 
-### 1. Task 094 — remaining 15 ADR-038 bans (#864) — NOT STARTED
+### 1. ~~Task 094~~ — DONE (PR #890)
 
-FULL rigor, 4–6h. Freeze-exposed (see Critical context). Owner rulings already made — **do not
-re-litigate**: B6 (mirror tests) has no regex signature, so say so plainly rather than shipping a
-weak detector; B13 (~1,124 live) — a bad name is NOT grounds for deletion.
+All 17 bans accounted for: **5 armed** (B1/B4 prior + **B3/B12/B16**), 12 documented-unenforceable
+with live counts. Migration cost 4 test methods in 2 files. ArchTests **136 → 139**.
+Census: `notes/094-adr038-ban-census.md`; annex added to ADR-038 §7.
+
+**The one thing worth carrying forward**: **B8 is the next arming pass** — 7 call sites in 5 files
+invoking private production methods by reflection. It is the only unarmed ban with both a tight
+signature and a bounded count; it stayed unarmed because the migration is a per-call-site
+production-visibility decision, not a mechanical sweep.
+
+Also confirmed, so nobody re-derives it: **B2 and B17 name types this repo does not contain** —
+there is no `IServiceClient` (3 grep hits, all prose) and AutoMapper is not a dependency (0 refs).
+Arming either would be guard-theater.
 
 ### 2. The cutover chain — gated on the window
 
