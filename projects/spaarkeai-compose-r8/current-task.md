@@ -1,9 +1,8 @@
 # Current Task State — `spaarkeai-compose-r8`
 
 > **Last Updated**: 2026-08-28 (by `context-handoff`)
-> **Recovery**: read Quick Recovery. The P1 authorization work is DONE, MERGED and DEPLOYED —
-> do not re-open it. **Issue #839 is also DONE** (PR #847, awaiting review).
-> Active work returns to **Compose R8 product work on PR #806**.
+> **Recovery**: read Quick Recovery. **#863 (session ownership) is code-complete.**
+> Everything below "Full State" is preserved history from earlier checkpoints.
 
 ---
 
@@ -11,12 +10,141 @@
 
 | Field | Value |
 |---|---|
-| **Active work** | **Track D — task 070**, decompose `ComposeService.cs`. IN PROGRESS: analysis complete, **no code moved yet**. |
-| **Next Action** | Extract **cluster 7 (memory capture)** first, NOT cluster 1. Coverage measured 2026-08-28 (see the seam map's coverage table) inverts the planned order: cluster 1 is structurally cleanest but only **76.6% branch**, while 7/6/5b/8 sit at 87-96%. Evidence order: **7 -> 6 -> 5b -> 8 -> 2b -> 2a -> 1 -> 3 -> 4 -> 5a**. Cluster 1's verified 5-dependency spec still stands and is still correct — it just should not go first. Build + run the Compose seam/op-log suites after EACH extraction (POML step 3), not once at the end. |
-| **⚠️ Do not chase the POML's criteria** | Its two stated criteria are unreachable, not merely stale: `GodClassGuardTests.cs` **does not exist** (verified) so there is no waiver to delete, and the LOC ratchet was retired 2026-08-20. Binding criterion is reason-to-change decomposition; **line count is an observation, not a target** (TASK-INDEX reframe box, owner-approved §6.5 Path C). All other POML constraints still bind — internal collaborators only (**no new DI registration**, ADR-010), behaviour-preserving, defects recorded not fixed, no second save entry point. |
-| **⚠️ SaveAsync stays whole** | It is ~816 lines and is ONE decision with many branches. 074 proved the two save paths are not interchangeable, and the POML forbids a second save entry point. A large cohesive remainder is a legitimate outcome under §11.5 — state it in the PR, do not slice it to hit a number. |
-| **Verify with** | `dotnet build src/server/api/Sprk.Bff.Api/` + the Compose seam/op-log suites |
-| **⚠️ 074 is CLOSED as DO-NOT-DELETE** | `ComposeShadowPatchEngine` is load-bearing. Deleting it fails as **silent data loss** — the mutation experiment returned HTTP 200 with 107/151 op-log tests failing. Do not revisit; see the reframe box. |
+| **Active work** | Between tasks. #863 code-complete; **070 cluster 7** is next. |
+| **Next Action** | **1) Sync with `origin/master` (152 behind) — this ALONE fixes all 5 ArchTest failures.** 2) Diagnose the 3 timeouts (§B). 3) Start 070 cluster 7 (§E). |
+| **Branch** | `work/spaarkeai-compose-r8` · clean · HEAD `9834cdaf4` · **152 behind master** |
+| **Suite** | BFF **11,465 pass / 3 fail** (was 85 failing) · ArchTests 123/128 — **all 5 are staleness, not defects** |
+| **Verify with** | `dotnet build src/server/api/Sprk.Bff.Api/` + `dotnet test tests/unit/Sprk.Bff.Api.Tests/` |
+
+---
+
+## A. The 5 ArchTest failures — FIX PATH: sync the branch. Nothing is orphaned.
+
+Established by evidence, not assumption:
+
+```
+847 merged to master: YES   (90c45315e)
+847 in our branch:    NO
+behind master by:     152 commits
+master ceiling: knownOneToOneCeiling = 156
+ours   ceiling: knownOneToOneCeiling = 153
+```
+
+PR #847 — the #839 adjudications (ADR-010 ceiling 153→156, the secret-shape guard rewrite, the
+ServiceBus canonical-construction-sites change) — **is already merged to master**. This branch
+predates it. The five failures are `ADR010_DITests` (ceiling), `CosmosProvisioningSecretGuard`
+(FR-27, firing on *another worktree's* `Sprk.Provisioning.ControlPlane` POCOs),
+`CredentialCensus`/`CredentialGuard` (FR-F1/F2), and `ServiceBusClientGuard`. Every one was
+adjudicated in #847.
+
+**Action**: `git merge origin/master` as the FIRST step next session; re-run ArchTests, expect
+128/128. **Do NOT hand-edit the ceiling here** — that forks a value #847 already owns, which is
+exactly how a ratchet stops meaning anything.
+
+**Merge risk**: those 152 commits include `unified-access-control-r2` work inside `ComposeService.cs`
+(#858) and their `CallerIdentityGuardTests` allowlist. Run `/conflict-check` first, per the standing
+Compose-spine rule.
+
+## B. The 3 remaining BFF failures — ONE symptom, hypothesis NOT confirmed
+
+| Test | Duration |
+|---|---|
+| `ChatRefineEndpointTests.Refine_WithAuth_ReachesTheHandler` | ~2m07 |
+| `ComposeSupersedeEndpointContractTests.Supersede_WhenSessionUnknown_Returns404` | ~2m07 |
+| `ComposeCreateOnSaveEndpointContractTests.CreateOnSave_WhenSpeCreateSucceeds_Returns200…` | timeout |
+
+They are **not three assertion problems — they are one timeout**; the shared ~2m07 is the evidence
+(`TaskCanceledException` / "the client aborted the request").
+
+**Hypothesis — record it, do NOT treat it as diagnosed**: `SessionOwnershipFilter` loads the session
+*before* the handler, so for a session that does not exist `GetSessionAsync` walks Redis → Cosmos →
+Dataverse. In these minimal hosts one tier may be reaching a real network with a long timeout. It
+fits: all three are routes where the session is deliberately absent.
+
+**Two prior data points that must inform this rather than be re-derived:**
+
+- The same ~2-minute shape appeared as **F-070-01** (3 contract tests hanging). A network-timeout
+  hypothesis was **REFUTED** there by an `.invalid` probe — but `test.servicebus.windows.net` was
+  never substituted, so that refutation is *incomplete*, not final.
+- `ChatRefine`'s assertion was separately wrong and is now fixed (it asserted the body echoes the
+  session id, contradicting the ADR-019 rule the dispatch suite pins — two suites asserting opposite
+  things about the same convention). That fix is right on its own merits and is **not** why the test
+  fails now.
+
+**First move**: force the Cosmos/Dataverse doubles to fail fast, or instrument `GetSessionAsync`
+tier-by-tier. Cheap and decisive — do that before touching the filter.
+
+**Production observation this surfaced — measure it, do not assume it is fine**: every session-scoped
+request now performs **two** session lookups (filter, then handler). A Redis hit makes the second
+nearly free; on a miss it is two cold three-tier walks. Fix if it matters: stash the resolved session
+in `HttpContext.Items` for the handler to reuse.
+
+## C. The 2 pre-existing failures — PROVEN unrelated, still NOT dropped
+
+`ScopePersonasEndpointTests.GetPersonas_AcceptsNameFilterParameter` ·
+`SpeAdmin.SearchItemsTests.SearchItems_WithToken_ValidConfigIdNotFound_Returns400`
+
+**Verified, not assumed**: stashed every change on this branch, re-ran both, both still fail. Neither
+touches a session-scoped route.
+
+"Not ours" is an ownership answer, not a disposition. **Fix path**: re-check after the master sync
+(§A) — 152 commits may already carry the fix, exactly as they do for the ArchTests. If they still
+fail on a synced branch, **file them** so they are visible, and cite them at 090. Do not merge with
+them silently red.
+
+## D. Where #863 stands
+
+**Complete**: `OwnerOid` on `ChatSession` + `StoredSession` (mapped both ways) · required positional
+`ownerOid` on `CreateSessionAsync` · `AddSessionOwnershipFilter` on all 28 `{sessionId}` routes · 4
+body-scoped routes checked in-handler and enumerated in the guard · History list owner-filtered · one
+stable `session.not-found-or-not-owned` code + `auth.tid-missing` at 401 · unowned sessions fail
+closed (cost accepted + documented).
+
+**Two production defects the suite found (review did not)**: the Compose *document* session was
+minted unowned — so the next dispatch 404'd for the user who had just registered the document — and
+`POST /api/compose/active-document` had no ownership check although it mutates the named session and
+its child inherits that owner.
+
+**Tests**: `SessionOwnershipGuardTests` 5/5 · `SessionOwnershipTests` 8/8, both **proven
+non-vacuous** (removing the ownership comparison turns 2 denial tests red; removing one
+`.AddSessionOwnershipFilter()` line turns guard Rule 1 red).
+
+Full record: `notes/863-session-ownership.md`. **Nothing on #863 awaits a decision.**
+
+## E. Then: task 070 cluster 7
+
+Extract **cluster 7 (memory capture)** first, NOT cluster 1 — coverage measured 2026-08-28 inverts
+the structural order: cluster 1 is cleanest but only **76.6% branch**, while 7/6/5b/8 sit at 87–96%.
+Evidence order: **7 → 6 → 5b → 8 → 2b → 2a → 1 → 3 → 4 → 5a**. Build + run the Compose seam/op-log
+suites after EACH extraction (POML step 3), not once at the end.
+
+> ⚠️ **Do NOT extract cluster 2 until `unified-access-control-r2` replies on #858.** They own a
+> security fix inside `ComposeService.cs`; I proposed holding cluster 2 so their patch lands against
+> today's line numbers.
+
+The three standing 070 warnings (POML criteria unreachable · SaveAsync stays whole · 074 closed
+do-not-delete) are UNCHANGED and still bind — preserved in full below.
+
+## F. Task status
+
+**44 ✅ · 4 🔲 (070, 071, 072, 090) · 1 ⊘ (043) · 1 ⛔ (074).** 059 closed this session (owner
+sign-off; the directed cross-user fix became #863).
+
+## G. Files modified this session
+
+`Api/Filters/SessionOwnershipFilter.cs` **NEW** · `Models/Ai/Chat/ChatSession.cs` ·
+`Services/Ai/Sessions/StoredSession.cs` · `Services/Ai/Chat/ChatSessionManager.cs` ·
+`Services/Ai/Sessions/{I,}SessionPersistenceService.cs` · `Api/ComposeActiveDocumentEndpoints.cs` ·
+`Api/Ai/{ChatEndpoints,AnalysisEndpoints}.cs` · `Api/Agent/AgentEndpoints.cs` ·
+`Services/Compose/ComposeService.cs` · `Api/Filters/AiAuthorizationFilter.cs` (corrected the false
+"handlers check ownership" comment) · `tests/Spaarke.ArchTests/SessionOwnershipGuardTests.cs` **NEW**
+· `tests/integration/auth/Ai/SessionOwnershipTests.cs` **NEW** ·
+`tests/integration/Shared/{TestSessionOwner,TestHttpContexts}.cs` **NEW** (wired into the csproj) ·
+~60 test files (fixture repairs) · `notes/863-session-ownership.md` **NEW** · `tasks/TASK-INDEX.md`.
+
+---
+
+# Full State (preserved history — earlier checkpoints)
 
 ### 📋 Owner decisions taken 2026-08-28 — all recorded, none pending
 
