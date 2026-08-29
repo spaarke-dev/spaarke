@@ -49,16 +49,21 @@ public class PipelineHealthTests : IClassFixture<CustomWebAppFactory>
         response.Content.Headers.ContentType!.MediaType.Should().Be("application/json");
     }
 
-    [Fact]
-    public void Services_Should_Be_Registered_Correctly()
-    {
-        using var scope = _factory.Services.CreateScope();
-        var serviceProvider = scope.ServiceProvider;
-
-        // Core services should be registered
-        serviceProvider.GetService<Microsoft.AspNetCore.Authorization.IAuthorizationService>().Should().NotBeNull();
-        serviceProvider.GetService<Sprk.Bff.Api.Infrastructure.Graph.IGraphClientFactory>().Should().NotBeNull();
-        serviceProvider.GetService<Sprk.Bff.Api.Infrastructure.Graph.SpeFileStore>().Should().NotBeNull();
-        serviceProvider.GetService<Sprk.Bff.Api.Infrastructure.Graph.UserOperations>().Should().NotBeNull();
-    }
+    // `Services_Should_Be_Registered_Correctly` was deleted here by task CICD-094 (issue #864) as the
+    // B3 migration that let the B3 guard arm green. It resolved four services and asserted each was
+    // non-null:
+    //
+    //     serviceProvider.GetService<IGraphClientFactory>().Should().NotBeNull();
+    //
+    // That is ADR-038 §7 B3 verbatim. The four are UNCONDITIONAL core registrations reached by
+    // endpoints that carry their own contract tests — if any were unregistered, those endpoints
+    // return 500 and the contract tests fail with a message that names the endpoint, which is
+    // strictly more diagnostic than "a service was null". The three HTTP tests above it survive and
+    // are the real value of this class.
+    //
+    // Deliberately NOT extended to conditional registrations. Root CLAUDE.md §10 bullet 6 and
+    // ADR-032 govern feature-gated services, where the concern is asymmetric registration rather
+    // than absence; the sanctioned shape there asserts the resolved TYPE
+    // (`.Should().BeOfType<NullFoo>()`) or its absence (`.Should().BeNull()`), and the B3 detector
+    // is written not to fire on either. See Adr038TestBanGuardTests.B3_NoDiRegistrationAssertions.
 }
