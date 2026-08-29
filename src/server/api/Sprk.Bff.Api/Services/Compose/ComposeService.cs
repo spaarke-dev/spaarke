@@ -159,6 +159,9 @@ public class ComposeService : IComposeService
 
     /// <summary>Cluster 6 (task 070): the session-annotations contract, extracted.</summary>
     private readonly ComposeAnnotationStore _annotations;
+
+    /// <summary>Cluster 5b (task 070): background profile dispatch + the step signals, extracted.</summary>
+    private readonly ComposeProfileDispatcher _profileDispatcher;
     // Fire-and-forget profile dispatch (compose-r2): a NEW DI scope is created per background profile so
     // the profile facade + its scoped deps never touch the disposing request scope. Optional + defaults
     // null so existing test constructors compile; DI always resolves it in every non-test host.
@@ -282,6 +285,7 @@ public class ComposeService : IComposeService
         _memoryCapture = memoryCapture;
         _memoryCapturer = new ComposeMemoryCapturer(memoryCapture, _sessions, _logger);
         _annotations = new ComposeAnnotationStore(_sessions, _logger);
+        _profileDispatcher = new ComposeProfileDispatcher(_scopeFactory, _documentProfileAi, _appLifetime, _logger);
         // FR-C3 (email-communication-intelligence-r2): null in a bare test constructor (dedup hook = no-op),
         // the real scoped detector in every non-test host.
         _dedupDetector = dedupDetector;
@@ -1863,8 +1867,8 @@ public class ComposeService : IComposeService
         // interim success (container + record + indexing) with the profile still in flight.
         // ────────────────────────────────────────────────────────────────────────────
         var profileSignal = promotion.DocumentRecordId.HasValue
-            ? DispatchBackgroundProfile(promotion.DocumentRecordId.Value, httpContext)
-            : ProfileNotAttemptedSignal("no sprk_document record id resolved — profile not attempted");
+            ? _profileDispatcher.Dispatch(promotion.DocumentRecordId.Value, httpContext)
+            : ComposeProfileDispatcher.ProfileNotAttempted("no sprk_document record id resolved — profile not attempted");
 
         // ────────────────────────────────────────────────────────────────────────────
         // STEP 5 — durable memory capture (FR-30, compose-r2, deferral #629). Best-effort: distil the
@@ -1902,7 +1906,7 @@ public class ComposeService : IComposeService
                 ? CompletedSignal(StepRecord)
                 : RecordNotResolvedSignal(),
             profileSignal: profileSignal,
-            indexingSignal: IndexingSignal(indexingResult),
+            indexingSignal: ComposeProfileDispatcher.Indexing(indexingResult),
             observedAt: observedAt);
 
         // FR-S06 (task 013): the ONE success-path outcome decision. Ordered most-severe first so a save
@@ -2580,7 +2584,7 @@ public class ComposeService : IComposeService
                 return; // unchanged since the last profile — skip (no storm)
             }
 
-            DispatchBackgroundProfile(documentRecordId, httpContext);
+            _profileDispatcher.Dispatch(documentRecordId, httpContext);
             await SetProfiledETagAsync(documentSpeId, liveETag, ct).ConfigureAwait(false);
 
             _logger.LogInformation(
@@ -2610,7 +2614,7 @@ public class ComposeService : IComposeService
         // G10 manual leg: a user-initiated on-demand re-run. UNCONDITIONAL (unlike the reload guard) — the
         // user explicitly asked to refresh — but still fire-and-forget + best-effort. Stamp the current eTag
         // (when known) so an immediately-following reopen does not redundantly re-trigger.
-        DispatchBackgroundProfile(request.DocumentRecordId, httpContext);
+        _profileDispatcher.Dispatch(request.DocumentRecordId, httpContext);
         if (!string.IsNullOrWhiteSpace(request.DocumentSpeId) && !string.IsNullOrWhiteSpace(request.ETag))
         {
             await SetProfiledETagAsync(request.DocumentSpeId!, request.ETag!, cancellationToken).ConfigureAwait(false);
@@ -3573,7 +3577,7 @@ public class ComposeService : IComposeService
                 MaxAttempts = 1,
                 Detail = detail,
             },
-            profileSignal: ProfileNotAttemptedSignal("profile not attempted: record step failed"),
+            profileSignal: ComposeProfileDispatcher.ProfileNotAttempted("profile not attempted: record step failed"),
             indexingSignal: new StoredStepSignal { StepName = StepIndexing, StoredStatus = null, Started = false },
             observedAt: observedAt);
 
@@ -3590,207 +3594,6 @@ public class ComposeService : IComposeService
             WasPromotedThisSave = false,
             CompletionState = completion,
             Origin = origin,
-        };
-    }
-
-    /// <summary>
-    /// FR-05 Fork C (compose-r2): DISPATCHES a best-effort OBO document-profile onto a detached DI
-    /// scope (fire-and-forget) for a newly-created (or idempotently-resolved) <c>sprk_document</c>, and
-    /// returns the non-terminal "dispatched" profile-analysis step signal WITHOUT awaiting the profile.
-    /// The background task (<see cref="RunBackgroundProfileAsync"/>) downloads the user-OBO-written SPE
-    /// file as the user (a background MI job would 403 — the round-6 bug) and reuses the existing
-    /// extract → classify → summarize → field-map → UpdateDocumentAsync pipeline; its 7 profile fields
-    /// land shortly AFTER the save returns.
-    /// </summary>
-    /// <remarks>
-    /// <para>
-    /// <b>Why a detached scope (constraint #1):</b> the request DI scope disposes when the HTTP
-    /// response returns, so the background profile MUST resolve the facade from a FRESH
-    /// <see cref="IServiceScopeFactory.CreateScope"/> — never a service captured from the request scope.
-    /// </para>
-    /// <para>
-    /// <b>How OBO survives (constraint #2):</b> the profile path reads ONLY the <c>Authorization</c>
-    /// header (the OBO user assertion) + <c>User</c> claims + <c>TraceIdentifier</c> from
-    /// <see cref="HttpContext"/> (see <c>TokenHelper.ExtractBearerToken</c> /
-    /// <c>GraphClientFactory.ForUserAsync</c>). Those three are captured HERE, before the request scope
-    /// disposes, and threaded into a synthetic <see cref="DefaultHttpContext"/> in the background task —
-    /// the user access token stays valid long enough to exchange after the response. If the save request
-    /// carried no bearer token, a background OBO download would 401, so we DO NOT dispatch a doomed task:
-    /// we skip cleanly with a non-terminal not-attempted signal instead.
-    /// </para>
-    /// <para>
-    /// Best-effort by design: a null facade / scope factory (test host, AI-gate off) or a missing bearer
-    /// token returns a NON-terminal signal, and any background failure is swallowed + logged
-    /// (<see cref="RunBackgroundProfileAsync"/>) — the synchronous save is never blocked, and its
-    /// aggregate is never demoted to Failed by a profile miss. ADR-013: injects NO AI-internal type.
-    /// </para>
-    /// </remarks>
-    private StoredStepSignal DispatchBackgroundProfile(Guid documentId, HttpContext httpContext)
-    {
-        // Availability gate: no scope factory (unit-test host) or no facade registered (compound AI gate
-        // off) → nothing to dispatch. Report non-terminal not-attempted synchronously.
-        if (_scopeFactory is null || _documentProfileAi is null)
-        {
-            return ProfileNotAttemptedSignal(
-                "profile facade unavailable (no IDocumentProfileAi / IServiceScopeFactory) — profile not dispatched");
-        }
-
-        // Capture the OBO user assertion (raw Authorization header) BEFORE the request scope disposes.
-        // Non-throwing (unlike TokenHelper.ExtractBearerToken) so a token-less save degrades cleanly.
-        var authorizationHeader = httpContext.Request?.Headers.Authorization.ToString();
-        if (string.IsNullOrWhiteSpace(authorizationHeader)
-            || !authorizationHeader.StartsWith("Bearer ", StringComparison.OrdinalIgnoreCase))
-        {
-            // No user token to detach — a background OBO download would 401. Never ship a broken detach.
-            _logger.LogWarning(
-                "Compose create-on-save: no bearer Authorization header on the save request for document {DocumentId} — background OBO profile not dispatched (best-effort skip).",
-                documentId);
-            return ProfileNotAttemptedSignal(
-                "no bearer Authorization header on the save request — background OBO profile not dispatched");
-        }
-
-        // Capture the remaining request-scoped context the profile facade reads. A ClaimsPrincipal is a
-        // plain object with no request-tied lifetime, so retaining the reference across the response is safe.
-        var user = httpContext.User;
-        var correlationId = httpContext.TraceIdentifier;
-
-        // Fire-and-forget: detach from the request scope AND the request CancellationToken (constraint #3).
-        // The task is unobserved by design; RunBackgroundProfileAsync owns its own try/catch so nothing
-        // faults the finalizer thread. The discard makes the intent explicit to reviewers + analyzers.
-        _ = Task.Run(() => RunBackgroundProfileAsync(documentId, authorizationHeader, user, correlationId));
-
-        return ProfileDispatchedSignal();
-    }
-
-    /// <summary>
-    /// The detached (fire-and-forget) body of the best-effort OBO document-profile. Creates a NEW DI
-    /// scope, rebuilds a minimal <see cref="HttpContext"/> from the captured OBO token + claims, resolves
-    /// the <see cref="IDocumentProfileAi"/> facade FROM THAT SCOPE, and runs the profile. NEVER throws —
-    /// a background profiling failure must not crash the process (unobserved-exception safe, constraint #4).
-    /// </summary>
-    private async Task RunBackgroundProfileAsync(
-        Guid documentId,
-        string authorizationHeader,
-        ClaimsPrincipal? user,
-        string correlationId)
-    {
-        // Constraint #3: use the app-shutdown token, NOT the (already-completed) request token. A profile
-        // in flight when the host stops is cut off cleanly; otherwise it runs to completion.
-        var ct = _appLifetime?.ApplicationStopping ?? CancellationToken.None;
-
-        try
-        {
-            await using var scope = _scopeFactory!.CreateAsyncScope();
-
-            // Rebuild a minimal HttpContext carrying ONLY what the profile path reads: the OBO user
-            // assertion (Authorization header), the User claims (runContext.TenantId + tenant-cache
-            // scoping), and the correlation id. Backed by the fresh scope's provider so any
-            // RequestServices lookup resolves against the detached (non-disposed) scope.
-            var detachedContext = new DefaultHttpContext
-            {
-                RequestServices = scope.ServiceProvider,
-                TraceIdentifier = correlationId,
-            };
-            detachedContext.Request.Headers.Authorization = authorizationHeader;
-            if (user is not null)
-            {
-                detachedContext.User = user;
-            }
-
-            // Keep AnalysisDocumentLoader's IHttpContextAccessor-based tenant-cache scoping coherent
-            // (else it degrades to the documented "system" sentinel — acceptable, but this is tidier).
-            var accessor = scope.ServiceProvider.GetService<IHttpContextAccessor>();
-            if (accessor is not null)
-            {
-                accessor.HttpContext = detachedContext;
-            }
-
-            // Constraint #1: resolve the facade from the NEW scope — never the request-scope service.
-            var facade = scope.ServiceProvider.GetService<IDocumentProfileAi>();
-            if (facade is null)
-            {
-                _logger.LogWarning(
-                    "Compose background profile: IDocumentProfileAi did not resolve from the detached scope for document {DocumentId} (correlation={CorrelationId}) — skipped.",
-                    documentId, correlationId);
-                return;
-            }
-
-            _logger.LogInformation(
-                "Compose background profile: starting best-effort OBO profile for document {DocumentId} (correlation={CorrelationId}).",
-                documentId, correlationId);
-
-            var result = await facade.ProfileDocumentAsUserAsync(documentId, detachedContext, ct)
-                .ConfigureAwait(false);
-
-            _logger.LogInformation(
-                "Compose background profile: document {DocumentId} — success={Success} (failure={Failure} skip={Skip}) (correlation={CorrelationId}). Profile fields populate on the record now.",
-                documentId, result.Success, result.FailureReason ?? "(none)", result.SkipReason ?? "(none)", correlationId);
-        }
-        catch (Exception ex)
-        {
-            // Constraint #4: unobserved-exception safe. The save already returned on its own terms; a
-            // best-effort background profile failure is logged and swallowed, never rethrown.
-            _logger.LogError(ex,
-                "Compose background profile: threw while profiling document {DocumentId} (correlation={CorrelationId}) — best-effort, the save is unaffected.",
-                documentId, correlationId);
-        }
-    }
-
-    /// <summary>Non-terminal (Running) profile-analysis signal for the fire-and-forget path: the profile
-    /// was DISPATCHED to a background scope and runs best-effort AFTER the save returns (the 7
-    /// sprk_document profile fields populate shortly after). <c>Started=true</c> + no stored status →
-    /// projects to <see cref="JobAwareState.Running"/>, so the returned aggregate reads Partial (record +
-    /// index exist, profile pending), never Completed-on-claim and never Failed.</summary>
-    private static StoredStepSignal ProfileDispatchedSignal() => new()
-    {
-        StepName = StepProfileAnalysis,
-        StoredStatus = null,
-        Started = true,
-        Detail = "profile-analysis dispatched to background (best-effort); the profile fields populate shortly after the save returns",
-    };
-
-    /// <summary>A non-terminal profile-analysis signal for when the profile was NOT attempted
-    /// (container/record step never produced a record, or no facade injected). Non-terminal so it
-    /// never poisons the create-on-save aggregate.</summary>
-    private static StoredStepSignal ProfileNotAttemptedSignal(string detail) => new()
-    {
-        StepName = StepProfileAnalysis,
-        StoredStatus = null,
-        Started = false,
-        Detail = detail,
-    };
-
-    /// <summary>Maps the indexing enqueue outcome to a stored step signal: submitted (sync-OBO ran)
-    /// → Completed; failed → terminal Failed (single attempt, so never RetryPending); skipped →
-    /// non-terminal (no stored outcome) so the record is never a success without an index.</summary>
-    private static StoredStepSignal IndexingSignal(PostUploadIndexingResult result)
-    {
-        if (result.JobSubmitted)
-        {
-            return new StoredStepSignal { StepName = StepIndexing, StoredStatus = JobStatus.Completed, Started = true };
-        }
-
-        if (result.FailureReason is not null)
-        {
-            return new StoredStepSignal
-            {
-                StepName = StepIndexing,
-                StoredStatus = JobStatus.Failed,
-                Started = true,
-                Attempt = 1,
-                MaxAttempts = 1,   // no retry budget → terminal Failed, not RetryPending
-                Detail = $"indexing failed: {result.FailureReason}",
-            };
-        }
-
-        // Skipped (feature flag off / non-indexable / empty / missing tenant): not indexed →
-        // not a terminal success. Keep it non-terminal so the aggregate never reads Completed.
-        return new StoredStepSignal
-        {
-            StepName = StepIndexing,
-            StoredStatus = null,
-            Started = false,
-            Detail = $"indexing skipped: {result.SkipReason}",
         };
     }
 
@@ -3848,7 +3651,7 @@ public class ComposeService : IComposeService
             recordSignal: new StoredStepSignal { StepName = StepRecord, StoredStatus = null, Started = false },
             // Container failed → no record → nothing to profile. Non-terminal so the aggregate stays
             // Failed (driven by the container step), not double-counted.
-            profileSignal: ProfileNotAttemptedSignal("profile not attempted: container step failed"),
+            profileSignal: ComposeProfileDispatcher.ProfileNotAttempted("profile not attempted: container step failed"),
             indexingSignal: new StoredStepSignal { StepName = StepIndexing, StoredStatus = null, Started = false },
             observedAt: observedAt);
 
