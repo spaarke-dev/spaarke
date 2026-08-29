@@ -153,6 +153,9 @@ public class ComposeService : IComposeService
     // null so existing test constructors keep compiling; DI resolves the real ComposeMemoryCapture in every
     // non-test host. Null → the STEP 5 capture below is a clean no-op (best-effort availability gate).
     private readonly IComposeMemoryCapture? _memoryCapture;
+
+    /// <summary>Cluster 7 (task 070): the document-memory distillation policy, extracted.</summary>
+    private readonly ComposeMemoryCapturer _memoryCapturer;
     // Fire-and-forget profile dispatch (compose-r2): a NEW DI scope is created per background profile so
     // the profile facade + its scoped deps never touch the disposing request scope. Optional + defaults
     // null so existing test constructors compile; DI always resolves it in every non-test host.
@@ -274,6 +277,7 @@ public class ComposeService : IComposeService
         _pdfModelProjector = pdfModelProjector ?? new ComposePdfModelProjector();
         _appLifetime = appLifetime;
         _memoryCapture = memoryCapture;
+        _memoryCapturer = new ComposeMemoryCapturer(memoryCapture, _sessions, _logger);
         // FR-C3 (email-communication-intelligence-r2): null in a bare test constructor (dedup hook = no-op),
         // the real scoped detector in every non-test host.
         _dedupDetector = dedupDetector;
@@ -1868,7 +1872,7 @@ public class ComposeService : IComposeService
         // ────────────────────────────────────────────────────────────────────────────
         if (promotion.DocumentRecordId.HasValue)
         {
-            await CaptureDocumentMemoryAsync(
+            await _memoryCapturer.CaptureDocumentMemoryAsync(
                     promotion.DocumentRecordId.Value, request.TenantId, request.SessionId, cancellationToken)
                 .ConfigureAwait(false);
         }
@@ -3115,90 +3119,6 @@ public class ComposeService : IComposeService
     /// guarded so a memory-capture failure NEVER throws — a Save must never be blocked or failed by it. A
     /// no-op when the facade is unregistered (null gate) or no session is bound.
     /// </summary>
-    private async Task CaptureDocumentMemoryAsync(
-        Guid documentId,
-        string tenantId,
-        string? sessionId,
-        CancellationToken ct)
-    {
-        // Availability gate + precondition: no facade (AI/persistence off in this host) or no bound
-        // session → nothing to capture. Both are clean no-ops, not failures.
-        if (_memoryCapture is null || string.IsNullOrWhiteSpace(sessionId))
-        {
-            return;
-        }
-
-        try
-        {
-            var session = await _sessions.GetSessionAsync(tenantId, sessionId, ct).ConfigureAwait(false);
-            var definedTerms = session?.DefinedTermsTracking;
-            if (definedTerms is null || definedTerms.Count == 0)
-            {
-                return;
-            }
-
-            // DISTILL: a defined term is durable knowledge only when it carries BOTH a non-empty label
-            // (the fact Key) AND a definition (the fact Value). Guarding Term too avoids persisting an
-            // empty-key fact (two of which would collide on the store's hashed empty key).
-            var insights = new List<ComposeInsight>(definedTerms.Count);
-            foreach (var term in definedTerms)
-            {
-                if (string.IsNullOrWhiteSpace(term.Term) || string.IsNullOrWhiteSpace(term.Definition))
-                {
-                    continue;
-                }
-
-                insights.Add(new ComposeInsight(
-                    FactType: "defined-term",
-                    Key: term.Term,
-                    Value: term.Definition!,
-                    Origin: string.Equals(term.Source, "ai", StringComparison.OrdinalIgnoreCase)
-                        ? MemoryOrigin.AiDerived
-                        : MemoryOrigin.User,
-                    // Confidence null → the store default (1.0), which keeps AI-extracted terms above the
-                    // recall confidence gate so they DO surface in later sessions (the FR-30 point).
-                    // ConfirmedByUser=false (set in the facade) is the honest "unverified" marker; DefinedTerm
-                    // carries no per-term confidence signal to thread here.
-                    Confidence: null,
-                    BindingId: term.Provenance?.BindingId,
-                    LedgerRef: term.Provenance?.LedgerRef));
-            }
-
-            if (insights.Count == 0)
-            {
-                return;
-            }
-
-            var outcome = await _memoryCapture.CaptureRecordInsightsAsync(
-                    subjectType: "sprk_document",
-                    subjectId: documentId.ToString(),
-                    insights: insights,
-                    provenance: new ComposeMemoryProvenance
-                    {
-                        TenantId = tenantId,
-                        SessionId = sessionId,
-                        CreatedBy = null,   // caller identity not threaded here; envelope stays honest (null)
-                    },
-                    ct)
-                .ConfigureAwait(false);
-
-            _logger.LogDebug(
-                "Compose memory-capture (FR-30): document {DocumentId} — {Status} {Count} insight(s) (session={SessionId}).",
-                documentId, outcome.Status, outcome.Count, sessionId);
-        }
-        catch (OperationCanceledException) when (ct.IsCancellationRequested)
-        {
-            // Honour cancellation quietly — the Save has already returned its result on its own terms.
-        }
-        catch (Exception ex)
-        {
-            // Best-effort: a memory-capture failure must never fail or block a Save (swallow + log).
-            _logger.LogWarning(ex,
-                "Compose memory-capture (FR-30): threw while capturing memory for document {DocumentId} — best-effort, Save unaffected.",
-                documentId);
-        }
-    }
-
     /// <inheritdoc />
     public async Task<PromoteComposeDocumentResult> PromoteIfEphemeralAsync(
         PromoteComposeDocumentRequest request,
