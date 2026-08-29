@@ -291,6 +291,23 @@ public class IntegrationTestFixture : WebApplicationFactory<Program>
             dataverseServiceMock.Setup(d => d.TestConnectionAsync()).ReturnsAsync(true);
             services.RemoveAll<IDataverseService>();
             services.AddSingleton(dataverseServiceMock.Object);
+
+            // IDataverseService was mocked here; its field-mapping sibling was not, so
+            // POST /api/v1/field-mappings/push reached a REAL Dataverse client. That client acquires
+            // its token through managed identity, which on a non-Azure machine means probing
+            // 169.254.169.254 — the request then hung until HttpClient's 100-second default timeout.
+            // Same root cause as UseStubTokenCredential above, reached by a path the DI-level stub
+            // cannot cover: DataverseServiceClientImpl constructs its own credential rather than
+            // taking the injected one (GraphModule.cs builds it without passing TokenCredential), so
+            // replacing the registration is the only lever the test host has.
+            //
+            // Note for anyone tightening this later: the fixture sets Graph:UseManagedIdentity=false
+            // just above, but the code reads Graph:ManagedIdentity:Enabled — different key, so that
+            // setting has never disabled anything. Left as-is rather than "fixed" because the else
+            // branch is MI-backed too under ADR-028 A4 (MI-issued federated assertion); correcting
+            // the key alone would not have stopped the probe, and would have looked like it had.
+            services.RemoveAll<IFieldMappingDataverseService>();
+            services.AddSingleton(new Mock<IFieldMappingDataverseService>().Object);
         });
     }
 

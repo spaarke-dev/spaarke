@@ -561,7 +561,7 @@ public class UploadTestFixture : IntegrationTestFixture
     public HttpClient CreateAuthenticatedClient(string tenantId, string? userId = null)
     {
         var client = CreateClient();
-        var token = GenerateTestJwt(tenantId, userId ?? Guid.NewGuid().ToString());
+        var token = GenerateTestJwt(tenantId, userId ?? IntegrationTestConstants.TestUserId);
         client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", token);
         return client;
     }
@@ -595,7 +595,7 @@ public class UploadTestFixture : IntegrationTestFixture
             PlaybookId: TestPlaybookId,
             CreatedAt: now,
             LastActivity: now,
-            Messages: []) { OwnerOid = TestSessionOwner.Oid };
+            Messages: []) { OwnerOid = IntegrationTestConstants.TestUserId };
 
         // Return a live session for the known test IDs until archived; null otherwise.
         MockDataverseRepository

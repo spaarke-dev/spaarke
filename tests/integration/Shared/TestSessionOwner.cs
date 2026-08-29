@@ -19,6 +19,17 @@
 /// <c>.claude/constraints/bff-extensions.md</c> §F.2 (Fixture-Config-FIRST), a fixture emitting a
 /// non-contract value is the defect: repair the fixture, never compensate in the assertions.
 /// </para>
+/// <para>
+/// <b>NOT a universal constant — check what YOUR fixture authenticates as.</b> The invariant is
+/// "the seeded session is owned by the caller the fixture authenticates as", and
+/// <see cref="Oid"/> satisfies it only for fixtures whose auth handler emits THAT oid.
+/// <c>Spe.Integration.Tests</c> authenticates as <c>IntegrationTestConstants.TestUserId</c>
+/// (<c>1111…</c>), so its sessions must be seeded with that value; seeding <see cref="Oid"/> there
+/// produced a session owned by nobody the caller is, and the ownership filter correctly answered
+/// 404 across 22 tests. That was a real mismatch, not a guard being over-strict — and it stayed
+/// invisible for a while because that project did not COMPILE (its csproj did not link this folder),
+/// and a project that does not compile does not run. Use the oid your fixture actually issues.
+/// </para>
 /// </remarks>
 internal static class TestSessionOwner
 {

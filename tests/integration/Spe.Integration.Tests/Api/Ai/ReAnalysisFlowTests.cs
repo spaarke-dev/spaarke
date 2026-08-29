@@ -546,7 +546,7 @@ public class ReAnalysisFlowTestFixture : WebApplicationFactory<Program>
     public HttpClient CreateAuthenticatedClient(string tenantId, string? userId = null)
     {
         var client = CreateClient();
-        var token = GenerateTestJwt(tenantId, userId ?? Guid.NewGuid().ToString());
+        var token = GenerateTestJwt(tenantId, userId ?? IntegrationTestConstants.TestUserId);
         client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", token);
         return client;
     }
@@ -580,7 +580,7 @@ public class ReAnalysisFlowTestFixture : WebApplicationFactory<Program>
                     new Sprk.Bff.Api.Models.Ai.Chat.ChatMessage(
                         "msg-002", TestSessionId, ChatMessageRole.Assistant,
                         "Here are the findings.", 20, now.AddMinutes(-1), 2)
-                ]) { OwnerOid = TestSessionOwner.Oid });
+                ]) { OwnerOid = IntegrationTestConstants.TestUserId });
 
         // Error session -- same structure but different ID
         MockDataverseRepository
@@ -592,7 +592,7 @@ public class ReAnalysisFlowTestFixture : WebApplicationFactory<Program>
                 PlaybookId: TestPlaybookId,
                 CreatedAt: now,
                 LastActivity: now,
-                Messages: []) { OwnerOid = TestSessionOwner.Oid });
+                Messages: []) { OwnerOid = IntegrationTestConstants.TestUserId });
 
         // Returns null for unknown session IDs (triggers 404)
         MockDataverseRepository
