@@ -468,6 +468,35 @@ public async Task GetUserDto_InPublicContext_StripsPii()
 | B16 | Getter/setter/auto-property tests | C# guarantees the round-trip | Delete or test the validation logic |
 | B17 | Generated-code tests (records, AutoMapper, EF projections) | Tests the generator | One config-validity assertion + behavior tests on output |
 
+### Mechanical enforcement status (annex — added 2026-08-29 by `ci-cd-unit-test-remediation-r1` task CICD-094, issue #864)
+
+This annex records **fact, not policy**. All 17 bans remain MUST NOT for new tests regardless of the row
+below; what follows is only whether a build fails automatically when one is violated. No ban is weakened by
+appearing as "not enforced" — it moves the enforcement point to `/test-diet` and code review.
+
+**5 of 17 are enforced by a blocking Tier 1 guard** ([`tests/Spaarke.ArchTests/Adr038TestBanGuardTests.cs`](../../tests/Spaarke.ArchTests/Adr038TestBanGuardTests.cs)):
+
+| Enforced | Live count when armed | Armed by |
+|---|---|---|
+| **B1**, **B4** | 0, 0 | PR #865 (B4 reached zero via task CICD-083, which deleted 54 tests) |
+| **B3**, **B12**, **B16** | 1, 0, 3 — migrated in the same PR | task CICD-094 |
+
+**12 are not mechanically enforced**, for four distinct reasons:
+
+| Reason | Bans | Note |
+|---|---|---|
+| **No lexical signature exists** | B5, B6, B9 | B6 (mirror tests) asks whether a test asserts that an implementation does what it does — a claim about the relationship between two bodies of code. It needs a call graph, not a regex. Permanently `/test-diet` judgment. |
+| **Detector output is mostly noise** | B7, B10, B11, B14 | B10 measured **247 hits, 1 true positive**. Arming a rule whose failures are mostly wrong gets it suppressed, and real violations then ride in behind it. |
+| **Real debt, migration is a design decision** | B8 | 7 call sites in 5 files invoke private production methods by reflection. Tight signature, bounded count — **the strongest candidate for the next arming pass.** |
+| **Threshold undefined, or type absent** | B13, B15, B2, B17 | B13's live count spans **15 to 1,466** depending only on how strictly `{Method}_{Scenario}_{ExpectedResult}` is read; a guard would enforce the threshold rather than the ban. B2 (`IServiceClient`) and B17 (AutoMapper) name types this repo does not contain. |
+
+Full census with every count and its row-by-row adjudication:
+[`projects/ci-cd-unit-test-remediation-r1/notes/094-adr038-ban-census.md`](../../projects/ci-cd-unit-test-remediation-r1/notes/094-adr038-ban-census.md).
+
+> **Reading the counts.** A detector hit is not a violation until the row is read. Adjudication moved B12
+> from 9 to 0, B10 from 247 to 1, and B16 from 4 to 3 — always downward, never upward. The rule from spec
+> FR-B10 holds: **doubt = KEEP**.
+
 ### How this list is used
 
 1. **At authoring time** — `tests/CLAUDE.md` and `.claude/constraints/testing.md` cite this section; future Claude sessions reading the directives reject these patterns.
