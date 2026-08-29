@@ -13,7 +13,7 @@
 |---|---|
 | **Active work** | **070 decomposition** — clusters **7 · 6 · 5b · 8** extracted & verified. **Cluster 1 is next available** (2b/2a are HELD). |
 | **Next Action** | **Cluster 1 (re-anchor / stale-base)** — the executable spec is in the seam map. Treat it with more care than the first four: **76.6% branch** (they were 87–96%) and ~470 LOC over five members, so seed **several** mutations across different members, not one. Then 3 → 4 → 5a; 2b/2a only after UAC-r2 replies on #858. |
-| **Branch** | `work/spaarkeai-compose-r8` · HEAD `2c056c3ca` · clean · **synced with master** · `ComposeService.cs` 4,427 → **3,975** |
+| **Branch** | `work/spaarkeai-compose-r8` · clean · **synced with master** · HEAD = the latest `checkpoint: session handoff` commit · `ComposeService.cs` 4,427 → **3,975** |
 | **Suite** | ALL GREEN — BFF **11,619/0** · ArchTests **150/150** · `Sprk.Bff.Api.IntegrationTests` **103/0** · `Spe.Integration.Tests` **409/0** |
 | **Verify with** | **`dotnet build`** at the SOLUTION root — not one project (see §A2 for why that distinction cost real time) |
 
