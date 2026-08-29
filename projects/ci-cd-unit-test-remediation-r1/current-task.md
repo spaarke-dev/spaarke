@@ -125,6 +125,15 @@ conversion pattern is proven — see `AdvanceUntilAsync` / `VirtualClockOptions`
 - **`TriggerNowAsync` passes `CancellationToken.None`** while its own comment claims the host
   stopping token — manual-trigger jobs cannot observe shutdown. Latent NFR-07 gap, no coverage.
   Reported, not fixed (out of scope).
+- **`--delete-branch` has a SECOND failure mode.** Beyond auto-closing a stacked PR (which killed
+  #856), deleting the branch while any job is still **queued** fails that job at **Checkout** — it
+  fetches a ref that no longer exists. Hit on #890: legacy sdap-ci "Code Quality" started 24s after
+  the merge and went red with no quality check having run. Wait for every check to reach a TERMINAL
+  state, not merely for the fail count to read 0 while others pend.
+- **That red cannot contaminate the shadow window**, by construction: `shadow-window-status.ps1`
+  compares `$pr.mergeCommit.oid` — POST-MERGE master runs only — so PR-branch infra failures are
+  never consulted. Worth knowing precisely because "sdap-ci red + tiers green" is the exact shape of
+  a disqualifying false green.
 - **A trivial fixture can falsely refute a true hypothesis.** The 092 line-ending theory looked
   disproven by a two-line file; inverting the setting against the real 1,911-file corpus proved it.
   Prefer inverting a setting over constructing a minimal repro when the corpus is the variable.
