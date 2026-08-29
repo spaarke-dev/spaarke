@@ -11,8 +11,53 @@
 | Field | Value |
 |-------|-------|
 | **State** | Worktree on `work/unified-access-control-r2` at `babf5f7ee` — 1 commit ahead of master (the design.md INV-7 correction). Five agents working in **isolated git worktrees**, each committing to its own branch. |
-| **Next Action** | 🔴 **READ [`notes/SESSION-STATUS-2026-08-28.md`](notes/SESSION-STATUS-2026-08-28.md) FIRST — §6.5 holds the owner's answers to Q1–Q5 and is the implementation contract.** Then: (1) create tasks **084** (Office save — row 9) and **085** (SpeAdmin container items — row 10, THREE routes incl. `POST …/folders`); (2) implement Q1's no-record branch — server-derived acting-user BU, never client-supplied; (3) widen `EntityAccessFilter.EntitySetByType` with `sprk_workassignment`/`sprk_event`/`sprk_todo` + a test each, then re-verify the Office save surface (shared map); (4) 083 closes with the DELETEs (rows 4/5) + row 8 conversion + the landed guard; (5) set 012 to `completed-with-escalation`, **not ✅**. |
-| **All six agents DONE, all branches merged** | test-suite repair · sink guard · 076 server half · 078 complete · 012 analysis · plus upstream #860/#862. 14+ commits ahead of master, zero conflicts. |
+| **PR** | 🔵 **#887 open as DRAFT** — https://github.com/spaarke-dev/spaarke/pull/887. First CI these 16 commits have ever seen. **Check its verdict before anything else.** |
+| **Next Action** | 🔴 **READ [`notes/SESSION-STATUS-2026-08-28.md`](notes/SESSION-STATUS-2026-08-28.md) FIRST — §6.5 holds the owner's answers to Q1–Q5 and is the implementation contract.** Then: (1) merge/verify the in-flight `sanitize-086` work (see below); (2) create tasks **084** (Office save — row 9) and **085** (SpeAdmin container items — row 10, THREE routes incl. `POST …/folders`); (3) implement Q1's no-record branch — server-derived acting-user BU, never client-supplied; (4) widen `EntityAccessFilter.EntitySetByType` with `sprk_workassignment`/`sprk_event`/`sprk_todo` + a test each, then re-verify the Office save surface (shared map); (5) 083 closes with the DELETEs (rows 4/5) + row 8 conversion + the landed guard; (6) set 012 to `completed-with-escalation`, **not ✅**. |
+| **Seven agents DONE, all merged** | test-suite repair · sink guard · 076 server half · 078 complete · 012 analysis · folder-removal · plus upstream #860/#862. 16 commits ahead of master, zero conflicts. |
+| **⏳ IN FLIGHT** | `sanitize-086` — running in the MAIN worktree (not isolated; a `core.worktree` redirect made isolation fail). It commits to `work/unified-access-control-r2` directly. If the next session finds uncommitted changes or a partial commit, that is why. |
+
+### 🔴 THE FOLDER MYSTERY IS SOLVED — and it was us, not Word Online
+
+**An unsanitized filename becomes the SPE upload path verbatim.** The Office add-in's free-text "Document
+Name" box let a user type a DATE:
+
+```
+"New Word Document from Word Web Add In 8/24/2026"
+   -> folder "…Add In 8"  ->  folder "24"  ->  extension-less file "2026"
+```
+
+**The trailing `8` in the folder name is the MONTH**, not a truncated title. Two production `sprk_document`
+rows account for both observed folders, written by the BFF service identities (`# mi-bff-api-dev`,
+`SDAP-BFF-SPE-API`). Control case: `Examiner's Report 8-24-2026` — same user, same day, hyphens — minted
+nothing. The upload is **app-only**, which is why SPE Admin showed no human creator; **that absence was
+misread as "something external did this."** Both of my hypotheses (Word Online direct-write; a folder
+prefix derived from the document title) are **refuted**.
+
+The **email** branch already sanitized; the document branch did not. That asymmetry was the whole bug.
+
+**Operator check (falsifiable)**: that folder should contain exactly one subfolder `24` containing one file
+`2026`. Expect the same shape under `Archived: PAT-942665 … Liardo 7` → `19` → `2026`.
+⚠️ **`GET /api/spe/audit` cannot answer this** — `SpeAuditService` is **write-only**, the Office path logs
+nothing, and the table has **0 rows**. My Phase 0 instruction rested on a false premise.
+
+### ⚠️ Three corrections yesterday produced — one would have broken production
+
+1. **My dead-code range 239–334 was WRONG.** The `else` block ends at **305**; 307–336 is **common
+   post-branch** code containing the `ProcessEmailAttachmentsAsync` call — deleting as specified would have
+   broken email attachments. Only 239–305 was deleted. *Telling the agent to verify my riskiest claims
+   rather than trust me is what caught this.*
+2. **The sink guard is keyed on `(File, Sink, Ordinal)`, NOT line numbers.** My warning that moving lines
+   breaks Rule A was wrong; the real mechanism is **ordinal shift**.
+3. **The ArchTest baseline was 7, not 6.** Rule A was *already red* from two OBO sites task 076 left
+   undeclared — which kept Rule A's own **non-vacuity assertion unreachable**, so no allow-list edit was
+   verifiable. Now declared (both `ServerDerivedRecord`); baseline back to **6**, Rule A green.
+
+### The perturbation lesson worth keeping
+
+Reverting one site to a naive flat `{FileName}` **failed the collision test while both no-slash tests still
+passed.** *A flatness assertion alone would have greenlit the data-loss version.* `UploadSmallAsync` uses
+Graph's path-keyed PUT with **no `conflictBehavior`** — two uploads to one path are a **silent
+unconditional REPLACE**, so the `{guid}` folded into the filename is the only collision guard.
 | **Owner directive this session** | Run 083 **and** 012/076/078 (CI-coordination scope), parallel where possible; and **fix** the unreliable local test suite rather than working around it. |
 
 ### ⚠️ MERGE HAZARD — `current-task.md` itself
