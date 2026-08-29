@@ -202,6 +202,9 @@ public class DataverseIntegrationTestFixture : WebApplicationFactory<Program>
 
         builder.ConfigureTestServices(services =>
         {
+            // Test hosts must not authenticate for real — see TestTokenCredential.
+            services.UseStubTokenCredential();
+
             // Replace Redis with deterministic in-memory cache (ADR-009).
             services.RemoveAll<IDistributedCache>();
             services.AddSingleton<IDistributedCache, MemoryDistributedCache>();

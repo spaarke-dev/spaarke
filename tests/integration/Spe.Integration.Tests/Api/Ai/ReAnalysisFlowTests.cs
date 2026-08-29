@@ -422,6 +422,9 @@ public class ReAnalysisFlowTestFixture : WebApplicationFactory<Program>
 
         builder.ConfigureTestServices(services =>
         {
+            // Test hosts must not authenticate for real — see TestTokenCredential.
+            services.UseStubTokenCredential();
+
             // Remove real registrations and replace with test doubles
             services.RemoveAll<ChatSessionManager>();
             services.RemoveAll<ChatHistoryManager>();

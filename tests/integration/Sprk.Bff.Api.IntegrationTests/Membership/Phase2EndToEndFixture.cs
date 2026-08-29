@@ -224,6 +224,9 @@ public sealed class Phase2EndToEndFixture : WebApplicationFactory<Program>
 
         builder.ConfigureTestServices(services =>
         {
+            // Test hosts must not authenticate for real — see TestTokenCredential.
+            services.UseStubTokenCredential();
+
             // ── In-memory cache (ADR-009 — Redis disabled in tests) ──────
             services.RemoveAll<IDistributedCache>();
             services.AddSingleton<IDistributedCache, MemoryDistributedCache>();

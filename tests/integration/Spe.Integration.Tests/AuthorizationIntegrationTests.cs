@@ -198,6 +198,9 @@ public class AuthorizationTestFixture : WebApplicationFactory<Program>
         // ensuring our mocks replace the real services.
         builder.ConfigureTestServices(services =>
         {
+            // Test hosts must not authenticate for real — see TestTokenCredential.
+            services.UseStubTokenCredential();
+
             // Remove the real IAccessDataSource registration and replace with mock
             services.RemoveAll<IAccessDataSource>();
             services.AddScoped<IAccessDataSource>(sp => new MockAccessDataSource(

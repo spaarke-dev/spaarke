@@ -564,6 +564,9 @@ public class InsightsAssistantEndpointTestFixture : WebApplicationFactory<Progra
 
         builder.ConfigureTestServices(services =>
         {
+            // Test hosts must not authenticate for real — see TestTokenCredential.
+            services.UseStubTokenCredential();
+
             services.RemoveAll<IInsightsAi>();
             services.AddSingleton(InsightsAiMock.Object);
 

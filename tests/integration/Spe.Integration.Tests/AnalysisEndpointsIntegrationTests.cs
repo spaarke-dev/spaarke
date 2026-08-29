@@ -647,6 +647,9 @@ public class AnalysisTestFixture : WebApplicationFactory<Program>
         // ensuring our mocks replace the real services.
         builder.ConfigureTestServices(services =>
         {
+            // Test hosts must not authenticate for real — see TestTokenCredential.
+            services.UseStubTokenCredential();
+
             // R7 Wave 4 (FR-11) — the /api/ai/analysis/execute endpoint dispatches
             // IPlaybookOrchestrationService.ExecuteAsync (post-task-041 migration; task 042
             // deleted the legacy direct-invocation path). The MockAnalysisOrchestrationService

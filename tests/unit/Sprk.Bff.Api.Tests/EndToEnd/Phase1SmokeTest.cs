@@ -542,6 +542,9 @@ public class Phase1SmokeTestFixture : WebApplicationFactory<Program>
 
         builder.ConfigureTestServices(services =>
         {
+            // Test hosts must not authenticate for real — see TestTokenCredential.
+            services.UseStubTokenCredential();
+
             services.RemoveAll<IInsightsAi>();
             services.AddSingleton(InsightsAiMock.Object);
 

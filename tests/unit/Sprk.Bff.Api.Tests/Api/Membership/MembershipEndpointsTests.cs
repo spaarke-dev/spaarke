@@ -556,6 +556,9 @@ public class MembershipEndpointsTestFixture : WebApplicationFactory<Program>
 
         builder.ConfigureTestServices(services =>
         {
+            // Test hosts must not authenticate for real — see TestTokenCredential.
+            services.UseStubTokenCredential();
+
             // Override auth — fake handler that emits oid claim per X-Test-Oid header.
             services.AddAuthentication(options =>
             {

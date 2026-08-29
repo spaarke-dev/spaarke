@@ -151,6 +151,9 @@ public class AdminJobsTestFixture : WebApplicationFactory<Program>
 
         builder.ConfigureTestServices(services =>
         {
+            // Test hosts must not authenticate for real — see TestTokenCredential.
+            services.UseStubTokenCredential();
+
             // Override auth — fake handler that honors X-Test-Role header to choose admin / user / none.
             services.AddAuthentication(options =>
             {

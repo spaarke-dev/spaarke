@@ -596,6 +596,9 @@ public class PinnedMemoryEndpointsTestFixture : WebApplicationFactory<Program>
 
         builder.ConfigureTestServices(services =>
         {
+            // Test hosts must not authenticate for real — see TestTokenCredential.
+            services.UseStubTokenCredential();
+
             var cacheDescriptor = services.SingleOrDefault(d => d.ServiceType == typeof(IDistributedCache));
             if (cacheDescriptor != null)
                 services.Remove(cacheDescriptor);

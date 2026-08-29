@@ -701,6 +701,9 @@ public class ChatEndpointsTestFixture : WebApplicationFactory<Program>
 
         builder.ConfigureTestServices(services =>
         {
+            // Test hosts must not authenticate for real — see TestTokenCredential.
+            services.UseStubTokenCredential();
+
             // ---------------------------------------------------------------
             // Remove real service registrations and replace with test doubles
             // ---------------------------------------------------------------

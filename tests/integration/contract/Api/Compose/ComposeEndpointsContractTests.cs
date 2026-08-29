@@ -478,6 +478,9 @@ public sealed class ComposeContractFixture : WebApplicationFactory<Program>
 
         builder.ConfigureTestServices(services =>
         {
+            // Test hosts must not authenticate for real — see TestTokenCredential.
+            services.UseStubTokenCredential();
+
             // Allow framework to map missing/required-bindings to 400 (matches production-equivalent contract).
             services.Configure<Microsoft.AspNetCore.Routing.RouteHandlerOptions>(options =>
             {

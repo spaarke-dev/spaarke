@@ -402,6 +402,9 @@ public class KnowledgeBaseTestFixture : WebApplicationFactory<Program>
 
         builder.ConfigureTestServices(services =>
         {
+            // Test hosts must not authenticate for real — see TestTokenCredential.
+            services.UseStubTokenCredential();
+
             // Replace IRagService with a controllable mock
             services.RemoveAll<IRagService>();
             SetupRagServiceMock();

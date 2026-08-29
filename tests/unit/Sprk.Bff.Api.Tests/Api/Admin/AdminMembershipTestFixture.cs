@@ -125,6 +125,9 @@ public class AdminMembershipTestFixture : WebApplicationFactory<Program>
 
         builder.ConfigureTestServices(services =>
         {
+            // Test hosts must not authenticate for real — see TestTokenCredential.
+            services.UseStubTokenCredential();
+
             // Fake auth — same X-Test-Role contract as AdminJobsTestFixture.
             services.AddAuthentication(options =>
             {

@@ -487,6 +487,9 @@ public class RecordSearchTestFixture : WebApplicationFactory<Program>
     {
         builder.ConfigureServices(services =>
         {
+            // Test hosts must not authenticate for real — see TestTokenCredential.
+            services.UseStubTokenCredential();
+
             // Configure JWT authentication for testing
             services.AddAuthentication("Test")
                 .AddScheme<RecordSearchTestAuthOptions, RecordSearchTestAuthHandler>("Test", options => { });

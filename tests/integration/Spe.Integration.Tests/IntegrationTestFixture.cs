@@ -224,6 +224,9 @@ public class IntegrationTestFixture : WebApplicationFactory<Program>
 
         builder.ConfigureTestServices(services =>
         {
+            // Test hosts must not authenticate for real — see TestTokenCredential.
+            services.UseStubTokenCredential();
+
             // ---------------------------------------------------------------
             // CACHE: Replace Redis with MemoryDistributedCache for deterministic
             // caching behavior (ADR-009: Redis-first in production).

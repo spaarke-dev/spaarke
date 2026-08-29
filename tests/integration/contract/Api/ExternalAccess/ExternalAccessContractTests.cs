@@ -375,6 +375,9 @@ public sealed class ExternalAccessContractFixture : WebApplicationFactory<Progra
 
         builder.ConfigureTestServices(services =>
         {
+            // Test hosts must not authenticate for real — see TestTokenCredential.
+            services.UseStubTokenCredential();
+
             services.Configure<Microsoft.AspNetCore.Routing.RouteHandlerOptions>(o => o.ThrowOnBadRequest = false);
 
             // Fake auth scheme serving BOTH the workforce default (admin group) and the CiamExternal policy.

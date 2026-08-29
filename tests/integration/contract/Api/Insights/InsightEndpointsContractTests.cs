@@ -752,6 +752,9 @@ public class InsightEndpointsTestFixture : WebApplicationFactory<Program>
 
         builder.ConfigureTestServices(services =>
         {
+            // Test hosts must not authenticate for real — see TestTokenCredential.
+            services.UseStubTokenCredential();
+
             // Replace the real IInsightsAi binding with the mock so we drive the
             // success / decline / throw paths deterministically.
             services.RemoveAll<IInsightsAi>();

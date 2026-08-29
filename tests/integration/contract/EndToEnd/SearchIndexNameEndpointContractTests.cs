@@ -429,6 +429,9 @@ public sealed class SearchIndexNameEndpointTestFixture : WebApplicationFactory<P
 
         builder.ConfigureTestServices(services =>
         {
+            // Test hosts must not authenticate for real — see TestTokenCredential.
+            services.UseStubTokenCredential();
+
             // Authentication — emit BOTH oid AND tid claims (tid is what the
             // SemanticSearch endpoint reads to derive tenant routing).
             services.AddAuthentication(options =>

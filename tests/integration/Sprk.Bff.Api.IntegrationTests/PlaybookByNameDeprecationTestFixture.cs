@@ -137,6 +137,9 @@ public class PlaybookByNameDeprecationTestFixture : WebApplicationFactory<Progra
 
         builder.ConfigureTestServices(services =>
         {
+            // Test hosts must not authenticate for real — see TestTokenCredential.
+            services.UseStubTokenCredential();
+
             // In-memory cache.
             services.RemoveAll<IDistributedCache>();
             services.AddSingleton<IDistributedCache, MemoryDistributedCache>();

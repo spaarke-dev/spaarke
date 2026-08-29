@@ -922,6 +922,9 @@ public class SemanticSearchAuthorizationTestFixture : WebApplicationFactory<Prog
     {
         builder.ConfigureServices(services =>
         {
+            // Test hosts must not authenticate for real — see TestTokenCredential.
+            services.UseStubTokenCredential();
+
             // Configure JWT authentication for testing
             services.AddAuthentication("Test")
                 .AddScheme<TestAuthOptions, TestAuthorizationHandler>("Test", options => { });

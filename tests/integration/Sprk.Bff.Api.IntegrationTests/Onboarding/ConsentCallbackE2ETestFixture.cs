@@ -166,6 +166,9 @@ public sealed class ConsentCallbackE2ETestFixture : WebApplicationFactory<Progra
 
         builder.ConfigureTestServices(services =>
         {
+            // Test hosts must not authenticate for real — see TestTokenCredential.
+            services.UseStubTokenCredential();
+
             // In-memory cache (ADR-009 — deterministic without Redis).
             services.RemoveAll<IDistributedCache>();
             services.AddSingleton<IDistributedCache, MemoryDistributedCache>();

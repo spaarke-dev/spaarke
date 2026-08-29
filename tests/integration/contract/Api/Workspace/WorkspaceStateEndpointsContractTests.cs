@@ -428,6 +428,9 @@ public class WorkspaceStateEndpointsTestFixture : WebApplicationFactory<Program>
 
         builder.ConfigureTestServices(services =>
         {
+            // Test hosts must not authenticate for real — see TestTokenCredential.
+            services.UseStubTokenCredential();
+
             // Replace IDistributedCache with in-memory.
             var cacheDescriptor = services.SingleOrDefault(
                 d => d.ServiceType == typeof(IDistributedCache));
