@@ -178,6 +178,61 @@ be extracted **last**, or given tests first.
 exercising `ComposeService` under another name is missing. Real coverage is therefore **≥** these
 numbers — the bias is conservative, which is the safe direction for this decision.
 
+## Extraction progress (2026-08-29)
+
+Order follows the coverage evidence (**7 → 6 → 5b → 8 → 2b → 2a → 1 → 3 → 4 → 5a**), not the
+structural order this file originally proposed.
+
+| Cluster | Status | New file | Verification |
+|---|---|---|---|
+| 7 memory capture | ✅ extracted | `ComposeMemoryCapturer.cs` | Compose 1,790/1,790 · mutation red→green · ArchTests 150/150 |
+| 6 annotations | ✅ extracted | `ComposeAnnotationStore.cs` | Compose 1,790/1,790 · mutation red→green · ArchTests 150/150 |
+| 5b background profile | ⏸ analysed, not moved | — | see the entanglement note below |
+
+`ComposeService.cs`: 4,427 → **4,258** lines. Stated as an observation; the target is cohesion, not a
+number (CLAUDE.md §11.5).
+
+**Mechanism held for both**: `internal sealed` collaborator, constructed in the `ComposeService` ctor
+from dependencies it already holds. **No new DI registration** (ADR-010) — verified by `git diff` on
+`Program.cs` + `Infrastructure/DI/` showing no change.
+
+**Cluster 6 needed one decision cluster 7 did not.** Two of its members are PUBLIC `IComposeService`
+methods. They stay on `ComposeService` as thin delegations — the interface is the service's contract
+to keep; only the policy moves. Moving the interface implementation itself would change what
+`ComposeService` *is*, not just how it is organised. Expect the same call on any later cluster whose
+members are public (2 create-on-save, 3 baseline).
+
+### Non-vacuity is proven per extraction, and the first attempt was inconclusive
+
+Worth recording because it nearly produced a false "verified":
+
+- Cluster 7: seeding `FactType: "SEEDED-MUTATION"` did **not** redden
+  `ComposeMemoryCaptureRecallTests` — that suite exercises the **facade** directly, not the service
+  path. It **does** redden `ComposeServiceCreateOnSaveTests` (1/16), which wires
+  `IComposeMemoryCapture` through `ComposeService`.
+- Cluster 6: neutering `LedgerRefPattern` to `@".*"` reddens `AnchoredAnnotationPersistenceTests`
+  (1/7).
+
+The lesson generalises to the remaining clusters: **pick the mutation target and the suite together**,
+and if the seeded fault survives, the suite you chose does not traverse the moved code — that is a
+statement about coverage, not a licence to move on.
+
+### Cluster 5b — analysed, and it is NOT as clean as 7 or 6
+
+Members: `DispatchBackgroundProfile` · `RunBackgroundProfileAsync` · `IndexingSignal`.
+Dependencies are fine (`_scopeFactory`, `_documentProfileAi`, `_appLifetime`, `_logger`). Two things
+must be decided BEFORE moving code, which is why this stopped at analysis:
+
+1. **`ProfileNotAttemptedSignal` has three callers outside the cluster** (≈1867, 3576, 3851 — the
+   save path and two failure projections). It cannot simply travel with the dispatcher. Either it
+   stays on `ComposeService` and the collaborator calls back into it (a circular smell), or the
+   profile-signal factories move to the collaborator as `internal static` and the three outside
+   callers reference them there. The second is preferable — the signals describe the profile step —
+   but it is a real choice, not a mechanical move.
+2. **`IndexingSignal` is grouped here but is about INDEXING, not the background profile.** Its single
+   caller is the save path (≈1905). Suggest leaving it on `ComposeService` and recording the
+   deviation from this map, rather than moving it because a table said cluster 5.
+
 ## Findings recorded, not fixed
 
 Per the POML constraint — record, do not fix inside the restructure.

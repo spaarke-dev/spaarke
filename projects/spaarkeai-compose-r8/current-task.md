@@ -10,9 +10,9 @@
 
 | Field | Value |
 |---|---|
-| **Active work** | **070 cluster 7** (memory capture) — all test debt is closed. |
-| **Next Action** | **Start 070 cluster 7 (§E)** — extract memory capture from `ComposeService.cs`, then build + run the Compose seam/op-log suites before moving to cluster 6. |
-| **Branch** | `work/spaarkeai-compose-r8` · HEAD `b30f4edfa` · **synced with master** (was 152 behind) |
+| **Active work** | **070 decomposition** — clusters 7 + 6 extracted & verified; **5b is next** (analysed, one decision pending). |
+| **Next Action** | **Cluster 5b** — first decide where the profile-signal factories live (`ProfileNotAttemptedSignal` has 3 callers OUTSIDE the cluster; recommendation + reasoning in the seam map), then move. Then 8 → 2b → 2a → 1 → 3 → 4 → 5a. |
+| **Branch** | `work/spaarkeai-compose-r8` · **synced with master** · `ComposeService.cs` 4,427 → **4,258** |
 | **Suite** | ALL GREEN — BFF **11,619/0** · ArchTests **150/150** · `Sprk.Bff.Api.IntegrationTests` **103/0** · `Spe.Integration.Tests` **409/0** |
 | **Verify with** | **`dotnet build`** at the SOLUTION root — not one project (see §A2 for why that distinction cost real time) |
 
