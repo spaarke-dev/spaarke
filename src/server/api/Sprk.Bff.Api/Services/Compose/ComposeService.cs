@@ -156,6 +156,9 @@ public class ComposeService : IComposeService
 
     /// <summary>Cluster 7 (task 070): the document-memory distillation policy, extracted.</summary>
     private readonly ComposeMemoryCapturer _memoryCapturer;
+
+    /// <summary>Cluster 6 (task 070): the session-annotations contract, extracted.</summary>
+    private readonly ComposeAnnotationStore _annotations;
     // Fire-and-forget profile dispatch (compose-r2): a NEW DI scope is created per background profile so
     // the profile facade + its scoped deps never touch the disposing request scope. Optional + defaults
     // null so existing test constructors compile; DI always resolves it in every non-test host.
@@ -278,6 +281,7 @@ public class ComposeService : IComposeService
         _appLifetime = appLifetime;
         _memoryCapture = memoryCapture;
         _memoryCapturer = new ComposeMemoryCapturer(memoryCapture, _sessions, _logger);
+        _annotations = new ComposeAnnotationStore(_sessions, _logger);
         // FR-C3 (email-communication-intelligence-r2): null in a bare test constructor (dedup hook = no-op),
         // the real scoped detector in every non-test host.
         _dedupDetector = dedupDetector;
@@ -3875,112 +3879,23 @@ public class ComposeService : IComposeService
     // session collections — mutable partial-replace, NOT ledger writes.
     // =========================================================================
 
-    /// <summary>ADR-040 <c>{bindingId}@t{n}</c> ledger-ref shape validator (mirrors <see cref="Ai.PublicContracts.OutcomeCard"/>'s own ledger-key validation intent).</summary>
-    private static readonly System.Text.RegularExpressions.Regex LedgerRefPattern =
-        new(@"^.+@t\d+$", System.Text.RegularExpressions.RegexOptions.Compiled);
-
     /// <inheritdoc />
-    public async Task<ComposeAnnotationsState> GetComposeAnnotationsAsync(
+    /// <remarks>
+    /// The interface member stays here and the implementation lives in
+    /// <see cref="ComposeAnnotationStore"/> (task 070 cluster 6): the CONTRACT is the service's to
+    /// keep, only the annotation policy moves.
+    /// </remarks>
+    public Task<ComposeAnnotationsState> GetComposeAnnotationsAsync(
         string tenantId,
         string sessionId,
         CancellationToken cancellationToken = default)
-    {
-        if (string.IsNullOrWhiteSpace(tenantId))
-            throw new ArgumentException("TenantId is required for ADR-015 Tier 3 isolation.", nameof(tenantId));
-        if (string.IsNullOrWhiteSpace(sessionId))
-            throw new ArgumentException("SessionId is required.", nameof(sessionId));
-
-        var session = await _sessions.GetSessionAsync(tenantId, sessionId, cancellationToken).ConfigureAwait(false);
-        return new ComposeAnnotationsState
-        {
-            AnchoredAnnotations = session?.AnchoredAnnotations ?? Array.Empty<AnchoredAnnotation>(),
-            DefinedTermsTracking = session?.DefinedTermsTracking ?? Array.Empty<DefinedTerm>(),
-        };
-    }
+        => _annotations.GetAsync(tenantId, sessionId, cancellationToken);
 
     /// <inheritdoc />
-    public async Task<ComposeAnnotationsState> SaveComposeAnnotationsAsync(
+    public Task<ComposeAnnotationsState> SaveComposeAnnotationsAsync(
         SaveComposeAnnotationsRequest request,
         CancellationToken cancellationToken = default)
-    {
-        ArgumentNullException.ThrowIfNull(request);
-        if (string.IsNullOrWhiteSpace(request.TenantId))
-            throw new ArgumentException("TenantId is required for ADR-015 Tier 3 isolation.", nameof(request));
-        if (string.IsNullOrWhiteSpace(request.SessionId))
-            throw new ArgumentException("SessionId is required.", nameof(request));
-
-        ValidateLedgerRefs(request.AnchoredAnnotations, request.DefinedTermsTracking);
-
-        var session = await _sessions.GetSessionAsync(request.TenantId, request.SessionId, cancellationToken)
-            .ConfigureAwait(false);
-        if (session is null)
-        {
-            throw new InvalidOperationException(
-                $"Compose session not found: session={request.SessionId} tenant={request.TenantId}. " +
-                "Annotations can only be saved onto an existing session (create one via LoadAsync first).");
-        }
-
-        // Partial-replace: a null collection on the request leaves the stored collection
-        // unchanged; a non-null (possibly empty) collection replaces it wholesale. Mutable
-        // by design (accept/reject/edit) — NOT an append to the append-only ledger.
-        var updated = session with
-        {
-            AnchoredAnnotations = request.AnchoredAnnotations ?? session.AnchoredAnnotations,
-            DefinedTermsTracking = request.DefinedTermsTracking ?? session.DefinedTermsTracking,
-            LastActivity = DateTimeOffset.UtcNow,
-        };
-
-        await _sessions.UpdateSessionCacheAsync(updated, cancellationToken).ConfigureAwait(false);
-
-        _logger.LogInformation(
-            "Compose annotations saved: tenant={TenantId} session={SessionId} annotations={AnnotationCount} definedTerms={DefinedTermCount}",
-            request.TenantId, request.SessionId,
-            updated.AnchoredAnnotations?.Count ?? 0, updated.DefinedTermsTracking?.Count ?? 0);
-
-        return new ComposeAnnotationsState
-        {
-            AnchoredAnnotations = updated.AnchoredAnnotations ?? Array.Empty<AnchoredAnnotation>(),
-            DefinedTermsTracking = updated.DefinedTermsTracking ?? Array.Empty<DefinedTerm>(),
-        };
-    }
-
-    /// <summary>
-    /// Validates that every supplied <see cref="AnchoredAnnotation.Provenance"/> /
-    /// <see cref="DefinedTerm.Provenance"/> ledger ref is in ADR-040 <c>{bindingId}@t{n}</c>
-    /// form BEFORE anything persists (fail fast — no partial writes).
-    /// </summary>
-    private static void ValidateLedgerRefs(
-        IReadOnlyList<AnchoredAnnotation>? annotations,
-        IReadOnlyList<DefinedTerm>? definedTerms)
-    {
-        if (annotations is not null)
-        {
-            foreach (var a in annotations)
-            {
-                if (a.Provenance is not null && !LedgerRefPattern.IsMatch(a.Provenance.LedgerRef))
-                {
-                    throw new ArgumentException(
-                        $"AnchoredAnnotation '{a.Id}' provenance.ledgerRef '{a.Provenance.LedgerRef}' " +
-                        "does not match the ADR-040 {bindingId}@t{n} format.",
-                        nameof(annotations));
-                }
-            }
-        }
-
-        if (definedTerms is not null)
-        {
-            foreach (var t in definedTerms)
-            {
-                if (t.Provenance is not null && !LedgerRefPattern.IsMatch(t.Provenance.LedgerRef))
-                {
-                    throw new ArgumentException(
-                        $"DefinedTerm '{t.Term}' provenance.ledgerRef '{t.Provenance.LedgerRef}' " +
-                        "does not match the ADR-040 {bindingId}@t{n} format.",
-                        nameof(definedTerms));
-                }
-            }
-        }
-    }
+        => _annotations.SaveAsync(request, cancellationToken);
 
     /// <summary>
     /// FR-07 idempotent rebind of a ChatSession's DocumentId. Handles three cases:
