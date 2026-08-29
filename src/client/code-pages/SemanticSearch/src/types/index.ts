@@ -140,8 +140,11 @@ export interface DocumentSearchOptions {
 export interface DocumentSearchResult {
   /** Spaarke document ID (GUID). */
   documentId?: string;
-  /** SharePoint Embedded file ID. */
-  speFileId?: string;
+  // NOTE (unified-access-control-r2, task 070): `speFileId` REMOVED — the
+  // server no longer returns raw SPE pointers from `POST /api/ai/search`
+  // (broker-only decision; file/AI access goes through document-id-keyed BFF
+  // routes carrying the authorization gate). This declaration had zero
+  // readers in this code page. Do NOT re-add.
   /** Document display name. */
   name?: string;
   /** Document type classification (e.g., "Contract", "Invoice"). */

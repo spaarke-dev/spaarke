@@ -1,7 +1,7 @@
 <task id="CICD-088" project="ci-cd-unit-test-remediation-r1">
   <metadata>
     <title>Fix ADR-007 violation — isolate Microsoft.Graph SDK out of 18 endpoint classes (wrap Graph exceptions in SpeFileStore facade) — BLOCKS 071 cutover</title>
-    <status>not-started</status>
+    <status>closed-moot</status>
     <estimated-effort>4-6 hours</estimated-effort>
     <phase>2.5 - Pre-cutover BFF ADR remediation</phase>
     <stream>A - CI tiering remediation</stream>
@@ -13,6 +13,32 @@
     <tags>bff-api, adr-007, spe, graph-sdk, hot-path, FR-A06</tags>
     <execution-note>Modifies src/server/api/Sprk.Bff.Api/** — hot-path. Overrides project's `<hot-path-declaration><bff-api>NO</bff-api>` per owner direction 2026-06-26. Coordinate via INDEX.md before editing. Larger blast radius than 087 (18 endpoint files); execute carefully + test each surface.</execution-note>
   </metadata>
+
+  <closure-record date="2026-08-28" resolution="MOOT — violation no longer exists">
+    Verified against master 2026-08-28. The premise of this task has evaporated:
+
+      * The NetArchTest guard this task exists to fix -- "ADR-007: Endpoints must not
+        reference Graph SDK" -- PASSES on master. All 6 ADR007_GraphIsolationTests green.
+      * 5 of the 18 target files no longer exist at all, including Api/UploadEndpoints.cs.
+      * Only 2 files still contain the string "Microsoft.Graph", and all 4 occurrences are
+        COMMENTS -- several of which document ADR-007 compliance. FileAccessEndpoints.cs
+        records the technique used: "match it by type NAME via an exception filter -- no
+        Microsoft.Graph.* type".
+
+    This is a genuine pass, not a false green: NetArchTest's HaveDependencyOn is an
+    IL-level check and cannot see comments. (A grep-based check DOES see them and reports
+    2 violations -- the same comment-matching false positive that defect #1 of the
+    classifier spot-check produced. Do not re-open this task on grep evidence.)
+
+    Consequence: the ADR-007 half of the FR-A06 cutover gate is SATISFIED. Task 087
+    (ADR-009, the other half) is already complete.
+
+    The UAC-r2 coordination this task was blocked on is also moot. For the record, the
+    real overlap was only ever 3 files (FileAccessEndpoints.cs / OBOEndpoints.cs /
+    DataverseDocumentsEndpoints.cs) and it was merge-conflict risk, not semantic
+    conflict -- ADR-007 exception-wrapping is orthogonal to UAC-r2's authorization work.
+    UAC-r2 owns tasks 012/076/078 and will land them.
+  </closure-record>
 
   <prompt>
     Per spec FR-A06 (CI Router stability gate). The new CI Router exposes a pre-existing ADR-007 violation: 18 endpoint classes import `Microsoft.Graph` or `Microsoft.Graph.Models.ODataErrors` directly. NetArchTest `ADR-007: Endpoints must not reference Graph SDK` fails because `Endpoints`-suffixed types have a dependency on `Microsoft.Graph`. Per BFF CLAUDE.md ADR-007 guidance, endpoints should use the `SpeFileStore` facade and NOT reference Graph SDK types directly.

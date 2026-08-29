@@ -42,9 +42,31 @@ namespace Sprk.Bff.Api.Tests.AccessControl;
 /// CLEANUP path for ACLs created by legacy versions or by admins outside Spaarke, and
 /// <c>NoPermissionFound</c> is the ordinary healthy answer — not a failure.</para>
 ///
+/// <para><b>Task 020 (FR-16b) extends this to ORGANIZATION grants.</b> An org revoke names no single
+/// grantee, so its SPE side is a many-identity sweep: the organization is expanded to its active member
+/// contacts via <c>sprk_contactorganization</c> and each member's permission is removed, with the outcome
+/// reported at member granularity. <c>NotAttempted</c> is consequently no longer reachable for an org
+/// revoke that supplied a <c>ContainerId</c>.</para>
+///
 /// <para>Seams are the <c>virtual</c> members of <see cref="DataverseWebApiClient"/> and
 /// <see cref="SpeContainerMembershipService"/> (ADR-038 §4). No <c>Mock&lt;HttpMessageHandler&gt;</c>
 /// (ban B1), no reflection into privates (ban B8).</para>
+///
+/// <para><b>⚠️ What these tests CANNOT falsify.</b> Everything below stops at the
+/// <c>SpeContainerMembershipService</c> seam, so nothing here says anything about real Graph behaviour:
+/// <list type="bullet">
+/// <item>Whether <c>RevokeMembershipAsync</c>'s "No permission found" is TRUE on a real container. It
+/// reads permissions with a single <c>GetAsync</c> and does not follow <c>@odata.nextLink</c>, so on a
+/// multi-page container a member's entry beyond page 1 is reported absent while they retain file access.
+/// Owned by task 024; a stub that returns <c>NotFound</c> cannot distinguish the two.</item>
+/// <item>Whether SPE's permission list is even consistent immediately after a delete (Graph is eventually
+/// consistent) — a removal reported here as succeeded may still be observable for some window.</item>
+/// <item>Whether <c>userPrincipalName</c> on a real legacy ACL matches <c>contact.emailaddress1</c>
+/// exactly. The match is case-insensitive but not alias- or proxy-address-aware, so a member invited
+/// under a different address would be reported <c>NoPermissionFound</c>.</item>
+/// </list>
+/// Each of these is a way the org cleanup could report <c>NoPermissionFound</c> — a healthy-looking
+/// answer — for a member who still has access. They need a live SPE environment to falsify.</para>
 /// </summary>
 public class SpeRevokeMatcherTests
 {
@@ -126,6 +148,18 @@ public class SpeRevokeMatcherTests
             emailSetup.ThrowsAsync(new InvalidOperationException("Dataverse unavailable"));
         else
             emailSetup.ReturnsAsync(new RevokeExternalAccessEndpoint.ContactEmailRow { emailaddress1 = contactEmail });
+
+        // THROW on the membership junction rather than answering it (task 020). Moq's loose default for
+        // Task<List<T>> is an EMPTY list, which would let a contact-path double silently satisfy an
+        // organization expansion — a permissive default standing in for behaviour nobody modelled. That
+        // is the class of hole task 021 found in its own fake (it ignored $top and the team predicates),
+        // and it would make "did the contact path accidentally start expanding organizations?"
+        // unanswerable. The contact path must never touch this table; if it does, this fails loudly.
+        mock.Setup(c => c.QueryAsync<ExternalOrganizationMembership.ContactOrganizationRow>(
+                It.IsAny<string>(), It.IsAny<string>(), It.IsAny<string>(),
+                It.IsAny<int?>(), It.IsAny<int?>(), It.IsAny<CancellationToken>()))
+            .ThrowsAsync(new InvalidOperationException(
+                "The per-contact revoke path must not query sprk_contactorganizations."));
 
         return mock;
     }
@@ -351,30 +385,586 @@ public class SpeRevokeMatcherTests
     }
 
     /// <summary>
-    /// An ORGANIZATION-grant revoke passes an empty ContactId (task 073 #7) — there is no single grantee,
-    /// so no single email, so no permission to match. Reporting <c>NotAttempted</c> is the honest answer;
-    /// claiming success here would recreate A-13 in a new place.
+    /// ✅ FLIPPED BY TASK 020 (FR-16b) — was
+    /// <c>Revoke_OfAnOrganizationGrant_ReportsNotAttemptedRatherThanSuccess</c>.
     ///
-    /// <para>⚠️ This is also a KNOWN GAP, deliberately left and filed: the Dataverse sweep revokes the org
-    /// grant for every member, but their container ACLs (if any) are not touched, because that needs an
-    /// organization → members → emails expansion this path does not have. See
-    /// <c>notes/task-017-spe-revoke-matcher.md</c>. Under broker-only no such ACLs are created, which is
-    /// what bounds it.</para>
+    /// <para><b>What was wrong.</b> An org revoke passes <c>ContactId = Guid.Empty</c> (task 073 #7), so
+    /// there was no single grantee, no single email, and nothing to match — the endpoint reported
+    /// <c>NotAttempted</c> and touched no container permission at all. Honest, but incomplete: the
+    /// Dataverse sweep revoked the grant for every member while every member's container ACL stayed
+    /// exactly where it was. Task 017 assessed and FILED this; task 020 closes it.</para>
+    ///
+    /// <para>The organization is now expanded to its active members and each member's permission is
+    /// removed, so <c>NotAttempted</c> is no longer reachable for an org revoke that supplied a
+    /// <c>ContainerId</c>. This assertion is the flip: seeing <c>NotAttempted</c> here again would mean
+    /// the expansion was skipped.</para>
     /// </summary>
     [Fact]
-    public async Task Revoke_OfAnOrganizationGrant_ReportsNotAttemptedRatherThanSuccess()
+    public async Task Revoke_OfAnOrganizationGrant_NoLongerReportsNotAttempted()
     {
+        var org = new OrgRevokeFixture(MemberOne, MemberTwo, MemberThree);
         var stub = new SpeServiceStub();
         var spe = stub.Build(Removed);
 
-        var result = await Revoke(
-            DataverseFor(contactOnGrantRow: null, contactEmail: null), spe, contactId: Guid.Empty);
+        var result = await org.Revoke(spe);
+
+        Body(result).SpeContainerOutcome.Should().NotBe(SpeContainerRevokeOutcome.NotAttempted,
+            "the organization is expanded to its members now — NotAttempted would mean the expansion " +
+            "was skipped and every member kept their container permission (task 017 §6, FR-16b)");
+        stub.CallCount.Should().BeGreaterThan(0);
+    }
+
+    // ─────────────────────────────────────────────────────────────────────────────
+    // FR-16b (task 020) — an ORGANIZATION revoke cleans up EVERY active member.
+    //
+    // These use their own double rather than DataverseFor: an org revoke reads a table the contact path
+    // never touches, and the double must ANSWER FROM A MODEL and THROW on anything unmodelled. A double
+    // that shrugs at an unrecognised $filter or ignores $top cannot detect a change in what the query
+    // DOES — only in what someone thought it was for.
+    // ─────────────────────────────────────────────────────────────────────────────
+
+    private const string JunctionEntitySet = "sprk_contactorganizations";
+
+    private static readonly Guid MemberOne = Guid.Parse("44444444-0000-0000-0000-000000000001");
+    private static readonly Guid MemberTwo = Guid.Parse("44444444-0000-0000-0000-000000000002");
+    private static readonly Guid MemberThree = Guid.Parse("44444444-0000-0000-0000-000000000003");
+
+    /// <summary>The personal grant row of <see cref="MemberOne"/> on the SAME root (task-010 invariant).</summary>
+    private static readonly Guid PersonalGrantId = Guid.Parse("aaaaaaaa-0000-0000-0000-00000000000f");
+
+    /// <summary>
+    /// Member emails, held as an explicit map rather than derived from the GUID.
+    /// </summary>
+    /// <remarks>
+    /// ⚠️ <b>This was a hole in this very double.</b> The first version derived the address as
+    /// <c>$"member-{memberId.ToString()[..8]}@…"</c> — and the three member GUIDs share their first
+    /// eight characters, so all three "distinct" members had the SAME email. The all-members-removed test
+    /// passed on one address matched three times, and per-member routing could not be expressed at all.
+    /// Only <see cref="Revoke_OfAnOrganizationGrant_WhenOneMemberFails_ReportsFailedAndStillCleansTheOthers"/>
+    /// — which needs to fail exactly ONE member — surfaced it. A double that derives its identities can
+    /// collide them; one that states them cannot.
+    /// </remarks>
+    private static readonly Dictionary<Guid, string> MemberEmails = new()
+    {
+        [MemberOne] = "alice.partner@clientfirm.com",
+        [MemberTwo] = "bob.associate@clientfirm.com",
+        [MemberThree] = "carol.paralegal@clientfirm.com",
+    };
+
+    private static string EmailFor(Guid memberId) => MemberEmails[memberId];
+
+    /// <summary>
+    /// A Dataverse double for the ORGANIZATION revoke path, modelling three tables:
+    /// the grant rows (org grant + a member's personal grant on the same root), the
+    /// <c>sprk_contactorganization</c> junction, and contact emails.
+    /// </summary>
+    /// <remarks>
+    /// Every seam validates its input and throws on anything it does not model. The junction setup in
+    /// particular asserts the production <c>$filter</c> and <c>$top</c> rather than accepting whatever
+    /// arrives: a stale column name in a revocation query reads as "nothing to revoke" and is silent, and
+    /// dropping the bound turns a truncated sweep into one that looks complete.
+    /// </remarks>
+    private sealed class OrgRevokeFixture
+    {
+        private readonly Dictionary<Guid, string?> _members = new();
+        private readonly List<ExternalGrantRow> _grantRows = new();
+
+        public Mock<DataverseWebApiClient> Dataverse { get; }
+
+        /// <summary>Ids passed to <c>UpdateAsync</c> — i.e. the rows the Dataverse sweep deactivated.</summary>
+        public List<Guid> DeactivatedRowIds { get; } = new();
+
+        public string? CapturedJunctionFilter { get; private set; }
+        public int? CapturedJunctionTop { get; private set; }
+        public int JunctionQueryCount { get; private set; }
+
+        public OrgRevokeFixture(
+            params Guid[] members)
+            : this(junctionThrows: false, membersWithoutEmail: null, overflowRows: 0, members) { }
+
+        public OrgRevokeFixture(
+            bool junctionThrows,
+            IReadOnlyCollection<Guid>? membersWithoutEmail,
+            int overflowRows,
+            params Guid[] members)
+        {
+            foreach (var m in members)
+                _members[m] = membersWithoutEmail?.Contains(m) == true ? null : EmailFor(m);
+
+            // The ORG grant being revoked, and a member's PERSONAL grant on the same root. Both are
+            // active; only the first belongs to the logical grant under revocation.
+            _grantRows.Add(new ExternalGrantRow
+            {
+                Id = AccessRecordId,
+                ProjectId = ProjectId,
+                ContactId = null,
+                OrganizationId = OrganizationId,
+                StateCode = 0
+            });
+            _grantRows.Add(new ExternalGrantRow
+            {
+                Id = PersonalGrantId,
+                ProjectId = ProjectId,
+                ContactId = MemberOne,
+                OrganizationId = OrganizationId,
+                StateCode = 0
+            });
+
+            Dataverse = new Mock<DataverseWebApiClient>(
+                ClientConfig(), NullLogger<DataverseWebApiClient>.Instance, null!, null!);
+
+            Dataverse.Setup(c => c.RetrieveAsync<ExternalGrantRow>(
+                    GrantEntitySet, It.IsAny<Guid>(), It.IsAny<string>(), It.IsAny<CancellationToken>()))
+                .ReturnsAsync((string _, Guid id, string _, CancellationToken _) =>
+                    _grantRows.SingleOrDefault(r => r.Id == id));
+
+            // Interprets the production filter from ExternalGrantKey.ToActiveRowsFilter rather than
+            // returning a fixed set — otherwise the task-010 isolation assertion below would be vacuous.
+            Dataverse.Setup(c => c.QueryAsync<ExternalGrantRow>(
+                    GrantEntitySet, It.IsAny<string>(), It.IsAny<string>(),
+                    It.IsAny<int?>(), It.IsAny<int?>(), It.IsAny<CancellationToken>()))
+                .ReturnsAsync((string _, string? filter, string? _, int? _, int? _, CancellationToken _) =>
+                    MatchGrantRows(filter));
+
+            Dataverse.Setup(c => c.UpdateAsync(
+                    GrantEntitySet, It.IsAny<Guid>(), It.IsAny<object>(), It.IsAny<CancellationToken>()))
+                .Returns((string _, Guid id, object _, CancellationToken _) =>
+                {
+                    DeactivatedRowIds.Add(id);
+                    return Task.CompletedTask;
+                });
+
+            var junction = Dataverse.Setup(c => c.QueryAsync<ExternalOrganizationMembership.ContactOrganizationRow>(
+                It.IsAny<string>(), It.IsAny<string>(), It.IsAny<string>(),
+                It.IsAny<int?>(), It.IsAny<int?>(), It.IsAny<CancellationToken>()));
+
+            if (junctionThrows)
+            {
+                junction.ThrowsAsync(new InvalidOperationException("Dataverse unavailable"));
+            }
+            else
+            {
+                junction.ReturnsAsync((
+                    string entitySet, string? filter, string? select,
+                    int? top, int? _, CancellationToken _) =>
+                {
+                    JunctionQueryCount++;
+                    CapturedJunctionFilter = filter;
+                    CapturedJunctionTop = top;
+
+                    if (entitySet != JunctionEntitySet)
+                        throw new InvalidOperationException(
+                            $"Membership must be read from '{JunctionEntitySet}', not '{entitySet}'.");
+
+                    // The predicate is the whole query — answering regardless of it would make a stale
+                    // column name (the exact silent failure this task's constraint names) undetectable.
+                    if (filter is null || !filter.Contains($"_sprk_organization_value eq {OrganizationId}", StringComparison.Ordinal))
+                        throw new InvalidOperationException($"Unmodelled junction $filter: '{filter}'.");
+
+                    if (!filter.Contains("statecode eq 0", StringComparison.Ordinal))
+                        throw new InvalidOperationException(
+                            $"Junction $filter must restrict to ACTIVE memberships: '{filter}'.");
+
+                    if (select is null || !select.Contains("_sprk_contact_value", StringComparison.Ordinal))
+                        throw new InvalidOperationException($"Unmodelled junction $select: '{select}'.");
+
+                    // $top is HONOURED, not ignored: it is the only thing standing between a large
+                    // organization and a silently truncated sweep, because DataverseWebApiClient.QueryAsync
+                    // reads one page and discards @odata.nextLink.
+                    if (top is null)
+                        throw new InvalidOperationException(
+                            "The membership query must be bounded — an unbounded read truncates silently.");
+
+                    var rows = _members.Keys
+                        .Select(id => new ExternalOrganizationMembership.ContactOrganizationRow { ContactId = id })
+                        .ToList();
+
+                    // Simulates an organization larger than one sweep may handle.
+                    for (var i = 0; i < overflowRows; i++)
+                        rows.Add(new ExternalOrganizationMembership.ContactOrganizationRow { ContactId = Guid.NewGuid() });
+
+                    return rows.Take(top.Value).ToList();
+                });
+            }
+
+            Dataverse.Setup(c => c.RetrieveAsync<RevokeExternalAccessEndpoint.ContactEmailRow>(
+                    ContactEntitySet, It.IsAny<Guid>(), It.IsAny<string>(), It.IsAny<CancellationToken>()))
+                .ReturnsAsync((string _, Guid id, string _, CancellationToken _) =>
+                {
+                    // Unknown contact ⇒ the code asked about somebody the model never described. Answering
+                    // with a plausible default here would let a wrong member set pass unnoticed.
+                    if (!_members.TryGetValue(id, out var email))
+                        throw new InvalidOperationException($"Unmodelled contact lookup: {id}.");
+
+                    return new RevokeExternalAccessEndpoint.ContactEmailRow { emailaddress1 = email };
+                });
+        }
+
+        private List<ExternalGrantRow> MatchGrantRows(string? filter)
+        {
+            if (filter is null)
+                throw new InvalidOperationException("The grant sweep must carry a $filter.");
+
+            var wantsOrg = filter.Contains("_sprk_contact_value eq null", StringComparison.Ordinal);
+
+            if (wantsOrg)
+                return _grantRows
+                    .Where(r => r.IsActive && r.ProjectId == ProjectId
+                                && r.OrganizationId == OrganizationId && r.ContactId is null)
+                    .ToList();
+
+            var contactMatch = System.Text.RegularExpressions.Regex.Match(
+                filter, @"_sprk_contact_value eq ([0-9a-fA-F-]{36})");
+
+            if (!contactMatch.Success)
+                throw new InvalidOperationException($"Unmodelled grant $filter: '{filter}'.");
+
+            var contactId = Guid.Parse(contactMatch.Groups[1].Value);
+            return _grantRows.Where(r => r.IsActive && r.ProjectId == ProjectId && r.ContactId == contactId).ToList();
+        }
+
+        public Task<IResult> Revoke(Mock<SpeContainerMembershipService> spe) =>
+            RevokeExternalAccessEndpoint.RevokeAccessAsync(
+                new RevokeAccessRequest(AccessRecordId, Guid.Empty, ProjectId, ContainerId),
+                Dataverse.Object, spe.Object, Mock.Of<ITenantCache>(),
+                AuthenticatedContext(), NullLogger<Program>.Instance, CancellationToken.None);
+    }
+
+    /// <summary>
+    /// Per-member SPE stub: records the key used for EACH member, because "which key" is the whole of
+    /// A-13 and the org path multiplies it by the member count.
+    /// </summary>
+    private sealed class SpeMemberStub
+    {
+        private readonly Dictionary<string, SpeContainerMembershipResult> _byEmail;
+        private readonly SpeContainerMembershipResult _default;
+
+        public List<string> CapturedEmails { get; } = new();
+        public int CallCount => CapturedEmails.Count;
+
+        public SpeMemberStub(
+            SpeContainerMembershipResult @default,
+            Dictionary<string, SpeContainerMembershipResult>? byEmail = null)
+        {
+            _default = @default;
+            _byEmail = byEmail ?? new Dictionary<string, SpeContainerMembershipResult>();
+        }
+
+        public Mock<SpeContainerMembershipService> Build()
+        {
+            var mock = new Mock<SpeContainerMembershipService>(
+                Mock.Of<IGraphClientFactory>(), NullLogger<SpeContainerMembershipService>.Instance);
+
+            mock.Setup(s => s.RevokeMembershipAsync(
+                    It.IsAny<string>(), It.IsAny<string>(), It.IsAny<CancellationToken>()))
+                .ReturnsAsync((string containerId, string email, CancellationToken _) =>
+                {
+                    if (containerId != ContainerId.ToString())
+                        throw new InvalidOperationException($"Unmodelled container: '{containerId}'.");
+
+                    CapturedEmails.Add(email);
+                    return _byEmail.TryGetValue(email, out var specific) ? specific : _default;
+                });
+
+            return mock;
+        }
+    }
+
+    private static SpeContainerMembershipResult NotFoundFor(string email) =>
+        new(false, null, $"No permission found for user '{email}' in container.");
+
+    /// <summary>
+    /// FR-16b acceptance criterion 1: revoking an organization grant removes the SPE container permission
+    /// of EVERY active member, matched on each member's email.
+    /// </summary>
+    [Fact]
+    public async Task Revoke_OfAnOrganizationGrant_RemovesEveryActiveMembersPermission()
+    {
+        var org = new OrgRevokeFixture(MemberOne, MemberTwo, MemberThree);
+        var stub = new SpeMemberStub(Removed);
+
+        var result = await org.Revoke(stub.Build());
+
+        stub.CapturedEmails.Should().BeEquivalentTo(
+            new[] { EmailFor(MemberOne), EmailFor(MemberTwo), EmailFor(MemberThree) },
+            "every ACTIVE member of the organization loses their container permission, and each is " +
+            "matched on the key SPE membership is written with — their email");
 
         var body = Body(result);
-        body.SpeContainerOutcome.Should().Be(SpeContainerRevokeOutcome.NotAttempted);
-        body.SpeContainerMembershipRevoked.Should().BeFalse();
-        stub.CallCount.Should().Be(0);
+        body.SpeContainerOutcome.Should().Be(SpeContainerRevokeOutcome.PermissionRemoved);
+        body.SpeContainerMembershipRevoked.Should().BeTrue();
+        body.SpeOrgMemberCleanup.Should().Be(
+            new SpeOrgMemberCleanupSummary(MembersEnumerated: 3, PermissionsRemoved: 3, PermissionsNotFound: 0, Failed: 0));
     }
+
+    /// <summary>
+    /// The negative half, stated separately because it is A-13's exact shape one level up: the key must
+    /// be the member's email, never their GUID.
+    /// </summary>
+    [Fact]
+    public async Task Revoke_OfAnOrganizationGrant_MatchesMembersOnEmailNotOnGuid()
+    {
+        var org = new OrgRevokeFixture(MemberOne, MemberTwo, MemberThree);
+        var stub = new SpeMemberStub(Removed);
+
+        await org.Revoke(stub.Build());
+
+        foreach (var memberId in new[] { MemberOne, MemberTwo, MemberThree })
+            stub.CapturedEmails.Should().NotContain(e => e.Contains(memberId.ToString(), StringComparison.OrdinalIgnoreCase),
+                "an email never contains the contact GUID — matching on it is why the old predicate could never find a permission");
+    }
+
+    /// <summary>
+    /// FR-16b acceptance criterion 2: one member's removal failing must NOT be reportable as success, and
+    /// must NOT stop the others from being cleaned up — stopping early leaves strictly MORE access in place.
+    /// </summary>
+    [Fact]
+    public async Task Revoke_OfAnOrganizationGrant_WhenOneMemberFails_ReportsFailedAndStillCleansTheOthers()
+    {
+        var org = new OrgRevokeFixture(MemberOne, MemberTwo, MemberThree);
+        var stub = new SpeMemberStub(Removed, new Dictionary<string, SpeContainerMembershipResult>
+        {
+            [EmailFor(MemberTwo)] = GraphError
+        });
+
+        var result = await org.Revoke(stub.Build());
+
+        stub.CallCount.Should().Be(3,
+            "a per-member failure must not abort the loop — the other members must still lose access");
+
+        var body = Body(result);
+        body.SpeContainerOutcome.Should().Be(SpeContainerRevokeOutcome.Failed,
+            "one member retaining file access is enough to make the org cleanup incomplete");
+        body.SpeContainerMembershipRevoked.Should().BeFalse(
+            "'some members retain access' must never be reportable as an SPE success");
+        body.SpeOrgMemberCleanup.Should().Be(
+            new SpeOrgMemberCleanupSummary(MembersEnumerated: 3, PermissionsRemoved: 2, PermissionsNotFound: 0, Failed: 1));
+    }
+
+    /// <summary>
+    /// A member with no <c>emailaddress1</c> has no findable ACL entry. That is an unknown state, not an
+    /// absence — the same judgement task 017 made per-contact, applied per member.
+    /// </summary>
+    [Fact]
+    public async Task Revoke_OfAnOrganizationGrant_WhenAMemberHasNoEmail_ReportsFailedRatherThanAbsent()
+    {
+        var org = new OrgRevokeFixture(
+            junctionThrows: false, membersWithoutEmail: new[] { MemberTwo }, overflowRows: 0,
+            MemberOne, MemberTwo, MemberThree);
+        var stub = new SpeMemberStub(Removed);
+
+        var result = await org.Revoke(stub.Build());
+
+        stub.CapturedEmails.Should().NotContain(string.Empty);
+        stub.CallCount.Should().Be(2,
+            "with no key to match on there is nothing to ask Graph for that member — and asking with an " +
+            "empty key could match the wrong permission");
+
+        var body = Body(result);
+        body.SpeContainerOutcome.Should().Be(SpeContainerRevokeOutcome.Failed);
+        body.SpeOrgMemberCleanup!.Failed.Should().Be(1);
+    }
+
+    /// <summary>
+    /// FR-16b acceptance criterion 3: when the member list cannot be established, the response reports a
+    /// non-success outcome and attempts NO removals. Counts from a partial sweep off an unknown member
+    /// list would read like a complete answer.
+    /// </summary>
+    [Fact]
+    public async Task Revoke_OfAnOrganizationGrant_WhenMembersCannotBeEnumerated_ReportsFailedAndRemovesNothing()
+    {
+        var org = new OrgRevokeFixture(
+            junctionThrows: true, membersWithoutEmail: null, overflowRows: 0,
+            MemberOne, MemberTwo, MemberThree);
+        var stub = new SpeMemberStub(Removed);
+
+        var result = await org.Revoke(stub.Build());
+
+        stub.CallCount.Should().Be(0);
+
+        var body = Body(result);
+        body.SpeContainerOutcome.Should().Be(SpeContainerRevokeOutcome.Failed,
+            "'we could not tell who the members are' must never be reported as 'there was nothing there'");
+        body.SpeOrgMemberCleanup!.MembersEnumerated.Should().BeNull(
+            "a null member count is what distinguishes 'we never looked' from 'we looked and it was empty'");
+    }
+
+    /// <summary>
+    /// FR-16b acceptance criterion 4: an organization with no active members revokes cleanly. The fix must
+    /// not turn "nothing to do" into an error.
+    /// </summary>
+    [Fact]
+    public async Task Revoke_OfAnOrganizationGrant_WithNoActiveMembers_RevokesCleanly()
+    {
+        var org = new OrgRevokeFixture();
+        var stub = new SpeMemberStub(Removed);
+
+        var result = await org.Revoke(stub.Build());
+
+        stub.CallCount.Should().Be(0);
+
+        var body = Body(result);
+        body.SpeContainerOutcome.Should().Be(SpeContainerRevokeOutcome.NoPermissionFound,
+            "the member list was established and nobody held a permission — the ordinary broker-only answer");
+        body.SpeContainerMembershipRevoked.Should().BeFalse();
+        body.DeactivatedCount.Should().Be(1, "the Dataverse revocation still happened");
+        body.SpeOrgMemberCleanup.Should().Be(
+            new SpeOrgMemberCleanupSummary(MembersEnumerated: 0, PermissionsRemoved: 0, PermissionsNotFound: 0, Failed: 0));
+    }
+
+    /// <summary>
+    /// An organization too large for one sweep is REFUSED, not silently truncated. Task 020's escalation
+    /// trigger, enforced in code: a truncated sweep that reports success is the exact failure class this
+    /// project exists to remove.
+    /// </summary>
+    [Fact]
+    public async Task Revoke_OfAnOrganizationGrant_TooLargeToSweep_ReportsFailedRatherThanTruncating()
+    {
+        var org = new OrgRevokeFixture(
+            junctionThrows: false, membersWithoutEmail: null,
+            overflowRows: ExternalOrganizationMembership.MaxMembersPerSweep,
+            MemberOne, MemberTwo, MemberThree);
+        var stub = new SpeMemberStub(Removed);
+
+        var result = await org.Revoke(stub.Build());
+
+        stub.CallCount.Should().Be(0, "a partial sweep would produce counts that read like a complete answer");
+
+        var body = Body(result);
+        body.SpeContainerOutcome.Should().Be(SpeContainerRevokeOutcome.Failed);
+        body.SpeOrgMemberCleanup!.MembersEnumerated.Should().BeNull(
+            "the member list is a truncation, not the membership — reporting its length would assert " +
+            "something we do not know");
+    }
+
+    /// <summary>
+    /// The membership query must ask for THIS organization's ACTIVE memberships. Pinned explicitly
+    /// because a stale column name in a revocation query reads as "nothing to revoke" — silently — which
+    /// is what three earlier Phase 0 tasks turned on.
+    /// </summary>
+    [Fact]
+    public async Task Revoke_OfAnOrganizationGrant_QueriesTheJunctionForThatOrganizationsActiveMembers()
+    {
+        var org = new OrgRevokeFixture(MemberOne);
+
+        await org.Revoke(new SpeMemberStub(Removed).Build());
+
+        org.JunctionQueryCount.Should().Be(1);
+        org.CapturedJunctionFilter.Should().Contain($"_sprk_organization_value eq {OrganizationId}");
+        org.CapturedJunctionFilter.Should().Contain("statecode eq 0",
+            "a deactivated membership is a FORMER member — sweeping them would revoke access nobody granted");
+    }
+
+    /// <summary>
+    /// The membership query must be BOUNDED. Asserted on its own, separately from the filter, because it
+    /// guards a different failure: <c>DataverseWebApiClient.QueryAsync</c> reads one page and discards
+    /// <c>@odata.nextLink</c>, so an unbounded read on a large organization returns a truncated list that
+    /// is indistinguishable from a complete one.
+    /// </summary>
+    [Fact]
+    public async Task Revoke_OfAnOrganizationGrant_BoundsTheMembershipQuery()
+    {
+        var org = new OrgRevokeFixture(MemberOne);
+
+        await org.Revoke(new SpeMemberStub(Removed).Build());
+
+        org.CapturedJunctionTop.Should().Be(ExternalOrganizationMembership.MaxMembersPerSweep + 1,
+            "asking for one MORE than the bound is what makes 'there are too many' detectable rather " +
+            "than silently truncated at the bound");
+    }
+
+    /// <summary>
+    /// The task-010 isolation invariant: an org revoke must not deactivate a member's PERSONAL grant on
+    /// the same root. A person grant and an org grant are DISTINCT logical grants and must never revoke
+    /// each other — the <c>_sprk_contact_value eq null</c> clause is what enforces it, and adding SPE
+    /// cleanup must not disturb it.
+    /// </summary>
+    [Fact]
+    public async Task Revoke_OfAnOrganizationGrant_DoesNotDeactivateAMembersPersonalGrantRow()
+    {
+        var org = new OrgRevokeFixture(MemberOne, MemberTwo);
+
+        var result = await org.Revoke(new SpeMemberStub(Removed).Build());
+
+        org.DeactivatedRowIds.Should().ContainSingle().Which.Should().Be(AccessRecordId);
+        org.DeactivatedRowIds.Should().NotContain(PersonalGrantId,
+            "MemberOne's personal grant on the same root is a different logical grant — the org revoke " +
+            "must leave it standing (task 010)");
+        Body(result).DeactivatedCount.Should().Be(1);
+    }
+
+    /// <summary>
+    /// The per-contact path carries no member summary. Guards against the new field leaking a summary
+    /// that would describe a sweep that never happened.
+    /// </summary>
+    [Fact]
+    public async Task Revoke_OfAContactGrant_ReportsNoOrgMemberSummary()
+    {
+        var stub = new SpeServiceStub();
+
+        var result = await Revoke(DataverseFor(ContactId, ContactEmail), stub.Build(Removed));
+
+        Body(result).SpeOrgMemberCleanup.Should().BeNull();
+    }
+
+    // ─────────────────────────────────────────────────────────────────────────────
+    // The AGGREGATOR itself, tested directly.
+    //
+    // Task 017's own lesson, applied pre-emptively: mocking at a seam proves the CALLER handles a state,
+    // never that the mapping producing that state is right. These four cases are the closed set — every
+    // summary shape maps somewhere, and exactly one shape maps to success.
+    // ─────────────────────────────────────────────────────────────────────────────
+
+    [Fact]
+    public void AggregateOrgOutcome_WhenMembershipIsUnknown_IsFailed() =>
+        RevokeExternalAccessEndpoint.AggregateOrgOutcome(new SpeOrgMemberCleanupSummary(null, 0, 0, 0))
+            .Should().Be(SpeContainerRevokeOutcome.Failed,
+                "we never established who the members are, so nothing can be claimed clean");
+
+    [Fact]
+    public void AggregateOrgOutcome_WithAnyFailure_IsFailedEvenAlongsideRemovals() =>
+        RevokeExternalAccessEndpoint.AggregateOrgOutcome(new SpeOrgMemberCleanupSummary(12, 11, 0, 1))
+            .Should().Be(SpeContainerRevokeOutcome.Failed,
+                "eleven people losing access does not make the twelfth's retained access a success");
+
+    [Fact]
+    public void AggregateOrgOutcome_WithRemovalsAndNoFailures_IsPermissionRemoved() =>
+        RevokeExternalAccessEndpoint.AggregateOrgOutcome(new SpeOrgMemberCleanupSummary(3, 1, 2, 0))
+            .Should().Be(SpeContainerRevokeOutcome.PermissionRemoved);
+
+    /// <summary>
+    /// The <c>null</c> member count must survive serialization as an explicit <c>null</c>, not vanish.
+    /// </summary>
+    /// <remarks>
+    /// This pins a contract that is easy to break from a distance. <c>MembersEnumerated == null</c> is the
+    /// only thing distinguishing "we could not establish the member list" from "the list was empty", and a
+    /// <c>DefaultIgnoreCondition = WhenWritingNull</c> added to the app's HTTP JSON options — or a
+    /// <c>[JsonIgnore]</c> on the property — would OMIT the field instead. A JS client reading
+    /// <c>body.speOrgMemberCleanup.membersEnumerated</c> would then see <c>undefined</c>, and the
+    /// natural <c>=== null</c> check would silently stop detecting the case. The BFF configures no
+    /// <c>ConfigureHttpJsonOptions</c>, so <see cref="JsonSerializerDefaults.Web"/> is what actually runs.
+    /// </remarks>
+    [Fact]
+    public void SpeOrgMemberCleanupSummary_UnknownMembership_SerializesAnExplicitNull()
+    {
+        var json = System.Text.Json.JsonSerializer.Serialize(
+            new RevokeAccessResponse(
+                SpeContainerMembershipRevoked: false,
+                SpeContainerOutcome: SpeContainerRevokeOutcome.Failed,
+                DeactivatedCount: 1,
+                SpeOrgMemberCleanup: new SpeOrgMemberCleanupSummary(null, 0, 0, 0)),
+            new System.Text.Json.JsonSerializerOptions(System.Text.Json.JsonSerializerDefaults.Web));
+
+        json.Should().Contain("\"membersEnumerated\":null",
+            "an omitted field reads as 'undefined' to a client, which is not the same claim as " +
+            "'we do not know who the members are'");
+    }
+
+    [Fact]
+    public void AggregateOrgOutcome_WhenNobodyHeldAPermission_IsAbsentNotFailure() =>
+        RevokeExternalAccessEndpoint.AggregateOrgOutcome(new SpeOrgMemberCleanupSummary(3, 0, 3, 0))
+            .Should().Be(SpeContainerRevokeOutcome.NoPermissionFound,
+                "the expected result under broker-only — no member ACLs are created in the first place");
 
     // ─────────────────────────────────────────────────────────────────────────────
     // The SPE SERVICE itself must report failure — the task-016 constraint.

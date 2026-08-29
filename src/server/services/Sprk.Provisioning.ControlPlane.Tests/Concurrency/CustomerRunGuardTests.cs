@@ -420,8 +420,11 @@ public sealed class CustomerRunGuardTests
             // in-memory store bypasses Dataverse entirely.
             TargetDataverseUrl = enabled ? "https://spaarke-admin-test.crm.dynamics.com" : null,
             TenantId = enabled ? "11111111-1111-1111-1111-111111111111" : null,
-            ClientId = enabled ? "22222222-2222-2222-2222-222222222222" : null,
-            ClientSecret = enabled ? "unit-test-secret" : null,
+            // ClientId/ClientSecret were REMOVED from CustomerRunGuardOptions in this PR --
+            // the store authenticates as the L2 UAMI now. ManagedIdentityClientId is the
+            // replacement and is OPTIONAL by design (empty selects the single assigned
+            // identity), so the enabled-path tests do not need to populate it at all.
+            ManagedIdentityClientId = enabled ? "22222222-2222-2222-2222-222222222222" : null,
         });
         return new CustomerRunGuard(store, repo, options, NullLogger<CustomerRunGuard>.Instance);
     }

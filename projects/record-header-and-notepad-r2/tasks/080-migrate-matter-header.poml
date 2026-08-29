@@ -1,0 +1,205 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="080" project="record-header-and-notepad-r2">
+  <metadata>
+    <title>Migrate Matter to Spaarke Record Header — re-bind + parity regression QA vs the task-002 baseline</title>
+    <phase>5 Rollout</phase>
+    <gate>blocked — startable when 002, 034 and 070 are ✅ (parity baseline captured; control shipped; waves 1-3 complete)</gate>
+    <status>not-started</status>
+    <rigor>STANDARD</rigor>
+    <rigor-reason>Operator/maker configuration + QA task — no .cs/.ts/.tsx files are modified. The pcf tag denotes the control under test, not code implementation, so the tag-based FULL trigger is deliberately overridden per plan.md Phase 5. The weight of this task is in QA judgment, which is why it carries an opus model-tier despite STANDARD rigor.</rigor-reason>
+    <model-tier>opus</model-tier>
+    <model-tier-reason>Parity regression judgment: assessing a screenshot diff against the task-002 baseline with a deliberate intended-change carve-out (lookup interaction), and issuing the go/no-go that gates the IRREVERSIBLE task 081 retirement. High blast radius of a wrong call.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Operator/maker task in the live spaarkedev1 environment; Matter migrates LAST by design (it is the parity regression test). Runs alone as its own wave.</parallel-reason>
+    <deps>002, 034, 070</deps>
+    <tags>pcf, dataverse, config, deploy, migration</tags>
+    <estimated-effort>3-5 hours</estimated-effort>
+  </metadata>
+
+  <prompt>
+    Re-bind the Matter (sprk_matter) main form from the old MatterHeaderPcf control to the new Spaarke Record
+    Header, reproducing R1 v1.0.20's exact 5-field layout, then run the parity regression QA against the
+    task-002 baseline — light AND dark. Your go/no-go verdict gates task 081, the irreversible retirement.
+
+    ⚠️ UPDATED 2026-08-27: the lookup-exclusion carve-out this task previously carried is **WITHDRAWN**.
+    FR-15a was amended — the header now renders the SAME shared inline `components/LookupField` that R1's
+    MatterHeader already renders, so parity is assessed UNQUALIFIED. See the baseline caveat below.
+  </prompt>
+
+  <role>
+    SPAARKE platform operator/maker with Dataverse form-designer access to spaarkedev1. Follow ADRs strictly.
+    Expertise: model-driven-app form configuration, regression QA judgment, screenshot-diff assessment.
+  </role>
+
+  <goal>
+    The "Matter main form" (4fa382f2-c273-f011-b4cb-6045bdd6a665) renders the new Spaarke Record Header
+    identically to the task-002 v1.0.20 baseline (lookup interaction excepted); all R1 live-QA behaviours are
+    confirmed to survive; the parity verdict (explicit GO / NO-GO for task 081) plus evidence is recorded in
+    projects/record-header-and-notepad-r2/notes/matter-parity-qa.md. The old control remains in the
+    environment untouched — its deletion is task 081.
+  </goal>
+
+  <context>
+    <background>
+      Matter migrates LAST because it is the strongest regression test (spec FR-26; design §8). The parity
+      target is the task-002 baseline artifact, NOT the live current state — the shipped v1.0.20 header is
+      currently broken by RS-1 (its $select names the deleted sprk_mattersummary column → HTTP 400; spec
+      FR-23). R2 fixes that by construction: the new control's sparkle reads sprk_recordsummary. Owner decision
+      D-4: MatterHeaderPcf retires on delivery with NO dormant-release window — the ONLY rollback window is
+      between this task and task 081 (re-add the old control to the field's control list; instant, no
+      redeploy). This task's pixel-parity QA is what earns closing that window.
+    </background>
+    <relevant-files>
+      <file role="canonical-reference">projects/record-header-and-notepad-r2/notes/ (task-002 baseline artifact — screenshots light+dark, exact 5-field layout + spans, bound field, footer version)</file>
+      <file role="canonical-reference">projects/record-header-and-notepad-r1/notes/matter-form-binding-instructions.md</file>
+      <file role="canonical-reference">projects/record-header-and-notepad-r2/design.md</file>
+      <file role="canonical-reference">projects/record-header-and-notepad-r2/spec.md</file>
+      <file role="canonical-reference">src/client/shared/Spaarke.UI.Components/src/types/RecordHeaderConfiguration.ts</file>
+      <file role="new">projects/record-header-and-notepad-r2/notes/matter-parity-qa.md</file>
+    </relevant-files>
+    <dependencies>
+      <dependency task="002" status="pending">MatterHeaderPcf v1.0.20 parity baseline — the diff target; without it there is nothing to compare against</dependency>
+      <dependency task="034" status="pending">Completed RecordHeader PCF importable as the RecordHeaderPcf solution</dependency>
+      <dependency task="070" status="pending">Waves 1-3 (Project, WA, Invoice, Event, Agreement) bound and accepted</dependency>
+    </dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="project">FR-25 scope: re-bind ONLY the "Matter main form" 4fa382f2-c273-f011-b4cb-6045bdd6a665 — NEVER the legacy "Information" form.</constraint>
+    <constraint source="project">Do NOT delete, remove from the environment, or otherwise retire the old MatterHeaderPcf control in this task — that is task 081's prescriptive two-step procedure. This task only removes the old control from the sprk_matternumber field's control list on the main form; the control itself stays importable/re-addable as the rollback path.</constraint>
+    <constraint source="project">Parity is assessed UNQUALIFIED (spec criterion 15, updated 2026-08-27). Both controls now render the same shared inline `components/LookupField`, so the former lookup-interaction exclusion no longer applies. ⚠️ EXPECT ONE KNOWN DELTA: the task-002 baseline comes from the deployed MatterHeaderPcf, which bundles the PRE-2026-08-27 shared LookupField, so its lookups lack the browse button, the overlaying dropdown and the pinned Advanced footer. That difference is caused by a SHARED-LIBRARY upgrade, not by this migration -- treat it as expected-and-explained, not a regression, and do NOT rebuild MatterHeaderPcf to erase it (owner decision 2026-08-27: the baseline must reflect the status quo users actually saw).</constraint>
+    <constraint source="project">This task modifies form configuration and QA notes only. If parity QA surfaces a code defect, do NOT patch code inside this task — record it, STOP, and escalate per CLAUDE.md §6.</constraint>
+    <constraint source="ADR-021">Parity is assessed in BOTH light and dark themes; high contrast is spot-checked (NFR-03).</constraint>
+    <constraint source="project">NFR-01/NFR-02 are measured THIS WAVE: bundle ≤250 KB minified, TTI ≤300 ms warm / ≤800 ms cold on the Matter form.</constraint>
+    <constraint source="project">NFR-07: the Notepad/SmartTodo launch contracts are byte-identical external API — verify, never alter.</constraint>
+    <constraint source="project">NFR-09: form and record GUIDs are environment data — acceptable in notes only, never in any shipped artifact.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>Matter migration + parity regression QA</topic>
+    <files>
+      <file>.claude/constraints/pcf.md</file>
+      <file>.claude/adr/ADR-021-fluent-design-system.md</file>
+      <file>src/client/pcf/CLAUDE.md</file>
+      <file>docs/guides/PCF-DEPLOYMENT-GUIDE.md</file>
+      <file>.claude/skills/ui-test/SKILL.md</file>
+      <file>.claude/patterns/pcf/control-initialization.md</file>
+      <file>.claude/patterns/pcf/fluent-v9-modern-theming.md</file>
+    </files>
+    <patterns>
+      <pattern name="Maker binding recipe (proven in R1)" location="projects/record-header-and-notepad-r1/notes/matter-form-binding-instructions.md">
+        The re-bind follows this recipe with one addition (design §8 step 3): REMOVE the old control from sprk_matternumber's control list before adding "Spaarke Record Header".
+      </pattern>
+    </patterns>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="0">Context + rigor declaration. Verify 002, 034 and 070 are ✅. Locate and load the task-002 baseline artifact — if it is missing or incomplete, STOP (there is no parity target).</step>
+    <step order="1">Author the Matter layoutJson reproducing the EXACT 5-field layout from the task-002 baseline. Expected shape (baseline wins on any conflict):
+{ "_version": "1.0", "title": "Matter", "columns": 3,
+  "fields": [
+    { "name": "sprk_matternumber", "span": 1, "required": true },
+    { "name": "sprk_mattername", "span": 2 },
+    { "name": "sprk_mattertype", "span": 1 },
+    { "name": "sprk_practicearea", "span": 1 },
+    { "name": "sprk_matterdescription", "span": 3 } ] }
+(summaryField omitted deliberately — defaults to sprk_recordsummary via RECORDSUMMARY_FIELD, per the FR-22 standardization.) Verify against the shipped RecordHeaderConfiguration v1.0 types before pasting.</step>
+    <step order="2">make.powerapps.com → Solutions → Tables → sprk_matter → Forms → "Matter main form" (4fa382f2-c273-f011-b4cb-6045bdd6a665) — NEVER the legacy "Information" form → ⋯ → Edit form → Edit in classic.</step>
+    <step order="3">Click sprk_matternumber → Controls tab → REMOVE the old "Matter Header" control from the field's control list (do NOT delete the control from the environment) → Add Control → "Spaarke Record Header" → Add → tick Web (and Phone/Tablet) → re-enter Bound field / Header title / Show version footer → paste the layoutJson as a static value.</step>
+    <step order="4">Save → Publish. Confirm the swap took via the version footer (the in-UI check that the NEW control is rendering, design §8 step 4).</step>
+    <step order="5">Parity QA against the task-002 baseline on the same Matter record(s) the baseline used: screenshot diff in LIGHT and DARK, field-by-field (labels, values, spans, typography, spacing, toolbar). EXCLUDE the lookup interaction from the diff (OOB picker vs inline dropdown — intended, FR-15a). Record every observed difference and classify it: intended (FR-15a lookup; FR-22 sparkle source) vs regression.</step>
+    <step order="6">Confirm R1's live-QA behaviours survive: (a) inline edit stages to the form buffer, form goes dirty, NO re-render flash, form Save persists; (b) Notepad opens in the 25% × 35% modal scoped to the record; (c) To Do opens SmartTodo with the openTodos filter (action=openTodos&amp;regardingType=sprk_matter&amp;regardingId=…); (d) dark AND high-contrast theming; (e) sparkle popover renders (reads sprk_recordsummary — "No summary yet" where empty); (f) Matter Type + Practice Area render correct values and the OOB picker resolves them with zero hard-coded constants (LOOKUP_META deleted — spec criterion 16).</step>
+    <step order="7">Run the standard negative QA: malformed ({{{) and absent layoutJson each degrade to derived defaults; a configured field not on the form fails loudly on edit.</step>
+    <step order="8">Wave measurement: bundle.js bytes after npm run build:prod; TTI cold + warm on the Matter form.</step>
+    <step order="9">Write projects/record-header-and-notepad-r2/notes/matter-parity-qa.md: baseline reference, light+dark diff evidence, intended-difference register, R1-behaviour checklist, measurements, and an EXPLICIT "GO for task 081" or "NO-GO" verdict. Task 081 must not start without a recorded GO.</step>
+    <step order="10">Update TASK-INDEX.md: set this task's status to ✅.</step>
+    <step order="11">Document any deviation in projects/record-header-and-notepad-r2/notes/.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If parity vs the task-002 baseline fails on ANYTHING other than the lookup interaction (the FR-15a OOB-picker change is the only spec-sanctioned exclusion), STOP — record NO-GO, do NOT proceed to task 081, and escalate per CLAUDE.md §6. The rollback window (re-add the old control to the field's control list) exists ONLY while 081 has not run.</trigger>
+    <trigger>If any R1 live-QA behaviour (form-buffer dirty state without flash, 25%×35% Notepad modal, openTodos SmartTodo filter, dark/high-contrast theming) does not survive, STOP — record NO-GO and escalate; do not patch code inside this task.</trigger>
+    <trigger>If the task-002 baseline artifact is missing or too incomplete to diff against, STOP and escalate — do not substitute memory or the live (RS-1-broken) v1.0.20 rendering as the parity target.</trigger>
+  </escalation>
+
+  <ui-tests>
+    <test name="Parity vs task-002 baseline (light + dark)">
+      <url>https://{org}.crm.dynamics.com/main.aspx?appid={app-id}&amp;pagetype=entityrecord&amp;etn=sprk_matter&amp;id={baseline-record-id}</url>
+      <steps>
+        <step>Open the same Matter record used by the task-002 baseline</step>
+        <step>Capture screenshots light and dark; diff against the baseline field-by-field (labels, values, spans, typography, spacing, toolbar, footer)</step>
+        <step>Include the lookup cells in the diff -- the exclusion was withdrawn 2026-08-27. Expect ONE known delta (browse button / overlay / Advanced footer) from the shared-library upgrade; everything else must match.</step>
+        <step>Check the console for JavaScript errors</step>
+      </steps>
+      <expected>Renders identically to the baseline, lookups included; no console errors (spec criterion 15)</expected>
+    </test>
+    <test name="R1 behaviours survive">
+      <steps>
+        <step>Edit sprk_mattername inline — form goes dirty with NO re-render flash; form Save persists; refresh confirms</step>
+        <step>Click Notepad — 25% × 35% modal scoped to this Matter</step>
+        <step>Click To Do — SmartTodo opens with the openTodos filter for this Matter</step>
+        <step>Click the sparkle — popover renders from sprk_recordsummary ("No summary yet" where empty)</step>
+        <step>Click Matter Type and Practice Area cells — the INLINE type-ahead dropdown opens under the field (NOT the side pane), the right-side magnifier browses without typing, the pinned Advanced action opens the OOB Xrm.Utility.lookupObjects dialog, there is NO "+ New", and opening the dropdown does not push the fields below it down. Selection stages to the form buffer.</step>
+      </steps>
+      <expected>All R1 live-QA behaviours intact; launch contracts byte-identical (NFR-07)</expected>
+    </test>
+    <test name="Config degradation (negative paths)">
+      <steps>
+        <step>With layoutJson = {{{ : console.warn + derived defaults, never blank, never thrown</step>
+        <step>With layoutJson absent: derived defaults render</step>
+        <step>With a layout field not on the form: attempted edit throws "Field '…' not on form"</step>
+      </steps>
+      <expected>Graceful degradation (NFR-10); loud failure on missing form field (FR-14)</expected>
+    </test>
+    <test name="Dark Mode + High Contrast Compliance (ADR-021)">
+      <steps>
+        <step>Toggle dark mode; verify the full header (fields, toolbar, popover, modals) adapts with semantic tokens</step>
+        <step>Diff dark-mode rendering against the task-002 DARK baseline</step>
+        <step>Spot-check high contrast mode</step>
+      </steps>
+      <expected>Dark parity holds vs baseline; all colors are Fluent v9 semantic tokens (ADR-021 / NFR-03)</expected>
+    </test>
+  </ui-tests>
+
+  <tools>
+    <tool name="browser">make.powerapps.com classic form designer + live-record QA + screenshot capture (ui-test skill / Chrome integration)</tool>
+    <tool name="pac">Solution verification (pac solution list)</tool>
+    <tool name="npm">Bundle measurement via npm run build:prod in the RecordHeader PCF folder</tool>
+  </tools>
+
+  <outputs>
+    <output type="docs">projects/record-header-and-notepad-r2/notes/matter-parity-qa.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">The Matter main form renders the NEW Spaarke Record Header (version footer confirms the swap) with the exact 5-field baseline layout; the old control is removed from the field's control list but still present in the environment (rollback intact until 081).</criterion>
+    <criterion testable="true">Screenshot diff vs the task-002 baseline passes in LIGHT and DARK with the lookup interaction as the ONLY unclassified-as-regression difference (spec criterion 15); every other observed difference is either absent or explicitly classified as intended (FR-15a lookup / FR-22 sparkle source) in the notes.</criterion>
+    <criterion testable="true">R1 behaviours survive: form-buffer dirty state with no re-render flash; 25% × 35% Notepad modal; openTodos SmartTodo filter; dark AND high-contrast theming (design §8).</criterion>
+    <criterion testable="true">Matter Type + Practice Area render and resolve via metadata with LOOKUP_META deleted — grep for LOOKUP_META returns nothing, and both lookups work functionally (spec criterion 16).</criterion>
+    <criterion testable="true">Sparkle reads sprk_recordsummary and renders "No summary yet" where empty — no reference to the deleted sprk_mattersummary anywhere in the header path (FR-22/FR-23 RS-1 fixed by construction).</criterion>
+    <criterion testable="true">Negative: malformed AND absent layoutJson degrade to derived defaults; a configured field not on the form fails loudly on edit (spec criteria 5-6).</criterion>
+    <criterion testable="true">Bundle ≤250 KB minified and TTI ≤300 ms warm / ≤800 ms cold measured this wave on the Matter form (spec criteria 8-9).</criterion>
+    <criterion testable="true">notes/matter-parity-qa.md exists with baseline reference, light+dark evidence, the intended-difference register, measurements, and an EXPLICIT GO / NO-GO verdict for task 081.</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    Spec refs: FR-22, FR-23 (RS-1), FR-25, FR-26, Success Criteria 1-9 + 15 + 16; design §8 (migration
+    sequence + rollback) and §5.2 (the Matter layout shape). The parity TARGET is the task-002 baseline
+    artifact, not the live v1.0.20 rendering — the shipped control is currently RS-1-broken (HTTP 400 on
+    load). One expected non-visual difference beyond the lookup: the sparkle's backing column is now
+    sprk_recordsummary (v1.0.20 read the deleted sprk_mattersummary), so popover CONTENT may differ on any
+    record the baseline captured with old summary text — classify under FR-22 as intended, with the evidence
+    noted. Rollback: between this task and 081 only — re-add the old control to sprk_matternumber's control
+    list (instant, no redeploy). Owner decision D-4: no dormant-release window after delivery.
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>
+      Before starting this task, load all files listed in &lt;knowledge&gt;&lt;files&gt;.
+      Follow the task-execute skill for the mandatory pre-execution checklist.
+    </protocol>
+  </execution>
+</task>

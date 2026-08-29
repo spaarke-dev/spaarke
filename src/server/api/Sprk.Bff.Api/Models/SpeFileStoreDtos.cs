@@ -17,9 +17,11 @@ public record FileHandleDto(
     // pre-existing consumers that ignore it.
     string? DriveId = null);
 
-public record UploadSessionDto(
-    string UploadUrl,
-    DateTimeOffset ExpirationDateTime);
+// UploadSessionDto DELETED 2026-08-27 by unified-access-control-r2, dead by transitivity once task 073
+// removed Api/UploadEndpoints.cs and the app-only chunked pair went with it. It carried a Graph
+// PRE-AUTHENTICATED upload URL, which is why the retirement regression guard treats handing one to a
+// caller as the interesting property. The OBO path uses UploadSessionResponse — a different type, still
+// live, and NOT this one.
 
 public record VersionInfoDto(
     string Id,

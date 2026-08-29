@@ -51,7 +51,7 @@ public class AccessibleRecordSetServiceTests
     {
         var membership = new Mock<IMembershipResolverService>();
         membership
-            .Setup(m => m.ResolveAsync(SystemUserId, MatterEntity, null, It.IsAny<CancellationToken>()))
+            .Setup(m => m.ResolveAsync(SystemUserId, MatterEntity, PagedOptions, It.IsAny<CancellationToken>()))
             .ReturnsAsync(Response(MatterEntity, MemberRecordA, MemberRecordB));
 
         var standing = new Mock<IContactStandingGrantReader>();
@@ -79,7 +79,7 @@ public class AccessibleRecordSetServiceTests
     {
         var membership = new Mock<IMembershipResolverService>();
         membership
-            .Setup(m => m.ResolveAsync(SystemUserId, MatterEntity, null, It.IsAny<CancellationToken>()))
+            .Setup(m => m.ResolveAsync(SystemUserId, MatterEntity, PagedOptions, It.IsAny<CancellationToken>()))
             .ReturnsAsync(Response(MatterEntity, MemberRecordA));
 
         var sut = CreateSut(membership.Object, NoParticipations(), NeverStanding());
@@ -100,7 +100,7 @@ public class AccessibleRecordSetServiceTests
     {
         var membership = new Mock<IMembershipResolverService>();
         membership
-            .Setup(m => m.ResolveAsync(SystemUserId, ProjectEntity, null, It.IsAny<CancellationToken>()))
+            .Setup(m => m.ResolveAsync(SystemUserId, ProjectEntity, PagedOptions, It.IsAny<CancellationToken>()))
             .ReturnsAsync(Response(ProjectEntity, MemberRecordA));
 
         // The systemuser's DERIVED contact (SystemUserPrincipal().ContactId) holds a grant.
@@ -121,7 +121,7 @@ public class AccessibleRecordSetServiceTests
     {
         var membership = new Mock<IMembershipResolverService>();
         membership
-            .Setup(m => m.ResolveAsync(SystemUserId, ProjectEntity, null, It.IsAny<CancellationToken>()))
+            .Setup(m => m.ResolveAsync(SystemUserId, ProjectEntity, PagedOptions, It.IsAny<CancellationToken>()))
             .ReturnsAsync(Response(ProjectEntity)); // no ADR-034 membership
 
         // No derived contact (sprk_primarycontact null) but a verified email that resolves to a contact.
@@ -152,7 +152,7 @@ public class AccessibleRecordSetServiceTests
     {
         var membership = new Mock<IMembershipResolverService>();
         membership
-            .Setup(m => m.ResolveAsync(SystemUserId, ProjectEntity, null, It.IsAny<CancellationToken>()))
+            .Setup(m => m.ResolveAsync(SystemUserId, ProjectEntity, PagedOptions, It.IsAny<CancellationToken>()))
             .ReturnsAsync(Response(ProjectEntity, MemberRecordA));
 
         // No derived contact AND no email → the contact-grants term cannot resolve; membership only.
@@ -223,7 +223,7 @@ public class AccessibleRecordSetServiceTests
     {
         var membership = new Mock<IMembershipResolverService>();
         membership
-            .Setup(m => m.ResolveByContactAsync(ContactId, ProjectEntity, null, It.IsAny<CancellationToken>()))
+            .Setup(m => m.ResolveByContactAsync(ContactId, ProjectEntity, PagedOptions, It.IsAny<CancellationToken>()))
             .ReturnsAsync(Response(ProjectEntity, MemberRecordA));
 
         var sut = CreateSut(membership.Object, ParticipationsFor(GrantedProject), AlwaysStanding());
@@ -244,7 +244,7 @@ public class AccessibleRecordSetServiceTests
         // standing membership (which spans all entities).
         var membership = new Mock<IMembershipResolverService>();
         membership
-            .Setup(m => m.ResolveByContactAsync(ContactId, MatterEntity, null, It.IsAny<CancellationToken>()))
+            .Setup(m => m.ResolveByContactAsync(ContactId, MatterEntity, PagedOptions, It.IsAny<CancellationToken>()))
             .ReturnsAsync(Response(MatterEntity, StandingMatter));
 
         var grantedMatter = Guid.Parse("d0000000-0000-0000-0000-000000000001");
@@ -267,7 +267,7 @@ public class AccessibleRecordSetServiceTests
     {
         var membership = new Mock<IMembershipResolverService>();
         membership
-            .Setup(m => m.ResolveByContactAsync(ContactId, ProjectEntity, null, It.IsAny<CancellationToken>()))
+            .Setup(m => m.ResolveByContactAsync(ContactId, ProjectEntity, PagedOptions, It.IsAny<CancellationToken>()))
             .ReturnsAsync(Response(ProjectEntity, MemberRecordA));
 
         var sut = CreateSut(membership.Object, ParticipationsFor(GrantedProject), AlwaysStanding());
@@ -348,6 +348,23 @@ public class AccessibleRecordSetServiceTests
         ExternalParticipationService participations,
         IContactStandingGrantReader standing)
         => new(membership, participations, standing, NullLogger<AccessibleRecordSetService>.Instance);
+
+    /// <summary>
+    /// Matches the membership options the composer is now required to pass.
+    ///
+    /// <para>These setups previously matched the literal argument <c>null</c> — which was pinning
+    /// finding A-10 rather than the contract. <c>options: null</c> is exactly what clamped every
+    /// composed set to the first 500 rows and discarded the continuation token, so a suite keyed on
+    /// it would have gone red the moment that defect was fixed, and green for as long as it stood.
+    /// (It did: these eight setups all failed on the task-015 fix.)</para>
+    ///
+    /// <para>The replacement is deliberately NOT <c>It.IsAny</c>, which would only stop the tests
+    /// caring. It asserts the composer passes real paging options at the agreed page size, so the
+    /// setups now pin the fix: a regression back to <c>null</c> fails to match and the test dies.</para>
+    /// </summary>
+    private static MembershipResolveOptions? PagedOptions =>
+        It.Is<MembershipResolveOptions?>(o =>
+            o != null && o.Limit == AccessibleRecordSetService.MembershipPageSize);
 
     private static WorkforcePrincipal SystemUserPrincipal() => new()
     {

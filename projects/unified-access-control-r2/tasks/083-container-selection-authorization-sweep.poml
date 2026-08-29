@@ -1,0 +1,238 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="083" project="unified-access-control-r2">
+  <metadata>
+    <title>Container-selection authorization sweep: every path where bytes reach SPE must have the SERVER choose the container from a record it authorized</title>
+    <phase>0c Secure Documents — Wave 2</phase>
+    <status>pending</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Security boundary across five-plus independent write paths, two of which are live app-only holes and one of which is a destroy. Changes route contracts on surfaces owned by three different projects.</rigor-reason>
+    <model-tier>fable</model-tier>
+    <model-tier-reason>Owner-directed 2026-08-27. The ENUMERATION is mechanical, but the judgment call is not: "what should the contract be for a write path that has no owning record at the moment the bytes move" is exactly the question that produced the Compose defect, and getting it wrong reintroduces option (B) (client-supplied container) through a side door. Highest tier for the contract decision, not for the grep.</model-tier-reason>
+    <effort>xhigh</effort>
+    <effort-reason>Brownfield root-cause work across an unbounded surface: two of the seven known paths are UNTRACED, and the sweep's whole purpose is finding the ones nobody has listed yet. This is the case xhigh exists for.</effort-reason>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Touches route contracts and RouteAuthorizationGuardTests.cs, and must sequence against PR #806. Concurrent agents on one authorization surface produce silent lost writes.</parallel-reason>
+    <deps>075, 076</deps>
+    <tags>bff-api, api, security, auth, dataverse</tags>
+    <estimated-effort>16-24 hours</estimated-effort>
+    <origin>Owner decision 2026-08-27 after task 076 surfaced that Compose has the same defect on a second surface, and the ArchTest revealed two more that were waived UNOWNED. Owner explicitly rejected offloading to compose-r8: "trying to offload to other projects is very risky because they lack the context."</origin>
+  </metadata>
+
+  <prompt>One defect class, at least five instances, two of them live. For every path where bytes reach SharePoint Embedded, the SERVER must choose the container from a record it has already authorized the caller against. Find every instance, including the ones not yet listed. Fix them. Prove completeness by absence, not by inventory.</prompt>
+
+  <role>SPAARKE security engineer. The deliverable is a closed set: after this task, no code path lets a caller name the container its bytes land in, and a mechanical guard makes a new one a build failure.</role>
+
+  <goal>Every SPE write path resolves its container server-side from `(entity, recordId)` via task 075's `RecordContainerResolver`, having authorized the caller on that record first. The two live app-only holes are closed. Compose is converted. A guard prevents regression. Completeness is proven by a grep for absence, not by an inventory that can go stale.</goal>
+
+  <context>
+    <background>⭐ **READ `notes/task-076-record-keyed-upload-contract.md` AND `notes/finding-compose-create-on-save-client-named-container.md` FIRST.** They contain the model, the verified facts, and three closed decisions you must not re-litigate.
+
+═══════════════════════════════════════════════════════════════════════
+§1 — THE DEFECT CLASS, AND WHY IT IS ONE CLASS
+═══════════════════════════════════════════════════════════════════════
+
+**Shape**: the client names a SharePoint Embedded container; the server writes bytes into it. The
+authorization decision (if any) keys on something OTHER than the container, so the two can disagree.
+
+**Why it is permanent damage, not a nuisance**: SPE permissions are **additive-only** — *"you can't break
+inheritance on arbitrary files or folders"*. A document written into a shared container is readable by
+every member of that container and **no later per-item permission retracts it**. There is no repair.
+
+**Why partial completion is worth little**: one surviving path puts secure content in a shared container
+forever. This is why the deliverable is an argument from absence.
+
+═══════════════════════════════════════════════════════════════════════
+§2 — THE KNOWN INVENTORY. Verified 2026-08-27. TWO ROWS ARE UNTRACED.
+═══════════════════════════════════════════════════════════════════════
+
+| # | Path | Container from | Auth today | Status |
+|---|---|---|---|---|
+| 1 | `PUT /api/containers/{containerId}/files/{*path}` (app-only) | client route | none per-resource | ✅ **073 DELETED** |
+| 2 | `POST /api/obo/drives/{driveId}/upload-session` + `PUT /api/obo/upload-session/chunk` | client route | `RequireAuthorization()` | ✅ **076 DELETED** (were dead — the drive route they depended on is mapped nowhere) |
+| 3 | `PUT /api/obo/containers/{id}/files/{*path}` | client route | `RequireAuthorization()` only | 🔄 **076 converting** — the Create\* wizard path (U1/U2/U3) |
+| 4 | **`PUT /api/drives/{driveId}/upload`** (`DocumentsEndpoints.cs:37-95`) | client route | **`canwritefiles` POLICY only** | 🔴 **LIVE. app-only MI.** Waived `UNOWNED`. **DO THIS FIRST** |
+| 5 | **`DELETE /api/drives/{driveId}/items/{itemId}`** (`DocumentsEndpoints.cs:~100-148`) | client route | **`canwritefiles` POLICY only** | 🔴 **LIVE. A DESTROY.** Waived `UNOWNED` |
+| 6 | Compose create-on-save `SaveComposeDocumentRequest.ContainerId` | client **body** | in-handler | 🔲 issue **#858**. Sequenced behind PR #806 |
+| 7 | `ChatWordExportEndpoints.cs:154` | `ResolveDriveIdAsync(containerId, …)` then `UploadSmallAsUserAsync` | OBO | ⚠️ **UNTRACED — trace it** |
+| 8 | `ChatDocumentEndpoints.cs:1160` | same shape | OBO | ⚠️ **UNTRACED — trace it** |
+
+**Rows 4 and 5 first, and here is why they outrank Compose.** They write **app-only (MI)**. Task 073's
+whole finding was that app-only needs no container ACL — so unlike every OBO row these are **live holes,
+not latent bypasses**. Row 5 is a destroy, which is the worst case for a wrong-resource-domain decision.
+Both survived 073 purely because they live in `DocumentsEndpoints.cs`, outside its file scope. Neither is
+blocked by any open PR (verified: zero overlap).
+
+**Do not trust this table as complete. Finding row 9 is the point of the task.**
+
+═══════════════════════════════════════════════════════════════════════
+§3 — THE MODEL. Settled by the owner 2026-08-27; do NOT re-open.
+═══════════════════════════════════════════════════════════════════════
+
+```
+secure record      -> its OWN sprk_containerid, or FAIL CLOSED (never a fallback)
+everything else    -> the RECORD's owningbusinessunit -> businessunit.sprk_containerid
+server-side ingest -> Communication:ArchiveContainerId (no owning record exists)
+```
+
+**The container follows the RECORD, not the acting user.** Every client site previously resolved
+`getUserId() → systemuser.businessunitid → businessunit.sprk_containerid` — the person uploading, not the
+thing uploaded to. Two users uploading to one matter split its documents across two containers. Worse:
+users sit in the Operations subtree while secure records are owned in `Secure Projects`, so acting-user
+resolution writes secure content into the general **Operations** container.
+
+**Already implemented** by task 076 in `RecordContainerResolver`:
+`ResolveForRecordAsync(entity, recordId, ct)` — derives the BU fallback itself. **Reuse it. Do not build a
+second resolver** (§11).
+
+**Three things about it that are load-bearing — do not "simplify" any of them:**
+1. `SecureContainerDecision.Decide` is PURE and pinned jointly with the TypeScript half against
+   `tests/fixtures/secure-container-decision-table.json`. Changing it desyncs both suites.
+2. The BU lookup is **skipped for secure records** — so the fail-closed path cannot acquire a usable
+   fallback. Not an optimisation.
+3. BU read failures **propagate**. "Unknown" must never become "no fallback".
+
+**INV-7 is not a constraint.** `design.md:450` says *"the BFF deliberately does not resolve this
+server-side (INV-7)"*. Traced: its only concrete statement is a comment on
+`SaveComposeDocumentRequest.ContainerId` reading *"the resolver stays in the wizards"* — a **scope
+boundary** from `spaarke-multi-container-multi-index`, cited downstream as a technical limit. **Correcting
+`design.md:450` is part of this task.**
+
+**Verified live against Dataverse 2026-08-27 — do not re-derive:** `owningbusinessunit` populated on every
+`sprk_project` row · `businessunit.sprk_containerid` populated on 3 of 6 BUs · the `Secure Project` BU has
+**no** container (correct — secure records use their own) · the root `Spaarke` BU **shares** its container
+with `Spaarke Business Unit 1`, so **a BU container is not an isolation boundary** · `sprk_issecure` is
+**NULL on 5 of 10 rows**, the "absent is not false" case, in real data.
+
+═══════════════════════════════════════════════════════════════════════
+§4 — THE AUTHORIZATION PRIMITIVE. Extend, do not add (§11).
+═══════════════════════════════════════════════════════════════════════
+
+`CallerRecordAccessProbe.GetCallerRightsAsync(callerBearerToken, entitySet, recordId, ct)` → `AccessRights`,
+**fail-closed to `None`** when the question cannot be answered. `Api/Filters/EntityAccessFilter.cs` already
+wraps it for `(entityType, recordId)`.
+
+Needs a logical-name → entity-SET map. **Reuse `SemanticSearchAuthorizationFilter`'s
+`TryResolveParentEntitySet`** — task 080 made it `internal` for exactly this. A second map is a review
+failure.
+
+**Rows 4 and 5 are app-only (MI), so there is no caller token to do OBO with.** That is the genuine design
+question on those two, and it is why they are `fable` tier rather than mechanical:
+- if they have real callers, they need a caller identity to authorize against — determine whether one exists
+- if they have **no** callers, DELETE them, as 073 did to their twin and 076 did to the chunked pair
+- **Grep for callers before designing anything.** Every count asserted in this project has been wrong at
+  least once.
+
+═══════════════════════════════════════════════════════════════════════
+§5 — SEQUENCING. One hard block.
+═══════════════════════════════════════════════════════════════════════
+
+**PR #806 modifies `IComposeService.cs`, `ComposeEndpoints.cs` AND `ComposeService.cs`** — verified by
+unpaginated listing (`gh api --paginate .../pulls/806/files`, 352 files). Row 6 is **sequenced behind
+#806**, not delegated. Issue #858 tells compose-r8 to stand down and to notify us when those files are
+stable. Rows 4, 5, 7, 8 are unblocked now.
+
+⚠️ **`gh pr view --json files` CAPS AT 100 and reports no error.** It under-reported #806 (352) and #843
+(178). Always use `gh api --paginate` for overlap checks in this repo.
+
+═══════════════════════════════════════════════════════════════════════
+§6 — COMPLETENESS: prove it by ABSENCE and by a GUARD
+═══════════════════════════════════════════════════════════════════════
+
+An inventory goes stale the day someone adds a route. Two mechanisms instead:
+
+1. **A grep for absence** — no route binds a container/drive id from client input on a write path; no client
+   supplies one. This is the acceptance evidence.
+2. **A mechanical guard** — extend `tests/Spaarke.ArchTests/RouteAuthorizationGuardTests.cs` with a rule
+   that FAILS when a write route binds a container/drive parameter without a per-record decision. Task 074
+   proved this works: its census forced the classification that found 077, 078 and 081, and its
+   registration pin caught 076's own route deletion before review did.
+
+Requires a **negative control** (seeded violation → rule fires) and a **positive control** (sanctioned
+shape → rule does not fire) per `tests/CLAUDE.md`. Task 060's positive controls caught two real defects.</background>
+    <relevant-files>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Api/DocumentsEndpoints.cs</file>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Api/Ai/ChatWordExportEndpoints.cs</file>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Api/Ai/ChatDocumentEndpoints.cs</file>
+      <file role="modify">tests/Spaarke.ArchTests/RouteAuthorizationGuardTests.cs</file>
+      <file role="modify">projects/unified-access-control-r2/design.md</file>
+      <file role="blocked-until-806">src/server/api/Sprk.Bff.Api/Services/Compose/IComposeService.cs</file>
+      <file role="blocked-until-806">src/server/api/Sprk.Bff.Api/Api/ComposeEndpoints.cs</file>
+      <file role="reference">src/server/api/Sprk.Bff.Api/Infrastructure/Dataverse/RecordContainerResolver.cs</file>
+      <file role="reference">src/server/api/Sprk.Bff.Api/Infrastructure/ExternalAccess/CallerRecordAccessProbe.cs</file>
+      <file role="reference">src/server/api/Sprk.Bff.Api/Api/Filters/EntityAccessFilter.cs</file>
+      <file role="reference">projects/unified-access-control-r2/notes/task-076-record-keyed-upload-contract.md</file>
+      <file role="reference">projects/unified-access-control-r2/notes/finding-compose-create-on-save-client-named-container.md</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="owner-decision 2026-08-27">This class is fixed HERE, not offloaded. The owner's words: "trying to offload to other projects is very risky because they lack the context." Filing a finding for another project to fix is NOT an acceptable outcome for any row.</constraint>
+    <constraint source="project">The authorization key and the container MUST be the same value, derived from `(entity, recordId)`. A route accepting BOTH a record and a container is a failed implementation — that is option (B), which was rejected.</constraint>
+    <constraint source="§11 reuse">Reuse `RecordContainerResolver`, `CallerRecordAccessProbe`, `EntityAccessFilter`, and `TryResolveParentEntitySet`. A second resolver, probe, or entity-set map is a review failure.</constraint>
+    <constraint source="ADR-003">A secure record with no container FAILS CLOSED and loudly. Never a fallback.</constraint>
+    <constraint source="ADR-008">Authorization is an endpoint filter, not handler code and not middleware.</constraint>
+    <constraint source="project">DELETE rather than convert where a path is dead. Verify deadness first-hand — 076 found the chunked pair's client depended on a route mapped nowhere.</constraint>
+    <constraint source="sequencing">Do NOT edit the three Compose files while PR #806 is open. Verify with `gh api --paginate`, never `gh pr view --json files`.</constraint>
+    <constraint source="task-074">Delete waivers for routes that become gated or deleted. Do NOT convert a Pending waiver to Permanent to make a build green — that inverts the forcing function.</constraint>
+    <constraint source="tests/CLAUDE.md">Any new ArchTest rule carries BOTH a negative and a positive control.</constraint>
+    <constraint source="CLAUDE.md §10">Placement Justification citing `.claude/constraints/bff-extensions.md`; publish size ≤60 MB (baseline 44.96 incl. PDBs — state the five-field convention); CVE check.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/unified-access-control-r2/notes/task-076-record-keyed-upload-contract.md</file>
+      <file>projects/unified-access-control-r2/notes/finding-compose-create-on-save-client-named-container.md</file>
+      <file>projects/unified-access-control-r2/notes/secure-project-workflow-review-2026-08-24.md</file>
+      <file>projects/unified-access-control-r2/SECURE-DOCUMENTS-BUILD-PLAN.md</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+    </files>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="0">Confirm 076 landed (route 3 converted) before starting, so you are not reshaping a surface mid-change.</step>
+    <step order="1">TRACE rows 7 and 8 — where does `containerId` come from in `ChatWordExportEndpoints.cs:154` and `ChatDocumentEndpoints.cs:1160`? Classify each: client-supplied (fix), server-derived (fine), or dead (delete). These are the two the previous session explicitly did NOT trace.</step>
+    <step order="2">SWEEP for unlisted instances. Do not grep for `containerId` alone — that finds reads too. Classify by SINK: find every call to a write/create/delete operation on SPE, then walk backwards to where its container or drive id came from. `UploadSmall*`, `CreateUploadSession*`, `ReplaceFileContent*`, `DeleteItem*`, and any Graph drive-item mutation.</step>
+    <step order="3">Rows 4 and 5 FIRST — grep for callers. No callers → delete (like 073 and 076 did). Callers exist → determine what caller identity is available on an app-only route, and design the decision. This is the escalation-worthy judgment call.</step>
+    <step order="4">Fix each remaining row: authorize `(entity, recordId)` via a filter, then resolve the container via `RecordContainerResolver.ResolveForRecordAsync(entity, recordId, ct)`.</step>
+    <step order="5">Row 6 (Compose) when #806 clears — thread `(entity, recordId)` onto `SaveComposeDocumentRequest` from the session that already holds `MatterId` (ADR-040 binding), resolve server-side, delete `ContainerId` and the client call feeding it. Close #858.</step>
+    <step order="6">Add the ArchTest guard (§6) with negative AND positive controls.</step>
+    <step order="7">Correct `design.md:450`'s INV-7 claim and any doc repeating it.</step>
+    <step order="8">Tests per row: caller without record access DENIED · secure record → own container · secure record with null container FAILS rather than falling back · non-secure unchanged. Perturbation-check the deny case: break the gate, confirm a test reddens.</step>
+    <step order="9">The absence-grep (§6.1). Build, full suite, publish size, CVE. Record the final inventory with every row's disposition.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If a write path genuinely has NO owning record at the moment the bytes move — so `(entity, recordId)` cannot be supplied — STOP. That is the modelling gap this class exists to close; if one survives, the contract needs a different shape (a server-issued upload ticket, say) and that is an owner decision. Do NOT reintroduce a client-supplied container "just for that path" — that is option (B) through the back door.</trigger>
+    <trigger>If rows 4/5 turn out to have live callers AND no caller identity is available on the app-only route, STOP. Authorizing an app-only write against a record requires an identity; inventing one is worse than the hole.</trigger>
+    <trigger>If the sweep finds more than ~3 unlisted instances, STOP and re-plan before fixing. That would mean the class is broader than a task and needs its own phase.</trigger>
+  </escalation>
+
+  <justification>
+    <existing>075 provides the resolver (now deriving the BU fallback itself, per 076). `CallerRecordAccessProbe` + `EntityAccessFilter` authorize `(entityType, recordId)`. `RouteAuthorizationGuardTests` provides the guard harness. All five-plus write paths exist.</existing>
+    <extension>Route contract changes and deletions on existing surface, plus ONE new ArchTest rule extending an existing guard class. No new service, no new endpoint, no new package.</extension>
+    <cost-of-doing-nothing>Named, live, and app-only: `PUT /api/drives/{driveId}/upload` writes bytes into a caller-named container as the MI, needing no container ACL, gated only by a policy whose resource domain does not match the route key. `DELETE /api/drives/{driveId}/items/{itemId}` destroys on the same terms. Because SPE permissions are additive-only, the first secure project whose content lands in a shared container is unrecoverable — and the window closes on FIRST USE, not on a date.</cost-of-doing-nothing>
+  </justification>
+
+  <outputs>
+    <output type="doc">The complete classified inventory — every SPE write path, its container source, its disposition. Including rows found by the sweep.</output>
+    <output type="code">Rows 4, 5, 7, 8 fixed or deleted; row 6 fixed when #806 clears</output>
+    <output type="code">ArchTest rule + negative and positive controls</output>
+    <output type="code">`design.md:450` INV-7 correction</output>
+    <output type="test">Per row: deny-without-access, secure→own, secure+null→fail-closed, non-secure unchanged</output>
+    <output type="doc">The absence-grep evidence</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion>No write path binds a container or drive id from client input. Proven by grep for absence, not by inventory.</criterion>
+    <criterion>Every remaining write path authorizes the caller on the owning record BEFORE resolving a container, and resolves via 075's resolver.</criterion>
+    <criterion>Rows 4 and 5 are closed — gated or deleted — and their `UNOWNED` waivers are gone, not converted to Permanent.</criterion>
+    <criterion>Rows 7 and 8 are traced and classified. "Not traced" is not an acceptable end state.</criterion>
+    <criterion>Row 6 is fixed and #858 closed, OR #858 carries a dated note explaining what #806 is still blocking.</criterion>
+    <criterion>The ArchTest guard fails on a seeded violation (negative control) and passes on the sanctioned shape (positive control).</criterion>
+    <criterion>`design.md:450` no longer states INV-7 as a technical constraint.</criterion>
+    <criterion>No finding is handed to another project as its fix. Notifications are fine; delegating the work is not.</criterion>
+  </acceptance-criteria>
+
+  <notes>The forcing function has now produced four holes (077, 078, 081, and this class) that no human sweep found. Trust it over any inventory, including §2's. The reason completeness is the deliverable rather than the fixes themselves: SPE cannot retract, so one survivor is permanent — and the argument from absence is the only one a future contributor cannot silently regress.</notes>
+</task>

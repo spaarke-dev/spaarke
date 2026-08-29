@@ -863,9 +863,15 @@ export const SemanticSearchControl: React.FC<ISemanticSearchControlProps> = ({
   );
 
   // Map current results into the wizard's lightweight item shape.
-  // driveId + itemId are required to run AI analysis (Document Profile
-  // playbook) in the wizard's Summary step — without them the wizard
-  // falls back to the cached summary/tldr text.
+  //
+  // unified-access-control-r2 task 070 — driveId/itemId are NO LONGER mapped.
+  // `POST /api/ai/search` stops returning raw SPE pointers (broker-only
+  // decision), and they were never actually needed: the wizard's Summary step
+  // calls `POST /api/ai/analysis/execute` with `{ documentIds }` only, so the
+  // AI analysis is already document-id-keyed end to end. The prior comment
+  // here claimed the wizard "falls back to the cached summary/tldr" without
+  // them — that was stale: the wizard reads neither field and has no such
+  // gate. Nothing to re-add; documentId is the sole key the analysis needs.
   //
   // v1.1.63 — renamed from `emailWizardItems` → `emailWizardItemsAll`.
   // This is now the UNFILTERED mapping of every result row. The
@@ -888,8 +894,6 @@ export const SemanticSearchControl: React.FC<ISemanticSearchControlProps> = ({
         name: r.name ?? '(untitled)',
         summary: r.summary ?? undefined,
         tldr: r.tldr ?? undefined,
-        driveId: r.driveId ?? undefined,
-        itemId: r.speFileId ?? undefined,
         fileSizeBytes: r.fileSize ?? undefined,
       })),
     [results]
@@ -930,8 +934,6 @@ export const SemanticSearchControl: React.FC<ISemanticSearchControlProps> = ({
       name: result.name ?? '(untitled)',
       summary: result.summary ?? undefined,
       tldr: result.tldr ?? undefined,
-      driveId: result.driveId ?? undefined,
-      itemId: result.speFileId ?? undefined,
     });
     setEmailWizardOpen(true);
   }, []);
@@ -1837,7 +1839,7 @@ export const SemanticSearchControl: React.FC<ISemanticSearchControlProps> = ({
 
       {/* Version Footer (always visible) */}
       <div className={styles.versionFooter}>
-        <Text size={100}>v1.1.80 • Built 2026-08-05</Text>
+        <Text size={100}>v1.1.81 • Built 2026-08-26</Text>
       </div>
 
       {/* Host-mounted preview dialog. Single instance per PCF surface so

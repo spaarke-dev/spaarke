@@ -123,29 +123,137 @@ function buildSavedQueriesForEntityOptions(entityName: string): string {
 }
 
 /**
- * Map `Xrm.Utility.getEntityMetadata` AttributeType values to our framework's
- * narrower `MetadataAttributeType` discriminator. Unknown values pass through
- * as-is (the type is `string`-open).
+ * `AttributeTypeCode` → `MetadataAttributeType` name.
+ *
+ * **This table is load-bearing.** `Xrm.Utility.getEntityMetadata` is the CLIENT
+ * API, and it returns each attribute's `AttributeType` as a **Number** (the
+ * `AttributeTypeCode` enum) — NOT the PascalCase string the Web API's
+ * `EntityDefinitions` endpoint returns. Microsoft documents this explicitly:
+ *
+ *   > `AttributeType` | **Number** | Type of a column. For a list of column
+ *   > type values, see AttributeTypeCode Enum
+ *   — learn.microsoft.com/.../xrm-utility/getentitymetadata, "Attribute objects"
+ *
+ * Before this table existed, `normalizeAttributeType` returned `'String'` for
+ * every non-string input, so EVERY attribute of EVERY entity projected as
+ * `String`. Downstream that made every RecordHeader cell derive the `text`
+ * renderer, which made lookups get `$select`ed by their BARE logical name
+ * (instead of `_<name>_value`), which 400s the whole request. See the
+ * `record-header-and-notepad-r2` UAT defect note.
+ *
+ * Values mirror `XrmEnum.AttributeTypeCode` in `@types/xrm`.
  */
-function normalizeAttributeType(attributeType: unknown): MetadataAttributeType {
-  if (typeof attributeType !== 'string') {
-    return 'String';
+const ATTRIBUTE_TYPE_CODE_TO_NAME: Readonly<Record<number, MetadataAttributeType>> = {
+  0: 'Boolean',
+  1: 'Customer',
+  2: 'DateTime',
+  3: 'Decimal',
+  4: 'Double',
+  5: 'Integer',
+  6: 'Lookup',
+  7: 'Memo',
+  8: 'Money',
+  9: 'Owner',
+  10: 'PartyList',
+  11: 'Picklist',
+  12: 'State',
+  13: 'Status',
+  14: 'String',
+  15: 'Uniqueidentifier',
+  16: 'CalendarRules',
+  17: 'Virtual',
+  18: 'BigInt',
+  19: 'ManagedProperty',
+  20: 'EntityName',
+};
+
+/**
+ * Normalize an AttributeType from EITHER metadata surface to our framework's
+ * `MetadataAttributeType` discriminator.
+ *
+ * Two shapes must both work, because the two Dataverse metadata surfaces
+ * disagree:
+ *  - **Client API** (`Xrm.Utility.getEntityMetadata`) → `Number`
+ *    (`AttributeTypeCode`), e.g. `6` for Lookup.
+ *  - **Web API** (`EntityDefinitions/Attributes`) → PascalCase `String`,
+ *    e.g. `"Lookup"`.
+ *
+ * A string passes through as-is (the type is `string`-open). A number maps
+ * through {@link ATTRIBUTE_TYPE_CODE_TO_NAME}. Anything else — including a
+ * numeric code outside the enum — yields `undefined`, meaning "type unknown".
+ * Callers MUST treat `undefined` as unknown rather than silently substituting
+ * `String`: guessing `String` for an unknown attribute is exactly what produced
+ * the bare-lookup `$select` defect.
+ */
+function normalizeAttributeType(attributeType: unknown): MetadataAttributeType | undefined {
+  if (typeof attributeType === 'string' && attributeType.length > 0) {
+    return attributeType as MetadataAttributeType;
   }
-  return attributeType as MetadataAttributeType;
+  if (typeof attributeType === 'number' && Number.isFinite(attributeType)) {
+    return ATTRIBUTE_TYPE_CODE_TO_NAME[attributeType];
+  }
+  return undefined;
 }
 
 /**
- * Project the Xrm OptionMetadata shape to our {@link OptionSetOption}.
- * Xrm gives `Value`, `Label.UserLocalizedLabel.Label`, and `Color`.
+ * Sentinel `attributeType` for an attribute whose type could NOT be determined
+ * from the metadata payload.
+ *
+ * Deliberately NOT `'String'`. Every renderer/chip switch already falls through
+ * to its text/no-chip default for an unrecognized discriminator, so this is
+ * behaviorally identical to the old `'String'` fallback — but it is
+ * *diagnostically honest*: `'String'` asserted a type we did not know, which is
+ * how a Lookup attribute silently became a text cell and got `$select`ed by its
+ * bare logical name.
+ */
+export const UNKNOWN_ATTRIBUTE_TYPE = 'Unknown';
+
+/**
+ * Project the option-set metadata to our {@link OptionSetOption} list.
+ *
+ * Three shapes must all work:
+ *  - **Web API**: `{ Options: [{ Value, Label: { UserLocalizedLabel: { Label } } }] }`
+ *  - **Client API (array)**: the `OptionSet` value is ITSELF the option array
+ *    (this is what `@types/xrm` declares: `OptionSet: OptionMetadata[]`)
+ *  - **Client API (map)**: a `value → label` key/value bag, which is how
+ *    Microsoft documents it for `Xrm.Utility.getEntityMetadata`
+ *    ("Options for the column where each option is a key:value pair")
+ *
+ * Returns `undefined` (never `[]`) when no options can be projected.
  */
 function projectOptions(optionSet: any): OptionSetOption[] | undefined {
-  const options: any[] | undefined = optionSet?.Options ?? optionSet?.options;
-  if (!Array.isArray(options) || options.length === 0) {
+  if (optionSet === null || optionSet === undefined) {
+    return undefined;
+  }
+
+  // Client-API "key:value pair" bag — `{ 1: 'Yes', 0: 'No' }`. Detected only
+  // when the value is a plain object whose keys are all numeric and whose
+  // values are all primitives (never objects, which would be the Web-API shape).
+  const options: any[] | undefined = Array.isArray(optionSet) ? optionSet : (optionSet?.Options ?? optionSet?.options);
+
+  if (!Array.isArray(options)) {
+    if (typeof optionSet === 'object') {
+      const entries = Object.entries(optionSet).filter(
+        ([k, v]) => /^-?\d+$/.test(k) && (typeof v === 'string' || typeof v === 'number')
+      );
+      if (entries.length > 0) {
+        return entries.map(([k, v]) => ({ value: Number(k), label: String(v) }));
+      }
+    }
+    return undefined;
+  }
+
+  if (options.length === 0) {
     return undefined;
   }
   return options.map(opt => {
+    // `Label` is a Label OBJECT on the Web API, but some client-API builds hand
+    // back a plain localized string. Probe both before falling back to the value.
     const label =
-      opt?.Label?.UserLocalizedLabel?.Label ?? opt?.Label?.LocalizedLabels?.[0]?.Label ?? String(opt?.Value ?? '');
+      opt?.Label?.UserLocalizedLabel?.Label ??
+      opt?.Label?.LocalizedLabels?.[0]?.Label ??
+      (typeof opt?.Label === 'string' ? opt.Label : undefined) ??
+      String(opt?.Value ?? '');
     return {
       value: Number(opt?.Value ?? 0),
       label,
@@ -155,15 +263,23 @@ function projectOptions(optionSet: any): OptionSetOption[] | undefined {
 }
 
 /**
- * Project one Xrm attribute metadata entry to our {@link EntityAttributeMetadata}.
- * The Xrm metadata object usually has:
- *  - `AttributeType` (string discriminator)
- *  - `Format` (sub-type for string attributes, etc.)
- *  - `IsPrimaryName`, `IsPrimaryId`
- *  - `OptionSet` (for Picklist) / `GlobalOptionSet` / state+status attributes have nested OptionSet
+ * Project one attribute metadata entry to our {@link EntityAttributeMetadata}.
+ *
+ * Handles BOTH Dataverse metadata surfaces, which differ in every field that
+ * matters:
+ *
+ * | Field         | Client API (`Xrm.Utility.getEntityMetadata`) | Web API (`EntityDefinitions`) |
+ * |---------------|----------------------------------------------|-------------------------------|
+ * | `AttributeType` | Number (`AttributeTypeCode`)               | String (`"Lookup"`)           |
+ * | `DisplayName`   | String (`"Project Type"`)                  | `{ UserLocalizedLabel: { Label } }` |
+ * | `OptionSet`     | array / key:value bag                      | `{ Options: [...] }`          |
+ *
+ * Parsing only the Web-API shapes (as this function originally did) silently
+ * degraded every client-API attribute to type `String` with no label and no
+ * options — the root cause of the RecordHeader v1.1.0 UAT defect.
  */
 function projectAttribute(attr: any): EntityAttributeMetadata {
-  const attributeType = normalizeAttributeType(attr?.AttributeType ?? attr?.attributeType);
+  const attributeType = normalizeAttributeType(attr?.AttributeType ?? attr?.attributeType) ?? UNKNOWN_ATTRIBUTE_TYPE;
 
   // Format is most relevant for String attributes; preserve when present.
   const format =
@@ -174,13 +290,23 @@ function projectAttribute(attr: any): EntityAttributeMetadata {
   const optionSet =
     projectOptions(attr?.OptionSet) ?? projectOptions(attr?.GlobalOptionSet) ?? projectOptions(attr?.optionSet);
 
-  // DisplayName: Xrm exposes `DisplayName.UserLocalizedLabel.Label` (preferred) or
-  // falls back to the first entry in `LocalizedLabels`. Some Xrm builds also use the
-  // lowercase `displayName` directly.
+  // DisplayName: the Web API exposes `DisplayName.UserLocalizedLabel.Label`
+  // (preferred) or the first `LocalizedLabels` entry. The CLIENT API returns a
+  // PLAIN STRING — Microsoft documents it as `DisplayName | String | Display
+  // name for the column`. Missing that string case is why every header label
+  // fell back to a humanized logical name ("Openeddate", "Highpriority").
+  const displayNameRaw = attr?.DisplayName ?? attr?.displayName;
   const displayName: string | undefined =
-    attr?.DisplayName?.UserLocalizedLabel?.Label ??
-    attr?.DisplayName?.LocalizedLabels?.[0]?.Label ??
-    (typeof attr?.displayName === 'string' ? attr.displayName : undefined);
+    displayNameRaw?.UserLocalizedLabel?.Label ??
+    displayNameRaw?.LocalizedLabels?.[0]?.Label ??
+    (typeof displayNameRaw === 'string' && displayNameRaw.length > 0 ? displayNameRaw : undefined);
+
+  // Lookup target entity logical names. Xrm exposes this as `Targets` (PascalCase)
+  // on the attribute metadata; probe the camelCase form too for resilience, mirroring
+  // FieldUpdateReconcileTab.tsx:149. Guard with Array.isArray so a malformed/absent
+  // value never surfaces as `[]` — the contract requires `undefined`, not empty array.
+  const targetsRaw = attr?.Targets ?? attr?.targets;
+  const targets = Array.isArray(targetsRaw) ? targetsRaw : undefined;
 
   return {
     attributeType,
@@ -189,94 +315,77 @@ function projectAttribute(attr: any): EntityAttributeMetadata {
     isPrimaryName: attr?.IsPrimaryName === true || attr?.isPrimaryName === true || undefined,
     isPrimaryId: attr?.IsPrimaryId === true || attr?.isPrimaryId === true || undefined,
     optionSet,
+    targets,
   };
 }
 
 /**
- * Fetch attribute DisplayName labels for the given entity via the EntityDefinitions
- * Web API. Returns a Map of `logicalName → user-localized label`.
+ * Flatten the `Attributes` member of an `Xrm.Utility.getEntityMetadata` payload
+ * into a plain array of attribute metadata objects.
  *
- * The EntityDefinitions endpoint is the canonical metadata surface and is the only
- * Xrm API that returns attribute-level DisplayName labels with locale resolution.
+ * `@types/xrm` declares it as
+ * `Collection.StringIndexableItemCollection<AttributeMetadata>`, i.e.
+ * `Dictionary<T> & ItemCollection<T>` — so at runtime it can present as any of:
+ *  - a plain array (Web-API-shaped payloads, and our own test doubles)
+ *  - an Xrm collection exposing `getAll()` / `get()` / `forEach()`
+ *  - a string-indexed bag keyed by logical name
  *
- * Uses `Xrm.WebApi.retrieveMultipleRecords('EntityDefinition', '?$filter=...&$expand=Attributes(...)')`.
- * The first argument is the SINGULAR entity name (`EntityDefinition`); Xrm
- * translates it to the plural collection (`EntityDefinitions`) automatically.
- * `$expand=Attributes($select=LogicalName,DisplayName)` returns the AttributeMetadata
- * children with the DisplayName fields populated by Dataverse's locale resolver.
+ * Every form is probed, in that order, and each probe is individually guarded:
+ * an older client that throws from `get()` must degrade to "no attributes", not
+ * take the whole metadata load down.
  *
- * Best-effort: the caller (`retrieveEntityMetadata`) catches any throw and falls
- * back to humanized logical names.
+ * The string-indexed fallback filters out FUNCTION members, because on a real
+ * Xrm collection `Object.values()` would otherwise yield `get`/`getAll`/
+ * `forEach`/`getLength` as if they were attributes.
  */
-/**
- * Result of the EntityDefinitions metadata fetch: per-attribute label AND
- * attribute type. The framework uses BOTH:
- *  - `displayName` populates the column header label
- *  - `attributeType` lets chip-discovery work even if `Xrm.Utility.getEntityMetadata`
- *    didn't include the attribute in its response (older Xrm clients can return
- *    a slimmed-down attribute set)
- */
-interface AttributeFetchEntry {
-  displayName?: string;
-  attributeType?: string;
-}
+function flattenAttributeCollection(rawAttributes: any): any[] {
+  if (!rawAttributes) return [];
+  if (Array.isArray(rawAttributes)) return rawAttributes;
 
-async function fetchAttributeDisplayNames(
-  xrm: XrmLike,
-  entityLogicalName: string
-): Promise<Map<string, AttributeFetchEntry>> {
-  const options =
-    `?$select=LogicalName&$filter=LogicalName eq '${entityLogicalName}'` +
-    `&$expand=Attributes($select=LogicalName,DisplayName,AttributeType)`;
-  const result = await xrm.WebApi.retrieveMultipleRecords('EntityDefinition', options);
-  const out = new Map<string, AttributeFetchEntry>();
-  const entityDefs = (result as { entities?: ReadonlyArray<Record<string, unknown>> })?.entities ?? [];
-  for (const ed of entityDefs) {
-    const attrs = (ed?.Attributes as ReadonlyArray<Record<string, unknown>> | undefined) ?? [];
-    for (const a of attrs) {
-      const logicalName = a?.LogicalName as string | undefined;
-      if (!logicalName) continue;
-      const dn = a?.DisplayName as
-        | {
-            UserLocalizedLabel?: { Label?: string };
-            LocalizedLabels?: ReadonlyArray<{ Label?: string }>;
-          }
-        | undefined;
-      const label = dn?.UserLocalizedLabel?.Label ?? dn?.LocalizedLabels?.[0]?.Label;
-      const attributeType = a?.AttributeType as string | undefined;
-      out.set(logicalName, { displayName: label, attributeType });
+  if (typeof rawAttributes.getAll === 'function') {
+    try {
+      const all = rawAttributes.getAll();
+      if (Array.isArray(all) && all.length > 0) return all;
+    } catch {
+      /* fall through to the next probe */
     }
   }
-  return out;
+
+  if (typeof rawAttributes.get === 'function') {
+    try {
+      // Xrm's ItemCollection.get() with NO argument returns the entire array.
+      const all = rawAttributes.get();
+      if (Array.isArray(all) && all.length > 0) return all;
+    } catch {
+      /* fall through to the next probe */
+    }
+  }
+
+  if (typeof rawAttributes.forEach === 'function') {
+    try {
+      const collected: any[] = [];
+      rawAttributes.forEach((item: any) => collected.push(item));
+      if (collected.length > 0) return collected;
+    } catch {
+      /* fall through to the next probe */
+    }
+  }
+
+  if (typeof rawAttributes === 'object') {
+    return Object.values(rawAttributes).filter(v => v !== null && typeof v === 'object');
+  }
+
+  return [];
 }
 
 /**
  * Project the full Xrm EntityMetadata payload to our {@link EntityMetadata} shape.
- *
- * Xrm's `getEntityMetadata(entityName, ['Attributes'])` returns an object whose
- * `Attributes` (or `attributes`) property is either an array of attribute metadata
- * or a `get()`-style collection. We support both forms for resilience.
  */
 function projectEntityMetadata(meta: any): EntityMetadata {
   const primaryIdAttribute: string = meta?.PrimaryIdAttribute ?? meta?.primaryIdAttribute ?? '';
   const primaryNameAttribute: string = meta?.PrimaryNameAttribute ?? meta?.primaryNameAttribute ?? '';
 
-  const rawAttributes = meta?.Attributes ?? meta?.attributes ?? [];
-  let attributeArray: any[] = [];
-
-  if (Array.isArray(rawAttributes)) {
-    attributeArray = rawAttributes;
-  } else if (typeof rawAttributes?.get === 'function') {
-    // Some Xrm versions expose a collection accessor.
-    try {
-      attributeArray = rawAttributes.get() ?? [];
-    } catch {
-      attributeArray = [];
-    }
-  } else if (rawAttributes && typeof rawAttributes === 'object') {
-    // Treat as a record of logicalName → metadata.
-    attributeArray = Object.values(rawAttributes);
-  }
+  const attributeArray = flattenAttributeCollection(meta?.Attributes ?? meta?.attributes);
 
   const attributes: Record<string, EntityAttributeMetadata> = {};
   for (const attr of attributeArray) {
@@ -292,6 +401,59 @@ function projectEntityMetadata(meta: any): EntityMetadata {
     primaryNameAttribute,
     attributes,
   };
+}
+
+// ---------------------------------------------------------------------------
+// Entity metadata cache (page-session lifetime) — FR-21 / NFR-01
+// ---------------------------------------------------------------------------
+
+/**
+ * Normalize a caller-supplied attribute request into a stable, de-duplicated,
+ * sorted list — or `undefined` when the caller wants the whole entity.
+ *
+ * Sorting makes the cache key order-insensitive, so two callers asking for the
+ * same set in a different order share one round trip.
+ */
+function normalizeRequestedAttributes(attributes: readonly string[] | undefined): string[] | undefined {
+  if (!Array.isArray(attributes)) return undefined;
+  const cleaned = Array.from(
+    new Set(attributes.filter((n): n is string => typeof n === 'string' && n.trim().length > 0).map(n => n.trim()))
+  ).sort();
+  return cleaned.length > 0 ? cleaned : undefined;
+}
+
+/**
+ * Module-level cache of `retrieveEntityMetadata` results, keyed by entity
+ * logical name PLUS the normalized requested-attribute set. Page-session
+ * lifetime — mirrors `_navPropCache` in `PolymorphicResolverService.ts:451`.
+ *
+ * Caches the in-flight {@link Promise} (not just the resolved value) so
+ * concurrent first callers for the same entity share one network round-trip
+ * instead of racing duplicate `getEntityMetadata` + `EntityDefinitions`
+ * fetches. A rejected promise is evicted immediately so a later retry issues
+ * a fresh fetch — failures are never cached.
+ */
+const _entityMetadataCache: Record<string, Promise<EntityMetadata>> = {};
+
+/**
+ * Reset the entity metadata cache. Test-only.
+ *
+ * @param entityName  Optional — clear a single entity's entry; omit to clear all.
+ * @internal
+ */
+export function _resetEntityMetadataCacheForTests(entityName?: string): void {
+  if (entityName) {
+    // Keys are `<entity>` or `<entity>::<sorted,attrs>` — clear every variant.
+    for (const k of Object.keys(_entityMetadataCache)) {
+      if (k === entityName || k.startsWith(`${entityName}::`)) {
+        delete _entityMetadataCache[k];
+      }
+    }
+    return;
+  }
+  for (const k of Object.keys(_entityMetadataCache)) {
+    delete _entityMetadataCache[k];
+  }
 }
 
 /**
@@ -357,61 +519,86 @@ export class XrmDataverseClient implements IDataverseClient {
   }
 
   /**
-   * Retrieve projected entity metadata via `Xrm.Utility.getEntityMetadata` and
-   * (in parallel) fetch attribute DisplayName labels via the EntityDefinitions
-   * Web API.
+   * Retrieve projected entity metadata for `entityName`.
    *
-   * **Why two calls**: `Xrm.Utility.getEntityMetadata` returns AttributeType, Format,
-   * OptionSet etc. but does NOT populate attribute-level DisplayName labels (known
-   * SDK gap). DisplayName comes from `/EntityDefinitions(LogicalName='X')/Attributes`
-   * which exposes the full `DisplayName.UserLocalizedLabel.Label`. We merge the two
-   * payloads so column headers can render localized labels instead of logical names.
+   * Page-session cached (FR-21 / NFR-01): a second call for the same
+   * `entityName` **and the same `attributes` request** returns the first
+   * call's result (or, if still in flight, its in-flight {@link Promise}) with
+   * zero additional network requests. A rejected fetch is evicted from the
+   * cache so a later retry re-attempts.
    *
-   * Throws if `Xrm.Utility` is unavailable (rare — older clients only). The
-   * DisplayName fetch is best-effort: a failure logs a warning and falls back to
-   * the humanized logical name in `configResolution.buildResolvedColumn`.
+   * @param entityName Entity logical name.
+   * @param attributes OPTIONAL explicit attribute logical names to request.
+   *        Pass this whenever the caller already knows which attributes it
+   *        needs — see {@link fetchEntityMetadataUncached} for why it matters.
    */
-  async retrieveEntityMetadata(entityName: string): Promise<EntityMetadata> {
+  async retrieveEntityMetadata(entityName: string, attributes?: string[]): Promise<EntityMetadata> {
+    // The requested attribute set is part of the cache identity: a narrow
+    // request must not satisfy a later broader one from cache.
+    const requested = normalizeRequestedAttributes(attributes);
+    const cacheKey = requested ? `${entityName}::${requested.join(',')}` : entityName;
+
+    const cached = _entityMetadataCache[cacheKey];
+    if (cached) {
+      return cached;
+    }
+
+    const promise = this.fetchEntityMetadataUncached(entityName, requested);
+    _entityMetadataCache[cacheKey] = promise;
+    // Fire-and-forget eviction subscription: does not alter what
+    // `retrieveEntityMetadata` returns to its caller (that's `promise`,
+    // returned below), and attaching a `.catch()` here means the rejection
+    // is always "handled" — no unhandledrejection noise from this subscription.
+    promise.catch(() => {
+      delete _entityMetadataCache[cacheKey];
+    });
+    return promise;
+  }
+
+  /**
+   * Retrieve projected entity metadata via `Xrm.Utility.getEntityMetadata`.
+   *
+   * ══════════════════════════════════════════════════════════════════════════
+   * WHY THE `attributes` ARGUMENT MATTERS (do not "simplify" it away)
+   * ══════════════════════════════════════════════════════════════════════════
+   * This method previously ALSO issued
+   * `Xrm.WebApi.retrieveMultipleRecords('EntityDefinition', ...)` to pick up
+   * attribute DisplayName labels. **That call can never succeed.**
+   * `Xrm.WebApi` resolves its first argument to an entity SET name via the
+   * client's entity catalog, and `entitydefinition` is not an entity — a live
+   * query for `EntityDefinitions?$filter=LogicalName eq 'entitydefinition'`
+   * returns an empty set. The repo already documents the same constraint in
+   * `SemanticSearchControl/services/DataverseMetadataService.ts` ("Xrm.WebApi
+   * doesn't support metadata entities"), and R2's own spec says
+   * EntityDefinitions is "unreachable by `Xrm.WebApi`". The call therefore
+   * threw on every invocation and its `.catch()` swallowed the throw, so the
+   * label/type rescue map was ALWAYS empty. It is deleted rather than
+   * re-pointed at a raw `fetch`, which spec NFR-05 forbids.
+   *
+   * With that path gone, `Xrm.Utility.getEntityMetadata` is the sole source —
+   * so its `Attributes` collection MUST be populated. The second argument is
+   * the documented way to guarantee that: callers that already know which
+   * attributes they need pass them explicitly, which both removes any
+   * dependence on the platform's undocumented "omitted argument" behaviour and
+   * shrinks the payload. Callers that genuinely need the whole entity omit it.
+   *
+   * @internal — called only through the cache wrapper {@link retrieveEntityMetadata}.
+   */
+  private async fetchEntityMetadataUncached(
+    entityName: string,
+    attributes?: readonly string[]
+  ): Promise<EntityMetadata> {
     const xrm = this.getXrm();
     if (!xrm.Utility) {
       throw new Error(`XrmDataverseClient.retrieveEntityMetadata requires Xrm.Utility (entity: ${entityName}).`);
     }
-    const [legacyMeta, attributeFetchMap] = await Promise.all([
-      // Second arg is an OData attribute FILTER (not a "include this section"
-      // hint). Omit it so Xrm returns the full entity metadata including
-      // every attribute's `AttributeType` / `OptionSet` / `IsPrimaryName`.
-      xrm.Utility.getEntityMetadata(entityName),
-      fetchAttributeDisplayNames(xrm, entityName).catch((err: unknown) => {
-        // eslint-disable-next-line no-console
-        console.warn(
-          `[XrmDataverseClient] Attribute metadata fetch failed for ${entityName}; falling back to Xrm.Utility values only.`,
-          err
-        );
-        return new Map<string, AttributeFetchEntry>();
-      }),
-    ]);
-    const projected = projectEntityMetadata(legacyMeta);
-    // eslint-disable-next-line no-console
-    console.info(
-      `[XrmDataverseClient] retrieveEntityMetadata(${entityName}): ` +
-        `legacyMeta.Attributes=${(legacyMeta as { Attributes?: unknown[] })?.Attributes?.length ?? 0}, ` +
-        `projected.attributes=${Object.keys(projected.attributes).length}, ` +
-        `displayNameFetch=${attributeFetchMap.size}`
-    );
-    // Merge EntityDefinitions attribute payload into the projected attribute
-    // map. Synthesize entries when Xrm.Utility didn't include them so chip
-    // discovery + column DisplayName labels still work end-to-end.
-    for (const [logicalName, entry] of attributeFetchMap) {
-      let attr = projected.attributes[logicalName];
-      if (!attr) {
-        attr = { attributeType: normalizeAttributeType(entry.attributeType) };
-        projected.attributes[logicalName] = attr;
-      }
-      if (!attr.displayName && entry.displayName) {
-        attr.displayName = entry.displayName;
-      }
-    }
-    return projected;
+
+    const legacyMeta =
+      attributes && attributes.length > 0
+        ? await xrm.Utility.getEntityMetadata(entityName, [...attributes])
+        : await xrm.Utility.getEntityMetadata(entityName);
+
+    return projectEntityMetadata(legacyMeta);
   }
 
   /**

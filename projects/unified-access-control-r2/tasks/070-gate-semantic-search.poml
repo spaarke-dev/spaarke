@@ -1,0 +1,117 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="070" project="unified-access-control-r2">
+  <metadata>
+    <title>Authorize POST /api/ai/search per document: constrain to the caller's accessible-record set, refuse scope=all, and stop emitting SPE pointers</title>
+    <phase>0c Secure Documents — Wave 1</phase>
+    <status>pending</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Closes a live tenant-wide disclosure on the flagship Matter form. Touches the BFF authorization surface and the AI search path.</rigor-reason>
+    <model-tier>opus</model-tier>
+    <model-tier-reason>The fix must reuse the existing accessible-record-set machinery rather than invent a third access policy; getting that wrong creates the exact divergence this project exists to remove.</model-tier-reason>
+    <effort>xhigh</effort>
+    <effort-reason>Brownfield: two sub-paths with different data planes (app-only Dataverse query, Azure AI Search index), and the correct answer must agree with the contact path that already ships.</effort-reason>
+    <parallel-group>wave1</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Touches the shared access-evaluation surface (AccessibleRecordSetService / CallerPrincipal); concurrent edits to authorization paths produce silent merge damage.</parallel-reason>
+    <deps>046</deps>
+    <tags>bff-api, api, auth, ai, security</tags>
+    <estimated-effort>4-6 hours</estimated-effort>
+    <origin>Filed 2026-08-25 from the Fable security-boundary review. Verified first-hand in code: `SemanticSearchAuthorizationFilter.ValidateScopeAuthorization` returns `new AuthorizationResult(true, null)` for entity, documentIds, all, AND default. Exploitable now by any authenticated non-admin.</origin>
+  </metadata>
+
+  <prompt>POST /api/ai/search authorizes on the tenant claim alone. Any authenticated user can request scope=all and receive every document in the tenant — name, AI summary, TL;DR, driveId and speFileId. Constrain results to what the caller may actually read, using the machinery that already exists, and stop handing out SPE pointers that no client needs under broker-only.</prompt>
+
+  <role>SPAARKE BFF security engineer. Expert in this codebase's access-evaluation seam and in the difference between filtering a query and authorizing a result.</role>
+
+  <goal>No caller receives a search result for a document they could not read directly. `scope=all` is refused or reduced to the caller's accessible set. `driveId` and `speFileId` no longer leave the server on this route. The decision reuses the existing accessible-record-set evaluation rather than adding a third access policy.</goal>
+
+  <context>
+    <background>WHAT IS WRONG, verified in code 2026-08-25:
+
+`Api/Filters/SemanticSearchAuthorizationFilter.cs` — `ValidateScopeAuthorization` (around lines 131-158) returns allow for EVERY branch:
+
+    case SearchScope.Entity:      return new AuthorizationResult(true, null);
+    case SearchScope.DocumentIds: return new AuthorizationResult(true, null);
+    case SearchScope.All:         return new AuthorizationResult(true, null);   // "R3: scope=all is now supported"
+    default:                      return new AuthorizationResult(true, null);
+
+The class remarks (around :44-49) list "Document-level authorization (validate user has access to specific documents)" as a FUTURE enhancement. Only the `tid` claim is checked (:69-81). The scope is caller-chosen and never caller-authorized.
+
+TWO SUB-PATHS, both app-only:
+1. `associatedOnly=true` -> `SemanticSearchService.SearchAssociatedOnlyAsync` -> `GetDocumentsByMatterAsync` -> `DataverseServiceClientImpl.GetDocumentsByLookupAsync` (~:1013-1039): a bare QueryExpression on sprk_document whose ONLY criterion is the parent FK. No CallerId, no impersonation. Connects via DefaultAzureCredential (managed identity).
+2. `associatedOnly=false` -> Azure AI Search, filter built by `SearchFilterBuilder.BuildFilter` — tenantId only, plus parentEntityType/parentEntityId when scoped. NO principal/ACL term. Enrichment (`EnrichResultsWithDataverseMetadataAsync`) only ADDS metadata and never drops a result when the Dataverse lookup returns null.
+
+WHAT LEAKS: `Models/Ai/SemanticSearch/SearchResult.cs` carries `speFileId`, `driveId`, `name`, `summary`, `tldr`, `parentEntityType/Id/Name`.
+
+THE REFERENCE IMPLEMENTATION ALREADY SHIPS. The contact document path does this correctly today: `Api/ExternalAccess/ExternalProjectDataEndpoints.cs` checks the caller has access to the project AND that the document belongs to that project, before any SPE read. Copy that shape. Do NOT invent a new policy.
+
+THE GATE TO EXTEND is `Infrastructure/ExternalAccess/AccessibleRecordSetService.cs` (project CLAUDE.md names it as the extension point). `CallerPrincipalResolver` already materialises a `CallerPrincipal` from it for both principal kinds.
+
+BROKER-ONLY DECISION (2026-08-25, see SECURE-DOCUMENTS-BUILD-PLAN.md): the BFF is the single access-decision point for every principal kind. No client needs raw SPE pointers — file access goes through document-id-keyed BFF routes. Removing `driveId`/`speFileId` from this response is therefore a safe narrowing, but CHECK the PCF callers first (`src/client/pcf/SemanticSearchControl/**` uses `driveId`/`speFileId` to invoke AI analysis) and route those through a document-id-keyed path instead of re-exposing the pointers.</background>
+    <relevant-files>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Api/Filters/SemanticSearchAuthorizationFilter.cs</file>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Api/Ai/SemanticSearchEndpoints.cs</file>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Services/Ai/SemanticSearch/SemanticSearchService.cs</file>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Services/Ai/SemanticSearch/SearchFilterBuilder.cs</file>
+      <file role="reference">src/server/api/Sprk.Bff.Api/Api/ExternalAccess/ExternalProjectDataEndpoints.cs</file>
+      <file role="reference">src/server/api/Sprk.Bff.Api/Infrastructure/ExternalAccess/AccessibleRecordSetService.cs</file>
+      <file role="reference">src/client/pcf/SemanticSearchControl/SemanticSearchControl/services/SemanticSearchApiService.ts</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="build-plan">Do NOT add a third access policy. Reuse the accessible-record-set evaluation that the contact path and the Tier-2 scope injector already consume. Two mechanisms answering one question is the bug class this project exists to remove.</constraint>
+    <constraint source="ADR-003">Fail closed. An unresolved caller, an errored access lookup, or an unknown scope DENIES. Never return unfiltered results on an error path.</constraint>
+    <constraint source="project">`scope=all` must not return records the caller cannot read. Either refuse it outright, or reduce it to the caller's accessible set — pick one and say which in the notes. Do NOT leave `default:` returning allow.</constraint>
+    <constraint source="project">Filtering must be a RESULT-level authorization, not only a query predicate. The AI Search index is a separate data plane with no ACL data; a filter expression there is not an authorization decision.</constraint>
+    <constraint source="performance">The associated-only path is a hot UI path on the Matter form. Do not introduce a per-result Dataverse round trip where a single set-based check will do. State the round-trip count in the notes (NFR-02 discipline).</constraint>
+    <constraint source="project">If removing `driveId`/`speFileId` breaks a client caller, route that caller through a document-id-keyed endpoint. Do NOT re-expose the pointers to preserve a client shortcut.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/unified-access-control-r2/SECURE-DOCUMENTS-BUILD-PLAN.md</file>
+      <file>projects/unified-access-control-r2/notes/task-046-secure-project-owner-role.md</file>
+      <file>projects/unified-access-control-r2/CLAUDE.md</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+    </files>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="0">Read the two sub-paths end to end and write down, concretely, what each returns and on what authority. Confirm the filter's allow-everything behaviour still matches HEAD before changing it.</step>
+    <step order="1">Decide and record: refuse `scope=all`, or reduce it to the accessible set. Refusing is simpler and safer; reducing is kinder to the UI. Whichever you choose, `default:` must also deny.</step>
+    <step order="2">Wire the caller's accessible-record set into the search path. Prefer constraining the query where the data plane supports it AND authorizing results before they leave — the index path needs the second regardless.</step>
+    <step order="3">Remove `driveId` and `speFileId` from the response contract. Find every client consumer first; give AI-analysis callers a document-id-keyed route instead.</step>
+    <step order="4">Add tests that FAIL without the fix: a non-admin caller must not see a document they cannot read directly, for BOTH sub-paths and for `scope=all`. Use the existing integration fixtures; assert denial, not shape.</step>
+    <step order="5">Verify build, tests, publish size, CVE scan. Record the round-trip count and the scope decision in notes.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If constraining the index path per-document cannot be done without a per-result Dataverse call, STOP and report the measured cost before choosing. A correct-but-unusable Matter form will be reverted, which leaves the hole open — that tradeoff is the owner's, not yours.</trigger>
+    <trigger>If a client genuinely requires `driveId`/`speFileId` and no document-id-keyed equivalent exists, STOP and surface it rather than leaving the pointers in place silently.</trigger>
+  </escalation>
+
+  <justification>
+    <existing>`AccessibleRecordSetService` + `CallerPrincipalResolver` already compute what a caller may read, and `ExternalProjectDataEndpoints` already applies that shape to document access.</existing>
+    <extension>This is an extension of that evaluation to a route that was built without it — no new component.</extension>
+    <cost-of-doing-nothing>Any authenticated non-admin can enumerate every document in the tenant with names, AI summaries and TL;DRs, including secure matters. Verified exploitable at HEAD.</cost-of-doing-nothing>
+  </justification>
+
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Api/Filters/SemanticSearchAuthorizationFilter.cs</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Ai/SemanticSearch/**</output>
+    <output type="test">tests/ — negative tests proving a non-admin cannot see unauthorized documents on either sub-path</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion>A non-admin caller issuing `scope=all` receives either a refusal or only documents they can read directly — proven by a test that fails without the change.</criterion>
+    <criterion>The same holds for `scope=entity` and `scope=documentIds` against a parent the caller cannot read.</criterion>
+    <criterion>`default:` (empty/unknown scope) DENIES.</criterion>
+    <criterion>`driveId` and `speFileId` are absent from the response; every client consumer still works via document-id-keyed routes.</criterion>
+    <criterion>Both sub-paths (associated-only and semantic) are covered — not just one.</criterion>
+    <criterion>Error paths deny; no path returns unfiltered results on failure.</criterion>
+    <criterion>Round-trip count recorded; no per-result Dataverse call on the hot associated-only path unless justified in notes.</criterion>
+  </acceptance-criteria>
+
+  <notes>The class remarks already name this gap as a "future enhancement" — this is that enhancement, and it is not optional. The contact path is the reference implementation; if this fix does not end up looking like `ExternalProjectDataEndpoints`, question why.</notes>
+</task>

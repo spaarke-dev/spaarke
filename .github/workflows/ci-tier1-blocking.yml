@@ -120,6 +120,28 @@ jobs:
               - 'src/server/api/Sprk.Bff.Api/**/Claims*.cs'
               - 'src/server/api/Sprk.Bff.Api/**/Authorization*.cs'
               - 'src/server/api/Sprk.Bff.Api/**/Authentication*.cs'
+              # ---------------------------------------------------------------
+              # Added 2026-08-26 by unified-access-control-r2 task 080.
+              #
+              # The five patterns above matched ZERO of the BFF's 17 per-resource
+              # authorization filters. `**/Authorization*.cs` anchors at the START of the
+              # filename, and every real filter is named <Subject>AuthorizationFilter.cs —
+              # DocumentAuthorizationFilter, SemanticSearchAuthorizationFilter,
+              # RecordSearchAuthorizationFilter, and 14 more. So `Auth Smoke` had never once
+              # fired for a change to the code that actually performs authorization.
+              #
+              # This is the same failure shape the project keeps meeting: a gate that LOOKS
+              # like it covers authorization while covering none of the authorization code.
+              # It is why task 074 needs its Rule B ("does the filter consult an
+              # authorization service?") in addition to Rule A ("is a filter attached?").
+              #
+              # Leading wildcard, plus the filter directory itself, so a filter added under a
+              # new name is still classified.
+              - 'src/server/api/Sprk.Bff.Api/Api/Filters/**'
+              - 'src/server/api/Sprk.Bff.Api/**/*Authorization*.cs'
+              - 'src/server/api/Sprk.Bff.Api/**/*Auth*Filter*.cs'
+              - 'src/server/shared/Spaarke.Core/Auth/**'
+              - 'src/server/shared/Spaarke.Dataverse/*AccessDataSource*.cs'
             ai_surface:
               - 'src/server/api/Sprk.Bff.Api/Services/Ai/**'
               - 'src/server/api/Sprk.Bff.Api/Endpoints/Ai*.cs'
@@ -248,6 +270,31 @@ jobs:
   #   - ADR-013 CrudCodeMustNotDependOnAiInternalTypes     — AI facade boundary (FR-C6;
   #     documented AI-API-surface exceptions grandfathered in the test itself per
   #     projects/sdap-bff-api-remediation-fix/EXECUTION-LOG.md tasks 050/053)
+  #
+  # ROUTE AUTHORIZATION (added 2026-08-26 by unified-access-control-r2 task 074).
+  # Four facts from RouteAuthorizationGuardTests. Each detects an UNGATED document or
+  # Dataverse route — the defect class behind every finding in that project:
+  #   - EveryGovernedRouteCarriesPerResourceAuthorizationOrANamedWaiver — the gate itself
+  #   - NoAuthorizationFilterIsDecorative — a filter that is ATTACHED but consults no
+  #     authorization service. This is not redundant with the rule above: the route that
+  #     leaked the tenant's documents HAD a filter, so the first rule called it gated and
+  #     four separate human enumerations of this surface agreed. Only this one catches it.
+  #   - ScannerAccountsForEveryRegistrationInTheGovernedFiles — fail-closed completeness;
+  #     a Map{Verb} the parser drops is a route whose authorization nobody is checking
+  #   - TheEndpointFileCensusIsPinned — a NEW endpoint file must be classified. Without it
+  #     the three rules above simply would not govern the new file.
+  #
+  # These are SOURCE scans, which this job's own criteria otherwise exclude. Deliberate:
+  # that exclusion targets nondeterminism and drifting heuristic ceilings, not source
+  # inspection as such. These parse a fixed file list with fail-closed parsing (an
+  # unparseable registration FAILS rather than being skipped) and assert pinned
+  # inventories that change only when a human adds or removes a route. The census is a
+  # count that must be updated deliberately — that IS the forcing function, not drift.
+  #
+  # Why here and not in code-quality: sdap-ci.yml's code-quality job runs the full
+  # ArchTests suite but carries continue-on-error at BOTH job and step level, so it can
+  # never fail a build. A rule that cannot fail is documentation. (sdap-ci.yml is also
+  # open in PR #806 and was deliberately not edited.)
   # --------------------------------------------------------------------------
   arch-tests:
     name: Arch Tests (MUST-NOT subset)
@@ -288,7 +335,7 @@ jobs:
           dotnet test tests/Spaarke.ArchTests/Spaarke.ArchTests.csproj \
             -c Debug \
             --no-build \
-            --filter "FullyQualifiedName=Spaarke.ArchTests.ADR001_MinimalApiTests.NoAzureFunctionsPackages|FullyQualifiedName=Spaarke.ArchTests.ADR002_PluginTests.EndpointsShouldNotReferencePluginInterfaces|FullyQualifiedName=Spaarke.ArchTests.ADR007_GraphIsolationTests.ControllersShouldNotReferenceGraphSdk|FullyQualifiedName=Spaarke.ArchTests.ADR007_GraphIsolationTests.EndpointsShouldNotReferenceGraphSdk|FullyQualifiedName=Spaarke.ArchTests.ADR009_CachingTests.MemoryCacheShouldNotBeSingleton|FullyQualifiedName=Spaarke.ArchTests.ADR009_CachingTests.NoHybridCachingLibraries|FullyQualifiedName=Spaarke.ArchTests.ADR013_AiBoundaryTests.CrudCodeMustNotDependOnAiInternalTypes|FullyQualifiedName=Spaarke.ArchTests.CallerIdentityGuardTests.Rule1_NoDirectIdentityClaimReadOutsideTheAllowlist|FullyQualifiedName=Spaarke.ArchTests.CallerIdentityGuardTests.Rule2_NoOwnershipPredicateGatedOnAGuidTryParse|FullyQualifiedName=Spaarke.ArchTests.CallerIdentityGuardTests.NegativeControl_TheRuleActuallyMatchesTheDefect|FullyQualifiedName=Spaarke.ArchTests.CallerIdentityGuardTests.NegativeControl_CommentStrippingRespectsStringLiterals|FullyQualifiedName=Spaarke.ArchTests.CallerIdentityGuardTests.EveryAllowlistEntryCarriesAReason|FullyQualifiedName=Spaarke.ArchTests.CallerIdentityGuardTests.EveryAllowlistEntryStillExists" \
+            --filter "FullyQualifiedName=Spaarke.ArchTests.ADR001_MinimalApiTests.NoAzureFunctionsPackages|FullyQualifiedName=Spaarke.ArchTests.ADR002_PluginTests.EndpointsShouldNotReferencePluginInterfaces|FullyQualifiedName=Spaarke.ArchTests.ADR007_GraphIsolationTests.ControllersShouldNotReferenceGraphSdk|FullyQualifiedName=Spaarke.ArchTests.ADR007_GraphIsolationTests.EndpointsShouldNotReferenceGraphSdk|FullyQualifiedName=Spaarke.ArchTests.ADR009_CachingTests.MemoryCacheShouldNotBeSingleton|FullyQualifiedName=Spaarke.ArchTests.ADR009_CachingTests.NoHybridCachingLibraries|FullyQualifiedName=Spaarke.ArchTests.ADR013_AiBoundaryTests.CrudCodeMustNotDependOnAiInternalTypes|FullyQualifiedName=Spaarke.ArchTests.CallerIdentityGuardTests.Rule1_NoDirectIdentityClaimReadOutsideTheAllowlist|FullyQualifiedName=Spaarke.ArchTests.CallerIdentityGuardTests.Rule2_NoOwnershipPredicateGatedOnAGuidTryParse|FullyQualifiedName=Spaarke.ArchTests.CallerIdentityGuardTests.NegativeControl_TheRuleActuallyMatchesTheDefect|FullyQualifiedName=Spaarke.ArchTests.CallerIdentityGuardTests.NegativeControl_CommentStrippingRespectsStringLiterals|FullyQualifiedName=Spaarke.ArchTests.CallerIdentityGuardTests.EveryAllowlistEntryCarriesAReason|FullyQualifiedName=Spaarke.ArchTests.CallerIdentityGuardTests.EveryAllowlistEntryStillExists|FullyQualifiedName=Spaarke.ArchTests.RouteAuthorizationGuardTests.EveryGovernedRouteCarriesPerResourceAuthorizationOrANamedWaiver|FullyQualifiedName=Spaarke.ArchTests.RouteAuthorizationGuardTests.NoAuthorizationFilterIsDecorative|FullyQualifiedName=Spaarke.ArchTests.RouteAuthorizationGuardTests.ScannerAccountsForEveryRegistrationInTheGovernedFiles|FullyQualifiedName=Spaarke.ArchTests.RouteAuthorizationGuardTests.TheEndpointFileCensusIsPinned|FullyQualifiedName=Spaarke.ArchTests.Adr038TestBanGuardTests.B4_NoConstructorNullGuardTests|FullyQualifiedName=Spaarke.ArchTests.Adr038TestBanGuardTests.B1_NoHttpMessageHandlerMocks|FullyQualifiedName=Spaarke.ArchTests.Adr038TestBanGuardTests.NegativeControl_DetectorsMatchTheDefect|FullyQualifiedName=Spaarke.ArchTests.Adr038TestBanGuardTests.PositiveControl_DetectorsIgnoreSanctionedShapes|FullyQualifiedName=Spaarke.ArchTests.Adr038TestBanGuardTests.Control_ScannerSeesTheTestTree" \
             --logger "trx;LogFileName=arch-must-not.trx" \
             --results-directory ./TestResults
         shell: bash

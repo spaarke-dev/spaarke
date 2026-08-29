@@ -1,8 +1,453 @@
 # Current Task State — `unified-access-control-r2`
 
-> **Last Updated**: 2026-08-25 (**021 COMPLETE** — live 409 regression closed; 2 owner findings)
-> **Recovery**: read "Quick Recovery" first. History lives in
-> [`tasks/TASK-INDEX.md`](tasks/TASK-INDEX.md) and the per-task `.poml` files.
+> **Last Updated**: 2026-08-27 (by `context-handoff`) — **MERGED TO MASTER. Next session runs task 083
+> on FABLE.**
+> **Recovery**: read "Quick Recovery", then §083, then §076. The merge-by-branch rule is history (all
+> branches in) but keep it for the next parallel wave.
+
+---
+
+## Quick Recovery (READ THIS FIRST)
+
+| Field | Value |
+|-------|-------|
+| **State** | ✅ **MERGED TO MASTER** at `8e799f5ec`. Worktree clean, **0/0**. Main repo `master` ref synced (its checkout `ci/task-084-b10-verification` left untouched). |
+| **PR** | **#861 open as DRAFT** — CI **fully green**: 23 success / 1 neutral (Trivy) / **0 failures**, all 8 Tier 1 blocking jobs pass, `Tier 2 / Full Unit Tests` **SUCCESS**, and `Tenant Isolation (I1–I5)` now green (was red on master). |
+| **Next Action** | 🔴 **Run task 083** — [`tasks/083-container-selection-authorization-sweep.poml`](tasks/083-container-selection-authorization-sweep.poml). It is **`<model-tier>fable</model-tier>` @ `xhigh`** — switch with `/model` before starting, or dispatch it as a Fable subagent. **Do not run it on a lower tier**; CLAUDE.md §8.5 requires the escalation. |
+| **Verified on master** | build **0/0** · ArchTests **121 pass / 6 fail** (the recorded not-ours baseline, all in `Sprk.Provisioning.ControlPlane.Core`; **PR #847 fixes exactly those**) · publish **45.11 MB** compressed incl. PDBs (+0.15 vs 44.96, ceiling 60) · CVE clean |
+
+### ⚠️ The local test suite is NOT trustworthy on this machine — CI is
+
+Local runs show **5 failures that do not exist in CI** (`Tier 2 / Full Unit Tests` = SUCCESS on the exact
+same SHA). Established, not assumed:
+
+1. Reverting `RecordContainerResolver.cs` to its pre-076 state reproduces them identically → not mine.
+2. The failing **set moves between runs** (`SearchItems` dropped out; `ScopePersonas` and
+   `EndpointAuthorizationCharacterization` appeared). A deterministic break does not move.
+3. All take **~100 s** and die with `TaskCanceledException` / *"The client aborted the request"* on an
+   in-memory `WebApplicationFactory` client — a timeout signature, not an assertion failure.
+
+**Root cause, partly found and partly NOT — do not repeat the dead end.** Proven: **5 of 6 "fake" test
+hostnames resolve to LIVE Microsoft Azure IPs** via wildcard DNS (`test.crm.dynamics.com` →
+`13.64.177.224`, `test.search.windows.net` → `20.191.59.83`, plus `test.openai.azure.com`,
+`test.documents.azure.com`, `test.vault.azure.net`; only `test.servicebus.windows.net` is NXDOMAIN). So a
+stray outbound call in a test opens a **real TCP connection to Azure** and hangs to the 100 s default
+instead of failing fast. **313 occurrences across 62 test files** + 3 in
+`Sprk.Provisioning.ControlPlane.Tests`.
+
+**But I DISPROVED that as the cause of the specific hang** — rewriting those hostnames to `.invalid` in
+`ComposeSupersedeEndpointContractTests.cs` and re-running left it at **2 m 6 s, still failing** (edit was
+reverted). Likely because the config is set in more than one place. So:
+- The hostname hazard is **real and worth fixing** (a latent 100 s trap on every stray call) — but it is
+  **test hygiene, not a blocker**: CI is green.
+- ⚠️ Changing those hostnames carries a real risk: URL-shape validation may depend on the genuine
+  `.dynamics.com` / `.azure.com` suffixes. Probe one file before sweeping 313.
+- The **actual** cause of `Supersede_WhenSessionUnknown_Returns404` hanging is **still unknown**. Next
+  diagnostic step: trace what the unknown-session path calls outbound
+  (`ChatEndpoints.cs:270` → `SupersedeComposeOutputAsync`, ~`:1530`).
+
+---
+
+## 🔴 §083 — THE NEXT TASK. Owner-directed, and it supersedes finishing 076 first.
+
+**Owner decision 2026-08-27, verbatim intent**: *"this is turning into a critical issue and trying to
+offload to other projects is very risky because they lack the context… we need to address the full extent
+of this issue here."*
+
+**The defect class**: the client names an SPE container; the server writes bytes into it. SPE permissions
+are **additive-only**, so one survivor puts secure content in a shared container **permanently**.
+
+**At least 5 instances, 2 of them LIVE. Two rows are UNTRACED — tracing them is step 1.**
+
+| # | Path | Status |
+|---|---|---|
+| 1–2 | app-only container route · chunked OBO pair | ✅ deleted (073, 076) |
+| 3 | `PUT /api/obo/containers/{id}/files/{*path}` | 🔄 **076 mid-conversion** (see §076) |
+| **4** | **`PUT /api/drives/{driveId}/upload`** — **app-only MI**, `canwritefiles` policy only | 🔴 **LIVE. DO FIRST.** |
+| **5** | **`DELETE /api/drives/{driveId}/items/{itemId}`** — **a DESTROY**, same gating | 🔴 **LIVE** |
+| 6 | Compose create-on-save `ContainerId` | 🔲 issue **#858**, sequenced behind PR #806 |
+| 7–8 | `ChatWordExportEndpoints.cs:154` · `ChatDocumentEndpoints.cs:1160` | ⚠️ **UNTRACED** |
+
+**Why 4 and 5 outrank Compose**: they write **app-only (MI)**, and 073's whole finding was that app-only
+needs **no container ACL** — so unlike every OBO row these are **live holes, not latent bypasses**. Both
+survived 073 only because they live in `DocumentsEndpoints.cs`, outside its file scope. **Neither is
+blocked by any open PR.**
+
+**The hard sequencing block, verified**: PR **#806** modifies `IComposeService.cs`, `ComposeEndpoints.cs`
+**and** `ComposeService.cs`. Row 6 waits on it. ⚠️ **`gh pr view --json files` CAPS AT 100 SILENTLY** — it
+under-reported #806 (**352** actual) and #843 (**178**). **Always `gh api --paginate` for overlap checks
+in this repo.**
+
+**Issue #858 ownership was CORRECTED** — it originally read as a handoff to compose-r8; the comment
+(`#858#issuecomment-5453509522`) now states UAC-r2 owns the fix, compose-r8 must NOT start it, and the only
+ask of them is notification when #806 clears.
+
+**082 is a DIFFERENT concern** — caller-*identity* claim reads, not container selection. I initially
+advised folding them together; that was wrong. Keep them separate.
+
+---
+
+## §076 — PARTIALLY DONE AND ON MASTER. Finish it inside 083 or before it.
+
+### ✅ Wave A is fully merged — all 6 branches, BY BRANCH NAME
+
+011 · 013 · 015 · 018 · 020 · 081, zero conflicts. **ArchTest edit #13 applied** (the last of the 13;
+081's census comment flipped to past tense only after 081's code was in the tree).
+
+Each merged test class was verified to **execute**, not merely compile — and that surfaced a
+handoff error worth keeping: **`tests/integration/auth/**` compiles into `Sprk.Bff.Api.Tests`**
+(csproj:101), NOT `Spe.Integration.Tests` as the prior handoff said. Counts: FetchXmlGuardSelfJoin 26 ·
+WorkforceEmailNoHijack 45 · MembershipPagingCharacterization 18 · SpeRevokeMatcher 31 ·
+ScopeInjectorBound 22 · AuditEnrichmentMiddleware 8 · ExternalModuleDataContract 8 ·
+StandingGrantRuntimeUnionSeam 2 · ExternalScopeCharacterization 6.
+
+Two stale claims the merges created were repaired: the 081 census comment, and
+`OfficeAuthFilter.cs`'s consumer list (018 deleted `OfficeDocumentAccessFilter`, one of the three it
+named — and the list was **already** incomplete, omitting **nine direct handler reads** in
+`OfficeEndpoints.cs`).
+
+---
+
+## 🔴 §076 — IN PROGRESS. Read this before touching anything.
+
+### The owner-approved model change (2026-08-27) — this supersedes the POML
+
+Option (C) said "the client stops deciding", but 075's resolver takes a
+`nonSecureFallbackContainerId` **the client supplied** — so (C) was unreachable without the server
+deriving it. Owner directed: **derive it from the record's own owning business unit.**
+
+**What was wrong**: every client upload site resolved `getUserId() → systemuser.businessunitid →
+businessunit.sprk_containerid` — *the person uploading, not the thing uploaded to*. Worse for
+isolation: users sit in the Operations subtree while secure records are owned in `Secure Projects`,
+so acting-user resolution writes secure content into the general **Operations** container.
+
+**INV-7 has no technical basis** — traced. `design.md:450` states it as a constraint; its only
+concrete form is a comment on `SaveComposeDocumentRequest.ContainerId` (`IComposeService.cs:743-751`)
+saying *"the resolver stays in the wizards"* — a **scope boundary** from
+`spaarke-multi-container-multi-index`, cited downstream as a constraint. `design.md:450` still needs
+correcting.
+
+**Verified live against Dataverse** (do not re-derive): `owningbusinessunit` populated on every
+`sprk_project` row · `businessunit.sprk_containerid` populated on 3 of 6 BUs · the **`Secure Project`
+BU has NO container** (correct — secure records use their own) · the **root `Spaarke` BU SHARES its
+container with `Spaarke Business Unit 1`** · `sprk_issecure` is **NULL on 5 of 10 rows** — the
+"ABSENT is not FALSE" case, live.
+
+### ✅ Done in 076
+
+| Step | State |
+|---|---|
+| **0** verify the three §1 facts | ✅ all three confirmed first-hand. `UploadEndpoints.cs` gone · 075's resolver present · `GET /api/obo/containers/{id}/drive` mapped NOWHERE (3 comments, 0 `Map*`) — this cleared escalation trigger 3 |
+| **1** design note | ✅ [`notes/task-076-record-keyed-upload-contract.md`](notes/task-076-record-keyed-upload-contract.md) |
+| **3** delete the dead chunked pair | ✅ `ed5d9e776` — both routes + dead client + 2 waivers; OBO registration pin **3 → 1** |
+| **model change** server-side BU resolution | ✅ `4d375b420` — `RecordContainerResolver` now derives the fallback from `owningbusinessunit` |
+
+### 🔲 Remaining in 076
+
+1. **Step 2 — convert the live route.** `PUT /api/obo/containers/{id}/files/{*path}` →
+   `PUT /api/obo/records/{entity}/{recordId}/files/{*path}`, authorized by
+   **`CallerRecordAccessProbe.GetCallerRightsAsync(bearerToken, entitySet, recordId, ct)`** (fail-closed
+   to `AccessRights.None`) via an endpoint filter per ADR-008. Needs a logical-name → entity-SET map —
+   **reuse `SemanticSearchAuthorizationFilter`'s `TryResolveParentEntitySet`** (task 080 made it
+   `internal` for exactly this); do NOT write a second one (§11).
+2. **NEW — the >4 MB fix (owner-directed).** `POST /api/obo/records/{entity}/{recordId}/upload-session`
+   → authorize record, resolve container, create the Graph session, return `uploadUrl`. **Client chunks
+   directly to Graph's `uploadUrl`** — that part already worked, and the deleted BFF chunk-relay route
+   stays deleted (nothing ever called it; proxying bytes through the BFF is worse).
+3. **Step 4** — cut over U1 `EntityCreationService.ts:493`, U2 `SdapApiClient.ts:101`,
+   U3 `UploadOperation.ts:27` to `(entity, recordId)`.
+4. **Step 5** — classify all 12 container suppliers; unclassified = survivor. Note
+   `NavigationService.ts:354-362`, `WorkspaceGrid.tsx:535-537`, `sprk_analysis_commands.js:58` feed
+   **reads/navigation, not uploads** — those are NOT this task's to delete.
+5. **Step 6** — delete W1 (`EntityCreationService.ts:327` `applyDefaultContainerId`, via
+   `applyUserBuDefaults:374`) and W2 (`DocumentUploadWizard/sprk_subgrid_commands.js`).
+6. **Step 7** — route the 7 server-side Communication sites (`CommunicationService.cs:460/1259/1574/
+   2054/2146`, `MessageAttachmentMaterializer.cs:114`, and verify `:2368`'s "no longer used" comment).
+7. **Step 8** — delete the LAST OBO waiver once the route is gated. **Never** convert it to Permanent.
+8. **Steps 9–11** — tests (incl. the no-access-caller deny case, which has no prior coverage at all),
+   absence-grep, build/publish/CVE.
+
+### ⚠️ 075 built a CLIENT-side resolver that option (C) makes dead
+
+`Spaarke.UI.Components/src/services/RecordContainerResolver.ts` — its header says *"Task 076 routes
+the ~8 client call sites onto this module"*, which is **option (A)'s design**. Under (C) no client
+resolves a container. It currently has **zero production importers** (only its own test + the
+barrel). Decide explicitly in Step 5: delete it, or keep `decideContainer` alone for the
+fixture-parity pin (`tests/fixtures/secure-container-decision-table.json` drives BOTH halves — check
+before deleting, or the C# half's parity test loses its counterpart).
+
+### 🔴 Deploy ordering — the outage risk
+
+**Client + BFF MUST ship together.** No compatibility window, no feature flag: BFF-first 404s every
+upload, client-first 404s every upload. Must be in the PR description.
+
+### Filed, not fixed — hand to compose-r8 (PR #806)
+
+[`notes/finding-compose-create-on-save-client-named-container.md`](notes/finding-compose-create-on-save-client-named-container.md)
+— Compose create-on-save writes into a **client-named container**, the same shape 076 removes from
+uploads. Root cause is a contract gap: `SaveComposeDocumentRequest` carries **no parent-record key**
+(all 16 properties enumerated). But the owning record IS known one step earlier
+(`LoadComposeDocumentRequest.MatterId` + ADR-040 session binding) and isn't threaded to save. Not
+exploitable today (OBO, no user holds a container ACL). `ComposeEndpoints.cs` IS governed as
+`Scope.HandlerAuthorized`, so it is visible and classified. **ADR-049 surface under active
+development — handover, not a drive-by edit.**
+
+### 🔴 STILL OWED — a regression test whose gap is PROVEN
+
+`SemanticSearchAuthorizationFilter` + `RecordSearchAuthorizationFilter` **and their handlers** were
+fixed to `CallerResolution.ResolveObjectId`, but nothing guards them. Perturbation-proven twice:
+restore the broken read and **45 dedicated authorization tests stay green**. Write a principal in
+production's MAPPED shape (schema-URI `oid` + *divergent* `NameIdentifier` `sub`) asserting the
+**oid** reaches the authorization decision.
+
+### 🔴 STILL OWED — a regression test whose gap is PROVEN, not suspected
+
+`SemanticSearchAuthorizationFilter` + `RecordSearchAuthorizationFilter` **and their handlers** were fixed
+to `CallerResolution.ResolveObjectId`, but nothing guards them. Perturbation-proven twice: restore the
+broken read and **45 dedicated authorization tests in `Spe.Integration.Tests` stay green**.
+**Write**: a principal in production's MAPPED shape (schema-URI `oid` + *divergent* `NameIdentifier` `sub`)
+asserting the **oid** reaches the authorization decision.
+
+### The session's most instructive find (don't lose the lesson)
+
+**#840's `CallerIdentityGuardTests.Rule1` — now blocking — caught three surviving
+`FindFirst("oid") ?? NameIdentifier` reads in our files**, two feeding *per-row authorization*
+(`SemanticSearchEndpoints.cs:653` → `:569`, `RecordSearchEndpoints.cs:130` → `:280`). My earlier fix had
+covered the **filters** only, and `SemanticSearchEndpoints.cs:650` documents the invariant —
+*"Mirrors the filter's extraction so both halves… identify the caller identically"* — so fixing one half
+**silently broke the mirror**. A mechanical ratchet caught what review did not.
+
+### Decisions NOT to re-litigate
+
+- **076 → option (C)**, record-keyed upload contract. Deps **073 + 075** (both on master). Tier **opus**.
+  Creates a **client + BFF ship-together** obligation. Status restored to `pending`.
+- **P2 (parent–child) is ours entirely** — no split.
+- **082 narrowed** — #840 built the ratchet; keep the §11 four-primitive question + classify-by-sink.
+- **Do not harden the ingest catch** — see the 047 residual below.
+- **A18 is RETRACTED by A19** — §4c was right; my merge was wrong.
+
+
+### The three read-first documents
+
+1. **[`notes/wave2-parallel-merge-plan.md`](notes/wave2-parallel-merge-plan.md)** — the integration
+   checklist. §§A1–A17 cover Wave A. 13 ArchTest edits, census 111→110, 8+ follow-ups.
+2. **[`notes/coordination-compose-r8-2026-08-27.md`](notes/coordination-compose-r8-2026-08-27.md)** —
+   cross-project contract, **DELIVERED** (PR #832 + #806 comments + their worktree). Carries
+   **Amendment 1** (we own P2 entirely) and **Amendment 2** (076 → option C).
+3. **[`notes/response-from-spaarkeai-compose-r8-2026-08-27.md`](notes/response-from-spaarkeai-compose-r8-2026-08-27.md)**
+   — their reply, **accepted in full**. Their §4 warns our census would not have caught either of their two
+   disclosures (id-space defects with no claim read at all) and offers two extra rules. Their §5 hands over
+   `WorkspaceLayoutService`: three breaks, and *"the claim fix alone would have converted a disclosure into
+   an outage"* — FR-01's shape on a third surface.
+
+### 🔴 NEXT: WORK ITEMS (owner-approved 2026-08-27)
+
+1. ~~Deliver the coordination doc~~ ✅ **DONE** — PR #832 + #806 comments, plus the full doc in their
+   worktree with a provenance header. They replied "accepted in full" within 9 minutes and merged #832
+   within 49.
+2. ~~081 hardening~~ ✅ **DONE** (`1a77288b0` + `41cb87310`). **P12 is the deliverable**: invert the branch
+   ordering with the conjunction intact → 19 tests still green, so execution order is provably no longer
+   the saving function. ⚠️ Retro-check returned **NO** as instructed — my risk model conflated input-shape
+   with source-edit risk; see merge plan §A17.
+3. **File the parent-fallback task** (new Phase 0c) — **now OURS entirely** (owner: no split, P2 is ours).
+   Filter-level, **Type 1 scoped** (terms 2–4 are what give contacts parent access, so "ask Dataverse about
+   the parent" returns nothing for Types 2/3), applies the parent's **vetoes** (§6.1 — pre-veto leaks Secure
+   through children), states the two-parent rule (§6.2), records that it does **not** cover orphans (§6.3).
+   **Also file the separate orphan task** — orphans are the dominant case.
+4. **Two Dataverse measurements** (minutes, gate several decisions):
+   **(a)** depth of `prvReadsprk_Document` per role — the census in `design.md:544` covers only
+   `prvReadsprk_Project`/`_Matter`, so this is unmeasured; **(b)** the business unit of the
+   `# mi-bff-api-dev` application user. Together they decide whether FR-01's 403 is MI-ownership or a
+   `RetrievePrincipalAccess` failure (both return a byte-identical fail-closed 403), and whether §5.2's BU
+   restructure would break every MI-owned record.
+5. **MERGE — the gate is open.** ~~#832~~ ✅ merged. ~~master~~ ✅ merged. ~~076 decision~~ ✅ option **C**.
+   Remaining: **merge the 10 worktrees** → 13 ArchTest edits + census **111→110** → **task 082** (narrow it,
+   see below) → **047** live validation. Also pull **050/052** forward (**050 has NO deps**) and decide
+   whether **030** starts now, since all of Phase 1 sits behind it.
+
+### Decisions made this session (do not re-litigate)
+
+| Decision | Outcome |
+|---|---|
+| **076 resolution point** | **Option (C)** — record-keyed upload contract; routes take `(entity, recordId)`, server resolves, **client stops deciding**. (A) was rejected: it leaves two keys for one decision and F-9 proves they already diverge. Scope re-measured — the note's "spans three tasks" was **stale**, 073 already deletes the overlap; ~3 OBO routes remain. **076's POML still needs rewriting to C.** |
+| **P2 ownership** | **UAC-r2 owns it ENTIRELY** — model, spec corrections, AND implementation. No split (loses context and attention). compose-r8 will **not** build a fallback; retracted on #806. |
+| **Task 082 scope** | Largely **superseded** — compose-r8's PR **#840** did the tail sweep (41 sites/37 files) and built `tests/Spaarke.ArchTests/CallerIdentityGuardTests.cs`. **Narrow 082** to the §11 four-primitive question + a **classify-by-SINK** audit, and add their two rules: a `Guid.TryParse` whose failure path drops a security predicate, and any caller-id vs `ownerid`/`owninguser`/`createdby` comparison without oid→systemuserid translation. |
+
+### ⚠️ Standing hazard: a CONCURRENT SESSION is committing to this branch
+
+Commits `ef1da3bd4`, `57191820b`, `973f9a459` were **not** mine — another session handled the compose-r8
+correspondence and captured my uncommitted amendments (+66 lines) in its own commit. Nothing was lost, but
+**two sessions writing one tree** is the lost-writes hazard documented for sub-agents, at session level.
+Before touching `RouteAuthorizationGuardTests.cs` (13 pending edits, single file), check `git log` for
+foreign commits.
+
+### Files modified this session (all committed + pushed through `314adad96`)
+
+- `notes/coordination-compose-r8-2026-08-27.md` — **new**, the cross-project contract
+- `tasks/082-caller-identity-primitive-census.poml` — **new**, the §11 ratchet
+- `notes/wave2-parallel-merge-plan.md` — §§A1–A16 (Wave A findings)
+- `spec.md` — FR-17 corrections (FR-25→NFR-03; both dead filters; the A-23 always-deny retraction)
+- `.claude/FAILURE-MODES.md` — **G-12** (stale assembly behind a truthful "up-to-date" build)
+- `.claude/constraints/azure-deployment.md` — publish-size five-field convention made binding
+- `.claude/CHANGELOG.md` — entries for both `.claude/` changes
+- `src/.../Membership/IIdentityNormalizationService.cs` — removed the load-bearing false security claim
+- `tasks/{024,043,025}-*.poml` — carry-forward constraints from 020/015/011
+- `tasks/TASK-INDEX.md` — Wave A → 🔄, task 082 filed
+
+### Critical context
+
+**Every agent worktree was cut from `master`, not this branch** (`isolation: worktree` uses the repo's
+default checkout). Verified harmless for Wave A — none of the 12 target files differ between trees — but
+agents cannot see task 074's guard and their test baselines are not ours. **Verify the base on every future
+dispatch.** Only 081 reset onto the project branch.
+
+**The batch's transferable lesson (AP-8 + G-12):** a green suite proves the code does what its tests say,
+never that the tests say the right rule. This wave found tests **pinning a defect as the contract** (015),
+a double **collapsing three entities into one** (020), a **method name asserting a security property it
+does not provide** (013's `ExtractVerifiedEmail`), and — only visible from the orchestrator position —
+**three agents reporting incoherent publish sizes while each was individually correct**.
+
+---
+
+## 🟢 CI IS GREEN — the Router gate was repaired and the fix is ON MASTER (2026-08-27)
+
+`CI / Router` had **never** succeeded on this branch (17 runs, 0 successes). Commit `f695ce38f` fixed
+three defects and the gate is now **green**, verified as a real green rather than a docs-only skip:
+all 15 jobs ran, including all four Tier 1 blocking jobs, and **Tier 2 `Full Unit Tests` ran to
+completion** instead of dying at the old 6-minute wall — the first time CI has actually executed the
+full unit suite on this branch.
+
+All three fixes are **content-verified live on `origin/master`** (not merely commit-ancestry):
+`ci-tier2-advisory.yml:243` `timeout-minutes: 30` · only `workflow_call:` at `:23` (the self-colliding
+`pull_request:` trigger is gone) · `ci-router.yml:274` builds an adjudication set that excludes tier2,
+with `allowed-skips: tier1` at `:294`. They reached master via the auth-v4 → master chain, not our PR.
+
+**`SDAP CI` is still red, and it is NOT ours** — one failing job, `Tenant Isolation (I1–I5)`, failing
+identically on master at `74ee9b6b1` (FR-28/I1, FR-29/I2, FR-32/I5). **PR #828 already fixes exactly
+those three.** Do not file a duplicate. Note the job calls itself *merge-blocking* while master is red
+on it, so repo-wide it currently gates nothing.
+
+**CI coordination**: another agent owns `sdap-ci.yml` + `scripts/ci/classify-and-retry.ps1` (PRs #829,
+#830). **Zero file overlap** with ours — verified. Do NOT touch `.github/workflows/**` from this
+project without re-checking. Useful thing to pass them: the Router now excludes tier2 **by
+construction**, so retry logic on the advisory tier cannot redden the gate however it concludes.
+
+---
+
+## 🟠 IN FLIGHT — WAVE A: 6 PARALLEL AGENTS IN SEPARATE WORKTREES (dispatched 2026-08-27)
+
+**Work is NOT all in this worktree right now.** Six `task-execute` agents dispatched with
+`isolation: worktree`, each with its own checkout and commits. Selected for **fully disjoint
+modify-sets** — that disjointness is the safety property, not the POMLs' `∥-safe` flag.
+
+| Agent | Task | Model | Exclusive modify-set |
+|---|---|---|---|
+| `uac-081` | **081** classify the caller | opus/xhigh | `Endpoints/Diagnostics/TenantContainerResolverEndpoint.cs`, `Infrastructure/Logging/AuditEnrichmentMiddleware.cs`, NEW `Spaarke.Core/Auth/` primitive |
+| `uac-011` | **011** same-entity self-join | sonnet/high | `Api/ExternalAccess/ExternalModuleDataEndpoints.cs` |
+| `uac-013` | **013** workforce `oid` no-hijack | sonnet/high | `Infrastructure/ExternalAccess/WorkforcePrincipalResolver.cs`, `Services/Ai/Membership/IdentityNormalizationService.cs` |
+| `uac-015` | **015** membership paging | sonnet/high | `Services/Ai/Membership/MembershipResolverService.cs`, `Infrastructure/ExternalAccess/AccessibleRecordSetService.cs` |
+| `uac-018` | **018** dead filter + `in`-clause bound | sonnet/high | `Api/ExternalAccess/AccessibleRecordSetAuthorizationFilter.cs`, `Api/ExternalAccess/Tier2ScopeFilterInjector.cs` |
+| `uac-020` | **020** org-grant SPE cleanup | sonnet/high | `Api/ExternalAccess/RevokeExternalAccessEndpoint.cs`, `Dtos/RevokeAccessResponse.cs`, `tests/.../SpeRevokeMatcherTests.cs` |
+
+**Pre-dispatch conflict check PASSED** (Step 0.5 hot-path, all six touch BFF): zero overlap with every
+open PR (#806/#828/#829/#830/#636/#526) **and** zero overlap with the three unmerged worktree branches
+(073 `dd3e38f6d`, 079 `8185c8fcc`, 075 `3289844`).
+
+### Held back from Wave A — with reasons (do NOT dispatch these blind)
+
+| Task | Why held |
+|---|---|
+| **012** | Contends `FileAccessEndpoints.cs`, which **072 just rewrote** (share-link now gated on `Share`, bounded expiry, anonymous opt-in). Its POML predates 072 — **re-scope before running**, part of it may already be satisfied |
+| **024**, **025** | Both contend `SpeRevokeMatcherTests.cs` + `RevokeExternalAccessEndpoint.cs` with 020 |
+| **028** | Contends `AccessibleRecordSetService.cs` with 015 |
+| **029** | Contends `ExternalProjectDataEndpoints.cs` + `ExternalAccessModule.cs` with 028; `spec.md` with 023 |
+| **023** | Contends `spec.md` with 029 |
+| **027** | Modifies `ci-tier2-advisory.yml` — **the file we just fixed**, on the CI hot path with another agent live. Needs coordination, not parallelism |
+| **076** | 🔔 escalated — owner decision outstanding |
+| **078** | Deps on 075 (unmerged) and gated on 047 |
+| **047** | Operator-driven — needs a live deploy + real secure project; not autonomous-safe |
+| **026** | ∥-safe and free, but held so the main session stays clear for escalations + the merge |
+| **030/031/040** | Edit `.claude/**` → main-session-only (root §3) |
+
+**Why worktrees rather than shared-worktree parallelism** (the POMLs' `∥-safe:true` does not cover
+these): sub-agents share ONE worktree by default, so concurrent edits to a shared file are **lost
+writes, not git conflicts** — and 073 + 079 BOTH need waivers deleted from
+`RouteAuthorizationGuardTests.cs`, while either may want a new `OperationAccessPolicy` key. Concurrent
+`dotnet build` in one worktree also contends on `bin`/`obj`.
+
+**MAIN-SESSION-OWNED files — every agent (both batches) was told NOT to touch these and to report
+needed changes instead:** `Spaarke.Core/Auth/OperationAccessPolicy.cs` ·
+`Api/Filters/DocumentAuthorizationFilter.cs` · `Infrastructure/Graph/SpeFileStore.cs` ·
+`tests/Spaarke.ArchTests/RouteAuthorizationGuardTests.cs` · `current-task.md` ·
+`tasks/TASK-INDEX.md` · `spec.md` · **`.github/workflows/**` (CI hot path, another agent is live)**.
+Same boundary pattern as the `.claude/` rule (root §3).
+
+### ⛔ READ THE MERGE PLAN FIRST: [`notes/wave2-parallel-merge-plan.md`](notes/wave2-parallel-merge-plan.md)
+
+That file is the complete integration checklist — worktree inventory, the 12 ArchTest edits, a
+must-fix false-PASS vector in a new guard, 8 follow-ups to file, and the verification sequence.
+**Nothing is merged yet.** Batch status: **073 ✅ shipped, both gates returned** (`dd3e38f6d`) ·
+**079 ✅ shipped, ⛔ NEITHER GATE RAN — both owed on the combined diff** (`8185c8fcc`) ·
+**075 ✅ shipped, gate PASSED after 4 rounds / 10 defects / 0 in round 4** (`3289844`) ·
+**076 🔔 ESCALATED, not implemented — owner decision outstanding.**
+
+⚠️ **CORRECTED 2026-08-27 — task 074's guard is NOT "currently +5 red".** It is green at HEAD here:
+`Api/UploadEndpoints.cs` still exists in this worktree, and CI's Tier 1 arch-tests job passes. The +5
+is the **post-merge** state that appears the moment 073's deletion lands. The merge plan's sequencing
+(§2 edits applied in the same tranche as 073, census last) is correct either way — only the tense was
+wrong. Cause is still known to the line: the `GovernedFile` entry for the deleted
+`Api/UploadEndpoints.cs`, whose `ScanFile` does an unguarded `File.ReadAllText`, accounts for 4 of 5.
+
+**Merge-back obligations when they report:**
+1. Apply each reported `OperationAccessPolicy` key centrally (073 and 079 may both want one).
+2. Delete the now-stale Pending waivers: 073 owns **4** (`PUT /api/containers/{id}/files/{*path}`,
+   `POST /api/containers/{id}/upload`, `PUT /api/upload-session/chunk`, `PUT /api/drives/{id}/upload`);
+   079 owns **2** (versions list + prior-version content). Only delete the ones actually gated —
+   `NoWaiverIsStale` fires on a waived route that became gated, and a waiver for a route that no longer
+   exists is worse than noise.
+3. Re-run the full suite + ArchTests in THIS worktree after merging — each agent verified only its own
+   worktree, so nothing has yet tested the combination.
+4. Expect 073 to possibly come back **blocked on 075's seam** — its waivers are tagged "073/075/076"
+   jointly. That is a correct outcome, not a failure; it was told not to duplicate or stub the mapping.
+
+**Baselines the agents were given** (so their numbers are comparable): full suite **11,172 / 0 / 82** ·
+ArchTests **9 known master failures** (FR-27 ×2, FR-28, FR-29, FR-32, FR-F1, FR-F2, ADR-010,
+ServiceBusClientGuard) · publish **45.08 MB** compressed incl. PDBs, ceiling 60.
+
+---
+
+## 🔴 START HERE
+
+**081 is UNBLOCKED and rewritten to option B.** The POML, the decision record
+([`notes/task-081-tenant-diagnostic-BLOCKED.md`](notes/task-081-tenant-diagnostic-BLOCKED.md) — filename
+is historical, it is no longer blocked) and `TASK-INDEX.md` are all consistent as of 2026-08-26. **Next
+action is 072 or Wave 2 (075 → 076)**, not 081 bookkeeping.
+
+**⚠️ Two "verified facts" recorded in the previous version of this block were WRONG.** Corrected in the
+decision record's §Corrections; do not carry them forward:
+- ❌ *"zero reads of `idtyp`/`appid` as claims in `src/server`"* — **false.**
+  `Infrastructure/Logging/AuditEnrichmentMiddleware.cs` reads `appid`/`azp` (:102-104) and `idtyp` (:132).
+- ❌ *"`Sprk.Bff.Api/CLAUDE.md` falsely claims `AuditEnrichmentMiddleware` enriches with `appid`"* —
+  **false, that doc is correct.** No doc fix needed there.
+
+This **improved** 081: `IsOnBehalfOfFlow` (:129-145) already classifies caller kind — it is just a
+`private static` method in a logging middleware, so unreachable, answering a logging question rather than
+an authorization one, with no tests and no other consumers. So 081 is *promote and extend ONE classifier*
+(CLAUDE.md §11 reuse), not *write a new one*, and its acceptance criteria require exactly one classifier
+to exist afterwards.
+
+**The three things carried into the POML that must not be re-litigated:**
+1. **Placement is binding** — the primitive goes in `src/server/shared/Spaarke.Core/Auth/`.
+   `Spaarke.Core` cannot reference BFF `Infrastructure/**` (`LayerDependencyTests`), so a BFF-side
+   primitive is unreachable by the evaluator in `Spaarke.Core/Auth/AuthorizationService.cs` and gets
+   rebuilt — the trap that shrank task 032. Verified: no new package reference needed (`ClaimsPrincipal`
+   is BCL).
+2. **User principals DENY outright**, not `tid`-match. A provisioning diagnostic has no end-user use
+   case; this gets option C's "no user reach" without C's credential downgrade.
+3. **The trap**: `appid`/`azp` is present in *delegated* tokens too — it names the client app, not the
+   caller kind. `allowedAppIds.Contains(appId)` alone lets a human on the L2 app registration name any
+   tenant. Gate = positive app-only determination **∧** allow-list. Absence ⇒ indeterminate ⇒ deny.
+   Empty **or** absent allow-list ⇒ deny everyone.
 
 ---
 
@@ -10,223 +455,440 @@
 
 | Field | Value |
 |---|---|
-| **Task** | ✅ **045 COMPLETE — CI IS UNBLOCKED** · ✅ 021 · ✅ 022 |
-| **Step** | **`Router = SUCCESS` at `c5edf2448`** — the first CI-adjudicated state of this branch since `ffc2cb1de`. 22 checks pass, 0 failures |
-| **Status** | clean + pushed. PR #812 is **MERGEABLE** (was CONFLICTING) |
-| **Phase** | **Phase 0 — 14 of 20** (001 002 003 004 005 006 007 008 009 010 014 016 017 019 ✅ · remaining: **011 012 013 015 018 020**) · **Phase 0b — 3 of 12** (**021 ✅ 022 ✅ 045 ✅** · remaining: **046** 047 023 024 025 026 027 028 029) |
-| **PR** | **[#812](https://github.com/spaarke-dev/spaarke/pull/812)** — draft |
-| **Next Action** | **Task 046 — create the `Secure Project Owner` role and REMOVE System Administrator from the owner team** (owner-approved 2026-08-25). Then **047** (live provisioning validation, needs a deploy). After that the recommended order is **025 → 023 → 029 → 028 → 024**, with 026 + 027 runnable any time. **026 is now higher value than its position suggests** — it fixes `secure-project-fields-schema.md`, the doc that CAUSED C4/C5 |
+| **Task** | ✅ **072 COMPLETE.** Phase 0c: **070 ✅ 071 ✅ 072 ✅ 074 ✅ 077 ✅ 080 ✅** · **081 🔲 READY** (option B — see START HERE) · 073 · 075 · 076 · 078 · 079 filed |
+| **Next Action** | **073** (authorize container upload — Wave 1, `opus`/`high`, `∥-safe:true`) **or Wave 2 (075 → 076)**. Note 078 depends on 075, so Wave 2 unblocks it |
+| **⚠️ 072 deploy ordering** | **BFF + client must ship together.** An older client posts `{}` → binds to organization scope → emailed links silently stop opening for **external** recipients, no error signal. See `notes/task-072-gate-share-link.md` §7 |
+| **Commits** | `d6d156ac1` 080 · `4c51eed7e` CI + census · `f857fdc07` 077 · `9a0823996` handoff · `7b8ac54e2` 081→option B · `bb1e442ea` 072. Push 7b8ac54e2 + bb1e442ea |
+| **⚠️ PR head ≠ your SHA** | `ce7a88718` is a `github-actions[bot]` auto-format commit that landed on top. **Always check the PR head SHA, not the one you pushed** — bot commits move it, and their workflow runs park at `action_required` until approved (`gh api -X POST .../actions/runs/{id}/approve`) |
+| **Step** | Between tasks. Working tree clean. **PR #825 open as DRAFT** |
+| **CI on #825** | ✅ **ASSESSED + RESOLVED.** 51 check-runs. `Changed-Surface Integration Smoke` **PASSED** (first run ever on this branch). Two failures, **neither ours** — see the CI block below. Master merged (285 commits, 0 conflicts) |
 
-### ✅ RESOLVED — the CI blocker (task 045)
+### ✅ CI assessed and resolved 2026-08-26 — 3 findings, none of them regressions
 
-Full diagnosis: [`notes/ci-dark-and-authv4-integration-2026-08-25.md`](notes/ci-dark-and-authv4-integration-2026-08-25.md).
+**PR #825 needed a close+reopen to get CI at all.** The `pull_request` event produced **zero** runs on
+creation (`check-runs` total = 0) despite: no `draft` gating anywhere, Actions enabled
+(`allowed_actions: all`), all workflows `active`, `mergeStateStatus: CLEAN`, and `pull_request` firing
+normally for other branches. Reopening fired it (51 check-runs). **This is a SECOND, independent way this
+branch ends up with no CI** — the first was structural (no PR ⇒ no triggers). Both look identical from
+the outside: a branch that appears tested because local runs are green.
 
-**FIXED. `Router = SUCCESS` at `c5edf2448`; PR #812 is `MERGEABLE`.** The cause: a conflicted PR produces **NO gate rather than a red one** —
-GitHub cannot compute `refs/pull/812/merge`, so it dispatched **zero workflows** for `2035b1d16`
-(last session) and `99408eee5` (task 021). Not queued, not failed — no `github-actions` check suite
-at all. ⚠️ Last session I said `2035b1d16`'s run was "starting now"; that was an assumption and it
-was **wrong**.
+| CI failure | Verdict |
+|---|---|
+| `Tier 1 / Arch Tests` — census `expected 109, found 111` | **Our forcing function working.** CI tests the MERGE with master; master added 2 route-registering files. **Fixed**: census → 111 with both files classified inline |
+| `Tenant Isolation (I1–I5)` | **Pre-existing red on master** — master's own latest `SDAP CI` run 32969447565 fails this identical job |
 
-The conflict is trivial — **one hunk in `projects/INDEX.md`** (master inserted the auth-v4 row where
-this branch holds its own row; keep both). But resolving it pulls master in, and a **trial merge
-(aborted, not committed) produced 22 failures** from two independent causes:
+**Proved no regressions the honest way**: ran the full ArchTests in a throwaway worktree at pristine
+`origin/master` → **9 failures**; same suite on this branch → **9 failures**, `comm` diff of the sorted
+names is **empty both directions**. Master is red; we add nothing. (FR-27 ×2, FR-28, FR-29, FR-32, FR-F1,
+FR-F2, ADR-010, ServiceBusClientGuard — all master's, none ours. Worth telling whoever owns them.)
 
-| Cause | What | Fix |
+### 🔴 TWO NEW FINDINGS from the CI work
+
+1. **`Auth Smoke` has NEVER fired for any authorization filter change.** Its path filter used
+   `**/Authorization*.cs`, which anchors at the START of the filename — and all **17** real filters are
+   named `<Subject>AuthorizationFilter.cs` (`DocumentAuthorizationFilter`,
+   `SemanticSearchAuthorizationFilter`, …). The glob matched **zero** of them. **FIXED** in
+   `ci-tier1-blocking.yml`: added `Api/Filters/**`, leading-wildcard `**/*Authorization*.cs`,
+   `**/*Auth*Filter*.cs`, `Spaarke.Core/Auth/**`, `*AccessDataSource*.cs`. Same failure shape as the
+   original vulnerability: a gate that LOOKS like it covers auth while covering none of the auth code.
+2. **Task 081 FILED — cross-tenant read** in master's new
+   `Endpoints/Diagnostics/TenantContainerResolverEndpoint.cs`. It takes `tenantId` from the QUERY STRING
+   and treats the caller's JWT `tid` as a mere *fallback*, passing the caller-supplied value straight to
+   `ITenantContainerResolver.ResolveAsync` with no match check. Tenant A can resolve tenant B's SPE
+   container id; the 400-vs-200 "tenant not served by this stamp" split is also a tenant-enumeration
+   oracle. **Third hole the 074 forcing function has produced** (after 077, 078) and the first from being
+   *made to classify* a new file rather than a rule firing directly.
+| **080 gates** | Step 9.5 ran as mechanical ADR checks on the diff: no new `.WithClientSecret` (ADR-028 A4) · no `Microsoft.Graph` outside Infrastructure (007) · no `IMemoryCache` (009) · no new interface (010) · no ADR-038 banned test shapes · both new `Results.Problem` sites carry error codes. **One accepted gap**: the new "Caller context not available" 500 has no error code, matching its two existing siblings in the same file — coding one of three identical 500s is worse than either consistent option |
+| **Gates so far** | Unit **11,084 / 0** (82 skip, unchanged vs Wave 1) · Integration SemanticSearch **81/81** · ArchTests **79/79** · code-page jest `useSemanticSearch` **48/48** · publish **43.76 MB** (ceiling 60) · CVE **clean**. **Only Step 9.5 (`code-review` + `adr-check`) remains** |
+| **⚠️ NO OPEN PR** | **#812 is MERGED.** This branch needs a NEW PR — not yet opened. Nothing blocks it |
+| **Next Action** | Run `/code-review` + `/adr-check` on the 6 modified files (listed below), then commit 080. Then **072**, or **Wave 2 (075 → 076)**. 073/077/078/079 filed and ready |
+
+### 🆕 CI FINDING 2026-08-26 — no CI had run on this branch at all
+
+`gh run list` showed **zero runs** for `8ce4b7cac`, `53c665abb`, `c5143a776` — including the Wave 1
+security commit. Cause: `ci-router.yml` triggers only on `pull_request:[master]` / `push:[master]` /
+`merge_group`; `sdap-ci.yml` needs a PR; `ci-tier1-blocking.yml` is `workflow_call` + `workflow_dispatch`
+only. **With no open PR, a push to this branch fires nothing.**
+
+- Dispatched tier 1 manually → **run 32983649044 = SUCCESS**, the first green CI on this branch.
+  Arch Tests (incl. the 4 newly-binding facts) ✅ · Classify ✅ · Compile ✅
+- ⚠️ **`Changed-Surface Integration Smoke` and `Auth Smoke` both SKIPPED** — they are gated to
+  `pull_request` events. The classifier *did* identify `Spe.Integration.Tests.SemanticSearch` as changed.
+  **Opening a PR is the only way to run them.** Do not report those two as verified in CI until then.
+- The `binary-tickling-yeti` plan (tier2 timeout 6→20, Router tier2-exclusion, tier2 self-collision) is
+  **already applied and committed** — verified present in both workflow files. Nothing left there.
+
+### Task 080 — files modified (all uncommitted)
+
+| File | Change |
+|---|---|
+| `Api/Filters/SemanticSearchAuthorizationFilter.cs` | `scope=all` permitted w/ `RequiresPerRowParentAuthorization`; allow-list made `internal` + `TryResolveParentEntitySet` |
+| `Api/Ai/SemanticSearchEndpoints.cs` | Row-level parent authorization (lazy, distinct-parent, budgeted); `/count` **refuses** `scope=all` |
+| `hooks/useSemanticSearch.ts` | Entity fragment w/o record id degrades to cross-record — in `search()` AND `loadMore()` |
+| `services/targetEntityNormalize.ts` | Blank-label fallback warns instead of silently widening |
+| `SemanticSearchAuthorizationTests.cs` | +19 cross-record cases; reconciled the stale `Search_ScopeAll_Returns403` |
+| `SemanticSearchIntegrationTests.cs` | 3 scope=all tests 403→200; **new** `Count_ScopeAll_Returns_403` |
+| `notes/task-080-cross-record-search.md` | NEW — premise corrections, paging contract, perturbation table |
+
+**Perturbation-verified on two independent mechanisms** (disjoint failure sets): neutralizing the access
+check reddens **9** tests; neutralizing fail-closed parent resolution reddens **5**. Full table in the notes.
+
+### ⛔ Do NOT re-derive these — task 080 corrected the POML's premises
+
+1. **The dropdown's `matter`/`project`/`invoice` rows never hit `/api/ai/search`.** `deriveSearchDomain`
+   routes them to `useRecordSearch` → **`/api/ai/search/records`**, which is **task 077's still-open hole**.
+   080 does not make the page safe on its own.
+2. **The main broken path was not a dropdown row.** It was `hasUserInitiatedSearch` dropping the launch
+   scope to tenant-wide the moment the user types a query (`App.tsx:473-474`) → `scope:'all'` → 403.
+3. **"Supply the missing entityId" was the wrong fix.** Those rows have no record to point at;
+   `SearchRequestFragment` omits `entityId` by design. The fix is degrading to filtered cross-record.
+4. **The POML's feared paging hazard does not exist.** `SemanticSearchService.cs:189` sets
+   `totalResults = results.Count`, so `hasMore` is already always false on this path. The real hazard is
+   **over-filtering** — a short page that looks like "no matches". Hence the `PARTIAL_RESULTS` warning.
+5. **`ValidEntityTypes` has no `workassignment`**, and `account`/`contact` are valid filter values with no
+   authorizable-parent mapping (so their rows fail closed). Three disagreeing vocabularies — notes §0.4.
+6. **Publish 43.76 MB is the clean baseline.** The apparent −1.29 MB vs task 070's 45.05 MB is
+   measurement hygiene (this run `rm -rf`'d the output dir first), not a real shrink.
+7. **The code page's jest suite has ~42 pre-existing failures** (`bundleIcon is not a function` +
+   `SearchFlowIntegration`). Confirmed identical with my changes stashed. Not mine, worth its own task.
+
+### ✅ ALL THREE OWNER DECISIONS RESOLVED 2026-08-26
+
+1. **Spaarke DOES offer cross-record search.** → `scope=all` must be *filtered*, not refused. Filed as
+   **task 080** (authorize the PAGE, not the corpus — no dependency on task 031). Task 070's refusal was
+   a correct stop-gap on a **false premise**; 080 is the real answer. **080 also fixes the pre-existing
+   missing-`entityId` defect**, without which the code page stays broken in every dropdown state.
+2. **079 has no shipping dependency** — schedule it whenever.
+3. **074's CI gate: FIXED.** ✅ See below. `ci-cd-unit-test-remediation-r1` is not active, so the
+   ownership block is gone.
+
+### ✅ 074 is now BLOCKING, not advisory
+
+Four facts added to `.github/workflows/ci-tier1-blocking.yml`'s `arch-tests` filter:
+`EveryGovernedRouteCarriesPerResourceAuthorizationOrANamedWaiver` · `NoAuthorizationFilterIsDecorative` ·
+`ScannerAccountsForEveryRegistrationInTheGovernedFiles` · `TheEndpointFileCensusIsPinned`.
+Verified with the exact filter string: **4 selected, 4 pass, 440 ms** (budget <30 s).
+
+- **`sdap-ci.yml` deliberately NOT touched** — it has `continue-on-error` at both job and step level so
+  it can never fail a build, AND it is open in **PR #806**. The blocking tier was the right home anyway.
+- Rule B (`NoAuthorizationFilterIsDecorative`) is **not redundant** with the main gate: the route that
+  leaked the tenant's documents *had* a filter, so the main rule called it gated and four human sweeps
+  agreed. Only Rule B catches that shape. Do not "simplify" the set down to one rule.
+- `TheEndpointFileCensusIsPinned` is included on purpose despite being a drifting count — without it the
+  other three simply would not govern a newly-added endpoint file. The drift IS the forcing function.
+- Also discovered: the `auth-smoke` job **already blocks** on `SemanticSearchAuthorizationTests`
+  (`ci-tier1-blocking.yml:428`), so task 070's negative tests were gating CI from the moment they landed.
+
+### Prior owner-decision detail (kept for context)
+
+**1. `scope=all` refusal breaks shipped UI — and the underlying question is bigger.**
+The SemanticSearch **code page** is an enterprise search screen. Its dropdown (from `sprk_aisearchindex`
+rows) maps to scope in [`targetEntityNormalize.ts:103-123`](../../src/client/code-pages/SemanticSearch/src/services/targetEntityNormalize.ts):
+"All" row → `scope:'all'` (**now 403**); any other row → `scope:'entity'` + `entityType` but **no
+`entityId`** (**now 400** — `entityId` only arrives as a URL param and [`App.tsx:270-272`](../../src/client/code-pages/SemanticSearch/src/App.tsx) has a TODO saying it isn't plumbed through). A blank
+config label also falls back to `all` → 403. **So the whole page is broken, not one dropdown row.**
+
+The real question: **does Spaarke offer cross-record search at all?** If yes — and a legal-ops product
+surely does — then refusing outright is the wrong shape. **Recommended: authorize the PAGE of results,
+not the corpus** — let `scope=all` through, run the search, authorize the 20–50 rows about to be
+returned. O(page) not O(tenant), checks are cached, needs no dependency on task 031, and it reuses the
+result-level mechanism 070 already built. ⚠️ **This retracts the earlier "remove the All affordance"
+recommendation**, which was reasoning about a checkbox rather than a product capability.
+
+**2. Does 079 go in this wave or the next?** It is independent of Wave 2 (reads existing content, so the
+document exists) and has a live caller.
+
+### Phase 0c status after Wave 1
+
+| Done | Escalated into | Filed mid-wave | Not started |
+|---|---|---|---|
+| 070 071 074 | 071's upload trio → **073/075/076** | **077 078 079** | 072 073 075 076 |
+
+Three of the six new tasks came from 074's forcing function or 071's caller inventory — **none** from a
+human re-reading the route table. That is 074 earning its place, demonstrated not asserted.
+
+### Corrections carried forward — do NOT re-derive the old versions
+
+- **074 runs in CI but CANNOT FAIL it.** `sdap-ci.yml`'s `code-quality` job has `continue-on-error` at
+  BOTH job and step level; the only blocking arch job selects 7 named facts by `--filter`. A one-line
+  append fixes it, but `.github/workflows/**` belongs to `ci-cd-unit-test-remediation-r1`. **Advisory
+  until they take it.** Do not claim the gate is binding.
+- **Compose never called the OBO routes.** `ComposeService` uses the in-process `SpeFileStore` facade.
+  The original POML's "do not break Compose" warning was aimed at a risk that did not exist.
+- **OBOEndpoints had 7 routes, not 5.** Now 3 (the upload trio). 074's census asserts 3.
+- **The upload trio's escalation is CORRECT, not unfinished.** Uploads CREATE content — no
+  `sprk_document` exists at authorization time, so `ExtractResourceId` yields a container id and the
+  document filter would deny **100% of uploads** across 9 wizards. Subject is the owning RECORD → 075/076.
+- **`AccessibleRecordSetService` is NOT the workforce answer today.** It resolves ADR-034 membership, not
+  Dataverse's real answer; that substitution is task **031**. Use `GetCallerRecordAccessAsync` (added by 070).
+- **`CallerRecordAccessProbe` already existed** (task 008) and answers the same question — couldn't be
+  extended (BFF-layer; `Spaarke.Core` can't reference it). Consequence: **task 032's scope shrinks.**
+- **The Create Project wizard defect is a discarded return value, NOT step ordering.** Files stage in
+  React state and move only on Finish; provisioning already runs first. `provisionSecureProject` returns
+  the container id and [`CreateProjectWizard.tsx:700-704`](../../src/client/shared/Spaarke.UI.Components/src/components/CreateProjectWizard/CreateProjectWizard.tsx) throws it away, so secure files land in the shared BU
+  container. **~2 lines. Fully written up in task 076's POML** — read it before touching the wizard.
+
+### Known follow-ups recorded, not fixed (detail in `notes/task-070-gate-semantic-search.md`)
+
+New auth tests sit outside the ADR-038 KEEP paths (move to `tests/integration/auth/**`) · error-path
+denials cached for the full 60s TTL · two `LookupDataverseUserIdAsync` overloads whose first `string` is
+a **token** in one and an **oid** in the other (and the 2-arg one logs it) · `useAiSummary.ts:114-126`
+has required `driveId`/`itemId` never sent to the server · dead client methods in two shared-lib barrels
+still target deleted routes (zero invocations) · `NoWaiverIsStale` doesn't catch waivers for DELETED routes.
+| **New findings** | ⚠️ **077** (`POST /api/ai/search/records`) and **078** (`GET /api/v1/containers/{id}/documents`) — both **exploitable at HEAD**, both found by 074's ArchTest on its FIRST run. POMLs written, in TASK-INDEX |
+| **Status** | **PR #812 is MERGED** — continued work needs a NEW PR. BFF **deployed to dev 2026-08-25** (45.05 MB, hash-verified, healthy). Branch is ~20 commits behind master — rebase at commit time |
+| **Phase** | **Phase 0 — 14 of 20** (remaining **011 012 013 015 018 020**) · **Phase 0b — 4 of 12** (**021 ✅ 022 ✅ 045 ✅ 046 ✅** · remaining **047** 023–029) · **Phase 0c — 0 of 7** (070 🔄 071 🔄 074 🔄) |
+| **Next Action** | Finish 070: (a) additive record-access seam, (b) rewrite `SemanticSearchAuthorizationFilter`, (c) result-level parent check in `SemanticSearchService`, (d) drop `driveId`/`speFileId` + route PCF through a document-id-keyed path, (e) tests + build + publish size + CVE |
+
+### Task 070 — decisions made this session (do not re-derive)
+
+**1. `scope=all` is REFUSED, not reduced.** Simpler, safer, and no legitimate caller was found. `default:`
+(empty/unknown scope) DENIES. Both were `return new AuthorizationResult(true, null)` at HEAD.
+
+**2. The canonical authorization seam could NOT be used as-is.**
+`DataverseAccessDataSource.TryRetrievePrincipalAccessAsync:509` hard-codes the RPA target as
+`sprk_documents({resourceId})`, so `AuthorizationService` can only authorize `sprk_document`. It cannot
+answer "may this caller read this **matter**?", which is exactly what `scope=entity` needs.
+
+**3. Chosen fix: an ADDITIVE record-access method, not a threaded entity-type parameter.**
+Threading an entity type through `IAccessDataSource.GetUserAccessAsync` would touch ~10
+`AuthorizationContext` construction sites, both `IAccessDataSource` implementations, AND
+`CachedAccessDataSource`'s `(userId, resourceId)` cache key (which would otherwise let a document's
+snapshot answer for a record of another type). That is a shared-authorization-surface refactor and does
+not belong inside "gate one route". Instead: a new method alongside the existing one — existing call
+sites UNCHANGED — using the SAME authority (`RetrievePrincipalAccess`, as the caller, over OBO).
+This is the seam **072** and **Wave 3's parent-inheritance** will also need.
+
+**4. `AccessibleRecordSetService` was NOT used for the workforce plane, deliberately.** The POML named it
+as the extension point, but `ComposeForSystemUserAsync` resolves **ADR-034 membership**
+(`sprk_assigned*` participation) — NOT Dataverse's real answer. Gating the MDA Matter form on that
+would deny the document list to any user who can read the matter but is not an assigned participant,
+on the flagship form. It would be reverted, which reopens the hole. Substituting Dataverse's real
+answer for workforce is task **031**'s ADR-028 A2 amendment and has not landed. Contacts still route
+through the accessible-record-set path.
+
+**5. Parent-type allow-list, not string pluralization.** The entity-set name is resolved from an explicit
+allow-list; an unrecognised `entityType` DENIES rather than being guessed at.
+
+**6. Result-level authorization for the index path = parent-id equality check on each result.** Costs zero
+extra round trips (the value is already on the result) and defends against AI-Search index staleness —
+a document reparented in Dataverse but stale in the index. Satisfies the POML's "a filter expression is
+not an authorization decision" constraint without a per-result Dataverse call. Hot-path round-trip
+count: **1** (the parent check).
+
+### ▶ START HERE — Phase 0c, Secure Documents
+
+**The owner decision, recorded 2026-08-25**: the BFF is the **single access-decision point** for every document and every byte, for **both** workforce and external contacts. No user is ever granted an SPE container permission — `GrantMembershipAsync` stays at zero callers. The per-project container is **blast-radius containment**, not the live ACL.
+
+**Why now**: **zero secure projects exist in any environment.** Build this before the first one and there is never a migration. That window closes the moment a real secure project is created.
+
+**The coordination contract is [`SECURE-DOCUMENTS-BUILD-PLAN.md`](SECURE-DOCUMENTS-BUILD-PLAN.md)** — the decision, the three invariants, what each component is *for*, verified current state, the platform constraints, and the honest claim at the end of Wave 2. **Read it before executing any 07x task.**
+
+| Wave | Tasks | Notes |
 |---|---|---|
-| **A** 🔔 | `CallerRecordAccessProbe.cs:134,137` (**task 008's**) calls `.WithClientSecret` → master's auth-v4 forcing functions **FR-F1 + FR-F2** both fail | Inject `IConfidentialClientProvider`, construct no credential. **Security path → owner decision (CLAUDE.md §6)** |
-| **B** | Master widened `DataverseWebApiClient`'s ctor to 4 params; Moq needs an exact match, so `Mock<DataverseWebApiClient>(config, logger)` throws in **5 fixtures** | One line per fixture |
+| **1 — close the holes** | 070 072 (serialize — shared auth surface) · 071 073 074 (`parallel-safe: true`) | **070 and 073 are exploitable at HEAD** |
+| **2 — make the container real** | 075 → 076 (strict) | Can run concurrently with Wave 1 |
 
-**Cause A is item D1 with its premise expired.** D1 was accepted 2026-08-23 as an ADR-028 A4 path-A
-exception *"to be handled in the broader MI migration"* — auth-v4 **completed 2026-08-24 and closed
-E-3**, and could not have handled a site living on an unmerged branch. The guard's own message says
-*"A failure here is NOT a prompt to update the number"*, so allowlisting is explicitly the wrong move.
+**074 is the highest-value task in both waves** — it makes ungated routes a build failure. Everything else closes a specific hole; 074 closes the way holes get added.
 
-**Consequence to be clear about: nothing on this branch can be CI-verified until this is done.**
-Task 021's own verification is local-only (all 7 projects 11,443/0, NetArchTest 36/36, publish
-43.70 MB, both gates clean) — but that is *not* the Router, by this project's own standing lesson.
+### The two findings that drive Phase 0c
 
-**Recommended**: one new task, ordered AHEAD of the remaining Phase 0/0b work — (1) migrate
-`CallerRecordAccessProbe` per the owner's ruling, (2) fix the 5 mock ctors, (3) merge master keeping
-both INDEX rows, then **confirm a check suite actually exists** before claiming green. Fold in the
-auth-v4 PR comment's two `DATAVERSE-ACCESS-LAYER-ROUTING.md` corrections while there.
+**Exploitable now**: `POST /api/ai/search` returns allow for **every** scope including `default` and `scope=all` — any authenticated non-admin gets tenant-wide document names, AI summaries, TL;DRs, `driveId` and `speFileId`. It never touches SPE, so container permissions are irrelevant to it. And `PUT /api/containers/{containerId}/files/{*path}` takes the container id off the route and writes **app-only (MI)** — no container ACL needed.
 
-### ✅ Task 021 — what shipped
+**The structural one**: **nothing reads `sprk_project.sprk_containerid`.** Provisioning stamps it; every write resolves from the acting user's BU or a global archive. So secure documents land in **shared** containers — and SPE permissions are **additive-only** (*"you can't break inheritance on arbitrary files or folders"*, verified against Microsoft docs 2026-08-25), so **no per-item permission can ever retract that**. Per-project containers are the only mechanism, which makes task 075 the document guarantee.
 
-Full record: [`notes/task-021-provisioning-stamping.md`](notes/task-021-provisioning-stamping.md) § "What shipped".
+⚠️ **Latent, not exploitable**: the `OBOEndpoints` drive-keyed routes (071) and `share-link` (072) are **OBO**, so SPE denies without a container ACL — and no user has one. They are bypasses by construction, not live holes. Do not overstate them.
 
-Provisioning now: resolves the canonical BU **by name** from `SecureProject:BusinessUnitName`
-(`$top=2`, fails closed on absent AND ambiguous, **never** falls back) → resolves that BU's **default
-owner team** by `_businessunitid_value + isdefault + teamtype=0` → assigns `ownerid` and **reads the
-owner back to verify** → creates the project's own SPE container → records it on `sprk_containerid`,
-**failing loudly with the container id** if that write cannot land (ADR-003).
+### Corrections carried forward — do not re-derive the old versions
 
-**Deleted**: BU creation, account creation, both rollbacks, `ResolveRootBusinessUnitIdAsync`,
-`ResolveAccountForBuAsync`, `AttemptRollbackBuAsync`, the umbrella branch, `UmbrellaBuId`, and three
-response members. `sprk_externalaccount` — the project's **CLIENT** lookup — is now never written, and
-a test fails if it reappears in any payload.
+- **FR-29 delegation IS implemented** (`DelegationRuleFilter`, Write-on-record via OBO, fail-closed). This is *why* Manage Access silently fails: the server correctly 403s and **the UI swallows it**. UI defect only.
+- **The contact document path is CORRECT** and is the **reference implementation** for Wave 3's inheritance — `ExternalProjectDataEndpoints` checks project access AND doc∈project before any SPE read.
+- **`DocumentAuthorizationFilter.ExtractResourceId`'s container fallback is inert and fail-closed** — a driveId is not a document GUID, so it denies. Not a finding.
+- **The isolation guarantee is "no ordinary human sits at or above the secure BU in the tree"** — NOT "reduce the depth". `Deep` is fine at a *sibling* BU; validated live.
 
-**The live 409 regression is closed.** The marker is now **ownership**, which only provisioning
-writes; `sprk_containerid` was shared state (the wizard's BU cascade writes it at create time), which
-was the whole bug. `_sprk_securitybu_value` is still read as a *legacy* marker so retired-mechanism
-projects are refused rather than silently migrated.
 
-**Ordering is load-bearing**: ownership is assigned BEFORE the container, because ownership is the
-*security* step. A container failure then leaves the record correctly owned inside the Secure Project
-BU; reversed, it would leave a secure project owned by its creator in an Operations BU. There is
-deliberately **no rollback** of the assignment — rolling it back would turn a storage failure into a
-disclosure.
 
-### 🔔 TWO OWNER FINDINGS from 021 — read these
+### 🔔 OWNER DECISION REQUIRED — task 046 found that secure projects are NOT isolated
 
-**1. The BU name in every doc was WRONG — it is `Secure Project`, SINGULAR.** design §5.1, spec
-FR-28/NFR-05 and 021's own POML all said `Secure Projects`. Live metadata:
-`d9ec0b6f-80a0-f111-aaac-000d3a99d1d7`, name **`Secure Project`**, parented to root `Spaarke`.
-Shipping the plural as the config default would have failed closed on *every* call — right direction,
-fabricated reason, and it would have read as a missing environment rather than a wrong string.
-Corrected in design.md + spec.md; pinned by a test. **Eighth "docs lose to live metadata" instance.**
+**Proven empirically, not inferred.** `Test User 1` — an ordinary non-admin user — **read a real
+`sprk_issecure=true` project** owned by the `Secure Project` owner team, sitting in the `Secure Project`
+BU. Cause: **`Spaarke Basic User` holds `prvReadsprk_Project` at `Deep` depth**, and `Deep` held at the
+**root** BU reaches every descendant BU.
 
-**2. 🔴 The `Secure Project` owner team holds `System Administrator`.** The team exists and is
-correctly **memberless** (✅ §5.1a), but the only role on it is System Administrator — and review §D
-says of this exact question *"None — and definitely NOT System Administrator."* No role matching
-`Secure%` exists in the environment, so **the `Secure Project Owner` role has never been created.**
+This is **design §5.2's blocking prerequisite, still unremediated** — not a new defect. §5.2 inferred it
+from a depth census on 2026-08-20; task 046 exercised the whole mechanism against a real record. The
+**negative control passed** (a `Basic`-depth principal WAS denied on the same record), which is what
+establishes that BU containment works correctly *once no ordinary role holds `Deep` or `Global`*.
 
-Nothing is exposed today (no members), but the posture is one membership row from full admin rights
-for a human. It is environment setup, so 021 did not change it. **The consequence to understand**:
-021's escalation trigger for *"the team lacks entity privileges"* **cannot fire in dev** — assignment
-succeeds because the team is omnipotent, not because it is correctly scoped. **A green provisioning
-run in dev is NOT evidence that the role is configured.** Recorded in design §5.1a + spec FR-28.
+| Fix | Blast radius (measured live 2026-08-25) | Note |
+|---|---|---|
+| **A — BU restructure** (§5.2's already-decided direction): users out of root into an Operations BU; secure BU becomes a **sibling** | Larger — every user's BU changes; secure BU re-parented; BU-cascade container re-seeded | Durable; survives future role edits |
+| **B — narrow the depth**: `Spaarke Basic User` `prvReadsprk_Project` `Deep`(4) → `Local`(2) | **ZERO today** — all 18 real projects and all 5 human users are in the root BU, so `Local` preserves current visibility exactly | One reversible edit, but a *role* guarantee, so a later role edit can silently undo it |
 
-### ⚠️ What 021 did NOT achieve — state this plainly
+**Not applied by 046 on purpose** — editing an ordinary end-user role changes every user's effective
+access. B closes the exposure now at near-zero risk while A is scheduled; they are not exclusive.
+Detail: design §5.1a-2. **Do NOT "fix" it by removing `sprk_project` Read from ordinary roles** — a
+share confers nothing without the entity privilege, so that would silently disable all sharing.
 
-- **No document isolation.** Nothing reads the project's `sprk_containerid` yet. That needs the three
-  container-resolution strategies special-cased → `spaarke-secure-project-r1`.
+### ⚠️ What this does to task 047's claim
+
+047 can validly conclude **"provisioning runs end-to-end"** — worth doing, since provisioning has never
+succeeded in any environment. It **cannot** conclude "isolation works" until the decision above lands.
+Keep those claims separate in the report.
+
+### The one thing that needs the OPERATOR, not the agent
+
+**Task 047 (live provisioning validation) needs the BFF deployed to dev.** The `Deploy BFF API`
+workflow is **`disabled_manually`**, so that deploy is operator-driven. Sequence:
+**~~046 (agent)~~ ✅ → deploy (operator) → 047 (agent).**
+
+### What 046 configured in live dev (`spaarkedev1`) — already done, do not redo
+
+| | |
+|---|---|
+| `Secure Project Owner` | `roleid e4ebabd9-b4a0-f111-aaac-000d3a99d1d7`, in the `Secure Project` BU |
+| Privileges | **exactly 1** — `prvReadsprk_Project` @ **User (`Basic`)** depth (hypothesis said 7 @ BU depth — wrong in both dimensions) |
+| Held by | that one owner team; **0 users, 0 other teams** |
+| `System Administrator` | **REMOVED** from the team; assignment re-proven *after* removal |
+| Team members | **0** |
+| Test artifacts | probe project deleted — 0 secure projects, 0 projects in the secure BU |
+
+Runbook: [`docs/guides/SECURE-PROJECT-ENVIRONMENT-SETUP.md`](../../docs/guides/SECURE-PROJECT-ENVIRONMENT-SETUP.md) ·
+write-up: [`notes/task-046-secure-project-owner-role.md`](notes/task-046-secure-project-owner-role.md)
+
+### Still open from 046
+
+- **Child-entity ownership** — **18 Spaarke entities via 19 lookups** carry a project lookup (the POML
+  said 3); `sprk_document` carries **two** (`sprk_project` *and* `sprk_relatedproject`, so a one-lookup
+  check misses half the cases). **Nothing assigns children to the secure team**, so they are unisolated
+  independently of the depth defect and would stay so after it is fixed. **Needs its own task** —
+  extending task 021's assign is the wrong shape (children are created continuously, long after
+  provisioning returns; this needs a create-time rule). Sequence with `spaarke-secure-project-r1`.
+- **FR-28's share→read assertion is untestable** until the depth fix lands — every human with
+  `sprk_project` Read holds `Deep`/`Global`, so no record exists that they cannot already read.
+
+### Live Dataverse facts task 046 needs (verified 2026-08-25 — do NOT re-derive from docs)
+
+| Fact | Value |
+|---|---|
+| Secure BU | **`Secure Project`** — SINGULAR — `d9ec0b6f-80a0-f111-aaac-000d3a99d1d7`, parent = root `Spaarke`, created 2026-08-25 08:28 |
+| Its default owner team | `Secure Project` — `daec0b6f-80a0-f111-aaac-000d3a99d1d7`, `teamtype=0` (Owner), `isdefault=Yes` |
+| Team members | **ZERO** ✅ (design §5.1a requires this) |
+| Team roles | **ONLY `System Administrator`** (`3980a53d-b0cf-3ded-37c8-4d4f9b94acef`) — 🔴 task 046 removes this |
+| Roles matching `Secure%` | **NONE EXIST** — `Secure Project Owner` has never been created |
+| Secure projects in dev | **ZERO — none has ever been provisioned** |
+| `SP-*` per-project BUs | **NONE** — the retired mechanism never succeeded, so there is no legacy debris |
+| Root BU `Spaarke`.`sprk_containerid` | `b!vzGDfDpd7km_-_H38Q6ZfbotQXLPXF9Ci71VoQmIOHUKlvxOqBsHQLrROZ5KySLh` |
+| `Secure Project` BU.`sprk_containerid` | **`null`** ✅ correct by design |
+| Dev BFF app service | **`spaarke-bff-dev`** in `rg-spaarke-dev` (the e2e spec's `spe-api-dev-67e2xz` default is STALE) |
+| `SharePointEmbedded__ContainerTypeId` | `8a6ce34c-6055-4681-8f87-2f4f9f921c06` ✅ configured |
+| `SecureProject__BusinessUnitName` | **NOT SET** → the endpoint uses the code default, which is why the singular/plural fix was load-bearing |
+
+⚠️ **Three projects share that root-BU container id** (`Intellectual Asset Management System Patent`,
+`Clarivate Plc Q3 2025 Earnings Disclosure`, `Test New Matter via Workspace`). That is the wizard's BU
+cascade stamping SHARED storage onto projects — the mechanism behind both the 409 regression and design
+§5.1c's isolation gap. **For task 047: assert INEQUALITY against every BU container, never presence of
+a value** — a populated field is exactly the false positive.
+
+### 🔴 Task 046's headline finding, restated so it is not lost
+
+The owner team holds **`System Administrator`**. It is memberless so nothing is exposed *today*, but it
+is one membership row from full admin rights on the BU that NFR-05 exists to guard, and review §D says
+of this exact question *"None — and definitely NOT System Administrator."*
+
+**Consequence**: task 021's escalation trigger for "the team lacks entity privileges" **cannot fire in
+dev** — assignment succeeds because the team is omnipotent, not because it is correctly scoped. **A
+green provisioning run in dev is NOT evidence the role is configured.**
+
+⚠️ **046 treats design §5.1a's privilege list as a HYPOTHESIS, not a spec.** For a team that owns the
+records, **User depth may suffice** and is tighter than the Business-Unit depth currently written down —
+which would *narrow* NFR-05's exemption. Determine empirically; record the error that forced each
+privilege you add.
+
+---
+
+## What 021 and 045 shipped (both on master)
+
+**021 — provisioning matches design §5.1.** Resolves the ONE canonical BU **by name** from
+`SecureProject:BusinessUnitName` (`$top=2`, fails closed on absent AND ambiguous, never falls back) →
+assigns the project to that BU's **default owner team** and **reads the owner back to verify** →
+creates the project's own SPE container → records it on `sprk_containerid`, **failing loudly with the
+container id** if that write cannot land (ADR-003). Deleted: BU creation, account creation, both
+rollbacks, three resolvers, the umbrella branch, and three response members. `sprk_externalaccount` —
+the project's **CLIENT** lookup — is never written, pinned by a test.
+
+**The live 409 regression is CLOSED.** The marker is now **ownership**, which only provisioning writes;
+`sprk_containerid` was shared state, which was the whole bug.
+
+**045 — auth-v4 integration.** `CallerRecordAccessProbe` ported off its own client secret onto
+`OrderedCredentialClientProvider` (ADR-028 A4; FR-F1/FR-F2 pass with **no** allowlist or census entry).
+Plus 5 Moq ctor sites, 6 fixtures needing `Graph:ManagedIdentity:Enabled`, and master's own 6 stale
+tests. Full write-ups: [`notes/task-021-provisioning-stamping.md`](notes/task-021-provisioning-stamping.md)
+and [`notes/ci-dark-and-authv4-integration-2026-08-25.md`](notes/ci-dark-and-authv4-integration-2026-08-25.md).
+
+### ⚠️ What is NOT achieved yet — do not overstate this on master
+
+- **No document isolation.** Nothing READS the project's `sprk_containerid` yet; that needs the three
+  container-resolution strategies special-cased → project **`spaarke-secure-project-r1`** (design.md
+  drafted, 4 open questions awaiting the owner).
 - **No human can reach a secure project.** FR-28's explicit share (access teams, design §5.1b) is
-  still outstanding, so the record is isolated but **unshared**. Needs its own task — the obvious
-  next candidate after the remaining Phase 0 work.
+  outstanding. The record is isolated but **unshared**. Still needs its own task.
+- **OBO correctness is unproven.** No test performs a real exchange (P5 unreachable offline —
+  `OrderedCredentialClientProvider` is `sealed`). Task **034** owns live verification.
+- **Provisioning has never run successfully in ANY environment.** Task **047**.
 
-### 🧪 The perturbation lesson from 021 — generalise this
+---
 
-9 perturbations, 9 bit. But **P2 and P8 first returned ZERO**, and the cause was **neither** of the
-two task 022 taught us to distinguish (wrong test level / unreachable code). It was a third: the
-fixture's Dataverse double **ignored `$top` and ignored the discriminating `$filter` predicates**.
+## Four lessons that keep paying off — apply to every remaining task
 
-- `$top` ignored → the double returned 2 BUs regardless, so the ambiguity guard was covered *by
-  accident*, while real Dataverse at `$top=1` makes ambiguity undetectable.
-- team-filter predicates ignored → answered on the BU id alone. Real BUs carry several teams (the live
-  root BU has **4 owner teams + 3 access teams**), so that query returns the WRONG team.
+**1. A misleading "it passed" now has FOUR causes, not two.** (a) test at the wrong level,
+(b) perturbed code unreachable, (c) — task 021 — **a FAKE that ignores part of the contract**
+(its fixture ignored `$top` and the discriminating `$filter` predicates, so two perturbations looked
+"covered" by accident; *a fake is evidence only to the extent it refuses what Dataverse would refuse*),
+and (d) — task 046 — **the platform answered from a STALE CACHE.** Dataverse's principal-privilege
+cache lags role edits by ~one operation; an early 046 pass reported *"assignment allowed with zero
+privileges"*, which taken at face value would have justified shipping a role that grants nothing.
+**Defences**: re-probe until stable across ≥3 polls, and cross-check the `privilegeCount` reported in
+any denial against the role's real privilege count. Run a zero-privilege control — if a role with no
+privileges still allows the operation, every reading in that session is void.
+*All four share one shape: the observation was real, but it was not an observation of the thing you
+thought it was.*
 
-Fixed the **fake**, not the tests: honour `$top`, apply only the predicates asked for, and seed
-**decoy teams** so "took an arbitrary team" is visible. **Third instance of task 016's class.**
-> **A fake is evidence only to the extent it refuses what Dataverse would refuse.** Any part of a
-> query the double discards is a part production code can build wrongly for free.
+**1b. Configuration-shaped assertions miss depth-shaped holes.** Task 046's headline finding —
+ordinary users can read secure projects — is invisible to any check that enumerates roles "scoped to
+the secure BU". `Spaarke Basic User` names that BU nowhere and reaches it anyway, via `Deep` at an
+ancestor. **Reach is a property of depth held at an ancestor, not of the target.** Prefer the
+empirical form: provision the record, attempt an impersonated read as a known non-admin, require
+denial. Same shape as NFR-04's negative canary — **success where you expect denial is the signal.**
 
-### 🆕 New project filed: `spaarke-secure-project-r1`
+**2. Read the GATE, not a substitute — and check the gate EXISTS.** A conflicted PR produces **NO
+gate, not a red one**: GitHub cannot compute `refs/pull/N/merge` and dispatches zero workflows. Two
+pushes went unadjudicated while a local suite was green. **Verify a `github-actions` check suite exists
+for the SHA** (`gh api repos/{owner}/{repo}/commits/{sha}/check-suites`) before claiming anything.
+Related: master's Router can be green while a whole test project fails, because tier1 runs a
+**changed-surface filtered subset** and tier2 (which runs everything) is **advisory**.
 
-[`projects/spaarke-secure-project-r1/design.md`](../spaarke-secure-project-r1/design.md) — DRAFT for
-owner review, 4 open questions.
+**3. A merge conflict is not the only way two branches collide.** Task 045 hit the same invisibility
+pattern three times — a duplicated credential site, a duplicated stale-test repair, and a duplicated
+`.csproj` glob that merged **textually clean and semantically broken** (`NETSDK1022`, whole test
+project fails to build, no conflict to warn you). When merging a long-lived branch, check for
+*semantic* duplicates, not just textual ones.
 
-**Why split**: container routing is document-storage plumbing with a security consequence, not
-evaluator work. It spans 7 client call sites, a server ingest path, invariant INV-7, and wizard UX.
+**4. Mocking at a seam proves the CALLER, never the CALLEE.** 045 found `CallerRecordAccessProbe` had
+**zero** test coverage because every fixture substituted it — its precondition logic could be inverted,
+opening the whole delegation gate, with the suite green.
 
-**The finding it is built on** — there are **THREE** container-resolution strategies, and the answer to
-"record or BU?" was *neither*: (1) the **acting user's BU**, client-side, 7 sites, BFF deliberately not
-involved (INV-7); (2) a single global `ArchiveContainerId` in **server-side** communication ingest —
-easiest to miss, no client, no wizard; (3) the document's own `GraphDriveId` — already correct.
+---
 
-⚠️ **Sequencing gap to state plainly**: 021 stamps a container that **nothing reads yet**. 021 is still
-right to ship first (it closes the live 409 and is the prerequisite), but **document isolation is not
-achieved until `spaarke-secure-project-r1` lands.**
+## Verified baselines (as of `290d9ab79`, on master)
 
-### 🔔 Client-visible contract change from task 008 (surfaced by the CI repair)
+- **All 7 test projects: 11,715 passed / 0 failed** — `Sprk.Bff.Api.Tests` 11,075 ·
+  `Spe.Integration.Tests` 372 · `Sprk.Bff.Api.IntegrationTests` 96 · `Spaarke.ArchTests` **69** ·
+  `Spaarke.Scheduling.Tests` 46 · `Spaarke.Core.Tests` 45 · `RecordSyncJob.IsolatedTests` 12
+- **Publish 43.75 MB** compressed incl. PDBs (ceiling 60). `--vulnerable` clean. BFF build 0 errors.
+- **`Router = SUCCESS`**; main repo local master synced and rebuilt clean from that checkout.
 
-On `/grant`, `/revoke` and `/close-project`, a body carrying an **empty identifier** now returns
-**403** (`sdap.access.deny.delegation_target_unresolved`) where it previously returned **400**. The
-delegation rule runs before the handler and must first work out WHICH record — an empty id resolves
-nothing, and task 008's ADR-003 constraint says deny rather than fall through. Still RFC 7807, and the
-reason code distinguishes "your request named no record" from "you lack permission".
-
-Low practical impact — `AccessGrantModal` and the external SPA send well-formed bodies — but it is a
-real change to the documented contract, not just a test update. Four `Spe.Integration.Tests` cases were
-flipped to match, with the rationale in their doc comments.
-
-### ✅ Task 022 — what shipped
-
-Full inventory + reasoning: [`notes/task-022-document-surface-inventory.md`](notes/task-022-document-surface-inventory.md).
-The class was **22 routes across 4 files**, not the "~15" the review estimated. **19 gated.**
-
-| Landed | Detail |
-|---|---|
-| **2 operation keys** (`write`, `delete`) | The filter's own `<param>` doc had always advertised `"read", "write", "delete"` while two thirds could not be honoured. Verified reachable in the snapshot before adding |
-| **C2, C3** | Two app-only destroy paths, one reachable from a shipped client hook |
-| **H2** | `PUT` tamper-by-GUID + the `GET` that discloses `GraphDriveId`/`GraphItemId` — the pointers the destroy and bulk paths consume |
-| **H3** | checkout · checkin · discard · checkout-status · **`analyze` → `write`** (owner decision) |
-| **C1** | Bulk download: per-document authorization **plus** collapsing the `_FAILED.txt` denial reason. Fixing only the first would have created a 500×-amplified enumeration oracle that did not exist before |
-| **5 URL-minting reads** | `read`; a mint-specific key was rejected — it would change no decision. Url **lifetime** is the real gap and belongs to task 012 |
-| **H5** | Sixth stale-column instance — `$orderby sprk_name` on `sprk_project` |
-
-**New defect found by writing the first ever test for bulk download**: `ZipArchive` is synchronous,
-Kestrel disallows sync IO, and `AllowSynchronousIO` appears nowhere in the repo — so the endpoint
-threw on its happy path. Fixed per-request via `IHttpBodyControlFeature`. Honest reading: C1 was a
-**working enumeration** primitive and a **broken exfiltration** one.
-
-⚠️ **`write`/`delete` gates depend on RPA being live.** The fallback probe caps rights at Read *by
-construction*, so on an RPA outage they deny — correct fail-closed direction, same trade as task 008,
-but those routes go **unavailable, not degraded**. Task 034 owns live verification (`RPA-FALLBACK`).
-
-⚠️ **The 5 OBO routes narrowed behaviour deliberately.** They already had real Graph-level OBO
-enforcement; the gate adds the per-document Dataverse answer. A caller with SPE *container* access but
-no `Read` on the row now gets 403 — which is precisely FR-01's intent, not a regression.
-
-**Still open on this surface**: the 3 collection-shaped routes (no caller-supplied id → Phase 1
-evaluator work, tasks 032/054) and `share-link` (task 012 — its OBO enforcement is real, so it is a
-*policy* question, not an open disclosure).
-
-### Phase 0b — the 9 review tasks are FILED (owner-approved 2026-08-24)
-
-`021`–`029` exist as POMLs and are registered in [`TASK-INDEX.md`](tasks/TASK-INDEX.md).
-Order: ~~022~~ ✅ → **021** → 025 → 023 → 029 → 028 → 024, with **026 and 027 parallel-safe**
-(no deps, no contended code — runnable any time, by anyone).
-
-- **021** ⚠️ the three `@odata.bind` names MUST come from `$metadata`. Escalate rather than guess —
-  a wrong nav-prop is silently accepted as an unknown property and the write does not happen.
-- **025** is why the rest could hide: the central gate (`CallerRecordAccessProbe.GetCallerRightsAsync`)
-  can be replaced with "return all rights" and the whole suite stays green.
-- **028** (new, from the task-009 To Do discussion): service request is one of the FOUR core types
-  in the project model but has no accessible set — only project/matter/WA exist.
-
-### Owner decisions recorded 2026-08-24
-
-| Decision | Effect |
-|---|---|
-| **To Do: matter + work assignment get the same functionality as project** | Implemented in `9294f0182`. ⚠️ TWO consequences: matter/WA sets carry NO access level, so membership implies WRITE there (more permissive than project, which requires the `Write` right); and the READ path is still project-only, so PATCH is WIDER than list. ✅ **Read/create parity FILED as task 029** (`290fcbf52`) — grounded on the `documents` module's existing OR'd `ScopeDimension` list and the already-entity-generic `ApplyResolverFieldsAsync`, so it is a third instance of an existing pattern, not new machinery. |
-| **CI: rely on `CI / Router`; do not chase `SDAP CI`** | Router is green (twice; tier2 ran 24m and 23m32s against the new 30m timeout). SDAP CI stays red on pre-existing latent flakes. **Do NOT register flakes reactively one per ~30-min cycle** — that is the widen-the-tolerance pattern. |
-
-### Last verified state
-
-**ALL SEVEN test projects — 11,431 passed / 0 failed**: `Sprk.Bff.Api.Tests` 10,819 ·
-`Spe.Integration.Tests` 377 · `Sprk.Bff.Api.IntegrationTests` 96 · `Spaarke.Scheduling.Tests` 46 ·
-`Spaarke.Core.Tests` 45 · `Spaarke.ArchTests` 36 · `RecordSyncJob.IsolatedTests` 12.
-Publish **43.70 MB** compressed incl. PDBs (unchanged by tasks 009 + 022 — no packages added; ceiling 60) · `--vulnerable` clean.
-
-⚠️ **`dotnet build --warnaserror` is clean for the BFF project, NOT for the whole solution.**
-`dotnet build -c Debug --warnaserror` at the root fails with **5 pre-existing CA2024** errors
-(`reader.EndOfStream` in an async method) in `tests/integration/Spe.Integration.Tests/AnalysisEndpointsIntegrationTests.cs`.
-Verified present on a stashed clean tree, so not ours — but earlier checkpoints said
-"`--warnaserror` clean" without that qualifier. Scope the claim to the project you built.
-Frontend: **26** `AccessGrantModal` tests pass — but `node_modules` is **absent in a fresh worktree**, so
-`npm install --legacy-peer-deps --no-audit --no-fund` under
-`src/client/shared/Spaarke.UI.Components` is required before any frontend test edit can be verified.
-
-⚠️ **Measure the publish COMPRESSED.** Raw bytes on disk are ~137 MB; the §10 ceiling is on the
-compressed artifact (43.69 MB). Zip `deploy/api-publish/` before reporting a number.
-
-### 🚨 Process failure found 2026-08-23 — READ THIS BEFORE CLAIMING A GREEN SUITE
-
-**There are SEVEN test projects. Tasks 002–008 were verified against THREE.** CI went red on task
-008's commit (`SDAP CI` → genuine `failure`, not a supersession cancel) with 9 failures in
-`Spe.Integration.Tests`, a project no local run had touched. Repaired in `3e5b9d373`.
-
-**The gate is `dotnet test` at the repo root, plus the three projects it does NOT pick up:**
+**The suite gate is `dotnet test` at the root PLUS three projects it does not pick up:**
 
 ```
 dotnet test -c Debug                                              # 4 projects
@@ -235,7 +897,21 @@ dotnet test tests/unit/Spaarke.Core.Tests/Spaarke.Core.Tests.csproj
 dotnet test tests/unit/RecordSyncJob.IsolatedTests/RecordSyncJob.IsolatedTests.csproj
 ```
 
-Running one project and reporting "full suite green" is how this was missed for six tasks.
+Running one project and reporting "full suite green" is how six tasks' worth of breakage was missed.
+
+⚠️ `Sprk.Bff.Api.Tests` **silently vanishes from a root `dotnet test`** when it fails to BUILD (exit 1,
+no `Failed!` line). If it is absent from the output, build it explicitly before believing anything.
+
+---
+
+## Recommended order
+
+**046 → [operator deploy] → 047 → 025 → 023 → 029 → 028 → 024**, with **026 and 027 runnable any
+time**. **026 is higher value than its position suggests** — it repairs
+`secure-project-fields-schema.md`, the stale doc that CAUSED Critical findings C4/C5.
+
+Also open: **Phase 0's 011, 012, 013, 015, 018, 020**, and a task still needed for **FR-28's access
+teams** (design §5.1b).
 
 ---
 

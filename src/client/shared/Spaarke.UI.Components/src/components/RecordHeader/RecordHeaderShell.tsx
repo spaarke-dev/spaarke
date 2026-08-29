@@ -3,9 +3,11 @@
  *
  * Composes a Fluent v9 card container with a `HeaderToolbar` at the top
  * and a body slot for `children`. On `loading === true`, the body renders
- * a small Fluent v9 `Skeleton` grid (3 columns × 2 rows — matches
- * `FieldGrid` default) instead of `children`, so the card chrome stays
- * visually stable while data resolves.
+ * a small Fluent v9 `Skeleton` grid — 3 columns × 2 rows by default (matches
+ * `FieldGrid` default), or 2 columns × 2 rows when the optional `columns={2}`
+ * prop is passed (FR-18) — instead of `children`, so the card chrome stays
+ * visually stable while data resolves AND the skeleton's footprint matches
+ * the loaded layout (no reflow on load).
  *
  * Per-entity thin PCFs (`MatterHeaderPcf`, future `ProjectHeaderPcf`,
  * `InvoiceHeaderPcf`, …) wrap this around a `FieldGrid` — the shell is
@@ -88,11 +90,27 @@ const useStyles = makeStyles({
    * 2 rows) so the placeholder occupies the same visual footprint as
    * the loaded body. Column/row gaps use the same semantic tokens
    * FieldGrid uses (spacingHorizontalM / spacingVerticalS) so the
-   * loading→loaded swap looks continuous.
+   * loading→loaded swap looks continuous. This is the DEFAULT skeleton
+   * grid (columns omitted or 3) — kept byte-identical to the original
+   * pre-FR-18 implementation for backward compatibility.
    */
   skeleton: {
     display: 'grid',
     gridTemplateColumns: 'repeat(3, 1fr)',
+    columnGap: tokens.spacingHorizontalM,
+    rowGap: tokens.spacingVerticalS,
+  },
+
+  /**
+   * Skeleton container variant for `columns={2}` (FR-18). Griffel's
+   * `makeStyles` is build-time static, so the runtime `columns` value
+   * cannot be interpolated into a single class — this is a second
+   * precompiled class selected at render time instead. Same gap tokens
+   * as the 3-column variant; only `gridTemplateColumns` differs.
+   */
+  skeletonTwoColumn: {
+    display: 'grid',
+    gridTemplateColumns: 'repeat(2, 1fr)',
     columnGap: tokens.spacingHorizontalM,
     rowGap: tokens.spacingVerticalS,
   },
@@ -108,27 +126,43 @@ const useStyles = makeStyles({
 });
 
 // ---------------------------------------------------------------------------
-// Loading skeleton — 3 columns × 2 rows (matches FieldGrid default)
+// Loading skeleton — columns × 2 rows (matches FieldGrid; FR-18)
 // ---------------------------------------------------------------------------
 
 /**
- * FR-02 loading affordance. Renders a 3×2 grid of `SkeletonItem`
- * placeholders inside a Fluent v9 `Skeleton` wrapper. Six cells match
+ * FR-02 / FR-18 loading affordance. Renders a `columns` × 2 grid of
+ * `SkeletonItem` placeholders inside a Fluent v9 `Skeleton` wrapper.
+ *
+ * Default (`columns` 3, or omitted upstream) renders six cells — matching
  * the ~5-field header footprint of `MatterHeaderPcf` (5 fields with one
- * spanning 3 columns still visually parks in ~6 grid cells).
+ * spanning 3 columns still visually parks in ~6 grid cells). `columns={2}`
+ * renders four cells so a 2-column configured header doesn't flash a
+ * mismatched 3-column skeleton during load.
+ *
+ * Cell testids follow the pre-existing stable scheme
+ * (`record-header-shell-skeleton-cell-0..N`) regardless of `columns`, so the
+ * default 3-column case is byte-identical to the original implementation.
  */
-const LoadingSkeleton: React.FC<{ className: string; cellClassName: string }> = ({ className, cellClassName }) => (
-  <Skeleton className={className} aria-label="Loading record header" data-testid="record-header-shell-skeleton">
-    {/* Six cells = 3 columns × 2 rows. Keys are stable strings so React
-        reconciliation stays predictable across re-renders. */}
-    <SkeletonItem className={cellClassName} data-testid="record-header-shell-skeleton-cell-0" />
-    <SkeletonItem className={cellClassName} data-testid="record-header-shell-skeleton-cell-1" />
-    <SkeletonItem className={cellClassName} data-testid="record-header-shell-skeleton-cell-2" />
-    <SkeletonItem className={cellClassName} data-testid="record-header-shell-skeleton-cell-3" />
-    <SkeletonItem className={cellClassName} data-testid="record-header-shell-skeleton-cell-4" />
-    <SkeletonItem className={cellClassName} data-testid="record-header-shell-skeleton-cell-5" />
-  </Skeleton>
-);
+const LoadingSkeleton: React.FC<{ className: string; cellClassName: string; columns: 2 | 3 }> = ({
+  className,
+  cellClassName,
+  columns,
+}) => {
+  const cellCount = columns * 2; // columns × 2 rows
+  const cellIndexes = Array.from({ length: cellCount }, (_, index) => index);
+
+  return (
+    <Skeleton className={className} aria-label="Loading record header" data-testid="record-header-shell-skeleton">
+      {cellIndexes.map(index => (
+        <SkeletonItem
+          key={index}
+          className={cellClassName}
+          data-testid={`record-header-shell-skeleton-cell-${index}`}
+        />
+      ))}
+    </Skeleton>
+  );
+};
 
 // ---------------------------------------------------------------------------
 // Component
@@ -155,10 +189,20 @@ const LoadingSkeleton: React.FC<{ className: string; cellClassName: string }> = 
  * );
  * ```
  */
-export const RecordHeaderShell: React.FC<IRecordHeaderShellProps> = ({ toolbar, loading, children, borderless }) => {
+export const RecordHeaderShell: React.FC<IRecordHeaderShellProps> = ({
+  toolbar,
+  loading,
+  children,
+  borderless,
+  columns,
+}) => {
   const styles = useStyles();
   const isLoading = loading === true;
   const containerClass = borderless === true ? styles.cardBorderless : styles.card;
+  // Only 2 opts in to the smaller skeleton; every other value (including
+  // undefined) resolves to the original 3-column default — backward compatible.
+  const resolvedColumns: 2 | 3 = columns === 2 ? 2 : 3;
+  const skeletonClassName = resolvedColumns === 2 ? styles.skeletonTwoColumn : styles.skeleton;
 
   return (
     <div
@@ -168,7 +212,15 @@ export const RecordHeaderShell: React.FC<IRecordHeaderShellProps> = ({ toolbar, 
     >
       <HeaderToolbar {...toolbar} />
       <div className={styles.body} data-testid="record-header-shell-body">
-        {isLoading ? <LoadingSkeleton className={styles.skeleton} cellClassName={styles.skeletonCell} /> : children}
+        {isLoading ? (
+          <LoadingSkeleton
+            className={skeletonClassName}
+            cellClassName={styles.skeletonCell}
+            columns={resolvedColumns}
+          />
+        ) : (
+          children
+        )}
       </div>
     </div>
   );

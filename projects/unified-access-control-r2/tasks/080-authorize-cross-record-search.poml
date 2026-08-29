@@ -1,0 +1,131 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="080" project="unified-access-control-r2">
+  <metadata>
+    <title>Restore cross-record search by authorizing the PAGE of results — scope=all stops being refused and starts being filtered</title>
+    <phase>0c Secure Documents — Wave 1 (added mid-wave)</phase>
+    <status>pending</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Re-opens a scope that was a live tenant-wide disclosure eight days ago. The filtering IS the security boundary; a bug here restores the original hole.</rigor-reason>
+    <model-tier>opus</model-tier>
+    <model-tier-reason>The failure mode is a plausible-looking wrong answer — a partially-filtered result set looks exactly like a correctly-filtered one. That needs judgement, not throughput.</model-tier-reason>
+    <effort>xhigh</effort>
+    <effort-reason>Must be correct under adversarial reading, and must also fix a second pre-existing defect (the code page never sends entityId) to be usable.</effort-reason>
+    <parallel-group>wave1</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Modifies the same filter and endpoint as task 070, and shares the surface with 077.</parallel-reason>
+    <deps>070</deps>
+    <tags>bff-api, api, auth, ai, security, react</tags>
+    <estimated-effort>6-8 hours</estimated-effort>
+    <origin>Owner decision 2026-08-26: **Spaarke DOES offer cross-record search.** Task 070 refused `scope=all` on the stated premise that "there is no caller that needs it" — which was FALSE and is corrected in `notes/task-070-gate-semantic-search.md` decision #1.</origin>
+  </metadata>
+
+  <prompt>Task 070 refused `scope=all` outright because its filter authorized nothing and the route leaked every document in the tenant. Refusing was right as a stop-gap and wrong as an end state: cross-record search is a capability Spaarke offers. Restore it by authorizing the page of results the caller is about to receive.</prompt>
+
+  <role>SPAARKE BFF security engineer. You are re-opening a scope that was a live disclosure. Assume a reviewer will try to prove your filtering is incomplete.</role>
+
+  <goal>`scope=all` returns results, and every returned row is one the caller could read directly. The SemanticSearch code page works end to end — including its entity-scoped rows, which are broken for a separate reason.</goal>
+
+  <context>
+    <background>WHAT IS BROKEN TODAY, and it is the WHOLE page, not one dropdown row.
+
+The SemanticSearch **code page** is an enterprise search screen. Its dropdown is populated from
+`sprk_aisearchindex` rows; `src/client/code-pages/SemanticSearch/src/services/targetEntityNormalize.ts`
+`buildSearchRequestFragment` (:103-123) maps the selected row to a scope:
+
+| Selection | Emits | Result after task 070 |
+|---|---|---|
+| The "All" row (`:109`) | `scope:'all'` | **403** — refused |
+| Any entity row (`:118-122`) | `scope:'entity'` + `entityType`, **no `entityId`** | **400** — entityId required |
+| A row with a blank label (`:114`) | `scope:'all'` (defensive default) | **403** |
+
+The missing `entityId` is a PRE-EXISTING defect, not something task 070 introduced — `entityId` only
+arrives as a URL parameter and `App.tsx:270-272` carries a TODO saying it is not plumbed into the search
+calls. Task 070 turned it from silent into a 400. Both halves must be fixed for the page to work.
+
+Also note `Models/Ai/SemanticSearch/SemanticSearchRequest.cs:29-32` documents `scope` as defaulting to
+`all` when omitted (e.g. Copilot API Plugin calls) — reconcile that doc with whatever you ship.
+
+THE APPROACH — authorize the PAGE, not the corpus.
+
+Do NOT try to enumerate the caller's accessible-record set and pre-filter the query. That path needs
+Dataverse's real answer for workforce principals, which is task **031**'s ADR-028 A2 amendment and has
+not landed; `AccessibleRecordSetService` today resolves ADR-034 membership, which is far narrower than
+what a user can actually read (see task 070 notes decision #4).
+
+Instead: run the search, then authorize the N rows about to be returned and drop what the caller cannot
+read. N is the page size (20-50), not the corpus. The checks are absorbed by `CachedAccessDataSource`.
+Task 070 already built both halves of this — `AuthorizeResults` in `SemanticSearchEndpoints` and the
+per-document authorization loop in `AuthorizeDocumentIdsScopeAsync`. This is composition, not invention.
+
+THE HARD PART, and it is why this is `xhigh`: **paging**. If you drop rows after fetching a page, the
+page shrinks and `totalResults` becomes a lie. A caller paging through 10 pages of 20 may see 7 usable
+pages with gaps. Decide deliberately between over-fetch-then-trim, cursor paging, or an honest
+"showing X of an unknown total" contract — and write down which and why. Do NOT silently return short
+pages while reporting a corpus total; task 070 already had to fix exactly that arithmetic (see the
+`Math.Min` → `total - dropped` correction).
+
+WHY THIS IS DELICATE. A partially-filtered result set is indistinguishable from a correctly-filtered one
+by inspection — it just looks like fewer results. That is precisely why task 070 chose refusal as the
+interim answer. The mitigation is adversarial testing, not caution.</background>
+    <relevant-files>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Api/Filters/SemanticSearchAuthorizationFilter.cs</file>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Api/Ai/SemanticSearchEndpoints.cs</file>
+      <file role="modify">src/client/code-pages/SemanticSearch/src/services/targetEntityNormalize.ts</file>
+      <file role="modify">src/client/code-pages/SemanticSearch/src/App.tsx</file>
+      <file role="reference">projects/unified-access-control-r2/notes/task-070-gate-semantic-search.md</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-003">Fail closed per ROW. A row whose owning record cannot be resolved is DROPPED, never included. An error mid-page denies the page rather than returning a partial one silently.</constraint>
+    <constraint source="project">Reuse task 070's result-level machinery and `GetCallerRecordAccessAsync`. Do NOT add a third access policy, and do NOT enumerate the accessible-record set (that is task 031's dependency).</constraint>
+    <constraint source="project">`totalResults` must not claim a number the caller cannot page to. State the paging contract explicitly in the notes and the response.</constraint>
+    <constraint source="performance">Bound the per-page authorization cost and record it. If N round trips per page is unacceptable, say so with a measurement rather than guessing.</constraint>
+    <constraint source="project">Fix the missing `entityId` on the code page's entity-scoped rows too — the page is not usable otherwise, and a half-fixed page gets the gate blamed.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/unified-access-control-r2/notes/task-070-gate-semantic-search.md</file>
+      <file>projects/unified-access-control-r2/SECURE-DOCUMENTS-BUILD-PLAN.md</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+    </files>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="0">Reproduce all three broken paths on the code page. Confirm the missing-entityId defect independently of the scope refusal.</step>
+    <step order="1">Decide and WRITE DOWN the paging contract before coding.</step>
+    <step order="2">Implement page-level authorization for `scope=all`, composing task 070's existing pieces.</step>
+    <step order="3">Fix the code page: supply `entityId` for entity-scoped rows; reconcile the blank-label default so a data-quality issue does not silently widen scope.</step>
+    <step order="4">ADVERSARIAL TESTS — this is the deliverable, not an afterthought. A caller who can read 3 of 50 matching documents gets exactly 3, across page boundaries, with an honest total. Include a test that FAILS if filtering is skipped on any single code path.</step>
+    <step order="5">Build, tests, publish size, CVE. Update task 070's notes decision #1 to point here.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If per-page authorization cannot meet an interactive latency budget, STOP and report the measurement. Reverting to refusal is preferable to shipping unfiltered results, and choosing between a slow search and no cross-record search is the owner's call.</trigger>
+  </escalation>
+
+  <justification>
+    <existing>Task 070 built result-level authorization (`AuthorizeResults`) and per-document authorization (`AuthorizeDocumentIdsScopeAsync`); `GetCallerRecordAccessAsync` answers the per-record question.</existing>
+    <extension>Composes those existing pieces for a scope that currently returns 403. No new component.</extension>
+    <cost-of-doing-nothing>The SemanticSearch code page stays broken in every dropdown state, and Spaarke ships without a capability the product offers. The alternative — reverting task 070 — reopens a proven tenant-wide document disclosure.</cost-of-doing-nothing>
+  </justification>
+
+  <outputs>
+    <output type="code">Page-level authorization for `scope=all`</output>
+    <output type="code">SemanticSearch code page: entityId supplied; blank-label default reconciled</output>
+    <output type="test">tests/ — adversarial filtering tests incl. cross-page correctness</output>
+    <output type="doc">notes — paging contract, per-page cost, why this cannot silently under-filter</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion>`scope=all` returns only rows the caller could read directly — proven by a test that fails if filtering is skipped on ANY code path.</criterion>
+    <criterion>Cross-page correctness: a caller entitled to 3 of 50 matches gets exactly 3, not 3-per-page or 3-then-gaps.</criterion>
+    <criterion>`totalResults` does not claim a number the caller cannot page to; the paging contract is written down.</criterion>
+    <criterion>The SemanticSearch code page works in all three dropdown states, including entity rows.</criterion>
+    <criterion>A blank config label does not silently widen scope to tenant-wide.</criterion>
+    <criterion>Per-page authorization cost measured and recorded.</criterion>
+  </acceptance-criteria>
+
+  <notes>Task 070 refused this scope on a premise that turned out to be false. The refusal bought safety while the real answer was designed; this task is that answer. Treat "it returns fewer results now" as the failure mode to hunt, because it is the one that looks like success.</notes>
+</task>

@@ -86,6 +86,55 @@ public sealed class CallerScopedAccessDataSource : IAccessDataSource
         });
     }
 
+    /// <summary>Calls received by <see cref="GetRecordAccessAsync"/> — kept separate from
+    /// <see cref="Calls"/> because this method carries an extra dimension (<c>entitySetName</c>) the
+    /// document-scoped method doesn't have. No test currently exercises this path; it exists so a
+    /// future entity-scoped permissions test can observe it rather than have the recorder silently
+    /// drop the call. Locked the same way as <see cref="Calls"/>, for the same reason (the endpoint
+    /// under test appends from request threads).</summary>
+    public List<(string UserId, string EntitySetName, Guid RecordId, string? UserAccessToken)> RecordCalls { get; } = new();
+
+    /// <summary>
+    /// Mirrors <see cref="GetUserAccessAsync"/> for the entity-agnostic path (unified-access-control-r2
+    /// task 070): same caller-token match against <see cref="WorkspaceTestConstants.TestBearerToken"/>,
+    /// same <see cref="ResourceRights"/> lookup (keyed on <paramref name="recordId"/>'s string form — the
+    /// seeded document ids are guid-shaped strings, so this reaches the same entries), and the same
+    /// <see cref="CallerScopedAccessTestFixture.ResolutionErrorDocumentId"/> sentinel.
+    /// </summary>
+    public Task<AccessSnapshot> GetRecordAccessAsync(
+        string userId,
+        string entitySetName,
+        Guid recordId,
+        string? userAccessToken,
+        CancellationToken ct = default)
+    {
+        lock (RecordCalls)
+        {
+            RecordCalls.Add((userId, entitySetName, recordId, userAccessToken));
+        }
+
+        var resourceId = recordId.ToString();
+
+        if (string.Equals(resourceId, CallerScopedAccessTestFixture.ResolutionErrorDocumentId, StringComparison.OrdinalIgnoreCase))
+        {
+            throw new InvalidOperationException("simulated Dataverse rights-resolution failure");
+        }
+
+        var callerMatches =
+            string.Equals(userAccessToken, WorkspaceTestConstants.TestBearerToken, StringComparison.Ordinal);
+
+        var rights = callerMatches && ResourceRights.TryGetValue(resourceId, out var granted)
+            ? granted
+            : AccessRights.None;
+
+        return Task.FromResult(new AccessSnapshot
+        {
+            UserId = userId,
+            ResourceId = resourceId,
+            AccessRights = rights
+        });
+    }
+
     /// <summary>Calls recorded for one resource, so assertions do not depend on test execution order.</summary>
     public IReadOnlyList<(string UserId, string ResourceId, string? UserAccessToken)> CallsFor(string resourceId)
     {

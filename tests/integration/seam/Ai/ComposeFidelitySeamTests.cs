@@ -583,7 +583,12 @@ public sealed class ComposeFidelitySeamTests : IClassFixture<ComposeFidelitySeam
 // mirrors the canonical Compose fixtures (bff-extensions.md §F.2 Fixture-Config-FIRST).
 // ════════════════════════════════════════════════════════════════════════════════════════════════
 
-public sealed class ComposeFidelitySeamFixture : WebApplicationFactory<Program>
+// NOT sealed — same reason as DocumentDestroyAuthorizationTestFixture / ExternalCollaborationTestFixture:
+// unified-access-control-r2 task 079 needed to add two more doubles (a document row + a stated-rights
+// IAccessDataSource) to reach the now-GATED document version routes, and extending this fixture is
+// strictly better than forking a second Compose seam host. Unsealing adds no registration and changes
+// no behaviour for existing consumers — every current test still resolves this exact type.
+public class ComposeFidelitySeamFixture : WebApplicationFactory<Program>
 {
     public const string TestTenantId = "tenant-compose-fidelity-seam-001";
 

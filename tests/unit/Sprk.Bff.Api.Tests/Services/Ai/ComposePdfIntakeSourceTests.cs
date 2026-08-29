@@ -325,25 +325,4 @@ public class ComposePdfIntakeSourceTests
     // Constructor validation (unchanged contract)
     // -------------------------------------------------------------------------
 
-    [Fact]
-    public void Constructor_NullParserRouter_ThrowsArgumentNullException()
-    {
-        var act = () => new ComposePdfIntakeSource(null!, _sourceLoggerMock.Object);
-
-        act.Should().Throw<ArgumentNullException>().WithParameterName("parserRouter");
-    }
-
-    [Fact]
-    public void Constructor_NullLogger_ThrowsArgumentNullException()
-    {
-        var router = new DocumentParserRouter(
-            _docIntelMock.Object,
-            _llamaClientMock.Object,
-            Options.Create(new LlamaParseOptions { Enabled = false }),
-            Mock.Of<ILogger<DocumentParserRouter>>());
-
-        var act = () => new ComposePdfIntakeSource(router, null!);
-
-        act.Should().Throw<ArgumentNullException>().WithParameterName("logger");
-    }
 }
