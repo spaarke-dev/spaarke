@@ -201,6 +201,29 @@ Ownership, established rather than assumed:
   failure — a different test (`StorageRetryPolicyTests`). So these likely pass in CI. **I did not
   confirm the cause**; do not treat "environmental" as established.
 
+> ### ✅ RESOLVED 2026-08-29 — it WAS the network, and the earlier refutation was incomplete
+>
+> Root cause: the test host held the REAL `DefaultAzureCredential` that `Program.cs` registers, so
+> the first request to an outbound-authenticating path probed **IMDS (169.254.169.254)** and blocked
+> until `HttpClient`'s 100-second default timeout. Proven, not inferred — a later instance of the
+> same hang surfaced the stack trace outright: `MsalServiceException:
+> managed_identity_unreachable_network` / `SocketException (10060) … 169.254.169.254:80`.
+>
+> **"Probably environmental" was right; the instinct to not call it confirmed was also right.** What
+> was missing was the decisive experiment, which was cheap: run a **passing sibling test alone**. It
+> then fails at ~100s too — so the subject of the test is irrelevant and the host is reaching the
+> network. `DefaultAzureCredential` caches which source answered, so only the FIRST caller in a host
+> pays; that is why the failing set rotated and why a test could pass in the suite and fail alone.
+>
+> It also explains why the `.invalid` probe **refuted** the network hypothesis here and should not
+> have been trusted: `.invalid` fails DNS instantly, while the real fixture hosts
+> (`test.crm.dynamics.com`, `login.microsoftonline.com`) resolve. A refutation is only as good as the
+> substitution it makes.
+>
+> Fixed at the fixture across all 52 `WebApplicationFactory<Program>` factories
+> (`services.UseStubTokenCredential()`), guarded by `TestHostCredentialGuardTests`. Full record:
+> [`test-host-credential-hang.md`](test-host-credential-hang.md).
+
 Impact on the measurement above: none material — 1,780 of 1,783 passed, and all three are endpoint
 contract tests, not the service-level tests that produce the coverage.
 

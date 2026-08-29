@@ -111,7 +111,7 @@ credential/HTTP timeout on the outbound auth path is worth sizing on its own mer
 
 ---
 
-# Addendum — `Spe.Integration.Tests`: 23 → 4, and why the last 4 are not a one-liner
+# Addendum — `Spe.Integration.Tests`: 23 → 0
 
 ## What was fixed (19 of 23)
 
@@ -172,3 +172,36 @@ to remove.
 
 `Spe.Integration.Tests` **405 pass / 4 fail / 65 skip**. Everything else green: BFF 11,619/0 ·
 ArchTests 150/150 · `Sprk.Bff.Api.IntegrationTests` 103/0 · solution build 0 errors.
+
+## Resolution — fix-path 1 implemented (owner-approved, not deferred)
+
+The last four are fixed at the cause. `UploadTestFixture` gained a **per-test session registry**
+(`SessionOwners`) replacing the two hard-coded session ids, and `CreateTestSession(tenantId)` mints
+**both** a session id and an owner oid per test, derived from a deterministic FNV-1a of the test
+name.
+
+Three constraints have to hold at once, and any two are easy — which is why the earlier attempt
+failed:
+
+| Constraint | Why | What breaks without it |
+|---|---|---|
+| oid STABLE across a test's requests | an Entra oid is stable per user per tenant; that is what makes it an ownership key | the original `Guid.NewGuid()` default → 404 under #863 |
+| oid DIFFERS between tests | `ai-upload` is a fixed 5 req/min window partitioned BY USER | one shared user → 429 from the sixth upload on |
+| session id DIFFERS between tests | `ChatSessionManager.GetSessionAsync` caches by `tenant + sessionId`, **not** by user | first test warms the cache with ITS owner; later tests denied from cache (the 4 → 7 attempt) |
+
+`SessionCleanup_DeletesUploadedDoc` moved onto its own session too: it ARCHIVES the session it uses,
+so a shared id would have left the archive flag set for whatever ran next.
+
+Two tests deliberately still use the shared constant, and the legacy ids stay pre-registered so that
+keeps working: `Upload_Returns401_WhenUnauthenticated` asserts the 401 that precedes any session
+lookup, so registering a session there would imply the route got further than it does.
+
+**`UploadIntegrationTests` 10 passed / 0 failed / 2 skipped.**
+
+### What this suite proves, and what it does not
+
+Caller and owner move together by construction, so these tests would NOT catch a broken ownership
+comparison — they exercise file-type and size validation. Ownership is covered by the eight
+dedicated tests (deny cases included) in `tests/integration/auth/Ai/SessionOwnershipTests.cs`. The
+alternative that was rejected — seeding the session owner to whoever happens to be asking — would
+have gone green while making the check vacuous here, which is the shape of the defect #863 removed.

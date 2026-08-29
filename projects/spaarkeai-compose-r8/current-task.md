@@ -10,10 +10,10 @@
 
 | Field | Value |
 |---|---|
-| **Active work** | Between tasks. **070 cluster 7** is next, once `Spe.Integration.Tests` (§A2) is settled. |
-| **Next Action** | **1) Triage the 23 `Spe.Integration.Tests` failures (§A2) — that project had not COMPILED, so it had not RUN, since the #863 sweep.** 2) Start 070 cluster 7 (§E). |
+| **Active work** | **070 cluster 7** (memory capture) — all test debt is closed. |
+| **Next Action** | **Start 070 cluster 7 (§E)** — extract memory capture from `ComposeService.cs`, then build + run the Compose seam/op-log suites before moving to cluster 6. |
 | **Branch** | `work/spaarkeai-compose-r8` · HEAD `b30f4edfa` · **synced with master** (was 152 behind) |
-| **Suite** | BFF **11,619 pass / 0 fail** · ArchTests **150/150** · `Sprk.Bff.Api.IntegrationTests` 103/0 · ⚠️ `Spe.Integration.Tests` **386 pass / 23 fail** |
+| **Suite** | ALL GREEN — BFF **11,619/0** · ArchTests **150/150** · `Sprk.Bff.Api.IntegrationTests` **103/0** · `Spe.Integration.Tests` **409/0** |
 | **Verify with** | **`dotnet build`** at the SOLUTION root — not one project (see §A2 for why that distinction cost real time) |
 
 ---
@@ -35,95 +35,36 @@ The recorded `SessionOwnershipFilter` hypothesis was **wrong** and could never h
 `ScopePersonas`, a route with no session. Fixed at the fixture (§F.2), all 52 factories, guarded by
 `TestHostCredentialGuardTests`. Full write-up: [`notes/test-host-credential-hang.md`](notes/test-host-credential-hang.md).
 
-## A2. OPEN — `Spe.Integration.Tests`: 23 failures, first visible today
+## A2. CLOSED — `Spe.Integration.Tests`: 23 → 0
 
-That project **had not compiled since the #863 sweep** (shared helpers were wired into
-`Sprk.Bff.Api.Tests.csproj` only, while the sweep edited all of `tests/**`). Not compiling means
-not running, so these 23 are surfacing now rather than newly broken. The compile break is fixed
-(shared helpers LINKED into the three projects that needed them).
+That project **had not compiled since the #863 sweep**, so it had not run either; the 23 surfaced
+when the compile break was fixed (shared helpers are now LINKED into the three projects that needed
+them, not copied). Three causes, all fixture defects, none requiring an assertion to be relaxed:
 
-**Do not assume these are #863's doing, and do not assume they are not.** The honest next step is to
-read the failure names and classify each. `dotnet test tests/integration/Spe.Integration.Tests/`.
+- **18** — the caller had a RANDOM identity. `CreateAuthenticatedClient(…, userId = null)` defaulted
+  to `Guid.NewGuid()`, so every request arrived as a different user. These suites had always been
+  running "created by one user, read by another"; nothing noticed until #863 checked.
+- **4** — `ai-upload` is a fixed **5 req/min partitioned BY USER** and the upload suite issues ~10.
+  Those tests had only ever passed *because* the identity was broken — each got its own partition.
+  Fixed by a per-test session registry: `CreateTestSession()` mints BOTH a session id and an owner
+  per test. Both halves are required — `ChatSessionManager` caches by `tenant + sessionId` and NOT
+  by user, so per-test oids alone made it worse (4 → 7, all 404).
+- **1** — the credential hang again, this time with the stack trace naming it outright
+  (`managed_identity_unreachable_network`, `169.254.169.254:80`).
 
-**Practice change that matters more than the bug**: a green
-`dotnet test tests/unit/Sprk.Bff.Api.Tests/` says nothing about the other projects. CI runs
-`dotnet test` at the SOLUTION level. Verify the same way.
+Full record incl. the rejected option: [`notes/test-host-credential-hang.md`](notes/test-host-credential-hang.md).
+
+**Practice change that outlives the bug**: verify with a SOLUTION-level `dotnet build`. A green
+`dotnet test tests/unit/Sprk.Bff.Api.Tests/` said nothing about the other projects, and that is how
+a non-compiling project stayed invisible.
 
 ---
 
-## A. The 5 ArchTest failures — FIX PATH: sync the branch. Nothing is orphaned.
-
-Established by evidence, not assumption:
-
-```
-847 merged to master: YES   (90c45315e)
-847 in our branch:    NO
-behind master by:     152 commits
-master ceiling: knownOneToOneCeiling = 156
-ours   ceiling: knownOneToOneCeiling = 153
-```
-
-PR #847 — the #839 adjudications (ADR-010 ceiling 153→156, the secret-shape guard rewrite, the
-ServiceBus canonical-construction-sites change) — **is already merged to master**. This branch
-predates it. The five failures are `ADR010_DITests` (ceiling), `CosmosProvisioningSecretGuard`
-(FR-27, firing on *another worktree's* `Sprk.Provisioning.ControlPlane` POCOs),
-`CredentialCensus`/`CredentialGuard` (FR-F1/F2), and `ServiceBusClientGuard`. Every one was
-adjudicated in #847.
-
-**Action**: `git merge origin/master` as the FIRST step next session; re-run ArchTests, expect
-128/128. **Do NOT hand-edit the ceiling here** — that forks a value #847 already owns, which is
-exactly how a ratchet stops meaning anything.
-
-**Merge risk**: those 152 commits include `unified-access-control-r2` work inside `ComposeService.cs`
-(#858) and their `CallerIdentityGuardTests` allowlist. Run `/conflict-check` first, per the standing
-Compose-spine rule.
-
-## B. The 3 remaining BFF failures — ONE symptom, hypothesis NOT confirmed
-
-| Test | Duration |
-|---|---|
-| `ChatRefineEndpointTests.Refine_WithAuth_ReachesTheHandler` | ~2m07 |
-| `ComposeSupersedeEndpointContractTests.Supersede_WhenSessionUnknown_Returns404` | ~2m07 |
-| `ComposeCreateOnSaveEndpointContractTests.CreateOnSave_WhenSpeCreateSucceeds_Returns200…` | timeout |
-
-They are **not three assertion problems — they are one timeout**; the shared ~2m07 is the evidence
-(`TaskCanceledException` / "the client aborted the request").
-
-**Hypothesis — record it, do NOT treat it as diagnosed**: `SessionOwnershipFilter` loads the session
-*before* the handler, so for a session that does not exist `GetSessionAsync` walks Redis → Cosmos →
-Dataverse. In these minimal hosts one tier may be reaching a real network with a long timeout. It
-fits: all three are routes where the session is deliberately absent.
-
-**Two prior data points that must inform this rather than be re-derived:**
-
-- The same ~2-minute shape appeared as **F-070-01** (3 contract tests hanging). A network-timeout
-  hypothesis was **REFUTED** there by an `.invalid` probe — but `test.servicebus.windows.net` was
-  never substituted, so that refutation is *incomplete*, not final.
-- `ChatRefine`'s assertion was separately wrong and is now fixed (it asserted the body echoes the
-  session id, contradicting the ADR-019 rule the dispatch suite pins — two suites asserting opposite
-  things about the same convention). That fix is right on its own merits and is **not** why the test
-  fails now.
-
-**First move**: force the Cosmos/Dataverse doubles to fail fast, or instrument `GetSessionAsync`
-tier-by-tier. Cheap and decisive — do that before touching the filter.
-
-**Production observation this surfaced — measure it, do not assume it is fine**: every session-scoped
-request now performs **two** session lookups (filter, then handler). A Redis hit makes the second
-nearly free; on a miss it is two cold three-tier walks. Fix if it matters: stash the resolved session
-in `HttpContext.Items` for the handler to reuse.
-
-## C. The 2 pre-existing failures — PROVEN unrelated, still NOT dropped
-
-`ScopePersonasEndpointTests.GetPersonas_AcceptsNameFilterParameter` ·
-`SpeAdmin.SearchItemsTests.SearchItems_WithToken_ValidConfigIdNotFound_Returns400`
-
-**Verified, not assumed**: stashed every change on this branch, re-ran both, both still fail. Neither
-touches a session-scoped route.
-
-"Not ours" is an ownership answer, not a disposition. **Fix path**: re-check after the master sync
-(§A) — 152 commits may already carry the fix, exactly as they do for the ArchTests. If they still
-fail on a synced branch, **file them** so they are visible, and cite them at 090. Do not merge with
-them silently red.
+> Sections A/B/C (the 2026-08-28 fix plan for the ten failures) were DELETED on 2026-08-29:
+> A1/A2 above supersede them, and two of their conclusions are now known wrong — the
+> `SessionOwnershipFilter` timeout hypothesis (§B) and "pre-existing, unrelated" (§C) were
+> both the credential defect. Leaving them would let a future reader act on a refuted
+> diagnosis. The reasoning is preserved in `notes/test-host-credential-hang.md`.
 
 ## D. Where #863 stands
 
