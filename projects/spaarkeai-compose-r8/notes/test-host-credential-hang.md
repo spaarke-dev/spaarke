@@ -108,3 +108,67 @@ The stub removes the hang, but the underlying question stands: **should a BFF re
 100 seconds when its credential source is unreachable?** In production the IMDS probe normally
 succeeds, so this is not evidence of a live outage — but nothing observed here bounds that call. A
 credential/HTTP timeout on the outbound auth path is worth sizing on its own merits.
+
+---
+
+# Addendum — `Spe.Integration.Tests`: 23 → 4, and why the last 4 are not a one-liner
+
+## What was fixed (19 of 23)
+
+**18 were a random caller identity.** `CreateAuthenticatedClient(tenantId, userId = null)`
+defaulted to `Guid.NewGuid()` — a fresh Entra `oid` per client. Entra never does that; an `oid` is
+stable per user per tenant, and that stability is the entire property that makes it an ownership
+key. These suites had **always** been running "session created by one user, read by another" on
+every call; nothing noticed while nothing checked ownership. #863 added the check and the fixture
+defect became visible. Defaulted to `IntegrationTestConstants.TestUserId` across 7 files.
+
+> My first attempt at this was wrong and cost a full cycle: I corrected the seeded **owner** while
+> the **caller** stayed random. Fixing one side of an equality and re-running is not a diagnosis.
+
+**1 was the credential hang**, with a stack trace instead of an inference —
+`managed_identity_unreachable_network`, `SocketException 10060` on `169.254.169.254:80`.
+
+## The remaining 4 — `UploadIntegrationTests` (Docx / Pdf / Txt / RejectsExe)
+
+All four answer **429**, not a wrong status. Cause is exact and not in doubt:
+
+- `POST /api/ai/chat/sessions/{sessionId}/documents` carries `RequireRateLimiting("ai-upload")`
+- `ai-upload` = **fixed window, 5 requests / minute, partitioned BY USER**, `QueueLimit = 0`
+- this class issues **~10** uploads
+
+**These tests only ever passed because the identity was broken.** A random `oid` per client gave
+every test its own rate-limit partition. Making the identity honest merged them into one bucket, so
+the sixth upload onward is throttled. Fixing the real defect exposed a second one it had been
+masking — that is the finding, not a regression to undo.
+
+### What I tried, and why it failed (recorded so nobody repeats it)
+
+Per-**test** stable identity (stable within a test → ownership holds; distinct across tests → own
+bucket). It made things worse — 4 failures became 7, all 404. Reason:
+**`ChatSessionManager.GetSessionAsync` caches by `tenant + sessionId`, NOT by user.** All these
+tests share one session id, so the first test warms the cache with its own owner and every later
+test is denied. Per-test identity therefore requires a per-test **session id** as well, and the
+fixture's mock only recognises two fixed ids. Reverted; the tree is at the 4-failure state.
+
+### Fix-path (pick one — none is a hack, all are bounded)
+
+1. **Per-test session id + per-test identity** *(recommended)*. Extend the fixture mock from two
+   hard-coded session ids to a per-test registry, then mint both id and owner per test. Fixes the
+   cause rather than the symptom, and removes the shared-cache coupling that made attempt (1) fail.
+   Largest edit, entirely inside the fixture.
+2. **Make rate limits configurable and disable them in test hosts.** `RateLimitingModule` currently
+   hardcodes every limit with no switch; the fixture already sets `OfficeRateLimit:Enabled=false`,
+   so the precedent exists. This is a **production** DI change (BFF §10 placement justification) and
+   is defensible on its own merits — per-environment tunable limits — but it is not a test fix and
+   should not be smuggled in as one.
+3. **Keep the suite under 5 uploads per user per minute.** Honest but fragile: it makes an unrelated
+   limit a standing constraint on how many cases this suite may contain.
+
+**Not acceptable**: seeding the session owner to whoever happens to be asking. It would go green
+while making the ownership check vacuous in this suite — the exact shape of the defect #863 existed
+to remove.
+
+### Standing state
+
+`Spe.Integration.Tests` **405 pass / 4 fail / 65 skip**. Everything else green: BFF 11,619/0 ·
+ArchTests 150/150 · `Sprk.Bff.Api.IntegrationTests` 103/0 · solution build 0 errors.
