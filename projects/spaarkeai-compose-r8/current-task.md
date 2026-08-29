@@ -1,7 +1,8 @@
 # Current Task State — `spaarkeai-compose-r8`
 
-> **Last Updated**: 2026-08-29
-> **Recovery**: read Quick Recovery. **#863 code-complete. Master synced. All 10 prior failures fixed.**
+> **Last Updated**: 2026-08-29 (by `context-handoff`)
+> **Recovery**: read Quick Recovery, then §S for what this session did.
+> **#863 code-complete · master synced · ALL suites green · 070 clusters 7/6/5b/8 extracted.**
 > Everything below "Full State" is preserved history from earlier checkpoints.
 
 ---
@@ -12,9 +13,70 @@
 |---|---|
 | **Active work** | **070 decomposition** — clusters **7 · 6 · 5b · 8** extracted & verified. **Cluster 1 is next available** (2b/2a are HELD). |
 | **Next Action** | **Cluster 1 (re-anchor / stale-base)** — the executable spec is in the seam map. Treat it with more care than the first four: **76.6% branch** (they were 87–96%) and ~470 LOC over five members, so seed **several** mutations across different members, not one. Then 3 → 4 → 5a; 2b/2a only after UAC-r2 replies on #858. |
-| **Branch** | `work/spaarkeai-compose-r8` · **synced with master** · `ComposeService.cs` 4,427 → **3,975** |
+| **Branch** | `work/spaarkeai-compose-r8` · HEAD `2c056c3ca` · clean · **synced with master** · `ComposeService.cs` 4,427 → **3,975** |
 | **Suite** | ALL GREEN — BFF **11,619/0** · ArchTests **150/150** · `Sprk.Bff.Api.IntegrationTests` **103/0** · `Spe.Integration.Tests` **409/0** |
 | **Verify with** | **`dotnet build`** at the SOLUTION root — not one project (see §A2 for why that distinction cost real time) |
+
+---
+
+## S. This session (2026-08-29) — 10 commits, tree clean
+
+### What changed, in order
+
+1. **Merged `origin/master`** (152 behind, zero conflicts). Verified PR #847 was already on master
+   rather than orphaned; did NOT hand-edit the ADR-010 ceiling.
+2. **Classified 8 Compose endpoint files** into the `RouteAuthorizationGuardTests` census after the
+   070 split — one entry each, deliberately not a `StartsWith("Api/Compose")` prefix rule.
+3. **Fixed the credential hang** (`UseStubTokenCredential` across all 52 factories) + guard.
+4. **Repaired `Spe.Integration.Tests` 23 → 0** (compile break, random caller identity, per-test
+   session registry).
+5. **Extracted 070 clusters 7 · 6 · 5b · 8**, each verified by mutation before being called done.
+
+### Files created this session
+
+| File | Why |
+|---|---|
+| `tests/integration/Shared/TestTokenCredential.cs` | stub credential + `UseStubTokenCredential()`; carries the full diagnosis |
+| `tests/Spaarke.ArchTests/TestHostCredentialGuardTests.cs` | fails the build if a factory omits the stub |
+| `src/…/Services/Compose/ComposeMemoryCapturer.cs` | cluster 7 |
+| `src/…/Services/Compose/ComposeAnnotationStore.cs` | cluster 6 |
+| `src/…/Services/Compose/ComposeProfileDispatcher.cs` | cluster 5b (owns the 4 step signals) |
+| `src/…/Services/Compose/ComposeReferenceMapping.cs` | cluster 8 (static — pure functions) |
+| `projects/…/notes/test-host-credential-hang.md` | the credential defect, end to end |
+
+Modified: `ComposeService.cs` · `RouteAuthorizationGuardTests.cs` · `CustomWebAppFactory.cs` ·
+`IntegrationTestFixture.cs` · `UploadIntegrationTests.cs` · 3 csproj files (link
+`tests/integration/Shared/**`) · 7 `Spe.Integration.Tests` suites (stable caller identity) ·
+`070-composeservice-seam-map.md`.
+
+### Decisions taken this session (owner-approved where noted)
+
+| Decision | Rationale |
+|---|---|
+| Fix the credential at the FIXTURE, not production | §F.2 Fixture-Config-FIRST — a real credential in a test host is a non-contract value. No assertion relaxed, no production change. |
+| **Signal factories move with cluster 5b; 3 outside callers follow** *(owner)* | Calling back into `ComposeService` from the collaborator would be circular; the signals describe the steps they moved with. |
+| **`IndexingSignal` stays in cluster 5** *(owner)* | Cluster 5's reason-to-change ("when a document gets (re)indexed") covers it; splitting a set of 4 step signals reads worse. |
+| Cluster 8 as a `static` class | Pure functions, no state or deps — a ctor + field would be ceremony. |
+| Public `IComposeService` members STAY on the service | Only the policy moves; relocating an interface impl would change what `ComposeService` *is*. Applies again at clusters 2 and 3. |
+| Per-test session id **and** owner in the upload fixture | Three constraints at once; see §A2. Any two are easy, which is why the first attempt failed. |
+
+### Two things I got wrong, corrected — do not re-derive
+
+- The recorded **`SessionOwnershipFilter` timeout hypothesis was wrong.** It could never have
+  explained `ScopePersonas`, a route with no session. The cause was the credential.
+- **Seeding the owner while the caller stayed random** was a non-fix. Fixing one side of an equality
+  and re-running is not a diagnosis; it cost a full 7-minute cycle.
+
+### The verification recipe that actually works here
+
+```
+dotnet build                                                   # SOLUTION root, not one project
+dotnet test tests/unit/Sprk.Bff.Api.Tests/ --filter "…~Compose" # 1,790 — after EACH extraction
+dotnet test tests/Spaarke.ArchTests/…                           # 150
+git diff --stat src/…/Program.cs src/…/Infrastructure/DI/       # MUST be empty (ADR-010)
+```
+Plus a **seeded mutation** per extraction: if the fault survives, the suite does not traverse the
+moved code — that is a coverage statement, not a licence to proceed (learned on cluster 7).
 
 ---
 
