@@ -183,13 +183,19 @@ numbers — the bias is conservative, which is the safe direction for this decis
 Order follows the coverage evidence (**7 → 6 → 5b → 8 → 2b → 2a → 1 → 3 → 4 → 5a**), not the
 structural order this file originally proposed.
 
-| Cluster | Status | New file | Verification |
+| Cluster | Status | New file | Mutation used to prove non-vacuity |
 |---|---|---|---|
-| 7 memory capture | ✅ extracted | `ComposeMemoryCapturer.cs` | Compose 1,790/1,790 · mutation red→green · ArchTests 150/150 |
-| 6 annotations | ✅ extracted | `ComposeAnnotationStore.cs` | Compose 1,790/1,790 · mutation red→green · ArchTests 150/150 |
-| 5b background profile | ⏸ analysed, not moved | — | see the entanglement note below |
+| 7 memory capture | ✅ extracted | `ComposeMemoryCapturer.cs` | `FactType` → `"SEEDED-MUTATION"` → 1/16 red |
+| 6 annotations | ✅ extracted | `ComposeAnnotationStore.cs` | `LedgerRefPattern` → `@".*"` → 1/7 red |
+| 5b profile + step signals | ✅ extracted | `ComposeProfileDispatcher.cs` | `if (result.JobSubmitted)` → `if (!…)` → 8/16 red |
+| 8 reference/paraId helpers | ✅ extracted | `ComposeReferenceMapping.cs` | off-by-one in `ResolveParaIdForHint` → 4 red |
+| 2b + 2a create-on-save | ⛔ **HELD** | — | `unified-access-control-r2` owns #858 inside this file |
+| 1 re-anchor | ▶ **next available** | — | executable spec already in this file (§ below) |
 
-`ComposeService.cs`: 4,427 → **4,258** lines. Stated as an observation; the target is cohesion, not a
+Every extraction: Compose suite **1,790/1,790**, ArchTests **150/150**, build 0/0, and the DI diff
+(`Program.cs` + `Infrastructure/DI/`) **empty** — ADR-010 holds by construction, not by assertion.
+
+`ComposeService.cs`: 4,427 → **3,975** lines. Stated as an observation; the target is cohesion, not a
 number (CLAUDE.md §11.5).
 
 **Mechanism held for both**: `internal sealed` collaborator, constructed in the `ComposeService` ctor
@@ -217,21 +223,40 @@ The lesson generalises to the remaining clusters: **pick the mutation target and
 and if the seeded fault survives, the suite you chose does not traverse the moved code — that is a
 statement about coverage, not a licence to move on.
 
-### Cluster 5b — analysed, and it is NOT as clean as 7 or 6
+### Cluster 5b — the two open questions, and how they were decided
 
 Members: `DispatchBackgroundProfile` · `RunBackgroundProfileAsync` · `IndexingSignal`.
-Dependencies are fine (`_scopeFactory`, `_documentProfileAi`, `_appLifetime`, `_logger`). Two things
-must be decided BEFORE moving code, which is why this stopped at analysis:
+Dependencies were fine (`_scopeFactory`, `_documentProfileAi`, `_appLifetime`, `_logger`). Two things
+had to be decided before moving code. **Both were decided by the owner on 2026-08-29 and are now
+implemented** — recorded here so the reasoning survives the commit log:
 
 1. **`ProfileNotAttemptedSignal` has three callers outside the cluster** (≈1867, 3576, 3851 — the
    save path and two failure projections). It cannot simply travel with the dispatcher. Either it
    stays on `ComposeService` and the collaborator calls back into it (a circular smell), or the
    profile-signal factories move to the collaborator as `internal static` and the three outside
-   callers reference them there. The second is preferable — the signals describe the profile step —
-   but it is a real choice, not a mechanical move.
+   callers reference them there. **DECIDED: the factories move; the three callers follow.** Calling
+   back into `ComposeService` from the collaborator would make the dependency circular for no
+   benefit, and the signals describe the profile/indexing steps, so they belong with the code that
+   owns them.
 2. **`IndexingSignal` is grouped here but is about INDEXING, not the background profile.** Its single
    caller is the save path (≈1905). Suggest leaving it on `ComposeService` and recording the
    deviation from this map, rather than moving it because a table said cluster 5.
+
+### Cluster 1 is next — and it is the first one that deserves caution
+
+Everything extracted so far sat at **87–96% branch**. Cluster 1 is **76.6%**, the weakest of the
+early group, and at ~470 LOC across five members it is also the largest single move attempted. The
+executable extraction spec below still stands; what changes is the verification burden:
+
+- the mutation-target choice matters more here than anywhere so far — at 76.6% branch, a seeded
+  fault surviving is genuinely likely, and (per the cluster-7 lesson) that is a statement about
+  coverage, **not** a licence to proceed;
+- consider seeding **more than one** mutation across different members, since a single green from
+  one member says nothing about the other four.
+
+Clusters **2b and 2a remain HELD** — `unified-access-control-r2` owns the #858 create-on-save
+container fix inside this file, confirmed still open with no reply as of 2026-08-29. Extracting that
+cluster would land their patch against line numbers that no longer exist.
 
 ## Findings recorded, not fixed
 
