@@ -1,7 +1,7 @@
 # Current Task State — `spaarkeai-compose-r8`
 
-> **Last Updated**: 2026-08-28 (by `context-handoff`)
-> **Recovery**: read Quick Recovery. **#863 (session ownership) is code-complete.**
+> **Last Updated**: 2026-08-29
+> **Recovery**: read Quick Recovery. **#863 code-complete. Master synced. All 10 prior failures fixed.**
 > Everything below "Full State" is preserved history from earlier checkpoints.
 
 ---
@@ -10,11 +10,44 @@
 
 | Field | Value |
 |---|---|
-| **Active work** | Between tasks. #863 code-complete; **070 cluster 7** is next. |
-| **Next Action** | **1) Sync with `origin/master` (152 behind) — this ALONE fixes all 5 ArchTest failures.** 2) Diagnose the 3 timeouts (§B). 3) Start 070 cluster 7 (§E). |
-| **Branch** | `work/spaarkeai-compose-r8` · clean · HEAD `9834cdaf4` · **152 behind master** |
-| **Suite** | BFF **11,465 pass / 3 fail** (was 85 failing) · ArchTests 123/128 — **all 5 are staleness, not defects** |
-| **Verify with** | `dotnet build src/server/api/Sprk.Bff.Api/` + `dotnet test tests/unit/Sprk.Bff.Api.Tests/` |
+| **Active work** | Between tasks. **070 cluster 7** is next, once `Spe.Integration.Tests` (§A2) is settled. |
+| **Next Action** | **1) Triage the 23 `Spe.Integration.Tests` failures (§A2) — that project had not COMPILED, so it had not RUN, since the #863 sweep.** 2) Start 070 cluster 7 (§E). |
+| **Branch** | `work/spaarkeai-compose-r8` · HEAD `b30f4edfa` · **synced with master** (was 152 behind) |
+| **Suite** | BFF **11,619 pass / 0 fail** · ArchTests **150/150** · `Sprk.Bff.Api.IntegrationTests` 103/0 · ⚠️ `Spe.Integration.Tests` **386 pass / 23 fail** |
+| **Verify with** | **`dotnet build`** at the SOLUTION root — not one project (see §A2 for why that distinction cost real time) |
+
+---
+
+## A1. RESOLVED — the ten failures were two causes, not three
+
+**The 5 ArchTests**: branch staleness, as predicted. `git merge origin/master` — zero conflicts.
+Master's census guard then fired correctly on task 070's split of `ComposeEndpoints.cs` into eight
+files; all eight are now classified in `GovernedFiles` (one entry each, deliberately not a
+`StartsWith("Api/Compose")` prefix rule, which would absorb the ninth file silently too).
+
+**The other 5 were ONE defect** — and not the one recorded here yesterday. Every failure lasted
+**~100s**, which is `HttpClient`'s default timeout, i.e. a hang. Test hosts held the REAL
+`DefaultAzureCredential` from `Program.cs`, so the first request to an outbound-authenticating path
+probed IMDS and blocked. The credential caches its answer, so only the FIRST caller paid — hence
+rotating victims, uniform ~100s, and a test that passes in the suite but fails alone.
+
+The recorded `SessionOwnershipFilter` hypothesis was **wrong** and could never have explained
+`ScopePersonas`, a route with no session. Fixed at the fixture (§F.2), all 52 factories, guarded by
+`TestHostCredentialGuardTests`. Full write-up: [`notes/test-host-credential-hang.md`](notes/test-host-credential-hang.md).
+
+## A2. OPEN — `Spe.Integration.Tests`: 23 failures, first visible today
+
+That project **had not compiled since the #863 sweep** (shared helpers were wired into
+`Sprk.Bff.Api.Tests.csproj` only, while the sweep edited all of `tests/**`). Not compiling means
+not running, so these 23 are surfacing now rather than newly broken. The compile break is fixed
+(shared helpers LINKED into the three projects that needed them).
+
+**Do not assume these are #863's doing, and do not assume they are not.** The honest next step is to
+read the failure names and classify each. `dotnet test tests/integration/Spe.Integration.Tests/`.
+
+**Practice change that matters more than the bug**: a green
+`dotnet test tests/unit/Sprk.Bff.Api.Tests/` says nothing about the other projects. CI runs
+`dotnet test` at the SOLUTION level. Verify the same way.
 
 ---
 
