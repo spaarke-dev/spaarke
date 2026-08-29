@@ -2,6 +2,7 @@ using System.Net;
 using System.Net.Http.Headers;
 using System.Net.Http.Json;
 using FluentAssertions;
+using Sprk.Bff.Api.Api.Filters;
 using Microsoft.Extensions.AI;
 using Moq;
 using Sprk.Bff.Api.Api.Ai;
@@ -115,11 +116,23 @@ public class ChatRefineEndpointTests : IClassFixture<CustomWebAppFactory>
         // Act
         var response = await _client.PostAsync($"/api/ai/chat/sessions/{sessionId}/refine", content);
 
-        // Assert — the route is mapped and the handler ran: it answered about THIS session by id,
-        // which the routing layer's empty 404 could not do.
+        // Assert — the route is mapped and the session-scoped pipeline ran, which the routing
+        // layer's empty 404 could not produce.
+        //
+        // Issue #863: this used to assert the body ECHOES the session id. That directly
+        // contradicted DispatchSessionEndpointContractTests, which forbids echoing identifiers in
+        // error detail strings (ADR-019) — two suites asserting opposite things about the same
+        // convention, which is how the convention stops meaning anything. Resolved in favour of NOT
+        // echoing: on a session route an echoed id also hands the caller confirmation of the very
+        // id they probed with. The stable errorCode carries the same proof the echo did — routing's
+        // bare 404 has no body at all — without the disclosure.
         var body = await response.Content.ReadAsStringAsync();
-        body.Should().Contain(sessionId, "the handler echoes the session id it could not find");
-        body.Should().Contain("not found");
+        response.StatusCode.Should().Be(HttpStatusCode.NotFound);
+        body.Should().Contain(SessionOwnershipFilterExtensions.NotFoundOrNotOwnedErrorCode,
+            "a ProblemDetails with the session pipeline's stable errorCode proves the request "
+            + "reached that pipeline; an unmapped route answers with an empty body");
+        body.Should().NotContain(sessionId,
+            "ADR-019: do not echo identifiers in error detail strings");
     }
 
 }
