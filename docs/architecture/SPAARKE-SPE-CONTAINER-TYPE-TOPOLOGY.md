@@ -106,6 +106,98 @@ If a Model 1 customer needs different sharing or retention behaviour, the answer
 
 ---
 
+## 3A. App registration topology
+
+### The two roles — conflating them is the trap
+
+| Role | Cardinality | Mutable? | Purpose |
+|---|---|---|---|
+| **Owning app** | **1:1 with the container type** | ❌ **Permanent** | Satisfies R1. Holds full access by default. For Model 2, this is the identity consuming tenants grant admin consent to |
+| **Registered app** | **N per registration** | ✅ Grant / revoke | Actually does the work — creates containers, reads and writes files. Needs no ownership |
+
+`scripts/Create-NewContainerType.ps1` only ever registers the owning app, which makes these look like
+one thing. They are not. Ownership is immutable and capped; **access is an ordinary, revocable grant**.
+
+### 🔴 The BFF app registration MUST be separate from the owning app
+
+This is the single most consequential decision on this page.
+
+**If the BFF app registration is also the owning app, container-type cardinality infects the BFF —
+and runs backwards into the 25-cap.** Every Model 2 customer needing its own BFF identity would then
+need **its own container type**, hitting the 25-customer wall permanently, with no way to reclaim a
+slot (R3).
+
+Separating them is what makes Model 2 scale: **customer growth costs app registrations — free and
+unlimited — instead of container types, which are capped and undeletable.**
+
+Three further reasons, all pointing the same way:
+
+- **Immutability.** The owning-app binding can never be changed (R1). Merged, the BFF app registration
+  could never be rotated or retired — it would be welded to a container type that also cannot be
+  deleted. Compromise, tenant migration, or a rebrand all become unsolvable.
+- **Consent surface.** Model 2 customers consent to the *owning* app. Merged, they are consenting to
+  something that also carries the BFF's API scopes, redirect URIs, and Dataverse/Mail permissions.
+- **Auth v4.** The BFF identity is deliberately secret-free ([ADR-028](../../.claude/adr/ADR-028-spaarke-auth-architecture.md) A4).
+  Owning apps are exception **E-1** and may carry secrets. Merging drags that exception back onto the
+  identity auth-v4 worked to clean.
+
+> ⚠️ **The existing app is the merged shape.** `170c98e1…` is named **`SDAP-PCF-CLIENT`** while being
+> the container type's owning app. That is the artifact to unwind, not the pattern to extend — and
+> because the binding is permanent, it is also a permanent misnaming.
+
+### BFF instances vs BFF app registrations
+
+They are different things and need not match:
+
+- **BFF instance** = a deployed App Service. **Necessarily per-environment** — that is what a dedicated
+  environment means.
+- **BFF app registration** = an Entra identity. Several instances *can* share one.
+
+For **Model 2, do not share one registration across customers.** Isolation is Model 2's premise, and a
+shared registration means a shared token audience — a token minted for Customer A's BFF is
+structurally valid at Customer B's.
+
+### The registration set
+
+| # | App registration | Purpose | Cardinality |
+|---|---|---|---|
+| 1 | `Spaarke SPE Trial 1 Owner` | Owns container type `Spaarke Trial 1` | 1 — fixed by R1 |
+| 2 | `Spaarke SPE Model 1 Owner` | Owns `Spaarke Model 1` | 1 — fixed by R1 |
+| 3 | `Spaarke SPE Model 2 Owner` | Owns `Spaarke Model 2`. **Multi-tenant** — customers consent to this | 1 — fixed by R1 |
+| 4 | `Spaarke BFF — Trial 1` | BFF identity, trial environment | 1 |
+| 5 | `Spaarke BFF — Model 1` | BFF identity, shared Model 1 environment | 1 |
+| 6…n | `Spaarke BFF — {Customer}` | BFF identity per Model 2 customer | **1 per customer** |
+
+Ten Model 2 customers ⇒ 15 app registrations and still **4 of 25 container types**. That ratio is the
+point of the split.
+
+### How a BFF gets container access without owning anything — VERIFIED
+
+**Permission grants are per consuming tenant, not global to the container type.** Confirmed against the
+Graph beta CSDL 2026-08-30:
+
+```
+fileStorageContainerTypeRegistration
+  ├─ owningAppId, billingClassification, registeredDateTime
+  ├─ settings                       ← the consuming-tenant OVERRIDE surface
+  └─ applicationPermissionGrants    → Collection(fileStorageContainerTypeAppPermissionGrant)
+                                        └─ keyed by appId
+                                           ├─ applicationPermissions   (app-only)
+                                           └─ delegatedPermissions
+```
+
+The grants hang off the **registration** — the container type *as registered in one tenant* — and are
+keyed by `appId`. So each Model 2 customer's registration carries **its own** grants, listing only that
+customer's BFF app. One customer's grant list is invisible to and independent of another's.
+
+This also confirms the Model 1 / Model 2 asymmetry in §3: `fileStorageContainerTypeRegistration.settings`
+is a distinct property from `fileStorageContainerType.settings` — that is the per-consuming-tenant
+override surface, which Model 1 (single tenant, single registration) does not get.
+
+Grant the BFF app what it needs on the relevant registration; **do not make it an owner.**
+
+---
+
 ## 4. How to create a container type
 
 ### Prerequisites
@@ -234,6 +326,20 @@ flow inherits this defect and should be treated as unproven.
 | 1 | **How many containers can one *standard* container type hold?** | If Model 1 holds one container per customer, this is the ceiling on Model 1 customers. Only the trial cap of 5 is published | ⚠️ **UNDOCUMENTED** — confirm with Microsoft before it becomes load-bearing |
 | 2 | Does the create-role documentation conflict still stand? | Learn's Graph reference and its conceptual doc disagree on whether an admin role is needed to create | Open — see [`knowledge/sharepoint-embedded/docs/learn-containertypes.md`](../../knowledge/sharepoint-embedded/docs/learn-containertypes.md) |
 | 3 | Is `scripts/Create-NewContainerType.ps1` used anywhere that currently succeeds? | If H8 has ever worked, our understanding of R5 is incomplete | Open — §7 |
+| 4 | ~~Are `applicationPermissions` scoped per consuming tenant, or global to the container type?~~ | Decides whether Model 2 customers' BFF apps are isolated from each other | ✅ **RESOLVED 2026-08-30** — per consuming tenant. Grants hang off `fileStorageContainerTypeRegistration`, not the container type (§3A) |
+
+### For `customer-provisioning-orchestration-r1`
+
+Three items in this document bear directly on that project and should be reconciled before its
+provisioning flow is treated as correct:
+
+1. **Handler H8 is unproven** — it inherits the `Create-NewContainerType.ps1` defect (§7). Container-type
+   creation cannot be automated with an app-only token.
+2. **The app registration set (§3A) is a provisioning input**, not an afterthought. Each Model 2 customer
+   needs its own BFF app registration and a grant on that customer's container-type registration —
+   **not** a new container type.
+3. **`sprk_containertypeid` on the environment registry** now has a defined meaning per model: shared
+   across all customers of a model, not allocated per customer.
 
 ---
 
