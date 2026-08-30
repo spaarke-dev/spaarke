@@ -357,8 +357,22 @@ jobs:
             $notReRun | ForEach-Object { Write-Host "  - $_" }
           }
           if ($stillFailing.Count -gt 0) {
-            Write-Host "::warning::$($stillFailing.Count) test(s) failed BOTH passes — real failures:"
-            $stillFailing | ForEach-Object { Write-Host "  - $($_.GetAttribute('testName'))" }
+            # ::error:: not ::warning:: — deliberately. An annotation does NOT fail the job, so
+            # Tier 2 stays advisory and non-blocking (FR-A03), but the failure now surfaces on the
+            # check page and in the run summary instead of only in the PR comment.
+            #
+            # Why the job is NOT failed here: a red tier2 job turns the whole `CI` run red, and
+            # tier2 is where the slow/flaky tests live by design — that is the "constant reds" this
+            # architecture exists to prevent. The advisory contract is "report loudly, never block".
+            #
+            # This gap was real: a reader running `gh pr checks` saw "Tier 2 (Advisory) / Full Unit
+            # Tests: pass" while the PR comment said "fail", because continue-on-error on pass 1
+            # (needed so the retry can run) left the job green. Green check, failing tests.
+            Write-Host "::error::TIER 2 TEST FAILURES — $($stillFailing.Count) test(s) failed BOTH passes. Advisory: this does NOT block merge, but these are real failures."
+            $stillFailing | ForEach-Object { Write-Host "::error::  FAILED BOTH PASSES: $($_.GetAttribute('testName'))" }
+            $summary = "## ⚠️ Tier 2: $($stillFailing.Count) real test failure(s)`n`nFailed both passes (advisory — does not block merge):`n`n"
+            $stillFailing | ForEach-Object { $summary += "- ``$($_.GetAttribute('testName'))```n" }
+            if ($env:GITHUB_STEP_SUMMARY) { $summary | Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Append -Encoding utf8 }
           } else {
             Write-Host "All pass-1 failures passed on retry — no real failures"
           }
