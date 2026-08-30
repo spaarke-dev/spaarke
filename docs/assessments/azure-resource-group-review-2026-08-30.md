@@ -99,31 +99,53 @@ Consequences: neither RG can be recreated independently, cost views split one ap
 places, RBAC must be granted three times, and secret resolution makes a **cross-region** call on cold start.
 This is the concrete mechanism behind the owner's instinct that something is off.
 
-### 2.4 🟡 Two dev Redis caches — `spe-redis-dev-67e2xz` is not serving the application
+### 2.4 🟡 The legacy Redis was decommissioned-by-tag in June and never finished
 
-**RESOLVED 2026-08-30.** Both caches sit in `spe-infrastructure-westus2`; Redis is one of the more expensive
-line items in a dev footprint.
+**RESOLVED 2026-08-30 — and the framing changed twice while resolving it.**
 
-Three independent signals, gathered over a 2-day window in 12-hour buckets:
+`spe-redis-dev-67e2xz` (Basic SKU) is **not** an open question about whether something is in use. The repo
+answered it in June, correctly. The resource carries:
 
-| Signal | `spaarke-bff-redis-dev` | `spe-redis-dev-67e2xz` |
+```
+decommission          = 2026-06-26
+decommission-reason   = replaced-by-spaarke-bff-redis-dev
+decommission-project  = spaarke-redis-cache-remediation-r1
+```
+
+Project `spaarke-redis-cache-remediation-r1` migrated off it and ran task **037 — "Decommission legacy
+spe-redis-dev-67e2xz"** on 2026-06-26. That task deliberately **tagged rather than deleted**, per its own
+constraint *"default to TAG; delete only with explicit owner sign-off"*, opening a stated **7–14 day
+reversibility window**.
+
+**That window closed in early July. The cache is still running and still billing** — roughly two months
+past its own retirement date. The decommission was started correctly and never closed out.
+
+Independent confirmation gathered *before* the tag was found (all agree):
+
+| Signal, 2 days in 12h buckets | `spaarke-bff-redis-dev` | `spe-redis-dev-67e2xz` |
 |---|---:|---:|
 | connected clients (max) | 5–6 | 2 |
 | operations (total) | 190–254 | 144–164 |
 | **cache hits (total)** | **1206–1219** | **0.0 — every bucket** |
 
-Traffic with **zero cache hits across every bucket** is the signature of health probes and `PING`, not
-application caching.
+Zero cache hits in every bucket is health-probe/`PING` traffic, not caching. **The ops count alone would
+have misled** — at 144–164 it is within 25% of the live cache, so "it has traffic, therefore it is used" is
+the wrong test. The BFF's `ConnectionStrings__Redis` also resolves to a Key Vault secret whose value
+contains `spaarke-bff-redis-dev` and not the legacy name (substring check only; the value was never printed
+or stored).
 
-**Confirmed directly**: the BFF's `ConnectionStrings__Redis` resolves to
-`@Microsoft.KeyVault(VaultName=spaarke-spekvcert;SecretName=Redis-ConnectionString)`, and that secret's value
-contains **`spaarke-bff-redis-dev`** and **not** `spe-redis-dev-67e2xz`. (Checked by substring match only —
-the secret value was never printed or stored.)
+**Action**: finish task 037 step 3 — `az redis delete` — which the project explicitly gated on **owner
+sign-off**. That gate is still the right one and has not been given.
 
-**Conclusion**: `spe-redis-dev-67e2xz` is not the BFF's cache. Before deleting it, confirm no *other*
-consumer holds it — the repo still contains **1,052** textual references to that name, so at minimum those
-need auditing, and deleting a Redis is irreversible. This is the clearest immediate cost saving in the
-footprint.
+> **Correction to the earlier draft of this section**, which claimed *"the repo still contains 1,052
+> references to that name, so at minimum those need auditing."* Wrong, and it was my own inflated number:
+> the references live in **20 files, all project notes and docs** — no active code or config. 1,052 was a
+> line count across those documents. Substring/line counting has now produced a misleading figure five
+> times in this workstream.
+
+> **Bookkeeping defect**: `tasks/037-decommission-legacy-redis.poml` still reads
+> `<status>not-started</status>` while `TASK-INDEX.md` records it ✅ complete with the tag details. The
+> index is right; the POML is stale.
 
 ### 2.5 🟡 Five RG names in the repo exist in no subscription
 
