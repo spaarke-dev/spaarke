@@ -1053,6 +1053,240 @@ public sealed class ConcurrencySaveSeamTests : IClassFixture<ComposeFidelitySeam
         body.Should().NotContain("document-metadata-stale");
     }
 
+    // ═══════════════════════════════════════════════════════════════════════════════════════════════
+    // 3. NEGATIVE — a FUZZY auto-band re-anchor (band=AUTO on content similarity, confidence < 1.0) is
+    //    SURFACED but NOT applied. This is invariant I-7 in its sharpest form, and it had no test.
+    //
+    //    Discovered 2026-08-29 by task 070's cluster-1 mutation pass: deleting the `Confidence >= 1.0`
+    //    half of the auto-apply gate — i.e. auto-applying every AUTO-band result, fuzzy ones included —
+    //    left all 1,791 Compose tests green. The suite covered exact-paraId AUTO (confidence 1.0) and
+    //    total ORPHAN (0.0) but never produced a score BETWEEN the two, so the one branch that decides
+    //    "scored well on content" != "is the same paragraph" was unguarded.
+    //
+    //    Why the distinction matters: an op's anchor is never rewritten (no write-path text search), so
+    //    an op auto-applied against a paragraph the SCORER liked would be applied under its ORIGINAL
+    //    paraId — landing on the wrong paragraph or failing to resolve at all. Exact-id AUTO is safe;
+    //    fuzzy AUTO is a suggestion for the user, and must stay one.
+    // ═══════════════════════════════════════════════════════════════════════════════════════════════
+
+    [Fact]
+    public async Task Save_StaleBase_FuzzyAutoBandMatch_SurfacedButNotApplied_ThroughTheWire()
+    {
+        const string speId = "spe-item-070-stale-fuzzy-auto";
+        const string driveId = "drive-070-stale-fuzzy-auto";
+        var tenant = ComposeFidelitySeamFixture.TestTenantId;
+        var original = BuildDocxWithParaIds(Paragraphs, ParaIds);
+
+        // The external writer's version: an ordinary Word round trip that REGENERATED every paraId
+        // (Open-XML-SDK #925 — the documented reason paraId is not a durable file key) and made a small
+        // edit to the first paragraph. The op's paraId now matches nothing, so the fuzzy scorer runs:
+        // content similarity ≈ 0.89 against paragraph 0, structural proximity 1.0 (same index) →
+        // combined ≈ 0.92, comfortably over the 0.85 AUTO cut-point but NOT the exact-id 1.0.
+        var driftedParagraphs = new[]
+        {
+            Paragraphs[0] + " Amended.",
+            Paragraphs[1],
+            Paragraphs[2],
+        };
+        var externalVersion = BuildDocxWithParaIds(driftedParagraphs, new[] { "AAAA0001", "AAAA0002", "AAAA0003" });
+
+        _fixture.ResetBoundaries();
+        ArrangeIdempotentPromotionAndIndexing();
+
+        using var client = _fixture.CreateAuthenticatedClient();
+        var sessionId = await CreateSessionAsync(tenant, speId);
+
+        _fixture.SpeMock
+            .Setup(s => s.ReplaceFileContentAsUserAsync(
+                It.IsAny<HttpContext>(), driveId, speId, It.IsAny<Stream>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(BuildFileHandle(speId, driveId, original.Length, "\"v1-etag\""));
+
+        var firstSave = await client.PostAsJsonAsync($"/api/compose/documents/{speId}/save", new
+        {
+            sessionId,
+            tenantId = tenant,
+            driveId,
+            content = original,
+            operationLog = (object?)null,
+            comments = (object?)null,
+        });
+        firstSave.StatusCode.Should().Be(HttpStatusCode.OK,
+            $"the seeding save must succeed — body: {await firstSave.Content.ReadAsStringAsync()}");
+
+        _fixture.SpeMock
+            .Setup(s => s.GetFileMetadataAsUserAsync(It.IsAny<HttpContext>(), driveId, speId, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(BuildFileHandle(speId, driveId, externalVersion.Length, "\"v2-etag-external\""));
+        _fixture.SpeMock
+            .Setup(s => s.DownloadFileAsUserAsync(It.IsAny<HttpContext>(), driveId, speId, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(() => new MemoryStream(externalVersion.ToArray()));
+
+        byte[]? persisted = null;
+        _fixture.SpeMock
+            .Setup(s => s.ReplaceFileContentAsUserAsync(
+                It.IsAny<HttpContext>(), driveId, speId, It.IsAny<Stream>(), It.IsAny<string?>(), It.IsAny<CancellationToken>()))
+            .Callback<HttpContext, string, string, Stream, string?, CancellationToken>((_, _, _, stream, _, _) =>
+            {
+                using var ms = new MemoryStream();
+                stream.CopyTo(ms);
+                persisted = ms.ToArray();
+            })
+            .ReturnsAsync(BuildFileHandle(speId, driveId, externalVersion.Length, "\"v3-etag\""));
+
+        var operationLog = new
+        {
+            schemaVersion = "compose-ops-v2",
+            operations = new object[]
+            {
+                new { type = "insertText", paraId = ParaIds[0], at = new { runIndex = 0, offset = 0 }, text = "[FUZZY-MUST-NOT-LAND]" },
+            },
+        };
+
+        var secondSave = await client.PostAsJsonAsync($"/api/compose/documents/{speId}/save", new
+        {
+            sessionId,
+            tenantId = tenant,
+            driveId,
+            content = original,
+            operationLog,
+            comments = (object?)null,
+        });
+
+        var secondBody = await secondSave.Content.ReadAsStringAsync();
+        secondSave.StatusCode.Should().Be(HttpStatusCode.OK,
+            $"a fuzzy re-anchor is surfaced for review, not a hard failure — body: {secondBody}");
+
+        var saveResult = await secondSave.Content.ReadFromJsonAsync<SaveComposeDocumentResponse>();
+        saveResult!.ReanchorSummary.Should().NotBeNull();
+        saveResult.ReanchorSummary!.Total.Should().Be(1);
+        saveResult.ReanchorSummary.AutoCount.Should().Be(1,
+            "content similarity ≈0.92 clears the 0.85 AUTO cut-point — the scorer's band is AUTO");
+
+        var annotation = saveResult.ReanchorSummary.Annotations.Single();
+        annotation.Band.Should().Be(ReanchorBand.Auto);
+        annotation.Confidence.Should().BeInRange(ReanchorBands.AutoThreshold, 0.9999,
+            "this must be a FUZZY auto — over the AUTO cut-point but strictly below the exact-paraId 1.0, " +
+            "which is the whole scenario under test; if it reaches 1.0 the fixture stopped exercising the branch");
+        annotation.MatchedParagraphIndex.Should().Be(0);
+        annotation.StructuralProximity.Should().Be(1.0,
+            "the paragraph hint comes from the op's paraId position in the RETAINED baseline (index 0) — " +
+            "an off-by-one there would silently degrade every fuzzy score");
+
+        // The assertion the whole test exists for.
+        persisted.Should().NotBeNull();
+        using var persistedDoc = WordprocessingDocument.Open(new MemoryStream(persisted!, writable: false), isEditable: false);
+        persistedDoc.MainDocumentPart!.Document!.Body!.Descendants<Text>().Select(t => t.Text)
+            .Should().NotContain(t => t.Contains("[FUZZY-MUST-NOT-LAND]", StringComparison.Ordinal),
+                "ONLY an exact-paraId match (confidence 1.0) may be auto-applied — a fuzzy AUTO scored well on " +
+                "CONTENT but is not known to be the same paragraph, and the op carries its original paraId " +
+                "unrewritten (I-7). It is reported for the user to redo, never silently applied.");
+    }
+
+    // ═══════════════════════════════════════════════════════════════════════════════════════════════
+    // 4. NEGATIVE — when the re-downloaded current bytes cannot be READ as a document, the save
+    //    fails CLOSED: every op AND every comment surfaces as ORPHAN, and nothing is applied.
+    //
+    //    Also found unguarded by the task-070 cluster-1 mutation pass: zeroing the fail-closed summary's
+    //    OrphanCount left all 1,791 tests green. The suite exercised ORPHAN as produced by the SCORER
+    //    (a paraId that matches nothing) but never the fallback that runs when scoring cannot happen at
+    //    all — so the code path that guarantees "never silently dropped" when the corpus is unreadable
+    //    could report an empty summary and no test would notice.
+    // ═══════════════════════════════════════════════════════════════════════════════════════════════
+
+    [Fact]
+    public async Task Save_StaleBase_CurrentBytesUnreadable_EveryOpAndCommentSurfacesAsOrphan_ThroughTheWire()
+    {
+        const string speId = "spe-item-070-stale-unreadable";
+        const string driveId = "drive-070-stale-unreadable";
+        var tenant = ComposeFidelitySeamFixture.TestTenantId;
+        var original = BuildDocxWithParaIds(Paragraphs, ParaIds);
+
+        _fixture.ResetBoundaries();
+        ArrangeIdempotentPromotionAndIndexing();
+
+        using var client = _fixture.CreateAuthenticatedClient();
+        var sessionId = await CreateSessionAsync(tenant, speId);
+
+        _fixture.SpeMock
+            .Setup(s => s.ReplaceFileContentAsUserAsync(
+                It.IsAny<HttpContext>(), driveId, speId, It.IsAny<Stream>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(BuildFileHandle(speId, driveId, original.Length, "\"v1-etag\""));
+
+        var firstSave = await client.PostAsJsonAsync($"/api/compose/documents/{speId}/save", new
+        {
+            sessionId,
+            tenantId = tenant,
+            driveId,
+            content = original,
+            operationLog = (object?)null,
+            comments = (object?)null,
+        });
+        firstSave.StatusCode.Should().Be(HttpStatusCode.OK,
+            $"the seeding save must succeed — body: {await firstSave.Content.ReadAsStringAsync()}");
+
+        // The base moved, AND what came back is not an openable package (a truncated/corrupt download —
+        // the case the paragraph-corpus read is wrapped in a try/catch for).
+        var unreadable = new byte[] { 0x50, 0x4B, 0x03, 0x04, 0xFF, 0xFF, 0xFF, 0xFF };
+        _fixture.SpeMock
+            .Setup(s => s.GetFileMetadataAsUserAsync(It.IsAny<HttpContext>(), driveId, speId, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(BuildFileHandle(speId, driveId, unreadable.Length, "\"v2-etag-external\""));
+        _fixture.SpeMock
+            .Setup(s => s.DownloadFileAsUserAsync(It.IsAny<HttpContext>(), driveId, speId, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(() => new MemoryStream(unreadable.ToArray()));
+        _fixture.SpeMock
+            .Setup(s => s.ReplaceFileContentAsUserAsync(
+                It.IsAny<HttpContext>(), driveId, speId, It.IsAny<Stream>(), It.IsAny<string?>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(BuildFileHandle(speId, driveId, unreadable.Length, "\"v3-etag\""));
+
+        // Two ops and one comment: the fail-closed summary must account for BOTH collections, not just ops.
+        var operationLog = new
+        {
+            schemaVersion = "compose-ops-v2",
+            operations = new object[]
+            {
+                new { type = "insertText", paraId = ParaIds[0], at = new { runIndex = 0, offset = 0 }, text = "[OP-ONE]" },
+                new { type = "insertText", paraId = ParaIds[1], at = new { runIndex = 0, offset = 0 }, text = "[OP-TWO]" },
+            },
+        };
+        var comments = new object[]
+        {
+            new
+            {
+                paraId = ParaIds[2],
+                range = new { start = new { runIndex = 0, offset = 0 }, end = new { runIndex = 0, offset = 8 } },
+                commentText = "please revisit this clause",
+                author = "AI Advisory Review",
+                date = "2026-08-29T00:00:00Z",
+            },
+        };
+
+        var secondSave = await client.PostAsJsonAsync($"/api/compose/documents/{speId}/save", new
+        {
+            sessionId,
+            tenantId = tenant,
+            driveId,
+            content = original,
+            operationLog,
+            comments,
+        });
+
+        var secondBody = await secondSave.Content.ReadAsStringAsync();
+        secondSave.StatusCode.Should().Be(HttpStatusCode.OK,
+            $"an unreadable current base degrades to an all-orphan report, a DEFINED outcome — body: {secondBody}");
+
+        var saveResult = await secondSave.Content.ReadFromJsonAsync<SaveComposeDocumentResponse>();
+        saveResult!.ReanchorSummary.Should().NotBeNull();
+        saveResult.ReanchorSummary!.Total.Should().Be(3, "two operations plus one comment are all accounted for");
+        saveResult.ReanchorSummary.AutoCount.Should().Be(0);
+        saveResult.ReanchorSummary.ReviewCount.Should().Be(0);
+        saveResult.ReanchorSummary.OrphanCount.Should().Be(3,
+            "when the current bytes cannot be read, NOTHING can be safely anchored — every op and comment " +
+            "must surface as ORPHAN rather than vanish from the report");
+        saveResult.ReanchorSummary.Annotations.Should().HaveCount(3)
+            .And.OnlyContain(a => a.Band == ReanchorBand.Orphan && a.MatchedParagraphIndex == -1);
+        saveResult.ReanchorSummary.Annotations.Should().Contain(a => a.Type == "comment",
+            "the comment must appear in the fail-closed report as its own entry, not be folded into the op count");
+    }
+
     private void ArrangeIdempotentPromotionAndIndexing()
     {
         var existingDocumentId = Guid.NewGuid();

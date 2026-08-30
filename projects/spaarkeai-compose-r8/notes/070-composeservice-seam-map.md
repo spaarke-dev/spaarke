@@ -190,7 +190,7 @@ structural order this file originally proposed.
 | 5b profile + step signals | ✅ extracted | `ComposeProfileDispatcher.cs` | `if (result.JobSubmitted)` → `if (!…)` → 8/16 red |
 | 8 reference/paraId helpers | ✅ extracted | `ComposeReferenceMapping.cs` | off-by-one in `ResolveParaIdForHint` → 4 red |
 | 2b + 2a create-on-save | ⛔ **HELD** | — | `unified-access-control-r2` owns #858 inside this file |
-| 1 re-anchor | ▶ **next available** | — | executable spec already in this file (§ below) |
+| 1 re-anchor | ✅ extracted | `ComposeReanchorCoordinator.cs` | **six** mutations across six members; four survived the whole suite → three coverage holes closed first (below) |
 
 Every extraction: Compose suite **1,790/1,790**, ArchTests **150/150**, build 0/0, and the DI diff
 (`Program.cs` + `Infrastructure/DI/`) **empty** — ADR-010 holds by construction, not by assertion.
@@ -242,7 +242,82 @@ implemented** — recorded here so the reasoning survives the commit log:
    caller is the save path (≈1905). Suggest leaving it on `ComposeService` and recording the
    deviation from this map, rather than moving it because a table said cluster 5.
 
-### Cluster 1 is next — and it is the first one that deserves caution
+### Cluster 1 — done, and the caution below was warranted (2026-08-29)
+
+The extraction itself was mechanical. What it surfaced was not.
+
+**The spec in this file undercounted the move.** It listed 5 members; there are **7** — it omitted
+`IsBatchLevelPatchRefusal` and `IsStructuralOrGlobalOp`, and `IsBatchLevelPatchRefusal` has a caller
+OUTSIDE the cluster (`SaveAsync`'s `catch … when` filter). That is the cluster-5b situation again, and it
+was resolved the same owner-approved way: the predicate defines the refusal taxonomy the recovery is built
+on, so it travels with the recovery as `internal static` and `SaveAsync` references it there.
+
+**One dependency points the other way.** `ReanchorStaleSaveAsync` needs `ResolveRevisionAuthor`, which is
+cluster 9 and stays with the save path (two of its three callers are there). It was widened from `private
+static` to `internal static` rather than duplicated or threaded through an extra argument — a pure function
+of its `HttpContext`, so a shared helper, not a cycle. The coordinator holds no reference to
+`ComposeService`.
+
+**The `ComposeWritePathTextSearchAuditTests` guard fired, correctly.** Its slice runs from `SaveAsync` to
+the `ResolveRevisionAuthor` signature, so widening that signature broke the end marker — precisely the
+"fails loudly rather than silently auditing the wrong slice" behaviour it was built for. Two things had to
+change, and only fixing the first would have been the wrong repair: the marker was updated, **and the newly
+extracted file was added as an audited file in its own right**. The ~470 moved lines had been inside the
+audited slice purely by position; without adding the new file, the guard would have silently shrunk to
+whatever remained between the markers while still reporting green.
+
+#### The mutation pass found three real coverage holes — all pre-existing, none created by the move
+
+Six mutations across six members. Two died immediately. **Four survived the entire 1,791-test suite**, and
+per the cluster-7 lesson that is a coverage statement, not a licence to proceed:
+
+| Mutation | Survived? | What it proved |
+|---|---|---|
+| `IsBatchLevelPatchRefusal` → always true | killed (4–5 red) | recovery eligibility is guarded |
+| `appliedCount += unitOps.Count` → `+= 0` | killed (3–4 red) | partial-apply accounting is guarded |
+| `IndexOfParaId` off-by-one | **survived** | hole A |
+| AUTO gate `Confidence >= 1.0` → `>= 0.0` | **survived** | hole A |
+| `IsStructuralOrGlobalOp` → false for all | **survived** | hole C |
+| `BuildAllOrphanSummary` `OrphanCount` → 0 | **survived** | hole B |
+
+- **Hole A — the fuzzy-AUTO rejection gate.** The suite covered exact-paraId AUTO (confidence 1.0) and
+  total ORPHAN (0.0) but never a score BETWEEN them. So the one branch separating *"scored well on
+  content"* from *"is the same paragraph"* — **invariant I-7 in its sharpest form** — could be deleted
+  outright with every test still green. The paragraph-hint off-by-one survived for the same reason: with
+  no fuzzy case, the hint feeding the scorer never mattered.
+- **Hole B — the fail-closed all-orphan summary.** ORPHAN-as-produced-by-the-scorer was covered; the
+  fallback that runs when scoring cannot happen at all (unreadable current bytes, or an AUTO batch that
+  throws at patch time) was not. It could report an empty summary and nothing would notice.
+- **Hole C — structural-op grouping inside prong-1 recovery.** No recovery test had ever included a
+  structural op, so the structural-last all-or-nothing rule was free to change unobserved.
+
+**Three tests were added to close them**, extending the two existing seam files rather than adding a
+fixture (§11):
+
+| Test | File | Kills |
+|---|---|---|
+| `Save_StaleBase_FuzzyAutoBandMatch_SurfacedButNotApplied_ThroughTheWire` | `ConcurrencySaveSeamTests` | A (both) |
+| `Save_StaleBase_CurrentBytesUnreadable_EveryOpAndCommentSurfacesAsOrphan_ThroughTheWire` | `ConcurrencySaveSeamTests` | B |
+| `Save_RefusingStructuralOp_IsItsOwnUnit_InlineOpOnSameParagraphStillApplied_ThroughTheWire` | `ComposePartialApplyRecoverySeamTests` | C |
+
+The fuzzy-AUTO fixture is worth understanding before editing it: the external version **regenerates every
+paraId** (the documented Open-XML-SDK #925 case) and drifts one paragraph's text, so content similarity
+≈0.89 × 0.75 + structural 1.0 × 0.25 ≈ **0.92** — over the 0.85 AUTO cut-point, under the exact-id 1.0.
+The test asserts the confidence stays in that window, so if a future change collapses it to 1.0 the test
+fails rather than quietly stopping exercising the branch. It also asserts `StructuralProximity == 1.0`,
+which is what catches the paragraph-hint off-by-one directly instead of relying on the score drifting
+across a threshold.
+
+The structural-op test is arranged so the two groupings differ in **outcome, not just bookkeeping**: an
+inline op and a refusing `splitParagraph` on the SAME paragraph. Grouped correctly the inline edit
+survives; grouped as inline the paragraph is atomic, the refusal takes the good edit down with it,
+`AppliedCount` hits 0, and the caller's zero-applied guard re-throws the whole save. That is the difference
+between keeping the user's edit and losing the session — which is what prong 1 exists to prevent.
+
+**After the three tests: all six mutations die.** Compose suite 1,794 · ArchTests 150 · solution build 0
+errors · DI diff empty.
+
+### Cluster 1 was next — and it was the first one that deserved caution
 
 Everything extracted so far sat at **87–96% branch**. Cluster 1 is **76.6%**, the weakest of the
 early group, and at ~470 LOC across five members it is also the largest single move attempted. The

@@ -475,6 +475,99 @@ public sealed class ComposePartialApplyRecoverySeamTests : IClassFixture<Compose
     }
 
     // ═══════════════════════════════════════════════════════════════════════════════════════════════
+    // 6. A refusing STRUCTURAL op is its OWN all-or-nothing unit — it must not drag down the inline ops
+    //    that happen to share its paraId.
+    //
+    //    Found unguarded by task 070's cluster-1 mutation pass: making IsStructuralOrGlobalOp return
+    //    false for every structural op left all 1,791 Compose tests green, because no recovery test had
+    //    ever included one. The grouping rule was therefore free to change with nothing to notice.
+    //
+    //    The arrangement makes the grouping observable. Both ops target paragraph 00000001: an inline
+    //    insertText that resolves, and a splitParagraph anchored past the end of the run, which refuses.
+    //      - Correct grouping — inline unit {insertText} applies; the structural op is a separate unit
+    //        applied last and refuses alone. AppliedCount=1, and the edit is preserved.
+    //      - If the structural op were treated as inline, it would join paragraph 00000001's unit; the
+    //        paragraph is the atomic unit, so the refusal would take the good edit down with it,
+    //        AppliedCount would be 0, and the caller's zero-applied guard would re-throw the whole save.
+    //    So the difference between the two groupings is the difference between keeping the user's edit
+    //    and losing the session — which is exactly what prong 1 exists to prevent.
+    // ═══════════════════════════════════════════════════════════════════════════════════════════════
+
+    [Fact]
+    public async Task Save_RefusingStructuralOp_IsItsOwnUnit_InlineOpOnSameParagraphStillApplied_ThroughTheWire()
+    {
+        const string speId = "spe-item-070-structural-unit";
+        const string driveId = "drive-070-structural-unit";
+        var tenant = ComposeFidelitySeamFixture.TestTenantId;
+        var original = BuildDocxWithParaIds(Paragraphs, ParaIds);
+
+        _fixture.ResetBoundaries();
+        ArrangeIdempotentPromotionAndIndexing();
+
+        using var client = _fixture.CreateAuthenticatedClient();
+        var sessionId = await CreateSessionAsync(tenant, speId);
+
+        _fixture.SpeMock
+            .Setup(s => s.GetFileMetadataAsUserAsync(It.IsAny<HttpContext>(), driveId, speId, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(BuildFileHandle(speId, driveId, original.Length, "\"v1-etag\""));
+
+        byte[]? persisted = null;
+        _fixture.SpeMock
+            .Setup(s => s.ReplaceFileContentAsUserAsync(
+                It.IsAny<HttpContext>(), driveId, speId, It.IsAny<Stream>(), It.IsAny<string?>(), It.IsAny<CancellationToken>()))
+            .Callback<HttpContext, string, string, Stream, string?, CancellationToken>((_, _, _, stream, _, _) =>
+            {
+                using var ms = new MemoryStream();
+                stream.CopyTo(ms);
+                persisted = ms.ToArray();
+            })
+            .ReturnsAsync(BuildFileHandle(speId, driveId, original.Length, "\"v2-etag\""));
+
+        var operationLog = new
+        {
+            schemaVersion = "compose-ops-v2",
+            operations = new object[]
+            {
+                new { type = "insertText", paraId = ParaIds[0], at = new { runIndex = 0, offset = 0 }, text = "[INLINE-KEPT]" },
+                // Anchored past the end of the run — resolves to the paragraph, then refuses at the split point.
+                new { type = "splitParagraph", paraId = ParaIds[0], at = new { runIndex = 0, offset = 99999 }, newParaId = "0BADBAD1" },
+            },
+        };
+
+        var response = await client.PostAsJsonAsync($"/api/compose/documents/{speId}/save", new
+        {
+            sessionId,
+            tenantId = tenant,
+            driveId,
+            content = original,
+            operationLog,
+            comments = (object?)null,
+        });
+
+        var body = await response.Content.ReadAsStringAsync();
+        response.StatusCode.Should().Be(HttpStatusCode.OK,
+            $"the inline op resolved, so this is a PARTIAL apply (200), not a lost session — body: {body}");
+
+        var saveResult = await response.Content.ReadFromJsonAsync<SaveComposeDocumentResponse>();
+        saveResult!.PartialApply.Should().NotBeNull();
+        saveResult.PartialApply!.Total.Should().Be(2);
+        saveResult.PartialApply.AppliedCount.Should().Be(1,
+            "the inline op is its paragraph's unit and applies; the structural op is a SEPARATE unit and " +
+            "its refusal must not take the inline op with it");
+        saveResult.PartialApply.UnresolvedCount.Should().Be(1);
+        saveResult.PartialApply.Unresolved.Single().OpType.Should().Be(nameof(SplitParagraphOperation),
+            "only the structural op is surfaced — the inline op on the same paragraph was applied, not reported");
+
+        persisted.Should().NotBeNull();
+        using var patchedDoc = WordprocessingDocument.Open(new MemoryStream(persisted!, writable: false), isEditable: false);
+        var editedPara = patchedDoc.MainDocumentPart!.Document!.Body!.Descendants<Paragraph>()
+            .Single(p => string.Equals(p.ParagraphId?.Value, ParaIds[0], StringComparison.OrdinalIgnoreCase));
+        editedPara.Descendants<Text>().Select(t => t.Text)
+            .Should().Contain(t => t.Contains("[INLINE-KEPT]", StringComparison.Ordinal),
+                "the user's inline edit survives a refusing structural op on the SAME paragraph");
+    }
+
+    // ═══════════════════════════════════════════════════════════════════════════════════════════════
     // Shared arrange + OOXML helpers (per-file-local, consistent with this suite's convention).
     // ═══════════════════════════════════════════════════════════════════════════════════════════════
 
