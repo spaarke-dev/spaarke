@@ -72,7 +72,7 @@ Two consequences:
 - **It cannot safely be treated as "dev".** The `spaarke.com` DNS zone is company-wide and production-critical. Any bulk action on this RG — a cleanup, a policy, an accidental delete — reaches DNS for everything.
 - **The name actively misleads.** "spe-infrastructure" implies SharePoint Embedded; there are no SPE resources in it (SPE has its own `SharePointEmbedded` RG in eastus).
 
-### 2.3 🟠 One logical application is split across two resource groups
+### 2.3 🟠 One logical application is split across THREE resource groups, in TWO regions
 
 The dev BFF is not self-contained:
 
