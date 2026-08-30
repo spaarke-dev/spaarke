@@ -343,7 +343,7 @@ $acrId             = az acr show -g $platformRg -n ($constants.name_templates.ac
 $bffAppServiceId   = az webapp list -g $platformRg --query "[?starts_with(name,'sprksharedprod-api') || starts_with(name,'spaarke-bff-$env')].id" -o tsv | Select-Object -First 1
 $kvResourceId      = az keyvault show -g $platformRg -n ($constants.name_templates.platformKvName -replace '\{env\}', $env) --query id -o tsv 2>$null
 $containerTypeId   = $constants.per_env_constants.$env.containerTypeId
-$bffAppId          = $constants.per_env_constants.$env.bffMultiTenantAppId
+$bffAppId          = $constants.per_env_constants.$env.bffApiAppId   # renamed 2026-08-30 task 212 from bffMultiTenantAppId (Entra-strict-wrong name — BFFs are single-tenant per topology doc §3A rows 4-6 + ADR-028 line 239 RESOLVED note)
 $adminDvUrl        = $constants.name_templates.registryDvUrl.$env
 $openAiRegionResolved = if ($openAiRegion) { $openAiRegion } else { 'westus3' }  # canonical Spaarke split per operator memory
 
@@ -1350,7 +1350,7 @@ Interactive-mode sub-flows below assume a live operator; batch mode returns befo
 
   ACTION FOR CUSTOMER ADMIN (send this URL to the customer — skill substitutes {tokens} before display):
     URL construction:
-      $bffAppId = $constants.spaarke.bffMultiTenantAppId  # from spaarke-constants.yaml per PLX-13
+      $bffAppId = $constants.per_env_constants.$env.bffApiAppId   # from spaarke-constants.yaml per PLX-13; renamed 2026-08-30 task 212 (was bffMultiTenantAppId)
       $callback = "$($constants.spaarke.bffProdBase)/api/onboarding/consent-callback"
       $consentUrl = "https://login.microsoftonline.com/$tenantId/adminconsent" +
                     "?client_id=$bffAppId&redirect_uri=$([Uri]::EscapeDataString($callback))&state=$runId"

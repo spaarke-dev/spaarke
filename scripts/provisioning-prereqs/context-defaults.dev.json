@@ -115,7 +115,7 @@
     "bffAppId": {
       "source": "constants-per-env-operator",
       "shape": "Entra app registration appId for the BFF (per-tenancy tier)",
-      "populatedBy": "spaarke-constants.yaml per_env_constants.dev.bffMultiTenantAppId (operator populates after Register-EntraAppRegistrations.ps1)",
+      "populatedBy": "spaarke-constants.yaml per_env_constants.dev.bffApiAppId (RENAMED 2026-08-30 task 212 from bffMultiTenantAppId — BFFs are single-tenant per topology doc §3A rows 4-6). Populated by task 213 after one-time topology setup (SPE container-type + owning app-reg + BFF app-reg creation via delegated flow).",
       "note": "One per tenancy tier, shared across all Model 1 customers. Currently referenced only in PRQ-T-02 tightening (Wave 4 deferred)."
     },
     "dvUrl": {

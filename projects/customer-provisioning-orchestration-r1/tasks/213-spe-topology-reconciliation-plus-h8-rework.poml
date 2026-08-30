@@ -1,0 +1,201 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="213" project="customer-provisioning-orchestration-r1">
+  <metadata>
+    <title>SPE topology reconciliation: rework H8 (container-type creation → container creation), add one-time operator prereqs for `Spaarke Trial 1` container-type + `Spaarke SPE Trial 1 Owner` + `Spaarke BFF — Trial 1` app-regs, populate spaarke-constants.yaml, coordinate topology doc merge to master</title>
+    <phase>Post-Live-Fire remediation — SPE topology reconciliation orthogonal to task 212 terminology fixes</phase>
+    <gate>startable</gate>
+    <status>not-started</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Modifies handler code (`H8*Handler.cs` — bff-api-adjacent per L2 control-plane); rewrites operator scripts (`Register-EntraAppRegistrations.ps1`); coordinates cross-worktree doc merge; extends canonical secret manifest; touches skill-directives hot-path (SKILL.md Step 0.5 gains topology-verify sub-step). Multiple hot-path surfaces + code-rework + operator-facing prereq scripts. Main-session-only per §3.</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Well-scoped mechanical work: (a) H8 rename + Graph API swap (`ContainerTypes.PostAsync` → `Containers.PostAsync` + activate); (b) Register-EntraAppRegistrations.ps1 extension to author owning-app + BFF-app entries; (c) SPE-Admin-CLI-driven container-type creation runbook (delegated flow, one-time manual); (d) constants file GUID population post-topology-setup; (e) SKILL Step 0.5 topology-verify addition. No architectural judgment beyond what SPAARKE-SPE-CONTAINER-TYPE-TOPOLOGY.md already dictates.</model-tier-reason>
+    <effort>xhigh</effort>
+    <effort-reason>H8 rework: ~4h (rename handler, swap Graph API call, update all callers, update tests, update DAG dependencies). Register-EntraAppRegistrations extension: ~3h (author 2 new app-reg templates with correct signInAudience + API permissions per topology doc §3A + §4 prereqs). Operator runbook for one-time SPE topology setup: ~2h (documentable delegated-flow steps for SPE Admin app / VS Code extension / SharePoint admin center; §R5 delegated-only enforced). Constants population + smoke verify: ~1h (after operator completes one-time setup). Cross-worktree topology-doc merge coordination: ~1h (open PR from sdap-SPE-admin-app-r2 or copy the doc into this worktree with pointer). SKILL Step 0.5 topology-verify addition: ~2h. Total 12-16h at xhigh.</effort-reason>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <deps>199, 212</deps>
+    <tags>provisioning, spe, container-type, h8-rework, operator-prereq, adr-028-reconciliation, cross-worktree-coordination, skill-directive, topology</tags>
+    <estimated-effort>12-16h (H8 rework + Register-EntraAppRegistrations extension + one-time SPE topology operator runbook + constants population + SKILL Step 0.5 topology-verify + cross-worktree merge coordination)</estimated-effort>
+  </metadata>
+
+  <prompt>Task 212 landed the ADR-028 terminology reconciliation + constants field rename (`bffMultiTenantAppId` → `bffApiAppId`) + name_templates alignment against LIVE Azure state. This task 213 is the substantive follow-on: reconcile the r1 provisioning stack against the authoritative SPAARKE-SPE-CONTAINER-TYPE-TOPOLOGY.md (currently in `sdap-SPE-admin-app-r2` worktree, pending merge to `docs/architecture/`), rework H8 to match, and add the one-time operator prereqs for the SPE topology setup.
+
+**Topology doc key findings that drive this task's scope** (per SPAARKE-SPE-CONTAINER-TYPE-TOPOLOGY.md, owner-confirmed authoritative 2026-08-30):
+
+- **§R1 permanent 1:1 binding**: one owning app ↔ one container type, permanent, 25-max per tenant, non-deletable for `standard` classification.
+- **§3 topology intent**: 4 container-types total across Spaarke (PAYGO 1 dev / Trial 1 / Model 1 / Model 2), each serving unlimited customers via containers inside. NOT per-customer container-types.
+- **§3A app-reg split**: OWNING apps (1 per container-type, immutable) MUST be separate from BFF apps (1 per env × model, shared across customers of that tier). Existing merged shape `170c98e1... = SDAP-PCF-CLIENT` (owning app also acting as BFF) is the artifact to unwind, not the pattern.
+- **§R5 + §7 + §8.1 for r1**: H8 as written (`H8SpeContainerTypeHandler` creating container-TYPES with app-only token) is doubly broken — (a) container-type CREATE is delegated-only, app-only receives 403; (b) per-customer container-types waste the 25-cap. H8 must be reworked as container-CREATION (per-customer container inside the shared per-model container-type).
+
+**Owner-confirmed decisions 2026-08-30 (from task 212 alignment discussion)**:
+- Topology doc is authoritative for r1 (Q1).
+- `Spaarke Trial 1` container-type + `Spaarke SPE Trial 1 Owner` app-reg do NOT exist yet — expected to be created as part of the provisioning process one-time setup (Q2).
+- H8 rework decision: **H8-B** (rework as container-creation, not container-type-creation) — my technical call, ratified by owner (Q3 delegated).
+- `Spaarke BFF — Trial 1` app-reg is a NEW registration — do NOT reuse `spaarke-bff-dev` = SDAP-BFF-SPE-API for trial1 (Q4).
+- Scope split: task 212 (small terminology fixes) + this task 213 (substantive topology rework). Trial1 dispatch remains blocked until BOTH land (Q5).
+
+**Scope of task 213** (7 discrete work-items):
+
+**213.1 — Cross-worktree topology doc merge coordination** (1h):
+- Coordinate with `sdap-SPE-admin-app-r2` worktree to merge `docs/architecture/SPAARKE-SPE-CONTAINER-TYPE-TOPOLOGY.md` to master.
+- Options: (a) merge sdap-SPE-admin-app-r2's PR to master before this task; (b) copy the file into r1's tree as a stopgap (with clear provenance comment) if coordination window is unavailable; (c) file `.claude/coord-notes/` entry to track the dependency.
+- Preferred: (a) — cleanest, no drift risk. Fallback: (b) with the copy explicitly marked "authored by sdap-SPE-admin-app-r2 — canonical source is that worktree until merged."
+
+**213.2 — H8 handler rework (H8-B: container-CREATION)** (~4h):
+- Rename `H8SpeContainerTypeHandler.cs` → `H8SpeContainerHandler.cs` (drop "Type" — reflects actual scope).
+- Rename `GraphContainerTypeProvisioner.cs` → `GraphContainerProvisioner.cs`; swap `graph.Storage.FileStorage.ContainerTypes.PostAsync(...)` → `graph.Storage.FileStorage.Containers.PostAsync({ displayName, description, containerTypeId })` + follow-up `PostAsync("/containers/{id}/activate")`.
+- Input: `containerTypeId` from `IntakeParameters.NonSecretParameters` OR from constants (`{containerTypeId}` per env). Do NOT create the container-type — that's a one-time operator prereq.
+- Update `HandlerIds.cs` string constant (keep `HandlerH8` but change the token if the string encodes "ContainerType"; verify + audit).
+- Update `DagAdvancer.cs:166` comment ("SPE container-type creation" → "SPE container creation").
+- Update all handler tests in `tests/unit/Sprk.Provisioning.ControlPlane.Core.Tests/Handlers/` — test the new container-creation code path with mocked `Containers.PostAsync` + activate.
+- Update `SpeConfidentialClientGraphFactory.cs` if it hardcoded assumptions about container-type creation (verify).
+- Delete `notes/probe_containertype_create.py` reference wiring if any (the app-only 403 evidence is preserved in topology doc §7; r1 no longer attempts app-only container-type creation).
+- Verify H8 code path uses app-only OR the operator/BFF UAMI's Graph token (either works for container creation, per §R5 which is delegated-only for container-TYPE creation ONLY). Delegated NOT required for container creation.
+
+**213.3 — Retire `scripts/Create-NewContainerType.ps1`** (~30min):
+- Mark script as DEPRECATED with header comment + operator-facing runbook pointer.
+- The script is documented broken (§7). Container-type creation goes through SPE Admin app / VS Code extension / SharePoint admin center per §R5.
+- Do NOT delete the script (may have residual references in docs). Mark + redirect.
+
+**213.4 — Register-EntraAppRegistrations.ps1 extension for owning + BFF apps** (~3h):
+- Add capability to register the 6 app-regs per topology doc §3A:
+  - Row 1: `Spaarke SPE Trial 1 Owner` — signInAudience=`AzureADMyOrg` (topology doc §3A row 1 doesn't specify audience; Trial 1 is single-tenant per §3 "Containers live in Spaarke tenant").
+  - Row 2: `Spaarke SPE Model 1 Owner` — same as row 1.
+  - Row 3: `Spaarke SPE Model 2 Owner` — signInAudience=`AzureADMultipleOrgs` (per §3A row 3 "Multi-tenant — customers consent to this"). **This is THE ONLY Entra-multitenant app-reg in Spaarke's design** per task 212's ADR-028 line 239 RESOLVED note.
+  - Row 4: `Spaarke BFF — Trial 1` — single-tenant (`AzureADMyOrg`).
+  - Row 5: `Spaarke BFF — Model 1` — single-tenant.
+  - Row 6: `Spaarke BFF — {Customer}` per Model 2 customer — single-tenant, 1 per customer.
+- API permissions per topology doc §4 prereqs:
+  - Owning apps: `FileStorageContainer.Selected` (application) + `FileStorageContainerTypeReg.Selected` (application).
+  - BFF apps: (whatever the current BFF app-reg has; verify against `spaarke-bff-dev` = `1e40baad-...` as reference).
+- Add idempotency (script re-runs safely; existing app-regs are detected + reported, not duplicated).
+- Add `-DryRun` mode.
+- Update script header + `scripts/README.md` entry with the new capability + usage example.
+
+**213.5 — Operator runbook for one-time SPE topology setup** (~2h):
+- Author `docs/guides/SPAARKE-SPE-TOPOLOGY-SETUP-RUNBOOK.md` (or extend `SPAARKE-CUSTOMER-DEPLOYMENT-GUIDE.md` §2.x if space warrants).
+- Runbook steps for a fresh env-model (e.g., dev × Trial 1):
+  1. Run `Register-EntraAppRegistrations.ps1 -CreateOwningApp Trial1 -CreateBffApp Trial1` → outputs the two app-reg GUIDs.
+  2. Grant admin consent on the owning-app's API permissions (Portal — manual, ~1 min).
+  3. Create the container-type via the **SPE Admin app** (`SPAARKE-SPE-Admin-CLI` = `68cf5a14-...`) OR the VS Code SPE extension OR the SharePoint admin center — pass the owning-app GUID from step 1 + `billingClassification=standard`.
+  4. Attach the Azure billing profile to the container-type (Portal or SPE Admin CLI).
+  5. Wait for replication (empirically ~2 min per operator memory `feedback_spe_container_timing`; Microsoft docs say 24h fallback).
+  6. Populate `spaarke-constants.yaml per_env_constants.dev.containerTypeId` + `bffApiAppId` with the two GUIDs.
+  7. Commit constants change.
+  8. Verify via `az rest --method get --url "https://graph.microsoft.com/v1.0/storage/fileStorage/containerTypes/{guid}"` (delegated token; check id matches).
+
+**213.6 — SKILL.md Step 0.5c topology-verify addition** (~2h):
+- Add a Step 0.5c after 0.5b that verifies:
+  - Owning app-reg exists in Spaarke tenant (`az ad app show --id {owningAppGuid}`).
+  - Container-type exists via Graph (`az rest ... /storage/fileStorage/containerTypes/{ctId}`) — requires delegated token per §R5; SKILL uses operator's delegated identity from Step 0b.
+  - BFF app-reg exists (`az ad app show --id $bffAppId`).
+  - All three checks HARD STOP on failure with actionable operator-facing message pointing at `SPAARKE-SPE-TOPOLOGY-SETUP-RUNBOOK.md`.
+- Add to SKILL.md Step 0.5b substitution block: derive `{bffAppServiceId}` per-env from `bffAppServiceRg` + `bffAppServiceName` templates (currently uses `platformRg`-hardcoded search which is wrong per task 212 Gap C).
+
+**213.7 — Constants population + first-dispatch smoke verify** (~1h):
+- After operator completes 213.5 one-time setup, populate:
+  - `spaarke-constants.yaml per_env_constants.dev.containerTypeId` = Trial 1 container-type GUID
+  - `spaarke-constants.yaml per_env_constants.dev.bffApiAppId` = Spaarke BFF — Trial 1 app-reg GUID
+- Re-invoke `/provision-environment trial1 --batch runs/trial1-intake.json` in a fresh session.
+- Verify Step 0 + Step 0.5 + Step 0.5c topology-verify + Step 1.0 batch loader all progress. Expected: dispatch may still HARD STOP downstream at task 206/207 prereqs.yaml issues — that's expected + is 206/207's job.
+
+**Sequencing constraint**: 213 MUST complete before task 186 dispatch. Sequence with 206/207: 213 can run PARALLEL with 206/207 (different files touched — 213 is handler code + operator scripts; 206/207 are prereqs.yaml recipes). Final dispatch sequence: {212 landed} → {213 || 206 || 207} → 208 → 209 → task 186.</prompt>
+
+  <role>Main-session operator (skill-directives + BFF-adjacent handler code + operator scripts + cross-worktree coordination).</role>
+
+  <goal>SPE topology in Spaarke tenant matches SPAARKE-SPE-CONTAINER-TYPE-TOPOLOGY.md §3 for the Trial tier (Spaarke Trial 1 container-type exists + Spaarke SPE Trial 1 Owner app-reg exists + Spaarke BFF — Trial 1 app-reg exists). H8 handler is renamed + reworked to create containers (not container-types) via `Containers.PostAsync + activate`. Register-EntraAppRegistrations.ps1 supports authoring the 6 topology-doc app-regs. SKILL Step 0.5c verifies topology exists before proceeding to prereq iteration. Constants populated. Trial1 dispatch progresses past Step 0.5c into task 206/207 territory.</goal>
+
+  <context>
+    <background>
+      Task 212 (SESSION 20, 2026-08-30) landed the terminology reconciliation ONLY — ADR-028 line 229 rewritten to say "single-tenant Spaarke BFF" (not "multi-tenant"), ADR-028 line 239 OPEN closed with the resolution, project CLAUDE.md MUST rule rewritten, spaarke-constants.yaml field renamed `bffMultiTenantAppId` → `bffApiAppId` with all consumers updated (SKILL.md Step 0.5b line 346 + Step 5a line 1353 + context-defaults.dev.json + context-defaults.prod.json), name_templates aligned against LIVE Azure state (Gap C from task 212's report).
+
+      Task 213 handles the substantive rework that task 212 deferred: reconciling the r1 provisioning STACK (handler code + scripts + operator prereqs + SKILL step additions) against the authoritative SPAARKE-SPE-CONTAINER-TYPE-TOPOLOGY.md. Task 212's small-scope fix does NOT unblock trial1 dispatch on its own — 213's H8 rework + topology setup are the substantive gate.
+
+      Full context including the 5-gap audit + resolution decisions: `runs/pre-dispatch-readiness-gap-report.md` (from SESSION 20 initial audit) + task 212 completion notes.
+    </background>
+    <relevant-files>
+      <file role="authoritative-topology">SPAARKE-SPE-CONTAINER-TYPE-TOPOLOGY.md (currently in sdap-SPE-admin-app-r2 worktree; canonical path once merged: docs/architecture/SPAARKE-SPE-CONTAINER-TYPE-TOPOLOGY.md)</file>
+      <file role="target-handler">src/server/services/Sprk.Provisioning.ControlPlane.Core/Handlers/SpeContainerType/H8SpeContainerTypeHandler.cs (rename + rework)</file>
+      <file role="target-graph-provisioner">src/server/services/Sprk.Provisioning.ControlPlane.Core/Handlers/SpeContainerType/GraphContainerTypeProvisioner.cs (rename + swap Graph API call)</file>
+      <file role="target-dag">src/server/services/Sprk.Provisioning.ControlPlane.Core/Reconciler/DagAdvancer.cs (update H8 comment)</file>
+      <file role="target-tests">tests/unit/Sprk.Provisioning.ControlPlane.Core.Tests/Handlers/SpeContainerType/</file>
+      <file role="target-operator-script">scripts/Register-EntraAppRegistrations.ps1 (extend for owning + BFF app-regs per topology §3A)</file>
+      <file role="deprecate">scripts/Create-NewContainerType.ps1 (mark DEPRECATED, redirect to SPE Admin app)</file>
+      <file role="new-runbook">docs/guides/SPAARKE-SPE-TOPOLOGY-SETUP-RUNBOOK.md (author)</file>
+      <file role="target-skill">.claude/skills/provision-environment/SKILL.md § Step 0.5c (add topology-verify)</file>
+      <file role="target-constants">scripts/provisioning-prereqs/spaarke-constants.yaml (populate values after operator one-time setup)</file>
+      <file role="dependent-adr">.claude/adr/ADR-028-spaarke-auth-architecture.md (task 212 amendment referenced for context)</file>
+      <file role="dependent-must-rules">projects/customer-provisioning-orchestration-r1/CLAUDE.md § MUST rules (task 212 amendment referenced)</file>
+    </relevant-files>
+    <dependencies>
+      <dependency task="199" status="completed">SESSION 14 baseline.</dependency>
+      <dependency task="212" status="not-started">SESSION 20 terminology + name-template + constants-rename. This task 213 depends on 212's rename (bffApiAppId field name) landing.</dependency>
+    </dependencies>
+    <blocks>
+      <blocks task="186">Task 186 trial1 dispatch remains blocked until 213 + 206 + 207 all land (each covers an orthogonal blocker class).</blocks>
+    </blocks>
+  </context>
+
+  <constraints>
+    <constraint source="topology-doc-R1">Container-type owning app is PERMANENT + 1:1 with container-type. Do NOT merge with BFF app-reg. Do NOT reuse existing dev owning app for trial. `170c98e1... = SDAP-PCF-CLIENT` is the ANTI-PATTERN to unwind, not the model.</constraint>
+    <constraint source="topology-doc-R3">Standard container-types CANNOT be deleted. Every one created permanently consumes 1 of the 25-cap. Do NOT create container-types "to test" — always via topology-doc-driven owning-app+classification decision.</constraint>
+    <constraint source="topology-doc-R5">Container-type CREATE is delegated-only. App-only receives 403. H8 must NOT attempt container-type creation with any token. Container CREATION (`/storage/fileStorage/containers`) is app-only-capable — H8-B rework uses this API.</constraint>
+    <constraint source="ADR-028-A4">BFF identity is secret-free (Managed Identity + Federated Credentials). Owning apps are E-1 exception (may carry secrets for container-type owner rotation). Do NOT extend Register-EntraAppRegistrations.ps1 in a way that seeds ANY client secret on a BFF identity.</constraint>
+    <constraint source="root-CLAUDE-md-3">Sub-Agent Write Boundary — SKILL.md + handler code + operator scripts are MAIN-SESSION-only if inside .claude/, testable in sub-agent if in src/**. This task modifies BOTH — main-session for SKILL.md; sub-agent OK for handler code (but coordination overhead makes main-session preferable for a coherent commit).</constraint>
+    <constraint source="topology-doc-3A-row-4-owner-directive-2026-08-30">Do NOT reuse `spaarke-bff-dev` (= SDAP-BFF-SPE-API `1e40baad-...`) for trial1. Create NEW `Spaarke BFF — Trial 1` app-reg per topology doc §3A row 4 + owner directive Q4.</constraint>
+  </constraints>
+
+  <acceptance-criteria>
+    <criterion>SPAARKE-SPE-CONTAINER-TYPE-TOPOLOGY.md is accessible from r1 worktree at `docs/architecture/SPAARKE-SPE-CONTAINER-TYPE-TOPOLOGY.md` (either via merge from sdap-SPE-admin-app-r2 to master OR via stopgap copy with clear provenance).</criterion>
+    <criterion>`H8SpeContainerHandler.cs` (renamed from `H8SpeContainerTypeHandler.cs`) creates a container inside the pre-existing `containerTypeId` using `graph.Storage.FileStorage.Containers.PostAsync + activate`. Tests pass.</criterion>
+    <criterion>`scripts/Create-NewContainerType.ps1` marked DEPRECATED with redirect to `SPAARKE-SPE-TOPOLOGY-SETUP-RUNBOOK.md`.</criterion>
+    <criterion>`Register-EntraAppRegistrations.ps1` supports `-CreateOwningApp Trial1|Model1|Model2` + `-CreateBffApp Trial1|Model1|{CustomerName}` with correct signInAudience per topology doc §3A (Model 2 owning app = multi-tenant; all others = single-tenant).</criterion>
+    <criterion>`docs/guides/SPAARKE-SPE-TOPOLOGY-SETUP-RUNBOOK.md` authored with the 8-step one-time setup runbook (register apps → grant consent → create container-type via delegated flow → attach billing → wait replication → populate constants → commit → verify).</criterion>
+    <criterion>SKILL.md gains a Step 0.5c topology-verify that HARD STOPs on missing owning-app / container-type / BFF app-reg with actionable messages pointing at the runbook.</criterion>
+    <criterion>SKILL.md Step 0.5b BFF App Service search fixed per task 212 Gap C (uses `{bffAppServiceRg}` + `{bffAppServiceName}` templates instead of hardcoded `platformRg`/`sprksharedprod-api*|spaarke-bff-$env` search).</criterion>
+    <criterion>Operator has completed the 8-step one-time SPE topology setup for the Trial tier in Spaarke dev tenant. `spaarke-constants.yaml per_env_constants.dev.containerTypeId` + `bffApiAppId` populated with real GUIDs.</criterion>
+    <criterion>`/provision-environment trial1 --batch runs/trial1-intake.json` progresses past Step 0.5c topology-verify successfully. Downstream HARD STOP at task 206/207 prereqs issues is expected + acceptable — that's their scope.</criterion>
+    <criterion>Task 213 completion note captures: (1) which app-reg GUIDs were created + who signed off; (2) container-type GUID + billing attachment confirmation; (3) H8 rework diff summary; (4) SKILL.md Step 0.5c code snippet; (5) verification-run output from step 213.7 smoke test.</criterion>
+  </acceptance-criteria>
+
+  <escalation>
+    <trigger>Container-type creation via SPE Admin app fails with unexpected error (not the expected 403 from app-only path — that's the KNOWN broken path). Escalate rather than debug reactively.</trigger>
+    <trigger>Cross-worktree merge coordination with sdap-SPE-admin-app-r2 blocked (owner offline, PR queue full, etc.). Escalate to operator with fallback option (b) copy-with-provenance.</trigger>
+    <trigger>Register-EntraAppRegistrations.ps1 extension surface introduces any `.WithClientSecret` site on a BFF identity — CredentialGuardTests will fail build (ADR-028 A4). Escalate rather than commit.</trigger>
+    <trigger>H8 rework tests reveal handler needs delegated (not app-only) even for container creation — topology doc §R5 says app-only is fine for container creation, but if empirical result differs, escalate rather than force app-only through.</trigger>
+    <trigger>Attempt to populate `containerTypeId` for a tier (Trial / Model 1 / Model 2) whose container-type doesn't exist yet. HARD STOP; escalate to operator (they must complete one-time setup per §213.5 runbook first).</trigger>
+  </escalation>
+
+  <knowledge>
+    <files>
+      <file>SPAARKE-SPE-CONTAINER-TYPE-TOPOLOGY.md (currently in sdap-SPE-admin-app-r2/docs/architecture/)</file>
+      <file>runs/pre-dispatch-readiness-gap-report.md</file>
+      <file>scripts/provisioning-prereqs/spaarke-constants.yaml (task 212 amended state)</file>
+      <file>scripts/provisioning-prereqs/prereqs.yaml</file>
+      <file>.claude/skills/provision-environment/SKILL.md (task 212 amended state)</file>
+      <file>.claude/adr/ADR-028-spaarke-auth-architecture.md (task 212 amended state — line 229 rewritten + line 239 RESOLVED note)</file>
+      <file>projects/customer-provisioning-orchestration-r1/CLAUDE.md (task 212 amended MUST rule)</file>
+      <file>scripts/Register-EntraAppRegistrations.ps1 (extension target)</file>
+      <file>scripts/Create-NewContainerType.ps1 (deprecation target)</file>
+      <file>src/server/services/Sprk.Provisioning.ControlPlane.Core/Handlers/SpeContainerType/H8SpeContainerTypeHandler.cs</file>
+      <file>src/server/services/Sprk.Provisioning.ControlPlane.Core/Handlers/SpeContainerType/GraphContainerTypeProvisioner.cs</file>
+    </files>
+    <patterns>
+      <pattern>.claude/patterns/provisioning/keyvault-reference-identity-invariant.md</pattern>
+      <pattern>.claude/patterns/auth/spaarke-sso-binding.md</pattern>
+    </patterns>
+  </knowledge>
+
+  <steps mode="directional">
+    <step n="1">Coordinate cross-worktree merge of SPAARKE-SPE-CONTAINER-TYPE-TOPOLOGY.md from sdap-SPE-admin-app-r2 to master (or fallback: copy-with-provenance).</step>
+    <step n="2">Rework H8 handler: rename files, swap Graph API call from ContainerTypes.PostAsync → Containers.PostAsync + activate, update DAG comment, update all tests.</step>
+    <step n="3">Mark scripts/Create-NewContainerType.ps1 DEPRECATED with runbook redirect.</step>
+    <step n="4">Extend Register-EntraAppRegistrations.ps1 for owning-app + BFF-app creation per topology §3A (correct signInAudience per row).</step>
+    <step n="5">Author docs/guides/SPAARKE-SPE-TOPOLOGY-SETUP-RUNBOOK.md (8-step operator runbook).</step>
+    <step n="6">Add SKILL.md Step 0.5c topology-verify + fix Step 0.5b BFF App Service search per task 212 Gap C.</step>
+    <step n="7">Operator executes one-time setup runbook for Trial tier in dev (register 2 app-regs + create container-type + attach billing + wait replication).</step>
+    <step n="8">Populate spaarke-constants.yaml with real GUIDs. Verify via delegated Graph probe.</step>
+    <step n="9">Smoke-test /provision-environment trial1 dispatch — expect Step 0.5c PASS + downstream HARD STOP at 206/207 issues (expected).</step>
+    <step n="10">Commit + push. Update TASK-INDEX.md 213 → ✅ + current-task.md next-task pointer.</step>
+  </steps>
+</task>

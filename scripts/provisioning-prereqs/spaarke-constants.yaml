@@ -28,27 +28,57 @@ microsoft_constants:
 
 # --- Canonical resource-name TEMPLATES (interpolated per-env at runtime) ---
 # These are BUILD RULES, not values. The skill fills {env} / {customerId} at runtime.
+#
+# 2026-08-28 SESSION 20 correction (task 212 Gap C): templates below were verified
+# against LIVE Azure state in the Spaarke dev subscription. Several templates the
+# 2026-08-27 authoring guessed were WRONG. LIVE-verified names take precedence
+# over prior conjecture. Verification: `az resource list -g rg-spaarke-platform-{env}`.
 name_templates:
   # L2 control-plane UAMI (per-env). Deploy-ControlPlane.ps1 uses this pattern.
+  # LIVE-verified 2026-08-28 dev: sprk-controlplane-dev-uami ✅
   l2UamiName: sprk-controlplane-{env}-uami
 
   # L2 control-plane App Service (per-env). Matches infrastructure/bicep/platform-controlplane.
+  # LIVE-verified 2026-08-28 dev: spaarke-provisioning-controlplane-dev ✅ (plus /staging slot + worker sibling)
   l2AppServiceName: spaarke-provisioning-controlplane-{env}
 
-  # Platform resource group (per-env). Matches customer.bicep + Deploy-ControlPlane.ps1.
+  # L2 worker sidecar (per-env). LIVE-verified 2026-08-28 dev: spaarke-provisioning-controlplane-worker-dev ✅
+  l2WorkerAppServiceName: spaarke-provisioning-controlplane-worker-{env}
+
+  # Platform resource group (per-env). LIVE-verified 2026-08-28 dev: rg-spaarke-platform-dev ✅
+  # (Note: BFF App Service lives in a DIFFERENT rg — rg-spaarke-{env} — see bffAppServiceRg below.)
   platformResourceGroup: rg-spaarke-platform-{env}
 
-  # Service Bus namespace (per-env). Matches Deploy-ControlPlane.ps1:185 default.
+  # BFF App Service RG (per-env) — added 2026-08-28 SESSION 20 task 212 Gap C.
+  # LIVE-verified 2026-08-28 dev: rg-spaarke-dev (NOT rg-spaarke-platform-dev — different RG from L2).
+  bffAppServiceRg: rg-spaarke-{env}
+
+  # BFF App Service name (per-env) — added 2026-08-28 SESSION 20 task 212 Gap C.
+  # LIVE-verified 2026-08-28 dev: spaarke-bff-dev ✅ (in rg-spaarke-dev)
+  bffAppServiceName: spaarke-bff-{env}
+
+  # Service Bus namespace (per-env). NOT VERIFIED 2026-08-28 in dev — no sb namespace
+  # visible in either rg-spaarke-platform-dev or rg-spaarke-dev at time of audit.
+  # sbNamespace template retained but consumers should tolerate absence in dev.
   sbNamespace: spaarke-servicebus-{env}
 
-  # Platform storage account for artifacts (per-env). Naming: sprk{env}artifacts (lowercase, no dash — Azure Storage rule).
-  artifactsStorageName: sprk{env}artifacts
+  # Platform storage account for artifacts (per-env). LIVE-verified 2026-08-28 dev:
+  # sprkcpartifactsdev ✅ (NOT sprk{env}artifacts as previously templated).
+  # Actual pattern: sprkcpartifacts{env} — "cp" = control-plane prefix.
+  artifactsStorageName: sprkcpartifacts{env}
 
-  # Platform ACR for L2 sidecar image (per-env).
-  acrName: sprk{env}acr
+  # Platform ACR for L2 sidecar image (per-env). LIVE-verified 2026-08-28 dev:
+  # sprkcontrolplanedevacr ✅ (NOT sprk{env}acr as previously templated).
+  # Actual pattern: sprkcontrolplane{env}acr — "controlplane" spelled out.
+  acrName: sprkcontrolplane{env}acr
 
-  # Platform KV (per-env). Matches Bicep params.
-  platformKvName: sprk-{env}-kv
+  # Platform KV (per-env). LIVE-verified 2026-08-28 dev: sprk-controlplane-dev-kv ✅
+  # (NOT sprk-{env}-kv as previously templated). The old template did NOT match any
+  # real KV in the subscription; this correction was blocking every once_per_env
+  # prereq that referenced {platformKvName} via SKILL substitution.
+  # NOTE: for prod, the actual name is sprk-platform-prod-kv (per LIVE audit) —
+  # per-env override may be needed if templating diverges further.
+  platformKvName: sprk-controlplane-{env}-kv
 
   # Registry env Dataverse URL (per-env). Per operator memory feedback_no_central_managing_env_yet,
   # spaarkedev1 doubles as engineering dev + customer registry until a central-managing env exists.
@@ -58,28 +88,54 @@ name_templates:
     demo: https://spaarke-demo.crm.dynamics.com  # placeholder; not yet provisioned
     prod: https://spaarke-registry-prod.crm.dynamics.com  # placeholder; not yet provisioned
 
-# --- Per-env unique GUIDs (require operator to populate before first provisioning run) ---
-# These are NOT derivable via az — the operator (or an install script) must set them once per env
-# and check them into this file. If null, Step 0.5b prereq checks referencing them HARD STOP with
-# an actionable error pointing here.
+# --- Per-topology / per-env values (populated by task 213 after SPE topology setup) ---
+# 2026-08-30 SESSION 20 task 212 reconciliation against SPAARKE-SPE-CONTAINER-TYPE-TOPOLOGY.md:
+#
+# CONTAINER-TYPES are PER-MODEL, not per-customer (topology doc §3 + §R1+R2 25-cap).
+# The intent for `containerTypeId` in this file has SHIFTED: it now holds ONE GUID per
+# (env × model), NOT one per customer. E.g., dev's `containerTypeId` value depends on
+# WHICH model tier is dispatching (trial / Model 1 / Model 2). Since the current dispatch
+# target is TRIAL (customerId=trial1), `containerTypeId` for `dev` here means "the
+# Spaarke Trial 1 container-type GUID" — shared across ALL trial prospects.
+#
+# BFF APP-REG is ALSO shared per-model per-env (topology doc §3A rows 4-6):
+#   - `Spaarke BFF — Trial 1`  (row 4, cardinality 1) — used by ALL trial prospects
+#   - `Spaarke BFF — Model 1` (row 5, cardinality 1) — used by ALL Model 1 customers
+#   - `Spaarke BFF — {Customer}` (row 6, cardinality 1 per Model 2 customer)
+#
+# BOTH the container-type and its OWNING app-reg are CREATED OUT-OF-BAND ONCE (per
+# topology doc §R5 delegated-only + §7 defect note — H8 as originally written cannot
+# work with app-only). Population of the values below awaits that one-time setup, which
+# is task 213's scope. HARD STOP behavior of Step 0.5b is preserved — attempting a fresh
+# dispatch before values are populated fails fast with an actionable error.
 per_env_constants:
   dev:
-    # SPE container-type GUID registered on the Spaarke tenant. Once created via Graph API,
-    # never changes (per operator directive 2026-08-24 SPE never_delete + 24h replication).
-    containerTypeId: null  # TODO: operator populate; see docs/guides/SPAARKE-CUSTOMER-DEPLOYMENT-GUIDE.md §2.4
+    # Per-model container-type GUID. For trial1 dispatch: the `Spaarke Trial 1` container-type
+    # (owned by `Spaarke SPE Trial 1 Owner` app-reg). ONCE-PER-TOPOLOGY (all trial prospects
+    # share this container-type; each gets their own container inside it). Created via
+    # delegated flow — SPE Admin app / VS Code extension / SharePoint admin center — NOT via
+    # r1 H8 as-currently-written. Populated by task 213 after one-time topology setup.
+    # See SPAARKE-SPE-CONTAINER-TYPE-TOPOLOGY.md §3 + §4 + §R5.
+    containerTypeId: null  # PENDING task 213 topology setup + population
 
-    # Model 1 multitenant BFF app-reg (per-tenancy tier). One per tier, shared across all Model 1 customers.
-    bffMultiTenantAppId: null  # TODO: operator populate after Register-EntraAppRegistrations.ps1 run
+    # Shared BFF API app-reg for this env × model. Single-tenant `AzureADMyOrg`
+    # (BFFs are always single-tenant per topology doc §3A rows 4-6; Entra-multitenancy
+    # applies ONLY to `Spaarke SPE Model 2 Owner` container-type OWNING app per row 3).
+    # For trial1 dispatch: `Spaarke BFF — Trial 1` app-reg (NEW per owner directive 2026-08-30;
+    # do NOT reuse existing `spaarke-bff-dev` = SDAP-BFF-SPE-API `1e40baad-...`). Populated
+    # by task 213 after Register-EntraAppRegistrations.ps1 extension lands.
+    bffApiAppId: null  # PENDING task 213 topology setup + population; RENAMED from `bffMultiTenantAppId` (Entra-strict-wrong name — see ADR-028 line 239 RESOLVED note)
 
-    # Base URL of the deployed BFF (used for admin-consent redirect_uri per PLX-11).
-    bffProdBase: https://spaarke-bff-dev.azurewebsites.net  # placeholder — verify against real App Service name
+    # Base URL of the deployed BFF for this env × model. For trial1: `spaarke-bff-trial1`
+    # (or agreed alternative — task 213 decides). Used for admin-consent redirect_uri (Model 2 only).
+    bffProdBase: https://spaarke-bff-dev.azurewebsites.net  # placeholder — task 213 replaces per env × model routing
 
   demo:
-    containerTypeId: null
-    bffMultiTenantAppId: null
+    containerTypeId: null  # PENDING topology setup — demo tier not yet in scope
+    bffApiAppId: null      # PENDING topology setup — demo tier not yet in scope
     bffProdBase: https://spaarke-bff-demo.azurewebsites.net
 
   prod:
-    containerTypeId: null
-    bffMultiTenantAppId: null
+    containerTypeId: null  # PENDING topology setup — prod tier not yet in scope
+    bffApiAppId: null      # PENDING topology setup — prod tier not yet in scope
     bffProdBase: https://spaarke-bff-prod.azurewebsites.net

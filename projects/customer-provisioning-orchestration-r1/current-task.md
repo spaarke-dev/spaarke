@@ -1,22 +1,22 @@
 # Current Task State — customer-provisioning-orchestration-r1
 
-> **Last Updated**: 2026-08-28 SESSION 19 END (MED#10 landed).
+> **Last Updated**: 2026-08-30 SESSION 20 END (Task 212 partially LANDED + Task 213 FILED).
 >
-> **Cumulative state**: **30 of 30 SESSION-18 adversarial verify workflow findings CLOSED** (13 HIGH + 10 MED + 4 LOW + 2 opportunistic + MED#10). Plus ISH-12 rename landed. Plus SESSION 17's 3 code partial-fix closeouts (COMP-03/06/10) landed. **~141 of ~157 total findings cumulative — pre-dispatch remediation ~90% complete.** L2 test suite: **1924 pass / 0 failed / 1 skipped** (+2 new MED#10 tests: `H13_CosmosConflict_DoesNotMutateRegistry_BucketB_MED10` + `H13_CosmosSuccess_ThenColumnsFailure_ReturnsSuccessWithLog_BucketB_MED10`).
+> **Cumulative state**: 30 of 30 SESSION-18 adversarial verify workflow findings CLOSED + MED#10 landed. 2026-08-28 first live batch-mode dispatch attempt HARD STOPPED at SKILL Step 0.5b constants sanity check. Deep audit surfaced 5 gap classes. Owner alignment on SPAARKE-SPE-CONTAINER-TYPE-TOPOLOGY.md (authored by sdap-SPE-admin-app-r2) confirmed as authoritative for r1's SPE topology. Task 212 landed the small-scope terminology + name-template + constants-rename wins; task 213 handles the substantive topology reconciliation + H8 rework.
 >
-> **Bucket B FULLY CLOSED.** No remaining SESSION-18 workflow findings.
->
-> **Next**: task 186 dispatch (`/provision-environment trial1 --batch runs/trial1-intake.json` via L3 skill) — UNBLOCKED per user "clear ALL issues" mandate now satisfied.
+> **Next**: task 213 (SPE topology reconciliation) can run PARALLEL with tasks 206 + 207. All three must land before task 186 dispatch. Full 5-gap audit + owner alignment: `runs/pre-dispatch-readiness-gap-report.md`.
 
 ## 🎯 Quick Recovery (READ THIS FIRST)
 
 | Field | Value |
 |-------|-------|
-| **Task** | Task 186 dispatch — `/provision-environment trial1 --batch runs/trial1-intake.json` |
-| **Step** | 1 of 1: invoke the L3 skill; L2 executes handlers H0 → H13 |
-| **Status** | UNBLOCKED (MED#10 landed in SESSION 19 commit `e426191eb`) |
-| **Next Action** | Invoke `/provision-environment trial1 --batch runs/trial1-intake.json` via the L3 skill (never bypass — root CLAUDE.md §4 mandatory task-execute protocol). Skill's Step 0 runs prereqs; Step 0.5 iterates `scripts/provisioning-prereqs/prereqs.yaml`; Step 1.0 loads the pre-validated intake; Step 2 preflight; Step 3 confirmation gate (literal `proceed with provisioning`); Step 4-6 execute loop + handoff. Estimated wall-clock ≤ 1h (NFR-03) absent Azure quota / SPE 24h / admin-consent lead-time gates. |
-| **MED#10 landing** | Commit `e426191eb` (SESSION 19). H13 handler now writes Cosmos-Completed FIRST, then attempts registry PATCHes best-effort. On Cosmos Conflict → return Failure Resumable with NO registry mutation attempted. On registry PATCH failure → REGISTRY-STALE warning log + Success; operator SKILL Step 6a recovery includes sprk_setupstatus. |
+| **Task** | Task 213 — SPE topology reconciliation + H8 rework (H8-B) |
+| **Step** | 1 of 10: coordinate cross-worktree topology-doc merge from sdap-SPE-admin-app-r2 |
+| **Status** | Not-started (POML authored + TASK-INDEX updated 2026-08-30 SESSION 20 END) |
+| **Next Action** | Invoke `task-execute 213` per root CLAUDE.md §4 mandatory protocol. POML: `projects/customer-provisioning-orchestration-r1/tasks/213-spe-topology-reconciliation-plus-h8-rework.poml`. Scope: (1) topology doc merge coordination; (2) H8 rework (rename H8SpeContainerTypeHandler → H8SpeContainerHandler + swap ContainerTypes.PostAsync → Containers.PostAsync + activate); (3) deprecate scripts/Create-NewContainerType.ps1 (broken §7); (4) extend Register-EntraAppRegistrations.ps1 for 6 topology-doc app-regs; (5) author docs/guides/SPAARKE-SPE-TOPOLOGY-SETUP-RUNBOOK.md; (6) SKILL Step 0.5c topology-verify; (7) operator one-time setup + constants population. Estimated 12-16h xhigh. Can run PARALLEL with 206/207. After {213 ∥ 206 ∥ 207} → 208 → 209 → dispatch. |
+| **Task 212 landing (retained context)** | Landed 2026-08-30: ADR-028 line 229/239 terminology `multi-tenant BFF` → `single-tenant Spaarke BFF` + RESOLVED note; project CLAUDE.md § MUST rule aligned; spaarke-constants.yaml name_templates corrected against LIVE Azure (`sprk-controlplane-{env}-kv`, `bffAppServiceRg`, `sprkcpartifacts{env}`, `sprkcontrolplane{env}acr`); rename `bffMultiTenantAppId` → `bffApiAppId` in 4 consumer sites (SKILL Step 0.5b/5a + context-defaults.dev.json + context-defaults.prod.json). NOT populated (deferred to 213): `containerTypeId` + `bffApiAppId` values. |
+| **Owner alignment 2026-08-30** | Q1: topology doc is authoritative for r1 ✅. Q2: neither `Spaarke Trial 1` container-type nor `Spaarke SPE Trial 1 Owner` app-reg exist yet — expected as one-time provisioning process setup ✅. Q3: H8-B (rework as container-creation, delegated to my technical call) ✅. Q4: create NEW `Spaarke BFF — Trial 1` app-reg (do NOT reuse `spaarke-bff-dev` = SDAP-BFF-SPE-API `1e40baad-...`) ✅. Q5: scope-split — 212 small + 213 substantive ✅. |
+| **MED#10 landing (retained context)** | Commit `e426191eb` (SESSION 19). H13 handler now writes Cosmos-Completed FIRST, then attempts registry PATCHes best-effort. On Cosmos Conflict → return Failure Resumable with NO registry mutation attempted. On registry PATCH failure → REGISTRY-STALE warning log + Success; operator SKILL Step 6a recovery includes sprk_setupstatus. |
 
 ### Files Modified This Session (SESSION 18)
 

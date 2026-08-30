@@ -97,7 +97,7 @@
     "bffAppId": {
       "source": "constants-per-env-operator",
       "shape": "Entra appId",
-      "populatedBy": "spaarke-constants.yaml per_env_constants.prod.bffMultiTenantAppId"
+      "populatedBy": "spaarke-constants.yaml per_env_constants.prod.bffApiAppId (RENAMED 2026-08-30 task 212 from bffMultiTenantAppId — BFFs are single-tenant per topology doc §3A rows 4-6)"
     },
     "dvUrl": {
       "source": "runtime-context",

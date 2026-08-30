@@ -96,7 +96,7 @@ Discovery report enumerates the strongest exemplars. Key ones the task POMLs ref
 Full list at [spec.md § Technical Constraints § MUST Rules](./spec.md#must-rules). Highlights that come up on EVERY task:
 
 - **MUST** register provisioning handlers in **L2 control-plane service, not the BFF** (§5.2 + D3/D8/D12)
-- **MUST NOT** create per-customer Entra tenant; use one Spaarke tenant + one multitenant BFF app (spec.md §9.1 v3)
+- **MUST NOT** create per-customer Entra tenant. Use one Spaarke Entra tenant for ALL customer envs (Model 1 shared + Model 2 spaarke-hosted + Model 2 customer-owned when customer's Azure is in Spaarke tenant). **BFF app-registrations are ALWAYS single-tenant** (`signInAudience=AzureADMyOrg`) — the only Entra-multitenant app-reg in Spaarke's topology is the `Spaarke SPE Model 2 Owner` container-type OWNING app (for Model 2 customer admin consent). See **SPAARKE-SPE-CONTAINER-TYPE-TOPOLOGY.md §3A** (currently in `sdap-SPE-admin-app-r2` worktree, pending merge to `docs/architecture/`) for the definitive app-reg topology. **Terminology alignment (task 212 SESSION 20, 2026-08-30)**: earlier phrasing "one multitenant BFF app" was Entra-strict-wrong — corrected here + ADR-028 line 229 `RESOLVED` note.
 - **MUST NOT** re-introduce Dataverse S2S app-reg (r3 task 060 dropped it; zero code consumers)
 - **MUST NOT** provision Redis per-customer **FOR MODEL 1** (Q-E FR-12; per-env via `Deploy-RedisCache.ps1`, unchanged). **MUST** provision Redis per-customer **FOR MODEL 2** (v3.6, task 128b, 2026-08-19 — `customer.bicep` is the sole Model2Dedicated template, env=customer 1:1 there, so `modules/redis.bicep` is wired unconditionally in that file)
 - **MUST** use confidential-client (app-only) token for SPE container-type creation (T6)

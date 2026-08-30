@@ -1,0 +1,28 @@
+{
+  "check": "step-0.5-pre-iteration",
+  "runId": "pre-dispatch",
+  "customerId": "trial1",
+  "controlPlaneEnv": "dev",
+  "detected": "2026-08-28T17:20:57Z",
+  "reason": "scripts/provisioning-prereqs/spaarke-constants.yaml per_env_constants.dev.containerTypeId is null AND per_env_constants.dev.bffMultiTenantAppId is null. Per SKILL.md line ~337, Step 0.5b HARD STOPS when the containerTypeId sanity check fails, because every once_per_tenant prereq recipe (PRQ-T-01, PRQ-T-02) substitutes {containerTypeId} into its az/curl payload and would produce a corrupt CLI otherwise.",
+  "gaps": [
+    {
+      "field": "per_env_constants.dev.containerTypeId",
+      "meaning": "SPE container-type GUID registered on the Spaarke tenant (never_delete: true per PRQ-T-01)",
+      "hint": "Operator identity (ralph.schroeder@spaarke.com) got Graph 403 attempting GET /beta/storage/fileStorage/containerTypes — this API needs FileStorageContainerType.Selected app-only permission, not user-delegated. Use Portal (SharePoint admin center → Advanced) OR run the enumeration script from a shell that already has an app-only Graph token for the SPE registration app."
+    },
+    {
+      "field": "per_env_constants.dev.bffMultiTenantAppId",
+      "meaning": "Multitenant BFF app-reg client-id (Model 1 shared tier). One per tier, shared across all Model 1 customers.",
+      "hint": "Look up via: az ad app list --display-name 'spaarke-bff-multitenant-dev' --query '[0].appId' -o tsv OR find in the KV secret 'BffMultiTenantAppId' if one exists. Also documented in the r1 project's design.md wherever the Model 1 tier is defined."
+    }
+  ],
+  "remedy": {
+    "step1": "Look up the two values (Portal / az / Graph as appropriate).",
+    "step2": "Edit scripts/provisioning-prereqs/spaarke-constants.yaml per_env_constants.dev.containerTypeId + per_env_constants.dev.bffMultiTenantAppId with the real GUIDs.",
+    "step3": "Commit the change (main-session-only per Sub-Agent Write Boundary — this file lives outside .claude/).",
+    "step4": "Re-invoke /provision-environment trial1 --batch runs/trial1-intake.json"
+  },
+  "docsPointer": "docs/guides/SPAARKE-CUSTOMER-DEPLOYMENT-GUIDE.md §2.4 (SPE container-type creation + GUID capture)",
+  "policy": "No skill-side auto-populate. Operator populates + reviews the constants per NFR-11 audit trail; L3 skill only reads."
+}

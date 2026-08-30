@@ -1,0 +1,136 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="212" project="customer-provisioning-orchestration-r1">
+  <metadata>
+    <title>Pre-dispatch readiness — populate spaarke-constants.yaml per_env_constants, align name_templates with LIVE azure resources, resolve Gap D (Model 1 multi-tenant BFF absent) via §6.5, and verify H8 containerTypeId runtime source (Gap E)</title>
+    <phase>Post-Live-Fire remediation — dispatch-blocking readiness gaps orthogonal to tasks 206/207/208/209</phase>
+    <gate>startable</gate>
+    <status>not-started</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Modifies operator-consumed config files (spaarke-constants.yaml) that gate every subsequent Step 0.5b run + surfaces an architectural decision under §6.5 (Gap D — multi-tenant BFF absence contradicts ADR-028) + investigates a runtime-config unknown (Gap E — H8 containerTypeId source). Skill-directives hot-path per root CLAUDE.md §10. Main-session-only per §3 (constants.yaml lives outside .claude/ but the §6.5 escalation for Gap D warrants FULL rigor).</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Mechanical for Gaps A + C (lookups + edits). Sonnet handles Gap E investigation (grep + read H8 handler code). Gap D triggers §6.5 escalation to operator — no model-side judgment needed for that surface.</model-tier-reason>
+    <effort>high</effort>
+    <effort-reason>Gap A: 2 lookups + 2 edits (30 min). Gap C: verify + correct 4 name_templates + add bffAppServiceRg override (1 h). Gap D: draft §6.5 escalation with 3 options — dispatch-single-tenant-in-dev-only, dispatch-blocked-until-multitenant-registered, or ADR-028-amendment (30 min). Gap E: grep H8SPEContainerHandler.cs for containerTypeId source + document (1 h). Verification pass: re-invoke /provision-environment trial1 in dry-run mode after fixes to confirm Step 0.5b now progresses past the constants sanity check (1 h). Total 3-4 h — sizing to 4 h to buffer the §6.5 discussion cycle.</effort-reason>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <deps>199</deps>
+    <tags>provisioning, prereqs-manifest, skill-directive, config-completeness, adr-028-tension</tags>
+    <estimated-effort>3-4h (lookups + edits + §6.5 escalation draft + Gap E investigation + verification pass)</estimated-effort>
+  </metadata>
+
+  <prompt>2026-08-28 dispatch attempt of `/provision-environment trial1 --batch runs/trial1-intake.json` HARD STOPped at SKILL Step 0.5b line ~337 constants sanity check. Deep audit surfaced 5 gap classes; 3 of them (Gap B recipe-contract, Gap C name-alignment-partial, Gap D&#8B;-forcing-function) are already scoped by tasks 206/207/208/209. This task 212 covers the remaining 4 gaps that would block dispatch even AFTER 206/207/208/209 land.
+
+Full pre-dispatch readiness report + gap analysis: [`runs/pre-dispatch-readiness-gap-report.md`](../../runs/pre-dispatch-readiness-gap-report.md)
+
+**Gap A — Populate `spaarke-constants.yaml per_env_constants.dev.*`**
+- `containerTypeId`: null → look up SPE container-type GUID via SharePoint admin center OR app-only Graph query with `FileStorageContainerType.Selected` app permission. Operator identity (user-delegated) got 403 on `GET /beta/storage/fileStorage/containerTypes` — as expected; user-delegated does not carry this scope. Populate with real GUID. Container-type is `never_delete: true` per PRQ-T-01 owner directive 2026-08-24.
+- `bffMultiTenantAppId`: null → CROSS-REFERENCES GAP D. If Gap D resolves as "use single-tenant dev BFF (existing app-reg `1e40baad-e065-4aea-a8d4-4b7ab273458c` = Spaarke BFF)", populate with that GUID + explanatory comment. If resolves as "register multi-tenant BFF for dev", populate with the new app-reg GUID after registration.
+
+**Gap C — Correct `name_templates` against LIVE Azure state**
+Verified 2026-08-28 discrepancies:
+- `platformKvName: sprk-{env}-kv` → assumes `sprk-dev-kv` for dev; ACTUAL KV in `rg-spaarke-platform-dev` is `sprk-controlplane-dev-kv`. Change template to `sprk-controlplane-{env}-kv` OR introduce per-env override.
+- BFF App Service search assumption in SKILL Step 0.5b line ~279 looks in `rg-spaarke-platform-dev` for `sprksharedprod-api*` OR `spaarke-bff-$env`; ACTUAL BFF `spaarke-bff-dev` lives in `rg-spaarke-dev` (different RG). Either add `bffAppServiceRg: rg-spaarke-{env}` per-env override to constants OR change SKILL Step 0.5b to search across RGs OR change constants to enumerate exact expected paths.
+- `artifactsStorageName: sprk{env}artifacts` and `acrName: sprk{env}acr` — UNVERIFIED. Check via `az resource list --resource-group rg-spaarke-platform-dev` and correct or accept-as-not-yet-provisioned.
+
+**Gap D — Model 1 shared multi-tenant BFF absent (ADR-028 tension, requires §6.5 escalation)**
+ADR-028 line 229 mandates: "Model 1 — shared Spaarke environment (20+ customers; ONE shared multi-tenant BFF App Service + ONE shared BFF UAMI)". Deployed reality (verified 2026-08-28):
+- Zero app-regs with `signInAudience != 'AzureADMyOrg'` in the Spaarke tenant (all 14 spaarke-* app-regs are single-tenant).
+- `spaarke-bff-dev` App Service uses `1e40baad-e065-4aea-a8d4-4b7ab273458c` (Spaarke BFF) — single-tenant.
+- The `trial1` dispatch's `tenantId=a221a95e-...` IS the Spaarke tenant, so this specific dispatch might sneak through end-to-end on the single-tenant BFF. But any real customer's tenantId will fail at H0.5 admin-consent.
+- CLAUDE.md § MUST rules: "MUST NOT create per-customer Entra tenant; use one Spaarke tenant + one multitenant BFF app (spec.md §9.1 v3)". This is a codified MUST that the dev environment doesn't satisfy.
+
+**§6.5 escalation MUST fire for this task**. Present the operator with the 3 documented paths (root CLAUDE.md §6.5):
+- **Path A (project-scoped exception)**: dispatch trial1 (and any subsequent same-tenant test runs) against single-tenant dev BFF; document as ADR-028 project-scoped exception for `env=dev` only; register multi-tenant BFF for dev before ANY real-customer Model 1 dispatch. Pros: unblocks trial1 immediately. Cons: creates a landmine — real-customer dispatch WILL fail at H0.5 unless someone remembers this exception.
+- **Path B (ADR amendment)**: amend ADR-028 to acknowledge dev tier does not require multi-tenant BFF (Model 1 is a shared-Spaarke-hosted-only design in dev). Pros: honest about reality. Cons: real customer would still need multi-tenant somewhere.
+- **Path C (pivot to comply)**: dispatch is BLOCKED until multi-tenant BFF is registered for dev; file `spaarke-dev-multitenant-bff-registration-r1` follow-on project; work through Register-EntraAppRegistrations.ps1 in multi-tenant mode + verify H0.5 admin-consent flow end-to-end. Pros: fully compliant. Cons: adds an unknown amount of work before trial1 can dispatch (probably 4-8h + Microsoft-side admin consent latency).
+
+**Gap E — H8 containerTypeId runtime source unknown**
+L2 App Service (`spaarke-provisioning-controlplane-dev`) has 13 app settings — none reference SPE or ContainerType. `sprk-controlplane-dev-kv` KV search for `SPE` or `Container` returned nothing. But H8 (SPE container creation) and H13 (acceptance verification) need this value at runtime.
+
+Investigate: `grep -rn "containerType\|ContainerType" src/server/services/Sprk.Provisioning.ControlPlane.Core/Handlers/**/*H8*`. Options:
+- (a) H8 reads from `IntakeParameters.NonSecretParameters.ContainerTypeId` → SKILL Step 4.0 payload MUST include `containerTypeId` in nonSecretParameters (currently doesn't). Add.
+- (b) H8 reads from per-customer KV secret populated by H4 → verify secret name in H4 KV manifest OR add.
+- (c) H8 reads from L2 App Service setting `SPE__ContainerTypeId` → add to L2 App Service settings via `az webapp config appsettings set`.
+- (d) H8 reads from a hardcoded constant → refactor.
+
+Document the actual answer + apply the fix. If it's (a), SKILL Step 4.0 payload block needs one-line addition. If (b) or (c), infrastructure fix. If (d), architectural code change.
+
+**Sequencing constraint**: THIS task (212) must complete BEFORE task 207 (which extends the SKILL substitution block for `{containerTypeId}` — depends on Gap A being populated) AND BEFORE task 206 (which fixes recipe exit-1 semantics that will fire against real Gap E state). Full sequence: 212 → 206 → 207 → 208 → 209 → dispatch.</prompt>
+
+  <role>Main-session operator (skill-directives + operator-config-file hot-path + §6.5 escalation authority).</role>
+
+  <goal>All four sub-gaps resolved: Gap A populated, Gap C corrected against LIVE Azure state, Gap D §6.5 escalation surfaced + operator decision captured + applied, Gap E H8 runtime source documented + fix landed. Re-invoking `/provision-environment trial1 --batch runs/trial1-intake.json` progresses past Step 0.5b constants sanity check (may still HARD STOP downstream at task-206/207-scoped Gap B issues — that's expected + is 206/207's job to resolve).</goal>
+
+  <context>
+    <background>
+      Discovery is from the first live batch-mode dispatch attempt of task 186 on 2026-08-28. The dispatch was intended to be the clean E2E Model 1 stand-up. SESSION 14 had judged Class A parseability sufficient to "unblock task 186 dispatch," but that assessment overlooked the constants sanity check in SKILL Step 0.5b which fires BEFORE the placeholder-substitution loop (Session 14's Class B/C scope). This task 212 is the corrective — plus catches the two NEW findings (Gap D architectural absence + Gap E runtime unknown) that no prior session had surfaced.
+
+      The 5 gaps + why-Fable-missed-them analysis is in [`runs/pre-dispatch-readiness-gap-report.md`](../../runs/pre-dispatch-readiness-gap-report.md). The root-cause is that isolated per-artifact review does not catch config-data-completeness, cross-artifact-naming-intersections, or architecture-vs-deployed-state gaps. A dry-dispatch integration test at Fable-time would catch all four Gap-B/C/D/E classes. That amendment to the Fable process is filed separately (see §6.5 output of this task for the follow-on POML pointer).
+    </background>
+    <relevant-files>
+      <file role="target-constants">scripts/provisioning-prereqs/spaarke-constants.yaml</file>
+      <file role="target-skill">.claude/skills/provision-environment/SKILL.md § Step 0.5b (name_templates alignment + Step 4.0 payload for Gap E option (a))</file>
+      <file role="audit-source">runs/pre-dispatch-readiness-gap-report.md</file>
+      <file role="architectural-source">.claude/adr/ADR-028-spaarke-auth-architecture.md § Model 1 line 229</file>
+      <file role="reference-must-rules">projects/customer-provisioning-orchestration-r1/CLAUDE.md § MUST rules</file>
+      <file role="investigation-target">src/server/services/Sprk.Provisioning.ControlPlane.Core/Handlers/SpeContainer/H8*.cs</file>
+    </relevant-files>
+    <dependencies>
+      <dependency task="199" status="completed">SESSION 14 baseline.</dependency>
+    </dependencies>
+    <blocks>
+      <blocks task="206">Task 206 recipe-contract remediation fixes will fire against Gap E state — better to know real source of containerTypeId before rewriting recipes.</blocks>
+      <blocks task="207">Task 207 substitution block extension depends on Gap A constants being populated (otherwise Step 0.5b sanity check still fails).</blocks>
+      <blocks task="186">Task 186 dispatch remains blocked until 212 + 206 + 207 all land.</blocks>
+    </blocks>
+  </context>
+
+  <constraints>
+    <constraint source="root-CLAUDE-md-6.5">Gap D triggers §6.5 escalation. Silent violation forbidden. Operator MUST see the 3 documented paths + choose. Do NOT self-select a path.</constraint>
+    <constraint source="root-CLAUDE-md-3">Sub-Agent Write Boundary — SKILL.md edits main-session-only. spaarke-constants.yaml is outside .claude/ but this whole task is FULL rigor so main-session is expected regardless.</constraint>
+    <constraint source="nfr-11">containerTypeId is tenant-audit-material. Populate ONLY from operator-verified lookup. Do NOT synthesize / guess / copy from an unverified source.</constraint>
+    <constraint source="adr-028">Any Path A (project-scoped exception) resolution MUST document the exception in this project's spec.md ADR Tensions section + cite in future PR descriptions + add a compensating gate that prevents accidental real-customer dispatch against single-tenant dev BFF.</constraint>
+  </constraints>
+
+  <acceptance-criteria>
+    <criterion>`scripts/provisioning-prereqs/spaarke-constants.yaml per_env_constants.dev.containerTypeId` is set to a real GUID (not null, not "TODO", not "placeholder"). Value verified via `az rest --method get --uri "https://graph.microsoft.com/v1.0/storage/fileStorage/containerTypes/{value}"` returning 200 with matching `id`.</criterion>
+    <criterion>`scripts/provisioning-prereqs/spaarke-constants.yaml per_env_constants.dev.bffMultiTenantAppId` is set to a real GUID (which one depends on Gap D resolution).</criterion>
+    <criterion>`name_templates.platformKvName` matches actual live KV name in `rg-spaarke-platform-dev` (verified via `az keyvault list -g rg-spaarke-platform-dev`).</criterion>
+    <criterion>`name_templates` OR SKILL Step 0.5b for `bffAppServiceId` derivation successfully finds `spaarke-bff-dev` in `rg-spaarke-dev` (verified end-to-end: `$bffAppServiceId` is non-null after Step 0.5b substitution).</criterion>
+    <criterion>Gap D §6.5 escalation surface presented to operator with 3 paths. Operator decision captured in this task's completion note + applied (path implementation is in-scope for THIS task if Path A; if Path C, a new follow-on POML is filed).</criterion>
+    <criterion>Gap E H8 containerTypeId runtime source is documented in a code comment at the H8 handler + the fix landed (SKILL Step 4.0 payload extension OR H4 KV secret manifest addition OR L2 app-setting addition).</criterion>
+    <criterion>Re-invoking `/provision-environment trial1 --batch runs/trial1-intake.json` progresses past Step 0.5b constants sanity check (may still HARD STOP downstream at task-206/207 issues — expected). Verification captured in this task's completion note.</criterion>
+    <criterion>Task 212 completion note includes: (1) actual values populated (GUIDs); (2) live-Azure resource-name alignment table; (3) Gap D operator decision + rationale; (4) Gap E source + fix applied; (5) verification-run output showing Step 0.5b progresses.</criterion>
+  </acceptance-criteria>
+
+  <escalation>
+    <trigger>Gap D §6.5 discussion required. Operator MUST see 3 documented paths (Path A project exception, Path B ADR amendment, Path C pivot to comply) and choose. Do NOT proceed silently past this trigger.</trigger>
+    <trigger>Operator does NOT have SPE container-type lookup credentials (SharePoint admin OR app-only Graph token). If lookup fails, escalate: operator obtains credentials out-of-band; skill dispatch remains blocked until real GUID available.</trigger>
+    <trigger>Gap E investigation reveals H8 currently has NO source for containerTypeId (option d — hardcoded or missing). This is a substantive code change; escalate rather than blindly refactor.</trigger>
+  </escalation>
+
+  <knowledge>
+    <files>
+      <file>runs/pre-dispatch-readiness-gap-report.md</file>
+      <file>scripts/provisioning-prereqs/spaarke-constants.yaml</file>
+      <file>scripts/provisioning-prereqs/prereqs.yaml</file>
+      <file>.claude/skills/provision-environment/SKILL.md</file>
+      <file>.claude/adr/ADR-028-spaarke-auth-architecture.md</file>
+      <file>projects/customer-provisioning-orchestration-r1/CLAUDE.md</file>
+    </files>
+    <patterns>
+      <pattern>.claude/patterns/auth/spaarke-sso-binding.md</pattern>
+    </patterns>
+  </knowledge>
+
+  <steps mode="directional">
+    <step n="1">Look up SPE container-type GUID (operator action — SharePoint admin center OR app-only Graph). Verify via `az rest --method get --uri "https://graph.microsoft.com/v1.0/storage/fileStorage/containerTypes/{guid}"` returns 200.</step>
+    <step n="2">Fire §6.5 escalation for Gap D — surface 3 paths to operator, capture decision.</step>
+    <step n="3">Populate `spaarke-constants.yaml per_env_constants.dev.containerTypeId` with verified GUID.</step>
+    <step n="4">Populate `spaarke-constants.yaml per_env_constants.dev.bffMultiTenantAppId` per Gap D decision.</step>
+    <step n="5">Verify actual live-Azure names for platform resources; correct `name_templates` in constants.yaml OR add per-env overrides for KV / BFF App Service RG mismatches.</step>
+    <step n="6">Grep H8 handler + H13 acceptance handler for containerTypeId source; document; apply fix (SKILL Step 4.0 nonSecretParameters extension OR H4 KV manifest OR L2 app-setting).</step>
+    <step n="7">Re-invoke `/provision-environment trial1 --batch runs/trial1-intake.json` in a fresh session. Confirm Step 0.5b progresses past constants sanity check. Capture output in completion note.</step>
+    <step n="8">Commit + push. Update TASK-INDEX.md 212 → ✅ and current-task.md next-task pointer.</step>
+  </steps>
+</task>

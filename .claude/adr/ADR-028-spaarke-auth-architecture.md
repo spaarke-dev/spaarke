@@ -226,7 +226,7 @@ Direct MSAL equivalent: `WithClientAssertion(Func<AssertionRequestOptions, Task<
 
 | Deployment | App registration | UAMI performing OBO | Credential |
 |---|---|---|---|
-| **Model 1** — shared Spaarke environment (20+ customers; ONE shared multi-tenant BFF App Service + ONE shared BFF UAMI `sprk-{env}-shared-bff-uami`) | Spaarke tenant | Spaarke tenant | ✅ **MI-FIC** — intra-tenant |
+| **Model 1** — shared Spaarke environment (20+ customers; ONE shared **single-tenant** Spaarke BFF App Service + ONE shared BFF UAMI `sprk-{env}-shared-bff-uami`. BFF app-reg `signInAudience=AzureADMyOrg` per SPE-container-type topology doc §3A row 5; Entra-multitenancy applies ONLY to the Model 2 container-type OWNING app, NOT the BFF identity — see topology doc reference in the "RESOLVED 2026-08-30" note below) | Spaarke tenant | Spaarke tenant | ✅ **MI-FIC** — intra-tenant |
 | **Model 2 — Spaarke tenant** (dedicated stamp) | Spaarke tenant | Spaarke tenant | ✅ **MI-FIC** — intra-tenant |
 | **Model 2 — customer tenant** (Azure + Dataverse + SPE + app registration all customer-side) | Customer tenant | Customer tenant | ✅ **MI-FIC** — intra-tenant |
 
@@ -236,7 +236,9 @@ Direct MSAL equivalent: `WithClientAssertion(Func<AssertionRequestOptions, Task<
 
 **MUST (standing guard)**: if any future shape cannot satisfy the same-tenant rule, fall back to a Key Vault certificate — **not** to a client secret. A client secret is the one credential a hardened customer tenant can refuse outright via Entra app-management policy. No such shape exists today, so **no certificate provisioning automation is required**.
 
-**Open (provisioning's call, does not affect feasibility)**: whether the shared Model 1 BFF authenticates as ONE shared multitenant app registration or one per customer — this decides whether onboarding creates a FIC per customer or none. See `TENANCY-AND-CREDENTIALS.md` §4.
+**RESOLVED 2026-08-30 (customer-provisioning-orchestration-r1 task 212)** — the shared Model 1 BFF authenticates as **ONE shared single-tenant Spaarke app registration** (`signInAudience=AzureADMyOrg`), NOT one per customer, NOT Entra-multitenant. Onboarding creates **no FIC per customer** on the BFF identity — a single FIC on the shared BFF app-reg covers all Model 1 customers (all customer envs live in the Spaarke Entra tenant). This is the shape called out at the SPE-container-type topology doc §3A row 5 (`Spaarke BFF — Model 1`, cardinality 1). **True Entra-multitenancy in Spaarke's topology applies to ONLY ONE app-reg**: the `Spaarke SPE Model 2 Owner` container-type OWNING app (topology doc §3A row 3), so that Model 2 customers' tenant admins can grant admin consent. BFFs are always single-tenant. Terminology reconciliation: earlier drafts of this ADR used "multi-tenant BFF" loosely to mean "shared across customer environments"; the topology doc's strict Entra-sense terminology supersedes.
+
+> **Topology doc location note (2026-08-30)**: `SPAARKE-SPE-CONTAINER-TYPE-TOPOLOGY.md` currently lives in the `sdap-SPE-admin-app-r2` worktree at `docs/architecture/SPAARKE-SPE-CONTAINER-TYPE-TOPOLOGY.md` — not yet merged to master. Once that project merges, the doc's canonical path becomes `docs/architecture/SPAARKE-SPE-CONTAINER-TYPE-TOPOLOGY.md` (same relative path from ADR: `../../docs/architecture/SPAARKE-SPE-CONTAINER-TYPE-TOPOLOGY.md`). Merge coordination is task 213's responsibility (per project INDEX cross-refs).
 
 ### Adoption status (as of 2026-08-17)
 
