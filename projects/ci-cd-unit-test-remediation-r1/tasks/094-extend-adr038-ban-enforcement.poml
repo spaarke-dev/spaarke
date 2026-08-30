@@ -1,7 +1,16 @@
 <task id="CICD-094" project="ci-cd-unit-test-remediation-r1">
   <metadata>
     <title>ADR-038 7: assess the remaining 15 bans; arm every one that can arm green (#864)</title>
-    <status>not-started</status>
+    <status>complete</status>
+    <completed date="2026-08-29">
+      5 of 17 bans armed (B1/B4 from #865; B3/B12/B16 added here). 12 documented-unenforceable, each with
+      a live count, grouped by the four distinct reasons they cannot arm. Migration cost: 4 test methods in
+      2 files (PipelineHealthTests 1, OpenAiClientConfigurationTests 3). ArchTests 136 -> 139, all green.
+      Guards armed in the same PR and verified by extracting the exact Tier 1 filter string (22 -> 25
+      selected), then proven end-to-end by seeding real violations into tests/ and confirming exactly those
+      three went red. Census: notes/094-adr038-ban-census.md; annex added to ADR-038 section 7.
+      B8 named as the strongest candidate for the next arming pass (tight signature, 7 call sites, 5 files).
+    </completed>
     <estimated-effort>4-6 hours</estimated-effort>
     <phase>4 - Deliverable defect repair (adopted 2026-08-28)</phase>
     <stream>A - CI tiering remediation</stream>
