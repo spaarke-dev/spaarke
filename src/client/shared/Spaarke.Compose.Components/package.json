@@ -73,5 +73,11 @@
     "react-dom": "^19.2.6",
     "ts-jest": "^29.4.4",
     "typescript": "^5.3.3"
+  },
+  "overridesRationale": {
+    "linkify-it": "CVE-2026-59887 (HIGH) affects linkify-it 5.0.1, reached transitively via @tiptap/core -> @tiptap/pm -> prosemirror-markdown -> markdown-it. 5.0.2 is the patch release that fixes it. An override rather than a dependency because nothing here imports linkify-it directly -- adding it as a direct dep would misrepresent the dependency graph and outlive the CVE. Remove once markdown-it's own range floats past 5.0.1. (npm rejects comment keys inside `overrides`, hence this sibling block.)"
+  },
+  "overrides": {
+    "linkify-it": "5.0.2"
   }
 }
