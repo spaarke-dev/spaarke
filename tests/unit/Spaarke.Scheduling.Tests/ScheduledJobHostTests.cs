@@ -508,7 +508,7 @@ public class ScheduledJobHostTests
     //   2. Re-enable → next-tick dispatch resumes.
     //   3. Refresh is safe to call externally (no exceptions, prior state preserved on failure).
 
-    [Fact(Skip = "CI cron-tick flake — passes locally; needs TimeProvider refactor (see PR #415)")]
+    [Fact]
     public async Task RefreshDefinitionsAsync_PicksUpDisableFlip_DispatchStopsOnNextTick()
     {
         // Arrange — fast-tick host with one enabled "every second" job.
@@ -519,11 +519,20 @@ public class ScheduledJobHostTests
         var store = new InMemoryBackgroundJobStore();
         store.AddOrReplaceJob(EverySecond("disable-mid-flight"));
 
-        var host = new ScheduledJobHost(registry, store, FastOptions(), NullLogger<ScheduledJobHost>.Instance);
+        // Un-skipped 2026-08-30. The skip said "needs TimeProvider refactor (PR #415)" — but the
+        // refactor already existed; this test had simply never adopted it. On the virtual clock the
+        // 1500 ms real sleep below becomes advanced time, so the wall-clock race cannot occur.
+        //
+        // VirtualClockOptions (30 s refresh) is REQUIRED, not incidental: TickAsync refreshes BEFORE
+        // the due-check and recomputes NextFireUtc from `now` EXCLUSIVE, so under jitter-free virtual
+        // time a refresh interval dividing the 1 s cron period starves dispatch forever. This test
+        // drives refresh EXPLICITLY, so a long refresh interval costs it nothing.
+        var (host, time) = HostWithVirtualClock(registry, store, VirtualClockOptions());
         await host.StartAsync(CancellationToken.None);
 
         // Let it fire at least once so we know it's running normally.
-        await WaitUntilAsync(() => fake.InvocationCount > 0, TimeSpan.FromSeconds(5));
+        await AdvanceUntilAsync(time, () => fake.InvocationCount > 0,
+            "the job must dispatch normally before the disable is meaningful");
         var baselineCount = fake.InvocationCount;
 
         // Act — flip Enabled=false in the store, then force-refresh.
@@ -534,8 +543,10 @@ public class ScheduledJobHostTests
         // Wait long enough that any cron-driven dispatch would have fired multiple times if
         // the disable wasn't honored — but keep it sub-second-and-a-half so test runtime stays
         // tight.
+        // Advance well past several cron periods. Without the disable this window would produce
+        // multiple dispatches, so a flat count is a real assertion rather than an absence of time.
         var countAtRefresh = fake.InvocationCount;
-        await Task.Delay(TimeSpan.FromMilliseconds(1500));
+        await AdvanceForAsync(time, TimeSpan.FromSeconds(5));
         await host.StopAsync(CancellationToken.None);
 
         // Assert — invocation count after refresh is exactly the count at refresh time
@@ -548,7 +559,7 @@ public class ScheduledJobHostTests
         baselineCount.Should().BeGreaterThan(0, "sanity — the job WAS firing before the disable");
     }
 
-    [Fact(Skip = "CI cron-tick flake — passes locally; needs TimeProvider refactor (see PR #415)")]
+    [Fact]
     public async Task RefreshDefinitionsAsync_PicksUpEnableFlip_DispatchResumesOnNextTick()
     {
         // Arrange — start with a DISABLED definition so no dispatches happen.
@@ -559,10 +570,14 @@ public class ScheduledJobHostTests
         var store = new InMemoryBackgroundJobStore();
         store.AddOrReplaceJob(EverySecond("enable-from-disabled", enabled: false));
 
-        var host = new ScheduledJobHost(registry, store, FastOptions(), NullLogger<ScheduledJobHost>.Instance);
+        // Un-skipped 2026-08-30 — same conversion as the disable-flip test above.
+        var (host, time) = HostWithVirtualClock(registry, store, VirtualClockOptions());
         await host.StartAsync(CancellationToken.None);
 
-        await Task.Delay(TimeSpan.FromMilliseconds(500));
+        // Advance past several cron periods: a disabled definition must produce nothing even when
+        // plenty of time passes. The old real-time version slept 500 ms — less than ONE cron
+        // period — so it proved almost nothing.
+        await AdvanceForAsync(time, TimeSpan.FromSeconds(3));
         fake.InvocationCount.Should().Be(0, "disabled definition must not be dispatched");
 
         // Act — flip Enabled=true + refresh.
@@ -571,10 +586,8 @@ public class ScheduledJobHostTests
         await host.RefreshDefinitionsAsync(CancellationToken.None);
 
         // Assert — host now dispatches.
-        await WaitUntilAsync(
-            () => fake.InvocationCount > 0,
-            TimeSpan.FromSeconds(5),
-            because: "after enable + refresh, the host MUST pick up the change and start dispatching");
+        await AdvanceUntilAsync(time, () => fake.InvocationCount > 0,
+            "after enable + refresh, the host MUST pick up the change and start dispatching");
 
         await host.StopAsync(CancellationToken.None);
 
@@ -640,6 +653,25 @@ public class ScheduledJobHostTests
     }
 
     /// <summary>Virtual-clock increment per <see cref="AdvanceUntilAsync"/> step (matches MaxLoopSleep).</summary>
+    /// <summary>
+    /// Advances virtual time by <paramref name="total"/> in <see cref="VirtualStep"/> increments,
+    /// yielding between each so the host loop observes every step.
+    ///
+    /// <para>Used for "and then nothing happened" assertions. Advancing in one jump would let the
+    /// host coalesce the whole span into a single tick, so a flat invocation count would prove
+    /// nothing — flat because time never appeared to pass, not because dispatch was correctly
+    /// suppressed.</para>
+    /// </summary>
+    private static async Task AdvanceForAsync(FakeTimeProvider time, TimeSpan total)
+    {
+        var steps = (int)(total.Ticks / VirtualStep.Ticks);
+        for (var i = 0; i < steps; i++)
+        {
+            time.Advance(VirtualStep);
+            await Task.Delay(1).ConfigureAwait(false);
+        }
+    }
+
     private static readonly TimeSpan VirtualStep = TimeSpan.FromMilliseconds(200);
 
     // CI runners can be 3-5x slower than local; scale the bound rather than weakening intent.
