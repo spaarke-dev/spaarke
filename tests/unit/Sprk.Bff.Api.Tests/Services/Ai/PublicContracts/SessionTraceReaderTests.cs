@@ -53,7 +53,7 @@ public class SessionTraceReaderTests
                 new(MessageId: "m-1", SessionId: sessionId, Role: ChatMessageRole.User,
                     Content: "hi", TokenCount: 1, CreatedAt: t0, SequenceNumber: 0),
             })
-        {
+        { OwnerOid = TestSessionOwner.Oid,
             ToolChains = toolChains,
             Gates = gates,
             ContextFingerprints = fingerprints,

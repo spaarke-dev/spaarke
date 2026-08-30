@@ -1,4 +1,5 @@
 using Sprk.Bff.Api.Models.Ai.Chat;
+using Sprk.Bff.Api.Services.Ai.Sessions;
 
 namespace Sprk.Bff.Api.Services.Ai.LinearConsumers;
 
@@ -78,10 +79,20 @@ public sealed class SessionFileTextSource : ISessionFileTextSource
     private readonly IRagService _ragService;
     private readonly ILogger<SessionFileTextSource> _logger;
 
-    public SessionFileTextSource(IRagService ragService, ILogger<SessionFileTextSource> logger)
+    // spaarkeai-compose-r8 FR-B02 (task 061) — lazy re-index from the durable byte copy. OPTIONAL with a
+    // default so existing unit tests construct this type unchanged; DI registers
+    // SessionFileRehydrationService unconditionally (AiPersistenceModule), so production always supplies
+    // one. Null means "no durable recovery", i.e. exactly the pre-task-061 behaviour.
+    private readonly SessionFileRehydrationService? _rehydration;
+
+    public SessionFileTextSource(
+        IRagService ragService,
+        ILogger<SessionFileTextSource> logger,
+        SessionFileRehydrationService? rehydration = null)
     {
         _ragService = ragService;
         _logger = logger;
+        _rehydration = rehydration;
     }
 
     public async Task<SessionFileText> FetchAsync(
@@ -194,6 +205,15 @@ public sealed class SessionFileTextSource : ISessionFileTextSource
 
         if (chunks.Count == 0)
         {
+            // FR-B02: neither inline text nor the hot index can answer. If a durable byte copy exists,
+            // this is the 24h-eviction state and it is recoverable — see TryRehydrateTextAsync.
+            var rehydrated = await TryRehydrateTextAsync(tenantId, sessionId, files, cancellationToken)
+                .ConfigureAwait(false);
+            if (rehydrated is not null)
+            {
+                return rehydrated;
+            }
+
             _logger.LogWarning(
                 "SessionFileTextSource: session-scoped search returned {ResultCount} chunks but none matched the allowed chunk id set (TenantId={TenantId} SessionId={SessionId}).",
                 response.Results.Count, tenantId, sessionId);
@@ -228,6 +248,95 @@ public sealed class SessionFileTextSource : ISessionFileTextSource
     /// output shape. This keeps the SUM-CHAT@v1 prompt's file-boundary references stable
     /// regardless of whether text came inline or from RAG.
     /// </summary>
+
+    /// <summary>
+    /// spaarkeai-compose-r8 FR-B02 (task 061) — last resort when neither inline text nor the hot index
+    /// can answer: rebuild each text-less file from its durable byte copy and use the RECOVERED TEXT
+    /// directly.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <b>Why this is last and not first.</b> Rehydration costs a document re-extraction per file. It is
+    /// attempted only once the inline path and the index path have both produced nothing — which, given
+    /// the cleanup job evicts a session's chunks all-or-nothing at its 24h Redis TTL while
+    /// <c>ChatSessionFile.ExtractedText</c> is dropped on the Cosmos round trip (it is not a field on
+    /// <c>StoredUploadedFile</c>), is exactly the reopened-after-a-day state this track exists to fix.
+    /// </para>
+    /// <para>
+    /// <b>Why the text is used directly rather than re-searching.</b> The rehydration also rebuilds the
+    /// hot index, but Azure AI Search does not make that write immediately queryable — the same
+    /// index-catchup race R7 Wave 12.3 hit on the upload path, and the reason inline text was introduced
+    /// there. Using the text we just recovered removes the race from this path entirely; the rebuilt
+    /// index still benefits every later consumer.
+    /// </para>
+    /// <para>
+    /// All-or-nothing on purpose: a partial answer here would silently summarise a subset of the
+    /// requested files, which is worse than reporting nothing.
+    /// </para>
+    /// </remarks>
+    private async Task<SessionFileText?> TryRehydrateTextAsync(
+        string tenantId,
+        string sessionId,
+        IReadOnlyList<ChatSessionFile> files,
+        CancellationToken cancellationToken)
+    {
+        if (_rehydration is null || !_rehydration.IsAvailable)
+        {
+            return null;
+        }
+
+        var recovered = new List<ChatSessionFile>(files.Count);
+        foreach (var file in files)
+        {
+            if (!string.IsNullOrWhiteSpace(file.ExtractedText))
+            {
+                recovered.Add(file);
+                continue;
+            }
+
+            SessionFileRehydrationResult result;
+            try
+            {
+                result = await _rehydration
+                    .RehydrateAsync(tenantId, sessionId, file, cancellationToken)
+                    .ConfigureAwait(false);
+            }
+            catch (Exception ex) when (ex is not OperationCanceledException)
+            {
+                _logger.LogWarning(ex,
+                    "SessionFileTextSource: lazy re-index threw for FileId={FileId}: {ErrorType}",
+                    file.FileId, ex.GetType().Name);
+                return null;
+            }
+
+            if (string.IsNullOrWhiteSpace(result.ExtractedText))
+            {
+                _logger.LogInformation(
+                    "SessionFileTextSource: no durable text recovered for FileId={FileId}. Outcome={Outcome}",
+                    file.FileId, result.Outcome);
+                return null;
+            }
+
+            recovered.Add(file with { ExtractedText = result.ExtractedText });
+        }
+
+        var text = recovered.Count == 1
+            ? recovered[0].ExtractedText!
+            : BuildMultiFileInlineText(recovered);
+
+        _logger.LogInformation(
+            "SessionFileTextSource: recovered {FileCount} file(s) from the durable store after the hot " +
+            "index returned nothing ({TextChars} chars). TenantId={TenantId}, SessionId={SessionId}",
+            recovered.Count, text.Length, tenantId, sessionId);
+
+        return new SessionFileText
+        {
+            ExtractedText = text,
+            DisplayName = recovered.Count == 1 ? recovered[0].FileName : "session-files-combined",
+            ChunkCount = 0,
+        };
+    }
+
     private static string BuildMultiFileInlineText(IReadOnlyList<ChatSessionFile> files)
     {
         var sb = new System.Text.StringBuilder();

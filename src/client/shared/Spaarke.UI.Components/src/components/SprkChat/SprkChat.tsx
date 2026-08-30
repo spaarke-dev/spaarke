@@ -162,6 +162,19 @@ const useStyles = makeStyles({
     flexDirection: 'column',
     ...shorthands.gap(tokens.spacingVerticalS),
     ...shorthands.padding(tokens.spacingVerticalM, tokens.spacingHorizontalM),
+    // UAT 2026-08-26 (spaarkeai-compose-r8): content below the last proactive card was clipped and
+    // UNREACHABLE BY SCROLLING. Cause: this scroll region is ITSELF a column flex container, so its
+    // children are flex items defaulting to `flex-shrink: 1`. Per CSS Flexbox §4.5 an item whose
+    // computed `overflow` is not `visible` has an automatic minimum size of ZERO — so the transcript's
+    // excess height was absorbed by CRUSHING the footer items that set `overflow: hidden` (the
+    // proactive-card panels, and Fluent's <Button> reset style) instead of by scrolling this container.
+    // scrollHeight therefore never exceeded clientHeight and there was nothing to scroll TO.
+    // NOTE: this is NOT the `minHeight: 0` problem fixed above — that one is real and still needed;
+    // these are two independent flex failures on the same element.
+    '& > *': { flexShrink: 0 },
+    // Breathing room so the final footer row never sits flush against the composer. Must follow the
+    // `shorthands.padding` spread above to win.
+    paddingBottom: tokens.spacingVerticalXXL,
     position: 'relative',
     // FIX 2 (Phase 0, spaarkeai-assistant-enhancements-r2): thin, light-gray,
     // theme-aware scrollbar — the SAME canonical style ConversationView uses

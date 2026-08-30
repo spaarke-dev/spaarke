@@ -17,7 +17,6 @@
   },
   "dependencies": {
     "@azure/msal-browser": "^4.26.2",
-    "ajv": "^8.20.0",
     "ajv-keywords": "^5.1.0"
   },
   "devDependencies": {
@@ -38,6 +37,7 @@
     "react": "^16.14.0",
     "react-dom": "^16.14.0",
     "typescript": "^5.8.3",
-    "typescript-eslint": "^8.31.0"
+    "typescript-eslint": "^8.31.0",
+    "ajv": "^8.20.0"
   }
 }

@@ -42,8 +42,8 @@ public class AnalysisChatContextEndpointsTests : IClassFixture<CustomWebAppFacto
         PropertyNameCaseInsensitive = true,
     };
 
-    // Task 070 repair: endpoint reads tenantId from `tid` JWT claim OR X-Tenant-Id header.
-    // FakeAuthHandler does not inject `tid`; tests pass tenant via the header fallback path.
+    // Task 059: the endpoint reads tenantId from the `tid` JWT claim and nothing else. This is the
+    // value FakeAuthHandler now injects (WorkspaceTestConstants.TestTenantId).
     private const string TestTenantId = "test-tenant-001";
 
     private readonly HttpClient _client;
@@ -54,14 +54,11 @@ public class AnalysisChatContextEndpointsTests : IClassFixture<CustomWebAppFacto
     }
 
     /// <summary>
-    /// Builds a request with the X-Tenant-Id header set. The endpoint uses this
-    /// when no `tid` claim is available (the FakeAuthHandler does not set `tid`).
+    /// Pass-through retained so the call sites below still read as "this request carries a tenant".
+    /// It no longer SETS anything: task 059 gave FakeAuthHandler the `tid` claim a real Entra token
+    /// always carries, so the tenant now arrives the way production delivers it.
     /// </summary>
-    private static HttpRequestMessage WithTenantHeader(HttpRequestMessage request)
-    {
-        request.Headers.Add("X-Tenant-Id", TestTenantId);
-        return request;
-    }
+    private static HttpRequestMessage WithTenantHeader(HttpRequestMessage request) => request;
 
     // =========================================================================
     // Endpoint Registration Tests (ADR-001 — Minimal API)

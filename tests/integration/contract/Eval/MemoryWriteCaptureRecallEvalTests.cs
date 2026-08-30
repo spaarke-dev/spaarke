@@ -222,7 +222,7 @@ public class MemoryWriteCaptureRecallEvalTests
             PlaybookId: null,
             CreatedAt: now,
             LastActivity: now,
-            Messages: new List<global::Sprk.Bff.Api.Models.Ai.Chat.ChatMessage>())).GetAwaiter().GetResult();
+            Messages: new List<global::Sprk.Bff.Api.Models.Ai.Chat.ChatMessage>()) { OwnerOid = TestSessionOwner.Oid }).GetAwaiter().GetResult();
 
         var services = new ServiceCollection();
         services.AddSingleton<ITenantCache>(cache);

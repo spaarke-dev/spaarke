@@ -1,0 +1,111 @@
+﻿<?xml version="1.0" encoding="UTF-8"?>
+<task id="014" project="spaarkeai-compose-r8">
+  <metadata>
+    <title>FR-S07 — A re-anchor path that cannot re-download current bytes MUST NOT persist the load-time baseline</title>
+    <phase>1 Track S — Save Reliability (P0, ships alone)</phase>
+    <gate>startable</gate>
+    <status>completed</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Data-loss defect on the engine side of the save path; modifies ComposeService's baseline resolution.</rigor-reason>
+    <model-tier>opus</model-tier>
+    <model-tier-reason>Capability-matched: this is the ONE Half-A (engine) defect in Track S, and its failure mode is the worst in the project — silently overwriting a newer version with pre-edit content. The bug is a fallback that looks defensive (proceed with what we have) but is actually destructive. Distinguishing a safe fallback from a destructive one requires reasoning about what the fallback value MEANS, not just whether the code runs.</model-tier-reason>
+    <effort>xhigh</effort>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Modifies ComposeService baseline resolution — shared with tasks 011 and 040.</parallel-reason>
+    <deps>none</deps>
+    <tags>bff-api, compose, save-path, testing</tags>
+    <estimated-effort>4 hours</estimated-effort>
+  </metadata>
+
+  <prompt>
+    On the re-anchor path (document was edited in Word, or the version moved), Compose re-downloads the
+    current bytes to rebase against. If that download FAILS, the current code falls back to the
+    **load-time baseline** — the bytes as they were when the editor opened — and proceeds to save.
+
+    That silently overwrites a newer version with pre-edit content. It is the only data-destroying defect in
+    Track S, and it is on the engine side rather than the client side, which is why it survived a project
+    whose other nine save defects are all client-contract issues.
+
+    The fallback must be REMOVED, not made more careful. A re-anchor that cannot obtain current bytes has no
+    valid basis for a save and must terminate in a defined outcome (task 013's enum) that tells the user
+    exactly that.
+  </prompt>
+
+  <role>SPAARKE backend developer. Expert in `ComposeService.SaveAsync`, `ResolveSaveBaselineAsync`, and the re-anchor path. Follow ADR-007 (SpeFileStore facade), ADR-009 and ADR-049.</role>
+
+  <goal>
+    No save can persist content derived from a baseline older than the version it is about to overwrite.
+    A failed re-download terminates in a defined, user-visible outcome. The load-time-baseline fallback is
+    deleted from the re-anchor path.
+  </goal>
+
+  <context>
+    <background>
+      Verified 2026-08-19 by the Fable review (design.md §3, S-7). The projection-failure fallback at
+      ComposeService.cs ~:608-613 and the baseline resolution around ~:1227 are the relevant regions — read
+      both, because the destructive path is the interaction between them, not either alone. This defect is
+      also the reason the R8 invariant "every save terminates in a defined outcome" is stated as a MUST that
+      no future amendment may trade away singly: a fallback that keeps the save alive at the cost of
+      correctness is exactly the trade this invariant forbids.
+    </background>
+    <relevant-files>
+      <file role="primary-edit">src/server/api/Sprk.Bff.Api/Services/Compose/ComposeService.cs</file>
+      <file role="canonical-reference">src/server/api/Sprk.Bff.Api/Services/Compose/ComposeService.cs (ResolveSaveBaselineAsync)</file>
+      <file role="canonical-reference">src/server/api/Sprk.Bff.Api/Services/Compose/AnnotationReanchorService.cs</file>
+      <file role="test">tests/integration/seam/Compose/</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="project">MUST DELETE the load-time-baseline fallback on the re-anchor path — not guard it, not log it, not feature-flag it. A conditional destructive path is still a destructive path.</constraint>
+    <constraint source="project">The failure MUST map to a member of task 013's closed outcome enum. Do NOT invent a local outcome shape.</constraint>
+    <constraint source="project">MUST NOT touch `AnnotationReanchorService` — it is the ADR-sanctioned return-from-Word fuzzy re-anchor and is explicitly KEEP (spec FR-C04). This task changes what happens when the DOWNLOAD fails, not how re-anchoring works.</constraint>
+    <constraint source="ADR-007">Byte retrieval stays behind the `SpeFileStore` facade; no Graph types above it. Scope: the download path inspected/changed here.</constraint>
+    <constraint source="ADR-049">MUST NOT reintroduce save-time anchor reconciliation or any HTTP 422 content-refusal as the failure mode. The outcome is a defined save outcome, not a content refusal.</constraint>
+    <constraint source="ADR-038">Seam test in `tests/integration/seam/**` driving a genuine download failure. MUST NOT use `Mock&lt;HttpMessageHandler&gt;`.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>compose baseline resolution, re-anchor, data integrity</topic>
+    <files>
+      <file>.claude/adr/ADR-007-spe-storage-seam-minimalism.md</file>
+      <file>.claude/adr/ADR-049-compose-shadow-document.md</file>
+      <file>docs/architecture/COMPOSE-READ-REFERENCE-FIDELITY.md</file>
+      <file>docs/standards/TEST-ARCHITECTURE.md</file>
+      <file>projects/spaarkeai-compose-r8/spec.md</file>
+      <file>projects/spaarkeai-compose-r8/CLAUDE.md</file>
+    </files>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="0" name="Rigor declaration">Declare rigor FULL; load spec.md, CLAUDE.md, ADR-049.</step>
+    <step order="1">Trace the re-anchor path end-to-end: where current bytes are requested, what happens on failure, and which baseline value reaches the renderer. Read ~:608-613 and ~:1227 and the code between them.</step>
+    <step order="2">Confirm empirically (hand-trace or a scratch test) that a download failure DOES currently reach a save with the load-time baseline — do not fix a defect you have not reproduced (bff-extensions.md § F.3).</step>
+    <step order="3">Delete the fallback. Route the failure to task 013's outcome enum with a cause that names the download failure.</step>
+    <step order="4">Verify no OTHER path reaches the renderer with a stale baseline — grep for every assignment to the baseline variable and confirm each one is either the freshly-downloaded bytes or a terminal failure.</step>
+    <step order="5">Seam test: force the current-bytes download to fail on the re-anchor path; assert (a) no write occurred, (b) the outcome is the defined failure member, (c) the stored version is unchanged.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If removing the fallback makes a legitimate, non-destructive scenario fail (e.g. a first save of an Authored document where there is genuinely no prior version to download), that scenario needs its own branch rather than sharing the fallback — surface it before broadening the deletion.</trigger>
+  </escalation>
+
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Compose/ComposeService.cs</output>
+    <output type="test">tests/integration/seam/Compose/</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion>A re-anchor whose current-bytes download fails performs NO write and leaves the stored version unchanged.</criterion>
+    <criterion>That failure returns a defined member of task 013's outcome enum, with a cause naming the download failure.</criterion>
+    <criterion>The load-time-baseline fallback is DELETED from the re-anchor path — verified by grep.</criterion>
+    <criterion>Every assignment to the baseline used by the renderer is either freshly-downloaded bytes or a terminal failure — enumerated in the task notes.</criterion>
+    <criterion>The defect was reproduced empirically BEFORE the fix, and the reproduction is recorded (bff-extensions.md § F.3).</criterion>
+    <criterion>NEGATIVE: `AnnotationReanchorService` is unmodified.</criterion>
+    <criterion>NEGATIVE: no HTTP 422 content-refusal was introduced (ADR-049).</criterion>
+    <criterion>NEGATIVE: a re-anchor whose download SUCCEEDS still saves normally (no regression on the healthy path).</criterion>
+    <criterion>A seam test drives a genuine download failure without `Mock&lt;HttpMessageHandler&gt;`.</criterion>
+    <criterion>Publish size reported (absolute + delta vs 44.96 MB); no new NuGet; no new HIGH CVE.</criterion>
+  </acceptance-criteria>
+</task>

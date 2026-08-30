@@ -44,6 +44,13 @@ public static class TelemetryModule
                 // Warning per ADR-015 D-06) alertable. Without this, the ttl:null → 400 regression
                 // froze History + memory for 11 days with no failing request and no read signal.
                 metrics.AddMeter(Sprk.Bff.Api.Telemetry.CosmosPersistenceTelemetry.MeterName);
+                // Compose save-outcome counter (spaarkeai-compose-r8 task 013, FR-S10): one increment
+                // per terminal save state, tagged outcome + bounded cause. R5/R6/R7 each shipped with
+                // the save button dead for some document class and the discovery mechanism was owner
+                // UAT — there was no metric that could have gone red. MUST stay registered: an
+                // unregistered meter is silently dropped from the App Insights export (the trap the AI
+                // redesign's task 054 found for the Event Rules meter, which existed unregistered).
+                metrics.AddMeter(Sprk.Bff.Api.Telemetry.ComposeSaveTelemetry.MeterName);
             })
             .WithTracing(tracing =>
             {

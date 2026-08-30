@@ -1,0 +1,110 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="072" project="spaarkeai-compose-r8">
+  <metadata>
+    <title>FR-D01 — Decompose ComposeDocumentRenderer.cs (2,304 lines) below 2,000 and DELETE its god-class waiver</title>
+    <phase>7 Track D — God-Class Removal</phase>
+    <gate>blocked-on-040</gate>
+    <status>pending</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Restructures the single body author, immediately after the merge landed in it.</rigor-reason>
+    <model-tier>opus</model-tier>
+    <model-tier-reason>Capability-matched: this file must remain the ONE body author (ADR-049 I-5) while being split — the exact refactor where extracting a helper that writes body children silently creates a second author and satisfies the line count by violating the invariant. Recognizing that boundary is the work.</model-tier-reason>
+    <effort>xhigh</effort>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>The body author; task 040's merge lives here.</parallel-reason>
+    <deps>040</deps>
+    <tags>bff-api, compose, refactor, testing</tags>
+    <estimated-effort>8 hours</estimated-effort>
+  </metadata>
+
+  <prompt>
+    `ComposeDocumentRenderer.cs` is 2,304 lines and frozen. Bring it below 2,000 and DELETE its waiver entry.
+
+    Note that task 040 already extracted the merge into a collaborator file, so part of the reduction may
+    already be done — measure before planning, and if it is already under 2,000, this task is the waiver
+    deletion plus verification, not a refactor for its own sake.
+
+    The binding constraint: **exactly one body author** (ADR-049 I-5). Extracted collaborators may build
+    elements, compute properties, or decide strategy — but only the renderer writes body children. A helper
+    that appends to `w:body` is a second author, and satisfying the line count that way defeats the invariant
+    the whole project just fought to make literally true.
+  </prompt>
+
+  <role>SPAARKE backend developer. Expert in behavior-preserving refactoring and the Compose render path. Follow ADR-049 I-5, ADR-010 and ADR-038.</role>
+
+  <goal>
+    `ComposeDocumentRenderer.cs` is under 2,000 lines with its waiver deleted, exactly one body author remains,
+    and the fidelity gate holds at its post-task-040 numbers.
+  </goal>
+
+  <context>
+    <background>
+      ADR-049 I-5 ("one body author") only became literally true in R8 — R4's patch engine was a second
+      author, and R6 demoted rather than removed it. Task 074 finishes that. This task must not undo it from
+      the other direction by splitting the author itself.
+    </background>
+    <relevant-files>
+      <file role="primary-edit">src/server/api/Sprk.Bff.Api/Services/Compose/ComposeDocumentRenderer.cs</file>
+      <file role="primary-edit">tests/Spaarke.ArchTests/GodClassGuardTests.cs</file>
+      <file role="canonical-reference">.claude/patterns/testing/god-class-ratchet.md</file>
+      <file role="canonical-reference">tests/integration/seam/Compose/ComposeFidelityGateHarnessTests.cs</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-049 I-5">EXACTLY ONE body author. Extracted collaborators may build elements or compute properties, but MUST NOT write body children. Verify by reading every extraction.</constraint>
+    <constraint source="ADR-010">Internal collaborators or partial classes — NOT new DI registrations.</constraint>
+    <constraint source="god-class-ratchet">DELETE the waiver entry; do not re-baseline.</constraint>
+    <constraint source="project">Behavior-preserving ONLY. The fidelity gate must hold at exactly its post-task-040 numbers — a change in either direction means behavior moved.</constraint>
+    <constraint source="project">Measure the file FIRST. If task 040's merge extraction already brought it under 2,000, do not refactor further for its own sake — delete the waiver and verify.</constraint>
+    <constraint source="project">MUST NOT introduce `body.Descendants&lt;Paragraph&gt;()` anywhere while restructuring.</constraint>
+    <constraint source="ADR-038">Existing tests pass unchanged. No DI-registration or ctor-null tests for new collaborators.</constraint>
+    <constraint source="ADR-029">Report publish size. No new NuGet. `/conflict-check` before the PR.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>render path, one-body-author invariant, god-class ratchet</topic>
+    <files>
+      <file>.claude/patterns/testing/god-class-ratchet.md</file>
+      <file>.claude/adr/ADR-049-compose-shadow-document.md</file>
+      <file>.claude/adr/ADR-010-di-minimalism.md</file>
+      <file>projects/spaarkeai-compose-r8/spec.md</file>
+      <file>projects/spaarkeai-compose-r8/CLAUDE.md</file>
+    </files>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="0" name="Rigor declaration">Declare rigor FULL; load spec.md, CLAUDE.md, ADR-049, god-class-ratchet.md.</step>
+    <step order="1">Measure the file's current line count post-task-040. If already under 2,000, skip to step 5.</step>
+    <step order="2">Record the fidelity gate's current numbers as the equivalence baseline.</step>
+    <step order="3">Identify seams that do NOT write body children: element construction, property computation, strategy selection, warning emission.</step>
+    <step order="4">Extract one seam at a time, re-running the gate after each and verifying no extraction writes body children.</step>
+    <step order="5">Confirm under 2,000; delete the waiver entry.</step>
+    <step order="6">ArchTests, seam suite and fidelity gate green at the recorded baseline numbers.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If the file cannot reach 2,000 lines without extracting something that writes body children, surface it — ADR-049 I-5 is a MUST and FR-D01's line target does not override it. This is a §6.5 situation.</trigger>
+    <trigger>Fidelity gate numbers move in either direction — behavior changed; reconcile before proceeding.</trigger>
+  </escalation>
+
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Compose/ComposeDocumentRenderer.cs</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Compose/ (new collaborator files)</output>
+    <output type="test">tests/Spaarke.ArchTests/GodClassGuardTests.cs</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion>`ComposeDocumentRenderer.cs` is under 2,000 lines.</criterion>
+    <criterion>Its waiver entry is DELETED — not re-baselined.</criterion>
+    <criterion>Exactly one body author remains — no extracted collaborator writes body children (verified by reading each extraction).</criterion>
+    <criterion>The fidelity gate holds at exactly its post-task-040 numbers.</criterion>
+    <criterion>ArchTests and the Compose seam suite are green.</criterion>
+    <criterion>The DI registration count did not increase.</criterion>
+    <criterion>NEGATIVE: no second body author was created to satisfy the line count.</criterion>
+    <criterion>NEGATIVE: no `body.Descendants&lt;Paragraph&gt;()` introduced (grep).</criterion>
+    <criterion>NEGATIVE: no DI-registration or ctor-null tests added.</criterion>
+    <criterion>`/conflict-check` run; publish size reported; no new NuGet; no new HIGH CVE.</criterion>
+  </acceptance-criteria>
+</task>

@@ -721,6 +721,9 @@ public class ChatEndpointsTestFixture : WebApplicationFactory<Program>
 
         builder.ConfigureTestServices(services =>
         {
+            // Test hosts must not authenticate for real — see TestTokenCredential.
+            services.UseStubTokenCredential();
+
             // ---------------------------------------------------------------
             // Remove real service registrations and replace with test doubles
             // ---------------------------------------------------------------
@@ -901,10 +904,24 @@ public class ChatEndpointsTestFixture : WebApplicationFactory<Program>
         builder.UseEnvironment("Testing");
     }
 
+    /// <summary>
+    /// A client authenticated as <see cref="IntegrationTestConstants.TestUserId"/> unless a caller
+    /// asks for someone else.
+    /// </summary>
+    /// <remarks>
+    /// The default used to be <c>Guid.NewGuid()</c> — a FRESH oid per client. Entra never does that:
+    /// an oid is stable per user per tenant, and that stability is the entire property that makes it
+    /// an ownership key. A random default meant every suite silently exercised "session created by
+    /// one user, read by another" on every call, which nothing noticed while nothing checked
+    /// ownership. #863 added the check, and 22 tests here turned 404 — the guard was right and the
+    /// fixture was wrong (bff-extensions.md §F.2). Tests that genuinely need a SECOND user still
+    /// pass <paramref name="userId"/> explicitly, so this default only changes callers that did not
+    /// care who they were.
+    /// </remarks>
     public HttpClient CreateAuthenticatedClient(string tenantId, string? userId = null)
     {
         var client = CreateClient();
-        var token = GenerateTestJwt(tenantId, userId ?? Guid.NewGuid().ToString());
+        var token = GenerateTestJwt(tenantId, userId ?? IntegrationTestConstants.TestUserId);
         client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", token);
         return client;
     }
@@ -944,7 +961,7 @@ public class ChatEndpointsTestFixture : WebApplicationFactory<Program>
                     new Sprk.Bff.Api.Models.Ai.Chat.ChatMessage(
                         "msg-002", TestSessionId, ChatMessageRole.Assistant,
                         "Hi there!", 10, now.AddMinutes(-1), 2)
-                ]));
+                ]) { OwnerOid = IntegrationTestConstants.TestUserId });
 
         // GetSessionAsync — returns null for any other session ID (triggers 404)
         MockDataverseRepository
@@ -970,7 +987,7 @@ public class ChatEndpointsTestFixture : WebApplicationFactory<Program>
                 PlaybookId: TestPlaybookId,
                 CreatedAt: now,
                 LastActivity: now,
-                Messages: Array.Empty<Sprk.Bff.Api.Models.Ai.Chat.ChatMessage>()));
+                Messages: Array.Empty<Sprk.Bff.Api.Models.Ai.Chat.ChatMessage>()) { OwnerOid = IntegrationTestConstants.TestUserId });
 
         // ArchiveSessionAsync — no-op (called by DeleteSessionAsync)
         MockDataverseRepository

@@ -180,6 +180,121 @@ public static class AiPersistenceModule
         // The summary is written alongside verbatim messages — no messages are ever deleted.
         services.AddScoped<ISessionSummarizationService, SessionSummarizationService>();
 
+        // spaarkeai-compose-r8 FR-B01 (task 060): SessionFileBlobStore — the durable, tenant-partitioned
+        // byte copy of every chat session upload. THE ONE new DI registration this project adds
+        // (spec §11 table); ADR-010 budget delta is +1.
+        //
+        // UNCONDITIONAL by design (ADR-032 P1 "promote-to-unconditional"): the store is injected into
+        // ChatDocumentEndpoints handlers, and MapChatDocumentEndpoints() is mapped unconditionally
+        // (EndpointMappingExtensions.cs:228). A feature-gated registration here would break that
+        // mapping whenever the gate was off — the asymmetric-registration failure ADR-032 exists to
+        // prevent. (Blast radius, stated precisely: that Map call is wrapped in a try/catch at
+        // EndpointMappingExtensions.cs:228-233, so the symptom would be a SILENTLY UNAVAILABLE upload
+        // surface plus one logged error, not a host-down.) There is therefore NO `if (flag)` block and
+        // NO null-object peer: the store has zero feature-gated transitive deps (TokenCredential +
+        // ILogger + two config strings), so P1 is the correct pattern, not P2/P3.
+        //
+        // The "no blob endpoint configured" case is a RUNTIME state inside the store (writes return
+        // SessionFileStoreOutcome.StoreDisabled and log a warning), not a DI state — so local dev and
+        // every test host resolve the same concrete type that production does.
+        //
+        // Singleton: BlobServiceClient/BlobContainerClient are thread-safe and designed for long-lived
+        // reuse (same rationale as the CosmosClient singleton above). Managed identity only — the
+        // shared TokenCredential; no connection string, no account key (root CLAUDE.md §9).
+        var sessionFileBlobEndpoint = configuration[SessionFileBlobStore.BlobEndpointConfigKey];
+        var sessionFileContainer = configuration[SessionFileBlobStore.ContainerNameConfigKey];
+
+        // Validate HERE, not only in the ctor. The registration below is a factory lambda, so the ctor
+        // does not run until the first upload request — a secret-bearing, non-https or malformed endpoint
+        // would otherwise surface as a 500 on a user request (and on every request after, since the
+        // container does not cache a failed singleton) with no startup signal at all. This call runs
+        // during composition, so a misconfiguration stops the host instead.
+        if (!string.IsNullOrWhiteSpace(sessionFileBlobEndpoint))
+        {
+            SessionFileBlobStore.ValidateConfiguration(sessionFileBlobEndpoint, sessionFileContainer, out _);
+        }
+
+        services.AddSingleton(sp => new SessionFileBlobStore(
+            blobEndpoint: sessionFileBlobEndpoint,
+            containerName: sessionFileContainer,
+            credential: sp.GetRequiredService<TokenCredential>(),
+            logger: sp.GetRequiredService<ILogger<SessionFileBlobStore>>()));
+
+        // spaarkeai-compose-r8 FR-B02 (task 061): SessionFileRehydrationService - the LAZY re-index that
+        // makes the durable copy above actually do something. Without it, task 060 writes bytes nothing
+        // ever reads and a day-60 recall still returns nothing.
+        //
+        // UNCONDITIONAL, for the same ADR-032 P1 reason as the store: its consumers
+        // (RecallSessionFileHandler, SessionFileTextSource) are registered on paths that do not share
+        // this service's feature gates, so a conditional registration here would be the asymmetric
+        // pattern F.1 exists to catch. The two collaborators that ARE conditional
+        // (RagIndexingPipeline via the DocumentIntelligence gate, ITextExtractor via the same gate's
+        // Null-Object peer) are resolved with GetService and handled as runtime state INSIDE the
+        // service - it reports StoreDisabled / Unavailable / TextOnly rather than failing to resolve.
+        // That keeps the DI graph symmetric in every configuration.
+        //
+        // Concrete class, no interface: ADR-010 forbids a 1:1 seam with no multi-implementation need.
+        // Singleton: all three collaborators are singletons and the service holds no per-request state.
+        //
+        // ADR-010 budget: this is the project's SECOND registration (the store above was the first, and
+        // spec section 11 budgeted one). The alternative shapes were worse, not cheaper - see the
+        // service's own section-11 gate in its XML docs, and task 061's report.
+        services.AddSingleton(sp => new SessionFileRehydrationService(
+            durableStore: sp.GetRequiredService<SessionFileBlobStore>(),
+            textExtractor: sp.GetService<Sprk.Bff.Api.Services.Ai.ITextExtractor>(),
+            indexingPipeline: sp.GetService<Sprk.Bff.Api.Services.Ai.RagIndexingPipeline>(),
+            logger: sp.GetRequiredService<ILogger<SessionFileRehydrationService>>()));
+
+        // spaarkeai-compose-r8 FR-B04 (task 062): SessionFileRetentionJob — the expiry pass that makes a
+        // durable copy's lifetime follow its SESSION's retention (90-day default for unfiled, INDEFINITE
+        // for filed, StoredSession.Ttl == -1). Without it the bytes tasks 060/061 write never expire at
+        // all, ADR-015's "MUST define retention and deletion behavior" stays unmet, and the mechanical
+        // gate holding SessionFileStore:BlobEndpoint empty can never be lifted.
+        //
+        // ADR-010 budget: this is the project's THIRD registration (spec §11 budgeted one; the store was
+        // #1, the rehydration service #2). Justified rather than assumed:
+        //   - It cannot be folded into SessionFilesCleanupJob. Task 061 deliberately made that job
+        //     structurally incapable of reaching durable bytes (no IServiceProvider; reachable surface =
+        //     one SearchClient + a read-only multiplexer), enforced by
+        //     tests/Spaarke.ArchTests/SessionFilesCleanupScopeTests.cs. Adding retention there would undo
+        //     the exact property 061 was sequenced before 062 to establish, and would fail that test.
+        //   - The generic cron framework (SchedulingModule's ScheduledJobHost / IScheduledJob) costs
+        //     TWO registrations plus a seeded job definition, and stores run history in an explicitly
+        //     interim InMemoryBackgroundJobStore. More surface, not less.
+        //   - ADR-001 says BackgroundService + PeriodicTimer for in-process periodic work, which is one
+        //     AddHostedService line and mirrors SessionFilesCleanupJob next door.
+        //
+        // UNCONDITIONAL (ADR-032 P1), like the two registrations above: the job's collaborators are a
+        // singleton store and a delegate, neither feature-gated, and "no blob endpoint" is a RUNTIME
+        // state (ExecuteAsync logs once and returns without starting a timer) rather than a DI state. A
+        // feature-gated registration would be the asymmetric pattern §F.1 exists to catch.
+        //
+        // The Cosmos probe is passed as a one-method delegate rather than an IServiceProvider /
+        // IServiceScopeFactory. ISessionPersistenceService is Scoped, so a scope is genuinely required —
+        // but this job is the first component that CAN delete durable bytes, and task 061's finding was
+        // precisely that an ambient service locator inside a deleting component is a reach, not a
+        // boundary. The closure keeps the scope factory OUT of the job: after construction the job can
+        // reach the store and this delegate, and nothing else. A missing ISessionPersistenceService
+        // degrades to Indeterminate, which RETAINS.
+        services.AddHostedService(sp =>
+        {
+            var scopeFactory = sp.GetRequiredService<IServiceScopeFactory>();
+
+            return new SessionFileRetentionJob(
+                durableStore: sp.GetRequiredService<SessionFileBlobStore>(),
+                probeSessionRetention: async (tenantId, sessionId, ct) =>
+                {
+                    using var scope = scopeFactory.CreateScope();
+                    var persistence = scope.ServiceProvider.GetService<ISessionPersistenceService>();
+
+                    return persistence is null
+                        ? SessionRetentionProbe.Indeterminate
+                        : await persistence.ProbeSessionRetentionAsync(tenantId, sessionId, ct);
+                },
+                configuration: configuration,
+                logger: sp.GetRequiredService<ILogger<SessionFileRetentionJob>>());
+        });
+
         return services;
     }
 }

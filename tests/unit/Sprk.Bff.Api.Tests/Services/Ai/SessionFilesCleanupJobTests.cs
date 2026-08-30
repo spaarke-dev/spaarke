@@ -163,7 +163,7 @@ public class SessionFilesCleanupJobTests
 
         // Act
         var deleted = await job.EvictSessionAsync(
-            services, TenantA, SessionId1,
+            TenantA, SessionId1,
             SessionFilesCleanupJob.TriggerOnSessionEnd, CancellationToken.None);
 
         // Assert
@@ -197,7 +197,7 @@ public class SessionFilesCleanupJobTests
 
         // Act
         var deleted = await job.EvictSessionAsync(
-            services, TenantA, SessionId1,
+            TenantA, SessionId1,
             SessionFilesCleanupJob.TriggerOnSessionEnd, CancellationToken.None);
 
         // Assert — return value matches deleted-doc count
@@ -248,7 +248,7 @@ public class SessionFilesCleanupJobTests
 
         // Act
         await job.EvictSessionAsync(
-            services, TenantA, SessionId1,
+            TenantA, SessionId1,
             SessionFilesCleanupJob.TriggerOnSessionEnd, CancellationToken.None);
 
         // Assert — filter shape exactly per ADR-014
@@ -305,10 +305,10 @@ public class SessionFilesCleanupJobTests
 
         // Act — invoke twice
         var firstDeleted = await job.EvictSessionAsync(
-            services, TenantA, SessionId1,
+            TenantA, SessionId1,
             SessionFilesCleanupJob.TriggerOnSessionEnd, CancellationToken.None);
         var secondDeleted = await job.EvictSessionAsync(
-            services, TenantA, SessionId1,
+            TenantA, SessionId1,
             SessionFilesCleanupJob.TriggerOnSessionEnd, CancellationToken.None);
 
         // Assert — first pass deletes 2, second pass is no-op (idempotent contract)

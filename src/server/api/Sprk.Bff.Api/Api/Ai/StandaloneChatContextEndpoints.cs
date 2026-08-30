@@ -2,6 +2,7 @@ using Microsoft.AspNetCore.Http.HttpResults;
 using Sprk.Bff.Api.Api.Filters;
 using Sprk.Bff.Api.Models.Ai.Chat;
 using Sprk.Bff.Api.Services.Ai.Chat;
+using Sprk.Bff.Api.Infrastructure.Authentication;
 
 namespace Sprk.Bff.Api.Api.Ai;
 
@@ -75,7 +76,8 @@ public static class StandaloneChatContextEndpoints
     ///
     /// Validates <paramref name="entityType"/> against the supported allowlist (returns 400 on mismatch).
     /// Validates <paramref name="entityId"/> as a parseable GUID (returns 400 on parse failure).
-    /// Extracts tenantId from JWT claims or X-Tenant-Id header — never from query string (ADR-008, ADR-014).
+    /// Extracts tenantId from JWT claims — never from a header, query string or body (ADR-008,
+    /// ADR-014). Task 059 made that structural: TenantResolution takes a ClaimsPrincipal.
     ///
     /// Resolution is delegated to <see cref="StandaloneChatContextProvider"/> which applies
     /// Redis caching (ADR-009) and builds from the static field catalog on cache miss.
@@ -126,7 +128,7 @@ public static class StandaloneChatContextEndpoints
                         $"Supported types: {string.Join(", ", StandaloneChatContextProvider.SupportedEntityTypes)}.");
         }
 
-        // Extract tenantId from JWT claims or X-Tenant-Id header (ADR-014 — tenant-scoped cache key)
+        // Extract tenantId from the caller's JWT claims (ADR-014 — tenant-scoped cache key)
         // tenantId MUST NOT come from query string (ADR-008)
         var tenantId = ExtractTenantId(httpContext);
         if (string.IsNullOrEmpty(tenantId))
@@ -138,7 +140,7 @@ public static class StandaloneChatContextEndpoints
             return TypedResults.Problem(
                 statusCode: 400,
                 title: "Bad Request",
-                detail: "Tenant ID not found in token claims (tid) or X-Tenant-Id header.");
+                detail: "Tenant ID not found in token claims (tid).");
         }
 
         logger.LogDebug(
@@ -170,8 +172,8 @@ public static class StandaloneChatContextEndpoints
     // =========================================================================
 
     /// <summary>
-    /// Extracts the tenant ID from Azure AD JWT claims (<c>tid</c>) or the
-    /// <c>X-Tenant-Id</c> request header for service-to-service calls.
+    /// Extracts the tenant ID from Azure AD JWT claims (<c>tid</c>, dual-form).
+    /// Tenant comes from the caller's authenticated principal and from nothing else (task 059 — see Infrastructure/Authentication/TenantResolution).
     ///
     /// Mirrors the pattern in <see cref="AnalysisChatContextEndpoints"/>.
     /// tenantId is NEVER read from the query string per ADR-008.
@@ -180,14 +182,7 @@ public static class StandaloneChatContextEndpoints
     {
         // Primary: 'tid' claim from Azure AD JWT token
         // Microsoft.Identity.Web may map 'tid' to the long-form URI claim
-        var tenantId = httpContext.User.FindFirst("tid")?.Value
-            ?? httpContext.User.FindFirst("http://schemas.microsoft.com/identity/claims/tenantid")?.Value;
-
-        // Fallback: X-Tenant-Id request header (service-to-service calls)
-        if (string.IsNullOrEmpty(tenantId))
-        {
-            tenantId = httpContext.Request.Headers["X-Tenant-Id"].FirstOrDefault();
-        }
+        var tenantId = TenantResolution.ResolveTenantId(httpContext.User);
 
         return tenantId;
     }

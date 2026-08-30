@@ -922,6 +922,9 @@ public class SemanticSearchAuthorizationTestFixture : WebApplicationFactory<Prog
     {
         builder.ConfigureServices(services =>
         {
+            // Test hosts must not authenticate for real — see TestTokenCredential.
+            services.UseStubTokenCredential();
+
             // Configure JWT authentication for testing
             services.AddAuthentication("Test")
                 .AddScheme<TestAuthOptions, TestAuthorizationHandler>("Test", options => { });
@@ -959,7 +962,7 @@ public class SemanticSearchAuthorizationTestFixture : WebApplicationFactory<Prog
     public HttpClient CreateAuthenticatedClient(string tenantId, string? userId = null)
     {
         var client = CreateClient();
-        var token = GenerateTestJwt(tenantId, userId ?? Guid.NewGuid().ToString());
+        var token = GenerateTestJwt(tenantId, userId ?? IntegrationTestConstants.TestUserId);
         client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", token);
         return client;
     }

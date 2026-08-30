@@ -1,0 +1,140 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="053b" project="spaarkeai-compose-r8">
+  <metadata>
+    <title>FR-C05/C06 residual — an edit whose `target_para_id` is explicitly NULL must reach the user's document at the paragraph they intend, not land at the caret reported as `applied`</title>
+    <phase>5 Track C — AI Edit Placement</phase>
+    <status>completed</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Changes the placement branch that every insertion-style compose consumer shares. Getting the discriminator wrong either breaks legitimate insertions (`compose-draft-document`, `compose_context_insert`) or leaves the false `applied` in place.</rigor-reason>
+    <model-tier>opus</model-tier>
+    <model-tier-reason>Capability-matched: the whole task is one distinction — "the model was ASKED for an identifier and could not supply one" vs "this consumer has no notion of a target" — and the two arrive at the same branch looking nearly identical. JavaScript makes it worse: `payload?.target_para_id` is falsy for BOTH an absent key and an explicit null, and existing code already relies on that truthiness (`unplaceableLabel`, `usePendingRedline.ts:449`). Reading the difference correctly, and finding every site that currently conflates them, is the task.</model-tier-reason>
+    <effort>xhigh</effort>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>`usePendingRedline.ts` — the client edit spine, shared with 052/053.</parallel-reason>
+    <deps>052, 053</deps>
+    <tags>frontend, compose, ai, testing</tags>
+    <estimated-effort>4 hours</estimated-effort>
+  </metadata>
+
+  <prompt>
+    **Owner decision 2026-08-25, verbatim: "whatever ensures the document updates and saves — so whatever
+    that takes."** That is the bar. This task is NOT about adding a refusal for its own sake; it is about
+    making the user's intended change actually reach their document.
+
+    **What happens today.** Structured Outputs requires the `target_para_id` key to be present, so "I could
+    not identify the paragraph" arrives as an explicit `null`, not an absent field. Task 052 removed
+    `target_text` from the edit channel, so such an edit has no anchor AND no prose. It therefore fails
+    task 053's `classifyAnchorlessReplay` (`usePendingRedline.ts:736` — *"no anchor AND no prose →
+    insertion-style draft"*), falls through to the insertion branch at `usePendingRedline.ts:1060`
+    (`insertContentAt(editor.state.selection.to, …)`), and returns **`applied`**.
+
+    So a revised indemnity clause can land in the recitals — wherever the caret happened to be — and the
+    status tells the user it succeeded. Nothing is struck, so no text is destroyed; the damage is a stray
+    insertion the user is told not to look for.
+
+    Meanwhile the catalog promises the model the opposite, verbatim:
+
+    > *"Set target_para_id to null ONLY when you genuinely cannot identify the paragraph. An EDIT with a
+    > null identifier is REFUSED rather than placed — there is no prose fallback — so a missing identifier
+    > costs you the edit."*
+
+    **The distinction to implement.** `payload?.target_para_id` is falsy for an absent key AND for an
+    explicit null, and existing code already leans on that truthiness (e.g. `unplaceableLabel`,
+    `usePendingRedline.ts:449`). Use key PRESENCE, not truthiness:
+
+    - **Key present, value null** ⇒ an EDIT that failed to identify its target ⇒ must not silently land at
+      the caret.
+    - **Key absent** ⇒ a genuine insertion consumer (`compose-draft-document`, `compose_context_insert`)
+      ⇒ insert at the caret exactly as today. **Do not regress these.**
+
+    **What "whatever ensures the document updates" means concretely.** A bare refusal that drops the edit
+    would satisfy the catalog's wording and FAIL the owner's bar — the user asked for a change and would
+    get nothing. Route it into task 053's existing propose-then-confirm machinery instead: surface the
+    proposed text with an honest reason (*"the assistant couldn't identify which paragraph to change"*) and
+    let the user place it — at their current selection, or by picking the paragraph. Confirmed ⇒ it applies
+    and saves normally. **Reuse 053's mechanism; do not build a second confirmation path** (CLAUDE.md §11).
+  </prompt>
+
+  <role>SPAARKE frontend developer. Expert in `usePendingRedline`'s placement branches, task 053's `anchorlessReplayFallback` bounds, and the compose payload contract.</role>
+
+  <goal>
+    An edit the model could not anchor reaches the user's document at the paragraph they intend, via an
+    honest proposal they confirm — never at the caret behind a false `applied`. Genuine insertion consumers
+    are unaffected.
+  </goal>
+
+  <context>
+    <background>
+      Task 053 built the propose-then-confirm machinery and its two structural bounds: the fallback's
+      argument type is branded by a module-private symbol, and the module has NO `applied` outcome. This
+      task adds a second ENTRY to that machinery — a payload with a null identifier and no prose — without
+      weakening either bound. Note the shape difference: 053's existing entry has prose to match, this one
+      has nothing to match, so the proposal is "place this where you say", not "we found a likely spot".
+
+      Discovered by task 053 (its report §5) and surfaced rather than fixed, because the same branch serves
+      legitimately-anchorless consumers.
+    </background>
+    <relevant-files>
+      <file role="primary-edit">src/client/shared/Spaarke.Compose.Components/src/widgets/hooks/usePendingRedline.ts</file>
+      <file role="primary-edit">src/client/shared/Spaarke.Compose.Components/src/widgets/hooks/anchorlessReplayFallback.ts</file>
+      <file role="primary-edit">src/client/shared/Spaarke.Compose.Components/src/widgets/ComposeBannerStack.tsx</file>
+      <file role="reference">src/client/shared/Spaarke.Compose.Components/src/widgets/ComposeWorkspace.tsx</file>
+      <file role="canonical-reference">projects/spaarkeai-compose-r8/notes/wording-differs-elimination-trace.md</file>
+      <file role="canonical-reference">projects/spaarkeai-compose-r8/notes/052-text-search-demotion-decisions.md</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="owner 2026-08-25">The bar is that the document UPDATES AND SAVES. A refusal that drops the user's requested change does NOT meet it. The outcome must be a placement the user can complete.</constraint>
+    <constraint source="task 053">MUST NOT weaken either structural bound: an anchored edit cannot be minted into the fallback's argument type, and the fallback module has NO `applied` outcome. Adding an entry must not add an auto-apply path.</constraint>
+    <constraint source="project">Key PRESENCE, not truthiness. Audit every site that currently treats `target_para_id` as falsy-means-absent (start with `unplaceableLabel` at ~:449) and state which ones needed to change and which correctly did not.</constraint>
+    <constraint source="project">MUST NOT regress genuine insertion consumers — `compose-draft-document` and `compose_context_insert` insert at the caret exactly as today. Assert this with a test, since it is the thing most likely to break.</constraint>
+    <constraint source="CLAUDE.md §11">Reuse task 053's confirmation machinery and `ConfirmModal`. MUST NOT build a second confirmation path or a second modal shell.</constraint>
+    <constraint source="ADR-049 I-7">MUST NOT reintroduce a text search to rescue this case — there is no prose to search, and inventing one would revive what 052 retired.</constraint>
+    <constraint source="ADR-050 / ADR-021">`SprkModal`/`ConfirmModal`, Fluent v9 semantic tokens, no bespoke chrome.</constraint>
+    <constraint source="UAT-21">Never silently mis-place. A proposal the user confirms is honest; a silent placement is not.</constraint>
+    <constraint source="ADR-038">Tests for: null-identifier edit proposes and does not report `applied`; confirmed proposal applies and the document saves; absent-key insertion unchanged; anchored edit still cannot reach the fallback.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>compose payload contract, propose-then-confirm placement</topic>
+    <files>
+      <file>.claude/adr/ADR-049-compose-shadow-document.md</file>
+      <file>.claude/adr/ADR-050-canonical-modal-shell.md</file>
+      <file>projects/spaarkeai-compose-r8/notes/adr-043-041-assessment.md</file>
+      <file>projects/spaarkeai-compose-r8/CLAUDE.md</file>
+    </files>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="0" name="Rigor declaration">Declare FULL; read `anchorlessReplayFallback.ts` and 053's two bounds FIRST.</step>
+    <step order="1">Establish empirically how a null identifier arrives on the wire (payload key present + null) and enumerate every site conflating it with an absent key.</step>
+    <step order="2">Write the failing tests FIRST — null-identifier edit must not report `applied`; absent-key insertion must be unchanged. Observe both fail/pass appropriately.</step>
+    <step order="3">Implement the presence-based discriminator and route the null case into 053's propose-then-confirm entry with its own honest reason.</step>
+    <step order="4">Prove the confirmed proposal APPLIES AND SAVES — that is the owner's bar, so assert the save path, not just the mark.</step>
+    <step order="5">Re-assert 053's bounds are intact and the anchored path is unchanged.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If the null-identifier case cannot be distinguished from a genuine insertion at the point of placement (e.g. the payload is normalized upstream and the key is lost before it reaches the hook), STOP and surface it — fixing it upstream may be the correct place, and guessing at the hook would break insertions.</trigger>
+    <trigger>If honoring the catalog's "REFUSED" wording turns out to conflict with the owner's "document updates and saves" bar in a way a proposal cannot reconcile, STOP and surface it rather than silently picking one — the catalog prompt is editable and may be what should change.</trigger>
+  </escalation>
+
+  <outputs>
+    <output type="code">src/client/shared/Spaarke.Compose.Components/src/widgets/hooks/usePendingRedline.ts</output>
+    <output type="code">src/client/shared/Spaarke.Compose.Components/src/widgets/hooks/anchorlessReplayFallback.ts</output>
+    <output type="test">src/client/shared/Spaarke.Compose.Components/src/widgets/hooks/</output>
+    <output type="doc">projects/spaarkeai-compose-r8/notes/053b-null-identifier-decisions.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion>A null-identifier edit produces a PROPOSAL with an honest reason — never `applied`, never a silent caret insertion.</criterion>
+    <criterion>A confirmed proposal applies AND the document saves — asserted through the save path, because that is the owner's stated bar.</criterion>
+    <criterion>An absent-key payload (`compose-draft-document`, `compose_context_insert`) inserts at the caret exactly as before — asserted by test.</criterion>
+    <criterion>Every site conflating absent-key with null-value is enumerated, with a stated verdict per site.</criterion>
+    <criterion>NEGATIVE: task 053's two structural bounds intact — no auto-apply path added, anchored edits still cannot reach the fallback.</criterion>
+    <criterion>NEGATIVE: no text search reintroduced; no second confirmation path or modal shell.</criterion>
+    <criterion>Client suites green; every new test observed to fail before its fix (or proved by mutation, stating which).</criterion>
+  </acceptance-criteria>
+</task>
