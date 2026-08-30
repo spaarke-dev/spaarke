@@ -238,7 +238,9 @@ public class SpeWriteSinkContainerProvenanceGuardTests
     //   Services/Communication/CommunicationService.cs:2066       UploadSmallAsync                    config
     //   Services/Communication/IncomingCommunicationProcessor.cs:921   UploadSmallAsync               record
     //   Services/Communication/IncomingCommunicationProcessor.cs:1093  UploadSmallAsync               record
-    //   (Services/Communication/MessageAttachmentMaterializer.cs      — FILE DELETED 2026-08-28, was DEAD)
+    //   Services/Communication/MessageAttachmentMaterializer.cs        UploadSmallAsync               record
+    //          (file was DELETED 2026-08-28 and RESTORED 2026-08-29 — see the entry in AllowList for why
+    //           the "Dead" classification it was deleted under did not hold)
     //   Services/Compose/ComposeService.cs:442                    ReplaceFileContentAsUserAsync       CLIENT
     //   Services/Compose/ComposeService.cs:1448                   ReplaceFileContentAsUserAsync       record
     //   Services/Compose/ComposeService.cs:1484                   UploadSmallAsUserAsync              CLIENT
@@ -549,22 +551,39 @@ public class SpeWriteSinkContainerProvenanceGuardTests
             + "will route chat artifacts into the email container. Server-derived either way, so not this "
             + "guard's business, but it is the kind of config coupling that produces a surprise."),
 
+        // ⚠️ DELETED 2026-08-28, RESTORED 2026-08-29 — the entry below replaces the deletion note that
+        // stood here. It is filed under ServerDerivedRecord, NOT Dead, and not ClientSupplied. Both
+        // reclassifications are deliberate:
+        //
+        //   · not Dead — the 2026-08-28 deletion of the whole class rested on a "zero production callers"
+        //     search that was PRODUCTION-ONLY. The type also had a DI registration, five unit tests
+        //     (including the CHAT-ATTACHMENT-POLICY gate), THIS allow-list citation, and live consumers in
+        //     two sibling worktrees. A caller count of zero in one tree is not evidence of deadness, and
+        //     this list's Dead classification means "provably unreachable", which was never established.
+        //
+        //   · not ClientSupplied — the deletion note said the DriveId override was "a caller-named drive
+        //     waiting for its first caller". That was true of the PRE-076 shape and had ALREADY been fixed
+        //     when the note was written: task 076 demoted request.DriveId to the fallback ARGUMENT of
+        //     CommunicationContainerResolver.ResolveContainerAsync, so a secure regarding's own container
+        //     beats it and a secure regarding with no container fails closed. The class was restored in
+        //     that hardened form only. If a future edit ever reverts to
+        //     `request.DriveId ?? ArchiveContainerId` at the sink, this entry becomes ClientSupplied and
+        //     needs an owning task — that is the edit this declaration exists to make visible.
+        new SinkSite("Services/Communication/MessageAttachmentMaterializer.cs", "UploadSmallAsync", 1,
+            Provenance.ServerDerivedRecord, "",
+            "CommunicationContainerResolver.ResolveContainerAsync(request.CommunicationId, "
+            + "request.DriveId ?? _options.ArchiveContainerId)",
+            "The messaging-channel twin of the IncomingCommunicationProcessor rows above, and resolved the "
+            + "same way (ADR-003 fail-closed; ADR-045 communication architecture). Note where the "
+            + "caller-supplied value sits: request.DriveId is passed IN as the non-secure default — INV-7's "
+            + "tier-3 fallback — never consulted ahead of the record. A null resolver REFUSES rather than "
+            + "using the shared archive container, which is the CLAUDE.md §10 F.1 asymmetric-registration "
+            + "trap being avoided rather than fallen into. Its upload also lands FLAT with the "
+            + "communication id folded into a SANITIZED filename, so it can no longer mint folders."),
+
         // ---------------------------------------------------------------------------------------------
         // Dead — expected to be deleted, not classified forever.
         // ---------------------------------------------------------------------------------------------
-        // Services/Communication/MessageAttachmentMaterializer.cs :: UploadSmallAsync #1 — ENTRY DELETED
-        // 2026-08-28 because THE SITE WAS DELETED, which is rule 5 of the MAINTENANCE PROCEDURE working as
-        // intended: this list shrinks by sites being fixed or removed, never by entries being softened.
-        //
-        // The class had zero production call sites (only the CommunicationModule registration and its own
-        // unit tests referenced it), it minted folders — its path was
-        // "/communications/{id:N}/attachments/{name}", and in SPE every folder segment of an upload path is
-        // created implicitly by Graph — and its `request.DriveId ??` override was a caller-named drive
-        // waiting for its first caller (ADR-003; ADR-045). Deleted rather than converted, per this
-        // classification's own stated expectation that Dead sites "are expected to be DELETED, not
-        // classified forever". Recovery guidance for a future messaging revival is recorded at the
-        // deletion site in Infrastructure/DI/CommunicationModule.cs.
-
         new SinkSite("Services/Email/EmailAttachmentProcessor.cs", "UploadSmallAsync", 1,
             Provenance.Dead, "083 (delete-rather-than-convert)",
             "request.DriveId on ProcessAttachmentsRequest",

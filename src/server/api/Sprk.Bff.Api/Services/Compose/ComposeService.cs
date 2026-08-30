@@ -1481,8 +1481,17 @@ public class ComposeService : IComposeService
                 // same key takes the dedup replace path above — never a double mint.
                 var driveId = await _spe.ResolveDriveIdAsync(request.ContainerId, cancellationToken).ConfigureAwait(false);
                 using var createStream = new MemoryStream(contentToPersist, writable: false);
+
+                // The value handed to the sink is named as what it IS — the whole upload path — and is
+                // sanitized AT the call rather than only in ResolveFileName far above. Redundant on today's
+                // control flow and deliberately so: `fileName` is reassigned three times in this method
+                // (from replaced.Name / created.Name), so "it was sanitized when it was created" is not a
+                // property a future edit preserves. Sanitizing is idempotent. Enforced by
+                // tests/Spaarke.ArchTests/SpeUploadPathIsFlatGuardTests.cs.
+                var uploadPath = SpeUploadPath.SanitizeFileName(fileName);
+
                 var created = await _spe.UploadSmallAsUserAsync(
-                        httpContext, driveId, fileName, createStream, cancellationToken)
+                        httpContext, driveId, uploadPath, createStream, cancellationToken)
                     .ConfigureAwait(false);
 
                 if (created is null || string.IsNullOrEmpty(created.Id))
@@ -2899,13 +2908,23 @@ public class ComposeService : IComposeService
 
     /// <summary>Resolves the created drive-item's file name from the caller display name,
     /// defaulting to a unique <c>compose-draft-…docx</c> and ensuring a <c>.docx</c> extension.</summary>
+    /// <remarks>
+    /// SANITIZED 2026-08-29. <paramref name="displayName"/> is CLIENT-SUPPLIED (the compose save request's
+    /// DisplayName) and the returned value is handed to <c>UploadSmallAsUserAsync</c> as the whole upload
+    /// path — so a '/' in a compose draft's display name made Graph create that folder inside the
+    /// container. This is the same defect as the Word add-in's free-text "Document Name" box, on the
+    /// Compose surface; it was NOT in the 2026-08-28 site list, which enumerated only the sites that
+    /// carried a hardcoded folder PREFIX.
+    /// </remarks>
     private static string ResolveFileName(string? displayName)
     {
         if (string.IsNullOrWhiteSpace(displayName))
             return $"compose-draft-{Guid.NewGuid():N}.docx";
-        return displayName.EndsWith(".docx", StringComparison.OrdinalIgnoreCase)
-            ? displayName
-            : displayName + ".docx";
+
+        var safeName = SpeUploadPath.SanitizeFileName(displayName);
+        return safeName.EndsWith(".docx", StringComparison.OrdinalIgnoreCase)
+            ? safeName
+            : safeName + ".docx";
     }
 
     /// <summary>A stored terminal-success signal for a step that this request completed inline.</summary>

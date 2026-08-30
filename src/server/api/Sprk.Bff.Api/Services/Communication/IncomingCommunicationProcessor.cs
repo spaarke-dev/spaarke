@@ -916,7 +916,12 @@ public sealed class IncomingCommunicationProcessor
                 // UploadSmallAsync is Graph's path-keyed simple PUT, which takes no conflictBehavior and
                 // unconditionally overwrites. Uniqueness therefore has to survive the flattening, so it
                 // moves into the name (cf. EmailAttachmentProcessor.GenerateUniqueFileName).
-                var spePath = $"{communicationId:N}_{fileName}";
+                // SANITIZED 2026-08-29: `fileName` is `attachment.Name` off a Graph message — an
+                // ATTACKER-INFLUENCED value, since anyone who can send this mailbox an email chooses it. A
+                // '/' in an attachment name would make Graph create that folder inside the container, so an
+                // inbound email could mint folders in a customer's SPE container by naming an attachment
+                // "a/b.pdf". Folding the id in front does not protect it.
+                var spePath = $"{communicationId:N}_{SpeUploadPath.SanitizeFileName(fileName)}";
                 using var stream = new MemoryStream(attachment.ContentBytes!);
                 var fileHandle = await speFileStore.UploadSmallAsync(driveId, spePath, stream, ct);
 
@@ -1073,7 +1078,10 @@ public sealed class IncomingCommunicationProcessor
         // FLAT container root, communication id folded into the filename — same reasoning as the
         // attachment leg above: the folder segments were minted implicitly by Graph on every upload, and
         // the {id} segment was carrying the uniqueness that the path-keyed PUT does not provide.
-        var spePath = $"{communicationId:N}_{emlResult.FileName}";
+        // SANITIZED 2026-08-29 (defence in depth): the name comes from GraphMessageToEmlConverter, which
+        // derives it from the SENDER-CONTROLLED subject line. That converter now sanitizes through the same
+        // SpeUploadPath helper, but this site does not get to assume its supplier did.
+        var spePath = $"{communicationId:N}_{SpeUploadPath.SanitizeFileName(emlResult.FileName)}";
         using var emlStream = new MemoryStream(emlResult.Content);
         // SpeFileStore + CommunicationContainerResolver are Scoped — resolve per-operation from a scope (R4).
         using var scope = _scopeFactory.CreateScope();

@@ -8,10 +8,12 @@ using Moq;
 using Azure.Messaging.ServiceBus;
 using Spaarke.Dataverse;
 using Sprk.Bff.Api.Configuration;
+using Sprk.Bff.Api.Infrastructure.Dataverse;
 using Sprk.Bff.Api.Infrastructure.Graph;
 using Sprk.Bff.Api.Models;
 using Sprk.Bff.Api.Services.Communication;
 using Sprk.Bff.Api.Services.Communication.Channels;
+using Sprk.Bff.Api.Services.Communication.Engine;
 using Sprk.Bff.Api.Services.Jobs;
 using Sprk.Bff.Api.Services.Office;
 using Xunit;
@@ -308,8 +310,8 @@ public class SpeFlatUploadPathTests
         // folder "24" containing an extension-less file "2026", which is why the folder name looked like a
         // truncated document title. Removing hardcoded folder prefixes does NOT cover this: a file name is
         // a path, so it needs its own guard.
-        OfficeEmailEnricher.SanitizeFileName(typedName).Should().Be(expected);
-        OfficeEmailEnricher.SanitizeFileName(typedName).Should().NotContain("/");
+        SpeUploadPath.SanitizeFileName(typedName).Should().Be(expected);
+        SpeUploadPath.SanitizeFileName(typedName).Should().NotContain("/");
     }
 
     [Fact]
@@ -317,6 +319,251 @@ public class SpeFlatUploadPathTests
     {
         // Fail-safe: an empty path would make the Graph PUT target the drive ROOT itself. "untitled" is a
         // bad file name; an empty one is an unpredictable API call.
-        OfficeEmailEnricher.SanitizeFileName("///").Should().Be("untitled");
+        SpeUploadPath.SanitizeFileName("///").Should().Be("untitled");
+    }
+
+    // =============================================================================================
+    // THE ONE SURFACE THAT REJECTS INSTEAD OF SANITIZING
+    // =============================================================================================
+
+    [Theory]
+    // Rejected — each was accepted by ValidatePathForOBO before 2026-08-29.
+    [InlineData("", false)]
+    [InlineData(".", false)]
+    [InlineData("..", false)]
+    [InlineData("back\\slash.docx", false)]
+    [InlineData("has:colon.docx", false)]
+    [InlineData("wild*card.docx", false)]
+    [InlineData("quote\".docx", false)]
+    // Accepted — ordinary names, including the characters SharePoint is fine with.
+    [InlineData("Report 2026.docx", true)]
+    [InlineData("RE Invoice #123.eml", true)]
+    [InlineData("a-b_c(1).pdf", true)]
+    public void IsSafeSegment_ForOneSegmentOfACallerSuppliedPath_AcceptsNamesAndRejectsNavigationAndInvalidChars(
+        string segment, bool expected)
+    {
+        // PUT /api/obo/containers/{id}/files/{*path} is the ONE upload surface that does not sanitize: its
+        // {*path} is a wildcard route where a caller may legitimately address a location inside a container
+        // it already holds, and silently rewriting a caller's path would move their bytes without telling
+        // them. So it REJECTS per segment instead — which is why this returns a verdict, not a clean string.
+        //
+        // The four gaps this closed in ValidatePathForOBO: a LEADING '/', EMPTY segments ("a//b"), a bare
+        // "." segment, and invalid characters. '\\' is the one that mattered most: several SharePoint
+        // surfaces read it as a separator, and Path.GetInvalidFileNameChars() does NOT report it on the
+        // linux-x64 runtime the BFF publishes to.
+        SpeUploadPath.IsSafeSegment(segment).Should().Be(expected);
+    }
+
+    [Fact]
+    public void IsSafeSegment_ForEverySegmentOfALegitimateSubPath_AcceptsAllOfThem()
+    {
+        // The capability that must SURVIVE the hardening. A multi-segment path is still legal on the OBO
+        // route — this rule tightens each segment, it does not forbid having several. (Reported separately:
+        // that capability is currently dormant; all three client callers send a single file name.)
+        "folder/sub folder/Report 2026.docx"
+            .Split('/')
+            .Should().OnlyContain(segment => SpeUploadPath.IsSafeSegment(segment));
+    }
+
+    // =============================================================================================
+    // SANITIZATION AT THE SINK — the runtime half of the 2026-08-29 sweep
+    // ---------------------------------------------------------------------------------------------
+    // WHY ONLY THREE SITES HAVE A BEHAVIOURAL TEST HERE, AND THAT IS NOT AN OVERSIGHT. Fourteen call
+    // sites now sanitize. Fourteen behavioural tests asserting one string each — most needing a
+    // WebApplicationFactory, an IFormFileCollection, or a text extractor to reach one interpolation —
+    // is exactly the setup-to-assertion shape tests/CLAUDE.md B15 bans, and it would rot within a
+    // release. Blanket coverage of the SITES is the job of the source rule
+    // (tests/Spaarke.ArchTests/SpeUploadPathIsFlatGuardTests.cs Rule 2), which also covers sites nobody
+    // has written yet. What a source rule CANNOT do is prove that a real value flowing through real
+    // collaborators comes out flat, so the three sites below are chosen for exactly that: one per
+    // distinct mechanism.
+    //
+    //   · OfficeStorageUploader — the last mile of the Office save path, i.e. the ACTUAL route the
+    //     reported folders were minted through.
+    //   · CommunicationService — a slash arriving from DATA (the subject line) rather than from a
+    //     parameter, flowing through the real EmlGenerationService.
+    //   · MessageAttachmentMaterializer — the restored site, where flat + sanitized + the id-carrying
+    //     uniqueness all have to hold at once.
+    // =============================================================================================
+
+    /// <summary>The exact string a user typed into the Word add-in's "Document Name" box, which minted the
+    /// folders an operator found in SPE Admin. Every test below feeds this same value, so a reader can see
+    /// the one production incident travelling through each mechanism.</summary>
+    private const string TheNameThatMintedFolders = "New Word Document from Word Web Add In 8/24/2026";
+
+    [Fact]
+    public async Task OfficeSave_WhenTheTypedDocumentNameContainsSlashes_UploadsOneFlatSegmentAndMintsNoFolder()
+    {
+        // The reported incident, end to end through the uploader. Before 2026-08-28 this exact value
+        // reached Graph verbatim and produced folder "…Add In 8" / folder "24" / file "2026".
+        var drive = new FakeSpeDrive();
+        var uploader = new OfficeStorageUploader(
+            BuildSpeMock(drive).Object, Mock.Of<ILogger<OfficeStorageUploader>>());
+
+        var result = await uploader.UploadToSpeAsync(
+            "b!drive-1", TheNameThatMintedFolders, new MemoryStream(new byte[] { 1, 2, 3 }), CancellationToken.None);
+
+        result.Success.Should().BeTrue();
+
+        var written = drive.WrittenPaths.Should().ContainSingle().Subject;
+        written.Should().NotContain("/", "each '/' Graph sees in an upload path becomes a FOLDER it creates");
+        written.Should().Be("New Word Document from Word Web Add In 8242026");
+
+        // The drive holds ONE item and it is a file at the root — no intermediate folder was addressed.
+        drive.DistinctItemCount.Should().Be(1);
+    }
+
+    [Fact]
+    public async Task ArchiveExisting_WhenTheSubjectContainsSlashes_UploadsOneFlatSegmentAndMintsNoFolder()
+    {
+        // The same defect arriving from DATA rather than from a parameter: the subject line is
+        // sender-controlled, EmlGenerationService derives the .eml file name from it, and that name becomes
+        // the upload path. A date in a subject line is entirely ordinary.
+        var drive = new FakeSpeDrive();
+        var speMock = BuildSpeMock(drive);
+        var communicationId = Guid.NewGuid();
+
+        await BuildSut(BuildEntityService(communicationId, TheNameThatMintedFolders).Object, speMock.Object)
+            .ArchiveExistingAsync(communicationId, CancellationToken.None);
+
+        var written = drive.WrittenPaths.Should().ContainSingle().Subject;
+        written.Should().NotContain("/");
+        written.Should().NotStartWith("/");
+        written.Should().StartWith($"{communicationId:N}_", "uniqueness still lives in the FILE NAME");
+        written.Should().EndWith(".eml");
+    }
+
+    [Fact]
+    public async Task MaterializeAttachment_WhenTheFileNameContainsSlashes_UploadsOneFlatSegmentCarryingTheCommunicationId()
+    {
+        // The RESTORED site (deleted 2026-08-28, restored 2026-08-29). Its path was
+        // "/communications/{id:N}/attachments/{fileName}" — three implicit folder levels AND an
+        // unsanitized name. Both halves are asserted here, because fixing either alone leaves a defect:
+        // dropping the folders without sanitizing keeps the name-as-path bug, and sanitizing without
+        // folding the id in keeps the silent-overwrite bug.
+        var drive = new FakeSpeDrive();
+        var communicationId = Guid.NewGuid();
+
+        var spe = new Mock<ISpeFileOperations>();
+        spe.Setup(s => s.UploadSmallAsync(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<Stream>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync((string _, string path, Stream content, CancellationToken _) =>
+            {
+                using var ms = new MemoryStream();
+                content.Position = 0;
+                content.CopyTo(ms);
+                drive.Put(path, ms.ToArray());
+                return (FileHandleDto?)new FileHandleDto(
+                    Id: "spe-item-1", Name: path, ParentId: null, Size: ms.Length,
+                    CreatedDateTime: DateTimeOffset.UtcNow, LastModifiedDateTime: DateTimeOffset.UtcNow,
+                    ETag: null, IsFolder: false, WebUrl: null);
+            });
+
+        var generic = new Mock<IGenericEntityService>();
+        generic.Setup(g => g.CreateAsync(It.IsAny<Entity>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(Guid.NewGuid());
+
+        var sut = new MessageAttachmentMaterializer(
+            spe.Object,
+            generic.Object,
+            Microsoft.Extensions.Options.Options.Create(Options()),
+            Mock.Of<ILogger<MessageAttachmentMaterializer>>(),
+            NonSecureContainerResolver(communicationId));
+
+        var result = await sut.MaterializeAsync(new MaterializeAttachmentRequest
+        {
+            CommunicationId = communicationId,
+            FileName = $"{TheNameThatMintedFolders}.pdf",
+            ContentType = "application/pdf",
+            Content = new MemoryStream(new byte[] { 1, 2, 3 }),
+        });
+
+        result.Succeeded.Should().BeTrue();
+
+        var written = drive.WrittenPaths.Should().ContainSingle().Subject;
+        written.Should().NotContain("/", "the old path had THREE folder segments and an unsanitized name");
+        written.Should().NotStartWith("/", "the old path also carried a leading slash");
+        written.Should().Be($"{communicationId:N}_New Word Document from Word Web Add In 8242026.pdf");
+    }
+
+    [Fact]
+    public async Task MaterializeAttachment_WhenTheCallerSuppliesADriveId_StillResolvesThroughTheRecordAwareResolver()
+    {
+        // The restored DriveId is a FALLBACK, not an override — restoring it as a caller-authoritative
+        // container would reinstate the exact defect this project exists to close. For a NON-secure
+        // communication (this one) the fallback IS the answer, which is what makes the property
+        // observable at all: the value the caller supplied is used, but only because the resolver chose
+        // to use it. Read with MessageAttachmentMaterializerTests, which pins the refuse-when-absent half.
+        var drive = new FakeSpeDrive();
+        var communicationId = Guid.NewGuid();
+        var driveIdsSeen = new List<string>();
+
+        var spe = new Mock<ISpeFileOperations>();
+        spe.Setup(s => s.UploadSmallAsync(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<Stream>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync((string driveId, string path, Stream content, CancellationToken _) =>
+            {
+                driveIdsSeen.Add(driveId);
+                drive.Put(path, Array.Empty<byte>());
+                return (FileHandleDto?)new FileHandleDto(
+                    Id: "spe-item-1", Name: path, ParentId: null, Size: 0,
+                    CreatedDateTime: DateTimeOffset.UtcNow, LastModifiedDateTime: DateTimeOffset.UtcNow,
+                    ETag: null, IsFolder: false, WebUrl: null);
+            });
+
+        var generic = new Mock<IGenericEntityService>();
+        generic.Setup(g => g.CreateAsync(It.IsAny<Entity>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(Guid.NewGuid());
+
+        var sut = new MessageAttachmentMaterializer(
+            spe.Object,
+            generic.Object,
+            Microsoft.Extensions.Options.Options.Create(Options()),
+            Mock.Of<ILogger<MessageAttachmentMaterializer>>(),
+            NonSecureContainerResolver(communicationId));
+
+        var result = await sut.MaterializeAsync(new MaterializeAttachmentRequest
+        {
+            CommunicationId = communicationId,
+            FileName = "brief.pdf",
+            ContentType = "application/pdf",
+            Content = new MemoryStream(new byte[] { 1 }),
+            DriveId = "b!caller-named-drive",
+        });
+
+        result.Succeeded.Should().BeTrue();
+        driveIdsSeen.Should().ContainSingle().Which.Should().Be("b!caller-named-drive");
+        result.Reference!.GraphDriveId.Should().Be("b!caller-named-drive");
+    }
+
+    /// <summary>
+    /// A REAL <see cref="CommunicationContainerResolver"/> answering "this communication regards nothing
+    /// secure", so the fallback container is used. Real rather than mocked because
+    /// <see cref="CommunicationContainerResolver"/> and <see cref="RecordContainerResolver"/> are
+    /// concrete-by-ADR-010 with non-virtual members — there is nothing to mock. Its two collaborators ARE
+    /// interfaces and are stubbed at that module boundary. The securable-entity set must be NON-EMPTY: the
+    /// resolver treats an empty set as "securability could not be determined" and refuses, which is its
+    /// fail-closed contract and not something to work around.
+    /// </summary>
+    private static CommunicationContainerResolver NonSecureContainerResolver(Guid communicationId)
+    {
+        var securableEntities = new Mock<ISecurableEntityRegistry>();
+        securableEntities
+            .Setup(r => r.GetSecurableEntitiesAsync(It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new HashSet<string>(StringComparer.OrdinalIgnoreCase) { "sprk_matter" });
+
+        // The communication row exists but carries NO regarding, so no securable regarding is found.
+        var resolverEntities = new Mock<IGenericEntityService>();
+        resolverEntities
+            .Setup(s => s.RetrieveAsync(
+                CommunicationEntity, communicationId, It.IsAny<string[]>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new Entity(CommunicationEntity) { Id = communicationId });
+
+        return new CommunicationContainerResolver(
+            new RecordContainerResolver(
+                securableEntities.Object,
+                resolverEntities.Object,
+                Mock.Of<ILogger<RecordContainerResolver>>()),
+            resolverEntities.Object,
+            securableEntities.Object,
+            Mock.Of<ILogger<CommunicationContainerResolver>>());
     }
 }

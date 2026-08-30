@@ -4,7 +4,14 @@
 > Source: [`spec.md`](../spec.md) 32 FRs / 7 NFRs · [`plan.md`](../plan.md) · [`CLAUDE.md`](../CLAUDE.md)
 > Status legend: 🔲 pending · 🔄 needs retry · ✅ complete
 
-Number gaps (020–029, 045–049, 059, 070–079, 084–089) are intentional insertion room.
+Number gaps (020–029, 045–049, 059, 070–079) are intentional insertion room.
+
+> ⚠️ **Corrected 2026-08-29.** This line used to also claim **084–089** as free. It was wrong: 086–089 were
+> occupied by the attestation block from the 2026-08-26 renumbering recorded further down this file, and
+> that renumbering was *itself* caused by a filing collision. The genuinely free slot was **084**, which
+> task 084 now takes; **085 is the last one left in this range.** A "documented insertion room" range that
+> nobody re-checks is how the same collision happens twice — the 2026-08-29 directive asked for this task
+> to be filed at 086, which would have been the third.
 
 ---
 
@@ -128,6 +135,7 @@ task 009 — 028 from its escalation, 029 from the read/write asymmetry its fix 
 | ✅ **080** | **Restore cross-record search** — `scope=all` FILTERED per row, not refused | 1 | 070 refused `scope=all` on the premise "no caller needs it". **That premise was FALSE** — the code page emits it for the "All" row, for blank-label rows, and for *every* search after the user types a query. Authorizes the PAGE, not the corpus, so no dependency on 031 | **070** | ❌ | **opus** | **xhigh** |
 | 🔲 **082** | **Caller-identity census** — a downward ratchet on direct claim reads + the §11 four-primitive decision | 1 | **Filed 2026-08-27 by owner directive.** After 081 + PR #832 there are **four** caller-identity primitives, and **71 files read identity claims directly** while #832 covers **30** `src/server` files — leaving ~40 unaudited, incl. ~10 further `*AuthorizationFilter.cs`. The sibling project proved the two MOST plausible-looking idioms (`oid ?? NameIdentifier`, `FindFirst("oid")`) are the broken ones, so an unaudited population is a live risk. Instrument = the proven `CredentialGuardTests` ratchet shape: a NEW direct read fails the build; existing sites grandfathered with a reason + classification. ⛔ **Seed the count only AFTER #832 and the ten worktrees merge** | **073,079,075,081,PR-832** | ❌ | **opus** | **xhigh** |
 | ✅ **081** | **Classify the caller**, then scope the tenant-container-resolver diagnostic | 1 | **Live on master.** Takes `tenantId` from the QUERY STRING and treats the caller's JWT `tid` as a mere *fallback* → tenant A resolves tenant B's SPE container id. The 400-vs-200 "not served by this stamp" split is also a **tenant-enumeration oracle**. Found by 074's census forcing a new-file classification | — | ❌ | **opus** | **xhigh** |
+| ✅ **084** | **Sanitize the filename at every SPE upload site** + consolidate 7 sanitizers onto 1 + restore `MessageAttachmentMaterializer` | 2 | 🔴 **OWNER-DIRECTED 2026-08-29.** `3c3d4072a` found the root cause of the mystery SPE folders — **a filename IS the whole upload path**, and Graph creates every `/`-segment of it as a folder — and fixed it at the ONE observed site. It was latent at every other. Sharpest: `POST /api/ai/chat/export/word` put `request.Filename` **straight from the request body** into the path (the `.docx` check constrains only the suffix; `a/b/c.docx` passes). **Three sites the brief missed**: `ComposeService` (`request.DisplayName`, client), `DocumentsEndpoints` (query string, app-only), `SpeAdminGraphService` (a *second* facade reaching `ItemWithPath`). **Seven** duplicate sanitizers, not four — one (`GraphMessageToEmlConverter`) was a live **linux-x64 platform bug** whose unit test passed only because CI-adjacent dev runs on Windows. `Api/OBOEndpoints.cs` deliberately NOT sanitized (wildcard `{*path}`); `ValidatePathForOBO` hardened per-segment instead. Also **reverses the 083-era deletion** of `MessageAttachmentMaterializer` — a production-only caller count of zero, against a type with a DI registration, a policy-gate test suite, an ArchTest citation and sibling-worktree consumers. Forcing function: `SpeUploadPathIsFlatGuardTests` **Rule 2** (path arg must be a named, sanitized local) | **075, 076, 083** | ❌ | **opus** | **xhigh** |
 
 **Wave 1 (070–074) is parallel-capable** — 071/073/074 are `parallel-safe: true`; 070 and 072 touch shared authorization surface and serialize. **Wave 2**: 075 → 076 strictly, and since the 2026-08-27 rewrite **073 must also be merged before 076** (it deletes `UploadEndpoints.cs`, removing the app-only twin of the surface 076 reshapes). Wave 1 and Wave 2 can otherwise run concurrently.
 

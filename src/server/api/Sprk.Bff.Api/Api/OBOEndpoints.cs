@@ -408,13 +408,62 @@ public static class OBOEndpoints
     }
 
     // Minimal, local validation to avoid dependency on other files.
+    /// <summary>
+    /// Validates the caller-supplied <c>{*path}</c> of the three OBO upload routes.
+    /// </summary>
+    /// <remarks>
+    /// <para><b>This route is deliberately NOT sanitized, unlike every other SPE upload site in the BFF
+    /// (reviewed 2026-08-29).</b> Everywhere else the server constructs the path and the "file name" is just
+    /// a name, so <c>SpeUploadPath.SanitizeFileName</c> strips separators. Here <c>{*path}</c> is a wildcard
+    /// route where the caller may legitimately address a location inside a container it already holds, and
+    /// silently rewriting it would move a caller's bytes without telling them. So this REJECTS (400) rather
+    /// than rewrites.</para>
+    ///
+    /// <para><b>What the pre-2026-08-29 version did and did not do.</b> It correctly blocked traversal
+    /// (<c>..</c>), control characters, a trailing <c>/</c>, blank, and &gt;1024 chars. It did NOT block a
+    /// LEADING <c>/</c>, EMPTY segments (<c>a//b</c>), a bare <c>.</c> segment, or any Windows/SharePoint
+    /// invalid character in a segment — notably <c>'\\'</c>, which several SharePoint surfaces read as a
+    /// separator and which <c>Path.GetInvalidFileNameChars()</c> does NOT report on the linux-x64 runtime
+    /// this publishes to. Those four gaps are closed below, per-SEGMENT, which is what preserves the
+    /// sub-path capability while making each segment a valid name.</para>
+    ///
+    /// <para><b>And it does NOT prevent folder creation — by design.</b> A multi-segment path here still
+    /// makes Graph create the intermediate folders. That is the documented capability of this route and is
+    /// why <c>tests/Spaarke.ArchTests/SpeUploadPathIsFlatGuardTests.cs</c> excludes this file by name.</para>
+    ///
+    /// <para>⚠️ <b>Reported finding, NOT acted on here.</b> That capability is currently DORMANT: all three
+    /// client callers send a single file name —
+    /// <c>Spaarke.SdapClient/src/operations/UploadOperation.ts</c> (<c>encodeURIComponent(file.name)</c>),
+    /// <c>Spaarke.UI.Components/src/services/EntityCreationService.ts</c>, and
+    /// <c>services/document-upload/types.ts</c>, which documents the parameter as <c>{fileName}</c>. That is
+    /// the same "dormant client-supplied path plumbing" shape the 2026-08-28 change DELETED at three other
+    /// sites (SaveRequest.FolderPath, UploadFinalizationPayload.FolderPath, OfficeStorageUploader.folderPath).
+    /// Retiring it here is an owner call, not a guard's, because this is a public route contract — so it is
+    /// left intact and recorded instead. Related: EntityCreationService interpolates the file name into the
+    /// URL WITHOUT <c>encodeURIComponent</c>, so a '/' in a user's file name silently becomes extra route
+    /// segments there. After this change that request gets a clean 400 instead of minting folders.</para>
+    /// </remarks>
     private static (bool ok, string? error) ValidatePathForOBO(string path)
     {
         if (string.IsNullOrWhiteSpace(path)) return (false, "path is required");
+        if (path.Length > 1024) return (false, "path too long");
+        if (path.StartsWith("/", StringComparison.Ordinal)) return (false, "path must not start with '/'");
         if (path.EndsWith("/", StringComparison.Ordinal)) return (false, "path must not end with '/'");
         if (path.Contains("..")) return (false, "path must not contain '..'");
         foreach (var ch in path) if (char.IsControl(ch)) return (false, "path contains control characters");
-        if (path.Length > 1024) return (false, "path too long");
+
+        // Per-SEGMENT validation. Splitting on '/' keeps the sub-path capability intact; requiring each
+        // segment to be a valid NAME is what the previous whole-string checks never did.
+        foreach (var segment in path.Split('/'))
+        {
+            if (!SpeUploadPath.IsSafeSegment(segment))
+            {
+                return (false,
+                    "each '/'-separated segment of path must be a valid file or folder name: non-empty, "
+                    + "not '.' or '..', and free of the characters < > : \" \\ | ? *");
+            }
+        }
+
         return (true, null);
     }
 }

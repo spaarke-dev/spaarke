@@ -3,6 +3,7 @@ using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 using Spaarke.Dataverse;
 using Sprk.Bff.Api.Configuration;
+using Sprk.Bff.Api.Infrastructure.Graph;
 using Sprk.Bff.Api.Models.Office;
 using Sprk.Bff.Api.Services.Ai.Membership.Events;
 using Sprk.Bff.Api.Services.Communication;
@@ -250,7 +251,7 @@ public class OfficeService : IOfficeService
                         // SANITIZED — see the note on the Document branch below. The client-supplied
                         // attachment name becomes the SPE upload path verbatim, and any '/' in it makes
                         // Graph create a folder.
-                        fileName = OfficeEmailEnricher.SanitizeFileName(request.Attachment.FileName);
+                        fileName = SpeUploadPath.SanitizeFileName(request.Attachment.FileName);
                         break;
 
                     case SaveContentType.Document when request.Document != null:
@@ -285,7 +286,7 @@ public class OfficeService : IOfficeService
                         // The asymmetry was the defect; the document and attachment branches now use the
                         // same sanitizer. Removing the hardcoded folder prefixes elsewhere in this change
                         // does NOT subsume this — a filename is a path, so it needs its own guard.
-                        fileName = OfficeEmailEnricher.SanitizeFileName(request.Document.FileName);
+                        fileName = SpeUploadPath.SanitizeFileName(request.Document.FileName);
                         break;
 
                     default:

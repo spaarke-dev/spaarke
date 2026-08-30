@@ -299,7 +299,9 @@ public sealed class ProjectPreFillService
                 // simple PUT behind UploadSmallAsUserAsync takes no conflictBehavior and silently
                 // replaces, so two concurrent pre-fill requests staging the same filename would clobber
                 // each other. The id moves into the filename to keep both properties.
-                var stagingPath = $"{requestId}_{fileName}";
+                // SANITIZED 2026-08-29 — see the twin in MatterPreFillService. fileName is
+                // Path.GetFileName(IFormFile.FileName), i.e. client-supplied and only host-OS-separator-safe.
+                var stagingPath = $"{requestId}_{SpeUploadPath.SanitizeFileName(fileName)}";
 
                 try
                 {

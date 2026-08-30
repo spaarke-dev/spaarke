@@ -2063,7 +2063,11 @@ public sealed class CommunicationService : ICommunicationEnvelopeReader
         // from the object's ".eml" path extension → message/rfc822 (mirrors InferContentType's mapping),
         // so the archived object downloads/opens as an email file in Outlook (UAT #4c). The prefix is
         // added ahead of the name, so the ".eml" extension remains the last segment and inference holds.
-        var spePath = $"{communicationId:N}_{emlResult.FileName}";
+        // SANITIZED 2026-08-29 (defence in depth). The archiver seam is pluggable — ICommunicationArchiver
+        // has two implementations today and channel authors add more — so the flatness of this path must not
+        // depend on every future archiver remembering to sanitize the name it returns. Folding the id in
+        // front does not protect it: "{id}_a/b.eml" still mints an "{id}_a" folder.
+        var spePath = $"{communicationId:N}_{SpeUploadPath.SanitizeFileName(emlResult.FileName)}";
 
         using var stream = new MemoryStream(emlResult.Content);
         // SpeFileStore is Scoped — resolve it per-operation (R9); scope lives to method end.

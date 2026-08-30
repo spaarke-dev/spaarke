@@ -51,7 +51,15 @@ public class OfficeStorageUploader
             var driveId = await _speFileStore.ResolveDriveIdAsync(containerId, cancellationToken);
 
             // Upload using SpeFileStore (ADR-007) — the file name IS the path; no folder segments.
-            var result = await _speFileStore.UploadSmallAsync(driveId, fileName, content, cancellationToken);
+            //
+            // SANITIZED 2026-08-29 at THIS layer as well as at the caller. OfficeService already sanitizes
+            // all three of its branches, but the ROOT CAUSE of the mystery folders was precisely one of
+            // those branches forgetting to: the email branch sanitized and the document branch did not, for
+            // as long as the feature existed. This uploader is where the value stops being "a name" and
+            // becomes "a path", so it is the last place that can still be honest about it. The double call
+            // is idempotent (sanitizing a sanitized name is a no-op).
+            var uploadPath = SpeUploadPath.SanitizeFileName(fileName);
+            var result = await _speFileStore.UploadSmallAsync(driveId, uploadPath, content, cancellationToken);
 
             if (result != null)
             {

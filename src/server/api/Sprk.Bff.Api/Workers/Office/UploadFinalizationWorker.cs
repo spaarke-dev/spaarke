@@ -1080,7 +1080,11 @@ public class UploadFinalizationWorker : BackgroundService, IOfficeJobHandler
         // canonical case — because UploadSmallAsync is Graph's path-keyed simple PUT, which accepts no
         // @microsoft.graph.conflictBehavior and therefore replaces silently and unconditionally. So the id
         // moves into the name rather than being dropped (cf. EmailAttachmentProcessor.GenerateUniqueFileName).
-        var attachmentPath = $"{parentDocumentId:N}_{attachment.FileName}";
+        //
+        // SANITIZED 2026-08-29: attachment.FileName originates in an email the mailbox RECEIVED, so it is
+        // attacker-influenced. A '/' in it makes Graph create that folder; folding the parent id in front
+        // does not stop it ("{id}_a/b.png" mints "{id}_a").
+        var attachmentPath = $"{parentDocumentId:N}_{SpeUploadPath.SanitizeFileName(attachment.FileName)}";
 
         // SpeFileStore is Scoped — resolve it per-operation from a scope (R1).
         using var scope = _scopeFactory.CreateScope();

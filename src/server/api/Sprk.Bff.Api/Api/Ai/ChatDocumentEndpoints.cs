@@ -1017,7 +1017,11 @@ public static class ChatDocumentEndpoints
     /// 1. Extract tenant ID and verify session ownership
     /// 2. Check idempotency marker (doc-persist:{sessionId}:{documentId})
     /// 3. Retrieve original binary from Redis (doc-binary:{sessionId}:{documentId})
-    /// 4. Resolve SPE container ID from ChatHostContext or configuration fallback
+    /// 4. Resolve SPE container ID from CONFIGURATION — SharePointEmbedded:StagingContainerId, falling back
+    ///    to EmailProcessing:DefaultContainerId. (⚠️ Corrected 2026-08-29: this step used to read "from
+    ///    ChatHostContext or configuration fallback". <see cref="ResolveContainerId"/> takes a ChatSession
+    ///    and never reads it — there is no per-entity container decision on this path, which is why the
+    ///    sink is classified ServerDerivedConfig in SpeWriteSinkContainerProvenanceGuardTests.)
     /// 5. Upload to SPE via SpeFileStore.UploadSmallAsUserAsync (ADR-007)
     /// 6. Store idempotency marker with SPE metadata
     /// 7. Return 201 Created with SPE file metadata
@@ -1130,7 +1134,7 @@ public static class ChatDocumentEndpoints
             _ => "application/octet-stream"
         };
 
-        // 6. Resolve SPE container ID from session's ChatHostContext or configuration fallback
+        // 6. Resolve SPE container ID from CONFIGURATION (not from the session — see step 4's correction).
         var containerId = ResolveContainerId(session, configuration);
         if (string.IsNullOrEmpty(containerId))
         {
@@ -1158,7 +1162,14 @@ public static class ChatDocumentEndpoints
             // FLAT CONTAINER ROOT — see the twin comment in ChatWordExportEndpoints. The "chat-uploads/"
             // prefix implicitly minted a folder on every upload and provided no uniqueness (no session key
             // in the path), so two sessions persisting the same filename already overwrote one another.
-            var uploadPath = filename;
+            //
+            // ⚠️ SANITIZED 2026-08-29. `filename` resolves to `request?.Filename` FIRST — the
+            // SpeFilePersistRequest body, i.e. CLIENT-SUPPLIED — before falling back to the cached upload
+            // metadata. Any '/' in it became a folder, because in SPE Graph creates every '/'-delimited
+            // segment of an upload path. Note the sanitization is applied to the PATH only: `filename` is
+            // still used unsanitized for the extension→content-type switch and in the response body, which
+            // is correct — those are not paths, and the response should echo what the caller asked for.
+            var uploadPath = SpeUploadPath.SanitizeFileName(filename);
 
             var uploadResult = await speFileStore.UploadSmallAsUserAsync(
                 httpContext,
@@ -1513,6 +1524,10 @@ public static class ChatDocumentEndpoints
     /// </summary>
     private static string? ResolveContainerId(ChatSession session, IConfiguration configuration)
     {
+        // `session` is deliberately unread — it is NOT a container input on this path. Kept so callers keep
+        // passing it and the surrounding logging stays coherent. Do not re-document this as record-scoped.
+        _ = session;
+
         // Use the staging container (consistent with ChatWordExportEndpoints and MatterPreFillService pattern).
         var stagingContainerId = configuration["SharePointEmbedded:StagingContainerId"];
         if (!string.IsNullOrEmpty(stagingContainerId))

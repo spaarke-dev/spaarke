@@ -213,24 +213,24 @@ public static class CommunicationModule
         // resolvers the same three call sites already inject.
         services.AddSingleton<CommunicationParticipantIndexer>();
 
-        // MessageAttachmentMaterializer (messaging-communication-app-r1 task 070 / FR-14) DELETED 2026-08-28,
-        // together with this registration and its unit tests, per unified-access-control-r2 task 083's
-        // settled disposition for dead SPE write sinks: DELETE rather than convert.
+        // Messaging attachment materialization (messaging-communication-app-r1 task 070 / FR-14). The net-new
+        // messaging step that materializes a chat file: ACS/file → SPE (SpeFileStore facade, ADR-007) →
+        // governed sprk_document (sprk_document.sprk_relatedcommunication lookup) → sprk_communicationattachment
+        // intersection, returning the reference the ACS message carries (SPE is the store; binary never on the
+        // ACS message). Enforces CHAT-ATTACHMENT-POLICY.md (25 MB binary cap + MIME allow-list) BEFORE upload,
+        // rejecting oversize/disallowed with RFC 7807 ProblemDetails (ADR-019). Storage SCHEMA is unchanged —
+        // it reuses the SAME sprk_document/sprk_communicationattachment shape the email inbound path writes.
+        // Registered UNCONDITIONALLY (ADR-010 / ADR-032 — no feature gate). Scoped to match the Scoped
+        // ISpeFileOperations facade lifetime (the Singleton IGenericEntityService composes safely into a Scoped
+        // consumer). Consumed by the messaging inbound/file-share wiring (task 031 / 060), not registered here.
         //
-        // WHY. Its upload built the path "/communications/{id:N}/attachments/{name}", and in SPE every
-        // folder segment of an upload path is created implicitly by Graph — so it was a folder-minting
-        // sink. It also had ZERO production call sites: the messaging inbound/file-share wiring that was
-        // to consume it (tasks 031 / 060) never landed, so the only references were this registration and
-        // the tests. And its `request.DriveId ?? _options.ArchiveContainerId` override was a CALLER-NAMED
-        // drive waiting for its first caller — the moment one appeared it would have become a live
-        // ClientSupplied sink (ADR-003 / ADR-045), which is the defect class task 083 exists to close.
-        //
-        // ⚠️ IF THE MESSAGING CHANNEL IS REVIVED: recover the class from git history
-        // (`git log --diff-filter=D -- '**/MessageAttachmentMaterializer.cs'`) rather than re-authoring it,
-        // then (a) upload FLAT — fold the communication id into the FILE NAME, never a folder segment, as
-        // IncomingCommunicationProcessor now does; and (b) drop the `DriveId` override, resolving the
-        // container from the RECORD via CommunicationContainerResolver only. Its CHAT-ATTACHMENT-POLICY.md
-        // gate (25 MB binary cap + the 4-type MIME allow-list) is worth recovering verbatim.
+        // ⚠️ THIS REGISTRATION WAS DELETED ON 2026-08-28 AND RESTORED ON 2026-08-29. The deletion rested on a
+        // "zero production callers" finding that was PRODUCTION-ONLY and therefore misleading: the type also
+        // had THIS registration, five unit tests (including the CHAT-ATTACHMENT-POLICY gate), an ArchTest
+        // allow-list citation, and live consumers in two sibling worktrees a single-tree grep cannot see.
+        // A production-caller count of zero is NOT a deletion licence. Full reasoning — and the two defects
+        // the deletion was RIGHT about, both fixed rather than reintroduced — is at the class itself.
+        services.AddScoped<MessageAttachmentMaterializer>(); // task 070; restored 2026-08-29
 
         // Reconciliation reader attachment-text read model (email-communication-intelligence-r2 Batch 2 / B2.1).
         // Re-extracts a communication's file-attachment text on demand for the browse reader's folds (the text is

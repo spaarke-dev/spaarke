@@ -375,48 +375,17 @@ public class OfficeEmailEnricher
     public static string GenerateEmlFileName(EmailMetadata metadata)
     {
         var datePrefix = metadata.SentDate?.ToString("yyyy-MM-dd") ?? DateTime.UtcNow.ToString("yyyy-MM-dd");
-        var sanitizedSubject = SanitizeFileName(metadata.Subject);
 
-        // Limit subject to 80 chars to leave room for date and extension
-        if (sanitizedSubject.Length > 80)
-        {
-            sanitizedSubject = sanitizedSubject[..80];
-        }
+        // Subject capped at 80 chars to leave room for the date prefix and the extension.
+        var sanitizedSubject = SpeUploadPath.SanitizeFileName(metadata.Subject, maxLength: 80);
 
         return $"{datePrefix}_{sanitizedSubject}.eml";
     }
 
-    // Windows reserves a stricter superset of invalid filename characters than Linux, and the BFF
-    // publishes linux-x64 — where Path.GetInvalidFileNameChars() returns only {'\0','/'}. Two
-    // consequences, both load-bearing:
-    //
-    //   · '/' IS stripped on Linux, which is the character that matters most here: a filename becomes
-    //     the SPE upload path (Drives[id].Root.ItemWithPath(path)), and Graph creates every
-    //     '/'-delimited segment of that path as a FOLDER. An unsanitized "8/24/2026" mints folders.
-    //   · '\\', '<', '>', ':', '"', '|', '?', '*' are NOT stripped on Linux, so they would survive into
-    //     names that SharePoint rejects or that break on Windows clients (Outlook opens these .eml
-    //     files). '\\' also reads as a separator to some SharePoint surfaces.
-    //
-    // So the set is stated EXPLICITLY rather than inherited from the host OS. Same reasoning, and the
-    // same character set, as the already-reviewed EmlGenerationService.s_invalidFileNameChars — see the
-    // comment there. Strengthened 2026-08-28 when the document-save branch started using this method.
-    private static readonly HashSet<char> s_invalidFileNameChars = new(
-        Path.GetInvalidFileNameChars()
-            .Concat(new[] { '<', '>', ':', '"', '/', '\\', '|', '?', '*' }));
-
-    /// <summary>
-    /// Sanitizes a string for use as a filename AND, because a filename is the whole SPE upload path,
-    /// as a single safe path segment: every path separator is removed, so the result can never cause
-    /// Graph to implicitly create a folder.
-    /// </summary>
-    public static string SanitizeFileName(string name)
-    {
-        if (string.IsNullOrWhiteSpace(name))
-        {
-            return "untitled";
-        }
-
-        var sanitized = new string(name.Where(c => !s_invalidFileNameChars.Contains(c)).ToArray());
-        return string.IsNullOrWhiteSpace(sanitized) ? "untitled" : sanitized.Trim();
-    }
+    // SanitizeFileName MOVED 2026-08-29 to Infrastructure/Graph/SpeUploadPath.SanitizeFileName, together
+    // with its explicit Windows-strict character set. It was the only PUBLIC implementation of a function
+    // seven other places had privately re-written, and callers now span Api/, Services/Communication/,
+    // Services/Workspace/, Services/Ai/, Services/Compose/ and Workers/ — reaching into Services/Office
+    // from all of those is the inverted dependency that produced the copies in the first place
+    // (root CLAUDE.md §11). Read the rationale at the new site; do not re-add a local copy here.
 }

@@ -329,7 +329,10 @@ public sealed class MatterPreFillService
                 // was minted implicitly by Graph on every upload; the {requestId} that was carrying the
                 // per-request uniqueness moves into the filename rather than being dropped, because the
                 // path-keyed simple PUT behind UploadSmallAsUserAsync silently replaces on collision.
-                var stagingPath = $"{requestId}_{fileName}";
+                // SANITIZED 2026-08-29: fileName is Path.GetFileName(IFormFile.FileName) — client-supplied,
+                // and GetFileName splits on the HOST OS separator only, so on the linux-x64 runtime a
+                // "a\b.docx" survives intact while Graph may still read the backslash as a separator.
+                var stagingPath = $"{requestId}_{SpeUploadPath.SanitizeFileName(fileName)}";
 
                 try
                 {
