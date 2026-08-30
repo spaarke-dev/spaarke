@@ -1,8 +1,8 @@
 # Current Task State — `spaarkeai-compose-r8`
 
-> **Last Updated**: 2026-08-29 (by `context-handoff`)
-> **Recovery**: read Quick Recovery, then §S for what this session did.
-> **#863 code-complete · master synced · ALL suites green · 070 clusters 7/6/5b/8 extracted.**
+> **Last Updated**: 2026-08-30 (by `context-handoff`)
+> **Recovery**: read Quick Recovery, then §S0 (this session), then §S (the prior one).
+> **#863 code-complete · master synced · ALL suites green · 070 clusters 7/6/5b/8/1/3 extracted.**
 > Everything below "Full State" is preserved history from earlier checkpoints.
 
 ---
@@ -11,11 +11,64 @@
 
 | Field | Value |
 |---|---|
-| **Active work** | **070 decomposition** — clusters **7 · 6 · 5b · 8** extracted & verified. **Cluster 1 is next available** (2b/2a are HELD). |
-| **Next Action** | **Cluster 1 (re-anchor / stale-base)** — the executable spec is in the seam map. Treat it with more care than the first four: **76.6% branch** (they were 87–96%) and ~470 LOC over five members, so seed **several** mutations across different members, not one. Then 3 → 4 → 5a; 2b/2a only after UAC-r2 replies on #858. |
-| **Branch** | `work/spaarkeai-compose-r8` · clean · **synced with master** · HEAD = the latest `checkpoint: session handoff` commit · `ComposeService.cs` 4,427 → **3,975** |
-| **Suite** | ALL GREEN — BFF **11,619/0** · ArchTests **150/150** · `Sprk.Bff.Api.IntegrationTests` **103/0** · `Spe.Integration.Tests` **409/0** |
+| **Active work** | **070 decomposition** — clusters **7 · 6 · 5b · 8 · 1 · 3** extracted & verified. **Cluster 4 (PDF intake + source markers) is next available** (2b/2a are HELD). |
+| **Next Action** | **Cluster 4 (PDF)** — 9 members, ~290 LOC, **75.0% branch**. Two things are already known about it: it must take `SaveStampJsonOptions` with it (cluster 3 left that note deliberately — see below), and at 61.6% LINE coverage on the 4b marker half it is the **least-covered** thing extracted so far, so budget for the mutation pass finding holes. Then 5a (64.3% branch, weakest of all — extract LAST or test first). 2b/2a only after UAC-r2 replies on #858. |
+| **Branch** | `work/spaarkeai-compose-r8` · clean · HEAD = `refactor(070): extract cluster 3 …` · `ComposeService.cs` 4,427 → **3,236** |
+| **Suite** | ALL GREEN — Compose **1,798/0** · ArchTests **150/150** · solution build **0 errors** · DI diff **empty** |
 | **Verify with** | **`dotnet build`** at the SOLUTION root — not one project (see §A2 for why that distinction cost real time) |
+
+---
+
+## S0. This session (2026-08-30) — clusters 1 and 3, and the seven coverage holes they exposed
+
+**The headline is not the two extractions. It is that a mutation pass over moved code found seven
+places where a documented safety guarantee had no test at all** — including two that could destroy a
+user's document. All seven are now closed. Full reasoning lives in
+[`notes/070-composeservice-seam-map.md`](notes/070-composeservice-seam-map.md); this is the index.
+
+| Cluster | New file | Mutations | Survived → holes closed |
+|---|---|---|---|
+| **1** re-anchor / stale-base | `ComposeReanchorCoordinator.cs` | 6, one per member | 4 survived the WHOLE suite → 3 holes |
+| **3** save baseline + concurrency | `ComposeSaveStorageCoordinator.cs` | 7, one per member | 3 survived the WHOLE suite → 3 holes |
+
+**The seven tests added** (all extending existing seam files — no new fixture, §11):
+`ConcurrencySaveSeamTests` gained fuzzy-AUTO-not-applied · unreadable-bytes-all-orphan ·
+PDF-guard × 2 entry paths · precondition-retry-rebases · missing-version-404.
+`ComposePartialApplyRecoverySeamTests` gained refusing-structural-op-is-its-own-unit.
+
+**The two most serious holes**, worth knowing even without reading the seam map:
+
+- `GuardBaselineIsNotPdf` (task-040 Step-9.5 HIGH-2) was **completely untested**. Disabled, all 1,791
+  tests stayed green — while a `%PDF-` baseline would write DOCX bytes **over the .pdf drive item**.
+- The **fuzzy-AUTO rejection gate** — invariant I-7 in its sharpest form. The suite covered exact-paraId
+  AUTO (1.0) and total ORPHAN (0.0) but never a score between them, so the branch separating "scored
+  well on content" from "is the same paragraph" could be deleted with everything still green.
+
+### Three method lessons from this session — do not re-derive
+
+1. **A surviving mutation is a statement about the suite you chose, not a licence to proceed.** Four of
+   cluster 1's six survived a narrow filter; re-running against all 1,791 confirmed they were real holes
+   rather than filter artifacts. Cluster 3's N8 went the other way — it survived the narrow filter and
+   DIED on the full suite, because `ComposeCarrierRenderSeamTests` was not in the filter. **Always
+   confirm a survivor against the full Compose filter before calling it a hole.**
+2. **A mutation that survives a NEW test usually means the assertion is weaker than the claim.** The
+   missing-version test first asserted only `!= 200`; the mutant passed it, because a save proceeding on
+   empty bytes also fails — later, and for a different reason. It had to name the specific outcome
+   (404 at resolution, not a 422 after the fact) before it counted.
+3. **When a guard test breaks because code moved, repairing the marker is only half the fix.**
+   `ComposeWritePathTextSearchAuditTests` fired when `ResolveRevisionAuthor` widened. Fixing only the
+   marker would have let the guard silently shrink to whatever remained between its two markers — the
+   ~470 moved lines had been inside its slice by position alone. The new file was added as an audited
+   file in its own right.
+
+### Decisions taken this session
+
+| Decision | Rationale |
+|---|---|
+| `IsBatchLevelPatchRefusal` + `HasBaselineVersionCoordinates` move as `internal static`, outside callers follow | Third and fourth time this shape has come up (after cluster 5b's signal factories). Same resolution each time: the helper lives with the code that explains it. **Expect it again on clusters 4 and 2.** |
+| `ResolveRevisionAuthor` widened to `internal static`, stays on `ComposeService` | Cluster 9; two of three callers are there. A pure function of its argument — a shared helper, not a cycle. |
+| `SaveStampJsonOptions` stays on `ComposeService`, widened to `internal` | **Shared with cluster 4.** Duplicating it would let two cache-payload formats drift apart silently. **Cluster 4 should take it and rename it** — "save stamp" already under-describes it. |
+| `ConcurrentExternalChangeCode` stays | Its reason-to-change is the client banner contract it mirrors, not concurrency. |
 
 ---
 
