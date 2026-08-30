@@ -37,7 +37,7 @@ not sampled. That is the rule task 083 established (spec FR-B10) and the one tha
 | **B5** | Mocking the SUT's own collaborators | — | — | ❌ judgment ("when … cheaper and more honest") |
 | **B6** | Mirror tests | — | — | ❌ **no regex signature exists** |
 | **B7** | All-mocks + trivial assertion | 28 | unverified | ❌ non-zero; detector FP-prone |
-| **B8** | Internal/private method tests | 7 | **~7 in 5 files** | ❌ real debt; migration is production-visibility work |
+| **B8** | Internal/private method tests | 12 | **12 in 10 files** | ❌ blocked on a PRODUCTION refactor — see correction below |
 | **B9** | Pass-through wrapper tests | — | — | ❌ undetectable from test source alone |
 | **B10** | Coverage-fillers | 247 | **1** | ❌ 1/247 true-positive rate |
 | **B11** | Language-feature redundancy | 37 | **~0** | ❌ detector matches behavioral assertions |
@@ -137,23 +137,48 @@ the compiler. **B7** (28) and **B14** (3) fail the same way.
 Arming any of these means arming a rule whose failures would mostly be wrong. A guard that cries wolf gets
 suppressed, and then the real violations ride in behind it.
 
-### Real live debt, migration not in this task's budget (B8)
+### Blocked on a production refactor (B8) — **corrected 2026-08-30**
 
-`GetMethod("name", BindingFlags.NonPublic).Invoke(...)` — **7 call sites in 5 files**, invoking private
-production methods:
+> **Correction.** This section previously read *"7 call sites in 5 files … the strongest candidate for the
+> next arming pass … five files is a tractable slice."* **Both halves were wrong.** A precise re-census
+> found **12 call sites across 10 files**, and the migration is not tractable as described. Recorded here
+> rather than quietly amended, because the original wording would send someone into a "quick" pass that
+> is not quick.
 
-- `Phase1StableIdMigrationSuite` · `ChatEndpointsAttachmentsTests` (×2)
-- `AppOnlyAnalysisServiceResolveTests` · `SprkChatAgentFactoryToolResolutionTests` (×2)
-- `LegalResearchHandlerTests`
+`GetMethod("literal", BindingFlags.NonPublic).Invoke(...)` — **12 call sites in 10 files**:
 
-(The broader `BindingFlags.NonPublic` count is 34 across 21 files, but most read private *fields* for setup
-rather than invoking private methods, which is not what B8 bans.)
+| Private member invoked | Test file |
+|---|---|
+| `CommunicationCreateTaskAi.ParseResult` | `contract/Eval/CreateTaskFromEmailEvalTests.cs` |
+| `CommunicationProposeAi.ParseResult` | `contract/Eval/ProposeFieldUpdatesEvalTests.cs` |
+| `CommunicationTriageAi.ParseResult` | `contract/Eval/TriageEmailEvalTests.cs` |
+| `WorkspaceFileEndpoints.HandleSummarize` | `Sprk.Bff.Api.IntegrationTests/Phase1StableIdMigrationSuite.cs` |
+| `ChatEndpoints.ValidateAttachments` + `.ComposeMessageWithAttachments` | `Api/Ai/ChatEndpointsAttachmentsTests.cs` |
+| `DailyBriefingEndpoints.HandleNarrate` | `Api/Ai/DailyBriefingEndpointsTests.cs` |
+| `DailyBriefingEndpoints.HandleNarrate` | `Api/Ai/DailyBriefingResponseShapeTests.cs` |
+| `AppOnlyAnalysisService.ResolvePlaybookAsync` | `Services/Ai/AppOnlyAnalysisServiceResolveTests.cs` |
+| `AgentToolCatalogProjector.TryParseChatSessionId` + `.TryParseMatterId` | `Services/Ai/Chat/SprkChatAgentFactoryToolResolutionTests.cs` |
+| `Sanitize` | `Services/Ai/Handlers/LegalResearchHandlerTests.cs` |
 
-This is the one unarmed ban with a **tight signature and a real, bounded count**. It is not armed because
-the migration is production-visibility work — make the method internal with `InternalsVisibleTo`, or route
-the test through the public surface — and that is a design decision per call site, not a mechanical sweep.
+(The broader `BindingFlags.NonPublic` count is 34 across 21 files, but most read private *fields* for
+fixture setup or call `GetMethod("Clear")` on a runtime type — neither is what B8 bans. Filtering those out
+is why the precise count is 12, not 34.)
 
-**This is the strongest candidate for the next arming pass.** Five files is a tractable slice.
+**Why it cannot simply be migrated.** ADR-038 B8 bans internal-method tests *"via `InternalsVisibleTo` **or**
+reflection"* — so making these members `internal` is **not** a compliant fix; it is the same ban under a
+different spelling. The only compliant route is testing through the public surface, which means:
+
+- for the three `ParseResult` parsers — **extract the parser into a public type** so it has a real surface;
+- for `HandleNarrate` / `HandleSummarize` / `ValidateAttachments` — **exercise the endpoint over HTTP**,
+  converting fast unit tests into slower integration tests.
+
+Both are **production refactors across multiple subsystems**, not test edits. That is well outside a CI
+remediation project, and doing it badly would trade a documented ban violation for a worse test suite.
+
+**Honest verdict: B8 stays unarmed, and it is NOT a quick win.** The right sequencing is a production
+change that gives this logic a public surface — at which point the tests migrate naturally and the guard
+arms for free. Until then the ban is documented with an exact, per-call-site inventory (above), which is
+the most useful thing this project can leave behind for it.
 
 ### The threshold is undefined (B13, B15)
 

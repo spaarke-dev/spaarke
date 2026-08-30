@@ -23,8 +23,10 @@ namespace Spaarke.ArchTests;
 /// interchangeable.</b> B5, B6 and B9 have <i>no lexical signature</i> — B6 (mirror tests) asks whether a
 /// test asserts that an implementation does what it does, which is a claim about the relationship between
 /// two bodies of code and needs a call graph, not a regex. B7, B10, B11 and B14 have detectors whose output
-/// is mostly noise: B10 measured 247 hits and <b>one</b> true positive. B8 is real, bounded debt (7 call
-/// sites in 5 files) whose migration is a per-call-site production-visibility decision. B13 and B15 turn on
+/// is mostly noise: B10 measured 247 hits and <b>one</b> true positive. B8 is real debt (**12 call sites in
+/// 10 files**, corrected 2026-08-30 from an earlier under-count) but is NOT a quick win: the ban covers
+/// <c>InternalsVisibleTo</c> as well as reflection, so the only compliant fix is giving the logic a
+/// public surface — a production refactor, not a test edit. B13 and B15 turn on
 /// thresholds nobody has fixed — B13's live count spans <b>15 to 1,466</b> depending only on how strictly
 /// "name describes behavior" is read, so a guard would enforce the threshold rather than the ban. B2 and
 /// B17 name types this repo does not contain.</para>
