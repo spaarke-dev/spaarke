@@ -239,39 +239,45 @@ doubt, **merge**.
 **FIRST: detect whether master is protected** — this determines which path runs.
 
 ```
-DETECT branch protection:
-  protection = gh api repos/{owner}/{repo}/branches/master/protection 2>/dev/null
-  rulesets   = gh api repos/{owner}/{repo}/rulesets 2>/dev/null
+DETECT branch protection (rulesets — NOT the classic endpoint on this repo):
+  gh api repos/{owner}/{repo}/rules/branches/master     # what actually applies to master
+  gh api repos/{owner}/{repo}/rulesets                  # the ruleset objects themselves
 
   → Path A (Auto-Merge PR) is the DEFAULT **regardless of what this returns**.
-  → Path B (Direct Local Merge) requires an EXPLICIT user instruction to push
-    directly to master. "Protection is off" is NOT that instruction.
+  → Path B (Direct Local Merge) requires an EXPLICIT user instruction. "Protection
+    looks off" is NOT that instruction — and on this repo it would simply be refused.
 ```
 
-> **⚠️ Absence of protection is not permission (corrected 2026-08-29).**
+> **Master IS protected as of 2026-08-29 — Path B is now refused by the server.**
 >
-> This detection previously read *"NOT protected → use Path B (Direct Local Merge)"*, which inverted
-> the intent: it turned a missing guardrail into an instruction to skip review. **Master on this repo
-> currently has no branch protection and no rulesets** — verified 2026-08-29, and it is the
-> *documented, intentional* pre-cutover state (`projects/ci-cd-unit-test-remediation-r1/notes/branch-protection-pre-cutover.json`).
-> Under the old wording, every `/merge-to-master` invocation today would route to a direct push.
+> A repository **ruleset** (`id 21824191`) enforces on the default branch: **PR required** (0
+> approvals), required status check **`Router`**, `strict` **false**, plus force-push and deletion
+> blocked. `git push origin {branch}:master` fails.
 >
-> Three reasons the PR path stays the default while protection is off:
+> **Two traps worth knowing before you debug this:**
 >
-> 1. **CI would not gate the merge.** With no required check, `gh pr merge` merges even with checks
->    `pending` — this is exactly how #890 merged before a job had run. A direct push skips even the
->    appearance of a gate.
-> 2. **It would corrupt the CI cutover measurement.** The shadow window
->    (`scripts/ci/shadow-window-status.ps1`) enumerates **merged PRs** and compares the legacy and new
->    workflow verdicts on each merge commit. Work pushed straight to master produces no PR, so it
->    contributes no comparison — direct pushes **slow the cutover** by starving the window of the very
->    evidence it needs to close.
-> 3. **Protection returns at cutover.** Task CICD-071 enables `required_status_checks=["CI / Router"]`,
->    `enforce_admins=true`, `strict=true`. A habit formed while protection is off breaks the day it
->    lands. Better to already be doing the thing that will be mandatory.
+> 1. **Classic branch protection does not work on this repo.** `GET`/`PUT` on
+>    `/branches/master/protection` return `404 "Branch protection has been disabled on this
+>    repository"` even with `admin: true` and a `repo`-scoped token. Do not conclude "protection is
+>    off" from that 404 — check **rulesets**. This is why task CICD-071's planned cutover command
+>    (a `PUT` to the classic endpoint) will not work as written.
+> 2. **The required context is `Router`**, the literal check-run name — **not** `CI / Router` as the
+>    spec and several planning notes say. Setting a context string that never reports blocks every PR
+>    permanently, so verify with `gh api .../rules/branches/master` after any change.
 >
-> Path B remains documented for genuine emergencies (a broken CI that blocks a hotfix), and it needs
-> the user to ask for it by name.
+> **This detection previously read *"NOT protected → use Path B (Direct Local Merge)"***, which
+> inverted the intent — it turned a missing guardrail into an instruction to skip review, and while
+> protection was off it would have routed **every** invocation to a direct push. Path A is the default
+> regardless of protection state, because:
+>
+> - **A direct push starves the CI cutover measurement.** `scripts/ci/shadow-window-status.ps1`
+>   enumerates merged **PRs** and compares legacy vs. new verdicts per merge commit. No PR → no
+>   comparison → the window takes *longer* to close.
+> - **Absence of a guardrail is not permission.** If protection is ever removed again (e.g. a CI
+>   outage), the correct response is to keep using PRs, not to start pushing directly.
+>
+> Path B remains documented for genuine emergencies and requires both an explicit user request **and**
+> a temporary ruleset bypass.
 
 #### Path A: Auto-Merge PR (DEFAULT for protected master)
 
