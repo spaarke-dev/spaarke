@@ -1,7 +1,7 @@
 <task id="CICD-085" project="ci-cd-unit-test-remediation-r1">
   <metadata>
     <title>Deep cleanup PR 3/3 — final sweep (remaining DELETE-tagged tests + AMBIGUOUS resolution) + full dotnet test verification — unblocks Phase 3 cutover</title>
-    <status>closed-not-worth-executing</status>
+    <status>complete</status>
     <estimated-effort>4 hours</estimated-effort>
     <phase>2.5 - Deep cleanup</phase>
     <stream>B - Test reset (extended)</stream>
@@ -11,6 +11,7 @@
     <dependencies>084</dependencies>
     <blocks>071</blocks>
     <tags>testing, deletion, deep-cleanup, sliced-PR, build-vs-maintain, gates-cutover</tags>
+    <disposition date="2026-08-30">COMPLETE AS notes/deep-cleanup-final-summary.md. This task's POML goal read 'final BFF unit test count <=3,500' — STRICTER than the spec it implements: SC-11 marks that figure '(DIRECTIONAL, non-binding)'. The spec governs. Its deletion sweep is superseded by 084's evidence (247 rows -> 1 genuine). Its remaining genuine obligation under SC-11 was the final summary with honest accounting, which is now written: count is 7,260 and it went UP, because other projects added tests to the same suite during the window and because there was no large scaffolding pile to remove. SC-11's BINDING clauses (ADR-038 §7 with >=12 examples; /test-diet wired into task-execute Step 11) are met.</disposition>
   </metadata>
 
   <owner-rescope date="2026-08-28" binding="true">
