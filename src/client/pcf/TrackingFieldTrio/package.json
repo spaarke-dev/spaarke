@@ -17,8 +17,7 @@
   },
   "dependencies": {
     "@spaarke/auth": "file:../../shared/Spaarke.Auth",
-    "@spaarke/ui-components": "file:../../shared/Spaarke.UI.Components",
-    "ajv": "^8.20.0"
+    "@spaarke/ui-components": "file:../../shared/Spaarke.UI.Components"
   },
   "devDependencies": {
     "@azure/msal-browser": "^3.30.0",
@@ -36,6 +35,7 @@
     "pcf-start": "^1",
     "react": "^16.14.0",
     "react-dom": "^16.14.0",
-    "typescript": "^5.0.0"
+    "typescript": "^5.0.0",
+    "ajv": "^8.20.0"
   }
 }
