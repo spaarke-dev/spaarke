@@ -90,6 +90,20 @@ public class RouteAuthorizationGuardTests
     {
         RouteLevelGate,
         HandlerAuthorized,
+
+        /// <summary>
+        /// The file registers its routes on a route GROUP that carries the authorization filters, so
+        /// no per-route filter appears in the fluent chain and Rule A deliberately does not apply.
+        /// Added 2026-08-30 by task 091.
+        /// <para>
+        /// This scope exists because forcing such a file into <see cref="RouteLevelGate"/> would make
+        /// Rule A demand a per-route filter that correctly is not there — the guard would flag the
+        /// code it protects, which per tests/CLAUDE.md is how a guard gets deleted rather than obeyed.
+        /// Leaving it unclassified was the other option, and that is precisely the blind spot task 091
+        /// closed.
+        /// </para>
+        /// </summary>
+        GroupGated,
     }
 
     private sealed record GovernedFile(string RelativePath, Scope Scope, string Reason);
@@ -133,6 +147,22 @@ public class RouteAuthorizationGuardTests
             + "here (zero callers, gated id-keyed equivalents ship); the surviving upload trio is waived "
             + "to 075/076 because content-CREATION has no document to authorize against yet. "
             + "AddDocumentAuthorizationFilter still appears ZERO times in this file."),
+
+        // ---- Group-gated: authorization is inherited from the /api/spe group ----
+        new GovernedFile("Api/SpeAdmin/ContainerItemEndpoints.cs", Scope.GroupGated,
+            "Nine routes serving container file BYTES (content, preview, thumbnails), plus sharing-link "
+            + "minting, delete, upload and folder-create. Added by task 091, which found them registered "
+            + "on the ROOT app while spelling out absolute /api/spe/... paths — so they sat at admin URLs "
+            + "carrying NEITHER SpeAdminAuthorizationFilter NOR SpeAdminTenantScopeFilter, reachable by "
+            + "any authenticated caller with configId an unchecked cross-tenant bearer capability. "
+            + "Proven empirically: as a non-admin they answered 500/400 from inside the handler, never "
+            + "403. This census governed 12 files and did not include this one, which is how the surface "
+            + "stayed invisible through four hand recounts. Rule A does not apply (the gate is on the "
+            + "group, not the route); the enforcing tests are "
+            + "GroupGatedFilesRegisterNoAbsolutePaths below, the RouteGroupBuilder parameter on "
+            + "MapContainerItemEndpoints (which makes a root-app registration a COMPILE error), and "
+            + "tests/integration/auth/SpeAdmin/SpeAdminContainerItemRouteGateTests.cs (which requests "
+            + "every route as a non-admin and requires 403)."),
 
         new GovernedFile("Api/Ai/SemanticSearchEndpoints.cs", Scope.RouteLevelGate,
             "/api/ai/search — document names, AI summaries, TL;DRs, driveId, speFileId. Finding #1. Never "
@@ -832,6 +862,54 @@ public class RouteAuthorizationGuardTests
     // =============================================================================================
     // CENSUS — the anti-drift ratchet (the task's mechanism (c))
     // =============================================================================================
+
+    [Fact(DisplayName = "Task 091 Rule E: a group-gated endpoint file declares no absolute route paths")]
+    public void GroupGatedFilesRegisterNoAbsolutePaths()
+    {
+        // A group-gated file inherits its authorization from the prefix group. A route that spells its
+        // own absolute "/api/..." path is a route that resolves WITHOUT the group — which is exactly
+        // how ContainerItemEndpoints came to be registered on the root app while still answering on
+        // /api/spe URLs. The absolute path is not merely a style difference; it is what made the
+        // mis-registration invisible, because the URLs looked right in every review.
+        //
+        // Note what this rule can and cannot see. It cannot verify that the file is registered on a
+        // group — source scanning cannot follow the call site. The RouteGroupBuilder parameter type is
+        // what enforces THAT, at compile time. This rule closes the complementary half: keeping the
+        // paths group-relative is what keeps the compile-time constraint meaningful, since a file
+        // taking a group but declaring absolute paths would silently double the prefix.
+        var offenders = new List<string>();
+
+        foreach (var file in GovernedFiles.Where(f => f.Scope == Scope.GroupGated))
+        {
+            var source = File.ReadAllText(
+                Path.Combine(BffRoot, file.RelativePath.Replace('/', Path.DirectorySeparatorChar)));
+
+            foreach (Match match in Regex.Matches(
+                         source, @"\.Map(?:Get|Post|Put|Patch|Delete)\s*\(\s*""(?<route>[^""]+)"""))
+            {
+                var route = match.Groups["route"].Value;
+                if (route.StartsWith("/api/", StringComparison.Ordinal))
+                {
+                    offenders.Add($"{file.RelativePath}: \"{route}\"");
+                }
+            }
+        }
+
+        Assert.True(
+            offenders.Count == 0,
+            "These routes are in a GROUP-GATED file but declare an absolute path, so they do not depend "
+            + "on the group to resolve. Make them group-relative (drop the group's prefix). Task 091's "
+            + "nine routes had this exact shape and were registered on the root app for it — they "
+            + "answered on /api/spe URLs while inheriting neither the admin-role filter nor the "
+            + "tenant-scope filter.\n\n  " + string.Join("\n  ", offenders));
+
+        // Non-vacuity: the scan must actually reach a group-gated file, or this rule passes by
+        // examining nothing.
+        Assert.True(
+            GovernedFiles.Any(f => f.Scope == Scope.GroupGated),
+            "No GroupGated file is classified, so this rule asserts nothing. If the last one was "
+            + "removed, delete this rule rather than leaving it to pass vacuously.");
+    }
 
     [Fact(DisplayName = "Task 074 census: the set of BFF endpoint files is pinned, so a new route surface must be classified")]
     public void TheEndpointFileCensusIsPinned()

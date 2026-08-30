@@ -6,6 +6,58 @@
 
 ---
 
+## ⏳ IN PROGRESS — task 091 (SPE Admin container items), 2026-08-30
+
+| Field | Value |
+|---|---|
+| **Task** | 091 — nine `/api/spe` routes registered outside the admin group |
+| **Step** | 6 of 8 — fix landed + guards green; remaining: full suite, publish size, CVE, notes, status |
+| **Status** | in-progress |
+| **Next Action** | full `dotnet test` unit suite → `dotnet publish -c Release` size vs 44.96 MB → `dotnet list package --vulnerable --include-transitive` → write `notes/task-091-spe-admin-container-items.md` → Step 9.5 gates |
+
+**Files modified**: `Api/SpeAdmin/ContainerItemEndpoints.cs` (9 routes → group-relative; signature →
+`RouteGroupBuilder`) · `Api/SpeAdminEndpoints.cs` (registers it on the group) ·
+`Infrastructure/DI/EndpointMappingExtensions.cs` (root-app registration removed) ·
+`tests/Spaarke.ArchTests/RouteAuthorizationGuardTests.cs` (new `Scope.GroupGated` + Rule E) ·
+`tests/Spaarke.ArchTests/SpeWriteSinkContainerProvenanceGuardTests.cs` (3 entries re-owned to 091) ·
+**NEW** `tests/integration/auth/SpeAdmin/SpeAdminContainerItemRouteGateTests.cs`
+
+**Empirical proof, before any fix**: 9 failed / 11 passed. All nine routes answered **500/400 from
+inside the handler** — never 403 — while the control route `/api/spe/containertypes` DID 403 for the
+same caller. Authorization never ran; the handler did. After the fix: **20/20**.
+
+**Perturbations, both bit**: (A) remove the group's role filter → 10 fail (the nine + the control).
+(B) attempt the original root-app registration → **compile error** (`cannot convert from
+'WebApplication' to 'RouteGroupBuilder'`) — the defect can no longer be expressed.
+
+**ArchTests**: 138 passed / 6 failed; clean tree proven by `git stash` at 137/6 — same six, +1 Rule E.
+
+**Escalation trigger did NOT fire**: the SPE Admin client makes 64 `/spe/*` calls and already depends
+on group-gated routes (`containers`, `containertypes`, `configs`, `businessunits`, `environments`), so
+its users must already hold the admin role. Gating these nine adds no new role requirement.
+
+### 🔴 Two PRE-EXISTING client/server route mismatches found (NOT caused by 091, NOT fixed by it)
+
+`src/solutions/SpeAdminApp/src/services/speApiClient.ts`:
+1. `createSharingLink` posts to `…/items/{itemId}/sharing` — the server serves **`/share`**. 404.
+2. `get` calls `GET …/items/{itemId}` — **no such server route exists**. 404.
+
+Both have been dead since written. They slightly *strengthen* the safety of gating (nothing could have
+depended on them), but they are real defects on the admin surface and want their own task.
+
+### ⚠️ Open modelling question left deliberately unresolved (owner decision)
+
+The three write sinks stay `ClientSupplied`. Task 091 closed the authorization half; it did **not**
+change provenance — an SPE admin still names the container, because that IS the function of an admin
+tool, and record-less containers legitimately exist (task 078). But the provenance guard documents
+`ClientSupplied` as *"a work list that shrinks to zero, never exemptions"*, which may be unreachable for
+an admin surface. Options: (a) accept as permanently client-supplied-by-design, or (b) add a distinct
+"administrative, gated by role + tenant scope" provenance. **091 did not choose** — inventing an
+exemption inside a guard whose model forbids exemptions is the quiet reclassification this project
+exists to stop.
+
+---
+
 ## Quick Recovery (READ THIS FIRST)
 
 | Field | Value |

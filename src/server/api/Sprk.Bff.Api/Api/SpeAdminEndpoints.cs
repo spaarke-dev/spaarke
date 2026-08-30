@@ -42,6 +42,11 @@ public static class SpeAdminEndpoints
         group.MapConfigEndpoints();                   // SPE-011
         group.MapBusinessUnitEndpoints();             // SPE-012
         ContainerEndpoints.MapContainerEndpoints(group); // SPE-013
+        // SPE-017..021. Moved onto this group by unified-access-control-r2 task 091. It was
+        // registered on the ROOT app while spelling out absolute /api/spe/... paths, so its nine
+        // routes sat at admin URLs carrying neither filter below — reachable by any authenticated
+        // caller, with configId an unchecked cross-tenant bearer capability.
+        ContainerItemEndpoints.MapContainerItemEndpoints(group);
         ContainerColumnEndpoints.MapContainerColumnEndpoints(group); // SPE-055
         ContainerCustomPropertyEndpoints.MapContainerCustomPropertyEndpoints(group); // SPE-056
         ContainerPermissionEndpoints.MapContainerPermissionEndpoints(group); // SPE-016

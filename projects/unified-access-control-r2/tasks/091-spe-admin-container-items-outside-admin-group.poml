@@ -3,7 +3,7 @@
   <metadata>
     <title>ContainerItemEndpoints — nine /api/spe routes are registered on the root app, outside the admin-role and tenant-scope filters</title>
     <phase>0c Secure Documents — Wave 2 (container-selection sweep follow-on)</phase>
-    <status>pending</status>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>Cross-tenant disclosure AND destruction surface on shipped routes: download, preview, sharing-link mint, delete, upload, folder-create — reachable by any authenticated caller.</rigor-reason>
     <model-tier>opus</model-tier>
@@ -135,7 +135,57 @@ SCOPE NOTE. The container-selection defect (client names the container) is real 
     <criterion>Build 0 warnings; publish size reported against the 44.96 MB baseline; no new HIGH CVE.</criterion>
   </acceptance-criteria>
 
-  <notes>Row 10 of the task 083 census, at revised severity.
+  <notes>COMPLETED 2026-08-30. Full write-up: notes/task-091-spe-admin-container-items.md.
+
+Fixed by moving all nine routes onto the `/api/spe` group (group-relative paths; URLs byte-identical,
+proven by the tests returning 403 rather than 404). Per-route `.RequireAuthorization()` removed as
+inherited. `MapContainerItemEndpoints` now takes `RouteGroupBuilder` instead of `IEndpointRouteBuilder`,
+which makes the original root-app registration a COMPILE ERROR rather than a silent hole.
+
+EMPIRICALLY PROVEN BEFORE THE FIX (POML step 1). The new HTTP-level suite, written to assert the correct
+behaviour and run first: 9 failed / 11 passed. The nine answered **500/400 from inside the handler** —
+never 403 — while the control `/api/spe/containertypes` DID 403 for the same caller. Authorization never
+ran; the handler did. Neither of the two obvious instruments could have shown this: the sibling filter
+test invokes the filter directly (the filter was never attached), and endpoint reflection cannot see
+filters at all (`AddEndpointFilter` contributes nothing to `EndpointBuilder.Metadata`).
+
+Perturbations, both bit: (A) remove the group's role filter → 10 fail (nine + control). (B) attempt the
+root-app registration → compile error.
+
+ESCALATION TRIGGER DID NOT FIRE. `SpeAdminApp` is the only consumer and already makes 64 `/spe/*` calls
+against group-gated routes, so its users must already hold `Admin`/`SystemAdmin`. Gating adds no new
+role requirement.
+
+TWO THINGS THIS TASK DID NOT FIX, both recorded rather than silently absorbed:
+
+(1) Pre-existing client/server route mismatches in `speApiClient.ts` — `createSharingLink` posts to
+    `…/sharing` while the server serves `/share`, and `get` calls `GET …/items/{itemId}` which has no
+    server route. Both 404, both dead since written, both unrelated to this change. They want a task.
+
+(2) An OPEN MODELLING QUESTION. The three write sinks stay `ClientSupplied`: this task closed the
+    authorization half but did not change provenance — an admin still names the container, because that
+    IS the function of an admin tool, and record-less containers legitimately exist (078). The guard
+    documents `ClientSupplied` as "a work list that shrinks to zero, never exemptions", which may be
+    unreachable for an administrative surface. Owner must choose: accept as client-supplied-by-design,
+    or add an "administrative, role + tenant scoped" provenance. 091 deliberately did NOT choose.
+
+CENSUS: added to `RouteAuthorizationGuardTests` under a NEW `Scope.GroupGated` + Rule E
+(`GroupGatedFilesRegisterNoAbsolutePaths`). A third scope was necessary, not tidy — `RouteLevelGate`
+would make Rule A demand a per-route filter that correctly is not there, and a guard that flags the code
+it protects gets deleted rather than obeyed (tests/CLAUDE.md).
+
+⚠️ THE POML'S OWN COUNT WAS WRONG AND THE REASON MATTERS. This task was filed after revising 083's "three
+routes" upward to nine. 083 said three because its instrument scanned for WRITE sinks; the six read
+routes — including file download and sharing-link minting — were invisible to it. A tool finds what it
+was built to look for, and the count it returns is not the size of the problem.
+
+Verification: build 0 warnings; new suite 29/29; full BFF suite 10,896 passed / 0 failed / 72 skipped;
+ArchTests 138 passed / 6 failed == clean-tree baseline proven by `git stash` (137/6, +1 Rule E); publish
+45.12 MB compressed incl. PDBs (0.00 delta, ceiling 60); no vulnerable packages; none added.
+
+---
+
+Row 10 of the task 083 census, at revised severity.
 
 WHAT THE CENSUS GOT WRONG, recorded because the correction is the lesson: it described "three routes (`upload`, `delete`, `folders`) whose primary defect is a missing admin gate." Three was the count of SPE **write sinks** in the file, because the instrument that found it was a write-sink scanner. The file has **nine** routes and the six read routes — including file download and sharing-link creation — were invisible to that instrument. A tool finds what it was built to look for; the count it returns is not the size of the problem.
 

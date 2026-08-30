@@ -313,32 +313,57 @@ public class SpeWriteSinkContainerProvenanceGuardTests
             + "Task 076 CONVERTS it to the record-keyed contract; the entry goes when the conversion lands "
             + "and must never become permanent."),
 
+        // ── The three SPE-Admin item writes ───────────────────────────────────────────────────────
+        //
+        // ALL THREE STAY ClientSupplied, and the classification is deliberate. Task 091 (2026-08-30)
+        // moved this file's nine routes onto the /api/spe group, so they now inherit
+        // SpeAdminAuthorizationFilter (admin app role) + SpeAdminTenantScopeFilter (configId ownership).
+        // That closed the AUTHORIZATION half. It did not, and could not, change PROVENANCE: an SPE
+        // admin still names the container, because naming the container IS the function of an admin
+        // tool. There is frequently no owning record to derive from — task 078 confirmed that
+        // record-less containers legitimately exist (every shared BU / archive container).
+        //
+        // ⚠️ OPEN MODELLING QUESTION, surfaced rather than silently resolved. This enum documents
+        // ClientSupplied as "a work list that shrinks to zero, never exemptions". For a user-facing
+        // route that is right. For an ADMIN surface it may not be reachable, and the honest options are
+        // (a) accept these three as permanently client-supplied-by-design, or (b) add a distinct
+        // provenance for "administrative, gated by role + tenant scope". Task 091 deliberately did NOT
+        // choose: inventing an exemption inside a guard whose stated model forbids exemptions is the
+        // kind of quiet reclassification this project exists to stop. Owner decision required before
+        // this row can leave the work list.
         new SinkSite("Api/SpeAdmin/ContainerItemEndpoints.cs", "CreateFolderForConfigAsync", 1,
-            Provenance.ClientSupplied, "083 (NEW row 10)",
+            Provenance.ClientSupplied, "091 (gated; provenance question open)",
             "route parameter {id} (container) + query parameter configId",
             "POST /api/spe/containers/{id}/folders creates a folder in a caller-named container using the "
-            + "container-type config's app-only credentials — no per-record decision anywhere on the path "
-            + "(ADR-003; ADR-008). FOUND BY THIS GUARD: absent from task 083's §2 table AND from the "
-            + "2026-08-28 manual sweep, which caught this file's upload and delete but not its folder "
-            + "create. Lower blast radius than its siblings (a folder holds no bytes yet) but identical "
-            + "provenance, and a folder is where the next write lands."),
+            + "container-type config's app-only credentials. FOUND BY THIS GUARD: absent from task 083's "
+            + "§2 table AND from the 2026-08-28 manual sweep, which caught this file's upload and delete "
+            + "but not its folder create. Lower blast radius than its siblings (a folder holds no bytes "
+            + "yet) but identical provenance, and a folder is where the next write lands. Since task 091 "
+            + "the route requires the Spaarke admin app role and a configId inside the caller's tenant "
+            + "scope; there is still no per-RECORD decision, which is inherent to administering a "
+            + "container rather than a document (ADR-003; ADR-008)."),
 
         new SinkSite("Api/SpeAdmin/ContainerItemEndpoints.cs", "DeleteDriveItemForConfigAsync", 1,
-            Provenance.ClientSupplied, "083 (NEW row 10)",
+            Provenance.ClientSupplied, "091 (gated; provenance question open)",
             "route parameter {id} (container) + query parameter configId",
             "DELETE /api/spe/containers/{id}/items/{itemId} destroys a caller-named item in a caller-named "
             + "container, app-only through the container-type config credentials, with no per-record "
-            + "decision (ADR-003; ADR-008). NEW in the 2026-08-28 sweep and confirmed here: this whole file "
-            + "sits outside RouteAuthorizationGuardTests' twelve-file census, which is why three live "
-            + "client-named writes lived here unremarked."),
+            + "decision (ADR-003; ADR-008). Gated by task 091. ⚠️ ONE CLAIM HERE WAS TRUE WHEN WRITTEN AND "
+            + "IS NOW FALSE — it read 'this whole file sits outside RouteAuthorizationGuardTests' "
+            + "twelve-file census, which is why three live client-named writes lived here unremarked'. "
+            + "Task 091 added the file to that census as Scope.GroupGated. The observation was the "
+            + "load-bearing one: the census could only find holes in files someone had already listed, "
+            + "and it governed twelve. Note also that the census undercounted this file's exposure — the "
+            + "sweep found three WRITE sinks here, but the file has NINE routes, and the six read routes "
+            + "(including file download and sharing-link minting) were invisible to a write-sink scan."),
 
         new SinkSite("Api/SpeAdmin/ContainerItemEndpoints.cs", "UploadFileToContainerForConfigAsync", 1,
-            Provenance.ClientSupplied, "083 (NEW row 10)",
+            Provenance.ClientSupplied, "091 (gated; provenance question open)",
             "route parameter {id} (container) + query parameter configId",
             "POST /api/spe/containers/{id}/items/upload writes bytes into a caller-named container app-only "
-            + "(ADR-003; ADR-008; ADR-007 for the Graph path). Note the sink NAME: the manual sweep and the "
-            + "task brief both named SpeAdminGraphService.UploadSmallFileAsync, which is the private "
-            + "implementation three frames down; the actual decision site calls "
+            + "(ADR-003; ADR-008; ADR-007 for the Graph path). Gated by task 091. Note the sink NAME: the "
+            + "manual sweep and the task brief both named SpeAdminGraphService.UploadSmallFileAsync, which "
+            + "is the private implementation three frames down; the actual decision site calls "
             + "UploadFileToContainerForConfigAsync, a sink name absent from every list this project has "
             + "kept. That omission is why the vocabulary is now pinned too."),
 

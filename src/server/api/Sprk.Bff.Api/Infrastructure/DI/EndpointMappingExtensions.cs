@@ -374,10 +374,21 @@ public static class EndpointMappingExtensions
         // SPE Admin endpoints (/api/spe/*) — environments, configs, business units, containers, audit log, dashboard
         app.MapSpeAdminEndpoints();
 
-        // SPE container item endpoints (/api/spe/containers/{id}/items, /upload, /content, /preview, /versions, /thumbnails, /sharing, /folders)
-        // Registered separately because ContainerItemEndpoints maps absolute paths (not relative to the /api/spe group).
-        // Inherits auth via RequireAuthorization() called inside MapContainerItemEndpoints. (SPE-017 through SPE-021)
-        app.MapContainerItemEndpoints();
+        // SPE container item endpoints (SPE-017..021) are NOT registered here. They now register on
+        // the /api/spe group inside MapSpeAdminEndpoints() above, so they inherit
+        // SpeAdminAuthorizationFilter + SpeAdminTenantScopeFilter like every other admin route.
+        //
+        // ⚠️ Do not restore a root-app registration for them. This site used to read:
+        //     "Registered separately because ContainerItemEndpoints maps absolute paths (not relative
+        //      to the /api/spe group). Inherits auth via RequireAuthorization() called inside
+        //      MapContainerItemEndpoints."
+        // Both sentences were true and the conclusion was still wrong: absolute paths were a reason
+        // to make them group-relative, not a reason to bypass the group, and RequireAuthorization()
+        // supplies authentication — not the admin-role check or the tenant scope. The result was nine
+        // routes (enumerate, versions, thumbnails, share-link, download, preview, delete, folder,
+        // upload) at /api/spe/... URLs reachable by any authenticated caller, with the client-supplied
+        // configId unchecked across tenants. Fixed by unified-access-control-r2 task 091; guarded by
+        // tests/integration/auth/SpeAdmin/SpeAdminContainerItemRouteGateTests.cs.
 
         // M365 Copilot Agent gateway endpoints (/api/agent/*)
         app.MapAgentEndpoints();
