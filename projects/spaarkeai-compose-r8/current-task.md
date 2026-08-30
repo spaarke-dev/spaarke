@@ -11,15 +11,70 @@
 
 | Field | Value |
 |---|---|
-| **Active work** | **070 decomposition** — clusters **7 · 6 · 5b · 8 · 1 · 3** extracted & verified. **Cluster 4 (PDF intake + source markers) is next available** (2b/2a are HELD). |
-| **Next Action** | **Cluster 4 (PDF)** — 9 members, ~290 LOC, **75.0% branch**. Two things are already known about it: it must take `SaveStampJsonOptions` with it (cluster 3 left that note deliberately — see below), and at 61.6% LINE coverage on the 4b marker half it is the **least-covered** thing extracted so far, so budget for the mutation pass finding holes. Then 5a (64.3% branch, weakest of all — extract LAST or test first). 2b/2a only after UAC-r2 replies on #858. |
-| **Branch** | `work/spaarkeai-compose-r8` · clean · HEAD = `refactor(070): extract cluster 3 …` · `ComposeService.cs` 4,427 → **3,236** |
-| **Suite** | ALL GREEN — Compose **1,798/0** · ArchTests **150/150** · solution build **0 errors** · DI diff **empty** |
+| **Active work** | **070 decomposition** — clusters **7 · 6 · 5b · 8 · 1 · 3** extracted & verified. **Cluster 4 is next; its executable spec is now written** (2b/2a are HELD). |
+| **Next Action** | **Cluster 4 (PDF intake + provenance)** — the full extraction spec is in the seam map: two source blocks (994–1088 and 1954–2163), six deps, nine call sites, and the `SaveStampJsonOptions` resolution. **Execute it, do not re-derive it.** Then 5a (64.3% branch, weakest of all — extract LAST or test first). 2b/2a only after UAC-r2 replies on #858. |
+| **Branch** | `work/spaarkeai-compose-r8` · clean · **PUSHED** (was 177 commits behind its own PR) · `ComposeService.cs` 4,427 → **3,236** |
+| **PR #806** | **Draft, MERGEABLE, CI running against real state for the first time since 2026-08-28.** Its 4 prior failures were all stale — see §S1. |
+| **Suite** | ALL GREEN — BFF **11,627/0** · Compose client gate **104 suites / 1,336** · Spe.Integration **409/0** · IntegrationTests **103/0** · ArchTests **150/150** · solution build **0 errors** · DI diff **empty** |
 | **Verify with** | **`dotnet build`** at the SOLUTION root — not one project (see §A2 for why that distinction cost real time) |
 
 ---
 
-## S0. This session (2026-08-30) — clusters 1 and 3, and the seven coverage holes they exposed
+## S1. PR #806 was blocked by one thing: 177 unpushed commits (resolved 2026-08-30)
+
+The four failing checks were a symptom, not the cause. `origin/work/spaarkeai-compose-r8` was pinned at
+`80f6f63bb` (2026-08-28) while local HEAD was 177 commits ahead — so **every CI result on #806 described a
+tree that no longer existed**, and UAC-r2 was waiting behind a PR that had never received the work.
+
+Each failure was diagnosed before pushing rather than assumed stale:
+
+| Check | Verdict |
+|---|---|
+| Tier 1 ArchTests (MUST-NOT subset) | **Stale.** "Task 074 census: the set of BFF endpoint files is pinned" — fixed on 2026-08-29 (110→117 + the 8 Compose endpoint files classified). Locally 150/150. |
+| Compose Client Gate | **Stale.** `ComposeWorkspace.redline-from-ledger.test.tsx` — run locally: **24/24 pass**. |
+| Router | Aggregate of Tier 1; nothing of its own. |
+| Trivy | **Not a scan failure.** The check's title is *"1 configuration not found"* — a path-filtered sidecar workflow (`build-provisioning-sidecar.yml`) that exists on master but does not run for this PR. |
+
+**Branch pushed.** #806 is now `MERGEABLE`, CI running against real state.
+
+**On the Trivy alert counts** (1 high / 6 medium / 4 low): verified against master rather than trusting the
+PR attribution — Trivy's own summary warns alerts may be misattributed when the diff is large, and it was.
+All three genuine HIGHs are byte-identical on master in lockfiles this PR does not modify. `linkify-it`
+(ours) is fixed; the `fast-uri` pair in `TrackingFieldTrio` is left for its own PR against master — an
+unrelated PCF surface, and bumping it inside a 491-file Compose PR adds risk to both.
+
+### What UAC-r2 needs to know (#858)
+
+Their stated ask was: *"tell us when PR #806 merges, or when `IComposeService.cs`, `ComposeEndpoints.cs`
+and `ComposeService.cs` are stable enough for us to edit."* The honest answer has changed and they should
+be told: **#806 now has the work in it and is mergeable**, and `ComposeService.cs` has gone 4,427 → 3,236
+under task 070, with the **create-on-save cluster they target (2b/2a) deliberately left untouched** so
+their patch still applies to recognisable code. Their sequencing ("behind #806") is now achievable rather
+than blocked.
+
+---
+
+## S0. This session (2026-08-30) — clusters 1 and 3, two production fixes, and the seven coverage holes
+
+### The two production loose ends — FIXED, not filed
+
+| Defect | Fix |
+|---|---|
+| `DataverseServiceClientImpl` built its own `DefaultAzureCredential` (ADR-028 A4 violation) | Credential is now a ctor param; `GraphModule` resolves it **from DI** (the shared singleton, one token cache) rather than calling the factory again. `Spaarke.Dataverse` is the base layer and cannot reference the factory (FR-14), so it is passed in. |
+| `Graph:UseManagedIdentity` — a key **no production code reads** | Corrected in 43 fixtures + the wrong row in `docs/procedures/test-fixture-contracts.md` they had all copied it from. |
+
+**Three silent drifts** the credential defect carried, none of which fails loudly: inverted UAMI-key
+precedence (Dataverse could authenticate as a *different identity* than Graph), blank-not-normalised (an
+App Service setting cleared to blank shadows the canonical key → unpinned credential → "Unable to load the
+proper Managed Identity"), and no tenant pinning (invariant I5 / FR-32 — a forcing function that must be in
+place *before* a multi-tenant switch).
+
+**A side effect worth knowing**: resolving from DI puts this path behind the test host's
+`UseStubTokenCredential`, which previously could not reach it. The note in
+`Spe.Integration.Tests/IntegrationTestFixture.cs` that described both defects as unfixed now records that
+they are — and explains why its `IFieldMappingDataverseService` mock is kept anyway.
+
+
 
 **The headline is not the two extractions. It is that a mutation pass over moved code found seven
 places where a documented safety guarantee had no test at all** — including two that could destroy a

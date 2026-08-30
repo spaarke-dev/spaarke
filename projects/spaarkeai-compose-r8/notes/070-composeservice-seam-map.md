@@ -318,6 +318,46 @@ between keeping the user's edit and losing the session — which is what prong 1
 **After the three tests: all six mutations die.** Compose suite 1,794 · ArchTests 150 · solution build 0
 errors · DI diff empty.
 
+## Cluster 4 — executable extraction spec (analysis done 2026-08-30; move not yet made)
+
+Verified against the file at HEAD so the next session executes rather than re-derives. Line numbers are
+from `ComposeService.cs` at **3,236 lines**.
+
+**Target**: `internal sealed class ComposePdfIntakeCoordinator` in
+`Services/Compose/ComposePdfIntakeCoordinator.cs`. Reason to change: *how a PDF becomes an editable
+document, and how that origin is remembered.*
+
+**Two source blocks, not one** (they are separated by ~900 lines of unrelated code):
+
+| Block | Lines | Members |
+|---|---|---|
+| A — intake | **994–1088** | `IsPdfSource` (994 doc / 1001 body) · `ProjectPdfToDocxAsync` (1021 doc / 1027 body) |
+| B — provenance | **1954–2163** | the FR-A08/FR-A09 banner · `PdfSourceMarkerKeyPrefix` · `PdfDerivedDocumentKeyPrefix` · `PdfProvenanceCacheOptions` · `ComposePdfSourceMarker` · `ComposePdfDerivedDocument` · `SetPdfSourceMarkerAsync` · `ClearPdfSourceMarkerAsync` · `GetPdfSourceMarkerAsync` · `SetPdfDerivedDocumentAsync` · `ResolvePdfDerivedDocumentAsync` · `PdfDerivedDocumentKey` |
+
+**Six dependencies**: `_pdfIntakeSource` · `_pdfModelProjector` · `_documentRenderer` · `_cache` (nullable)
+· `_spe` (the reachability probe in `ResolvePdfDerivedDocumentAsync`) · `_logger`.
+
+**Call sites to rewire — 9**: `IsPdfSource` at 357 and 595 (→ `internal static`, two callers stay on
+`ComposeService`) · `ProjectPdfToDocxAsync` at 360, 647 · `SetPdfSourceMarkerAsync` at 371, 931 ·
+`ClearPdfSourceMarkerAsync` at 937 · `GetPdfSourceMarkerAsync` at 1269 · `SetPdfDerivedDocumentAsync` at
+1749 · `ResolvePdfDerivedDocumentAsync` at 615. Note the two records are used in `ComposeService`
+signatures at those sites, so both must become `internal`.
+
+**`SaveStampJsonOptions` must be resolved here** — cluster 3 left it deliberately (see its note). Cluster 4
+holds 4 of its 6 usages. Recommendation: do NOT move it onto this collaborator (that would make cluster 3
+reach laterally into cluster 4); extract it to a one-field `internal static class ComposeCacheJson` in the
+same folder and rename it — "save stamp" already under-describes a field the PDF markers also use. The §11
+justification is the cost of the alternative: two cache-payload serializer configs free to drift apart
+silently.
+
+**Expect holes.** Cluster 4 is **75.0% branch**, and its 4b marker half is **61.6% LINE** — the least
+covered thing extracted so far. On the evidence of clusters 1 and 3 (7 holes between them, two of which
+could destroy a document), budget for the mutation pass finding more, and mutate **each** member: the
+bytes-first PDF sniff, the intake failure-cause split (503 vs 422), the marker read/write/clear trio, the
+derived-document key, and the reachability probe's *"fall through for this caller, leave the entry
+alone"* rule — that last one is a per-caller-vs-shared-state distinction and exactly the shape a
+refactor gets wrong.
+
 ### Cluster 3 — done (2026-08-30), and it found the worst holes yet
 
 Extracted as `ComposeSaveStorageCoordinator`: the storage boundary of a save — which bytes it starts
