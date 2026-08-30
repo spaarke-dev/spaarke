@@ -514,9 +514,21 @@ Next steps:
 > Work pushed straight to master creates no PR, contributes no comparison, and therefore *delays*
 > retiring `sdap-ci.yml`.
 >
-> **Master currently has no branch protection** (verified 2026-08-29; the intentional pre-cutover
-> state). That is not permission to push directly — see `merge-to-master` Step 3. Task CICD-071
-> enables `CI / Router` as a required check, at which point a direct push is refused outright.
+> **Master IS protected (enabled 2026-08-29).** A repository **ruleset** — not classic branch
+> protection — enforces on the default branch: a **PR is required** (0 approvals), the **`Router`**
+> check must pass, and force-push/deletion are blocked. A direct push to master is refused.
+>
+> Classic branch protection is **unavailable on this repo** — both `GET` and `PUT` on
+> `/branches/master/protection` return `404 "Branch protection has been disabled on this repository"`
+> despite `admin: true` and a `repo`-scoped token. Rulesets are the working mechanism here. Manage it
+> at `gh api repos/spaarke-dev/spaarke/rulesets/21824191`, and read what actually applies with
+> `gh api repos/spaarke-dev/spaarke/rules/branches/master`.
+>
+> **The required context is `Router`** — the literal check-run name — **not** `CI / Router` as some
+> planning docs say. `Router` is the router workflow's `always()` aggregate over `classify` + `tier1`;
+> **tier2 is deliberately excluded from its adjudication**, which is what makes Tier 2 advisory in
+> practice. Docs-only PRs skip Tier 1 and `Router` still reports success, so they are not blocked
+> (verified on #891/#892).
 >
 > **Prefer `/merge-to-master`**, which runs the pre-merge branch update + conflict resolution (its
 > Step 2.5) that this skill does not.
