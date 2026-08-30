@@ -191,6 +191,7 @@ structural order this file originally proposed.
 | 8 reference/paraId helpers | ✅ extracted | `ComposeReferenceMapping.cs` | off-by-one in `ResolveParaIdForHint` → 4 red |
 | 2b + 2a create-on-save | ⛔ **HELD** | — | `unified-access-control-r2` owns #858 inside this file |
 | 1 re-anchor | ✅ extracted | `ComposeReanchorCoordinator.cs` | **six** mutations across six members; four survived the whole suite → three coverage holes closed first (below) |
+| 3 save baseline + concurrency | ✅ extracted | `ComposeSaveStorageCoordinator.cs` | **seven** mutations, one per member; three survived the whole suite → three more holes closed (below) |
 
 Every extraction: Compose suite **1,790/1,790**, ArchTests **150/150**, build 0/0, and the DI diff
 (`Program.cs` + `Infrastructure/DI/`) **empty** — ADR-010 holds by construction, not by assertion.
@@ -316,6 +317,55 @@ between keeping the user's edit and losing the session — which is what prong 1
 
 **After the three tests: all six mutations die.** Compose suite 1,794 · ArchTests 150 · solution build 0
 errors · DI diff empty.
+
+### Cluster 3 — done (2026-08-30), and it found the worst holes yet
+
+Extracted as `ComposeSaveStorageCoordinator`: the storage boundary of a save — which bytes it starts
+from, under what precondition it writes, and the version stamp that makes the NEXT save's staleness
+detectable. The three ends are one cluster because they share an invariant that is easy to break by
+touching any one alone: **the bytes a save starts from, the version it asserts against, and the stamp it
+leaves behind must describe the same version.** Break that and staleness detection stops working
+silently.
+
+**Two things deliberately did NOT move**, recorded so the omissions read as decisions rather than misses:
+
+- `ConcurrentExternalChangeCode` — co-located and about concurrency, but its reason-to-change is the
+  CLIENT banner contract it mirrors (`ComposeBannerStack.tsx`) and its only caller is `SaveAsync`.
+- `SaveStampJsonOptions` — **shared with cluster 4** (PDF provenance markers). It cannot travel without
+  either duplicating a serializer configuration (two cache-payload formats free to drift) or dragging
+  cluster 4 along early. It stays as the one definition both reference, widened to `internal`, with a
+  note to re-home and rename it when cluster 4 moves — "save stamp" already under-describes it.
+
+`HasBaselineVersionCoordinates` moved as `internal static` (SaveAsync also reads it, to decide whether a
+save can proceed before any baseline work starts) — the third time that call has come up, and it has
+been resolved the same way each time.
+
+#### Three more holes, and these were the most serious of the task
+
+Seven mutations, one per member. Four died. **Three survived the entire 1,794-test suite:**
+
+| Survivor | What was unguarded | Consequence if it regressed |
+|---|---|---|
+| `GuardBaselineIsNotPdf` never fires | the task-040 Step-9.5 HIGH-2 fix, **completely untested** | a %PDF- baseline either 500s deep in the OOXML stack or — worse — the save writes DOCX bytes **over the .pdf drive item**, destroying the source |
+| the `If-Match` retry re-sends the STALE eTag | that a precondition is SENT was covered; what happens when it is REJECTED was not | the retry fails identically every time — decoration, and the save a dead end |
+| missing baseline version returns empty bytes | "a dirty save never falls back to a reconstruction" was a comment enforced by a throw no test had ever fired | the delta applies onto zero bytes and the result is written over a real document |
+
+**Four tests close them** (all extending `ConcurrencySaveSeamTests`): the PDF guard on **both** entry
+paths its own doc comment names — retained bytes echoed back, and a re-fetched `.pdf` version — because
+a guard proven on one of two paths is half a guard; the precondition retry asserting **both** halves
+(rebases onto the fresh version AND retries exactly once, since re-sending stale and spinning forever
+fail differently); and the missing-version refusal.
+
+**One of those four had to be tightened before it counted.** The missing-version test first asserted only
+`StatusCode != OK` — and the mutant passed it, because a save proceeding on empty bytes *also* fails,
+just later and for a different reason (the patch engine rejects the empty package). The assertion now
+names the specific outcome: a **404 refusal at resolution**, before any content work, rather than a
+malformed-document 422 discovered after a delta was applied to bytes that were never the user's
+document. Worth recording as its own lesson: **a mutation that survives a new test usually means the
+assertion is weaker than the claim it was written to defend.**
+
+**After the four tests: all seven mutations die.** Compose suite 1,798 · ArchTests 150 · solution build 0
+errors · DI diff empty. `ComposeService.cs` 3,975 → **3,236**.
 
 ### Cluster 1 was next — and it was the first one that deserved caution
 

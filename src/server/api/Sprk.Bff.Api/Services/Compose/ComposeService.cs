@@ -237,6 +237,9 @@ public class ComposeService : IComposeService
     // Task 070 cluster 1: mis-anchored-save recovery (stale-base re-anchor + prong-1 per-paragraph
     // best-effort). SaveAsync decides WHETHER recovery is needed; this decides what recovery does.
     private readonly ComposeReanchorCoordinator _reanchorCoordinator;
+    // Task 070 cluster 3: the storage boundary of a save — which bytes it starts from, under what
+    // precondition it writes, and the version stamp that makes the NEXT save's staleness detectable.
+    private readonly ComposeSaveStorageCoordinator _saveStorage;
 
     public ComposeService(
         ISpeFileOperations spe,
@@ -300,6 +303,7 @@ public class ComposeService : IComposeService
         // the cache assigned immediately above.
         _reanchorCoordinator = new ComposeReanchorCoordinator(
             _spe, _patchEngine, _baselineParaIdStamper, _reanchorService, _logger);
+        _saveStorage = new ComposeSaveStorageCoordinator(_spe, _documentRenderer, _cache, _logger);
     }
 
     /// <inheritdoc />
@@ -489,7 +493,7 @@ public class ComposeService : IComposeService
 
         // FR-08 alignment: stamp the just-written version as the next save's staleness assert-baseline
         // (best-effort — mirrors SaveAsync's post-write stamp; a Redis miss never fails the merge).
-        await SetSaveVersionStampAsync(documentSpeId, replaced.ETag, DateTimeOffset.UtcNow, cancellationToken)
+        await _saveStorage.SetSaveVersionStampAsync(documentSpeId, replaced.ETag, DateTimeOffset.UtcNow, cancellationToken)
             .ConfigureAwait(false);
 
         // 5) Re-project the PERSISTED bytes into the canonical model (mirror the post-save
@@ -1175,7 +1179,7 @@ public class ComposeService : IComposeService
         var observedAt = DateTimeOffset.UtcNow;
         var isTransientCreate = string.IsNullOrWhiteSpace(request.DocumentSpeId);
 
-        (byte[] contentToPersist, var renderDegradationWarnings) = await ResolveSaveBaselineAsync(request, httpContext, cancellationToken)
+        (byte[] contentToPersist, var renderDegradationWarnings) = await _saveStorage.ResolveSaveBaselineAsync(request, httpContext, cancellationToken)
             .ConfigureAwait(false);
 
         // FR-A08 (task 044): remember WHICH warnings came from the render call. Everything appended below
@@ -1215,7 +1219,7 @@ public class ComposeService : IComposeService
         // SPE-id presence or a content/text match (NFR-02, I-7).
         var origin = request.ContentModel is not null
             && request.Content.IsEmpty
-            && !HasBaselineVersionCoordinates(request)
+            && !ComposeSaveStorageCoordinator.HasBaselineVersionCoordinates(request)
             ? ComposeOrigin.Authored
             : ComposeOrigin.Imported;
 
@@ -1323,7 +1327,7 @@ public class ComposeService : IComposeService
             // saved (Compose's own last write), else the client's LOAD-TIME ETag (request.BaselineETag) — the
             // latter closes the first-Compose-save no-stamp gap (UAT-26). A mismatch vs the live SPE ETag means
             // an EXTERNAL writer (Word / another tab) landed a new version since the client loaded.
-            var saveStamp = await GetSaveVersionStampAsync(request.DocumentSpeId!, cancellationToken)
+            var saveStamp = await _saveStorage.GetSaveVersionStampAsync(request.DocumentSpeId!, cancellationToken)
                 .ConfigureAwait(false);
             var effectiveBaselineETag = saveStamp?.ETag ?? request.BaselineETag;
             var baseMoved = preWriteETag is not null
@@ -1636,7 +1640,7 @@ public class ComposeService : IComposeService
             // blind PUT, unchanged. `ReplaceFileContentAsUserAsync` already accepts the value and maps a
             // Graph 412 to a typed EtagPreconditionFailedException (ADR-007: the Graph type never
             // crosses the facade); the ETag itself crosses as a plain string.
-            var replaced = await ReplaceWithPreconditionAsync(
+            var replaced = await _saveStorage.ReplaceWithPreconditionAsync(
                     httpContext, request.DriveId, request.DocumentSpeId!, contentToPersist, preWriteETag, cancellationToken)
                 .ConfigureAwait(false);
 
@@ -1657,7 +1661,7 @@ public class ComposeService : IComposeService
         // save of this same item (never a pre-write/pre-create precondition). Best-effort: a Redis miss
         // here never fails an already-successful save; it only means the next save's staleness assert
         // degrades to "no stamp = not stale" (R1-equivalent), never a false negative that blocks a save.
-        await SetSaveVersionStampAsync(effectiveSpeId, saved.ETag, observedAt, cancellationToken).ConfigureAwait(false);
+        await _saveStorage.SetSaveVersionStampAsync(effectiveSpeId, saved.ETag, observedAt, cancellationToken).ConfigureAwait(false);
 
         // ────────────────────────────────────────────────────────────────────────────
         // STEP 2 — record (FR-06 idempotent promotion). Repeated saves see the existing row.
@@ -1926,197 +1930,6 @@ public class ComposeService : IComposeService
     }
 
     /// <summary>
-    /// E1 baseline resolution (FR-06, task 022, Option C — design §4.3): returns the retained LOAD-TIME
-    /// ORIGINAL bytes the save delta applies onto. Resolution order:
-    /// <list type="number">
-    /// <item><b>Same-session fast-path</b> — <see cref="SaveComposeDocumentRequest.Content"/> when present:
-    /// the client still holds the pristine mount payload (<c>state.docxBytes</c>, the ORIGINAL — never a
-    /// reconstruction). Also the create-on-save document bytes.</item>
-    /// <item><b>FR-06 primary</b> — re-fetch the load-time SPE version by
-    /// <see cref="SaveComposeDocumentRequest.BaselineVersionId"/> via
-    /// <c>ISpeFileOperations.DownloadFileVersionAsUserAsync</c> (task 002; behind the <c>SpeFileStore</c>
-    /// facade — ADR-007). Covers a save after the client lost its in-memory bytes (page refresh); the
-    /// load-time version stays addressable even after later dirty saves advance the CURRENT version.</item>
-    /// </list>
-    /// A dirty save NEVER falls back to a client reconstruction (FR-01) — an unresolvable baseline is a
-    /// clear error, not a lossy rebuild.
-    /// <para>
-    /// <b>Tier-3 Redis fallback (design §4.3, deferred — §6.5 Path-A scoping)</b>: the size-capped Redis
-    /// cache of the load-time original is an OPTIMIZATION to avoid the SPE re-fetch, not a correctness
-    /// requirement — the <see cref="SaveComposeDocumentRequest.BaselineVersionId"/> fetch already
-    /// discharges FR-06 baseline retrieval. Populating it requires a Load-path write (out of task-022's
-    /// file scope; Load is task 010/024). Deferred to keep this cutover to the SaveAsync inversion; the
-    /// fast-path + versionId cover every real save case.
-    /// </para>
-    /// </summary>
-    private async Task<(byte[] Bytes, IReadOnlyList<ComposeProjectionWarning>? RenderDegradations)> ResolveSaveBaselineAsync(
-        SaveComposeDocumentRequest request,
-        HttpContext httpContext,
-        CancellationToken cancellationToken)
-    {
-        if (request.ContentModel is not null)
-        {
-            // Task 026 (FR-04): the render degradation sink — dropped anchors / format-change records /
-            // hrefs surface as SUCCESS-WITH-WARNINGS, never a 422 and never silent.
-            var renderDegradations = new List<ComposeProjectionWarning>();
-            var revisionAuthor = ResolveRevisionAuthor(httpContext);
-
-            // (a1) IMPORTED RENDER-ON-SAVE (task 010 — the cutover; spec FR-01/FR-02, ADR-049 Path-B
-            //      amendment): a ContentModel WITH a resolvable retained baseline renders INTO that
-            //      carrier (RenderIntoCarrier) — the model (projected at load through the 020-026
-            //      canonical hub, edited in TipTap, re-posted with every server-set fact preserved) is
-            //      the authoring source, and the carrier contributes the parts the thin model cannot
-            //      carry (styles / numbering / headers / footers / theme / comments part). NO surgical
-            //      byte-patch and NO count-gate on this path — the anchor-reconciliation 422 class
-            //      (the NDA) is unreachable by construction. Hard-tier constructs accept-flattened at
-            //      projection (026) render as degraded prose; the prior version stays retrievable via
-            //      SPE version history (FR-07 safety net). Two boundary notes: (1) a born-in-editor doc
-            //      must keep OMITTING baselineVersionId on its re-saves (its retained versionId is the
-            //      drive-ITEM id, not a real SPE version — echoing it here would 404 the fetch; the
-            //      client's bornInEditor branch sends contentModel only); (2) the FR-08 stale-base
-            //      re-anchor deliberately does not run on this path — the model is full document state,
-            //      so a concurrent out-of-band writer resolves last-writer-wins with version history as
-            //      the net (design-accepted; the eTag stamp still updates post-save for the next op-log
-            //      save's assert).
-            if (!request.Content.IsEmpty)
-            {
-                var carrierContent = request.Content.ToArray();
-                GuardBaselineIsNotPdf(carrierContent);
-                var carrierRendered = _documentRenderer.RenderIntoCarrier(
-                    carrierContent, request.ContentModel, revisionAuthor, renderDegradations);
-                return (carrierRendered, renderDegradations.Count > 0 ? renderDegradations : null);
-            }
-
-            if (HasBaselineVersionCoordinates(request))
-            {
-                var carrierBytes = await FetchBaselineVersionBytesAsync(request, httpContext, cancellationToken)
-                    .ConfigureAwait(false);
-                GuardBaselineIsNotPdf(carrierBytes);
-                var carrierRendered = _documentRenderer.RenderIntoCarrier(
-                    carrierBytes, request.ContentModel, revisionAuthor, renderDegradations);
-                return (carrierRendered, renderDegradations.Count > 0 ? renderDegradations : null);
-            }
-
-            // (a0) BORN-IN-EDITOR (FR-01a, task 026): no retained original at all (AI-drafted / blank) —
-            //      the model is the WHOLE document; render the high-fidelity .docx from a blank package
-            //      (real styles + style-linked multi-level numbering + native tables + minted
-            //      w14:paraId). Deterministic authoring, NOT an AI dispatch (ADR-039 — design §11).
-            var synthesized = _documentRenderer.SynthesizeDocument(
-                request.ContentModel, revisionAuthor, renderDegradations);
-            return (synthesized, renderDegradations.Count > 0 ? renderDegradations : null);
-        }
-
-        // (a) Same-session fast-path: the client still holds the retained ORIGINAL bytes.
-        if (!request.Content.IsEmpty)
-        {
-            var retained = request.Content.ToArray();
-            GuardBaselineIsNotPdf(retained);
-            return (retained, null);
-        }
-
-        // (b) FR-06 primary: re-fetch the LOAD-TIME SPE version by versionId (task 002), behind the
-        //     SpeFileStore facade (ADR-007 — no Microsoft.Graph type crosses into Services/Compose).
-        if (HasBaselineVersionCoordinates(request))
-        {
-            var baseline = await FetchBaselineVersionBytesAsync(request, httpContext, cancellationToken)
-                .ConfigureAwait(false);
-            GuardBaselineIsNotPdf(baseline);
-            return (baseline, null);
-        }
-
-        // No baseline resolvable. A dirty save NEVER falls back to a client reconstruction (FR-01).
-        throw new ArgumentException(
-            "Compose save: no baseline could be resolved — supply the retained original bytes (Content) for " +
-            "a same-session save, or a BaselineVersionId (+ DriveId + DocumentSpeId) to re-fetch the " +
-            "load-time version (FR-06). A docx.js reconstruction is not a valid baseline (FR-01).",
-            nameof(request));
-    }
-
-    /// <summary>
-    /// Task 040 Step-9.5 fix (HIGH-2): every resolved SAVE BASELINE must be an OOXML package, never a
-    /// PDF. Before 040, a PDF could not reach a save (Load fail-closed on the OOXML projection); now a
-    /// PDF load succeeds with SYNTHESIZED docx Content and a rogue/stale caller could hand the engine
-    /// %PDF- bytes (a re-fetched PDF-item version, or the raw PDF echoed as "retained bytes") — which
-    /// would either throw deep inside the OOXML stack as a generic 500, or worse, write docx bytes
-    /// over the .pdf item. Sniff once here (the single choke point every baseline passes through) and
-    /// refuse LOUDLY with the honest instruction (the 041 client saves PDFs via create-on-save; the
-    /// endpoint maps this to 422).
-    /// </summary>
-    private static void GuardBaselineIsNotPdf(ReadOnlySpan<byte> baseline)
-    {
-        if (baseline.Length >= 5
-            && baseline[0] == (byte)'%' && baseline[1] == (byte)'P' && baseline[2] == (byte)'D'
-            && baseline[3] == (byte)'F' && baseline[4] == (byte)'-')
-        {
-            throw new ComposePdfIntakeException(
-                "Compose save: the save baseline resolved to PDF bytes. A document opened from a PDF " +
-                "saves as a NEW Word document (create-on-save) — it cannot replace the PDF in place. " +
-                "Re-open the document and save again.",
-                unavailable: false);
-        }
-    }
-
-    /// <summary>
-    /// FR-S02 (r8 task 011): replace the drive-item's content under an `If-Match` precondition, retrying
-    /// ONCE against the freshly-read version if a writer landed inside the check-then-act window.
-    /// </summary>
-    /// <remarks>
-    /// The retry is the deliberate resolution of the POML's step-5 question ("retry once, or report
-    /// storage-failed?"). Retrying is correct here because the precondition failure carries no information
-    /// the user could act on — it means only that our read was microseconds stale, and the save's own
-    /// semantics are already last-writer-wins, so re-issuing against the fresh version produces exactly the
-    /// outcome the user asked for. Retrying UNBOUNDED would be wrong (a hot document could spin), and
-    /// failing immediately would resurrect the dead-end this task exists to remove — so: exactly one retry,
-    /// then an honest typed failure the endpoint maps to a defined outcome.
-    ///
-    /// The second attempt re-reads metadata rather than reusing the failed ETag: reusing it would fail
-    /// identically, and the point of the retry is to rebase onto whatever landed.
-    /// </remarks>
-    private async Task<FileHandleDto?> ReplaceWithPreconditionAsync(
-        HttpContext httpContext,
-        string driveId,
-        string itemId,
-        byte[] content,
-        string? ifMatch,
-        CancellationToken cancellationToken)
-    {
-        if (string.IsNullOrEmpty(ifMatch))
-        {
-            // No resolved version to assert against (no metadata read happened — a drive-less or
-            // transient path). Nothing to precondition on, so this stays the unchanged R1 blind PUT via
-            // the etag-less overload rather than passing an explicit null through the If-Match one.
-            using var blindStream = new MemoryStream(content, writable: false);
-            return await _spe.ReplaceFileContentAsUserAsync(httpContext, driveId, itemId, blindStream, cancellationToken)
-                .ConfigureAwait(false);
-        }
-
-        try
-        {
-            using var stream = new MemoryStream(content, writable: false);
-            return await _spe.ReplaceFileContentAsUserAsync(httpContext, driveId, itemId, stream, ifMatch, cancellationToken)
-                .ConfigureAwait(false);
-        }
-        // Only reachable with a non-empty `ifMatch` — the guard above returns for the blind-PUT case, so
-        // this catch cannot fire on a request that never carried a precondition.
-        catch (EtagPreconditionFailedException)
-        {
-            var fresh = await _spe.GetFileMetadataAsUserAsync(httpContext, driveId, itemId, cancellationToken)
-                .ConfigureAwait(false);
-
-            _logger.LogWarning(
-                "Compose save: If-Match precondition failed for driveItem={DocumentSpeId} (sent eTag={SentETag}, " +
-                "live eTag={FreshETag}) — a writer landed inside the read-to-write window. Retrying ONCE against " +
-                "the fresh version (last-writer-wins).",
-                itemId, ifMatch, fresh?.ETag);
-
-            using var retryStream = new MemoryStream(content, writable: false);
-            return await _spe.ReplaceFileContentAsUserAsync(
-                    httpContext, driveId, itemId, retryStream, fresh?.ETag, cancellationToken)
-                .ConfigureAwait(false);
-        }
-    }
-
-    /// <summary>
     /// FR-S02 (r8 task 011): the degradation-warning code carried when a save superseded a version another
     /// writer landed while the document was open. Concurrency is last-writer-wins with a warning; this code
     /// IS the warning, and the client renders it naming version history as the recovery path.
@@ -2124,109 +1937,20 @@ public class ComposeService : IComposeService
     /// </summary>
     internal const string ConcurrentExternalChangeCode = "concurrent-external-change";
 
-    /// <summary>Whether the request carries the full coordinate set for an FR-06 load-time-version
-    /// re-fetch (versionId + driveId + speId).</summary>
-    private static bool HasBaselineVersionCoordinates(SaveComposeDocumentRequest request) =>
-        !string.IsNullOrWhiteSpace(request.BaselineVersionId)
-        && !string.IsNullOrWhiteSpace(request.DriveId)
-        && !string.IsNullOrWhiteSpace(request.DocumentSpeId);
-
-    /// <summary>FR-06: downloads the load-time SPE version's exact bytes (the retained baseline / render
-    /// carrier) behind the SpeFileStore facade. Throws when the version is gone — a dirty save never
-    /// falls back to a reconstruction (FR-01).</summary>
-    private async Task<byte[]> FetchBaselineVersionBytesAsync(
-        SaveComposeDocumentRequest request,
-        HttpContext httpContext,
-        CancellationToken cancellationToken)
-    {
-        var stream = await _spe.DownloadFileVersionAsUserAsync(
-                httpContext, request.DriveId!, request.DocumentSpeId!, request.BaselineVersionId!, cancellationToken)
-            .ConfigureAwait(false);
-
-        if (stream is not null)
-        {
-            await using (stream.ConfigureAwait(false))
-            {
-                using var buffer = new MemoryStream();
-                await stream.CopyToAsync(buffer, cancellationToken).ConfigureAwait(false);
-                return buffer.ToArray();
-            }
-        }
-
-        throw new InvalidOperationException(
-            $"Compose save: the load-time baseline version was not found (drive={request.DriveId} " +
-            $"item={request.DocumentSpeId} version={request.BaselineVersionId}). A dirty save must apply " +
-            "onto the load-time original — it will not fall back to a reconstruction (FR-01/FR-06).");
-    }
-
-    // =========================================================================
-    // FR-08 (task 050) — save-path version stamp + stale-base re-anchor (design §5 "Save + concurrency",
-    // NFR-08). The stamp (SPE eTag + operation-schema version) is persisted via IDistributedCache (ADR-009)
-    // after every save of an existing item and asserted against the LIVE eTag at the top of the NEXT save.
-    // A mismatch re-anchors the operation log via AnnotationReanchorService — REUSED verbatim, never
-    // reimplemented (CLAUDE.md §11 / task constraint).
-    // =========================================================================
-
-    private const string SaveVersionStampKeyPrefix = "sdap:compose:save-stamp:";
-    private static readonly JsonSerializerOptions SaveStampJsonOptions = new(JsonSerializerDefaults.Web);
-
-    /// <summary>The save-path version stamp persisted per <c>documentSpeId</c> (ADR-009 Redis) — the SPE
-    /// eTag + operation-schema version this service last wrote, asserted against the live eTag at the top
-    /// of the next save of the same item.</summary>
-    private sealed record ComposeSaveVersionStamp(
-        [property: JsonPropertyName("eTag")] string ETag,
-        [property: JsonPropertyName("schemaVersion")] string SchemaVersion,
-        [property: JsonPropertyName("savedAtUtc")] DateTimeOffset SavedAtUtc);
-
-    /// <summary>Reads the persisted version stamp for <paramref name="documentSpeId"/> (null when absent, no
-    /// cache configured, or a Redis read fails — all three degrade to "not stale", never a false-positive
-    /// re-anchor and never a blocked save).</summary>
-    private async Task<ComposeSaveVersionStamp?> GetSaveVersionStampAsync(string documentSpeId, CancellationToken ct)
-    {
-        if (_cache is null)
-        {
-            return null;
-        }
-
-        try
-        {
-            var json = await _cache.GetStringAsync(SaveVersionStampKeyPrefix + documentSpeId, ct).ConfigureAwait(false);
-            return json is null ? null : JsonSerializer.Deserialize<ComposeSaveVersionStamp>(json, SaveStampJsonOptions);
-        }
-        catch (Exception ex)
-        {
-            _logger.LogWarning(ex,
-                "Compose save: failed to read the version stamp for driveItem={DocumentSpeId} — treating as no prior stamp (not stale).",
-                documentSpeId);
-            return null;
-        }
-    }
-
-    /// <summary>Persists the version stamp for <paramref name="documentSpeId"/> after a successful write
-    /// (create or replace). Best-effort: a Redis write failure here never fails the already-successful save
-    /// — it only means the NEXT save's staleness assert degrades to "no stamp" (not stale), same as a
-    /// freshly-onboarded item that has never been stamped.</summary>
-    private async Task SetSaveVersionStampAsync(string documentSpeId, string? eTag, DateTimeOffset savedAtUtc, CancellationToken ct)
-    {
-        if (_cache is null || string.IsNullOrEmpty(eTag))
-        {
-            return;
-        }
-
-        try
-        {
-            var stamp = new ComposeSaveVersionStamp(eTag, ComposeOperationSchema.Version, savedAtUtc);
-            await _cache.SetStringAsync(SaveVersionStampKeyPrefix + documentSpeId, JsonSerializer.Serialize(stamp, SaveStampJsonOptions), ct)
-                .ConfigureAwait(false);
-        }
-        catch (Exception ex)
-        {
-            _logger.LogWarning(ex,
-                "Compose save: failed to persist the version stamp for driveItem={DocumentSpeId} — the save itself succeeded; a future assert may miss this save.",
-                documentSpeId);
-        }
-    }
-
+    /// <summary>
+    /// Serializer configuration for the small JSON payloads Compose keeps in the distributed cache.
+    /// Named for the save stamp it was introduced for, but shared: the save version stamp (cluster 3,
+    /// <see cref="ComposeSaveStorageCoordinator"/>) and the PDF provenance markers (cluster 4, still on
+    /// this class) both use it.
+    /// </summary>
+    /// <remarks>
+    /// Task 070: <c>internal</c> rather than private because it is the ONE definition both clusters
+    /// read. Duplicating it per collaborator would let two cache-payload formats drift apart silently,
+    /// which is the failure this single definition prevents. When cluster 4 is extracted, this should
+    /// move to whichever collaborator ends up owning cache-payload serialization — and be renamed then,
+    /// since "save stamp" already under-describes it.
+    /// </remarks>
+    internal static readonly JsonSerializerOptions SaveStampJsonOptions = new(JsonSerializerDefaults.Web);
     // =========================================================================
     // FR-A08/FR-A09 (r8 task 044) — PDF provenance: what a session was opened FROM, and what that PDF
     // BECAME. Two keys because they answer two different questions and neither substitutes for the other:

@@ -60,6 +60,7 @@ using Microsoft.Xrm.Sdk;
 using Microsoft.Xrm.Sdk.Query;
 using Moq;
 using Sprk.Bff.Api.Api;
+using Sprk.Bff.Api.Infrastructure.Graph;
 using Sprk.Bff.Api.Models;
 using Sprk.Bff.Api.Services.Ai;
 using Sprk.Bff.Api.Services.Ai.Chat;
@@ -1285,6 +1286,275 @@ public sealed class ConcurrencySaveSeamTests : IClassFixture<ComposeFidelitySeam
             .And.OnlyContain(a => a.Band == ReanchorBand.Orphan && a.MatchedParagraphIndex == -1);
         saveResult.ReanchorSummary.Annotations.Should().Contain(a => a.Type == "comment",
             "the comment must appear in the fail-closed report as its own entry, not be folded into the op count");
+    }
+
+    // ═══════════════════════════════════════════════════════════════════════════════════════════════
+    // 5. NEGATIVE — a save whose BASELINE resolves to PDF bytes is refused with an honest 422 and
+    //    writes nothing, by BOTH routes a PDF can reach the baseline resolver.
+    //
+    //    The guard is the task-040 Step-9.5 HIGH-2 fix, and task 070's cluster-3 mutation pass found it
+    //    completely untested: disabling it left all 1,791 Compose tests green. Without it a %PDF- baseline
+    //    either throws deep inside the OOXML stack as a generic 500, or — the worse outcome — the save
+    //    proceeds and writes DOCX bytes over the .pdf drive item, destroying the source document.
+    //
+    //    Its doc comment names two ways a PDF gets there, so both are covered: the raw PDF echoed back as
+    //    "retained bytes", and a re-fetched version of a .pdf item. One test each, because a guard that is
+    //    only proven on one of its two entry paths is only half a guard.
+    // ═══════════════════════════════════════════════════════════════════════════════════════════════
+
+    /// <summary>%PDF- magic plus enough filler to look like a real payload — the sniff reads the first
+    /// five bytes, which is exactly the point: the guard must not need to parse anything to refuse.</summary>
+    private static readonly byte[] PdfMagicBytes = "%PDF-1.7\n%âãÏÓ\n1 0 obj\n<< >>\nendobj\n"u8.ToArray();
+
+    [Fact]
+    public async Task Save_RetainedBytesAreAPdf_RefusedWithFourTwentyTwo_NothingWritten_ThroughTheWire()
+    {
+        const string speId = "spe-item-070-pdf-retained";
+        const string driveId = "drive-070-pdf-retained";
+        var tenant = ComposeFidelitySeamFixture.TestTenantId;
+
+        _fixture.ResetBoundaries();
+        ArrangeIdempotentPromotionAndIndexing();
+
+        using var client = _fixture.CreateAuthenticatedClient();
+        var sessionId = await CreateSessionAsync(tenant, speId);
+
+        _fixture.SpeMock
+            .Setup(s => s.GetFileMetadataAsUserAsync(It.IsAny<HttpContext>(), driveId, speId, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(BuildFileHandle(speId, driveId, PdfMagicBytes.Length, "\"v1-etag\""));
+
+        var response = await client.PostAsJsonAsync($"/api/compose/documents/{speId}/save", new
+        {
+            sessionId,
+            tenantId = tenant,
+            driveId,
+            content = PdfMagicBytes,
+            operationLog = new
+            {
+                schemaVersion = "compose-ops-v2",
+                operations = new object[]
+                {
+                    new { type = "insertText", paraId = ParaIds[0], at = new { runIndex = 0, offset = 0 }, text = "[NEVER]" },
+                },
+            },
+            comments = (object?)null,
+        });
+
+        var body = await response.Content.ReadAsStringAsync();
+        response.StatusCode.Should().Be(HttpStatusCode.UnprocessableEntity,
+            $"a PDF baseline is refused LOUDLY at the single choke point, never allowed deeper into the " +
+            $"OOXML stack where it surfaces as a generic 500 — body: {body}");
+        body.Should().Contain("PDF Cannot Be Saved In Place",
+            "the refusal must be the honest, actionable one — a document opened from a PDF saves as a NEW " +
+            "Word document via create-on-save; it cannot replace the PDF in place");
+
+        AssertNothingWrittenTo(driveId, speId);
+    }
+
+    [Fact]
+    public async Task Save_RefetchedBaselineVersionIsAPdf_RefusedWithFourTwentyTwo_NothingWritten_ThroughTheWire()
+    {
+        const string speId = "spe-item-070-pdf-refetch";
+        const string driveId = "drive-070-pdf-refetch";
+        const string baselineVersionId = "pdf-version-1";
+        var tenant = ComposeFidelitySeamFixture.TestTenantId;
+
+        _fixture.ResetBoundaries();
+        ArrangeIdempotentPromotionAndIndexing();
+
+        using var client = _fixture.CreateAuthenticatedClient();
+        var sessionId = await CreateSessionAsync(tenant, speId);
+
+        _fixture.SpeMock
+            .Setup(s => s.GetFileMetadataAsUserAsync(It.IsAny<HttpContext>(), driveId, speId, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(BuildFileHandle(speId, driveId, PdfMagicBytes.Length, "\"v1-etag\""));
+
+        // No retained bytes — the FR-06 route: the save re-fetches its load-time version, and what comes
+        // back is a PDF (a stale/rogue caller pointing at a .pdf item's version).
+        _fixture.SpeMock
+            .Setup(s => s.DownloadFileVersionAsUserAsync(
+                It.IsAny<HttpContext>(), driveId, speId, baselineVersionId, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(() => new MemoryStream(PdfMagicBytes.ToArray()));
+
+        var response = await client.PostAsJsonAsync($"/api/compose/documents/{speId}/save", new
+        {
+            sessionId,
+            tenantId = tenant,
+            driveId,
+            baselineVersionId,
+            operationLog = new
+            {
+                schemaVersion = "compose-ops-v2",
+                operations = new object[]
+                {
+                    new { type = "insertText", paraId = ParaIds[0], at = new { runIndex = 0, offset = 0 }, text = "[NEVER]" },
+                },
+            },
+            comments = (object?)null,
+        });
+
+        var body = await response.Content.ReadAsStringAsync();
+        response.StatusCode.Should().Be(HttpStatusCode.UnprocessableEntity,
+            $"the re-fetch route passes through the same single choke point as the retained-bytes route — " +
+            $"body: {body}");
+        body.Should().Contain("PDF Cannot Be Saved In Place");
+
+        AssertNothingWrittenTo(driveId, speId);
+    }
+
+    // ═══════════════════════════════════════════════════════════════════════════════════════════════
+    // 7. FR-01/FR-06 — when the load-time baseline version is GONE, the save fails. It does not proceed
+    //    on empty bytes.
+    //
+    //    Third hole from task 070's cluster-3 mutation pass: replacing the "version not found" throw with
+    //    `return Array.Empty<byte>()` left the whole suite green. That mutant is not a subtle one — a save
+    //    would apply its delta onto zero bytes and write the result over a real document. "A dirty save
+    //    never falls back to a reconstruction" was stated in a comment and enforced by a throw that no
+    //    test had ever caused to fire.
+    // ═══════════════════════════════════════════════════════════════════════════════════════════════
+
+    [Fact]
+    public async Task Save_BaselineVersionNoLongerExists_FailsLoudly_WritesNothing_ThroughTheWire()
+    {
+        const string speId = "spe-item-070-missing-version";
+        const string driveId = "drive-070-missing-version";
+        const string baselineVersionId = "version-that-was-pruned";
+        var tenant = ComposeFidelitySeamFixture.TestTenantId;
+
+        _fixture.ResetBoundaries();
+        ArrangeIdempotentPromotionAndIndexing();
+
+        using var client = _fixture.CreateAuthenticatedClient();
+        var sessionId = await CreateSessionAsync(tenant, speId);
+
+        _fixture.SpeMock
+            .Setup(s => s.GetFileMetadataAsUserAsync(It.IsAny<HttpContext>(), driveId, speId, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(BuildFileHandle(speId, driveId, 1024, "\"v1-etag\""));
+
+        // The client lost its in-memory bytes (page refresh) and asks for its load-time version back —
+        // but that version is gone (pruned / the item was replaced out from under it).
+        _fixture.SpeMock
+            .Setup(s => s.DownloadFileVersionAsUserAsync(
+                It.IsAny<HttpContext>(), driveId, speId, baselineVersionId, It.IsAny<CancellationToken>()))
+            .ReturnsAsync((Stream?)null);
+
+        var response = await client.PostAsJsonAsync($"/api/compose/documents/{speId}/save", new
+        {
+            sessionId,
+            tenantId = tenant,
+            driveId,
+            baselineVersionId,
+            operationLog = new
+            {
+                schemaVersion = "compose-ops-v2",
+                operations = new object[]
+                {
+                    new { type = "insertText", paraId = ParaIds[0], at = new { runIndex = 0, offset = 0 }, text = "[NEVER]" },
+                },
+            },
+            comments = (object?)null,
+        });
+
+        var body = await response.Content.ReadAsStringAsync();
+
+        // Asserting the SPECIFIC failure, not merely "not 200". A save that proceeds on empty bytes also
+        // fails — the patch engine rejects the empty package — so a `NotBe(OK)` assertion passes on the
+        // broken behaviour too. The distinction is what the user is told and where the save stopped: a
+        // missing baseline version is a 404 refusal BEFORE any content work, not a malformed-document 422
+        // discovered after the delta was applied to bytes that were never the user's document.
+        response.StatusCode.Should().Be(HttpStatusCode.NotFound,
+            $"an unresolvable baseline stops the save at resolution and is reported honestly (FR-01/FR-06) — body: {body}");
+        body.Should().Contain("Document Not Found");
+
+        AssertNothingWrittenTo(driveId, speId);
+    }
+
+    // ═══════════════════════════════════════════════════════════════════════════════════════════════
+    // 6. FR-S02 — when the If-Match precondition fails, the save retries EXACTLY ONCE and rebases onto
+    //    the version that actually landed.
+    //
+    //    Test 1b above proves an If-Match is SENT. Nothing proved what happens when it is REJECTED, and
+    //    task 070's cluster-3 mutation pass showed it: making the retry re-send the STALE eTag — the
+    //    precise mistake the method's own remarks warn about ("reusing it would fail identically, and the
+    //    point of the retry is to rebase onto whatever landed") — left all 1,791 Compose tests green.
+    //
+    //    Both halves are asserted, because each fails differently. Re-sending the stale eTag turns a
+    //    recoverable race into a dead-end save; retrying more than once lets a hot document spin.
+    // ═══════════════════════════════════════════════════════════════════════════════════════════════
+
+    [Fact]
+    public async Task Save_PreconditionFails_RetriesOnceAgainstTheFreshVersion_NotTheStaleETag_ThroughTheWire()
+    {
+        const string speId = "spe-item-070-precondition-retry";
+        const string driveId = "drive-070-precondition-retry";
+        var tenant = ComposeFidelitySeamFixture.TestTenantId;
+        var original = BuildDocxWithParaIds(Paragraphs, ParaIds);
+
+        _fixture.ResetBoundaries();
+        ArrangeIdempotentPromotionAndIndexing();
+
+        using var client = _fixture.CreateAuthenticatedClient();
+        var sessionId = await CreateSessionAsync(tenant, speId);
+
+        // The live version the save resolves against, and then the version an interleaving writer left
+        // behind. The first metadata read is the save's own pre-write read; the second is the re-read the
+        // retry performs, and it MUST see the newer version for the rebase to mean anything.
+        var metadataReads = 0;
+        _fixture.SpeMock
+            .Setup(s => s.GetFileMetadataAsUserAsync(It.IsAny<HttpContext>(), driveId, speId, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(() => BuildFileHandle(
+                speId, driveId, original.Length, ++metadataReads == 1 ? "\"v1-etag\"" : "\"v2-etag-interleaved\""));
+
+        var sentPreconditions = new List<string?>();
+        _fixture.SpeMock
+            .Setup(s => s.ReplaceFileContentAsUserAsync(
+                It.IsAny<HttpContext>(), driveId, speId, It.IsAny<Stream>(), It.IsAny<string?>(), It.IsAny<CancellationToken>()))
+            .Returns<HttpContext, string, string, Stream, string?, CancellationToken>((_, _, _, _, ifMatch, _) =>
+            {
+                sentPreconditions.Add(ifMatch);
+                if (sentPreconditions.Count == 1)
+                {
+                    // A writer landed inside the check-then-act window.
+                    throw new EtagPreconditionFailedException(speId, ifMatch);
+                }
+
+                return Task.FromResult<FileHandleDto?>(BuildFileHandle(speId, driveId, original.Length, "\"v3-etag\""));
+            });
+
+        var response = await client.PostAsJsonAsync($"/api/compose/documents/{speId}/save", new
+        {
+            sessionId,
+            tenantId = tenant,
+            driveId,
+            content = original,
+            operationLog = (object?)null,
+            comments = (object?)null,
+        });
+
+        var body = await response.Content.ReadAsStringAsync();
+        response.StatusCode.Should().Be(HttpStatusCode.OK,
+            $"a lost precondition race is recoverable and must NOT surface to the user — body: {body}");
+
+        sentPreconditions.Should().HaveCount(2,
+            "exactly one retry: failing immediately would resurrect the dead-end save this contract removed, " +
+            "and retrying unbounded would let a hot document spin");
+        sentPreconditions[0].Should().Be("\"v1-etag\"", "the first attempt asserts the version the save resolved against");
+        sentPreconditions[1].Should().Be("\"v2-etag-interleaved\"",
+            "the retry must rebase onto the version that actually landed. Re-sending the stale eTag would fail " +
+            "identically every time — the retry would be decoration, and the save a dead end.");
+    }
+
+    /// <summary>The half of the PDF-guard assertion that matters most: refusing with a 422 is good, but the
+    /// failure being guarded against is DOCX bytes landing on a .pdf drive item, so assert directly that no
+    /// write of either overload was attempted.</summary>
+    private void AssertNothingWrittenTo(string driveId, string speId)
+    {
+        _fixture.SpeMock.Verify(s => s.ReplaceFileContentAsUserAsync(
+            It.IsAny<HttpContext>(), driveId, speId, It.IsAny<Stream>(), It.IsAny<CancellationToken>()),
+            Times.Never, "the PDF drive-item must never be overwritten with docx bytes");
+        _fixture.SpeMock.Verify(s => s.ReplaceFileContentAsUserAsync(
+            It.IsAny<HttpContext>(), driveId, speId, It.IsAny<Stream>(), It.IsAny<string?>(), It.IsAny<CancellationToken>()),
+            Times.Never, "the PDF drive-item must never be overwritten with docx bytes");
     }
 
     private void ArrangeIdempotentPromotionAndIndexing()
