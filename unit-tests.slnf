@@ -1,0 +1,10 @@
+{
+  "solution": {
+    "path": "Spaarke.sln",
+    "projects": [
+      "tests\\unit\\Spaarke.Core.Tests\\Spaarke.Core.Tests.csproj",
+      "tests\\unit\\Spaarke.Scheduling.Tests\\Spaarke.Scheduling.Tests.csproj",
+      "tests\\unit\\Sprk.Bff.Api.Tests\\Sprk.Bff.Api.Tests.csproj"
+    ]
+  }
+}
