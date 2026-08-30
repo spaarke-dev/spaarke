@@ -1,10 +1,16 @@
 # Current Task State — customer-provisioning-orchestration-r1
 
-> **Last Updated**: 2026-08-30 SESSION 20 END (Task 212 partially LANDED + Task 213 FILED).
+> **Last Updated**: 2026-08-30 SESSION 20 END-3 — /context-handoff invoked before /compact.
 >
-> **Cumulative state**: 30 of 30 SESSION-18 adversarial verify workflow findings CLOSED + MED#10 landed. 2026-08-28 first live batch-mode dispatch attempt HARD STOPPED at SKILL Step 0.5b constants sanity check. Deep audit surfaced 5 gap classes. Owner alignment on SPAARKE-SPE-CONTAINER-TYPE-TOPOLOGY.md (authored by sdap-SPE-admin-app-r2) confirmed as authoritative for r1's SPE topology. Task 212 landed the small-scope terminology + name-template + constants-rename wins; task 213 handles the substantive topology reconciliation + H8 rework.
+> **This session's arc (SESSION 20, 2026-08-28 → 2026-08-30 across pre- and post-compact)**:
+> 1. Attempted `/provision-environment trial1 --batch runs/trial1-intake.json` → HARD STOPPED at SKILL Step 0.5b constants sanity check (both `containerTypeId` + `bffMultiTenantAppId` null in spaarke-constants.yaml). Deep audit surfaced 5 gap classes.
+> 2. Task 212 filed + partially landed (commit `2e8e30e16`): ADR-028 line 229/239 terminology reconciled (`multi-tenant BFF` → `single-tenant Spaarke BFF` per topology doc §3A rows 4-6); project CLAUDE.md § MUST rule aligned; spaarke-constants.yaml `name_templates` corrected against LIVE Azure (5 corrections); `bffMultiTenantAppId` → `bffApiAppId` renamed in 4 consumer sites.
+> 3. Task 213 filed + partially landed (commit `c7b695678`, 4 of 7 items): topology doc copied to r1 with provenance; `Create-NewContainerType.ps1` DEPRECATED banner + throw; `SPAARKE-SPE-TOPOLOGY-SETUP-RUNBOOK.md` authored (8-step operator runbook); SKILL Step 0.5c topology-verify + Step 0.5b BFF search fix.
+> 4. Task 206 completed in parallel (sub-agent): 31 of 32 recipes already remediated by prior commits; only PRQ-C-03 needed edit (F10 root cause — global resource-name silent-PASS).
+> 5. Task 213.2 Option A H8 live-test executed (per owner directive): HTTP 403 accessDenied CONFIRMED for third empirical time — topology doc §R5 applies to ANY `client_credentials` grant regardless of credential shape. Also discovered KV cert drift.
+> 6. Task 214 filed (commit `f2ec7500d`): H8 full rewrite (H8-B semantics) — 8-12h xhigh scope.
 >
-> **Next**: task 213 (SPE topology reconciliation) can run PARALLEL with tasks 206 + 207. All three must land before task 186 dispatch. Full 5-gap audit + owner alignment: `runs/pre-dispatch-readiness-gap-report.md`.
+> **Next-session directive** (per user 2026-08-30 END): resume with 213.4 (Register-EntraAppRegistrations.ps1 extension) + 214 (H8 rewrite) in PARALLEL.
 
 ## 🎯 Quick Recovery (READ THIS FIRST)
 
@@ -19,37 +25,43 @@
 | **Owner alignment 2026-08-30** | Q1: topology doc is authoritative for r1 ✅. Q2: neither `Spaarke Trial 1` container-type nor `Spaarke SPE Trial 1 Owner` app-reg exist yet — expected as one-time provisioning process setup ✅. Q3: H8-B (rework as container-creation, delegated to my technical call) ✅. Q4: create NEW `Spaarke BFF — Trial 1` app-reg (do NOT reuse `spaarke-bff-dev` = SDAP-BFF-SPE-API `1e40baad-...`) ✅. Q5: scope-split — 212 small + 213 substantive ✅. |
 | **MED#10 landing (retained context)** | Commit `e426191eb` (SESSION 19). H13 handler now writes Cosmos-Completed FIRST, then attempts registry PATCHes best-effort. On Cosmos Conflict → return Failure Resumable with NO registry mutation attempted. On registry PATCH failure → REGISTRY-STALE warning log + Success; operator SKILL Step 6a recovery includes sprk_setupstatus. |
 
-### Files Modified This Session (SESSION 18)
+### Files Modified This Session (SESSION 20)
 
-**Committed + pushed (6 commits, all landed on `origin/work/customer-provisioning-orchestration-r1`):**
+**All 4 commits pushed to `origin/work/customer-provisioning-orchestration-r1`. Working tree: CLEAN.**
 
 | Commit | Files | Scope |
 |---|---|---|
-| `6baf1fbfd` | 5 | ISH-12 `intake.schema.json.environment` → `controlPlaneEnv` rename |
-| `97e18c227` | 4 | Bucket A (5 pre-dispatch blockers: HIGH#1/#2/#8/#13 + MED#12) + `ConfirmationAcknowledgment_IsRequired_InIntakeSchema` parity test |
-| `f5438373a` | 11 | Bucket B credential cluster (5 HIGH: #3/#4/#5/#11 + MED#14): `EntraAppRegRequest.RequireSecretFreeIdentity`, `Register-EntraAppRegistrations.ps1` `-AllowClientSecretMint` opt-in, manifest.yaml `app_settings: []`, `Seed-CustomerKeyVault.generated.ps1` guard |
-| `00341e7c2` | 1 | SESSION 18 first handoff artifact |
-| `1c8b02fbc` | 9 | Bucket B final 5 HIGHs: HIGH#12 H0 warnAndProceed, HIGH#6 HandlerOutcomeApplier terminal release, HIGH#7 DataverseRegistrySetupStatusUpdater single-writer, HIGH#10 SKILL Step 6a→6c handoff-resilience, HIGH#9 prereqs.yaml exit-1 hardening (15 recipes) + `validate-recipe-authoring.ps1` |
-| `f5ef16231` | 17 | Bucket B MED/LOW cluster (10 MED + 4 LOW): MED#3 I1 allow-list, MED#4/#5/#7 H0 strict-mode, MED#9 PRQ-C-07 grep, MED#11 Conflict release, MED#12 orphan sweep, MED#13 H8 25h polling, LOW#1 docstring, LOW#2 verified, LOW#3 order swap, LOW#4 token refresh |
-| `a3b0eef24` | 1 | MED#10 refactor handoff artifact for fresh session |
-| `f755c2d88` | 1 | current-task.md context-handoff checkpoint (SESSION 18 close) |
-| **`e426191eb`** | **4** | **SESSION 19 — MED#10 H13 Cosmos-first refactor (H13 handler + tests + DataverseRegistrySetupStatusUpdater header + SKILL Step 6a runbook). L2 suite 1924 pass / 0 fail. Bucket B fully closed.** |
-
-**Working tree**: CLEAN. All work pushed to origin.
+| `0e2d0df22` | 17 | MDA-GAP fix — SpaarkeCorporateCounselApp added to H6 canonical catalog (C# + PS mirror + tests + spec/design refresh) |
+| `2e8e30e16` | 12 | Task 212 partial + Task 213 POML filed. ADR-028 lines 229/239 terminology reconciliation (`multi-tenant BFF` → `single-tenant`), project CLAUDE.md § MUST rule aligned, spaarke-constants.yaml `name_templates` corrected against LIVE Azure state (5 corrections: `sprk-controlplane-{env}-kv`, `bffAppServiceRg`, `sprkcpartifacts{env}`, `sprkcontrolplane{env}acr`, `l2WorkerAppServiceName`), `bffMultiTenantAppId` → `bffApiAppId` renamed in 4 consumer sites. runs/pre-dispatch-*.md audit artifacts. |
+| `c7b695678` | 6 | Task 213 partial (4 of 7 items) + Task 206 completion (sub-agent). Topology doc copied to `docs/architecture/SPAARKE-SPE-CONTAINER-TYPE-TOPOLOGY.md` (verbatim from sdap-SPE-admin-app-r2 SHA b7dcc72b7) + provenance marker. `Create-NewContainerType.ps1` DEPRECATED banner + throw + runbook redirect. `docs/guides/SPAARKE-SPE-TOPOLOGY-SETUP-RUNBOOK.md` authored (8-step operator runbook). SKILL Step 0.5c topology-verify added + Step 0.5b BFF App Service search fix. PRQ-C-03 recipe exit-1 hardening (F10 root cause). |
+| `f2ec7500d` | 4 | Task 214 filed after H8 live-test. `runs/h8-live-test-2026-08-30.md` (probe methodology + evidence + interpretation). POML 214 (H8 full rewrite, 8-12h xhigh, 7 sub-items). TASK-INDEX 213 row updated to 🟡 partial + 214 row added. |
 
 ### Critical Context (must-know for fresh session)
 
-- **Task 186 dispatch is UNBLOCKED** — MED#10 landed in SESSION 19 commit `e426191eb`. All 30 SESSION-18 workflow findings are closed. User's "clear ALL issues" mandate is satisfied.
-- **H13 is now Cosmos-first** — Cosmos-Completed lands BEFORE registry PATCHes. On Cosmos Conflict, NO registry mutation is attempted (whole point of Cosmos-first). On registry PATCH failure, H13 emits REGISTRY-STALE warning log + returns Success; operator SKILL Step 6a recovery picks up the residual PATCH (now includes `sprk_setupstatus`). See handoff artifact [`notes/session-18-handoff-med10-refactor.md`](notes/session-18-handoff-med10-refactor.md) for the pre-refactor plan (kept for archive).
-- **Sub-Agent Write Boundary applies** — task 186 skill invocation touches nothing under `.claude/`; the L3 skill runs main-session driving L2 REST API calls. If any follow-on remediation needs `.claude/**` edits (post-dispatch findings), main-session-only.
-- **Standing binding rules unchanged**: BFF-API-ClientSecret is GONE (never re-introduce); Dataverse-ClientSecret never-delete before 2026-11-23; operator uses OWN AAD identity (never SP) per NFR-11; task 186 dispatch MUST invoke `/provision-environment` skill per root CLAUDE.md §4 — never bypass with direct L2 REST calls.
+- **Task 186 dispatch remains BLOCKED** — pre-dispatch remediation is 4/7 through task 213. Remaining blockers: {213.4 (Register-EntraAppRegistrations extension), 213.7 (operator SPE topology one-time setup + constants population), 214 (H8 full rewrite), 207 (placeholder-substitution), 208 (validator CI integration), 209 (branch protection)}.
+- **Task 214 rewrite scope is empirically-driven**: H8 live-test 2026-08-30 verified topology doc §R5 for the third time — 403 accessDenied on `client_credentials` POST to `/containerTypes` regardless of credential shape (secret / cert / FIC). Full evidence in `runs/h8-live-test-2026-08-30.md`. H8-B rewrite: container-CREATION only; container-TYPE creation retires to operator prereq (task 213.5 runbook). Also retire drifted KV cert (`spaarke-spekvcert/spe-app-cert` + `spe-app-cert-pass`).
+- **Task 213.4 scope**: extend `scripts/Register-EntraAppRegistrations.ps1` (1630-line script) for 6 topology-doc app-regs per §3A: 3 owning apps (single-tenant except Model 2 which is `AzureADMultipleOrgs`) + 3 BFF apps (all single-tenant per §3A rows 4-6). Careful refactor to avoid regressing existing `spaarke-bff-api-prod` flow. Reference: `docs/guides/SPAARKE-SPE-TOPOLOGY-SETUP-RUNBOOK.md` Step 1 + Step 6.
+- **213 and 214 CAN run in PARALLEL** — different files touched (213.4 = operator scripts; 214 = handler code + tests + KV manifest). Per user directive: continue both after /compact.
+- **Sub-Agent Write Boundary**: 213.4 touches `.claude/skills/**` only via reference (no edits); 214 touches SKILL.md if H8-B needs Step 0.5c reference update — main-session-only for those. Handler code + tests are `src/**` + `tests/**` — sub-agent OK, but 214 is FULL rigor so main-session preferred for coherent commit.
+- **Standing binding rules unchanged**:
+  - `BFF-API-ClientSecret` is GONE (auth-v4 task 033 deletion 2026-08-24) — do NOT re-introduce under any name (CredentialGuardTests fails build on any new `.WithClientSecret` site).
+  - `Dataverse-ClientSecret` never-delete before 2026-11-23 (auth-v4's rollback copy).
+  - Operator uses OWN AAD identity (never SP) per NFR-11.
+  - Task 186 dispatch MUST invoke `/provision-environment` L3 skill (per root CLAUDE.md §4) — never bypass with direct L2 REST calls.
+  - SPE container-type owning app-reg binding is PERMANENT + 1:1 (topology doc §R1) — do NOT merge owning app with BFF app.
+  - SPAARKE-SPE-CONTAINER-TYPE-TOPOLOGY.md is AUTHORITATIVE for r1 (owner Q1 answer 2026-08-30) — reconcile any conflicting r1 assumptions to match.
 
 ### To resume in fresh session
 
 - **"where was I"** → reads this Quick Recovery
-- **"dispatch task 186"** → invoke `/provision-environment trial1 --batch runs/trial1-intake.json` via the L3 skill (never bypass)
-- **"verify MED#10"** → run `dotnet test src/server/services/Sprk.Provisioning.ControlPlane.Tests/` — expect 1924 pass / 0 fail / 1 skipped, including the 2 new `_BucketB_MED10` tests
-- **Full workflow report**: `C:\Users\RALPHS~1\AppData\Local\Temp\claude\c--code-files-spaarke-wt-customer-provisioning-orchestration-r1\5aa5d91f-cd2d-4c24-88ae-ae9649a3fe2f\tasks\wepdcb8we.output` (adversarial verify workflow full output — all 30 findings with per-finding failure scenarios)
+- **"continue"** or **"proceed"** → invoke `task-execute 213` (for 213.4 Register-EntraAppRegistrations extension) AND `task-execute 214` (for H8 rewrite) — user directive was PARALLEL
+- **"run 213.4"** → `task-execute projects/customer-provisioning-orchestration-r1/tasks/213-spe-topology-reconciliation-plus-h8-rework.poml` (POML scope now narrowed to 213.4 + 213.7; other items completed or escalated to 214)
+- **"run 214"** → `task-execute projects/customer-provisioning-orchestration-r1/tasks/214-h8-rewrite-container-creation-only-per-r5-verified.poml`
+- **"verify SESSION 20 work"** → `git log --oneline -4` should show `f2ec7500d`, `c7b695678`, `2e8e30e16`, `0e2d0df22`. Working tree CLEAN.
+- **"what's the current dispatch blocker list"** → `{213.4, 213.7, 214, 207, 208, 209}` — see Task 186 status card above.
+- **Full H8 live-test evidence**: `runs/h8-live-test-2026-08-30.md`
+- **5-gap audit (this session's origin)**: `runs/pre-dispatch-readiness-gap-report.md`
+- **Owner alignment discussion (Q1-Q5)**: in current-task.md above (Owner alignment 2026-08-30 row of Quick Recovery table)
 
 ---
 
