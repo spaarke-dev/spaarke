@@ -99,13 +99,31 @@ Consequences: neither RG can be recreated independently, cost views split one ap
 places, RBAC must be granted three times, and secret resolution makes a **cross-region** call on cold start.
 This is the concrete mechanism behind the owner's instinct that something is off.
 
-### 2.4 🟡 Two dev Redis caches — one may be unused
+### 2.4 🟡 Two dev Redis caches — `spe-redis-dev-67e2xz` is not serving the application
 
-`spe-redis-dev-67e2xz` and `spaarke-bff-redis-dev` sit in the same RG. Redis is one of the more expensive
+**RESOLVED 2026-08-30.** Both caches sit in `spe-infrastructure-westus2`; Redis is one of the more expensive
 line items in a dev footprint.
 
-**Not yet confirmed which is live** — the `az webapp config appsettings list` call did not return within the
-time budget of this review. **Confirm before acting**; do not assume the older-looking name is the dead one.
+Three independent signals, gathered over a 2-day window in 12-hour buckets:
+
+| Signal | `spaarke-bff-redis-dev` | `spe-redis-dev-67e2xz` |
+|---|---:|---:|
+| connected clients (max) | 5–6 | 2 |
+| operations (total) | 190–254 | 144–164 |
+| **cache hits (total)** | **1206–1219** | **0.0 — every bucket** |
+
+Traffic with **zero cache hits across every bucket** is the signature of health probes and `PING`, not
+application caching.
+
+**Confirmed directly**: the BFF's `ConnectionStrings__Redis` resolves to
+`@Microsoft.KeyVault(VaultName=spaarke-spekvcert;SecretName=Redis-ConnectionString)`, and that secret's value
+contains **`spaarke-bff-redis-dev`** and **not** `spe-redis-dev-67e2xz`. (Checked by substring match only —
+the secret value was never printed or stored.)
+
+**Conclusion**: `spe-redis-dev-67e2xz` is not the BFF's cache. Before deleting it, confirm no *other*
+consumer holds it — the repo still contains **1,052** textual references to that name, so at minimum those
+need auditing, and deleting a Redis is irreversible. This is the clearest immediate cost saving in the
+footprint.
 
 ### 2.5 🟡 Five RG names in the repo exist in no subscription
 
@@ -185,7 +203,8 @@ step, not the first one.
 
 ## 5. Open items
 
-- **Which dev Redis is live** (§2.4) — the one measurement this review could not complete.
+- ~~Which dev Redis is live~~ — **RESOLVED**, see §2.4. Remaining work is auditing the 1,052 repo
+  references to `spe-redis-dev-67e2xz` before decommissioning it.
 - Whether `rg-spaarke-website` (eastus2) and `SharePointEmbedded` (eastus) are deliberately cross-region or
   historical accidents. **`SharePointEmbedded` is no longer just an SPE RG** — it holds `spaarke-spekvcert`,
   which the dev BFF depends on for application secrets (§2.3). Whatever else changes, that vault's contents
