@@ -12,9 +12,29 @@
 |-------|-------|
 | **State** | Worktree on `work/unified-access-control-r2` at `babf5f7ee` — 1 commit ahead of master (the design.md INV-7 correction). Five agents working in **isolated git worktrees**, each committing to its own branch. |
 | **PR** | 🔵 **#887 open as DRAFT** — https://github.com/spaarke-dev/spaarke/pull/887. First CI these 16 commits have ever seen. **Check its verdict before anything else.** |
-| **Next Action** | 🔴 **READ [`notes/SESSION-STATUS-2026-08-28.md`](notes/SESSION-STATUS-2026-08-28.md) FIRST — §6.5 holds the owner's answers to Q1–Q5 and is the implementation contract.** Then: (1) merge/verify the in-flight `sanitize-086` work (see below); (2) create tasks **084** (Office save — row 9) and **085** (SpeAdmin container items — row 10, THREE routes incl. `POST …/folders`); (3) implement Q1's no-record branch — server-derived acting-user BU, never client-supplied; (4) widen `EntityAccessFilter.EntitySetByType` with `sprk_workassignment`/`sprk_event`/`sprk_todo` + a test each, then re-verify the Office save surface (shared map); (5) 083 closes with the DELETEs (rows 4/5) + row 8 conversion + the landed guard; (6) set 012 to `completed-with-escalation`, **not ✅**. |
-| **Seven agents DONE, all merged** | test-suite repair · sink guard · 076 server half · 078 complete · 012 analysis · folder-removal · plus upstream #860/#862. 16 commits ahead of master, zero conflicts. |
-| **⏳ IN FLIGHT** | `sanitize-086` — running in the MAIN worktree (not isolated; a `core.worktree` redirect made isolation fail). It commits to `work/unified-access-control-r2` directly. If the next session finds uncommitted changes or a partial commit, that is why. |
+| **Next Action** | 🔴 **READ [`notes/SESSION-STATUS-2026-08-28.md`](notes/SESSION-STATUS-2026-08-28.md) FIRST — §6.5 holds the owner's answers to Q1–Q5 and is the implementation contract.** Then: (1) **PUSH** — local is 4 commits ahead of remote and PR #887 does not yet show the folder fix or task 084; (2) create task **085** (Office save — row 9) and task **091** (SpeAdmin container items — row 10, THREE routes incl. `POST …/folders`) — ⚠️ **NOT 084/085 as previously written, see the numbering note below**; (3) implement Q1's no-record branch — server-derived acting-user BU, never client-supplied; (4) widen `EntityAccessFilter.EntitySetByType` with `sprk_workassignment`/`sprk_event`/`sprk_todo` + a test each, then re-verify the Office save surface (shared map); (5) 083 closes with the DELETEs (rows 4/5) + row 8 conversion + the landed guard; (6) set 012 to `completed-with-escalation`, **not ✅**. |
+| **Eight agents DONE, all merged** | test-suite repair · sink guard · 076 server half · 078 complete · 012 analysis · folder-removal · **filename sanitization (task 084)** · plus upstream #860/#862. **18 commits ahead of master**, zero conflicts, tree clean. |
+
+### ⚠️ TASK NUMBERING — do not reuse 084/085 blindly. This has now collided THREE times.
+
+**`084` is TAKEN** — it is the filename-sanitization task filed 2026-08-29 (`c820b3f8f`). `086`–`090` were
+already taken (`086-access-event-log-schema.poml` etc.). **Free: `085`, then `091`+.**
+So: **Office save → `085`** · **SpeAdmin container items → `091`**.
+The `TASK-INDEX.md` line that claimed 084–089 was insertion room was itself wrong and is corrected; the
+index already records a prior 080–083 → 086–089 renumbering caused by the same mistake. **Check the
+directory listing before assigning a number**, every time.
+
+### 🔴 A LIVE linux-x64 PRODUCTION BUG found while consolidating sanitizers
+
+`GraphMessageToEmlConverter`'s private copy called bare `Path.GetInvalidFileNameChars()`, which on
+**linux-x64 returns only `{'\0','/'}`** — so `< > " : \ | ? *` survived into archived `.eml` filenames in
+production. **Its test asserted they were stripped and PASSED — because the test runs on Windows.** A
+platform-dependent API under a platform-independent assertion. Worth a standing check: any
+`Path.GetInvalid*Chars()` use in code that ships to linux is suspect.
+
+Related, not yet fixed: `EntityCreationService.ts:493` interpolates the filename into the URL **without**
+`encodeURIComponent`, unlike its sibling. The server-side fix now turns that into a clean 400 rather than
+folder creation, so it is contained but still wrong at the source.
 
 ### 🔴 THE FOLDER MYSTERY IS SOLVED — and it was us, not Word Online
 
