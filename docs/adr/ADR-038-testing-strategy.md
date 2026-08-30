@@ -487,7 +487,7 @@ appearing as "not enforced" — it moves the enforcement point to `/test-diet` a
 |---|---|---|
 | **No lexical signature exists** | B5, B6, B9 | B6 (mirror tests) asks whether a test asserts that an implementation does what it does — a claim about the relationship between two bodies of code. It needs a call graph, not a regex. Permanently `/test-diet` judgment. |
 | **Detector output is mostly noise** | B7, B10, B11, B14 | B10 measured **247 hits, 1 true positive**. Arming a rule whose failures are mostly wrong gets it suppressed, and real violations then ride in behind it. |
-| **Real debt, migration is a design decision** | B8 | 7 call sites in 5 files invoke private production methods by reflection. Tight signature, bounded count — **the strongest candidate for the next arming pass.** |
+| **Blocked on a production refactor** | B8 | **12 call sites in 10 files** invoke private production methods by reflection (corrected 2026-08-30 from an earlier under-count of 7/5). NOT a quick win: B8 bans `InternalsVisibleTo` as well as reflection, so the only compliant fix is giving the logic a public surface — a production refactor across several subsystems. Per-call-site inventory is in the census note. |
 | **Threshold undefined, or type absent** | B13, B15, B2, B17 | B13's live count spans **15 to 1,466** depending only on how strictly `{Method}_{Scenario}_{ExpectedResult}` is read; a guard would enforce the threshold rather than the ban. B2 (`IServiceClient`) and B17 (AutoMapper) name types this repo does not contain. |
 
 Full census with every count and its row-by-row adjudication:
