@@ -159,6 +159,34 @@ public class SpeWriteSinkContainerProvenanceGuardTests
         ClientSupplied,
 
         /// <summary>
+        /// The container comes from the client, and that is the CORRECT design because the route is an
+        /// administrative surface whose function is to operate on a container the admin names. Added
+        /// 2026-08-30 by task 091, by owner decision.
+        ///
+        /// <para><b>Why this is a category and not an exemption.</b> Our auth structure already treats
+        /// SPE Admin as a distinct authorization plane rather than an unclassified special case: it has
+        /// two independently-documented layers (<c>SpeAdminAuthorizationFilter</c> — the Spaarke admin
+        /// app role; <c>SpeAdminTenantScopeFilter</c> — <c>configId</c> ownership), and its own deny-code
+        /// namespace (<c>spe.admin.*</c>) separate from the record plane's <c>sdap.access.*</c>. There is
+        /// no owning record to derive a container from, and record-less containers legitimately exist
+        /// (task 078 confirmed every shared BU / archive container). Classifying these
+        /// <see cref="ClientSupplied"/> would assert an unfixed record-plane defect about a correctly
+        /// designed admin-plane decision — and would leave a work list that can never reach zero, which
+        /// is how a work list stops being read.</para>
+        ///
+        /// <para><b>Why it cannot become a loophole.</b> It is shaped like ADR-028's enumerated
+        /// credential exceptions (E-1/E-3) rather than like a blanket waiver: the membership is
+        /// enumerated, the COUNT is pinned by
+        /// <see cref="TheAdministrativeRoleScopedSetIsPinnedAndActuallyGroupGated"/>, and that same rule
+        /// mechanically verifies the file's routes are group-relative — i.e. that they genuinely cannot
+        /// resolve without the group that carries both filters. A site claiming this provenance from a
+        /// file that self-registers absolute paths fails the build. Task 091 is the proof this matters:
+        /// these three routes carried this exact shape while registered on the ROOT app, gated by
+        /// nothing.</para>
+        /// </summary>
+        AdministrativeRoleScoped,
+
+        /// <summary>
         /// No production callers. Must name the evidence. Expected to be DELETED, not classified forever —
         /// task 083's own constraint is "DELETE rather than convert where a path is dead".
         /// </summary>
@@ -315,24 +343,20 @@ public class SpeWriteSinkContainerProvenanceGuardTests
 
         // ── The three SPE-Admin item writes ───────────────────────────────────────────────────────
         //
-        // ALL THREE STAY ClientSupplied, and the classification is deliberate. Task 091 (2026-08-30)
-        // moved this file's nine routes onto the /api/spe group, so they now inherit
-        // SpeAdminAuthorizationFilter (admin app role) + SpeAdminTenantScopeFilter (configId ownership).
-        // That closed the AUTHORIZATION half. It did not, and could not, change PROVENANCE: an SPE
-        // admin still names the container, because naming the container IS the function of an admin
-        // tool. There is frequently no owning record to derive from — task 078 confirmed that
-        // record-less containers legitimately exist (every shared BU / archive container).
+        // AdministrativeRoleScoped by OWNER DECISION, 2026-08-30 (task 091). The open question this
+        // block previously carried — keep them ClientSupplied forever, or give the admin plane its own
+        // provenance — was resolved in favour of the latter, on the grounds of consistency with the
+        // auth structure we already have: SPE Admin is a distinct authorization plane with two named
+        // layers and its own deny-code namespace, not an unclassified special case. See the enum doc.
         //
-        // ⚠️ OPEN MODELLING QUESTION, surfaced rather than silently resolved. This enum documents
-        // ClientSupplied as "a work list that shrinks to zero, never exemptions". For a user-facing
-        // route that is right. For an ADMIN surface it may not be reachable, and the honest options are
-        // (a) accept these three as permanently client-supplied-by-design, or (b) add a distinct
-        // provenance for "administrative, gated by role + tenant scope". Task 091 deliberately did NOT
-        // choose: inventing an exemption inside a guard whose stated model forbids exemptions is the
-        // kind of quiet reclassification this project exists to stop. Owner decision required before
-        // this row can leave the work list.
+        // What that decision does NOT do: it does not weaken anything. Task 091 first moved all nine of
+        // this file's routes onto the /api/spe group, so they inherit SpeAdminAuthorizationFilter
+        // (admin app role) + SpeAdminTenantScopeFilter (configId ownership). The provenance is only
+        // sanctioned BECAUSE the gate is now real, and
+        // TheAdministrativeRoleScopedSetIsPinnedAndActuallyGroupGated re-proves the group-registration
+        // mechanically on every build rather than trusting this comment.
         new SinkSite("Api/SpeAdmin/ContainerItemEndpoints.cs", "CreateFolderForConfigAsync", 1,
-            Provenance.ClientSupplied, "091 (gated; provenance question open)",
+            Provenance.AdministrativeRoleScoped, "091 (gated + owner-classified)",
             "route parameter {id} (container) + query parameter configId",
             "POST /api/spe/containers/{id}/folders creates a folder in a caller-named container using the "
             + "container-type config's app-only credentials. FOUND BY THIS GUARD: absent from task 083's "
@@ -344,7 +368,7 @@ public class SpeWriteSinkContainerProvenanceGuardTests
             + "container rather than a document (ADR-003; ADR-008)."),
 
         new SinkSite("Api/SpeAdmin/ContainerItemEndpoints.cs", "DeleteDriveItemForConfigAsync", 1,
-            Provenance.ClientSupplied, "091 (gated; provenance question open)",
+            Provenance.AdministrativeRoleScoped, "091 (gated + owner-classified)",
             "route parameter {id} (container) + query parameter configId",
             "DELETE /api/spe/containers/{id}/items/{itemId} destroys a caller-named item in a caller-named "
             + "container, app-only through the container-type config credentials, with no per-record "
@@ -358,7 +382,7 @@ public class SpeWriteSinkContainerProvenanceGuardTests
             + "(including file download and sharing-link minting) were invisible to a write-sink scan."),
 
         new SinkSite("Api/SpeAdmin/ContainerItemEndpoints.cs", "UploadFileToContainerForConfigAsync", 1,
-            Provenance.ClientSupplied, "091 (gated; provenance question open)",
+            Provenance.AdministrativeRoleScoped, "091 (gated + owner-classified)",
             "route parameter {id} (container) + query parameter configId",
             "POST /api/spe/containers/{id}/items/upload writes bytes into a caller-named container app-only "
             + "(ADR-003; ADR-008; ADR-007 for the Graph path). Gated by task 091. Note the sink NAME: the "
@@ -824,6 +848,92 @@ public class SpeWriteSinkContainerProvenanceGuardTests
     // =================================================================================================
     // RULE B — the provenance classification has teeth
     // =================================================================================================
+
+    [Fact(DisplayName = "Task 091 Rule F: the AdministrativeRoleScoped set is pinned, and every member is genuinely group-gated")]
+    public void TheAdministrativeRoleScopedSetIsPinnedAndActuallyGroupGated()
+    {
+        // MAINTENANCE PROCEDURE. This provenance says "the client names the container and that is
+        // correct, because the caller is an authenticated ADMIN bounded by tenant scope". It is the one
+        // category in this guard that does NOT shrink to zero, so it is the one a future change is most
+        // tempted to hide in. Two mechanisms stop that:
+        //
+        //   1. The membership is PINNED below. A new member cannot join silently; adding one is a
+        //      deliberate edit that a reviewer sees.
+        //   2. The claim is VERIFIED, not trusted. A route can only inherit the admin-role and
+        //      tenant-scope filters if it registers on the group that carries them — and a route that
+        //      spells its own absolute "/api/..." path does not need the group to resolve. That is
+        //      precisely the shape these three routes had while registered on the ROOT app, gated by
+        //      nothing at all, until task 091. So: any file claiming this provenance must declare only
+        //      group-relative routes.
+        //
+        // What this rule cannot see: whether the group those routes register on actually carries the
+        // filters. RouteAuthorizationGuardTests.GroupGatedFilesRegisterNoAbsolutePaths covers the same
+        // invariant from the route side, the RouteGroupBuilder parameter type enforces it at compile
+        // time, and SpeAdminContainerItemRouteGateTests proves it at runtime with real requests. This
+        // rule is the provenance-side half of that set, not the whole proof.
+        var expected = new[]
+        {
+            ("Api/SpeAdmin/ContainerItemEndpoints.cs", "CreateFolderForConfigAsync"),
+            ("Api/SpeAdmin/ContainerItemEndpoints.cs", "DeleteDriveItemForConfigAsync"),
+            ("Api/SpeAdmin/ContainerItemEndpoints.cs", "UploadFileToContainerForConfigAsync"),
+        };
+
+        var actual = AllowList
+            .Where(s => s.Provenance == Provenance.AdministrativeRoleScoped)
+            .Select(s => (s.File, s.Sink))
+            .OrderBy(x => x.File, StringComparer.Ordinal)
+            .ThenBy(x => x.Sink, StringComparer.Ordinal)
+            .ToArray();
+
+        Assert.True(
+            actual.SequenceEqual(expected.OrderBy(x => x.Item1, StringComparer.Ordinal)
+                                         .ThenBy(x => x.Item2, StringComparer.Ordinal)),
+            "The AdministrativeRoleScoped set changed. This provenance means \"client-named container, "
+            + "and that is correct because the caller is a role-gated, tenant-scoped admin\" — it is the "
+            + "only category here that never shrinks to zero, so joining it must be deliberate.\n\n"
+            + "Before adding a member, confirm ALL of: (a) the route is genuinely administrative — its "
+            + "function is to operate on a container the admin names, not to store a record's content; "
+            + "(b) there is no owning record it could derive the container from instead; (c) it "
+            + "registers on a group carrying BOTH SpeAdminAuthorizationFilter and "
+            + "SpeAdminTenantScopeFilter. If (c) is not true you have found a live hole, not a new "
+            + "category — that was exactly task 091's finding.\n\n"
+            + $"Expected:\n  {string.Join("\n  ", expected.Select(e => $"{e.Item1} :: {e.Item2}"))}\n\n"
+            + $"Found:\n  {string.Join("\n  ", actual.Select(a => $"{a.File} :: {a.Sink}"))}");
+
+        // The verification half: every claiming file must declare only group-relative routes, so its
+        // routes genuinely cannot resolve without the group that carries the two filters.
+        var selfRegistering = new List<string>();
+
+        foreach (var file in actual.Select(a => a.File).Distinct(StringComparer.Ordinal))
+        {
+            var source = File.ReadAllText(
+                Path.Combine(BffRoot, file.Replace('/', Path.DirectorySeparatorChar)));
+
+            foreach (Match match in Regex.Matches(
+                         source, @"\.Map(?:Get|Post|Put|Patch|Delete)\s*\(\s*""(?<route>[^""]+)"""))
+            {
+                var route = match.Groups["route"].Value;
+                if (route.StartsWith("/api/", StringComparison.Ordinal))
+                {
+                    selfRegistering.Add($"{file}: \"{route}\"");
+                }
+            }
+        }
+
+        Assert.True(
+            selfRegistering.Count == 0,
+            "These files claim AdministrativeRoleScoped provenance but declare ABSOLUTE route paths, so "
+            + "their routes resolve without the group — which means they may inherit neither the "
+            + "admin-role filter nor the tenant-scope filter, and the provenance claim is unfounded. "
+            + "This is the pre-task-091 shape of ContainerItemEndpoints exactly.\n\n  "
+            + string.Join("\n  ", selfRegistering));
+
+        Assert.True(
+            actual.Length > 0,
+            "No AdministrativeRoleScoped site is declared, so this rule asserts nothing. If the last one "
+            + "was removed, delete the rule and the enum member rather than leaving both to pass "
+            + "vacuously.");
+    }
 
     [Fact(DisplayName = "Task 083 Rule B: every ClientSupplied site names an owning task, every Dead site names its evidence, every entry carries a reasoned ADR citation")]
     public void EveryDeclaredSiteCarriesAnOwnerWhereRequiredAndAReasonWithAnAdrCitation()
