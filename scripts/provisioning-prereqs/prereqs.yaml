@@ -736,10 +736,24 @@ prereqs:
     consequence_of_absence: F10 — `NamespaceUnavailable` mid-deploy (~16m35s) with reserved suffix or global collision.
     check_recipe:
       cli: |
-        az rest --method post \
+        # Task 206 (2026-08-30): exit-1-guard remediation per SESSION 12 recipe author
+        # contract. Prior recipe dumped `az rest` output without asserting nameAvailable
+        # == true — F10 silent-PASS class (reserved suffix or global collision would
+        # return nameAvailable=false but exit 0, and H2a fails 16m35s in). Fix: capture
+        # response, jq-assert nameAvailable == true, surface reason field on failure.
+        result=$(az rest --method post \
           --url "https://management.azure.com/subscriptions/{sub}/providers/Microsoft.ServiceBus/checkNameAvailability?api-version=2022-10-01-preview" \
-          --body '{"name":"{sbName}","type":"Microsoft.ServiceBus/namespaces"}'
-      expect: '`{"nameAvailable": true}`'
+          --body '{"name":"{sbName}","type":"Microsoft.ServiceBus/namespaces"}' 2>/dev/null)
+        [ -z "$result" ] && { echo "CHECK_NAME_AVAILABILITY_FAILED: az rest returned empty for {sbName}"; exit 1; }
+        available=$(echo "$result" | jq -r '.nameAvailable')
+        if [ "$available" != "true" ]; then
+          reason=$(echo "$result" | jq -r '.reason // "unspecified"')
+          message=$(echo "$result" | jq -r '.message // "unspecified"')
+          echo "NAME_UNAVAILABLE: {sbName} nameAvailable=$available reason=$reason message=$message"
+          exit 1
+        fi
+        echo "OK: {sbName} nameAvailable=true"
+      expect: '`{"nameAvailable": true}` (asserted via jq — reason/message surfaced on failure)'
     remediation: "Adjust resource base name in bicepparam. Reserved suffixes to avoid: `-sb` (Service Bus namespace)."
     related_findings: [F10]
 

@@ -1,0 +1,15 @@
+# SPAARKE-SPE-CONTAINER-TYPE-TOPOLOGY.md — Provenance for r1 (customer-provisioning-orchestration-r1)
+
+**Canonical source of truth**: `sdap-SPE-admin-app-r2` worktree, `docs/architecture/SPAARKE-SPE-CONTAINER-TYPE-TOPOLOGY.md`
+**Copied into r1 worktree**: 2026-08-30 SESSION 20 (task 212 partial-land + task 213 stopgap)
+**Reason for copy**: cross-worktree reference dependency — r1 needs the doc reachable via its own docs/architecture/ path for ADR-028 line 239 `RESOLVED` note + task 213 (H8 rework, operator runbook, SKILL Step 0.5c topology-verify) to resolve their internal links. Sibling worktree's PR is not yet merged to master.
+
+**Sync discipline**:
+- The canonical source is `sdap-SPE-admin-app-r2` — treat r1's copy as READ-ONLY within this project's scope. Any content changes MUST land in the canonical source first, then be manually re-synced here.
+- When `sdap-SPE-admin-app-r2` PR merges to master, DELETE this stopgap copy in favor of the master-merged version. Retire this `.provenance` file at the same time.
+- If drift is discovered (r1's copy diverges from canonical), the canonical WINS. Reconcile by re-copying + updating this file's "Copied" timestamp.
+
+**Owner-attested authority** (2026-08-30 SESSION 20 task 212 alignment discussion):
+> "yes this is our topology document" (Q1 answer, verbatim)
+
+The topology doc is BINDING for r1's SPE-related decisions. Terminology, cardinality rules (§R1-§R5), and app-reg topology (§3A) supersede any earlier r1 assumptions in POMLs / SKILL / handler code / notes authored before 2026-08-30.
