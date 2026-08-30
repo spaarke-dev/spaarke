@@ -10,10 +10,37 @@
 
 | Field | Value |
 |-------|-------|
-| **State** | Worktree on `work/unified-access-control-r2` at `babf5f7ee` — 1 commit ahead of master (the design.md INV-7 correction). Five agents working in **isolated git worktrees**, each committing to its own branch. |
-| **PR** | 🔵 **#887 open as DRAFT** — https://github.com/spaarke-dev/spaarke/pull/887. First CI these 16 commits have ever seen. **Check its verdict before anything else.** |
-| **Next Action** | 🔴 **READ [`notes/SESSION-STATUS-2026-08-28.md`](notes/SESSION-STATUS-2026-08-28.md) FIRST — §6.5 holds the owner's answers to Q1–Q5 and is the implementation contract.** Then: (1) **PUSH** — local is 4 commits ahead of remote and PR #887 does not yet show the folder fix or task 084; (2) create task **085** (Office save — row 9) and task **091** (SpeAdmin container items — row 10, THREE routes incl. `POST …/folders`) — ⚠️ **NOT 084/085 as previously written, see the numbering note below**; (3) implement Q1's no-record branch — server-derived acting-user BU, never client-supplied; (4) widen `EntityAccessFilter.EntitySetByType` with `sprk_workassignment`/`sprk_event`/`sprk_todo` + a test each, then re-verify the Office save surface (shared map); (5) 083 closes with the DELETEs (rows 4/5) + row 8 conversion + the landed guard; (6) set 012 to `completed-with-escalation`, **not ✅**. |
-| **Eight agents DONE, all merged** | test-suite repair · sink guard · 076 server half · 078 complete · 012 analysis · folder-removal · **filename sanitization (task 084)** · plus upstream #860/#862. **18 commits ahead of master**, zero conflicts, tree clean. |
+| **State** | Worktree on `work/unified-access-control-r2`, **pushed and in sync with origin**. All agents finished and merged. Tree clean. |
+| **PR** | 🟢 **#887 open as DRAFT, CI FULLY GREEN** (verified 2026-08-30) — https://github.com/spaarke-dev/spaarke/pull/887. All 19 commits pushed; every check passes. The two "skipping" jobs are conditional, not failures. ⚠️ **The PR BODY is stale** — it still says the folder-removal work is "planned but NOT in this PR". It IS in this PR now, along with task 084. Update the body before marking ready. |
+| **Next Action** | 🔴 **READ [`notes/SESSION-STATUS-2026-08-28.md`](notes/SESSION-STATUS-2026-08-28.md) FIRST — §6.5 holds the owner's answers to Q1–Q5 and is the implementation contract.** Then: (1) **execute task 085** (Office save — server-derive the container, delete `SaveRequest.ContainerId`) and **task 091** (SPE Admin container items — nine routes outside the admin group; see the severity note below); (2) widen `EntityAccessFilter.EntitySetByType` with `sprk_workassignment`/`sprk_event`/`sprk_todo` + a test each, then re-verify the Office save surface (**shared map** — 085 must not widen it itself); (3) 083 closes with the DELETEs (rows 4/5) + row 8 conversion + the landed guard; (4) set 012 to `completed-with-escalation`, **not ✅**; (5) update the #887 body. |
+| **Nine agents DONE, all merged** | test-suite repair · sink guard · 076 server half · 078 complete · 012 analysis · folder-removal · **filename sanitization (task 084)** · plus upstream #860/#862. Zero conflicts, tree clean, pushed. |
+
+### 🔴 TASK 091 IS MORE SEVERE THAN THE CENSUS RECORDED — re-verified 2026-08-30
+
+The 083 census filed row 10 as *"three routes (`upload`, `delete`, `folders`) whose primary defect is a
+missing admin gate."* Both halves understated it.
+
+`Api/SpeAdmin/ContainerItemEndpoints.cs` has **nine** routes, registered on the **root app** at
+`Infrastructure/DI/EndpointMappingExtensions.cs:380` — *not* on the `/api/spe` group that carries
+`AddSpeAdminAuthorizationFilter()` (requires the `Admin`/`SystemAdmin` app role) **and**
+`AddSpeAdminTenantScopeFilter()`. Eighteen sibling groups register on that group; this file does not. No
+`DefaultPolicy`/`FallbackPolicy` override exists, so bare `.RequireAuthorization()` means *authenticated*
+and nothing more.
+
+So **any authenticated caller** can, on any container id they name, with a client-supplied `configId` that
+nothing checks the ownership of: enumerate · read versions · read thumbnails · **mint a sharing link** ·
+**download file content** · preview · **DELETE the item** · create a folder · **upload bytes** — across
+tenant boundaries.
+
+Two things worth carrying forward:
+
+1. `SpeAdminTenantScopeFilter`'s own doc comment predicted that a per-handler check would be missed on the
+   sixteenth file and concluded that a group filter *"cannot be forgotten"*. **Both halves were right.** The
+   hole opened through a third channel neither covered: a file that never joined the group. A control that
+   cannot be forgotten can still be **bypassed by not being applied**.
+2. 083's instrument scanned for SPE **write sinks**, so it reported 3 of 9. The six read routes — including
+   file download and sharing-link creation — were invisible to it. **A tool finds what it was built to look
+   for; the count it returns is not the size of the problem.**
 
 ### ⚠️ TASK NUMBERING — do not reuse 084/085 blindly. This has now collided THREE times.
 

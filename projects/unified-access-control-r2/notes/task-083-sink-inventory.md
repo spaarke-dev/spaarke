@@ -164,10 +164,37 @@ existing guard keys on a hand-listed set of files classified for *route authoriz
 | S17 | `Services/Ai/WorkingDocumentService.cs:172` | `UploadSmallAsync` | matter's **stamped** `sprk_containerid` read directly (`:120-124`) | SERVER (record) ⚠️ stale-stamp risk — flag for resolver conversion |
 | S18 | `Services/Communication/CommunicationService.cs:2053,2066` | `UploadSmallAsync` | `_options.ArchiveContainerId` | CONFIG ✅ sanctioned server-ingest |
 | S19 | `Services/Communication/IncomingCommunicationProcessor.cs:886,914,1075,1083` | `UploadSmallAsync` | `ResolveContainerForContentAsync` (075) | SERVER (record) ✅ |
-| ~~S20~~ | ~~`Services/Communication/MessageAttachmentMaterializer.cs:112-114,130`~~ | ~~`UploadSmallAsync`~~ | ~~`request.DriveId ?? ArchiveContainerId`~~ | **RESOLVED 2026-08-28 — FILE DELETED**, per this project's delete-rather-than-convert disposition for dead sinks. Zero production callers (only the `CommunicationModule` registration + its own unit tests referenced it), it minted folders, and the `request.DriveId ??` override was a caller-named drive awaiting its first caller. ⚠️ Collateral, recorded because the sweep's "zero callers" claim was about PRODUCTION only: the DI registration and 5 unit tests (incl. the CHAT-ATTACHMENT-POLICY 25 MB + MIME-allow-list gate tests) went with it, and the messaging channel this was built for is still in flight in `spaarke-wt-messaging-communication-app-r2/-r3`. Revival guidance is recorded at the deletion site in `Infrastructure/DI/CommunicationModule.cs` |
+| S20 | `Services/Communication/MessageAttachmentMaterializer.cs:206-207` (resolve), `:236` (write) | `UploadSmallAsync` | `_containerResolver.ResolveContainerAsync(communicationId, fallback)` — **record-aware** | SERVER (record) ✅ — **DELETED 2026-08-28, RESTORED 2026-08-29 (task 084)**. See correction below |
 | S21 | `Services/Email/EmailAttachmentProcessor.cs:232` | `UploadSmallAsync` | `request.DriveId` | **DEAD** (zero callers) |
 | S22 | `Services/DocumentCheckoutService.cs:787` | `DeleteFileAsync` | `document.DriveId/ItemId` off the authorized row | SERVER (record) ✅ the sanctioned delete |
 | S23 | `SpeFileStore.DeleteItemAsUserAsync:245`, `CreateUploadSessionAsUserAsync:278` (+ `DriveItemOperations.cs:671`, `UploadSessionManager.cs:414`) | facade | — | **DEAD CODE** since 071/076 deleted their routes |
+
+### ⚠️ Correction to S20 — the deletion was wrong and was reverted (2026-08-29, task 084)
+
+The row above previously read **"RESOLVED — FILE DELETED"**. That disposition rested on two claims, and
+both were false when written:
+
+1. **"Zero callers."** True of *production* only. The class had a DI registration, **5 unit tests** — including
+   the CHAT-ATTACHMENT-POLICY 25 MB + MIME-allow-list gate tests, the only coverage those policy limits had —
+   a citation in the ArchTest suite, and live consumers in two sibling worktrees
+   (`spaarke-wt-messaging-communication-app-r2/-r3`). "Zero production callers" is not "dead".
+2. **"The `request.DriveId ??` override was a caller-named drive awaiting its first caller."** This was true of
+   the **pre-076** shape and had **already been fixed by task 076** by the time the note was written. The
+   deletion note described a defect that no longer existed.
+
+Restored in the hardened form only. The ordering is load-bearing and is the reason restoration was safe:
+`_containerResolver.ResolveContainerAsync` runs **first** and wins; `request.DriveId ?? ArchiveContainerId`
+is passed in only as INV-7's tier-3 **fallback**. Were the resolver to run only when `DriveId` is absent, the
+secure-record isolation would be caller-bypassable — any caller supplying a drive id would silently reinstate
+the defect. A null resolver **refuses** rather than degrading to the shared archive container (CLAUDE.md §10
+F.1). Path flattened and sanitized: `{communicationId:N}_{Sanitize(fileName)}` in the container root.
+
+Provenance reclassified in `SpeWriteSinkContainerProvenanceGuardTests`: `Dead` → **`ServerDerivedRecord`**
+(not `ClientSupplied` — the fallback never outranks the resolver).
+
+**The lesson**: a "dead code" claim needs the test suite, the DI graph and sibling worktrees checked, not just
+production call sites — and a deletion rationale quoting a defect should be re-verified against HEAD, because
+the defect may already have been fixed by a task that landed in between.
 
 **Excluded as non-SPE**: all Cosmos `DeleteItemAsync` (SessionPersistence, PromptLibrary, PinnedContext,
 MemoryItemStore, MemoryGovernance, provisioning tests) and Dataverse `DeleteAsync`. Graph

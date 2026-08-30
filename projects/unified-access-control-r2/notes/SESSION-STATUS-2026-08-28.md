@@ -325,13 +325,45 @@ file is uploaded to a *path*. Confirmed sites:
 | `exports` | `Api/Ai/ChatWordExportEndpoints.cs:152` — `uploadPath = $"exports/{request.Filename}"` |
 | `chat-uploads` | `Api/Ai/ChatDocumentEndpoints.cs:1158` |
 | `communications`, `emails` | the Communication archive path (`ArchiveContainerId`) |
-| **document-title-named folders** | the **Office add-in save path** — `Workers/Office/UploadFinalizationWorker.cs:641-643` builds `$"{folderPath}/{fileName}"` from the job payload |
+| **document-title-named folders** | ~~the Office add-in save path passing a document title as `folderPath`~~ → **REFUTED. See the correction below.** |
 
-**So nobody clicked "New Folder" for the two Word ones — the Office save path is passing a document title
-as `folderPath`, creating one folder per saved document.** ⚠️ Mechanism and the `exports`/`chat-uploads`
-cases are CONFIRMED; the Office `folderPath` origin is a strong inference from
-`UploadFinalizationWorker.cs:620,641` — **task 084 must confirm it at the payload's source**
-(`OfficeJobQueue.cs` / `OfficeService.SaveAsync`) before changing behaviour.
+### 🔴 CORRECTION (2026-08-29) — the document-title folder inference was WRONG, twice over
+
+This section originally concluded: *"the Office save path is passing a document title as `folderPath`,
+creating one folder per saved document"*, flagged as "a strong inference … task 084 must confirm it at the
+payload's source". It was confirmed at the source and **refuted**:
+
+- `SaveRequest.FolderPath` was **client-supplied and always null**. No producer under `src/client/**` ever
+  set it (zero hits for `folderPath` there) and no server code constructed one. It has since been deleted.
+- No BFF sink named a folder after a document's own title. The dead plumbing could not have produced the
+  observed folders.
+
+**The actual cause: an unsanitized filename became the SPE upload path verbatim.** The Office add-in's
+free-text "Document Name" box let a user type a date:
+
+```
+"New Word Document from Word Web Add In 8/24/2026"
+   → folder "…Add In 8"  →  folder "24"  →  extension-less file "2026"
+```
+
+The trailing `8` in the folder name is the **month**, not a truncated title. Two production `sprk_document`
+rows account for both observed folders, written by the BFF service identities. Control case:
+`Examiner's Report 8-24-2026` — same user, same day, hyphens instead of slashes — minted nothing.
+
+The **email** branch already sanitized; the **document** branch did not, for as long as the feature existed.
+That asymmetry was the whole bug. Fixed by **task 084** (2026-08-29), which sanitizes at 14 sites and
+consolidates seven duplicate sanitizers onto `Infrastructure/Graph/SpeUploadPath`.
+
+⚠️ **A second refuted claim from the same investigation**: the plan's Phase 0 proposed confirming folder
+provenance via `GET /api/spe/audit`. That rests on a false premise — `SpeAuditService` is **write-only**, the
+Office path logs nothing, and the table has **0 rows**.
+
+⚠️ **And a third**: the upload is **app-only**, which is why SPE Admin showed no human creator. That absence
+was read as evidence of an external cause (Word Online writing directly to the container). It was evidence of
+an app-only write — i.e. of us.
+
+**The lesson**: three confident inferences about this surface, each internally coherent, all wrong, all
+surviving until someone read the source. The folders were ours the whole time.
 
 **These folders are row 9 made visible** — the observable footprint of the same Office save path that takes
 its container from a client-supplied body field. Worth stating in 084's justification: the defect already
