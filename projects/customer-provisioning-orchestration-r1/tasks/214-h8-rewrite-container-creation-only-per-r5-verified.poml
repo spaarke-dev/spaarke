@@ -1,0 +1,202 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="214" project="customer-provisioning-orchestration-r1">
+  <metadata>
+    <title>H8 handler full rewrite (H8-B semantics): container-CREATION only, container-TYPE creation retired as operator prereq per SPAARKE-SPE-CONTAINER-TYPE-TOPOLOGY.md §R5 (verified 403 accessDenied 2026-08-30 SESSION 20 Option A probe)</title>
+    <phase>Post-Live-Fire remediation — H8 architectural rewrite driven by empirical §R5 verification</phase>
+    <gate>startable</gate>
+    <status>not-started</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Modifies handler code (H8SpeContainerTypeHandler.cs + GraphContainerTypeProvisioner.cs + collaborators — 700+ LOC in Sprk.Provisioning.ControlPlane.Core), rewrites test surface (tests/unit/Sprk.Provisioning.ControlPlane.Core.Tests/Handlers/SpeContainerType/**), touches DagAdvancer.cs, KV manifest, potentially SKILL.md. Multiple hot-path surfaces per root CLAUDE.md §10. bff-api-adjacent per L2 control-plane. Main-session-only per §3 for any .claude/** edits.</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Well-scoped mechanical rewrite: change of scope from container-type creation to container creation is a straightforward Graph SDK swap (Storage.FileStorage.ContainerTypes.PostAsync → Storage.FileStorage.Containers.PostAsync + activate). Interface refactoring is well-understood. Trap inversion is a mechanical delete. No architectural judgment beyond what topology doc §6 already dictates for container-creation flow. Sonnet 5 at xhigh handles this cleanly.</model-tier-reason>
+    <effort>xhigh</effort>
+    <effort-reason>H8 handler proper: ~4h (delete container-type creation code, rewrite as container-creation, update parameter guards). GraphContainerProvisioner rewrite: ~2h (new POST body shape, new activation call, new outcome shape). Interface refactoring (SpeContainerType* → SpeContainer*): ~1.5h. Test surface rewrite (~15 test files touching SpeContainerType*): ~3-4h — the biggest single time sink. KV manifest update (SPE-ContainerTypeId slot semantics): ~30 min. DagAdvancer + HandlerIds comment updates: ~15 min. Incidental cert-drift cleanup (retire spe-app-cert + spe-app-cert-pass from KV): ~30 min. Total 12-13h at xhigh. POML 213 original estimate 4h was based on "rename + swap" scope; empirical + drift findings pushed it to full rewrite.</effort-reason>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <deps>199, 212, 213</deps>
+    <tags>provisioning, spe, h8, handler-rewrite, adr-028, topology-driven, bff-adjacent</tags>
+    <estimated-effort>8-12h xhigh (H8 rewrite + provisioner rewrite + interface refactor + test surface rewrite + KV manifest + DagAdvancer + incidental cert-drift cleanup)</estimated-effort>
+  </metadata>
+
+  <prompt>Task 213.2's Option A live-test empirically verified topology doc §R5 for the third time (topology doc §7 verified twice 2026-08-28 in sdap-SPE-admin-app-r2; we re-verified 2026-08-30 from r1 worktree). `client_credentials` grant against `POST /storage/fileStorage/containerTypes` returns **HTTP 403 accessDenied** regardless of credential shape (secret verified today; cert verified in topology doc). Grant-type is what matters (app-only vs delegated) per Microsoft OAuth semantics — credential shape (secret / cert / FIC) is irrelevant.
+
+**Consequence**: H8SpeContainerTypeHandler as written cannot succeed against real Graph. Container-TYPE creation MUST become a one-time operator prereq (per SPAARKE-SPE-TOPOLOGY-SETUP-RUNBOOK.md Steps 1-3 filed by task 213.5). H8's remaining role at customer dispatch is container-CREATION only.
+
+**Empirical evidence artifact**: [`runs/h8-live-test-2026-08-30.md`](../../../runs/h8-live-test-2026-08-30.md) — full probe methodology, response bodies, cert-drift finding, interpretation.
+
+**Scope of task 214** (7 discrete work-items):
+
+**214.1 — Delete container-TYPE creation code from GraphContainerTypeProvisioner.cs (~2h)**:
+- File currently makes `graph.Storage.FileStorage.ContainerTypes.PostAsync(...)` call — DELETE that code path
+- Also deletes owning-app permission-grant registration on containerTypeRegistrations (that call succeeds but is now redundant — done during operator runbook step 6)
+- Only the container-creation code path survives — moved to new `GraphContainerProvisioner.cs` (renamed per 214.3 below)
+
+**214.2 — Refactor H8SpeContainerTypeHandler.cs → H8SpeContainerHandler.cs (~4h)**:
+- Rename file + class + HandlerIdentifier constant
+- New responsibilities:
+  - Read `containerTypeId` from `IntakeParameters.NonSecretParameters["containerTypeId"]` — populated by SKILL Step 4.0 payload construction from `spaarke-constants.yaml per_env_constants.<env>.containerTypeId` (populated by task 213.7 after operator completes runbook)
+  - Read customer's `displayName` from `IntakeParameters.NonSecretParameters["customerId"]` (or a dedicated `containerDisplayName` intake field — decide during implementation)
+  - Call `graph.Storage.FileStorage.Containers.PostAsync(new FileStorageContainer { DisplayName, Description, ContainerTypeId })` — this is the app-only-OK call per topology doc §6
+  - Call `graph.Storage.FileStorage.Containers[{id}].Activate.PostAsync()` — container isn't usable until activated per §6
+  - Persist the new container's GUID to `run.InterStepState.SpeContainerId` (H7DataverseEnvVarValuesHandler reads this to write to Dataverse env-var sprk_SharePointEmbeddedContainerId — unchanged handoff mechanism per H8 old code deviation-(2) note)
+- Delete the KV write for `SPE-ContainerTypeId` — that value is now sourced from constants, not written per-customer
+- Rebuild parameter guards for the new inputs (containerTypeId + displayName instead of tenantId + keyVaultName + subscriptionId + sharePointDomain + owningAppId — most of the old ones become moot)
+
+**214.3 — Rename SpeContainerType* interfaces + collaborators → SpeContainer* (~1.5h)**:
+- `ISpeContainerTypeProvisioner` → `ISpeContainerProvisioner`
+- `ISpeContainerVerifier` — keep name; verification of the customer container remains conceptually similar (T6 gate becomes T6-relaxed since we're not creating container-types anymore, but verification-that-container-exists is still meaningful for H13 acceptance)
+- `ISpeContainerIdKvWriter` — DELETE (per 214.2, no more KV write; containerTypeId comes from constants)
+- `SpeContainerTypeOptions` → `SpeContainerOptions` (rename); trim fields that are now moot (`DefaultCertSecretName` may still be needed for the verifier — decide during implementation)
+- `SpeConfidentialClientGraphFactory` — KEEP for now if verifier still uses cert-based auth; DELETE if verifier is refactored to app-only (which is fine per topology doc §6 — verification via app-only is standard)
+- Namespace `Sprk.Provisioning.ControlPlane.Handlers.SpeContainerType` → `Sprk.Provisioning.ControlPlane.Handlers.SpeContainer` (drop "Type" from folder name too)
+
+**214.4 — Invert or delete T6 trap detection (~1h)**:
+- `IsDelegatedTokenTrap` was designed for the INVERSE failure mode (assumed delegated returns 403, use confidential-client). Reality per §R5: confidential-client (client_credentials, regardless of secret/cert) returns 403 for container-TYPE creation; delegated is required. For container CREATION (§6), app-only is fine.
+- Since H8's new shape doesn't create container-types at all, the T6 trap conceptually doesn't apply. Options:
+  - **Option A (recommended)**: DELETE the T6 trap wiring entirely from H8's new shape. Keep the trap-code in the codebase as `SpeConfidentialClientGraphFactory.IsDelegatedTokenTrapError` for the H13 verifier's use only (T6 acceptance gate at H13). Document that H8 no longer participates in T6 detection.
+  - **Option B**: keep T6 in H8 as a defense-in-depth check for any future re-introduction of container-type creation. Would fire never in practice (H8's new shape never hits the trap surface). Adds noise.
+- Choose Option A. Update `SpeContainerTypeRejectionCodes.TrapT6DelegatedTokenDetected` — either remove or repurpose. H13's `TrapT6Failed` rejection code stays (H13 still owns T6 acceptance gate).
+
+**214.5 — Rewrite test surface (~3-4h)**:
+- All tests under `tests/unit/Sprk.Provisioning.ControlPlane.Core.Tests/Handlers/SpeContainerType/**` need review:
+  - Tests that assert container-type creation success → DELETE (behavior no longer exists in H8)
+  - Tests that assert T6 trap detection at H8 → DELETE per 214.4
+  - Tests that assert KV write of SPE-ContainerTypeId → DELETE per 214.2
+  - Tests that assert idempotency → REWRITE for new key shape (may become `container-{customerId}` since one container per customer)
+  - Tests that assert parameter guards → REWRITE for new parameter set
+  - NEW: tests that assert container CREATE + activate happy path
+  - NEW: tests that assert containerTypeId param guard (missing → Resumable Failure)
+  - NEW: tests that assert 24h replication tolerance if container-type just created (edge case — Cosmos WaitingOnGate + resume)
+
+**214.6 — Update HandlerIds.cs + DagAdvancer.cs comments (~15 min)**:
+- `HandlerIds.H8` — the ID string may encode "ContainerType" (verify + update if so)
+- `DagAdvancer.cs:166` — update comment "H8 is Graph-based SPE container-type creation" → "H8 is Graph-based SPE container CREATION (per-customer; container-type is pre-existing per-model operator prereq)"
+- H8's DAG dependency on H3 (Entra app-reg): review if still needed. New H8 doesn't need owningAppId from H3 (uses constants-sourced containerTypeId whose owning app is a topology prereq). Likely can REMOVE the H3 dep + rewire the DAG (would let H8 run earlier in parallel).
+
+**214.7 — Incidental: retire KV cert drift (~30 min)**:
+- KV `spaarke-spekvcert/spe-app-cert` (thumbprint `269691A5...`, CN=SPE Certificate 22Sept2025_1) is NOT registered on any Spaarke app-reg. It's dead weight (see runs/h8-live-test-2026-08-30.md incidental finding).
+- Options: (a) retire (soft-delete both secrets — cert + password); (b) register the cert on SDAP-PCF-CLIENT to fix drift (unnecessary if H8's new shape doesn't need it).
+- Choose (a). Also update `spe-owning-app-secret` slot: retain per topology doc §3A row 1 for the owning app rotation lifecycle (E-1 exception per ADR-028) — do NOT retire that one.
+- **Cross-reference to KV credential-lifecycle rule** in `.claude/constraints/provisioning.md`: `spe-app-cert` + `spe-app-cert-pass` are NOT in the never-delete list (unlike `Dataverse-ClientSecret` + `BFF-API-ClientSecret` which have specific auth-v4 governance). They are ordinary application secrets and can be retired when confirmed unused.
+- Verify via git grep that no code path references either secret name before retiring.
+
+**Sequencing constraint**: 214 can proceed in PARALLEL with 213.4 (Register-EntraAppRegistrations.ps1 extension) — different files touched. 214 does NOT depend on operator completing the runbook setup (that's 213.7's dependency). Task 186 dispatch blocks on {213.4, 213.7, 214, 207, 208, 209}.
+
+**Reference architecture** (topology doc §6 canonical container creation shape):
+```http
+POST https://graph.microsoft.com/beta/storage/fileStorage/containers
+Authorization: Bearer <app-only Graph token; grant_type=client_credentials — WORKS for container creation, unlike container-TYPE creation>
+Content-Type: application/json
+
+{ "displayName": "Acme Corp", "description": "Container for Acme Corp trial customer", "containerTypeId": "{containerTypeId from constants}" }
+
+POST /beta/storage/fileStorage/containers/{newContainerId}/activate
+```
+
+Deletion for tests / dev cleanup follows §6 two-step:
+```http
+DELETE /beta/storage/fileStorage/containers/{id}
+DELETE /beta/storage/fileStorage/deletedContainers/{id}
+```</prompt>
+
+  <role>Main-session operator (skill-directives + BFF-adjacent handler code + test rewrite + KV governance).</role>
+
+  <goal>H8 handler is renamed + reworked to CREATE containers (not container-types) per topology doc §6. Container-TYPE creation is retired from the handler codebase — it exists only in the operator runbook (task 213.5). All tests updated; DagAdvancer updated; KV manifest updated; cert drift cleanup landed. Trial1 dispatch progresses through H8 successfully (creates trial1's container inside the pre-existing Spaarke Trial 1 container-type).</goal>
+
+  <context>
+    <background>
+      Task 213.2's Option A live-test (per owner directive 2026-08-30) definitively verified topology doc §R5 for the third empirical time. HTTP 403 accessDenied on `POST /storage/fileStorage/containerTypes` under `client_credentials` grant — regardless of credential shape.
+
+      Incidental discovery during the probe: KV cert (`spaarke-spekvcert/spe-app-cert`) is drifted from what's registered on any Spaarke app-reg. This confirms H8's cert path has been doubly-broken since task 131 (Wave G-3 Graph SDK port) — never live-fired.
+
+      Task 213 completed 4 of its 7 planned work-items (topology doc merge, Create-NewContainerType.ps1 deprecation, operator runbook, SKILL Step 0.5c topology-verify + Step 0.5b BFF search fix). Task 213.2 was escalated (this task 214), 213.4 was deferred to next turn, 213.7 blocks on operator one-time SPE setup runbook completion.
+
+      Trial1 dispatch remains blocked on {213.4, 213.7, 214, 207, 208, 209}.
+    </background>
+    <relevant-files>
+      <file role="empirical-evidence">runs/h8-live-test-2026-08-30.md</file>
+      <file role="authoritative-topology">docs/architecture/SPAARKE-SPE-CONTAINER-TYPE-TOPOLOGY.md § R1, R2, R5, 3, 3A, 6, 7, 8</file>
+      <file role="handler-target-primary">src/server/services/Sprk.Provisioning.ControlPlane.Core/Handlers/SpeContainerType/H8SpeContainerTypeHandler.cs</file>
+      <file role="handler-target-graph">src/server/services/Sprk.Provisioning.ControlPlane.Core/Handlers/SpeContainerType/GraphContainerTypeProvisioner.cs</file>
+      <file role="handler-target-collaborators">src/server/services/Sprk.Provisioning.ControlPlane.Core/Handlers/SpeContainerType/**/*.cs (all interfaces + implementations)</file>
+      <file role="test-target">tests/unit/Sprk.Provisioning.ControlPlane.Core.Tests/Handlers/SpeContainerType/**/*.cs</file>
+      <file role="dag">src/server/services/Sprk.Provisioning.ControlPlane.Core/Reconciler/DagAdvancer.cs (H8 comment + dependency map)</file>
+      <file role="handler-ids">src/server/services/Sprk.Provisioning.ControlPlane.Core/Handlers/HandlerIds.cs (H8 identifier string)</file>
+      <file role="kv-manifest">scripts/canonical-secret-catalog/manifest.yaml (SPE-ContainerTypeId slot semantics change)</file>
+      <file role="incidental-cleanup">spaarke-spekvcert KV (retire spe-app-cert + spe-app-cert-pass; retain spe-owning-app-secret per E-1)</file>
+      <file role="runbook-reference">docs/guides/SPAARKE-SPE-TOPOLOGY-SETUP-RUNBOOK.md (documents the operator prereq that replaces H8's old container-type creation scope)</file>
+    </relevant-files>
+    <dependencies>
+      <dependency task="199" status="completed">SESSION 14 baseline.</dependency>
+      <dependency task="212" status="in-progress">SESSION 20 terminology + constants rename (bffApiAppId).</dependency>
+      <dependency task="213" status="in-progress">SESSION 20 topology setup: 4 of 7 items landed 2026-08-30 (topology doc, script deprecation, runbook, SKILL Step 0.5c). 213.4 + 213.7 pending. 214 does NOT block on either — parallel work stream.</dependency>
+    </dependencies>
+    <blocks>
+      <blocks task="186">Trial1 dispatch blocks on 214 alongside 213.4 + 213.7 + 207 + 208 + 209.</blocks>
+    </blocks>
+  </context>
+
+  <constraints>
+    <constraint source="topology-doc-R1">Container-type owning app is PERMANENT + 1:1 with container-type. H8's new shape MUST NOT attempt to create container-types (per this task's verified §R5 basis). Container-type creation is retired to operator runbook (task 213.5).</constraint>
+    <constraint source="topology-doc-R5">Container-type CREATE requires delegated token. H8 uses app-only per its runtime environment (L2 control-plane UAMI-federated identity or similar). H8 MUST NOT attempt container-type creation.</constraint>
+    <constraint source="topology-doc-6">Container creation (`POST /storage/fileStorage/containers` + activate) is app-only-capable. This is H8's new scope. Follow-up `/activate` is REQUIRED — container isn't usable until activated.</constraint>
+    <constraint source="ADR-028-A4">BFF identity is secret-free. Do NOT introduce any `.WithClientSecret(...)` site on the BFF identity in H8's new shape. Verifier's cert-based auth (if retained per 214.3) uses the owning app's cert per E-1 exception, NOT the BFF identity.</constraint>
+    <constraint source="root-CLAUDE-md-3">Sub-Agent Write Boundary — SKILL.md edits main-session-only. Handler code + tests are inside src/**/tests/** which sub-agents CAN write, but this task is FULL rigor + interconnected so main-session is expected.</constraint>
+    <constraint source="kv-credential-lifecycle">spe-app-cert + spe-app-cert-pass are NOT in the never-delete list (unlike Dataverse-ClientSecret + BFF-API-ClientSecret which are auth-v4-governed). Retire only after git grep verifies no code path references them.</constraint>
+  </constraints>
+
+  <acceptance-criteria>
+    <criterion>`GraphContainerTypeProvisioner.cs` (or renamed `GraphContainerProvisioner.cs`) has NO code path that calls `graph.Storage.FileStorage.ContainerTypes.PostAsync(...)`. Container-type creation is deleted.</criterion>
+    <criterion>`H8SpeContainerHandler.cs` (renamed from H8SpeContainerTypeHandler.cs) creates a container via `graph.Storage.FileStorage.Containers.PostAsync + activate`, using `containerTypeId` from `IntakeParameters.NonSecretParameters` (source: `spaarke-constants.yaml per_env_constants.<env>.containerTypeId` per task 213.7 population).</criterion>
+    <criterion>Interfaces renamed: `ISpeContainerTypeProvisioner` → `ISpeContainerProvisioner`. `ISpeContainerIdKvWriter` deleted (no more per-customer KV write). Namespace `SpeContainerType` → `SpeContainer` throughout.</criterion>
+    <criterion>T6 trap detection wiring removed from H8's new shape (Option A per 214.4). `SpeConfidentialClientGraphFactory.IsDelegatedTokenTrapError` retained ONLY for H13's use.</criterion>
+    <criterion>Test surface updated: all tests under `tests/unit/Sprk.Provisioning.ControlPlane.Core.Tests/Handlers/SpeContainerType/**` reflect the new shape (or moved to `Handlers/SpeContainer/**` per rename). No stale references to container-TYPE creation success paths. New tests for container CREATE + activate happy path.</criterion>
+    <criterion>`HandlerIds.cs` H8 identifier + `DagAdvancer.cs:166` comment updated to reflect container CREATION (not container-type creation) scope.</criterion>
+    <criterion>KV manifest `SPE-ContainerTypeId` slot semantics updated: value sourced from constants (not per-customer write). Manifest generator (`Invoke-CatalogGenerator.ps1 -Verify`) exits 0.</criterion>
+    <criterion>KV `spaarke-spekvcert/spe-app-cert` + `spaarke-spekvcert/spe-app-cert-pass` retired (soft-deleted). Grep-verified no code path references either secret name. `spe-owning-app-secret` RETAINED per E-1 exception.</criterion>
+    <criterion>Build passes: `dotnet build src/server/services/Sprk.Provisioning.ControlPlane.Core/` + `dotnet test tests/unit/Sprk.Provisioning.ControlPlane.Core.Tests/` — 0 errors, 0 test failures.</criterion>
+    <criterion>Task 214 completion note captures: (1) all files renamed + new namespace; (2) test count before + after; (3) KV secrets retired (which + when); (4) DagAdvancer changes (comment + any dep removal); (5) verification that H8's new shape can be exercised end-to-end via a follow-on live-test similar to task 213.2 Option A.</criterion>
+  </acceptance-criteria>
+
+  <escalation>
+    <trigger>Container CREATION (`POST /containers`) also 403s empirically — contradicts topology doc §6. Escalate rather than assume Graph API changed silently.</trigger>
+    <trigger>Test surface rewrite reveals implicit dependencies from other handlers on the deleted `ISpeContainerIdKvWriter` interface or the H8-per-customer KV write behavior. Investigate + reconcile rather than force through.</trigger>
+    <trigger>Retiring `spe-app-cert` breaks another consumer (something in the repo that references it besides H8). Investigate the ownership + escalate.</trigger>
+    <trigger>H8's new shape reveals a design gap in the operator runbook (task 213.5) — e.g., something the runbook assumes H8 handles that H8 no longer does. Reconcile with 213 rather than proceed silently.</trigger>
+  </escalation>
+
+  <knowledge>
+    <files>
+      <file>runs/h8-live-test-2026-08-30.md</file>
+      <file>docs/architecture/SPAARKE-SPE-CONTAINER-TYPE-TOPOLOGY.md</file>
+      <file>docs/guides/SPAARKE-SPE-TOPOLOGY-SETUP-RUNBOOK.md</file>
+      <file>src/server/services/Sprk.Provisioning.ControlPlane.Core/Handlers/SpeContainerType/H8SpeContainerTypeHandler.cs</file>
+      <file>src/server/services/Sprk.Provisioning.ControlPlane.Core/Handlers/SpeContainerType/GraphContainerTypeProvisioner.cs</file>
+      <file>src/server/services/Sprk.Provisioning.ControlPlane.Core/Handlers/SpeContainerType/SpeConfidentialClientGraphFactory.cs</file>
+      <file>src/server/services/Sprk.Provisioning.ControlPlane.Core/Handlers/SpeContainerType/GraphAppOnlyContainerVerifier.cs</file>
+      <file>src/server/services/Sprk.Provisioning.ControlPlane.Core/Handlers/HandlerIds.cs</file>
+      <file>src/server/services/Sprk.Provisioning.ControlPlane.Core/Reconciler/DagAdvancer.cs</file>
+      <file>scripts/canonical-secret-catalog/manifest.yaml</file>
+      <file>.claude/constraints/provisioning.md (KV credential-lifecycle rule)</file>
+      <file>.claude/adr/ADR-028-spaarke-auth-architecture.md (E-1 exception for owning apps; A4 for BFF identity)</file>
+    </files>
+    <patterns>
+      <pattern>.claude/patterns/provisioning/keyvault-reference-identity-invariant.md</pattern>
+      <pattern>.claude/patterns/provisioning/handler-registration-completeness.md</pattern>
+    </patterns>
+  </knowledge>
+
+  <steps mode="directional">
+    <step n="1">Delete container-TYPE creation code path from GraphContainerTypeProvisioner.cs; rename to GraphContainerProvisioner.cs (or similar).</step>
+    <step n="2">Refactor H8SpeContainerTypeHandler.cs → H8SpeContainerHandler.cs — read containerTypeId from IntakeParameters; call Containers.PostAsync + activate; persist container GUID to InterStepState.SpeContainerId.</step>
+    <step n="3">Rename interfaces + namespace (SpeContainerType* → SpeContainer*); delete ISpeContainerIdKvWriter; trim SpeContainerOptions.</step>
+    <step n="4">Delete T6 trap detection from H8's new shape (retain for H13 verifier only).</step>
+    <step n="5">Rewrite test surface — delete stale tests, add new tests for container CREATE + activate + parameter guards.</step>
+    <step n="6">Update HandlerIds.cs identifier + DagAdvancer.cs H8 comment + dep map (consider removing H3 dep since new H8 doesn't need owningAppId from H3).</step>
+    <step n="7">Update KV manifest for new SPE-ContainerTypeId slot semantics; verify generator exits 0.</step>
+    <step n="8">Incidental: retire spe-app-cert + spe-app-cert-pass from KV after grep-verifying no code path references them.</step>
+    <step n="9">Build + test — dotnet build + dotnet test must both exit 0.</step>
+    <step n="10">Follow-on live-test verifying H8's new shape works end-to-end against a pre-existing container-type (similar shape to task 213.2 Option A probe but for container creation).</step>
+    <step n="11">Commit + push. Update TASK-INDEX.md 214 → ✅ + current-task.md next-task pointer.</step>
+  </steps>
+</task>
