@@ -171,4 +171,14 @@ Orphan sweep before deleting — all clean:
 | repo references overall | 20 files, all project notes + docs |
 | linked servers / private endpoints / subnet | none |
 
-**Trap worth keeping**: operations/sec was 144-164 against the live cache's 190-254 — within 25
+**Trap worth keeping**: operations/sec was 144–164 against the live cache's 190–254 — within 25%.
+"It has traffic, therefore it is used" would have been the WRONG test. Only the zero cache-hit rate
+separated a health-probe workload from a real one.
+
+**Second trap**: an orphan search using the pattern `spe-redis-dev-67e2xz|67e2xz` returned 66 files —
+because `67e2xz` is a SHARED environment suffix (`spe-insights-dev-67e2xz`, `spe-logs-dev-67e2xz` sit in
+the same resource group). Searching the exact name returns zero hits in code. Match the full resource
+name, never a fragment of it.
+
+The POML for 037 had been left at `not-started` while TASK-INDEX recorded it complete; corrected in the
+same change.
