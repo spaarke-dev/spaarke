@@ -21,6 +21,7 @@
 | [navigateto-popup-result-bridge.md](navigateto-popup-result-bridge.md) | Any wizard opened via `Xrm.Navigation.navigateTo({ target: 2 })` that must signal a result (savedId, confirmed flag) back to its opener when it closes | 2026-07-03 | Current |
 | [oob-form-dialog-chrome.md](oob-form-dialog-chrome.md) | Modifying the chrome of an OOB Dataverse main form (hide tab navigator / entity-name subtitle, restyle dialog chrome), full-page OR `navigateTo` modal. Supported-API-first ladder + the two frame/re-render gotchas + console-first workflow. | 2026-08-18 | Current |
 | [thin-scrollbar.md](thin-scrollbar.md) | Applying the Spaarke "modern thin grey scrollbar" (`thinScrollbarStyle` / `thinScrollbarDescendantStyle` from `@spaarke/ui-components`). Token-based (dark-mode-safe), the no-cascade gotcha, the "thumb length is native/proportional" answer, and the raw-CSS form for non-React surfaces. | 2026-08-18 | Current |
+| [infinite-scroll-list.md](infinite-scroll-list.md) | Building ANY scrollable list / record collection. The standard = **infinite lazy-scroll + thin scrollbar, NEVER a pager** (no numbered pages / prev-next / "Load more" / down-arrow). Use `<DataGrid>` (built-in `useLazyLoad` + sentinel `IntersectionObserver`); covers the page-fullness `hasMore` fallback (why MDA grids silently cap at 25) + the custom-scroller recipe. **Governed by [ADR-051](../../adr/ADR-051-infinite-scroll-lists.md).** | 2026-08-31 | Current |
 
 ## Critical Constraint (ADR-021 + ADR-022)
 
