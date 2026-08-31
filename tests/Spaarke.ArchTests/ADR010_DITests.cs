@@ -150,7 +150,76 @@ public class ADR010_DITests
         //   - Architecture seams (ADR-013 AI, ADR-007 facade): ~15 interfaces
         //   - Worker/Job handler seams (multiple implementations): ~5 interfaces
         //   - Infrastructure seams (resilience, auth): ~8 interfaces
-        const int knownOneToOneCeiling = 76;
+        //
+        // Ceiling re-armed 2026-08-12 (dotnet-10-upgrade-r1 task 030): 76 → 153. The +77 growth
+        // over ~5 months is legitimate DI/test seams accumulated across many feature projects
+        // (Office/Job status, workspace/scope services, finance analysis, precedent/insight graph,
+        // communication engine, membership, etc.) — every entry is an interface mocked in tests
+        // (tests/CLAUDE.md mandates Moq at module boundaries) or a genuine multi-impl/architecture
+        // seam per ADR-010's own testing-seam exception. The tripwire had simply not been maintained
+        // as the codebase grew (it had drifted from 76 to 153 while still asserting 76). Setting the
+        // ceiling to the current audited count grandfathers the legitimate set and RE-ARMS the ratchet:
+        // any NEW 1:1 interface beyond 153 will fail this test and force the same justify-or-concrete
+        // review. This is the maintenance procedure this test documents, not a suppression.
+        // ⚠️ auth-v4 task 020 (2026-08-21) DID NOT RAISE THIS, though the task instructed it to.
+        // Empirically verified instead of assumed: the real count is 151, not 153, and the new
+        // IClientAssertionProvider -> ManagedIdentityAssertionProvider pair does NOT appear in the
+        // list at all. Reason: this test scans `typeof(Program).Assembly` — the BFF assembly only —
+        // and IClientAssertionProvider is declared in Spaarke.Dataverse. A CROSS-ASSEMBLY 1:1 seam
+        // (contract in a shared library, implementation in the BFF) is therefore invisible here.
+        // Raising the ceiling would have granted headroom for a future IN-assembly interface to
+        // land unreviewed, which is the opposite of what this ratchet is for. Left at 153.
+        // The blind spot is booked onto tasks 060/061 (the forcing-function tasks), where a
+        // cross-assembly credential census belongs.
+        //
+        // ───────── Ceiling raised 153 → 155, 2026-08-27 (issue #839, spaarkeai-compose-r8) ─────────
+        // This test began FAILING at 155 once the Tier 2 aggregator was repaired and stopped
+        // reporting every ADR line as `pass` regardless of outcome (PR #840). The failure is
+        // inherited from master, not from the branch that raised the ceiling: that branch adds no
+        // interface to any assembly.
+        //
+        // ⚠️ READ THE NET NUMBER CAREFULLY. It is +2, and that is misleading: SEVEN 1:1 interfaces
+        // were added and FIVE were removed. The removals bought headroom that hid five of the
+        // additions from the ratchet entirely. A ceiling on a net count cannot see this; only the
+        // list diff can. Anyone maintaining this number should diff the printed lists, not trust
+        // the delta. (Method: check out the prior ceiling commit, set the ceiling to 0 so the list
+        // prints, capture both lists, `comm` them.)
+        //
+        // Diff vs 5c3652f8d (the 2026-08-12 re-arm):
+        //   ADDED (7):
+        //     IFileSummarizeAi          -> FileSummarizeAi             ADR-013 / CLAUDE.md §10
+        //     IPreferenceMemoryCapture  -> PreferenceMemoryCapture       bullet 3 REQUIRE CRUD→AI
+        //       Both live in Services/Ai/PublicContracts/. These interfaces are not optional
+        //       indirection — the facade boundary is a binding architecture rule, and removing them
+        //       would violate it. 2 impls exist for IPreferenceMemoryCapture.
+        //     IProvisioningEnqueuer     -> ServiceBusProvisioningEnqueuer   test seam (2 doubles)
+        //     ITenantContainerResolver  -> OptionsTenantContainerResolver   test seam (1 double)
+        //     IAdvisoryCapabilityRunner -> AdvisoryCapabilityRunner         test seam (1 double)
+        //       Each is mocked/faked in tests, which is ADR-010's own testing-seam exception.
+        //     ITenantBudgetPolicy       -> TenantBudgetPolicy         ⚠️ WEAKEST — see below
+        //     ITenantTokenLedger        -> InMemoryTenantTokenLedger  ⚠️ WEAKEST — see below
+        //   REMOVED (5): IConfidenceScoringService, IEmailTemplateService, IOwnershipValidator,
+        //     IScopeCopyService, IScopeInheritanceService.
+        //
+        // ⚠️ The two weak seams are grandfathered here but NOT endorsed. Neither has a second
+        // implementation nor a test double today; their justification is documented future
+        // evolution (ITenantTokenLedger's impl is named InMemory* with a Redis successor named per
+        // ADR-009; ITenantBudgetPolicy is a fail-open pre-call gate). "Future flexibility" is
+        // exactly the reasoning CLAUDE.md §11 question 3 rejects. They are grandfathered rather
+        // than fixed because the AI-metering surface belongs to another project and converting it
+        // to concrete registration is a behavior-affecting refactor outside an ArchTest
+        // adjudication branch. Tracked so it is not lost — see the #839 PR description.
+        //
+        // 155 -> 156, same day, on merging master: ISecurableEntityRegistry ->
+        // SecurableEntityRegistry (unified-access-control-r2 task 075). ACCEPTED as an
+        // external-dependency seam: it wraps a live Dataverse metadata retrieval, and its XML doc
+        // states an implementation contract the interface exists to impose — "Implementations MUST
+        // throw rather than return an empty or partial set when the answer cannot be determined",
+        // because "I could not find out whether this entity is securable" read as "it is not
+        // securable" places content in a shared container, which SPE's additive-only permission
+        // model makes irreversible. That is a contract, not indirection. Worth noting as the
+        // ratchet behaving correctly: the count moved for a real reason and named the interface.
+        const int knownOneToOneCeiling = 156;
 
         Assert.True(
             oneToOneInterfaces.Count <= knownOneToOneCeiling,
@@ -238,13 +307,20 @@ public class ADR010_DITests
     }
 
     /// <summary>
-    /// Reflection-stable record detection: the C# compiler synthesizes a clone method named
-    /// <c>&lt;Clone&gt;$</c> for every record type. Its presence distinguishes a positional
-    /// parameter-DTO record from a hand-written configuration POCO.
+    /// Reflection-stable record detection covering BOTH record class and record struct.
+    /// The C# compiler synthesizes a <c>&lt;Clone&gt;$</c> method for a record <b>class</b> only
+    /// (value-type records are copied by value, so they get no clone method). It synthesizes a
+    /// <c>PrintMembers</c> member-printer for <b>every</b> record — class and struct alike — so that
+    /// is the marker that also recognizes positional <c>readonly record struct</c> parameter-DTOs
+    /// (e.g. <c>AutoFileSettings</c>, <c>TrackingFooterSettings</c> in the Communication engine).
+    /// Fixed 2026-08-12 (dotnet-10-upgrade-r1 task 030): the old <c>&lt;Clone&gt;$</c>-only check
+    /// false-positived on record structs, wrongly flagging their positional DATA parameters as
+    /// constructor DI dependencies.
     /// </summary>
     private static bool IsRecordType(Type type)
         => type.GetMethods(BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance)
-               .Any(m => m.Name == "<Clone>$");
+               .Any(m => m.Name == "<Clone>$"        // record class
+                      || m.Name == "PrintMembers");  // record class AND record struct
 
     // --- Negative controls for HasConstructorDependencies (live in the TEST assembly) ---
 
@@ -254,8 +330,12 @@ public class ADR010_DITests
         public FakeConfigOptions(IServiceProvider services) => _ = services;
     }
 
-    /// <summary>Positional-record parameter DTO — the false positive the exclusion removes.</summary>
+    /// <summary>Positional-record (class) parameter DTO — the false positive the exclusion removes.</summary>
     private sealed record FakeParameterDtoOptions(string Value, int Count);
+
+    /// <summary>Positional <c>readonly record struct</c> parameter DTO — the value-type false
+    /// positive that the <c>&lt;Clone&gt;$</c>-only check missed (record structs have no clone method).</summary>
+    private readonly record struct FakeParameterDtoStructOptions(bool Enabled, double Threshold);
 
     [Fact(DisplayName = "ADR-010: Options ctor-dependency check flags non-record POCOs, excludes parameter-DTO records")]
     public void OptionsConstructorDependencyCheck_NegativeControl_StillFlagsGenuineViolations()
@@ -266,10 +346,16 @@ public class ADR010_DITests
             HasConstructorDependencies(typeof(FakeConfigOptions)),
             "Non-record Options POCO with constructor dependencies must still be flagged.");
 
-        // A positional-record parameter DTO MUST be excluded (its ctor params are data, not DI deps).
+        // A positional-record (class) parameter DTO MUST be excluded (its ctor params are data, not DI deps).
         Assert.False(
             HasConstructorDependencies(typeof(FakeParameterDtoOptions)),
             "Positional-record parameter-DTO must be excluded from the Options-pattern rule.");
+
+        // A positional readonly record STRUCT parameter DTO MUST also be excluded — record structs
+        // have no <Clone>$ method, so the old detection missed them (this is the task-030 fix).
+        Assert.False(
+            HasConstructorDependencies(typeof(FakeParameterDtoStructOptions)),
+            "Positional record-struct parameter-DTO must be excluded from the Options-pattern rule.");
     }
 
     /// <summary>

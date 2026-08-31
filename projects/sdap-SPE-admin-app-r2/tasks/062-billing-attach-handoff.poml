@@ -1,0 +1,98 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="062" project="sdap-SPE-admin-app-r2">
+  <metadata>
+    <title>Raise billing-profile attach as a requirement on customer-provisioning-orchestration-r1</title>
+    <phase>6 Hygiene + cross-cutting</phase>
+    <gate>029 complete</gate>
+    <status>completed</status>
+    <rigor>MINIMAL</rigor>
+    <rigor-reason>Cross-project coordination and documentation. No code, no tests.</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Documentation handoff with a defined recipient.</model-tier-reason>
+    <effort>low</effort>
+    <parallel-group>W18</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <deps>029</deps>
+    <tags>documentation, coordination</tags>
+    <estimated-effort>1 hour</estimated-effort>
+  </metadata>
+
+  <prompt>Billing-profile attach is out of scope for SPE Admin but must land somewhere. Raise it as a provisioning-tooling requirement on customer-provisioning-orchestration-r1 BEFORE R2 closes, so the capability does not fall between the two projects.</prompt>
+
+  <role>SPAARKE platform developer. Follow the repo's cross-project coordination conventions.</role>
+
+  <goal>The requirement is recorded on customer-provisioning-orchestration-r1 with enough detail to act on, and referenced back from this project.</goal>
+
+  <context>
+    <background>Spec FR-X02 / §4.2d. Add-SPOContainerTypeBilling and New-SPOContainerType are PowerShell, require the SharePoint Embedded Administrator role plus Azure subscription owner/contributor, and are once-per-customer provisioning acts. customer-provisioning-orchestration-r1 already owns repeatable per-customer setup and is already PowerShell (Provision-Customer.ps1 + Bicep), so the cmdlets drop straight in. That project is active (PR #779, ~68% complete), so this is a live coordination, not a note in a drawer.</background>
+    <relevant-files>
+      <file role="new">projects/customer-provisioning-orchestration-r1/notes/spe-billing-attach-requirement.md</file>
+      <file role="new">projects/sdap-SPE-admin-app-r2/notes/cross-project-handoffs.md</file>
+      <file role="canonical-reference">projects/sdap-SPE-admin-app-r2/spec.md</file>
+    </relevant-files>
+    <dependencies>
+      <dependency task="029" status="pending">The billing READ surface — the handoff should reference what SPE Admin now shows so provisioning knows the boundary.</dependency>
+    </dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="project">Scope: this is a REQUIREMENT handoff, not an implementation. Do NOT implement billing attach in either project from this task.</constraint>
+    <constraint source="project">Scope: content. The requirement MUST carry enough to act on — the exact cmdlets, the privilege set required, the SubscriptionNotRegistered retry caveat for Microsoft.Syntex, and the one-shot/irreversible nature of the billing choice.</constraint>
+    <constraint source="project">Scope: the boundary. State explicitly what SPE Admin does instead (reads billingClassification + billingStatus and warns when invalid), so the two projects do not both build it or both skip it.</constraint>
+    <constraint source="project">Scope: coordination. customer-provisioning-orchestration-r1 is ACTIVE with an open PR. Record the handoff in its notes; do not modify its code or tasks from this project.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>Cross-project requirement handoff</topic>
+    <files>
+      <file>projects/sdap-SPE-admin-app-r2/spec.md</file>
+      <file>projects/sdap-SPE-admin-app-r2/design.md</file>
+      <file>projects/INDEX.md</file>
+      <file>.claude/skills/project-defer-issue-tracking/SKILL.md</file>
+    </files>
+    <patterns>
+      <pattern name="provisioning-pipeline" location=".claude/patterns/api/provisioning-pipeline.md">How provisioning work is structured.</pattern>
+    </patterns>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="0" name="Context + rigor declaration">Declare rigor MINIMAL. Load spec §4.2d.</step>
+    <step order="1">Write the requirement into projects/customer-provisioning-orchestration-r1/notes/spe-billing-attach-requirement.md: the cmdlets, the privilege set, the retry caveat, the irreversibility, and why it belongs there.</step>
+    <step order="2">State the boundary explicitly — SPE Admin reads billing state and warns; provisioning writes it.</step>
+    <step order="3">File it as a tracked issue per the repo's defer/issue-tracking convention so it is visible outside the notes folder.</step>
+    <step order="4">Record the handoff in projects/sdap-SPE-admin-app-r2/notes/cross-project-handoffs.md with a link to the issue.</step>
+    <step order="5">Update TASK-INDEX.md: task 062 → ✅.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If customer-provisioning-orchestration-r1 has closed or been cancelled by the time this task runs, STOP and escalate — the capability then has no home, and choosing a different owner is a portfolio decision.</trigger>
+  </escalation>
+
+  <justification>
+    <existing>customer-provisioning-orchestration-r1 already owns repeatable per-customer setup and is already PowerShell-based (Provision-Customer.ps1 + Bicep).</existing>
+    <extension>Yes — the cmdlets extend that project's existing provisioning script. No new project or tooling is proposed.</extension>
+    <cost-of-doing-nothing>Billing-profile attach falls between the two projects: SPE Admin excluded it as provisioning's scope, and provisioning does not know it was assigned. A container type with invalid billing is a live operational failure with nobody owning the fix.</cost-of-doing-nothing>
+  </justification>
+
+  <tools>
+    <tool name="dotnet">Not required — documentation only</tool>
+  </tools>
+
+  <outputs>
+    <output type="doc">projects/customer-provisioning-orchestration-r1/notes/spe-billing-attach-requirement.md</output>
+    <output type="doc">projects/sdap-SPE-admin-app-r2/notes/cross-project-handoffs.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">The requirement exists in customer-provisioning-orchestration-r1's notes with the cmdlets, privilege set, retry caveat, and irreversibility recorded.</criterion>
+    <criterion testable="true">The SPE-Admin-reads / provisioning-writes boundary is stated explicitly.</criterion>
+    <criterion testable="true">The requirement is filed as a tracked issue, not only as a note.</criterion>
+    <criterion testable="true">The handoff is recorded in this project's notes with a link to the issue.</criterion>
+    <criterion testable="true">Negative: no billing-attach implementation was written in either project.</criterion>
+    <criterion testable="true">Negative: customer-provisioning-orchestration-r1's code and tasks were not modified from this project.</criterion>
+  </acceptance-criteria>
+
+  <notes>Spec FR-X02. Satisfies spec success criterion 13. Must complete BEFORE R2 closes — task 090 checks it.</notes>
+
+  <execution><skill>.claude/skills/task-execute/SKILL.md</skill></execution>
+</task>

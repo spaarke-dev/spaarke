@@ -1,3 +1,4 @@
+using Sprk.Bff.Api.Infrastructure.Authentication;
 using System.Runtime.ExceptionServices;
 using System.Security.Claims;
 using System.Text.Json;
@@ -72,6 +73,12 @@ public static class DispatchSessionEndpoint
     private const string ErrorCodeBindingRequired = "dispatch.binding-required";
     private const string ErrorCodeBindingIdInvalid = "dispatch.binding-id-invalid";
     private const string ErrorCodeInvalidArgs = "dispatch.invalid-args";
+    // Issue #863: reachable only on an expiry RACE now. SessionOwnershipFilter loads and
+    // ownership-checks the session before this handler runs, answering
+    // SessionOwnershipFilterExtensions.NotFoundOrNotOwnedErrorCode for an ordinary missing session.
+    // A session can still expire between the two, so the branch stays — but a client that used to
+    // match this string must now match the filter's code. Kept rather than deleted because the race
+    // is real; do not treat a hit on this code as "session never existed".
     private const string ErrorCodeSessionNotFound = "dispatch.session-not-found";
     private const string ErrorCodeInternalError = "dispatch.internal-error";
 
@@ -88,6 +95,7 @@ public static class DispatchSessionEndpoint
             .WithTags("AI Chat");
 
         group.MapPost("/sessions/{sessionId}/dispatch", DispatchAsync)
+            .AddSessionOwnershipFilter()
             .AddAiAuthorizationFilter()
             .WithName("DispatchChatSessionBinding")
             .WithSummary("Dispatch a capability Binding by id for a chat session (Click path, FR-P1-04)")
@@ -199,9 +207,7 @@ public static class DispatchSessionEndpoint
             return;
         }
 
-        var callerOid = httpContext.User.FindFirst("oid")?.Value
-            ?? httpContext.User.FindFirst("http://schemas.microsoft.com/identity/claims/objectidentifier")?.Value
-            ?? httpContext.User.FindFirst(ClaimTypes.NameIdentifier)?.Value;
+        var callerOid = CallerResolution.ResolveObjectId(httpContext.User);
         if (string.IsNullOrWhiteSpace(callerOid))
         {
             await SummarizeSessionEndpoint.WriteProblemDetailsAsync(

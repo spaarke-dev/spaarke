@@ -1,0 +1,114 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="204g" project="customer-provisioning-orchestration-r1">
+  <metadata>
+    <title>Class-B B21 spec amendment — SC #2 allow retired-on-disk-with-banner convention (Wave G-6 pattern)</title>
+    <phase>Pre-Live-Fire — Class-B spec amendment (post-186 safe)</phase>
+    <gate>ready</gate>
+    <status>not-started</status>
+    <rigor>MINIMAL</rigor>
+    <rigor-reason>Spec amendment only — no code changes, no tests, no `.claude/` writes. Per root CLAUDE.md §8 rigor decision tree: docs/inventory/simple-updates = MINIMAL. Quality gates skipped per MINIMAL row.</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Spec-amendment authoring against an established convention (Wave G-6 retired-on-disk-with-banner pattern is precedent); Sonnet @ high fits.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>waveG8-parallel</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <parallel-reason>Touches only `spec.md` (project doc) + punch list annotation. No overlap with 204a/204f.</parallel-reason>
+    <deps>202</deps>
+    <tags>spec-amendment, cleanup, sc-2, class-b-verified-open, docs</tags>
+    <estimated-effort>2 hours</estimated-effort>
+  </metadata>
+
+  <prompt>Amend `projects/customer-provisioning-orchestration-r1/spec.md` SC #2 to allow the "retired-on-disk-with-banner" convention adopted by Wave G-6 (for AzCli*, PacAdmin*, PowerShellAppConfigSeeder, DeployBffApiScriptRunner, and now PlaceholderInvariantVerifier retirements). Current SC #2 requires grep-verify to return zero matches for retired shell-out class names — but Wave G-6 accepted retention of files with a retirement banner header (preserves audit trail + prevents accidental resurrection). Task 202's verification matrix B21 row flagged this as DESIGN CONFLICT ("SC #2 says grep should return zero; Wave G-6 accepts on-disk-with-banner"). Amend SC #2 to explicitly allow retired-on-disk-with-banner as a valid completion state, update the verification recipe, and cross-reference `PlaceholderInvariantVerifier.cs` retirement banner as the current example.</prompt>
+
+  <role>SPAARKE platform architect. Familiar with: project spec.md § Success Criteria structure; SC #2 current wording + verification recipe; Wave G-6 retired-on-disk-with-banner convention (adopted 2026-08-XX for AzCli*/PacAdmin*/PowerShellAppConfigSeeder classes and now for PlaceholderInvariantVerifier when 204c retires it); the retirement-banner header format (used in `PlaceholderInvariantVerifier.cs` per punch list B07 row citation).</role>
+
+  <goal>`projects/customer-provisioning-orchestration-r1/spec.md` SC #2 amended to:
+- Allow retired-on-disk classes that carry a retirement-banner header as a valid completion state (in addition to fully-deleted classes)
+- Updated verification recipe: `grep -L "// RETIRED" <candidate-files>` (find files that DO NOT have the banner) instead of `grep -c <class-name>` (find any occurrence)
+- Cross-reference `PlaceholderInvariantVerifier.cs` retirement banner as current example
+- Retain prohibition on ACTIVE registration of retired classes (banner is on-disk-only; DI module must NOT `services.AddSingleton<TInterface, RetiredClass>()`)
+
+Punch list B21 row annotated `applied 2026-XX-XX task 204g — spec.md SC #2 amended`.</goal>
+
+  <context>
+    <background>Wave G-6 (~2026-08-XX) adopted a pattern: when a class is superseded (AzCliKvSecretsWriter → real KV writer; DeployBffApiScriptRunner → artifact-fetch handler; PowerShellAppConfigSeeder → C# seeders; PlaceholderInvariantVerifier → real probes), the class file remains ON DISK with a retirement-banner header explaining:
+- WHEN retired
+- WHICH task retired it
+- WHAT replaced it
+- WHY retained on disk (audit trail; prevents future author from re-creating class with same name unknowingly)
+
+The DI module registrations are removed, so the class is UNREACHABLE at runtime — but the file preserves history.
+
+Current spec.md SC #2 verification recipe is (paraphrasing task 202 B21 row): `grep -c "<retired class name>" src/` should return zero. But Wave G-6 convention retains the file → grep still returns non-zero → SC #2 literal check FAILS despite class being effectively retired.
+
+Task 202 verification matrix B21 flagged this as **DOWNGRADE — spec-amendment task**. Amendment reconciles SC #2's intent (no active retired classes) with Wave G-6's implementation (on-disk-with-banner audit trail).
+
+**Why post-186 safe**: spec amendment only; no code / runtime impact. Also unblocks any future task 204c retiring PlaceholderInvariantVerifier via same convention (currently SC #2 would fail that retirement literally).</background>
+    <relevant-files>
+      <file role="input">projects/customer-provisioning-orchestration-r1/notes/task-202-punch-list.md B21 row + verification matrix</file>
+      <file role="modify">projects/customer-provisioning-orchestration-r1/spec.md § Success Criteria § SC #2 (amend wording + verification recipe)</file>
+      <file role="reference-example">src/server/services/Sprk.Provisioning.ControlPlane.Core/Handlers/E2EAcceptance/PlaceholderInvariantVerifier.cs (retirement banner header — current example for spec cross-reference)</file>
+      <file role="reference-earlier-examples">src/server/services/Sprk.Provisioning.ControlPlane.Core/Handlers/**/AzCli*.cs + PacAdmin*.cs + PowerShellAppConfigSeeder.cs + DeployBffApiScriptRunner.cs (earlier retirement-banner examples)</file>
+      <file role="update">projects/customer-provisioning-orchestration-r1/notes/task-202-punch-list.md B21 row annotation</file>
+    </relevant-files>
+    <dependencies>
+      <dependency task="202" status="complete">Punch list B21 row + verification matrix state</dependency>
+    </dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="task-202 punch list verification obligation">Executor MUST grep-verify current spec.md SC #2 wording BEFORE amending — confirm the wording still matches punch list description (has not been amended since verification pass 2026-08-24 SESSION 7).</constraint>
+    <constraint source="Wave G-6 retired-on-disk convention">Amendment MUST retain the prohibition on ACTIVE registration of retired classes. The banner is on-disk-only; DI module must NOT `services.AddSingleton<TInterface, RetiredClass>()`. If a task retires a class but leaves the registration active, SC #2 amended version STILL FAILS.</constraint>
+    <constraint source="root CLAUDE.md §11 Component Justification">Amendment-only (edit existing spec); §11 does not trigger.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>Class-B B21 spec amendment — SC #2 retired-on-disk convention</topic>
+    <files>
+      <file>projects/customer-provisioning-orchestration-r1/spec.md</file>
+      <file>projects/customer-provisioning-orchestration-r1/notes/task-202-punch-list.md</file>
+    </files>
+  </knowledge>
+
+  <steps mode="prescriptive">
+    <step order="0" name="Rigor + load">Emit RIGOR LEVEL (MINIMAL, sonnet/high). Read `notes/task-202-punch-list.md` B21 row.</step>
+    <step order="1" name="Read + verify current SC #2 wording">Read `projects/customer-provisioning-orchestration-r1/spec.md` § Success Criteria § SC #2 verbatim. Confirm wording matches punch list description (grep-verify recipe requires zero occurrences).</step>
+    <step order="2" name="Read retirement-banner reference examples">Read the retirement-banner header of `PlaceholderInvariantVerifier.cs` (current example) + at least one earlier Wave G-6 example (`AzCliKvSecretsWriter.cs` OR `DeployBffApiScriptRunner.cs`) to capture the banner format for spec cross-reference.</step>
+    <step order="3" name="Amend SC #2">Update spec.md § SC #2:
+- Preserve intent statement (retired shell-out / placeholder classes MUST NOT be actively used)
+- Add: "Retired classes MAY be retained on-disk with a retirement-banner header (Wave G-6 convention) — this preserves audit trail + prevents accidental resurrection under the same class name. Retention-with-banner is a valid completion state."
+- Replace verification recipe with: `grep -L "// RETIRED" <candidate-files>` (files matching the retired-class name pattern but LACKING the banner header) OR (equivalent): `grep <retired-class-name> src/server/services/**/*Module.cs` (any DI module actively registering the retired class → FAIL). Combined check ensures class is not actively registered AND if retained on-disk has banner.
+- Cross-reference: "Example: `src/server/services/Sprk.Provisioning.ControlPlane.Core/Handlers/E2EAcceptance/PlaceholderInvariantVerifier.cs` retirement banner header format (retired by task 204c per punch list B07)."</step>
+    <step order="4" name="Annotate + report">Update `notes/task-202-punch-list.md` B21 row: `applied 2026-XX-XX task 204g — spec.md SC #2 amended per Wave G-6 retired-on-disk convention`. Update `current-task.md`.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If spec.md SC #2 wording has been amended since punch list verification pass (2026-08-24 SESSION 7), STOP + escalate — punch list state may be stale + amendment premise may not apply.</trigger>
+    <trigger>If retirement-banner header format is inconsistent across earlier Wave G-6 retirements, standardize as part of amendment (author canonical banner template inline in SC #2) + open follow-on row for updating older retirements to conformant format.</trigger>
+  </escalation>
+
+  <tools>
+    <tool name="grep">verify current SC #2 wording + inspect retirement-banner examples</tool>
+  </tools>
+
+  <outputs>
+    <output type="spec-amendment">projects/customer-provisioning-orchestration-r1/spec.md § Success Criteria § SC #2 (amended)</output>
+    <output type="annotation">projects/customer-provisioning-orchestration-r1/notes/task-202-punch-list.md B21 row outcome</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">spec.md § SC #2 explicitly allows retired-on-disk-with-banner as a valid completion state.</criterion>
+    <criterion testable="true">SC #2 verification recipe updated to distinguish "retained-with-banner" (Pass) from "actively-registered" (Fail).</criterion>
+    <criterion testable="true">SC #2 cross-references `PlaceholderInvariantVerifier.cs` retirement banner as current example.</criterion>
+    <criterion testable="true">Amendment retains prohibition on ACTIVE registration of retired classes (banner is on-disk-only).</criterion>
+    <criterion testable="true">`notes/task-202-punch-list.md` B21 row annotated `applied 2026-XX-XX task 204g — <evidence>`.</criterion>
+  </acceptance-criteria>
+
+  <notes>Justification (CLAUDE.md §11): Amendment-only (edit existing spec); §11 does not trigger. Cost-of-doing-nothing: SC #2 literal check keeps failing on every Wave G-6-convention retirement (AzCli* / PacAdmin* / PowerShellAppConfigSeeder / DeployBffApiScriptRunner / soon PlaceholderInvariantVerifier via task 204c), forcing either false-negative acceptance or spec violation ambiguity. Amendment reconciles SC #2 intent with adopted convention.
+
+**Post-186 safe + also unblocks 204c**: amendment must land BEFORE task 204c retires PlaceholderInvariantVerifier (204c's Step 11 relies on Wave G-6 convention being spec-sanctioned). If 204c runs first + retires the placeholder + SC #2 amendment lags, SC #2 literal check fails on 204c's own output.</notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+  </execution>
+</task>

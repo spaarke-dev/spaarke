@@ -1,5 +1,6 @@
 using System.Text.Json;
 using Azure.Messaging.ServiceBus;
+using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Options;
 using Spaarke.Dataverse;
 using Sprk.Bff.Api.Configuration;
@@ -40,7 +41,11 @@ public class ProfileSummaryWorker : BackgroundService, IOfficeJobHandler
     private readonly ITenantCache _cache;
     private readonly IProcessingJobService _processingJobService;
     private readonly IJobStatusService _jobStatusService;
-    private readonly IAppOnlyAnalysisService _analysisService;
+    // IAppOnlyAnalysisService is Scoped; resolved per-message via _scopeFactory inside
+    // ProcessAsync (dotnet-10-upgrade task 020, R2) rather than captured on this Singleton
+    // worker, so the graph passes ValidateScopes. Behavior is unchanged — each message is
+    // an independent unit of work and the analysis facade is stateless per call.
+    private readonly IServiceScopeFactory _scopeFactory;
     private readonly ServiceBusOptions _serviceBusOptions;
 
     private const string QueueName = "office-profile";
@@ -61,7 +66,7 @@ public class ProfileSummaryWorker : BackgroundService, IOfficeJobHandler
         ITenantCache cache,
         IProcessingJobService processingJobService,
         IJobStatusService jobStatusService,
-        IAppOnlyAnalysisService analysisService,
+        IServiceScopeFactory scopeFactory,
         IOptions<ServiceBusOptions> serviceBusOptions)
     {
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
@@ -69,7 +74,7 @@ public class ProfileSummaryWorker : BackgroundService, IOfficeJobHandler
         _cache = cache ?? throw new ArgumentNullException(nameof(cache));
         _processingJobService = processingJobService ?? throw new ArgumentNullException(nameof(processingJobService));
         _jobStatusService = jobStatusService ?? throw new ArgumentNullException(nameof(jobStatusService));
-        _analysisService = analysisService ?? throw new ArgumentNullException(nameof(analysisService));
+        _scopeFactory = scopeFactory ?? throw new ArgumentNullException(nameof(scopeFactory));
         _serviceBusOptions = serviceBusOptions?.Value ?? throw new ArgumentNullException(nameof(serviceBusOptions));
     }
 
@@ -161,8 +166,12 @@ public class ProfileSummaryWorker : BackgroundService, IOfficeJobHandler
                     message.JobId,
                     payload.DocumentId);
 
-                // Call the analysis service with the "Document Profile" playbook
-                var analysisResult = await _analysisService.AnalyzeDocumentAsync(
+                // Call the analysis service with the "Document Profile" playbook.
+                // IAppOnlyAnalysisService is Scoped — resolve it from a per-message scope
+                // (R2) instead of capturing it on this Singleton worker.
+                using var analysisScope = _scopeFactory.CreateScope();
+                var analysisService = analysisScope.ServiceProvider.GetRequiredService<IAppOnlyAnalysisService>();
+                var analysisResult = await analysisService.AnalyzeDocumentAsync(
                     payload.DocumentId,
                     IAppOnlyAnalysisService.DefaultPlaybookName,
                     cancellationToken);

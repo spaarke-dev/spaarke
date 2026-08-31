@@ -17,10 +17,57 @@ import {
   CheckmarkCircle20Regular,
   DataBarVertical20Regular,
   Clock20Regular,
+  Warning20Regular,
+  ErrorCircle20Regular,
 } from "@fluentui/react-icons";
 import { speApiClient } from "../../services/speApiClient";
 import { useBuContext } from "../../contexts/BuContext";
-import type { DashboardMetrics } from "../../types/spe";
+import type { DashboardMetrics, SyncHealth } from "../../types/spe";
+
+/**
+ * Presentation for each sync-health state.
+ *
+ * ADR-021: colours come from Fluent v9 semantic palette tokens, which resolve per theme — the indicator
+ * adapts in dark mode with no hex literals and no theme-conditional logic here.
+ *
+ * The `value` strings matter: task 003 (spec FR-A03) exists because the tile read "OK" while a concern was
+ * failing. "Degraded"/"Failed" must never be renderable as "OK".
+ */
+const SYNC_HEALTH_PRESENTATION: Record<
+  SyncHealth,
+  { value: string; color: string; icon: React.ReactElement }
+> = {
+  Healthy: {
+    value: "OK",
+    color: tokens.colorPaletteGreenForeground1,
+    icon: <CheckmarkCircle20Regular />,
+  },
+  Degraded: {
+    value: "Degraded",
+    color: tokens.colorPaletteYellowForeground1,
+    icon: <Warning20Regular />,
+  },
+  Failed: {
+    value: "Failed",
+    color: tokens.colorPaletteRedForeground1,
+    icon: <ErrorCircle20Regular />,
+  },
+};
+
+/**
+ * Resolves the health to render.
+ *
+ * Falls back to the legacy `syncSucceeded` boolean when `syncHealth` is absent — a cached
+ * DashboardMetrics payload written before task 003 has no `syncHealth` field, and it survives in Redis for
+ * up to 2× the sync interval after deploy. Treating that `undefined` as "Healthy" would reintroduce the
+ * exact optimistic default this task removes, so an unrecognised value degrades to "Degraded", never "OK".
+ */
+function resolveSyncHealth(metrics: DashboardMetrics): SyncHealth {
+  if (metrics.syncHealth && metrics.syncHealth in SYNC_HEALTH_PRESENTATION) {
+    return metrics.syncHealth;
+  }
+  return metrics.syncSucceeded ? "Healthy" : "Degraded";
+}
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Styles (ADR-021: makeStyles + Fluent design tokens; dark mode automatic)
@@ -71,6 +118,15 @@ const useStyles = makeStyles({
     gridTemplateColumns: "repeat(auto-fill, minmax(220px, 1fr))",
     gap: tokens.spacingVerticalM,
     flexShrink: 0,
+  },
+
+  /** Failed-concern list inside the sync-health MessageBar (FR-A03). */
+  concernList: {
+    margin: `${tokens.spacingVerticalXS} 0 0 0`,
+    paddingLeft: tokens.spacingHorizontalL,
+    display: "flex",
+    flexDirection: "column",
+    gap: tokens.spacingVerticalXXS,
   },
 
   metricCard: {
@@ -296,6 +352,8 @@ interface MetricCardProps {
   label: string;
   value: string | number;
   subtext?: string;
+  /** Optional Fluent semantic token for the value text (ADR-021 — token only, never a hex literal). */
+  valueColor?: string;
 }
 
 /**
@@ -304,17 +362,24 @@ interface MetricCardProps {
  * Uses Fluent design tokens exclusively for colors/spacing (ADR-021).
  * Dark mode is automatic via the FluentProvider theme in App.tsx.
  */
-const MetricCard: React.FC<MetricCardProps> = ({ icon, label, value, subtext }) => {
+const MetricCard: React.FC<MetricCardProps> = ({ icon, label, value, subtext, valueColor }) => {
   const styles = useStyles();
   return (
     <div className={styles.metricCard} role="region" aria-label={label}>
       <div className={styles.metricCardHeader}>
-        <span className={styles.metricCardIcon}>{icon}</span>
+        <span className={styles.metricCardIcon} style={valueColor ? { color: valueColor } : undefined}>
+          {icon}
+        </span>
         <Text size={200} weight="semibold" className={styles.metricCardLabel}>
           {label}
         </Text>
       </div>
-      <Text size={700} weight="bold" className={styles.metricCardValue}>
+      <Text
+        size={700}
+        weight="bold"
+        className={styles.metricCardValue}
+        style={valueColor ? { color: valueColor } : undefined}
+      >
         {value}
       </Text>
       {subtext && (
@@ -332,12 +397,21 @@ const MetricCard: React.FC<MetricCardProps> = ({ icon, label, value, subtext }) 
 
 interface ConfigCountGridProps {
   containerCountByConfig: Record<string, number>;
+  /** configId → display labels. Missing entries fall back to the raw ID. */
+  configLabels: Record<string, { name: string; containerTypeName: string }>;
 }
 
 /**
  * ConfigCountGrid — displays per-config container counts from the dashboard metrics.
+ *
+ * Shows the configuration NAME and its container type rather than the bare Dataverse GUID that
+ * `containerCountByConfig` is keyed by (operator-directed, UAT 2026-08-26). The GUID is still
+ * available on the row's `title` — it is what support tickets and log lines quote.
  */
-const ConfigCountGrid: React.FC<ConfigCountGridProps> = ({ containerCountByConfig }) => {
+const ConfigCountGrid: React.FC<ConfigCountGridProps> = ({
+  containerCountByConfig,
+  configLabels,
+}) => {
   const styles = useStyles();
   const entries = Object.entries(containerCountByConfig);
 
@@ -359,15 +433,23 @@ const ConfigCountGrid: React.FC<ConfigCountGridProps> = ({ containerCountByConfi
     <table className={styles.activityTable} aria-label="Container counts by config">
       <thead>
         <tr className={styles.tableHeaderRow}>
-          <th className={styles.tableHeaderCell}>Config ID</th>
+          <th className={styles.tableHeaderCell}>Configuration</th>
+          <th className={styles.tableHeaderCell}>Container Type</th>
           <th className={styles.tableHeaderCell}>Container Count</th>
         </tr>
       </thead>
       <tbody>
-        {entries.map(([configId, count]) => (
-          <tr key={configId} className={styles.tableRow}>
-            <td className={styles.tableCell} title={configId}>
-              {configId}
+        {entries.map(([configId, count]) => {
+          const label = configLabels[configId];
+          return (
+          <tr key={configId} className={styles.tableRow} title={configId}>
+            <td className={styles.tableCell}>
+              {/* Unresolved is shown as the ID, never as blank — a config we could not name is
+                  still a config with containers in it. */}
+              {label?.name ?? configId}
+            </td>
+            <td className={styles.tableCell}>
+              {label?.containerTypeName ?? "—"}
             </td>
             <td className={styles.tableCell}>
               {count === -1 ? (
@@ -377,7 +459,8 @@ const ConfigCountGrid: React.FC<ConfigCountGridProps> = ({ containerCountByConfi
               )}
             </td>
           </tr>
-        ))}
+          );
+        })}
       </tbody>
     </table>
   );
@@ -412,6 +495,44 @@ export const DashboardPage: React.FC = () => {
   const [isLoading, setIsLoading] = React.useState(false);
   const [isRefreshing, setIsRefreshing] = React.useState(false);
   const [error, setError] = React.useState<string | null>(null);
+
+  /**
+   * configId → its human-readable name and container type, for the per-config counts table.
+   *
+   * `containerCountByConfig` is keyed by the Dataverse GUID of `sprk_specontainertypeconfig`, and
+   * the table showed that GUID raw — the operator's reasonable question at UAT was "what is Config
+   * ID?". A GUID names nothing to a human. Resolved from the same config list the header picker
+   * uses, so the label here matches the label they picked with.
+   *
+   * A failure here is deliberately silent: the table falls back to showing the ID, which is what it
+   * did before. Losing a display name must not cost anyone their container counts.
+   */
+  const [configLabels, setConfigLabels] = React.useState<
+    Record<string, { name: string; containerTypeName: string }>
+  >({});
+
+  React.useEffect(() => {
+    let cancelled = false;
+    void (async () => {
+      try {
+        const configs = await speApiClient.configs.list();
+        if (cancelled) return;
+        const map: Record<string, { name: string; containerTypeName: string }> = {};
+        for (const c of configs) {
+          map[c.id] = {
+            name: c.name,
+            containerTypeName: c.containerTypeName,
+          };
+        }
+        setConfigLabels(map);
+      } catch {
+        // Fall back to raw IDs — see the note above.
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   // ── Load Metrics ───────────────────────────────────────────────────────────
 
@@ -565,21 +686,81 @@ export const DashboardPage: React.FC = () => {
               value={metrics.totalContainerCount.toLocaleString()}
               subtext={`Across ${Object.keys(metrics.containerCountByConfig).length} config(s)`}
             />
-            <MetricCard
-              icon={<DataBarVertical20Regular />}
-              label="Storage Used"
-              value={formatBytes(metrics.totalStorageUsedInBytes)}
-              subtext="Across all containers"
-            />
-            <MetricCard
-              icon={<CheckmarkCircle20Regular />}
-              label="Sync Status"
-              value={metrics.syncSucceeded ? "OK" : "Partial"}
-              subtext={metrics.syncStatus}
-            />
+            {/*
+              A total is only a total when everything counted. Graph reports consumption on the LIST
+              surface only, so coverage can be partial — and a partial sum shown as a complete one is
+              the same defect as the "0 B" this tile used to display when NOTHING reported (every
+              container returned null because the BFF discarded the value). The subtext states the
+              coverage rather than asserting "across all containers" unconditionally.
+            */}
+            {(() => {
+              const total = metrics.totalContainerCount;
+              const reporting = metrics.storageReportingContainerCount ?? 0;
+              const complete = total > 0 && reporting === total;
+
+              return (
+                <MetricCard
+                  icon={<DataBarVertical20Regular />}
+                  label="Storage Used"
+                  value={
+                    reporting === 0 && total > 0
+                      ? "Not reported"
+                      : formatBytes(metrics.totalStorageUsedInBytes)
+                  }
+                  subtext={
+                    total === 0
+                      ? "No containers"
+                      : reporting === 0
+                        ? `Graph reported no storage figures for ${total} container(s)`
+                        : complete
+                          ? `Across all ${total} container(s)`
+                          : `At least — only ${reporting} of ${total} container(s) reported`
+                  }
+                />
+              );
+            })()}
+            {(() => {
+              const health = resolveSyncHealth(metrics);
+              const presentation = SYNC_HEALTH_PRESENTATION[health];
+              return (
+                <MetricCard
+                  icon={presentation.icon}
+                  label="Sync Status"
+                  value={presentation.value}
+                  subtext={metrics.syncStatus}
+                  valueColor={presentation.color}
+                />
+              );
+            })()}
           </div>
 
-          <Divider />
+          {/* ── Failing concerns (FR-A03) ──
+              A count alone ("1 failed") tells an operator something broke but not what. This names each
+              failed concern and shows the reason the server captured. */}
+          {(metrics.concerns ?? []).some((c) => !c.succeeded) && (
+            <MessageBar intent={resolveSyncHealth(metrics) === "Failed" ? "error" : "warning"}>
+              <MessageBarBody>
+                <Text weight="semibold">
+                  {resolveSyncHealth(metrics) === "Failed"
+                    ? "Every concern in the last sync failed — these metrics are not trustworthy."
+                    : "Some concerns failed in the last sync. The metrics below are incomplete."}
+                </Text>
+                <ul className={styles.concernList}>
+                  {(metrics.concerns ?? [])
+                    .filter((c) => !c.succeeded)
+                    .map((c) => (
+                      <li key={c.concern}>
+                        <Text weight="semibold">{c.concern}</Text>
+                        {c.reason ? <Text> — {c.reason}</Text> : null}
+                      </li>
+                    ))}
+                </ul>
+              </MessageBarBody>
+            </MessageBar>
+          )}
+
+          {/* flexGrow:0 is load-bearing. Fluent v9 Divider defaults to flex-grow:1 so it can fill its track; inside these column layouts that made it grow VERTICALLY, and because the rule is centred in the divider box it rendered as space-line-space — the "big space gap" reported on Dashboard, Search, Security and Audit Log (UAT 2026-08-26). The pages without a Divider had no gap. flexShrink:0 alone never addressed it. */}
+          <Divider style={{ flexGrow: 0, flexShrink: 0 }} />
 
           {/* ── Per-Config Container Counts ── */}
           <section className={styles.section}>
@@ -594,7 +775,10 @@ export const DashboardPage: React.FC = () => {
               )}
             </div>
 
-            <ConfigCountGrid containerCountByConfig={metrics.containerCountByConfig} />
+            <ConfigCountGrid
+              containerCountByConfig={metrics.containerCountByConfig}
+              configLabels={configLabels}
+            />
           </section>
         </>
       )}

@@ -1,5 +1,31 @@
 # Spaarke.Dataverse - Technical Overview
 
+> ## 🔴 Secret-free BFF identity — read before following any credential step on this page
+>
+> **2026-08-24, `spaarke-auth-v4-dataverse-MI` task 033 (ADR-028 **A4**; exception **E-3 CLOSED**).**
+> The BFF authenticates as a confidential client — **including on the OBO / delegated path** — using a
+> **federated credential issued to its user-assigned managed identity**. It holds **no client secret**.
+>
+> | Removed | |
+> |---|---|
+> | App settings | `API_CLIENT_SECRET`, `AzureAd__ClientSecret`, `Dataverse__ClientSecret`, `AgentToken__ClientSecret` |
+> | Key Vault | `BFF-API-ClientSecret`, `bff-api-client-secret`, and the orphaned `Graph-API-ClientSecret` |
+>
+> Set instead: `Graph__Credentials__Order__0=ManagedIdentityFederated` and
+> `Graph__Credentials__RequireSecretFreeIdentity=true`.
+>
+> **Do not re-create the secret.** A secret listed *beneath* MI-FIC in the order is worse than no migration:
+> a broken federated credential would fall through to it silently while every health signal stayed green.
+> With `RequireSecretFreeIdentity=true` the app **refuses to start** outside Development if `ClientSecret`
+> returns to the order.
+>
+> Any instruction below that tells you to create, store, reference or rotate a BFF client secret is
+> **superseded**. Still valid: ADR-028 **E-1** per-customer SPE owning-app secrets, and
+> `PowerBi:ClientSecret` while task 042 is deferred.
+> Canonical: [`ADR-028`](../../../../../.claude/adr/ADR-028-spaarke-auth-architecture.md) ·
+> [`auth-deployment-setup.md`](../../../../../docs/guides/auth-deployment-setup.md)
+
+
 **Purpose**: Dataverse integration for SharePoint Document Access Platform (SDAP)
 **Architecture**: Dual Implementation (ServiceClient SDK + REST/Web API)
 **Authentication**: ClientSecret Credential (Azure Identity)
@@ -149,8 +175,8 @@ builder.Services.AddSingleton<IDataverseService>(sp =>
 ### 2. DataverseWebApiService (Alternative)
 
 **File**: `DataverseWebApiService.cs`
-**Status**: ⚠️ Available but not currently used
-**Lifetime**: Would be Scoped (with HttpClient)
+**Status**: ✅ **LIVE** — the production implementation for Event + FieldMapping. (Corrected 2026-08-14, r3 task 011/034: previously mislabeled "not currently used"; it is a **second live `ClientSecret` consumer**, pending the #3b ClientSecret→Managed-Identity migration.)
+**Lifetime**: Scoped (with HttpClient)
 
 **Purpose**: Alternative Dataverse integration using REST/OData API
 
@@ -172,7 +198,7 @@ builder.Services.AddSingleton<IDataverseService>(sp =>
 }
 ```
 
-**DI Registration** (Alternative, not currently used):
+**DI Registration** (LIVE — serves Event + FieldMapping in production):
 ```csharp
 builder.Services.AddHttpClient<IDataverseService, DataverseWebApiService>(client =>
 {
@@ -712,6 +738,8 @@ builder.Services.AddScoped<IDataverseService>(...)
 ---
 
 ## Security Best Practices
+
+> **⚠️ ADR-028 §24 (canonical, 2026-08-14 r3 task 011/034):** for server-side outbound auth, **Managed Identity is MANDATED** — `ClientSecret` is a *violation to migrate*, not a best practice. The `ClientSecret` examples below reflect the current (pre-migration) state; the app-only Dataverse paths are the sanctioned **#3b ClientSecret→MI** target (keep the KV secret only for the OBO/user-context path). Do not cite this section as endorsing ClientSecret for new server outbound.
 
 ### 1. Never Store Secrets in Code
 

@@ -1,0 +1,93 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="014" project="dotnet-10-upgrade-r1">
+  <metadata>
+    <title>FR-06 — telemetry consolidation: remove classic App Insights SDK, rely on OTel→Azure Monitor</title>
+    <phase>P1 Hit-site remediation</phase>
+    <gate>004 complete</gate>
+    <status>completed</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Owner-approved carve-out to NFR-01 (deliberate telemetry-pipeline change); bff-api; observability-sensitive.</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Well-specified package removal + wiring verification; the OTel pipeline is already present.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Edits BFF csproj + startup wiring; keep serial with other BFF P1 edits.</parallel-reason>
+    <deps>004</deps>
+    <tags>dotnet, bff-api, observability, packages, migration</tags>
+    <estimated-effort>2-3 hours</estimated-effort>
+  </metadata>
+
+  <prompt>Consolidate telemetry onto OpenTelemetry: remove the classic `Microsoft.ApplicationInsights.AspNetCore` package and any classic-SDK wiring, and confirm all telemetry now flows solely through the already-wired `Azure.Monitor.OpenTelemetry.AspNetCore` pipeline (BFF csproj lines ~119–131, per redis-remediation R7-S7). Verify the 12 registered Meters + Redis instrumentation are still present in the OTel pipeline. This is the ONE owner-approved carve-out to NFR-01 (documented telemetry-pipeline change) — record it in the PR.</prompt>
+  <role>SPAARKE platform developer. Expert in OpenTelemetry, Azure Monitor Distro, ASP.NET Core metrics/meters, and telemetry pipelines. Follow ADRs strictly.</role>
+  <goal>No `Microsoft.ApplicationInsights.AspNetCore` reference or classic-SDK wiring remains; the OTel→Azure Monitor pipeline is the sole telemetry path; the 12 Meters + Redis instrumentation are confirmed registered in OTel; BFF builds green. (Live App-Insights verification happens on the non-prod slot in task 051.)</goal>
+
+  <context>
+    <background>design §6.4 + spec FR-06 + owner clarification (consolidate in this project). The BFF today double-instruments (classic App Insights SDK + Azure.Monitor.OpenTelemetry). The OTel→Azure Monitor pipeline is complete (redis-remediation R7-S7) — removing the classic SDK leaves a single, non-deprecated path. FR-06 is explicitly the NFR-01 carve-out (ADR Tensions table).</background>
+    <relevant-files>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Sprk.Bff.Api.csproj</file>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Program.cs</file>
+      <file role="canonical-reference">src/server/api/Sprk.Bff.Api/** (telemetry/meter registration + Redis instrumentation)</file>
+    </relevant-files>
+    <dependencies>
+      <dependency task="004" status="pending">BFF retargeted; Azure.Monitor.OTel bumped to §6.3 version.</dependency>
+    </dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="NFR-01">This is the SINGLE documented carve-out: a deliberate telemetry-pipeline change. Everything else stays zero-behavior-change. Record the carve-out in the PR description (ADR Tensions table).</constraint>
+    <constraint source="project">MUST confirm the 12 registered Meters + Redis instrumentation still emit via OTel before removing the classic SDK — do not create a telemetry gap.</constraint>
+    <constraint source="ADR-029">Package removal REDUCES publish surface — good; re-measure in task 031.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>OTel → Azure Monitor consolidation (drop classic App Insights SDK)</topic>
+    <files>
+      <file>projects/dotnet-10-upgrade-r1/spec.md</file>
+      <file>projects/dotnet-10-upgrade-r1/design.md</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+    </files>
+    <patterns>
+      <pattern name="otel-azure-monitor" location="src/server/api/Sprk.Bff.Api/Sprk.Bff.Api.csproj">Existing Azure.Monitor.OpenTelemetry.AspNetCore wiring (~lines 119-131) — the sole path after this task.</pattern>
+    </patterns>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="0" name="Context + rigor declaration">Load spec FR-06 + design §6.4 + the ADR Tensions carve-out. Declare RIGOR: FULL.</step>
+    <step order="1">Enumerate the 12 registered Meters + Redis instrumentation; confirm each is captured by the OTel pipeline (metric/trace registration).</step>
+    <step order="2">Remove `Microsoft.ApplicationInsights.AspNetCore` from the BFF csproj and delete classic-SDK wiring (e.g. `AddApplicationInsightsTelemetry`) from Program.cs / DI.</step>
+    <step order="3">Build BFF green; grep to confirm no classic-SDK references remain.</step>
+    <step order="4">Write the carve-out note for the PR (what changed, why, how it's validated on the slot in 051).</step>
+    <step order="5">Update `tasks/TASK-INDEX.md`: set 014 status to ✅.</step>
+    <step order="6">Document any deviation in `projects/dotnet-10-upgrade-r1/notes/`.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If any of the 12 Meters or Redis instrumentation is NOT covered by the OTel pipeline (i.e. removing the classic SDK would drop that signal), STOP and surface per CLAUDE.md §6.5 — the consolidation must not create a telemetry gap.</trigger>
+  </escalation>
+
+  <tools>
+    <tool name="dotnet">Build BFF</tool>
+  </tools>
+
+  <outputs>
+    <output type="config">src/server/api/Sprk.Bff.Api/Sprk.Bff.Api.csproj</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Program.cs</output>
+    <output type="doc">projects/dotnet-10-upgrade-r1/notes/fr06-telemetry-carveout.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">No `Microsoft.ApplicationInsights.AspNetCore` reference or classic-SDK wiring remains (grep-verified); BFF builds green.</criterion>
+    <criterion testable="true">The 12 registered Meters + Redis instrumentation are confirmed registered in the OTel pipeline.</criterion>
+    <criterion testable="true">The carve-out is documented for the PR (intentional telemetry change per the ADR Tensions table).</criterion>
+    <criterion testable="true">Negative: no OTHER behavior changes ride along with this task (telemetry-only).</criterion>
+  </acceptance-criteria>
+
+  <notes>spec FR-06 + NFR-01 carve-out. Live App-Insights confirmation (requests/deps/exceptions/Meters/Redis appear) is on the non-prod slot in task 051 — this task proves the wiring, 051 proves the signal.
+
+  COMPLETION (2026-08-12): Removed classic `Microsoft.ApplicationInsights.AspNetCore 2.23.0` from BFF csproj + all classic-SDK code from the ONLY consumer `Api/Agent/AgentTelemetry.cs` (dropped 2 usings + `TelemetryClient?` field/ctor-param + all dead `_telemetryClient?.TrackEvent/GetMetric` calls; kept every `_logger.Log*` + all public method signatures). **KEY FINDING (gap-free proof)**: `AddApplicationInsightsTelemetry()` was never called (only UseAzureMonitor, since redis-cache-remediation R7-S7) and `TelemetryClient` is registered NOWHERE → the optional ctor param bound `null` (why task 020's DI guard passed clean) → the classic emissions were ALREADY inert no-ops. Removing them drops NO live signal → escalation trigger did NOT fire. OTel pipeline `TelemetryModule.cs` UNTOUCHED: 10 custom `Sprk.Bff.Api.*` AddMeter calls + AddRedisInstrumentation + 3 tracing AddSource all intact; `UseAzureMonitor()` exporter + AzureMonitorGuard intact. (Program.cs comment/task say "12 Meters" — code registers 10 custom; nominal count is historical, material point holds.) BFF net10 Release GREEN (0 err, 21 warn = unchanged post-013 baseline). Package removal = strict publish-surface + CVE-surface reduction (formal re-baseline = task 031; post-004 vulnerable-clean state preserved). Telemetry-only; no other behavior change. Step 9.5 code-review + adr-check PASS (ADR-010/015/029; §10 removal → Placement Justification N/A; no §6.5). Left inert `Logging:ApplicationInsights` section in appsettings.Production.json.template (deploy config, harmless) + noted OTel-metric revival as an optional separate follow-up. Live-signal proof deferred to task 051 slot smoke. Carve-out doc (cite in PR ADR Tensions): `notes/fr06-telemetry-carveout.md`.</notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+  </execution>
+</task>

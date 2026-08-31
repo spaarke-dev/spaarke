@@ -90,7 +90,6 @@ public class ArchivalFlowTests
             Mock.Of<ICommunicationDataverseService>(),
             dvService,
             Mock.Of<IDocumentDataverseService>(),
-            speFileStore ?? null!,
             null!, // CommunicationAccountService — not tested here
             null!, // JobSubmissionService — not tested here
             Mock.Of<ICommunicationEnrichmentService>(),

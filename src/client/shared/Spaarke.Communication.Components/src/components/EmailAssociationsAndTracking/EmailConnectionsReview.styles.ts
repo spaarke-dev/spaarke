@@ -12,8 +12,22 @@ import { makeStyles, tokens } from '@fluentui/react-components';
 export const useConnectionsReviewStyles = makeStyles({
   root: { display: 'flex', flexDirection: 'column', gap: tokens.spacingVerticalM },
 
+  // Reconcile variant (owner UAT 2026-08-19, items 2a/2b/2c): the browse-shell tabs
+  // pane is unpadded and the Fields/Tasks tabs self-pad — so the Related-to tab must
+  // pad itself too, else its cards / "Look up another record" field / "New record"
+  // button sit flush against the pane's left edge and read as clipped. Matches the
+  // Field/Task tab roots' `spacingHorizontalM` inset. Default (email-form) variant is
+  // unpadded — its host provides the inset.
+  reconcilePad: { paddingInline: tokens.spacingHorizontalM, paddingTop: tokens.spacingVerticalM },
+
   // ── Cards + "Link another" on ONE row (link to the right — saves vertical space) ──
   cardsRow: { display: 'flex', gap: tokens.spacingHorizontalM, alignItems: 'flex-start', flexWrap: 'wrap' },
+
+  // ── Reconcile variant (owner UAT 2026-08-14): candidate cards STACK vertically as
+  //    full-width rows, exactly like the prototype's `tabBody > cand` list. NOT the
+  //    multi-column grid below — that produced a cramped horizontal strip (owner
+  //    screenshot 2026-08-14). Each compact card fills the row width. ──
+  cardsStack: { display: 'flex', flexDirection: 'column', gap: tokens.spacingVerticalM, minWidth: 0 },
 
   // ── Candidate card grid (3 across when wide; wraps on narrow panes) ──
   cards: {
@@ -98,6 +112,44 @@ export const useConnectionsReviewStyles = makeStyles({
     cursor: 'pointer',
     ':hover': { backgroundColor: tokens.colorNeutralBackground1Hover },
   },
+  // ── Compact (reconcile variant) candidate card — the prototype's single-row layout
+  //    (owner UAT 2026-08-14): `{name}` + `{type} · {n}% match` on the left, an inline
+  //    "Confirm" button on the right, content-height (NO 72px floor) so the cards are the
+  //    same compact size as the prototype. Selected/green highlight reuses the shared
+  //    cardSelected/cardPrimary border+fill classes.
+  candCompact: {
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: tokens.spacingHorizontalM,
+    minWidth: 0,
+    paddingBlock: tokens.spacingVerticalS,
+    paddingInline: tokens.spacingHorizontalM,
+    border: `${tokens.strokeWidthThin} solid ${tokens.colorNeutralStroke2}`,
+    borderRadius: tokens.borderRadiusMedium,
+    backgroundColor: tokens.colorNeutralBackground1,
+  },
+  compactMeta: {
+    display: 'flex',
+    flexDirection: 'column',
+    minWidth: 0,
+    flex: '1 1 auto',
+    cursor: 'pointer',
+  },
+  compactName: {
+    minWidth: 0,
+    overflow: 'hidden',
+    textOverflow: 'ellipsis',
+    whiteSpace: 'nowrap',
+    fontSize: tokens.fontSizeBase300,
+    fontWeight: tokens.fontWeightSemibold,
+    color: tokens.colorNeutralForeground1,
+  },
+  compactScore: {
+    fontSize: tokens.fontSizeBase200,
+    color: tokens.colorNeutralForeground3,
+  },
+
   // 🔵 Selected (requires-review pick) — brand border/fill.
   cardSelected: {
     border: `${tokens.strokeWidthThin} solid ${tokens.colorBrandStroke1}`,
@@ -212,6 +264,47 @@ export const useConnectionsReviewStyles = makeStyles({
     ':hover': { color: tokens.colorPaletteGreenForeground2, textDecorationLine: 'underline' },
   },
   chipRemove: { minWidth: 'auto', paddingInline: 0, height: '20px' },
+
+  // ── Reconcile variant (owner UAT round-3 2026-08-13) — prototype-parity layout ──
+  // "Look up another record" as a LABELLED FIELD (owner: "lookup record as more of a
+  // field"): a caption label above a full-width input-styled control that opens the
+  // record-type menu → host polymorphic picker. Reads like the prototype's
+  // `Field label="Look up another record"` row.
+  lookupField: { display: 'flex', flexDirection: 'column', gap: tokens.spacingVerticalXXS },
+  lookupFieldLabel: {
+    fontSize: tokens.fontSizeBase200,
+    fontWeight: tokens.fontWeightRegular,
+    color: tokens.colorNeutralForeground2,
+  },
+  // Input-look control: full width, neutral field surface + stroke, placeholder text
+  // left, search glyph right. A button (opens the type menu) styled as a text field.
+  lookupControl: {
+    boxSizing: 'border-box',
+    width: '100%',
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: tokens.spacingHorizontalS,
+    paddingBlock: tokens.spacingVerticalS,
+    paddingInline: tokens.spacingHorizontalM,
+    border: `${tokens.strokeWidthThin} solid ${tokens.colorNeutralStroke1}`,
+    borderRadius: tokens.borderRadiusMedium,
+    backgroundColor: tokens.colorNeutralBackground1,
+    cursor: 'pointer',
+    fontFamily: 'inherit',
+    ':hover': { backgroundColor: tokens.colorNeutralBackground1Hover },
+  },
+  lookupPlaceholder: {
+    minWidth: 0,
+    overflow: 'hidden',
+    textOverflow: 'ellipsis',
+    whiteSpace: 'nowrap',
+    fontSize: tokens.fontSizeBase300,
+    color: tokens.colorNeutralForeground3,
+  },
+  lookupControlIcon: { flexShrink: 0, color: tokens.colorBrandForeground1, fontSize: '20px' },
+  // "New record" as a FULL-WIDTH button (owner: "+New record as a full width button").
+  newRecordFullWidth: { width: '100%' },
 
   // ── Shared affordances ──
   actionsRow: { display: 'flex', alignItems: 'center', gap: tokens.spacingHorizontalS, flexWrap: 'wrap' },

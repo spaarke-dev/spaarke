@@ -174,6 +174,33 @@ public sealed class BindingCapabilityTool : AIFunction
     }
 
     /// <summary>
+    /// R4 UAT 2026-08-18 (Bug B): extracts the advisory grounded narration from a surface-launch
+    /// payload, if present. An ADVISORY READ capability (list-tasks / FR-01) that also surface-launches
+    /// stores its cited summary + recommendation as <c>{ "acknowledgement": &lt;narration&gt; }</c>
+    /// (<see cref="AdvisoryCapabilityRunner.AcknowledgementField"/>). Returns that string so the
+    /// text/agent path can RELAY it instead of discarding it behind the generic "surface opening"
+    /// message. CREATE-capability payloads (draftValues/resolvedLookups/…) carry no acknowledgement
+    /// field → returns null → the generic surface-launch message is kept (structural discriminator,
+    /// not a consumerType hardcode — ADR-039).
+    /// </summary>
+    internal static string? TryExtractAdvisoryNarration(JsonElement? payload)
+    {
+        if (payload is not JsonElement element || element.ValueKind != JsonValueKind.Object)
+        {
+            return null;
+        }
+
+        if (element.TryGetProperty(AdvisoryCapabilityRunner.AcknowledgementField, out var ack)
+            && ack.ValueKind == JsonValueKind.String)
+        {
+            var text = ack.GetString();
+            return string.IsNullOrWhiteSpace(text) ? null : text;
+        }
+
+        return null;
+    }
+
+    /// <summary>
     /// spaarkeai-compose-r2 — Model Y redirect target: the whole-document revise capability that
     /// edits a document already open in Compose. When invoked from the TEXT/agent path its
     /// full-document payload cannot render as an inline redline (that materialization is wired only
@@ -353,6 +380,31 @@ public sealed class BindingCapabilityTool : AIFunction
                         "[agent-turn.capability] surface_launch emitted — binding={BindingId} consumerType={ConsumerType} " +
                         "session={SessionId} hasPayload={HasPayload}",
                         _binding.BindingId, launchConsumerType, _sessionId, launchPayload is not null);
+
+                    // ── R4 UAT 2026-08-18 (Bug B): an ADVISORY READ capability (e.g. list-tasks, FR-01) ALSO
+                    // surface-launches, but its whole point is a GROUNDED, CITED summary + prioritized
+                    // recommendation that the AdvisoryCapabilityRunner assembled into the terminal payload
+                    // ({ "acknowledgement": <narration> }, ADR-040 store-before-render). The generic
+                    // "draft only" string below is for CREATE capabilities and would DISCARD that narration —
+                    // the P1 defect where the agent relayed "I opened your task list" instead of the grounded
+                    // answer. If the launch payload carries an acknowledgement narration, relay it so the agent
+                    // conveys the grounded summary faithfully; the Tasks tab still opens via the SSE above.
+                    // CREATE capabilities have no acknowledgement field → they keep the generic message
+                    // (structural discriminator, not a consumerType hardcode — ADR-039).
+                    var advisoryNarration = TryExtractAdvisoryNarration(launchPayload);
+                    if (!string.IsNullOrWhiteSpace(advisoryNarration))
+                    {
+                        var narration = advisoryNarration!;
+                        if (narration.Length > MaxResultChars)
+                        {
+                            narration = narration[..MaxResultChars] + "…[truncated]";
+                        }
+                        return $"The '{launchConsumerType}' capability produced this GROUNDED, cited answer for the user — " +
+                               "relay it faithfully and do NOT add, drop, or invent any fact, count, name, or date:\n\n" +
+                               narration +
+                               $"\n\nThe user's {launchConsumerType} view is ALSO opening in a workspace tab. This was a " +
+                               "READ-ONLY capability: do NOT invoke any write tool and do NOT claim you created or changed anything.";
+                    }
 
                     return $"A pre-seeded {launchConsumerType} surface is now opening for the user to review and " +
                            "complete. This capability produced a DRAFT only — it did NOT create, save, or modify any " +

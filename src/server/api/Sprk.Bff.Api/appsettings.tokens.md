@@ -1,5 +1,31 @@
 # AppSettings Token Reference
 
+> ## 🔴 Secret-free BFF identity — read before following any credential step on this page
+>
+> **2026-08-24, `spaarke-auth-v4-dataverse-MI` task 033 (ADR-028 **A4**; exception **E-3 CLOSED**).**
+> The BFF authenticates as a confidential client — **including on the OBO / delegated path** — using a
+> **federated credential issued to its user-assigned managed identity**. It holds **no client secret**.
+>
+> | Removed | |
+> |---|---|
+> | App settings | `API_CLIENT_SECRET`, `AzureAd__ClientSecret`, `Dataverse__ClientSecret`, `AgentToken__ClientSecret` |
+> | Key Vault | `BFF-API-ClientSecret`, `bff-api-client-secret`, and the orphaned `Graph-API-ClientSecret` |
+>
+> Set instead: `Graph__Credentials__Order__0=ManagedIdentityFederated` and
+> `Graph__Credentials__RequireSecretFreeIdentity=true`.
+>
+> **Do not re-create the secret.** A secret listed *beneath* MI-FIC in the order is worse than no migration:
+> a broken federated credential would fall through to it silently while every health signal stayed green.
+> With `RequireSecretFreeIdentity=true` the app **refuses to start** outside Development if `ClientSecret`
+> returns to the order.
+>
+> Any instruction below that tells you to create, store, reference or rotate a BFF client secret is
+> **superseded**. Still valid: ADR-028 **E-1** per-customer SPE owning-app secrets, and
+> `PowerBi:ClientSecret` while task 042 is deferred.
+> Canonical: [`ADR-028`](../../../../.claude/adr/ADR-028-spaarke-auth-architecture.md) ·
+> [`auth-deployment-setup.md`](../../../../docs/guides/auth-deployment-setup.md)
+
+
 This document describes the tokens used in `appsettings.template.json` for multi-tenant deployment.
 
 ## Token Format
@@ -26,7 +52,6 @@ Tokens use the format `#{TOKEN_NAME}#` which is compatible with Azure DevOps and
 | `#{INSIGHTS_INDEX_NAME}#` | AI Search derived-intelligence index (AllowedIndexes) | `spaarke-insights-index` |
 | `#{SESSION_FILES_INDEX_NAME}#` | AI Search session-scoped chat-upload index (AllowedIndexes) | `spaarke-session-files` |
 | `#{INVOICES_INDEX_NAME}#` | AI Search invoices index (AllowedIndexes) | `spaarke-invoices-index` |
-| `#{PLAYBOOK_EMBEDDINGS_INDEX_NAME}#` | AI Search playbook-embeddings index (AllowedIndexes) | `spaarke-playbook-embeddings` |
 | `#{DEPLOYMENT_ENVIRONMENT}#` | Environment name | `Development`, `Test`, `Production` |
 | `#{CUSTOMER_TENANT_ID}#` | Customer tenant for cross-tenant (or null) | `null` or GUID |
 | `#{RECORD_MATCHING_ENABLED}#` | Enable record matching (boolean) | `true` or `false` |
@@ -52,7 +77,7 @@ The template references these Key Vault secrets:
 | `ai-search-endpoint` | AI Search endpoint URL |
 | `ai-search-key` | AI Search admin key (legacy operational alias — mirrors AiSearch--AdminKey value) |
 | `AiSearch--AdminKey` | AI Search admin key (canonical per spec FR-21; added 2026-06-26 task 001 Option C remediation) |
-| `AzureAISearchApiKey` | AI Search admin key (legacy app-settings alias — mirrors AiSearch--AdminKey value; referenced by `AiSearch__ApiKeySecretName` + `AiSearch__ReferencesApiKey`) |
+| `AzureAISearchApiKey` | AI Search admin key (legacy app-settings alias — mirrors AiSearch--AdminKey value; referenced by `AiSearch__ReferencesApiKey`. The `AiSearch__ApiKeySecretName` reference was removed by auth-v4 task 053: the property it bound to was read by nothing) |
 | `PromptFlow-Endpoint` | AI Foundry Prompt Flow endpoint |
 | `PromptFlow-Key` | AI Foundry Prompt Flow API key |
 | `AppInsights-ConnectionString` | Application Insights connection string |
@@ -111,7 +136,6 @@ RAG_REFERENCES_INDEX_NAME=spaarke-rag-references
 INSIGHTS_INDEX_NAME=spaarke-insights-index
 SESSION_FILES_INDEX_NAME=spaarke-session-files
 INVOICES_INDEX_NAME=spaarke-invoices-index
-PLAYBOOK_EMBEDDINGS_INDEX_NAME=spaarke-playbook-embeddings
 DEPLOYMENT_ENVIRONMENT=Development
 CUSTOMER_TENANT_ID=null
 RECORD_MATCHING_ENABLED=false

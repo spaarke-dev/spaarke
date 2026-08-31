@@ -36,7 +36,7 @@ Spec `ci-cd-unit-test-remediation-r1` FR-B01..FR-B07 + design.md §§4–5 + SC-
 
 - Drop coverage-% MUST rules from both directive files.
 - Replace mock-first authoring template with integration-first.
-- Encode 7 KEEP path categories as MUST rules (deletion requires same-PR replacement). (Was 6; the `tests/integration/seam/**` vertical-slice-seam category was added 2026-07-09 by spaarke-ai-architecture-redesign-r2 E-40.)
+- Encode **8** KEEP path categories as MUST rules (deletion requires same-PR replacement). (Was 6; `tests/integration/seam/**` added 2026-07-09 by spaarke-ai-architecture-redesign-r2 E-40; **`tests/Spaarke.ArchTests/**` added 2026-08-24 by spaarke-auth-v4-dataverse-MI task 090 — see Amendment A1**.)
 - Ban specific antipatterns (`Mock<HttpMessageHandler>`, `Mock<IServiceClient>`, DI-registration tests, constructor null-checks).
 - Coverage measurement remains observable (tracked nightly via augmented `nightly-health.yml`), never gating.
 - Cultural reset binding for ≥6 months from 2026-06-26.
@@ -60,6 +60,7 @@ Tests under these paths are KEEP-protected. Deletion requires a same-PR replacem
 | `tests/integration/contract/**` | endpoint-contract | Endpoint HTTP contract: route + status + ProblemDetails + payload shape. "Every new endpoint = ≥1 integration test." |
 | `tests/integration/seam/**` | vertical-slice-seam | **(Added 2026-07-09 by spaarke-ai-architecture-redesign-r2 E-40.)** End-to-end vertical slice across an AI convergence seam (dispatch → input resolution → executor → ledger → disposition → render): exercises PRODUCTION types (`SessionDispatchOrchestrator`, `OutputRouter`, `ContextBinder`, `ChatSessionManager`) with only the LLM, catalog-data, and side-effect-transport boundaries doubled. A green contract-shape / router-unit test is **NOT** a substitute — this category exists precisely because the compose-disposition 422 shipped "done" at the router/unit layer while the admit-gate was un-widened (the "green contract-shape ≠ working slice" defect). The **definition-of-done for any dispatch-spine change** is a passing test here. |
 | `tests/unit/domain/**` | domain-logic | Pure domain logic — calculation / mapping / parsing / serialization / handler-internal orchestration |
+| `tests/Spaarke.ArchTests/**` | **structural-fitness-function** | **(Added 2026-08-24 by `spaarke-auth-v4-dataverse-MI` task 090 — Amendment A1.)** NetArchTest-style tests asserting an invariant over **source or assemblies** rather than runtime behavior (`LayerDependencyTests`, `ADR010_DITests`, `CredentialGuardTests`, `CredentialCensusTests`, `ServiceBusClientGuardTests`, `FabricatedResultGuardTests`). This is the category §7's bans B1–B5 *delegate to*: the "Some discovery loss" consequence below names "NetArchTest-style architecture tests at Tier 1" as the sanctioned replacement for what wiring tests used to catch. Until this row existed the ADR **prescribed** these tests and **failed to protect** them, so `/test-diet` classified every one as a path violation with no canonical path to move to — i.e. recommended deleting the mechanism the ADR requires. The behavioral heuristics do not apply here: a fitness function's **name states the invariant** (`NoSecretBearingConfidentialClientOutsideTheAllowlist`), not a `{Method}_{Scenario}_{ExpectedResult}` triple, and its "arrange" section is a source scan whose setup-to-assertion ratio is meaninglessly high. |
 
 ### 3. Coverage as observation, never gate
 
@@ -467,6 +468,35 @@ public async Task GetUserDto_InPublicContext_StripsPii()
 | B16 | Getter/setter/auto-property tests | C# guarantees the round-trip | Delete or test the validation logic |
 | B17 | Generated-code tests (records, AutoMapper, EF projections) | Tests the generator | One config-validity assertion + behavior tests on output |
 
+### Mechanical enforcement status (annex — added 2026-08-29 by `ci-cd-unit-test-remediation-r1` task CICD-094, issue #864)
+
+This annex records **fact, not policy**. All 17 bans remain MUST NOT for new tests regardless of the row
+below; what follows is only whether a build fails automatically when one is violated. No ban is weakened by
+appearing as "not enforced" — it moves the enforcement point to `/test-diet` and code review.
+
+**5 of 17 are enforced by a blocking Tier 1 guard** ([`tests/Spaarke.ArchTests/Adr038TestBanGuardTests.cs`](../../tests/Spaarke.ArchTests/Adr038TestBanGuardTests.cs)):
+
+| Enforced | Live count when armed | Armed by |
+|---|---|---|
+| **B1**, **B4** | 0, 0 | PR #865 (B4 reached zero via task CICD-083, which deleted 54 tests) |
+| **B3**, **B12**, **B16** | 1, 0, 3 — migrated in the same PR | task CICD-094 |
+
+**12 are not mechanically enforced**, for four distinct reasons:
+
+| Reason | Bans | Note |
+|---|---|---|
+| **No lexical signature exists** | B5, B6, B9 | B6 (mirror tests) asks whether a test asserts that an implementation does what it does — a claim about the relationship between two bodies of code. It needs a call graph, not a regex. Permanently `/test-diet` judgment. |
+| **Detector output is mostly noise** | B7, B10, B11, B14 | B10 measured **247 hits, 1 true positive**. Arming a rule whose failures are mostly wrong gets it suppressed, and real violations then ride in behind it. |
+| **Blocked on a production refactor** | B8 | **12 call sites in 10 files** invoke private production methods by reflection (corrected 2026-08-30 from an earlier under-count of 7/5). NOT a quick win: B8 bans `InternalsVisibleTo` as well as reflection, so the only compliant fix is giving the logic a public surface — a production refactor across several subsystems. Per-call-site inventory is in the census note. |
+| **Threshold undefined, or type absent** | B13, B15, B2, B17 | B13's live count spans **15 to 1,466** depending only on how strictly `{Method}_{Scenario}_{ExpectedResult}` is read; a guard would enforce the threshold rather than the ban. B2 (`IServiceClient`) and B17 (AutoMapper) name types this repo does not contain. |
+
+Full census with every count and its row-by-row adjudication:
+[`projects/ci-cd-unit-test-remediation-r1/notes/094-adr038-ban-census.md`](../../projects/ci-cd-unit-test-remediation-r1/notes/094-adr038-ban-census.md).
+
+> **Reading the counts.** A detector hit is not a violation until the row is read. Adjudication moved B12
+> from 9 to 0, B10 from 247 to 1, and B16 from 4 to 3 — always downward, never upward. The rule from spec
+> FR-B10 holds: **doubt = KEEP**.
+
 ### How this list is used
 
 1. **At authoring time** — `tests/CLAUDE.md` and `.claude/constraints/testing.md` cite this section; future Claude sessions reading the directives reject these patterns.
@@ -486,7 +516,7 @@ public async Task GetUserDto_InPublicContext_StripsPii()
 
 - **Reduced ability to "lift" coverage cheaply.** Teams accustomed to wiring tests will need to author integration tests (slower per test, higher value).
 - **Cultural change takes ≥6 months.** Per design.md §257, the test suite "growing back from integration + regression-driven additions" is the long-horizon outcome.
-- **Some discovery loss.** Wiring tests sometimes accidentally caught contract changes (e.g., DI-registration test would fail if a service was renamed). Replacement: NetArchTest-style architecture tests at Tier 1 plus endpoint-contract category at Tier 2/3.
+- **Some discovery loss.** Wiring tests sometimes accidentally caught contract changes (e.g., DI-registration test would fail if a service was renamed). Replacement: NetArchTest-style architecture tests at Tier 1 plus endpoint-contract category at Tier 2/3. **These now have a protected home** — `tests/Spaarke.ArchTests/**`, the eighth KEEP path (Amendment **A1**). Before A1 this sentence delegated to a category the ADR did not protect, which is how the replacement for the bans became a deletion candidate.
 - **Tenant-isolation count is currently 1.** Per task CICD-020 inventory: only 1 file in `tests/integration/tenant/**` post-reorg. This is a flag for regression-test-driven backfill over the ≥6-month cultural change window.
 
 ### Reversibility
@@ -507,3 +537,67 @@ This ADR is binding for ≥6 months from 2026-06-26. After that window, the next
 ## Non-supersession note
 
 ADR-022 ("PCF Platform Libraries — Field-Bound Controls Only", Frontend domain) is **unchanged** by this ADR. Earlier drafts of the `ci-cd-unit-test-remediation-r1` project misattributed coverage-% rules to ADR-022; that misattribution lives in `.claude/constraints/testing.md` line 25 and is fixed in the same project's task CICD-022. ADR-022 status remains Accepted; its scope (React 16/17 on PCF, platform-provided React) is independent of and orthogonal to testing strategy.
+
+---
+
+## Amendment A1 — `tests/Spaarke.ArchTests/**` is the eighth KEEP path (2026-08-24)
+
+**Raised by**: `spaarke-auth-v4-dataverse-MI` task 063 · **Ratified**: task 090 · **Path**: CLAUDE.md §6.5 **B** (amend the ADR)
+
+### The contradiction this closes
+
+This ADR contained both of the following, and they cannot both stand:
+
+| | |
+|---|---|
+| §7 bans **B1–B5** | forbid DI-registration tests, ctor null-check tests, `Mock<HttpMessageHandler>` wiring tests |
+| "Some discovery loss" consequence | names *"NetArchTest-style architecture tests at Tier 1"* as the **sanctioned replacement** for what those bans give up |
+| §2 KEEP paths | listed **7** categories — and `tests/Spaarke.ArchTests/**` was **not one of them** |
+
+So the ADR **prescribed** a category of test and **declined to protect** it. `/test-diet` — which this
+repo runs as a **mandatory gate at every project close** (root CLAUDE.md §7) — classifies anything outside
+a KEEP path as a path violation, and a path violation with no canonical destination becomes a delete
+recommendation. The gate therefore recommended deleting the exact mechanism the ADR requires, and a
+reviewer following the report faithfully would have removed it.
+
+### Why it survived from 2026-06-26 to 2026-08-24
+
+Task 063 found it and fixed the **symptom**: it added heuristic 0 to `/test-diet` and named the category in
+`tests/CLAUDE.md`. That worked, so the contradiction stopped hurting — and stopped being visible. The
+protection then lived in a skill file and a module directive, neither of which is the ADR, and both of
+which drift: the *same* task found `/test-diet`'s path list had also been missing `tests/integration/seam/**`
+since 2026-07-09, which had silently made **every vertical-slice-seam test in the repo** a delete candidate.
+
+A workaround that removes the pain also removes the pressure to fix the cause. That is the general lesson;
+this amendment is the specific correction.
+
+### The rule
+
+`tests/Spaarke.ArchTests/**` is a **KEEP path** with the same MUST force as the other seven: **deleting a
+file under it requires a same-PR replacement covering the same invariant.**
+
+**Category**: *structural fitness function* — asserts an invariant over **source or assemblies**, not over
+runtime behavior.
+
+**The behavioral heuristics do not apply to it**, and applying them produces confident nonsense:
+
+| Heuristic | Why it mis-fires here |
+|---|---|
+| **B13 naming** (`{Method}_{Scenario}_{ExpectedResult}`) | a fitness function's name states the **invariant** — `NoSecretBearingConfidentialClientOutsideTheAllowlist`. There is no "method under test" |
+| **B15 setup ratio** (>10:1 ⇒ scaffolding) | its "arrange" is a scan of the whole source tree; the ratio is meaninglessly high by construction |
+| **B3 wiring** (`GetRequiredService`) | a census/guard legitimately enumerates registrations to assert a *count* or an *absence*, which is the opposite of asserting that DI is wired |
+
+### Evidence that this category earns the protection
+
+Exercised on 2026-08-24 (graduation criterion 12): a deliberate ninth secret-bearing confidential client
+was seeded on a scratch branch, and `CredentialGuardTests` (**FR-F1**) and `CredentialCensusTests`
+(**FR-F2**) both failed, naming the offending `file:line`. Note the precise mechanism — **`dotnet build`
+succeeds; the ArchTests fail** — so the gate is CI (`sdap-ci.yml` `code-quality` job), not the compiler.
+
+### Scope and non-scope
+
+- **Does not** relax any of B1–B17 for tests *outside* this directory.
+- **Does not** make `tests/Spaarke.ArchTests/**` exempt from review — a fitness function can still be
+  wrong, redundant, or assert a rule nobody agreed to.
+- **Does** mean a `/test-diet` run that recommends deleting a file there is reporting a **classifier
+  defect**, not a finding.

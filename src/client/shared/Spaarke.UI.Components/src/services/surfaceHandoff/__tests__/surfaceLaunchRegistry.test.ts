@@ -40,6 +40,24 @@ describe('surfaceLaunchRegistry', () => {
     expect(entry!.title).toBe('Compose');
   });
 
+  it('resolves daily-briefing to the workspace layout-dispatcher surface (spaarkeai-assistant-enhancements-r4 task 022, FR-06)', () => {
+    const entry = resolveSurfaceLaunch('daily-briefing');
+    expect(entry).toBeDefined();
+    expect(entry!.kind).toBe('workspace-tab');
+    expect(entry!.surface).toBe('workspace'); // registered widget type (generic layout dispatcher)
+    expect(entry!.title).toBe('Daily Briefing');
+    expect(entry!.widgetData).toMatchObject({ layoutName: 'Daily Briefing' });
+  });
+
+  it('resolves smart-todo to the workspace layout-dispatcher surface (spaarkeai-assistant-enhancements-r4 task 022, FR-06)', () => {
+    const entry = resolveSurfaceLaunch('smart-todo');
+    expect(entry).toBeDefined();
+    expect(entry!.kind).toBe('workspace-tab');
+    expect(entry!.surface).toBe('workspace');
+    expect(entry!.title).toBe('Smart To Do');
+    expect(entry!.widgetData).toMatchObject({ layoutName: 'Smart To Do List' });
+  });
+
   it('returns undefined for unknown / empty consumerTypes (graceful, no throw)', () => {
     expect(resolveSurfaceLaunch('does-not-exist')).toBeUndefined();
     expect(resolveSurfaceLaunch('')).toBeUndefined();

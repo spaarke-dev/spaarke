@@ -13,3 +13,16 @@ export type {
   IKanbanDataverseService,
   KanbanOrientation,
 } from './kanban';
+
+// R5 FR-01 / task 002 — host-agnostic domain types for the hoisted rich
+// Smart To Do subtree (`components/SmartToDo/`).
+export type { ITodo, PriorityLevel, EffortLevel, ITodoKanbanPreferences, ITodoMutationResult } from './entities';
+export type {
+  ITodoScoringPriorityFactor,
+  ITodoScoringMultiplier,
+  ITodoPriorityScore,
+  ITodoEffortScore,
+  ITodoScoringAction,
+  ITodoScoringResult,
+  ITodoScoringEventContext,
+} from './todoScoringTypes';

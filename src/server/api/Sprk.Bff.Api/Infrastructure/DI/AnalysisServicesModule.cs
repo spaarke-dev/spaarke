@@ -130,6 +130,48 @@ public static class AnalysisServicesModule
         // unconditional registration (pattern precedent: EventRulesTelemetry above).
         services.AddSingleton<Sprk.Bff.Api.Telemetry.AiTelemetry>();
 
+        // ── Per-tenant token-budget enforcement (customer-provisioning-orchestration-r1 task 077,
+        //    D19 + spec.md FR-13 §M1/M2 + SC #13) ────────────────────────────────────────────────
+        // UNCONDITIONAL registration per ADR-032 F.1 (feature is opt-in via config, not DI gate).
+        // Pattern: options bound from configuration section 'TenantBudget'; ledger tracks month-
+        // to-date USD spend per tenant; policy reads ambient AiMeteringContext.TenantId + options
+        // + ledger to make the pre-call 429 decision.
+        // Design rationale: notes/per-tenant-metering-impl-2026-08-17.md (Phase A decision) —
+        // extends existing observability shipped by task 054 (AiTelemetry.RecordMeteredTokens),
+        // adds enforcement seam without duplicating any observability code (CLAUDE.md §11).
+        services.Configure<Services.Ai.Metering.TenantBudgetOptions>(
+            configuration.GetSection(Services.Ai.Metering.TenantBudgetOptions.SectionName));
+        services.AddSingleton<Services.Ai.Metering.ITenantTokenLedger,
+                              Services.Ai.Metering.InMemoryTenantTokenLedger>();
+        services.AddSingleton<Services.Ai.Metering.ITenantBudgetPolicy,
+                              Services.Ai.Metering.TenantBudgetPolicy>();
+
+        // task 024 (ADR-013 / BFF §10 bullet 3) — IFileSummarizeAi PublicContracts facade.
+        // TRULY UNCONDITIONAL, mirroring the always-mapped
+        // WorkspaceFileEndpoints.MapWorkspaceFileEndpoints (the non-AI /api/workspace/files/summarize
+        // endpoint now injects THIS facade instead of IActionResolver/IActionRunner directly, A-1).
+        // FileSummarizeAi wraps those Linear AI Consumer primitives, whose registrations are
+        // symmetric (real ActionResolver/ActionRunner under the compound AI gate via
+        // AddLinearConsumers; Null peers in AddNullObjectsForCompoundOff). So the facade's ctor
+        // resolves on BOTH the AI-ON path (real primitives) and the AI-OFF path (Null peers →
+        // FeatureDisabledException → the endpoint's 503 SSE-error pattern). Scoped to match
+        // IActionResolver's scoped lifetime (§F.1 asymmetric-registration rule, CLAUDE.md §10 F.1).
+        services.AddScoped<IFileSummarizeAi, FileSummarizeAi>();
+
+        // customer-provisioning-orchestration-r1 SESSION 5 (2026-08-24) — hoisted OUT of the
+        // documentIntelligenceEnabled/analysisEnabled compound gate below. Rationale (CLAUDE.md
+        // §10 F.1 asymmetric-registration rule): CommunicationRiActionService is registered
+        // UNCONDITIONALLY in CommunicationModule (line 195) and takes IActionSeam as a ctor
+        // dependency; when DocumentIntelligence is disabled (default on greenfield Model 1 Prod
+        // stand-up), the compound gate skips IActionSeam → SIGABRT at Host.StartAsync. The
+        // pattern precedent is IPinnedContextRepository (line 77 above), also "hotfix moved out
+        // of compound gate" for the same reason. Dependencies (IGenericEntityService +
+        // IFieldMappingDataverseService via GraphModule) are unconditional, so the hoist is
+        // safe (no captive dependency). The registration comment ORIGINALLY (line 1421) claimed
+        // "Registered UNCONDITIONALLY" but the code placed it inside the compound gate — this
+        // hoist reconciles code with the documented intent.
+        services.AddSingleton<Sprk.Bff.Api.Services.Ai.PublicContracts.IActionSeam, Sprk.Bff.Api.Services.Ai.PublicContracts.ActionSeam>();
+
         var documentIntelligenceEnabled = configuration.GetValue<bool>("DocumentIntelligence:Enabled");
         if (documentIntelligenceEnabled)
         {
@@ -165,15 +207,21 @@ public static class AnalysisServicesModule
             // PromptSchemaRenderer, IScopeResolverService, AnalysisDocumentLoader,
             // ITextExtractor, IRagService).
             //
-            // §F.1 asymmetric-registration audit (static scan run 2026-07-05):
-            //  - IActionResolver/IActionRunner — consumed by WorkspaceFileEndpoints.HandleSummarize
-            //    (MapWorkspaceFileEndpoints is UNCONDITIONAL) → Null executor-primitive peers
-            //    registered in AddNullObjectsForCompoundOff (P3 subclass).
+            // §F.1 asymmetric-registration audit (static scan run 2026-07-05; refreshed task 024):
+            //  - IActionResolver/IActionRunner — consumed by the IFileSummarizeAi facade
+            //    (FileSummarizeAi, registered UNCONDITIONALLY above) behind
+            //    WorkspaceFileEndpoints.HandleSummarize (MapWorkspaceFileEndpoints is
+            //    UNCONDITIONAL). Per task 024 (ADR-013 / BFF §10 bullet 3) the endpoint no longer
+            //    injects the primitives directly — the facade does. The Null executor-primitive
+            //    peers in AddNullObjectsForCompoundOff (P3 subclass) are STILL required so the
+            //    unconditional facade resolves on the compound-OFF path (→ FeatureDisabledException
+            //    → the endpoint's 503 SSE-error pattern).
             //  - the document-profile pipeline — consumed only by AnalysisEndpoints
             //    (MapAnalysisEndpoints is INSIDE the same compound gate) → symmetric; no peer.
-            //  - IActionResolver / IActionRunner — consumed by Matter/ProjectPreFillService as
-            //    OPTIONAL nullable ctor params (= null default) → ADR-032 "optional-via-null-
-            //    tolerance" exemption; no peer.
+            //  - IActionResolver / IActionRunner — Matter/ProjectPreFillService NO LONGER inject
+            //    these (task 024, A-2/A-3): they route the linear path through
+            //    IWorkspacePrefillAi.RunPrefillActionAsync (which has its own P3 Null peer,
+            //    NullWorkspacePrefillAi) → covered by that facade's symmetry; no separate peer.
             //  - IDocumentTextSource / ISessionFileTextSource — transitively conditional
             //    (consumed only by gated LinearConsumers services + compound-ON
             //    the dispatch seam) → no peer.
@@ -368,12 +416,21 @@ public static class AnalysisServicesModule
         // compound AI gate (AddPlaybookServices). When AI is OFF, GetService returns
         // null and ChatSessionManager's fire-and-forget signal call short-circuits.
         // Back-compat preserved for existing call sites and unit tests.
+        //
+        // spaarkeai-compose-r8 FR-B06 (task 063) — SessionFileBlobStore is the durable byte store whose
+        // copies DeleteSessionAsync must erase. NOT a new registration: AiPersistenceModule already
+        // registers it UNCONDITIONALLY (ADR-032 P1), so this is a new EDGE in the graph and the ADR-010
+        // budget delta for task 063 is ZERO. GetService (not GetRequiredService) mirrors the two
+        // nullable injections above and keeps this factory resolvable in hosts that compose this module
+        // without AiPersistenceModule; a null store degrades to StoreDisabled, which is the same outcome
+        // an unconfigured deployment produces — never a silent success claim.
         services.AddScoped<ChatSessionManager>(sp => new ChatSessionManager(
             cache: sp.GetRequiredService<Sprk.Bff.Api.Infrastructure.Cache.ITenantCache>(),
             dataverseRepository: sp.GetRequiredService<IChatDataverseRepository>(),
             logger: sp.GetRequiredService<Microsoft.Extensions.Logging.ILogger<ChatSessionManager>>(),
             persistence: sp.GetService<Sprk.Bff.Api.Services.Ai.Sessions.ISessionPersistenceService>(),
-            cleanupSignal: sp.GetService<Sprk.Bff.Api.Services.Ai.Chat.ISessionFilesCleanupSignal>()));
+            cleanupSignal: sp.GetService<Sprk.Bff.Api.Services.Ai.Chat.ISessionFilesCleanupSignal>(),
+            durableFileStore: sp.GetService<Sprk.Bff.Api.Services.Ai.Sessions.SessionFileBlobStore>()));
 
         // B5 — ChatHistoryManager (deps: ChatSessionManager + IChatDataverseRepository + ILogger — all unconditional).
         services.AddScoped<ChatHistoryManager>();
@@ -463,6 +520,26 @@ public static class AnalysisServicesModule
         // maps unconditionally; real impl registers in AddDeliveryServices (compound-ON only). Null peer
         // resolves templates to not-found (clean 404), never a DI 500.
         services.AddSingleton<IComposeTemplateSource, Sprk.Bff.Api.Services.Ai.PublicContracts.NullComposeTemplateSource>();
+
+        // §F.1 — IEmailTemplateService compound-OFF peer (email-communication-intelligence-r2 UAT).
+        // POST /api/communications/template/render (CommunicationTemplateEndpoints) maps UNCONDITIONALLY,
+        // but the real EmailTemplateService registers in AddDeliveryServices (compound-ON only). Without
+        // this peer a compound-OFF host CRASHES AT STARTUP — AuthorizationPolicyCache eagerly enumerates
+        // endpoints and RequestDelegateFactory throws "Failure to infer one or more parameters"
+        // (emailTemplateService). Null peer resolves renders to a failed result → the endpoint's clean
+        // 404/400 path. Same LATENT-BUG shape as the NullComposeTemplateSource peer above.
+        services.AddSingleton<Sprk.Bff.Api.Services.Ai.Delivery.IEmailTemplateService,
+            Sprk.Bff.Api.Services.Ai.Delivery.NullEmailTemplateService>();
+
+        // §F.1 — IEmailDraftAi compound-OFF peer (email-communication-intelligence-r2 UAT).
+        // POST /api/communications/draft (CommunicationDraftEndpoints) maps UNCONDITIONALLY. IEmailDraftAi
+        // registers ONLY inside AddAiModule — which is itself called inside the compound gate
+        // (AnalysisServicesModule ~L202) — so AddAiModule's own gate-off else (NullEmailDraftAi) is
+        // UNREACHABLE when the compound gate is off (AddAiModule never runs). Register the same existing
+        // NullEmailDraftAi here so the facade is resolvable on the compound-OFF path (same crash shape as
+        // emailTemplateService above).
+        services.AddScoped<Sprk.Bff.Api.Services.Ai.PublicContracts.IEmailDraftAi,
+            Sprk.Bff.Api.Services.Ai.PublicContracts.NullEmailDraftAi>();
 
         // Task 040 (spaarkeai-compose-r6, FR-06) — IComposePdfIntakeSource compound-OFF peer (§F.1):
         // the Compose load endpoint maps unconditionally; real impl registers in the compound-ON
@@ -560,7 +637,9 @@ public static class AnalysisServicesModule
         // these peers, minimal-API parameter inference aborts host startup when the
         // compound AI gate is OFF. The endpoint's catch (FeatureDisabledException) emits
         // the SSE error chunk / 503 pattern.
-        services.AddSingleton<IActionResolver, NullActionResolver>();
+        // IActionResolver Null peer is Scoped to stay symmetric with the real ActionResolver
+        // (demoted to Scoped in dotnet-10-upgrade task 020, R5 / ADR-032 lifetime symmetry).
+        services.AddScoped<IActionResolver, NullActionResolver>();
         services.AddSingleton<IActionRunner, NullActionRunner>();
 
         // B6 — IPlaybookService (P3 Fail-Fast). Real impl registered in AddPlaybookServices as typed HttpClient.
@@ -924,6 +1003,18 @@ public static class AnalysisServicesModule
         services.AddScoped<Sprk.Bff.Api.Services.Ai.Context.IContextBinder,
                            Sprk.Bff.Api.Services.Ai.Context.ContextBinder>();
         Console.WriteLine("✓ ContextBinder registered (ADR-043 E-10 input-resolution seam; ContextEnvelope + operand; task-038 fingerprint writer)");
+
+        // IAdvisoryCapabilityRunner — the E1 advisory grounded-recommend tier runner (task 012,
+        // FR-01/FR-02). Consumed ONLY by the concrete SessionDispatchOrchestrator (an OPTIONAL ctor dep)
+        // in THIS compound-ON block; the compound-OFF path resolves NullSessionDispatchOrchestrator
+        // (logger-only ctor) which never touches it → transitively conditional, no ADR-032 Null peer
+        // needed (same rationale as IOutputRouter below). Depends on the REAL SprkChatAgentFactory
+        // (registered in this block, overriding the B2 NullSprkChatAgentFactory default) to build the
+        // nested bounded advisory turn. Singleton: no per-request state (the factory owns per-turn
+        // scoping); resolved fine by the Scoped orchestrator.
+        services.AddSingleton<Sprk.Bff.Api.Services.Ai.Chat.IAdvisoryCapabilityRunner,
+                              Sprk.Bff.Api.Services.Ai.Chat.AdvisoryCapabilityRunner>();
+        Console.WriteLine("✓ AdvisoryCapabilityRunner registered (task 012 FR-01/FR-02; advisory nested-turn grounded-recommend tier)");
 
         services.AddScoped<Sprk.Bff.Api.Services.Ai.Chat.SessionDispatchOrchestrator>();
         Console.WriteLine("✓ SessionDispatchOrchestrator registered (FR-P1-04 Click path; binding-id catalog dispatch; ADR-040 ledger-before-render)");
@@ -1360,13 +1451,13 @@ public static class AnalysisServicesModule
         services.AddSingleton<Sprk.Bff.Api.Services.Ai.Nodes.INodeExecutor, Sprk.Bff.Api.Services.Ai.Nodes.CreateNotificationNodeExecutor>();
         services.AddSingleton<Sprk.Bff.Api.Services.Ai.Nodes.INodeExecutor, Sprk.Bff.Api.Services.Ai.Nodes.QueryDataverseNodeExecutor>();
 
-        // IActionSeam (task 031 / FR-07, ADR-013) — session-agnostic Layer-A record actions
-        // (CreateNotification / CreateTask / UpdateRecord) that share the SAME extracted cores the
-        // three node executors call. Registered UNCONDITIONALLY: record creation is not AI-model-gated,
-        // so — unlike IBriefingAi — it needs no Null-Object fallback. Singleton matches the executors'
-        // profile (its deps IGenericEntityService/IFieldMappingDataverseService/IServiceScopeFactory
-        // are all Singleton). Consumed by Phase 4/5 producers via this facade only (never the executors).
-        services.AddSingleton<Sprk.Bff.Api.Services.Ai.PublicContracts.IActionSeam, Sprk.Bff.Api.Services.Ai.PublicContracts.ActionSeam>();
+        // IActionSeam registration MOVED OUT of this compound gate to the top-of-module
+        // unconditional block (see hoist ~line 160, customer-provisioning-orchestration-r1
+        // SESSION 5, 2026-08-24). CommunicationRiActionService requires IActionSeam
+        // unconditionally per CommunicationModule.cs:195 — leaving the registration inside
+        // this gate created SIGABRT at Host.StartAsync when DocumentIntelligence was disabled.
+        // Intentionally NOT re-registering here — DI is duplicate-safe for Singletons, but the
+        // top-of-module hoist is the single source of truth per CLAUDE.md §10 F.1.
 
         // AgentServiceNodeExecutor — ExecutorType.AgentService = 60 (Phase 2, ADR-010, AIPU-061).
         // Requires AgentServiceClient singleton (AIPU-060). Kill switch: AgentService:Enabled.
@@ -1554,14 +1645,28 @@ public static class AnalysisServicesModule
     private static void AddRagServices(IServiceCollection services, IConfiguration configuration)
     {
         var docIntelOptions = configuration.GetSection(DocumentIntelligenceOptions.SectionName).Get<DocumentIntelligenceOptions>();
-        if (!string.IsNullOrEmpty(docIntelOptions?.AiSearchEndpoint) && !string.IsNullOrEmpty(docIntelOptions?.AiSearchKey))
+        // auth-v4 task 053 (FR-E4): the gate is the ENDPOINT, not the key.
+        //
+        // It previously read `endpoint != null && key != null`, which made the ADMIN KEY'S PRESENCE
+        // the feature flag for this entire block - SearchIndexClient plus IRagService,
+        // IFileIndexingService, IKnowledgeDeploymentService, IEmbeddingCache and IVisualizationService.
+        // Clearing the key to finish the Entra migration would therefore not have degraded retrieval;
+        // it would have SILENTLY UN-REGISTERED six services at startup, and every consumer would have
+        // failed with an unrelated "service not registered" error. That is the asymmetric-registration
+        // anti-pattern (CLAUDE.md 10 F.1 / ADR-032) and the same shape as this project's own FR-A1
+        // finding, where secret *presence* selected the Dataverse auth path.
+        //
+        // Gating on the endpoint keeps registration symmetric across both credential modes: with Entra
+        // selected and no key configured, RAG still registers and an auth problem surfaces as an auth
+        // error at call time instead of a missing dependency at startup.
+        if (!string.IsNullOrEmpty(docIntelOptions?.AiSearchEndpoint))
         {
             services.AddSingleton(sp =>
-            {
-                return new Azure.Search.Documents.Indexes.SearchIndexClient(
+                Sprk.Bff.Api.Infrastructure.Auth.SearchClientFactory.CreateIndexClient(
                     new Uri(docIntelOptions.AiSearchEndpoint),
-                    new Azure.AzureKeyCredential(docIntelOptions.AiSearchKey));
-            });
+                    docIntelOptions.AiSearchKey,
+                    sp.GetRequiredService<IConfiguration>(),
+                    sp.GetRequiredService<Azure.Core.TokenCredential>()));
 
             services.AddSingleton<IKnowledgeDeploymentService, KnowledgeDeploymentService>();
             services.AddSingleton<IEmbeddingCache, EmbeddingCache>();

@@ -1,3 +1,4 @@
+using Sprk.Bff.Api.Infrastructure.Authentication;
 using System.Security.Claims;
 using Sprk.Bff.Api.Infrastructure.Errors;
 
@@ -134,9 +135,7 @@ public class ReportingAuthorizationFilter : IEndpointFilter
         // ── Check 2: User Authentication ─────────────────────────────────────────────────
         // Base JWT authentication middleware must already have run. Verify identity is present.
         var user = httpContext.User;
-        var userId = user.FindFirst("oid")?.Value
-            ?? user.FindFirst("http://schemas.microsoft.com/identity/claims/objectidentifier")?.Value
-            ?? user.FindFirst(ClaimTypes.NameIdentifier)?.Value;
+        var userId = CallerResolution.ResolveObjectId(user);
 
         if (string.IsNullOrEmpty(userId) || user.Identity?.IsAuthenticated is not true)
         {

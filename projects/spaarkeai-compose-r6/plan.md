@@ -1,7 +1,7 @@
 # PLAN — Spaarke Compose R6: Render-on-Save Canonical Model & Word-Parity Fidelity
 
 > **Source**: [`spec.md`](spec.md) · **Design**: [`design.md`](design.md)
-> **Status**: Ready for task decomposition
+> **Status**: ✅ Complete (closed 2026-08-13 — 30/30 tasks; all 6 Success Criteria met; see README changelog)
 > **Governing ADR**: [ADR-049](../../.claude/adr/ADR-049-compose-shadow-document.md) — **Path-B amendment (task 001)**
 > **Hot-path**: BFF=Y · SpaarkeAi=Y · CI=Y · Skills=N (task 001 authors the ADR amendment — main-session only) · root-CLAUDE=N
 

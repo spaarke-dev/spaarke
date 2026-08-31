@@ -1,0 +1,96 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="023" project="customer-provisioning-orchestration-r1">
+  <metadata>
+    <title>Extend sprk_dataverseenvironment with 12 new columns (registry schema v3.3)</title>
+    <phase>C Wave C1 — Registry Schema + Cosmos Model</phase>
+    <gate>startable</gate>
+    <status>not-started</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Dataverse schema change on the central customer-registry table; downstream consumers (L2 control plane, upgrade-mode preflight, tenancy-driven Bicep composition, cache-bust token) all read these columns — task-create Step 3.5.5 FULL (dataverse tag + creates new surface + &gt;3 downstream deps).</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Mechanical solution-component authoring against a well-established Dataverse alt-key/column pattern; no architectural judgment — spec.md §Assumptions "Sonnet 5 @ high for Dataverse solution + Cosmos schema".</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>waveC1-parallel</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <deps>none</deps>
+    <tags>dataverse, solution, fields, schema, registry</tags>
+    <estimated-effort>3-5 hours</estimated-effort>
+  </metadata>
+
+  <prompt>Extend the sprk_dataverseenvironment entity in src/dataverse/solutions/spaarke_core/** with the 12 new columns enumerated in design.md §6.1: the 6 v3/v3.3 additions (sprk_currentrunid, sprk_tenancymodel [Choice: Model1Shared/Model2Dedicated], sprk_tenantid, sprk_bffversion, sprk_solutionversion, sprk_ClientCacheBustToken) plus the 6 v2 additions carried through v3 (sprk_azuresubscriptionid, sprk_resourcegroupname, sprk_appservicename, sprk_keyvaultname, sprk_containertypeid, sprk_provisionedon). Include a datatype/length/required/description spec per column that matches the design and preserves existing 16-column data. **Count reconciliation**: spec.md FR-26 says "11 new columns" but enumerates 12 items (discovery report notes/resource-discovery-2026-08-16.md §9). At completion, ALSO reconcile spec.md FR-26 + spec.md scope § affected areas + plan.md Wave C1 + CLAUDE.md § MUST Rules to say "12 new columns" (was "11 new columns" — off-by-one from missing `sprk_provisionedon` from the enumeration).</prompt>
+  <role>SPAARKE platform developer with Dataverse solution-component authoring expertise (Entities/*/FormXml, Entities/*/Entity.xml, Choice option-set definitions). Follow ADR-044 GUID canonicalization for lookup/key columns. Author for durability — this is the customer registry every provisioning run depends on.</role>
+  <goal>The sprk_dataverseenvironment entity in the spaarke_core solution declares all 12 new columns with correct data types, correct required-level, correct display names, correct schema names (design.md §6.1); the solution can be exported/imported without breaking existing 16-column rows; sprk_tenancymodel option-set has integers + labels for Model1Shared and Model2Dedicated; spec.md/plan.md/CLAUDE.md doc-reconciliation commit updates "11 new columns" → "12 new columns" throughout.</goal>
+
+  <context>
+    <background>Spec FR-26 + design.md §6.1: v3 requires per-customer serialization (sprk_currentrunid — I5 concurrency), tenancy-driven Bicep composition (sprk_tenancymodel + sprk_tenantid), version-compatibility matrix enforcement (sprk_bffversion + sprk_solutionversion), and upgrade cache-bust (sprk_ClientCacheBustToken). Without these columns there is no per-customer serialization, no tier-driven pipeline, and no upgrade-mode preflight. spec.md § New Components table row 11 documents extension IS the pattern (6 columns net-new v3.3; 6 columns rolled forward from v2 including sprk_provisionedon). ⚠ Count discrepancy: spec.md FR-26 says "11 new columns" but enumerates 12; this task reconciles that mismatch (per discovery report §9).</background>
+    <relevant-files>
+      <file role="modify">src/dataverse/solutions/spaarke_core/Entities/</file>
+      <file role="modify">src/dataverse/solutions/spaarke_core/Other/Solution.xml</file>
+      <file role="canonical-reference">src/server/api/Sprk.Bff.Api/Services/Registration/DataverseEnvironmentRecord.cs</file>
+      <file role="canonical-reference">src/server/api/Sprk.Bff.Api/Services/Registration/DataverseEnvironmentService.cs</file>
+      <file role="canonical-reference">src/server/api/Sprk.Bff.Api/Services/Registration/RegistrationDataverseService.cs</file>
+    </relevant-files>
+    <dependencies>
+      <dependency task="none" status="complete">No prerequisite r1 task — this is a Phase C Wave C1 kickoff task; Phase A registry-column-audit at notes/registry-column-audit-2026-08.md confirms none of the 11 columns exist today.</dependency>
+    </dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-044">Scope: any new lookup/key column on sprk_dataverseenvironment (sprk_currentrunid, sprk_tenantid, sprk_azuresubscriptionid) MUST follow ADR-044 GUID canonicalization — store canonical string form; never mix casing / dash conventions in downstream consumers.</constraint>
+    <constraint source="spec">Scope (this task only): dataverse solution-component authoring — do NOT add any code path that reads/writes these columns beyond what already exists in DataverseEnvironmentRecord.cs; consumers land in later tasks (H0 preflight, H2a Bicep composition, H12c runtime refs).</constraint>
+    <constraint source="spec">FR-26 acceptance: solution import creates all 12 columns (reconciled count — spec FR-26 says "11" but design §6.1 enumerates 12 including sprk_provisionedon); existing rows migrate cleanly; sprk_tenantid is populated later from H0.5 or run params — this task does NOT backfill data.</constraint>
+    <constraint source="project">MUST NOT change the schema name / display name / data type of any of the existing 16 columns — the extension is additive-only per FR-26.</constraint>
+    <constraint source="project">MUST provide a description on every new column citing the FR (e.g. "FR-26 v3.3 — per-customer serialization guard (§4D I5)") so future readers can trace intent.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>Dataverse solution-component authoring; sprk_dataverseenvironment registry extension</topic>
+    <files>
+      <file>projects/customer-provisioning-orchestration-r1/spec.md</file>
+      <file>projects/customer-provisioning-orchestration-r1/design.md</file>
+      <file>projects/customer-provisioning-orchestration-r1/CLAUDE.md</file>
+      <file>.claude/adr/ADR-044-dataverse-guid-canonicalization.md</file>
+      <file>.claude/constraints/data.md</file>
+      <file>.claude/patterns/dataverse/</file>
+    </files>
+    <patterns>
+      <pattern name="Existing sprk_dataverseenvironment consumers" location="src/server/api/Sprk.Bff.Api/Services/Registration/DataverseEnvironmentRecord.cs">Mirror the naming + type conventions of the existing 16 columns; new columns should extend the same POCO in a later task.</pattern>
+    </patterns>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="0" name="Context + rigor declaration">Output the RIGOR LEVEL declaration (FULL + reason). Load spec.md FR-26, design.md §6.1, ADR-044, CLAUDE.md, Phase A registry-column-audit notes.</step>
+    <step order="1">Enumerate the 12 columns with data type / length / required / description / display name / schema name; cross-check against DataverseEnvironmentRecord.cs to confirm none collide with existing 16 columns. Include sprk_provisionedon (DateTime, v2 addition; missed by spec.md FR-26's "11 new columns" enumeration — discovery report §9).</step>
+    <step order="2">Author the sprk_tenancymodel option-set as a global-or-local Choice with (0=Model1Shared, 1=Model2Dedicated) plus labels; place under the solution's option-set definition location.</step>
+    <step order="3">Add each of the 12 columns to the sprk_dataverseenvironment Entity.xml under src/dataverse/solutions/spaarke_core/Entities/**; ensure Solution.xml component list includes them.</step>
+    <step order="4">Add a column-level description on each new column citing the FR and section (e.g. FR-26 §4D I5, §14A version-compat).</step>
+    <step order="5">Verify by mock-pack (or PAC CLI unpack/pack round-trip) — solution files must parse cleanly.</step>
+    <step order="6">Update TASK-INDEX.md: set this task's status to ✅.</step>
+    <step order="7">Document any deviation (e.g. columns already partially present) in projects/customer-provisioning-orchestration-r1/notes/.</step>
+  </steps>
+
+  <justification>
+    <existing>sprk_dataverseenvironment already exists with 16 columns (5 v2 additions confirmed above via Grep of Sprk.Bff.Api/Services/Registration/**). No column matches any of the 11 new names (spec.md § New Components table row 11 states "Existing 16-column entity per r1 registration flow"; Phase A audit notes/registry-column-audit-2026-08.md is the pending evidence).</existing>
+    <extension>Yes — extending IS the pattern per spec.md § New Components. 5 columns are net-new v3.3; the other 6 are v2-rolled-forward. All add to an existing entity; no new entity introduced.</extension>
+    <cost-of-doing-nothing>Without sprk_currentrunid there is no per-customer serialization (§4D I5) — concurrent same-customer provisioning runs race the registry with no 409 signal. Without sprk_tenancymodel + sprk_tenantid, H2a Bicep cannot compose the correct stack for Model 1 vs Model 2 (§3A A1). Without sprk_bffversion + sprk_solutionversion, H0 upgrade-mode preflight has no data to query against the version-compatibility matrix (§14A). Without sprk_ClientCacheBustToken, client caches serve stale bundles after every deploy.</cost-of-doing-nothing>
+  </justification>
+
+  <outputs>
+    <output type="code">src/dataverse/solutions/spaarke_core/Entities/sprk_dataverseenvironment/Entity.xml</output>
+    <output type="code">src/dataverse/solutions/spaarke_core/Other/Solution.xml</output>
+    <output type="doc">projects/customer-provisioning-orchestration-r1/notes/registry-column-audit-2026-08.md (updated with executed column list)</output>
+    <output type="doc">Doc-reconciliation commit updating spec.md FR-26 + spec.md scope § affected areas + plan.md Wave C1 + CLAUDE.md § MUST Rules from "11 new columns" to "12 new columns" (per discovery report §9)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Given the modified spaarke_core solution, unpack/pack round-trip via PAC CLI succeeds with 0 validation errors.</criterion>
+    <criterion testable="true">Given the entity XML, all 12 new columns are present with the exact schema names in design.md §6.1 (reconciled from spec.md FR-26 "11 new columns" — see task prompt count reconciliation); no existing column is renamed / retyped.</criterion>
+    <criterion testable="true">Given the option-set XML, sprk_tenancymodel enumerates exactly 2 values (Model1Shared=0, Model2Dedicated=1).</criterion>
+    <criterion testable="true">Every new column has a description citing its FR (e.g. "FR-26 §4D I5 concurrency guard").</criterion>
+    <criterion testable="true">Negative: no data path (BFF or L2) reads/writes the new columns yet — this task is schema-only per Step 2 constraint.</criterion>
+  </acceptance-criteria>
+
+  <notes>Maps spec.md FR-26 + design.md §6.1. The sprk_currentrunid + sprk_tenancymodel + sprk_tenantid columns feed Wave C5's optimistic-concurrency guard + Wave C2's tenancy-driven Bicep composition. Register schema-name changes in projects/customer-provisioning-orchestration-r1/notes/registry-column-audit-2026-08.md as they are chosen (case matters — Dataverse is case-insensitive but our conventions are lowercase).</notes>
+
+  <execution><skill>.claude/skills/task-execute/SKILL.md</skill></execution>
+</task>

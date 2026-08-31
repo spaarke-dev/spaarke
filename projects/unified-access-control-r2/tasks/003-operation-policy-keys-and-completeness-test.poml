@@ -1,0 +1,127 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="003" project="unified-access-control-r2">
+  <metadata>
+    <title>FR-03: Register missing OperationAccessPolicy keys + call-site completeness test</title>
+    <phase>0 Enforcement Remediation</phase>
+    <gate>after-001</gate>
+    <status>completed</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Modifies .cs on an authorization path (Spaarke.Core/Auth) and adds tests — FULL per root CLAUDE.md §8 (auth tag + TEST-MODIFYING override).</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>The missing keys and every call-site are exhaustively enumerated in finding A-20; implementation is mechanical against a closed list.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Touches src/server/shared/Spaarke.Core/Auth/** — a known contended path (task 004 modifies AuthorizationService.cs in the same directory).</parallel-reason>
+    <deps>001</deps>
+    <tags>bff-api, auth, security, testing</tags>
+    <estimated-effort>3-4 hours</estimated-effort>
+  </metadata>
+
+  <prompt>Close findings A-3/A-20 policy-key half (spec FR-03, High): every operation string passed to an authorization filter must exist in OperationAccessPolicy, and an automated completeness test must keep it that way. Today "read", "finance.read", "finance.confirm", and "entity.associate_document" are absent, so OperationAccessRule unconditionally denies those endpoints ("unknown_operation").</prompt>
+  <role>SPAARKE platform developer. Expert in the Spaarke.Core authorization seams (OperationAccessPolicy / OperationAccessRule) and xUnit. Follow ADRs strictly.</role>
+  <goal>All four missing operation keys resolve in OperationAccessPolicy with least-privilege rights, and a completeness test enumerates every authorization-filter call-site operation string and asserts each resolves — so a future unregistered key fails the build, not production.</goal>
+
+  <context>
+    <background>Finding A-20 (10-finding-confirmations.md) enumerated every operation string reaching AuthorizationService/OperationAccessRule against OperationAccessPolicy._operationRequirements (OperationAccessPolicy.cs:25-149). OperationAccessRule.EvaluateAsync:35-46 denies any unknown operation. Complete always-deny list: "finance.read" → FinanceEndpoints.cs:18,:51,:65; "finance.confirm" → FinanceEndpoints.cs:23,:37; "entity.associate_document" → EntityAccessFilter.cs:64 attached at OfficeEndpoints.cs:173; "read" → DataverseDocumentsEndpoints.cs:443, FileAccessEndpoints.cs:118 (eml-render), ChatDocumentEndpoints.cs:915 (archive ingest). All ResourceAccessRequirement operations wired in AuthorizationModule.cs:182-247 ARE present. FR-03 acceptance: automated test enumerates all filter call-sites and asserts each key resolves. NOTE: the unknown-operation DENY behavior itself is correct fail-closed design (NFR-01) and must not be weakened — the fix is registering the keys.</background>
+    <relevant-files>
+      <file role="modify">src/server/shared/Spaarke.Core/Auth/OperationAccessPolicy.cs</file>
+      <file role="canonical-reference">src/server/shared/Spaarke.Core/Auth/Rules/OperationAccessRule.cs</file>
+      <file role="canonical-reference">src/server/api/Sprk.Bff.Api/Api/Finance/FinanceEndpoints.cs</file>
+      <file role="canonical-reference">src/server/api/Sprk.Bff.Api/Api/Filters/EntityAccessFilter.cs</file>
+      <file role="canonical-reference">src/server/api/Sprk.Bff.Api/Infrastructure/DI/AuthorizationModule.cs</file>
+      <file role="new">tests/unit/Sprk.Bff.Api.Tests/AccessControl/OperationAccessPolicyCompletenessTests.cs</file>
+      <file role="modify">tests/unit/Sprk.Bff.Api.Tests/AccessControl/OperationPolicyCharacterizationTests.cs</file>
+    </relevant-files>
+    <dependencies>
+      <dependency task="001" status="pending">Characterization tests pinning the unknown-operation denials, to be flipped here.</dependency>
+    </dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-003">Fail-closed unknown-operation denial in OperationAccessRule MUST remain intact — this task registers keys; it does not soften the deny path. Scope: OperationAccessRule and OperationAccessPolicy.</constraint>
+    <constraint source="ADR-003">Assign least-privilege rights per key: read-only endpoints get Read; mutating endpoints (finance.confirm, entity.associate_document) get Write-bearing requirements. Scope: the four new policy entries.</constraint>
+    <constraint source="ADR-038">The completeness test is MAINTAIN-class at a KEEP path; it must fail when a NEW call-site introduces an unregistered operation string (a real forcing function, not a snapshot of today's list only). Scope: the new test.</constraint>
+    <constraint source="project">Spaarke.Core is consumed by the BFF (CLAUDE.md §10): report publish size vs baseline ~44.96 MB in PR; ceiling 60 MB (NFR-06). Scope: this task's PR.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>operation access policy</topic>
+    <files>
+      <file>.claude/adr/ADR-003-authorization-seams.md</file>
+      <file>.claude/constraints/auth.md</file>
+      <file>.claude/constraints/testing.md</file>
+      <file>projects/unified-access-control-r2/notes/investigation/10-finding-confirmations.md</file>
+    </files>
+    <patterns>
+      <pattern name="unit-test-structure" location=".claude/patterns/testing/unit-test-structure.md">Test naming + structure</pattern>
+    </patterns>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="0" name="Context + rigor declaration">Load knowledge files; declare FULL rigor.</step>
+    <step order="1">Re-verify the A-20 call-site list by grepping for authorization-filter operation strings across src/server/api/Sprk.Bff.Api (filters, ResourceAccessRequirement, EntityAccessFilter usages).</step>
+    <step order="2">Add the four keys to OperationAccessPolicy with least-privilege AccessRights: "read" and "finance.read" → Read; "finance.confirm" and "entity.associate_document" → Write-bearing (match the semantics of comparable existing entries).</step>
+    <step order="3">Author OperationAccessPolicyCompletenessTests: enumerate every operation string used at filter call-sites (scan mechanism of your choice: source scan of the Api tree, or a canonical registry the call-sites share) and assert each resolves via OperationAccessPolicy; include an explicit closed-list assertion covering the A-20 strings.</step>
+    <step order="4">Flip the task-001 characterization tests: the four operations now resolve; unknown strings still deny.</step>
+    <step order="5">Run full test suite; build green.</step>
+    <step order="6">Update TASK-INDEX.md: set this task's status to ✅.</step>
+    <step order="7">Document rights-level decisions per key in projects/unified-access-control-r2/notes/.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If the correct AccessRights for a key is ambiguous (e.g. finance.confirm could be Write or a finance-specific right), STOP and escalate the level choice per CLAUDE.md §6 rather than guessing high.</trigger>
+    <trigger>If the grep sweep finds operation strings beyond the A-20 list that also fail to resolve, report them and add them to the fix — but escalate first if any belongs to another in-flight project's surface.</trigger>
+  </escalation>
+
+  <justification>
+    <existing>tests/unit/Sprk.Bff.Api.Tests — the existing BFF test project; no completeness/forcing-function test over OperationAccessPolicy exists (A-20 was found by manual enumeration).</existing>
+    <extension>Yes — a new test file inside the existing project; this is test surface for existing code, not new production surface.</extension>
+    <cost-of-doing-nothing>Without the completeness test, a future call-site introducing an unregistered operation string re-opens A-3/A-20 (unconditional 403) undetected — exactly the drift this test is the forcing function against (FR-03).</cost-of-doing-nothing>
+  </justification>
+
+  <tools><tool name="dotnet">Build + test</tool></tools>
+
+  <outputs>
+    <output type="code">src/server/shared/Spaarke.Core/Auth/OperationAccessPolicy.cs</output>
+    <output type="test">tests/unit/Sprk.Bff.Api.Tests/AccessControl/OperationAccessPolicyCompletenessTests.cs</output>
+    <output type="test">tests/unit/Sprk.Bff.Api.Tests/AccessControl/OperationPolicyCharacterizationTests.cs</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">"read", "finance.read", "finance.confirm", and "entity.associate_document" each resolve in OperationAccessPolicy (FR-03 acceptance).</criterion>
+    <criterion testable="true">The completeness test enumerates every authorization-filter call-site operation string and asserts each resolves; it FAILS if a call-site uses an unregistered string.</criterion>
+    <criterion testable="true">Negative: an operation string NOT in the policy is still denied by OperationAccessRule (fail-closed preserved) — asserted by test.</criterion>
+    <criterion testable="true">Negative: a caller whose rights do not meet a key's requirement is denied on that operation (e.g. Read-only caller on finance.confirm) — asserted by test.</criterion>
+    <criterion testable="true">All unit tests pass; build green; publish size reported in PR and ≤60 MB.</criterion>
+  </acceptance-criteria>
+
+  <notes>**COMPLETED 2026-08-21.** 4 keys registered; 15-test source-scanning completeness gate; 8 task-001
+  characterizations flipped. Suite: BFF 10,617 / ArchTests 36 / Core 45, all green. Publish 43.65 MB
+  compressed incl. PDBs (baseline 44.96 -- DOWN 1.31 MB; no package changes). 0 HIGH/CRITICAL CVE.
+
+  RIGHTS DECISIONS (full rationale: notes/task-003-operation-rights-decisions.md):
+  read -&gt; Read | finance.read -&gt; Read | finance.confirm -&gt; Write (NOT Create -- the sprk_invoice is a
+  different entity than the authorized document) | entity.associate_document -&gt; **AppendTo** (the filter
+  authorizes the TARGET entity and the operation attaches a document TO it; NOT Write -- saving an email
+  to a matter does not modify the matter's own fields).
+
+  ⚠️ AppendTo is the FIRST use of that flag in the policy, so it creates a binding obligation on TASK 005:
+  map Dataverse AppendToAccess, or POST /api/office/save is permanently 403 while LOOKING fixed
+  (insufficient_rights reads as legitimate). Recorded as a &lt;constraint source="task-003"&gt; on 005.
+
+  SWEEP: re-derived the call-site list rather than trusting A-20 -- 22 Add*Filter extensions exist but only
+  7 reach AuthorizeAsync; the 3 AI filters use IAiAuthorizationService (checks AccessRights.Read directly)
+  and DataverseAuthorizationFilter uses IDataversePrivilegeChecker, so all are correctly out of scope.
+  A-20's list CONFIRMED COMPLETE for active call-sites. Filed NEW finding **A-23** (escalation trigger 2):
+  AddOfficeDocumentAccessFilter is a second orphaned filter (zero call-sites, doc examples "share"/"attach"
+  unregistered) -- Low severity, delete alongside A-15 in task 018 (&lt;constraint source="task-003"&gt; added).
+
+  DEVIATION: tests authored at tests/integration/auth/** (the ADR-038 KEEP path backfilled by task 001),
+  not the POML's declared tests/unit/Sprk.Bff.Api.Tests/AccessControl/ -- same CLAUDE.md 6.5 path C
+  reasoning as task 001.
+
+  Spec FR-03; findings A-3 + A-20 (policy-key half — the Read-ceiling half is task 005). The endpoints remain functionally broken for Write+ callers until 004/005 land; this task only guarantees key resolution and least-privilege requirements.</notes>
+
+  <execution><skill>.claude/skills/task-execute/SKILL.md</skill></execution>
+</task>

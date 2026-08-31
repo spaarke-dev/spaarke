@@ -1,0 +1,101 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="052" project="unified-access-control-r2">
+  <metadata>
+    <title>Server-side regarding writers: audit + converge on core-ancestor stamping (FR-26)</title>
+    <phase>3 Child inheritance</phase>
+    <gate>startable (derivation rules are spec-fixed; runs parallel to 050)</gate>
+    <status>pending</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Authorization-path .cs changes: server-created children (emails, todos from automation) without stamps are invisible to inheriting principals; wrong stamps over-grant.</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Audit + convergence against an explicit derivation-rules table; well-specified after 050's rules note; default tier.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>phase3-wave1</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <parallel-reason>Touches Services/Communication/** + a new helper — disjoint from task 050's TS shared-lib files; does NOT touch Infrastructure/ExternalAccess, Api/ExternalAccess or DataverseWebApiService.cs.</parallel-reason>
+    <deps>none</deps>
+    <tags>bff-api, auth, dataverse, testing</tags>
+    <estimated-effort>3-4 hours</estimated-effort>
+  </metadata>
+
+  <prompt>Find every SERVER-side write path that creates or reparents child-class records with sprk_regarding* lookups (BFF Communication pipeline, todo automation, any job handler) and route them through one C# core-ancestor derivation helper so server-created children carry the same ultimate core-record ancestor stamp the client write path (task 050) produces.</prompt>
+  <role>SPAARKE platform developer. BFF Minimal API services, Dataverse Web API, the ADR-024 regarding model. Follow ADRs strictly.</role>
+  <goal>A grep-complete inventory of server writers of sprk_regarding* on child entities; one new CoreAncestorResolver helper (C#) mirroring the task-050 taxonomy + derivation rules; every server writer stamps on create and re-stamps on reparent; unit tests pin the C# taxonomy to the same literal sets as the TS side.</goal>
+
+  <context>
+    <background>spec.md FR-26 acceptance covers ALL chains, not just PCF-authored ones. Emails are created server-side (Communication pipeline / ThreadResolver), todos can be created by automation (SmartTodo launcher goes through client, but BFF Office endpoints and job handlers may write regarding fields). If any server writer skips the stamp, FR-27 inheritance silently under-grants for those records; the backfill (053) would also permanently miss them going forward.</background>
+    <relevant-files>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Services/Communication/ThreadResolver.cs</file>
+      <file role="new">src/server/api/Sprk.Bff.Api/Services/Dataverse/CoreAncestorResolver.cs (location may be adjusted to the most cohesive existing folder — state the placement decision)</file>
+      <file role="canonical-reference">src/client/shared/Spaarke.UI.Components/src/services/TodoRegardingUpdateBuilder.ts (taxonomy to mirror)</file>
+      <file role="canonical-reference">projects/unified-access-control-r2/notes/phase3-derivation-rules.md (task 050 output; if not yet merged, use spec.md FR-26 + design.md §4.3 directly)</file>
+      <file role="modify">tests/unit/Sprk.Bff.Api.Tests/ (new CoreAncestorResolver tests + updated writer tests)</file>
+    </relevant-files>
+    <dependencies>
+      <dependency task="050" status="pending">Soft: derivation-rules note for parity; the rules themselves are spec-fixed so this task may start in parallel.</dependency>
+    </dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="CLAUDE.md-§10">BFF-touching task: state the placement decision (new helper vs extension of an existing service) in the PR citing .claude/constraints/bff-extensions.md decision criteria, and report publish size (dotnet publish -c Release, ceiling 60 MB, baseline ~44.96 MB incl. PDBs). Scope: PR description + task notes.</constraint>
+    <constraint source="ADR-034">1-hop derivation only: read the immediate target's core-ancestor stamp columns; never recursive traversal. Scope: CoreAncestorResolver read logic.</constraint>
+    <constraint source="ADR-010">No new interface unless a test seam genuinely requires it; prefer a concrete registered once. Scope: DI registration of the helper.</constraint>
+    <constraint source="project">Matter does NOT inherit from Project — a server-created child regarding a Matter stamps only the matter. Scope: derivation rules.</constraint>
+    <constraint source="NFR-01">If ancestor resolution fails during a server create, fail the operation (or queue retry per the writer's existing error contract) — never create the child silently unstamped. Scope: every converged writer.</constraint>
+    <constraint source="CLAUDE.md-§10-b6">PRs modifying Sprk.Bff.Api/Services/ MUST add/update tests in tests/unit/Sprk.Bff.Api.Tests/. Scope: this task's outputs.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>server-side regarding writers + BFF hygiene</topic>
+    <files>
+      <file>.claude/constraints/bff-extensions.md</file>
+      <file>.claude/adr/ADR-024-polymorphic-resolver-pattern.md</file>
+      <file>.claude/adr/ADR-010-di-minimalism.md</file>
+      <file>docs/adr/ADR-038-testing-strategy.md</file>
+      <file>projects/unified-access-control-r2/spec.md</file>
+    </files>
+    <patterns>
+      <pattern name="web-api-client" location=".claude/patterns/dataverse/web-api-client.md">DataverseWebApiService read/write conventions the helper must follow.</pattern>
+    </patterns>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="0">Context + rigor declaration.</step>
+    <step order="1">Inventory: grep src/server for writes binding sprk_regarding (odata.bind payloads, attribute writes) on child-class entities (sprk_communication, sprk_todo, sprk_event, sprk_invoice, sprk_document, sprk_analysis). Record the complete list with file:line in notes — this list is an acceptance artifact.</step>
+    <step order="2">Implement CoreAncestorResolver: taxonomy constants (literal, mirroring TS) + ResolveStampsAsync(targetEntity, targetId) reading the target's core-ancestor lookups app-only via the existing Dataverse service; core target returns itself.</step>
+    <step order="3">Converge each inventoried writer: create paths include stamps in the create payload; reparent paths re-stamp; delete/clear paths null stamps. Do not modify writers that only ever set a CORE target lookup directly and already write it (they are trivially 1-hop) — but list them as verified.</step>
+    <step order="4">Unit tests: taxonomy parity (literal sets), stamp-on-create for a child-of-child, re-stamp on reparent, fail-closed on resolution error; update existing writer tests.</step>
+    <step order="5">dotnet build + dotnet test green; publish-size measurement recorded.</step>
+    <step order="6">Update TASK-INDEX.md; write the writer inventory + decisions to projects/unified-access-control-r2/notes/phase3-server-writers.md.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If the inventory finds a writer inside a Dataverse plugin (src/dataverse/plugins) rather than the BFF, STOP and escalate scope per CLAUDE.md §6 — plugin changes are a different deployment surface and are not in this task's file set.</trigger>
+  </escalation>
+
+  <justification>
+    <existing>No C# equivalent of the TS derivation exists — grep "sprk_regardingmatter" in src/server hits writers only, no resolver (verify and cite the grep in the PR). Closest neighbor: ThreadResolver.cs (Services/Communication) which resolves regarding for emails but does not derive ancestors.</existing>
+    <extension>No — ThreadResolver is communication-specific; the derivation must serve every child-entity writer. The helper is one small class; extending ThreadResolver would couple todo/event writers to the communication module.</extension>
+    <cost-of-doing-nothing>Server-created emails/todos carry no core-ancestor stamp, so FR-27 inheritance returns 0 rows for them — a contact with Project access does not see server-filed emails on the project (concrete acceptance failure of FR-27's "sees its communications").</cost-of-doing-nothing>
+  </justification>
+
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Dataverse/CoreAncestorResolver.cs</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Communication/ThreadResolver.cs (+ any other inventoried writers)</output>
+    <output type="test">tests/unit/Sprk.Bff.Api.Tests/ (CoreAncestorResolver + writer tests)</output>
+    <output type="docs">projects/unified-access-control-r2/notes/phase3-server-writers.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">The writer inventory note lists every src/server write site of sprk_regarding* on child entities with file:line, each marked converged / verified-trivial / escalated.</criterion>
+    <criterion testable="true">Given a server-created communication regarding Matter M, the created row carries sprk_regardingmatter = M in the create payload.</criterion>
+    <criterion testable="true">Given a server-created todo regarding Communication C (C regards Matter M), the created row carries sprk_regardingmatter = M.</criterion>
+    <criterion testable="true">Negative: ancestor resolution failure fails the create per the writer's error contract; no unstamped child row is created by a converged writer.</criterion>
+    <criterion testable="true">C# taxonomy literals equal the TS taxonomy literals (pinned by test on each side).</criterion>
+    <criterion testable="true">dotnet build + all unit tests green; publish size reported ≤ 60 MB with delta vs baseline in the PR.</criterion>
+  </acceptance-criteria>
+
+  <notes>spec.md FR-26; design.md §4.3. The one-time backfill for existing rows is task 053.</notes>
+
+  <execution><skill>.claude/skills/task-execute/SKILL.md</skill></execution>
+</task>

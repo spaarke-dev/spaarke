@@ -98,12 +98,12 @@ public class AssociationMappingTests
             Mock.Of<ICommunicationDataverseService>(),
             _genericEntityServiceMock.Object,
             Mock.Of<IDocumentDataverseService>(),
-            speFileStore,
             null!, // CommunicationAccountService — not tested here
             null!, // JobSubmissionService — not tested here
             Mock.Of<ICommunicationEnrichmentService>(),
             Options.Create(options),
-            _loggerMock.Object);
+            _loggerMock.Object,
+            scopeFactory: SpeScopeFactoryStub.Create(speFileStore));
     }
 
     private static SendCommunicationRequest CreateRequestWithAssociations(

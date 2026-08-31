@@ -24,7 +24,7 @@
 
 import "@testing-library/jest-dom";
 import * as React from "react";
-import { render, screen } from "@testing-library/react";
+import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import {
   FluentProvider,
@@ -211,6 +211,52 @@ describe("QuickStartModal", () => {
       intent: "email-compose",
     });
     expect(onClose).toHaveBeenCalledTimes(1);
+  });
+
+  // -------------------------------------------------------------------------
+  // Task 064 (E1b): onRecordCreated after a committed record-creation wizard
+  // -------------------------------------------------------------------------
+
+  it("E1b: fires onRecordCreated with the committed record's id + entity (create-matter)", async () => {
+    mockLaunchSurface.mockResolvedValue({
+      handoffId: "h-1",
+      launched: true,
+      result: { committed: true, recordId: "mtr-committed" },
+    });
+    const onRecordCreated = jest.fn();
+    render(
+      <FluentProvider theme={webLightTheme}>
+        <QuickStartModal open onClose={jest.fn()} onRecordCreated={onRecordCreated} />
+      </FluentProvider>,
+    );
+    const user = userEvent.setup();
+
+    await user.click(screen.getByText("Create Matter"));
+
+    await waitFor(() =>
+      expect(onRecordCreated).toHaveBeenCalledWith({ id: "mtr-committed", entityType: "sprk_matter" }),
+    );
+  });
+
+  it("E1b: does NOT fire onRecordCreated when the wizard was cancelled (not committed)", async () => {
+    mockLaunchSurface.mockResolvedValue({
+      handoffId: "h-2",
+      launched: true,
+      result: { committed: false, cancelled: true },
+    });
+    const onRecordCreated = jest.fn();
+    render(
+      <FluentProvider theme={webLightTheme}>
+        <QuickStartModal open onClose={jest.fn()} onRecordCreated={onRecordCreated} />
+      </FluentProvider>,
+    );
+    const user = userEvent.setup();
+
+    await user.click(screen.getByText("Create Matter"));
+
+    // Give the awaited outcome a tick to settle, then assert nothing fired.
+    await waitFor(() => expect(mockLaunchSurface).toHaveBeenCalled());
+    expect(onRecordCreated).not.toHaveBeenCalled();
   });
 
   // -------------------------------------------------------------------------

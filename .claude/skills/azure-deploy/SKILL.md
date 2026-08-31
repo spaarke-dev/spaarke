@@ -97,7 +97,7 @@ az account show --query "{Name:name, Id:id}" -o table
 | `docintel-api-key` | Document Intelligence key |
 | `redis-connection` | Redis connection string |
 | `appinsights-key` | Application Insights key |
-| `BFF-API-ClientSecret` | BFF app registration client secret — retained for OBO only (Graph/Dataverse app-only use MI per ADR-028) |
+| ~~`BFF-API-ClientSecret`~~ | 🔴 **DELETED 2026-08-24** (auth-v4 task 033, ADR-028 A4; E-3 closed). The BFF identity is secret-free — **including OBO** — and authenticates with a managed-identity federated credential. **Do not create or reference this secret.** Set `Graph__Credentials__Order__0=ManagedIdentityFederated` + `Graph__Credentials__RequireSecretFreeIdentity=true` instead. |
 | `Communication-WebhookSigningKey` | HMAC-SHA256 key for Communication webhooks (48-byte base64) |
 | `EmailProcessing-WebhookSigningKey` | HMAC-SHA256 key for Email webhooks (48-byte base64) |
 

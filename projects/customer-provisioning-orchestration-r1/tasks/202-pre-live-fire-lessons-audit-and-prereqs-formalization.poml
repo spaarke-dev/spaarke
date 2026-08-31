@@ -1,0 +1,157 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="202" project="customer-provisioning-orchestration-r1">
+  <metadata>
+    <title>Pre-live-fire lessons audit + formalize PROVISIONING-PREREQUISITES + design provisioning-run structure (blocker for task 186 E2E)</title>
+    <phase>Pre-Live-Fire — Consolidate lessons + structural gaps before E2E ceremony</phase>
+    <gate>blocked</gate>
+    <status>not-started</status>
+    <rigor>STANDARD</rigor>
+    <rigor-reason>Doc-heavy authoring task: audit + inventory of all captured-but-unapplied lessons across notes/*, then author (a) PROVISIONING-PREREQUISITES.md machine-parseable YAML + rendered markdown, (b) provisioning-run structural specs, (c) punch list for task 203 (apply). No .cs modifications in this task; substantial code changes ride in task 203. Owner directive 2026-08-24: "for point 1 - AND these need to be actually documented somewhere that can then feed into the process; this needs to be formalized e.g., a file, an app, a table--something that is codified" — this task is that codification.</rigor-reason>
+    <model-tier>opus</model-tier>
+    <model-tier-reason>Cross-file audit + design synthesis + authoring formalized codified structure. Volume of source material (90+ notes files, 3 major docs at ~4000 lines total, skill file at 1092 lines) benefits from Opus's larger context + design-synthesis strength. Not xhigh — this is authoring/synthesis, not brownfield root-cause.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Serial: 202 audits + produces punch list → 203 (apply, potentially FULL rigor with .cs changes + skill updates) → 186 (E2E live-fire). 202 also touches .claude/patterns/provisioning/ scaffolding + potentially seeds .claude/skills/provision-environment/refs/ — main-session-only per Sub-Agent Write Boundary.</parallel-reason>
+    <deps>200, 201</deps>
+    <tags>lessons-learned, provisioning, l3-skill, docs, root-claude, skill-directives</tags>
+    <estimated-effort>6-10 hours (audit spans 90+ notes files; formalization requires design synthesis)</estimated-effort>
+  </metadata>
+
+  <prompt>Consolidate every captured-but-unapplied lesson from projects/customer-provisioning-orchestration-r1/notes/ (SESSION 2 fresh-sub F1-F20+, SESSION 3-4 handoff decisions, SESSION 5 IActionSeam + F20-chain, task-XXX-deviations notes, wave drift notes) into a single punch list mapped to landing spots (code / ArchTest / skill / design.md / deployment guide / new PROVISIONING-PREREQUISITES.md). Author PROVISIONING-PREREQUISITES.md as a formalized codified file (YAML for skill Step 0.5 consumption + rendered markdown for humans) enumerating every prerequisite outside provisioning automation (SPE container-types, Office add-in Entra apps, Copilot bot apps, Power BI SPs, Azure subscription creation, OpenAI TPM quota bumps for frontier models, resource-provider registration on fresh subs). Design the provisioning-runs/{customerId}-{runId}/ project structure mirroring coding-project pattern: {CLAUDE.md, intake.md, prerequisites-check.md, preflight-report.md, handler-log.md, manual-gates.md, handoff-report.md, lessons-learned.md} + provisioning-runs/INDEX.md cross-run registry + .claude/patterns/provisioning/ scaffolding for cross-run shared patterns. Do NOT apply the lessons in this task — that's task 203's scope. Output: a machine-parseable punch list at notes/task-202-punch-list.md that task 203 executes against.</prompt>
+
+  <role>SPAARKE platform architect. Expert in: this project's r1 domain (customer-provisioning-orchestration-r1 spec.md + design.md v3.6); the /provision-environment L3 skill (1092 lines, Step 0-7 flow); coding-project structural pattern (projects/{name}/{spec,plan,design,CLAUDE.md,current-task,tasks/,notes/}) that this task adapts to provisioning-runs; the ADR-032 asymmetric-registration anti-pattern (root CLAUDE.md §10 F.1); the two-level lessons process (in-flight direct-apply vs project-close lessons-learned.md) per root CLAUDE.md §7 wrap-up + task-execute Step 11. Familiar with SESSION 5 (2026-08-24) manual-BFF-patching learnings + owner directive to codify prereqs.</role>
+
+  <goal>Files exist and the following contracts are satisfied: (a) `docs/guides/PROVISIONING-PREREQUISITES.md` authored as formalized codified reference (markdown-with-YAML-frontmatter OR markdown-plus-sibling-YAML at scripts/provisioning-prereqs/prereqs.yaml — pick one and justify), enumerating every manual prerequisite with how-to + frequency (once-per-tenant / once-per-sub / once-per-env / once-per-customer) + programmatic-check recipe where possible; (b) design memo at notes/provisioning-run-structure-design.md specifying the provisioning-runs/{customerId}-{runId}/ folder layout + purpose of each artifact + template contents for CLAUDE.md/intake.md/handoff-report.md/lessons-learned.md; (c) design memo at notes/provisioning-run-agent-autonomy-design.md capturing the interactive-vs-autonomous split (what stays operator-interactive: SPE 24h wait detection, admin-consent verification; what can auto-advance: idempotent re-runs, backoff-poll of L2 REST); (d) punch list at notes/task-202-punch-list.md — machine-parseable table of every unapplied lesson × landing spot × effort estimate × dependency chain, sortable by "must-do-before-E2E" vs "can-do-after-E2E"; (e) proposed .claude/patterns/provisioning/ scaffolding (empty folder OR skeleton .md files with headers only — task 203 fills content); (f) update task 186's escalation triggers section: add explicit "if a lesson from task-202-punch-list.md was not applied before invocation, abort and defer to task 203" gate; (g) update project current-task.md + TASK-INDEX.md with task 202 completion status + explicit link to punch list.</goal>
+
+  <context>
+    <background>Owner directive 2026-08-24 SESSION 5 conversation: "for point 1 - AND these need to be actually documented somewhere that can then feed into the process; this needs to be formalized e.g., a file, an app, a table--something that is codified". SESSION 5 attempted to boot Model 1 Prod BFF by patching individual App Service settings (5 gates cleared: Cosmos endpoint, CORS origins, DocumentIntelligence enable, Dataverse ServiceUrl, plus code fix e3a15db91 for IActionSeam ADR-032 asymmetric-registration bug). Owner recognized this was symptom-fixing, not project-relevant E2E validation. Corrective sequence: audit + apply all captured-but-unapplied lessons BEFORE invoking task 186 E2E ceremony, so live-fire proves the platform's automation rather than iterating through fail-cycles. Task 202 = the audit + formalization; task 203 = the apply.
+
+**Two-level lessons process** (per SESSION 5 conversation resolution):
+1. **NOW (retrospective)**: this task 202 + follow-on task 203 apply everything known. Goal: no known unapplied lesson when task 186 fires.
+2. **ONGOING (forward-looking)**: skill Step 7 mandatory postmortem writing per-run `lessons-learned.md`; cross-run audit reads all lessons files periodically. This task designs the ONGOING structure; task 203 implements it in the skill.
+
+**Prerequisite scope from owner** (SESSION 5): "container types are prerequisites — don't touch them, they live outside provisioning automation. Other prerequisites that are more appropriately handled outside provisioning automation" — codify list. Enumerate against the actual `az` + Power Platform inventory + design.md § shared-vs-dedicated split.
+
+**Provisioning-run project structure directive from owner** (SESSION 5): "shouldn't there be a project structure within which a new environment provisioning project runs?" — YES. Mirror coding-project pattern; each provisioning run becomes an auditable mini-project.</background>
+    <relevant-files>
+      <file role="input-lessons">projects/customer-provisioning-orchestration-r1/notes/lessons-learned-model1-prod-standup-2026-08-22.md</file>
+      <file role="input-lessons">projects/customer-provisioning-orchestration-r1/notes/r1-gap-analysis-2026-08-18.md</file>
+      <file role="input-lessons">projects/customer-provisioning-orchestration-r1/notes/post-authoring-audit-2026-08-20.md</file>
+      <file role="input-lessons">projects/customer-provisioning-orchestration-r1/notes/phase-c-double-prime-e2e-acceptance-real-run.md</file>
+      <file role="input-lessons">projects/customer-provisioning-orchestration-r1/notes/PROVISIONING-CHANGE-REQUEST.md</file>
+      <file role="input-lessons">projects/customer-provisioning-orchestration-r1/notes/follow-on-customer-deployment-webapp-proposal.md</file>
+      <file role="input-lessons">projects/customer-provisioning-orchestration-r1/notes/task-081.5-rollback.md</file>
+      <file role="input-lessons">projects/customer-provisioning-orchestration-r1/notes/task-200-completion-notes.md</file>
+      <file role="input-lessons">projects/customer-provisioning-orchestration-r1/notes/task-201-completion-notes.md</file>
+      <file role="input-lessons-glob">projects/customer-provisioning-orchestration-r1/notes/task-*-deviations.md (40+ files, scan all)</file>
+      <file role="input-lessons-glob">projects/customer-provisioning-orchestration-r1/notes/wave-*-drift-*.md (4 files, scan all)</file>
+      <file role="input-current-state">projects/customer-provisioning-orchestration-r1/current-task.md (SESSION 5 handoff — 5 SESSION 5 lessons captured live)</file>
+      <file role="target-new">docs/guides/PROVISIONING-PREREQUISITES.md (NEW — this task authors)</file>
+      <file role="target-new-optional">scripts/provisioning-prereqs/prereqs.yaml (NEW if pattern (b) chosen — machine-parseable sibling)</file>
+      <file role="target-new">projects/customer-provisioning-orchestration-r1/notes/provisioning-run-structure-design.md (NEW)</file>
+      <file role="target-new">projects/customer-provisioning-orchestration-r1/notes/provisioning-run-agent-autonomy-design.md (NEW)</file>
+      <file role="target-new">projects/customer-provisioning-orchestration-r1/notes/task-202-punch-list.md (NEW — output for task 203)</file>
+      <file role="target-new-optional">.claude/patterns/provisioning/README.md (NEW folder scaffolding — main-session-only per Sub-Agent Write Boundary)</file>
+      <file role="modify">projects/customer-provisioning-orchestration-r1/tasks/186-real-phase-f-e2e-acceptance-rerun.poml (add pre-check citing 202 punch list)</file>
+      <file role="modify">projects/customer-provisioning-orchestration-r1/tasks/TASK-INDEX.md (add row for 202 + entry for pending 203)</file>
+      <file role="modify">projects/customer-provisioning-orchestration-r1/current-task.md (SESSION 5 → task 202 handoff)</file>
+      <file role="reference">.claude/skills/provision-environment/SKILL.md (understand current Step 0-7 flow for design work)</file>
+      <file role="reference">docs/guides/SPAARKE-CUSTOMER-DEPLOYMENT-GUIDE.md (understand what prereqs are already documented vs missing)</file>
+      <file role="reference">projects/customer-provisioning-orchestration-r1/design.md (v3.6, 2029 lines — §7.2 shared-vs-dedicated + §3A Model 1)</file>
+      <file role="reference">projects/customer-provisioning-orchestration-r1/CLAUDE.md (project AI context)</file>
+    </relevant-files>
+    <dependencies>
+      <dependency task="200" status="completed">H4-shared handler landed — one of the lessons applied</dependency>
+      <dependency task="201" status="completed">H4b handler landed — the F20 automation lesson applied</dependency>
+    </dependencies>
+    <blocks>
+      <blocked-task task="203" reason="Apply-phase requires 202's punch list as input" />
+      <blocked-task task="186" reason="E2E ceremony requires all pre-live-fire lessons applied per owner directive 2026-08-24" />
+    </blocks>
+  </context>
+
+  <constraints>
+    <constraint source="owner directive 2026-08-24 SESSION 5">PROVISIONING-PREREQUISITES.md MUST be formalized codified — file/YAML/table — not just prose. Consumers: (a) /provision-environment Step 0.5 (task 203 wires the read), (b) human operators.</constraint>
+    <constraint source="owner directive 2026-08-24 SESSION 5">Provisioning-run structure MUST parallel coding-project structure (CLAUDE.md + spec-analog + tasks-analog + notes/ + lessons-learned). Auditable per-run; cross-run registry INDEX.md.</constraint>
+    <constraint source="root CLAUDE.md §3 Sub-Agent Write Boundary">Sub-agents CANNOT write to .claude/ paths. Main session writes .claude/patterns/provisioning/ scaffolding.</constraint>
+    <constraint source="root CLAUDE.md §7 wrap-up test-diet gate">Do NOT invoke /test-diet in this task (no tests added/modified in 202 — pure docs + design memos).</constraint>
+    <constraint source="root CLAUDE.md §11 Component Justification">PROVISIONING-PREREQUISITES.md is a NEW file — justify per §11 three-question template in the file header: (1) existing overlap with SPAARKE-CUSTOMER-DEPLOYMENT-GUIDE.md §2? (yes, but not codified/machine-parseable — the deployment guide is prose narrative for humans; PREREQUISITES is codified data for skill + humans); (2) can extend the deployment guide instead? (partially — the codified list belongs alongside human narrative for tool consumption); (3) concrete failure without? (skill Step 0.5 cannot programmatically verify prereqs → operator hits F1-F9-class errors during Step 2 preflight instead of Step 0.5 fail-fast).</constraint>
+    <constraint source="this project design.md §6.5 ADR Tensions">If audit surfaces architectural gaps requiring ADR amendment (e.g., SESSION 5 Lesson 3: multi-tenant Dataverse routing), file as ADR Tension in design.md via path A/B/C protocol — do NOT bypass. Task 203 applies the resolution.</constraint>
+    <constraint source="lessons-learned-model1-prod-standup-2026-08-22.md">F1-F9 partially applied to skill Step 2.5. Task 202 audits ALL F1-F20+ (if F10-F20+ exist) and identifies which are still unapplied.</constraint>
+    <constraint source="owner directive 2026-08-24 SESSION 5 (BINDING)">**Provisioning-surfaced BFF bugs MUST be routed to BFF-owning projects, NOT fixed in customer-provisioning-orchestration-r1's branch.** When task 202's audit surfaces a lesson that requires editing `src/server/api/Sprk.Bff.Api/**` (or `src/server/shared/Spaarke.*/**`), it does NOT go into task 203's scope. Instead: (a) file the bug as a separate task in `code-quality-and-assurance-r3` (the active BFF-decomposition worktree, per project CLAUDE.md coordination table) or a new dedicated BFF-quality worktree; (b) require accompanying ArchTest that prevents the class-of-bug at build time; (c) coordinate merge sequencing so the BFF fix lands BEFORE task 186 E2E live-fire but through the correct project. Task 203 EXCLUDES BFF code edits by design. This constraint prevents the "provisioning project doubles as BFF hero-fix branch" anti-pattern SESSION 5's `e3a15db91` IActionSeam commit exhibited. Rationale: if E2E live-fire routinely surfaces BFF bugs and we fix them in the provisioning branch, we've merely moved bug-discovery from prod to E2E without strengthening the BFF's own quality gates.</constraint>
+    <constraint source="owner directive 2026-08-24 SESSION 5 (BINDING)">**Audit the SESSION 5 IActionSeam commit `e3a15db91` explicitly.** The fix is correct (real ADR-032 F.1 asymmetric-registration bug — IActionSeam registered inside DocIntel/Analysis compound gate at AnalysisServicesModule.cs:1425, CommunicationRiActionService requires it unconditionally at CommunicationModule.cs:195). But it landed on `work/customer-provisioning-orchestration-r1` when it arguably should have landed on `code-quality-and-assurance-r3` or a BFF-owned branch. Task 202 must (a) evaluate whether to extract-and-relocate the commit; (b) file the follow-on ArchTest requirement in the correct project; (c) surface the missing-ArchTest gap (existing ADR-032 forcing-function ArchTest catches "kill-switch declared" but NOT "unconditional consumer + conditionally-registered dependency" — a real hole in the BFF's own §10 F.1 enforcement).</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>Pre-live-fire lessons audit + formalization</topic>
+    <files>
+      <file>projects/customer-provisioning-orchestration-r1/spec.md</file>
+      <file>projects/customer-provisioning-orchestration-r1/design.md</file>
+      <file>projects/customer-provisioning-orchestration-r1/CLAUDE.md</file>
+      <file>projects/customer-provisioning-orchestration-r1/notes/lessons-learned-model1-prod-standup-2026-08-22.md</file>
+      <file>projects/customer-provisioning-orchestration-r1/notes/r1-gap-analysis-2026-08-18.md</file>
+      <file>projects/customer-provisioning-orchestration-r1/notes/PROVISIONING-CHANGE-REQUEST.md</file>
+      <file>docs/guides/SPAARKE-CUSTOMER-DEPLOYMENT-GUIDE.md</file>
+      <file>.claude/skills/provision-environment/SKILL.md</file>
+    </files>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="0" name="Rigor + load">Emit RIGOR LEVEL (STANDARD, high effort, opus tier). Read the 4 authoritative reference files (spec.md v3.6, design.md v3.6, deployment guide, /provision-environment SKILL.md) + the top-priority lessons file (lessons-learned-model1-prod-standup-2026-08-22.md, 870 lines). Skim SESSION 5 handoff in current-task.md for the 4 lessons captured live.</step>
+    <step order="1" name="Enumerate all lessons sources">List every notes/*.md file. Categorize: (a) lessons docs, (b) design studies, (c) coord PRs, (d) deviation notes (task-XXX-deviations.md × 40+), (e) drift notes (wave-XX-drift-XX.md × 4), (f) session handoffs.</step>
+    <step order="2" name="Extract each lesson">For each source file, extract concrete lessons in a normalized shape: {source-file, source-section, finding-id (F1/F2/...), title, symptom, root-cause, fix-applied (yes/no + where), landing-spot (code|archtest|skill|design.md|deployment-guide|prereqs.md|new-adr|new-task), effort-estimate, blocks-e2e (yes/no + reason), dependencies (list of other lessons or tasks)}. Store as YAML/JSON in an intermediate file — this is punch-list input.</step>
+    <step order="3" name="Identify unapplied set">Compare each lesson's fix-applied field against actual repository state (grep for the fix, check design.md/skill.md for cited amendments). Produce the unapplied subset — this is the punch list.</step>
+    <step order="4" name="Formalize PROVISIONING-PREREQUISITES.md">Author docs/guides/PROVISIONING-PREREQUISITES.md. Decision: markdown-with-YAML-frontmatter vs markdown-plus-sibling-YAML at scripts/provisioning-prereqs/prereqs.yaml. Recommendation: sibling YAML (cleaner separation of concerns — YAML is machine-parseable, markdown is human-readable rendering with same data). Justify choice in file header per §11 template. Enumerate every prerequisite from owner's SESSION 5 list + any surfaced during Step 2 audit: SPE container-type + owning app, Office add-in Entra apps, Copilot bot Entra apps, Power BI service principals, Azure subscription (EA/MCA), OpenAI TPM quota bumps for frontier models, resource-provider registration on fresh subs, tenant-shared-domain registrations, etc. For each: {name, scope (tenant/sub/env/customer), how-to (link or inline recipe), frequency (once-per-X), programmatic-check-recipe (if possible — az/pac/graph command that returns present/absent/version), owner (who does it — Spaarke platform admin / customer admin), consequence-of-absence}.</step>
+    <step order="5" name="Design provisioning-run structure">Author notes/provisioning-run-structure-design.md. Specify: (a) folder layout provisioning-runs/{customerId}-{runId}/ + INDEX.md; (b) file templates for CLAUDE.md (per-run AI context: loads shared context + per-run intake), intake.md (analog of spec — 4 required inputs + operator's decisions), prerequisites-check.md (Step 0.5 output archived per run), preflight-report.md (H0 output), handler-log.md (analog of current-task.md — live handler progress), manual-gates.md (H0.5/H8/H11 gate log), handoff-report.md (final report — supersedes today's runs/{runId}.md), lessons-learned.md (mandatory Step 7 postmortem); (c) INDEX.md schema (like projects/INDEX.md: customerId | runId | tenancyModel | profile | status | started | ended | lessons-count | link); (d) .claude/patterns/provisioning/ scaffolding proposal (patterns to seed: rbac-grant.md, kv-secret-naming.md, sweep-legacy-artifacts.md, etc.). Reference the coding-project pattern's structural principles (root CLAUDE.md §7 + task-create SKILL.md).</step>
+    <step order="6" name="Design agent autonomy">Author notes/provisioning-run-agent-autonomy-design.md. Enumerate the current interactive gates in /provision-environment (Step 1 intake, Step 3 confirmation, Step 5 manual gates). For each, classify: (a) must-stay-interactive (SPE 24h clock, admin consent verification per NFR-11), (b) can-auto-advance-with-verification (backoff-poll L2 REST for idempotent re-runs), (c) can-batch-upfront (Step 1 intake collected via JSON blob if operator specifies --batch mode). Propose --batch flag for /provision-environment + JSON intake schema. Note operator-identity NFR-11 constraint still binds (agent runs UNDER operator's AAD context, not SP).</step>
+    <step order="6.5" name="Classify BFF vs provisioning lessons">Before punch-list synthesis, split every extracted lesson into ONE of three exclusive classes: (A) **provisioning-owned** — lesson lands in this project's scope (skill, PROVISIONING-PREREQUISITES, design.md, deployment guide, `.claude/patterns/provisioning/`, provisioning-run structure, H4b manifest additions); (B) **BFF-owned** — lesson requires editing `src/server/api/Sprk.Bff.Api/**` or `src/server/shared/Spaarke.*/**` (routing target: `code-quality-and-assurance-r3` or a new BFF-owned worktree; MUST include ArchTest requirement); (C) **shared/coordination** — lesson requires both (rare — carefully justified). Explicitly EVALUATE commit `e3a15db91` (IActionSeam hoist) as case study: does it belong on this branch or should it be extracted and rebased onto the BFF-owning worktree? Document decision in punch list header. Any class-B lesson does NOT enter task 203's scope — instead it enters a separate task filed in the correct project (via `/devops-project-sync` or manual project init).</step>
+    <step order="7" name="Author punch list">Author notes/task-202-punch-list.md. Table format: {lesson-id, source-doc, title, class (A/B/C per Step 6.5), landing-spot, effort-h, blocks-e2e, dependencies, target-project, task-203-subphase-OR-external-task-id}. Sort by blocks-e2e DESC, then class (A first — 203 scope), then effort ASC. Task 203 executes against class-A rows only. Class-B rows list target-project + coordination action. Class-C rows document the split. Include NEW lessons surfaced during 202 audit — do NOT limit to pre-existing lessons. Header MUST summarize: total lessons, class-A count (203 scope), class-B count (routed elsewhere), class-C count (both), blocks-e2e YES count for each class.</step>
+    <step order="8" name="Update task 186 escalation">Edit projects/customer-provisioning-orchestration-r1/tasks/186-real-phase-f-e2e-acceptance-rerun.poml to add explicit pre-check trigger: "if task-202-punch-list.md has any blocks-e2e=YES row with fix-applied=NO, abort task 186 and defer to task 203". Preserves existing escalation triggers.</step>
+    <step order="9" name="Update TASK-INDEX + current-task.md">Add row for task 202 to TASK-INDEX.md (Phase Pre-Live-Fire section — NEW). Add placeholder row for task 203 (blocked on 202 completion). Update current-task.md: SESSION 5 handoff → task 202 in-progress → task 203 pending → task 186 blocked. Update Quick Recovery block accordingly.</step>
+    <step order="10" name="Commit">Commit all in ONE atomic commit with detailed message: "docs(customer-provisioning): task 202 — pre-live-fire lessons audit + PROVISIONING-PREREQUISITES.md formalization + provisioning-run structure design + task-203 punch list". Include lessons-count, unapplied-count, priority-ordering, task-203 handoff summary in commit body.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If audit surfaces a lesson requiring ADR amendment (path B per CLAUDE.md §6.5) — specifically SESSION 5 Lesson 3 (multi-tenant Dataverse routing at DataverseServiceClientImpl.cs:39 reading single Dataverse:ServiceUrl at DI setup time, incompatible with Model 1's per-tenant Dataverse design in model1-shared.bicep) — STOP and file the ADR Tension via design.md path B protocol. Do NOT silently work around in the punch list. This is a design decision that gates whether Model 1 shared BFF is architecturally viable as designed.</trigger>
+    <trigger>If audit surfaces &gt;20 unapplied lessons blocking E2E, escalate to owner for prioritization — task 203's scope may need splitting into 203a/203b/203c to stay tractable (each &lt;24 hours effort).</trigger>
+    <trigger>If PROVISIONING-PREREQUISITES.md's enumeration requires prerequisites we (Spaarke) have no way to programmatically check (e.g., legal-review sign-off for a customer contract) — flag with owner-review row in the YAML + prose warning in the markdown. Do NOT invent a fake check.</trigger>
+    <trigger>If the provisioning-run structure design surfaces an obviously-better pattern than the coding-project analog (e.g., Cosmos-persisted per-run state instead of file-based) — note it in the design memo as a decision-record entry but DEFAULT to file-based analog per owner directive 2026-08-24 (parallel structure aids operator understanding).</trigger>
+    <trigger>If the class-B (BFF-owned) lesson count exceeds 5, or if any single class-B lesson blocks E2E and has NO existing BFF-owning worktree to route to, escalate to owner: this indicates the BFF's own quality gates need dedicated project scope, not distributed patches. Options: (i) initiate a new BFF-quality worktree; (ii) expand `code-quality-and-assurance-r3`'s scope; (iii) accept the risk and proceed with E2E knowing some BFF bugs will surface live. Do NOT default to fixing them in this project's branch — that's the anti-pattern the constraint exists to prevent.</trigger>
+    <trigger>If commit `e3a15db91` audit concludes it should be extracted-and-relocated (rebased onto a BFF-owned branch), the extraction plan MUST include a revert on `work/customer-provisioning-orchestration-r1` + coordination with the target branch's owner + a temporary re-cherry-pick strategy if this project's E2E depends on the fix before the target branch merges. Document the plan in punch list; do NOT execute the extraction in task 202 (that's task 203 or a separate coordination task).</trigger>
+  </escalation>
+
+  <tools>
+    <tool name="terminal">grep + wc across notes/ for audit</tool>
+    <tool name="editor">Write/Edit for new files + edits</tool>
+    <tool name="git">status + diff + commit</tool>
+  </tools>
+
+  <outputs>
+    <output name="PROVISIONING-PREREQUISITES.md" path="docs/guides/PROVISIONING-PREREQUISITES.md" required="true" />
+    <output name="prereqs.yaml (if sibling-YAML pattern chosen)" path="scripts/provisioning-prereqs/prereqs.yaml" required="conditional" />
+    <output name="provisioning-run-structure-design" path="projects/customer-provisioning-orchestration-r1/notes/provisioning-run-structure-design.md" required="true" />
+    <output name="provisioning-run-agent-autonomy-design" path="projects/customer-provisioning-orchestration-r1/notes/provisioning-run-agent-autonomy-design.md" required="true" />
+    <output name="task-202 punch list (input for task 203)" path="projects/customer-provisioning-orchestration-r1/notes/task-202-punch-list.md" required="true" />
+    <output name=".claude/patterns/provisioning/ scaffolding" path=".claude/patterns/provisioning/README.md" required="true" note="main-session-only per Sub-Agent Write Boundary; skeleton only, task 203 fills content" />
+    <output name="task 186 POML update" path="projects/customer-provisioning-orchestration-r1/tasks/186-real-phase-f-e2e-acceptance-rerun.poml" required="true" note="add pre-check trigger citing 202 punch list" />
+    <output name="TASK-INDEX row for 202 + placeholder for 203" path="projects/customer-provisioning-orchestration-r1/tasks/TASK-INDEX.md" required="true" />
+    <output name="current-task.md update" path="projects/customer-provisioning-orchestration-r1/current-task.md" required="true" />
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion>docs/guides/PROVISIONING-PREREQUISITES.md exists with ≥7 prerequisites codified (SPE container-type, Office add-in apps, Copilot bot apps, Power BI SPs, Azure subscription, OpenAI TPM bumps, provider registration) + each has scope + how-to + frequency + programmatic-check-recipe-or-none + consequence-of-absence</criterion>
+    <criterion>PROVISIONING-PREREQUISITES.md header includes §11 Component Justification (three-question template) explaining why this new file is not scope creep vs the existing deployment guide</criterion>
+    <criterion>notes/provisioning-run-structure-design.md specifies the 7-file per-run folder + INDEX.md schema + template contents for CLAUDE.md/intake.md/handoff-report.md/lessons-learned.md</criterion>
+    <criterion>notes/provisioning-run-agent-autonomy-design.md classifies every current interactive gate + proposes --batch flag + JSON intake schema</criterion>
+    <criterion>notes/task-202-punch-list.md is a machine-readable table (markdown table with fixed columns) listing EVERY unapplied lesson × class(A/B/C) × landing-spot × effort × blocks-e2e × target-project × task-203-subphase-or-external-task-id</criterion>
+    <criterion>Punch-list header explicitly summarizes: total lessons, class-A count (203 scope), class-B count (routed to BFF-owning projects), class-C count, blocks-e2e YES count per class</criterion>
+    <criterion>Commit `e3a15db91` (IActionSeam hoist) has an explicit case-study entry in the punch list: decision on whether to keep-in-place or extract-and-relocate, with rationale + coordination plan if extract</criterion>
+    <criterion>Task 203 authoring guidance (in task-202-punch-list.md footer or separate `notes/task-203-scope-brief.md`) states EXPLICITLY: "task 203 scope excludes class-B rows by design; each class-B row spawns a separate task in the target project"</criterion>
+    <criterion>.claude/patterns/provisioning/README.md exists (main-session-only Edit, empty or skeleton) — task 203 fills content</criterion>
+    <criterion>task 186 POML has a new pre-check trigger: "abort if task-202-punch-list.md has any blocks-e2e=YES + fix-applied=NO"</criterion>
+    <criterion>TASK-INDEX.md has row for 202 in NEW Phase Pre-Live-Fire section + placeholder row for 203</criterion>
+    <criterion>current-task.md Quick Recovery block updated with SESSION 5 → task 202 → task 203 → task 186 sequence</criterion>
+    <criterion>ONE atomic commit lands all deliverables + detailed commit body</criterion>
+  </acceptance-criteria>
+</task>

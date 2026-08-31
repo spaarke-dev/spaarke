@@ -270,9 +270,9 @@ public sealed class ComposeOriginRoutingSeamTests : IClassFixture<ComposeFidelit
             .ReturnsAsync((Entity)null!);
         Entity? createdEntity = null;
         _fixture.DataverseMock
-            .Setup(d => d.CreateAsync(It.IsAny<Entity>(), It.IsAny<CancellationToken>()))
+            .Setup(d => d.UpsertAsync(It.IsAny<Entity>(), It.IsAny<CancellationToken>()))
             .Callback<Entity, CancellationToken>((e, _) => createdEntity = e)
-            .ReturnsAsync(newDocumentId);
+            .ReturnsAsync((newDocumentId, true));
 
         _fixture.IndexingMock
             .Setup(i => i.EnqueueIfApplicableAsync(
@@ -354,9 +354,9 @@ public sealed class ComposeOriginRoutingSeamTests : IClassFixture<ComposeFidelit
             .ReturnsAsync((Entity)null!);
         Entity? createdEntity = null;
         _fixture.DataverseMock
-            .Setup(d => d.CreateAsync(It.IsAny<Entity>(), It.IsAny<CancellationToken>()))
+            .Setup(d => d.UpsertAsync(It.IsAny<Entity>(), It.IsAny<CancellationToken>()))
             .Callback<Entity, CancellationToken>((e, _) => createdEntity = e)
-            .ReturnsAsync(newDocumentId);
+            .ReturnsAsync((newDocumentId, true));
 
         _fixture.IndexingMock
             .Setup(i => i.EnqueueIfApplicableAsync(
@@ -456,7 +456,7 @@ public sealed class ComposeOriginRoutingSeamTests : IClassFixture<ComposeFidelit
     {
         using var scope = _fixture.Services.CreateScope();
         var sessions = scope.ServiceProvider.GetRequiredService<ChatSessionManager>();
-        var session = await sessions.CreateSessionAsync(tenant, documentId: speId);
+        var session = await sessions.CreateSessionAsync(tenant, TestSessionOwner.Oid, documentId: speId);
         return session.SessionId;
     }
 

@@ -24,7 +24,7 @@ All Spaarke secrets are stored in Azure Key Vault (per FR-08 — zero plaintext 
 
 | Secret Name | Type | Source Resource | Rotation Method |
 |-------------|------|-----------------|-----------------|
-| `BFF-API-ClientSecret` | Entra ID client secret | Entra ID app registration | Automated (`Rotate-Secrets.ps1 -SecretType EntraId`). **Auth v2**: retained for OBO only — Graph + Dataverse app-only use MI per ADR-028. |
+| ~~`BFF-API-ClientSecret`~~ | ~~Entra ID client secret~~ | **DELETED 2026-08-24** | 🔴 **NOTHING TO ROTATE.** Removed by `spaarke-auth-v4-dataverse-MI` task 033 (ADR-028 **A4**, exception **E-3 closed**) together with its lowercase duplicate `bff-api-client-secret`. The BFF identity — **including OBO** — authenticates with a *federated credential* issued to its user-assigned managed identity; the assertion is minted per token exchange and has **no expiry for an operator to roll**. `Rotate-Secrets.ps1 -SecretType EntraId` is now an audited no-op. **Do not re-create this secret**: `Graph:Credentials:RequireSecretFreeIdentity=true` makes the BFF refuse to start outside Development if `ClientSecret` returns to the credential order. |
 | `Communication-WebhookSigningKey` | HMAC-SHA256 key (48-byte base64) | Generated via `openssl rand -base64 48` | Manual (every 12 months or on incident) — rotate key in KV, restart App Service. Sender (Graph subscription) must be re-registered with the new key. |
 | `EmailProcessing-WebhookSigningKey` | HMAC-SHA256 key (48-byte base64) | Generated via `openssl rand -base64 48` | Manual (every 12 months or on incident) — rotate key in KV, restart App Service. Dataverse Service Endpoint must be re-registered with the new key. |
 | `Communication-WebhookClientState` | Graph subscription validation secret | Generated random string | Manual (every 90 days or on Graph subscription renewal) |
@@ -36,7 +36,7 @@ All Spaarke secrets are stored in Azure Key Vault (per FR-08 — zero plaintext 
 
 | Secret | Status | When safe to delete |
 |---|---|---|
-| `Dataverse-ClientSecret` | No longer consumed by production code when `Graph__ManagedIdentity__Enabled=true` (BFF MI is the Dataverse Application User per ADR-028) | After the MI cutover is verified by smoke test ([`auth-deployment-setup.md`](auth-deployment-setup.md) §9c). Keep for local-dev environments only. |
+| `Dataverse-ClientSecret` | ⚠️ **STILL REQUIRED (corrected 2026-08-13)** — AUTHV2-042 migrated only the `Services/Ai` raw-HTTP camp; the shared-lib Dataverse path (`DataverseWebApiService`/`DataverseOptions` `[Required]`+`ValidateOnStart`, `DataverseServiceClientImpl`) still hard-requires the secret backing `Dataverse:ClientSecret` regardless of the MI flag | ⚠️ **NOT yet — removing it crashes the BFF at startup.** Gated on the #3b shared-lib `ClientSecret`→MI migration (project `code-quality-and-assurance-r3` task 011 / NG1). See `projects/code-quality-and-assurance-r3/notes/bff-auth-surface-map.md`. |
 | `Email-WebhookSecret` | Superseded by `Email-WebhookSigningKey` (HMAC-SHA256 per Phase C) | After verifying Dataverse Service Endpoint is re-registered with the HMAC key |
 | `communication-webhook-secret` (HMAC pre-v2) | Superseded by `communication-webhook-signing-key` (HMAC-SHA256 per Phase C) | After verifying Graph subscription is re-registered with the HMAC key |
 
@@ -55,7 +55,6 @@ All Spaarke secrets are stored in Azure Key Vault (per FR-08 — zero plaintext 
 | Azure-managed SSL certificates | App Service (api.spaarke.com) | Auto-renewed by Azure |
 | Managed identity credentials | App Service system-assigned identity | Auto-rotated by Azure (no manual action) |
 | GitHub Actions secrets | GitHub repository settings | Manual — see [Manual Procedures](#manual-procedures) |
-| Dataverse S2S app secret | sprk-platform-{env}-kv (`Dataverse-S2S-ClientSecret`) | Automated (`Rotate-Secrets.ps1 -SecretType EntraId` after adding to platform orchestration) |
 
 ---
 
@@ -236,26 +235,12 @@ GitHub Actions secrets are used in CI/CD workflows and cannot be rotated by `Rot
    ```
 6. Monitor the workflow run for success.
 
-### Rotate Dataverse S2S Client Secret
-
-If the Dataverse S2S app registration (`spaarke-dataverse-s2s-prod`) is not included in the platform Entra ID rotation, rotate manually:
-
-1. Go to **Azure Portal > Entra ID > App registrations > spaarke-dataverse-s2s-prod**.
-2. Navigate to **Certificates & secrets > Client secrets**.
-3. Click **New client secret**, set expiry to 12 months.
-4. Copy the new secret value immediately (it will not be shown again).
-5. Update Key Vault:
-   ```powershell
-   az keyvault secret set `
-       --vault-name sprk-platform-prod-kv `
-       --name "Dataverse-S2S-ClientSecret" `
-       --value "<new-secret-value>"
-   ```
-6. Restart the App Service:
-   ```powershell
-   az webapp restart --name spaarke-bff-prod --resource-group rg-spaarke-platform-prod
-   ```
-7. Verify health: `curl https://api.spaarke.com/healthz`
+<!-- The "Rotate Dataverse S2S Client Secret" procedure was removed 2026-08-14
+     (code-quality-and-assurance-r3 task 060). The separate spaarke-dataverse-s2s-*
+     app registration + its Dataverse-S2S-* Key Vault secrets had zero code consumers
+     and were dropped; Dataverse S2S access consolidated onto the BFF app registration
+     credential (BFF-API-ClientSecret) on 2026-01-07. Rotating BFF-API-ClientSecret
+     (see the BFF API section above) now covers the Dataverse service path. -->
 
 ---
 
@@ -332,7 +317,10 @@ curl https://api.spaarke.com/healthz/dataverse
 Confirm the secret was updated (newest version should be recent):
 
 ```powershell
-az keyvault secret show --vault-name sprk-platform-prod-kv --name "BFF-API-ClientSecret" --query "attributes.updated" -o tsv
+# BFF-API-ClientSecret no longer exists (deleted 2026-08-24, task 033) — this command returns SecretNotFound.
+# The BFF identity is secret-free. To check its credential instead, verify the federated credential exists
+# and that its subject is the UAMI's principalId (NOT its clientId):
+az ad app federated-credential list --id 1e40baad-e065-4aea-a8d4-4b7ab273458c -o table
 ```
 
 ### 3. Audit Log Review

@@ -1,6 +1,7 @@
 using Microsoft.AspNetCore.Mvc;
 using Sprk.Bff.Api.Infrastructure.Graph;
 using Sprk.Bff.Api.Models.SpeAdmin;
+using Sprk.Bff.Api.Infrastructure.Errors;
 
 namespace Sprk.Bff.Api.Api.SpeAdmin;
 
@@ -46,7 +47,185 @@ public static class ContainerTypePermissionEndpoints
             .ProducesProblem(StatusCodes.Status404NotFound)
             .ProducesProblem(StatusCodes.Status500InternalServerError);
 
+        /*
+         * ── Container-type OWNERS (FR-C09, task 027) ──
+         *
+         * 🔑 Routed at /owners, NOT /permissions, and the distinction is load-bearing.
+         *
+         * "/containertypes/{id}/permissions" above already means Graph's `applicationPermissions` —
+         * which APPLICATIONS may access containers of this type, with what scopes. These endpoints
+         * expose `fileStorageContainerType.permissions`, which is `Collection(graph.permission)` —
+         * which PEOPLE own the container type. The two are orthogonal; neither supersedes the other.
+         *
+         * Task 027's own POML conflated them (it called this a supersession of the screen above).
+         * Naming the route /owners makes the difference legible in the URL, so the next reader cannot
+         * repeat that conflation by glancing at a route table.
+         *
+         * All three run DELEGATED against BETA — the only combination Graph will serve. See
+         * SpeAdminGraphService's container-type owners region for the measurement.
+         */
+        group.MapGet("/containertypes/{typeId}/owners", ListContainerTypeOwnersAsync)
+            .WithName("SpeListContainerTypeOwners")
+            .WithSummary("List the owners of an SPE container type")
+            .WithDescription(
+                "Returns the people who own (administer) the specified container type. Distinct from " +
+                "/permissions, which lists consuming APPLICATIONS. Returns 404 when the container " +
+                "type is not found.")
+            .Produces<ContainerTypeOwnerListDto>(StatusCodes.Status200OK)
+            .ProducesProblem(StatusCodes.Status400BadRequest)
+            .ProducesProblem(StatusCodes.Status401Unauthorized)
+            .ProducesProblem(StatusCodes.Status403Forbidden)
+            .ProducesProblem(StatusCodes.Status404NotFound)
+            .ProducesProblem(StatusCodes.Status500InternalServerError);
+
+        group.MapPost("/containertypes/{typeId}/owners", AddContainerTypeOwnerAsync)
+            .WithName("SpeAddContainerTypeOwner")
+            .WithSummary("Grant ownership of an SPE container type to a user")
+            .WithDescription(
+                "Grants the 'owner' role on the container type to the supplied user (email/UPN or " +
+                "directory object id). The identifier is passed to Graph as given — an unknown user " +
+                "surfaces Graph's own error rather than succeeding silently.")
+            .Produces<ContainerTypeOwnerDto>(StatusCodes.Status200OK)
+            .ProducesProblem(StatusCodes.Status400BadRequest)
+            .ProducesProblem(StatusCodes.Status401Unauthorized)
+            .ProducesProblem(StatusCodes.Status403Forbidden)
+            .ProducesProblem(StatusCodes.Status404NotFound)
+            .ProducesProblem(StatusCodes.Status500InternalServerError);
+
+        group.MapDelete("/containertypes/{typeId}/owners/{permissionId}", RemoveContainerTypeOwnerAsync)
+            .WithName("SpeRemoveContainerTypeOwner")
+            .WithSummary("Revoke an ownership grant on an SPE container type")
+            .WithDescription(
+                "Revokes the named ownership grant. Returns 404 when the grant or the container type " +
+                "does not exist — a removal that removed nothing is reported as such, not as success.")
+            .Produces(StatusCodes.Status204NoContent)
+            .ProducesProblem(StatusCodes.Status400BadRequest)
+            .ProducesProblem(StatusCodes.Status401Unauthorized)
+            .ProducesProblem(StatusCodes.Status403Forbidden)
+            .ProducesProblem(StatusCodes.Status404NotFound)
+            .ProducesProblem(StatusCodes.Status500InternalServerError);
+
         return group;
+    }
+
+    // ─────────────────────────────────────────────────────────────────────────
+    // Owner handlers (FR-C09)
+    // ─────────────────────────────────────────────────────────────────────────
+
+    private static async Task<IResult> ListContainerTypeOwnersAsync(
+        string typeId,
+        SpeAdminGraphService graphService,
+        ILogger<Program> logger,
+        HttpContext context,
+        CancellationToken ct)
+    {
+        try
+        {
+            var owners = await graphService.ListContainerTypeOwnersForUserAsync(context, typeId, ct);
+            if (owners is null)
+            {
+                return Results.NotFound();
+            }
+
+            return TypedResults.Ok(new ContainerTypeOwnerListDto
+            {
+                Items = owners.Select(ContainerTypeOwnerDto.FromDomain).ToList(),
+            });
+        }
+        catch (SpaarkeStorageException ex)
+        {
+            logger.LogError(
+                ex, "ListContainerTypeOwners failed for {TypeId}. Status={Status}. TraceId={TraceId}",
+                typeId, ex.StatusCode, context.TraceIdentifier);
+
+            return ex.ToProblemDetails(
+                summary: $"Could not list owners for container type '{typeId}'.",
+                errorCode: "spe.containertypes.owners.graph_error",
+                statusCode: ex.ClientStatusFor(),
+                traceId: context.TraceIdentifier,
+                title: "Graph API Error");
+        }
+    }
+
+    private static async Task<IResult> AddContainerTypeOwnerAsync(
+        string typeId,
+        AddContainerTypeOwnerRequest request,
+        SpeAdminGraphService graphService,
+        ILogger<Program> logger,
+        HttpContext context,
+        CancellationToken ct)
+    {
+        if (string.IsNullOrWhiteSpace(request?.UserIdentifier))
+        {
+            return Results.Problem(
+                detail: "A 'userIdentifier' (email/UPN or directory object id) is required.",
+                statusCode: StatusCodes.Status400BadRequest,
+                title: "Bad Request",
+                extensions: new Dictionary<string, object?>
+                {
+                    ["errorCode"] = "spe.containertypes.owners.user_required",
+                    ["traceId"] = context.TraceIdentifier,
+                });
+        }
+
+        try
+        {
+            var owner = await graphService.AddContainerTypeOwnerForUserAsync(
+                context, typeId, request.UserIdentifier, ct);
+
+            if (owner is null)
+            {
+                return Results.NotFound();
+            }
+
+            return TypedResults.Ok(ContainerTypeOwnerDto.FromDomain(owner));
+        }
+        catch (SpaarkeStorageException ex)
+        {
+            logger.LogError(
+                ex, "AddContainerTypeOwner failed for {TypeId}. Status={Status}. TraceId={TraceId}",
+                typeId, ex.StatusCode, context.TraceIdentifier);
+
+            return ex.ToProblemDetails(
+                summary: $"Could not add an owner to container type '{typeId}'.",
+                errorCode: "spe.containertypes.owners.graph_error",
+                statusCode: ex.ClientStatusFor(),
+                traceId: context.TraceIdentifier,
+                title: "Graph API Error");
+        }
+    }
+
+    private static async Task<IResult> RemoveContainerTypeOwnerAsync(
+        string typeId,
+        string permissionId,
+        SpeAdminGraphService graphService,
+        ILogger<Program> logger,
+        HttpContext context,
+        CancellationToken ct)
+    {
+        try
+        {
+            var removed = await graphService.RemoveContainerTypeOwnerForUserAsync(
+                context, typeId, permissionId, ct);
+
+            // A removal that removed nothing is a 404, not a 204. Reporting success here would be
+            // this project's signature defect: the caller reloads, the owner is still listed, and
+            // nothing ever said the operation did not apply.
+            return removed ? Results.NoContent() : Results.NotFound();
+        }
+        catch (SpaarkeStorageException ex)
+        {
+            logger.LogError(
+                ex, "RemoveContainerTypeOwner failed for {TypeId}/{PermissionId}. Status={Status}. TraceId={TraceId}",
+                typeId, permissionId, ex.StatusCode, context.TraceIdentifier);
+
+            return ex.ToProblemDetails(
+                summary: $"Could not remove the owner from container type '{typeId}'.",
+                errorCode: "spe.containertypes.owners.graph_error",
+                statusCode: ex.ClientStatusFor(),
+                traceId: context.TraceIdentifier,
+                title: "Graph API Error");
+        }
     }
 
     // ─────────────────────────────────────────────────────────────────────────
@@ -175,15 +354,11 @@ public static class ContainerTypePermissionEndpoints
                 "Graph API error getting permissions for container type {TypeId}, config {ConfigId}. Status: {Status}. TraceId: {TraceId}",
                 typeId, configGuid, ex.StatusCode, context.TraceIdentifier);
 
-            return Results.Problem(
-                detail: "Failed to retrieve container type permissions from the Graph API. Check the app registration credentials in the config.",
+            return ex.ToProblemDetails(
+                summary: $"Could not retrieve permissions for container type '{typeId}'.",
+                errorCode: "spe.containertypes.permissions.graph_error",
                 statusCode: StatusCodes.Status500InternalServerError,
-                title: "Graph API Error",
-                extensions: new Dictionary<string, object?>
-                {
-                    ["errorCode"] = "spe.containertypes.permissions.graph_error",
-                    ["traceId"] = context.TraceIdentifier
-                });
+                traceId: context.TraceIdentifier);
         }
         catch (Exception ex) when (ex is not OperationCanceledException)
         {
@@ -193,7 +368,7 @@ public static class ContainerTypePermissionEndpoints
                 typeId, configGuid, context.TraceIdentifier);
 
             return Results.Problem(
-                detail: "An unexpected error occurred while retrieving container type permissions.",
+                detail: ProblemDetailsHelper.Explain("An unexpected error occurred while retrieving container type permissions.", ex),
                 statusCode: StatusCodes.Status500InternalServerError,
                 title: "Internal Server Error",
                 extensions: new Dictionary<string, object?>

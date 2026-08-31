@@ -732,6 +732,56 @@ public class SessionPersistenceService : ISessionPersistenceService
 
     private Container GetContainer() => _cosmosClient.GetContainer(_databaseName, ContainerName);
 
+    /// <inheritdoc/>
+    public async Task<SessionRetentionProbe> ProbeSessionRetentionAsync(
+        string tenantId,
+        string sessionId,
+        CancellationToken ct = default)
+    {
+        if (string.IsNullOrWhiteSpace(tenantId) || string.IsNullOrWhiteSpace(sessionId))
+        {
+            // A malformed question cannot be answered, and MUST NOT be answered "expired".
+            return SessionRetentionProbe.Indeterminate;
+        }
+
+        try
+        {
+            var container = GetContainer();
+            var response = await container.ReadItemAsync<StoredSession>(
+                id: sessionId,
+                partitionKey: new PartitionKey(tenantId),
+                cancellationToken: ct);
+
+            // The document's own ttl is the retention fact: null rides the container's 90-day default,
+            // StoredSession.NeverExpireTtl (-1) is a FILED session and never expires.
+            return SessionRetentionProbe.Found(response.Resource?.Ttl);
+        }
+        catch (CosmosException ex) when (ex.StatusCode == System.Net.HttpStatusCode.NotFound)
+        {
+            // The ONLY answer that can lead to a delete. A 404 on a point read against a live account
+            // is definitive: either the TTL elapsed or the document was erased.
+            return SessionRetentionProbe.Absent;
+        }
+        catch (OperationCanceledException)
+        {
+            // Shutdown / caller cancellation. Propagate — this is not "the session is gone" and it is
+            // not an Indeterminate that should be logged as a retention anomaly either.
+            throw;
+        }
+        catch (Exception ex)
+        {
+            // Throttling, transient network, a missing container, an unconfigured account. Every one of
+            // these looks like "not found" to LoadFromCosmosAsync above, which is exactly why retention
+            // does not use it (see ISessionPersistenceService.ProbeSessionRetentionAsync remarks).
+            _logger.LogWarning(ex,
+                "SessionPersistenceService: retention probe could not determine whether session {SessionId} " +
+                "still exists (tenant={TenantId}) — reporting Indeterminate, which RETAINS.",
+                sessionId, tenantId);
+
+            return SessionRetentionProbe.Indeterminate;
+        }
+    }
+
     private async Task<StoredSession?> LoadFromCosmosAsync(
         string tenantId,
         string sessionId,
@@ -763,10 +813,14 @@ public class SessionPersistenceService : ISessionPersistenceService
     /// <inheritdoc/>
     public async Task<IReadOnlyList<RecentSessionInfo>> ListRecentSessionsAsync(
         string tenantId,
+        string ownerOid,
         int limit,
         CancellationToken ct = default)
     {
-        if (string.IsNullOrEmpty(tenantId))
+        // Issue #863 — an unidentifiable caller gets NOTHING, never the unfiltered tenant list.
+        // Empty-not-throw matches this method's existing degrade-gracefully contract, and the
+        // endpoint answers 401 before ever reaching here; this is the second line of defence.
+        if (string.IsNullOrEmpty(tenantId) || string.IsNullOrWhiteSpace(ownerOid))
         {
             return Array.Empty<RecentSessionInfo>();
         }
@@ -785,13 +839,21 @@ public class SessionPersistenceService : ISessionPersistenceService
             // read downstream, see BuildTabSummary) so the History row can render a preview + message
             // count + tab summary. ORDER BY lastActivity DESC uses the default range index; ISO-8601
             // timestamps sort chronologically as strings.
+            //
+            // Issue #863 — `c.ownerOid = @ownerOid` is the ownership predicate. It is written as an
+            // EQUALITY against the caller's oid, never as `(c.ownerOid = @ownerOid OR NOT IS_DEFINED(
+            // c.ownerOid))`: an IS_DEFINED escape hatch would re-list every pre-#863 session to every
+            // user, which is the exact disclosure this line closes and would do so on the oldest —
+            // therefore most numerous — documents. Sessions without an owner match nobody. Intended.
             var query = new QueryDefinition(
                 "SELECT TOP @limit c.id, c.sessionId, c.lastActivity, c.conversationSummary, " +
                 "c.entityRefs, c.messages[0].content AS firstMessage, c.title, " +
                 "ARRAY_LENGTH(c.messages) AS messageCount, c.tabs " +
-                "FROM c WHERE c.tenantId = @tenantId ORDER BY c.lastActivity DESC")
+                "FROM c WHERE c.tenantId = @tenantId AND c.ownerOid = @ownerOid " +
+                "ORDER BY c.lastActivity DESC")
                 .WithParameter("@limit", capped)
-                .WithParameter("@tenantId", tenantId);
+                .WithParameter("@tenantId", tenantId)
+                .WithParameter("@ownerOid", ownerOid);
 
             using var iterator = container.GetItemQueryIterator<RecentSessionProjection>(
                 query,
@@ -977,6 +1039,10 @@ public class SessionPersistenceService : ISessionPersistenceService
         catch (Exception ex)
         {
             // Logged at Warning — not re-thrown. Cosmos failure must not surface to the user (ADR-015 D-06).
+            // ALSO emit an alertable metric (R-5, 2026-08-18): a swallowed Warning alone let the
+            // ttl:null → 400 write outage stay invisible for 11 days. cosmos.write_failures{container}
+            // makes a persistent write-stoppage detectable without any failing request.
+            Sprk.Bff.Api.Telemetry.CosmosPersistenceTelemetry.RecordWriteFailure("sessions");
             _logger.LogWarning(ex,
                 "SessionPersistenceService: Cosmos DB write failed for session {SessionId} (tenant={TenantId}, store=Cosmos) — streaming continues",
                 session.SessionId, session.TenantId);

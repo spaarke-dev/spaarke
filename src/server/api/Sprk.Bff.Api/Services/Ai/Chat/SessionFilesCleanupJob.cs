@@ -1,9 +1,7 @@
 using System.Diagnostics;
 using Azure.Search.Documents;
-using Azure.Search.Documents.Indexes;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Options;
-using Sprk.Bff.Api.Configuration;
 using StackExchange.Redis;
 
 namespace Sprk.Bff.Api.Services.Ai.Chat;
@@ -48,6 +46,24 @@ namespace Sprk.Bff.Api.Services.Ai.Chat;
 /// </para>
 ///
 /// <para>
+/// <b>Scope — HOT INDEX ONLY (spaarkeai-compose-r8 FR-B03, task 061).</b> This sweep runs off a Redis
+/// key with a 24h sliding TTL, while the conversation those files belong to lives 90 days. That
+/// mismatch is the whole reason the durable byte store (task 060) exists — so the sweep must evict the
+/// hot AI-Search tier and MUST NOT touch the durable copy under any condition. That is enforced
+/// structurally rather than by a conditional: the constructor consumes the
+/// <see cref="IServiceProvider"/> into a <see cref="SessionFilesHotIndexAccess"/> and does not retain
+/// it, so after construction this component's entire reachable surface is one
+/// <see cref="SearchClient"/> (the delete target) and one read-only
+/// <see cref="IConnectionMultiplexer"/> (key-existence probes). There is no expression anywhere in this
+/// class from which a <c>SessionFileBlobStore</c> can be obtained, which is why a future edit cannot
+/// quietly widen the blast radius. A conditional guard would have been weaker: it would still leave the
+/// reach in place and rely on the guard being correct.
+/// <c>tests/Spaarke.ArchTests/SessionFilesCleanupScopeTests.cs</c> fails the build if that changes, and
+/// <c>tests/integration/seam/Ai/SessionFilesCleanupHotIndexOnlySeamTests.cs</c> asserts the durable
+/// bytes survive a real eviction pass.
+/// </para>
+///
+/// <para>
 /// <b>Telemetry</b>: emits <c>r5.session_files_cleanup.run</c> events
 /// via <see cref="Telemetry.AiTelemetry.ActivitySource"/> (no new
 /// telemetry singleton per R5 §3.3). Event fields are LOCKED for task 008
@@ -74,7 +90,7 @@ namespace Sprk.Bff.Api.Services.Ai.Chat;
 /// </summary>
 public sealed class SessionFilesCleanupJob : BackgroundService
 {
-    private readonly IServiceProvider _serviceProvider;
+    private readonly SessionFilesHotIndexAccess _hotIndexAccess;
     private readonly SessionFilesCleanupOptions _options;
     private readonly SessionFilesCleanupSignal _signal;
     private readonly string _redisInstancePrefix;
@@ -106,13 +122,35 @@ public sealed class SessionFilesCleanupJob : BackgroundService
         SessionFilesCleanupSignal signal,
         ILogger<SessionFilesCleanupJob> logger)
     {
-        _serviceProvider = serviceProvider ?? throw new ArgumentNullException(nameof(serviceProvider));
+        ArgumentNullException.ThrowIfNull(serviceProvider);
         _options = options?.Value ?? throw new ArgumentNullException(nameof(options));
         // Sessions are WRITTEN via ITenantCache → StackExchangeRedisCache, which
         // prepends RedisOptions.InstanceName to every key ON THE WIRE. The active-set
         // probe below reads raw Redis (IConnectionMultiplexer), so it must apply the
         // same prefix or every live session looks orphaned and gets its files evicted
         // (issue #559).
+        _redisInstancePrefix = redisOptions?.Value?.InstanceName ?? string.Empty;
+        _signal = signal ?? throw new ArgumentNullException(nameof(signal));
+        _logger = logger ?? throw new ArgumentNullException(nameof(logger));
+
+        // spaarkeai-compose-r8 FR-B03 (task 061). The container is consumed HERE and deliberately not
+        // retained: after this line the component holds a SearchClient and an IConnectionMultiplexer and
+        // nothing that can produce any other service. That is what makes "this sweep cannot reach the
+        // durable byte store" a property of the code rather than of nobody having written the call yet.
+        // See SessionFilesHotIndexAccess and tests/Spaarke.ArchTests/SessionFilesCleanupScopeTests.cs.
+        _hotIndexAccess = SessionFilesHotIndexAccess.Resolve(serviceProvider, logger);
+    }
+
+    /// <summary>Test seam: construct the job over an explicit hot-index access set (no container).</summary>
+    internal SessionFilesCleanupJob(
+        SessionFilesHotIndexAccess hotIndexAccess,
+        IOptions<SessionFilesCleanupOptions> options,
+        IOptions<Configuration.RedisOptions> redisOptions,
+        SessionFilesCleanupSignal signal,
+        ILogger<SessionFilesCleanupJob> logger)
+    {
+        _hotIndexAccess = hotIndexAccess ?? throw new ArgumentNullException(nameof(hotIndexAccess));
+        _options = options?.Value ?? throw new ArgumentNullException(nameof(options));
         _redisInstancePrefix = redisOptions?.Value?.InstanceName ?? string.Empty;
         _signal = signal ?? throw new ArgumentNullException(nameof(signal));
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
@@ -185,14 +223,11 @@ public sealed class SessionFilesCleanupJob : BackgroundService
     /// </summary>
     internal async Task DrainPendingSignalsAsync(CancellationToken ct)
     {
-        using var scope = _serviceProvider.CreateScope();
-
         while (_signal.Reader.TryRead(out var signal))
         {
             try
             {
                 await EvictSessionAsync(
-                    scope.ServiceProvider,
                     signal.TenantId,
                     signal.SessionId,
                     TriggerOnSessionEnd,
@@ -231,7 +266,6 @@ public sealed class SessionFilesCleanupJob : BackgroundService
     internal async Task RunScheduledScanAsync(CancellationToken ct)
     {
         var stopwatch = Stopwatch.StartNew();
-        using var scope = _serviceProvider.CreateScope();
 
         var sessionsEvicted = 0;
         var documentsDeleted = 0;
@@ -240,18 +274,15 @@ public sealed class SessionFilesCleanupJob : BackgroundService
 
         try
         {
-            var searchIndexClient = scope.ServiceProvider.GetService<SearchIndexClient>();
-            if (searchIndexClient is null)
+            var sessionFilesClient = _hotIndexAccess.HotIndex;
+            if (sessionFilesClient is null)
             {
                 _logger.LogDebug(
-                    "SessionFilesCleanupJob: SearchIndexClient not registered — scheduled scan skipped");
+                    "SessionFilesCleanupJob: session-files search client unavailable — scheduled scan skipped");
                 return;
             }
 
-            var aiSearchOptions = scope.ServiceProvider.GetRequiredService<IOptions<AiSearchOptions>>().Value;
-            var sessionFilesClient = searchIndexClient.GetSearchClient(aiSearchOptions.SessionFilesIndexName);
-
-            var multiplexer = scope.ServiceProvider.GetService<IConnectionMultiplexer>();
+            var multiplexer = _hotIndexAccess.ActiveSessionKeys;
             if (multiplexer is null)
             {
                 _logger.LogInformation(
@@ -293,7 +324,6 @@ public sealed class SessionFilesCleanupJob : BackgroundService
                     try
                     {
                         var deleted = await EvictSessionAsync(
-                            scope.ServiceProvider,
                             tenantId,
                             orphanSessionId,
                             TriggerScheduled,
@@ -364,7 +394,6 @@ public sealed class SessionFilesCleanupJob : BackgroundService
     /// </para>
     /// </remarks>
     internal async Task<int> EvictSessionAsync(
-        IServiceProvider scopedServices,
         string tenantId,
         string sessionId,
         string trigger,
@@ -379,17 +408,16 @@ public sealed class SessionFilesCleanupJob : BackgroundService
 
         try
         {
-            var searchIndexClient = scopedServices.GetService<SearchIndexClient>();
-            if (searchIndexClient is null)
+            // FR-B03: the ONE and ONLY delete target reachable from this component. It is the hot
+            // AI-Search index; the durable byte copy is not addressable from here at all.
+            var sessionFilesClient = _hotIndexAccess.HotIndex;
+            if (sessionFilesClient is null)
             {
                 _logger.LogDebug(
-                    "SessionFilesCleanupJob.EvictSessionAsync: SearchIndexClient not registered — skipping ({TenantId}/{SessionId})",
+                    "SessionFilesCleanupJob.EvictSessionAsync: session-files search client unavailable — skipping ({TenantId}/{SessionId})",
                     tenantId, sessionId);
                 return 0;
             }
-
-            var aiSearchOptions = scopedServices.GetRequiredService<IOptions<AiSearchOptions>>().Value;
-            var sessionFilesClient = searchIndexClient.GetSearchClient(aiSearchOptions.SessionFilesIndexName);
 
             // ADR-014: tenant + session predicates always present.
             var filter = $"tenantId eq '{EscapeOData(tenantId)}' and sessionId eq '{EscapeOData(sessionId)}'";

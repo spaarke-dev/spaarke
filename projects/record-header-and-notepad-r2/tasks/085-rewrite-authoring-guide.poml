@@ -1,0 +1,154 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="085" project="record-header-and-notepad-r2">
+  <metadata>
+    <title>Rewrite RECORD-HEADER-PCF-AUTHORING-GUIDE.md from shipped code: per-entity PCF recipe → configure-the-header-for-a-new-entity</title>
+    <phase>6 Documentation + wrap</phase>
+    <gate>blocked</gate>
+    <status>completed</status>
+    <rigor>STANDARD</rigor>
+    <rigor-reason>Documentation task, but with explicit constraints (preserve-verbatim block, author-from-code rule) and Phase 6 — STANDARD per the Step 3.5.5 tree; no code modification.</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Documentation authoring against a shipped, fully specified code surface; no architectural judgment.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <parallel-reason>Sole writer of the guide file; nothing else in Phase 6 touches it. Blocked on 080 anyway (must document the shipped, Matter-verified control).</parallel-reason>
+    <deps>080</deps>
+    <tags>documentation</tags>
+    <estimated-effort>3-5 hours</estimated-effort>
+  </metadata>
+
+  <prompt>
+    Rewrite docs/guides/RECORD-HEADER-PCF-AUTHORING-GUIDE.md (~354 lines) from "how to write a new per-entity
+    PCF" to "how to configure the header for a new entity" — the per-entity recipe becomes actively wrong the day
+    R2 ships. Roughly 170-190 lines (≈50-55%) are replaced or heavily revised; ~120 survive. Author the new content
+    FROM SHIPPED CODE, not by diffing the old guide — the old guide has ALREADY drifted from v1.0.20 and cannot be
+    trusted as a baseline.
+  </prompt>
+
+  <role>
+    SPAARKE platform developer and technical writer. Expert in PCF manifests, the R2 RecordHeader configuration
+    model, and the docs-guide conventions. Follow ADRs strictly.
+  </role>
+
+  <goal>
+    docs/guides/RECORD-HEADER-PCF-AUTHORING-GUIDE.md teaches the R2 workflow (bind Spaarke.Records.RecordHeader on
+    a main form, author layoutJson, rely on derived defaults) with zero surviving references to the retired
+    per-entity recipe, the bundle-optimization triad section preserved verbatim, and every code claim verified
+    against the shipped RecordHeader control.
+  </goal>
+
+  <context>
+    <background>
+      FR-27 (spec.md) and design.md §3.1 scoping note. The old guide's core recipe (clone a thin per-entity PCF)
+      was withdrawn 2026-08-21. KNOWN DRIFT in the old guide — this is WHY authoring must start from shipped code,
+      and each of these must NOT survive into the rewrite:
+      (a) its manifest example shows a recordId input-only control, but actual v1.0.20 shipped boundField (bound) +
+      title + showVersion — and R2 adds layoutJson;
+      (b) its modal sizes are stale: SmartTodo "85%×85%" is now the openTodos filtered launch, Notepad "70%×80%"
+      is now 25%×35%;
+      (c) it documents a recordSummary hook parameter retired at v1.0.10;
+      (d) it repeats the ADR-011 "typed components — no runtime schemas" line that design.md §12 debunks (ADR-011
+      contains no such rule);
+      (e) it claims platform-library theming removes the need for a manual FluentProvider — R1 live QA proved the
+      manual wrap IS required (Fluent portals mount outside the PCF subtree);
+      (f) line 86 says the version number appears in "four" locations — the correct count is FIVE (ADR-020).
+    </background>
+    <relevant-files>
+      <file role="modify">docs/guides/RECORD-HEADER-PCF-AUTHORING-GUIDE.md</file>
+      <file role="canonical-reference">src/client/pcf/RecordHeader/control/ControlManifest.Input.xml</file>
+      <file role="canonical-reference">src/client/pcf/RecordHeader/control/index.ts</file>
+      <file role="canonical-reference">src/client/shared/Spaarke.UI.Components/src/components/RecordHeader/</file>
+      <file role="canonical-reference">src/client/shared/Spaarke.UI.Components/src/hooks/toolbarLaunchDefaults.ts</file>
+    </relevant-files>
+    <dependencies>
+      <dependency task="080" status="pending">Matter parity QA complete — the RecordHeader control is shipped, bound on all six entities, and stable; the guide documents final reality, not a moving target.</dependency>
+    </dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="FR-27">Author every new section FROM the shipped code (RecordHeader manifest, view, resolver, toolbarLaunchDefaults) — never by paraphrasing or diffing the old guide's per-entity sections. Each manifest/property/size claim in the new guide must be traceable to a shipped file.</constraint>
+    <constraint source="FR-27">PRESERVE the "Bundle Optimization — MANDATORY for Consuming PCFs" section (currently lines ~206-265, the ~57-line triad block: featureconfig.json + webpack.config.js + deep-path imports) VERBATIM — it is still correct and still mandatory (NFR-08). Heading anchors referenced elsewhere must keep working.</constraint>
+    <constraint source="ADR-020">Correct the version-locations count from "four" to FIVE everywhere it appears (currently line 86), consistent with PCF-DEPLOYMENT-GUIDE.md.</constraint>
+    <constraint source="project">The rewrite scope is docs/guides/RECORD-HEADER-PCF-AUTHORING-GUIDE.md ONLY. Do not edit PCF-DEPLOYMENT-GUIDE.md, the pattern pointer (that is task 086), or any code file.</constraint>
+    <constraint source="project">Surviving content (~120 lines: shared-primitives overview, Notepad launch contract, testing/deploy skeleton, troubleshooting, FAQ, references) is kept only where re-verified against shipped code — stale modal sizes and the retired recordSummary param in those sections must be corrected, not preserved.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>Guide authoring for the configurable RecordHeader</topic>
+    <files>
+      <file>.claude/skills/docs-guide/SKILL.md</file>
+      <file>projects/record-header-and-notepad-r2/spec.md</file>
+      <file>projects/record-header-and-notepad-r2/design.md</file>
+      <file>docs/guides/PCF-DEPLOYMENT-GUIDE.md</file>
+      <file>.claude/adr/ADR-020-versioning.md</file>
+    </files>
+    <patterns>
+      <pattern name="shipped configuration model" location="src/client/shared/Spaarke.UI.Components/src/components/RecordHeader/">resolveHeaderConfig + RecordHeaderConfiguration v1.0 schema — the guide's layoutJson authoring section documents exactly what this code accepts, including the span clamp and derived defaults.</pattern>
+      <pattern name="maker binding recipe" location="projects/record-header-and-notepad-r1/notes/matter-form-binding-instructions.md">The form-designer binding walkthrough Phase 5 followed — fold the R2 (layoutJson) version of this into the guide's configure-a-new-entity section.</pattern>
+    </patterns>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="0">Declare rigor level (STANDARD) and load knowledge files per task-execute Step 0.5.</step>
+    <step order="1">Read the shipped RecordHeader control end-to-end: ControlManifest.Input.xml (property set incl. layoutJson), index.ts, the generic view, resolveHeaderConfig + the RecordHeaderConfiguration types, toolbarLaunchDefaults.ts (RECORDSUMMARY_FIELD, both parent maps incl. sprk_agreement). Also read one live layoutJson example from a Phase 5 form binding (design.md §9 layouts are the shipped defaults).</step>
+    <step order="2">Read the old guide ONCE to inventory: (a) the surviving-content candidates, (b) the exact boundaries of the Bundle Optimization triad block to preserve verbatim, (c) every drift item from the background list. Do not reuse its per-entity sections as source material.</step>
+    <step order="3">Rewrite: Purpose/Prerequisites → configuring the ONE control; replace "Per-Entity Thin PCF Pattern" (manifest/class/view walkthrough) with "Configure the header for a new entity" — form binding on the entity's MAIN form, layoutJson authoring (schema v1.0, spans, columns, clamp, no-apostrophes manifest trap), derived defaults when no JSON is supplied, summary sparkle via the sprk_recordsummary default, toolbar slot auto-hide and what adding a new To Do/Memo parent requires.</step>
+    <step order="4">Carry over and re-verify the surviving sections; correct modal sizes (Notepad 25%×35%; SmartTodo openTodos filtered launch), delete the recordSummary hook param, delete the ADR-011 misreading, state that the manual FluentProvider wrap IS required, fix "four" → 5 version locations.</step>
+    <step order="5">Verify with greps (see acceptance criteria) and a full read-through; confirm the triad block is byte-identical.</step>
+    <step order="6">Update TASK-INDEX.md: set this task's status to ✅.</step>
+    <step order="7">Document any deviation in projects/record-header-and-notepad-r2/notes/.</step>
+  </steps>
+
+  <tools>
+    <tool name="grep">Verify no retired-recipe references survive</tool>
+  </tools>
+
+  <outputs>
+    <output type="docs">docs/guides/RECORD-HEADER-PCF-AUTHORING-GUIDE.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Grep of the guide for "Per-Entity", "ProjectHeader", "&lt;Entity&gt;HeaderView", and "recordId" (as a manifest property) returns zero matches — no reference to the retired per-entity recipe survives (FR-27 acceptance).</criterion>
+    <criterion testable="true">The "Bundle Optimization — MANDATORY for Consuming PCFs" section (Fix 1 / Fix 2 / Fix 3, ~57 lines) is byte-identical to the pre-task version (verify via git diff hunk boundaries).</criterion>
+    <criterion testable="true">The guide states the version number appears in FIVE locations; grep for "four locations"/"4 locations" returns zero matches.</criterion>
+    <criterion testable="true">The guide's manifest excerpt matches the shipped src/client/pcf/RecordHeader/control/ControlManifest.Input.xml property set (layoutJson + boundField + title + showVersion), and its modal/launch claims match shipped code (Notepad 25%×35%; SmartTodo openTodos filtered launch).</criterion>
+    <criterion testable="true">Grep for "recordSummary" (the retired hook parameter), "no runtime schemas", and any claim that platform-library theming makes the manual FluentProvider unnecessary returns zero matches; the guide affirmatively states the manual FluentProvider wrap is required for portal-mounted Fluent surfaces.</criterion>
+    <criterion testable="true">Negative: git status shows the guide as the ONLY modified file for this task.</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    Spec refs: FR-27; design.md §3.1 (scoping: ~170-190 of ~354 lines replaced, ~120 survive; triad block survives).
+    The old guide is a drift EXHIBIT, not a source — treat its six known drift items as a checklist of claims that
+    must not reappear. Task 086 (pattern pointer refresh) depends on this task and links to the rewritten guide.
+  </notes>
+
+  <notes>
+    COMPLETED 2026-08-27, PULLED FORWARD ahead of its `080` dependency at owner request ("this needs
+    to be fixed/updated"). The dependency was about finality rather than content: the control is
+    shipped and UAT-passed at v1.1.11, and the maker recipe does not change when Matter migrates.
+    Leaving it until after 080 meant leaving a live hazard in place -- the guide was teaching the
+    RETIRED per-entity-PCF recipe end-to-end, which is exactly the wrong instruction for any agent or
+    maker who found it.
+
+    Rewritten from shipped code, 353 -> ~250 lines. It now OPENS with an explicit stop-sign for the
+    retired approach rather than burying the correction. Reframed from "author a new PCF" to
+    "configure the one control": binding recipe, layoutJson schema reference, manifest properties,
+    sparkle behaviour, and the two 🚨 traps (MOVE-don't-delete the raw fields; edit ALL THREE form
+    factors). Developer material retained where still true -- the bundle-optimization triad (still
+    mandatory), the two FAILED bundle "fixes" that must not be re-derived, the Notepad/SmartTodo
+    launch contracts, and the G-12/G-13/G-14 rules. Troubleshooting now leads with the two console
+    diagnostics the control emits.
+
+    Also fixed FOUR broken ADR links, three of which were inherited from the original: ADR-024 and
+    ADR-028 live in `.claude/adr/`, not `docs/adr/`, and ADR-006's filename is
+    `ADR-006-prefer-pcf-over-webresources.md`. All relative links verified to resolve.
+
+    Follow-up: re-check after task 080 in case the Matter migration surfaces anything new.
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Before starting this task, load all files listed in knowledge/files. Follow the task-execute skill for the mandatory pre-execution checklist.</protocol>
+  </execution>
+</task>

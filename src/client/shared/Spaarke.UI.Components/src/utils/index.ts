@@ -1,3 +1,4 @@
+export * from './ensureNavigatorSidePane';
 export * from './logger';
 export * from './lookupMatching';
 export * from './parseDataParams';
@@ -9,3 +10,4 @@ export * from './themeStorage';
 export * from './xrmContext';
 export * from './relationshipColors';
 export * from './adapters';
+export * from './todoScoreMappings';

@@ -1,0 +1,71 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="054" project="spaarke-auth-v4-dataverse-MI">
+  <metadata>
+    <title>Document Intelligence: migrate the three key sites to Entra/MI (FR-E5)</title>
+    <phase>5 Group 2</phase>
+    <gate>startable</gate>
+    <status>completed</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>auth tag, modifies .cs on the document-analysis path.</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Standard Entra migration across three named config sites.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>F</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <deps>none</deps>
+    <tags>auth,bff-api,ai,api-key</tags>
+    <estimated-effort>4-6 hours</estimated-effort>
+  </metadata>
+
+  <prompt>DocumentIntelligenceOptions carries three keys — OpenAiKey, DocIntelKey and AiSearchKey — at :42, :152 and :303. All three target first-party Azure services where Entra auth is available. Migrate them.</prompt>
+  <role>SPAARKE platform developer.</role>
+  <goal>All three Document Intelligence credential paths authenticate via managed identity, with analysis output unchanged.</goal>
+
+  <context>
+    <background>Group 2 pattern: Azure first-party services running on API keys where MI is available. Note the AiSearchKey here may overlap task 053's surface — check for duplication rather than migrating the same resource twice.</background>
+    <relevant-files>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Configuration/DocumentIntelligenceOptions.cs</file>
+      <file role="canonical-reference">src/server/api/Sprk.Bff.Api/Infrastructure/Auth/ManagedIdentityCredentialFactory.cs</file>
+    </relevant-files>
+    <dependencies><dependency task="none" status="complete">Independent, but coordinate with 053 on the shared AI Search resource</dependency></dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="project">Scope: these three config sites only.</constraint>
+    <constraint source="project">Scope: check whether AiSearchKey targets the same Search resource as task 053. If so, coordinate — do not grant duplicate RBAC or migrate twice.</constraint>
+    <constraint source="project">Scope: use the DI-injected TokenCredential, not inline construction.</constraint>
+    <constraint source="project">Scope: verify RBAC on each target resource before clearing its key.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>Azure Document Intelligence, Entra auth</topic>
+    <files>
+      <file>.claude/adr/ADR-028-spaarke-auth-architecture.md</file>
+      <file>projects/spaarke-auth-v4-dataverse-MI/notes/CREDENTIAL-INVENTORY.md</file>
+    </files>
+  </knowledge>
+
+  <steps mode="directional">
+    <step>Map each of the three keys to its target Azure resource.</step>
+    <step>Check for overlap with task 053's AI Search resource.</step>
+    <step>Verify UAMI RBAC on each resource.</step>
+    <step>Migrate each site to the DI TokenCredential.</step>
+    <step>Verify document analysis output is unchanged on a known document set.</step>
+    <step>Clear the keys.</step>
+  </steps>
+
+  <escalation>
+    <trigger>Any target resource does not support Entra auth — STOP for that key and document why it is retained.</trigger>
+  </escalation>
+
+  <outputs>
+    <output type="modify">src/server/api/Sprk.Bff.Api/Configuration/DocumentIntelligenceOptions.cs</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion>All three paths authenticate via managed identity, or a retained key is documented with its reason.</criterion>
+    <criterion>Document analysis output is unchanged on a known document set.</criterion>
+    <criterion>Negative case: no duplicate RBAC grant or double migration of the AI Search resource shared with task 053.</criterion>
+    <criterion>Negative case: with RBAC absent, analysis fails with an actionable message rather than degrading silently.</criterion>
+  </acceptance-criteria>
+</task>

@@ -1,3 +1,4 @@
+using Sprk.Bff.Api.Infrastructure.Authentication;
 using System.Security.Claims;
 using Microsoft.AspNetCore.Http.HttpResults;
 using Sprk.Bff.Api.Infrastructure.Errors;
@@ -142,33 +143,25 @@ public class OfficeAuthFilter : IEndpointFilter
     }
 
     /// <summary>
-    /// Extracts user ID from claims. Checks Azure AD claims first, then standard claims.
+    /// Resolves the caller's Entra object id, or <see langword="null"/> when the caller cannot be
+    /// identified (the filter then answers 401).
     /// </summary>
+    /// <remarks>
+    /// <para><b>The NameIdentifier and sub fallbacks were removed on 2026-08-27.</b> The value this
+    /// returns is stored in <see cref="UserIdKey"/> and consumed as the caller identity by
+    /// <c>EntityAccessFilter</c> and <c>JobOwnershipFilter</c>, and by nine handlers in
+    /// <c>Api/Office/OfficeEndpoints.cs</c> that read the key directly — all of which authorize
+    /// against Dataverse, which matches on <c>systemuser.azureactivedirectoryobjectid</c>. Under
+    /// inbound claim mapping both fallbacks resolve the same pairwise <c>sub</c>, matching no
+    /// systemuser.</para>
+    /// <para>A third filter, <c>OfficeDocumentAccessFilter</c>, was also named here until task 018
+    /// deleted it (2026-08-27) as unused-but-functional: nothing ever attached it to a route. Note
+    /// this list is NOT only filters — the direct handler reads carry the same requirement, so
+    /// weakening this resolver breaks authorization at call sites no filter inventory would find.</para>
+    /// <para>Contrast <c>OfficeRateLimitFilter</c>, which legitimately accepts <c>sub</c> because a
+    /// rate-limit partition only needs stability, not resolvability. Same claim, different purpose —
+    /// which is why the two now call differently named resolvers instead of sharing one chain.</para>
+    /// </remarks>
     private static string? ExtractUserId(ClaimsPrincipal user)
-    {
-        // Try Azure AD object identifier (OID) first - most reliable
-        var oid = user.FindFirst(OidClaimType)?.Value
-            ?? user.FindFirst(AltOidClaimType)?.Value;
-
-        if (!string.IsNullOrWhiteSpace(oid))
-        {
-            return oid;
-        }
-
-        // Fallback to standard NameIdentifier
-        var nameId = user.FindFirst(ClaimTypes.NameIdentifier)?.Value;
-        if (!string.IsNullOrWhiteSpace(nameId))
-        {
-            return nameId;
-        }
-
-        // Fallback to OIDC 'sub' claim
-        var sub = user.FindFirst("sub")?.Value;
-        if (!string.IsNullOrWhiteSpace(sub))
-        {
-            return sub;
-        }
-
-        return null;
-    }
+        => CallerResolution.ResolveObjectId(user);
 }

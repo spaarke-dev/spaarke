@@ -201,6 +201,10 @@ export interface WorkspacePaneEvent {
    * - `widget_action`          — a user action was performed inside a widget
    * - `tab_change`             — the active workspace tab changed
    * - `tab_count_change`       — the number of open tabs changed (drives Stage 3↔4 transitions)
+   * - `workspace_tabs_snapshot`— the open embedded-layout tab set changed; carries `openLayoutIds`
+   *                              (the `layoutId`s of open `widgetType:'workspace'` tabs) so a sibling
+   *                              pane can gate an "open this layout" follow-on card on already-open
+   *                              state (task 023 / FR-06). Additive; existing subscribers ignore it.
    * - `selection_changed`      — the user selected (or cleared) text inside a widget
    * - `tabs_clear`             — all workspace tabs should be cleared (exclusive playbook selection)
    * - `wizard_step`            — the ConversationPane requests a wizard step navigation or field update
@@ -338,6 +342,7 @@ export interface WorkspacePaneEvent {
     | 'widget_action'
     | 'tab_change'
     | 'tab_count_change'
+    | 'workspace_tabs_snapshot'
     | 'selection_changed'
     | 'tabs_clear'
     | 'wizard_step'
@@ -476,6 +481,27 @@ export interface WorkspacePaneEvent {
    *   tabCount === 0 → reset toward Stage 1 (welcome)
    */
   tabCount?: number;
+
+  /**
+   * The layout ids of the currently-open `widgetType: 'workspace'` tabs (embedded
+   * LegalWorkspaceApp layouts — Daily Briefing / Smart To Do / Calendar / …),
+   * read off each tab's `widgetData.layoutId`.
+   *
+   * Present when `type === 'workspace_tabs_snapshot'` — an ADDITIVE, backward-
+   * compatible open-tab awareness signal (spaarkeai-assistant-enhancements-r4 task
+   * 023, FR-06): WorkspacePane broadcasts it whenever the tab set mutates (add /
+   * close / restore), so a sibling pane (the Assistant's ConversationPane) can gate
+   * a "open this layout" follow-on card on whether that layout's tab is already
+   * open — WITHOUT reaching into WorkspacePane's private tab manager (panes stay
+   * decoupled via the bus, per ADR-030). Existing subscribers ignore this
+   * discriminant (ADR-030 additive-types rule). Non-layout tabs (document viewers,
+   * Compose, wizards) contribute no id — only `widgetType: 'workspace'` layout
+   * tabs carry a `layoutId`, so the set is exactly the open embedded layouts.
+   *
+   * ADR-015: layout ids are deterministic `sprk_workspacelayout` identifiers — no
+   * user content.
+   */
+  openLayoutIds?: readonly string[];
 
   /**
    * Human-readable display name for the affected widget tab.
@@ -1587,7 +1613,16 @@ export interface ConversationPaneEvent {
     // asks ConversationPane — which owns the single `QuickStartModal` — to open
     // that modal on a specified tab (`create` | `analysis`). Additive
     // discriminant per ADR-030; existing subscribers ignore it.
-    | 'open_quick_start';
+    | 'open_quick_start'
+    // ── Focus chat input (spaarkeai-compose-r7 task 061, FR-05 / UC-6) ──
+    // A DIFFERENT pane (the Compose editor, via its Ctrl+Shift+Space hotkey) asks
+    // ConversationPane to move keyboard focus into the Assistant chat composer.
+    // ConversationPane relays it to SprkChat's `focusInputSignal` host→focus seam,
+    // which calls the SprkChatInput `focusInput()` handle. A pure UI-focus signal —
+    // carries NO content (only the reused `sessionId`/`timestamp` identifier fields
+    // below, both Tier-1 safe per ADR-015). Additive discriminant per ADR-030;
+    // existing subscribers ignore it.
+    | 'focus_chat_input';
 
   /** Human-readable suggestion text when `type === 'suggestion'`. */
   suggestionText?: string;

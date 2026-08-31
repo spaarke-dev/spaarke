@@ -76,7 +76,7 @@ public sealed class ActiveDocumentBridgeSeamTests : TypedToolHandlerTestFixture
     private SendWorkspaceArtifactHandler CreateHandler() => new(
         _guidProvider.Object,
         new FixedTimeProvider(DeterministicNow),
-        new WorkspaceLayoutService(_entityService.Object, CreateLogger<WorkspaceLayoutService>()),
+        new WorkspaceLayoutService(_entityService.Object, global::Sprk.Bff.Api.Tests.Services.Workspace.StubSystemUserIdentityResolver.Instance, CreateLogger<WorkspaceLayoutService>()),
         _dataverse.Object,
         _ackCoordinator.Object,
         _sessions,
@@ -101,7 +101,7 @@ public sealed class ActiveDocumentBridgeSeamTests : TypedToolHandlerTestFixture
             HostContext: null,
             AdditionalDocumentIds: null,
             UploadedFiles: uploadedFile is null ? null : new[] { uploadedFile })
-        {
+        { OwnerOid = TestSessionOwner.Oid,
             ActiveDocument = activeDocument,
         };
         await _sessions.UpdateSessionCacheAsync(session);

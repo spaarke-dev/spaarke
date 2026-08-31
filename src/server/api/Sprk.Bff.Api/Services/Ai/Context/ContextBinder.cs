@@ -273,12 +273,18 @@ public sealed class ContextBinder : IContextBinder
                 };
             }
 
-            // (3) A declared operand field value (selectionText / changesText / documentText) → { field: value }.
+            // (3) A declared operand field value (selectionText / changesText / documentText) → { field: value },
+            //     PLUS any DECLARED COMPANION inputs the caller supplied (see CollectDeclaredCompanions).
             var declared = GetDeclaredProperties(request.InputSchemaJson);
             if (TryFindDeclaredOperandField(args, declared, out var field, out var kind, out var value))
             {
-                var operandObject = JsonSerializer.SerializeToElement(
-                    new Dictionary<string, JsonElement> { [field] = value });
+                var members = new Dictionary<string, JsonElement> { [field] = value };
+                foreach (var companion in CollectDeclaredCompanions(args, declared, field))
+                {
+                    members[companion.Key] = companion.Value;
+                }
+
+                var operandObject = JsonSerializer.SerializeToElement(members);
                 return new ResolvedOperand
                 {
                     Channel = OperandChannel.Input,
@@ -348,6 +354,92 @@ public sealed class ContextBinder : IContextBinder
         key = value;
         return true;
     }
+
+    /// <summary>
+    /// The DECLARED COMPANION inputs that ride alongside the operand in the <c>## Input</c> object
+    /// (spaarkeai-compose-r8 task 051, FR-C03). Added because the operand channel is single-valued by
+    /// construction — <see cref="TryFindDeclaredOperandField"/> returns on the first vocabulary match and
+    /// the operand object carries exactly one key — so it can say WHAT content a completion runs over but
+    /// never WHERE that content came from. A caller holding a deterministic anchor (Compose captures a
+    /// stable <c>w14:paraId</c> at selection time) had nowhere to put it: the arg was accepted and then
+    /// silently dropped before the prompt, leaving the model able to name its edit target only by quoting
+    /// prose back. Quoting is a GENERATION step and generation is lossy, which is precisely the
+    /// "wording differs slightly" failure Compose kept hitting.
+    ///
+    /// <para>
+    /// <b>Declaration is the contract.</b> A property reaches the model when the Action DECLARES it in
+    /// <c>sprk_inputschema</c> and the caller SUPPLIES it — nothing else. That is what declaring an input
+    /// already means, and it closes the accepted-and-ignored trap that hid the defect. Capability shape
+    /// stays in catalog DATA (ADR-039): a new companion is an Action-row edit, not a code change.
+    /// </para>
+    ///
+    /// <para>
+    /// <b>Why not widen <see cref="OperandVocabulary"/>.</b> The vocabulary is a PICK-ONE list, not an
+    /// inclusion list. A fourth entry would COMPETE with <c>selectionText</c> rather than accompany it —
+    /// whichever came first would win and the other would vanish — breaking every selection dispatch. And
+    /// nesting the anchor inside the operand value (<c>selectionText: {text, paraId}</c>) is a type pun:
+    /// <see cref="OperandKind.SelectionText"/> means the TEXT, tiered as content, while a paraId is a
+    /// Tier-1 opaque identifier. Both alternatives were considered and rejected.
+    /// </para>
+    ///
+    /// <para>
+    /// <b>Bounds.</b> Never the operand field itself; never another <see cref="OperandVocabulary"/> name
+    /// (a second content field must not enter this way); never the <c>ledger_resolution</c> control member;
+    /// null/empty values skipped. Oversized companions are SKIPPED AND LOGGED rather than truncated — a
+    /// half-sent identifier list is worse than an absent one, because the model would treat it as complete.
+    /// </para>
+    /// </summary>
+    private IEnumerable<KeyValuePair<string, JsonElement>> CollectDeclaredCompanions(
+        JsonElement args,
+        IReadOnlySet<string>? declaredProperties,
+        string operandField)
+    {
+        // No declaration ⇒ no companions. The closed vocabulary is the whole contract in that case, so
+        // there is nothing that authorized any other arg to reach the model.
+        if (declaredProperties is null || declaredProperties.Count == 0)
+        {
+            yield break;
+        }
+
+        var emitted = 0;
+        foreach (var property in args.EnumerateObject())
+        {
+            if (emitted >= MaxDeclaredCompanions)
+            {
+                _logger.LogWarning(
+                    "ContextBinder: companion cap ({Max}) reached; later declared inputs were not sent to the model.",
+                    MaxDeclaredCompanions);
+                yield break;
+            }
+
+            if (string.Equals(property.Name, operandField, StringComparison.Ordinal)
+                || string.Equals(property.Name, LedgerResolutionMember, StringComparison.Ordinal)
+                || OperandVocabulary.Any(v => string.Equals(v.Field, property.Name, StringComparison.Ordinal))
+                || !declaredProperties.Contains(property.Name)
+                || !IsNonEmptyOperandValue(property.Value))
+            {
+                continue;
+            }
+
+            var raw = property.Value.GetRawText();
+            if (raw.Length > MaxDeclaredCompanionChars)
+            {
+                _logger.LogWarning(
+                    "ContextBinder: declared input '{Field}' ({Chars} chars) exceeds the companion cap and was NOT sent to the model.",
+                    property.Name, raw.Length);
+                continue;
+            }
+
+            emitted++;
+            yield return new KeyValuePair<string, JsonElement>(property.Name, property.Value.Clone());
+        }
+    }
+
+    /// <summary>Max declared companion inputs rendered alongside the operand.</summary>
+    private const int MaxDeclaredCompanions = 8;
+
+    /// <summary>Max serialized size of ONE companion value. Oversize is skipped + logged, never truncated.</summary>
+    private const int MaxDeclaredCompanionChars = 32 * 1024;
 
     /// <summary>
     /// Finds the first closed-vocabulary operand field that is (a) declared by the schema when a schema is
@@ -561,11 +653,14 @@ public sealed class ContextBinder : IContextBinder
         var statedProfileFragment = await ResolveStatedProfileFragmentAsync(systemUserId, ct).ConfigureAwait(false);
         var orgContextFragment = await ResolveOrgContextFragmentAsync(systemUserId, ct).ConfigureAwait(false);
         var memoryRecallFragment = await ResolveUserMemoryFragmentAsync(systemUserId, ct).ConfigureAwait(false);
+        // task 032 (FR-09): the fourth sibling — the governed narrow-allow-list preference-directive HINT.
+        var preferenceDirectiveFragment = await ResolvePreferenceDirectiveFragmentAsync(systemUserId, ct).ConfigureAwait(false);
 
-        // Deterministic order: stated profile FIRST, then org (BU/team) context, then memory recall. Present
-        // blocks are joined by a blank line. This preserves the prior behavior exactly when the org block is
-        // absent (stated-only → stated; memory-only → memory; stated+memory → stated\n\nmemory). All absent → null.
-        var blocks = new List<string>(3);
+        // Deterministic order: stated profile FIRST, then org (BU/team) context, then memory recall, then the
+        // preference-directive hint LAST (task 032). Present blocks are joined by a blank line. This preserves
+        // the prior behavior exactly when the new blocks are absent (stated-only → stated; memory-only →
+        // memory; stated+memory → stated\n\nmemory). All absent → null.
+        var blocks = new List<string>(4);
         if (statedProfileFragment is not null)
         {
             blocks.Add(statedProfileFragment);
@@ -577,6 +672,10 @@ public sealed class ContextBinder : IContextBinder
         if (memoryRecallFragment is not null)
         {
             blocks.Add(memoryRecallFragment);
+        }
+        if (preferenceDirectiveFragment is not null)
+        {
+            blocks.Add(preferenceDirectiveFragment);
         }
 
         return blocks.Count == 0 ? null : string.Join("\n\n", blocks);
@@ -664,6 +763,43 @@ public sealed class ContextBinder : IContextBinder
             _logger.LogWarning(ex,
                 "ContextBinder: user-memory store read failed for the resolved caller — User recall " +
                 "fragment degrades to absent (soft-fail; a bind is never taken down by memory). NFR-07.");
+            return null;
+        }
+    }
+
+    // ── User-scope GOVERNED preference-directive hint (task 032, FR-09): the ONE sanctioned seam where a
+    //    LEARNED preference biases behavior. Reads the caller's CONFIRMED Preference facts and runs the
+    //    CLOSED-allow-list PreferenceDirectiveProducer, which emits a SERVER-AUTHORED pre-turn hint that
+    //    biases the DEFAULT of an already-available capability. Soft-fail to null (store outage / no confirmed
+    //    directive → absent). ADR-039 preference-only: this is PROMPT text folded into the User slice — it
+    //    NEVER reaches AgentToolFilterContext / grounding / dispatch (the mount set stays preference-blind,
+    //    the task-011 ProfileInjection invariant). Confirmed-only (task-031 dormant candidates never steer);
+    //    the user's raw preference text is never emitted as an instruction (only the fixed hint is). ────────
+
+    private async Task<string?> ResolvePreferenceDirectiveFragmentAsync(string systemUserId, CancellationToken ct)
+    {
+        if (_memoryItemStore is null)
+        {
+            return null;
+        }
+
+        try
+        {
+            var items = await _memoryItemStore.GetForUserAsync(systemUserId, ct).ConfigureAwait(false);
+            var facts = items.Select(i => i.Fact).ToList();
+            return PreferenceDirectiveProducer.Produce(facts);
+        }
+        catch (OperationCanceledException)
+        {
+            throw;
+        }
+        catch (Exception ex)
+        {
+            // Defense-in-depth: a store outage degrades the preference-directive hint to absent — a bind is
+            // never taken down by a preference, and the ABSENCE of a hint is always the safe default (NFR-07).
+            _logger.LogWarning(ex,
+                "ContextBinder: preference-directive read failed for the resolved caller — the governed " +
+                "preference hint degrades to absent (soft-fail; the safe default is no steering).");
             return null;
         }
     }

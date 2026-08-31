@@ -1,0 +1,100 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="003" project="dotnet-10-upgrade-r1">
+  <metadata>
+    <title>Retarget Spaarke.Core + Spaarke.Dataverse; required package moves + pin removals</title>
+    <phase>P0 Retarget + build-green</phase>
+    <gate>002 complete</gate>
+    <status>completed</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Modifies .csproj + runtime-tied packages (Dataverse.Client/MSAL/Identity.Web); brownfield; tags include bff-api.</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Enumerated package moves from design §6.1/§6.2; bounded judgment.</model-tier-reason>
+    <effort>xhigh</effort>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Serial P0 chain; BFF (004) references these libs, so they must retarget first and coherently.</parallel-reason>
+    <deps>002</deps>
+    <tags>dotnet, migration, packages, dataverse, auth, bff-api</tags>
+    <estimated-effort>3-4 hours</estimated-effort>
+  </metadata>
+
+  <prompt>Retarget `Spaarke.Core` and `Spaarke.Dataverse` from net8.0 to net10.0 and land the required package moves: align all `Microsoft.Extensions.*` to the 10.0.x wave, bump `Microsoft.PowerPlatform.Dataverse.Client` 1.1.32 → 1.2.26 (drags MSAL ≥ 4.84.2), bump `Microsoft.Identity.Web` (+`.MicrosoftGraph`) → 4.14.2, and remove the superseded CVE-pin `PackageReference`s (same STJ/Asn1/Pkcs/RegEx set) after confirming inbox ≥ pin. Zero behavior change — this is `ServiceClient` same-API-surface work.</prompt>
+  <role>SPAARKE platform developer. Expert in Dataverse ServiceClient, MSAL/Identity.Web auth stacks, and Microsoft.Extensions version alignment. Follow ADRs strictly.</role>
+  <goal>`Spaarke.Core.csproj` + `Spaarke.Dataverse.csproj` target `net10.0`; `Microsoft.Extensions.*` all at 10.0.x; `Dataverse.Client` 1.2.26; MSAL ≥ 4.84.2; `Identity.Web`(+`.MicrosoftGraph`) 4.14.2; superseded CVE pins removed; `dotnet build -c Release` green for both libs; no NU1605 version-unification warnings.</goal>
+
+  <context>
+    <background>design §3.1/§6.1/§6.2. `Spaarke.Dataverse` pins `Dataverse.Client 1.1.32` — a pre-net8 pin whose asset resolves an out-of-support-runtime asset on net10; 1.2.x (added the net8 target in 1.2.1/1.2.2) is the same `ServiceClient` API surface. Both libs carry the same STJ + CVE pins as Scheduling (task 002 already produced the inbox-≥-pin evidence — reuse it). Ending the 8.0/10.0 Extensions split-brain is the point (M.E.AI 10.x already pulls 10.x abstractions transitively).</background>
+    <relevant-files>
+      <file role="modify">src/server/shared/Spaarke.Core/Spaarke.Core.csproj</file>
+      <file role="modify">src/server/shared/Spaarke.Dataverse/Spaarke.Dataverse.csproj</file>
+      <file role="canonical-reference">projects/dotnet-10-upgrade-r1/notes/pin-removals.md</file>
+      <file role="canonical-reference">Directory.Packages.props</file>
+    </relevant-files>
+    <dependencies>
+      <dependency task="002" status="pending">Scheduling retargeted; pin-removal evidence available to reuse.</dependency>
+    </dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="project">Scope: ONLY Core + Dataverse csproj (+ any shared version catalog entries they consume). BFF (004) and tests (005) are separate tasks.</constraint>
+    <constraint source="project">Required moves are exact (spec FR-03): Extensions → 10.0.x (current 10.0.10); Dataverse.Client → 1.2.26; MSAL ≥ 4.84.2 (target 4.87.0); Identity.Web + .MicrosoftGraph → 4.14.2. No optional major-version bumps here.</constraint>
+    <constraint source="project">Remove superseded CVE pins ONLY after confirming inbox ≥ pin (reuse task 002 evidence); keep any pin the framework does not supply.</constraint>
+    <constraint source="ADR-028">The Dataverse.Client / MSAL / Identity.Web bumps are same-major, API-preserving — auth behavior (OBO + MI) MUST be unchanged; do not alter token acquisition flows.</constraint>
+    <constraint source="ADR-013">No AI-internal types introduced; retarget only.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>Dataverse ServiceClient + MSAL/Identity.Web version alignment on net10</topic>
+    <files>
+      <file>projects/dotnet-10-upgrade-r1/spec.md</file>
+      <file>projects/dotnet-10-upgrade-r1/design.md</file>
+      <file>.claude/adr/ADR-028-spaarke-auth-architecture.md</file>
+      <file>.claude/adr/ADR-013-ai-architecture.md</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+    </files>
+    <patterns>
+      <pattern name="required-package-moves" location="projects/dotnet-10-upgrade-r1/design.md">design §6.1 table — exact from→to for each required package.</pattern>
+    </patterns>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="0" name="Context + rigor declaration">Load spec FR-01/FR-03/FR-04 + design §6.1/§6.2. Declare RIGOR: FULL.</step>
+    <step order="1">Set `<TargetFramework>net10.0</TargetFramework>` on both Core and Dataverse csproj.</step>
+    <step order="2">Bump `Dataverse.Client` 1.1.32 → 1.2.26 in `Spaarke.Dataverse`; let it drag MSAL ≥ 4.84.2 (target 4.87.0) — verify the resolved MSAL floor.</step>
+    <step order="3">Align every `Microsoft.Extensions.*` reference to 10.0.x; bump `Identity.Web` (+`.MicrosoftGraph`) → 4.14.2.</step>
+    <step order="4">Remove superseded CVE pins (reuse task 002 inbox-≥-pin evidence); append any new evidence to `notes/pin-removals.md`.</step>
+    <step order="5">`dotnet build -c Release` both libs; resolve any NU1605 version-unification warning by aligning versions (not by suppression).</step>
+    <step order="6">Run the Dataverse seam integration test if runnable at this stage; otherwise note it is validated in task 030.</step>
+    <step order="7">Update `tasks/TASK-INDEX.md`: set 003 status to ✅.</step>
+    <step order="8">Document any deviation in `projects/dotnet-10-upgrade-r1/notes/`.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If the Dataverse.Client 1.1→1.2 bump surfaces a non-trivial `ServiceClient` API change (not the expected same-surface), STOP and surface per CLAUDE.md §6 — the spec assumed low code impact; a real API break is a scope change.</trigger>
+  </escalation>
+
+  <tools>
+    <tool name="dotnet">Build + restore Core/Dataverse</tool>
+  </tools>
+
+  <outputs>
+    <output type="config">src/server/shared/Spaarke.Core/Spaarke.Core.csproj</output>
+    <output type="config">src/server/shared/Spaarke.Dataverse/Spaarke.Dataverse.csproj</output>
+    <output type="doc">projects/dotnet-10-upgrade-r1/notes/pin-removals.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Given the retargeted libs, `dotnet build -c Release` for both is green with no NU1605 version-unification warnings.</criterion>
+    <criterion testable="true">`dotnet list package` shows no `Microsoft.Extensions.*` at 8.0.x in Core/Dataverse; `Dataverse.Client` = 1.2.26; MSAL ≥ 4.84.2; `Identity.Web` = 4.14.2.</criterion>
+    <criterion testable="true">Every removed pin has inbox-≥-CVE evidence recorded.</criterion>
+    <criterion testable="true">Negative: no token-acquisition (OBO/MI) code path is altered — the change is TFM + package versions only.</criterion>
+  </acceptance-criteria>
+
+  <notes>spec FR-01/FR-03/FR-04. Dataverse seam integration test is the FR-03 acceptance proof — if not runnable until the BFF retargets, defer its execution to task 030 and note that here.
+
+  COMPLETION (2026-08-11): Core + Dataverse TFM net8.0 → net10.0. `dotnet build -c Release` green (0 warnings / 0 errors, 0 NU1605). Package moves: Extensions.* (DI/Logging/Config) 8.0.x → 10.0.1 (Caching already 10.0.1); MSAL 4.79.2 → 4.87.0 (≥4.84.2 floor ✓); Dataverse.Client 1.1.32 → 1.2.26 (compiled clean → ServiceClient-API-break escalation did NOT fire). Identity.Web step = N/A (BFF-only pkg, task 004). Pin removals via NU1510 forcing-function: Asn1/STJ/RegEx REMOVED (framework-superseded, NU1510 confirmed inbox≥CVE); Pkcs 8.0.1 KEPT (no NU1510 → framework doesn't supply → constraint 'keep pins framework doesn't supply'). Evidence in notes/pin-removals.md. CARRY-FORWARD (task 004/032, NOT a 003 regression): isolated vulnerable scan flags transitive System.Security.Cryptography.Xml 8.0.2 (8 HIGH) — pre-existing (libs never pinned it; net8 baseline same), resolved at BFF via 8.0.4 pin; task 004/032 must confirm 8.0.4 clears all 8 advisories or bump. Step 6 Dataverse seam test deferred to 030. Quality gates SKIPPED — config-only (csproj TFM+versions, zero .cs); ADR-028 (no token-flow code touched) + ADR-029 (no SelfContained/RID/trim) verified by inspection. Negative criteria: no .cs changed; only the 2 csproj + note.
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+  </execution>
+</task>

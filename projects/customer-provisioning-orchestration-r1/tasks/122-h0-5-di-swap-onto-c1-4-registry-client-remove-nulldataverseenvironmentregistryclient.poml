@@ -1,0 +1,94 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="122" project="customer-provisioning-orchestration-r1">
+  <metadata>
+    <title>H0.5: DI-swap onto C1.4 registry client (remove NullDataverseEnvironmentRegistryClient)</title>
+    <phase>C'' Wave G-2 -- Entry + resources</phase>
+    <gate>blocked</gate>
+    <status>completed</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Re-activates FR-02 re-consent semantics that are currently inert (PARTIAL per DS-4) -- correctness-relevant for the H0.5 consent-capture path; touches BFF-adjacent onboarding semantics (though the swap is L2-side).</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Small DI-swap (~50 LOC per DS-4) with well-defined branch tests -- Sonnet @ high.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <deps>112</deps>
+    <tags>l2-controlplane, job-handler, path-x</tags>
+    <estimated-effort>3-4 hours</estimated-effort>
+  </metadata>
+
+  <prompt>DI-swap H0.5's registry-client dependency from NullDataverseEnvironmentRegistryClient (which always returns null, making FR-02 re-consent semantics currently inert per DS-4 §2 H0.5 row -- 'core real, idempotency/restart-vs-no-op logic correct, but NullDataverseEnvironmentRegistryClient always returns null') onto task 112's real IDataverseEnvironmentRegistryClient implementation. Verify the re-consent no-op vs restart branches now correctly read actual registry state.</prompt>
+
+  <role>SPAARKE platform developer. Expert in DI-swap verification and idempotency-branch testing against a now-real dependency.</role>
+
+  <goal>H0.5's owning module registers the real IDataverseEnvironmentRegistryClient (task 112) in place of the Null-Object. The existing re-consent no-op vs restart branch logic (already correct per DS-4) now operates against REAL registry data from a fake registry populated with test data, proving the previously-inert FR-02 semantics are live.</goal>
+
+  <context>
+    <background>DS-4 §2 (H0.5 row) and §3 confirm: H0.5's core handler logic (idempotency, restart-vs-no-op branching) is ALREADY CORRECT -- the only gap is that its registry-client dependency is a Null-Object returning null unconditionally, making the correct branching logic operate on fictional (always-empty) data. This is the smallest task in Wave G-2 (~50 LOC) precisely because the hard work (task 112's client + task 111's grant) already landed in Wave G-1.</background>
+    <relevant-files>
+      <file role="modify">src/server/services/Sprk.Provisioning.ControlPlane.Core/Handlers/ConsentCapture/H05ConsentCaptureHandler.cs (or its owning module -- DI registration only)</file>
+      <file role="canonical-reference">src/server/services/Sprk.Provisioning.ControlPlane.Core/Registry/DataverseEnvironmentRegistryClient.cs</file>
+    </relevant-files>
+    <dependencies>
+      <dependency task="112" status="pending">The real registry client this task swaps onto must exist</dependency>
+    </dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="spec.md FR-38">L2's admin-env Dataverse credential model is Path X: L2 UAMI registered as a Dataverse Application User via DefaultAzureCredential pinned to the UAMI (DS-8). MUST NOT provision a new client-secret for L2. The Dataverse-ClientSecret KV secret itself MUST NOT be deleted (BFF still consumes it) -- only L2's dependency on it is removed.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>H0.5 registry client DI-swap</topic>
+    <files>
+      <file>projects/customer-provisioning-orchestration-r1/spec.md</file>
+      <file>projects/customer-provisioning-orchestration-r1/design.md</file>
+      <file>projects/customer-provisioning-orchestration-r1/CLAUDE.md</file>
+      <file>projects/customer-provisioning-orchestration-r1/notes/design-study-ds4-handler-audit.md</file>
+      <file>projects/customer-provisioning-orchestration-r1/notes/design-study-ds4-handler-audit.md</file>
+    </files>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="0" name="Rigor + load">Emit RIGOR LEVEL (FULL). Read H05ConsentCaptureHandler.cs's registry-client consumption + its existing idempotency branch tests.</step>
+    <step order="1" name="DI swap">Replace the NullDataverseEnvironmentRegistryClient registration with DataverseEnvironmentRegistryClient in H0.5's owning module.</step>
+    <step order="2" name="Verify branches">Run/extend the existing re-consent no-op vs restart branch tests against a fake IDataverseEnvironmentRegistryClient populated with data (proving the branching logic, already correct, now has real data to branch on).</step>
+    <step order="3" name="Integration smoke">Against dev spaarkedev1 (post task 111 grant), verify an actual H0.5 invocation reads a real registry row's re-consent state correctly.</step>
+    <step order="4" name="Build + verify">dotnet build 0 errors; dotnet test green.</step>
+  </steps>
+
+  <escalation>
+  </escalation>
+
+  <tools>
+    <tool name="dotnet">build/test</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">H0.5 owning module DI registration (modified)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">grep 'NullDataverseEnvironmentRegistryClient' in H0.5's active DI registration returns 0 matches.</criterion>
+    <criterion testable="true">Existing re-consent no-op vs restart branch tests pass against a data-populated fake registry client (not the Null-Object).</criterion>
+    <criterion testable="true">Integration smoke test (dev, post task 111) confirms a real registry read succeeds under the H0.5 handler's invocation path.</criterion>
+    <criterion testable="true">dotnet build exits 0; dotnet test exits 0.</criterion>
+  </acceptance-criteria>
+
+  <notes>Justification (CLAUDE.md §11): Existing -- H0.5's branch logic is already correct; only the data source is fictional. Extension -- swapping the DI registration is the direct, minimal fix; no redesign needed. Cost-of-doing-nothing -- FR-02 re-consent semantics stay permanently inert regardless of how correct the branch logic is.
+
+COMPLETION SUMMARY (2026-08-19):
+- Worker/Program.cs: single-line DI swap -- `AddSingleton&lt;IDataverseEnvironmentRegistryClient, NullDataverseEnvironmentRegistryClient&gt;()` replaced by `AddDataverseEnvironmentRegistry(builder.Configuration)` (task 112's module; registers the real client Scoped). This is a GLOBAL swap -- also activates H13's idempotency-short-circuit registry read (H13's WRITE path via IRegistrySetupStatusUpdater remains task 184's separate seam).
+- NullDataverseEnvironmentRegistryClient disposition: KEPT (not deleted) -- unregistered from the composition root only. Its own 4 unit tests in DataverseEnvironmentRegistryClientTests.cs continue to exercise its ADR-032 P2 contract. No environment-based kill-switch was introduced (none existed for this seam; DS-8 mandates Path X real from day one, matching task 112's own unconditional-validation design).
+  grep 'NullDataverseEnvironmentRegistryClient' Worker/Program.cs -&gt; 0 matches (acceptance criterion #1 satisfied).
+- FIX-AT-DISCOVERY (per CLAUDE.md §11 / operator memory rule): task 112's DataverseEnvironmentRegistryOptions.Validate() unconditionally requires AdminEnvironmentUrl (NFR-05 fail-fast, no Enabled kill-switch). No Bicep app-setting existed for it -- a live deploy of this swap would have crash-looped the Worker at boot. Closed the gap in the SAME PR: added `adminDataverseEnvironmentUrl` param to platform-controlplane.bicep + controlplane-worker-app-service.bicep (-&gt; DataverseEnvironmentRegistry__AdminEnvironmentUrl app-setting), regenerated platform-controlplane.json (`az bicep build`, 0 errors/warnings). Required param, no default (deliberate -- dev/staging/prod each target a distinct admin Dataverse org). Also added the matching UseSetting("DataverseEnvironmentRegistry:AdminEnvironmentUrl", ...) to the two WebApplicationFactory&lt;WorkerProgram&gt; test factories (WorkerTestFactory in HandlerRegistrationCompletenessTests.cs, SeamTestFactory in ProvisioningDispatchSpineSeamTests.cs) -- both would otherwise have thrown OptionsValidationException at test-host boot.
+- New completeness ArchTest (reuses task 103's WorkerTestFactory pattern): `IDataverseEnvironmentRegistryClient_ResolvesRealClient_NotNullObject` resolves the REAL Worker composition root and asserts the concrete resolved type is DataverseEnvironmentRegistryClient, not NullDataverseEnvironmentRegistryClient -- catches a future silent regression (Null-Object satisfies the interface; every other test would still pass).
+- Path X verified: DataverseEnvironmentRegistryClient.AcquireTokenAsync uses `DefaultAzureCredential` with `DefaultAzureCredentialOptions.ManagedIdentityClientId` set from `DataverseEnvironmentRegistryOptions.ManagedIdentityClientId` (falls back to `ManagedIdentity:ClientId` app-setting via the module's PostConfigure, same as CosmosModule) -- NO ClientSecretCredential anywhere in this seam. Confirmed by reading DataverseEnvironmentRegistryClient.cs:312-328 (pre-existing task-112 code, unchanged by this task) + the new Bicep appSetting supplies only the URL, no secret.
+- Existing H05ConsentCaptureHandlerTests.cs re-consent no-op/restart branch tests already used a data-populated `StubRegistry` fake (not the Null-Object) -- acceptance criterion #2 was already satisfied pre-task; no test changes needed there.
+- Verification: `dotnet build` (Worker + Tests) 0 errors/0 warnings; `dotnet test` 788/788 green (787 baseline + 1 new ArchTest); `az bicep build` on both edited .bicep files 0 errors/0 warnings.
+- Live-invocation smoke (acceptance criterion #3, dev spaarkedev1 real registry read) is NOT executable from this sandbox (no live Azure/Dataverse reachability) -- deferred to the Wave G-1 live-ceremony step 5 (Deploy-ControlPlane.ps1 + Bicep deploy), which now has the required app-setting wired.</notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+  </execution>
+</task>

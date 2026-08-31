@@ -1,0 +1,111 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="041" project="sdap-SPE-admin-app-r2">
+  <metadata>
+    <title>LiveIntegration suite with a throwaway-container fixture</title>
+    <phase>4 Workstream D — Build the harness</phase>
+    <gate>011 complete, 040 complete</gate>
+    <status>completed</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>TEST-MODIFYING override row (root CLAUDE.md §8): tasks modifying tests/** run code-review + adr-check UNCONDITIONALLY. Also exercises destructive tenant operations.</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Well-specified test infrastructure; the risky part is fixture lifecycle discipline, not reasoning depth.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>W13</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <deps>011, 040</deps>
+    <tags>testing, integration-test, bff-api, auth</tags>
+    <estimated-effort>6-8 hours</estimated-effort>
+  </metadata>
+
+  <prompt>Build a LiveIntegration suite covering the operations WireMock cannot meaningfully fake — consent, registration, permission, and role flows. Destructive paths must provision and tear down their own throwaway container (see the corrected background for why the rule stands).</prompt>
+
+  <role>SPAARKE platform developer. Expert in xUnit fixtures, test isolation, and safe testing against live tenants. Follow ADR-038 strictly.</role>
+
+  <goal>A category-gated live suite exists, runs green against Spaarke Dev, is excluded from the default CI run, and never touches a pre-existing container.</goal>
+
+  <context>
+    <background>Spec FR-D02 / NFR-07. Delete, permanent-delete, recycle-bin-purge, and restore paths must provision their own container. Read-only and additive operations may use the existing ones. CORRECTED 2026-08-27 (operator): this background previously asserted the Spaarke Dev containers hold "signed NDAs, Compose drafts, and matter files" on the strength of a File Browser walkthrough that read filenames and inferred sensitivity. They hold TEST documents. The throwaway-container rule stands on repeatability (a destructive suite mutating shared containers is non-idempotent), a shared tenant (other sessions work spaarkedev1 concurrently), and evidence preservation (the unresolved communications/emails/exports folders are a task-052 prerequisite) — not on confidentiality. See projects/sdap-SPE-admin-app-r2/CLAUDE.md "Live-tenant safety".</background>
+    <relevant-files>
+      <file role="new">tests/integration/seam/SpeAdmin/LiveIntegrationFixture.cs</file>
+      <file role="new">tests/integration/seam/SpeAdmin/ContainerLifecycleLiveTests.cs</file>
+      <file role="canonical-reference">tests/integration/contract/Eval/AgreementClassifyEvalTests.cs</file>
+      <file role="canonical-reference">tests/unit/Sprk.Bff.Api.Tests/Api/SpeAdmin/Fixtures/GraphWireMockFixture.cs</file>
+    </relevant-files>
+    <dependencies>
+      <dependency task="011" status="complete">The delegated auth path — role and permission flows need it.</dependency>
+      <dependency task="040" status="complete">The WireMock fixture, whose conventions this suite mirrors.</dependency>
+    </dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="NFR-07">Scope: destructive operations. Delete, permanent-delete, recycle-bin-purge, and restore MUST target a container the fixture provisioned. NEVER a pre-existing one. This is the highest-consequence rule in the task.</constraint>
+    <constraint source="project">Scope: teardown. The fixture MUST tear down its container even when a test fails — use fixture disposal, not end-of-test cleanup that a failure skips.</constraint>
+    <constraint source="project">Scope: CI. The suite MUST be excluded from the default CI run by category, so a missing tenant or credential never breaks the main pipeline.</constraint>
+    <constraint source="project">Scope: category convention. Use [Trait("Category", "LiveIntegration")] — the repo convention. MUST NOT use [Category(...)].</constraint>
+    <constraint source="ADR-038">Scope: test value. No DI-registration or constructor null-check tests. Mock at module boundaries; this suite mocks nothing — it is the live tier.</constraint>
+    <constraint source="project">Scope: secrets. Credentials come from configuration, never from committed files. No secret value in the repo.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>Live integration testing + fixture lifecycle</topic>
+    <files>
+      <file>docs/adr/ADR-038-testing-strategy.md</file>
+      <file>docs/standards/TEST-ARCHITECTURE.md</file>
+      <file>.claude/constraints/testing.md</file>
+      <file>tests/CLAUDE.md</file>
+      <file>projects/sdap-SPE-admin-app-r2/spec.md</file>
+    </files>
+    <patterns>
+      <pattern name="integration-tests" location=".claude/patterns/testing/integration-tests.md">Fixture lifecycle and disposal.</pattern>
+      <pattern name="unit-test-structure" location=".claude/patterns/testing/unit-test-structure.md">Naming and arrangement.</pattern>
+    </patterns>
+  </knowledge>
+
+  <steps mode="prescriptive">
+    <step order="0" name="Context + rigor declaration">Declare rigor FULL (TEST-MODIFYING override). Load ADR-038 and NFR-07.</step>
+    <step order="1">Build the fixture: provision a throwaway container on setup, expose its id, and dispose it on teardown — including on test failure.</step>
+    <step order="2">Prove teardown reliability by forcing a test failure and confirming the container is still removed.</step>
+    <step order="3">Add a guard that refuses to run a destructive test against any container id the fixture did not provision.</step>
+    <step order="4">Write coverage for consent, registration, permission, and role flows using the delegated path from task 011.</step>
+    <step order="5">Write destructive-path coverage (delete, permanent delete, recycle-bin purge, restore) against the throwaway container only.</step>
+    <step order="6">Apply [Trait("Category", "LiveIntegration")] and confirm the default CI run excludes it.</step>
+    <step order="7">Run the suite against Spaarke Dev — all green.</step>
+    <step order="8">Verify the existing containers are untouched: their contents are unchanged after the run.</step>
+    <step order="9">Update TASK-INDEX.md: task 041 → ✅. Document deviations in notes/.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If the fixture cannot reliably provision or tear down its own container, STOP. Do NOT fall back to running destructive tests against an existing container. (The tail of this trigger previously called that "the one failure in this project that is not recoverable" — overstated; the dev documents are test documents. The STOP still stands: see the corrected background.)</trigger>
+    <trigger>If a destructive operation cannot be tested without an admin role the executing identity lacks, STOP and escalate with the role named rather than broadening permissions.</trigger>
+  </escalation>
+
+  <justification>
+    <existing>tests/integration/seam/** exists as an ADR-038 KEEP path; tests/integration/contract/Eval/ provides the category-gating convention. No live SpeAdmin fixture exists — grep confirms the 14 SpeAdmin test files make no HTTP call.</existing>
+    <extension>No existing live fixture to extend. This adds the live tier ADR-038 prescribes for flows that mocks cannot meaningfully cover.</extension>
+    <cost-of-doing-nothing>Consent, registration, permission, and role flows have zero coverage at any tier. R1 closed 75 tasks with "4176 passing, 0 failing" for an app that had never run — exactly because no test exercised a real flow.</cost-of-doing-nothing>
+  </justification>
+
+  <tools>
+    <tool name="dotnet">Build and run tests</tool>
+  </tools>
+
+  <outputs>
+    <output type="test">tests/integration/seam/SpeAdmin/LiveIntegrationFixture.cs</output>
+    <output type="test">tests/integration/seam/SpeAdmin/ContainerLifecycleLiveTests.cs</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">The suite runs green against Spaarke Dev.</criterion>
+    <criterion testable="true">Given a test failure mid-run, when the fixture disposes, then the throwaway container is still removed.</criterion>
+    <criterion testable="true">Negative: a destructive test invoked against a container the fixture did not provision is refused by the guard.</criterion>
+    <criterion testable="true">Negative: after a full run, the pre-existing Spaarke Dev containers and their contents are unchanged (NFR-07).</criterion>
+    <criterion testable="true">Negative: the default CI run does not execute this suite — verified by running the default test command with no tenant credentials configured.</criterion>
+    <criterion testable="true">Consent, registration, permission, and role flows each have at least one live test.</criterion>
+    <criterion testable="true">Category traits use [Trait("Category", "LiveIntegration")]; no secret value is committed.</criterion>
+    <criterion testable="true">dotnet build 0 errors.</criterion>
+  </acceptance-criteria>
+
+  <notes>Spec FR-D02. NFR-07 is the binding safety rule — the throwaway-container discipline is non-negotiable.</notes>
+
+  <execution><skill>.claude/skills/task-execute/SKILL.md</skill></execution>
+</task>

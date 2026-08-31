@@ -29,6 +29,9 @@ export type {
   ComposeEditorDocumentRef,
   ComposeDraftPayload,
   ComposeDraftProvenance,
+  // FR-C05 residual (r8 task 052b) — the `'live' | 'replay'` provenance discriminator a host must
+  // declare so the stale-target check knows whether the paragraph it finds is the capture-time text.
+  MaterializeOrigin,
   // NDA-REVIEW advisory comments (ai-advanced-capabilities-nda-r1 task 031) —
   // ComposeEditorHandle.placeAdvisoryComments' input/output shapes.
   AdvisoryCommentInput,
@@ -294,6 +297,25 @@ export type {
   // R3 FR-25 — import round-trip: existing Word comments projected on Load (task 051)
   ImportedComment,
 } from './types/compose-contracts';
+
+// FR-07(b) (spaarkeai-compose-r7, task 010): the single identity accessor for a Compose
+// document — `sprkDocumentId ?? speDriveItemId ?? composeLogicalId` (empty-guarded). The
+// canonical dedup + draft-store key consumed by FR-03 (task 040) and FR-07 client dedup (task
+// 011). Value export (a function), separate from the `export type` block above.
+export { getComposeLogicalIdentity } from './types/compose-contracts';
+
+// FR-07(b) (task 010): the non-rotating logical-id lifecycle helpers (mint / persist / recover /
+// clear) backing the client-only active-draft slot. FR-03 (040) drives recovery; FR-07 (011)
+// dedups on the id.
+export {
+  COMPOSE_ACTIVE_DRAFT_ID_KEY,
+  mintComposeLogicalId,
+  startNewComposeLogicalId,
+  recoverActiveComposeLogicalId,
+  persistActiveComposeLogicalId,
+  clearActiveComposeLogicalId,
+  uniquifyForkFileName,
+} from './widgets/composeIdentity';
 
 // -------------------------------------------------------------------------
 // R4 FR-11 — the shared, versioned operation schema (task 003)

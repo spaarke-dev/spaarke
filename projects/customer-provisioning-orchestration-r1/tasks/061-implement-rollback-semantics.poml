@@ -1,0 +1,111 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="061" project="customer-provisioning-orchestration-r1">
+  <metadata>
+    <title>Implement §4C rollback semantics — 4-class failure taxonomy + Quarantined state + clear-quarantine audit</title>
+    <phase>C Wave C5 — L2 REST + Reconciler</phase>
+    <gate>blocked</gate>
+    <status>not-started</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Task tags include 'l2-controlplane','job-handler','auth'; implements FR-24 rollback semantics; a bug here strands runs OR silently retries a Quarantine-required failure. Audit-log obligation makes this security-adjacent.</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>4-class taxonomy → state transition table encoded in code + Cosmos state store transitions + audit-log wiring. Requires careful reasoning through each class's semantics but scoped. Step 3.5.5b sonnet @ xhigh justified per complex-brownfield criteria.</model-tier-reason>
+    <effort>xhigh</effort>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <deps>057, 058</deps>
+    <tags>l2-controlplane, job-handler, auth, testing</tags>
+    <estimated-effort>4-6 hours</estimated-effort>
+  </metadata>
+
+  <prompt>Implement the §4C rollback semantics per spec.md FR-24 + design.md §4C. Classify handler failures into 4 classes: (1) Resumable — retry after external precondition; (2) Retryable-with-cleanup — re-run handler; own idempotency handles partial write; (3) Quarantine-required — Cosmos Quarantined state blocks new runs against same customerId until operator explicitly clears via POST /api/runs/{id}/clear-quarantine (audit-logged); (4) Successful-but-drifted — H13 detects; operator re-runs affected phases with resumeFromPhase param. Each class round-trips through Cosmos state correctly per the §4C state-transition table. POST /api/runs/{id}/clear-quarantine requires a reason and audit-logs to App Insights.</prompt>
+
+  <role>SPAARKE platform developer. Expert in state-machine encoding, Cosmos DB state transitions, App Insights audit event patterns, and mapping domain-level failure taxonomy to enum + policy code. Follow ADRs strictly.</role>
+
+  <goal>Failure classification is encoded as an enum FailureClass { Resumable, RetryableWithCleanup, QuarantineRequired, SuccessfulButDrifted } in src/server/services/Sprk.Provisioning.ControlPlane/Rollback/**. Reconciler + handlers translate exceptions/results into a FailureClass via a policy component. Cosmos state transitions per class match the §4C state-transition table. POST /api/runs/{id}/clear-quarantine (implemented in task 057) is wired to a QuarantineClearService that verifies the run is in Quarantined state, transitions it to Failed (post-quarantine), and audit-logs to App Insights with actor tid + reason. Unit + integration tests cover each class's state transition + clear-quarantine happy/negative paths.</goal>
+
+  <context>
+    <background>Per spec.md FR-24 + design.md §4C: prior generations of provisioning had no explicit failure taxonomy — every failure was "retry or manual fix." v3.2 added the 4-class taxonomy to make failure handling deterministic and to give operators a reversible "quarantine cleared" mechanism for the class that CANNOT auto-recover (e.g., corrupted partial-write). Quarantined state blocks new runs against the same customerId until explicitly cleared.</background>
+    <relevant-files>
+      <file role="new">src/server/services/Sprk.Provisioning.ControlPlane/Rollback/FailureClass.cs</file>
+      <file role="new">src/server/services/Sprk.Provisioning.ControlPlane/Rollback/IFailureClassifier.cs</file>
+      <file role="new">src/server/services/Sprk.Provisioning.ControlPlane/Rollback/FailureClassifier.cs</file>
+      <file role="new">src/server/services/Sprk.Provisioning.ControlPlane/Rollback/QuarantineClearService.cs</file>
+      <file role="new">src/server/services/Sprk.Provisioning.ControlPlane/Rollback/RollbackTransitions.Tests.cs</file>
+      <file role="modify">src/server/services/Sprk.Provisioning.ControlPlane/Reconciler/StateReconcilerService.cs</file>
+      <file role="modify">src/server/services/Sprk.Provisioning.ControlPlane/Api/RunsEndpoints.cs</file>
+    </relevant-files>
+    <dependencies>
+      <dependency task="057" status="pending">POST /api/runs/{id}/clear-quarantine endpoint shape (invokes QuarantineClearService)</dependency>
+      <dependency task="058" status="pending">Reconciler dispatch loop — translates handler outcomes into FailureClass transitions</dependency>
+    </dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="spec.md FR-24">SCOPE: 4-class taxonomy exactly per §4C — no additional classes; no merging of classes.</constraint>
+    <constraint source="spec.md FR-24">SCOPE: Quarantined runs block NEW runs against the same customerId (integrate with task 059 I5 concurrency guard — a customer with a Quarantined active run cannot start a new run until cleared).</constraint>
+    <constraint source="spec.md FR-24">SCOPE: clear-quarantine REQUIRES a reason parameter and MUST audit-log actor tid + reason + before/after state to App Insights (TelemetryClient.TrackEvent("QuarantineCleared", ...)).</constraint>
+    <constraint source="spec.md FR-24">SCOPE: Successful-but-drifted class — H13 detects; the reclassification path allows operator to invoke POST /api/runs/{id}/resume with a resumeFromPhase parameter targeting the drifted phase; do NOT auto-retry.</constraint>
+    <constraint source="ADR-036">SCOPE: Resumable + Retryable-with-cleanup classes trigger normal re-enqueue via Service Bus + 3-level-idempotent handler stack; no bespoke retry loop.</constraint>
+    <constraint source="project">SCOPE: FailureClass is an ENUM (not a string); the reconciler-to-Cosmos translation is a switch with an exhaustive-guard so a new class MUST be handled explicitly at compile time.</constraint>
+    <constraint source="project">SCOPE: Terminal-state ReleaseAsync (task 059) does NOT fire on QuarantineRequired — the customer stays blocked until clear-quarantine explicitly runs.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>4-class failure taxonomy with Cosmos state transitions and audit-logged clear-quarantine</topic>
+    <files>
+      <file>.claude/adr/ADR-004-job-contract.md</file>
+      <file>.claude/adr/ADR-036-background-job-infrastructure.md</file>
+      <file>.claude/constraints/jobs.md</file>
+      <file>projects/customer-provisioning-orchestration-r1/spec.md</file>
+      <file>projects/customer-provisioning-orchestration-r1/design.md</file>
+    </files>
+    <patterns>
+      <pattern name="Enum-driven state transitions with exhaustive switch" location="src/server/api/Sprk.Bff.Api/Services/Jobs/">Existing pattern for exception → job-status transitions; extend the shape for FailureClass.</pattern>
+      <pattern name="App Insights audit event" location="src/server/api/Sprk.Bff.Api/Services/">TelemetryClient.TrackEvent with custom properties (actor tid, reason); copy for QuarantineCleared event.</pattern>
+    </patterns>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="0" name="Rigor + load">Emit RIGOR LEVEL (FULL). Load spec.md FR-24 + design.md §4C state-transition table + this project's CLAUDE.md.</step>
+    <step order="1" name="Inventory">Read design.md §4C state-transition table verbatim; author a matching test-case list before code.</step>
+    <step order="2" name="Enum + classifier">Author FailureClass enum + IFailureClassifier + FailureClassifier implementation mapping handler outcomes/exceptions to classes.</step>
+    <step order="3" name="Transition wire">Modify StateReconcilerService (from task 058) to invoke IFailureClassifier on handler outcome + apply the resulting Cosmos state transition per §4C table.</step>
+    <step order="4" name="Quarantine block">Integrate with task 059 CustomerRunGuard — a customer with a Quarantined run cannot start a new run; TryAcquireAsync returns Conflict with a Quarantined-specific reason code.</step>
+    <step order="5" name="Clear service">Author QuarantineClearService — verify run in Quarantined state, transition to Failed (post-quarantine), release CustomerRunGuard, audit-log to App Insights with actor tid + reason.</step>
+    <step order="6" name="Endpoint wire">Wire POST /api/runs/{id}/clear-quarantine (task 057) to QuarantineClearService — 400 if reason missing, 404 if run not found, 409 if run not in Quarantined state, 200 on success.</step>
+    <step order="7" name="Tests">Author RollbackTransitions.Tests.cs: for each of 4 classes, verify handler outcome → Cosmos state transition matches §4C table. QuarantineClearService: happy + negative (wrong-state, missing-reason, unauthorized).</step>
+    <step order="8" name="Verify">dotnet build + dotnet test = green; dotnet format; zero analyzer warnings.</step>
+    <step order="9" name="Index update">Update TASK-INDEX.md: task 061 → ✅.</step>
+    <step order="10" name="Deviations">Document any deviation in projects/customer-provisioning-orchestration-r1/notes/.</step>
+  </steps>
+
+  <tools>
+    <tool name="dotnet">Build and test the L2 control-plane project</tool>
+    <tool name="terminal">Run shell commands</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/server/services/Sprk.Provisioning.ControlPlane/Rollback/FailureClass.cs</output>
+    <output type="code">src/server/services/Sprk.Provisioning.ControlPlane/Rollback/IFailureClassifier.cs</output>
+    <output type="code">src/server/services/Sprk.Provisioning.ControlPlane/Rollback/FailureClassifier.cs</output>
+    <output type="code">src/server/services/Sprk.Provisioning.ControlPlane/Rollback/QuarantineClearService.cs</output>
+    <output type="test">src/server/services/Sprk.Provisioning.ControlPlane/Rollback/RollbackTransitions.Tests.cs</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Given a handler failure classified Resumable, when the reconciler processes the outcome, then Cosmos state transitions per §4C Resumable row (status stays Running / WaitingOnGate with retry-schedule metadata).</criterion>
+    <criterion testable="true">Given a handler failure classified Retryable-with-cleanup, when the reconciler processes the outcome, then the handler is re-enqueued with the same idempotency key and Cosmos state matches §4C row 2.</criterion>
+    <criterion testable="true">Given a handler failure classified Quarantine-required, when the reconciler processes the outcome, then Cosmos state = Quarantined and no re-enqueue is triggered.</criterion>
+    <criterion testable="true">Given a Quarantined run for customer C, when TryAcquireAsync(C, newRunId) is invoked, then result = Conflict with reasonCode = "Quarantined" (integrates with task 059).</criterion>
+    <criterion testable="true">Given a Quarantined run, when POST /api/runs/{id}/clear-quarantine is invoked with reason by Operator, then the state transitions to Failed, CustomerRunGuard is released, and App Insights receives QuarantineCleared with actor tid + reason.</criterion>
+    <criterion testable="true">Negative: clear-quarantine without reason returns 400; on a non-Quarantined run returns 409; unauthorized returns 403.</criterion>
+    <criterion testable="true">Given a handler flagged Successful-but-drifted by H13, when the reconciler processes the outcome, then state = Completed with driftDetected = true; operator re-runs affected phases via resume with resumeFromPhase.</criterion>
+    <criterion testable="true">dotnet build exits 0; dotnet test exits 0; zero analyzer warnings.</criterion>
+  </acceptance-criteria>
+
+  <notes>Reference: spec.md FR-24 + design.md §4C state-transition table + spec.md ADR Tensions row 1 (ADR-004 Path A at L2 scope).</notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+  </execution>
+</task>

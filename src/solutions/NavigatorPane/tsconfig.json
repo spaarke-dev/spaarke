@@ -1,0 +1,43 @@
+{
+  "compilerOptions": {
+    "target": "ES2020",
+    "useDefineForClassFields": true,
+    "lib": ["ES2020", "DOM", "DOM.Iterable"],
+    "module": "ESNext",
+    "skipLibCheck": true,
+
+    /* Bundler mode */
+    "moduleResolution": "bundler",
+    "allowImportingTsExtensions": true,
+    "resolveJsonModule": true,
+    "isolatedModules": true,
+    "noEmit": true,
+    "jsx": "react",
+
+    /* Test types — task 041's RecentTab.test.tsx is the first NavigatorPane test file
+       located under src/ (existing NavigatorBody.test.tsx lives in the sibling top-level
+       __tests__/ folder, outside this "include": ["src"] scope, so this gap was latent
+       until now). Needed for `tsc --noEmit` to recognize jest-dom matchers. */
+    "types": ["jest", "@testing-library/jest-dom"],
+
+    /* Linting */
+    "strict": true,
+    "noUnusedLocals": true,
+    "noUnusedParameters": true,
+    "noFallthroughCasesInSwitch": true,
+
+    /* Paths */
+    "baseUrl": ".",
+    "paths": {
+      "@/*": ["src/*"],
+      // task 041 — RecentTab deep-imports navItemRepository (DEF-10 tree-shaking
+      // convention, matching useSprkMemoRepository.ts's `@spaarke/ui-components/services/*`
+      // import). Points at the compiled `dist/` (not source) because NavigatorPane
+      // consumes the pre-built shared-lib bundle — see vite.config.ts's matching alias
+      // + jest.config.cjs's matching moduleNameMapper.
+      "@spaarke/ui-components/services/*": ["../../client/shared/Spaarke.UI.Components/dist/services/*"]
+    }
+  },
+  "include": ["src"],
+  "references": [{ "path": "./tsconfig.node.json" }]
+}

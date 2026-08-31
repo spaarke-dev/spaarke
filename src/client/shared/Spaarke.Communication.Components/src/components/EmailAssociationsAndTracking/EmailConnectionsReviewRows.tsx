@@ -21,7 +21,7 @@
  */
 import * as React from 'react';
 import { mergeClasses, Text, Button, Tooltip } from '@fluentui/react-components';
-import { Checkmark16Filled, Dismiss12Regular } from '@fluentui/react-icons';
+import { Checkmark16Filled, Dismiss12Regular, ArrowUndo16Regular } from '@fluentui/react-icons';
 import { entityLabel, type PrimaryCandidate } from '../../logic/connections';
 import type { ConnectionsReviewStyles } from './EmailConnectionsReview.styles';
 
@@ -35,10 +35,12 @@ export function CandidateCard({
   selected,
   tone,
   showConfirm,
+  compact = false,
   busy,
   readOnly,
   onSelect,
   onConfirm,
+  onUndo,
   s,
 }: {
   candidate: PrimaryCandidate;
@@ -46,13 +48,77 @@ export function CandidateCard({
   /** `'primary'` → green auto-matched card; `'select'` → brand-blue when picked. */
   tone: 'select' | 'primary';
   showConfirm: boolean;
+  /**
+   * Reconcile variant (owner UAT 2026-08-14): the prototype's COMPACT single-row card
+   * — `{name}` + `{type} · {n}% match` on the left, an always-visible inline "Confirm"
+   * button on the right, no 72px floor. Default (`false`) keeps the email-form's taller
+   * 2-line select-then-confirm card unchanged.
+   */
+  compact?: boolean;
   busy: boolean;
   readOnly: boolean;
   onSelect: () => void;
   onConfirm: () => void;
+  /**
+   * Reconcile variant (owner UAT 2026-08-19, item 2f): when THIS card is the current
+   * primary (auto-matched 🟡 or confirmed 🟢, `tone === 'primary'`), its action button
+   * is **Undo** instead of Confirm — clicking it un-files the association (back to
+   * Confirm) while the other candidate cards keep their Confirm (switch) buttons.
+   * Omitted ⇒ the primary card falls back to a Confirm button (default variant).
+   */
+  onUndo?: () => void;
   s: ConnectionsReviewStyles;
 }): React.ReactElement {
   const selectedClass = tone === 'primary' ? s.cardPrimary : s.cardSelected;
+
+  // ── Compact (reconcile) — one row: meta on the left, inline Confirm on the right ──
+  if (compact) {
+    const type = candidate.entity ? entityLabel(candidate.entity) : 'Record';
+    return (
+      <div className={s.cardCell}>
+        <div
+          className={mergeClasses(s.candCompact, selected && selectedClass)}
+          aria-label={`${candidate.recordNumber ? candidate.recordNumber + ' ' : ''}${candidate.targetName}`}
+        >
+          <div className={s.compactMeta} onClick={() => !readOnly && onSelect()}>
+            <Text className={s.compactName} title={candidate.targetName}>
+              {candidate.recordNumber ? `${candidate.recordNumber} : ${candidate.targetName}` : candidate.targetName}
+            </Text>
+            <Text className={s.compactScore}>
+              {type} · {pct(candidate.confidence)} match
+            </Text>
+          </div>
+          {!readOnly ? (
+            tone === 'primary' && onUndo ? (
+              // Current primary (auto-matched/confirmed) → Undo un-files it (item 2f).
+              <Button
+                appearance="secondary"
+                size="small"
+                icon={<ArrowUndo16Regular />}
+                disabled={busy}
+                onClick={onUndo}
+                data-testid="candidate-undo"
+              >
+                Undo
+              </Button>
+            ) : (
+              // Non-primary candidate → Confirm switches the association to it.
+              <Button
+                appearance="primary"
+                size="small"
+                icon={<Checkmark16Filled />}
+                disabled={busy}
+                onClick={onConfirm}
+              >
+                Confirm
+              </Button>
+            )
+          ) : null}
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div className={s.cardCell}>
       <div

@@ -62,17 +62,27 @@ import {
   Save20Regular,
   Warning20Regular,
   People20Regular,
+  Person20Regular,
 } from "@fluentui/react-icons";
 import { SidePaneShell } from "@spaarke/ui-components";
 import { useBuContext } from "../../contexts/BuContext";
-import { speApiClient, ApiError } from "../../services/speApiClient";
-import {
-  ContainerTypeSettingsForm,
-  type ContainerTypeSettings,
-  type SharingCapabilityValue,
-} from "./ContainerTypeSettingsForm";
+import { speApiClient, describeApiError } from "../../services/speApiClient";
+import { ContainerTypeSettingsForm } from "./ContainerTypeSettingsForm";
 import { ConsumingTenantsPanel } from "./ConsumingTenantsPanel";
-import type { ContainerType, ContainerTypePermission } from "../../types/spe";
+import { ContainerTypeOwnersPanel } from "./ContainerTypeOwnersPanel";
+import {
+  assessBilling,
+  assessTrialExpiry,
+  labelForSetting,
+  parseConsumingTenantOverridables,
+  SAVE_ACCEPTED_DETAIL,
+  SAVE_ACCEPTED_TITLE,
+} from "./containerTypeLifecycle";
+import type {
+  ContainerType,
+  ContainerTypePermission,
+  ContainerTypeSettings,
+} from "../../types/spe";
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Props
@@ -83,13 +93,18 @@ export interface ContainerTypeDetailProps {
   containerTypeId: string | null;
   /** Callback to close the panel. */
   onClose: () => void;
+  /**
+   * Pane height in pixels, owned by the host's `useResizablePane` so the splitter above can drag
+   * it. Omitted falls back to the CSS default in `styles.panel`.
+   */
+  paneHeight?: number;
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Tab identifiers
 // ─────────────────────────────────────────────────────────────────────────────
 
-type TabId = "settings" | "permissions" | "consumers";
+type TabId = "settings" | "owners" | "permissions" | "consumers";
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Helpers
@@ -130,19 +145,31 @@ function capitalize(s: string): string {
 }
 
 /**
- * Extract ContainerTypeSettings from a SpeContainerTypeConfig (selectedConfig).
- * The config holds the Dataverse-side settings for the container type.
+ * The settings a container type actually has, as reported by Graph.
+ *
+ * 🔴 REPLACED `extractSettingsFromConfig` 2026-08-27 (task 025 completion). That function read the
+ * **Dataverse config record** and filled every gap with an invented default —
+ * `?? "disabled"`, `?? false`, `?? 100`, `?? 1 GB`, and `isSearchEnabled: true` hard-coded with the
+ * comment *"Graph API search is enabled by default"*. The Settings screen therefore displayed the
+ * client's guesses as though they were the container type's configuration, on a screen whose entire
+ * purpose is to report that configuration. Signature defect (spec §2.4), inside the settings screen.
+ *
+ * Graph is the authority for Graph settings. Where Graph reports nothing the value stays
+ * `undefined` — rendered as "Not reported" and omitted from any save, because the BFF applies only
+ * non-null fields. An unknown must not become a write.
  */
-function extractSettingsFromConfig(
-  config: NonNullable<ReturnType<typeof useBuContext>["selectedConfig"]>
-): ContainerTypeSettings {
-  return {
-    sharingCapability: (config.sharingCapability as SharingCapabilityValue) ?? "disabled",
-    isItemVersioningEnabled: config.isItemVersioningEnabled ?? false,
-    itemMajorVersionLimit: config.itemMajorVersionLimit ?? 100,
-    maxStoragePerBytes: config.maxStoragePerBytes ?? 1_073_741_824,
-    isSearchEnabled: true, // Graph API search is enabled by default; no Dataverse field yet
-  };
+function settingsFromContainerType(ct: ContainerType | null): ContainerTypeSettings {
+  return ct?.settings ? { ...ct.settings } : {};
+}
+
+/**
+ * The subset of settings that were actually established — i.e. everything the admin either saw
+ * reported or explicitly set. Sent as the PUT body; anything absent means "leave unchanged".
+ */
+function definedSettings(settings: ContainerTypeSettings): Record<string, unknown> {
+  return Object.fromEntries(
+    Object.entries(settings).filter(([, v]) => v !== undefined && v !== null)
+  );
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -150,26 +177,30 @@ function extractSettingsFromConfig(
 // ─────────────────────────────────────────────────────────────────────────────
 
 const useStyles = makeStyles({
-  /** Translucent backdrop covering the page behind the panel. */
-  backdrop: {
-    position: "fixed",
-    inset: 0,
-    zIndex: 200,
-    backgroundColor: tokens.colorBackgroundOverlay,
-  },
-
-  /** Panel container — fixed right-side overlay, 440px wide. */
+  /**
+   * Panel container — a docked BOTTOM pane, full width of the page.
+   *
+   * 🔴 Changed 2026-08-26 (UAT). This was a 440px fixed overlay on the right with a translucent
+   * backdrop. Two things were wrong with that. The panel carries a settings form, a permissions
+   * grid and a consuming-tenants list — content that needs horizontal room, and 440px gave it a
+   * column so narrow that labels wrapped mid-phrase. And the backdrop made it MODAL: the list you
+   * were comparing rows against was greyed out and unclickable behind it, which is the opposite of
+   * what a detail pane is for.
+   *
+   * Now it is in-flow, sized by its flex parent in `App.tsx`, so the grid above shrinks rather than
+   * being covered — the list stays live while the detail is open. The backdrop is gone with it.
+   */
   panel: {
-    position: "fixed",
-    top: 0,
-    right: 0,
-    bottom: 0,
-    width: "440px",
-    zIndex: 201,
-    boxShadow: tokens.shadow64,
+    flex: "0 0 auto",
+    height: "45%",
+    minHeight: "260px",
     display: "flex",
     flexDirection: "column",
     backgroundColor: tokens.colorNeutralBackground1,
+    borderTopWidth: "1px",
+    borderTopStyle: "solid",
+    borderTopColor: tokens.colorNeutralStroke2,
+    boxShadow: tokens.shadow16,
   },
 
   /** Header rendered inside SidePaneShell's header slot. */
@@ -312,8 +343,29 @@ const useStyles = makeStyles({
   },
 
   /** Permissions table. */
+  /**
+   * `tableLayout: fixed` is load-bearing, not cosmetic.
+   *
+   * With auto layout a single long unbroken token — which is exactly what the server was sending
+   * before the `MapContainerTypePermission` fix — widens its column past the table and the cells
+   * visually run over each other (UAT round 6: "the columns need to concat and not overlap").
+   * Fixed layout means a cell can never claim more than its share, whatever lands in it, so the
+   * overlap cannot recur even if some future value is long again.
+   */
   permTable: {
     width: "100%",
+    tableLayout: "fixed",
+  },
+
+  /**
+   * Wraps long scope lists inside their own cell instead of overflowing into the next one.
+   * `break-word` rather than `break-all` so readable names break at spaces where they can.
+   */
+  permCellText: {
+    wordBreak: "break-word",
+    overflowWrap: "anywhere",
+    whiteSpace: "normal",
+    color: tokens.colorNeutralForeground2,
   },
 
   noPermissions: {
@@ -349,6 +401,7 @@ const useStyles = makeStyles({
 export const ContainerTypeDetail: React.FC<ContainerTypeDetailProps> = ({
   containerTypeId,
   onClose,
+  paneHeight,
 }) => {
   const styles = useStyles();
   const { selectedConfig } = useBuContext();
@@ -368,13 +421,9 @@ export const ContainerTypeDetail: React.FC<ContainerTypeDetailProps> = ({
 
   // ── Settings / Dirty State ─────────────────────────────────────────────────
 
-  const [settings, setSettings] = React.useState<ContainerTypeSettings>({
-    sharingCapability: "disabled",
-    isItemVersioningEnabled: false,
-    itemMajorVersionLimit: 100,
-    maxStoragePerBytes: 1_073_741_824,
-    isSearchEnabled: true,
-  });
+  // Empty, not defaulted. Before the container type loads nothing is known, and an invented
+  // starting value would render as fact for the duration of the fetch.
+  const [settings, setSettings] = React.useState<ContainerTypeSettings>({});
   const [savedSettings, setSavedSettings] = React.useState<ContainerTypeSettings>(settings);
   const [saving, setSaving] = React.useState(false);
   const [saveSuccess, setSaveSuccess] = React.useState(false);
@@ -384,6 +433,44 @@ export const ContainerTypeDetail: React.FC<ContainerTypeDetailProps> = ({
   const isDirty = React.useMemo(
     () => JSON.stringify(settings) !== JSON.stringify(savedSettings),
     [settings, savedSettings]
+  );
+
+  /**
+   * Billing standing for the loaded container type (task 029 / spec FR-C12).
+   *
+   * Computed even when `containerType` is null so the value is always defined; in that state it
+   * assesses to "unknown", which is the truthful reading of "nothing loaded yet".
+   */
+  const billingAssessment = React.useMemo(
+    () => assessBilling(containerType ?? {}),
+    [containerType]
+  );
+
+  /**
+   * Trial expiry standing (spec FR-C13).
+   *
+   * The panel previously rendered `expiryDateTime` as a plain red date, which cannot say whether the
+   * date has PASSED — so the live tenant's trial, expired 2025-10-10, looked the same as one
+   * expiring next year. `now` is captured per loaded container type, not per render.
+   */
+  const trialExpiry = React.useMemo(
+    () => assessTrialExpiry(containerType ?? {}, new Date()),
+    [containerType]
+  );
+
+  /**
+   * Settings a consuming tenant is PERMITTED to override (task 026 / spec FR-C08).
+   *
+   * A permission, not a state — see `containerTypeLifecycle.parseConsumingTenantOverridables`. The
+   * UI must say "may be overridden", never "is overridden", because the effective value lives on a
+   * registration in the consuming tenant that this tenant cannot read.
+   */
+  const overridableSettings = React.useMemo(
+    () =>
+      parseConsumingTenantOverridables(
+        containerType?.settings?.consumingTenantOverridables
+      ),
+    [containerType]
   );
 
   // ── Tab State ──────────────────────────────────────────────────────────────
@@ -415,16 +502,14 @@ export const ContainerTypeDetail: React.FC<ContainerTypeDetailProps> = ({
       .get(containerTypeId, selectedConfig.id)
       .then((ct) => {
         setContainerType(ct);
-        // Initialise settings from selectedConfig (which holds the Dataverse settings)
-        const initial = extractSettingsFromConfig(selectedConfig);
+        // Seed from Graph's own reported settings — the authority for this screen.
+        const initial = settingsFromContainerType(ct);
         setSettings(initial);
         setSavedSettings(initial);
       })
       .catch((err) => {
         const message =
-          err instanceof ApiError
-            ? err.message
-            : "Failed to load container type details. Please try again.";
+          describeApiError(err, "Failed to load container type details. Please try again.");
         setError(message);
       })
       .finally(() => {
@@ -447,9 +532,7 @@ export const ContainerTypeDetail: React.FC<ContainerTypeDetailProps> = ({
       setPermissionsLoaded(true);
     } catch (err) {
       const message =
-        err instanceof ApiError
-          ? err.message
-          : "Failed to load permissions. Please try again.";
+        describeApiError(err, "Failed to load permissions. Please try again.");
       setPermissionsError(message);
     } finally {
       setPermissionsLoading(false);
@@ -477,29 +560,44 @@ export const ContainerTypeDetail: React.FC<ContainerTypeDetailProps> = ({
     setSaveError(null);
     setSaveSuccess(false);
     try {
-      await speApiClient.containerTypes.updateSettings(
+      // All nine v1.0 settings now travel under Graph's own property names, and only the ones
+      // actually established are sent — the BFF applies non-null fields and leaves the rest alone,
+      // so omitting an unreported setting is how we avoid writing a guess.
+      //
+      // `isOfficeRestricted` is stripped: it is beta-only and read-only on the v1.0 surface this
+      // endpoint writes through, so sending it would be asking for a change that cannot happen.
+      const { isOfficeRestricted: _readOnly, ...writable } = settings;
+
+      const updated = await speApiClient.containerTypes.updateSettings(
         containerTypeId,
         selectedConfig.id,
-        {
-          sharingCapability: settings.sharingCapability,
-          isItemVersioningEnabled: settings.isItemVersioningEnabled,
-          itemMajorVersionLimit: settings.itemMajorVersionLimit,
-          maxStoragePerBytes: settings.maxStoragePerBytes,
-          isSearchEnabled: settings.isSearchEnabled,
-        }
+        definedSettings(writable)
       );
-      setSavedSettings({ ...settings });
+
+      // MERGE, never replace. The PUT returns `ContainerTypeSettingsResponseDto` — a deliberately
+      // narrower shape carrying id, displayName, billing, createdDateTime and settings. It does NOT
+      // carry owningAppId, expiryDateTime or region, so assigning it wholesale would blank those
+      // from the details panel above and make a successful save look like data loss. Object spread
+      // only copies keys the response actually has, so the omitted ones survive.
+      const merged: ContainerType = { ...(containerType as ContainerType), ...updated };
+      setContainerType(merged);
+
+      // Re-seed from the response, not from what we sent. Task 025 made the update response carry
+      // the post-update settings precisely so a caller can confirm the write applied instead of
+      // trusting a 200 (FR-C04) — and task 051 measured Graph accepting a settings PATCH while
+      // silently discarding a property. Echoing our own request back would hide exactly that.
+      const applied = settingsFromContainerType(merged);
+      setSettings(applied);
+      setSavedSettings(applied);
       setSaveSuccess(true);
     } catch (err) {
       const message =
-        err instanceof ApiError
-          ? err.message
-          : "Failed to save settings. Please try again.";
+        describeApiError(err, "Failed to save settings. Please try again.");
       setSaveError(message);
     } finally {
       setSaving(false);
     }
-  }, [containerTypeId, selectedConfig, settings]);
+  }, [containerTypeId, selectedConfig, settings, containerType]);
 
   // ── Close Handler (with dirty check) ──────────────────────────────────────
 
@@ -560,6 +658,28 @@ export const ContainerTypeDetail: React.FC<ContainerTypeDetailProps> = ({
                   {capitalize(containerType.billingClassification)}
                 </Badge>
               )}
+              {/*
+                Billing standing (task 029 / spec FR-C12). Rendered whenever a container type is
+                loaded — including when Graph did not report it, which shows as an explicit "Unknown"
+                rather than being omitted. An omitted badge would be indistinguishable from a healthy
+                one to anyone who does not already know the field exists (NFR-06).
+              */}
+              {containerType && (
+                <Badge
+                  color={billingAssessment.tone}
+                  appearance={
+                    billingAssessment.standing === "unknown" ? "outline" : "filled"
+                  }
+                  size="small"
+                  title={
+                    [billingAssessment.consequence, billingAssessment.remediation]
+                      .filter(Boolean)
+                      .join(" ") || undefined
+                  }
+                >
+                  Billing: {billingAssessment.label}
+                </Badge>
+              )}
               {containerType?.containerTypeId && (
                 <Text
                   className={styles.headerSubtext}
@@ -591,6 +711,9 @@ export const ContainerTypeDetail: React.FC<ContainerTypeDetailProps> = ({
       >
         <Tab value="settings" icon={<Settings20Regular />}>
           Settings
+        </Tab>
+        <Tab value="owners" icon={<Person20Regular />}>
+          Owners
         </Tab>
         <Tab value="permissions" icon={<LockClosed20Regular />}>
           Permissions
@@ -643,15 +766,13 @@ export const ContainerTypeDetail: React.FC<ContainerTypeDetailProps> = ({
 
   return (
     <>
-      {/* Backdrop */}
+      {/* Panel — docked beneath the list. No backdrop: the grid above stays interactive. */}
       <div
-        className={styles.backdrop}
-        onClick={handleCloseRequest}
-        aria-hidden="true"
-      />
-
-      {/* Panel */}
-      <div className={styles.panel} role="complementary" aria-label="Container type detail">
+        className={styles.panel}
+        style={paneHeight !== undefined ? { height: `${paneHeight}px` } : undefined}
+        role="complementary"
+        aria-label="Container type detail"
+      >
         <SidePaneShell
           header={
             <>
@@ -664,10 +785,71 @@ export const ContainerTypeDetail: React.FC<ContainerTypeDetailProps> = ({
           {/* ── Settings Tab ── */}
           {activeTab === "settings" && (
             <div className={styles.tabContent}>
-              {/* Save success / error banners */}
+              {/*
+                Invalid-billing warning (task 029 / spec FR-C12). Placed above the settings form
+                because it is a condition of the container type itself, not a result of anything the
+                admin is about to do here — and it is not a save failure, so it must not sit among the
+                save banners. States the operational consequence and where it is remediated (which is
+                deliberately NOT this app); a bare red badge would leave an admin with nowhere to go.
+              */}
+              {billingAssessment.needsAttention && (
+                <MessageBar intent="warning" className={styles.errorBanner}>
+                  <MessageBarBody>
+                    <MessageBarTitle>Billing is invalid</MessageBarTitle>
+                    {billingAssessment.consequence}
+                    {billingAssessment.remediation ? (
+                      <>
+                        {" "}
+                        {billingAssessment.remediation}
+                      </>
+                    ) : null}
+                  </MessageBarBody>
+                </MessageBar>
+              )}
+
+              {/*
+                Which settings a consuming tenant MAY override (task 026 / spec FR-C08).
+
+                Deliberately worded as a permission. `consumingTenantOverridables` says what a
+                consuming tenant is ALLOWED to override; it carries no effective value and no
+                indication that any override actually exists. The effective value lives on a
+                fileStorageContainerTypeRegistration in the CONSUMING tenant, which the owning tenant
+                has no way to read (notes/task-026-findings.md §2) — so "is overridden" is a claim this
+                screen cannot make, and the last line says so rather than leaving a false impression
+                of completeness.
+              */}
+              {overridableSettings.length > 0 && (
+                <MessageBar intent="info" className={styles.errorBanner}>
+                  <MessageBarBody>
+                    <MessageBarTitle>
+                      Consuming tenants may override these settings
+                    </MessageBarTitle>
+                    {overridableSettings.map(labelForSetting).join(", ")}. Where a
+                    consuming tenant has applied its own value, that value stays in
+                    place and changes saved here will not reach it. Overrides applied
+                    in another tenant are not visible from this screen.
+                  </MessageBarBody>
+                </MessageBar>
+              )}
+
+              {/*
+                Post-save feedback (task 026 / spec FR-C08).
+
+                This said "Settings saved successfully." — a bare success that implies the change is
+                in effect. It is not: replication to consuming tenants takes up to 24 hours, and any
+                setting a consuming tenant has overridden never picks the new value up at all
+                (learn-containertypes.md:101). An admin who saved, saw "successfully", checked a
+                consuming tenant and found the old value would reasonably conclude the tool is broken.
+
+                Intent is `info`, not `success` — the write was accepted, which is not the same as the
+                setting being live, and green reads as the latter.
+              */}
               {saveSuccess && (
-                <MessageBar intent="success" className={styles.successBanner}>
-                  <MessageBarBody>Settings saved successfully.</MessageBarBody>
+                <MessageBar intent="info" className={styles.successBanner}>
+                  <MessageBarBody>
+                    <MessageBarTitle>{SAVE_ACCEPTED_TITLE}</MessageBarTitle>
+                    {SAVE_ACCEPTED_DETAIL}
+                  </MessageBarBody>
                 </MessageBar>
               )}
               {saveError && (
@@ -702,13 +884,13 @@ export const ContainerTypeDetail: React.FC<ContainerTypeDetailProps> = ({
                           .get(containerTypeId, selectedConfig.id)
                           .then((ct) => {
                             setContainerType(ct);
-                            const initial = extractSettingsFromConfig(selectedConfig);
+                            const initial = settingsFromContainerType(ct);
                             setSettings(initial);
                             setSavedSettings(initial);
                           })
                           .catch((err) => {
                             setError(
-                              err instanceof ApiError ? err.message : "Failed to load."
+                              describeApiError(err, "Failed to load.")
                             );
                           })
                           .finally(() => setLoading(false));
@@ -746,12 +928,35 @@ export const ContainerTypeDetail: React.FC<ContainerTypeDetailProps> = ({
                         {containerType.expiryDateTime && (
                           <div className={styles.fieldRow}>
                             <Text className={styles.fieldLabel}>Trial Expiry</Text>
-                            <Text
-                              className={styles.fieldValue}
-                              style={{ color: tokens.colorPaletteRedForeground1 }}
-                            >
-                              {formatDate(containerType.expiryDateTime)}
-                            </Text>
+                            {/*
+                              A date alone does not say whether it has PASSED. This rendered as plain
+                              red text, so the live tenant's trial — expired 2025-10-10 — looked
+                              identical to one expiring next year (spec FR-C13).
+                            */}
+                            <div className={styles.fieldValue}>
+                              <Text>{formatDate(containerType.expiryDateTime)}</Text>
+                              {trialExpiry.label && (
+                                <Badge
+                                  color={trialExpiry.tone}
+                                  appearance={
+                                    trialExpiry.state === "unknown" ? "outline" : "filled"
+                                  }
+                                  size="small"
+                                  style={{ marginLeft: tokens.spacingHorizontalXS }}
+                                >
+                                  {trialExpiry.label}
+                                </Badge>
+                              )}
+                              {trialExpiry.consequence && (
+                                <Text
+                                  size={200}
+                                  block
+                                  style={{ color: tokens.colorNeutralForeground3 }}
+                                >
+                                  {trialExpiry.consequence}
+                                </Text>
+                              )}
+                            </div>
                           </div>
                         )}
                         <div className={styles.fieldRow}>
@@ -783,6 +988,17 @@ export const ContainerTypeDetail: React.FC<ContainerTypeDetailProps> = ({
                 containerTypeId={containerTypeId}
                 configId={selectedConfig.id}
               />
+            </div>
+          )}
+
+          {/*
+            ── Owners Tab (spec FR-C09) ──
+            PEOPLE who administer the container type. Distinct from the Permissions tab below, which
+            lists which APPLICATIONS may access containers of this type. Neither supersedes the other.
+          */}
+          {activeTab === "owners" && containerTypeId && (
+            <div className={styles.tabContent}>
+              <ContainerTypeOwnersPanel containerTypeId={containerTypeId} />
             </div>
           )}
 
@@ -861,14 +1077,14 @@ export const ContainerTypeDetail: React.FC<ContainerTypeDetailProps> = ({
                             </Text>
                           </TableCell>
                           <TableCell>
-                            <Text size={200} style={{ color: tokens.colorNeutralForeground2 }}>
+                            <Text size={200} className={styles.permCellText}>
                               {perm.delegatedPermissions.length > 0
                                 ? perm.delegatedPermissions.join(", ")
                                 : "—"}
                             </Text>
                           </TableCell>
                           <TableCell>
-                            <Text size={200} style={{ color: tokens.colorNeutralForeground2 }}>
+                            <Text size={200} className={styles.permCellText}>
                               {perm.applicationPermissions.length > 0
                                 ? perm.applicationPermissions.join(", ")
                                 : "—"}

@@ -1,7 +1,7 @@
 <Project Sdk="Microsoft.NET.Sdk">
 
   <PropertyGroup>
-    <TargetFramework>net8.0</TargetFramework>
+    <TargetFramework>net10.0</TargetFramework>
     <ImplicitUsings>enable</ImplicitUsings>
     <Nullable>enable</Nullable>
     <IsPackable>false</IsPackable>
@@ -17,11 +17,13 @@
       <PrivateAssets>all</PrivateAssets>
     </PackageReference>
 
-    <!-- Security: Override vulnerable transitive dependencies -->
-    <!-- CVE-2018-8292 (HIGH): System.Net.Http 4.3.0 → 4.3.4 -->
-    <PackageReference Include="System.Net.Http" Version="4.3.4" />
-    <!-- CVE-2019-0820 (HIGH): System.Text.RegularExpressions 4.3.0 → 4.3.1 -->
-    <PackageReference Include="System.Text.RegularExpressions" Version="4.3.1" />
+    <!-- System.Net.Http pin removed (dotnet-10-upgrade-r1 task 030): net10 framework-superseded
+         (NU1510, promoted to error by root TreatWarningsAsErrors=true). CVE-2018-8292 (HIGH) fix is
+         inbox on net10 (inbox System.Net.Http ≫ 4.3.4). Mirrors the System.Text.RegularExpressions
+         removal task 005 did here; this pin was missed then because ArchTests is not in Spaarke.sln. -->
+    <!-- System.Text.RegularExpressions pin removed (task 005): net10 framework-superseded (NU1510);
+         the CVE-2019-0820 fix is inbox on net10. -->
+
   </ItemGroup>
 
   <ItemGroup>
@@ -29,5 +31,64 @@
     <ProjectReference Include="..\..\src\server\shared\Spaarke.Core\Spaarke.Core.csproj" />
     <ProjectReference Include="..\..\src\server\shared\Spaarke.Dataverse\Spaarke.Dataverse.csproj" />
   </ItemGroup>
+
+  <!--
+    NOTE: Sprk.Provisioning.ControlPlane is intentionally NOT a <ProjectReference>.
+    CosmosProvisioningSecretGuardTests (task 025 — customer-provisioning-orchestration-r1
+    spec FR-27) loads the L2 assembly at TEST RUNTIME via Assembly.LoadFrom, resolving
+    the DLL from src/server/services/Sprk.Provisioning.ControlPlane/bin/**. Two reasons:
+      1) Sprk.Bff.Api and Sprk.Provisioning.ControlPlane are BOTH Web SDK projects with a
+         compiler-synthesized top-level `Program` class; a plain ProjectReference collides
+         (CS0433) with `typeof(Program)` used across ADR001/007/008/... An extern alias
+         would fix that, but option (2) is a stronger reason for runtime loading anyway.
+      2) L2 is a POCO surface in this project's Wave 2 phase — its NuGet stack evolves
+         through parallel Wave 2 tasks (Cosmos SDK via task 037, Service Bus via 038,
+         AppInsights via 039). A compile-time ProjectReference would couple this test to
+         the composite build health of a fast-moving sibling package graph. Runtime
+         reflection over the already-published L2 DLL keeps this ArchTest robust across
+         sibling churn — the invariant it enforces is a POCO-shape invariant, not a
+         wiring invariant, so the DLL is the right artifact to inspect.
+    Consequence: L2 must be built at least once before this test runs.
+
+    THAT CONSEQUENCE WAS NOT SATISFIED, 2026-08-27. This note previously read "CI's full-sln
+    `dotnet build` satisfies this automatically". It does not. The Tier 2 `adr-compliance` job
+    runs `dotnet restore` then `dotnet test tests/Spaarke.ArchTests/Spaarke.ArchTests.csproj`,
+    which builds this project and its ProjectReferences only — never the L2 projects. So the
+    guard threw FileNotFoundException on every CI run and evaluated nothing, which is the same
+    dead-guard state task 025 repaired it out of.
+
+    The BuildL2ForCosmosGuard target below closes that without a ProjectReference, so BOTH
+    reasons above still hold: MSBuild builds the L2 projects as a separate graph and discards
+    their outputs (ReferenceOutputAssembly is not involved at all), so there is no CS0433
+    `Program` collision and no compile-time coupling to L2's package graph. The DLLs land in
+    their own bin/ where Assembly.LoadFrom finds them.
+  -->
+  <Target Name="BuildL2ForCosmosGuard" AfterTargets="Build">
+    <ItemGroup>
+      <_L2Project Include="..\..\src\server\services\Sprk.Provisioning.ControlPlane.Core\Sprk.Provisioning.ControlPlane.Core.csproj" />
+      <_L2Project Include="..\..\src\server\services\Sprk.Provisioning.ControlPlane.Api\Sprk.Provisioning.ControlPlane.Api.csproj" />
+    </ItemGroup>
+    <!--
+      Core carries the POCOs the FR-27 shape invariant is about; Api is included because the
+      loader scans every Sprk.Provisioning.ControlPlane* assembly and a partially-built set
+      would silently shrink the guard's coverage. Sidecar and Worker are deliberately omitted:
+      neither declares provisioning POCOs, and each adds build time to a job with a <60s budget.
+      If a secret-shaped POCO is ever added to one of them, add it here — the loader will not
+      tell you it is missing, it will simply scan less.
+    -->
+    <!--
+      RESTORE THEN BUILD. `Targets="Build"` alone fails with NETSDK1004 ("Assets file
+      project.assets.json not found") in every job that restores only this project rather
+      than the full solution. Observed 2026-08-28 on the Tier 1 `tenant-isolation` job and
+      on a clean local worktree. Those jobs are correct to restore narrowly; it is this
+      target that reaches outside the restore graph, so it is this target's job to bring its
+      own assets. Restore is a no-op when the assets file is already current, so the
+      full-solution path pays nothing.
+    -->
+    <MSBuild Projects="@(_L2Project)"
+             Targets="Restore;Build"
+             Properties="Configuration=$(Configuration)"
+             ContinueOnError="false" />
+  </Target>
 
 </Project>

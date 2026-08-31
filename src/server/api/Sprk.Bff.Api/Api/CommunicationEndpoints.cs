@@ -77,6 +77,18 @@ public static class CommunicationEndpoints
             .Produces<CommunicationStatusResponse>(StatusCodes.Status200OK)
             .Produces<ProblemDetails>(StatusCodes.Status404NotFound);
 
+        // GET /{id}/attachments/text — re-extracted, normalized text for each of a communication's file
+        // attachments, for the reconciliation browse reader's folds (email-communication-intelligence-r2 B2.1).
+        // Text is a transient pipeline artifact (never persisted), so it is re-extracted on demand from SPE via
+        // the shared cache-aware ITextExtractor. Download is OBO (caller's token) so SPE enforces file access;
+        // the auth filter also gates on an authenticated caller identity.
+        group.MapGet("/{id:guid}/attachments/text", GetCommunicationAttachmentTextAsync)
+            .AddEndpointFilter<CommunicationAuthorizationFilter>()
+            .WithName("GetCommunicationAttachmentText")
+            .WithDescription("Get re-extracted, normalized text for a communication's file attachments (reconciliation reader folds)")
+            .Produces<CommunicationAttachmentTextResponse>(StatusCodes.Status200OK)
+            .Produces<ProblemDetails>(StatusCodes.Status403Forbidden);
+
         // POST /threads/direct — start (or reuse) a 1:1 direct thread with another Spaarke user (task 043 / FR-09).
         // Not anchored to a record (no ADR-024 regarding); membership is the EXPLICIT two-party list (thread
         // ownership + a POA "Manage access" share to the other participant) — see IDirectThreadAccessService.
@@ -341,6 +353,33 @@ public static class CommunicationEndpoints
             .Produces<ProblemDetails>(StatusCodes.Status400BadRequest)
             .Produces<ProblemDetails>(StatusCodes.Status403Forbidden)
             .Produces<ProblemDetails>(StatusCodes.Status422UnprocessableEntity);
+
+        // POST /api/communications/proposals/{reviewLogId}/undo — Job B UNDO (email-communication-intelligence-r2 B2.2).
+        // The Fields reconcile tab POSTs a just-applied proposal's ReviewLogId here on Undo. The service re-writes the
+        // proposal's stored oldValue back to the target field under the caller's MSCRMCallerID impersonation (same
+        // blessed core + allow-list gate as apply), and writes one append-only compensating audit row. No body.
+        group.MapPost("/proposals/{reviewLogId:guid}/undo", UndoProposalAsync)
+            .AddEndpointFilter<CommunicationAuthorizationFilter>()
+            .WithName("UndoCommunicationProposal")
+            .WithDescription("Job B undo (B2.2): reverse a just-applied field-update proposal by writing its stored oldValue back to the target record under the caller's MSCRMCallerID impersonation, then write one append-only compensating audit row. Caller resolved server-side (403 fail-closed); missing/malformed proposal (404/422), non-allow-listed field (403), lookup field (422), or a failed coercion/PATCH (422) are refused.")
+            .Produces<UndoProposalResult>(StatusCodes.Status200OK)
+            .Produces<ProblemDetails>(StatusCodes.Status403Forbidden)
+            .Produces<ProblemDetails>(StatusCodes.Status404NotFound)
+            .Produces<ProblemDetails>(StatusCodes.Status422UnprocessableEntity);
+
+        // POST /api/communications/{communicationId}/tasks/{taskId}/undo — Job C UNDO (email-communication-intelligence-r2
+        // B2.2). The Tasks reconcile tab POSTs a just-created task's CreatedTaskId here on Undo. The service SOFT-CANCELS
+        // the sprk_event (sprk_eventstatus = Cancelled) under the caller's MSCRMCallerID impersonation — impersonation
+        // gates the write to the caller (no app-only "delete any event by id"), reversible, preserves the audit trail —
+        // then writes ONE append-only compensating audit row tying the cancel to the communication (provenance + W1/W2).
+        group.MapPost("/{communicationId:guid}/tasks/{taskId:guid}/undo", UndoCreateTaskAsync)
+            .AddEndpointFilter<CommunicationAuthorizationFilter>()
+            .WithName("UndoCommunicationCreateTask")
+            .WithDescription("Job C undo (B2.2): soft-cancel a just-created task (sprk_eventstatus=Cancelled) under the caller's MSCRMCallerID impersonation and write one append-only compensating audit row for the communication. Caller resolved server-side (403 fail-closed); a failed write — caller lacks access or the event no longer exists (422) — or a failed audit write (500) are refused.")
+            .Produces<UndoCreateTaskResult>(StatusCodes.Status200OK)
+            .Produces<ProblemDetails>(StatusCodes.Status403Forbidden)
+            .Produces<ProblemDetails>(StatusCodes.Status422UnprocessableEntity)
+            .Produces<ProblemDetails>(StatusCodes.Status500InternalServerError);
 
         group.MapPost("/accounts/{id:guid}/verify", VerifyCommunicationAccountAsync)
             .AddEndpointFilter<CommunicationAuthorizationFilter>()
@@ -699,6 +738,24 @@ public static class CommunicationEndpoints
     }
 
     /// <summary>
+    /// Re-extracted attachment text for the reconciliation browse reader (email-communication-intelligence-r2 B2.1).
+    /// Delegates to the Scoped read model, which lists the communication's file attachments and re-extracts each
+    /// one's text from SPE via the shared cache-aware ITextExtractor (OBO download → SPE enforces the caller's
+    /// access). Always 200 with a (possibly empty) list; per-attachment failures degrade to Extractable=false
+    /// (never an error — the reader shows a "not available as text" fold).
+    /// </summary>
+    private static async Task<IResult> GetCommunicationAttachmentTextAsync(
+        Guid id,
+        CommunicationAttachmentTextService attachmentTextService,
+        HttpContext context,
+        CancellationToken ct)
+    {
+        // context.User → impersonated Dataverse reads (NFR-06 no-leak); context → OBO SPE download.
+        var result = await attachmentTextService.GetAttachmentTextAsync(id, context.User, context, ct);
+        return TypedResults.Ok(result);
+    }
+
+    /// <summary>
     /// Unread-count for the polling indicator (task 050 / FR-11). Parses the optional <c>?since</c> (the caller's
     /// last-seen marker), resolves the caller server-side, and delegates to the impersonated, access-filtered count.
     /// </summary>
@@ -1039,6 +1096,32 @@ public static class CommunicationEndpoints
         }
 
         var result = await applyService.CreateAdHocAsync(communicationId, request, context.User, ct);
+        return TypedResults.Ok(result);
+    }
+
+    // Job B undo (B2.2). Reverses a just-applied field proposal to its stored oldValue under the caller's MSCRMCallerID
+    // impersonation (fail-closed 403); failures surface as RFC 7807 ProblemDetails (403/404/422/500). No request body.
+    private static async Task<IResult> UndoProposalAsync(
+        Guid reviewLogId,
+        ICommunicationProposalApplyService applyService,
+        HttpContext context,
+        CancellationToken ct)
+    {
+        var result = await applyService.UndoApplyAsync(reviewLogId, context.User, ct);
+        return TypedResults.Ok(result);
+    }
+
+    // Job C undo (B2.2). Soft-cancels a just-created task (sprk_eventstatus=Cancelled) under the caller's MSCRMCallerID
+    // impersonation (fail-closed 403) + writes one compensating audit row for the communication; failures surface as
+    // RFC 7807 ProblemDetails (403/422/500). No request body.
+    private static async Task<IResult> UndoCreateTaskAsync(
+        Guid communicationId,
+        Guid taskId,
+        ICommunicationCreateTaskApplyService applyService,
+        HttpContext context,
+        CancellationToken ct)
+    {
+        var result = await applyService.UndoCreateTaskAsync(communicationId, taskId, context.User, ct);
         return TypedResults.Ok(result);
     }
 

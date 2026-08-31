@@ -5,6 +5,7 @@ using Microsoft.Extensions.Caching.Distributed;
 using Microsoft.Extensions.Options;
 using Spaarke.Dataverse;
 using Sprk.Bff.Api.Configuration;
+using Sprk.Bff.Api.Infrastructure.Errors;
 using Sprk.Bff.Api.Infrastructure.Graph;
 
 namespace Sprk.Bff.Api.Services.SpeAdmin;
@@ -46,8 +47,27 @@ public sealed class SpeDashboardSyncService : BackgroundService
         public int TotalContainerCount { get; init; }
 
         /// <summary>Total storage used in bytes across all containers that reported storage usage.</summary>
+        /// <remarks>
+        /// Read together with <see cref="StorageReportingContainerCount"/>. Before 2026-08-24 every
+        /// container reported null (the value was fetched from Graph and discarded), so this summed
+        /// to <b>0</b> and the dashboard rendered a confident "0 B" — the purest instance of the
+        /// systemic defect this project exists to remove. A partial sum presented as a total is the
+        /// same defect in miniature, which is why the contributing count travels with it.
+        /// </remarks>
         [JsonPropertyName("totalStorageUsedInBytes")]
         public long TotalStorageUsedInBytes { get; init; }
+
+        /// <summary>
+        /// How many containers actually reported a storage figure, out of
+        /// <see cref="TotalContainerCount"/>.
+        /// </summary>
+        /// <remarks>
+        /// Graph returns consumption only on the beta LIST surface (task 020), so coverage can be
+        /// partial. When this is below the total, the sum is a floor rather than a total and the UI
+        /// must say so instead of presenting it as complete.
+        /// </remarks>
+        [JsonPropertyName("storageReportingContainerCount")]
+        public int StorageReportingContainerCount { get; init; }
 
         /// <summary>Number of containers per container type config ID (Guid.ToString()).</summary>
         [JsonPropertyName("containerCountByConfig")]
@@ -67,7 +87,64 @@ public sealed class SpeDashboardSyncService : BackgroundService
         /// </summary>
         [JsonPropertyName("syncStatus")]
         public string SyncStatus { get; init; } = string.Empty;
+
+        /// <summary>
+        /// Overall sync health, derived from <see cref="Concerns"/>. Never optimistic.
+        /// </summary>
+        [JsonPropertyName("syncHealth")]
+        public SyncHealth SyncHealth { get; init; } = SyncHealth.Healthy;
+
+        /// <summary>
+        /// Per-concern outcome for every concern this sync pass attempted, in the order attempted.
+        /// A concern that was attempted and failed appears here with its reason — this is what lets the
+        /// dashboard NAME the failing concern instead of showing an opaque "Partial".
+        /// </summary>
+        [JsonPropertyName("concerns")]
+        public IReadOnlyList<ConcernOutcome> Concerns { get; init; } = Array.Empty<ConcernOutcome>();
     }
+
+    /// <summary>Overall sync health. Ordered least-to-most severe.</summary>
+    [JsonConverter(typeof(JsonStringEnumConverter))]
+    public enum SyncHealth
+    {
+        /// <summary>Every attempted concern succeeded.</summary>
+        Healthy,
+
+        /// <summary>At least one concern succeeded and at least one failed.</summary>
+        Degraded,
+
+        /// <summary>Every attempted concern failed — the dashboard is showing nothing trustworthy.</summary>
+        Failed
+    }
+
+    /// <summary>
+    /// The outcome of one concern in a sync pass.
+    /// </summary>
+    /// <remarks>
+    /// Added 2026-08-21 by <c>sdap-SPE-admin-app-r2</c> task 003 (spec FR-A03). Before this, a failed
+    /// concern's reason existed only in the server log: the payload carried a bare count ("1 failed"), so
+    /// an operator could see that something broke but not what or why.
+    /// </remarks>
+    public sealed record ConcernOutcome
+    {
+        /// <summary>What was attempted — e.g. "Dataverse container-type configs" or "Graph containers (config …)".</summary>
+        [JsonPropertyName("concern")]
+        public required string Concern { get; init; }
+
+        [JsonPropertyName("succeeded")]
+        public required bool Succeeded { get; init; }
+
+        /// <summary>Redacted failure reason. Null when <see cref="Succeeded"/> is true.</summary>
+        [JsonPropertyName("reason")]
+        public string? Reason { get; init; }
+    }
+
+    /// <summary>Result of loading container-type configs — distinguishes "none registered" from "load failed".</summary>
+    private sealed record ConfigLoadResult(
+        IReadOnlyList<SpeAdminGraphService.ContainerTypeConfig> Configs,
+        bool Succeeded,
+        string? FailureReason,
+        int SkippedIncompleteCount);
 
     // -------------------------------------------------------------------------
     // Internal Dataverse query model for sprk_specontainertypeconfigs
@@ -293,30 +370,54 @@ public sealed class SpeDashboardSyncService : BackgroundService
     /// </summary>
     private async Task<DashboardMetrics> FetchAndAggregateDashboardMetricsAsync(CancellationToken ct)
     {
-        // 1. Load container type configs from Dataverse
-        var configs = await LoadContainerTypeConfigsAsync(ct);
+        var concerns = new List<ConcernOutcome>();
+
+        // 1. Load container type configs from Dataverse.
+        var load = await LoadContainerTypeConfigsAsync(ct);
+        var configs = load.Configs;
+
+        concerns.Add(new ConcernOutcome
+        {
+            Concern = "Dataverse container-type configs",
+            Succeeded = load.Succeeded,
+            Reason = load.FailureReason
+        });
+
+        if (load.SkippedIncompleteCount > 0)
+        {
+            // Skipped records used to be a LogWarning only — invisible to the operator looking at a
+            // dashboard that silently covered fewer configs than they registered.
+            concerns.Add(new ConcernOutcome
+            {
+                Concern = "Dataverse config completeness",
+                Succeeded = false,
+                Reason = $"{load.SkippedIncompleteCount} config record(s) skipped as incomplete "
+                         + "(missing container type, owning app, secret name, or environment tenant)."
+            });
+        }
+
+        // A Dataverse failure MUST NOT look like "nothing is registered". Before task 003 both paths
+        // produced SyncSucceeded = true — a green dashboard over a broken app (spec §2.4).
+        if (!load.Succeeded)
+        {
+            return Summarize(0, 0, 0, new Dictionary<string, int>(), concerns,
+                "Could not load container-type configs from Dataverse — container metrics are unavailable.");
+        }
 
         if (configs.Count == 0)
         {
             _logger.LogWarning(
                 "No container type configs found in Dataverse. Dashboard metrics will show zeros.");
 
-            return new DashboardMetrics
-            {
-                TotalContainerCount = 0,
-                TotalStorageUsedInBytes = 0,
-                ContainerCountByConfig = new Dictionary<string, int>(),
-                LastSyncedAt = DateTimeOffset.UtcNow,
-                SyncSucceeded = true,
-                SyncStatus = "No container type configs registered."
-            };
+            return Summarize(0, 0, 0, new Dictionary<string, int>(), concerns,
+                "No container type configs registered.");
         }
 
         // 2. Query Graph for containers per config
         var containerCountByConfig = new Dictionary<string, int>();
         long totalStorageBytes = 0;
         int totalContainerCount = 0;
-        int failedConfigs = 0;
+        int storageReportingContainerCount = 0;
 
         foreach (var config in configs)
         {
@@ -334,40 +435,107 @@ public sealed class SpeDashboardSyncService : BackgroundService
                 foreach (var container in containers)
                 {
                     if (container.StorageUsedInBytes.HasValue)
+                    {
                         totalStorageBytes += container.StorageUsedInBytes.Value;
+                        storageReportingContainerCount++;
+                    }
                 }
 
                 // Evict expired Graph clients as a housekeeping step
                 _graphService.EvictExpiredClients();
 
+                concerns.Add(new ConcernOutcome
+                {
+                    Concern = $"Graph containers (config {config.ConfigId})",
+                    Succeeded = true
+                });
+
                 _logger.LogDebug(
                     "Config {ConfigId}: {Count} containers, {StorageBytes} bytes reported",
                     config.ConfigId, containers.Count, containers.Sum(c => c.StorageUsedInBytes ?? 0));
             }
-            catch (Exception ex)
+            catch (Exception ex) when (ex is not OperationCanceledException)
             {
-                failedConfigs++;
                 _logger.LogError(ex,
                     "Failed to fetch containers for configId {ConfigId} (containerTypeId={ContainerTypeId}). Skipping.",
                     config.ConfigId, config.ContainerTypeId);
+
                 containerCountByConfig[config.ConfigId.ToString()] = -1; // Signal error for this config
+
+                concerns.Add(new ConcernOutcome
+                {
+                    Concern = $"Graph containers (config {config.ConfigId})",
+                    Succeeded = false,
+                    Reason = ProblemDetailsHelper.Explain("Container list failed.", ex)
+                });
             }
         }
 
-        // 3. Build summary
-        var succeeded = failedConfigs == 0;
-        var syncStatus = failedConfigs == 0
-            ? $"Synced {configs.Count} config(s) successfully."
-            : $"Synced {configs.Count - failedConfigs} of {configs.Count} config(s). {failedConfigs} failed.";
+        return Summarize(totalContainerCount, totalStorageBytes, storageReportingContainerCount,
+            containerCountByConfig, concerns, null);
+    }
+
+    /// <summary>
+    /// The domain rule for dashboard sync health: a concern that failed can never report Healthy.
+    /// </summary>
+    /// <remarks>
+    /// Public and pure because it IS the contract the Sync Status tile renders, and because it is the exact
+    /// rule spec §2.4 exists to protect — the app reporting success while a concern is failing. Kept free of
+    /// I/O so it can be tested directly (ADR-038 <c>tests/unit/domain/**</c>) rather than through a mocked
+    /// Graph/Dataverse pair.
+    /// <para>
+    /// An empty concern list is <see cref="SyncHealth.Healthy"/>: no concern was attempted, so nothing
+    /// failed. Callers that attempt work always record at least one concern.
+    /// </para>
+    /// </remarks>
+    public static SyncHealth DeriveHealth(IReadOnlyList<ConcernOutcome> concerns)
+    {
+        ArgumentNullException.ThrowIfNull(concerns);
+
+        var failedCount = concerns.Count(c => !c.Succeeded);
+
+        if (failedCount == 0) return SyncHealth.Healthy;
+        return failedCount == concerns.Count ? SyncHealth.Failed : SyncHealth.Degraded;
+    }
+
+    /// <summary>
+    /// Derives overall health and the status line from the per-concern outcomes.
+    /// </summary>
+    /// <remarks>
+    /// The single place a <see cref="DashboardMetrics"/> is constructed after a sync attempt, so health can
+    /// never drift from the concerns that produced it. <c>SyncSucceeded</c> is kept as a derived mirror of
+    /// <c>SyncHealth == Healthy</c> for existing clients.
+    /// </remarks>
+    private static DashboardMetrics Summarize(
+        int totalContainerCount,
+        long totalStorageBytes,
+        int storageReportingContainerCount,
+        IReadOnlyDictionary<string, int> containerCountByConfig,
+        IReadOnlyList<ConcernOutcome> concerns,
+        string? statusOverride)
+    {
+        var failed = concerns.Where(c => !c.Succeeded).ToList();
+        var health = DeriveHealth(concerns);
+
+        var status = statusOverride ?? (health switch
+        {
+            SyncHealth.Healthy => $"All {concerns.Count} concern(s) synced successfully.",
+            // Name the failures — a bare count is what made the old status unactionable.
+            _ => $"{failed.Count} of {concerns.Count} concern(s) failed: "
+                 + string.Join("; ", failed.Select(f => f.Concern))
+        });
 
         return new DashboardMetrics
         {
             TotalContainerCount = totalContainerCount,
             TotalStorageUsedInBytes = totalStorageBytes,
+            StorageReportingContainerCount = storageReportingContainerCount,
             ContainerCountByConfig = containerCountByConfig,
             LastSyncedAt = DateTimeOffset.UtcNow,
-            SyncSucceeded = succeeded,
-            SyncStatus = syncStatus
+            SyncSucceeded = health == SyncHealth.Healthy,
+            SyncHealth = health,
+            SyncStatus = status,
+            Concerns = concerns
         };
     }
 
@@ -375,9 +543,11 @@ public sealed class SpeDashboardSyncService : BackgroundService
     /// Reads all active container type configs from the sprk_specontainertypeconfigs Dataverse entity.
     /// Returns resolved <see cref="SpeAdminGraphService.ContainerTypeConfig"/> records.
     /// </summary>
-    private async Task<IReadOnlyList<SpeAdminGraphService.ContainerTypeConfig>> LoadContainerTypeConfigsAsync(
+    private async Task<ConfigLoadResult> LoadContainerTypeConfigsAsync(
         CancellationToken ct)
     {
+        var skippedIncomplete = 0;
+
         try
         {
             var records = await _dataverseClient.QueryAsync<ContainerTypeConfigRecord>(
@@ -422,6 +592,7 @@ public sealed class SpeDashboardSyncService : BackgroundService
                 {
                     _logger.LogWarning(
                         "Skipping incomplete container type config record: id={Id}", record.Id);
+                    skippedIncomplete++;
                     continue;
                 }
 
@@ -437,12 +608,24 @@ public sealed class SpeDashboardSyncService : BackgroundService
                 "Loaded {Count} container type configs from Dataverse ({Total} records total)",
                 configs.Count, records.Count);
 
-            return configs;
+            return new ConfigLoadResult(configs, Succeeded: true, FailureReason: null, skippedIncomplete);
+        }
+        catch (OperationCanceledException) when (ct.IsCancellationRequested)
+        {
+            throw;
         }
         catch (Exception ex)
         {
             _logger.LogError(ex, "Failed to load container type configs from Dataverse.");
-            return Array.Empty<SpeAdminGraphService.ContainerTypeConfig>();
+
+            // Returning an empty list with Succeeded: false is the point. Previously this returned a bare
+            // empty array, which the caller could not distinguish from "no configs registered" — so a
+            // Dataverse outage rendered as Sync Status "OK". That is spec §2.4's systemic defect exactly.
+            return new ConfigLoadResult(
+                Array.Empty<SpeAdminGraphService.ContainerTypeConfig>(),
+                Succeeded: false,
+                FailureReason: ProblemDetailsHelper.Explain("Dataverse query failed.", ex),
+                skippedIncomplete);
         }
     }
 

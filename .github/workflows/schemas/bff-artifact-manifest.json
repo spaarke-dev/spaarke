@@ -1,0 +1,68 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://spaarke.dev/schemas/bff-artifact-manifest.json",
+  "title": "BFF Artifact Manifest (latest.json)",
+  "description": "Schema for the latest.json manifest pushed alongside bff-api-{buildId}.zip to the platform provisioning-artifacts blob container by .github/workflows/deploy-bff-api.yml (customer-provisioning-orchestration-r1 task 116, design.md DS-4 §5). H9's handler (Sprk.Provisioning.ControlPlane task 132, Wave G-3) reads this file to resolve-verify-download-deploy the platform BFF artifact without shelling out to dotnet publish or re-running the r3 gates at provision time. The `gates` values mirror Sprk.Provisioning.ControlPlane.Handlers.BffDeploy.R3GateStatus (Passed/Skipped/Failed) exactly so task 132 can deserialize straight into that existing enum -- no new vocabulary.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["buildId", "sha", "sizeBytes", "publishedAt", "artifactBlobName", "gates"],
+  "properties": {
+    "buildId": {
+      "type": "string",
+      "description": "Deterministic, monotonic, human-sortable build identifier: {UTC yyyy.MM.dd}-{github.run_number}. This is the value H9 resolves-by (the blob name is bff-api-{buildId}.zip). NEVER a raw timestamp alone -- the run-number component guarantees uniqueness across same-day dispatches.",
+      "pattern": "^\\d{4}\\.\\d{2}\\.\\d{2}-\\d+$"
+    },
+    "sha": {
+      "type": "string",
+      "description": "Full git commit SHA (github.sha) the artifact was built from. Carried separately from buildId so consumers can cross-reference against the repo/PR history independent of the human-facing buildId.",
+      "pattern": "^[0-9a-f]{40}$"
+    },
+    "sizeBytes": {
+      "type": "integer",
+      "minimum": 0,
+      "description": "Size in bytes of the bff-api-{buildId}.zip artifact (PDBs excluded -- see zip step's -x '*.pdb' exclusion, matching the repo's NFR-01 'excl. PDBs' publish-size reporting convention)."
+    },
+    "publishedAt": {
+      "type": "string",
+      "format": "date-time",
+      "description": "UTC ISO-8601 timestamp of manifest generation (always AFTER the zip blob upload succeeds -- a manifest reader never sees a manifest pointing at a not-yet-uploaded blob)."
+    },
+    "artifactBlobName": {
+      "type": "string",
+      "description": "Exact blob name of the artifact zip within the provisioning-artifacts container, i.e. bff-api-{buildId}.zip."
+    },
+    "gates": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["r3AnalyzersAsErrors", "godClassRatchet", "archTests", "namingConformance", "graphAppRoleParity"],
+      "description": "Per-gate outcome, computed in the SAME CI job that built the artifact (never re-run by H9 at provision time). Each value is one of Passed | Skipped | Failed -- mirrors Sprk.Provisioning.ControlPlane.Handlers.BffDeploy.R3GateStatus. H9 (task 132) MUST refuse to deploy if any of r3AnalyzersAsErrors / godClassRatchet / archTests / namingConformance is 'Failed', and MUST treat a missing gates object (or a manifest fetch failure) as a hard refusal per design.md DS-4 §5 point 4.",
+      "properties": {
+        "r3AnalyzersAsErrors": {
+          "type": "string",
+          "enum": ["Passed", "Skipped", "Failed"],
+          "description": "r3 task 041 -- Directory.Build.props TreatWarningsAsErrors=true baseline. Always 'Passed' when present: this step is not independently re-run -- GitHub Actions aborts the job on the earlier 'Build' step's failure (no continue-on-error there), so reaching the gate-computation steps already proves this gate held."
+        },
+        "godClassRatchet": {
+          "type": "string",
+          "enum": ["Passed", "Skipped", "Failed"],
+          "description": "r3 task 040 -- tests/Spaarke.ArchTests/GodClassGuardTests.cs, filtered via FullyQualifiedName~GodClassGuardTests."
+        },
+        "archTests": {
+          "type": "string",
+          "enum": ["Passed", "Skipped", "Failed"],
+          "description": "r1 task 064 -- the 5 tenant-isolation invariants I1-I5, filtered via FullyQualifiedName~TenantIsolation (matches Sprk.Provisioning.ControlPlane's DotnetR3GateVerifier.RunArchTestsGateAsync exactly -- NOT the full 65-test Spaarke.ArchTests suite)."
+        },
+        "namingConformance": {
+          "type": "string",
+          "enum": ["Passed", "Skipped", "Failed"],
+          "description": "r3 task 063 -- scripts/naming-conformance-check.ps1 (static regex scan, no live Azure calls, ~1s runtime)."
+        },
+        "graphAppRoleParity": {
+          "type": "string",
+          "enum": ["Passed", "Skipped", "Failed"],
+          "description": "ALWAYS 'Skipped' from this workflow by design. Graph app-role parity (UAMI service principal vs GraphAppRoles.cs) is a property of the DEPLOYMENT TARGET (a specific customer's UAMI), not of this platform-BFF build artifact -- it cannot be computed at build time. The platform-wide baseline signal is the advisory graph-app-role-parity job in nightly-health.yml; H9 (task 132) MUST perform its own live per-environment check against the actual target UAMI rather than trusting this manifest key as a real per-deploy signal."
+        }
+      }
+    }
+  }
+}

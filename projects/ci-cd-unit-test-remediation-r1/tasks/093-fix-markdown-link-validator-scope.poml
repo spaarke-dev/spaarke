@@ -1,0 +1,79 @@
+<task id="CICD-093" project="ci-cd-unit-test-remediation-r1">
+  <metadata>
+    <title>Markdown Link Validator: 1212 broken links, but 86% of the scanned corpus is out of scope (#849)</title>
+    <status>completed</status>
+    <estimated-effort>2-3 hours</estimated-effort>
+    <phase>4 - Deliverable defect repair (adopted 2026-08-28)</phase>
+    <stream>A - CI tiering remediation</stream>
+    <rigor-level>STANDARD</rigor-level>
+    <model-tier>sonnet</model-tier>
+    <effort>high</effort>
+    <autonomous>true</autonomous>
+    <parallel-safe>true</parallel-safe>
+    <dependencies>none</dependencies>
+    <blocks>090</blocks>
+    <tags>ci-workflows, tier2, docs</tags>
+    <tracking-issue>#849</tracking-issue>
+  </metadata>
+
+  <adoption-note date="2026-08-28">
+    ADOPTED INTO THIS PROJECT, NOT DEFERRED. Owner direction 2026-08-28: "if an issue is
+    important, then it should be added to this project NOT deferred to others."
+
+    scripts/validate-markdown-links.ps1 is an EXPLICIT new deliverable of this project, named in the spec Affected Areas. A validator whose own scan corpus is 86% out of scope is a defective deliverable: it reports 1212 findings nobody can triage, which is operationally indistinguishable from reporting nothing.
+
+    This is a DEFECT REPORT AGAINST THIS PROJECT OWN DELIVERABLE, not new scope. The project
+    cannot honestly close while something it shipped is known-broken. That is north star #1
+    ("fix it right the first time") and #3 ("no constant reds").
+  </adoption-note>
+
+  <goal>The validator scans only the corpus it is meant to govern, and its findings are few enough to act on.</goal>
+
+  <steps mode="directional">
+    <step order="1">Establish what the validator is FOR. Likely docs/, .claude/ and root markdown that a human or agent navigates. Almost certainly NOT node_modules, archived project folders, vendored content or generated output.</step>
+    <step order="2">Scope the scan to that corpus. Report the before/after finding count in the PR.</step>
+    <step order="3">Triage what survives. A broken link inside .claude/archive/ is not the same defect as one in root CLAUDE.md.</step>
+    <step order="4">Keep the enforcement posture deliberate: advisory in Tier 2 is correct while the count is large. Do NOT make it blocking in this task.</step>
+  </steps>
+
+  <notes date="2026-08-28">
+    COMPLETE. Full write-up: notes/093-link-validator-scope.md.
+
+    Corpus 100,220 -> 922 files; broken links 1,212 (CI) / 2,563 (local) -> 267.
+
+    Two defects, neither in the link-checking logic itself:
+    (1) Scope. 3,643 of 4,581 tracked .md files (79.5%) are archival records under projects/.
+        `.claude/worktrees/` is gitignored and holds 117,311 .md files locally — an order of
+        magnitude more than #849's 4,507 estimate. `.claude/archive/` was ALSO not excluded: the
+        old `\.archive` alternation matches a segment literally named `.archive`, which
+        `.claude/archive` is not.
+    (2) Output. Format-Table truncated paths to console width, so even in-scope findings were
+        unactionable. Replaced with a per-area rollup + one untruncated line per finding.
+
+    KEY IMPLEMENTATION TRAP AVOIDED: the new exclusions are anchored to the path RELATIVE TO REPO
+    ROOT, not matched anywhere in the path. Unanchored, `projects` would match the absolute path of
+    every file under `-Path projects/<name>` — an invocation the script's own header documents —
+    scanning ZERO files while printing "All markdown links resolved successfully". Explicit -Path
+    into an excluded area now suppresses root exclusions; verified it still scans (27 files).
+    Excluded count is always printed so a scope reduction can never look like a clean scan.
+
+    The surviving 267 were verified REAL, not narrowed to a flattering number: missing doc files,
+    links to code deleted under ADR-028 (BridgeStrategy/XrmStrategy), and a genuine authoring bug
+    at .claude/CHANGELOG.md:241. knowledge/** (67 findings) was assessed as an exclusion candidate
+    and deliberately KEPT — it is actively curated (REFRESH-PROCEDURE.md) and root CLAUDE.md §15
+    has the researcher consult it first. 267 is real documentation debt the 1,212 was concealing;
+    repairing those links is doc work, not validator work.
+
+    Posture unchanged: stays advisory / continue-on-error in Tier 2 per this task's own constraint.
+
+    FREEZE-SAFE: no workflow file touched. CI invokes `& pwsh -File $script` with NO arguments, so
+    -Path defaults to '.' and the new corpus applies automatically. CI totals will exceed 267
+    because CI runs with network (external HEAD checks, capped at 200).
+  </notes>
+
+  <acceptance-criteria>
+    <criterion testable="true">Scan corpus documented in the script header, with a reason for each exclusion</criterion>
+    <criterion testable="true">Surviving finding count is small enough to triage in one sitting</criterion>
+    <criterion testable="true">Remains advisory (non-blocking) in Tier 2</criterion>
+  </acceptance-criteria>
+</task>

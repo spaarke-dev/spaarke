@@ -1,0 +1,95 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="090" project="unified-access-control-r2">
+  <metadata>
+    <title>Project wrap-up: test-diet gate, register closeout (H-8a/H-8b), lessons learned, README Complete</title>
+    <phase>Wrap-up</phase>
+    <gate>blocked — requires ALL prior tasks (Phases 0-5) completed</gate>
+    <status>pending</status>
+    <rigor>STANDARD</rigor>
+    <rigor-reason>Mostly docs/process; the H-8a/H-8b code touches are comment + vestigial-DTO cleanup scoped by an escalation trigger (behavioral change is out of bounds). /test-diet itself is read-only.</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Checklist-driven closure; no design judgment beyond the scoped cleanups.</model-tier-reason>
+    <effort>medium</effort>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Project-close task: reconciles the whole tree (test-diet, README, register) — nothing may run beside it.</parallel-reason>
+    <deps>050, 051, 052, 053, 054, 055, 056, 057, 058, 060, 061, 062, 063, 064, 065, 066, 067, 068, 069, 080, 081, 082, 083 (plus all Phase 0-2 tasks per TASK-INDEX)</deps>
+    <tags>documentation, testing, wrap-up</tags>
+    <estimated-effort>2-4 hours</estimated-effort>
+  </metadata>
+
+  <prompt>Close the unified-access-control-r2 project: run the mandatory /test-diet gate, close out design-register hygiene items H-8a and H-8b, write lessons-learned, flip the README to Complete, and reconcile TASK-INDEX/current-task. Follow root CLAUDE.md §7's project-close protocol exactly.</prompt>
+  <role>SPAARKE platform developer. Project closure procedures. Follow root CLAUDE.md §7 strictly.</role>
+  <goal>test-diet report generated and cited; H-8a/H-8b closed (or explicitly re-dispositioned with rationale); notes/lessons-learned.md written; README status Complete with summary; TASK-INDEX all-green; current-task.md reset to "none"; wrap-up PR cites the test-diet report per the binding gate.</goal>
+
+  <context>
+    <background>Root CLAUDE.md §7 project-close test diet gate (BINDING): task-execute Step 11 invokes /test-diet BEFORE marking the project complete; skipping is a HARD WARNING and the wrap-up PR MUST cite the report or document the skip rationale. Register items: H-8a = stale comments naming the deleted ExternalCallerAuthorizationFilter/ExternalCallerContext (Api/ExternalAccess/ExternalProjectDataEndpoints.cs:13,24,339 — plus the further grep hits: ExternalDataService.cs:16, ExternalCallerContext.cs:7, ExternalUserContextEndpoint.cs:14,18, ExternalAccessEndpoints.cs:52); H-8b = RevokeExternalAccessEndpoint.cs:182 returns vestigial WebRoleRemoved: false (Power Pages relic, Dtos/RevokeAccessResponse.cs) and retains a best-effort SPE-permission-removal path — H-8b was flagged "related to A-13 (FR-16), fix together", so FIRST verify what the Phase 0 FR-16 task already did and close only the remainder.</background>
+    <relevant-files>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Api/ExternalAccess/ExternalProjectDataEndpoints.cs (H-8a comments)</file>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Infrastructure/ExternalAccess/ExternalDataService.cs + ExternalCallerContext.cs (H-8a comments)</file>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Api/ExternalAccess/ExternalUserContextEndpoint.cs (H-8a comments)</file>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Api/ExternalAccess/RevokeExternalAccessEndpoint.cs + Dtos/RevokeAccessResponse.cs (H-8b)</file>
+      <file role="new">projects/unified-access-control-r2/notes/lessons-learned.md</file>
+      <file role="modify">projects/unified-access-control-r2/README.md</file>
+      <file role="modify">projects/unified-access-control-r2/tasks/TASK-INDEX.md + current-task.md</file>
+    </relevant-files>
+    <dependencies>
+      <dependency task="083" status="pending">Last phase task; all phases complete before closure.</dependency>
+    </dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="CLAUDE.md-§7">/test-diet runs BEFORE completion; it is read-only (emits git rm/git mv for the reviewer — do NOT auto-execute deletions); the wrap-up PR cites projects/unified-access-control-r2/notes/test-diet-report.md. Scope: closure sequence.</constraint>
+    <constraint source="project">H-8a is comment-only: no behavioural edits ride along under the cleanup banner. Scope: every H-8a file.</constraint>
+    <constraint source="project">H-8b: removing WebRoleRemoved from RevokeAccessResponse is an API-contract change — grep ALL clients (AccessGrantModal, SPA, Teams) for consumers of the field first; if any consumer reads it, coordinate the removal or keep the field with a deprecation comment and record the decision. Scope: the DTO edit.</constraint>
+    <constraint source="CLAUDE.md-§10">The H-8x edits touch BFF files: verify build + report publish size in the PR even for cleanup. Scope: PR.</constraint>
+    <constraint source="CLAUDE.md-§7">Completion order: task poml statuses -> TASK-INDEX -> current-task reset -> README -> report. Scope: closure sequence.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>project closure</topic>
+    <files>
+      <file>projects/unified-access-control-r2/notes/design-register.md</file>
+      <file>.claude/skills/test-diet/SKILL.md</file>
+      <file>projects/unified-access-control-r2/spec.md</file>
+    </files>
+    <patterns>
+      <pattern name="repo-cleanup" location=".claude/skills/repo-cleanup/SKILL.md">Ephemeral-file hygiene at close.</pattern>
+    </patterns>
+  </knowledge>
+
+  <steps mode="prescriptive">
+    <step order="0">Context + rigor declaration. Verify every task in TASK-INDEX is ✅ (or explicitly deferred with a note) — if not, STOP: this task's gate is unmet.</step>
+    <step order="1">Invoke /test-diet; review the classification; save the report; do NOT execute deletions — hand the emitted commands to the reviewer via the PR.</step>
+    <step order="2">H-8a: remove/replace the stale ExternalCallerAuthorizationFilter/ExternalCallerContext comment references (grep-verified complete list); comment-only diff.</step>
+    <step order="3">H-8b: check FR-16's (A-13) merged fix; then remove the vestigial WebRoleRemoved field + dead SPE-removal remainder per the consumer-grep constraint; document the disposition.</step>
+    <step order="4">Write notes/lessons-learned.md: what the investigation-first approach caught (F1 refutation shaping FR-26), the reclassification of the BU restructure to UAT, the POA consolidation reuse story, evaluator-versioning decisions, and process lessons for the next access project.</step>
+    <step order="5">Verify success criteria 1-9 in spec.md each have their verification pointer (test name / UAT item); record the mapping in the README status section.</step>
+    <step order="6">Update README to Complete; reconcile TASK-INDEX; reset current-task.md to "none"; build green; publish size reported.</step>
+    <step order="7">Wrap-up PR citing the test-diet report + register closeouts.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If H-8b's WebRoleRemoved field is read by ANY client, or the SPE-removal path turns out to be live behaviour post-FR-16, STOP the removal and record a path-A disposition (kept + deprecated, reason documented) instead — a wrap-up task must not ship a breaking contract change.</trigger>
+  </escalation>
+
+  <outputs>
+    <output type="docs">projects/unified-access-control-r2/notes/lessons-learned.md</output>
+    <output type="docs">projects/unified-access-control-r2/notes/test-diet-report.md</output>
+    <output type="docs">projects/unified-access-control-r2/README.md (status Complete)</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Api/ExternalAccess/ (H-8a/H-8b cleanups)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">notes/test-diet-report.md exists and is cited in the wrap-up PR description; no test deletion was auto-executed.</criterion>
+    <criterion testable="true">Grep for ExternalCallerAuthorizationFilter across src/ returns zero comment references (H-8a closed).</criterion>
+    <criterion testable="true">H-8b dispositioned: either WebRoleRemoved removed with consumer-grep evidence, or kept-deprecated with the documented reason; the design register updated either way.</criterion>
+    <criterion testable="true">notes/lessons-learned.md exists with the five content areas from step 4.</criterion>
+    <criterion testable="true">README status Complete incl. success-criteria mapping; TASK-INDEX fully reconciled; current-task.md reads "none".</criterion>
+    <criterion testable="true">Negative: build green after the H-8x edits; no behavioural test changes required by them (proving cleanup-only).</criterion>
+  </acceptance-criteria>
+
+  <notes>Root CLAUDE.md §7 (test-diet gate is BINDING). UAT items (BU restructure, live-dev secure verification) remain open in notes/phase4-uat-acceptance.md — the README must link them as post-project environment work, not silently absorb them.</notes>
+
+  <execution><skill>.claude/skills/task-execute/SKILL.md</skill></execution>
+</task>

@@ -80,11 +80,16 @@ public static class CorsModule
             {
                 policy.SetIsOriginAllowed(origin =>
                 {
+                    // Explicit, config-driven allow-list (exact origin match). This is the single
+                    // source for our Azure Static Web Apps SPA origins (external-access SPA + Office
+                    // Add-ins) — enumerate each in 'Cors:AllowedOrigins'. See appsettings.template.json.
                     if (allowedOrigins.Contains(origin))
                         return true;
 
                     if (Uri.TryCreate(origin, UriKind.Absolute, out var uri))
                     {
+                        // First-party Microsoft app-host domains (Dataverse model-driven app + Power
+                        // Apps) that embed our web resources. Per-tenant, Microsoft-provisioned.
                         if (uri.Host.EndsWith(".dynamics.com", StringComparison.OrdinalIgnoreCase) ||
                             uri.Host == "dynamics.com")
                             return true;
@@ -93,11 +98,16 @@ public static class CorsModule
                             uri.Host == "powerapps.com")
                             return true;
 
+                        // SECURITY (r3 task 030 / FR-17, D3-03): the former blanket
+                        // ".azurestaticapps.net" suffix rule was REMOVED. azurestaticapps.net is a
+                        // shared, third-party-registrable domain; combined with AllowCredentials it
+                        // let ANY attacker-owned SWA make credentialed cross-origin calls. Our own
+                        // SWA origins are now allowed only via the explicit 'Cors:AllowedOrigins'
+                        // config list above (fail-closed). NOTE: ".powerappsportals.com" below is the
+                        // same shared-domain risk class (D3-03) and should be migrated to the explicit
+                        // list too, once the live Power Pages origin is verified (Tranche B).
                         if (uri.Host.EndsWith(".powerappsportals.com", StringComparison.OrdinalIgnoreCase) ||
                             uri.Host == "powerappsportals.com")
-                            return true;
-
-                        if (uri.Host.EndsWith(".azurestaticapps.net", StringComparison.OrdinalIgnoreCase))
                             return true;
                     }
 
@@ -114,11 +124,24 @@ public static class CorsModule
                           "X-Requested-With",
                           "X-Correlation-Id",
                           "X-Idempotency-Key",
+                          // KEEP. Task 059 stopped the BFF from READING this header, but the browser
+                          // SSE path (useSseStream.ts readSseStream) still SENDS it. Dropping it here
+                          // would make the CORS preflight reject the request outright — turning an
+                          // ignored header into a broken chat stream. Remove only together with the
+                          // client-side send.
                           "X-Tenant-Id",
                           "request-id",
                           "client-request-id",
                           "traceparent",
-                          "tracestate")
+                          "tracestate",
+                          // SSE job-progress streams (Office add-in SaveFlow → SseClient.ts).
+                          // Neither is a CORS-safelisted request header, so both MUST be listed
+                          // explicitly or the preflight fails with "Request header field
+                          // cache-control is not allowed by Access-Control-Allow-Headers".
+                          // Last-Event-ID is only sent on RECONNECT, so omitting it fails later
+                          // and more confusingly than Cache-Control does.
+                          "Cache-Control",
+                          "Last-Event-ID")
                       .WithExposedHeaders(
                           "ETag",
                           "request-id",

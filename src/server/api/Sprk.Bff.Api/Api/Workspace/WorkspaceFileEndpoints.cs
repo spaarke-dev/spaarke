@@ -6,8 +6,8 @@ using Sprk.Bff.Api.Api.Ai;
 using Sprk.Bff.Api.Api.Filters;
 using Sprk.Bff.Api.Configuration;
 using Sprk.Bff.Api.Services.Ai;
-using Sprk.Bff.Api.Services.Ai.LinearConsumers;
 using Sprk.Bff.Api.Services.Ai.PublicContracts;
+using Sprk.Bff.Api.Infrastructure.Authentication;
 
 namespace Sprk.Bff.Api.Api.Workspace;
 
@@ -29,13 +29,18 @@ public static class WorkspaceFileEndpoints
     private const long MaxFileSizeBytes = 10 * 1024 * 1024; // 10 MB
 
     // Summarize execution — FR-P3-05 hard cutover (ai-architecture-redesign-r1 task 044):
-    // summarize-file executes EXCLUSIVELY on the prompted executor. IActionResolver
-    // resolves the summarize-file Binding row's Action (sprk_playbookconsumer →
-    // sprk_analysisaction, single routing surface per ADR-039) and IActionRunner renders
-    // the Action's JPS prompt + output schema. The former consumer-specific wrapper class
-    // and the Playbook Engine fall-through (dispatch when the row had no Action target)
-    // were DELETED per NFR-08 — a Binding row without an Action target is a catalog
-    // authoring error surfaced as an SSE error chunk, never an engine fallback.
+    // summarize-file executes EXCLUSIVELY on the prompted executor (resolve the summarize-file
+    // Binding row's Action — sprk_playbookconsumer → sprk_analysisaction, single routing surface
+    // per ADR-039 — then render the Action's JPS prompt + output schema). The former
+    // consumer-specific wrapper class and the Playbook Engine fall-through (dispatch when the row
+    // had no Action target) were DELETED per NFR-08 — a Binding row without an Action target is a
+    // catalog authoring error surfaced as an SSE error chunk, never an engine fallback.
+    //
+    // Facade boundary (task 024, ADR-013 / BFF §10 bullet 3): the resolve + run now live behind
+    // the IFileSummarizeAi PublicContracts facade (mirroring CommunicationTriageAi) rather than
+    // this non-AI endpoint injecting IActionResolver / IActionRunner directly. The SSE chunk +
+    // 503 semantics are preserved byte-for-byte — the facade yields the same chunk sequence and
+    // re-throws FeatureDisabledException so the endpoint's catch emits the 503 pattern.
     //
     // Historical: the prior hardcoded GUID fallback was removed in Phase 1
     // (chat-routing-redesign-r1 task 019); the config-key fallback surface was removed
@@ -150,8 +155,7 @@ public static class WorkspaceFileEndpoints
     private static async Task HandleSummarize(
         IFormFileCollection files,
         ITextExtractor textExtractor,
-        IActionResolver actionResolver,
-        IActionRunner actionRunner,
+        IFileSummarizeAi fileSummarizeAi,
         HttpContext httpContext,
         ILogger<Program> logger,
         CancellationToken ct)
@@ -210,15 +214,20 @@ public static class WorkspaceFileEndpoints
             await WriteSSEAsync(response, AnalysisStreamChunk.Progress("context_ready", "Preparing analysis..."), ct);
             await WriteSSEAsync(response, AnalysisStreamChunk.Progress("analyzing", "Analyzing..."), ct);
 
-            // FR-P3-05 hard cutover (ai-architecture-redesign-r1 task 044): summarize-file
-            // executes EXCLUSIVELY on the prompted executor (IActionResolver resolves the
-            // summarize-file Binding row's Action; IActionRunner renders + runs it). The
-            // former wrapper class and the Playbook Engine fall-through (used when the row
-            // had no Action target) were DELETED per NFR-08 — a row without an Action
-            // target surfaces as an error chunk from the resolver, never an engine dispatch.
+            // FR-P3-05 hard cutover (ai-architecture-redesign-r1 task 044) + task 024 facade
+            // boundary (ADR-013 / BFF §10 bullet 3): summarize-file executes EXCLUSIVELY on the
+            // prompted executor, now via the IFileSummarizeAi PublicContracts facade (which
+            // resolves the summarize-file Binding row's Action and runs it — mirroring
+            // CommunicationTriageAi). The former wrapper class and the Playbook Engine
+            // fall-through (used when the row had no Action target) were DELETED per NFR-08 — a
+            // row without an Action target surfaces as an error chunk from the resolver, never an
+            // engine dispatch. The facade yields the same SSE chunk sequence and re-throws
+            // FeatureDisabledException so the catch blocks below emit the canonical 503 pattern.
             var displayName = files.FirstOrDefault()?.FileName ?? "combined-input";
-            await foreach (var chunk in ExecuteSummarizeActionAsync(
-                extractedText, displayName, actionResolver, actionRunner, httpContext, logger, ct))
+            var tenantId = httpContext.User?.FindFirst("tid")?.Value
+                ?? httpContext.User?.FindFirst("http://schemas.microsoft.com/identity/claims/tenantid")?.Value;
+            await foreach (var chunk in fileSummarizeAi.SummarizeAsync(
+                extractedText, displayName, tenantId, httpContext.TraceIdentifier, ct))
             {
                 await WriteSSEAsync(response, chunk, ct);
             }
@@ -249,102 +258,6 @@ public static class WorkspaceFileEndpoints
             await WriteSSEAsync(response, AnalysisStreamChunk.FromError("An error occurred while summarizing the uploaded documents."), CancellationToken.None);
             await response.WriteAsync("data: [DONE]\n\n", CancellationToken.None);
         }
-    }
-
-    /// <summary>
-    /// Executes summarize-file on the prompted executor and emits progress + a single
-    /// "result" SSE chunk with the structured output (FR-P3-05 wrapper absorption:
-    /// resolve the Binding row's Action via <see cref="IActionResolver"/>, run it via
-    /// <see cref="IActionRunner"/> — behavior preserved from the deleted wrapper class).
-    /// Resolution/LLM failures surface as error chunks so the stream never dies silently.
-    /// </summary>
-    private static async IAsyncEnumerable<AnalysisStreamChunk> ExecuteSummarizeActionAsync(
-        string extractedText,
-        string fileName,
-        IActionResolver actionResolver,
-        IActionRunner actionRunner,
-        HttpContext httpContext,
-        ILogger logger,
-        [System.Runtime.CompilerServices.EnumeratorCancellation] CancellationToken ct)
-    {
-        var tenantId = httpContext.User?.FindFirst("tid")?.Value
-            ?? httpContext.User?.FindFirst("http://schemas.microsoft.com/identity/claims/tenantid")?.Value;
-
-        var runContext = new LinearRunContext
-        {
-            ConsumerType = ConsumerTypes.SummarizeFile,
-            CorrelationId = httpContext.TraceIdentifier,
-            TenantId = tenantId,
-        };
-
-        yield return AnalysisStreamChunk.Progress("resolving_action", "Resolving action configuration…");
-        AnalysisAction? action = null;
-        string? resolveError = null;
-        try
-        {
-            action = await actionResolver.ResolveAsync(ConsumerTypes.SummarizeFile, ct);
-        }
-        catch (OperationCanceledException)
-        {
-            throw;
-        }
-        catch (FeatureDisabledException)
-        {
-            // Kill-switch (ADR-032 P3): propagate so the endpoint's catch emits the
-            // canonical 503 / SSE-error-chunk pattern (parity with the deleted Null wrapper).
-            throw;
-        }
-        catch (Exception ex)
-        {
-            logger.LogError(ex,
-                "Failed to resolve action for consumerType={ConsumerType}. CorrelationId={CorrelationId}",
-                ConsumerTypes.SummarizeFile, httpContext.TraceIdentifier);
-            resolveError = $"Failed to resolve action: {ex.Message}";
-        }
-        if (resolveError != null)
-        {
-            yield return AnalysisStreamChunk.FromError(resolveError);
-            yield break;
-        }
-
-        var docText = new DocumentText
-        {
-            DocumentId = null,
-            FileName = fileName,
-            ExtractedText = extractedText,
-        };
-
-        yield return AnalysisStreamChunk.Progress("calling_llm", "Analyzing document(s) with AI…");
-        JsonElement aiOutput = default;
-        string? llmError = null;
-        try
-        {
-            aiOutput = await actionRunner.RunAsync(action!, docText, runContext, ct);
-        }
-        catch (OperationCanceledException)
-        {
-            throw;
-        }
-        catch (FeatureDisabledException)
-        {
-            throw;
-        }
-        catch (Exception ex)
-        {
-            logger.LogError(ex,
-                "LLM call failed for consumerType={ConsumerType}. CorrelationId={CorrelationId}",
-                ConsumerTypes.SummarizeFile, httpContext.TraceIdentifier);
-            llmError = $"AI analysis failed: {ex.Message}";
-        }
-        if (llmError != null)
-        {
-            yield return AnalysisStreamChunk.FromError(llmError);
-            yield break;
-        }
-
-        // Emit the entire structured output as a single SSE `result` chunk —
-        // the client parses Content as JSON (contract unchanged from the wrapper).
-        yield return AnalysisStreamChunk.Result(aiOutput.GetRawText());
     }
 
     // =========================================================================
@@ -405,8 +318,7 @@ public static class WorkspaceFileEndpoints
     private static string ResolveUserId(HttpContext httpContext)
     {
         return httpContext.Items["UserId"]?.ToString()
-            ?? httpContext.User.FindFirst("oid")?.Value
-            ?? httpContext.User.FindFirst(ClaimTypes.NameIdentifier)?.Value
+            ?? CallerResolution.ResolveObjectId(httpContext.User)
             ?? "unknown";
     }
 

@@ -86,7 +86,7 @@ public sealed class ComposeServiceLoadImportedRevisionsTests
     private ComposeService CreateSut() => new(
         _spe.Object,
         _sessions.Object,
-        _dataverse.Object,        _indexing.Object,
+        _dataverse.Object, _indexing.Object,
         NullLogger<ComposeService>.Instance);
 
     private void SetupSpeReturns(byte[] docx)
@@ -145,7 +145,7 @@ public sealed class ComposeServiceLoadImportedRevisionsTests
 
         var result = await sut.LoadAsync(
             new LoadComposeDocumentRequest { DriveId = DriveId, DocumentSpeId = DocumentSpeId, TenantId = Tenant },
-            new DefaultHttpContext(),
+            TestHttpContexts.Authenticated(),
             CancellationToken.None);
 
         result.ImportedRevisions.Should().HaveCount(2, "the doc carries one w:ins and one w:del (FR-24)");
@@ -180,7 +180,7 @@ public sealed class ComposeServiceLoadImportedRevisionsTests
 
         var result = await sut.LoadAsync(
             new LoadComposeDocumentRequest { DriveId = DriveId, DocumentSpeId = DocumentSpeId, TenantId = Tenant },
-            new DefaultHttpContext(),
+            TestHttpContexts.Authenticated(),
             CancellationToken.None);
 
         result.ImportedRevisions.Should().NotBeNull().And.BeEmpty(
@@ -198,7 +198,7 @@ public sealed class ComposeServiceLoadImportedRevisionsTests
 
         var result = await sut.LoadAsync(
             new LoadComposeDocumentRequest { DriveId = DriveId, DocumentSpeId = DocumentSpeId, TenantId = Tenant },
-            new DefaultHttpContext(),
+            TestHttpContexts.Authenticated(),
             CancellationToken.None);
 
         result.ImportedRevisions.Should().NotBeNull().And.BeEmpty();

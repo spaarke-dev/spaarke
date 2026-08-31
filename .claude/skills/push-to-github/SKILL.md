@@ -237,6 +237,38 @@ IF NOT inside a project (ad-hoc work at repo root):
 
 **Why this step exists**: deferred work hidden in a project's `notes/` folder is invisible to anyone working on other projects. Surfacing entries as GitHub Issues at push time is the latest-possible reliable hook for visibility. See `/project-defer-issue-tracking` skill for the full protocol.
 
+### Step 1.7: Real-Dataverse Smoke Check (Widget/Dataverse Changes)
+
+**Added 2026-08-17 by `smart-todo-r5` task 060 per spec FR-20 / PROC-1. Advisory (ask-user-first), NOT a blocking CI gate — same shape as Steps 1.5/1.6.**
+
+```
+DETECT Dataverse-querying widget/component changes in this push:
+  git diff --name-only origin/{branch}..HEAD (or the staged set)
+  FLAG files that are widget/component/service changes which QUERY Dataverse
+  entities — e.g. anything touching Xrm.WebApi / IDataverseClient / a
+  `sprk_*` (or OOB `contact`/`systemuser`/…) entity name in a
+  `retrieveMultipleRecords` / FetchXML / OData `$select` path.
+
+  IF such changes are present:
+    → 🚨 WARNING: This push changes code that queries Dataverse entities.
+    → List the affected files.
+    → ASK: "Before merge, this change MUST have been exercised with ≥1
+       create + read against REAL Dataverse (not a prototype / mock harness).
+       Confirm:"
+      1. Yes — I ran a real create+read against real Dataverse (name the env)
+      2. No — exercised only against a mock/prototype harness (NOT sufficient)
+      3. N/A — this change does not actually touch a Dataverse query path
+    → IF user picks 2: 🚨 WARN explicitly that mock-only verification is the exact
+       failure this gate guards against; recommend a real-DV smoke before merge;
+       if the user still proceeds, log the choice in the commit/PR footer.
+    → REQUIRE an explicit decision — DO NOT silently proceed.
+
+  IF no Dataverse-querying changes:
+    → Continue to Step 2.
+```
+
+**Why this step exists**: R4 UAT rounds 5–6 burned multiple deploy cycles because the `spaarke-prototype` harness mocked a `sprk_contact` entity that **does not exist in real Dataverse** — the real entity is the OOB `contact`. The mock hid the entity-name bug until it reached a real environment. A mock passing proves nothing about real Dataverse's actual schema; only a real create+read does. R5's own FR-04 (RegardingResolver wiring, smoke-tested by task 014) and FR-06 (Assigned-To typeahead) satisfy this gate by example. This is **reviewer judgment**, not enforcement code — like `/test-diet` and the Step 1.6 defer audit, it surfaces a WARNING and asks; it never runs a `dotnet`/CI script or hard-blocks the merge.
+
 ### Step 2: Review Changes
 
 ```powershell
@@ -401,38 +433,58 @@ SUGGEST PR template content for user to paste
 
 ### Step 8: Monitor CI Status
 
-After pushing, the `sdap-ci.yml` workflow runs automatically.
+After pushing, CI runs automatically. **Two systems run in parallel today** (updated 2026-08-29):
+
+| Workflow | Role | Blocking? |
+|---|---|---|
+| **`CI` (Router)** → `ci-tier1-blocking.yml` | Compile, Arch Tests (MUST-NOT subset), auth/tenant/eval/fidelity gates. Target p95 ≤3 min. | **Yes** — this is the verdict that matters |
+| **`CI` (Router)** → `ci-tier2-advisory.yml` | Full unit tests, format, lint, ADR NetArchTest, markdown links, plugin size | **No — advisory by design.** A red Tier 2 does **not** block a merge |
+| **`SDAP CI`** (legacy `sdap-ci.yml`) | Build & Test, Code Quality, Trivy | Running in parallel pending retirement (task CICD-077) |
+
+Tier 2 being advisory is deliberate, not an oversight — it exists so slow/flaky checks cannot hold up
+high-frequency master pushes. Do **not** "fix" a red Tier 2 by making it blocking.
 
 ```powershell
-# Check CI status for the PR
-gh pr checks
-
-# Or watch CI progress in real-time
-gh pr checks --watch
+gh pr checks {N}
 ```
 
-**CI Pipeline Jobs** (see `ci-cd` skill for details):
-
-| Job | What It Checks | Blocking? |
-|-----|----------------|-----------|
-| `security-scan` | Trivy vulnerability scan | Yes |
-| `build-test` | Build + unit tests | Yes |
-| `code-quality` | Format, ADR tests, plugin size | Yes |
-| `adr-pr-comment` | Posts ADR violations to PR | No |
-
 ```
-WAIT for CI checks:
-  gh pr checks --watch
+WAIT until EVERY check reports a TERMINAL state (pass / fail / skipping).
 
-IF any check fails:
-  → View logs: gh run view {run-id} --log
-  → Fix issues locally
-  → Commit and push again
-  → CI will re-run automatically
+🚨 A zero-failure count while other checks are still `pending` is NOT a green build —
+   it is a measurement taken too early. Count pending explicitly:
 
-IF all checks pass:
+     gh pr checks {N} | grep -c pending      # must be 0 before you judge the result
+
+   This is the same error class as trusting a too-small test fixture: the observation
+   was taken before the thing being observed had happened.
+
+IF a TIER 1 check fails:
+  → gh run view {run-id} --log-failed
+  → Read the FAILING STEP name before assuming it is your code. An infrastructure step
+    (Checkout, setup-dotnet, artifact upload) failing is not a code defect.
+  → Fix, commit, push; CI re-runs automatically.
+
+IF only TIER 2 checks fail:
+  → Advisory. Report it, judge whether it is real, do NOT treat it as a merge blocker.
+
+IF all terminal and no Tier 1 failures:
   → Ready for review/merge
 ```
+
+#### 🚨 `--delete-branch` races queued jobs
+
+`gh pr merge --delete-branch` removes the branch immediately. **Any job still queued then fails at
+`Checkout`**, unable to fetch a ref that no longer exists — producing a red that looks like a quality
+regression and is not.
+
+This happened on **#890**: the legacy `Code Quality` job started 24 s after the merge and failed on
+checkout; no quality check ever ran. The tell is `The process '...git.exe' failed with exit code 1`
+during **Checkout**, often with a downstream `No files were found with the provided path: ...trx`.
+
+**Prevention**: confirm `grep -c pending` is `0` *before* merging with `--delete-branch`. If you hit it
+anyway, verify the merge commit itself is green (`gh api "repos/{owner}/{repo}/actions/runs?head_sha={merge_sha}"`)
+— that, not the branch-side run, is what the shadow window reads.
 
 ### Step 9: Summary
 
@@ -453,14 +505,42 @@ Next steps:
 
 ### Step 10: Merge to Master (When Ready)
 
+> **⚠️ Corrected 2026-08-29.** This step previously read *"Push branch to master:
+> `git push origin {branch}:master`"*. That is a **direct push that bypasses the PR**, and it is not how
+> work lands on this repo. Every PR merged in the CI-remediation project used `gh pr merge --squash`.
+>
+> A direct push also **starves the CI cutover measurement**: `scripts/ci/shadow-window-status.ps1`
+> enumerates merged **PRs** and compares the legacy vs. new workflow verdict on each merge commit.
+> Work pushed straight to master creates no PR, contributes no comparison, and therefore *delays*
+> retiring `sdap-ci.yml`.
+>
+> **Master IS protected (enabled 2026-08-29).** A repository **ruleset** — not classic branch
+> protection — enforces on the default branch: a **PR is required** (0 approvals), the **`Router`**
+> check must pass, and force-push/deletion are blocked. A direct push to master is refused.
+>
+> Classic branch protection is **unavailable on this repo** — both `GET` and `PUT` on
+> `/branches/master/protection` return `404 "Branch protection has been disabled on this repository"`
+> despite `admin: true` and a `repo`-scoped token. Rulesets are the working mechanism here. Manage it
+> at `gh api repos/spaarke-dev/spaarke/rulesets/21824191`, and read what actually applies with
+> `gh api repos/spaarke-dev/spaarke/rules/branches/master`.
+>
+> **The required context is `Router`** — the literal check-run name — **not** `CI / Router` as some
+> planning docs say. `Router` is the router workflow's `always()` aggregate over `classify` + `tier1`;
+> **tier2 is deliberately excluded from its adjudication**, which is what makes Tier 2 advisory in
+> practice. Docs-only PRs skip Tier 1 and `Router` still reports success, so they are not blocked
+> (verified on #891/#892).
+>
+> **Prefer `/merge-to-master`**, which runs the pre-merge branch update + conflict resolution (its
+> Step 2.5) that this skill does not.
+
 When user requests "merge to master" or "merge and sync":
 
 ```
-1. Verify CI passes:
-   gh pr checks (or gh run list --branch {branch})
+1. Verify CI reached a TERMINAL state (not merely "no failures yet") — see Step 8:
+   gh pr checks {N}
 
-2. Push branch to master:
-   git push origin {branch}:master
+2. Merge via the PR (squash is this repo's convention):
+   gh pr merge {N} --squash --delete-branch
 
 3. IF in worktree (MANDATORY):
    MAIN_REPO=$(git rev-parse --git-common-dir | sed 's|/.git/worktrees.*||')
@@ -541,6 +621,7 @@ gh pr create                            # Create PR (if gh installed)
 
 - **CRITICAL: Always run Step 1.5 (untracked source file check) before ANY commit/push**
 - Untracked files have caused code loss - treat this check as mandatory, not optional
+- **Step 1.7 (real-Dataverse smoke): for any push that changes Dataverse-querying widget/component/service code, ASK whether a real create+read against real Dataverse was exercised — a mock/prototype harness passing is NOT sufficient (R4 `sprk_contact`-vs-OOB-`contact` regression). Advisory (ask-user-first), not a blocking CI gate.**
 - Always show `git status` before committing so user sees what's included
 - Propose a commit message based on changed files - don't just ask user to write one
 - If user is on main/master, strongly recommend creating a feature branch first
@@ -549,8 +630,18 @@ gh pr create                            # Create PR (if gh installed)
 - Always provide the GitHub compare URL even if `gh` CLI creates the PR
 - Include project/issue references in PR body when context is available
 - After push, **always run `gh pr checks`** to show CI status
-- If CI fails, use `gh run view {id} --log` to diagnose before suggesting fixes
-- Never suggest merging until all CI checks pass
+- If CI fails, use `gh run view {id} --log-failed` and **read the failing STEP name first** — an
+  infrastructure step (Checkout, setup-dotnet) failing is not a code defect
+- **Never judge a result while checks are `pending`.** "0 failures so far" is not "passing";
+  confirm `gh pr checks {N} | grep -c pending` is `0` first
+- Merge on a green **Tier 1**. **Tier 2 is advisory and does not block** — report a red Tier 2, judge
+  whether it is real, but do not treat it as a merge blocker (that is the design, per north star
+  "CI must not hold up high-frequency pushes")
+- **Do not edit `ci-router.yml` / `ci-tier1-blocking.yml` / `ci-tier2-advisory.yml` while the shadow
+  window is open** — changing the configuration invalidates what was observed and restarts the
+  cutover clock. Check with `pwsh scripts/ci/shadow-window-status.ps1`. Narrow exception, already
+  set by PRs #865/#890: adding a guard whose live count is **zero** is verdict-neutral, since no
+  existing PR's result can change.
 - Reference `ci-cd` skill for detailed troubleshooting guidance
 - **After successful push, always remind**: "Branch pushed to origin. When ready to merge this work into master, run `/merge-to-master`." Pushing to origin does NOT merge to master — these are separate operations.
 

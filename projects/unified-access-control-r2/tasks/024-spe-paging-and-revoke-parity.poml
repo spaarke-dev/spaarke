@@ -1,0 +1,96 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="024" project="unified-access-control-r2">
+  <metadata>
+    <title>SPE honesty: Graph paging (M1) + /revoke status parity with closure (M2)</title>
+    <phase>0 Enforcement Remediation</phase>
+    <status>pending</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Modifies .cs on the SPE membership read path that task 016's closure guard depends on.</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Graph paging is a known mechanical pattern; the status-parity half is a small contract alignment.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Touches Infrastructure/ExternalAccess/SpeContainerMembershipService.cs -- owned by tasks 016/017.</parallel-reason>
+    <deps>016,017</deps>
+    <tags>bff-api, auth, graph, spe</tags>
+    <estimated-effort>3-4 hours</estimated-effort>
+    <origin>review-2026-08-24 (multi-agent re-review of the 13 completed Phase 0 tasks); filed 2026-08-24 by owner decision</origin>
+  </metadata>
+
+  <prompt>Neither SPE membership read follows Graph paging, so the container_not_cleared guard tasks 016 and 017 built can report clean while page-2 members keep file access. And /revoke returns 200 when the SPE removal failed, while closure returns 500 for the identical shape. Make both honest.</prompt>
+  <role>SPAARKE platform developer. Expert in Microsoft Graph paging and the SPE container membership surface.</role>
+  <goal>Both SPE reads enumerate every page, so container_not_cleared reflects reality; /revoke's status matches closure's for the same failure shape.</goal>
+
+  <context>
+    <background>Review findings M1 and M2 (Medium). M1: both reads issue a single .GetAsync() and use permissions?.Value directly, with no @odata.nextLink follow. A container with more members than one Graph page reports clean after a partial clear -- which defeats the exact guard tasks 016 and 017 were built to provide, so the guard currently gives false assurance. M2: /revoke returns 200 with a body saying Failed while closure returns 500 for the identical shape; AccessGrantModal ignores the body (see the related M8 finding on postJson never checking res.ok), so a failed SPE revoke is invisible to the user. Task 017 made SPE failures observable in the RETURN VALUE; this finishes the job at the HTTP layer.</background>
+    <relevant-files>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Infrastructure/ExternalAccess/SpeContainerMembershipService.cs</file>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Api/ExternalAccess/RevokeExternalAccessEndpoint.cs</file>
+      <file role="canonical-reference">src/server/api/Sprk.Bff.Api/Api/ExternalAccess/ProjectClosureEndpoint.cs</file>
+      <file role="modify">tests/integration/auth/UnifiedAccessControl/SpeRevokeMatcherTests.cs</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="review-2026-08-24">PERTURBATION IS MANDATORY. After the fix, break it one line at a time and record how many tests fail. A perturbation that fails ZERO means the test is at the wrong level -- fix the test, never drop the perturbation. Task 009 hit this TWICE in one task: once because two guards denied the same case so a status-code assertion could not tell them apart, and once because a membership check had a positive test but no negative one. Pair every positive with a negative, and assert the distinguishing observable.</constraint>
+    <constraint source="ADR-038">Tests go on a KEEP path (tests/integration/{auth,regression,data-mutation,tenant,contract,seam}/** or tests/unit/domain/**). Mock at a virtual seam or module boundary; Mock&lt;HttpMessageHandler&gt; stays banned (B1), as do DI-registration tests (B3), ctor null-checks (B4), reflection into privates (B8) and coverage-fillers (B10).</constraint>
+    <constraint source="project">BFF-touching task (CLAUDE.md §10): state the Placement Justification in the PR citing .claude/constraints/bff-extensions.md, and report publish size vs the 43.70 MB baseline; ceiling 60 MB compressed incl. PDBs. Run /conflict-check before the PR -- this surface is shared with SPA-external-access-platform-r1/r2 and teams-app-r1.</constraint>
+    <constraint source="ADR-003">A partial or failed SPE clear must be reported as failure. Never report clean on an unenumerated set.</constraint>
+    <constraint source="project">Match the closure endpoint's contract: closure returns 500 with a reason code for an incomplete clear. /revoke must be consistent for the identical failure shape -- do not invent a third convention.</constraint>
+    <constraint source="review-2026-08-24">Mocking at a seam proves the CALLER, never the CALLEE. Task 017 learned this here: re-swallowing listing failures passed every endpoint test because the closure tests substitute RemoveAllExternalMembersAsync at its seam and never reach ListExternalMembersAsync. Test the paging at the SERVICE level, not only through an endpoint.</constraint>
+    <constraint source="ADR-007">Graph types stay inside Infrastructure. Do not leak a paging iterator or Graph model into an endpoint.</constraint>
+    <constraint source="task-020">HAND-OFF FROM TASK 020 (2026-08-27, verified in main session). 020 made org-grant revoke enumerate members and remove each one's permission, and it deliberately did NOT fix the paging gap because forking the matcher is what task 017 deleted. Two facts you inherit: (1) `SpeContainerMembershipService.RevokeMembershipAsync` reads permissions with a SINGLE `.Containers[containerId].Permissions.GetAsync(ct)` at lines 167-168 and IGNORES `@odata.nextLink` -- so every per-member `NoPermissionFound` verdict inherits the M1/M2 false assurance, now multiplied across members. (2) 020 introduced an N+1: N members = N full permission-list reads (negligible at 1 member/org today, real at the 200 bound). 020's recommended convergence, which fixes BOTH: ONE **paged** read + local email match + delete-by-permission-id. Do NOT reach for `RemoveAllExternalMembersAsync` as the paged primitive -- it removes EVERY external member, not just the target org's. Also note 020's un-falsifiable residuals, which belong on task 047 rather than here: SPE permission lists are eventually consistent (a removed permission may stay observable for a window), and the email match is case-insensitive but NOT alias/proxy-address aware, so a member invited under an address other than `contact.emailaddress1` reads as absent.</constraint>
+    <constraint source="task-020">TEST FILE STATE. 020 appended to `SpeRevokeMatcherTests.cs` in clearly-marked regions with their own fixtures (`OrgRevokeFixture`, `SpeMemberStub`), left the existing 17 tests untouched except flipping `Revoke_OfAnOrganizationGrant_ReportsNotAttemptedRatherThanSuccess` in place (position preserved), and changed `DataverseFor`/`SpeServiceStub` only by adding one throwing setup. Extend, do not restructure. Both doubles now THROW on unmodelled input -- preserve that; do not reintroduce a permissive fallback. Warning from 020's own run: its first double derived member emails from the first 8 GUID chars, which all fixture members shared, so "three members" was ONE email three times and the fan-out was never tested. STATE identities in a map; never derive them.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>.claude/adr/ADR-003-authorization-seams.md</file>
+      <file>projects/unified-access-control-r2/notes/review-2026-08-24-findings.md</file>
+      <file>projects/unified-access-control-r2/spec.md</file>
+      <file>.claude/adr/ADR-007-spe-storage-seam.md</file>
+      <file>projects/unified-access-control-r2/notes/task-016-close-project-cascade.md</file>
+      <file>projects/unified-access-control-r2/notes/task-017-spe-revoke-matcher.md</file>
+    </files>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="0">Read both SPE read paths and confirm neither follows @odata.nextLink.</step>
+    <step order="1">Implement paging on both, using the Graph SDK's page-iterator pattern rather than a hand-rolled loop where available.</step>
+    <step order="2">Author SERVICE-LEVEL tests proving a multi-page container is fully enumerated -- an endpoint-level test cannot see this.</step>
+    <step order="3">Align /revoke's HTTP status with closure's for a failed or partial SPE removal, reusing the same reason-code family.</step>
+    <step order="4">Update the SpeContainerRevokeOutcome contract and any client expectation if the status changes.</step>
+    <step order="5">Perturb: return only page 1; re-swallow the revoke failure. Record the counts.</step>
+    <step order="6">Full suite; publish size; update TASK-INDEX.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If aligning /revoke's status to 500 would break AccessGrantModal or the external SPA, note it and coordinate -- the related M8 finding (postJson never checks res.ok) is filed as a constraint on task 065, so the client may need to land first.</trigger>
+  </escalation>
+
+  <justification>
+    <existing>Both read methods and both endpoints exist. This corrects their behaviour.</existing>
+    <extension>Modification only. Reuses the closure endpoint's existing reason-code family rather than inventing one.</extension>
+    <cost-of-doing-nothing>The container_not_cleared guard that tasks 016 and 017 shipped gives false assurance: a multi-page container reports clean after a partial clear, so a revoked external user keeps file access and the system says the cascade succeeded.</cost-of-doing-nothing>
+  </justification>
+
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Infrastructure/ExternalAccess/SpeContainerMembershipService.cs</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Api/ExternalAccess/RevokeExternalAccessEndpoint.cs</output>
+    <output type="test">tests/integration/auth/UnifiedAccessControl/SpeRevokeMatcherTests.cs</output>
+    <output type="doc">projects/unified-access-control-r2/notes/task-024-spe-paging-parity.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Both SPE reads enumerate every page; a service-level test proves a multi-page container is fully seen.</criterion>
+    <criterion testable="true">container_not_cleared reports incomplete when a member on page 2 survives.</criterion>
+    <criterion testable="true">/revoke's status matches closure's for the identical failure shape, using the same reason-code family.</criterion>
+    <criterion testable="true">Perturbation: returning only page 1 fails at least one test; re-swallowing the revoke failure fails at least one test.</criterion>
+    <criterion testable="true">All 7 test projects pass; publish size reported and &lt;=60 MB.</criterion>
+  </acceptance-criteria>
+
+  <notes>Review findings M1 and M2. Finishes the observability work task 017 started.</notes>
+
+  <execution><skill>.claude/skills/task-execute/SKILL.md</skill></execution>
+</task>

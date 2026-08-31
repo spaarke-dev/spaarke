@@ -672,8 +672,8 @@ public class P2LoopInjectionEvalSuiteTests
         // ADR-040: gate closed `confirmed` + outcome ledger-written before rendering.
         var session = await harness.SessionManager.GetSessionAsync(TenantId, harness.SessionId);
         session!.Gates.Should().HaveCount(2, "append-only: pending + confirmed resolution correlated by gate id");
-        session.Gates.Last().GateId.Should().Be(pendingMarker.GateId);
-        session.Gates.Last().Status.Should().Be(PendingPlanManager.GateStatusConfirmed);
+        session.Gates!.Last().GateId.Should().Be(pendingMarker.GateId);
+        session.Gates!.Last().Status.Should().Be(PendingPlanManager.GateStatusConfirmed);
         var output = session.Outputs.Should().ContainSingle().Subject;
         output.Key.Should().Be(outcome.LedgerKey);
         output.BindingId.Should().Be("loop");
@@ -1198,7 +1198,7 @@ public class P2LoopInjectionEvalSuiteTests
                 PlaybookId: null,
                 CreatedAt: now,
                 LastActivity: now,
-                Messages: new List<Sprk.Bff.Api.Models.Ai.Chat.ChatMessage>());
+                Messages: new List<Sprk.Bff.Api.Models.Ai.Chat.ChatMessage>()) { OwnerOid = TestSessionOwner.Oid };
             await sessionManager.UpdateSessionCacheAsync(session);
 
             var services = new ServiceCollection();

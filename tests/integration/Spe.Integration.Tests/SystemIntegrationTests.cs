@@ -38,11 +38,14 @@ public class SystemIntegrationTests : IClassFixture<IntegrationTestFixture>
     public async Task ApiEndpoints_ReturnConsistentErrorFormat()
     {
         // Test multiple endpoints return RFC 7807 compliant errors
+        // `/api/containers/invalid-id/drive` was removed from this list on 2026-08-25: auth-v4
+        // (commit c17e856f4) deleted GET /api/containers/{containerId}/drive along with five other
+        // endpoints whose per-resource authorization requirement was structurally unsatisfiable on a
+        // collection route. A deleted endpoint returns 404 with no body, which is not a statement
+        // about ProblemDetails formatting — the thing this test exists to check.
         var endpointsToTest = new[]
         {
-            "/api/me",
-            "/api/containers",
-            "/api/containers/invalid-id/drive"
+            "/api/me"
         };
 
         foreach (var endpoint in endpointsToTest)
@@ -83,8 +86,15 @@ public class SystemIntegrationTests : IClassFixture<IntegrationTestFixture>
         var endpointGroups = new Dictionary<string, string[]>
         {
             ["User Endpoints"] = ["/api/me", "/api/me/capabilities"],
-            ["Document Endpoints"] = ["/api/containers", "/api/drives/test/children"],
-            ["OBO Endpoints"] = ["/api/obo/containers/test/children"]
+            // `/api/obo/containers/test/children` was removed from this list on 2026-08-26:
+            // unified-access-control-r2 task 071 deleted GET /api/obo/containers/{id}/children along
+            // with three other drive-keyed OBO routes that reached existing SPE content with no
+            // per-document authorization decision. Same rationale as the auth-v4 pruning above: a
+            // deleted endpoint returns a bare routing 404, which is not a statement about endpoint
+            // GROUPING — the thing this test exists to check. The OBO group's surviving GET routes
+            // live in DocumentVersionEndpoints; its remaining OBOEndpoints routes are PUT/POST, which
+            // this GET-only probe cannot exercise. Route absence is asserted directly by
+            // tests/integration/regression/OboDriveKeyedRouteRetirementTests.cs.
         };
 
         foreach (var (groupName, endpoints) in endpointGroups)

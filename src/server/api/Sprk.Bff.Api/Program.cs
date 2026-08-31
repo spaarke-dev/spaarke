@@ -2,6 +2,8 @@ using Azure.Monitor.OpenTelemetry.AspNetCore;      // R7-S7: UseAzureMonitor() e
 using Sprk.Bff.Api.Api.Membership;                 // R3 task 035 — AddMembershipApi() pairing
 using Sprk.Bff.Api.Api.Reporting;
 using Sprk.Bff.Api.Api.Dataverse;                  // Dataverse passthrough endpoints (Phase B)
+using Sprk.Bff.Api.Endpoints.Diagnostics;          // G-8 Batch 6 — I4 tenant-container-resolver diagnostic (customer-provisioning-r1)
+using Sprk.Bff.Api.Endpoints.Onboarding;           // task 042 — H0.5 consent-callback (customer-provisioning-r1)
 using Sprk.Bff.Api.Infrastructure.DI;
 using Sprk.Bff.Api.Infrastructure.Startup;         // R2 FR-06: AzureMonitorGuard
 using Sprk.Bff.Api.Services.Ai.LinearConsumers;    // R7 Wave 12 — Linear AI Consumer library
@@ -49,6 +51,16 @@ builder.Services.AddSingleton<Azure.Core.TokenCredential>(sp =>
 
 // Data Access Layer - Document storage resolution
 builder.Services.AddScoped<Sprk.Bff.Api.Infrastructure.Dataverse.IDocumentStorageResolver, Sprk.Bff.Api.Infrastructure.Dataverse.DocumentStorageResolver>();
+
+// Record-aware SPE container resolution — unified-access-control-r2 task 075.
+// The ONE mapping between a record and the container its content belongs in, in both directions:
+// forward for storage placement (a secure record resolves to its OWN sprk_containerid or FAILS CLOSED),
+// reverse for authorizing container-keyed routes (tasks 073/078).
+// UNCONDITIONAL on purpose: a feature-gated isolation seam is absent exactly when the gate is off, and an
+// absent resolver means callers silently fall back to a shared container. There is no acceptable null
+// object here, so no ADR-032 kill-switch applies.
+builder.Services.AddScoped<Sprk.Bff.Api.Infrastructure.Dataverse.ISecurableEntityRegistry, Sprk.Bff.Api.Infrastructure.Dataverse.SecurableEntityRegistry>();
+builder.Services.AddScoped<Sprk.Bff.Api.Infrastructure.Dataverse.RecordContainerResolver>();
 
 // Authentication & Authorization (Azure AD JWT + authorization policies)
 builder.Services.AddAuthorizationModule(builder.Configuration);
@@ -210,6 +222,21 @@ builder.Services.AddAgentModule(builder.Configuration);
 // match to avoid the RB-T028-03/04/05/06 asymmetric-registration anti-pattern. R1 has
 // no feature gates per project CLAUDE.md.
 builder.Services.AddComposeModule();
+
+// Onboarding surface (customer-provisioning-orchestration-r1, task 042) —
+// H0.5 consent-callback endpoint (Anonymous+HMAC) + Service Bus enqueuer
+// to the L2 provisioning queue. Placement Justification per CLAUDE.md §10:
+// the callback IS the extension point (design.md D18) — cannot live elsewhere;
+// scoped to a single new Endpoints/Onboarding/ folder (bounded per spec
+// ADR-010 tension row); NO AI-internal injection (ADR-013 forcing-function).
+builder.Services.AddOnboardingModule(builder.Configuration, builder.Environment);
+
+// Diagnostics surface (customer-provisioning-orchestration-r1, G-8 Batch 6 fix #18) —
+// ITenantContainerResolver for GET /api/diagnostics/tenant-container-resolver, the
+// BFF-side dependency of the L2 H13 I4 invariant probe. Unconditional per ADR-032 /
+// bff-extensions.md §F.1 (endpoint maps unconditionally). READ-ONLY; no AI-internal
+// types (ADR-013); zero new packages. See Endpoints/Diagnostics/DiagnosticsModule.cs.
+builder.Services.AddDiagnosticsModule();
 
 // CORS (secure, fail-closed configuration)
 builder.Services.AddCorsModule(builder.Configuration, builder.Environment);

@@ -3,6 +3,7 @@ using Sprk.Bff.Api.Services.Ai;
 using Sprk.Bff.Api.Services.Ai.Chat;
 using Sprk.Bff.Api.Services.Ai.ReviewMemo;
 using Sprk.Bff.Api.Services.Compose;
+using Sprk.Bff.Api.Infrastructure.Authentication;
 
 namespace Sprk.Bff.Api.Api.Ai;
 
@@ -65,6 +66,7 @@ public static class ReviewMemoEndpoints
 
         // POST /api/ai/chat/sessions/{sessionId}/review-memo
         group.MapPost("/{sessionId}/review-memo", GenerateReviewMemo)
+            .AddSessionOwnershipFilter()
             .AddAiAuthorizationFilter()
             .RequireRateLimiting("ai-batch")
             .WithName("GenerateReviewMemo")
@@ -85,6 +87,7 @@ public static class ReviewMemoEndpoints
 
         // GET /api/ai/chat/sessions/{sessionId}/review-memo (FR-14, task 051)
         group.MapGet("/{sessionId}/review-memo", GetReviewMemo)
+            .AddSessionOwnershipFilter()
             .AddAiAuthorizationFilter()
             .WithName("GetReviewMemo")
             .WithSummary("Read the persisted Review Summary Memo for the session's bound Analysis")
@@ -99,6 +102,7 @@ public static class ReviewMemoEndpoints
 
         // GET /api/ai/chat/sessions/{sessionId}/review-memo/docx (FR-14, task 051)
         group.MapGet("/{sessionId}/review-memo/docx", GetReviewMemoDocx)
+            .AddSessionOwnershipFilter()
             .AddAiAuthorizationFilter()
             .WithName("GetReviewMemoDocx")
             .WithSummary("Render the persisted Review Summary Memo as a downloadable .docx")
@@ -129,7 +133,7 @@ public static class ReviewMemoEndpoints
             return Problem(
                 StatusCodes.Status400BadRequest,
                 "Tenant Required",
-                "Tenant ID not found in token claims or X-Tenant-Id header.");
+                "Tenant ID not found in token claims.");
         }
 
         // Negative acceptance criterion (spec FR-13 / task 050): generation with no completed review
@@ -178,7 +182,7 @@ public static class ReviewMemoEndpoints
         if (string.IsNullOrEmpty(tenantId))
         {
             return Problem(StatusCodes.Status400BadRequest, "Tenant Required",
-                "Tenant ID not found in token claims or X-Tenant-Id header.");
+                "Tenant ID not found in token claims.");
         }
 
         var (analysisId, resolveError) = await ResolveBoundAnalysisIdAsync(sessionId, tenantId, sessionManager, cancellationToken);
@@ -209,7 +213,7 @@ public static class ReviewMemoEndpoints
         if (string.IsNullOrEmpty(tenantId))
         {
             return Problem(StatusCodes.Status400BadRequest, "Tenant Required",
-                "Tenant ID not found in token claims or X-Tenant-Id header.");
+                "Tenant ID not found in token claims.");
         }
 
         var (analysisId, resolveError) = await ResolveBoundAnalysisIdAsync(sessionId, tenantId, sessionManager, cancellationToken);
@@ -263,14 +267,16 @@ public static class ReviewMemoEndpoints
             // wizard door binds durably). It is NOT "there is no completed review": the memo endpoint
             // cannot see review-completion state here (per task 050, disposition lives client-side), so
             // claiming "no completed review" was inaccurate — a review may well have completed. The memo
-            // is unusable only because there is nowhere durable to persist it. Guide the user to the
-            // EXISTING promote affordance (Assistant → History → "Promote to Analysis…", tasks 023/033),
-            // which binds the session durably; NO silent auto-creation (ADR-041). The distinct `code`
-            // lets the client surface a promote-first affordance instead of a dead-end error.
+            // is unusable only because there is nowhere durable to persist it.
+            // UAT (2026-08-18, owner): the Document + Analysis are created when the user **Saves** — NOT
+            // by a run/upload, and NOT via Assistant conversation History. So guide the user to SAVE the
+            // document (which creates its Analysis); the memo is available afterward. The old "Assistant →
+            // History → Promote to Analysis…" instruction is REMOVED (that menu label no longer exists and
+            // the user does not go to conversation History to link an Analysis).
             return (Guid.Empty, Problem(
                 StatusCodes.Status400BadRequest,
-                "Session Not Bound To Analysis",
-                "This session isn't linked to an Analysis, so there's nowhere to save a Review Summary Memo. If a review was completed here it is not lost — promote this session to an Analysis first (in the Assistant, open History and choose \"Promote to Analysis…\"), then generate the memo.",
+                "Save The Document First",
+                "This document isn't saved yet, so there's nowhere to save a Review Summary Memo. If a review was completed here it is not lost — save the document first (that creates its Analysis), then generate the memo.",
                 code: "session-not-bound"));
         }
 
@@ -320,19 +326,14 @@ public static class ReviewMemoEndpoints
         extensions: code is null ? null : new Dictionary<string, object?> { ["code"] = code });
 
     /// <summary>
-    /// Extracts the tenant ID from the JWT <c>tid</c> claim (ADR-014) with an <c>X-Tenant-Id</c> header
+    /// Extracts the tenant ID from the JWT <c>tid</c> claim (ADR-014).
     /// fallback for service-to-service calls. Mirrors <c>AnalysisEndpoints.ExtractTenantId</c> /
     /// <c>ChatEndpoints.ExtractTenantId</c> (each endpoint file carries its own copy per existing
     /// convention — see the ~14 sibling private implementations across <c>Api/Ai/*.cs</c>).
     /// </summary>
     private static string? ExtractTenantId(HttpContext httpContext)
     {
-        var tenantId = httpContext.User.FindFirst("tid")?.Value
-            ?? httpContext.User.FindFirst("http://schemas.microsoft.com/identity/claims/tenantid")?.Value;
-        if (string.IsNullOrEmpty(tenantId))
-        {
-            tenantId = httpContext.Request.Headers["X-Tenant-Id"].FirstOrDefault();
-        }
+        var tenantId = TenantResolution.ResolveTenantId(httpContext.User);
         return tenantId;
     }
 }

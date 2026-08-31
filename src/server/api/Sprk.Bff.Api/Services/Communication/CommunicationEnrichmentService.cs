@@ -1,6 +1,7 @@
 using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
+using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Xrm.Sdk;
 using Microsoft.Xrm.Sdk.Query;
 using Spaarke.Dataverse;
@@ -33,13 +34,16 @@ namespace Sprk.Bff.Api.Services.Communication;
 /// </remarks>
 public sealed class CommunicationEnrichmentService : ICommunicationEnrichmentService
 {
-    private readonly IPostUploadIndexingEnqueuer _postUploadIndexingEnqueuer;
+    // IPostUploadIndexingEnqueuer and the three ICommunication*Ai facades (Triage/Propose/CreateTask)
+    // are Scoped; this service is a Singleton consumed by singleton producers (CommunicationService,
+    // CommunicationChannelDispatcher, …), so each is resolved from a fresh scope at its single use-site
+    // (dotnet-10-upgrade task 020, R3) rather than captured on the ctor — otherwise the Singleton graph
+    // fails ValidateScopes. Each enrichment step is an independent, stateless AI/enqueue call, so a
+    // per-call scoped instance is behavior-preserving.
+    private readonly IServiceScopeFactory _scopeFactory;
     private readonly IGenericEntityService _genericEntityService;
     private readonly IConfiguration _configuration;
     private readonly ICommunicationAssessedProducer _assessedProducer;
-    private readonly ICommunicationTriageAi _triageAi;
-    private readonly ICommunicationProposeAi _proposeAi;
-    private readonly ICommunicationCreateTaskAi _createTaskAi;
     private readonly IActionSeam _actionSeam;
     private readonly Engine.CategoryRoutingGate _routingGate;
     private readonly ILogger<CommunicationEnrichmentService> _logger;
@@ -170,24 +174,18 @@ public sealed class CommunicationEnrichmentService : ICommunicationEnrichmentSer
         };
 
     public CommunicationEnrichmentService(
-        IPostUploadIndexingEnqueuer postUploadIndexingEnqueuer,
+        IServiceScopeFactory scopeFactory,
         IGenericEntityService genericEntityService,
         IConfiguration configuration,
         ICommunicationAssessedProducer assessedProducer,
-        ICommunicationTriageAi triageAi,
-        ICommunicationProposeAi proposeAi,
-        ICommunicationCreateTaskAi createTaskAi,
         IActionSeam actionSeam,
         Engine.CategoryRoutingGate routingGate,
         ILogger<CommunicationEnrichmentService> logger)
     {
-        _postUploadIndexingEnqueuer = postUploadIndexingEnqueuer;
+        _scopeFactory = scopeFactory ?? throw new ArgumentNullException(nameof(scopeFactory));
         _genericEntityService = genericEntityService;
         _configuration = configuration;
         _assessedProducer = assessedProducer ?? throw new ArgumentNullException(nameof(assessedProducer));
-        _triageAi = triageAi ?? throw new ArgumentNullException(nameof(triageAi));
-        _proposeAi = proposeAi ?? throw new ArgumentNullException(nameof(proposeAi));
-        _createTaskAi = createTaskAi ?? throw new ArgumentNullException(nameof(createTaskAi));
         _actionSeam = actionSeam ?? throw new ArgumentNullException(nameof(actionSeam));
         _routingGate = routingGate ?? throw new ArgumentNullException(nameof(routingGate));
         _logger = logger;
@@ -400,7 +398,10 @@ public sealed class CommunicationEnrichmentService : ICommunicationEnrichmentSer
 
         // App-only path: the outbound .eml was written to SPE by the BFF's Managed Identity, so MI can
         // read its own write (writer-identity rule per sdap-auth-patterns.md Pattern 4). Non-fatal.
-        await _postUploadIndexingEnqueuer.EnqueueAppOnlyIfApplicableAsync(request, ct);
+        // IPostUploadIndexingEnqueuer is Scoped — resolve it per-operation from a scope (R3).
+        using var scope = _scopeFactory.CreateScope();
+        var postUploadIndexingEnqueuer = scope.ServiceProvider.GetRequiredService<IPostUploadIndexingEnqueuer>();
+        await postUploadIndexingEnqueuer.EnqueueAppOnlyIfApplicableAsync(request, ct);
 
         _logger.LogInformation(
             "Enrichment[rag-indexing] enqueued outbound RAG indexing (previously-missing half closed) | CommunicationId: {CommunicationId}, DocumentId: {DocumentId}.",
@@ -484,7 +485,10 @@ public sealed class CommunicationEnrichmentService : ICommunicationEnrichmentSer
             TenantId = tenantId,
         };
 
-        var result = await _triageAi.TriageAsync(request, ct);
+        // ICommunicationTriageAi is Scoped — resolve it per-operation from a scope (R3).
+        using var scope = _scopeFactory.CreateScope();
+        var triageAi = scope.ServiceProvider.GetRequiredService<ICommunicationTriageAi>();
+        var result = await triageAi.TriageAsync(request, ct);
 
         if (result is null)
         {
@@ -838,7 +842,10 @@ public sealed class CommunicationEnrichmentService : ICommunicationEnrichmentSer
             TenantId = tenantId,
         };
 
-        var candidates = await _proposeAi.ProposeAsync(request, ct).ConfigureAwait(false);
+        // ICommunicationProposeAi is Scoped — resolve it per-operation from a scope (R3).
+        using var scope = _scopeFactory.CreateScope();
+        var proposeAi = scope.ServiceProvider.GetRequiredService<ICommunicationProposeAi>();
+        var candidates = await proposeAi.ProposeAsync(request, ct).ConfigureAwait(false);
         if (candidates is not { Count: > 0 })
         {
             _logger.LogDebug(
@@ -1231,7 +1238,10 @@ public sealed class CommunicationEnrichmentService : ICommunicationEnrichmentSer
                 TenantId = tenantId,
             };
 
-            var candidates = await _createTaskAi.ExtractAsync(request, ct).ConfigureAwait(false);
+            // ICommunicationCreateTaskAi is Scoped — resolve it per-operation from a scope (R3).
+            using var scope = _scopeFactory.CreateScope();
+            var createTaskAi = scope.ServiceProvider.GetRequiredService<ICommunicationCreateTaskAi>();
+            var candidates = await createTaskAi.ExtractAsync(request, ct).ConfigureAwait(false);
             if (candidates is not { Count: > 0 })
             {
                 _logger.LogDebug(
@@ -1695,7 +1705,10 @@ public sealed class CommunicationEnrichmentService : ICommunicationEnrichmentSer
                     TenantId = tenantId,
                 };
 
-                var candidates = await _createTaskAi.ExtractAsync(request, ct).ConfigureAwait(false);
+                // ICommunicationCreateTaskAi is Scoped — resolve it per-operation from a scope (R3).
+                using var scope = _scopeFactory.CreateScope();
+                var createTaskAi = scope.ServiceProvider.GetRequiredService<ICommunicationCreateTaskAi>();
+                var candidates = await createTaskAi.ExtractAsync(request, ct).ConfigureAwait(false);
                 if (candidates is not { Count: > 0 })
                 {
                     continue;

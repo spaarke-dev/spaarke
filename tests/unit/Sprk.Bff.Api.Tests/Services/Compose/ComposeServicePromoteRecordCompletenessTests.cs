@@ -74,7 +74,7 @@ public sealed class ComposeServicePromoteRecordCompletenessTests
     private ComposeService CreateSut() => new(
         _spe.Object,
         _sessions.Object,
-        _dataverse.Object,        _indexing.Object,
+        _dataverse.Object, _indexing.Object,
         NullLogger<ComposeService>.Instance);
 
     private static ReadOnlyMemory<byte> DraftBytes() =>
@@ -108,11 +108,13 @@ public sealed class ComposeServicePromoteRecordCompletenessTests
             .ReturnsAsync((Entity)null!);
 
         Entity? captured = null;
-        _dataverse.Setup(d => d.CreateAsync(It.IsAny<Entity>(), It.IsAny<CancellationToken>()))
+        // task 013 (FR-07d): promote now writes via the atomic UpsertAsync (was CreateAsync). The entity
+        // it hands over carries the same attributes PLUS the sprk_graphitemid_uk KeyAttributes match.
+        _dataverse.Setup(d => d.UpsertAsync(It.IsAny<Entity>(), It.IsAny<CancellationToken>()))
             .Callback<Entity, CancellationToken>((e, _) => captured = e)
-            .ReturnsAsync(newId);
+            .ReturnsAsync((newId, true));
 
-        return () => captured ?? throw new InvalidOperationException("CreateAsync was never invoked.");
+        return () => captured ?? throw new InvalidOperationException("UpsertAsync was never invoked.");
     }
 
     private void ArrangeIndexingSubmitted() =>
@@ -139,7 +141,7 @@ public sealed class ComposeServicePromoteRecordCompletenessTests
             DisplayName = "Contract draft",
         };
 
-        await sut.SaveAsync(request, new DefaultHttpContext(), CancellationToken.None);
+        await sut.SaveAsync(request, TestHttpContexts.Authenticated(), CancellationToken.None);
 
         var created = captureCreated();
 
@@ -168,7 +170,7 @@ public sealed class ComposeServicePromoteRecordCompletenessTests
             DisplayName = "Contract draft",
         };
 
-        await sut.SaveAsync(request, new DefaultHttpContext(), CancellationToken.None);
+        await sut.SaveAsync(request, TestHttpContexts.Authenticated(), CancellationToken.None);
 
         var created = captureCreated();
 

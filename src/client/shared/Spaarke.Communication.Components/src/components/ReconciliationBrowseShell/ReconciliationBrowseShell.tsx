@@ -39,8 +39,9 @@
  * (Fluent v9 tokens, light + dark), ADR-022 (React-version-agnostic).
  */
 import * as React from 'react';
-import { makeStyles, tokens, Text } from '@fluentui/react-components';
-import { SprkModal, PreviewModal } from '@spaarke/ui-components';
+import { makeStyles, tokens, Text, Button } from '@fluentui/react-components';
+import { Open16Regular } from '@fluentui/react-icons';
+import { SprkModal, PreviewModal, PanelSplitter } from '@spaarke/ui-components';
 import { EmailReadingPaneShell } from '../EmailReadingPaneShell';
 import { EmailReadingHeader } from '../EmailReadingHeader';
 import { EmailRecipients } from '../EmailRecipients';
@@ -51,16 +52,20 @@ import type { ReconciliationAttachmentContent } from '../EmailBody/EmailBodyView
 import type { ReconciliationBrowseRecord, ReconciliationBrowseShellProps } from './ReconciliationBrowseShell.types';
 
 const useStyles = makeStyles({
-  // Two-pane body filling the SprkModal (unpadded) `lg`/landscape stage: reader
-  // left (1fr), reconcile tabs right (clamped). `minHeight: 0` lets each pane
-  // scroll independently inside the modal's height cap.
+  // Two-pane body filling the SprkModal (unpadded) `xl`/landscape stage: reader
+  // LEFT (flex-basis = split ratio), a draggable `PanelSplitter` divider, and the
+  // reconcile tabs RIGHT (flex 1). A6 (owner UAT 2026-08-10): a 50/50 default with
+  // manual horizontal drag-resize replaces the former fixed `1fr minmax()` grid.
+  // `minHeight: 0` lets each pane scroll independently inside the modal height cap.
   twoPane: {
-    display: 'grid',
-    gridTemplateColumns: '1fr minmax(360px, 480px)',
+    display: 'flex',
+    flexDirection: 'row',
     height: '100%',
     minHeight: 0,
     width: '100%',
   },
+  // Reader pane width is driven by the split ratio (inline `flex` style). No
+  // `borderRight` — the `PanelSplitter` grip IS the divider now (A6).
   readerPane: {
     position: 'relative',
     display: 'flex',
@@ -68,18 +73,31 @@ const useStyles = makeStyles({
     minHeight: 0,
     height: '100%',
     overflow: 'hidden',
-    borderRightWidth: tokens.strokeWidthThin,
-    borderRightStyle: 'solid',
-    borderRightColor: tokens.colorNeutralStroke2,
   },
+  // A5 (owner UAT 2026-08-10): modern thin scrollbar on the scrollable tabs pane.
+  // Fluent semantic tokens only (ADR-021) — light-gray thumb that resolves
+  // theme-aware, transparent track; matches the shared `thinScrollbarStyle`
+  // convention (the reused reader already applies it internally). No hard-coded
+  // colors. `scrollbarWidth`/`scrollbarColor` cover Firefox; the
+  // `::-webkit-scrollbar*` pseudo-elements cover Chromium/Edge/Safari.
   tabsPane: {
     display: 'flex',
     flexDirection: 'column',
+    flex: '1 1 0',
     minWidth: 0,
     minHeight: 0,
     height: '100%',
     overflowY: 'auto',
     backgroundColor: tokens.colorNeutralBackground1,
+    scrollbarWidth: 'thin',
+    scrollbarColor: `${tokens.colorNeutralStroke1} transparent`,
+    '::-webkit-scrollbar': { width: '8px', height: '8px' },
+    '::-webkit-scrollbar-track': { backgroundColor: 'transparent' },
+    '::-webkit-scrollbar-thumb': {
+      backgroundColor: tokens.colorNeutralStroke1,
+      borderRadius: tokens.borderRadiusMedium,
+    },
+    '::-webkit-scrollbar-thumb:hover': { backgroundColor: tokens.colorNeutralStroke1Hover },
   },
   tabsPlaceholder: {
     display: 'flex',
@@ -100,11 +118,27 @@ const useStyles = makeStyles({
     paddingInline: tokens.spacingHorizontalM,
     paddingTop: tokens.spacingVerticalS,
   },
-  bodySubject: {
-    paddingInline: tokens.spacingHorizontalM,
-    paddingTop: tokens.spacingVerticalS,
-    paddingBottom: tokens.spacingVerticalXS,
+  // TRIAGE panel (prototype parity, owner UAT 2026-08-14) — the AI triage summary + optional
+  // priority/category, in a subtle boxed band above the body. Semantic tokens only (ADR-021).
+  triageBox: {
+    marginInline: tokens.spacingHorizontalM,
+    marginTop: tokens.spacingVerticalS,
+    padding: tokens.spacingHorizontalM,
+    borderRadius: tokens.borderRadiusMedium,
+    backgroundColor: tokens.colorNeutralBackground2,
+    display: 'flex',
+    flexDirection: 'column',
+    gap: tokens.spacingVerticalXXS,
   },
+  triageLabel: {
+    fontSize: tokens.fontSizeBase100,
+    fontWeight: tokens.fontWeightSemibold,
+    letterSpacing: '0.04em',
+    color: tokens.colorNeutralForeground3,
+  },
+  triageText: { fontSize: tokens.fontSizeBase200, color: tokens.colorNeutralForeground1 },
+  triageMeta: { fontSize: tokens.fontSizeBase200, color: tokens.colorNeutralForeground3 },
+  openOriginalRow: { paddingInline: tokens.spacingHorizontalM, paddingTop: tokens.spacingVerticalXS },
   emptyState: {
     display: 'flex',
     alignItems: 'center',
@@ -121,6 +155,93 @@ function clampIndex(n: number, len: number): number {
   if (n < 0) return 0;
   if (n > len - 1) return len - 1;
   return n;
+}
+
+// A6 split-ratio bounds — reader gets 25–75% of the two-pane body, defaulting to
+// a 50/50 split. Keyboard nudges the divider ±2% per arrow press.
+const MIN_SPLIT_RATIO = 0.25;
+const MAX_SPLIT_RATIO = 0.75;
+const DEFAULT_SPLIT_RATIO = 0.5;
+const SPLIT_KEYBOARD_STEP = 0.02;
+
+function clampRatio(r: number): number {
+  return Math.max(MIN_SPLIT_RATIO, Math.min(MAX_SPLIT_RATIO, r));
+}
+
+interface UseSplitRatioResult {
+  /** Attach to the flex container that holds reader + splitter + tabs. */
+  containerRef: React.RefObject<HTMLDivElement | null>;
+  /** Reader-pane proportion (0.25–0.75). */
+  ratio: number;
+  /** True while the divider is being dragged. */
+  isDragging: boolean;
+  /** Handlers for the `<PanelSplitter />` grip. */
+  splitterHandlers: {
+    onMouseDown: (e: React.MouseEvent) => void;
+    onKeyDown: (e: React.KeyboardEvent) => void;
+    onDoubleClick: () => void;
+  };
+}
+
+/**
+ * Controlled 50/50 split-ratio state for the A6 drag-resize divider. The shared
+ * `useThreadPaneLayout` was considered (§11 reuse) but it models a fixed-width,
+ * collapsible LEFT sidebar (px width + localStorage persistence + collapse) and
+ * is not exported from `@spaarke/ui-components` — a poor fit for a symmetric,
+ * ratio-based reader|tabs split. This local hook owns only the ratio + drag/
+ * keyboard/reset logic and drives the reused presentational `PanelSplitter` grip.
+ * PCF-safe (ADR-022): React-16-compatible hooks only.
+ */
+function useSplitRatio(defaultRatio = DEFAULT_SPLIT_RATIO): UseSplitRatioResult {
+  const containerRef = React.useRef<HTMLDivElement | null>(null);
+  const draggingRef = React.useRef(false);
+  const [ratio, setRatio] = React.useState(defaultRatio);
+  const [isDragging, setIsDragging] = React.useState(false);
+
+  const onMouseMove = React.useCallback((e: MouseEvent) => {
+    if (!draggingRef.current) return;
+    const rect = containerRef.current?.getBoundingClientRect();
+    if (!rect || rect.width <= 0) return;
+    setRatio(clampRatio((e.clientX - rect.left) / rect.width));
+  }, []);
+
+  const onMouseUp = React.useCallback(() => {
+    draggingRef.current = false;
+    setIsDragging(false);
+    document.body.style.cursor = '';
+    document.body.style.userSelect = '';
+  }, []);
+
+  React.useEffect(() => {
+    if (!isDragging) return;
+    document.addEventListener('mousemove', onMouseMove);
+    document.addEventListener('mouseup', onMouseUp);
+    return () => {
+      document.removeEventListener('mousemove', onMouseMove);
+      document.removeEventListener('mouseup', onMouseUp);
+    };
+  }, [isDragging, onMouseMove, onMouseUp]);
+
+  const onMouseDown = React.useCallback((e: React.MouseEvent) => {
+    e.preventDefault();
+    draggingRef.current = true;
+    setIsDragging(true);
+    document.body.style.cursor = 'col-resize';
+    document.body.style.userSelect = 'none';
+  }, []);
+
+  const onKeyDown = React.useCallback((e: React.KeyboardEvent) => {
+    let delta = 0;
+    if (e.key === 'ArrowLeft') delta = -SPLIT_KEYBOARD_STEP;
+    else if (e.key === 'ArrowRight') delta = SPLIT_KEYBOARD_STEP;
+    else return;
+    e.preventDefault();
+    setRatio(prev => clampRatio(prev + delta));
+  }, []);
+
+  const onDoubleClick = React.useCallback(() => setRatio(DEFAULT_SPLIT_RATIO), []);
+
+  return { containerRef, ratio, isDragging, splitterHandlers: { onMouseDown, onKeyDown, onDoubleClick } };
 }
 
 /**
@@ -143,6 +264,7 @@ function toAttachmentItem(att: ReconciliationAttachmentContent): IAttachmentItem
 export const ReconciliationBrowseShell: React.FC<ReconciliationBrowseShellProps> = ({
   open,
   onClose,
+  onSave,
   queue,
   initialIndex = 0,
   onIndexChange,
@@ -152,8 +274,10 @@ export const ReconciliationBrowseShell: React.FC<ReconciliationBrowseShellProps>
   authenticatedFetch,
   activeCitation,
   uiScale,
+  headerBadges,
 }) => {
   const s = useStyles();
+  const { containerRef, ratio, isDragging, splitterHandlers } = useSplitRatio();
 
   const [index, setIndex] = React.useState<number>(() => clampIndex(initialIndex, queue.length));
 
@@ -190,15 +314,31 @@ export const ReconciliationBrowseShell: React.FC<ReconciliationBrowseShellProps>
         open={open}
         onClose={onClose}
         title={title}
-        size="lg"
+        size="xl"
         layout="landscape"
         padded={false}
         uiScale={uiScale}
+        dismiss="explicit"
         nav={{ index, total: queue.length, onNavigate: handleNavigate }}
+        headerActions={headerBadges}
+        footerStart={
+          <Button appearance="secondary" onClick={onClose} data-testid="reconciliation-browse-close">
+            Close
+          </Button>
+        }
+        footer={
+          <Button appearance="primary" onClick={onSave ?? onClose} data-testid="reconciliation-browse-save">
+            Save
+          </Button>
+        }
       >
         {current ? (
-          <div className={s.twoPane} data-testid="reconciliation-browse-two-pane">
-            <div className={s.readerPane} data-testid="reconciliation-browse-reader">
+          <div className={s.twoPane} data-testid="reconciliation-browse-two-pane" ref={containerRef}>
+            <div
+              className={s.readerPane}
+              data-testid="reconciliation-browse-reader"
+              style={{ flex: `0 0 ${ratio * 100}%` }}
+            >
               {/* Reused reader (ADR-045). Keyed by record id so navigation
                   remounts it and re-binds `initialSelectedId` to the new record. */}
               <EmailReadingPaneShell
@@ -216,17 +356,40 @@ export const ReconciliationBrowseShell: React.FC<ReconciliationBrowseShellProps>
                         to={current.to ?? null}
                         cc={current.cc}
                         bcc={current.bcc}
+                        receivedDate={current.receivedDate}
+                        dateLabel={current.outbound ? 'Sent' : 'Received'}
                       />
                     </div>
-                    <Text
-                      as="h2"
-                      className={s.bodySubject}
-                      data-testid="reconciliation-browse-subject"
-                      truncate
-                      wrap={false}
-                    >
-                      {current.subject || '(no subject)'}
-                    </Text>
+                    {current.emlDocumentId ? (
+                      <div className={s.openOriginalRow}>
+                        <Button
+                          appearance="subtle"
+                          size="small"
+                          icon={<Open16Regular />}
+                          data-testid="reconciliation-open-original-eml"
+                          onClick={() =>
+                            setOverlayAttachment({
+                              attachmentId: 'eml-archive',
+                              name: `${current.subject || 'email'}.eml`,
+                              documentId: current.emlDocumentId ?? null,
+                            })
+                          }
+                        >
+                          Open original email (.eml)
+                        </Button>
+                      </div>
+                    ) : null}
+                    {current.triageSummary || current.triagePriority || current.triageCategory ? (
+                      <div className={s.triageBox} data-testid="reconciliation-browse-triage">
+                        <Text className={s.triageLabel}>TRIAGE</Text>
+                        {current.triagePriority || current.triageCategory ? (
+                          <Text className={s.triageMeta}>
+                            {[current.triagePriority, current.triageCategory].filter(Boolean).join(' · ')}
+                          </Text>
+                        ) : null}
+                        {current.triageSummary ? <Text className={s.triageText}>{current.triageSummary}</Text> : null}
+                      </div>
+                    ) : null}
                     <EmailBodyView
                       selectedId={current.id}
                       emlDocumentId={current.emlDocumentId}
@@ -240,6 +403,15 @@ export const ReconciliationBrowseShell: React.FC<ReconciliationBrowseShellProps>
                 )}
               />
             </div>
+
+            {/* A6 — draggable vertical divider (reused presentational grip). */}
+            <PanelSplitter
+              onMouseDown={splitterHandlers.onMouseDown}
+              onKeyDown={splitterHandlers.onKeyDown}
+              onDoubleClick={splitterHandlers.onDoubleClick}
+              isDragging={isDragging}
+              currentRatio={ratio}
+            />
 
             <div className={s.tabsPane} data-testid="reconciliation-browse-tabs">
               {renderTabs ? (

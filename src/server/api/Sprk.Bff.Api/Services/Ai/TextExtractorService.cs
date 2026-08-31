@@ -57,16 +57,58 @@ public class TextExtractorService : ITextExtractor
     /// </summary>
     private static readonly TimeSpan CacheTtl = TimeSpan.FromHours(24);
 
+    /// <summary>Managed-identity credential (Program.cs singleton) for the Entra auth path.</summary>
+    private readonly Azure.Core.TokenCredential? _managedIdentityCredential;
+
+    /// <summary>
+    /// Builds the Document Intelligence client, selecting Entra (managed identity) when no
+    /// <c>DocumentIntelligence:DocIntelKey</c> is configured (auth-v4 task 054 / FR-E5).
+    /// </summary>
+    /// <remarks>
+    /// <b>The Entra path requires a CUSTOM SUBDOMAIN on the Cognitive Services account.</b> An
+    /// account reached through a REGIONAL endpoint (<c>https://{region}.api.cognitive.microsoft.com/</c>)
+    /// accepts API keys only. Measured 2026-08-22: <c>spaarke-docintel-prod</c> has custom subdomain
+    /// <c>spaarke-docintel-prod</c> and CAN use Entra, while <c>spaarke-docintel-dev</c> has
+    /// <c>customSubDomainName: null</c> and a regional endpoint, so it CANNOT until a subdomain is
+    /// added — an irreversible change that also changes the endpoint URL consumers depend on, hence
+    /// escalated rather than applied. The dev UAMI also holds no role on that account yet.
+    /// </remarks>
+    private DocumentIntelligenceClient CreateDocIntelClient()
+    {
+        var endpoint = new Uri(_options.DocIntelEndpoint!);
+
+        if (!string.IsNullOrWhiteSpace(_options.DocIntelKey))
+        {
+            return new DocumentIntelligenceClient(endpoint, new AzureKeyCredential(_options.DocIntelKey));
+        }
+
+        if (_managedIdentityCredential is null)
+        {
+            throw new InvalidOperationException(
+                "DocumentIntelligence:DocIntelKey is not configured and no TokenCredential was supplied, " +
+                "so Document Intelligence has no credential. Configure the key, or construct " +
+                "TextExtractorService with the DI TokenCredential (ADR-028).");
+        }
+
+        _logger.LogInformation(
+            "DocumentIntelligence auth: Managed Identity (ADR-028). Requires a custom subdomain on " +
+            "the account plus a Cognitive Services User role assignment; a regional endpoint will " +
+            "reject the token.");
+        return new DocumentIntelligenceClient(endpoint, _managedIdentityCredential);
+    }
+
     public TextExtractorService(
         IOptions<DocumentIntelligenceOptions> options,
         ILogger<TextExtractorService> logger,
         ITenantCache cache,
-        ICircuitBreakerRegistry? circuitRegistry = null)
+        ICircuitBreakerRegistry? circuitRegistry = null,
+        Azure.Core.TokenCredential? managedIdentityCredential = null)
     {
         _options = options.Value;
         _logger = logger;
         _circuitRegistry = circuitRegistry;
         _cache = cache ?? throw new ArgumentNullException(nameof(cache));
+        _managedIdentityCredential = managedIdentityCredential;
 
         // Register circuit breaker for Document Intelligence
         _circuitRegistry?.RegisterCircuit(CircuitBreakerRegistry.DocumentIntelligence);
@@ -774,9 +816,8 @@ public class TextExtractorService : ITextExtractor
                 "Starting Document Intelligence extraction for {FileName} (timeout: {Timeout}s)",
                 fileName, _options.DocIntelTimeoutSeconds);
 
-            // Create client
-            var credential = new AzureKeyCredential(_options.DocIntelKey!);
-            var client = new DocumentIntelligenceClient(new Uri(_options.DocIntelEndpoint!), credential);
+            // Create client (auth-v4 task 054: key-or-managed-identity, see CreateDocIntelClient)
+            var client = CreateDocIntelClient();
 
             // Read stream to BinaryData (required by SDK)
             using var memoryStream = new MemoryStream();
@@ -871,7 +912,8 @@ public class TextExtractorService : ITextExtractor
                 .ToList();
 
             return TextExtractionResult.Succeeded(text, TextExtractionMethod.DocumentIntelligence)
-                with { Pages = pages };
+                with
+            { Pages = pages };
         }
         catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
         {
@@ -1001,8 +1043,7 @@ public class TextExtractorService : ITextExtractor
                 "Starting Document Intelligence layout extraction for {FileName} (timeout: {Timeout}s)",
                 fileName, _options.DocIntelTimeoutSeconds);
 
-            var credential = new AzureKeyCredential(_options.DocIntelKey!);
-            var client = new DocumentIntelligenceClient(new Uri(_options.DocIntelEndpoint!), credential);
+            var client = CreateDocIntelClient();
 
             using var memoryStream = new MemoryStream();
             await fileStream.CopyToAsync(memoryStream, cancellationToken);

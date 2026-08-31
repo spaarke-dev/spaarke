@@ -100,12 +100,14 @@ public class Phase1StableIdMigrationSuite
     // IPlaybookLookupService as a parameter (DI-injected per ASP.NET minimal API).
     // ─────────────────────────────────────────────────────────────────────────
     [Fact]
-    public void Consumer05_WorkspaceFileEndpoints_HandleSummarize_ExecutesOnActionPrimitives()
+    public void Consumer05_WorkspaceFileEndpoints_HandleSummarize_ExecutesViaFileSummarizeFacade()
     {
-        // FR-P3-05 (ai-architecture-redesign-r1 task 044): summarize-file executes on the
-        // prompted executor — HandleSummarize composes IActionResolver + IActionRunner
-        // directly; the playbook lookup + engine fall-through were deleted (no playbook id
-        // resolution remains on the path, so the stable-id concern is closed structurally).
+        // FR-P3-05 (task 044) established that summarize-file executes on the prompted executor;
+        // task 024 (ADR-013 / BFF §10 bullet 3) relocated the resolve + run behind the
+        // IFileSummarizeAi PublicContracts facade so the non-AI endpoint no longer injects the
+        // Linear AI Consumer primitives directly (A-1). The playbook lookup + engine fall-through
+        // stay deleted (no playbook id resolution on the path — the stable-id concern is closed
+        // structurally).
         var method = typeof(WorkspaceFileEndpoints).GetMethod(
             "HandleSummarize",
             BindingFlags.NonPublic | BindingFlags.Static);
@@ -115,11 +117,14 @@ public class Phase1StableIdMigrationSuite
 
         var parameters = method!.GetParameters();
         parameters.Should().Contain(
+            p => p.ParameterType == typeof(Sprk.Bff.Api.Services.Ai.PublicContracts.IFileSummarizeAi),
+            "HandleSummarize resolves + runs the summarize-file Action via the IFileSummarizeAi facade (task 024)");
+        parameters.Should().NotContain(
             p => p.ParameterType == typeof(Sprk.Bff.Api.Services.Ai.LinearConsumers.IActionResolver),
-            "HandleSummarize resolves the summarize-file Binding row's Action via IActionResolver (task 044)");
-        parameters.Should().Contain(
+            "task 024 A-1 — IActionResolver no longer injected into the non-AI endpoint (behind the facade)");
+        parameters.Should().NotContain(
             p => p.ParameterType == typeof(Sprk.Bff.Api.Services.Ai.LinearConsumers.IActionRunner),
-            "HandleSummarize executes via IActionRunner (task 044)");
+            "task 024 A-1 — IActionRunner no longer injected into the non-AI endpoint (behind the facade)");
         parameters.Should().NotContain(
             p => p.ParameterType == typeof(IPlaybookLookupService),
             "the playbook lookup was deleted from the summarize path (FR-P3-05 hard cutover)");

@@ -1,0 +1,170 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="081" project="record-header-and-notepad-r2">
+  <metadata>
+    <title>Retire MatterHeaderPcf — remove all form references, then delete the CustomControl (irreversible)</title>
+    <phase>5 Rollout</phase>
+    <gate>blocked — startable ONLY when task 080 is ✅ with an explicit recorded GO verdict in notes/matter-parity-qa.md</gate>
+    <status>not-started</status>
+    <rigor>STANDARD</rigor>
+    <rigor-reason>Operator/maker environment-configuration task — no .cs/.ts/.tsx files are modified (the repo-side MatterHeader → RecordHeader migration happened in Phase 3). STANDARD per the config-not-code carve-out; the irreversibility risk is carried by the opus model-tier, the prescriptive step mode and the escalation triggers, not by rigor gates.</rigor-reason>
+    <model-tier>opus</model-tier>
+    <model-tier-reason>Irreversible destructive procedure (owner decision D-4: retire on delivery, no dormant-release window). Executing it closes the only rollback path; a wrong or premature deletion cannot be undone without a full redeploy of the retired control. Warrants top-tier judgment on every precondition check.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Operator/maker task in the live spaarkedev1 environment; irreversible destructive sequence; must run strictly after 080's GO verdict, alone.</parallel-reason>
+    <deps>080</deps>
+    <tags>pcf, dataverse, solution, deploy, migration</tags>
+    <estimated-effort>1-2 hours</estimated-effort>
+  </metadata>
+
+  <prompt>
+    Retire the old MatterHeaderPcf control from spaarkedev1 in TWO ORDERED STEPS: (1) remove every remaining
+    form reference to the control and publish, THEN (2) delete the CustomControl component itself, then the
+    empty solution container. This is irreversible — owner decision D-4 mandates retirement on delivery with
+    no dormant-release window. The rollback window that existed between task 080 and this task closes when
+    step 2 executes.
+  </prompt>
+
+  <role>
+    SPAARKE platform operator/maker with Dataverse solution-management access to spaarkedev1. Follow ADRs
+    strictly. Expertise: Dataverse solution lifecycle, dependency tracking, controlled destructive operations.
+  </role>
+
+  <goal>
+    The sprk_Spaarke.Records.MatterHeader CustomControl and the MatterHeaderPcf unmanaged solution no longer
+    exist in spaarkedev1 (pac solution list clean; "Matter Header" absent from the form designer's Add Control
+    gallery); the Matter main form still renders the new Spaarke Record Header correctly; the retirement
+    evidence is recorded in projects/record-header-and-notepad-r2/notes/matterheaderpcf-retirement.md.
+  </goal>
+
+  <context>
+    <background>
+      Design §8 step 5 / spec FR-26: retirement is two ordered steps because Dataverse dependency tracking
+      blocks CustomControl deletion while ANY form still references it, and deleting the unmanaged
+      MatterHeaderPcf solution CONTAINER does NOT delete the control it holds. Task 080 removed the Matter
+      main-form reference during the re-bind, but other references may exist (any form on any entity where the
+      control was ever added). Identity reference (design §8): control schema name
+      sprk_Spaarke.Records.MatterHeader (namespace Spaarke.Records, constructor MatterHeader, v1.0.20);
+      solution unique name MatterHeaderPcf (unmanaged, publisher Spaarke / prefix sprk). The repo-side source
+      migration (src/client/pcf/MatterHeader/ → RecordHeader/) belongs to Phase 3, NOT this task.
+    </background>
+    <relevant-files>
+      <file role="canonical-reference">projects/record-header-and-notepad-r2/notes/matter-parity-qa.md</file>
+      <file role="canonical-reference">projects/record-header-and-notepad-r2/design.md</file>
+      <file role="canonical-reference">projects/record-header-and-notepad-r2/spec.md</file>
+      <file role="new">projects/record-header-and-notepad-r2/notes/matterheaderpcf-retirement.md</file>
+    </relevant-files>
+    <dependencies>
+      <dependency task="080" status="pending">Matter re-bound to the new control with parity QA passed and an explicit GO verdict recorded — the last moment rollback was possible</dependency>
+    </dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="project">ORDER IS BINDING (FR-26 / design §8 step 5): every form reference must be removed AND published BEFORE the CustomControl deletion is attempted. Dependency tracking enforces this; do not attempt to bypass, force-delete, or delete the solution container as a shortcut — the container deletion does NOT delete the control.</constraint>
+    <constraint source="project">Precondition is a recorded GO in notes/matter-parity-qa.md. If it says NO-GO, is missing, or is ambiguous, this task MUST NOT proceed past step 0.</constraint>
+    <constraint source="project">Scope is the spaarkedev1 Dataverse environment ONLY. Do not delete or modify any repo file in this task — the repo-side migration was Phase 3 work. If src/client/pcf/MatterHeader/ still exists in the repo, record it as a deviation for follow-up; do not delete it here.</constraint>
+    <constraint source="project">Delete ONLY the sprk_Spaarke.Records.MatterHeader control and the MatterHeaderPcf solution. Touching the RecordHeaderPcf solution, the new control, or any other solution component is out of scope.</constraint>
+    <constraint source="project">NFR-09: environment names and GUIDs in the retirement evidence are notes-only data, never shipped artifacts.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>Dataverse control retirement + solution lifecycle</topic>
+    <files>
+      <file>.claude/constraints/pcf.md</file>
+      <file>src/client/pcf/CLAUDE.md</file>
+      <file>docs/guides/PCF-DEPLOYMENT-GUIDE.md</file>
+      <file>.claude/skills/dataverse-deploy/SKILL.md</file>
+      <file>.claude/skills/ui-test/SKILL.md</file>
+      <file>.claude/adr/ADR-021-fluent-design-system.md</file>
+    </files>
+    <patterns>
+      <pattern name="Two-step retirement" location="projects/record-header-and-notepad-r2/design.md">
+        Design §8 step 5 is the canonical procedure: remove form references + publish, THEN delete the CustomControl. The solution container comes last and deletes nothing by itself.
+      </pattern>
+    </patterns>
+  </knowledge>
+
+  <steps mode="prescriptive">
+    <step order="0">Context + rigor declaration. Verify task 080 is ✅ AND notes/matter-parity-qa.md records an explicit GO verdict. Announce that executing this task closes the rollback window permanently. If GO is absent → STOP.</step>
+    <step order="1">Enumerate EVERY remaining reference to control schema name sprk_Spaarke.Records.MatterHeader across the environment: check the MatterHeaderPcf solution's component dependencies in the maker portal (Solutions → MatterHeaderPcf → the custom control → Show dependencies), and additionally sweep entity main forms that could have had the control added (at minimum every sprk_matter form). Expected result: zero form references (task 080 removed the main-form one).</step>
+    <step order="2">IF any form reference remains: open each such form, remove the control from the bound field's control list, Save. Do not proceed until the enumeration in step 1 re-runs clean.</step>
+    <step order="3">Publish all customizations. Re-run the dependency check and confirm the control shows NO remaining dependencies.</step>
+    <step order="4">Delete the CustomControl component sprk_Spaarke.Records.MatterHeader (maker portal: Solutions → MatterHeaderPcf → select the custom control component → Delete / Remove from this environment — the environment-level delete, not just removal from the solution). This is the irreversible step.</step>
+    <step order="5">Delete the now-empty MatterHeaderPcf unmanaged solution container.</step>
+    <step order="6">Verify retirement: (a) pac solution list no longer shows MatterHeaderPcf; (b) the form designer's Add Control gallery no longer offers "Matter Header" (only "Spaarke Record Header"); (c) open a live Matter record — the new Record Header renders correctly with no console errors (post-deletion regression check, ui-tests below).</step>
+    <step order="7">Write projects/record-header-and-notepad-r2/notes/matterheaderpcf-retirement.md: dependency-enumeration evidence, timestamps of each step, verification outputs (pac listing, gallery screenshot, Matter form screenshot).</step>
+    <step order="8">Update TASK-INDEX.md: set this task's status to ✅.</step>
+    <step order="9">Document any deviation in projects/record-header-and-notepad-r2/notes/.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If Dataverse dependency tracking blocks the CustomControl deletion at step 4, STOP — do not force, do not delete the solution container as a workaround. A blocking dependency means a reference survived steps 1-3: re-enumerate, remove it, republish, and only then retry. If the blocking dependency is NOT a form reference (or cannot be identified), escalate per CLAUDE.md §6 with the dependency details.</trigger>
+    <trigger>If notes/matter-parity-qa.md does not contain an explicit GO verdict, STOP at step 0 and escalate — this task must never infer a GO.</trigger>
+    <trigger>If the post-deletion verification (step 6c) shows the Matter form degraded in ANY way, STOP and escalate immediately — rollback via the old control is no longer possible; recovery requires redeploying the retired control from source history.</trigger>
+  </escalation>
+
+  <ui-tests>
+    <test name="Matter form healthy after retirement">
+      <url>https://{org}.crm.dynamics.com/main.aspx?appid={app-id}&amp;pagetype=entityrecord&amp;etn=sprk_matter&amp;id={record-id}</url>
+      <steps>
+        <step>After step 5, open a live Matter record on the Matter main form</step>
+        <step>Verify the Spaarke Record Header renders the 5-field layout with full toolbar, exactly as accepted in task 080</step>
+        <step>Check the console for JavaScript errors and for any missing-control placeholder/error region on the form</step>
+        <step>Edit a field inline and confirm the form-buffer dirty-state behaviour still works</step>
+      </steps>
+      <expected>Matter form fully functional on the new control; no missing-control artifacts; no console errors</expected>
+    </test>
+    <test name="Old control gone from the designer gallery">
+      <steps>
+        <step>Open any entity form in the form designer → a field's Controls tab → Add Control</step>
+        <step>Search for "Matter Header"</step>
+      </steps>
+      <expected>"Matter Header" is absent; "Spaarke Record Header" is the only Spaarke header control offered (spec criterion 20)</expected>
+    </test>
+    <test name="Dark Mode Compliance (ADR-021) — post-retirement spot check">
+      <steps>
+        <step>Toggle dark mode and reload the Matter record</step>
+        <step>Verify the header renders correctly with semantic tokens (no regression introduced by the publish cycle)</step>
+      </steps>
+      <expected>Dark mode rendering unchanged from task 080's accepted state</expected>
+    </test>
+  </ui-tests>
+
+  <tools>
+    <tool name="browser">make.powerapps.com solution explorer + form designer + live-record verification (ui-test skill / Chrome integration)</tool>
+    <tool name="pac">pac solution list for pre/post verification</tool>
+  </tools>
+
+  <outputs>
+    <output type="docs">projects/record-header-and-notepad-r2/notes/matterheaderpcf-retirement.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Given the recorded GO from task 080, when the two ordered steps complete, then pac solution list no longer shows MatterHeaderPcf and the sprk_Spaarke.Records.MatterHeader control no longer exists in the environment (spec criterion 20).</criterion>
+    <criterion testable="true">The form reference removal + publish (steps 1-3) completed BEFORE the CustomControl deletion (step 4) — evidenced by the timestamped sequence in the retirement notes.</criterion>
+    <criterion testable="true">"Matter Header" is absent from the form designer's Add Control gallery; "Spaarke Record Header" remains available (spec criterion 20).</criterion>
+    <criterion testable="true">Post-deletion, a live Matter record renders the new Record Header exactly as accepted in task 080 — no missing-control artifacts, no console errors, inline edit still stages to the form buffer.</criterion>
+    <criterion testable="true">Negative: no force-path was used — if dependency tracking blocked deletion at any point, the block was resolved by removing the referencing form component and republishing, and the evidence records what was found (or the task stopped and escalated).</criterion>
+    <criterion testable="true">The RecordHeaderPcf solution and every other solution component are untouched; no repo files were modified by this task.</criterion>
+    <criterion testable="true">notes/matterheaderpcf-retirement.md exists with the dependency-enumeration evidence, step timestamps, and pac/gallery/form verification outputs.</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    Spec refs: FR-26, Success Criterion 20; design §8 step 5 + rollback paragraph; owner decision D-4
+    (retire on delivery — no dormant-release window). Key traps this task is built around: (a) deleting the
+    unmanaged solution CONTAINER does not delete the control — the CustomControl component must be deleted
+    itself; (b) dependency tracking blocks deletion while any form references the control — which is why the
+    reference sweep + publish MUST come first; (c) after step 4 the only recovery is redeploying the retired
+    control from git history — hence the prescriptive mode and the GO-verdict gate. After this task, Phase 6
+    (docs + wrap) proceeds.
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>
+      Before starting this task, load all files listed in &lt;knowledge&gt;&lt;files&gt;.
+      Follow the task-execute skill for the mandatory pre-execution checklist.
+    </protocol>
+  </execution>
+</task>

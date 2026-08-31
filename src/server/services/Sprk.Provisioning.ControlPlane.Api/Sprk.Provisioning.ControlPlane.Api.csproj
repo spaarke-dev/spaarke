@@ -1,0 +1,93 @@
+<Project Sdk="Microsoft.NET.Sdk.Web">
+
+  <!--
+    Sprk.Provisioning.ControlPlane.Api — HTTP intake host for the L2 control
+    plane. Peer service to Sprk.Bff.Api, NOT a BFF extension (ADR-010 DI
+    minimalism + project MUST rule: no Sprk.Bff.Api project/assembly reference).
+
+    SPLIT LINEAGE (task 100, DS-3 § 3 Option 2 owner-lock, 2026-08-19):
+      Before the split this project was the single Sprk.Provisioning.ControlPlane
+      csproj hosting everything (REST endpoints + JWT bearer + Swagger + audit
+      middleware + 20-handler fleet + 4 background services + Cosmos + SB +
+      OTel). Task 100 moved Handlers/, Reconciler/, Concurrency/, Enqueue/,
+      Models/, Registry/, Repositories/, Rollback/, Infrastructure/,
+      Modules/{Cosmos,ServiceBus,Telemetry,Handlers}Module.cs into
+      Sprk.Provisioning.ControlPlane.Core and moved the dispatcher/reconciler/
+      crash-recovery HOST REGISTRATIONS into
+      Sprk.Provisioning.ControlPlane.Worker. See DS-3 for the disqualifying
+      always-on staging-slot shadow-worker defect the split eliminates.
+
+    THIS PROJECT (post-split) contains:
+      - Api/RunsEndpoints.cs, Api/RunLogsEndpoints.cs — the 8 REST endpoints
+        under /api/runs.
+      - Endpoints/HealthEndpoints.cs — GET /ping (anonymous smoke test).
+      - Middleware/AuditLogMiddleware.cs — NFR-11 audit-log emitter that
+        wraps the mutating request pipeline.
+      - Modules/AuthModule.cs — JWT bearer + Operator/Reader policies.
+      - Modules/SwaggerModule.cs — OpenAPI surface.
+      - Program.cs — thin composition root (~150 lines) referencing .Core
+        infra modules (Cosmos, ServiceBus, Telemetry) + Api-side modules
+        (Auth, Swagger). NO handler DI, NO BackgroundService that touches
+        handler execution (per DS-3 constraint — those live in .Worker).
+
+    - TargetFramework net10.0 pinned via Directory.Build.props inheritance.
+    - TreatWarningsAsErrors=true + Nullable=enable inherited from root
+      Directory.Build.props (analyzers-as-errors per NFR-06/07).
+    - Publish target: linux-x64 framework-dependent (parity with BFF —
+      App Service Linux Plan per platform-controlplane.bicep § 5).
+    - AssemblyName kept as Sprk.Provisioning.ControlPlane (App Service Linux
+      apps use AssemblyName.dll as the entry point; keeping the pre-split
+      name means the platform-controlplane.bicep App Service surface + any
+      deploy tooling continues to target Sprk.Provisioning.ControlPlane.dll
+      without change). Task 101 (Worker Bicep) authors the Worker App
+      Service against Sprk.Provisioning.ControlPlane.Worker.dll.
+  -->
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <AssemblyName>Sprk.Provisioning.ControlPlane</AssemblyName>
+    <RootNamespace>Sprk.Provisioning.ControlPlane</RootNamespace>
+    <UserSecretsId>a1c2e0a2-1f4a-4a2e-9a5e-2b8f3c9d4e5f</UserSecretsId>
+
+    <!-- FR-A1 parity with BFF: framework-dependent linux-x64 publish
+         (L2 App Service is Linux per platform-controlplane.bicep). -->
+    <RuntimeIdentifier>linux-x64</RuntimeIdentifier>
+    <SelfContained>false</SelfContained>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\Sprk.Provisioning.ControlPlane.Core\Sprk.Provisioning.ControlPlane.Core.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <!-- Inbound JWT validation (ADR-028 MUST rule: Microsoft.Identity.Web's
+         AddMicrosoftIdentityWebApi for BFF + any new .NET API service).
+         Version pinned to BFF's Microsoft.Identity.Web 4.14.2 line to keep
+         a single auth stack version across services. Api-side ONLY — the
+         Worker host has no auth surface. -->
+    <PackageReference Include="Microsoft.Identity.Web" Version="4.14.2" />
+    <!-- JwtBearer transitive via Microsoft.Identity.Web but referenced
+         directly per POML step 2 for explicit intent. -->
+    <PackageReference Include="Microsoft.AspNetCore.Authentication.JwtBearer" Version="10.0.0" />
+
+    <!-- OpenAPI / Swagger — pinned to a net10-compatible release. Api-side
+         ONLY — the Worker host has no Swagger surface. -->
+    <PackageReference Include="Swashbuckle.AspNetCore" Version="9.0.5" />
+  </ItemGroup>
+
+  <!-- Exclude the template config from publish output (parity with BFF —
+       real config comes from Azure App Service settings + Key Vault refs
+       in production; local dev copies the template to appsettings.json which
+       is .gitignore-excluded per Spaarke convention). -->
+  <ItemGroup>
+    <Content Update="appsettings.template.json" CopyToPublishDirectory="Never" />
+  </ItemGroup>
+
+  <!-- Expose internal test seams to the L2 test project (parity with the
+       pre-split csproj) for the WebApplicationFactory consumer
+       Api/RunsEndpointsTests.cs. -->
+  <ItemGroup>
+    <InternalsVisibleTo Include="Sprk.Provisioning.ControlPlane.Tests" />
+  </ItemGroup>
+
+</Project>

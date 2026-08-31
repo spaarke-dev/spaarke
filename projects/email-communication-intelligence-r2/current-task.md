@@ -1,9 +1,7 @@
-# Current Task State
+# Current Task State — email-communication-intelligence-r2
 
-> **Auto-updated by task-execute and context-handoff skills**
-> **Last Updated**: 2026-08-10 (Pillar E **PR #751 MERGED to master** — tasks 050–058 now in `origin/master` @ `1c37781f4`; worktree fully synced 0/0/0/0; main repo master synced. Only GATED deploys (017/026/035/044/045/059) remain.)
-> **Recovery**: Read "Quick Recovery" first. **All Pillar A–E code + R-1/R-2/R-3 remediation is MERGED to master.** Worktree = master (0 ahead/behind before this doc commit); nothing in-flight; only operator-gated deploys left.
-> **Protocol**: [Context Recovery](../../docs/procedures/context-recovery.md)
+> **Last Updated**: 2026-08-19 (UAT round 5 fixes DONE + DEPLOYED — awaiting operator re-UAT)
+> **Recovery**: Read "Quick Recovery" first.
 
 ---
 
@@ -11,125 +9,58 @@
 
 | Field | Value |
 |-------|-------|
-| **Task** | **Pillar E COMPLETE (code + docs).** ✅: **050·051·052·053·054·055a·055b·055·056b·056·057·058**. Tree clean; worktree current with master. **The ONLY remaining item is 059** (Pillar E deploy — GATED/paused, NOT autonomous): seeds the needs-review + per-team `sprk_gridconfiguration` records, sets the `Communication:CategoryRouting` app setting, updates `NEEDS_REVIEW_CONFIG_ID` to the seeded record id. **All autonomous Pillar E work is done.** |
-| **Pillar E chain (next work — all `parallel-safe:false`, sequential main-session, /conflict-check before each shared PR)** | **050 · 051 · 052 · 053 · 054 · 055a · 055b · 055 ✅.** Remaining: **056**←034✅/052✅/053✅ (Tasks reconcile tab — Job C create-task, FR-E5; sibling of 055, consumes `queue-feed` kind=`create-task` + `POST …/proposals/{reviewLogId}/create-task/apply`), **057** (routing category→team; dep 050), **058** (r5 coordination contract — see COORD-058-01), **059** (deploy — update `NEEDS_REVIEW_CONFIG_ID`). Contended: `Spaarke.Communication.Components` (r5 — clean, no overlap). |
-| **This session (2026-08-07 — all committed+pushed; HEAD=`eeeef5ff4`)** | Worktree-sync (0 behind master, merge `87af271d7`) + /conflict-check clean + post-merge verify (BFF 0-err, Communication 13/13 apply/dismiss, package 206/206). **055a ✅** apply-OVERRIDE endpoint (`3aba6d9ca`, pre-merge). **055b ✅** Job B DISMISS endpoint (`c03a264fb`) — `POST …/proposals/{reviewLogId}/dismiss` + `DismissAsync`; caller-403 + open-pending-409 + ONE `Dismissed` (100000004) audit row, NO record write, NO allow-list/citation re-gate; 4 seam tests; §10 47.06 MB/no CVE/no ArchTest delta (verified pre-existing by stash-rerun). **055 ✅** Fields reconcile tab (`eeeef5ff4`) — `ReconcileTabs/FieldUpdateReconcileTab` (inline editable cards, browse-pane) + `FieldUpdateReconcileModal` (FormModal, form mount); NFR-10 gate+re-scope; Accept→apply{overrideValue} / Reject→dismiss / Hold→no-write; citation→054; 11 UI tests incl. 053+054+055 browse-mount seam; shared-lib build green. All Step 9.5 + conflict-check clean. |
-| **Next task** | **058 — r5 coordination contract** (`tasks/058-r5-coordination-contract.poml`). A DOCUMENTATION task: formalize the r5 BINDING coordination contract (FR-E6). All content is staged in **COORD-058-01** (`notes/defer-issues.md`): 052 `onCreateNewRecord` tile; 055a/055b/056b endpoints; 055/056 `ReconcileTabs` exports + the 056 edited-proposal→ad-hoc+dismiss Accept-routing r5 must not re-implement. Read the POML for the exact deliverable shape (likely a doc/section r5 consumes). |
-| **Status** | Pillar A: 010–016 ✅ (code) · 017 deploy (paused). Pillar C: 020–025 ✅ + 027/028/029 ✅ · 026 deploy (gated). Pillar D: 030–032 ✅ 034 ✅ · 033🔲(seed, gated) · 035 deploy. Pillar B: 041/042/043 ✅ · **040 ✅-code** · 044/045 deploy. Pillar E: **050/051/052/053/054/055a/055b/055/056b/056/057 ✅** · 058🔲 (r5 coord — DOC) · 059🔲 (deploy — GATED). |
-| **Next Action** | **Nothing in-flight — pick one:** (1) **Open the Pillar E PR** — first run `/worktree-sync` (Full Sync; branch is 17 behind master, 0 file-overlap per conflict-check 2026-08-10) then `push-to-github`. Cite the §10 as-built coordination contract; re-run `/conflict-check` at PR time. (2) **Run 059 (GATED deploy)** only on explicit operator go-ahead — deploys are PAUSED per standing note. (3) New work item. |
-| **Conflict-check (2026-08-10)** | ✅ CLEAN. 50 changed files (Communication.Components/** + BFF Communication/config/DI + Communication tests) vs all open PRs → **0 overlap**; master advanced 17 commits since sync but **0 touch my files**. Branch 18 ahead / 17 behind. Advisory: `/worktree-sync` before the PR (no conflict, just currency). |
-| **057 (this turn)** | Reconciliation routing (FR-E7). Backend: `CategoryRoutingOptions` (ADR-018) + `CategoryRoutingGate` + triage-time `ownerid`→team on the additive triage `UpdateAsync` (ADR-024/NFR-04). Frontend: `per-team.gridconfiguration.json` (`behavior.membershipFilter` owner/team; grid already forwards `membershipResolver`). No new entity (ADR-045). Tests: 2 triage seam + 6 gate unit + 3 frontend; §10 47.07 MB/no CVE/no ArchTest delta. Communication seam 150/150; package 222/222. `c2970202b`. |
-| **Backend endpoints added this session (r5 consumes; all conflict-check-clean)** | **055a** `POST …/proposals/{reviewLogId}/apply` +optional `{overrideValue}` · **055b** `POST …/proposals/{reviewLogId}/dismiss` · **056b** `POST …/{communicationId}/create-task` (ad-hoc). All extend existing Communication services (no new service/DI/package); §10 47.06 MB no-delta / no CVE / no ArchTest-delta; seam tests 13 (055a/b) + 15 (056b/034). |
-| **Frontend tabs added this session (`ReconcileTabs/`)** | **055** `FieldUpdateReconcileTab` + `FieldUpdateReconcileModal` (Fields) · **056** `TaskReconcileTab` + `TaskReconcileModal` (Tasks). Both: inline cards (browse-pane) + FormModal (email-form), NFR-10 gate+re-scope, citation→054, injected `authenticatedFetch`. 056 Accept-routing: unchanged proposal→034 apply, edited-identity→056b ad-hoc+055b dismiss, +New task→056b. Package jest 30 suites / 219 tests green. |
-| **⚠️ Before the eventual PR** | Worktree **current with master**. Re-run **`/conflict-check`** before the PR (contended `Spaarke.Communication.Components` r5 surface). Root `npm install` for the prettier/lint-staged pre-commit hook is active. |
-| **Owed coordination (task 058)** | **COORD-058-01 filed + updated** (`notes/defer-issues.md`). 058 MUST record: (a) 052 additive `onCreateNewRecord` tile; (b) **055a/055b/056b** endpoints; (c) **055 + 056** tab exports r5 mounts (browse `renderTabs` slots + email form; host supplies `regarding` from 052 `onConfirmed`, re-supplies on override) — incl. the 056 Accept-routing contract (edited-proposal→ad-hoc+dismiss) r5 must NOT re-implement. All conflict-check-clean vs r5 now. |
-| **Placeholder still open** | `NEEDS_REVIEW_CONFIG_ID` in `ReconciliationGrid.tsx` is a placeholder GUID — **task 059** must point it at the seeded `sprk_gridconfiguration` record id. |
-
-### Completed this session (all committed)
-- **Task 003 ✅** — `notes/fixtures/r1-golden-emails.md`.
-- **Task 030 ✅** — FR-D1 RAG grounding (`RegardingParentEntityMapper` + both index sites; N+1 fixed; seam 8/8; DEFER-030-01 filed). Commit `f1f5cf5dd`.
-- **Task 031 ✅** — FR-D2 batched identifier query (`QueryRecordsByNumberFieldValuesAsync` In-filter; ≈175→≤7; rung tests migrated to batched seam 21/21). Commit `c700d1b0b`.
-- **CVE fix ✅** — `System.Security.Cryptography.Xml` 8.0.3→8.0.4 (3 HIGH); solution-wide clean. Commit `0455d8658`.
-- **Task 015 ✅** — FR-A3 self-association guarantee formalized + seam regression (`ThreadSelfAssociationRegressionTests`, 2/2; stripped-headers via In-Reply-To + References). No production code changed. → **task 032 must absorb this into the D3 golden suite.**
-
-- **DEFER-030-01 ✅ CLOSED** (`e0650bcac`) — service-request RAG grounding added (core type); residual edge types intentional non-support. No open deferrals.
-- **Task 032 ✅** — FR-D3 golden regression suite (`GoldenMisfileRegressionTests`, 3 golden scenarios drive the REAL spine → Ambiguous/Resolved/contact-not-filed verdicts reproduced; 149/149 Communication suite green). FR-A3 absorbed via co-located 015 file (no duplicate). Pillar D test coverage complete.
-- **Task 011 ✅** — Tracking-footer config (`TrackingFooterOptions` + `TrackingFooterGate`, cloned from AutoFileOptions/AutoFileGate; unconditional DI in CommunicationModule; only KV secret name, no key material). 8/8 tests green. **Unblocks nothing new autonomously** — 012 (send-path inject) + 013 (TrackingTokenRung) both need 010 (Key Vault signer, gated). 014 (RecipientAliasRung+Bcc, deps 011) is now the next code-only candidate.
-
-### Gates ahead (need operator go-ahead — NOT autonomous)
-004 (Entra/security), 020/023 (Dataverse schema mutation), 033 (Dataverse seed), 010 (Key Vault), all deploys, all Pillar E (contended shared-lib, sequential).
-### Standing reminders
-- **/conflict-check MUST re-run before the PR** (030/031/015/DEFER-030-01 touched shared Communication + the AI-owned `ParentEntityContext.cs`; cleared only at execution time). Publish baseline 46.88 MB. **CVE fixed** (Xml 8.0.4).
-
-### Files Modified This Session (2026-08-06 — remediation R-1/R-2/R-3 + 021-drift; all committed)
-- **R-2** (`83f2496d9`): `Services/Compose/ComposeService.cs` (link-on-create + graduate; widened alt-key lookup), `Services/Documents/ContentDedupDetector.cs` (ResolveContentIdentityAsync + linked-copy exclusion + NotifyLinkedCopyAsync), `Spaarke.Dataverse/DataverseServiceClientImpl.cs` + `IGenericEntityService.cs` (DBNull clear-sentinel), tests `ContentDedupDetectorTests` + `ComposeContentDedupTests` (new), `tasks/027-canonicaldocument-selflookup-schema.poml` (new, GATED), TASK-INDEX row.
-- **R-3** (`ed62571d8`): `Services/Office/OfficeDocumentPersistence.cs` (tuple return), `OfficeService.cs` (skip finalization + delete blob on dup), `OfficeStorageUploader.cs` (DeleteFromSpeAsync), `Infrastructure/Graph/SpeFileStore.cs` (DeleteFileAsync virtual), tests `OfficeDocumentPersistenceDedupTests` + `OfficeStorageUploaderDeleteTests` (new).
-- **R-1** (`9d69d2ca2`): `Api/CommunicationEndpoints.cs` (POST /confirm-affinity), `Services/Communication/Engine/AffinityConfirmationRecorder.cs` + `Models/RecordAffinityConfirmation.cs` (new), `CommunicationModule.cs` (DI), client `ConnectionsWriteHandler.ts` (recordAffinity field) + `EmailConnectionsReview.tsx` (fire) + `EmailWorkspace.tsx` (BFF wire), tests `AffinityConfirmationRecorderTests` (new) + `EmailAssociationsAndTracking.test.tsx` (+2).
-- **021-drift** (`0e1ba86d3`): `tests/…/Integration/CommunicationIntegrationTests.cs` (4 inbound stubs → `CreateCommunicationRaceProofAsync`).
-- Memory saved: `closed-r5-projects-editable.md` (compose-r5 + email-communication-solution-r5 are CLOSED; edit directly).
-
-### Critical Context
-**Open questions resolved 2026-08-05 — project runs spike-free** (tasks 001/002 removed): gate-after-write dedup · Tier-2 deferred out of R2 · FR-E5 = Path B (create via `IActionSeam` + PATCH; add base/final-due-date fields, task 034) · backfill forward-only · browse shell = `BrowseModal` preset. See CLAUDE.md → **Decisions Made** + TASK-INDEX → **Resolved decisions**. Pillar-E UI is prototype-validated (`spaarke-prototype/projects/email-communication-intelligence-r2-uat`). Heavily-contended shared surfaces — `/conflict-check` before every shared PR; `parallel-safe:false` on shared writers. Execution intentionally **not started** — operator review gate.
+| **Phase** | Reconciliation UX prototype-parity. **UAT round 5 (6 items): all 6 fixed + deployed.** Awaiting operator re-UAT. (Round 4's 2 data gaps — 2d/2e — still open, see below.) |
+| **Branch** | `work/email-communication-intelligence-r2` · clean · **NOT merged to master** (operator gates merge after re-UAT). HEAD ≈ `650494765` + restore-point commit. Synced to master at round-4 start. |
+| **Deployed (dev, spaarkedev1)** | Code page `sprk_communicationreconciliation` (`1e191e05-…`) + SpaarkeAi `sprk_spaarkeai` (`5206a442-…`) — both rebuilt + published 2026-08-19 with round-5 fixes. BFF UNCHANGED. |
+| **Next Action** | Operator re-UAT. If green → `/merge-to-master`. Decide on 2d/2e data gaps + item-1 lazy-load note (below). |
 
 ---
 
-## Active Task (Full Details)
+## UAT ROUND 5 — the 6 items (all FIXED + deployed)
 
-| Field | Value |
-|-------|-------|
-| **Task ID** | 050 ✅ COMPLETE (2026-08-07) |
-| **Task File** | tasks/050-reconciliation-grid.poml |
-| **Title** | Reconciliation grid — enhance DataGrid + "Needs review" sprk_gridconfiguration over sprk_communication (Email) |
-| **Phase** | 5 Pillar E — Reconciliation UI |
-| **Status** | completed — `ReconciliationGrid.tsx` + `needs-review.gridconfiguration.json` + 4 RTL tests in `@spaarke/communication-components`; build green, jest 162/162; Step 9.5 code-review ACCEPT + adr-check 0. **NO DataGrid-framework edit** (seams pre-shipped). Option-set values verified vs `AssociationStatusCodes.cs`/`CommunicationType` (Email=100000000). Operator-gated: live dual-mount (code-page + SpaarkeAi widget) + visual dark-mode contrast (jsdom-verified only). Deviation: subject is the DataGrid primary/clickable column (framework bypasses columnRenderers for isPrimaryName), body-preview is an adjacent custom column. **`NEEDS_REVIEW_CONFIG_ID` is a placeholder GUID — task 059 must update it to the seeded record id.** |
-| **Started** | 2026-08-07 |
-| **Rigor** | FULL · sonnet·high · directional |
-| **Pillar E next** | 051/052/057 dep 050 (now ✅); 053 startable; 054←053; 055←052,053; 056←034✅,052,053. All `parallel-safe:false` (sequential main-session, /conflict-check before each shared PR). |
+| # | What | Fix |
+|---|---|---|
+| **1** | Needs-Review capped at 25 (100 exist) | ✅ **TRUE INFINITE SCROLL** (revised 2026-08-20, commit `49e1b8d25`, NOT yet on master). Root cause: MDA `Xrm.WebApi` respects the FetchXML `page`/`count` but STRIPS the `morerecords`/paging-cookie annotations → `useLazyLoad` `moreRecords` always false → never advanced past page 1. Fix: `useLazyLoad` infers `hasMore` from **page fullness** (page filled to `pageSize` ⇒ more; short/empty ⇒ end). Workspace `pageSize` 500 → **50** (incremental). DataGrid `gridScroll` now uses the canonical **`thinScrollbarStyle`** (was a drifted inline copy). New `useLazyLoad.hasMore` test (4 cases) green; DataGrid suite 68 pass. |
+| **2** | Two-ish view UI → put selector IN the grid toolbar | Added additive `externalViews` prop to `<DataGrid>` (host view list rendered in the NATIVE header-left ViewSelector slot). Workspace passes the reconciliation views; removed the separate `DataGridViewSelector` bar + the round-4 `showViewSelector` wiring. One selector, native dataset-grid look, in the toolbar. |
+| **3** | Related-to cards showed the record GUID | The flat provenance candidate carries no `targetName`; the name is in the contributor `name="…"` token. Added `candidateDisplayName()` + used in `flattenPrimaryCandidates` → cards show "{number} : {name}" (matter) / "{name}" (contact), never the GUID. |
+| **4** | "Look up another record" — label → placeholder | Removed the separate label; the prompt is now the field placeholder (aria-label preserved). |
+| **5** | Lookup should ADD to list + Confirm (not auto-file) | `handleLinkPick` now adds the picked record to `addedCandidates` (selected, shown as a Confirm card) instead of auto-confirming; reviewer clicks Confirm to file. `shownCandidates` = engine candidates + added lookups (deduped). |
+| **6** | Don't auto-switch to Fields on confirm | Removed `setSelectedTab('fields')` from `handleConfirmed`; reviewer stays on Related-to and moves to Fields/Tasks themselves. |
 
-### KEY FINDING (de-risking — escalation trigger did NOT fire)
-The shipped `@spaarke/ui-components` DataGrid framework **already exposes every seam 050 needs** — NO framework edit required (zero `dataset-grid-framework-r2` contention):
-- `DataGridProps.onRecordOpen?` (DataGrid.tsx:170) — supplied handler fully replaces `defaultRecordOpen` (`effectiveRecordOpen = onRecordOpen ?? defaultRecordOpen`, L1140; default = `Xrm.Navigation.navigateTo`).
-- `DataGridProps.onRecordAction?` (L173) — per-row action seam.
-- `DataGridOverrides.columnRenderers?` (configResolution.ts:42) — per-field custom cells.
-- `DataGridProps.dataverseClient?` (L117, injectable → ADR-012 context-agnostic dual-mount), `hostFilters?` (L135), `membershipResolver?` (L154, FR-E7/057).
-**Deviation from POML step 2** (which said "add the seams to configResolution.ts/DataGrid.tsx"): seams already exist → do NOT touch the shared framework. 050 = author `ReconciliationGrid.tsx` + `needs-review.gridconfiguration.json` + tests in `@spaarke/communication-components` (NEW files, additive). §11 reuse-first win.
+### Files changed (round 5) — committed `650494765`
+- `Spaarke.UI.Components/src/components/DataGrid/DataGrid.tsx` — item 2 (`externalViews`) + item 1 (`pageSize` already existed).
+- `Spaarke.Communication.Components`:
+  - `logic/connections/provenance.ts` — item 3 (`candidateDisplayName` + flatten).
+  - `components/ReconciliationGrid/ReconciliationGrid.tsx` — forward `externalViews` + `pageSize`.
+  - `components/ReconciliationWorkspace/ReconciliationWorkspace.tsx` — items 1/2/6.
+  - `components/EmailAssociationsAndTracking/EmailConnectionsReview.tsx` — items 4/5.
+- Tests: `clearPrimaryAndTypeLabel.test.ts` (item 3), `ReconciliationWorkspace.test.tsx` (view-selector retarget).
 
----
-
-## Progress
-
-### Completed Steps
-*No steps completed yet*
-
-### Files Modified (All Task)
-*No files modified yet*
-
-### Decisions Made
-*No decisions recorded yet*
+### Verification
+- Both libs tsc: 0 errors. Suites: 87 passed (incl. new item-3 + retargeted view-selector tests). 4 pre-existing failures (`EmailTrackingPanel` ×3 + `triageColumnRenderers` ×1) — unrelated, identical on clean base.
+- Both surfaces rebuilt (cache-cleared) + verified bundles + deployed + published.
 
 ---
 
-## Next Action
-
-**Next Step**: Review `tasks/TASK-INDEX.md`, then execute **003** (R1 close-out) or **020** (Pillar C alternate-key schema) — no spike gate.
-
-**Pre-conditions**:
-- Operator has reviewed the task breakdown
-- No spike gate (spikes retired); 020/023 schema + 003/004 prereqs are the entry points
-
-**Key Context**:
-- Refer to `CLAUDE.md` for hot-path coordination + tiering rules
-- ADR-045/024/013/018/028 apply broadly
+## STILL OPEN from round 4 — data gaps (2d/2e), code is correct
+- **2d (.eml pre-seed)**: only 6/126 email archives carry `sprk_relatedcommunication`; needs-review emails have none → wizard un-seeded. Wiring correct.
+- **2e (attachments)**: reader renders `sprk_communicationattachment` folds correctly; tested emails have zero attachment rows. Resolved emails w/ real attachments render fine (e.g. "Fw: LITG-119896 Monte Rosa…" = `d0d3f282-…`, 4 attachments).
+- **Operator decision**: backfill dev data (needs approval — never silently mutate dev rows) OR treat as ingestion concern (item 064). To UAT them now, open an attachment/archive-bearing email via the "Email Review All" view.
 
 ---
 
-## Blockers
+## Build / deploy / test reference
+- Libs (order): `Spaarke.UI.Components` → `Spaarke.Auth` → `Spaarke.Communication.Components` (`npm run build` in Comm runs build:deps).
+- Code page: `cd src/solutions/CommunicationReconciliation && rm -rf dist node_modules/.vite .vite && npm run build` → `dist/sprk_communicationreconciliation.html`.
+- SpaarkeAi: `cd src/solutions/SpaarkeAi && rm -rf dist node_modules/.vite .vite && npm run build` → `dist/spaarkeai.html`.
+- Deploy: `pwsh scripts/Deploy-WebResourceInline.ps1 -DataverseUrl https://spaarkedev1.crm.dynamics.com -WebResourceName {sprk_communicationreconciliation|sprk_spaarkeai} -FilePath …/dist/*.html` (needs `az login` = ralph.schroeder@spaarke.com / Spaarke Dev).
+- Tests: `npx jest EmailAssociationsAndTracking ReconciliationWorkspace ReconciliationGrid ReconcileTabs clearPrimaryAndTypeLabel` in the shared-lib dir.
 
-**Status**: None
+## Other remaining project items (non-parity)
+- **064** — Quick Start `.eml` pre-load (SAME root as 2d).
+- **044** — Deploy Pillar B Outlook add-in (Azure SWA) — 🔲.
+- **090** — Project wrap-up (test-diet, doc-drift, size) — 🔲 terminal.
 
----
-
-## Session Notes
-
-### Current Session
-- Started: 2026-08-05
-- Focus: Project initialization via /project-pipeline (plan + tasks; execution deferred)
-
-### Key Learnings
-*See CLAUDE.md → Implementation Notes for discovery findings.*
-
-### Handoff Notes
-*Project scaffolded; awaiting operator go-ahead to execute task 001.*
-
----
-
-## Quick Reference
-
-### Project Context
-- **Project**: email-communication-intelligence-r2
-- **Project CLAUDE.md**: [`CLAUDE.md`](./CLAUDE.md)
-- **Task Index**: [`tasks/TASK-INDEX.md`](./tasks/TASK-INDEX.md)
-
----
-
-*This file is the primary source of truth for active work state. Keep it updated.*
+## Key IDs
+- Needs-review count (2026-08-19): **100** (`sprk_communicationtype=100000000` AND `sprk_associationstatus IN (100000001,100000003,100000004)`).
+- Attachment-bearing test email: "Fw: LITG-119896 Monte Rosa…" `d0d3f282-938c-f111-8076-000d3a98755b` (4 attachments, status Resolved).

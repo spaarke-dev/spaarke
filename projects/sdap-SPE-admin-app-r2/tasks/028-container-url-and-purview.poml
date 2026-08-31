@@ -1,0 +1,162 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="028" project="sdap-SPE-admin-app-r2">
+  <metadata>
+    <title>Expose container URL and add Purview guidance + deep-link</title>
+    <phase>3 Workstream C — Correct the API surface</phase>
+    <gate>020 complete</gate>
+    <status>completed</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Modifies .cs (Graph read + DTO) and .tsx; tags include bff-api and frontend.</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Well-specified field exposure plus static guidance content.</model-tier-reason>
+    <effort>medium</effort>
+    <parallel-group>W12</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Modifies SpeAdminGraphService.cs ($select for the URL field). One GraphService task per wave — plan.md §3.</parallel-reason>
+    <deps>020, 040</deps>
+    <tags>bff-api, api, frontend, fluent-ui</tags>
+    <estimated-effort>3-4 hours</estimated-effort>
+  </metadata>
+
+  <prompt>Expose each container's URL in the Containers grid and detail — it is the scoping key for a Purview eDiscovery search and is surfaced nowhere today. Add in-app guidance that SPE compliance is governed in Purview, with a deep-link. An admin looking for "legal hold" should be routed, not stonewalled.</prompt>
+
+  <role>SPAARKE platform developer. Expert in the Graph SPE container model and Fluent UI v9. Follow ADRs strictly.</role>
+
+  <goal>Container URL is visible and copyable per container; Purview guidance with a working deep-link is present on a relevant surface.</goal>
+
+  <context>
+    <background>Spec FR-C10 + FR-C11 / §4.2c. SPE compliance is delivered through Microsoft Purview, not container-level app APIs. Building hold/retention management here would duplicate an audited compliance surface with a narrower, unauditable one — so R2 routes admins out instead. The container URL is the concrete thing an admin needs to scope an eDiscovery search under the SharePoint sites workload.</background>
+    <relevant-files>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Infrastructure/Graph/SpeAdminGraphService.cs</file>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Api/SpeAdmin/ContainerEndpoints.cs</file>
+      <file role="modify">src/solutions/SpeAdminApp/src/components/containers</file>
+    </relevant-files>
+    <dependencies>
+      <dependency task="020" status="pending">v1.0 endpoints — the URL field must be requested from the correct version.</dependency>
+      <dependency task="040" status="pending">WireMock fixture for the $select assertion.</dependency>
+    </dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="project">Scope: the URL field. Verify the actual property name on the v1.0 container entity before adding it to $select — this is the exact defect class task 022 fixed; do not repeat it.</constraint>
+    <constraint source="project">Scope: compliance features. Do NOT build hold, retention, or eDiscovery management. R2 routes to Purview only (spec §4.2c). Adding even a read-only hold-state column requires a spike first and is out of scope here.</constraint>
+    <constraint source="project">Scope: the deep-link. It MUST resolve to the Purview compliance portal. A dead link is worse than no link.</constraint>
+    <constraint source="NFR-06">Scope: the URL column. If a container has no URL, show an explicit absent state — never a blank cell that reads as an empty string.</constraint>
+    <constraint source="ADR-021">Scope: the grid and guidance UI. Fluent v9 semantic tokens; dark-mode correct.</constraint>
+    <constraint source="CLAUDE.md §10">Scope: this BFF change. Placement Justification in the PR; verify publish size.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>SPE container entity fields + Purview compliance boundary</topic>
+    <files>
+      <file>.claude/adr/ADR-021-fluent-design-system.md</file>
+      <file>.claude/adr/ADR-019-problemdetails.md</file>
+      <file>.claude/constraints/api.md</file>
+      <file>knowledge/sharepoint-embedded/docs/learn-containers.md</file>
+      <file>projects/sdap-SPE-admin-app-r2/spec.md</file>
+      <file>projects/sdap-SPE-admin-app-r2/notes/spe-platform-research-2026-08-20.md</file>
+    </files>
+    <patterns>
+      <pattern name="graph-sdk-v5" location=".claude/patterns/auth/graph-sdk-v5.md">$select construction.</pattern>
+      <pattern name="endpoint-definition" location=".claude/patterns/api/endpoint-definition.md">Minimal API endpoint shape.</pattern>
+    </patterns>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="0" name="Context + rigor declaration">Declare rigor FULL. Load spec §4.2c.</step>
+    <step order="1">Verify the container URL property name on the v1.0 entity; add it to $select and the DTO.</step>
+    <step order="2">Render it in the Containers grid and detail with a copy affordance.</step>
+    <step order="3">Add Purview guidance text explaining that hold, retention, and eDiscovery are governed in Purview, with the container URL as the scoping key.</step>
+    <step order="4">Add a deep-link to the Purview compliance portal and verify it resolves.</step>
+    <step order="5">Add WireMock coverage asserting the URL field is requested.</step>
+    <step order="6">Build BFF and code page; run tests.</step>
+    <step order="7">Verify against Spaarke Dev: URLs render for real containers.</step>
+    <step order="8">Measure publish size; record. Update TASK-INDEX.md: task 028 → ✅. Document deviations in notes/.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If the v1.0 container entity exposes no URL property, STOP and escalate — the eDiscovery scoping story depends on it, and synthesizing a URL from other fields would be a fabricated value, which NFR-06 forbids.</trigger>
+  </escalation>
+
+  <ui-tests>
+    <test name="Container URL visible and copyable">
+      <steps>
+        <step>Open the Containers grid</step>
+        <step>Locate the URL for a container and copy it</step>
+      </steps>
+      <expected>The URL renders and can be copied. A container without a URL shows an explicit absent state, not a blank cell.</expected>
+    </test>
+    <test name="Purview guidance routes the admin">
+      <steps>
+        <step>Look for hold/retention/eDiscovery in the app</step>
+        <step>Follow the Purview deep-link</step>
+      </steps>
+      <expected>Guidance explains Purview governs these, names the container URL as the scoping key, and the deep-link resolves to the compliance portal.</expected>
+    </test>
+    <test name="Dark Mode Compliance">
+      <steps><step>Toggle dark mode and inspect the grid and guidance</step></steps>
+      <expected>Fluent v9 semantic tokens per ADR-021; no hex literals.</expected>
+    </test>
+  </ui-tests>
+
+  <tools>
+    <tool name="dotnet">Build and test the BFF</tool>
+    <tool name="npm">Build the SpeAdminApp code page</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Infrastructure/Graph/SpeAdminGraphService.cs</output>
+    <output type="code">src/solutions/SpeAdminApp/src/components/containers</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Container URL renders in the Containers grid and detail and can be copied.</criterion>
+    <criterion testable="true">Purview guidance is present and its deep-link resolves to the compliance portal.</criterion>
+    <criterion testable="true">The URL property name is verified against the v1.0 entity before use.</criterion>
+    <criterion testable="true">Negative: a container without a URL shows an explicit absent state, not a blank cell (NFR-06).</criterion>
+    <criterion testable="true">Negative: no hold, retention, or eDiscovery MANAGEMENT capability was built (spec §4.2c boundary).</criterion>
+    <criterion testable="true">dotnet build 0 errors; code page builds; tests green; publish size within ceiling.</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    Spec FR-C10 + FR-C11. Satisfies spec success criterion 10.
+
+    COMPLETED 2026-08-24. Full record: notes/task-028-findings.md
+
+    🔴 The constraint to verify the property name found something sharper than a wrong name:
+    `fileStorageContainer` has NO URL property in EITHER API version. The URL lives on the `drive`
+    navigation property. And on the containers COLLECTION Graph accepts
+    `$expand=drive($select=webUrl)`, returns 200, echoes `drive(webUrl)` in its own `@odata.context`
+    — and omits `drive` from every row. Both versions, every expand shape tried. The natural
+    implementation would have shipped an empty URL column backed by a 200 and a context header
+    asserting the field was present: this project's signature defect, arriving from the platform.
+    GET-single DOES return it, and `$select` does NOT suppress it there (verified with the code's
+    actual 7-field $select, not a simplified probe — having just watched $select co-occur with a
+    dropped expand, that could not be assumed).
+
+    ESCALATION TRIGGER evaluated, did NOT fire. Its antecedent is literally true (v1.0 exposes no URL
+    property) but its purpose is satisfied: the URL is obtainable from Graph as a real value. The
+    fabrication path was live and was refused — the container id decodes to the SharePoint site GUID
+    that appears in the URL, so a URL could be assembled with no Graph call, but the tenant hostname
+    is nowhere in the id, so any assembled URL hard-codes a guess. Exactly what NFR-06 forbids.
+
+    ⚠️ DEVIATION from AC-1's literal wording: the grid resolves the URL per row on demand rather than
+    eagerly, because per the above an eager column is not purchasable short of one Graph call per row
+    per grid load. Detail carries it unconditionally at zero extra cost. The <goal> — "visible and
+    copyable per container" — is met in full; see findings §3.
+
+    Wire contract: list rows omit the `webUrl` KEY entirely (JsonIgnore WhenWritingNull) so absence
+    cannot be misread as "this container has no URL".
+
+    Purview link is the portal ROOT, deliberately: a bogus path returns the same 302 as /ediscovery
+    (auth-gated SPA), so a 302 proves the host, never the path. Navigation is in the guidance text.
+
+    🔴 Fixed in passing — the review harness was a source of the fabricated data the operator
+    reported: `createdDateTime` was invented from container NAMES (Spaarke Dev Container 2 said
+    2025-09-30; truth is 2026-05-28, matching the operator's M365 screenshot), and
+    `GET /spe/containers/{id}` returned CONTAINERS[0] for EVERY id — which would have hidden this
+    task entirely by resolving every row's URL to the same container's.
+  </notes>
+
+  <execution><skill>.claude/skills/task-execute/SKILL.md</skill></execution>
+</task>

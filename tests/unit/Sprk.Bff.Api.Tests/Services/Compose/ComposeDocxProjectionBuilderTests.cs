@@ -72,6 +72,14 @@ public sealed class ComposeDocxProjectionBuilderTests
         return ms.ToArray();
     }
 
+    /// <summary>
+    /// Task 049: the text a reader actually SEES — the projection HTML with its tags stripped. Used where a
+    /// test means "this string is not shown to the user", which is not the same claim as "this string does
+    /// not appear in the markup" now that atoms carry `data-*` payloads.
+    /// </summary>
+    private static string VisibleTextOf(string html) =>
+        System.Net.WebUtility.HtmlDecode(Regex.Replace(html, "<[^>]*>", string.Empty));
+
     private static readonly Regex ParaIdAttr = new("data-paraid=\"([0-9A-Fa-f]+)\"", RegexOptions.Compiled);
 
     private static List<string> EmittedParaIds(string html) =>
@@ -442,7 +450,7 @@ public sealed class ComposeDocxProjectionBuilderTests
         var para = new Paragraph(
             new Run(new Text("before ") { Space = SpaceProcessingModeValues.Preserve }),
             new SdtRun(new SdtProperties(new SdtContentGroup()), new SdtContentRun(new Run(new Text("grouped")))),
-            new Run(new Text(" after") ))
+            new Run(new Text(" after")))
         { ParagraphId = new HexBinaryValue("22220001") };
 
         var projection = new ComposeDocxProjectionBuilder().Build(BuildDocx(para));
@@ -499,8 +507,17 @@ public sealed class ComposeDocxProjectionBuilderTests
 
         var projection = new ComposeDocxProjectionBuilder().Build(BuildDocx(para));
 
-        projection.Html.Should().NotContain("PAGE", "the field CODE is never editor-visible");
+        // Task 049 sharpened this assertion. It used to be `Html.Should().NotContain("PAGE")` — a PROXY for
+        // "the field code is never editor-visible" that reads the whole markup string, attributes included.
+        // The atom now carries the instruction in a `data-*` attribute so a save can hand the field back, so
+        // the proxy no longer separates "shown to the user" from "present in the markup". The property under
+        // test is unchanged and is now asserted directly: the code is absent from the RENDERED TEXT.
+        VisibleTextOf(projection.Html).Should().NotContain("PAGE", "the field CODE is never editor-visible");
+        VisibleTextOf(projection.Html).Should().Be("1", "only the cached result is shown");
         projection.Html.Should().Contain("data-atom-kind=\"field\"").And.Contain(">1</span>");
+        projection.Html.Should().Contain("data-field-instr=\" PAGE \"",
+            "the instruction is the payload that lets an edited paragraph return the field instead of " +
+            "dropping it (task 049) — asserted here so the read half is a tested contract, not a side effect");
         var map = projection.OffsetAddressingTable.Single(m => m.ParaId == "44440001");
         map.Runs.Should().ContainSingle();
         map.Runs[0].AtomKind.Should().Be(ComposeAtomKind.Field);
@@ -870,11 +887,25 @@ public sealed class ComposeDocxProjectionBuilderTests
 
         var projection = new ComposeDocxProjectionBuilder().Build(BuildDocx(para));
 
-        projection.Html.Should().Contain("§Confidentiality",
+        // Task 048: the glyph is UNCHANGED — this is still exactly what the user sees, still immediately
+        // before the following run's text — but it is now wrapped in an atom carrying the font + code point,
+        // so a save re-emits the original w:sym instead of the resolved look-alike. § in a legal document is
+        // usually Symbol-font F0A7, not U+00A7, and writing back the look-alike changes the character the
+        // document contains.
+        projection.Html.Should().Contain(
+            "<span class=\"compose-atom\" data-atom-kind=\"symbol\" data-sym-font=\"Symbol\" " +
+            "data-sym-char=\"F0A7\" contenteditable=\"false\">§</span>Confidentiality",
             "WS-2 FR-06: the mapped Symbol-font glyph (section mark, U+00A7) renders immediately before " +
-            "the following run's text, verbatim — no separator invented, no glyph dropped");
+            "the following run's text, verbatim — no separator invented, no glyph dropped — and task 048 " +
+            "carries the source font/char alongside it so the write path never has to guess");
         projection.Warnings.Should().NotContain(w => w.Code == "unmapped-symbol-char",
             "a VERIFIED mapping must never raise the unmapped-glyph warning");
+
+        // The offset space is what everything else is addressed in, so it must not move: one editor-visible
+        // character for the symbol, exactly as before it became an atom.
+        var map = projection.OffsetAddressingTable.Single(m => m.ParaId == "00D00001");
+        map.TotalLength.Should().Be(1 + "Confidentiality".Length,
+            "a w:sym contributes exactly 1 editor-visible character whether or not it is wrapped in an atom");
     }
 
     [Fact]
@@ -892,8 +923,15 @@ public sealed class ComposeDocxProjectionBuilderTests
 
         var projection = new ComposeDocxProjectionBuilder().Build(BuildDocx(para));
 
-        projection.Html.Should().Contain("Item � text",
-            "an unmapped w:sym renders a visible U+FFFD placeholder in place — never a silent gap");
+        // Task 048: the placeholder is still shown — that is the READ contract, unchanged — but the atom now
+        // carries the TRUE font + code point beside it. This is the case where the fix matters most: without
+        // it, a save would have written the U+FFFD placeholder into the document as the user's content, so a
+        // marker that exists purely to be honest on screen would have become the glyph itself.
+        projection.Html.Should().Contain(
+            "Item <span class=\"compose-atom\" data-atom-kind=\"symbol\" data-sym-font=\"Wingdings\" " +
+            "data-sym-char=\"F0A8\" contenteditable=\"false\">�</span> text",
+            "an unmapped w:sym renders a visible U+FFFD placeholder in place — never a silent gap — and " +
+            "task 048 keeps the real Wingdings F0A8 on the atom so the write path re-emits it, not the �");
         projection.Warnings.Should().ContainSingle(w => w.Code == "unmapped-symbol-char" && w.Count == 1,
             "FR-10: the intra-run glyph-loss warning must fire exactly once for the one unmapped w:sym run " +
             "— the placeholder and the warning always co-occur, never one without the other");
@@ -959,7 +997,13 @@ public sealed class ComposeDocxProjectionBuilderTests
         // Note: the compose-tab span's interior character is U+2003 (EM SPACE, not a plain ASCII space) —
         // a deliberate pre-existing choice (predates this task) so the placeholder can never collapse under
         // HTML whitespace rules the way a literal U+0020 could.
-        projection.Html.Should().Contain("before<span class=\"compose-tab\"> </span>after");
+        //
+        // Task 048: the span is now an ATOM as well as a compose-tab. The class and the em space are both
+        // unchanged — it looks exactly as it did — and the only addition is the identity that lets the
+        // mapper tell this em space from a typed one, which is what stopped tabs being flattened on save.
+        projection.Html.Should().Contain(
+            "before<span class=\"compose-atom compose-tab\" data-atom-kind=\"tab\" "
+            + "contenteditable=\"false\"> </span>after");
         var map = projection.OffsetAddressingTable.Single(m => m.ParaId == "66660002");
         map.TotalLength.Should().Be("before".Length + 1 + "after".Length,
             "the ptab contributes exactly 1 editor-visible character, mirroring w:tab");

@@ -795,8 +795,12 @@ public class SprkChatAgentFactoryWorkspaceStateTests
         var tab = MakeTab("email-1", widgetType: "Email",
             widgetData: new EmailTabWidgetData
             {
-                EmlDocumentId = "eml-doc-999", Subject = "Re: NDA review", From = "alice@acme.com",
-                Date = "2026-08-01T10:00:00Z", ThreadId = "thread-123", Snippet = longSnippet,
+                EmlDocumentId = "eml-doc-999",
+                Subject = "Re: NDA review",
+                From = "alice@acme.com",
+                Date = "2026-08-01T10:00:00Z",
+                ThreadId = "thread-123",
+                Snippet = longSnippet,
             });
 
         var state = SprkChatAgentFactory.TryDeriveVisibleState(tab);
@@ -813,8 +817,12 @@ public class SprkChatAgentFactoryWorkspaceStateTests
     {
         WorkspaceTabWidgetData original = new EmailTabWidgetData
         {
-            EmlDocumentId = "eml-doc-999", Subject = "Re: NDA review", From = "alice@acme.com",
-            Date = "2026-08-01T10:00:00Z", ThreadId = "thread-123", Snippet = "Please review the attached draft.",
+            EmlDocumentId = "eml-doc-999",
+            Subject = "Re: NDA review",
+            From = "alice@acme.com",
+            Date = "2026-08-01T10:00:00Z",
+            ThreadId = "thread-123",
+            Snippet = "Please review the attached draft.",
         };
 
         var json = System.Text.Json.JsonSerializer.Serialize(original);

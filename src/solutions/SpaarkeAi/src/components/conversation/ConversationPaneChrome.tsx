@@ -11,6 +11,7 @@
 import * as React from "react";
 import {
   makeStyles,
+  mergeClasses,
   tokens,
   Button,
   Dropdown,
@@ -209,6 +210,12 @@ const useStyles = makeStyles({
     textOverflow: "ellipsis",
     whiteSpace: "nowrap",
     minWidth: 0,
+  },
+  // spaarkeai-compose-r7: dimmed hint for a reopened file whose content may no longer be available.
+  // r8 task 062: hedged copy — `available === false` is now either the server's authoritative answer
+  // or, while the durable store is disabled, the client's ~24h eviction-window inference.
+  filesAttachedIndicatorHintUnavailable: {
+    color: tokens.colorNeutralForegroundDisabled,
   },
   filesList: {
     listStyleType: "none",
@@ -591,6 +598,17 @@ export interface AttachedFileSummary {
   id: string;
   filename: string;
   status?: string;
+  /**
+   * Best-effort 24h re-attach signal (spaarkeai-compose-r7): `false` ⇒ the file's searchable content
+   * was evicted from AI Search (session idle > 24h, SessionFilesCleanupJob) so it can no longer be
+   * recalled — render a dimmed "may no longer be available" chip. Absent/`true` ⇒ usable this session.
+   *
+   * TRI-STATE as of r8 task 062: `false` no longer means "definitely gone". It is either the server's
+   * authoritative answer from the durable store, OR — while that store is disabled and the server
+   * returns null — the client's ~24h eviction-window inference. The copy is hedged accordingly; see
+   * `ConversationPane.handleSelectHistorySession` for which source produced it.
+   */
+  available?: boolean;
 }
 
 /**
@@ -638,11 +656,28 @@ export function FilesAttachedIndicator(props: {
         )}
         <Text className={styles.filesAttachedIndicatorText}>{headerText}</Text>
         {uploadedFileCount === 1 && files && files[0] ? (
-          <Text className={styles.filesAttachedIndicatorHint} title={files[0].filename}>
+          <Text
+            className={mergeClasses(
+              styles.filesAttachedIndicatorHint,
+              files[0].available === false && styles.filesAttachedIndicatorHintUnavailable
+            )}
+            title={files[0].filename}
+          >
             {files[0].filename}
+            {files[0].available === false ? " — may no longer be available" : ""}
           </Text>
         ) : (
-          <Text className={styles.filesAttachedIndicatorHint}>available for this session</Text>
+          // spaarkeai-compose-r7: on a reopened session, if any file's content was evicted (>24h) say so.
+          <Text
+            className={mergeClasses(
+              styles.filesAttachedIndicatorHint,
+              !!files && files.some((f) => f.available === false) && styles.filesAttachedIndicatorHintUnavailable
+            )}
+          >
+            {!!files && files.some((f) => f.available === false)
+              ? "some files may no longer be available"
+              : "available for this session"}
+          </Text>
         )}
         {/* R5 task 036: Held vs Indexed visibility without opening the workspace pane. */}
         {promotedCount > 0 && (

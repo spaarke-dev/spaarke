@@ -24,6 +24,11 @@ public sealed class FinanceRollupService
     // INTENTIONAL: Keeps IDataverseService — casts to ServiceClient for FetchXML queries.
     // Cannot use narrow interface until FetchXML support is added to IFieldMappingDataverseService.
     private readonly IDataverseService _dataverseService;
+
+    // Writes go through the NARROW interface (→ DataverseWebApiService), NOT the composite.
+    // The composite resolves to DataverseServiceClientImpl, whose field-mapping methods are stubs.
+    // See docs/architecture/DATAVERSE-ACCESS-LAYER-ROUTING.md.
+    private readonly IFieldMappingDataverseService _fieldMappingService;
     private readonly ILogger<FinanceRollupService> _logger;
 
     // Entity constants (same as FinancialCalculationToolHandler)
@@ -56,11 +61,51 @@ public sealed class FinanceRollupService
 
     public FinanceRollupService(
         IDataverseService dataverseService,
+        IFieldMappingDataverseService fieldMappingService,
         ILogger<FinanceRollupService> logger)
     {
         _dataverseService = dataverseService ?? throw new ArgumentNullException(nameof(dataverseService));
+        _fieldMappingService = fieldMappingService ?? throw new ArgumentNullException(nameof(fieldMappingService));
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
     }
+
+    /// <summary>
+    /// Builds the rollup write payload. Values MUST be OData Web API primitives — plain
+    /// <see cref="decimal"/> / <see cref="int"/> / <see cref="string"/> — never SDK Entity-model
+    /// wrappers (<c>Money</c>, <c>OptionSetValue</c>, <c>EntityReference</c>).
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <b>Regression guard.</b> <c>UpdateRecordFieldsAsync</c> PATCHes this dictionary to the Dataverse
+    /// <b>Web API</b>, which takes currency as a bare number. Serializing a <c>Money</c> yields
+    /// <c>{"Value":1234.56,"ExtensionData":null}</c> — an object — and Dataverse rejects the PATCH with
+    /// HTTP 400. This method previously wrapped the five currency fields in <c>Money</c>, left behind when
+    /// <c>b7b0d4011</c> (2026-03-03) converted the impl from the SDK Entity model to OData PATCH; every
+    /// recalculate has failed at the write since. Extracted here so the contract is unit-testable without a
+    /// live Dataverse connection — see <c>FinanceRollupPayloadTests</c>.
+    /// </para>
+    /// </remarks>
+    internal static Dictionary<string, object?> BuildRollupFields(
+        decimal totalSpend,
+        int invoiceCount,
+        decimal currentMonthSpend,
+        decimal totalBudget,
+        decimal remainingBudget,
+        decimal utilization,
+        decimal velocity,
+        decimal averageInvoice,
+        string timelineJson) => new()
+        {
+            [Field_TotalSpendToDate] = totalSpend,
+            [Field_InvoiceCount] = invoiceCount,
+            [Field_MonthlySpendCurrent] = currentMonthSpend,
+            [Field_TotalBudget] = totalBudget,
+            [Field_RemainingBudget] = remainingBudget,
+            [Field_BudgetUtilizationPercent] = utilization,
+            [Field_MonthOverMonthVelocity] = velocity,
+            [Field_AverageInvoiceAmount] = averageInvoice,
+            [Field_MonthlySpendTimeline] = timelineJson
+        };
 
     /// <summary>Recalculate and persist financial fields for a matter.</summary>
     public Task<RecalculateFinanceResponse> RecalculateMatterAsync(Guid matterId, CancellationToken ct = default)
@@ -82,7 +127,7 @@ public sealed class FinanceRollupService
             parentEntityName, parentId);
 
         // Get ServiceClient for QueryExpression support
-        var serviceClient = GetServiceClient();
+        var serviceClient = _dataverseService.UnwrapServiceClient(nameof(FinanceRollupService));
 
         // Step 1: Parallel queries — invoices and budgets
         var invoiceTask = QueryInvoicesAsync(serviceClient, parentId, invoiceLookupField, ct);
@@ -140,21 +185,12 @@ public sealed class FinanceRollupService
         var timelineEntries = monthlyBuckets.Select(kvp => new { month = kvp.Key, spend = kvp.Value });
         var timelineJson = JsonSerializer.Serialize(timelineEntries);
 
-        // Step 3: Write back to parent entity
-        var fields = new Dictionary<string, object?>
-        {
-            [Field_TotalSpendToDate] = new Money(totalSpend),
-            [Field_InvoiceCount] = invoiceCount,
-            [Field_MonthlySpendCurrent] = new Money(currentMonthSpend),
-            [Field_TotalBudget] = new Money(totalBudget),
-            [Field_RemainingBudget] = new Money(remainingBudget),
-            [Field_BudgetUtilizationPercent] = utilization,
-            [Field_MonthOverMonthVelocity] = velocity ?? 0m,
-            [Field_AverageInvoiceAmount] = new Money(averageInvoice),
-            [Field_MonthlySpendTimeline] = timelineJson
-        };
+        // Step 3: Write back to parent entity — through the NARROW interface (→ DataverseWebApiService).
+        var fields = BuildRollupFields(
+            totalSpend, invoiceCount, currentMonthSpend, totalBudget,
+            remainingBudget, utilization, velocity ?? 0m, averageInvoice, timelineJson);
 
-        await _dataverseService.UpdateRecordFieldsAsync(parentEntityName, parentId, fields, ct);
+        await _fieldMappingService.UpdateRecordFieldsAsync(parentEntityName, parentId, fields, ct);
 
         _logger.LogInformation(
             "Finance rollup complete for {Entity} {EntityId}: " +
@@ -219,19 +255,5 @@ public sealed class FinanceRollupService
 
         var results = await Task.Run(() => serviceClient.RetrieveMultiple(query), ct);
         return results.Entities.Sum(e => e.GetAttributeValue<Money>(Budget_TotalBudget)?.Value ?? 0m);
-    }
-
-    /// <summary>
-    /// Get the underlying ServiceClient from IDataverseService for QueryExpression support.
-    /// Same pattern as FinancialCalculationToolHandler.
-    /// </summary>
-    private ServiceClient GetServiceClient()
-    {
-        if (_dataverseService is ServiceClient sc)
-            return sc;
-
-        throw new InvalidOperationException(
-            "FinanceRollupService requires IDataverseService resolved as ServiceClient " +
-            "for QueryExpression support.");
     }
 }

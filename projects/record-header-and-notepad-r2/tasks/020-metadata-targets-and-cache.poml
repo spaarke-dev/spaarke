@@ -1,0 +1,101 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="020" project="record-header-and-notepad-r2">
+  <metadata>
+    <title>Extend EntityAttributeMetadata with lookup targets + page-session metadata cache</title>
+    <phase>2 Metadata + Machinery</phase>
+    <gate>startable after 002 (parity baseline captured)</gate>
+    <status>not-started</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Modifies .ts code files (services/IDataverseClient.ts, services/XrmDataverseClient.ts) — Step 3.5.5 code-implementation trigger</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Standard single-component extension with explicit canonical references to copy (Targets projection proven at FieldUpdateReconcileTab.tsx:149; cache shape proven at PolymorphicResolverService.ts:451)</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>B</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <deps>002</deps>
+    <tags>react, shared-components, metadata, unit-test</tags>
+    <estimated-effort>2-3 hours</estimated-effort>
+  </metadata>
+
+  <prompt>Extend the shared-library `IDataverseClient` metadata contract with lookup `targets` and add a module-level page-session metadata cache to `XrmDataverseClient.retrieveEntityMetadata`. This delivers FR-21 and the NFR-01 mitigation: `retrieveEntityMetadata` issues TWO network calls per invocation today (Xrm.Utility.getEntityMetadata + the EntityDefinitions DisplayName fetch) and has NO cache, and the RecordHeader control will call it pre-render on every form load. DataGrid inherits both changes without modification.</prompt>
+  <role>SPAARKE platform developer. TypeScript shared-library services, Dataverse metadata APIs (Xrm.Utility.getEntityMetadata / EntityDefinitions). Follow ADRs strictly.</role>
+  <goal>`EntityAttributeMetadata` carries `targets?: string[]` populated for lookup-class attributes; repeated `retrieveEntityMetadata` calls for the same entity within a page session issue no additional network requests; both proven by unit tests in `XrmDataverseClient.test.ts`; shared lib builds and full test suite green.</goal>
+
+  <context>
+    <background>Spec FR-21: the RecordHeader control resolves lookup targets from metadata (deleting `LOOKUP_META`, FR-15), and task 023's OOB picker call needs `Targets[0]` for `entityTypes`. The owner explicitly chose extending `IDataverseClient` over a raw-fetch `EntityDefinitions/ManyToOneRelationships` path (Owner Clarifications table): `XrmDataverseClient` reaches `EntityDefinition` via `Xrm.WebApi.retrieveMultipleRecords`, which is why this path complies with NFR-05 while raw-fetch `ManyToOneRelationships` would not (it would have required an NFR-05 carve-out — see spec ADR Tensions section, "Choosing IDataverseClient over raw fetch"). The cache addresses NFR-01 (TTI ≤300 ms warm / ≤800 ms cold): R2 adds pre-render metadata calls, so the two-network-call cost must be paid at most once per entity per page session.</background>
+    <relevant-files>
+      <file role="modify">src/client/shared/Spaarke.UI.Components/src/services/IDataverseClient.ts</file>
+      <file role="modify">src/client/shared/Spaarke.UI.Components/src/services/XrmDataverseClient.ts</file>
+      <file role="modify">src/client/shared/Spaarke.UI.Components/src/services/__tests__/XrmDataverseClient.test.ts</file>
+      <file role="canonical-reference">src/client/shared/Spaarke.Communication.Components/src/components/ReconcileTabs/FieldUpdateReconcileTab.tsx</file>
+      <file role="canonical-reference">src/client/shared/Spaarke.UI.Components/src/services/PolymorphicResolverService.ts</file>
+    </relevant-files>
+    <dependencies>
+      <dependency task="002" status="pending">MatterHeaderPcf v1.0.20 parity baseline captured before any code change</dependency>
+    </dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="NFR-05">All Dataverse I/O added or modified in this task goes through `Xrm.WebApi` / `Xrm.Utility`. Do NOT add any raw `fetch` to the Dataverse API and do NOT import `@spaarke/auth`. Specifically: do NOT reach lookup targets via a raw-fetch `EntityDefinitions/ManyToOneRelationships` call — `Targets` is already present on the `Xrm.Utility.getEntityMetadata` attribute payload.</constraint>
+    <constraint source="ADR-012">The change extends the existing `IDataverseClient` contract in place. Do NOT create a parallel metadata service or client; `services/XrmDataverseClient.ts` is extended, never replaced (spec Existing Patterns table).</constraint>
+    <constraint source="ADR-022">Everything added in this task stays React 16/17-safe: no `use()`, no `useSyncExternalStore`, no `createRoot` (these are services — no React should be imported at all).</constraint>
+    <constraint source="project">`targets` is OPTIONAL (`targets?: string[]`) on `EntityAttributeMetadata`. `BffDataverseClient` and every other `IDataverseClient` implementation must compile unchanged — do not touch them.</constraint>
+    <constraint source="project">The cache is module-level in `XrmDataverseClient.ts`, keyed by entity logical name, page-session lifetime — mirror `_navPropCache` at `PolymorphicResolverService.ts:451` including its `_resetNavPropCacheForTests`-style test seam (see `:545`). Do NOT cache failures: a rejected metadata fetch must be evicted so a later retry can succeed.</constraint>
+    <constraint source="project">Do NOT modify DataGrid code. FR-21 acceptance is that DataGrid inherits `targets` + the cache without modification — a DataGrid diff in this task is scope creep.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>Shared-library Dataverse metadata access</topic>
+    <files>
+      <file>.claude/constraints/pcf.md</file>
+      <file>.claude/adr/ADR-012-shared-components.md</file>
+      <file>.claude/adr/ADR-022-pcf-platform-libraries.md</file>
+      <file>docs/adr/ADR-038-testing-strategy.md</file>
+      <file>projects/record-header-and-notepad-r2/spec.md</file>
+    </files>
+    <patterns>
+      <pattern name="Targets projection from Xrm metadata" location="src/client/shared/Spaarke.Communication.Components/src/components/ReconcileTabs/FieldUpdateReconcileTab.tsx">Line 149: `const targets = attr?.Targets ?? attr?.targets;` reading the same `Xrm.Utility.getEntityMetadata` attribute payload (typed at line 91-92 as `Targets?: string[]` / `targets?: string[]`). Copy this dual-casing probe into `projectAttribute`.</pattern>
+      <pattern name="Page-session metadata cache" location="src/client/shared/Spaarke.UI.Components/src/services/PolymorphicResolverService.ts">`_navPropCache` (line 451): module-level `Record` keyed by entity logical name, checked at entry (line 475-477), written on success (line 506), with `_resetNavPropCacheForTests(entityLogicalName?)` test seam (line 545). Mirror shape, lifetime, and test seam.</pattern>
+    </patterns>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="0" name="Context + rigor declaration">Load knowledge files; declare RIGOR LEVEL FULL per CLAUDE.md §8; update current-task.md.</step>
+    <step order="1">In `IDataverseClient.ts`, add `targets?: string[]` to `EntityAttributeMetadata` (interface starts at line 90) with JSDoc: populated for Lookup/Customer/Owner attributes from the Xrm `Targets` metadata array; `targets[0]` is the primary target used by the RecordHeader OOB picker (FR-15a).</step>
+    <step order="2">In `XrmDataverseClient.ts` `projectAttribute` (line 165), project `targets` from `attr?.Targets ?? attr?.targets` guarded with `Array.isArray`, following the FieldUpdateReconcileTab.tsx:149 reference. Include it in the returned object (line 185-192).</step>
+    <step order="3">Add a module-level cache in `XrmDataverseClient.ts` keyed by entity logical name, mirroring `_navPropCache`. In `retrieveEntityMetadata` (line 374), return the cached result on hit; on miss, run the existing two-call flow and cache it. Caching the in-flight promise (so concurrent first callers share one network round-trip) is acceptable and preferred; on rejection, evict the entry so retries are possible.</step>
+    <step order="4">Export a `_resetEntityMetadataCacheForTests(entityName?)` seam mirroring `_resetNavPropCacheForTests` (PolymorphicResolverService.ts:545).</step>
+    <step order="5">Extend `services/__tests__/XrmDataverseClient.test.ts`: (a) `targets` projected from a Lookup attribute carrying `Targets: ['sprk_mattertype_ref']`; (b) `targets` undefined for a String attribute; (c) second `retrieveEntityMetadata('sprk_matter')` call performs zero additional `getEntityMetadata` / `retrieveMultipleRecords` invocations (assert on mock call counts); (d) a different entity name misses the cache; (e) a rejected first call does not poison the cache — a retry re-fetches. Reset the cache in beforeEach via the test seam.</step>
+    <step order="6">Build the shared lib (`npm run build` in `src/client/shared/Spaarke.UI.Components`) and run its test suite; both green.</step>
+    <step order="7">Update TASK-INDEX.md: set this task's status to ✅.</step>
+    <step order="8">Document any deviation in projects/record-header-and-notepad-r2/notes/.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If `Targets` turns out NOT to be present on the `Xrm.Utility.getEntityMetadata` attribute payload for any needed attribute class (i.e., reaching targets would require a raw-fetch `ManyToOneRelationships` call), STOP and escalate per CLAUDE.md §6 — that path breaches NFR-05 and was explicitly rejected at design time. Do not add a fetch fallback.</trigger>
+  </escalation>
+
+  <tools>
+    <tool name="npm">Build shared lib (`npm run build`) and run tests (`npm test`) in src/client/shared/Spaarke.UI.Components</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/client/shared/Spaarke.UI.Components/src/services/IDataverseClient.ts</output>
+    <output type="code">src/client/shared/Spaarke.UI.Components/src/services/XrmDataverseClient.ts</output>
+    <output type="test">src/client/shared/Spaarke.UI.Components/src/services/__tests__/XrmDataverseClient.test.ts</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Given an entity whose metadata contains a Lookup attribute with `Targets: ['sprk_mattertype_ref']`, when `retrieveEntityMetadata` resolves, then that attribute's projected `EntityAttributeMetadata.targets` equals `['sprk_mattertype_ref']`.</criterion>
+    <criterion testable="true">Given a non-lookup attribute (no `Targets` in the Xrm payload), when projected, then `targets` is `undefined` (not `[]`).</criterion>
+    <criterion testable="true">Given `retrieveEntityMetadata('sprk_matter')` has resolved once, when it is called again for `sprk_matter` in the same page session, then zero additional `Xrm.Utility.getEntityMetadata` and zero additional `Xrm.WebApi.retrieveMultipleRecords` calls occur (mock call counts unchanged).</criterion>
+    <criterion testable="true">Given the cache holds `sprk_matter`, when `retrieveEntityMetadata('sprk_project')` is called, then the network flow runs for `sprk_project` (per-entity keying).</criterion>
+    <criterion testable="true">Negative: given the first `retrieveEntityMetadata('sprk_event')` call rejects (Xrm.Utility unavailable or fetch failure), when called again, then the fetch is re-attempted (failures are not cached) and the original error surfaced to the first caller is unchanged in shape.</criterion>
+    <criterion testable="true">`BffDataverseClient.ts` and all other `IDataverseClient` implementations compile with zero modifications; no DataGrid file is touched (git diff shows only the three files in outputs).</criterion>
+    <criterion testable="true">Shared-lib build is green and the full Spaarke.UI.Components test suite passes.</criterion>
+  </acceptance-criteria>
+
+  <notes>Spec refs: FR-21, NFR-01, NFR-05; spec "ADR Tensions" final paragraph records why IDataverseClient-over-raw-fetch was chosen. The two network calls being cached are visible at XrmDataverseClient.ts:379-392 (`Promise.all` of `getEntityMetadata` + `fetchAttributeDisplayNames`). Downstream consumers: task 023 (OOB picker `entityTypes: [targets[0]]`) and task 031 (`resolveHeaderConfig` renderer derivation).</notes>
+
+  <execution><skill>.claude/skills/task-execute/SKILL.md</skill></execution>
+</task>

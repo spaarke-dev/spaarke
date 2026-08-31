@@ -10,6 +10,7 @@ using Azure.Search.Documents;
 using Azure.Search.Documents.Indexes;
 using Azure.Search.Documents.Models;
 using FluentAssertions;
+using Sprk.Bff.Api.Api.Filters;
 using Microsoft.AspNetCore.Authentication;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Hosting;
@@ -32,6 +33,10 @@ using Sprk.Bff.Api.Services.Ai.Chat;
 using Sprk.Bff.Api.Services.Dataverse;
 using Sprk.Bff.Api.Services.Ai.Sessions;
 using Sprk.Bff.Api.Tests.Infrastructure.Cache;
+using Sprk.Bff.Api.Tests.Mocks;
+using Sprk.Bff.Api.Infrastructure.Graph;
+using Spaarke.Dataverse;
+using Spaarke.Core.Auth;
 using Xunit;
 
 namespace Sprk.Bff.Api.Tests.Api.Ai;
@@ -318,6 +323,11 @@ public class ChatDocumentEndpointsContractTests : IClassFixture<ChatDocumentEndp
         // FeatureDisabledException and emits the canonical 503 (ADR-018/ADR-019), never a
         // dead SSE stream.
         _fx.Reset();
+
+        // Issue #863: the kill-switch contract is asserted on a session the caller OWNS -- the
+        // filter runs first, so without a seeded session this never reaches the 503 branch.
+        _fx.Sessions.Session = BuildSession(TestSessionId, uploadedFiles: null);
+
         var client = _fx.CreateAuthenticatedClient();
 
         var response = await client.PostAsJsonAsync(
@@ -340,8 +350,13 @@ public class ChatDocumentEndpointsContractTests : IClassFixture<ChatDocumentEndp
             "/api/ai/chat/sessions/not-a-guid/events/document-uploaded",
             new { fileIds = new[] { "file-1" } });
 
-        response.StatusCode.Should().Be(HttpStatusCode.BadRequest);
-        (await response.Content.ReadAsStringAsync()).Should().Contain("sessionId.invalid");
+        // Issue #863: SessionOwnershipFilter runs before the handler's GUID-format check, so a
+        // malformed id is answered "not found" rather than "invalid" -- truthful (an id that cannot
+        // be a GUID cannot name a session) and it keeps ONE answer for every id the caller does not
+        // own, which is what stops the route being an existence oracle.
+        response.StatusCode.Should().Be(HttpStatusCode.NotFound);
+        (await response.Content.ReadAsStringAsync())
+            .Should().Contain(SessionOwnershipFilterExtensions.NotFoundOrNotOwnedErrorCode);
     }
 
     [Fact]
@@ -363,6 +378,181 @@ public class ChatDocumentEndpointsContractTests : IClassFixture<ChatDocumentEndp
             "the FR-P1-03 opt-out bound persists per user (real EventPathUserState over the fixture cache)");
     }
 
+    // ─────────────────────────────────────────────────────────────────────────
+    // Task 064 (E1c) — from-document ingest: an archived .eml sprk_document becomes
+    // a session document the wizard's AI-prepopulate file leg can fetch.
+    // ─────────────────────────────────────────────────────────────────────────
+
+    [Fact]
+    public async Task IngestFromDocument_WhenArchive_Returns200AndCachesBinaryAndManifest()
+    {
+        _fx.Reset();
+        _fx.Sessions.Session = BuildSession(TestSessionId, uploadedFiles: null);
+        var emlBytes = Encoding.UTF8.GetBytes("From: a@x.com\r\nSubject: Re Acme\r\n\r\nbody");
+        _fx.DataverseMock
+            .Setup(d => d.GetDocumentAsync("doc-eml-1", It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new DocumentEntity
+            {
+                Id = "doc-eml-1",
+                Name = "Re Acme",
+                GraphDriveId = "drive-1",
+                GraphItemId = "item-1",
+                FileName = "Re Acme.eml",
+                IsEmailArchive = true,
+                HasFile = true
+            });
+        _fx.SpeMock
+            .Setup(s => s.DownloadFileAsync("drive-1", "item-1", It.IsAny<CancellationToken>()))
+            .ReturnsAsync((Stream)new MemoryStream(emlBytes));
+
+        var client = _fx.CreateAuthenticatedClient();
+        var response = await client.PostAsJsonAsync(
+            $"/api/ai/chat/sessions/{TestSessionId}/documents/from-document",
+            new { documentId = "doc-eml-1" });
+
+        response.StatusCode.Should().Be(HttpStatusCode.OK);
+        var body = await response.Content.ReadFromJsonAsync<IngestArchiveResponse>();
+        body!.SessionId.Should().Be(TestSessionId);
+        body.FileId.Should().NotBeNullOrEmpty();
+        body.FileName.Should().Be("Re Acme.eml");
+
+        // The .eml bytes were written to the session document store (the /content GET reads this key).
+        _fx.CacheCalls.Should().Contain(c => c.Contains("doc-upload-binary"),
+            "the ingested .eml binary must be cached so the wizard's file leg can fetch it");
+        // The session manifest gained the ingested file, content-typed as the real email MIME.
+        _fx.Sessions.PersistedSession.Should().NotBeNull();
+        _fx.Sessions.PersistedSession!.UploadedFiles.Should().ContainSingle();
+        _fx.Sessions.PersistedSession.UploadedFiles![0].ContentType.Should().Be("message/rfc822");
+    }
+
+    [Fact]
+    public async Task IngestFromDocument_WhenDocumentMissing_ReturnsNotFound()
+    {
+        _fx.Reset();
+        _fx.Sessions.Session = BuildSession(TestSessionId, uploadedFiles: null);
+        _fx.DataverseMock
+            .Setup(d => d.GetDocumentAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync((DocumentEntity?)null);
+
+        var client = _fx.CreateAuthenticatedClient();
+        var response = await client.PostAsJsonAsync(
+            $"/api/ai/chat/sessions/{TestSessionId}/documents/from-document",
+            new { documentId = "missing" });
+
+        response.StatusCode.Should().Be(HttpStatusCode.NotFound);
+    }
+
+    [Fact]
+    public async Task IngestFromDocument_WhenNotEmailArchive_Returns422()
+    {
+        _fx.Reset();
+        _fx.Sessions.Session = BuildSession(TestSessionId, uploadedFiles: null);
+        _fx.DataverseMock
+            .Setup(d => d.GetDocumentAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new DocumentEntity
+            {
+                Id = "not-archive",
+                Name = "contract",
+                GraphDriveId = "d",
+                GraphItemId = "i",
+                FileName = "contract.pdf",
+                IsEmailArchive = false,
+                HasFile = true
+            });
+
+        var client = _fx.CreateAuthenticatedClient();
+        var response = await client.PostAsJsonAsync(
+            $"/api/ai/chat/sessions/{TestSessionId}/documents/from-document",
+            new { documentId = "not-archive" });
+
+        response.StatusCode.Should().Be((HttpStatusCode)422);
+    }
+
+    [Fact]
+    public async Task IngestFromDocument_WhenCommunicationId_ResolvesArchiveAndReturns200()
+    {
+        _fx.Reset();
+        _fx.Sessions.Session = BuildSession(TestSessionId, uploadedFiles: null);
+        var commId = Guid.NewGuid();
+        var emlBytes = Encoding.UTF8.GetBytes("From: a@x.com\r\nSubject: Re Acme\r\n\r\nbody");
+        _fx.DataverseMock
+            .Setup(d => d.GetEmailArchiveByCommunicationAsync(commId, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new DocumentEntity
+            {
+                Id = "doc-eml-1",
+                Name = "Re Acme",
+                GraphDriveId = "drive-1",
+                GraphItemId = "item-1",
+                FileName = "Re Acme.eml",
+                IsEmailArchive = true,
+                HasFile = true
+            });
+        _fx.SpeMock
+            .Setup(s => s.DownloadFileAsync("drive-1", "item-1", It.IsAny<CancellationToken>()))
+            .ReturnsAsync((Stream)new MemoryStream(emlBytes));
+
+        var client = _fx.CreateAuthenticatedClient();
+        var response = await client.PostAsJsonAsync(
+            $"/api/ai/chat/sessions/{TestSessionId}/documents/from-document",
+            new { communicationId = commId.ToString() });
+
+        response.StatusCode.Should().Be(HttpStatusCode.OK);
+        var body = await response.Content.ReadFromJsonAsync<IngestArchiveResponse>();
+        body!.FileName.Should().Be("Re Acme.eml");
+        _fx.Sessions.PersistedSession!.UploadedFiles.Should().ContainSingle();
+    }
+
+    [Fact]
+    public async Task IngestFromDocument_WhenCommunicationHasNoArchive_ReturnsNotFound()
+    {
+        _fx.Reset();
+        _fx.Sessions.Session = BuildSession(TestSessionId, uploadedFiles: null);
+        _fx.DataverseMock
+            .Setup(d => d.GetEmailArchiveByCommunicationAsync(It.IsAny<Guid>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync((DocumentEntity?)null);
+
+        var client = _fx.CreateAuthenticatedClient();
+        var response = await client.PostAsJsonAsync(
+            $"/api/ai/chat/sessions/{TestSessionId}/documents/from-document",
+            new { communicationId = Guid.NewGuid().ToString() });
+
+        response.StatusCode.Should().Be(HttpStatusCode.NotFound);
+    }
+
+    [Fact]
+    public async Task IngestFromDocument_WhenCallerLacksReadAccess_ReturnsForbidden()
+    {
+        _fx.Reset();
+        _fx.Sessions.Session = BuildSession(TestSessionId, uploadedFiles: null);
+        _fx.DataverseMock
+            .Setup(d => d.GetDocumentAsync("doc-eml-1", It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new DocumentEntity
+            {
+                Id = "doc-eml-1",
+                Name = "Re Acme",
+                GraphDriveId = "drive-1",
+                GraphItemId = "item-1",
+                FileName = "Re Acme.eml",
+                IsEmailArchive = true,
+                HasFile = true
+            });
+        // Caller is NOT authorized to read this archive document → 403, and the .eml is NEVER downloaded.
+        _fx.AuthzMock
+            .Setup(a => a.AuthorizeAsync(It.IsAny<AuthorizationContext>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new Spaarke.Core.Auth.AuthorizationResult { IsAllowed = false, ReasonCode = "sdap.access.denied", RuleName = "Test" });
+
+        var client = _fx.CreateAuthenticatedClient();
+        var response = await client.PostAsJsonAsync(
+            $"/api/ai/chat/sessions/{TestSessionId}/documents/from-document",
+            new { documentId = "doc-eml-1" });
+
+        response.StatusCode.Should().Be(HttpStatusCode.Forbidden);
+        _fx.SpeMock.Verify(
+            s => s.DownloadFileAsync(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<CancellationToken>()),
+            Times.Never,
+            "an unauthorized caller must never trigger the app-only SPE download of the .eml");
+    }
+
     // ─── Helpers ───────────────────────────────────────────────────────────────
 
     private static ChatSession BuildSession(string sessionId, IReadOnlyList<ChatSessionFile>? uploadedFiles)
@@ -376,7 +566,7 @@ public class ChatDocumentEndpointsContractTests : IClassFixture<ChatDocumentEndp
             Messages: Array.Empty<ChatMessage>(),
             HostContext: null,
             AdditionalDocumentIds: null,
-            UploadedFiles: uploadedFiles);
+            UploadedFiles: uploadedFiles) { OwnerOid = TestSessionOwner.Oid };
 
     private static MultipartFormDataContent BuildMultipartForm(string filename, string content)
     {
@@ -407,7 +597,67 @@ public sealed class ChatDocumentEndpointsTestFixture : IAsyncLifetime, IDisposab
     public Mock<IRagService> RagServiceMock { get; } = new();
     public Mock<ITextChunkingService> ChunkingServiceMock { get; } = new();
     public Mock<IOpenAiClient> OpenAiClientMock { get; } = new();
+    // task 064 (E1c): the from-document ingest endpoint resolves a sprk_document → SPE pointers
+    // (IDocumentDataverseService) and downloads the .eml (SpeFileStore). Both mockable so the
+    // contract tests exercise the happy / not-found / not-archive branches deterministically.
+    public Mock<IDocumentDataverseService> DataverseMock { get; } = new();
+    public Mock<SpeFileStore> SpeMock { get; } = BuildSpeMock();
+    // task 064 (E1c): the from-document ingest endpoint applies per-document authorization
+    // (mirrors eml-render's DocumentAuthorizationFilter). Default: allow; the 403 test flips it.
+    public Mock<IAuthorizationService> AuthzMock { get; } = new();
     public List<string> CacheCalls { get; } = new();
+
+    /// <summary>
+    /// spaarkeai-compose-r8 FR-B01 (task 060) — the blob boundary behind
+    /// <see cref="SessionFileBlobStore"/>. Keyed by the exact blob name the PRODUCTION store computes,
+    /// so the seam tests in <c>tests/integration/seam/Ai/SessionDurableFileStoreSeamTests.cs</c> observe
+    /// real reachability rather than an assertion about a path string.
+    /// </summary>
+    internal InMemorySessionFileBlobGateway DurableBlobs { get; } = new();
+
+    /// <summary>
+    /// The store under test, built over <see cref="DurableBlobs"/>. Registered unconditionally, exactly
+    /// as <c>AiPersistenceModule</c> registers it in production (ADR-032 P1) — this fixture would fail
+    /// to start if the endpoint's new parameter were ever left unresolvable.
+    /// </summary>
+    public SessionFileBlobStore DurableFileStore { get; }
+
+    /// <summary>Per-test control over the authenticated caller's tenant (see <see cref="UploadFakeAuthOptions"/>).</summary>
+    public UploadFakeAuthOptions Auth { get; } = new(includeTid: true);
+
+    /// <summary>
+    /// The very <see cref="ITenantCache"/> the upload endpoint writes its four <c>doc-upload-*</c>
+    /// entries into (a real in-memory store behind <see cref="RecordingTenantCache"/>).
+    /// </summary>
+    /// <remarks>
+    /// Exposed by spaarkeai-compose-r8 task 063 so the erasure seam can run against the entries a REAL
+    /// upload produced. That is the only way to pin the property that matters: the eraser composes the
+    /// same cache key the writer did. Two independently-written key expressions that differ by one
+    /// character produce an erasure that removes nothing and reports success — with no exception, no
+    /// count and no log line to contradict it.
+    /// </remarks>
+    public ITenantCache Cache => _recordingCache;
+
+    public ChatDocumentEndpointsTestFixture()
+    {
+        DurableFileStore = new SessionFileBlobStore(
+            DurableBlobs, Microsoft.Extensions.Logging.Abstractions.NullLogger<SessionFileBlobStore>.Instance);
+    }
+
+    /// <summary>
+    /// Build a loose <see cref="SpeFileStore"/> mock (concrete facade with a null-checking ctor —
+    /// the established idiom, cf. <c>CommunicationServiceArchiveEmbedTests.BuildSpeMock</c>).
+    /// <c>DownloadFileAsync</c> is virtual; per-test setup supplies the .eml bytes.
+    /// </summary>
+    private static Mock<SpeFileStore> BuildSpeMock()
+    {
+        var gcf = Mock.Of<IGraphClientFactory>();
+        var containerOps = new ContainerOperations(gcf, Mock.Of<ILogger<ContainerOperations>>());
+        var driveItemOps = new DriveItemOperations(gcf, Mock.Of<ILogger<DriveItemOperations>>());
+        var uploadMgr = new UploadSessionManager(gcf, Mock.Of<IHttpClientFactory>(), Mock.Of<ILogger<UploadSessionManager>>());
+        var userOps = new UserOperations(gcf, Mock.Of<ILogger<UserOperations>>());
+        return new Mock<SpeFileStore>(MockBehavior.Loose, containerOps, driveItemOps, uploadMgr, userOps, null!);
+    }
 
     private WebApplication? _app;
     private RecordingTenantCache _recordingCache = null!;
@@ -425,7 +675,7 @@ public sealed class ChatDocumentEndpointsTestFixture : IAsyncLifetime, IDisposab
 
         // Auth — single scheme that succeeds on Authorization: Bearer ... with tid claim.
         builder.Services
-            .AddSingleton(new UploadFakeAuthOptions(includeTid: true))
+            .AddSingleton(Auth)
             .AddAuthentication(o =>
             {
                 o.DefaultAuthenticateScheme = UploadFakeAuthHandler.SchemeName;
@@ -459,6 +709,12 @@ public sealed class ChatDocumentEndpointsTestFixture : IAsyncLifetime, IDisposab
         builder.Services.AddSingleton<ITextExtractor>(TextExtractorMock.Object);
         builder.Services.AddSingleton(AuthMock.Object);
 
+        // spaarkeai-compose-r8 FR-B01 (task 060) — the durable byte store is a REQUIRED handler
+        // parameter on both upload paths. Registered unconditionally here for the same reason
+        // AiPersistenceModule registers it unconditionally in production (ADR-032 P1): the endpoints
+        // map unconditionally, so a missing registration aborts endpoint metadata generation.
+        builder.Services.AddSingleton(DurableFileStore);
+
         // RagIndexingPipeline — sealed concrete; build a real instance with mocked
         // dependencies. The pipeline writes through SearchIndexClient.GetSearchClient(...)
         // and the configured options below.
@@ -478,10 +734,16 @@ public sealed class ChatDocumentEndpointsTestFixture : IAsyncLifetime, IDisposab
             }));
         builder.Services.AddSingleton<RagIndexingPipeline>();
 
-        // SpeFileStore is needed by PersistDocumentAsync but not by UploadDocumentAsync;
-        // the endpoint mapping still resolves the type at startup so register a stub.
-        builder.Services.AddSingleton<Sprk.Bff.Api.Infrastructure.Graph.SpeFileStore>(_ =>
-            null!); // not exercised by upload tests
+        // SpeFileStore is needed by PersistDocumentAsync + the task-064 from-document ingest;
+        // register the mockable facade (DownloadFileAsync setup per-test). Not exercised by upload tests.
+        builder.Services.AddSingleton<Sprk.Bff.Api.Infrastructure.Graph.SpeFileStore>(SpeMock.Object);
+
+        // task 064 (E1c): the from-document ingest endpoint resolves the sprk_document via
+        // IDocumentDataverseService — register the mock so the ingest contract tests drive it.
+        builder.Services.AddSingleton<IDocumentDataverseService>(DataverseMock.Object);
+
+        // task 064 (E1c): per-document authorization mock (endpoint injects IAuthorizationService).
+        builder.Services.AddSingleton<IAuthorizationService>(AuthzMock.Object);
 
         // IPostUploadIndexingEnqueuer is needed by PersistDocumentAsync (Phase 3a — sync OBO
         // post-upload indexing). Same registration pattern as SpeFileStore above — endpoint
@@ -540,7 +802,13 @@ public sealed class ChatDocumentEndpointsTestFixture : IAsyncLifetime, IDisposab
         RagServiceMock.Reset();
         ChunkingServiceMock.Reset();
         OpenAiClientMock.Reset();
+        DataverseMock.Reset();
+        SpeMock.Reset();
+        AuthzMock.Reset();
         CacheCalls.Clear();
+        DurableBlobs.Clear();
+        Auth.IncludeTid = true;
+        Auth.TenantId = UploadFakeAuthOptions.DefaultTenantId;
         ConfigureDefaults();
     }
 
@@ -553,6 +821,11 @@ public sealed class ChatDocumentEndpointsTestFixture : IAsyncLifetime, IDisposab
                 "Stub extracted text content for testing.",
                 TextExtractionMethod.DocumentIntelligence));
 
+        // Default per-document authorization — ALLOW (the 403 test overrides to denied).
+        AuthzMock
+            .Setup(a => a.AuthorizeAsync(It.IsAny<AuthorizationContext>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new Spaarke.Core.Auth.AuthorizationResult { IsAllowed = true, ReasonCode = "sdap.access.granted", RuleName = "Test" });
+
         // Default auth filter — the filter passes through when no document IDs are
         // present in the request args (the upload endpoint takes sessionId + IFormFile,
         // neither is a Guid). Default mock still returns Authorized for completeness.
@@ -561,7 +834,7 @@ public sealed class ChatDocumentEndpointsTestFixture : IAsyncLifetime, IDisposab
                 It.IsAny<IReadOnlyList<Guid>>(),
                 It.IsAny<HttpContext>(),
                 It.IsAny<CancellationToken>()))
-            .ReturnsAsync(AuthorizationResult.Authorized(Array.Empty<Guid>()));
+            .ReturnsAsync(Sprk.Bff.Api.Services.Ai.AuthorizationResult.Authorized(Array.Empty<Guid>()));
 
         // Default chunking — one small chunk so embedding/upload paths succeed.
         ChunkingServiceMock
@@ -714,7 +987,21 @@ public sealed class RecordingTenantCache : ITenantCache
 /// <summary>Singleton holder for "include tid claim?" — mutated per-test via fixture.</summary>
 public sealed class UploadFakeAuthOptions
 {
+    /// <summary>
+    /// The tenant every existing contract test has always authenticated as. Kept as the default so
+    /// adding <see cref="TenantId"/> (task 060, for the two-tenant seam tests) changes no existing behaviour.
+    /// </summary>
+    public const string DefaultTenantId = "00000000-0000-0000-0000-000000000abc";
+
     public bool IncludeTid { get; set; }
+
+    /// <summary>
+    /// Tenant emitted in the <c>tid</c> claim. Overridable per test so a suite can drive the SAME
+    /// endpoint as two different tenants — required to prove tenant isolation through the wire rather
+    /// than only at the store's own API.
+    /// </summary>
+    public string TenantId { get; set; } = DefaultTenantId;
+
     public UploadFakeAuthOptions(bool includeTid) => IncludeTid = includeTid;
 }
 
@@ -756,7 +1043,7 @@ public sealed class UploadFakeAuthHandler : AuthenticationHandler<Authentication
 
         if (_opts.IncludeTid)
         {
-            claims.Add(new Claim("tid", "00000000-0000-0000-0000-000000000abc"));
+            claims.Add(new Claim("tid", _opts.TenantId));
         }
 
         var identity = new ClaimsIdentity(claims, SchemeName);

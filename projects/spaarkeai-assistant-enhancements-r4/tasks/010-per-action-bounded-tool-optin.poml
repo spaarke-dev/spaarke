@@ -1,0 +1,88 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="010" project="spaarkeai-assistant-enhancements-r4">
+  <metadata>
+    <title>Per-Action bounded grounded-tool opt-in field — mirror sprk_allowsknowledge (FR-03)</title>
+    <phase>1 — E1 grounded-recommend tier</phase>
+    <gate>startable</gate>
+    <status>completed</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>New catalog field on the ADR-039 Action-materialization path; touches shared BFF Services/Ai; closed-catalog boundary change requires code-review + adr-check.</rigor-reason>
+    <model-tier>opus</model-tier>
+    <model-tier-reason>Introduces a per-Action capability opt-in on the closed-catalog boundary — must mirror sprk_allowsknowledge exactly and must NOT become a code-side tool-name gate; high ADR-039 sensitivity.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>Wave1-E1</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Edits Services/Ai AnalysisActionService / AnalysisAction (shared BFF) — sequential Services/Ai catalog spine with 011/012. Run /conflict-check before the PR (compose-r5/r6 + assistant-r3 overlap on Services/Ai).</parallel-reason>
+    <deps></deps>
+    <tags>bff-api, ai</tags>
+    <estimated-effort>4-6 hours</estimated-effort>
+  </metadata>
+  <prompt>Introduce a per-Action bounded grounded-tool opt-in on the ADR-039 Action-materialization path, mirroring the shipped `sprk_allowsknowledge` precedent EXACTLY (its `$select` read + model materialization + honor shape). The opt-in declares a bounded grounded-tool allow-list as catalog DATA — NOT a hardcoded tool-name list in code. An Action WITHOUT the opt-in mounts zero grounded tools (stays ack-tier); an Action WITH it mounts exactly its declared allow-list. Consume the Services/Ai/PublicContracts/ facade discipline (ADR-013); do NOT inject AI-internal types into CRUD code.</prompt>
+  <role>SPAARKE platform developer. Follow ADRs strictly. .NET 8 Minimal API + AI Action-catalog expertise; comfortable with the AnalysisActionService `$select` / `AnalysisAction` materialization path and the ADR-013 AI facade boundary.</role>
+  <goal>An Action can declare a bounded grounded-tool allow-list via catalog data (mirroring `sprk_allowsknowledge`); an Action WITHOUT the opt-in mounts zero grounded tools (stays ack-tier); an Action WITH it mounts exactly its declared allow-list — with no code-side tool-name gate.</goal>
+  <context>
+    <background>FR-03 — the per-Action bounded-tool opt-in field. R3's capabilities are authored at the extreme-deterministic end (`allowstools=false` ack tier): an Action is either no-tools or the whole catalog, so no bounded grounded-recommend tier is possible. The shipped precedent for a per-Action capability opt-in is `sprk_allowsknowledge` — the per-Action RAG opt-in, read in `AnalysisActionService` `$select` (~:44/126/186), materialized on `AnalysisAction` (~:502), and honored on the agent path (`ActionRunner.cs:141`). Note `allowstools` was NEVER a real field — it exists only as `$comment` prose in `list-tasks.action.json`; the REAL precedent to mirror is `sprk_allowsknowledge`. This task adds a sibling opt-in whose value is a bounded grounded-tool allow-list expressed as catalog DATA (mirroring the RAG opt-in's shape), read in the same `$select`, materialized on the same model, and honored on the agent path. Task 011 scopes the deterministic pre-filter to this allow-list; task 012 authors the first advisory Action that opts in. redesign-r2 is CLOSED so Services/Ai is editable by R4 — still keep AI-facade discipline (ADR-013) and run /conflict-check for shared-file overlap with compose-r5/r6 + assistant-r3.</background>
+    <relevant-files>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/AnalysisActionService.cs ($select ~:44/126/186; AnalysisAction materialization ~:502 — mirror the sprk_allowsknowledge read + materialize)</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/ActionRunner.cs (:141 — where sprk_allowsknowledge is honored; the honor precedent to mirror on the agent path)</file>
+      <file>infra/dataverse/actions/list-tasks.action.json (the $comment allowstools prose that was NEVER a real field — do NOT resurrect it as a code gate)</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/PublicContracts/ (facade discipline to preserve — no AI-internal types into CRUD code)</file>
+      <file>tests/unit/Sprk.Bff.Api.Tests/ (add/update unit tests — NFR-08)</file>
+    </relevant-files>
+  </context>
+  <constraints>
+    <constraint source="ADR-039" scope="the opt-in field and its honor path">The bounded allow-list is catalog DATA honored by the sanctioned deterministic pre-filter; MUST NOT introduce a classifier or a second dispatch surface; MUST NOT gate tools by a hardcoded tool-name list in code. Exactly ONE probabilistic decider stays the Text-path agent turn.</constraint>
+    <constraint source="ADR-013" scope="Services/Ai placement and CRUD interaction">Preserve the Services/Ai/PublicContracts/ facade discipline; do NOT inject IOpenAiClient / IPlaybookService or other AI-internal types into CRUD code, even though redesign-r2 is closed and Services/Ai is now R4-editable.</constraint>
+    <constraint source="project" scope="the opt-in field shape">Mirror `sprk_allowsknowledge` EXACTLY — the $select read, the AnalysisAction materialization, and the honor shape. Do NOT invent a divergent mechanism; the allow-list value is catalog data, not code (§11 reuse-first / NFR-06).</constraint>
+    <constraint source="BFF §10" scope="every BFF-touching change">Publish size ≤60 MB compressed (baseline ~49.63 MB incl. PDBs) — measure and report absolute + delta; ≥+5 MB single-task delta needs justification; no new HIGH CVE from `dotnet list package --vulnerable --include-transitive`.</constraint>
+    <constraint source="NFR-08" scope="the opt-in field + materialization">Add/update unit tests in tests/unit/Sprk.Bff.Api.Tests/.</constraint>
+  </constraints>
+  <knowledge>
+    <files>
+      <file>projects/spaarkeai-assistant-enhancements-r4/spec.md</file>
+      <file>projects/spaarkeai-assistant-enhancements-r4/CLAUDE.md</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+      <file>src/server/api/Sprk.Bff.Api/CLAUDE.md</file>
+      <file>.claude/adr/ADR-039-grounded-execution-closed-catalogs.md</file>
+      <file>.claude/adr/ADR-013-ai-architecture.md</file>
+    </files>
+  </knowledge>
+  <steps mode="directional">
+    <step order="1">Read the `sprk_allowsknowledge` precedent end-to-end: the `$select` read (AnalysisActionService ~:44/126/186), the `AnalysisAction` materialization (~:502), and the honor point (ActionRunner.cs:141).</step>
+    <step order="2">Add the new per-Action opt-in to the AnalysisActionService `$select` and materialize it on `AnalysisAction`, mirroring the `sprk_allowsknowledge` shape.</step>
+    <step order="3">Define the allow-list value as catalog DATA (a bounded set of grounded-tool identifiers carried on the Action row) — NOT a hardcoded tool-name list in code.</step>
+    <step order="4">Honor the opt-in on the agent path so an Action without it mounts zero grounded tools and an Action with it mounts exactly its declared allow-list (task 011 wires the pre-filter narrowing; keep this task's honor shape faithful to the precedent).</step>
+    <step order="5">Add/extend unit tests in tests/unit/Sprk.Bff.Api.Tests/ (field read in $select, materialized on the model, opt-out mounts none, opt-in mounts exactly the allow-list, allow-list is data not code).</step>
+    <step order="6">dotnet build + dotnet publish size check; record absolute size + delta; run the vulnerable-package scan.</step>
+    <step order="7">/conflict-check before the PR; update TASK-INDEX ✅.</step>
+  </steps>
+  <escalation>
+    <trigger>If mirroring `sprk_allowsknowledge` cannot express a bounded grounded-tool allow-list without a code-side tool-name list or a new capability-selecting surface, STOP and escalate (ADR-039 forbids a second decider / code-side tool gate) rather than hardcoding tool names.</trigger>
+  </escalation>
+  <justification>
+    <existing>`sprk_allowsknowledge` is the per-Action RAG opt-in (read in $select, materialized on AnalysisAction, honored in ActionRunner.cs:141) — the closest precedent. `allowstools` was never a real field.</existing>
+    <extension>Mirror `sprk_allowsknowledge`'s $select + materialization + honor shape for a bounded grounded-tool allow-list carried as catalog data.</extension>
+    <cost-of-doing-nothing>An Action is either no-tools or the whole catalog — no bounded grounded-recommend tier is possible, so the P1 task-agenda capability (task 012) cannot mount exactly its two grounded tools.</cost-of-doing-nothing>
+  </justification>
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Ai/AnalysisActionService.cs ($select read + AnalysisAction materialization of the new opt-in)</output>
+    <output type="code">the agent-path honor of the opt-in (mirroring ActionRunner.cs:141)</output>
+    <output type="test">tests/unit/Sprk.Bff.Api.Tests/ opt-in field unit tests</output>
+  </outputs>
+  <acceptance-criteria>
+    <criterion testable="true">The new opt-in is read in the AnalysisActionService `$select` and materialized on `AnalysisAction` (mirroring `sprk_allowsknowledge`).</criterion>
+    <criterion testable="true">An Action WITHOUT the opt-in mounts zero grounded tools (stays ack-tier).</criterion>
+    <criterion testable="true">An Action WITH the opt-in mounts exactly its declared allow-list.</criterion>
+    <criterion testable="true">The allow-list is catalog DATA, NOT a code-side hardcoded tool-name list (negative case, verified against ADR-039).</criterion>
+    <criterion testable="true">No classifier / second dispatch surface is added; the Text-path agent turn stays the sole decider.</criterion>
+    <criterion testable="true">Unit tests added/updated in tests/unit/Sprk.Bff.Api.Tests/ and pass.</criterion>
+    <criterion testable="true">Publish size ≤60 MB reported (absolute + delta); no new HIGH CVE.</criterion>
+  </acceptance-criteria>
+  <notes>`allowstools` was $comment prose only in list-tasks.action.json — do NOT resurrect it as a code gate. The REAL precedent is `sprk_allowsknowledge`. Task 011 narrows the deterministic pre-filter to this allow-list; task 012 authors the first opt-in Action. redesign-r2 is closed (Services/Ai R4-editable) but keep AI-facade discipline; /conflict-check with compose-r5/r6 + assistant-r3 before the PR.
+
+  COMPLETION (2026-08-15, main session): Delivered the field as catalog DATA only (010/011 boundary honored — no agent-path edits). New column `sprk_groundedtoolallowlist` (multiline text, JSON array of grounded-tool ids). Changes: `ActionEntity.GroundedToolAllowList` DTO + `sprk_groundedtoolallowlist` added to the 3 `$select` sites + `AnalysisAction.GroundedToolAllowList` model prop (`IReadOnlyList<string>`, default `[]` = ack-tier) + materialize at the 3 constructor sites via `internal static ParseGroundedToolAllowList` (fail-closed→empty, dedup ordinal first-seen, drop blanks). 12 unit tests (AnalysisActionAllowListTests.cs) PASS. BFF build 0 errors; CVE scan clean (no new HIGH). Step 9.5 gates CLEAN (opus subagent: no Critical/Warning; ADR-039/013/038 compliant; grep-verified field is inert — zero consumers, so it cannot widen/gate tools in code). Agent-path MOUNTING ("mounts zero/exactly") is DATA-verified here, BEHAVIOR-verified in task 011. Publish size: measured framework-dependent (see current-task.md); delta ~0 (no new packages). OWED before PR: /conflict-check (Services/Ai overlap w/ compose-r5/r6 + assistant-r3). DEPLOY NOTE (task 080): the new Dataverse column `sprk_groundedtoolallowlist` on `sprk_analysisaction` must be created in the environment (schema add).</notes>
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Before starting, load all files in knowledge/files. Follow task-execute skill.</protocol>
+  </execution>
+</task>

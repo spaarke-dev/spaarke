@@ -2,6 +2,8 @@ using System.Security.Claims;
 using Microsoft.AspNetCore.Http.HttpResults;
 using Spaarke.Core.Auth;
 using Sprk.Bff.Api.Infrastructure.Errors;
+using Sprk.Bff.Api.Infrastructure.Auth;
+using Sprk.Bff.Api.Infrastructure.Authentication;
 
 namespace Sprk.Bff.Api.Api.Filters;
 
@@ -44,8 +46,12 @@ public class DocumentAuthorizationFilter : IEndpointFilter
     {
         var httpContext = context.HttpContext;
 
-        // Extract user ID from claims
-        var userId = httpContext.User.FindFirst(ClaimTypes.NameIdentifier)?.Value;
+        // The caller's Entra OBJECT ID (`oid`) — the identifier IAccessDataSource matches against
+        // Dataverse `systemuser.azureactivedirectoryobjectid`. Reading ClaimTypes.NameIdentifier
+        // directly (as this did until UAT 2026-08-26 / D-6) yields `sub` under inbound claim
+        // mapping — a pairwise, non-GUID id that can never match a systemuser, so EVERY caller on
+        // EVERY route carrying this filter was denied. See Infrastructure/Authentication/CallerResolution.
+        var userId = CallerResolution.ResolveObjectId(httpContext.User);
         if (string.IsNullOrEmpty(userId))
         {
             return Results.Problem(
@@ -71,19 +77,27 @@ public class DocumentAuthorizationFilter : IEndpointFilter
             UserId = userId,
             ResourceId = resourceId,
             Operation = _operation,
-            CorrelationId = httpContext.TraceIdentifier
+            CorrelationId = httpContext.TraceIdentifier,
+            UserAccessToken = TokenHelper.ExtractBearerTokenOrNull(httpContext)
         };
 
+        // The try covers the AUTHORIZATION DECISION ONLY — deliberately not next().
+        //
+        // unified-access-control-r2 task 072: `return await next(context)` used to sit inside this try,
+        // so EVERY exception the downstream handler threw was caught here and rendered as
+        // 500 "Authorization Error" / "An error occurred during authorization". On the nine routes
+        // carrying this filter that silently converted each handler's intended status into a misleading
+        // 500 — a document 404, a 409 "no file attached", a 409 "invalid drive id", and (the case that
+        // surfaced it) task 072's own 403 for a disallowed anonymous link. It also defeats the global
+        // UseExceptionHandler that renders SdapProblemException as canonical ProblemDetails per ADR-019.
+        //
+        // Two independent reasons to keep the boundary here: correctness of the response contract, and
+        // honesty of the log line — "Authorization failed" was being written for faults that had nothing
+        // to do with authorization, which is the kind of log that misdirects an incident.
+        AuthorizationResult result;
         try
         {
-            var result = await _authorizationService.AuthorizeAsync(authContext);
-
-            if (!result.IsAllowed)
-            {
-                return ProblemDetailsHelper.Forbidden(result.ReasonCode);
-            }
-
-            return await next(context);
+            result = await _authorizationService.AuthorizeAsync(authContext);
         }
         catch (Exception ex)
         {
@@ -98,6 +112,13 @@ public class DocumentAuthorizationFilter : IEndpointFilter
                 detail: "An error occurred during authorization",
                 type: "https://tools.ietf.org/html/rfc7231#section-6.6.1");
         }
+
+        if (!result.IsAllowed)
+        {
+            return ProblemDetailsHelper.Forbidden(result.ReasonCode);
+        }
+
+        return await next(context);
     }
 
     private static string? ExtractResourceId(EndpointFilterInvocationContext context)

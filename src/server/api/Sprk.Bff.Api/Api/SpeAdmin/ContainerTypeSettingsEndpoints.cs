@@ -1,0 +1,290 @@
+using Sprk.Bff.Api.Infrastructure.Graph;
+using Sprk.Bff.Api.Models.SpeAdmin;
+using Sprk.Bff.Api.Infrastructure.Errors;
+
+namespace Sprk.Bff.Api.Api.SpeAdmin;
+
+/// <summary>
+/// Endpoint for updating SharePoint Embedded container type settings via the Graph API.
+///
+/// Routes (all under the /api/spe group from <see cref="SpeAdminEndpoints"/>):
+///   PUT /api/spe/containertypes/{typeId}/settings?configId={id}
+///
+/// The configId query parameter identifies the sprk_specontainertypeconfig Dataverse record whose
+/// app registration credentials are used to authenticate with Graph API. Administrators update
+/// these settings to enforce organizational policies (sharing, versioning, storage) across all
+/// containers created from the specified container type.
+///
+/// Authorization: Inherited from SpeAdminEndpoints route group (RequireAuthorization + SpeAdminAuthorizationFilter).
+/// </summary>
+/// <remarks>
+/// ADR-001: Minimal API — no controllers; MapGroup for route organization.
+/// ADR-007: No Graph SDK types in public API surface — endpoint accepts and returns domain records only.
+/// ADR-008: Authorization inherited from parent route group (no global middleware).
+/// ADR-019: All errors return ProblemDetails (RFC 7807).
+/// </remarks>
+public static class ContainerTypeSettingsEndpoints
+{
+    /// <summary>
+    /// Registers the container type settings update endpoint on the provided route group.
+    /// Called from <see cref="SpeAdminEndpoints.MapSpeAdminEndpoints"/> with the /api/spe group.
+    /// </summary>
+    /// <param name="group">The /api/spe route group to register endpoints on.</param>
+    public static RouteGroupBuilder MapContainerTypeSettingsEndpoints(this RouteGroupBuilder group)
+    {
+        // PUT /api/spe/containertypes/{typeId}/settings?configId={id}
+        group.MapPut("/containertypes/{typeId}/settings", UpdateContainerTypeSettingsAsync)
+            .WithName("SpeUpdateContainerTypeSettings")
+            .WithSummary("Update settings for an SPE container type")
+            .WithDescription(
+                "Updates container type settings (sharing capability, versioning policy, storage limits) " +
+                "via the Graph API. Only fields supplied in the request body are updated — null fields " +
+                "are left unchanged (merge-patch semantics). Returns the updated container type resource. " +
+                "Returns 400 when the configId is missing or invalid, or when the sharing capability " +
+                "value is not one of: disabled, view, edit, full. Returns 404 when the container type " +
+                "does not exist in Graph API.")
+            .Produces<ContainerTypeSettingsResponseDto>(StatusCodes.Status200OK)
+            .ProducesProblem(StatusCodes.Status400BadRequest)
+            .ProducesProblem(StatusCodes.Status401Unauthorized)
+            .ProducesProblem(StatusCodes.Status403Forbidden)
+            .ProducesProblem(StatusCodes.Status404NotFound)
+            .ProducesProblem(StatusCodes.Status500InternalServerError);
+
+        return group;
+    }
+
+    // ─────────────────────────────────────────────────────────────────────────
+    // Handlers
+    // ─────────────────────────────────────────────────────────────────────────
+
+    /// <summary>
+    /// PUT /api/spe/containertypes/{typeId}/settings?configId={id}
+    ///
+    /// Resolves the container type config, obtains a Graph client authenticated as the config's app
+    /// registration, validates the request, and PATCHes the container type settings in Graph.
+    ///
+    /// Responses:
+    ///   200 OK          — Settings updated successfully; updated resource returned.
+    ///   400 Bad Request — configId is missing/invalid, or sharingCapability value is not allowed.
+    ///   401 Unauthorized — No authenticated user (handled by RequireAuthorization).
+    ///   403 Forbidden   — User is not an admin (handled by SpeAdminAuthorizationFilter).
+    ///   404 Not Found   — Container type with the given typeId was not found in Graph API.
+    ///   500 Internal    — Unexpected error from Graph API or Key Vault.
+    /// </summary>
+    private static async Task<IResult> UpdateContainerTypeSettingsAsync(
+        string typeId,
+        [Microsoft.AspNetCore.Mvc.FromQuery] Guid? configId,
+        UpdateContainerTypeSettingsRequest request,
+        SpeAdminGraphService graphService,
+        ILogger<Program> logger,
+        HttpContext context,
+        CancellationToken ct)
+    {
+        // Validate required configId query parameter
+        if (configId is null || configId == Guid.Empty)
+        {
+            logger.LogWarning(
+                "PUT /api/spe/containertypes/{TypeId}/settings — missing or empty configId", typeId);
+            return Results.Problem(
+                detail: "The 'configId' query parameter is required and must be a valid GUID.",
+                statusCode: StatusCodes.Status400BadRequest,
+                title: "Bad Request",
+                extensions: new Dictionary<string, object?>
+                {
+                    ["errorCode"] = "spe.containertypes.settings.config_id_required"
+                });
+        }
+
+        // Validate sharingCapability when provided
+        if (!string.IsNullOrWhiteSpace(request.SharingCapability) &&
+            !SpeAdminGraphService.ValidSharingCapabilities.Contains(request.SharingCapability))
+        {
+            logger.LogWarning(
+                "PUT /api/spe/containertypes/{TypeId}/settings — invalid sharingCapability '{Value}'. " +
+                "TraceId: {TraceId}",
+                typeId, request.SharingCapability, context.TraceIdentifier);
+            return Results.Problem(
+                // Enumerated from the SDK enum, not hand-listed — the previous hardcoded
+                // "disabled, view, edit, full" named three values Graph has never accepted.
+                detail: $"Invalid sharing capability '{request.SharingCapability}'. " +
+                        $"Allowed values are: {string.Join(", ", SpeAdminGraphService.ValidSharingCapabilities)}.",
+                statusCode: StatusCodes.Status400BadRequest,
+                title: "Invalid Sharing Capability",
+                extensions: new Dictionary<string, object?>
+                {
+                    ["errorCode"] = "spe.containertypes.settings.invalid_sharing_capability"
+                });
+        }
+
+        // Validate itemMajorVersionLimit when provided
+        if (request.ItemMajorVersionLimit.HasValue && request.ItemMajorVersionLimit.Value <= 0)
+        {
+            logger.LogWarning(
+                "PUT /api/spe/containertypes/{TypeId}/settings — invalid itemMajorVersionLimit {Value}. " +
+                "TraceId: {TraceId}",
+                typeId, request.ItemMajorVersionLimit.Value, context.TraceIdentifier);
+            return Results.Problem(
+                detail: $"Invalid itemMajorVersionLimit '{request.ItemMajorVersionLimit.Value}'. " +
+                        "Value must be a positive integer.",
+                statusCode: StatusCodes.Status400BadRequest,
+                title: "Invalid Version Limit",
+                extensions: new Dictionary<string, object?>
+                {
+                    ["errorCode"] = "spe.containertypes.settings.invalid_major_version_limit"
+                });
+        }
+
+        // Validate the storage CEILING when provided (spec FR-C04 AC-6).
+        // A non-positive ceiling is rejected rather than silently truncated: sending 0 or a negative
+        // would either be ignored by Graph or applied as "no storage", and both outcomes look
+        // identical to the caller once the PATCH returns 200.
+        if (request.MaxStoragePerContainerInBytes.HasValue &&
+            request.MaxStoragePerContainerInBytes.Value <= 0)
+        {
+            logger.LogWarning(
+                "PUT /api/spe/containertypes/{TypeId}/settings — invalid maxStoragePerContainerInBytes " +
+                "{Value}. TraceId: {TraceId}",
+                typeId, request.MaxStoragePerContainerInBytes.Value, context.TraceIdentifier);
+            return Results.Problem(
+                detail: $"Invalid maxStoragePerContainerInBytes '{request.MaxStoragePerContainerInBytes.Value}'. " +
+                        "The per-container storage ceiling must be a positive number of bytes. " +
+                        "This is a limit, not a usage figure.",
+                statusCode: StatusCodes.Status400BadRequest,
+                title: "Invalid Storage Ceiling",
+                extensions: new Dictionary<string, object?>
+                {
+                    ["errorCode"] = "spe.containertypes.settings.invalid_storage_ceiling"
+                });
+        }
+
+        // Resolve the container type config from Dataverse
+        var config = await graphService.ResolveConfigAsync(configId.Value, ct);
+        if (config is null)
+        {
+            logger.LogWarning(
+                "PUT /api/spe/containertypes/{TypeId}/settings — config {ConfigId} not found. TraceId: {TraceId}",
+                typeId, configId, context.TraceIdentifier);
+            return Results.Problem(
+                detail: $"Container type config '{configId}' was not found. Verify the configId is correct.",
+                statusCode: StatusCodes.Status400BadRequest,
+                title: "Config Not Found",
+                extensions: new Dictionary<string, object?>
+                {
+                    ["errorCode"] = "spe.containertypes.settings.config_not_found"
+                });
+        }
+
+        try
+        {
+            // DELEGATED, not app-only. Container types reject application permissions outright (403),
+            // so this write could never have reached Graph's own validation. Routing it through the
+            // delegated path is what makes the remaining 400 escalation (notes/live-verification-
+            // 2026-08-24.md §2) the ACTUAL blocker rather than a symptom hidden behind an earlier 403.
+            var result = await graphService.UpdateContainerTypeSettingsForUserAsync(
+                context,
+                typeId,
+                request.SharingCapability,
+                request.IsItemVersioningEnabled,
+                request.ItemMajorVersionLimit,
+                request.MaxStoragePerContainerInBytes,
+                request.IsSearchEnabled,
+                request.IsDiscoverabilityEnabled,
+                request.IsSharingRestricted,
+                request.UrlTemplate,
+                request.ConsumingTenantOverridables,
+                ct);
+
+            if (result is null)
+            {
+                logger.LogInformation(
+                    "PUT /api/spe/containertypes/{TypeId}/settings — container type not found in Graph. " +
+                    "TraceId: {TraceId}",
+                    typeId, context.TraceIdentifier);
+                return Results.NotFound();
+            }
+
+            logger.LogInformation(
+                "PUT /api/spe/containertypes/{TypeId}/settings — settings updated successfully. " +
+                "TraceId: {TraceId}",
+                typeId, context.TraceIdentifier);
+
+            // Map domain record to response DTO
+            return Results.Ok(new ContainerTypeSettingsResponseDto
+            {
+                Id = result.Id,
+                DisplayName = result.DisplayName,
+                BillingClassification = result.BillingClassification,
+                BillingStatus = result.BillingStatus,
+                CreatedDateTime = result.CreatedDateTime,
+                // The read-back. A 200 is not proof a settings write applied (spec FR-C04).
+                Settings = ContainerTypeSettingsDto.FromDomain(result.Settings)
+            });
+        }
+        catch (SpeAdminGraphService.SettingsNotPersistedException ex)
+        {
+            /*
+             * Graph answered 2xx and did not write. Reporting this as a success would be the §2.4
+             * defect in its purest form — an operator sets a storage cap, sees a confirmation, and has
+             * no cap. 502 Bad Gateway is the honest code: the request was valid and authorized, and
+             * the UPSTREAM service failed to do what it acknowledged.
+             *
+             * Measured 2026-08-27: a container-SCOPE quota PATCH does exactly this (200, value
+             * discarded). The container-TYPE path used here does persist, so this branch should never
+             * fire — it exists so that if that ever stops being true, it surfaces as a loud failure
+             * rather than a silent one. See notes/task-051-findings.md §1.
+             */
+            logger.LogError(
+                ex,
+                "PUT /api/spe/containertypes/{TypeId}/settings — Graph returned success but did NOT " +
+                "persist: {Unwritten}. TraceId: {TraceId}",
+                typeId, string.Join("; ", ex.UnwrittenFields), context.TraceIdentifier);
+
+            return Results.Problem(
+                title: "Settings Not Applied",
+                detail:
+                    $"Microsoft Graph accepted the update for container type '{typeId}' but did not " +
+                    "apply it. The settings are unchanged. This is an upstream failure, not a problem " +
+                    "with the values submitted — retrying with the same values is reasonable. " +
+                    $"Not applied: {string.Join("; ", ex.UnwrittenFields)}.",
+                statusCode: StatusCodes.Status502BadGateway,
+                extensions: new Dictionary<string, object?>
+                {
+                    ["traceId"] = context.TraceIdentifier,
+                    ["errorCode"] = "spe.containertypes.settings.not_persisted",
+                    ["unwrittenFields"] = ex.UnwrittenFields,
+                });
+        }
+        catch (SpaarkeStorageException sse)
+        {
+            logger.LogError(
+                sse,
+                "Graph API error updating container type {TypeId} settings for config {ConfigId}. " +
+                "Status: {Status}. TraceId: {TraceId}",
+                typeId, configId, sse.StatusCode, context.TraceIdentifier);
+
+            return sse.ToProblemDetails(
+                summary: $"Could not update settings for container type '{typeId}'.",
+                errorCode: "spe.containertypes.settings.graph_error",
+                statusCode: StatusCodes.Status500InternalServerError,
+                traceId: context.TraceIdentifier);
+        }
+        catch (Exception ex)
+        {
+            logger.LogError(
+                ex,
+                "Unexpected error updating container type {TypeId} settings for config {ConfigId}. " +
+                "TraceId: {TraceId}",
+                typeId, configId, context.TraceIdentifier);
+
+            return Results.Problem(
+                detail: ProblemDetailsHelper.Explain("An unexpected error occurred while updating container type settings.", ex),
+                statusCode: StatusCodes.Status500InternalServerError,
+                title: "Internal Server Error",
+                extensions: new Dictionary<string, object?>
+                {
+                    ["errorCode"] = "spe.containertypes.settings.unexpected_error",
+                    ["traceId"] = context.TraceIdentifier
+                });
+        }
+    }
+}

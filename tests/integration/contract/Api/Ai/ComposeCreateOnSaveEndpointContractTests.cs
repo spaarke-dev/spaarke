@@ -30,6 +30,7 @@ using System.Net.Http.Headers;
 using System.Net.Http.Json;
 using System.Security.Claims;
 using System.Text.Encodings.Web;
+using System.Text.Json;
 using FluentAssertions;
 using Microsoft.AspNetCore.Authentication;
 using Microsoft.AspNetCore.Hosting;
@@ -120,9 +121,9 @@ public sealed class ComposeCreateOnSaveEndpointContractTests
             .ReturnsAsync((Entity)null!);
         Entity? createdEntity = null;
         _fixture.DataverseMock
-            .Setup(d => d.CreateAsync(It.IsAny<Entity>(), It.IsAny<CancellationToken>()))
+            .Setup(d => d.UpsertAsync(It.IsAny<Entity>(), It.IsAny<CancellationToken>()))
             .Callback<Entity, CancellationToken>((e, _) => createdEntity = e)
-            .ReturnsAsync(newDocumentId);
+            .ReturnsAsync((newDocumentId, true));
 
         // Indexing boundary: sync-OBO indexing succeeds (non-terminal for this assertion).
         _fixture.IndexingMock
@@ -136,7 +137,7 @@ public sealed class ComposeCreateOnSaveEndpointContractTests
         using (var scope = _fixture.Services.CreateScope())
         {
             var sessions = scope.ServiceProvider.GetRequiredService<ChatSessionManager>();
-            var session = await sessions.CreateSessionAsync(ComposeCreateOnSaveFixture.TestTenantId, documentId: null);
+            var session = await sessions.CreateSessionAsync(ComposeCreateOnSaveFixture.TestTenantId, TestSessionOwner.Oid, documentId: null);
             sessionId = session.SessionId;
 
             var cache = scope.ServiceProvider.GetRequiredService<ITenantCache>();
@@ -252,9 +253,9 @@ public sealed class ComposeCreateOnSaveEndpointContractTests
             .ReturnsAsync((Entity)null!);
         Entity? createdEntity = null;
         _fixture.DataverseMock
-            .Setup(d => d.CreateAsync(It.IsAny<Entity>(), It.IsAny<CancellationToken>()))
+            .Setup(d => d.UpsertAsync(It.IsAny<Entity>(), It.IsAny<CancellationToken>()))
             .Callback<Entity, CancellationToken>((e, _) => createdEntity = e)
-            .ReturnsAsync(newDocumentId);
+            .ReturnsAsync((newDocumentId, true));
         _fixture.IndexingMock
             .Setup(i => i.EnqueueIfApplicableAsync(
                 It.IsAny<PostUploadIndexingRequest>(), It.IsAny<HttpContext>(), It.IsAny<CancellationToken>()))
@@ -321,9 +322,9 @@ public sealed class ComposeCreateOnSaveEndpointContractTests
             .ReturnsAsync((Entity)null!);
         Entity? createdEntity = null;
         _fixture.DataverseMock
-            .Setup(d => d.CreateAsync(It.IsAny<Entity>(), It.IsAny<CancellationToken>()))
+            .Setup(d => d.UpsertAsync(It.IsAny<Entity>(), It.IsAny<CancellationToken>()))
             .Callback<Entity, CancellationToken>((e, _) => createdEntity = e)
-            .ReturnsAsync(newDocumentId);
+            .ReturnsAsync((newDocumentId, true));
         _fixture.IndexingMock
             .Setup(i => i.EnqueueIfApplicableAsync(
                 It.IsAny<PostUploadIndexingRequest>(), It.IsAny<HttpContext>(), It.IsAny<CancellationToken>()))
@@ -372,6 +373,119 @@ public sealed class ComposeCreateOnSaveEndpointContractTests
             s => s.UploadSmallAsUserAsync(It.IsAny<HttpContext>(), It.IsAny<string>(),
                 It.IsAny<string>(), It.IsAny<Stream>(), It.IsAny<CancellationToken>()),
             Times.Never, "no SPE work happens when the request is rejected at validation");
+    }
+
+    // ── FR-S06 (spaarkeai-compose-r8 task 013) — the 200-with-nothing-written defect ──────────────────
+    //
+    // THE defect the save-outcome contract exists to remove, asserted through the real route.
+    // `ComposeService`'s container-failure path RETURNS a result rather than throwing (it carries the
+    // per-step create-on-save completion projection, which the client needs), and the endpoint wraps
+    // every returned result in `Results.Ok`. So a save that stored NOTHING arrived as HTTP 200 — and
+    // before this contract the client had nothing in the body to distinguish it from success, so it
+    // rendered "Saved ✓" over a write that never happened. Three releases shipped that way.
+    //
+    // The status deliberately stays 200 (the step-projection contract rides on this body). What changed
+    // is that the body now SAYS what happened, and the client keys off that field rather than the status
+    // — see the paired client assertion in ComposeWorkspace.saveErrorRouting.test.tsx.
+    [Fact]
+    public async Task CreateOnSave_WhenSpeCreateReturnsNull_Returns200CarryingStorageFailedOutcome()
+    {
+        _fixture.ResetBoundaries();
+
+        _fixture.SpeMock
+            .Setup(s => s.ResolveDriveIdAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync("drive-storage-failed-001");
+        // The SPE mint fails softly — Graph returned nothing. Nothing is stored.
+        _fixture.SpeMock
+            .Setup(s => s.UploadSmallAsUserAsync(
+                It.IsAny<HttpContext>(), It.IsAny<string>(), It.IsAny<string>(),
+                It.IsAny<Stream>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync((FileHandleDto?)null);
+
+        using var client = _fixture.CreateAuthenticatedClient();
+        var response = await client.PostAsJsonAsync(
+            "/api/compose/documents/create-on-save",
+            new
+            {
+                containerId = "b!container-bu-storage-failed",
+                tenantId = ComposeCreateOnSaveFixture.TestTenantId,
+                sessionId = Guid.NewGuid().ToString("N"),
+                content = DraftBytes,
+            });
+
+        var body = await response.Content.ReadAsStringAsync();
+
+        response.StatusCode.Should().Be(HttpStatusCode.OK,
+            $"the container-failure path returns a result (it carries the step projection), so the status stays 200 — body: {body}");
+
+        using var payload = JsonDocument.Parse(body);
+        payload.RootElement.GetProperty("outcome").GetString().Should().Be("storage-failed",
+            "FR-S06: a 200 that stored nothing MUST say so on the wire — this field is the only thing " +
+            "distinguishing it from a successful save, and its absence is how a total write failure " +
+            "rendered as 'Saved ✓' across three releases");
+
+        payload.RootElement.GetProperty("versionId").GetString().Should().BeEmpty(
+            "no SPE version was committed — the outcome and the payload must agree");
+    }
+
+    [Fact]
+    public async Task CreateOnSave_WhenSpeCreateSucceeds_Returns200CarryingPersistedOutcome()
+    {
+        // NEGATIVE pairing for the above: the happy path must still report `persisted`, so the new
+        // field cannot manufacture false failures.
+        _fixture.ResetBoundaries();
+
+        _fixture.SpeMock
+            .Setup(s => s.ResolveDriveIdAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync("drive-persisted-001");
+        _fixture.SpeMock
+            .Setup(s => s.UploadSmallAsUserAsync(
+                It.IsAny<HttpContext>(), It.IsAny<string>(), It.IsAny<string>(),
+                It.IsAny<Stream>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new FileHandleDto(
+                Id: "spe-item-persisted-001",
+                Name: "draft.docx",
+                ParentId: null,
+                Size: DraftBytes.Length,
+                CreatedDateTime: DateTimeOffset.UtcNow,
+                LastModifiedDateTime: DateTimeOffset.UtcNow,
+                ETag: "\"v1-etag\"",
+                IsFolder: false,
+                WebUrl: null,
+                DriveId: "drive-persisted-001"));
+
+        // The SUCCESS path continues past the SPE mint into promote + indexing, so those boundaries
+        // must be arranged too (the storage-failed case above returns before reaching them).
+        _fixture.DataverseMock
+            .Setup(d => d.RetrieveByAlternateKeyAsync(
+                It.IsAny<string>(), It.IsAny<KeyAttributeCollection>(),
+                It.IsAny<string[]>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync((Entity)null!);
+        _fixture.DataverseMock
+            .Setup(d => d.UpsertAsync(It.IsAny<Entity>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync((Guid.NewGuid(), true));
+        _fixture.IndexingMock
+            .Setup(i => i.EnqueueIfApplicableAsync(
+                It.IsAny<PostUploadIndexingRequest>(), It.IsAny<HttpContext>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(PostUploadIndexingResult.Submitted(Guid.NewGuid()));
+
+        using var client = _fixture.CreateAuthenticatedClient();
+        var response = await client.PostAsJsonAsync(
+            "/api/compose/documents/create-on-save",
+            new
+            {
+                containerId = "b!container-bu-persisted",
+                tenantId = ComposeCreateOnSaveFixture.TestTenantId,
+                sessionId = Guid.NewGuid().ToString("N"),
+                content = DraftBytes,
+            });
+
+        var body = await response.Content.ReadAsStringAsync();
+        response.StatusCode.Should().Be(HttpStatusCode.OK, $"body: {body}");
+
+        using var payload = JsonDocument.Parse(body);
+        payload.RootElement.GetProperty("outcome").GetString().Should().Be("persisted",
+            "a clean save reports `persisted` — the outcome field must not manufacture false failures");
     }
 
     [Fact]
@@ -437,9 +551,9 @@ public sealed class ComposeCreateOnSaveEndpointContractTests
             .ReturnsAsync((Entity)null!);
         Entity? createdEntity = null;
         _fixture.DataverseMock
-            .Setup(d => d.CreateAsync(It.IsAny<Entity>(), It.IsAny<CancellationToken>()))
+            .Setup(d => d.UpsertAsync(It.IsAny<Entity>(), It.IsAny<CancellationToken>()))
             .Callback<Entity, CancellationToken>((e, _) => createdEntity = e)
-            .ReturnsAsync(newDocumentId);
+            .ReturnsAsync((newDocumentId, true));
 
         _fixture.IndexingMock
             .Setup(i => i.EnqueueIfApplicableAsync(
@@ -453,7 +567,7 @@ public sealed class ComposeCreateOnSaveEndpointContractTests
         {
             var sessions = scope.ServiceProvider.GetRequiredService<ChatSessionManager>();
             var session = await sessions.CreateSessionAsync(
-                ComposeCreateOnSaveFixture.TestTenantId, documentId: sentinelDocId);
+                ComposeCreateOnSaveFixture.TestTenantId, TestSessionOwner.Oid, documentId: sentinelDocId);
             unrelatedSessionId = session.SessionId;
         }
 
@@ -545,7 +659,7 @@ public sealed class ComposeCreateOnSaveFixture : WebApplicationFactory<Program>
                 ["Graph:TenantId"] = "test-tenant-id",
                 ["Graph:ClientId"] = "test-client-id",
                 ["Graph:ClientSecret"] = "test-client-secret",
-                ["Graph:UseManagedIdentity"] = "false",
+                ["Graph:ManagedIdentity:Enabled"] = "false",
                 ["Graph:Scopes:0"] = "https://graph.microsoft.com/.default",
                 ["Dataverse:EnvironmentUrl"] = "https://test.crm.dynamics.com",
                 ["Dataverse:ServiceUrl"] = "https://test.crm.dynamics.com",
@@ -603,6 +717,9 @@ public sealed class ComposeCreateOnSaveFixture : WebApplicationFactory<Program>
 
         builder.ConfigureTestServices(services =>
         {
+            // Test hosts must not authenticate for real — see TestTokenCredential.
+            services.UseStubTokenCredential();
+
             services.Configure<Microsoft.AspNetCore.Routing.RouteHandlerOptions>(options =>
             {
                 options.ThrowOnBadRequest = false;
@@ -680,7 +797,10 @@ internal sealed class CreateOnSaveFakeAuthHandler : AuthenticationHandler<Authen
             return Task.FromResult(AuthenticateResult.Fail("No Authorization header"));
         }
 
-        var oid = Guid.NewGuid().ToString();
+        // Issue #863 (fixture repair, bff-extensions.md §F.2): a STABLE oid. This minted a
+        // fresh one per request, which Entra never does — every call arrived as a different
+        // user, so the suite silently exercised cross-user access on every request.
+        var oid = TestSessionOwner.Oid;
         var claims = new List<Claim>
         {
             new("oid", oid),

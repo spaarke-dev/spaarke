@@ -31,6 +31,28 @@ tests/
 
 These seven paths are **deletion-protected**. Removing a file under any of them requires a same-PR replacement covering the same scenario. Enforced at code-review (`task-execute` Step 9.5).
 
+### Structural fitness functions — `tests/Spaarke.ArchTests/**`
+
+> **Added 2026-08-21** by `spaarke-auth-v4-dataverse-MI` task 063 (FR-F0). **Ratification status: an ADR-038 amendment formalising this category is OPEN** — see [`projects/spaarke-auth-v4-dataverse-MI/notes/decisions/063-archtest-keep-path.md`](../projects/spaarke-auth-v4-dataverse-MI/notes/decisions/063-archtest-keep-path.md). This directive records the category and the reasoning; the ADR is the canonical source and has not been edited unilaterally (root CLAUDE.md §6.5 path B).
+
+`tests/Spaarke.ArchTests/**` holds **structural fitness functions** — tests that assert an invariant over the *source or assemblies* rather than over runtime behavior (`LayerDependencyTests`, `ADR010_DITests`, `CredentialGuardTests`, `CredentialCensusTests`, …). They are **deletion-protected as the eighth KEEP path** — ratified in ADR-038 **Amendment A1** (2026-08-24, `spaarke-auth-v4-dataverse-MI` task 090). Before A1 this protection existed only here and in `/test-diet`'s heuristic 0, i.e. in skill/module text rather than in the ADR — while ADR-038 §7's bans B1–B5 simultaneously *delegated their lost discovery to this very category*.
+
+**This is not an exception to the build-vs-maintain classifier; it is a category the classifier was not written for**, and ADR-038 already depends on it. The ADR's own "Some discovery loss" consequence names *"NetArchTest-style architecture tests at Tier 1"* as the sanctioned **replacement** for the discovery given up by banning wiring tests (B1–B5). A classifier that deletes architecture tests deletes the mechanism the ADR prescribes.
+
+Two classifier heuristics are miscalibrated here and **must not be applied** to this path:
+
+- **Naming (B13)** — a fitness function's name states the **invariant it enforces** (`NoSecretBearingConfidentialClientOutsideTheAllowlist`), not a `{Method}_{Scenario}_{ExpectedResult}` triple. The rule is the subject; there is no "method under test".
+- **Setup-to-assertion ratio (B15)** — the "arrange" section is a source scan over the whole server tree. A high ratio is inherent, not a smell.
+
+**Authoring rules for this path** (these replace the two above, they do not remove scrutiny):
+
+| Rule | Why |
+|---|---|
+| Every rule carries a **negative control** proving the detector fires on a seeded violation | A detector nobody has seen fail is a detector nobody knows works |
+| Every rule carries a **positive control** proving it does NOT fire on the sanctioned shape | A guard that flags the code it protects gets deleted rather than obeyed — this caught two real defects in task 060 |
+| Every allowlist / census entry carries a **written reason and an ADR citation** | An unexplained exemption is indistinguishable from an oversight six months later |
+| The **maintenance procedure** lives in the test file itself | The person who trips the guard is the person who needs the procedure |
+
 ---
 
 ## Test Pyramid (Integration-Heavy)

@@ -1,3 +1,4 @@
+using Azure.Core;
 using Microsoft.AspNetCore.Authentication;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Mvc.Testing;
@@ -47,8 +48,17 @@ public class CustomWebAppFactory : WebApplicationFactory<Program>
                 ["Graph:TenantId"] = "test-tenant-id",
                 ["Graph:ClientId"] = "test-client-id",
                 ["Graph:ClientSecret"] = "test-client-secret",
-                ["Graph:UseManagedIdentity"] = "false",
+                ["Graph:ManagedIdentity:Enabled"] = "false",
                 ["Graph:Scopes:0"] = "https://graph.microsoft.com/.default",
+
+                // PublicConfig options (customer-provisioning-orchestration-r1 task 087)
+                // Tier-1 fail-fast at startup — required for GET /api/config endpoint and for
+                // any test that boots the host (the ValidateOnStart() gate fires unconditionally).
+                ["PublicConfig:BffUrl"] = "https://spaarke-bff-test.example.com",
+                ["PublicConfig:MsalClientId"] = "test-app-id",
+                ["PublicConfig:TenantId"] = "test-tenant-id",
+                ["PublicConfig:FeatureFlags:testFeatureEnabled"] = "true",
+                ["PublicConfig:FeatureFlags:testFeatureDisabled"] = "false",
 
                 // Dataverse options (required by DataverseOptions validation)
                 ["Dataverse:EnvironmentUrl"] = "https://test.crm.dynamics.com",
@@ -213,6 +223,34 @@ public class CustomWebAppFactory : WebApplicationFactory<Program>
             dataverseServiceMock.Setup(d => d.TestConnectionAsync()).ReturnsAsync(true);
             services.RemoveAll<IDataverseService>();
             services.AddSingleton(dataverseServiceMock.Object);
+
+            // ---------------------------------------------------------------
+            // TOKEN CREDENTIAL: the test host must never authenticate for real.
+            //
+            // Program.cs registers TokenCredential as ManagedIdentityCredentialFactory.Create(...),
+            // which returns a DefaultAzureCredential. Nothing here replaced it, so every test host
+            // ran the real probe chain — environment, workload identity, IMDS (169.254.169.254),
+            // Azure CLI. The IMDS leg is the one that hurts: on a machine that is not in Azure it
+            // does not fail fast, and the FIRST caller to reach it blocked until HttpClient's
+            // 100-second default timeout aborted the whole request.
+            //
+            // That is the entire mechanism behind a failure that had been read as five separate
+            // problems. DefaultAzureCredential caches which source answered, so only the first
+            // caller pays; every later call returns fast. Whichever test happened to hit an
+            // outbound-authenticating path FIRST timed out and the rest passed — so the failing
+            // set rotated between runs, every failure lasted ~100s regardless of subject, and a
+            // test that passed in the full suite failed on its own. GetPersonas_AcceptsSort-
+            // Parameters passes in the suite and fails at 1m41 in isolation; that asymmetry is the
+            // proof, and it is not something an assertion could have been wrong about.
+            //
+            // Fixed at the FIXTURE per bff-extensions.md §F.2 (Fixture-Config-FIRST): a real
+            // credential in a test host is a non-contract fixture value, so the fixture is the
+            // defect. No assertion is relaxed and no production code changes — the credential is
+            // simply not a real one any more.
+            //
+            // Keep this registration LAST so it wins over anything registered above. The stub and the
+            // full diagnosis live in TestTokenCredential — this is not the only fixture that needs it.
+            services.UseStubTokenCredential();
         });
     }
 }

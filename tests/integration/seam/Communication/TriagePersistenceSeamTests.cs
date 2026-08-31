@@ -84,13 +84,11 @@ public sealed class TriagePersistenceSeamTests
         var config = new ConfigurationBuilder().Build();
 
         return new CommunicationEnrichmentService(
-            enqueuer.Object,
+            EnrichmentScopeFactoryStub.Create(
+                enqueuer.Object, triageAi, new NullCommunicationProposeAi(), new NullCommunicationCreateTaskAi()),
             entityService,
             config,
             assessedProducer,
-            triageAi,
-            new NullCommunicationProposeAi(),
-            new NullCommunicationCreateTaskAi(),
             new Mock<IActionSeam>(MockBehavior.Loose).Object,
             TestRoutingGate.Disabled(),
             NullLogger<CommunicationEnrichmentService>.Instance);

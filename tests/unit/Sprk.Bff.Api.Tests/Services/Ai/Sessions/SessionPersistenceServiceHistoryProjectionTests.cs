@@ -80,7 +80,7 @@ public class SessionPersistenceServiceHistoryProjectionTests
             conversationSummary: "Reviewed the NDA redlines",
             firstMessage: "Can you review this NDA?"));
 
-        var results = await _sut.ListRecentSessionsAsync(TenantId, limit: 10);
+        var results = await _sut.ListRecentSessionsAsync(TenantId, TestSessionOwner.Oid, limit: 10);
 
         results.Should().HaveCount(1);
         results[0].Preview.Should().Be("Reviewed the NDA redlines");
@@ -93,7 +93,7 @@ public class SessionPersistenceServiceHistoryProjectionTests
             conversationSummary: null,
             firstMessage: "Can you review this NDA?"));
 
-        var results = await _sut.ListRecentSessionsAsync(TenantId, limit: 10);
+        var results = await _sut.ListRecentSessionsAsync(TenantId, TestSessionOwner.Oid, limit: 10);
 
         results[0].Preview.Should().Be("Can you review this NDA?");
     }
@@ -105,7 +105,7 @@ public class SessionPersistenceServiceHistoryProjectionTests
         // Preview has no placeholder fallback — the client omits the preview line entirely when absent.
         ArrangeProjection(BuildProjection(conversationSummary: null, firstMessage: null));
 
-        var results = await _sut.ListRecentSessionsAsync(TenantId, limit: 10);
+        var results = await _sut.ListRecentSessionsAsync(TenantId, TestSessionOwner.Oid, limit: 10);
 
         results[0].Preview.Should().BeNull();
     }
@@ -118,7 +118,7 @@ public class SessionPersistenceServiceHistoryProjectionTests
 
         ArrangeProjection(BuildProjection(conversationSummary: longMultilineSummary, firstMessage: null));
 
-        var results = await _sut.ListRecentSessionsAsync(TenantId, limit: 10);
+        var results = await _sut.ListRecentSessionsAsync(TenantId, TestSessionOwner.Oid, limit: 10);
 
         var preview = results[0].Preview;
         preview.Should().NotBeNull();
@@ -136,7 +136,7 @@ public class SessionPersistenceServiceHistoryProjectionTests
     {
         ArrangeProjection(BuildProjection(messageCount: 7));
 
-        var results = await _sut.ListRecentSessionsAsync(TenantId, limit: 10);
+        var results = await _sut.ListRecentSessionsAsync(TenantId, TestSessionOwner.Oid, limit: 10);
 
         results[0].MessageCount.Should().Be(7);
     }
@@ -146,7 +146,7 @@ public class SessionPersistenceServiceHistoryProjectionTests
     {
         ArrangeProjection(BuildProjection(messageCount: null));
 
-        var results = await _sut.ListRecentSessionsAsync(TenantId, limit: 10);
+        var results = await _sut.ListRecentSessionsAsync(TenantId, TestSessionOwner.Oid, limit: 10);
 
         results[0].MessageCount.Should().BeNull();
     }
@@ -164,7 +164,7 @@ public class SessionPersistenceServiceHistoryProjectionTests
             new StoredWorkspaceTab("tab-2", "compose", null, "Compose")
         ]));
 
-        var results = await _sut.ListRecentSessionsAsync(TenantId, limit: 10);
+        var results = await _sut.ListRecentSessionsAsync(TenantId, TestSessionOwner.Oid, limit: 10);
 
         results[0].TabSummary.Should().Be("Email · Compose");
     }
@@ -174,7 +174,7 @@ public class SessionPersistenceServiceHistoryProjectionTests
     {
         ArrangeProjection(BuildProjection(tabs: []));
 
-        var results = await _sut.ListRecentSessionsAsync(TenantId, limit: 10);
+        var results = await _sut.ListRecentSessionsAsync(TenantId, TestSessionOwner.Oid, limit: 10);
 
         results[0].TabSummary.Should().BeNull();
     }
@@ -184,7 +184,7 @@ public class SessionPersistenceServiceHistoryProjectionTests
     {
         ArrangeProjection(BuildProjection(tabs: null));
 
-        var results = await _sut.ListRecentSessionsAsync(TenantId, limit: 10);
+        var results = await _sut.ListRecentSessionsAsync(TenantId, TestSessionOwner.Oid, limit: 10);
 
         results[0].TabSummary.Should().BeNull();
     }

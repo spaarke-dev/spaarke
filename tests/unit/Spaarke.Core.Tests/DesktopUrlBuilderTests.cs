@@ -4,10 +4,16 @@ using Xunit;
 
 namespace Spaarke.Core.Tests;
 
+// NOTE (dotnet-10-upgrade-r1 task 030): DesktopUrlBuilder.FromMime intentionally emits the ABBREVIATED
+// Office protocol format `ms-{app}:{webUrl}` (raw URL, NO `ofe|u|` prefix, NO URL-encoding) to bypass
+// Windows Security Zone / Restricted-Sites blocking of SPE /contentstorage/ URLs — see the production
+// XML doc on DesktopUrlBuilder.FromMime. These expectations were updated from the legacy `ofe|u|{encoded}`
+// full-format (introduced by the FileViewer Enhancements project, commit bb63d9818, without updating this
+// test — the tests were red on master/net8 before the .NET 10 retarget; this is a stale-test correction,
+// NOT a net10 behavior change). "Code wins; the test lagged."
 public class DesktopUrlBuilderTests
 {
     private const string TestWebUrl = "https://contoso.sharepoint.com/sites/test/documents/report.docx";
-    private const string EncodedTestUrl = "https%3A%2F%2Fcontoso.sharepoint.com%2Fsites%2Ftest%2Fdocuments%2Freport.docx";
 
     #region Word MIME Type Tests
 
@@ -21,7 +27,7 @@ public class DesktopUrlBuilderTests
         var result = DesktopUrlBuilder.FromMime(TestWebUrl, mimeType);
 
         // Assert
-        result.Should().Be($"ms-word:ofe|u|{EncodedTestUrl}");
+        result.Should().Be($"ms-word:{TestWebUrl}");
     }
 
     [Fact]
@@ -34,7 +40,7 @@ public class DesktopUrlBuilderTests
         var result = DesktopUrlBuilder.FromMime(TestWebUrl, mimeType);
 
         // Assert
-        result.Should().Be($"ms-word:ofe|u|{EncodedTestUrl}");
+        result.Should().Be($"ms-word:{TestWebUrl}");
     }
 
     #endregion
@@ -51,7 +57,7 @@ public class DesktopUrlBuilderTests
         var result = DesktopUrlBuilder.FromMime(TestWebUrl, mimeType);
 
         // Assert
-        result.Should().Be($"ms-excel:ofe|u|{EncodedTestUrl}");
+        result.Should().Be($"ms-excel:{TestWebUrl}");
     }
 
     [Fact]
@@ -64,7 +70,7 @@ public class DesktopUrlBuilderTests
         var result = DesktopUrlBuilder.FromMime(TestWebUrl, mimeType);
 
         // Assert
-        result.Should().Be($"ms-excel:ofe|u|{EncodedTestUrl}");
+        result.Should().Be($"ms-excel:{TestWebUrl}");
     }
 
     #endregion
@@ -81,7 +87,7 @@ public class DesktopUrlBuilderTests
         var result = DesktopUrlBuilder.FromMime(TestWebUrl, mimeType);
 
         // Assert
-        result.Should().Be($"ms-powerpoint:ofe|u|{EncodedTestUrl}");
+        result.Should().Be($"ms-powerpoint:{TestWebUrl}");
     }
 
     [Fact]
@@ -94,7 +100,7 @@ public class DesktopUrlBuilderTests
         var result = DesktopUrlBuilder.FromMime(TestWebUrl, mimeType);
 
         // Assert
-        result.Should().Be($"ms-powerpoint:ofe|u|{EncodedTestUrl}");
+        result.Should().Be($"ms-powerpoint:{TestWebUrl}");
     }
 
     #endregion
@@ -161,10 +167,10 @@ public class DesktopUrlBuilderTests
 
     #endregion
 
-    #region URL Encoding Tests
+    #region URL Pass-Through Tests (abbreviated format — see class note)
 
     [Fact]
-    public void FromMime_UrlWithSpecialCharacters_EncodesCorrectly()
+    public void FromMime_UrlWithSpecialCharacters_PassesThroughUnencoded()
     {
         // Arrange
         const string urlWithSpaces = "https://contoso.sharepoint.com/sites/test/My Documents/report.docx";
@@ -173,14 +179,12 @@ public class DesktopUrlBuilderTests
         // Act
         var result = DesktopUrlBuilder.FromMime(urlWithSpaces, mimeType);
 
-        // Assert
-        result.Should().NotBeNull();
-        result.Should().StartWith("ms-word:ofe|u|");
-        result.Should().Contain("My%20Documents"); // Space should be encoded
+        // Assert — abbreviated format passes the web URL through verbatim (no ofe|u|, no URL-encoding)
+        result.Should().Be($"ms-word:{urlWithSpaces}");
     }
 
     [Fact]
-    public void FromMime_UrlWithQueryString_EncodesCorrectly()
+    public void FromMime_UrlWithQueryString_PassesThroughUnencoded()
     {
         // Arrange
         const string urlWithQuery = "https://contoso.sharepoint.com/file.docx?param=value&other=123";
@@ -189,11 +193,8 @@ public class DesktopUrlBuilderTests
         // Act
         var result = DesktopUrlBuilder.FromMime(urlWithQuery, mimeType);
 
-        // Assert
-        result.Should().NotBeNull();
-        result.Should().StartWith("ms-word:ofe|u|");
-        result.Should().Contain("%3F"); // ? should be encoded
-        result.Should().Contain("%26"); // & should be encoded
+        // Assert — abbreviated format passes the raw URL (incl. query string) through unchanged
+        result.Should().Be($"ms-word:{urlWithQuery}");
     }
 
     #endregion
@@ -209,7 +210,7 @@ public class DesktopUrlBuilderTests
         var result = DesktopUrlBuilder.FromMime(TestWebUrl, mimeType);
 
         // Assert
-        result.Should().Be($"ms-word:ofe|u|{EncodedTestUrl}");
+        result.Should().Be($"ms-word:{TestWebUrl}");
     }
 
     #endregion

@@ -1,9 +1,11 @@
-import { DriveItem, UploadSession } from '../types';
+import { DriveItem } from '../types';
 import { TokenProvider } from '../auth/TokenProvider';
 
+// `UploadSession` and the 320 KB CHUNK_SIZE constant were dropped from this file on 2026-08-27 with
+// the chunked path (task 076). The `UploadSession` TYPE is deliberately left in ../types and in the
+// package barrel: it describes Graph's own upload-session shape, and a future record-keyed
+// upload-session route will need it. Deleting a type that has to come straight back is churn.
 export class UploadOperation {
-  private static readonly CHUNK_SIZE = 320 * 1024; // 320 KB (Microsoft recommended)
-
   constructor(
     private readonly baseUrl: string,
     private readonly timeout: number,
@@ -51,106 +53,29 @@ export class UploadOperation {
   }
 
   /**
-   * Upload large file (≥ 4MB) using chunked upload.
+   * DELETED 2026-08-27 (unified-access-control-r2 task 076): `uploadChunked`,
+   * `createUploadSession` and `uploadChunk`.
+   *
+   * The chunked path never worked. `createUploadSession` began by calling
+   * `GET /api/obo/containers/{id}/drive` to obtain a drive id, and **that route is mapped nowhere
+   * in the BFF** — so the first request 404'd and the method threw `'Failed to get container drive'`
+   * before it ever reached the upload-session call. Its two server routes
+   * (`POST /api/obo/drives/{driveId}/upload-session`, `PUT /api/obo/upload-session/chunk`) are
+   * deleted in the same change.
+   *
+   * `uploadChunk` did not even use the BFF chunk route — it PUT directly to Graph's own
+   * `session.uploadUrl` — so that route had no client at all.
+   *
+   * ⚠️ **Files >= 4 MiB have no working upload path, and did not before this change either.** The
+   * server caps the small route at `PathValidator.SmallUploadMaxBytes` (4 MiB), and this was the
+   * only alternative. {@link uploadFile} previously routed large files here and failed with a
+   * misleading drive-resolution error; it now fails with an explicit, accurate message. Restoring
+   * large-file upload needs a record-keyed upload-session route and is follow-up work.
    */
-  public async uploadChunked(
-    containerId: string,
-    file: File,
-    options?: { onProgress?: (percent: number) => void; signal?: AbortSignal }
-  ): Promise<DriveItem> {
-    // Step 1: Create upload session
-    const session = await this.createUploadSession(containerId, file.name);
-
-    // Step 2: Upload chunks
-    let uploadedBytes = 0;
-
-    while (uploadedBytes < file.size) {
-      // Check for cancellation
-      if (options?.signal?.aborted) {
-        throw new Error('Upload cancelled');
-      }
-
-      const chunkStart = uploadedBytes;
-      const chunkEnd = Math.min(chunkStart + UploadOperation.CHUNK_SIZE, file.size);
-      const chunk = file.slice(chunkStart, chunkEnd);
-
-      const result = await this.uploadChunk(session, chunk, chunkStart, chunkEnd, file.size);
-
-      uploadedBytes = chunkEnd;
-
-      // Report progress
-      const percent = Math.round((uploadedBytes / file.size) * 100);
-      options?.onProgress?.(percent);
-
-      // If upload complete, return result
-      if (result.completedItem) {
-        return result.completedItem;
-      }
-    }
-
-    throw new Error('Upload completed but no item returned');
-  }
-
-  private async createUploadSession(containerId: string, fileName: string): Promise<UploadSession> {
-    const token = await this.tokenProvider.getToken();
-
-    // Get drive ID first
-    const driveResponse = await fetch(`${this.baseUrl}/api/obo/containers/${containerId}/drive`, {
-      headers: token ? { Authorization: `Bearer ${token}` } : {},
-    });
-
-    if (!driveResponse.ok) {
-      throw new Error('Failed to get container drive');
-    }
-
-    const drive = await driveResponse.json();
-
-    // Create upload session
-    const response = await fetch(
-      `${this.baseUrl}/api/obo/drives/${drive.id}/upload-session?path=/${encodeURIComponent(fileName)}&conflictBehavior=rename`,
-      {
-        method: 'POST',
-        headers: token ? { Authorization: `Bearer ${token}` } : {},
-      }
-    );
-
-    if (!response.ok) {
-      throw new Error('Failed to create upload session');
-    }
-
-    return await response.json();
-  }
-
-  private async uploadChunk(
-    session: UploadSession,
-    chunk: Blob,
-    start: number,
-    end: number,
-    totalSize: number
-  ): Promise<{ completedItem?: DriveItem }> {
-    const response = await fetch(session.uploadUrl, {
-      method: 'PUT',
-      headers: {
-        'Content-Range': `bytes ${start}-${end - 1}/${totalSize}`,
-        'Content-Length': chunk.size.toString(),
-      },
-      body: chunk,
-    });
-
-    if (!response.ok && response.status !== 202) {
-      throw new Error(`Chunk upload failed: ${response.statusText}`);
-    }
-
-    const result = await response.json();
-
-    // Status 200/201 = upload complete
-    if (response.status === 200 || response.status === 201) {
-      return { completedItem: result };
-    }
-
-    // Status 202 = more chunks expected
-    return {};
-  }
+  public static readonly LARGE_FILE_UNSUPPORTED =
+    'Files of 4 MiB or larger cannot be uploaded: the chunked upload path was removed in 2026-08 ' +
+    'because it was non-functional (it depended on GET /api/obo/containers/{id}/drive, a route ' +
+    'that does not exist). A record-keyed upload-session route is required to restore it.';
 
   private async parseError(response: Response): Promise<string> {
     try {

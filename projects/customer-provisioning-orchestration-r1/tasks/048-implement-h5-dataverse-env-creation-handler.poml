@@ -1,0 +1,111 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="048" project="customer-provisioning-orchestration-r1">
+  <metadata>
+    <title>Implement H5 Dataverse Env Creation Handler (interim pac admin create-environment + gate)</title>
+    <phase>C Wave C4 — Handler Implementations</phase>
+    <gate>blocked</gate>
+    <status>not-started</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Task tags include 'l2-controlplane','job-handler','dataverse'; modifies .cs files; long-running (15–30 min); provisions Dataverse env — high-blast-radius operation.</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Handler wraps existing pac admin CLI; complete spec (FR-08); TF migration deferred per M-10 (interim scope only); not cross-cutting.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>waveC4-parallel</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <deps>036, 044</deps>
+    <tags>l2-controlplane, job-handler, dataverse, powershell</tags>
+    <estimated-effort>3-5 hours</estimated-effort>
+  </metadata>
+
+  <prompt>Implement the H5 Dataverse env-creation handler as an IJobHandler in the L2 control-plane. H5 invokes `pac admin create-environment` (interim per M-10 — TF Power Platform provider adoption deferred to first-customer engagement) with parameters from the ProvisioningRun, verifies the env exists + is accessible, and writes dataverseEnvUrl to Cosmos interStepState. Idempotency key: dvenv-{customerId}.</prompt>
+
+  <role>SPAARKE platform developer. Expert in IJobHandler contract, Power Platform CLI (pac admin), Dataverse Web API health checks, and long-running handler patterns (15–30 min operations off-thread per §4.2 fire-and-forget). Follow ADRs strictly.</role>
+
+  <goal>File src/server/services/Sprk.Provisioning.ControlPlane/Handlers/H5DataverseEnvCreationHandler.cs exists, implements IJobHandler, registers in L2 DI, and: (a) invokes `pac admin create-environment` with customerId + tenantId + region + tier parameters; (b) polls Dataverse env-creation status via pac admin quota + env-list; (c) verifies env is reachable via Dataverse Web API; (d) writes dataverseEnvUrl to Cosmos interStepState; (e) asserts idempotency key dvenv-{customerId}. Unit tests cover happy path, env-creation-in-progress polling, and idempotency.</goal>
+
+  <context>
+    <background>Per spec.md FR-08 + design.md §4.1 H5 row: design target is TF `powerplatform_environment` (D14), but implementation is DEFERRED to first-customer engagement per v3.2 M-10 (dev-only reality, no customer volume). Interim uses `pac admin create-environment` PS invocation + gate verification. Env creation is 15–30 min; the fire-and-forget execution model (§4.2) handles the wait off the HTTP thread.</background>
+    <relevant-files>
+      <file role="new">src/server/services/Sprk.Provisioning.ControlPlane/Handlers/H5DataverseEnvCreationHandler.cs</file>
+      <file role="new">src/server/services/Sprk.Provisioning.ControlPlane/Handlers/H5DataverseEnvCreationHandler.Tests.cs</file>
+      <file role="canonical-reference">src/server/api/Sprk.Bff.Api/Services/Jobs/</file>
+      <file role="canonical-reference">src/server/api/Sprk.Bff.Api/Services/Registration/RegistrationDataverseService.cs</file>
+      <file role="modify">src/server/services/Sprk.Provisioning.ControlPlane/Program.cs</file>
+    </relevant-files>
+    <dependencies>
+      <dependency task="036" status="pending">L2 project scaffold — Wave C3</dependency>
+      <dependency task="044" status="pending">H2a Bicep deploy — must complete for Azure infra (though H5 targets Dataverse, DAG places H5 after H2a per §4.1)</dependency>
+    </dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-004">Single IJobHandler implementation registered in L2 DI.</constraint>
+    <constraint source="ADR-010">Register in L2 control-plane, NOT BFF.</constraint>
+    <constraint source="ADR-036">Reuse background-job infrastructure; return 202; fire-and-forget (15–30 min operation).</constraint>
+    <constraint source="ADR-044">dataverseEnvUrl written to Cosmos interStepState — env ID canonicalization applies where GUIDs are involved.</constraint>
+    <constraint source="project">Idempotency key: dvenv-{customerId} — env creation is per-customer + version-independent.</constraint>
+    <constraint source="project">Interim implementation is pac admin CLI per M-10; TF migration is deferred and NOT r1 acceptance.</constraint>
+    <constraint source="spec.md §4D I1">-TenantId flows through explicitly to pac admin; no default tenant fallback.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>L2 handler wrapping pac admin CLI with async polling gate</topic>
+    <files>
+      <file>.claude/adr/ADR-004-job-contract.md</file>
+      <file>.claude/adr/ADR-036-background-job-infrastructure.md</file>
+      <file>.claude/adr/ADR-044-dataverse-guid-canonicalization.md</file>
+      <file>.claude/constraints/jobs.md</file>
+      <file>.claude/constraints/data.md</file>
+      <file>projects/customer-provisioning-orchestration-r1/spec.md</file>
+      <file>projects/customer-provisioning-orchestration-r1/design.md</file>
+    </files>
+    <patterns>
+      <pattern name="reference-handler-shape" location="src/server/api/Sprk.Bff.Api/Services/Jobs/">IJobHandler exemplar.</pattern>
+      <pattern name="dataverse-token-cache" location="src/server/api/Sprk.Bff.Api/Services/Registration/RegistrationDataverseService.cs">Cross-env token cache pattern for the health-check step.</pattern>
+    </patterns>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="0">Declare rigor level (FULL) and load knowledge files.</step>
+    <step order="1">Author H5DataverseEnvCreationHandler.cs — inject IPacCliRunner, IDataverseHealthProbe, IIdempotencyService, ICosmosRunStore.</step>
+    <step order="2">Invoke `pac admin create-environment` with customerId + tenantId + region + tier parameters.</step>
+    <step order="3">Poll env-creation status (design.md §4.2 median-handler-duration polling window).</step>
+    <step order="4">Verify env reachability via Dataverse Web API GET /WhoAmI.</step>
+    <step order="5">Write dataverseEnvUrl to Cosmos interStepState.</step>
+    <step order="6">Author unit tests: happy path, in-progress polling continues, creation-failure fails deploy, idempotency (existing env returns dataverseEnvUrl without re-creating).</step>
+    <step order="7">Register in L2 Program.cs DI.</step>
+    <step order="8">Run dotnet build + dotnet test; verify green + zero analyzer warnings.</step>
+    <step order="9">Update TASK-INDEX.md: change task 048 status from 🔲 to ✅.</step>
+    <step order="10">Document any deviations in projects/customer-provisioning-orchestration-r1/notes/.</step>
+  </steps>
+
+  <justification>
+    <existing>No existing L2 handler for Dataverse env creation. Closest neighbor: pac admin CLI usage in ad-hoc runbooks; RegistrationDataverseService.cs for cross-env token cache pattern.</existing>
+    <extension>No — pac admin CLI wrapped in a handler is required for DAG advancement + Cosmos state writes + idempotency. Ad-hoc runbook usage doesn't scale to 19-handler orchestration.</extension>
+    <cost-of-doing-nothing>Without H5 as a handler, Dataverse env creation is a manual operator step, breaking the D3 pipeline promise. H6 solution import (next in DAG) can't proceed without dataverseEnvUrl in Cosmos interStepState.</cost-of-doing-nothing>
+  </justification>
+
+  <tools>
+    <tool name="dotnet">Build and test .NET projects</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/server/services/Sprk.Provisioning.ControlPlane/Handlers/H5DataverseEnvCreationHandler.cs</output>
+    <output type="test">src/server/services/Sprk.Provisioning.ControlPlane/Handlers/H5DataverseEnvCreationHandler.Tests.cs</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Given customerId + tenantId + region + tier parameters, when HandleAsync runs, then pac admin create-environment succeeds and dataverseEnvUrl is populated in Cosmos interStepState.</criterion>
+    <criterion testable="true">Given env creation is in-progress (15–30 min), when HandleAsync polls, then it continues polling until complete or fails only on timeout with distinct code "EnvCreationTimeout".</criterion>
+    <criterion testable="true">Post-condition: Dataverse Web API /WhoAmI on dataverseEnvUrl returns 200; H5 fails otherwise with "EnvHealthCheckFailed".</criterion>
+    <criterion testable="true">Idempotency: given an existing env for the customerId, when HandleAsync runs, then it returns success with existing dataverseEnvUrl and does NOT re-create.</criterion>
+    <criterion testable="true">Negative: H5 invoked without tenantId parameter returns failure (§4D I1); no pac admin call fired.</criterion>
+    <criterion testable="true">Handler registers in L2 DI; dotnet build + dotnet test exit 0; zero analyzer warnings.</criterion>
+  </acceptance-criteria>
+
+  <notes>Reference: spec.md FR-08; design.md §4.1 H5 + M-10 TF deferral + §4.2 fire-and-forget. TF migration is Phase D backlog for r2 per M-10.</notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+  </execution>
+</task>

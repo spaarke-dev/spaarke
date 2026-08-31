@@ -49,6 +49,27 @@ Ships in **~2 weeks elapsed, no dev halt**, with one ~4-hour cutover window.
 - New `deploy-spaarke-ai.yml` mirroring `deploy-bff-api.yml` pattern (CD from master)
 - Audit `deploy-bff-api.yml` confirms master-trigger (fix if needed)
 
+### Scope adoption 2026-08-28 — deliverable defects are NOT deferred (BINDING)
+
+Owner direction: *"if an issue is important, then it should be added to this project NOT deferred to others."*
+
+Repairing the Tier 2 aggregator (PR #840) unmasked a cluster of standing failures that had been reported as `pass` regardless of outcome. Four of the five are **defects in this project's own deliverables**, named in the Affected Areas list below — not new scope, and not another project's problem:
+
+| Issue | Deliverable it defects | Task |
+|---|---|---|
+| #848 | `ci-tier2-advisory.yml` — 5 real-clock unit-test failures | **091** |
+| #850 | Tier 2 Prettier job — CI reports 1,907 files, local 46 | **092** |
+| #849 | `scripts/validate-markdown-links.ps1` — 86% of its own scan corpus is out of scope | **093** |
+| #864 | ADR-038 §7 — 15 of 17 bans documented but unenforced | **094** |
+
+**A project does not close while a thing it shipped is known-broken.** That follows directly from north star #1 (*fix it right the first time*) and #3 (*no constant reds*): a check nobody can reproduce or act on trains the team to ignore checks, which is worse than not having it.
+
+**One deliberate split.** #851 (no workflow runs jest — 707 client test files, zero enforced) is **half in scope**. "React/PCF Jest test architecture" is listed out of scope below and stays out. But *"no workflow runs jest at all"* is a CI gap, and CI is what this project owns. Task **095** therefore adds the workflow and baselines the 39 packages, and explicitly stops there — fixing the tests, and any jest architecture work, is handed on with the numbers.
+
+Tasks 091–095 are `parallel-safe: true` and do **not** gate the cutover chain (071 → 075 → 077 → 076). They gate **090** (wrap-up), which is the correct place: the project cannot declare itself finished with its own deliverables defective.
+
+---
+
 ### Out of Scope
 
 - Registry architecture redesign for BFF DI and SpaarkeAi widget/route registries — candidate follow-up project
@@ -124,6 +145,24 @@ The original FR-B01..FR-B07 framing attacked symptoms (coverage %, specific anti
 
 Owner clarification 2026-06-26 (recorded after task 053 deletion completed): "The assessment said we have way over-engineered the unit testing. The current 9-file deletion (179 tests removed) doesn't accomplish the goals of the project. My understanding is there are two categories of unit tests: (1) build tests created during the build process that validate aspects of the build, and (2) integrate/maintain tests that ship to long-term ownership. The protocol should ensure we reconcile (1) and (2) at project close, AND apply that protocol retroactively to existing components. There ARE clear best practices for what's build-only vs integrate/maintain."
 
+#### FR-B10 — owner decisions, 2026-08-28 (binding)
+
+Task 082's classification landed at **301 DELETE / 1,493 AMBIGUOUS / 5,325 KEEP** across 7,119 methods — below the 1,500–3,000 *projection*. Three owner decisions close it out:
+
+> **Number revised 2026-08-28 (post-decision), decision unchanged.** These decisions were taken against 358 DELETE. Spot-check rounds 3 and 4 — task 083's stated precondition — then found six classifier over-call bugs and moved the figure to **301**: `B1` 1→0, `B3` 13→0, `B8` 3→0, every row in all three a false positive, including the ADR-032 Null-Object kill-switch tests that are the regression cover for the RB-T028-03..06 production defect class. The revision **strengthens** decision 1 rather than disturbing it: the correct response to a number below projection was verification, and verification moved the number *down*, not up. Trajectory across four rounds: 3,411 → 427 → 358 → 301. Detail in `notes/test-inventory-broader-summary.md` § Accuracy control.
+
+1. **The mechanically-detected figure is accepted as the deliverable.** *"We need to be safe, not sorry."* This is **not** a deviation: FR-B10's own MUST above is qualitative and states plainly that *"numeric reduction is a signal, not a gate."* The 1,500–3,000 figure was a projection about what mechanical detection would find, and that projection was wrong — 9 of the 17 bans require intent, and B6 (mirror tests) is undetectable by pattern while plausibly being the largest real bucket. Missing a projection is not missing a requirement.
+
+2. **The CICD-082b deep-judgment pass will NOT happen.** The owner stated directly that there is no realistic chance of a human reading 7,119 tests — *"just keeping it honest."* FR-B10 step (2) above is therefore **retired, not deferred**; recording it as "deferred" would be a fiction that leaves the requirement looking satisfiable. Residual cleanup happens incrementally through **`/test-diet`** at project close (FR-B09), which reconciles the tests each project actually touched — a small, reviewable set — rather than the whole suite at once. That is the sustainable mechanism; the one-time deep pass never was.
+
+3. **A bad name is not grounds for deletion.** The 1,124 `B13-name-missing-scenario` methods MUST NOT be deleted where the test is *otherwise useful, effective, and executable*. ADR-038's own remedy column for B13 reads **"rename per convention or delete"** — rename first. This re-scopes task **085**, which was written as "final sweep + deletion" but whose actual content is rename decisions. See its POML note.
+
+**Consequence, stated honestly**: the "≤3,500 surviving BFF unit tests" figure elsewhere in this spec is **not reachable** by the deletion path now sanctioned (54 shipped in 083 + at most 247 in 084 = ~301 removals against 7,119). It should be read as a retired aspiration, not an open commitment. The qualitative MUST — surviving tests are useful per ADR-038 §7 — remains binding and is served by `/test-diet` over time.
+
+**Standing rule established by this task (binding for the rest of Phase 2.5)**: no DELETE bucket is acted on until it has had **one clean verification round** — an independent code path, over **every** row in the bucket, not a sample. Four spot-check rounds have now each found real over-calls, and the failure mode has been consistently *deleting good tests*. Task 083 met this bar (54/54). **Task 084 has not**: its `B10` bucket produced a false positive in two separate rounds, most recently *absence-of-throw as the contract*, and round 4's mitigation was a name heuristic rather than verification.
+
+---
+
 This directive expands FR-B scope from FR-B01..FR-B07 to FR-B01..FR-B10. Phase 2 task 053 (narrow 9-file deletion) is preserved as a foundation; FR-B08/B09/B10 are additive deliverables required before Phase 3 cutover (071).
 
 **Stream C — Hot-path coordination**
@@ -153,12 +192,39 @@ This directive expands FR-B scope from FR-B01..FR-B07 to FR-B01..FR-B10. Phase 2
 ### MUST Rules
 
 - ✅ MUST keep existing Azure deployment workflows functionally untouched (`deploy-bff-api.yml` trigger audit only; `deploy-promote.yml`, `deploy-infrastructure.yml`, `deploy-office-addins.yml` zero changes)
-- ✅ MUST keep `sdap-ci.yml` running in parallel through Phase 2; retire only post-cutover after 14 days of new-tier stability
+- ✅ MUST keep `sdap-ci.yml` running in parallel through Phase 2; retire only post-cutover after **20 code PRs on which both systems returned the same blocking verdict** (see "Shadow-window exit criterion" below). *(Amended 2026-08-27 — was "after 14 days of new-tier stability". Path B per root CLAUDE.md §6.5; owner-approved.)*
 - ✅ MUST enforce deletion-safety via path check at Step 9.5 (FR-B06); no CSV consultation at runtime
 - ❌ MUST NOT restore `Release` matrix before Phase 2 deletion has merged AND surviving suite green ≥7 days
 - ❌ MUST NOT add commit-marker skip mechanism to Tier 1 (FR-A05)
 - ❌ MUST NOT introduce coverage-% targets to any new directive file (binding for ≥6 months)
 - ❌ MUST NOT redesign BFF DI registry or SpaarkeAi widget/route registries in this project — OUT of scope
+
+#### Shadow-window exit criterion (amended 2026-08-27, Path B per root CLAUDE.md §6.5)
+
+**Was**: "14 days of new-tier stability."
+**Now**: **20 code PRs on which `sdap-ci.yml` and `CI (Router)` returned the same blocking verdict**, with **zero false greens** among them.
+
+**Why the change.** Calendar days are a proxy for evidence, and a poor one — the metric moves whether or not anything is being tested. Fourteen quiet days over a holiday prove close to nothing; four busy days prove a great deal. Meanwhile the window is not free: every PR touching server code pays `sdap-ci.yml`'s ~40-minute duplicate leg for the window's full duration, which works directly against this project's north star ("CI must not hold up high-frequency master pushes"). A criterion that can be satisfied by a slow week costs real time and buys no confidence.
+
+Counting PRs ties the exit to the thing actually being measured: agreement between two systems on real diffs.
+
+**Definitions** — a PR counts toward the 20 only if:
+- it is a **code PR** (`docs_only == false` per `ci-router.yml`'s classifier — on docs-only PRs tier1/tier2 are correctly skipped, so there is no verdict to compare); **and**
+- both systems reached a terminal conclusion (cancelled/superseded runs do not count).
+
+**Verdict comparison**, per counted PR:
+
+| `sdap-ci` | tier1 | Meaning |
+|---|---|---|
+| red | **green** | **FALSE GREEN — disqualifying.** tier1 would pass a real break. Reset the count to zero and diagnose before resuming. |
+| green | **red** | False red. Does not disqualify, but log it — it burns the "no constant reds" goal and must be understood before branch protection is enabled. |
+| agree | agree | Counts toward the 20. |
+
+**Floor**: the window must also span **≥5 calendar days** regardless of PR count, so a single high-volume day cannot satisfy it. This preserves the one thing the original rule got right — that some failure modes (flaky gates, runner capacity, scheduled-job interactions) only appear across day boundaries.
+
+**Unchanged**: the sibling rule below (no `Release` matrix restore before Phase 2 deletion has merged AND surviving suite green ≥7 days) is a different clock and is NOT amended.
+
+**Evidence base for distrusting a short window**: during the 2026-08-27 remediation the tier1 gate port broke **twice** in ways invisible in the diff — a 6-hour hang, then 275 startup failures — from byte-identical copies of jobs that ran correctly elsewhere. The differences were environmental (a workflow-level `env` var present-but-empty vs absent). That is the class of defect this window exists to catch, and it is why the criterion is agreement-on-real-diffs rather than elapsed time.
 
 ### Existing Patterns
 

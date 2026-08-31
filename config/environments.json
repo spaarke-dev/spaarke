@@ -44,6 +44,19 @@
         "deployTokenSecret": "AZURE_SWA_TOKEN_EXTERNAL_SPA_DEV",
         "$comment": "External Secure Project Workspace SPA on Azure Static Web Apps (task 003). Deploy token stored as GitHub Actions secret (name above) — never in this file. BrowserRouter + staticwebapp.config.json + BFF CORS + CIAM authority wired in Phase 1/2."
       },
+      "officeAddins": {
+        "swaName": "spaarke-office-addins",
+        "swaHostname": "icy-desert-0bfdbb61e.6.azurestaticapps.net",
+        "resourceGroup": "spe-infrastructure-westus2",
+        "$comment": "Outlook + Word add-in taskpanes on Azure Static Web Apps. Declared here 2026-08-25 (spaarke-auth-v4-dataverse-MI task 090) — it was previously recorded ONLY in .claude/skills/office-addins-deploy/SKILL.md, so nothing structural knew this origin existed."
+      },
+
+      "requiredCorsOrigins": [
+        "https://icy-desert-0bfdbb61e.6.azurestaticapps.net",
+        "https://green-dune-0c4f1221e.7.azurestaticapps.net"
+      ],
+      "$comment_requiredCorsOrigins": "FORCING FUNCTION (spaarke-auth-v4-dataverse-MI task 090, 2026-08-25). Every origin listed here MUST be present in the target App Service's Cors__AllowedOrigins__N settings; Deploy-BffApi.ps1 asserts it after each deploy and FAILS if one is missing. WHY THIS EXISTS: commit 66a45cf6a removed the blanket credentialed *.azurestaticapps.net CORS rule (correct — it is an attacker-registrable shared domain) and its commit message named a DEPLOYMENT PREREQ to enumerate our SWA origins explicitly. Nobody ran it, nothing failed, and the gap surfaced only when a human opened the Outlook add-in during UAT. WHAT TO LIST: ONLY origins that CorsModule's suffix rules do NOT already cover — i.e. NOT *.dynamics.com, *.powerapps.com or *.powerappsportals.com, which are matched in code. Listing covered origins adds noise without adding protection. WHAT THE CHECK IS: 'every declared origin is present', NOT 'live equals declared' — environments legitimately carry extra origins, and an exact-match check would fail on every deploy and be disabled within a month.",
+
       "ciam": {
         "tenantId": "7052feba-bfc4-43e0-b09e-65014b429131",
         "domain": "spaarkeextid.onmicrosoft.com",
@@ -90,6 +103,8 @@
         "searchServiceName": "spaarke-search-demo",
         "docIntelName": "spaarke-docintel-demo"
       },
+      "requiredCorsOrigins": [],
+      "$comment_requiredCorsOrigins": "EMPTY BECAUSE THE ENVIRONMENT IS STOPPED — not because it was audited. Verified 2026-08-25: `az webapp show -n spaarke-bff-prod` reports state=Stopped, consistent with the r3 handoff decommissioning prod/demo. It serves no traffic, so it has no live front-end origins to require. ⚠️ AUDIT BEFORE RESTARTING: if this environment is ever brought back, enumerate its Static Web App origins here FIRST. The deploy-time gate in Deploy-BffApi.ps1 will pass vacuously against an empty array — that is correct for a stopped site and wrong for a running one.",
       "dataverseRegion": "unitedstates",
       "isLegacyNaming": false
     },
@@ -124,6 +139,8 @@
         "searchServiceName": "spaarke-search-{env}",
         "docIntelName": "spaarke-docintel-{env}"
       },
+      "requiredCorsOrigins": [],
+      "$comment_requiredCorsOrigins": "REQUIRED (may be empty). Origins that MUST appear in this environment's Cors__AllowedOrigins__N App Settings. List ONLY origins CorsModule's suffix rules do not already match — so NOT *.dynamics.com / *.powerapps.com / *.powerappsportals.com. In practice this means your Azure Static Web App front-ends (Office add-ins, external SPA). Deploy-BffApi.ps1 asserts these after every deploy and fails if one is missing. Leaving the key ABSENT makes the deploy warn that the environment is unaudited; an explicit empty array asserts 'this environment genuinely has no SWA front-ends'.",
       "dataverseRegion": "unitedstates",
       "isLegacyNaming": false
     }

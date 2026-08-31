@@ -150,7 +150,6 @@ Each environment gets its **own app registrations** to ensure credential and sco
 | Registration | Pattern | Dev | Demo |
 |-------------|---------|-----|------|
 | BFF API | `Spaarke BFF API - {Env}` | `spe-bff-api` (legacy) | `Spaarke BFF API - Demo` |
-| Dataverse S2S | `Spaarke Dataverse S2S - {Env}` | _(shared)_ | `Spaarke Dataverse S2S - Demo` |
 | UI SPA (MSAL) | `Spaarke UI - {Env}` | _(existing)_ | `Spaarke UI - Demo` |
 | API Scope URI | `api://{appId}/user_impersonation` | `api://spe-bff-api/...` (legacy) | `api://{guid}/user_impersonation` |
 
@@ -183,7 +182,6 @@ Each environment gets **one resource group** containing ALL its resources. No sh
 | AI Foundry Project | 63 | `sprk-{env}-aif-proj` | `sprk-demo-aif-proj` | `sprk-prod-aif-proj` |
 | AI Foundry Storage | 24 | `sprk{env}aifsa` | `sprkdemoaifsa` | `sprkprodaifsa` |
 | App Registration (BFF) | 120 | `Spaarke BFF API - {Env}` | `Spaarke BFF API - Demo` | `Spaarke BFF API - Production` |
-| App Registration (DV) | 120 | `Spaarke Dataverse S2S - {Env}` | `Spaarke Dataverse S2S - Demo` | `Spaarke Dataverse S2S - Production` |
 | App Registration (UI) | 120 | `Spaarke UI - {Env}` | `Spaarke UI - Demo` | `Spaarke UI - Production` |
 | API Scope URI | N/A | `api://{appId}/user_impersonation` | Use Application ID GUID | Use Application ID GUID |
 | Managed Identity (User-Assigned) | 128 | `mi-{purpose}-{env}` | `mi-bff-api-demo` | `mi-bff-api-prod` |
@@ -346,10 +344,72 @@ For fully automated provisioning (CI/CD, `Provision-Customer.ps1`), these servic
 | `Spaarke Provisioning SP` | Entra ID | Application Administrator (app registrations) |
 | `Spaarke BFF API - {Env}` | Microsoft Graph | `FileStorageContainer.Selected` (Application) |
 | `Spaarke BFF API - {Env}` | SharePoint | `Container.Selected` (Application) |
-| `Spaarke Dataverse S2S - {Env}` | Dataverse | System Administrator security role |
+| `Spaarke BFF API - {Env}` | Dataverse | System Administrator security role (single Dataverse Application User; the separate Dataverse S2S app was removed 2026-08-14 — task 060) |
 | PAC CLI auth | Dataverse | System Administrator (for solution import) |
 
 **For manual provisioning** (current approach): Azure CLI interactive login (`az login`) + PAC CLI interactive login (`pac auth create`) are sufficient.
+
+---
+
+## KV-Secret & Resource Naming Standard (Conformance-Gated)
+
+> **Added by** `code-quality-and-assurance-r3` task 063 (owner productization directive, 2026-08-13).
+> **Enforced by** `scripts/naming-conformance-check.ps1` (r3 owns the standard + the gate;
+> `customer-provisioning-orchestration-r1` owns applying canonical names at provisioning time +
+> remediating live-environment drift). Grounded in the FR-29 naming-drift census —
+> `projects/code-quality-and-assurance-r3/workstreams/config-deployment/design.md` (task 017).
+
+This section makes the env-agnostic principle stated above **explicit and enforceable**. It exists
+because the convention was doc-only and had drifted (four vault-naming conventions, 3 casing styles for
+one AI-Search key, env-token-baked names, orphan secrets — see the 017 census).
+
+### The load-bearing rule — env-agnostic replicated names
+
+A name that is **replicated across environments MUST be env-agnostic**: the environment lives in the
+**value** (and in the vault name, which is legitimately per-env), never baked into the **secret or
+resource name**.
+
+| ✅ Conformant | ❌ Violation | Why |
+|---|---|---|
+| `Dataverse-ServiceUrl` | `SPRK-DEV-DATAVERSE-URL` | env token (`DEV`) baked into a replicated secret name |
+| ~~`BFF-API-ClientSecret` (one casing everywhere)~~ | ~~`BFF-API-ClientSecret` + `bff-api-client-secret`~~ | **RESOLVED 2026-08-24** — both deleted (auth-v4 task 033); the BFF identity is secret-free, so the casing-drift hazard is gone rather than reconciled. The rule itself still applies to every other secret |
+| vault `sprk-demo-kv` / `sprk-prod-kv` | vault `sprk-platform-prod-kv`, `kv-sdap-dev`, `spaarke-kv-dev` | non-canonical vault form (extra qualifier / wrong scheme) |
+
+### The four standard rules
+
+1. **Env-agnostic secret names (R1)** — no `DEV/DEMO/PROD/UAT/TEST/STAGING/SANDBOX/QA` token as a
+   delimited segment of a KV-secret name. The per-environment difference is the secret **value** and the
+   **vault** it lives in, never the secret name.
+2. **One canonical casing per logical secret (R2)** — a logical secret has exactly ONE spelling across
+   template, seeder, IaC, and tokens doc. Canonical casing for **new** KV secrets is **kebab-case**
+   (`communication-webhook-signing-key`); existing PascalCase live secrets (`BFF-API-ClientSecret`) are
+   grandfathered but MUST NOT gain a second casing. Never two casings for one value simultaneously.
+3. **Canonical vault name (R3)** — `sprk-{env}-kv` (e.g. `sprk-demo-kv`). **Codified legacy exception
+   (DO-NOT-RENAME): `spaarke-spekvcert`** — the only live dev vault; bicep accepts the vault name as a
+   parameter rather than hardcoding a divergent form. `kv-sdap-{env}`, `spaarke-kv-dev`,
+   `sprkshareddev-kv`, and `sprk-{workload}-{env}-kv` are drift.
+4. **No orphan / duplicate secrets** — every secret the template/app reads is provisioned by the seeder
+   under exactly that canonical name; no alias fan-out (one value → one name), no orphan (a referenced
+   secret never seeded), no duplicate (one value under multiple names).
+
+### Reference syntax (single form)
+
+KV references use the Key Vault-reference form with an env-parameterized vault name:
+`@Microsoft.KeyVault(VaultName=sprk-{env}-kv;SecretName=<Canonical-Name>)`. Do not mix the
+`#{KEY_VAULT_NAME}#`/SecretUri token schemes for the same value.
+
+### Enforcement
+
+`scripts/naming-conformance-check.ps1` implements rules R1–R3 (read-only; renames nothing). It runs
+`-SelfTest` (a seeded env-token/casing violation MUST fail, conformant names MUST pass) and scans the
+canonical secret-name sources. **Activation is per-surface + advisory-until-remediated**: because the
+live environments still carry the 017-census drift (r1's remediation backlog), the gate runs
+**advisory** (reports, does not block) until `customer-provisioning-orchestration-r1` applies the
+current→canonical rename map; it flips to **blocking** per-surface as each surface reaches zero
+violations. This is the same ownership seam as the Graph app-role constants (task 062): r3 owns the
+guardrail, r1 owns the live-environment application. The blocking-gate wiring into `.github/workflows`
+is a coordinated follow-on with `ci-cd-unit-test-remediation-r1` (owns existing-workflow edits) — see
+`projects/code-quality-and-assurance-r3/notes/task-042-063-ci-gate-wiring-deferral.md`.
 
 ---
 

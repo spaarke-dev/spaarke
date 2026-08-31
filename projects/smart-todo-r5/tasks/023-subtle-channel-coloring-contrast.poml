@@ -1,0 +1,127 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="023" project="smart-todo-r5">
+  <metadata>
+    <title>Subtle channel urgency coloring + yellow-contrast audit (FR-08 / U-1 + F-1)</title>
+    <phase>3: Top bar + filter + visuals</phase>
+    <gate>003 complete</gate>
+    <status>completed</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Modifies .ts/.tsx visual/styling code across the shared Kanban surface (useKanbanColumns.ts, KanbanBoard.tsx, KanbanCard.tsx) — FULL per CLAUDE.md §8 ("modifying .cs/.ts/.tsx" trigger); a11y-tagged with axe-core contrast gates.</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Contained visual/token change to an already-token-based surface — not architectural — sonnet default per CLAUDE.md §8.5.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>Q</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <deps>003</deps>
+    <tags>react, fluent-ui, frontend, a11y</tags>
+    <estimated-effort>1 day</estimated-effort>
+  </metadata>
+
+  <prompt>Replace the SmartTodo Kanban's full-column red/yellow/green BACKGROUND wash (currently `backgroundColor: column.tintColor` applied to the entire column body in src/client/shared/Spaarke.UI.Components/src/components/Kanban/KanbanBoard.tsx line ~260, fed by `tintColor: tokens.colorPaletteRedBackground1 / YellowBackground1 / GreenBackground1` in src/client/shared/Spaarke.SmartTodo.Components/src/hooks/useKanbanColumns.ts lines ~224-246) with a subtle treatment — a thin accent bar and/or a lightly tinted column HEADER only, not a full-column fill — while preserving the semantic mapping red=Today, yellow=Tomorrow, green=later. Separately, audit every yellow surface across the SmartTodo Code Page AND the SpaarkeAi/LegalWorkspace widget (KanbanCard score circles, due-date badges, count pills, column tints) to confirm dark foreground on yellow per WCAG — most of this is ALREADY fixed (KanbanCard.tsx uses `colorNeutralForeground1` on yellow at lines ~101-102 and ~306-307; useKanbanColumns.ts sets `countTextColor: colorNeutralForeground1` for Tomorrow at line ~238) — this task is primarily a verification sweep, closing any remaining gap.</prompt>
+
+  <role>Spaarke platform developer. Expert in Fluent UI v9 semantic-token color systems and WCAG 2.1 AA contrast requirements. Follow ADRs strictly.</role>
+
+  <goal>The Kanban's Today/Tomorrow/Future columns show a subtle urgency cue (thin top-border accent already exists via `accentColor`; the change is dropping or substantially reducing the full-column `tintColor` wash, e.g. scoping any residual tint to the column header strip only) while remaining scannable at a glance; an explicit grep+visual sweep confirms zero remaining white-on-yellow (or otherwise low-contrast) surfaces in both the Code Page and the widget; light/dark parity holds; zero hex/rgb literals.</goal>
+
+  <context>
+    <background>Spec FR-08 (U-1 + F-1, refined 2026-08-14): "Now: each kanban channel/column renders a full red/yellow/green background. Want: keep the semantic mapping... but make it subtle (e.g., a thin colored top/left accent bar or a lightly tinted header, not a full saturated column fill)." Design.md confirms F-1's white-on-yellow bug is "already fixed in code" — this task downgrades that half of the work to a verification sweep. KanbanBoard.tsx (grep-confirmed sole consumer family: SmartTodo Code Page + SmartTodoWidget + LegalWorkspace's SmartToDo — no unrelated Kanban consumer exists in this repo) already separates `accentColor` (a Border2-token top-border rail, already thin) from `tintColor` (a Background1-token FULL column fill) — the fix is to stop applying tintColor as a full-column background, or confine it to the column header only.</background>
+    <relevant-files>
+      <file role="modify">src/client/shared/Spaarke.SmartTodo.Components/src/hooks/useKanbanColumns.ts</file>
+      <file role="modify">src/client/shared/Spaarke.UI.Components/src/components/Kanban/KanbanBoard.tsx</file>
+      <file role="canonical-reference">src/client/shared/Spaarke.SmartTodo.Components/src/components/KanbanCard/KanbanCard.tsx</file>
+      <file role="canonical-reference">src/client/shared/Spaarke.SmartTodo.Components/src/widgets/SmartTodoWidget/SmartTodoWidget.styles.ts</file>
+    </relevant-files>
+    <dependencies>
+      <dependency task="003" status="pending">Phase 1 hoist gate — useKanbanColumns.ts / KanbanCard.tsx live in the shared package this task modifies; hoist must be closed first per plan.md sequencing.</dependency>
+    </dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-021">Fluent UI v9 semantic tokens exclusively — zero hex/rgb literals (NFR-04).</constraint>
+    <constraint source="spec">FR-08: preserve red=Today, yellow=Tomorrow, green=later semantic mapping; must remain scannable at a glance (not so subtle it becomes indistinguishable).</constraint>
+    <constraint source="spec">FR-08 acceptance: no white-on-yellow surface remains anywhere audited (Code Page + widget); light/dark parity holds.</constraint>
+    <constraint source="project">KanbanBoard.tsx is shared (Spaarke.UI.Components); grep confirmed its only consumers today are the SmartTodo family (Code Page, SpaarkeAi widget, LegalWorkspace shim). Changing its tint-application behavior is safe under this task's scope, but re-grep before merging in case a new consumer was added by a parallel project.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>fluent-v9-color-contrast</topic>
+    <files>
+      <file>.claude/adr/ADR-021-fluent-design-system.md</file>
+      <file>.claude/adr/ADR-012-shared-components.md</file>
+      <file>.claude/patterns/ui/fluent-v9-component-authoring.md</file>
+      <file>docs/architecture/spaarke-todo-architecture.md</file>
+      <file>projects/smart-todo-r5/spec.md</file>
+      <file>projects/smart-todo-r5/CLAUDE.md</file>
+    </files>
+    <patterns>
+      <pattern name="fluent-v9-component-authoring" location=".claude/patterns/ui/fluent-v9-component-authoring.md">Semantic-token usage, contrast-safe pairing conventions.</pattern>
+    </patterns>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="0" name="Context + rigor declaration">Read useKanbanColumns.ts (buildColumns, ~lines 190-249), KanbanBoard.tsx's tint/accent application (~lines 240-310), KanbanCard.tsx's due-badge and score-circle color maps (~lines 90-110, ~295-315), and SmartTodoWidget.styles.ts for any independent yellow usage.</step>
+    <step order="1">Run `grep -rn "colorPaletteYellow" src/client/shared/Spaarke.SmartTodo.Components src/solutions/SmartTodo` to enumerate every yellow-token usage; for each, confirm the paired foreground/text token is a dark/neutral token (colorNeutralForeground1 or equivalent), not `colorNeutralForegroundOnBrand` (white) or unset (defaulting to light text).</step>
+    <step order="2">In useKanbanColumns.ts, remove or substantially reduce the full-column `tintColor` values (or repurpose them for a header-only application — coordinate with KanbanBoard.tsx's rendering in the next step) so the visible column body is not a solid wash; keep `accentColor` (the top-border rail) as the primary channel cue, and keep the yellow `countTextColor: colorNeutralForeground1` fix in place.</step>
+    <step order="3">In KanbanBoard.tsx, adjust the column-container rendering so `tintColor` (if retained) applies ONLY to a header/title strip element rather than `hasTint ? { backgroundColor: column.tintColor }` on the full column body — OR remove the tint application entirely if the accent-bar-only treatment already satisfies "keep enough differentiation to scan urgency at a glance" (make this call based on a visual check against the 3-column layout, not by assumption).</step>
+    <step order="4">Fix any remaining low-contrast yellow instance found in step 1 by swapping its foreground token to `colorNeutralForeground1` (or the darkest appropriate neutral token), matching the pattern already used in KanbanCard.tsx.</step>
+    <step order="5">Verify light/dark parity by toggling FluentProvider theme and re-checking every touched surface.</step>
+    <step order="6">Add/update unit + axe-core coverage asserting no contrast violations on yellow surfaces.</step>
+    <step order="7">Grep changed files for hex/rgb literals — zero matches.</step>
+    <step order="8">Update tasks/TASK-INDEX.md: mark 023 ✅ completed.</step>
+    <step order="9">Document the final subtle-treatment decision (accent-bar-only vs header-tint) in projects/smart-todo-r5/notes/.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If reducing the column tint makes the 3-column urgency mapping genuinely hard to distinguish at a glance (a legitimate UX regression, not a preference call), STOP and escalate per CLAUDE.md §6 with a screenshot/description rather than shipping a treatment that fails the "scannable at a glance" acceptance criterion.</trigger>
+  </escalation>
+
+  <ui-tests>
+    <test name="axe-core contrast audit">
+      <steps>
+        <step>Render the Kanban with a mix of Today/Tomorrow/Future items and run axe-core against the full surface</step>
+      </steps>
+      <expected>Zero color-contrast violations, specifically on yellow-tinted surfaces (Tomorrow column, yellow score circles, yellow due badges, yellow count pills)</expected>
+    </test>
+    <test name="Dark Mode Compliance (ADR-021)">
+      <steps>
+        <step>Render with webLightTheme, then switch to webDarkTheme</step>
+        <step>Inspect all 3 columns and every card-level colored surface</step>
+      </steps>
+      <expected>Subtle accent treatment + text colors adapt correctly in both themes; zero hex/rgb literals</expected>
+    </test>
+    <test name="Urgency scannability (manual/visual)">
+      <steps>
+        <step>Render a populated 3-column board</step>
+        <step>Visually compare against the pre-change full-wash version</step>
+      </steps>
+      <expected>Today/Tomorrow/Future remain distinguishable at a glance despite the reduced saturation</expected>
+    </test>
+  </ui-tests>
+
+  <tools>
+    <tool name="npm">Run vitest in the shared lib</tool>
+    <tool name="terminal">grep for hex/rgb literals and colorPaletteYellow usages</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/client/shared/Spaarke.SmartTodo.Components/src/hooks/useKanbanColumns.ts</output>
+    <output type="code">src/client/shared/Spaarke.UI.Components/src/components/Kanban/KanbanBoard.tsx</output>
+    <output type="test">src/client/shared/Spaarke.SmartTodo.Components/__tests__/useKanbanColumns.test.ts</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Given the Kanban renders, then no column shows a full-saturation background wash — the urgency cue is a thin accent bar and/or a lightly tinted header only.</criterion>
+    <criterion testable="true">Given the reduced treatment, when a user scans the board, then Today (red) / Tomorrow (yellow) / Future (green) remain visually distinguishable at a glance.</criterion>
+    <criterion testable="true">Given an axe-core scan of the full SmartTodo surface (Code Page + widget), then zero color-contrast violations are reported, specifically on yellow surfaces.</criterion>
+    <criterion testable="true">Given light and dark themes, then both render with correct contrast and no visual regression.</criterion>
+    <criterion testable="true">Zero hex/rgb literals in changed files (grep-verifiable); all unit tests pass; build is green.</criterion>
+  </acceptance-criteria>
+
+  <notes>Spec refs: FR-08 (U-1 + F-1). F-1's yellow-foreground fix is largely already shipped (KanbanCard.tsx, useKanbanColumns.ts countTextColor) — confirm via the step-1 grep sweep rather than re-implementing.
+
+Completion notes (2026-08-16): Step-1 grep sweep (`colorPaletteYellow` across both `Spaarke.SmartTodo.Components` and `src/solutions/SmartTodo`) found ZERO white-on-yellow surfaces remaining — every existing yellow usage already pairs with `colorNeutralForeground1`; F-1 confirmed fully fixed, no code changes needed for that half. Subtle-coloring fix (U-1): split KanbanBoard.tsx's single accent+tint inline-style closure into two — `columnInlineStyle` (accentColor top-border, unchanged, on the column container) and new `columnHeaderTintStyle` (tintColor as backgroundColor, scoped to the columnHeader div only — title/subtitle/count-pill strip — instead of the full column body). useKanbanColumns.ts token values (accentColor/tintColor/countTextColor) are bit-for-bit unchanged — comment-only update describing the new render-side scoping. Reconciled with SmartTodoWidget.tsx's "column tints" doc comment: confirmed it describes this SAME single-rendering-site mechanism (KanbanBoard.tsx), not a second independent tint application — no double-apply risk (widget file itself not modified, out of this task's 3-file scope; its comment is now mildly stale, flagged as a minor doc-drift item in notes/task-023-coloring.md, not fixed in-scope). Added one additive test (`runSubtleColoringTokenMappingTest`) to useKanbanColumns.test.ts verifying the red/yellow/green token mapping + F-1 countTextColor pin + zero hex/rgb. Verification: tsc clean in both packages (0 errors in KanbanBoard.tsx; 3 pre-existing unrelated @spaarke/auth/@spaarke/sdap-client errors elsewhere in Spaarke.UI.Components, confirmed out of scope); existing KanbanBoard.test.tsx (12 tests, unmodified) passed — zero DnD/layout/a11y regression; ad-hoc compiled run of useKanbanColumns.test.ts — 5/5 passed; zero hex/rgb/hsl literals grep-verified across all 3 changed files. code-review + adr-check (Step 9.5, FULL rigor) both clean — no critical/warning findings. Escalation trigger did not fire (primary accent-border + count-pill cues unchanged; scannability preserved). Full writeup: projects/smart-todo-r5/notes/task-023-coloring.md. Scope discipline: only the 3 designated files were touched (useKanbanColumns.ts, KanbanBoard.tsx, useKanbanColumns.test.ts); nothing staged/committed (per concurrent-agent boundary — 1 of 3 agents in this worktree); TASK-INDEX.md/current-task.md intentionally left untouched for the orchestrator.</notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+  </execution>
+</task>

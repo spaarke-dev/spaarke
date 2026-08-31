@@ -1,0 +1,158 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="030" project="record-header-and-notepad-r2">
+  <metadata>
+    <title>RecordHeaderConfiguration v1.0 types + shallow non-throwing guard</title>
+    <phase>3 Config Resolver + Control</phase>
+    <gate>blocked until 015 (fields barrel + contract tests) is complete</gate>
+    <status>completed</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Modifies shared-library .ts code; new type surface consumed by the resolver (031) and the RecordHeader PCF (033)</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Standard single-file implementation with an explicit canonical reference to copy (types/DataGridConfiguration.ts isValidDataGridConfiguration)</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>C</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <deps>015</deps>
+    <tags>typescript, config, unit-test</tags>
+    <estimated-effort>2-3 hours</estimated-effort>
+  </metadata>
+
+  <prompt>
+    Create the RecordHeaderConfiguration v1.0 TypeScript schema and its runtime guard
+    isValidRecordHeaderConfiguration in a new shared-library types file, mirroring the shape and
+    philosophy of types/DataGridConfiguration.ts (guard at line 479). The guard is a SHALLOW,
+    NON-THROWING discriminator; callers console.warn and fall through to derived defaults.
+  </prompt>
+
+  <role>
+    SPAARKE platform developer. Expert in TypeScript type design and runtime type guards for
+    maker-authored JSON configuration. Follow ADRs strictly.
+  </role>
+
+  <goal>
+    A new file src/client/shared/Spaarke.UI.Components/src/types/RecordHeaderConfiguration.ts
+    exporting the RecordHeaderConfiguration interface family and the
+    isValidRecordHeaderConfiguration guard, exported from the types barrel, with exhaustive unit
+    tests passing.
+  </goal>
+
+  <context>
+    <background>
+      R2 ships ONE configuration-driven Spaarke.Records.RecordHeader PCF. A maker pastes a
+      RecordHeaderConfiguration v1.0 JSON layout into the layoutJson manifest property (FR-01).
+      Because the JSON is maker-authored free text, a malformed paste must NEVER throw and NEVER
+      blank a production form (FR-03, NFR-10). The proven in-repo shape for this is
+      isValidDataGridConfiguration: a shallow discriminator check that returns false, with the
+      CALLER logging console.warn and falling through to metadata-derived defaults. Deep shape
+      errors intentionally surface as undefined property reads downstream and degrade gracefully.
+      Spec: FR-01 (schema), FR-03 (validation). Schema definition: design.md section 5.2.
+    </background>
+    <relevant-files>
+      <file role="new">src/client/shared/Spaarke.UI.Components/src/types/RecordHeaderConfiguration.ts</file>
+      <file role="new">src/client/shared/Spaarke.UI.Components/src/types/__tests__/RecordHeaderConfiguration.test.ts</file>
+      <file role="modify">src/client/shared/Spaarke.UI.Components/src/types/index.ts</file>
+      <file role="canonical-reference">src/client/shared/Spaarke.UI.Components/src/types/DataGridConfiguration.ts</file>
+      <file role="canonical-reference">projects/record-header-and-notepad-r2/design.md</file>
+    </relevant-files>
+    <dependencies>
+      <dependency task="015" status="pending">Fields barrel + renderer contract tests merged (Phase 1 complete; group C prerequisite per plan section 4)</dependency>
+    </dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="project">The guard isValidRecordHeaderConfiguration validates ONLY the discriminators: value is a non-null object AND _version === '1.0' AND Array.isArray(fields). It MUST NOT deep-validate field entries, MUST NOT throw for any input, and MUST NOT log — callers console.warn and fall through (mirror isValidDataGridConfiguration at DataGridConfiguration.ts:479, including its JSDoc style explaining the intentionally-shallow contract).</constraint>
+    <constraint source="project">The schema in this file is a CLOSED SET per spec FR-01 / design section 5.2: _version (required, literal '1.0'), title (optional string), columns (optional, union 2 | 3, documented default 3 — the default is APPLIED by the resolver in task 031, not by this types file), summaryField (optional string), fields (required array). Per-field keys: name (required string), span (optional number), label (optional string), renderer (optional union: 'text' | 'textarea' | 'lookup' | 'optionset' | 'date' | 'datetime' | 'number' | 'currency' | 'boolean'), readOnly (optional boolean), required (optional boolean), maxLines (optional number). Do NOT add any other key. Explicitly do NOT add a fields[].lookup escape hatch — design closed it 2026-08-24 (lookup targets come from metadata).</constraint>
+    <constraint source="project">This file MUST be free of React, Xrm, and I/O imports — types + one pure guard function only. Use readonly property modifiers mirroring DataGridConfiguration.ts conventions.</constraint>
+    <constraint source="ADR-012">The type + guard live in the shared component library (@spaarke/ui-components), not in the PCF folder — both the resolver (shared lib) and the PCF consume them.</constraint>
+    <constraint source="ADR-038">This is a pure, typed surface — its unit tests are a KEEP category (maintain-class). Place them at src/types/__tests__/RecordHeaderConfiguration.test.ts.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/record-header-and-notepad-r2/spec.md</file>
+      <file>projects/record-header-and-notepad-r2/design.md</file>
+      <file>.claude/adr/ADR-012-shared-components.md</file>
+      <file>docs/adr/ADR-038-testing-strategy.md</file>
+      <file>.claude/constraints/testing.md</file>
+      <file>.claude/patterns/testing/unit-test-structure.md</file>
+    </files>
+    <patterns>
+      <pattern name="isValidDataGridConfiguration" location="src/client/shared/Spaarke.UI.Components/src/types/DataGridConfiguration.ts">
+        Lines 440-495: the canonical shallow non-throwing guard. Copy its structure — null/typeof
+        object check, discriminator equality check, boolean return, is-type predicate signature,
+        JSDoc documenting WHY it is intentionally shallow. Replace the source.type discriminator
+        with Array.isArray(fields).
+      </pattern>
+      <pattern name="types barrel export" location="src/client/shared/Spaarke.UI.Components/src/types/index.ts">
+        Line 16-17: export * from './DataGridConfiguration'. Add the mirror line for
+        RecordHeaderConfiguration.
+      </pattern>
+    </patterns>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="0">Context + rigor declaration per task-execute Step 0.5. Read DataGridConfiguration.ts (interface block 440-495) and design.md section 5.2 in full.</step>
+    <step order="1">Create src/types/RecordHeaderConfiguration.ts: RecordHeaderFieldConfig interface, RecordHeaderFieldRenderer union, RecordHeaderConfiguration interface, all readonly, with JSDoc citing design.md section 5.2 and the defaults table (defaults documented in JSDoc; applied by resolveHeaderConfig in task 031).</step>
+    <step order="2">Implement isValidRecordHeaderConfiguration(value: unknown): value is RecordHeaderConfiguration — the shallow discriminator per the constraints.</step>
+    <step order="3">Add the barrel export to src/types/index.ts.</step>
+    <step order="4">Write src/types/__tests__/RecordHeaderConfiguration.test.ts covering the full acceptance-criteria matrix below.</step>
+    <step order="5">Run the shared-library build and test suite; both green.</step>
+    <step order="6">Update TASK-INDEX.md: set this task's status to ✅.</step>
+    <step order="7">Document any deviation in projects/record-header-and-notepad-r2/notes/.</step>
+  </steps>
+
+  <justification>
+    <existing>src/client/shared/Spaarke.UI.Components/src/types/DataGridConfiguration.ts:448 (DataGridConfiguration) + :479 (isValidDataGridConfiguration) — closest neighbor, grep-verified; no header-layout schema exists anywhere in src/ (grep RecordHeaderConfiguration returns nothing).</existing>
+    <extension>No — DataGridConfiguration describes grid columns/views/command-bar for the DataGrid framework; a record-header layout describes fields/spans/renderers for a header card. Grafting header keys onto the grid schema would couple two unrelated v1.0 discriminator contracts and break isValidDataGridConfiguration's source.type check. The design mirrors its STRUCTURE instead (spec section 11 table).</extension>
+    <cost-of-doing-nothing>Without a typed schema + shallow guard, each layoutJson consumer (resolver 031, control 033) hand-parses maker JSON: a malformed paste then throws in the render path and blanks a production form, directly violating FR-03/NFR-10 ("never throws, never renders blank"), and config precedence spreads through the render path untested (spec section 11).</cost-of-doing-nothing>
+  </justification>
+
+  <tools>
+    <tool name="npm">Build/test the shared library (npm run build, npm test in Spaarke.UI.Components)</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/client/shared/Spaarke.UI.Components/src/types/RecordHeaderConfiguration.ts</output>
+    <output type="code">src/client/shared/Spaarke.UI.Components/src/types/index.ts</output>
+    <output type="test">src/client/shared/Spaarke.UI.Components/src/types/__tests__/RecordHeaderConfiguration.test.ts</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Given the minimal object parsed from '{"_version":"1.0","fields":[]}', the guard returns true.</criterion>
+    <criterion testable="true">Given the full design section 5.2 Matter example JSON parsed to an object, the guard returns true, and the same object literal type-checks as RecordHeaderConfiguration at compile time.</criterion>
+    <criterion testable="true">Negative: null, undefined, 42, 'a string', a top-level array, and an object with no _version each return false.</criterion>
+    <criterion testable="true">Negative: _version of '2.0', 1.0 (number), and '' each return false.</criterion>
+    <criterion testable="true">Negative: fields missing, fields as an object, and fields as a string each return false.</criterion>
+    <criterion testable="true">Shallow by design: an object with _version '1.0' and fields [{}] (field entries missing name) returns TRUE — deep errors degrade downstream, per the DataGridConfiguration precedent.</criterion>
+    <criterion testable="true">The guard never throws for any input in the test matrix (each case wrapped so a throw fails the test), and the guard function contains no console call.</criterion>
+    <criterion testable="true">The module imports nothing from react, @fluentui, or any Xrm/service module (verified by reading the import list in the test or lint).</criterion>
+    <criterion testable="true">export * from './RecordHeaderConfiguration' present in src/types/index.ts; shared-library tsc build and npm test both green.</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    Consumed by task 031 (resolveHeaderConfig) and task 033 (RecordHeader PCF). Keep columns and
+    all defaults OPTIONAL in the types — resolution to concrete values is the resolver's job
+    (031); this file only documents the defaults in JSDoc. Spec refs: FR-01, FR-03; design.md
+    section 5.2 is the authoritative key table.
+
+    COMPLETION (2026-08-25): Implemented as specified, no deviations from the closed-set schema
+    or the shallow-guard contract. Created src/types/RecordHeaderConfiguration.ts
+    (RecordHeaderFieldRenderer union, RecordHeaderFieldConfig, RecordHeaderConfiguration, all
+    readonly, mirroring isValidDataGridConfiguration's JSDoc style) + 36-test
+    src/types/__tests__/RecordHeaderConfiguration.test.ts covering the full acceptance-criteria
+    matrix (minimal + design.md §5.2 Matter example + two staged realistic payloads valid;
+    6 top-level + 3 _version + 3 fields negative cases; shallow-by-design field [{}] pass-through;
+    17-input never-throws matrix + console-spy no-log assertion; static import-purity scan).
+    Added the barrel line to src/types/index.ts. `tsc --noEmit`, `npm run build`, and
+    `eslint` all clean; full jest run is 213/222 suites green — the 9 failures are the
+    pre-existing known-red suites (incl. the documented-stale
+    src/__tests__/recordHeader.integration.test.tsx), none touching this file.
+    Per the orchestrator's hard constraints for this sub-agent run, TASK-INDEX.md and
+    current-task.md were left untouched — the main session owns those updates.
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Before starting this task, load all files listed in knowledge/files. Follow the task-execute skill for the mandatory pre-execution checklist.</protocol>
+  </execution>
+</task>

@@ -148,6 +148,9 @@ public sealed class OutboxServiceSeamTests
     {
         private readonly Dictionary<Guid, Entity> _rows = new();
 
+        public async Task<(Guid Id, bool Created)> UpsertAsync(Entity entity, CancellationToken ct = default)
+            => (await CreateAsync(entity, ct), true); // compose-r7 task 013: interface member; fake delegates to create
+
         public Task<Guid> CreateAsync(Entity entity, CancellationToken ct = default)
         {
             var id = Guid.NewGuid();
@@ -217,28 +220,28 @@ public sealed class OutboxServiceSeamTests
             switch (condition.Operator)
             {
                 case ConditionOperator.Equal:
-                {
-                    var expected = condition.Values[0];
-                    if (raw is EntityReference er && expected is Guid expectedGuid)
                     {
-                        return er.Id == expectedGuid;
-                    }
+                        var expected = condition.Values[0];
+                        if (raw is EntityReference er && expected is Guid expectedGuid)
+                        {
+                            return er.Id == expectedGuid;
+                        }
 
-                    return Equals(raw, expected);
-                }
+                        return Equals(raw, expected);
+                    }
                 case ConditionOperator.Null:
                     return !hasValue;
                 case ConditionOperator.GreaterThan:
-                {
-                    if (!hasValue)
                     {
-                        return false;
-                    }
+                        if (!hasValue)
+                        {
+                            return false;
+                        }
 
-                    var actual = (DateTime)raw!;
-                    var threshold = (DateTime)condition.Values[0];
-                    return actual > threshold;
-                }
+                        var actual = (DateTime)raw!;
+                        var threshold = (DateTime)condition.Values[0];
+                        return actual > threshold;
+                    }
                 default:
                     throw new NotSupportedException(
                         $"FakeGenericEntityService does not model ConditionOperator.{condition.Operator} — extend the fake if OutboxService starts using it.");

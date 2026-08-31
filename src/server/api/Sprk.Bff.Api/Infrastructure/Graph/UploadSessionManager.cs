@@ -1,4 +1,5 @@
 using System.Diagnostics;
+using System.Globalization;
 using Microsoft.Graph;
 using Microsoft.Graph.Models;
 using Microsoft.Graph.Models.ODataErrors;
@@ -90,142 +91,33 @@ public class UploadSessionManager
         }
     }
 
-    public async Task<UploadSessionDto?> CreateUploadSessionAsync(
-        string containerId,
-        string path,
-        CancellationToken ct = default)
-    {
-        using var activity = Activity.Current;
-        activity?.SetTag("operation", "CreateUploadSession");
-        activity?.SetTag("containerId", containerId);
-        activity?.SetTag("filePath", path);
+    // ---------------------------------------------------------------------------------------------
+    // APP-ONLY CHUNKED UPLOAD (CreateUploadSessionAsync + UploadChunkAsync) — DELETED 2026-08-27
+    // by unified-access-control-r2, following task 073.
+    //
+    // Their only caller was Api/UploadEndpoints.cs, which 073 deleted outright. They were reported as
+    // "0 production callers" BEFORE 073 as well (merge plan follow-up #2) — 073 is what made that
+    // provably true rather than nearly true, and the retirement regression guard
+    // (tests/integration/regression/MiContainerKeyedWriteRouteRetirementTests.cs) is what keeps the
+    // routes from coming back and reviving them.
+    //
+    // NOT deleted, and do not confuse them with these: the OBO twins CreateUploadSessionAsUserAsync /
+    // UploadChunkAsUserAsync below are LIVE via OBOEndpoints.cs:119/172. They are 076's to remove, and
+    // only because their client path is dead by 404 (GET /api/obo/containers/{id}/drive is mapped
+    // nowhere) — a different reason from these two, which had no caller at all.
+    // ---------------------------------------------------------------------------------------------
 
-        _logger.LogInformation("Creating upload session for container {ContainerId} at path {Path}",
-            containerId, path);
-
-        try
-        {
-            var graphClient = _factory.ForApp();
-
-            // First, get the drive for this container
-            var drive = await graphClient.Storage.FileStorage.Containers[containerId].Drive
-                .GetAsync(cancellationToken: ct);
-
-            if (drive?.Id == null)
-            {
-                _logger.LogError("Failed to get drive for container {ContainerId}", containerId);
-                return null;
-            }
-
-            var createUploadSessionPostRequestBody = new Microsoft.Graph.Drives.Item.Items.Item.CreateUploadSession.CreateUploadSessionPostRequestBody
-            {
-                Item = new DriveItemUploadableProperties
-                {
-                    AdditionalData = new Dictionary<string, object>
-                    {
-                        { "@microsoft.graph.conflictBehavior", "rename" }
-                    }
-                }
-            };
-
-            var session = await graphClient.Drives[drive.Id].Root
-                .ItemWithPath(path)
-                .CreateUploadSession
-                .PostAsync(createUploadSessionPostRequestBody, cancellationToken: ct);
-
-            if (session == null)
-            {
-                _logger.LogError("Failed to create upload session - Graph API returned null");
-                return null;
-            }
-
-            _logger.LogInformation("Created upload session {UploadUrl} for file {Path}",
-                session.UploadUrl, path);
-
-            return new UploadSessionDto(
-                session.UploadUrl!,
-                session.ExpirationDateTime ?? DateTimeOffset.UtcNow.AddHours(24));
-        }
-        catch (ServiceException ex) when (ex.ResponseStatusCode == (int)System.Net.HttpStatusCode.NotFound)
-        {
-            _logger.LogWarning("Container {ContainerId} not found", containerId);
-            return null;
-        }
-        catch (ServiceException ex) when (ex.ResponseStatusCode == (int)System.Net.HttpStatusCode.TooManyRequests)
-        {
-            _logger.LogWarning("Graph API throttling encountered, retry with backoff: {Error}", ex.Message);
-            throw new InvalidOperationException("Service temporarily unavailable due to rate limiting", ex);
-        }
-        catch (ServiceException ex)
-        {
-            _logger.LogError(ex, "Graph API error creating upload session: {Error}", ex.Message);
-            throw new InvalidOperationException($"Failed to create upload session: {ex.Message}", ex);
-        }
-        catch (Exception ex)
-        {
-            _logger.LogError(ex, "Unexpected error creating upload session: {Error}", ex.Message);
-            throw;
-        }
-    }
-
-    public async Task<HttpResponseMessage> UploadChunkAsync(
-        UploadSessionDto session,
-        Stream file,
-        long start,
-        long length,
-        CancellationToken ct = default)
-    {
-        using var activity = Activity.Current;
-        activity?.SetTag("operation", "UploadChunk");
-        activity?.SetTag("start", start);
-        activity?.SetTag("length", length);
-
-        _logger.LogInformation("Uploading chunk from {Start} to {End}", start, start + length - 1);
-
-        try
-        {
-            using var httpClient = _httpClientFactory.CreateClient("GraphUploadSession");
-            using var request = new HttpRequestMessage(HttpMethod.Put, session.UploadUrl);
-
-            // Read chunk data
-            var buffer = new byte[length];
-            var bytesRead = await file.ReadAsync(buffer, 0, (int)length, ct);
-
-            if (bytesRead != length)
-            {
-                _logger.LogWarning("Read {BytesRead} bytes but expected {Length}", bytesRead, length);
-            }
-
-            request.Content = new ByteArrayContent(buffer, 0, bytesRead);
-            request.Content.Headers.ContentLength = bytesRead;
-            request.Content.Headers.ContentRange = new System.Net.Http.Headers.ContentRangeHeaderValue(start, start + bytesRead - 1);
-
-            var response = await httpClient.SendAsync(request, ct);
-
-            if (!response.IsSuccessStatusCode && response.StatusCode != System.Net.HttpStatusCode.Accepted)
-            {
-                _logger.LogWarning("Chunk upload returned status {StatusCode}", response.StatusCode);
-            }
-            else
-            {
-                _logger.LogInformation("Successfully uploaded chunk from {Start} to {End}", start, start + bytesRead - 1);
-            }
-
-            return response;
-        }
-        catch (Exception ex)
-        {
-            _logger.LogError(ex, "Error uploading chunk: {Error}", ex.Message);
-            throw;
-        }
-    }
 
     // =============================================================================
     // USER CONTEXT METHODS (OBO Flow)
     // =============================================================================
 
     /// <summary>
-    /// Uploads a small file (< 4MB) as the user (OBO flow).
+    /// Uploads a file as the user (OBO flow) via Graph's SIMPLE upload — a single
+    /// <c>PUT .../content</c>. Named "small" for the R1-era 4 MB boundary that no longer applies:
+    /// Graph raised the simple-upload limit to 250 MB in October 2023 and SharePoint Embedded confirms
+    /// the same figure for containers, so this method now covers every document size Spaarke carries.
+    /// Callers enforce their own product limits (see <c>ComposeSaveLimits</c>); this method enforces none.
     /// </summary>
     public async Task<FileHandleDto?> UploadSmallAsUserAsync(
         HttpContext ctx,
@@ -240,12 +132,19 @@ public class UploadSessionManager
 
             _logger.LogInformation("Uploading file as user to container {ContainerId}, path {Path}", containerId, path);
 
-            // Validate content size (small upload < 4MB)
-            if (content.CanSeek && content.Length > 4 * 1024 * 1024)
-            {
-                _logger.LogWarning("Content too large for small upload: {Size} bytes (max 4MB)", content.Length);
-                throw new ArgumentException("Content size exceeds 4MB limit for small uploads. Use chunked upload instead.");
-            }
+            // FR-S08 (spaarkeai-compose-r8 task 015): the 4 MB guard that stood here is DELETED — it
+            // enforced a Graph limit that no longer exists. `PUT .../content` has accepted files up to
+            // 250 MB since October 2023 (the 4 MB figure comes from the retired OneDrive REST docs, which
+            // now redirect to the Graph page carrying the new number), and SharePoint Embedded confirms
+            // the same 250 MB simple-upload boundary for containers. The guard's advice — "use chunked
+            // upload instead" — therefore sent callers to a resumable session they do not need, and it
+            // failed a Compose create-on-save of any document over 4 MB outright.
+            //
+            // It is NOT replaced with a 250 MB guard: the caller that cares (Compose) enforces its own
+            // product limit at the endpoint, from ComposeSaveLimits, and a second threshold here would be
+            // the "two constants" divergence that turns a stated limit into an unexplained failure. If a
+            // future caller genuinely needs >250 MB, that caller routes to a resumable session — which is
+            // a decision about that caller, not a guard on this method.
 
             // For SharePoint Embedded: Container ID = Drive ID (per Microsoft documentation)
             // Use container ID directly with OBO credentials (user has access, App-Only might not)
@@ -323,8 +222,14 @@ public class UploadSessionManager
         }
         catch (ODataError ex) when (ex.ResponseStatusCode == 429)
         {
-            _logger.LogWarning(ex, "SPE create (upload-small): Graph throttling for container={ContainerId} path={Path}", containerId, path);
-            throw new InvalidOperationException("Service temporarily unavailable due to Graph rate limiting", ex);
+            // FR-S09 item 6 (r8 task 016): a throttle is a TYPED, retryable refusal carrying Graph's own
+            // back-off, not a generic InvalidOperationException that reaches the endpoint's catch-all and
+            // becomes an HTTP 500. Nothing was written; the caller's document is intact.
+            var retryAfter = ReadRetryAfter(ex.ResponseHeaders);
+            _logger.LogWarning(ex,
+                "SPE create (upload-small): Graph throttling for container={ContainerId} path={Path} retryAfter={RetryAfter}",
+                containerId, path, retryAfter);
+            throw new GraphThrottledException(path, retryAfter, ex);
         }
         catch (ODataError ex)
         {
@@ -348,9 +253,11 @@ public class UploadSessionManager
         }
         catch (ServiceException ex) when (ex.ResponseStatusCode == 429)
         {
-            _logger.LogWarning("Graph API throttling, retry after {RetryAfter}s",
-                ex.ResponseHeaders?.RetryAfter?.Delta?.TotalSeconds ?? 60);
-            throw new InvalidOperationException("Service temporarily unavailable due to rate limiting", ex);
+            // FR-S09 item 6 (r8 task 016): same typed refusal as the ODataError filter above. Kept in
+            // step with it so the belt-and-suspenders path cannot report a throttle differently.
+            var retryAfter = ex.ResponseHeaders?.RetryAfter?.Delta;
+            _logger.LogWarning(ex, "Graph API throttling, retry after {RetryAfter}", retryAfter);
+            throw new GraphThrottledException(path, retryAfter, ex);
         }
         catch (ServiceException ex)
         {
@@ -462,8 +369,12 @@ public class UploadSessionManager
         }
         catch (ODataError ex) when (ex.ResponseStatusCode == 429)
         {
-            _logger.LogWarning(ex, "SPE replace-content: Graph throttling drive={DriveId} item={ItemId}", driveId, itemId);
-            throw new InvalidOperationException("Service temporarily unavailable due to Graph rate limiting", ex);
+            // FR-S09 item 6 (r8 task 016) — see the create-path throttle catch above.
+            var retryAfter = ReadRetryAfter(ex.ResponseHeaders);
+            _logger.LogWarning(ex,
+                "SPE replace-content: Graph throttling drive={DriveId} item={ItemId} retryAfter={RetryAfter}",
+                driveId, itemId, retryAfter);
+            throw new GraphThrottledException(itemId, retryAfter, ex);
         }
         catch (ODataError ex)
         {
@@ -500,8 +411,12 @@ public class UploadSessionManager
         }
         catch (ServiceException ex) when (ex.ResponseStatusCode == 429)
         {
-            _logger.LogWarning(ex, "SPE replace-content: Graph throttling drive={DriveId} item={ItemId}", driveId, itemId);
-            throw new InvalidOperationException("Service temporarily unavailable due to Graph rate limiting", ex);
+            // FR-S09 item 6 (r8 task 016) — see the ODataError filter above.
+            var retryAfter = ex.ResponseHeaders?.RetryAfter?.Delta;
+            _logger.LogWarning(ex,
+                "SPE replace-content: Graph throttling drive={DriveId} item={ItemId} retryAfter={RetryAfter}",
+                driveId, itemId, retryAfter);
+            throw new GraphThrottledException(itemId, retryAfter, ex);
         }
         catch (ServiceException ex)
         {
@@ -520,6 +435,35 @@ public class UploadSessionManager
     private static bool IsResourceLockedCode(string? code) =>
         !string.IsNullOrEmpty(code) &&
         code.Contains("locked", StringComparison.OrdinalIgnoreCase);
+
+    /// <summary>
+    /// FR-S09 item 6 (r8 task 016): read Graph's <c>Retry-After</c> off a Kiota error's response headers.
+    /// </summary>
+    /// <remarks>
+    /// Graph sends <c>Retry-After</c> as delta-seconds on a 429. It is the ONE piece of information that
+    /// makes a throttle actionable, and every throttle site used to discard it. Returns null when the
+    /// header is absent or unparseable — callers state a conservative default rather than invent a number.
+    /// An HTTP-date form (RFC 9110 permits it, Graph does not send it) is deliberately NOT parsed: a wrong
+    /// number would be worse than none.
+    /// </remarks>
+    private static TimeSpan? ReadRetryAfter(IDictionary<string, IEnumerable<string>>? headers)
+    {
+        if (headers is null) return null;
+        foreach (var (key, values) in headers)
+        {
+            if (!string.Equals(key, "Retry-After", StringComparison.OrdinalIgnoreCase)) continue;
+            foreach (var value in values)
+            {
+                if (int.TryParse(value, NumberStyles.Integer, CultureInfo.InvariantCulture, out var seconds)
+                    && seconds is > 0 and <= 3600)
+                {
+                    return TimeSpan.FromSeconds(seconds);
+                }
+            }
+            return null;
+        }
+        return null;
+    }
 
     /// <summary>
     /// Creates an upload session for large files as the user (OBO flow).

@@ -431,7 +431,7 @@ public class LoopElicitationTests
             PlaybookId: null,
             CreatedAt: now,
             LastActivity: now,
-            Messages: new List<Sprk.Bff.Api.Models.Ai.Chat.ChatMessage>());
+            Messages: new List<Sprk.Bff.Api.Models.Ai.Chat.ChatMessage>()) { OwnerOid = TestSessionOwner.Oid };
         await _sessionManager.UpdateSessionCacheAsync(session);
         return session;
     }

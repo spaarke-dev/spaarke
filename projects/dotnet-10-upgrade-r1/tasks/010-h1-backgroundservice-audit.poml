@@ -1,0 +1,94 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="010" project="dotnet-10-upgrade-r1">
+  <metadata>
+    <title>H1 — BackgroundService.ExecuteAsync threading audit (closed per-worker verdict list)</title>
+    <phase>P1 Hit-site remediation</phase>
+    <gate>005 complete</gate>
+    <status>completed</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Behavioral .NET 10 change across ~10+ workers; startup-ordering/fail-fast assumptions; highest-risk hit-site.</rigor-reason>
+    <model-tier>opus</model-tier>
+    <model-tier-reason>Behavioral change requiring per-worker judgment about startup ordering + fail-fast semantics (root CLAUDE.md §8.5).</model-tier-reason>
+    <effort>xhigh</effort>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Serial critical path; edits BFF worker files; verified by task 011 immediately after.</parallel-reason>
+    <deps>005</deps>
+    <tags>dotnet, bff-api, background-jobs, behavioral, migration</tags>
+    <estimated-effort>4-6 hours</estimated-effort>
+  </metadata>
+
+  <prompt>In .NET 10, `BackgroundService.ExecuteAsync` now runs entirely on a background thread: synchronous pre-`await` initialization no longer blocks host startup, and a pre-`await` throw no longer takes startup down synchronously. Audit EVERY `BackgroundService`/`IHostedService` in the BFF for (a) pre-`await` init assumed complete before the app serves traffic, and (b) startup-ordering / fail-fast assumptions. Produce a CLOSED per-worker verdict list (safe / remediated), moving any ordering-sensitive or fail-fast code to the constructor / `StartAsync` / `IHostedLifecycleService`. Explicitly verify `TodoGenerationService`'s 500.30 startup-crash guard behavior.</prompt>
+  <role>SPAARKE platform developer. Expert in ASP.NET Core hosted-service lifecycle, `IHostedLifecycleService`, startup ordering, and the .NET 10 BackgroundService threading change. Follow ADRs strictly.</role>
+  <goal>A document `notes/h1-backgroundservice-audit.md` enumerating EVERY BackgroundService with a per-worker verdict (safe or remediated + what changed + where the code moved); `TodoGenerationService`'s 500.30 guard explicitly analyzed; any remediation applied and building green.</goal>
+
+  <context>
+    <background>design §5 H1 (the single highest-impact hit-site). Workers named in the spec: ScheduledJobHost, UploadFinalizationWorker, ProfileSummaryWorker, IndexingWorkerHostedService, TodoGenerationService, SpeDashboardSyncService, BulkOperationService, ServiceBusJobProcessor — plus ANY others found by grep (the list is not asserted complete; discover them). `TodoGenerationService` has explicit 500.30 startup-crash guard comments → ordering was load-bearing at least once. ADR-001 makes workers first-class. Moving ordering-sensitive/fail-fast code to ctor/StartAsync/IHostedLifecycleService restores the pre-net10 guarantee.</background>
+    <relevant-files>
+      <file role="canonical-reference">src/server/api/Sprk.Bff.Api/Services/Jobs/ServiceBusJobProcessor.cs</file>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Services/**/*.cs (every BackgroundService/IHostedService — discover via grep)</file>
+      <file role="new">projects/dotnet-10-upgrade-r1/notes/h1-backgroundservice-audit.md</file>
+    </relevant-files>
+    <dependencies>
+      <dependency task="005" status="pending">Whole solution builds on net10.</dependency>
+    </dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="NFR-01">Zero product-behavior change: the remediation RESTORES the pre-net10 startup-ordering/fail-fast guarantee — it must not alter what the workers do, only where init/ordering is anchored.</constraint>
+    <constraint source="project">The per-worker list MUST be a CLOSED SET (every BackgroundService discovered by grep, each with an explicit verdict) — an illustrative subset is a defect (spec FR-07).</constraint>
+    <constraint source="ADR-001">Preserve the single-BFF-runtime worker model; do not introduce a new hosting abstraction beyond ctor/StartAsync/IHostedLifecycleService.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>.NET 10 BackgroundService.ExecuteAsync threading change + hosted-service lifecycle</topic>
+    <files>
+      <file>projects/dotnet-10-upgrade-r1/spec.md</file>
+      <file>projects/dotnet-10-upgrade-r1/design.md</file>
+      <file>.claude/adr/ADR-001-minimal-api-and-workers.md</file>
+      <file>src/server/api/Sprk.Bff.Api/CLAUDE.md</file>
+    </files>
+    <patterns>
+      <pattern name="hosted-lifecycle" location="projects/dotnet-10-upgrade-r1/design.md">design §5 H1 fix guidance: move ordering-sensitive/fail-fast code to ctor / StartAsync / IHostedLifecycleService.</pattern>
+    </patterns>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="0" name="Context + rigor declaration">Load spec FR-07 + design §5 H1 + the .NET 10 BackgroundService breaking-change page. Declare RIGOR: FULL.</step>
+    <step order="1">Grep the BFF for every `: BackgroundService`, `IHostedService`, `IHostedLifecycleService` implementer; build the CLOSED list (do not trust the spec's 8-name list as complete).</step>
+    <step order="2">For each worker, read `ExecuteAsync`/`StartAsync`/ctor: identify pre-`await` synchronous init, startup-ordering assumptions, and fail-fast (throw-on-startup) behavior.</step>
+    <step order="3">Assign a verdict: SAFE (no pre-await ordering/fail-fast dependency) or REMEDIATE (move the ordering-sensitive/fail-fast code to ctor/StartAsync/IHostedLifecycleService).</step>
+    <step order="4">Apply remediations; specifically analyze `TodoGenerationService`'s 500.30 guard and preserve its fail-fast intent under net10.</step>
+    <step order="5">Build green; write `notes/h1-backgroundservice-audit.md` with the full closed list + per-worker verdict + remediation detail.</step>
+    <step order="6">Update `tasks/TASK-INDEX.md`: set 010 status to ✅ (hand off to 011 for adversarial verification).</step>
+    <step order="7">Document any deviation in `projects/dotnet-10-upgrade-r1/notes/`.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If a worker's correct behavior under net10 cannot be preserved by moving code to ctor/StartAsync/IHostedLifecycleService (i.e. it needs a genuine behavior change), STOP and surface per CLAUDE.md §6/§6.5 — that is a carve-out decision, not an in-line fix.</trigger>
+  </escalation>
+
+  <tools>
+    <tool name="dotnet">Build BFF</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/** (remediated workers)</output>
+    <output type="doc">projects/dotnet-10-upgrade-r1/notes/h1-backgroundservice-audit.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">`notes/h1-backgroundservice-audit.md` lists EVERY BackgroundService/IHostedService found by grep, each with an explicit SAFE/REMEDIATED verdict.</criterion>
+    <criterion testable="true">`TodoGenerationService`'s 500.30 startup-guard behavior is explicitly analyzed and its fail-fast intent preserved under net10.</criterion>
+    <criterion testable="true">Every REMEDIATE worker moved its ordering-sensitive/fail-fast code to ctor/StartAsync/IHostedLifecycleService; BFF builds green.</criterion>
+    <criterion testable="true">Negative: no worker's functional behavior (what it does) changed — only where init/ordering is anchored.</criterion>
+  </acceptance-criteria>
+
+  <notes>spec FR-07 + NFR-07. This task's output is adversarially verified by a non-author in task 011 before P1 is considered done.
+
+  COMPLETION (2026-08-12): closed-set audit of **28 hosted-service implementers** (23 BackgroundService + 5 IHostedService), discovered by grep across `src/server/**` (BFF + Spaarke.Scheduling); archived `JobProcessor.cs.archived-2025-10-03` excluded (not compiled). **Verdict: 28/28 SAFE, 0 REMEDIATE, 0 code changes.** Full per-worker table + rationale: `notes/h1-backgroundservice-audit.md`. Root cause of all-SAFE: the codebase already follows ADR-001 worker discipline — the single fail-fast that must abort startup (config validation) already lives in `StartupValidationService : IHostedService.StartAsync` (throw preserved under net10, which changes ONLY BackgroundService.ExecuteAsync); every BackgroundService reaches its first `await` after only a trivial synchronous prefix (log + options read) and uses graceful `return` (never a pre-await `throw`) for disabled/misconfig paths; warm-up/initial-sync patterns were already async-and-tolerant under net8; ordering-sensitive registry bootstraps run in StartAsync against a self-healing ScheduledJobRegistry. **`TodoGenerationService` 500.30 guard explicitly analyzed (audit §4)**: it is a *constructor-avoidance* guard (keeps eager-connecting Dataverse resolution out of the ctor, resolving lazily post-await at line 213), so the net10 ExecuteAsync-threading change does not touch it — guard remains valid + necessary, unchanged. Escalation trigger did NOT fire (no worker needed a behavior change). BFF build GREEN on net10 (Release, 0 errors; zero source changes → P0 baseline stands). Step 9.5: code-review N/A (0 code changes); adr-check PASS (ADR-001 single-runtime worker model preserved). Two residual empirical items handed to task 011 (non-author): dashboard-cache cold-tolerance (§5) + SB CreateProcessor pre-await-throw (§6) — both argued SAFE (net10 opens no window absent on net8).</notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+  </execution>
+</task>

@@ -1,13 +1,13 @@
 # Spaarke - SharePoint Document Access Platform (SDAP)
 
-A modern, enterprise-grade SharePoint Embedded integration platform built with .NET 8, Power Platform, and Microsoft Graph.
+A modern, enterprise-grade SharePoint Embedded integration platform built with .NET 10, Power Platform, and Microsoft Graph.
 
 ## 🏗️ **Architecture Overview**
 
 SDAP provides secure, scalable document management through SharePoint Embedded with comprehensive Power Platform integration, featuring clean architecture, thin plugins, and robust authorization patterns.
 
 ### **Core Components**
-- **🔌 SharePoint Embedded API**: .NET 8 Minimal API with Graph SDK v5
+- **🔌 SharePoint Embedded API**: .NET 10 Minimal API with Graph SDK v6
 - **⚡ Power Platform Plugins**: Lightweight validation and projection plugins (<50ms)
 - **🔐 Authorization Framework**: Rule-based access control with secure defaults
 - **📊 Monitoring & Observability**: Structured logging with correlation tracking
@@ -39,7 +39,7 @@ tools/              # Development tools (PAC CLI, Postman)
 ## 🚀 **Quick Start**
 
 ### **Prerequisites**
-- .NET 8 SDK
+- .NET 10 SDK
 - .NET Framework 4.8 Developer Pack
 - Visual Studio 2022 or VS Code
 - Azure CLI
@@ -113,4 +113,4 @@ dotnet test tests/unit/Sprk.Bff.Api.Tests/
 
 ---
 
-**Built with**: .NET 8 • Microsoft Graph • SharePoint Embedded • Power Platform • Azure
+**Built with**: .NET 10 • Microsoft Graph • SharePoint Embedded • Power Platform • Azure

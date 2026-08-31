@@ -1,0 +1,105 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="025" project="unified-access-control-r2">
+  <metadata>
+    <title>Test-integrity remediation: the four untested seams (H6) + the gate's missing mechanism (M3) + misleading legacy tests (M7)</title>
+    <phase>0 Enforcement Remediation</phase>
+    <status>pending</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Modifies tests/** -- FULL unconditionally per root CLAUDE.md §8 TEST-MODIFYING override.</rigor-reason>
+    <model-tier>opus</model-tier>
+    <model-tier-reason>Requires judging why four load-bearing methods are invisible to the suite and redesigning coverage at the right level, plus deciding which of ~25 misleading tests to delete versus repair.</model-tier-reason>
+    <effort>xhigh</effort>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Touches shared test files owned by tasks 003/007/017.</parallel-reason>
+    <deps>003,007,017</deps>
+    <tags>testing, integration-test, auth, deletion</tags>
+    <estimated-effort>1 day</estimated-effort>
+    <origin>review-2026-08-24 (multi-agent re-review of the 13 completed Phase 0 tasks); filed 2026-08-24 by owner decision</origin>
+  </metadata>
+
+  <prompt>Four load-bearing methods in this project are executed by NO test -- each has a one-line perturbation that fails zero. Task 003's completeness gate misses an entire mechanism. And roughly 25 legacy tests assert claims that are now false. Close all three so the suite means what it appears to mean.</prompt>
+  <role>SPAARKE platform developer and test architect. Expert in ADR-038 KEEP paths and perturbation-driven coverage assessment.</role>
+  <goal>Each of the four seams has a test that fails when the seam is broken; task 003's gate sees the HasRequiredRights mechanism; and no remaining test asserts a false claim about current behaviour.</goal>
+
+  <context>
+    <background>Review findings H6 (High), M3 and M7 (Medium). H6 -- four load-bearing methods executed by no test, each with a one-line perturbation that fails ZERO: FindPermissionByEmail (the A-13 SPE revoke matcher), CallerRecordAccessProbe.GetCallerRightsAsync (the project's CENTRAL gate -- return Read|Write unconditionally and nothing fails), task 007's query CALL SITES (the emitted filter is asserted, the call sites are not), and the real Graph-call error path. Findings section 3 lists the exact perturbation for each. M3 -- task 003's completeness gate misses a whole mechanism: operation strings passed directly to HasRequiredRights(...) are invisible to its source scan, and PermissionsEndpoints.cs now has 16 such call sites; worse, the const-indirection mechanism the test documents matches ZERO real call sites -- entity.associate_document is found only by an unanchored regex accidentally matching an AssociateOperation = "..." declaration. M7 -- ExternalAccessEndpointTests.cs holds ~25 non-discriminating tests, several asserting FALSE claims about code tasks 010 and 017 changed (for example 'empty ContactId returns 400', when an empty ContactId is the documented org-grant signal and returns 200).</background>
+    <relevant-files>
+      <file role="modify">tests/integration/auth/UnifiedAccessControl/SpeRevokeMatcherTests.cs</file>
+      <file role="modify">tests/integration/auth/UnifiedAccessControl/OperationAccessPolicyCompletenessTests.cs</file>
+      <file role="modify">tests/unit/Sprk.Bff.Api.Tests/AccessControl/ExternalAccessEndpointTests.cs</file>
+      <!-- ⚠️ CORRECTED 2026-08-27 (task 011 + Wave A §A10). `tests/unit/Sprk.Bff.Api.Tests/AccessControl/`
+           is NOT an ADR-038 KEEP path. The KEEP paths are tests/integration/{auth,contract,data-mutation,
+           regression,seam,tenant}/** and tests/unit/domain/** — and tests/CLAUDE.md states "Tests authored
+           elsewhere are anti-pattern by construction." Task 011 hit this same wrong path in its own POML,
+           correctly pivoted to tests/integration/auth/** as a CLAUDE.md §6.5 path-C deviation, and kept
+           InternalsVisibleTo reach because the csproj auth glob puts it in the same assembly. Do the same:
+           if the file above exists at that path, MOVE it to the correct KEEP path as part of this task
+           (that is squarely in scope for a test-INTEGRITY task); if it does not exist, create it at
+           tests/integration/auth/UnifiedAccessControl/. Endpoint-authorization tests are auth tests. -->
+      <file role="modify">tests/integration/auth/UnifiedAccessControl/ExternalAccessEndpointTests.cs</file>
+      <file role="new">tests/integration/auth/UnifiedAccessControl/CallerRecordAccessProbeTests.cs</file>
+      <file role="canonical-reference">projects/unified-access-control-r2/notes/review-2026-08-24-findings.md</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="review-2026-08-24">PERTURBATION IS MANDATORY. After the fix, break it one line at a time and record how many tests fail. A perturbation that fails ZERO means the test is at the wrong level -- fix the test, never drop the perturbation. Task 009 hit this TWICE in one task: once because two guards denied the same case so a status-code assertion could not tell them apart, and once because a membership check had a positive test but no negative one. Pair every positive with a negative, and assert the distinguishing observable.</constraint>
+    <constraint source="ADR-038">Tests go on a KEEP path (tests/integration/{auth,regression,data-mutation,tenant,contract,seam}/** or tests/unit/domain/**). Mock at a virtual seam or module boundary; Mock&lt;HttpMessageHandler&gt; stays banned (B1), as do DI-registration tests (B3), ctor null-checks (B4), reflection into privates (B8) and coverage-fillers (B10).</constraint>
+    <constraint source="project">START FROM THE PERTURBATIONS, not from the code. Findings section 3 gives the exact one-line change for each of the four seams. Apply it, confirm zero tests fail, then write the test that makes it fail. That order is what guarantees the new test is at the right level.</constraint>
+    <constraint source="project">M3 -- extend task 003's gate to see BOTH mechanisms: const-indirection AND operation strings passed directly to HasRequiredRights(...). Anchor the regex; the current one matches a declaration by accident, which means the gate reports a covered call site that does not exist. Prove the extended gate catches all 16 PermissionsEndpoints.cs call sites.</constraint>
+    <constraint source="ADR-038">M7 -- a test asserting a FALSE claim is worse than no test: delete it. Deletion under a KEEP path needs a same-PR replacement covering the same real scenario (FR-B06). For each of the ~25, decide delete / repair / keep and record the reasoning; do not bulk-delete and do not bulk-keep.</constraint>
+    <constraint source="review-2026-08-24">CallerRecordAccessProbe.GetCallerRightsAsync is the project's central gate. Its test must fail if the method returns blanket rights. Nothing else in this task matters more.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>.claude/adr/ADR-003-authorization-seams.md</file>
+      <file>projects/unified-access-control-r2/notes/review-2026-08-24-findings.md</file>
+      <file>projects/unified-access-control-r2/spec.md</file>
+      <file>docs/adr/ADR-038-testing-strategy.md</file>
+      <file>docs/standards/TEST-ARCHITECTURE.md</file>
+      <file>tests/CLAUDE.md</file>
+    </files>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="0">Read findings section 3 and apply each of the four perturbations in turn, confirming the zero-failure baseline.</step>
+    <step order="1">For each seam, write the test that makes its perturbation fail. Prefer the level the seam actually lives at.</step>
+    <step order="2">Extend task 003's completeness gate to cover HasRequiredRights(...) call sites; anchor the regex so a declaration is not mistaken for a call site.</step>
+    <step order="3">Prove the extended gate sees all 16 PermissionsEndpoints.cs call sites.</step>
+    <step order="4">Triage ExternalAccessEndpointTests.cs test by test: delete false-claim tests (with same-PR replacement where the scenario is real), repair the salvageable, keep the rest, and record the decision per test.</step>
+    <step order="5">Re-run all four perturbations plus the gate perturbation; record the counts.</step>
+    <step order="6">Full suite; update TASK-INDEX.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If a seam turns out to be genuinely untestable offline (as A-7 was believed to be before task 009 disproved it), STOP and escalate with the specific blocker rather than writing a test that passes vacuously. Note that task 009 found ICallerPrincipalResolver is substitutable with no Dataverse, which invalidated one such claim -- re-check the others before accepting them.</trigger>
+  </escalation>
+
+  <justification>
+    <existing>All four seams already have production code and three already have test FILES; the tests simply do not execute the methods. This is coverage repair, not new surface.</existing>
+    <extension>Extends the existing completeness gate rather than adding a second one.</extension>
+    <cost-of-doing-nothing>The project's central authorization gate can be replaced with 'return all rights' and the entire 11,000-test suite stays green. Every other task in this project is verified by a suite with that hole in it.</cost-of-doing-nothing>
+  </justification>
+
+  <outputs>
+    <output type="test">tests/integration/auth/UnifiedAccessControl/CallerRecordAccessProbeTests.cs</output>
+    <output type="test">tests/integration/auth/UnifiedAccessControl/OperationAccessPolicyCompletenessTests.cs</output>
+    <output type="doc">projects/unified-access-control-r2/notes/task-025-test-integrity.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Each of the four H6 perturbations now fails at least one test; the notes record before-and-after counts.</criterion>
+    <criterion testable="true">Returning blanket rights from CallerRecordAccessProbe.GetCallerRightsAsync fails at least one test.</criterion>
+    <criterion testable="true">Task 003's gate detects operation strings passed directly to HasRequiredRights(...), including all 16 in PermissionsEndpoints.cs.</criterion>
+    <criterion testable="true">The gate's regex is anchored; a const declaration is no longer counted as a call site.</criterion>
+    <criterion testable="true">Every test in ExternalAccessEndpointTests.cs is either deleted with rationale, repaired, or kept with rationale -- recorded per test.</criterion>
+    <criterion testable="true">No remaining test asserts a claim that is false about current behaviour.</criterion>
+    <criterion testable="true">All 7 test projects pass.</criterion>
+  </acceptance-criteria>
+
+  <notes>Review findings H6, M3, M7. This is WHY the rest of the findings could hide -- worth doing early.</notes>
+
+  <execution><skill>.claude/skills/task-execute/SKILL.md</skill></execution>
+</task>

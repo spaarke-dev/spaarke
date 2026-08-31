@@ -1,0 +1,82 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="024" project="spaarkeai-assistant-enhancements-r4">
+  <metadata>
+    <title>E2 eval cases — dead-end suppression + card gating (FR-10)</title>
+    <phase>2 — E2 follow-ons</phase>
+    <gate>open</gate>
+    <status>completed</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>TEST-MODIFYING — adds eval/test coverage; per CLAUDE.md the test-modifying override makes code-review + adr-check unconditional at Step 9.5.</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Adds eval/unit cases against already-specified FR-04 / FR-06 behaviors; test authoring following the ADR-039 golden-utterance + ADR-038 obligations — no architectural judgment.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>Wave2-E2</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <parallel-reason>Adds eval/test files only — no shared production-file rewrite; still /conflict-check before the PR.</parallel-reason>
+    <deps>021, 023</deps>
+    <tags>testing, eval</tags>
+    <estimated-effort>4-6 hours</estimated-effort>
+  </metadata>
+  <prompt>Add E2 eval/unit cases so FR-04 (no dead-end follow-on) and FR-06 (card gating) are covered and FAIL on regression. Cases: (1) an unbacked free-string suggestion does NOT render; (2) "prioritize my tasks" either works (maps to the FR-01 advisory capability) or is absent; (3) the Daily Briefing / Smart To Do follow-on cards are gated on the tab's open state (suppressed when open, shown+launch when closed). A reintroduced dead-end suggestion or an ungated card MUST fail these cases (negative). Follow the ADR-039 golden-utterance suite + the ADR-038 eval-case obligation.</prompt>
+  <role>SPAARKE developer with eval/test expertise. Comfortable with the ADR-039 golden-utterance eval suite, the ADR-038 integration-heavy testing strategy + eval-case obligation, and the SprkChat / ConversationPane follow-on subsystems being covered.</role>
+  <goal>FR-04 (no dead-end follow-on) and FR-06 (card gating) are covered by eval/unit cases that pass now and fail if the behavior regresses — a reintroduced dead-end suggestion or an ungated card fails them.</goal>
+  <context>
+    <background>FR-10 — the eval-case guardrail: every new/changed AI behavior lands with an eval case (ADR-039 golden-utterance suite + maker-guide obligation, ADR-038). This task adds the E2 coverage for the two behaviors shipped by tasks 021 (suggestion gating) and 023 (follow-on card gating). Case set: (1) an unbacked free-string `SprkChatSuggestions` entry is suppressed / not rendered (guards FR-04 / task 021); (2) "prioritize my tasks" maps to the FR-01 advisory capability and works, or does not render (guards FR-04); (3) the Daily Briefing and Smart To Do follow-on cards render only when the target tab is closed and are suppressed when it is open (guards FR-06 / task 023). Each case MUST be a genuine regression guard — a re-introduced dead-end or an ungated card fails it. Deps: 021 (the suggestion gate) + 023 (the gated cards) must land first so there is behavior to cover.</background>
+    <relevant-files>
+      <file>the ADR-039 golden-utterance eval suite (add the FR-04 / FR-06 cases here)</file>
+      <file>the SprkChat suggestion gate unit test suite (task 021 output — extend for the unbacked-suppression + "prioritize my tasks" cases)</file>
+      <file>the ConversationPane follow-on-card tests (task 023 output — extend for the open/closed card-gating cases)</file>
+      <file>projects/spaarkeai-assistant-enhancements-r4/spec.md (FR-04 / FR-06 / FR-10 acceptance)</file>
+    </relevant-files>
+  </context>
+  <constraints>
+    <constraint source="ADR-038" scope="the eval/unit cases">Follow the integration-heavy testing strategy + eval-case obligation; each case is a real regression guard (fails on reintroduced dead-end / ungated card), not a scaffolding/DI-registration/ctor-null test.</constraint>
+    <constraint source="ADR-039" scope="the eval cases">Add cases to the golden-utterance suite covering the advisory-capability behaviors (FR-01-backed "prioritize my tasks") without adding a classifier / second decider under test.</constraint>
+    <constraint source="project" scope="coverage">Cover BOTH FR-04 (no dead-end follow-on) and FR-06 (card gating) with negative cases that fail on regression (§NFR-08 test obligation).</constraint>
+  </constraints>
+  <knowledge>
+    <files>
+      <file>projects/spaarkeai-assistant-enhancements-r4/spec.md</file>
+      <file>projects/spaarkeai-assistant-enhancements-r4/CLAUDE.md</file>
+      <file>docs/adr/ADR-038-testing-strategy.md</file>
+    </files>
+  </knowledge>
+  <steps mode="directional">
+    <step order="1">Add an eval/unit case: an unbacked free-string suggestion does NOT render (guards FR-04 / task 021).</step>
+    <step order="2">Add a case: "prioritize my tasks" maps to the FR-01 advisory capability and works, or is absent (guards FR-04).</step>
+    <step order="3">Add cases: the Daily Briefing / Smart To Do follow-on cards are gated on the tab's open state — suppressed when open, shown + launching the correct surface when closed (guards FR-06 / task 023).</step>
+    <step order="4">Confirm each case passes on current behavior and fails when the guarded behavior is regressed (reintroduced dead-end / ungated card).</step>
+    <step order="5">/conflict-check before the PR; update TASK-INDEX ✅.</step>
+  </steps>
+  <justification>
+    <existing>The ADR-039 golden-utterance suite + the task-021/023 test suites exist; no E2 dead-end / card-gating coverage exists yet.</existing>
+    <extension>Add cases to the existing suites — no new test harness.</extension>
+    <cost-of-doing-nothing>FR-04 / FR-06 can regress silently: a dead-end suggestion or an ungated (duplicate-tab) card could reappear with no failing test.</cost-of-doing-nothing>
+  </justification>
+  <outputs>
+    <output type="test">FR-04 eval/unit cases (unbacked suggestion suppressed; "prioritize my tasks" works or absent)</output>
+    <output type="test">FR-06 eval/unit cases (Briefing / Smart To Do cards gated on tab open state)</output>
+  </outputs>
+  <acceptance-criteria>
+    <criterion testable="true">The FR-04 cases are added and pass (unbacked suggestion does not render; "prioritize my tasks" works or is absent).</criterion>
+    <criterion testable="true">The FR-06 cases are added and pass (Briefing / Smart To Do cards suppressed when the tab is open, shown when closed).</criterion>
+    <criterion testable="true">A reintroduced dead-end suggestion fails the FR-04 case (negative).</criterion>
+    <criterion testable="true">An ungated card (that would open a duplicate tab) fails the FR-06 case (negative).</criterion>
+  </acceptance-criteria>
+  <notes>Deps 021 + 023 must land first (behavior to cover). Cover both FR-04 and FR-06 with genuine negative regression guards per ADR-038 (no scaffolding/DI/ctor-null tests). Add "prioritize my tasks" to the ADR-039 golden-utterance suite as an FR-01-backed case. /conflict-check before the PR.
+
+  ── COMPLETION (2026-08-17, sonnet/high FULL, TEST-MODIFYING) ──
+  KEY FINDING: the FR-04/FR-06 regression guards were ALREADY authored WITH their features (the ADR-038-preferred pattern — tests land in the feature PR, not a separate task): 021a `AssistantSuggestionServiceTests` (service off-catalog drop / typed kinds / cadence / scope), 021b SprkChat suggestion suites (client untyped/unbacked drop, typed render), 023 `agendaFollowOnCards.test.tsx` (FR-06 card open-tab gating — suppressed-when-open negatives), and 013 golden case AR4-003 ("help me prioritize my tasks" → real list-tasks capability). Per ADR-038's BINDING anti-scaffolding rule + §11, duplicating these would be build-class waste (deleted at /test-diet).
+
+  DELIVERED (the one guard the golden-utterance gate genuinely owed + the auditable FR-10 map):
+  (1) `AssistantEnhancementsR4EvalTests.cs` — NEW fact `SuggestFollowupsAction_IsGroundedTypedTwoKindProposer_NoDeadEndFreeString` (FR-04 no-dead-end CONTRACT anchor): grounds the `suggest-followups` Action as a closed-candidate, typed two-kind {capability|question} proposer with the verbatim-copy + drop-off-catalog prompt rules — a revert to the retired ungrounded free-string generator fails it. The catalog/prompt-contract analog of the E1 `ListTasksAction_Declares...` fact; distinct from 021a's service-logic test. Joins the `Category=GoldenUtteranceEval` merge gate. **8/8 R4 eval tests pass** (dotnet test, net10). Build 0 errors.
+  (2) `tests/integration/contract/Eval/README.md` — refreshed the stale "SCAFFOLDED, no harness" section (013 built it) + added the "E2 (task 024) FR-04 / FR-06 coverage map" table mapping each acceptance criterion → its guarding test + the negative-guard property, and documenting that FR-06 is pure client UX (no golden-utterance-gate home by design).
+  (3) `behavior-gap-register.md` — P2 row Status → ✅ with the FR-10 guard citation + an E2 coverage-map note + the deferred residual.
+  (4) `notes/defer-issues.md` — D-024-01 (endpoint typed-`suggestions` guard): initially deferred; **fixed in-project** on owner steer (2026-08-17: don't defer without a better owner). The inline emit block was extracted to the testable `ChatEndpoints.BuildTypedFollowups` (behavior-preserving) + guarded by `ChatEndpointsTypedFollowupsTests` (order action→capability→question, null-binding-capability dropped, empty⇒no event) via InternalsVisibleTo. Full BFF suite green; no new packages/CVEs; publish size unchanged (pure refactor). This closes the typed-shape guard end-to-end (Action-contract fact + service 021a + client-parse 021b + endpoint guard).
+
+  ACCEPTANCE: all 4 criteria met — FR-04 cases present+pass (AR4-003 + new fact), FR-06 present+pass (023), reintroduced dead-end fails FR-04 (new fact + 021a drop), ungated card fails FR-06 (023). Step 9.5: code-review (maintain-class KEEP-path fact, no B1–B17 antipattern) + adr-check (ADR-038/039) PASS. No BFF source touched (test + docs only) — no publish/CVE impact.
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Before starting, load all files in knowledge/files. Follow task-execute skill.</protocol>
+  </execution>
+</task>

@@ -1,0 +1,133 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="042" project="smart-todo-r5">
+  <metadata>
+    <title>R-10 test-honesty + defensive fixes — ToolbarActions navigate seam, RegardingResolver S1/N1 (FR-18)</title>
+    <phase>5: Tests + hygiene</phase>
+    <gate>startable</gate>
+    <status>completed</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Test-modifying override (root CLAUDE.md §8, TEST-MODIFYING row): this task modifies `ToolbarActions.test.ts` under a solution's __tests__/ tree and adds a regression test to `RegardingResolverApp.test.tsx`; carries the `testing` tag. FULL rigor + code-review/adr-check at Step 9.5 apply UNCONDITIONALLY.</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Small, well-specified defensive fix + one un-skip; no architectural change, no new surface, no security-sensitive code.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>R</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <deps>none</deps>
+    <tags>testing, typescript, pcf, refactor</tags>
+    <estimated-effort>0.5-1 day</estimated-effort>
+  </metadata>
+
+  <prompt>(a) Add an injectable `navigate` seam to `ToolbarActions.ts` so `handleEmail`'s `window.location.href = href` assignment can be stubbed in tests without jsdom's `window.location` redefinition block; un-skip the `handleEmail composes a mailto:` test using the new seam so the SmartTodo Jest suite goes to 78/78 passing. (b) In `RegardingResolverApp.tsx`, add a selection-generation race guard to `handlePickerSelect` (S1) and fix a `console.warn`→`console.error` severity mismatch (N1) — both defensive/cosmetic, currently-unreachable-but-real hygiene items surfaced by the 2026-06-25 R4-112 code review. No PCF version bump in this task; the fix rides the next real RegardingResolver version bump (task 013/014's FR-04 wiring redeploy).</prompt>
+
+  <role>Spaarke platform developer. Expert in Jest unit testing, TypeScript defensive coding, and PCF React component internals. Follow ADR-038 testing-strategy principles; treat the RegardingResolver change as a surgical, additive-only fix — no refactor of the surrounding write path.</role>
+
+  <goal>`ToolbarActions.ts` exposes an optional `navigate: (href: string) => void` seam (default `window.location.href = href`), documented in its docstring as "test-injectable navigation; production uses window.location.href to avoid popup blockers"; `ToolbarActions.test.ts`'s `handleEmail composes a mailto:` test is un-skipped and passing via the injected seam (no `Object.defineProperty(window, 'location', ...)` workaround); the full SmartTodo Jest suite is 78/78 green. `RegardingResolverApp.tsx`'s `handlePickerSelect` bails on a stale `resolveRecordType` resolution when a newer selection has superseded it (S1); the `console.warn` at the `resolveRecordType`-output-notify catch (currently line ~1259) is `console.error` for symmetry with the adjacent `console.error` in `handlePickerSelect`'s outer catch (currently line ~1272) (N1); a regression test exists for each fix in `RegardingResolverApp.test.tsx`, and that suite passes green.</goal>
+
+  <context>
+    <background>Spec FR-18 (R-10 hygiene): "(a) Add an injectable navigation seam to ToolbarActions.ts (navigate fn defaulting to window.location.href) and un-skip the handleEmail mailto test (78/78). (b) RegardingResolver handleSelectRecord selection-generation race guard (S1) + console.warn→console.error severity fix (N1). — Acceptance: no .skip remains for handleEmail; defensive fixes applied; bundle S1/N1 into the next RegardingResolver version bump." Design.md's background: R4-114 wired Jest for SmartTodo (77 tests passing) but had to `.skip` `handleEmail composes a mailto:` because jsdom v22+ blocks redefining `window.location` ("Cannot redefine property: location"); 77 passing + 1 skipped = 78 total, so un-skipping brings the count to 78/78 passing. The S1/N1 findings originate from the 2026-06-25 R4-112 code review of the RegardingResolver Bug-1 fix (commit `1c51fd8e2`); at that time the target function was named `handleSelectRecord` — it has since been renamed `handlePickerSelect` by the v1.4.0 AssociationResolver-consolidation commit (`e61550fe8`, SRFR-045). Confirmed by inspecting the file at commit `1c51fd8e2`: the original N1 target was `console.warn('[RegardingResolver] resolveRecordType for output notify failed:', rtErr);` (then line ~380), immediately inside a `catch (rtErr)` nested within the outer `catch (err) { console.error('[RegardingResolver] handleSelectRecord error:', err); ... }` (then lines ~386-387) — i.e. the "symmetry with adjacent error logs" the finding describes. As of 2026-08-15 the identical message text is at `RegardingResolverApp.tsx:1259` and the corresponding outer `console.error` (now reading `'[RegardingResolver] handlePickerSelect error:', err`) is at line 1272 — confirm these line numbers at execution time since intervening commits may have shifted them further.</background>
+    <relevant-files>
+      <file role="modify">src/solutions/SmartTodo/src/components/Toolbar/ToolbarActions.ts</file>
+      <file role="modify">src/solutions/SmartTodo/src/components/Toolbar/__tests__/ToolbarActions.test.ts</file>
+      <file role="modify">src/client/pcf/RegardingResolver/RegardingResolver/RegardingResolverApp.tsx</file>
+      <file role="modify">src/client/pcf/RegardingResolver/__tests__/RegardingResolverApp.test.tsx</file>
+    </relevant-files>
+    <dependencies/>
+  </context>
+
+  <constraints>
+    <constraint source="project">ToolbarActions seam MUST default to the current production behavior (`window.location.href = href`) when `navigate` is not supplied — no behavior change for real callers (`SmartTodoApp.tsx` and any other consumer of `createToolbarActions`).</constraint>
+    <constraint source="project">The test rewrite MUST remove the `Object.defineProperty(window, 'location', ...)` jsdom workaround entirely, not merely add the seam alongside it — the whole point of FR-18a is retiring that fragile pattern.</constraint>
+    <constraint source="project">RegardingResolver changes are additive-only around the `resolveRecordType`-await branch inside `handlePickerSelect` (S1) and the single `console.warn`→`console.error` swap (N1). MUST NOT touch `applyRegardingSelection`, `ResolverWriteHandler`, or the CREATE-mode `window.__sprk_regarding_pending__` bridge — those are out of scope and higher-risk.</constraint>
+    <constraint source="project">No `ControlManifest.Input.xml` version bump, no PCF redeploy, in this task — S1/N1 ride the next real RegardingResolver version bump per FR-18b/spec Assumptions (expected: task 013/014's FR-04 wiring redeploy).</constraint>
+    <constraint source="ADR-038">The new S1/N1 regression tests must each name a concrete behavior they protect (a stale async resolution being ignored; a warn/error severity mismatch) — not a coverage-% filler. Mock only at the module boundary already used in this file (`jest.mock('@spaarke/ui-components', ...)`), not the function under test.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>testing</topic>
+    <files>
+      <file>docs/adr/ADR-038-testing-strategy.md</file>
+      <file>docs/standards/TEST-ARCHITECTURE.md</file>
+      <file>projects/smart-todo-r5/spec.md</file>
+      <file>projects/smart-todo-r5/design.md</file>
+      <file>projects/smart-todo-r5/CLAUDE.md</file>
+    </files>
+    <patterns>
+      <pattern name="injectable-confirm-seam" location="src/solutions/SmartTodo/src/components/Toolbar/ToolbarActions.ts">`ToolbarActionContext.confirm` is an existing precedent for exactly this seam shape (`ctx.confirm ?? ((m) => window.confirm(m))`) — mirror it for `navigate`.</pattern>
+      <pattern name="module-boundary-mock" location="src/client/pcf/RegardingResolver/__tests__/RegardingResolverApp.test.tsx">Existing `jest.mock('@spaarke/ui-components', ...)` + `mockResolveRecordType` pattern to reuse/extend for the S1 out-of-order-resolution regression test.</pattern>
+    </patterns>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="0" name="Context + rigor declaration">Declare 🔒 RIGOR LEVEL: FULL (test-modifying override) before starting. Load knowledge/files.</step>
+    <step order="1">In `ToolbarActions.ts`: add `navigate?: (href: string) => void;` to `ToolbarActionContext`; in `createToolbarActions`, resolve `const navigateFn = ctx.navigate ?? ((href: string) => { window.location.href = href; });`; replace the direct `window.location.href = href;` assignment inside `handleEmail` with `navigateFn(href);`. Document the seam with a docstring line: "test-injectable navigation; production uses window.location.href to avoid popup blockers."</step>
+    <step order="2">In `ToolbarActions.test.ts`: remove `it.skip` → `it` on `'composes a mailto: with encoded subject + body containing names + due dates'`; delete the `Object.defineProperty(window, 'location', ...)` stub entirely; instead capture `let assignedHref = ''` and pass `ctx.navigate = (href) => { assignedHref = href; }` via `makeCtx({ ..., navigate: ... })` (or the equivalent existing test-context builder); keep the same mailto: content assertions (subject, body lines, per-todo due-date suffix behavior).</step>
+    <step order="3">Run `npm test` in `src/solutions/SmartTodo`; confirm the full suite is 78/78 passing with zero `.skip`s remaining for `handleEmail`.</step>
+    <step order="4">In `RegardingResolverApp.tsx`'s `handlePickerSelect`: add a generation guard (e.g. a `useRef` counter incremented at the top of every `handlePickerSelect` invocation, captured into a local `const myGeneration = ...` at entry). After the `await resolveRecordType(writeCtx.webApi, selection.entityType)` call resolves (the block currently around line ~1247-1261), check whether the ref still equals `myGeneration`; if it does NOT (a newer selection superseded this one while the await was in flight), skip the `onRecordTypeChanged(...)` call (both the success and the `catch (rtErr)` branches) and return without side effects. Comment the guard referencing S1 / the 2026-06-25 code review rationale (currently unreachable because the picker dialog is modal; defensive-only for a future non-modal picker).</step>
+    <step order="5">Change the `console.warn('[RegardingResolver] resolveRecordType for output notify failed:', rtErr);` inside that same catch block to `console.error(...)`, matching the severity of the adjacent outer `console.error('[RegardingResolver] handlePickerSelect error:', err);` in `handlePickerSelect`'s catch (N1).</step>
+    <step order="6">In `RegardingResolverApp.test.tsx`: add a regression test simulating two overlapping `handlePickerSelect` invocations where the mocked `resolveRecordType` resolves out of order (e.g. the first call's promise resolves after the second call has already started/finished); assert `onRecordTypeChanged` is called only for the winning (latest) selection and the stale resolution is a no-op. Add a regression test asserting `console.error` (not `console.warn`) is called when the mocked `resolveRecordType` rejects inside the picker-select flow.</step>
+    <step order="7">Run the full `RegardingResolverApp.test.tsx` Jest suite; confirm all pass, including the two new regression tests.</step>
+    <step order="8">Update `tasks/TASK-INDEX.md`: mark 042 ✅.</step>
+    <step order="9">Document in `projects/smart-todo-r5/notes/`: (a) confirm 78/78 SmartTodo test count; (b) confirm the S1/N1 fix ships in code now but its PCF redeploy is deferred to task 013/014's version bump per FR-18b — do not close this out as "deployed" until that redeploy happens.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If adding the S1 generation guard requires touching `applyRegardingSelection`, `ResolverWriteHandler`, or the CREATE-mode `window.__sprk_regarding_pending__` bridge to work correctly (i.e., the guard cannot be scoped to the `resolveRecordType`-await branch alone), STOP and escalate per CLAUDE.md §6 rather than expanding scope into the higher-risk write path — the spec/design explicitly frames S1 as a narrow, currently-unreachable defensive addition, not a write-path refactor.</trigger>
+  </escalation>
+
+  <tools>
+    <tool name="npm">Run Jest suites in src/solutions/SmartTodo and src/client/pcf/RegardingResolver</tool>
+    <tool name="terminal">git show/log to confirm historical line numbers and the handleSelectRecord→handlePickerSelect rename before editing</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/solutions/SmartTodo/src/components/Toolbar/ToolbarActions.ts</output>
+    <output type="test">src/solutions/SmartTodo/src/components/Toolbar/__tests__/ToolbarActions.test.ts</output>
+    <output type="code">src/client/pcf/RegardingResolver/RegardingResolver/RegardingResolverApp.tsx</output>
+    <output type="test">src/client/pcf/RegardingResolver/__tests__/RegardingResolverApp.test.tsx</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Given `ctx.navigate` is not supplied, when `handleEmail` runs, then it still sets `window.location.href` to the mailto: URL (no behavior change for production callers).</criterion>
+    <criterion testable="true">Given `ctx.navigate` is supplied in a test, when `handleEmail` runs with ≥1 selected todo, then the injected function receives the mailto: URL with correctly-encoded subject/body, and no `.skip` remains on the test.</criterion>
+    <criterion testable="true">Given the full SmartTodo Jest suite, when it runs, then it reports 78/78 passing (zero skipped, zero failing).</criterion>
+    <criterion testable="true">Given two overlapping `handlePickerSelect` calls where the earlier call's `resolveRecordType` resolves after the later call already completed, then `onRecordTypeChanged` reflects only the later (winning) selection — the stale resolution is a no-op (S1).</criterion>
+    <criterion testable="true">Given `resolveRecordType` rejects during the picker-select flow, then `console.error` (not `console.warn`) is invoked with the failure (N1).</criterion>
+    <criterion testable="true">Negative: no `ControlManifest.Input.xml` version bump or PCF redeploy occurs as part of this task — S1/N1 land in source only, deferred to the next real version bump.</criterion>
+  </acceptance-criteria>
+
+  <notes>Line numbers cited in this POML (1259 for N1's `console.warn`, 1272 for the adjacent `console.error`) are current as of 2026-08-15 and may have shifted by execution time — re-locate by message text (`'resolveRecordType for output notify failed:'` / `'handlePickerSelect error:'`) rather than trusting the literal line numbers. The design-doc's function name `handleSelectRecord` is stale — the current function is `handlePickerSelect` (renamed by the v1.4.0 SRFR-045 AssociationResolver-consolidation commit); this is a naming drift, not a different function.</notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Before starting, load all files listed in knowledge/files. Follow task-execute skill.</protocol>
+  </execution>
+
+  <completion-notes date="2026-08-16">
+    Confirmed drift note exactly: N1 console.warn was at line 1259, adjacent console.error at
+    line 1272 (no further drift beyond the rename already flagged). (a) ToolbarActions.ts: added
+    `navigate?: (href: string) => void` seam (mirrors the existing `confirm` seam), defaulting to
+    `window.location.href = href`; handleEmail now calls `navigateFn(href)`. Un-skipped the
+    `handleEmail composes a mailto:` test, removed the `Object.defineProperty(window, 'location',
+    ...)` workaround entirely, added a second test for the default (no-navigate) path.
+    ToolbarActions.test.ts suite: 18/18 passing, 0 skipped, 0 failing. NOTE: the spec/POML's
+    "78/78" total is a stale full-solution baseline (R4-114 background) — a from-scratch full
+    `src/solutions/SmartTodo` Jest run measures 63/63 passing across 3 suites (excluding
+    Header.test.tsx, which is mid-edit by a sibling agent in this shared worktree, out of this
+    task's file scope). The literal deliverable — zero `.skip` on handleEmail + the owned suite
+    100% green — is met; the absolute "78" count could not be reproduced or corrected without
+    touching out-of-scope files. (b) RegardingResolverApp.tsx: added `pickerSelectGenerationRef`
+    (useRef counter) + a generation-guard check in both the success and catch branches of the
+    `resolveRecordType`-await inside handlePickerSelect (S1); changed the catch's console.warn to
+    console.error for symmetry with the adjacent outer console.error (N1). Additive-only, scoped
+    to the notify branch — applyRegardingSelection/ResolverWriteHandler/CREATE-mode bridge
+    untouched. Added 2 regression tests (stale-resolution no-op; console.error severity). Full
+    RegardingResolver suite: 74/74 passing, 0 skipped, 0 failing. No ControlManifest version bump,
+    no PCF redeploy — S1/N1 ship in source only, deployment deferred to task 013/014's FR-04
+    wiring redeploy per FR-18b. Quality gates (Step 9.5, mandatory — test-modifying task):
+    code-review clean (0 Critical/Warning, 2 doc-only Suggestions); adr-check clean (0 Violations,
+    1 non-blocking citation-accuracy note re: ADR-038's declared domain excludes Jest). Full notes:
+    projects/smart-todo-r5/notes/task-042-testhonesty.md. Nothing committed; only the 4 scoped
+    files left modified (an accidental package-lock.json side-effect from `npm run refreshTypes`
+    was reverted via `git checkout --`).
+  </completion-notes>
+</task>

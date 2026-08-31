@@ -1,5 +1,6 @@
 using System.Text.Json;
 using System.Text.Json.Serialization;
+using Microsoft.Extensions.DependencyInjection;
 using Sprk.Bff.Api.Models.Ai;
 using Sprk.Bff.Api.Models.Insights;
 using Sprk.Bff.Api.Services.Insights.LiveFacts;
@@ -60,16 +61,21 @@ public sealed class LiveFactNode : INodeExecutor
         PropertyNameCaseInsensitive = true
     };
 
-    private readonly IReadOnlyDictionary<string, ILiveFactResolver> _resolvers;
+    // The IReadOnlyDictionary<string, ILiveFactResolver> dispatch map is Scoped (its per-entity
+    // resolvers are Scoped). This executor is registered Singleton (required by NodeExecutorRegistry),
+    // so it resolves the map from a fresh scope per ExecuteAsync via _scopeFactory instead of
+    // capturing it (dotnet-10-upgrade task 020, R7). Behavior is unchanged — each node execution is an
+    // independent unit of work and the resolvers are stateless per call.
+    private readonly IServiceScopeFactory _scopeFactory;
     private readonly ISubjectParser _subjectParser;
     private readonly ILogger<LiveFactNode> _logger;
 
     public LiveFactNode(
-        IReadOnlyDictionary<string, ILiveFactResolver> resolvers,
+        IServiceScopeFactory scopeFactory,
         ISubjectParser subjectParser,
         ILogger<LiveFactNode> logger)
     {
-        _resolvers = resolvers ?? throw new ArgumentNullException(nameof(resolvers));
+        _scopeFactory = scopeFactory ?? throw new ArgumentNullException(nameof(scopeFactory));
         _subjectParser = subjectParser ?? throw new ArgumentNullException(nameof(subjectParser));
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
     }
@@ -160,10 +166,16 @@ public sealed class LiveFactNode : INodeExecutor
                 NodeExecutionMetrics.Timed(startedAt, DateTimeOffset.UtcNow));
         }
 
+        // Resolve the Scoped per-entity dispatch map from a fresh scope per execution (R7).
+        // The scope stays alive through resolver.ResolveAsync below.
+        using var scope = _scopeFactory.CreateScope();
+        var resolvers = scope.ServiceProvider
+            .GetRequiredService<IReadOnlyDictionary<string, ILiveFactResolver>>();
+
         // Dispatch by entity-type to the per-entity resolver. The dictionary uses
         // case-insensitive lookup (registered with StringComparer.OrdinalIgnoreCase in
         // InsightsModule per design-a6 §3.4).
-        if (!_resolvers.TryGetValue(parsedSubject.EntityType, out var resolver))
+        if (!resolvers.TryGetValue(parsedSubject.EntityType, out var resolver))
         {
             var msg = $"No ILiveFactResolver registered for subject entity-type '{parsedSubject.EntityType}'. " +
                       $"Register an implementation in InsightsModule and add the scheme to " +

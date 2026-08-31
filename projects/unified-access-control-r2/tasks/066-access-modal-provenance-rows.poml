@@ -1,0 +1,111 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="066" project="unified-access-control-r2">
+  <metadata>
+    <title>AccessGrantModal: provenance + level on every Current Access row; suppressed-row rendering (FR-30 client half)</title>
+    <phase>4 Secure Project, Manage Access, wizard</phase>
+    <gate>blocked — requires 064 (report endpoint) + 065 (modal baseline with user rows) merged</gate>
+    <status>pending</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Frontend on the authorization/attestation surface; wrong provenance display is a false compliance answer.</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Renders a frozen DTO contract (064) with an enumerated provenance/suppression vocabulary.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>phase4-wave5</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Same component files as 065/067 (AccessGrantModal.tsx/types.ts) — must not run concurrently with them; runs solo in its wave (BFF waves finished).</parallel-reason>
+    <deps>064, 065</deps>
+    <tags>pcf, frontend, fluent-ui, auth</tags>
+    <estimated-effort>3-4 hours</estimated-effort>
+  </metadata>
+
+  <prompt>Rebase the modal's Current Access list onto the task-064 record-access report so EVERY row shows provenance (share · explicit grant · organization grant · standing grant · derived-from-field) and level, and Secure/Restricted records render suppressed rows AS suppressed (struck-through with the reason) instead of hiding them. The modal becomes the answer to "who can see this record and why" without leaving the form.</prompt>
+  <role>SPAARKE platform developer. Fluent v9 list/badge patterns, accessibility. Follow ADRs strictly.</role>
+  <goal>Current Access renders from the report endpoint (one source of truth, replacing the client-side union of grants + standing lists); each row: principal, provenance badge, level, revoke where the provenance is revocable (share, explicit grant), suppressed styling + reason tooltip where suppressed; derived-from-field rows name the conferring column in a tooltip.</goal>
+
+  <context>
+    <background>spec.md FR-30; design.md §6 ("Provenance is what makes this double as the attestation surface"). The modal currently unions two client-fetched lists and infers provenance from row shape (AccessGrantModal.tsx:286-303, 789-800) — the report endpoint (064) replaces that inference with server truth including rows the client could never compute (derived-from-field, POA shares, suppression).</background>
+    <relevant-files>
+      <file role="modify">src/client/shared/Spaarke.UI.Components/src/components/AccessGrantModal/AccessGrantModal.tsx</file>
+      <file role="modify">src/client/shared/Spaarke.UI.Components/src/components/AccessGrantModal/types.ts</file>
+      <file role="canonical-reference">projects/unified-access-control-r2/notes/phase4-access-report-contract.md (the frozen DTO)</file>
+      <file role="modify">src/client/shared/Spaarke.UI.Components/src/components/AccessGrantModal/__tests__/</file>
+    </relevant-files>
+    <dependencies>
+      <dependency task="064" status="pending">Report endpoint + frozen DTO.</dependency>
+      <dependency task="065" status="pending">User-share rows + 403 deny state already in the modal.</dependency>
+    </dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="project">Provenance comes ONLY from the report DTO — delete the client-side provenance inference; a row the report calls suppressed renders suppressed even if a legacy list would have shown it active. Scope: Current Access data flow.</constraint>
+    <constraint source="ADR-021">Suppressed styling via semantic tokens (strikethrough + muted foreground token), correct in dark mode; scope: suppressed-row styles.</constraint>
+    <constraint source="project">Revoke is offered ONLY on provenances the server can revoke (share via 063, explicit grant via existing revoke endpoint); derived/org/standing rows get an explanatory tooltip instead — never a dead button. Scope: per-row actions.</constraint>
+    <constraint source="a11y">Suppression must not be conveyed by strikethrough alone — include the reason as text/tooltip accessible to screen readers. Scope: suppressed rows.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>provenance rendering</topic>
+    <files>
+      <file>.claude/adr/ADR-021-fluent-design-system.md</file>
+      <file>docs/standards/UI-DESIGN-STANDARDS.md</file>
+      <file>projects/unified-access-control-r2/design.md</file>
+      <file>projects/unified-access-control-r2/spec.md</file>
+    </files>
+    <patterns>
+      <pattern name="fluent-v9-modern-theming" location=".claude/patterns/pcf/fluent-v9-modern-theming.md">Token usage.</pattern>
+    </patterns>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="0">Context + rigor declaration.</step>
+    <step order="1">Swap Current Access loading to the report endpoint; map the DTO to row models; remove the legacy union + inference.</step>
+    <step order="2">Render provenance badges (5 kinds) + level per row; suppressed styling + reason; conferring-column tooltip for derived rows.</step>
+    <step order="3">Wire revoke per provenance kind to the correct endpoint; keep candidate/named-picker sections functioning against the new row model.</step>
+    <step order="4">Component tests: one row per provenance kind renders its badge + level; secure fixture renders suppressed org/standing rows struck-through with reason; restricted fixture suppresses all contact rows; revoke only on revocable kinds; report error renders explicit error state (not an empty list).</step>
+    <step order="5">Shared-lib build + jest green; TrackingFieldTrio rebuild/version bump if its bundle embeds the modal. Update TASK-INDEX.md.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If the report DTO cannot express a row the legacy union displayed (a real access source missing from the report), STOP and escalate to fix 064 — do NOT re-add client-side inference to paper over it.</trigger>
+  </escalation>
+
+  <ui-tests>
+    <test name="Provenance answers who-and-why">
+      <steps>
+        <step>Open https://{org}.crm.dynamics.com; open a matter with: a user share, an explicit contact grant, an org-derived contact, a standing-grant holder, and an assigned-attorney (derived-from-field); open Manage Access.</step>
+      </steps>
+      <expected>Five rows, each with the correct provenance badge and level; derived row's tooltip names the conferring column.</expected>
+    </test>
+    <test name="Secure record suppression">
+      <steps>
+        <step>Open a Secure project's Manage Access.</step>
+      </steps>
+      <expected>Org/standing rows render struck-through with a "suppressed — secure record" reason; explicit shares/grants render active.</expected>
+    </test>
+    <test name="ADR-021 dark mode">
+      <steps>
+        <step>Dark theme; inspect badges, suppressed styling, tooltips.</step>
+      </steps>
+      <expected>Semantic tokens throughout; suppressed rows distinguishable in dark mode; reason text readable by screen reader.</expected>
+    </test>
+  </ui-tests>
+
+  <outputs>
+    <output type="code">src/client/shared/Spaarke.UI.Components/src/components/AccessGrantModal/AccessGrantModal.tsx</output>
+    <output type="code">src/client/shared/Spaarke.UI.Components/src/components/AccessGrantModal/types.ts</output>
+    <output type="test">src/client/shared/Spaarke.UI.Components/src/components/AccessGrantModal/__tests__/</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Every Current Access row displays provenance (one of the five kinds) and level, sourced from the report endpoint.</criterion>
+    <criterion testable="true">Secure record: suppressed rows render struck-through with reason "secure"; Restricted record: contact rows suppressed with reason "restricted" — present, not hidden.</criterion>
+    <criterion testable="true">Revoke appears only on share and explicit-grant rows and calls the matching endpoint.</criterion>
+    <criterion testable="true">Negative: report endpoint failure renders an explicit error state; the modal never shows a silently partial list.</criterion>
+    <criterion testable="true">Negative: no client-side provenance inference remains (grep the component for the legacy standing/org inference — removed).</criterion>
+    <criterion testable="true">Jest + builds green.</criterion>
+  </acceptance-criteria>
+
+  <notes>spec.md FR-30. Deny-list management UI + standing-grant levels are task 067 (same files — later wave).</notes>
+
+  <execution><skill>.claude/skills/task-execute/SKILL.md</skill></execution>
+</task>

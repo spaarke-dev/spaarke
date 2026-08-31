@@ -86,6 +86,202 @@ public enum ComposeCommentAnchorKind
     End,
 }
 
+/// <summary>
+/// A symbol-font glyph carried as a dedicated marker run (task 048 — same mechanism as
+/// <see cref="ComposeInlineRun.IsPageBreak"/>): the run IS a <c>w:sym</c>, and the renderer re-emits it from
+/// these two scalars rather than from the resolved glyph the editor showed.
+/// <para>
+/// The two fields are the ONLY thing <c>w:sym</c> carries, and neither is document prose — a font name and a
+/// four-hex code point. Round-tripping them is therefore not "the client handling OOXML" (ADR-049 I-2): no
+/// markup crosses the wire, only the same two scalars any font picker would hold. That is what makes a symbol
+/// self-describing where a field or a content control is not — those need their original subtree, which is why
+/// they stay on the base-carry path instead.
+/// </para>
+/// <para>
+/// Why it matters: § and ¶ in a legal document are typically Symbol-font glyphs, not the Unicode characters
+/// they resemble. Until this record existed, editing the paragraph replaced the glyph with whatever the read
+/// path had resolved it to — silently downgrading § to a look-alike, or (for an unmapped code point) to the
+/// U+FFFD placeholder the reader had substituted for display.
+/// </para>
+/// </summary>
+public sealed record ComposeSymbol
+{
+    /// <summary>The symbol font (<c>w:sym/@w:font</c>) — e.g. <c>Symbol</c>, <c>Wingdings</c>.</summary>
+    public required string Font { get; init; }
+
+    /// <summary>
+    /// The code point within that font (<c>w:sym/@w:char</c>), as the four-hex-digit string OOXML uses
+    /// (e.g. <c>F0A7</c>). Kept as the source string rather than parsed to an int so a round trip is
+    /// byte-identical to what the document declared.
+    /// </summary>
+    public required string CharCode { get; init; }
+}
+
+/// <summary>
+/// A Word FIELD carried as a dedicated marker run (task 049 — the same mechanism as
+/// <see cref="ComposeSymbol"/>): the run IS a field, and the renderer re-emits it from these scalars rather
+/// than from the text the field happened to be displaying.
+/// <para>
+/// <b>The instruction is the identity; the cached result is only the display.</b> Until this record existed,
+/// editing a paragraph replaced <c>{ REF _Ref_Confidentiality \r \h }</c> with the literal characters
+/// <c>4</c>. Nothing looked wrong — and that is the problem: the cross-reference had stopped being one, so
+/// when the agreement renumbered, the paragraph went on claiming "Section 4" forever. A stale number
+/// presented as prose is worse in an executed agreement than a visible error, because nobody audits it.
+/// Carrying the instruction restores the document's own behaviour; carrying the result alongside it means
+/// the save changes nothing on screen while doing so.
+/// </para>
+/// <para>
+/// <b>Self-describing, so ADR-049 I-2 holds.</b> Like <c>w:sym</c>'s font + code point, everything here is a
+/// scalar the document already stated in plain text — an instruction string and its last computed value. No
+/// markup crosses the wire and the client never interprets OOXML; it hands back the same strings it was
+/// given. Constructs that need their original subtree (an embedded object, a content-control shell) stay on
+/// the base-carry path instead, which is exactly why they are not modelled this way.
+/// </para>
+/// <para>
+/// <b>What is NOT carried, and why</b> (see <c>projects/spaarkeai-compose-r8/notes/049-field-carry-decisions.md</c>
+/// and <c>058-nested-field-carry.md</c>): a field whose <c>begin</c>/<c>end</c> straddle paragraphs (a
+/// <c>TOC</c>, an <c>INDEX</c>) never closes inside one container, so there is no complete field to carry at
+/// all. It keeps flattening and is reported <c>field-flattened-to-text</c> — the gate is structural (can the
+/// construct be reproduced exactly?), never a keyword allow-list, because freezing PAGE in the one paragraph
+/// a user edited while the other 39 pages stay live makes a document that behaves two ways.
+/// </para>
+/// <para>
+/// A NESTED field (<c>{ IF { MERGEFIELD State } = … }</c> — the conditional merge block a template is built
+/// from) has no single recoverable instruction either, and until task 058 it flattened for that reason. It is
+/// now carried by <see cref="SpanXml"/>, which does not recover the instruction at all: it carries the
+/// field's own OOXML.
+/// </para>
+/// </summary>
+public sealed record ComposeField
+{
+    /// <summary>
+    /// The field instruction VERBATIM — <c>w:fldSimple/@w:instr</c>, or the concatenated <c>w:instrText</c>
+    /// content of the <c>w:fldChar</c> code phase. Carried as the source string (leading/trailing spaces
+    /// included: Word writes <c>" REF _Ref1 \h "</c>, and trimming would change the field).
+    /// </summary>
+    public required string Instruction { get; init; }
+
+    /// <summary>
+    /// The result Word last computed and the reader currently sees. Carried so the save is visually a no-op
+    /// — Word displays the cached result until something asks the field to update.
+    /// </summary>
+    public string CachedResult { get; init; } = string.Empty;
+
+    /// <summary>
+    /// <c>true</c> when the source authored this field as the <c>w:fldChar</c> begin/instrText/separate/
+    /// result/end RUN sequence; <c>false</c> for the compact <c>w:fldSimple</c> element. The renderer
+    /// re-emits the FORM the document used. Word treats the two as equivalent, but normalising one into the
+    /// other rewrites what the file contains — and the residual-loss parity test counts element names, so a
+    /// silent normalisation would read there as a loss of one form and an invention of the other.
+    /// </summary>
+    public bool Complex { get; init; }
+
+    /// <summary>
+    /// <c>w:fldLock</c> — the author froze this field so it never updates. Carried because dropping it is
+    /// the one way this carry could make things WORSE than flattening: it would convert a deliberately
+    /// frozen field into a live one.
+    /// </summary>
+    public bool Locked { get; init; }
+
+    /// <summary>
+    /// <c>w:dirty</c> — the author asked Word to re-evaluate this field the next time the document opens.
+    /// Carried for the same reason as <see cref="Locked"/>: it is the document's own instruction about when
+    /// the field may change, and silently dropping it changes behaviour.
+    /// </summary>
+    public bool Dirty { get; init; }
+
+    /// <summary>
+    /// Task 058: the NESTED field's own OOXML, carried verbatim. <c>null</c> for every other field.
+    /// <para>
+    /// <b>Why a second representation exists at all.</b> A nested field — <c>{ IF { MERGEFIELD State } =
+    /// "California" "…" "…{ MERGEFIELD State }…" }</c>, the shape a conditional merge template is built from
+    /// — is a TREE, and <see cref="Instruction"/> is a scalar. Task 049 recorded the consequence precisely:
+    /// the scan folds the inner field's <c>w:instrText</c> into the outer accumulation, so the only string
+    /// recoverable is a CONCATENATION of both fields' instructions, and re-emitting it would author neither.
+    /// That reasoning is correct and is not overturned here. What it does not establish is that the field
+    /// cannot be carried — only that it cannot be RECONSTRUCTED. This property is the third option: the
+    /// span is captured and re-emitted without ever being taken apart, so the tree survives because nothing
+    /// parses it. Same argument, one construct larger, as
+    /// <see cref="ComposeEmbeddedObject.Xml"/> — a typed model of a construct discards every property it
+    /// failed to enumerate, and carrying the bytes preserves the ones nobody thought of.
+    /// </para>
+    /// <para>
+    /// <b>Mutually exclusive with <see cref="Instruction"/>.</b> When this is set the instruction is EMPTY,
+    /// because there is no single instruction to state — and that is load-bearing rather than tidy: if the
+    /// carry is refused at render time, the renderer falls through to the instruction path, finds nothing,
+    /// and flattens to <see cref="CachedResult"/> — today's outcome, a defined one (ADR-049 invariant 1).
+    /// A concatenated instruction sitting in that slot would instead author a different field, which is the
+    /// exact failure task 049 declined to ship.
+    /// </para>
+    /// <para>
+    /// <b>Shape.</b> A holder <c>w:p</c> whose children are the field: either the contiguous
+    /// <c>w:fldChar</c> begin/…/end RUN sequence, or a single <c>w:fldSimple</c>. The wrapper exists so ONE
+    /// parse gate serves both forms — the SDK emits the namespace declarations the fragment needs on the
+    /// holder, exactly as <see cref="ComposeEmbeddedObject.Xml"/> relies on.
+    /// </para>
+    /// <para>
+    /// <b>Server-set, and NEVER handed to the client.</b> The read-side atom deliberately carries no payload
+    /// for a nested field (<c>data-field-instr</c> is absent), so no client can round-trip this and ADR-049
+    /// I-2 is not stretched: a field instruction is a scalar the document states in plain text, but a field
+    /// SUBTREE is markup, and markup does not cross the wire. It reaches the renderer only through a
+    /// server-side model round trip. At render it is parsed through the typed SDK class, schema-validated,
+    /// size-capped, checked to resolve every relationship it names, and — unlike any other carry — checked
+    /// to BE a nested field: a balanced span that opens on its first run, closes on its last, and nests at
+    /// least once. A payload that is not that is refused, so the property cannot become a way to author
+    /// arbitrary content into a saved package.
+    /// </para>
+    /// </summary>
+    public string? SpanXml { get; init; }
+}
+
+/// <summary>
+/// An EMBEDDED OBJECT carried as a dedicated marker run (task 056 — the same marker mechanism as
+/// <see cref="ComposeField"/>, but the OPAQUE-CARRY contract of
+/// <see cref="ComposeFormatChange.PreviousPropertiesXml"/> rather than a set of scalars).
+/// <para>
+/// <b>Why opaque and not typed.</b> A <c>w:drawing</c> is a DrawingML document in its own right — extents,
+/// effect extents, graphic frame locks, a <c>pic:pic</c> with fill/geometry/transform, or a chart
+/// reference, or an entire VML shape. A typed model of that would be a second OOXML library, and every
+/// property it failed to enumerate would be silently discarded — the exact failure this project exists to
+/// end. Carrying the subtree VERBATIM preserves properties nobody enumerated, for the same reason cloning
+/// an untouched block does.
+/// </para>
+/// <para>
+/// <b>The subtree is never string-injected.</b> Same gate as <see cref="ComposeFormatChange"/>: the XML is
+/// parsed through the typed OpenXML SDK class (whose generated constructor validates the root element's
+/// NAME and NAMESPACE), schema-validated, and the whole record is dropped when that fails — so client junk
+/// cannot reach the package.
+/// </para>
+/// <para>
+/// <b>…and a second gate this construct alone needs.</b> A drawing refers to its image by RELATIONSHIP id
+/// (<c>r:embed="rId7"</c>), resolved against the MAIN DOCUMENT PART — the very part whose body this save
+/// replaces. A subtree that parses perfectly but names a relationship the carrier does not have would
+/// author a package Word reports as DAMAGED, which is strictly worse than the honest drop it replaces. The
+/// renderer therefore also resolves every attribute in the relationships namespace against the carrier and
+/// refuses the carry if any does not resolve. (Measured: the body swap does NOT prune relationships — the
+/// SDK rewrites the part's XML, never its <c>.rels</c>. Evidence in
+/// <c>projects/spaarkeai-compose-r8/notes/056-object-carry-decisions.md</c> §1.)
+/// </para>
+/// <para>
+/// <b>Server-set; clients preserve it untouched on re-post.</b> A client that drops it entirely is also
+/// fine: <c>ComposeBlockMerge.CarryUnmodeledConstructs</c> restores the object from the block's BASE
+/// counterpart, which is what makes a browser keystroke edit keep its image today without any OOXML
+/// crossing the wire (ADR-049 I-2).
+/// </para>
+/// </summary>
+public sealed record ComposeEmbeddedObject
+{
+    /// <summary>
+    /// The <c>w:drawing</c> / <c>w:object</c> / <c>w:pict</c> element as OuterXml, exactly as captured by
+    /// the projection. Parsed through the typed SDK class at render and dropped whole on failure — see the
+    /// type remarks. The element must be self-contained: namespace declarations for every prefix it uses
+    /// have to be present on the element itself, because it is parsed OUT of its original document's
+    /// namespace scope (the projection captures <c>OuterXml</c>, which the SDK emits with the needed
+    /// declarations).
+    /// </summary>
+    public required string Xml { get; init; }
+}
+
 /// <summary>Revision kind for <see cref="ComposeRevision"/> (task 025). Serialized as its STRING name.</summary>
 [JsonConverter(typeof(JsonStringEnumConverter))]
 public enum ComposeRevisionKind
@@ -299,10 +495,80 @@ public sealed record ComposeInlineRun
     /// Task 023: this run IS a manual page break (<c>w:br w:type="page"</c>). When true the renderer emits
     /// exactly that break run and every other field on this run (<see cref="Text"/>, marks,
     /// <see cref="Href"/>) is ignored. Captured by the server projection at the break's exact inline
-    /// position (splitting the surrounding text into separate runs); soft line/column breaks remain the
-    /// counted <c>line-break-flattened</c> degradation.
+    /// position (splitting the surrounding text into separate runs).
     /// </summary>
     public bool IsPageBreak { get; init; }
+
+    /// <summary>
+    /// Task 046 (r8, FR-A10 residual): this run IS a SOFT line break (<c>w:br</c> with no type, or
+    /// <c>w:cr</c>). Same marker-run contract as <see cref="IsPageBreak"/> — when true every other field
+    /// is ignored — and mutually exclusive with it.
+    /// <para>
+    /// Until this field existed, an edit anywhere in a paragraph flattened its line breaks: the model had
+    /// no way to say "a break sits here", so the client rebuilt the paragraph without them and the
+    /// renderer had nothing to emit. Address blocks, party blocks and signature blocks are held together
+    /// by exactly these breaks, so the paragraph a user is most likely to edit was the one most likely to
+    /// collapse. The editor already carried the break as a TipTap <c>hardBreak</c>; the only thing missing
+    /// was somewhere to put it.
+    /// </para>
+    /// </summary>
+    public bool IsLineBreak { get; init; }
+
+    /// <summary>
+    /// Task 048 (r8, FR-A10 residual): this run IS a tab (<c>w:tab</c> / <c>w:ptab</c>). Marker-run contract
+    /// like <see cref="IsPageBreak"/> for <see cref="Text"/>, but — unlike the break markers — run PROPERTIES
+    /// still apply: an underlined tab is the fill-in leader line on a signature block, so dropping the
+    /// underline would lose visible formatting. The renderer therefore builds the run normally and swaps only
+    /// the text child (see <c>BuildRun</c>).
+    /// <para>
+    /// Tabs are what hold a definitions list, a signature block and a table-of-contents line in alignment.
+    /// Flattening one to a space is invisible in a diff and obvious on the page.
+    /// </para>
+    /// </summary>
+    public bool IsTab { get; init; }
+
+    /// <summary>
+    /// Task 048 (r8, FR-A10 residual): this run IS a symbol-font glyph (<c>w:sym</c>) — see
+    /// <see cref="ComposeSymbol"/>. Same marker/property contract as <see cref="IsTab"/>. Mutually exclusive
+    /// with it and with the two break markers.
+    /// </summary>
+    public ComposeSymbol? Symbol { get; init; }
+
+    /// <summary>
+    /// Task 049 (r8, FR-A10 residual): this run IS a Word field (<c>w:fldSimple</c>, or a <c>w:fldChar</c>
+    /// begin/instrText/separate/result/end run sequence) — see <see cref="ComposeField"/>. Marker-run
+    /// contract like <see cref="IsTab"/>: <see cref="Text"/> and the other content fields are ignored, but
+    /// run PROPERTIES still apply, because a cross-reference is routinely bold or italic and the field's
+    /// result run is where that formatting lives. Mutually exclusive with the other markers.
+    /// <para>
+    /// Unlike them, a field is not emitted from inside <c>BuildRun</c>: <c>w:fldSimple</c> is a
+    /// paragraph-level element (<c>EG_PContent</c>) and the complex form is FIVE runs, so the renderer
+    /// authors it at paragraph level — the same shape the revised-hyperlink case already uses (wrapper
+    /// OUTSIDE, <c>w:ins</c>/<c>w:del</c> INSIDE).
+    /// </para>
+    /// </summary>
+    public ComposeField? Field { get; init; }
+
+    /// <summary>
+    /// Task 056 (r8, FR-A10 residual): this run IS an embedded object — a picture, chart, shape or OLE
+    /// embed (<c>w:drawing</c> / <c>w:object</c> / <c>w:pict</c>) — carried as its own subtree (see
+    /// <see cref="ComposeEmbeddedObject"/>). Marker-run contract like <see cref="IsTab"/>: <see cref="Text"/>
+    /// and the other content fields are ignored, run PROPERTIES still apply. Mutually exclusive with the
+    /// other markers.
+    /// <para>
+    /// Until this field existed, an edit anywhere in the paragraph removed the object from it and reported
+    /// <c>complex-object-dropped</c>. The image's own bytes were never deleted — they stayed in the package
+    /// as an unreferenced part — so the file was intact and the page had a hole in it, which is the shape of
+    /// loss users notice last and trust least. An executed signature image and an exhibit chart are exactly
+    /// the content a legal document cannot re-derive.
+    /// </para>
+    /// <para>
+    /// A TEXT-CARRYING box (a DrawingML/VML text box) is deliberately NOT carried here: its text is
+    /// accept-flattened into the paragraph as prose (<c>text-box-flattened</c>), so carrying the box as well
+    /// would put the same words in the document twice. That family keeps its own named outcome.
+    /// </para>
+    /// </summary>
+    public ComposeEmbeddedObject? EmbeddedObject { get; init; }
 
     /// <summary>
     /// Task 024: this run IS a comment range anchor (see <see cref="ComposeCommentAnchor"/>). When non-null

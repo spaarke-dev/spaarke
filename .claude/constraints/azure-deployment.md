@@ -40,7 +40,7 @@ Load when:
 - **MUST** set `stdoutLogEnabled="true"` in the published `web.config` before packaging (dotnet publish resets it to false)
 - **MUST** set `<RuntimeIdentifier>linux-x64</RuntimeIdentifier>` + `<SelfContained>false</SelfContained>` in `Sprk.Bff.Api.csproj` — framework-dependent Linux publish (FR-A1 per `sdap-bff-api-remediation-fix` project). Eliminates the entire `runtimes/` directory tree (10 RIDs → eliminated on Linux App Service) and matches the target App Service OS.
 - **MUST** exclude wwwroot sourcemaps from publish via `<Content Update="wwwroot\**\*.js.map" CopyToPublishDirectory="Never" />` in `Sprk.Bff.Api.csproj` (FR-A2). Sourcemaps remain in the source tree for local debugging but never ship.
-- **MUST** verify zip entry count (~247) and size (~50 MB) before deploying — oversized zips indicate stale publish dirs in source. Current baseline is **49.63 MB compressed incl. PDBs** (2026-07-08, `spaarke-ai-architecture-redesign-r1` task 055; 45.87 MB excl. PDBs — state the PDB convention when reporting). History: 72.9 MB (2026-05-19) → 45.65 (2026-05-26) → 49.63.
+- **MUST** verify zip entry count (~215) and size (~45 MB) before deploying — oversized zips indicate stale publish dirs in source. Current baseline is **44.96 MB compressed incl. PDBs** (2026-08-13, `dotnet-10-upgrade-r1` task 031, on the .NET 10 framework-dependent linux-x64 publish; 44.05 MB excl. PDBs — state the PDB convention when reporting). History: 72.9 MB (2026-05-19) → 45.65 (2026-05-26) → 49.63 (2026-07-08 net8) → **44.96 (2026-08-13 net10)**.
 - **MUST** use `az webapp deploy --type zip` or Kudu zipdeploy API for deployment (ensures atomic replacement)
 
 > **Phase 5 demo deploy verified** the framework-dependent linux-x64 publish removes the entire `runtimes/` directory tree (10 RIDs → eliminated). See `projects/sdap-bff-api-remediation-fix/EXECUTION-LOG.md` Phase 4 Outcome A for evidence.
@@ -53,9 +53,30 @@ Every task that touches `src/server/api/Sprk.Bff.Api/` (or `Spaarke.Core` / `Spa
 
 1. **MUST** run `dotnet publish -c Release src/server/api/Sprk.Bff.Api/ -o deploy/api-publish/` AFTER changes land and BEFORE merge.
 2. **MUST** measure compressed size of `deploy/api-publish/` (or the resulting zip if packaging) and report the absolute size + diff vs the prior measured baseline in the task notes / PR description.
-3. **MUST** compare against the binding **ceiling of ≤60 MB compressed** (per spec NFR-01). The current measured baseline as of 2026-07-08 is **49.63 MB incl. PDBs** (task 055, Compress-Archive Optimal over `deploy/api-publish/*` — state the PDB convention when reporting; 45.87 MB excl. PDBs). Tasks pushing toward 60 MB MUST flag the trajectory in code review.
+3. **MUST** compare against the binding **ceiling of ≤60 MB compressed** (per spec NFR-01). The current measured baseline as of 2026-08-13 is **44.96 MB incl. PDBs** (`dotnet-10-upgrade-r1` task 031, Compress-Archive Optimal over `deploy/api-publish/*`, .NET 10 framework-dependent linux-x64 — state the PDB convention when reporting; 44.05 MB excl. PDBs). Prior net8 baseline: 49.63 MB incl. PDBs (2026-07-08 task 055). Tasks pushing toward 60 MB MUST flag the trajectory in code review.
 4. **MUST** verify no new HIGH-severity CVEs via `dotnet list package --vulnerable --include-transitive` if NuGet packages were added or upgraded.
 5. **MUST** cross-reference CLAUDE.md §10 in the task notes / PR description (e.g., "BFF Hygiene §10 + NFR-01 verified: publish size = X MB, delta = Y MB, no new HIGH CVEs").
+
+### ⚠️ Measurement convention is BINDING, not descriptive (added 2026-08-27 by `unified-access-control-r2` Wave A)
+
+**The number is meaningless unless it was produced the same way as the number you compare it to.** Report **all five** of these alongside the size, every time:
+
+| Must state | Canonical value for the baseline |
+|---|---|
+| Command | `dotnet publish -c Release src/server/api/Sprk.Bff.Api/ -o deploy/api-publish/` |
+| RID / deployment mode | **framework-dependent linux-x64** (NOT self-contained, NOT win-x64) |
+| Configuration | **Release** (a Debug publish is not comparable) |
+| Compression | **`Compress-Archive -CompressionLevel Optimal`** over `deploy/api-publish/*` |
+| PDBs | **included** for the 44.96 figure; 44.05 excludes them — say which |
+
+**Why this became binding — a real incident, not a hypothetical.** On 2026-08-27 three sub-agents on the **identical base commit**, each stating *"compressed incl. PDBs"*, reported **45.07 / 45.07 / 43.78 MB** — a **1.29 MB spread on the same tree**. Cause: the POML corpus carried **two baseline clusters** (~43.65–43.71 MB across 24 POMLs and 44.96 MB across 31), so each agent compared against whichever its own POML cited, computed a small delta (+0.11, +0.11, +0.09), and correctly concluded "within ceiling". *Every individual report was internally consistent and correct.* The set was incoherent, and the defect was visible only by comparing reports across agents.
+
+**Consequence, and why it matters even far below the ceiling**: the ≤60 MB HARD STOP still bounds the worst case regardless of convention. But the **≥+5 MB single-task escalation below is a drift detector**, and a 1.3 MB convention gap in circulation means a genuine regression can be absorbed as a convention artifact — or a convention change misread as a regression. The gate keeps its floor and loses its sensitivity, which is the half it was actually added for.
+
+**Therefore**:
+- **MUST** state all five fields above. A bare "45.07 MB" is an incomplete report and a reviewer should reject it.
+- **MUST NOT** compare across conventions. If the cited baseline's convention is unstated or differs, re-measure the baseline yourself on the merge-base commit rather than differencing two incomparable numbers.
+- When authoring POMLs, cite **44.96 MB incl. PDBs** (the canonical baseline above). POMLs citing the ~43.7 cluster are **stale** and should be re-baselined on next touch.
 
 **Threshold for escalation**:
 - Diff ≥ +5 MB single-task: explicit justification required in PR description; reviewer must explicitly accept.

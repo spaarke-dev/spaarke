@@ -32,18 +32,22 @@ import * as React from 'react';
 import {
   MessageBar,
   MessageBarBody,
+  MessageBarActions,
   Menu,
   MenuTrigger,
   MenuPopover,
   MenuList,
   MenuItem,
+  Button,
+  mergeClasses,
 } from '@fluentui/react-components';
-import { Search20Regular, DocumentAdd20Regular } from '@fluentui/react-icons';
+import { Search20Regular, DocumentAdd20Regular, ArrowUndo16Regular } from '@fluentui/react-icons';
 import { getXrmForPicker } from '@spaarke/ui-components';
 import {
   derivePrimaryReview,
   applyRegardingSelection,
   advanceAssociationStatus,
+  clearPrimaryRegarding,
   type PrimaryCandidate,
 } from '../../logic/connections';
 import type { EmailConnectionsReviewProps } from './EmailAssociationsAndTracking.types';
@@ -66,19 +70,27 @@ export function EmailConnectionsReview(props: EmailConnectionsReviewProps): Reac
     writeContext,
     linkAnotherCatalog,
     readOnly = false,
+    variant = 'default',
     onAssociationsChanged,
     onCreateNewRecord,
+    onLaunchCreateRecord,
   } = props;
   const s = useConnectionsReviewStyles();
+  const reconcile = variant === 'reconcile';
 
   const [selectedKey, setSelectedKey] = React.useState<string | undefined>(undefined);
   const [busy, setBusy] = React.useState(false);
   const [error, setError] = React.useState<string | null>(null);
+  // Item 5 (owner UAT 2026-08-19): records the reviewer picks via "Look up another record"
+  // are ADDED to the candidate list as confirmable cards (not auto-filed) — the reviewer
+  // clicks Confirm to file. Per-email; reset on selection change.
+  const [addedCandidates, setAddedCandidates] = React.useState<PrimaryCandidate[]>([]);
 
   // Session-local review state is per-selected-email — reset on selection change.
   React.useEffect(() => {
     setSelectedKey(undefined);
     setError(null);
+    setAddedCandidates([]);
   }, [communicationId]);
 
   // SAME data path as the engine (no client recompute; ADR-045).
@@ -108,9 +120,28 @@ export function EmailConnectionsReview(props: EmailConnectionsReviewProps): Reac
   const greenKey = model.primary ? candidateKey(model.primary) : undefined;
   const confirmedKey = model.state === 'confirmed' && model.primary ? candidateKey(model.primary) : undefined;
   const activeSelectedKey = selectedKey ?? greenKey;
+  // Item 5: the rendered candidate list = engine candidates + reviewer-added lookups
+  // (deduped). An added record that later becomes the primary is already de-duplicated
+  // against the engine set by key.
+  const shownCandidates = React.useMemo(() => {
+    const seen = new Set(model.candidates.map(candidateKey));
+    return [...model.candidates, ...addedCandidates.filter(c => !seen.has(candidateKey(c)))];
+  }, [model.candidates, addedCandidates]);
+  // Item 2f: in the reconcile variant the primary now renders as a green candidate
+  // card carrying its OWN Undo button — so the filed-banner's Undo is redundant and
+  // is only shown for a primary NOT represented among the cards (a denorm-only /
+  // manual "Link another" record has no provenance candidate to render as a card).
+  const primaryInCards = !!greenKey && shownCandidates.some(c => candidateKey(c) === greenKey);
   // Confirmed → the primary is the header chip, so the cards row shows ONLY the
   // "Link another record" tile (owner UAT 2026-07-31).
   const isConfirmed = model.state === 'confirmed';
+  // Reconcile-variant "Filed to …" banner label — the confirmed primary's name
+  // (with its record number when known).
+  const filedLabel = model.primary
+    ? model.primary.recordNumber
+      ? `${model.primary.targetName} (${model.primary.recordNumber})`
+      : model.primary.targetName
+    : '';
 
   const confirmCandidate = React.useCallback(
     async (c: PrimaryCandidate): Promise<void> => {
@@ -142,44 +173,120 @@ export function EmailConnectionsReview(props: EmailConnectionsReviewProps): Reac
     [writeContext, onAssociationsChanged]
   );
 
-  const onLinkSelected = React.useCallback(
-    (entityType: string, recordId: string, recordName: string): void => {
-      void confirmCandidate({ entity: entityType, targetId: recordId, targetName: recordName, confidence: 1 });
-    },
-    [confirmCandidate]
-  );
+  // Reconcile variant — per-line UNDO of the confirmed primary (owner UAT 2026-08-14).
+  // Unfiles the association via the shipped `clearPrimaryRegarding` (nulls the typed lookup +
+  // the denorm fields + resets `sprk_associationstatus`), returning the row to Needs-review.
+  // `onAssociationsChanged` re-derives the gate so Fields/Tasks re-lock. Best-effort with
+  // an inline error on failure.
+  const handleUndoPrimary = React.useCallback(async (): Promise<void> => {
+    if (!model.primary) return;
+    setBusy(true);
+    setError(null);
+    try {
+      const res = await clearPrimaryRegarding(writeContext, model.primary.entity ?? '');
+      if (!res.success) {
+        setError(res.error ?? 'Could not undo this association.');
+        return;
+      }
+      setSelectedKey(undefined);
+      onAssociationsChanged?.();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Unexpected error while undoing.');
+    } finally {
+      setBusy(false);
+    }
+  }, [model.primary, writeContext, onAssociationsChanged]);
+
+  // "New record" (task 064, E1b) → the host opens Quick Start / a Create*Wizard and
+  // resolves with the created record's ref (or null when cancelled). A created ref is
+  // filed as the confirmed regarding via the SAME additive `confirmCandidate` →
+  // `applyRegardingSelection` path a picked record uses (no second write path; NFR-10).
+  // The subsequent `onAssociationsChanged` (inside confirmCandidate) re-scopes Fields/Tasks.
+  // Falls back to the fire-and-forget `onCreateNewRecord` when no launcher is wired.
+  const handleCreateNew = React.useCallback(async (): Promise<void> => {
+    if (!onLaunchCreateRecord) {
+      onCreateNewRecord?.();
+      return;
+    }
+    setError(null);
+    try {
+      const ref = await onLaunchCreateRecord();
+      if (!ref) return; // user cancelled the wizard — no write
+      await confirmCandidate({
+        entity: ref.entityType,
+        targetId: ref.id,
+        targetName: ref.name ?? '',
+        confidence: 1,
+      });
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Could not create and file the new record.');
+    }
+  }, [onLaunchCreateRecord, onCreateNewRecord, confirmCandidate]);
 
   // "Link another record" → SINGLE click opens the record-type dropdown directly
   // (owner UAT #6). Picking a type opens the host's polymorphic lookup dialog
   // (`Xrm.Utility.lookupObjects`, reused via the shared picker's `getXrmForPicker`
   // bridge). In a non-MDA / dev host that bridge is absent, so the lookup no-ops
   // (expected). A picked record is filed via the same additive confirm path.
-  const handleLinkPick = React.useCallback(
-    async (entityType: string): Promise<void> => {
-      setError(null);
-      try {
-        const xrm = getXrmForPicker();
-        if (!xrm?.Utility?.lookupObjects) return; // dev/non-MDA host — no-op (expected)
-        const results = await xrm.Utility.lookupObjects({
-          entityTypes: [entityType],
-          defaultEntityType: entityType,
-          allowMultiSelect: false,
-        });
-        if (!results || results.length === 0) return; // user cancelled
-        const picked = results[0];
-        onLinkSelected(entityType, picked.id.replace(/[{}]/g, '').toLowerCase(), picked.name);
-      } catch (err) {
-        setError(err instanceof Error ? err.message : 'Could not open the record picker.');
-      }
-    },
-    [onLinkSelected]
-  );
+  const handleLinkPick = React.useCallback(async (entityType: string): Promise<void> => {
+    setError(null);
+    try {
+      const xrm = getXrmForPicker();
+      if (!xrm?.Utility?.lookupObjects) return; // dev/non-MDA host — no-op (expected)
+      const results = await xrm.Utility.lookupObjects({
+        entityTypes: [entityType],
+        defaultEntityType: entityType,
+        allowMultiSelect: false,
+      });
+      if (!results || results.length === 0) return; // user cancelled
+      const picked = results[0];
+      // Item 5: ADD the picked record to the candidate list (deduped) as a confirmable
+      // card + select it — the reviewer clicks Confirm to file it (no auto-write here).
+      const cand: PrimaryCandidate = {
+        entity: entityType,
+        targetId: picked.id.replace(/[{}]/g, '').toLowerCase(),
+        targetName: picked.name,
+        confidence: 1,
+      };
+      const key = candidateKey(cand);
+      setAddedCandidates(prev => (prev.some(c => candidateKey(c) === key) ? prev : [...prev, cand]));
+      setSelectedKey(key);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Could not open the record picker.');
+    }
+  }, []);
 
   return (
-    <div className={s.root} data-testid="email-connections-review">
+    <div className={reconcile ? mergeClasses(s.root, s.reconcilePad) : s.root} data-testid="email-connections-review">
       {error && (
         <MessageBar intent="error">
           <MessageBarBody>{error}</MessageBarBody>
+        </MessageBar>
+      )}
+
+      {/* Reconcile variant (owner UAT round-3 2026-08-13) — "Filed to …" success
+          banner once a primary is confirmed. The reconciliation browse tab renders
+          NO confirmed chip of its own, so this banner is the filed-state feedback
+          the reviewer sees (matches the Pillar E prototype's Related-to banner). */}
+      {reconcile && isConfirmed && model.primary && (
+        <MessageBar intent="success" data-testid="association-filed-banner">
+          <MessageBarBody>
+            Filed to <strong>{filedLabel}</strong>. Switch below, or move to Fields / Tasks to continue.
+          </MessageBarBody>
+          {!readOnly && !primaryInCards && (
+            <MessageBarActions>
+              <Button
+                size="small"
+                appearance="secondary"
+                icon={<ArrowUndo16Regular />}
+                disabled={busy}
+                onClick={() => void handleUndoPrimary()}
+                data-testid="association-undo"
+              >
+                Undo
+              </Button>
+            </MessageBarActions>
+          )}
         </MessageBar>
       )}
 
@@ -192,10 +299,16 @@ export function EmailConnectionsReview(props: EmailConnectionsReviewProps): Reac
               filler slots).
             • no matches → a single "No confident match" card.
           The "Link another record" tile renders in every non-read-only state. */}
-      <div className={s.cards}>
-        {!isConfirmed &&
-          (model.candidates.length > 0 ? (
-            model.candidates.map(c => {
+      <div className={reconcile ? s.cardsStack : s.cards}>
+        {/* Reconcile variant (owner UAT 2026-08-19, item 2f): candidate cards STAY
+            visible even after a match/confirm so the reviewer can SWITCH the
+            association — the current primary (🟡 auto-matched or 🟢 confirmed) card
+            shows an Undo button, every other candidate keeps a Confirm (switch)
+            button. The default (email-form) variant keeps its confirmed-chip-in-header
+            behavior (cards hidden once confirmed). */}
+        {(reconcile || !isConfirmed) &&
+          (shownCandidates.length > 0 ? (
+            shownCandidates.map(c => {
               const k = candidateKey(c);
               const isGreen = k === greenKey;
               const isSelected = k === activeSelectedKey;
@@ -206,10 +319,12 @@ export function EmailConnectionsReview(props: EmailConnectionsReviewProps): Reac
                   selected={isSelected || isGreen}
                   tone={isGreen ? 'primary' : 'select'}
                   showConfirm={isSelected && k !== confirmedKey}
+                  compact={reconcile}
                   busy={busy}
                   readOnly={readOnly}
                   onSelect={() => setSelectedKey(k)}
                   onConfirm={() => void confirmCandidate(c)}
+                  onUndo={() => void handleUndoPrimary()}
                   s={s}
                 />
               );
@@ -218,11 +333,10 @@ export function EmailConnectionsReview(props: EmailConnectionsReviewProps): Reac
             <BlankCard key="blank" s={s} />
           ))}
 
-        {/* Link another record — a tile that is a VISUAL SIBLING of the candidate
-            cards (owner UAT #5). A SINGLE click opens the record-type dropdown
-            directly (owner UAT #6): choosing a type opens the host's polymorphic
-            lookup dialog for all regarding targets. No intermediate reveal step. */}
-        {!readOnly && (
+        {/* Default variant — "Link another record" as a card TILE (a VISUAL SIBLING
+            of the candidate cards; owner UAT 2026-07-31 #5/#6). The reconcile variant
+            renders this as a labelled field BELOW the grid instead (see below). */}
+        {!reconcile && !readOnly && (
           <div className={s.cardCell}>
             <Menu positioning="below-start">
               <MenuTrigger disableButtonEnhancement>
@@ -250,23 +364,18 @@ export function EmailConnectionsReview(props: EmailConnectionsReviewProps): Reac
           </div>
         )}
 
-        {/* Create new record — the "Create-new-and-link" new-vs-related intent
-            (email-communication-intelligence-r2 task 052, FR-E3). Rendered ONLY
-            when the host wires `onCreateNewRecord` (the reconciliation Related-to
-            cell does; existing consumers like EmailWorkspace omit it → this tile
-            never appears there — additive + backward-compatible). A single click
-            fires the host's create-new intent; the created record is then filed
-            via the SAME additive regarding path (no second write path). */}
-        {onCreateNewRecord && !readOnly && (
+        {/* Default variant — "New record" as a card tile (see reconcile full-width
+            button below). Rendered ONLY when the host wires a create-new launcher. */}
+        {!reconcile && (onLaunchCreateRecord || onCreateNewRecord) && !readOnly && (
           <div className={s.cardCell}>
             <button
               type="button"
               className={s.linkCard}
               disabled={busy}
-              onClick={onCreateNewRecord}
+              onClick={() => void handleCreateNew()}
               data-testid="create-new-record"
             >
-              <span className={s.linkCardLabel}>Create new record</span>
+              <span className={s.linkCardLabel}>New record</span>
               <span className={s.linkCardIconRow}>
                 <DocumentAdd20Regular className={s.linkCardIcon} aria-hidden="true" />
               </span>
@@ -274,6 +383,59 @@ export function EmailConnectionsReview(props: EmailConnectionsReviewProps): Reac
           </div>
         )}
       </div>
+
+      {/* Reconcile variant — "Look up another record" as a LABELLED FIELD (owner UAT
+          round-3: "lookup record as more of a field"). A single click on the field
+          opens the record-type menu → the host's polymorphic lookup dialog (same
+          `handleLinkPick` path the default tile uses). */}
+      {reconcile && !readOnly && (
+        <div className={s.lookupField}>
+          {/* Item 4 (owner UAT 2026-08-19): no separate label — the prompt lives inside
+              the field as placeholder text ("Look up another record"). */}
+          <Menu positioning="below-start">
+            <MenuTrigger disableButtonEnhancement>
+              <button
+                type="button"
+                className={s.lookupControl}
+                disabled={busy}
+                data-testid="link-another-record"
+                aria-label="Look up another record"
+              >
+                <span className={s.lookupPlaceholder}>Look up another record</span>
+                <Search20Regular className={s.lookupControlIcon} aria-hidden="true" />
+              </button>
+            </MenuTrigger>
+            <MenuPopover>
+              <MenuList>
+                {catalog.map(entry => (
+                  <MenuItem
+                    key={entry.recordTypeRefId}
+                    onClick={() => void handleLinkPick(entry.logicalName)}
+                    data-testid={`link-another-record-item-${entry.logicalName}`}
+                  >
+                    {entry.displayName}
+                  </MenuItem>
+                ))}
+              </MenuList>
+            </MenuPopover>
+          </Menu>
+        </div>
+      )}
+
+      {/* Reconcile variant — "New record" as a FULL-WIDTH button (owner UAT round-3:
+          "+New record as a full width button"). Same additive create-and-file path. */}
+      {reconcile && (onLaunchCreateRecord || onCreateNewRecord) && !readOnly && (
+        <Button
+          className={s.newRecordFullWidth}
+          appearance="secondary"
+          icon={<DocumentAdd20Regular />}
+          disabled={busy}
+          onClick={() => void handleCreateNew()}
+          data-testid="create-new-record"
+        >
+          New record
+        </Button>
+      )}
     </div>
   );
 }

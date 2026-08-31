@@ -1,0 +1,213 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="015" project="record-header-and-notepad-r2">
+  <metadata>
+    <title>Renderer barrel exports + shared FR-10 contract test suite (serial, after Group A)</title>
+    <phase>1 Renderers</phase>
+    <gate>after-010-014</gate>
+    <status>completed</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Modifies .ts barrel files and adds tests (Step 3.5.5: code files = FULL). Tags include `testing`, so the TEST-MODIFYING override row (root CLAUDE.md §8) makes the Step 9.5 code-review + adr-check gates unconditional regardless.</rigor-reason>
+    <model-tier>opus</model-tier>
+    <model-tier-reason>Cross-cutting contract enforcement + reconciliation across the outputs of five parallel tasks (six renderers, two barrels): high blast radius, and the judgment of whether a divergence is a renderer bug to fix or a contract question to escalate is exactly the boundary Step 3.5.5b routes to opus.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Sole owner of fields/index.ts and components/RecordHeader/index.ts — the files every Group-A task was explicitly barred from touching. R1 lost time to parallel renderer tasks racing on fields/index.ts; this task exists to serialize that edit. Runs only after 010-014 all complete.</parallel-reason>
+    <deps>010, 011, 012, 013, 014</deps>
+    <tags>react, typescript, frontend, fluent-ui, testing, unit-test</tags>
+    <estimated-effort>3-5 hours</estimated-effort>
+  </metadata>
+
+  <prompt>
+    Serialize the barrel work Group A was barred from: export the three new renderers (DateField,
+    NumberField, BooleanField) from fields/index.ts and components/RecordHeader/index.ts. Then write the
+    shared renderer-CONTRACT test suite asserting that every renderer obeys FR-10 identically — props
+    shape, self-applied gridColumn, editable gate, draft/commit/revert-on-reject-stay-in-edit,
+    Enter/Escape, blur-commits, em-dash for null/undefined/'' — with per-renderer interaction adapters.
+    Where a renderer violates the contract, fix the renderer here (serially — no race) and document the
+    fix; where the violation is a contract question, escalate.
+  </prompt>
+
+  <role>
+    SPAARKE platform developer. Expert in React Testing Library, parameterized test design, and the
+    Fluent v9 / React 16-17 shared-library boundary. Follow ADRs strictly.
+  </role>
+
+  <goal>
+    Both barrels export all renderers + prop types; a NEW parameterized suite
+    __tests__/rendererContract.test.tsx passes against all six field renderers (TextField, TextareaField,
+    OptionSetField, DateField, NumberField, BooleanField); the full shared-library test suite and build
+    are green; any conformance fixes made to renderer files are documented in
+    projects/record-header-and-notepad-r2/notes/renderer-contract-reconciliation.md.
+  </goal>
+
+  <context>
+    <background>
+      FR-10 acceptance is literally "contract test suite passes identically against every renderer" —
+      this task IS that acceptance. It exists as a separate serial task because R1 lost time to parallel
+      renderer tasks racing on fields/index.ts (plan.md Strategy point 3: "The barrel serializes");
+      tasks 010-014 each carried a MUST-NOT-edit-the-barrel constraint pointing here. The
+      fields/index.ts header comment documents the one-line-per-renderer append convention;
+      components/RecordHeader/index.ts (lines 19-34) documents the explicit-named re-export convention
+      (NO `export *` — it exists to dodge a LookupField name collision).
+    </background>
+    <relevant-files>
+      <file role="modify">src/client/shared/Spaarke.UI.Components/src/components/RecordHeader/fields/index.ts</file>
+      <file role="modify">src/client/shared/Spaarke.UI.Components/src/components/RecordHeader/index.ts</file>
+      <file role="new">src/client/shared/Spaarke.UI.Components/src/components/RecordHeader/__tests__/rendererContract.test.tsx</file>
+      <file role="canonical-reference">src/client/shared/Spaarke.UI.Components/src/components/RecordHeader/fields/TextField.tsx</file>
+      <file role="canonical-reference">src/client/shared/Spaarke.UI.Components/src/components/RecordHeader/__tests__/fields.test.tsx</file>
+    </relevant-files>
+    <dependencies>
+      <dependency task="010" status="pending">DateField.tsx + its unit tests</dependency>
+      <dependency task="011" status="pending">NumberField.tsx + its unit tests</dependency>
+      <dependency task="012" status="pending">BooleanField.tsx + its unit tests</dependency>
+      <dependency task="013" status="pending">OptionSetField edit mode + typography fix</dependency>
+      <dependency task="014" status="pending">TextField em-dash '' alignment</dependency>
+    </dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="project">Barrel scope: APPEND-only, following each barrel's documented convention — one export line + one type line per renderer in fields/index.ts; explicit-named re-exports (never `export *`) in components/RecordHeader/index.ts. Do not reorder or restructure existing export lines.</constraint>
+    <constraint source="project">NFR-08 / DEF-06 (scope: both barrel files and package.json): do NOT add an `exports` map to package.json, do NOT change moduleResolution, do NOT "clean up" anything about how consumers deep-path import from dist/* — the deep paths are load-bearing for PCF bundle size and the exports migration is explicitly out of R2 scope.</constraint>
+    <constraint source="ADR-038">The contract suite tests a pure rendering contract through the public props — no mocking of renderer internals, no DI-registration-style tests, no snapshot-only assertions. This is a KEEP-category suite (it guards a cross-component contract that outlives the project).</constraint>
+    <constraint source="ADR-022">The test file and any conformance fixes stay React 16/17-safe; conformance fixes to renderer files stay semantic-tokens-only (ADR-021).</constraint>
+    <constraint source="project">Contract-violation handling (scope: any renderer failing the suite): FIX the renderer in this task with the minimal conformance change and record it in notes/renderer-contract-reconciliation.md (what, why, which suite assertion caught it). If the fix would change shipped public behavior a consumer depends on (e.g. TextareaField's commit key), that is the escalation trigger — do not weaken the suite and do not fork the contract.</constraint>
+    <constraint source="project">Documented per-renderer allowances (the ONLY permitted deviations, encoded as suite parameters, not skipped tests): TextareaField's commit key is its documented Ctrl/Cmd+Enter (plain Enter inserts a newline — shipped R1 behavior); OptionSetField's commit gesture is option-selection in the Dropdown; DateField/NumberField/BooleanField per their task specs. The display-only RecordHeader LookupField is OUT of this suite's scope (different value-shape props, no onSave) — note this exclusion in the suite header comment.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>Renderer contract testing; barrel export conventions; test architecture</topic>
+    <files>
+      <file>.claude/constraints/pcf.md</file>
+      <file>.claude/constraints/testing.md</file>
+      <file>.claude/patterns/testing/unit-test-structure.md</file>
+      <file>docs/adr/ADR-038-testing-strategy.md</file>
+      <file>.claude/adr/ADR-021-fluent-design-system.md</file>
+      <file>.claude/adr/ADR-022-pcf-platform-libraries.md</file>
+      <file>.claude/adr/ADR-012-shared-components.md</file>
+      <file>src/client/shared/CLAUDE.md</file>
+      <file>.claude/skills/ui-test/SKILL.md</file>
+      <file>projects/record-header-and-notepad-r1/notes/lessons-learned.md</file>
+    </files>
+    <patterns>
+      <pattern name="contract source of truth" location="src/client/shared/Spaarke.UI.Components/src/components/RecordHeader/fields/TextField.tsx">FR-10 is defined as "the TextField contract verbatim" — every suite assertion derives from observable TextField behavior: editable gate (:118), revert-on-reject-stay-in-edit (:150-153), Enter/Escape (:165-176), blur-commit (:206), spinner (:212), self-applied span (:181).</pattern>
+      <pattern name="existing test harness" location="src/client/shared/Spaarke.UI.Components/src/components/RecordHeader/__tests__/fields.test.tsx">Use the same `renderWithProviders` from `../../../__mocks__/pcfMocks` and the same span-assertion technique (inline style gridColumn). Do NOT modify this file — the contract suite is a NEW sibling, and the per-renderer describe blocks in fields.test.tsx remain as-is.</pattern>
+      <pattern name="barrel conventions" location="src/client/shared/Spaarke.UI.Components/src/components/RecordHeader/index.ts">Lines 19-34 document WHY explicit-named re-exports are used (LookupField collision). Follow it; extend the comment only if you add a colliding name (you should not).</pattern>
+    </patterns>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="0">Context + rigor declaration per task-execute Step 0.5. Read all six renderer files as they now exist post-Group-A, plus both barrels and fields.test.tsx.</step>
+    <step order="1">Update fields/index.ts: append export + type lines for BooleanField/IBooleanFieldProps, DateField/IDateFieldProps, NumberField/INumberFieldProps (alphabetical placement consistent with the file's existing order; one line per renderer per its header comment).</step>
+    <step order="2">Update components/RecordHeader/index.ts: add explicit-named re-exports for the three new renderers + prop types, following the documented convention. Verify no name collides with an existing top-level component export (grep the top-level src/index.ts surface for DateField/NumberField/BooleanField before choosing un-aliased names; alias like RecordHeaderLookupField only if a collision actually exists).</step>
+    <step order="3">Design the contract suite: a parameterized harness (e.g. an array of per-renderer adapter objects driving shared `describe.each` blocks) where each adapter supplies: component, minimal props factory, a sample non-empty value + its expected rendered text, an empty-value triple (null/undefined/''), an edit-entry gesture, a draft-change gesture, the commit gesture (per the documented allowances), and the expected onSave payload. Cover all six renderers: TextField, TextareaField, OptionSetField, DateField, NumberField, BooleanField.</step>
+    <step order="4">Implement the shared assertions for EVERY renderer: (a) label + value render; (b) `gridColumn: span N` self-applied for spans 1/2/3; (c) null, undefined, and '' each render `—`; (d) no onSave = no editable affordance; (e) onSave + disabled=true = not editable; (f) commit gesture calls onSave exactly once with the adapter's expected payload and exits edit on resolve; (g) Escape cancels with zero onSave calls; (h) blur commits a changed draft; (i) rejected onSave reverts the draft AND stays in edit mode with a spinner during the pending save; (j) required=true renders the `*` marker ONLY for TextField — the other five render NO marker (D-10 negative assertion).</step>
+    <step order="5">Run the suite. For each failure, decide: renderer bug → minimal conformance fix in the renderer file + entry in notes/renderer-contract-reconciliation.md; contract question → escalation trigger. Iterate until green with zero skipped tests.</step>
+    <step order="6">Run the FULL shared-library suite (`npm test`) and `npm run build` in src/client/shared/Spaarke.UI.Components; both must exit 0. Verify fields.test.tsx is untouched in git diff.</step>
+    <step order="7">Write notes/renderer-contract-reconciliation.md (even if empty of fixes — record "no violations found" explicitly, listing the six renderers verified).</step>
+    <step order="8">Update TASK-INDEX.md: set this task's status to ✅.</step>
+    <step order="9">If any deviations from plan occurred, document in projects/record-header-and-notepad-r2/notes/.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If bringing a renderer into conformance requires changing shipped public behavior that an existing consumer depends on (e.g. TextareaField's Ctrl/Cmd+Enter commit key, or any behavior MatterHeaderPcf v1.0.20 renders today), STOP and escalate per root CLAUDE.md §6 — renegotiating the FR-10 contract or grandfathering a deviation is the operator's call, not the suite author's.</trigger>
+    <trigger>If two Group-A outputs landed mutually inconsistent interpretations of the contract (e.g. different rejected-save semantics) such that no single suite can pass both without one being rewritten, STOP and escalate with the diff evidence rather than silently rewriting one renderer's semantics.</trigger>
+  </escalation>
+
+  <ui-tests>
+    <test name="Mixed-grid renderer parity (visual)">
+      <url>https://{org}.crm.dynamics.com/main.aspx?pagetype=entityrecord&amp;etn=sprk_invoice&amp;id={record-id}</url>
+      <steps>
+        <step>Open a bound header showing text, date, number, optionset, and boolean cells in one grid (executes at Phase 5 tasks 050/051/060/061)</step>
+        <step>Verify every label has identical typography (size, weight, color) and every empty value shows `—`</step>
+        <step>Enter and cancel edit on one cell of each type; verify identical interaction feel (click-to-edit, Escape cancels)</step>
+      </steps>
+      <expected>Six renderers indistinguishable in chrome and interaction except for their value-type-specific editors</expected>
+    </test>
+    <test name="Dark Mode Compliance (ADR-021)">
+      <steps>
+        <step>Toggle dark mode in the app</step>
+        <step>Verify a mixed grid of all renderer types adapts completely — labels, value cells, em-dashes, and open editors (input, picker, dropdown, switch)</step>
+      </steps>
+      <expected>All colors resolve from Fluent v9 semantic tokens per ADR-021; no renderer stands out in dark mode</expected>
+    </test>
+  </ui-tests>
+
+  <tools>
+    <tool name="npm">Build + test the shared library</tool>
+    <tool name="terminal">git diff verification; grep for export-collision check</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/client/shared/Spaarke.UI.Components/src/components/RecordHeader/fields/index.ts</output>
+    <output type="code">src/client/shared/Spaarke.UI.Components/src/components/RecordHeader/index.ts</output>
+    <output type="test">src/client/shared/Spaarke.UI.Components/src/components/RecordHeader/__tests__/rendererContract.test.tsx</output>
+    <output type="docs">projects/record-header-and-notepad-r2/notes/renderer-contract-reconciliation.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">`import { DateField, NumberField, BooleanField } from './fields'` type-checks from components/RecordHeader/index.ts, and all three (plus their prop types) are re-exported from the RecordHeader barrel with no `export *` introduced.</criterion>
+    <criterion testable="true">The contract suite runs its shared assertion set against ALL SIX renderers (TextField, TextareaField, OptionSetField, DateField, NumberField, BooleanField) — six adapter entries exist and none is skipped.</criterion>
+    <criterion testable="true">For every renderer: null, undefined, and '' each render `—`; `gridColumn: span N` is self-applied for spans 1, 2, and 3; no onSave = read-only; onSave + disabled=true = read-only.</criterion>
+    <criterion testable="true">For every renderer: the commit gesture calls onSave exactly once with the adapter's expected payload; Escape exits edit with zero onSave calls; blur commits a changed draft.</criterion>
+    <criterion testable="true">Negative, for every renderer: a rejected onSave reverts the draft to the prior value AND leaves the component IN edit mode, with the spinner shown while the rejection is pending.</criterion>
+    <criterion testable="true">Negative (D-10): with required=true, the `*` marker renders for TextField and for NO other renderer — asserted for all six.</criterion>
+    <criterion testable="true">__tests__/fields.test.tsx is untouched in git diff; every pre-existing test still passes; the FULL `npm test` and `npm run build` in Spaarke.UI.Components exit 0.</criterion>
+    <criterion testable="true">notes/renderer-contract-reconciliation.md exists and either lists each conformance fix (file, behavior, catching assertion) or states "no violations found" over the six verified renderers.</criterion>
+    <criterion testable="true">Negative (NFR-08): package.json gained no `exports` map and no consumer-facing import path changed — `git diff` on package.json is empty.</criterion>
+  </acceptance-criteria>
+
+  <completion-notes date="2026-08-25">
+    DONE. Both barrels wired (append-only, alphabetical, no `export *`, no aliases needed — repo-wide
+    grep confirmed zero symbol collisions for BooleanField/DateField/NumberField). New suite
+    `__tests__/rendererContract.test.tsx` runs 91 assertions over SIX adapters, none skipped:
+    **91/91 green on the first run**. All 9 RecordHeader suites: **232/232**. `tsc --noEmit` exit 0;
+    shared-lib `npm run build` exit 0; eslint 0 errors; prettier clean.
+
+    ZERO behavioral contract violations found — every renderer already obeyed the TextField contract
+    verbatim (em-dash triple, self-applied gridColumn, editable gate, exactly-one-onSave,
+    Escape-cancels, blur-commits, and revert-on-reject-STAY-in-edit with spinner). Two PROP-SHAPE
+    conformance fixes were required and applied: `required?: boolean` added as accepted-but-inert to
+    `ITextareaFieldProps` and `IOptionSetFieldProps` (D-10 parity — the other three renderers already
+    declared it). Both are declaration-only: never destructured, never rendered, zero consumer impact.
+    Neither escalation trigger fired.
+
+    NFR-02 bundle re-measured after rebuilding the shared lib: MatterHeader `bundle.js` =
+    **62,114 bytes** (25% of the 250 KB ceiling), and `grep -c react-datepicker-compat` on the bundle
+    returns **0** — the barrel re-export is genuinely pruned, not merely compressed. `sideEffects: false`
+    was neither removed nor altered. `package.json` git diff is empty (NFR-08 / DEF-06 honored);
+    `__tests__/fields.test.tsx` git diff is empty.
+
+    Quality gates: code-review PASS (0 critical, 1 process warning re: absent POML `&lt;justification&gt;`
+    — answered concretely in the reconciliation note instead; 4 low suggestions). adr-check PASS
+    (0 violations, 0 warnings; ADR-021/022/012/028/038 all compliant; ADR-010 candidate dismissed —
+    the flagged interfaces are React prop types and a test adapter with six implementations).
+
+    Full reasoning, the per-renderer allowance table, and the one documented suite branch (OptionSetField
+    is the sole immediate-commit adapter, so its blur assertion asserts wired-and-exits-clean rather than
+    commits-a-pending-draft) are in `notes/renderer-contract-reconciliation.md`.
+
+    NOT DONE, deliberately: (1) TASK-INDEX.md left untouched — main session owns it. (2) The
+    "full `npm test` exits 0" criterion is NOT met, for two reasons independent of this task, both
+    documented in the reconciliation note §8: `src/__tests__/recordHeader.integration.test.tsx` has been
+    red since v1.0.10 retired the sparkle slot (`git show HEAD:...useRecordHeaderToolbarActions.ts |
+    grep -c aiSummary` → 0, while `HeaderToolbar.tsx:157` gates the button on that prop), and tasks
+    021/024 were concurrently mutating this worktree during execution. Re-run the full gate after they land.
+  </completion-notes>
+
+  <notes>
+    Spec refs: FR-10 (this task IS its acceptance), FR-11, D-10, NFR-08; plan.md Strategy point 3 and
+    Parallel Groups table ("None may edit fields/index.ts — that is task 015"). The suite is deliberately
+    behavior-parameterized rather than lowest-common-denominator: identical SEMANTICS, per-renderer
+    GESTURES. Keep adapters small — if an adapter needs more than props factory + gestures + expected
+    payload, the renderer probably deviates and that is a finding, not an adapter feature. Top-level
+    src/index.ts re-export wiring beyond the RecordHeader barrel is NOT in scope (consumers deep-path
+    import from dist/components/RecordHeader per the bundle triad).
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Before starting this task, load all files listed in knowledge/files. Follow the task-execute skill for the mandatory pre-execution checklist.</protocol>
+  </execution>
+</task>

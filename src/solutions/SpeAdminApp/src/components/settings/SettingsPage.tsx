@@ -3,20 +3,8 @@ import {
   makeStyles,
   tokens,
   Text,
-  TabList,
-  Tab,
-  type SelectTabData,
-  type SelectTabEvent,
 } from "@fluentui/react-components";
 import { EnvironmentConfig } from "./EnvironmentConfig";
-import { ContainerTypeConfig } from "./ContainerTypeConfig";
-
-// ─────────────────────────────────────────────────────────────────────────────
-// Types
-// ─────────────────────────────────────────────────────────────────────────────
-
-/** Tab identifiers for the Settings page */
-type SettingsTab = "environments" | "container-type-configs";
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Styles
@@ -48,14 +36,13 @@ const useStyles = makeStyles({
     color: tokens.colorNeutralForeground1,
   },
 
+  /**
+   * `display: block` so the description sits on its own line beneath the title rather than
+   * running on beside it (operator-directed, UAT 2026-08-26).
+   */
   pageSubtitle: {
+    display: "block",
     color: tokens.colorNeutralForeground2,
-    marginBottom: tokens.spacingVerticalM,
-  },
-
-  tabListWrapper: {
-    paddingLeft: tokens.spacingHorizontalXL,
-    paddingRight: tokens.spacingHorizontalXL,
   },
 
   content: {
@@ -74,56 +61,36 @@ const useStyles = makeStyles({
 // ─────────────────────────────────────────────────────────────────────────────
 
 /**
- * SettingsPage — administration configuration page for the SPE Admin App.
+ * SettingsPage — SPE **environment** administration.
  *
- * Provides a tabbed layout with two configuration sections:
- * - **Environments**: Azure tenant and SPE endpoint configuration
- * - **Container Type Configs**: Business Unit to Container Type mapping
+ * Renamed in substance on 2026-08-26 (UAT): this page used to be "Settings" with two tabs,
+ * Environments and Container Type Configs. The configs moved to the Container Types page, where
+ * their subject actually lives, leaving environments as this page's only content — so the tab
+ * strip went with them. A TabList with one tab is a control that cannot be operated.
  *
- * Uses Fluent v9 TabList for navigation (ADR-021).
- * Dark mode supported via Fluent design tokens — no hard-coded colors.
+ * The nav label is "Environments" (`AppShell.tsx`), and this title now matches it.
+ *
+ * Dark mode supported via Fluent design tokens — no hard-coded colors (ADR-021).
  */
 export const SettingsPage: React.FC = () => {
   const styles = useStyles();
-
-  // Track the currently selected tab
-  const [selectedTab, setSelectedTab] = React.useState<SettingsTab>("environments");
-
-  const handleTabSelect = React.useCallback(
-    (_event: SelectTabEvent, data: SelectTabData) => {
-      setSelectedTab(data.value as SettingsTab);
-    },
-    []
-  );
 
   return (
     <div className={styles.root}>
       {/* ── Page Header ── */}
       <div className={styles.header}>
         <Text as="h1" size={600} weight="semibold" className={styles.pageTitle}>
-          Settings
+          Environments
         </Text>
         <Text size={300} className={styles.pageSubtitle}>
-          Configure SPE environments and container type mappings.
+          Configure the Azure tenants and SharePoint Embedded endpoints that container type
+          configurations point at.
         </Text>
-
-        {/* ── Tab Navigation ── */}
-        <div className={styles.tabListWrapper}>
-          <TabList
-            selectedValue={selectedTab}
-            onTabSelect={handleTabSelect}
-            aria-label="Settings sections"
-          >
-            <Tab value="environments">Environments</Tab>
-            <Tab value="container-type-configs">Container Type Configs</Tab>
-          </TabList>
-        </div>
       </div>
 
-      {/* ── Tab Content ── */}
+      {/* ── Content ── */}
       <div className={styles.content}>
-        {selectedTab === "environments" && <EnvironmentConfig />}
-        {selectedTab === "container-type-configs" && <ContainerTypeConfig />}
+        <EnvironmentConfig />
       </div>
     </div>
   );

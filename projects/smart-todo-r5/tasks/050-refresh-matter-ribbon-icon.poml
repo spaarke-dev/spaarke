@@ -1,0 +1,98 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="050" project="smart-todo-r5">
+  <metadata>
+    <title>Refresh Matter ribbon "Create To Do" icon to sprk_ToDoCheckmark (FR-19)</title>
+    <phase>6: Ribbon expansion</phase>
+    <gate>startable</gate>
+    <status>not-started</status>
+    <rigor>STANDARD</rigor>
+    <rigor-reason>Modify-only edit to one existing entity RibbonDiff.xml (icon-reference swap on an already-shipped button) plus a solution redeploy; no new component/file, no .cs/.ts/.tsx change, fewer than 6 steps — does not trigger any FULL criterion in CLAUDE.md §8's decision tree. Quality assurance comes from XSD validation plus the explicit escalation trigger below, not code-review/adr-check.</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Single-attribute XML edit against an existing, well-documented pattern (the CreateEvent/CreateProject/FindSimilar buttons already on this same file use the target `$webresource:` + ModernImage attribute shape) — mechanical, not architectural. CLAUDE.md §8.5 default tier applies.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>S</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <deps>none</deps>
+    <tags>ribbon, dataverse, deploy</tags>
+    <estimated-effort>1-1.5 hrs</estimated-effort>
+  </metadata>
+
+  <prompt>Update the Matter "Create To Do" ribbon button in src/solutions/spaarke_insights/Entities/sprk_Matter/RibbonDiff.xml to reference the already-deployed sprk_ToDoCheckmark32.svg / sprk_ToDoCheckmark16.svg web resources (replacing the OOB /_imgs/ribbon/newrecord32.png and /_imgs/ribbon/newrecord16.png icons) and add the required ModernImage attribute, then redeploy the spaarke_insights solution so the Matter form shows the new MS-To-Do-style icon per FR-19 / design.md R-9.</prompt>
+
+  <role>SPAARKE platform developer. Expert in Dataverse RibbonDiffXml editing and solution export/import via PAC CLI. Follow the ribbon-edit skill strictly; treat RibbonDiffXml as XSD-sensitive per its Failure Modes table.</role>
+
+  <goal>The `sprk.Wizard.Matter.CreateTodo.Button` element in src/solutions/spaarke_insights/Entities/sprk_Matter/RibbonDiff.xml has Image32by32="$webresource:sprk_ToDoCheckmark32.svg", Image16by16="$webresource:sprk_ToDoCheckmark16.svg", and ModernImage="$webresource:sprk_ToDoCheckmark32.svg"; the spaarke_insights solution is exported with this change, reimported, and published; the Matter form's "Create To Do" button visibly shows the new icon and still opens the CreateTodo wizard with Matter's entity context.</goal>
+
+  <context>
+    <background>R4-118 (2026-06-25) deployed the shared JS handler (sprk_wizard_commands.js) and the two sprk_ToDoCheckmark SVG icons but deferred the ribbon-XML expansion for time/complexity. The R4 Matter button works today but still shows the generic OOB /_imgs/ribbon/newrecord32.png icon. This task closes the icon-refresh half of design.md R-9 for Matter; task 051 does the 5-new-entity half using this task's verified icon-reference shape as the pattern to clone.</background>
+    <relevant-files>
+      <file role="modify">src/solutions/spaarke_insights/Entities/sprk_Matter/RibbonDiff.xml</file>
+      <file role="canonical-reference">src/client/assets/icons/sprk_ToDoCheckmark32.svg</file>
+      <file role="canonical-reference">src/client/assets/icons/sprk_ToDoCheckmark16.svg</file>
+      <file role="reference">src/client/webresources/js/sprk_wizard_commands.js</file>
+    </relevant-files>
+    <dependencies>
+      <!-- none -->
+    </dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="ribbon-edit skill">Icon attributes MUST use `$webresource:` SVG references (Image16by16, Image32by32) plus a required `ModernImage="$webresource:sprk_ToDoCheckmark32.svg"` attribute for the modern command bar — applies only to the `sprk.Wizard.Matter.CreateTodo.Button` element, not the other Matter wizard buttons on the same file.</constraint>
+    <constraint source="ribbon-edit skill">NEVER import the full SpaarkeCore/spaarke_insights solution for unrelated components — export/edit/import ONLY the RibbonDiffXml change inside spaarke_insights; do not touch other entities' RibbonDiff.xml or Customizations.xml sections in the same export.</constraint>
+    <constraint source="spec FR-19">Acceptance is scoped to the Matter icon only in this task — the 5 other entities' ribbon buttons are out of scope (task 051 handles those).</constraint>
+    <constraint source="project">Do not modify the `Alt`, `Command`, `LabelText`, `ToolTipTitle`, `ToolTipDescription` attributes or the LocLabels block for this button — only the three icon attributes (Image32by32, Image16by16, ModernImage) change.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>ribbon customization</topic>
+    <files>
+      <file>.claude/skills/ribbon-edit/SKILL.md</file>
+      <file>projects/smart-todo-r5/spec.md</file>
+      <file>projects/smart-todo-r5/design.md</file>
+      <file>projects/smart-todo-r5/CLAUDE.md</file>
+      <file>docs/architecture/spaarke-todo-architecture.md</file>
+    </files>
+    <patterns>
+      <pattern name="ribbon-icon-modernization" location=".claude/skills/ribbon-edit/SKILL.md">Image16by16 / Image32by32 / ModernImage triad required for correct icon rendering in the modern (UCI) command bar; SVG only, no width/height attributes, fill="currentColor" for dark-mode adaptation.</pattern>
+    </patterns>
+  </knowledge>
+
+  <steps mode="prescriptive">
+    <step order="0" name="Context + rigor declaration">Declare rigor level (STANDARD) and reason per CLAUDE.md §8. Load knowledge files. Confirm task 050 has no upstream deps (gate: startable).</step>
+    <step order="1">Read src/solutions/spaarke_insights/Entities/sprk_Matter/RibbonDiff.xml; locate the Button element with Id="sprk.Wizard.Matter.CreateTodo.Button" (currently Image32by32="/_imgs/ribbon/newrecord32.png" Image16by16="/_imgs/ribbon/newrecord16.png", no ModernImage attribute).</step>
+    <step order="2">Edit that Button element's three icon attributes only: Image32by32="$webresource:sprk_ToDoCheckmark32.svg", Image16by16="$webresource:sprk_ToDoCheckmark16.svg", add ModernImage="$webresource:sprk_ToDoCheckmark32.svg". Leave every other attribute (Alt, Command, Id, LabelText, Sequence, TemplateAlias, ToolTipTitle, ToolTipDescription) unchanged.</step>
+    <step order="3">Validate the edited XML is well-formed (e.g. `xmllint --noout` or an equivalent XML validator) before proceeding to export/import.</step>
+    <step order="4">Confirm the two web resources sprk_ToDoCheckmark32.svg and sprk_ToDoCheckmark16.svg are already published in the target Dataverse environment (per design.md R-9, deployed in R4-118). If either is missing, STOP per the escalation trigger rather than importing a ribbon that references a nonexistent web resource.</step>
+    <step order="5">Export the spaarke_insights solution (`pac solution export --name spaarke_insights ...`), extract it, replace the sprk_Matter/RibbonDiff.xml (or the corresponding RibbonDiffXml section in customizations.xml) with the edited version, repackage, and reimport with `--publish-changes`, per the ribbon-edit skill Workflow Steps 1-6.</step>
+    <step order="6">Publish and hard-refresh the browser; open a real Matter record and visually confirm the "Create To Do" button shows the new checkmark icon (not the OOB icon, not a placeholder/jigsaw icon).</step>
+    <step order="7">Click "Create To Do" on the Matter record and confirm the wizard still opens correctly with Matter's entityType/entityId context (functional regression check — this task changes only the icon, not the CommandDefinition or JS handler).</step>
+    <step order="8">Update tasks/TASK-INDEX.md: set 050's status to ✅.</step>
+    <step order="9">Document any deviation (e.g. icon not found, XSD rejection) in projects/smart-todo-r5/notes/.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If the RibbonDiff edit fails XSD/schema validation on import, OR either sprk_ToDoCheckmark32.svg / sprk_ToDoCheckmark16.svg web resource is missing from the target environment, STOP — do not re-author the icon reference from a different naming guess or import an unvalidated file. Escalate per CLAUDE.md §6.</trigger>
+  </escalation>
+
+  <tools>
+    <tool name="pac">Solution export / import / publish</tool>
+    <tool name="terminal">XML validation (xmllint or equivalent), PowerShell for archive extract/repack</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/solutions/spaarke_insights/Entities/sprk_Matter/RibbonDiff.xml</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Given the Matter form is opened in the target Dataverse environment, when the command bar renders, then the "Create To Do" button shows the sprk_ToDoCheckmark32.svg icon (not /_imgs/ribbon/newrecord32.png, not a placeholder).</criterion>
+    <criterion testable="true">Given the new icon is showing, when "Create To Do" is clicked, then the CreateTodo wizard opens exactly as before with the Matter record's entityType/entityId populated (no functional regression).</criterion>
+    <criterion testable="true">Given the modified RibbonDiff.xml, when the spaarke_insights solution is reimported, then the import completes with no XSD/schema validation errors and requires no changes to any other entity's ribbon in the same solution.</criterion>
+    <criterion testable="true">Negative: if either icon web resource is absent from the environment, the button MUST NOT be left silently referencing a broken `$webresource:` path — the task halts per the escalation trigger instead of shipping a broken icon reference.</criterion>
+  </acceptance-criteria>
+
+  <notes>design.md R-9 background section (deferred from R4-118). Original attribute block being changed is at approximately lines 48-50 of the source file. Matter's other wizard buttons on the same RibbonDiff.xml (CreateEvent, CreateProject, FindSimilar, PlaybookLibrary, SummarizeFiles, UploadDocuments) are untouched — this is a single-button, three-attribute change.</notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+  </execution>
+</task>

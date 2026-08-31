@@ -1,6 +1,6 @@
 using Sprk.Bff.Api.Models.Ai;
 
-namespace Sprk.Bff.Api.Services.Ai;
+namespace Sprk.Bff.Api.Services.Ai.PublicContracts;
 
 /// <summary>
 /// Service for looking up playbooks by the stable-ID alternate key (<c>sprk_playbookid</c>)

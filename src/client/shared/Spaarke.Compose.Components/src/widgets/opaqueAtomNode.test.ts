@@ -232,6 +232,44 @@ describe('R4 opaque-atom nodes (task 021, FR-02)', () => {
     });
   });
 
+  describe('task 056 — an atom with NO display text survives a getHTML() round trip', () => {
+    // Task 057 stopped an opaque atom's placeholder LABEL from being re-read as its display text, by
+    // re-emitting `data-atom-display`. It fixed the case it was written for (a `field`, whose server span
+    // contains its cached result) and NOT the general one: the attribute was emitted only when the display
+    // text was truthy, so an atom the server emits EMPTY — `object` is the whole family, and an `sdt` with
+    // no resolvable text is another — still had nothing to re-emit, read its own label "Object" back as
+    // display text, and compounded to "Object: Object" on the next pass.
+    //
+    // The round trip is reachable, not theoretical: `ComposeEditor.getDraftHtml` persists `getHTML()` to
+    // the local draft store on the dirty-autosave tick and the FR-03 recovery path re-mounts it, so a user
+    // who recovers a draft saw the label eaten by its own placeholder. Task 056 carries objects through the
+    // save, which makes it worth fixing on its own terms rather than leaving as a cosmetic oddity: an
+    // attribute whose value is the UI's own label is a payload waiting to be trusted by the next task.
+    const objectAtom = '<span class="compose-atom" data-atom-kind="object" contenteditable="false"></span>';
+
+    it('an object atom does not absorb its own placeholder label as display text', () => {
+      const first = makeEditor(`<p>Exhibit ${objectAtom} above.</p>`);
+      const second = makeEditor(first.getHTML());
+      const third = makeEditor(second.getHTML());
+
+      for (const editor of [first, second, third]) {
+        let atom: { attrs: Record<string, unknown> } | null = null;
+        editor.state.doc.descendants(node => {
+          if (node.type.name === 'composeInlineAtom') atom = node as never;
+          return true;
+        });
+        expect(atom).not.toBeNull();
+        expect((atom as unknown as { attrs: Record<string, unknown> }).attrs.displayText).toBeFalsy();
+      }
+
+      expect(third.getHTML()).not.toContain('Object: Object');
+
+      first.destroy();
+      second.destroy();
+      third.destroy();
+    });
+  });
+
   describe('exported node identities', () => {
     it('COMPOSE_R4_OPAQUE_ATOMS is exactly [ComposeBlockAtomNode, ComposeInlineAtomNode]', () => {
       expect(COMPOSE_R4_OPAQUE_ATOMS).toEqual([ComposeBlockAtomNode, ComposeInlineAtomNode]);

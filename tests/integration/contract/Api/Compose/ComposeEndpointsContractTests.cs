@@ -163,7 +163,9 @@ public sealed class ComposeEndpointsContractTests : IClassFixture<ComposeContrac
     {
         const string speId = "spe-item-load-abc";
         const string driveId = "drive-001";
-        const string tenantId = "tenant-aad-001";
+        // Task 059: the tenant that reaches IComposeService is the CALLER's, from the tid claim —
+        // not the one in the query string below, which the handler no longer reads.
+        const string tenantId = ComposeContractFixture.CallerTenantId;
         var sessionId = Guid.NewGuid().ToString();
 
         _fixture.ComposeServiceMock
@@ -225,6 +227,10 @@ public sealed class ComposeEndpointsContractTests : IClassFixture<ComposeContrac
                 It.IsAny<CancellationToken>()))
             .ReturnsAsync(new SaveComposeDocumentResult
             {
+                // FR-S06 (r8 task 013): `Outcome` is `required` by design — a save result that does not
+                // say what happened is a COMPILE error, which is what stops a future path from silently
+                // reintroducing the 200-with-nothing-written defect. This is the clean-save case.
+                Outcome = ComposeSaveOutcome.Persisted,
                 DocumentSpeId = speId,
                 DriveId = driveId,
                 SessionId = sessionId,
@@ -325,8 +331,8 @@ public sealed class ComposeEndpointsContractTests : IClassFixture<ComposeContrac
     {
         using var client = _fixture.CreateAuthenticatedClient();
 
-        // Missing driveId (handler validates) — tenantId IS present so we get past that gate
-        // and hit the driveId check.
+        // Missing driveId (handler validates). The tenantId query param is vestigial since task 059
+        // — the handler reads the caller's tid claim — and is left here only to prove it is inert.
         var response = await client.GetAsync(
             "/api/compose/documents/spe-item-validate?tenantId=tenant-aad-007");
 
@@ -383,6 +389,14 @@ public sealed class ComposeEndpointsContractTests : IClassFixture<ComposeContrac
 /// </summary>
 public sealed class ComposeContractFixture : WebApplicationFactory<Program>
 {
+    /// <summary>
+    /// The tenant the fake principal is authenticated in. Since task 059 the Compose handlers take
+    /// the tenant from the caller's <c>tid</c> claim, so any test asserting on the tenant that
+    /// reaches <see cref="IComposeService"/> must expect THIS value — not one it puts in the query
+    /// string, which the server now ignores.
+    /// </summary>
+    public const string CallerTenantId = "tenant-aad-001";
+
     public Mock<IComposeService> ComposeServiceMock { get; } = new(MockBehavior.Loose);
 
     protected override IHost CreateHost(IHostBuilder builder)
@@ -406,7 +420,7 @@ public sealed class ComposeContractFixture : WebApplicationFactory<Program>
                 ["Graph:TenantId"] = "test-tenant-id",
                 ["Graph:ClientId"] = "test-client-id",
                 ["Graph:ClientSecret"] = "test-client-secret",
-                ["Graph:UseManagedIdentity"] = "false",
+                ["Graph:ManagedIdentity:Enabled"] = "false",
                 ["Graph:Scopes:0"] = "https://graph.microsoft.com/.default",
                 ["Dataverse:EnvironmentUrl"] = "https://test.crm.dynamics.com",
                 ["Dataverse:ServiceUrl"] = "https://test.crm.dynamics.com",
@@ -464,6 +478,9 @@ public sealed class ComposeContractFixture : WebApplicationFactory<Program>
 
         builder.ConfigureTestServices(services =>
         {
+            // Test hosts must not authenticate for real — see TestTokenCredential.
+            services.UseStubTokenCredential();
+
             // Allow framework to map missing/required-bindings to 400 (matches production-equivalent contract).
             services.Configure<Microsoft.AspNetCore.Routing.RouteHandlerOptions>(options =>
             {
@@ -516,7 +533,9 @@ public sealed class ComposeContractFixture : WebApplicationFactory<Program>
         {
             AllowAutoRedirect = false,
         });
-        client.DefaultRequestHeaders.Add("X-Test-User", Guid.NewGuid().ToString());
+        // Issue #863: a STABLE test user. A fresh Guid per client meant the caller identity
+        // changed between the seed and the request, so an ownership check could never pass.
+        client.DefaultRequestHeaders.Add("X-Test-User", TestSessionOwner.Oid);
         client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", "test-token");
         return client;
     }
@@ -558,6 +577,10 @@ internal sealed class ComposeFakeAuthHandler : AuthenticationHandler<Authenticat
             new("oid", oid),
             new(ClaimTypes.NameIdentifier, oid),
             new(ClaimTypes.Name, $"Compose Test User {oid}"),
+            // Task 059 — a real Entra token always carries `tid`, and since 059 the Compose Load and
+            // GetAnnotations handlers take the tenant from this claim rather than from `?tenantId=`.
+            // A fixture without it is not a principal the production pipeline can ever see.
+            new("tid", ComposeContractFixture.CallerTenantId),
         };
 
         var identity = new ClaimsIdentity(claims, SchemeName);

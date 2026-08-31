@@ -11,10 +11,17 @@
  * This drives the REAL `ComposeWorkspace.triggerSave` flow with a stubbed `ComposeEditor` handle (the
  * op-log capture itself is unit-tested against the real `RebasedOperationLog` in
  * `stepOperationInterceptor.test.ts`). The `@spaarke/auth` fetch boundary is mocked: the Load serves a
- * stored doc, the first `/save` returns 422, the second returns 200. We assert:
+ * stored doc, the first `/save` fails with 422, the second returns 200. We assert:
  *   1. both saves POST the SAME `operationLog.operations` (the retry re-sends the batch — no loss),
  *   2. the editor's `commitSaved()` is NOT called on the 422 (op-log preserved) and IS called after the 200,
  *   3. the workspace stays saveable (dirty) after the 422.
+ *
+ * FR-S01 (r8 task 010): the 422 is now expressed as a THROWN `ApiError` — the only failure shape
+ * `authenticatedFetch` can actually produce (it returns solely when `response.ok`; see
+ * `Spaarke.Auth/src/authenticatedFetch.ts`). The previous version of this test RESOLVED a
+ * `{ ok:false, status:422 }` object, which the real function never emits: it exercised the unreachable
+ * `if (!response.ok)` block instead of the live catch, so it passed while the failure contract it claimed
+ * to cover was dead code. Routing per status is covered in `ComposeWorkspace.saveErrorRouting.test.tsx`.
  *
  * ADR-038: a client behavior test at the save-orchestration seam; mocks the network at the `@spaarke/auth`
  * boundary + stubs a heavy child — NOT a banned `Mock<HttpMessageHandler>`/DI-registration/ctor test.
@@ -43,23 +50,25 @@ const CONTENT_B64 = 'UEsDBA==';
 /** The fixed op the stubbed editor "captured" this dirty session — a single interior text insert. */
 const CAPTURED_OP = { type: 'insertText', paraId: 'AAAA0001', at: { runIndex: 0, offset: 3 }, text: 'x' };
 
-// ── Fetch boundary (ADR-028): Load → stored doc; first /save → 422; second /save → 200 ──
+// ── Fetch boundary (ADR-028): Load → stored doc; first /save THROWS a 422 ApiError; second → 200 ──
 let saveCallCount = 0;
 const saveRequestBodies: Array<Record<string, unknown>> = [];
+/**
+ * The `ApiError` class the mocked `@spaarke/auth` exports — resolved LAZILY (inside the call) because
+ * the factory runs when `ComposeWorkspace` requires the module, which babel hoists above this file's
+ * top-level statements. Throwing the module's OWN class keeps the failure identical to production's.
+ */
+const apiErrorClass = (): new (message: string, status: number) => Error =>
+  (jest.requireMock('@spaarke/auth') as { ApiError: new (m: string, s: number) => Error }).ApiError;
 const authenticatedFetchMock = jest.fn(async (url: string, init?: RequestInit): Promise<Response> => {
   // Replace-path save (checked BEFORE the generic documents Load route).
   if (url.includes('/api/compose/documents/') && url.includes('/save')) {
     saveCallCount += 1;
     saveRequestBodies.push(JSON.parse(String(init?.body ?? '{}')) as Record<string, unknown>);
     if (saveCallCount === 1) {
-      // 422 — a refused op. The workspace reads `response.clone().json()` for the detail.
-      return {
-        ok: false,
-        status: 422,
-        clone: () => ({ json: async () => ({ detail: 'A tracked edit could not be applied.' }) }),
-        json: async () => ({ detail: 'A tracked edit could not be applied.' }),
-        text: async () => 'A tracked edit could not be applied.',
-      } as unknown as Response;
+      // 422 — a refused op. `authenticatedFetch` parses the ProblemDetails and THROWS; it never
+      // resolves a non-ok Response, so this is the only shape the workspace can actually receive.
+      throw new (apiErrorClass())('A tracked edit could not be applied.', 422);
     }
     return {
       ok: true,
@@ -96,26 +105,49 @@ const authenticatedFetchMock = jest.fn(async (url: string, init?: RequestInit): 
       }),
     } as unknown as Response;
   }
-  // Session-ledger compose-outputs probe + everything else → benign 404.
-  return { ok: false, status: 404, json: async () => [], text: async () => '' } as unknown as Response;
+  // Session-ledger compose-outputs probe + everything else → benign 404, expressed the way
+  // `authenticatedFetch` actually expresses one (a thrown ApiError, not a resolved non-ok Response).
+  throw new (apiErrorClass())('Not found', 404);
 });
 
-jest.mock('@spaarke/auth', () => ({
-  authenticatedFetch: (...args: unknown[]) => authenticatedFetchMock(...(args as [string, RequestInit?])),
-  useAuth: () => ({
-    isAuthenticated: true,
-    getAccessToken: async () => 'test-token',
+// NO `virtual: true` on the sibling-lib mocks below — deliberately, and it is load-bearing. The flag
+// registers the specifier in jest's RESOLVER, which is shared by every suite a worker runs, so one
+// suite's virtual registration changes how a LATER suite resolves the same specifier. See the
+// "Sibling `@spaarke/*` resolution" note in jest.config.js for the measurement and the contract.
+jest.mock('@spaarke/auth', () => {
+  // Mirrors the real `@spaarke/auth` ApiError (message = ProblemDetails.detail, plus `.status`).
+  // Declared INSIDE the factory so the class the workspace imports and the class the fetch mock
+  // throws are the same object.
+  class ApiError extends Error {
+    public readonly status: number;
+    constructor(message: string, status: number) {
+      super(message);
+      this.name = 'ApiError';
+      this.status = status;
+    }
+  }
+  return {
+    ApiError,
     authenticatedFetch: (...args: unknown[]) => authenticatedFetchMock(...(args as [string, RequestInit?])),
-    tenantId: 'test-tenant',
-    logout: jest.fn(),
-  }),
-}));
+    useAuth: () => ({
+      isAuthenticated: true,
+      getAccessToken: async () => 'test-token',
+      authenticatedFetch: (...args: unknown[]) => authenticatedFetchMock(...(args as [string, RequestInit?])),
+      tenantId: 'test-tenant',
+      logout: jest.fn(),
+    }),
+  };
+});
 
 // `@spaarke/ui-components` + `@spaarke/document-operations` resolve to built `dist/` bundles in this jest
 // project whose own transitive `@spaarke/auth` require is unresolvable without a full sibling-package
 // build (the same pre-existing condition that stops the other ComposeWorkspace.*.test suites from running
 // here). Mock them to the tiny surface ComposeWorkspace actually consumes so this test is self-contained.
 jest.mock('@spaarke/ui-components', () => ({
+  // r8 task 052 (FR-C05) — ComposeWorkspace also mounts <ConfirmModal/> unconditionally for the
+  // stale-target "apply anyway?" question (controlled via its own `open` prop, same pattern as
+  // SprkModal/SendEmailDialog above). A no-op stub keeps this mock complete.
+  ConfirmModal: () => null,
   createXrmNavigationService: () => ({ openLookup: jest.fn() }),
   createXrmDataService: () => ({ retrieveRecord: jest.fn() }),
   // FR-14 (task 051) — ComposeWorkspace mounts <SendEmailDialog/> unconditionally (controlled via its
@@ -128,6 +160,12 @@ jest.mock('@spaarke/ui-components', () => ({
   // without it, `SprkModal` resolves to `undefined` under this mock and React throws
   // "Element type is invalid" the moment `ComposeConflictDialog` renders.
   SprkModal: () => null,
+  // Task 075 (FR-13) flake/breakage fix — ComposeWorkspace also mounts
+  // <RichFilePreviewDialog/> once a document is promoted (`canPreviewDocument`), same
+  // unconditional-mount-under-its-own-`open`-prop pattern as SendEmailDialog/SprkModal
+  // above. A missing stub here resolved to `undefined` and threw the identical "Element
+  // type is invalid" error the moment a promoted-document scenario rendered it.
+  RichFilePreviewDialog: () => null,
 }));
 jest.mock('@spaarke/document-operations', () => ({
   useDocumentActions: () => ({

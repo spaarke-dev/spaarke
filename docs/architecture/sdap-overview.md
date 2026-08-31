@@ -52,7 +52,7 @@ SDAP is an enterprise platform integrating Dataverse with SharePoint Embedded (S
 └─────────────────────────────────┼────────────────────────────────────────────┘
                                   │
 ┌─────────────────────────────────┼────────────────────────────────────────────┐
-│  BFF API (Sprk.Bff.Api)        │        .NET 8 Minimal API                  │
+│  BFF API (Sprk.Bff.Api)        │        .NET 10 Minimal API                  │
 │  spe-api-dev-67e2xz.azurewebsites.net                                       │
 │                                                                              │
 │  ┌──────────┐ ┌──────────┐ ┌──────────┐ ┌──────────┐ ┌──────────────────┐  │
@@ -124,7 +124,8 @@ The foundational domain. All document file storage uses SharePoint Embedded (SPE
 
 **Endpoints**:
 ```
-/api/containers                           Container CRUD (app-only auth)
+/api/spe/containers                       Container CRUD (app-only auth) — THE working path
+/api/containers                           SUPERSEDED: returns 403 to every caller (see below)
 /api/containers/{id}/files/{*path}        File upload/replace
 /api/documents/{id}/preview-url           Office preview URL
 /api/documents/{id}/content               File download (OBO)

@@ -1,0 +1,118 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="016" project="customer-provisioning-orchestration-r1">
+  <metadata>
+    <title>Add H0 preflight quota-check PowerShell prep (Azure OpenAI TPM, Dataverse env-creation rate, subscription vCPU, SPE cert-bootstrap)</title>
+    <phase>B Gap Automation Script Hardening</phase>
+    <gate>startable</gate>
+    <status>not-started</status>
+    <rigor>STANDARD</rigor>
+    <rigor-reason>New PowerShell prep modules for a downstream C4 handler; azure-deployment scope; not BFF code. Per root CLAUDE.md §8, script/prep work with explicit constraints = STANDARD.</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Well-scoped modular checks with clear per-check contract; no cross-cutting refactor. Per Step 3.5.5b default = sonnet.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>groupB-parallel</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <deps>none</deps>
+    <tags>powershell, azure-deployment, deploy</tags>
+    <estimated-effort>4-6 hours</estimated-effort>
+  </metadata>
+
+  <prompt>
+Author PowerShell prep modules that H0 preflight handler (Wave C4) will invoke to verify quota headroom before H1 starts, per spec.md FR-01 + R19 + §4B + design.md § handlers H0. Four checks: (1) Azure OpenAI regional TPM headroom (150+200+30+350 per model per region) via `az cognitiveservices`, (2) Dataverse environment-creation rate quota via `pac admin quota` (~4/hr typical), (3) subscription vCPU quota per SKU per region via `az vm list-usage`, (4) SPE cert-bootstrap status via `az keyvault secret show` cert-present + 24h-old-enough check. Each returns pass/fail + diagnostic; H0 (Wave C4) invokes all four and blocks the run before H1 if any fail.
+  </prompt>
+
+  <role>SPAARKE platform DevOps engineer fluent with Azure CLI (az cognitiveservices, az vm list-usage, az keyvault), PAC CLI (pac admin quota), and PowerShell 7.4+ module composition.</role>
+
+  <goal>scripts/preflight/ contains 4 modular PS checks (Test-AzureOpenAiTpmHeadroom.ps1, Test-DataverseEnvCreationRate.ps1, Test-SubscriptionVCpuQuota.ps1, Test-SpeCertBootstrap.ps1) — each: (a) accepts required params (subscription, region, model list, cert URI etc), (b) queries the appropriate Azure/PAC API, (c) returns a structured pass/fail object with headroom + diagnostic, (d) exits 0 on pass / non-zero on fail. Handler H0 (Wave C4) invokes each one; run is blocked if any fail.</goal>
+
+  <context>
+    <background>
+Per spec.md FR-01 + R19 + §4B + § New Components + design.md § handlers H0. Without quota preflight, Model 2 provisioning fails deep in H2a/H2b/H8 with cryptic Azure quota-exceeded errors that cascade into partial state + Quarantine per §4C. Quota bumps have 1-3 day lead time (spec.md § External Dependencies) — H0 preflight surfaces this UP-FRONT so operator can request bumps before starting the pipeline.
+    </background>
+    <relevant-files>
+      <file role="new">scripts/preflight/Test-AzureOpenAiTpmHeadroom.ps1</file>
+      <file role="new">scripts/preflight/Test-DataverseEnvCreationRate.ps1</file>
+      <file role="new">scripts/preflight/Test-SubscriptionVCpuQuota.ps1</file>
+      <file role="new">scripts/preflight/Test-SpeCertBootstrap.ps1</file>
+      <file role="canonical-reference">projects/customer-provisioning-orchestration-r1/design.md</file>
+      <file role="canonical-reference">projects/customer-provisioning-orchestration-r1/spec.md</file>
+      <file role="canonical-reference">.claude/constraints/azure-deployment.md</file>
+    </relevant-files>
+    <dependencies>
+      <dependency task="none" status="complete">Phase B is startable</dependency>
+    </dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="spec.md">SCOPE: Four checks per FR-01 — OpenAI TPM, Dataverse env-creation rate, subscription vCPU, SPE cert-bootstrap. Fewer OR more is a defect (H0 handler consumes exactly these four).</constraint>
+    <constraint source="spec.md">SCOPE: OpenAI TPM check MUST verify headroom for 150+200+30+350 per-model TPM sum (per NFR-12); a passing check only if projected +1-tenant capacity is within regional quota.</constraint>
+    <constraint source="spec.md">SCOPE: SPE cert-bootstrap check MUST verify cert exists in KV AND is old enough to have completed the 24h replication (per FR-11 T6 lead-time item).</constraint>
+    <constraint source="project">SCOPE: Each check returns a structured pass/fail object (PS custom object) with fields: Result (Pass/Fail), CheckName, Headroom, Diagnostic. Non-structured return is a defect (H0 handler parses these).</constraint>
+    <constraint source="project">SCOPE: Modular design — each check MUST be independently invocable (no shared state between checks); H0 handler orchestrates the four in parallel.</constraint>
+    <constraint source="project">SCOPE: On check failure, diagnostic MUST cite BOTH the observed headroom AND the requested capacity + region — actionable for operator to file a quota-bump request.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>Azure quota queries + preflight design</topic>
+    <files>
+      <file>projects/customer-provisioning-orchestration-r1/spec.md</file>
+      <file>projects/customer-provisioning-orchestration-r1/design.md</file>
+      <file>projects/customer-provisioning-orchestration-r1/CLAUDE.md</file>
+      <file>.claude/constraints/azure-deployment.md</file>
+    </files>
+    <patterns>
+      <pattern name="Structured pass/fail return" location="scripts/preflight/">`[PSCustomObject]@{ Result = 'Pass|Fail'; CheckName = '...'; Headroom = @{...}; Diagnostic = '...' }`.</pattern>
+      <pattern name="Independent invocability" location="scripts/preflight/">Each check accepts required params; makes ONE authoritative API call; returns object; caller decides orchestration.</pattern>
+    </patterns>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="0" name="Context + rigor declaration">Emit the 🔒 RIGOR LEVEL block. Load azure-deployment.md + design.md H0 + spec FR-01/NFR-12.</step>
+    <step order="1" name="Design shared return contract">Define the PSCustomObject shape all four checks return; store in scripts/preflight/README.md.</step>
+    <step order="2" name="Author Test-AzureOpenAiTpmHeadroom">Query `az cognitiveservices account deployment list` + regional quota; compute headroom for 150+200+30+350 per-model TPM; return pass/fail object.</step>
+    <step order="3" name="Author Test-DataverseEnvCreationRate">Query `pac admin quota` for env-creation rate; check ≥1 slot available in the current hourly bucket; return pass/fail object.</step>
+    <step order="4" name="Author Test-SubscriptionVCpuQuota">Query `az vm list-usage` for target region + SKU; check headroom for expected +1-customer stamp; return pass/fail object.</step>
+    <step order="5" name="Author Test-SpeCertBootstrap">Query KV via `az keyvault secret show` for cert + creation-date; verify cert present AND at least 24h old (replication complete); return pass/fail object.</step>
+    <step order="6" name="Test each check standalone">Run each against dev env; verify pass path AND simulated fail path (e.g., ask for absurdly high vCPU headroom → fail).</step>
+    <step order="7" name="Documentation">Add scripts/preflight/README.md documenting the four checks + return contract; H0 handler will consume from here.</step>
+    <step order="8" name="Index update">Update TASK-INDEX.md: set task 016 status to ✅.</step>
+    <step order="9" name="Deviations">Document any deviation in projects/customer-provisioning-orchestration-r1/notes/.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If any Azure/PAC API for the four checks has drifted (e.g., `az cognitiveservices deployment list` command name changed, or `pac admin quota` output shape different from expected), STOP and escalate per CLAUDE.md §6 rather than adapting silently. H0 handler depends on the return contract being stable.</trigger>
+  </escalation>
+
+  <justification>
+    <existing>No prior preflight-check module directory exists in scripts/. Nearest neighbors: individual quota-verification snippets scattered across ENV-GUIDE and design.md but no reusable module surface.</existing>
+    <extension>No — the four checks are net-new logic on top of Azure/PAC APIs; there is no existing prep-check script to extend without conflating unrelated concerns.</extension>
+    <cost-of-doing-nothing>Without preflight quota checks, Model 2 provisioning fails deep in H2a/H2b/H8 with cryptic Azure quota errors that cascade into partial state + Quarantine per §4C. Quota bumps have 1-3 day lead time (per External Dependencies) — without H0 preflight surfacing this UP-FRONT, every quota-blocked run is a 1-3 day delay after entering Quarantine, plus operator debug time chasing partial infra.</cost-of-doing-nothing>
+  </justification>
+
+  <tools>
+    <tool name="pwsh">PowerShell 7.4+</tool>
+    <tool name="az">Azure CLI for OpenAI + vCPU + KV queries</tool>
+    <tool name="pac">PAC CLI for Dataverse env-creation rate</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">scripts/preflight/Test-AzureOpenAiTpmHeadroom.ps1</output>
+    <output type="code">scripts/preflight/Test-DataverseEnvCreationRate.ps1</output>
+    <output type="code">scripts/preflight/Test-SubscriptionVCpuQuota.ps1</output>
+    <output type="code">scripts/preflight/Test-SpeCertBootstrap.ps1</output>
+    <output type="docs">scripts/preflight/README.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Given scripts/preflight/, when listing, then exactly the 4 Test-*.ps1 files + README.md exist.</criterion>
+    <criterion testable="true">Given each check invoked standalone with valid params, when returning, then output matches the shared PSCustomObject contract (Result / CheckName / Headroom / Diagnostic).</criterion>
+    <criterion testable="true">Given Test-AzureOpenAiTpmHeadroom against a saturated dev region, when running, then Result = Fail and Diagnostic cites the observed vs requested TPM per model.</criterion>
+    <criterion testable="true">Given Test-SpeCertBootstrap against a KV missing the cert, when running, then Result = Fail with diagnostic naming the cert URI.</criterion>
+    <criterion testable="true">Given all four checks against a healthy dev env, when running, then all four return Result = Pass.</criterion>
+    <criterion testable="true">Negative: no check has cross-module state dependency (each is independently invocable — H0 handler orchestrates).</criterion>
+  </acceptance-criteria>
+
+  <notes>Spec FR-01 + R19 + NFR-12 + §4B. Wave C4 H0 handler orchestrates all 4 checks; blocks run before H1 if any fail.</notes>
+
+  <execution><skill>.claude/skills/task-execute/SKILL.md</skill></execution>
+</task>

@@ -4,26 +4,21 @@
  * Unit tests for the SmartTodo launch-context parser hook (task 070b).
  *
  * ──────────────────────────────────────────────────────────────────────────
- * TEST-RUNNER STATUS (2026-06-08)
+ * Runs under Jest (R4-114, 2026-06-25, wired `src/solutions/SmartTodo/
+ * jest.config.cjs`) — the "no test runner wired" framing this header
+ * previously carried is stale (smart-todo-r5 task 040 removed it). The
+ * ~30+ `it()` blocks for the pure `parseLaunchContextFromSearch` parser have
+ * been executing for real since R4-114; task 040's own contribution is
+ * replacing the final `useLaunchContext hook — URL clearing side-effect`
+ * describe block's two `expect(true).toBe(true)` placeholders with real
+ * `@testing-library/react` `renderHook` assertions (see that block below).
  *
- * SmartTodo's `package.json` does NOT currently include a test runner (no jest,
- * no vitest). These tests are written as DOCUMENTATION + ASSERTION SOURCE so
- * they activate immediately when a test runner is added to the SmartTodo
- * package (or when the file is moved into a workspace that already runs them).
- *
- * In the meantime, the test source itself serves as:
+ * The test source continues to serve as:
  *   1. An executable spec — every assertion below is a concrete behavior we
  *      want the production hook to honour.
  *   2. A regression boundary — future edits to `useLaunchContext.ts` should
  *      change tests in this file FIRST, then the implementation, so the diff
  *      makes the behavior change reviewable.
- *
- * To run these once a test runner is wired up:
- *   • Add `vitest` (preferred) or `jest` + `@testing-library/react` + jsdom env
- *     to `src/solutions/SmartTodo/package.json` devDependencies.
- *   • Add a `"test"` script.
- *   • These tests use the `jest` / `vitest` global API (`describe`/`it`/`expect`)
- *     which both runners expose by default.
  * ──────────────────────────────────────────────────────────────────────────
  *
  * Scenarios covered (mirror the three POML acceptance criteria + a regression
@@ -46,6 +41,7 @@
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
 
+import { renderHook } from '@testing-library/react';
 import {
   LAUNCH_ACTION_CREATE_TODO,
   LAUNCH_ACTION_OPEN_TODO,
@@ -53,17 +49,8 @@ import {
   LAUNCH_PARAM_KEYS,
   VISUAL_HOST_PARAM_KEYS,
   parseLaunchContextFromSearch,
+  useLaunchContext,
 } from '../useLaunchContext';
-
-// Avoid TypeScript errors when neither jest nor vitest globals are present at
-// type-check time. The runtime resolution still uses the real globals when a
-// test runner is added — this declaration is purely a compile-time shim.
-declare const describe: (name: string, fn: () => void) => void;
-declare const it: (name: string, fn: () => void) => void;
-declare const expect: any;
-declare const beforeEach: (fn: () => void) => void;
-declare const afterEach: (fn: () => void) => void;
-declare const jest: any;
 
 // ---------------------------------------------------------------------------
 // Pure-parser tests (DOM-free — runs in node/jsdom)
@@ -502,36 +489,78 @@ describe('parseLaunchContextFromSearch — openTodo branch (R4 task 100 / W-2)',
 // ---------------------------------------------------------------------------
 // useLaunchContext hook integration tests
 //
-// These exercise the side-effects (URL clearing via history.replaceState) which
-// require a DOM (jsdom). Skipped in pure-node test runs; enabled when a runner
-// with @testing-library/react + jsdom is installed.
+// These exercise the side-effects (URL clearing via history.replaceState),
+// which need a DOM — provided by `testEnvironment: 'jsdom'` in
+// jest.config.cjs. Uses `history.pushState` (not a direct `window.location`
+// reassignment) to seed the initial URL, because jsdom v22+ makes
+// `window.location` non-configurable (see `ToolbarActions.test.ts`'s
+// `handleEmail` tests for the same constraint).
+//
+// smart-todo-r5 task 040: replaces the two former `expect(true).toBe(true)`
+// placeholders. Running the real assertions surfaced that `clearLaunchParams`
+// (see `useLaunchContext.ts`) treats the literal `data` key as one of its OWN
+// recognised launch keys ("the envelope wrapper itself") — it is ALWAYS
+// stripped, not selectively unwrapped. The original PSEUDO-TEST comment for
+// the second case assumed a raw `data=key%3Dval` param would survive
+// alongside raw createTodo params; that assumption doesn't match
+// `clearLaunchParams`'s actual `keysToClear` list (which unconditionally
+// includes `'data'`). These tests assert the ACTUAL contract instead: launch
+// keys (including a literal `data` key, whether used as the envelope or not)
+// are cleared, and a genuinely unrelated param survives.
 // ---------------------------------------------------------------------------
 
 describe('useLaunchContext hook — URL clearing side-effect (jsdom required)', () => {
-  it('(d) clears the launch params from window.location after first read', () => {
-    // PSEUDO-TEST (intentionally skipped at the lib level):
-    //
-    //   1. Use @testing-library/react `renderHook(useLaunchContext)`.
-    //   2. Initially: window.location.search = '?action=createTodo&regardingType=…&regardingId=…&regardingName=…&data=foo'.
-    //   3. After renderHook: assert window.location.search no longer contains
-    //      action/regardingType/regardingId/regardingName, BUT preserves `data=foo`.
-    //   4. Assert returned launch context still carries the parsed regarding
-    //      (the clear happens AFTER the parse, in useEffect).
-    //
-    // Implementation note: the hook uses `history.replaceState(null, '', newUrl)`.
-    // jsdom supports replaceState since 12.x — works out of the box with vitest
-    // + @vitest/web environment or jest + jest-environment-jsdom.
-    expect(true).toBe(true); // placeholder so the describe block isn't empty
+  const BASE_URL = 'http://localhost/smarttodo.html';
+
+  afterEach(() => {
+    window.history.replaceState(null, '', BASE_URL);
   });
 
-  it('(d) preserves non-launch query params (e.g., the Xrm `data=…` envelope)', () => {
-    // PSEUDO-TEST:
-    //   1. window.location.search = '?action=createTodo&regardingType=sprk_communication&regardingId=guid-1&regardingName=Subject&data=key%3Dval'
-    //   2. After hook runs, window.location.search === '?data=key%3Dval'
-    //
-    // This is critical because the SmartTodo Code Page may also receive an
-    // Xrm `data=…` envelope on the same URL — clearing only the four launch
-    // params (not all params) is the documented contract in clearLaunchParams.
-    expect(true).toBe(true);
+  it('(d) clears the four raw launch params from window.location after first read, preserving an unrelated param', () => {
+    const guid = 'abc12345-6789-0123-4567-89abcdef0123';
+    window.history.pushState(
+      {},
+      '',
+      `${BASE_URL}?action=createTodo&regardingType=sprk_communication&regardingId=${guid}&regardingName=Subject&foo=bar`,
+    );
+
+    const { result } = renderHook(() => useLaunchContext());
+
+    // Returned launch context still carries the parsed regarding — the clear
+    // happens AFTER the parse, in a useEffect (post-commit).
+    expect(result.current?.action).toBe(LAUNCH_ACTION_CREATE_TODO);
+    if (result.current?.action === LAUNCH_ACTION_CREATE_TODO) {
+      expect(result.current.initialRegarding).toEqual({
+        entityType: 'sprk_communication',
+        recordId: guid,
+        recordName: 'Subject',
+      });
+    }
+
+    // Launch keys are gone; the unrelated `foo` param survives — proves
+    // clearLaunchParams preserves any key it doesn't recognise.
+    const params = new URLSearchParams(window.location.search);
+    expect(params.has('action')).toBe(false);
+    expect(params.has('regardingType')).toBe(false);
+    expect(params.has('regardingId')).toBe(false);
+    expect(params.has('regardingName')).toBe(false);
+    expect(params.get('foo')).toBe('bar');
+  });
+
+  it('(d) clears the `data=` envelope wrapper itself (not just its decoded contents), preserving an unrelated param', () => {
+    const guid = 'b2c3d4e5-f6a7-8901-2345-67890abcdef0';
+    const dataString = `action=openTodo&todoId=${guid}`;
+    window.history.pushState({}, '', `${BASE_URL}?data=${encodeURIComponent(dataString)}&foo=bar`);
+
+    const { result } = renderHook(() => useLaunchContext());
+
+    expect(result.current?.action).toBe(LAUNCH_ACTION_OPEN_TODO);
+    if (result.current?.action === LAUNCH_ACTION_OPEN_TODO) {
+      expect(result.current.todoId).toBe(guid);
+    }
+
+    const params = new URLSearchParams(window.location.search);
+    expect(params.has('data')).toBe(false);
+    expect(params.get('foo')).toBe('bar');
   });
 });

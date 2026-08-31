@@ -106,7 +106,9 @@ public sealed class ScheduledJobHost : BackgroundService
                 _logger.LogError(ex, "ScheduledJobHost tick failed unexpectedly; backing off 5s");
                 try
                 {
-                    await Task.Delay(TimeSpan.FromSeconds(5), stoppingToken).ConfigureAwait(false);
+                    // _timeProvider (not the ambient clock) so a test can virtualize EVERY host
+                    // sleep — see the idle sleep below and the retry delays.
+                    await Task.Delay(TimeSpan.FromSeconds(5), _timeProvider, stoppingToken).ConfigureAwait(false);
                 }
                 catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)
                 {
@@ -483,7 +485,10 @@ public sealed class ScheduledJobHost : BackgroundService
         {
             // Nothing scheduled — wait until next refresh or shutdown.
             var idleSleep = TimeSpan.FromTicks(Math.Min(_options.MaxLoopSleep.Ticks, _options.RefreshInterval.Ticks));
-            await Task.Delay(idleSleep, stoppingToken).ConfigureAwait(false);
+            // _timeProvider, matching the scheduled-sleep and retry-delay paths — the host's
+            // sleeps are ALL virtualizable, so a FakeTimeProvider test can prove that a wake-up
+            // came from cancellation rather than from elapsed wall-clock time.
+            await Task.Delay(idleSleep, _timeProvider, stoppingToken).ConfigureAwait(false);
             return;
         }
 

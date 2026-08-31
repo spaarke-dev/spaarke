@@ -1,8 +1,11 @@
+using Azure.Core;
 using FluentAssertions;
+using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 using Moq;
 using Sprk.Bff.Api.Configuration;
+using Sprk.Bff.Api.Infrastructure.Auth;
 using Sprk.Bff.Api.Services.RecordMatching;
 using Xunit;
 
@@ -25,15 +28,19 @@ public class RecordMatchServiceTests
         var logger = Mock.Of<ILogger<RecordMatchService>>();
 
         // Act & Assert
-        var act = () => new RecordMatchService(options, logger);
+        var act = () => new RecordMatchService(options, EmptyConfig(), new StubCredential(), logger);
         act.Should().Throw<InvalidOperationException>()
            .WithMessage("*AiSearchEndpoint*");
     }
 
     [Fact]
-    public void Constructor_ThrowsWhenAiSearchKeyMissing()
+    public void Constructor_SelectsManagedIdentity_WhenAiSearchKeyMissing()
     {
-        // Arrange
+        // auth-v4 task 053 (FR-E4). This test previously asserted the OPPOSITE — that a missing
+        // AiSearchKey throws. That contract made the admin key MANDATORY for record matching, so
+        // clearing the key to finish the Entra migration would have broken this service at startup.
+        // A missing key now selects Entra (managed identity); only the endpoint stays required,
+        // because there is nothing to infer it from.
         var options = Options.Create(new DocumentIntelligenceOptions
         {
             AiSearchEndpoint = "https://test.search.windows.net",
@@ -41,10 +48,59 @@ public class RecordMatchServiceTests
         });
         var logger = Mock.Of<ILogger<RecordMatchService>>();
 
-        // Act & Assert
-        var act = () => new RecordMatchService(options, logger);
-        act.Should().Throw<InvalidOperationException>()
-           .WithMessage("*AiSearchKey*");
+        var act = () => new RecordMatchService(options, EmptyConfig(), new StubCredential(), logger);
+
+        act.Should().NotThrow(
+            "an absent admin key must select managed identity, not fail construction");
+    }
+
+    [Fact]
+    public void Constructor_SelectsManagedIdentity_WhenFlagIsSet_EvenWithKeyConfigured()
+    {
+        // The flag is what allows an environment to move to Entra while the key is still in place
+        // as a rollback (NFR-06) — the staged transition, rather than delete-then-hope.
+        var options = Options.Create(new DocumentIntelligenceOptions
+        {
+            AiSearchEndpoint = "https://test.search.windows.net",
+            AiSearchKey = "still-in-keyvault"
+        });
+
+        var config = new ConfigurationBuilder()
+            .AddInMemoryCollection(new Dictionary<string, string?>
+            {
+                [SearchClientFactory.ManagedIdentityEnabledConfigKey] = "true",
+            })
+            .Build();
+
+        SearchClientFactory.UseManagedIdentity(config, options.Value.AiSearchKey)
+            .Should().BeTrue("the explicit flag must win over a still-configured key");
+
+        var act = () => new RecordMatchService(
+            options, config, new StubCredential(), Mock.Of<ILogger<RecordMatchService>>());
+        act.Should().NotThrow();
+    }
+
+    [Fact]
+    public void SearchClientFactory_PrefersKey_WhenFlagIsUnsetAndKeyPresent()
+    {
+        // Default posture: unchanged behaviour until an operator opts in. Guards against the
+        // migration silently flipping every environment to Entra before the Search service is
+        // switched to aadOrApiKey (which would 403 every call).
+        SearchClientFactory.UseManagedIdentity(EmptyConfig(), "an-admin-key")
+            .Should().BeFalse("no flag + a configured key means the key is still used");
+    }
+
+    private static IConfiguration EmptyConfig()
+        => new ConfigurationBuilder().AddInMemoryCollection(new Dictionary<string, string?>()).Build();
+
+    /// <summary>Never invoked — construction only selects the credential, it does not fetch a token.</summary>
+    private sealed class StubCredential : TokenCredential
+    {
+        public override AccessToken GetToken(TokenRequestContext requestContext, CancellationToken cancellationToken)
+            => new("stub-token", DateTimeOffset.UtcNow.AddHours(1));
+
+        public override ValueTask<AccessToken> GetTokenAsync(TokenRequestContext requestContext, CancellationToken cancellationToken)
+            => new(GetToken(requestContext, cancellationToken));
     }
 
     [Theory]

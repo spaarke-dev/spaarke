@@ -88,7 +88,7 @@ public sealed class ComposeServiceLoadImportedCommentsTests
     private ComposeService CreateSut() => new(
         _spe.Object,
         _sessions.Object,
-        _dataverse.Object,        _indexing.Object,
+        _dataverse.Object, _indexing.Object,
         NullLogger<ComposeService>.Instance);
 
     private void SetupSpeReturns(byte[] docx)
@@ -149,7 +149,7 @@ public sealed class ComposeServiceLoadImportedCommentsTests
 
         var result = await sut.LoadAsync(
             new LoadComposeDocumentRequest { DriveId = DriveId, DocumentSpeId = DocumentSpeId, TenantId = Tenant },
-            new DefaultHttpContext(),
+            TestHttpContexts.Authenticated(),
             CancellationToken.None);
 
         result.ImportedComments.Should().HaveCount(3, "the doc carries three w:comment elements (FR-25)");
@@ -185,7 +185,7 @@ public sealed class ComposeServiceLoadImportedCommentsTests
 
         var result = await sut.LoadAsync(
             new LoadComposeDocumentRequest { DriveId = DriveId, DocumentSpeId = DocumentSpeId, TenantId = Tenant },
-            new DefaultHttpContext(),
+            TestHttpContexts.Authenticated(),
             CancellationToken.None);
 
         result.ImportedComments.Should().NotBeNull().And.BeEmpty(
@@ -203,7 +203,7 @@ public sealed class ComposeServiceLoadImportedCommentsTests
 
         var result = await sut.LoadAsync(
             new LoadComposeDocumentRequest { DriveId = DriveId, DocumentSpeId = DocumentSpeId, TenantId = Tenant },
-            new DefaultHttpContext(),
+            TestHttpContexts.Authenticated(),
             CancellationToken.None);
 
         result.ImportedComments.Should().NotBeNull().And.BeEmpty();
@@ -227,7 +227,7 @@ public sealed class ComposeServiceLoadImportedCommentsTests
 
         var result = await sut.LoadAsync(
             new LoadComposeDocumentRequest { DriveId = DriveId, DocumentSpeId = DocumentSpeId, TenantId = Tenant },
-            new DefaultHttpContext(),
+            TestHttpContexts.Authenticated(),
             CancellationToken.None);
 
         result.ImportedRevisions.Should().ContainSingle(r => r.Kind == RecoveredAnnotationKind.Insertion);

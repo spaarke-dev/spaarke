@@ -21,6 +21,41 @@
 import type { FiledAssociation, IResolverWriteContext } from '../../logic/connections';
 import type { IAccessPermissionOption, RecordTypeCatalogEntry, IPolymorphicPickerWebApi } from '@spaarke/ui-components';
 
+/**
+ * A record the host created via the Quick Start / Create*Wizard surface-launch
+ * (email-communication-intelligence-r2 task 064, E1b). Returned by
+ * `onLaunchCreateRecord` so the review can file it as the confirmed regarding
+ * through the SAME additive `applyRegardingSelection` path a picked record uses
+ * (no second write path; NFR-10). `null` return ⇒ the user cancelled the wizard.
+ */
+export interface CreatedRecordRef {
+  /** The created Dataverse record id (bare GUID). */
+  id: string;
+  /** The created record's entity logical name (e.g. `sprk_matter`). */
+  entityType: string;
+  /** Optional display name/number for the confirmed chip; the grid refresh re-derives the denorm. */
+  name?: string;
+}
+
+/**
+ * The reconciled email's archived `.eml` source (task 064, E1c). The host passes
+ * it to `onLaunchCreateRecord` so the launched wizard's AI-prepopulate step opens
+ * pre-seeded with the email content. Carried BY REFERENCE — a `sprk_document`
+ * GUID (`sprk_isemailarchive=true`), never inline binary; the host resolves it to
+ * a session file via the BFF `.eml`→session-document ingest endpoint.
+ */
+export interface EmlSource {
+  /** The `sprk_document` id of the reconciled email's `.eml` archive (direct resolution). */
+  documentId?: string;
+  /**
+   * The `sprk_communication` id whose archived `.eml` to resolve. Preferred for the
+   * reconciliation grid (it shows `sprk_communication` rows): the BFF resolves the
+   * communication's archive `.eml` `sprk_document` server-side (via the `sprk_communication`
+   * lookup), so no grid-column / client-side document lookup is required.
+   */
+  communicationId?: string;
+}
+
 export interface EmailConnectionsReviewProps {
   /** The selected `sprk_communication` id (the reading-pane `selectedId`). Also drives session-local state reset on selection change. */
   communicationId: string;
@@ -46,6 +81,17 @@ export interface EmailConnectionsReviewProps {
   resolveDisplayName?: (entity: string, id: string) => string | undefined;
   /** Hide every write affordance (Confirm/Change/Remove/Link another) — review-only display. */
   readOnly?: boolean;
+  /**
+   * Presentation variant (owner UAT round-3 2026-08-13). Default `'default'` keeps
+   * the email-form reading-pane layout unchanged (per-card "Confirm", "Link another
+   * record" + "New record" card tiles, no filed banner). `'reconcile'` renders the
+   * reconciliation-browse layout that matches the Pillar E prototype: the per-card
+   * button reads "Select", the manual lookup is a labelled "Look up another record"
+   * field, "New record" is a full-width button, and a success "Filed to …" banner
+   * shows once a primary is confirmed (the reconciliation browse tab renders no
+   * confirmed chip of its own, so the banner is the only filed-state feedback).
+   */
+  variant?: 'default' | 'reconcile';
   /** Called after ANY successful write (confirm/change/remove/link-another) so the host can refetch the record's provenance/filed-associations. */
   onAssociationsChanged?: () => void;
   /**
@@ -53,8 +99,23 @@ export interface EmailConnectionsReviewProps {
    * Find a record · Create new · Dismiss). When omitted, the "Create new" button
    * is not rendered (the host has no create-a-record-to-associate flow wired) —
    * "Find a record" (the shared picker) + "Dismiss" still appear.
+   *
+   * FIRE-AND-FORGET fallback (existing consumers, e.g. EmailWorkspace). When
+   * `onLaunchCreateRecord` (below) is also supplied it takes precedence and this
+   * is ignored for the tile click.
    */
   onCreateNewRecord?: () => void;
+  /**
+   * Task 064 (E1b): create-a-record-and-file-it launcher. When supplied, the
+   * "New record" tile AWAITS this (the host opens Quick Start / a Create*Wizard)
+   * and, on a non-null {@link CreatedRecordRef}, files the created record as the
+   * confirmed regarding via the SAME additive `applyRegardingSelection` path a
+   * picked record uses (no second write path; NFR-10). `null` ⇒ the user
+   * cancelled → no write. Zero-arg: the host binds the `.eml` source (E1c) itself
+   * (see `ReconciliationWorkspaceProps.onLaunchCreateRecord` + `resolveEmlSource`).
+   * Takes precedence over `onCreateNewRecord`; both omitted ⇒ tile not rendered.
+   */
+  onLaunchCreateRecord?: () => Promise<CreatedRecordRef | null>;
 }
 
 export interface EmailTrackingPanelProps {

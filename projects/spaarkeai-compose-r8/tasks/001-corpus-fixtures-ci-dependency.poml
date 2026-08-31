@@ -1,0 +1,94 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="001" project="spaarkeai-compose-r8">
+  <metadata>
+    <title>Land/verify PR #690 — Git-LFS corpus fixtures load in CI</title>
+    <phase>0 Coordination &amp; Prerequisites</phase>
+    <gate>startable</gate>
+    <status>pending</status>
+    <rigor>MINIMAL</rigor>
+    <rigor-reason>No source modified — verifies an external PR landed and that corpus fixtures resolve in CI; produces a note.</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Mechanical verification; no architectural judgment.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>P0</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <parallel-reason>Read-only verification against CI + an external PR; touches no project source.</parallel-reason>
+    <deps>none</deps>
+    <tags>ci-cd, testing, devops</tags>
+    <estimated-effort>1-2 hours</estimated-effort>
+  </metadata>
+
+  <prompt>
+    Confirm PR #690 ("ci: pull Git-LFS corpus fixtures in Build &amp; Test") has landed on master, and verify that
+    the Compose corpus fixtures under tests/fixtures/compose-corpus/ actually resolve to real bytes in a CI run
+    (not LFS pointer stubs). This is a HARD DEPENDENCY for the entire Phase-2 oracle: without it the fidelity
+    gate cannot load a single corpus document in CI. Do NOT modify sdap-ci.yml in this task — #690 owns it.
+  </prompt>
+
+  <role>SPAARKE platform developer familiar with GitHub Actions, Git-LFS, and the Compose seam-test harness.</role>
+
+  <goal>
+    A note at projects/spaarkeai-compose-r8/notes/ci-corpus-dependency.md recording: (1) PR #690 status
+    (merged / open / stalled) with its merge SHA if landed; (2) evidence that every .docx under
+    tests/fixtures/compose-corpus/ resolves to real content in CI — not a 130-byte LFS pointer;
+    (3) the current pass/fail state of the 5 Compose seam tests #690 names; (4) a GO / NO-GO for Phase 2.
+  </goal>
+
+  <context>
+    <background>
+      Owner decision 2026-08-19: land #690 first, then build the gate. The corpus .docx files are Git-LFS
+      pointers (`*.docx filter=lfs` in .gitattributes, per tests/fixtures/compose-corpus/corpus-manifest.md).
+      A CI job without `lfs: true` on checkout gets pointer stubs, and every fixture-driven test fails or
+      silently skips. R8's central deliverable (the preservation oracle, task 030) is fixture-driven.
+    </background>
+    <relevant-files>
+      <file role="doc-output">projects/spaarkeai-compose-r8/notes/ci-corpus-dependency.md</file>
+      <file role="canonical-reference">tests/fixtures/compose-corpus/corpus-manifest.md</file>
+      <file role="canonical-reference">tests/integration/seam/Compose/ComposeCorpusFixtureLocator.cs</file>
+      <file role="canonical-reference">tests/integration/seam/Compose/ComposeFidelityGateHarnessTests.cs</file>
+      <file role="external-pr">.github/workflows/sdap-ci.yml</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="project">MUST NOT modify .github/workflows/sdap-ci.yml — PR #690 owns that file. Editing it here creates a merge conflict with an open PR.</constraint>
+    <constraint source="project">Verification MUST be empirical: check actual file sizes (`git lfs ls-files`, or file size &gt; pointer size) and a real CI run, not just the PR's description.</constraint>
+    <constraint source="project">If #690 has NOT landed, record NO-GO and STOP — do not work around it by committing raw binaries (corpus-manifest.md forbids raw binaries under that path).</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>ci-cd, git-lfs, corpus fixtures</topic>
+    <files>
+      <file>tests/fixtures/compose-corpus/corpus-manifest.md</file>
+      <file>docs/procedures/ci-cd-workflow.md</file>
+      <file>projects/spaarkeai-compose-r8/spec.md</file>
+      <file>projects/spaarkeai-compose-r8/CLAUDE.md</file>
+    </files>
+  </knowledge>
+
+  <steps mode="prescriptive">
+    <step order="0" name="Rigor declaration">Declare rigor MINIMAL; load spec.md + CLAUDE.md.</step>
+    <step order="1">Check PR #690 state: `gh pr view 690 --json state,mergedAt,mergeCommit,files`.</step>
+    <step order="2">If merged: confirm the merge is on our branch's base (`git log origin/master --oneline | grep`-style check for the merge SHA).</step>
+    <step order="3">Verify fixture resolution locally: `git lfs ls-files` under tests/fixtures/compose-corpus/, and confirm each .docx is a real package (size &gt; 10 KB, opens as a ZIP) rather than a pointer stub.</step>
+    <step order="4">Inspect a recent CI run for the Compose seam tests: `gh run list --workflow=sdap-ci.yml` then `gh run view {id} --log` filtered to the Compose seam tests. Record pass/fail/skip counts.</step>
+    <step order="5">Write the note with a clear GO / NO-GO for Phase 2.</step>
+  </steps>
+
+  <escalation>
+    <trigger>PR #690 is stalled, closed without merging, or its approach is superseded — Phase 2 cannot proceed and the owner must decide whether R8 absorbs the CI fix (spec §Dependencies named this as the rejected option because it conflicts in sdap-ci.yml).</trigger>
+  </escalation>
+
+  <outputs>
+    <output type="doc">projects/spaarkeai-compose-r8/notes/ci-corpus-dependency.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion>The note records PR #690's actual state with evidence (SHA or open-PR link), not an assumption.</criterion>
+    <criterion>Every .docx under tests/fixtures/compose-corpus/ is confirmed to resolve to real bytes, with the verification method stated.</criterion>
+    <criterion>The pass/fail/skip state of the Compose seam tests in a real CI run is recorded.</criterion>
+    <criterion>A GO or NO-GO for Phase 2 is stated explicitly.</criterion>
+    <criterion>NEGATIVE: no change was made to .github/workflows/sdap-ci.yml.</criterion>
+    <criterion>NEGATIVE: no raw binary was committed under tests/fixtures/compose-corpus/.</criterion>
+  </acceptance-criteria>
+</task>

@@ -101,13 +101,38 @@ public interface IComposeService
     /// paragraph id (two independent walks would otherwise mint different ids for id-less paragraphs);
     /// (2) the canonical content model itself, which the client's imported-save mapper merges editor
     /// state onto and re-posts as <c>SaveComposeDocumentRequest.ContentModel</c> (preserving every
-    /// server-set field). Pure / synchronous — no I/O, no Graph (ADR-007). Fail-closed like
-    /// <see cref="ProjectDocument"/>: an unreadable source returns the original bytes, a Failed HTML
-    /// projection, and a null model — never throws.
+    /// server-set field). Fail-closed like <see cref="ProjectDocument"/>: an unreadable source returns
+    /// the original bytes, a Failed HTML projection, and a null model — never throws.
     /// </summary>
-    ComposeMountProjection ProjectForMount(
+    /// <remarks>
+    /// Task 050 (spaarkeai-compose-r7, FR-06 — PDF import parity): this method is now <b>async</b> and
+    /// forks a PDF source onto the SAME <c>ProjectPdfToDocxAsync</c> intake leg <see cref="LoadAsync"/>
+    /// already uses (<see cref="IsPdfSource"/> → synthesized docx), so a PDF opened via the Browse /
+    /// Assistant-upload doors becomes an editable Compose document exactly as it does via Load. This is a
+    /// documented, project-scoped ADR-007/ADR-013 contract change (NFR-04, ADR Tensions path A):
+    /// <see cref="ProjectForMount"/> was deliberately synchronous / no-I/O, and the <b>docx path stays
+    /// synchronous-fast</b> — the single Azure Document-Intelligence call is reached ONLY on the PDF
+    /// branch, mirroring <see cref="LoadAsync"/>'s own fork. <paramref name="fileName"/> is optional and
+    /// participates only in source detection (bytes-first, so a real PDF is detected even without it) and
+    /// intake diagnostics. On a PDF source, <see cref="ComposeMountProjection.SourceFormat"/> is
+    /// <c>"pdf"</c> and the counted <c>pdf-intake-*</c> degradations ride in
+    /// <see cref="ComposeMountProjection.ContentModelWarnings"/> (the client's honest-lossiness surface),
+    /// mirroring <see cref="LoadComposeDocumentResult"/>.
+    /// </remarks>
+    /// <param name="content">The source bytes to project (DOCX, or a PDF that forks onto the intake leg).</param>
+    /// <param name="fileName">Optional; participates in source detection and intake diagnostics only.</param>
+    /// <param name="cancellationToken">Cancellation token.</param>
+    /// <param name="sessionId">FR-A08 (r8 task 044): the Compose session this mount belongs to, when there
+    /// is one. Supplied by the Assistant-upload door (which requires a session) and omitted by the
+    /// Browse/local-file door (<c>/api/compose/project</c>, contracted to leave zero server-side state).
+    /// When supplied AND the source is a PDF, the server records that fact against the session so the first
+    /// save stamps the new record <c>Authored</c> — a PDF projection is our file, with no original .docx it
+    /// could be a lossy view of. Omitting it costs only that stamp.</param>
+    Task<ComposeMountProjection> ProjectForMount(
         ReadOnlyMemory<byte> content,
-        CancellationToken cancellationToken = default);
+        string? fileName = null,
+        CancellationToken cancellationToken = default,
+        string? sessionId = null);
 
     /// <summary>
     /// Load an existing document into the Compose workspace. Used by both Path A (open from
@@ -561,6 +586,18 @@ public sealed record LoadComposeDocumentResult : ComposeDocumentResult
     public IReadOnlyList<ImportedComment> ImportedComments { get; init; } = Array.Empty<ImportedComment>();
 
     /// <summary>
+    /// UAT-12 (2026-08-18, honest/safe): <c>true</c> when the existing-annotation read
+    /// (<see cref="DocxAnnotationReader"/>) THREW during Load, so <see cref="ImportedRevisions"/> and
+    /// <see cref="ImportedComments"/> were forced empty as a fallback. Without this flag a document that
+    /// genuinely CONTAINS tracked changes / reviewer comments would mount looking CLEAN — a trust-breaking
+    /// silent loss on a legal-review surface. The client surfaces an honest "this document's tracked
+    /// changes and comments couldn't be read — do not treat it as clean" banner when this is set.
+    /// <c>false</c> on the normal path (the read succeeded — an empty result then means the document
+    /// really has no annotations).
+    /// </summary>
+    public bool AnnotationReadFailed { get; init; }
+
+    /// <summary>
     /// Task 012 (spaarkeai-compose-r6, the client cutover): the CANONICAL content model projected from
     /// the SAME minted load-time bytes the HTML <see cref="Projection"/> is built from (one mint, two
     /// walks — paraIds agree by construction). The client RETAINS this as the loaded model and, on an
@@ -676,8 +713,20 @@ public sealed record ComposeMountProjection
     public ComposeContentModel? ContentModel { get; init; }
 
     /// <summary>Task 013 (012-review F7): the canonical projection's flatten warnings - see
-    /// <see cref="LoadComposeDocumentResult.ContentModelWarnings"/>. Null when clean or failed.</summary>
+    /// <see cref="LoadComposeDocumentResult.ContentModelWarnings"/>. Null when clean or failed.
+    /// Task 050 (FR-06): on a PDF mount the intake's counted <c>pdf-intake-*</c> degradations are
+    /// folded in FIRST (source-level facts), mirroring <see cref="LoadAsync"/>.</summary>
     public IReadOnlyList<ComposeProjectionWarning>? ContentModelWarnings { get; init; }
+
+    /// <summary>
+    /// Task 050 (spaarkeai-compose-r7, FR-06 — PDF import parity): the SOURCE format the mount projected
+    /// from when it was not a native <c>.docx</c>. <c>"pdf"</c> = the mounted source was a PDF and
+    /// <see cref="Content"/> is the docx SYNTHESIZED from its canonical-model projection; null = native
+    /// docx mount (the common case — byte-unchanged). The SAME marker
+    /// <see cref="LoadComposeDocumentResult.SourceFormat"/> carries — the client (task 051) keys the
+    /// honest-lossiness UX + save-as-docx flow off it. ADDITIVE (ADR-040).
+    /// </summary>
+    public string? SourceFormat { get; init; }
 }
 
 /// <summary>Save request payload.</summary>
@@ -739,6 +788,21 @@ public sealed record SaveComposeDocumentRequest
     /// same-session save (the <see cref="Content"/> fast-path is used) or a transient create-on-save.
     /// </summary>
     public string? BaselineVersionId { get; init; }
+
+    /// <summary>
+    /// UAT-25/26 (2026-08-18, honest/safe concurrency): the LOAD-TIME SPE ETag the client's in-memory
+    /// document is based on (<see cref="LoadComposeDocumentResult.ETag"/>). It is the client's "base I
+    /// edited from" reference for stale-base detection. <see cref="SaveAsync"/> compares the LIVE SPE ETag
+    /// at save time against the effective baseline (the Compose save-version STAMP if this session has
+    /// already saved, else this load-time ETag) — a mismatch means an external writer (Word / another tab)
+    /// landed a new version since the client loaded. On the whole-body <see cref="ContentModel"/> re-author
+    /// path (which CANNOT re-anchor another writer's changes) a mismatch is refused with a 412 (reload +
+    /// reapply — nothing overwritten) rather than SILENTLY overwriting the external change. Providing it on
+    /// the FIRST Compose save of a pre-existing item closes the prior no-stamp-yet concurrency gap (UAT-26).
+    /// Null on a transient create-on-save (no prior base) or an older client that predates this field
+    /// (then only the stamp-based check applies, unchanged).
+    /// </summary>
+    public string? BaselineETag { get; init; }
 
     /// <summary>
     /// R4 FR-06 (task 032, the write-path cutover — supersedes the retired R3 paragraph-diff decision, Path B /
@@ -857,9 +921,196 @@ public sealed record SaveComposeDocumentRequest
     public Guid? SourceDocumentRecordId { get; init; }
 }
 
+/// <summary>
+/// FR-S06 (spaarkeai-compose-r8 task 011/013) — the CLOSED set of terminal save outcomes.
+///
+/// <para><b>Why this exists.</b> Before it, a save's completion state was inferable only from the HTTP
+/// status, and the status lied: <see cref="ComposeService"/>'s container-failure path RETURNS a result
+/// (it does not throw), and the endpoint wraps every returned result in <c>Results.Ok</c> — so a save
+/// that wrote nothing at all presented to the user as HTTP 200 "Saved ✓". Putting the outcome ON the
+/// wire makes the completion state something the client READS rather than infers.</para>
+///
+/// <para><b>The set is closed and every member has a real producer.</b> Do NOT add a catch-all
+/// "unknown"/"other" member — that recreates the undefined outcome this type removes. If a genuine
+/// terminal state does not map to one of these seven, that is a spec change (FR-S06 names the set) and
+/// an escalation, not a local widening.</para>
+/// </summary>
+public enum ComposeSaveOutcome
+{
+    /// <summary>The bytes were written and nothing was lost or simplified. The only "clean" outcome.</summary>
+    Persisted,
+
+    /// <summary>
+    /// The bytes were written, but something the user should know about happened: content the renderer
+    /// simplified, a stale-base re-anchor, or (FR-S02) another writer's version was superseded. Still a
+    /// success — the document IS saved.
+    /// </summary>
+    PersistedWithWarnings,
+
+    /// <summary>
+    /// The save was refused because this request's base had moved and could not be rebased onto the
+    /// current version. Nothing was written and — the defining property — nothing was OVERWRITTEN.
+    ///
+    /// <para>Two producers, both of which are a refusal on staleness grounds rather than a failed write:</para>
+    /// <list type="number">
+    ///   <item>the If-Match precondition failed AND the single rebase retry also lost — the document is
+    ///   being written continuously by someone else right now (FR-S02, task 011);</item>
+    ///   <item>the stale-base re-anchor could not re-download the current bytes, so there was no valid
+    ///   basis to rebase the operation log against (FR-S07, task 014).</item>
+    /// </list>
+    ///
+    /// <para>Producer (2) is triggered by a storage READ that failed, which is why the telemetry
+    /// <c>cause</c> dimension carries that distinction — but the OUTCOME is still a refusal, not a
+    /// <see cref="StorageFailed"/>: no write was attempted, so nothing about the storage attempt failed.
+    /// Reporting it as a storage failure would tell the user their document may be damaged when the
+    /// stored version is in fact untouched.</para>
+    /// </summary>
+    RefusedStale,
+
+    /// <summary>The document is held by a Word-for-the-web co-authoring lock (HTTP 423). Nothing written.</summary>
+    RefusedLocked,
+
+    /// <summary>
+    /// The request could not be honored as submitted: a missing required field, a PDF replace target, a
+    /// patch-engine refusal, or insufficient permission. Nothing written. The distinguishing property is
+    /// that RETRYING THE SAME REQUEST cannot succeed — something about the request or the caller's rights
+    /// must change first.
+    /// </summary>
+    RefusedInvalid,
+
+    /// <summary>
+    /// The storage layer failed to complete the write: the container step failed, the SPE call returned
+    /// null, or the write faulted. Nothing durable landed. Distinct from <see cref="RefusedStale"/> and
+    /// <see cref="RefusedInvalid"/> in that the REQUEST was fine — the storage attempt was not.
+    /// </summary>
+    StorageFailed,
+
+    /// <summary>
+    /// Some of what the user asked for landed and some did not — the best-effort per-paragraph recovery
+    /// applied the resolvable edits and could not place the rest. The document IS saved, but it does not
+    /// contain everything that was submitted, so it is deliberately NOT a success member: the user has
+    /// work to redo.
+    /// </summary>
+    PartiallyRecorded,
+}
+
+/// <summary>
+/// FR-S06: the STABLE wire strings for <see cref="ComposeSaveOutcome"/>.
+///
+/// <para>Deliberately hand-mapped rather than relying on enum serialization: the wire contract must
+/// survive member reordering, renaming, and any future change to the app's global
+/// <c>JsonStringEnumConverter</c> configuration. The client keys its success/failure decision off these
+/// strings, so they are a published contract, not an implementation detail.</para>
+/// </summary>
+public static class ComposeSaveOutcomes
+{
+    public const string Persisted = "persisted";
+    public const string PersistedWithWarnings = "persisted-with-warnings";
+    public const string RefusedStale = "refused-stale";
+    public const string RefusedLocked = "refused-locked";
+    public const string RefusedInvalid = "refused-invalid";
+    public const string StorageFailed = "storage-failed";
+    public const string PartiallyRecorded = "partially-recorded";
+
+    /// <summary>Map an outcome to its stable wire string. Total over the closed set.</summary>
+    public static string ToWireValue(this ComposeSaveOutcome outcome) => outcome switch
+    {
+        ComposeSaveOutcome.Persisted => Persisted,
+        ComposeSaveOutcome.PersistedWithWarnings => PersistedWithWarnings,
+        ComposeSaveOutcome.RefusedStale => RefusedStale,
+        ComposeSaveOutcome.RefusedLocked => RefusedLocked,
+        ComposeSaveOutcome.RefusedInvalid => RefusedInvalid,
+        ComposeSaveOutcome.StorageFailed => StorageFailed,
+        ComposeSaveOutcome.PartiallyRecorded => PartiallyRecorded,
+        // Unreachable over the closed set; the compiler cannot prove exhaustiveness for an enum, and
+        // returning a silent default here would be the "unknown member" the enum exists to forbid.
+        _ => throw new ArgumentOutOfRangeException(nameof(outcome), outcome, "Unmapped ComposeSaveOutcome."),
+    };
+}
+
+/// <summary>
+/// FR-S08 (spaarkeai-compose-r8 task 015) — THE Compose document-size limit. One number, one place.
+///
+/// <para>Every consumer derives from <see cref="MaxDocumentBytes"/>: the request-body cap on the two save
+/// routes, the server-side refusal, the number quoted in the refusal message, and the number the client
+/// receives (on the Load/Upload responses) for its pre-flight. Two constants is how "your file is fine"
+/// becomes an unexplained 413, so the client is NEVER given a compiled-in copy to drift from — when the
+/// server does not advertise a limit the client does no numeric pre-flight and lets the server refuse
+/// honestly, rather than guessing.</para>
+///
+/// <para><b>25 MB</b> matches the established Spaarke document ceiling — `DocumentUploadWizard`,
+/// `OfficeService` and the chat attachment policy all sit there (docs/standards/CHAT-ATTACHMENT-POLICY.md
+/// §"Why 25 MB binary cap"). A Compose document that the user could upload through the Documents pane must
+/// not be one Compose refuses to save.</para>
+///
+/// <para><b>Not a storage limit.</b> Graph's simple upload (`PUT .../content`) has accepted up to 250 MB
+/// since October 2023 (raised from 4 MB; confirmed for SharePoint Embedded containers in the SPE
+/// "Upload, download, and manage files" guidance), and SPE's own per-file ceiling is 250 GB. This number
+/// is a deliberate product limit on what Compose will carry through a JSON+base64 request body, not a
+/// platform boundary — which is why raising it is a config-shaped decision, not an architecture one.</para>
+/// </summary>
+public static class ComposeSaveLimits
+{
+    /// <summary>Largest document Compose will save, in bytes. See the type remarks before changing.</summary>
+    public const long MaxDocumentBytes = 25L * 1024 * 1024;
+
+    /// <summary>
+    /// Base64 inflates by 4/3 and the document rides inside a JSON envelope, so the REQUEST BODY cap has
+    /// to exceed <see cref="MaxDocumentBytes"/> or the transport refuses the request before the honest
+    /// document-size check can run — which is exactly the unexplained-413 failure this design removes.
+    /// The 1.5x factor covers base64 (1.34x) plus the model/op-log/comment fields with headroom.
+    /// </summary>
+    public const long MaxRequestBodyBytes = (long)(MaxDocumentBytes * 1.5);
+
+    /// <summary>The limit as a human number for user-facing copy — one formatting site, so the message
+    /// and the enforcement can never disagree.</summary>
+    public static string MaxDocumentDisplay => $"{MaxDocumentBytes / (1024 * 1024)} MB";
+}
+
+/// <summary>
+/// FR-S07 (spaarkeai-compose-r8 task 014) — the stale-base re-anchor could not obtain the CURRENT bytes,
+/// so this save has no valid basis and is refused before any write is attempted.
+///
+/// <para>What this replaces: the re-download failure used to fall back to the LOAD-TIME baseline and let
+/// the save proceed. That branch runs only when the base has already been observed to MOVE, so the
+/// fallback bytes are by definition older than the version they were about to replace — it silently
+/// overwrote a newer document with pre-edit content and reported HTTP 200. It was the only
+/// data-destroying path in Track S.</para>
+///
+/// <para>Deleted rather than guarded, deliberately: a conditional destructive path is still a destructive
+/// path. A re-anchor with no current bytes cannot produce a correct save under any condition, so there is
+/// no version of this fallback worth keeping.</para>
+///
+/// <para>Maps to <see cref="ComposeSaveOutcome.RefusedStale"/> at the endpoint. It is NOT an HTTP 422
+/// content refusal — ADR-049 forbids reintroducing that failure mode on the save path.</para>
+/// </summary>
+public sealed class ComposeStaleBaselineUnavailableException : Exception
+{
+    public ComposeStaleBaselineUnavailableException(string documentSpeId, string reason, Exception? innerException = null)
+        : base($"Compose save: the stale-base re-anchor could not obtain the current bytes for drive-item '{documentSpeId}' ({reason}). The save was refused — nothing was written.", innerException)
+    {
+        DocumentSpeId = documentSpeId;
+        Reason = reason;
+    }
+
+    /// <summary>The drive-item whose current bytes could not be read.</summary>
+    public string DocumentSpeId { get; }
+
+    /// <summary>Bounded diagnostic discriminator — never free text from an external system (ADR-015).</summary>
+    public string Reason { get; }
+}
+
 /// <summary>Save outcome — new SPE version id + resolved <c>sprk_documentid</c>.</summary>
 public sealed record SaveComposeDocumentResult : ComposeDocumentResult
 {
+    /// <summary>
+    /// FR-S06 (task 013): the terminal outcome of this save. <c>required</c> BY DESIGN — it makes
+    /// "returned a result without saying what happened" a COMPILE error rather than a runtime check,
+    /// which is what stops a future save path from silently reintroducing the 200-with-nothing-written
+    /// defect this field exists to remove.
+    /// </summary>
+    public required ComposeSaveOutcome Outcome { get; init; }
+
     /// <summary>New SPE version id committed by this Save. Empty when the operation failed
     /// before a version was committed (e.g. the create-on-save container step failed).</summary>
     public required string VersionId { get; init; }
@@ -1072,6 +1323,19 @@ public sealed record PromoteComposeDocumentResult : ComposeDocumentResult
     /// <summary>True when the <c>sprk_document</c> row was created in this call. False
     /// when an existing row was returned (idempotent behavior on repeated Save).</summary>
     public required bool WasCreated { get; init; }
+
+    /// <summary>
+    /// FR-S09 item 7 (r8 task 016): true when the idempotent existing-row branch could not refresh the
+    /// file metadata (<c>sprk_filesize</c> / <c>sprk_filepath</c>) that this save just changed.
+    /// </summary>
+    /// <remarks>
+    /// The document itself is saved and complete — only the Dataverse columns describing it are stale, so
+    /// this is a <c>persisted-with-warnings</c> signal, never a failure. It exists because the refresh
+    /// used to not happen at all: every replace save left the row reporting the size and path of the
+    /// FIRST version, and nothing said so. A refresh that is attempted and fails must not go back to
+    /// being silent.
+    /// </remarks>
+    public bool MetadataRefreshFailed { get; init; }
 }
 
 /// <summary>

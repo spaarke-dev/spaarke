@@ -13,7 +13,13 @@ using Sprk.Bff.Api.Models.Ai.Chat;
 using Sprk.Bff.Api.Services.Ai;
 using Sprk.Bff.Api.Services.Ai.Chat;
 using Sprk.Bff.Api.Services.Ai.EventRules;
+using Sprk.Bff.Api.Services.Ai.Sessions;
 using Sprk.Bff.Api.Services.Ai.Telemetry;
+using Sprk.Bff.Api.Infrastructure.Errors;
+using Spaarke.Dataverse;
+using Spaarke.Core.Auth;
+using Sprk.Bff.Api.Infrastructure.Auth;
+using Sprk.Bff.Api.Infrastructure.Authentication;
 
 namespace Sprk.Bff.Api.Api.Ai;
 
@@ -76,13 +82,50 @@ public static class ChatDocumentEndpoints
     //   spaarke:tenant:{tenantId}:doc-upload-binary:{sessionId}:{documentId}:v1
     //   spaarke:tenant:{tenantId}:doc-upload-meta:{sessionId}:{documentId}:v1
     //   spaarke:tenant:{tenantId}:doc-upload-persist:{sessionId}:{documentId}:v1
-    private const string DocTextResource = "doc-upload-text";
-    private const string DocBinaryResource = "doc-upload-binary";
-    private const string DocMetaResource = "doc-upload-meta";
-    private const string DocPersistResource = "doc-upload-persist";
-    private const int CacheVersion = 1;
+    //
+    // spaarkeai-compose-r8 FR-B06 (task 063): the literals now live in SessionUploadCacheKeys, which
+    // SessionFileEraser also reads. An eraser composing a key one character different from the
+    // writer's removes nothing and reports success — a silent miss with no exception and no log line.
+    // One definition removes that failure mode by construction.
+    private const string DocTextResource = SessionUploadCacheKeys.TextResource;
+    private const string DocBinaryResource = SessionUploadCacheKeys.BinaryResource;
+    private const string DocMetaResource = SessionUploadCacheKeys.MetaResource;
+    private const string DocPersistResource = SessionUploadCacheKeys.PersistResource;
+    private const int CacheVersion = SessionUploadCacheKeys.Version;
 
-    private static string DocCacheId(string sessionId, string documentId) => $"{sessionId}:{documentId}";
+    /// <summary>
+    /// ADR-019 stable errorCode for "the durable byte copy could not be written" (compose-r8 FR-B01).
+    /// Distinguishes this 500 from every other 500 on the upload routes — a client seeing this knows the
+    /// file was NOT stored and a retry is meaningful, and an operator knows to check
+    /// <c>SessionFileStore:BlobEndpoint</c> + the Storage Blob Data Contributor assignment.
+    /// </summary>
+    private const string DurableStoreFailedErrorCode = "session.durable-store-failed";
+
+    /// <summary>
+    /// The single content-type resolver for a session upload (compose-r8 task 060). Used by the
+    /// upload-started telemetry event, the durable blob's <c>Content-Type</c>, and the
+    /// <see cref="ChatSessionFile"/> manifest entry — so those three can never disagree about what a
+    /// file is. Falls back to the client-declared type, then to <c>application/octet-stream</c>.
+    /// </summary>
+    private static string ResolveContentType(string extension, IFormFile file) => extension switch
+    {
+        ".pdf" => "application/pdf",
+        ".docx" => "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+        ".txt" => "text/plain",
+        ".md" => "text/markdown",
+        _ => file.ContentType ?? "application/octet-stream"
+    };
+
+    // TenantCameFromSpoofableHeader (task 060) and its two warning call sites were REMOVED by task
+    // 059. It reported "this durable write's tenant came from the header, not a claim" — a signal
+    // task 060 added because removing the fallback was out of its scope. Task 059 removed the
+    // fallback, so the condition it tested (no tenant claim in either form) now returns 400 at the
+    // top of both handlers and the warning could never fire again. Its own remark named
+    // SummarizeSessionEndpoint.cs:215-216 as "the shape to converge on"; that shape is now
+    // Infrastructure/Authentication/TenantResolution, and every endpoint uses it.
+
+    private static string DocCacheId(string sessionId, string documentId)
+        => SessionUploadCacheKeys.CacheId(sessionId, documentId);
 
     /// <summary>
     /// Registers chat document upload endpoints on the provided route builder.
@@ -96,6 +139,7 @@ public static class ChatDocumentEndpoints
 
         // POST /api/ai/chat/sessions/{sessionId}/documents — upload a document
         group.MapPost("/sessions/{sessionId}/documents", UploadDocumentAsync)
+            .AddSessionOwnershipFilter()
             .AddAiAuthorizationFilter()
             .RequireRateLimiting("ai-upload")
             .DisableAntiforgery()
@@ -118,6 +162,7 @@ public static class ChatDocumentEndpoints
 
         // POST /api/ai/chat/sessions/{sessionId}/documents/{documentId}/persist — save to SPE container
         group.MapPost("/sessions/{sessionId}/documents/{documentId}/persist", PersistDocumentAsync)
+            .AddSessionOwnershipFilter()
             .AddAiAuthorizationFilter()
             .RequireRateLimiting("ai-persist")
             .WithName("PersistChatDocument")
@@ -144,6 +189,7 @@ public static class ChatDocumentEndpoints
         // through its EXISTING upload+link+index pipeline so the drafted-from file lands in the
         // NEW matter's SPE container + an sprk_document links it — no new create-write path.
         group.MapGet("/sessions/{sessionId}/documents/{documentId}/content", GetDocumentContentAsync)
+            .AddSessionOwnershipFilter()
             .AddAiAuthorizationFilter()
             .RequireRateLimiting("ai-context")
             .WithName("GetChatDocumentContent")
@@ -158,11 +204,46 @@ public static class ChatDocumentEndpoints
             .ProducesProblem(403)
             .ProducesProblem(404);
 
+        // POST /api/ai/chat/sessions/{sessionId}/documents/from-document — ingest an EXISTING
+        // sprk_document (an archived email .eml, sprk_isemailarchive=true) as a session document
+        // (email-communication-intelligence-r2 task 064 E1c). Resolves the doc → SPE pointers
+        // (IDocumentDataverseService.GetDocumentAsync), downloads the raw .eml via the SpeFileStore
+        // facade (app-only, ADR-007 — the endpoint has HttpContext, unlike OBO-less chat tool
+        // handlers), writes the bytes to the SAME session document store the multipart upload writes,
+        // and returns {sessionId, fileId, fileName}. A launched Create*Wizard's AI-prepopulate file
+        // leg then fetches it via GET .../content and extracts the email natively (raw .eml hand-off —
+        // no server-side text materialization; the wizard's pre-fill extractor supports .eml). This is
+        // NOT the multipart upload path (which takes raw bytes + rejects .eml) — it is a by-reference
+        // ingest of an already-archived document. Placement: Documents/Chat domain, reuses existing
+        // Dataverse + SPE facades, no AI-internal injection (§10 / ADR-013).
+        group.MapPost("/sessions/{sessionId}/documents/from-document", IngestArchiveDocumentAsync)
+            .AddSessionOwnershipFilter()
+            .AddAiAuthorizationFilter()
+            .RequireRateLimiting("ai-upload")
+            .WithName("IngestChatDocumentFromArchive")
+            .WithSummary("Ingest an archived email (.eml) sprk_document as a session document")
+            .WithDescription(
+                "Takes a sprk_document id (an archived email, sprk_isemailarchive=true), resolves its SPE " +
+                "pointers, downloads the .eml, writes it into session-scoped storage, and returns " +
+                "{sessionId, fileId, fileName} so a launched wizard can pre-seed its AI-prepopulate step " +
+                "from the reconciled email (parity with the Assistant's current-file hand-off).")
+            .Accepts<IngestArchiveRequest>("application/json")
+            .Produces<IngestArchiveResponse>(200)
+            .ProducesProblem(400)
+            .ProducesProblem(401)
+            .ProducesProblem(403)
+            .ProducesProblem(404)
+            .ProducesProblem(413)
+            .ProducesProblem(422)
+            .ProducesProblem(429)
+            .ProducesProblem(500);
+
         // POST /api/ai/chat/sessions/{sessionId}/events/document-uploaded — the Event entry
         // path emission point (FR-P1-03, ai-architecture-redesign-r1 task 022). The client
         // signals batch completion here (per-file 202s above can't see batch boundaries or
         // typed-command context); the SERVER owns every routing + bounds decision.
         group.MapPost("/sessions/{sessionId}/events/document-uploaded", FireDocumentUploadedEventAsync)
+            .AddSessionOwnershipFilter()
             .AddAiAuthorizationFilter()
             .RequireRateLimiting("ai-context")
             .WithName("FireDocumentUploadedEvent")
@@ -219,6 +300,7 @@ public static class ChatDocumentEndpoints
         ITenantCache cache,
         ChatSessionManager sessionManager,
         IContextEventEmitter contextEventEmitter,
+        SessionFileBlobStore durableFileStore,
         ILoggerFactory loggerFactory)
     {
         var logger = loggerFactory.CreateLogger("Sprk.Bff.Api.Api.Ai.ChatDocumentEndpoints");
@@ -233,11 +315,8 @@ public static class ChatDocumentEndpoints
         // Microsoft.Identity.Web's JwtBearer middleware may rename `tid` to the schema URL
         // form depending on Microsoft.IdentityModel.Tokens.DefaultInboundClaimTypeMap state.
         // Check both forms to match the pattern used by ChatEndpoints.cs and
-        // SummarizeSessionEndpoint.cs (R5). Fallback to X-Tenant-Id header for
-        // server-to-server scenarios that bypass JWT.
-        var tenantId = httpContext.User.FindFirst("tid")?.Value
-            ?? httpContext.User.FindFirst("http://schemas.microsoft.com/identity/claims/tenantid")?.Value
-            ?? httpContext.Request.Headers["X-Tenant-Id"].FirstOrDefault();
+        // SummarizeSessionEndpoint.cs (R5), which is now the shape every endpoint shares.
+        var tenantId = TenantResolution.ResolveTenantId(httpContext.User);
 
         if (string.IsNullOrEmpty(tenantId))
         {
@@ -342,20 +421,18 @@ public static class ChatDocumentEndpoints
 
         // chat-routing-redesign-r1 task 074 — emit context.upload_started.
         // ADR-015 Tier 1 SAFE: deterministic IDs + contentType + numeric size only.
-        // Resolve contentType from extension (mirrors the switch later in step 10a) so the
-        // started-event carries the same MIME enum string as downstream events.
-        var startedContentType = extension switch
-        {
-            ".pdf" => "application/pdf",
-            ".docx" => "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
-            ".txt" => "text/plain",
-            ".md" => "text/markdown",
-            _ => file.ContentType ?? "application/octet-stream"
-        };
+        //
+        // ONE resolver for the whole handler (compose-r8 task 060): this value, the durable blob's
+        // Content-Type at step 9c, and the ChatSessionFile manifest entry at step 10a are the SAME
+        // string by construction. There used to be two identical copies of this switch ~140 lines
+        // apart, which is a drift waiting to happen — the telemetry, the stored blob and the manifest
+        // must not be able to disagree about what a file is.
+        var sessionFileContentType = ResolveContentType(extension, file);
+
         contextEventEmitter.UploadStarted(
             sessionId: sessionGuidForEmit,
             fileId: documentId,
-            contentType: startedContentType,
+            contentType: sessionFileContentType,
             fileSizeBytes: file.Length,
             tenantId: tenantId);
 
@@ -476,6 +553,60 @@ public static class ChatDocumentEndpoints
                 docCacheId, documentId);
         }
 
+        // 9c. spaarkeai-compose-r8 FR-B01 — durable, tenant-partitioned byte copy.
+        //
+        // WHY this is here and not later: the session's manifest (Cosmos, 90 days) and the AI-Search
+        // chunks (evicted with the 24h Redis key) already disagreed about how long a file lives. The
+        // durable copy is what closes that gap, so it is written at UPLOAD time, from the same bytes
+        // the Redis cache above received — not derived later from something that may already be gone.
+        //
+        // Failure policy, deliberately asymmetric:
+        //   - store DISABLED (no blob endpoint configured for this deployment) → proceed. Behaviour is
+        //     exactly the pre-FR-B01 world; a warning is logged by the store, once.
+        //   - store ENABLED but the write FAILS → 500. Returning 202 here would hand the user a
+        //     "stored" file that quietly dies at the Redis TTL — silently reintroducing the very
+        //     defect this task closes. The Azure SDK has already exhausted its retries by this point.
+        try
+        {
+            var durableOutcome = await durableFileStore.WriteAsync(
+                tenantId, sessionId, documentId,
+                BinaryData.FromBytes(originalBinary),
+                sessionFileContentType,
+                httpContext.RequestAborted);
+
+            if (durableOutcome == SessionFileStoreOutcome.StoreDisabled)
+            {
+                logger.LogWarning(
+                    "Durable byte store is not configured — uploaded file will not survive the session cache TTL. " +
+                    "DocumentId={DocumentId}, SessionId={SessionId}",
+                    documentId, sessionId);
+            }
+        }
+        catch (OperationCanceledException) when (httpContext.RequestAborted.IsCancellationRequested)
+        {
+            throw;
+        }
+        catch (Exception ex)
+        {
+            // ADR-015: identifiers only — never the file name or the bytes.
+            logger.LogError(ex,
+                "Durable byte-store write FAILED for DocumentId={DocumentId}, SessionId={SessionId}. " +
+                "Upload rejected rather than reporting success for a file that would not survive.",
+                documentId, sessionId);
+
+            // ADR-019: stable errorCode + correlationId so a client can tell THIS 500 from any other
+            // 500 on this route, and so the log line and the response can be joined.
+            return Results.Problem(
+                statusCode: 500,
+                title: "Internal Server Error",
+                detail: "Failed to store the document durably. Please try again.",
+                extensions: new Dictionary<string, object?>
+                {
+                    ["errorCode"] = DurableStoreFailedErrorCode,
+                    ["correlationId"] = httpContext.TraceIdentifier
+                });
+        }
+
         // 10. Also store document metadata for retrieval (filename, etc.)
         var metadata = new UploadedDocumentMetadata(documentId, filename, tokenEstimate, wasTruncated);
         try
@@ -574,15 +705,8 @@ public static class ChatDocumentEndpoints
                     .ToArray();
                 var searchDocumentIdsCsv = string.Join(",", chunkIds);
 
-                // Determine content type from filename extension (mirrors PersistDocumentAsync §5).
-                var sessionFileContentType = extension switch
-                {
-                    ".pdf" => "application/pdf",
-                    ".docx" => "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
-                    ".txt" => "text/plain",
-                    ".md" => "text/markdown",
-                    _ => file.ContentType ?? "application/octet-stream"
-                };
+                // Content type: computed once at step 9c above (hoisted by task 060) so the durable
+                // blob and this manifest entry can never record different types for the same file.
 
                 // Build the ChatSessionFile manifest entry (six fields per ChatSession.cs §134).
                 //
@@ -705,9 +829,7 @@ public static class ChatDocumentEndpoints
     {
         var logger = loggerFactory.CreateLogger("Sprk.Bff.Api.Api.Ai.ChatDocumentEndpoints");
 
-        var tenantId = httpContext.User.FindFirst("tid")?.Value
-            ?? httpContext.User.FindFirst("http://schemas.microsoft.com/identity/claims/tenantid")?.Value
-            ?? httpContext.Request.Headers["X-Tenant-Id"].FirstOrDefault();
+        var tenantId = TenantResolution.ResolveTenantId(httpContext.User);
 
         if (string.IsNullOrEmpty(tenantId))
         {
@@ -754,6 +876,9 @@ public static class ChatDocumentEndpoints
             ".docx" => "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
             ".txt" => "text/plain",
             ".md" => "text/markdown",
+            // task 064 (E1c): an ingested archived email carries the real message MIME so the
+            // wizard's fetched File is content-typed message/rfc822 (the pre-fill allow-list gate).
+            ".eml" => "message/rfc822",
             _ => "application/octet-stream"
         };
 
@@ -762,6 +887,246 @@ public static class ChatDocumentEndpoints
             documentId, filename, binaryContent.Length, sessionId);
 
         return Results.File(binaryContent, contentType, fileDownloadName: filename);
+    }
+
+    /// <summary>
+    /// Ingest an EXISTING sprk_document (an archived email .eml) as a session document
+    /// (email-communication-intelligence-r2 task 064 E1c). Reuses the GetEmlRender resolution
+    /// pattern (<see cref="IDocumentDataverseService.GetDocumentAsync"/> → SPE pointers →
+    /// <see cref="SpeFileStore.DownloadFileAsync"/>, app-only per ADR-007) to obtain the raw .eml
+    /// bytes, then writes them into the SAME session document store the multipart upload writes
+    /// (<see cref="DocBinaryResource"/> + <see cref="DocMetaResource"/> + a ChatSessionFile manifest
+    /// entry). Returns {sessionId, fileId, fileName} so a launched wizard's AI-prepopulate file leg
+    /// (GET .../content) pre-seeds from the reconciled email. Raw hand-off — no server-side text
+    /// materialization or RAG indexing (the wizard's pre-fill extractor parses the .eml natively).
+    /// ADR-015: never logs binary content.
+    /// </summary>
+    private static async Task<IResult> IngestArchiveDocumentAsync(
+        string sessionId,
+        IngestArchiveRequest? request,
+        HttpContext httpContext,
+        IDocumentDataverseService dataverseService,
+        SpeFileStore speFileStore,
+        ITenantCache cache,
+        ChatSessionManager sessionManager,
+        IAuthorizationService authorizationService,
+        SessionFileBlobStore durableFileStore,
+        ILoggerFactory loggerFactory)
+    {
+        var logger = loggerFactory.CreateLogger("Sprk.Bff.Api.Api.Ai.ChatDocumentEndpoints");
+        var ct = httpContext.RequestAborted;
+
+        // 1. Tenant identity (ADR-014) — same claim resolution as the sibling endpoints.
+        var tenantId = TenantResolution.ResolveTenantId(httpContext.User);
+
+        if (string.IsNullOrEmpty(tenantId))
+        {
+            return Results.Problem(statusCode: 401, title: "Unauthorized", detail: "Tenant identity not found in token claims");
+        }
+
+        var hasDocumentId = request is not null && !string.IsNullOrWhiteSpace(request.DocumentId);
+        var hasCommunicationId = request is not null && !string.IsNullOrWhiteSpace(request.CommunicationId);
+        if (!hasDocumentId && !hasCommunicationId)
+        {
+            return Results.Problem(statusCode: 400, title: "Bad Request", detail: "Either a 'documentId' (sprk_document id) or a 'communicationId' (sprk_communication id) is required.");
+        }
+
+        // 2. Verify session exists + capacity (mirror UploadDocumentAsync's NFR-02 cap).
+        var session = await sessionManager.GetSessionAsync(tenantId, sessionId, ct);
+        if (session == null)
+        {
+            return Results.Problem(statusCode: 404, title: "Not Found", detail: $"Chat session '{sessionId}' not found or has expired");
+        }
+
+        var existingFileCount = session.UploadedFiles?.Count ?? 0;
+        if (existingFileCount >= ChatSession.MaxUploadedFiles)
+        {
+            return Results.Problem(
+                statusCode: 400,
+                title: "Bad Request",
+                detail: $"This chat session already has {existingFileCount} uploaded files. The per-session cap is {ChatSession.MaxUploadedFiles}.",
+                extensions: new Dictionary<string, object?> { ["errorCode"] = "summarize.too-many-files" });
+        }
+
+        // 3. Resolve the archived .eml sprk_document → SPE pointers.
+        //  - documentId path (direct): resolve by id (reuses the GetEmlRender pattern), then verify it's an archive.
+        //  - communicationId path (reconciliation): the grid shows sprk_communication rows, so resolve the
+        //    communication's archived .eml document via the sprk_communication lookup (task 064 E1c).
+        DocumentEntity? document;
+        if (hasDocumentId)
+        {
+            document = await dataverseService.GetDocumentAsync(request!.DocumentId!, ct);
+            if (document == null)
+            {
+                return Results.Problem(statusCode: 404, title: "Not Found", detail: $"Document '{request.DocumentId}' does not exist.");
+            }
+            if (document.IsEmailArchive != true)
+            {
+                return Results.Problem(statusCode: 422, title: "Unprocessable Entity", detail: "The referenced document is not an email archive (.eml).");
+            }
+        }
+        else
+        {
+            if (!Guid.TryParse(request!.CommunicationId, out var communicationGuid))
+            {
+                return Results.Problem(statusCode: 400, title: "Bad Request", detail: "'communicationId' must be a valid GUID.");
+            }
+            document = await dataverseService.GetEmailArchiveByCommunicationAsync(communicationGuid, ct);
+            if (document == null)
+            {
+                return Results.Problem(statusCode: 404, title: "Not Found", detail: "No archived email (.eml) is linked to that communication.");
+            }
+        }
+        if (string.IsNullOrEmpty(document.GraphDriveId) || string.IsNullOrEmpty(document.GraphItemId))
+        {
+            return Results.Problem(statusCode: 404, title: "Not Found", detail: "The email archive has no SPE file to ingest.");
+        }
+
+        // 3a. Per-document authorization (BROKEN-OBJECT-LEVEL-AUTHZ guard). The AI-session filter gates
+        // SESSION access; it does NOT verify the caller may read THIS archive document. Because the SPE
+        // download below is app-only (bypassing the caller's SPE permissions), an unchecked caller could
+        // exfiltrate any communication's .eml by id. Mirror the sibling eml-render endpoint, which adds
+        // DocumentAuthorizationFilter("read") for exactly this reason — applied here in-handler because the
+        // resource id is resolved from the body (documentId) / lookup (communicationId), not a route value.
+        // Entra `oid`, not `sub` — this feeds AuthorizationContext.UserId below, so the same
+        // D-6 defect applied here in-handler. See CallerResolution.
+        var callerUserId = CallerResolution.ResolveObjectId(httpContext.User);
+        if (string.IsNullOrEmpty(callerUserId))
+        {
+            return Results.Problem(statusCode: 401, title: "Unauthorized", detail: "User identity not found in token claims");
+        }
+        var authz = await authorizationService.AuthorizeAsync(new AuthorizationContext
+        {
+            UserId = callerUserId,
+            ResourceId = document.Id,
+            Operation = "read",
+            CorrelationId = httpContext.TraceIdentifier,
+            UserAccessToken = TokenHelper.ExtractBearerTokenOrNull(httpContext)
+        }, ct);
+        if (!authz.IsAllowed)
+        {
+            logger.LogWarning(
+                "Archive ingest denied: caller {UserId} lacks read access to document {DocumentId} (session {SessionId}).",
+                callerUserId, document.Id, sessionId);
+            return ProblemDetailsHelper.Forbidden(authz.ReasonCode);
+        }
+
+        // 4. Download the raw .eml via the facade (app-only, ADR-007 — no GraphServiceClient injection).
+        byte[] bytes;
+        var stream = await speFileStore.DownloadFileAsync(document.GraphDriveId!, document.GraphItemId!, ct);
+        if (stream == null)
+        {
+            return Results.Problem(statusCode: 404, title: "Not Found", detail: "The email archive file could not be downloaded from storage.");
+        }
+        await using (stream)
+        {
+            using var ms = new MemoryStream();
+            await stream.CopyToAsync(ms, ct);
+            bytes = ms.ToArray();
+        }
+        if (bytes.Length == 0)
+        {
+            return Results.Problem(statusCode: 404, title: "Not Found", detail: "The email archive file is empty.");
+        }
+        if (bytes.Length > MaxFileSizeBytes)
+        {
+            var sizeMb = bytes.Length / (1024.0 * 1024.0);
+            return Results.Problem(statusCode: 413, title: "Request Entity Too Large", detail: $"Email archive ({sizeMb:F1} MB) exceeds the 50 MB limit.");
+        }
+
+        // 5. Derive a stable .eml filename (the wizard's pre-fill gate keys on the extension).
+        var baseName = !string.IsNullOrWhiteSpace(document.FileName) ? document.FileName!
+            : !string.IsNullOrWhiteSpace(document.Name) ? document.Name!
+            : "email";
+        var fileName = baseName.EndsWith(".eml", StringComparison.OrdinalIgnoreCase) ? baseName : baseName + ".eml";
+
+        // 6. Mint a session file id + write to the SAME session document store the upload path writes.
+        var fileId = Guid.NewGuid().ToString("N");
+        var docCacheId = DocCacheId(sessionId, fileId);
+
+        try
+        {
+            await cache.SetAsync(tenantId, DocBinaryResource, docCacheId, CacheVersion, bytes, UploadDocumentTtl, ct: ct);
+        }
+        catch (Exception ex)
+        {
+            logger.LogError(ex, "Failed to store ingested archive binary in Redis: CacheId={CacheId}", docCacheId);
+            return Results.Problem(statusCode: 500, title: "Internal Server Error", detail: "Failed to store the email archive. Please try again.");
+        }
+
+        // spaarkeai-compose-r8 FR-B01 — this path appends a ChatSessionFile to the SAME manifest the
+        // multipart upload does, so its bytes have the same 90-day obligation and get the same durable
+        // copy. Same failure policy as UploadDocumentAsync step 9c: disabled → proceed, enabled-but-failed → 500.
+        try
+        {
+            var durableOutcome = await durableFileStore.WriteAsync(
+                tenantId, sessionId, fileId, BinaryData.FromBytes(bytes), "message/rfc822", ct);
+
+            if (durableOutcome == SessionFileStoreOutcome.StoreDisabled)
+            {
+                logger.LogWarning(
+                    "Durable byte store is not configured — ingested archive will not survive the session cache TTL. " +
+                    "FileId={FileId}, SessionId={SessionId}",
+                    fileId, sessionId);
+            }
+        }
+        catch (OperationCanceledException) when (ct.IsCancellationRequested)
+        {
+            throw;
+        }
+        catch (Exception ex)
+        {
+            logger.LogError(ex,
+                "Durable byte-store write FAILED for ingested archive FileId={FileId}, SessionId={SessionId}.",
+                fileId, sessionId);
+            return Results.Problem(
+                statusCode: 500,
+                title: "Internal Server Error",
+                detail: "Failed to store the email archive durably. Please try again.",
+                extensions: new Dictionary<string, object?>
+                {
+                    ["errorCode"] = DurableStoreFailedErrorCode,
+                    ["correlationId"] = httpContext.TraceIdentifier
+                });
+        }
+
+        var metadata = new UploadedDocumentMetadata(fileId, fileName, 0, false);
+        try
+        {
+            await cache.SetAsync(tenantId, DocMetaResource, docCacheId, CacheVersion, metadata, UploadDocumentTtl, ct: ct);
+        }
+        catch (Exception ex)
+        {
+            // Non-fatal: the /content GET falls back to a default filename when meta is missing.
+            logger.LogWarning(ex, "Failed to cache ingested archive metadata: CacheId={CacheId}", docCacheId);
+        }
+
+        // 7. Append a ChatSessionFile manifest entry (raw .eml hand-off — no RAG index / extracted text).
+        //    Non-fatal: the binary + meta writes above already make the /content fetch work.
+        try
+        {
+            var newFile = new ChatSessionFile(
+                FileId: fileId,
+                FileName: fileName,
+                ContentType: "message/rfc822",
+                SizeBytes: bytes.Length,
+                SearchDocumentIdsCsv: string.Empty,
+                UploadedAt: DateTimeOffset.UtcNow);
+
+            var updatedFiles = (session.UploadedFiles ?? Array.Empty<ChatSessionFile>()).Append(newFile).ToList();
+            var updatedSession = session with { UploadedFiles = updatedFiles };
+            await sessionManager.UpdateSessionCacheAsync(updatedSession, ct);
+        }
+        catch (Exception ex)
+        {
+            logger.LogWarning(ex, "Session manifest update failed (non-fatal) for ingested archive FileId={FileId}, SessionId={SessionId}", fileId, sessionId);
+        }
+
+        logger.LogInformation(
+            "Ingested archive document as session document: SourceDocumentId={SourceDocumentId}, FileId={FileId}, SessionId={SessionId}, SizeBytes={SizeBytes}",
+            document.Id, fileId, sessionId, bytes.Length);
+
+        return Results.Ok(new IngestArchiveResponse(sessionId, fileId, fileName));
     }
 
     /// <summary>
@@ -797,11 +1162,8 @@ public static class ChatDocumentEndpoints
         // Microsoft.Identity.Web's JwtBearer middleware may rename `tid` to the schema URL
         // form depending on Microsoft.IdentityModel.Tokens.DefaultInboundClaimTypeMap state.
         // Check both forms to match the pattern used by ChatEndpoints.cs and
-        // SummarizeSessionEndpoint.cs (R5). Fallback to X-Tenant-Id header for
-        // server-to-server scenarios that bypass JWT.
-        var tenantId = httpContext.User.FindFirst("tid")?.Value
-            ?? httpContext.User.FindFirst("http://schemas.microsoft.com/identity/claims/tenantid")?.Value
-            ?? httpContext.Request.Headers["X-Tenant-Id"].FirstOrDefault();
+        // SummarizeSessionEndpoint.cs (R5), which is now the shape every endpoint shares.
+        var tenantId = TenantResolution.ResolveTenantId(httpContext.User);
 
         if (string.IsNullOrEmpty(tenantId))
         {
@@ -1216,15 +1578,11 @@ public static class ChatDocumentEndpoints
 
     /// <summary>Tenant claim extraction — same dual-form pattern as UploadDocumentAsync.</summary>
     private static string? GetTenantIdClaim(HttpContext httpContext) =>
-        httpContext.User.FindFirst("tid")?.Value
-        ?? httpContext.User.FindFirst("http://schemas.microsoft.com/identity/claims/tenantid")?.Value
-        ?? httpContext.Request.Headers["X-Tenant-Id"].FirstOrDefault();
+        TenantResolution.ResolveTenantId(httpContext.User);
 
     /// <summary>User oid claim extraction — same dual-form pattern as SummarizeSessionEndpoint.</summary>
     private static string? GetUserOidClaim(HttpContext httpContext) =>
-        httpContext.User.FindFirst("oid")?.Value
-        ?? httpContext.User.FindFirst("http://schemas.microsoft.com/identity/claims/objectidentifier")?.Value
-        ?? httpContext.User.FindFirst(ClaimTypes.NameIdentifier)?.Value;
+        CallerResolution.ResolveObjectId(httpContext.User);
 
     /// <summary>SSE frame writer — <c>data: {json}\n\n</c>, camelCase (chat wire format).</summary>
     private static async Task WriteEventSseAsync(
@@ -1292,6 +1650,23 @@ internal record UploadedDocumentMetadata(
     string Filename,
     int TokenEstimate,
     bool WasTruncated);
+
+/// <summary>
+/// Request body for <c>POST /api/ai/chat/sessions/{sessionId}/documents/from-document</c>
+/// (email-communication-intelligence-r2 task 064 E1c — ingest an archived email by reference).
+/// </summary>
+/// <param name="DocumentId">The sprk_document id of the archived email (.eml, sprk_isemailarchive=true). Optional when CommunicationId is supplied.</param>
+/// <param name="CommunicationId">The sprk_communication id whose archived .eml to ingest (the reconciliation path — the grid shows communications). Optional when DocumentId is supplied.</param>
+public record IngestArchiveRequest(string? DocumentId = null, string? CommunicationId = null);
+
+/// <summary>
+/// Response for the archive-ingest endpoint — the session-scoped file handle the wizard's
+/// AI-prepopulate file leg fetches (GET .../sessions/{sessionId}/documents/{fileId}/content).
+/// </summary>
+/// <param name="SessionId">The chat session the archive was ingested into.</param>
+/// <param name="FileId">The minted session document id (the fetch/content key).</param>
+/// <param name="FileName">The .eml file name surfaced to the wizard.</param>
+public record IngestArchiveResponse(string SessionId, string FileId, string FileName);
 
 /// <summary>
 /// Request body for <c>POST /api/ai/chat/sessions/{sessionId}/events/document-uploaded</c>

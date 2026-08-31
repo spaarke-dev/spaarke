@@ -110,7 +110,6 @@ public class ReferenceRetrievalTenantPinTests
         var aiSearchOptions = Options.Create(new AiSearchOptions
         {
             Endpoint = "https://test-search.search.windows.net",
-            ApiKeySecretName = "test-api-key"
             // RagReferencesIndexName defaults to "spaarke-rag-references" — matches production.
         });
 

@@ -1,6 +1,7 @@
 # Spaarke Notification & Action Spine — Architecture & Component Model
 
 > **Status**: Shipped (Layers A–D on master, `spaarke-notification-spine-r1`, 2026-07-22).
+> **⚠️ 2026-08-20 correction**: the SpaarkeAi proactive-**suggestion renderer** (tasks 051/052) was later **removed** by `spaarkeai-assistant-enhancements-r2` (FR-E1). The spine BACKEND is fully live and `suggestion` rows are still produced, but **nothing renders them** today; the one live UI consumer is `communication-arrived`. The suggestion surface is being rebuilt as **OOB Dataverse notifications** in [`spaarke-notification-spine-r2`](../../projects/spaarke-notification-spine-r2/README.md). See §Consumers + Flow B.
 > **Decision record**: [ADR-047](../adr/ADR-047-notification-action-spine.md) — the binding MUST/MUST-NOT rules. **This doc is the component model** (what is actually built, how the pieces fit, how to consume/extend); it does not restate the ADR's rules.
 > **Data model**: [`sprk_notificationoutbox`](../data-model/sprk_notificationoutbox.md).
 > **User guide**: [NOTIFICATIONS-AND-SUGGESTIONS-USER-GUIDE.md](../guides/NOTIFICATIONS-AND-SUGGESTIONS-USER-GUIDE.md).
@@ -49,7 +50,7 @@ Azure SignalR **Serverless** mode, hosted in the BFF (FR-01 spike: +0.30 MB, 0 n
 | Component | Responsibility |
 |---|---|
 | `Services/Notifications/SignalRDeliveryService.cs` | `PingUserAsync(outboxRowId, recipientSystemUserId, kind)` (virtual; outbox-before-ping structural) · `PingGroupAsync`. Signal-only. ADR-032 null-object when SignalR disabled. |
-| `Api/Notifications/NotificationsEndpoints.cs` | `POST /api/notifications/negotiate` (oid-scoped token from JWT) · `GET /api/notifications/pending[?kind=]` (oid-scoped, expiry-filtered; the poll fallback AND the re-fetch surface). |
+| `Api/Notifications/NotificationsEndpoints.cs` | `POST /api/notifications/negotiate` (oid-scoped token from JWT) · `GET /api/notifications/pending[?kind=]` (oid-scoped, expiry-filtered; the poll fallback AND the re-fetch surface) · `POST /api/notifications/{outboxRowId:guid}/dismiss` (owner-scoped; stamps `sprk_dismissed` on ONE of the caller's own pending rows; 404 on not-owned/already-dismissed — ADR-028 no cross-user writes). |
 | `Services/Identity/SystemUserIdentityResolver.cs` (`ISystemUserIdentityResolver`) | systemuserid ↔ oid (cached, fail-open) + `IsExternalAsync` (authoritative `sprk_isexternal`, fail-closed). Producers key by systemuserid; SignalR resolves oid internally. |
 | `@spaarke/notifications` (`src/client/shared/Spaarke.Notifications/`) | `NotificationsClient` (negotiate → connect → kind-route → poll fallback) · `types.ts` (wire mirrors) · `negotiate.ts` · `kindRouter.ts` · `pollFallback.ts`. The ONE client, host-agnostic. |
 
@@ -65,11 +66,16 @@ Each producer owns its judgment and writes to Layer B. Fan-out targeting derives
 | `Services/Ai/Narrators/DailyBriefingSuggestionProducer.cs` (050) | `suggestion` | Sibling of the narrator (Null peer). Grounding (ADR-039) + proactive gate (ADR-041, `SuggestionGateOptions`, deny-by-default). |
 | `Services/Communication/CommunicationFanOutTargetingService.cs` (023) | — (targeting) | Recipients from `sprk_communication`/thread + `sprk_communicationparticipant` + access filter; **fail-closes to zero** without the authoritative `sprk_isexternal` flag. |
 
-### Consumers (SpaarkeAi reference implementation)
-| Component | Responsibility |
-|---|---|
-| `src/solutions/SpaarkeAi/src/services/notificationsBootstrap.ts` | `getNotificationsClient()` singleton + `initNotificationsClient()` (registers handlers + `start()`; non-fatal). |
-| `.../components/conversation/SuggestionCard.tsx` · `useSuggestionCards.tsx` (051/052) | Renders `kind=suggestion` as a compact card (mirrors `ConsumerChips` styling, ADR-021); pre-mount expiry filter; click → re-fetch/re-ground → **open the regarding record in a modal** (`INavigationService.openRecordModal`, task 052). |
+### Consumers (current reality — corrected 2026-08-20)
+
+> **⚠️ The 051/052 suggestion renderer was removed.** `spaarkeai-assistant-enhancements-r2` (FR-E1) DELETED `useSuggestionCards.tsx` and reduced the `suggestion` handler in `notificationsBootstrap.ts` to a **log-only stub**. So the spine's `suggestion` outbox rows are **produced but not rendered** in SpaarkeAi today (Flow B). The ONE live UI consumer is `communication-arrived`. The suggestion surface is rebuilt as OOB Dataverse notifications in [`spaarke-notification-spine-r2`](../../projects/spaarke-notification-spine-r2/README.md).
+
+| Component | Kind consumed | Responsibility |
+|---|---|---|
+| `src/client/shared/Spaarke.Notifications/src/NotificationsClient.ts` | (all) | The ONE host-agnostic client — negotiate → connect → kind-route → poll fallback; per-`outboxRowId` dispatch dedup (#688). |
+| `src/solutions/SpaarkeAi/src/services/notificationsBootstrap.ts` | (all — **log-only**) | `getNotificationsClient()` singleton + `initNotificationsClient()`; registers **log-only** proof-of-wiring handlers for the three active kinds — **no UI**. Non-fatal. |
+| `src/client/shared/Spaarke.Communication.Components/.../CommunicationsWorkspaceWidget/useCommunicationArrivals.ts` (+ `CommunicationsWorkspaceWidget`) | `communication-arrived` | **The one live UI consumer** — updates the Communications-widget unread badge / list on arrival; re-fetches detail via `/pending`. |
+| `.../components/conversation/SuggestionCard.tsx` | — (none) | **Shared presentational primitive only — NOT a spine consumer.** Reused by `useRerunFullAnalysisCard.tsx` (a client-local rerun card: no outbox row, no expiry, no dismiss endpoint, no BFF). Retained after `useSuggestionCards.tsx` was deleted. |
 
 ---
 
@@ -80,11 +86,11 @@ Each producer owns its judgment and writes to Layer B. Fan-out targeting derives
 2. `CommunicationArrivedProducer` builds a `CommunicationEnvelope` (IDs + `senderDisplay` + `badgeDelta`; no body) → `CommunicationFanOutTargetingService` computes recipients from record security → **per recipient**: `OutboxService.WriteAsync` (kind=`communication-arrived`) **then** best-effort `PingUserAsync`.
 3. Client `registerHandler("communication-arrived")` fires → re-fetches via `GET /api/notifications/pending?kind=communication-arrived` → updates the unread badge / communications list.
 
-### B. Daily briefing → a proactive suggestion → open the record
-1. `DailyBriefingCompositeService.RenderAsync` collects high-priority items → `DailyBriefingSuggestionProducer.ProduceAsync`.
-2. Per item: **ground** (real EntityType + parseable id + name) then **gate** (`SuggestionGateOptions.Enabled` AND confirm-worthy). Both pass → one `SuggestionEnvelope` (carries `regardingRecordType` + `regardingRecordId`) → `OutboxService.WriteAsync` (kind=`suggestion`) → best-effort ping.
-3. SpaarkeAi `useSuggestionCards` receives the signal → re-grounds from `/pending` → renders `SuggestionCard` ("Review {Name}"), expired ones filtered out.
-4. User clicks → the hook **re-fetches** to confirm the row is still pending (freshness + access re-check) → **opens the regarding record in a modal** (`openRecordModal`, Layout 1, `target: 2`, 85% × 85%). Stale/revoked → a stable local line, nothing opens.
+### B. Daily briefing → a proactive suggestion (⚠️ produced, currently unrendered)
+1. `DailyBriefingCompositeService.RenderAsync` collects high-priority items → `DailyBriefingSuggestionProducer.ProduceAsync`. **This runs ONLY on the interactive `POST /api/ai/daily-briefing/render`** — if the user never opens the briefing, nothing is produced (the gap `spaarke-notification-spine-r2` fixes with a scheduled job).
+2. Per item: **ground** (real EntityType + parseable id + name) then **gate** (`SuggestionGateOptions.Enabled` AND confirm-worthy). Both pass → one `SuggestionEnvelope` (carries `regardingRecordType` + `regardingRecordId`) → `OutboxService.WriteAsync` (kind=`suggestion`, **idempotent** per `(owner, kind, regardingRecordId)` — UAT 2026-07-22) → best-effort ping.
+3. **⚠️ No renderer today.** The SpaarkeAi renderer (`useSuggestionCards`) that formerly displayed these rows was **removed** by `spaarkeai-assistant-enhancements-r2` (FR-E1); the `suggestion` handler is now log-only. So these outbox rows persist and are pollable via `/pending`, but **nothing surfaces them to the user**. The producer is left in place (harmless; re-gating it was out of r2's scope).
+4. **Planned replacement** ([`spaarke-notification-spine-r2`](../../projects/spaarke-notification-spine-r2/README.md)): a **scheduled job** produces the same grounded+gated items into **OOB Dataverse notifications** (the native bell), deduped against the outbox on a **7-day** re-notify window, whose action opens the regarding record in a **modal** (`appnotification` action `navigationTarget:"dialog"` + same-origin `?pagetype=entityrecord` URL). This decouples production from the interactive render and restores a visible, dismiss-durable surface.
 
 ---
 
@@ -115,5 +121,5 @@ Each producer owns its judgment and writes to Layer B. Fan-out targeting derives
 | Delivery + endpoints | `Services/Notifications/SignalRDeliveryService.cs` · `Api/Notifications/NotificationsEndpoints.cs` |
 | Client library | `src/client/shared/Spaarke.Notifications/src/NotificationsClient.ts` |
 | Action seam | `Services/Ai/PublicContracts/IActionSeam.cs` |
-| Reference consumer | `src/solutions/SpaarkeAi/src/components/conversation/useSuggestionCards.tsx` |
+| Reference consumer (live) | `src/client/shared/Spaarke.Communication.Components/.../CommunicationsWorkspaceWidget/useCommunicationArrivals.ts` (`communication-arrived`) · client wiring: `src/solutions/SpaarkeAi/src/services/notificationsBootstrap.ts` (log-only) |
 | Cross-project consumption | [`projects/spaarke-notification-spine-r1/notes/handoffs/CROSS-PROJECT-CONSUMPTION-REPORT.md`](../../projects/spaarke-notification-spine-r1/notes/handoffs/CROSS-PROJECT-CONSUMPTION-REPORT.md) |

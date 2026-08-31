@@ -24,10 +24,14 @@ public class DocumentIntelligenceOptionsValidator : IValidateOptions<DocumentInt
             failures.Add("DocumentIntelligence:OpenAiEndpoint is required when DocumentIntelligence:Enabled=true");
         }
 
-        if (string.IsNullOrWhiteSpace(options.OpenAiKey))
-        {
-            failures.Add("DocumentIntelligence:OpenAiKey is required when DocumentIntelligence:Enabled=true");
-        }
+        // auth-v4 task 054 (FR-E5): OpenAiKey is NO LONGER REQUIRED. OpenAiClient now falls forward
+        // to managed identity when it is absent, so demanding it here would have blocked the very
+        // migration this project exists to perform - startup would fail before the Entra path could
+        // ever run. The endpoint stays required because nothing can infer it.
+        //
+        // The key is still the working choice for Azure OpenAI today (ADR-028 exception E-2,
+        // re-affirmed 2026-08-21 by task 052); this only stops the VALIDATOR from making it
+        // mandatory.
 
         // Validate ranges (these still use DataAnnotations but good to double-check)
         if (options.MaxOutputTokens < 100 || options.MaxOutputTokens > 4000)
@@ -53,10 +57,12 @@ public class DocumentIntelligenceOptionsValidator : IValidateOptions<DocumentInt
                 failures.Add("DocumentIntelligence:AiSearchEndpoint is required when DocumentIntelligence:RecordMatchingEnabled=true");
             }
 
-            if (string.IsNullOrWhiteSpace(options.AiSearchKey))
-            {
-                failures.Add("DocumentIntelligence:AiSearchKey is required when DocumentIntelligence:RecordMatchingEnabled=true");
-            }
+            // auth-v4 task 054 (FR-E5): AiSearchKey is NO LONGER REQUIRED. Task 053 migrated every
+            // AI Search consumer onto SearchClientFactory, where an absent key selects Entra. Leaving
+            // this check would have re-created 053's own defect one layer up: 053 fixed the DI block
+            // that silently un-registered six services when the key went, but clearing the key would
+            // STILL have failed startup here, at options validation, with a message pointing at the
+            // key rather than at the migration. Endpoint + index name stay required.
 
             if (string.IsNullOrWhiteSpace(options.AiSearchIndexName))
             {

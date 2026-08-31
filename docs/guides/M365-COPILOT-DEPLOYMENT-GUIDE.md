@@ -1,5 +1,31 @@
 # M365 Copilot Integration Deployment Guide
 
+> ## 🔴 Secret-free BFF identity — read before following any credential step on this page
+>
+> **2026-08-24, `spaarke-auth-v4-dataverse-MI` task 033 (ADR-028 **A4**; exception **E-3 CLOSED**).**
+> The BFF authenticates as a confidential client — **including on the OBO / delegated path** — using a
+> **federated credential issued to its user-assigned managed identity**. It holds **no client secret**.
+>
+> | Removed | |
+> |---|---|
+> | App settings | `API_CLIENT_SECRET`, `AzureAd__ClientSecret`, `Dataverse__ClientSecret`, `AgentToken__ClientSecret` |
+> | Key Vault | `BFF-API-ClientSecret`, `bff-api-client-secret`, and the orphaned `Graph-API-ClientSecret` |
+>
+> Set instead: `Graph__Credentials__Order__0=ManagedIdentityFederated` and
+> `Graph__Credentials__RequireSecretFreeIdentity=true`.
+>
+> **Do not re-create the secret.** A secret listed *beneath* MI-FIC in the order is worse than no migration:
+> a broken federated credential would fall through to it silently while every health signal stayed green.
+> With `RequireSecretFreeIdentity=true` the app **refuses to start** outside Development if `ClientSecret`
+> returns to the order.
+>
+> Any instruction below that tells you to create, store, reference or rotate a BFF client secret is
+> **superseded**. Still valid: ADR-028 **E-1** per-customer SPE owning-app secrets, and
+> `PowerBi:ClientSecret` while task 042 is deferred.
+> Canonical: [`ADR-028`](../../.claude/adr/ADR-028-spaarke-auth-architecture.md) ·
+> [`auth-deployment-setup.md`](auth-deployment-setup.md)
+
+
 > **Last Updated**: March 26, 2026
 >
 > **Project**: Spaarke M365 Copilot Integration
@@ -20,7 +46,7 @@ Before starting deployment, ensure the following are in place:
 | **M365 tenant** | With Microsoft 365 Copilot licenses assigned to target users |
 | **Azure CLI** | Installed and authenticated (`az login`) |
 | **Power Platform environment** | With Copilot enabled in admin center settings |
-| **.NET 8 SDK** | For building the BFF API (`dotnet --version` should return 8.x) |
+| **.NET 10 SDK** | For building the BFF API (`dotnet --version` should return 10.x) |
 | **Node.js 18+** | Required if using Teams Agents Toolkit for local development |
 | **Entra ID permissions** | Ability to create app registrations and grant admin consent |
 | **Teams Admin access** | To upload custom apps to the org catalog |

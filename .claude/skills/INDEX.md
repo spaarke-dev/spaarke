@@ -67,6 +67,7 @@
 | [dev-cleanup](dev-cleanup/SKILL.md) | Clean up dev environment caches (Azure CLI, NuGet, npm, Git) | No | `/dev-cleanup`, "clean up dev", "fix auth issues", "clear caches" |
 | [merge-to-master](merge-to-master/SKILL.md) | Merge completed branch work into master with safety checks | No | `/merge-to-master`, "merge to master", "check unmerged branches", "reconcile branches" |
 | [worktree-sync](worktree-sync/SKILL.md) | Guarantee worktree is fully synchronized — committed, pushed, merged, updated | No | `/worktree-sync`, "sync worktree", "full sync", "update worktree from master" |
+| [worktree-net10-migrate](worktree-net10-migrate/SKILL.md) | Migrate a worktree onto the .NET 10 baseline (SDK check → merge master → net8-clobber guard → build) | No | "migrate worktree to net10", "update to .NET 10", "bring this branch to net10", "net10 migrate" |
 | [deploy-new-release](deploy-new-release/SKILL.md) | Interactive production release — pre-flight, env selection, deploy, validate, tag | No | `/deploy-new-release`, "deploy release", "new release", "production release" |
 | [jps-action-create](jps-action-create/SKILL.md) | Create a new JPS definition for an Analysis Action | No | "create JPS action", "new JPS definition", "new playbook action" |
 | [jps-playbook-audit](jps-playbook-audit/SKILL.md) | Audit existing playbooks against current scope catalog and standards | No | "audit playbooks", "review playbooks", "check playbook compliance" |
@@ -167,6 +168,7 @@
 - **dev-cleanup** - Clean up local dev environment caches (Azure CLI, NuGet, npm, Git credentials)
 - **merge-to-master** - Merge completed branch work into master with safety checks and build verification
 - **worktree-sync** - Guarantee worktree is fully synchronized — committed, pushed, merged to master, updated from master
+- **worktree-net10-migrate** - Migrate a worktree onto the .NET 10 baseline (SDK check → merge master → net8-clobber guard → build); wraps `scripts/Update-WorktreeToNet10.ps1`
 
 ## Skill Flow
 

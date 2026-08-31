@@ -1,3 +1,4 @@
+using Sprk.Bff.Api.Infrastructure.Authentication;
 using System.Security.Claims;
 using System.Text;
 using Microsoft.Extensions.AI;
@@ -124,8 +125,22 @@ public static class AgentEndpoints
             return Results.Problem(
                 statusCode: 400,
                 title: "Bad Request",
-                detail: "Tenant ID not found in token claims (tid) or X-Tenant-Id header.",
+                detail: "Tenant ID not found in token claims (tid).",
                 type: "https://tools.ietf.org/html/rfc7231#section-6.5.1");
+        }
+
+        // Issue #863 — the owner of any session this handler mints. Deliberately NOT `userId`
+        // above: ExtractUserId substitutes the literal "unknown" when the oid is absent, which is
+        // fine for a log line and catastrophic as an ownership key — every unidentified caller
+        // would own, and therefore share, the same bucket of sessions.
+        var ownerOid = CallerResolution.ResolveObjectId(httpContext.User);
+        if (string.IsNullOrEmpty(ownerOid))
+        {
+            return Results.Problem(
+                statusCode: 401,
+                title: "Unauthorized",
+                detail: "User identity not found",
+                type: "https://tools.ietf.org/html/rfc7235#section-3.1");
         }
 
         logger.LogInformation(
@@ -141,6 +156,22 @@ public static class AgentEndpoints
             {
                 // Attempt to resume existing session
                 var existingSession = await sessionManager.GetSessionAsync(tenantId, request.ConversationReference, cancellationToken);
+
+                // Issue #863 — a ConversationReference is caller-supplied, so resuming on it is an
+                // access to an existing session and takes the ownership test. A reference to
+                // someone else's session (or to a pre-#863 unowned one) is treated exactly like a
+                // stale reference: mint a fresh session. The agent keeps working; it just never
+                // continues a conversation that is not the caller's.
+                if (existingSession is not null
+                    && !string.Equals(existingSession.OwnerOid, ownerOid, StringComparison.Ordinal))
+                {
+                    logger.LogWarning(
+                        "[AGENT] ConversationReference {SessionId} is not owned by the caller " +
+                        "(tenant={TenantId}) — minting a new session instead of resuming it.",
+                        request.ConversationReference, tenantId);
+                    existingSession = null;
+                }
+
                 if (existingSession is not null)
                 {
                     sessionId = existingSession.SessionId;
@@ -150,6 +181,7 @@ public static class AgentEndpoints
                     // ConversationReference no longer maps to a valid session — create a new one
                     var newSession = await sessionManager.CreateSessionAsync(
                         tenantId,
+                        ownerOid,
                         request.DocumentId?.ToString(),
                         playbookId: null,
                         hostContext: null,
@@ -162,6 +194,7 @@ public static class AgentEndpoints
                 // First message — create a new session
                 var newSession = await sessionManager.CreateSessionAsync(
                     tenantId,
+                    ownerOid,
                     request.DocumentId?.ToString(),
                     playbookId: null,
                     hostContext: null,
@@ -284,7 +317,7 @@ public static class AgentEndpoints
                             {
                                 PlaybookId = pb.Id,
                                 Name = pb.Name,
-                                Description = pb.Description
+                                Description = pb.Description ?? string.Empty
                             });
                         }
                     }
@@ -307,7 +340,7 @@ public static class AgentEndpoints
                         {
                             PlaybookId = pb.Id,
                             Name = pb.Name,
-                            Description = pb.Description
+                            Description = pb.Description ?? string.Empty
                         });
                     }
                 }
@@ -496,9 +529,7 @@ public static class AgentEndpoints
     /// </summary>
     private static string ExtractUserId(HttpContext httpContext)
     {
-        return httpContext.User.FindFirst("oid")?.Value
-            ?? httpContext.User.FindFirst("http://schemas.microsoft.com/identity/claims/objectidentifier")?.Value
-            ?? httpContext.User.FindFirst(ClaimTypes.NameIdentifier)?.Value
+        return CallerResolution.ResolveObjectId(httpContext.User)
             ?? "unknown";
     }
 
@@ -508,24 +539,18 @@ public static class AgentEndpoints
     /// </summary>
     private static Guid? ExtractUserGuid(HttpContext httpContext)
     {
-        var oid = httpContext.User.FindFirst("oid")?.Value
-            ?? httpContext.User.FindFirst("http://schemas.microsoft.com/identity/claims/objectidentifier")?.Value;
+        var oid = CallerResolution.ResolveObjectId(httpContext.User);
         return Guid.TryParse(oid, out var userId) ? userId : null;
     }
 
     /// <summary>
-    /// Extracts the tenant ID from the JWT 'tid' claim or X-Tenant-Id header fallback.
+    /// Extracts the tenant ID from the JWT 'tid' claim (ADR-014).
+    /// Tenant comes from the caller's authenticated principal and from nothing else (task 059 — see Infrastructure/Authentication/TenantResolution).
     /// Mirrors the pattern used in ChatEndpoints.
     /// </summary>
     private static string? ExtractTenantId(HttpContext httpContext)
     {
-        var tenantId = httpContext.User.FindFirst("tid")?.Value
-            ?? httpContext.User.FindFirst("http://schemas.microsoft.com/identity/claims/tenantid")?.Value;
-
-        if (string.IsNullOrEmpty(tenantId))
-        {
-            tenantId = httpContext.Request.Headers["X-Tenant-Id"].FirstOrDefault();
-        }
+        var tenantId = TenantResolution.ResolveTenantId(httpContext.User);
 
         return tenantId;
     }

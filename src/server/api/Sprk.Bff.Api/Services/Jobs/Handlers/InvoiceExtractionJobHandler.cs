@@ -6,6 +6,7 @@ using Spaarke.Dataverse;
 using Sprk.Bff.Api.Configuration;
 using Sprk.Bff.Api.Infrastructure.Graph;
 using Sprk.Bff.Api.Services.Ai;
+using Sprk.Bff.Api.Services.Ai.PublicContracts;
 using Sprk.Bff.Api.Services.Finance;
 using Sprk.Bff.Api.Services.Finance.Models;
 using Sprk.Bff.Api.Services.Finance.Tools;
@@ -380,8 +381,19 @@ public class InvoiceExtractionJobHandler : IJobHandler
 
     /// <summary>
     /// Generates a human-readable AI summary from extracted invoice facts.
-    /// Maximum 5000 characters to fit in sprk_aisummary field.
     /// </summary>
+    /// <remarks>
+    /// The 5000-character cap sizes the string for a Dataverse Memo column, but nothing
+    /// persists it today. The result is published only as the extraction.aiSummary context
+    /// variable (see line 236). Its one declared destination lives in the seed reference file
+    /// scripts/seed-data/playbooks.json, which maps it to sprk_aisummary on sprk_invoice - a
+    /// column that does not exist (sprk_invoice carries sprk_recordsummary). That mapping is
+    /// unreachable in any case: PlaybookService.GetPlaybookAsync never selects sprk_configjson,
+    /// so OutputOrchestratorService.ParseOutputMapping short-circuits to null for every playbook.
+    /// Do not assume this value reaches a record. Traced and verified 2026-08-25 by
+    /// record-header-and-notepad-r2 task 041; the plumbing gap is tracked separately in
+    /// projects/record-header-and-notepad-r2/notes/issues/ISSUE-output-mapping-unreachable.md.
+    /// </remarks>
     private static string GenerateAiSummary(ExtractionResult extractionResult)
     {
         if (extractionResult == null || extractionResult.Header == null)

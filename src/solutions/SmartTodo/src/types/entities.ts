@@ -57,6 +57,8 @@ export interface ITodo {
   /** 0-100 native effort score on sprk_todo. */
   sprk_effortscore?: number;
   sprk_duedate?: string;
+  /** Dataverse formatted value of sprk_duedate (locale short date, e.g. "8/18/2026") — mapped for date text-search (UAT 2026-08-17). */
+  dueDateFormatted?: string;
   sprk_completedon?: string;
   /** Choice: 100000000=Today, 100000001=Tomorrow, 100000002=Future. */
   sprk_todocolumn?: number;
@@ -74,6 +76,15 @@ export interface ITodo {
   _ownerid_value?: string;
   createdon: string;
   modifiedon: string;
+  // DEF-11 Part 3 (2026-07-04, record-header-and-notepad-r1) — regarding-record
+  // resolver text fields (ADR-024), always selected via
+  // `queryHelpers.ts TODO_SELECT_FIELDS` and consumed by
+  // `SmartToDo.tsx`/`utils/todoSearchUtils.ts`'s search predicate. Type gap
+  // closed here (smart-todo-r5 UAT 2026-08-17) — the fields were already
+  // read off `ITodo` items at runtime without being declared on this
+  // interface (a pre-existing `tsc` error this fix removes).
+  sprk_regardingrecordname?: string;
+  sprk_regardingrecordnumber?: string;
 }
 
 /**

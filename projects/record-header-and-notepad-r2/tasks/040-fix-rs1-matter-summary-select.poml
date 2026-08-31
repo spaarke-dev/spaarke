@@ -1,0 +1,187 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="040" project="record-header-and-notepad-r2">
+  <metadata>
+    <title>RS-1 — Fix live Matter header HTTP 400: retarget $select from deleted sprk_mattersummary to RECORDSUMMARY_FIELD</title>
+    <phase>4 Schema-drift remediation</phase>
+    <gate>startable</gate>
+    <status>completed</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Modifies code files (.tsx) and tests; tags include pcf. TEST-MODIFYING override also applies (tags include testing) — code-review + adr-check at Step 9.5 run unconditionally.</rigor-reason>
+    <model-tier>opus</model-tier>
+    <model-tier-reason>Live production breakage remediation plus a release-judgment call (ship v1.0.21 hotfix now vs wait for R2) whose outcome gates task 002's parity baseline. This is not routine patterned work.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <parallel-reason>Touches only MatterHeader control + test files, which no Phase 0-3 task modifies. Independent of all other tasks; can run alongside anything. Scheduled EARLY because the breakage is live.</parallel-reason>
+    <deps>none</deps>
+    <tags>pcf, react, typescript, frontend, testing</tags>
+    <estimated-effort>2-4 hours</estimated-effort>
+  </metadata>
+
+  <prompt>
+    The shipped MatterHeaderPcf v1.0.20 is broken in production RIGHT NOW: MatterHeaderView.tsx line 83 includes
+    'sprk_mattersummary' in the useRecordFieldValues $select, but that column was DELETED during the 2026-08-25
+    summary standardization, so Dataverse returns HTTP 400 and the ENTIRE Matter header fails to load on every
+    Matter record — not just the sparkle. Fix the reference to point at the existing shared constant
+    RECORDSUMMARY_FIELD ('sprk_recordsummary'), update the Matter-fixtured tests, and make an explicit,
+    owner-confirmed call on whether to ship a v1.0.21 hotfix now or wait for R2's replacement control.
+  </prompt>
+
+  <role>
+    SPAARKE platform developer. Expert in PCF controls, React 17 platform libraries, and Dataverse Web API $select
+    semantics. Follow ADRs strictly.
+  </role>
+
+  <goal>
+    (1) No file under src/client/pcf/MatterHeader/control/ or src/client/pcf/MatterHeader/__tests__/ references
+    sprk_mattersummary; the summary field is referenced via the shared constant RECORDSUMMARY_FIELD.
+    (2) All MatterHeader tests pass and npm run build:prod is green.
+    (3) An explicit hotfix-vs-wait decision is recorded with owner confirmation (see escalation), and if the hotfix
+    path is chosen, v1.0.21 is version-bumped in all 5 locations and deployed.
+  </goal>
+
+  <context>
+    <background>
+      FR-23 / RS-1 (spec.md) and design.md §9 "Two live breakages caused by the column deletions". The owner
+      standardized all six rollout entities on sprk_recordsummary (2026-08-25) and deleted sprk_mattersummary /
+      sprk_aisummary. The shared library has carried RECORDSUMMARY_FIELD = 'sprk_recordsummary' since R1
+      (toolbarLaunchDefaults.ts:90, re-exported from the hooks barrel). R2 fixes this by construction when the new
+      RecordHeader control replaces MatterHeaderPcf (Phase 5, task 080), but that is weeks out; until then Matter's
+      header 400s on every record. CROSS-REFERENCE: task 002 (parity baseline capture) cannot capture a rendering
+      baseline while the DEPLOYED header fails to load — the hotfix decision directly gates whether 002 can
+      screenshot a working v1.0.20-equivalent header. Weigh that in the recommendation.
+    </background>
+    <relevant-files>
+      <file role="modify">src/client/pcf/MatterHeader/control/MatterHeaderView.tsx</file>
+      <file role="modify">src/client/pcf/MatterHeader/__tests__/MatterHeaderView.test.tsx</file>
+      <file role="modify">src/client/pcf/MatterHeader/control/ControlManifest.Input.xml</file>
+      <file role="canonical-reference">src/client/shared/Spaarke.UI.Components/src/hooks/toolbarLaunchDefaults.ts</file>
+    </relevant-files>
+    <dependencies/>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-020">IF (and only if) the v1.0.21 hotfix path is chosen: the version MUST be bumped in all 5 locations (NOT 4 — the old guide's count is wrong) per docs/guides/PCF-DEPLOYMENT-GUIDE.md before deployment.</constraint>
+    <constraint source="project">Every import added to MatterHeaderView.tsx MUST use the deep path (e.g. '@spaarke/ui-components/dist/hooks') — the bundle-optimization triad (featureconfig.json + webpack.config.js + deep-path imports) is untouchable (NFR-08). Do NOT "clean up" existing deep paths.</constraint>
+    <constraint source="project">Scope is the sprk_mattersummary reference set ONLY: the FIELDS $select entry (line 83), the summary read (lines 273/276), the stale file-header comments (lines 28-41), the manifest description-key, and the tests. Do NOT change any other FIELDS entry, the lookup machinery, launch contracts (NFR-07), or the sparkle refresh icon (stays unwired — DEF-01).</constraint>
+    <constraint source="project">The ControlManifest.Input.xml description-key MUST contain no apostrophes (pac solution import fails with noAposStringType).</constraint>
+    <constraint source="project">Files under src/client/pcf/MatterHeader/Solution/ are build artifacts — do NOT hand-edit them; they regenerate on the next pack (hotfix path) or stay stale at v1.0.20 (wait path). The acceptance grep excludes them.</constraint>
+    <constraint source="ADR-038">Update the existing tests in place; do NOT add DI-registration-style or scaffolding-class tests. The v1.0.20 field-wiring regression guard test stays, retargeted to sprk_recordsummary.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>PCF control maintenance + hotfix release</topic>
+    <files>
+      <file>.claude/constraints/pcf.md</file>
+      <file>.claude/adr/ADR-020-versioning.md</file>
+      <file>src/client/pcf/CLAUDE.md</file>
+      <file>docs/guides/PCF-DEPLOYMENT-GUIDE.md</file>
+      <file>projects/record-header-and-notepad-r2/spec.md</file>
+      <file>projects/record-header-and-notepad-r2/design.md</file>
+      <file>.claude/skills/ui-test/SKILL.md</file>
+    </files>
+    <patterns>
+      <pattern name="pcf-build-scaffold" location=".claude/patterns/pcf/pcf-build-scaffold.md">10 build/runtime gotchas from R1 UAT — read before any build work.</pattern>
+      <pattern name="shared summary constant" location="src/client/shared/Spaarke.UI.Components/src/hooks/toolbarLaunchDefaults.ts">RECORDSUMMARY_FIELD = 'sprk_recordsummary' at line 90; re-exported from src/hooks/index.ts (line 61) so it is importable from '@spaarke/ui-components/dist/hooks'.</pattern>
+    </patterns>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="0">Declare rigor level (FULL) and load knowledge files per task-execute Step 0.5.</step>
+    <step order="1">Read MatterHeaderView.tsx (whole file) and toolbarLaunchDefaults.ts lines 80-91. Confirm the breakage: 'sprk_mattersummary' at line 83 in FIELDS, summary read at lines 273/276, stale comments at lines 28-41 describing the v1.0.20 wiring, and the manifest description-key mentioning sprk_mattersummary.</step>
+    <step order="2">Add RECORDSUMMARY_FIELD to the existing '@spaarke/ui-components/dist/hooks' import in MatterHeaderView.tsx. Replace the 'sprk_mattersummary' FIELDS entry with RECORDSUMMARY_FIELD; retarget the summary read (values?.sprk_mattersummary at 273/276) to the same constant; rewrite the stale comments so they describe the sprk_recordsummary standardization (cite design §9), not the v1.0.20 sprk_mattersummary fix.</step>
+    <step order="3">Update ControlManifest.Input.xml description-key: remove the "(v1.0.20 — ... sprk_mattersummary instead of sprk_recordsummary)" clause. No apostrophes.</step>
+    <step order="4">Update __tests__/MatterHeaderView.test.tsx: fixture key at line ~190 (sprk_mattersummary → sprk_recordsummary), the $select assertion at ~247, the popover body + empty-state tests at ~298-313, and the file-header comment at lines 9-12. The regression-guard intent is preserved: the sparkle reads the summary field the $select fetches.</step>
+    <step order="5">Run the MatterHeader test suite and npm run build:prod (NOT npm run build). Verify green and bundle still well under 250 KB.</step>
+    <step order="6">Make the hotfix call: write a short decision note (projects/record-header-and-notepad-r2/notes/rs1-hotfix-decision.md) laying out v1.0.21-now vs wait-for-R2 — factors: header is broken on EVERY Matter record today; R2 replacement is weeks out; task 002's parity baseline needs a rendering deployed header. State a recommendation, then FIRE THE ESCALATION below for owner confirmation. Do not deploy without it.</step>
+    <step order="7">If the owner confirms the hotfix: bump to v1.0.21 in all 5 locations per ADR-020 + PCF-DEPLOYMENT-GUIDE.md, deploy via the pcf-deploy skill, and run the ui-tests below. If the owner chooses wait-for-R2: record the rationale and explicitly flag in the notes + TASK-INDEX that task 002 must capture its baseline from the repaired local/harness build or after R2 binding, not from the broken deployed control.</step>
+    <step order="8">Update TASK-INDEX.md: set this task's status to ✅.</step>
+    <step order="9">Document any deviation in projects/record-header-and-notepad-r2/notes/.</step>
+  </steps>
+
+  <escalation>
+    <trigger>The hotfix-vs-wait call is an owner release decision. Before deploying (or finalizing wait-for-R2), STOP and escalate per root CLAUDE.md §6 with the 🔔 format: situation, both options, recommendation, and the task-002 baseline impact. Do NOT deploy a hotfix or close the decision without owner input.</trigger>
+    <trigger>If sprk_recordsummary is also missing from sprk_matter metadata (i.e. the $select still 400s after the fix), STOP and escalate — the schema ground truth diverges from the 2026-08-25 verification and the standardization premise is broken.</trigger>
+  </escalation>
+
+  <ui-tests>
+    <test name="Matter header loads (hotfix path only — record N/A in notes if wait-for-R2 is chosen)">
+      <url>https://{org}.crm.dynamics.com/main.aspx?appid={app-id}&amp;pagetype=entityrecord&amp;etn=sprk_matter&amp;id={record-id}</url>
+      <steps>
+        <step>Navigate to any Matter record's main form</step>
+        <step>Verify the header control renders its 5 fields (no blank control, no perpetual skeleton)</step>
+        <step>Open dev tools Network tab; verify the sprk_matters retrieve returns 200, not 400</step>
+        <step>Click the AI-summary sparkle; verify the popover renders (summary body or the empty state)</step>
+        <step>Verify the footer shows v1.0.21</step>
+        <step>Check console for JavaScript errors</step>
+      </steps>
+      <expected>Header renders fully; record retrieve is HTTP 200; sparkle popover opens; footer shows 1.0.21; no console errors.</expected>
+    </test>
+    <test name="Dark Mode Compliance (ADR-021)">
+      <steps>
+        <step>Toggle dark mode in D365 settings</step>
+        <step>Verify header background and text colors adapt (no white-on-white / black-on-black)</step>
+      </steps>
+      <expected>Unchanged from v1.0.20 — this task alters no styling; any regression indicates an unintended change.</expected>
+    </test>
+  </ui-tests>
+
+  <tools>
+    <tool name="npm">Test + build PCF (npm run build:prod, never npm run build)</tool>
+    <tool name="pac">Solution pack/import via pcf-deploy skill (hotfix path only)</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/client/pcf/MatterHeader/control/MatterHeaderView.tsx</output>
+    <output type="code">src/client/pcf/MatterHeader/control/ControlManifest.Input.xml</output>
+    <output type="test">src/client/pcf/MatterHeader/__tests__/MatterHeaderView.test.tsx</output>
+    <output type="docs">projects/record-header-and-notepad-r2/notes/rs1-hotfix-decision.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Grep for sprk_mattersummary across src/client/pcf/MatterHeader/control/ and src/client/pcf/MatterHeader/__tests__/ returns zero matches (code, comments, and manifest strings all clean; Solution/ build artifacts excluded).</criterion>
+    <criterion testable="true">MatterHeaderView.tsx references the summary field ONLY via RECORDSUMMARY_FIELD imported from '@spaarke/ui-components/dist/hooks' — no new 'sprk_recordsummary' string literal in the view.</criterion>
+    <criterion testable="true">All MatterHeader tests pass, including the retargeted field-wiring regression guard and the null-summary empty-state test; npm run build:prod exits 0.</criterion>
+    <criterion testable="true">The FIELDS array still contains exactly 6 entries and the other 5 are byte-identical; launch contracts (regardingEntity/regardingId, action=openTodos&amp;regardingType=…&amp;regardingId=…) are untouched.</criterion>
+    <criterion testable="true">notes/rs1-hotfix-decision.md exists, records the explicit hotfix-vs-wait decision WITH owner confirmation obtained via the §6 escalation, and states the task-002 baseline consequence of the chosen path.</criterion>
+    <criterion testable="true">Hotfix path only: version reads 1.0.21 in all 5 ADR-020 locations, the control is deployed, and the "Matter header loads" ui-test passes. Wait path only: no version bump and no deployment occurred; repo changes are code/test/manifest-source only.</criterion>
+    <criterion testable="true">Negative: no change under src/client/pcf/MatterHeader/Solution/ was hand-authored (any diff there is build output from an approved hotfix pack only).</criterion>
+  </acceptance-criteria>
+
+  <completion>
+    Completed 2026-08-25. Owner chose **Option A (ship v1.0.21)** at the escalation — recorded in
+    notes/rs1-hotfix-decision.md with rationale. Source, tests, and manifest now reference the summary field
+    only via RECORDSUMMARY_FIELD. Version bumped in all 5 ADR-020 locations; solution packed to
+    Solution/bin/MatterHeaderPcf_v1.0.21.0.zip (18,179 bytes; bundle 64,422 bytes) and handed to the owner,
+    who imports manually — so the two ui-tests are the OWNER's post-import verification, not run here.
+
+    Two out-of-scope items surfaced and are flagged rather than absorbed silently:
+    (1) `npm run build:prod` was ALREADY RED at HEAD, unrelated to RS-1 — the PCF build type-checked
+        __tests__/ and hit TS2347 on the jest.mock factories' untyped `require('react')`. Verified
+        empirically by rebuilding with the original test file restored. Fixed via a tsconfig `exclude`,
+        mirroring RegardingResolver + VisualHost (the two sibling PCFs with the same __tests__ layout).
+        ts-jest uses its own tsconfig.test.json, so tests still type-check.
+    (2) package-lock.json resynced (shared-lib metadata 2.3.0 → 2.4.0) as a byproduct of `npm install`
+        in a fresh worktree. No behavioural effect.
+
+    Non-obvious detail for anyone touching this test file later: MatterHeaderView now IMPORTS
+    RECORDSUMMARY_FIELD from the mocked '@spaarke/ui-components/dist/hooks' subpath, so the jest.mock
+    factory must export it. Without that the $select silently carries `undefined` — green tests, dead control.
+
+    Quality gates: code-review 0 Critical / 0 AI code smells / ESLint clean; adr-check 0 violations across
+    ADR-006/012/020/021/022/028/038.
+  </completion>
+
+  <notes>
+    Spec refs: FR-22, FR-23/RS-1; design.md §9 "Two live breakages". The deployed control keeps 400ing until a
+    hotfix DEPLOYS — merely fixing source does not repair production, which is why the decision step is mandatory,
+    not optional. Solution/Controls/.../ControlManifest.xml and bundle.js are checked-in build artifacts that still
+    say v1.0.20/sprk_mattersummary until the next pack; do not hand-edit them. R2's task 080 retires this control
+    entirely, so keep the change surgical.
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Before starting this task, load all files listed in knowledge/files. Follow the task-execute skill for the mandatory pre-execution checklist.</protocol>
+  </execution>
+</task>

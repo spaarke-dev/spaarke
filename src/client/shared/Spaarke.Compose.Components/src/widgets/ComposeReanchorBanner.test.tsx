@@ -82,15 +82,40 @@ function renderWithTheme(ui: React.ReactElement, theme: typeof webLightTheme = w
 // ---------------------------------------------------------------------------
 
 describe('ComposeReanchorBanner — summary + review affordance', () => {
-  it('renders "N re-anchored, M need review" and the Review changes button when attention is needed', () => {
+  // FR-C07 (r8 task 053): the message is SPECIFIC about the cause and about WHAT re-attached — the
+  // one place fuzzy matching still speaks to the user has to say what actually happened. The kinds
+  // come from `ReanchoredAnnotation.type`, already on the wire; nothing new is asked of the server,
+  // and `AnnotationReanchorService`'s behaviour is untouched.
+  it('names the CAUSE and WHAT re-attached, plus the Review changes button when attention is needed', () => {
     renderWithTheme(<ComposeReanchorBanner summary={summary()} onReview={jest.fn()} />);
 
     expect(screen.getByTestId('compose-reanchor-banner')).toBeInTheDocument();
     const text = screen.getByTestId('compose-reanchor-banner-summary').textContent ?? '';
-    expect(text).toContain('2 re-anchored');
+    // The cause, stated plainly — this is why anchors moved at all (Word regenerates w14:paraIds).
+    expect(text).toContain('This document was edited in Word');
+    // WHAT re-attached, by kind and count — the two `auto`-band annotations are both comments here.
+    expect(text).toContain('2 comments re-attached to their paragraphs');
     expect(text).toContain('1 need review');
-    expect(text).toContain('1 orphaned');
+    expect(text).toContain("1 couldn't be re-attached");
     expect(screen.getByTestId('compose-reanchor-banner-review')).toBeInTheDocument();
+  });
+
+  it('describes MIXED annotation kinds rather than a bare count', () => {
+    const s = summary({
+      total: 3,
+      autoCount: 3,
+      reviewCount: 0,
+      orphanCount: 0,
+      annotations: [
+        annotation({ id: 'c1', band: 'auto', type: 'comment' }),
+        annotation({ id: 's1', band: 'auto', type: 'insertion-suggestion' }),
+        annotation({ id: 's2', band: 'auto', type: 'deletion-suggestion' }),
+      ],
+    });
+    renderWithTheme(<ComposeReanchorBanner summary={s} onReview={jest.fn()} />);
+
+    const text = screen.getByTestId('compose-reanchor-banner-summary').textContent ?? '';
+    expect(text).toContain('1 comment and 2 tracked changes re-attached to their paragraphs');
   });
 
   it('calls onReview when the Review changes button is clicked', async () => {
@@ -110,7 +135,10 @@ describe('ComposeReanchorBanner — summary + review affordance', () => {
       />
     );
 
-    expect(screen.getByTestId('compose-reanchor-banner-summary').textContent).toContain('2 re-anchored');
+    const text = screen.getByTestId('compose-reanchor-banner-summary').textContent ?? '';
+    expect(text).toContain('This document was edited in Word');
+    expect(text).toContain('2 comments re-attached to their paragraphs');
+    expect(text).toContain('nothing needs your attention');
     expect(screen.queryByTestId('compose-reanchor-banner-review')).not.toBeInTheDocument();
   });
 

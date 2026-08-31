@@ -1,0 +1,132 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="062" project="email-communication-intelligence-r2">
+  <metadata>
+    <title>Dual host — CommunicationReconciliation code page (sprk_communicationreconciliation) + SpaarkeAi widget mounting ReconciliationWorkspace</title>
+    <phase>5 Pillar E — Reconciliation UI (mount build)</phase>
+    <gate>blocked: 061 (ReconciliationWorkspace)</gate>
+    <status>not-started</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Creates a new Vite code page + a SpaarkeAi widget registration (.ts/.tsx); real auth + IDataverseClient + BFF wiring; touches the shared SpaarkeAi surface.</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Hosting/wiring following explicit references (EmailPage code page + the SpaarkeAi widget-registry pattern); no architectural novelty. Mounts the single ReconciliationWorkspace unchanged.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Touches the shared SpaarkeAi code page (hot-path) + creates a new code page; sequential; /conflict-check before PR.</parallel-reason>
+    <deps>061</deps>
+    <tags>react, typescript, frontend, fluent-ui, code-page, spaarke-ai</tags>
+    <estimated-effort>3-5 hours</estimated-effort>
+  </metadata>
+
+  <prompt>
+    Mount the task-061 `ReconciliationWorkspace` in TWO production hosts: (1) a new standalone Vite code page
+    `src/solutions/CommunicationReconciliation` deployed as web resource `sprk_communicationreconciliation` (mirror
+    EmailPage's structure), and (2) a SpaarkeAi widget registered in the SpaarkeAi widget registry. Both wire the SAME
+    component to a real `IDataverseClient`, `initAuth` (ADR-028), theme, and the deployed BFF via `authenticatedFetch`.
+    Do NOT re-implement the surface — mount ReconciliationWorkspace unchanged. Deployment is task 059 (do NOT deploy here).
+  </prompt>
+  <role>SPAARKE platform developer. Expert in Spaarke Vite code pages, the @spaarke/auth bootstrap, and the SpaarkeAi widget registry. Follow ADRs strictly.</role>
+  <goal>
+    Two hosts build green and mount ReconciliationWorkspace: a new `CommunicationReconciliation` code page
+    (`sprk_communicationreconciliation`) with the standard auth bootstrap + real IDataverseClient + BFF wiring, and a
+    SpaarkeAi widget registry entry rendering the same component. No forked copy of the reconciliation surface.
+  </goal>
+
+  <context>
+    <background>
+      The reconciliation surface currently mounts nowhere (task-050's dual-mount was deferred). Owner decision
+      (2026-08-10): both a standalone code page and a SpaarkeAi widget. EmailPage is the reference code page
+      (Vite + initAuth + EmailWorkspace); SpaarkeAi's widget registry is the reference for the widget.
+    </background>
+    <relevant-files>
+      <file role="new">src/solutions/CommunicationReconciliation/src/main.tsx</file>
+      <file role="new">src/solutions/CommunicationReconciliation/index.html</file>
+      <file role="new">src/solutions/CommunicationReconciliation/vite.config.ts</file>
+      <file role="new">src/solutions/CommunicationReconciliation/package.json</file>
+      <file role="new">src/solutions/CommunicationReconciliation/tsconfig.json</file>
+      <file role="reference">src/solutions/EmailPage/src/main.tsx</file>
+      <file role="reference">src/solutions/EmailPage/vite.config.ts</file>
+      <file role="reference">src/solutions/EmailPage/package.json</file>
+      <file role="new">(SpaarkeAi widget registration — locate the widget registry under src/solutions/SpaarkeAi or @spaarke/ai-widgets and add ONE entry)</file>
+      <file role="reference">src/solutions/SpaarkeAi/src/services/notificationsBootstrap.ts</file>
+    </relevant-files>
+    <dependencies>
+      <dependency task="061" status="pending">ReconciliationWorkspace composition component (the single surface both hosts mount).</dependency>
+    </dependencies>
+  </context>
+
+  <justification>
+    <existing>No code page hosts the reconciliation grid — EmailPage hosts EmailWorkspace (a different surface: per-email review, not the needs-review grid). SpaarkeAi has no reconciliation widget (only a notifications subscribe hook, notificationsBootstrap.ts).</existing>
+    <extension>No — reconciliation is a distinct surface from EmailWorkspace; folding it into EmailPage would conflate two surfaces. The SpaarkeAi widget is a new registry entry, not a modification of an existing widget.</extension>
+    <cost-of-doing-nothing>Without a host, the entire Pillar E reconciliation surface is unreachable by users — it is currently exported-but-unmounted, so the "Needs review" queue, reconcile tabs, and routing views have no runtime entry point on any surface.</cost-of-doing-nothing>
+  </justification>
+
+  <constraints>
+    <constraint source="project">SCOPE: mount, do not fork. Both hosts import and render ReconciliationWorkspace from @spaarke/communication-components. No copy of the grid/shell/tabs.</constraint>
+    <constraint source="ADR-028">SCOPE: auth. The code page bootstraps with `await initAuth({ clientId, tenantId, bffBaseUrl, bffApiScope })` before createRoot(...).render, per the v2 contract; use `authenticatedFetch` for BFF calls (no raw Bearer). Mirror EmailPage.</constraint>
+    <constraint source="ADR-012">SCOPE: data. Provide a real `IDataverseClient` to ReconciliationWorkspace (context-agnostic dual-mount). The code page uses host-context/webApi; the SpaarkeAi widget uses SpaarkeAi's injected client.</constraint>
+    <constraint source="project">SCOPE: hot-path. This touches the shared SpaarkeAi code page. Run /conflict-check against active SpaarkeAi worktrees (projects/INDEX.md) before the PR; update the project INDEX row if this is the first SpaarkeAi touch.</constraint>
+    <constraint source="project">SCOPE: config placeholder. The grid's `NEEDS_REVIEW_CONFIG_ID` remains a placeholder until task 059 seeds the record — do NOT hard-code a real GUID here; leave the wiring so 059 can set it.</constraint>
+    <constraint source="project">SCOPE: no deploy. Building + registering only. Deployment (code-page-deploy + SpaarkeAi rebuild + Deploy-AllDataGridConsumers) is task 059.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>.claude/constraints/pcf.md</file>
+      <file>.claude/adr/ADR-028-spaarke-auth-architecture.md</file>
+      <file>.claude/adr/ADR-012-shared-components.md</file>
+      <file>.claude/patterns/auth/spaarke-sso-binding.md</file>
+      <file>docs/architecture/SPAARKEAI-DASHBOARD-AND-WIDGET-MODEL.md</file>
+      <file>docs/guides/BUILD-A-NEW-WORKSPACE-WIDGET.md</file>
+      <file>.claude/skills/code-page-deploy/SKILL.md</file>
+    </files>
+    <patterns>
+      <pattern name="EmailPage code page" location="src/solutions/EmailPage/src/main.tsx">Reference Vite code page: initAuth bootstrap + IDataverseClient + mounting a communication-components surface.</pattern>
+      <pattern name="SpaarkeAi widget registry" location="docs/guides/BUILD-A-NEW-WORKSPACE-WIDGET.md">The five widget archetypes + registration pattern for adding a reconciliation widget.</pattern>
+    </patterns>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="0">Load this POML + knowledge. Read EmailPage/src/main.tsx + vite.config.ts + package.json as the code-page reference, and locate the SpaarkeAi widget registry (BUILD-A-NEW-WORKSPACE-WIDGET.md points to it). Run /conflict-check (hot-path SpaarkeAi).</step>
+    <step order="1">Scaffold src/solutions/CommunicationReconciliation (copy EmailPage's Vite structure): index.html, vite.config.ts (singlefile), package.json (name sprk_communicationreconciliation), tsconfig.json.</step>
+    <step order="2">main.tsx: initAuth (ADR-028) → build a real IDataverseClient → createRoot render &lt;FluentProvider&gt;&lt;ReconciliationWorkspace dataverseClient=… authenticatedFetch=… theme=… /&gt;. Mirror EmailPage's bootstrap.</step>
+    <step order="3">Register a SpaarkeAi reconciliation widget in the widget registry (ONE entry) that mounts the same ReconciliationWorkspace with SpaarkeAi's injected client + auth.</step>
+    <step order="4">Build both hosts green (npm install --legacy-peer-deps for the new solution; build the shared lib first if needed). Verify a built bundle actually contains ReconciliationWorkspace (grep the output).</step>
+    <step order="5">Update TASK-INDEX.md: set 062 status to ✅; ensure 059 depends on 061,062.</step>
+    <step order="6">Document the SpaarkeAi registry entry + any host adapter in projects/email-communication-intelligence-r2/notes/.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If mounting the widget requires changing shared SpaarkeAi infrastructure beyond a single registry entry (e.g., the registry contract, dashboard wrapper, or pane bus), STOP and escalate per CLAUDE.md §6/§6.5 + coordinate via /conflict-check — do not modify the shared SpaarkeAi chassis unilaterally.</trigger>
+    <trigger>If the code-page auth/IDataverseClient bootstrap cannot follow EmailPage's pattern (e.g., ReconciliationWorkspace needs a client capability EmailPage doesn't wire), STOP and escalate rather than inventing a bespoke data path.</trigger>
+  </escalation>
+
+  <tools>
+    <tool name="npm">Build the new code page + SpaarkeAi.</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/solutions/CommunicationReconciliation/src/main.tsx</output>
+    <output type="code">src/solutions/CommunicationReconciliation/vite.config.ts</output>
+    <output type="code">(SpaarkeAi widget registry entry for the reconciliation widget)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">src/solutions/CommunicationReconciliation builds a self-contained bundle whose output contains ReconciliationWorkspace (grep-verified).</criterion>
+    <criterion testable="true">The code page bootstraps with initAuth (ADR-028 v2 contract) before render and passes authenticatedFetch + a real IDataverseClient to ReconciliationWorkspace.</criterion>
+    <criterion testable="true">A SpaarkeAi widget registry entry renders the same ReconciliationWorkspace (no forked copy).</criterion>
+    <criterion testable="true">Both hosts import ReconciliationWorkspace from @spaarke/communication-components; no reconciliation grid/shell/tab code is duplicated in either host.</criterion>
+    <criterion testable="true">NEEDS_REVIEW_CONFIG_ID is left as the placeholder for task 059 to set (no hard-coded real GUID).</criterion>
+    <criterion testable="true">Negative: no deployment is performed in this task; /conflict-check was run against SpaarkeAi worktrees before the PR (cited).</criterion>
+    <criterion testable="true">Both solutions build green.</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    Deploy is task 059 (code-page-deploy the code page + rebuild/redeploy SpaarkeAi + Deploy-AllDataGridConsumers + seed gridconfig + set NEEDS_REVIEW_CONFIG_ID). The dual-use pattern (one shared-lib component, thin host shims) mirrors the Calendar Pattern D precedent (SPAARKEAI-DASHBOARD-AND-WIDGET-MODEL.md).
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Load all <knowledge><files> + read EmailPage's bootstrap and the widget-registry docs before implementing. Follow task-execute; run Step 9.5 gates; /conflict-check before PR (hot-path SpaarkeAi).</protocol>
+  </execution>
+</task>

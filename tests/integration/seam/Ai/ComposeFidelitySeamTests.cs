@@ -125,7 +125,7 @@ public sealed class ComposeFidelitySeamTests : IClassFixture<ComposeFidelitySeam
         using (var scope = _fixture.Services.CreateScope())
         {
             var sessions = scope.ServiceProvider.GetRequiredService<ChatSessionManager>();
-            var session = await sessions.CreateSessionAsync(ComposeFidelitySeamFixture.TestTenantId, documentId: speId);
+            var session = await sessions.CreateSessionAsync(ComposeFidelitySeamFixture.TestTenantId, TestSessionOwner.Oid, documentId: speId);
             sessionId = session.SessionId;
         }
 
@@ -250,7 +250,7 @@ public sealed class ComposeFidelitySeamTests : IClassFixture<ComposeFidelitySeam
         using (var scope = _fixture.Services.CreateScope())
         {
             var sessions = scope.ServiceProvider.GetRequiredService<ChatSessionManager>();
-            var session = await sessions.CreateSessionAsync(ComposeFidelitySeamFixture.TestTenantId, documentId: null);
+            var session = await sessions.CreateSessionAsync(ComposeFidelitySeamFixture.TestTenantId, TestSessionOwner.Oid, documentId: null);
             sessionId = session.SessionId;
         }
 
@@ -279,8 +279,8 @@ public sealed class ComposeFidelitySeamTests : IClassFixture<ComposeFidelitySeam
                 It.IsAny<string>(), It.IsAny<KeyAttributeCollection>(), It.IsAny<string[]>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync((Entity)null!);
         _fixture.DataverseMock
-            .Setup(d => d.CreateAsync(It.IsAny<Entity>(), It.IsAny<CancellationToken>()))
-            .ReturnsAsync(newDocumentId);
+            .Setup(d => d.UpsertAsync(It.IsAny<Entity>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync((newDocumentId, true));
 
         _fixture.IndexingMock
             .Setup(i => i.EnqueueIfApplicableAsync(
@@ -583,7 +583,12 @@ public sealed class ComposeFidelitySeamTests : IClassFixture<ComposeFidelitySeam
 // mirrors the canonical Compose fixtures (bff-extensions.md §F.2 Fixture-Config-FIRST).
 // ════════════════════════════════════════════════════════════════════════════════════════════════
 
-public sealed class ComposeFidelitySeamFixture : WebApplicationFactory<Program>
+// NOT sealed — same reason as DocumentDestroyAuthorizationTestFixture / ExternalCollaborationTestFixture:
+// unified-access-control-r2 task 079 needed to add two more doubles (a document row + a stated-rights
+// IAccessDataSource) to reach the now-GATED document version routes, and extending this fixture is
+// strictly better than forking a second Compose seam host. Unsealing adds no registration and changes
+// no behaviour for existing consumers — every current test still resolves this exact type.
+public class ComposeFidelitySeamFixture : WebApplicationFactory<Program>
 {
     public const string TestTenantId = "tenant-compose-fidelity-seam-001";
 
@@ -643,7 +648,7 @@ public sealed class ComposeFidelitySeamFixture : WebApplicationFactory<Program>
                 ["Graph:TenantId"] = "test-tenant-id",
                 ["Graph:ClientId"] = "test-client-id",
                 ["Graph:ClientSecret"] = "test-client-secret",
-                ["Graph:UseManagedIdentity"] = "false",
+                ["Graph:ManagedIdentity:Enabled"] = "false",
                 ["Graph:Scopes:0"] = "https://graph.microsoft.com/.default",
                 ["Dataverse:EnvironmentUrl"] = "https://test.crm.dynamics.com",
                 ["Dataverse:ServiceUrl"] = "https://test.crm.dynamics.com",
@@ -701,6 +706,9 @@ public sealed class ComposeFidelitySeamFixture : WebApplicationFactory<Program>
 
         builder.ConfigureTestServices(services =>
         {
+            // Test hosts must not authenticate for real — see TestTokenCredential.
+            services.UseStubTokenCredential();
+
             services.Configure<Microsoft.AspNetCore.Routing.RouteHandlerOptions>(options =>
             {
                 options.ThrowOnBadRequest = false;
@@ -801,7 +809,10 @@ internal sealed class ComposeFidelitySeamFakeAuthHandler : AuthenticationHandler
             return Task.FromResult(AuthenticateResult.Fail("No Authorization header"));
         }
 
-        var oid = Guid.NewGuid().ToString();
+        // Issue #863 (fixture repair, bff-extensions.md §F.2): a STABLE oid. This minted a
+        // fresh one per request, which Entra never does — every call arrived as a different
+        // user, so the suite silently exercised cross-user access on every request.
+        var oid = TestSessionOwner.Oid;
         var claims = new List<Claim>
         {
             new("oid", oid),

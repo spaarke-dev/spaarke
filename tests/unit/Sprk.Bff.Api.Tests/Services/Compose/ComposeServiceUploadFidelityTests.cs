@@ -80,7 +80,7 @@ public sealed class ComposeServiceUploadFidelityTests
     private ComposeService CreateSut() => new(
         _spe.Object,
         _sessions.Object,
-        _dataverse.Object,        _indexing.Object,
+        _dataverse.Object, _indexing.Object,
         NullLogger<ComposeService>.Instance);
 
     /// <summary>The pristine ORIGINAL bytes — as if retained from the 010/012 mount path,
@@ -174,8 +174,9 @@ public sealed class ComposeServiceUploadFidelityTests
         _dataverse.Setup(d => d.RetrieveByAlternateKeyAsync(
                 "sprk_document", It.IsAny<KeyAttributeCollection>(), It.IsAny<string[]?>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync((Entity)null!);
-        _dataverse.Setup(d => d.CreateAsync(It.IsAny<Entity>(), It.IsAny<CancellationToken>()))
-            .ReturnsAsync(newId);
+        // task 013 (FR-07d): promote now writes via the atomic UpsertAsync (was CreateAsync).
+        _dataverse.Setup(d => d.UpsertAsync(It.IsAny<Entity>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync((newId, true));
     }
 
     private void ArrangeIndexingSubmitted() =>
@@ -203,7 +204,7 @@ public sealed class ComposeServiceUploadFidelityTests
             DisplayName = "Unedited draft",
         };
 
-        await sut.SaveAsync(request, new DefaultHttpContext(), CancellationToken.None);
+        await sut.SaveAsync(request, TestHttpContexts.Authenticated(), CancellationToken.None);
 
         capturedBytes().Should().BeEquivalentTo(
             original.ToArray(),
@@ -231,7 +232,7 @@ public sealed class ComposeServiceUploadFidelityTests
             DisplayName = "Edited draft",
         };
 
-        await sut.SaveAsync(request, new DefaultHttpContext(), CancellationToken.None);
+        await sut.SaveAsync(request, TestHttpContexts.Authenticated(), CancellationToken.None);
 
         var persisted = capturedBytes();
         persisted.Should().BeEquivalentTo(
@@ -262,7 +263,7 @@ public sealed class ComposeServiceUploadFidelityTests
             TenantId = Tenant,
         };
 
-        await sut.SaveAsync(request, new DefaultHttpContext(), CancellationToken.None);
+        await sut.SaveAsync(request, TestHttpContexts.Authenticated(), CancellationToken.None);
 
         capturedBytes().Should().BeEquivalentTo(
             original.ToArray(),
@@ -294,7 +295,7 @@ public sealed class ComposeServiceUploadFidelityTests
             TenantId = Tenant,
         };
 
-        var result = await sut.SaveAsync(request, new DefaultHttpContext(), CancellationToken.None);
+        var result = await sut.SaveAsync(request, TestHttpContexts.Authenticated(), CancellationToken.None);
 
         // Strict mocks (ISpeFileOperations/IGenericEntityService/IPostUploadIndexingEnqueuer) —
         // any unexpected collaborator call (e.g. a hypothetical server-side regeneration hook)

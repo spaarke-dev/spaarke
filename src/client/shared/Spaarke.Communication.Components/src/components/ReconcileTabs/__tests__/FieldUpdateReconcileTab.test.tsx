@@ -20,6 +20,14 @@ jest.mock('@spaarke/auth', () => ({
   authenticatedFetch: (...args: [string, RequestInit?]) => mockAuthenticatedFetch(...args),
 }));
 
+// E2b/E2c (065) — the OOB Xrm bridge (metadata + lookup + navigateTo). `getXrmForPicker` is
+// overridden per-test; `undefined` = non-MDA/dev host (the fieldType-hint / text-fallback path).
+const mockPickerXrm: { current: unknown } = { current: undefined };
+jest.mock('@spaarke/ui-components', () => {
+  const actual = jest.requireActual('@spaarke/ui-components');
+  return { ...actual, getXrmForPicker: () => mockPickerXrm.current };
+});
+
 import { FieldUpdateReconcileTab, FieldUpdateReconcileModal } from '../FieldUpdateReconcileTab';
 
 const COMM_ID = 'comm-1';
@@ -70,8 +78,104 @@ const renderTab = (props: Partial<React.ComponentProps<typeof FieldUpdateReconci
   );
 
 describe('FieldUpdateReconcileTab', () => {
-  beforeEach(() => mockAuthenticatedFetch.mockReset());
+  beforeEach(() => {
+    mockAuthenticatedFetch.mockReset();
+    mockPickerXrm.current = undefined;
+  });
   afterEach(() => jest.restoreAllMocks());
+
+  // E2b (065) — an option-set proposal renders a dropdown seeded from live metadata; Accept sends the value.
+  it('E2b: option-set field renders a metadata-seeded dropdown; Accept sends the chosen value', async () => {
+    wireDefault([proposalItem({ fieldType: 'Picklist', targetField: 'sprk_stage', newValue: '1' })]);
+    const getEntityMetadata = jest.fn().mockResolvedValue({
+      Attributes: [
+        {
+          LogicalName: 'sprk_stage',
+          AttributeType: 'Picklist',
+          OptionSet: {
+            Options: [
+              { Value: 1, Label: { UserLocalizedLabel: { Label: 'Open' } } },
+              { Value: 2, Label: { UserLocalizedLabel: { Label: 'Closed' } } },
+            ],
+          },
+        },
+      ],
+    });
+    mockPickerXrm.current = { Utility: { getEntityMetadata } };
+    renderTab();
+
+    const select = await screen.findByTestId('field-reconcile-edit-optionset');
+    expect(getEntityMetadata).toHaveBeenCalledWith('sprk_matter', ['sprk_stage']);
+    await waitFor(() => expect(within(select).getByText('Closed')).toBeInTheDocument());
+    fireEvent.change(select, { target: { value: '2' } });
+    fireEvent.click(screen.getByTestId('field-reconcile-accept'));
+
+    await waitFor(() =>
+      expect(mockAuthenticatedFetch.mock.calls.find(c => String(c[0]).endsWith('/apply'))).toBeTruthy()
+    );
+    const applyCall = mockAuthenticatedFetch.mock.calls.find(c => String(c[0]).endsWith('/apply'));
+    expect(JSON.parse(applyCall![1].body)).toEqual({ overrideValue: '2' });
+  });
+
+  // E2b — a lookup field opens the OOB advanced-lookup with the attribute's Targets; a pick sets the id + name.
+  it('E2b: lookup field opens the OOB lookup (targets from metadata); pick sets normalized id + name', async () => {
+    wireDefault([proposalItem({ fieldType: 'Lookup', targetField: 'sprk_owner', newValue: '' })]);
+    const getEntityMetadata = jest.fn().mockResolvedValue({
+      Attributes: [{ LogicalName: 'sprk_owner', AttributeType: 'Lookup', Targets: ['systemuser', 'team'] }],
+    });
+    const lookupObjects = jest
+      .fn()
+      .mockResolvedValue([{ id: '{BBBBBBBB-2222-3333-4444-555555555555}', name: 'Priya Owner' }]);
+    mockPickerXrm.current = { Utility: { getEntityMetadata, lookupObjects } };
+    renderTab();
+
+    const lookupBtn = await screen.findByTestId('field-reconcile-edit-lookup-btn');
+    fireEvent.click(lookupBtn);
+    await waitFor(() => expect(screen.getByTestId('field-reconcile-edit-lookup')).toHaveValue('Priya Owner'));
+    expect(lookupObjects).toHaveBeenCalledWith(
+      expect.objectContaining({ entityTypes: ['systemuser', 'team'], allowMultiSelect: false })
+    );
+    fireEvent.click(screen.getByTestId('field-reconcile-accept'));
+    await waitFor(() =>
+      expect(mockAuthenticatedFetch.mock.calls.find(c => String(c[0]).endsWith('/apply'))).toBeTruthy()
+    );
+    const applyCall = mockAuthenticatedFetch.mock.calls.find(c => String(c[0]).endsWith('/apply'));
+    expect(JSON.parse(applyCall![1].body)).toEqual({ overrideValue: 'bbbbbbbb-2222-3333-4444-555555555555' });
+  });
+
+  // E2b — non-MDA host (no bridge): an option-set-hint proposal degrades to the editable text input.
+  it('E2b: non-MDA host degrades option-set to the editable text input', async () => {
+    wireDefault([proposalItem({ fieldType: 'Picklist', targetField: 'sprk_stage', newValue: 'draft' })]);
+    mockPickerXrm.current = undefined; // no bridge
+    renderTab();
+    const card = await screen.findByTestId('field-reconcile-card');
+    const input = within(card).getByTestId('field-reconcile-edit');
+    expect(input).toHaveValue('draft');
+    fireEvent.change(input, { target: { value: 'final' } });
+    expect(input).toHaveValue('final');
+    expect(within(card).queryByTestId('field-reconcile-edit-optionset')).not.toBeInTheDocument();
+  });
+
+  // E2c — "+ Update other fields" opens the confirmed record's OOB form; guarded no-op non-MDA.
+  it('E2c: "Update other fields" opens the confirmed record form via navigateTo', async () => {
+    wireDefault();
+    const navigateTo = jest.fn().mockResolvedValue(undefined);
+    mockPickerXrm.current = { Navigation: { navigateTo } };
+    renderTab();
+
+    const btn = await screen.findByTestId('field-reconcile-update-other');
+    fireEvent.click(btn);
+    await waitFor(() =>
+      expect(navigateTo).toHaveBeenCalledWith(
+        expect.objectContaining({
+          pageType: 'entityrecord',
+          entityName: 'sprk_matter',
+          entityId: REGARDING_A.recordId,
+        }),
+        expect.any(Object)
+      )
+    );
+  });
 
   // NFR-10 gate — no confirmed record ⇒ prompt to confirm first; nothing is fetched.
   it('gates on NFR-10 when no association is confirmed and does not fetch', async () => {
@@ -110,7 +214,28 @@ describe('FieldUpdateReconcileTab', () => {
     const applyCall = mockAuthenticatedFetch.mock.calls.find(c => String(c[0]).endsWith('/apply'));
     expect(JSON.parse(applyCall![1].body)).toEqual({ overrideValue: '2026-09-20' });
     await waitFor(() => expect(onResolved).toHaveBeenCalledWith('rl-1', 'applied'));
-    expect(screen.queryByTestId('field-reconcile-card')).not.toBeInTheDocument(); // row leaves Proposed
+    // B2.2: the row STAYS visible in an Accepted state carrying a per-line Undo (the Accept button is gone).
+    expect(await screen.findByTestId('field-reconcile-accepted')).toBeInTheDocument();
+    expect(screen.getByTestId('field-reconcile-undo')).toBeInTheDocument();
+    expect(screen.queryByTestId('field-reconcile-accept')).not.toBeInTheDocument();
+  });
+
+  // B2.2 — Undo reverses a just-accepted field via POST /undo, then the row shows a terminal "Undone" state.
+  it('Undo reverses an accepted field via POST /undo', async () => {
+    wireDefault();
+    renderTab({});
+
+    fireEvent.click(await screen.findByTestId('field-reconcile-accept'));
+    fireEvent.click(await screen.findByTestId('field-reconcile-undo'));
+
+    await waitFor(() =>
+      expect(mockAuthenticatedFetch).toHaveBeenCalledWith(
+        '/communications/proposals/rl-1/undo',
+        expect.objectContaining({ method: 'POST' })
+      )
+    );
+    expect(await screen.findByTestId('field-reconcile-undone')).toBeInTheDocument();
+    expect(screen.queryByTestId('field-reconcile-undo')).not.toBeInTheDocument();
   });
 
   // AC2 — Reject terminally dismisses via POST /dismiss.
@@ -201,6 +326,15 @@ describe('FieldUpdateReconcileTab', () => {
     wireDefault([]);
     renderTab();
     expect(await screen.findByTestId('field-reconcile-empty')).toBeInTheDocument();
+  });
+
+  // Item 2g (owner UAT 2026-08-19) — the "Update other fields" affordance must be present
+  // in the EMPTY state too (a confirmed record with no proposals can still edit other fields).
+  it('item 2g: shows "Update other fields" in the empty state when a record is confirmed', async () => {
+    wireDefault([]);
+    renderTab();
+    expect(await screen.findByTestId('field-reconcile-empty')).toBeInTheDocument();
+    expect(screen.getByTestId('field-reconcile-update-other')).toBeInTheDocument();
   });
 
   // AC1/AC5 — the FormModal dual-use mount renders the proposal (ADR-050) and dark-mode renders cleanly (ADR-021).

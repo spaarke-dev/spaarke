@@ -1,0 +1,99 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="006" project="customer-provisioning-orchestration-r1">
+  <metadata>
+    <title>Publish initial docs/deployment/version-compatibility-matrix.md (BFF × Solution version cells per §14A.3)</title>
+    <phase>A Doc Consolidation + Audits</phase>
+    <gate>startable</gate>
+    <status>not-started</status>
+    <rigor>MINIMAL</rigor>
+    <rigor-reason>Documentation-only publication. Creates one new markdown file; no code changes; no tests. Per root CLAUDE.md §8 rigor table, docs-only = MINIMAL.</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Standard doc authoring with a well-defined table shape (§14A.3 compatibility cells). Per Step 3.5.5b default = sonnet.</model-tier-reason>
+    <effort>medium</effort>
+    <parallel-group>groupA-parallel</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <deps>none</deps>
+    <tags>docs, deploy</tags>
+    <estimated-effort>2-3 hours</estimated-effort>
+  </metadata>
+
+  <prompt>
+Publish the initial version-compatibility matrix at docs/deployment/version-compatibility-matrix.md per spec.md FR-34 + design.md §14A.3. The matrix maps BFF version × Solution version cells to green/yellow/red compatibility (green = supported, yellow = requires operator manual step, red = blocked). H0 preflight (upgrade mode) queries this matrix. This is the v1 publication — matrix will be updated per release-tag milestone (see Assumptions).
+  </prompt>
+
+  <role>SPAARKE platform documentation author. Familiar with Spaarke's release semantics (BFF version, Solution version, sprk_ClientCacheBustToken), upgrade-mode handler semantics per §14A.2, and the 6 breaking-change classes U-CB-1..U-CB-6.</role>
+
+  <goal>docs/deployment/version-compatibility-matrix.md exists as a valid markdown file containing: (a) purpose statement + query semantics (H0 upgrade-mode consults this), (b) v1 matrix table with rows = current BFF versions, columns = current Solution versions, cells = green/yellow/red per §14A.3 rules, (c) legend + operator remediation guidance per yellow/red cell, (d) update cadence (per release-tag milestone), (e) cross-reference to §14A.2 handler upgrade-mode semantics.</goal>
+
+  <context>
+    <background>
+Per spec.md FR-34 + § New Components row 13 + design.md §14A.3. Without the matrix, H0 preflight (upgrade mode) has nothing to query and incompatible BFF/Solution pairs deploy blindly + fail with silent-trap galore. This is Phase A v1 publication; the matrix becomes a living doc updated at each release-tag milestone (project Assumptions).
+    </background>
+    <relevant-files>
+      <file role="new">docs/deployment/version-compatibility-matrix.md</file>
+      <file role="canonical-reference">projects/customer-provisioning-orchestration-r1/design.md</file>
+      <file role="canonical-reference">projects/customer-provisioning-orchestration-r1/spec.md</file>
+    </relevant-files>
+    <dependencies>
+      <dependency task="none" status="complete">Phase A is startable</dependency>
+    </dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="spec.md">SCOPE: Publish v1 matrix ONLY. Do NOT modify any handler code, Bicep, or script; this is documentation for H0 upgrade-mode to consume in a later task.</constraint>
+    <constraint source="spec.md">SCOPE: The matrix MUST include ALL currently-shipped BFF versions × ALL currently-shipped Solution versions per §14A.3; a partial matrix is a defect.</constraint>
+    <constraint source="spec.md">SCOPE: Green/yellow/red cell classification MUST follow §14A.3 rules (green = supported, yellow = manual operator step, red = blocked) — do NOT invent new severity levels.</constraint>
+    <constraint source="project">SCOPE: Cross-reference the 6 U-CB breaking-change classes (U-CB-1..U-CB-6) in the doc's remediation guidance section, linking to the templates task 007 produces.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>Version compatibility + upgrade model</topic>
+    <files>
+      <file>projects/customer-provisioning-orchestration-r1/spec.md</file>
+      <file>projects/customer-provisioning-orchestration-r1/design.md</file>
+      <file>projects/customer-provisioning-orchestration-r1/CLAUDE.md</file>
+    </files>
+    <patterns>
+      <pattern name="Compatibility matrix layout" location="docs/deployment/">Rows = older-to-newer versions of one dimension; columns = older-to-newer of the other; cell values color-coded; legend below.</pattern>
+    </patterns>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="0" name="Context + rigor declaration">Emit the 🔒 RIGOR LEVEL block. Load design.md §14A entire section.</step>
+    <step order="1" name="Enumerate BFF versions">List current + reachable-back BFF versions (from git tags, release notes, or design.md §14A.3 baseline reference). Keep to a reasonable back-window (last 3-4 majors).</step>
+    <step order="2" name="Enumerate Solution versions">Same for Solution versions per the 8 authoritative solutions (§11.1a). Keep matrix compact.</step>
+    <step order="3" name="Apply §14A.3 rules">For each BFF × Solution cell, apply §14A.3 green/yellow/red rules; cite the specific breaking-change class (U-CB-N) that triggers yellow/red where applicable.</step>
+    <step order="4" name="Draft matrix">Compose the markdown table.</step>
+    <step order="5" name="Draft legend + remediation">Add legend + per-color operator remediation guidance + cross-refs to U-CB templates (task 007).</step>
+    <step order="6" name="Publish">Write docs/deployment/version-compatibility-matrix.md.</step>
+    <step order="7" name="Cross-reference">Ensure the new authoritative deploy guide (task 001) references this matrix; if task 001 not yet complete, note the cross-ref TODO in the doc's front-matter.</step>
+    <step order="8" name="Index update">Update TASK-INDEX.md: set task 006 status to ✅.</step>
+    <step order="9" name="Deviations">Document any deviation in projects/customer-provisioning-orchestration-r1/notes/.</step>
+  </steps>
+
+  <justification>
+    <existing>No prior version-compatibility matrix exists in docs/deployment/ per spec.md § New Components row 13 (grep-confirmed).</existing>
+    <extension>No — no existing publication surface covers BFF × Solution pair compatibility; extending release-notes files would fragment the query surface that H0 upgrade-mode needs.</extension>
+    <cost-of-doing-nothing>Without the matrix, H0 upgrade-mode preflight (FR-34) has no query surface; incompatible BFF/Solution pairs deploy silently + fail with silent-trap cascade (T1/T2/T3/T4/T5/T6 per §4B). Explicitly cited in spec.md § New Components: "H0 upgrade-mode preflight has nothing to query; incompatible BFF/solution pairs deploy + fail with silent-trap galore."</cost-of-doing-nothing>
+  </justification>
+
+  <tools>
+    <tool name="git">Enumerate release tags for version-list source</tool>
+  </tools>
+
+  <outputs>
+    <output type="docs">docs/deployment/version-compatibility-matrix.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Given the file, when reading, then it contains a matrix table with rows = BFF versions and columns = Solution versions.</criterion>
+    <criterion testable="true">Given each cell, when scanning, then the value is one of {green, yellow, red} (or equivalent unicode/emoji) with no cells left blank.</criterion>
+    <criterion testable="true">Given the legend section, when reading, then green/yellow/red rules match §14A.3 verbatim + reference the applicable U-CB-N class per yellow/red.</criterion>
+    <criterion testable="true">Given the doc, when scanning cross-references, then it links (a) design.md §14A.2 handler upgrade-mode semantics, (b) docs/deployment/customer-comms/ (U-CB templates from task 007), (c) SPAARKE-CUSTOMER-DEPLOYMENT-GUIDE.md (task 001).</criterion>
+    <criterion testable="true">Negative: git diff shows only the new docs file — no handler/Bicep/script touched.</criterion>
+  </acceptance-criteria>
+
+  <notes>Spec FR-34 + § New Components row 13. H0 upgrade-mode (Wave C4) consumes this matrix. Living doc: update per release-tag milestone (project Assumptions).</notes>
+
+  <execution><skill>.claude/skills/task-execute/SKILL.md</skill></execution>
+</task>

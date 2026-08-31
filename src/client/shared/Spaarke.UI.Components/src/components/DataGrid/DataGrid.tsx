@@ -77,6 +77,7 @@ import { discoverChips, augmentFetchXmlWithChips, type ChipDescriptor, type Chip
 import { HeaderCellContent } from './HeaderCellContent';
 import { ViewSelector, type SavedView } from './ViewSelector';
 import type { SavedQuerySummary } from '../../services/IDataverseClient';
+import { thinScrollbarStyle } from '../../theme/scrollbar';
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Props
@@ -236,6 +237,33 @@ export interface DataGridProps {
    */
   onBack?: () => void;
 
+  /**
+   * OPTIONAL — show the header's built-in saved-view selector. Defaults to `true`
+   * (every existing host keeps its view picker unchanged). Set `false` when the host
+   * owns its OWN view switcher above the grid and the built-in one would duplicate it
+   * (e.g. the reconciliation workspace's dedicated "Email Review views" selector —
+   * email-communication-intelligence-r2 item 1, owner UAT 2026-08-19). Suppresses only
+   * the header-left picker; the command bar, filters, and grid are unaffected.
+   */
+  showViewSelector?: boolean;
+
+  /**
+   * OPTIONAL — replace the header's saved-view selector with a HOST-OWNED view list
+   * rendered in the SAME native toolbar position (header-left). When supplied, the
+   * built-in saved-query selector is bypassed and these views render instead —
+   * selecting one calls `onViewChange` (the host swaps the grid's `configId`). Use
+   * this when the host's views are separate grid CONFIGURATIONS rather than sibling
+   * saved queries (e.g. the reconciliation "Email Review views" — each a distinct
+   * `sprk_gridconfiguration`). Gives a native dataset-grid look with one selector,
+   * IN the toolbar (email-communication-intelligence-r2 item 2, owner UAT 2026-08-19).
+   * Ignored when `showViewSelector` is `false`.
+   */
+  externalViews?: {
+    views: ReadonlyArray<SavedView>;
+    activeViewId: string;
+    onViewChange: (viewId: string) => void;
+  };
+
   /** OPTIONAL — additional class merged AFTER component classes (per Spaarke convention). */
   className?: string;
 }
@@ -298,24 +326,10 @@ const useStyles = makeStyles({
     // sits inside its container with breathing room on the left/right).
     paddingLeft: tokens.spacingHorizontalM,
     paddingRight: tokens.spacingHorizontalM,
-    // Thin overlay scrollbar so the right edge looks clean even when content
-    // overflows. Native overlay scrollbars on macOS/iOS already auto-hide;
-    // these declarations cover Windows Chrome/Edge + Firefox.
-    scrollbarWidth: 'thin',
-    '::-webkit-scrollbar': {
-      width: '8px',
-      height: '8px',
-    },
-    '::-webkit-scrollbar-track': {
-      backgroundColor: 'transparent',
-    },
-    '::-webkit-scrollbar-thumb': {
-      backgroundColor: tokens.colorNeutralStroke2,
-      borderRadius: '4px',
-    },
-    '::-webkit-scrollbar-thumb:hover': {
-      backgroundColor: tokens.colorNeutralStroke1,
-    },
+    // Canonical thin, theme-aware scrollbar (the "modern grey scrollbar"). Replaces
+    // this file's former inline copy that drifted to `colorNeutralStroke2` / 4px —
+    // see `.claude/patterns/ui/thin-scrollbar.md` (it called out this exact drift).
+    ...thinScrollbarStyle,
   },
   loadingOverlay: {
     position: 'absolute',
@@ -713,14 +727,25 @@ async function resolveSource(
 
 function extractEntityFromFetchXml(fetchXml: string): string | undefined {
   if (!fetchXml) return undefined;
+  // Primary: DOMParser (browser). Fall back to a regex when DOMParser is
+  // unavailable/returns a parsererror (owner UAT 2026-08-12 #4C — a valid inline
+  // fetchXml was yielding an empty entityName → the "Cannot resolve entityName"
+  // error; the regex makes extraction robust to DOMParser quirks/XML-decl/BOM/
+  // entity-encoded quotes). Matches `<entity name="…">` or `name='…'`.
   try {
-    const parser = new DOMParser();
-    const doc = parser.parseFromString(fetchXml, 'text/xml');
-    if (doc.querySelector('parsererror')) return undefined;
-    return doc.querySelector('entity')?.getAttribute('name') ?? undefined;
+    if (typeof DOMParser !== 'undefined') {
+      const parser = new DOMParser();
+      const doc = parser.parseFromString(fetchXml, 'text/xml');
+      if (!doc.querySelector('parsererror')) {
+        const name = doc.querySelector('entity')?.getAttribute('name');
+        if (name) return name;
+      }
+    }
   } catch {
-    return undefined;
+    /* fall through to regex */
   }
+  const m = /<entity\b[^>]*\bname\s*=\s*['"]([^'"]+)['"]/i.exec(fetchXml);
+  return m?.[1] ?? undefined;
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -749,6 +774,8 @@ export const DataGrid: React.FC<DataGridProps> = props => {
     availableViewsAllowlist: availableViewsAllowlistOverride,
     theme = webLightTheme,
     onBack,
+    showViewSelector = true,
+    externalViews,
     className,
   } = props;
 
@@ -1431,7 +1458,17 @@ export const DataGrid: React.FC<DataGridProps> = props => {
       <div className={mergeClasses(styles.root, className)} aria-label={contextValue.currentView}>
         <div className={styles.headerCard}>
           <div className={styles.headerLeft}>
-            {selectorViews.length > 0 ? (
+            {showViewSelector && externalViews && externalViews.views.length > 0 ? (
+              // Host-owned views (e.g. reconciliation grid configs) rendered in the
+              // native toolbar position, bypassing the saved-query selector (item 2).
+              <ViewSelector
+                views={externalViews.views}
+                activeViewId={externalViews.activeViewId}
+                onViewChange={externalViews.onViewChange}
+                onBack={onBack}
+                theme={theme}
+              />
+            ) : showViewSelector && selectorViews.length > 0 ? (
               <ViewSelector
                 views={selectorViews}
                 activeViewId={currentViewId}

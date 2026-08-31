@@ -4,6 +4,8 @@ using Sprk.Bff.Api.Api.Filters;
 using Sprk.Bff.Api.Infrastructure.Caching;
 using Sprk.Bff.Api.Models.Ai;
 using Sprk.Bff.Api.Services.Ai;
+using Sprk.Bff.Api.Services.Ai.PublicContracts;
+using Sprk.Bff.Api.Infrastructure.Authentication;
 
 namespace Sprk.Bff.Api.Api.Ai;
 
@@ -186,8 +188,7 @@ public static class PlaybookEndpoints
         var logger = loggerFactory.CreateLogger("PlaybookEndpoints");
 
         // Get user ID from claims
-        var userIdClaim = httpContext.User.FindFirst(ClaimTypes.NameIdentifier)?.Value
-            ?? httpContext.User.FindFirst("oid")?.Value;
+        var userIdClaim = CallerResolution.ResolveObjectId(httpContext.User);
         if (string.IsNullOrEmpty(userIdClaim) || !Guid.TryParse(userIdClaim, out var userId))
         {
             return Results.Problem(
@@ -237,8 +238,7 @@ public static class PlaybookEndpoints
         var logger = loggerFactory.CreateLogger("PlaybookEndpoints");
 
         // Get user ID from claims
-        var userIdClaim = httpContext.User.FindFirst(ClaimTypes.NameIdentifier)?.Value
-            ?? httpContext.User.FindFirst("oid")?.Value;
+        var userIdClaim = CallerResolution.ResolveObjectId(httpContext.User);
         if (string.IsNullOrEmpty(userIdClaim) || !Guid.TryParse(userIdClaim, out var userId))
         {
             return Results.Problem(
@@ -492,8 +492,7 @@ public static class PlaybookEndpoints
         var logger = loggerFactory.CreateLogger("PlaybookEndpoints");
 
         // Get user ID from claims
-        var userIdClaim = httpContext.User.FindFirst(ClaimTypes.NameIdentifier)?.Value
-            ?? httpContext.User.FindFirst("oid")?.Value;
+        var userIdClaim = CallerResolution.ResolveObjectId(httpContext.User);
         if (string.IsNullOrEmpty(userIdClaim) || !Guid.TryParse(userIdClaim, out var userId))
         {
             return Results.Problem(
@@ -583,8 +582,7 @@ public static class PlaybookEndpoints
         var logger = loggerFactory.CreateLogger("PlaybookEndpoints");
 
         // Get user ID from claims
-        var userIdClaim = httpContext.User.FindFirst(ClaimTypes.NameIdentifier)?.Value
-            ?? httpContext.User.FindFirst("oid")?.Value;
+        var userIdClaim = CallerResolution.ResolveObjectId(httpContext.User);
         if (string.IsNullOrEmpty(userIdClaim) || !Guid.TryParse(userIdClaim, out var userId))
         {
             return Results.Problem(
@@ -630,8 +628,7 @@ public static class PlaybookEndpoints
         var logger = loggerFactory.CreateLogger("PlaybookEndpoints");
 
         // Get user ID from claims
-        var userIdClaim = httpContext.User.FindFirst(ClaimTypes.NameIdentifier)?.Value
-            ?? httpContext.User.FindFirst("oid")?.Value;
+        var userIdClaim = CallerResolution.ResolveObjectId(httpContext.User);
         if (string.IsNullOrEmpty(userIdClaim) || !Guid.TryParse(userIdClaim, out var userId))
         {
             return Results.Problem(
@@ -818,8 +815,7 @@ public static class PlaybookEndpoints
         var logger = loggerFactory.CreateLogger("PlaybookEndpoints");
 
         // Get user ID from claims
-        var userIdClaim = httpContext.User.FindFirst(ClaimTypes.NameIdentifier)?.Value
-            ?? httpContext.User.FindFirst("oid")?.Value;
+        var userIdClaim = CallerResolution.ResolveObjectId(httpContext.User);
         if (string.IsNullOrEmpty(userIdClaim) || !Guid.TryParse(userIdClaim, out var userId))
         {
             return Results.Problem(

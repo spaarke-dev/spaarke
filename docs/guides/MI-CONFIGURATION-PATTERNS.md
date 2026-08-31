@@ -96,7 +96,7 @@ Authoritative: `auth-deployment-setup.md` §7.
 
 When provisioning BFF for a new env, work this list top-to-bottom:
 
-- [ ] **Infrastructure**: App Service (Linux .NET 8) + Key Vault + Cosmos DB (Serverless, with `spaarke-ai` DB + 5 containers) + Storage + Service Bus + Redis + AI Search
+- [ ] **Infrastructure**: App Service (Linux .NET 10) + Key Vault + Cosmos DB (Serverless, with `spaarke-ai` DB + 5 containers) + Storage + Service Bus + Redis + AI Search
 - [ ] **Identity**: UAMI (`mi-bff-api-{env}`) created, attached to App Service
 - [ ] **Identity RBAC**: UAMI granted Key Vault Secrets User + Cosmos Data Contributor + 6 Graph app roles (Mail.Send, Mail.Read, FileStorageContainer.Selected, FileStorageContainerTypeReg.Selected, User.ReadWrite.All, Group.ReadWrite.All — adjust per env's feature scope)
 - [ ] **Dataverse Application User**: UAMI registered as systemuser on target Dataverse org with appropriate security role (Pattern 5 above)

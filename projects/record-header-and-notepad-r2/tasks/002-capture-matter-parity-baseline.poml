@@ -1,0 +1,158 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="002" project="record-header-and-notepad-r2">
+  <metadata>
+    <title>Capture MatterHeaderPcf v1.0.20 parity baseline — BLOCKING, before any code change</title>
+    <phase>0 Spike + Baseline</phase>
+    <gate>startable</gate>
+    <status>not-started</status>
+    <rigor>MINIMAL</rigor>
+    <rigor-reason>Documentation/capture task — no code file is created or modified; the deliverable is a baseline doc + screenshots. (Step 3.5.5: documentation/inventory = MINIMAL. The judgment boundary around RS-1 is handled by an explicit escalation trigger, not by rigor gates.)</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Mechanical capture against named files and a named form; the one judgment point (RS-1 breakage) is an explicit escalation, not a reasoning problem.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Hard ordering gate: once ANY code change lands in src/client/pcf/MatterHeader/** or src/client/shared/Spaarke.UI.Components/src/components/RecordHeader/**, there is no v1.0.20 baseline left to capture. This task (with 001) BLOCKS all later tasks; it also needs operator/browser access to spaarkedev1.</parallel-reason>
+    <deps>none</deps>
+    <tags>frontend, e2e-test, documentation</tags>
+    <estimated-effort>2-3 hours</estimated-effort>
+  </metadata>
+
+  <prompt>
+    Capture the complete MatterHeaderPcf v1.0.20 parity baseline BEFORE any R2 code change: screenshots in
+    light and dark theme, the exact 5-field layout with per-field spans, which form field `boundField`
+    binds, the footer version string, and the current lookup + toolbar interactions. Task 080 diffs the
+    migrated Matter header against this baseline — once code changes, the baseline is unrecoverable.
+    KNOWN BREAKAGE: the shipped v1.0.20 currently returns HTTP 400 and fails to load entirely, because its
+    `$select` names the deleted `sprk_mattersummary` column (spec FR-23 RS-1, MatterHeaderView.tsx:83) —
+    expect the runtime capture to be blocked and follow the escalation path when it is.
+  </prompt>
+
+  <role>
+    SPAARKE platform developer. Careful evidence capture; no fixes. Follow ADRs strictly.
+  </role>
+
+  <goal>
+    projects/record-header-and-notepad-r2/notes/matter-parity-baseline.md exists containing every item in
+    the acceptance criteria, with screenshots under projects/record-header-and-notepad-r2/notes/baseline/,
+    OR the code/form-XML half is captured and the runtime half is formally blocked-and-escalated per the
+    RS-1 trigger. No source file modified either way.
+  </goal>
+
+  <context>
+    <background>
+      Spec Dependencies section: "MatterHeaderPcf v1.0.20 baseline captured (screenshots light + dark,
+      exact 5-field layout + spans, bound field) before any code change — it is the parity target."
+      Spec success criterion 15: Matter renders identically to v1.0.20 EXCEPT that lookup cells open the
+      inline dropdown. ⚠️ UPDATED 2026-08-27: the lookup EXCLUSION is WITHDRAWN — FR-15a was amended and both
+      controls now render the same shared inline `components/LookupField`, so task 080 diffs lookups too.
+      CONSEQUENCE FOR THIS TASK: capture the baseline from the CURRENTLY DEPLOYED MatterHeaderPcf, i.e. the
+      status quo users actually see. Do NOT rebuild it first (owner decision 2026-08-27; an earlier note here
+      recommended rebuilding and was WRONG -- rebuilding changes the "before" side to a build that never
+      shipped, which makes it a worse baseline, not a better one). The deployed build bundles the
+      PRE-2026-08-27 shared LookupField, so its lookups lack the browse button, the overlaying dropdown and the
+      pinned Advanced footer. That delta is KNOWN, INTENDED, and caused by a shared-library upgrade rather than
+      by the migration. RECORD IT EXPLICITLY in the baseline doc so task 080 reads the diff correctly.
+      plan.md flags this task as "genuinely blocking". FR-23 RS-1 documents that the shipped header 400s
+      today; task 040 owns the fix. The baseline therefore has two halves: static facts recoverable from
+      code + form XML (capturable regardless), and runtime screenshots (blocked until the header loads).
+    </background>
+    <relevant-files>
+      <file role="canonical-reference">src/client/pcf/MatterHeader/control/MatterHeaderView.tsx</file>
+      <file role="canonical-reference">src/client/pcf/MatterHeader/control/ControlManifest.Input.xml</file>
+      <!-- Deliverable (baseline doc + screenshots) is listed under <outputs>; no src/ surface is added by this task. -->
+    </relevant-files>
+    <dependencies>
+    </dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="project">This task modifies NO source file, NO Dataverse solution, and NO form. It reads and captures only. The RS-1 fix belongs to task 040 — do not implement it here even as a "quick unblock".</constraint>
+    <constraint source="project">Screenshots MUST cover both light and dark theme for every captured state (parity criterion 15 is verified "light and dark" — spec success criteria).</constraint>
+    <constraint source="project">The lookup interaction (inline type-ahead on Matter Type / Practice Area) MUST be captured and explicitly marked "excluded from parity diff — replaced by OOB picker per FR-15a" in the baseline doc, so task 080 does not misread the change as a regression.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>MatterHeader v1.0.20 shipped behavior; parity target definition</topic>
+    <files>
+      <file>src/client/pcf/CLAUDE.md</file>
+      <file>.claude/skills/ui-test/SKILL.md</file>
+      <file>.claude/patterns/ui/record-header-composition.md</file>
+      <file>projects/record-header-and-notepad-r1/notes/lessons-learned.md</file>
+      <file>projects/record-header-and-notepad-r1/notes/matter-form-binding-instructions.md</file>
+    </files>
+    <patterns>
+      <pattern name="shipped layout source of truth" location="src/client/pcf/MatterHeader/control/MatterHeaderView.tsx">The 5-field payload, per-field spans (hand-rolled gridColumn cells), renderer per field, and the $select list are all in this file — capture them from code verbatim; they remain capturable even while the runtime 400s.</pattern>
+    </patterns>
+  </knowledge>
+
+  <steps mode="prescriptive">
+    <step order="0">Context + rigor declaration per task-execute Step 0.5. Confirm via `git status` / `git log` that no R2 code change has touched src/client/pcf/MatterHeader/** or the shared RecordHeader components on this branch — if one has, STOP and escalate (the baseline premise is broken).</step>
+    <step order="1">CODE HALF — from MatterHeaderView.tsx capture into the baseline doc: the exact field list in render order, each field's span and renderer (TextField / editable LookupField / OptionSetField / TextareaField), the full `$select` list (note `sprk_mattersummary` at line 83 — the RS-1 defect), the pending-buffer display resolution, and the footer version string source. From ControlManifest.Input.xml capture: version (1.0.20), `boundField` shape, `title` + `showVersion` properties.</step>
+    <step order="2">FORM HALF — determine which field `boundField` actually binds on the Matter main form (4fa382f2-…): read the form XML (solution export of the form or Dataverse API `systemform` query), expected `sprk_matternumber` per the manifest comment. Record the actual value found, not the expectation.</step>
+    <step order="3">RUNTIME HALF — open a Matter record on the main form in spaarkedev1. If the header renders: capture full-header screenshots light + dark; the sparkle popover open state; To Do and Notepad badge states; an inline lookup type-ahead interaction on Matter Type or Practice Area; an inline text edit showing the form going dirty with no re-render flash; the version footer.</step>
+    <step order="4">If the header FAILS to render (expected per RS-1): capture the failure evidence instead — screenshot of the broken/blank header area plus the DevTools network trace showing the HTTP 400 on the retrieveRecord whose $select includes sprk_mattersummary. Then fire the escalation trigger below.</step>
+    <step order="5">Write projects/record-header-and-notepad-r2/notes/matter-parity-baseline.md assembling steps 1-4, with the FR-15a lookup-exclusion note, and file screenshots under notes/baseline/ with self-describing names (e.g. matter-header-light.png, matter-header-dark.png, sparkle-popover-light.png, rs1-http400-network.png).</step>
+    <step order="6">Update TASK-INDEX.md: set this task's status to ✅ (or 🚧 blocked-on-RS-1 for the runtime half if the escalation fired and the operator has not yet resequenced task 040).</step>
+    <step order="7">If any deviations occurred, document them in projects/record-header-and-notepad-r2/notes/.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If the shipped header fails to load (HTTP 400 per FR-23 RS-1), STOP after capturing the failure evidence and escalate per root CLAUDE.md §6: the operator must choose between (a) executing task 040 as a v1.0.21 hotfix FIRST and re-running the runtime capture against v1.0.21 (recording in the baseline doc that the parity target became v1.0.21 = v1.0.20 minus the broken $select entry), or (b) accepting a code-facts-only baseline. Do NOT apply the RS-1 fix yourself inside this task, and do NOT let renderer tasks start on the strength of a half-captured baseline without the operator's explicit go-ahead.</trigger>
+    <trigger>If the Matter main form no longer binds MatterHeaderPcf at all (control missing from the form), STOP and escalate — the parity premise of FR-26 needs re-confirmation before any migration work.</trigger>
+  </escalation>
+
+  <ui-tests>
+    <test name="Baseline capture — light theme">
+      <url>https://{org}.crm.dynamics.com/main.aspx?pagetype=entityrecord&amp;etn=sprk_matter&amp;id={record-id}</url>
+      <steps>
+        <step>Open a populated Matter record on the main form</step>
+        <step>Verify the MatterHeader control area renders (or capture the RS-1 failure state)</step>
+        <step>Screenshot the full header, sparkle popover, and an inline edit (form dirty, no skeleton flash)</step>
+        <step>Check console + network tab; record any errors verbatim</step>
+      </steps>
+      <expected>All states captured; footer shows v1.0.20; any HTTP 400 captured as RS-1 evidence</expected>
+    </test>
+    <test name="Baseline capture — dark theme (ADR-021 reference)">
+      <steps>
+        <step>Switch the app to dark theme</step>
+        <step>Re-capture the same header states</step>
+        <step>Note any existing token/contrast defects — they are part of the baseline, not something to fix</step>
+      </steps>
+      <expected>Dark-theme twins of every light screenshot, filed under notes/baseline/</expected>
+    </test>
+  </ui-tests>
+
+  <tools>
+    <tool name="terminal">git status verification; file management for screenshots</tool>
+    <tool name="pac">Optional: export the Matter main form to read its form XML</tool>
+  </tools>
+
+  <outputs>
+    <output type="docs">projects/record-header-and-notepad-r2/notes/matter-parity-baseline.md</output>
+    <output type="docs">projects/record-header-and-notepad-r2/notes/baseline/ (screenshots, light + dark)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">The baseline doc records the exact 5-field layout from MatterHeaderView.tsx: field logical names, render order, span per field, and renderer per field — captured from code, verbatim.</criterion>
+    <criterion testable="true">The baseline doc records which form field `boundField` binds on Matter main form 4fa382f2-… as found in the form definition (not assumed).</criterion>
+    <criterion testable="true">The baseline doc records the footer version (v1.0.20), the full `$select` list including the defective `sprk_mattersummary` entry, and the toolbar inventory (title, sparkle, To Do badge, Notepad badge).</criterion>
+    <criterion testable="true">Light AND dark screenshots of every captured runtime state exist under notes/baseline/ — OR the RS-1 failure evidence (screenshot + HTTP 400 network trace) exists and the escalation was raised with the operator's decision recorded in the doc.</criterion>
+    <criterion testable="true">The lookup inline type-ahead interaction is documented and explicitly marked excluded-from-parity per FR-15a, so task 080 has the exclusion in writing.</criterion>
+    <criterion testable="true">Negative: `git status` shows changes ONLY under projects/record-header-and-notepad-r2/notes/ — no source, solution, or form was modified by this task.</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    Spec refs: Dependencies/Prerequisites, FR-23 RS-1, FR-26, success criterion 15. If capture happens
+    against a v1.0.21 hotfix (escalation path a), say so on the first line of the baseline doc — task 080's
+    diff target must be unambiguous. TextField currently renders empty-string values as an empty filled box
+    (task 014 changes this to an em-dash per FR-11): if any baseline Matter field is empty-string-valued,
+    capture it — 080 must treat "empty box became — " as intended, and the baseline is the proof of what
+    it looked like before.
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Before starting this task, load all files listed in knowledge/files. Follow the task-execute skill for the mandatory pre-execution checklist.</protocol>
+  </execution>
+</task>

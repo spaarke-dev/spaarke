@@ -1,0 +1,103 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="066" project="email-communication-intelligence-r2">
+  <metadata>
+    <title>E3b — New-task "Assigned to" uses the OOB advanced-lookup (systemuser/team) instead of a raw id text box</title>
+    <phase>5 Pillar E — Reconciliation UI (mount build, UAT round-2)</phase>
+    <gate>none — prototype approved 2026-08-11; shared lib only, no BFF, no host wiring</gate>
+    <status>completed</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>TEST-MODIFYING (root CLAUDE.md §8) + modifies .tsx in the shared Communication.Components lib; Step 9.5 gates unconditional.</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Single-component change mirroring an explicit in-package reference impl (EmailConnectionsReview lookup); no architectural novelty.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Shared Spaarke.Communication.Components (hot-path per project rule); sequential main-session; /conflict-check before PR.</parallel-reason>
+    <deps>056,063</deps>
+    <tags>react, typescript, frontend, fluent-ui, testing</tags>
+    <estimated-effort>1-2 hours</estimated-effort>
+  </metadata>
+
+  <prompt>
+    In `TaskReconcileTab`, replace the raw "Assigned to (user id)" text `Input` with the standard OOB
+    advanced-lookup (systemuser/team) — reusing the EXACT `getXrmForPicker().Utility.lookupObjects`
+    pattern already shipped in `EmailConnectionsReview.tsx:157-176`. Keep a text-input fallback for
+    non-MDA/dev hosts (the bridge is a guarded no-op there). Applies to BOTH the proposal cards and the
+    ad-hoc "+ New task" form (they share `renderFields`). Shared lib only — no host wiring, no BFF.
+  </prompt>
+  <role>SPAARKE frontend developer. Expert in @spaarke/communication-components + Fluent v9 + the shared getXrmForPicker bridge. Reuse the in-package pattern; make the minimal change; nothing above-and-beyond.</role>
+  <goal>
+    The New-task "Assigned to" field opens the OOB advanced-lookup (entityTypes systemuser + team) and,
+    on pick, stores the selected id in `form.assignedTo` and displays the picked name; on a non-MDA/dev
+    host it silently no-ops and the text-input fallback remains usable. Payload unchanged (`assignedTo` = id).
+  </goal>
+
+  <context>
+    <background>
+      Plan §9 (explicit build plan). `renderFields` (`TaskReconcileTab.tsx`) renders the Assigned-to
+      field at ~:498-505 as a raw text `Input` bound to `form.assignedTo` (systemuser GUID). The
+      canonical OOB advanced-lookup reuse is `EmailConnectionsReview.tsx:157-176`
+      (`getXrmForPicker()` → guard `!xrm?.Utility?.lookupObjects` → `xrm.Utility.lookupObjects({entityTypes, defaultEntityType, allowMultiSelect:false})`
+      → normalize `picked.id.replace(/[{}]/g,'').toLowerCase()`).
+    </background>
+    <relevant-files>
+      <file role="edit">src/client/shared/Spaarke.Communication.Components/src/components/ReconcileTabs/TaskReconcileTab.tsx</file>
+      <file role="edit-tests">src/client/shared/Spaarke.Communication.Components/src/components/ReconcileTabs/__tests__/TaskReconcileTab.test.tsx</file>
+      <file role="reference">src/client/shared/Spaarke.Communication.Components/src/components/EmailAssociationsAndTracking/EmailConnectionsReview.tsx</file>
+      <file role="reference">src/client/shared/Spaarke.Communication.Components/src/components/ReconciliationGrid/__tests__/RelatedToCell.test.tsx</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="plan-§9">SCOPE: reuse `getXrmForPicker` from `@spaarke/ui-components` (add the import). Do NOT build a bespoke picker, add a host prop, or touch the BFF.</constraint>
+    <constraint source="plan-§9">Guarded no-op: if `getXrmForPicker()?.Utility?.lookupObjects` is absent (dev/non-MDA), the lookup returns silently and the editable text `Input` fallback stays functional. Mirror `EmailConnectionsReview.tsx:162`.</constraint>
+    <constraint source="project">Apply to BOTH proposal cards and the ad-hoc "+ New task" form — the change is in the shared `renderFields(key, form)`, so both get it automatically.</constraint>
+    <constraint source="ADR-021">Fluent v9 tokens only; use an existing @fluentui/react-icons glyph for the lookup affordance (e.g. `SearchRegular`).</constraint>
+    <constraint source="project">Payload unchanged: `assignedTo` still carries the id (the `b.assignedTo = form.assignedTo` build path at ~:217 stays). The picked display name is UI-only local state.</constraint>
+    <constraint source="project">No deploy. Build + test only.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>.claude/constraints/pcf.md</file>
+      <file>.claude/adr/ADR-021-fluent-v9.md</file>
+      <file>projects/email-communication-intelligence-r2/notes/pillar-e-mount-build-plan.md</file>
+    </files>
+    <patterns>
+      <pattern name="OOB advanced-lookup reuse" location="src/client/shared/Spaarke.Communication.Components/src/components/EmailAssociationsAndTracking/EmailConnectionsReview.tsx">Lines 157-176 — the exact getXrmForPicker → lookupObjects pattern to mirror (incl. the non-MDA guard + id normalization).</pattern>
+      <pattern name="Xrm/lookup jest mock" location="src/client/shared/Spaarke.Communication.Components/src/components/ReconciliationGrid/__tests__/RelatedToCell.test.tsx">How the tests mock the Xrm lookup bridge — mirror for the assigned-to lookup test.</pattern>
+    </patterns>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="0">Load POML + plan §9 + read the EmailConnectionsReview lookup pattern (157-176) and the current Assigned-to field (~498-505). Run /conflict-check (shared Communication.Components).</step>
+    <step order="1">Import `getXrmForPicker` from `@spaarke/ui-components` + a lookup icon (`SearchRegular`) from @fluentui/react-icons.</step>
+    <step order="2">Add local state for picked display names keyed by row key; add an `openAssignedToLookup(key)` callback mirroring `handleLinkPick` (entityTypes ['systemuser','team'], defaultEntityType 'systemuser', allowMultiSelect false; guard non-MDA; on pick → `patchForm(key,{assignedTo:id})` + store name; on error → `setRowError`).</step>
+    <step order="3">Replace the Assigned-to Field body: keep the editable text `Input` fallback + add a Lookup button; when a name has been picked for the row, show the name + a "Change" affordance. Preserve `data-testid="task-reconcile-assignedto"`; add `data-testid="task-reconcile-assignedto-lookup"`.</step>
+    <step order="4">Tests: add a case mocking `getXrmForPicker` → `lookupObjects` resolving a systemuser → assert `assignedTo` set to the normalized id + name displayed; add a non-MDA no-op case (bridge absent → button click does nothing, text input still editable). Keep existing assertions intact.</step>
+    <step order="5">Build shared lib green (tsc 0-err via the new prebuild chain) + run the TaskReconcileTab jest suite green.</step>
+    <step order="6">Step 9.5 (code-review + adr-check). Update TASK-INDEX 066 → ✅; note in notes/066-*.md.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If `getXrmForPicker` is not exported from `@spaarke/ui-components` (import fails), STOP — the reuse assumption is wrong; do not hand-roll an Xrm bridge.</trigger>
+  </escalation>
+
+  <outputs>
+    <output type="code">src/client/shared/Spaarke.Communication.Components/src/components/ReconcileTabs/TaskReconcileTab.tsx</output>
+    <output type="test">src/client/shared/Spaarke.Communication.Components/src/components/ReconcileTabs/__tests__/TaskReconcileTab.test.tsx</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Assigned-to opens the OOB advanced-lookup via getXrmForPicker → lookupObjects with entityTypes ['systemuser','team']; a pick sets form.assignedTo to the normalized (brace-stripped, lowercased) id.</criterion>
+    <criterion testable="true">The picked user/team display name is shown after selection (UI-only state; payload still sends the id).</criterion>
+    <criterion testable="true">Non-MDA/dev host: the bridge guard makes the lookup a silent no-op and the text-input fallback remains editable (data-testid task-reconcile-assignedto).</criterion>
+    <criterion testable="true">Both the proposal cards and the ad-hoc "+ New task" form get the lookup (shared renderFields).</criterion>
+    <criterion testable="true">No host prop added, no BFF touch, no bespoke picker; getXrmForPicker reused from @spaarke/ui-components.</criterion>
+    <criterion testable="true">Shared lib builds green (tsc 0-err); TaskReconcileTab jest suite green; existing assertions unchanged.</criterion>
+  </acceptance-criteria>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>task-execute FULL; Step 9.5 gates; /conflict-check before PR (shared Communication.Components).</protocol>
+  </execution>
+</task>

@@ -353,6 +353,7 @@ FOR each pattern in <knowledge><patterns>:
 | `worker`, `job`, `background` | `.claude/constraints/jobs.md` |
 | `testing`, `unit-test`, `integration-test` | `.claude/constraints/testing.md` |
 | `config`, `feature-flag` | `.claude/constraints/config.md` |
+| `provisioning`, `provisioning-run`, `l2-controlplane`, `provisioning-handler`, `customer-provisioning` | `.claude/constraints/provisioning.md` |
 
 #### 4b. Load Patterns by Tag (RECOMMENDED)
 
@@ -366,6 +367,7 @@ FOR each pattern in <knowledge><patterns>:
 | `dataverse`, `plugin` | `.claude/patterns/dataverse/plugin-structure.md` |
 | `cache` | `.claude/patterns/caching/distributed-cache.md` |
 | `testing` | `.claude/patterns/testing/unit-test-structure.md`, `.claude/patterns/testing/mocking-patterns.md` |
+| `provisioning`, `provisioning-run`, `l2-controlplane`, `provisioning-handler` | `.claude/patterns/provisioning/INDEX.md` (dispatches to 9 pattern files: manifest-driven-secret-catalog, handler-registration-completeness, progressive-fail-fast-recovery, operator-rbac-bootstrap, keyvault-reference-identity-invariant, resource-name-availability-precheck, openai-quota-region-composition, null-object-kill-switch-anti-pattern, bff-vs-provisioning-boundary) |
 
 #### 4c. Common Knowledge Files by Tag
 

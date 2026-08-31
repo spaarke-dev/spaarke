@@ -1046,6 +1046,47 @@ safeRegisterWidget(
 );
 
 // ---------------------------------------------------------------------------
+// email-communication-intelligence-r2 task 062 (Pillar E): Communications
+// Reconciliation direct widget. Dual-mount with the standalone
+// `sprk_communicationreconciliation` Code Page (`src/solutions/CommunicationReconciliation`)
+// — BOTH mounts render the SAME shared `ReconciliationWorkspace` from
+// `@spaarke/communication-components` (task 061) unchanged; only the host-adapter
+// resolution differs. `ReconciliationWorkspaceWidget.tsx` (this package) is a thin
+// host-adapter wrapper: Xrm-backed `dataverseClient`/`webApi` + `useAiSession()`
+// for `authenticatedFetch`, mirroring `EmailWorkspaceWidget.tsx`. Type string
+// `communications-reconciliation` is distinct from `communications-list` /
+// `email` / `email-compose` (ADR-039 Path C — no collision, no server-side
+// surface identity). MOUNT only (§11): no forked grid/shell/tabs.
+safeRegisterWidget(
+  'communications-reconciliation',
+  {
+    displayName: 'Reconciliation',
+    category: 'data',
+    icon: 'TaskListSquareLtrRegular',
+    allowMultiple: true,
+    // defaultOrder=246: positioned immediately after Email (245), before the
+    // metrics dashboards (300+).
+    defaultOrder: 246,
+    // FR-B1/FR-C3 (task 020): the reconciliation widget embeds a DataGrid over
+    // communication records — the entity-grid bucket is the closest honest fit.
+    contextType: 'matter-grid',
+    // FR-15 (task 050) makes assistantContract REQUIRED; this registration
+    // (task 061) predated enforcement reaching it and shipped without one,
+    // breaking the AI.Widgets tsc gate. Mirrors the sibling 'communications-list'
+    // (defaultOrder 240) exactly: same category/contextType, same "DataGrid over
+    // communication records" surface — an overview-only grid with ONE
+    // parameterized tool and NO per-item cards. Per-item email actions live on
+    // the 'email' direct widget (FR-09/FR-10), not on a reconciliation list.
+    assistantContract: OVERVIEW_ONLY_CONTRACT,
+  },
+  () =>
+    import('./ReconciliationWorkspaceWidget').then(m => ({
+      default:
+        m.ReconciliationWorkspaceWidget as unknown as import('../../types/widget-types').WorkspaceWidgetComponent,
+    }))
+);
+
+// ---------------------------------------------------------------------------
 // ai-spaarke-ai-workspace-UI-r1 #7 (2026-06-08) — Metrics dashboards
 //
 // Each dashboard ("Matters Report", "Invoice Report", "Project Report", …) is

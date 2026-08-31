@@ -237,10 +237,7 @@ export class WordTaskPanePage {
   /**
    * Toggle processing option
    */
-  async setProcessingOption(
-    option: 'profileSummary' | 'ragIndex' | 'deepAnalysis',
-    enabled: boolean
-  ): Promise<void> {
+  async setProcessingOption(option: 'profileSummary' | 'ragIndex' | 'deepAnalysis', enabled: boolean): Promise<void> {
     let toggle: Locator;
     switch (option) {
       case 'profileSummary':
@@ -290,7 +287,7 @@ export class WordTaskPanePage {
    */
   async waitForStageUpdate(stageName: string, timeout = 10000): Promise<void> {
     await this.page.waitForFunction(
-      (stage) => {
+      stage => {
         const stageElement = document.querySelector(`[data-stage="${stage}"]`);
         return stageElement && stageElement.getAttribute('data-status') !== 'Pending';
       },
@@ -326,9 +323,7 @@ export class WordTaskPanePage {
   /**
    * Get job stage statuses
    */
-  async getStageStatuses(): Promise<
-    Array<{ name: string; status: string }>
-  > {
+  async getStageStatuses(): Promise<Array<{ name: string; status: string }>> {
     const stages = await this.stageIndicators.all();
     const statuses: Array<{ name: string; status: string }> = [];
 
@@ -380,10 +375,7 @@ export class WordTaskPanePage {
     await submitButton.click();
 
     // Wait for dialog to close
-    await this.page.waitForFunction(
-      () => document.querySelector('[role="dialog"]') === null,
-      { timeout: 10000 }
-    );
+    await this.page.waitForFunction(() => document.querySelector('[role="dialog"]') === null, { timeout: 10000 });
   }
 
   /**
@@ -406,8 +398,7 @@ export class WordTaskPanePage {
   ): Promise<void> {
     await this.page.addInitScript(
       ({ title, size }) => {
-        const mockOoxmlContent =
-          'PD94bWwgdmVyc2lvbj0iMS4wIj8+CjxkdGQ+...'; // Mock base64 OOXML
+        const mockOoxmlContent = 'PD94bWwgdmVyc2lvbj0iMS4wIj8+CjxkdGQ+...'; // Mock base64 OOXML
 
         (window as any).Word = {
           run: async (callback: (context: any) => Promise<any>) => {
@@ -472,7 +463,7 @@ export class WordTaskPanePage {
    * Mock entity search API response
    */
   async mockEntitySearchApi(results: EntitySearchResult[]): Promise<void> {
-    await this.page.route(`${this.config.apiBaseUrl}/office/search/entities*`, (route) => {
+    await this.page.route(`${this.config.apiBaseUrl}/office/search/entities*`, route => {
       route.fulfill({
         status: 200,
         contentType: 'application/json',
@@ -485,7 +476,7 @@ export class WordTaskPanePage {
    * Mock save API response
    */
   async mockSaveApi(response: SaveJobResponse): Promise<void> {
-    await this.page.route(`${this.config.apiBaseUrl}/office/save`, (route) => {
+    await this.page.route(`${this.config.apiBaseUrl}/office/save`, route => {
       route.fulfill({
         status: response.duplicate ? 200 : 202,
         contentType: 'application/json',
@@ -498,7 +489,7 @@ export class WordTaskPanePage {
    * Mock job status API response
    */
   async mockJobStatusApi(jobId: string, response: JobStatusResponse): Promise<void> {
-    await this.page.route(`${this.config.apiBaseUrl}/office/jobs/${jobId}`, (route) => {
+    await this.page.route(`${this.config.apiBaseUrl}/api/office/jobs/${jobId}`, route => {
       route.fulfill({
         status: 200,
         contentType: 'application/json',
@@ -510,11 +501,8 @@ export class WordTaskPanePage {
   /**
    * Mock SSE stream for job status updates
    */
-  async mockJobStatusSSE(
-    jobId: string,
-    events: Array<{ event: string; data: any; delay?: number }>
-  ): Promise<void> {
-    await this.page.route(`${this.config.apiBaseUrl}/office/jobs/${jobId}/stream`, async (route) => {
+  async mockJobStatusSSE(jobId: string, events: Array<{ event: string; data: any; delay?: number }>): Promise<void> {
+    await this.page.route(`${this.config.apiBaseUrl}/api/office/jobs/${jobId}/stream`, async route => {
       const headers = {
         'Content-Type': 'text/event-stream',
         'Cache-Control': 'no-cache',
@@ -539,38 +527,27 @@ export class WordTaskPanePage {
   /**
    * Mock Quick Create API response
    */
-  async mockQuickCreateApi(
-    entityType: string,
-    response: { id: string; name: string; url: string }
-  ): Promise<void> {
-    await this.page.route(
-      `${this.config.apiBaseUrl}/office/quickcreate/${entityType.toLowerCase()}`,
-      (route) => {
-        route.fulfill({
-          status: 201,
-          contentType: 'application/json',
-          body: JSON.stringify({
-            id: response.id,
-            entityType,
-            logicalName: `sprk_${entityType.toLowerCase()}`,
-            name: response.name,
-            url: response.url,
-          }),
-        });
-      }
-    );
+  async mockQuickCreateApi(entityType: string, response: { id: string; name: string; url: string }): Promise<void> {
+    await this.page.route(`${this.config.apiBaseUrl}/office/quickcreate/${entityType.toLowerCase()}`, route => {
+      route.fulfill({
+        status: 201,
+        contentType: 'application/json',
+        body: JSON.stringify({
+          id: response.id,
+          entityType,
+          logicalName: `sprk_${entityType.toLowerCase()}`,
+          name: response.name,
+          url: response.url,
+        }),
+      });
+    });
   }
 
   /**
    * Mock API error response
    */
-  async mockApiError(
-    endpoint: string,
-    status: number,
-    errorCode: string,
-    message: string
-  ): Promise<void> {
-    await this.page.route(`${this.config.apiBaseUrl}${endpoint}*`, (route) => {
+  async mockApiError(endpoint: string, status: number, errorCode: string, message: string): Promise<void> {
+    await this.page.route(`${this.config.apiBaseUrl}${endpoint}*`, route => {
       route.fulfill({
         status,
         contentType: 'application/json',
@@ -591,7 +568,7 @@ export class WordTaskPanePage {
     recentAssociations: EntitySearchResult[],
     recentDocuments: Array<{ id: string; name: string }> = []
   ): Promise<void> {
-    await this.page.route(`${this.config.apiBaseUrl}/office/recent*`, (route) => {
+    await this.page.route(`${this.config.apiBaseUrl}/office/recent*`, route => {
       route.fulfill({
         status: 200,
         contentType: 'application/json',

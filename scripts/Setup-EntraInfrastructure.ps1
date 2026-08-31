@@ -58,7 +58,12 @@
 
 [CmdletBinding(SupportsShouldProcess)]
 param(
-    [string]$TenantId = "a221a95e-6abc-4434-aecc-e48338a1b2f2",
+    # v3.3 change: -TenantId is MANDATORY (was defaulted to Spaarke tenant) per r1
+    # customer-provisioning-orchestration-r1 design.md §4D tenant-isolation invariant
+    # I1 / FR-28. Sibling script Register-EntraAppRegistrations.ps1 received the
+    # baseline fix (commit 1834b77bc); this script mirrors that pattern via task 065.
+    [Parameter(Mandatory = $true)]
+    [string]$TenantId,
     [string]$BffApiAppId = "1e40baad-e065-4aea-a8d4-4b7ab273458c",
     [string]$GroupDisplayName = "Spaarke Demo Users",
     [string]$ConditionalAccessPolicyName = "Exclude Spaarke Demo Users from MFA",
@@ -74,6 +79,13 @@ $ErrorActionPreference = "Stop"
 $GraphServicePrincipalId = "00000003-0000-0000-c000-000000000000"
 
 # Application permission IDs (from Microsoft Graph permission reference)
+#
+# CANONICAL SOURCE OF TRUTH for the BFF's expected Graph APPLICATION (app-only) roles:
+#   src/server/api/Sprk.Bff.Api/Infrastructure/Auth/GraphAppRoles.cs
+# PowerShell cannot import the C# constant, so keep these three self-service-registration-subsystem
+# entries in sync with the GraphAppRoles.All entries whose OwningModule = "Self-Service Registration"
+# (the Name + Id values below MUST byte-match GraphAppRoles Value + AppRoleId). Adding/removing a role
+# here without updating GraphAppRoles.cs (and vice-versa) reintroduces the drift this constant closes.
 $PermissionsToAdd = @(
     @{ Name = "User.ReadWrite.All";        Id = "741f803b-c850-494e-b5df-cde7c675a1ca"; Type = "Role" }
     @{ Name = "GroupMember.ReadWrite.All";  Id = "dbaae8cf-10b5-4b86-a4a1-f871c94c6571"; Type = "Role" }

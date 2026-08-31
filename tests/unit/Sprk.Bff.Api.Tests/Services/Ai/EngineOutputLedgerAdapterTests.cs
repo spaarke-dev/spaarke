@@ -252,7 +252,7 @@ public class EngineOutputLedgerAdapterTests
         PlaybookId: null,
         CreatedAt: DateTimeOffset.UtcNow,
         LastActivity: DateTimeOffset.UtcNow,
-        Messages: Array.Empty<ChatMessage>());
+        Messages: Array.Empty<ChatMessage>()) { OwnerOid = TestSessionOwner.Oid };
 
     private static EngineRunOutput BuildSuccessResult(
         string? text = "Aggregated engine composite output.",

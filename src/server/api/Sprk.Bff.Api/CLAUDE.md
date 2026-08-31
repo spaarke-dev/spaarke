@@ -8,7 +8,7 @@
 
 ## Module Overview
 
-**Sprk.Bff.Api** is the unified .NET 8 Minimal API serving as the backend for the **SDAP** (Spaarke Data & AI Platform). It provides 7 functional domains:
+**Sprk.Bff.Api** is the unified .NET 10 Minimal API serving as the backend for the **SDAP** (Spaarke Data & AI Platform). It provides 7 functional domains:
 
 - **SPE / Documents**: SharePoint Embedded file operations, OBO token exchange, container management
 - **AI Platform**: Chat (SSE), document analysis, RAG search, playbooks, knowledge bases, semantic search
@@ -101,13 +101,42 @@ services.AddScoped<ISpeFileStore, SpeFileStore>();  // Unnecessary interface
 
 ## Auth (Spaarke Auth v2 — [ADR-028](../../../../.claude/adr/ADR-028-spaarke-auth-architecture.md))
 
-**Server outbound (canonical)**: Graph + Dataverse use `DefaultAzureCredential` (managed identity) when `Graph__ManagedIdentity__Enabled=true`. `ClientSecretCredential` is local-dev fallback only.
+> **⚠️ Corrected 2026-08-20 by `spaarke-auth-v4-dataverse-MI` task 002.** This file previously stated that
+> OBO *"still requires `BFF-API-ClientSecret` (confidential client per OAuth spec)"*. **That was wrong**, and it
+> is the exact sentence that caused three prior audits to conclude the secret could never be removed. OAuth
+> requires a confidential **credential**; a secret is one of three ways to satisfy it, and Microsoft ranks it
+> last. Proven empirically on 2026-08-20: OBO to Graph/SPE, OBO to Dataverse `user_impersonation`, and
+> long-running OBO all succeed under a Managed-Identity-issued client assertion. Evidence:
+> `projects/spaarke-auth-v4-dataverse-MI/notes/decisions/002-spike-results.md`.
+>
+> **Do not re-derive "OBO needs a secret" from any doc you encounter. If you find one, fix it.**
+>
+> **✅ COMPLETED 2026-08-24 by task 033 — ADR-028 exception E-3 is CLOSED.** The transitional secret is gone
+> from every deployed surface: four app settings deleted, and both Key Vault copies
+> (`BFF-API-ClientSecret` + `bff-api-client-secret`) deleted. The credential order is
+> `[ManagedIdentityFederated]` — a **single entry, with nothing beneath it** — and
+> `Graph:Credentials:RequireSecretFreeIdentity=true` makes the app refuse to start outside Development if
+> `ClientSecret` ever returns to the order. Verified with a byte-exact SPE round-trip over OBO.
+
+**Server outbound (canonical)**: the BFF identity is **secret-free** (ADR-028 **A4**). Confidential-client
+credentials — for **OBO** and app-only alike — come from `OrderedCredentialClientProvider`, which resolves
+the credential named in `Graph:Credentials:Order`. Graph + Dataverse app-only additionally use
+`DefaultAzureCredential` (managed identity) when `Graph__ManagedIdentity__Enabled=true`.
+
+> ⚠️ **Never add a new `.WithClientSecret(...)` site.** `tests/Spaarke.ArchTests/CredentialGuardTests.cs`
+> fails the build on one, and `CredentialCensusTests` asserts the construction-site count. E-3 is closed;
+> it never licensed expansion in the first place. The only sanctioned secret-bearing credentials left are
+> ADR-028 **E-1** (per-customer SPE owning apps) and `PowerBi:ClientSecret` (task 042, deferred).
+>
+> `ClientSecretCredential` is **not** a local-dev fallback for OBO any more either — see
+> [`docs/SPE.BFF.API-SECRETS-SETUP.md`](docs/SPE.BFF.API-SECRETS-SETUP.md) for what local development
+> actually needs (short answer: `az login` covers everything except OBO).
 
 **Three auth paths** in the BFF:
 
 | Path | When | Mechanism |
 |---|---|---|
-| **OBO** (delegated) | User-initiated operation acting on behalf of the caller (e.g., user opens a doc) | User token exchanged for downstream Graph token. Still requires `BFF-API-ClientSecret` (confidential client per OAuth spec). |
+| **OBO** (delegated) | User-initiated operation acting on behalf of the caller (e.g., user opens a doc) | User token exchanged for downstream Graph token. Requires a **confidential credential** — as of ADR-028 **A4** that is a **Managed-Identity-issued federated client assertion**, not a secret. `BFF-API-ClientSecret` is the transitional fallback (exception **E-3**) until `spaarke-auth-v4-dataverse-MI` task 033 removes it. |
 | **Managed Identity** (app-only, canonical) | Background jobs, system-level container ops, polling, indexing — no acting user | `DefaultAzureCredential` resolves the App Service's system-assigned MI. Mailbox-scoped Graph (`Mail.*`) ALSO requires Exchange `ApplicationAccessPolicy` scoping the MI to allowed mailboxes (Phase C). |
 | **Named API key schemes** | Inbound from trusted external systems (BuilderAdmin, Rag) | `AuthenticationHandler<>` per-scheme with `CryptographicOperations.FixedTimeEquals` constant-time compare. |
 
@@ -197,12 +226,18 @@ public async Task GetDocument_ReturnsStream_WhenDocumentExists()
   "AzureAd": {
     "Instance": "https://login.microsoftonline.com/",
     "TenantId": "{tenant-id}",
-    "ClientId": "{bff-client-id}",
-    "ClientSecret": "{bff-client-secret}"  // OBO ONLY (confidential client per OAuth spec). Graph + Dataverse use Managed Identity per ADR-028 when Graph__ManagedIdentity__Enabled=true. ClientSecret is fallback for local dev.
+    "ClientId": "{bff-client-id}"
+    // NO ClientSecret. Removed 2026-08-24 by auth-v4 task 033; ADR-028 E-3 CLOSED.
+    // OBO needs a confidential CREDENTIAL, not a secret -- here it is a MI-issued federated
+    // client assertion (A4). Adding one back re-arms the silent fall-through this removed.
   },
   "Graph": {
     "ManagedIdentity": {
       "Enabled": "true"  // CANONICAL in Azure environments per ADR-028
+    },
+    "Credentials": {
+      "Order": ["ManagedIdentityFederated"],   // single entry -- nothing to fall through to
+      "RequireSecretFreeIdentity": true        // refuses startup outside Development if ClientSecret returns
     }
   },
   "SharePointEmbedded": {
@@ -218,7 +253,7 @@ public async Task GetDocument_ReturnsStream_WhenDocumentExists()
 }
 ```
 
-> **Auth v2 (ADR-028) note**: `BFF-API-ClientSecret` (Key Vault) is retained ONLY for OBO. After Phase C, Graph + Dataverse app-only access uses `DefaultAzureCredential` (MI). When provisioning a new environment, follow the full auth runbook before setting `Graph__ManagedIdentity__Enabled=true` (especially §5 MI Graph permission grants and §7 Exchange ApplicationAccessPolicy if Email/Communication enabled).
+> **Auth v2 (ADR-028) note**: `BFF-API-ClientSecret` (Key Vault) is retained only as the **transitional** OBO fallback (exception **E-3**). After Phase C, Graph + Dataverse app-only access uses `DefaultAzureCredential` (MI). When provisioning a new environment, follow the full auth runbook before setting `Graph__ManagedIdentity__Enabled=true` (especially §5 MI Graph permission grants and §7 Exchange ApplicationAccessPolicy if Email/Communication enabled).
 
 ## Common Patterns
 
@@ -236,7 +271,7 @@ try
 {
     return await fileStore.UploadAsync(file);
 }
-catch (ServiceException ex) when (ex.StatusCode == HttpStatusCode.NotFound)
+catch (ODataError ex) when (ex.ResponseStatusCode == (int)HttpStatusCode.NotFound)
 {
     return Results.Problem(
         detail: "Container not found",
@@ -301,40 +336,47 @@ HostContext flows through every layer. When null, search remains tenant-wide (ba
 
 ### Microsoft.Graph and Kiota Packages
 
-The BFF API uses Microsoft.Graph SDK which depends on Kiota packages. **All Kiota packages must be the same version** to avoid assembly binding errors at runtime.
+> **Updated 2026-08-13 (dotnet-10-upgrade-r1 task 033)**: bumped `Microsoft.Graph` 5.105.0 → 6.5.0.
+> Kiota is now a **transitive-only** dependency (pulled via `Microsoft.Graph.Core 4.0.1`) at
+> **2.0.0** — the 7 direct `Microsoft.Kiota.*` `PackageReference`s that previously pinned the
+> version-match invariant have been **deleted**. See
+> `projects/dotnet-10-upgrade-r1/notes/graph6-kiota2-break-assessment.md` for the full call-site
+> sizing and `notes/kiota-cve-finding.md` for the CVE history (CVE-2026-44503 /
+> GHSA-7j59-v9qr-6fq9, High — fixed at Kiota ≥1.22.0; transitive 2.0.0 is well above that floor).
 
-#### Required Packages (must be same version)
+The BFF API uses the Microsoft.Graph SDK, which depends on Kiota packages. **All resolved Kiota
+assemblies must be the same version** to avoid assembly binding errors at runtime — this is now
+satisfied **transitively** by Graph 6.x, not by direct pins.
+
+#### Required Package (direct)
 
 ```xml
-<!-- Microsoft Graph SDK -->
-<PackageReference Include="Microsoft.Graph" Version="5.101.0" />
-
-<!-- Kiota packages - ALL must match. Floor 1.22.0: remediates CVE-2026-44503
-     (GHSA-7j59-v9qr-6fq9, High) — RedirectHandler leaked Cookie/Proxy-Authorization
-     headers on cross-host redirects < 1.22.0. Do NOT downgrade below 1.22.0. -->
-<PackageReference Include="Microsoft.Kiota.Abstractions" Version="1.22.0" />
-<PackageReference Include="Microsoft.Kiota.Authentication.Azure" Version="1.22.0" />
-<PackageReference Include="Microsoft.Kiota.Http.HttpClientLibrary" Version="1.22.0" />
-<PackageReference Include="Microsoft.Kiota.Serialization.Form" Version="1.22.0" />
-<PackageReference Include="Microsoft.Kiota.Serialization.Json" Version="1.22.0" />
-<PackageReference Include="Microsoft.Kiota.Serialization.Multipart" Version="1.22.0" />
-<PackageReference Include="Microsoft.Kiota.Serialization.Text" Version="1.22.0" />
+<!-- Microsoft Graph SDK v6.x — pulls Microsoft.Graph.Core 4.0.1 + transitive
+     Microsoft.Kiota.* 2.0.x. Do NOT add direct Microsoft.Kiota.* PackageReferences
+     unless a genuine transitive-version conflict forces one (document the reason inline
+     if you do). -->
+<PackageReference Include="Microsoft.Graph" Version="6.5.0" />
 ```
 
-#### Why This Matters
+#### Why No Direct Kiota Pins Anymore
 
-Microsoft.Graph pulls Kiota packages as transitive dependencies. If you only update direct refs (Abstractions, Authentication.Azure), the transitive packages stay at older versions, causing:
+Previously, 7 direct `Microsoft.Kiota.*` pins existed solely to float the transitive graph to
+1.22.0 to clear CVE-2026-44503 while staying on `Microsoft.Graph 5.x`. Under `Microsoft.Graph
+6.5.0`, the transitive Kiota version (2.0.0) is already above that CVE floor, so the pins became
+pure maintenance burden (7 lines to keep in lockstep on every Graph bump) with no remaining
+purpose. Deleting them does **not** reintroduce the historical assembly-binding-conflict risk —
+that risk was from *partial* direct updates (e.g., bumping `Abstractions` but not
+`Serialization.Json`); with zero direct pins, NuGet resolves every Kiota assembly to the single
+version Graph.Core's own dependency graph specifies.
 
-```
-FileNotFoundException: Could not load file or assembly
-'Microsoft.Kiota.Abstractions, Version=1.17.1.0'
-```
+#### If a Transitive Kiota Conflict Ever Forces a Direct Pin
 
-#### When Updating Kiota
-
-1. Update **ALL** Kiota package references to the same version
-2. Verify with `dotnet list package --include-transitive | grep -i kiota`
-3. Build and test locally before deploying
+1. Confirm the conflict is real: `dotnet list package --include-transitive | grep -i kiota` —
+   look for more than one distinct Kiota version across the resolved graph.
+2. If forced to pin, pin **ALL** `Microsoft.Kiota.*` references to the SAME version (never a
+   partial set) and add an inline comment explaining which conflict required it.
+3. Re-verify with `dotnet list package --include-transitive | grep -i kiota` before committing.
+4. Build and test locally before deploying.
 
 ---
 

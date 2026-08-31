@@ -1,0 +1,137 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="130" project="customer-provisioning-orchestration-r1">
+  <metadata>
+    <title>H3: Graph app-reg port (Applications/ServicePrincipals/AppRoleAssignedTo/Oauth2PermissionGrants) + real consent verifier + KV writes + H10-idiom app-user assign</title>
+    <phase>C'' Wave G-3 -- Identity + deploy</phase>
+    <gate>cleared</gate>
+    <status>completed</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Heaviest single port in the whole Phase G'' backlog per DS-1b (982-line script, 14 grants, consent flow) -- security-sensitive (Entra app registration, consent gate). FULL rigor.</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Named explicitly in the parent task instructions' xhigh-effort exception list: 'complex-but-fully-specified... H3 heavy port' -- Sonnet @ xhigh.</model-tier-reason>
+    <effort>xhigh</effort>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <deps>102, 103, 125, 126</deps>
+    <tags>l2-controlplane, job-handler, option-d, sdk-port, auth</tags>
+    <estimated-effort>14-20 hours</estimated-effort>
+  </metadata>
+
+  <prompt>Port H3EntraAppRegHandler.cs's collaborator RegisterEntraAppRegScriptProvisioner (Register-EntraAppRegistrations.ps1, 982 lines: az ad app x19, az ad sp x2, az rest [Graph] x3, az keyvault secret x3, pac admin assign-app-to-environment x1) to Microsoft.Graph 6.x (already a BFF dependency at 6.5.0): Applications.PostAsync for app registration, ServicePrincipals for SP creation, AppRoleAssignedTo for the 14 grants, Oauth2PermissionGrants for delegated-permission wiring; KV writes via SecretClient (task 125's collaborator); the lone `pac admin assign-app-to-environment` call maps to the EXACT SAME Dataverse Web API app-user creation H10's collaborators already perform in-process (DataverseWebApiAppUserCreator.cs idiom -- REUSE it, do not reimplement). ALSO replace NullAdminConsentVerifier (which always returns Verified -- the consent gate can currently advance on fiction) with a real implementation: ONE Graph oauth2PermissionGrants query (~80 LOC per DS-1b) that actually checks whether admin consent was granted.
+
+  **Auth-v4 coordination amendment (v3.5, 2026-08-19, per spec.md FR-39 + design.md §4.1 H3 row + §4D I6)**: this port MUST implement a runtime branch keyed on tenancy model, not a single unconditional app-reg-creation path. **Model 1**: the app-reg step is a NO-OP -- the shared multitenant BFF app-reg (`AzureADMultipleOrgs`) already exists; this branch instead (a) verifies the shared app-reg's 14 AppRoleAssignedTo grants are current and (b) registers the customer tenant's service principal via the H0.5/D18 consent-callback path (coordinate with whichever task owns H0.5 -- do not reimplement consent-capture here). **Model 2**: creates a per-customer app-reg (as originally scoped) PLUS a federated identity credential (FIC) trusting the shared BFF UAMI, following auth-v4's §3.1 recipe (issuer = customer tenant OR Spaarke tenant depending on Spaarke-hosted vs customer-owned; subject = the UAMI's `principalId`, NOT `clientId`; audiences = `["api://AzureADTokenExchange"]`; retry logic for `AADSTS70021` propagation-delay errors, which are expected and NOT a failure on first occurrence). The app-reg selection logic itself (which branch runs) MUST derive from per-tenant request context with no default/fallback (I6 enforcement, design.md §4D).</prompt>
+
+  <role>SPAARKE platform developer. Expert in Microsoft.Graph 6.x Applications/ServicePrincipals/AppRoleAssignments/Oauth2PermissionGrants SDK surface, Entra app-registration idempotency, admin-consent verification via oauth2PermissionGrants queries, and federated identity credential (FIC) creation for Managed-Identity-as-issuer patterns.</role>
+
+  <goal>H3EntraAppRegHandler.cs's provisioner is a pure Microsoft.Graph SDK implementation with a tenancy-model runtime branch: **Model 1** verifies the shared app-reg's grants + registers customer-tenant trust via consent-callback (no new app-reg or FIC object created). **Model 2** performs app-reg ensure (idempotent create-if-absent), SP ensure, the 14 AppRoleAssignedTo grants (per GraphAppRoles.cs's completed 11-of-14 catalog, task 005), Oauth2PermissionGrants wiring, KV writes, Dataverse app-user assignment via the REUSED H10 idiom, AND FIC creation trusting the shared BFF UAMI per auth-v4's §3.1 recipe with exchange-based verification (not creation-200 alone) and propagation-delay retry. A real AdminConsentVerifier replaces NullAdminConsentVerifier for the Model 2 path, performing a genuine Graph query proving consent was granted (not assumed). Recipe order per DS-4 §3 (Model 2 branch): Graph app ensure -&gt; 14 AppRoleAssignedTo grants -&gt; consent gate -&gt; real Oauth2PermissionGrants verify -&gt; FIC creation + verify -&gt; KV writes -&gt; Dataverse app-user assign. The branch selection itself is I6-enforced: derived from per-tenant request context, no default/fallback.</goal>
+
+  <context>
+    <background>DS-1b classifies H3's collaborator as 'the single heaviest port' (8-10 person-days per DS-1b §5) among all Class-A handlers. DS-4 §3 (H3 deep-dive) is explicit about the current defect's severity: 'POML 046 disclosed the Null consent verifier in scaffold headers, but the handler BEHAVES AS IF consent is verified (gate can advance on fiction).' This is distinct from an honestly-disclosed interim state -- it is a gate that silently passes. DS-4's recipe order (app ensure -&gt; 14 grants -&gt; consent gate -&gt; real verify -&gt; KV -&gt; Dataverse assign) is the authoritative sequencing this task follows. The 11-of-14 GraphAppRoles.cs GUIDs are already complete (task 005); the remaining 3 are a pre-existing, separately-tracked project risk item, not this task's scope to complete.</background>
+    <relevant-files>
+      <file role="modify">src/server/services/Sprk.Provisioning.ControlPlane.Core/Handlers/EntraAppReg/H3EntraAppRegHandler.cs</file>
+      <file role="new">src/server/services/Sprk.Provisioning.ControlPlane.Core/Handlers/EntraAppReg/GraphAppRegistrationProvisioner.cs</file>
+      <file role="new">src/server/services/Sprk.Provisioning.ControlPlane.Core/Handlers/EntraAppReg/GraphAdminConsentVerifier.cs</file>
+      <file role="modify">src/server/services/Sprk.Provisioning.ControlPlane.Core/Handlers/EntraAppReg/NullAdminConsentVerifier.cs (retire)</file>
+      <file role="canonical-reference">scripts/Register-EntraAppRegistrations.ps1</file>
+      <file role="canonical-reference">src/server/services/Sprk.Provisioning.ControlPlane.Core/Handlers/DataverseAppUserGraphParity/DataverseWebApiAppUserCreator.cs</file>
+      <file role="canonical-reference">src/server/api/Sprk.Bff.Api/Infrastructure/Auth/GraphAppRoles.cs</file>
+    </relevant-files>
+    <dependencies>
+      <dependency task="102" status="pending">wave-sequencing</dependency>
+      <dependency task="103" status="pending">H3 keyed registration</dependency>
+      <dependency task="125" status="pending">H4's SecretClient collaborator this task reuses for KV writes must exist</dependency>
+      <dependency task="126" status="pending">H4's real-value-sourcing fix must have landed so the KV values H3 reads/writes are functional, not placeholder</dependency>
+    </dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="design.md §4.1b">Handler runtime classification (Option D hybrid, DS-1b Sec.2): 12 handlers are pure .NET SDK/REST under DefaultAzureCredential pinned to the L2 UAMI (Class A); H14a is the sole Class-C residual (Exchange sidecar); H7/H10/H11/H12c are already native. No ProcessStartInfo/shell-out collaborator may remain in this handler's target state.</constraint>
+    <constraint source="spec.md MUST rules (post-line-254 block)">No new ProcessStartInfo/shell-out collaborator may be introduced by this task. Option D's entire point is deleting the pwsh/az/pac dependency from the L2 runtime, not adding to it (the sole designed exception is the H14a Exchange sidecar).</constraint>
+    <constraint source="DS-4 §3 H3 deep-dive">Recipe order is binding, not incidental: Graph app ensure -&gt; 14 AppRoleAssignedTo grants -&gt; consent gate -&gt; real Oauth2PermissionGrants verify -&gt; KV writes -&gt; Dataverse app-user assign via the H10 idiom. Do not reorder (e.g., writing KV secrets before consent verification would leak a functional secret before the consent gate has genuinely passed).</constraint>
+    <constraint source="this project's CLAUDE.md MUST rules">MUST complete 11 of 14 null AppRoleId GUIDs in GraphAppRoles.cs BEFORE first production customer -- already done (task 005). This task consumes the completed catalog; it does NOT re-verify or re-complete the GUIDs.</constraint>
+    <constraint source="DS-4 §3">REUSE the H10 Dataverse app-user creation idiom verbatim for the pac admin assign-app-to-environment replacement -- do not write a second, parallel implementation of the same find-by-applicationid/create/role-associate sequence.</constraint>
+    <constraint source="spec.md FR-39 + design.md §4.1 H3 row (added v3.5 2026-08-19, auth-v4 coordination)">The Model 1 vs Model 2 runtime branch is BINDING, not optional scope. Model 1 MUST NOT create a new app-reg or FIC object -- doing so would violate the spec.md MUST-rule split (Model 1 = single shared app-reg only). Model 2's FIC creation follows auth-v4's §3.1 recipe exactly (subject = UAMI principalId, not clientId -- this is the documented most-common misconfiguration trap).</constraint>
+    <constraint source="design.md §4D invariant I6 (Model 1 only, added v3.5)">The code path selecting which app-reg branch to run (Model 1 no-op vs Model 2 create) MUST take tenant/tenancy-model context as an explicit parameter with no default or fallback value -- this is the exact call site the new `Spaarke.ArchTests.TenantIsolation.I6_ObApp*` ArchTest will scan.</constraint>
+    <constraint source="auth-v4 §3.2 (coordination note, notes/AUTH-V4-CHANGE-REQUEST-RESPONSE.md)">If `spaarke-auth-v4-dataverse-MI` has already landed a FIC-creation extension to `scripts/Register-EntraAppRegistrations.ps1` by the time this task executes, INVOKE that extended script/logic rather than duplicating FIC-creation logic independently (soft dependency -- check before authoring FIC creation from scratch).</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>H3 Graph app-reg port + real consent verifier</topic>
+    <files>
+      <file>projects/customer-provisioning-orchestration-r1/spec.md</file>
+      <file>projects/customer-provisioning-orchestration-r1/design.md</file>
+      <file>projects/customer-provisioning-orchestration-r1/CLAUDE.md</file>
+      <file>projects/customer-provisioning-orchestration-r1/notes/design-study-ds4-handler-audit.md</file>
+      <file>projects/customer-provisioning-orchestration-r1/notes/design-study-ds4-handler-audit.md</file>
+      <file>projects/customer-provisioning-orchestration-r1/notes/design-study-ds1b-option-d-hybrid-deep-dive.md</file>
+      <file>.claude/constraints/auth.md</file>
+    </files>
+    <patterns>
+      <pattern name="Idempotent App User registration (reuse, not reimplement)" location="src/server/services/Sprk.Provisioning.ControlPlane.Core/Handlers/DataverseAppUserGraphParity/DataverseWebApiAppUserCreator.cs">The exact find-by-applicationid/create-if-absent/role-associate sequence H3's Dataverse-assign step reuses verbatim per DS-4's explicit instruction.</pattern>
+    </patterns>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="0" name="Rigor + load">Emit RIGOR LEVEL (FULL, xhigh effort). Read Register-EntraAppRegistrations.ps1 in FULL (982 lines) plus GraphAppRoles.cs's completed catalog and DataverseWebApiAppUserCreator.cs in full.</step>
+    <step order="1" name="App-reg + SP ensure">Author GraphAppRegistrationProvisioner: idempotent Applications.PostAsync (find-by-displayName or a tracked appId first) + ServicePrincipals ensure.</step>
+    <step order="2" name="14 grants">Wire the 14 AppRoleAssignedTo grants per GraphAppRoles.cs's completed catalog.</step>
+    <step order="3" name="Real consent verifier">Author GraphAdminConsentVerifier: query Oauth2PermissionGrants, assert the expected scope set is present -- replace NullAdminConsentVerifier's unconditional Verified with this real check. WaitingOnGate is the correct outcome when consent is genuinely not yet granted (external human latency, per DS-4b's wall-clock analysis -- this is a session-free wait, not a bug).</step>
+    <step order="4" name="KV writes">Wire H4's SecretClient collaborator (task 125) for H3's own KV writes (the app-reg client secret, etc.).</step>
+    <step order="5" name="Dataverse app-user assign">Reuse DataverseWebApiAppUserCreator's exact idiom (either by direct reuse of the class, or a thin H3-scoped wrapper calling into the same underlying sequence) for the pac admin assign-app-to-environment replacement.</step>
+    <step order="6" name="Wire up">Replace RegisterEntraAppRegScriptProvisioner and NullAdminConsentVerifier in H3's owning module with the new real implementations.</step>
+    <step order="7" name="Parity tests">Author acceptance tests asserting parity against recorded script outputs (DS-1b §6's mitigation for the heavy-port risk class) -- at minimum, the 14-grant set + the app-reg idempotency (re-run = no-op) + the real-vs-fake consent-gate branching.</step>
+    <step order="8" name="Build + verify">dotnet build 0 errors; dotnet test green.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If any of the 14 AppRoleAssignedTo grants targets a GraphAppRoles.cs entry that is STILL a null GUID (one of the 3 not-yet-completed per task 005's 11-of-14 status), STOP and escalate per this project's existing risk-register entry rather than skipping that grant silently — a skipped grant is a silent T3-class failure exactly like the risk register warns.</trigger>
+    <trigger>If the real GraphAdminConsentVerifier's query shape does not match what NullAdminConsentVerifier's callers expect (e.g., a WaitingOnGate outcome the handler's state machine doesn't have a transition for), STOP and escalate to confirm the gate-state contract with the dispatcher/reconciler design (tasks 102/104) before shipping a verifier whose real outcomes the handler can't correctly route.</trigger>
+    <trigger>Auth-v4 coordination (spec.md FR-39, design.md §4.1 H3 row): if `spaarke-auth-v4-dataverse-MI`'s FIC-creation extension to `scripts/Register-EntraAppRegistrations.ps1` (§3.2 of their change request) has landed by the time this task executes, STOP before authoring independent FIC-creation logic -- invoke the extended script/logic instead per the soft-dependency constraint above.</trigger>
+    <trigger>If the H0.5/D18 consent-callback path this task's Model 1 branch depends on for customer-tenant trust registration is not yet implemented/available when this task executes, STOP and escalate to confirm sequencing with whichever task owns H0.5 -- do not stub or reimplement consent-capture logic inside H3.</trigger>
+  </escalation>
+
+  <tools>
+    <tool name="dotnet">build/test</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/server/services/Sprk.Provisioning.ControlPlane.Core/Handlers/EntraAppReg/GraphAppRegistrationProvisioner.cs</output>
+    <output type="code">src/server/services/Sprk.Provisioning.ControlPlane.Core/Handlers/EntraAppReg/GraphAdminConsentVerifier.cs</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">grep 'ProcessStartInfo\|Register-EntraAppRegistrations.ps1' in the new H3 collaborator files returns 0 matches.</criterion>
+    <criterion testable="true">A test confirms all 14 AppRoleAssignedTo grants are attempted against GraphAppRoles.cs's completed catalog entries (11 real GUIDs; the 3 still-null entries are explicitly skipped WITH a loud warning, not silently dropped).</criterion>
+    <criterion testable="true">GraphAdminConsentVerifier test: given a fake Oauth2PermissionGrants response WITHOUT the expected scope set, the verifier returns NOT-Verified (WaitingOnGate), not Verified -- proving the gate can no longer advance on fiction.</criterion>
+    <criterion testable="true">GraphAdminConsentVerifier test: given a fake Oauth2PermissionGrants response WITH the expected scope set, the verifier returns Verified.</criterion>
+    <criterion testable="true">The Dataverse app-user assignment step reuses (via direct call or thin wrapper) DataverseWebApiAppUserCreator's exact idiom -- grep confirms no duplicate find-by-applicationid/create/associate implementation exists in H3's new files.</criterion>
+    <criterion testable="true">dotnet build exits 0; dotnet test exits 0.</criterion>
+    <criterion testable="true">I6 enforcement: a test confirms the app-reg branch-selection function requires an explicit tenancy-model/tenant-context parameter with no default value (compile-time or runtime) -- calling it without one is not possible / fails loudly.</criterion>
+    <criterion testable="true">A Model 1 run of this handler creates ZERO new app-reg objects and ZERO new FIC objects -- only grant-currency verification + consent-callback trust registration occur.</criterion>
+    <criterion testable="true">A Model 2 run creates exactly one app-reg + one FIC per customer, with the FIC's `subject` set to the UAMI's `principalId` (verified against a fake/mock, not the `clientId`), and the FIC creation is followed by an exchange-based verification call (not treated as verified on a 200 from the creation call alone).</criterion>
+  </acceptance-criteria>
+
+  <notes>Justification (CLAUDE.md §11): Existing -- Microsoft.Graph 6.5.0 is already a BFF dependency and DataverseWebApiAppUserCreator already implements the exact app-user idiom H3's last step needs; nothing new to invent for those two pieces. Extension -- porting the remaining 982-line script's app-reg/grant/consent logic to Graph SDK calls, while REUSING (not reimplementing) the app-user step, is the correct minimal-duplication extension. Cost-of-doing-nothing -- H3 cannot execute under Option D's zero-shell main site; separately, and more dangerously, the consent gate currently 'behaves as if consent is verified' when it is not -- a customer's admin consent could be silently assumed-granted, an auth-integrity defect DS-4 calls out as worse than a mere missing feature.</notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+  </execution>
+
+  <notes-completion date="2026-08-19">
+Landed: GraphAppRegistrationProvisioner.cs (Model 2 Graph SDK ensure/create/reconcile app-reg + SP + client-secret + FIC), GraphAdminConsentVerifier.cs (real oauth2PermissionGrants query -- replaces NullAdminConsentVerifier's unconditional Verified), EntraAppRegPermissionCatalog.cs (shared 5-delegated-permission source of truth). H3EntraAppRegHandler.cs rewritten with the Model 1/Model 2 tenancy branch (I6-enforced -- explicit tenancyModel required, no default), deferred-KV-write ordering (DS-4 SS3 binding: KV writes commit only AFTER consent Verified, never before), and BFF-API-ClientId/Audience/ClientSecret RunParameters.Secrets population (task 129's manifest.yaml contract). RegisterEntraAppRegScriptProvisioner.cs + NullAdminConsentVerifier.cs retired (kept on disk, unregistered, retirement banners added -- same pattern as AzCliKvSecretsWriter.cs). Microsoft.Graph 6.5.0 added to Sprk.Provisioning.ControlPlane.Core.csproj (L2's first Graph SDK dependency; every other L2 Graph collaborator stayed on raw HttpClient REST -- a considered per-handler exception, design.md SS4.1's H3 SDK-surface table explicitly assigns Microsoft.Graph 6.x to H3).
+
+DEVIATIONS FROM THIS POML'S LITERAL TEXT (Path C per root CLAUDE.md SS6.5 -- documented at decision point, not deferred):
+
+1. Did NOT implement the 14 AppRoleAssignedTo grants (step 2 / AC "14 AppRoleAssignedTo grants attempted"). design.md SS4.1's authoritative H3 SDK-surface table (line ~197) lists ONLY Applications/ServicePrincipals/Oauth2PermissionGrants for H3 -- no AppRoleAssignedTo. H10 (H10DataverseAppUserGraphParityHandler + GraphRestAppRoleGranter, task 053, already landed) already grants all 14 GraphAppRoles.cs application-only roles onto the customer's UAMI service principal -- a DIFFERENT principal than H3's own app-reg SP (GraphAppRoles.cs's own doc comment: "roles MUST be granted on the UAMI SP -- not on the app registration"). Reimplementing in H3 targeting the wrong principal would be a functional bug, not just duplication -- CLAUDE.md SS11 forced the more-authoritative-source read. H3's real consent verifier instead covers the 5 DELEGATED (OAuth2PermissionScope) grants per the same design.md table's "Oauth2PermissionGrants" entry.
+
+2. Did NOT implement H3's own Dataverse-app-user-assignment step (step 5). H10 (already landed) registers BOTH the BFF app-reg (via H3's own InterStepState.BffAppRegId output) AND the UAMI as Dataverse App Users via DataverseWebApiAppUserCreator -- the exact idiom this POML's step 5 asks H3 to reuse. Per design.md's DAG, "H4 -> H3" and "H5 -> H6 -> H7 -> H10" are separate parallel branches; H5/H6 (which populate DataverseEnvUrl) have not necessarily completed when H3 dispatches, so an H3-side attempt would almost always short-circuit dead in the success path -- exactly the "second, parallel implementation" DS-4's own instruction (reuse H10's idiom, don't duplicate) forbids.
+
+3. Renamed EntraAppRegOptions.ExpectedAppRoleCount -> ExpectedDelegatedScopeCount (default 5, was 14) to correct the Wave-C4 scaffold's scope conflation (its doc comment described the 14-role app-only catalog, which was never actually H3's -- see deviation 1).
+
+4. FIC "exchange-based verification" (AC: "followed by an exchange-based verification call, not treated as verified on a 200 from the creation call alone") implemented as an INDEPENDENT RE-GET of the FIC object (fresh GET confirming Subject/Issuer/Audiences persisted exactly as requested) rather than a literal OAuth2 client_credentials token exchange. Root cause: L2's Worker runs under L2's OWN platform UAMI (Spaarke's tenant), not the customer's per-customer BFF UAMI (the FIC's subject) -- L2 has no credential path to mint a token AS that UAMI to use as a client_assertion. A literal exchange proof belongs to whichever component actually runs AS the customer's UAMI (the deployed BFF itself, H9's domain) -- structurally out of L2's reach, not an oversight. Documented as GOTCHA 2 in GraphAppRegistrationProvisioner.cs's file header.
+
+Acceptance criteria satisfied as originally written: #1 (0 ProcessStartInfo/script-name grep matches), #6 (dotnet build 0 errors / dotnet test 0 failures -- 916/916), #7 (I6 -- explicit tenancyModel param, no default, 2 dedicated tests), #8 (Model 1 creates 0 new app-reg/FIC objects -- test-verified via ProvisionCallCount==0). #3/#4 (consent-verifier Pending/Verified branching) satisfied via a refactored pure-logic EvaluateGrantedScopes function + 5 new direct unit tests (GraphAdminConsentVerifierTests.cs), since the Graph I/O itself follows this project's established "collaborator I/O untested, logic extracted + tested" precedent (GraphRestAppRoleGranter, DataverseWebApiAppUserCreator, etc. have zero direct unit tests). #5 (Dataverse app-user reuse, no duplicate impl) satisfied per deviation 2 -- trivially true since H3 has no such implementation at all. #2, #9 deviated per above.
+
+L2 test suite: 903 -> 916 (+13 net; ~30 new/rewritten test methods across H3EntraAppRegHandlerTests.cs full rewrite + new GraphAdminConsentVerifierTests.cs). Zero regressions. Zero new vulnerable packages (dotnet list package --vulnerable --include-transitive clean after Microsoft.Graph 6.5.0 add).
+  </notes-completion>
+</task>

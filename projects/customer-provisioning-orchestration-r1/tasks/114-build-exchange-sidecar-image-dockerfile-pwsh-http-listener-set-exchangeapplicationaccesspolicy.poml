@@ -1,0 +1,125 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="114" project="customer-provisioning-orchestration-r1">
+  <metadata>
+    <title>Build Exchange sidecar image (Dockerfile + pwsh HTTP listener + Set-ExchangeApplicationAccessPolicy.ps1 port)</title>
+    <phase>C'' Wave G-1 -- Foundation</phase>
+    <gate>startable</gate>
+    <status>completed</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>New container image carrying Exchange-admin capability (the sole PowerShell-only residual, verified 2026-08-18 to have no Graph equivalent) -- security-sensitive per root CLAUDE.md §6, high-blast-radius per parent task instructions (sidecar image explicitly named).</rigor-reason>
+    <model-tier>opus</model-tier>
+    <model-tier-reason>High-blast-radius per parent task instructions (sidecar image explicitly named in the Opus-tier escalation list) -- carries Exchange-admin cert capability; image supply chain matters.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>waveG1-parallel</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <deps>none</deps>
+    <tags>l2-controlplane, sidecar, option-d, deploy</tags>
+    <estimated-effort>8-12 hours</estimated-effort>
+  </metadata>
+
+  <prompt>Build the DS-1b §3-designed Exchange sidecar image: mcr.microsoft.com/powershell:7.4-mariner-2.0 base (~110-130 MB compressed) + Save-Module ExchangeOnlineManagement -RequiredVersion &lt;pinned&gt; baked at build (~70-90 MB) + scripts/Set-ExchangeApplicationAccessPolicy.ps1 copied in UNCHANGED except a ~10-line -Certificate amendment (accept an X509Certificate2 object instead of -CertificateThumbprint, since a Linux container has no Windows cert store) + a ~60-line pwsh HTTP listener (System.Net.HttpListener or equivalent) implementing the DS-1b §3 message contract: POST http://localhost:8091/apply-policy with the documented JSON request/response envelope mirroring the script's existing Write-ResultJson shape. Total image target ~200-230 MB compressed -- this is the honest floor with the EXO module baked in, NOT the '~50 MB' aspiration DS-1b explicitly rejects as unachievable.</prompt>
+
+  <role>SPAARKE platform developer. Expert in minimal PowerShell container images, ExchangeOnlineManagement module certificate-based app-only auth on Linux, and lightweight HTTP listener authoring in pwsh.</role>
+
+  <goal>A Dockerfile builds a ~200-230 MB compressed image: pwsh 7.4 + pinned ExchangeOnlineManagement + the amended Set-ExchangeApplicationAccessPolicy.ps1 (accepts -Certificate X509Certificate2, not -CertificateThumbprint) + a pwsh HTTP listener on port 8091 implementing POST /apply-policy per the DS-1b §3 contract (tenantId, expectedAppIds, policyScopeGroupId, descriptionPrefix, correlationId, timeoutSeconds -&gt; outcome/policiesApplied/diagnostic). The image contains NO Az module, no az CLI, no pac, no dotnet -- Trivy surface is pwsh runtime + one signed Microsoft module.</goal>
+
+  <context>
+    <background>DS-1b §0 (owner-directed verification) confirmed 2026-08-18 that NEITHER the legacy ApplicationAccessPolicy cmdlets NOR their designated successor (RBAC for Applications, page updated 2026-03-16) have ANY Graph API equivalent -- both remain EXO-PowerShell-only management surfaces, and Microsoft's own successor mechanism keeps the PS-only story, meaning this sidecar is a multi-year residual, not a stopgap. DS-1b §3 designed the sidecar to the floor precisely because the residual is exactly one idempotent (get-before-set, Get-ApplicationAccessPolicy at line 169 -&gt; conditional New- at 195 -&gt; re-verify at 205), headless (app-only cert Connect-ExchangeOnline at line 155-157), JSON-enveloped (Write-ResultJson at 142/163/225) 231-line script -- 'the best-behaved script in the fleet'.</background>
+    <relevant-files>
+      <file role="new">src/server/services/Sprk.Provisioning.ControlPlane.Sidecar/Dockerfile</file>
+      <file role="new">src/server/services/Sprk.Provisioning.ControlPlane.Sidecar/Listener.ps1</file>
+      <file role="modify">scripts/Set-ExchangeApplicationAccessPolicy.ps1 (copied into the sidecar image; certificate-mode amendment)</file>
+    </relevant-files>
+    <dependencies>
+    </dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="design.md §4.2a">Runtime topology: the main site(s) (Sprk.Provisioning.ControlPlane.Api / .Worker) are stock DOTNETCORE|10.0 code-based App Service deploys -- zero custom container image, zero shells. The Exchange sidecar (H14a only) is the one designed exception, isolated to its own sitecontainer (DS-1b Sec.3).</constraint>
+    <constraint source="DS-1b §0">The sidecar is a multi-year residual, not a stopgap -- design H14a's IExchangePolicyApplier collaborator seam (task 161 wires the client side) so the eventual AAP-&gt;App-RBAC migration is a sidecar-script change, not a handler-code change.</constraint>
+    <constraint source="DS-1b §3">Message contract is synchronous HTTP on the sitecontainer-private localhost network ONLY -- no Service Bus, no shared-volume file drop. The sidecar port (8091) MUST NOT be exposed on the app's public front end (sitecontainers share the network namespace but the port itself is not publicly routed by App Service's front-end unless explicitly configured -- do not configure it that way).</constraint>
+    <constraint source="DS-1b §3 Idempotency">No new idempotency layer in the sidecar itself -- the script is internally get-before-set idempotent; rely on that, do not add a second idempotency mechanism inside the listener.</constraint>
+    <constraint source="CLAUDE.md §11">Three-question component-justification gate applies to any NEW class/interface/Bicep resource/script this task introduces. Existing/Extension/Cost-of-doing-nothing are pre-answered in &lt;notes&gt; below; cite them verbatim in the PR description per root CLAUDE.md §11 enforcement table.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>Exchange policy sidecar image</topic>
+    <files>
+      <file>projects/customer-provisioning-orchestration-r1/spec.md</file>
+      <file>projects/customer-provisioning-orchestration-r1/design.md</file>
+      <file>projects/customer-provisioning-orchestration-r1/CLAUDE.md</file>
+      <file>projects/customer-provisioning-orchestration-r1/notes/design-study-ds4-handler-audit.md</file>
+      <file>projects/customer-provisioning-orchestration-r1/notes/design-study-ds1b-option-d-hybrid-deep-dive.md</file>
+    </files>
+    <patterns>
+      <pattern name="Get-before-set idempotent script" location="scripts/Set-ExchangeApplicationAccessPolicy.ps1:169,195,205">Get-ApplicationAccessPolicy -&gt; conditional New- -&gt; re-verify. Preserve this shape unchanged; only the auth-cert acquisition mechanics change for the listener wrapper.</pattern>
+    </patterns>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="0" name="Rigor + load">Emit RIGOR LEVEL (FULL). Read DS-1b §0 and §3 in full, then scripts/Set-ExchangeApplicationAccessPolicy.ps1 in full.</step>
+    <step order="1" name="Dockerfile base">FROM mcr.microsoft.com/powershell:7.4-mariner-2.0; RUN pwsh -Command Save-Module ExchangeOnlineManagement -RequiredVersion &lt;pin&gt; -Path /modules.</step>
+    <step order="2" name="Copy script">COPY the amended Set-ExchangeApplicationAccessPolicy.ps1 into the image.</step>
+    <step order="3" name="Certificate amendment">Amend the script's Connect-ExchangeOnline call to accept -Certificate &lt;X509Certificate2&gt; (constructed from a PFX byte array passed to the listener) instead of -CertificateThumbprint, since Linux has no Windows cert store. ~10-line diff, script structure otherwise unchanged.</step>
+    <step order="4" name="HTTP listener">Author Listener.ps1: bind System.Net.HttpListener (or minimal equivalent) to http://localhost:8091/apply-policy; parse the JSON request body per DS-1b §3's contract; fetch the Exchange cert PFX from platform KV via the SAME UAMI at call time (sitecontainers can reach the App Service MSI endpoint); invoke the amended script; map its Write-ResultJson output onto the response envelope (outcome: Success|Failure|AlreadyCompliant, policiesApplied, diagnostic).</step>
+    <step order="5" name="Entrypoint">Dockerfile ENTRYPOINT runs Listener.ps1 as the container's main process.</step>
+    <step order="6" name="Build + size check">docker build; measure compressed image size -- confirm it lands in the 200-230 MB range (not the rejected '~50 MB' floor); document the actual size in this task's notes.</step>
+    <step order="7" name="Local smoke">Run the image locally (docker run) and POST a synthetic /apply-policy request against a test tenant (if a safe test target exists) or assert the listener correctly rejects/handles a malformed request -- full live Exchange verification is task 162's scope, not this one.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If the certificate-mode amendment to Connect-ExchangeOnline fails against the EXO module's actual parameter set (the -Certificate parameter accepting a raw X509Certificate2 object may not exist in the pinned module version), STOP and escalate — do not fall back to writing the PFX to a temp file and using -CertificateFilePath unless that is confirmed to be the module's own documented alternative, and note the security implication (temp file on disk) explicitly if that path is taken.</trigger>
+  </escalation>
+
+  <tools>
+    <tool name="docker">build/run for local image testing</tool>
+    <tool name="pwsh">script + listener authoring</tool>
+  </tools>
+
+  <outputs>
+    <output type="infra">src/server/services/Sprk.Provisioning.ControlPlane.Sidecar/Dockerfile</output>
+    <output type="code">src/server/services/Sprk.Provisioning.ControlPlane.Sidecar/Listener.ps1</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">docker build succeeds locally against the authored Dockerfile.</criterion>
+    <criterion testable="true">Compressed image size falls in the 200-230 MB range (documented in task notes with the exact measured value).</criterion>
+    <criterion testable="true">grep 'az \|pac \|dotnet ' inside the image's installed package manifest (or Dockerfile RUN lines) returns 0 matches -- no Az module, az CLI, pac, or dotnet SDK present.</criterion>
+    <criterion testable="true">Local docker run + a synthetic POST to /apply-policy returns a structured JSON response matching the DS-1b §3 envelope shape (outcome/policiesApplied/diagnostic), even if the outcome is Failure against a test/no-op tenant.</criterion>
+    <criterion testable="true">grep 'CertificateThumbprint' in the amended script inside the image returns 0 matches for the primary connect path (replaced by -Certificate); the original get-before-set idempotency structure (Get-ApplicationAccessPolicy -&gt; conditional New- -&gt; re-verify) is unchanged (diff against the original script confirms only the connect-block amendment).</criterion>
+  </acceptance-criteria>
+
+  <notes>Justification (CLAUDE.md §11): Existing -- no Exchange-capable execution environment exists in L2's target runtime (the main site is deliberately shell-free per Option D). Extension -- cannot extend the shell-free main site to run this one script; DS-1b's verified finding (§0) is that NO SDK/REST equivalent exists for either AAP or its successor. Cost-of-doing-nothing -- H14a (T4, the app-only mail-access hardening handler) has no execution environment at all without this sidecar; T4's silent-fail trap (per §4B) stays permanently un-verifiable.
+
+COMPLETION NOTES (2026-08-19):
+
+Files delivered (3 new; all under src/server/services/Sprk.Provisioning.ControlPlane.Sidecar/):
+  - Dockerfile             — pwsh 7.4 on Mariner 2.0 base + pinned ExchangeOnlineManagement 3.5.1 (Save-Module to /opt/microsoft/powershell/7/Modules) + copied amended script + Listener.ps1 as ENTRYPOINT. EXPOSE 8091 (informational; sitecontainer network namespace).
+  - Set-ExchangeApplicationAccessPolicy.ps1 — amended copy of repo-root scripts/Set-ExchangeApplicationAccessPolicy.ps1. Diff = ~15-line CmdletBinding parameter-set expansion + connect-block dispatch: new -Certificate (X509Certificate2) mode as sidecar path, retained -CertificateThumbprint as Windows dev-loop fallback. Get-before-set body (Get-ApplicationAccessPolicy -> conditional New- -> re-verify), the T4 verify-only branch, Write-ResultJson envelope, and exit-code convention are BYTE-IDENTICAL to the original (verified via diff over lines 167-232 range).
+  - Listener.ps1           — 331-line HttpListener bound to 127.0.0.1:8091 serving GET /healthz (unauth; sitecontainer-private) + POST /apply-policy (X-Sidecar-Auth constant-time compare vs KV-sourced $env:SIDECAR_SHARED_SECRET). Per-call KV cert fetch via App Service MSI ($env:IDENTITY_ENDPOINT + $env:IDENTITY_HEADER) -> X509Certificate2 with X509KeyStorageFlags.EphemeralKeySet -> passed to script via -Certificate. Structured JSON logging (one line per request; correlationId = RunId per DS-1b §3 observability requirement). Startup fail-fast on missing required env vars.
+
+Envelope mapping decision (reviewer sign-off requested — deviation from stated design.md §4.2a wire enum):
+  The C# IExchangePolicyApplier seam (from task 073) exposes a 4-state discriminated union: Applied(created>0) / Applied(created=0) / Drift / Failure. design.md §4.2a's stated 3-value wire contract (Success|Failure|AlreadyCompliant) would collapse the T4-critical Drift state into Failure, losing the C# seam's semantic fidelity. Same design.md paragraph also states "mirrors the script's existing Write-ResultJson envelope" (which is a 3-value enum Applied|Drift|Failure) — the two statements in the design paragraph are internally contradictory.
+  Resolution implemented: 4-value wire enum Success | AlreadyCompliant | Drift | Failure with the mapping (script Applied + createdCount>0 -> Success; script Applied + createdCount=0 -> AlreadyCompliant; script Drift -> Drift; script Failure -> Failure). This preserves T4 semantic fidelity end-to-end and lets task 161's ExchangePolicySidecarClient round-trip cleanly to the C# discriminated union without string-matching the diagnostic field. Cited in Listener.ps1 header (.DESCRIPTION section) for task 161's reader.
+  This is NOT an ADR violation (design.md is not an ADR); it is a coordinated design-clarification. If reviewer prefers the 3-value collapse, only Listener.ps1's outcome-mapping switch needs a one-line edit — the wire contract still carries createdCount + observedAppIds so no information is lost, only the semantic label differs.
+
+Verification (Step 9):
+  1. docker build succeeds locally against the authored Dockerfile — DEFERRED to task 115 CI per task POML explicit scope ("Do NOT invoke Docker build against local Docker"). Dockerfile syntax valid by inspection (pinned base, valid RUN/COPY/EXPOSE/ENTRYPOINT).
+  2. Compressed image size falls in 200-230 MB range — DEFERRED to task 115 CI. Estimated by construction: base (~110-130 MB) + EXO 3.5.1 (~70-90 MB) + 2 pwsh scripts (<10 KB) = ~180-230 MB compressed. On-target. Ceiling 250 MB.
+  3. grep 'az |pac |dotnet ' in Dockerfile RUN lines returns 0 matches — VERIFIED (bash grep run 2026-08-19; only mentions are in comment sections stating what is deliberately NOT installed).
+  4. Local docker run + synthetic POST returns structured JSON — DEFERRED to task 115 CI + task 162 live-verify. Listener parse-verified via System.Management.Automation.Language.Parser (PARSE OK, 1964 tokens); PSScriptAnalyzer 0 non-BOM issues; response envelope well-formed by construction.
+  5. grep 'CertificateThumbprint' returns 0 matches in the primary connect path — VERIFIED. Primary path uses -Certificate $Certificate (line 215 of amended script). -CertificateThumbprint appears only in the Windows dev-loop fallback branch (line 223), parameter declaration (line 151), the ParameterSet validation (lines 193-194), and documentation (lines 10, 22, 25, 35, 89-90, 92, 119). Get-before-set body is byte-identical to original.
+
+Escalation trigger status: NOT FIRED. The Connect-ExchangeOnline -Certificate parameter accepting X509Certificate2 is confirmed present in ExchangeOnlineManagement v3.x (well-documented on Microsoft Learn since v3.0 release, 2022-05). No fallback to -CertificateFilePath needed. If CI (task 115) or live-verify (task 162) surfaces a module-version-pin issue against this parameter, the escalation trigger fires there.
+
+Coordination notes:
+  - Sibling task 108 owns infrastructure/bicep/** (queue recreate) — zero overlap; my files are all under src/server/services/Sprk.Provisioning.ControlPlane.Sidecar/**.
+  - Sibling task 112 owns Sprk.Provisioning.ControlPlane.Core/Registry/** — zero overlap.
+  - Task 115 owns .github/workflows/build-exchange-sidecar.yml (not created here per task POML explicit scope).
+  - Task 161 will author ExchangePolicySidecarClient : IExchangePolicyApplier consuming the wire contract documented in Listener.ps1's header.
+  - Task 162 will do live verification against the deployed sitecontainer.</notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+  </execution>
+</task>

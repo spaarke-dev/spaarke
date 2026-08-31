@@ -11,12 +11,25 @@
  *   - Notes   → `sprk_notes`           (was `sprk_eventtodo.sprk_todonotes`)
  *   - Description → `sprk_description` (unchanged)
  *   - Due Date → `sprk_duedate`        (unchanged)
- *   - Priority → `sprk_priorityscore`  (Integer 0-100; was `sprk_priority` option set)
- *   - Effort   → `sprk_effortscore`    (Integer 0-100; new field)
+ *   - Priority → `sprk_priorityscore`  (Integer 0-100; derived from a Priority
+ *                                       choice selection via the shared
+ *                                       `todoScoreMappings.ts` table — see
+ *                                       smart-todo-r5 task 011 / FR-02)
+ *   - Effort   → `sprk_effortscore`    (Integer 0-100; derived from an Effort
+ *                                       choice selection via the shared
+ *                                       `todoScoreMappings.ts` table, Option B
+ *                                       quick-wins-first — task 011 / FR-03)
  *   - Assignee → `sprk_assignedto`     (Lookup → systemuser; new field)
+ *
+ * `priorityScore`/`effortScore` remain plain numbers on this form-state shape
+ * (the write path `todoService.ts` uses is unchanged) — `CreateTodoStep.tsx`
+ * now derives them from a Priority/Effort Dropdown rather than a raw 0-100
+ * slider; the resolved CHOICE itself is local UI state in that component, not
+ * part of this form-state contract.
  *
  * @see src/solutions/SpaarkeCore/entities/sprk_todo/entity-schema.md
  * @see projects/smart-todo-decoupling-r3/spec.md FR-15
+ * @see ../../utils/todoScoreMappings.ts for the shared choice→score mapping (task 011)
  */
 
 import type { AssociationResult } from '../AssociateToStep/types';

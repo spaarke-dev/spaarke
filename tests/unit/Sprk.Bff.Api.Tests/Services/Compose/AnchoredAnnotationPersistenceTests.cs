@@ -78,7 +78,7 @@ public sealed class AnchoredAnnotationPersistenceTests
     private ComposeService CreateSut() => new(
         _spe.Object,
         _sessions.Object,
-        _dataverse.Object,        _indexing.Object,
+        _dataverse.Object, _indexing.Object,
         NullLogger<ComposeService>.Instance);
 
     private ChatSession SeedSession(string sessionId, string documentId, string tenantId = Tenant)
@@ -90,7 +90,7 @@ public sealed class AnchoredAnnotationPersistenceTests
             PlaybookId: null,
             CreatedAt: DateTimeOffset.UtcNow,
             LastActivity: DateTimeOffset.UtcNow,
-            Messages: Array.Empty<ChatMessage>());
+            Messages: Array.Empty<ChatMessage>()) { OwnerOid = TestSessionOwner.Oid };
         _store[sessionId] = session;
         return session;
     }
@@ -259,7 +259,7 @@ public sealed class AnchoredAnnotationPersistenceTests
             DocumentSpeId = DocumentSpeId,
             TenantId = Tenant,
             SessionId = priorSessionId,
-        }, new DefaultHttpContext(), CancellationToken.None);
+        }, TestHttpContexts.Authenticated(), CancellationToken.None);
 
         result.SessionId.Should().Be(priorSessionId, "a SessionId bound to the SAME document must be RESUMED, not replaced with a fresh session");
         result.AnchoredAnnotations.Should().ContainSingle().Which.Id.Should().Be("anno-1");
@@ -289,7 +289,7 @@ public sealed class AnchoredAnnotationPersistenceTests
             DocumentSpeId = DocumentSpeId, // different document than otherDocSessionId is bound to
             TenantId = Tenant,
             SessionId = otherDocSessionId,
-        }, new DefaultHttpContext(), CancellationToken.None);
+        }, TestHttpContexts.Authenticated(), CancellationToken.None);
 
         result.SessionId.Should().NotBe(otherDocSessionId);
         result.AnchoredAnnotations.Should().BeEmpty("the supplied SessionId belongs to a DIFFERENT document — its annotations must not leak onto this load");

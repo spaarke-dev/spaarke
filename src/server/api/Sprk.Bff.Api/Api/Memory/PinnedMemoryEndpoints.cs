@@ -1,3 +1,4 @@
+using Sprk.Bff.Api.Infrastructure.Authentication;
 using System.ComponentModel.DataAnnotations;
 using System.Diagnostics;
 using System.Diagnostics.Metrics;
@@ -580,8 +581,7 @@ public static class PinnedMemoryEndpoints
             return false;
         }
 
-        var oid = httpContext.User.FindFirst("oid")?.Value
-            ?? httpContext.User.FindFirst("http://schemas.microsoft.com/identity/claims/objectidentifier")?.Value;
+        var oid = CallerResolution.ResolveObjectId(httpContext.User);
         if (string.IsNullOrWhiteSpace(oid))
         {
             problem = Results.Problem(

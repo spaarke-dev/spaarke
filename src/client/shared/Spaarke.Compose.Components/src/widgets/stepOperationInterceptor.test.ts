@@ -130,19 +130,24 @@ describe('resolveRunAnchor (D2 fine anchor)', () => {
   it('resolves an interior position inside the first run to its run-local offset', () => {
     // Caret after "Hel" — char offset 3, inside run 0.
     const anchor = resolveRunAnchor(doc, abs(3));
-    expect(anchor).toEqual({ paraId: PARA_ID, runIndex: 0, offset: 3 });
+    // paraOffset (task 055 robust anchor, ADDITIVE) mirrors the paragraph-relative offset
+    // alongside the legacy (runIndex, offset) — here run 0 starts at paragraph offset 0, so
+    // paraOffset === offset.
+    expect(anchor).toEqual({ paraId: PARA_ID, runIndex: 0, offset: 3, paraOffset: 3 });
   });
 
   it('resolves a position inside the second run to (runIndex 1, in-run offset)', () => {
     // Char offset 8 → 8 - 5 = 3 within run 1.
     const anchor = resolveRunAnchor(doc, abs(8));
-    expect(anchor).toEqual({ paraId: PARA_ID, runIndex: 1, offset: 3 });
+    // paraOffset is the PARAGRAPH-relative offset (8), distinct from the run-local offset (3) —
+    // run 1 starts at paragraph offset 5.
+    expect(anchor).toEqual({ paraId: PARA_ID, runIndex: 1, offset: 3, paraOffset: 8 });
   });
 
   it('resolves a run boundary to the trailing edge of the earlier run (documented convention)', () => {
     // Char offset 5 is the bold|normal boundary → run 0, offset 5 (NOT run 1, offset 0).
     const anchor = resolveRunAnchor(doc, abs(5));
-    expect(anchor).toEqual({ paraId: PARA_ID, runIndex: 0, offset: 5 });
+    expect(anchor).toEqual({ paraId: PARA_ID, runIndex: 0, offset: 5, paraOffset: 5 });
   });
 
   it('returns null for a position whose parent is not a paraId textblock', () => {
@@ -161,7 +166,7 @@ describe('classifyStep — inline edits → task-003 operations', () => {
     const op = ops[0] as InsertTextOperation;
     expect(op.type).toBe('insertText');
     expect(op.paraId).toBe(PARA_ID);
-    expect(op.at).toEqual({ runIndex: 0, offset: 3 });
+    expect(op.at).toEqual({ runIndex: 0, offset: 3, paraOffset: 3 });
     expect(op.text).toBe('x');
     // NOT an absolute editor position — the anchor is run-local (offset 3, not abs 4).
     expect((op.at as { offset: number }).offset).not.toBe(abs(3));
@@ -170,7 +175,7 @@ describe('classifyStep — inline edits → task-003 operations', () => {
   it('a typed edit at the bold|normal boundary identifies the correct run + in-run offset', () => {
     const step = new ReplaceStep(abs(5), abs(5), inlineSlice('!'));
     const op = expectOps(classifyStep(step, doc, {}))[0] as InsertTextOperation;
-    expect(op.at).toEqual({ runIndex: 0, offset: 5 });
+    expect(op.at).toEqual({ runIndex: 0, offset: 5, paraOffset: 5 });
     // Run-local, not the absolute doc position (which would be 6).
     expect(op.at).not.toEqual({ runIndex: 0, offset: abs(5) });
   });
@@ -191,7 +196,10 @@ describe('classifyStep — inline edits → task-003 operations', () => {
     expect(ops[0]).toEqual({
       type: 'deleteRange',
       paraId: PARA_ID,
-      range: { start: { runIndex: 0, offset: 1 }, end: { runIndex: 0, offset: 4 } },
+      range: {
+        start: { runIndex: 0, offset: 1, paraOffset: 1 },
+        end: { runIndex: 0, offset: 4, paraOffset: 4 },
+      },
     });
   });
 
@@ -211,7 +219,10 @@ describe('classifyStep — inline edits → task-003 operations', () => {
     expect(setOp).toEqual({
       type: 'setMark',
       paraId: PARA_ID,
-      range: { start: { runIndex: 0, offset: 1 }, end: { runIndex: 0, offset: 5 } },
+      range: {
+        start: { runIndex: 0, offset: 1, paraOffset: 1 },
+        end: { runIndex: 0, offset: 5, paraOffset: 5 },
+      },
       mark: 'Italic',
     });
   });
@@ -398,13 +409,13 @@ describe('RebasedOperationLog — rebase-across-concurrent-edits (task 022, FR-0
     // 'Hello World' content", NOT a stale offset that would now land mid-word.
     const anchorA = opA!.operation as InsertTextOperation;
     expect(anchorA.paraId).toBe(PARA_ID);
-    expect(anchorA.at).toEqual({ runIndex: 0, offset: 14 });
+    expect(anchorA.at).toEqual({ runIndex: 0, offset: 14, paraOffset: 14 });
     expect(anchorA.at.offset).not.toBe(11); // NOT the stale, un-rebased offset
 
     // B's own anchor is unaffected (it was captured against the doc AFTER A already existed, and
     // nothing after it has since shifted its own start).
     const anchorB = opB!.operation as InsertTextOperation;
-    expect(anchorB.at).toEqual({ runIndex: 0, offset: 0 });
+    expect(anchorB.at).toEqual({ runIndex: 0, offset: 0, paraOffset: 0 });
 
     // Neither op is flagged — no deletion occurred.
     expect(opA!.deletedContentFlag).toBe(false);
@@ -431,7 +442,10 @@ describe('RebasedOperationLog — rebase-across-concurrent-edits (task 022, FR-0
     const snapshot = log.serialize(state.doc);
     const deleteOp = snapshot.orderedOps.find(o => o.operation.type === 'deleteRange')!
       .operation as DeleteRangeOperation;
-    expect(deleteOp.range).toEqual({ start: { runIndex: 0, offset: 10 }, end: { runIndex: 0, offset: 10 } });
+    expect(deleteOp.range).toEqual({
+      start: { runIndex: 0, offset: 10, paraOffset: 10 },
+      end: { runIndex: 0, offset: 10, paraOffset: 10 },
+    });
   });
 });
 
@@ -543,6 +557,55 @@ describe('RebasedOperationLog — op inside deleted content is flagged, not drop
   });
 });
 
+// UAT-23 (2026-08-18, honest/safe): a re-derivation FAILURE at serialize time (an op whose anchor
+// drifted so it can't be re-anchored) is the SILENT-LOSS subcase of deletedContentFlag — the save path
+// surfaces it (`anchorLostFlag`) instead of silently dropping the edit. A GENUINE later-deletion of the
+// target is NOT anchor-lost (dropping it is expected, and surfacing would be a false alarm).
+describe('RebasedOperationLog — anchor-lost drift is distinguished from genuine deletion (UAT-23)', () => {
+  it('flags anchorLostFlag when an op can no longer be re-anchored (still in orderedOps)', () => {
+    // Op A: insert "X" in a paragraph. Later edit: the paragraph LOSES its paraId (a structural
+    // rework — setNodeMarkup with paraId=null; NOT a deletion). At serialize, the op's tracked position
+    // still resolves to a live position, but its block no longer carries a paraId → deriveOperation
+    // returns null. That is a still-valid edit that can't be re-anchored: surfaced, never dropped.
+    const doc0 = onePara(PARA_ID, 'Hello');
+    const log = new RebasedOperationLog();
+    let state = EditorState.create({ doc: doc0 });
+
+    const trIns = state.tr.insertText('X', abs(2), abs(2));
+    log.recordTransaction(trIns);
+    state = state.apply(trIns);
+
+    const trStrip = state.tr.setNodeMarkup(0, undefined, { paraId: null, textAlign: null });
+    log.recordTransaction(trStrip);
+    state = state.apply(trStrip);
+
+    const snapshot = log.serialize(state.doc);
+    const insertOp = snapshot.orderedOps.find(o => o.operation.type === 'insertText');
+    expect(insertOp).toBeDefined(); // NEVER dropped — still in orderedOps
+    expect(insertOp!.anchorLostFlag).toBe(true); // surfaced as a silent-loss candidate
+  });
+
+  it('does NOT set anchorLostFlag for a genuine later-deletion (no false alarm)', () => {
+    // The genuine-deletion case: insert "X", then delete a range enclosing it. deletedContentFlag is
+    // set by rebasing (MapResult.deleted), so this drop is EXPECTED — anchorLostFlag must stay falsy.
+    const doc0 = onePara(PARA_ID, 'Hello World');
+    const log = new RebasedOperationLog();
+    let state = EditorState.create({ doc: doc0 });
+
+    const trInsert = state.tr.insertText('X', abs(5), abs(5));
+    log.recordTransaction(trInsert);
+    state = state.apply(trInsert);
+
+    const trDelete = state.tr.delete(abs(2), abs(9));
+    log.recordTransaction(trDelete);
+    state = state.apply(trDelete);
+
+    const flaggedInsert = log.serialize(state.doc).orderedOps.find(o => o.operation.type === 'insertText')!;
+    expect(flaggedInsert.deletedContentFlag).toBe(true); // genuine deletion — excluded from apply
+    expect(flaggedInsert.anchorLostFlag).toBeFalsy(); // but NOT surfaced as a lost edit (expected drop)
+  });
+});
+
 // ---------------------------------------------------------------------------
 // Structural step → operation synthesis (task 031, FR-05) — the four paragraph ops
 // ---------------------------------------------------------------------------
@@ -628,7 +691,7 @@ describe('classifyStructuralStep — split / insert (task 031)', () => {
     expect(op.type).toBe('splitParagraph');
     if (op.type === 'splitParagraph') {
       expect(op.paraId).toBe('AAAA1111');
-      expect(op.at).toEqual({ runIndex: 0, offset: 5 });
+      expect(op.at).toEqual({ runIndex: 0, offset: 5, paraOffset: 5 });
       expect(op.newParaId).toMatch(/^[0-9A-F]{8}$/);
     }
   });

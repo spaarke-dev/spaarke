@@ -1,6 +1,7 @@
 using FluentAssertions;
 using Microsoft.Graph.Models;
 using MimeKit;
+using Sprk.Bff.Api.Infrastructure.Graph;
 using Sprk.Bff.Api.Services.Communication;
 using Xunit;
 

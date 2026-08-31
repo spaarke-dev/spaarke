@@ -1,0 +1,103 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="021" project="record-header-and-notepad-r2">
+  <metadata>
+    <title>Land one shared getXrmPage() and migrate both existing duplicates</title>
+    <phase>2 Metadata + Machinery</phase>
+    <gate>startable after 002 (parity baseline captured)</gate>
+    <status>completed</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Modifies .ts/.tsx code files (utils/xrmContext.ts, services/FieldMappingHandler.ts, MatterHeaderView.tsx) — Step 3.5.5 code-implementation trigger</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Mechanical consolidation of two near-identical existing functions into an existing utils module; both source implementations are named with exact line ranges</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>B</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <deps>002</deps>
+    <tags>react, shared-components, unit-test</tags>
+    <estimated-effort>2-3 hours</estimated-effort>
+  </metadata>
+
+  <prompt>Consolidate the two near-identical private `getXrmPage()` duplicates (`services/FieldMappingHandler.ts:552-561` and `src/client/pcf/MatterHeader/control/MatterHeaderView.tsx:132-142`) into ONE shared `getXrmPage()` exported from `utils/xrmContext.ts`, and add the missing `Page` member to the `XrmContext` interface (it exposes WebApi/Navigation/Utility/App today but no Page). This is FR-20; task 022's form-buffer hook builds on the shared accessor.</prompt>
+  <role>SPAARKE platform developer. TypeScript shared-library utils, Xrm host-context access patterns (window/parent walker). Follow ADRs strictly.</role>
+  <goal>Exactly one `getXrmPage` implementation exists in `src/` (in `utils/xrmContext.ts`); `XrmContext` declares `Page`; both former duplicate call sites consume the shared function with no behavior change; shared-lib tests and the MatterHeader `npm run build:prod` build are green.</goal>
+
+  <context>
+    <background>Spec FR-20. R1 shipped a third-copy risk: `FieldMappingHandler` and `MatterHeaderView` each hand-roll a window→parent `Xrm.Page` walker, and `xrmContext.ts` — the canonical Xrm accessor module with `getXrm()` — omits `Page` from its `XrmContext` interface entirely. Task 022 hoists the form-buffer machinery into a shared hook that MUST use this shared accessor, so this lands first. Hoisting `Xrm.Page` access into shared `utils/`/`hooks/`/`services/` does NOT break ADR-012: that rule bars PCF-SPECIFIC APIs in shared components, and `Xrm.Page` is a host FORM API the shared library already uses (`FieldMappingHandler.ts:478-512, 552-561`) alongside direct `Xrm.WebApi` calls in `useRecordFieldValues` / `useRelatedCount`. The established split — components props-driven, Xrm access in hooks/services/utils behind a window/parent walker — is exactly where this puts it (spec "ADR Tensions" point 2). Do not "fix" this by refusing to put `Xrm.Page` in the shared library.</background>
+    <relevant-files>
+      <file role="modify">src/client/shared/Spaarke.UI.Components/src/utils/xrmContext.ts</file>
+      <file role="modify">src/client/shared/Spaarke.UI.Components/src/services/FieldMappingHandler.ts</file>
+      <file role="modify">src/client/pcf/MatterHeader/control/MatterHeaderView.tsx</file>
+      <file role="modify">src/client/shared/Spaarke.UI.Components/src/utils/__tests__/xrmContext.test.ts</file>
+    </relevant-files>
+    <dependencies>
+      <dependency task="002" status="pending">MatterHeaderPcf v1.0.20 parity baseline captured before any code change</dependency>
+    </dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-012">The shared `getXrmPage()` lives in `utils/xrmContext.ts` beside `getXrm()`. Components stay props-driven; no component file gains direct `Xrm.Page` access in this task.</constraint>
+    <constraint source="ADR-022">Code added to `utils/xrmContext.ts` stays React 16/17-safe and framework-free (it is a plain TS module today — keep it that way).</constraint>
+    <constraint source="NFR-08">MatterHeaderView's deep-path import convention is load-bearing: import the shared function via `@spaarke/ui-components/dist/utils/xrmContext` (extend the existing `getXrm` import at line 72). Do NOT "clean up" deep-path imports or introduce barrel imports in the PCF layer.</constraint>
+    <constraint source="project">No behavior change at either call site beyond swapping the accessor. `getXrmPage()` NEVER throws — it returns `null` when Xrm/Page is unavailable (both duplicates already do this). FieldMappingHandler's failure logging may stay at its call site if the shared function does not log.</constraint>
+    <constraint source="project">MatterHeaderView is otherwise untouched: do NOT refactor its save machinery (task 022 hoists it into a shared hook; the MatterHeader PCF itself is retired in task 081). This task changes only the `getXrmPage` definition/import lines in that file.</constraint>
+    <constraint source="NFR-05">No raw `fetch` to the Dataverse API, no `@spaarke/auth` — this task adds no I/O at all.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>Shared Xrm host-context access</topic>
+    <files>
+      <file>.claude/constraints/pcf.md</file>
+      <file>.claude/adr/ADR-012-shared-components.md</file>
+      <file>.claude/adr/ADR-022-pcf-platform-libraries.md</file>
+      <file>.claude/patterns/pcf/pcf-build-scaffold.md</file>
+      <file>projects/record-header-and-notepad-r2/spec.md</file>
+    </files>
+    <patterns>
+      <pattern name="Cross-frame Xrm walker" location="src/client/shared/Spaarke.UI.Components/src/utils/xrmContext.ts">`getXrm()` (line 236) is the canonical never-throwing window→parent→top walker with structural `XrmContext` typing. Model `getXrmPage()` on it — implementing as a thin wrapper over `getXrm()` (returning its `Page` member) is acceptable if the null-when-unavailable contract holds; otherwise replicate the window→parent try/catch walk the two duplicates share.</pattern>
+      <pattern name="The two duplicates being consolidated" location="src/client/pcf/MatterHeader/control/MatterHeaderView.tsx">Lines 132-142 (returns `xrmObj?.Page ?? null`, silent) and `services/FieldMappingHandler.ts:552-561` (returns `IXrmPageLike | null`, logs a warn on catch). The shared implementation must serve both.</pattern>
+    </patterns>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="0" name="Context + rigor declaration">Load knowledge files; declare RIGOR LEVEL FULL per CLAUDE.md §8; update current-task.md.</step>
+    <step order="1">In `utils/xrmContext.ts`: add a minimal structural `XrmPageLike` interface (at least `getAttribute(name: string)` returning an attribute-like with `setValue`, `getValue?`, `getIsDirty?`) and add `Page?: XrmPageLike` to `XrmContext` (line 17-22). Export `getXrmPage(): XrmPageLike | null` — never throws, returns null when unavailable, JSDoc noting Xrm.Page is deprecated-but-functional and this is THE single shared accessor (FR-20).</step>
+    <step order="2">Migrate `FieldMappingHandler.ts`: delete the private `getXrmPage` (lines 547-561), import the shared function from `../utils/xrmContext`, and adapt `this.getXrmPage()` call sites (line 479 and any others) — cast to its local `IXrmPageLike` if the shared structural type is narrower. Preserve its observable behavior (null on failure; warn logging may move to the call site).</step>
+    <step order="3">Migrate `MatterHeaderView.tsx`: delete the local `getXrmPage` (lines 131-142) and add `getXrmPage` to the existing deep-path import from `@spaarke/ui-components/dist/utils/xrmContext` (line 72). No other change to this file.</step>
+    <step order="4">Extend `utils/__tests__/xrmContext.test.ts`: `getXrmPage` returns the Page object when `window.Xrm.Page` exists; walks to `window.parent.Xrm.Page` when window has none; returns null (no throw) when Xrm is absent entirely.</step>
+    <step order="5">Rebuild the shared lib (`npm run build` in `src/client/shared/Spaarke.UI.Components`) so `dist/` carries the new export, then build MatterHeader with `npm run build:prod` in `src/client/pcf/MatterHeader` (NOT `npm run build` — CLAUDE.md §12) to prove the PCF consumes it through the dist deep path.</step>
+    <step order="6">Verify the FR-20 acceptance grep: `getXrmPage` has exactly one implementation in `src/` (function definition only in `utils/xrmContext.ts`; the other two hits are imports/call sites).</step>
+    <step order="7">Run the shared-lib test suite; green.</step>
+    <step order="8">Update TASK-INDEX.md: set this task's status to ✅.</step>
+    <step order="9">Document any deviation in projects/record-header-and-notepad-r2/notes/.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If serving both consumers from one implementation would force an observable behavior change at either call site (e.g., FieldMappingHandler's `IXrmPageLike` contract cannot be satisfied by a shared structural type without changing what it does on failure), STOP and escalate per CLAUDE.md §6 rather than changing consumer behavior to fit the consolidation.</trigger>
+  </escalation>
+
+  <tools>
+    <tool name="npm">Shared lib: `npm run build` + `npm test` in src/client/shared/Spaarke.UI.Components. PCF: `npm run build:prod` in src/client/pcf/MatterHeader.</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/client/shared/Spaarke.UI.Components/src/utils/xrmContext.ts</output>
+    <output type="code">src/client/shared/Spaarke.UI.Components/src/services/FieldMappingHandler.ts</output>
+    <output type="code">src/client/pcf/MatterHeader/control/MatterHeaderView.tsx</output>
+    <output type="test">src/client/shared/Spaarke.UI.Components/src/utils/__tests__/xrmContext.test.ts</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Grep for `function getXrmPage` (and method-form `getXrmPage(`) across `src/` finds exactly ONE implementation, in `utils/xrmContext.ts`; `FieldMappingHandler.ts` and `MatterHeaderView.tsx` contain only imports/call sites of it.</criterion>
+    <criterion testable="true">`XrmContext` in `utils/xrmContext.ts` declares a `Page` member (optional, structurally typed).</criterion>
+    <criterion testable="true">Given `window.Xrm.Page` exists, `getXrmPage()` returns it; given only `window.parent.Xrm.Page` exists, it returns that; given no Xrm on any frame, it returns `null` without throwing (unit-tested).</criterion>
+    <criterion testable="true">Negative: `getXrmPage()` never throws — including when accessing `window.parent` raises a cross-origin SecurityError (try/catch verified by test or by construction identical to `getXrm()`).</criterion>
+    <criterion testable="true">`MatterHeaderView.tsx` diff touches ONLY the getXrmPage definition removal and the deep-path import line — no change to save/search machinery, LOOKUP_META, or rendering.</criterion>
+    <criterion testable="true">Shared-lib test suite passes; `npm run build:prod` in `src/client/pcf/MatterHeader` exits 0.</criterion>
+  </acceptance-criteria>
+
+  <notes>Spec refs: FR-20; spec "ADR Tensions" point 2 (hoisting Xrm.Page into the shared lib is the established convention, not an ADR-012 violation — encode this so an implementer does not "fix" it). Note: `.claude/patterns/pcf/pcf-build-scaffold.md` §10 contains a `getXrmPage` snippet in markdown — the one-implementation grep is scoped to `src/`. Task 022 consumes the shared accessor immediately.
+
+Completion note (2026-08-25): Landed `getXrmPage()` in `utils/xrmContext.ts` alongside `getXrm()`, with new `XrmPageLike`/`XrmPageAttributeLike` structural interfaces and an optional `Page?: XrmPageLike` member on `XrmContext`. Deliberately walks window -> parent ONLY (not the third `top` frame `getXrm()` checks) — the knowledge-pattern note's literal fallback instruction named "window→parent," and the "no behavior change beyond swapping the accessor" constraint made a 3-frame widening out of scope for this task (a first draft added `top`; reverted after re-reading the constraint literally). `FieldMappingHandler.ts` imports the shared function and casts via `as unknown as IXrmPageLike | null` (kept its own narrower local `IXrmPageLike`/`IXrmPageAttributeLike` with non-optional `getIsDirty()`, per the task's explicit cast guidance) — its private duplicate + warn-on-catch logging removed; the call-site `if (!xrmPage)` warn preserves the observable "not available" log. `MatterHeaderView.tsx` diff is exactly 2 lines: the deep-path import gains `getXrmPage`, and the 12-line local duplicate is deleted — verified via `git diff` that task 040's `RECORDSUMMARY_FIELD`/`summaryValue` wiring is untouched. Updated `MatterHeaderView.test.tsx`'s per-subpath xrmContext mock to also export `getXrmPage: jest.fn(() => null)` (task 040 hit the identical silent-mock-gap class of bug). FR-20 grep confirms exactly one `function getXrmPage` in `src/`. Shared-lib `xrmContext.test.ts`: 34/34 green (28 existing + 6 new). MatterHeader `__tests__/MatterHeaderView.test.tsx`: 7/7 green. `npm run build:prod` in MatterHeader: exit 0, bundle 59.8 KiB. Full shared-lib suite has 12 pre-existing failing suites (`toolbarLaunchDefaults.test.ts`, `EntityCreationService.cascade.test.ts`, `recordHeader.integration.test.tsx`, etc.) caused by concurrently-running sibling tasks 015/022 editing `hooks/` and `RecordHeader/fields/` in this shared worktree — confirmed unrelated by inspecting failure diffs (stale Notepad-modal-sizing/webresource-name expectations, unrelated cascade-lookup assertion), zero overlap with files this task touched. Self-performed code-review + adr-check (Skill-loaded procedure, applied directly): 0 Critical, 0 ADR violations (ADR-006/012/022 compliant — deep-path import preserved per NFR-08, module stays framework-free, no PCF-specific API leaked into shared lib), 0 lint errors (`eslint` on the 3 shared-lib files clean; PCF build's ESLint step clean). No `.claude/**` writes attempted (sub-agent boundary respected). Did not edit `current-task.md` or `tasks/TASK-INDEX.md` per explicit task-dispatch constraint — orchestrator should mark 021 ✅ there.</notes>
+
+  <execution><skill>.claude/skills/task-execute/SKILL.md</skill></execution>
+</task>

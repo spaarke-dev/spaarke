@@ -1,0 +1,427 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!--
+    Sprk.Provisioning.ControlPlane.Core — shared class library for the L2
+    control plane. Contains:
+      - Handlers/**              — 20 IProvisioningHandler implementations
+                                   (H0-H14 catalog per design.md § 4.1) + their
+                                   options + collaborator seams.
+      - Reconciler/**            — StateReconcilerService, DagAdvancer,
+                                   CrashRecoveryStartupService, ReconcilerModule.
+                                   TYPES only; HOST REGISTRATION lives in
+                                   Sprk.Provisioning.ControlPlane.Worker.
+      - Concurrency/**           — CustomerRunGuard (I5 same-customer
+                                   serialization) + options.
+      - Enqueue/**               — ServiceBusHandlerEnqueuer +
+                                   IHandlerEnqueuer contract. Referenced by
+                                   both .Api (endpoint enqueue) and .Worker
+                                   (reconciler re-enqueue).
+      - Models/**                — ProvisioningRun + GateState + supporting
+                                   value types.
+      - Registry/**              — IDataverseEnvironmentRegistryClient +
+                                   NullDataverseEnvironmentRegistryClient
+                                   scaffold.
+      - Repositories/**          — IProvisioningRunRepository (Cosmos abstraction).
+      - Rollback/**              — FailureClassifier, RollbackTransitions,
+                                   QuarantineClearService, RollbackModule.
+      - Modules/{Cosmos,ServiceBus,Telemetry,Handlers}Module.cs — DI
+                                   extension methods each host layer calls
+                                   into during composition.
+      - Infrastructure/Startup/  — AzureMonitorGuard (fail-fast NFR-05 check
+                                   consumed by TelemetryModule).
+
+    HOST LAYERS (both consume this project):
+      - Sprk.Provisioning.ControlPlane.Api    — HTTP intake surface (App
+                                                Service, keeps staging slot +
+                                                JWT bearer + Swagger + audit
+                                                middleware). NO BackgroundService
+                                                that touches handler execution.
+      - Sprk.Provisioning.ControlPlane.Worker — dispatcher (task 102) +
+                                                StateReconcilerService +
+                                                CrashRecoveryStartupService +
+                                                CustomerRunGuard + Rollback +
+                                                20-handler fleet. Slotless
+                                                App Service on the same P1v3
+                                                plan.
+
+    RATIONALE (DS-3 § 3 Option 2 owner-lock):
+      Splitting Core out of the monolithic Sprk.Provisioning.ControlPlane
+      project eliminates the always-on staging-slot shadow-worker defect
+      DS-3 § 1.3 identified as disqualifying: once the dispatcher (task 102)
+      exists, deploying to the .Api staging slot MUST NOT boot a competing
+      consumer against production Cosmos + Service Bus. Split at project-
+      layer boundary is the only way to make that structurally impossible;
+      code-based feature flags leave the door open and require permanent
+      operational mitigations of exactly the silent-fail class r1 exists to
+      eliminate. See notes/design-study-ds3-api-worker-split.md for the full
+      analysis.
+
+    PROJECT SHAPE:
+      - Microsoft.NET.Sdk (class library — no Kestrel, no Program.cs).
+      - net10.0 (inherited from Directory.Build.props).
+      - RootNamespace kept as Sprk.Provisioning.ControlPlane so folder-move
+        namespaces (Sprk.Provisioning.ControlPlane.Handlers.*, .Reconciler,
+        etc.) do NOT churn.
+      - Same Azure SDK version pins as the pre-split project (Cosmos 3.62.1,
+        ServiceBus 7.20.2, Identity 1.21.0, Newtonsoft.Json 13.0.3, Azure.Monitor
+        OTel 1.6.0) — no version drift on the split.
+      - InternalsVisibleTo the L2 unit test project so
+        ServiceBusHandlerEnqueuer.ComputeMessageId (level-1 idempotency
+        contract) stays test-visible without leaking as public API.
+  -->
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <AssemblyName>Sprk.Provisioning.ControlPlane.Core</AssemblyName>
+    <RootNamespace>Sprk.Provisioning.ControlPlane</RootNamespace>
+  </PropertyGroup>
+
+  <!--
+    Implicit usings — mirrored from Microsoft.NET.Sdk.Web's implicit set.
+    The pre-split monolithic Sprk.Provisioning.ControlPlane project was
+    Microsoft.NET.Sdk.Web (ASP.NET Core meta-SDK) which auto-includes:
+      Microsoft.AspNetCore.Builder, Microsoft.AspNetCore.Hosting,
+      Microsoft.AspNetCore.Http, Microsoft.AspNetCore.Routing,
+      Microsoft.Extensions.Configuration, Microsoft.Extensions.DependencyInjection,
+      Microsoft.Extensions.Hosting, Microsoft.Extensions.Logging.
+    Core is now Microsoft.NET.Sdk (class library) which does NOT auto-include
+    the Microsoft.Extensions.* set. Rather than churn ~60 handler + module
+    files to add explicit `using` directives (folder-move-only task), declare
+    the required namespaces as implicit usings so the source moves compile
+    unchanged. All are provided by the Microsoft.AspNetCore.App framework
+    reference below.
+  -->
+  <ItemGroup>
+    <Using Include="Microsoft.Extensions.Configuration" />
+    <Using Include="Microsoft.Extensions.DependencyInjection" />
+    <Using Include="Microsoft.Extensions.Hosting" />
+    <Using Include="Microsoft.Extensions.Logging" />
+    <Using Include="Microsoft.AspNetCore.Builder" />
+    <Using Include="Microsoft.AspNetCore.Hosting" />
+    <Using Include="Microsoft.AspNetCore.Http" />
+    <Using Include="Microsoft.AspNetCore.Routing" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <!-- ASP.NET Core hosting abstractions used by BackgroundService types
+         (StateReconcilerService, CrashRecoveryStartupService) that live in
+         this Core library. Framework reference — pulled in by any consumer
+         that hosts these types (both .Api and .Worker are Sdk.Web). -->
+    <FrameworkReference Include="Microsoft.AspNetCore.App" />
+
+    <!-- Azure Identity — DefaultAzureCredential for MI-outbound (Cosmos, KV,
+         Service Bus, Graph, Dataverse) per ADR-028 MI-outbound MUST rule.
+         Same 1.21.0 as pre-split. -->
+    <PackageReference Include="Azure.Identity" Version="1.21.0" />
+    <PackageReference Include="Azure.ResourceManager.AppService" Version="1.5.0" />
+
+    <!-- Azure.ResourceManager.CognitiveServices + .Compute — task 120 (Wave
+         G-2, Option D hybrid per DS-1b) SDK ports of two of H0's four
+         preflight probes (ArmCognitiveServicesTpmProbe, ArmComputeVCpuProbe),
+         replacing `az cognitiveservices usage list` / `az vm list-usage`
+         shell-outs. DefaultAzureCredential pinned to the L2 UAMI per
+         ADR-028 MI-outbound. -->
+    <PackageReference Include="Azure.ResourceManager.CognitiveServices" Version="1.5.2" />
+    <PackageReference Include="Azure.ResourceManager.Compute" Version="1.16.0" />
+    <PackageReference Include="Azure.ResourceManager.Resources" Version="1.11.2" />
+
+    <!-- Azure.Security.KeyVault.Secrets — task 120 SDK port of H0's
+         cert-bootstrap probe (KeyVaultCertBootstrapProbe), replacing
+         `az keyvault secret show`. Same 4.11.0 pin as Sprk.Bff.Api for
+         cross-service version parity. -->
+    <PackageReference Include="Azure.Security.KeyVault.Secrets" Version="4.11.0" />
+
+    <!-- Azure.ResourceManager (core) + Azure.ResourceManager.ManagedServices —
+         task 121 (Wave G-2) real ARM-backed H1 subscription-readiness probe
+         (ArmSubscriptionReadinessProbe), replacing NullSubscriptionReadinessProbe.
+         Core gives ArmClient.GetSubscriptionResource(...).GetAsync() for
+         subscription reachability; ManagedServices gives
+         GetManagedServicesRegistrationAssignments(...) for the Lighthouse
+         delegation check (Microsoft.ManagedServices/registrationAssignments,
+         CustomerOwned tenancy branch only). Version 1.14.0 matches the
+         Azure.ResourceManager version already pulled in transitively by
+         Azure.ResourceManager.Compute 1.16.0 (task 120) — pinned explicitly
+         here because this project's code references ArmClient/SubscriptionResource
+         types directly. DefaultAzureCredential pinned to the L2 UAMI per
+         ADR-028 MI-outbound (reuses the TokenCredential singleton registered
+         by CosmosModule — no second credential built). -->
+    <PackageReference Include="Azure.ResourceManager" Version="1.14.0" />
+    <PackageReference Include="Azure.ResourceManager.ManagedServices" Version="1.1.2" />
+
+    <!-- Azure.ResourceManager.Authorization — task 125 (Wave G-2) SDK port of
+         H4's T5 interim mitigation (ArmSlotIdentityRoleGranter, replacing the
+         retired AzCliSlotIdentityRoleGranter's `az role assignment create`
+         shell-out). Gives RoleAssignmentCollection.CreateOrUpdateAsync for
+         the KV Secrets User grant against a slot's System-Assigned MI
+         principal. Version 1.1.4 verified to resolve cleanly alongside this
+         project's existing Azure.ResourceManager 1.14.0 / Azure.ResourceManager
+         .AppService 1.5.0 pins (scratch-project build, zero NU1605 warnings)
+         BEFORE adding it here. DefaultAzureCredential pinned to the L2 UAMI
+         per ADR-028 MI-outbound (reuses the shared TokenCredential singleton
+         via a probe-local ArmClient — no second credential chain, parity
+         with the other Wave-G-2 ARM collaborators). -->
+    <PackageReference Include="Azure.ResourceManager.Authorization" Version="1.1.4" />
+    <PackageReference Include="Azure.Storage.Blobs" Version="12.29.1" />
+
+    <!-- Azure.ResourceManager.Search / .ServiceBus / .Storage / .Redis —
+         task 200 (Phase B) H4-shared source-service key-extraction SDK
+         packages. Consumed by SdkSourceServiceKeyExtractor (5 branches — one
+         per SourceServiceType enum member; CognitiveServices covers 2 of the 6
+         F19 canonical secrets via key1 extraction, uses the existing 1.5.2
+         package pin above). All resolve cleanly alongside this project's
+         existing Azure.ResourceManager 1.14.0 pin — same version-alignment
+         posture as the Authorization / CognitiveServices / Compute /
+         CosmosDB / CostManagement / ManagedServices / Resources pins above.
+         DefaultAzureCredential pinned to the L2 UAMI per ADR-028 MI-outbound
+         (reuses the shared TokenCredential singleton via a per-extractor-call
+         ArmClient). -->
+    <PackageReference Include="Azure.ResourceManager.Search" Version="1.3.0" />
+    <PackageReference Include="Azure.ResourceManager.ServiceBus" Version="1.1.0" />
+    <PackageReference Include="Azure.ResourceManager.Storage" Version="1.4.2" />
+    <PackageReference Include="Azure.ResourceManager.Redis" Version="1.4.0" />
+
+    <!-- Azure.Search.Documents — task 124 (Wave G-2) SDK port of H2b's Model-2
+         index provisioner (SearchIndexClientProvisioner, replacing
+         DeployAllIndexesScriptProvisioner's shell-out to
+         scripts/ai-search/Deploy-AllIndexes.ps1). Same 11.6.0 pin as
+         Sprk.Bff.Api for cross-service version parity. UAMI RBAC auth via
+         the shared TokenCredential singleton — zero admin-key handling. -->
+    <PackageReference Include="Azure.Search.Documents" Version="12.0.0" />
+
+    <!-- Azure Cosmos DB SDK — L2 state store (spaarke-provisioning/runs +,
+         since task 124, the sibling tenantFilterTemplates container). -->
+    <PackageReference Include="Microsoft.Azure.Cosmos" Version="3.62.1" />
+
+    <!-- Azure.ResourceManager.CosmosDB — task 174 (Wave G-7) MANAGEMENT-plane
+         SDK for the H13 §4D I3 CosmosPartitionKeyInvariantProbe. Partition-key
+         DEFINITION verification lives on Microsoft.DocumentDB/databaseAccounts/
+         sqlDatabases/containers; the data-plane Microsoft.Azure.Cosmos SDK
+         above is not fake-transport-friendly, whereas this ARM package rides
+         the same ArmClientOptions.Transport pattern task 123's ArmSdkTestFakes
+         helpers already establish. Version 1.3.2 verified to resolve cleanly
+         alongside this project's Azure.ResourceManager 1.14.0 pin. -->
+    <PackageReference Include="Azure.ResourceManager.CosmosDB" Version="1.3.2" />
+
+    <!-- Azure.ResourceManager.CostManagement — task 183 (Phase C'' Wave G-7)
+         SDK port of the H13 cost-envelope acceptance gate. Replaces the retired
+         AzCliCostEnvelopeChecker's `az costmanagement query` shell-out with
+         CostManagementExtensions.UsageQueryAsync(scope, QueryDefinition,...)
+         so H13 executes cleanly under Option D's zero-shell L2 Worker host
+         (no `az` binary in the App Service publish layout). Emits the SAME
+         POST /subscriptions/{id}/providers/Microsoft.CostManagement/query
+         call the retired az CLI shell-out did (verified via SDK reflection +
+         HttpMessageHandler capture), typed against QueryResult.Rows for
+         parse safety. Version 1.0.3 verified to resolve cleanly alongside
+         this project's Azure.ResourceManager 1.14.0 / Azure.Core (transitive)
+         pins via a scratch-project build (zero NU1605 warnings) BEFORE adding
+         here. DefaultAzureCredential pinned to the L2 UAMI per ADR-028
+         MI-outbound: reuses the shared UAMI-pinned TokenCredential singleton
+         via the shared ArmClient DI registration in HandlersModule (task 120),
+         parity with sibling Wave-G-7 T1/I3 probe registrations. -->
+    <PackageReference Include="Azure.ResourceManager.CostManagement" Version="1.0.3" />
+
+    <!-- Azure Service Bus SDK — L2 handler-enqueue path + (task 102)
+         session-processor dispatcher. -->
+    <PackageReference Include="Azure.Messaging.ServiceBus" Version="7.20.2" />
+
+    <!-- Newtonsoft.Json — required BY the Cosmos SDK's build target
+         (Microsoft.Azure.Cosmos.targets line 72 checks the graph for an
+         explicit reference >= 10.0.2). 13.0.3 matches BFF resolved version. -->
+    <PackageReference Include="Newtonsoft.Json" Version="13.0.3" />
+
+    <!-- Telemetry — OpenTelemetry -> Azure Monitor exporter used by
+         TelemetryModule.AddTelemetryModule. Both .Api and .Worker call
+         AddTelemetryModule during composition, so the reference lives here. -->
+    <PackageReference Include="Azure.Monitor.OpenTelemetry.AspNetCore" Version="1.6.0" />
+
+    <!-- StackExchange.Redis cache — Level-2 dispatcher idempotency (task 102
+         Phase C'' Wave G-1 sole new dep; task 105's DispatchIdempotencyService
+         Redis impl consumes IDistributedCache transitively from this package).
+         Reference lives on .Core so both .Api (future in-process integration
+         tests) and .Worker (production dispatcher host) can compose against
+         IDistributedCache without either project pinning its own version.
+         Cache is per-environment (Deploy-RedisCache.ps1); NEVER
+         per-customer per spec MUST rule (FR-12 rejects per-customer Redis).
+         Pinned to 10.0.9 for parity with Microsoft.Extensions.Logging
+         .Abstractions 10.0.9 already floored by Azure.Core 1.60.0 in the
+         test-project (prevents NU1605 warnings-as-errors on downgrades). -->
+    <PackageReference Include="Microsoft.Extensions.Caching.StackExchangeRedis" Version="10.0.9" />
+
+    <!-- YamlDotNet — task 126 (Wave G-2 Batch G-2C) H4 real-values correctness
+         gate. FileKvSecretManifest.cs parses scripts/canonical-secret-catalog/
+         manifest.yaml (task 084's canonical secret-catalog manifest, embedded
+         below) at runtime — the de-facto standard .NET YAML library (537M+
+         NuGet downloads, MIT license), same file task 084's own PowerShell
+         generator (Invoke-CatalogGenerator.ps1) parses via powershell-yaml.
+         No transitive conflicts with any existing package in this project
+         (verified: `dotnet add package` resolved cleanly, zero NU1605s). -->
+    <PackageReference Include="YamlDotNet" Version="18.1.0" />
+
+    <!-- Microsoft.Graph — task 130 (Wave G-3, xhigh) H3 SDK port
+         (GraphAppRegistrationProvisioner / GraphAdminConsentVerifier —
+         Applications/ServicePrincipals/FederatedIdentityCredentials/
+         Oauth2PermissionGrants). Pinned to 6.5.0 for cross-service version
+         parity with Sprk.Bff.Api (dotnet-10-upgrade-r1 task 033). This is
+         L2's FIRST Microsoft.Graph SDK dependency — every other L2 Graph
+         collaborator (GraphRestAppRoleGranter, GraphRestB2BInvitationClient,
+         etc., H10/H11) deliberately stayed on raw HttpClient REST per those
+         handlers' own file-header "Path C" rationale (2 GET + 1 POST shapes
+         don't justify the SDK weight). H3's surface is materially richer
+         (full Application manifest CRUD + FederatedIdentityCredentials +
+         AddPassword) — design.md §4.1's H3 SDK-surface table explicitly
+         assigns Microsoft.Graph 6.x to H3 specifically, not L2 generally;
+         this is a considered per-handler exception, not a reversal of the
+         REST-first convention. Verified zero NU1605 warnings alongside this
+         project's existing Azure.Identity 1.21.0 / Azure.ResourceManager*
+         pins via a scratch-project build BEFORE adding here (ground-truthed
+         Graph SDK shapes via reflection against the installed package per
+         Wave G-2/G-3 discipline — see GraphAppRegistrationProvisioner.cs
+         file header for the 2 gotchas caught). -->
+    <PackageReference Include="Microsoft.Graph" Version="6.5.0" />
+  </ItemGroup>
+
+  <!-- Task 124 (Wave G-2): the 7 canonical AI Search index JSON schemas,
+       embedded verbatim (byte-identical, checksum-verified at copy time)
+       from infrastructure/ai-search/*.json so the L2 App Service publish
+       output is self-contained (no repo-checkout dependency at runtime,
+       unlike the retired DeployAllIndexesScriptProvisioner's local-path
+       script read). Explicit <LogicalName> (rather than relying on the SDK's
+       implicit RootNamespace-derived convention) because RootNamespace here
+       is "Sprk.Provisioning.ControlPlane" while AssemblyName is
+       "Sprk.Provisioning.ControlPlane.Core" (deliberately different per the
+       project-header comment above) — SearchIndexClientProvisioner.LoadAndStripSchema
+       reads by this exact logical name. -->
+  <ItemGroup>
+    <EmbeddedResource Include="Handlers\AiSearchIndex\IndexSchemas\*.json">
+      <LogicalName>Sprk.Provisioning.ControlPlane.Handlers.AiSearchIndex.IndexSchemas.%(Filename)%(Extension)</LogicalName>
+    </EmbeddedResource>
+
+    <!-- Task 126 (Wave G-2 Batch G-2C): task 084's canonical secret-catalog
+         manifest.yaml is the SINGLE source of truth (scripts/canonical-
+         secret-catalog/manifest.yaml at repo root — NOT duplicated into this
+         project's folder, which would reintroduce the exact drift problem
+         task 084 exists to close). Embedded directly from its canonical repo
+         location so FileKvSecretManifest.cs's read is self-contained at
+         runtime (parity with the IndexSchemas embedding above — task 124). -->
+    <EmbeddedResource Include="..\..\..\..\scripts\canonical-secret-catalog\manifest.yaml"
+                       Link="Handlers\KvSecretsPopulation\CanonicalManifest\manifest.yaml">
+      <LogicalName>Sprk.Provisioning.ControlPlane.Handlers.KvSecretsPopulation.CanonicalManifest.manifest.yaml</LogicalName>
+    </EmbeddedResource>
+
+    <!-- Task 150 (Wave G-5 Batch G-5A) — H12a YamlDotNet manifest engine +
+         DV-REST seed writes. task-069's manifest.yaml (single source of
+         truth per its own header) + the 4 flat-JSON content files
+         DataverseWebApiSeedWriter directly seeds (type-lookups / knowledge /
+         skills / output-types — see that file's SCOPE BOUNDARY note for why
+         playbooks-mvp / playbook-consumers / the R7 per-file artifacts are
+         NOT embedded here) are embedded from their canonical repo location
+         (scripts/seed-data/ at repo root — NOT duplicated into this
+         project's folder, parity with the KvSecretsPopulation embed
+         immediately above) so YamlSeedManifestEngine's read is self-
+         contained at runtime (no repo-checkout dependency in the L2 publish
+         output, same "content files in the payload" rationale the POML
+         names). FileSeedManifestReader (the H12a handler's ISeedManifestReader
+         collaborator — SHA-256 hash + defense-in-depth retired-artifact
+         scan) intentionally keeps its existing on-disk Content-copy read
+         path (AiSeedChainOptions.ManifestPath) — unchanged by this task,
+         out of the declared file-modify scope; the writer's embedded copy
+         and the reader's on-disk copy are both sourced from the SAME
+         scripts/seed-data/manifest.yaml file at build time, so there is no
+         drift risk despite the two read mechanisms. -->
+    <EmbeddedResource Include="..\..\..\..\scripts\seed-data\manifest.yaml"
+                       Link="Handlers\AiSeedChain\SeedContent\manifest.yaml">
+      <LogicalName>Sprk.Provisioning.ControlPlane.Handlers.AiSeedChain.SeedContent.manifest.yaml</LogicalName>
+    </EmbeddedResource>
+    <EmbeddedResource Include="..\..\..\..\scripts\seed-data\type-lookups.json"
+                       Link="Handlers\AiSeedChain\SeedContent\type-lookups.json">
+      <LogicalName>Sprk.Provisioning.ControlPlane.Handlers.AiSeedChain.SeedContent.type-lookups.json</LogicalName>
+    </EmbeddedResource>
+    <EmbeddedResource Include="..\..\..\..\scripts\seed-data\knowledge.json"
+                       Link="Handlers\AiSeedChain\SeedContent\knowledge.json">
+      <LogicalName>Sprk.Provisioning.ControlPlane.Handlers.AiSeedChain.SeedContent.knowledge.json</LogicalName>
+    </EmbeddedResource>
+    <EmbeddedResource Include="..\..\..\..\scripts\seed-data\skills.json"
+                       Link="Handlers\AiSeedChain\SeedContent\skills.json">
+      <LogicalName>Sprk.Provisioning.ControlPlane.Handlers.AiSeedChain.SeedContent.skills.json</LogicalName>
+    </EmbeddedResource>
+    <EmbeddedResource Include="..\..\..\..\scripts\seed-data\output-types.json"
+                       Link="Handlers\AiSeedChain\SeedContent\output-types.json">
+      <LogicalName>Sprk.Provisioning.ControlPlane.Handlers.AiSeedChain.SeedContent.output-types.json</LogicalName>
+    </EmbeddedResource>
+
+    <!-- Task 151 (Wave G-5 Batch G-5A, parallel with task 150) — H12b
+         DataGrid + workspace-layout DV-REST ports. Same single-source-of-
+         truth embedding pattern as the task 124/126/150 entries above: the
+         4 reconciliation-grid config JSON files are the shared-lib's OWN
+         source of truth (src/client/shared/Spaarke.Communication.Components,
+         NOT duplicated into this project) so DataverseWebApiDataGridSeeder's
+         seed content can never drift from the shared-lib source, matching
+         the retired seed-reconciliation-gridconfig.ps1's own stated design
+         intent ("Reads the config JSON verbatim from the shared-lib source
+         of truth so the seed can never drift from code"). -->
+    <EmbeddedResource Include="..\..\..\client\shared\Spaarke.Communication.Components\src\components\ReconciliationGrid\*.gridconfiguration.json"
+                       Link="Handlers\AppConfigSeed\GridConfig\%(Filename)%(Extension)">
+      <LogicalName>Sprk.Provisioning.ControlPlane.Handlers.AppConfigSeed.GridConfig.%(Filename)%(Extension)</LogicalName>
+    </EmbeddedResource>
+
+    <!-- Task 151: scripts/system-layouts.json is the retired
+         Deploy-SystemWorkspaceLayouts.ps1's data sidecar (repo-root
+         scripts/, NOT this project's folder) — embedded directly so
+         DataverseWebApiWorkspaceLayoutSeeder reads the SAME single source of
+         truth the PS script did (no duplicated copy to drift). -->
+    <EmbeddedResource Include="..\..\..\..\scripts\system-layouts.json"
+                       Link="Handlers\AppConfigSeed\SystemLayouts\system-layouts.json">
+      <LogicalName>Sprk.Provisioning.ControlPlane.Handlers.AppConfigSeed.SystemLayouts.system-layouts.json</LogicalName>
+    </EmbeddedResource>
+
+    <!-- Task 152 (Wave G-5 Batch G-5B) — H12b GREENFIELD chart-def scope.
+         infrastructure/dataverse/charts/upcoming-todos-*.json (repo-root
+         infrastructure/, NOT this project's folder) are the 4 checked-in
+         sprk_chartdefinition record mirrors smart-todo-r4 task 080-G already
+         authored + proved live (FR-31..FR-36) — the ONLY chart-def family in
+         the repo with both a JSON source-of-truth AND a proven idempotent
+         upsert script (scripts/Create-UpcomingTodosChartDefinitions.ps1).
+         Embedded directly so DataverseWebApiChartDefSeeder reads the SAME
+         single source of truth the PS script did (no duplicated copy to
+         drift). The other ~15 chart-def records live in spaarkedev1 today
+         have NO JSON mirror in the repo at all — intentionally NOT seeded by
+         this task (see DataverseWebApiChartDefSeeder.cs file header SCOPE
+         DECISION). -->
+    <EmbeddedResource Include="..\..\..\..\infrastructure\dataverse\charts\upcoming-todos-*.json"
+                       Link="Handlers\AppConfigSeed\ChartDefs\%(Filename)%(Extension)">
+      <LogicalName>Sprk.Provisioning.ControlPlane.Handlers.AppConfigSeed.ChartDefs.%(Filename)%(Extension)</LogicalName>
+    </EmbeddedResource>
+
+    <!-- Wave G-8 Batch 10 (FR-34 defect #24) — H0 upgrade-mode version-compat
+         matrix. Runtime JSON mirror of the authoritative human-maintained doc
+         docs/deployment/version-compatibility-matrix.md, queried by
+         JsonFileVersionCompatMatrix. Embedded (not CopyToOutput) per the same
+         publish-safety rationale as the seed-content entries above; an
+         operator can hot-override with an on-disk file via
+         Preflight:VersionCompatMatrixPath without rebuilding. OPS: append new
+         cells here in the SAME PR that updates the .md doc at each
+         release-tag milestone (doc §6 update cadence). -->
+    <EmbeddedResource Include="Handlers\Preflight\version-compat-matrix.json">
+      <LogicalName>Sprk.Provisioning.ControlPlane.Handlers.Preflight.version-compat-matrix.json</LogicalName>
+    </EmbeddedResource>
+  </ItemGroup>
+
+  <!-- Expose internal seams to the L2 test project (parity with the pre-split
+       csproj) and to the .Api + .Worker host projects. Post-split, the
+       composition-root Program.cs files in .Api and .Worker call internal
+       members of Core types that pre-split were resolved within-assembly
+       (e.g. CrashRecoveryOptions.Validate() via PostConfigure<T>). Adding
+       both hosts here restores the pre-split composition without churning
+       the type surface (POML: namespaces + type visibility unchanged, folder-
+       move-only).
+
+       Test-project usage: ServiceBusHandlerEnqueuer.ComputeMessageId is the
+       FR-22 level-1 idempotency contract; stays test-visible without
+       promoting it to public API. -->
+  <ItemGroup>
+    <InternalsVisibleTo Include="Sprk.Provisioning.ControlPlane" />
+    <InternalsVisibleTo Include="Sprk.Provisioning.ControlPlane.Worker" />
+    <InternalsVisibleTo Include="Sprk.Provisioning.ControlPlane.Tests" />
+  </ItemGroup>
+
+</Project>

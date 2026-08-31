@@ -58,7 +58,7 @@ import {
   ArrowClockwise20Regular,
   ColumnTriple20Regular,
 } from "@fluentui/react-icons";
-import { speApiClient, ApiError } from "../../services/speApiClient";
+import { speApiClient, describeApiError } from "../../services/speApiClient";
 import type { ColumnDefinition, ColumnDefinitionUpsert } from "../../types/spe";
 import { AddEditColumnDialog } from "./AddEditColumnDialog";
 
@@ -383,12 +383,10 @@ export const ColumnEditor: React.FC<ColumnEditorProps> = ({
         setAddEditOpen(false);
         setEditingColumn(null);
       } catch (err) {
-        const message =
-          err instanceof ApiError
-            ? err.message
-            : editingColumn
-            ? "Failed to update column."
-            : "Failed to create column.";
+        const message = describeApiError(
+          err,
+          editingColumn ? "Failed to update column." : "Failed to create column."
+        );
         setAddEditError(message);
       } finally {
         setAddEditSaving(false);
@@ -410,7 +408,7 @@ export const ColumnEditor: React.FC<ColumnEditorProps> = ({
         setDeleteOpen(false);
       } catch (err) {
         const message =
-          err instanceof ApiError ? err.message : "Failed to delete column.";
+          describeApiError(err, "Failed to delete column.");
         setDeleteError(message);
       } finally {
         setDeleteSaving(false);

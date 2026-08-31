@@ -1,5 +1,31 @@
 # Declarative Agent Build and Deploy Guide
 
+> ## 🔴 Secret-free BFF identity — read before following any credential step on this page
+>
+> **2026-08-24, `spaarke-auth-v4-dataverse-MI` task 033 (ADR-028 **A4**; exception **E-3 CLOSED**).**
+> The BFF authenticates as a confidential client — **including on the OBO / delegated path** — using a
+> **federated credential issued to its user-assigned managed identity**. It holds **no client secret**.
+>
+> | Removed | |
+> |---|---|
+> | App settings | `API_CLIENT_SECRET`, `AzureAd__ClientSecret`, `Dataverse__ClientSecret`, `AgentToken__ClientSecret` |
+> | Key Vault | `BFF-API-ClientSecret`, `bff-api-client-secret`, and the orphaned `Graph-API-ClientSecret` |
+>
+> Set instead: `Graph__Credentials__Order__0=ManagedIdentityFederated` and
+> `Graph__Credentials__RequireSecretFreeIdentity=true`.
+>
+> **Do not re-create the secret.** A secret listed *beneath* MI-FIC in the order is worse than no migration:
+> a broken federated credential would fall through to it silently while every health signal stayed green.
+> With `RequireSecretFreeIdentity=true` the app **refuses to start** outside Development if `ClientSecret`
+> returns to the order.
+>
+> Any instruction below that tells you to create, store, reference or rotate a BFF client secret is
+> **superseded**. Still valid: ADR-028 **E-1** per-customer SPE owning-app secrets, and
+> `PowerBi:ClientSecret` while task 042 is deferred.
+> Canonical: [`ADR-028`](../../.claude/adr/ADR-028-spaarke-auth-architecture.md) ·
+> [`auth-deployment-setup.md`](auth-deployment-setup.md)
+
+
 > **Last Updated**: 2026-03-26
 > **Project**: ai-m365-copilot-integration (R1)
 > **Status**: Validated through deployment to dev tenant
@@ -210,7 +236,7 @@ Add these in Azure Portal → App Service → Environment variables:
 |---------|-------|
 | `AgentToken__TenantId` | Your tenant ID |
 | `AgentToken__ClientId` | BFF API app ID (from AzureAd__ClientId) |
-| `AgentToken__ClientSecret` | BFF API secret (from Key Vault) |
+| ~~`AgentToken__ClientSecret`~~ | 🔴 **DELETED 2026-08-24** (task 033). `AgentTokenService` stopped reading it at task 022 — it takes its confidential client from `OrderedCredentialClientProvider`. Do not set it. |
 | `AgentToken__AgentAppId` | Bot/Copilot app ID (from Step 1) |
 | `AgentToken__DataverseEnvironmentUrl` | `https://yourorg.crm.dynamics.com` |
 | `AgentToken__CacheTtlMinutes` | `55` |
@@ -224,7 +250,9 @@ Add these in Azure Portal → App Service → Environment variables:
 az webapp config appsettings list ... --output tsv | grep AzureAd__ClientId
 
 # Client Secret
-az keyvault secret show --vault-name spaarke-spekvcert --name BFF-API-ClientSecret --query value -o tsv
+# BFF-API-ClientSecret was DELETED 2026-08-24 (task 033) — this returns SecretNotFound.
+# The BFF identity is secret-free. Verify its federated credential instead:
+az ad app federated-credential list --id 1e40baad-e065-4aea-a8d4-4b7ab273458c -o table
 ```
 
 ### Step 5: Package the Declarative Agent

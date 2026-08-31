@@ -68,6 +68,36 @@ function makeEditor(content = '<p>The quick brown fox jumps.</p>'): Editor {
 
 const PROV = { ledgerRef: 'b1@t1', bindingId: 'b1', turn: 1 };
 
+/**
+ * FR-C06 (spaarkeai-compose-r8 task 053) — the CONFIRMING harness.
+ *
+ * Most fixtures in this file target their edit with LEGACY prose (`{ target_text, new_text }`) — the
+ * shape the four compose EDIT Actions emitted before task 052 retired `target_text`. Task 053 bounded
+ * that leg: a payload with prose and no anchor no longer places anything on its own, it PROPOSES a
+ * location and waits for the user (`legacyProposal` + `applyLegacyProposal`).
+ *
+ * These suites are about what happens AFTER a redline exists — accept/reject, supersession,
+ * idempotency, refresh durability, confidence bands, sanitized insertion markup. Answering the
+ * proposal here keeps each test on its own subject while making the new gate visible at every site:
+ * the placement they assert is one a user consented to, not one the matcher performed.
+ *
+ * The GATE itself — that nothing is placed before the answer, that an anchored edit can never reach
+ * it, and that ambiguity is refused rather than proposed — is covered directly in
+ * `usePendingRedline.anchorlessFallback.test.tsx`, with the module-boundary tripwire armed.
+ */
+function useConfirmedPendingRedline(
+  editor: Editor | null,
+  referenceMap?: Parameters<typeof usePendingRedline>[1],
+  options?: Parameters<typeof usePendingRedline>[2]
+): ReturnType<typeof usePendingRedline> {
+  const redline = usePendingRedline(editor, referenceMap, options);
+  const { legacyProposal, applyLegacyProposal } = redline;
+  React.useEffect(() => {
+    if (legacyProposal !== null) applyLegacyProposal();
+  }, [legacyProposal, applyLegacyProposal]);
+  return redline;
+}
+
 // ---------------------------------------------------------------------------
 // resolveTargetSpans — the FR-19 match-mode contract (pure)
 // ---------------------------------------------------------------------------
@@ -266,14 +296,16 @@ describe('usePendingRedline.materializeMany (DEF-11 whole-document revision)', (
 
   it('materializes a MULTI-change redline: one ins/del pair per edit, distinct #{i} sub-keys', () => {
     const editor = makeEditor('<p>The quick brown fox jumps over the lazy dog.</p>');
-    const { result } = renderHook(() => usePendingRedline(editor));
+    const { result } = renderHook(() => useConfirmedPendingRedline(editor));
 
     let statuses: string[] = [];
     act(() => {
       statuses = result.current.materializeMany(THREE_EDITS, BASE);
     });
 
-    expect(statuses).toEqual(['applied', 'applied', 'applied']);
+    // FR-C06 (task 053): a LEGACY anchorless payload PROPOSES; `materialize` therefore returns
+    // 'proposed', and the harness's confirmation is what places it (see useConfirmedPendingRedline).
+    expect(statuses).toEqual(['proposed', 'proposed', 'proposed']);
     // THREE independent changes → 3 insertion marks + 3 deletion marks (NOT one).
     expect(countMarks(editor, 'insertion')).toBe(3);
     expect(countMarks(editor, 'deletion')).toBe(3);
@@ -287,7 +319,7 @@ describe('usePendingRedline.materializeMany (DEF-11 whole-document revision)', (
 
   it('Accept-all (base key) commits EVERY sub-change: alternatives kept, originals struck-removed, 0 pending', () => {
     const editor = makeEditor('<p>The quick brown fox jumps over the lazy dog.</p>');
-    const { result } = renderHook(() => usePendingRedline(editor));
+    const { result } = renderHook(() => useConfirmedPendingRedline(editor));
 
     act(() => {
       result.current.materializeMany(THREE_EDITS, BASE);
@@ -309,7 +341,7 @@ describe('usePendingRedline.materializeMany (DEF-11 whole-document revision)', (
 
   it('Reject-all (base key) reverts EVERY sub-change: originals restored, alternatives gone, 0 pending', () => {
     const editor = makeEditor('<p>The quick brown fox jumps over the lazy dog.</p>');
-    const { result } = renderHook(() => usePendingRedline(editor));
+    const { result } = renderHook(() => useConfirmedPendingRedline(editor));
 
     act(() => {
       result.current.materializeMany(THREE_EDITS, BASE);
@@ -329,7 +361,7 @@ describe('usePendingRedline.materializeMany (DEF-11 whole-document revision)', (
 
   it('per-change on-click accept (exact sub-key) commits ONE change and leaves the others pending', () => {
     const editor = makeEditor('<p>The quick brown fox jumps over the lazy dog.</p>');
-    const { result } = renderHook(() => usePendingRedline(editor));
+    const { result } = renderHook(() => useConfirmedPendingRedline(editor));
 
     act(() => {
       result.current.materializeMany(THREE_EDITS, BASE);
@@ -348,7 +380,7 @@ describe('usePendingRedline.materializeMany (DEF-11 whole-document revision)', (
 
   it('skips an unresolved target (do-not-guess) but still applies the resolvable edits', () => {
     const editor = makeEditor('<p>The quick brown fox.</p>');
-    const { result } = renderHook(() => usePendingRedline(editor));
+    const { result } = renderHook(() => useConfirmedPendingRedline(editor));
 
     let statuses: string[] = [];
     act(() => {
@@ -361,7 +393,9 @@ describe('usePendingRedline.materializeMany (DEF-11 whole-document revision)', (
       );
     });
 
-    expect(statuses[0]).toBe('applied');
+    // FR-C06 (task 053): a LEGACY anchorless payload PROPOSES; `materialize` therefore returns
+    // 'proposed', and the harness's confirmation is what places it (see useConfirmedPendingRedline).
+    expect(statuses[0]).toBe('proposed');
     expect(statuses[1]).toBe('not_found');
     expect(result.current.pending).toHaveLength(1);
     expect(result.current.error).toMatchObject({ kind: 'not_found' });
@@ -370,7 +404,7 @@ describe('usePendingRedline.materializeMany (DEF-11 whole-document revision)', (
 
   it('item 1: reports BATCHED failed/total counts when several targets cannot be placed', () => {
     const editor = makeEditor('<p>The quick brown fox.</p>');
-    const { result } = renderHook(() => usePendingRedline(editor));
+    const { result } = renderHook(() => useConfirmedPendingRedline(editor));
 
     let statuses: string[] = [];
     act(() => {
@@ -384,7 +418,9 @@ describe('usePendingRedline.materializeMany (DEF-11 whole-document revision)', (
       );
     });
 
-    expect(statuses).toEqual(['applied', 'not_found', 'not_found']);
+    // FR-C06 (task 053): a LEGACY anchorless payload PROPOSES; `materialize` therefore returns
+    // 'proposed', and the harness's confirmation is what places it (see useConfirmedPendingRedline).
+    expect(statuses).toEqual(['proposed', 'not_found', 'not_found']);
     // The banner drives off failedCount/totalCount → "2 of 3 couldn't be placed" (calm, batched).
     expect(result.current.error).toMatchObject({ kind: 'not_found', failedCount: 2, totalCount: 3 });
     editor.destroy();
@@ -392,7 +428,7 @@ describe('usePendingRedline.materializeMany (DEF-11 whole-document revision)', (
 
   it('item 1: no batched error when every target places (error stays null)', () => {
     const editor = makeEditor('<p>The quick brown fox.</p>');
-    const { result } = renderHook(() => usePendingRedline(editor));
+    const { result } = renderHook(() => useConfirmedPendingRedline(editor));
 
     act(() => {
       result.current.materializeMany(
@@ -415,14 +451,16 @@ describe('usePendingRedline.materializeMany (DEF-11 whole-document revision)', (
 describe('usePendingRedline (materialize from ledger)', () => {
   it('materializes a pending insertion/deletion pair tagged {bindingId}@t{n}', () => {
     const editor = makeEditor('<p>The quick brown fox.</p>');
-    const { result } = renderHook(() => usePendingRedline(editor));
+    const { result } = renderHook(() => useConfirmedPendingRedline(editor));
 
     let status: string | undefined;
     act(() => {
       status = result.current.materialize({ target_text: 'quick', new_text: 'nimble', match_mode: 'strict' }, PROV);
     });
 
-    expect(status).toBe('applied');
+    // FR-C06 (task 053): a LEGACY anchorless payload PROPOSES; `materialize` therefore returns
+    // 'proposed', and the harness's confirmation is what places it (see useConfirmedPendingRedline).
+    expect(status).toBe('proposed');
     const html = editor.getHTML();
     // deletion half over the target, insertion half carrying the alternative — both with provenance.
     expect(html).toContain('data-compose-mark="deletion"');
@@ -435,27 +473,32 @@ describe('usePendingRedline (materialize from ledger)', () => {
     editor.destroy();
   });
 
-  it('all mode: replaces EVERY occurrence (accept leaves the alternative at each site)', () => {
+  // Task 052 — `match_mode` is RETIRED IN FULL, including `all`
+  // (notes/052-text-search-demotion-decisions.md §2). This test formerly asserted that
+  // `match_mode: 'all'` fanned one edit out to every occurrence; that capability is gone, and its
+  // replacement is user-invoked find/replace (which shows the match count before committing).
+  // The LEGACY replay leg is pinned to `strict`, so a stored `all` payload can only ever RESOLVE
+  // MORE NARROWLY than it used to — an honest refusal instead of an invisible over-application.
+  it('a legacy `match_mode: "all"` payload no longer fans out — it resolves STRICTLY and refuses', () => {
     const editor = makeEditor('<p>fee then fee again</p>');
-    const { result } = renderHook(() => usePendingRedline(editor));
+    const { result } = renderHook(() => useConfirmedPendingRedline(editor));
 
+    let status: string | undefined;
     act(() => {
-      result.current.materialize({ target_text: 'fee', new_text: 'fie', match_mode: 'all' }, PROV);
-    });
-    act(() => {
-      result.current.accept('b1@t1');
+      status = result.current.materialize({ target_text: 'fee', new_text: 'fie', match_mode: 'all' }, PROV);
     });
 
-    const text = editor.getText();
-    expect(text).not.toContain('fee');
-    // Both occurrences replaced by the alternative.
-    expect(text.match(/fie/g)).toHaveLength(2);
+    // Two occurrences under `strict` ⇒ ambiguous ⇒ nothing placed (UAT-21: never silently mis-place).
+    expect(status).toBe('ambiguous');
+    expect(result.current.error).toMatchObject({ kind: 'ambiguous', matchCount: 2 });
+    expect(editor.getText()).toBe('fee then fee again');
+    expect(editor.getHTML()).not.toContain('data-compose-mark');
     editor.destroy();
   });
 
   it('insertion-style draft (no target_text) renders a pending insertion, no deletion', () => {
     const editor = makeEditor('<p>Intro.</p>');
-    const { result } = renderHook(() => usePendingRedline(editor));
+    const { result } = renderHook(() => useConfirmedPendingRedline(editor));
 
     act(() => {
       result.current.materialize({ new_text: 'Appended clause.' }, PROV);
@@ -470,7 +513,7 @@ describe('usePendingRedline (materialize from ledger)', () => {
 
   it('AMBIGUOUS target surfaces an error and renders NOTHING (FR-19 do-not-guess)', () => {
     const editor = makeEditor('<p>term and term</p>');
-    const { result } = renderHook(() => usePendingRedline(editor));
+    const { result } = renderHook(() => useConfirmedPendingRedline(editor));
 
     let status: string | undefined;
     act(() => {
@@ -486,7 +529,7 @@ describe('usePendingRedline (materialize from ledger)', () => {
 
   it('accept commits: keeps the alternative, removes the struck original', () => {
     const editor = makeEditor('<p>The quick fox.</p>');
-    const { result } = renderHook(() => usePendingRedline(editor));
+    const { result } = renderHook(() => useConfirmedPendingRedline(editor));
 
     act(() => {
       result.current.materialize({ target_text: 'quick', new_text: 'nimble' }, PROV);
@@ -505,7 +548,7 @@ describe('usePendingRedline (materialize from ledger)', () => {
 
   it('reject reverts: removes the alternative, restores the original', () => {
     const editor = makeEditor('<p>The quick fox.</p>');
-    const { result } = renderHook(() => usePendingRedline(editor));
+    const { result } = renderHook(() => useConfirmedPendingRedline(editor));
 
     act(() => {
       result.current.materialize({ target_text: 'quick', new_text: 'nimble' }, PROV);
@@ -524,7 +567,7 @@ describe('usePendingRedline (materialize from ledger)', () => {
 
   it('supersession: a newer output for the same binding removes the prior pending redline', () => {
     const editor = makeEditor('<p>The quick fox.</p>');
-    const { result } = renderHook(() => usePendingRedline(editor));
+    const { result } = renderHook(() => useConfirmedPendingRedline(editor));
 
     act(() => {
       result.current.materialize({ target_text: 'quick', new_text: 'nimble' }, PROV);
@@ -548,7 +591,7 @@ describe('usePendingRedline (materialize from ledger)', () => {
 
   it('idempotent: re-materializing the same output already present is a no-op', () => {
     const editor = makeEditor('<p>The quick fox.</p>');
-    const { result } = renderHook(() => usePendingRedline(editor));
+    const { result } = renderHook(() => useConfirmedPendingRedline(editor));
 
     act(() => {
       result.current.materialize({ target_text: 'quick', new_text: 'nimble' }, PROV);
@@ -570,7 +613,7 @@ describe('usePendingRedline (materialize from ledger)', () => {
     // Simulates a page refresh: the document is reloaded CLEAN from SPE (no marks), then
     // ComposeWorkspace re-materializes the CURRENT compose output from the durable ledger.
     const reloaded = makeEditor('<p>The quick fox.</p>');
-    const { result } = renderHook(() => usePendingRedline(reloaded));
+    const { result } = renderHook(() => useConfirmedPendingRedline(reloaded));
 
     act(() => {
       result.current.materialize({ target_text: 'quick', new_text: 'nimble' }, PROV);
@@ -709,7 +752,7 @@ function findMarkedText(editor: Editor, text: string, markName: string): boolean
 describe('usePendingRedline.materialize — formatted AI insertions render formatted (FR-15, task 032)', () => {
   it('a bold-bearing new_text yields a bold insertion mark in the rendered redline', () => {
     const editor = makeEditor('<p>Intro.</p>');
-    const { result } = renderHook(() => usePendingRedline(editor));
+    const { result } = renderHook(() => useConfirmedPendingRedline(editor));
 
     act(() => {
       result.current.materialize({ new_text: '<strong>bold suggestion</strong>' }, PROV);
@@ -722,7 +765,7 @@ describe('usePendingRedline.materialize — formatted AI insertions render forma
 
   it('an italic-bearing new_text yields an italic insertion mark in the rendered redline', () => {
     const editor = makeEditor('<p>Intro.</p>');
-    const { result } = renderHook(() => usePendingRedline(editor));
+    const { result } = renderHook(() => useConfirmedPendingRedline(editor));
 
     act(() => {
       result.current.materialize({ new_text: '<em>italic suggestion</em>' }, PROV);
@@ -738,7 +781,7 @@ describe('usePendingRedline.materialize — formatted AI insertions render forma
       extensions: [StarterKit, Underline, InsertionMark, DeletionMark, CommentAnchorMark],
       content: '<p>Intro.</p>',
     });
-    const { result } = renderHook(() => usePendingRedline(editor));
+    const { result } = renderHook(() => useConfirmedPendingRedline(editor));
 
     act(() => {
       result.current.materialize({ new_text: '<u>underlined suggestion</u>' }, PROV);
@@ -751,7 +794,7 @@ describe('usePendingRedline.materialize — formatted AI insertions render forma
 
   it('a bold-bearing REPLACEMENT (with target_text) renders bold on the inserted alternative', () => {
     const editor = makeEditor('<p>The quick fox.</p>');
-    const { result } = renderHook(() => usePendingRedline(editor));
+    const { result } = renderHook(() => useConfirmedPendingRedline(editor));
 
     act(() => {
       result.current.materialize({ target_text: 'quick', new_text: '<strong>swift</strong>' }, PROV);
@@ -766,7 +809,7 @@ describe('usePendingRedline.materialize — formatted AI insertions render forma
 
   it('a plain-string new_text (no markup) still renders unformatted — backward compatible', () => {
     const editor = makeEditor('<p>Intro.</p>');
-    const { result } = renderHook(() => usePendingRedline(editor));
+    const { result } = renderHook(() => useConfirmedPendingRedline(editor));
 
     act(() => {
       result.current.materialize({ new_text: 'plain suggestion' }, PROV);
@@ -783,7 +826,7 @@ describe('usePendingRedline.materialize — formatted AI insertions render forma
 
   it('SECURITY: a new_text with disallowed markup (<script>) is sanitized — never injected as a real element', () => {
     const editor = makeEditor('<p>Intro.</p>');
-    const { result } = renderHook(() => usePendingRedline(editor));
+    const { result } = renderHook(() => useConfirmedPendingRedline(editor));
 
     act(() => {
       result.current.materialize({ new_text: '<script>alert(1)</script>suggested text' }, PROV);
@@ -814,7 +857,7 @@ describe('usePendingRedline.materialize — formatted AI insertions render forma
       ],
       content: '<p>Intro.</p>',
     });
-    const { result } = renderHook(() => usePendingRedline(editor));
+    const { result } = renderHook(() => useConfirmedPendingRedline(editor));
 
     act(() => {
       result.current.materialize({ new_text: '<a href="javascript:alert(1)">click me</a>' }, PROV);
@@ -828,17 +871,20 @@ describe('usePendingRedline.materialize — formatted AI insertions render forma
 });
 
 // ---------------------------------------------------------------------------
-// usePendingRedline.materialize — selection fallback (round-3 UAT Test #4)
-// When the (normalize-tolerant) target still can't be located verbatim, anchor at the user's live
-// selection instead of dead-ending — but ONLY for not_found + a non-empty selection.
+// usePendingRedline.materialize — unresolved target ALWAYS surfaces (UAT-21, 2026-08-18)
+// The Round-3 UAT Test #4 fallback (anchor a not_found redline at the user's live selection) was a
+// SILENT mis-placement risk (stale caret / ledger replay → wrong text struck, reported as applied).
+// Per the owner ("highest trust priority") the R7 honest/safe charter reverses it: a not_found target
+// NEVER auto-places on the selection — it surfaces the banner and renders nothing (propose-don't-place).
 // ---------------------------------------------------------------------------
-describe('usePendingRedline.materialize (selection fallback — round-3 UAT Test #4)', () => {
-  it('not_found + a live non-empty selection → anchors the redline at the selection', () => {
+describe('usePendingRedline.materialize (unresolved target surfaces — UAT-21, reverses round-3 fallback)', () => {
+  it('not_found + a live non-empty selection → honest banner, NOTHING placed (no silent mis-placement)', () => {
     const editor = makeEditor('<p>The quick brown fox.</p>');
-    const { result } = renderHook(() => usePendingRedline(editor));
+    const { result } = renderHook(() => useConfirmedPendingRedline(editor));
 
-    // User still has a range selected (the clause they asked to revise); the model echoed a target
-    // that is NOT a verbatim substring of the doc.
+    // User has a range selected, but the model echoed a target that is NOT a verbatim substring of
+    // the doc. The old fallback struck+replaced the SELECTION (possibly the wrong text) and reported
+    // 'applied'; UAT-21 requires we surface the miss instead of guessing at the location.
     act(() => {
       editor.commands.setTextSelection({ from: 1, to: 10 });
     });
@@ -850,18 +896,19 @@ describe('usePendingRedline.materialize (selection fallback — round-3 UAT Test
       );
     });
 
-    expect(status).toBe('applied');
+    expect(status).toBe('not_found');
+    expect(result.current.error).toMatchObject({ kind: 'not_found' });
+    expect(result.current.pending).toHaveLength(0);
     const html = editor.getHTML();
-    expect(html).toContain('data-compose-mark="deletion"');
-    expect(html).toContain('nimble auburn');
-    expect(result.current.error).toBeNull();
-    expect(result.current.pending).toHaveLength(1);
+    // The selection is NOT struck and the alternative is NOT inserted — nothing was placed.
+    expect(html).not.toContain('data-compose-mark');
+    expect(html).not.toContain('nimble auburn');
     editor.destroy();
   });
 
   it('not_found + a COLLAPSED caret (no selection) → honest banner, nothing applied', () => {
     const editor = makeEditor('<p>The quick brown fox.</p>');
-    const { result } = renderHook(() => usePendingRedline(editor));
+    const { result } = renderHook(() => useConfirmedPendingRedline(editor));
 
     act(() => {
       editor.commands.setTextSelection(1); // collapsed caret → empty selection
@@ -883,7 +930,7 @@ describe('usePendingRedline.materialize (selection fallback — round-3 UAT Test
 
   it('AMBIGUOUS is NOT overridden by a selection (keeps the reselect banner — do not guess)', () => {
     const editor = makeEditor('<p>term and term</p>');
-    const { result } = renderHook(() => usePendingRedline(editor));
+    const { result } = renderHook(() => useConfirmedPendingRedline(editor));
 
     act(() => {
       editor.commands.setTextSelection({ from: 1, to: 5 });
@@ -900,13 +947,17 @@ describe('usePendingRedline.materialize (selection fallback — round-3 UAT Test
   });
 
   // UAT 2026-07-14 #3 (owner: ACCUMULATE): redline section A, then draft a DIFFERENT section B.
-  // (1) The new redline must land on B — NOT on A. (Previously the supersession strip relocated the
-  //     live selection onto A and the not-found fallback anchored B's redline there.)
+  // (1) The new redline must land on B — NOT on A. (The supersession strip must not relocate B's
+  //     placement onto A.)
   // (2) A's redline must be PRESERVED — drafting a different section accumulates (range-scoped
   //     supersession); only a re-draft of the same/overlapping section supersedes (next test).
-  it('draft on a DIFFERENT section anchors on the current selection AND keeps the prior redline (accumulate)', () => {
+  // NOTE (UAT-21, 2026-08-18): draft B now uses a RESOLVABLE target ("lazy") so it places via the
+  // normal resolver — the not_found→selection fallback this test formerly exercised was removed as a
+  // silent-mis-placement risk. The accumulation invariant (A preserved) is what this test guards, and
+  // it is independent of how B resolves.
+  it('draft on a DIFFERENT section places at that target AND keeps the prior redline (accumulate)', () => {
     const editor = makeEditor('<p>The quick brown fox jumps over the lazy dog.</p>');
-    const { result } = renderHook(() => usePendingRedline(editor));
+    const { result } = renderHook(() => useConfirmedPendingRedline(editor));
 
     // Draft A on "quick" → resolvable; leave it KEPT (do NOT accept — stays pending).
     act(() => {
@@ -925,17 +976,19 @@ describe('usePendingRedline.materialize (selection fallback — round-3 UAT Test
       editor.commands.setTextSelection({ from: bStart, to: bEnd });
     });
 
-    // Draft B: SAME binding, different ledgerRef, a target the model echoed non-verbatim → not_found
-    // → fallback must use selection B, and A (a different section) must NOT be superseded.
+    // Draft B: SAME binding, different ledgerRef, a RESOLVABLE target on the other section ("lazy")
+    // → places at B via the resolver, and A (a different section) must NOT be superseded.
     let status: string | undefined;
     act(() => {
       status = result.current.materialize(
-        { target_text: 'a paraphrase not present verbatim', new_text: 'INDOLENT', match_mode: 'strict' },
+        { target_text: 'lazy', new_text: 'INDOLENT', match_mode: 'strict' },
         { ledgerRef: 'b1@t2', bindingId: 'b1', turn: 2 }
       );
     });
 
-    expect(status).toBe('applied');
+    // FR-C06 (task 053): 'proposed' is the pre-confirmation status for a legacy anchorless payload;
+    // the harness answers it, and everything below asserts the state AFTER that answer.
+    expect(status).toBe('proposed');
     const html = editor.getHTML();
     // New alternative applied to the user's ACTUAL selection B ("lazy" struck), NOT A ("quick").
     expect(html).toContain('INDOLENT');
@@ -953,7 +1006,7 @@ describe('usePendingRedline.materialize (selection fallback — round-3 UAT Test
   // that region is replaced, not stacked.
   it('re-draft of the SAME section supersedes the prior redline (range overlap)', () => {
     const editor = makeEditor('<p>The quick brown fox.</p>');
-    const { result } = renderHook(() => usePendingRedline(editor));
+    const { result } = renderHook(() => useConfirmedPendingRedline(editor));
 
     act(() => {
       result.current.materialize(
@@ -965,14 +1018,19 @@ describe('usePendingRedline.materialize (selection fallback — round-3 UAT Test
     // Re-select the SAME region (the "quick"→"nimble" redline) and re-draft it.
     const span = editor.getHTML();
     expect(span).toContain('nimble');
-    // Select across the struck "quick" + inserted "nimble" (the redline sits early in the doc).
+    // Select across the struck "quick" + inserted "nimble" (the redline sits early in the doc) so the
+    // range-scoped supersession sees the overlap with the prior redline.
     act(() => {
       editor.commands.setTextSelection({ from: 4, to: 16 });
     });
 
+    // UAT-21 (2026-08-18): draft B now uses a RESOLVABLE target ("quick") rather than a not_found
+    // target relying on the removed selection fallback. Supersession strips the prior redline first
+    // (reverting "nimble" back to "quick"), then the resolver places B on "quick". The range-overlap
+    // supersession invariant — the whole point of this test — is unchanged.
     act(() => {
       result.current.materialize(
-        { target_text: 'still not verbatim', new_text: 'swift', match_mode: 'strict' },
+        { target_text: 'quick', new_text: 'swift', match_mode: 'strict' },
         { ledgerRef: 'b1@t2', bindingId: 'b1', turn: 2 }
       );
     });
@@ -1019,7 +1077,7 @@ describe('deriveConfidenceBand (FR-13, client-derived — ported from retired Co
 describe('usePendingRedline — confidence band derivation (client-side, FR-13 amendment §6.5 Path B)', () => {
   it('materialize: cited sources + resolvable target => high', () => {
     const editor = makeEditor('<p>The quick brown fox.</p>');
-    const { result } = renderHook(() => usePendingRedline(editor));
+    const { result } = renderHook(() => useConfirmedPendingRedline(editor));
 
     act(() => {
       result.current.materialize({ target_text: 'quick', new_text: 'nimble', sources: ['doc:precedent-123'] }, PROV);
@@ -1031,7 +1089,7 @@ describe('usePendingRedline — confidence band derivation (client-side, FR-13 a
 
   it('materialize: cited sources but a pure insertion (no target to resolve) => medium', () => {
     const editor = makeEditor('<p>Intro.</p>');
-    const { result } = renderHook(() => usePendingRedline(editor));
+    const { result } = renderHook(() => useConfirmedPendingRedline(editor));
 
     act(() => {
       result.current.materialize({ new_text: 'Appended clause.', sources: ['doc:precedent-123'] }, PROV);
@@ -1043,7 +1101,7 @@ describe('usePendingRedline — confidence band derivation (client-side, FR-13 a
 
   it('materialize: resolvable target but no cited sources => medium', () => {
     const editor = makeEditor('<p>The quick brown fox.</p>');
-    const { result } = renderHook(() => usePendingRedline(editor));
+    const { result } = renderHook(() => useConfirmedPendingRedline(editor));
 
     act(() => {
       result.current.materialize({ target_text: 'quick', new_text: 'nimble' }, PROV);
@@ -1055,7 +1113,7 @@ describe('usePendingRedline — confidence band derivation (client-side, FR-13 a
 
   it('materialize: no sources, no target (bare pure insertion) => low', () => {
     const editor = makeEditor('<p>Intro.</p>');
-    const { result } = renderHook(() => usePendingRedline(editor));
+    const { result } = renderHook(() => useConfirmedPendingRedline(editor));
 
     act(() => {
       result.current.materialize({ new_text: 'Appended clause.' }, PROV);
@@ -1067,7 +1125,7 @@ describe('usePendingRedline — confidence band derivation (client-side, FR-13 a
 
   it('ignores a confidence_band value smuggled onto the payload (never a model self-report)', () => {
     const editor = makeEditor('<p>Intro.</p>');
-    const { result } = renderHook(() => usePendingRedline(editor));
+    const { result } = renderHook(() => useConfirmedPendingRedline(editor));
 
     act(() => {
       // A hostile/buggy model output claiming "high" on an otherwise ungrounded bare insertion.
@@ -1088,7 +1146,7 @@ describe('usePendingRedline — confidence band derivation (client-side, FR-13 a
 
   it('materializeMany: each whole-document-revision edit gets its OWN band (per-edit sources)', () => {
     const editor = makeEditor('<p>The quick brown fox jumps over the lazy dog.</p>');
-    const { result } = renderHook(() => usePendingRedline(editor));
+    const { result } = renderHook(() => useConfirmedPendingRedline(editor));
     const BASE = { ledgerRef: 'rev@t1', bindingId: 'rev', turn: 1 };
 
     act(() => {
@@ -1114,7 +1172,7 @@ describe('usePendingRedline — confidence band derivation (client-side, FR-13 a
 
   it('reactive recompute: manually deleting a redline target OUTSIDE accept/reject drops its band', () => {
     const editor = makeEditor('<p>The quick brown fox.</p>');
-    const { result } = renderHook(() => usePendingRedline(editor));
+    const { result } = renderHook(() => useConfirmedPendingRedline(editor));
 
     act(() => {
       result.current.materialize({ target_text: 'quick', new_text: 'nimble', sources: ['doc:precedent-123'] }, PROV);
@@ -1143,13 +1201,59 @@ describe('ComposeEditor pending-redline affordances (ADR-021 dark mode)', () => 
   // eslint-disable-next-line @typescript-eslint/no-var-requires
   const { ComposeEditor } = require('../ComposeEditor');
 
-  function renderEditor() {
-    const ref = React.createRef<import('../ComposeEditor').ComposeEditorHandle>();
-    render(
+  // Banner consolidation (2026-08-19): the redline anchor-failure NOTICE moved out of ComposeEditor
+  // into the host's ComposeBannerStack rail (surfaced via onRedlineErrorChange). This harness plays the
+  // host — it captures the callback and renders the notice with the SAME testid + copy the stack uses —
+  // so the "surfaces the unresolved-target banner" intent is still exercised end-to-end.
+  function EditorHostHarness({
+    editorRef,
+  }: {
+    editorRef: React.Ref<import('../ComposeEditor').ComposeEditorHandle>;
+  }): React.JSX.Element {
+    const [redlineError, setRedlineError] = React.useState<import('./usePendingRedline').PendingRedlineError | null>(
+      null
+    );
+    // FR-C06 (task 053) — the harness plays the HOST for the anchorless-replay proposal too: the
+    // editor raises the question, the host answers it through the handle. These tests use legacy
+    // prose fixtures and are about the accept/reject SURFACE, so the answer is always "place it";
+    // the ComposeWorkspace ConfirmModal that asks a real user is covered in its own suites.
+    const [legacyProposal, setLegacyProposal] = React.useState<
+      import('./usePendingRedline').PendingRedlineLegacyProposal | null
+    >(null);
+    const handleRef = editorRef as React.RefObject<import('../ComposeEditor').ComposeEditorHandle | null>;
+    React.useEffect(() => {
+      if (legacyProposal !== null) handleRef.current?.applyLegacyRedlineProposal();
+    }, [legacyProposal, handleRef]);
+    return (
       <FluentProvider theme={webDarkTheme}>
-        <ComposeEditor ref={ref} docxBytes={null} />
+        <ComposeEditor
+          ref={editorRef}
+          docxBytes={null}
+          onRedlineErrorChange={setRedlineError}
+          onRedlineLegacyProposalChange={setLegacyProposal}
+        />
+        {redlineError ? (
+          // FR-C07 (task 053): copy kept in lockstep with ComposeBannerStack's rail — the
+          // "wording differs slightly" branch is GONE from both. The `not_found` sentence now
+          // depends on WHICH channel failed (`source`), because for an anchored edit no text was
+          // ever compared and blaming the wording was a fabrication.
+          <div data-testid="compose-redline-error">
+            {redlineError.kind === 'ambiguous'
+              ? redlineError.source === 'legacy-replay'
+                ? `This suggestion came from an earlier session and quoted wording that appears in ${redlineError.matchCount} places, so we won't guess which one it meant. Re-run it on the passage you want.`
+                : `This suggested edit matches ${redlineError.matchCount} places in the document. Select the exact passage and try again.`
+              : redlineError.source === 'legacy-replay'
+                ? `This suggestion came from an earlier session, before suggestions carried a paragraph reference, and the text it quoted is no longer in this document. Nothing was changed — re-run it to get a suggestion that points at a real paragraph.`
+                : `This suggested edit named a paragraph or section this document doesn't have. Nothing was changed — select the passage you want and try again.`}
+          </div>
+        ) : null}
       </FluentProvider>
     );
+  }
+
+  function renderEditor() {
+    const ref = React.createRef<import('../ComposeEditor').ComposeEditorHandle>();
+    render(<EditorHostHarness editorRef={ref} />);
     return ref;
   }
 
@@ -1196,7 +1300,12 @@ describe('ComposeEditor pending-redline affordances (ADR-021 dark mode)', () => 
 
     const banner = await screen.findByTestId('compose-redline-error');
     // Item 1 (UAT round-4): softened, non-alarming copy — the document is fully usable regardless.
-    expect(banner).toHaveTextContent(/couldn't be placed automatically/i);
+    // FR-C07 (task 053): the copy is now SOURCE-SPECIFIC and no longer says "wording differs
+    // slightly". This fixture is a legacy prose target, so the user is told the suggestion predates
+    // paragraph references and offered the one remedy that works: re-run it.
+    expect(banner).toHaveTextContent(/came from an earlier session/i);
+    expect(banner).toHaveTextContent(/Nothing was changed/i);
+    expect(banner.textContent ?? '').not.toMatch(/wording differs/i);
     // Nothing was rendered as a pending suggestion.
     expect(screen.queryByTestId('compose-redline-controls')).not.toBeInTheDocument();
   });
@@ -1213,13 +1322,40 @@ describe('ComposeEditor rationale-first accept/reject surface (FR-14, task 031, 
   // eslint-disable-next-line @typescript-eslint/no-var-requires
   const { ComposeEditor } = require('../ComposeEditor');
 
-  function renderEditorWithText(html: string) {
-    const ref = React.createRef<import('../ComposeEditor').ComposeEditorHandle>();
-    render(
+  /**
+   * FR-C06 (task 053) — plays the HOST for the anchorless-replay proposal, exactly as
+   * `EditorHostHarness` above does: the legacy prose fixtures in this describe would otherwise stop
+   * at the proposal and never render a redline. Answering "place it" through the handle is what a
+   * real host's ConfirmModal does on Confirm.
+   */
+  function ConfirmingEditorHost({
+    editorRef,
+    html,
+  }: {
+    editorRef: React.RefObject<import('../ComposeEditor').ComposeEditorHandle | null>;
+    html: string;
+  }): React.JSX.Element {
+    const [proposal, setProposal] = React.useState<import('./usePendingRedline').PendingRedlineLegacyProposal | null>(
+      null
+    );
+    React.useEffect(() => {
+      if (proposal !== null) editorRef.current?.applyLegacyRedlineProposal();
+    }, [proposal, editorRef]);
+    return (
       <FluentProvider theme={webDarkTheme}>
-        <ComposeEditor ref={ref} docxBytes={null} initialHtml={html} />
+        <ComposeEditor
+          ref={editorRef}
+          docxBytes={null}
+          initialHtml={html}
+          onRedlineLegacyProposalChange={setProposal}
+        />
       </FluentProvider>
     );
+  }
+
+  function renderEditorWithText(html: string) {
+    const ref = React.createRef<import('../ComposeEditor').ComposeEditorHandle>();
+    render(<ConfirmingEditorHost editorRef={ref} html={html} />);
     return ref;
   }
 

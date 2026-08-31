@@ -1,0 +1,108 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="074" project="unified-access-control-r2">
+  <metadata>
+    <title>Forcing function: fail the build when a document- or Dataverse-reading route carries no authorization filter or named waiver</title>
+    <phase>0c Secure Documents — Wave 1</phase>
+    <status>pending</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>This is the control that prevents the whole class of defect the other Wave 1 tasks are fixing. A weak or noisy implementation gets waived away and the class returns.</rigor-reason>
+    <model-tier>opus</model-tier>
+    <model-tier-reason>The hard part is choosing a detection rule precise enough to have no false positives and broad enough to have caught the four routes actually missed. That is a judgement problem, not a coding one.</model-tier-reason>
+    <effort>xhigh</effort>
+    <effort-reason>Requires reasoning about the true positive/negative boundary against real historical misses, and a waiver mechanism that cannot become a rubber stamp.</effort-reason>
+    <parallel-group>wave1</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <parallel-reason>New test project surface; does not modify BFF authorization code.</parallel-reason>
+    <deps>046</deps>
+    <tags>bff-api, testing, auth, security, ci-workflows</tags>
+    <estimated-effort>5-7 hours</estimated-effort>
+    <origin>Filed 2026-08-25. Enforcement on the BFF plane is by enumeration and the count has been wrong every single time it was taken: the workflow review estimated ~15 routes, task 022 found 22, then `/api/ai/search` and `/share-link` were found AFTER that sweep, then five more in `OBOEndpoints`. The next miss is scheduled, not hypothetical.</origin>
+  </metadata>
+
+  <prompt>Every hole found in this project's document surface was found by a human re-reading the route table, and every count was wrong. Replace enumeration with a build-time check: a route that reads documents or Dataverse content and carries no authorization filter fails the build, unless it carries an explicit, reviewed waiver.</prompt>
+
+  <role>SPAARKE architecture-test engineer. Your product is a rule that is precise enough to be trusted and strict enough to be worth having.</role>
+
+  <goal>Adding an ungated document/Dataverse-reading route to the BFF fails CI. The rule has no false positives on the current codebase, and — verified retroactively — it would have caught `/api/ai/search`, `share-link`, the `OBOEndpoints` drive-keyed routes, and the container upload.</goal>
+
+  <context>
+    <background>WHY THIS TASK EXISTS. The four Wave 1 defects are not four mistakes; they are one mistake made four times, because the control was "remember to add the filter". The route inventory has been recounted repeatedly and been wrong each time:
+
+- the secure-project workflow review estimated ~15 document routes
+- task 022's sweep found 22
+- AFTER that sweep, `POST /api/ai/search` (absent from this project's spec AND design entirely) and `POST /api/documents/{id}/share-link` were found
+- then five more in `Api/OBOEndpoints.cs`, where `AddDocumentAuthorizationFilter` appears **zero** times
+
+THE PRECEDENT EXISTS IN THIS REPO. A CORS-drift fitness test landed on master in commit `34ef54542`; `tests/Spaarke.ArchTests/` is the NetArchTest project and already hosts rules of this kind (e.g. `CredentialGuardTests` fails the build on a new `.WithClientSecret` site, and `CredentialCensusTests` asserts a construction-site count). Follow those patterns — this is the same idea applied to route authorization.
+
+THE DESIGN PROBLEM, and it is the whole task: minimal-API routes are registered by method calls, not attributes, so the rule cannot simply reflect over types. Options to weigh, with honest tradeoffs:
+  (a) **Reflect the built endpoint data sources** — construct the app (as the integration fixtures already do), enumerate `EndpointDataSource`, and inspect each endpoint's metadata for an authorization filter. Highest fidelity; requires app construction in a test.
+  (b) **Static analysis of the registration files** — parse `Api/**/*.cs` for `Map{Get,Post,Put,Patch,Delete}` calls and check the fluent chain. No app construction; brittle against formatting and helper-wrapped registrations.
+  (c) **Census assertion** — assert a known count of gated vs ungated routes, in the style of `CredentialCensusTests`. Cheapest and hardest to fool, but tells you *that* something changed, not *what*.
+Prefer (a) if it can be made reliable; (c) is an acceptable belt-and-braces addition. Do not ship (b) alone — a rule that misses helper-wrapped registrations reproduces the original failure.
+
+SCOPE OF THE RULE. It must cover routes that serve document metadata or bytes, or that read Dataverse content, across at minimum: `Api/FileAccessEndpoints.cs`, `Api/OBOEndpoints.cs`, `Api/UploadEndpoints.cs`, `Api/DocumentsEndpoints.cs`, `Api/DocumentVersionEndpoints.cs`, `Api/DocumentsBulkEndpoints.cs`, `Api/Ai/**`, `Api/ExternalAccess/**`, `Api/ComposeEndpoints.cs`. Decide the boundary deliberately and write it down — a rule whose scope nobody can state will be waived.
+
+THE WAIVER MECHANISM IS AS IMPORTANT AS THE RULE. Genuinely public routes exist (`/ping`, `/healthz`) and some routes are authorized by a different mechanism. A waiver must be: explicit, per-route, in code, carrying a reason string, and enumerable — so a reviewer can read the whole waiver list in one place and ask whether each is still true. An implicit exclusion (a path pattern, a naming convention) is not a waiver; it is a hole with better manners.</background>
+    <relevant-files>
+      <file role="new">tests/Spaarke.ArchTests/ — new route authorization rule</file>
+      <file role="reference">tests/Spaarke.ArchTests/CredentialGuardTests.cs</file>
+      <file role="reference">src/server/api/Sprk.Bff.Api/Api/FileAccessEndpoints.cs</file>
+      <file role="reference">src/server/api/Sprk.Bff.Api/Api/Filters/DocumentAuthorizationFilter.cs</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="project">ZERO false positives on the current codebase. A noisy rule gets disabled, and a disabled rule is worse than none because it looks like coverage.</constraint>
+    <constraint source="project">RETROACTIVE PROOF IS MANDATORY. Demonstrate the rule fires on each of the four historical misses — reintroduce each ungated registration in a scratch branch or a fixture and show the failure. A rule not shown to catch the known misses is unvalidated.</constraint>
+    <constraint source="project">Waivers must be explicit, per-route, reasoned, and enumerable in one place. No pattern-based or convention-based exclusions.</constraint>
+    <constraint source="ADR-038">Do not write a DI-registration test or a reflection-into-privates test. This is a structural fitness rule over public routing surface, which is a legitimate category — keep it there.</constraint>
+    <constraint source="project">The failure message must name the offending route and say what to do. A build failure that requires archaeology gets waived.</constraint>
+    <constraint source="project">Run in CI on the standard path. A rule that only runs locally does not bind.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/unified-access-control-r2/SECURE-DOCUMENTS-BUILD-PLAN.md</file>
+      <file>docs/standards/TEST-ARCHITECTURE.md</file>
+      <file>docs/adr/ADR-038-testing-strategy.md</file>
+      <file>.claude/constraints/testing.md</file>
+    </files>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="0">Read `CredentialGuardTests` and the CORS-drift test (`34ef54542`) for the established shape of a fitness rule in this repo.</step>
+    <step order="1">Choose the detection mechanism. Prototype (a) endpoint-data-source reflection first; fall back to (c) census, or combine. Record why.</step>
+    <step order="2">Define and write down the scope boundary — which route groups the rule governs — and the waiver format.</step>
+    <step order="3">Implement. Make the failure message name the route and the remedy.</step>
+    <step order="4">Run against HEAD; drive false positives to zero by waiving deliberately (with reasons), not by narrowing scope silently.</step>
+    <step order="5">RETROACTIVE VALIDATION: prove the rule fires for `/api/ai/search`, `share-link`, an `OBOEndpoints` drive-keyed route, and the container upload. Record the evidence.</step>
+    <step order="6">Wire into CI. Confirm it runs and can fail there, not just locally.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If no mechanism achieves both zero false positives and coverage of the four historical misses, STOP and report the tradeoff rather than shipping a rule that looks like coverage but is not. A census-only rule honestly described is better than a route-level rule that silently misses helper-wrapped registrations.</trigger>
+  </escalation>
+
+  <justification>
+    <existing>`tests/Spaarke.ArchTests/` already hosts build-failing structural rules — `CredentialGuardTests`, `CredentialCensusTests`, and the CORS-drift fitness test.</existing>
+    <extension>This is another rule in that existing project, following the established pattern. No new component or infrastructure.</extension>
+    <cost-of-doing-nothing>Route authorization stays enforced by human enumeration, which has been wrong on every attempt in this project. Wave 1 fixes four known holes and does nothing to stop the fifth, and the SemanticSearchControl incident shows the fifth arrives via a route nobody remembered to review.</cost-of-doing-nothing>
+  </justification>
+
+  <outputs>
+    <output type="test">tests/Spaarke.ArchTests/ — route authorization fitness rule + enumerable waiver list</output>
+    <output type="doc">notes — mechanism choice, scope boundary, waiver list rationale, retroactive-validation evidence</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion>The rule fails the build for a newly added ungated document/Dataverse-reading route.</criterion>
+    <criterion>Zero false positives on HEAD; every exclusion is an explicit reasoned waiver, all in one enumerable place.</criterion>
+    <criterion>Retroactive proof recorded that the rule fires on all four historical misses.</criterion>
+    <criterion>The failure message names the route and the remedy.</criterion>
+    <criterion>The rule runs in CI, and its failure is demonstrated there.</criterion>
+    <criterion>The scope boundary is written down and defensible.</criterion>
+  </acceptance-criteria>
+
+  <notes>This is the highest-value task in Waves 1–2. The other four close specific holes; this one closes the way holes get added. If schedule pressure forces a cut, cut something else.</notes>
+</task>

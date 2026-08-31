@@ -1,19 +1,31 @@
 /**
  * versionHistory.ts — Documents surface version-history client (task 051).
  *
- * Thin client for the task-050 USER-CONTEXT (OBO) version-history endpoint pair
+ * Thin client for the USER-CONTEXT (OBO) version-history endpoint pair
  * (src/server/api/Sprk.Bff.Api/Api/DocumentVersionEndpoints.cs):
  *
- *   GET /api/obo/drives/{driveId}/items/{itemId}/versions
+ *   GET /api/documents/{documentId}/versions
  *       → VersionInfoDto[] (id, eTag, lastModifiedDateTime, size), newest first
- *   GET /api/obo/drives/{driveId}/items/{itemId}/versions/{versionId}/content
+ *   GET /api/documents/{documentId}/versions/{versionId}/content
  *       → the EXACT bytes of the named prior version (read-only)
  *
+ * ⚠️ unified-access-control-r2 task 079 — these routes were RE-KEYED from
+ * `(driveId, itemId)` to `{documentId}`. The old pair
+ *
+ *   GET /api/obo/drives/{driveId}/items/{itemId}/versions[/{versionId}/content]
+ *
+ * is DELETED, not deprecated. It let any caller holding a container ACL read
+ * the version history and PRIOR-VERSION BYTES of an arbitrary SPE item with no
+ * per-document check. Pass the `sprk_document` row id; the server reads the
+ * drive/item off that row AFTER authorizing the caller for it. Do not
+ * reintroduce a drive-keyed call here.
+ *
  * Auth model (ADR-028): every call goes through `@spaarke/auth`
- * `authenticatedFetch` under the CALLING USER's OBO token. This module NEVER
- * calls the admin/app-only version surface (`ContainerItemEndpoints.cs`) —
- * per-document authorization is enforced at the SPE layer under the user's
- * delegated permission (403/404, never the bytes).
+ * `authenticatedFetch` under the CALLING USER's OBO token. Authorization is a
+ * per-document Dataverse decision on the server (Read on the document, the same
+ * gate as the current-version download) — NOT, as this comment previously
+ * claimed, the SPE layer's container-scoped answer. This module still never
+ * calls the admin/app-only version surface (`ContainerItemEndpoints.cs`).
  *
  * SCOPE (binding, per task 051): view/open read-only ONLY. No restore, no
  * branch-from, no version-state mutation of any kind is exposed here.
@@ -77,26 +89,25 @@ export function ensureAuthInitialized(): Promise<void> {
 // OBO endpoint calls (task-050 contract — the ONLY fetch paths in this module)
 // ---------------------------------------------------------------------------
 
-function versionsPath(driveId: string, itemId: string): string {
-  return `/api/obo/drives/${encodeURIComponent(driveId)}/items/${encodeURIComponent(itemId)}/versions`;
+function versionsPath(documentId: string): string {
+  return `/api/documents/${encodeURIComponent(documentId)}/versions`;
 }
 
 /** List a document's SPE version history (newest first) as the calling user. */
-export async function listVersions(driveId: string, itemId: string): Promise<IVersionInfo[]> {
+export async function listVersions(documentId: string): Promise<IVersionInfo[]> {
   await ensureAuthInitialized();
-  const response = await authenticatedFetch(versionsPath(driveId, itemId));
+  const response = await authenticatedFetch(versionsPath(documentId));
   return (await response.json()) as IVersionInfo[];
 }
 
 /** Fetch the exact bytes of a specific prior version, read-only, as the calling user. */
 export async function fetchVersionBytes(
-  driveId: string,
-  itemId: string,
+  documentId: string,
   versionId: string
 ): Promise<Blob> {
   await ensureAuthInitialized();
   const response = await authenticatedFetch(
-    `${versionsPath(driveId, itemId)}/${encodeURIComponent(versionId)}/content`
+    `${versionsPath(documentId)}/${encodeURIComponent(versionId)}/content`
   );
   return await response.blob();
 }
@@ -122,13 +133,12 @@ const INLINE_VIEWABLE: Record<string, string> = {
  * bytes of the prior version — never a restore, never a branch.
  */
 export async function openPriorVersionReadOnly(
-  driveId: string,
-  itemId: string,
+  documentId: string,
   versionId: string,
   documentName: string,
   fileType?: string
 ): Promise<void> {
-  const rawBlob = await fetchVersionBytes(driveId, itemId, versionId);
+  const rawBlob = await fetchVersionBytes(documentId, versionId);
 
   const ext = (fileType ?? "").toLowerCase().replace(/^\./, "");
   const inlineMime = INLINE_VIEWABLE[ext];

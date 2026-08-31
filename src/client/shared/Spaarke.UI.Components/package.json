@@ -52,7 +52,7 @@
     "react-dom": ">=16.14.0"
   },
   "devDependencies": {
-    "@fluentui/react-components": "^9.73.2",
+    "@fluentui/react-components": "9.68.0",
     "@fluentui/react-icons": "^2.0.320",
     "@hello-pangea/dnd": "^18.0.1",
     "@lexical/html": "^0.41.0",
@@ -96,7 +96,8 @@
     "dompurify": "^3.4.0",
     "mammoth": "^1.12.0",
     "marked": "^17.0.4",
-    "pdfjs-dist": "^5.7.284",
+    "pdfjs-dist": "^6.2.108",
     "react-window": "^1.8.11"
-  }
+  },
+  "sideEffects": false
 }

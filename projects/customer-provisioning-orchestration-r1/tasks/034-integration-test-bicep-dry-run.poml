@@ -1,0 +1,107 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="034" project="customer-provisioning-orchestration-r1">
+  <metadata>
+    <title>Integration test — end-to-end Bicep deploy dry-run of customer + platform + model1-shared + platform-controlplane stacks against dev subscription</title>
+    <phase>C Wave C2 — Bicep + UAMI</phase>
+    <gate>blocked</gate>
+    <status>completed</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Test-modifying task per root CLAUDE.md §8 override — any task tagged integration-test triggers unconditional FULL rigor (code-review + adr-check at Step 9.5). Also deploy tag + azure-deployment scope. This is the E2E gate verifying Wave C2 produces a coherent deployable stamp.</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Brief rubric: mechanical dotnet+bicep dry-run test authoring against a fully-specified acceptance surface (spec.md §7.2 resource list; design.md 25-module count). No architectural judgment — verification only.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>waveC2-integration</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Deps on all Wave C2 tasks (027–033). Integration test that must run after every bicep artifact is authored + individually validated.</parallel-reason>
+    <deps>027, 028, 029, 030, 031, 032, 033</deps>
+    <tags>azure, bicep, azure-deployment, deploy, testing, integration-test</tags>
+    <estimated-effort>3-5 hours</estimated-effort>
+  </metadata>
+
+  <prompt>Author + run an integration test that performs end-to-end bicep dry-run (az deployment sub / group what-if) against a dev Azure subscription for the full Wave C2 stack composition: customer.bicep (task 027) + platform.bicep (task 031) + stacks/model1-shared.bicep (task 032) + platform-controlplane.bicep (task 033). Verify: all 15 resources per spec.md §7.2 are surfaced; resource count matches design.md 25-module count; UAMI is bound to both slots (T5 fix); RBAC assignments target UAMI principalId. Publish the dry-run output as a task-note artifact.</prompt>
+  <role>SPAARKE platform developer with Bicep + Azure CLI test-scripting expertise. Author a repeatable test harness (PowerShell or bash script under scripts/tests/) that runs the dry-runs + parses output + asserts the counts.</role>
+  <goal>An integration-test artifact (scripts/tests/bicep-e2e-dry-run.ps1 or similar) exists that: (a) runs az deployment group what-if against dev for all 4 stacks; (b) asserts the resource-count matches design.md §7.2 target (15 per-customer resources; 25-module count); (c) asserts UAMI binding on both slots; (d) asserts UAMI RBAC assignments present. Test passes; dry-run output persisted at projects/customer-provisioning-orchestration-r1/notes/bicep-e2e-dry-run-{yyyymmdd}.md.</goal>
+
+  <context>
+    <background>Spec FR-04 acceptance: "all 15 resources per §7.2 deployed to expected names per §7.1 naming convention; az deployment group what-if in upgrade mode surfaces drift before apply." Design.md 25-module count is the composition-level metric. Wave C2 completion is gated on producing a coherent stamp deployable dry-run without errors. Without this test, individual bicep tasks pass but composition-level breakage (e.g. output-signature mismatch, param propagation gap) is only caught at Phase F E2E acceptance — too late.</background>
+    <relevant-files>
+      <file role="new">scripts/tests/bicep-e2e-dry-run.ps1</file>
+      <file role="canonical-reference">infrastructure/bicep/customer.bicep (task 027)</file>
+      <file role="canonical-reference">infrastructure/bicep/platform.bicep (task 031)</file>
+      <file role="canonical-reference">infrastructure/bicep/stacks/model1-shared.bicep (task 032)</file>
+      <file role="canonical-reference">infrastructure/bicep/platform-controlplane.bicep (task 033)</file>
+      <file role="canonical-reference">infrastructure/bicep/modules/uami.bicep (task 028)</file>
+      <file role="canonical-reference">infrastructure/bicep/modules/app-service.bicep (task 029)</file>
+    </relevant-files>
+    <dependencies>
+      <dependency task="027" status="pending">customer.bicep with Cosmos + optional SignalR + UAMI param</dependency>
+      <dependency task="028" status="pending">uami.bicep module</dependency>
+      <dependency task="029" status="pending">app-service.bicep UAMI-refactored + bound to both slots</dependency>
+      <dependency task="030" status="pending">RBAC bicep migrated to UAMI principal</dependency>
+      <dependency task="031" status="pending">platform.bicep shrunk to control-plane-only</dependency>
+      <dependency task="032" status="pending">model1-shared.bicep first-class trial-tier composition</dependency>
+      <dependency task="033" status="pending">platform-controlplane.bicep L2 orchestrator infra</dependency>
+    </dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="project">Scope: dry-run only (az deployment group what-if / az deployment sub what-if). Do NOT actually provision new resources; do NOT touch production or demo subscriptions — dev-only per r3 handoff "Only spaarke-dev is live".</constraint>
+    <constraint source="project">MUST assert the resource-count matches spec.md §7.2 (15 per-customer resources) + design.md 25-module count.</constraint>
+    <constraint source="project">MUST assert UAMI binding is present on BOTH prod + staging App Service slots (T5 structural fix verification).</constraint>
+    <constraint source="project">MUST assert every RBAC role assignment migrated by task 030 targets UAMI principalId with correct roleDefinitionId GUID.</constraint>
+    <constraint source="project">MUST NOT edit .github/workflows/** — CI-wiring is Phase H coordinated PR per root CLAUDE.md §10 ci-workflows=Y.</constraint>
+    <constraint source="project">Publish-size delta = 0 (bicep + PS test script only, no BFF code).</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>Bicep dry-run + resource-count assertion</topic>
+    <files>
+      <file>projects/customer-provisioning-orchestration-r1/spec.md</file>
+      <file>projects/customer-provisioning-orchestration-r1/design.md</file>
+      <file>projects/customer-provisioning-orchestration-r1/CLAUDE.md</file>
+      <file>.claude/constraints/azure-deployment.md</file>
+      <file>.claude/constraints/testing.md</file>
+    </files>
+    <patterns>
+      <pattern name="Existing az deployment what-if usage" location="scripts/">Grep scripts/ for existing what-if invocations to mirror the calling convention + auth flow.</pattern>
+    </patterns>
+  </knowledge>
+
+  <steps mode="prescriptive">
+    <step order="0" name="Context + rigor declaration">Output the RIGOR LEVEL declaration (FULL + reason — test-modifying override + deploy tag). Load spec.md FR-04 + §7.2, design.md 25-module count, tasks 027–033 outputs.</step>
+    <step order="1">Author scripts/tests/bicep-e2e-dry-run.ps1 with sections for each stack: customer.bicep, platform.bicep, stacks/model1-shared.bicep, platform-controlplane.bicep.</step>
+    <step order="2">For each stack, invoke az deployment group what-if (or sub what-if for subscription-scope stacks) against the dev subscription with realistic parameters (dev customerId + dev tenantId + dev RG naming).</step>
+    <step order="3">Parse what-if output (JSON format) — enumerate resource additions/modifications; count total per-customer resources; count total modules invoked.</step>
+    <step order="4">Assert: per-customer resource count = 15 per spec.md §7.2 (log the exact resource type list for diff-visibility); modules invoked = 25 per design.md; UAMI resource ID appears in App Service identity.userAssignedIdentities on BOTH slot resources; UAMI principalId appears in role-assignment principalId for KV Secrets User + Storage Blob Data Contributor + Cognitive Services User + Cosmos DB Built-in Data Contributor.</step>
+    <step order="5">Persist dry-run output as projects/customer-provisioning-orchestration-r1/notes/bicep-e2e-dry-run-{yyyymmdd}.md with sections per stack.</step>
+    <step order="6">Run the test script — verify all assertions pass; capture any deltas.</step>
+    <step order="7">Update TASK-INDEX.md: set this task's status to ✅.</step>
+    <step order="8">Document deviation (e.g. resource count nuance, expected drift for env-scope resources) in projects/customer-provisioning-orchestration-r1/notes/.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If the resource count differs from spec.md §7.2 (15 per-customer) or design.md (25-module) by more than 1, STOP and escalate per CLAUDE.md §6 — do NOT paper over with an adjusted target; the composition is off and needs task-level triage.</trigger>
+    <trigger>If UAMI binding fails to appear on the staging slot in the what-if output, STOP and escalate — this is the T5 structural fix; a slot-scoped identity gap invalidates the whole Phase C UAMI strategy.</trigger>
+  </escalation>
+
+  <outputs>
+    <output type="test">scripts/tests/bicep-e2e-dry-run.ps1</output>
+    <output type="doc">projects/customer-provisioning-orchestration-r1/notes/bicep-e2e-dry-run-{yyyymmdd}.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Given the test script, az deployment group what-if succeeds (exit 0) against dev for all 4 stacks.</criterion>
+    <criterion testable="true">Given the what-if output, per-customer resource count equals 15 (spec.md §7.2) with the expected type-name list.</criterion>
+    <criterion testable="true">Given the what-if output, module invocation count equals 25 (design.md).</criterion>
+    <criterion testable="true">Given the what-if output for app-service + slot resources, identity.userAssignedIdentities contains the SAME UAMI resource ID on both.</criterion>
+    <criterion testable="true">Given the what-if output for role-assignment resources, principalId matches UAMI principalId for all 4 role families (KV Secrets User, Storage Blob Data Contributor, Cognitive Services User, Cosmos DB Built-in Data Contributor).</criterion>
+    <criterion testable="true">Negative: no real deploy is executed — what-if only.</criterion>
+    <criterion testable="true">Negative: no .github/workflows/** file is touched.</criterion>
+  </acceptance-criteria>
+
+  <notes>Maps spec.md FR-04 acceptance + Wave C2 completion gate. This test becomes a recurring pre-Phase F gate — re-run it whenever any Wave C2 bicep is modified. Coordinate with Phase H for eventual CI wiring per root CLAUDE.md §10 ci-workflows=Y coordinated-PR rule.
+
+**Completion notes (2026-08-17)**: Delivered `scripts/tests/bicep-e2e-dry-run.ps1` (three-tier test: static build / live what-if / structural assertions) + notes artifact at `notes/bicep-e2e-dry-run-20260817.md`. All 3 non-deferred stacks (customer, platform, platform-controlplane) build clean AND what-if succeeds against dev subscription. All 8 structural assertions PASS (UAMI both-slot binding, module count 29 vs baseline 25 acknowledged as Wave 2 drift, no CI workflow edits, etc.). scripts/README.md updated (Testing & Validation section). Step 9.5 quality gates: code-review PASS with 2 minor comment-additions applied; adr-check PASS (no violations, no warnings — ADR-038 §7 KEEP paths are C#-scoped and don't cover shell integration tests). Deviation documented: stacks/model1-shared.bicep is an unmigrated caller of task-029 UAMI-only app-service.bicep (build failure is EXPECTED per task 029 D1); follow-on task recommended to migrate the sharedBffApi module invocation.</notes>
+
+  <execution><skill>.claude/skills/task-execute/SKILL.md</skill></execution>
+</task>

@@ -61,7 +61,6 @@ public class CommunicationServiceChannelRoutingTests
             Mock.Of<ICommunicationDataverseService>(),
             entityService,
             Mock.Of<IDocumentDataverseService>(),
-            null!, // SpeFileStore — archival not exercised
             null!, // CommunicationAccountService — not exercised
             null!, // JobSubmissionService — not exercised
             Mock.Of<ICommunicationEnrichmentService>(),

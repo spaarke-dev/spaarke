@@ -45,6 +45,25 @@ export interface ReconciliationBrowseRecord {
   /** Bcc recipients — hidden when empty. */
   bcc?: string | null;
   /**
+   * Received (inbound) / sent (outbound) datetime — raw ISO/Dataverse string. Shown
+   * right-aligned in the reader's From row (prototype's Date row; owner UAT 2026-08-14).
+   * `sprk_receiveddate`. Omitted ⇒ no date shown.
+   */
+  receivedDate?: string | null;
+  /** `false` ⇒ label the date "Sent" (outbound); default/omitted ⇒ "Received". */
+  outbound?: boolean;
+  /**
+   * Triage panel (prototype's TRIAGE box; owner UAT 2026-08-14) — the AI triage summary
+   * sentence + optional priority/category chips. All host-resolved from the existing
+   * `sprk_triage*` columns (already populated by `CommunicationEnrichmentService`). Omitted
+   * ⇒ no triage panel renders.
+   */
+  triageSummary?: string | null;
+  /** `sprk_triagepriority` FormattedValue (e.g. "High"). */
+  triagePriority?: string | null;
+  /** `sprk_triagecategory` FormattedValue (e.g. "Deal correspondence"). */
+  triageCategory?: string | null;
+  /**
    * The resolved `.eml` archive document id (the related document flagged
    * `sprk_isemailarchive`). Present ⇒ the reader renders the server-sanitized
    * `.eml`; absent ⇒ it degrades to `body`. Resolution stays in the host.
@@ -62,8 +81,15 @@ export interface ReconciliationBrowseRecord {
 export interface ReconciliationBrowseShellProps {
   /** Whether the shell is open. */
   open: boolean;
-  /** Close callback — wired to the × and ESC/backdrop. */
+  /** Close callback — wired to the × and the footer "Close" (grey, left). */
   onClose: () => void;
+  /**
+   * Optional "Save" callback for the footer primary (blue, right) — owner UAT 2026-08-14.
+   * The reconciliation surface commits per-action (Confirm/Accept/Create write immediately),
+   * so "Save" is a visual-confirmation + close affordance following the standard SprkModal
+   * footer contract (Cancel/Close left, primary right). Defaults to {@link onClose} when omitted.
+   */
+  onSave?: () => void;
   /**
    * The ordered Needs-review queue the shell steps through. Same order as the
    * task-050 reconciliation grid so "N of M" matches the list the reviewer sees.
@@ -77,6 +103,12 @@ export interface ReconciliationBrowseShellProps {
   initialIndex?: number;
   /** Observability — fired when the shell advances to a new record (does NOT control the index). */
   onIndexChange?: (index: number, record: ReconciliationBrowseRecord) => void;
+  /**
+   * Optional header-right badges (B2.3 progress badges) — rendered in the SprkModal header (before the
+   * window controls) via its `headerActions` slot. The host builds the "Related ✓ · Fields n/N · Tasks
+   * n/N" progress node for the CURRENT record. Omitted ⇒ no header badges.
+   */
+  headerBadges?: React.ReactNode;
   /**
    * RIGHT-pane slot — the three reconcile tabs (Related to = task 052 · Fields =
    * 055 · Tasks = 056/057). Invoked with the current record + index. This task

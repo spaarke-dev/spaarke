@@ -1,0 +1,109 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="004" project="customer-provisioning-orchestration-r1">
+  <metadata>
+    <title>Resolve two-source AI seed drift (scripts/seed-data MVP vs infra/dataverse R7); publish resolution note</title>
+    <phase>A Doc Consolidation + Audits</phase>
+    <gate>startable</gate>
+    <status>completed</status>
+    <rigor>STANDARD</rigor>
+    <rigor-reason>Read-only audit but with a decision component (which source becomes authoritative per H12a declarative manifest); output steers Phase C' H12a implementation. Per root CLAUDE.md §8 rigor table, tasks with explicit constraints + Phase-2+ downstream consumers = STANDARD.</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Standard drift-resolution analysis with two clearly defined candidate sources; no cross-cutting refactor. Per Step 3.5.5b default = sonnet.</model-tier-reason>
+    <effort>medium</effort>
+    <parallel-group>groupA-parallel</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <deps>none</deps>
+    <tags>docs, audit, ai, dataverse</tags>
+    <estimated-effort>3-4 hours</estimated-effort>
+  </metadata>
+
+  <prompt>
+Reconcile the two-source AI seed drift: scripts/seed-data/ (MVP heritage) vs infra/dataverse/ (R7 heritage). For each seed artifact type (type-lookups, actions, tools, knowledge, skills, playbooks, output-types, playbook consumers, sprk_aimodeldeployment, DataGrid configs, field-mapping profiles/rules, workspace layouts, chart defs) declare the AUTHORITATIVE source and rationale. Publish projects/customer-provisioning-orchestration-r1/notes/ai-seed-drift-resolution-2026-08.md — this is the baseline for the H12a/H12b declarative manifest that Wave C'/Phase C' will implement (FR-15/FR-16).
+  </prompt>
+
+  <role>SPAARKE platform AI + data engineer. Fluent with ADR-039 single-AI-routing-surface, the seed chain (type-lookups → actions → tools → knowledge → skills → playbooks → output-types → playbook consumers), and the r7 dispatcher retirement. Follow ADR-039 strictly.</role>
+
+  <goal>projects/customer-provisioning-orchestration-r1/notes/ai-seed-drift-resolution-2026-08.md exists containing, per seed artifact type, a canonical decision row: (artifact | current scripts/seed-data source | current infra/dataverse source | AUTHORITATIVE source for H12a manifest | rationale | any deltas that must be migrated). This note is the input for Phase C' H12a manifest authoring — remediation happens THERE, not here.</goal>
+
+  <context>
+    <background>
+Per spec.md FR-15 + R14 + design.md §11.3 + INVENTORY §12. Two-source drift arose because scripts/seed-data/ was the MVP path while infra/dataverse/ was the R7 dispatcher-era seed. ADR-039 retired the dispatcher; H12a must consume a SINGLE declarative manifest naming the authoritative source per artifact. This audit produces that authoritative-source declaration.
+    </background>
+    <relevant-files>
+      <file role="new">projects/customer-provisioning-orchestration-r1/notes/ai-seed-drift-resolution-2026-08.md</file>
+      <file role="canonical-reference">scripts/seed-data/</file>
+      <file role="canonical-reference">infra/dataverse/</file>
+      <file role="canonical-reference">.claude/adr/ADR-039-grounded-execution-closed-catalogs.md</file>
+      <file role="canonical-reference">scripts/seed-data/Deploy-All-AI-SeedData.ps1</file>
+      <file role="canonical-reference">scripts/seed-data/Seed-PlaybookConsumers.ps1</file>
+    </relevant-files>
+    <dependencies>
+      <dependency task="none" status="complete">Phase A is startable</dependency>
+    </dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="spec.md">SCOPE: Read-only reconciliation. Do NOT edit any seed script or seed data file; the authoritative-source declaration is documentation only. Phase C' H12a task implements the manifest.</constraint>
+    <constraint source="ADR-039">SCOPE: The seed chain terminates at "playbook consumers" per ADR-039 dispatcher-retirement. Any resolution row that would re-introduce the dispatcher OR the retired spaarke-playbook-embeddings index is a defect.</constraint>
+    <constraint source="spec.md">SCOPE: Every seed artifact type per FR-15 (AI chain) AND FR-16 (app-config) MUST have a resolution row; missing an artifact type is a defect.</constraint>
+    <constraint source="project">SCOPE: Rationale for each AUTHORITATIVE choice MUST cite concrete evidence (drift item, latest-commit date, ADR-039 alignment, deployer invocation) — "seems cleaner" is not a rationale.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>AI seed chain + ADR-039 single-routing-surface</topic>
+    <files>
+      <file>projects/customer-provisioning-orchestration-r1/spec.md</file>
+      <file>projects/customer-provisioning-orchestration-r1/design.md</file>
+      <file>projects/customer-provisioning-orchestration-r1/CLAUDE.md</file>
+      <file>.claude/adr/ADR-039-grounded-execution-closed-catalogs.md</file>
+      <file>.claude/constraints/ai.md</file>
+      <file>.claude/adr/ADR-014-ai-caching.md</file>
+    </files>
+    <patterns>
+      <pattern name="Spaarke drift-resolution note" location="projects/*/notes/*-drift-*.md">Front-matter → per-artifact table (current sources + delta) → authoritative decision + rationale → migration deltas for downstream implementer.</pattern>
+    </patterns>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="0" name="Context + rigor declaration">Emit the 🔒 RIGOR LEVEL block. Load spec.md FR-15/16 + design.md §11.3 + ADR-039.</step>
+    <step order="1" name="Enumerate seed artifacts">List each seed artifact type per FR-15 + FR-16.</step>
+    <step order="2" name="Inventory scripts/seed-data">Enumerate scripts/seed-data/ contents; identify which artifacts each script seeds; capture latest-commit dates + any known drift markers.</step>
+    <step order="3" name="Inventory infra/dataverse">Enumerate infra/dataverse/ seed artifacts; capture latest-commit dates + drift markers.</step>
+    <step order="4" name="Cross-reference deployers">Note which source Deploy-All-AI-SeedData.ps1 + Seed-PlaybookConsumers.ps1 currently invoke.</step>
+    <step order="5" name="Decide authoritative">For each artifact type, propose AUTHORITATIVE source with rationale citing evidence + ADR-039 alignment.</step>
+    <step order="6" name="Enumerate migration deltas">For each artifact where authoritative-source differs from the currently-invoked source, list the migration deltas that Phase C' H12a task must handle.</step>
+    <step order="7" name="Publish">Write projects/customer-provisioning-orchestration-r1/notes/ai-seed-drift-resolution-2026-08.md.</step>
+    <step order="8" name="Index update">Update TASK-INDEX.md: set task 004 status to ✅.</step>
+    <step order="9" name="Deviations">Document any deviation in projects/customer-provisioning-orchestration-r1/notes/.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If any seed artifact type has authoritative-source ambiguity that cannot be resolved by evidence (both sources plausible OR conflicting ADR-039 signal), STOP and escalate per CLAUDE.md §6 rather than making an arbitrary call — the H12a manifest carries this decision forward and a silent wrong call cascades into H12a idempotency defects.</trigger>
+  </escalation>
+
+  <justification>
+    <existing>No prior seed-drift resolution note exists. INVENTORY.md and design.md §11.3 identify the drift but do not decide the authoritative source per artifact.</existing>
+    <extension>No — this note is the specific pre-work input for the Phase C' H12a manifest task; extending design.md with per-artifact decisions bloats the design doc with implementation-detail.</extension>
+    <cost-of-doing-nothing>Without the resolution note, the H12a declarative manifest in Phase C' has no baseline for authoritative-source declarations and would perpetuate the two-source drift into production customer provisioning — every seeded environment would carry silent inconsistency between the two sources.</cost-of-doing-nothing>
+  </justification>
+
+  <tools>
+    <tool name="terminal">ls / rg / git log across scripts/seed-data + infra/dataverse</tool>
+  </tools>
+
+  <outputs>
+    <output type="docs">projects/customer-provisioning-orchestration-r1/notes/ai-seed-drift-resolution-2026-08.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Given the note, when scanning the artifact table, then every seed artifact type per FR-15 + FR-16 appears exactly once with an AUTHORITATIVE source declared.</criterion>
+    <criterion testable="true">Given each AUTHORITATIVE decision row, when reading rationale, then the rationale cites concrete evidence (file line, commit date, or ADR-039 clause) — not a heuristic.</criterion>
+    <criterion testable="true">Given the migration-deltas section, when reading, then each delta is scoped as work for Phase C' H12a task — NOT for this task.</criterion>
+    <criterion testable="true">Negative: git diff shows only the new notes file — no seed script/data modified.</criterion>
+    <criterion testable="true">Negative: no decision row reintroduces the retired dispatcher or spaarke-playbook-embeddings index (per ADR-039).</criterion>
+  </acceptance-criteria>
+
+  <notes>Spec FR-15 + FR-16 + R14 + ADR-039. Directly feeds Phase C' H12a manifest authoring. COMPLETED 2026-08-17 by task-execute Wave 0 Batch 1 sub-agent. Deliverable: projects/customer-provisioning-orchestration-r1/notes/ai-seed-drift-resolution-2026-08.md — 13 artifact types resolved (9 FR-15 + 4 FR-16), each with authoritative source + evidence-cited rationale + Phase C' migration deltas (M1–M12 for H12a, N1–N5 for H12b). Escalation trigger not fired — no ambiguity. git diff shows only the new note file (no seed scripts/data modified). ADR-039 invariants preserved (no dispatcher, no spaarke-playbook-embeddings index).</notes>
+
+  <execution><skill>.claude/skills/task-execute/SKILL.md</skill></execution>
+</task>

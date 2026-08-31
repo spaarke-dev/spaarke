@@ -97,7 +97,6 @@ public class CommunicationServiceEmailSendThreadTests
             Mock.Of<ICommunicationDataverseService>(),
             entityService,
             Mock.Of<IDocumentDataverseService>(),
-            null!, // SpeFileStore — not exercised (ArchiveToSpe = false, the default)
             null!, // CommunicationAccountService — not exercised (ArchiveToSpe = false; see CommunicationServiceTests precedent)
             null!, // JobSubmissionService — not exercised (ArchiveToSpe = false)
             Mock.Of<ICommunicationEnrichmentService>(),

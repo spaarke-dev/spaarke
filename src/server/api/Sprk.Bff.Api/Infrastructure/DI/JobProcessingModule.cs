@@ -1,3 +1,4 @@
+using Microsoft.Extensions.Options;
 using Sprk.Bff.Api.Configuration;
 using Sprk.Bff.Api.Services.Ai;
 
@@ -51,18 +52,40 @@ public static class JobProcessingModule
             services.AddScoped<Sprk.Bff.Api.Services.Jobs.IJobHandler, Sprk.Bff.Api.Services.Ai.Jobs.BulkRagIndexingJobHandler>();
         }
 
-        // Service Bus client
-        var serviceBusConnectionString = configuration.GetConnectionString("ServiceBus");
-        if (string.IsNullOrWhiteSpace(serviceBusConnectionString))
-        {
-            throw new InvalidOperationException(
-                "ConnectionStrings:ServiceBus is required. " +
-                "For local development, use Service Bus emulator (see docs/README-Local-Development.md) " +
-                "or configure a dev Service Bus namespace.");
-        }
+        // Service Bus client — THE single registration for the whole BFF (auth-v4 task 051 / FR-E2).
+        //
+        // Previously three modules each registered a ServiceBusClient singleton (WorkersModule at
+        // Program.cs:75, OfficeWorkersModule at :124, and this one at :196). .NET DI resolves
+        // last-registration-wins, so this was the only one anything ever received; the other two
+        // were shadowed. They are now deleted and point here.
+        //
+        // Registration is UNCONDITIONAL and the credential decision is deferred to resolution time,
+        // per ADR-032 / CLAUDE.md §10 F.1: the old shape gated registration on a credential being
+        // present, so clearing the connection string would have silently un-registered the client
+        // and every hosted service that injects it — the asymmetric-registration anti-pattern.
+        // Failure now surfaces where it can be read (ServiceBusClientFactory.Create) instead of as
+        // an unresolvable-dependency error naming a type nobody configured.
+        services.AddSingleton(sp => Sprk.Bff.Api.Infrastructure.Auth.ServiceBusClientFactory.Create(
+            sp.GetRequiredService<IOptions<ServiceBusOptions>>().Value,
+            sp.GetRequiredService<Azure.Core.TokenCredential>()));
 
-        services.AddSingleton(sp => new Azure.Messaging.ServiceBus.ServiceBusClient(serviceBusConnectionString));
-        services.AddHostedService<Sprk.Bff.Api.Services.Jobs.ServiceBusJobProcessor>();
+        // Registered as a singleton FIRST, then handed to the hosted-service and health-check
+        // pipelines, so all three share ONE instance. AddHostedService<T>() alone registers only
+        // IHostedService->T, and AddCheck<T>() would then construct a SECOND, stateless T via
+        // ActivatorUtilities — a health check that can never observe the processor's auth-failure
+        // state. (RoutingConsumerTypeHealthCheck has that same shape and gets away with it only
+        // because its check re-derives everything from scratch.)
+        services.AddSingleton<Sprk.Bff.Api.Services.Jobs.ServiceBusJobProcessor>();
+        services.AddHostedService(sp => sp.GetRequiredService<Sprk.Bff.Api.Services.Jobs.ServiceBusJobProcessor>());
+
+        // auth-v4 task 051 (FR-E2): make "authorized but processing nothing" visible. Persistent
+        // Service Bus authorization failure previously left /healthz returning 200 while the queue
+        // silently stopped draining.
+        services.AddHealthChecks()
+            .AddCheck<Sprk.Bff.Api.Services.Jobs.ServiceBusJobProcessor>(
+                "servicebus-job-processing",
+                failureStatus: Microsoft.Extensions.Diagnostics.HealthChecks.HealthStatus.Unhealthy,
+                tags: new[] { "jobs", "servicebus", "auth" });
 
         // Background hosted services
         services.Configure<Sprk.Bff.Api.Services.Ai.Jobs.EmbeddingMigrationOptions>(
@@ -86,12 +109,9 @@ public static class JobProcessingModule
         services.Configure<AiSearchOptions>(configuration.GetSection("AiSearch"));
 
         logging.AddConsole();
-        Console.WriteLine("\u2713 Job processing configured with Service Bus (queue: sdap-jobs)");
-        Console.WriteLine("\u2713 Email polling backup service configured");
-        Console.WriteLine("\u2713 Document vector backfill service registered (enable via config)");
-        Console.WriteLine("\u2713 Embedding migration service registered (enable via config)");
-        Console.WriteLine("\u2713 Scheduled RAG indexing service registered (enable via config)");
-        Console.WriteLine("\u2713 RecordSyncJob registered (enable via RecordSync:Enabled=true)");
+        // D9-01 (config-deployment): removed 6 Console.WriteLine startup echoes that bypassed the
+        // ILogger/OTel pipeline. These ran at service-registration time (pre-host-build) with no
+        // ILogger available; the AddHostedService registrations above are the source of truth.
 
         return services;
     }

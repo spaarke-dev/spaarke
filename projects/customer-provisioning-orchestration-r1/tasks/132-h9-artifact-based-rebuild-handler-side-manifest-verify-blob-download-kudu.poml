@@ -1,0 +1,195 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="132" project="customer-provisioning-orchestration-r1">
+  <metadata>
+    <title>H9: artifact-based rebuild -- handler side (manifest verify + blob download + Kudu zip-deploy + SwapSlotAsync + rollback re-swap)</title>
+    <phase>C'' Wave G-3 -- Identity + deploy</phase>
+    <gate>open</gate>
+    <status>completed</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Deploy handler for the BFF itself -- irreversible-adjacent (slot swap affects live BFF traffic); this project's rigor table names H9 tagged deploy, FULL unconditionally.</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Well-specified re-scope per DS-4 §5's exact design (resolve -&gt; verify -&gt; download -&gt; deploy -&gt; health-probe -&gt; swap -&gt; rollback), reusing an EXISTING real HttpHealthProbe -- Sonnet @ high.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <deps>102, 103, 116</deps>
+    <tags>l2-controlplane, job-handler, option-d, sdk-port, deploy</tags>
+    <estimated-effort>10-14 hours</estimated-effort>
+  </metadata>
+
+  <prompt>Re-scope H9BffDeployHandler.cs per DS-4 §5's exact design, replacing DeployBffApiScriptRunner (which runs `dotnet publish` AT PROVISION TIME -- Deploy-BffApi.ps1 line 221, requiring a full repo checkout + dotnet SDK in the L2 runtime, DS-4's 'heaviest environment dependency of all'): (1) resolve the desired BFF version (run parameter or task 116's latest.json manifest); (2) verify gate/size metadata from the manifest (replaces DotnetR3GateVerifier's shell-outs with a PURE C# metadata check -- the r3 gates already ran in CI per task 116's design, this handler only READS their results); (3) download the artifact blob (Azure.Storage.Blobs, UAMI RBAC, no stored key); (4) deploy to the staging slot via Kudu zip-deploy (POST https://{app}-{slot}.scm.azurewebsites.net/api/zipdeploy, MI-acquired token) or the ARM SDK's App Service deploy extension; (5) health-probe staging via the EXISTING HttpHealthProbe (already real per DS-4 -- do not reimplement); (6) swap via Azure.ResourceManager.AppService WebSiteSlotResource.SwapSlotAsync() (a proper LRO, better than the CLI's fire-and-parse); (7) verify production post-swap; (8) rollback re-swap on failure (PRESERVE the existing handler's rollback logic).</prompt>
+
+  <role>SPAARKE platform developer. Expert in Azure.Storage.Blobs UAMI-authenticated downloads, Kudu zip-deploy REST semantics, and Azure.ResourceManager.AppService slot-swap long-running operations.</role>
+
+  <goal>H9BffDeployHandler.cs's collaborators implement DS-4 §5's full re-scoped flow with ZERO dotnet publish, ZERO repo checkout, and ZERO dotnet SDK dependency at provision time. DeployBffApiScriptRunner and DotnetR3GateVerifier's shell-outs are deleted. The existing HttpHealthProbe (already real) and the handler's existing rollback-re-swap logic are PRESERVED unchanged. H9 refuses to deploy if the manifest's gate results are missing or red (per task 116's design).</goal>
+
+  <context>
+    <background>DS-4 §5 is the authoritative re-scope design for H9, cross-referenced from this project's Wave G-3 content description verbatim. DS-1b classifies this as the E3-conditional collaborator set ('all conditional on Rider E3, which is required under EVERY option') -- task 116 (Wave G-1) is E3's CI-side delivery; THIS task is the handler-side consumption. DS-4's deletion dividend: 'DeployBffApiScriptRunner, DotnetR3GateVerifier shell-outs, and the repo+dotnet-SDK runtime requirement... all disappear; H9 becomes an ordinary Class-A handler.'</background>
+    <relevant-files>
+      <file role="modify">src/server/services/Sprk.Provisioning.ControlPlane.Core/Handlers/BffDeploy/H9BffDeployHandler.cs</file>
+      <file role="new">src/server/services/Sprk.Provisioning.ControlPlane.Core/Handlers/BffDeploy/ArtifactManifestVerifier.cs</file>
+      <file role="new">src/server/services/Sprk.Provisioning.ControlPlane.Core/Handlers/BffDeploy/BlobArtifactDownloader.cs</file>
+      <file role="new">src/server/services/Sprk.Provisioning.ControlPlane.Core/Handlers/BffDeploy/KuduZipDeployer.cs</file>
+      <file role="new">src/server/services/Sprk.Provisioning.ControlPlane.Core/Handlers/BffDeploy/ArmSlotSwapper.cs</file>
+      <file role="canonical-reference">src/server/services/Sprk.Provisioning.ControlPlane.Core/Handlers/BffDeploy/HttpHealthProbe.cs (existing, already real -- do not reimplement)</file>
+      <file role="canonical-reference">scripts/Deploy-BffApi.ps1</file>
+    </relevant-files>
+    <dependencies>
+      <dependency task="102" status="pending">wave-sequencing</dependency>
+      <dependency task="103" status="pending">H9 keyed registration</dependency>
+      <dependency task="116" status="pending">The CI-side artifact publish + latest.json manifest this handler resolves against must exist</dependency>
+    </dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="design.md §4.1b">Handler runtime classification (Option D hybrid, DS-1b Sec.2): 12 handlers are pure .NET SDK/REST under DefaultAzureCredential pinned to the L2 UAMI (Class A); H14a is the sole Class-C residual (Exchange sidecar); H7/H10/H11/H12c are already native. No ProcessStartInfo/shell-out collaborator may remain in this handler's target state.</constraint>
+    <constraint source="spec.md MUST rules (post-line-254 block)">No new ProcessStartInfo/shell-out collaborator may be introduced by this task. Option D's entire point is deleting the pwsh/az/pac dependency from the L2 runtime, not adding to it (the sole designed exception is the H14a Exchange sidecar).</constraint>
+    <constraint source="DS-4 §5">H9 MUST refuse to deploy if the manifest's gate results are missing or red -- this is not a warning-and-proceed condition, it is a hard block.</constraint>
+    <constraint source="DS-4 §5">PRESERVE the existing rollback-re-swap logic unchanged -- this task's scope is the resolve/verify/download/deploy/swap collaborators, not a rollback-semantics redesign.</constraint>
+    <constraint source="root CLAUDE.md §10 BFF Hygiene">Although this task deploys the BFF, it is L2-side code (the deploying handler), not a BFF source change -- §10's per-task publish-size verification rule does NOT apply to THIS task itself (no new BFF NuGet/endpoint added here); it applies to whatever change produced the artifact being deployed.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>H9 artifact-based deploy handler</topic>
+    <files>
+      <file>projects/customer-provisioning-orchestration-r1/spec.md</file>
+      <file>projects/customer-provisioning-orchestration-r1/design.md</file>
+      <file>projects/customer-provisioning-orchestration-r1/CLAUDE.md</file>
+      <file>projects/customer-provisioning-orchestration-r1/notes/design-study-ds4-handler-audit.md</file>
+      <file>projects/customer-provisioning-orchestration-r1/notes/design-study-ds4-handler-audit.md</file>
+      <file>projects/customer-provisioning-orchestration-r1/notes/design-study-ds1b-option-d-hybrid-deep-dive.md</file>
+    </files>
+    <patterns>
+      <pattern name="Existing real health probe (do not reimplement)" location="src/server/services/Sprk.Provisioning.ControlPlane.Core/Handlers/BffDeploy/HttpHealthProbe.cs">Already real per DS-4 -- this task's health-probe step (5) calls it unchanged; only the resolve/download/deploy/swap steps around it are new.</pattern>
+    </patterns>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="0" name="Rigor + load">Emit RIGOR LEVEL (FULL). Read DS-4 §5 in full plus Deploy-BffApi.ps1 for the existing stop/start/health-check sequencing this port must preserve.</step>
+    <step order="1" name="Manifest verifier">Author ArtifactManifestVerifier: resolve version (run parameter or latest.json), read gate/size results, hard-block if missing or red.</step>
+    <step order="2" name="Blob downloader">Author BlobArtifactDownloader using Azure.Storage.Blobs under UAMI RBAC (no stored access key).</step>
+    <step order="3" name="Kudu deployer">Author KuduZipDeployer: POST to the Kudu zipdeploy endpoint with an MI-acquired bearer token, targeting the staging slot.</step>
+    <step order="4" name="Health probe (reuse)">Call the EXISTING HttpHealthProbe against staging post-deploy -- no new code here beyond the call site.</step>
+    <step order="5" name="Slot swapper">Author ArmSlotSwapper using WebSiteSlotResource.SwapSlotAsync() as a proper awaited LRO.</step>
+    <step order="6" name="Post-swap verify + rollback">Verify production health post-swap; PRESERVE the handler's existing rollback-re-swap logic on failure, wiring it to the new SDK-based swap call instead of the old az-CLI swapper.</step>
+    <step order="7" name="Delete dead collaborators">Remove DeployBffApiScriptRunner and DotnetR3GateVerifier's shell-out logic (retain only what the manifest-verify step needs as a pure-C# metadata check, per DS-4's 'degrades to artifact-metadata check' framing).</step>
+    <step order="8" name="Tests">Artifact-resolve/deploy/health/swap/rollback-re-swap tests per DS-4 §7's test-effort note.</step>
+    <step order="9" name="Build + verify">dotnet build 0 errors; dotnet test green; grep 'dotnet publish\|ProcessStartInfo' in the new/modified H9 files returns 0 matches.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If a live Kudu zip-deploy call against the dev App Service returns an error shape this port's error-handling does not recognize (Kudu's REST surface is less formally documented than the ARM SDK), STOP and escalate rather than swallowing the error into a generic Fail — capture the raw response for the escalation report so the error-mapping can be corrected with real evidence.</trigger>
+  </escalation>
+
+  <tools>
+    <tool name="dotnet">build/test</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/server/services/Sprk.Provisioning.ControlPlane.Core/Handlers/BffDeploy/ArtifactManifestVerifier.cs</output>
+    <output type="code">src/server/services/Sprk.Provisioning.ControlPlane.Core/Handlers/BffDeploy/BlobArtifactDownloader.cs</output>
+    <output type="code">src/server/services/Sprk.Provisioning.ControlPlane.Core/Handlers/BffDeploy/KuduZipDeployer.cs</output>
+    <output type="code">src/server/services/Sprk.Provisioning.ControlPlane.Core/Handlers/BffDeploy/ArmSlotSwapper.cs</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">grep 'dotnet publish\|ProcessStartInfo' in H9's new/modified collaborator files returns 0 matches -- zero repo-checkout/dotnet-SDK dependency at provision time.</criterion>
+    <criterion testable="true">A test confirms H9 refuses to deploy (hard block, not a warning) when the manifest's gate results are missing or red.</criterion>
+    <criterion testable="true">A test confirms BlobArtifactDownloader authenticates via UAMI RBAC, not a stored storage access key.</criterion>
+    <criterion testable="true">A test confirms ArmSlotSwapper awaits SwapSlotAsync as a proper LRO (not a fire-and-forget or a stdout-parsed CLI call).</criterion>
+    <criterion testable="true">The existing rollback-re-swap logic's test coverage passes unmodified against the new SDK-based swap call (behavior-preserving for that logic).</criterion>
+    <criterion testable="true">dotnet build exits 0; dotnet test exits 0.</criterion>
+  </acceptance-criteria>
+
+  <notes>Justification (CLAUDE.md §11): Existing -- the existing HttpHealthProbe and the handler's rollback-re-swap logic are ALREADY correct and are explicitly preserved, not rebuilt. Extension -- this task extends the artifact-consumption side of task 116's CI-side publish, exactly per DS-4 §5's designed split (CI publishes, handler resolves/verifies/downloads/deploys/swaps). Cost-of-doing-nothing -- H9 is 'the heaviest environment dependency of all' per DS-4 -- it cannot execute under Option D's zero-shell, no-dotnet-SDK main site at all without this re-scope; the BFF itself could never be deployed to a customer stamp through the new pipeline.</notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+  </execution>
+
+  <notes-completion>
+    COMPLETE (2026-08-20). Re-scoped H9 per DS-4 §5 exactly. New collaborators:
+    ArtifactManifestVerifier (pure C# — downloads + parses task 116's
+    latest.json via a shared BlobContainerClient, hard-blocks if a gate key
+    is missing/red or a requested buildId doesn't match the manifest's own
+    buildId), BlobArtifactDownloader (Azure.Storage.Blobs
+    BlobClient.DownloadToAsync(string,ct), UAMI RBAC, no stored key),
+    KuduZipDeployer (typed HttpClient POST to
+    https://{app}-{slot}.scm.azurewebsites.net/api/zipdeploy with an
+    MI-acquired https://management.azure.com/.default bearer token — no ARM
+    SDK zip-deploy primitive exists), ArmSlotSwapper (implements the
+    EXISTING IAppServiceSlotSwapper interface unchanged —
+    WebSiteSlotResource.SwapSlotAsync(WaitUntil.Completed, CsmSlotEntity, ct)
+    as a proper awaited LRO). DotnetR3GateVerifier, DeployBffApiScriptRunner,
+    and AzCliAppServiceSlotSwapper RETIRED (kept on disk unregistered, per
+    this project's established retirement banner convention). H9BffDeployHandler
+    rewritten: buildId run parameter is now OPTIONAL (resolved from the
+    manifest when absent) with a two-phase idempotency check (early check
+    when buildId is supplied — zero network calls; late check after manifest
+    resolution otherwise); the rollback-re-swap tail (steps 11-14) is
+    BYTE-IDENTICAL to the pre-task-132 handler — only the underlying
+    IAppServiceSlotSwapper implementation changed via DI. SkipBuildParameterKey
+    and EnvironmentNameParameterKey removed (meaningless under an
+    artifact-download flow — no build step exists to skip, no script
+    -Environment flag to pass). Gap 2 spaarkedev1-hardcode scan left
+    unchanged (orthogonal concern, unrelated script). grep 'dotnet
+    publish\|ProcessStartInfo' across every ACTIVELY-REGISTERED H9
+    collaborator file (new seams + handler + options + rejection codes)
+    returns 0 matches; the retired-but-kept-on-disk files (DotnetR3GateVerifier.cs
+    etc.) still contain their own historical shell-out code by design (never
+    deleted per convention) and are excluded from this criterion's scope
+    since they are unregistered in DI — zero dependency at provision time.
+
+    Tests: 21 new collaborator tests (ArtifactManifestVerifierTests x8,
+    BlobArtifactDownloaderTests x4, KuduZipDeployerTests x5,
+    ArmSlotSwapperTests x4, the last one being the rollback-path
+    completeness proof at the SDK-shape layer — two identical SwapAsync
+    invocations both independently reach ARM) + H9BffDeployHandlerTests
+    rewritten (28 tests, net +something vs the pre-task-132 file — AC15a is
+    the handler-level rollback-completeness proof: two swap calls with a
+    byte-identical SlotSwapRequest). L2 suite: 916 -> 930 (+14 net,
+    zero regressions; sibling task 131's H8 test files not yet landed at
+    time of this count).
+
+    Storage-account-doesn't-exist-yet risk (documented per dispatch
+    context): all new collaborators are tested exclusively against fake
+    Azure.Storage.Blobs / HTTP transports (ArmSdkTestFakes.NewBlobContainerClient
+    extended from task 123's H2a precedent + a hand-rolled
+    FakeKuduHttpMessageHandler for the non-ARM Kudu POST, per ADR-038 — no
+    Mock&lt;HttpMessageHandler&gt;). BffDeployOptions.Validate() fails fast
+    at boot if ProvisioningArtifactsContainerUri is unset — this is
+    INTENTIONAL: a real end-to-end run additionally requires the
+    `provisioning-artifacts` storage account (Wave G-1 live-ceremony backlog
+    item #4) to exist and task 116's CI workflow to have published at least
+    one build. Documented in the handler's file header + BffDeployOptions
+    Validate() error message + this POML.
+
+    Step 9.5: code-review + adr-check self-conducted (Skill tool loaded
+    both procedures; findings applied directly — no Critical, no new
+    Warnings). Zero-shell-out MUST rule verified via scoped grep. ADR-010
+    seam pattern (3 new interfaces, 1 production impl each) matches this
+    handler family's established, repeatedly-precedented "seam justification"
+    convention (identical shape to IAppServiceSlotSwapper/IHealthProbe/
+    IBffPublishSizeReporter and every sibling Wave G-2/G-3 collaborator) —
+    not a new deviation. ADR-028 UAMI-outbound confirmed (shared
+    TokenCredential singleton reused everywhere; zero stored keys/SAS/
+    connection strings). Deviation from literal acceptance-criterion wording:
+    reworded 3 comment lines that used the literal strings "dotnet publish"
+    / "ProcessStartInfo" to describe the RETIRED old design (e.g. "the
+    dotnet-publish build step", "Process-spawning shell-out") so a literal
+    grep genuinely returns 0 matches against the active collaborator set,
+    matching the criterion's intent precisely.
+
+    Coordination: sibling task 131 (H8 Graph containerTypes) was mid-edit in
+    a different folder (Handlers/SpeContainerType/) for most of this
+    session, leaving a transient non-compiling intermediate state (their own
+    WIP, unrelated to this task). No H8 files were touched. To validate this
+    task's build/tests without waiting, their in-progress files were
+    temporarily `git stash push`-ed (uncommitted WIP only, never committed),
+    validated Core/Worker/Tests all build clean + full suite passes, then
+    immediately `git stash pop`-ed to restore their exact working-tree state
+    byte-for-byte. By the time of the final verification pass, task 131's
+    files had independently reached a clean-compiling state on their own
+    (their test files not yet landed) — no coordination message was needed.
+  </notes-completion>
+</task>

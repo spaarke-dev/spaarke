@@ -73,6 +73,9 @@ param deployments array = [
   // See docs/guides/AI-EMBEDDING-STRATEGY.md for rationale.
 ]
 
+@description('Principal ID of the per-customer User-Assigned Managed Identity (from `modules/uami.bicep`, task 028) granted Cognitive Services User (built-in role `a97b65f3-24c7-4388-baec-2e87135dc908`) on this OpenAI account. Task 030 canonical target per ADR-028: the BFF acquires Azure OpenAI tokens via `DefaultAzureCredential` pinned to the UAMI (`AZURE_CLIENT_ID` app-setting). Note the ADR-028 E-2 documented MI exception for OpenAI data plane — when API-key auth is active this grant is dormant but MUST still be provisioned so the MI code path can be restored via config change alone. Empty default skips the assignment (caller-side wiring). Emitted assignment sets principalType=ServicePrincipal.')
+param userAssignedIdentityPrincipalId string = ''
+
 @description('Tags for the resource')
 param tags object = {}
 
@@ -107,12 +110,20 @@ resource openAi 'Microsoft.CognitiveServices/accounts@2024-10-01' = {
 // MODEL DEPLOYMENTS
 // ============================================================================
 
+// Deployment SKU is per-deployment optional (default 'Standard' preserves prior
+// caller behavior). gpt-5.x family REQUIRES 'GlobalStandard' (gpt-5-pro literally
+// supports no other SKU); gpt-4o family supports 'Standard'. Add `sku: 'GlobalStandard'`
+// to a deployment object to override — see stacks/model1-shared.bicep for the
+// canonical gpt-5.x tier stack example. Discovered 2026-08-22 during Model 1 Prod
+// stand-up (customer-provisioning-orchestration-r1) — preflight rejects with
+// "InvalidResourceProperties: The specified SKU 'Standard' of account deployment
+// is not supported by the model 'gpt-5.x'" when this defaults for gpt-5 models.
 @batchSize(1)
 resource modelDeployments 'Microsoft.CognitiveServices/accounts/deployments@2024-10-01' = [for deployment in deployments: {
   parent: openAi
   name: deployment.name
   sku: {
-    name: 'Standard'
+    name: deployment.?sku ?? 'Standard'
     capacity: deployment.capacity
   }
   properties: {
@@ -124,6 +135,29 @@ resource modelDeployments 'Microsoft.CognitiveServices/accounts/deployments@2024
     raiPolicyName: 'Microsoft.Default'
   }
 }]
+
+// ============================================================================
+// RBAC: Cognitive Services User for UAMI (task 030 — Phase C canonical grant)
+// Built-in role ID: a97b65f3-24c7-4388-baec-2e87135dc908
+// Grants the per-customer UAMI the right to call OpenAI data-plane actions
+// (chat completions, embeddings) via `DefaultAzureCredential` — the canonical
+// ADR-028 outbound-auth path. See E-2 exception note on the param description
+// for the API-key fallback currently in force on `spaarke-openai-dev`.
+// No prior RBAC on this module — no interim SA-MI grant to preserve.
+// ============================================================================
+
+var cognitiveServicesUserRoleId = 'a97b65f3-24c7-4388-baec-2e87135dc908'
+
+resource uamiCognitiveServicesUser 'Microsoft.Authorization/roleAssignments@2022-04-01' = if (!empty(userAssignedIdentityPrincipalId)) {
+  scope: openAi
+  name: guid(openAi.id, userAssignedIdentityPrincipalId, cognitiveServicesUserRoleId)
+  properties: {
+    roleDefinitionId: subscriptionResourceId('Microsoft.Authorization/roleDefinitions', cognitiveServicesUserRoleId)
+    principalId: userAssignedIdentityPrincipalId
+    principalType: 'ServicePrincipal'
+    description: 'Per-customer UAMI (task 028) invokes Azure OpenAI data-plane via DefaultAzureCredential (task 030 / ADR-028)'
+  }
+}
 
 // ============================================================================
 // OUTPUTS

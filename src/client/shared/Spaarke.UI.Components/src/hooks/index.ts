@@ -36,6 +36,13 @@ export type { DataGridContextValue, DataGridContextProviderProps, DataGridParent
 export { useRecordFieldValues } from './useRecordFieldValues';
 export type { UseRecordFieldValuesResult } from './useRecordFieldValues';
 
+// FR-13/14/19 (record-header-and-notepad-r2 task 022) — form-buffer staging +
+// pending-changes buffer + lookup projection, hoisted out of MatterHeaderView.
+// Both save paths THROW on a missing attribute (FR-14); staging NEVER writes to
+// Dataverse and NEVER refetches (R1 v1.0.7 no-flash rule — see file header).
+export { useRecordHeaderFields, projectLookup } from './useRecordHeaderFields';
+export type { IUseRecordHeaderFieldsOptions, IUseRecordHeaderFieldsResult } from './useRecordHeaderFields';
+
 // FR-06 — filter-agnostic $count query (mount + focus, no polling).
 export { useRelatedCount } from './useRelatedCount';
 export type { UseRelatedCountResult } from './useRelatedCount';
@@ -59,6 +66,7 @@ export {
   NOTEPAD_WEBRESOURCE_NAME,
   SMARTTODO_WEBRESOURCE_NAME,
   RECORDSUMMARY_FIELD,
+  RECORD_SUMMARY_EMPTY_TEXT,
   SUPPORTED_MEMO_PARENTS,
   SUPPORTED_TODO_PARENTS,
   buildMemoFilterForParent,

@@ -5,21 +5,26 @@ namespace Spaarke.ArchTests;
 
 /// <summary>
 /// ADR-013 / NFR-05 (spaarkeai-compose-r2 task 025): Tier-1 facade guard scoped to
-/// <c>Sprk.Bff.Api.Services.Compose</c>. The Phase 2 LLM Editing Pattern services
-/// (<c>IComposeEditValidator</c>, <c>ComposeEditBatch</c>, <c>ComposeEditTransaction</c>,
+/// <c>Sprk.Bff.Api.Services.Compose</c>. The Compose edit/annotation services
+/// (<c>ComposeEditAnchorPass</c>, <c>ComposeAnchorResolver</c>, <c>ComposeShadowPatchEngine</c>,
 /// <c>SemanticAppendixGenerator</c>, <c>CriticMarkupRenderer</c>, <c>ComposeService</c>, ...)
 /// are pure deterministic text-transform logic per design.md §6.1 — the LLM proposes edits
-/// out-of-band (via the shipped session-dispatch seam), and Compose only resolves/applies spans
-/// against text it already has. None of these types may reach the model or the
+/// out-of-band (via the shipped session-dispatch seam), and Compose only resolves/applies those
+/// proposals against content it already has. None of these types may reach the model or the
 /// capability-invocation router directly.
+/// <para>
+/// The guard is NAMESPACE-scoped, so it needs no maintenance as the type list changes: the
+/// text-offset apply pair <c>ComposeEditBatch</c> / <c>ComposeEditTransaction</c> named here until
+/// spaarkeai-compose-r8 task 064 was retired, and the guard covered its removal without an edit.
+/// </para>
 /// </summary>
 /// <remarks>
 /// This is narrower than <see cref="ADR013_AiBoundaryTests"/> (which guards the whole assembly
 /// against <c>IOpenAiClient</c>/<c>IPlaybookService</c> with a grandfathered-exception list for
 /// the AI API surface itself). <c>Services/Compose/</c> has ZERO legitimate exceptions — it is
 /// the reference example of a facade-compliant consumer per the Compose project's own doc
-/// comments (see <c>IComposeEditValidator.cs</c>, <c>ComposeEditTransaction.cs</c>,
-/// <c>ComposeEditBatch.cs</c> remarks, all of which cite this test by task number). Without this
+/// comments (see <c>ComposeAnchorResolver.cs</c> and <c>ComposeShadowPatchEngine</c>'s
+/// <c>ComposeModule</c> registration note, which cite this discipline by task number). Without this
 /// guard, a future edit could inject <c>IOpenAiClient</c>, a <c>Services/Ai/Nodes</c> executor, or
 /// <c>IConsumerRoutingService</c> into a Compose service and pass CI, silently reintroducing an
 /// AI dependency into code the design requires to stay deterministic and model-free.

@@ -4,13 +4,13 @@
 > **Last Reviewed**: 2026-04-05
 > **Reviewed By**: ai-procedure-refactoring-r2
 > **Status**: Current
-> **Purpose**: Architecture of the Sprk.Bff.Api — the unified .NET 8 Minimal API backend for the SDAP platform.
+> **Purpose**: Architecture of the Sprk.Bff.Api — the unified .NET 10 Minimal API backend for the SDAP platform.
 
 ---
 
 ## Overview
 
-Sprk.Bff.Api is a single .NET 8 Minimal API that serves as the Backend-for-Frontend (BFF) for the entire SDAP platform. It provides 120+ endpoints across 7 functional domains: SPE/Documents, AI Platform, Office Add-ins, Email/Communication, Finance Intelligence, Workspace/Portfolio, and Background Processing. The API uses a modular DI registration system where each domain is encapsulated in a startup module, and endpoints are registered through extension methods organized by domain.
+Sprk.Bff.Api is a single .NET 10 Minimal API that serves as the Backend-for-Frontend (BFF) for the entire SDAP platform. It provides 120+ endpoints across 7 functional domains: SPE/Documents, AI Platform, Office Add-ins, Email/Communication, Finance Intelligence, Workspace/Portfolio, and Background Processing. The API uses a modular DI registration system where each domain is encapsulated in a startup module, and endpoints are registered through extension methods organized by domain.
 
 The architecture is shaped by three key ADRs: ADR-001 (Minimal API + BackgroundService, no Azure Functions), ADR-008 (endpoint filters for authorization, no global middleware), and ADR-010 (DI minimalism with concrete types and feature modules).
 
@@ -156,7 +156,7 @@ Authorization is enforced per-endpoint via `IEndpointFilter` implementations (AD
 
 | Decision | Choice | Rationale | ADR |
 |----------|--------|-----------|-----|
-| API style | .NET 8 Minimal API + BackgroundService | No Azure Functions overhead; single deployable unit | ADR-001 |
+| API style | .NET 10 Minimal API + BackgroundService | No Azure Functions overhead; single deployable unit | ADR-001 |
 | Authorization | Endpoint filters per-endpoint | No global middleware; fine-grained per-resource checks | ADR-008 |
 | DI pattern | Feature modules with concrete types | Minimize DI registrations; forwarding delegates don't count | ADR-010 |
 | Caching | Redis-first via IDistributedCache | No hybrid L1 cache unless profiling proves need | ADR-009 |

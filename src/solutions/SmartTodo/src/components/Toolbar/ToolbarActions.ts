@@ -167,6 +167,14 @@ export interface ToolbarActionContext {
    * inject a deterministic stub without monkey-patching globals.
    */
   confirm?: (message: string) => boolean;
+  /**
+   * Test-injectable navigation; production uses window.location.href to
+   * avoid popup blockers. Defaults to `(href) => { window.location.href = href; }`.
+   * Lets tests inject a deterministic stub instead of monkey-patching
+   * `window.location` (which jsdom v22+ blocks via "Cannot redefine
+   * property: location" — FR-18a / R-10 hygiene).
+   */
+  navigate?: (href: string) => void;
 }
 
 /** The 4 toolbar handlers returned by {@link createToolbarActions}. */
@@ -193,6 +201,11 @@ export function createToolbarActions(
   ctx: ToolbarActionContext,
 ): ToolbarActionHandlers {
   const confirmFn = ctx.confirm ?? ((m: string) => window.confirm(m));
+  const navigateFn =
+    ctx.navigate ??
+    ((href: string) => {
+      window.location.href = href;
+    });
 
   // ────────────────────────────────────────────────────────────────────────
   // Open — dispatches CustomEvent on window
@@ -293,8 +306,9 @@ export function createToolbarActions(
 
     const href = `mailto:?subject=${encodeURIComponent(subject)}&body=${encodeURIComponent(body)}`;
     try {
-      // window.location.href avoids popup-blocker issues with window.open.
-      window.location.href = href;
+      // navigateFn defaults to window.location.href to avoid popup-blocker
+      // issues with window.open; tests inject a stub via ctx.navigate.
+      navigateFn(href);
       return { succeeded: selected.length, failed: 0 };
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);

@@ -72,7 +72,7 @@ import {
 } from "@fluentui/react-icons";
 import { LookupField } from "@spaarke/ui-components";
 import type { ILookupItem } from "@spaarke/ui-components";
-import { speApiClient, ApiError } from "../../services/speApiClient";
+import { speApiClient, describeApiError } from "../../services/speApiClient";
 import type {
   SpeContainerTypeConfig,
   SpeContainerTypeConfigUpsert,
@@ -544,12 +544,7 @@ const ConfigFormDialog: React.FC<ConfigFormDialogProps> = ({
         : await speApiClient.configs.create(payload);
       onSaved(saved);
     } catch (err) {
-      const message =
-        err instanceof ApiError
-          ? err.message
-          : err instanceof Error
-            ? err.message
-            : "An unexpected error occurred.";
+      const message = describeApiError(err, "An unexpected error occurred.");
       setSaveError(message);
     } finally {
       setSaving(false);
@@ -1006,8 +1001,16 @@ const ConfigDataGrid: React.FC<ConfigDataGridProps> = ({
 
 /**
  * ContainerTypeConfig — manages container type configuration records (Business
- * Unit to Container Type mapping, authentication parameters). Renders within
- * the Settings page Container Type Configs tab.
+ * Unit to Container Type mapping, authentication parameters).
+ *
+ * Rendered inside the **Container Types** page, in the dialog behind its
+ * "Configurations" toolbar button (moved there 2026-08-26; it previously lived in a
+ * "Container Type Configs" tab on the Settings page, which no longer exists). The file still
+ * sits under `components/settings/` — moving it is a rename with no behavioural effect and was
+ * left for a quieter change.
+ *
+ * This component is the ONLY surface that can create a config, which is why the host renders it
+ * from both of that page's branches — see the `configsDialog` comment in `ContainerTypesPage`.
  *
  * Key security constraint: the component displays and accepts only Key Vault
  * secret *names*, never actual secret values. The BFF retrieves credentials
@@ -1045,12 +1048,7 @@ export const ContainerTypeConfig: React.FC = () => {
       const data = await speApiClient.configs.list();
       setConfigs(data);
     } catch (err) {
-      const message =
-        err instanceof ApiError
-          ? err.message
-          : err instanceof Error
-            ? err.message
-            : "Failed to load container type configs.";
+      const message = describeApiError(err, "Failed to load container type configs.");
       setLoadError(message);
     } finally {
       setLoading(false);
@@ -1088,10 +1086,7 @@ export const ContainerTypeConfig: React.FC = () => {
       setEditingConfig(config);
       setDialogOpen(true);
     } catch (err) {
-      const message =
-        err instanceof ApiError ? err.message :
-        err instanceof Error ? err.message :
-        "Failed to load config detail.";
+      const message = describeApiError(err, "Failed to load config detail.");
       setDeleteError(message);
     } finally {
       setEditLoading(false);

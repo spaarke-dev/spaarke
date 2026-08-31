@@ -1,0 +1,115 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="077" project="customer-provisioning-orchestration-r1">
+  <metadata>
+    <title>Implement per-tenant token-metering layer (D19) — APIM gateway OR app-level custom App Insights metric keyed on tenantId</title>
+    <phase>D L3 Skill + BFF Integration Endpoints + Metering</phase>
+    <gate>blocked</gate>
+    <status>not-started</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Task tags include 'bff-api','ai','auth','azure-deployment'; introduces per-tenant fair-billing + runaway guardrail; blast-radius = every AI call in the platform. FR-13 §M1/M2 differences + SC #13 acceptance scope.</rigor-reason>
+    <model-tier>opus</model-tier>
+    <model-tier-reason>Design of per-tenant metering layer that will govern platform economics; choice between APIM gateway (infra + IaC) vs app-level custom metric (BFF code) is Phase-A-decided architectural work. Step 3.5.5b Opus tier for high-blast-radius design.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <deps>none</deps>
+    <tags>bff-api, ai, auth, azure-deployment</tags>
+    <estimated-effort>6-10 hours</estimated-effort>
+  </metadata>
+
+  <prompt>Implement the per-tenant token-metering layer per spec.md FR-13 §M1/M2 + design.md D19. Phase A decides between: (a) APIM gateway with per-tenant token attribution on the OpenAI proxy path; (b) app-level custom App Insights metric keyed on tenantId (a MetricTelemetry with tenantId as a custom dimension emitted per OpenAI call). Per Model 1 (shared-tier) — this is REQUIRED for fair billing + runaway guardrail; blocks pipeline over-budget with HTTP 429. Per Model 2 (dedicated) — this is observability-only. Publish the Phase-A decision + implementation at projects/customer-provisioning-orchestration-r1/notes/per-tenant-metering-impl-2026-XX.md.</prompt>
+
+  <role>SPAARKE platform developer. Expert in Azure APIM policy authoring OR App Insights custom-metric telemetry patterns, Azure OpenAI response header parsing (x-ratelimit-remaining-tokens), and per-tenant attribution via IHttpContextAccessor/actor tid. Follow ADRs strictly.</role>
+
+  <goal>Per-tenant token metering is emitted for every OpenAI call in the platform, keyed on tenantId. Implementation choice (APIM vs custom metric) documented in notes/per-tenant-metering-impl-2026-XX.md with Phase-A rationale. Model 1 flow: over-budget attempt returns HTTP 429 to caller (spec.md SC #13 acceptance). Model 2 flow: observability-only. Integration tests verify emission + 429 gating.</goal>
+
+  <context>
+    <background>Per spec.md FR-13 §M1/M2 differences + D19 + design.md §3A + SC #13: Model 1 shares platform OpenAI across trial tenants — without per-tenant metering, one runaway tenant burns the entire platform budget. D19 mandates a metering layer that attributes tokens per tenantId + enforces tokenBudgetMonthlyUSD. Phase A picks the implementation (APIM proxy or app-level custom metric); this task implements the decision.</background>
+    <relevant-files>
+      <file role="new">projects/customer-provisioning-orchestration-r1/notes/per-tenant-metering-impl-2026-XX.md</file>
+      <file role="new">src/server/api/Sprk.Bff.Api/Services/Ai/Metering/TenantTokenMeter.cs (if app-level chosen)</file>
+      <file role="new">infrastructure/bicep/modules/apim-openai-proxy.bicep (if APIM chosen)</file>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Services/Ai/ (metering integration if app-level)</file>
+      <file role="canonical-reference">.claude/constraints/bff-extensions.md</file>
+    </relevant-files>
+    <dependencies>
+      <dependency task="none" status="pending">Phase A decision documented</dependency>
+    </dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="spec.md FR-13 §M1/M2">SCOPE: Model 1 = fair-billing + runaway-guardrail (blocks pipeline over-budget); Model 2 = observability-only.</constraint>
+    <constraint source="spec.md SC #13">SCOPE: Over-budget attempt returns HTTP 429 to caller; this is the acceptance criterion.</constraint>
+    <constraint source="ADR-013">SCOPE: If BFF-side implementation, metering integration goes through Services/Ai/PublicContracts/ facade — MUST NOT inject IOpenAiClient/IPlaybookService directly into CRUD code.</constraint>
+    <constraint source="CLAUDE.md-§10">SCOPE: BFF-touching task — load .claude/constraints/bff-extensions.md; publish size delta reported per NFR-01; /conflict-check before PR; publish-size ≤60 MB.</constraint>
+    <constraint source="spec.md §4D I5">SCOPE: Metering emissions carry tenantId as a custom dimension — the tid is source-of-truth per-call, NOT a default tenant.</constraint>
+    <constraint source="project">SCOPE: Emission per OpenAI call includes tenantId + model + prompt_tokens + completion_tokens + estimated_usd; App Insights dashboard queries roll up by tenantId + month.</constraint>
+    <constraint source="ADR-032">SCOPE: If the metering layer is feature-gated (e.g., disabled for legacy tenants during migration), follow Null-Object P1/P2/P3 pattern; do NOT add `if (flag) { ... }` conditional registration.</constraint>
+    <constraint source="CLAUDE.md-§11">SCOPE: NEW-surface task — justification field completed per §11 three-question gate.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>Per-tenant token-metering — APIM vs app-level tradeoffs + implementation</topic>
+    <files>
+      <file>.claude/constraints/bff-extensions.md</file>
+      <file>.claude/constraints/ai.md</file>
+      <file>.claude/constraints/azure-deployment.md</file>
+      <file>.claude/adr/ADR-013-ai-architecture.md</file>
+      <file>.claude/adr/ADR-032-bff-nullobject-kill-switch.md</file>
+      <file>projects/customer-provisioning-orchestration-r1/spec.md</file>
+      <file>projects/customer-provisioning-orchestration-r1/design.md</file>
+    </files>
+    <patterns>
+      <pattern name="App Insights custom metric" location="src/server/api/Sprk.Bff.Api/Services/">TelemetryClient.TrackMetric with custom dimensions; reference pattern for tenantId-attributed emissions.</pattern>
+      <pattern name="PublicContracts facade" location="src/server/api/Sprk.Bff.Api/Services/Ai/PublicContracts/">Route AI integration through facade — mandatory per ADR-013.</pattern>
+    </patterns>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="0" name="Rigor + load">Emit RIGOR LEVEL (FULL). Load spec.md FR-13 §M1/M2 + SC #13 + D19 + this project's CLAUDE.md.</step>
+    <step order="1" name="Phase A decision">Author notes/per-tenant-metering-impl-2026-XX.md § "Implementation Choice" — pick APIM OR app-level with cost + latency + operational-complexity rationale.</step>
+    <step order="2 (app-level path)" name="Author meter">If app-level chosen: author Services/Ai/Metering/TenantTokenMeter.cs with TelemetryClient emissions + budget check.</step>
+    <step order="2 (APIM path)" name="Author APIM">If APIM chosen: author infrastructure/bicep/modules/apim-openai-proxy.bicep + policy XML for tenant-attribution + budget check.</step>
+    <step order="3" name="Integrate">Wire metering into OpenAI call path via PublicContracts/ facade (ADR-013) — no direct injection.</step>
+    <step order="4" name="429 gating">Model 1 over-budget → return HTTP 429 with clear diagnostic; Model 2 → emit-only (no gating).</step>
+    <step order="5" name="Tests">Integration tests: emission fires per call; over-budget returns 429 for Model 1; Model 2 stays open.</step>
+    <step order="6" name="Publish size">Run `dotnet publish -c Release src/server/api/Sprk.Bff.Api/ -o deploy/api-publish/` and report absolute size + delta per NFR-01.</step>
+    <step order="7" name="Verify">dotnet build + dotnet test = green; dotnet format; zero analyzer warnings.</step>
+    <step order="8" name="Index update">Update TASK-INDEX.md: task 077 → ✅.</step>
+    <step order="9" name="Deviations">Document any deviation in projects/customer-provisioning-orchestration-r1/notes/.</step>
+  </steps>
+
+  <justification>
+    <existing>Grep for `TenantTokenMeter` OR `apim-openai-proxy` in the repo returns none. No existing per-tenant metering layer.</existing>
+    <extension>No — Application Insights RequestTelemetry + existing dashboards do NOT attribute OpenAI token usage per-tenant; they attribute per-endpoint. Extending them would still miss the runaway-guardrail semantics (429 on over-budget for Model 1).</extension>
+    <cost-of-doing-nothing>Without per-tenant metering, Model 1 shared-tier has NO fair billing (one runaway tenant burns the platform OpenAI quota) and NO runaway guardrail. Spec.md § New Components / §3A A1 explicitly cite Model 1 tokenBudgetMonthlyUSD; without D19, the budget field is a decoration. Business impact: uncapped platform cost per trial customer.</cost-of-doing-nothing>
+  </justification>
+
+  <tools>
+    <tool name="dotnet">Build and test BFF</tool>
+    <tool name="terminal">Run shell commands</tool>
+  </tools>
+
+  <outputs>
+    <output type="docs">projects/customer-provisioning-orchestration-r1/notes/per-tenant-metering-impl-2026-XX.md</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Ai/Metering/TenantTokenMeter.cs (if app-level)</output>
+    <output type="config">infrastructure/bicep/modules/apim-openai-proxy.bicep (if APIM)</output>
+    <output type="test">tests/integration/Sprk.Bff.Api.Tests/Metering/ (integration tests)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">notes/per-tenant-metering-impl-2026-XX.md documents the APIM-vs-app-level decision with cost + latency + complexity rationale.</criterion>
+    <criterion testable="true">Every OpenAI call emits a metric/log entry keyed on tenantId with model + prompt_tokens + completion_tokens + estimated_usd.</criterion>
+    <criterion testable="true">Given Model 1 tenant over budget for the month, when an AI request fires, then response is HTTP 429 with clear diagnostic (spec.md SC #13).</criterion>
+    <criterion testable="true">Given Model 2 tenant over budget (observability-only), when an AI request fires, then the response is normal (200) and only an alert is emitted.</criterion>
+    <criterion testable="true">If BFF-side, integration goes through Services/Ai/PublicContracts/ facade — ADR-013 forcing-function ArchTest passes.</criterion>
+    <criterion testable="true">BFF publish size delta reported per NFR-01; delta &lt;5 MB single-task; cumulative &lt;60 MB.</criterion>
+    <criterion testable="true">dotnet build exits 0; dotnet test exits 0; zero analyzer warnings; zero new HIGH CVEs.</criterion>
+  </acceptance-criteria>
+
+  <notes>Reference: spec.md FR-13 §M1/M2 + SC #13 + D19 + design.md §3A A1. Integrates with task 072 H12c Model 1 metering-attribution.</notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+  </execution>
+</task>

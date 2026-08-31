@@ -1,0 +1,100 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="088" project="unified-access-control-r2">
+  <metadata>
+    <title>Evaluator versioning + point-in-time replay over Dataverse field audit (FR-32 read half)</title>
+    <phase>5 Attestation</phase>
+    <gate>blocked — requires 081 merged (event backbone + coverage boundary documented)</gate>
+    <status>pending</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Authorization-path .cs: replay reuses the live evaluator; a versioning mistake silently rewrites history.</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Complex but fully specified: replay = pure-function evaluator over historically-reconstructed inputs; the input list is enumerated in design §7 and the coverage-boundary doc.</model-tier-reason>
+    <effort>xhigh</effort>
+    <parallel-group>phase5-wave3</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Touches Infrastructure/ExternalAccess/** (evaluator refactor for versioned pure-input evaluation) — exclusive zone.</parallel-reason>
+    <deps>087, 032</deps>
+    <tags>bff-api, auth, dataverse, testing</tags>
+    <estimated-effort>3-4 hours</estimated-effort>
+  </metadata>
+
+  <prompt>Make the unified evaluator VERSIONED and build the replay harness: "who could see record X on date D" is answered by running the evaluator (at its version current on D, or the pinned latest with the version disclosed) over inputs reconstructed for date D — grant/share/deny state from the 081 event log, and lookup/flag/junction state from Dataverse FIELD AUDIT history. Derived access is NEVER materialized; replay is computation, exactly like live evaluation.</prompt>
+  <role>SPAARKE platform developer. Access evaluator internals, Dataverse audit (RetrieveAuditDetails / audit entity), temporal reconstruction. Follow ADRs strictly.</role>
+  <goal>(a) The evaluator declares an EvaluatorVersion constant, bumped by policy whenever term/veto semantics change (policy documented; version emitted in 081 events and the 064 report); (b) the evaluator's term inputs are injectable (an IAccessStateSource abstraction or equivalent seam: live source = today's reads; historical source = audit reconstruction) WITHOUT changing live behaviour; (c) a replay entry point (admin endpoint or operational CLI/script — placement decision stated) answering (recordId, date) -> principals + rights + provenance, marked with the evaluator version used and an explicit completeness statement (which inputs came from audit vs event log vs unavailable).</goal>
+
+  <context>
+    <background>spec.md FR-32 acceptance ("who could see record X on date D is answerable; derived access is NOT materialized into rows"); design.md §7 ("evaluator replay ... pure function of record lookups, org junctions, flags and deny entries, all already covered by Dataverse field audit. No new storage; the evaluator must be versioned so historical answers remain reproducible."). 06 §F4's staleness/reconciliation critique is WHY materialization is banned. The 081 coverage-boundary doc says which changes are event-logged vs field-audited — replay composes both.</background>
+    <relevant-files>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Infrastructure/ExternalAccess/ (evaluator: version constant + input seam)</file>
+      <file role="new">src/server/api/Sprk.Bff.Api/Infrastructure/ExternalAccess/ (HistoricalAccessStateSource + replay entry point — exact names per suite convention)</file>
+      <file role="canonical-reference">docs/data-model/ (sprk_accessevent doc incl. 081 coverage boundary)</file>
+      <file role="modify">tests/unit/Sprk.Bff.Api.Tests/ (replay tests with synthetic histories)</file>
+    </relevant-files>
+    <dependencies>
+      <dependency task="081" status="pending">Event backbone + coverage boundary.</dependency>
+      <dependency task="032" status="pending">FR-19 evaluator — the component being versioned/seamed.</dependency>
+    </dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="spec-MUST">No materialization: replay writes NOTHING (no cache tables, no snapshot rows); its output is a response/report only. Scope: whole task.</constraint>
+    <constraint source="project">Live-path invariance: the input-seam refactor must leave live evaluation behaviourally identical — the full Phase 0-4 seam suite is the regression gate and must pass unmodified. Scope: evaluator refactor.</constraint>
+    <constraint source="project">Honest completeness: where audit history is missing (audit disabled before UAT, pre-FR-26 stamps, pre-081 events), the replay answer says so explicitly per input rather than returning a confident wrong answer. Scope: replay output contract.</constraint>
+    <constraint source="project">Versioning policy: semantic changes to terms/vetoes bump EvaluatorVersion; the policy note defines what counts as semantic; replay discloses when it evaluates a date with a version newer than the one live on that date. Scope: version constant + docs.</constraint>
+    <constraint source="ADR-008">If the entry point is an endpoint: admin-gated via endpoint filter (delegation/role decision stated in PR) — attestation answers are themselves sensitive. Scope: entry-point wiring.</constraint>
+    <constraint source="CLAUDE.md-§10">Placement justification citing .claude/constraints/bff-extensions.md; publish size ≤ 60 MB reported. Scope: PR.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>evaluator replay + Dataverse audit</topic>
+    <files>
+      <file>.claude/adr/ADR-003-authorization-seams.md</file>
+      <file>docs/adr/ADR-038-testing-strategy.md</file>
+      <file>projects/unified-access-control-r2/design.md</file>
+      <file>projects/unified-access-control-r2/notes/investigation/06-adversarial-critique.md</file>
+    </files>
+    <patterns>
+      <pattern name="uac-access-control" location=".claude/patterns/auth/uac-access-control.md">Seam map.</pattern>
+      <pattern name="web-api-client" location=".claude/patterns/dataverse/web-api-client.md">Audit-entity read conventions.</pattern>
+    </patterns>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="0">Context + rigor declaration.</step>
+    <step order="1">Introduce EvaluatorVersion + the policy note; thread it into 081 events (small follow-up edit) and the 064 report.</step>
+    <step order="2">Extract the evaluator's input reads behind the state-source seam; run the full seam suite to prove live invariance BEFORE building the historical source.</step>
+    <step order="3">Implement HistoricalAccessStateSource: grants/shares/denies as-of D from the event log; lookups/flags/junctions as-of D from Dataverse audit reads; explicit per-input completeness flags.</step>
+    <step order="4">Implement the replay entry point (state the endpoint-vs-script decision; gate it); output includes version + completeness statement.</step>
+    <step order="5">Tests: synthetic history fixtures — grant on D1, revoke on D2: replay(D1)=granted, replay(D3)=denied; secure-flag flip mid-window changes the answer across the boundary; missing audit yields the explicit-incomplete marker, never a fabricated answer; live seam suite green unmodified.</step>
+    <step order="6">Build + tests green; publish size reported. Update TASK-INDEX.md; write the versioning policy note to notes/phase5-evaluator-versioning.md.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If Dataverse field audit is not enabled (or not enabled on a required column) in dev, STOP the historical-source work, record the exact audit-config prerequisite in the UAT runbook note, and deliver the replay against the event-log-covered inputs with the audit inputs marked unavailable — escalate rather than faking audit data.</trigger>
+  </escalation>
+
+  <justification>
+    <existing>The Phase-1 evaluator (live inputs only) and the 081 event log; no historical evaluation capability exists (grep for audit reads in Infrastructure/ExternalAccess: none).</existing>
+    <extension>Yes — replay REUSES the evaluator via the input seam; the only new surface is the historical state source + entry point, which spec Placement lists as the attestation component.</extension>
+    <cost-of-doing-nothing>FR-32 acceptance fails: point-in-time questions are unanswerable for derived access, and the alternative (materializing rows) is spec-banned because it reintroduces 06 §F4's unreconcilable push model.</cost-of-doing-nothing>
+  </justification>
+
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Infrastructure/ExternalAccess/ (versioned evaluator + historical source + replay entry)</output>
+    <output type="test">tests/unit/Sprk.Bff.Api.Tests/ (replay tests)</output>
+    <output type="docs">projects/unified-access-control-r2/notes/phase5-evaluator-versioning.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">replay(record X, D) between grant(D1) and revoke(D2) shows the principal WITH rights; after D2 shows None — both from synthetic history, no materialized rows anywhere (schema check).</criterion>
+    <criterion testable="true">A secure-flag flip on D flips the org/standing-derived answer across the boundary in replay.</criterion>
+    <criterion testable="true">Replay output always names the evaluator version used and per-input completeness; missing audit history yields explicit-incomplete, not a guess.</criterion>
+    <criterion testable="true">Negative: the replay entry point rejects unauthenticated (401) and un-privileged (403) callers per the stated gate.</criterion>
+    <criterion testable="true">Negative: live evaluation behaviour unchanged — the full Phase 0-4 seam suite passes without modification.</criterion>
+    <criterion testable="true">Build + tests green; publish size ≤ 60 MB reported.</criterion>
+  </acceptance-criteria>
+
+  <notes>spec.md FR-32, success criterion 9 ("replay a historical date"). Do NOT bump effort down: temporal reconstruction correctness is the hard part; xhigh is justified as complex-but-fully-specified brownfield work.</notes>
+
+  <execution><skill>.claude/skills/task-execute/SKILL.md</skill></execution>
+</task>

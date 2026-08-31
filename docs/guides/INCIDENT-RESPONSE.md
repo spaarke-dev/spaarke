@@ -95,7 +95,13 @@ az ad sp show --id 720bcc53-3399-488d-9a93-dafde5d9e290 --query "displayName" -o
 1. Check Microsoft 365 Service Health for Dataverse outages
 2. If authentication issue: Verify app registration credentials in Key Vault have not expired
 3. If Dataverse environment-specific: Verify the `Dataverse__ServiceUrl` app setting is correct
-4. If S2S token issue: Re-create the client secret and update Key Vault
+4. If token/credential issue: 🔴 **DO NOT re-create a client secret.** This step said to re-create `BFF-API-ClientSecret` and update Key Vault; that secret was **deleted 2026-08-24** (task 033, ADR-028 **A4**) and re-creating it would make the BFF **refuse to start** outside Development (`Graph:Credentials:RequireSecretFreeIdentity=true`). The BFF identity — including the Dataverse service path — now uses a **managed-identity federated credential**. Diagnose instead:
+   - **a.** Confirm the credential the app selected — startup log should read `Ordered credential selection active: ManagedIdentityFederated.` and `... built with credential ManagedIdentityFederated.` (emitted on **cache miss only**, so force a restart to see it).
+   - **b.** Confirm the FIC still exists and its **subject is the UAMI's `principalId`, not its `clientId`**: `az ad app federated-credential list --id 1e40baad-e065-4aea-a8d4-4b7ab273458c -o table`. A wrong subject yields `AADSTS700213`.
+   - **c.** If the FIC was just (re)created, expect `AADSTS70025` to **flap for ~2 minutes** — do not conclude failure inside that window.
+   - **d.** Confirm the UAMI is still attached to the App Service and still registered as the Dataverse Application User.
+   - **e.** ⚠️ **A 200 does not clear the credential.** While anything sits beneath `ManagedIdentityFederated` in `Graph:Credentials:Order`, a completely broken FIC still serves traffic off the fallback. Check the log line, not the status code.
+   - **f.** Genuine emergency rollback (last resort, dev only): `az keyvault secret recover --vault-name spaarke-spekvcert --name BFF-API-ClientSecret` (**available until 2026-11-22**), restore the app settings, remove the order override, and set `RequireSecretFreeIdentity=false` **so the deviation is recorded rather than hidden**.
 
 ```bash
 # Check current Dataverse URL setting
@@ -253,7 +259,13 @@ curl -vI https://api.spaarke.com 2>&1 | grep -E "SSL|issuer|expire"
 **Diagnosis**:
 ```bash
 # 1. Check SPE endpoint through BFF
-curl -s -o /dev/null -w "%{http_code}" https://api.spaarke.com/api/containers
+#    NOTE (2026-08-24, auth-v4 task 031): do NOT probe /api/containers.
+#    That endpoint returns 403 to EVERY caller, always — it is a collection route
+#    guarded by a per-resource policy, so authorization fails before any SPE call
+#    is made. A 403 there tells you nothing about SPE health and will send you
+#    chasing an auth problem that does not exist.
+curl -s -o /dev/null -w "%{http_code}" https://api.spaarke.com/healthz          # liveness
+curl -s -o /dev/null -w "%{http_code}" https://api.spaarke.com/api/spe/containers  # real SPE path (expect 401 unauthenticated, not 403)
 
 # 2. Verify BFF API app registration has Graph permissions
 az ad app show --id 92ecc702-d9ae-492d-957e-563244e93d8c --query "requiredResourceAccess" -o json
@@ -560,8 +572,12 @@ After every SEV-1 or SEV-2 incident, conduct a blameless post-incident review wi
 
 | App | App ID | Purpose |
 |-----|--------|---------|
-| BFF API (prod) | `92ecc702-d9ae-492d-957e-563244e93d8c` | Graph + SPE + Dataverse |
-| Dataverse S2S (prod) | `720bcc53-3399-488d-9a93-dafde5d9e290` | Dataverse server-to-server |
+| BFF API (prod) | `92ecc702-d9ae-492d-957e-563244e93d8c` | Graph + SPE + Dataverse (single Dataverse Application User) |
+
+<!-- The separate "Dataverse S2S (prod)" app registration (`720bcc53-...`) was removed
+     2026-08-14 (code-quality-and-assurance-r3 task 060) — zero code consumers; Dataverse
+     server-to-server access consolidated onto the BFF API app registration. -->
+
 
 ### Managed Identities
 

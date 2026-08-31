@@ -1,0 +1,115 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="011" project="smart-todo-r5">
+  <metadata>
+    <title>Single-source-of-truth auto-score handler — Option B quick-wins-first (FR-02/FR-03)</title>
+    <phase>2: Schema + scoring + resolver</phase>
+    <gate>010 complete</gate>
+    <status>completed</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Modifies .ts/.tsx across 3 surfaces (form OnChange webresource, CreateTodoWizard, quick-add) with a shared contract; 6+ steps; FULL per CLAUDE.md §8 decision tree.</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Well-specified mapping table + parity requirement, not high-blast-radius architecture.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Form-handler is the single source of truth touched alongside the wizard (Spaarke.UI.Components/CreateTodoWizard) and quick-add (solutions/SmartTodo/SmartToDo.tsx) in the same task — not safe to interleave with other tasks touching those files.</parallel-reason>
+    <deps>010</deps>
+    <tags>typescript, dataverse, form-script</tags>
+    <estimated-effort>4-6 hours</estimated-effort>
+  </metadata>
+
+  <prompt>Implement ONE shared choice-to-score mapping (priority: Urgent-&gt;100/High-&gt;75/Medium-&gt;50/Low-&gt;25; effort Option B quick-wins-first: Low-&gt;25/Medium-&gt;50/High-&gt;75/Very High-&gt;100/None-&gt;50) and wire it in three places so all three stay in parity: (1) a form OnChange handler on sprk_todo that sets sprk_priorityscore/sprk_effortscore when sprk_priority/sprk_effort change, (2) CreateTodoWizard (src/client/shared/Spaarke.UI.Components/src/components/CreateTodoWizard/), and (3) the SmartTodo Code Page quick-add flow (src/solutions/SmartTodo/src/components/SmartToDo.tsx handleAdd). The composite score formula in todoScoring.ts is UNCHANGED — only the choice-&gt;score mapping tables are new.</prompt>
+
+  <role>SPAARKE platform developer. Expert in Dataverse form scripting (Xrm.Page OnChange), Fluent v9 React forms, and TypeScript module design for cross-surface parity. Follow ADR-024 and CLAUDE.md §11 (reuse-over-new-surface) strictly.</role>
+
+  <goal>A single mapping module (TypeScript) is the canonical source for priority/effort -&gt; score values, consumed by CreateTodoWizard and the quick-add flow; a form OnChange webresource on sprk_todo mirrors the identical literal table (webresources cannot import npm packages) with an explicit comment cross-referencing the canonical TS module. Selecting any priority/effort value in any of the three surfaces produces the exact score per the mapping tables.</goal>
+
+  <context>
+    <background>Spec FR-02/FR-03 + Owner Clarification (spec.md "F-5 effort direction" row): Option B (quick-wins-first) is CONFIRMED and locked. Today, CreateTodoStep.tsx exposes raw 0-100 sliders for priorityScore/effortScore directly (bypassing any choice concept), and SmartToDo.tsx's handleAdd (quick-add) hardcodes sprk_priorityscore: 50, sprk_effortscore: 10 with no user input at all. This task replaces/augments both with the new sprk_priority/sprk_effort choice fields (created in task 010) driving the score via the shared mapping, and adds the missing form-level OnChange handler for direct sprk_todo form edits. The composite formula (priorityComponent = score*0.50, effortComponent = (100-score)*0.20) in todoScoring.ts is LOCKED — do not touch it.</background>
+    <relevant-files>
+      <file role="canonical-reference">src/client/shared/Spaarke.SmartTodo.Components/src/utils/todoScoring.ts</file>
+      <file role="modify">src/client/shared/Spaarke.UI.Components/src/components/CreateTodoWizard/formTypes.ts</file>
+      <file role="modify">src/client/shared/Spaarke.UI.Components/src/components/CreateTodoWizard/CreateTodoStep.tsx</file>
+      <file role="modify">src/client/shared/Spaarke.UI.Components/src/components/CreateTodoWizard/todoService.ts</file>
+      <file role="modify">src/solutions/SmartTodo/src/components/SmartToDo.tsx</file>
+      <file role="new">src/client/webresources/js/ (new sprk_todo score OnChange handler, sibling of sprk_todo_regarding_presave.js)</file>
+      <file role="canonical-reference">src/client/webresources/js/sprk_todo_regarding_presave.js</file>
+    </relevant-files>
+    <dependencies>
+      <dependency task="010" status="pending">sprk_priority + sprk_effort Choice columns must exist on sprk_todo before this handler can read/write them.</dependency>
+    </dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="spec">FR-02 scope: priority mapping is EXACTLY Urgent-&gt;100, High-&gt;75, Medium-&gt;50, Low-&gt;25; unset/Medium reproduces today's null-default of 50 (no-op vs current behavior).</constraint>
+    <constraint source="spec">FR-03 scope (Option B, owner-locked): effort mapping is EXACTLY Low-&gt;25, Medium-&gt;50, High-&gt;75, Very High-&gt;100, None-&gt;50 (unknown/null-default).</constraint>
+    <constraint source="project">MUST NOT change the composite score formula or weights in todoScoring.ts (locked per spec Out-of-Scope + MUST rules).</constraint>
+    <constraint source="project">MUST route all three surfaces (form, wizard, quick-add) through ONE mapping definition; the webresource JS may only literally MIRROR the same table (documented, cross-referenced) since Dataverse webresources cannot import the TS package — this is not permitted duplication of LOGIC, only of the static value table.</constraint>
+    <constraint source="ADR-012">The canonical mapping module lives in the shared library (Spaarke.SmartTodo.Components or Spaarke.UI.Components, whichever the wizard/quick-add already depend on) — do not create a third parallel copy.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>scoring-and-mapping</topic>
+    <files>
+      <file>.claude/adr/ADR-024-polymorphic-resolver-pattern.md</file>
+      <file>.claude/adr/ADR-012-shared-components.md</file>
+      <file>projects/smart-todo-r5/spec.md</file>
+      <file>projects/smart-todo-r5/CLAUDE.md</file>
+      <file>docs/architecture/spaarke-todo-architecture.md</file>
+      <file>docs/architecture/SPAARKE-FIELD-MAPPING-FRAMEWORK.md</file>
+      <file>docs/standards/DATA-ACCESS-DECISION-CRITERIA.md</file>
+      <file>docs/standards/CODING-STANDARDS.md</file>
+    </files>
+    <patterns>
+      <pattern name="locked-scoring-contract" location="src/client/shared/Spaarke.SmartTodo.Components/src/utils/todoScoring.ts">Bit-for-bit locked composite formula; this task supplies inputs only, never touches weights.</pattern>
+      <pattern name="presave-webresource" location="src/client/webresources/js/sprk_todo_regarding_presave.js">Existing plain-JS OnSave/OnChange webresource convention for sprk_todo — mirror this file's structure/doc-comment style for the new score OnChange handler.</pattern>
+    </patterns>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="0" name="Context + rigor declaration">Declare rigor FULL; load todoScoring.ts, CreateTodoStep.tsx, formTypes.ts, todoService.ts, SmartToDo.tsx handleAdd, sprk_todo_regarding_presave.js as the webresource-convention reference.</step>
+    <step order="1">Define the canonical mapping module (e.g. scoreMappings.ts) exporting PRIORITY_TO_SCORE and EFFORT_TO_SCORE lookup tables + typed helper functions, placed in the shared package already consumed by both CreateTodoWizard and the quick-add surface (grep import graph first to confirm placement per ADR-012 — do not create a second copy if one surface already imports from Spaarke.SmartTodo.Components and the other doesn't; resolve via the existing dependency direction, escalating if incompatible).</step>
+    <step order="2">Update CreateTodoWizard: replace or augment the raw 0-100 sliders in CreateTodoStep.tsx with priority/effort choice selection (Fluent v9 Dropdown/RadioGroup) that maps through the shared table via formTypes.ts/todoService.ts, preserving the existing sprk_priorityscore/sprk_effortscore write path in todoService.ts.</step>
+    <step order="3">Update the quick-add flow in SmartToDo.tsx handleAdd: replace the hardcoded sprk_priorityscore:50/sprk_effortscore:10 literals with the shared mapping's null-default outputs (Medium-&gt;50 priority default, None-&gt;50 effort default) unless/until quick-add exposes its own choice input — document the decision inline.</step>
+    <step order="4">Create the new sprk_todo score OnChange webresource JS (mirroring sprk_todo_regarding_presave.js's doc-comment + defensive style): on sprk_priority change, set sprk_priorityscore via Xrm.Page.getAttribute(...).setValue(...); on sprk_effort change, set sprk_effortscore likewise. Include a header comment explicitly cross-referencing the canonical TS mapping module and asserting the literal values must be kept in sync.</step>
+    <step order="5">Add/extend unit tests (vitest) covering: each priority value -&gt; exact score, each effort value -&gt; exact score, Medium priority reproduces null-default 50, None effort reproduces null-default 50, and that CreateTodoWizard + quick-add both resolve through the same exported table (not independently duplicated literals).</step>
+    <step order="6">Run the full test suite for touched packages; ensure green.</step>
+    <step order="7">Update tasks/TASK-INDEX.md: mark 011 complete.</step>
+    <step order="8">Document the webresource-JS/TS-module sync decision (and any deviation) in projects/smart-todo-r5/notes/.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If the wizard's shared package (Spaarke.UI.Components) and quick-add's shared package (Spaarke.SmartTodo.Components) cannot both cleanly import ONE mapping module without introducing a new cross-package dependency edge that doesn't already exist, STOP, document the conflict, and escalate per CLAUDE.md §6/§11 rather than duplicating the mapping table in TypeScript (the webresource-JS mirror is the ONLY sanctioned literal duplication, because it is a build/runtime-boundary constraint, not a design choice).</trigger>
+  </escalation>
+
+  <tools>
+    <tool name="npm">Build/test the touched TS packages (Spaarke.UI.Components, Spaarke.SmartTodo.Components, SmartTodo Code Page)</tool>
+    <tool name="terminal">Run vitest</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">shared choice-to-score mapping module (exact path decided at step 1, documented in notes/)</output>
+    <output type="code">src/client/shared/Spaarke.UI.Components/src/components/CreateTodoWizard/CreateTodoStep.tsx (updated)</output>
+    <output type="code">src/client/shared/Spaarke.UI.Components/src/components/CreateTodoWizard/formTypes.ts (updated)</output>
+    <output type="code">src/client/shared/Spaarke.UI.Components/src/components/CreateTodoWizard/todoService.ts (updated)</output>
+    <output type="code">src/solutions/SmartTodo/src/components/SmartToDo.tsx (updated handleAdd)</output>
+    <output type="code">src/client/webresources/js/ new sprk_todo score OnChange handler</output>
+    <output type="test">vitest coverage for the mapping table + parity assertion</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Given sprk_priority = Urgent/High/Medium/Low, when the score is computed (form, wizard, or quick-add path), then sprk_priorityscore is exactly 100/75/50/25 respectively.</criterion>
+    <criterion testable="true">Given sprk_effort = Low/Medium/High/Very High/None, when the score is computed, then sprk_effortscore is exactly 25/50/75/100/50 respectively (Option B quick-wins-first).</criterion>
+    <criterion testable="true">Given sprk_priority = Medium (or unset), then sprk_priorityscore reproduces today's null-default of 50 (no behavior change for existing/unmapped records).</criterion>
+    <criterion testable="true">The mapping is defined in exactly ONE TypeScript module consumed by both CreateTodoWizard and the quick-add flow (verified by import graph, not by value comparison alone); the webresource JS mirror is the only literal duplication and carries an explicit cross-reference comment.</criterion>
+    <criterion testable="true">The composite score formula/weights in todoScoring.ts are byte-identical to their pre-task state (diff check).</criterion>
+    <criterion testable="true">Negative: an unrecognized/out-of-range choice value does not throw — it falls back to the documented null-default (50) rather than crashing the form or wizard.</criterion>
+    <criterion testable="true">All existing + new unit tests pass; build is green for every touched package.</criterion>
+  </acceptance-criteria>
+
+  <notes>See spec.md FR-02/FR-03 and the "F-5 effort direction" Owner Clarification row for the locked Option B table. CreateTodoStep.tsx currently exposes raw sliders (0-100) for priorityScore/effortScore — decide during step 2 whether to fully replace with a choice control or keep the slider as an advanced/override affordance; either way the choice-driven path must be the default per FR-02/FR-03 acceptance criteria ("choosing a priority sets the score").
+
+COMPLETION (2026-08-16): Canonical mapping module created at `src/client/shared/Spaarke.UI.Components/src/utils/todoScoreMappings.ts`, re-exported via `utils/index.ts`. Wired in all 3 surfaces: (1) `CreateTodoStep.tsx` — sliders replaced with Priority/Effort Dropdowns resolving through `priorityChoiceToScore`/`effortChoiceToScore`; (2) `SmartToDo.tsx` `handleAdd` — hardcoded `50`/`10` literals replaced with `NULL_DEFAULT_PRIORITY_SCORE`/`NULL_DEFAULT_EFFORT_SCORE` imported from `@spaarke/ui-components`; (3) new webresource `src/client/webresources/js/sprk_todo_score_onchange.js` mirrors the literal table with an explicit cross-reference comment. `todoScoring.ts` verified byte-identical (git diff empty + sha256 hash assertion in the new test suite). 21 new unit tests (value tables, null-defaults, negative/defensive fallback, import-graph parity, locked-formula hash) — all passing. `todoService.test.ts` (13/13) and the full SmartTodo Jest suite (76/76) pass with no regressions. tsc --noEmit clean for all touched files (pre-existing unrelated errors only in `@spaarke/auth`/`@spaarke/sdap-client`/`ComponentFramework` resolution elsewhere). ADR-check surfaced one Warning (ADR-006 — new webresource JS carries logic beyond ribbon-invocation scope) with a recommended Path A resolution (extend the existing ADR-050 OOB-form tension in spec.md); not fixed in-task since `spec.md` is outside this task's file scope — see `notes/task-011-scoring.md` for full detail. TASK-INDEX.md intentionally NOT updated (orchestrator scope ban — 3 concurrent agents in one worktree); no git add/commit performed.</notes>
+
+  <execution><skill>.claude/skills/task-execute/SKILL.md</skill></execution>
+</task>

@@ -91,6 +91,7 @@ import {
   useComposeInsertSuggestion,
   useComposeSave,
   useRegisterComposeSaveCompletedHandler,
+  useComposeAnchoredDocumentText,
 } from "@spaarke/compose-components/context/composeActionBridge";
 // spaarkeai-assistant-enhancements-r3 task 001 — READ the widget-agnostic active-item handle
 // (id/type/label; NEVER bytes — ADR-015) the WorkspacePane tab-focus feed publishes. This is the
@@ -109,6 +110,8 @@ import { useDocumentPerItemCards } from "./DocumentPerItemCards";
 // plus the stack-collapse wrapper for multiple simultaneous proactive card slots.
 import { resolveFollowOnElementTypeForActiveItemType } from "./followOnElementType";
 import { ProactiveCardStack } from "./ProactiveCardStack";
+// task 023 (FR-06): open-tab-gated follow-on launcher cards (Daily Briefing / Smart To Do).
+import { buildAgendaFollowOnSlots } from "./agendaFollowOnCards";
 import { resolveCurrentComposeLedgerRef, buildComposeApplyEvent } from "./composeApplyLeg";
 // FR-17 undo/replace (task 034) — the durable ledger-supersession hook + its Assistant affordance.
 import { useEditSupersession, EditSupersessionBar } from "./useEditSupersession";
@@ -755,6 +758,11 @@ export function ConversationPane(): React.JSX.Element {
   // edit).
   const pendingDocumentTurnRef = React.useRef<string | null>(null);
   const [pendingOutboundMessage, setPendingOutboundMessage] = React.useState<string | null>(null);
+  // FR-05 (spaarkeai-compose-r7 task 061, UC-6) — one-slot host→focus nonce passed to <SprkChat>.
+  // Bumped when a cross-pane `conversation.focus_chat_input` event arrives (Compose Ctrl+Shift+Space);
+  // SprkChat's `focusInputSignal` seam focuses the composer once per new value. State (not ref) because
+  // SprkChat re-reads it as a prop.
+  const [focusInputSignal, setFocusInputSignal] = React.useState<number>(0);
 
   // ── Behaviour hooks (see module map in the header) ────────────────────────
   const injection = useInjectionQueue();
@@ -962,6 +970,14 @@ export function ConversationPane(): React.JSX.Element {
   // client-projectable (buildChipPreference gives stated precedence when non-empty). `chipUsageTick`
   // bumps after each dispatch so the preference re-reads usage and the next chip strip re-ranks.
   const [chipUsageTick, setChipUsageTick] = React.useState(0);
+  // task 023 (FR-06) — follow-on launcher-card gating state.
+  //  - `agendaFollowOnArmed`: set true once the FR-01 task-agenda answer's `list-tasks`
+  //    surface_launch fires (structural signal in handleSurfaceLaunch — no keyword heuristic,
+  //    ADR-039); session-scoped (reset in handleSessionCreated).
+  //  - `openLayoutIds`: the live set of open embedded-layout tab ids, fed by WorkspacePane's
+  //    additive `workspace_tabs_snapshot` bus event — the open-tab awareness the cards gate on.
+  const [agendaFollowOnArmed, setAgendaFollowOnArmed] = React.useState(false);
+  const [openLayoutIds, setOpenLayoutIds] = React.useState<ReadonlySet<string>>(() => new Set());
   const chipDisplayPreference = React.useMemo(
     // eslint-disable-next-line react-hooks/exhaustive-deps -- chipUsageTick is the intended recompute trigger
     () => buildChipPreference(/* statedOrder seam */ null),
@@ -1259,6 +1275,14 @@ export function ConversationPane(): React.JSX.Element {
       // The capability that opens a workspace tab drafts nothing — ignore any payload.
       const surfaceEntry = resolveSurfaceLaunch(payload.consumerType);
       if (surfaceEntry && (surfaceEntry.kind === "workspace-tab" || surfaceEntry.kind === "layout")) {
+        // task 023 (FR-06): the FR-01 task-agenda answer opens the My Tasks grid via a
+        // `list-tasks` surface_launch — the STRUCTURAL signal (consumerType match, not a
+        // keyword heuristic; ADR-039) that arms the Daily Briefing / Smart To Do follow-on
+        // launcher cards. Session-scoped; the open-tab gate + WorkspacePane's own layoutId
+        // de-dupe keep it from ever offering (or opening a duplicate of) an already-open tab.
+        if (payload.consumerType === "list-tasks") {
+          setAgendaFollowOnArmed(true);
+        }
         dispatch("workspace", {
           type: "widget_load",
           widgetType: surfaceEntry.surface,
@@ -1507,6 +1531,10 @@ export function ConversationPane(): React.JSX.Element {
           // shapes, so it renders via the formatEventOutputMarkdown fallback AND, here,
           // separately materializes as document comments; no-op for any other action's result).
           ndaReviewAdvisoryComments.emitFromResult(dispatched.result);
+          // UAT (2026-08-18, owner): auto-creating the sprk_analysis on review COMPLETION was reverted —
+          // the owner's model is SAVE-driven: the Document + Analysis are created when the user Saves (the
+          // user may not want to persist a run). The create+bind now happens on create-on-save completion,
+          // not here. See [[compose-analysis-save-model]].
         }
         // Draft-alternative apply leg (Flow 5) — references the ledger entry, never the payload.
         // Capture the applied compose ledger key so the FR-17 undo/replace affordance targets THIS
@@ -1558,7 +1586,13 @@ export function ConversationPane(): React.JSX.Element {
     // `ndaReviewAdvisoryComments.emitFromResult` (itself stable — memoized on `[dispatch,
     // getSessionId]`, both stable — see useNdaReviewAdvisoryCommentsBridge.ts) over the whole
     // `ndaReviewAdvisoryComments` object, which is a fresh literal every render.
-    [actionQueue, injection, emitComposeApplyLeg, trackAppliedEdit, ndaReviewAdvisoryComments.emitFromResult]
+    [
+      actionQueue,
+      injection,
+      emitComposeApplyLeg,
+      trackAppliedEdit,
+      ndaReviewAdvisoryComments.emitFromResult,
+    ]
   );
 
   // FR-17 affordance handlers (task 034). "Try another approach" passes the CURRENT
@@ -1629,9 +1663,30 @@ export function ConversationPane(): React.JSX.Element {
   // NOT narrated prose. This reuses the SHIPPED `dispatchComposeAction` edit path verbatim: a
   // non-empty `documentSessionId` makes it an EDIT (routes to the doc session, confirmation-only,
   // no prose — DEF-09), and `revisionScope: 'whole-document'` selects the DEF-11 confirmation copy.
-  // The bindingId comes ONLY from capability discovery (ADR-039); documentText is resolved
-  // SERVER-SIDE from the registered document session's file (ContextBinder file-operand path when the
-  // args omit a documentText operand) — see the wave notes. `instruction` rides only for `custom`.
+  // The bindingId comes ONLY from capability discovery (ADR-039).
+  //
+  // TASK 054 (FR-C03) — `documentText` is now supplied from the Compose editor, annotated with each
+  // paragraph's `w14:paraId`. Two things change, and the second was not obvious:
+  //
+  //  1. It IS the closed set. The model targets a paragraph by copying an identifier it can see beside
+  //     the content (a copy) instead of quoting the prose back (a generation, and generation is lossy —
+  //     the "wording differs slightly" failure). The editor supplies it because only the LIVE editor
+  //     holds the COMPLETE current set: the server's session reference map is a Load-time snapshot that
+  //     omits paragraphs typed since, and carries no text to annotate with.
+  //
+  //  2. It changes which server path runs, which is what makes `revisionIntent` work AT ALL. Supplying
+  //     a `documentText` operand moves this dispatch onto the STRUCTURED-operand path, where the
+  //     Action's declared inputs render into `## Input` beside the operand (ADR-043 Amendment 1). The
+  //     file-operand path it took before passes NO args and NO input schema to ContextBinder, so
+  //     `revisionIntent` was accepted and dropped before the prompt — the systemPrompt's four
+  //     INSTRUCTIONS-BY-INTENT branches could not be selected, and flag-risks (comments-only, empty
+  //     edits) was indistinguishable from improve-clarity.
+  //
+  // No annotated text available (no Compose tab open, an inactive tab, or a document with no stamped
+  // ids) → `documentText` is omitted and the dispatch is byte-identical to the pre-054 one. That is a
+  // real degradation (back to prose matching) but never a WRONG placement: a half-supplied set would
+  // get the model refused on ids that genuinely exist.
+  const readAnchoredDocumentText = useComposeAnchoredDocumentText();
   const dispatchReviseDocument = React.useCallback(
     (revisionIntent: RevisionIntent, instruction: string | undefined, documentSessionId: string): void => {
       if (!reviseBindingId) {
@@ -1646,6 +1701,11 @@ export function ConversationPane(): React.JSX.Element {
       if (instruction && instruction.trim().length > 0) {
         slots.instruction = instruction.trim();
       }
+      // Read at DISPATCH time, never cached — the set must describe the document as it is now.
+      const anchored = readAnchoredDocumentText?.() ?? null;
+      if (anchored && anchored.paraIds.length > 0) {
+        slots.documentText = anchored.text;
+      }
       void dispatchComposeAction({
         id: `compose-revise-document#${(reviseDispatchSeqRef.current += 1)}`,
         bindingId: reviseBindingId,
@@ -1654,7 +1714,7 @@ export function ConversationPane(): React.JSX.Element {
         revisionScope: "whole-document",
       });
     },
-    [reviseBindingId, dispatchComposeAction, injection]
+    [reviseBindingId, dispatchComposeAction, injection, readAnchoredDocumentText]
   );
 
   // FIX #1 (editor-centric reframe) — a DOCUMENT-LEVEL action chip click (summarize / add-to-DMS /
@@ -2556,6 +2616,9 @@ export function ConversationPane(): React.JSX.Element {
       // R5-D (2026-07-07): the execution-trace replay buffer is session-scoped —
       // a fresh session must not replay the previous session's tool calls.
       clearExecutionTraceBuffer();
+      // task 023 (FR-06): a fresh session has no task-agenda answer yet — disarm the
+      // Daily Briefing / Smart To Do follow-on cards until the next FR-01 answer.
+      setAgendaFollowOnArmed(false);
       // task 022: a fresh session has no pending "Review an NDA" card.
       setNdaReviewFile(null);
       // task 064: reset the resolved consumerType to the default alongside the file — keeps the
@@ -2624,12 +2687,84 @@ export function ConversationPane(): React.JSX.Element {
   // adoptions below; those are excluded from the clear by WorkspacePane's
   // `composeAdoptionSessionRef` marker (they show the adopted document, not a full tab set).
   // External contract is unchanged: `HistoryMenu`'s `onSelectSession(sessionId: string)`.
+  // Best-effort file re-attach on History reopen (spaarkeai-compose-r7): the FR-D5 restore chip is
+  // keyed to the COLD-LOAD restoreCtx.sessionId and never updates on an in-app History reopen (the
+  // handler below only ADOPTS the id). Recall itself already works on reopen — the server scopes it by
+  // the persisted session manifest (RecallSessionFileHandler reads UploadedFiles[].SearchDocumentIdsCsv),
+  // so no client re-arm is needed. This state drives ONLY the CHIP + its best-effort 24h availability
+  // signal: we fetch /restore for the reopened session and stage its uploaded-files manifest here.
+  const [reopenRestore, setReopenRestore] = React.useState<{
+    sessionId: string;
+    files: AttachedFileSummary[];
+  } | null>(null);
+
   const handleSelectHistorySession = React.useCallback(
     (sessionId: string) => {
       setChatSessionId(sessionId);
       startNewSession();
+
+      // Fetch the reopened session's uploaded-files manifest so the attachment chip re-renders for THIS
+      // session (the cold-load restore path does not cover in-app reopen). Fire-and-forget + silent on
+      // failure — recall still works via the persisted server-side manifest; only the chip is affected.
+      setReopenRestore(null);
+      void (async () => {
+        try {
+          const url = `${bffBaseUrl.replace(/\/$/, "")}/api/ai/chat/sessions/${encodeURIComponent(
+            sessionId
+          )}/restore`;
+          const resp = await authenticatedFetch(url, {
+            method: "GET",
+            headers: { Accept: "application/json" },
+          });
+          if (!resp.ok) return;
+          const spec = (await resp.json()) as {
+            uploadedFiles?: Array<{
+              fileId: string;
+              fileName: string;
+              contentType: string;
+              sizeBytes: number;
+              contentAvailable?: boolean;
+            }>;
+            recentMessages?: Array<{ timestamp?: string }>;
+          };
+          const rawFiles = Array.isArray(spec.uploadedFiles) ? spec.uploadedFiles : [];
+          if (rawFiles.length === 0) return;
+          // Availability — TRI-STATE, server-preferred (FR-B05), with a deliberate client fallback.
+          //
+          // Task 062 made the server the AUTHORITY: `contentAvailable` is a real answer derived from
+          // the durable store. But while `SessionFileStore:BlobEndpoint` is empty — which it MUST stay
+          // until 062 AND 063 both merge, because ADR-015 requires retention AND erasure before a
+          // persisted store is armed — the server has NO answer and returns null everywhere.
+          //
+          // Deleting this fallback (as task 062's hand-off proposed) would therefore drop the dimmed
+          // chip entirely for the whole period the store is disabled, even though the ~24h AI-Search
+          // eviction (SessionFilesCleanupJob) is STILL REAL. That trades a real user-visible warning
+          // for a purity FR-B05 does not actually require: "server-authoritative" means the client must
+          // not OVERRIDE the server, not that the client must go silent when the server is mute.
+          //
+          // So: a boolean from the server always wins; null/absent falls back to the freshest-message
+          // age vs the eviction window. Unknown age ⇒ assume available (never falsely disable). Once
+          // the store is armed the server always answers and this branch becomes unreachable.
+          const stamps = (spec.recentMessages ?? [])
+            .map((m) => (m.timestamp ? Date.parse(m.timestamp) : NaN))
+            .filter((n) => !Number.isNaN(n));
+          const lastTs = stamps.length ? Math.max(...stamps) : NaN;
+          const withinWindow = Number.isNaN(lastTs)
+            ? true
+            : Date.now() - lastTs < 24 * 60 * 60 * 1000;
+          const files: AttachedFileSummary[] = rawFiles.map((f) => ({
+            id: f.fileId,
+            filename: f.fileName,
+            status: "ready",
+            available: typeof f.contentAvailable === "boolean" ? f.contentAvailable : withinWindow,
+          }));
+          setReopenRestore({ sessionId, files });
+        } catch {
+          // silent — chip is best-effort; recall is unaffected.
+        }
+      })();
     },
-    [setChatSessionId, startNewSession]
+    [setChatSessionId, startNewSession, bffBaseUrl, authenticatedFetch]
   );
 
   // ai-advanced-capabilities-analysis-hub-r1 task 031 (FR-11): a DIFFERENT pane (the
@@ -2649,6 +2784,11 @@ export function ConversationPane(): React.JSX.Element {
       // 'create' if unspecified.
       setQuickStartTab(event.quickStartTab ?? "create");
       setQuickStartOpen(true);
+    } else if (event.type === "focus_chat_input") {
+      // FR-05 (spaarkeai-compose-r7 task 061, UC-6): the Compose editor's Ctrl+Shift+Space asks us to
+      // move focus into the chat composer. Bump the one-slot nonce; SprkChat's `focusInputSignal` seam
+      // calls the SprkChatInput `focusInput()` handle. A new value each time so repeated presses re-focus.
+      setFocusInputSignal((n) => n + 1);
     }
   });
 
@@ -2673,6 +2813,21 @@ export function ConversationPane(): React.JSX.Element {
   // A seed WITHOUT the hand-off fields (every non-wizard compose open — upload door, Browse,
   // "Open in Compose", revise mounts) returns immediately: zero behavior change.
   usePaneEvent("workspace", (event) => {
+    // task 023 (FR-06) — open-tab awareness: WorkspacePane broadcasts the open embedded-layout
+    // id set (additive `workspace_tabs_snapshot`) on every tab-set mutation. Track it so the
+    // Daily Briefing / Smart To Do follow-on cards can suppress themselves when their target
+    // layout tab is already open. Additive discriminant — return early (nothing else reads it).
+    if ((event as { type?: string }).type === "workspace_tabs_snapshot") {
+      const ids = (event as { openLayoutIds?: readonly string[] }).openLayoutIds ?? [];
+      // Referential-equality guard: this event fires on EVERY tab mutation (incl. unrelated
+      // document/compose tabs), but the layout set rarely changes — return the SAME set when it's
+      // unchanged so React bails out and this large component does not re-render needlessly.
+      setOpenLayoutIds((prev) =>
+        prev.size === ids.length && ids.every((id) => prev.has(id)) ? prev : new Set(ids)
+      );
+      return;
+    }
+
     // task 010 (FR-A1) — active-tab focus-stamp. Extend the existing `workspace` subscription
     // (rather than adding a second bus subscription, per ADR-030's single-subscriber-per-concern
     // convention already followed by this handler) with an `active_widget_changed` branch that
@@ -2815,6 +2970,21 @@ export function ConversationPane(): React.JSX.Element {
     [dispatchBinding]
   );
 
+  // ── R4 021b: grounded capability follow-up suggestion → Click-path dispatch ──
+  // A CAPABILITY-kind SprkChatSuggestions chip carries a real `targetBindingId`
+  // the model selected from the closed candidate menu (ADR-039). Route it through
+  // the SAME shared `dispatchBinding` seam `handleNextStep` uses — no new dispatch
+  // path (bindingId in, stream out; the server resolves the Binding). SprkChat
+  // owns question/action chips internally; only capability crosses this seam.
+  const handleSuggestionCapability = React.useCallback(
+    (targetBindingId: string): void => {
+      if (targetBindingId) {
+        dispatchBinding(targetBindingId, { slots: undefined });
+      }
+    },
+    [dispatchBinding]
+  );
+
   // R7 12.3a: normalize restored SessionRestoreMessage[] → IChatMessage[].
   const restoredInitialMessages = React.useMemo<IChatMessage[] | undefined>(() => {
     if (!restoreCtx?.recentMessages || restoreCtx.recentMessages.length === 0) return undefined;
@@ -2839,11 +3009,17 @@ export function ConversationPane(): React.JSX.Element {
   // and clears them). Live attachments take precedence: once the user attaches a file this session,
   // `attachments.uploadedFileCount > 0` and the live indicator renders instead.
   const restoredAttachmentFiles = React.useMemo<AttachedFileSummary[]>(() => {
+    // Reopen path (spaarkeai-compose-r7): staged files for the CURRENTLY reopened session win, and
+    // carry their best-effort 24h availability flag (drives the dimmed "no longer available" chip).
+    if (reopenRestore && chatSessionId && chatSessionId === reopenRestore.sessionId) {
+      return reopenRestore.files;
+    }
+    // Cold-load path (FR-D5): the ThreePaneShell restore spec, gated to its own session.
     const files = restoreCtx?.uploadedFiles;
     if (!files || files.length === 0) return [];
     if (!chatSessionId || chatSessionId !== restoreCtx?.sessionId) return [];
     return files.map((f) => ({ id: f.fileId, filename: f.fileName, status: "ready" }));
-  }, [restoreCtx?.uploadedFiles, restoreCtx?.sessionId, chatSessionId]);
+  }, [reopenRestore, restoreCtx?.uploadedFiles, restoreCtx?.sessionId, chatSessionId]);
 
   // Prefer the LIVE attachment strip; fall back to the restored manifest only when there are no live
   // attachments yet (the reopened-session case FR-D5 targets).
@@ -2865,6 +3041,20 @@ export function ConversationPane(): React.JSX.Element {
   // the compose-context doc-action chips (Summarize / Add-to-DMS / Draft-email) are the relevant
   // next-steps, so they REPLACE the generic consumer cards instead of stacking a second row. Once
   // the user acts (handleDocAction clears reviseChipsPending), the consumer cards resume.
+  // task 023 (FR-06) — build the gated agenda follow-on launcher slots. Pure/memoized;
+  // each slot is null until armed AND its target layout tab is closed (open-tab gate).
+  // Click routes through the SAME `handleSurfaceLaunch` the create/list-tasks paths use
+  // (registry-driven; no per-card dispatch branch).
+  const agendaFollowOnSlots = React.useMemo(
+    () =>
+      buildAgendaFollowOnSlots({
+        armed: agendaFollowOnArmed,
+        openLayoutIds,
+        onOpenSurface: (consumerType: string) => handleSurfaceLaunch({ consumerType }),
+      }),
+    [agendaFollowOnArmed, openLayoutIds, handleSurfaceLaunch]
+  );
+
   const transcriptFooter = React.useMemo(
     () => (
       <>
@@ -2876,7 +3066,12 @@ export function ConversationPane(): React.JSX.Element {
             are additionally gated on `activeItemFollowOnType === 'card'` — the DETERMINISTIC resolution
             read through task-022's `perItemCards` + task-040's `getWidgetInteractionPattern` (never
             message text, never a keyword) — a belt-and-suspenders check against the SAME registration
-            contract those hooks already read internally. */}
+            contract those hooks already read internally.
+
+            task 023 (FR-06): the two agenda follow-on launcher cards (Daily Briefing / Smart To Do)
+            join as additional slots — each null (suppressed) until the FR-01 answer arms them AND its
+            target layout tab is closed. Feeding them as INDEPENDENT slots gets the "collapse both
+            behind one disclosure header" behavior for free from `ProactiveCardStack`. */}
         <ProactiveCardStack
           slots={[
             {
@@ -2901,6 +3096,7 @@ export function ConversationPane(): React.JSX.Element {
               key: "document-per-item",
               node: activeItemFollowOnType === "card" ? documentPerItemCards.cardSlot : null,
             },
+            ...agendaFollowOnSlots,
           ]}
         />
         {reviseChipsPending ? (
@@ -2937,6 +3133,7 @@ export function ConversationPane(): React.JSX.Element {
       chips.consumerChipsSlot,
       chips.hasChips,
       handleRefreshSuggestions,
+      agendaFollowOnSlots,
     ]
   );
 
@@ -3254,6 +3451,7 @@ export function ConversationPane(): React.JSX.Element {
               // decorate seam that attaches the one-turn documentId), then acks so we clear the slot.
               pendingOutboundMessage={pendingOutboundMessage}
               onOutboundConsumed={() => setPendingOutboundMessage(null)}
+              focusInputSignal={focusInputSignal}
               onBeforeSendMessage={handleBeforeSendMessage}
               onMessagesChange={(msgs) => {
                 // CHAT-4: keep the local transcript-length in sync so the get-started cards toggle
@@ -3292,6 +3490,11 @@ export function ConversationPane(): React.JSX.Element {
               // invoke_capability chip's targetBindingId through the shared
               // dispatchConsumer path (see handleNextStep above).
               onNextStep={handleNextStep}
+              // R4 021b: a grounded CAPABILITY follow-up suggestion chip dispatches
+              // its targetBindingId through the SAME shared dispatchBinding path
+              // every consumer chip uses (ADR-039: bindingId in, stream out — no
+              // new dispatch surface). Question/action chips route inside SprkChat.
+              onSuggestionCapabilitySelect={handleSuggestionCapability}
               // FIX #7a: "Open preview" on the persistent "Saved to the DMS" message — opens the File
               // Preview modal for that document (savedPreview metadata carries the id per message).
               onOpenSavedPreview={handleOpenSavedPreview}

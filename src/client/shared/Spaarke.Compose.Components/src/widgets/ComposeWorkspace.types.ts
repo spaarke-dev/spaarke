@@ -1,4 +1,4 @@
-/**
+﻿/**
  * ComposeWorkspace.types.ts — shared types for the Compose workspace orchestrator
  * and its extracted hooks (`useComposeBroadcastChannel`, `useComposeCheckoutLifecycle`,
  * `useComposeHeartbeatGate`).
@@ -164,6 +164,13 @@ export interface ComposeWorkspaceState {
    */
   importedComments: readonly ImportedComment[];
   /**
+   * UAT-12 (2026-08-18, honest/safe): true when the server's annotation read FAILED on this load, so
+   * {@link importedRevisions}/{@link importedComments} are an empty FALLBACK — NOT proof the document
+   * is clean. Drives an honest, prominent "tracked changes and comments couldn't be read — do not
+   * treat this as clean" banner. False on every normal load (an empty result then means no annotations).
+   */
+  annotationReadFailed: boolean;
+  /**
    * The server-side DOCX→editor projection from a STORED-DOCUMENT Load response. When present, the
    * editor mounts `projection.html` directly (the paraId extension parses `data-paraid`). Fail-closed:
    * `canEdit === false` ⇒ the editor renders a read-only / "Open in Word" state, NEVER a blank editable
@@ -196,6 +203,19 @@ export interface ComposeWorkspaceState {
    * `loadedContentModel`; null = none surfaced / older BFF.
    */
   loadedContentModelWarnings: Array<{ code: string; count: number }> | null;
+
+  /**
+   * FR-S08 (r8 task 015): the document-size limit the SERVER enforces, as advertised on the response
+   * that mounted this document. Drives the save pre-flight, so a too-large document is refused BEFORE
+   * the user waits out a 25 MB upload that was always going to be rejected.
+   *
+   * `null` means the server did not advertise one — an older BFF, or a mount door that never called
+   * the server (a local Browse pick, a born-in-editor seed). Then the client does NO numeric
+   * pre-flight and lets the server refuse honestly. It deliberately does NOT fall back to a
+   * compiled-in number: a second constant is exactly how "your file is fine" becomes a rejection,
+   * which is the failure this requirement exists to remove.
+   */
+  maxDocumentBytes: number | null;
   /**
    * Task 041 (spaarkeai-compose-r6, FR-06 — PDF intake): the load's source format. `'pdf'` = the
    * mounted docx was SYNTHESIZED server-side from a PDF's canonical-model projection (task 040;
@@ -229,6 +249,16 @@ export interface ComposeWorkspaceState {
    * cleanly (the common case). Reset on save-start / load.
    */
   partialApply: ComposePartialApplyInfo | null;
+  /**
+   * UAT-13 (2026-08-18, honest/safe): populated when a create-on-save SUCCEEDED (the sprk_document
+   * exists) but the follow-on parent/regarding association write FAILED — the document is saved but
+   * ORPHANED (not filed under its matter). The old code only `console.warn`'d this, so the user saw an
+   * unqualified success while the doc was silently unfiled — load-bearing for the Field-Mapping /
+   * set-regarding framework. Drives an honest dismissible banner with a Retry-link action (re-invokes
+   * the host association write with `documentRecordId`). `null` when the association succeeded or none
+   * was attempted. Reset on save-start / load.
+   */
+  associationWarning: { documentRecordId: string } | null;
   /** Last assistant-inserted draft staged for confirm (Flow 5 R1 manual-confirm gate). */
   pendingAssistantInsert: ComposeAssistantToWorkspaceFlow | null;
   /** SPE check-out lifecycle (Task 050 / Spike #3 §9; Task 051 multi-tab UX). */
@@ -286,12 +316,19 @@ export type ComposeWorkspaceAction =
       versionId: string | null;
       sessionId: string;
       sprkDocumentId?: string;
+      // FR-A09 (r8 task 044): the drive-item the server ACTUALLY served. Normally identical to the one
+      // requested, but a PDF that has already been saved as a Word document resolves to that document
+      // instead of being projected a second time — so the identity we save against must come from the
+      // response, not from what we asked for. Omitted by an older BFF → the requested id is retained.
+      speDriveItemId?: string;
       fileName?: string;
       // task 052 fast-follow (FR-08/FR-24/FR-25 wire gap): parsed defensively by the caller from an
       // optional Load response field — undefined (older BFF) is normalized to `[]` in the reducer.
       paraIdMap?: readonly ParaIdMapEntry[];
       importedRevisions?: readonly ImportedRevision[];
       importedComments?: readonly ImportedComment[];
+      // UAT-12: honest annotation-read-failed signal from the Load response (undefined → false).
+      annotationReadFailed?: boolean;
       // The server DOCX→editor projection. Undefined (older BFF) → null in the reducer → (task 013,
       // F-2) the editor renders an explicit error/unavailable state — no client fallback reader remains.
       projection?: ComposeServerProjection | null;
@@ -307,6 +344,8 @@ export type ComposeWorkspaceAction =
       // response — folded into saveDegradationWarnings on the first model-path save. Undefined/null
       // (older BFF / no loss) → null.
       contentModelWarnings?: Array<{ code: string; count: number }> | null;
+      /** FR-S08 (task 015): the server-advertised save size limit, in bytes. */
+      maxDocumentBytes?: number | null;
       // Task 041 (FR-06, PDF intake): the Load response's sourceFormat marker ('pdf' = the mounted
       // docx was synthesized from a PDF). Undefined/null (older BFF / native docx) → null.
       sourceFormat?: string | null;
@@ -314,6 +353,17 @@ export type ComposeWorkspaceAction =
       // carried onto documentRef.transientKey so the PDF's repeated create-on-saves dedup to ONE new
       // docx record (the G7 mechanism, reused).
       transientKey?: string;
+      // FR-07(b) (task 010): the non-rotating logical id for a PDF-sourced (transient) load — carried
+      // onto documentRef.composeLogicalId so the recovered identity survives re-mount. Undefined for a
+      // native stored-doc load (identity comes from speDriveItemId/sprkDocumentId).
+      composeLogicalId?: string;
+      // FR-09 (task 071): the AUTHORITATIVE drive the doc was loaded from (the BFF Load response's
+      // required `driveId`). Stamped onto documentRef so a subsequent Reload-from-source (requestLoad)
+      // targets the drive the doc actually LIVES in — a doc in a BU-container drive the host `driveId`
+      // prop doesn't identify would otherwise lose its drive on reload and hit the `!loadDriveId → reset`
+      // blank branch (the R6 D4 "Reload from source blanks + asks for re-upload" root cause). Mirrors the
+      // saveSucceeded create-on-save re-target stamp (UAT-2026-07-19 P2).
+      driveId?: string;
     }
   | { kind: 'loadFailed'; errorMessage: string }
   // ── FR-03 (task 012): transient upload-mount (no SPE pointer, create-on-save) ──
@@ -351,10 +401,21 @@ export type ComposeWorkspaceAction =
       // task 013 (r6, review F7): the projection's flatten warnings from the same response — same
       // lifecycle as `contentModel` (see the loadSucceeded field above).
       contentModelWarnings?: Array<{ code: string; count: number }> | null;
+      /** FR-S08 (task 015): the server-advertised save size limit, in bytes. */
+      maxDocumentBytes?: number | null;
       // G7 (FR-06, task 022): the client-minted stable transient-draft dedup key
       // (mintTransientKey). Carried onto documentRef.transientKey so every create-on-save sends it →
       // repeated saves dedup to ONE record. Omitted by an older caller → no dedup (unchanged behavior).
       transientKey?: string;
+      // FR-07(b) (task 010): the non-rotating logical document id (startNewComposeLogicalId /
+      // recovered). Carried onto documentRef.composeLogicalId — the SHARED key for FR-03 draft
+      // recovery (040) + FR-07 client dedup (011). Persisted client-side; survives re-mount/reload.
+      composeLogicalId?: string;
+      // Task 051 (spaarkeai-compose-r7, FR-06 — PDF import parity): 'pdf' when the Browse-project /
+      // Assistant-upload door forked a PDF into a server-SYNTHESIZED docx (task 050). Drives the editor's
+      // editable admission (despite a .pdf display name) + the PDF create-on-save routing, exactly as
+      // loadSucceeded.sourceFormat does for the Load door. Omitted for a native docx mount → null.
+      sourceFormat?: string | null;
     }
   // ── DEF-08: AI-drafted full-document seed mount (create-on-save, like mountTransient) ──
   // Item 6 (UAT round-4): `sessionId` carries a MINTED document session id for born-in-editor mounts
@@ -369,6 +430,8 @@ export type ComposeWorkspaceAction =
       containerId?: string;
       sessionId?: string;
       transientKey?: string;
+      // FR-07(b) (task 010): non-rotating logical id for this born-in-editor draft — see mountTransient.
+      composeLogicalId?: string;
     }
   | { kind: 'requestSave' }
   // FR-05 (task 100): create-on-save mints a NEW SPE drive-item; `documentSpeId` carries the
@@ -400,6 +463,11 @@ export type ComposeWorkspaceAction =
       // the client POSTed; the caller resolves that fallback). Omitted on op-log / born-in-editor
       // saves → the reducer keeps the existing `loadedContentModel` (never regresses to null).
       contentModel?: ComposeContentModel | null;
+      // FR-07(a) (task 012): on a Save-New fork, the uniquified fork filename + the fresh task-010
+      // logical id, adopted onto the forked documentRef so it reflects the NEW document (a real fork),
+      // not the original. Undefined on every non-fork save (the reducer keeps the existing values).
+      fileName?: string;
+      composeLogicalId?: string;
     }
   | { kind: 'saveFailed'; errorMessage: string; isLock?: boolean }
   | { kind: 'reset' }
@@ -407,6 +475,9 @@ export type ComposeWorkspaceAction =
   // 026-F5 (task 012, r6): REPLACE the save-time degradation-warning set. Dispatched on EVERY
   // successful save: warnings present → set; none → null (a clean save clears the stale banner).
   | { kind: 'saveDegradationWarnings'; warnings: Array<{ code: string; count: number }> | null }
+  // UAT-13 (2026-08-18): set/clear the create-on-save association-orphan warning. `documentRecordId`
+  // non-null → the doc saved but its parent association write failed (retryable); null → clear.
+  | { kind: 'associationWarning'; documentRecordId: string | null }
   | { kind: 'pendingAssistantInsert'; payload: ComposeAssistantToWorkspaceFlow }
   | { kind: 'clearPendingAssistantInsert' }
   // ── Task 050 (Spike #3 §9): SPE check-out lifecycle actions ───────────────
@@ -439,14 +510,17 @@ export const INITIAL_STATE: ComposeWorkspaceState = {
   paraIdMap: [],
   importedRevisions: [],
   importedComments: [],
+  annotationReadFailed: false,
   projection: null,
   loadedContentModel: null,
   loadedContentModelWarnings: null,
+  maxDocumentBytes: null,
   sourceFormat: null,
   saveDegradationWarnings: null,
   errorMessage: null,
   saveErrorIsLock: false,
   partialApply: null,
+  associationWarning: null,
   pendingAssistantInsert: null,
   checkoutStatus: 'idle',
   checkoutLockedBy: null,
@@ -491,6 +565,8 @@ export function composeWorkspaceReducer(
         paraIdMap: action.paraIdMap ?? [],
         importedRevisions: action.importedRevisions ?? [],
         importedComments: action.importedComments ?? [],
+        // UAT-12: carry the honest annotation-read-failed signal (older BFF omits it → false).
+        annotationReadFailed: action.annotationReadFailed ?? false,
         // The server projection (null for an older BFF → task 013/F-2 error-unavailable state).
         projection: action.projection ?? null,
         // task 012 (r6): the canonical content model — set ATOMICALLY with projection (same source
@@ -498,6 +574,8 @@ export function composeWorkspaceReducer(
         loadedContentModel: action.contentModel ?? null,
         // task 013 (r6, F7): the projection's flatten warnings — same atomic set/clear as the model.
         loadedContentModelWarnings: action.contentModelWarnings ?? null,
+        // FR-S08 (task 015): the server-advertised limit, set atomically with the rest of the mount.
+        maxDocumentBytes: action.maxDocumentBytes ?? null,
         // G1 (FR-01, task 020): normalize an omitted/undefined field (Path B continuation, or an
         // older BFF) to `null` — the BINDING null-handling contract treats null as 'imported'.
         origin: action.origin ?? null,
@@ -507,11 +585,29 @@ export function composeWorkspaceReducer(
         documentRef: state.documentRef
           ? {
               ...state.documentRef,
+              // FR-A09 (task 044): adopt the identity the server SERVED. This is normally the same id
+              // we asked for; it differs in exactly one case — re-opening a PDF that has already become
+              // a Word document, where the server resumes us on that document. Saving against the
+              // requested id there would target the .pdf item, which the save path refuses outright
+              // (and rightly: docx bytes must never be written over a PDF). Mirrors the existing
+              // saveSucceeded re-target, which adopts the created identity the same way.
+              speDriveItemId:
+                action.speDriveItemId && action.speDriveItemId.length > 0
+                  ? action.speDriveItemId
+                  : state.documentRef.speDriveItemId,
               sprkDocumentId: action.sprkDocumentId ?? state.documentRef.sprkDocumentId,
               fileName: action.fileName ?? state.documentRef.fileName,
               // Task 041: the PDF dedup key (supplied only on PDF-sourced loads) — repeated saves
               // of the same PDF session create-on-save onto ONE new docx record (G7 mechanism).
               transientKey: action.transientKey ?? state.documentRef.transientKey,
+              // FR-07(b) (task 010): the non-rotating logical id — supplied on a PDF-sourced
+              // (transient) load; preserved from state for a native stored-doc load (where identity
+              // comes from speDriveItemId/sprkDocumentId and this stays undefined).
+              composeLogicalId: action.composeLogicalId ?? state.documentRef.composeLogicalId,
+              // FR-09 (task 071): stamp the AUTHORITATIVE load-time drive so a later Reload-from-source
+              // targets where the doc lives (never the `!loadDriveId → reset` blank). Mirrors the
+              // saveSucceeded stamp below; a defensive empty/undefined falls back to the existing value.
+              driveId: action.driveId && action.driveId.length > 0 ? action.driveId : state.documentRef.driveId,
             }
           : state.documentRef,
         errorMessage: null,
@@ -560,6 +656,9 @@ export function composeWorkspaceReducer(
           fileName: action.fileName,
           containerId: action.containerId,
           transientKey: action.transientKey,
+          // FR-07(b) (task 010): the non-rotating logical id for this transient mount — the shared
+          // key for FR-03 draft recovery + FR-07 dedup. Read identity via getComposeLogicalIdentity.
+          composeLogicalId: action.composeLogicalId,
         },
         checkoutStatus: 'skipped',
         // A transient (Browse / assistant-upload) mount has no server pre-parse — there is no
@@ -569,6 +668,7 @@ export function composeWorkspaceReducer(
         paraIdMap: [],
         importedRevisions: [],
         importedComments: [],
+        annotationReadFailed: false, // UAT-12: a non-load mount has no annotation read — clear any stale flag.
         // FR-01/FR-03 (tasks 010/011): both the assistant-upload door (POST /api/compose/upload)
         // AND the Browse-direct-upload door (POST /api/compose/project, T-2 path-A) now supply a
         // server projection built from the SAME mounted bytes (ComposeDocxProjectionBuilder) —
@@ -582,8 +682,13 @@ export function composeWorkspaceReducer(
         loadedContentModel: action.contentModel ?? null,
         // task 013 (r6, F7): same lifecycle as the model — set from this mount's response or cleared.
         loadedContentModelWarnings: action.contentModelWarnings ?? null,
-        // Task 041 (FR-06): a transient mount is not a PDF-sourced load — clear rather than inherit.
-        sourceFormat: null,
+        // FR-S08 (task 015): the server-advertised limit, set atomically with the rest of the mount.
+        maxDocumentBytes: action.maxDocumentBytes ?? null,
+        // Task 051 (FR-06 — PDF import parity): a Browse-project / Assistant-upload mount CAN now be
+        // PDF-sourced (task 050 gave ProjectForMount the intake fork), so carry the marker when the door
+        // supplies it; a native docx mount omits it → null (clear-rather-than-inherit still holds — a fresh
+        // mount over a prior PDF session must not keep the prior 'pdf').
+        sourceFormat: action.sourceFormat ?? null,
         // 026-F5 (task 012, r6): a fresh mount has no save history — clear any stale save-warning
         // banner from a prior document mounted in this same tab.
         saveDegradationWarnings: null,
@@ -615,12 +720,15 @@ export function composeWorkspaceReducer(
           fileName: action.fileName,
           containerId: action.containerId,
           transientKey: action.transientKey,
+          // FR-07(b) (task 010): non-rotating logical id for this born-in-editor draft.
+          composeLogicalId: action.composeLogicalId,
         },
         checkoutStatus: 'skipped',
         // An AI-drafted seed has no server pre-parse either — same rationale as `mountTransient`.
         paraIdMap: [],
         importedRevisions: [],
         importedComments: [],
+        annotationReadFailed: false, // UAT-12: a non-load mount has no annotation read — clear any stale flag.
         // No server round-trip → no projection. `docxBytes` is also null for this mount kind (the
         // editor seeds directly from `initialHtml`), so the editor's docx-mount branch (projection /
         // error-unavailable) is never reached here — this was never a mammoth consumer (task 012 audit).
@@ -630,6 +738,9 @@ export function composeWorkspaceReducer(
         loadedContentModel: null,
         // task 013 (r6, F7): no projection ran for this mount — nothing was flattened.
         loadedContentModelWarnings: null,
+        // FR-S08 (task 015): a born-in-editor seed never called the server, so no limit is known
+        // here — null means "do no numeric pre-flight", not "unlimited".
+        maxDocumentBytes: null,
         // Task 041 (FR-06): a born-in-editor seed is not a PDF-sourced load — clear rather than inherit.
         sourceFormat: null,
         // 026-F5 (task 012, r6): clear any stale save-warning banner from a prior mount (same
@@ -642,7 +753,15 @@ export function composeWorkspaceReducer(
       };
     case 'requestSave':
       if (state.status !== 'loaded') return state;
-      return { ...state, status: 'saving', errorMessage: null, saveErrorIsLock: false, partialApply: null };
+      return {
+        ...state,
+        status: 'saving',
+        errorMessage: null,
+        saveErrorIsLock: false,
+        partialApply: null,
+        // UAT-13: clear a prior association-orphan warning at the start of a new save attempt.
+        associationWarning: null,
+      };
     case 'saveSucceeded':
       return {
         ...state,
@@ -699,10 +818,16 @@ export function composeWorkspaceReducer(
               // replace-path saves and the toolbar show the document's real identity. Review
               // B-LOW-4: the undefined-name fallback MIRRORS triggerSave's ('document.pdf' →
               // 'document.docx') so local state never diverges from the server record.
+              // FR-07(a) (task 012): a Save-New fork adopts the uniquified fork name (action.fileName);
+              // otherwise the PDF→docx rename or the existing name, unchanged.
               fileName:
-                state.sourceFormat === 'pdf'
+                action.fileName ??
+                (state.sourceFormat === 'pdf'
                   ? (state.documentRef.fileName ?? 'document.pdf').replace(/\.pdf$/i, '') + '.docx'
-                  : state.documentRef.fileName,
+                  : state.documentRef.fileName),
+              // FR-07(a/b) (task 012/010): a fork adopts a NEW logical id (action.composeLogicalId);
+              // a non-fork save preserves the existing one (the accessor prefers sprkDocumentId anyway).
+              composeLogicalId: action.composeLogicalId ?? state.documentRef.composeLogicalId,
               // gap 1.7: carry the server-minted SPE id back so the mount is no longer transient
               // (empty speDriveItemId) — a second Save now targets the real drive-item.
               speDriveItemId:
@@ -717,7 +842,18 @@ export function composeWorkspaceReducer(
           : state.documentRef,
       };
     case 'saveFailed':
-      return { ...state, status: 'loaded', errorMessage: action.errorMessage, saveErrorIsLock: action.isLock ?? false };
+      return {
+        ...state,
+        // FR-S09 item 1 (r8 task 016): only a save that was actually RUNNING returns to 'loaded'.
+        // This used to force 'loaded' unconditionally, which was harmless while the only dispatchers
+        // were the in-flight save path (status 'saving') and its pre-flight guards (status 'loaded').
+        // Task 016 gives the entry guards a voice, and one of them fires while the document is still
+        // LOADING — forcing 'loaded' there would tell the workspace the load had finished and swap a
+        // spinner for a half-mounted editor. A refusal must not move the state machine.
+        status: state.status === 'saving' ? 'loaded' : state.status,
+        errorMessage: action.errorMessage,
+        saveErrorIsLock: action.isLock ?? false,
+      };
     case 'reset':
       return INITIAL_STATE;
     case 'importWarnings':
@@ -726,6 +862,13 @@ export function composeWorkspaceReducer(
     // dispatches this; null (a clean save) clears the stale banner.
     case 'saveDegradationWarnings':
       return { ...state, saveDegradationWarnings: action.warnings };
+    // UAT-13: the create-on-save succeeded but the parent-association write failed (or a retry just
+    // succeeded/failed). Non-null → surface the orphan banner; null → clear it (retry succeeded).
+    case 'associationWarning':
+      return {
+        ...state,
+        associationWarning: action.documentRecordId ? { documentRecordId: action.documentRecordId } : null,
+      };
     case 'pendingAssistantInsert':
       return { ...state, pendingAssistantInsert: action.payload };
     case 'clearPendingAssistantInsert':

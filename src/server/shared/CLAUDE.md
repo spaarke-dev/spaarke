@@ -46,10 +46,11 @@ namespace Spaarke.Everything
 
 ### No Circular Dependencies
 ```
-Spaarke.Core       <- No dependencies on other Spaarke libraries
-Spaarke.Dataverse  <- Can depend on Spaarke.Core
+Spaarke.Dataverse  <- Base layer: no ProjectReferences to other Spaarke libs
+Spaarke.Core       <- References Spaarke.Dataverse (actual direction at head; corrected 2026-08-14, r3 task 040/034 — the previous doc had this inverted)
 Sprk.Bff.Api       <- Can depend on both
 ```
+> Enforced by `tests/Spaarke.ArchTests/LayerDependencyTests.cs` (Dataverse is base + acyclic; no shared lib references the BFF app). If a future refactor makes Core the base again, update BOTH this note and that fitness function together.
 
 ### From ADR-010: DI Minimalism
 ```csharp

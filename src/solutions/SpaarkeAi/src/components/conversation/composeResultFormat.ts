@@ -127,17 +127,39 @@ export function formatCompareToPlaybookResult(payload: unknown): string | null {
 }
 
 // ---------------------------------------------------------------------------
-// compose-draft-alternative — { target_text, new_text, match_mode, rationale, sources[] }
+// compose-draft-alternative — { target_para_id, new_text, rationale, sources[] }
+//
+// spaarkeai-compose-r8 task 052: the detector formerly required the triad
+// { target_text, new_text, match_mode }. The four compose EDIT Actions no longer ASK the model for
+// target_text or match_mode (text matching is not a placement channel for an AI edit — ADR-049 I-7),
+// so that triad went permanently incomplete and this renderer silently returned null for every new
+// edit result — the Assistant's confirmation line would have vanished. The shape test is now
+// `new_text` PLUS a target of either vintage (`target_para_id` for a post-052 payload,
+// `target_text` for a replayed legacy one), which stays as specific as before: no other compose
+// payload carries `new_text` alongside a target field.
 // ---------------------------------------------------------------------------
 
-/** Detects + renders a `compose-draft-alternative` result, or `null` if the shape doesn't match. */
+/**
+ * Detects + renders a `compose-draft-alternative` result, or `null` if the shape doesn't match.
+ *
+ * spaarkeai-compose-r8 task 053b — THE TARGET TEST IS KEY PRESENCE, NOT TRUTHINESS. The Action's
+ * output schema declares `target_para_id` as `["string","null"]` and REQUIRES the key, so an edit the
+ * model could not anchor arrives as `{ target_para_id: null, new_text: "…" }`. Under the previous
+ * `asNonEmptyString(...) !== null` test that payload matched NO formatter, fell through to the
+ * ```json``` fence, and the user was shown raw JSON for exactly the edit that most needed explaining.
+ * The shape test stays just as specific: `new_text` PLUS a DECLARED target field (of either vintage).
+ * No other compose payload carries `new_text` alongside one, and this formatter runs last, so the four
+ * ahead of it have already claimed their own shapes.
+ */
 export function formatDraftAlternativeResult(payload: unknown): string | null {
   const record = asRecord(payload);
   if (record === null) return null;
   const newText = asNonEmptyString(record.new_text);
-  const targetText = asNonEmptyString(record.target_text);
-  const matchMode = asNonEmptyString(record.match_mode);
-  if (newText === null || targetText === null || matchMode === null) return null;
+  const declaresTarget =
+    Object.prototype.hasOwnProperty.call(record, "target_para_id") ||
+    Object.prototype.hasOwnProperty.call(record, "target_ref") ||
+    asNonEmptyString(record.target_text) !== null;
+  if (newText === null || !declaresTarget) return null;
 
   const rationale = asNonEmptyString(record.rationale);
   const parts: string[] = ['**Drafted an alternative clause.**'];

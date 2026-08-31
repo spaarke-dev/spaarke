@@ -9,7 +9,7 @@
 You have a PCF (or any host-context surface) that needs to display a count of related records as a badge overlay on an icon — the "17 new to-dos" / "3 memos" / "5 attachments" pattern. Count fetched via `Xrm.WebApi` (host-context surface, ADR-028 boundary — no BFF).
 
 Typical uses:
-- Toolbar-icon counters on record-header PCFs (`MatterHeaderPcf`, future `ProjectHeaderPcf` / `InvoiceHeaderPcf` / `EventHeaderPcf`)
+- Toolbar-icon counters on the Record Header PCF (`MatterHeaderPcf` today; generalized to one configurable control per `projects/record-header-and-notepad-r2/design.md` — there is no per-entity `ProjectHeaderPcf` / `InvoiceHeaderPcf`)
 - Any icon that says "look here — there are N things"
 
 ## Read These Files

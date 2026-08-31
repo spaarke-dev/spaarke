@@ -2,52 +2,48 @@ using Microsoft.AspNetCore.Mvc;
 using Sprk.Bff.Api.Infrastructure.Auth;
 using Sprk.Bff.Api.Infrastructure.Errors;
 using Sprk.Bff.Api.Infrastructure.Graph;
-using Sprk.Bff.Api.Models;
 using Sprk.Bff.Api.Models.Ai;
 using Sprk.Bff.Api.Services.Ai;
 
 namespace Sprk.Bff.Api.Api;
 
+/// <summary>
+/// OBO (delegated) SPE upload surface.
+///
+/// RETIRED 2026-08-26 by unified-access-control-r2 task 071 — FOUR drive/container-keyed routes were
+/// DELETED because they read or mutated EXISTING SPE content with no per-document authorization
+/// decision, and gated document-id-keyed equivalents already ship:
+///
+///   GET    /api/obo/containers/{id}/children              -> no caller ever existed; also error-OPEN
+///                                                            (turned a Graph 404 into 200 {"items":[]}).
+///   PATCH  /api/obo/drives/{driveId}/items/{itemId}       -> DocumentOperationsEndpoints (gated "write")
+///   GET    /api/obo/drives/{driveId}/items/{itemId}/content -> FileAccessEndpoints (8 routes, gated "read")
+///   DELETE /api/obo/drives/{driveId}/items/{itemId}       -> DocumentOperationsEndpoints (gated "delete")
+///
+/// These were OBO, so SPE denied any caller lacking a container permission — and under the broker-only
+/// decision no user is ever granted one. They were a BYPASS BY CONSTRUCTION of the per-document gate,
+/// not a live hole. Do NOT re-add them: the id-keyed routes above are the supported surface.
+///
+/// WHY THE REMAINING THREE ROUTES ARE STILL UNGATED (escalated, NOT an oversight).
+/// The three routes below CREATE content. At the moment of authorization no `sprk_document` row exists
+/// — every wizard's ordering is `uploadFilesToSpe` THEN `createDocumentRecords` — so there is nothing
+/// for `RetrievePrincipalAccess` to answer about, and their authorization object is the OWNING RECORD /
+/// container, not a document. Adding <see cref="Api.Filters.DocumentAuthorizationFilter"/> here would
+/// resolve `{id}` to a container id, return None, and deny 100% of uploads.
+///
+/// That seam is owned by tasks 075 (record-aware container resolver) + 076 (route every call site
+/// through it), and must land together with task 073, which gates the app-only twin
+/// `PUT /api/containers/{containerId}/files/{*path}` — both container-upload routes should end up
+/// behind ONE decision. Task 074's route-authorization ArchTest must carry a NAMED WAIVER for these
+/// three until then.
+///
+/// Full caller inventory + per-route reasoning:
+/// `projects/unified-access-control-r2/notes/task-071-obo-route-retirement.md`.
+/// </summary>
 public static class OBOEndpoints
 {
     public static IEndpointRouteBuilder MapOBOEndpoints(this IEndpointRouteBuilder app)
     {
-        // GET: list children (as user) with paging, ordering, and metadata
-        app.MapGet("/api/obo/containers/{id}/children", async (
-            string id,
-            int? top,
-            int? skip,
-            string? orderBy,
-            string? orderDir,
-            HttpContext ctx,
-            [FromServices] SpeFileStore speFileStore,
-            CancellationToken ct) =>
-        {
-            try
-            {
-                var parameters = new Sprk.Bff.Api.Models.ListingParameters(
-                    Top: top ?? 50,
-                    Skip: skip ?? 0,
-                    OrderBy: orderBy ?? "name",
-                    OrderDir: orderDir ?? "asc"
-                );
-
-                var result = await GraphCallScope.Run(
-                    () => speFileStore.ListChildrenAsUserAsync(ctx, id, parameters, ct),
-                    "obo.children.list");
-                return TypedResults.Ok(result);
-            }
-            catch (UnauthorizedAccessException)
-            {
-                return TypedResults.Unauthorized();
-            }
-            catch (SpaarkeStorageException ex)
-            {
-                return ex.ToProblemDetails();
-            }
-        }).RequireRateLimiting("graph-read");
-
-
         // PUT: small upload (as user). Post-upload RAG indexing is triggered by the
         // wizard client via `@spaarke/sdap-client.SdapApiClient.indexFile()` after a
         // successful PUT — see project `sdap-client-shared-library-fix-r1` and the
@@ -99,246 +95,48 @@ public static class OBOEndpoints
                     statusCode: 500
                 );
             }
-        }).RequireRateLimiting("graph-write");
+        }).RequireRateLimiting("graph-write").RequireAuthorization();
 
 
-        // POST: create upload session (as user)
-        app.MapPost("/api/obo/drives/{driveId}/upload-session", async (
-            string driveId,
-            string path,
-            string? conflictBehavior,
-            HttpContext ctx,
-            [FromServices] SpeFileStore speFileStore,
-            CancellationToken ct) =>
-        {
-            if (string.IsNullOrWhiteSpace(path))
-            {
-                return ProblemDetailsHelper.ValidationError("path query parameter is required");
-            }
+        // ─────────────────────────────────────────────────────────────────────────────────────────
+        // DELETED 2026-08-27 (task 076): POST /api/obo/drives/{driveId}/upload-session and
+        // PUT /api/obo/upload-session/chunk — the chunked OBO pair.
+        //
+        // DELETED rather than converted to the record-keyed contract, because the path was DEAD and
+        // giving a dead path a new contract is worse than removing it. Verified first-hand rather
+        // than taken from the task POML:
+        //
+        //   1. The pair's only client was Spaarke.SdapClient's UploadOperation.createUploadSession,
+        //      which FIRST called `GET /api/obo/containers/{id}/drive` to obtain a drive id.
+        //   2. That route is mapped NOWHERE in the BFF — grep of src/server/** returns three prose
+        //      comments and zero Map* calls. So createUploadSession threw 'Failed to get container
+        //      drive' on the 404 and never reached the upload-session call at all.
+        //   3. The chunk route was deader still: even that client never called it. Its uploadChunk
+        //      PUT went straight to Graph's own `session.uploadUrl`, not to the BFF.
+        //
+        // ⚠️ WHAT THIS DOES NOT FIX. Files >= 4 MiB have NO working upload path, before or after
+        // this deletion. PathValidator.SmallUploadMaxBytes caps the small route at 4 MiB
+        // (enforced at UploadSessionManager.cs:131) and the chunked path was the only alternative.
+        // The client's own SdapApiClient.uploadFile routes >= 4 MiB to the dead path, so large
+        // uploads fail today with a misleading 'Failed to get container drive'. Deleting makes the
+        // failure honest; it does not make large uploads work. A record-keyed upload-session route
+        // is follow-up work and is NOT in task 076's scope — see
+        // projects/unified-access-control-r2/notes/task-076-record-keyed-upload-contract.md.
+        //
+        // Both routes carried Pending waivers in RouteAuthorizationGuardTests owned by "073/075/076";
+        // those are deleted with them, because the routes are gone — not because the rule relaxed.
+        // ─────────────────────────────────────────────────────────────────────────────────────────
 
-            try
-            {
-                var behavior = Sprk.Bff.Api.Models.ConflictBehaviorExtensions.ParseConflictBehavior(conflictBehavior);
-                var session = await GraphCallScope.Run(
-                    () => speFileStore.CreateUploadSessionAsUserAsync(ctx, driveId, path, behavior, ct),
-                    "obo.upload.session.create");
-
-                return session == null
-                    ? TypedResults.Problem(statusCode: 500, title: "Failed to create upload session")
-                    : TypedResults.Ok(session);
-            }
-            catch (UnauthorizedAccessException)
-            {
-                return TypedResults.Unauthorized();
-            }
-            catch (SpaarkeStorageException ex)
-            {
-                return ex.ToProblemDetails();
-            }
-        }).RequireRateLimiting("graph-write");
-
-        // PUT: upload chunk (as user)
-        app.MapPut("/api/obo/upload-session/chunk", async (
-            HttpRequest request,
-            HttpContext ctx,
-            [FromServices] SpeFileStore speFileStore,
-            CancellationToken ct) =>
-        {
-            // Get required headers
-            var uploadSessionUrl = request.Headers["Upload-Session-Url"].FirstOrDefault();
-            var contentRange = request.Headers["Content-Range"].FirstOrDefault();
-
-            if (string.IsNullOrWhiteSpace(uploadSessionUrl))
-            {
-                return ProblemDetailsHelper.ValidationError("Upload-Session-Url header is required");
-            }
-
-            if (string.IsNullOrWhiteSpace(contentRange))
-            {
-                return ProblemDetailsHelper.ValidationError("Content-Range header is required");
-            }
-
-            try
-            {
-                var userToken = TokenHelper.ExtractBearerToken(ctx);
-
-                // Read chunk data from request body
-                using var ms = new MemoryStream();
-                await request.Body.CopyToAsync(ms, ct);
-                var chunkData = ms.ToArray();
-
-                if (chunkData.Length == 0)
-                {
-                    return ProblemDetailsHelper.ValidationError("Request body cannot be empty");
-                }
-
-                var result = await GraphCallScope.Run(
-                    () => speFileStore.UploadChunkAsUserAsync(userToken, uploadSessionUrl, contentRange, chunkData, ct),
-                    "obo.upload.chunk");
-
-                return result.StatusCode switch
-                {
-                    200 => TypedResults.Ok(result.CompletedItem), // Upload complete
-                    201 => TypedResults.Created("", result.CompletedItem), // Upload complete
-                    202 => TypedResults.Accepted("", result.CompletedItem), // More chunks expected
-                    400 => TypedResults.BadRequest("Invalid chunk or Content-Range"),
-                    413 => TypedResults.Problem(statusCode: 413, title: "Chunk too large"),
-                    499 => TypedResults.Problem(statusCode: 499, title: "Client closed request"),
-                    _ => TypedResults.Problem(statusCode: 500, title: "Upload failed")
-                };
-            }
-            catch (UnauthorizedAccessException)
-            {
-                return TypedResults.Unauthorized();
-            }
-            catch (SpaarkeStorageException ex)
-            {
-                return ex.ToProblemDetails();
-            }
-            catch (Exception)
-            {
-                return TypedResults.Problem(statusCode: 500, title: "Upload chunk failed");
-            }
-        }).RequireRateLimiting("graph-write");
-
-        // PATCH: update item (rename/move)
-        app.MapPatch("/api/obo/drives/{driveId}/items/{itemId}", async (
-            string driveId,
-            string itemId,
-            UpdateFileRequest request,
-            HttpContext ctx,
-            [FromServices] SpeFileStore speFileStore,
-            CancellationToken ct) =>
-        {
-            if (string.IsNullOrWhiteSpace(itemId))
-            {
-                return ProblemDetailsHelper.ValidationError("itemId is required");
-            }
-
-            if (request == null || (string.IsNullOrEmpty(request.Name) && string.IsNullOrEmpty(request.ParentReferenceId)))
-            {
-                return ProblemDetailsHelper.ValidationError("At least one of 'name' or 'parentReferenceId' must be provided");
-            }
-
-            try
-            {
-                var updatedItem = await GraphCallScope.Run(
-                    () => speFileStore.UpdateItemAsUserAsync(ctx, driveId, itemId, request, ct),
-                    "obo.item.update");
-
-                return updatedItem == null
-                    ? TypedResults.NotFound()
-                    : TypedResults.Ok(updatedItem);
-            }
-            catch (UnauthorizedAccessException)
-            {
-                return TypedResults.Unauthorized();
-            }
-            catch (SpaarkeStorageException ex)
-            {
-                return ex.ToProblemDetails();
-            }
-        }).RequireRateLimiting("graph-write");
-
-
-        // GET: download content with range support (enhanced)
-        app.MapGet("/api/obo/drives/{driveId}/items/{itemId}/content", async (
-            string driveId,
-            string itemId,
-            HttpRequest request,
-            HttpContext ctx,
-            [FromServices] SpeFileStore speFileStore,
-            CancellationToken ct) =>
-        {
-            if (string.IsNullOrWhiteSpace(itemId))
-            {
-                return ProblemDetailsHelper.ValidationError("itemId is required");
-            }
-
-            try
-            {
-                // Parse Range header
-                var rangeHeader = request.Headers["Range"].FirstOrDefault();
-                var range = Sprk.Bff.Api.Models.RangeHeader.Parse(rangeHeader);
-
-                // Parse If-None-Match header (for ETag-based caching)
-                var ifNoneMatch = request.Headers["If-None-Match"].FirstOrDefault();
-
-                var fileContent = await GraphCallScope.Run(
-                    () => speFileStore.DownloadFileWithRangeAsUserAsync(ctx, driveId, itemId, range, ifNoneMatch, ct),
-                    "obo.file.download.range");
-
-                if (fileContent == null)
-                {
-                    return range != null
-                        ? TypedResults.Problem(statusCode: 416, title: "Range Not Satisfiable") // 416
-                        : TypedResults.NotFound();
-                }
-
-                // Handle ETag match (304 Not Modified)
-                if (fileContent.ContentLength == 0 && fileContent.Content == Stream.Null)
-                {
-                    return TypedResults.StatusCode(304); // Not Modified
-                }
-
-                var response = fileContent.IsRangeRequest
-                    ? TypedResults.Stream(fileContent.Content, fileContent.ContentType, enableRangeProcessing: true)
-                    : TypedResults.Stream(fileContent.Content, fileContent.ContentType);
-
-                // Set headers
-                ctx.Response.Headers.ETag = $"\"{fileContent.ETag}\"";
-                ctx.Response.Headers.AcceptRanges = "bytes";
-
-                if (fileContent.IsRangeRequest)
-                {
-                    ctx.Response.StatusCode = 206; // Partial Content
-                    ctx.Response.Headers.ContentRange = fileContent.ContentRangeHeader;
-                }
-
-                return response;
-            }
-            catch (UnauthorizedAccessException)
-            {
-                return TypedResults.Unauthorized();
-            }
-            catch (SpaarkeStorageException ex)
-            {
-                return ex.ToProblemDetails();
-            }
-            catch (Exception)
-            {
-                return TypedResults.Problem(statusCode: 500, title: "Download failed");
-            }
-        }).RequireRateLimiting("graph-read");
-
-        // DELETE: delete item (as user)
-        app.MapDelete("/api/obo/drives/{driveId}/items/{itemId}", async (
-            string driveId,
-            string itemId,
-            HttpContext ctx,
-            [FromServices] SpeFileStore speFileStore,
-            CancellationToken ct) =>
-        {
-            try
-            {
-                await GraphCallScope.Run(
-                    () => speFileStore.DeleteItemAsUserAsync(ctx, driveId, itemId, ct),
-                    "obo.item.delete");
-                return TypedResults.NoContent();
-            }
-            catch (UnauthorizedAccessException)
-            {
-                return TypedResults.Unauthorized();
-            }
-            catch (SpaarkeStorageException ex)
-            {
-                return ex.ToProblemDetails();
-            }
-            catch (Exception)
-            {
-                return TypedResults.Problem(statusCode: 500, title: "Delete failed");
-            }
-        }).RequireRateLimiting("graph-write");
+        // ─────────────────────────────────────────────────────────────────────────────────────────
+        // DELETED 2026-08-26 (task 071): PATCH /api/obo/drives/{driveId}/items/{itemId},
+        // GET /api/obo/drives/{driveId}/items/{itemId}/content, and
+        // DELETE /api/obo/drives/{driveId}/items/{itemId}.
+        //
+        // All three reached EXISTING SPE content keyed by (driveId, itemId) with no per-document
+        // authorization decision. Zero production callers (grep-evidenced). Use the gated
+        // document-id-keyed routes instead: FileAccessEndpoints (read) and
+        // DocumentOperationsEndpoints (write / delete). See the class summary above.
+        // ─────────────────────────────────────────────────────────────────────────────────────────
 
         return app;
     }

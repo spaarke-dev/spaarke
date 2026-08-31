@@ -34,6 +34,82 @@ const TWO_WARNINGS = [
   { type: 'ignored', message: 'b' },
 ];
 
+describe('ComposeBannerStack — UAT-12 annotation-read-failed warning (do not treat as clean)', () => {
+  it('renders the honest "tracked changes and comments couldn\'t be read" banner', () => {
+    renderStack({ annotationReadFailed: true });
+    expect(screen.getByTestId('compose-workspace-annotation-read-failed-banner')).toBeInTheDocument();
+    expect(screen.getByText("Tracked changes and comments couldn't be read")).toBeInTheDocument();
+  });
+
+  it('renders nothing for the banner when annotationReadFailed is false/omitted', () => {
+    renderStack({ annotationReadFailed: false });
+    expect(screen.queryByTestId('compose-workspace-annotation-read-failed-banner')).not.toBeInTheDocument();
+  });
+
+  it('hides the banner on dismiss', async () => {
+    const user = userEvent.setup();
+    renderStack({ annotationReadFailed: true });
+    await user.click(screen.getByTestId('compose-workspace-annotation-read-failed-dismiss'));
+    expect(screen.queryByTestId('compose-workspace-annotation-read-failed-banner')).not.toBeInTheDocument();
+  });
+});
+
+describe('ComposeBannerStack — UAT save-driven "not saved yet" notice', () => {
+  it('renders the doc-only notice when no review ran', () => {
+    renderStack({ unsavedDocumentNotice: { reviewRan: false } });
+    expect(screen.getByTestId('compose-workspace-unsaved-notice')).toBeInTheDocument();
+    expect(screen.getByText('Not saved yet')).toBeInTheDocument();
+    expect(screen.getByTestId('compose-workspace-unsaved-notice').textContent).toContain(
+      'This document hasn’t been saved yet'
+    );
+  });
+
+  it('mentions the analysis when a review ran', () => {
+    renderStack({ unsavedDocumentNotice: { reviewRan: true } });
+    expect(screen.getByTestId('compose-workspace-unsaved-notice').textContent).toContain(
+      'This document and its analysis haven’t been saved yet'
+    );
+  });
+
+  it('renders nothing when the document is saved (notice null)', () => {
+    renderStack({ unsavedDocumentNotice: null });
+    expect(screen.queryByTestId('compose-workspace-unsaved-notice')).not.toBeInTheDocument();
+  });
+});
+
+describe('ComposeBannerStack — UAT-13 association-orphan warning (saved but not filed)', () => {
+  it('renders the honest "not filed under its matter" banner with a Retry action', () => {
+    const onRetry = jest.fn();
+    renderStack({ associationWarning: { documentRecordId: 'doc-1' }, onRetryAssociation: onRetry });
+
+    expect(screen.getByTestId('compose-workspace-association-warning-banner')).toBeInTheDocument();
+    expect(screen.getByText('Saved, but not filed under its matter')).toBeInTheDocument();
+    expect(screen.getByTestId('compose-workspace-association-warning-retry')).toBeInTheDocument();
+  });
+
+  it('invokes onRetryAssociation when Retry is clicked', async () => {
+    const user = userEvent.setup();
+    const onRetry = jest.fn();
+    renderStack({ associationWarning: { documentRecordId: 'doc-1' }, onRetryAssociation: onRetry });
+
+    await user.click(screen.getByTestId('compose-workspace-association-warning-retry'));
+    expect(onRetry).toHaveBeenCalledTimes(1);
+  });
+
+  it('hides the banner on dismiss', async () => {
+    const user = userEvent.setup();
+    renderStack({ associationWarning: { documentRecordId: 'doc-1' }, onRetryAssociation: jest.fn() });
+
+    await user.click(screen.getByTestId('compose-workspace-association-warning-dismiss'));
+    expect(screen.queryByTestId('compose-workspace-association-warning-banner')).not.toBeInTheDocument();
+  });
+
+  it('renders nothing for the banner when associationWarning is null', () => {
+    renderStack({ associationWarning: null });
+    expect(screen.queryByTestId('compose-workspace-association-warning-banner')).not.toBeInTheDocument();
+  });
+});
+
 describe('ComposeBannerStack — DEF-15 dismissible simplification warning', () => {
   // FR-21 (R3 carry-in): dismissal is now content-signature-keyed sessionStorage (see
   // ComposeBannerStack.tsx). Several `it`s below reuse the SAME `TWO_WARNINGS` content, so the
@@ -277,9 +353,28 @@ describe('ComposeBannerStack — task 012 save-degradation banner (026-F5)', () 
     // … but the SAVE-degradation banner still renders — the 026-F5 fix.
     const banner = screen.getByTestId('compose-workspace-save-degradation-banner');
     expect(banner).toBeInTheDocument();
-    expect(screen.getByText('Some content was simplified when saving')).toBeInTheDocument();
+    // UAT-07b (committed earlier) renamed the banner TITLE to "Some formatting was simplified when
+    // saving"; this assertion was left on the old "content" wording. Match the shipped title.
+    expect(screen.getByText('Some formatting was simplified when saving')).toBeInTheDocument();
     expect(banner.textContent).toContain('A text box was converted to regular text.');
     expect(banner.textContent).toContain("A comment's anchor could not be placed; the comment text was kept. (×2)");
+  });
+
+  // UAT-S-01 (2026-08-21, owner UAT of task 017). This banner renders ONLY from the server's response
+  // to a COMPLETED save (ComposeWorkspace dispatches `saveDegradationWarnings` from `payload.degradation‑
+  // Warnings` on the success branch, and the post-save re-mount carries it forward). Its trailer used to
+  // read "The original file is unchanged until you save." — false at every moment it was on screen: the
+  // bytes were already written and already carried the simplification being described. The owner saw
+  // exactly this in dev. Assert the honest trailer AND assert the false claim is gone, so the old copy
+  // cannot come back.
+  it('does NOT claim the original file is unchanged — this banner only renders AFTER a completed save', () => {
+    renderStack({ saveDegradationWarnings: SAVE_WARNINGS });
+
+    const banner = screen.getByTestId('compose-workspace-save-degradation-banner');
+    expect(banner.textContent).not.toMatch(/original file is unchanged/i);
+    expect(banner.textContent).not.toMatch(/until you save/i);
+    expect(banner.textContent).toContain('These changes are in the version you just saved.');
+    expect(banner.textContent).toMatch(/version history/i);
   });
 
   it('falls back to the generic "(code ×N)" copy for an unknown code', () => {
@@ -287,6 +382,23 @@ describe('ComposeBannerStack — task 012 save-degradation banner (026-F5)', () 
 
     const banner = screen.getByTestId('compose-workspace-save-degradation-banner');
     expect(banner.textContent).toContain('Some content was simplified when saving (mystery-degradation ×3).');
+  });
+
+  it('renders friendly copy (not the raw code) for previously-cryptic degradation codes (copy-gap 2026-08-18)', () => {
+    renderStack({
+      saveDegradationWarnings: [
+        { code: 'unrepresented-footnote-reference', count: 1 },
+        { code: 'field-flattened-to-text', count: 1 },
+        { code: 'hard-tier-sdt-flattened', count: 1 },
+      ],
+    });
+    const banner = screen.getByTestId('compose-workspace-save-degradation-banner');
+    expect(banner.textContent).toContain("A footnote couldn't be carried into the saved document.");
+    expect(banner.textContent).toContain('was saved as plain text and will no longer update automatically.');
+    expect(banner.textContent).toContain('A content control');
+    // The raw codes must NOT leak into the user-facing copy.
+    expect(banner.textContent).not.toContain('unrepresented-footnote-reference');
+    expect(banner.textContent).not.toContain('field-flattened-to-text');
   });
 
   it('renders nothing for null or an empty set (a clean save clears the banner)', () => {
@@ -454,5 +566,68 @@ describe('ComposeBannerStack — "Opened from PDF" honest-lossiness notice (task
     expect(banner.textContent).toMatch(/could not be placed/i);
     // Friendly copy exists for every code — the raw kebab code never leaks into the sentence.
     expect(banner.textContent).not.toMatch(/pdf-intake-fixed-layout-reflowed/);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// FR-C07 (spaarkeai-compose-r8 task 053) — "wording differs slightly" is not a state this rail can
+// render. The banner is the ONE place that sentence was ever produced (see
+// `projects/spaarkeai-compose-r8/notes/wording-differs-elimination-trace.md`), so the elimination is
+// asserted HERE, over the CLOSED set of shapes `PendingRedlineError` can take: 3 kinds × 2 sources ×
+// single/batched. A test over the closed set is the difference between "the string is gone from the
+// file" (a grep, which a future branch can undo) and "no reachable input produces it".
+// ---------------------------------------------------------------------------
+describe('ComposeBannerStack — FR-C07: the unresolved-target banner never blames the wording', () => {
+  const KINDS = ['not_found', 'ambiguous', 'target_deleted'] as const;
+  const SOURCES = ['anchored', 'legacy-replay'] as const;
+
+  function redlineError(
+    kind: (typeof KINDS)[number],
+    source: (typeof SOURCES)[number],
+    batched: boolean
+  ): NonNullable<ComposeBannerStackProps['pendingRedlineError']> {
+    return {
+      ledgerRef: 'b1@t1',
+      kind,
+      source,
+      targetText: 'clause 4.2',
+      matchCount: kind === 'ambiguous' ? 3 : 0,
+      ...(batched ? { failedCount: 2, totalCount: 5 } : {}),
+    };
+  }
+
+  it.each(
+    KINDS.flatMap(kind => SOURCES.flatMap(source => [false, true].map(batched => [kind, source, batched] as const)))
+  )('renders a specific, non-empty message for %s / %s (batched: %s)', (kind, source, batched) => {
+    renderStack({ pendingRedlineError: redlineError(kind, source, batched) });
+    const text = screen.getByTestId('compose-redline-error').textContent ?? '';
+
+    // The eliminated state, in every shape that can reach this banner.
+    expect(text).not.toMatch(/wording differs/i);
+    expect(text).not.toMatch(/differs slightly/i);
+    // Still honest about the outcome — a message that says nothing is not an improvement.
+    expect(text.length).toBeGreaterThan(40);
+    expect(text).toMatch(/Nothing was changed|no longer exist|won't guess|Select the exact passage/i);
+  });
+
+  it('an ANCHORED miss blames the named paragraph, never the wording (the fabrication FR-C07 removes)', () => {
+    renderStack({ pendingRedlineError: redlineError('not_found', 'anchored', false) });
+    const text = screen.getByTestId('compose-redline-error').textContent ?? '';
+    expect(text).toContain("named a paragraph or section this document doesn't have");
+    expect(text).toContain('clause 4.2');
+  });
+
+  it('a REPLAYED miss explains the real cause and offers the remedy that works', () => {
+    renderStack({ pendingRedlineError: redlineError('not_found', 'legacy-replay', false) });
+    const text = screen.getByTestId('compose-redline-error').textContent ?? '';
+    expect(text).toContain('came from an earlier session');
+    expect(text).toContain('re-run it');
+  });
+
+  it('a REPLAYED ambiguity says it will not guess (UAT-21 in copy)', () => {
+    renderStack({ pendingRedlineError: redlineError('ambiguous', 'legacy-replay', false) });
+    const text = screen.getByTestId('compose-redline-error').textContent ?? '';
+    expect(text).toContain('appears in 3 places');
+    expect(text).toContain("we won't guess");
   });
 });

@@ -39,6 +39,18 @@ public static class TelemetryModule
                 // since task 022 but was never AddMeter'd, so eventpath.execution /
                 // eventpath.bound_denial were silently dropped from the App Insights export.
                 metrics.AddMeter(Sprk.Bff.Api.Services.Ai.EventRules.EventRulesTelemetry.MeterName);
+                // Cosmos persistence write-failure counter (spaarkeai-compose-r7 R-5, 2026-08-18):
+                // cosmos.write_failures{container} makes a SILENT total write outage (swallowed at
+                // Warning per ADR-015 D-06) alertable. Without this, the ttl:null → 400 regression
+                // froze History + memory for 11 days with no failing request and no read signal.
+                metrics.AddMeter(Sprk.Bff.Api.Telemetry.CosmosPersistenceTelemetry.MeterName);
+                // Compose save-outcome counter (spaarkeai-compose-r8 task 013, FR-S10): one increment
+                // per terminal save state, tagged outcome + bounded cause. R5/R6/R7 each shipped with
+                // the save button dead for some document class and the discovery mechanism was owner
+                // UAT — there was no metric that could have gone red. MUST stay registered: an
+                // unregistered meter is silently dropped from the App Insights export (the trap the AI
+                // redesign's task 054 found for the Event Rules meter, which existed unregistered).
+                metrics.AddMeter(Sprk.Bff.Api.Telemetry.ComposeSaveTelemetry.MeterName);
             })
             .WithTracing(tracing =>
             {
@@ -72,7 +84,9 @@ public static class TelemetryModule
         // Resilient Search Client
         services.AddSingleton<Sprk.Bff.Api.Infrastructure.Resilience.IResilientSearchClient,
             Sprk.Bff.Api.Infrastructure.Resilience.ResilientSearchClient>();
-        Console.WriteLine("\u2713 Circuit breaker registry enabled");
+        // D9-01 (config-deployment): removed Console.WriteLine startup echo that bypassed the
+        // ILogger/OTel pipeline. This runs at service-registration time (pre-host-build) where no
+        // ILogger is available; the registration itself is the source of truth, so the echo was noise.
 
         // Health Checks - Redis availability monitoring
         var redisEnabled = configuration.GetValue<bool>("Redis:Enabled");

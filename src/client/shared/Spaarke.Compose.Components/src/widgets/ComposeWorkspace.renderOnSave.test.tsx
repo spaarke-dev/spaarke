@@ -25,12 +25,19 @@
  *      `buildContentModel()` and NO separate `comments` field (the editor folds threads into the
  *      model now).
  *
+ * 7. NAME GATE (UAT-03, r8 task 018) — every create-on-save of a never-persisted document (born-in-
+ *    editor AND assistant-upload) is gated by the first-save name modal: `requestSave` posts NOTHING
+ *    until it is confirmed, and the confirmed name threads into `displayName`. Added when this suite's
+ *    two create-on-save tests were found red on HEAD — commit `cdb1dbcb4` (2026-08-18) widened
+ *    `saveNeedsName` to every never-persisted doc and did not update them. A second save on the
+ *    now-persisted doc must NOT re-prompt.
+ *
  * ADR-038: a client behavior test at the save-orchestration seam; mocks the network at the
  * `@spaarke/auth` boundary + stubs a heavy child — NOT a banned Mock<HttpMessageHandler>/DI test.
  */
 
 import * as React from 'react';
-import { render, screen, waitFor, act } from '@testing-library/react';
+import { render, screen, waitFor, act, fireEvent } from '@testing-library/react';
 import { FluentProvider, webLightTheme } from '@fluentui/react-components';
 
 // Fluent's MessageBar uses ResizeObserver, which jsdom lacks.
@@ -117,15 +124,13 @@ const authenticatedFetchMock = jest.fn(async (url: string, init?: RequestInit): 
     saveRequests.push({ url, body: JSON.parse(String(init?.body ?? '{}')) as Record<string, unknown> });
     if (config.failNextCreateOnSave) {
       config.failNextCreateOnSave = false; // one-shot: the retry succeeds
-      return {
-        ok: false,
-        status: 500,
-        json: async () => ({ detail: 'transient create failure' }),
-        text: async () => 'transient create failure',
-        clone() {
-          return this;
-        },
-      } as unknown as Response;
+      // FR-S01 (r8 task 010): a failure is THROWN, never resolved as a non-ok Response —
+      // `authenticatedFetch` returns only when `response.ok` (see Spaarke.Auth/src/authenticatedFetch.ts).
+      // Thrown lazily via requireMock so the class is the same one ComposeWorkspace imports.
+      const { ApiError } = jest.requireMock('@spaarke/auth') as {
+        ApiError: new (message: string, status: number) => Error;
+      };
+      throw new ApiError('transient create failure', 500);
     }
     return saveResponse('spe-created-1');
   }
@@ -173,52 +178,73 @@ const authenticatedFetchMock = jest.fn(async (url: string, init?: RequestInit): 
       }),
     } as unknown as Response;
   }
-  return { ok: false, status: 404, json: async () => [], text: async () => '' } as unknown as Response;
+  // Session-ledger compose-outputs probe + everything else → benign 404, expressed the way
+  // `authenticatedFetch` actually expresses one (a thrown ApiError, not a resolved non-ok Response —
+  // FR-S01, r8 task 010). Verified behaviour-neutral for this suite.
+  const { ApiError } = jest.requireMock('@spaarke/auth') as {
+    ApiError: new (message: string, status: number) => Error;
+  };
+  throw new ApiError('Not found', 404);
 });
 
-jest.mock(
-  '@spaarke/auth',
-  () => ({
+jest.mock('@spaarke/auth', () => ({
+  authenticatedFetch: (...args: unknown[]) => authenticatedFetchMock(...(args as [string, RequestInit?])),
+  ApiError: class ApiError extends Error {
+    status: number;
+    constructor(message: string, status: number) {
+      super(message);
+      this.status = status;
+    }
+  },
+  useAuth: () => ({
+    isAuthenticated: true,
+    getAccessToken: async () => 'test-token',
     authenticatedFetch: (...args: unknown[]) => authenticatedFetchMock(...(args as [string, RequestInit?])),
-    ApiError: class ApiError extends Error {
-      status: number;
-      constructor(message: string, status: number) {
-        super(message);
-        this.status = status;
-      }
-    },
-    useAuth: () => ({
-      isAuthenticated: true,
-      getAccessToken: async () => 'test-token',
-      authenticatedFetch: (...args: unknown[]) => authenticatedFetchMock(...(args as [string, RequestInit?])),
-      tenantId: 'test-tenant',
-      logout: jest.fn(),
-    }),
-    // `virtual` lets this suite run even when the sibling lib's `dist/` is not built locally (the
-    // pre-existing condition that stops the other ComposeWorkspace.*.test suites in a fresh clone);
-    // with dist built (CI) the mock behaves identically.
+    tenantId: 'test-tenant',
+    logout: jest.fn(),
   }),
-  { virtual: true }
-);
+}));
 
-jest.mock(
-  '@spaarke/ui-components',
-  () => ({
-    createXrmNavigationService: () => ({ openLookup: jest.fn() }),
-    createXrmDataService: () => ({ retrieveRecord: jest.fn() }),
-    SendEmailDialog: () => null,
-    SprkModal: () => null,
-    RichFilePreviewDialog: () => null,
-  }),
-  { virtual: true }
-);
-jest.mock(
-  '@spaarke/document-operations',
-  () => ({
-    useDocumentActions: () => ({ openInWeb: jest.fn(), openInDesktop: jest.fn(), isActing: false }),
-  }),
-  { virtual: true }
-);
+jest.mock('@spaarke/ui-components', () => ({
+  // r8 task 052 (FR-C05) — ComposeWorkspace also mounts <ConfirmModal/> unconditionally for the
+  // stale-target "apply anyway?" question (controlled via its own `open` prop, same pattern as
+  // SprkModal/SendEmailDialog above). A no-op stub keeps this mock complete.
+  ConfirmModal: () => null,
+  createXrmNavigationService: () => ({ openLookup: jest.fn() }),
+  createXrmDataService: () => ({ retrieveRecord: jest.fn() }),
+  SendEmailDialog: () => null,
+  SprkModal: () => null,
+  RichFilePreviewDialog: () => null,
+  // FR-02 (task 030): ComposeWorkspace now mounts <ComposeSaveNameDialog/> (a FormModal preset) for
+  // the first create-on-save of an unnamed draft AND every Save As. Behavioral stub mirroring the
+  // preset contract (open gate, children, submit gated by submitDisabled/busy) so the fork test can
+  // drive the name modal to completion. Closed → renders nothing (the dialog itself returns <></>).
+  FormModal: (props: {
+    open: boolean;
+    onClose: () => void;
+    onSubmit: () => void;
+    title?: string;
+    submitLabel?: string;
+    submitDisabled?: boolean;
+    busy?: boolean;
+    children?: React.ReactNode;
+  }) =>
+    props.open ? (
+      <div role="dialog" aria-label={props.title} data-testid="mock-form-modal">
+        {props.children}
+        <button
+          onClick={props.onSubmit}
+          disabled={props.busy || props.submitDisabled}
+          data-testid="mock-form-modal-submit"
+        >
+          {props.submitLabel ?? 'Save'}
+        </button>
+      </div>
+    ) : null,
+}));
+jest.mock('@spaarke/document-operations', () => ({
+  useDocumentActions: () => ({ openInWeb: jest.fn(), openInDesktop: jest.fn(), isActing: false }),
+}));
 jest.mock('@spaarke/ai-widgets/events', () => ({
   useDispatchPaneEvent: () => jest.fn(),
   usePaneEvent: () => undefined,
@@ -375,6 +401,27 @@ async function clickSave(): Promise<void> {
   });
 }
 
+/**
+ * UAT-03 (owner 2026-08-18, commit cdb1dbcb4) — the name-modal gate on a FIRST create-on-save.
+ *
+ * `requestSave` (what the toolbar's onSave is wired to) opens `ComposeSaveNameDialog` and returns
+ * WITHOUT posting whenever the document has never been persisted (no `speDriveItemId` AND no
+ * `sprkDocumentId`) — that is every born-in-editor draft and every assistant-upload mount. The POST
+ * only happens when the modal submits. The modal seeds its field with the document's current file
+ * name, so `submitDisabled` is already false and confirming needs no typing.
+ *
+ * The PDF suite's forkNew test performs this same drive inline; this is that drive, named.
+ */
+async function confirmSaveName(): Promise<void> {
+  const submit = await screen.findByTestId('mock-form-modal-submit');
+  await act(async () => {
+    fireEvent.click(submit);
+    await Promise.resolve();
+    await Promise.resolve();
+    await Promise.resolve();
+  });
+}
+
 describe('ComposeWorkspace — imported save-routing flip (task 012)', () => {
   it('posts the MODEL shape when the Load carried contentModel: contentModel + content, NO op-log/paraIdMap/comments/baselineVersionId', async () => {
     config.loadContentModel = LOADED_MODEL;
@@ -497,16 +544,44 @@ describe('ComposeWorkspace — imported save-routing flip (task 012)', () => {
     );
   });
 
-  it('task 013 (F7): the FIRST model-path save folds the mount-time projection flatten warnings — and a second model save does not repeat them', async () => {
+  // Task 044 (r8) SUPERSEDES task 013's F7 fold. The old test asserted that a model-path save folds the
+  // mount-time projection flatten warnings into the save banner, on the reasoning that "the loss they
+  // describe materializes on the first save that renders from the flatten-tier model". That was true when
+  // every save rebuilt the whole body. Since task 040 the merge CLONES untouched blocks verbatim, so a text
+  // box on a block the user did not touch loses nothing — and the banner was reporting a loss that did not
+  // happen. The server now reports what was ACTUALLY lost, per re-rendered block, so the fold is both
+  // unnecessary and false. The `pdf-intake-*` exception (a reflow that really did happen at LOAD) is
+  // asserted below and is unchanged.
+  it('task 044: a model-path save does NOT fold the mount-time docx flatten warnings — the merge clones those blocks, so nothing was simplified', async () => {
     config.loadContentModel = LOADED_MODEL;
-    // The mount door surfaced projection flatten warnings (previously server-log-only): the loss
-    // they describe materializes on the first save that renders from the flatten-tier model.
+    // The mount door surfaced projection flatten warnings. Under the merge these describe blocks that are
+    // now cloned verbatim on save.
     config.loadContentModelWarnings = [
       { code: 'text-box-flattened', count: 2 },
       { code: 'complex-object-dropped', count: 1 },
     ];
-    // The mapper adds one more text-box occurrence — counts must SUM per code (2 + 1 = 3).
-    config.builtResult = { model: BUILT_MODEL, warnings: [{ code: 'text-box-flattened', count: 1 }] };
+    config.builtResult = { model: BUILT_MODEL, warnings: [] };
+    config.saveDegradationWarnings = undefined;
+    renderStoredDoc();
+    await waitForEditor();
+
+    await clickSave();
+    await waitFor(() => expect(saveRequests).toHaveLength(1));
+
+    // No banner at all: nothing the server reported, nothing the mapper reported, and the held flatten
+    // warnings are no longer folded. A false "Some formatting was simplified when saving" here is exactly
+    // what trains a reader to ignore the true ones.
+    await waitFor(() =>
+      expect(screen.queryByTestId('compose-workspace-save-degradation-banner')).not.toBeInTheDocument()
+    );
+  });
+
+  it('task 044: the SERVER remains authoritative — a real loss it reports still reaches the banner', async () => {
+    config.loadContentModel = LOADED_MODEL;
+    config.loadContentModelWarnings = [{ code: 'text-box-flattened', count: 2 }];
+    config.builtResult = { model: BUILT_MODEL, warnings: [] };
+    // The merge's shortfall report: the edited block genuinely lost soft breaks.
+    config.saveDegradationWarnings = [{ code: 'edited-paragraph-line-break-dropped', count: 2 }];
     renderStoredDoc();
     await waitForEditor();
 
@@ -514,17 +589,32 @@ describe('ComposeWorkspace — imported save-routing flip (task 012)', () => {
     await waitFor(() => expect(saveRequests).toHaveLength(1));
 
     const banner = await screen.findByTestId('compose-workspace-save-degradation-banner');
-    expect(banner.textContent).toContain('A text box was converted to regular text. (×3)');
-    expect(banner.textContent).toContain('A drawing or embedded object could not be carried over.');
+    // The server's real finding is shown...
+    expect(banner.textContent).toContain('A line break inside an edited paragraph was dropped.');
+    // ...and the stale mount-time flatten warning is NOT, because that block was cloned.
+    expect(banner.textContent).not.toContain('A text box was converted to regular text.');
+  });
 
-    // SECOND model-path save (still dirty, no new mapper/server warnings): the mount warnings were
-    // CLEARED by the first model save's adoption — the loss materialized once, it is not repeated.
+  it('task 044: pdf-intake facts are STILL folded — that reflow happened at LOAD, before any save', async () => {
+    config.loadContentModel = LOADED_MODEL;
+    config.loadContentModelWarnings = [
+      { code: 'pdf-intake-fixed-layout-reflowed', count: 1 },
+      { code: 'text-box-flattened', count: 2 },
+    ];
     config.builtResult = { model: BUILT_MODEL, warnings: [] };
+    config.saveDegradationWarnings = undefined;
+    renderStoredDoc();
+    await waitForEditor();
+
     await clickSave();
-    await waitFor(() => expect(saveRequests).toHaveLength(2));
-    await waitFor(() =>
-      expect(screen.queryByTestId('compose-workspace-save-degradation-banner')).not.toBeInTheDocument()
-    );
+    await waitFor(() => expect(saveRequests).toHaveLength(1));
+
+    const banner = await screen.findByTestId('compose-workspace-save-degradation-banner');
+    // The PDF intake already reflowed the source into the synthesized carrier — that loss is real
+    // whatever the save does, so it must still surface.
+    expect(banner.textContent.length).toBeGreaterThan(0);
+    // The docx flatten warning alongside it is still not folded.
+    expect(banner.textContent).not.toContain('A text box was converted to regular text.');
   });
 
   it('task 013 (F7): an OP-LOG-path save does NOT fold the projection flatten warnings (the loss does not materialize on the byte-identical path)', async () => {
@@ -587,10 +677,17 @@ describe('ComposeWorkspace — imported save-routing flip (task 012)', () => {
     await waitForEditor();
 
     await clickSave();
+    // UAT-03: an uploaded file has no sprk_document row yet, so this first save is name-gated —
+    // nothing is posted until the modal is confirmed.
+    expect(screen.getByTestId('compose-save-name-dialog')).toBeInTheDocument();
+    expect(saveRequests).toHaveLength(0);
+    await confirmSaveName();
     await waitFor(() => expect(saveRequests).toHaveLength(1));
 
     const body = saveRequests[0].body;
     expect(saveRequests[0].url).toContain('/api/compose/documents/create-on-save');
+    // The confirmed name threads into displayName (→ server ResolveFileName + sprk_documentname).
+    expect(body.displayName).toBe('uploaded.docx');
     expect(body.contentModel).toEqual(BUILT_MODEL);
     expect(body.content).toBe(CONTENT_B64);
     expect(body.containerId).toBe('bu-container-1');
@@ -609,10 +706,15 @@ describe('ComposeWorkspace — born-in-editor branches unchanged except the comm
     await waitForEditor();
 
     await clickSave();
+    // UAT-03: a born-in-editor draft is never-persisted → the first save is name-gated.
+    expect(screen.getByTestId('compose-save-name-dialog')).toBeInTheDocument();
+    expect(saveRequests).toHaveLength(0);
+    await confirmSaveName();
     await waitFor(() => expect(saveRequests).toHaveLength(1));
 
     const body = saveRequests[0].body;
     expect(saveRequests[0].url).toContain('/api/compose/documents/create-on-save');
+    expect(body.displayName).toBe('draft.docx');
     expect(body.contentModel).toEqual(BORN_MODEL);
     // Amendment: buildContentModel folds threads into the model — the separate field is GONE even
     // though the editor handle reports a non-empty anchored-comment set.
@@ -623,8 +725,11 @@ describe('ComposeWorkspace — born-in-editor branches unchanged except the comm
     // The imported-model mapper is NEVER consulted for a born-in-editor doc.
     expect(buildImportedContentModelMock).not.toHaveBeenCalled();
 
-    // Second save → replace route, still contentModel-only, still no comments/baseline.
+    // Second save → replace route, still contentModel-only, still no comments/baseline. The doc now
+    // carries an SPE id, so `saveNeedsName` is false and the modal does NOT re-open (UAT-03 gates the
+    // FIRST save only — a name prompt on every save would be the regression).
     await clickSave();
+    expect(screen.queryByTestId('compose-save-name-dialog')).not.toBeInTheDocument();
     await waitFor(() => expect(saveRequests).toHaveLength(2));
     expect(saveRequests[1].url).toContain('/api/compose/documents/spe-created-1/save');
     expect(saveRequests[1].body.contentModel).toEqual(BORN_MODEL);
@@ -721,9 +826,16 @@ describe('ComposeWorkspace — PDF-sourced save routing (task 042 / FR-06)', () 
     const loadMintedKey = saveRequests[0].body.transientKey;
 
     // Drive the Save split-button's 'new' fork exactly as the real UI does — the consolidated
-    // toolbar lives inside ComposeEditor, whose onSave prop threads the mode into triggerSave.
+    // toolbar lives inside ComposeEditor, whose onSave prop threads the mode into requestSave.
+    // FR-02 (task 030): Save As now opens the name modal FIRST — confirm the seeded name to run the
+    // fork save (the fork identity contract below is unchanged: forkNew + a fresh transient key).
     await act(async () => {
       (editorProps.current.onSave as unknown as (mode?: 'version' | 'new') => void)?.('new');
+      await Promise.resolve();
+    });
+    const forkSubmit = await screen.findByTestId('mock-form-modal-submit');
+    await act(async () => {
+      fireEvent.click(forkSubmit);
       await Promise.resolve();
       await Promise.resolve();
       await Promise.resolve();

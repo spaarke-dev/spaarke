@@ -1,0 +1,76 @@
+<task id="CICD-092" project="ci-cd-unit-test-remediation-r1">
+  <metadata>
+    <title>Tier 2 Prettier check is not developer-reproducible: CI 1907 files vs local 46 (#850)</title>
+    <status>completed</status>
+    <estimated-effort>2-4 hours</estimated-effort>
+    <phase>4 - Deliverable defect repair (adopted 2026-08-28)</phase>
+    <stream>A - CI tiering remediation</stream>
+    <rigor-level>FULL</rigor-level>
+    <model-tier>sonnet</model-tier>
+    <effort>high</effort>
+    <autonomous>true</autonomous>
+    <parallel-safe>true</parallel-safe>
+    <dependencies>none</dependencies>
+    <blocks>090</blocks>
+    <tags>ci-workflows, tier2, tooling</tags>
+    <tracking-issue>#850</tracking-issue>
+  </metadata>
+
+  <adoption-note date="2026-08-28">
+    ADOPTED INTO THIS PROJECT, NOT DEFERRED. Owner direction 2026-08-28: "if an issue is
+    important, then it should be added to this project NOT deferred to others."
+
+    The check lives in ci-tier2-advisory.yml, built by THIS PROJECT. A 40x disagreement between CI and local means a developer cannot reproduce it, therefore cannot fix it, therefore learns to ignore it. That is exactly the "constant reds" failure mode north star #3 forbids.
+
+    This is a DEFECT REPORT AGAINST THIS PROJECT OWN DELIVERABLE, not new scope. The project
+    cannot honestly close while something it shipped is known-broken. That is north star #1
+    ("fix it right the first time") and #3 ("no constant reds").
+  </adoption-note>
+
+  <goal>A developer running the documented local command sees the same file count CI sees, so the check is actionable.</goal>
+
+  <steps mode="directional">
+    <step order="1">Diagnose the 40x gap BEFORE changing anything. Candidates: glob expansion differing between bash and PowerShell; .prettierignore not applied on one path; line-ending normalization counting every file as changed; CI scanning build output that local excludes.</step>
+    <step order="2">CRLF is the leading suspect on this repo -- .gitattributes and core.autocrlf interact with prettier endOfLine. Verify before assuming.</step>
+    <step order="3">Fix the root cause, NOT the count. Do not narrow the CI glob to make the numbers match; that hides the disagreement rather than resolving it.</step>
+    <step order="4">Print the exact local reproduction command in the job output so the next person does not re-derive it.</step>
+  </steps>
+
+  <notes date="2026-08-28">
+    COMPLETE. Full write-up: notes/092-prettier-reproducibility.md.
+
+    ROOT CAUSE: .prettierrc.json declared "endOfLine": "crlf", backed by NOTHING. .editorconfig
+    scopes end_of_line=crlf to [*.{cs,csx,vb,vbx}] only; .gitattributes has text eol=crlf for those
+    same C# types only (added 2026-08-19 to fix THIS EXACT BUG CLASS for dotnet format, with a
+    comment describing the identical symptom). TypeScript had no declared line-ending policy at all.
+    Windows dev (autocrlf=true) => CRLF tree => 0 of 1911 flagged. Linux CI => LF stored bytes =>
+    1907 of 1911 flagged. CI was failing essentially every .ts/.tsx in src/client on line endings.
+
+    PROVEN, NOT GUESSED: the first isolated two-line fixture appeared to REFUTE the line-ending
+    hypothesis (both CRLF and LF passed) -- that test was too trivial to be valid. The decisive
+    test inverted the setting against the real corpus: `--end-of-line lf` against the CRLF working
+    tree flagged 1911, the exact mirror of CI's 1907. Sole discriminator confirmed.
+
+    FIX: "endOfLine": "auto". Line endings are then governed by Git (core.autocrlf + .gitattributes)
+    rather than asserted independently by the formatter for a type the repo never declared a policy
+    for. Verified 0 differences on BOTH a CRLF working tree and a real subtree copy converted to LF.
+
+    REJECTED the .cs precedent (adding `*.ts text eol=crlf`): that precedent exists to BACK an
+    already-declared .editorconfig policy ("Scope deliberately matches .editorconfig"). Nothing
+    declares one for TypeScript, so a gitattributes rule would INVENT a policy and force CRLF
+    working trees on CI and every non-Windows contributor -- far larger blast radius than the defect.
+
+    PARTIAL on one criterion: printing the repro command in the JOB OUTPUT needs a
+    ci-tier2-advisory.yml edit, which the shadow-window freeze forbids. Command + full root-cause
+    explanation documented in docs/procedures/testing-and-code-quality.md instead; the one-line
+    workflow change is deferred to after cutover.
+
+    FREEZE-SAFE: no workflow touched.
+  </notes>
+
+  <acceptance-criteria>
+    <criterion testable="true">CI and local report the same file count on the same commit</criterion>
+    <criterion testable="true">The job output names the exact command to reproduce locally</criterion>
+    <criterion testable="true">Remaining unformatted files are either fixed or ignored with a written reason</criterion>
+  </acceptance-criteria>
+</task>

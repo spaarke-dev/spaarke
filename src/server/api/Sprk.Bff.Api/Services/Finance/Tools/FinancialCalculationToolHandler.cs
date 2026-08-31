@@ -136,14 +136,8 @@ public class FinancialCalculationToolHandler : IAiToolHandler
         Guid matterId,
         CancellationToken ct)
     {
-        // Resolve to ServiceClient for QueryExpression support
-        var serviceClient = _dataverseService as ServiceClient;
-        if (serviceClient == null)
-        {
-            throw new InvalidOperationException(
-                "FinancialCalculationToolHandler requires IDataverseService resolved as ServiceClient " +
-                "for QueryExpression support. Ensure FinanceModule registers DataverseServiceClientImpl.");
-        }
+        // Resolve to ServiceClient for QueryExpression support (Bug-1: unwrap the concrete impl).
+        var serviceClient = _dataverseService.UnwrapServiceClient(nameof(FinancialCalculationToolHandler));
 
         // Query all invoices for this matter
         var invoiceQuery = new QueryExpression(InvoiceEntity)
@@ -202,14 +196,8 @@ public class FinancialCalculationToolHandler : IAiToolHandler
         Guid projectId,
         CancellationToken ct)
     {
-        // Resolve to ServiceClient for QueryExpression support
-        var serviceClient = _dataverseService as ServiceClient;
-        if (serviceClient == null)
-        {
-            throw new InvalidOperationException(
-                "FinancialCalculationToolHandler requires IDataverseService resolved as ServiceClient " +
-                "for QueryExpression support. Ensure FinanceModule registers DataverseServiceClientImpl.");
-        }
+        // Resolve to ServiceClient for QueryExpression support (Bug-1: unwrap the concrete impl).
+        var serviceClient = _dataverseService.UnwrapServiceClient(nameof(FinancialCalculationToolHandler));
 
         // Query all invoices for this project
         var invoiceQuery = new QueryExpression(InvoiceEntity)

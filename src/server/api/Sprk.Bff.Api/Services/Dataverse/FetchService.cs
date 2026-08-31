@@ -77,22 +77,9 @@ internal sealed class FetchService
             throw new FetchXmlParseException("FetchXML cannot be null, empty, or whitespace.");
         }
 
-        // The privilege checker pattern (UserPrivilegeChecker) shows ServiceClient is
-        // reached via DataverseServiceClientImpl.OrganizationService. We follow the same
-        // pattern instead of taking a hard dependency on the concrete type at compile time.
-        if (_dataverseService is not DataverseServiceClientImpl impl)
-        {
-            // This is a deployment misconfiguration, not a request error — surface as 500.
-            throw new InvalidOperationException(
-                $"FetchService requires {nameof(DataverseServiceClientImpl)} but {_dataverseService.GetType().FullName} is registered.");
-        }
-
-        var serviceClient = impl.OrganizationService;
-        if (serviceClient is null || !serviceClient.IsReady)
-        {
-            throw new InvalidOperationException(
-                "Dataverse ServiceClient is not ready; cannot execute FetchXML.");
-        }
+        // Reach the underlying ServiceClient via the canonical unwrap (fail-loud; a deployment
+        // misconfiguration surfaces as 500, not a request error). See DataverseServiceClientExtensions.
+        var serviceClient = _dataverseService.UnwrapServiceClient(nameof(FetchService));
 
         // Inject paging cookie into the FetchXML root if supplied.
         // Dataverse expects <fetch page="N" paging-cookie="…"> for paged retrieval.

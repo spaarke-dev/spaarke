@@ -1,0 +1,110 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="075" project="customer-provisioning-orchestration-r1">
+  <metadata>
+    <title>Author /provision-environment operator skill (L3) per §4.3a — 15-tool matrix + prereqs + intake + gate + execute loop + handoff report</title>
+    <phase>D L3 Skill + BFF Integration Endpoints + Metering</phase>
+    <gate>blocked</gate>
+    <status>not-started</status>
+    <rigor>STANDARD</rigor>
+    <rigor-reason>New file creation without BFF touch — a skill directive, not code. Per project CLAUDE.md rigor defaults + root CLAUDE.md §8 STANDARD row. Note: Sub-Agent Write Boundary forces parallel-safe:false.</rigor-reason>
+    <model-tier>opus</model-tier>
+    <model-tier-reason>Skill authoring covering 15-tool matrix + fallback matrix + interactive intake + gate/execute loop is a design-heavy operator-UX task — high-blast-radius because it becomes THE mechanism for every provisioning going forward. Step 3.5.5b Opus tier justified (architectural/skill-directive scope).</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Writes to .claude/skills/** — Sub-Agent Write Boundary per root CLAUDE.md §3 forces MAIN-SESSION-ONLY; sub-agents will fail with "Edit denied on .claude/...". task-create Step 3.8 auto-marks these.</parallel-reason>
+    <deps>057, 042</deps>
+    <tags>skill-directive, l2-controlplane, deploy</tags>
+    <estimated-effort>6-10 hours</estimated-effort>
+  </metadata>
+
+  <prompt>Author the /provision-environment operator skill at .claude/skills/provision-environment/SKILL.md per spec.md FR-25 + §4.3a. The skill Step 0 is a prerequisites check (pwsh ≥ 7.4, az ≥ 2.60, pac ≥ 1.35, git ≥ 2.40, operator az login succeeded, L2 API reachable, Dataverse MCP status optional). Interactive intake collects customerId / tenantId / tenancyModel / profile. Preflight → confirmation gate → execute loop (enqueue via L2 REST → poll GET /api/runs/{id} → advance on manual gates surfacing actionable instructions) → completion writes handoff report to runs/{runId}.md + updates sprk_dataverseenvironment via Dataverse MCP + produces final summary. Reference model: .claude/skills/deploy-new-release/SKILL.md.</prompt>
+
+  <role>SPAARKE platform skill author. Fluent with the Claude Code skill format (.claude/skills/{name}/SKILL.md), the 15-tool operator-toolchain matrix per §4.3a, interactive-intake + confirmation-gate patterns from /deploy-new-release, and the L2 REST API surface from task 057. Follow ADRs strictly.</role>
+
+  <goal>File .claude/skills/provision-environment/SKILL.md exists as an operator skill; describes Step 0 prereqs, interactive intake, preflight-then-confirm gate, execute loop against L2 REST, manual-gate handling with actionable instructions, completion handoff report at runs/{runId}.md + sprk_dataverseenvironment update via Dataverse MCP. Skill is invocable via /provision-environment. Dry-run mode supported.</goal>
+
+  <context>
+    <background>Per spec.md FR-25 + §4.3a + design.md §4.3a.4: the L3 skill is the operator's entry point to the entire provisioning platform. Today (Gen 1) operators merge 3 docs by hand + invoke scripts sequentially. The skill wraps L2's REST surface (task 057) into a guided flow with prereq checks, an intake wizard, a confirmation gate before execution, and a poll loop that surfaces manual gates (customer admin consent, Azure quota bumps, SPE cert bootstrap) with actionable instructions. Reference model /deploy-new-release exists as a strong template.</background>
+    <relevant-files>
+      <file role="new">.claude/skills/provision-environment/SKILL.md</file>
+      <file role="canonical-reference">.claude/skills/deploy-new-release/SKILL.md</file>
+      <file role="canonical-reference">src/server/services/Sprk.Provisioning.ControlPlane/Api/RunsEndpoints.cs</file>
+      <file role="canonical-reference">projects/customer-provisioning-orchestration-r1/spec.md</file>
+      <file role="canonical-reference">projects/customer-provisioning-orchestration-r1/design.md</file>
+    </relevant-files>
+    <dependencies>
+      <dependency task="057" status="pending">L2 REST endpoints — the surface the skill invokes</dependency>
+      <dependency task="042" status="pending">H0.5 consent-callback BFF endpoint — referenced by the skill for Model 2 flows</dependency>
+    </dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="spec.md FR-25">SCOPE: Step 0 prereqs check (pwsh ≥ 7.4, az ≥ 2.60, pac ≥ 1.35, git ≥ 2.40, operator az login, L2 API reachable, MCP status optional); intake collects customerId/tenantId/tenancyModel/profile; preflight → confirmation gate → execute loop → completion handoff report.</constraint>
+    <constraint source="spec.md §4.3a">SCOPE: 15-tool matrix per §4.3a — pwsh, bash, WebFetch, az, pac, Dataverse MCP, Azure MCP (with fallbacks); operator's OWN AAD identity (not SP) per NFR-11.</constraint>
+    <constraint source="CLAUDE.md-§3">SCOPE: This skill file writes to .claude/skills/** — MAIN-SESSION-ONLY per Sub-Agent Write Boundary; parallel-safe:false enforced by task-create Step 3.8.</constraint>
+    <constraint source="CLAUDE.md-§11">SCOPE: NEW-surface task — justification field completed per §11 three-question gate.</constraint>
+    <constraint source="project">SCOPE: Skill produces a handoff report at runs/{runId}.md in the operator's working directory; NOT under .claude/ (runs are per-operator-invocation, not repo state).</constraint>
+    <constraint source="project">SCOPE: Skill uses Dataverse MCP for the sprk_dataverseenvironment update; MCP-unreachable triggers fallback matrix per FR-25 (task 076 authors fallback impl).</constraint>
+    <constraint source="project">SCOPE: Confirmation gate at design.md §4.3a.4 semantics — user MUST type an explicit "proceed" phrase; a bare "y" is insufficient.</constraint>
+    <constraint source="CLAUDE.md-§6.5">SCOPE: Auditable operator action per NFR-11 — every mutating L2 call the skill makes carries the operator's actor tid; the L2 side audit-logs (task 061).</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>L3 /provision-environment skill authoring — reference /deploy-new-release + spec §4.3a</topic>
+    <files>
+      <file>.claude/skills/deploy-new-release/SKILL.md</file>
+      <file>projects/customer-provisioning-orchestration-r1/spec.md</file>
+      <file>projects/customer-provisioning-orchestration-r1/design.md</file>
+      <file>projects/customer-provisioning-orchestration-r1/CLAUDE.md</file>
+      <file>CLAUDE.md</file>
+    </files>
+    <patterns>
+      <pattern name="Skill format" location=".claude/skills/deploy-new-release/SKILL.md">Existing operator skill with pre-flight, confirmation gate, script execution, and release-tag steps; copy structure.</pattern>
+    </patterns>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="0" name="Rigor + load">Emit RIGOR LEVEL (STANDARD, main-session-only). Load spec.md FR-25 + §4.3a + design.md §4.3a.4 + /deploy-new-release SKILL.md.</step>
+    <step order="1" name="Outline">Draft skill outline: Trigger phrases, Step 0 prereqs, Step 1 intake, Step 2 preflight, Step 3 confirmation gate, Step 4 execute loop, Step 5 manual-gate handling, Step 6 completion handoff.</step>
+    <step order="2" name="Write skill">Author .claude/skills/provision-environment/SKILL.md with all 6+ steps + tool matrix + confirmation-gate phrase requirement + handoff-report template.</step>
+    <step order="3" name="Tool matrix">Document the 15-tool matrix per §4.3a with fallback references (task 076 owns fallback impl).</step>
+    <step order="4" name="Test dry-run">Manually walk through the skill in a dry-run against dev L2 (no actual provisioning); verify each step produces expected output.</step>
+    <step order="5" name="Cross-reference">Add pointer row to root CLAUDE.md §17 Pointers table linking the new skill and cross-reference from project CLAUDE.md.</step>
+    <step order="6" name="Index update">Update TASK-INDEX.md: task 075 → ✅.</step>
+    <step order="7" name="Deviations">Document any deviation in projects/customer-provisioning-orchestration-r1/notes/.</step>
+  </steps>
+
+  <justification>
+    <existing>Closest neighbor: .claude/skills/deploy-new-release/SKILL.md (release-deploy skill, different lifecycle stage). Grep for `provision-environment` under .claude/skills/ returns none.</existing>
+    <extension>No — provisioning has different phases (H0..H14 handler catalog), different gates (Model 2 admin consent, Azure quota, SPE 24h), different error semantics (§4C 4-class taxonomy), different auth flow (operator's own AAD per §4.3a.2). Extending /deploy-new-release would violate its single-purpose contract per spec.md § New Components table row 3.</extension>
+    <cost-of-doing-nothing>Without L3 skill, operator invokes L2 REST manually via curl/az rest + tracks 19-handler state by hand + loses fallback matrix for MCP disconnects (§4.3a.5). Spec.md § New Components table row 3 explicitly cites this failure mode. The skill is HOW the operator uses L2 at all — without it, L2 is inaccessible except to engineers reading OpenAPI.</cost-of-doing-nothing>
+  </justification>
+
+  <tools>
+    <tool name="terminal">Test-invoke the skill via manual walk-through</tool>
+  </tools>
+
+  <outputs>
+    <output type="docs">.claude/skills/provision-environment/SKILL.md</output>
+    <output type="docs">CLAUDE.md (pointer row added)</output>
+    <output type="docs">projects/customer-provisioning-orchestration-r1/CLAUDE.md (cross-reference)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">.claude/skills/provision-environment/SKILL.md exists with Step 0 prereqs, intake, preflight, confirmation gate, execute loop, and completion handoff sections.</criterion>
+    <criterion testable="true">Step 0 lists all 6 prerequisite checks per FR-25: pwsh ≥ 7.4, az ≥ 2.60, pac ≥ 1.35, git ≥ 2.40, operator az login, L2 API reachable.</criterion>
+    <criterion testable="true">Confirmation gate requires an explicit "proceed" phrase (not a bare "y") per §4.3a.4.</criterion>
+    <criterion testable="true">Skill invokes L2 REST endpoints (task 057) and polls GET /api/runs/{id} for progress; surfaces manual gates with actionable instructions.</criterion>
+    <criterion testable="true">Completion produces a handoff report at runs/{runId}.md in the operator's cwd (NOT under .claude/).</criterion>
+    <criterion testable="true">Skill updates sprk_dataverseenvironment via Dataverse MCP; MCP-unreachable triggers fallback per task 076.</criterion>
+    <criterion testable="true">Root CLAUDE.md §17 Pointers table has a row linking the skill.</criterion>
+    <criterion testable="true">Manual dry-run against dev L2 walks all steps without runtime error.</criterion>
+  </acceptance-criteria>
+
+  <notes>Reference: spec.md FR-25 + §4.3a + NFR-11 + design.md §4.3a.4. Companion: task 076 (fallback matrix).</notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+  </execution>
+</task>

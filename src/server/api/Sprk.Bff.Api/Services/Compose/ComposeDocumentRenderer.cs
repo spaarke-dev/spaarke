@@ -382,12 +382,24 @@ public sealed partial class ComposeDocumentRenderer
     /// <b>Carrier metadata preserved</b>: core properties (creator etc.) are left untouched when present;
     /// <paramref name="author"/> is used only when the carrier lacks a core-properties part entirely.
     /// Orphaned parts (images/footnotes referenced only by the replaced body) remain in the package as inert
-    /// weight — harmless, and version history retains the original anyway (ADR-049 safety net). Two further
-    /// documented degradations (review 011-P4/P9): a preserved header/footer whose <c>REF</c> field or
-    /// anchor hyperlink targets a BODY bookmark loses its target with the body swap (the model does not
-    /// carry bookmarks — Word shows its standard broken-reference text on field update); and a carrier
-    /// instance referencing an UNDEFINED abstractNumId that happens to equal a remapped renderer abstract id
-    /// would resolve to it — only observable from numbered paragraphs inside preserved parts, accepted.
+    /// weight — harmless, and version history retains the original anyway (ADR-049 safety net). One further
+    /// documented degradation: a carrier instance referencing an UNDEFINED abstractNumId that happens to
+    /// equal a remapped renderer abstract id would resolve to it — only observable from numbered paragraphs
+    /// inside preserved parts, accepted.
+    /// </para>
+    /// <para>
+    /// <b>Review 011-P4/P9 is CLOSED (task 049).</b> It recorded that a preserved header/footer whose
+    /// <c>REF</c> field or anchor hyperlink targets a BODY bookmark would lose its target with the body
+    /// swap, "because the model does not carry bookmarks". That reason stopped being true at task 041:
+    /// bookmarks survive a save in both block positions — an untouched block is cloned verbatim, and an
+    /// edited one has its base block's bookmarks restored by <c>ComposeBlockMerge.CarryBookmarks</c> (span
+    /// widened to the paragraph, which keeps a cross-reference resolving). Measured by
+    /// <c>ComposeFieldCarrySeamTests.EditedBookmarkParagraph_StillCarriesTheTarget_SoACarriedRefResolves</c>
+    /// over <c>ref-cross-references.docx</c>. Verifying this rather than inheriting it is what let task 049
+    /// carry <c>REF</c>/<c>PAGEREF</c> LIVE instead of freezing them: a carried cross-reference is only an
+    /// improvement if its target is still there. Residual: a bookmark whose paragraph the user DELETED is
+    /// gone — Word's own semantics for the same edit — and the R6 fail-open path (baseline unprojectable)
+    /// loses bookmarks along with everything else it does not clone.
     /// </para>
     /// </remarks>
     /// <param name="carrierBytes">The retained source package (a valid WordprocessingML OPC package).</param>
@@ -396,7 +408,7 @@ public sealed partial class ComposeDocumentRenderer
     /// <exception cref="ArgumentException"><paramref name="carrierBytes"/> is null/empty.</exception>
     /// <exception cref="ArgumentNullException"><paramref name="model"/> is null.</exception>
     /// <exception cref="ComposePatchException">The carrier is not a readable package or has no main part/body.</exception>
-    public byte[] RenderIntoCarrier(byte[] carrierBytes, ComposeContentModel model, string author, ICollection<ComposeProjectionWarning>? degradations = null)
+    public byte[] RenderIntoCarrier(byte[] carrierBytes, ComposeContentModel model, string author, ICollection<ComposeProjectionWarning>? degradations = null, bool mergeUnchangedBlocks = true, ComposeMergeStats? mergeStats = null)
     {
         if (carrierBytes is null || carrierBytes.Length == 0)
         {
@@ -446,6 +458,34 @@ public sealed partial class ComposeDocumentRenderer
                     ?.ParagraphProperties?.SectionProperties?.CloneNode(true) as SectionProperties;
             }
 
+            // ═══════════════════════════════════════════════════════════════════════════════════
+            // THE BASE SIDE (ADR-049 R8 third amendment · task 040).
+            //
+            // `body.RemoveAllChildren()` below is the single instruction that cost the project 82% of its
+            // untouched blocks: every tab stop, indent, style, spacing rule and numbering association in the
+            // carrier was discarded here, and the body rebuilt from a content model carrying justification,
+            // bold and italic.
+            //
+            // The merge does not change that control flow (ADR-049 I-5: ONE body author, and this is it). It
+            // adds the BASE side R6 never had — the baseline's own blocks, captured before the swap and
+            // re-projected server-side, so a block the user never touched is put back VERBATIM instead of
+            // re-authored from a lossy model.
+            //
+            // Captured BEFORE the removal because RemoveAllChildren detaches the nodes.
+            //
+            // `mergeUnchangedBlocks` defaults to TRUE and is a TEST SEAM, not a feature flag: it is bound to
+            // no configuration and exists so the seam measurement can run a control arm through the same
+            // renderer in the same test run. An instrument that reports two different answers for two inputs
+            // is measuring something; that is the anti-vacuity evidence behind the gate.
+            var mergeBaseline = mergeUnchangedBlocks ? ComposeBlockMerge.Capture(body, carrierBytes) : null;
+            if (mergeUnchangedBlocks && mergeBaseline is null)
+            {
+                // Fail OPEN: a baseline we cannot re-project simply gets no merge and the render proceeds
+                // exactly as R6 does. A save is never refused because the base side was unavailable
+                // (ADR-049 invariant 1 — every save terminates in a defined outcome).
+                mergeStats?.RecordBaselineUnavailable();
+            }
+
             body.RemoveAllChildren();
 
             // Collision-safe allocation base (see remarks), computed BEFORE the render so the plan's ids
@@ -472,6 +512,12 @@ public sealed partial class ComposeDocumentRenderer
             }
             // Task 012: user-edit revision facts arrive author-less by design — attribute the saving user.
             state.DefaultRevisionAuthor = author;
+
+            // Task 056: the ids a carried embedded object is allowed to reference. Read from the LIVE part —
+            // relationships are NOT touched by the body swap (measured; see TryBuildCarriedObject) — so an
+            // object carried out of this very document resolves by construction, while one a client
+            // fabricated does not and is refused rather than authored as a dangling reference.
+            state.CarrierRelationshipIds = CollectRelationshipIds(mainPart);
 
             // Step-9.5 F2 + task 012: anchors may only reference ids the target will actually contain —
             // the carrier part's own ids (scanned READ-ONLY from the bytes) PLUS any NEW model comments
@@ -519,7 +565,15 @@ public sealed partial class ComposeDocumentRenderer
                 renderBlocks = FilterCommentAnchors(renderBlocks, validCommentIds, state);
             }
 
-            RenderBlocks(body, renderBlocks, state);
+            if (mergeBaseline is not null)
+            {
+                RenderMergedBlocks(body, renderBlocks, mergeBaseline, state, mergeStats);
+            }
+            else
+            {
+                RenderBlocks(body, renderBlocks, state);
+            }
+
             ResolveHyperlinkRelationships(body, mainPart, state);
 
             if (mainPart.StyleDefinitionsPart is null)
@@ -887,7 +941,7 @@ public sealed partial class ComposeDocumentRenderer
     // Body render
     // ────────────────────────────────────────────────────────────────────────────────────────────
 
-    private void RenderBlocks(OpenXmlElement container, IReadOnlyList<ComposeBlock> blocks, ListRenderState state)
+    private void RenderBlocks(OpenXmlElement container, IReadOnlyList<ComposeBlock> blocks, ListRenderState state, IDictionary<int, int>? runCursor = null)
     {
         // Ordered-list continuity (task 021, review 020-R1 + Step-9.5 fix F1): the model contract — not
         // block adjacency — governs instance selection. An item carrying a source NumId resolves through
@@ -913,7 +967,10 @@ public sealed partial class ComposeDocumentRenderer
         //   - StartsNewList=true always allocates a fresh restart-at-1 instance.
         // State is local per container: a table-cell boundary starts fresh (a NumId-less list never
         // continues across cells).
-        var orderedRunByLevel = new Dictionary<int, int>();
+        // Task 040: the merge owns ONE cursor for the whole body and passes it here, so ordered-list run
+        // continuity spans cloned blocks and multiple calls. Every other caller passes null and gets the
+        // previous per-call behaviour — a table-cell boundary still starts fresh, which is the contract.
+        var orderedRunByLevel = runCursor ?? new Dictionary<int, int>();
 
         void CloseRunsDeeperThan(int level)
         {
@@ -984,7 +1041,7 @@ public sealed partial class ComposeDocumentRenderer
 
     /// <summary>The nearest ACTIVE ordered run shallower than <paramref name="level"/> (a NumId-less
     /// nested ordered item joins its parent's instance at a deeper ilvl — Word's multi-level idiom).</summary>
-    private static bool TryNearestShallowerRun(Dictionary<int, int> orderedRunByLevel, int level, out int numId)
+    private static bool TryNearestShallowerRun(IDictionary<int, int> orderedRunByLevel, int level, out int numId)
     {
         for (var probe = level - 1; probe >= 0; probe--)
         {
@@ -1065,7 +1122,7 @@ public sealed partial class ComposeDocumentRenderer
         // on the render degradation sink (task 026; was render-silent, 025-F4/F7 routing).
         if (block.PropertiesChange is { } propsChange)
         {
-            if (TryParsePreviousProperties<ParagraphPropertiesExtended>(propsChange.PreviousPropertiesXml) is { } previousPPr)
+            if (TryParseOpaqueCarry<ParagraphPropertiesExtended>(propsChange.PreviousPropertiesXml) is { } previousPPr)
             {
                 pPr.AppendChild(new ParagraphPropertiesChange(previousPPr)
                 {
@@ -1124,6 +1181,31 @@ public sealed partial class ComposeDocumentRenderer
                 continue;
             }
 
+            // Task 049: a FIELD marker run is authored at paragraph level rather than from BuildRun, for two
+            // schema reasons: `w:fldSimple` is an EG_PContent element (it is not a run and cannot sit inside
+            // `w:ins`/`w:del`), and the complex form is FIVE runs rather than one. Revision and hyperlink
+            // context are handled inside — wrapper OUTSIDE, `w:ins`/`w:del` INSIDE, exactly the nesting the
+            // revised-linked-run case above establishes.
+            if (run.Field is { } field)
+            {
+                CloseWrapper();
+                if (AppendField(paragraph, run, field, state))
+                {
+                    continue;
+                }
+
+                // The instruction did not survive authoring hardening (see AppendField). Degrade to the
+                // cached result as plain prose — today's flatten, and a defined outcome (invariant 1).
+                // Deliberately NOT warned here: the merge's base-vs-rendered count already reports the
+                // field as lost, and task 045 established that saying it twice is how a taxonomy stops
+                // being read.
+                paragraph.AppendChild(BuildRun(
+                    run with { Field = null, Text = field.CachedResult },
+                    state,
+                    deleted: run.Revision?.Kind == ComposeRevisionKind.Deleted));
+                continue;
+            }
+
             if (run.Revision is not { } revision)
             {
                 CloseWrapper();
@@ -1156,6 +1238,284 @@ public sealed partial class ComposeDocumentRenderer
         }
 
         return paragraph;
+    }
+
+    /// <summary>
+    /// Task 049 (FR-A10 residual): re-authors a carried Word field onto <paramref name="paragraph"/>.
+    /// </summary>
+    /// <remarks>
+    /// <para><b>The FORM the document used is reproduced</b>, not normalised: <c>w:fldSimple</c> comes back
+    /// as <c>w:fldSimple</c> and the <c>w:fldChar</c> run sequence as a run sequence. Word treats them as
+    /// equivalent, but a save is not licensed to rewrite what the file contains just because the two render
+    /// alike — the same reasoning that makes task 048 carry a symbol's code point instead of its glyph.</para>
+    /// <para><b>The cached result is re-emitted with the field.</b> Word displays that until something asks
+    /// the field to update, so the save is visually a no-op while the field becomes a field again. A field
+    /// with no cached result is legal (Word shows the instruction's default) and simply has no result run.</para>
+    /// <para><b>Nesting.</b> `w:ins`/`w:del` may not contain `w:fldSimple`, so the simple form puts the
+    /// revision wrapper INSIDE, around its result run — which is what Word itself writes. The complex form
+    /// is plain runs, so its wrapper goes outside them. Either way the field element is what the paragraph
+    /// (or the hyperlink, which admits EG_PContent) receives.</para>
+    /// </remarks>
+    private static bool AppendField(Paragraph paragraph, ComposeInlineRun run, ComposeField field, ListRenderState state)
+    {
+        // Task 058: a NESTED field carries its own OOXML rather than an instruction, because it HAS no
+        // single instruction — see ComposeField.SpanXml. Re-emitted verbatim, so the outer field, every
+        // inner field, and both of their result runs come back as the document authored them. A span that
+        // does not survive the gate falls through: SpanXml and Instruction are mutually exclusive, so the
+        // guard below finds nothing and the caller flattens to the cached result — today's outcome, never a
+        // reconstruction (ADR-049 invariant 1).
+        if (!string.IsNullOrEmpty(field.SpanXml)
+            && TryBuildCarriedFieldSpan(field.SpanXml, state) is { } spanParts)
+        {
+            AppendFieldParts(paragraph, spanParts, run, state);
+            return true;
+        }
+
+        // CLIENT INPUT REACHING OOXML AUTHORING — the recurring review-finding class this file already
+        // gates for revision attribution (021-F1 / 022-F1 / 024-F1), applied to the instruction. A posted
+        // model is not necessarily one we projected: it can carry XML-illegal control characters (which
+        // would make the saved package unopenable — an UNDEFINED outcome, and invariant 1 forbids that) or
+        // an unbounded string. Sanitized and clamped here rather than trusted, and a request that does not
+        // survive that returns false so the caller can flatten instead.
+        var instruction = SanitizeText(field.Instruction);
+        if (string.IsNullOrWhiteSpace(instruction) || instruction.Length > MaxFieldInstructionChars)
+        {
+            return false;
+        }
+
+        var deleted = run.Revision?.Kind == ComposeRevisionKind.Deleted;
+
+        // The result run carries the field's own character formatting (marker-run contract: properties
+        // still apply). Built through BuildRun so bold/italic/underline and the delText rule stay in ONE
+        // place rather than being restated here.
+        var resultRun = field.CachedResult.Length > 0
+            ? BuildRun(new ComposeInlineRun
+            {
+                Text = field.CachedResult,
+                Bold = run.Bold,
+                Italic = run.Italic,
+                Underline = run.Underline,
+            }, state, deleted)
+            : null;
+
+        OpenXmlElement fieldElement;
+
+        if (field.Complex)
+        {
+            // begin / instrText / separate / result / end. A run sequence is valid anywhere a run is, so
+            // the revision wrapper (when present) simply contains all of them.
+            var begin = new Run(new FieldChar { FieldCharType = FieldCharValues.Begin });
+            ApplyFieldFlags(begin.GetFirstChild<FieldChar>()!, field);
+
+            OpenXmlElement instructionRun = deleted
+                ? new Run(new DeletedFieldCode(instruction) { Space = SpaceProcessingModeValues.Preserve })
+                : new Run(new FieldCode(instruction) { Space = SpaceProcessingModeValues.Preserve });
+
+            var parts = new List<OpenXmlElement> { begin, instructionRun };
+            if (resultRun is not null)
+            {
+                parts.Add(new Run(new FieldChar { FieldCharType = FieldCharValues.Separate }));
+                parts.Add(resultRun);
+            }
+            parts.Add(new Run(new FieldChar { FieldCharType = FieldCharValues.End }));
+
+            AppendFieldParts(paragraph, parts, run, state);
+            return true;
+        }
+        else
+        {
+            var simple = new SimpleField { Instruction = instruction };
+            ApplyFieldFlags(simple, field);
+
+            if (resultRun is not null)
+            {
+                // Word's own nesting for a revised simple field: w:fldSimple outside, w:ins/w:del inside.
+                if (run.Revision is { } simpleRevision)
+                {
+                    var wrapper = NewRevisionWrapper(simpleRevision, state);
+                    wrapper.AppendChild(resultRun);
+                    simple.AppendChild(wrapper);
+                }
+                else
+                {
+                    simple.AppendChild(resultRun);
+                }
+            }
+
+            fieldElement = simple;
+        }
+
+        if (!string.IsNullOrWhiteSpace(run.Href))
+        {
+            paragraph.AppendChild(new Hyperlink(fieldElement) { Id = HyperlinkPendingIdPrefix + run.Href!.Trim() });
+            return true;
+        }
+
+        paragraph.AppendChild(fieldElement);
+        return true;
+    }
+
+    /// <summary>
+    /// Appends a field authored as a bare RUN SEQUENCE onto <paramref name="paragraph"/>, in the revision /
+    /// hyperlink nesting Word itself writes: <c>w:hyperlink</c> OUTSIDE, <c>w:ins</c>/<c>w:del</c> INSIDE
+    /// (CT_RunTrackChange does not admit <c>w:hyperlink</c>, and the reverse nesting risks Word's repair
+    /// prompt). No element may hold a bare run sequence, so with neither context the parts go straight onto
+    /// the paragraph.
+    /// </summary>
+    /// <remarks>
+    /// Extracted at task 058 from the complex-form branch of <see cref="AppendField"/>, unchanged, so the
+    /// re-authored sequence and the VERBATIM-carried nested span land in the document the same way. Two
+    /// copies of this nesting would be two chances to get the schema wrong, in a file whose one job is to
+    /// author packages Word does not report as damaged.
+    /// </remarks>
+    private static void AppendFieldParts(
+        Paragraph paragraph, IReadOnlyList<OpenXmlElement> parts, ComposeInlineRun run, ListRenderState state)
+    {
+        if (run.Revision is { } revision)
+        {
+            var wrapper = NewRevisionWrapper(revision, state);
+            foreach (var part in parts) wrapper.AppendChild(part);
+            paragraph.AppendChild(string.IsNullOrWhiteSpace(run.Href)
+                ? wrapper
+                : new Hyperlink(wrapper) { Id = HyperlinkPendingIdPrefix + run.Href!.Trim() });
+            return;
+        }
+
+        if (!string.IsNullOrWhiteSpace(run.Href))
+        {
+            // A hyperlink admits EG_PContent, so it can hold the whole sequence.
+            var link = new Hyperlink { Id = HyperlinkPendingIdPrefix + run.Href!.Trim() };
+            foreach (var part in parts) link.AppendChild(part);
+            paragraph.AppendChild(link);
+            return;
+        }
+
+        foreach (var part in parts) paragraph.AppendChild(part);
+    }
+
+    /// <summary>
+    /// Task 058 (FR-A10 residual): parses a carried NESTED field span and returns its elements ONLY if it is
+    /// safe to author into this carrier. Returns <c>null</c> when it is not, and the caller then falls
+    /// through to the flatten.
+    /// </summary>
+    /// <remarks>
+    /// <para><b>Three gates, and the third one is specific to this carry.</b></para>
+    /// <list type="number">
+    /// <item><description>The shared opaque-carry gate (<see cref="TryParseOpaqueCarry{T}"/>) — typed SDK
+    /// parse plus schema validation plus the size cap, the same one <c>w:pPrChange</c> has used since task
+    /// 025 and the embedded-object carry since 056. Client XML never reaches the package
+    /// unparsed.</description></item>
+    /// <item><description><b>Relationship resolution</b> (<see cref="CarriedObjectRelationshipsResolve"/>) —
+    /// a field's RESULT can contain anything a run can, an <c>INCLUDEPICTURE</c> result included, so a span
+    /// can name a relationship this package does not have. Authoring that produces a file Word reports as
+    /// DAMAGED: strictly worse than the honest flatten it would replace.</description></item>
+    /// <item><description><b>It must BE a nested field</b> (<see cref="IsCarryableFieldSpan"/>). Every other
+    /// carry in this file is gated by the SDK's own root-element check — a <c>w:drawing</c> payload can only
+    /// parse as a <c>w:drawing</c>. This one's holder is a <c>w:p</c>, which admits any paragraph content at
+    /// all, so without a structural check the property would be a general-purpose way to author arbitrary
+    /// markup into a saved document. The check is what keeps <c>SpanXml</c> a field carry rather than an
+    /// injection point, and it is asserted by a test that posts prose through it.</description></item>
+    /// </list>
+    /// </remarks>
+    private static List<OpenXmlElement>? TryBuildCarriedFieldSpan(string spanXml, ListRenderState state)
+    {
+        var holder = TryParseOpaqueCarry<Paragraph>(spanXml);
+        if (holder is null)
+        {
+            return null;
+        }
+
+        var children = holder.ChildElements.ToList();
+        if (!IsCarryableFieldSpan(children))
+        {
+            return null;
+        }
+
+        return CarriedObjectRelationshipsResolve(holder, state.CarrierRelationshipIds)
+            ? children.Select(c => c.CloneNode(true)).ToList()
+            : null;
+    }
+
+    /// <summary>
+    /// Whether <paramref name="children"/> are exactly one NESTED Word field and nothing else — either a
+    /// single <c>w:fldSimple</c> containing a field, or a <c>w:fldChar</c> run sequence that opens on its
+    /// first run, closes on its last, holds nothing outside itself, and nests at least once.
+    /// </summary>
+    /// <remarks>
+    /// The nesting requirement is not decoration. A span that does NOT nest is a field the instruction carry
+    /// already handles, and admitting it here would give one construct two authoring paths that could drift
+    /// apart. Requiring depth &gt; 1 keeps <c>SpanXml</c> scoped to the one class it exists for.
+    /// </remarks>
+    private static bool IsCarryableFieldSpan(IReadOnlyList<OpenXmlElement> children)
+    {
+        if (children.Count == 0)
+        {
+            return false;
+        }
+
+        if (children.Count == 1 && children[0] is SimpleField simple)
+        {
+            return simple.Descendants<SimpleField>().Any() || simple.Descendants<FieldChar>().Any();
+        }
+
+        var depth = 0;
+        var maxDepth = 0;
+        for (var i = 0; i < children.Count; i++)
+        {
+            if (children[i] is not Run run)
+            {
+                return false;
+            }
+
+            var type = run.GetFirstChild<FieldChar>()?.FieldCharType?.Value;
+            if (type == FieldCharValues.Begin)
+            {
+                depth++;
+                if (depth > maxDepth) maxDepth = depth;
+            }
+            else if (type == FieldCharValues.End)
+            {
+                if (depth == 0) return false;
+                depth--;
+                // Closing the outermost field anywhere but on the LAST element would leave content trailing
+                // outside the field — content the projection never captured as part of it.
+                if (depth == 0 && i != children.Count - 1) return false;
+            }
+            else if (depth == 0)
+            {
+                return false; // anything at all outside the field: prose, a separate with no begin, markup
+            }
+        }
+
+        return depth == 0 && maxDepth > 1;
+    }
+
+    /// <summary>
+    /// Authoring cap on a posted field instruction. Real instructions are tens of characters
+    /// (a <c>REF</c> to a bookmark with two switches is about 32 characters); this is generous by two
+    /// orders of magnitude and still bounded, in the same spirit as <see cref="MaxRevisionAuthorChars"/>. Over the cap the field
+    /// flattens rather than being truncated — a truncated instruction is a DIFFERENT field, and silently
+    /// authoring one would be exactly the "re-authored look-alike" defect the carry exists to avoid.
+    /// </summary>
+    private const int MaxFieldInstructionChars = 4096;
+
+    /// <summary>
+    /// Copies <c>w:fldLock</c> / <c>w:dirty</c> onto the emitted field. <c>fldLock</c> is the one attribute
+    /// this carry MUST not drop: the author set it so the field never updates, and re-authoring it without
+    /// the lock would silently convert a deliberately frozen field into a live one — the single way carrying
+    /// a field could be worse than flattening it.
+    /// </summary>
+    private static void ApplyFieldFlags(SimpleField element, ComposeField field)
+    {
+        if (field.Locked) element.FieldLock = true;
+        if (field.Dirty) element.Dirty = true;
+    }
+
+    /// <inheritdoc cref="ApplyFieldFlags(SimpleField, ComposeField)"/>
+    private static void ApplyFieldFlags(FieldChar element, ComposeField field)
+    {
+        if (field.Locked) element.FieldLock = true;
+        if (field.Dirty) element.Dirty = true;
     }
 
     /// <summary>Task 012: revision-author resolution — a fact that carries an author keeps it
@@ -1197,12 +1557,20 @@ public sealed partial class ComposeDocumentRenderer
             return new Run(new Break { Type = BreakValues.Page });
         }
 
+        // Task 046: the SOFT break marker — a bare <w:br/>, the same marker-run contract as the page break
+        // above. A soft break carries no type attribute; emitting one WITH a type would silently promote a
+        // line break into a page break.
+        if (run.IsLineBreak)
+        {
+            return new Run(new Break());
+        }
+
         var element = new Run();
         // Task 025: a tracked run-formatting change (w:rPrChange) forces an rPr even on an unmarked run —
         // the change record lives inside it (LAST in CT_RPr order). A record whose opaque carry fails the
         // parse gate drops — counted on the render degradation sink (task 026).
         var formatChange = run.FormatChange is { } change
-            ? (Change: change, Previous: TryParsePreviousProperties<PreviousRunProperties>(change.PreviousPropertiesXml))
+            ? (Change: change, Previous: TryParseOpaqueCarry<PreviousRunProperties>(change.PreviousPropertiesXml))
             : ((ComposeFormatChange Change, PreviousRunProperties? Previous)?)null;
         if (formatChange is { Previous: null })
         {
@@ -1229,21 +1597,201 @@ public sealed partial class ComposeDocumentRenderer
         }
 
         // Pending-deleted content authors as w:delText (Word rejects w:t inside w:del).
-        OpenXmlElement textElement = deleted
-            ? new DeletedText(SanitizeText(run.Text)) { Space = SpaceProcessingModeValues.Preserve }
+        //
+        // Task 041 investigated emitting `xml:space="preserve"` only when the text NEEDS it (leading or
+        // trailing whitespace, or empty). The `p/r/t` difference class on five corpus documents is exactly
+        // this attribute: the text was character-identical and only the attribute had been added.
+        //
+        // REVERTED — the conditional rule was measurably WORSE. Word emits `xml:space="preserve"` far more
+        // liberally than "the text has edge whitespace", so matching that narrow rule made the renderer
+        // disagree with the source on 15 of 18 documents instead of 5. Emitting it unconditionally is safe
+        // (it only ever suppresses whitespace trimming) and agrees with the corpus more often.
+        //
+        // The residual `p/r/t` differences are therefore attribute-PRESENCE, not text loss — verified by
+        // inspecting the fixtures. Recorded on the loss list so the class is not re-investigated as if it
+        // were content.
+        // Task 048: the tab and symbol markers swap the run's TEXT CHILD rather than returning early like the
+        // two break markers above. The difference is deliberate: run properties are meaningless on a break but
+        // load-bearing here — an underlined tab is the fill-in leader on a signature block, and a symbol run
+        // carries bold/italic like any other. Returning early would have silently dropped both.
+        //
+        // Both are schema-legal inside a w:del wrapper as-is (only w:t must become w:delText), so `deleted`
+        // needs no special case.
+        // Task 056: an EMBEDDED-OBJECT marker run swaps the run's content child for the carried subtree —
+        // the same "properties still apply, content is replaced" contract as IsTab/Symbol above, one level
+        // bigger. A carry that does not survive BOTH gates yields a run with no content child at all, which
+        // is exactly today's drop; it is deliberately NOT warned here, because ComposeBlockMerge's
+        // base-vs-rendered count already reports it and task 045 established that a taxonomy which says a
+        // thing twice is one users stop reading.
+        if (run.EmbeddedObject is { } embedded)
+        {
+            var carried = TryBuildCarriedObject(embedded, state);
+            if (carried is not null)
+            {
+                element.AppendChild(carried);
+            }
+            return WrapInPendingHyperlink(element, run);
+        }
+
+        OpenXmlElement textElement =
+            run.IsTab ? new TabChar()
+            : run.Symbol is { } symbol ? new SymbolChar { Font = symbol.Font, Char = symbol.CharCode }
+            : deleted ? new DeletedText(SanitizeText(run.Text)) { Space = SpaceProcessingModeValues.Preserve }
             : new Text(SanitizeText(run.Text)) { Space = SpaceProcessingModeValues.Preserve };
         element.AppendChild(textElement);
 
-        // G5: a run carrying an href renders as a clean w:hyperlink wrapping the run. The real external
-        // relationship id can only be minted once the MainDocumentPart is in scope, so stash the href on a
-        // sentinel Hyperlink.Id here; ResolveHyperlinkRelationships (called by both byte-authors after the
-        // body is built) swaps it for the true rId. Zero text-search — the wrap is by the model's own run.
-        if (!string.IsNullOrWhiteSpace(run.Href))
+        return WrapInPendingHyperlink(element, run);
+    }
+
+    /// <summary>
+    /// G5: a run carrying an href renders as a clean <c>w:hyperlink</c> wrapping the run. The real external
+    /// relationship id can only be minted once the MainDocumentPart is in scope, so the href is stashed on a
+    /// sentinel <see cref="Hyperlink.Id"/> here; <see cref="ResolveHyperlinkRelationships"/> (called by both
+    /// byte-authors after the body is built) swaps it for the true rId. Zero text-search — the wrap is by the
+    /// model's own run.
+    /// </summary>
+    private static OpenXmlElement WrapInPendingHyperlink(Run element, ComposeInlineRun run) =>
+        string.IsNullOrWhiteSpace(run.Href)
+            ? element
+            : new Hyperlink(element) { Id = HyperlinkPendingIdPrefix + run.Href!.Trim() };
+
+    /// <summary>
+    /// Task 056 (FR-A10 residual): parses a carried embedded object and returns it ONLY if it is safe to
+    /// author into this carrier. Returns <c>null</c> when it is not, and the caller then emits a run with no
+    /// content — today's drop, which <c>ComposeBlockMerge</c> reports as <c>complex-object-dropped</c>.
+    /// </summary>
+    /// <remarks>
+    /// <para><b>Two gates, and the second one is the point of the task.</b></para>
+    /// <list type="number">
+    /// <item><description>The shared opaque-carry gate (<see cref="TryParseOpaqueCarry{T}"/>) — the same one
+    /// <c>w:pPrChange</c>/<c>w:rPrChange</c> have used since task 025. Client XML never reaches the package
+    /// unparsed.</description></item>
+    /// <item><description><b>Relationship resolution.</b> A <c>w:drawing</c> names its image by relationship
+    /// id (<c>r:embed="rId7"</c>), resolved against the MAIN DOCUMENT PART — the part whose body this save
+    /// replaces. A subtree that parses and validates PERFECTLY can still name a relationship this package
+    /// does not have, and authoring that produces a file Word reports as DAMAGED: strictly worse than the
+    /// honest drop it would replace, and exactly the silent-damage regression R8 exists to end. So every
+    /// attribute in the relationships namespace must resolve against the carrier before the subtree is
+    /// authored.</description></item>
+    /// </list>
+    /// <para><b>Measured, not reasoned.</b> The carrier's relationships DO survive the body swap: the SDK
+    /// rewrites the main part's XML and never its <c>.rels</c>, so an id the source used still resolves in
+    /// the saved package. That was verified by opening a saved package and resolving the reference, not by
+    /// reading this file's own remarks — which called such parts "orphaned", a word that does not
+    /// distinguish "present with its relationship" from "relationship pruned". Evidence:
+    /// <c>projects/spaarkeai-compose-r8/notes/056-object-carry-decisions.md</c> §1;
+    /// <c>ComposeObjectCarrySeamTests</c> asserts it continuously.</para>
+    /// <para><b>Why the gate is keyed on the NAMESPACE, not on attribute names.</b> <c>r:id</c>,
+    /// <c>r:embed</c>, <c>r:link</c>, <c>r:pict</c>, <c>r:dm</c>/<c>r:lo</c>/<c>r:qs</c>/<c>r:cs</c> are all
+    /// relationship references, and the list grows with each DrawingML part type. An allow-list of names
+    /// would silently stop guarding the first construct nobody thought of.</para>
+    /// </remarks>
+    private static OpenXmlElement? TryBuildCarriedObject(ComposeEmbeddedObject embedded, ListRenderState state)
+    {
+        var parsed = RootLocalName(embedded.Xml) switch
         {
-            return new Hyperlink(element) { Id = HyperlinkPendingIdPrefix + run.Href!.Trim() };
+            "drawing" => (OpenXmlElement?)TryParseOpaqueCarry<Drawing>(embedded.Xml),
+            "object" => TryParseOpaqueCarry<EmbeddedObject>(embedded.Xml),
+            "pict" => TryParseOpaqueCarry<Picture>(embedded.Xml),
+            _ => null,
+        };
+
+        if (parsed is null)
+        {
+            return null;
         }
 
-        return element;
+        return CarriedObjectRelationshipsResolve(parsed, state.CarrierRelationshipIds) ? parsed : null;
+    }
+
+    /// <summary>
+    /// Whether every relationship reference inside <paramref name="element"/> resolves against
+    /// <paramref name="carrierRelationshipIds"/>. An object that references nothing (a shape with no image
+    /// part) passes trivially — it has nothing to dangle.
+    /// </summary>
+    private static bool CarriedObjectRelationshipsResolve(
+        OpenXmlElement element, IReadOnlySet<string> carrierRelationshipIds)
+    {
+        foreach (var node in new[] { element }.Concat(element.Descendants()))
+        {
+            foreach (var attribute in node.GetAttributes())
+            {
+                if (!string.Equals(attribute.NamespaceUri, OoxmlRelationshipNamespace, StringComparison.Ordinal))
+                {
+                    continue;
+                }
+                if (string.IsNullOrEmpty(attribute.Value))
+                {
+                    continue;
+                }
+                if (!carrierRelationshipIds.Contains(attribute.Value))
+                {
+                    return false;
+                }
+            }
+        }
+
+        return true;
+    }
+
+    /// <summary>The OOXML relationships namespace — every attribute in it names a package relationship.</summary>
+    private const string OoxmlRelationshipNamespace =
+        "http://schemas.openxmlformats.org/officeDocument/2006/relationships";
+
+    /// <summary>
+    /// Every relationship id <paramref name="mainPart"/> can resolve — internal part relationships, external
+    /// ones, and hyperlinks. All three kinds are addressed by the same <c>r:*</c> attributes from the body,
+    /// so all three belong in the set a carried object is checked against.
+    /// </summary>
+    private static IReadOnlySet<string> CollectRelationshipIds(MainDocumentPart mainPart)
+    {
+        var ids = new HashSet<string>(StringComparer.Ordinal);
+        foreach (var pair in mainPart.Parts)
+        {
+            if (pair.RelationshipId is { Length: > 0 } id) ids.Add(id);
+        }
+        foreach (var relationship in mainPart.ExternalRelationships)
+        {
+            if (relationship.Id is { Length: > 0 } id) ids.Add(id);
+        }
+        foreach (var relationship in mainPart.HyperlinkRelationships)
+        {
+            if (relationship.Id is { Length: > 0 } id) ids.Add(id);
+        }
+        return ids;
+    }
+
+    /// <summary>
+    /// The local name of an XML fragment's ROOT element (<c>"&lt;w:drawing …"</c> → <c>drawing</c>), read
+    /// without parsing. Used only to choose which typed SDK class the opaque carry is parsed through; the
+    /// typed ctor is what actually VALIDATES the name and namespace, so a wrong guess here fails the gate
+    /// rather than admitting anything.
+    /// </summary>
+    private static string RootLocalName(string? xml)
+    {
+        if (string.IsNullOrWhiteSpace(xml))
+        {
+            return string.Empty;
+        }
+
+        var start = xml.IndexOf('<');
+        if (start < 0 || start + 1 >= xml.Length)
+        {
+            return string.Empty;
+        }
+
+        var i = start + 1;
+        var nameStart = i;
+        while (i < xml.Length && xml[i] is not (' ' or '\t' or '\r' or '\n' or '>' or '/'))
+        {
+            if (xml[i] == ':')
+            {
+                nameStart = i + 1;
+            }
+            i++;
+        }
+
+        return i > nameStart ? xml[nameStart..i] : string.Empty;
     }
 
     /// <summary>
@@ -1265,6 +1813,25 @@ public sealed partial class ComposeDocumentRenderer
             }
 
             var href = id.Substring(HyperlinkPendingIdPrefix.Length);
+
+            // An INTERNAL cross-reference ("see Section 4.2") targets a BOOKMARK, not a relationship:
+            // Word writes it as `w:anchor` and it has NO entry in document.xml.rels. So there is nothing
+            // to resolve and — the point ADR-049 I-2 turns on — nothing to RE-DERIVE: the anchor is a
+            // self-contained scalar available verbatim at capture time, so it must be carried, not lost.
+            // Before UAT 2026-08-26 (D-1) this fell to the `Uri.TryCreate` else-branch below, because
+            // "#Section2" is not an absolute Uri — every internal cross-reference was silently delinked
+            // and reported as `hyperlink-target-dropped`.
+            // The bookmark it names is guaranteed to still be there: it is cloned with an untouched block,
+            // or restored from the base by ComposeBlockMerge.CarryUnmodeledConstructs (task 041) on an
+            // edited one. A dangling `w:anchor` does not make Word report a damaged file either, so this
+            // needs no equivalent of the embedded-object relationship-resolution gate.
+            if (href.Length > 1 && href[0] == '#')
+            {
+                hyperlink.Id = null;                        // the sentinel id must never persist
+                hyperlink.Anchor = SanitizeText(href[1..]); // client-controlled: same gate as body text
+                continue;
+            }
+
             if (Uri.TryCreate(href, UriKind.Absolute, out var uri))
             {
                 hyperlink.Id = mainPart.AddHyperlinkRelationship(uri, isExternal: true).Id;
@@ -1739,6 +2306,20 @@ public sealed partial class ComposeDocumentRenderer
     /// </summary>
     private void AssignParaIds(Body body)
     {
+        // Task 040 investigated excluding paragraphs inside opaque regions (`mc:AlternateContent`,
+        // `w:txbxContent`) from this pass, because entering them MUTATES a block the merge cloned verbatim:
+        // Word writes the same box twice (Choice + Fallback) carrying the SAME w14:paraId, pass 1 treats the
+        // second copy as a malformed duplicate, and re-mints it. Measured cost at the STRICT comparison level:
+        // alternate-content-duplicate-paraid.docx 66.67%, AppligentNDA_Signed.docx 95.92% (both 100% LENIENT
+        // — content is preserved; only identity churns).
+        //
+        // REVERTED, deliberately. Excluding them breaks task 011's global-paraId-uniqueness guarantee, which
+        // RenderOnSaveSeamTests pins by name on the NDA's 2BBF07C9/CA/CB class — duplicate anchors were part
+        // of the production-422 failure chain. Strict is a no-regression RATCHET, not a gate (task 031 T5),
+        // and both documents clear it by a wide margin; trading a safety invariant for a better number on a
+        // non-gating metric is the exact move the ADR-049 paired-MUST exists to forbid. The residual is on the
+        // task-045 loss list with this reasoning; resolving it properly means changing what the identity map
+        // considers a block, which is not a rendering change.
         var paragraphs = body.Descendants<Paragraph>().ToList();
 
         // Pass 1: keep the first occurrence of each client id; null out duplicates so pass 2 re-mints them.
@@ -1770,6 +2351,7 @@ public sealed partial class ComposeDocumentRenderer
             p.ParagraphId = new HexBinaryValue(minted);
         }
     }
+
 
     private string MintUnique(HashSet<string> seen)
     {
@@ -1872,7 +2454,16 @@ public sealed partial class ComposeDocumentRenderer
     // schema-validated (never string-injected), revision ids ALWAYS server-minted.
 
     private const int MaxRevisionAuthorChars = 255;
-    private const int MaxPreviousPropertiesXmlChars = 32 * 1024;
+
+    /// <summary>
+    /// Authoring cap on ANY opaque OOXML carry — <see cref="ComposeFormatChange.PreviousPropertiesXml"/>
+    /// (task 025) and <see cref="ComposeEmbeddedObject.Xml"/> (task 056). One number for one mechanism:
+    /// a second cap would be a second contract in everything but name. Generous for both (a real
+    /// <c>w:drawing</c> in the corpus is 0.6–2.4 KB, a <c>w:rPr</c> a few hundred bytes) and still bounded
+    /// against a hostile payload. Over the cap the carry is REFUSED, never truncated — a truncated subtree
+    /// is not the construct the document contained.
+    /// </summary>
+    internal const int MaxOpaqueCarryXmlChars = 32 * 1024;
 
     // Step-9.5 F3: the xsd:dateTime LEXICAL forms (K covers Z / ±hh:mm / no-zone). A merely
     // DateTime.TryParse-able string ("08/01/2026") is NOT a valid @w:date and must be dropped.
@@ -1911,18 +2502,33 @@ public sealed partial class ComposeDocumentRenderer
         NormalizeXsdDateTime(date) is { } valid ? new DateTimeValue { InnerText = valid } : null;
 
     /// <summary>
-    /// The <see cref="ComposeFormatChange.PreviousPropertiesXml"/> gate: parses the opaque carry through
-    /// the TYPED SDK class — the generated ctor VALIDATES the root element (name + namespace; a
-    /// wrong-root or malformed fragment throws <c>ArgumentException</c>, and DTDs are prohibited by the
-    /// SDK reader) — then schema-validates the parsed subtree; any failure drops the whole change record
-    /// (the current formatting simply stands; equivalent to accepting the formatting change). Never
-    /// string-injection into the package. Size-clamped against hostile payloads. The validator is
-    /// per-call — <c>OpenXmlValidator</c> instance thread-safety is not contractually guaranteed and
-    /// this runs on concurrent request paths (Step-9.5 F10); a subtree validation is cheap.
+    /// THE opaque-carry gate — one mechanism, two consumers:
+    /// <see cref="ComposeFormatChange.PreviousPropertiesXml"/> (task 025) and
+    /// <see cref="ComposeEmbeddedObject.Xml"/> (task 056).
+    /// <para>
+    /// Parses the carry through the TYPED SDK class — the generated ctor VALIDATES the root element (name +
+    /// namespace; a wrong-root or malformed fragment throws <c>ArgumentException</c>, and DTDs are
+    /// prohibited by the SDK reader) — then schema-validates the parsed subtree; any failure returns null
+    /// and the CALLER degrades (the format-change record is not emitted / the object is dropped). Never
+    /// string-injection into the package. Size-clamped against hostile payloads. The validator is per-call —
+    /// <c>OpenXmlValidator</c> instance thread-safety is not contractually guaranteed and this runs on
+    /// concurrent request paths (Step-9.5 F10); a subtree validation is cheap.
+    /// </para>
+    /// <para>
+    /// Named for what it does rather than for its first caller (task 056 renamed it from
+    /// <c>TryParsePreviousProperties</c>): a method called <c>…PreviousProperties</c> parsing a
+    /// <c>w:drawing</c> is precisely the kind of stale naming that let a stale REMARK about bookmarks
+    /// survive two tasks past being true.
+    /// </para>
+    /// <para>
+    /// <b>Parsing is not sufficient for every carry.</b> A subtree that parses and validates can still name
+    /// a package RELATIONSHIP that does not exist — see <see cref="CarriedObjectRelationshipsResolve"/>,
+    /// which is the second gate the embedded-object carry needs and the format-change carry does not.
+    /// </para>
     /// </summary>
-    private static T? TryParsePreviousProperties<T>(string? xml) where T : OpenXmlElement
+    private static T? TryParseOpaqueCarry<T>(string? xml) where T : OpenXmlElement
     {
-        if (string.IsNullOrWhiteSpace(xml) || xml.Length > MaxPreviousPropertiesXmlChars)
+        if (string.IsNullOrWhiteSpace(xml) || xml.Length > MaxOpaqueCarryXmlChars)
         {
             return null;
         }
@@ -1970,56 +2576,56 @@ public sealed partial class ComposeDocumentRenderer
         {
             return ScanCarrierBytes(carrierBytes, doc =>
             {
-            var main = doc.MainDocumentPart;
-            if (main is null)
-            {
-                return 0;
-            }
-
-            var max = 0;
-            void Scan(OpenXmlElement? root)
-            {
-                if (root is null) return;
-                foreach (var element in root.Descendants())
+                var main = doc.MainDocumentPart;
+                if (main is null)
                 {
-                    var id = element switch
+                    return 0;
+                }
+
+                var max = 0;
+                void Scan(OpenXmlElement? root)
+                {
+                    if (root is null) return;
+                    foreach (var element in root.Descendants())
                     {
-                        InsertedRun ins => ins.Id?.Value,
-                        DeletedRun del => del.Id?.Value,
-                        MoveFromRun mf => mf.Id?.Value,
-                        MoveToRun mt => mt.Id?.Value,
-                        Inserted i => i.Id?.Value,
-                        Deleted d => d.Id?.Value,
-                        RunPropertiesChange rc => rc.Id?.Value,
-                        ParagraphPropertiesChange pc => pc.Id?.Value,
-                        CellInsertion ci => ci.Id?.Value,
-                        CellDeletion cd => cd.Id?.Value,
-                        // Step-9.5 F8: the remaining *Change family preserved parts can carry.
-                        SectionPropertiesChange sc => sc.Id?.Value,
-                        TablePropertiesChange tpc => tpc.Id?.Value,
-                        TableRowPropertiesChange trc => trc.Id?.Value,
-                        TableCellPropertiesChange tcc => tcc.Id?.Value,
-                        TableGridChange tgc => tgc.Id?.Value,
-                        _ => null,
-                    };
-                    if (id is not null
-                        && int.TryParse(id, NumberStyles.Integer, CultureInfo.InvariantCulture, out var value)
-                        && value > max)
-                    {
-                        max = value;
+                        var id = element switch
+                        {
+                            InsertedRun ins => ins.Id?.Value,
+                            DeletedRun del => del.Id?.Value,
+                            MoveFromRun mf => mf.Id?.Value,
+                            MoveToRun mt => mt.Id?.Value,
+                            Inserted i => i.Id?.Value,
+                            Deleted d => d.Id?.Value,
+                            RunPropertiesChange rc => rc.Id?.Value,
+                            ParagraphPropertiesChange pc => pc.Id?.Value,
+                            CellInsertion ci => ci.Id?.Value,
+                            CellDeletion cd => cd.Id?.Value,
+                            // Step-9.5 F8: the remaining *Change family preserved parts can carry.
+                            SectionPropertiesChange sc => sc.Id?.Value,
+                            TablePropertiesChange tpc => tpc.Id?.Value,
+                            TableRowPropertiesChange trc => trc.Id?.Value,
+                            TableCellPropertiesChange tcc => tcc.Id?.Value,
+                            TableGridChange tgc => tgc.Id?.Value,
+                            _ => null,
+                        };
+                        if (id is not null
+                            && int.TryParse(id, NumberStyles.Integer, CultureInfo.InvariantCulture, out var value)
+                            && value > max)
+                        {
+                            max = value;
+                        }
                     }
                 }
-            }
 
-            Scan(main.Document);
-            foreach (var header in main.HeaderParts) Scan(header.Header);
-            foreach (var footer in main.FooterParts) Scan(footer.Footer);
-            Scan(main.FootnotesPart?.Footnotes);
-            Scan(main.EndnotesPart?.Endnotes);
-            // Step-9.5 F8: comment TEXT can itself carry tracked changes; the part is preserved
-            // byte-identically (task 024), so its ids join the collision base too.
-            Scan(main.WordprocessingCommentsPart?.Comments);
-            return max;
+                Scan(main.Document);
+                foreach (var header in main.HeaderParts) Scan(header.Header);
+                foreach (var footer in main.FooterParts) Scan(footer.Footer);
+                Scan(main.FootnotesPart?.Footnotes);
+                Scan(main.EndnotesPart?.Endnotes);
+                // Step-9.5 F8: comment TEXT can itself carry tracked changes; the part is preserved
+                // byte-identically (task 024), so its ids join the collision base too.
+                Scan(main.WordprocessingCommentsPart?.Comments);
+                return max;
             });
         }
         catch (Exception ex) when (ex is not OutOfMemoryException)
@@ -2067,6 +2673,20 @@ public sealed partial class ComposeDocumentRenderer
         /// user; a fact that CARRIES an author (imported revisions) keeps it. Raw — sanitized at the
         /// emission sites via <see cref="ResolveRevisionAuthorValue"/>.</summary>
         public string? DefaultRevisionAuthor { get; set; }
+
+        /// <summary>
+        /// Task 056: every relationship id the RENDER TARGET's main document part can resolve. A carried
+        /// embedded object is authored only when every relationship its subtree references is in this set —
+        /// otherwise the save would emit a reference to nothing, and Word reports such a file as damaged.
+        /// <para>
+        /// EMPTY by default, which is the correct answer for <see cref="SynthesizeDocument"/>: a
+        /// born-in-editor package has no relationships, so a posted object naming one is refused rather than
+        /// authored into a document that cannot resolve it. Populated by
+        /// <see cref="RenderIntoCarrier"/> from the carrier's own part.
+        /// </para>
+        /// </summary>
+        public IReadOnlySet<string> CarrierRelationshipIds { get; set; } =
+            System.Collections.Immutable.ImmutableHashSet<string>.Empty;
 
         /// <summary>Task 025: mints the next revision <c>w:id</c> — monotonic per render, seeded above the
         /// carrier's existing revision ids (<see cref="ScanCarrierRevisionIdSeed"/>) so re-authored body
@@ -2241,22 +2861,22 @@ public sealed partial class ComposeDocumentRenderer
         {
             return ScanCarrierBytes(carrierBytes, doc =>
             {
-            var scan = new CarrierNumberingScan();
-            var numbering = doc.MainDocumentPart?.NumberingDefinitionsPart?.Numbering;
-            if (numbering is null)
-            {
-                return scan;
-            }
+                var scan = new CarrierNumberingScan();
+                var numbering = doc.MainDocumentPart?.NumberingDefinitionsPart?.Numbering;
+                if (numbering is null)
+                {
+                    return scan;
+                }
 
-            foreach (var abstractNum in numbering.Elements<AbstractNum>())
-            {
-                scan.RecordAbstract(abstractNum);
-            }
-            foreach (var instance in numbering.Elements<NumberingInstance>())
-            {
-                scan.RecordInstance(instance);
-            }
-            return scan;
+                foreach (var abstractNum in numbering.Elements<AbstractNum>())
+                {
+                    scan.RecordAbstract(abstractNum);
+                }
+                foreach (var instance in numbering.Elements<NumberingInstance>())
+                {
+                    scan.RecordInstance(instance);
+                }
+                return scan;
             });
         }
         catch (Exception ex) when (ex is not ComposePatchException and not OutOfMemoryException)
@@ -2300,5 +2920,68 @@ public sealed partial class ComposeDocumentRenderer
 
         /// <summary>Returns the shared bullet-list instance id, allocating it on first use.</summary>
         public int BulletInstance() => BulletInstanceId ??= _nextNumId++;
+    }
+
+    // ═══════════════════════════════════════════════════════════════════════════════════════════
+    // THE MERGE, EXECUTED (ADR-049 R8 third amendment · task 040).
+    //
+    // Not a second body author (ADR-049 I-5): this method lives in the renderer, appends into the same
+    // `body`, and shares the same `ListRenderState` as `RenderBlocks`, which it delegates to for every block
+    // it does not clone. `ComposeBlockMerge` decides; this executes. One component writes body children.
+    //
+    //   cloned  -> the baseline's own subtree, appended verbatim, with ZERO property logic. Nothing is
+    //              re-derived, so nothing can be lost (invariant 7).
+    //   rendered-> from the model, inheriting the base counterpart's unmodeled properties (FR-A04).
+    //   no base -> from the model alone. An inserted block has no base side; that is not a failure.
+    // ═══════════════════════════════════════════════════════════════════════════════════════════
+    private void RenderMergedBlocks(
+        Body body,
+        IReadOnlyList<ComposeBlock> posted,
+        ComposeMergeBaseline baseline,
+        ListRenderState state,
+        ComposeMergeStats? stats)
+    {
+        var steps = ComposeBlockMerge.Plan(posted, baseline, stats);
+
+        // ONE ordered-list run cursor for the entire body, observed by cloned and rendered blocks alike.
+        // The task-030 prototype batched renders and let each batch start a fresh cursor, so a rendered list
+        // item following cloned list items restarted at 1 (its limitation 3). Sharing the cursor — and
+        // recording every cloned block into it — is what makes a cloned list and a rendered continuation of
+        // it number as one list.
+        var runCursor = new Dictionary<int, int>();
+        var single = new ComposeBlock[1];
+
+        foreach (var step in steps)
+        {
+            if (step.Action == ComposeMergeAction.Clone)
+            {
+                var clone = baseline.Blocks[step.BaseIndex].CloneNode(true);
+                body.AppendChild(clone);
+                ComposeBlockMerge.ObserveClonedBlock(clone, runCursor);
+                continue;
+            }
+
+            // Rendered one block at a time so the just-appended element can be identified for property
+            // inheritance. Continuity is unaffected: the run cursor is external and persists across calls.
+            var before = body.ChildElements.Count;
+            single[0] = posted[step.PostedIndex];
+            RenderBlocks(body, single, state, runCursor);
+
+            if (step.BaseIndex < 0)
+            {
+                continue;
+            }
+
+            var baseElement = baseline.Blocks[step.BaseIndex];
+            for (var i = before; i < body.ChildElements.Count; i++)
+            {
+                ComposeBlockMerge.InheritProperties(body.ChildElements[i], baseElement);
+            }
+
+            // FR-A05 (task 041): restore what the content model cannot represent — bookmarks (the target of
+            // every REF field, so dropping one breaks cross-references ELSEWHERE in the document) and a
+            // block-level content-control shell. Taken from the BASE block, never from a client payload.
+            ComposeBlockMerge.CarryUnmodeledConstructs(body, before, baseElement, code => state.Warn(code));
+        }
     }
 }

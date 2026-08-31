@@ -1,5 +1,6 @@
 using System.Text.Json;
 using FluentAssertions;
+using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Options;
@@ -51,7 +52,23 @@ public sealed class LiveFactNodeTests
 
         parser ??= new SubjectParser(Options.Create(new SubjectSchemeCatalogOptions()));
 
-        return new LiveFactNode(resolvers, parser, NullLogger<LiveFactNode>.Instance);
+        // LiveFactNode resolves the Scoped resolver dictionary from IServiceScopeFactory
+        // (dotnet-10-upgrade task 020, R7). Wire a scope chain that yields the test dictionary.
+        return new LiveFactNode(ScopeFactoryReturning(resolvers), parser, NullLogger<LiveFactNode>.Instance);
+    }
+
+    /// <summary>Builds a mock IServiceScopeFactory whose scope resolves the supplied resolver map.</summary>
+    private static IServiceScopeFactory ScopeFactoryReturning(IReadOnlyDictionary<string, ILiveFactResolver> resolvers)
+    {
+        var scopedProvider = new Mock<IServiceProvider>();
+        scopedProvider
+            .Setup(sp => sp.GetService(typeof(IReadOnlyDictionary<string, ILiveFactResolver>)))
+            .Returns(resolvers);
+        var scope = new Mock<IServiceScope>();
+        scope.Setup(s => s.ServiceProvider).Returns(scopedProvider.Object);
+        var factory = new Mock<IServiceScopeFactory>();
+        factory.Setup(f => f.CreateScope()).Returns(scope.Object);
+        return factory.Object;
     }
 
     private static FactArtifact BuildFact(string subject, string predicate, double rawValue) => new()
@@ -213,18 +230,9 @@ public sealed class LiveFactNodeTests
     }
 
     [Fact]
-    public void Constructor_NullResolvers_Throws()
-    {
-        var parser = new SubjectParser(Options.Create(new SubjectSchemeCatalogOptions()));
-        Action act = () => new LiveFactNode(null!, parser, NullLogger<LiveFactNode>.Instance);
-        act.Should().Throw<ArgumentNullException>().WithParameterName("resolvers");
-    }
-
-    [Fact]
     public void Constructor_NullParser_Throws()
     {
-        var resolvers = new Dictionary<string, ILiveFactResolver>();
-        Action act = () => new LiveFactNode(resolvers, null!, NullLogger<LiveFactNode>.Instance);
+        Action act = () => new LiveFactNode(Mock.Of<IServiceScopeFactory>(), null!, NullLogger<LiveFactNode>.Instance);
         act.Should().Throw<ArgumentNullException>().WithParameterName("subjectParser");
     }
 }

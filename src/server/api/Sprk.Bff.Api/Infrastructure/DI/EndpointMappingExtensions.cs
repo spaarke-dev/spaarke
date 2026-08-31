@@ -13,8 +13,10 @@ using Sprk.Bff.Api.Api.Membership;
 using Sprk.Bff.Api.Api.Notifications;
 using Sprk.Bff.Api.Api.Office;
 using Sprk.Bff.Api.Api.Reporting;
+using Sprk.Bff.Api.Api.SpeAdmin;
 using Sprk.Bff.Api.Api.Workspace;
-using Sprk.Bff.Api.Endpoints;
+using Sprk.Bff.Api.Endpoints.Diagnostics;  // G-8 Batch 6 — I4 tenant-container-resolver diagnostic (customer-provisioning-r1)
+using Sprk.Bff.Api.Endpoints.Onboarding;   // task 042 — H0.5 consent-callback (customer-provisioning-r1)
 
 namespace Sprk.Bff.Api.Infrastructure.DI;
 
@@ -45,6 +47,11 @@ public static class EndpointMappingExtensions
         // Anonymous client config endpoint — MSAL bootstrap fallback for direct URL access (AIPU-091)
         app.MapMsalConfigEndpoints();
 
+        // Anonymous public runtime config endpoint (FR-36 — customer-provisioning-orchestration-r1
+        // task 087). Returns { bffUrl, msalClientId, tenantId, featureFlags } short-cached (60s + ETag)
+        // for external-spa + code-pages, closing the bake-at-build-time pattern.
+        app.MapPublicConfigEndpoint();
+
         // /healthz is the App Service LIVENESS probe — it must not fail on catalog
         // drift (an unseeded catalog would recycle instances forever). The FR-P0-04
         // reconciliation check (tag "catalog") is exposed on its own endpoint below;
@@ -61,8 +68,15 @@ public static class EndpointMappingExtensions
             Predicate = registration => registration.Tags.Contains("catalog")
         }).AllowAnonymous();
 
-        app.MapGet("/healthz/dataverse", TestDataverseConnectionAsync);
-        app.MapGet("/healthz/dataverse/crud", TestDataverseCrudOperationsAsync);
+        // Anonymous smoke probes that hit Dataverse live — rate-limited to prevent abuse
+        // (mirrors the /healthz/dataverse/doc/{id} sibling below). Task 023 (B-2): added
+        // RequireRateLimiting and stopped echoing ex.Message (see handler methods below).
+        app.MapGet("/healthz/dataverse", TestDataverseConnectionAsync)
+            .AllowAnonymous()
+            .RequireRateLimiting("anonymous");
+        app.MapGet("/healthz/dataverse/crud", TestDataverseCrudOperationsAsync)
+            .AllowAnonymous()
+            .RequireRateLimiting("anonymous");
 
         app.MapGet("/healthz/dataverse/doc/{id}", async (string id, IDocumentDataverseService dataverseService, ILogger<Program> logger) =>
         {
@@ -89,8 +103,10 @@ public static class EndpointMappingExtensions
             }
             catch (Exception ex)
             {
+                // Task 023 (MF-3): do NOT echo ex.Message / InnerException to the anonymous
+                // caller (information disclosure). The exception is logged server-side above.
                 logger.LogError(ex, "[DEBUG-ENDPOINT] Error retrieving document {Id}", id);
-                return Results.Ok(new { status = "ERROR", documentId = id, error = ex.Message, innerError = ex.InnerException?.Message });
+                return Results.Ok(new { status = "ERROR", documentId = id, message = "An error occurred retrieving the document. See server logs." });
             }
         })
             .AllowAnonymous()
@@ -125,7 +141,33 @@ public static class EndpointMappingExtensions
         app.MapFileAccessEndpoints();
         app.MapDocumentsEndpoints();
         app.MapDocumentsBulkEndpoints();
-        app.MapUploadEndpoints();
+
+        // MapUploadEndpoints() REMOVED — unified-access-control-r2 task 073 (Phase 0c Wave 1).
+        // Api/UploadEndpoints.cs is deleted; its three app-only (managed-identity) routes were
+        // retired rather than gated:
+        //
+        //   PUT  /api/containers/{containerId}/files/{*path}
+        //   POST /api/containers/{containerId}/upload
+        //   PUT  /api/upload-session/chunk
+        //
+        // All three took an SPE key straight off the route and wrote as the MANAGED IDENTITY, so
+        // SPE performed no caller-side check, and their only gate was RequireAuthorization(
+        // "canwritefiles") -> ResourceAccessRequirement -> ResourceAccessHandler, which resolves
+        // DOCUMENT rights from a CONTAINER id (ExtractResourceId treats containerId / driveId /
+        // documentId / id interchangeably). Real mechanism, wrong resource domain.
+        //
+        // RETIRED, NOT GATED, because a repo-wide caller sweep found ZERO callers: every live upload
+        // flow uses the OBO sibling PUT /api/obo/containers/{id}/files/{*path} (11 call sites via
+        // EntityCreationService.ts:493, Spaarke.SdapClient UploadOperation.ts:27, document-upload
+        // SdapApiClient.ts:101). Gating instead would have required a container->owning-record
+        // mapping that tasks 075/076 own, i.e. a second copy of that mapping — which task 075's
+        // constraints forbid. Deletion is remedy #2 in RouteAuthorizationGuardTests' own remedy list
+        // and follows task 071's precedent for the OBO drive-keyed routes.
+        //
+        // Absence is asserted by tests/integration/regression/
+        // MiContainerKeyedWriteRouteRetirementTests.cs. Do not re-add these routes: the supported
+        // user-context path is /api/obo/**, and the supported app-only path is the in-process
+        // SpeFileStore facade (Workers/, Services/Email, Services/Communication all call it directly).
         app.MapOBOEndpoints();
 
         // OBO (user-context) document version-history: list + open-prior-version, READ-ONLY —
@@ -351,6 +393,20 @@ public static class EndpointMappingExtensions
         // Registration endpoints (/api/registration/*) — demo request submission, approval, rejection
         app.MapRegistrationEndpoints();
 
+        // Onboarding — H0.5 consent-callback (customer-provisioning-orchestration-r1, task 042).
+        // POST /api/onboarding/consent-callback — Anonymous + HMAC-SHA256 signature verified.
+        // Captures the customer admin tid from the Microsoft admin-consent redirect and enqueues
+        // the L2 provisioning pipeline via Service Bus. See Endpoints/Onboarding/OnboardingModule.cs
+        // and design.md D18 + §4.3a.2 for the Anonymous+HMAC exception rationale.
+        app.MapConsentCallbackEndpoint();
+
+        // Diagnostics — I4 tenant-container-resolver (customer-provisioning-orchestration-r1,
+        // G-8 Batch 6 fix #18). GET /api/diagnostics/tenant-container-resolver — JWT-authorized,
+        // READ-ONLY; the L2 H13 I4 invariant probe's BFF-side dependency (without it, live H13
+        // parks I4 at InfraFault via its 404 branch and Ready is unreachable). Contract locked
+        // by SpeContainerResolverInvariantProbe (L2). See Endpoints/Diagnostics/.
+        app.MapTenantContainerResolverEndpoint();
+
         // R3 task 020 (FR-2.6) — Admin background-job inspection endpoints.
         // GET /api/admin/jobs               — list registered jobs + status summary
         // GET /api/admin/jobs/{jobId}/status — per-job detail + last 10 runs
@@ -375,7 +431,7 @@ public static class EndpointMappingExtensions
         app.MapAdminMembershipEndpoints();
     }
 
-    private static async Task<IResult> TestDataverseConnectionAsync(IDataverseHealthService dataverseService)
+    private static async Task<IResult> TestDataverseConnectionAsync(IDataverseHealthService dataverseService, ILogger<Program> logger)
     {
         try
         {
@@ -387,11 +443,14 @@ public static class EndpointMappingExtensions
         }
         catch (Exception ex)
         {
-            return TypedResults.Problem(detail: ex.Message, statusCode: 503, title: "Dataverse Connection Error");
+            // Task 023 (B-2): do NOT echo ex.Message to the anonymous caller (information
+            // disclosure). Log server-side and return a generic detail.
+            logger.LogError(ex, "Dataverse connection health probe failed");
+            return TypedResults.Problem(detail: "Dataverse connection test failed. See server logs.", statusCode: 503, title: "Dataverse Connection Error");
         }
     }
 
-    private static async Task<IResult> TestDataverseCrudOperationsAsync(IDataverseHealthService dataverseService)
+    private static async Task<IResult> TestDataverseCrudOperationsAsync(IDataverseHealthService dataverseService, ILogger<Program> logger)
     {
         try
         {
@@ -403,7 +462,10 @@ public static class EndpointMappingExtensions
         }
         catch (Exception ex)
         {
-            return TypedResults.Problem(detail: ex.Message, statusCode: 503, title: "Dataverse CRUD Test Error");
+            // Task 023 (B-2): do NOT echo ex.Message to the anonymous caller (information
+            // disclosure). Log server-side and return a generic detail.
+            logger.LogError(ex, "Dataverse CRUD health probe failed");
+            return TypedResults.Problem(detail: "Dataverse CRUD operations test failed. See server logs.", statusCode: 503, title: "Dataverse CRUD Test Error");
         }
     }
 }

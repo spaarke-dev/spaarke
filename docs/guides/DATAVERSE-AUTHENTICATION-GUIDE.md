@@ -1,5 +1,31 @@
 # Dataverse Authentication Guide - Complete Reference
 
+> ## 🔴 Secret-free BFF identity — read before following any credential step on this page
+>
+> **2026-08-24, `spaarke-auth-v4-dataverse-MI` task 033 (ADR-028 **A4**; exception **E-3 CLOSED**).**
+> The BFF authenticates as a confidential client — **including on the OBO / delegated path** — using a
+> **federated credential issued to its user-assigned managed identity**. It holds **no client secret**.
+>
+> | Removed | |
+> |---|---|
+> | App settings | `API_CLIENT_SECRET`, `AzureAd__ClientSecret`, `Dataverse__ClientSecret`, `AgentToken__ClientSecret` |
+> | Key Vault | `BFF-API-ClientSecret`, `bff-api-client-secret`, and the orphaned `Graph-API-ClientSecret` |
+>
+> Set instead: `Graph__Credentials__Order__0=ManagedIdentityFederated` and
+> `Graph__Credentials__RequireSecretFreeIdentity=true`.
+>
+> **Do not re-create the secret.** A secret listed *beneath* MI-FIC in the order is worse than no migration:
+> a broken federated credential would fall through to it silently while every health signal stayed green.
+> With `RequireSecretFreeIdentity=true` the app **refuses to start** outside Development if `ClientSecret`
+> returns to the order.
+>
+> Any instruction below that tells you to create, store, reference or rotate a BFF client secret is
+> **superseded**. Still valid: ADR-028 **E-1** per-customer SPE owning-app secrets, and
+> `PowerBi:ClientSecret` while task 042 is deferred.
+> Canonical: [`ADR-028`](../../.claude/adr/ADR-028-spaarke-auth-architecture.md) ·
+> [`auth-deployment-setup.md`](auth-deployment-setup.md)
+
+
 **Purpose**: Definitive guide for Dataverse authentication in the Spaarke SDAP project
 **Last Updated**: 2026-03 (Auth v2 callout added 2026-05-20)
 **Status**: Legacy reference (pre-Auth v2) — see Auth v2 callout below
@@ -12,7 +38,7 @@
 >
 > **For new-environment provisioning, follow** [`auth-deployment-setup.md`](auth-deployment-setup.md) (the canonical 10-section operator runbook) instead of this guide. That runbook covers §3 App Service settings, §5 Azure AD MI Graph permission grants, §6 Dataverse Application User (the MI is the App User), §7 Exchange ApplicationAccessPolicy.
 >
-> **`Dataverse-ClientSecret` is no longer consumed by production code paths.** It can be removed from Key Vault on environments where MI is enabled (after the MI cutover is verified by smoke test).
+> **⚠️ CORRECTION (2026-08-13): `Dataverse-ClientSecret` is STILL required — do NOT remove it.** AUTHV2-042 migrated only the `Services/Ai` raw-HTTP camp; the shared-lib Dataverse path (`DataverseWebApiService.cs:51-52` + `DataverseOptions.cs:32` `[Required]`+`ValidateOnStart`, plus `DataverseServiceClientImpl`) still hard-requires the secret backing `Dataverse:ClientSecret` regardless of `Graph__ManagedIdentity__Enabled` — removing it from Key Vault **crashes the BFF at startup**. Full removal is gated on the #3b shared-lib `ClientSecret`→MI migration (project `code-quality-and-assurance-r3` task 011 / NG1). See `projects/code-quality-and-assurance-r3/notes/bff-auth-surface-map.md`.
 >
 > **What's still canonical in this guide**: the local-dev `ServiceClient` connection-string pattern, `IDataverseService` interface, troubleshooting (HTTP error codes, MSAL exceptions), naming conventions. Treat the "PRODUCTION READY" assertion as historically accurate for the pre-v2 ClientSecret path; the v2 canonical production path is documented in the runbook.
 
@@ -1004,7 +1030,7 @@ Multiple approaches exist for Dataverse authentication. We tried custom HttpClie
 #### Alternatives Considered
 
 1. **Custom HttpClient**: Rejected - unreliable, returns 500 errors
-2. **Managed Identity**: Rejected - doesn't work for Dataverse S2S
+2. **Managed Identity**: ~~Rejected - doesn't work for Dataverse S2S~~ — **CORRECTED 2026-08-14 (code-quality-and-assurance-r3 task 060).** This claim is stale and contradicts [ADR-028 §24](../../.claude/adr/ADR-028-spaarke-auth-architecture.md), which **mandates `DefaultAzureCredential` (managed identity) for the Dataverse service identity**, and the live `auth-deployment-setup.md` §9c MI Dataverse smoke test. Managed identity does work for Dataverse app-only (server-to-server) access — the `Services/Ai` Dataverse camp already runs on the UAMI. The BFF's own shared-lib Dataverse path (`DataverseServiceClientImpl` / `DataverseWebApiService`) is still `ClientSecret`-based; migrating it to MI is the **#3(b) shared-lib ClientSecret→MI migration**, tracked on the **NG1 / task-011** assess-then-decide track (see `projects/code-quality-and-assurance-r3/notes/deployment-refactors-assessment-2026-08-12.md` §Addendum 2026-08-13). This task (060) does not perform that migration.
 3. **CrmServiceClient (.NET Framework)**: Rejected - not .NET 8 compatible
 
 #### Review Date

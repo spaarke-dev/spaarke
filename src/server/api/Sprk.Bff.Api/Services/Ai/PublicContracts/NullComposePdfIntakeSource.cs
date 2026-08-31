@@ -31,4 +31,28 @@ public sealed class NullComposePdfIntakeSource : IComposePdfIntakeSource
             fileName);
         return Task.FromResult<DocumentLayout?>(null);
     }
+
+    /// <inheritdoc />
+    /// <remarks>
+    /// Task 050 (FR-11): the gate-off peer must also answer the discriminated twin. This is NOT one of the
+    /// three runtime causes (circuit-open / timeout / corrupt) — it is the ADR-032 gate-off universe — so
+    /// it rides <see cref="PdfIntakeFailureCause.Unknown"/> carrying the DISTINCT "AI document parsing is
+    /// disabled" message (the gate-off case stays distinct via the message, keeping the enum narrow per
+    /// task 073). The caller (<c>ComposeService.ProjectPdfToDocxAsync</c>) surfaces it as a 503 with this
+    /// exact text — an honest "the service is turned off here", never the generic corrupt-file wording.
+    /// </remarks>
+    public Task<PdfIntakeParseResult> ParseWithDiagnosticsAsync(
+        byte[] pdfBytes,
+        string fileName,
+        CancellationToken cancellationToken)
+    {
+        _logger.LogWarning(
+            "Compose PDF intake (diagnostics) requested for {FileName} but AI document parsing is disabled " +
+            "(compound gate OFF: Analysis:Enabled + DocumentIntelligence:Enabled required).",
+            fileName);
+        return Task.FromResult(PdfIntakeParseResult.Failure(
+            PdfIntakeFailureCause.Unknown,
+            "PDF intake is unavailable: AI document parsing is disabled on this host " +
+            "(Analysis:Enabled + DocumentIntelligence:Enabled required)."));
+    }
 }

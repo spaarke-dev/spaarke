@@ -1,0 +1,101 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="052" project="smart-todo-r5">
+  <metadata>
+    <title>Deploy 5 ribbon solutions plus smoke-test "Create To Do" on each parent entity (FR-19)</title>
+    <phase>6: Ribbon expansion</phase>
+    <gate>051 complete</gate>
+    <status>not-started</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Tags include `integration-test` — CLAUDE.md §8's TEST-MODIFYING override row applies FULL rigor unconditionally, overriding the default STANDARD classification a Phase-6 deploy task would otherwise get. Independently justified: real-Dataverse deploy plus a 6-entity smoke test is the pass/fail gate for FR-19's actual acceptance criteria against live data, not a mock — high blast-radius if skipped or faked.</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Deploy plus manual/scripted smoke verification against solutions already authored (task 051) and individually imported — confirmatory work, not novel design. CLAUDE.md §8.5 default tier applies.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Sequential deploy-and-verify step gated on task 051's 5 solutions being individually imported; running concurrently with 051 risks smoke-testing against a partially-imported state.</parallel-reason>
+    <deps>051</deps>
+    <tags>ribbon, dataverse, deploy, integration-test</tags>
+    <estimated-effort>1.5-2 hrs</estimated-effort>
+  </metadata>
+
+  <prompt>Deploy (or confirm already-deployed, per task 051) the 5 new per-entity ribbon solutions and the task-050 Matter icon refresh into the target Dataverse environment, then smoke-test each of the 6 "Create To Do" buttons (Matter plus the 5 new entities) by opening a REAL record of each entity type, clicking the button, and confirming the CreateTodo wizard opens with the correct entity context (entityType and entityId visible in the wizard's regarding field), per FR-19's full acceptance criteria and the PROC-1 real-DV smoke discipline (spec FR-20).</prompt>
+
+  <role>SPAARKE platform developer. Expert in Dataverse solution deployment and manual/browser-driven UI verification. Follow PROC-1 (real-DV, not mock) discipline strictly.</role>
+
+  <goal>All 5 new ribbon solutions (ProjectRibbons, EventRibbons, InvoiceRibbons, WorkAssignmentRibbons, CommunicationRibbons) plus the task-050 spaarke_insights icon-refresh are imported and published in the target Dataverse environment; each of the 6 parent entities' "Create To Do" button is smoke-tested against a REAL record and confirmed to open the CreateTodo wizard with the correct entityType/entityId in the regarding field; results (pass/fail per entity) are recorded in projects/smart-todo-r5/notes/.</goal>
+
+  <context>
+    <background>Per spec FR-19's acceptance criterion ("each parent record's 'Create To Do' button opens the CreateTodo wizard with the correct entity context") and spec FR-20/PROC-1 (any Dataverse-querying widget/UI change requires at least one real create-plus-read against real Dataverse before merge — this task IS that gate for the ribbon expansion). Task 051 authored and individually imported the 5 solutions; this task is the closing verification step for Phase 6, re-confirming Matter (task 050) alongside the 5 new entities so the full FR-19 acceptance set is checked in one pass.</background>
+    <relevant-files>
+      <file role="reference">src/solutions/spaarke_insights/Entities/sprk_Matter/RibbonDiff.xml</file>
+      <file role="reference">src/solutions/ProjectRibbons/</file>
+      <file role="reference">src/solutions/EventRibbons/</file>
+      <file role="reference">src/solutions/InvoiceRibbons/</file>
+      <file role="reference">src/solutions/WorkAssignmentRibbons/</file>
+      <file role="reference">src/solutions/CommunicationRibbons/</file>
+      <file role="reference">src/client/webresources/js/sprk_wizard_commands.js</file>
+    </relevant-files>
+    <dependencies>
+      <dependency task="051" status="pending">5 ribbon solutions authored and individually imported.</dependency>
+    </dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="spec FR-20/PROC-1">Smoke test MUST run against REAL Dataverse, not a prototype mock — this is exactly the PROC-1 hazard class (a mock previously hid an entity-name bug in R4, per the TASK-INDEX.md High-Risk-Items note on the RegardingResolver tasks).</constraint>
+    <constraint source="spec FR-19">The smoke test's pass condition is entityType AND entityId both visible/correct in the wizard's regarding field — a wizard that opens but shows an empty or wrong regarding context is a FAIL, not a partial pass.</constraint>
+    <constraint source="ribbon-edit skill">If any solution failed to import cleanly in task 051, re-attempt the import here only after confirming the underlying XSD/schema issue from task 051's escalation was actually resolved — do not silently retry an unresolved import.</constraint>
+    <constraint source="project">Re-verify Matter (task 050) in the SAME pass as the 5 new entities so the full 6-entity FR-19 acceptance set is validated together, not just the 5 new ones.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>ribbon customization</topic>
+    <files>
+      <file>.claude/skills/ribbon-edit/SKILL.md</file>
+      <file>projects/smart-todo-r5/spec.md</file>
+      <file>projects/smart-todo-r5/design.md</file>
+      <file>projects/smart-todo-r5/CLAUDE.md</file>
+      <file>docs/architecture/spaarke-todo-architecture.md</file>
+    </files>
+  </knowledge>
+
+  <steps mode="prescriptive">
+    <step order="0" name="Context + rigor declaration">Declare rigor level (FULL, TEST-MODIFYING override) and reason per CLAUDE.md §8. Load knowledge files. Confirm task 051 is complete (gate: 051 complete) before proceeding.</step>
+    <step order="1">Confirm (via `pac solution list` or the maker portal) that all 5 solutions from task 051 (ProjectRibbons, EventRibbons, InvoiceRibbons, WorkAssignmentRibbons, CommunicationRibbons) and the spaarke_insights icon-refresh from task 050 are imported and published in the target Dataverse environment. If any is missing or unpublished, import and publish it now before proceeding.</step>
+    <step order="2">Open a REAL sprk_matter record; click "Create To Do"; confirm the new checkmark icon shows AND the wizard opens with entityType="sprk_matter" and the correct entityId. Record pass/fail.</step>
+    <step order="3">Open a REAL sprk_project record; click "Create To Do"; confirm the wizard opens with entityType="sprk_project" and the correct entityId. Record pass/fail.</step>
+    <step order="4">Open a REAL sprk_event record; click "Create To Do"; confirm the wizard opens with entityType="sprk_event" and the correct entityId. Record pass/fail.</step>
+    <step order="5">Open a REAL sprk_invoice record; click "Create To Do"; confirm the wizard opens with entityType="sprk_invoice" and the correct entityId. Record pass/fail.</step>
+    <step order="6">Open a REAL sprk_workassignment record; click "Create To Do"; confirm the wizard opens with entityType="sprk_workassignment" and the correct entityId. Record pass/fail.</step>
+    <step order="7">Open a REAL sprk_communication record; click "Create To Do"; confirm the wizard opens with entityType="sprk_communication" and the correct entityId. Record pass/fail.</step>
+    <step order="8">If any of steps 2-7 fails (wrong/empty context, button missing, wizard does not open), STOP per the escalation trigger — do not mark the task complete with a partial pass.</step>
+    <step order="9">Write the 6-row pass/fail table to projects/smart-todo-r5/notes/052-ribbon-smoke-results.md as the PROC-1 evidence artifact.</step>
+    <step order="10">Update tasks/TASK-INDEX.md: set 052's status to ✅.</step>
+    <step order="11">Document any deviation in projects/smart-todo-r5/notes/.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If a button opens the wizard with wrong or empty entity context (a `getEntityContext(primaryControl)` mismatch — e.g. entityType/entityId blank or belonging to a different record), STOP and escalate per CLAUDE.md §6 rather than treating it as a per-entity quirk to patch around; this indicates either a Location/CrmParameter defect from task 051 or a `getEntityContext` edge case that needs root-cause investigation, not a workaround.</trigger>
+  </escalation>
+
+  <tools>
+    <tool name="pac">Solution list / import / publish</tool>
+    <tool name="browser">Manual UI smoke test against real Dataverse records</tool>
+  </tools>
+
+  <outputs>
+    <output type="test">projects/smart-todo-r5/notes/052-ribbon-smoke-results.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Given all 6 entities (Matter plus the 5 new entities) with REAL records, when each entity's "Create To Do" button is clicked, then the CreateTodo wizard opens with the correct entityType AND entityId visible in the wizard's regarding field for ALL 6.</criterion>
+    <criterion testable="true">Given the Matter button specifically, when re-verified in this task, then it shows the sprk_ToDoCheckmark32.svg icon (task 050 regression check).</criterion>
+    <criterion testable="true">Given the smoke-test results, when recorded, then they exist as a written pass/fail artifact in projects/smart-todo-r5/notes/ satisfying the PROC-1 real-DV smoke gate (spec FR-20) for this ribbon expansion.</criterion>
+    <criterion testable="true">Negative: if any of the 6 buttons opens with wrong, empty, or missing entity context, the task is NOT marked complete — it halts per the escalation trigger and the defect is documented, not silently accepted as a partial pass.</criterion>
+  </acceptance-criteria>
+
+  <notes>This task doubles as FR-19's closing acceptance check AND (per design.md R-9 scope item 4 plus spec FR-20) the project's PROC-1 real-DV smoke discipline applied to the ribbon expansion. Use real records, not the prototype mock environment.</notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+  </execution>
+</task>

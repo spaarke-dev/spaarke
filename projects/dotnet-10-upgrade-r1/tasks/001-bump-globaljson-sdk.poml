@@ -1,0 +1,93 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="001" project="dotnet-10-upgrade-r1">
+  <metadata>
+    <title>Bump global.json to the 10.0.1xx SDK + re-scrape .NET 10 breaking changes (H5)</title>
+    <phase>P0 Retarget + build-green</phase>
+    <gate>startable</gate>
+    <status>completed</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Modifies build config (global.json) that gates every downstream build; tags include bff-api/ci.</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Mechanical config change, fully specified; no architectural judgment.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Root-level global.json change is the prerequisite for the entire retarget chain; nothing else can build against net10 until it lands.</parallel-reason>
+    <deps>none</deps>
+    <tags>dotnet, bff-api, ci, config, migration</tags>
+    <estimated-effort>1-2 hours</estimated-effort>
+  </metadata>
+
+  <prompt>Bump the repo-root `global.json` SDK pin from `8.0.0` to a `10.0.1xx` family (keeping `rollForward` semantics) so the toolchain resolves a .NET 10 SDK, and re-scrape the (previously "work-in-progress") .NET 10 breaking-changes page to capture any servicing entries that landed since the 2026-08-10 research. This is H5 — a hard gate: until global.json moves, every net10 build fails NETSDK1045.</prompt>
+  <role>SPAARKE platform developer. Expert in the .NET SDK toolchain, global.json roll-forward semantics, and CI SDK resolution. Follow ADRs strictly.</role>
+  <goal>`global.json` pins a `10.0.1xx` SDK; `dotnet --version` in this worktree resolves a 10.0.x SDK with no NETSDK1045; a short note in `notes/breaking-changes-rescrape.md` records any new .NET 10 / ASP.NET Core 10 / C# 14 breaking-change entries beyond design §5 (or "no new entries").</goal>
+
+  <context>
+    <background>design §0/§5 (H5) + spec FR-02. Current `global.json` = `{ "sdk": { "version": "8.0.0", "rollForward": "latestFeature" } }`. `latestFeature` roll-forward will NOT pick up a net10 SDK, so this is a hard prerequisite. The .NET 10 breaking-changes page was marked "work in progress" at research time (design §12) — re-scrape via the `researcher` subagent to catch late servicing entries before the retarget proper.</background>
+    <relevant-files>
+      <file role="modify">global.json</file>
+      <file role="new">projects/dotnet-10-upgrade-r1/notes/breaking-changes-rescrape.md</file>
+      <file role="canonical-reference">projects/dotnet-10-upgrade-r1/design.md</file>
+    </relevant-files>
+    <dependencies>
+      <dependency task="none" status="complete">First task in the chain.</dependency>
+    </dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="project">Scope: ONLY `global.json` + the re-scrape note. Do NOT retarget any csproj or bump any package in this task (those are 002–004).</constraint>
+    <constraint source="project">Keep `rollForward` present; do not pin an exact patch that could break a CI runner lacking that exact SDK. Use a feature-band pin (e.g. `10.0.100`) with the existing roll-forward policy.</constraint>
+    <constraint source="ADR-029">This is BFF-adjacent build config: MUST NOT introduce any change that would alter framework-dependent publish (no SelfContained, no RID changes) — global.json only.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>.NET SDK version selection + roll-forward</topic>
+    <files>
+      <file>projects/dotnet-10-upgrade-r1/spec.md</file>
+      <file>projects/dotnet-10-upgrade-r1/design.md</file>
+      <file>projects/dotnet-10-upgrade-r1/CLAUDE.md</file>
+      <file>.claude/constraints/azure-deployment.md</file>
+    </files>
+    <patterns>
+      <pattern name="researcher-subagent" location=".claude/agents/researcher.md">Use to re-scrape the WIP .NET 10 breaking-changes page (Microsoft Learn) and record deltas vs design §5.</pattern>
+    </patterns>
+  </knowledge>
+
+  <steps mode="prescriptive">
+    <step order="0" name="Context + rigor declaration">Load spec FR-02 + design §5/§7. Declare RIGOR: FULL.</step>
+    <step order="1">Edit `global.json`: set `sdk.version` to `10.0.100` (or the current 10.0.1xx feature band), keep `rollForward` as-is (`latestFeature`).</step>
+    <step order="2">Run `dotnet --version` in the worktree; confirm it resolves a 10.0.x SDK and emits no NETSDK1045. If a 10.0 SDK is not installed locally, record that as an environment prerequisite in the note (do NOT downgrade the pin to work around a missing SDK).</step>
+    <step order="3">Invoke the `researcher` subagent to re-scrape the .NET 10 + ASP.NET Core 10 + C# 14 breaking-changes pages; diff against design §5 hit-sites/secondary audits; write `notes/breaking-changes-rescrape.md` with any NEW entries (or "no new entries beyond design §5").</step>
+    <step order="4">If a new breaking-change entry materially affects scope, STOP and escalate (see escalation) rather than silently expanding the retarget.</step>
+    <step order="5">Update `tasks/TASK-INDEX.md`: set 001 status to ✅.</step>
+    <step order="6">Document any deviation in `projects/dotnet-10-upgrade-r1/notes/`.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If the re-scrape surfaces a NEW .NET 10 breaking change that touches a Spaarke production path not already covered by H1–H6 or the §5 secondary audits, STOP and surface it per CLAUDE.md §6/§6.5 — it may need a new task, not a silent in-line fix.</trigger>
+  </escalation>
+
+  <tools>
+    <tool name="dotnet">Resolve SDK version</tool>
+  </tools>
+
+  <outputs>
+    <output type="config">global.json</output>
+    <output type="doc">projects/dotnet-10-upgrade-r1/notes/breaking-changes-rescrape.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Given the edited `global.json`, when `dotnet --version` runs in this worktree, then it resolves a 10.0.x SDK and emits no NETSDK1045.</criterion>
+    <criterion testable="true">`global.json` retains a `rollForward` policy (not a bare exact-patch pin).</criterion>
+    <criterion testable="true">`notes/breaking-changes-rescrape.md` exists and either lists new breaking-change entries beyond design §5 or explicitly states "no new entries".</criterion>
+    <criterion testable="true">Negative: no csproj TFM and no package version is changed by this task (git diff touches only `global.json` + the note).</criterion>
+  </acceptance-criteria>
+
+  <notes>spec FR-02 acceptance: `dotnet --version` in CI resolves a 10.0.x SDK; no NETSDK1045. CI setup-dotnet alignment happens in task 040 — keep global.json and setup-dotnet in lockstep there.
+
+  COMPLETION (2026-08-11): `global.json` sdk.version 8.0.0 → 10.0.100 (rollForward=latestFeature kept). `dotnet --version` in worktree → 10.0.101, no NETSDK1045 (10.0.101 SDK installed locally). Re-scrape (researcher) verdict = NO scope change: Learn pages not re-serviced since 2026-08-10 (core page updated_at 2026-07-30); 4 minor already-on-page items §5 didn't transcribe (ActivitySource sampling, W3C propagator, C#14 span overload resolution, XmlSerializer [Obsolete]) — all absorbable into P1 sweep + P5 smoke, none meets §6 escalation bar. Escalation NOT fired. Findings + 2 carried follow-ups in `notes/breaking-changes-rescrape.md`. Quality gates (Step 9.5) SKIPPED — config-only (JSON version bump, no logic) + doc note; not test-modifying, so binding override N/A. ADR-029 satisfied by inspection (no SelfContained/RID/publish change). Side effect: researcher wrote its own project-memory files under `.claude/agent-memory/researcher/` (CLAUDE.md §15 mechanism) — not part of the retarget; zero csproj/package changes.</notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+  </execution>
+</task>

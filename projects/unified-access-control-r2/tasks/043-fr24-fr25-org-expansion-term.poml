@@ -1,0 +1,103 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="043" project="unified-access-control-r2">
+  <metadata>
+    <title>FR-24/FR-25 — org-expansion membership term (registry-filtered, baseline-levelled) + registry filter on the systemuser fallback path</title>
+    <phase>2 One definition of member</phase>
+    <gate>after-037-041-042</gate>
+    <status>pending</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Authorization-path .cs change adding a new access-conferring term; tags bff-api/auth.</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Builds strictly on seams delivered by 037/041/042 with escalation triggers on the open semantic (non-standing derived level); default tier per CLAUDE.md §8.5.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Modifies AccessibleRecordSetService.cs (orchestrator hot-file list) and MembershipResolverService.cs (shared with 041's output).</parallel-reason>
+    <deps>037, 041, 042</deps>
+    <tags>bff-api, auth, security, dataverse, testing</tags>
+    <estimated-effort>3-4 hours</estimated-effort>
+  </metadata>
+
+  <prompt>Deliver design §4.5 term 4 — ORG EXPANSION: a contact derives membership of records that reference (via a REGISTRY-LISTED org-typed lookup, task 041) an organization the contact actively belongs to (sprk_contactorganization), contributing at the ORGANIZATION's standing-grant baseline level (task 042's org reader). Also wire task 041's AccessConferringOnly registry filter into the systemuser MEMBERSHIP FALLBACK path (flag-off branch of task 036), closing the A-8 over-inclusion for however long the fallback lives. Both new contributions MUST route through the task-037 Secure suppression hook.</prompt>
+  <role>SPAARKE platform developer, C#/.NET membership + evaluator internals. Follow ADRs strictly.</role>
+  <goal>ResolveByContactAsync (behind an explicit option) additionally binds the contact's ACTIVE org ids against registry-listed org-typed descriptors; ComposeForContactAsync consumes the org-derived ids as a distinct term at the org's baseline rights, gated on the org holding a standing grant; ComposeForSystemUserAsync's membership fallback passes AccessConferringOnly=true; Secure suppression covers both; closed-set tests.</goal>
+
+  <context>
+    <background>Design §4.5 terms 3-4: "Derived member: allow-listed sprk_assigned* lookups → contact + org identities; Org expansion: org identity → active contacts via sprk_contactorganization". Investigation 02 §3: ResolveByContactAsync builds a bare PersonIdentity(Guid.Empty, contactId) — all non-contact identity values empty, so org-typed descriptors emit zero conditions today; the extension point is supplying the contact's org ids into the identity before FetchXml construction. ExternalParticipationService.QueryActiveOrgIdsAsync already resolves active org memberships (statecode-filtered) — reuse the junction semantics. Register B-1: derived access is default-on and Secure is the veto; but the LEVEL of a NON-standing derived contribution is not specified anywhere — see the escalation trigger; implement the org term as standing-gated (org must hold a standing grant) pending that answer, which keeps FR-25's acceptance exact and matches the contact-plane precedent.</background>
+    <relevant-files>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Services/Ai/Membership/MembershipResolverService.cs</file>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Infrastructure/ExternalAccess/AccessibleRecordSetService.cs</file>
+      <file role="modify">tests/unit/Sprk.Bff.Api.Tests/Services/Ai/Membership/MembershipResolverServiceTests.cs</file>
+      <file role="modify">tests/unit/Sprk.Bff.Api.Tests/Infrastructure/ExternalAccess/AccessibleRecordSetServiceTests.cs</file>
+      <file role="canonical-reference">src/server/api/Sprk.Bff.Api/Infrastructure/ExternalAccess/ExternalParticipationService.cs</file>
+      <file role="canonical-reference">src/server/api/Sprk.Bff.Api/Infrastructure/ExternalAccess/ContactStandingGrantReader.cs</file>
+    </relevant-files>
+    <dependencies>
+      <dependency task="037" status="pending">Secure suppression hook the new term must route through.</dependency>
+      <dependency task="041" status="pending">The column registry + AccessConferringOnly option.</dependency>
+      <dependency task="042" status="pending">Org standing-grant baseline reader.</dependency>
+    </dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-034 (as amended by task 040)">Scope: the membership extension. Org binding happens INSIDE the canonical resolver (extending ResolveByContactAsync behind an explicit option) — no parallel FetchXml derivation outside MembershipResolverService (M1). 1-hop cap untouched.</constraint>
+    <constraint source="spec FR-24">Scope: which org lookups confer. ONLY registry-listed org-typed columns bind; the negative acceptance (opposing-counsel org confers nothing) applies to this term specifically — assert at the FetchXml-shape level.</constraint>
+    <constraint source="spec FR-25">Scope: the term's level. Org-derived contributions enter the max at the ORGANIZATION's baseline (task 042 org reader, task 032 mapping) — never at the contact's own baseline, never at a hardcoded level.</constraint>
+    <constraint source="spec FR-22 (task 037)">Scope: Secure interaction. Org-expansion contributions and the registry-filtered systemuser membership fallback both route through the pre-max Secure suppression hook — a secure record receives NO org-derived contribution for any principal kind.</constraint>
+    <constraint source="spec NFR-01 + NFR-02">Scope: reads. Junction/org reads fail-soft to NO contribution (never widen, never 500 the gate); org-id binding adds at most one junction read per composition (the existing 60s-cached QueryActiveOrgIdsAsync path or equivalent); respect the in-clause bounds.</constraint>
+    <constraint source="CLAUDE.md §10">Scope: this task's PR (BFF-touching). State the placement decision citing .claude/constraints/bff-extensions.md; run dotnet publish -c Release src/server/api/Sprk.Bff.Api/ -o deploy/api-publish/ and report compressed size + diff vs ~44.96 MB baseline; ceiling 60 MB (NFR-06). NOTE 2026-08-27: the project has TWO publish-size baseline conventions in circulation (~43.7 MB and ~44.96 MB, a ~1.3 MB gap) and three Wave-A agents on the SAME base reported 45.07 / 45.07 / 43.78 MB. State your exact command, RID, configuration, compression level and PDB in/out, and compare only within one convention. See notes/wave2-parallel-merge-plan.md §A13.</constraint>
+    <constraint source="task-020">🔴 READ-SIDE ASYMMETRY THIS TASK MUST DECIDE (filed by task 020, 2026-08-27, verified in main session). The org-GRANT query bounds on date -- `ExternalParticipationService.cs:578` passes `TodayUtc` into `BuildOrganizationGrantFilter` -- but the org-MEMBERSHIP junction query is `statecode eq 0` ALONE (`:620`). Consequence: **a membership ended by `sprk_enddate` but never deactivated still confers inherited access on the READ path.** Task 020's revoke deliberately matches the same statecode-only shape because over-including is fail-CLOSED for a revoke; on the read path the identical shape is fail-OPEN. Decide explicitly whether the read must additionally bound on `sprk_enddate`, and record the decision either way -- do not inherit the revoke's shape by default, because its fail direction is inverted relative to yours.</constraint>
+    <constraint source="task-020">PER-MEMBER CACHE INVALIDATION BELONGS HERE, NOT IN 020. Task 020 made the org member list available and deliberately did NOT add per-member cache invalidation, because in 020 the member list only exists when a `ContainerId` was supplied -- so invalidation would fire on some org revokes and not others, and an inconsistent invalidation contract is worse than the uniform documented 60s TTL. This task derives the member list UNCONDITIONALLY, so the objection does not apply here. Decide whether to add it.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>org expansion, junction membership, term composition</topic>
+    <files>
+      <file>projects/unified-access-control-r2/design.md</file>
+      <file>projects/unified-access-control-r2/notes/investigation/02-membership-spine.md</file>
+      <file>projects/unified-access-control-r2/notes/design-register.md</file>
+    </files>
+    <patterns>
+      <pattern name="active-org junction read" location="src/server/api/Sprk.Bff.Api/Infrastructure/ExternalAccess/ExternalParticipationService.cs">QueryActiveOrgIdsAsync (statecode eq 0 junction filter) — the org-membership semantics to reuse for identity binding.</pattern>
+      <pattern name="identity-value condition emission" location="src/server/api/Sprk.Bff.Api/Services/Ai/Membership/MembershipResolverService.cs">BuildFetchXml's per-descriptor per-identity-value condition emission — org ids bind exactly as Organization descriptor values do on the systemuser path.</pattern>
+    </patterns>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="0" name="Context + rigor declaration">Declare rigor FULL. Read the post-041 resolver, post-042 evaluator, investigation 02 §2.4/§3.</step>
+    <step order="1">Extend ResolveByContactAsync: behind a new explicit option, populate the identity's OrganizationIds from the contact's active junction rows before FetchXml construction; org-typed descriptors (registry-filtered) then emit conditions naturally; keep byRole attribution so the evaluator can distinguish org-derived from contact-derived ids (provenance for FR-30 and for level assignment).</step>
+    <step order="2">Wire the evaluator's org-expansion term: for each org-derived record id, contribute at the owning org's baseline (042 reader), gated on the org's standing flag; route through the Secure suppression hook.</step>
+    <step order="3">Wire AccessConferringOnly=true into ComposeForSystemUserAsync's membership fallback branch (flag-off path of 036); confirm the flag-on branch is untouched.</step>
+    <step order="4">Tests per the closed set (resolver-shape + evaluator-term + suppression + fallback).</step>
+    <step order="5">Build + tests; publish-size measurement per §10.</step>
+    <step order="6">Update TASK-INDEX.md: set this task's status to ✅.</step>
+    <step order="7">Document any deviation in projects/unified-access-control-r2/notes/.</step>
+  </steps>
+
+  <escalation>
+    <trigger>ENCODE, DO NOT DECIDE: if implementation reaches a point where a NON-standing derived contribution (contact-derived term 3, or org-derived with no org standing grant) needs a level to be useful (register B-1 says derived access is "default-on" but no FR assigns its level), STOP and escalate per CLAUDE.md §6 with the options (ViewOnly floor / standing-gated as implemented) — do not invent a default level.</trigger>
+    <trigger>If binding org ids on the contact path breaks the M10 endpoint-contract byte-compatibility for existing membership API consumers, STOP and surface it (investigation 02 §8 M10 note) rather than shipping a changed wire shape.</trigger>
+  </escalation>
+
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Ai/Membership/MembershipResolverService.cs</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Infrastructure/ExternalAccess/AccessibleRecordSetService.cs</output>
+    <output type="test">tests/unit/Sprk.Bff.Api.Tests/Services/Ai/Membership/MembershipResolverServiceTests.cs</output>
+    <output type="test">tests/unit/Sprk.Bff.Api.Tests/Infrastructure/ExternalAccess/AccessibleRecordSetServiceTests.cs</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">A contact actively in org X derives membership of a record referencing X via a REGISTRY-LISTED org-typed lookup, contributing at X's baseline rights (org holds standing grant, baseline View Only ⇒ exactly Read).</criterion>
+    <criterion testable="true">FR-24 negative: the same record referencing org X ONLY via a non-registry lookup (opposing counsel) yields NO org-derived contribution — the column is absent from the emitted FetchXml.</criterion>
+    <criterion testable="true">Negative: an INACTIVE junction row (statecode ≠ 0) confers nothing; a contact in no orgs gets zero org-derived entries.</criterion>
+    <criterion testable="true">FR-22 negative: on a secure record, the org-derived contribution is suppressed pre-max for BOTH a ContactOnly principal and a Type 1 systemuser whose linked contact is in org X.</criterion>
+    <criterion testable="true">Max interaction: org-derived ViewOnly + direct Collaborate grant on the same record ⇒ Read|Write|Create.</criterion>
+    <criterion testable="true">Systemuser fallback: ComposeForSystemUserAsync (impersonation flag OFF) passes AccessConferringOnly=true — an adverse-lookup-derived record no longer enters the composed set (A-8 closure pinned by test); the flag-ON branch byte-unchanged.</criterion>
+    <criterion testable="true">Negative: junction or org-baseline read fault ⇒ no org-derived contribution, warning logged, gate does not 500.</criterion>
+    <criterion testable="true">Build green; publish size reported and ≤60 MB.</criterion>
+  </acceptance-criteria>
+
+  <notes>Design §4.5 terms 3-4; spec FR-24/FR-25/FR-22; register B-1/B-12; investigation 02 §3/§4.2. The standing-gated implementation choice for the org term is deliberately conservative pending the escalation's owner answer — record the outcome in notes/ and in the PR.</notes>
+
+  <execution><skill>.claude/skills/task-execute/SKILL.md</skill></execution>
+</task>
