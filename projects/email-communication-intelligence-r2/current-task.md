@@ -1,7 +1,7 @@
 # Current Task State — email-communication-intelligence-r2
 
-> **Last Updated**: 2026-08-31 (context-handoff — all reconciliation UAT + infinite-scroll standard MERGED to master)
-> **Recovery**: Read "Quick Recovery" first. This is a CLEAN/IDLE restore point — no active in-progress task.
+> **Last Updated**: 2026-08-31 (task 090 wrap-up — automatable close-out artifacts DONE; project gated on 044 live UAT)
+> **Recovery**: Read "Quick Recovery" first. Wrap-up ran; ONE task (044) is operator-gated on an Office host.
 
 ---
 
@@ -9,11 +9,11 @@
 
 | Field | Value |
 |-------|-------|
-| **Status** | **IDLE — everything through UAT round 5 + the infinite-scroll standard is MERGED to master.** No active in-progress task. Awaiting operator direction on the 3 remaining items (below). |
-| **Branch** | `work/email-communication-intelligence-r2` · clean · **0 ahead / 0 behind origin/master** (fully merged + synced). |
-| **Last merge** | PR **#911** MERGED 2026-08-31 13:22 UTC → merge commit **`3c577bce4`** (Path A auto-merge; master is now protected via ruleset `21824191`, required check = `Router`). Contained: item-1 true infinite scroll + canonical thin scrollbar + **ADR-051** scroll standard + patterns. |
-| **Deployed (dev, spaarkedev1)** | Code page `sprk_communicationreconciliation` (`1e191e05-…`) + SpaarkeAi `sprk_spaarkeai` (`5206a442-…`) — both current with master. BFF unchanged this whole UAT arc. |
-| **Next Action** | Operator picks up ONE of the 3 remaining items below, OR closes the project. Nothing is blocked on me. |
+| **Status** | **WRAP-UP DONE except the 044 gate.** 090 close-out artifacts all written (test-diet, doc-drift, publish-size, CVE, lessons-learned, r5 coordination, INDEX). Project NOT yet flipped to Complete — blocked on **044** (Pillar B add-in live UAT, operator-gated). |
+| **Branch** | `work/email-communication-intelligence-r2` · has **uncommitted** wrap-up notes + INDEX/TASK-INDEX/r5-coord/current-task edits (need commit + push + PR). |
+| **Last merge** | PR **#911** MERGED 2026-08-31 → `3c577bce4` (infinite scroll + ADR-051). master protected (ruleset `21824191`, required check `Router`; use `/merge-to-master` Path A). |
+| **090 artifacts (this session)** | `notes/test-diet-report.md` (clean, 0 deletes) · `notes/drift-audit-2026-08-31.md` (clean) · `notes/lessons-learned.md` · `notes/044-addin-deploy-runbook.md` · publish ~**44 MB** compressed (≤60), **0 HIGH CVE** · r5 coord §10 close-out stamp · `projects/INDEX.md` row → WRAP-UP. |
+| **Next Action** | (1) Commit + push these wrap-up edits (PR via Path A). (2) **044**: operator runs `deploy-office-addins.yml` + live NAA smoke at an Office host (see `notes/044-addin-deploy-runbook.md`), then flip 044→✅. (3) Then flip README→Complete + all-✅ + reset current-task→none. |
 
 ---
 
