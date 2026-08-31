@@ -1880,10 +1880,11 @@ public sealed class SpeAdminGraphService
     }
 
     public async Task<SpeContainerTypeSummary> CreateContainerTypeForUserAsync(
-        HttpContext httpContext, string displayName, string? billingClassification, CancellationToken ct = default)
+        HttpContext httpContext, string displayName, string? billingClassification, string owningAppId,
+        CancellationToken ct = default)
     {
         var client = await GetDelegatedClientForContainerTypesAsync(httpContext, ct).ConfigureAwait(false);
-        try { return await CreateContainerTypeAsync(client, displayName, billingClassification, ct).ConfigureAwait(false); }
+        try { return await CreateContainerTypeAsync(client, displayName, billingClassification, owningAppId, ct).ConfigureAwait(false); }
         catch (ODataError ex) { throw ex.ToSpaarkeStorageException($"CreateContainerType({displayName},delegated)"); }
     }
 
@@ -2265,6 +2266,7 @@ public sealed class SpeAdminGraphService
             {
                 _ when method == HttpMethod.Get => Method.GET,
                 _ when method == HttpMethod.Post => Method.POST,
+                _ when method == HttpMethod.Patch => Method.PATCH,
                 _ when method == HttpMethod.Delete => Method.DELETE,
                 _ => throw new ArgumentOutOfRangeException(nameof(method), method, "Unsupported Graph method."),
             },
@@ -2322,10 +2324,19 @@ public sealed class SpeAdminGraphService
     }
 
     public async Task<SpeContainerTypeSummary> CreateContainerTypeForConfigAsync(
-        ContainerTypeConfig config, string displayName, string? billingClassification, CancellationToken ct = default)
+        ContainerTypeConfig config, string displayName, string? billingClassification,
+        string? owningAppId = null, CancellationToken ct = default)
     {
+        ArgumentNullException.ThrowIfNull(config);
+
+        // Same precedence as the delegated endpoint: explicit argument, else the config's registered
+        // owning app (multi-app mode), else its own client id (single-app mode).
+        var resolvedOwningAppId = owningAppId;
+        if (string.IsNullOrWhiteSpace(resolvedOwningAppId)) resolvedOwningAppId = config.OwningAppId;
+        if (string.IsNullOrWhiteSpace(resolvedOwningAppId)) resolvedOwningAppId = config.ClientId;
+
         var client = await GetClientForConfigAsync(config, ct).ConfigureAwait(false);
-        try { return await CreateContainerTypeAsync(client, displayName, billingClassification, ct).ConfigureAwait(false); }
+        try { return await CreateContainerTypeAsync(client, displayName, billingClassification, resolvedOwningAppId!, ct).ConfigureAwait(false); }
         catch (ODataError ex) { throw ex.ToSpaarkeStorageException($"CreateContainerType({displayName})"); }
     }
 
@@ -2423,6 +2434,45 @@ public sealed class SpeAdminGraphService
         var client = await GetClientForConfigAsync(config, ct).ConfigureAwait(false);
         try { return await UnarchiveContainerAsync(client, containerId, ct).ConfigureAwait(false); }
         catch (ODataError ex) { throw ex.ToSpaarkeStorageException($"UnarchiveContainer({containerId})"); }
+    }
+
+    // ── Per-container ITEM recycle bin (FR-E03 / task 052) ───────────────────
+    // NOT the deleted-CONTAINERS bin above (spec D3 keeps both).
+
+    /// <summary>Lists deleted ITEMS in a container's recycle bin. See <see cref="ListRecycleBinItemsAsync"/>.</summary>
+    public async Task<IReadOnlyList<SpeRecycleBinItem>> ListRecycleBinItemsForConfigAsync(
+        ContainerTypeConfig config, string containerId, CancellationToken ct = default)
+    {
+        var client = await GetClientForConfigAsync(config, ct).ConfigureAwait(false);
+        try { return await ListRecycleBinItemsAsync(client, containerId, ct).ConfigureAwait(false); }
+        catch (ODataError ex) { throw ex.ToSpaarkeStorageException($"ListRecycleBinItems({containerId})"); }
+    }
+
+    /// <summary>Restores ITEMS from a container's recycle bin. See <see cref="RestoreRecycleBinItemsAsync"/>.</summary>
+    /// <remarks>
+    /// <see cref="RecycleBinRestoreRejectedException"/> propagates unwrapped, for the same reason
+    /// <see cref="ArchivalNotEnabledException"/> does: flattening it into an anonymous
+    /// <c>SpaarkeStorageException</c> would destroy the distinction between "nothing was restored"
+    /// and "some items were restored", which is the whole acceptance criterion.
+    /// </remarks>
+    public async Task<SpeRecycleBinRestoreResult> RestoreRecycleBinItemsForConfigAsync(
+        ContainerTypeConfig config, string containerId, IReadOnlyList<string> itemIds, CancellationToken ct = default)
+    {
+        var client = await GetClientForConfigAsync(config, ct).ConfigureAwait(false);
+        try { return await RestoreRecycleBinItemsAsync(client, containerId, itemIds, ct).ConfigureAwait(false); }
+        catch (ODataError ex) { throw ex.ToSpaarkeStorageException($"RestoreRecycleBinItems({containerId})"); }
+    }
+
+    /// <summary>
+    /// Permanently purges ITEMS from a container's recycle bin — irreversible.
+    /// See <see cref="PermanentDeleteRecycleBinItemsAsync"/>.
+    /// </summary>
+    public async Task<SpeRecycleBinDeleteResult> PermanentDeleteRecycleBinItemsForConfigAsync(
+        ContainerTypeConfig config, string containerId, IReadOnlyList<string> itemIds, CancellationToken ct = default)
+    {
+        var client = await GetClientForConfigAsync(config, ct).ConfigureAwait(false);
+        try { return await PermanentDeleteRecycleBinItemsAsync(client, containerId, itemIds, ct).ConfigureAwait(false); }
+        catch (ODataError ex) { throw ex.ToSpaarkeStorageException($"PermanentDeleteRecycleBinItems({containerId})"); }
     }
 
     public async Task<IReadOnlyList<SecurityAlertResult>> GetSecurityAlertsForConfigAsync(
@@ -2598,8 +2648,7 @@ public sealed class SpeAdminGraphService
         _logger.LogInformation(
             "Updating {Count} custom properties on container {ContainerId}", properties.Count, containerId);
 
-        // Build the customProperties payload via AdditionalData.
-        // Kiota will serialize this as: { "customProperties": { "KeyName": { "value": "...", "isSearchable": false } } }
+        // Build the property map. It becomes the BODY ROOT — see the URL note below.
         var customPropertiesDict = new Dictionary<string, object>(properties.Count);
         foreach (var prop in properties)
         {
@@ -2610,21 +2659,37 @@ public sealed class SpeAdminGraphService
             };
         }
 
-        var patch = new Microsoft.Graph.Models.FileStorageContainer
-        {
-            AdditionalData = new Dictionary<string, object>
-            {
-                ["customProperties"] = customPropertiesDict
-            }
-        };
+        // 🔴 This write was aimed at the wrong URL and had NEVER worked. It PATCHed the CONTAINER
+        // with a { "customProperties": { ... } } wrapper, and Graph rejects that outright:
+        //
+        //     400 invalidRequest: Unsupported request body property: customProperties.
+        //
+        // Proven live on a throwaway container 2026-08-28 (UAT question "do the + Add functions
+        // work?"). customProperties is its own sub-resource: the PATCH goes to
+        // /containers/{id}/customProperties and the property map IS the body root, unwrapped.
+        // The same probe confirmed the semantics we depend on:
+        //   - partial writes MERGE (an untouched property survives), so a delta save is not
+        //     destructive despite the endpoint being exposed as PUT;
+        //   - setting a name to null REMOVES that property.
+        //
+        // Why the read path never caught it: reads go through GET ?$select=customProperties on the
+        // container, which is a different, valid shape. A working read beside a broken write is
+        // exactly how this stayed invisible.
+        // The v1.0 SDK models customProperties for READING (container.CustomProperties) but exposes no
+        // request builder for WRITING to the sub-resource, so this goes through SendGraphJsonAsync —
+        // the same RequestAdapter path the container-type permission calls already use, which keeps
+        // the SDK's auth, retry and ODataError mapping intact.
+        var url = $"{ResolveGraphBaseUrl(graphClient)}/storage/fileStorage/containers/" +
+                  $"{Uri.EscapeDataString(containerId)}/customProperties";
+        var payload = JsonSerializer.Serialize(customPropertiesDict);
 
         try
         {
             await ExecuteWithRetryAsync(
                 async () =>
                 {
-                    await graphClient.Storage.FileStorage.Containers[containerId]
-                        .PatchAsync(patch, cancellationToken: ct);
+                    using var _ = await SendGraphJsonAsync(
+                        graphClient, HttpMethod.Patch, url, payload, ct).ConfigureAwait(false);
                     return (object?)null;
                 },
                 ct);
@@ -4134,34 +4199,69 @@ public sealed class SpeAdminGraphService
         GraphServiceClient graphClient,
         string displayName,
         string? billingClassification,
+        string owningAppId,
         CancellationToken ct = default)
     {
         ArgumentNullException.ThrowIfNull(graphClient);
         ArgumentException.ThrowIfNullOrWhiteSpace(displayName);
+        ArgumentException.ThrowIfNullOrWhiteSpace(owningAppId);
 
         _logger.LogInformation(
-            "Creating SPE container type '{DisplayName}' with billingClassification '{BillingClassification}'",
-            displayName, billingClassification ?? "standard");
+            "Creating SPE container type '{DisplayName}' (billingClassification '{BillingClassification}', owningAppId {OwningAppId})",
+            displayName, billingClassification ?? "standard", owningAppId);
 
-        // Parse billingClassification string to the Graph SDK enum.
-        // FileStorageContainerBillingClassification values: Standard, Premium (case-insensitive parse).
-        // Invalid values will be rejected by the endpoint before reaching here.
+        // Parse billingClassification to the Graph SDK enum. Graph's enum is
+        // standard · trial · directToCustomer · unknownFutureValue (beta CSDL).
+        //
+        // 🔴 This used to fall through to null on an unparseable value, so a request for a TRIAL
+        // container type would silently create a STANDARD one and report success. Billing
+        // classification is permanent and cannot be changed afterwards, so a silent substitution
+        // here is unrecoverable — the operator would have to delete and start over, if the type is
+        // even deletable. Fail loudly instead.
         Microsoft.Graph.Models.FileStorageContainerBillingClassification? billingEnum = null;
-        if (!string.IsNullOrWhiteSpace(billingClassification) &&
-            Enum.TryParse<Microsoft.Graph.Models.FileStorageContainerBillingClassification>(
-                billingClassification,
-                ignoreCase: true,
-                out var parsed))
+        if (!string.IsNullOrWhiteSpace(billingClassification))
         {
+            if (!Enum.TryParse<Microsoft.Graph.Models.FileStorageContainerBillingClassification>(
+                    billingClassification, ignoreCase: true, out var parsed))
+            {
+                throw new ArgumentException(
+                    $"Billing classification '{billingClassification}' is not a value the Graph SDK "
+                    + "recognises. Valid values are standard, trial, directToCustomer. Refusing to "
+                    + "create the container type, because defaulting here would silently produce a "
+                    + "classification that can never be changed.",
+                    nameof(billingClassification));
+            }
+
             billingEnum = parsed;
         }
 
         // Build the Graph SDK request body.
         // NOTE: FileStorageContainerType uses "Name" (not "DisplayName") as the display label.
+        //
+        // 🔴 OwningAppId was MISSING here and is REQUIRED — the cause of the UAT 2026-08-28 failure
+        // "invalidRequest: One of the provided arguments is not acceptable". Graph's beta CSDL marks
+        // owningAppId Nullable="false", and the documented create body carries it. Every container
+        // type is owned by exactly one Entra app registration, fixed at creation; without it Graph
+        // has no owner to assign and rejects the whole request without naming the field.
+        // Validate HERE, not only at the endpoint. The delegated endpoint parses the GUID before
+        // calling, but CreateContainerTypeForConfigAsync does not — it resolves owningAppId from a
+        // Dataverse TEXT column, so a malformed value would reach a bare Guid.Parse and throw
+        // FormatException, which that caller's ODataError-only catch does not map. The operator would
+        // get a raw 500 instead of a message naming the field. Validation belongs with the parse.
+        if (!Guid.TryParse(owningAppId, out var owningAppGuid))
+        {
+            throw new ArgumentException(
+                $"Owning application id '{owningAppId}' is not a valid GUID. Graph types "
+                + "fileStorageContainerType.owningAppId as Edm.Guid and rejects anything else with an "
+                + "error that does not name the field.",
+                nameof(owningAppId));
+        }
+
         var body = new Microsoft.Graph.Models.FileStorageContainerType
         {
             Name = displayName,
-            BillingClassification = billingEnum
+            BillingClassification = billingEnum,
+            OwningAppId = owningAppGuid
         };
 
         var created = await ExecuteWithRetryAsync(
@@ -6243,6 +6343,484 @@ public sealed class SpeAdminGraphService
         var message = ex.Error?.Message;
         return message is not null
             && message.Contains("archiv", StringComparison.OrdinalIgnoreCase);
+    }
+
+    // =========================================================================
+    // Per-container ITEM recycle bin (FR-E03 / task 052)
+    //
+    // ⚠️ This is NOT the deleted-CONTAINERS recycle bin. Spec decision D3 keeps both:
+    //   • deleted CONTAINERS  → /storage/fileStorage/deletedContainers  (task 022, above)
+    //   • deleted ITEMS       → /storage/fileStorage/containers/{id}/recycleBin/items  (here)
+    // Two Graph resources, two admin needs. Merging them would lose one of them.
+    //
+    // 🔴 THE FINDING THAT SHAPES THIS CODE — restore and delete fail in OPPOSITE ways.
+    // Measured live 2026-08-27 on throwaway containers with real uploaded-then-deleted files:
+    //
+    //                  | all ids valid | any id invalid          | body
+    //   ---------------|---------------|-------------------------|----------------------------
+    //   restore        | 207           | 400 — nothing restored, | the ids that SUCCEEDED
+    //                  |               | ATOMIC                  |
+    //   delete (purge) | 204           | 204 — and it purges the | NONE
+    //                  |               | valid ones anyway,      |
+    //                  |               | NON-ATOMIC              |
+    //
+    // Consequences encoded below, and neither is optional:
+    //   1. A 207 is NOT success. Partial failure is expressed as (requested − returned); Graph
+    //      supplies no per-item error object. Reporting "restored" on a 207 hides every item that
+    //      did not come back.
+    //   2. Permanent delete's 204 means NOTHING. It is returned whether Graph purged all, some, or
+    //      none. For an IRREVERSIBLE operation that is the worst reporting shape in this API. The
+    //      only honest answer comes from re-listing the bin and diffing — the same discipline task
+    //      051 applied to the quota write, for the same reason.
+    //
+    // Issued through SendGraphJsonAsync rather than the Kiota request builders because `restore` and
+    // `delete` are bound to Collection(recycleBinItem) on BETA ONLY — absent from the v1.0 CSDL
+    // entirely (read from $metadata, both versions, 2026-08-27). The container surface is already
+    // beta-pinned by task 020, so this adds no new version exposure.
+    //
+    // Reading raw JSON also DISSOLVES a trap rather than handling it: `deletedBy` and `title` are
+    // OpenType extras absent from the CSDL, so through Kiota they would arrive as UntypedObject —
+    // the shape task 050 guessed wrong twice before measuring. Parsing the response ourselves means
+    // that shape never exists here.
+    // =========================================================================
+
+    /// <summary>
+    /// One item in a container's recycle bin. ADR-007: no Graph SDK types cross this boundary.
+    /// </summary>
+    /// <param name="DeletedByDisplayName">
+    /// Who deleted it. An OpenType extra (not in the CSDL) and the most operationally useful field
+    /// on the record — null means Graph did not report it, never "nobody".
+    /// </param>
+    public sealed record SpeRecycleBinItem(
+        string Id,
+        string Name,
+        long? Size,
+        DateTimeOffset? DeletedDateTime,
+        string? DeletedFromLocation,
+        string? DeletedByDisplayName);
+
+    /// <summary>
+    /// What happened to ONE requested id. The unit of truth for both operations — the acceptance
+    /// criterion forbids collapsing a multi-item result to a single pass/fail.
+    /// </summary>
+    /// <param name="Detail">
+    /// Why, in words an admin can act on. Graph returns no per-item error for either operation, so
+    /// this states what was actually observed rather than inventing a cause.
+    /// </param>
+    public sealed record SpeRecycleBinItemOutcome(
+        string Id,
+        string? Name,
+        bool Succeeded,
+        string Detail);
+
+    /// <summary>Per-item outcomes of a restore. Never collapse to a boolean.</summary>
+    public sealed record SpeRecycleBinRestoreResult(IReadOnlyList<SpeRecycleBinItemOutcome> Outcomes)
+    {
+        public int RequestedCount => Outcomes.Count;
+        public int RestoredCount => Outcomes.Count(o => o.Succeeded);
+        public bool IsPartialSuccess => RestoredCount > 0 && RestoredCount < RequestedCount;
+    }
+
+    /// <summary>Per-item outcomes of a permanent delete, established by re-listing the bin.</summary>
+    /// <param name="Verified">
+    /// <c>false</c> when the post-delete re-list could not be performed. The per-item outcomes are
+    /// then NOT trustworthy and the caller MUST say so. Claiming a purge we did not observe would be
+    /// the exact defect this project exists to remove — and here it would be an unrecoverable one.
+    /// </param>
+    public sealed record SpeRecycleBinDeleteResult(
+        IReadOnlyList<SpeRecycleBinItemOutcome> Outcomes,
+        bool Verified,
+        string? VerificationFailureReason)
+    {
+        public int RequestedCount => Outcomes.Count;
+        public int PurgedCount => Outcomes.Count(o => o.Succeeded);
+    }
+
+    /// <summary>
+    /// Thrown when Graph rejects a restore outright (400). Distinct from a partial success because
+    /// the outcomes are opposite: here <b>nothing</b> was restored and the bin is unchanged.
+    /// </summary>
+    /// <remarks>
+    /// Restore is atomic on rejection — measured: one unknown id in a batch of otherwise-valid ids
+    /// causes the whole call to fail and leaves every valid item in the bin. Folding this into the
+    /// generic 400 path would tell an admin "bad request" when the actionable truth is "your list is
+    /// stale — refresh and retry".
+    /// </remarks>
+    public sealed class RecycleBinRestoreRejectedException(
+        IReadOnlyList<string> requestedIds, string? graphMessage)
+        : Exception(
+            $"Graph rejected the restore of {requestedIds.Count} item(s); nothing was restored. " +
+            (graphMessage is { Length: > 0 } ? $"Graph reported: {graphMessage}" : "Graph reported no detail."))
+    {
+        public IReadOnlyList<string> RequestedIds { get; } = requestedIds;
+        public string? GraphMessage { get; } = graphMessage;
+    }
+
+    /// <summary>
+    /// Lists the items currently in a container's recycle bin (deleted files and folders).
+    /// </summary>
+    /// <returns>The items; an empty list when the bin is empty. Empty is a valid state, not a failure.</returns>
+    public async Task<IReadOnlyList<SpeRecycleBinItem>> ListRecycleBinItemsAsync(
+        GraphServiceClient graphClient,
+        string containerId,
+        CancellationToken ct = default)
+    {
+        ArgumentNullException.ThrowIfNull(graphClient);
+        ArgumentException.ThrowIfNullOrWhiteSpace(containerId);
+
+        var results = new List<SpeRecycleBinItem>();
+        var url = $"{RecycleBinItemsUrl(graphClient, containerId)}";
+
+        // Follow @odata.nextLink. No $select — task 022's lesson: a hand-maintained projection is a
+        // hand-maintained list of property names, and the two most useful fields here (deletedBy,
+        // title) are OpenType extras a projection would have to know to ask for.
+        while (!string.IsNullOrEmpty(url))
+        {
+            using var json = await ExecuteWithRetryAsync(
+                () => SendGraphJsonAsync(graphClient, HttpMethod.Get, url!, body: null, ct),
+                ct).ConfigureAwait(false);
+
+            if (json is null)
+            {
+                break;
+            }
+
+            var root = json.RootElement;
+
+            if (root.TryGetProperty("value", out var value) && value.ValueKind == JsonValueKind.Array)
+            {
+                foreach (var element in value.EnumerateArray())
+                {
+                    results.Add(ParseRecycleBinItem(element));
+                }
+            }
+
+            url = root.TryGetProperty("@odata.nextLink", out var next) && next.ValueKind == JsonValueKind.String
+                ? next.GetString()
+                : null;
+        }
+
+        _logger.LogInformation(
+            "Container {ContainerId}: recycle bin holds {Count} item(s)", containerId, results.Count);
+
+        return results;
+    }
+
+    /// <summary>
+    /// Restores items from a container's recycle bin, reporting the outcome of EACH requested id.
+    /// </summary>
+    /// <remarks>
+    /// Graph answers <c>207 Multi-Status</c> whose <c>value</c> array lists only the ids that
+    /// SUCCEEDED. There is no per-item error object, so a failure is expressed by absence — which is
+    /// why this computes the set difference instead of reading a status per row. An id that does not
+    /// come back did not restore, and the admin is told exactly which.
+    /// </remarks>
+    /// <exception cref="RecycleBinRestoreRejectedException">
+    /// Graph rejected the whole batch (400). Nothing was restored; the bin is unchanged.
+    /// </exception>
+    public async Task<SpeRecycleBinRestoreResult> RestoreRecycleBinItemsAsync(
+        GraphServiceClient graphClient,
+        string containerId,
+        IReadOnlyList<string> itemIds,
+        CancellationToken ct = default)
+    {
+        ArgumentNullException.ThrowIfNull(graphClient);
+        ArgumentException.ThrowIfNullOrWhiteSpace(containerId);
+        ArgumentNullException.ThrowIfNull(itemIds);
+
+        if (itemIds.Count == 0)
+        {
+            return new SpeRecycleBinRestoreResult([]);
+        }
+
+        // Names are for the report only — a failed restore that says "3 items did not restore"
+        // without naming them is barely better than a collapsed boolean.
+        var names = await TryMapItemNamesAsync(graphClient, containerId, ct).ConfigureAwait(false);
+
+        var url = $"{RecycleBinItemsUrl(graphClient, containerId)}/restore";
+        var body = JsonSerializer.Serialize(new { ids = itemIds });
+
+        JsonDocument? json;
+        try
+        {
+            json = await ExecuteWithRetryAsync(
+                () => SendGraphJsonAsync(graphClient, HttpMethod.Post, url, body, ct),
+                ct).ConfigureAwait(false);
+        }
+        catch (ODataError ex) when (ex.ResponseStatusCode == (int)HttpStatusCode.BadRequest)
+        {
+            _logger.LogWarning(
+                "Container {ContainerId}: restore of {Count} item(s) rejected outright — nothing was " +
+                "restored. Graph: {GraphMessage}",
+                containerId, itemIds.Count, ex.Error?.Message);
+
+            throw new RecycleBinRestoreRejectedException(itemIds, ex.Error?.Message);
+        }
+
+        using (json)
+        {
+            var restored = ReadReturnedIds(json);
+
+            var outcomes = itemIds
+                .Select(id => restored.Contains(id)
+                    ? new SpeRecycleBinItemOutcome(
+                        id, names.GetValueOrDefault(id), Succeeded: true, "Restored to its original location.")
+                    : new SpeRecycleBinItemOutcome(
+                        id, names.GetValueOrDefault(id), Succeeded: false,
+                        "Graph did not report this item as restored. It may no longer be in the " +
+                        "recycle bin, or it may have been purged. Refresh the list and retry."))
+                .ToList();
+
+            var result = new SpeRecycleBinRestoreResult(outcomes);
+
+            _logger.LogInformation(
+                "Container {ContainerId}: restore requested {Requested}, Graph confirmed {Restored}. " +
+                "Partial={Partial}",
+                containerId, result.RequestedCount, result.RestoredCount, result.IsPartialSuccess);
+
+            return result;
+        }
+    }
+
+    /// <summary>
+    /// Permanently purges items from a container's recycle bin. <b>Irreversible.</b>
+    /// </summary>
+    /// <remarks>
+    /// 🔴 Graph answers <c>204 No Content</c> with an empty body <i>regardless of what it did</i> —
+    /// measured: a batch containing one unknown id still returned 204 and still purged the valid
+    /// ids. The 204 therefore carries no information, so this method establishes the truth by
+    /// listing the bin BEFORE and AFTER and diffing.
+    ///
+    /// The before-list matters as much as the after-list: without it, an id that was never in the
+    /// bin is absent afterwards and would be reported as "purged" — a fabricated success of exactly
+    /// the kind this project was created to eliminate.
+    ///
+    /// If the after-list cannot be obtained, the result is returned with <c>Verified = false</c>
+    /// rather than assuming the purge worked.
+    /// </remarks>
+    public async Task<SpeRecycleBinDeleteResult> PermanentDeleteRecycleBinItemsAsync(
+        GraphServiceClient graphClient,
+        string containerId,
+        IReadOnlyList<string> itemIds,
+        CancellationToken ct = default)
+    {
+        ArgumentNullException.ThrowIfNull(graphClient);
+        ArgumentException.ThrowIfNullOrWhiteSpace(containerId);
+        ArgumentNullException.ThrowIfNull(itemIds);
+
+        if (itemIds.Count == 0)
+        {
+            return new SpeRecycleBinDeleteResult([], Verified: true, VerificationFailureReason: null);
+        }
+
+        // BEFORE. Separates "purged by us" from "was never here" — see remarks.
+        IReadOnlyList<SpeRecycleBinItem> before;
+        try
+        {
+            before = await ListRecycleBinItemsAsync(graphClient, containerId, ct).ConfigureAwait(false);
+        }
+        catch (ODataError ex)
+        {
+            // Without the before-list we cannot honestly attribute any later absence to this call,
+            // so we do not proceed to destroy anything on a guess.
+            _logger.LogError(
+                ex,
+                "Container {ContainerId}: could not read the recycle bin before a permanent delete — " +
+                "aborting rather than purging unverifiably.", containerId);
+            throw;
+        }
+
+        var presentBefore = before.ToDictionary(i => i.Id, i => i.Name, StringComparer.OrdinalIgnoreCase);
+
+        _logger.LogWarning(
+            "Container {ContainerId}: PERMANENTLY deleting {Count} recycle-bin item(s). This is " +
+            "irreversible.", containerId, itemIds.Count);
+
+        var url = $"{RecycleBinItemsUrl(graphClient, containerId)}/delete";
+        var body = JsonSerializer.Serialize(new { ids = itemIds });
+
+        using (await ExecuteWithRetryAsync(
+            () => SendGraphJsonAsync(graphClient, HttpMethod.Post, url, body, ct),
+            ct).ConfigureAwait(false))
+        {
+            // Deliberately ignored. A 204 here is not evidence of anything — see remarks.
+        }
+
+        // AFTER. The only actual evidence of what happened.
+        HashSet<string> presentAfter;
+        try
+        {
+            var after = await ListRecycleBinItemsAsync(graphClient, containerId, ct).ConfigureAwait(false);
+            presentAfter = after.Select(i => i.Id).ToHashSet(StringComparer.OrdinalIgnoreCase);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            _logger.LogError(
+                ex,
+                "Container {ContainerId}: permanent delete was issued but the recycle bin could not be " +
+                "re-read, so the outcome is UNVERIFIED.", containerId);
+
+            var unverified = itemIds
+                .Select(id => new SpeRecycleBinItemOutcome(
+                    id, presentBefore.GetValueOrDefault(id), Succeeded: false,
+                    "Unverified — the delete was sent but the recycle bin could not be re-read to " +
+                    "confirm what was purged."))
+                .ToList();
+
+            return new SpeRecycleBinDeleteResult(
+                unverified, Verified: false, VerificationFailureReason: ex.Message);
+        }
+
+        var outcomes = itemIds
+            .Select(id =>
+            {
+                var wasPresent = presentBefore.ContainsKey(id);
+                var name = presentBefore.GetValueOrDefault(id);
+
+                return (wasPresent, stillPresent: presentAfter.Contains(id)) switch
+                {
+                    (true, false) => new SpeRecycleBinItemOutcome(
+                        id, name, Succeeded: true, "Permanently deleted. This cannot be undone."),
+
+                    (true, true) => new SpeRecycleBinItemOutcome(
+                        id, name, Succeeded: false,
+                        "Still in the recycle bin after the delete — it was NOT purged."),
+
+                    // Absent both before and after. Graph would have reported 204 either way; saying
+                    // "deleted" here would credit this call with something it did not do.
+                    _ => new SpeRecycleBinItemOutcome(
+                        id, name, Succeeded: false,
+                        "Was not in the recycle bin when the delete was issued — nothing was purged " +
+                        "for this id."),
+                };
+            })
+            .ToList();
+
+        var result = new SpeRecycleBinDeleteResult(outcomes, Verified: true, VerificationFailureReason: null);
+
+        _logger.LogWarning(
+            "Container {ContainerId}: permanent delete requested {Requested}, verified purged {Purged} " +
+            "(bin {Before} → {After} items).",
+            containerId, result.RequestedCount, result.PurgedCount, before.Count, presentAfter.Count);
+
+        return result;
+    }
+
+    /// <summary>Base URL for a container's recycle-bin item collection.</summary>
+    private static string RecycleBinItemsUrl(GraphServiceClient graphClient, string containerId)
+        => $"{ResolveGraphBaseUrl(graphClient)}/storage/fileStorage/containers/" +
+           $"{Uri.EscapeDataString(containerId)}/recycleBin/items";
+
+    /// <summary>
+    /// Best-effort id → name map, used only to make outcome reports legible. A failure here must
+    /// never fail the operation — an unnamed outcome is worse reporting, not a wrong result.
+    /// </summary>
+    private async Task<Dictionary<string, string>> TryMapItemNamesAsync(
+        GraphServiceClient graphClient, string containerId, CancellationToken ct)
+    {
+        try
+        {
+            var items = await ListRecycleBinItemsAsync(graphClient, containerId, ct).ConfigureAwait(false);
+            return items.ToDictionary(i => i.Id, i => i.Name, StringComparer.OrdinalIgnoreCase);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            _logger.LogDebug(
+                ex, "Container {ContainerId}: could not pre-read recycle-bin item names.", containerId);
+            return new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        }
+    }
+
+    /// <summary>Reads the ids Graph echoed back in a 207 <c>value</c> array.</summary>
+    internal static HashSet<string> ReadReturnedIds(JsonDocument? json)
+    {
+        var ids = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+
+        if (json is null ||
+            !json.RootElement.TryGetProperty("value", out var value) ||
+            value.ValueKind != JsonValueKind.Array)
+        {
+            // No body, or no `value`. Returning an empty set means "nothing confirmed", which reports
+            // every requested id as not-restored. That is the safe direction: it under-claims rather
+            // than asserting a success Graph never stated.
+            return ids;
+        }
+
+        foreach (var element in value.EnumerateArray())
+        {
+            // Graph returns bare objects carrying `id`; tolerate a bare string too.
+            var id = element.ValueKind switch
+            {
+                JsonValueKind.String => element.GetString(),
+                JsonValueKind.Object when element.TryGetProperty("id", out var idEl)
+                    && idEl.ValueKind == JsonValueKind.String => idEl.GetString(),
+                _ => null,
+            };
+
+            if (!string.IsNullOrEmpty(id))
+            {
+                ids.Add(id);
+            }
+        }
+
+        return ids;
+    }
+
+    /// <summary>
+    /// Maps one <c>recycleBinItem</c> JSON object to the domain record.
+    /// </summary>
+    /// <remarks>
+    /// <c>recycleBinItem</c> is <c>OpenType="true"</c>, so the wire shape is wider than the CSDL's
+    /// declared properties — <c>deletedBy</c> and <c>title</c> are measured extras. Absent fields map
+    /// to null, which the UI must render as "not reported" rather than as a blank or a zero (NFR-06).
+    /// </remarks>
+    internal static SpeRecycleBinItem ParseRecycleBinItem(JsonElement element)
+    {
+        static string? Str(JsonElement e, string name)
+            => e.TryGetProperty(name, out var v) && v.ValueKind == JsonValueKind.String
+                ? v.GetString()
+                : null;
+
+        // `deletedBy` is an identitySet: { "user": { "displayName": ... } }. Measured live —
+        // "SharePoint App" for app-only deletions.
+        string? deletedBy = null;
+        if (element.TryGetProperty("deletedBy", out var by) && by.ValueKind == JsonValueKind.Object)
+        {
+            foreach (var identity in by.EnumerateObject())
+            {
+                if (identity.Value.ValueKind == JsonValueKind.Object)
+                {
+                    deletedBy = Str(identity.Value, "displayName");
+                    if (!string.IsNullOrWhiteSpace(deletedBy))
+                    {
+                        break;
+                    }
+                }
+            }
+        }
+
+        long? size = element.TryGetProperty("size", out var sizeEl)
+            && sizeEl.ValueKind == JsonValueKind.Number
+            && sizeEl.TryGetInt64(out var sizeValue)
+                ? sizeValue
+                : null;
+
+        DateTimeOffset? deletedAt =
+            element.TryGetProperty("deletedDateTime", out var delEl)
+            && delEl.ValueKind == JsonValueKind.String
+            && DateTimeOffset.TryParse(delEl.GetString(), out var parsed)
+                ? parsed
+                : null;
+
+        return new SpeRecycleBinItem(
+            Id: Str(element, "id") ?? string.Empty,
+            // `title` duplicates `name` in every row observed; prefer `name` and fall back rather
+            // than showing an empty label.
+            Name: Str(element, "name") ?? Str(element, "title") ?? string.Empty,
+            Size: size,
+            DeletedDateTime: deletedAt,
+            DeletedFromLocation: Str(element, "deletedFromLocation"),
+            DeletedByDisplayName: string.IsNullOrWhiteSpace(deletedBy) ? null : deletedBy);
     }
 
     /// <summary>

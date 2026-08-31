@@ -110,14 +110,32 @@ direct, recurring, and currently un-levered cost line for any tenant using a con
 `sdap-SPE-admin-app-r2` scoped this as FR-E01 (task 050, not yet started as of this refresh) — check
 `projects/sdap-SPE-admin-app-r2/tasks/TASK-INDEX.md` for current status before assuming it shipped.
 
-## Per-container item recycle bin — GA v1.0
+## Per-container item recycle bin — entity types on v1.0, **actions on BETA ONLY**
 
-**Source**: [Restore recycleBinItem — Graph
-v1.0](https://learn.microsoft.com/en-us/graph/api/filestoragecontainer-restore-recyclebinitem?view=graph-rest-1.0);
-`sdap-SPE-admin-app-r2` `notes/spe-platform-research-2026-08-20.md` §5.4.
+**Source**: Graph **CSDL**, both versions, read 2026-08-27 (`curl https://graph.microsoft.com/{v1.0,beta}/$metadata`,
+no token required) + live measurement on throwaway containers;
+`sdap-SPE-admin-app-r2` `notes/task-052-findings.md` §1–§2.
 
-`GET /storage/fileStorage/containers/{containerId}/recycleBin/items` — with restore (`207 Multi-Status`
-for partial success across multiple items) and permanent delete.
+`GET /storage/fileStorage/containers/{containerId}/recycleBin/items` — with restore and permanent delete.
+
+> 🔴 **CORRECTED 2026-08-27 (task 052).** This section previously read *"GA v1.0"* and cited the
+> `view=graph-rest-1.0` Learn page. **That is wrong**, and the error is the same shape task 050 had to
+> correct for archival ("GA in the admin centre ⇒ available on Graph v1.0" — it does not follow).
+>
+> | | v1.0 | beta |
+> |---|---|---|
+> | `recycleBin` / `recycleBinItem` entity types | ✅ | ✅ |
+> | `restore` action (bound to `Collection(recycleBinItem)`, param `ids`) | ❌ **absent** | ✅ |
+> | `delete` action (bound to the collection, param `ids`) | ❌ **absent** | ✅ |
+>
+> The entity types are on v1.0; **the two actions that make the feature usable are not**. Building
+> against v1.0 on the strength of the old claim yields a 404 on every restore and every purge. No ADR
+> conflict — the SPE container surface is already beta-pinned by task 020.
+
+⚠️ **`recycleBinItem` is `OpenType="true"`**, so the wire shape is wider than the CSDL declares.
+`deletedBy` (an identitySet — *who deleted it*, the most operationally useful field) and `title` are
+**not in the CSDL** and arrive as untyped extras. A response projection or reader written from the
+declared schema alone will silently drop them.
 
 **🔴 This is a different Graph resource from `/storage/fileStorage/deletedContainers`, which this corpus
 already documents elsewhere and which the SPE Admin app's "Recycle Bin" screen currently implements.**
@@ -131,14 +149,28 @@ share the word "recycle bin" in casual conversation:
 
 `sdap-SPE-admin-app-r2` spec FR-E03 identifies the item recycle bin as "the likelier admin intent behind
 a screen called 'Recycle Bin'" — an admin who deletes a file expects to find it here, not by restoring
-the whole container. As of this refresh the item recycle bin is **not yet implemented** (task 052,
-`🔲` in `TASK-INDEX.md`); the existing deleted-containers screen (task 022, **complete and
-live-verified 2026-08-24** — see `notes/task-022-findings.md`) is retained alongside it once built, not
+the whole container. **Shipped 2026-08-27 (task 052)** as a *Recycle Bin* tab on the container detail
+pane; the deleted-containers screen (task 022, live-verified 2026-08-24) is retained alongside it, not
 replaced.
 
-**Handling `207 Multi-Status` matters.** A bulk restore/delete against multiple items can partially
-succeed — collapsing that to a single pass/fail result hides which specific items failed. Report
-per-item outcomes.
+### 🔴 `207` is only half the story — restore and delete fail in OPPOSITE ways
+
+Measured live on throwaway containers, 2026-08-27 (task 052 §2):
+
+| | all ids valid | any id invalid | body |
+|---|---|---|---|
+| **`restore`** | **207** | **400 — nothing restored, ATOMIC** | `value` = the ids that **SUCCEEDED** |
+| **`delete`** (purge) | **204** | **204 — and it purges the valid ids anyway, NON-ATOMIC** | **none** |
+
+- **Restore's 207 carries no per-item error object.** Partial failure is expressed by **absence**:
+  `requested − returned`. Treating 207 as success hides every item that did not come back.
+- **Permanent delete has no 207 and no per-item reporting at all.** It answers `204` whether it purged
+  everything, some, or nothing. For an **irreversible** operation this is the worst reporting shape in
+  the SPE surface. The only way to know what happened is to **re-list the bin and diff** — and to diff
+  against a *before* list too, or an id that was never in the bin reads as "purged".
+- ⚠️ **Graph's error `code` for a rejected restore is not stable** — the same condition returned
+  `badArgument` and `invalidRequest` hours apart on 2026-08-27. Key any detector on the **400 status**,
+  not the code string.
 
 ## 🔴 The container URL field — VERIFIED 2026-08-24, and Graph's documented shape does not hold up
 
