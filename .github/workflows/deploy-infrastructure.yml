@@ -75,7 +75,7 @@ jobs:
           chmod 600 $AZURE_CONFIG_DIR/azureProfile.json
 
       - name: Setup Azure CLI
-        uses: azure/cli@v2
+        uses: azure/cli@v3
         with:
           azcliversion: latest
           inlineScript: echo "Azure CLI ready"
