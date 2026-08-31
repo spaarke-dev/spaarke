@@ -236,8 +236,6 @@ public class EntityAccessFilter : IEndpointFilter
 
             if (!OperationAccessPolicy.HasRequiredRights(rights, AssociateOperation))
             {
-                var (statusCode, errorCode, detail) = MapAuthorizationDenial("insufficient_rights");
-
                 _logger?.LogWarning(
                     "Entity access denied: User {UserId} cannot associate documents with {EntityType} {EntityId} " +
                     "({EntitySet}). Holds {Rights}; requires {Required}. CorrelationId: {CorrelationId}",
@@ -245,13 +243,13 @@ public class EntityAccessFilter : IEndpointFilter
                     OperationAccessPolicy.GetRequiredRights(AssociateOperation), httpContext.TraceIdentifier);
 
                 return Results.Problem(
-                    statusCode: statusCode,
+                    statusCode: 403,
                     title: "Forbidden",
-                    detail: detail,
+                    detail: InsufficientRightsDetail,
                     type: "https://tools.ietf.org/html/rfc7231#section-6.5.3",
                     extensions: new Dictionary<string, object?>
                     {
-                        ["errorCode"] = errorCode,
+                        ["errorCode"] = AccessDeniedErrorCode,
                         ["reasonCode"] = "insufficient_rights",
                         ["entityType"] = targetEntity.EntityType,
                         ["correlationId"] = httpContext.TraceIdentifier
@@ -309,24 +307,46 @@ public class EntityAccessFilter : IEndpointFilter
     /// <summary>
     /// Maps authorization denial reason to appropriate HTTP status and error code.
     /// </summary>
-    private static (int statusCode, string errorCode, string detail) MapAuthorizationDenial(string? reasonCode)
-    {
-        return reasonCode?.ToLowerInvariant() switch
-        {
-            "entity_not_found" or "resource_not_found" =>
-                (404, "OFFICE_007", "Association target not found"),
+    /// <summary>
+    /// The Office error-code taxonomy's "access denied" code. The Outlook/Word task pane keys its
+    /// notification TITLE off this (<c>errorMessages.ts</c> <c>ERROR_CODE_MAP</c> → "Access Denied");
+    /// the BODY comes from <see cref="InsufficientRightsDetail"/> below.
+    /// </summary>
+    private const string AccessDeniedErrorCode = "OFFICE_009";
 
-            "inactive" or "deleted" =>
-                (404, "OFFICE_007", "Association target is inactive or deleted"),
-
-            "team_mismatch" or "tenant_mismatch" =>
-                (403, "OFFICE_009", "Access denied to this entity"),
-
-            "permission_denied" or "insufficient_role" =>
-                (403, "OFFICE_009", "You do not have permission to associate documents with this entity"),
-
-            _ =>
-                (403, "OFFICE_009", "Access denied to association target")
-        };
-    }
+    /// <summary>
+    /// What the USER is shown when the association is refused for want of rights.
+    /// </summary>
+    /// <remarks>
+    /// <para><b>Why this is a written sentence and not a code lookup</b> (unified-access-control-r2,
+    /// 2026-08-31, owner-directed). This replaced <c>MapAuthorizationDenial</c>, a five-arm switch on a
+    /// <c>reasonCode</c> string. That switch had exactly ONE call site passing exactly ONE literal —
+    /// <c>"insufficient_rights"</c> — which matched NONE of its named arms, so every real denial fell to
+    /// the default and the user was told <i>"Access denied to association target"</i>: internal jargon
+    /// that names no record, no missing capability and no remedy. The switch's own better sentence (for
+    /// <c>"permission_denied"</c>) was unreachable from that call site. A lookup table with one input and
+    /// four dead arms is not a mapping; the message is written here directly instead.</para>
+    ///
+    /// <para><b>The dead arms were not merely dead — one was a latent disclosure.</b> Its
+    /// <c>entity_not_found → 404</c> arm would, if it ever became reachable, have separated "no such
+    /// record" from "no access to that record". <see cref="CallerRecordAccessProbe"/> conflates those two
+    /// deliberately ("both mean not authorized"), and task 022 removed exactly that separation from bulk
+    /// download because it is a record-enumeration oracle. So restoring reason-code branching here needs a
+    /// disclosure argument, not just a caller.</para>
+    ///
+    /// <para><b>Why naming the permission is safe.</b> Record EXISTENCE is not disclosed by this text —
+    /// the filter answers 403 whether or not the record exists, precisely because the probe conflates
+    /// them. And the caller supplied the record id from a picker that already required access to it. So
+    /// naming "Append To" costs no information and is the one word an administrator can act on.</para>
+    ///
+    /// <para><b>The entity type is deliberately NOT interpolated.</b> It is a logical name
+    /// (<c>sprk_matter</c>), not a label, and mapping logical names to display names would be a FOURTH
+    /// entity-name table (CLAUDE.md §11 — see <see cref="EntitySetByType"/>'s remarks). The type travels
+    /// in the <c>entityType</c> extension for support and telemetry instead of in prose.</para>
+    /// </remarks>
+    private const string InsufficientRightsDetail =
+        "You do not have permission to file documents against this record. Filing a document to a record "
+        + "requires the \"Append To\" permission on it, and your security role does not currently grant "
+        + "that. Ask an administrator to grant Append To for this record type, or ask the record's owner "
+        + "to share the record with you.";
 }
