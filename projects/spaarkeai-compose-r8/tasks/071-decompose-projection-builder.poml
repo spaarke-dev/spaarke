@@ -1,4 +1,4 @@
-﻿<?xml version="1.0" encoding="UTF-8"?>
+<?xml version="1.0" encoding="UTF-8"?>
 <task id="071" project="spaarkeai-compose-r8">
   <metadata>
     <title>FR-D01 — Decompose ComposeDocxProjectionBuilder.cs (3,085 lines) below 2,000 and DELETE its god-class waiver</title>
