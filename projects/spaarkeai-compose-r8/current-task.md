@@ -1,8 +1,8 @@
-# Current Task State — `spaarkeai-compose-r8`
+﻿# Current Task State — `spaarkeai-compose-r8`
 
 > **Last Updated**: 2026-08-30 (by `context-handoff`)
 > **Recovery**: read Quick Recovery, then §S3 → §S2 → §S1 → §S0.
-> **ALL WORK IS MERGED TO MASTER (0 unmerged). 070 clusters 7/6/5b/8/1/3/4 done, ZERO holes open.**
+> **071 COMPLETE (2026-08-31). 070 clusters 7/6/5b/8/1/3/4 done, ZERO holes open.**
 > **`ComposeService.cs` is FROZEN for `unified-access-control-r2` — do not touch it.**
 > Everything below "Full State" is preserved history from earlier checkpoints.
 
@@ -12,8 +12,8 @@
 
 | Field | Value |
 |---|---|
-| **Active work** | **070 decomposition** — clusters **7 · 6 · 5b · 8 · 1 · 3 · 4** extracted & verified, **every hole closed**. `ComposeService.cs` is now **FROZEN**. |
-| **Next Action** | **Task 071 — decompose `ComposeDocxProjectionBuilder.cs` (3,593 lines).** It is a DIFFERENT file, so it does not touch the freeze. Do NOT start cluster 5a or 2a/2b — both live in `ComposeService.cs`, which is frozen until `unified-access-control-r2` lands their #858 patch and says so. Note 071/072 are **larger than TASK-INDEX records** (index says 3,085 / 2,304; actual **3,593 / 2,987**) — they grew during Track A. |
+| **Active work** | **071 COMPLETE** — `ComposeDocxProjectionBuilder.cs` **3,593 → 1,031**, four collaborators (`ComposeNumbering` · `ComposeOoxmlPrimitives` · `ComposeContentModelProjector` · `ComposeParaOffsetMapBuilder`), projection output **byte-identical** over the whole corpus after each extraction. 070 clusters 7/6/5b/8/1/3/4 done; `ComposeService.cs` still **FROZEN**. |
+| **Next Action** | **Task 072 — decompose `ComposeDocumentRenderer.cs` (2,987 lines; TASK-INDEX says 2,304 — stale).** DIFFERENT file, does not touch the freeze. Build its equivalence oracle FIRST and validate it on all four axes before trusting it — recipe + the 071 oracle's resurrect command are in `notes/071-projection-builder-seam-map.md` §1. 072 is the WRITE side, so its oracle needs a byte-normalisation step (OOXML packages embed timestamps). Do NOT start 070 cluster 5a or 2a/2b — both live in the frozen `ComposeService.cs`. |
 | **Branch** | `work/spaarkeai-compose-r8` · clean · master `330b9fc55` · main repo synced. **All CODE is merged**; the only unmerged commit is this checkpoint itself (docs-only — it cannot be in master, since it records its own writing). Confirm with `git log --oneline origin/master..HEAD` — anything beyond a checkpoint commit there is unlanded work. |
 | **Merged today** | #806 `19bf65ec4` · #905 `369c3ea89` · #908 `330b9fc55` |
 | **Suite** | ALL GREEN — Compose **1,802/0** · BFF **11,614/0** · ArchTests **153/153** · Spe.Integration **409/0** · IntegrationTests **103/0** · client gate **104 suites / 1,336** · solution build **0 errors** · DI diff **empty** |
