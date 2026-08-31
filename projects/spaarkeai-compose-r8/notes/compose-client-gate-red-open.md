@@ -66,3 +66,45 @@ This gate has now defeated two "obvious" fixes (#908's `testTimeout`, #916's `as
 looked right, both were reasoned from a real mechanism, and neither moved the symptom. **A local pass is
 not evidence here** — the machine is 8x the runner. Any candidate fix must be validated by watching the
 gate on an actual CI run, not by a green local suite.
+
+---
+
+# UPDATE 2026-08-31 (2) — third hypothesis also WRONG, and the timing story collapses
+
+**`--maxWorkers=1` (PR #917) changed nothing.** Serial: 19 failed / 288s. Parallel: 19 failed / 294s.
+CPU contention between workers is **not** the cause. Both #916 and #917 are now **REVERTED** — neither
+fixed anything and both cost CI time.
+
+## The number that reframes this
+
+19 failures × 15s budget ≈ **285s**, and the whole suite took **288s**. So essentially *all* the runtime
+is failing waits, and the **5 passing tests mount the editor almost instantly**.
+
+That is not a slow machine. If it were slowness, all 24 would be slow and near the budget. Instead the
+split is binary: **5 mount immediately, 19 never mount at all**, no matter how long they wait (5s → 15s
+moved exactly one test).
+
+**So this was never a timing problem, and three timing-shaped fixes were all treating the symptom:**
+#908 (`testTimeout`), #916 (`asyncUtilTimeout`), #917 (`maxWorkers`).
+
+## Where to look next (untested — do NOT assume, validate on the gate)
+
+Something makes the editor mount for 5 tests and never for the other 19, in CI but not locally. That
+shape points at **conditional state, not resources**:
+
+- Test-order / shared-state pollution *within the file* — locally all 24 pass, so ordering or a
+  module-level mock may differ under `--ci`. Compare which 5 pass in CI against local ordering.
+- A module-resolution difference that only bites some code paths (jest.config.js's dist-vs-src note is
+  the known trap here, and `--ci` disables the watch-mode cache).
+- Something environment-gated inside `ComposeEditor` mount (a feature flag, `matchMedia`, a timer, an
+  observer stub) that is absent or behaves differently on the runner.
+
+**First diagnostic** (cheap, high information): get the CI log to print WHICH 5 tests pass. If they are
+the first N in file order, it is state pollution after test N. If they are scattered, it is per-test
+input.
+
+## Meta
+
+Three fixes, three wrong causes, all of them plausible and all validated only on a 32-core dev box where
+the suite passes unconditionally. **A local pass proves nothing about this gate.** The next attempt
+should start by making the CI log say *which* tests pass, not by changing a number.
