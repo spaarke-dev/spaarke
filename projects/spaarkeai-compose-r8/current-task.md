@@ -14,7 +14,7 @@
 |---|---|
 | **Active work** | **070 decomposition** — clusters **7 · 6 · 5b · 8 · 1 · 3 · 4** extracted & verified, **every hole closed**. `ComposeService.cs` is now **FROZEN**. |
 | **Next Action** | **Task 071 — decompose `ComposeDocxProjectionBuilder.cs` (3,593 lines).** It is a DIFFERENT file, so it does not touch the freeze. Do NOT start cluster 5a or 2a/2b — both live in `ComposeService.cs`, which is frozen until `unified-access-control-r2` lands their #858 patch and says so. Note 071/072 are **larger than TASK-INDEX records** (index says 3,085 / 2,304; actual **3,593 / 2,987**) — they grew during Track A. |
-| **Branch** | `work/spaarkeai-compose-r8` · clean · **0 commits unmerged** · master `330b9fc55` · main repo synced |
+| **Branch** | `work/spaarkeai-compose-r8` · clean · master `330b9fc55` · main repo synced. **All CODE is merged**; the only unmerged commit is this checkpoint itself (docs-only — it cannot be in master, since it records its own writing). Confirm with `git log --oneline origin/master..HEAD` — anything beyond a checkpoint commit there is unlanded work. |
 | **Merged today** | #806 `19bf65ec4` · #905 `369c3ea89` · #908 `330b9fc55` |
 | **Suite** | ALL GREEN — Compose **1,802/0** · BFF **11,614/0** · ArchTests **153/153** · Spe.Integration **409/0** · IntegrationTests **103/0** · client gate **104 suites / 1,336** · solution build **0 errors** · DI diff **empty** |
 | **Verify with** | **`dotnet build`** at the SOLUTION root — not one project (see §A2 for why that distinction cost real time) |
