@@ -173,21 +173,30 @@ param(
     [string]$CreateOwningApp = "",
 
     # ── SPE topology BFF app-registrations — added 2026-08-30, task 213.4 ──
-    # Creates the SHARED BFF app-reg for the named tier per topology doc §3A rows 4-5.
-    # For Model 2 per-customer BFFs (§3A row 6, "Spaarke BFF — {Customer}"), pass
-    # -CreateBffApp Model2 -CustomerName {name} to override the display name. All
-    # BFF app-regs are single-tenant (`AzureADMyOrg`) per project CLAUDE.md §MUST rule
-    # + topology doc §3A rows 4-6. Container access is granted separately at runbook
-    # Step 6 (registration-level `applicationPermissionGrants` on the container-type
-    # registration) — NOT via declared app-reg permissions. See topology doc §3A
-    # "How a BFF gets container access without owning anything — VERIFIED".
+    # ── Model 2 semantics corrected 2026-08-31, task 213.4-correction ──
+    # Creates the tier-appropriate BFF app-reg. All BFF app-regs are single-tenant
+    # (`AzureADMyOrg`) per project CLAUDE.md §MUST rule.
+    #
+    # Model 1 / Trial 1: ONE shared BFF app-reg for the shared environment
+    # (multiple customers use the same env → they use the same BFF app-reg).
+    # Do NOT pass -CustomerName (the shared env has no single "customer" identity).
+    #
+    # Model 2: ONE BFF app-reg per Model 2 stamp — every Model 2 environment
+    # IS a customer (Model 2 has no shared-env concept). -CustomerName is
+    # MANDATORY for Model 2; without it the script HARD-FAILS (there is no
+    # "shared Model 2 BFF" architecturally).
+    #
+    # Container access is granted separately at runbook Step 6 (registration-level
+    # `applicationPermissionGrants` on the container-type registration) — NOT via
+    # declared app-reg permissions. See topology doc §3A "How a BFF gets container
+    # access without owning anything — VERIFIED".
     [ValidateSet('Trial1','Model1','Model2')]
     [string]$CreateBffApp = "",
 
-    # Per-customer name override for Model 2 BFF app-regs. When passed with
-    # -CreateBffApp Model2, the display name becomes "Spaarke BFF — {CustomerName}"
-    # (topology doc §3A row 6). Ignored for Trial1 / Model1 (which use fixed
-    # shared display names).
+    # Per-stamp identifier for Model 2 BFF app-regs (Model 2 stamp = customer).
+    # MANDATORY when -CreateBffApp Model2. FORBIDDEN when -CreateBffApp Trial1
+    # or Model1 (those tiers are shared, no per-stamp identity applies).
+    # Display name becomes "Spaarke BFF - {CustomerName}".
     [string]$CustomerName = ""
 )
 
@@ -228,18 +237,24 @@ if ($TopologyMode) {
     if ($AllowClientSecretMint) {
         throw "-AllowClientSecretMint cannot be combined with -CreateOwningApp / -CreateBffApp. Topology app-regs are created secret-free per ADR-028 A4 (BFF identities) + KV credential-lifecycle rules 1-2 (.claude/constraints/provisioning.md § KV credential lifecycle). E-1 container-type owning-app secrets, if ever required, are managed via a separate operator flow."
     }
-    # Cannot pass both bare -CreateBffApp Model2 without a customer name AND expect the shared
-    # display name — topology doc §3A row 6 explicitly says Model 2 BFFs are per-customer.
-    # Bare `-CreateBffApp Model2` (no -CustomerName) creates a shared placeholder
-    # `Spaarke BFF — Model 2`; this is fine as a one-time setup, but flag it so the
-    # operator explicitly opts into it vs. per-customer.
+    # Model 2 semantics (owner correction 2026-08-31, task 213.4-correction):
+    # Model 2 has NO shared-environment concept — every Model 2 stamp IS a customer.
+    # Therefore `-CreateBffApp Model2` REQUIRES -CustomerName (there is no
+    # architecturally-valid "shared Model 2 BFF app-reg" to fall back to).
     if ($CreateBffApp -eq "Model2" -and [string]::IsNullOrWhiteSpace($CustomerName)) {
-        Write-Host ""
-        Write-Host "  [!!] -CreateBffApp Model2 without -CustomerName will create the shared display name" -ForegroundColor DarkYellow
-        Write-Host "       'Spaarke BFF - Model 2'. Per topology doc SS3A row 6, Model 2 BFFs are" -ForegroundColor DarkYellow
-        Write-Host "       normally per-customer: 'Spaarke BFF - {Customer}'. If you meant" -ForegroundColor DarkYellow
-        Write-Host "       per-customer, cancel now and pass -CustomerName '<name>'." -ForegroundColor DarkYellow
-        Write-Host ""
+        throw "-CreateBffApp Model2 REQUIRES -CustomerName. Model 2 has no shared-environment concept — every Model 2 stamp IS a customer, so every Model 2 BFF app-reg is per-stamp. There is no 'shared Model 2 BFF' architecturally. Re-invoke with -CustomerName '<stamp-identifier>' (e.g., 'Acme', 'Contoso'). See scripts/Register-EntraAppRegistrations.ps1 header comments on -CreateBffApp for the Model 1 / Trial 1 (shared) vs Model 2 (per-stamp) contract."
+    }
+    # Symmetric guard: -CustomerName is meaningless for Trial 1 / Model 1 (shared
+    # environments — one BFF app-reg, no per-customer split). Reject rather than
+    # silently ignore so the operator gets a clear error when the wrong tier is picked.
+    if ($CreateBffApp -in @("Trial1","Model1") -and -not [string]::IsNullOrWhiteSpace($CustomerName)) {
+        throw "-CustomerName is not valid with -CreateBffApp $CreateBffApp. Trial 1 and Model 1 are SHARED environments — ONE BFF app-reg serves all customers of that tier. -CustomerName is only valid with -CreateBffApp Model2 (where every stamp is a customer). Re-invoke without -CustomerName, or switch to -CreateBffApp Model2 if you meant a Model 2 stamp."
+    }
+    # Same rule for owning apps: -CustomerName is never meaningful for owning
+    # apps regardless of tier (all 3 owning apps are one-per-tier, per topology
+    # doc §R1's permanent 1:1 container-type binding). Reject to prevent confusion.
+    if (-not [string]::IsNullOrWhiteSpace($CreateOwningApp) -and -not [string]::IsNullOrWhiteSpace($CustomerName)) {
+        throw "-CustomerName is not valid with -CreateOwningApp. Owning apps are permanent + 1:1 with their container-type (topology doc §R1) — one per tier, never per-customer. Re-invoke without -CustomerName."
     }
     $SkipBffApi = $true          # implicit — skip the prod BFF-API flow
     $SkipClientSecret = $true    # forced — topology apps are secret-free
@@ -1224,13 +1239,18 @@ function Get-SpeTopologyBffAppDisplayName {
         Returns the exact display name for the BFF app-reg of a given tier, per topology
         doc SS3A rows 4-6.
     .DESCRIPTION
-        Trial 1 and Model 1 use fixed shared names (rows 4-5). Model 2 defaults to the
-        shared 'Spaarke BFF - Model 2' placeholder BUT topology doc SS3A row 6 says
-        Model 2 is per-customer 'Spaarke BFF - {Customer}' — pass -CustomerName to
-        opt into the per-customer name.
+        Model 1 and Trial 1 are SHARED environments — ONE BFF app-reg serves all
+        customers of the tier ('Spaarke BFF - Model 1' / 'Spaarke BFF - Trial 1').
+        Model 2 is per-stamp (every Model 2 environment IS a customer) — CustomerName
+        MANDATORY, display name becomes 'Spaarke BFF - {CustomerName}'.
+
+        Corrected 2026-08-31 per owner clarification: the earlier 'shared Model 2
+        BFF placeholder' path was architecturally wrong (Model 2 has no shared-env
+        concept). Model 2 without CustomerName now hard-throws upstream (see
+        topology-mode gate block in param handling).
 
         Uses ASCII hyphen '-' (not em dash) to keep display names shell-safe across
-        PowerShell / az CLI / portal rendering; topology doc SS3A shows em dashes for
+        PowerShell / az CLI / portal rendering; topology doc §3A shows em dashes for
         visual readability but the actual Entra display name uses ASCII throughout the
         codebase.
     #>
@@ -1244,10 +1264,12 @@ function Get-SpeTopologyBffAppDisplayName {
         'Trial1' { return "Spaarke BFF - Trial 1" }
         'Model1' { return "Spaarke BFF - Model 1" }
         'Model2' {
-            if (-not [string]::IsNullOrWhiteSpace($CustomerName)) {
-                return "Spaarke BFF - $CustomerName"
+            if ([string]::IsNullOrWhiteSpace($CustomerName)) {
+                # Defensive — upstream gate should have already thrown; this is a
+                # last-resort catch if a caller invokes this helper directly.
+                throw "Get-SpeTopologyBffDisplayName: Tier=Model2 requires non-empty CustomerName. Model 2 has no shared-BFF path."
             }
-            return "Spaarke BFF - Model 2"
+            return "Spaarke BFF - $CustomerName"
         }
     }
 }
