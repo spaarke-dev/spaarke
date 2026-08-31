@@ -42,6 +42,10 @@ public class OfficeService : IOfficeService
     // sprk_document archive. Optional/null-tolerant so hosts without the Communication module (and the existing
     // bare test constructions) keep working; null → the capture step is a guarded no-op (best-effort, NFR-04).
     private readonly EmailUploadCaptureService? _emailUploadCapture;
+    // Real Dataverse entity search for the add-in "File to" picker (task 026 / #229 — replaces the
+    // GenerateStubResults hardcoded fixtures). App-only read (ADR-028); singleton REST client.
+    // Optional/null-tolerant so bare test constructions keep compiling; null → stub fallback.
+    private readonly DataverseWebApiClient? _dataverseClient;
     private readonly ILogger<OfficeService> _logger;
 
     // In-memory job storage for development/testing (fallback when Dataverse unavailable)
@@ -57,7 +61,8 @@ public class OfficeService : IOfficeService
         IOptions<EmailProcessingOptions> emailProcessingOptions,
         IMembershipEventPublisher membershipEventPublisher,
         ILogger<OfficeService> logger,
-        EmailUploadCaptureService? emailUploadCapture = null)
+        EmailUploadCaptureService? emailUploadCapture = null,
+        DataverseWebApiClient? dataverseClient = null)
     {
         _jobStatusService = jobStatusService;
         _jobService = jobService;
@@ -68,6 +73,7 @@ public class OfficeService : IOfficeService
         _emailProcessingOptions = emailProcessingOptions.Value;
         _membershipEventPublisher = membershipEventPublisher;
         _emailUploadCapture = emailUploadCapture;
+        _dataverseClient = dataverseClient;
         _logger = logger;
     }
 
@@ -652,27 +658,142 @@ public class OfficeService : IOfficeService
         // Determine which entity types to search
         var typesToSearch = GetEntityTypesToSearch(request.EntityTypes);
 
-        // TRACKED: GitHub #229 - Replace with Dataverse queries once tables exist
-        // The implementation should:
-        // 1. Build FetchXML queries for each entity type with 'contains' filter on name fields
-        // 2. Execute queries in parallel for performance
-        // 3. Combine and sort results by relevance + recency
-        // 4. Apply pagination (skip/top) to combined results
-        // 5. Filter by user permissions (Dataverse handles this via security roles)
+        // Real Dataverse search (task 026 / #229). When no client is injected (bare test
+        // constructions), fall back to the legacy stub so those tests keep their shape.
+        if (_dataverseClient is null)
+        {
+            var stub = GenerateStubResults(request.Query, typesToSearch, request.Top);
+            var stubTotal = stub.Count + (request.Skip > 0 ? request.Skip : 0);
+            return new EntitySearchResponse
+            {
+                Results = stub.Skip(request.Skip).Take(request.Top).ToList(),
+                TotalCount = stubTotal,
+                HasMore = stubTotal > request.Skip + request.Top
+            };
+        }
 
-        // For now, return stub data for testing the endpoint structure
-        var results = GenerateStubResults(request.Query, typesToSearch, request.Top);
-        var totalCount = results.Count + (request.Skip > 0 ? request.Skip : 0);
+        // Query each requested entity type with a name/number 'contains' filter. Each type is
+        // best-effort — one entity's failure (missing table, transient 4xx) is logged and skipped,
+        // never fails the whole picker. NOTE: app-only read (no per-user security trimming yet) —
+        // tracked as a follow-up on #919.
+        var combined = new List<EntitySearchResult>();
+        var perTypeTop = Math.Clamp(request.Top, 5, 50);
+        foreach (var type in typesToSearch)
+        {
+            try
+            {
+                combined.AddRange(await QuerySearchEntityAsync(type, request.Query, perTypeTop, cancellationToken));
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "Entity search failed for type {EntityType}; skipping", type);
+            }
+        }
 
-        await Task.CompletedTask; // Simulate async operation
+        // Rank: prefix matches first, then most-recently-modified.
+        var ordered = combined
+            .OrderByDescending(r => r.Name.StartsWith(request.Query, StringComparison.OrdinalIgnoreCase))
+            .ThenByDescending(r => r.ModifiedOn)
+            .ToList();
 
         return new EntitySearchResponse
         {
-            Results = results.Skip(request.Skip).Take(request.Top).ToList(),
-            TotalCount = totalCount,
-            HasMore = totalCount > request.Skip + request.Top
+            Results = ordered.Skip(request.Skip).Take(request.Top).ToList(),
+            TotalCount = ordered.Count + request.Skip,
+            HasMore = ordered.Count > request.Skip + request.Top
         };
     }
+
+    /// <summary>Per-entity-type Dataverse Web API search metadata (mirrors RecordSyncJob's catalogue).</summary>
+    internal sealed record EntitySearchMeta(string EntitySet, string IdField, string NameField, string? RefField, string? DescField);
+
+    private static readonly IReadOnlyDictionary<AssociationEntityType, EntitySearchMeta> _searchMeta =
+        new Dictionary<AssociationEntityType, EntitySearchMeta>
+        {
+            [AssociationEntityType.Matter]  = new("sprk_matters",  "sprk_matterid",  "sprk_mattername",  "sprk_matternumber",  "sprk_matterdescription"),
+            [AssociationEntityType.Project] = new("sprk_projects", "sprk_projectid", "sprk_projectname", "sprk_projectnumber", "sprk_projectdescription"),
+            [AssociationEntityType.Invoice] = new("sprk_invoices", "sprk_invoiceid", "sprk_name",        "sprk_invoicenumber", "sprk_description"),
+            [AssociationEntityType.Account]  = new("accounts",     "accountid",      "name",             "accountnumber",      "description"),
+            [AssociationEntityType.Contact]  = new("contacts",     "contactid",      "fullname",         null,                 "jobtitle"),
+        };
+
+    /// <summary>
+    /// Runs a single entity type's name/number 'contains' query against the Dataverse Web API and
+    /// maps rows to <see cref="EntitySearchResult"/>. App-only read.
+    /// </summary>
+    private async Task<List<EntitySearchResult>> QuerySearchEntityAsync(
+        AssociationEntityType type,
+        string query,
+        int top,
+        CancellationToken cancellationToken)
+    {
+        var meta = _searchMeta[type];
+
+        // OData string literal: double single-quotes, then URL-encode the value (the surrounding
+        // contains(...) syntax stays literal).
+        var value = Uri.EscapeDataString(query.Replace("'", "''"));
+        var nameClause = $"contains({meta.NameField},'{value}')";
+        var filter = meta.RefField is null
+            ? nameClause
+            : $"({nameClause} or contains({meta.RefField},'{value}'))";
+
+        var selectFields = new List<string> { meta.IdField, meta.NameField, "modifiedon" };
+        if (meta.RefField is not null) selectFields.Add(meta.RefField);
+        if (meta.DescField is not null) selectFields.Add(meta.DescField);
+
+        var rows = await _dataverseClient!.QueryAsync<Dictionary<string, JsonElement>>(
+            meta.EntitySet,
+            filter: filter,
+            select: string.Join(",", selectFields),
+            top: top,
+            cancellationToken: cancellationToken);
+
+        var results = new List<EntitySearchResult>(rows.Count);
+        foreach (var row in rows)
+        {
+            var mapped = MapSearchRow(type, meta, row);
+            if (mapped is not null)
+                results.Add(mapped);
+        }
+
+        return results;
+    }
+
+    /// <summary>
+    /// Maps one Dataverse Web API JSON row to an <see cref="EntitySearchResult"/>, or null when the
+    /// row has no name (never surface an unnamed record in the picker). Pure — unit-tested.
+    /// </summary>
+    internal static EntitySearchResult? MapSearchRow(
+        AssociationEntityType type,
+        EntitySearchMeta meta,
+        Dictionary<string, JsonElement> row)
+    {
+        var name = GetJsonString(row, meta.NameField);
+        if (string.IsNullOrWhiteSpace(name))
+            return null;
+
+        var id = Guid.TryParse(GetJsonString(row, meta.IdField), out var g) ? g : Guid.Empty;
+        var refVal = meta.RefField is not null ? GetJsonString(row, meta.RefField) : null;
+        var desc = meta.DescField is not null ? GetJsonString(row, meta.DescField) : null;
+        var modified = DateTimeOffset.TryParse(GetJsonString(row, "modifiedon"), out var mo)
+            ? mo
+            : DateTimeOffset.UtcNow;
+
+        return new EntitySearchResult
+        {
+            Id = id,
+            EntityType = type,
+            LogicalName = GetLogicalName(type),
+            Name = name!,
+            DisplayInfo = !string.IsNullOrWhiteSpace(refVal) ? refVal! : (desc ?? GetLogicalName(type)),
+            PrimaryField = !string.IsNullOrWhiteSpace(refVal) ? refVal! : name!,
+            IconUrl = $"/icons/{type.ToString().ToLowerInvariant()}.svg",
+            ModifiedOn = modified
+        };
+    }
+
+    private static string? GetJsonString(Dictionary<string, JsonElement> row, string key)
+        => row.TryGetValue(key, out var el) && el.ValueKind == JsonValueKind.String ? el.GetString() : null;
 
     /// <summary>
     /// Determines which entity types to search based on the request.
