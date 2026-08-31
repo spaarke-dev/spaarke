@@ -37,19 +37,10 @@ public class ToolFrameworkIntegrationTests : IClassFixture<IntegrationTestFixtur
 
     #region Step 1: Tool Discovery Tests
 
-    [Fact]
-    public void ToolHandlerRegistry_IsRegisteredInDI()
-    {
-        // Arrange
-        using var scope = _fixture.Services.CreateScope();
-
-        // Act
-        var registry = scope.ServiceProvider.GetService<IToolHandlerRegistry>();
-
-        // Assert
-        registry.Should().NotBeNull("IToolHandlerRegistry should be registered in DI");
-        _output.WriteLine("IToolHandlerRegistry successfully resolved from DI container");
-    }
+    // `ToolHandlerRegistry_IsRegisteredInDI` removed 2026-08-31 — ADR-038 §7 B3 (DI-registration
+    // test). Resolution is proven by the discovery tests below, which resolve the registry and then
+    // assert what it actually discovered; if registration breaks, those fail with a handler name
+    // rather than "a service was null".
 
     [Fact]
     public void ToolHandlerRegistry_DiscoversCoreToolHandlers()

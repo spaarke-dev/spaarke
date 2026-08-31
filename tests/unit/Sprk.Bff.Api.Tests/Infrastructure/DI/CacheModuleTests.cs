@@ -72,32 +72,19 @@ public class CacheModuleTests
     // ===================================================================
     // Branch (a) — Redis on
     // ===================================================================
-
-    [Fact(Skip = "Requires live Redis to satisfy AbortOnConnectFail=true (ConnectionMultiplexer.Connect runs at DI-registration time per CacheModule.cs:84). Covered by manual harness tests/manual/RedisValidationTests.ps1.")]
-    public void Redis_On_RegistersRealConnectionMultiplexer_And_RedisCache()
-    {
-        // Arrange
-        var services = new ServiceCollection();
-        var logging = GetLoggingBuilder(services);
-        var env = new FakeHostEnvironment { EnvironmentName = Environments.Development };
-        var config = BuildConfiguration(new Dictionary<string, string?>
-        {
-            ["Redis:Enabled"] = "true",
-            ["Redis:ConnectionString"] = "localhost:6379,abortConnect=false",
-            ["Redis:InstanceName"] = "spaarke:",
-        });
-
-        // Act
-        services.AddCacheModule(config, logging, env);
-        using var provider = services.BuildServiceProvider();
-        var multiplexer = provider.GetRequiredService<IConnectionMultiplexer>();
-        var distCache = provider.GetRequiredService<IDistributedCache>();
-
-        // Assert
-        multiplexer.Should().NotBeNull();
-        multiplexer.Should().NotBeOfType<NullConnectionMultiplexer>();
-        distCache.GetType().Name.Should().Be("RedisCache");
-    }
+    //
+    // The happy-path test (`Redis_On_RegistersRealConnectionMultiplexer_And_RedisCache`) was removed
+    // 2026-08-31: it cannot run in CI by construction. `CacheModule` hard-sets
+    // `configOptions.AbortOnConnectFail = true` and calls `ConnectionMultiplexer.Connect` DURING DI
+    // registration, so the branch needs a live Redis — passing `abortConnect=false` in the test's
+    // connection string does nothing, because the production code overwrites it.
+    //
+    // KNOWN GAP, stated honestly: its skip reason claimed coverage by
+    // `tests/manual/RedisValidationTests.ps1`. That claim was FALSE — the harness greps config and
+    // source text and never resolves a multiplexer. So nothing automated now asserts
+    // "Redis on => real multiplexer, not the null object". The Redis-OFF branches (b/c/d) and the
+    // ADR-032 `NullConnectionMultiplexer` semantics remain covered by the running tests below.
+    // Closing the gap needs a Redis container in the test lane, not a resurrected skip.
 
     [Fact]
     public void Redis_On_NoConnectionString_Throws()
