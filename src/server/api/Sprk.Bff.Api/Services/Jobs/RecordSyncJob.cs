@@ -194,7 +194,11 @@ public class RecordSyncJob : BackgroundService
             NameField:         "fullname",
             DescriptionField:  "description",
             ReferenceField:    null,
-            SelectFields:      "contactid,fullname,description,jobtitle,parentcustomerid,modifiedon"),
+            // Web API selects a lookup via its `_<name>_value` form; the raw
+            // `parentcustomerid` 400s with 0x80060888 ("Could not find a property named
+            // 'parentcustomerid'"), which failed the contacts sync every run (every ~15 min).
+            // Confirmed via App Insights 2026-08-31. Pre-existing on master.
+            SelectFields:      "contactid,fullname,description,jobtitle,_parentcustomerid_value,modifiedon"),
 
         new EntityConfig(
             EntityLogicalName: "account",
