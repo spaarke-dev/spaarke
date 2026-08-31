@@ -511,7 +511,7 @@ public sealed class DispositionRoutabilitySeamTests
         Messages: Array.Empty<ChatMessage>(),
         HostContext: null,
         AdditionalDocumentIds: null,
-        UploadedFiles: Array.Empty<ChatSessionFile>());
+        UploadedFiles: Array.Empty<ChatSessionFile>()) { OwnerOid = TestSessionOwner.Oid };
 
     private sealed class Harness
     {

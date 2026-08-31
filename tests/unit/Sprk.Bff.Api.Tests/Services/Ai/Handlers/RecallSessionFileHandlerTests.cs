@@ -138,7 +138,7 @@ public sealed class RecallSessionFileHandlerTests
             Messages: Array.Empty<ChatMessage>(),
             HostContext: null,
             AdditionalDocumentIds: null,
-            UploadedFiles: new[] { file });
+            UploadedFiles: new[] { file }) { OwnerOid = TestSessionOwner.Oid };
     }
 
     private static RagSearchResponse BuildRagResponse(int resultCount, string? content = null)

@@ -177,7 +177,7 @@ The following keys are routinely set in `tests/integration/Spe.Integration.Tests
 | Service Bus | `ServiceBus:ConnectionString`, `ServiceBus:QueueName` (paired) | `ServiceBusJobProcessor` |
 | Cosmos | `CosmosPersistence:Endpoint`, `CosmosPersistence:DatabaseName` (paired — see §2.1) | `SessionPersistenceService` |
 | Cache | `Redis:Enabled` (opt-in only — see §2.2) | `RedisCacheModule` |
-| Graph | `Graph:TenantId`, `Graph:ClientId`, `Graph:ClientSecret`, `Graph:UseManagedIdentity`, `Graph:Scopes:0` | `GraphClientFactory` |
+| Graph | `Graph:TenantId`, `Graph:ClientId`, `Graph:ClientSecret`, `Graph:ManagedIdentity:Enabled`, `Graph:Scopes:0` | `GraphClientFactory` |
 | Dataverse | `Dataverse:EnvironmentUrl`, `Dataverse:ServiceUrl`, `Dataverse:ClientId`, `Dataverse:ClientSecret`, `Dataverse:TenantId` | `DataverseService` |
 | AI gate | `DocumentIntelligence:Enabled`, `Analysis:Enabled` (compound — see §3.1) | `AnalysisServicesModule` |
 | AI Chat | `AzureOpenAI:Endpoint`, `AzureOpenAI:ChatModelName` (paired — see §3.2) | `AiModule` |
@@ -185,6 +185,23 @@ The following keys are routinely set in `tests/integration/Spe.Integration.Tests
 | Storage admin | `SpeAdmin:KeyVaultUri` | `SpeAdminModule` |
 | Multi-tenant | `ManagedIdentity:ClientId` | `ManagedIdentityCredentialFactory` |
 | Resilience | `AiSearchResilience:*`, `GraphResilience:*` | Polly policy configuration |
+
+> **Correction, 2026-08-30 (`spaarkeai-compose-r8`).** The Graph row previously named
+> **`Graph:UseManagedIdentity`**. **No production code has ever read that key** — `GraphClientFactory`,
+> `IdentityConfigurationValidator` and `DataverseServiceClientImpl` all read
+> **`Graph:ManagedIdentity:Enabled`**. 43 fixtures had copied the wrong key from this table and were
+> corrected in the same change.
+>
+> It was inert rather than harmful only by luck: the fixtures all set it to `"false"`, and an *absent*
+> `Graph:ManagedIdentity:Enabled` also evaluates false, so intent and behaviour happened to agree. A
+> fixture that had tried to **enable** managed identity would have silently got the opposite — and,
+> per §F.2 (Fixture-Config-FIRST), this table is where an engineer looks to decide whether a failing
+> fixture value is contract-conformant. A wrong entry here sends that investigation the wrong way,
+> which is the more expensive failure.
+>
+> `ManagedIdentity:ClientId` in the "Multi-tenant" row is a *different* key and remains correct — it is
+> the legacy fallback `ManagedIdentityCredentialFactory.ResolveUamiClientId` reads after the canonical
+> `Graph:ManagedIdentity:ClientId`.
 
 ---
 

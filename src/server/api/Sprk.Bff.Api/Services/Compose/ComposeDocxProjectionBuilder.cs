@@ -528,11 +528,51 @@ public sealed class ComposeDocxProjectionBuilder
         public FieldPhase Phase = FieldPhase.None;
         public readonly List<Run> ResultRuns = new();
 
+        /// <summary>
+        /// Task 049: the field INSTRUCTION accumulated from the code phase's <c>w:instrText</c> /
+        /// <c>w:delInstrText</c> children. Swallowing these was correct while a field could only ever be
+        /// flattened to its display text; carrying the field needs the half that says what it IS.
+        /// </summary>
+        public readonly StringBuilder Instruction = new();
+
+        /// <summary>
+        /// Task 049: the deepest nesting reached in this span. The INSTRUCTION carry is available only at 1
+        /// — at 2 the inner field's own <c>w:instrText</c> has been folded into this accumulation, so the
+        /// string is a concatenation that would author a DIFFERENT field. Recorded rather than inferred from
+        /// <see cref="Depth"/>, which is back at 0 by the time the caller decides. (Task 058: at 2 the field
+        /// is still carried — by <see cref="SpanRuns"/>, which never takes the instruction apart.)
+        /// </summary>
+        public int MaxDepth;
+
+        /// <summary>
+        /// Task 058: every run this span consumed, in document order — the <c>begin</c>, the code phase, any
+        /// nested field's own runs, the <c>separate</c>, the result runs and the <c>end</c>.
+        /// </summary>
+        /// <remarks>
+        /// This is the whole of the nested carry. <see cref="Instruction"/> is a lossy summary of the code
+        /// phase and cannot describe a tree; this is the tree, unread. Accumulated unconditionally rather
+        /// than only when nesting appears, because the decision is made at the close and the runs are gone
+        /// by then — and because a conditional accumulation would be a second rule to keep in step with the
+        /// first. Costs one list of references per field span.
+        /// </remarks>
+        public readonly List<Run> SpanRuns = new();
+
+        /// <summary><c>w:fldLock</c> on the outermost <c>begin</c> — the author froze this field.</summary>
+        public bool Locked;
+
+        /// <summary><c>w:dirty</c> on the outermost <c>begin</c> — re-evaluate on next open.</summary>
+        public bool Dirty;
+
         public void Reset()
         {
             Depth = 0;
             Phase = FieldPhase.None;
             ResultRuns.Clear();
+            Instruction.Clear();
+            SpanRuns.Clear();
+            MaxDepth = 0;
+            Locked = false;
+            Dirty = false;
         }
     }
 
@@ -558,14 +598,23 @@ public sealed class ComposeDocxProjectionBuilder
                 {
                     field.Phase = FieldPhase.Code;
                     field.ResultRuns.Clear();
+                    field.Instruction.Clear();
+                    field.SpanRuns.Clear();
+                    // Task 049: fldLock / dirty are declared on the OUTERMOST begin and govern the whole
+                    // field, so they are read here and not overwritten by a nested begin below.
+                    field.Locked = fldChar.FieldLock?.Value == true;
+                    field.Dirty = fldChar.Dirty?.Value == true;
                 }
                 field.Depth++;
+                if (field.Depth > field.MaxDepth) field.MaxDepth = field.Depth;
+                field.SpanRuns.Add(run);
                 return true;
             }
             if (type == FieldCharValues.Separate)
             {
                 if (field.Depth == 0) return false; // stray separate outside any field — fail open
                 if (field.Phase == FieldPhase.Code) field.Phase = FieldPhase.Result;
+                field.SpanRuns.Add(run);
                 return true;
             }
             if (type == FieldCharValues.End)
@@ -573,6 +622,7 @@ public sealed class ComposeDocxProjectionBuilder
                 if (field.Depth == 0) return false; // stray end outside any field — fail open
                 field.Depth--;
                 if (field.Depth == 0) closed = true;
+                field.SpanRuns.Add(run);
                 return true;
             }
             return false; // unrecognized/absent FieldCharType — treat as ordinary (empty) content
@@ -580,15 +630,64 @@ public sealed class ComposeDocxProjectionBuilder
 
         if (field.Depth > 0)
         {
+            // Task 058: recorded on EVERY consumed-run path, control markup included. The span carry needs
+            // the whole sequence, and a run recorded on some paths but not others would be a hole that only
+            // shows up as a mangled field in a saved document.
+            field.SpanRuns.Add(run);
             if (field.Phase == FieldPhase.Result)
             {
                 field.ResultRuns.Add(run); // cached result content — becomes the atom's display text
             }
-            // Phase == Code: field-code (w:instrText) runs are never editor-visible — swallowed.
+            else
+            {
+                // Phase == Code: field-code runs are never editor-VISIBLE, and still are not — the atom's
+                // display text is unchanged. Task 049 accumulates them anyway, because the instruction is
+                // what makes the construct a field rather than the number it printed last time.
+                foreach (var child in run.ChildElements)
+                {
+                    switch (child)
+                    {
+                        case FieldCode code: field.Instruction.Append(code.Text); break;
+                        case DeletedFieldCode deleted: field.Instruction.Append(deleted.Text); break;
+                        default: break;
+                    }
+                }
+            }
             return true;
         }
 
         return false;
+    }
+
+    /// <summary>
+    /// Task 049: the self-describing payload an inline FIELD atom carries back to the client, or <c>null</c>
+    /// when the field is not carryable.
+    /// </summary>
+    /// <remarks>
+    /// <para>The PRESENCE of <c>data-field-instr</c> is the contract: it means "this field can be handed
+    /// back verbatim on save". A nested or instruction-less field gets no payload at all, so a client cannot
+    /// accidentally return a construct the server would have to refuse — the gate lives in one place
+    /// (<see cref="TryCarryField"/>'s rule, mirrored here) rather than being restated as client policy.</para>
+    /// <para>Emitting this is the read half of the carry. Without it the write half is unreachable from the
+    /// editor: an edited paragraph is rebuilt from the client's own nodes, and a field atom that carries
+    /// nothing contributes nothing.</para>
+    /// </remarks>
+    private static (string Name, string Value)[]? FieldAtomDataAttributes(
+        string instruction, bool complex, bool locked, bool dirty, bool nested)
+    {
+        if (nested || string.IsNullOrWhiteSpace(instruction))
+        {
+            return null;
+        }
+
+        var attributes = new List<(string, string)>(4)
+        {
+            ("data-field-instr", instruction),
+        };
+        if (complex) attributes.Add(("data-field-complex", "1"));
+        if (locked) attributes.Add(("data-field-locked", "1"));
+        if (dirty) attributes.Add(("data-field-dirty", "1"));
+        return attributes.ToArray();
     }
 
     /// <summary>A run carrying a complex/floating object — DrawingML (<c>w:drawing</c>, image/shape), an
@@ -744,7 +843,17 @@ public sealed class ComposeDocxProjectionBuilder
                     {
                         if (fieldClosed)
                         {
-                            ctx.AppendAtom(ComposeAtomKind.Field, ExtractRunsDisplayText(field.ResultRuns));
+                            // Task 049: the atom's DISPLAY is unchanged — still the field's cached result,
+                            // still a non-editable leaf. What is new is the self-describing payload beside
+                            // it, so a client that rebuilds an edited paragraph can hand the field back
+                            // instead of dropping it. Same mechanism (and same I-2 argument) as w:sym's
+                            // font + code point: scalars only, no markup crosses the wire.
+                            ctx.AppendAtom(
+                                ComposeAtomKind.Field,
+                                ExtractRunsDisplayText(field.ResultRuns),
+                                dataAttributes: FieldAtomDataAttributes(
+                                    field.Instruction.ToString(), complex: true,
+                                    locked: field.Locked, dirty: field.Dirty, nested: field.MaxDepth > 1));
                             field.Reset();
                         }
                         break;
@@ -757,7 +866,13 @@ public sealed class ComposeDocxProjectionBuilder
                     RenderRun(r, ctx);
                     break;
                 case SimpleField sf:
-                    ctx.AppendAtom(ComposeAtomKind.Field, ExtractAtomDisplayText(sf));
+                    ctx.AppendAtom(
+                        ComposeAtomKind.Field,
+                        ExtractAtomDisplayText(sf),
+                        dataAttributes: FieldAtomDataAttributes(
+                            sf.Instruction?.Value ?? string.Empty, complex: false,
+                            locked: sf.FieldLock?.Value == true, dirty: sf.Dirty?.Value == true,
+                            nested: sf.Descendants<SimpleField>().Any() || sf.Descendants<FieldChar>().Any()));
                     break;
                 case Hyperlink h:
                     RenderHyperlink(h, ctx);
@@ -812,7 +927,13 @@ public sealed class ComposeDocxProjectionBuilder
                 case TabChar:
                 case PositionalTab:
                     // Non-collapsing tab representation (GPT §9.1) — never a bare "\t".
-                    ctx.Append("<span class=\"compose-tab\"> </span>");
+                    //
+                    // Task 048: now emitted as an ATOM, keeping the `compose-tab` class and the SAME em-space
+                    // content so it looks exactly as it did. That the content is unchanged is what makes this
+                    // invisible to every coordinate space: RunEditorLength already counted a tab as 1, and the
+                    // atom node is a ProseMirror leaf of size 1 contributing that same one character. The only
+                    // thing that changed is that the client can now tell this em space from a typed one.
+                    ctx.AppendAtom(ComposeAtomKind.Tab, " ", extraClass: "compose-tab");
                     break;
                 case Break br:
                     // Task 022 WS-2 construct audit (design section 4: "w:br type=page - currently a line
@@ -840,8 +961,19 @@ public sealed class ComposeDocxProjectionBuilder
                     // visible placeholder (U+FFFD) AND raise the intra-run glyph-loss warning — F-1 never
                     // allows a silent drop. This was previously the FR-06 characterization gap pinned by
                     // ComposeDocxProjectionBuilderTests.Build_ParagraphWithSymbolCharRun_..., now flipped.
+                    //
+                    // Task 048: the glyph is unchanged — this is still exactly what the user sees — but it is
+                    // now wrapped in an ATOM carrying the font + code point verbatim, so a save re-emits the
+                    // ORIGINAL w:sym rather than the resolved look-alike. That matters most in precisely the
+                    // unmapped case: without this the U+FFFD placeholder, which exists to be honest about a
+                    // glyph we could not resolve for DISPLAY, would have been written back into the document
+                    // as the user's content.
                     var glyph = ResolveSymbolGlyph(sym, out var mapped);
-                    ctx.AppendEscaped(glyph);
+                    ctx.AppendAtom(ComposeAtomKind.Symbol, glyph, dataAttributes: new[]
+                    {
+                        ("data-sym-font", sym.Font?.Value ?? string.Empty),
+                        ("data-sym-char", sym.Char?.Value ?? string.Empty),
+                    });
                     if (!mapped) ctx.AddWarning("unmapped-symbol-char", 1);
                     break;
                 case Ruby ruby:
@@ -2408,10 +2540,26 @@ public sealed class ComposeDocxProjectionBuilder
                     {
                         if (fieldClosed)
                         {
-                            // Field flattens to its cached RESULT text as plain prose (the field's dynamic
-                            // behavior does not survive; its visible value does). 026 refines the surface.
-                            AddPlainRun(sink, ExtractRunsDisplayText(field.ResultRuns), href, ctx, revision);
-                            ctx.AddWarning("field-flattened-to-text", 1);
+                            // Task 049: the field is CARRIED when its instruction can be reproduced exactly
+                            // — see TryCarryField. Otherwise it flattens to its cached RESULT text as plain
+                            // prose, which is what every field did before this task: the visible value
+                            // survives, the dynamic behaviour does not, and the loss is named.
+                            var complexResult = ExtractRunsDisplayText(field.ResultRuns);
+                            var complexNested = field.MaxDepth > 1;
+                            if (!TryCarryField(
+                                    sink, ctx, href, revision,
+                                    instruction: field.Instruction.ToString(),
+                                    cachedResult: complexResult,
+                                    complex: true,
+                                    locked: field.Locked,
+                                    dirty: field.Dirty,
+                                    nested: complexNested,
+                                    firstResultRun: field.ResultRuns.FirstOrDefault(),
+                                    spanXml: complexNested ? TryCaptureFieldSpanXml(field.SpanRuns) : null))
+                            {
+                                AddPlainRun(sink, complexResult, href, ctx, revision);
+                                ctx.AddWarning("field-flattened-to-text", 1);
+                            }
                             field.Reset();
                         }
                         break;
@@ -2428,6 +2576,17 @@ public sealed class ComposeDocxProjectionBuilder
                         // text is never doubled here.
                         var runBoxText = ExtractTextBoxDisplayText(r, ctx);
                         var directRunText = ExtractRunsDisplayText(new[] { r });
+
+                        // Task 056 (FR-A10 residual): a TEXT-FREE object — a picture, chart, shape or OLE
+                        // embed — is CARRIED as its own subtree instead of being dropped. Only the text-free
+                        // case: a box that carries text is accept-flattened into the paragraph as prose just
+                        // above, so carrying it as well would put the same words in the document twice.
+                        if (runBoxText.Length == 0
+                            && TryCarryEmbeddedObjects(sink, ctx, href, revision, r, directRunText))
+                        {
+                            break;
+                        }
+
                         var combined = directRunText.Length > 0 && runBoxText.Length > 0
                             ? directRunText + " " + runBoxText
                             : directRunText.Length > 0 ? directRunText : runBoxText;
@@ -2441,20 +2600,47 @@ public sealed class ComposeDocxProjectionBuilder
                     ProjectRun(r, sink, href, ctx, revision);
                     break;
                 case SimpleField sf:
-                    AddPlainRun(sink, ExtractAtomDisplayText(sf), href, ctx, revision);
-                    ctx.AddWarning("field-flattened-to-text", 1);
+                    // Task 049: the compact form. Its instruction is an attribute rather than a code phase,
+                    // so it is read directly — but the carryability gate is the same one the complex form
+                    // uses, including the nesting exclusion (a w:fldSimple may itself contain a field).
+                    var simpleResult = ExtractAtomDisplayText(sf);
+                    var simpleNested = sf.Descendants<SimpleField>().Any() || sf.Descendants<FieldChar>().Any();
+                    if (!TryCarryField(
+                            sink, ctx, href, revision,
+                            instruction: sf.Instruction?.Value ?? string.Empty,
+                            cachedResult: simpleResult,
+                            complex: false,
+                            locked: sf.FieldLock?.Value == true,
+                            dirty: sf.Dirty?.Value == true,
+                            nested: simpleNested,
+                            firstResultRun: sf.Descendants<Run>().FirstOrDefault(),
+                            spanXml: simpleNested ? TryCaptureSimpleFieldSpanXml(sf) : null))
+                    {
+                        AddPlainRun(sink, simpleResult, href, ctx, revision);
+                        ctx.AddWarning("field-flattened-to-text", 1);
+                    }
                     break;
                 case Hyperlink h:
                     var resolved = ResolveHyperlinkHref(h, ctx.MainPart);
-                    if (resolved is not null && resolved.StartsWith('#'))
-                    {
-                        // Task 024: an INTERNAL bookmark link — bookmark targets are not model data (026
-                        // owns bookmarks), so carrying the anchor would dangle. TEXT kept, link dropped
-                        // LOUDLY (the read walk still renders it as a live #anchor href — read-path only).
-                        ctx.AddWarning("internal-link-flattened", 1);
-                        resolved = null;
-                    }
-                    else if (resolved is null && (h.Id?.Value is { Length: > 0 } || h.DocLocation?.Value is { Length: > 0 }))
+                    // UAT 2026-08-26 (D-1): the internal-bookmark branch that used to sit here NULLED
+                    // `resolved` and warned `internal-link-flattened`, on the premise — stated in its own
+                    // comment — that "the read walk still renders it as a live #anchor href — read-path
+                    // only". That premise was FALSE: ComposeEditor does `setContent(projection.html)`, so
+                    // the read walk's HTML *is* the editable document. The result was a read/write
+                    // asymmetry with two compounding costs:
+                    //   1. The editor held `href="#Section2"` while the model held null, so
+                    //      `formattingUnchanged` could NEVER match — an untouched paragraph containing a
+                    //      cross-reference fell to the rebuild tier, its canonical key diverged from the
+                    //      base, and the merge planned Render instead of Clone. That paragraph therefore
+                    //      lost the byte-verbatim clone guarantee ON EVERY SAVE — taking any footnote ref
+                    //      / inline w:sdt / text box sharing it along. That is a direct breach of the R8
+                    //      invariant "untouched blocks are preserved", not merely an edited-block loss.
+                    //   2. On save the "#Section2" href failed `Uri.TryCreate(..., Absolute)` in the
+                    //      renderer and was reported to the user as `hyperlink-target-dropped`.
+                    // Carrying the anchor is ADR-049 I-2-clean (a self-contained scalar, no markup on the
+                    // wire) and the bookmark it names survives independently — see the renderer's
+                    // ResolveHyperlinkRelationships for why it cannot dangle.
+                    if (resolved is null && (h.Id?.Value is { Length: > 0 } || h.DocLocation?.Value is { Length: > 0 }))
                     {
                         // Unresolvable relationship, protocol-neutralized target (GPT §13 allowlist), or a
                         // docLocation-only link (Step-9.5 F9): text kept, link dropped LOUDLY (was silent).
@@ -2688,10 +2874,21 @@ public sealed class ComposeDocxProjectionBuilder
                     break;
                 case TabChar:
                 case PositionalTab:
-                    // The model has no tab (the read walk renders a non-collapsing compose-tab span):
-                    // flatten to a space with a counted warning — never silently (review finding 020-R3).
-                    sb.Append(' ');
-                    ctx.AddWarning("tab-flattened", 1);
+                    // Task 048: a tab is model data now (ComposeInlineRun.IsTab), emitted at its exact inline
+                    // position — mirroring the break markers below. It was previously flattened to a space
+                    // with a counted warning, so any edit to the paragraph collapsed its alignment:
+                    // definitions lists, signature blocks and table-of-contents lines are all held together by
+                    // exactly these tabs. Budget-guarded like the breaks (a clipped projection must not trail
+                    // stray tabs).
+                    //
+                    // w:ptab (PositionalTab) degrades to a plain w:tab, as it did when both flattened to the
+                    // same space. Its absolute-position attributes are not modeled — recorded on the residual
+                    // loss list rather than silently implied to round-trip.
+                    FlushText();
+                    if (ctx.HasOutputBudget)
+                    {
+                        sink.Add(new ComposeInlineRun { IsTab = true, Revision = revision });
+                    }
                     break;
                 case Break pageBreak when pageBreak.Type is not null && pageBreak.Type.Value == BreakValues.Page:
                     // Task 023: a MANUAL PAGE BREAK is model data (ComposeInlineRun.IsPageBreak) — emitted
@@ -2709,18 +2906,46 @@ public sealed class ComposeDocxProjectionBuilder
                     break;
                 case Break:
                 case CarriageReturn:
-                    // The model has no intra-paragraph soft line/column break: flatten to a space rather
-                    // than fusing words, with a counted warning. (Manual PAGE breaks are model data above.)
-                    sb.Append(' ');
-                    ctx.AddWarning("line-break-flattened", 1);
+                    // Task 046: a SOFT line/column break is model data too (ComposeInlineRun.IsLineBreak),
+                    // emitted at its exact inline position — mirroring the manual page break above. It was
+                    // previously flattened to a space with a counted warning, which meant any edit to the
+                    // paragraph collapsed its line structure: address blocks, party blocks and signature
+                    // blocks all lost their layout. Budget-guarded like the page break, for the same reason
+                    // (a clipped projection must not trail stray breaks).
+                    FlushText();
+                    if (ctx.HasOutputBudget)
+                    {
+                        sink.Add(new ComposeInlineRun { IsLineBreak = true, Revision = revision });
+                    }
                     break;
                 case NoBreakHyphen:
                     sb.Append('‑');
                     break;
                 case SymbolChar sym:
-                    var glyph = ResolveSymbolGlyph(sym, out var mapped);
-                    sb.Append(glyph);
-                    if (!mapped) ctx.AddWarning("unmapped-symbol-char", 1);
+                    // Task 048: a symbol is model data now (ComposeInlineRun.Symbol) — the font + code point
+                    // verbatim, NOT the glyph the reader resolved for display. That distinction is the whole
+                    // point: § in a legal document is usually Symbol-font F0A7, and re-authoring the resolved
+                    // look-alike (or, for an unmapped code point, the U+FFFD placeholder) is a wrong glyph in
+                    // a legal document — the exact failure ResolveSymbolGlyph's curation exists to avoid.
+                    //
+                    // The unmapped-symbol-char warning still fires: it describes the READ (what the editor
+                    // shows the user), which is unchanged. The WRITE is now lossless either way, which is why
+                    // "symbol-flattened" left ReportableConstructs.
+                    FlushText();
+                    if (ctx.HasOutputBudget)
+                    {
+                        ResolveSymbolGlyph(sym, out var symMapped);
+                        if (!symMapped) ctx.AddWarning("unmapped-symbol-char", 1);
+                        sink.Add(new ComposeInlineRun
+                        {
+                            Symbol = new ComposeSymbol
+                            {
+                                Font = sym.Font?.Value ?? string.Empty,
+                                CharCode = sym.Char?.Value ?? string.Empty,
+                            },
+                            Revision = revision,
+                        });
+                    }
                     break;
                 case Ruby ruby:
                     sb.Append(ExtractRunsDisplayText(RubyBaseRuns(ruby)));
@@ -2774,6 +2999,258 @@ public sealed class ComposeDocxProjectionBuilder
         }
 
         FlushText(); // trailing text after the last break (or the whole run when no break split it)
+    }
+
+    /// <summary>
+    /// Task 049 (FR-A10 residual): adds the field as a <see cref="ComposeInlineRun.Field"/> marker run when
+    /// it can be reproduced EXACTLY, and returns <c>false</c> when it cannot — the caller then flattens it
+    /// to its cached display text exactly as every field did before this task.
+    /// </summary>
+    /// <remarks>
+    /// <para><b>The gate is structural, not a keyword allow-list.</b> The obvious-looking alternative was to
+    /// carry <c>PAGE</c>/<c>DATE</c> (harmless on re-evaluation) and freeze <c>REF</c>/<c>PAGEREF</c> (which
+    /// show Word's broken-reference text if their target bookmark did not survive). Three findings ruled
+    /// that out, recorded in <c>notes/049-field-carry-decisions.md</c>:</para>
+    /// <list type="number">
+    /// <item><description><b>The target survives.</b> Bookmarks are carried since task 041 — an untouched
+    /// block is cloned verbatim and an edited one gets <c>ComposeBlockMerge.CarryBookmarks</c>. The
+    /// renderer's own 011-P4/P9 remark ("the model does not carry bookmarks") predates that and has been
+    /// corrected. So the hazard the allow-list existed to dodge is closed, and measured:
+    /// <c>ComposeFieldCarrySeamTests.EditedBookmarkParagraph_StillCarriesTheTarget_SoACarriedRefResolves</c>.</description></item>
+    /// <item><description><b>A keyword allow-list makes one document behave two ways.</b> Freezing the
+    /// <c>DATE</c> in the paragraph a user edited while the other 39 pages keep live <c>DATE</c> fields is
+    /// an inconsistency nothing on screen explains — worse than either uniform outcome.</description></item>
+    /// <item><description><b>Freezing is not the null action.</b> A flattened <c>REF</c> keeps printing
+    /// "Section 4" after the agreement renumbers to 5. A visible broken reference is a worse-looking failure
+    /// and a better one: silence in a legal document is the failure nobody catches.</description></item>
+    /// </list>
+    /// <para>What genuinely cannot be reproduced is excluded here, and only that: a field with no
+    /// instruction at all. A field whose begin/end straddle paragraphs never closes, so it never reaches
+    /// this method — it keeps its own <c>field-unterminated</c> anomaly on the read side and flattens on
+    /// the write side.</para>
+    /// <para><b>Task 058 — the nested case takes the other door.</b> A NESTED field still has no single
+    /// recoverable instruction (the outer scan's accumulation is a concatenation of two fields' code
+    /// phases), so it does not take the instruction path above and never will. It is carried instead by
+    /// <see cref="ComposeField.SpanXml"/>: the span's own OOXML, captured by
+    /// <see cref="TryCaptureFieldSpanXml"/> and re-emitted verbatim. Nothing about the instruction argument
+    /// changes — the field is carried by not being taken apart.</para>
+    /// <para><b>Run properties come from the field's RESULT run</b> — a cross-reference is routinely bold or
+    /// italic, and that formatting lives there. Same rule as <c>IsTab</c>: the marker replaces the content,
+    /// never the properties.</para>
+    /// </remarks>
+    private static bool TryCarryField(
+        List<ComposeInlineRun> sink,
+        ModelWalkContext ctx,
+        string? href,
+        ComposeRevision? revision,
+        string instruction,
+        string cachedResult,
+        bool complex,
+        bool locked,
+        bool dirty,
+        bool nested,
+        Run? firstResultRun,
+        string? spanXml = null)
+    {
+        if (!ctx.HasOutputBudget)
+        {
+            return false;
+        }
+
+        if (nested)
+        {
+            // Task 058: a nested field has no single instruction, so the instruction carry above cannot
+            // describe it — and task 049 was right that inventing one would author a different field. It is
+            // carried by its own OOXML instead (see ComposeField.SpanXml). Instruction is left EMPTY on
+            // purpose: if the render-time gate refuses the span, the renderer finds nothing to author and
+            // flattens to the cached result — today's outcome, never a substitution.
+            if (spanXml is null)
+            {
+                return false;
+            }
+
+            var nestedRPr = firstResultRun?.RunProperties;
+            sink.Add(new ComposeInlineRun
+            {
+                Field = new ComposeField
+                {
+                    Instruction = string.Empty,
+                    SpanXml = spanXml,
+                    CachedResult = ctx.ClampText(cachedResult),
+                    Complex = complex,
+                    Locked = locked,
+                    Dirty = dirty,
+                },
+                Bold = IsOn(nestedRPr?.Bold),
+                Italic = IsOn(nestedRPr?.Italic),
+                Underline = nestedRPr?.Underline is { Val: not null } nu && nu.Val!.Value != UnderlineValues.None,
+                Href = href,
+                Revision = revision,
+            });
+            return true;
+        }
+
+        if (string.IsNullOrWhiteSpace(instruction))
+        {
+            return false;
+        }
+
+        var rPr = firstResultRun?.RunProperties;
+
+        sink.Add(new ComposeInlineRun
+        {
+            Field = new ComposeField
+            {
+                Instruction = instruction,
+                // Clamped like any other projected text: the result is document prose and shares the same
+                // output budget. The INSTRUCTION is never clamped — a truncated instruction is a different
+                // field, so an oversized one is refused above rather than shortened.
+                CachedResult = ctx.ClampText(cachedResult),
+                Complex = complex,
+                Locked = locked,
+                Dirty = dirty,
+            },
+            Bold = IsOn(rPr?.Bold),
+            Italic = IsOn(rPr?.Italic),
+            Underline = rPr?.Underline is { Val: not null } u && u.Val!.Value != UnderlineValues.None,
+            Href = href,
+            Revision = revision,
+        });
+
+        return true;
+    }
+
+    /// <summary>
+    /// Task 058 (FR-A10 residual): captures a NESTED <c>w:fldChar</c> field span as the verbatim OOXML the
+    /// renderer re-emits, or <c>null</c> when the span cannot be captured safely and the field keeps
+    /// flattening.
+    /// </summary>
+    /// <remarks>
+    /// <para><b>The contiguity check is the whole safety argument.</b> The scan consumes RUNS, but the
+    /// container it walks may hold other children between them — a <c>w:bookmarkStart</c>, a
+    /// <c>w:commentRangeStart</c>, a <c>w:proofErr</c>, a <c>w:hyperlink</c> — and each of those is emitted
+    /// by its OWN arm of <see cref="ProjectInline"/>, at its own position. Capturing just the runs of such a
+    /// span would carry the field while the interleaved element was emitted somewhere else, silently
+    /// reordering the paragraph. A span whose runs are not consecutive siblings is therefore refused and
+    /// keeps today's flatten — a smaller, already-described loss than a paragraph whose parts moved.</para>
+    /// <para><b>A holder <c>w:p</c>, not a bare fragment.</b> The captured runs are cloned into a fresh
+    /// paragraph and that paragraph's <c>OuterXml</c> is what travels: the SDK emits the namespace
+    /// declarations the fragment needs on the holder (the same mechanism <see cref="ComposeEmbeddedObject"/>
+    /// relies on), and a single root means ONE parse gate at render serves both this and the
+    /// <c>w:fldSimple</c> form.</para>
+    /// <para>Capped by the shared opaque-carry limit and REFUSED rather than truncated over it — half a
+    /// field is not the construct the document contained.</para>
+    /// </remarks>
+    private static string? TryCaptureFieldSpanXml(IReadOnlyList<Run> spanRuns)
+    {
+        if (spanRuns.Count == 0)
+        {
+            return null;
+        }
+
+        for (var i = 0; i < spanRuns.Count - 1; i++)
+        {
+            if (!ReferenceEquals(spanRuns[i].NextSibling(), spanRuns[i + 1]))
+            {
+                return null;
+            }
+        }
+
+        return CaptureInHolderParagraph(spanRuns);
+    }
+
+    /// <summary>
+    /// Task 058: the compact form's capture — a <c>w:fldSimple</c> that itself contains a field is ONE
+    /// element, so there is no contiguity question to answer; it is cloned into the same holder shape as the
+    /// complex span so both forms meet the same render-time gate.
+    /// </summary>
+    private static string? TryCaptureSimpleFieldSpanXml(SimpleField field) =>
+        CaptureInHolderParagraph(new OpenXmlElement[] { field });
+
+    private static string? CaptureInHolderParagraph(IEnumerable<OpenXmlElement> children)
+    {
+        var holder = new Paragraph();
+        foreach (var child in children)
+        {
+            holder.AppendChild(child.CloneNode(true));
+        }
+
+        var xml = holder.OuterXml;
+        return xml.Length == 0 || xml.Length > ComposeDocumentRenderer.MaxOpaqueCarryXmlChars ? null : xml;
+    }
+
+    /// <summary>
+    /// Task 056 (FR-A10 residual): captures a run's embedded objects (<c>w:drawing</c> / <c>w:object</c> /
+    /// <c>w:pict</c>) as <see cref="ComposeInlineRun.EmbeddedObject"/> marker runs, and returns <c>false</c>
+    /// when they cannot be carried — the caller then drops them exactly as every object did before this task.
+    /// </summary>
+    /// <remarks>
+    /// <para><b>The subtree is carried VERBATIM rather than modelled.</b> A <c>w:drawing</c> is a DrawingML
+    /// document in its own right (extents, effect extents, frame locks, a <c>pic:pic</c> with fill, geometry
+    /// and transform — or a chart reference, or an entire VML shape). Any typed model of that would silently
+    /// discard every property it failed to enumerate, which is the exact failure this project exists to end.
+    /// Carrying the bytes preserves properties nobody enumerated, for the same reason cloning an untouched
+    /// block does. What makes that SAFE is the renderer's two gates — the shared SDK parse gate and the
+    /// relationship-resolution check — not anything asserted here.</para>
+    /// <para><b>All or nothing per run.</b> A run with two objects where only one is carryable would emit
+    /// one and drop the other while the merge's count reported a single loss with no way to say WHICH. The
+    /// whole run falls back to the flatten instead, which is a state the taxonomy already describes.</para>
+    /// <para><b>Ordering caveat, stated rather than discovered.</b> A TRANSITIONAL run carrying its own
+    /// <c>w:t</c> text ALONGSIDE the object (the 026 F3 shape) emits the text first and the object second,
+    /// regardless of their order inside the source run. The alternative — walking the run's children to
+    /// interleave them exactly — buys correct ordering for a shape the corpus does not contain, at the cost
+    /// of a second content walk in the hottest method in this file.</para>
+    /// </remarks>
+    private static bool TryCarryEmbeddedObjects(
+        List<ComposeInlineRun> sink,
+        ModelWalkContext ctx,
+        string? href,
+        ComposeRevision? revision,
+        Run run,
+        string directRunText)
+    {
+        if (!ctx.HasOutputBudget)
+        {
+            return false;
+        }
+
+        // The SAME carryability rule the base-side carry applies (ComposeBlockMerge.IsCarryableEmbeddedObject
+        // — text boxes excluded, because their text is accept-flattened into the paragraph above and
+        // carrying the box as well would put the same words in the document twice). One rule, one place: if
+        // the two sides could disagree, the disagreement would show up as a DUPLICATED sentence in a saved
+        // legal document, which is a bad way to learn that a boolean drifted.
+        var objects = run.Elements().Where(ComposeBlockMerge.IsCarryableEmbeddedObject).ToList();
+        if (objects.Count == 0)
+        {
+            return false;
+        }
+
+        var rPr = run.RunProperties;
+        var carried = new List<ComposeInlineRun>(objects.Count);
+        foreach (var element in objects)
+        {
+            var xml = element.OuterXml;
+            if (xml.Length == 0 || xml.Length > ComposeDocumentRenderer.MaxOpaqueCarryXmlChars)
+            {
+                // Over the shared opaque-carry cap (or unserializable). Refused, never truncated — a
+                // truncated subtree is not the construct the document contained.
+                return false;
+            }
+
+            carried.Add(new ComposeInlineRun
+            {
+                EmbeddedObject = new ComposeEmbeddedObject { Xml = xml },
+                Bold = IsOn(rPr?.Bold),
+                Italic = IsOn(rPr?.Italic),
+                Underline = rPr?.Underline is { Val: not null } u && u.Val!.Value != UnderlineValues.None,
+                Href = href,
+                Revision = revision,
+            });
+        }
+
+        AddPlainRun(sink, directRunText, href, ctx, revision);
+        sink.AddRange(carried);
+        return true;
     }
 
     private static void AddPlainRun(List<ComposeInlineRun> sink, string text, string? href, ModelWalkContext ctx, ComposeRevision? revision = null)
@@ -3016,11 +3493,40 @@ public sealed class ComposeDocxProjectionBuilder
         /// (it sits inside the paragraph's own <c>data-paraid</c> block); <see cref="RunBoundary.AtomKind"/>
         /// in the offset-addressing table is the matching signal that no intra-atom operation may target it.
         /// </summary>
-        public void AppendAtom(ComposeAtomKind kind, string? displayText)
+        /// <param name="extraClass">
+        /// Task 048: an additional class on the span, so a RENDERABLE atom keeps the exact appearance it had
+        /// before it became one (the tab's existing <c>compose-tab</c> rule). Styling only — never identity.
+        /// </param>
+        /// <param name="dataAttributes">
+        /// Task 048: extra <c>data-*</c> attributes carrying an atom's self-describing payload back to the
+        /// client, so the client can return it on save without ever handling OOXML (ADR-049 I-2). Today only
+        /// <c>w:sym</c>'s font + code point use this. Names MUST be literal <c>data-*</c> tokens; values are
+        /// attribute-escaped.
+        /// </param>
+        public void AppendAtom(
+            ComposeAtomKind kind,
+            string? displayText,
+            string? extraClass = null,
+            (string Name, string Value)[]? dataAttributes = null)
         {
-            Append("<span class=\"compose-atom\" data-atom-kind=\"");
+            Append("<span class=\"compose-atom");
+            if (!string.IsNullOrEmpty(extraClass))
+            {
+                Append(" ");
+                Append(extraClass);
+            }
+            Append("\" data-atom-kind=\"");
             Append(AtomKindToken(kind));
-            Append("\" contenteditable=\"false\">");
+            Append("\"");
+            foreach (var (name, value) in dataAttributes ?? Array.Empty<(string, string)>())
+            {
+                Append(" ");
+                Append(name);
+                Append("=\"");
+                AppendEscapedAttr(value);
+                Append("\"");
+            }
+            Append(" contenteditable=\"false\">");
             if (!string.IsNullOrEmpty(displayText)) AppendEscaped(displayText);
             Append("</span>");
         }
@@ -3030,6 +3536,8 @@ public sealed class ComposeDocxProjectionBuilder
             ComposeAtomKind.Sdt => "sdt",
             ComposeAtomKind.Field => "field",
             ComposeAtomKind.ComplexObject => "object",
+            ComposeAtomKind.Tab => "tab",
+            ComposeAtomKind.Symbol => "symbol",
             _ => "unknown",
         };
 

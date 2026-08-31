@@ -1,7 +1,7 @@
 <task id="CICD-085" project="ci-cd-unit-test-remediation-r1">
   <metadata>
     <title>Deep cleanup PR 3/3 — final sweep (remaining DELETE-tagged tests + AMBIGUOUS resolution) + full dotnet test verification — unblocks Phase 3 cutover</title>
-    <status>not-started</status>
+    <status>complete</status>
     <estimated-effort>4 hours</estimated-effort>
     <phase>2.5 - Deep cleanup</phase>
     <stream>B - Test reset (extended)</stream>
@@ -11,6 +11,7 @@
     <dependencies>084</dependencies>
     <blocks>071</blocks>
     <tags>testing, deletion, deep-cleanup, sliced-PR, build-vs-maintain, gates-cutover</tags>
+    <disposition date="2026-08-30">COMPLETE AS notes/deep-cleanup-final-summary.md. This task's POML goal read 'final BFF unit test count <=3,500' — STRICTER than the spec it implements: SC-11 marks that figure '(DIRECTIONAL, non-binding)'. The spec governs. Its deletion sweep is superseded by 084's evidence (247 rows -> 1 genuine). Its remaining genuine obligation under SC-11 was the final summary with honest accounting, which is now written: count is 7,260 and it went UP, because other projects added tests to the same suite during the window and because there was no large scaffolding pile to remove. SC-11's BINDING clauses (ADR-038 §7 with >=12 examples; /test-diet wired into task-execute Step 11) are met.</disposition>
   </metadata>
 
   <owner-rescope date="2026-08-28" binding="true">
@@ -33,6 +34,27 @@
     little deletion left. It should either be (a) rewritten as a naming-remediation task, or
     (b) closed as superseded by `/test-diet`. Operator's call — do NOT execute it as written.
   </owner-rescope>
+
+  <closure-record date="2026-08-28" resolution="CLOSED — rename churn without behavioral benefit">
+    Closed on the same reasoning that closed 084, and with owner approval.
+
+    This task's actual content is ~1,124 B13 renames, not deletions. Per the FR-B10
+    owner decision in PR #852, a bad name is NOT grounds for deletion where the test is
+    otherwise useful, effective and executable -- so the deletion framing was already
+    withdrawn. What remained was a mechanical rename of 1,124 test methods.
+
+    Cost: a very large diff touching hundreds of files, landing across 30+ active
+    worktrees, with guaranteed merge-conflict cost for every project currently in
+    flight. Benefit: zero behavioral change; no test gains or loses coverage.
+
+    Residual value is delivered by /test-diet (FR-B09), which renames the handful of
+    tests each project actually touches, at its own project close, where the diff is
+    small and reviewable. That is the same mechanism that retired CICD-082b.
+
+    GATE CONSEQUENCE: 085 was the last blocker on task 071 (cutover window). With 084,
+    085 and 088 all closed, 071 is gated only on the shadow window (spec.md:156 --
+    20 agreeing PRs, zero false greens, >= 5 calendar days).
+  </closure-record>
 
   <prompt>
     Third and final deep-cleanup PR per spec FR-B10. Delete remaining DELETE-tagged tests from broader inventory. Resolve AMBIGUOUS bucket via judgment (each ambiguous test: read + decide keep or delete; document rationale). Run FULL dotnet test on surviving suite (not just a sample) to verify zero regressions vs pre-cleanup. Confirm final BFF unit test count is ≤3,500 (≥48% reduction from ~6,695). This PR's merge UNBLOCKS task 071 cutover.

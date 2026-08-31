@@ -128,7 +128,7 @@ public class IntegrationTestFixture : WebApplicationFactory<Program>
                 ["Graph:TenantId"] = "test-tenant-id",
                 ["Graph:ClientId"] = "test-client-id",
                 ["Graph:ClientSecret"] = "test-client-secret",
-                ["Graph:UseManagedIdentity"] = "false",
+                ["Graph:ManagedIdentity:Enabled"] = "false",
                 ["Graph:Scopes:0"] = "https://graph.microsoft.com/.default",
 
                 // Dataverse options (DataverseOptions validator)
@@ -224,6 +224,9 @@ public class IntegrationTestFixture : WebApplicationFactory<Program>
 
         builder.ConfigureTestServices(services =>
         {
+            // Test hosts must not authenticate for real — see TestTokenCredential.
+            services.UseStubTokenCredential();
+
             // ---------------------------------------------------------------
             // CACHE: Replace Redis with MemoryDistributedCache for deterministic
             // caching behavior (ADR-009: Redis-first in production).
@@ -288,6 +291,30 @@ public class IntegrationTestFixture : WebApplicationFactory<Program>
             dataverseServiceMock.Setup(d => d.TestConnectionAsync()).ReturnsAsync(true);
             services.RemoveAll<IDataverseService>();
             services.AddSingleton(dataverseServiceMock.Object);
+
+            // IDataverseService was mocked here; its field-mapping sibling was not, so
+            // POST /api/v1/field-mappings/push reached a REAL Dataverse client. That client acquires
+            // its token through managed identity, which on a non-Azure machine means probing
+            // 169.254.169.254 — the request then hung until HttpClient's 100-second default timeout.
+            // Same root cause as UseStubTokenCredential above.
+            //
+            // BOTH defects this note used to describe are now FIXED (2026-08-30, spaarkeai-compose-r8):
+            //
+            //   1. DataverseServiceClientImpl built its own credential and GraphModule passed none, so
+            //      the DI-level stub could not reach this path. The credential is now a ctor parameter
+            //      and GraphModule resolves it from DI — so UseStubTokenCredential DOES cover it, and
+            //      replacing the registration is no longer the only lever available.
+            //   2. This fixture set Graph:UseManagedIdentity, which no production code reads (the real
+            //      key is Graph:ManagedIdentity:Enabled, now set above). Corrected here and in 42
+            //      sibling fixtures, along with the wrong entry in
+            //      docs/procedures/test-fixture-contracts.md that they had all copied it from.
+            //
+            // This override is KEPT anyway, deliberately: it is not credential plumbing. The concern is
+            // that a push reaches a REAL Dataverse client at all, and the else branch is MI-backed too
+            // under ADR-028 A4, so neither fix makes a live Dataverse call acceptable in a unit host.
+            // Removing it would trade a fast mock for a real client that now merely fails differently.
+            services.RemoveAll<IFieldMappingDataverseService>();
+            services.AddSingleton(new Mock<IFieldMappingDataverseService>().Object);
         });
     }
 

@@ -239,7 +239,14 @@ public sealed class ComposeTrackedChangesSeamTests
     {
         var source = BuildRedlineSource();
         var projection = _builder.BuildContentModel(source);
-        var rendered = _renderer.RenderIntoCarrier(source, projection.Model, author: "seam-test");
+        // Task 040: pinned to the RENDER path (mergeUnchangedBlocks: false). This test asserts how the
+        // renderer RE-AUTHORS tracked-change revision markup (minting fresh ids ABOVE the carrier's), and it
+        // posts the projection unmodified — so with the merge on (the production default) every block is
+        // CLONED and the re-authoring never runs. Cloning is the correct behaviour for an unedited block, and
+        // it preserves the carrier's own revision ids rather than minting new ones; this test's subject is the
+        // render path itself, which still executes for every block the user actually changed.
+        // Merge-path coverage: ComposeMergeSeamTests.
+        var rendered = _renderer.RenderIntoCarrier(source, projection.Model, author: "seam-test", mergeUnchangedBlocks: false);
 
         using var doc = WordprocessingDocument.Open(new MemoryStream(rendered, writable: false), isEditable: false);
         var body = doc.MainDocumentPart!.Document!.Body!;

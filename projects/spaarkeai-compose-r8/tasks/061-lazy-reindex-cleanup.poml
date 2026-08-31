@@ -1,0 +1,109 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="061" project="spaarkeai-compose-r8">
+  <metadata>
+    <title>FR-B02/B03 — Lazy re-index from the durable copy on recall; SessionFilesCleanupJob evicts the hot index ONLY</title>
+    <phase>6 Track B — Durable Session Files</phase>
+    <gate>blocked-on-060</gate>
+    <status>completed</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Modifies a background cleanup job that deletes data; a scope error destroys the durable copies the previous task created.</rigor-reason>
+    <model-tier>opus</model-tier>
+    <model-tier-reason>Capability-matched: the job currently deletes on a 24h sweep, and the change is "delete less" — the class of change where an over-broad selector still passes every test because the test only checks that the hot index was cleared. Destroying durable bytes would be discovered weeks later by a user, not by CI.</model-tier-reason>
+    <effort>xhigh</effort>
+    <parallel-group>B1</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <parallel-reason>Track B files only; not the Compose spine.</parallel-reason>
+    <deps>060</deps>
+    <tags>bff-api, storage, background-jobs, testing</tags>
+    <estimated-effort>6 hours</estimated-effort>
+  </metadata>
+
+  <prompt>
+    With durable bytes in place (task 060), make recall work and make cleanup safe.
+
+    **FR-B02 Lazy re-index** — when a session recalls a file whose hot-index chunks have been evicted,
+    re-index from the durable copy on demand. A day-60 session must recall from its files identically to
+    day 1 — same results, not merely "no error".
+
+    **FR-B03 Cleanup scope** — `SessionFilesCleanupJob` currently sweeps on a 24h Redis-key expiry. It must
+    evict the **hot index ONLY**. The durable copy must never be deleted by that sweep. Retention of the
+    durable bytes is task 062's concern and follows the session's own TTL — the 24h sweep has no business
+    touching it.
+  </prompt>
+
+  <role>SPAARKE backend developer. Expert in the AI session file index, Redis-backed hot storage, and background job semantics. Follow ADR-009 (Redis-first), ADR-014/015 and ADR-038.</role>
+
+  <goal>
+    A session reopened at day 60 recalls from its files identically to day 1. The 24h cleanup sweep removes
+    only hot-index entries and provably never deletes durable bytes.
+  </goal>
+
+  <context>
+    <background>
+      The current failure is a lifecycle mismatch, not a bug in either component: the hot index expires on a
+      24h Redis TTL while the conversation it serves lives 90 days. Adding durable bytes without fixing the
+      sweep would just mean the sweep deletes them too — which is why these two requirements are one task.
+    </background>
+    <relevant-files>
+      <file role="primary-edit">src/server/api/Sprk.Bff.Api/Services/Ai/Sessions/ (SessionFilesCleanupJob)</file>
+      <file role="primary-edit">src/server/api/Sprk.Bff.Api/Services/Ai/Chat/</file>
+      <file role="canonical-reference">src/server/api/Sprk.Bff.Api/Services/Ai/Sessions/SessionRestoreService.cs</file>
+      <file role="test">tests/integration/seam/</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="spec FR-B03">The cleanup job MUST evict the hot index ONLY. It MUST NOT delete durable bytes under any condition. Enforce this structurally — the job should not have a code path that can reach the durable store at all.</constraint>
+    <constraint source="ADR-009">Hot index state uses `IDistributedCache` / Redis. MUST NOT use `IMemoryCache`.</constraint>
+    <constraint source="project">Re-index MUST be LAZY (on recall), not a background rehydration sweep — a sweep would re-warm every session's files and defeat the eviction.</constraint>
+    <constraint source="project">Recall after re-index MUST produce identical results to the pre-eviction path. Assert equality of results, not merely absence of error.</constraint>
+    <constraint source="ADR-014/015">Tenant isolation on the re-index read path — a re-index MUST NOT read another tenant's durable copy.</constraint>
+    <constraint source="root CLAUDE.md §11">MUST reuse `SessionRestoreService` and R7's re-attach layer. MUST NOT build a new session-restore surface.</constraint>
+    <constraint source="ADR-038">Seam tests including a day-60 simulation (evict the hot index, then recall) and an explicit assertion that the durable copy survives a cleanup run.</constraint>
+    <constraint source="spec NFR-02">No new NuGet. Report publish size.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>session file index, lazy rehydration, background cleanup</topic>
+    <files>
+      <file>.claude/adr/ADR-009-caching-redis-first.md</file>
+      <file>.claude/adr/ADR-014-tenant-isolation.md</file>
+      <file>projects/spaarkeai-compose-r8/notes/durable-session-files.md</file>
+      <file>projects/spaarkeai-compose-r8/spec.md</file>
+      <file>projects/spaarkeai-compose-r8/CLAUDE.md</file>
+    </files>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="0" name="Rigor declaration">Declare rigor FULL; load spec.md, CLAUDE.md, ADR-009.</step>
+    <step order="1">Read `SessionFilesCleanupJob` and map EXACTLY what it deletes today. Enumerate every delete call and its target.</step>
+    <step order="2">Scope it to hot-index entries only. Prefer removing the job's access to the durable store entirely over adding a conditional.</step>
+    <step order="3">Implement lazy re-index: on recall, if hot-index chunks are missing, rebuild from the durable copy, tenant-scoped.</step>
+    <step order="4">Reuse `SessionRestoreService` + R7's re-attach layer — do not build a parallel restore surface.</step>
+    <step order="5">Seam test: write files → evict hot index (simulate day 60) → recall → assert results are IDENTICAL to day 1.</step>
+    <step order="6">Seam test: run the cleanup job → assert durable bytes still exist.</step>
+    <step order="7">Seam test: a re-index cannot read another tenant's durable copy.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If the cleanup job's delete path cannot be structurally separated from the durable store (shared client, shared key prefix), surface it — a conditional guard on a destructive sweep is weaker than the property this requirement needs.</trigger>
+  </escalation>
+
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Ai/Sessions/</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Ai/Chat/</output>
+    <output type="test">tests/integration/seam/</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion>A day-60 simulation (hot index evicted) recalls from files with results IDENTICAL to day 1 — equality asserted, not just absence of error.</criterion>
+    <criterion>Re-index is lazy (on recall), not a background rehydration sweep.</criterion>
+    <criterion>Running `SessionFilesCleanupJob` leaves durable bytes intact — asserted by seam test.</criterion>
+    <criterion>The cleanup job has no code path that can reach the durable store (structural, verified by reading).</criterion>
+    <criterion>A re-index cannot read another tenant's durable copy (asserted by seam test).</criterion>
+    <criterion>`SessionRestoreService` and R7's re-attach layer are REUSED — verified by grep.</criterion>
+    <criterion>NEGATIVE: no new session-restore surface was created.</criterion>
+    <criterion>NEGATIVE: no `IMemoryCache` usage introduced.</criterion>
+    <criterion>Publish size reported; no new NuGet; no new HIGH CVE.</criterion>
+  </acceptance-criteria>
+</task>

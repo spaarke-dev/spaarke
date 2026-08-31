@@ -33,7 +33,55 @@ public class ServiceBusClientGuardTests
         "src/server/api/Sprk.Bff.Api/Infrastructure/Auth/ServiceBusClientFactory.cs";
 
     /// <summary>
-    /// <c>new ServiceBusClient(...)</c> may appear only inside <see cref="FactoryRelativePath"/>.
+    /// The ONE file, per deployable, where a <c>ServiceBusClient</c> may be constructed.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <b>Why this is a list and not a single path (2026-08-27, issue #839).</b> The scan was widened
+    /// to all of <c>src/server/**</c> on 2026-08-27, which brought the L2 control plane into scope and
+    /// produced one finding: <c>Sprk.Provisioning.ControlPlane.Core/Modules/ServiceBusModule.cs:144</c>.
+    /// The prescribed remedy — "route the call through <c>ServiceBusClientFactory</c>" — is not
+    /// available to that file. <c>Sprk.Provisioning.ControlPlane.Core</c> has NO ProjectReferences at
+    /// all, and its .csproj states the reason as a project rule: <i>"Peer service to Sprk.Bff.Api, NOT
+    /// a BFF extension (ADR-010 DI minimalism + project MUST rule: no Sprk.Bff.Api project/assembly
+    /// reference)"</i>. The guard was demanding an architecturally forbidden fix, and a guard whose
+    /// only satisfiable outcome is suppression gets suppressed.
+    /// </para>
+    /// <para>
+    /// <b>This is not the allowlist the class doc rules out.</b> That objection is to a census of sites
+    /// permitted to VIOLATE the rule — "these four are fine, honest" — which regrows because each new
+    /// violation argues for its own entry. This names the single legal construction point per
+    /// deployable: the thing the rule points TO, not an exemption from it. The rule's force is
+    /// unchanged, and it now applies to L2 as well as the BFF — a SECOND construction site in either
+    /// deployable fails this test exactly as before.
+    /// </para>
+    /// <para>
+    /// <b>Why L2 gets no factory of its own.</b> The BFF needed one because it had four construction
+    /// sites across three DI modules and a hosted service, sharing no base type, resolving the SAS
+    /// string from two different config keys. L2 has one site, in its single DI composition root, and
+    /// makes no credential choice at all: it is <c>DefaultAzureCredential</c> only, with no
+    /// connection-string overload anywhere in the project. It is already stricter than the invariant
+    /// requires. Wrapping a one-line construction in a one-line factory to satisfy a path check would
+    /// manufacture a component to hit a target — the anti-pattern CLAUDE.md §11.5 names.
+    /// </para>
+    /// <para>
+    /// Adding an entry here is therefore a real architectural claim: "a new deployable exists, and this
+    /// is its composition root." It is not the way to silence a finding inside an existing deployable.
+    /// </para>
+    /// </remarks>
+    private static readonly string[] CanonicalConstructionSites =
+    {
+        // BFF — chooses between namespace+MI and a transitional SAS connection string.
+        FactoryRelativePath,
+
+        // L2 control plane — separate deployable, cannot reference the BFF (see remarks).
+        // Managed identity only; no connection-string path exists in this project.
+        "src/server/services/Sprk.Provisioning.ControlPlane.Core/Modules/ServiceBusModule.cs",
+    };
+
+    /// <summary>
+    /// <c>new ServiceBusClient(...)</c> may appear only inside a
+    /// <see cref="CanonicalConstructionSites"/> file — one per deployable.
     /// </summary>
     [Fact]
     public void ServiceBusClient_IsConstructedOnlyInTheFactory()
@@ -43,7 +91,8 @@ public class ServiceBusClientGuardTests
         foreach (var file in SourceScan.ServerSourceFiles())
         {
             var relative = SourceScan.Relative(file).Replace('\\', '/');
-            if (relative.EndsWith(FactoryRelativePath, StringComparison.OrdinalIgnoreCase))
+            if (CanonicalConstructionSites.Any(p =>
+                    relative.EndsWith(p, StringComparison.OrdinalIgnoreCase)))
             {
                 continue;
             }
@@ -83,7 +132,10 @@ public class ServiceBusClientGuardTests
             "between namespace+managed-identity and a SAS connection string stays fixable in one " +
             "place. Each extra construction site is an independent copy of that decision — the " +
             "shape that made BFF-API-ClientSecret unfixable (ADR-028 A4). Route the call through " +
-            "ServiceBusClientFactory.Create or .CreateForNamespace instead. Found: " +
+            "your deployable's canonical construction site: the BFF has ServiceBusClientFactory" +
+            ".Create / .CreateForNamespace; the L2 control plane has ServiceBusModule. Adding a " +
+            "path to CanonicalConstructionSites is for a NEW deployable, not for silencing a " +
+            "second site inside an existing one. Found: " +
             string.Join(" | ", offenders));
     }
 

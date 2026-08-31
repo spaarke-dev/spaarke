@@ -116,6 +116,16 @@ function Harness({ stub, authFetch }: { stub: { current: LedgerRow[] }; authFetc
   React.useEffect(() => () => editor.destroy(), [editor]);
 
   const redline = usePendingRedline(editor);
+  // spaarkeai-compose-r8 task 053 (FR-C06): these fixtures are LEGACY anchorless payloads
+  // (`{target_text, new_text, match_mode}`) — the shape the compose EDIT Actions emitted before task
+  // 052 retired `target_text`. Such a payload no longer places anything on its own: it PROPOSES a
+  // location and waits for the user. This harness plays the HOST that answers, exactly as
+  // ComposeWorkspace's ConfirmModal does on Confirm, so the file stays on its own subject — FR-17
+  // undo/replace via ledger supersession, which is orthogonal to how an edit is targeted.
+  const { legacyProposal, applyLegacyProposal } = redline;
+  React.useEffect(() => {
+    if (legacyProposal !== null) applyLegacyProposal();
+  }, [legacyProposal, applyLegacyProposal]);
   const dispatch = useDispatchPaneEvent();
 
   // "try another approach" re-dispatch stub: writes a fresh proposal + re-materializes it via the bus.
@@ -283,6 +293,9 @@ describe('useEditSupersession — FR-17 undo/replace via ledger supersession (re
     act(() => {
       r1.current.materialize(head1.payload, { ledgerRef: head1.key, bindingId: head1.bindingId, turn: head1.turn });
     });
+    // Task 053: the head here is the RETRACTION (empty payload) — nothing to propose, nothing to
+    // confirm. Asserted explicitly so a future change that started proposing here would be caught.
+    expect(r1.current.legacyProposal).toBeNull();
     expect(fresh1.getHTML()).not.toContain('data-compose-mark'); // prior redline does NOT reappear
     expect(fresh1.getText()).toContain('quick'); // original text intact
     fresh1.destroy();
@@ -297,6 +310,14 @@ describe('useEditSupersession — FR-17 undo/replace via ledger supersession (re
     const head2 = replacedLedger.reduce((a, b) => (b.turn > a.turn ? b : a));
     act(() => {
       r2.current.materialize(head2.payload, { ledgerRef: head2.key, bindingId: head2.bindingId, turn: head2.turn });
+    });
+    // Task 053 (FR-C06): the replacement is a LEGACY anchorless payload, so the reload PROPOSES it
+    // rather than placing it — the durable ledger state is what survives the refresh, and the user
+    // re-confirms placement. That is the FR-17 property this test is about, unchanged.
+    expect(r2.current.legacyProposal).toMatchObject({ ledgerRef: 'b1@t3' });
+    expect(fresh2.getHTML()).not.toContain('swift');
+    act(() => {
+      r2.current.applyLegacyProposal();
     });
     expect(fresh2.getHTML()).toContain('swift');
     expect(fresh2.getHTML()).toContain('data-ledger-ref="b1@t3"');

@@ -71,12 +71,12 @@ public class UploadIntegrationTests : IClassFixture<UploadTestFixture>
     public async Task Upload_AcceptsPdf()
     {
         // Arrange
-        var client = _fixture.CreateAuthenticatedClient(TestTenantId);
+        var (client, sessionId) = _fixture.CreateTestSession(TestTenantId);
         var content = CreateMultipartContent("test-document.pdf", "application/pdf", "PDF test content");
 
         // Act
         var response = await client.PostAsync(
-            $"/api/ai/chat/sessions/{TestSessionId}/documents", content);
+            $"/api/ai/chat/sessions/{sessionId}/documents", content);
 
         // Assert — ADR-015: only assert on metadata, not document text
         response.StatusCode.Should().Be(HttpStatusCode.Accepted,
@@ -97,7 +97,7 @@ public class UploadIntegrationTests : IClassFixture<UploadTestFixture>
     public async Task Upload_AcceptsDocx()
     {
         // Arrange
-        var client = _fixture.CreateAuthenticatedClient(TestTenantId);
+        var (client, sessionId) = _fixture.CreateTestSession(TestTenantId);
         var content = CreateMultipartContent(
             "contract.docx",
             "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
@@ -105,7 +105,7 @@ public class UploadIntegrationTests : IClassFixture<UploadTestFixture>
 
         // Act
         var response = await client.PostAsync(
-            $"/api/ai/chat/sessions/{TestSessionId}/documents", content);
+            $"/api/ai/chat/sessions/{sessionId}/documents", content);
 
         // Assert — ADR-015: only assert on metadata
         response.StatusCode.Should().Be(HttpStatusCode.Accepted,
@@ -125,12 +125,12 @@ public class UploadIntegrationTests : IClassFixture<UploadTestFixture>
     public async Task Upload_AcceptsTxt()
     {
         // Arrange
-        var client = _fixture.CreateAuthenticatedClient(TestTenantId);
+        var (client, sessionId) = _fixture.CreateTestSession(TestTenantId);
         var content = CreateMultipartContent("notes.txt", "text/plain", "Plain text content");
 
         // Act
         var response = await client.PostAsync(
-            $"/api/ai/chat/sessions/{TestSessionId}/documents", content);
+            $"/api/ai/chat/sessions/{sessionId}/documents", content);
 
         // Assert
         response.StatusCode.Should().Be(HttpStatusCode.Accepted,
@@ -150,12 +150,12 @@ public class UploadIntegrationTests : IClassFixture<UploadTestFixture>
     public async Task Upload_AcceptsMd()
     {
         // Arrange
-        var client = _fixture.CreateAuthenticatedClient(TestTenantId);
+        var (client, sessionId) = _fixture.CreateTestSession(TestTenantId);
         var content = CreateMultipartContent("readme.md", "text/markdown", "# Markdown heading");
 
         // Act
         var response = await client.PostAsync(
-            $"/api/ai/chat/sessions/{TestSessionId}/documents", content);
+            $"/api/ai/chat/sessions/{sessionId}/documents", content);
 
         // Assert
         response.StatusCode.Should().Be(HttpStatusCode.Accepted,
@@ -179,12 +179,12 @@ public class UploadIntegrationTests : IClassFixture<UploadTestFixture>
     public async Task Upload_RejectsJpg()
     {
         // Arrange
-        var client = _fixture.CreateAuthenticatedClient(TestTenantId);
+        var (client, sessionId) = _fixture.CreateTestSession(TestTenantId);
         var content = CreateMultipartContent("photo.jpg", "image/jpeg", "fake-jpg-bytes");
 
         // Act
         var response = await client.PostAsync(
-            $"/api/ai/chat/sessions/{TestSessionId}/documents", content);
+            $"/api/ai/chat/sessions/{sessionId}/documents", content);
 
         // Assert — 422 Unprocessable Entity for unsupported file types
         response.StatusCode.Should().Be(HttpStatusCode.UnprocessableEntity,
@@ -199,12 +199,12 @@ public class UploadIntegrationTests : IClassFixture<UploadTestFixture>
     public async Task Upload_RejectsExe()
     {
         // Arrange
-        var client = _fixture.CreateAuthenticatedClient(TestTenantId);
+        var (client, sessionId) = _fixture.CreateTestSession(TestTenantId);
         var content = CreateMultipartContent("malware.exe", "application/octet-stream", "fake-exe-bytes");
 
         // Act
         var response = await client.PostAsync(
-            $"/api/ai/chat/sessions/{TestSessionId}/documents", content);
+            $"/api/ai/chat/sessions/{sessionId}/documents", content);
 
         // Assert
         response.StatusCode.Should().Be(HttpStatusCode.UnprocessableEntity,
@@ -219,12 +219,12 @@ public class UploadIntegrationTests : IClassFixture<UploadTestFixture>
     public async Task Upload_RejectsZip()
     {
         // Arrange
-        var client = _fixture.CreateAuthenticatedClient(TestTenantId);
+        var (client, sessionId) = _fixture.CreateTestSession(TestTenantId);
         var content = CreateMultipartContent("archive.zip", "application/zip", "fake-zip-bytes");
 
         // Act
         var response = await client.PostAsync(
-            $"/api/ai/chat/sessions/{TestSessionId}/documents", content);
+            $"/api/ai/chat/sessions/{sessionId}/documents", content);
 
         // Assert
         response.StatusCode.Should().Be(HttpStatusCode.UnprocessableEntity,
@@ -250,14 +250,14 @@ public class UploadIntegrationTests : IClassFixture<UploadTestFixture>
         // We can't send 50 MB+ through test HTTP without OOM, so we verify the
         // rejection happens at the endpoint level by checking the max size constant.
         // Instead, we test with a normal file and verify the constant is 50 MB.
-        var client = _fixture.CreateAuthenticatedClient(TestTenantId);
+        var (client, sessionId) = _fixture.CreateTestSession(TestTenantId);
 
         // Create a ~1 MB file to verify successful upload (under limit)
         var normalContent = CreateMultipartContent("normal.pdf", "application/pdf",
             new string('x', 1024 * 1024));
 
         var normalResponse = await client.PostAsync(
-            $"/api/ai/chat/sessions/{TestSessionId}/documents", normalContent);
+            $"/api/ai/chat/sessions/{sessionId}/documents", normalContent);
 
         // A 1 MB file should be accepted (under 50 MB limit)
         normalResponse.StatusCode.Should().Be(HttpStatusCode.Accepted,
@@ -297,11 +297,11 @@ public class UploadIntegrationTests : IClassFixture<UploadTestFixture>
             "Set AZURE_CREDENTIALS_AVAILABLE=true to run this test.");
 
         // Arrange — upload a document first
-        var client = _fixture.CreateAuthenticatedClient(TestTenantId);
+        var (client, sessionId) = _fixture.CreateTestSession(TestTenantId);
         var uploadContent = CreateMultipartContent("persist-test.pdf", "application/pdf", "Persist this PDF");
 
         var uploadResponse = await client.PostAsync(
-            $"/api/ai/chat/sessions/{TestSessionId}/documents", uploadContent);
+            $"/api/ai/chat/sessions/{sessionId}/documents", uploadContent);
         uploadResponse.StatusCode.Should().Be(HttpStatusCode.Accepted);
 
         var uploadResult = await uploadResponse.Content.ReadFromJsonAsync<DocumentUploadResponse>(_jsonOptions);
@@ -310,7 +310,7 @@ public class UploadIntegrationTests : IClassFixture<UploadTestFixture>
 
         // Act — persist the uploaded document to SPE
         var persistResponse = await client.PostAsync(
-            $"/api/ai/chat/sessions/{TestSessionId}/documents/{documentId}/persist", null);
+            $"/api/ai/chat/sessions/{sessionId}/documents/{documentId}/persist", null);
 
         // Assert — real SpeFileStore returns 201 Created
         persistResponse.StatusCode.Should().Be(HttpStatusCode.Created,
@@ -341,8 +341,12 @@ public class UploadIntegrationTests : IClassFixture<UploadTestFixture>
     public async Task SessionCleanup_DeletesUploadedDoc()
     {
         // Arrange — use a unique session for cleanup test
-        var cleanupSessionId = "cleanup-test-session-001";
-        var client = _fixture.CreateAuthenticatedClient(TestTenantId);
+        // This test's OWN session, not the shared "cleanup-test-session-001" constant. It ARCHIVES
+        // the session it uses, so a shared id would leave the archive flag set for whatever ran next;
+        // and the shared id is registered to the default owner, which no longer matches this test's
+        // caller (see CreateTestSession) — that mismatch is why the upload answered 404.
+        var (client, sessionId) = _fixture.CreateTestSession(TestTenantId);
+        var cleanupSessionId = sessionId;
 
         // Upload a document to the cleanup session
         var uploadContent = CreateMultipartContent("cleanup-test.txt", "text/plain", "Temporary content");
@@ -379,7 +383,8 @@ public class UploadIntegrationTests : IClassFixture<UploadTestFixture>
     [Fact]
     public async Task Upload_Returns401_WhenUnauthenticated()
     {
-        // Arrange — no bearer token
+        // Arrange — no bearer token. Deliberately NOT CreateTestSession: this asserts the 401 that
+        // precedes any session lookup, so registering a session would imply the route got that far.
         var client = _fixture.CreateClient();
         var content = CreateMultipartContent("test.pdf", "application/pdf", "test");
 
@@ -421,14 +426,14 @@ public class UploadIntegrationTests : IClassFixture<UploadTestFixture>
         Skip.IfNot(File.Exists(testPdfPath),
             $"Test PDF not found at {testPdfPath}. Place a 5-page test PDF in tests/fixtures/.");
 
-        var client = _fixture.CreateAuthenticatedClient(TestTenantId);
+        var (client, sessionId) = _fixture.CreateTestSession(TestTenantId);
         var pdfBytes = await File.ReadAllBytesAsync(testPdfPath);
         var content = CreateMultipartContentFromBytes("sample-5page.pdf", "application/pdf", pdfBytes);
 
         // Act — time the upload + processing
         var stopwatch = System.Diagnostics.Stopwatch.StartNew();
         var response = await client.PostAsync(
-            $"/api/ai/chat/sessions/{TestSessionId}/documents", content);
+            $"/api/ai/chat/sessions/{sessionId}/documents", content);
         stopwatch.Stop();
 
         // Assert — NFR-02: processing time < 15 seconds for < 50 pages
@@ -499,6 +504,72 @@ public class UploadTestFixture : IntegrationTestFixture
 {
     private const string TestSessionId = "upload-test-session-001";
     private const string CleanupSessionId = "cleanup-test-session-001";
+
+    /// <summary>sessionId -> the oid that owns it. Populated by <see cref="CreateTestSession"/>.</summary>
+    /// <remarks>
+    /// The two legacy ids are pre-registered to the shared default so a test that still uses the
+    /// constants behaves exactly as before; everything else is registered per test.
+    /// </remarks>
+    internal readonly System.Collections.Concurrent.ConcurrentDictionary<string, string> SessionOwners =
+        new(new[]
+        {
+            new KeyValuePair<string, string>(TestSessionId, IntegrationTestConstants.TestUserId),
+            new KeyValuePair<string, string>(CleanupSessionId, IntegrationTestConstants.TestUserId),
+        }, StringComparer.Ordinal);
+
+    /// <summary>
+    /// One test's own session and a client authenticated as that session's owner.
+    /// </summary>
+    /// <remarks>
+    /// <para><b>Why per-test, and why BOTH halves.</b> Three constraints have to hold at once, and
+    /// any two of them are easy:</para>
+    /// <list type="bullet">
+    /// <item>the caller's oid must be STABLE across a test's requests — an Entra oid is stable per
+    /// user per tenant, and that is the whole reason it can serve as an ownership key. The previous
+    /// <c>Guid.NewGuid()</c> default gave every request a new identity, which #863's check correctly
+    /// turned into 404s;</item>
+    /// <item>the oid must DIFFER between tests — <c>ai-upload</c> is a FIXED window of 5
+    /// requests/minute partitioned BY USER, and this class issues about ten uploads, so one shared
+    /// user means the sixth test onward gets 429 instead of the status it asserts;</item>
+    /// <item>the SESSION ID must differ between tests too. This is the one that is easy to miss:
+    /// <c>ChatSessionManager.GetSessionAsync</c> caches by <c>tenant + sessionId</c> and NOT by user,
+    /// so with a shared session id the first test warms the cache with ITS owner and every later
+    /// test — authenticating as someone else — is denied from cache. An earlier attempt gave each
+    /// test its own oid while leaving the session id shared and turned 4 failures into 7.</item>
+    /// </list>
+    /// <para><b>What this suite does not prove.</b> Caller and owner are moved together on purpose,
+    /// so these tests would NOT catch a broken ownership comparison — they exercise file-type and
+    /// size validation. Ownership has eight dedicated tests, deny cases included, in
+    /// <c>tests/integration/auth/Ai/SessionOwnershipTests.cs</c>. The rejected alternative — seeding
+    /// the session owner to whoever happens to be asking — would go green while making the check
+    /// vacuous here, which is the shape of the defect #863 removed.</para>
+    /// <para>Both values are a deterministic FNV-1a of the test name rather than
+    /// <c>GetHashCode()</c>, which is randomised per process for strings in .NET Core and would hand
+    /// the same test a different identity each run — reintroducing the instability this removes.</para>
+    /// </remarks>
+    internal (HttpClient Client, string SessionId) CreateTestSession(
+        string tenantId,
+        [System.Runtime.CompilerServices.CallerMemberName] string testName = "")
+    {
+        var slug = FnvHex(testName);
+        var sessionId = $"upload-test-session-{slug}";
+        var ownerOid = $"00000000-0000-0000-{slug[..4]}-{slug}";
+
+        SessionOwners[sessionId] = ownerOid;
+        return (CreateAuthenticatedClient(tenantId, ownerOid), sessionId);
+    }
+
+    private static string FnvHex(string value)
+    {
+        ulong hash = 14695981039346656037UL;
+        foreach (var c in value)
+        {
+            hash ^= c;
+            hash *= 1099511628211UL;
+        }
+
+        return (hash & 0xFFFFFFFFFFFF).ToString("x12");
+    }
     private const string TestDocumentId = "doc-upload-test-001";
     private static readonly Guid TestPlaybookId = Guid.Parse("22222222-2222-2222-2222-222222222222");
 
@@ -561,7 +632,7 @@ public class UploadTestFixture : IntegrationTestFixture
     public HttpClient CreateAuthenticatedClient(string tenantId, string? userId = null)
     {
         var client = CreateClient();
-        var token = GenerateTestJwt(tenantId, userId ?? Guid.NewGuid().ToString());
+        var token = GenerateTestJwt(tenantId, userId ?? IntegrationTestConstants.TestUserId);
         client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", token);
         return client;
     }
@@ -588,22 +659,26 @@ public class UploadTestFixture : IntegrationTestFixture
         // production error mapping (the 404 path already exists and is correct).
         var archivedSessions = new HashSet<string>(StringComparer.Ordinal);
 
-        ChatSession BuildSession(string sessionId) => new ChatSession(
+        ChatSession BuildSession(string sessionId, string ownerOid) => new ChatSession(
             SessionId: sessionId,
             TenantId: "upload-test-tenant-001",
             DocumentId: TestDocumentId,
             PlaybookId: TestPlaybookId,
             CreatedAt: now,
             LastActivity: now,
-            Messages: []);
+            Messages: []) { OwnerOid = ownerOid };
 
-        // Return a live session for the known test IDs until archived; null otherwise.
+        // A session is live if some test REGISTERED it (see CreateTestSession) and it is not
+        // archived. The owner comes from that registration rather than a constant, so the caller and
+        // the session's owner are the same identity by construction — which is what the ownership
+        // filter compares. The two formerly hard-coded ids stay pre-registered so any test still
+        // using the shared constants keeps working.
         MockDataverseRepository
             .Setup(r => r.GetSessionAsync(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync((string _, string sessionId, CancellationToken _) =>
-                (sessionId == TestSessionId || sessionId == CleanupSessionId)
+                SessionOwners.TryGetValue(sessionId, out var ownerOid)
                     && !archivedSessions.Contains(sessionId)
-                    ? BuildSession(sessionId)
+                    ? BuildSession(sessionId, ownerOid)
                     : null);
 
         MockDataverseRepository

@@ -840,6 +840,19 @@ Diagnostic:
 
 ### 13.3 SPE 403 "public client not allowed"
 
+> 🔴 **CONTRADICTED 2026-08-28** by `sdap-SPE-admin-app-r2`. The remedy below conflates two different
+> things: **"confidential client" is not "app-only".** Container-type CREATE is **delegated-only** —
+> Microsoft lists Application permission as *"Not supported"*, and an app-only
+> (`client_credentials`) token gets `403 accessDenied` even with the role granted and
+> admin-consented (probed twice 2026-08-28; also task 010, 2026-08-21).
+> `scripts/Create-NewContainerType.ps1` does exactly that (line 46 `client_credentials` → line 76
+> `POST /beta/storage/fileStorage/containerTypes`) and therefore **cannot work**. The correct fix for
+> a public-client rejection is a confidential client performing a **delegated** exchange
+> (auth-code / OBO), not `client_credentials`.
+> **Until fixed, create container types via the SPE Admin app, the VS Code extension, or the
+> SharePoint admin center.** Treat H8 as unproven. Full analysis:
+> [`docs/architecture/SPAARKE-SPE-CONTAINER-TYPE-TOPOLOGY.md`](../architecture/SPAARKE-SPE-CONTAINER-TYPE-TOPOLOGY.md) §7.
+
 T6 root cause. Handler H8 (or interim `Create-NewContainerType.ps1`) must use confidential-client (app-only) token with cert bootstrapped from KV. If retrofitting an existing env: re-run H8 (or manually invoke updated script) with `-UseConfidentialClient` switch.
 
 ### 13.4 AI Search returns cross-tenant results

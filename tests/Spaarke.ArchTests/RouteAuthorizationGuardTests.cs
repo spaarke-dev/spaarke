@@ -152,10 +152,59 @@ public class RouteAuthorizationGuardTests
             + "rewriting the caller's FetchXML against their accessible-record set — a query-shaping "
             + "mechanism with no route-level equivalent."),
 
-        new GovernedFile("Api/ComposeEndpoints.cs", Scope.HandlerAuthorized,
-            "19 routes keyed by documentSpeId / documentId / sessionId. Group-level RequireAuthorization "
-            + "plus in-handler checks. Listed rather than gated because converting Compose to route-level "
-            + "filters is a design change owned by the Compose ADR (ADR-049), not by this guard."),
+        // ---- Compose: ONE governed file became EIGHT (compose-r8 task 070) ----
+        // Api/ComposeEndpoints.cs was split by reason-to-change. It is the same route surface, keyed the
+        // same way (documentSpeId / documentId / sessionId), authorized the same way (group-level
+        // RequireAuthorization + in-handler checks), and it stays HandlerAuthorized for the same reason:
+        // converting Compose to route-level filters is a design change owned by ADR-049, not by this guard.
+        //
+        // Enumerated one-per-file rather than by prefix ON PURPOSE. A `StartsWith("Api/Compose")` rule
+        // would have absorbed the split silently — and would absorb the NEXT Compose file silently too,
+        // which is the census's whole subject. Eight entries cost eight lines and make a ninth file fail
+        // loudly until someone classifies it.
+        new GovernedFile("Api/ComposeDocumentEndpoints.cs", Scope.HandlerAuthorized,
+            "GET /documents/{documentSpeId} (load), promote, refresh-profile — the document read/lifecycle "
+            + "cluster. Serves SPE document bytes and metadata; the handler resolves the caller and the "
+            + "document together."),
+
+        new GovernedFile("Api/ComposeSaveEndpoints.cs", Scope.HandlerAuthorized,
+            "POST /documents/{documentSpeId}/save and /documents/create-on-save — the write path. "
+            + "create-on-save has no pre-existing document to authorize against, which is the same "
+            + "content-CREATION shape waived on OBOEndpoints rather than a gap unique to Compose."),
+
+        new GovernedFile("Api/ComposeAnnotationEndpoints.cs", Scope.HandlerAuthorized,
+            "pull/reanchor annotations keyed by documentSpeId, plus GET/POST /sessions/{sessionId}/"
+            + "annotations. The two session-scoped routes DO carry a route-level gate as of #863 "
+            + "(.AddSessionOwnershipFilter()); the file stays HandlerAuthorized because the "
+            + "documentSpeId-keyed pair does not."),
+
+        new GovernedFile("Api/ComposeCheckoutEndpoints.cs", Scope.HandlerAuthorized,
+            "checkout / checkin / heartbeat keyed by documentId. Mutates lock state on a document row, so "
+            + "the decision is per-document and lives with the lock logic."),
+
+        new GovernedFile("Api/ComposeMountEndpoints.cs", Scope.HandlerAuthorized,
+            "POST /upload and POST /project. /upload is content CREATION (no prior document). /project is "
+            + "the stateless projection endpoint — it renders bytes the caller supplies and persists "
+            + "nothing, so there is no stored resource to authorize against."),
+
+        new GovernedFile("Api/ComposeTemplateEndpoints.cs", Scope.HandlerAuthorized,
+            "POST /documents/{documentSpeId}/apply-template — writes template content into an existing "
+            + "document; authorized against that document in the handler."),
+
+        new GovernedFile("Api/ComposeSyncEndpoints.cs", Scope.HandlerAuthorized,
+            "POST /document/{documentSpeId}/check-changes (authenticated etag poll) AND the ONE anonymous "
+            + "route in the Compose surface: POST /api/compose/webhooks/spe-doc-changed, registered on "
+            + "`routes` not `group`, .AllowAnonymous() because Graph's own contract sends the validation "
+            + "handshake and notifications unauthenticated. It is not ungoverned: HMAC-SHA256 over the raw "
+            + "body via RequireWebhookSignature + constant-time clientState in the handler, both mandatory "
+            + "with no DEVELOPMENT_MODE bypass. Flagged here so a reader auditing 'which Compose routes are "
+            + "anonymous' gets the answer from this list rather than from a grep."),
+
+        new GovernedFile("Api/ComposeActiveDocumentEndpoints.cs", Scope.HandlerAuthorized,
+            "POST /active-document. Takes sessionId in the BODY, so no route-level filter can see it — the "
+            + "handler checks the parent session's owner directly (#863). Also enumerated in "
+            + "SessionOwnershipGuardTests.BodyScopedSessionRoutes; the two lists answer different questions "
+            + "and both need the entry."),
     };
 
     // =============================================================================================
@@ -401,7 +450,35 @@ public class RouteAuthorizationGuardTests
     // Deliberately verified before bumping, rather than after: master's merge (15385bbdf) also DELETED
     // Api/Filters/WorkspaceLayoutAuthorizationFilter.cs, and that does NOT move the count — the file has
     // no Map* call, so EndpointFiles() never counted it. Two deletions, one census delta.
-    private const int ExpectedEndpointFileCount = 110;
+    //
+    // 110 -> 117 (2026-08-28, spaarkeai-compose-r8, on merging master into the R8 branch). Net +7 from a
+    // single decomposition, and the census's fourth firing:
+    //
+    //   070  -1  Api/ComposeEndpoints.cs — NOT deleted. It still exists and still owns
+    //            MapGroup("/api/compose") + RequireAuthorization(); it simply no longer registers any
+    //            route DIRECTLY, so EndpointFiles() (which selects on .Map{Verb}() ) stopped counting it.
+    //        +8  Api/Compose{Document,Save,Annotation,Checkout,Mount,Template,Sync,ActiveDocument}
+    //            Endpoints.cs ADDED — the split by reason-to-change (CLAUDE.md §11.5).
+    //
+    // That -1 is worth stating precisely, because "deleted" and "demoted to an aggregator" leave the same
+    // footprint in the count and very different ones in reality: the group-level RequireAuthorization()
+    // every one of the eight inherits is still declared in ComposeEndpoints.cs. Its GovernedFiles entry was
+    // removed rather than kept because a file with zero Map{Verb} call sites passes
+    // ScannerAccountsForEveryRegistrationInTheGovernedFiles vacuously (expected 0, actual 0) — an entry
+    // that asserts nothing, on a list whose value is that every entry means something.
+    //
+    // The arithmetic is the least interesting part of this firing. ComposeEndpoints.cs was a GOVERNED file
+    // (HandlerAuthorized). Bumping 110 -> 117 and stopping would have left the count green while every
+    // Compose route sat outside GovernedFiles — the guard passing BECAUSE the surface it guards had been
+    // reorganized out from under it. So the split is reflected as eight GovernedFiles entries above, one
+    // per file, not as a prefix rule.
+    //
+    // Same discipline as the 111 -> 110 note above: verified, not inferred. The eight successors are
+    // exactly the delta (110 - 1 + 8 = 117 reconciles with no residue); ComposeEndpoints.cs was read to
+    // confirm it survives as the aggregator rather than assumed gone from the count alone; and the
+    // anonymous webhook inside ComposeSyncEndpoints.cs was read before being classified rather than
+    // assumed authenticated because its siblings are.
+    private const int ExpectedEndpointFileCount = 117;
 
     // =============================================================================================
     // RULE A — every governed route carries a per-resource decision, or a named waiver

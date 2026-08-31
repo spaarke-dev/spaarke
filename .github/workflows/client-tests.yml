@@ -1,0 +1,264 @@
+# ============================================================================
+# Client Tests (Jest) — Phase 1: BASELINE ONLY
+# ============================================================================
+# ci-cd-unit-test-remediation-r1 · task CICD-095 · issue #851
+#
+# WHY THIS EXISTS
+# ---------------
+# 730 tracked client test files across 40 packages, and BEFORE this workflow
+# not one of them ran in CI — while 923 server .cs files did. One package has
+# been red since 2026-06-11 under a board that showed all green. A test nobody
+# runs is not a test; it is a file.
+#
+# SCOPE — PHASE 1 IS DELIBERATELY PLUMBING ONLY
+# ---------------------------------------------
+# This workflow makes the client test surface VISIBLE and nothing more. It does
+# not fix a single test, and no jest test file was modified by the task that
+# added it. The project spec puts "React/PCF Jest test architecture" explicitly
+# OUT of scope and it stays out — how those tests are designed is not this
+# project's business. But "no workflow runs jest at all" is a CI gap, and CI is
+# precisely what this project owns. That is the split.
+#
+# The per-package pass/fail table this produces IS the deliverable. Remediation
+# is handed on with numbers attached.
+#
+# WHY IT DOES NOT RUN ON pull_request (deliberate, revisit at promotion)
+# ----------------------------------------------------------------------
+# 40 packages with no npm workspace root means 40 independent `npm install`s.
+# Hanging that off every PR would contend for runners with the very PRs the
+# CI shadow window is trying to accumulate (20 agreeing PRs), which works
+# directly against the owner north star "CI must not hold up high-frequency
+# master builds and pushes". Phase 1 needs to SEE the surface, not gate it, and
+# a nightly baseline sees it just as well at a fraction of the contention.
+#
+# Adding `pull_request` is part of the Phase 2 promotion described below — not
+# an oversight.
+#
+# PROMOTION PATH (NOT part of this task)
+# ---------------------------------------
+# Promotion into Tier 2 as a real gate happens only AFTER the shadow window
+# closes AND the baseline is green. Until then this workflow is advisory by
+# construction: every step is continue-on-error and it appears in no blocking
+# filter. Do not add it to ci-tier1-blocking.yml or ci-tier2-advisory.yml.
+# ============================================================================
+
+name: Client Tests (Jest)
+
+on:
+  # Nightly baseline. 07:00 UTC — deliberately one hour after nightly-health.yml
+  # (06:00 UTC) so the two do not contend for runners.
+  schedule:
+    - cron: '0 7 * * *'
+  workflow_dispatch:
+    inputs:
+      package_filter:
+        description: 'Optional substring filter — run only packages whose path contains this'
+        required: false
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  # Keyed per ref. Never cancel a nightly baseline mid-flight on account of a
+  # manual dispatch: a partial baseline is worse than a late one.
+  group: client-tests-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  # --------------------------------------------------------------------------
+  # Job 1 — discover
+  # Build the matrix by SCANNING for packages that declare a real jest test
+  # script. A hardcoded list would silently drift the first time someone adds a
+  # package, and a baseline that quietly stops covering things is exactly the
+  # false-green this project exists to remove.
+  # --------------------------------------------------------------------------
+  discover:
+    name: Discover client packages
+    runs-on: ubuntu-latest
+    outputs:
+      matrix: ${{ steps.find.outputs.matrix }}
+      count: ${{ steps.find.outputs.count }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Find packages with a jest test script
+        id: find
+        shell: bash
+        run: |
+          set -euo pipefail
+          filter='${{ inputs.package_filter }}'
+          pkgs=()
+
+          while IFS= read -r pkgjson; do
+            dir="$(dirname "$pkgjson")"
+            script="$(node -e "
+              try {
+                const j = require('./$pkgjson');
+                const t = (j.scripts && j.scripts.test) || '';
+                process.stdout.write(t);
+              } catch (e) { }
+            " 2>/dev/null || true)"
+
+            # A package counts only if it has a test script that actually runs
+            # something. The npm-init default ('Error: no test specified' + exit 1)
+            # must NOT be treated as coverage.
+            if [ -z "$script" ]; then continue; fi
+            case "$script" in
+              *"no test specified"*) continue ;;
+            esac
+
+            if [ -n "$filter" ] && [[ "$dir" != *"$filter"* ]]; then continue; fi
+            pkgs+=("$dir")
+          done < <(git ls-files '*/package.json' | grep -v node_modules)
+
+          if [ ${#pkgs[@]} -eq 0 ]; then
+            echo "::error::No client packages with a jest test script were found. That is almost certainly a discovery bug, not an empty repo — failing loudly rather than reporting a vacuous green."
+            exit 1
+          fi
+
+          matrix=$(printf '%s\n' "${pkgs[@]}" | jq -R . | jq -cs '{package: .}')
+          echo "matrix=$matrix" >> "$GITHUB_OUTPUT"
+          echo "count=${#pkgs[@]}" >> "$GITHUB_OUTPUT"
+
+          echo "Discovered ${#pkgs[@]} package(s):"
+          printf '  %s\n' "${pkgs[@]}"
+
+  # --------------------------------------------------------------------------
+  # Job 2 — test
+  # One package per matrix leg. continue-on-error so a red package never fails
+  # the run; the result is RECORDED, not enforced.
+  # --------------------------------------------------------------------------
+  test:
+    name: ${{ matrix.package }}
+    needs: discover
+    runs-on: ubuntu-latest
+    continue-on-error: true
+    strategy:
+      fail-fast: false
+      # Bound runner usage. 40 simultaneous legs would starve everything else in
+      # the org queue for the duration.
+      max-parallel: 8
+      matrix: ${{ fromJson(needs.discover.outputs.matrix) }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node 20
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Install dependencies
+        id: install
+        continue-on-error: true
+        working-directory: ${{ matrix.package }}
+        # NOT `npm ci`. Per root CLAUDE.md §12, roughly 14 of 16 Vite solutions
+        # carry stale package-lock.json files and `npm ci` fails outright on them.
+        run: npm install --legacy-peer-deps --no-audit --no-fund
+
+      - name: Run jest
+        id: jest
+        continue-on-error: true
+        working-directory: ${{ matrix.package }}
+        run: npm test -- --ci --reporters=default --passWithNoTests=false
+
+      - name: Record result
+        if: always()
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p "$RUNNER_TEMP/results"
+          # Distinguish install failure from test failure. Collapsing them would
+          # report a broken lockfile as "tests failing", sending the next person
+          # to debug the wrong thing.
+          if [ "${{ steps.install.outcome }}" != "success" ]; then
+            status="install-failed"
+          elif [ "${{ steps.jest.outcome }}" = "success" ]; then
+            status="pass"
+          else
+            status="fail"
+          fi
+          slug="$(printf '%s' '${{ matrix.package }}' | tr '/' '_')"
+          printf '%s\t%s\n' '${{ matrix.package }}' "$status" > "$RUNNER_TEMP/results/$slug.tsv"
+          echo "$status  ${{ matrix.package }}"
+
+      - name: Upload result
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: client-test-result-${{ strategy.job-index }}
+          path: ${{ runner.temp }}/results/
+          retention-days: 30
+
+  # --------------------------------------------------------------------------
+  # Job 3 — summarize
+  # The per-package table is the artifact of this task. It must be readable
+  # without downloading anything, so it goes in the job summary.
+  # --------------------------------------------------------------------------
+  summarize:
+    name: Baseline summary
+    needs: [discover, test]
+    if: always()
+    runs-on: ubuntu-latest
+    steps:
+      - name: Download all results
+        uses: actions/download-artifact@v4
+        with:
+          pattern: client-test-result-*
+          merge-multiple: true
+          path: results
+
+      - name: Build baseline table
+        shell: bash
+        run: |
+          set -euo pipefail
+          discovered='${{ needs.discover.outputs.count }}'
+          cat results/*.tsv 2>/dev/null | sort -u > all.tsv || true
+          reported=$(wc -l < all.tsv | tr -d ' ')
+
+          pass=$(awk -F'\t' '$2=="pass"'          all.tsv | wc -l | tr -d ' ')
+          fail=$(awk -F'\t' '$2=="fail"'          all.tsv | wc -l | tr -d ' ')
+          inst=$(awk -F'\t' '$2=="install-failed"' all.tsv | wc -l | tr -d ' ')
+
+          {
+            echo "# Client Test Baseline (Phase 1)"
+            echo
+            echo "Advisory only — this workflow gates nothing. See the header of"
+            echo '`.github/workflows/client-tests.yml` for the scope split.'
+            echo
+            echo "| Result | Packages |"
+            echo "|---|---:|"
+            echo "| ✅ pass | $pass |"
+            echo "| ❌ fail | $fail |"
+            echo "| ⚠️ install-failed | $inst |"
+            echo "| **discovered** | **$discovered** |"
+            echo
+
+            # Never let a partial baseline read as a complete one.
+            if [ "$reported" != "$discovered" ]; then
+              echo "> ⚠️ **Incomplete baseline** — $discovered package(s) discovered but only"
+              echo "> $reported reported a result. The difference is legs that did not finish"
+              echo "> (cancelled or infrastructure failure). Treat the table below as partial."
+              echo
+            fi
+
+            echo "## Per package"
+            echo
+            echo "| Package | Result |"
+            echo "|---|---|"
+            awk -F'\t' '{
+              icon = ($2=="pass") ? "✅" : ($2=="fail") ? "❌" : "⚠️";
+              printf "| `%s` | %s %s |\n", $1, icon, $2
+            }' all.tsv
+          } >> "$GITHUB_STEP_SUMMARY"
+
+          echo "Baseline: $pass pass / $fail fail / $inst install-failed of $discovered discovered"
+
+      - name: Upload combined baseline
+        uses: actions/upload-artifact@v4
+        with:
+          name: client-test-baseline
+          path: all.tsv
+          retention-days: 90

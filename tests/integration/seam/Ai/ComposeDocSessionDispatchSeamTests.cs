@@ -26,6 +26,7 @@ using System.Net.Http.Headers;
 using System.Net.Http.Json;
 using System.Security.Claims;
 using System.Text.Encodings.Web;
+using Sprk.Bff.Api.Api.Filters;
 using FluentAssertions;
 using Microsoft.AspNetCore.Authentication;
 using Microsoft.AspNetCore.Hosting;
@@ -94,7 +95,7 @@ public sealed class ComposeDocSessionDispatchSeamTests : IClassFixture<ComposeDo
                     ContentType: "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
                     SizeBytes: 64, SearchDocumentIdsCsv: "browse-mounted-file_s_0",
                     UploadedAt: DateTimeOffset.UtcNow),
-            }));
+            }) { OwnerOid = TestSessionOwner.Oid });
 
         // The client-minted Compose document session — a hyphenated crypto.randomUUID that is NEVER
         // created via POST /api/ai/chat/sessions.
@@ -175,7 +176,12 @@ public sealed class ComposeDocSessionDispatchSeamTests : IClassFixture<ComposeDo
         dispatch.StatusCode.Should().Be(HttpStatusCode.NotFound,
             "an unregistered document session does not resolve — this is the DEF-11 defect the fix removes " +
             "for registered sessions");
-        (await dispatch.Content.ReadAsStringAsync()).Should().Contain("dispatch.session-not-found");
+        // Issue #863: the denial now comes from SessionOwnershipFilter, ahead of the handler, so the
+        // code is the single `session.not-found-or-not-owned` rather than the route's own. The
+        // BEHAVIOUR this test guards — an unregistered document session does not resolve — is
+        // unchanged, which is the point: the DEF-11 regression guard still holds.
+        (await dispatch.Content.ReadAsStringAsync())
+            .Should().Contain(SessionOwnershipFilterExtensions.NotFoundOrNotOwnedErrorCode);
     }
 }
 
@@ -227,7 +233,7 @@ public sealed class ComposeDocSessionDispatchSeamFixture : WebApplicationFactory
                 ["Graph:TenantId"] = "test-tenant-id",
                 ["Graph:ClientId"] = "test-client-id",
                 ["Graph:ClientSecret"] = "test-client-secret",
-                ["Graph:UseManagedIdentity"] = "false",
+                ["Graph:ManagedIdentity:Enabled"] = "false",
                 ["Graph:Scopes:0"] = "https://graph.microsoft.com/.default",
                 ["Dataverse:EnvironmentUrl"] = "https://test.crm.dynamics.com",
                 ["Dataverse:ServiceUrl"] = "https://test.crm.dynamics.com",
@@ -285,6 +291,9 @@ public sealed class ComposeDocSessionDispatchSeamFixture : WebApplicationFactory
 
         builder.ConfigureTestServices(services =>
         {
+            // Test hosts must not authenticate for real — see TestTokenCredential.
+            services.UseStubTokenCredential();
+
             services.Configure<Microsoft.AspNetCore.Routing.RouteHandlerOptions>(options =>
             {
                 options.ThrowOnBadRequest = false;
@@ -370,7 +379,9 @@ public sealed class ComposeDocSessionDispatchSeamFixture : WebApplicationFactory
     public HttpClient CreateAuthenticatedClient()
     {
         var client = CreateClient(new WebApplicationFactoryClientOptions { AllowAutoRedirect = false });
-        client.DefaultRequestHeaders.Add("X-Test-User", Guid.NewGuid().ToString());
+        // Issue #863: a STABLE test user. A fresh Guid per client meant the caller identity
+        // changed between the seed and the request, so an ownership check could never pass.
+        client.DefaultRequestHeaders.Add("X-Test-User", TestSessionOwner.Oid);
         client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", "test-token");
         return client;
     }
@@ -398,7 +409,10 @@ internal sealed class ComposeDocSessionFakeAuthHandler : AuthenticationHandler<A
         }
 
         var oid = Request.Headers["X-Test-User"].ToString();
-        if (string.IsNullOrWhiteSpace(oid)) oid = Guid.NewGuid().ToString();
+        // Issue #863 (fixture repair): the fallback was Guid.NewGuid(), so every request with no
+        // X-Test-User header arrived as a DIFFERENT user. Entra never issues a per-request oid,
+        // and an ownership key that changes every call makes ownership untestable.
+        if (string.IsNullOrWhiteSpace(oid)) oid = TestSessionOwner.Oid;
 
         var claims = new List<Claim>
         {

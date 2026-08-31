@@ -1,0 +1,92 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="058" project="spaarkeai-compose-r8">
+  <metadata>
+    <title>FR-A10 residual - carry NESTED / conditional fields, the shape real templates use; retire the nested/unterminated row</title>
+    <phase>4 Track A - Fidelity</phase>
+    <status>pending</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Changes the projection's field scanner - the component that decides what a field IS. Mis-reconstructing a nested instruction authors a DIFFERENT field: a document-correctness defect, not a cosmetic one.</rigor-reason>
+    <model-tier>opus</model-tier>
+    <model-tier-reason>Capability-matched: task 049 flattened nested fields for a STRUCTURAL reason, not laziness. `FieldScanState` folds an inner field into the outer span, so the only recoverable instruction is a CONCATENATION of outer and inner instruction text; re-emitting it authors a different field. The work is deciding whether the scanner can preserve the field TREE without destabilising the flat scan every other carried class depends on - and, if it cannot, saying so honestly instead of shipping a plausible reconstruction.</model-tier-reason>
+    <effort>xhigh</effort>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Same save spine as 049/056/070-073.</parallel-reason>
+    <deps>049, 057</deps>
+    <tags>bff-api, compose, testing</tags>
+    <estimated-effort>8 hours</estimated-effort>
+  </metadata>
+
+  <prompt>
+    Owner decision 2026-08-25, answering "we will be introducing templates and field-merge-codes, will these
+    be supported?" - simple merge codes already are; conditional ones are not, and that gap must close.
+
+    Task 049's gate is structural, so MERGEFIELD is carried VERBATIM today under "unknown / vendor
+    instruction: carry, never interpret". That half works.
+
+    What does NOT work is the shape real templates actually use - a conditional merge block, an IF field
+    whose condition and result both contain MERGEFIELDs. Task 049 flattens it, by design and for a real
+    reason recorded in notes/049-field-carry-decisions.md section 2: FieldScanState folds the inner field
+    into the outer span (MaxDepth greater than 1), so the only instruction it can recover is a CONCATENATION
+    of the outer and inner instruction text. Re-emitting that authors a DIFFERENT field - worse than
+    flattening, because it looks like it worked.
+
+    So this is not "remove a guard". The scanner has to preserve the field TREE - outer instruction, inner
+    fields, and the result span - without destabilising the flat scan every other carried class depends on
+    (REF, PAGEREF, PAGE, SEQ, STYLEREF, HYPERLINK, vendor). TOC and INDEX stay OUT of scope: they span
+    paragraph marks, so begin and end sit in different containers and there is no complete field to carry.
+
+    The honest outcome if the tree cannot be preserved safely is to keep flattening and say so on the
+    published list, with the template implication stated plainly - the owner needs to know before authoring
+    templates, not after. Do not ship a reconstruction you cannot prove round-trips.
+  </prompt>
+
+  <role>SPAARKE backend developer. Expert in ComposeDocxProjectionBuilder's field scanner, ComposeField, and ComposeDocumentRenderer.AppendField.</role>
+
+  <goal>
+    A conditional merge field in a paragraph the user edits round-trips as the SAME field - outer
+    instruction, nested inner fields and lock/dirty flags intact - or the published list states honestly
+    that it does not, with the consequence for template authoring named.
+  </goal>
+
+  <constraints>
+    <constraint source="task 049">A carried instruction MUST reproduce the SAME field. A concatenated instruction is not a carry, it is a silent substitution.</constraint>
+    <constraint source="task 049">MUST NOT destabilise the flat scan the already-carried classes depend on. Those are shipped and covered by ComposeFieldCarrySeamTests.</constraint>
+    <constraint source="ADR-049 I-5">One body author. Re-emit inside ComposeDocumentRenderer.</constraint>
+    <constraint source="project invariant 1">An unreconstructable field degrades to today's flatten plus named warning - never a refusal.</constraint>
+    <constraint source="FR-A10">Move the row only when the parity test proves it, in BOTH directions.</constraint>
+    <constraint source="CLAUDE.md section 10">Publish size vs the 43.74 MB current / 60 MB ceiling; no new NuGet; no new HIGH CVE.</constraint>
+    <constraint source="ADR-038">Seam test over a REAL corpus document containing a nested merge field. The corpus has none - add one; task 056 added inline-image.docx the same way via tests/fixtures/compose-corpus/generators/.</constraint>
+  </constraints>
+
+  <steps mode="directional">
+    <step order="0">Declare FULL. Read notes/049-field-carry-decisions.md section 2 FIRST - it explains why this was flattened, and that reasoning is the thing to defeat or confirm.</step>
+    <step order="1">Add a nested-merge-field corpus fixture plus generator.</step>
+    <step order="2">Decide whether FieldScanState can preserve the tree. If not, STOP and report - that is a legitimate outcome.</step>
+    <step order="3">Failing seam test FIRST, observed to fail, then implement.</step>
+    <step order="4">Prove the already-carried classes are unaffected - the flat-scan non-regression.</step>
+    <step order="5">Update the residual list plus parity family; publish-size and CVE report.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If preserving the field tree destabilises the flat scan for the shipped classes, STOP. Those carries are live and proven; trading them for nested support is a net loss.</trigger>
+    <trigger>If a nested field can only be carried by reconstructing an instruction that is not byte-identical to the source, STOP and keep flattening. A field that looks carried but behaves differently is the worst outcome available.</trigger>
+  </escalation>
+
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Compose/ComposeDocxProjectionBuilder.cs</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Compose/ComposeContentModel.cs</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Compose/ComposeDocumentRenderer.cs</output>
+    <output type="doc">docs/architecture/COMPOSE-WRITE-RESIDUAL-LOSS.md</output>
+    <output type="test">tests/integration/seam/Compose/</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion>A conditional merge field in an EDITED paragraph round-trips as the same field, asserted through the real renderer over a real fixture - OR the flatten is retained and the list says so with the template consequence named.</criterion>
+    <criterion>Every already-carried field class still round-trips (flat-scan non-regression).</criterion>
+    <criterion>Every test observed to FAIL before its fix.</criterion>
+    <criterion>Residual list and parity agree in both directions.</criterion>
+    <criterion>NEGATIVE: no reconstructed instruction that differs from the source.</criterion>
+    <criterion>Publish size reported; no new NuGet; no new HIGH CVE.</criterion>
+  </acceptance-criteria>
+</task>

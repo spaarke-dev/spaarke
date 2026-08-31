@@ -150,10 +150,8 @@ param exchangeConnectAppId string = ''
 @description('Entra tenant ID of the ADMIN Dataverse environment for the CustomerRunGuard concurrency guard (Sprk.Provisioning.ControlPlane.Core/Concurrency/CustomerRunGuardOptions.cs). Emitted as the CustomerRunGuard__TenantId app-setting. Consumed only when customerRunGuardEnabled=true; validated at Worker boot via CustomerRunGuardOptions.Validate (customer-provisioning-orchestration-r1 task 203b, punch list row A27 / r1-gap-analysis c5-6).')
 param customerRunGuardTenantId string = ''
 
-@description('BFF Entra app-registration client (application) ID used by the CustomerRunGuard to authenticate to the admin Dataverse env via confidential-client credentials (SAME app-reg H6/H7 use for solution-import + env-var writes; multitenant BFF app-reg registered as a Dataverse Application User on the admin env). Emitted as the CustomerRunGuard__ClientId app-setting. Consumed only when customerRunGuardEnabled=true (customer-provisioning-orchestration-r1 task 203b, punch list row A27).')
-param customerRunGuardClientId string = ''
 
-@description('Kill-switch for the CustomerRunGuard (Sprk.Provisioning.ControlPlane.Core/Concurrency/CustomerRunGuardOptions.cs Enabled). Emitted as the CustomerRunGuard__Enabled app-setting. Default false keeps the null-object return-Success path per ADR-032 -- flip to true once the admin-env credentials are seeded on the platform KV AND the customerRunGuardTenantId + customerRunGuardClientId params are supplied. Production deployments MUST set true once I5 same-customer serialization becomes load-bearing (spec.md §4D I5 / FR-32; customer-provisioning-orchestration-r1 task 203b, punch list row A27).')
+@description('Kill-switch for the CustomerRunGuard (Sprk.Provisioning.ControlPlane.Core/Concurrency/CustomerRunGuardOptions.cs Enabled). Emitted as the CustomerRunGuard__Enabled app-setting. Default false keeps the null-object return-Success path per ADR-032 -- flip to true once customerRunGuardTenantId is supplied and the bound UAMI is a Dataverse Application User on the admin env (it authenticates as the UAMI since 2026-08-27; no client secret is involved). Production deployments MUST set true once I5 same-customer serialization becomes load-bearing (spec.md §4D I5 / FR-32; customer-provisioning-orchestration-r1 task 203b, punch list row A27).')
 param customerRunGuardEnabled bool = false
 
 @description('Tags for the resource.')
@@ -346,17 +344,19 @@ resource appService 'Microsoft.Web/sites@2023-01-01' = {
         // (ADR-032): a fresh L2 deployment without the admin-env credentials
         // wired stays boot-safe (the null-object returns Success
         // unconditionally, WARN-log on each acquire). Flip to true once
-        // customerRunGuardTenantId + customerRunGuardClientId + the KV
+        // customerRunGuardTenantId + the bound UAMI
         // secret are all in place -- CustomerRunGuardOptions.Validate()
         // fails fast at boot on missing fields when Enabled=true.
         // ---------------------------------------------------------------
         { name: 'CustomerRunGuard__TargetDataverseUrl', value: adminDataverseEnvironmentUrl }
         { name: 'CustomerRunGuard__TenantId', value: customerRunGuardTenantId }
-        { name: 'CustomerRunGuard__ClientId', value: customerRunGuardClientId }
-        {
-          name: 'CustomerRunGuard__ClientSecret'
-          value: '@Microsoft.KeyVault(VaultName=${keyVaultName};SecretName=${bffApiClientSecretName})'
-        }
+        // MIGRATED 2026-08-27: CustomerRunGuard__ClientId + __ClientSecret removed. The guard
+        // authenticated as the BFF app-reg with a client secret (ADR-028 A4 violation; E-3 CLOSED
+        // 2026-08-24) because the L2 UAMI was not a Dataverse Application User on the admin env.
+        // It is one now -- '# sprk-controlplane-dev-uami', Spaarke Provisioning Registry role --
+        // so the store uses DefaultAzureCredential pinned to the bound UAMI, exactly as
+        // DataverseEnvironmentRegistryClient already did against the same environment.
+        { name: 'CustomerRunGuard__ManagedIdentityClientId', value: uamiClientId }
         { name: 'CustomerRunGuard__Enabled', value: string(customerRunGuardEnabled) }
 
         // ---------------------------------------------------------------

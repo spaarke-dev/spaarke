@@ -1,0 +1,120 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="074" project="spaarkeai-compose-r8">
+  <metadata>
+    <title>FR-D01/D02 — Retire ComposeShadowPatchEngine.cs (2,999 lines) entirely and DELETE its god-class waiver — gate-confirmed before deletion</title>
+    <phase>7 Track D — God-Class Removal</phase>
+    <gate>blocked-on-031</gate>
+    <status>pending</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Deletes a 3,000-line engine that is still on a live code path. Authorized only by task 031's subsumption determination.</rigor-reason>
+    <model-tier>opus</model-tier>
+    <model-tier-reason>Capability-matched, highest risk in Track D: deleting an engine that is still reachable would break saves for whichever document class still routes through it — and the reachable path (op-log, reopened authored documents) is not the one most testing exercises. The judgment is whether "subsumed" is actually true for every entry, and the failure is unrecoverable in production.</model-tier-reason>
+    <effort>max</effort>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Removes a save path; interacts with tasks 040 and 070.</parallel-reason>
+    <deps>031, 040</deps>
+    <tags>bff-api, compose, refactor, deletion, testing</tags>
+    <estimated-effort>8 hours</estimated-effort>
+  </metadata>
+
+  <prompt>
+    `ComposeShadowPatchEngine.cs` is 2,999 lines. FR-D02 says it **retires entirely** rather than being
+    decomposed — R6 already demoted it to the transitional path and R8 finishes that.
+
+    **The deletion is authorized ONLY by task 031's subsumption determination.** If 031 recorded
+    NOT-CONFIRMED, this task does NOT delete — it reports that one waiver survives and why. Confirm before you
+    remove; that ordering is stated in FR-D02 and in the spec's assumptions.
+
+    Before deleting, prove reachability is closed:
+    - `ComposeService.SaveAsync` (~:1062) forks: ContentModel present → render path; absent + op-log →
+      patch engine. Show that the second branch is either unreachable or fully served by the merge.
+    - Reopened AUTHORED documents' clean-apply is the case task 031 was told to check specifically. Verify it
+      empirically, not by inference.
+    - Grep the whole repo for consumers.
+
+    Then delete the file, its interface, its DI registration (symmetrically), its tests, and its waiver entry.
+  </prompt>
+
+  <role>SPAARKE backend developer, careful at deletion. Expert in the Compose save fork and the R6 demotion history. Follow ADR-049, ADR-010, ADR-032 and ADR-038.</role>
+
+  <goal>
+    `ComposeShadowPatchEngine` no longer exists, its waiver is deleted, no save path regressed, and the
+    deletion is backed by a recorded reachability proof — or, if task 031 said NOT-CONFIRMED, the engine
+    survives and that is reported explicitly.
+  </goal>
+
+  <context>
+    <background>
+      This engine is R4's architecture. Its EDGE-wisdom has already been migrated per FR-D02. It is the last
+      structural remnant of the surgical byte-patch model, and its removal is what makes ADR-049 I-5 ("one
+      body author") literally true for the first time.
+    </background>
+    <relevant-files>
+      <file role="deletion">src/server/api/Sprk.Bff.Api/Services/Compose/ComposeShadowPatchEngine.cs</file>
+      <file role="primary-edit">src/server/api/Sprk.Bff.Api/Services/Compose/ComposeService.cs</file>
+      <file role="primary-edit">tests/Spaarke.ArchTests/GodClassGuardTests.cs</file>
+      <file role="canonical-reference">projects/spaarkeai-compose-r8/notes/gate-decision.md</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="spec FR-D02">Deletion is authorized ONLY by task 031's CONFIRMED subsumption determination. If NOT-CONFIRMED, do NOT delete — report that one waiver survives and why.</constraint>
+    <constraint source="project">Reachability MUST be proven before deletion: the `SaveAsync` fork's op-log branch, reopened-authored-document clean-apply (verified EMPIRICALLY), and a repo-wide consumer grep. Record all three.</constraint>
+    <constraint source="ADR-032 / bff-extensions.md § F.1">Removing the DI registration MUST NOT leave an asymmetric registration. Check the registration site and any null-object counterpart.</constraint>
+    <constraint source="ADR-010">Registration count decreases or holds — never increases.</constraint>
+    <constraint source="god-class-ratchet">DELETE the waiver entry; do not re-baseline.</constraint>
+    <constraint source="project">Delete its tests WITH it — an orphaned test suite for deleted code is exactly what `/test-diet` exists to catch, and leaving it is worse than deleting it.</constraint>
+    <constraint source="ADR-038">The Compose seam suite and the fidelity gate must be green after deletion, at their prior numbers.</constraint>
+    <constraint source="ADR-029">Report publish size (expect a meaningful decrease). No new NuGet. `/conflict-check` before the PR.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>engine retirement, reachability proof, save fork</topic>
+    <files>
+      <file>.claude/adr/ADR-049-compose-shadow-document.md</file>
+      <file>.claude/adr/ADR-032-bff-nullobject-kill-switch.md</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+      <file>.claude/patterns/testing/god-class-ratchet.md</file>
+      <file>projects/spaarkeai-compose-r8/notes/gate-decision.md</file>
+      <file>projects/spaarkeai-compose-r8/spec.md</file>
+      <file>projects/spaarkeai-compose-r8/CLAUDE.md</file>
+    </files>
+  </knowledge>
+
+  <steps mode="prescriptive">
+    <step order="0" name="Rigor declaration">Declare rigor FULL; load `gate-decision.md` FIRST and read the subsumption determination.</step>
+    <step order="1">If NOT-CONFIRMED → STOP. Record that the waiver survives, state why, and report the FR-D01 consequence. Do not proceed.</step>
+    <step order="2">If CONFIRMED → read `ComposeService.SaveAsync` (~:1062) and characterize the fork's op-log branch precisely: what reaches it today?</step>
+    <step order="3">Empirically verify reopened-authored-document clean-apply through the merge path — actually run it, do not infer.</step>
+    <step order="4">Grep the whole repo for consumers of the engine and its interface. Record the result.</step>
+    <step order="5">Delete the file, its interface, its DI registration (checking symmetry), and its tests.</step>
+    <step order="6">Delete the waiver entry from `GodClassGuardTests.cs`.</step>
+    <step order="7">Run ArchTests, the Compose seam suite and the fidelity gate. All green at prior numbers. Report the publish-size decrease.</step>
+  </steps>
+
+  <escalation>
+    <trigger>Task 031 recorded NOT-CONFIRMED — do not delete. Report that FR-D01's "all five waivers deleted" cannot be met and let the owner decide whether to defer or to fund the confirmation work.</trigger>
+    <trigger>A consumer exists outside the Compose save path, or reopened-authored clean-apply fails through the merge — the engine is still load-bearing. Surface it; do not delete and patch afterwards.</trigger>
+  </escalation>
+
+  <outputs>
+    <output type="deletion">src/server/api/Sprk.Bff.Api/Services/Compose/ComposeShadowPatchEngine.cs</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Compose/ComposeService.cs</output>
+    <output type="test">tests/Spaarke.ArchTests/GodClassGuardTests.cs</output>
+    <output type="doc">projects/spaarkeai-compose-r8/notes/patch-engine-retirement.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion>Task 031's subsumption determination was read FIRST and is cited; deletion proceeded only on CONFIRMED.</criterion>
+    <criterion>A reachability proof is recorded: the `SaveAsync` op-log branch, an EMPIRICAL reopened-authored clean-apply verification, and a repo-wide consumer grep.</criterion>
+    <criterion>`ComposeShadowPatchEngine.cs`, its interface, its DI registration and its tests are all deleted.</criterion>
+    <criterion>Its waiver entry is DELETED from `GodClassGuardTests.cs`.</criterion>
+    <criterion>ArchTests, the Compose seam suite and the fidelity gate are green at their prior numbers.</criterion>
+    <criterion>Removing the registration left no asymmetric registration (bff-extensions.md § F.1).</criterion>
+    <criterion>Publish size decreased; the delta is reported.</criterion>
+    <criterion>NEGATIVE: no save path regressed for any document class, including op-log and reopened-authored.</criterion>
+    <criterion>NEGATIVE: no orphaned tests for the deleted engine remain.</criterion>
+    <criterion>NEGATIVE (conditional): if NOT-CONFIRMED, nothing was deleted and the surviving waiver is reported.</criterion>
+  </acceptance-criteria>
+</task>

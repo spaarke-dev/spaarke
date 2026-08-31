@@ -1,0 +1,128 @@
+﻿<?xml version="1.0" encoding="UTF-8"?>
+<task id="016" project="spaarkeai-compose-r8">
+  <metadata>
+    <title>FR-S09 — Close the honest-failure set: silent guard drops, name-modal gate, tenant precondition, checkout force-close, promote-after-write, 429 mapping, filesize/filepath refresh, per-document draft slot</title>
+    <phase>1 Track S — Save Reliability (P0, ships alone)</phase>
+    <gate>startable</gate>
+    <status>completed</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Eight distinct save-path failure modes across client and server; each currently fails silently or unrecoverably.</rigor-reason>
+    <model-tier>opus</model-tier>
+    <model-tier-reason>Capability-matched: eight defects that share one signature — a failure that produces no user-visible signal. Finding the remaining silent drops requires reading for absence (what should have surfaced and didn't), which is a judgment task, not a pattern match. A miss here leaves a save that fails quietly, which is the exact condition that made R5–R7 undiagnosable.</model-tier-reason>
+    <effort>xhigh</effort>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Spans ComposeWorkspace.tsx, ComposeEndpoints.cs and ComposeService.cs — the shared save spine.</parallel-reason>
+    <deps>010, 013</deps>
+    <tags>bff-api, frontend, compose, save-path, testing</tags>
+    <estimated-effort>8 hours</estimated-effort>
+  </metadata>
+
+  <prompt>
+    Eight verified failure modes that today produce NO user-visible outcome. Each gets an outcome (task 013's
+    enum), a message, and a test. They are consolidated into one file-pass because they touch the same three
+    files and share one root signature — a failure branch that returns without telling anyone.
+
+    1. **Silent guard drops** — save guards that `return` early without surfacing anything. The user presses
+       Save and nothing happens at all.
+    2. **Name-modal gate** — a save blocked pending a filename gives no indication that is why.
+    3. **Tenant precondition** — `canSaveNow` does not validate `tenantId`; a missing tenant fails downstream
+       with an opaque error instead of a stated precondition.
+    4. **Checkout force-close** — the SAME dead-`!response.ok` bug as FR-S01, in the checkout path. Task 010
+       fixes the save path; this fixes the sibling occurrence.
+    5. **Promote-after-write faults** — the write lands but promotion fails; currently indistinguishable from
+       full success. This is `partially-recorded`.
+    6. **Graph 429 mapping** — throttling surfaces as a generic failure with no retry guidance.
+    7. **`sprk_filesize` / `sprk_filepath` refresh on replace saves** — stale metadata after a replace.
+    8. **Per-document local draft slot** — drafts collide across documents.
+
+    Read for ABSENCE: for each, the question is "what did the user see?", and today the answer is "nothing".
+  </prompt>
+
+  <role>SPAARKE full-stack developer. Expert in the Compose save spine, the Dataverse metadata refresh path, and Graph throttling semantics. Follow ADR-013, ADR-021, ADR-028 and ADR-038.</role>
+
+  <goal>
+    Every one of the eight has a user-visible outcome mapped to task 013's enum, a recovery affordance where
+    one exists, and a test. `canSaveNow` validates `tenantId`. No save-path branch returns without a signal.
+  </goal>
+
+  <context>
+    <background>
+      Verified 2026-08-19 by the Fable review (design.md §3, S-9). These are the long tail of the same Half-B
+      problem: seven releases of engine investment answered "what bytes to write" while "did we tell the
+      truth" accreted. Item 4 is particularly telling — the identical dead-code bug exists in two places,
+      which means the pattern, not the instance, is the defect.
+    </background>
+    <relevant-files>
+      <file role="primary-edit">src/client/shared/Spaarke.Compose.Components/src/widgets/ComposeWorkspace.tsx</file>
+      <file role="primary-edit">src/server/api/Sprk.Bff.Api/Api/ComposeEndpoints.cs</file>
+      <file role="primary-edit">src/server/api/Sprk.Bff.Api/Services/Compose/ComposeService.cs</file>
+      <file role="canonical-reference">src/client/shared/Spaarke.Auth/src/authenticatedFetch.ts</file>
+      <file role="reference-impl">src/client/shared/Spaarke.Compose.Components/src/widgets/ComposeBannerStack.tsx</file>
+      <file role="test">tests/integration/seam/Compose/</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="project">Every one of the eight MUST map to a member of task 013's closed enum. MUST NOT introduce a local outcome shape for any of them.</constraint>
+    <constraint source="project">MUST reuse R7's banner stack + SAVE_DEGRADATION_COPY. No new message surface (root CLAUDE.md §11).</constraint>
+    <constraint source="ADR-028">Item 4 (checkout force-close) MUST be fixed the same way task 010 fixed the save path — route on thrown `ApiError.status`, delete the unreachable `!response.ok` block. MUST NOT introduce a raw `fetch`.</constraint>
+    <constraint source="ADR-021">Any banner uses Fluent v9 semantic tokens — no hex, no inline color.</constraint>
+    <constraint source="project">Item 5 (promote-after-write) MUST report `partially-recorded`, not `persisted`. Reporting a partial write as full success is the specific lie FR-S06 exists to prevent.</constraint>
+    <constraint source="project">Item 8's draft slot MUST be keyed per document. Verify no existing consumer depends on the current shared key before changing it.</constraint>
+    <constraint source="ADR-038">Each of the eight gets a test. Seam tests in `tests/integration/seam/**`; client tests drive real thrown-ApiError paths, never a mocked `{ok:false}`.</constraint>
+    <constraint source="spec NFR-08">Paired client-recovery tests for any status code left reachable.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>compose save failure surfacing, Graph throttling, Dataverse metadata refresh</topic>
+    <files>
+      <file>.claude/adr/ADR-021-fluent-v9-design-system.md</file>
+      <file>.claude/adr/ADR-028-spaarke-auth-architecture.md</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+      <file>docs/standards/TEST-ARCHITECTURE.md</file>
+      <file>projects/spaarkeai-compose-r8/spec.md</file>
+      <file>projects/spaarkeai-compose-r8/CLAUDE.md</file>
+      <file>projects/spaarkeai-compose-r7/notes/uat-issues.md</file>
+    </files>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="0" name="Rigor declaration">Declare rigor FULL; load spec.md, CLAUDE.md, ADR-028.</step>
+    <step order="1">Enumerate every early-`return` and swallowed-catch on the save path (client and server). Confirm the eight named items, and record any NINTH silent drop found — the list is "verified so far", not proven complete.</step>
+    <step order="2">Items 1–3: give each guard an outcome + message. Add `tenantId` validation to `canSaveNow`.</step>
+    <step order="3">Item 4: apply task 010's fix shape to the checkout path — status routing on thrown ApiError, dead block deleted.</step>
+    <step order="4">Item 5: distinguish write-succeeded-promote-failed from full success; report `partially-recorded` with a cause.</step>
+    <step order="5">Item 6: map Graph 429 to a retryable outcome carrying retry guidance (honor `Retry-After` if present).</step>
+    <step order="6">Item 7: refresh `sprk_filesize` / `sprk_filepath` on replace saves; verify against a real replace, not a create.</step>
+    <step order="7">Item 8: key the local draft slot per document; migrate or discard any existing shared-key drafts deliberately (state which).</step>
+    <step order="8">Tests for all eight, plus a negative test that a healthy save is unaffected.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If step 1 finds silent drops beyond the eight named, report them and confirm scope with the owner before fixing — FR-S09 calls the set "closed", and expanding it changes what Track S's ship gate means.</trigger>
+    <trigger>If item 8's shared draft key is depended on by a surface outside Compose, changing it is a breaking change — surface the consumers first.</trigger>
+  </escalation>
+
+  <outputs>
+    <output type="code">src/client/shared/Spaarke.Compose.Components/src/widgets/ComposeWorkspace.tsx</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Api/ComposeEndpoints.cs</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Compose/ComposeService.cs</output>
+    <output type="test">tests/integration/seam/Compose/</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion>All eight failure modes produce a user-visible outcome mapped to task 013's enum, each with a test.</criterion>
+    <criterion>`canSaveNow` validates `tenantId`; a missing tenant is refused with a stated precondition, not an opaque downstream error.</criterion>
+    <criterion>The checkout path routes on thrown `ApiError.status`; its unreachable `!response.ok` block is DELETED — verified by grep.</criterion>
+    <criterion>A write that succeeds but whose promotion fails reports `partially-recorded`, never `persisted`.</criterion>
+    <criterion>Graph 429 maps to a retryable outcome carrying retry guidance.</criterion>
+    <criterion>A replace save refreshes `sprk_filesize` and `sprk_filepath` — asserted against a real replace.</criterion>
+    <criterion>The local draft slot is keyed per document; the handling of pre-existing shared-key drafts is stated explicitly.</criterion>
+    <criterion>A complete enumeration of save-path early-returns and swallowed catches is recorded in the task notes, with any ninth item flagged rather than silently fixed.</criterion>
+    <criterion>NEGATIVE: no local outcome shape was introduced — all eight use task 013's enum.</criterion>
+    <criterion>NEGATIVE: no raw `fetch(` with a hand-built Authorization header (ADR-028); no new banner surface.</criterion>
+    <criterion>NEGATIVE: a healthy save is unaffected — still `persisted`, still "Saved", no new banners.</criterion>
+    <criterion>Publish size reported; no new NuGet; no new HIGH CVE; Compose client + seam suites pass.</criterion>
+  </acceptance-criteria>
+</task>

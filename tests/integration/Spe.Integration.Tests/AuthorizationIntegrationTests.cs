@@ -150,7 +150,7 @@ public class AuthorizationTestFixture : WebApplicationFactory<Program>
                 ["Graph:TenantId"] = "test-tenant-id",
                 ["Graph:ClientId"] = "test-client-id",
                 ["Graph:ClientSecret"] = "test-client-secret",
-                ["Graph:UseManagedIdentity"] = "false",
+                ["Graph:ManagedIdentity:Enabled"] = "false",
                 ["Graph:Scopes:0"] = "https://graph.microsoft.com/.default",
                 ["Dataverse:EnvironmentUrl"] = "https://test.crm.dynamics.com",
                 ["Dataverse:ServiceUrl"] = "https://test.crm.dynamics.com",
@@ -198,6 +198,9 @@ public class AuthorizationTestFixture : WebApplicationFactory<Program>
         // ensuring our mocks replace the real services.
         builder.ConfigureTestServices(services =>
         {
+            // Test hosts must not authenticate for real — see TestTokenCredential.
+            services.UseStubTokenCredential();
+
             // Remove the real IAccessDataSource registration and replace with mock
             services.RemoveAll<IAccessDataSource>();
             services.AddScoped<IAccessDataSource>(sp => new MockAccessDataSource(

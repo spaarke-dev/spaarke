@@ -82,7 +82,7 @@ public sealed class ComposeContentDedupTests
 
     private static DefaultHttpContext HttpCtx()
     {
-        var ctx = new DefaultHttpContext();
+        var ctx = TestHttpContexts.Authenticated();
         ctx.User = new ClaimsPrincipal(new ClaimsIdentity(new[] { new Claim("oid", Guid.NewGuid().ToString()) }, "test"));
         return ctx;
     }

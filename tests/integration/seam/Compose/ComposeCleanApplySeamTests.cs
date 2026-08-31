@@ -203,8 +203,8 @@ public sealed class ComposeCleanApplySeamTests : IClassFixture<ComposeFidelitySe
         byte[]? persisted = null;
         _fixture.SpeMock
             .Setup(s => s.ReplaceFileContentAsUserAsync(
-                It.IsAny<HttpContext>(), driveId, speId, It.IsAny<Stream>(), It.IsAny<CancellationToken>()))
-            .Callback<HttpContext, string, string, Stream, CancellationToken>((_, _, _, stream, _) =>
+                It.IsAny<HttpContext>(), driveId, speId, It.IsAny<Stream>(), It.IsAny<string?>(), It.IsAny<CancellationToken>()))
+            .Callback<HttpContext, string, string, Stream, string?, CancellationToken>((_, _, _, stream, _, _) =>
             {
                 using var ms = new MemoryStream();
                 stream.CopyTo(ms);
@@ -238,7 +238,7 @@ public sealed class ComposeCleanApplySeamTests : IClassFixture<ComposeFidelitySe
     {
         using var scope = _fixture.Services.CreateScope();
         var sessions = scope.ServiceProvider.GetRequiredService<ChatSessionManager>();
-        var session = await sessions.CreateSessionAsync(tenant, documentId: speId);
+        var session = await sessions.CreateSessionAsync(tenant, TestSessionOwner.Oid, documentId: speId);
         return session.SessionId;
     }
 

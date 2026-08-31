@@ -46,6 +46,8 @@ import type {
   ContainerSearchResult,
   DriveItemSearchResult,
   DeletedContainer,
+  RecycleBinItem,
+  RecycleBinItemActionResult,
   BulkOperationAccepted,
   BulkOperationStatus,
   BulkDeleteRequest,
@@ -1224,6 +1226,68 @@ export const speApiClient = {
      */
     permanentDelete(containerId: string, configId: string): Promise<void> {
       return del("/spe/recyclebin/" + containerId + qs({ configId }));
+    },
+  },
+
+  // =========================================================================
+  // Recycle Bin — ITEMS inside one container (FR-E03 / task 052)
+  //
+  // ⚠️ A different Graph resource from the deleted-CONTAINERS bin above. Spec decision D3 keeps
+  // both. Do not merge these two surfaces.
+  // =========================================================================
+
+  recycleBinItems: {
+    /**
+     * GET /api/spe/containers/{containerId}/recyclebin/items?configId={id}
+     * Lists deleted files and folders in one container's recycle bin.
+     * An empty array means the bin is empty — a valid state, not a failure.
+     */
+    list(containerId: string, configId: string): Promise<RecycleBinItem[]> {
+      return get<{ items: RecycleBinItem[]; count: number }>(
+        "/spe/containers/" + encodeURIComponent(containerId) + "/recyclebin/items" + qs({ configId }),
+      ).then(r => r.items);
+    },
+
+    /**
+     * POST /api/spe/containers/{containerId}/recyclebin/items/restore?configId={id}
+     *
+     * Restores items and returns the outcome of EVERY requested id.
+     *
+     * Resolves on both 200 (all restored) and 207 (mixed) — the caller must read
+     * `outcomes`, not the status. Rejects with 409 when Graph refused the whole batch, in which
+     * case NOTHING was restored and the bin is unchanged.
+     */
+    restore(
+      containerId: string,
+      ids: string[],
+      configId: string,
+    ): Promise<RecycleBinItemActionResult> {
+      return post<{ ids: string[] }, RecycleBinItemActionResult>(
+        "/spe/containers/" + encodeURIComponent(containerId) + "/recyclebin/items/restore" + qs({ configId }),
+        { ids },
+      );
+    },
+
+    /**
+     * POST /api/spe/containers/{containerId}/recyclebin/items/delete?configId={id}
+     *
+     * Permanently purges items. **Irreversible.**
+     *
+     * POST rather than DELETE because Graph models this as an action taking an `ids` body, and a
+     * DELETE with a body is not reliably supported by intermediaries.
+     *
+     * The BFF re-reads the bin to establish what was actually purged, because Graph answers 204
+     * regardless. Check `verified` before believing the outcomes.
+     */
+    permanentDelete(
+      containerId: string,
+      ids: string[],
+      configId: string,
+    ): Promise<RecycleBinItemActionResult> {
+      return post<{ ids: string[] }, RecycleBinItemActionResult>(
+        "/spe/containers/" + encodeURIComponent(containerId) + "/recyclebin/items/delete" + qs({ configId }),
+        { ids },
+      );
     },
   },
 

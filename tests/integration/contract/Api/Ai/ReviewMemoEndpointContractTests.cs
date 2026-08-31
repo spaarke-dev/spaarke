@@ -111,7 +111,7 @@ public class ReviewMemoEndpointContractTests : IClassFixture<ReviewMemoEndpointT
             Messages: Array.Empty<ChatMessage>(),
             HostContext: new ChatHostContext(
                 EntityType: ChatSessionManager.AnalysisHostContextEntityType,
-                EntityId: analysisId.ToString()));
+                EntityId: analysisId.ToString())) { OwnerOid = TestSessionOwner.Oid };
 
         var client = _fx.CreateAuthenticatedClient();
         var response = await client.PostAsJsonAsync(
@@ -165,7 +165,7 @@ public class ReviewMemoEndpointContractTests : IClassFixture<ReviewMemoEndpointT
             Messages: Array.Empty<ChatMessage>(),
             HostContext: new ChatHostContext(
                 EntityType: ChatSessionManager.AnalysisHostContextEntityType,
-                EntityId: analysisId.ToString()));
+                EntityId: analysisId.ToString())) { OwnerOid = TestSessionOwner.Oid };
 
         var client = _fx.CreateAuthenticatedClient();
         var response = await client.PostAsJsonAsync(
@@ -225,7 +225,7 @@ public class ReviewMemoEndpointContractTests : IClassFixture<ReviewMemoEndpointT
             CreatedAt: DateTimeOffset.UtcNow,
             LastActivity: DateTimeOffset.UtcNow,
             Messages: Array.Empty<ChatMessage>(),
-            HostContext: null);
+            HostContext: null) { OwnerOid = TestSessionOwner.Oid };
 
         var client = _fx.CreateAuthenticatedClient();
         var response = await client.PostAsJsonAsync(
@@ -268,7 +268,7 @@ public class ReviewMemoEndpointContractTests : IClassFixture<ReviewMemoEndpointT
             CreatedAt: DateTimeOffset.UtcNow,
             LastActivity: DateTimeOffset.UtcNow,
             Messages: Array.Empty<ChatMessage>(),
-            HostContext: new ChatHostContext(EntityType: "matter", EntityId: Guid.NewGuid().ToString()));
+            HostContext: new ChatHostContext(EntityType: "matter", EntityId: Guid.NewGuid().ToString())) { OwnerOid = TestSessionOwner.Oid };
 
         var client = _fx.CreateAuthenticatedClient();
         var response = await client.PostAsJsonAsync(
@@ -332,7 +332,7 @@ public class ReviewMemoEndpointContractTests : IClassFixture<ReviewMemoEndpointT
             Messages: Array.Empty<ChatMessage>(),
             HostContext: new ChatHostContext(
                 EntityType: ChatSessionManager.AnalysisHostContextEntityType,
-                EntityId: analysisId.ToString()));
+                EntityId: analysisId.ToString())) { OwnerOid = TestSessionOwner.Oid };
         return sessionId;
     }
 
@@ -406,7 +406,7 @@ public class ReviewMemoEndpointContractTests : IClassFixture<ReviewMemoEndpointT
             CreatedAt: DateTimeOffset.UtcNow,
             LastActivity: DateTimeOffset.UtcNow,
             Messages: Array.Empty<ChatMessage>(),
-            HostContext: null);
+            HostContext: null) { OwnerOid = TestSessionOwner.Oid };
 
         var client = _fx.CreateAuthenticatedClient();
         var response = await client.GetAsync($"/api/ai/chat/sessions/{sessionId}/review-memo");
