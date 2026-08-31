@@ -1,8 +1,9 @@
 # Current Task State — `spaarkeai-compose-r8`
 
 > **Last Updated**: 2026-08-30 (by `context-handoff`)
-> **Recovery**: read Quick Recovery, then §S2 → §S1 → §S0.
-> **PR #806 IS MERGED TO MASTER. 070 clusters 7/6/5b/8/1/3/4 extracted. ONE hole left open (P7).**
+> **Recovery**: read Quick Recovery, then §S3 → §S2 → §S1 → §S0.
+> **ALL WORK IS MERGED TO MASTER (0 unmerged). 070 clusters 7/6/5b/8/1/3/4 done, ZERO holes open.**
+> **`ComposeService.cs` is FROZEN for `unified-access-control-r2` — do not touch it.**
 > Everything below "Full State" is preserved history from earlier checkpoints.
 
 ---
@@ -11,16 +12,77 @@
 
 | Field | Value |
 |---|---|
-| **Active work** | **070 decomposition** — clusters **7 · 6 · 5b · 8 · 1 · 3 · 4** extracted & verified. **5a is next** (2b/2a still HELD). |
-| **Next Action** | **TWO things, in this order.** (1) **Close the P7 hole** — `ClearPdfSourceMarkerAsync` has no test; the seam map carries the exact surviving mutation string and two test designs (try the direct-against-`MemoryDistributedCache` one first — the shape `ComposePdfProvenanceKeySeamTests` already establishes). (2) Then **cluster 5a** (profile etag + retrigger) — **64.3% branch, the weakest in the file**; on this session's evidence expect the mutation pass to find holes, so consider writing tests BEFORE extracting. 2b/2a only after UAC-r2 replies on #858. |
-| **Branch** | `work/spaarkeai-compose-r8` · clean · pushed (`bebc42e16`) · **synced with master** · `ComposeService.cs` 4,427 → **2,919** |
-| **PR #806** | ✅ **MERGED 2026-08-30** (`19bf65ec4`). Main repo at `C:/code_files/spaarke` synced to it. ⚠️ **Post-merge work on this branch is UNMERGED and needs a NEW PR.** |
-| **Suite** | ALL GREEN — Compose **1,801/0** · BFF **11,614/0** · ArchTests **153/153** · Spe.Integration **409/0** · IntegrationTests **103/0** · client gate **104 suites / 1,336** · solution build **0 errors** · DI diff **empty** |
+| **Active work** | **070 decomposition** — clusters **7 · 6 · 5b · 8 · 1 · 3 · 4** extracted & verified, **every hole closed**. `ComposeService.cs` is now **FROZEN**. |
+| **Next Action** | **Task 071 — decompose `ComposeDocxProjectionBuilder.cs` (3,593 lines).** It is a DIFFERENT file, so it does not touch the freeze. Do NOT start cluster 5a or 2a/2b — both live in `ComposeService.cs`, which is frozen until `unified-access-control-r2` lands their #858 patch and says so. Note 071/072 are **larger than TASK-INDEX records** (index says 3,085 / 2,304; actual **3,593 / 2,987**) — they grew during Track A. |
+| **Branch** | `work/spaarkeai-compose-r8` · clean · **0 commits unmerged** · master `330b9fc55` · main repo synced |
+| **Merged today** | #806 `19bf65ec4` · #905 `369c3ea89` · #908 `330b9fc55` |
+| **Suite** | ALL GREEN — Compose **1,802/0** · BFF **11,614/0** · ArchTests **153/153** · Spe.Integration **409/0** · IntegrationTests **103/0** · client gate **104 suites / 1,336** · solution build **0 errors** · DI diff **empty** |
 | **Verify with** | **`dotnet build`** at the SOLUTION root — not one project (see §A2 for why that distinction cost real time) |
 
 ---
 
-### ⚠️ The one thing that is NOT finished
+### 🔒 THE FREEZE — read before touching `ComposeService.cs`
+
+**`ComposeService.cs` is frozen until `unified-access-control-r2` lands their #858 create-on-save patch
+and comments on the issue.** We committed to this publicly in
+[#858 comment 5472902579](https://github.com/spaarke-dev/spaarke/issues/858#issuecomment-5472902579):
+*"You will not have to rebase."*
+
+- **Frozen**: clusters **5a** and **2a/2b** — both live in that file. Do not start them.
+- **Not frozen**: tasks **071** (`ComposeDocxProjectionBuilder.cs`) and **072**
+  (`ComposeDocumentRenderer.cs`) — different files, zero overlap.
+- **Unfreeze trigger**: their comment on #858. Then 5a → 2a/2b.
+
+Their anchors on master, which the freeze protects: `PromoteIfEphemeralAsync` **1989** ·
+`ResolveDriveIdAsync(request.ContainerId, …)` **1510** · the no-ContainerId guard **1500**.
+
+**The coordination record is `notes/response-to-unified-access-control-r2-2026-08-27.md`** — its
+`# ✅ DEFINITIVE STATUS` block at the top is the current agreement; everything below it is history. The
+sibling `coordination-from-*.md` is THEIR document, received — do not edit it.
+
+---
+
+## S3. Session close (2026-08-30) — everything merged, and the verification habit that was missing
+
+**All three PRs merged**: #806 (`19bf65ec4`) · #905 (`369c3ea89`) · #908 (`330b9fc55`). Branch has
+**0 unmerged commits**. Main repo synced.
+
+### The mistake worth carrying forward
+
+After #905 merged I reported "done". It wasn't. **GitHub auto-merge merges the head that PASSED CHECKS,
+not the current head** — and I had pushed the client-gate timeout fix while checks were already running.
+#905 merged head `47859684c`, silently leaving behind:
+
+1. the compose-client-gate flake fix — **still live on master**, and
+2. the definitive UAC-r2 coordination record — so the file path I had just given them in #858 pointed at
+   the stale 2026-08-27 version. They work from master.
+
+Both were caught only because the owner asked "where is the coordination document?", which made me look
+at **master** rather than my worktree. PR #908 fixed both.
+
+> **The check that would have caught it, and is now the rule:**
+> ```
+> git log --oneline origin/master..HEAD   # MUST be 0 before saying "merged"
+> ```
+> A merge notification is not proof that YOUR commits merged. Also note the compose-client gate is **not
+> a required check** (only `Router` is), so a PR can and did merge with it red.
+
+### Cluster 4 closed out completely
+
+P7 (`ClearPdfSourceMarkerAsync`) is **closed** — the last of **eleven** coverage holes this session's
+mutation passes found across clusters 1, 3 and 4. All nine cluster-4 mutations now die.
+
+### The client-gate flake — fixed at the cause, and a correction
+
+I had called the #806 client-gate failure "stale" after the suite passed locally. **It was not stale.**
+It is a recurring 5-second jest timeout in suites that mount a real TipTap editor —
+`redline-from-ledger` takes ~95s for 24 tests (~4s each, no headroom under `--maxWorkers=2` contention).
+Fixed with an explicit `testTimeout: 30000` in `jest.config.js`, with the reasoning and the
+"if a test needs >30s that is a defect in the test" rule written inline.
+
+---
+
+## S2-appendix. The one thing that WAS not finished (now closed)
 
 **P7 — `ClearPdfSourceMarkerAsync` has no test.** Replacing its body with `await Task.CompletedTask`
 leaves all 1,801 tests green. Its own log calls this "the marker's one unsafe direction": a session that
