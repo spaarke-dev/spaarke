@@ -1,0 +1,140 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="215" project="customer-provisioning-orchestration-r1">
+  <metadata>
+    <title>Retire drifted SPE certificate `spe-app-cert` + `spe-app-cert-pass` — deprecate live consumers → grep-verify → KV soft-delete</title>
+    <phase>Post-Live-Fire cleanup — SPE cert lifecycle hygiene (follow-on to task 214 H8-B rewrite)</phase>
+    <gate>startable</gate>
+    <status>not-started</status>
+    <rigor>STANDARD</rigor>
+    <rigor-reason>Configuration + script cleanup — no C# code changes, no test-modification. Touches config/**, scripts/**, and Azure Key Vault operator commands. Sub-agent-safe (no `.claude/**` edits expected). Rigor STANDARD per task-execute Step 0.5 decision tree (new file creation NOT expected; constraint-load required for KV lifecycle rules).</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Mechanical cleanup with clear scope (3 known consumers + 1 KV soft-delete). No architectural judgment beyond following the KV credential-lifecycle rule.</model-tier-reason>
+    <effort>medium</effort>
+    <effort-reason>~1-2h total. Verify no additional consumers (~15 min grep sweep). Update config/spaarke-resources.yaml (`_meta.status=retired` per file's own convention, ~15 min). Retire or update scripts/Import-And-Register.ps1 (~30 min — decide whether to delete the script or update its defaults to something still-functional). Update keyvault_inventory section in spaarke-resources.yaml. Execute KV soft-delete (~15 min operator command). Commit + push (~15 min).</effort-reason>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <deps>214</deps>
+    <tags>provisioning, spe, kv-cleanup, cert-retirement, hygiene, non-blocking</tags>
+    <estimated-effort>1-2h medium (follow-on to task 214 H8-B rewrite)</estimated-effort>
+  </metadata>
+
+  <prompt>During task 214 completion (SESSION 21, commit `a26e30dd2`), grep verification of `spe-app-cert` + `spe-app-cert-pass` before KV soft-delete surfaced LIVE consumers:
+
+1. **`config/spaarke-resources.yaml`** (lines 452-455, 492-493):
+   - Line 452-454: `cert_secrets: certificate: kv:spe-app-cert / certificate_password: kv:spe-app-cert-pass` under some SPE resource section (declarative dev-env manifest)
+   - Line 492-493: `keyvault_inventory.referenced:` list includes both secret names (documentation snapshot of what exists in `spaarke-spekvcert`)
+
+2. **`scripts/Import-And-Register.ps1`** (lines 6-8):
+   - `[string]$CertName = "spe-app-cert"`
+   - `[string]$PasswordSecretName = "spe-app-cert-pass"`
+   - `[string]$DownloadPath = "C:\temp\spe-app-cert.pfx"`
+   - Script header: "Import Certificate and Register BFF API" — bootstrap script for a one-time dev-env cert import + BFF app registration flow, uses cert thumbprint `269691A5...` (same drifted thumbprint from H8 live-test evidence — script has likely been broken since cert drift)
+
+**Consequence**: H8-B (task 214) does NOT reference `spe-app-cert` at all — the new SpeConfidentialClientGraphFactory reads a cert from `SpeContainerOptions.DefaultCertSecretName` which defaults to `SPE-OwnerCert-Pfx` (per topology doc §3A E-1 per-owning-app cert convention). But the declarative config + bootstrap script still reference the retired cert names, creating drift between docs + KV state.
+
+**Scope of task 215** (3 discrete work-items):
+
+**215.1 — Full grep sweep to confirm no additional consumers (~15 min)**:
+- `git grep -n "spe-app-cert" -- '*.cs' '*.ps1' '*.yaml' '*.yml' '*.json' '*.md'` from repo root
+- Verify all matches are in known files (config/spaarke-resources.yaml, scripts/Import-And-Register.ps1, projects/**, runs/**, .claude/**)
+- If new consumer found: expand scope + document in task notes; DO NOT proceed to 215.3 until reconciled
+
+**215.2 — Deprecate consumer references (~45 min)**:
+- **config/spaarke-resources.yaml lines 452-455**: mark cert_secrets block with `_meta: status: retired, retired: {today}, reason_retained: "documentation of pre-H8-B cert reference; H8-B (task 214, 2026-08-30) reads cert from SPE-OwnerCert-Pfx per topology doc §3A E-1"`. Keep the block for archival per file's own retention convention (line 15 comment). Remove the `kv:` prefix from the values OR add inline comment marking them retired.
+- **config/spaarke-resources.yaml lines 492-493**: move `spe-app-cert` + `spe-app-cert-pass` from `referenced:` list into a new subsection `retired_but_present_in_kv:` with retired dates. Update the file's `_changelog:` top-level chronology (add 2026-08-30 entry).
+- **scripts/Import-And-Register.ps1**: decide fate:
+  - **Option A (preferred)**: Delete the script entirely — it's a bootstrap that assumes the drifted cert. H8-B doesn't use it. `git mv scripts/Import-And-Register.ps1 scripts/_archive/Import-And-Register.ps1` with a header comment noting retirement date + reason.
+  - **Option B**: Update the parameter defaults to `SPE-OwnerCert-Pfx` (currently what SpeConfidentialClientGraphFactory reads) — keeps the script functional but re-targets it to the current cert. Requires operator to know a working thumbprint (would need to look up).
+  - **Option C**: Add a DEPRECATED banner + `throw` at top (parity with task 213.3 `Create-NewContainerType.ps1` retirement pattern).
+  - Recommendation: **Option A** (delete/archive) — simplest, aligns with task 213.3 precedent for topology-obsolete scripts, doesn't leave stale cert-thumbprint values in the repo.
+
+**215.3 — KV soft-delete (~15 min operator step)**:
+- `az keyvault secret delete --vault-name spaarke-spekvcert --name spe-app-cert`
+- `az keyvault secret delete --vault-name spaarke-spekvcert --name spe-app-cert-pass`
+- Verify soft-delete via `az keyvault secret list-deleted --vault-name spaarke-spekvcert` (both should appear)
+- Recovery window: 90 days per vault default. Do NOT purge (`az keyvault secret purge`) — soft-delete is reversible; purge is not.
+- **DO NOT** touch `spe-owning-app-secret` — that's E-1 exception per ADR-028, retained indefinitely for the owning-app rotation lifecycle.
+
+**Sequencing**: 215 is a strict follow-on to 214 (needs 214's `SpeConfidentialClientGraphFactory` refactor landed to prove no C# consumer remains). Does NOT block task 186 dispatch — H8-B works without cert retirement; retirement is hygiene.
+
+**Not blocking**: task 186 dispatch remaining blockers stay {213.7, 207, 208, 209}. Task 215 is a low-priority cleanup — run when convenient.
+</prompt>
+
+  <role>Main-session or sub-agent (config + script cleanup + operator KV command — no `.claude/**` edits expected).</role>
+
+  <goal>KV `spaarke-spekvcert/spe-app-cert` + `spe-app-cert-pass` soft-deleted after live consumers deprecated. `config/spaarke-resources.yaml` documents retirement per its own `_meta:` convention. `scripts/Import-And-Register.ps1` archived (Option A) or deprecated (Option C). Grep-verify no remaining live consumers. `spe-owning-app-secret` UNCHANGED (E-1 exception).</goal>
+
+  <context>
+    <background>
+      Task 214 (H8-B rewrite, commit a26e30dd2, SESSION 21) removed the last C# code path referencing `spe-app-cert`. The new `SpeConfidentialClientGraphFactory` reads cert from `SPE-OwnerCert-Pfx` (per `SpeContainerOptions.DefaultCertSecretName`).
+
+      During task 214.7 KV manifest work, grep verification surfaced remaining consumers in `config/spaarke-resources.yaml` (declarative dev-env manifest) + `scripts/Import-And-Register.ps1` (bootstrap script — likely non-functional since cert thumbprint drift discovered 2026-08-30). Deferred to this follow-on task rather than shipped inside 214 commit to keep 214's scope clean.
+
+      KV cert drift discovered 2026-08-30 (task 213.2 Option A H8 live-test): KV `spaarke-spekvcert/spe-app-cert` thumbprint `269691A5A60536050FA76C0163BD4A942ECD724D` (CN=SPE Certificate 22Sept2025_1) is NOT registered on any Spaarke app-reg. SDAP-PCF-CLIENT `170c98e1-...` has a different cert registered (`A57B48A2...` CN=SDAP-SPE-Owner-Renewed-2026). So the KV secrets are dead weight — no app-reg would accept a JWT signed by them.
+
+      Task 186 dispatch is NOT blocked by 215.
+    </background>
+    <relevant-files>
+      <file role="live-consumer-config">config/spaarke-resources.yaml (lines 452-455, 492-493)</file>
+      <file role="live-consumer-script">scripts/Import-And-Register.ps1 (lines 6-8)</file>
+      <file role="empirical-evidence-of-drift">runs/h8-live-test-2026-08-30.md (incidental finding section)</file>
+      <file role="kv-target">spaarke-spekvcert KV: spe-app-cert + spe-app-cert-pass (retire); spe-owning-app-secret (RETAIN per E-1)</file>
+      <file role="constraint-reference">.claude/constraints/provisioning.md § KV credential lifecycle</file>
+      <file role="prior-precedent">scripts/Create-NewContainerType.ps1 (task 213.3 DEPRECATED banner + throw pattern — Option C reference)</file>
+      <file role="archive-precedent">scripts/_archive/Register-BffApi-WithCertificate.ps1 (Option A pattern — archived script)</file>
+    </relevant-files>
+    <dependencies>
+      <dependency task="214" status="completed">SESSION 21 H8-B rewrite — removed last C# code path referencing spe-app-cert. Enables safe retirement of the cert.</dependency>
+    </dependencies>
+    <blocks>
+      <blocks task="none">Does NOT block task 186 dispatch. Task 186 blockers stay {213.7, 207, 208, 209}.</blocks>
+    </blocks>
+  </context>
+
+  <constraints>
+    <constraint source="kv-credential-lifecycle-rule-4">E-1 secrets (per-customer SpeAdmin container-type secrets — includes `spe-owning-app-secret` per topology doc §3A row 1 owning-app rotation lifecycle) are OUT OF SCOPE and MUST stay protected indefinitely. Only retire `spe-app-cert` + `spe-app-cert-pass`.</constraint>
+    <constraint source="kv-credential-lifecycle-rule-1">Never re-introduce `BFF-API-ClientSecret` (either casing) under any name. Not directly relevant here (different secret) but a reminder: task 215 must NOT create any replacement secret; it's pure retirement.</constraint>
+    <constraint source="FR-35-precheck-gate">BEFORE the KV soft-delete (215.3), verify LIVE App Service settings + KV `referenced` list + any Dataverse-persisted config do NOT reference the retiring secrets. The declarative config check + grep sweep in 215.1 satisfies this for the code + docs surface; a `az webapp config appsettings list` sweep against `spaarke-bff-dev` App Service also recommended.</constraint>
+    <constraint source="spaarke-resources-yaml-lifecycle-conventions">File's own convention (lines 11-19): retired resources MUST carry a `_meta:` block with `status: retired`, `retired: {date}`, `reason_retained: "..."`, `history: [...]`. 215.2 MUST honor this convention rather than deleting the entries silently.</constraint>
+    <constraint source="soft-delete-not-purge">Use `az keyvault secret delete` (soft-delete, 90-day recovery) NOT `az keyvault secret purge` (irreversible). Purge is only appropriate for confirmed-orphan secrets after the recovery window expires.</constraint>
+  </constraints>
+
+  <acceptance-criteria>
+    <criterion>Grep verification `git grep -n "spe-app-cert" -- '*.cs' '*.ps1' '*.yaml' '*.yml' '*.json'` returns only expected files (config/spaarke-resources.yaml retirement notes + scripts/_archive/ or scripts/Import-And-Register.ps1 header + projects/customer-provisioning-orchestration-r1/** self-references + runs/h8-live-test-2026-08-30.md evidence).</criterion>
+    <criterion>`config/spaarke-resources.yaml` cert_secrets block carries `_meta: status: retired` per file's own convention. `keyvault_inventory` splits `referenced` from `retired_but_present_in_kv` for the two soft-deleted secrets.</criterion>
+    <criterion>`scripts/Import-And-Register.ps1` is either archived (Option A: moved to scripts/_archive/) OR carries a DEPRECATED banner + throw (Option C: parity with task 213.3 pattern). Rationale documented in task 215 notes.</criterion>
+    <criterion>Azure KV `spaarke-spekvcert/spe-app-cert` + `spe-app-cert-pass` are soft-deleted (verify via `az keyvault secret list-deleted --vault-name spaarke-spekvcert`). Both appear in the deleted list. NOT purged.</criterion>
+    <criterion>Azure KV `spaarke-spekvcert/spe-owning-app-secret` UNTOUCHED (verify via `az keyvault secret show --vault-name spaarke-spekvcert --name spe-owning-app-secret` returns 200).</criterion>
+    <criterion>`spaarke-bff-dev` App Service settings sweep (`az webapp config appsettings list -g rg-spaarke-dev -n spaarke-bff-dev`) shows NO references to `spe-app-cert` or `spe-app-cert-pass`.</criterion>
+    <criterion>Task 215 completion note captures: (1) grep sweep result before + after retirement; (2) which fate chosen for Import-And-Register.ps1 (A/B/C) + why; (3) KV soft-delete operator commands executed + evidence; (4) confirmation that spe-owning-app-secret preserved.</criterion>
+  </acceptance-criteria>
+
+  <escalation>
+    <trigger>Grep sweep in 215.1 finds a live code-path consumer that task 214 missed. Investigate + reconcile with 214 rather than force through — may require an amendment commit to 214's H8-B rewrite.</trigger>
+    <trigger>App Service settings sweep finds a reference to `spe-app-cert` still bound to a KV reference (e.g., some legacy setting). Escalate rather than blindly delete the KV secret while a live App Service references it.</trigger>
+    <trigger>An external worktree (grep the wider repo including sibling projects/) references these secrets. Coordinate cross-project via `/conflict-check` before soft-delete.</trigger>
+  </escalation>
+
+  <knowledge>
+    <files>
+      <file>config/spaarke-resources.yaml (lines 1-30 for conventions, 440-500 for cert + inventory sections)</file>
+      <file>scripts/Import-And-Register.ps1 (30 lines total)</file>
+      <file>runs/h8-live-test-2026-08-30.md (incidental cert drift finding)</file>
+      <file>.claude/constraints/provisioning.md § KV credential lifecycle</file>
+      <file>.claude/adr/ADR-028-spaarke-auth-architecture.md § Amendment A4 (BFF secret-free) + E-1 exception (SpeAdmin per-customer)</file>
+    </files>
+    <patterns>
+      <pattern>.claude/patterns/provisioning/keyvault-reference-identity-invariant.md</pattern>
+    </patterns>
+  </knowledge>
+
+  <steps mode="directional">
+    <step n="1">Grep sweep — confirm consumer list matches known {config/spaarke-resources.yaml + scripts/Import-And-Register.ps1} + investigate any new consumer.</step>
+    <step n="2">Update config/spaarke-resources.yaml — mark cert_secrets block with _meta retired + move inventory entries to retired subsection + add _changelog entry.</step>
+    <step n="3">Decide + apply fate for scripts/Import-And-Register.ps1 — Option A (archive) recommended.</step>
+    <step n="4">FR-35 pre-check — az webapp config appsettings list sweep against spaarke-bff-dev to confirm no live App Service reference.</step>
+    <step n="5">Execute KV soft-delete for spe-app-cert + spe-app-cert-pass. VERIFY spe-owning-app-secret untouched.</step>
+    <step n="6">Verify via `az keyvault secret list-deleted` that both secrets appear in soft-delete list.</step>
+    <step n="7">Commit + push. Update TASK-INDEX row 215 → ✅ + current-task.md next-task pointer.</step>
+  </steps>
+</task>
