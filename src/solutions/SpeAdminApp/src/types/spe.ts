@@ -909,6 +909,65 @@ export interface DeletedContainer {
   containerTypeId: string;
 }
 
+/**
+ * A deleted FILE or FOLDER inside one container's recycle bin.
+ *
+ * Returned by GET /api/spe/containers/{containerId}/recyclebin/items?configId={id}.
+ *
+ * ⚠️ Distinct from {@link DeletedContainer}, which is a whole deleted CONTAINER. Spec decision D3
+ * keeps both bins: a container-level restore cannot recover one deleted file, and an item-level
+ * restore cannot recover a deleted container.
+ *
+ * Added by sdap-SPE-admin-app-r2 task 052 (spec FR-E03).
+ */
+export interface RecycleBinItem {
+  /** Graph recycleBinItem ID */
+  id: string;
+  /** File or folder name */
+  name: string;
+  /** Size in bytes. `null` means Graph did not report a size — render as "—", never as 0. */
+  size: number | null;
+  /** UTC timestamp when the item was deleted. `null` means not reported. */
+  deletedDateTime: string | null;
+  /** Where it was deleted from, e.g. "contentstorage/CSP_.../Document Library". */
+  deletedFromLocation: string | null;
+  /** Who deleted it. `null` means Graph did not report it — NOT "nobody". */
+  deletedByDisplayName: string | null;
+}
+
+/** What happened to one requested item in a restore or permanent delete. */
+export interface RecycleBinItemOutcome {
+  id: string;
+  /** The item's name where known — an outcome list of bare ids is unreadable. */
+  name: string | null;
+  succeeded: boolean;
+  /** What actually happened, in terms an admin can act on. */
+  detail: string;
+}
+
+/**
+ * Per-item result of a recycle-bin restore or permanent delete.
+ *
+ * ⚠️ The `outcomes` array is the contract. Graph reports these two operations in ways that hide
+ * failure — restore returns 207 listing only the ids that SUCCEEDED, and permanent delete returns
+ * 204 whether it purged everything, some, or nothing. Rendering only `summary`, or reducing this to
+ * a single success banner, reintroduces exactly the defect the BFF works to remove.
+ */
+export interface RecycleBinItemActionResult {
+  /** One entry per requested id. Always render this. */
+  outcomes: RecycleBinItemOutcome[];
+  requestedCount: number;
+  succeededCount: number;
+  /**
+   * Whether the outcomes were confirmed against the bin's actual state. Only ever `false` on a
+   * permanent delete whose post-delete re-read failed — in which case the items may or may not
+   * have been destroyed, and the UI must say so rather than pick a side.
+   */
+  verified: boolean;
+  /** Human-readable roll-up. Supplements the per-item list; never replaces it. */
+  summary: string;
+}
+
 // ---------------------------------------------------------------------------
 // Search
 // ---------------------------------------------------------------------------
