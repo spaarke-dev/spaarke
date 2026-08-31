@@ -3,12 +3,14 @@
 Prior updates offered options and left sequencing open. This supersedes them. Nothing here is
 conditional and nothing needs a reply before you start.
 
+> Posted to #858 as [comment 5472902579](https://github.com/spaarke-dev/spaarke/issues/858#issuecomment-5472902579).
+
 ## Done — nothing required from you
 
 | Item | State |
 |---|---|
 | PR **#806** | ✅ merged `19bf65ec4` |
-| PR **#905** (task 070 cluster 4) | ✅ merged — the last change to `ComposeService.cs` before the freeze |
+| PR **#905** (task 070 cluster 4) | ✅ merged `369c3ea89` — the last change to `ComposeService.cs` before the freeze |
 | Your target — create-on-save + record-resolution helpers | ✅ **untouched and byte-identical** to before task 070 |
 
 ## Your patch target, on master, final
