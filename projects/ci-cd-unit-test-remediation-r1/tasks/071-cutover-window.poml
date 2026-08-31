@@ -94,6 +94,7 @@
     <step order="7">Test merge: create a trivial test PR; verify it goes through router → tier1 (blocking) → tier2 (advisory PR comment) → merge queue → merged</step>
     <step order="8">Monitor for the next 4 hours for any of the rollback triggers; if triggered, execute rollback (see spec §152) — restore branch-protection from 070 snapshot, disable merge queue, re-enable sdap-ci as required, document in `notes/cutover-attempts.md`</step>
     <step order="9">If stable through 4-hour window, commit cutover-success note to `notes/cutover-success.md`</step>
+    <step order="9b">Merge PR #869 (dependabot: re-actors/alls-green 1.2.2 -> 1.3.0 in ci-router.yml). HELD until now on purpose: alls-green is the aggregation step in router-result, i.e. the job whose conclusion IS the `Router` required check, so bumping it mid-shadow-window could make prior verdict observations non-comparable. Its two siblings (#870 github-script, #872 cache) were verdict-neutral and merged 2026-08-30. Once cutover is done the window has served its purpose and this is free.</step>
     <step order="10">Step 9.5: code-review + adr-check on sdap-ci.yml Release restoration (other changes are settings, not code)</step>
   </steps>
 
