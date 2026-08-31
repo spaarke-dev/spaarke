@@ -38,7 +38,7 @@ namespace Sprk.Bff.Api.Services.Compose;
 ///   about concurrency, but its reason to change is the CLIENT banner contract it mirrors
 ///   (<c>ComposeBannerStack.tsx</c>), and its only caller is <c>SaveAsync</c>. Moving it would buy a
 ///   reference and nothing else.</item>
-/// <item><c>ComposeService.SaveStampJsonOptions</c> — shared with cluster 4 (the PDF provenance markers),
+/// <item><c>ComposeCacheJson.Options</c> — shared with cluster 4 (the PDF provenance markers),
 ///   so it cannot travel with this cluster without either duplicating a serializer configuration or
 ///   pulling cluster 4 along early. It stays as the single definition both reference; when cluster 4
 ///   moves, whichever collaborator ends up owning cache-payload serialization should take it.</item>
@@ -334,7 +334,7 @@ internal sealed class ComposeSaveStorageCoordinator
         try
         {
             var json = await _cache.GetStringAsync(SaveVersionStampKeyPrefix + documentSpeId, ct).ConfigureAwait(false);
-            return json is null ? null : JsonSerializer.Deserialize<ComposeSaveVersionStamp>(json, ComposeService.SaveStampJsonOptions);
+            return json is null ? null : JsonSerializer.Deserialize<ComposeSaveVersionStamp>(json, ComposeCacheJson.Options);
         }
         catch (Exception ex)
         {
@@ -359,7 +359,7 @@ internal sealed class ComposeSaveStorageCoordinator
         try
         {
             var stamp = new ComposeSaveVersionStamp(eTag, ComposeOperationSchema.Version, savedAtUtc);
-            await _cache.SetStringAsync(SaveVersionStampKeyPrefix + documentSpeId, JsonSerializer.Serialize(stamp, ComposeService.SaveStampJsonOptions), ct)
+            await _cache.SetStringAsync(SaveVersionStampKeyPrefix + documentSpeId, JsonSerializer.Serialize(stamp, ComposeCacheJson.Options), ct)
                 .ConfigureAwait(false);
         }
         catch (Exception ex)
