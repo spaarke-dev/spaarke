@@ -32,9 +32,37 @@
 // existed only as a workaround for the unbuilt dist that this gate now builds. The same rule was
 // already documented per-file for `@spaarke/ai-widgets/events` (see ComposeWorkspace.browse /
 // .search / .upload / .imports and hooks/usePendingRedline).
+//
+// ---------------------------------------------------------------------------
+// testTimeout — why it is 30s and not jest's 5s default (2026-08-30)
+// ---------------------------------------------------------------------------
+// Symptom: `compose-client-gate` failed intermittently with a dozen
+// "Exceeded timeout of 5000 ms for a test" errors, always in the heaviest suites
+// (ComposeWorkspace.redline-from-ledger, ComposeCommentThread) — while the same suites
+// passed when run alone, and a re-run of the full suite passed. Classic
+// "flaky, therefore ignorable" shape. It is not ignorable: it had already been
+// misdiagnosed once as a stale CI result on PR #806.
+//
+// Cause: these are not unit tests. Each one mounts ComposeWorkspace -> ComposeEditor ->
+// a real TipTap/ProseMirror editor, under ts-jest with jsdom. Measured locally,
+// redline-from-ledger alone takes ~95s for 24 tests — ~4s per test, i.e. sitting just
+// under jest's 5000ms default with no headroom. `test:ci` then runs with
+// `--maxWorkers=2` on a shared runner, and the contention pushes individual tests over
+// the line. The default was never a considered budget for this workload; it is simply
+// jest's out-of-the-box number.
+//
+// Why 30s: generous enough to absorb CI contention on a suite whose slowest tests are
+// ~4s, while still small enough that a genuine hang (an await that never resolves, a
+// timer that never fires) fails the run rather than hiding inside the budget. Raising
+// it to "big enough to never fail" would trade a flaky signal for no signal.
+//
+// If a test needs MORE than 30s, that is a defect in the test, not a reason to raise
+// this again — split it, or stop mounting the whole editor for an assertion that does
+// not need one.
 module.exports = {
   preset: 'ts-jest',
   testEnvironment: 'jsdom',
+  testTimeout: 30000,
   roots: ['<rootDir>/src'],
   testMatch: ['**/*.test.ts', '**/*.test.tsx'],
   setupFilesAfterEnv: ['<rootDir>/jest.setup.js'],

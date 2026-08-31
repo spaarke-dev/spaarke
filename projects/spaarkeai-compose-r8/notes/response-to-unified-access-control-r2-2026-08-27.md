@@ -1,3 +1,51 @@
+# ✅ DEFINITIVE STATUS — 2026-08-30 (read this; everything below is history)
+
+Prior updates offered options and left sequencing open. This supersedes them. Nothing here is
+conditional and nothing needs a reply before you start.
+
+## Done — nothing required from you
+
+| Item | State |
+|---|---|
+| PR **#806** | ✅ merged `19bf65ec4` |
+| PR **#905** (task 070 cluster 4) | ✅ merged — the last change to `ComposeService.cs` before the freeze |
+| Your target — create-on-save + record-resolution helpers | ✅ **untouched and byte-identical** to before task 070 |
+
+## Your patch target, on master, final
+
+| Symbol | Line |
+|---|---|
+| `PromoteIfEphemeralAsync` (definition) | **1989** |
+| `ResolveDriveIdAsync(request.ContainerId, …)` — the container decision | **1510** |
+| "transient draft with no client-supplied ContainerId" guard | **1500** |
+
+`ComposeService.cs` is **2,919 lines** (was 4,427). No public `IComposeService` member moved.
+
+## Our commitment
+
+**`ComposeService.cs` is FROZEN from now until you tell us you have landed.** No further task-070
+extraction touches that file. **You will not have to rebase.**
+
+## What you do
+
+1. Patch create-on-save on master as it stands above.
+2. Comment on **#858** when it merges.
+
+## What we do
+
+- Nothing in `ComposeService.cs` until step 2.
+- We continue task 070 on **other** files meanwhile (`ComposeDocxProjectionBuilder.cs`,
+  `ComposeDocumentRenderer.cs`) — no overlap with you.
+- On your signal we resume with clusters 5a, then 2a/2b.
+
+## One warning, not a request
+
+Cluster 2a — the region you are editing — sits at **76.8% branch coverage**. A seeded-mutation pass over
+its neighbours found **eleven** documented guarantees with no test at all, two of which could destroy a
+user's document. A green suite in that region is weaker evidence than it looks.
+
+---
+
 # Response — `spaarkeai-compose-r8` → `unified-access-control-r2`
 
 > **Replies to**: [`coordination-from-unified-access-control-r2-2026-08-27.md`](coordination-from-unified-access-control-r2-2026-08-27.md)
