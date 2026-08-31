@@ -72,6 +72,15 @@ The constraints above apply to **application logs** (Tier 1). R2 introduces two 
 | **Tier 1: App Logs** | App Insights / Azure Monitor | Metadata only (IDs, sizes, timings) | 90 days | SRE | N/A |
 | **Tier 2: Compliance Audit** | Cosmos DB `audit` container | Response hash (SHA-256), tool names, doc IDs, safety scores. **No verbatim text.** | 7 years (configurable) | Compliance role only | No (legal hold) |
 | **Tier 3: Work History** | Cosmos DB `sessions`, `prompts`, `memory`, `feedback` | Full messages, widget state, matter facts. User-owned data. | 90 days default | Owning user + admin | Yes (Art. 17) |
+| 3 | `SessionFileBlobStore` (blob, `{tenantId}/session-files/{sessionId}/{fileId}`) | User-uploaded document BYTES | Follows session TTL (incl. `-1` filed = indefinite) — **task 062, NOT YET IMPLEMENTED** | Managed identity only; tenant is the leading path segment | **Task 063, NOT YET IMPLEMENTED** |
+
+> **Amendment 2026-08-25 (`spaarkeai-compose-r8` task 060, §6.5 Path B).** The durable session-file
+> byte store is added to the table above as a Tier-3 governed store. Its retention and erasure rows are
+> honestly marked NOT YET IMPLEMENTED: this ADR requires both for a persisted store, and they are owned
+> by tasks 062/063. The non-compliant state is unreachable by a MECHANICAL gate rather than a promise —
+> `SessionFileStore:BlobEndpoint` ships EMPTY, so no bytes are persisted at all until an operator sets
+> it. Enabling it before 062/063 merge would accumulate user document bytes with no defined deletion
+> path, and the config template says so at the point of use.
 
 ### Tier-Specific MUST Rules
 

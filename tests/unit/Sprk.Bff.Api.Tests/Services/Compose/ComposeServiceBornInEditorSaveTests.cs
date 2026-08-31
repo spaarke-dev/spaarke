@@ -145,7 +145,7 @@ public sealed class ComposeServiceBornInEditorSaveTests
             TenantId = Tenant,
         };
 
-        await sut.SaveAsync(request, new DefaultHttpContext(), CancellationToken.None);
+        await sut.SaveAsync(request, TestHttpContexts.Authenticated(), CancellationToken.None);
 
         var persisted = capturedBytes();
 
@@ -255,7 +255,7 @@ public sealed class ComposeServiceBornInEditorSaveTests
             TenantId = Tenant,
         };
 
-        var result = await sut.SaveAsync(request, new DefaultHttpContext(), CancellationToken.None);
+        var result = await sut.SaveAsync(request, TestHttpContexts.Authenticated(), CancellationToken.None);
 
         // (a) It UPDATED the SAME drive-item via replace — never a create-on-save upload (no duplicate record).
         _spe.Verify(s => s.ReplaceFileContentAsUserAsync(

@@ -141,7 +141,7 @@ public sealed class ComposeServicePromoteRecordCompletenessTests
             DisplayName = "Contract draft",
         };
 
-        await sut.SaveAsync(request, new DefaultHttpContext(), CancellationToken.None);
+        await sut.SaveAsync(request, TestHttpContexts.Authenticated(), CancellationToken.None);
 
         var created = captureCreated();
 
@@ -170,7 +170,7 @@ public sealed class ComposeServicePromoteRecordCompletenessTests
             DisplayName = "Contract draft",
         };
 
-        await sut.SaveAsync(request, new DefaultHttpContext(), CancellationToken.None);
+        await sut.SaveAsync(request, TestHttpContexts.Authenticated(), CancellationToken.None);
 
         var created = captureCreated();
 

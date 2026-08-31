@@ -1,0 +1,138 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="051" project="spaarkeai-compose-r8">
+  <metadata>
+    <title>FR-C01/C02/C03 — Anchor supply: thread the captured (paraId, span) request→response→apply · wire CitationResolver · closed-set paraId return for review passes</title>
+    <phase>5 Track C — AI Edit Placement</phase>
+    <gate>blocked-on-050</gate>
+    <status>pending</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Changes the AI edit envelope end-to-end across client and server; three anchor sources converge on one code path.</rigor-reason>
+    <model-tier>opus</model-tier>
+    <model-tier-reason>Capability-matched: three anchor sources (selection, citation, model-returned paraId) must converge on ONE resolution path, or the text-search fallback survives for whichever source was overlooked — and task 052's deletion then breaks that source in production. Recognizing that all three must land before anything is retired is the judgment; implementing any one of them is not.</model-tier-reason>
+    <effort>max</effort>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Touches ComposeAiToolbar.tsx, usePendingRedline.ts, ComposeEditModels.cs and the AI edit endpoint.</parallel-reason>
+    <deps>050</deps>
+    <tags>bff-api, frontend, compose, ai, testing</tags>
+    <estimated-effort>10 hours</estimated-effort>
+  </metadata>
+
+  <prompt>
+    The client ALREADY captures the exact anchor. `ComposeAiToolbar.tsx` ~:747-784 does
+    `const { from, to } = editor.state.selection` and forwards `selectionAnchorStart: from`. Then
+    `ProposedEdit` (ComposeEditModels.cs ~:76) launders it through prose — `[property:
+    JsonPropertyName("target_text")] string TargetText` plus `match_mode`, and NO paraId — and the apply path
+    searches the whole document for the model's echoed wording.
+
+    That is invariant (7) violated exactly: deterministic information available at capture time, re-derived.
+
+    Supply the anchor for all THREE sources, in one code path, before anything is retired:
+
+    **FR-C01 Selection-driven** — thread the captured `(paraId, span)` through request → response → apply.
+    Zero text matching for these edits.
+
+    **FR-C02 Reference-driven** — "clause 4.2" resolves through `CitationResolver`, which already exists and
+    currently has NO consumer in the BFF outside its own file. Deterministic resolution from the numbering
+    engine; no search.
+
+    **FR-C03 Model-initiated review passes** — where there is no user selection, supply the model an
+    ENUMERATED CLOSED SET of paraIds and require it to return one from that set. Validate on return; an
+    invalid id is rejected loudly, never guessed.
+
+    All three land here. Task 052 retires the search path only once every source has a real anchor.
+  </prompt>
+
+  <role>SPAARKE full-stack developer. Expert in the Compose AI edit envelope, the ProseMirror selection model, `CitationResolver`, and the numbering engine. Follow ADR-039 (engine frozen), ADR-040, ADR-043 and the task-050 assessment.</role>
+
+  <goal>
+    Every AI edit arrives with a deterministic anchor from one of the three sources, resolved through the
+    projection, with zero text matching. `CitationResolver` has a real consumer. Invalid model-returned ids
+    are rejected, not guessed.
+  </goal>
+
+  <context>
+    <background>
+      ADR-049 ALREADY specifies paraId-referencing operations. `ComposeEditValidator`'s own header says it was
+      "ported from the validated Spike 2 prototype" in R2 — it predates R4's paraId anchor model and was never
+      migrated. This is not a new capability; it is finishing a migration that stalled six releases ago.
+
+      `AnnotationReanchorService` is the ADR-sanctioned fuzzy case (return-from-Word) and is explicitly KEEP.
+      Do not touch it.
+    </background>
+    <relevant-files>
+      <file role="primary-edit">src/server/api/Sprk.Bff.Api/Services/Compose/ComposeEditModels.cs</file>
+      <file role="primary-edit">src/server/api/Sprk.Bff.Api/Services/Compose/CitationResolver.cs</file>
+      <file role="primary-edit">src/client/shared/Spaarke.Compose.Components/src/widgets/ComposeAiToolbar.tsx</file>
+      <file role="primary-edit">src/client/shared/Spaarke.Compose.Components/src/widgets/hooks/usePendingRedline.ts</file>
+      <file role="primary-edit">src/server/api/Sprk.Bff.Api/Api/ComposeEndpoints.cs</file>
+      <file role="canonical-reference">projects/spaarkeai-compose-r8/notes/adr-043-041-assessment.md</file>
+      <file role="canonical-reference">src/server/api/Sprk.Bff.Api/Services/Compose/ComposeDocxProjectionBuilder.cs</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="task 050">MUST comply with the ADR-043/ADR-041 assessment findings. If it declared a Gate obligation or a path other than C, honor it. Cite the assessment.</constraint>
+    <constraint source="ADR-039">Engine frozen — the anchor is an ENVELOPE addition only. MUST NOT add new dispatch, new catalog rows, or new `ActionKind` values. Scope: the AI edit request/response shape.</constraint>
+    <constraint source="project invariant 3">The projection is the ONLY coordinate system. All three anchor sources MUST resolve through it. MUST NOT introduce a second position-resolution mechanism.</constraint>
+    <constraint source="project invariant 6">ONE edit-capture mechanism. The AI edit's anchor MUST be rebased by the SAME machinery the op-log uses (`RebasedOperationLog` / `stepOperationInterceptor`), not by a parallel rebaser.</constraint>
+    <constraint source="project">MUST NOT delete or retire anything in this task. Task 052 owns retirement, and it must not run until all three sources have anchors — deleting early breaks whichever source was missed.</constraint>
+    <constraint source="project">FR-C03's closed set MUST be enumerated BY US and validated on return. An id outside the set is rejected loudly. MUST NOT fall back to searching for the intended paragraph.</constraint>
+    <constraint source="project">MUST NOT modify `AnnotationReanchorService` — the ADR-sanctioned return-from-Word case (spec FR-C04 marks it KEEP).</constraint>
+    <constraint source="ADR-013">No AI internals in `Services/Compose/`; consume via `PublicContracts/` if any AI-side type is needed.</constraint>
+    <constraint source="ADR-038">Seam + client tests. Include a test that a selection-driven edit places with ZERO text matching invoked.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>AI edit envelope, anchors, citation resolution, ProseMirror selection</topic>
+    <files>
+      <file>.claude/adr/ADR-049-compose-shadow-document.md</file>
+      <file>.claude/adr/ADR-039-ai-engine-frozen.md</file>
+      <file>.claude/adr/ADR-043-ai-capability-execution-spine.md</file>
+      <file>docs/architecture/COMPOSE-READ-REFERENCE-FIDELITY.md</file>
+      <file>projects/spaarkeai-compose-r8/notes/adr-043-041-assessment.md</file>
+      <file>projects/spaarkeai-compose-r8/spec.md</file>
+      <file>projects/spaarkeai-compose-r8/CLAUDE.md</file>
+    </files>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="0" name="Rigor declaration">Declare rigor FULL; load the task-050 assessment FIRST, then spec.md, CLAUDE.md, ADR-039/043.</step>
+    <step order="1">Trace the current envelope end-to-end: what `ComposeAiToolbar.tsx` ~:747-784 captures, what survives into `ProposedEdit`, and what the apply path receives. Record where the anchor is dropped.</step>
+    <step order="2">Add the anchor to `ProposedEdit` and the request/response envelope. Do NOT remove `target_text`/`match_mode` yet — 052 owns that.</step>
+    <step order="3">Thread the captured `(paraId, span)` from the toolbar through the request, back on the response, and into apply.</step>
+    <step order="4">Rebase the anchor through the SAME machinery the op-log uses. Verify by reading — a parallel rebaser is invariant (6) violated.</step>
+    <step order="5">Wire `CitationResolver` as the reference-driven resolver; confirm it now has a real BFF consumer.</step>
+    <step order="6">FR-C03: enumerate the closed paraId set for review passes, supply it to the model, validate the returned id against it, reject loudly on miss.</step>
+    <step order="7">Tests: selection-driven edit places with zero text matching; citation-driven resolves deterministically; invalid model id is rejected, not guessed.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If a fourth anchor source exists that none of C01/C02/C03 covers (e.g. a replayed edit from a prior session, or a chat-originated edit with no selection), name it — task 052 must NOT retire the search path while an uncovered source depends on it.</trigger>
+    <trigger>If the op-log rebasing machinery cannot rebase an anchor supplied by the server (rather than one produced by a local step), surface it — invariant (6) requires one mechanism, and forking here would be the violation.</trigger>
+  </escalation>
+
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Compose/ComposeEditModels.cs</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Compose/CitationResolver.cs</output>
+    <output type="code">src/client/shared/Spaarke.Compose.Components/src/widgets/ComposeAiToolbar.tsx</output>
+    <output type="code">src/client/shared/Spaarke.Compose.Components/src/widgets/hooks/usePendingRedline.ts</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Api/ComposeEndpoints.cs</output>
+    <output type="test">tests/integration/seam/Compose/</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion>A selection-driven AI edit places at its captured anchor with ZERO text matching invoked (asserted by test).</criterion>
+    <criterion>A reference-driven target ("clause 4.2") resolves through `CitationResolver` with no search.</criterion>
+    <criterion>`CitationResolver` now has a real consumer in the BFF outside its own file (verified by grep).</criterion>
+    <criterion>Review passes receive an enumerated closed paraId set; a returned id outside the set is rejected loudly and never guessed.</criterion>
+    <criterion>The anchor is rebased by the SAME machinery the op-log uses — verified by reading, no parallel rebaser.</criterion>
+    <criterion>All anchor resolution goes through the projection — no second coordinate system introduced.</criterion>
+    <criterion>The task-050 assessment findings are honored and cited.</criterion>
+    <criterion>NEGATIVE: nothing was deleted or retired in this task (`target_text`/`match_mode`/`ComposeEditValidator` all still present).</criterion>
+    <criterion>NEGATIVE: no new dispatch, catalog row or `ActionKind` was added (ADR-039).</criterion>
+    <criterion>NEGATIVE: `AnnotationReanchorService` is unmodified.</criterion>
+    <criterion>NEGATIVE: no AI internals injected into `Services/Compose/` (ADR-013).</criterion>
+    <criterion>Publish size reported; no new NuGet; no new HIGH CVE.</criterion>
+  </acceptance-criteria>
+</task>

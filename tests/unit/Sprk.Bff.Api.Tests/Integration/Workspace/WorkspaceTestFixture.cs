@@ -43,6 +43,15 @@ public static class WorkspaceTestConstants
 
     /// <summary>Test bearer token value for fake authentication header.</summary>
     public const string TestBearerToken = "workspace-test-token";
+
+    /// <summary>
+    /// The Entra <c>tid</c> claim the fake principal carries. Added by <c>spaarkeai-compose-r8</c>
+    /// task 059: a real Entra access token ALWAYS carries <c>tid</c>, so a fake principal without one
+    /// was a non-contract fixture (per <c>docs/procedures/test-fixture-contracts.md</c>). Tests
+    /// compensated by sending an <c>X-Tenant-Id</c> header, which kept the spoofable fallback alive
+    /// as the only exercised tenant path — the fixture gap was, in effect, holding the hole open.
+    /// </summary>
+    public const string TestTenantId = "test-tenant-001";
 }
 
 /// <summary>
@@ -87,7 +96,7 @@ public class WorkspaceTestFixture : WebApplicationFactory<Program>
                 ["Graph:TenantId"] = "test-tenant-id",
                 ["Graph:ClientId"] = "test-client-id",
                 ["Graph:ClientSecret"] = "test-client-secret",
-                ["Graph:UseManagedIdentity"] = "false",
+                ["Graph:ManagedIdentity:Enabled"] = "false",
                 ["Graph:Scopes:0"] = "https://graph.microsoft.com/.default",
 
                 // Dataverse options (DataverseOptions validator)
@@ -191,6 +200,9 @@ public class WorkspaceTestFixture : WebApplicationFactory<Program>
 
         builder.ConfigureTestServices(services =>
         {
+            // Test hosts must not authenticate for real — see TestTokenCredential.
+            services.UseStubTokenCredential();
+
             // ---------------------------------------------------------------
             // CACHE: Replace Redis with MemoryDistributedCache for deterministic
             // caching behavior (ADR-009: Redis-first in production).
@@ -361,6 +373,9 @@ internal sealed class FakeAuthHandler : AuthenticationHandler<AuthenticationSche
             new Claim(ClaimTypes.NameIdentifier, WorkspaceTestConstants.TestUserId),
             new Claim(ClaimTypes.Name, "Test User"),
             new Claim("name", "Test User"),
+            // Every real Entra access token carries `tid`; omitting it here made the fixture
+            // unrepresentative and forced tests onto the X-Tenant-Id fallback (task 059).
+            new Claim("tid", WorkspaceTestConstants.TestTenantId),
             // Admin role required by SpeAdminAuthorizationFilter
             new Claim("roles", "SystemAdmin"),
         };

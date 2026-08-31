@@ -52,6 +52,34 @@ Tests under these eight paths are **KEEP-protected**. Deleting a file under any 
 - ✅ **MUST** test one behavior per test method
 - ✅ **MUST** use `TimeProvider` (or `FakeTimeProvider`) for any code that reads the current time, schedules, or delays. **Banned**: `Stopwatch`, `DateTime.UtcNow`, `Task.Delay` in tests.
 
+### 2a. Reliability-registry exit rule (BINDING, added 2026-08-28)
+
+[`tests/.reliability-registry.json`](../../tests/.reliability-registry.json) lists tests whose
+timing/concurrency assertions earn a **pass-2 retry** in CI instead of failing the build outright.
+
+- ✅ **MUST** delete a test's registry entry **in the same PR** that removes its timing or
+  concurrency dependence (e.g. converting it to `FakeTimeProvider`).
+- ❌ **MUST NOT** leave an entry for a test that is now deterministic.
+
+Membership describes the test **as it exists today**, not a permanent label. A stale entry buys a
+deterministic test a free retry, so a genuine regression can pass on the second attempt and ship.
+This is not hypothetical: three entries went stale the moment PR #884 landed, including
+`StopAsync_CancelsInFlightJobWithinDrainTimeout_NFR07` — a test that *names an NFR*.
+
+Adding an entry is likewise a real claim: only add one when the assertions are genuinely
+wall-clock- or concurrency-dependent, and prefer fixing the test with `FakeTimeProvider` over
+registering it.
+
+### 2b. Test-scope clause in task acceptance criteria (BINDING, added 2026-08-28)
+
+- ✅ **MUST**: any task that adds or modifies tests states in its `<acceptance-criteria>` which
+  behaviours and edge cases are in scope for coverage.
+- ❌ **MUST NOT** state a numeric test count — a number invites satisfying the number.
+
+Acceptance criteria are otherwise a **closed set** (`task-create`), so an unqualified "write tests"
+is an open instruction inside a closed contract; the predictable result is breadth padding that
+passes every B1–B17 ban individually while adding no unique verification value.
+
 ### 3. Test isolation
 
 - ✅ **MUST** isolate tests from external production services (use real test tenants for integration, in-memory for unit)

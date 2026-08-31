@@ -81,7 +81,7 @@ public class AdminJobsTestFixture : WebApplicationFactory<Program>
                 ["Graph:TenantId"] = "test-tenant-id",
                 ["Graph:ClientId"] = "test-client-id",
                 ["Graph:ClientSecret"] = "test-client-secret",
-                ["Graph:UseManagedIdentity"] = "false",
+                ["Graph:ManagedIdentity:Enabled"] = "false",
                 ["Graph:Scopes:0"] = "https://graph.microsoft.com/.default",
                 ["Dataverse:EnvironmentUrl"] = "https://test.crm.dynamics.com",
                 ["Dataverse:ServiceUrl"] = "https://test.crm.dynamics.com",
@@ -151,6 +151,9 @@ public class AdminJobsTestFixture : WebApplicationFactory<Program>
 
         builder.ConfigureTestServices(services =>
         {
+            // Test hosts must not authenticate for real — see TestTokenCredential.
+            services.UseStubTokenCredential();
+
             // Override auth — fake handler that honors X-Test-Role header to choose admin / user / none.
             services.AddAuthentication(options =>
             {

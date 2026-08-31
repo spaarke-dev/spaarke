@@ -49,6 +49,27 @@ Ships in **~2 weeks elapsed, no dev halt**, with one ~4-hour cutover window.
 - New `deploy-spaarke-ai.yml` mirroring `deploy-bff-api.yml` pattern (CD from master)
 - Audit `deploy-bff-api.yml` confirms master-trigger (fix if needed)
 
+### Scope adoption 2026-08-28 — deliverable defects are NOT deferred (BINDING)
+
+Owner direction: *"if an issue is important, then it should be added to this project NOT deferred to others."*
+
+Repairing the Tier 2 aggregator (PR #840) unmasked a cluster of standing failures that had been reported as `pass` regardless of outcome. Four of the five are **defects in this project's own deliverables**, named in the Affected Areas list below — not new scope, and not another project's problem:
+
+| Issue | Deliverable it defects | Task |
+|---|---|---|
+| #848 | `ci-tier2-advisory.yml` — 5 real-clock unit-test failures | **091** |
+| #850 | Tier 2 Prettier job — CI reports 1,907 files, local 46 | **092** |
+| #849 | `scripts/validate-markdown-links.ps1` — 86% of its own scan corpus is out of scope | **093** |
+| #864 | ADR-038 §7 — 15 of 17 bans documented but unenforced | **094** |
+
+**A project does not close while a thing it shipped is known-broken.** That follows directly from north star #1 (*fix it right the first time*) and #3 (*no constant reds*): a check nobody can reproduce or act on trains the team to ignore checks, which is worse than not having it.
+
+**One deliberate split.** #851 (no workflow runs jest — 707 client test files, zero enforced) is **half in scope**. "React/PCF Jest test architecture" is listed out of scope below and stays out. But *"no workflow runs jest at all"* is a CI gap, and CI is what this project owns. Task **095** therefore adds the workflow and baselines the 39 packages, and explicitly stops there — fixing the tests, and any jest architecture work, is handed on with the numbers.
+
+Tasks 091–095 are `parallel-safe: true` and do **not** gate the cutover chain (071 → 075 → 077 → 076). They gate **090** (wrap-up), which is the correct place: the project cannot declare itself finished with its own deliverables defective.
+
+---
+
 ### Out of Scope
 
 - Registry architecture redesign for BFF DI and SpaarkeAi widget/route registries — candidate follow-up project

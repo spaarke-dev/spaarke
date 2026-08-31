@@ -572,6 +572,126 @@ public sealed class ComposeDocumentRendererTests
         Assert.True(errors.Count == 0, "the authored .docx must be schema-valid — offenders:\n" + detail);
     }
 
+    // ── task 048: tab + symbol marker runs ────────────────────────────────────────────────────────
+    //
+    // The residual-loss parity test measures that these two families now SURVIVE an edit. It cannot see the
+    // two things below, both of which are deliberate design choices rather than consequences:
+    //
+    //   * run PROPERTIES apply. The break markers return early from BuildRun, because bold on a page break
+    //     is meaningless. A tab and a symbol are different — an underlined tab is the fill-in leader on a
+    //     signature block — so these swap the run's text child instead, keeping w:rPr. Returning early would
+    //     have dropped visible formatting silently, which is the exact failure class this project exists to
+    //     end, reintroduced by the fix for it.
+    //   * the symbol's payload is re-emitted VERBATIM, not re-derived from the glyph the reader resolved.
+
+    [Fact]
+    public void SynthesizeDocument_TabMarkerRun_EmitsWTabAndKeepsRunProperties()
+    {
+        var model = new ComposeContentModel
+        {
+            Blocks = new[]
+            {
+                new ComposeBlock
+                {
+                    Kind = ComposeBlockKind.Paragraph,
+                    Runs = new[]
+                    {
+                        new ComposeInlineRun { Text = "Name:" },
+                        new ComposeInlineRun { IsTab = true, Underline = true },
+                        new ComposeInlineRun { Text = "Jordan Avery" },
+                    },
+                },
+            },
+        };
+
+        var bytes = Renderer().SynthesizeDocument(model, "Jordan Avery");
+
+        using var doc = Open(bytes);
+        var para = Paragraphs(doc).Single(p => p.InnerText.Contains("Name:"));
+
+        var tabRun = para.Elements<Run>().Single(r => r.Elements<TabChar>().Any());
+        tabRun.RunProperties?.Underline.Should().NotBeNull(
+            "an underlined tab is the fill-in leader line on a signature block — dropping the underline is " +
+            "visible formatting loss, so a tab marker must keep its run properties (unlike a break marker)");
+
+        // The tab must not ALSO appear as text, which would write it twice.
+        para.InnerText.Should().Be("Name:Jordan Avery");
+    }
+
+    [Fact]
+    public void SynthesizeDocument_SymbolMarkerRun_EmitsWSymWithTheSourceFontAndCharCode()
+    {
+        var model = new ComposeContentModel
+        {
+            Blocks = new[]
+            {
+                new ComposeBlock
+                {
+                    Kind = ComposeBlockKind.Paragraph,
+                    Runs = new[]
+                    {
+                        new ComposeInlineRun { Text = "See " },
+                        new ComposeInlineRun
+                        {
+                            Symbol = new ComposeSymbol { Font = "Symbol", CharCode = "F0A7" },
+                            Bold = true,
+                        },
+                        new ComposeInlineRun { Text = "4.2" },
+                    },
+                },
+            },
+        };
+
+        var bytes = Renderer().SynthesizeDocument(model, "Jordan Avery");
+
+        using var doc = Open(bytes);
+        var para = Paragraphs(doc).Single(p => p.InnerText.Contains("See "));
+
+        var sym = para.Descendants<SymbolChar>().Single();
+        sym.Font?.Value.Should().Be("Symbol");
+        sym.Char?.Value.Should().Be("F0A7",
+            "the SOURCE code point is re-emitted verbatim. § in a legal document is usually Symbol-font " +
+            "F0A7, not U+00A7 — writing back the resolved look-alike would change the character the " +
+            "document contains, and for an unmapped glyph it would persist the on-screen U+FFFD placeholder");
+
+        sym.Ancestors<Run>().First().RunProperties?.Bold.Should().NotBeNull(
+            "a symbol run carries bold/italic like any other run");
+
+        // The glyph must not ALSO be present as text.
+        para.InnerText.Should().Be("See 4.2");
+    }
+
+    [Fact]
+    public void SynthesizeDocument_TabAndSymbolMarkerRuns_ProduceASchemaValidDocument()
+    {
+        // A malformed w:tab or w:sym is a Word repair prompt, which for a legal document reads as a
+        // corrupted file. FR-G05's check, applied to the two constructs this task introduced.
+        var model = new ComposeContentModel
+        {
+            Blocks = new[]
+            {
+                new ComposeBlock
+                {
+                    Kind = ComposeBlockKind.Paragraph,
+                    Runs = new[]
+                    {
+                        new ComposeInlineRun { Text = "Term:" },
+                        new ComposeInlineRun { IsTab = true },
+                        new ComposeInlineRun { Symbol = new ComposeSymbol { Font = "Symbol", CharCode = "F0A7" } },
+                        new ComposeInlineRun { Text = " 4.2" },
+                    },
+                },
+            },
+        };
+
+        var bytes = Renderer().SynthesizeDocument(model, "Jordan Avery");
+
+        using var doc = Open(bytes);
+        var errors = new OpenXmlValidator(FileFormatVersions.Office2019).Validate(doc).ToList();
+        var detail = string.Join("\n", errors.Select(e => $"{e.Path?.XPath}: {e.Description}"));
+        Assert.True(errors.Count == 0, "tab + symbol marker runs must author schema-valid OOXML — offenders:\n" + detail);
+    }
+
     // ── helpers ───────────────────────────────────────────────────────────────────────────────────
 
     private static bool IsValidParaId(string id) =>

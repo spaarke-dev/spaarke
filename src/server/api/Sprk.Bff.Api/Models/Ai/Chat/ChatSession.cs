@@ -92,6 +92,41 @@ public record ChatSession(
     public const int MaxUploadedFiles = 20;
 
     // =========================================================================
+    // OWNERSHIP (issue #863, 2026-08-28) — a session belongs to ONE user.
+    //
+    // Until this field existed, a chat session had a tenant and nothing else. Two
+    // consequences, and the second is the one nobody had filed:
+    //
+    //   1. DELETE /api/ai/chat/sessions/{id} had no owner check, so any authenticated
+    //      user could delete any session in their tenant given its id — and
+    //   2. GET /api/ai/chat/sessions (the History list) queried
+    //      `WHERE c.tenantId = @tenantId` with NO user predicate, so it HANDED every
+    //      user in the tenant the ids, titles and content previews of every other
+    //      user's conversations. The ids were never "unguessable" as
+    //      notes/059-tenant-header-decisions.md §6a assumed; they were listed.
+    //
+    // Populated from CallerResolution.ResolveObjectId — the Entra `oid`, NOT `sub`
+    // (pairwise, joins nothing) and NOT a Dataverse systemuserid. See CallerResolution
+    // for why that distinction produced a production outage on 2026-08-26.
+    //
+    // NULL means a session created before this field existed. Those FAIL CLOSED: they
+    // are invisible to the History list and inaccessible through every session-scoped
+    // route (SessionOwnershipFilter). The alternative — treating unowned as
+    // world-readable-within-the-tenant — would preserve exactly the disclosure this
+    // field exists to close, on the data most likely to still be live. The cost is
+    // bounded: the Redis hot copy has a 24h sliding TTL, and the Dataverse transcript
+    // is retained as an audit trail regardless (archive-not-delete), so nothing is
+    // destroyed — pre-existing conversations simply stop being resumable in the UI.
+    // =========================================================================
+
+    /// <summary>
+    /// Entra <c>oid</c> of the user who created this session — the ownership key for every
+    /// session-scoped route. <see langword="null"/> only for sessions created before issue
+    /// #863; those are inaccessible by design (see the remarks above), never world-readable.
+    /// </summary>
+    public string? OwnerOid { get; init; }
+
+    // =========================================================================
     // FR-D4 (task 032) — stored, writable session title.
     //
     // Like the ledger/Compose-domain collections below, this is an INIT-property addition

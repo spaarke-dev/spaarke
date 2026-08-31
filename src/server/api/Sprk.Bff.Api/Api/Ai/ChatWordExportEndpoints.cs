@@ -4,6 +4,7 @@ using Sprk.Bff.Api.Infrastructure.Graph;
 using Sprk.Bff.Api.Models.Ai.Chat;
 using Sprk.Bff.Api.Services.Ai.Chat;
 using Sprk.Bff.Api.Services.Ai.Export;
+using Sprk.Bff.Api.Infrastructure.Authentication;
 
 namespace Sprk.Bff.Api.Api.Ai;
 
@@ -110,7 +111,7 @@ public static class ChatWordExportEndpoints
             return Results.Problem(
                 statusCode: 400,
                 title: "Bad Request",
-                detail: "Tenant ID not found in token claims (tid) or X-Tenant-Id header.");
+                detail: "Tenant ID not found in token claims (tid).");
         }
 
         var session = await sessionManager.GetSessionAsync(tenantId, request.SessionId, cancellationToken);
@@ -288,18 +289,13 @@ public static class ChatWordExportEndpoints
     }
 
     /// <summary>
-    /// Extracts the tenant ID from the JWT 'tid' claim (ADR-014) with X-Tenant-Id header fallback.
+    /// Extracts the tenant ID from the JWT 'tid' claim (ADR-014).
+    /// Tenant comes from the caller's authenticated principal and from nothing else (task 059 — see Infrastructure/Authentication/TenantResolution).
     /// </summary>
     private static string? ExtractTenantId(HttpContext httpContext)
     {
         // Microsoft.Identity.Web may map 'tid' to the long-form URI claim
-        var tenantId = httpContext.User.FindFirst("tid")?.Value
-            ?? httpContext.User.FindFirst("http://schemas.microsoft.com/identity/claims/tenantid")?.Value;
-
-        if (string.IsNullOrEmpty(tenantId))
-        {
-            tenantId = httpContext.Request.Headers["X-Tenant-Id"].FirstOrDefault();
-        }
+        var tenantId = TenantResolution.ResolveTenantId(httpContext.User);
 
         return tenantId;
     }

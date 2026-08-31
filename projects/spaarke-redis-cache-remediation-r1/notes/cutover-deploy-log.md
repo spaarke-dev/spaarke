@@ -150,3 +150,35 @@ User authorized inline R7-S7 fix to close the App Insights telemetry pipeline ga
 - `cache.hits` / `cache.misses` / `cache.redis_call_duration_ms` (`customMetrics | where name startswith 'cache.'` empty despite `TenantCache` being exercised). Hypothesis: `TenantCache.Meter` static-init order vs MeterProvider; OR not all cache call sites route through the static counter. Requires audit.
 
 These are NOT regressions — neither was visible before this project. The project shipped the prep work (correct Meter name, Redis instrumentation registration, OTel exporter); R8 closes the last mile.
+
+## 2026-08-30 — legacy Redis DELETED (task 037 step 3 closed)
+
+`spe-redis-dev-67e2xz` deleted with explicit owner sign-off, ~2 months after the stated 7-14 day
+reversibility window closed. `az redis show` now returns `ResourceNotFound` (acceptance criterion met).
+
+Pre-delete record: Basic C0, redis 6.0, West US 2, host `spe-redis-dev-67e2xz.redis.cache.windows.net`,
+tags `decommission=2026-06-26` / `decommission-reason=replaced-by-spaarke-bff-redis-dev`.
+
+Orphan sweep before deleting — all clean:
+
+| Check | Result |
+|---|---|
+| cache hits, 2 days, 12h buckets | **0.0 every bucket** (live cache: 1206-1219) |
+| BFF `ConnectionStrings__Redis` | Key Vault secret naming `spaarke-bff-redis-dev` |
+| `redis-cache-memory-high-dev` alert scope | the **live** cache, not this one |
+| 3 scheduled query rules | neither cache named |
+| `infrastructure/ scripts/ config/ .github/ src/` | **zero** exact-name references |
+| repo references overall | 20 files, all project notes + docs |
+| linked servers / private endpoints / subnet | none |
+
+**Trap worth keeping**: operations/sec was 144–164 against the live cache's 190–254 — within 25%.
+"It has traffic, therefore it is used" would have been the WRONG test. Only the zero cache-hit rate
+separated a health-probe workload from a real one.
+
+**Second trap**: an orphan search using the pattern `spe-redis-dev-67e2xz|67e2xz` returned 66 files —
+because `67e2xz` is a SHARED environment suffix (`spe-insights-dev-67e2xz`, `spe-logs-dev-67e2xz` sit in
+the same resource group). Searching the exact name returns zero hits in code. Match the full resource
+name, never a fragment of it.
+
+The POML for 037 had been left at `not-started` while TASK-INDEX recorded it complete; corrected in the
+same change.

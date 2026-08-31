@@ -1,6 +1,7 @@
 using System.Diagnostics;
 using FluentAssertions;
 using Microsoft.Extensions.Logging.Abstractions;
+using Microsoft.Extensions.Time.Testing;
 using Spaarke.Scheduling;
 using Xunit;
 
@@ -27,6 +28,44 @@ public class RetryAndIdempotencyTests
         }
     };
 
+    /// <summary>
+    /// <see cref="FastOptions"/> with a LONG refresh interval, for tests driven by the virtual clock.
+    ///
+    /// <para>The 200 ms refresh in <see cref="FastOptions"/> is actively harmful under virtual time.
+    /// <c>TickAsync</c> refreshes BEFORE the due-check and recomputes <c>NextFireUtc</c> from
+    /// <c>now</c> EXCLUSIVE, so a refresh interval that divides the 1 s cron period lands on every
+    /// tick that could dispatch and starves dispatch forever. Real time escapes this only via sleep
+    /// jitter. 30 s is far from any divisor of the cron period.</para>
+    /// </summary>
+    private static ScheduledJobHostOptions VirtualClockOptions(JobRetryPolicy? retryPolicy = null)
+    {
+        var o = FastOptions(retryPolicy);
+        o.RefreshInterval = TimeSpan.FromSeconds(30);
+        return o;
+    }
+
+    /// <summary>Builds a host on a controllable clock, returning both so the test can drive time.</summary>
+    private static (ScheduledJobHost Host, FakeTimeProvider Time) HostWithVirtualClock(
+        ScheduledJobRegistry registry,
+        IBackgroundJobStore store,
+        ScheduledJobHostOptions options)
+    {
+        var time = new FakeTimeProvider(DateTimeOffset.Parse("2026-08-30T12:00:00Z"));
+        var host = new ScheduledJobHost(registry, store, options, NullLogger<ScheduledJobHost>.Instance, time);
+        return (host, time);
+    }
+
+    /// <summary>Advances virtual time by <paramref name="total"/> in <see cref="VirtualStep"/> steps.</summary>
+    private static async Task AdvanceForAsync(FakeTimeProvider time, TimeSpan total)
+    {
+        var steps = (int)(total.Ticks / VirtualStep.Ticks);
+        for (var i = 0; i < steps; i++)
+        {
+            time.Advance(VirtualStep);
+            await Task.Delay(1).ConfigureAwait(false);
+        }
+    }
+
     private static BackgroundJobDefinition EverySecond(string jobId, bool enabled = true) =>
         new(JobId: jobId,
             DisplayName: $"Test {jobId}",
@@ -35,10 +74,11 @@ public class RetryAndIdempotencyTests
             CronSchedule: "* * * * * *",
             ConfigJson: null);
 
-    // CI flake: cron-tick timing under runner load doesn't converge even at 5x scaled timeouts +
-    // parallel-disabled. Passes deterministically locally. Follow-up: refactor to TimeProvider-based
-    // deterministic time control (Microsoft.Extensions.TimeProvider.Testing). See R3 PR #415 wrap-up.
-    [Fact(Skip = "CI cron-tick flake — passes locally; needs TimeProvider refactor; follow-up issue TBD")]
+    // The four tests below carried "CI cron-tick flake — needs TimeProvider refactor (PR #415)" and
+    // were skipped. Un-skipped 2026-08-30: the follow-up that note asked for is DONE. They now run
+    // on FakeTimeProvider, so cron ticks advance only when the test advances them and runner load
+    // cannot influence the outcome. Verified across three consecutive full-suite runs, 56/56, ~7s.
+    [Fact]
     public async Task TransientFailure_RetriesAndSucceeds_RecordsSuccess()
     {
         // Mock: fail twice then succeed. Verify exactly 3 invocations and the recorded result is success.
@@ -60,11 +100,12 @@ public class RetryAndIdempotencyTests
         var store = new InMemoryBackgroundJobStore();
         store.AddOrReplaceJob(EverySecond("flaky"));
 
-        var host = new ScheduledJobHost(registry, store, FastOptions(), NullLogger<ScheduledJobHost>.Instance);
+        var (host, time) = HostWithVirtualClock(registry, store, VirtualClockOptions());
 
         await host.StartAsync(CancellationToken.None);
-        await WaitUntilAsync(() => fakeImpl.InvocationCount >= 3, TimeSpan.FromSeconds(5));
-        await Task.Delay(200); // let RecordRunCompleteAsync settle
+        await AdvanceUntilAsync(time, () => fakeImpl.InvocationCount >= 3,
+            "fail-fail-succeed must reach the third attempt via the retry loop");
+        await AdvanceForAsync(time, TimeSpan.FromSeconds(1)); // let RecordRunCompleteAsync settle
         await host.StopAsync(CancellationToken.None);
 
         // Handler MUST have been called exactly 3 times for the first tick (initial + 2 retries) —
@@ -78,7 +119,7 @@ public class RetryAndIdempotencyTests
             "the retry loop MUST eventually record a successful run");
     }
 
-    [Fact(Skip = "CI cron-tick flake — passes locally; needs TimeProvider refactor (see PR #415)")]
+    [Fact]
     public async Task PermanentFailure_ExhaustsRetries_RecordsFailureWithErrorMessage()
     {
         // Mock: always fail. Verify final recorded result is Success=false with the exception message.
@@ -95,12 +136,12 @@ public class RetryAndIdempotencyTests
         var store = new InMemoryBackgroundJobStore();
         store.AddOrReplaceJob(EverySecond("doomed"));
 
-        var host = new ScheduledJobHost(registry, store, FastOptions(), NullLogger<ScheduledJobHost>.Instance);
+        var (host, time) = HostWithVirtualClock(registry, store, VirtualClockOptions());
 
         await host.StartAsync(CancellationToken.None);
-        await WaitUntilAsync(
+        await AdvanceUntilAsync(time,
             () => store.RunRecords.Any(r => r.JobId == "doomed" && r.Result != null && !r.Result.Success),
-            TimeSpan.FromSeconds(5));
+            "a permanently-failing job must exhaust its retries and record a FAILED run");
         await host.StopAsync(CancellationToken.None);
 
         var doomedRuns = store.RunRecords.Where(r => r.JobId == "doomed" && r.Result != null).ToList();
@@ -114,7 +155,7 @@ public class RetryAndIdempotencyTests
         attempts.Should().BeGreaterOrEqualTo(3);
     }
 
-    [Fact(Skip = "CI cron-tick flake — passes locally; needs TimeProvider refactor (see PR #415)")]
+    [Fact]
     public async Task RetryRespectsMaxAttempts_CallsHandlerExactlyMaxAttempts_PerTick()
     {
         // Use a deliberately slow cron + tiny refresh so that only ONE tick is observable
@@ -145,13 +186,13 @@ public class RetryAndIdempotencyTests
         var store = new InMemoryBackgroundJobStore();
         store.AddOrReplaceJob(EverySecond("max-count"));
 
-        var host = new ScheduledJobHost(registry, store, FastOptions(policy), NullLogger<ScheduledJobHost>.Instance);
+        var (host, time) = HostWithVirtualClock(registry, store, VirtualClockOptions(policy));
 
         await host.StartAsync(CancellationToken.None);
         // Wait for at least one completed run record (i.e., one full burst).
-        await WaitUntilAsync(
+        await AdvanceUntilAsync(time,
             () => store.RunRecords.Any(r => r.JobId == "max-count" && r.Result != null),
-            TimeSpan.FromSeconds(5));
+            "one full retry burst must complete and record a run");
         await host.StopAsync(CancellationToken.None);
 
         // The first recorded run reflects the first tick — which made exactly MaxAttempts
@@ -197,28 +238,39 @@ public class RetryAndIdempotencyTests
 
         var options = new ScheduledJobHostOptions
         {
-            RefreshInterval = TimeSpan.FromMilliseconds(200),
+            // RefreshInterval MUST exceed the 1s cron period under a virtual clock: TickAsync
+            // refreshes first and recomputes NextFireUtc from `now` exclusive, so a 200ms refresh
+            // stepped by an exactly periodic 200ms virtual advance starves the job forever. Real
+            // time only escapes that by sleep jitter. See VirtualClockOptions in ScheduledJobHostTests.
+            RefreshInterval = TimeSpan.FromSeconds(30),
             ShutdownDrainTimeout = TimeSpan.FromSeconds(3),
             MaxLoopSleep = TimeSpan.FromMilliseconds(200),
             RetryPolicy = policy
         };
 
-        var host = new ScheduledJobHost(registry, store, options, NullLogger<ScheduledJobHost>.Instance);
+        // Virtual clock: the 5s retry delay above is now 5s of VIRTUAL time that this test
+        // simply never grants. See the assertion note below for why that is the whole point.
+        var time = new FakeTimeProvider(DateTimeOffset.Parse("2026-08-28T12:00:00Z"));
+        var host = new ScheduledJobHost(registry, store, options, NullLogger<ScheduledJobHost>.Instance, time);
 
         await host.StartAsync(CancellationToken.None);
-        await startedTcs.Task.WaitAsync(TimeSpan.FromSeconds(5));
 
-        // Cancellation must short-circuit the 5s retry-loop sleep AND any in-flight ExecuteAsync.
-        var sw = Stopwatch.StartNew();
+        // Advance only until attempt #1 has run. It throws, which puts the host into its 5s
+        // retry sleep — and then we stop advancing, so virtual time freezes mid-sleep.
+        await AdvanceUntilAsync(time, () => startedTcs.Task.IsCompleted,
+            "the every-second cron MUST dispatch 'cancellable-retry' once virtual time reaches its occurrence");
+
         await host.StopAsync(CancellationToken.None);
-        sw.Stop();
 
-        // CI runners get 5x headroom; the 5s ceiling tests cancellation responsiveness
-        // (NOT total elapsed time), which still holds under both budgets.
-        var cancelCeiling = _isCi ? TimeSpan.FromSeconds(25) : TimeSpan.FromSeconds(5);
-        sw.Elapsed.Should().BeLessThan(cancelCeiling,
-            "retry-loop sleep MUST honor cancellation (NFR-07) — would block past this if unhonored");
-
+        // Task 091 (#848): this replaces a `sw.Elapsed < (CI ? 25s : 5s)` wall-clock ceiling, and
+        // it is a STRICTLY STRONGER check rather than a weaker one. The retry sleep is 5s of
+        // virtual time that was never advanced, so if the sleep had ignored the cancellation token
+        // StopAsync could not have returned at all — it would deadlock until the drain timeout and
+        // the record below would not say "Cancelled". Completing at all is therefore proof that the
+        // wake-up came from the token and not from elapsed time, which is exactly the NFR-07
+        // property the old ceiling could only ever approximate. (The production loop routes every
+        // sleep through the injected TimeProvider specifically so this is provable — see the
+        // comment on ScheduledJobHost.TickAsync's idle sleep.)
         var run = store.RunRecords.FirstOrDefault(r => r.JobId == "cancellable-retry");
         run.Should().NotBeNull();
         run!.Result.Should().NotBeNull();
@@ -293,7 +345,7 @@ public class RetryAndIdempotencyTests
             "the pre-seeded run was NOT overwritten — host skipped this tick");
     }
 
-    [Fact(Skip = "CI cron-tick flake — passes locally; needs TimeProvider refactor (see PR #415)")]
+    [Fact]
     public async Task Idempotency_DistinctTicks_AllExecute()
     {
         // Sanity check that idempotency does NOT prevent legitimate execution of different ticks.
@@ -303,15 +355,20 @@ public class RetryAndIdempotencyTests
         var store = new InMemoryBackgroundJobStore();
         store.AddOrReplaceJob(EverySecond("multi-tick"));
 
-        var host = new ScheduledJobHost(registry, store, new ScheduledJobHostOptions
+        // RefreshInterval MUST NOT stay at 200 ms here. Under virtual time a refresh interval that
+        // divides the 1 s cron period lands on every tick that could dispatch and starves dispatch
+        // forever, because TickAsync refreshes before the due-check and recomputes NextFireUtc from
+        // `now` exclusive. 30 s is nowhere near a divisor.
+        var (host, time) = HostWithVirtualClock(registry, store, new ScheduledJobHostOptions
         {
-            RefreshInterval = TimeSpan.FromMilliseconds(200),
+            RefreshInterval = TimeSpan.FromSeconds(30),
             ShutdownDrainTimeout = TimeSpan.FromSeconds(3),
             MaxLoopSleep = TimeSpan.FromMilliseconds(100)
-        }, NullLogger<ScheduledJobHost>.Instance);
+        });
 
         await host.StartAsync(CancellationToken.None);
-        await WaitUntilAsync(() => fake.InvocationCount >= 2, TimeSpan.FromSeconds(6));
+        await AdvanceUntilAsync(time, () => fake.InvocationCount >= 2,
+            "distinct ticks must each execute");
         await host.StopAsync(CancellationToken.None);
 
         // Each tick should have a distinct ScheduledFireUtc.
@@ -324,6 +381,35 @@ public class RetryAndIdempotencyTests
     // CI runners can be 3-5x slower than local; multiply tight timeouts to
     // avoid flake without changing per-test call sites or weakening intent.
     // GitHub Actions sets CI=true; local dev runs unscaled.
+    /// <summary>Virtual-clock increment per <see cref="AdvanceUntilAsync"/> step (matches MaxLoopSleep).</summary>
+    private static readonly TimeSpan VirtualStep = TimeSpan.FromMilliseconds(200);
+
+    /// <summary>
+    /// Advances the host's VIRTUAL clock in fixed steps until <paramref name="predicate"/> holds.
+    /// Bounded by step COUNT, not elapsed real time, so a loaded runner cannot make it give up
+    /// early — virtual time moves only when this method moves it. Added by task 091 (#848); see
+    /// the fuller rationale on the twin helper in <c>ScheduledJobHostTests</c>.
+    /// </summary>
+    private static async Task AdvanceUntilAsync(
+        FakeTimeProvider time,
+        Func<bool> predicate,
+        string because,
+        int maxSteps = 400)
+    {
+        for (var step = 0; step < maxSteps; step++)
+        {
+            if (predicate()) return;
+            time.Advance(VirtualStep);
+            await Task.Delay(1).ConfigureAwait(false);
+        }
+
+        if (!predicate())
+        {
+            throw new TimeoutException(
+                $"Predicate did not become true within {maxSteps} virtual steps of {VirtualStep} — {because}");
+        }
+    }
+
     private static readonly bool _isCi =
         string.Equals(Environment.GetEnvironmentVariable("CI"), "true", StringComparison.OrdinalIgnoreCase);
 

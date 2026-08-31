@@ -153,7 +153,7 @@ public sealed class ComposeServiceSaveAnnotationsTests
             // No OperationLog and no Comments → a clean Save: the engine is a byte-identical passthrough.
         };
 
-        await sut.SaveAsync(request, new DefaultHttpContext(), CancellationToken.None);
+        await sut.SaveAsync(request, TestHttpContexts.Authenticated(), CancellationToken.None);
 
         capturedBytes().Should().BeEquivalentTo(
             baseline,

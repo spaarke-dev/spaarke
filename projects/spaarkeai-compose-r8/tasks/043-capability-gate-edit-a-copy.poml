@@ -1,0 +1,142 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="043" project="spaarkeai-compose-r8">
+  <metadata>
+    <title>FR-A07 — Capability gate: open read-only with a reason, plus a working "Edit a copy" fork (original never written)</title>
+    <phase>4 Track A — Faithful Save</phase>
+    <gate>blocked-on-031</gate>
+    <status>superseded</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Adds a gate that can BLOCK a user from editing a document. False positives are the main risk this feature carries. PROVISIONAL — amendable by task 031.</rigor-reason>
+    <model-tier>opus</model-tier>
+    <model-tier-reason>Capability-matched: the trigger list decides which documents a user is refused edit access to. A too-broad trigger blocks documents we could have handled and is experienced as the product being broken; a too-narrow one lets a document through that gets damaged. Neither failure is visible in a test suite — both need judgment about what the merge can actually carry, informed by the gate results.</model-tier-reason>
+    <effort>xhigh</effort>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Touches ComposeWorkspace.tsx and the Compose open/save path.</parallel-reason>
+    <deps>040</deps>
+    <tags>bff-api, frontend, compose, testing</tags>
+    <estimated-effort>10 hours</estimated-effort>
+  </metadata>
+
+  <resolution date="2026-08-23" decided-by="owner">
+    SUPERSEDED — no construct family requires a capability gate. The corpus gap the first pass found (six
+    families with ZERO coverage) was closed at the owner's direction; four new fixtures cover five of the
+    six, and all measure 100% strict preservation in an untouched block and a NAMED warning when the
+    construct's own block is edited. No hard fail; no silent loss; the saved document is schema-valid in
+    every case. "Edit a copy" also has no trigger to attach to: every existing read-only trigger is "we
+    cannot read this at all", and the one genuine read-but-never-write case (the PDF) already ships.
+    Evidence: notes/capability-gate-triggers.md. Residual (warn at EDIT rather than at save; .docm) carried
+    to task 045.
+  </resolution>
+
+  <prompt>
+    ⚠️ **PROVISIONAL** — re-read `notes/gate-decision.md` and `notes/merge-prototype-results.md` first. The
+    trigger list must be derived from what the merge ACTUALLY cannot carry, per those results, not from a
+    prior guess.
+
+    Some documents contain constructs the merge cannot safely carry. The owner's decision (2026-08-19) — which
+    is better than any option originally offered — is:
+
+    **Open read-only, state WHAT cannot be carried, and offer "Edit a copy".** The user is told what the copy
+    will drop, confirms, and gets a NEW SPE item with a uniquified filename stamped `ComposeOrigin.Authored`.
+    **The original is never written to.** The user is never blocked; the original can never be damaged.
+
+    Two things make or break this feature:
+    - The **trigger list** — a false positive blocks a document we could have handled. This is the main risk.
+      Derive it from the gate results and have the owner review it.
+    - The **honesty of the drop list** — the confirmation must name what will actually be lost, specifically,
+      not "some formatting may be lost".
+  </prompt>
+
+  <role>SPAARKE full-stack developer. Expert in the Compose open path, `SprkModal`/`ConfirmModal`, and SPE item creation. Follow ADR-050 (modal shell), ADR-021 (semantic tokens) and ADR-007.</role>
+
+  <goal>
+    A document we cannot safely carry opens read-only with a specific reason and a working "Edit a copy" that
+    produces a new `Authored` SPE item with a uniquified filename. The original is never written. No document
+    the merge CAN carry is gated.
+  </goal>
+
+  <context>
+    <background>
+      This is the Word-for-the-web capability-gate pattern with the owner's improvement — Word refuses into
+      read-only; we refuse into read-only PLUS a fork. The pattern is production-proven; the fork is what makes
+      it non-blocking.
+
+      The `ComposeOrigin` Authored/Imported discriminator already exists and is the correct stamp for the fork
+      (see task 044, which makes `Authored` suppress degradation warnings — a forked copy has no original to
+      lose against, which is exactly right).
+    </background>
+    <relevant-files>
+      <file role="primary-edit">src/client/shared/Spaarke.Compose.Components/src/widgets/ComposeWorkspace.tsx</file>
+      <file role="primary-edit">src/server/api/Sprk.Bff.Api/Services/Compose/ComposeService.cs</file>
+      <file role="primary-edit">src/server/api/Sprk.Bff.Api/Api/ComposeEndpoints.cs</file>
+      <file role="reference-impl">src/client/shared/Spaarke.UI.Components/src/components/ (SprkModal / ConfirmModal)</file>
+      <file role="canonical-reference">projects/spaarkeai-compose-r8/notes/merge-prototype-results.md</file>
+      <file role="doc-output">projects/spaarkeai-compose-r8/notes/capability-gate-triggers.md</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-050">The gate notice and fork confirmation MUST use `SprkModal` / `ConfirmModal` from `@spaarke/ui-components`. MUST NOT author bespoke modal chrome. Scope: both surfaces added here.</constraint>
+    <constraint source="ADR-021">Fluent v9 semantic tokens only — no hex, no inline color.</constraint>
+    <constraint source="project">The ORIGINAL MUST NEVER be written to on this path. No save, no metadata update, no checkout. Verify by test, not by inspection.</constraint>
+    <constraint source="project">The trigger list MUST be derived from the gate/prototype results — which constructs the merge demonstrably cannot carry. MUST NOT be assembled from assumption. It MUST be owner-reviewed before this task is considered complete (spec §Unresolved Questions).</constraint>
+    <constraint source="project">The drop list in the confirmation MUST name specific constructs ("3 embedded charts, 1 legacy form field"), not a generic caution. A vague warning is not informed consent.</constraint>
+    <constraint source="project">The fork MUST be stamped `ComposeOrigin.Authored` and get a uniquified filename. Reuse the existing `ComposeOrigin` discriminator — do not add a third origin value (root §11).</constraint>
+    <constraint source="ADR-007">SPE item creation goes through `SpeFileStore`; no Graph types above the facade.</constraint>
+    <constraint source="ADR-041">Assess whether this confirmation must be modeled as an ADR-041 Gate. Task 050's assessment concluded that user-initiated confirmations are likely OUT of scope (unlike FR-C05's AI-origin one) — confirm that conclusion applies here and cite it.</constraint>
+    <constraint source="ADR-038">Seam + client tests. Include a NEGATIVE test that a carryable document is NOT gated.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>capability gates, modal design system, SPE item creation</topic>
+    <files>
+      <file>docs/standards/MODAL-DESIGN-SYSTEM.md</file>
+      <file>docs/standards/MODAL-DECISION-CRITERIA.md</file>
+      <file>.claude/adr/ADR-050-canonical-modal-shell.md</file>
+      <file>.claude/adr/ADR-021-fluent-v9-design-system.md</file>
+      <file>.claude/adr/ADR-041-judgment-confirmation-policy.md</file>
+      <file>projects/spaarkeai-compose-r8/spec.md</file>
+      <file>projects/spaarkeai-compose-r8/CLAUDE.md</file>
+      <file>projects/spaarkeai-compose-r8/notes/merge-prototype-results.md</file>
+    </files>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="0" name="Rigor declaration">Declare rigor FULL; load gate-decision.md, merge-prototype-results.md, spec.md, CLAUDE.md, ADR-050.</step>
+    <step order="1">Derive the trigger list from the prototype/gate results: which constructs did the merge demonstrably fail to carry? Write it to `notes/capability-gate-triggers.md` with the evidence per trigger.</step>
+    <step order="2">Get owner review of the trigger list. A false positive blocks a real document — this review is a gate on the task, not a formality.</step>
+    <step order="3">Implement detection on the open path. Detection must run BEFORE the editor mounts editable.</step>
+    <step order="4">Implement read-only open with a specific reason naming the detected constructs (`SprkModal`).</step>
+    <step order="5">Implement "Edit a copy": `ConfirmModal` naming the specific drops → new SPE item via `SpeFileStore`, uniquified filename, stamped `ComposeOrigin.Authored`.</step>
+    <step order="6">Verify by test that the original receives NO write of any kind on this path.</step>
+    <step order="7">Negative test: a document the merge CAN carry opens normally editable and is not gated.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If the trigger list would gate a construct family that appears in ordinary legal documents (i.e. it would gate a large share of the corpus), stop — that is a signal the merge needs more work, not that the gate needs to be wider. Surface it to the owner.</trigger>
+    <trigger>If the owner has not reviewed the trigger list, the task is not complete. Do not ship a gate on an unreviewed list.</trigger>
+  </escalation>
+
+  <outputs>
+    <output type="code">src/client/shared/Spaarke.Compose.Components/src/widgets/ComposeWorkspace.tsx</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Compose/ComposeService.cs</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Api/ComposeEndpoints.cs</output>
+    <output type="doc">projects/spaarkeai-compose-r8/notes/capability-gate-triggers.md</output>
+    <output type="test">tests/integration/seam/Compose/</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion>The trigger list is derived from gate/prototype evidence, documented per trigger, and OWNER-REVIEWED (recorded).</criterion>
+    <criterion>A gated document opens read-only with a reason naming the SPECIFIC detected constructs.</criterion>
+    <criterion>"Edit a copy" produces a new SPE item with a uniquified filename, stamped `ComposeOrigin.Authored`.</criterion>
+    <criterion>The confirmation names the specific constructs that will be dropped, not a generic warning.</criterion>
+    <criterion>A test proves the ORIGINAL receives no write of any kind on this path — no save, no metadata update, no checkout.</criterion>
+    <criterion>NEGATIVE: a document the merge CAN carry opens normally editable and is not gated (asserted over the corpus).</criterion>
+    <criterion>NEGATIVE: no bespoke modal chrome — `SprkModal`/`ConfirmModal` only (ADR-050); semantic tokens only (ADR-021).</criterion>
+    <criterion>NEGATIVE: no third `ComposeOrigin` value was added.</criterion>
+    <criterion>NEGATIVE: no Graph type above the `SpeFileStore` facade (ADR-007).</criterion>
+    <criterion>The ADR-041 assessment for this confirmation is cited (per task 050).</criterion>
+    <criterion>Publish size reported; no new NuGet; no new HIGH CVE.</criterion>
+  </acceptance-criteria>
+</task>

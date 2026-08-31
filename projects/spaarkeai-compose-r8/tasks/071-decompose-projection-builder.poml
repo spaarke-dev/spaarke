@@ -1,0 +1,116 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="071" project="spaarkeai-compose-r8">
+  <metadata>
+    <title>FR-D01 — Decompose ComposeDocxProjectionBuilder.cs (3,085 lines) below 2,000 and DELETE its god-class waiver</title>
+    <phase>7 Track D — God-Class Removal</phase>
+    <gate>blocked-on-040</gate>
+    <status>pending</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Restructures the projector — the only coordinate system in the architecture. Every anchor and every merge comparison depends on it.</rigor-reason>
+    <model-tier>opus</model-tier>
+    <model-tier-reason>Capability-matched: the projection is invariant (3) — the ONLY coordinate system. A decomposition that changes projection output by even one block boundary silently invalidates anchors, the merge's unchanged-detection, and the gate's measurements at once. Byte-level output equivalence across a 3,000-line restructure is the property to preserve, and it is not what a passing test suite proves.</model-tier-reason>
+    <effort>xhigh</effort>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Compose spine; the merge in task 040 compares against this file's output.</parallel-reason>
+    <deps>040</deps>
+    <tags>bff-api, compose, refactor, testing</tags>
+    <estimated-effort>10 hours</estimated-effort>
+  </metadata>
+
+  <prompt>
+    `ComposeDocxProjectionBuilder.cs` is 3,085 lines and frozen by the ratchet. Bring it below 2,000 and DELETE
+    its waiver entry.
+
+    Natural seams: block projection, run projection (`ProjectRun` ~:2644), atom identification, table
+    projection, numbering, and part traversal.
+
+    The property that matters more than the line count: **projection output must be byte-for-byte
+    equivalent** before and after. The projection is the only coordinate system in this architecture —
+    anchors, the merge's unchanged-detection, and every gate measurement all resolve through it. A one-block
+    difference in output is not a refactor, it is a silent re-architecture.
+
+    Prove equivalence empirically over the corpus, not by argument.
+
+    ADR-010: internal collaborators, not DI registrations. Behavior-preserving only — defects found go to
+    their owning task as findings.
+  </prompt>
+
+  <role>SPAARKE backend developer. Expert in behavior-preserving refactoring and the Compose projection model. Follow ADR-010, ADR-049 and ADR-038.</role>
+
+  <goal>
+    `ComposeDocxProjectionBuilder.cs` is under 2,000 lines, its waiver is deleted, ArchTests are green, and
+    projection output over the whole corpus is provably unchanged.
+  </goal>
+
+  <context>
+    <background>
+      `ProjectRun` (~:2644) currently keeps only three booleans from `rPr` — that narrowness is a Track A
+      concern (tasks 040/041), not a Track D one. This task must NOT widen it; changing what the projection
+      captures while restructuring makes the equivalence proof impossible.
+    </background>
+    <relevant-files>
+      <file role="primary-edit">src/server/api/Sprk.Bff.Api/Services/Compose/ComposeDocxProjectionBuilder.cs</file>
+      <file role="primary-edit">tests/Spaarke.ArchTests/GodClassGuardTests.cs</file>
+      <file role="canonical-reference">.claude/patterns/testing/god-class-ratchet.md</file>
+      <file role="canonical-reference">tests/integration/seam/Compose/ComposeFidelityGateHarnessTests.cs</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="project">Projection output MUST be byte-for-byte equivalent before and after, proven EMPIRICALLY over the whole corpus (capture projections pre-refactor, compare post-refactor). Argument is not proof for this property.</constraint>
+    <constraint source="ADR-010">Internal collaborators or partial classes — NOT new DI registrations.</constraint>
+    <constraint source="god-class-ratchet">DELETE the waiver entry; do not re-baseline.</constraint>
+    <constraint source="project">Behavior-preserving ONLY. MUST NOT widen what `ProjectRun` captures — that is tasks 040/041's concern and doing it here destroys the equivalence proof.</constraint>
+    <constraint source="project">MUST NOT introduce a `body.Descendants&lt;Paragraph&gt;()` walk while restructuring part traversal — direct `w:body` children only; `w:txbxContent` / `mc:*` opaque.</constraint>
+    <constraint source="ADR-038">Existing tests pass unchanged. No DI-registration or ctor-null tests for new collaborators.</constraint>
+    <constraint source="project">`/conflict-check` before the PR; coordinate with the parallel god-class program.</constraint>
+    <constraint source="ADR-029">Report publish size. No new NuGet.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>projection model, behavior-preserving refactoring, god-class ratchet</topic>
+    <files>
+      <file>.claude/patterns/testing/god-class-ratchet.md</file>
+      <file>.claude/adr/ADR-010-di-minimalism.md</file>
+      <file>.claude/adr/ADR-049-compose-shadow-document.md</file>
+      <file>docs/architecture/COMPOSE-READ-REFERENCE-FIDELITY.md</file>
+      <file>projects/spaarkeai-compose-r8/spec.md</file>
+      <file>projects/spaarkeai-compose-r8/CLAUDE.md</file>
+    </files>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="0" name="Rigor declaration">Declare rigor FULL; load spec.md, CLAUDE.md, god-class-ratchet.md, ADR-010.</step>
+    <step order="1">BEFORE refactoring: capture the projection output for every corpus document and store it as the equivalence baseline.</step>
+    <step order="2">Map seams: block projection, run projection, atom identification, table projection, numbering, part traversal.</step>
+    <step order="3">Extract collaborators one seam at a time, re-running the equivalence comparison after EACH extraction.</step>
+    <step order="4">Verify DI registration count unchanged.</step>
+    <step order="5">Confirm under 2,000 lines; delete the waiver entry.</step>
+    <step order="6">Final equivalence run over the whole corpus; ArchTests, seam suite and fidelity gate green.</step>
+  </steps>
+
+  <escalation>
+    <trigger>Projection output differs for ANY corpus document after refactoring. Stop and reconcile — a difference here silently invalidates anchors, unchanged-detection and every gate number simultaneously.</trigger>
+    <trigger>If the file cannot reach 2,000 lines without a new DI registration or a behavior change, surface it under §6.5.</trigger>
+  </escalation>
+
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Compose/ComposeDocxProjectionBuilder.cs</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Compose/ (new collaborator files)</output>
+    <output type="test">tests/Spaarke.ArchTests/GodClassGuardTests.cs</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion>`ComposeDocxProjectionBuilder.cs` is under 2,000 lines.</criterion>
+    <criterion>Projection output is byte-for-byte identical before and after for EVERY corpus document — proven empirically, with the comparison recorded.</criterion>
+    <criterion>Its waiver entry is DELETED from `GodClassGuardTests.cs` — not re-baselined.</criterion>
+    <criterion>ArchTests, the Compose seam suite and the fidelity gate are green.</criterion>
+    <criterion>The DI registration count did not increase (ADR-010).</criterion>
+    <criterion>NEGATIVE: `ProjectRun`'s captured properties were NOT widened.</criterion>
+    <criterion>NEGATIVE: no `body.Descendants&lt;Paragraph&gt;()` walk was introduced (grep).</criterion>
+    <criterion>NEGATIVE: no new DI registration; no DI-registration or ctor-null tests added.</criterion>
+    <criterion>NEGATIVE: no defect was fixed silently inside the refactor.</criterion>
+    <criterion>`/conflict-check` run; publish size reported; no new NuGet; no new HIGH CVE.</criterion>
+  </acceptance-criteria>
+</task>

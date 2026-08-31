@@ -10,7 +10,7 @@
  *  - Label above (small caption; secondary neutral color)
  *  - Value below (primary neutral color)
  *  - Value is single-line with ellipsis on overflow (read mode)
- *  - `null` / `undefined` value renders as an em-dash "—"
+ *  - `null` / `undefined` / `''` value renders as an em-dash "—" (FR-11 parity with sibling renderers)
  *  - `required===true` renders a "*" marker beside the label
  *  - CSS `grid-column: span N` on root for FieldGrid integration
  *  - When `onSave` supplied: click-to-edit; save on blur or Enter; cancel on Escape;
@@ -114,7 +114,7 @@ const useTextFieldStyles = makeStyles({
 export const TextField: React.FC<ITextFieldProps> = ({ label, value, span, required, onSave, disabled }) => {
   const styles = useTextFieldStyles();
 
-  const displayValue = value === null || value === undefined ? EMPTY_VALUE_PLACEHOLDER : String(value);
+  const displayValue = value === null || value === undefined || value === '' ? EMPTY_VALUE_PLACEHOLDER : String(value);
   const editable = typeof onSave === 'function' && disabled !== true;
 
   // Edit-mode state
@@ -200,7 +200,12 @@ export const TextField: React.FC<ITextFieldProps> = ({ label, value, span, requi
         <div className={styles.editRow}>
           <Input
             appearance="filled-lighter"
-            size="small"
+            // v1.1.6: `medium`, NOT `small`. Fluent sizes the small variant at
+            // `fontSizeBase200` (12px) while the read-mode cell above uses
+            // `fontSizeBase300` (14px), so text visibly shrank the moment a
+            // field was clicked. Medium matches both the read state and the OOB
+            // Dataverse inputs beside the header.
+            size="medium"
             value={draft}
             onChange={(_, data) => setDraft(data.value)}
             onBlur={() => void commit()}

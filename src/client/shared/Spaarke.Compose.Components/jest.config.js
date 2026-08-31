@@ -6,9 +6,32 @@
 //      the widget, e.g. src/widgets/ComposeAiToolbar.test.tsx) — not a `__tests__/` dir.
 //   2. Coverage is NOT gated (ADR-038: coverage is observation, never a gate).
 //
+// ---------------------------------------------------------------------------
+// Sibling `@spaarke/*` resolution — the contract (r8 task 018, 2026-08-20)
+// ---------------------------------------------------------------------------
 // `@spaarke/*` runtime deps resolve via node_modules → their built `dist/` (produced by
 // scripts/Build-AllClientComponents.ps1 -Component SharedLibs). Type-only `@spaarke/*`
 // imports are erased by ts-jest and need no runtime resolution.
+//
+// `@spaarke/ui-components` is consumed as `dist/`, NOT mapped to its `src/` the way
+// `@spaarke/ai-widgets` is below. Measured 2026-08-20: mapping it to `src` moves resolution of its
+// OWN dependency graph into this package's node_modules, and 10 of its runtime deps are ones this
+// package does not (and should not) declare — d3-force, lexical, pdfjs-dist, react-window,
+// dompurify, diff, marked, @hello-pangea/dnd, @microsoft/applicationinsights-web, @spaarke/sdap-client.
+// The experiment failed with 72 `Cannot find module '@fluentui/react-icons'` errors. The dist route
+// keeps the package boundary honest; the cost is that CI must build the SharedLibs first
+// (`compose-client-gate` in .github/workflows/sdap-ci.yml does exactly that, in dependency order:
+// Spaarke.Auth → Spaarke.SdapClient → Spaarke.UI.Components → Spaarke.DocumentOperations).
+//
+// NEVER pass `{ virtual: true }` to a `jest.mock()` of an `@spaarke/*` specifier in this package.
+// `virtual: true` registers the specifier in jest's RESOLVER, which is shared by every suite a
+// worker runs — so one suite's virtual registration changes how a LATER suite resolves the same
+// specifier, and the failure is invisible to a single-suite run. Measured 2026-08-20: with the
+// SharedLibs dist present, 7 of the 8 suites that failed a full `--runInBand` package run were
+// exactly the 7 files carrying the flag, and every one of them passed when run alone. The flag
+// existed only as a workaround for the unbuilt dist that this gate now builds. The same rule was
+// already documented per-file for `@spaarke/ai-widgets/events` (see ComposeWorkspace.browse /
+// .search / .upload / .imports and hooks/usePendingRedline).
 module.exports = {
   preset: 'ts-jest',
   testEnvironment: 'jsdom',

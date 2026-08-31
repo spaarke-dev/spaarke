@@ -148,6 +148,7 @@ import { authenticatedFetch } from '@spaarke/auth';
 import { InsertionMark } from './marks/InsertionMark';
 import { DeletionMark } from './marks/DeletionMark';
 import { TrackChangesExtension, trackChangesPluginKey } from './marks/TrackChangesExtension';
+import { RedlineCueExtension, REDLINE_CUE_CLASS } from './marks/RedlineCueExtension';
 import { CommentAnchorMark } from './marks/CommentAnchorMark';
 import { QaHighlightExtension } from './marks/QaHighlightExtension';
 import { SelectedCommentExtension, selectedCommentPluginKey } from './marks/SelectedCommentExtension';
@@ -155,9 +156,18 @@ import {
   usePendingRedline,
   resolveTargetSpans,
   type MaterializeStatus,
+  type MaterializeOrigin,
   type ConfidenceBand,
   type PendingRedlineError,
+  type PendingRedlineStaleTarget,
+  type PendingRedlineLegacyProposal,
 } from './hooks/usePendingRedline';
+// FR-C01 (r8 task 051) — the anchor supply for AI edits. Both hooks shipped in R4 (tasks 040/041) and
+// were never given a production consumer: every `<ComposeAiToolbar>` mount below omitted them, so
+// `useBookmark` was permanently false, `targetParaId` was never sent, and EVERY AI edit fell through to
+// `resolveTargetSpans`' text search. Wiring them here is what makes the durable anchor real.
+import { useAiGenerateBookmark } from './hooks/useAiGenerateBookmark';
+import { useAiApplyValidation } from './hooks/useAiApplyValidation';
 import { useDocQaHighlight, type QaHighlightStatus } from './hooks/useDocQaHighlight';
 import { useComposeCommentThreads } from './hooks/useComposeCommentThreads';
 import { ComposeFindReplaceExtension } from './hooks/useComposeFindReplace';
@@ -212,11 +222,17 @@ import {
   collectBlocks,
   type BlockInfo,
 } from './importedRevisions';
+// Task 054 (FR-C03): the whole-document closed set — the live text with each paragraph's paraId
+// prefixed, walked from the SAME collectBlocks placement resolves against (project invariant 3).
+import { buildAnchoredDocumentText, type AnchoredDocumentText } from './composeAnchoredDocumentText';
 import { applyImportedCommentAnchors, groupImportedComments } from './importedComments';
 // ai-advanced-capabilities-agreements-r1 task 011 (spec FR-03) — the WS-4 CLIENT CITATION RESOLVER
 // mirroring `Services/Compose/CitationResolver.cs`. See that module's header for the reuse-first
 // justification (CLAUDE.md §11) for why this is a mirror, not a new BFF endpoint.
-import { resolveCitation } from './composeCitationResolver';
+// r8 task 055 — the paraId-vs-citation PRECEDENCE, shared with `usePendingRedline` (AI edits) and
+// `ComposeWorkspace.registerAiReviewComments` (whole-document review flags). It wraps
+// `resolveCitation` above, which is why this module no longer calls the resolver directly.
+import { resolveAnchorParaIds } from './composeAnchorResolution';
 import type {
   ParaIdMapEntry,
   ComposeServerProjection,
@@ -476,12 +492,42 @@ export interface ComposeEditorDocumentRef {
  * and MUST NOT be logged; `sources` are identifiers only.
  */
 export interface ComposeDraftPayload {
-  /** Text the draft targets for replacement; absent/empty for an insertion-style draft. */
+  /**
+   * LEGACY ONLY (r8 task 052) — prose the draft targeted for replacement. The four compose EDIT
+   * Actions no longer ask the model for this, so a payload carrying it and no anchor is a REPLAYED
+   * ledger entry written before that catalog change (`usePendingRedline.resolveLegacyReplayedSpans`,
+   * the bounded case task 053 owns). Retained on the type so replayed entries still parse — never
+   * emitted by a new edit, and never a placement channel when an anchor is present.
+   */
   target_text?: string;
   /** The drafted content to materialize into the editor (load-bearing single-edit field). */
   new_text?: string;
-  /** How the client resolves `target_text` (Compose vocabulary, e.g. `strict` / `insert`). */
+  /**
+   * LEGACY ONLY (r8 task 052) — RETIRED IN FULL, including `all`
+   * (notes/052-text-search-demotion-decisions.md §2). Retained on the type so replayed entries parse;
+   * it is NOT read by any placement path — the legacy leg is pinned to `strict`, which can only refuse
+   * where `first`/`all` would have guessed.
+   */
   match_mode?: string;
+  /**
+   * FR-C01/FR-C03 (spaarkeai-compose-r8 task 051) — the DETERMINISTIC anchor: the exact `w14:paraId`
+   * this edit targets, captured from the user's selection at dispatch time or returned by the model
+   * from the enumerated closed set. When present it OUTRANKS `target_text`, which is never read.
+   * Mirrors the server envelope's `target_para_id` (`ProposedEdit`, `ComposeEditModels.cs`).
+   *
+   * NULLABLE ON THE WIRE (r8 task 053b): the Action output schemas declare this `["string","null"]`
+   * and list it in `required`, because Azure OpenAI Structured Outputs demands the KEY be present. So
+   * "I could not identify the paragraph" arrives as an explicit `null` — a state the type used to be
+   * unable to express, which is exactly why `payload?.target_para_id` truthiness conflated it with an
+   * ABSENT key (a genuine insertion consumer). See `usePendingRedline` / `classifyUnidentifiedTarget`.
+   */
+  target_para_id?: string | null;
+  /**
+   * FR-C02 (task 051) — the target named as a legal citation ("clause 4.2", "4.2(b)(iii)"), resolved
+   * through the numbering engine's `paraIdMap` by the same `CitationResolver` mirror the advisory-comment
+   * path already uses. Also outranks `target_text`. Never a text search.
+   */
+  target_ref?: string;
   /** Optional model-supplied rationale (provenance/explanation). */
   rationale?: string;
   /** Citations / source ids the draft was grounded on (ids only). */
@@ -503,20 +549,50 @@ export interface ComposeDraftPayload {
 
 /** DEF-11: one targeted edit in a whole-document revision change list. Shape = the single-edit redline payload. */
 export interface ComposeDraftEdit {
-  /** Exact substring to replace — VERBATIM from the document so the editor can locate it. */
-  target_text: string;
+  /**
+   * Exact substring to replace — VERBATIM from the document so the editor can locate it. OPTIONAL since
+   * task 051: an edit that carries {@link target_para_id} or {@link target_ref} names its target
+   * deterministically and needs no prose to search for.
+   */
+  target_text?: string;
   /** The proposed replacement clause language, inserted as a pending track-change. */
   new_text: string;
-  /** How to locate `target_text`: `strict` (default) | `first` | `all`. */
+  /** LEGACY ONLY (r8 task 052) — retired; not read by any placement path. See ComposeDraftPayload. */
   match_mode?: string;
+  /**
+   * FR-C01/C03 (task 051) — the exact `w14:paraId` this change targets. Outranks `target_text`.
+   * NULLABLE on the wire for the same Structured-Outputs reason as {@link ComposeDraftPayload.target_para_id}
+   * (r8 task 053b): `compose-revise-document`'s `edits[]` REQUIRES the key and permits a null value.
+   */
+  target_para_id?: string | null;
+  /** FR-C02 (task 051) — this change's target named as a legal citation. Outranks `target_text`. */
+  target_ref?: string;
   /** Optional per-change rationale. */
   rationale?: string;
 }
 
 /** DEF-11: one anchored review flag in a whole-document revision (no rewrite). */
 export interface ComposeDraftComment {
-  /** Exact substring the flag is anchored to. */
-  target_text: string;
+  /**
+   * Exact substring the flag is anchored to. OPTIONAL since r8 task 055, mirroring
+   * {@link ComposeDraftEdit.target_text}: a flag that names its paragraph deterministically needs no
+   * prose to search for — and, per task 054's L-1 finding, may not be ABLE to quote any (hard breaks
+   * collapse in `collectBlocks().text`, so a model-quoted excerpt can fail to exist verbatim).
+   */
+  target_text?: string;
+  /**
+   * FR-C03 (r8 tasks 054/055) — the exact `w14:paraId` this flag targets, returned by the model from
+   * the enumerated closed set. Outranks {@link target_text}, which is then only the fuzzy fallback
+   * carried onto `AnchoredAnnotationAnchor.textPattern` for a Word-round-tripped document.
+   *
+   * NULLABLE on the wire (r8 task 053b). Unlike an EDIT, a null here is BENIGN and needs no
+   * discrimination: the schema itself says a null flag "hangs on target_text within the document (an
+   * ANNOTATION anchor, not an edit placement — the role ADR-049 I-7 leaves intact)", which is exactly
+   * what `registerAiReviewComments` already does with a falsy value.
+   */
+  target_para_id?: string | null;
+  /** FR-C03 (r8 tasks 054/055) — this flag's target named as a legal citation. Also outranks prose. */
+  target_ref?: string;
   /** The reviewer flag / comment body. */
   comment: string;
 }
@@ -525,10 +601,29 @@ export interface ComposeDraftComment {
  * Provenance stamp accompanying a materialized draft — all Tier 1 identifiers.
  * `ledgerRef` is the addressable `{bindingId}@t{n}` key of the stored output.
  */
+/**
+ * Re-exported so a host that constructs a {@link ComposeDraftProvenance} can name the value it is
+ * declaring without reaching into the hook module. The type itself is defined next to the gate that
+ * consumes it (`./hooks/usePendingRedline`).
+ */
+export type { MaterializeOrigin };
+
 export interface ComposeDraftProvenance {
   ledgerRef: string;
   bindingId: string;
   turn: number;
+  /**
+   * FR-C05 residual (r8 task 052b) — whether this materialize is driven by the dispatch that PRODUCED
+   * the entry (`'live'`) or is a re-materialize from durable ledger state (`'replay'`). It decides
+   * whether the anchored paragraph as it reads right now may be recorded as the CAPTURE-TIME text for
+   * the stale-target check.
+   *
+   * Optional on the wire, FAIL-CLOSED in effect: `usePendingRedline` reads an absent value as
+   * `'replay'`, so a caller that does not declare freshness cannot be granted it. The worst an
+   * omission costs is one confirmation; the worst a wrong `'live'` costs is the user's newer wording,
+   * overwritten silently. See {@link MaterializeOrigin}.
+   */
+  origin?: MaterializeOrigin;
 }
 
 export interface ComposeEditorProps {
@@ -655,6 +750,26 @@ export interface ComposeEditorProps {
   onRedlineErrorChange?: (error: PendingRedlineError | null) => void;
 
   /**
+   * FR-C05 (spaarkeai-compose-r8 task 052) — surfaces the "this clause changed since the suggestion —
+   * apply anyway?" question UP to the host, which renders it as a `ConfirmModal` (ADR-050) and — the
+   * load-bearing half — writes the DURABLE resolution via the FR-17 supersession seam so a refresh
+   * cannot re-ask (task-050 assessment §4.4 O-2/O-3). Null clears it. The two answers route back via
+   * {@link ComposeEditorHandle.applyStaleRedlineAnyway} / {@link ComposeEditorHandle.dismissStaleRedline}.
+   */
+  onRedlineStaleTargetChange?: (stale: PendingRedlineStaleTarget | null) => void;
+
+  /**
+   * FR-C06 (spaarkeai-compose-r8 task 053) — surfaces the "is this the right place?" question for a
+   * REPLAYED/LEGACY anchorless suggestion UP to the host, which renders it as a `ConfirmModal`
+   * (ADR-050) and writes the DURABLE resolution via the same FR-17 supersession seam the stale
+   * question uses (O-2/O-3/O-5). Null clears it. NOTHING is in the document while it is non-null —
+   * this is a PROPOSAL, and the bounded fallback that produced it has no way to place anything on its
+   * own. The two answers route back via {@link ComposeEditorHandle.applyLegacyRedlineProposal} /
+   * {@link ComposeEditorHandle.dismissLegacyRedlineProposal}.
+   */
+  onRedlineLegacyProposalChange?: (proposal: PendingRedlineLegacyProposal | null) => void;
+
+  /**
    * Called with the server projection's fidelity-warning array after each DOCX mount (task 013:
    * formerly mammoth's per-conversion warnings; now `projection.warnings` + unresolved-revision
    * notices). The host can surface a "this document was simplified on load" banner (deferred to R2
@@ -692,6 +807,9 @@ export interface ComposeEditorProps {
   onSave?: (mode?: ComposeSaveMode) => void;
   /** True when Save should be enabled (unsaved edit OR unpersisted transient draft). */
   canSave?: boolean;
+  /** FR-S09 item 3 (r8 task 016): why Save is unavailable — forwarded verbatim to
+   *  ComposeFormatToolbar, which renders it as the disabled button's tooltip. */
+  saveDisabledReason?: string;
   /** True while a save is in flight. */
   isSaving?: boolean;
   /** FR-01/FR-03 (task 020/040): forwarded to ComposeFormatToolbar's Save dropdown Auto Save toggle.
@@ -822,6 +940,20 @@ export interface AdvisoryCommentInput {
    * metadata parameter) so the right-rail gutter card can render a risk badge + citation. Structural
    * mirror of `ComposeAdvisoryCommentItem`'s own optional fields (`@spaarke/ai-widgets`).
    */
+  /**
+   * r8 task 055 (FR-C03) — the DETERMINISTIC anchor, checked ABOVE {@link sectionRef}: the exact
+   * `w14:paraId` this finding targets. It IS the address, so it needs no citation parse and no
+   * reference map. Additive: no caller supplies it today, so every shipped NDA-REVIEW placement is
+   * unchanged.
+   *
+   * UAT-21 applies to THIS field and not to `sectionRef`, and the asymmetry is deliberate. A
+   * `sectionRef` that fails to resolve falls through to the legacy text leg — that fixed
+   * deterministic-then-legacy ordering is shipped behaviour (agreements-r1 task 011) and stays. A
+   * `paraId` that fails to resolve REFUSES: it named a paragraph exactly, so searching for prose
+   * instead would re-introduce the wrong-occurrence risk for precisely the finding that had already
+   * removed it. Same rule as the AI-edit path's `resolveAnchoredSpans`.
+   */
+  paraId?: string;
   /** Section/clause reference from the NDA-REVIEW output (e.g. "3.2"). */
   sectionRef?: string;
   /** Coarse qualitative risk signal (NEVER a numeric score, per ADR-039). */
@@ -891,8 +1023,14 @@ export interface ComposeEditorHandle {
    * task 038 (zero-error guardrails): commit the batch returned by the most recent
    * {@link serializeOperationLog} AFTER the save POST confirmed (HTTP 200). Drops exactly that batch from
    * the op-log while PRESERVING any edits made during the in-flight save, then recomputes the dirty flag
-   * from whatever remains. The host MUST call this only on a 200 for a save that sent an op-log; a failed
-   * save never calls it, so the op-log + dirty flag survive for a retry. No-op if the editor is unmounted.
+   * from whatever remains. The host MUST call this only on a confirmed successful save; a failed save
+   * never calls it, so the op-log + dirty flag survive for a retry. No-op if the editor is unmounted.
+   *
+   * FR-S03 (spaarkeai-compose-r8 task 012): this is now the SINGLE dirty-clearing site on the save
+   * path — for EVERY save shape, including the born-in-editor ContentModel saves that previously
+   * cleared the flag at build time. The recomputed flag is dirty when either the op-log still holds
+   * entries past the committed batch OR the document revision moved past the capture point (an edit
+   * the op-log cannot represent, typed while the save was in flight).
    */
   commitSaved(): void;
 
@@ -904,6 +1042,26 @@ export interface ComposeEditorHandle {
   clearRedlineError(): void;
 
   /**
+   * FR-C05 (task 052) — "apply anyway": place the suggestion(s) held back by the stale-target question.
+   * The host MUST also write the durable supersession; this only resolves the in-editor placement.
+   */
+  applyStaleRedlineAnyway(): void;
+
+  /** FR-C05 (task 052) — "skip this suggestion": discard the held-back suggestion(s), placing nothing. */
+  dismissStaleRedline(): void;
+
+  /**
+   * FR-C06 (task 053) — "yes, place it there": confirm the proposed location for the replayed/legacy
+   * anchorless suggestion(s). This is the ONLY route from a prose match to marks in the document; the
+   * bounded fallback (`hooks/anchorlessReplayFallback.ts`) has no `applied` outcome of its own. The
+   * host MUST also write the durable supersession, exactly as for the stale question.
+   */
+  applyLegacyRedlineProposal(): void;
+
+  /** FR-C06 (task 053) — "no, skip it": discard the proposed suggestion(s), placing nothing. */
+  dismissLegacyRedlineProposal(): void;
+
+  /**
    * C2 fix (UAT 2026-07-20): the ordered LOAD-TIME paraId map ({@link ComposeBaselineParaId}[]) the host
    * sends on save so the server can stamp minted ids physically onto the retained-original baseline's
    * id-less paragraphs before the synthesizer resolves. Read-only (no dirty-flag side effect) — sourced
@@ -913,9 +1071,32 @@ export interface ComposeEditorHandle {
   getBaselineParaIdMap(): ComposeBaselineParaId[];
 
   /**
+   * Task 054 (FR-C03): the LIVE document text with every id-bearing paragraph prefixed `[PARAID] `,
+   * plus the closed set of those ids in document order. Read-only, no dirty-flag side effect.
+   *
+   * This is what a WHOLE-DOCUMENT AI pass (`compose-revise-document`) sends as its operand, so the
+   * model can target a paragraph by copying an identifier it can see beside the content instead of
+   * quoting prose back. It must be read at DISPATCH time, not cached: the set has to describe the
+   * document as it is now, including paragraphs typed since load — an incomplete "closed" set would
+   * get the model refused on ids that genuinely exist.
+   *
+   * Sourced from the SAME block walk placement resolves against (`collectBlocks`), so the set the
+   * model chooses from and the set the redline resolves into cannot diverge (project invariant 3).
+   * `paraIds` is empty for a document whose paragraphs carry no stamped ids; the caller then omits
+   * the annotated text rather than presenting an id-free document as if it carried a closed set.
+   */
+  getAnchoredDocumentText(): AnchoredDocumentText;
+
+  /**
    * R3 FR-01a (task 027): the full paraId-keyed {@link ComposeContentModel} for a BORN-IN-EDITOR save
    * (AI-drafted / blank / browse-local). The host sends it to create-on-save; the server RENDERS the
-   * high-fidelity `.docx` (styles + style-linked multi-level numbering + tables). Resets the dirty flag.
+   * high-fidelity `.docx` (styles + style-linked multi-level numbering + tables).
+   *
+   * FR-S03 (spaarkeai-compose-r8 task 012): does NOT reset the dirty flag — it WATERMARKS (op-log
+   * high-water mark + doc revision), exactly as {@link buildImportedContentModel} does. The flag is
+   * cleared only by {@link commitSaved}, after a confirmed successful save, so a save that fails
+   * leaves every recovery affordance (Save button, Ctrl+S, `beforeunload`, unmount flush, toolbar
+   * label) armed. It previously cleared here, before the POST was issued.
    */
   buildContentModel(): ComposeContentModel;
 
@@ -1045,12 +1226,14 @@ export interface ComposeEditorHandle {
    * FR-16 pending track-change materialization (spaarkeai-compose-r2 task 033).
    * Render the stored `compose`-disposition draft as a PENDING redline using the
    * FR-15 marks (task 031), tagged with `{bindingId}@t{n}` provenance, with inline
-   * accept/reject. A `target_text` produces an insertion/deletion pair (resolved by
-   * the payload's `match_mode`); an insertion-style draft produces a pending
-   * insertion at the cursor. Idempotent per `ledgerRef`; a newer output for the same
-   * binding supersedes the prior one (FR-17 alignment). Returns the outcome so the
-   * host can distinguish applied vs an unresolved (`ambiguous`/`not_found`) target —
-   * the FR-19 "do not guess" rule. The true ledger-supersession WRITE is FR-17/034.
+   * accept/reject. An ANCHORED draft (`target_para_id`/`target_ref`) resolves to its
+   * paragraph and then diffs LOCALLY inside it, so only the changed words are struck
+   * (r8 task 052, FR-C05); a targetless draft produces a pending insertion at the
+   * cursor. Idempotent per `ledgerRef`; a newer output for the same binding supersedes
+   * the prior one (FR-17 alignment). Returns the outcome so the host can distinguish
+   * applied vs an unresolved (`ambiguous` / `not_found` / `target_deleted`) target and
+   * vs a `stale` one held back for confirmation — the FR-19 "do not guess" rule. The
+   * true ledger-supersession WRITE is FR-17/034.
    */
   materializePendingRedline(draft: ComposeDraftPayload, provenance: ComposeDraftProvenance): MaterializeStatus;
 
@@ -1258,23 +1441,33 @@ const useStyles = makeStyles({
       // The deleted text is a non-editable widget reinserted for display only.
       userSelect: 'none',
     },
-    // U1 R2 (UAT 2026-07-20): a small lightbulb at the FRONT of each pending redline signals "click me
-    // for the rationale". A redline renders as a deletion span (struck original) immediately followed by
-    // an insertion span (new text) — the rule below puts ONE bulb on whichever span comes first and
-    // SUPPRESSES the duplicate on the insertion half of a deletion→insertion pair, so a pair shows a
-    // single cue. Semantic token color; no text-decoration bleed onto the glyph.
-    '& .compose-mark-insertion::before, & .compose-mark-deletion::before': {
-      content: '"\\1F4A1"', // 💡
-      fontSize: '0.8em',
-      marginRight: '2px',
+    // U1 R2 (UAT 2026-07-20): a lightbulb at the FRONT of each pending redline signals "click me for
+    // the rationale". REWORKED for UAT 2026-08-26 item 5 — the cue is now a ProseMirror WIDGET
+    // DECORATION (marks/RedlineCueExtension.ts), not a `::before` pseudo-element on the mark spans.
+    //
+    // WHY THE PSEUDO-ELEMENT HAD TO GO (all three reported in one UAT round):
+    //   • `.compose-mark-deletion` above sets `line-through`, making it a DECORATING BOX. Per CSS Text
+    //     Decoration L3 §2.2 that line paints across every in-flow inline DESCENDANT and a descendant
+    //     CANNOT switch it off — so the old `textDecorationLine: 'none'` was a silent no-op and the
+    //     bulb rendered STRUCK THROUGH, reading as deleted content.
+    //   • `0.8em` against body text is ~9-11px — the user reported it as hidden.
+    //   • The `.compose-mark-deletion + .compose-mark-insertion::before` de-duplication only holds when
+    //     the insertion is ONE span and is the deletion's immediate sibling. FR-15 inline markup breaks
+    //     both (a `<strong>` splits the insertion into several spans; a LEADING `<strong>` stops `+`
+    //     matching at all) → up to THREE bulbs. Formatted AI legal edits take that path by design.
+    // A widget is a SIBLING of the mark spans, so it is structurally outside every decorating box —
+    // it cannot inherit strikethrough no matter how these rules evolve.
+    [`& .${REDLINE_CUE_CLASS}`]: {
+      // LOAD-BEARING: an ATOMIC inline-level box. Text decorations are not propagated into one (L3
+      // §2.2), which is what actually prevents the strikethrough — `text-decoration: none` does not.
+      display: 'inline-block',
+      fontSize: tokens.fontSizeBase400, // was '0.8em' — too small to notice (UAT 2026-08-26)
+      lineHeight: '1', // keep the larger glyph from inflating the document's line boxes
+      marginRight: tokens.spacingHorizontalXXS, // was a hard-coded '2px'
       color: tokens.colorNeutralForeground3,
-      textDecorationLine: 'none',
       cursor: 'pointer',
       userSelect: 'none',
-      verticalAlign: 'baseline',
-    },
-    '& .compose-mark-deletion + .compose-mark-insertion::before': {
-      content: 'none', // the pair's cue already sits on the leading deletion span
+      verticalAlign: 'text-bottom',
     },
     // UAT round-5 #5 — the BASE advisory comment anchor is LIGHT GRAY; it turns YELLOW only when its
     // thread is selected (the `compose-mark-comment-anchor-selected` view decoration below, painted by
@@ -1316,6 +1509,23 @@ const useStyles = makeStyles({
       display: 'inline-block',
       padding: `0 ${tokens.spacingHorizontalXXS}`,
     },
+    // Task 048: RENDERABLE atoms (tab, symbol) — content, not placeholders. They are atoms so the mapper can
+    // recognize them on save, which is what stopped tabs and symbol glyphs being flattened; they were never
+    // meant to LOOK like anything new. Without this reset the `.compose-atom` chrome above would put a
+    // dashed bordered box around every tab and render every § as an italic chip — a visible regression
+    // introduced by a fidelity fix. Everything here is a reset to the surrounding text's own appearance;
+    // no new color is invented, so ADR-021's semantic-token rule is satisfied by having no color at all.
+    '& .compose-atom-renderable': {
+      color: 'inherit',
+      backgroundColor: 'transparent',
+      border: 'none',
+      borderRadius: 0,
+      fontStyle: 'inherit',
+      padding: 0,
+      // Selectable as a whole node (that is what makes it deletable), but never a text-editing target.
+      userSelect: 'none',
+    },
+    // The selected-node outline still applies — a user who selects a tab should see that they have.
     '& .ProseMirror-selectednode.compose-atom': {
       outlineWidth: '2px',
       outlineStyle: 'solid',
@@ -1814,6 +2024,25 @@ function resolveAdvisoryAnchorSpan(editor: Editor, targetText: string): Advisory
 }
 
 /**
+ * The outcome of the deterministic advisory-anchor leg.
+ *
+ * `null` means "no deterministic answer — use the legacy text leg", which covers BOTH "this finding
+ * carried no deterministic anchor at all" and the shipped `sectionRef` fall-through. A
+ * `{ span: null, kind }` is a REFUSAL, reachable only when the finding supplied an explicit `paraId`
+ * (UAT-21 — see {@link AdvisoryCommentInput.paraId} for why the two anchors differ here).
+ */
+type DeterministicAnchorOutcome =
+  | { span: { from: number; to: number }; kind?: undefined }
+  | { span: null; kind: 'not_found' | 'ambiguous' }
+  | null;
+
+/** Ordinal-insensitive paraId compare — the map and the document agree in practice, but producers
+ *  vary in casing and an exact compare would silently fail to match. */
+function sameBlockParaId(blockParaId: string | undefined, target: string): boolean {
+  return typeof blockParaId === 'string' && blockParaId.toUpperCase() === target.toUpperCase();
+}
+
+/**
  * ai-advanced-capabilities-agreements-r1 task 011 (spec FR-03) — the DETERMINISTIC advisory-anchor
  * path. Resolves a finding's `sectionRef` ("Section 4.2" / "4.2(b)(iii)" / "Sections 4–7") against the
  * WS-4 `paraIdMap` (`computedNumber`/`listPath`, already on the Load response — see
@@ -1828,29 +2057,47 @@ function resolveAdvisoryAnchorSpan(editor: Editor, targetText: string): Advisory
  * `matches` and `collectBlocks`'s doc-order walk preserve document order, so `matches[0]`/`matches[length-1]`
  * are the range's true first/last clauses).
  *
- * Returns `null` — never a guess — when `sectionRef` is absent, the `paraIdMap` prop is missing/empty
- * (pre-WS-4 caller or a response predating the reference layer), the citation is unparseable, it
- * resolves to zero paragraphs, or a resolved paraId is no longer present in the live document (map/doc
- * drift). The caller falls through to {@link resolveAdvisoryAnchorSpan} (legacy text/position
- * resolution) in every one of those cases — the FIXED fallback order this task's constraints require
- * (deterministic first; legacy ONLY when sectionRef is absent/unresolvable; ADR-049 — no text-search
- * placement when a deterministic paraId resolution exists).
+ * Returns `null` — never a guess — when NEITHER anchor is present, or when a `sectionRef`-ONLY
+ * finding fails to resolve for any reason (the `paraIdMap` prop is missing/empty on a pre-WS-4
+ * caller, the citation is unparseable, it resolves to zero paragraphs, or a resolved paraId is no
+ * longer in the live document). The caller falls through to {@link resolveAdvisoryAnchorSpan}
+ * (legacy text/position resolution) in every one of those cases — the FIXED fallback order
+ * agreements-r1 task 011 established (deterministic first; legacy ONLY when the citation is
+ * absent/unresolvable; ADR-049 — no text-search placement when a deterministic paraId resolution
+ * exists).
+ *
+ * r8 task 055 — TWO changes, both additive:
+ *  - the paraId-vs-citation PRECEDENCE now comes from `resolveAnchorParaIds`, the module the AI-edit
+ *    path and the whole-document review-flag path also use, so it cannot drift between them;
+ *  - a finding carrying an explicit `paraId` REFUSES on failure instead of falling through
+ *    (`{ span: null, kind }`) — see {@link AdvisoryCommentInput.paraId} for the asymmetry rationale.
+ *    No caller supplies `paraId` today, so the shipped `sectionRef` behaviour is byte-identical.
  */
 function resolveDeterministicAnchorSpan(
   blocks: readonly BlockInfo[],
-  sectionRef: string | undefined,
+  anchor: { paraId?: string; sectionRef?: string },
   referenceMap: readonly ParaIdMapEntry[] | undefined
-): { from: number; to: number } | null {
-  if (!sectionRef || !referenceMap || referenceMap.length === 0) return null;
+): DeterministicAnchorOutcome {
+  // An explicit paraId is what makes a failure a REFUSAL rather than a fall-through.
+  const hasParaId = (anchor.paraId ?? '').trim().length > 0;
+  const resolution = resolveAnchorParaIds({ paraId: anchor.paraId, ref: anchor.sectionRef }, referenceMap);
 
-  const resolution = resolveCitation(sectionRef, referenceMap);
-  if (resolution.matches.length === 0) return null;
+  if (resolution.kind === 'none') return null;
+  if (resolution.kind !== 'resolved') {
+    return hasParaId ? { span: null, kind: resolution.kind } : null;
+  }
 
-  const firstBlock = blocks.find(b => b.paraId === resolution.matches[0].paraId);
-  const lastBlock = blocks.find(b => b.paraId === resolution.matches[resolution.matches.length - 1].paraId);
-  if (!firstBlock || !lastBlock || lastBlock.to <= firstBlock.from) return null;
+  // A RANGE citation resolves to MULTIPLE paragraphs; anchor the single thread across the full span,
+  // from the FIRST matched paragraph's start to the LAST matched paragraph's end (both
+  // `resolveCitation` and `collectBlocks` walk in document order, so first/last are the true bounds).
+  const ids = resolution.paraIds;
+  const firstBlock = blocks.find(b => sameBlockParaId(b.paraId, ids[0]));
+  const lastBlock = blocks.find(b => sameBlockParaId(b.paraId, ids[ids.length - 1]));
+  if (!firstBlock || !lastBlock || lastBlock.to <= firstBlock.from) {
+    return hasParaId ? { span: null, kind: 'not_found' } : null;
+  }
 
-  return { from: firstBlock.from, to: lastBlock.to };
+  return { span: { from: firstBlock.from, to: lastBlock.to } };
 }
 
 // ---------------------------------------------------------------------------
@@ -1890,6 +2137,8 @@ export const ComposeEditor = React.forwardRef<ComposeEditorHandle, ComposeEditor
       sessionId = '',
       onDirtyChange,
       onRedlineErrorChange,
+      onRedlineStaleTargetChange,
+      onRedlineLegacyProposalChange,
       onImportWarnings,
       enqueueComposeAction,
       onOpenInWord,
@@ -1897,6 +2146,7 @@ export const ComposeEditor = React.forwardRef<ComposeEditorHandle, ComposeEditor
       wordActionsDisabled,
       onSave,
       canSave,
+      saveDisabledReason,
       isSaving,
       autoSaveEnabled,
       onAutoSaveToggle,
@@ -1918,6 +2168,22 @@ export const ComposeEditor = React.forwardRef<ComposeEditorHandle, ComposeEditor
 
     const [isImporting, setIsImporting] = React.useState<boolean>(false);
     const dirtyRef = React.useRef<boolean>(false);
+
+    // FR-S03 (r8 task 012) — the save-capture watermark that makes "clear the dirty flag" honest.
+    //
+    // `docRevisionRef` counts EVERY doc-changing update (incremented in `onUpdate`, outside the
+    // dirty-flag guard, so it advances on the 2nd and 100th edit too). `capturedRevisionRef` records
+    // the revision the save payload was captured at — set by `serializeOperationLog`,
+    // `buildContentModel` and `buildImportedContentModel`, the three capture methods.
+    //
+    // Why a counter and not just the op-log's size: a deferred / unrepresentable / refused-atom
+    // transaction appends NO op-log entry (`RebasedOperationLog.recordTransaction` returns early),
+    // so an edit of that class typed DURING an in-flight save is invisible to `opLog.size > 0`. On
+    // the ContentModel paths the whole document is captured, so such an edit is real work that the
+    // in-flight save did NOT carry — clearing dirty on it would silently discard it. The revision
+    // comparison sees it; the op-log count cannot. Both are consulted in `commitSaved`.
+    const docRevisionRef = React.useRef<number>(0);
+    const capturedRevisionRef = React.useRef<number | null>(null);
 
     // task 038 (spaarkeai-compose-r4 zero-error guardrails): a NON-BLOCKING, dismissible sticky notice
     // surfaced when a deferred/unrepresentable/refused step is seen (most importantly formatted or linked
@@ -2215,6 +2481,11 @@ export const ComposeEditor = React.forwardRef<ComposeEditorHandle, ComposeEditor
         // COMPOSE_R4_STEP_INTERCEPTOR registration; supplies the classifier callbacks + feeds
         // the log `serializeOperationLog()` sends on save). Read-only step→operation capture.
         trackChangesExtension, // Item 4 — live Track Changes decoration overlay (additive, view-only)
+        RedlineCueExtension, // UAT 2026-08-26 item 5 — the AI-rationale lightbulb, as a widget
+        // decoration rather than a `::before` on the mark spans. Unconfigured and view-only: it
+        // observes insertion/deletion marks and never modifies the document. Deliberately NOT folded
+        // into trackChangesExtension, which goes dark when the Track Changes toggle is off — an AI
+        // rationale must stay reachable regardless of that toggle.
       ],
       content: '<p></p>',
       // editorProps to apply Fluent v9 inherited foreground; semantic-token
@@ -2320,6 +2591,10 @@ export const ComposeEditor = React.forwardRef<ComposeEditorHandle, ComposeEditor
         },
       },
       onUpdate: () => {
+        // FR-S03 (r8 task 012): OUTSIDE the dirty guard — the revision must advance on every edit,
+        // including edits made while the flag is already true (that is the mid-flight-edit case
+        // `commitSaved` has to detect).
+        docRevisionRef.current += 1;
         if (!dirtyRef.current) {
           dirtyRef.current = true;
           onDirtyChange?.(true);
@@ -2472,7 +2747,13 @@ export const ComposeEditor = React.forwardRef<ComposeEditorHandle, ComposeEditor
 
     // ----- FR-16 pending-redline materialization (task 033) ---------------
     // Owns materialize-from-ledger → FR-15 marks + accept/reject + supersession.
-    const redline = usePendingRedline(editor);
+    // Task 051 (FR-C02): the paraId map is what a citation-anchored edit ("clause 4.2") resolves
+    // through — the SAME map `placeAdvisoryComments` already uses for `sectionRef`. One coordinate
+    // system for both anchor consumers (project invariant 3).
+    // Task 052 (FR-C05): `proposalScope` is the DOCUMENT session id — the scope the stale-target
+    // proposal baseline is recorded under, so two documents' suggestions can never compare against
+    // each other. Absent session ⇒ the stale check is inert (fail-open to pre-052 behaviour).
+    const redline = usePendingRedline(editor, paraIdMap, { proposalScope: sessionId ?? undefined });
 
     // Banner consolidation (2026-08-19): surface the redline anchor-failure notice up to the host so
     // it renders in the single ComposeBannerStack rail (one location, MessageBar styling) instead of a
@@ -2480,6 +2761,20 @@ export const ComposeEditor = React.forwardRef<ComposeEditorHandle, ComposeEditor
     React.useEffect(() => {
       onRedlineErrorChange?.(redline.error);
     }, [redline.error, onRedlineErrorChange]);
+
+    // FR-C05 (task 052): same pattern for the stale-target question — the editor DETECTS it, the host
+    // ASKS it (ConfirmModal) and RESOLVES it durably (FR-17 supersession).
+    React.useEffect(() => {
+      onRedlineStaleTargetChange?.(redline.staleTarget);
+    }, [redline.staleTarget, onRedlineStaleTargetChange]);
+
+    // FR-C06 (task 053): same pattern again for the anchorless-replay PROPOSAL — the editor's bounded
+    // fallback DETECTS a candidate location, the host ASKS (ConfirmModal) and RESOLVES it durably.
+    // The editor deliberately does not render either question itself: one confirmation surface, in
+    // the host, is what keeps "nothing is placed until a human says yes" a single auditable place.
+    React.useEffect(() => {
+      onRedlineLegacyProposalChange?.(redline.legacyProposal);
+    }, [redline.legacyProposal, onRedlineLegacyProposalChange]);
 
     // ----- FR-14 (task 031) — anti-rubber-stamp accept-all gating ----------
     // "Accept all" MUST NOT include low-band edits without an explicit confirmation step (design
@@ -2502,6 +2797,37 @@ export const ComposeEditor = React.forwardRef<ComposeEditorHandle, ComposeEditor
       // The deliberate SECOND action (design §6.2) — never bundled into handleAcceptAllExcludingLowBand.
       for (const p of lowBandPending) redline.accept(p.ledgerRef);
     }, [lowBandPending, redline]);
+
+    // ----- FR-C01 anchor supply (r8 task 051) — the two R4 controllers, finally given a consumer ------
+    //
+    // `useAiGenerateBookmark` (R4 task 040) drops a request-scoped bookmark at the live selection and
+    // REBASES it through every concurrent user edit with the same ProseMirror `Mapping` primitive the
+    // op-log uses (`RebasedOperationLog.recordTransaction`), then resolves the durable `w14:paraId` via
+    // `resolveRunAnchor`. `useAiApplyValidation` (task 041) validates each returned operation's anchor
+    // against the LIVE document before applying it, and surfaces anything unvalidatable for review
+    // rather than placing it.
+    //
+    // Both were built, tested and exported in R4 — and never mounted. The consequence was not a
+    // degraded anchor but NO anchor: `useBookmark` in ComposeAiToolbar is `!!aiGenerateBookmark && …`,
+    // so with the prop absent it was permanently false, `targetParaId` never reached the model, and the
+    // apply path text-searched for the model's echoed wording every single time. That search is what
+    // produced the dead-end R7 users saw as "its wording differs slightly from this document" — copy
+    // that task 053 (FR-C07) deleted along with the state it described. Historical note only: the
+    // banner no longer has that branch, and no path renders that sentence (see
+    // `projects/spaarkeai-compose-r8/notes/wording-differs-elimination-trace.md`).
+    //
+    // Invariant (6) — ONE edit-capture mechanism — is satisfied by construction here, not by a parallel
+    // rebaser: the bookmark rebases on the editor's own Mapping, and `applyValidatedComposeOperation`
+    // applies through a normal TipTap `chain()` on this SAME editor, so the step interceptor captures
+    // it into the SAME operation log the user's own keystrokes flow through.
+    //
+    // The reanchor options (`reanchor`/`documentSpeId`/`driveId`/`tenantId`) are deliberately NOT
+    // supplied: without them `canReanchor` is false and an unvalidatable op surfaces with no fuzzy
+    // confidence hint. That is the MORE conservative branch — the hint is presentation only and never a
+    // placement (the hook's own SCOPE DECISION), so omitting it loses no placement capability and keeps
+    // this wiring free of a second service dependency.
+    const aiGenerateBookmark = useAiGenerateBookmark(editor);
+    const aiApplyValidation = useAiApplyValidation(editor);
 
     // ----- FR-35 Doc Q&A ephemeral highlight (task 072, stretch) -----------
     const qaHighlight = useDocQaHighlight(editor);
@@ -2701,14 +3027,27 @@ export const ComposeEditor = React.forwardRef<ComposeEditorHandle, ComposeEditor
       const entered = await promptForInstruction(action);
       if (!entered || !entered.trim()) return;
       const instruction = entered.trim();
+      const requestId = `${action.id}#caret-${(caretRunSeqRef.current += 1)}`;
+      // FR-C01 (task 051) — the CARET anchor source. Like the review-note path, this one already knew
+      // exactly which paragraph it meant (it resolved the enclosing textblock two statements up) and
+      // then sent only raw ProseMirror offsets, which are session-local and drift across the model
+      // round-trip — so its edit was placed by text search like everything else. Same controller, same
+      // Mapping rebasing, same return handling as the selection and note paths; the only difference is
+      // that the bookmark is anchored at the caret's enclosing block.
+      const bookmarkContext = aiGenerateBookmark.beginGenerate({
+        requestId,
+        range: { from: blockStart, to: blockEnd },
+      });
       void enqueueComposeAction({
-        id: `${action.id}#caret-${(caretRunSeqRef.current += 1)}`,
+        id: requestId,
         bindingId: action.bindingId,
         args: {
           slots: {
             selectionText,
             selectionAnchorStart: blockStart,
             selectionAnchorEnd: blockEnd,
+            // The durable anchor the model anchors its returned operations to (I-7).
+            ...(bookmarkContext.paraId ? { targetParaId: bookmarkContext.paraId } : {}),
             documentSpeId: documentRef?.speDriveItemId,
             documentRecordId: documentRef?.sprkDocumentId,
             sessionId,
@@ -2719,8 +3058,25 @@ export const ComposeEditor = React.forwardRef<ComposeEditorHandle, ComposeEditor
         // an inline redline (independent of the registry's `materializesInEditor` flag, which the catalog
         // seed may not preserve — same rationale as `dispatchNoteToolRequest`).
         documentSessionId: sessionId,
-      }).catch(() => undefined);
-    }, [editor, enqueueComposeAction, sessionId, documentRef, promptForInstruction]);
+      })
+        .then(result => {
+          // Resolve the bookmark against the RETURNED payload, exactly as the note/selection paths do —
+          // one edit-capture mechanism (invariant 6), and the bookmark is released either way.
+          const outcome = aiGenerateBookmark.resolveOnReturn(requestId, result?.result);
+          if (outcome?.status === 'operations') void aiApplyValidation.validateAndApply(outcome);
+        })
+        .catch(() => {
+          aiGenerateBookmark.clearBookmark(requestId);
+        });
+    }, [
+      editor,
+      enqueueComposeAction,
+      sessionId,
+      documentRef,
+      promptForInstruction,
+      aiGenerateBookmark,
+      aiApplyValidation,
+    ]);
 
     // Keep the fresh runner reachable from the (initial-render-closed) editorProps.handleKeyDown, per the
     // ref convention above (mirrors commentThreadsRef / selectedThreadIdRef assignment effects).
@@ -2764,14 +3120,27 @@ export const ComposeEditor = React.forwardRef<ComposeEditorHandle, ComposeEditor
         }
         const rawText = editor.state.doc.textBetween(span.from, span.to, ' ');
         const selectionText = rawText.length > 16000 ? rawText.slice(0, 16000) : rawText;
+        const requestId = `${action.id}#note-${threadId}#${(noteToolSeqRef.current += 1)}`;
+        // FR-C01 (task 051) — the review-note anchor source. This path ALREADY resolved a durable
+        // identity (`findCommentAnchorRange`) and then threw it away, keeping only raw ProseMirror
+        // offsets, so a note tool's edit was placed by text search like everything else. It is the
+        // uncovered source this task's escalation trigger names: task 052 must not retire the search
+        // path while it depends on one.
+        //
+        // Same controller, same rebasing, same return handling as the selection path — the only
+        // difference is that the bookmark is anchored at the NOTE's span rather than the caret.
+        const bookmarkContext = aiGenerateBookmark.beginGenerate({ requestId, range: span });
         return enqueueComposeAction({
-          id: `${action.id}#note-${threadId}#${(noteToolSeqRef.current += 1)}`,
+          id: requestId,
           bindingId: action.bindingId,
           args: {
             slots: {
               selectionText,
               selectionAnchorStart: span.from,
               selectionAnchorEnd: span.to,
+              // The durable anchor the model anchors its returned operations to (I-7: operations
+              // referencing paraId, never free text to search).
+              ...(bookmarkContext.paraId ? { targetParaId: bookmarkContext.paraId } : {}),
               documentSpeId: documentRef?.speDriveItemId,
               documentRecordId: documentRef?.sprkDocumentId,
               sessionId,
@@ -2792,9 +3161,31 @@ export const ComposeEditor = React.forwardRef<ComposeEditorHandle, ComposeEditor
           // so the result materializes as an inline redline — independent of the registry's
           // `materializesInEditor` flag (which the catalog seed may not preserve).
           documentSessionId: sessionId,
-        }).then(() => undefined);
+        })
+          .then(result => {
+            // Task 051: resolve the bookmark to its CURRENT (rebased) position and hand the returned
+            // operations to the validate-before-apply gate — identical to the toolbar's `resolveReturn`.
+            // A free-text return is REFUSED here rather than text-searched (I-7); an unvalidatable
+            // anchor surfaces for review rather than being placed.
+            const outcome = aiGenerateBookmark.resolveOnReturn(requestId, result?.result);
+            if (outcome?.status === 'operations') void aiApplyValidation.validateAndApply(outcome);
+          })
+          .catch((err: unknown) => {
+            // A rejected dispatch must not leak a live bookmark (mirrors the toolbar's onDispatchError).
+            aiGenerateBookmark.clearBookmark(requestId);
+            throw err;
+          })
+          .then(() => undefined);
       },
-      [editor, enqueueComposeAction, sessionId, documentRef, advisoryComments.threads]
+      [
+        editor,
+        enqueueComposeAction,
+        sessionId,
+        documentRef,
+        advisoryComments.threads,
+        aiGenerateBookmark,
+        aiApplyValidation,
+      ]
     );
 
     // Run a note tool: dispatch the compose EDIT action against the NOTE's live clause span — the SAME
@@ -2973,37 +3364,78 @@ export const ComposeEditor = React.forwardRef<ComposeEditorHandle, ComposeEditor
             throw new Error('ComposeEditor: cannot serialize operation log — editor not mounted');
           }
           committedBoundaryRef.current = opLogRef.current!.nextSeq;
+          // FR-S03 (r8 task 012): record WHICH revision this payload captured, so a later
+          // `commitSaved` can tell "nothing changed since" from "the user typed mid-flight".
+          capturedRevisionRef.current = docRevisionRef.current;
           return opLogRef.current!.serialize(editor.state.doc);
         },
         // task 038 (zero-error guardrails): clear the just-persisted op-log batch + recompute the dirty flag
         // AFTER the save POST confirmed (200). Preserves any edits appended during the in-flight save; a
         // failed save never calls this, so the batch survives for a retry.
+        //
+        // FR-S03 (r8 task 012): this is THE one place the dirty flag is cleared on the save path —
+        // every capture method now only WATERMARKS (see `capturedRevisionRef`). The remaining
+        // `dirtyRef.current = false` assignments in this file all belong to the LOAD/mount lifecycle
+        // (a fresh document is clean by definition), never to a save.
+        //
+        // `stillDirty` is the OR of two independent signals, because neither alone is complete:
+        //   • `opLog.size > 0` — representable edits appended after the serialize high-water mark;
+        //   • a revision that moved past the capture — catches edits the op-log cannot represent
+        //     (deferred structural / unrepresentable / refused-atom steps append no entry), which on
+        //     the ContentModel paths is real work the in-flight save did not carry.
+        // A null `capturedRevisionRef` means no capture method ran for this save (a clean
+        // byte-identical passthrough): there is nothing outstanding, so the op-log count decides
+        // alone — the pre-012 behavior, unchanged.
         commitSaved: () => {
           if (!opLogRef.current) return;
           opLogRef.current.commitSaved(committedBoundaryRef.current);
-          const stillDirty = opLogRef.current.size > 0;
+          const captured = capturedRevisionRef.current;
+          const editedSinceCapture = captured !== null && docRevisionRef.current !== captured;
+          const stillDirty = opLogRef.current.size > 0 || editedSinceCapture;
+          // Consumed — the next save watermarks afresh. Left set, a second (clean) save would keep
+          // re-reading a stale capture point and report dirty forever.
+          capturedRevisionRef.current = null;
           dirtyRef.current = stillDirty;
           onDirtyChange?.(stillDirty);
         },
         // Banner consolidation (2026-08-19): dismiss the redline anchor-failure notice now rendered in
         // the host's ComposeBannerStack rail. Delegates to the redline hook's own clearError.
         clearRedlineError: () => redline.clearError(),
+        // FR-C05 (task 052) — the two answers to the host's stale-target ConfirmModal.
+        applyStaleRedlineAnyway: () => redline.applyStaleTargetAnyway(),
+        dismissStaleRedline: () => redline.dismissStaleTarget(),
+        // FR-C06 (task 053) — the two answers to the host's anchorless-replay ConfirmModal. The
+        // confirm leg is the ONLY route from a prose match to marks in the document.
+        applyLegacyRedlineProposal: () => redline.applyLegacyProposal(),
+        dismissLegacyRedlineProposal: () => redline.dismissLegacyProposal(),
         // C2 fix (UAT 2026-07-20): the ordered load-time paraId map (from the snapshot) the host sends on
         // save so the server can stamp minted ids onto the baseline. Read-only — no dirty-flag reset.
         getBaselineParaIdMap: () => buildBaselineParaIdMap(paraIdSnapshotRef.current),
+        // Task 054 (FR-C03): the live annotated text + closed paraId set for a whole-document AI pass.
+        // Computed on CALL (never cached) so it reflects paragraphs typed since load — see the handle
+        // doc comment for why an incomplete closed set is worse than none.
+        getAnchoredDocumentText: () =>
+          editor ? buildAnchoredDocumentText(editor) : { text: '', paraIds: [], totalBlocks: 0 },
         // R3 FR-01a (task 027): the full content model for a born-in-editor save — the server renders it.
         // R6 (task 012 scope amendment): the server removed the engine-based comment bake for ALL
         // ContentModel saves, so the born-in-editor build now folds session + advisory comment threads
         // into the model itself (Start/End anchor runs + comments list, ids allocated from 1). Text
         // output is unchanged (reject-state parity — buildContentModelWithComments delegates to the
         // legacy buildContentModel when no session threads exist).
+        //
+        // FR-S03 (r8 task 012): this used to clear the dirty flag HERE — before the POST was even
+        // issued. A save that then failed left the editor believing it was clean: Save disabled,
+        // Ctrl+S inert, `beforeunload` disarmed, the unmount flush disarmed, the toolbar reading
+        // "Saved" — the user's work one tab-close from gone, on the failure branch only. The
+        // imported sibling below already got this right (F5); both paths now behave identically:
+        // WATERMARK at build time, clear only in `commitSaved` after a confirmed success.
         buildContentModel: () => {
           if (!editor) {
             throw new Error('ComposeEditor: cannot build content model — editor not mounted');
           }
           const { model } = buildContentModelWithComments(editor, collectSessionThreadInputs());
-          dirtyRef.current = false;
-          onDirtyChange?.(false);
+          if (opLogRef.current) committedBoundaryRef.current = opLogRef.current.nextSeq;
+          capturedRevisionRef.current = docRevisionRef.current;
           return model;
         },
         // R6 (task 012, render-on-save cutover): the imported-doc merged model — see the handle JSDoc.
@@ -3014,6 +3446,8 @@ export const ComposeEditor = React.forwardRef<ComposeEditorHandle, ComposeEditor
         buildImportedContentModel: (loadedModel, opts) => {
           if (!editor) return null;
           if (opLogRef.current) committedBoundaryRef.current = opLogRef.current.nextSeq;
+          // FR-S03 (r8 task 012): same watermark as the born-in-editor sibling above.
+          capturedRevisionRef.current = docRevisionRef.current;
           return buildImportedContentModel(editor, loadedModel, paraIdSnapshotRef.current, {
             trackChanges: opts.trackChanges,
             sessionThreads: collectSessionThreadInputs(),
@@ -3116,11 +3550,18 @@ export const ComposeEditor = React.forwardRef<ComposeEditorHandle, ComposeEditor
             // still highlights instead of being dropped — see resolveAdvisoryAnchorSpan. A target that
             // recurs at >1 location (exact OR prefix) is REPORTED ambiguous, never guessed via
             // first-occurrence — a wrong-clause anchor is a correctness defect, not a cosmetic one.
-            const deterministicSpan = resolveDeterministicAnchorSpan(blocks, item.sectionRef, paraIdMap);
+            const deterministic = resolveDeterministicAnchorSpan(
+              blocks,
+              { paraId: item.paraId, sectionRef: item.sectionRef },
+              paraIdMap
+            );
             let span: { from: number; to: number } | null;
             let failureKind: AdvisoryCommentFailure['kind'] = 'not_found';
-            if (deterministicSpan) {
-              span = deterministicSpan;
+            if (deterministic) {
+              // Resolved, OR REFUSED (task 055 — an explicit paraId that did not resolve). A refusal
+              // does NOT fall through to the text leg: that is the whole point of naming the target.
+              span = deterministic.span;
+              if (deterministic.kind) failureKind = deterministic.kind;
             } else {
               const resolution = resolveAdvisoryAnchorSpan(editor, item.targetText);
               span = resolution.span;
@@ -3262,6 +3703,7 @@ export const ComposeEditor = React.forwardRef<ComposeEditorHandle, ComposeEditor
           wordActionsDisabled={wordActionsDisabled}
           onSave={onSave}
           canSave={canSave}
+          saveDisabledReason={saveDisabledReason}
           isSaving={isSaving}
           autoSaveEnabled={autoSaveEnabled}
           onAutoSaveToggle={onAutoSaveToggle}
@@ -3408,6 +3850,10 @@ export const ComposeEditor = React.forwardRef<ComposeEditorHandle, ComposeEditor
               activeWorkType={activeWorkType}
               onRequestInstruction={promptForInstruction}
               enqueueComposeAction={enqueueComposeAction}
+              // FR-C01 (task 051): the durable anchor. Without these two the toolbar's `useBookmark`
+              // is permanently false and every edit falls to text search — see the hook wiring above.
+              aiGenerateBookmark={aiGenerateBookmark}
+              aiApplyValidation={aiApplyValidation}
               forceVisible
             />
           </div>
@@ -3666,6 +4112,10 @@ export const ComposeEditor = React.forwardRef<ComposeEditorHandle, ComposeEditor
               activeWorkType={activeWorkType}
               onRequestInstruction={promptForInstruction}
               enqueueComposeAction={enqueueComposeAction}
+              // FR-C01 (task 051): same anchor supply as the popup mount above. BOTH mounts need it —
+              // this is the BubbleMenu (selection) path, which is the one users hit most.
+              aiGenerateBookmark={aiGenerateBookmark}
+              aiApplyValidation={aiApplyValidation}
             />
           </BubbleMenu>
         ) : null}

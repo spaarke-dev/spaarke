@@ -1,8 +1,8 @@
 {
   "_documentation": "Reliability registry for SDAP CI's two-pass test runner. Tests in this file have wall-clock or concurrency-dependent assertions whose failures may reflect CI VM contention (noise) rather than real regressions. The CI workflow's classify-and-retry.ps1 reads this file: any pass-1 failure NOT in this registry fails the build immediately (deterministic = real bug); failures that ARE in this registry trigger a targeted pass-2 retry on a fresh runner. If pass 2 also fails, the build still fails (treated as real regression). Add a test here ONLY if its assertions are genuinely timing-sensitive. See docs/procedures/testing-and-code-quality.md for the developer protocol.",
-  "_lastUpdated": "2026-08-24",
+  "_exitRule": "BINDING (added 2026-08-28, task CICD-092 follow-on): an entry here BUYS A TEST A FREE RETRY, so a stale entry can mask a real regression. When a PR removes a test's timing or concurrency dependence, that SAME PR MUST delete its entry from this file. Membership is a statement about the test as it exists today, not a permanent label. Reviewers: if a diff makes a listed test deterministic and leaves it listed, that is a change request. Rationale: three entries went stale the moment PR #884 converted their tests to FakeTimeProvider, including StopAsync_CancelsInFlightJobWithinDrainTimeout_NFR07 -- a test that NAMES an NFR and would have been silently retried on a genuine regression.",
+  "_lastUpdated": "2026-08-28",
   "TimingSensitive": [
-    "Spaarke.Scheduling.Tests.ScheduledJobHostTests.StopAsync_CancelsInFlightJobWithinDrainTimeout_NFR07",
     "Sprk.Bff.Api.IntegrationTests.Admin.JobsEndpointsTests.Trigger_RunsJobOutOfBand_RecordsRun",
     "Spe.Integration.Tests.SystemIntegrationTests.ApiPerformance_MeetsResponseTimeRequirements",
     "Spe.Integration.Tests.Api.Ai.UploadIntegrationTests.ProcessingTime_UnderFifteenSeconds",
@@ -15,8 +15,13 @@
     "Sprk.Bff.Api.Tests.Services.Ai.ScopeResolverServiceTests.SearchScopesAsync_PerformanceUnder1Second_ForTypicalQuery"
   ],
   "ConcurrencySensitive": [
-    "Spaarke.Scheduling.Tests.RetryAndIdempotencyTests.CancellationDuringRetryLoop_StopsImmediately_DoesNotSleepThroughToken",
-    "Sprk.Bff.Api.Tests.Mocks.AsyncEnumerableHelpersTests.DelayedAsyncEnumerable_CancellationDuringDelay_Throws",
-    "Sprk.Bff.Api.Tests.Infrastructure.Resilience.StorageRetryPolicyTests.ExecuteAsync_CancellationDuringRetry_StopsRetrying"
-  ]
+    "Sprk.Bff.Api.Tests.Mocks.AsyncEnumerableHelpersTests.DelayedAsyncEnumerable_CancellationDuringDelay_Throws"
+  ],
+  "_removed": {
+    "2026-08-28 (PR #884, task CICD-091)": [
+      "Spaarke.Scheduling.Tests.ScheduledJobHostTests.StopAsync_CancelsInFlightJobWithinDrainTimeout_NFR07 -- now driven by FakeTimeProvider; no wall-clock assertion remains",
+      "Spaarke.Scheduling.Tests.RetryAndIdempotencyTests.CancellationDuringRetryLoop_StopsImmediately_DoesNotSleepThroughToken -- retry sleep is virtual time the test never advances, so completion PROVES cancellation woke it",
+      "Sprk.Bff.Api.Tests.Infrastructure.Resilience.StorageRetryPolicyTests.ExecuteAsync_CancellationDuringRetry_StopsRetrying -- cancels synchronously inside attempt #1; no timer, no clock"
+    ]
+  }
 }
