@@ -12,9 +12,9 @@
 
 | Field | Value |
 |---|---|
-| **Active work** | **071 + 072 COMPLETE.** `ComposeDocxProjectionBuilder` 3,593 → 1,031 (4 collaborators) · `ComposeDocumentRenderer` 2,987 → 1,997 (3 collaborators, **ADR-049 I-5 verified by count**: 8 body writes, all in the renderer). Both proven byte-identical over the corpus. 070 clusters 7/6/5b/8/1/3/4 done; `ComposeService.cs` still **FROZEN**. |
-| **Next Action** | **Task 090 wrap-up** (`/test-diet`, anti-clobber deploy, write-side fidelity doc, `projects/INDEX.md` + root §17). Track D is otherwise done: 073 ✅, 074 ⛔ closed as DO-NOT-DELETE, 070 partially frozen. Do NOT start 070 cluster 5a or 2a/2b — both live in the frozen `ComposeService.cs`; unfreeze signal is UAC-r2 commenting on #858. |
-| **Branch** | `work/spaarkeai-compose-r8` · clean · master `330b9fc55` · main repo synced. **All CODE is merged**; the only unmerged commit is this checkpoint itself (docs-only — it cannot be in master, since it records its own writing). Confirm with `git log --oneline origin/master..HEAD` — anything beyond a checkpoint commit there is unlanded work. |
+| **Active work** | **071 + 072 COMPLETE and merged.** Worktree FULLY SYNCED at `f6887d46a` (0 uncommitted / 0 unpushed / 0 behind / 0 unmerged; main repo synced). **090 STARTED but NOT closed** — its escalation trigger fired. |
+| **Next Action** | **1. DEPLOY (090 step 2)** — `scripts/Deploy-BffApi.ps1` + `scripts/Deploy-CustomPage.ps1` for `sprk_spaarkeai`, **together, one window, same tree** (NFR-05). TFM verified **net10.0**. Owner authorised the deploy after being told the save-contract gate is red. **2. Then 090 docs**: `/test-diet` → write-side fidelity doc → lessons-learned (Half-A/Half-B) → `projects/INDEX.md` + root §17 + `.claude/CHANGELOG.md`. **3. Separate session: fix the client save-contract suite** (see below). |
+| **Branch** | `work/spaarkeai-compose-r8` @ **`f6887d46a`** — identical to `origin/master`. Nothing outstanding. |
 | **Merged today** | #806 `19bf65ec4` · #905 `369c3ea89` · #908 `330b9fc55` |
 | **Suite** | ALL GREEN — Compose **1,802/0** · BFF **11,614/0** · ArchTests **153/153** · Spe.Integration **409/0** · IntegrationTests **103/0** · client gate **104 suites / 1,336** · solution build **0 errors** · DI diff **empty** |
 | **Verify with** | **`dotnet build`** at the SOLUTION root — not one project (see §A2 for why that distinction cost real time) |
@@ -594,7 +594,7 @@ clean build — the last sync returned MERGEABLE and then failed to compile (bot
 |-------|-------|
 | **Task** | **DEPLOYED TO DEV — owner is mid-UAT.** No task in progress. |
 | **Status** | 47 of 51 resolved. Tree clean, everything pushed, merged with `origin/master` (12 behind again — other projects merging). BFF **11,931 / 0 / 96** · integration **103 / 6** · ArchTests **9 failed / 101 passed — ALL 9 PRE-EXISTING ON MASTER** (verified against a clean `origin/master` checkout: 9 failed / 95 passed). |
-| **Next Action** | **Task 090 wrap-up** (`/test-diet`, anti-clobber deploy, write-side fidelity doc, `projects/INDEX.md` + root §17). Track D is otherwise done: 073 ✅, 074 ⛔ closed as DO-NOT-DELETE, 070 partially frozen. Do NOT start 070 cluster 5a or 2a/2b — both live in the frozen `ComposeService.cs`; unfreeze signal is UAC-r2 commenting on #858. |
+| **Next Action** | **1. DEPLOY (090 step 2)** — `scripts/Deploy-BffApi.ps1` + `scripts/Deploy-CustomPage.ps1` for `sprk_spaarkeai`, **together, one window, same tree** (NFR-05). TFM verified **net10.0**. Owner authorised the deploy after being told the save-contract gate is red. **2. Then 090 docs**: `/test-diet` → write-side fidelity doc → lessons-learned (Half-A/Half-B) → `projects/INDEX.md` + root §17 + `.claude/CHANGELOG.md`. **3. Separate session: fix the client save-contract suite** (see below). |
 
 ---
 
@@ -1043,3 +1043,44 @@ changed is that §2's promise ("reported by name … none is silent") is now *tr
 Root `CLAUDE.md`'s ADR-049 pointer says the save "pairs blocks by **document order**". It has paired by
 **LCS** since task 040 — loosely true (matches are monotone) but imprecise, and 047b showed the imprecision
 is where a real defect hid. Touching root CLAUDE.md needs `/conflict-check` + a `.claude/CHANGELOG.md` entry.
+
+---
+
+## 090 — WHY THE PROJECT IS NOT CLOSED (escalation fired, owner informed)
+
+The POML's trigger: *"If any Track's gate did not pass, do NOT close the project."* Two are outstanding:
+
+| Blocker | State |
+|---|---|
+| **Task 070** | 🔲 — clusters 5a + 2a/2b **frozen** in `ComposeService.cs` until `unified-access-control-r2` lands #858 and comments. A declared dep of 090. |
+| **Compose Client Gate (Save-Contract Suite)** | ❌ red on master — 19 failing tests |
+
+**The Compose FIDELITY Gate passes** — document fidelity is verified. The red one is the client
+save-contract suite. Do not conflate them.
+
+So: do the deploy + the 090 documentation, but **do NOT mark the project complete** until 070 unfreezes
+and the save-contract gate is addressed.
+
+## The save-contract gate — for the fresh session that will fix it
+
+Full write-up: `notes/compose-client-gate-red-open.md`. **Read it before touching anything** — it records
+three disproved hypotheses so they are not re-run.
+
+**The single most important fact**: 19 failures × 15s ≈ 285s of a 288s run, so the **5 passing tests mount
+the editor instantly while 19 never mount at all**. Slowness would make all 24 slow. The split is binary
+⇒ **conditional state, not resources**. Three timing-shaped fixes (#908 `testTimeout`, #916
+`asyncUtilTimeout`, #917 `maxWorkers`) all failed; #916 and #917 are reverted.
+
+**Do NOT re-run**: RTL-vs-jest timeout distinction · `--coverage` overhead (the 10s-vs-102s figure was
+warm-vs-cold jest cache; cold it is 20s vs 26s) · CPU contention (serial run is identical).
+
+**Start here instead**: make CI print WHICH 5 tests pass. First N in file order ⇒ state pollution after
+test N; scattered ⇒ per-test input.
+
+**And the meta-rule**: this box has 32 cores and the suite passes on it unconditionally. **A local pass is
+not evidence for this gate.** Validate on the real runner or not at all — that blind spot is what made all
+three previous fixes look right.
+
+**Do not "solve" it by deleting the tests.** 21 of the 24 assertions read editor-rendered DOM
+(`data-compose-mark`, `span[data-comment-id]`); the editor mount IS the system under test, and the names
+carry defect ids (DEF-09/11/12, FR-16 tasks 030/032, r8 task 055) — ADR-038 KEEP category.
