@@ -124,6 +124,37 @@ public class SpeAdminContainerTypeCreateContractTests
             because: "nothing may reach Graph once the classification is known to be unmappable");
     }
 
+    [Theory]
+    [Trait("Category", "SpeAdminGraphContract")]
+    [InlineData("not-a-guid")]
+    [InlineData("")]
+    [InlineData("   ")]
+    public async Task CreateContainerType_WithMalformedOwningAppId_ThrowsBeforeCallingGraph(
+        string owningAppId)
+    {
+        using var graph = new GraphWireMockFixture();
+        graph.StubPost(ContainerTypesPath, CreatedResponse);
+        var sut = CreateSut();
+        var client = graph.CreateGraphClient();
+
+        var act = async () => await sut.CreateContainerTypeAsync(
+            client,
+            displayName: "Spaarke Model 1",
+            billingClassification: "standard",
+            owningAppId: owningAppId);
+
+        // Found in code review 2026-08-30. The DELEGATED endpoint validates this before calling, but
+        // CreateContainerTypeForConfigAsync does not — it resolves owningAppId from a Dataverse TEXT
+        // column and passes it straight through. A bare Guid.Parse there threw FormatException, which
+        // that caller's ODataError-only catch does not map, so the operator got a raw 500 instead of a
+        // message naming the field. Validation now sits with the parse, so it holds for BOTH callers.
+        await act.Should().ThrowAsync<ArgumentException>(
+            because: "the service must defend its own contract, not rely on one of two callers to");
+
+        graph.RequestsFor(ContainerTypesPath).Should().BeEmpty(
+            because: "nothing may reach Graph once the owning app id is known to be unusable");
+    }
+
     // ─────────────────────────────────────────────────────────────────────────
     // Construction
     // ─────────────────────────────────────────────────────────────────────────

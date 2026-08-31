@@ -4243,11 +4243,25 @@ public sealed class SpeAdminGraphService
         // owningAppId Nullable="false", and the documented create body carries it. Every container
         // type is owned by exactly one Entra app registration, fixed at creation; without it Graph
         // has no owner to assign and rejects the whole request without naming the field.
+        // Validate HERE, not only at the endpoint. The delegated endpoint parses the GUID before
+        // calling, but CreateContainerTypeForConfigAsync does not — it resolves owningAppId from a
+        // Dataverse TEXT column, so a malformed value would reach a bare Guid.Parse and throw
+        // FormatException, which that caller's ODataError-only catch does not map. The operator would
+        // get a raw 500 instead of a message naming the field. Validation belongs with the parse.
+        if (!Guid.TryParse(owningAppId, out var owningAppGuid))
+        {
+            throw new ArgumentException(
+                $"Owning application id '{owningAppId}' is not a valid GUID. Graph types "
+                + "fileStorageContainerType.owningAppId as Edm.Guid and rejects anything else with an "
+                + "error that does not name the field.",
+                nameof(owningAppId));
+        }
+
         var body = new Microsoft.Graph.Models.FileStorageContainerType
         {
             Name = displayName,
             BillingClassification = billingEnum,
-            OwningAppId = Guid.Parse(owningAppId)
+            OwningAppId = owningAppGuid
         };
 
         var created = await ExecuteWithRetryAsync(
