@@ -63,6 +63,24 @@ diff -r <dir>/before <dir>/after        # MUST be empty
 Unset `COMPOSE_ORACLE_OUT` ⇒ the test is inert, so it never runs in CI and never gates a build during the
 window it exists.
 
+### The oracle was DELETED when 071 landed — how to bring it back
+
+It is gone from `tests/` as designed; a permanently-inert file in the test tree reads as coverage while
+asserting nothing. It survives in git, so reproducing the proof (or building the equivalent for **task
+072**, which decomposes `ComposeDocumentRenderer.cs` and needs the same discipline on the *write* side)
+is one command:
+
+```
+git show e2c9a7ffa:tests/integration/seam/Compose/ComposeProjectionEquivalenceOracle.cs \
+  > tests/integration/seam/Compose/ComposeProjectionEquivalenceOracle.cs
+```
+
+**The reusable part is the shape, not the file**: capture full serialised output (never a hash) for every
+corpus document, inject determinism through an existing test seam, and prove the instrument on all four
+axes above *before* trusting a single one of its results. 072's oracle differs only in what it captures —
+`SynthesizeDocument`'s output bytes rather than a projection — and in needing a byte-level normalisation
+step, since OOXML packages embed timestamps that a rendering will legitimately differ on.
+
 ---
 
 ## 2. Why this file is a genuine decomposition candidate (not just a big file)
@@ -163,7 +181,69 @@ full suite, so **the full Compose suite is the escalation, not the filtered one*
 
 After 1–3 the remaining file is the two pipelines plus the façade; after 4–5 it is the façade.
 
-## 6. Defects found while decomposing
+## 6. Outcome — what was extracted, and what deliberately was not
+
+Four collaborators, each verified by the oracle immediately after its own extraction (never batched):
+
+| Step | Component | Reason to change | LOC | Equivalence |
+|---|---|---|---|---|
+| 1 | `ComposeNumbering.cs` | Word's numbering semantics | 611 | ✅ identical |
+| 2 | `ComposeOoxmlPrimitives.cs` | what an OOXML construct *says*, independent of output shape | 365 | ✅ identical |
+| 3 | `ComposeContentModelProjector.cs` | the canonical content model / render-on-save hub | 1,549 | ✅ identical |
+| 4 | `ComposeParaOffsetMapBuilder.cs` | the D2 fine-anchor resolver contract | 167 | ✅ identical |
+| — | `ComposeDocxProjectionBuilder.cs` (remainder) | the editor's HTML/TipTap contract | **1,031** | — |
+
+`ComposeDocxProjectionBuilder.cs`: **3,593 → 1,031**.
+
+### Cluster 5 was NOT extracted — and that is the finding, not a shortfall
+
+The plan's fifth step was to split the HTML pipeline from the façade, leaving a thin
+`ComposeDocxProjectionBuilder` holding only two delegating entry points. **That was not done, deliberately.**
+
+After steps 1–4 the remainder *is* the HTML projection: one pipeline, one reason to change (the editor's
+HTML/TipTap contract), with `BuildContentModel` present only as a one-line delegate that keeps the public
+surface — and therefore the DI registration — unchanged. Splitting it further would manufacture a
+façade class whose sole purpose is to be small, which is precisely the anti-pattern
+`COMPONENT-COMPLEXITY.md` names ("splitting to satisfy a number", "thin components to dodge a size
+number"). With the LOC ratchet retired there is no number left to satisfy, so the only remaining argument
+for that split was the one the standard rejects.
+
+**This is a §11.5 documented decision: a large, cohesive file is a legitimate outcome.** Stated here and
+in the PR rather than left implicit.
+
+### Verification
+
+| Check | Result |
+|---|---|
+| Projection equivalence, all 25 corpus documents × both entry points | ✅ byte-identical after **each** of the four extractions |
+| Full Compose suite (after extraction 1) | ✅ 1,827 / 0 |
+| BFF suite (final) | ✅ **11,683 / 0** (66 skipped, pre-existing) |
+| ArchTests (final) | ✅ **153 / 153** |
+| Solution build | ✅ 0 errors, 0 warnings |
+| Publish size (NFR-01) | ✅ **43.90 MB** compressed incl PDBs (42.98 excl) — ceiling 60 MB. **−1.06 MB** vs the 44.96 MB 2026-08-13 baseline; this task changed no packages, so the delta is master drift since that baseline, not this work |
+| No new NuGet (ADR-029) | ✅ no `.csproj` / `Directory.Packages.props` change |
+| No new HIGH CVE | ✅ `dotnet list package --vulnerable --include-transitive` → none |
+| **NEGATIVE** — DI registration count (ADR-010) | ✅ `git diff` on `Program.cs` + `Infrastructure/DI/` is **empty** |
+| **NEGATIVE** — no `body.Descendants<Paragraph>()` introduced | ✅ **5 on master, 5 now** (pre-existing, reader-alignment; none added) |
+| **NEGATIVE** — `ProjectRun` capture not widened | ✅ identical set before/after: `Bold`, `Italic`, `Underline` |
+| **NEGATIVE** — no defect silently fixed | ✅ see §6 below |
+| Public API surface | ✅ unchanged — `Build` and `BuildContentModel` both still on `ComposeDocxProjectionBuilder` |
+
+The `Descendants<Paragraph>()` check is worth reading precisely: the constraint is *"MUST NOT introduce"*
+one while restructuring part traversal, not *"must have none"*. Five already existed on master (the
+documented reader-alignment walk in `Build`'s Pass 1, which `DocxAnnotationReader` is aligned to). The
+count is unchanged, so none was introduced — and none was removed either, which would have been an
+unrequested behaviour change.
+
+### Doc-comment repair
+
+Moved doc comments carried `<see cref>`s to members that now live in other classes (`Build`,
+`RenderInline`, `RenderRun`, `RenderBlockChildren`, `CollectRunBoundaries`, `RunEditorLength`,
+`ResolveOrdered`, `ListInfo`). A `cref` to another class's *private* member cannot resolve, so each was
+rewritten to `<c>Class.Member</c>`. Left alone they would have been silent documentation rot — the build
+does not fail on an unresolvable cref here.
+
+## 7. Defects found while decomposing
 
 Behaviour-preserving only. Anything found here is **recorded against its owning task, never fixed inside
 the restructure** — the POML makes that an explicit NEGATIVE acceptance criterion, and a silent fix would
@@ -172,4 +252,21 @@ refactoring slip.
 
 | # | Finding | Owning task | Status |
 |---|---|---|---|
-| _(none yet)_ | | | |
+| — | **No production defect was found.** | — | — |
+
+A "none" is worth stating rather than leaving the table empty, because the two are easy to confuse and
+mean opposite things. The decomposition read every line of the moved code closely enough to classify it
+by reason-to-change, and nothing surfaced that was wrong — as distinct from nothing having been looked
+for. What *was* found is documentation rot (crefs and line-number references pointing at members that
+had moved), fixed in place because it is a consequence of this task's own edit, not a pre-existing
+defect being smuggled into a refactor.
+
+Two things deliberately NOT changed, both of which were tempting:
+
+- **`ProjectRun` still captures only `Bold`/`Italic`/`Underline`.** The POML calls that narrowness out
+  and forbids widening it here — it belongs to tasks 040/041. Widening it would also have made the
+  equivalence proof impossible, since a real output difference would be indistinguishable from a
+  refactoring slip.
+- **The five pre-existing `body.Descendants<Paragraph>()` walks were left alone.** They are the
+  documented reader-alignment walk that `DocxAnnotationReader` depends on. The constraint is "must not
+  introduce", and removing one would have been an unrequested behaviour change.

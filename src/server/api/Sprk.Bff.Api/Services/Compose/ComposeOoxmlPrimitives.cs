@@ -40,9 +40,9 @@ internal static class ComposeOoxmlPrimitives
     /// <see cref="Depth"/> tracks NESTING (e.g. <c>{ IF {PAGE} = 1 ... }</c>) so only the OUTERMOST
     /// <c>end</c> closes the atom; an inner field's own separate/result folds into the outer atom's display
     /// text rather than being modeled precisely (documented simplification — not exercised by the corpus).
-    /// Each of <see cref="CollectRunBoundaries"/> and <see cref="RenderInline"/> keeps its OWN instance, so
+    /// Each of <c>ComposeParaOffsetMapBuilder.CollectRunBoundaries</c> and <c>ComposeDocxProjectionBuilder.RenderInline</c> keeps its OWN instance, so
     /// the two mirrored walks stay independent but deterministic over the same input (this file's existing
-    /// parallel-walk pattern — see <see cref="RunEditorLength"/> vs <see cref="RenderRun"/>).
+    /// parallel-walk pattern — see <c>ComposeParaOffsetMapBuilder.RunEditorLength</c> vs <c>ComposeDocxProjectionBuilder.RenderRun</c>).
     /// </summary>
     internal sealed class FieldScanState
     {
@@ -183,7 +183,7 @@ internal static class ComposeOoxmlPrimitives
 
     /// <summary>A run carrying a complex/floating object — DrawingML (<c>w:drawing</c>, image/shape), an
     /// OLE embed (<c>w:object</c>), or a legacy VML fallback picture (<c>w:pict</c>, task 022 WS-2
-    /// construct audit: previously fell through <see cref="RenderRun"/>'s default case with zero HTML,
+    /// construct audit: previously fell through <c>ComposeDocxProjectionBuilder.RenderRun</c>'s default case with zero HTML,
     /// zero offset-table length, and no warning — a genuine silent drop per F-1; now the same non-editable
     /// atom placeholder as <c>w:drawing</c>/<c>w:object</c>, since it is equally an opaque image/shape
     /// construct, never opened for display (I-4)).</summary>
@@ -194,7 +194,7 @@ internal static class ComposeOoxmlPrimitives
 
     /// <summary>
     /// The editor-visible display text an opaque atom shows — the SAME text/glyph counting convention as
-    /// <see cref="RunEditorLength"/> (so an atom's offset-table length always equals the exact character
+    /// <c>ComposeParaOffsetMapBuilder.RunEditorLength</c> (so an atom's offset-table length always equals the exact character
     /// count the HTML render emits inside its placeholder — the two mirrored walks stay consistent by
     /// construction, not by sharing state). Never returns document formatting, only text content.
     /// </summary>
@@ -248,7 +248,7 @@ internal static class ComposeOoxmlPrimitives
     /// picture, doc-part gallery, equation, citation, bibliography, group) — content that cannot be
     /// faithfully shown as editable prose. A plain-text or rich-text control (or one with no declared type
     /// at all, the OOXML default) wraps ordinary editable paragraphs, so its shell stays TRANSPARENT (see
-    /// <see cref="RenderBlockChildren"/>'s <c>SdtBlock</c> case and <see cref="CollectRunBoundaries"/>'s
+    /// <c>ComposeDocxProjectionBuilder.RenderBlockChildren</c>'s <c>SdtBlock</c> case and <c>ComposeParaOffsetMapBuilder.CollectRunBoundaries</c>'s
     /// <c>SdtRun</c> case) — treating every SDT as opaque would silently regress real, currently-editable
     /// content, and no corpus construct forces that tradeoff (the escalation trigger this task's POML names
     /// is resolved by this structural rule rather than applied silently — see task notes for the writeup).

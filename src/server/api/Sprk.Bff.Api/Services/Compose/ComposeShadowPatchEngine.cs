@@ -23,7 +23,7 @@ namespace Sprk.Bff.Api.Services.Compose;
 /// <b>Anchor model (D2, task 003).</b> Each op carries <c>(paraId, runIndex, run-local-offset)</c>.
 /// The paragraph is resolved by <c>w14:paraId</c> dictionary lookup (never text-search, never absolute
 /// position); the fine anchor addresses the <c>runIndex</c>-th run in the paragraph's <b>editor-visible
-/// run flatten</b> — the SAME flatten <see cref="ComposeDocxProjectionBuilder.BuildParaOffsetMap"/>
+/// run flatten</b> — the SAME flatten <see cref="ComposeParaOffsetMapBuilder.BuildParaOffsetMap"/>
 /// produces (descends into <c>w:hyperlink</c>/<c>w:ins</c>/<c>w:del</c>/<c>w:sdt</c>, counts fields /
 /// complex objects / special content controls as single opaque atom slots). <see cref="FlattenEditorRuns"/>
 /// here MIRRORS <see cref="ComposeDocxProjectionBuilder"/>'s <c>CollectRunBoundaries</c> exactly (the
@@ -2552,7 +2552,7 @@ public sealed class ComposeShadowPatchEngine
             }
         }
 
-        // -- editor-visible run flatten (mirrors ComposeDocxProjectionBuilder.CollectRunBoundaries) -----
+        // -- editor-visible run flatten (mirrors ComposeParaOffsetMapBuilder.CollectRunBoundaries) -----
 
         /// <summary>
         /// Produces the paragraph's ordered editor-visible run slots — the SAME flatten

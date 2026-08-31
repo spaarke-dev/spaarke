@@ -1,4 +1,4 @@
-// Task 071 (Track D) — the numbering subsystem, extracted from `ComposeDocxProjectionBuilder`.
+﻿// Task 071 (Track D) — the numbering subsystem, extracted from `ComposeDocxProjectionBuilder`.
 //
 // WHY THIS IS ITS OWN COMPONENT. It changes for one reason and it is not either projection's reason:
 // **Word's numbering semantics**. It parses `numbering.xml` + style-linked numbering from `styles.xml`
@@ -32,7 +32,7 @@ internal static class ComposeNumbering
     // task 031; this region only builds + exposes the model and resolves each paragraph's effective
     // `(numId, ilvl)`. Model construction is a side-part read (numbering.xml / styles.xml are NOT the
     // document body) and per-paragraph resolution is wired into the EXISTING Pass-1 identity-assignment
-    // loop in <see cref="Build"/> (`:134-171` at time of writing) — so this adds NO second full-document
+    // loop in <c>ComposeDocxProjectionBuilder.Build</c> (`:134-171` at time of writing) — so this adds NO second full-document
     // walk; the single document-order paragraph walk invariant (`:18-26`) is untouched.
 
     /// <summary>One level's authored numbering definition. Mirrors exactly the field set
@@ -85,7 +85,7 @@ internal static class ComposeNumbering
         /// `w:lvlOverride` before falling back to the abstractNum's own level — the same precedence
         /// <c>ComposeDocumentRenderer</c> authors (an override always wins). Null means the numId is
         /// unresolvable or that exact level is not defined (031's call whether to fall back to the
-        /// nearest lower level, mirroring <see cref="ResolveOrdered"/>'s existing tolerant fallback).</summary>
+        /// nearest lower level, mirroring <c>ComposeDocxProjectionBuilder.ResolveOrdered</c>'s existing tolerant fallback).</summary>
         public NumberingLevelDef? ResolveLevel(int numId, int ilvl)
         {
             if (Overrides.TryGetValue((numId, ilvl), out var over) && over.FullLevelOverride is not null)
@@ -106,10 +106,10 @@ internal static class ComposeNumbering
     /// <summary>
     /// Parses `numbering.xml` into a <see cref="NumberingModel"/> (FR-11) and resolves STYLE-LINKED
     /// numbering from `styles.xml` (FR-12). Pure / static / never throws on a malformed numbering or
-    /// styles part (mirrors <see cref="ResolveOrdered"/>'s fail-open posture) — a defect in one part
+    /// styles part (mirrors <c>ComposeDocxProjectionBuilder.ResolveOrdered</c>'s fail-open posture) — a defect in one part
     /// degrades that part of the model to empty rather than aborting the whole projection (F-04, Build()
     /// never throws). `internal` (not private) so task 031 and this task's own sanity tests can drive it
-    /// directly over the corpus fixtures without a full <see cref="Build"/> round-trip.
+    /// directly over the corpus fixtures without a full <c>ComposeDocxProjectionBuilder.Build</c> round-trip.
     /// </summary>
     internal static NumberingModel BuildNumberingModel(MainDocumentPart mainPart)
     {
@@ -294,7 +294,7 @@ internal static class ComposeNumbering
     /// FR-12) — direct `w:numPr` first (mirrors <c>ComposeDocxProjectionBuilder.ListInfo</c>'s extraction exactly), else the
     /// paragraph's `pStyle` resolved through <see cref="NumberingModel.StyleLinkedNumbering"/>
     /// (heading-style-numbering.docx's Heading1/Heading2, corpus-manifest.md row 10). `internal` so 031
-    /// calls this from the SAME per-paragraph call site <see cref="Build"/>'s Pass-1 loop already visits
+    /// calls this from the SAME per-paragraph call site <c>ComposeDocxProjectionBuilder.Build</c>'s Pass-1 loop already visits
     /// (no second walk) and so this task's tests can assert the resolution directly.</summary>
     internal static ParagraphNumberingRef? ResolveParagraphNumbering(Paragraph p, NumberingModel model)
     {
@@ -390,7 +390,7 @@ internal static class ComposeNumbering
         /// label Word computes for it TOGETHER WITH the level's ordinal chain (task 040, WS-4/FR-16 — e.g.
         /// <c>"4.2"</c> pairs with <c>[4, 2]</c>), or <c>null</c> when the numbering is unresolvable (the
         /// <c>numId</c> is not in the model — no corpus doc hits this; it is the escalation-relevant
-        /// "construct outside the model" case, already surfaced as a warning by <see cref="Build"/>). Must be
+        /// "construct outside the model" case, already surfaced as a warning by <c>ComposeDocxProjectionBuilder.Build</c>). Must be
         /// called exactly once per numbered paragraph, in document order, for the single-counter replay to be
         /// exact. The chain is read from the SAME counter state the label was just composed from — computed
         /// together so a caller can never observe the chain for a different (later) paragraph's counters.
