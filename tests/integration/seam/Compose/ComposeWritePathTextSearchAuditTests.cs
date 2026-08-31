@@ -54,6 +54,31 @@ public sealed class ComposeWritePathTextSearchAuditTests
         }
     }
 
+    [Fact(DisplayName = "Code audit: the extracted mis-anchored-save recovery (ComposeReanchorCoordinator) contains ZERO text-search API usage")]
+    public void ComposeReanchorCoordinator_Source_ContainsNoTextSearchApiUsage()
+    {
+        // Task 070 cluster 1 moved the two mis-anchored-save recovery paths (ReanchorStaleSaveAsync +
+        // ApplyBestEffortByParagraph, ~470 lines) OUT of ComposeService.cs and into their own collaborator.
+        // That code was previously covered by the SaveAsync-slice audit below, purely because it happened to
+        // sit between that slice's two markers. Auditing the new file explicitly is what keeps this guard's
+        // coverage intact across the move: the guard follows the code, rather than quietly shrinking to
+        // whatever is left between the markers. Both recovery paths resolve anchors by w14:paraId
+        // (IndexOfParaId is an ordinal id comparison, not a content scan) and by paragraph-unit grouping —
+        // never by scanning document text for a match (I-7).
+        var source = ReadRepoFile("src", "server", "api", "Sprk.Bff.Api", "Services", "Compose", "ComposeReanchorCoordinator.cs");
+
+        foreach (var banned in BannedTextSearchApis)
+        {
+            source.Should().NotContain(banned,
+                $"ComposeReanchorCoordinator.cs (the extracted save-path recovery, I-7) must contain zero " +
+                $"'{banned}' usage — a stale base is re-anchored by AnnotationReanchorService and applied " +
+                "only on an EXACT paraId match, never by locating an edit target through a text scan");
+        }
+
+        source.Should().NotContain("_annotationWriter",
+            "the extracted save-path recovery must never invoke the retired DocxAnnotationWriter");
+    }
+
     [Fact(DisplayName = "Code audit: ComposeService's save-path slice (SaveAsync + ResolveSaveBaselineAsync) contains ZERO text-search API usage and never calls the retired DocxAnnotationWriter")]
     public void ComposeService_SavePathSlice_ContainsNoTextSearchApiUsage_AndDoesNotInvokeRetiredWriter()
     {
@@ -64,8 +89,13 @@ public sealed class ComposeWritePathTextSearchAuditTests
         // Marker strings, not line numbers, so this audit stays correct across incidental reformatting —
         // if either marker disappears (the methods were renamed/moved), the test fails loudly rather than
         // silently auditing the wrong (or an empty) slice.
+        //
+        // The end marker reads `internal static` (not `private static`) as of task 070 cluster 1:
+        // ResolveRevisionAuthor stayed on ComposeService but its visibility widened so the extracted
+        // coordinator could reuse it. The marker mismatch failed this test on that change — which is the
+        // loud-failure behaviour described above working as intended, not a false positive.
         const string sliceStartMarker = "public async Task<SaveComposeDocumentResult> SaveAsync(";
-        const string sliceEndMarker = "private static string ResolveRevisionAuthor(HttpContext httpContext)";
+        const string sliceEndMarker = "internal static string ResolveRevisionAuthor(HttpContext httpContext)";
 
         var startIndex = fullSource.IndexOf(sliceStartMarker, StringComparison.Ordinal);
         var endIndex = fullSource.IndexOf(sliceEndMarker, StringComparison.Ordinal);

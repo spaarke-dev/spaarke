@@ -317,7 +317,7 @@ public sealed class ExternalAccessContractFixture : WebApplicationFactory<Progra
                 ["Graph:TenantId"] = "test-tenant-id",
                 ["Graph:ClientId"] = "test-client-id",
                 ["Graph:ClientSecret"] = "test-client-secret",
-                ["Graph:UseManagedIdentity"] = "false",
+                ["Graph:ManagedIdentity:Enabled"] = "false",
                 ["Graph:Scopes:0"] = "https://graph.microsoft.com/.default",
                 ["Dataverse:EnvironmentUrl"] = "https://test.crm.dynamics.com",
                 ["Dataverse:ServiceUrl"] = "https://test.crm.dynamics.com",
@@ -375,6 +375,9 @@ public sealed class ExternalAccessContractFixture : WebApplicationFactory<Progra
 
         builder.ConfigureTestServices(services =>
         {
+            // Test hosts must not authenticate for real — see TestTokenCredential.
+            services.UseStubTokenCredential();
+
             services.Configure<Microsoft.AspNetCore.Routing.RouteHandlerOptions>(o => o.ThrowOnBadRequest = false);
 
             // Fake auth scheme serving BOTH the workforce default (admin group) and the CiamExternal policy.

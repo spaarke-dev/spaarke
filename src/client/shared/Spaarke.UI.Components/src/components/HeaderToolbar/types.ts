@@ -77,5 +77,11 @@ export interface IHeaderToolbarProps {
    */
   aiSummary?: {
     onFetchSummary: () => Promise<ISummaryData>;
+    /**
+     * Optional override for the popover's empty-state body text. Omit to keep
+     * `AiSummaryPopover`'s shipped document-oriented default. Record headers
+     * pass record-oriented copy — see `RECORD_SUMMARY_EMPTY_TEXT`.
+     */
+    emptyText?: string;
   };
 }

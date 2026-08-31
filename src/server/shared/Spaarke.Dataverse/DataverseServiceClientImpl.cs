@@ -52,10 +52,28 @@ public class DataverseServiceClientImpl : IDataverseService, IDisposable
     /// managed-identity-disabled branch, where it replaces the <c>AuthType=ClientSecret</c> connection
     /// string. Nullable with a null default (NFR-04).
     /// </param>
+    /// <param name="managedIdentityCredential">
+    /// The app-only managed-identity credential, supplied by the BFF from its single shared factory
+    /// (<c>ManagedIdentityCredentialFactory.Create</c>). Used ONLY in the managed-identity-ENABLED
+    /// branch — the symmetric counterpart to <paramref name="confidentialClients"/>.
+    ///
+    /// <para><b>Why injected rather than built here.</b> ADR-028 A4 requires the app-only credential to
+    /// come from the single shared provider rather than being constructed per call site — "seven call
+    /// sites each rolling their own credential handling is what made the previous state unfixable in one
+    /// place". This class used to build its own <c>DefaultAzureCredential</c>, and it had drifted from
+    /// the shared factory in three ways that are invisible until they are not (see the fallback below).
+    /// The factory itself lives in the BFF and cannot be referenced from here — <c>Spaarke.Dataverse</c>
+    /// is the base layer and references no other Spaarke project (FR-14, enforced by
+    /// <c>LayerDependencyTests</c>) — so the credential is passed IN rather than reached for.</para>
+    ///
+    /// <para>Null default keeps every existing direct-construction call site compiling; when null, the
+    /// fallback below is used.</para>
+    /// </param>
     public DataverseServiceClientImpl(
         IConfiguration configuration,
         ILogger<DataverseServiceClientImpl> logger,
-        IConfidentialClientProvider? confidentialClients = null)
+        IConfidentialClientProvider? confidentialClients = null,
+        TokenCredential? managedIdentityCredential = null)
     {
         _logger = logger;
 
@@ -80,12 +98,9 @@ public class DataverseServiceClientImpl : IDataverseService, IDisposable
         Func<ServiceClient> connectFactory;
         if (useManagedIdentity)
         {
-            var miClientId = configuration["ManagedIdentity:ClientId"]
-                ?? configuration["Graph:ManagedIdentity:ClientId"];
-            var options = new DefaultAzureCredentialOptions();
-            if (!string.IsNullOrEmpty(miClientId))
-                options.ManagedIdentityClientId = miClientId;
-            var credential = new DefaultAzureCredential(options);
+            // ADR-028 A4: prefer the BFF's single shared credential. The fallback exists only for
+            // direct-construction call sites that pass no credential.
+            var credential = managedIdentityCredential ?? BuildFallbackManagedIdentityCredential(configuration, _logger);
             var instanceUri = new Uri(dataverseUrl);
             // Token scope = the Dataverse ENVIRONMENT ROOT authority (e.g. https://spaarkedev1.crm.dynamics.com/.default).
             // #3b root cause: the ServiceClient token-provider is invoked with the full SOAP endpoint URL
@@ -96,9 +111,14 @@ public class DataverseServiceClientImpl : IDataverseService, IDisposable
 
             connectFactory = () =>
             {
+                // The clientId is no longer resolved here — it is a property of the credential, which is
+                // now supplied by the caller. Report the credential's SOURCE instead: which of the two
+                // is in play is the fact worth having in a log when Dataverse auth misbehaves, and the
+                // fallback logs the identity it resolved at construction time.
                 _logger.LogInformation(
-                    "Connecting Dataverse ServiceClient via Managed Identity (clientId {ClientId}, scope {Scope})",
-                    miClientId ?? "(system-assigned)", dataverseScope);
+                    "Connecting Dataverse ServiceClient via Managed Identity ({CredentialSource}, scope {Scope})",
+                    managedIdentityCredential is not null ? "injected shared credential" : "locally-built fallback",
+                    dataverseScope);
                 return new ServiceClient(
                     instanceUrl: instanceUri,
                     tokenProviderFunction: (string resourceUri) =>
@@ -190,6 +210,65 @@ public class DataverseServiceClientImpl : IDataverseService, IDisposable
                 throw;
             }
         }, LazyThreadSafetyMode.ExecutionAndPublication);
+    }
+
+    /// <summary>
+    /// Builds the app-only managed-identity credential for call sites that inject none. Mirrors the
+    /// contract of the BFF's <c>ManagedIdentityCredentialFactory</c>, which cannot be referenced from
+    /// this base-layer library (FR-14).
+    /// </summary>
+    /// <remarks>
+    /// This replaces an inline <c>new DefaultAzureCredential(...)</c> that had drifted from the shared
+    /// factory in three ways. None of them fails loudly, which is why they survived:
+    ///
+    /// <list type="number">
+    /// <item><b>Inverted precedence.</b> It read <c>ManagedIdentity:ClientId</c> BEFORE
+    ///   <c>Graph:ManagedIdentity:ClientId</c>; the factory reads the canonical Spaarke-Auth-v2 key first
+    ///   and treats the bare one as the legacy fallback. In an environment where both are set and differ,
+    ///   Dataverse would authenticate as a DIFFERENT identity than Graph — the identity-conflation hazard
+    ///   ADR-028 A4 exists to prevent, presenting as unexplained Dataverse-only authorization failures.</item>
+    /// <item><b>Blank not normalised.</b> A bare <c>??</c> lets a present-but-EMPTY key (an App Service
+    ///   setting cleared to blank, or <c>"ClientId": ""</c>) shadow a correctly-set canonical key and then
+    ///   silently fall through to an unpinned credential — which on a host with several attached
+    ///   identities fails with "Unable to load the proper Managed Identity".</item>
+    /// <item><b>No tenant pinning.</b> The factory pins <c>TenantId</c> from
+    ///   <c>AZURE_TENANT_ID</c>/<c>TENANT_ID</c> (tenant-isolation invariant I5 / FR-32) so the credential
+    ///   cannot silently resolve to the MI host's default tenant. Today that is the same Spaarke tenant,
+    ///   so this is a forcing function rather than a live bug — which is exactly why it needs to be in
+    ///   place BEFORE a multi-tenant switch, not after.</item>
+    /// </list>
+    /// </remarks>
+    private static TokenCredential BuildFallbackManagedIdentityCredential(
+        IConfiguration configuration,
+        ILogger logger)
+    {
+        // Canonical key first, legacy second, blank normalised to null at each step.
+        var miClientId = configuration["Graph:ManagedIdentity:ClientId"];
+        if (string.IsNullOrWhiteSpace(miClientId))
+        {
+            var legacy = configuration["ManagedIdentity:ClientId"];
+            miClientId = string.IsNullOrWhiteSpace(legacy) ? null : legacy;
+        }
+
+        var tenantId = configuration["AZURE_TENANT_ID"] ?? configuration["TENANT_ID"];
+
+        var options = new DefaultAzureCredentialOptions();
+        if (!string.IsNullOrWhiteSpace(miClientId))
+        {
+            options.ManagedIdentityClientId = miClientId;
+        }
+        if (!string.IsNullOrWhiteSpace(tenantId))
+        {
+            options.TenantId = tenantId;
+        }
+
+        logger.LogInformation(
+            "DataverseServiceClientImpl: no managed-identity credential was injected — built one locally " +
+            "(UAMI clientId {ClientId}, tenant {TenantId}). Inside the BFF the shared " +
+            "ManagedIdentityCredentialFactory credential is injected instead (ADR-028 A4).",
+            miClientId ?? "(system-assigned)", tenantId ?? "(host default)");
+
+        return new DefaultAzureCredential(options);
     }
 
     public async Task<string> CreateDocumentAsync(CreateDocumentRequest request, CancellationToken ct = default)

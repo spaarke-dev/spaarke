@@ -288,6 +288,22 @@ public class CatalogToolDescriptionParityContractTests
             {
                 args[i] = CreateStub(p.ParameterType);
             }
+            catch (Exception ex) when (p.IsOptional)
+            {
+                // An OPTIONAL dependency that cannot be stubbed is not a parity problem — this helper
+                // exists only to read a compile-time Metadata field initializer, and an optional
+                // parameter's whole contract is that the handler works without it. Falling back to the
+                // declared default keeps the guard aimed at description drift instead of failing on the
+                // shape of a dependency graph it never invokes.
+                //
+                // Added by spaarkeai-compose-r8 task 061: RecallSessionFileHandler gained an optional
+                // SessionFileRehydrationService (FR-B02). It is a SEALED concrete class, so CreateStub
+                // recursed into its smallest ctor and on into the Azure Search client graph, which threw
+                // UriFormatException("The URI is empty"). Every future optional concrete dependency would
+                // have hit the same wall; this fixes the class, not the instance.
+                _ = ex;
+                args[i] = p.HasDefaultValue ? p.DefaultValue : null;
+            }
             catch (Exception ex)
             {
                 throw new InvalidOperationException(

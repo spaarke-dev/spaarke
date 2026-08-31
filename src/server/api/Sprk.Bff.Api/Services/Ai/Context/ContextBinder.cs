@@ -273,12 +273,18 @@ public sealed class ContextBinder : IContextBinder
                 };
             }
 
-            // (3) A declared operand field value (selectionText / changesText / documentText) → { field: value }.
+            // (3) A declared operand field value (selectionText / changesText / documentText) → { field: value },
+            //     PLUS any DECLARED COMPANION inputs the caller supplied (see CollectDeclaredCompanions).
             var declared = GetDeclaredProperties(request.InputSchemaJson);
             if (TryFindDeclaredOperandField(args, declared, out var field, out var kind, out var value))
             {
-                var operandObject = JsonSerializer.SerializeToElement(
-                    new Dictionary<string, JsonElement> { [field] = value });
+                var members = new Dictionary<string, JsonElement> { [field] = value };
+                foreach (var companion in CollectDeclaredCompanions(args, declared, field))
+                {
+                    members[companion.Key] = companion.Value;
+                }
+
+                var operandObject = JsonSerializer.SerializeToElement(members);
                 return new ResolvedOperand
                 {
                     Channel = OperandChannel.Input,
@@ -348,6 +354,92 @@ public sealed class ContextBinder : IContextBinder
         key = value;
         return true;
     }
+
+    /// <summary>
+    /// The DECLARED COMPANION inputs that ride alongside the operand in the <c>## Input</c> object
+    /// (spaarkeai-compose-r8 task 051, FR-C03). Added because the operand channel is single-valued by
+    /// construction — <see cref="TryFindDeclaredOperandField"/> returns on the first vocabulary match and
+    /// the operand object carries exactly one key — so it can say WHAT content a completion runs over but
+    /// never WHERE that content came from. A caller holding a deterministic anchor (Compose captures a
+    /// stable <c>w14:paraId</c> at selection time) had nowhere to put it: the arg was accepted and then
+    /// silently dropped before the prompt, leaving the model able to name its edit target only by quoting
+    /// prose back. Quoting is a GENERATION step and generation is lossy, which is precisely the
+    /// "wording differs slightly" failure Compose kept hitting.
+    ///
+    /// <para>
+    /// <b>Declaration is the contract.</b> A property reaches the model when the Action DECLARES it in
+    /// <c>sprk_inputschema</c> and the caller SUPPLIES it — nothing else. That is what declaring an input
+    /// already means, and it closes the accepted-and-ignored trap that hid the defect. Capability shape
+    /// stays in catalog DATA (ADR-039): a new companion is an Action-row edit, not a code change.
+    /// </para>
+    ///
+    /// <para>
+    /// <b>Why not widen <see cref="OperandVocabulary"/>.</b> The vocabulary is a PICK-ONE list, not an
+    /// inclusion list. A fourth entry would COMPETE with <c>selectionText</c> rather than accompany it —
+    /// whichever came first would win and the other would vanish — breaking every selection dispatch. And
+    /// nesting the anchor inside the operand value (<c>selectionText: {text, paraId}</c>) is a type pun:
+    /// <see cref="OperandKind.SelectionText"/> means the TEXT, tiered as content, while a paraId is a
+    /// Tier-1 opaque identifier. Both alternatives were considered and rejected.
+    /// </para>
+    ///
+    /// <para>
+    /// <b>Bounds.</b> Never the operand field itself; never another <see cref="OperandVocabulary"/> name
+    /// (a second content field must not enter this way); never the <c>ledger_resolution</c> control member;
+    /// null/empty values skipped. Oversized companions are SKIPPED AND LOGGED rather than truncated — a
+    /// half-sent identifier list is worse than an absent one, because the model would treat it as complete.
+    /// </para>
+    /// </summary>
+    private IEnumerable<KeyValuePair<string, JsonElement>> CollectDeclaredCompanions(
+        JsonElement args,
+        IReadOnlySet<string>? declaredProperties,
+        string operandField)
+    {
+        // No declaration ⇒ no companions. The closed vocabulary is the whole contract in that case, so
+        // there is nothing that authorized any other arg to reach the model.
+        if (declaredProperties is null || declaredProperties.Count == 0)
+        {
+            yield break;
+        }
+
+        var emitted = 0;
+        foreach (var property in args.EnumerateObject())
+        {
+            if (emitted >= MaxDeclaredCompanions)
+            {
+                _logger.LogWarning(
+                    "ContextBinder: companion cap ({Max}) reached; later declared inputs were not sent to the model.",
+                    MaxDeclaredCompanions);
+                yield break;
+            }
+
+            if (string.Equals(property.Name, operandField, StringComparison.Ordinal)
+                || string.Equals(property.Name, LedgerResolutionMember, StringComparison.Ordinal)
+                || OperandVocabulary.Any(v => string.Equals(v.Field, property.Name, StringComparison.Ordinal))
+                || !declaredProperties.Contains(property.Name)
+                || !IsNonEmptyOperandValue(property.Value))
+            {
+                continue;
+            }
+
+            var raw = property.Value.GetRawText();
+            if (raw.Length > MaxDeclaredCompanionChars)
+            {
+                _logger.LogWarning(
+                    "ContextBinder: declared input '{Field}' ({Chars} chars) exceeds the companion cap and was NOT sent to the model.",
+                    property.Name, raw.Length);
+                continue;
+            }
+
+            emitted++;
+            yield return new KeyValuePair<string, JsonElement>(property.Name, property.Value.Clone());
+        }
+    }
+
+    /// <summary>Max declared companion inputs rendered alongside the operand.</summary>
+    private const int MaxDeclaredCompanions = 8;
+
+    /// <summary>Max serialized size of ONE companion value. Oversize is skipped + logged, never truncated.</summary>
+    private const int MaxDeclaredCompanionChars = 32 * 1024;
 
     /// <summary>
     /// Finds the first closed-vocabulary operand field that is (a) declared by the schema when a schema is

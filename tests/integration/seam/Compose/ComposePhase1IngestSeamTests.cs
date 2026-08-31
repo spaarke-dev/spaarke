@@ -87,8 +87,8 @@ public sealed class ComposePhase1IngestSeamTests : IClassFixture<ComposeFidelity
         SetupDownload(driveId, speId, docName, () => storage);
         _fixture.SpeMock
             .Setup(s => s.ReplaceFileContentAsUserAsync(
-                It.IsAny<HttpContext>(), It.IsAny<string>(), It.IsAny<string>(), It.IsAny<Stream>(), It.IsAny<CancellationToken>()))
-            .Callback<HttpContext, string, string, Stream, CancellationToken>((_, _, _, stream, _) =>
+                It.IsAny<HttpContext>(), It.IsAny<string>(), It.IsAny<string>(), It.IsAny<Stream>(), It.IsAny<string?>(), It.IsAny<CancellationToken>()))
+            .Callback<HttpContext, string, string, Stream, string?, CancellationToken>((_, _, _, stream, _, _) =>
             {
                 using var ms = new MemoryStream();
                 stream.CopyTo(ms);
@@ -291,7 +291,16 @@ public sealed class ComposePhase1IngestSeamTests : IClassFixture<ComposeFidelity
         body!.Projection.Status.Should().NotBe("failed");
         body.Projection.Html.Should().Contain("data-atom-kind=\"field\"").And.Contain("contenteditable=\"false\"");
         body.Projection.Html.Should().Contain("data-atom-kind=\"sdt\"").And.Contain("data-atomid");
-        body.Projection.Html.Should().NotContain("PAGE", "the field CODE (w:instrText) must never be editor-visible");
+        // Task 049 sharpened this. It was `Html.Should().NotContain("PAGE")` — a proxy that reads the whole
+        // markup string, attributes included. The field atom now carries its instruction in a `data-*`
+        // attribute so an edited paragraph can hand the field back rather than dropping it, so the proxy no
+        // longer separates "shown to the user" from "present in the markup". The property is unchanged and
+        // asserted directly: the field code is absent from the RENDERED TEXT.
+        System.Text.RegularExpressions.Regex.Replace(body.Projection.Html, "<[^>]*>", string.Empty)
+            .Should().NotContain("PAGE", "the field CODE (w:instrText) must never be editor-visible");
+        body.Projection.Html.Should().Contain("data-field-instr=\" PAGE \"",
+            "…while the instruction IS carried as atom payload, which is what makes the field survive an " +
+            "edit to its paragraph (task 049)");
 
         var save = await client.PostAsJsonAsync($"/api/compose/documents/{speId}/save", new
         {
@@ -377,8 +386,8 @@ public sealed class ComposePhase1IngestSeamTests : IClassFixture<ComposeFidelity
     {
         _fixture.SpeMock
             .Setup(s => s.ReplaceFileContentAsUserAsync(
-                It.IsAny<HttpContext>(), driveId, speId, It.IsAny<Stream>(), It.IsAny<CancellationToken>()))
-            .Callback<HttpContext, string, string, Stream, CancellationToken>((_, _, _, stream, _) =>
+                It.IsAny<HttpContext>(), driveId, speId, It.IsAny<Stream>(), It.IsAny<string?>(), It.IsAny<CancellationToken>()))
+            .Callback<HttpContext, string, string, Stream, string?, CancellationToken>((_, _, _, stream, _, _) =>
             {
                 using var ms = new MemoryStream();
                 stream.CopyTo(ms);

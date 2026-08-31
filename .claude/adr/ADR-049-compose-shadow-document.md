@@ -1,6 +1,6 @@
 # ADR-049: Compose Shadow Document Architecture (Concise)
 
-> **Status**: Proposed (2026-07-22) — authored by `spaarkeai-compose-r4` task 001 (Phase 0 gate). Accepted at the Phase-0 proof gate (task 006: operation schema + applier spike on the CIPO doc + corpus byte-diff harness green).
+> **Status**: **Accepted**, amended three times — R4 (2026-07-22, `spaarkeai-compose-r4` task 001; accepted at the Phase-0 proof gate, task 006), R6 (2026-08-05, render-on-save), **R8 (2026-08-21, base re-projection + block copy-through — the current save contract)**. Read the R8 amendment before touching the save path: the two earlier amendments are each superseded in part.
 > **Domain**: Compose — the AI-native legal drafting save/edit layer (`Services/Compose/`, `Spaarke.Compose.Components`).
 > **Source**: `spaarkeai-compose-r4` design §0 (D1–D5), §3 (I-1…I-7), §5 (architecture), §9 (ADR Tensions); two external senior reviews (`notes/senior-reviews-2026-07-22.md`); prior-art catalog (`notes/bridge-prior-art.md`).
 > **Why this ADR exists**: R1–R3 were unshippable for two structural reasons — **fidelity loss** on untouched content (the save re-derived the `.docx` from a lossy editor model) and **interior-location failures / HTTP 422** (annotations were placed by whole-document text-search). Both are consequences of the *translation/save layer*, not the feature set. No ADR governed how editor edits map to OOXML bytes; this ADR does, at the **principle level** (the property that kept ADR-028/039 durable while mechanism-shaped ADRs rotted).
@@ -106,7 +106,98 @@ R4 (above) made the **write/save** side principled; **R4.5** completed the **rea
 
 ---
 
+## R8 Path-B Amendment — base re-projection + block copy-through (per CLAUDE.md §6.5)
+
+> **Amendment 2026-08-21 · author `spaarkeai-compose-r8` · Path B (ADR amendment)** — owner-accepted
+> 2026-08-21 ("ADR-049 is fine."). Drafted by task 031 on the evidence of the Phase-3 architecture gate;
+> applied at the start of task 040 so that no Phase-4 code is written against the superseded rule. Scope is
+> the **write/save path only**; the R4.5 read/reference invariants **F-1…F-5** and I-7 remain in force.
+> Full reasoning: [`docs/adr/ADR-049-compose-shadow-document.md`](../../docs/adr/ADR-049-compose-shadow-document.md).
+
+🔔 **ADR Conflict — Resolution (Path B, amendment)**
+
+- **Rules challenged**: the **R6 amendment** ("save renders a new immutable version from the canonical model")
+  *and* **I-4** as restored in intent ("untouched XML subtrees are byte-identical after save"). Both govern
+  the save path; each prior amendment secured one of two non-negotiable properties by surrendering the other.
+- **Conflict**: R4 took preservation and lost termination (surgical anchoring → the HTTP 422 treadmill);
+  R6 took termination and lost preservation (whole-body rebuild from a model carrying `w:jc`, `w:b` and `w:i`
+  — everything else in `w:pPr`/`w:rPr` is discarded at projection time). Measured on the 18-document corpus,
+  master preserves **18.08%** of untouched blocks and **6.67%** of the near tier; on a 109-block patent-claims
+  document, **one block** survives.
+- **Resolution**: **the save renders from the model AND preserves untouched content. These are not
+  alternatives.** At save time the renderer re-projects the retained baseline server-side, pairs its blocks
+  against the posted model **by document order**, and dispatches per block:
+  - **unchanged block** → the baseline's own `w:p` subtree is **cloned verbatim**, with zero property logic;
+  - **changed block** → rendered from the model, with property inheritance from its baseline counterpart;
+  - **unmergeable block** → thin render **+ warning**. Never a content refusal.
+- **Impact**: R6's control flow is unchanged (ADR-049 **I-5** — one body author — is reinforced, not relaxed:
+  the merge lives *inside* `ComposeDocumentRenderer`). What is added is the **base side** the render path
+  never had. Measured on the corpus: overall preservation **18.08% → 100%**, near-tier **6.67% → 100%**, zero
+  hard-fails, zero cumulative drift over 5 round trips, +2–19 ms per save, no new package.
+- **Alternative considered (rejected)**: **Path A** (project-scoped exception) — wrong instrument; this is not
+  a narrow deviation but a correction to the governing decision, and leaving the ADR as written would let a
+  future project re-derive R6's mistake from a still-authoritative rule. **Path C** (comply with R6) — rejected
+  because complying re-ships the silent fidelity loss this release exists to fix.
+
+There is **no per-construct preservation logic and there must not be.** Properties survive because an
+untouched block is **never re-derived** — preservation is a consequence of not rewriting, not a feature list.
+
+### The seven standing invariants
+
+1. **Every save terminates in a defined outcome** — never an undefined content refusal.
+2. **Untouched blocks are preserved.**
+3. **The projection is the only coordinate system** — nothing else independently resolves document positions.
+4. **`paraId` is a hint in the *file*, authoritative within a *session*.** Duplicates are spec-legal across
+   `mc:AlternateContent`; Word regenerates ids on save. Pair by document order; `paraId` corroborates, never keys.
+5. **Concurrency is last-writer-wins with a warning**, enforced by `If-Match` at the storage boundary.
+6. **One edit-capture mechanism** — keystroke or model, the same anchor capture and rebasing.
+7. **Deterministic information available at capture time MUST be carried, not re-derived.**
+
+### The paired MUST (load-bearing — do not restate singly)
+
+> **Invariants (1) and (2) are a PAIR. No future amendment may trade one away to obtain the other.**
+> An amendment that improves termination at the cost of preservation, or preservation at the cost of
+> termination, is rejected **by this rule alone**, regardless of its other merits.
+
+Both prior amendments made exactly that trade. This clause exists so a fourth cannot.
+
+### On invariant (7)
+
+Stated as a **general rule**, not per surface. It is the rule beneath three of R8's four root causes: R6's
+thin content model re-derived formatting it had been handed; the AI edit contract re-derived a location it
+had already captured; and the demand for a fuzzy matcher was a consequence of the second. **If a design
+re-derives something it already had, that is the bug** — and naming it once, generally, is how it stops
+being rediscovered per surface.
+
+### Mechanism MUSTs (normative — binding on Phase 4)
+
+- **MUST** capture the retained baseline's **direct `w:body` children** before the swap. **MUST NOT** use
+  `body.Descendants<Paragraph>()` — it interleaves `w:txbxContent` paragraphs into the body sequence and
+  mis-pairs every block after the first text box. `mc:AlternateContent`, `w:txbxContent`, `mc:Choice` and
+  `mc:Fallback` are **opaque**: carried whole, never entered.
+- **MUST** decide "unchanged" against a **fresh server-side re-projection** of the baseline — never raw text,
+  never the client's copy. Base and posted are then two values of the same type from the same builder, and
+  their comparison is total.
+- **MUST NOT** decide "unchanged" by text equality. Two paragraphs with identical text can differ in
+  formatting, list level, comment anchors or revision state; a text shortcut clones a block the user *did*
+  change, silently discarding their edit — a worse failure than the one being fixed. The comparison **MUST
+  fail closed**: a block that cannot be compared is treated as changed and re-rendered.
+- **MUST** fail open on an unavailable baseline: a baseline that cannot be re-projected yields no merge and
+  the render proceeds as R6 does. A save is **never refused** because the base side was unavailable (invariant 1).
+
+### Known residue (do not read this amendment as "fidelity solved")
+
+- **The edited block is still rebuilt from the model.** The gate measures **untouched** blocks and excludes
+  the edited one by construction. Property inheritance (R8 FR-A04, task 041) narrows this; it does not
+  eliminate it, and 041 is **not optional and not deferrable**.
+- **Reorder yields no benefit.** Document-order pairing cannot recognise a moved block; a reordered body
+  degrades to R6's behaviour — never a failure, but no preservation.
+- **`ComposeShadowPatchEngine` is NOT confirmed as subsumed.** It serves the op-log path, which this
+  amendment does not touch. It **MUST NOT** be deleted on this evidence.
+
+---
+
 ## Integration
 ADR-013 (facade boundary — no AI internals in `Services/Compose/`) · ADR-007 (`SpeFileStore` — no Graph types above it) · ADR-009 (version/re-anchor state via `IDistributedCache`) · ADR-010 (Patch Engine = stateless concrete singleton) · ADR-028 (client fetches via `@spaarke/auth`) · ADR-038 (seam DoD; banned mock/DI/ctor tests) · ADR-039/040 (AI engine frozen; redline path envelope-only; no new dispatch).
 
-**Full reasoning**: `projects/spaarkeai-compose-r4/design.md` (§0 D1–D5, §3 invariants, §5 architecture, §9 ADR Tensions) + `spec.md`. No `docs/adr/` twin yet — promote to a full ADR if the pattern generalizes beyond Compose (e.g. when D3's multi-format phase lands).
+**Full reasoning**: [`docs/adr/ADR-049-compose-shadow-document.md`](../../docs/adr/ADR-049-compose-shadow-document.md) (the extended record — currently the R8 third amendment in full) · `projects/spaarkeai-compose-r4/design.md` (§0 D1–D5, §3 invariants, §5 architecture, §9 ADR Tensions) + `spec.md` (R4) · `projects/spaarkeai-compose-fidelity-r4.5/` (R4.5 read/reference) · `projects/spaarkeai-compose-r6/` (R6 render-on-save) · `projects/spaarkeai-compose-r8/notes/{gate-contract,control-measurement,merge-prototype-results,gate-decision}.md` (R8 evidence).

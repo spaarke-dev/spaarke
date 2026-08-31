@@ -204,7 +204,7 @@ public sealed class ComposeServiceUploadFidelityTests
             DisplayName = "Unedited draft",
         };
 
-        await sut.SaveAsync(request, new DefaultHttpContext(), CancellationToken.None);
+        await sut.SaveAsync(request, TestHttpContexts.Authenticated(), CancellationToken.None);
 
         capturedBytes().Should().BeEquivalentTo(
             original.ToArray(),
@@ -232,7 +232,7 @@ public sealed class ComposeServiceUploadFidelityTests
             DisplayName = "Edited draft",
         };
 
-        await sut.SaveAsync(request, new DefaultHttpContext(), CancellationToken.None);
+        await sut.SaveAsync(request, TestHttpContexts.Authenticated(), CancellationToken.None);
 
         var persisted = capturedBytes();
         persisted.Should().BeEquivalentTo(
@@ -263,7 +263,7 @@ public sealed class ComposeServiceUploadFidelityTests
             TenantId = Tenant,
         };
 
-        await sut.SaveAsync(request, new DefaultHttpContext(), CancellationToken.None);
+        await sut.SaveAsync(request, TestHttpContexts.Authenticated(), CancellationToken.None);
 
         capturedBytes().Should().BeEquivalentTo(
             original.ToArray(),
@@ -295,7 +295,7 @@ public sealed class ComposeServiceUploadFidelityTests
             TenantId = Tenant,
         };
 
-        var result = await sut.SaveAsync(request, new DefaultHttpContext(), CancellationToken.None);
+        var result = await sut.SaveAsync(request, TestHttpContexts.Authenticated(), CancellationToken.None);
 
         // Strict mocks (ISpeFileOperations/IGenericEntityService/IPostUploadIndexingEnqueuer) —
         // any unexpected collaborator call (e.g. a hypothetical server-side regeneration hook)

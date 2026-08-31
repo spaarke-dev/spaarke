@@ -61,7 +61,7 @@ public sealed class DailyBriefingResponseShapeTests
             request,
             NullLoggerFactory.Instance,
             composite,
-            new DefaultHttpContext(),
+            TestHttpContexts.Authenticated(),
             CancellationToken.None
         })!;
 

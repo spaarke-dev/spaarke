@@ -53,6 +53,21 @@ public class StoredSession
     [JsonPropertyName("tenantId")]
     public string TenantId { get; set; } = string.Empty;
 
+    /// <summary>
+    /// Entra <c>oid</c> of the user who owns this session (issue #863). The warm-tier half of
+    /// <c>ChatSession.OwnerOid</c> — see that property for the fail-closed contract and for why
+    /// this is an <c>oid</c> rather than <c>sub</c> or a Dataverse <c>systemuserid</c>.
+    /// </summary>
+    /// <remarks>
+    /// Also the predicate <see cref="SessionPersistenceService.ListRecentSessionsAsync"/> filters
+    /// the History list on. Before it existed that query was tenant-scoped only, which listed every
+    /// user's sessions — with titles and content previews — to every other user in the tenant.
+    /// <see langword="null"/> on documents written before #863; those match no caller and are
+    /// therefore listed to nobody, which is the intended outcome, not a gap.
+    /// </remarks>
+    [JsonPropertyName("ownerOid")]
+    public string? OwnerOid { get; set; }
+
     /// <summary>Playbook that governs this session's agent behaviour. Nullable for knowledge-only sessions.</summary>
     [JsonPropertyName("playbookId")]
     public Guid? PlaybookId { get; set; }

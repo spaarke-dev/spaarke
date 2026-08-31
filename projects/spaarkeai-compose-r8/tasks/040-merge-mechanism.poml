@@ -1,0 +1,150 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="040" project="spaarkeai-compose-r8">
+  <metadata>
+    <title>FR-A01/A02/A03/A04 — The merge mechanism: baseline stamping · server-side re-projection oracle · block copy-through · property inheritance</title>
+    <phase>4 Track A — Faithful Save</phase>
+    <gate>passed-031</gate>
+    <status>completed</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>The project's central architectural change, landing in the single body author. PROVISIONAL — amendable by task 031's gate findings.</rigor-reason>
+    <model-tier>opus</model-tier>
+    <model-tier-reason>Capability-matched, top of the project: this is the production form of the bet. The prototype proved the model; this must prove the implementation, in a 2,300-line file, against pathological OOXML, without a second body author. Every failure mode is silent — a merge that mis-pairs blocks produces a document that opens fine and is subtly wrong.</model-tier-reason>
+    <effort>max</effort>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Rewrites the core of `ComposeDocumentRenderer`; everything in Phase 4 and Track D depends on it.</parallel-reason>
+    <deps>031</deps>
+    <tags>bff-api, compose, save-path, testing, integration-test</tags>
+    <estimated-effort>14 hours</estimated-effort>
+  </metadata>
+
+  <prompt>
+    ✅ **RECONCILED + COMPLETE (2026-08-21).** Five reconciliations against the gate findings are recorded
+    in `notes/merge-mechanism-results.md` §1 — most importantly FR-A01 (stamper promotion) was DROPPED as
+    proved-unnecessary, and pairing is by longest common subsequence rather than document order, because
+    positional pairing gives ZERO preservation on insert/delete (the prototype never measured either).
+
+    ⚠️ **PROVISIONAL** — authored before the Phase-3 gate. Task 031 may amend this POML based on what the
+    prototype learned. Re-read `notes/gate-decision.md` and `notes/merge-prototype-results.md` FIRST, and
+    treat their findings as authoritative over anything here that conflicts.
+
+    Implement the merge in production form, all four requirements in ONE file-pass because they are one
+    mechanism and splitting them means four sequential passes over the most contended file in the repo:
+
+    **FR-A01 Baseline stamping** — promote `ComposeBaselineParaIdStamper` from the op-log path
+    (`ComposeService.cs` ~:1280) to the RENDER path. Preserve its fill-gaps-only, fail-open, text-verified
+    behavior exactly — those properties are why it is safe to run on real documents.
+
+    **FR-A02 Re-projection oracle** — decide "unchanged" by comparing the posted block against a FRESH
+    server-side re-projection of the stamped baseline. Never raw text. Never client trust. A paragraph
+    containing tabs, breaks or fields must compare correctly.
+
+    **FR-A03 Block copy-through** — unchanged blocks are cloned WHOLE from the baseline `w:p` subtree, with
+    zero property logic. Tabs, soft breaks, footnote refs, field results, `w:sym` and interior `sectPr`
+    survive because nothing interprets them.
+
+    **FR-A04 Property inheritance** — edited blocks render from the model but inherit from the base block
+    (clone `pPr`, apply dominant `rPr`), so an edit inside a formatted run does not collapse the paragraph
+    to Normal.
+
+    The floor for any block the mechanism cannot handle is thin render + warning — never a refusal.
+  </prompt>
+
+  <role>SPAARKE backend architect. Deep WordprocessingML and `DocumentFormat.OpenXml` DOM expertise. Follow ADR-049 (as amended by task 031), ADR-007, ADR-010 and ADR-038.</role>
+
+  <goal>
+    A save that edits one paragraph leaves every other block XML-equivalent to its original, measured by the
+    task-020 gate at both comparison levels, meeting the thresholds task 031 confirmed. Exactly one body
+    author. No refusal path introduced.
+  </goal>
+
+  <context>
+    <background>
+      `ComposeDocumentRenderer.RenderIntoCarrier` (~:399) calls `body.RemoveAllChildren()` (~:449) and rebuilds
+      all 40 pages from a five-node editor view. That single line is R6's silent fidelity loss. The merge
+      replaces it with: clone what did not change, render what did.
+
+      `ComposeFormatChange.PreviousPropertiesXml` (~:131 in ComposeContentModel.cs) is the proven
+      opaque-XML-carry-with-SDK-parse-gate pattern in this codebase — generalize it rather than inventing a
+      new carry mechanism.
+    </background>
+    <relevant-files>
+      <file role="primary-edit">src/server/api/Sprk.Bff.Api/Services/Compose/ComposeDocumentRenderer.cs</file>
+      <file role="primary-edit">src/server/api/Sprk.Bff.Api/Services/Compose/ComposeService.cs</file>
+      <file role="reference-impl">src/server/api/Sprk.Bff.Api/Services/Compose/ComposeBaselineParaIdStamper.cs</file>
+      <file role="reference-impl">src/server/api/Sprk.Bff.Api/Services/Compose/ComposeContentModel.cs</file>
+      <file role="canonical-reference">src/server/api/Sprk.Bff.Api/Services/Compose/ComposeDocxProjectionBuilder.cs</file>
+      <file role="canonical-reference">projects/spaarkeai-compose-r8/notes/merge-prototype-results.md</file>
+      <file role="test">tests/integration/seam/Compose/ComposeFidelityGateHarnessTests.cs</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-049 I-5">Exactly ONE body author. The merge lands INSIDE `ComposeDocumentRenderer`. The spec's §11 table permits a separate merge FILE (required by Track D's ratchet obligation) but it must remain a collaborator of the renderer, not a second writer of body children.</constraint>
+    <constraint source="ADR-010">Decomposition produces INTERNAL collaborators, not new DI registrations. The ≤15 non-framework registration budget binds. Scope: any new type introduced here.</constraint>
+    <constraint source="project">MUST NOT walk `body.Descendants&lt;Paragraph&gt;()`. Direct `w:body` children only; `w:txbxContent` / `mc:Choice` / `mc:Fallback` are OPAQUE — cloned whole, never entered.</constraint>
+    <constraint source="project">MUST NOT treat `paraId` as a durable file key. Pair by document order with paraId as corroboration; duplicates → consume in document order, and on dup-detection fall back rather than mis-pair.</constraint>
+    <constraint source="project">"Unchanged" MUST be decided against a fresh server-side re-projection. MUST NOT use raw text equality or trust a client-supplied unchanged flag.</constraint>
+    <constraint source="project">The stamper's fill-gaps-only / fail-open / text-verified behavior MUST be preserved when promoted to the render path. Changing its semantics to suit the merge is out of scope and dangerous.</constraint>
+    <constraint source="ADR-049">MUST NOT reintroduce save-time anchor reconciliation or any HTTP 422 content refusal. A block the mechanism cannot handle degrades to thin render + warning.</constraint>
+    <constraint source="spec NFR-02">NO new NuGet. Pure `DocumentFormat.OpenXml`.</constraint>
+    <constraint source="spec NFR-07">No worse than one extra baseline projection + DOM clone per save. Measure and report.</constraint>
+    <constraint source="ADR-038">Coverage lives in `tests/integration/seam/**`. The gate harness is the primary assertion surface. No `Mock&lt;HttpMessageHandler&gt;`, DI-registration or ctor-null tests.</constraint>
+    <constraint source="project">Warnings for degraded blocks MUST use R7's existing degradation-copy layer. No new warning surface (root §11).</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>three-way merge, OOXML cloning, property inheritance, projection</topic>
+    <files>
+      <file>.claude/adr/ADR-049-compose-shadow-document.md</file>
+      <file>.claude/adr/ADR-010-di-minimalism.md</file>
+      <file>docs/architecture/COMPOSE-READ-REFERENCE-FIDELITY.md</file>
+      <file>.claude/patterns/testing/god-class-ratchet.md</file>
+      <file>projects/spaarkeai-compose-r8/spec.md</file>
+      <file>projects/spaarkeai-compose-r8/CLAUDE.md</file>
+      <file>projects/spaarkeai-compose-r8/notes/gate-decision.md</file>
+      <file>projects/spaarkeai-compose-r8/notes/merge-prototype-results.md</file>
+    </files>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="0" name="Rigor declaration">Declare rigor FULL; load gate-decision.md and merge-prototype-results.md FIRST (they may amend this task), then spec.md, CLAUDE.md, ADR-049.</step>
+    <step order="1">Reconcile this POML against the gate findings. Record any amendment explicitly before writing code.</step>
+    <step order="2">Promote the stamper to the render path in `ComposeService`, preserving its three safety properties.</step>
+    <step order="3">Implement the re-projection oracle: project the stamped baseline fresh at save time; compare posted block vs base block structurally.</step>
+    <step order="4">Implement copy-through: clone the whole `w:p` subtree for unchanged blocks. Zero property logic on this path — that is the point.</step>
+    <step order="5">Implement property inheritance for edited blocks: clone `pPr`, apply dominant `rPr`.</step>
+    <step order="6">Implement the per-block floor: thin render + warning via R7's degradation-copy layer.</step>
+    <step order="7">Place the merge in its own file as a renderer collaborator (Track D obligation) — no new DI registration.</step>
+    <step order="8">Run the gate. Meet the confirmed thresholds at both comparison levels. Measure the NFR-07 performance delta.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If gate thresholds are not met by the production implementation even though the prototype met them, STOP and diagnose the divergence — shipping a production merge that is worse than its own prototype is how R6 happened. Do not adjust the gate.</trigger>
+    <trigger>If the merge cannot be placed as a renderer collaborator without a second body author, surface it — ADR-049 I-5 is a MUST and this is a §6.5 situation, not an implementation shortcut.</trigger>
+  </escalation>
+
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Compose/ComposeDocumentRenderer.cs</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Compose/ (new merge collaborator file)</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Compose/ComposeService.cs</output>
+    <output type="test">tests/integration/seam/Compose/</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion>This POML was reconciled against `gate-decision.md` before implementation, and any amendment recorded.</criterion>
+    <criterion>The stamper runs on the render path with fill-gaps-only, fail-open and text-verified behavior intact.</criterion>
+    <criterion>"Unchanged" is decided against a fresh server-side re-projection — verified by reading the comparison code.</criterion>
+    <criterion>Unchanged blocks are cloned whole with zero property logic on that path.</criterion>
+    <criterion>A paragraph containing tabs, breaks and fields compares correctly (corpus-asserted).</criterion>
+    <criterion>An edit inside a formatted run does not collapse the paragraph to Normal (corpus-asserted).</criterion>
+    <criterion>Tabs, soft breaks, footnote refs, field results, `w:sym` and interior `sectPr` survive an unrelated edit.</criterion>
+    <criterion>The gate meets task 031's confirmed thresholds at BOTH comparison levels, with zero hard-fails.</criterion>
+    <criterion>NEGATIVE: `body.Descendants&lt;Paragraph&gt;()` does not appear in the merge path (grep).</criterion>
+    <criterion>NEGATIVE: exactly one body author — no second component writes body children.</criterion>
+    <criterion>NEGATIVE: no new DI registration was added (ADR-010).</criterion>
+    <criterion>NEGATIVE: no HTTP 422 / content refusal exists; unmergeable blocks thin-render with a warning through R7's existing copy layer.</criterion>
+    <criterion>NEGATIVE: no new NuGet; publish size reported (absolute + delta vs 44.96 MB); no new HIGH CVE.</criterion>
+    <criterion>NFR-07 performance delta measured and within budget.</criterion>
+  </acceptance-criteria>
+</task>

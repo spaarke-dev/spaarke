@@ -87,7 +87,7 @@ public sealed class ComposeNoOpRoundTripByteDiffSeamTests : IClassFixture<Compos
         using (var scope = _fixture.Services.CreateScope())
         {
             var sessions = scope.ServiceProvider.GetRequiredService<ChatSessionManager>();
-            var session = await sessions.CreateSessionAsync(ComposeFidelitySeamFixture.TestTenantId, documentId: speId);
+            var session = await sessions.CreateSessionAsync(ComposeFidelitySeamFixture.TestTenantId, TestSessionOwner.Oid, documentId: speId);
             sessionId = session.SessionId;
         }
 

@@ -1,4 +1,5 @@
 using System.Globalization;
+using System.Xml;
 using DocumentFormat.OpenXml;
 using DocumentFormat.OpenXml.Packaging;
 using DocumentFormat.OpenXml.Wordprocessing;
@@ -2835,14 +2836,63 @@ public sealed class ComposeShadowPatchEngine
             }
 
             var commentsPart = mainPart.GetPartsOfType<WordprocessingCommentsPart>().FirstOrDefault();
-            if (commentsPart?.Comments is { } comments)
+            if (commentsPart is not null)
             {
-                foreach (var comment in comments.Elements<Comment>())
+                foreach (var id in ReadCommentIdsWithoutLoadingThePart(commentsPart))
                 {
-                    if (comment.Id?.Value is { } v) yield return v;
+                    yield return id;
                 }
             }
         }
+
+        /// <summary>
+        /// Reads the comment ids straight off the part's XML stream, WITHOUT materializing its SDK DOM.
+        /// </summary>
+        /// <remarks>
+        /// <para>This method only needs ids for collision avoidance, but touching
+        /// <see cref="WordprocessingCommentsPart.Comments"/> loads the part's root element, which marks the
+        /// part dirty and makes the SDK re-serialize it on dispose. The bytes then differ from the original
+        /// even though nothing was edited — breaking the "every untouched package part is byte-identical"
+        /// guarantee the corpus byte-diff harness asserts.</para>
+        ///
+        /// <para>It went unnoticed because no corpus fixture had a comments part until task 042 added one.
+        /// The renderer already avoids the same trap by scanning the carrier bytes through a separate
+        /// read-only open (<c>ScanCarrierComments</c>); this is the equivalent for the op-log path.</para>
+        /// </remarks>
+        private static IEnumerable<string> ReadCommentIdsWithoutLoadingThePart(WordprocessingCommentsPart part)
+        {
+            var ids = new List<string>();
+            try
+            {
+                using var stream = part.GetStream(FileMode.Open, FileAccess.Read);
+                using var reader = XmlReader.Create(stream, new XmlReaderSettings { IgnoreWhitespace = true });
+                while (reader.Read())
+                {
+                    if (reader.NodeType != XmlNodeType.Element
+                        || !string.Equals(reader.LocalName, "comment", StringComparison.Ordinal))
+                    {
+                        continue;
+                    }
+
+                    var id = reader.GetAttribute("id", WordprocessingNamespace);
+                    if (!string.IsNullOrEmpty(id))
+                    {
+                        ids.Add(id);
+                    }
+                }
+            }
+            catch (XmlException)
+            {
+                // A malformed comments part yields no ids rather than failing the save. The cost is a
+                // possible id collision with a comment we could not read; the cost of throwing is refusing
+                // a save over a part the user never touched (ADR-049 invariant 1).
+            }
+
+            return ids;
+        }
+
+        private const string WordprocessingNamespace =
+            "http://schemas.openxmlformats.org/wordprocessingml/2006/main";
 
         private static string DeriveInitials(string author)
         {

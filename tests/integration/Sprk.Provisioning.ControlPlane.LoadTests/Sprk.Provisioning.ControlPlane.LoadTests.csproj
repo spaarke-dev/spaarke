@@ -147,4 +147,11 @@
     <ProjectReference Include="..\..\..\src\server\services\Sprk.Provisioning.ControlPlane.Api\Sprk.Provisioning.ControlPlane.Api.csproj" />
   </ItemGroup>
 
+
+  <!-- Shared test helpers (TestSessionOwner, TestHttpContexts, TestTokenCredential).
+       Linked rather than copied so every test project sees ONE definition; a second copy is how
+       two projects drift into disagreeing about what a test callers oid is. -->
+  <ItemGroup>
+    <Compile Include="..\Shared\**\*.cs" LinkBase="SharedTestHelpers" />
+  </ItemGroup>
 </Project>

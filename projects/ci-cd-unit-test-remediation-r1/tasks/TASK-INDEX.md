@@ -108,12 +108,17 @@
 | 080 | codify-build-vs-maintain-criteria | FULL | ✅ | **false** (`.claude/` write) | (Phase 2 complete) | 082 |
 | 086 | fix-ci-router-startup-failure | FULL | ✅ | **false** (hot-path `.github/workflows/`) | none | 071 (workflow infrastructure unblocked; SC-12 still gated on 087+088 underlying-test fixes) |
 | 087 | fix-adr-009-imemorycache-endpoints | FULL | ✅ | **false** (hot-path BFF production) | none | 071 (ADR-009 arch test passes locally) |
-| 088 | fix-adr-007-graph-isolation-endpoints | FULL | ⛔ | **false** (hot-path BFF production) | none (can start anytime) | **071** |
+| 088 | fix-adr-007-graph-isolation-endpoints | FULL | ✅ | **false** (hot-path BFF production) | none (can start anytime) | **071** | **Closed 2026-08-30 on evidence**: ADR-007 arch tests PASS 6/6 and are armed in the Tier 1 filter. The violation was fixed by other work during the window. This had been listed as a cutover (071) precondition — i.e. 071 was gated on a phantom blocker. |
 | 081 | build-test-diet-skill | FULL | ✅ | **false** (`.claude/` write — runs in parallel with 080 via main-session sequencing) | (Phase 2 complete) | 090 |
+| 091 | fix-tier2-realclock-test-failures (#848) | FULL | 🟡 | true | none | 090 | 4/5 fixed; 5th is a different defect (live Azure Search call in a "unit test" job) — escalated, blocked on the shadow window per the tier-file freeze. See `notes/091-realclock-findings.md`. |
+| 092 | make-prettier-check-reproducible (#850) | FULL | ✅ | true | none | 090 | Root cause: `endOfLine: crlf` backed by nothing — CI flagged 1,907 of 1,911 `.ts/.tsx` on line endings alone. Fixed to `auto`; verified 0 on both CRLF and LF trees. Freeze-safe. `notes/092-prettier-reproducibility.md`. |
+| 093 | fix-markdown-link-validator-scope (#849) | STANDARD | ✅ | true | none | 090 | Corpus 100,220 → 922 files; broken 1,212 → 267 (all verified real). Freeze-safe — no workflow touched. `notes/093-link-validator-scope.md`. |
+| 094 | extend-adr038-ban-enforcement (#864) | FULL | ✅ | true | 865 | 090 | All 17 bans accounted for: **5 armed** (B1/B4 prior + **B3/B12/B16** here), 12 documented-unenforceable with live counts. Migration cost 4 test methods in 2 files. ArchTests 136 → 139. **Tier-file edit** — filter verified by extracting the exact `--filter` string (22 → 25 selected). `notes/094-adr038-ban-census.md`. |
+| 095 | client-test-ci-workflow-phase1 (#851) | STANDARD | ✅ | true | none | 090 | New `client-tests.yml` — 730 test files / 40 packages now run. Nightly + dispatch, NOT on PR (runner contention vs the shadow window). Freeze-safe (new file). `notes/095-client-test-baseline.md`. |
 | 082 | rerun-inventory-broader-criteria | STANDARD | ✅ | true | 080 | 083 |
 | 083 | deep-cleanup-pr-1 (B4 ctor null-guards — bucket revised) | FULL | ✅ | **false** (strict serial) | 082 | 084 |
-| 084 | deep-cleanup-pr-2 (medium-confidence DELETE bucket) | FULL | ⛔ | **false** (strict serial) | 083 | 085 |
-| 085 | deep-cleanup-pr-3 (final sweep + dotnet build/test verification) | FULL | 🔲 | **false** (strict serial; unblocks Phase 3) | 084 | 070 → 071 |
+| 084 | deep-cleanup-pr-2 (medium-confidence DELETE bucket) | FULL | 🚫 | **false** (strict serial) | 083 | 085 | **Closed WITHOUT executing**, per its own verification (`notes/b10-verification-round5.md`): 247 rows scoped, **1** genuine. Six classifier defects found, every one an over-call. Residue routed to `/test-diet`. |
+| 085 | deep-cleanup-pr-3 (final sweep + dotnet build/test verification) | FULL | ✅ | **false** (strict serial; unblocks Phase 3) | 084 | 070 → 071 | **Complete as `notes/deep-cleanup-final-summary.md`.** Its POML goal (`≤3,500`) was stricter than SC-11, which marks that figure **(DIRECTIONAL, non-binding)**. Honest count: **7,260 — it went UP**. SC-11's binding clauses are met. |
 
 > **Parallel Groups added for Phase 2.5**:
 > - **PG-4 codification (main-session sequential)**: 080 → 081 (both `.claude/` writes; serialize per write boundary)

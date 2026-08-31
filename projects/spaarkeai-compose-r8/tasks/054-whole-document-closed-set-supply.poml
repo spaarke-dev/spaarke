@@ -1,0 +1,200 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="054" project="spaarkeai-compose-r8">
+  <metadata>
+    <title>FR-C03 (whole-document half) — enumerate the closed paraId set for the whole-document review pass and deliver it to the model; catalog change for `compose-revise-document`</title>
+    <phase>5 Track C — AI Edit Placement</phase>
+    <gate>blocked-on-051</gate>
+    <status>completed</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Changes what the whole-document review pass sends to the model and what its Action contract requires back; may cross into the SpaarkeAi code page (a hot path).</rigor-reason>
+    <model-tier>opus</model-tier>
+    <model-tier-reason>Capability-matched: the judgment is WHERE the closed set is enumerated — server-side from `ChatSession.ReferenceMap`, or client-side across a pane boundary — and both candidate homes sit near lines the project has already fenced (C-7's admission-gate boundary; ADR-043's "no engine reads hardcoded session state"). Choosing wrong here either re-opens a governance line or ships a second supply mechanism that task 055 then has to consume. Implementing either half, once chosen, is not the hard part.</model-tier-reason>
+    <effort>xhigh</effort>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Same Compose edit spine as 051/052/053; may also touch `src/solutions/SpaarkeAi/**`.</parallel-reason>
+    <deps>051</deps>
+    <tags>bff-api, frontend, compose, ai, spaarke-ai, testing</tags>
+    <estimated-effort>8 hours</estimated-effort>
+  </metadata>
+
+  <prompt>
+    Task 051 gave the SELECTION-scoped Compose capabilities a deterministic anchor end to end: the client
+    captures a `w14:paraId`, ADR-043 Amendment 1 carries it into the model's `## Input`, the Action schema
+    lets the model echo it back, and `ComposeAnchorResolver` places by it with zero text matching.
+
+    The WHOLE-DOCUMENT review pass (`compose-revise-document`) is the one path that still cannot work that
+    way, for a real reason: there is no selection, so there is no single paraId to send. It needs the other
+    half of FR-C03 — an ENUMERATED CLOSED SET of the document's paragraphs, supplied to the model, with the
+    model required to return an id drawn from that set.
+
+    The validate half already exists and is tested (`ComposeAnchorResolver` membership check →
+    `EditErrorKind.UnknownParaId`, refused loudly, never guessed). This task owns the SUPPLY half.
+
+    **The decision this task exists to make.** Where is the set enumerated?
+
+      (a) SERVER-SIDE from `ChatSession.ReferenceMap` (built at Compose Load, already persisted, already
+          the authoritative map `CitationResolver` reads). The dispatch already carries
+          `documentSessionId`, so the server can resolve it with NO client change and NO cross-pane
+          hand-off. Tension to resolve honestly: ADR-043's "no engine reads hardcoded session state", and
+          C-7's "not as a new admission gate in `SessionDispatchOrchestrator`". Neither obviously forbids
+          resolving a DECLARED input from session state — that is arguably the binder's own job — but the
+          line must be argued, not assumed.
+
+      (b) CLIENT-SIDE in `ConversationPane.tsx` (SpaarkeAi), which builds the dispatch slots today but does
+          NOT hold the paraId map — that lives in the Compose pane. Requires a cross-pane hand-off, makes
+          SpaarkeAi a hot-path touch, and lets a client assert the closed set the server will validate
+          against, which is the weaker trust position.
+
+    Pick one, state why in the task notes, and cite ADR-043 Amendment 1 (the companion-input channel this
+    rides on — no new mechanism is owed). If the chosen path needs SpaarkeAi changes, make them HERE; there
+    is no hand-off to another project.
+
+    **Then the catalog change, and NOT before the supply exists.** `compose-revise-document`'s `edits[]` and
+    `comments[]` gain `target_para_id`; its `sprk_inputschema` declares the paragraph-set input; the
+    systemPrompt gains the same TARGET IDENTITY rule the three selection Actions carry. Landing the schema
+    first would ask the model for ids it was never given and refuse every whole-document edit — strictly
+    worse than today's prose matching. Supply and catalog land together.
+  </prompt>
+
+  <role>SPAARKE full-stack developer. Expert in the Compose projection/reference map, `ContextBinder`'s declared-input channel (ADR-043 Amendment 1), the SpaarkeAi ConversationPane dispatch, and the Compose catalog Action seeds.</role>
+
+  <goal>
+    The whole-document review pass supplies the model an enumerated closed set of the document's paragraphs,
+    and `compose-revise-document` requires an id drawn from that set. An id outside it is refused loudly.
+    No second supply mechanism is introduced — the set rides the ADR-043 Amendment 1 declared-input channel.
+  </goal>
+
+  <context>
+    <background>
+      ADR-043 Amendment 1 (task 051, §6.5 Path B) opened the channel this task needs: an Action's DECLARED
+      inputs render into `## Input` alongside the operand. The paragraph set is just another declared input —
+      that is why the amendment was written generically rather than as a paraId special case.
+
+      Task 051 also proved the failure mode to avoid: a consumer built before its producer. Three links were
+      dark in one session (the Action schema, the Action `inputSchema`, and the deploy script's
+      `sprk_inputschema` mapping). Verify each link of THIS chain by test before declaring it done.
+
+      Size matters here in a way it did not for a single paraId. A whole document's paragraph set is many
+      entries; `ContextBinder`'s companion cap (`MaxDeclaredCompanionChars`) SKIPS an oversized value and
+      logs rather than truncating, precisely so a half-sent set is never presented to the model as complete.
+      Measure a realistic worst case and decide deliberately: trim the set (headings + numbered clauses
+      only?), raise the cap, or page it. Do NOT let it silently hit the cap.
+    </background>
+    <relevant-files>
+      <file role="primary-edit">infra/dataverse/actions/compose-revise-document.action.json</file>
+      <file role="primary-edit">src/server/api/Sprk.Bff.Api/Services/Ai/Context/ContextBinder.cs</file>
+      <file role="primary-edit">src/solutions/SpaarkeAi/src/components/conversation/ConversationPane.tsx</file>
+      <file role="reference">src/server/api/Sprk.Bff.Api/Services/Compose/ComposeAnchorResolver.cs</file>
+      <file role="reference">src/server/api/Sprk.Bff.Api/Services/Compose/ComposeService.cs (BuildReferenceMap)</file>
+      <file role="reference">src/server/api/Sprk.Bff.Api/Models/Ai/Chat/ChatSession.cs (ReferenceMap)</file>
+      <file role="canonical-reference">docs/adr/ADR-043-ai-capability-execution-spine.md (Amendment 1)</file>
+      <file role="canonical-reference">projects/spaarkeai-compose-r8/notes/adr-043-041-assessment.md (C-1 as amended, C-4, C-7)</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-043 Amendment 1">The set MUST ride the DECLARED-input channel. MUST NOT add a fourth `OperandVocabulary` entry (pick-one list — it would displace `selectionText`), and MUST NOT nest it inside the operand value (type pun).</constraint>
+    <constraint source="task 050 C-7">MUST NOT add a new admission gate in `SessionDispatchOrchestrator`, and MUST NOT add a new dispatch protocol, catalog kind, or `ActionKind`.</constraint>
+    <constraint source="project invariant 3">The projection is the ONLY coordinate system. The closed set MUST be the projection/session reference map — never a second enumeration.</constraint>
+    <constraint source="project">Catalog change and supply MUST land together. Requiring `target_para_id` before the set is supplied refuses every whole-document edit — worse than today.</constraint>
+    <constraint source="task 050 C-4">ADR-040 caps inline payloads at 128 KB and `ChatEndpoints.ProjectComposeOutputs` SKIPS truncated entries. A whole-document change list that now carries an anchor per edit grows. Measure the worst case and report headroom or the degradation.</constraint>
+    <constraint source="CLAUDE.md §17">If SpaarkeAi is touched, run `/conflict-check` FIRST, update the `projects/INDEX.md` hot-path row, and deploy BFF + `sprk_spaarkeai` together (NFR-05).</constraint>
+    <constraint source="project">MUST NOT delete or retire anything. Task 052 owns retirement and MUST NOT run until this task and 055 land.</constraint>
+    <constraint source="ADR-038">Seam tests. Every link verified by a test that was observed to FAIL before its fix — no consumer built for an unverified producer.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>Declared-input channel, session reference map, whole-document review dispatch</topic>
+    <files>
+      <file>docs/adr/ADR-043-ai-capability-execution-spine.md</file>
+      <file>.claude/adr/ADR-049-compose-shadow-document.md</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+      <file>projects/spaarkeai-compose-r8/notes/adr-043-041-assessment.md</file>
+      <file>projects/spaarkeai-compose-r8/spec.md</file>
+    </files>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="0" name="Rigor declaration">Declare rigor FULL; load the ADR-043 amendment and the assessment (C-1 as amended, C-4, C-7) FIRST.</step>
+    <step order="1">Trace the whole-document dispatch end to end and record where the paragraph set could enter. Name every link, as task 051 had to.</step>
+    <step order="2">DECIDE server-side vs client-side enumeration. Write the reasoning + the ADR line you are arguing against or within into `notes/`. Escalate per §6.5 if it needs an amendment.</step>
+    <step order="3">Size the set on a real corpus document. Decide trim / raise-cap / page BEFORE implementing, and never let it silently hit the companion cap.</step>
+    <step order="4">Write the failing seam test for the supply link, observe it fail, then implement.</step>
+    <step order="5">Land the `compose-revise-document` catalog change (inputSchema + `edits[]`/`comments[]` `target_para_id` + TARGET IDENTITY prompt rule) in the SAME change as the supply.</step>
+    <step order="6">Flip the negative test in `ComposeEditActionAnchorContractSeamTests` that currently PINS the whole-document omission, and move the Action onto the anchored list.</step>
+    <step order="7">Publish-size + no-new-NuGet + no-new-HIGH-CVE report; `/conflict-check` if SpaarkeAi was touched.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If server-side enumeration cannot be reconciled with ADR-043's "no engine reads hardcoded session state" without straining it, surface the conflict per §6.5 rather than choosing the client path by default to avoid the argument — the trust position matters more than the convenience.</trigger>
+    <trigger>If the realistic paragraph set cannot fit the companion cap without trimming that would make the closed set incomplete, STOP: an incomplete "closed" set is a contradiction, and the model would be refused on ids that genuinely exist.</trigger>
+  </escalation>
+
+  <outputs>
+    <output type="code">infra/dataverse/actions/compose-revise-document.action.json</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Ai/Context/ContextBinder.cs</output>
+    <output type="code">src/solutions/SpaarkeAi/src/components/conversation/ConversationPane.tsx (if the client path is chosen)</output>
+    <output type="test">tests/integration/seam/Compose/</output>
+    <output type="doc">projects/spaarkeai-compose-r8/notes/054-closed-set-supply-decision.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion>A whole-document review dispatch supplies the model an enumerated closed set of the document's paragraphs, asserted by a seam test that reads the RENDERED prompt.</criterion>
+    <criterion>The set is the projection/session reference map — no second enumeration exists (verified by reading).</criterion>
+    <criterion>`compose-revise-document` declares the set as an input AND requires `target_para_id` on `edits[]` and `comments[]`.</criterion>
+    <criterion>A returned id outside the set is refused loudly and never guessed (already implemented; asserted here for the whole-document path).</criterion>
+    <criterion>The enumeration decision is documented with its reasoning and the ADR line it was argued against.</criterion>
+    <criterion>Worst-case set size measured on a real corpus document; headroom stated, or the degradation stated explicitly. The companion cap is never hit silently.</criterion>
+    <criterion>Every link verified by a test observed to FAIL before its fix.</criterion>
+    <criterion>NEGATIVE: no fourth `OperandVocabulary` entry; the operand is not displaced.</criterion>
+    <criterion>NEGATIVE: no new dispatch, catalog kind, or `ActionKind`; no new admission gate in `SessionDispatchOrchestrator`.</criterion>
+    <criterion>NEGATIVE: nothing deleted or retired.</criterion>
+    <criterion>If SpaarkeAi was touched: `/conflict-check` run, `projects/INDEX.md` updated, co-deploy noted.</criterion>
+    <criterion>Publish size reported; no new NuGet; no new HIGH CVE.</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    COMPLETED 2026-08-24. Decision: **client-side, from the Compose editor pane, as an id-annotated
+    `documentText` operand** — full reasoning in `notes/054-closed-set-supply-decision.md`.
+
+    The task framed the choice as server (`ChatSession.ReferenceMap`) vs client, and expected the server to
+    win on trust. Tracing the dispatch inverted it on stronger grounds:
+
+    - The closed set is NOT a separate list. A side list forces the model to match a paragraph to an entry
+      by number or first-words — prose matching moved, not removed. Ids go inline (`[PARAID] text`), so
+      naming a target is a COPY. Measured: the side-list alternative costs 9.5x more per paragraph and at
+      800 paragraphs (84,000 chars) EXCEEDS `MaxDeclaredCompanionChars` (32,768), where an oversize
+      companion is skipped and logged — i.e. it would have silently produced the incomplete closed set the
+      second escalation trigger forbids.
+    - Only the LIVE editor holds the COMPLETE set. `ChatSession.ReferenceMap` is a Load-time snapshot that
+      omits paragraphs typed since AND carries no text to annotate with, so a server build would have to
+      re-project — re-deriving what was already in hand (invariant 7).
+    - Six dark links were found, not one. The decisive one: the FILE-operand path
+      (`SessionDispatchOrchestrator.ResolveFileOperandAsync`) passes NO `Args` and NO `InputSchemaJson` to
+      `ContextBinder`. Supplying a `documentText` operand flips the dispatch onto the structured path,
+      which is why this ALSO fixes `revisionIntent` — it did not reach the model at all before, so the
+      systemPrompt's four INSTRUCTIONS-BY-INTENT branches could not be selected and `flag-risks`
+      (comments-only) was indistinguishable from `improve-clarity`. Task 055 depends on that.
+
+    ZERO server code changed — it rides ADR-043 Amendment 1 unchanged (Path C, no escalation).
+
+    Verified by tests observed to FAIL first: 4 catalog-contract tests, and the client supply test
+    (neutralised the supply line and watched it fail, printing the exact pre-054 wire body
+    `args:{"revisionIntent":"flag-risks"}`). Suites: BFF 11,179 passed / 0 failed; Compose components
+    95 suites / 1,162 tests; SpaarkeAi conversation 75 suites / 720 tests.
+
+    Publish 43.72 MB compressed incl. PDBs (under the 60 MB ceiling); no new NuGet; no vulnerable packages.
+    C-4 measured: anchors add 3.50% at realistic payload sizes (40.4 KB, under the 128 KB cap); the
+    over-cap case at the schema's declared maxima is pre-existing and the anchor contributes 0.09%.
+
+    Known limitations recorded in the note (L-1 hard breaks collapse in `collectBlocks().text`; L-2 the
+    provider-registration race is argued not proven; L-3 the `[XXXXXXXX]` prefix is unescaped) — each
+    bounded and safe-degrading; L-1's fix would breach invariant 3 and belongs with `collectBlocks`.
+
+    Also found: `compose-draft-alternative` / `compose-compare-to-playbook` have the WHOLE mirror file in
+    `sprk_inputschema` in dev, so `GetDeclaredProperties` returns null and task 051's `targetParaId` would
+    NOT render. Fixed by the 051 deploy-script change — the Action seed deploy is a PREREQUISITE for
+    observing either task's work.
+  </notes>
+</task>
