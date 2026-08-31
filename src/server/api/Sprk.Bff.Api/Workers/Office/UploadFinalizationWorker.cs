@@ -801,13 +801,19 @@ public class UploadFinalizationWorker : BackgroundService, IOfficeJobHandler
             documentId,
             metadata.Subject);
 
-        // Map importance (0=Low, 1=Normal, 2=High) to Dataverse priority option values
+        // Map importance (0=Low, 1=Normal, 2=High) to sprk_emailartifact.sprk_priority
+        // option values. These MUST match the live option set — Urgent(100000000),
+        // High(100000001), Medium(100000002), Low(100000003). The prior values
+        // (192350001-3) are not in the option set, so Dataverse rejected every
+        // EmailArtifact create with AADSTS-style "outside the valid range", aborting
+        // the save job (no .eml document, no SPE file). Confirmed via App Insights
+        // 2026-08-31 (job 237a5c8d). Pre-existing on master.
         var priorityValue = metadata.Importance switch
         {
-            0 => 192350003, // Low
-            1 => 192350002, // Medium (Normal)
-            2 => 192350001, // Important (High)
-            _ => 192350002  // Default to Medium
+            0 => 100000003, // Low
+            1 => 100000002, // Medium (Normal)
+            2 => 100000001, // High
+            _ => 100000002  // Default to Medium
         };
 
         var request = new
