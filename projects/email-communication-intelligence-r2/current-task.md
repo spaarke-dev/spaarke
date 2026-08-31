@@ -15,6 +15,16 @@
 | **090 artifacts (this session)** | `notes/test-diet-report.md` (clean, 0 deletes) · `notes/drift-audit-2026-08-31.md` (clean) · `notes/lessons-learned.md` · `notes/044-addin-deploy-runbook.md` · publish ~**44 MB** compressed (≤60), **0 HIGH CVE** · r5 coord §10 close-out stamp · `projects/INDEX.md` row → WRAP-UP. |
 | **Next Action** | (1) Commit + push these wrap-up edits (PR via Path A). (2) **044**: operator runs `deploy-office-addins.yml` + live NAA smoke at an Office host (see `notes/044-addin-deploy-runbook.md`), then flip 044→✅. (3) Then flip README→Complete + all-✅ + reset current-task→none. |
 
+## Pillar B add-in UAT — deep-fix arc (2026-08-31, deployed to dev)
+Live UAT surfaced 6 issues (full record: `notes/pillar-b-uat-findings-2026-08-31.md`; GitHub #919). All deployed to dev (`spaarke-bff-dev` hash-verified + healthy; add-in SWA from `cfae9cdc1`):
+- **#1 auth** — added NAA broker SPA redirect (`brk-9199bf20-…`/`brk-multihub://icy-desert-…`) to add-in Entra reg `c1258e2d-…` via `az rest`. Fold into task 004 / auth-deployment-setup.
+- **#3 priority mapping** (`UploadFinalizationWorker` `192350xxx`→`100000xxx`) — **PRE-EXISTING MASTER BUG**; aborted every email save. `c0bd37fdc`.
+- **#4 attachment gate** (`OfficeJobQueue` HasAttachments from SelectedAttachmentFileNames). `cfae9cdc1`.
+- **#6 contacts-sync 400** (`RecordSyncJob` `parentcustomerid`→`_parentcustomerid_value`) — **PRE-EXISTING MASTER BUG**. `35b12c560`.
+- **#2 real entity search** (`OfficeService.SearchEntitiesAsync` real Dataverse queries, replaces stub; +4 tests). `f5f4362ee`.
+- **#5 email archives not AI-indexed** — OPEN, not root-caused (downstream analysis/index job). Tracked #919.
+- **⚠️ #3 + #6 are pre-existing master bugs** — deployed to dev but MUST reach master via PR. Branch HEAD `f5f4362ee` (6 commits past the wrap-up docs). **Awaiting operator re-test** of File-to search + save-with-attachments (verify via Dataverse).
+
 ---
 
 ## What's DONE + MERGED (do not redo)
