@@ -38,6 +38,18 @@
 4. **On sign-in failure** — STOP + escalate (POML §escalation): treat as Entra registration / SWA origin / consent config, not a code fix. Record consent/redirect/scope/origin detail here; do **not** redeploy on repeat.
 5. **On success** — append the deployment record (target SWA, URL, manifest URLs, timestamp, manifest version) below, then flip TASK-INDEX 044 → ✅ and re-run the 090 wrap-up README→Complete flip.
 
-## Deployment record (fill on live deploy)
+## Deployment record
 
-_Pending operator live-UAT session._
+- **2026-08-31 14:12 UTC** — operator dispatched `deploy-office-addins.yml` (from `master`); run `33401242927` **completed / success** (build + SWA deploy). URL: https://github.com/spaarke-dev/spaarke/actions/runs/33401242927
+- **Served manifests verified** (cache-busted curl):
+  - `outlook/manifest.json` → 200, version **1.0.20**, functional origin = `https://icy-desert-0bfdbb61e.6.azurestaticapps.net` (no `localhost`; `spaarke.com` = branding only) ✅
+  - `word/manifest.xml` → 200, version **1.0.4.0**, origin = deployed SWA ✅
+  - `outlook/taskpane.html` → 200 ✅
+- **Note**: Word manifest is served at `word/manifest.xml` (not `word/word-manifest.xml`).
+
+### STILL PENDING — operator live smoke (Success Criterion 7)
+The only remaining step is interactive and needs a live Office host:
+1. Sideload the Outlook add-in — either upload `outlook/manifest.json` in **M365 Admin Center → Integrated Apps → Upload custom app** (bump version if re-uploading; propagation 5–15 min), OR sideload directly in **Outlook on the web → Get Add-ins → My add-ins → Add a custom add-in → Add from URL**: `https://icy-desert-0bfdbb61e.6.azurestaticapps.net/outlook/manifest.json`.
+2. Open the add-in taskpane, **sign in** (Entra NAA), confirm the taskpane loads and a BFF call succeeds.
+3. Repeat for Word (`https://icy-desert-0bfdbb61e.6.azurestaticapps.net/word/manifest.xml`).
+4. On success → flip TASK-INDEX **044 → ✅** + close 090 (README→Complete). On sign-in failure → STOP, treat as Entra/consent/origin config, record detail here.
