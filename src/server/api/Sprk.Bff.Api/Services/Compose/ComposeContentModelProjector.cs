@@ -1,4 +1,4 @@
-﻿// Task 071 (Track D) — the CANONICAL CONTENT MODEL projection, extracted from
+// Task 071 (Track D) — the CANONICAL CONTENT MODEL projection, extracted from
 // `ComposeDocxProjectionBuilder`.
 //
 // WHY THIS IS ITS OWN COMPONENT. The builder held TWO independent output pipelines. This one walks a

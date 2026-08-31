@@ -1,4 +1,4 @@
-﻿// Task 071 (Track D) — OOXML reading primitives shared by BOTH projection pipelines.
+// Task 071 (Track D) — OOXML reading primitives shared by BOTH projection pipelines.
 //
 // WHY THIS EXISTS. `ComposeDocxProjectionBuilder` contains two independent output pipelines —
 // `Build()` (paraId-tagged HTML for the editor) and `BuildContentModel()` (the canonical model the

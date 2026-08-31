@@ -1,4 +1,4 @@
-﻿// R5 task 011 (G3 heading/list applier, spec FR-03 + gaps SDL-1/2) — seam proof for
+// R5 task 011 (G3 heading/list applier, spec FR-03 + gaps SDL-1/2) — seam proof for
 // ComposeShadowPatchEngine's setBlockAttr Style / ListOrdered / ListLevel appliers. Extends the surface
 // task 010 opened (Alignment): each attribute resolves the target paragraph by paraId ONLY (I-7 — no
 // text-search anywhere in the write path) and records the change as a tracked w:pPrChange.

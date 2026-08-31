@@ -1,4 +1,4 @@
-﻿// Task 071 (Track D) — the numbering subsystem, extracted from `ComposeDocxProjectionBuilder`.
+// Task 071 (Track D) — the numbering subsystem, extracted from `ComposeDocxProjectionBuilder`.
 //
 // WHY THIS IS ITS OWN COMPONENT. It changes for one reason and it is not either projection's reason:
 // **Word's numbering semantics**. It parses `numbering.xml` + style-linked numbering from `styles.xml`

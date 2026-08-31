@@ -1,4 +1,4 @@
-﻿// Phase-1 mammoth removal (design notes/design-server-side-docx-html-conversion.md) — unit tests for
+// Phase-1 mammoth removal (design notes/design-server-side-docx-html-conversion.md) — unit tests for
 // ComposeDocxProjectionBuilder: the single-walk server-side DOCX→editor projection that replaced the
 // client mammoth convert + position-based paraId stamping (the two-engine drift that caused the recurring
 // "w14:paraId matches no paragraph in the retained original" save failures).

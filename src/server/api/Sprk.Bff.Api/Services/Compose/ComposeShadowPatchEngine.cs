@@ -1,4 +1,4 @@
-﻿using System.Globalization;
+using System.Globalization;
 using System.Xml;
 using DocumentFormat.OpenXml;
 using DocumentFormat.OpenXml.Packaging;

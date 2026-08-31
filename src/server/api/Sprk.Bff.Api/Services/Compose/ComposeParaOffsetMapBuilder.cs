@@ -1,4 +1,4 @@
-﻿// Task 071 (Track D) — the INTRA-PARAGRAPH OFFSET-ADDRESSING TABLE, extracted from
+// Task 071 (Track D) — the INTRA-PARAGRAPH OFFSET-ADDRESSING TABLE, extracted from
 // `ComposeDocxProjectionBuilder`.
 //
 // WHY THIS IS ITS OWN COMPONENT. It answers one question, and it is not "what does this document look
