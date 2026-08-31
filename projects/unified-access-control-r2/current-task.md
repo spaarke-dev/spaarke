@@ -1,7 +1,139 @@
 # Current Task State — `unified-access-control-r2`
 
-> **Last Updated**: 2026-08-30 — session end. Three tasks completed (091, 092, 085), master merged in,
-> everything pushed. **Recovery**: read "Quick Recovery", then the two OPEN DECISIONS below.
+> **Last Updated**: 2026-08-31 — **ACTIVE TASK: 076, resuming at step 4.** Two pieces landed today
+> (denial-message fix `848b56798` pushed; `ResolveForActingUserAsync` `279ca8022` committed, NOT pushed).
+> **Recovery**: read "Quick Recovery" then §076-RESUME below.
+
+---
+
+## Quick Recovery (READ THIS FIRST) — 2026-08-31
+
+| Field | Value |
+|---|---|
+| **Task** | **076** — record-keyed upload contract. `<rigor>FULL</rigor>`, tier `opus`, effort `high`, steps `directional`, `parallel-safe: false` |
+| **Step** | **4 of 11** (client cutover). Steps 0–3 + the >4 MB server half are DONE; 5–11 remain |
+| **Status** | in-progress |
+| **Next Action** | 🔴 **READ [`notes/plan-upload-path-decomposition-2026-08-31.md`](notes/plan-upload-path-decomposition-2026-08-31.md) FIRST — it is the work contract and holds four facts you must not re-derive.** Then: file tasks **093/094/095** per its §3, and execute **076** (client cutover U1/U2/U3 → `(entity, recordId)`; **250 MB** threshold correction; record-less route for the Skip path; classify 12 suppliers; delete W1/W2; delete the legacy route LAST) |
+| **Conflict-check** | ✅ CLEAN 2026-08-31 — 15 open PRs, only #887 is this branch, #894 is CI-only, 13 dependabot. **No overlap on 076's files** |
+| **Behind master** | **10 commits** — sync before the next merge |
+
+### 🔴 §076-RESUME — what is ACTUALLY landed vs. what the POML implies
+
+**Verified first-hand 2026-08-31; do not trust the POML's step ordering here.** Step 2 was implemented by
+**ADDING** the record-keyed routes *alongside* the legacy one, not by converting it.
+`Api/OBOEndpoints.cs`'s own header documents **three routes, two contracts**:
+
+| Route | Line | State |
+|---|---|---|
+| `PUT /api/obo/containers/{id}/files/{*path}` | :75 | 🔴 **LEGACY, container-keyed, UNGATED — STILL LIVE** |
+| `PUT /api/obo/records/{entity}/{recordId}/files/{*path}` | :145 | ✅ TARGET, record-keyed, GATED |
+| `POST /api/obo/records/{entity}/{recordId}/upload-session` | :251 | ✅ TARGET, record-keyed, GATED (the >4 MB fix) |
+
+**Consequence for sequencing**: acceptance criterion *"no upload route accepts a caller-named container"*
+is **NOT met** — the legacy route still does. Deleting it belongs **after** the client cutover, so the
+order is: step 4 (cut over) → 5 (classify) → 6 (delete W1/W2) → **delete the legacy route** → 7 → 8 → 9–11.
+Deleting it first would 404 every shipped client.
+
+**Step 3 left a gap inside step 4**: the chunked *client* was deleted, but its replacement was never
+wired. `SdapApiClient.uploadFile` now **throws** `UploadOperation.LARGE_FILE_UNSUPPORTED` for ≥4 MB.
+So step 4 is not three signature changes — it is three signature changes **plus** wiring the
+upload-session + direct-to-Graph chunking the server half already supports.
+
+### ✅ Landed 2026-08-31 (this session, before resuming 076)
+
+| Commit | What |
+|---|---|
+| `848b56798` **pushed** | `EntityAccessFilter` denial text. Users were told *"Access denied to association target"* — no record, no capability, no remedy. Root cause was a **dead branch**: the filter passed `"insufficient_rights"` into a five-arm switch with no arm for it, so every real denial hit the default, and the switch's own better message was unreachable from its only call site. Switch removed rather than extended — one of its dead arms (`entity_not_found → 404`) was a **latent enumeration oracle**, since the probe conflates not-found with no-access on purpose (task 022's finding). Client renders server `detail` (`errorMessages.ts:188`), so this was server-only. **10/10 tests; perturbation bites** |
+| `279ca8022` **NOT pushed** | `RecordContainerResolver.ResolveForActingUserAsync` — the no-record container answer, server-side. Takes the Entra `oid` as a **lookup key** on `systemuser.azureactivedirectoryobjectid` (translates, never compares — the #840 Rule 2 class). Fail-closed: no user / >1 user / no BU all THROW; only "BU has no container stamped" returns `Unresolved`. **11/11; perturbation on the id-space filter reddens ONLY that test — the other 10 stay green, which is why the structural assertion exists** |
+
+**Full BFF suite after both: 11,746 passed / 0 failed / 66 skipped.**
+
+### Why `ResolveForActingUserAsync` had to come first (owner-directed 2026-08-31)
+
+`#858` cannot delete `SaveComposeDocumentRequest.ContainerId` without a server answer for record-less
+drafts, and leaving the field as a *fallback* is **bypassable**: the client decides whether a matter is
+bound at all, so "omit the matter" becomes a supported route to naming your own container. Owner picked
+the single canonical path — server always derives, from the record or from the acting user.
+⚠️ Matter-less Compose drafting is a **designed** flow (`composeEditor.registration.ts:22-25`), not an
+edge case, so "no record → refuse" was not available.
+
+### 🔴 Filed, deferred by owner direction — NOT in 076
+
+[`notes/finding-secure-transition-container-migration.md`](notes/finding-secure-transition-container-migration.md)
+— flipping a record to secure **moves nothing**. New writes go to the secure container; every existing
+file stays in the shared BU container with its `sprk_document` pointers unchanged, and SPE's
+additive-only permissions retract nothing. Verified no container move/copy code exists in `src/**`. Not
+biting yet only because **zero secure projects exist anywhere**. Its own project; revisit after core
+UAC-r2. The hard part is not the copy loop — permanent (not recycle-bin) source deletion is load-bearing,
+and already-minted anonymous share links (task 012) survive their ≤7-day window regardless.
+
+### 🔴 SCOPE DECOMPOSED 2026-08-31 (owner-directed) — 076 → 076 + 093 + 094 + 095
+
+**Contract: [`notes/plan-upload-path-decomposition-2026-08-31.md`](notes/plan-upload-path-decomposition-2026-08-31.md).**
+One conversation grew 076 from "steps 4–6" into six workstreams; running it as one task produces an
+unreviewable change. **Free numbers start at 093** (`085`/`091`/`092` taken — `ls tasks/` every time).
+
+| Task | Scope | Depends |
+|---|---|---|
+| **076** (continues) | container contract: cutover U1/U2/U3 · **250 MB fix** · record-less route (Skip path) · classify 12 suppliers · delete W1/W2 · **delete legacy route LAST** · Communication ×7 · waivers · tests · absence-grep | — |
+| **093** NEW | **reorder all 7 Create wizards** (collect IsSecure → create record → provision-if-secure → upload → link) **+ the Secure Project wizard UI** (owner: part of this solution; never specified) | 076 |
+| **094** NEW | upload collision: **pre-flight existence probe** → dialog (Replace / Rename / Use existing) → explicit `conflictBehavior`. Owner: *"we do not want to silent fail (or fail at the end)"* | 076 |
+| **095** NEW | document↔record multi-association — **intersection entity, owner chose option (b), NOT native N:N** | — (094's "Use existing" waits on it) |
+
+#### 🔴 Four facts these tasks must NOT re-derive (full detail in the plan §4)
+
+1. **The 4 MB threshold is stale by ~3 years.** Simple `PUT …/content` supports **250 MB** (verified
+   2026-08-20 in `…/.claude/agent-memory/researcher/graph-driveitem-upload-facts.md` against MS Learn +
+   the docs source repos). `SdapApiClient.uploadFile`'s `LARGE_FILE_UNSUPPORTED` throw at ≥4 MB is a
+   **live defect on a false premise** — the fix is the threshold, NOT wiring chunked upload.
+2. ⚠️ **`conflictBehavior` IS valid on the simple PUT** — `fail|replace|rename`, *"the default for PUT is
+   replace"*, docs disagree on the default so **always set it explicitly**; name-collision only.
+   **Earlier notes in this project claiming it "takes no conflictBehavior at all" are WRONG** — the SDK
+   method doesn't expose it; the REST API honours it.
+3. **Why the owner's 412 happens**: path-keyed PUT + no explicit `conflictBehavior` → **silent REPLACE**
+   → same item id → second `sprk_document` insert violates the alt-key on the SPE item id → 412 with
+   Dataverse's unsubstituted `{0}`/`{1}`. **The first file's bytes are already gone.** Not a failing
+   duplicate check — an unguarded collision that destroys data then errors confusingly. Every SERVER
+   ingest path already guards this by folding an id into the filename; the CLIENT path never did.
+4. **AI pre-fill does NOT block the Create-wizard reorder.** Pre-fill stages to
+   `SpeOptions.StagingContainerId` (server config — `MatterPreFillService.cs:307`) and the final upload is
+   a **separate** browser call holding the same `File` objects. The legs are independent.
+
+#### Why 093's reorder is the load-bearing one
+
+Today a **secure Matter created with documents puts those documents in the shared BU container** — at
+upload time no matter exists to be secure. Server-side derivation alone cannot fix that; only the reorder
+can. ⚠️ **Provisioning requires the record to exist already** (task 008: its final act stamps three fields
+on the project), so IsSecure is **collected** early (owner: before the Info step) and **acted on** after
+creation. That ordering is also why an abandoned wizard leaves **no orphaned container**.
+`provision-project` is **project-only**; owner: projects first, matters a later add-on.
+
+#### 095 — the schema facts (owner screenshots, live metadata 2026-08-31)
+
+Document→Matter has **TWO** Many-to-one relationships (`sprk_matter_document` +
+`sprk_sprk_matter_sprk_document_sprk_relatedmatter`); Document→Project likewise
+(`sprk_Project_Document_1n` + `…_sprk_relatedproject`); Document→WorkAssignment **one**
+(`sprk_WorkAssignment_Document_1n`). All Many-to-one — **two slots per type, not a many-to-many.**
+**Native N:N was rejected**: it breaks this project's "child inherits **1 hop** via a denormalized core
+ancestor" model (the ancestor becomes multi-valued), Dataverse intersect tables can't carry columns or be
+secured, and the codebase already has the polymorphic-regarding pattern (ADR-024 / `sprk_todo`).
+⚠️ **Do NOT relax the alternate key on the SPE item id** to allow duplicate rows — Compose's
+transient-key dedup and promote-idempotency both rest on it.
+
+### ⚠️ Carried forward, NOT yet done — from the Q4 widening investigation
+
+Widening `EntityAccessFilter.EntitySetByType` with `sprk_workassignment`/`sprk_event`/`sprk_todo` (owner
+said yes — "it is file access") needs `UploadFinalizationWorker.cs:611-629` widened **with** it. That
+switch maps only `matter`/`project`/`invoice`; the three new types would hit `default:` and log
+*"Unknown association type, skipping association"* — the document would be created **silently
+unassociated**. Plural forms attested in live Web API URLs: `sprk_workassignments` (SemanticSearch map),
+`sprk_events` (`DataverseWebApiService.cs:304/405/463`), `sprk_todos` (`ExternalDataService.cs:295/337/386`).
+
+---
+
+## Superseded — 2026-08-30 session end
+
+> Three tasks completed (091, 092, 085), master merged in, everything pushed.
 
 ---
 

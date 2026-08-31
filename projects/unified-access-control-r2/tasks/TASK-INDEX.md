@@ -38,6 +38,20 @@ Number gaps (020–029, 045–049, 059, 070–079) are intentional insertion roo
 > branch coverage**, with eleven documented guarantees untested, **two of which could destroy a user's
 > document** — the #858 patch must carry its own tests, not lean on the 1,791-test Compose suite.
 
+> 🔴 **2026-08-31 — 076 DECOMPOSED by owner direction into 076 + 093 + 094 + 095. READ
+> [`notes/plan-upload-path-decomposition-2026-08-31.md`](../notes/plan-upload-path-decomposition-2026-08-31.md)
+> BEFORE touching any upload path** — it is the work contract and carries four facts that must not be
+> re-derived. Headlines: **076** keeps the container contract (cutover + **250 MB threshold fix** +
+> record-less Skip route + delete the legacy `PUT /api/obo/containers/{id}/files/{*path}` **last**);
+> **093** reorders all 7 Create wizards (collect IsSecure → create record → provision-if-secure → upload →
+> link) **and adds the Secure Project wizard UI**, which was never specified; **094** fixes the upload
+> collision (pre-flight probe → Replace/Rename/Use-existing dialog → explicit `conflictBehavior`);
+> **095** adds a document↔record **intersection entity** (owner chose this over native N:N).
+> ⚠️ Three corrections to prior project belief: the **4 MB** upload branch is stale by ~3 years (simple PUT
+> supports **250 MB**), `conflictBehavior` **IS** valid on the simple PUT (earlier notes saying otherwise
+> are wrong), and the owner's HTTP 412 is a **silent file overwrite that destroys data**, not a failing
+> duplicate check. **Free numbers start at 093.**
+
 > 🔴 **2026-08-30 — the ArchTest baseline is now ZERO failures (176/176).** The 6-failure baseline this
 > project carried and re-verified all the way through (ControlPlane FR-27 ×2, ADR-010 interface ceiling,
 > `ServiceBusClientGuardTests`, FR-F1, FR-F2) was **fixed on master**. Do not re-record it as expected —
