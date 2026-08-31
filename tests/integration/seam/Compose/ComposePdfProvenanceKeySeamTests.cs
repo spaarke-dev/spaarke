@@ -82,4 +82,57 @@ public sealed class ComposePdfProvenanceKeySeamTests
             "drive, opening this PDF in container B would hand the user the Word document that a " +
             "DIFFERENT PDF in container A became — someone else's document, silently, with no error.");
     }
+
+    // ═══════════════════════════════════════════════════════════════════════════════════════════
+    // CLEARING the PDF source marker — "the marker's one unsafe direction".
+    //
+    // The cluster-4 mutation pass reduced ClearPdfSourceMarkerAsync to a no-op and all 1,801 Compose
+    // tests stayed green. The test that LOOKS like this guard
+    // (ComposePdfRefreshBaselineSeamTests.SessionThatServedAPdfThenServesADocx_DoesNotStampTheDocxAuthored)
+    // is not: its own in-test comment states that session BINDING — a load of a different document mints
+    // a new session — is what makes it pass. Binding masked the clear, so the clear was free to rot.
+    //
+    // What the clear protects: a session that served a PDF and then serves a .docx must lose its PDF
+    // marker, or the next save reads a stale marker, stamps a NON-PDF document as Authored, and every
+    // later save routes onto the clean-apply branch and silently drops redlines. That is the SEV-1 shape
+    // UAT #1A caught once already, which is why the production method logs this case "loudly" and calls
+    // it the marker's one unsafe direction.
+    //
+    // Asserted directly against a real cache so the guarantee does not depend on session binding to hold
+    // — binding is a second line of defence, not this method's contract.
+    // ═══════════════════════════════════════════════════════════════════════════════════════════
+
+    [Fact]
+    public async Task ClearPdfSourceMarker_AfterASessionServedAPdf_TheMarkerIsGone_NotMerelyShadowed()
+    {
+        const string SessionId = "session-pdf-then-docx";
+
+        var cache = new MemoryDistributedCache(Options.Create(new MemoryDistributedCacheOptions()));
+        var sut = new ComposePdfIntakeCoordinator(
+            pdfIntakeSource: null,
+            pdfModelProjector: new ComposePdfModelProjector(),
+            documentRenderer: new ComposeDocumentRenderer(),
+            spe: new Mock<ISpeFileOperations>().Object,
+            cache: cache,
+            logger: NullLogger.Instance);
+
+        // The session served a PDF.
+        await sut.SetPdfSourceMarkerAsync(SessionId, DriveA, SpeId, CancellationToken.None);
+
+        // Sanity: the marker is really there. Without this the assertion below could pass because the
+        // write silently failed rather than because the clear worked.
+        var beforeClear = await sut.GetPdfSourceMarkerAsync(SessionId, CancellationToken.None);
+        beforeClear.Should().NotBeNull("the PDF load recorded its source marker");
+        beforeClear!.SpeId.Should().Be(SpeId);
+
+        // The same session now serves a .docx.
+        await sut.ClearPdfSourceMarkerAsync(SessionId, CancellationToken.None);
+
+        var afterClear = await sut.GetPdfSourceMarkerAsync(SessionId, CancellationToken.None);
+        afterClear.Should().BeNull(
+            "a session that stops being PDF-sourced must LOSE the marker. If it survives, the next save " +
+            "reads a stale PDF fact and stamps a non-PDF document Authored — which puts every later save " +
+            "on the clean-apply branch and silently drops redlines (the UAT #1A SEV-1 shape). Session " +
+            "binding usually hides this, and that is exactly why the clear needs its own assertion.");
+    }
 }
