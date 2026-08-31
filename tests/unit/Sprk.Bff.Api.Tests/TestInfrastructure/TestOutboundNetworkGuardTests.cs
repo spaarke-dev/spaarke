@@ -78,42 +78,68 @@ public sealed class TestOutboundNetworkGuardTests : IClassFixture<CustomWebAppFa
     }
 
     // ── LAYER 1 · CONTROL ────────────────────────────────────────────────────────────────────────
-    // The determinism fix. The test host's TokenCredential is the real DefaultAzureCredential from
-    // Program.cs; the guard restricts its chain to the one leg that resolves entirely offline.
-    // The developer legs named below are the ones that cost ~6.0 s per attempt on a machine with az
-    // CLI + Az.Accounts + the Visual Studio identity cache present, and ~0 ms on a CI runner where
-    // they are absent. That asymmetry — not any product bug — is what made local runs disagree with
-    // CI and made the failing set move between runs.
+    //
+    // ⚠️ REWRITTEN 2026-08-30, and the reason is worth more than the test.
+    //
+    // This assertion used to require the host's TokenCredential to be the REAL DefaultAzureCredential
+    // with its chain narrowed to one offline leg, and to prove it by catching a
+    // CredentialUnavailableException naming EnvironmentCredential. When master merged in, it failed —
+    // not as a regression, but because master had independently fixed the SAME root cause, better.
+    //
+    // Master's `TestTokenCredential.UseStubTokenCredential()` REPLACES the credential in every test
+    // host's DI with a stub that answers instantly and never touches the network, and
+    // `Spaarke.ArchTests/TestHostCredentialGuardTests` fails the build if any
+    // WebApplicationFactory<Program> subclass forgets to call it. Its docstring reaches the identical
+    // diagnosis this guard did — the ~100 s HttpClient timeout, the failing set that rotates between
+    // runs, the test that passes in the suite and fails alone — from a different starting point.
+    // Substituting the credential is strictly stronger than narrowing the real one's chain, and it is
+    // enforced structurally rather than by one runtime assertion.
+    //
+    // So this test now defers to master's mechanism instead of forking it, and asserts only what it
+    // still uniquely owns: that the module initializer ran (layer 1 remains defence-in-depth for any
+    // credential constructed OUTSIDE a fixture's DI, which the stub cannot reach), and that resolving
+    // a token in a test host is instant and offline — which is the property that actually mattered all
+    // along. The specific exception type never did; it was evidence for the property, and evidence
+    // goes stale when the mechanism improves.
     [Fact]
-    public async Task TestHostTokenCredential_ChainExcludesDeveloperCredentials_AndFailsOffline()
+    public async Task TestHostTokenCredential_ResolvesOfflineAndInstantly()
     {
         Environment.GetEnvironmentVariable(TestOutboundNetworkGuard.AzureTokenCredentialsEnvVar)
             .Should().Be(TestOutboundNetworkGuard.OfflineCredentialLeg,
-                "the module initializer must have restricted the chain before any host was built");
+                "the module initializer must still restrict the chain before any host is built — it is "
+                + "the only defence for a credential constructed outside a fixture's DI, which master's "
+                + "DI-level stub by construction cannot reach");
 
         var credential = _factory.Services.GetRequiredService<TokenCredential>();
+
+        // The property under test is "offline", and a wall-clock bound is how you observe it: a real
+        // probe chain on a developer machine costs ~6 s per developer leg, and a network-reaching leg
+        // costs up to HttpClient's 100 s default. Anything resolving in well under a second cannot have
+        // touched either. (tests/CLAUDE.md bans Stopwatch for TIME-DEPENDENT LOGIC, where FakeTimeProvider
+        // is the fix; here the elapsed time IS the observation, and no fake can substitute for it.)
+        var started = System.Diagnostics.Stopwatch.StartNew();
 
         var act = () => credential.GetTokenAsync(
             new TokenRequestContext(new[] { "https://test.documents.azure.com/.default" }),
             CancellationToken.None).AsTask();
 
-        var thrown = (await act.Should().ThrowAsync<CredentialUnavailableException>(
-            "with no AZURE_CLIENT_* variables set, the single permitted leg reports unavailable " +
-            "without touching the network"))
-            .Which;
-
-        thrown.Message.Should().Contain("EnvironmentCredential");
-        foreach (var developerLeg in new[]
-                 {
-                     "AzureCliCredential",
-                     "AzurePowerShellCredential",
-                     "VisualStudioCredential",
-                     "VisualStudioCodeCredential",
-                 })
+        // Either outcome is correct and both prove the point: master's stub RETURNS a token instantly,
+        // and a chain-restricted real credential THROWS CredentialUnavailable instantly. What must never
+        // happen is a slow answer, because slow means a probe chain or the network.
+        try
         {
-            thrown.Message.Should().NotContain(developerLeg,
-                $"{developerLeg} spawns a process to probe for a developer login; it is present on a " +
-                "developer machine and absent in CI, which is precisely the local-vs-CI divergence");
+            await act();
         }
+        catch (CredentialUnavailableException)
+        {
+            // Fine — the offline leg reported unavailable without leaving the process.
+        }
+
+        started.Stop();
+        started.Elapsed.Should().BeLessThan(TimeSpan.FromSeconds(2),
+            "a test host must never pay for a credential probe. ~6 s means a developer leg (az CLI, "
+            + "Az.Accounts, the VS identity cache) is being probed — present locally, absent in CI, and "
+            + "the exact asymmetry that made local runs disagree with CI. ~100 s means HttpClient's "
+            + "default timeout, i.e. the host reached the network");
     }
 }

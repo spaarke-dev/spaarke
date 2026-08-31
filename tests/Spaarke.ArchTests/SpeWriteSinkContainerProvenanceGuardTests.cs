@@ -410,13 +410,51 @@ public class SpeWriteSinkContainerProvenanceGuardTests
             + "server-side BU->container resolver on this path yet. Fix is to thread (entity, recordId) onto "
             + "the request and resolve server-side; blocked on #806."),
 
-        new SinkSite("Services/Compose/ComposeService.cs", "ReplaceFileContentAsUserAsync", 3,
-            Provenance.ClientSupplied, "#858 (behind PR #806)",
-            "request.DriveId (client body)",
-            "The ordinary Compose save path replaces content in a drive the client body names, under OBO "
-            + "(ADR-049; ADR-003). Ordinal 3 rather than 2 because the transient-key dedup replace at "
-            + "ordinal 2 is server-derived — the two shapes are interleaved in one method, which is exactly "
-            + "why this list is keyed per call site instead of per file."),
+        // ── The ordinary Compose save replace MOVED, 2026-08-30 ────────────────────────────────────
+        //
+        // It was Services/Compose/ComposeService.cs :: ReplaceFileContentAsUserAsync #3. PR #806 merged
+        // to master and extracted it into ComposeSaveStorageCoordinator, where FR-S02's If-Match
+        // precondition split it into TWO sinks: a blind PUT when there is no resolved version to assert
+        // against, and a preconditioned PUT when there is.
+        //
+        // ⚠️ THIS IS THE CASE RULE A'S OWN MESSAGE WARNS ABOUT — "a rename looks identical to a
+        // deletion from here". The guard reported the old entry as stale AND the two new sites as
+        // undeclared, in the same run; had it only done the former, the unresolved #858 container
+        // decision would have quietly left the census during a refactor nobody thought of as touching
+        // container provenance. Both new sites are declared BEFORE the old entry was deleted, which is
+        // the order the maintenance procedure requires.
+        //
+        // Provenance UNCHANGED: traced back through ComposeService.cs:1652 to `request.DriveId` — the
+        // client body, exactly as before. The refactor moved and split the sink; it did not fix it.
+        // Still owned by #858.
+        new SinkSite("Services/Compose/ComposeSaveStorageCoordinator.cs", "ReplaceFileContentAsUserAsync", 1,
+            Provenance.ClientSupplied, "#858 (was behind PR #806; #806 MERGED 2026-08-30)",
+            "driveId parameter <- ComposeService.cs:1652 <- request.DriveId (client body)",
+            "The blind-PUT branch of the ordinary Compose save: no resolved version to precondition on "
+            + "(a drive-less or transient path), so it replaces content in a client-named drive under OBO "
+            + "with no If-Match (ADR-049; ADR-003). Was ComposeService #3 until PR #806 extracted it. "
+            + "Note the OBO leg is what limits blast radius here — unlike the app-only Office path this "
+            + "list also tracks, a caller can only reach drives their own token permits."),
+
+        new SinkSite("Services/Compose/ComposeSaveStorageCoordinator.cs", "ReplaceFileContentAsUserAsync", 2,
+            Provenance.ClientSupplied, "#858 (was behind PR #806; #806 MERGED 2026-08-30)",
+            "driveId parameter <- ComposeService.cs:1652 <- request.DriveId (client body)",
+            "The preconditioned branch of the same save (FR-S02 If-Match, added by PR #806). Same "
+            + "client-supplied drive as ordinal 1; the precondition protects against a lost UPDATE, not "
+            + "against writing to the wrong drive — worth stating because an ETag check reads like a "
+            + "safety mechanism and does nothing about container provenance (ADR-049; ADR-003). #806 is now "
+            + "MERGED, so the sequencing that deferred #858 has lapsed: this trio is unblocked work, "
+            + "not blocked work."),
+
+        new SinkSite("Services/Compose/ComposeSaveStorageCoordinator.cs", "ReplaceFileContentAsUserAsync", 3,
+            Provenance.ClientSupplied, "#858 (was behind PR #806; #806 MERGED 2026-08-30)",
+            "driveId parameter <- ComposeService.cs:1652 <- request.DriveId (client body)",
+            "The single rebase RETRY inside catch(EtagPreconditionFailedException): re-reads the live "
+            + "version and re-issues the replace against the same client-named drive. Declared "
+            + "separately because it is a distinct write that a reader skimming the method will miss — "
+            + "it sits inside a catch block, three sites deep, and I missed it myself on first read, "
+            + "declaring only ordinals 1 and 2 until Rule A named the third. That is the argument for "
+            + "keying this list per CALL SITE rather than per method in one line (ADR-049; ADR-003)."),
 
         new SinkSite("Services/Office/OfficeStorageUploader.cs", "UploadSmallAsync", 1,
             Provenance.ServerDerivedRecord, "085 (CLOSED 2026-08-30)",
