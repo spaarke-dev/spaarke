@@ -29,6 +29,12 @@ public class WorkspaceLayoutTestFixture : WorkspaceTestFixture
     private readonly Action<Mock<IGenericEntityService>>? _configureMock;
 
     /// <summary>
+    /// When false, the fixture's identity resolver maps the caller's oid to NO systemuser, so
+    /// ownership-scoped operations take their fail-closed branch.
+    /// </summary>
+    private bool _callerResolvesToSystemUser = true;
+
+    /// <summary>
     /// Exposes the IGenericEntityService mock for verification in tests.
     /// </summary>
     public Mock<IGenericEntityService> EntityServiceMock { get; } = new();
@@ -55,6 +61,13 @@ public class WorkspaceLayoutTestFixture : WorkspaceTestFixture
 
             services.RemoveAll<IGenericEntityService>();
             services.AddSingleton(EntityServiceMock.Object);
+
+            if (!_callerResolvesToSystemUser)
+            {
+                services.RemoveAll<Sprk.Bff.Api.Services.Identity.ISystemUserIdentityResolver>();
+                services.AddSingleton<Sprk.Bff.Api.Services.Identity.ISystemUserIdentityResolver>(
+                    new FixtureSystemUserIdentityResolver(resolvesAnyCaller: false));
+            }
         });
     }
 
@@ -251,6 +264,79 @@ public class WorkspaceLayoutTestFixture : WorkspaceTestFixture
     }
 
     /// <summary>
+    /// Creates a fixture whose layout is owned by SOMEONE ELSE — a systemuserid that is not the
+    /// caller's. Every mutation is wired to SUCCEED, so a missing ownership guard shows up as a 2xx
+    /// and a real <c>UpdateAsync</c> call rather than as an incidental failure.
+    /// </summary>
+    /// <remarks>
+    /// The suite had no fixture like this before 2026-08-27, which is why the ownership guard could
+    /// sit inert (it read an <c>ownerid</c> column that <c>SelectColumns</c> never requested) through
+    /// a fully green run. A guard with only allow-path coverage is untested, not verified.
+    /// </remarks>
+    public static WorkspaceLayoutTestFixture WithForeignOwnedLayout(Guid layoutId)
+    {
+        return new WorkspaceLayoutTestFixture(mock =>
+        {
+            var entity = CreateLayoutEntity(layoutId, "Someone Else's Workspace");
+            entity["ownerid"] = new EntityReference("systemuser", ForeignSystemUserId);
+
+            mock.Setup(s => s.RetrieveAsync(
+                    "sprk_workspacelayout",
+                    layoutId,
+                    It.IsAny<string[]>(),
+                    It.IsAny<CancellationToken>()))
+                .ReturnsAsync(entity);
+
+            // Deliberately permissive: if authorization lets the request through, the write
+            // succeeds and the Verify(Never) assertions below fail loudly.
+            mock.Setup(s => s.UpdateAsync(
+                    It.IsAny<string>(),
+                    It.IsAny<Guid>(),
+                    It.IsAny<Dictionary<string, object>>(),
+                    It.IsAny<CancellationToken>()))
+                .Returns(Task.CompletedTask);
+
+            mock.Setup(s => s.RetrieveMultipleAsync(
+                    It.IsAny<QueryExpression>(),
+                    It.IsAny<CancellationToken>()))
+                .ReturnsAsync(new EntityCollection());
+        });
+    }
+
+    /// <summary>A systemuserid deliberately different from the caller's, for isolation tests.</summary>
+    public static readonly Guid ForeignSystemUserId = Guid.Parse("00000000-dead-4000-8000-000000000bad");
+
+    /// <summary>
+    /// Records every <see cref="QueryExpression"/> the service issues, so a test can assert on the
+    /// query that was BUILT rather than on the rows a mock chose to return.
+    /// </summary>
+    /// <param name="captured">Sink for the issued queries.</param>
+    /// <param name="resolvesCaller">
+    /// When false, the caller's oid resolves to no systemuser — exercising the fail-closed branch.
+    /// </param>
+    /// <remarks>
+    /// Result-shape assertions cannot see a missing <c>WHERE</c>: the mock returns its canned rows
+    /// either way, so an unscoped query and a scoped one are indistinguishable downstream. The
+    /// disclosure lived in the query, so the query is the thing to observe.
+    /// </remarks>
+    public static WorkspaceLayoutTestFixture CapturingQueries(
+        IList<QueryExpression> captured,
+        bool resolvesCaller = true)
+    {
+        var fixture = new WorkspaceLayoutTestFixture(mock =>
+        {
+            mock.Setup(s => s.RetrieveMultipleAsync(
+                    It.IsAny<QueryExpression>(),
+                    It.IsAny<CancellationToken>()))
+                .Callback<QueryExpression, CancellationToken>((q, _) => captured.Add(q))
+                .ReturnsAsync(new EntityCollection());
+        });
+
+        fixture._callerResolvesToSystemUser = resolvesCaller;
+        return fixture;
+    }
+
+    /// <summary>
     /// Creates a fixture for successful layout deletion. RetrieveAsync returns the layout,
     /// and UpdateAsync (soft delete via statecode=1) succeeds.
     /// </summary>
@@ -296,7 +382,8 @@ public class WorkspaceLayoutTestFixture : WorkspaceTestFixture
 
     /// <summary>
     /// Creates a Dataverse Entity matching the sprk_workspacelayout schema.
-    /// Includes ownerid set to the test user so ownership checks pass.
+    /// Sets <c>ownerid</c> to <see cref="WorkspaceTestConstants.TestSystemUserId"/> so ownership
+    /// checks pass — deliberately a different value from the caller's Entra oid.
     /// R4 task 053 (B-4): also seeds <c>modifiedon</c> so MapToDto's
     /// <see cref="WorkspaceLayoutDto.ModifiedOn"/> mapping is exercised.
     /// </summary>
@@ -319,12 +406,15 @@ public class WorkspaceLayoutTestFixture : WorkspaceTestFixture
         // are deterministic.
         entity["modifiedon"] = FixedModifiedOnUtc;
 
-        // Set ownerid to the test user so ownership verification passes.
-        // WorkspaceLayoutService checks ownerid against the authenticated user's "oid" claim.
-        if (Guid.TryParse(WorkspaceTestConstants.TestUserId, out var userGuid))
-        {
-            entity["ownerid"] = new EntityReference("systemuser", userGuid);
-        }
+        // Own the row with the caller's SYSTEMUSERID — the value Dataverse stores in `ownerid` —
+        // not their Entra oid. WorkspaceLayoutService resolves oid → systemuserid before comparing.
+        //
+        // This assignment used to be wrapped in `if (Guid.TryParse(TestUserId, ...))`. TestUserId is
+        // not GUID-shaped, so the parse always failed and `ownerid` was NEVER SET — while the comment
+        // asserted the opposite. The service's guard read `ownerId.HasValue`, so an absent column read
+        // as "allowed" and every ownership test passed without exercising ownership at all.
+        entity["ownerid"] = new EntityReference(
+            "systemuser", Guid.Parse(WorkspaceTestConstants.TestSystemUserId));
 
         return entity;
     }

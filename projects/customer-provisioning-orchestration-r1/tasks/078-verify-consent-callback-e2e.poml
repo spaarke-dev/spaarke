@@ -1,0 +1,108 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="078" project="customer-provisioning-orchestration-r1">
+  <metadata>
+    <title>Verify POST /api/onboarding/consent-callback BFF endpoint E2E with actual Model 2 admin-consent flow</title>
+    <phase>D L3 Skill + BFF Integration Endpoints + Metering</phase>
+    <gate>blocked</gate>
+    <status>not-started</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Task tags include 'bff-api','auth','integration-test','testing'; end-to-end verification of the H0.5 consent-callback endpoint through actual Model 2 admin-consent grant + HMAC verification + Dataverse + Cosmos writes + pipeline kick. FR-02/D18 acceptance scope.</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>E2E verification against an existing endpoint (task 042 impl); requires careful choreography with admin-consent flow but no architectural design. Step 3.5.5b sonnet @ high.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <deps>042, 057</deps>
+    <tags>bff-api, auth, integration-test, testing, azure-deployment</tags>
+    <estimated-effort>4-6 hours</estimated-effort>
+  </metadata>
+
+  <prompt>Verify the H0.5 consent-callback BFF endpoint (POST /api/onboarding/consent-callback, implemented in task 042) end-to-end with an ACTUAL Model 2 admin-consent flow: (a) simulate/execute the Microsoft admin-consent grant against a dev tenant; (b) callback fires with HMAC-signed payload; (c) BFF verifies HMAC signature; (d) BFF writes tid claim to sprk_dataverseenvironment.sprk_tenantid + Cosmos parameters.tenantId; (e) BFF kicks the pipeline via POST /api/runs (L2 REST). Re-consent semantics: repeat with existing Ready/Running/WaitingOnGate row → no-op 200 with link to existing run; repeat with Failed/Cancelled → restart from H0. Publish E2E test results at projects/customer-provisioning-orchestration-r1/notes/consent-callback-e2e-2026-XX.md.</prompt>
+
+  <role>SPAARKE platform test engineer. Expert in HMAC signature verification, Microsoft admin-consent OAuth flow (`/adminconsent` endpoint), BFF endpoint contract semantics, Cosmos + Dataverse write verification, and L2 REST pipeline-kick assertion. Follow ADRs strictly.</role>
+
+  <goal>E2E test suite at tests/integration/Sprk.Bff.Api.Tests/Onboarding/ConsentCallbackE2ETests.cs (or similar) exists; verifies happy path (consent → HMAC verify → Dataverse + Cosmos write → pipeline kick), re-consent no-op path, restart-from-H0 path, and 401 on invalid HMAC. Results published at projects/customer-provisioning-orchestration-r1/notes/consent-callback-e2e-2026-XX.md with all 4 paths + observed behavior.</goal>
+
+  <context>
+    <background>Per spec.md FR-02 + D18 + design.md §4.1 H0.5 row: Model 2 self-service consent-capture is the ONE irreducible customer-tenant admin action. Task 042 implemented the endpoint; this task VERIFIES the end-to-end flow works with a real admin-consent grant. The verification exercises HMAC verification, Dataverse write, Cosmos write, and L2 pipeline kick — the full ceremony.</background>
+    <relevant-files>
+      <file role="new">tests/integration/Sprk.Bff.Api.Tests/Onboarding/ConsentCallbackE2ETests.cs</file>
+      <file role="new">projects/customer-provisioning-orchestration-r1/notes/consent-callback-e2e-2026-XX.md</file>
+      <file role="canonical-reference">src/server/api/Sprk.Bff.Api/Api/Onboarding/ConsentCallbackEndpoint.cs</file>
+      <file role="canonical-reference">src/server/services/Sprk.Provisioning.ControlPlane/Api/RunsEndpoints.cs</file>
+    </relevant-files>
+    <dependencies>
+      <dependency task="042" status="pending">H0.5 consent-callback endpoint implementation</dependency>
+      <dependency task="057" status="pending">L2 REST POST /api/runs the callback kicks</dependency>
+    </dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="spec.md FR-02">SCOPE: HMAC signature verified; tid claim written to sprk_dataverseenvironment.sprk_tenantid + Cosmos parameters.tenantId; idempotency key consent-{customerId}-{tid}.</constraint>
+    <constraint source="spec.md FR-02">SCOPE: Re-consent semantics — no-op 200 with existing-run link IF row exists with same tid + status ∈ {Ready, Running, WaitingOnGate}; restart from H0 IF Failed/Cancelled.</constraint>
+    <constraint source="CLAUDE.md-§10">SCOPE: BFF-touching verification — /conflict-check before PR; publish-size report per NFR-01.</constraint>
+    <constraint source="ADR-013">SCOPE: If verification touches Services/Ai/ paths, use PublicContracts/ facade — MUST NOT inject IActionResolver/IActionRunner directly.</constraint>
+    <constraint source="spec.md §4D I1">SCOPE: Verify the endpoint does NOT default any tenantId; it MUST derive from the claimed tid on the consent grant.</constraint>
+    <constraint source="ADR-038">SCOPE: Integration test in tests/integration/**; test-modifying task triggers unconditional code-review + adr-check at Step 9.5 per root CLAUDE.md §8 override row.</constraint>
+    <constraint source="project">SCOPE: Test uses REAL admin-consent flow against dev tenant OR a signed synthetic payload with the same HMAC secret; NOT a mock of the consent grant itself.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>E2E verification of H0.5 consent-callback (HMAC + Dataverse + Cosmos + L2 kick)</topic>
+    <files>
+      <file>.claude/adr/ADR-028-spaarke-auth-architecture.md</file>
+      <file>.claude/adr/ADR-013-ai-architecture.md</file>
+      <file>.claude/adr/ADR-038-testing-strategy.md</file>
+      <file>.claude/constraints/auth.md</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+      <file>projects/customer-provisioning-orchestration-r1/spec.md</file>
+      <file>projects/customer-provisioning-orchestration-r1/design.md</file>
+    </files>
+    <patterns>
+      <pattern name="Integration test for BFF endpoint" location="tests/integration/Sprk.Bff.Api.Tests/">Existing integration-test project shape.</pattern>
+    </patterns>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="0" name="Rigor + load">Emit RIGOR LEVEL (FULL). Load spec.md FR-02 + D18.</step>
+    <step order="1" name="Inventory">Read task 042 H0.5 endpoint impl; identify HMAC secret storage location + shared-secret name.</step>
+    <step order="2" name="Test scaffold">Create tests/integration/Sprk.Bff.Api.Tests/Onboarding/ConsentCallbackE2ETests.cs.</step>
+    <step order="3" name="Test happy">Author test that: signs a synthetic payload with the shared HMAC secret; POSTs to the endpoint; verifies 200; verifies sprk_dataverseenvironment.sprk_tenantid populated; verifies Cosmos parameters.tenantId populated; verifies L2 receives POST /api/runs.</step>
+    <step order="4" name="Test re-consent">Second POST with same customerId + tid + existing Ready-state row → 200 with existing-run link, no new pipeline kick.</step>
+    <step order="5" name="Test restart">Set existing row to Failed → third POST → new pipeline kick + restart from H0.</step>
+    <step order="6" name="Test negative">POST with invalid HMAC → 401; no Dataverse/Cosmos writes.</step>
+    <step order="7" name="Test I1">POST with a MISSING tid → 400 with clear diagnostic; verify no default tenantId is assumed (I1).</step>
+    <step order="8" name="Report">Write notes/consent-callback-e2e-2026-XX.md with all 4 paths + observed outcomes.</step>
+    <step order="9" name="Publish size">If any BFF code changed during verification, report publish-size delta per NFR-01.</step>
+    <step order="10" name="Verify">dotnet build + dotnet test = green; dotnet format.</step>
+    <step order="11" name="Index update">Update TASK-INDEX.md: task 078 → ✅.</step>
+    <step order="12" name="Deviations">Document any deviation in projects/customer-provisioning-orchestration-r1/notes/.</step>
+  </steps>
+
+  <tools>
+    <tool name="dotnet">Build and test BFF</tool>
+    <tool name="terminal">Run shell commands</tool>
+  </tools>
+
+  <outputs>
+    <output type="test">tests/integration/Sprk.Bff.Api.Tests/Onboarding/ConsentCallbackE2ETests.cs</output>
+    <output type="docs">projects/customer-provisioning-orchestration-r1/notes/consent-callback-e2e-2026-XX.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Happy path: signed payload → 200 → sprk_dataverseenvironment.sprk_tenantid populated → Cosmos parameters.tenantId populated → L2 receives POST /api/runs.</criterion>
+    <criterion testable="true">Re-consent (existing Ready/Running/WaitingOnGate row + same tid): 200 with existing-run link in response; NO new pipeline kick.</criterion>
+    <criterion testable="true">Re-consent (existing Failed/Cancelled row + same tid): 200 → new pipeline kick + restart from H0.</criterion>
+    <criterion testable="true">Invalid HMAC: 401 Unauthorized; zero Dataverse writes; zero Cosmos writes; zero L2 calls.</criterion>
+    <criterion testable="true">Missing tid: 400 Bad Request; endpoint does NOT default any tenantId (I1 compliance).</criterion>
+    <criterion testable="true">Idempotency key consent-{customerId}-{tid} verified via IdempotencyService — second identical POST detected.</criterion>
+    <criterion testable="true">Report notes/consent-callback-e2e-2026-XX.md exists with all 4 paths documented.</criterion>
+    <criterion testable="true">dotnet build exits 0; dotnet test exits 0; zero analyzer warnings.</criterion>
+  </acceptance-criteria>
+
+  <notes>Reference: spec.md FR-02 + D18 + design.md §4.1 H0.5 row. Verifies task 042's implementation end-to-end.</notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+  </execution>
+</task>

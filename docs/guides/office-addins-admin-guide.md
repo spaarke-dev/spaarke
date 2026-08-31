@@ -417,7 +417,8 @@ The BFF API is configured via Azure App Service application settings:
 |---------|-------------|---------------|
 | `TENANT_ID` | Azure AD tenant ID | `a221a95e-6abc-4434-aecc-e48338a1b2f2` |
 | `API_APP_ID` | BFF API app registration ID | `1e40baad-e065-4aea-a8d4-4b7ab273458c` |
-| `API_CLIENT_SECRET` | BFF API client secret | `@Microsoft.KeyVault(...)` |
+| `Graph__Credentials__Order__0` | Credential the BFF identity uses. **Replaced `API_CLIENT_SECRET` on 2026-08-24** (ADR-028 A4) — the BFF authenticates with a managed-identity federated credential and holds no secret | `ManagedIdentityFederated` |
+| `Graph__Credentials__RequireSecretFreeIdentity` | Refuses startup outside Development if `ClientSecret` returns to the credential order | `true` |
 
 #### Office Integration Settings
 
@@ -773,7 +774,7 @@ az webapp log tail --name spe-api-prod-* --resource-group rg-spaarke-prod-westus
 | Check dashboard metrics | Daily | Review SDAP Office Integration dashboard |
 | Review alert history | Weekly | Check fired alerts, investigate patterns |
 | Certificate renewal | Before expiry | Update SSL certificates if custom domain |
-| Secret rotation | Every 6 months | Rotate API client secret in Key Vault |
+| ~~Secret rotation~~ | **n/a since 2026-08-24** | The BFF identity is secret-free (ADR-028 A4) — a managed-identity federated credential is minted per exchange and has nothing to rotate. See §10.3 |
 | Dependency updates | Monthly | Review and update npm/NuGet packages |
 
 ### 10.2 Updating the Add-ins
@@ -792,27 +793,40 @@ az webapp log tail --name spe-api-prod-* --resource-group rg-spaarke-prod-westus
 4. Upload updated manifest to M365 Admin Center
 5. Re-deploy (overwrites existing deployment)
 
-### 10.3 Secret Rotation
+### 10.3 Secret Rotation — **RETIRED 2026-08-24**
 
-**Rotate BFF API Client Secret**:
+**There is no BFF API client secret to rotate.** Per ADR-028 **A4** (`spaarke-auth-v4-dataverse-MI`), the
+BFF authenticates as a confidential client using a **federated credential issued to its user-assigned
+managed identity**. The assertion is minted per token exchange by the platform; nothing has an expiry date
+for an operator to roll. `BFF-API-ClientSecret` and its lowercase duplicate were deleted from Key Vault on
+2026-08-24, and the four secret app settings were removed from the App Service.
 
-1. Generate new secret in Azure AD app registration
-2. Add new secret to Key Vault
-3. Update App Service Key Vault reference (or wait for auto-refresh)
-4. Verify API health
-5. Delete old secret from Azure AD
+**Do not re-create the secret.** `Graph__Credentials__RequireSecretFreeIdentity=true` makes the BFF refuse
+to start outside Development if `ClientSecret` reappears in the credential order — deliberately, because a
+secret sitting *beneath* the federated credential in the order is worse than no migration at all: a broken
+MI-FIC would silently fall through to it and every health signal would stay green.
+
+**What to check instead**, if you suspect a credential problem:
 
 ```powershell
-# Add secret to Key Vault
-az keyvault secret set `
-  --vault-name spaarke-kv-prod `
-  --name API-CLIENT-SECRET `
-  --value "{new-secret-value}"
+# 1. The credential the app actually selected (startup log, emitted on cache miss)
+#    Expect: "Ordered credential selection active: ManagedIdentityFederated."   <- no "> ClientSecret"
+#            "Confidential client for <app-id> built with credential ManagedIdentityFederated."
+az webapp log download --name spaarke-bff-dev --resource-group rg-spaarke-dev --log-file logs.zip
 
-# Verify App Service picks up new secret
-az webapp restart --name spe-api-prod-* --resource-group rg-spaarke-prod-westus2
-curl https://spe-api-prod-*.azurewebsites.net/healthz
+# 2. The federated credential still exists and its subject is the UAMI's principalId (NOT its clientId)
+az ad app federated-credential list --id 1e40baad-e065-4aea-a8d4-4b7ab273458c -o table
+
+# 3. Health
+curl https://spaarke-bff-dev.azurewebsites.net/healthz
 ```
+
+> A **200 does not prove the credential**. While anything remains beneath MI-FIC in the order, a completely
+> broken federated credential still serves every request off the fallback. The startup line is the evidence;
+> an order with no fallback is the guarantee.
+
+**What still rotates** (unrelated credentials, out of scope of A4): the SPE **owning-app** secret
+(`spe-owning-app-secret`, ADR-028 **E-1** — per-customer owning apps) and `PowerBi__ClientSecret`.
 
 ### 10.4 Log Retention
 

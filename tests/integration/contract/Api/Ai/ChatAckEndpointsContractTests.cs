@@ -15,7 +15,9 @@ using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 using Moq;
 using Sprk.Bff.Api.Api.Ai;
+using Sprk.Bff.Api.Models.Ai.Chat;
 using Sprk.Bff.Api.Services.Ai;
+using Sprk.Bff.Api.Services.Ai.Chat;
 using Sprk.Bff.Api.Services.Ai.PublicContracts;
 using Xunit;
 
@@ -145,6 +147,25 @@ public sealed class ChatAckEndpointsTestFixture : IAsyncLifetime, IDisposable
 {
     public Mock<IUiActionAckCoordinator> AckCoordinatorMock { get; } = new();
 
+    /// <summary>
+    /// Issue #863: the ack route is session-scoped, so a session that the authenticated caller
+    /// OWNS must exist for the request to reach the handler at all.
+    /// </summary>
+    public AckTestableSessionManager AckSessions { get; } = new()
+    {
+        Session = new ChatSession(
+            SessionId: "ack-session",
+            TenantId: "00000000-0000-0000-0000-000000000abc",
+            DocumentId: null,
+            PlaybookId: null,
+            CreatedAt: DateTimeOffset.UtcNow,
+            LastActivity: DateTimeOffset.UtcNow,
+            Messages: Array.Empty<ChatMessage>())
+        {
+            OwnerOid = TestSessionOwner.Oid,
+        },
+    };
+
     private WebApplication? _app;
 
     public async Task InitializeAsync()
@@ -179,6 +200,12 @@ public sealed class ChatAckEndpointsTestFixture : IAsyncLifetime, IDisposable
         builder.Services.AddSingleton(new Mock<IAiAuthorizationService>().Object);
 
         builder.Services.AddSingleton(AckCoordinatorMock.Object);
+
+        // Issue #863: the ack route is session-scoped, so SessionOwnershipFilter resolves a
+        // ChatSessionManager on every request. A host that maps the route must register the
+        // service the route needs -- the same unconditional-registration rule as RB-T028-03..06
+        // (root CLAUDE.md 10, bullet 6).
+        builder.Services.AddSingleton<ChatSessionManager>(AckSessions);
 
         builder.WebHost.UseTestServer();
 
@@ -238,4 +265,22 @@ public sealed class ChatAckFakeAuthHandler : AuthenticationHandler<Authenticatio
         var ticket = new AuthenticationTicket(principal, SchemeName);
         return Task.FromResult(AuthenticateResult.Success(ticket));
     }
+}
+
+public sealed class AckTestableSessionManager : ChatSessionManager
+{
+    public AckTestableSessionManager() : base(
+        cache: Mock.Of<Sprk.Bff.Api.Infrastructure.Cache.ITenantCache>(),
+        dataverseRepository: Mock.Of<IChatDataverseRepository>(),
+        logger: Mock.Of<ILogger<ChatSessionManager>>(),
+        persistence: null,
+        cleanupSignal: null)
+    {
+    }
+
+    public ChatSession? Session { get; set; }
+
+    public override Task<ChatSession?> GetSessionAsync(
+        string tenantId, string sessionId, CancellationToken ct = default)
+        => Task.FromResult(Session);
 }

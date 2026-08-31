@@ -262,6 +262,13 @@ FOR each task identified, assign a model tier:
 - **Explicit scope everywhere.** List the **exact files** to touch (not "the follow-on components"); **point at the canonical reference implementation to copy** (e.g. `workAssignmentService.ts`) rather than describe it; state the **exact contract** (e.g. the ADR-024 resolver's 5 fields + mutual-exclusion). A `<constraint>` without an explicit scope clause is a defect — write "Every endpoint added or modified in this task applies `DocumentAuthFilter`," not "use endpoint filters for auth."
 - **Acceptance criteria are a CLOSED SET.** The executor treats every listed `<criterion>` as mandatory and **anything not listed as out of scope**. Criteria must be **exhaustive, not illustrative** — include the negative/authorization cases (the 401, the empty-input, the unauthorized-user path), not just the happy path.
 - **"Above and beyond" must be requested.** If a task should include opportunistic improvements (e.g. "also fix adjacent lint violations in touched files"), say so explicitly. Do NOT rely on the model to infer it — and do NOT add anti-laziness scaffolding ("be exhaustive", "double-check everything"); Sonnet 5 over-triggers on those and burns effort on ritual verification.
+- **Test-scope clause (added 2026-08-28).** For any task that will add or modify tests, state in `<acceptance-criteria>` **which behaviours and edge cases are in scope for test coverage** — not just the production behaviour. Frame it as intent, and say what is *not* wanted:
+
+  > *"Cover the stated contract plus the edge cases named above. Anything beyond that needs a one-line justification in task notes."*
+
+  Two reasons. First, the closed-set rule above already tells the executor that unlisted criteria are out of scope; without a test-scope clause, "write tests" is an **open** instruction inside an otherwise closed contract, and the predictable result is breadth padding as uncertainty-hedging — three near-identical happy-path variants that each pass every ADR-038 §7 ban individually while adding no unique verification value. Second, it gives `/test-diet` something concrete to check a MAINTAIN classification against at project close.
+
+  **Do NOT state a numeric test count.** A number invites satisfying the number, which is the padding behaviour this clause exists to prevent.
 - **Step mode (see Step 3.5.5c) and escalation triggers (see the `<escalation>` element)** are the other two literal-execution levers — set them deliberately per task.
 - **Frontend tasks need concrete visual direction** (see Step 3.65): anchor the look in a `<knowledge>` pattern reference to an existing Fluent v9 component or an explicit spec. "Clean and modern" is not a spec — Sonnet 5 will settle into a fixed default house style.
 - **Knowledge curation (token discipline).** The 1M context window is headroom for genuinely cross-cutting tasks, NOT license to load the full ADR corpus by default. The Sonnet-5 tokenizer produces ~30% more tokens for the same text, so padding is materially more expensive — load what the task needs via the Tag-to-Knowledge mapping, reference the rest by path.
@@ -334,6 +341,11 @@ FOR each new-component task:
 **NOT required for**: tasks that ONLY modify existing files (edit, refactor, fix bug, add tests for existing surface, rename, format). The rule applies to NEW surface, not modification.
 
 **Audit trail**: tasks with hollow or missing `<justification>` are blocked from code review per CLAUDE.md §11. The `code-review` skill Step 6.6 verifies justification concreteness at PR time.
+
+**Component-complexity check (per [`docs/standards/COMPONENT-COMPLEXITY.md`](../../../docs/standards/COMPONENT-COMPLEXITY.md))** — for any task that creates a new component OR **materially grows an existing one**, evaluate **complexity/cohesion, not line count**:
+- If the task would add a **second (or Nth) responsibility** to an already-multi-purpose component, design the task to **extract the diverging responsibility into the right seam** up front — don't accrete another concern onto a god-class. (Prefer extending a *cohesive* component; don't manufacture thin components to dodge a size number.)
+- A large file is **not** a defect by itself — a large, single-responsibility/cohesive component (state machine, exhaustive mapping, generated code) is legitimate; note it in the task if relevant.
+- When an existing component's responsibilities have genuinely diverged, prefer a **deliberate decomposition task** over reactively splitting mid-feature. (There is no hard LOC gate — the retired God-class ratchet is replaced by this authoring/review guidance + a non-blocking observation report, `scripts/report-large-server-files.ps1`.)
 
 ### Step 3.6: Add Deployment Tasks (REQUIRED)
 

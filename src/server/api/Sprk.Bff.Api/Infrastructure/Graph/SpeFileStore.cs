@@ -36,7 +36,22 @@ public class SpeFileStore : ISpeFileOperations
     }
 
     // Container Operations - delegate to ContainerOperations
-    public Task<ContainerDto?> CreateContainerAsync(
+
+    /// <summary>
+    /// Creates an SPE container.
+    /// </summary>
+    /// <remarks>
+    /// <c>virtual</c> so a test host can substitute container creation at this facade — the seam
+    /// ADR-007 already designates for SPE access. The alternative is faking
+    /// <c>IGraphClientFactory</c>, which means standing up Graph SDK internals: transport-shaped
+    /// mocking, banned by ADR-038 B1. Same reasoning and same precedent as
+    /// <c>DocumentCheckoutService.DeleteAsync</c> (task 022). No behaviour change.
+    ///
+    /// Substituting it is what lets a provisioning test assert the SUCCESS path at all: before this,
+    /// the only available assertion was that provisioning reached business-unit creation and then
+    /// failed on the unavailable test-host Graph services — and business-unit creation no longer exists.
+    /// </remarks>
+    public virtual Task<ContainerDto?> CreateContainerAsync(
         Guid containerTypeId,
         string displayName,
         string? description = null,
@@ -68,19 +83,9 @@ public class SpeFileStore : ISpeFileOperations
     public virtual Task<string?> GetQuickXorHashAsync(string driveId, string itemId, CancellationToken ct = default)
         => _driveItemOps.GetQuickXorHashAsync(driveId, itemId, ct);
 
-    public Task<UploadSessionDto?> CreateUploadSessionAsync(
-        string containerId,
-        string path,
-        CancellationToken ct = default)
-        => _uploadManager.CreateUploadSessionAsync(containerId, path, ct);
-
-    public Task<HttpResponseMessage> UploadChunkAsync(
-        UploadSessionDto session,
-        Stream file,
-        long start,
-        long length,
-        CancellationToken ct = default)
-        => _uploadManager.UploadChunkAsync(session, file, start, length, ct);
+    // CreateUploadSessionAsync / UploadChunkAsync (app-only chunked upload) DELETED 2026-08-27 by
+    // unified-access-control-r2, following task 073's deletion of Api/UploadEndpoints.cs — their only
+    // caller. See the note in UploadSessionManager.cs for why the OBO twins are NOT covered by this.
 
     // Drive Item Operations - delegate to DriveItemOperations
     public Task<IList<FileHandleDto>> ListChildrenAsync(
@@ -158,7 +163,13 @@ public class SpeFileStore : ISpeFileOperations
     /// Creates a recipient-openable SPE sharing link for a DriveItem via OBO (R2 item 12 — the email
     /// composer's "Link" attachments). Delegates to <see cref="DriveItemOperations.CreateSharingLinkAsUserAsync"/>.
     /// </summary>
-    public Task<string?> CreateSharingLinkAsUserAsync(
+    /// <remarks>
+    /// <c>virtual</c> for the same reason as <see cref="DownloadFileAsync"/> (unified-access-control-r2
+    /// task 072): a test asserting that an unauthorized caller was denied must be able to prove NO LINK
+    /// WAS MINTED. A 403 assertion alone would pass even if the createLink had already been issued — and
+    /// unlike a failed download, a minted SPE URL cannot be taken back.
+    /// </remarks>
+    public virtual Task<string?> CreateSharingLinkAsUserAsync(
         HttpContext ctx,
         string driveId,
         string itemId,

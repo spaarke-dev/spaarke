@@ -145,7 +145,107 @@ public static class OperationAccessPolicy
         ["update_metadata"] = AccessRights.Write,                        // → driveitem.update
         ["share_document"] = AccessRights.Share,                         // → driveitem.createlink
         ["create_container"] = AccessRights.Create | AccessRights.Write, // → container.create
-        ["delete_container"] = AccessRights.Delete                       // → container.delete
+        ["delete_container"] = AccessRights.Delete,                      // → container.delete
+
+        // ========================================================================
+        // RECORD-SCOPED OPERATIONS (unified-access-control-r2 task 003 · spec FR-03)
+        // ========================================================================
+        // Findings A-3 / A-20: each string below is passed by a LIVE authorization filter but was
+        // absent from this table, so OperationAccessRule.EvaluateAsync:35-46 denied it as
+        // "unknown_operation" for every caller regardless of rights — an unconditional 403 on the
+        // finance surface, the Office save path, and three document read routes.
+        //
+        // Rights are least-privilege against the resource the FILTER actually authorizes, which is
+        // not always the record being written:
+
+        // "read" — DocumentAuthorizationFilter (FileAccessEndpoints.cs:118 eml-render),
+        // DataverseDocumentsEndpoints.cs:443, ChatDocumentEndpoints.cs:915. Resource = the document.
+        ["read"] = AccessRights.Read,
+
+        // "finance.read" — FinanceAuthorizationFilter on the /api/finance group and its GET routes
+        // (FinanceEndpoints.cs:18, :51, :65). Resource = matter / document / invoice id.
+        ["finance.read"] = AccessRights.Read,
+
+        // "finance.confirm" — FinanceEndpoints.cs:23 (confirm) and :37 (reject). Both MUTATE the
+        // authorized resource's own state (document status → Confirmed / RejectedNotInvoice), so
+        // Write is the requirement. Deliberately NOT Create: confirm also creates an sprk_invoice,
+        // but that is a DIFFERENT entity than the one being authorized — requiring Create on the
+        // document would over-restrict.
+        ["finance.confirm"] = AccessRights.Write,
+
+        // "entity.associate_document" — EntityAccessFilter.cs:64, attached at OfficeEndpoints.cs:173
+        // (POST /api/office/save). The authorized resource is the TARGET entity
+        // ("{EntityType}:{EntityId}", e.g. a matter), and the operation attaches a document TO it.
+        // In Dataverse that is AppendTo on the target ("other records can be attached to this
+        // record"), not Write — saving an email to a matter does not modify the matter's own fields.
+        //
+        // ⚠️ First use of AppendTo in this table. Task 005 (FR-04, lifting the Read ceiling in
+        // DataverseAccessDataSource.QueryUserPermissionsAsync:305-379) MUST map Dataverse's
+        // AppendToAccess into the snapshot, or this route stays permanently 403 — a silent failure.
+        // Recorded as an explicit obligation on task 005.
+        ["entity.associate_document"] = AccessRights.AppendTo,
+
+        // ========================================================================
+        // RECORD-SCOPED MUTATION OPERATIONS (unified-access-control-r2 task 022)
+        // ========================================================================
+        // DocumentAuthorizationFilterExtensions.AddDocumentAuthorizationFilter's own <param> doc
+        // reads: 'The operation being authorized (e.g., "read", "write", "delete")'. Task 003 added
+        // "read"; "write" and "delete" were advertised by that contract but never registered. Every
+        // ungated mutation route on the document surface therefore had no key to be gated WITH — and
+        // attaching a filter with an unregistered string is not a no-op, it is an unconditional 403
+        // for every caller (the incident recorded above). So these land BEFORE any filter uses them.
+        //
+        // Naming follows task 003's record-scoped convention (bare names, resource = the Dataverse
+        // record named by the route), NOT the driveitem.*/container.* Graph-shaped families above.
+        // These filters authorize an sprk_document ROW; driveitem.delete authorizes an SPE item. The
+        // rights happen to coincide, but reusing a driveitem.* key here would misdescribe the
+        // resource, and the legacy delete_file/download_file aliases already show what happens when
+        // one table carries two conventions for the same act.
+        //
+        // ⚠️ BOTH depend on RetrievePrincipalAccess being live. DataverseAccessDataSource's fallback
+        // probe (QueryReadAccessByProbeAsync) caps rights at Read by construction, so on an RPA
+        // outage every "write"/"delete" gate denies. That is the correct fail-closed direction and
+        // the same trade task 008 accepted deliberately for the delegation gate — but it does mean
+        // these routes are unavailable, not merely degraded, if RPA is misconfigured. Live RPA
+        // verification is owned by task 034; see the RPA-FALLBACK log marker.
+
+        // "write" — mutation of the authorized record's own fields (PUT /api/v1/documents/{id}), and
+        // the checkout family, which mints an EDITABLE url and moves the record's lock state.
+        // Deliberately not Write|Create: these change an existing row, they do not create one.
+        ["write"] = AccessRights.Write,
+
+        // "delete" — destruction of the authorized record. Delete alone, not Delete|Write: Dataverse
+        // models these as independent rights and a principal holding Delete without Write may still
+        // legitimately destroy. Requiring both would deny that caller for no security gain.
+        ["delete"] = AccessRights.Delete,
+
+        // ========================================================================
+        // RECORD-SCOPED SHARING OPERATION (unified-access-control-r2 task 072)
+        // ========================================================================
+        // "share" — minting a shareable credential for the authorized record
+        // (POST /api/documents/{documentId}/share-link). The right is NOT a judgement call: this table
+        // already answers it twice for the same act — "driveitem.createlink" (Share) and its legacy alias
+        // "share_document" (Share). Task 072 follows that precedent rather than re-deriving it, and it
+        // matches Graph's own permission model for driveitem.createLink.
+        //
+        // Why a BARE name and not simply reusing "driveitem.createlink": the resource differs. The
+        // driveitem.* family authorizes an SPE item; DocumentAuthorizationFilter authorizes an
+        // sprk_document ROW, which is the record-scoped convention established by task 003 and spelled
+        // out above ("reusing a driveitem.* key here would misdescribe the resource"). The rights
+        // coincide; the subject does not.
+        //
+        // Why Share and not Read — the eight sibling routes on this group carry "read": those routes
+        // return content TO AN AUTHENTICATED CALLER the platform can still identify and revoke. This one
+        // mints a URL that outlives revocation and, for anonymous scope, is openable by parties with no
+        // Spaarke identity at all. Reading a document and publishing a durable handle to it are different
+        // acts, and Dataverse models the second as Share.
+        //
+        // ⚠️ Same RPA dependency as "write"/"delete" above: DataverseAccessDataSource's fallback probe
+        // (QueryReadAccessByProbeAsync) caps rights at Read by construction, so on a RetrievePrincipalAccess
+        // outage every "share" gate denies and share-link minting is unavailable rather than degraded.
+        // That is the correct fail-closed direction and the same trade tasks 008/022 accepted; it is
+        // recorded here so the behaviour is not mistaken for a bug. Watch the RPA-FALLBACK log marker.
+        ["share"] = AccessRights.Share
     };
 
     /// <summary>

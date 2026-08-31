@@ -69,17 +69,47 @@ import {
   CheckmarkCircle20Regular,
   Storage20Regular,
   FolderOpen20Regular,
+  Copy16Regular,
+  CheckmarkCircle16Filled,
+  Link16Regular,
+  Dismiss20Regular,
+  Archive20Regular,
+  ArchiveArrowBack20Regular,
 } from "@fluentui/react-icons";
+import { ConfirmModal } from "@spaarke/ui-components";
 import { useBuContext } from "../../contexts/BuContext";
-import { speApiClient, ApiError } from "../../services/speApiClient";
-import type { Container, ContainerStatus } from "../../types/spe";
+import { speApiClient, describeApiError } from "../../services/speApiClient";
+import { copyToClipboard } from "../../services/clipboard";
+import type {
+  Container,
+  ContainerStatus,
+  ContainerArchiveStatus,
+} from "../../types/spe";
 import { ContainerDetail } from "./ContainerDetail";
+import { FileBrowserPage } from "../files/FileBrowserPage";
+import { useResizablePane, PaneSplitter } from "../layout/ResizablePane";
+import { useGridStyles } from "../layout/gridStyles";
+import {
+  CONTAINER_URL_LABEL,
+  CONTAINER_URL_ABSENT_LABEL,
+  CONTAINER_URL_ABSENT_TOOLTIP,
+  CONTAINER_URL_ON_DEMAND_TOOLTIP,
+  type ContainerUrlState,
+} from "./containerCompliance";
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Utilities
 // ─────────────────────────────────────────────────────────────────────────────
 
 /** Format bytes to a human-readable size string (e.g. "1.2 GB"). */
+/**
+ * Format a byte count. Callers MUST handle absence themselves — see the Storage Used column.
+ *
+ * This deliberately does NOT map absence to an em-dash any more. Until 2026-08-24 every container
+ * returned null here (the BFF fetched the value from Graph and discarded it), so this column showed
+ * "—" for every row, and an operator had no way to tell "we did not measure" from "nothing stored"
+ * (spec NFR-06).
+ */
 function formatBytes(bytes: number | undefined): string {
   if (bytes === undefined || bytes === null) return "—";
   if (bytes === 0) return "0 B";
@@ -104,6 +134,30 @@ function formatDate(iso: string | undefined): string {
     }).format(new Date(iso));
   } catch {
     return iso;
+  }
+}
+
+/**
+ * Human labels for archive state (FR-E01).
+ *
+ * Graph's raw values are camelCase enum members and two of the three describe work still in flight.
+ * The labels keep that visible — "Archiving…" rather than "Archived" for `recentlyArchived` — because
+ * the whole point of surfacing this column is that archival is asynchronous.
+ */
+const ARCHIVE_STATUS_LABEL: Record<ContainerArchiveStatus, string> = {
+  recentlyArchived: "Archiving…",
+  fullyArchived: "Archived",
+  reactivating: "Restoring…",
+};
+
+function archiveStatusExplanation(status: ContainerArchiveStatus): string {
+  switch (status) {
+    case "recentlyArchived":
+      return "Archiving has started but is not finished. Content is still being moved to archival storage.";
+    case "fullyArchived":
+      return "Fully archived. Storage cost is reduced and content is de-prioritised in Copilot results. Restore to make it fully available again.";
+    case "reactivating":
+      return "Restore is in progress. The container is not yet available for normal use.";
   }
 }
 
@@ -153,7 +207,9 @@ const useStyles = makeStyles({
     color: tokens.colorNeutralForeground1,
   },
 
+  /** `display: block` so the scope line sits below the title — see ContainerTypesPage. */
   pageSubtitle: {
+    display: "block",
     color: tokens.colorNeutralForeground2,
   },
 
@@ -200,6 +256,45 @@ const useStyles = makeStyles({
     paddingRight: tokens.spacingHorizontalXL,
   },
 
+  /**
+   * Browse pane below the list. Capped at half the viewport so the container list stays visible
+   * and usable while browsing — the point of the split is to see both, not to trade one for the
+   * other.
+   */
+  browsePane: {
+    display: "flex",
+    flexDirection: "column",
+    flex: "1 1 50%",
+    minHeight: "220px",
+    maxHeight: "55%",
+    overflow: "hidden",
+    borderTopWidth: "1px",
+    borderTopStyle: "solid",
+    borderTopColor: tokens.colorNeutralStroke2,
+    backgroundColor: tokens.colorNeutralBackground1,
+  },
+
+  browsePaneHeader: {
+    display: "flex",
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    gap: tokens.spacingHorizontalM,
+    paddingLeft: tokens.spacingHorizontalL,
+    paddingRight: tokens.spacingHorizontalM,
+    paddingTop: tokens.spacingVerticalS,
+    paddingBottom: tokens.spacingVerticalS,
+    backgroundColor: tokens.colorNeutralBackground2,
+    flexShrink: 0,
+  },
+
+  /** minHeight:0 is required, or the embedded page's own scroll container never scrolls. */
+  browsePaneBody: {
+    flex: "1 1 auto",
+    minHeight: 0,
+    overflow: "hidden",
+  },
+
   /** DataGrid fills its parent. */
   dataGrid: {
     width: "100%",
@@ -243,35 +338,243 @@ const useStyles = makeStyles({
 // Column Definitions
 // ─────────────────────────────────────────────────────────────────────────────
 
+/**
+ * Per-row container URL (FR-C10) — resolved on demand, then copyable.
+ *
+ * 🔑 WHY ON DEMAND, AND WHY THIS IS NOT A SHORTCUT. Microsoft Graph cannot return container URLs on
+ * a LIST at all. `fileStorageContainer` has no URL property in either API version; the value lives on
+ * the `drive` navigation property, and on the containers COLLECTION Graph accepts
+ * `$expand=drive($select=webUrl)`, answers 200, echoes `drive(webUrl)` back in `@odata.context` — and
+ * omits `drive` from every row. Measured 2026-08-24 across both versions and every expand shape
+ * (notes/task-028-findings.md §1).
+ *
+ * So an eagerly-populated column is not available at any price short of N extra Graph calls on every
+ * grid load. Resolving the one container the admin actually asks about costs one call, matches the
+ * real workflow (find a container → copy its URL → paste into a Purview eDiscovery search), and —
+ * decisively — cannot render a false absent state: there is no point at which this cell claims a
+ * container has no URL because nobody asked Graph for it.
+ */
+const ContainerUrlCell: React.FC<{ container: Container; configId?: string }> = ({
+  container,
+  configId,
+}) => {
+  const [state, setState] = React.useState<ContainerUrlState>({ kind: "idle" });
+  const [copied, setCopied] = React.useState(false);
+
+  const resolveAndCopy = React.useCallback(async () => {
+    if (!configId) return;
+    setState({ kind: "loading" });
+    try {
+      const detail = await speApiClient.containers.get(container.id, configId);
+      if (!detail.webUrl) {
+        // Asked, and Graph reported none — a real state (e.g. a container still provisioning
+        // has no drive yet), distinct from "not asked". Never synthesise a URL to fill it.
+        setState({ kind: "absent" });
+        return;
+      }
+      setState({ kind: "resolved", url: detail.webUrl });
+      const ok = await copyToClipboard(detail.webUrl);
+      setCopied(ok);
+      if (ok) setTimeout(() => setCopied(false), 2000);
+    } catch (err) {
+      setState({
+        kind: "error",
+        message: describeApiError(err, "Could not retrieve the container URL."),
+      });
+    }
+  }, [container.id, configId]);
+
+  if (state.kind === "loading") {
+    return <Spinner size="tiny" label="" aria-label="Retrieving container URL" />;
+  }
+
+  if (state.kind === "absent") {
+    return (
+      <Tooltip content={CONTAINER_URL_ABSENT_TOOLTIP} relationship="label">
+        <Text italic style={{ color: tokens.colorNeutralForeground3 }}>
+          {CONTAINER_URL_ABSENT_LABEL}
+        </Text>
+      </Tooltip>
+    );
+  }
+
+  if (state.kind === "error") {
+    return (
+      <Tooltip content={state.message} relationship="label">
+        <Text italic style={{ color: tokens.colorPaletteRedForeground1 }}>
+          Unavailable
+        </Text>
+      </Tooltip>
+    );
+  }
+
+  if (state.kind === "resolved") {
+    return (
+      <Tooltip content={decodeURIComponent(state.url)} relationship="label">
+        <Button
+          appearance="subtle"
+          size="small"
+          icon={copied ? <CheckmarkCircle16Filled /> : <Copy16Regular />}
+          onClick={(e) => {
+            e.stopPropagation();
+            void copyToClipboard(state.url).then((ok) => {
+              setCopied(ok);
+              if (ok) setTimeout(() => setCopied(false), 2000);
+            });
+          }}
+          aria-label={`Copy the URL for ${container.displayName}`}
+        >
+          {copied ? "Copied" : "Copy URL"}
+        </Button>
+      </Tooltip>
+    );
+  }
+
+  return (
+    <Tooltip content={CONTAINER_URL_ON_DEMAND_TOOLTIP} relationship="label">
+      <Button
+        appearance="subtle"
+        size="small"
+        icon={<Link16Regular />}
+        disabled={!configId}
+        onClick={(e) => {
+          e.stopPropagation();
+          void resolveAndCopy();
+        }}
+        aria-label={`Get and copy the URL for ${container.displayName}`}
+      >
+        Get URL
+      </Button>
+    </Tooltip>
+  );
+};
+
+/**
+ * Column sizing for the containers grid — a MODULE-LEVEL CONSTANT, deliberately.
+ *
+ * 🔴 This was an inline object literal on the `<DataGrid>` until 2026-08-26. A fresh object every
+ * render means Fluent's `useTableColumnSizing` sees new options each time and re-applies
+ * `defaultWidth`, discarding whatever the operator had dragged. Selecting a row re-renders, so the
+ * columns snapped back the instant you clicked one — reported as "the columns collapse back to
+ * their default width when I click the column" (UAT round 8), and the reason widening the Container
+ * ID column to read the value was impossible: the click that started the selection undid the drag.
+ *
+ * A stable reference is the whole fix. Do NOT inline this back, and do not build it with `useMemo`
+ * inside the component either unless the dependency array is genuinely empty — same failure.
+ */
+const COLUMN_SIZING = {
+  displayName: { minWidth: 120, defaultWidth: 200, idealWidth: 200 },
+  id: { minWidth: 120, defaultWidth: 300, idealWidth: 300 },
+  status: { minWidth: 80, defaultWidth: 110, idealWidth: 110 },
+  archiveStatus: { minWidth: 80, defaultWidth: 110, idealWidth: 110 },
+  createdDateTime: { minWidth: 90, defaultWidth: 130, idealWidth: 130 },
+  storageUsedInBytes: { minWidth: 100, defaultWidth: 140, idealWidth: 140 },
+  webUrl: { minWidth: 100, defaultWidth: 140, idealWidth: 140 },
+} as const;
+
 /** Build typed Fluent DataGrid column definitions for Container rows. */
 function buildColumns(
-  onBrowse?: (containerId: string, containerName?: string) => void,
+  configId?: string,
 ): TableColumnDefinition<Container>[] {
   return [
     createTableColumn<Container>({
       columnId: "displayName",
       renderHeaderCell: () => "Name",
       renderCell: (container) => (
-        <Text weight="semibold" truncate>
+        <Text weight="semibold" truncate wrap={false}>
           {container.displayName}
+        </Text>
+      ),
+    }),
+    createTableColumn<Container>({
+      columnId: "id",
+      renderHeaderCell: () => "Container ID",
+      /*
+       * Operator-requested (UAT 2026-08-26). The container ID is what every Graph call, support
+       * ticket and log line identifies a container by, and until now the only place to read one was
+       * the detail panel. Monospace because these are opaque base64-ish strings that get compared
+       * character by character; the full value is on the title attribute since the cell truncates.
+       */
+      renderCell: (container) => (
+        <Text
+          truncate
+          wrap={false}
+          title={container.id}
+          style={{
+            fontFamily: tokens.fontFamilyMonospace,
+            fontSize: tokens.fontSizeBase200,
+            color: tokens.colorNeutralForeground2,
+          }}
+        >
+          {container.id}
         </Text>
       ),
     }),
     createTableColumn<Container>({
       columnId: "status",
       renderHeaderCell: () => "Status",
-      renderCell: (container) => {
-        const status = container.status ?? "active";
-        return (
+      /*
+       * Three states, not two — the same correction the Storage column already carries.
+       *
+       * This cell read `container.status ?? "active"` until 2026-08-27. The server was ALSO
+       * defaulting to "active" (and doing so for 100% of rows, because its reader looked for `status`
+       * in the wrong place), so the fabrication was doubled: even once the server started telling the
+       * truth, this `??` would have kept the lie alive on its own. Graph does not return `status` on
+       * a list at all — measured, task 050 §4 — so "Not reported" is the honest and permanent answer
+       * here, and a real value only appears on the detail view.
+       */
+      renderCell: (container) =>
+        container.status === undefined || container.status === null ? (
+          <Tooltip
+            content="Microsoft Graph does not report container status on a list. Open the container to see its status."
+            relationship="label"
+          >
+            <Text italic style={{ color: tokens.colorNeutralForeground3 }}>
+              Not reported
+            </Text>
+          </Tooltip>
+        ) : (
           <Badge
-            color={statusBadgeColor(status)}
+            color={statusBadgeColor(container.status)}
             appearance="filled"
             size="small"
           >
-            {status.charAt(0).toUpperCase() + status.slice(1)}
+            {container.status.charAt(0).toUpperCase() + container.status.slice(1)}
           </Badge>
-        );
-      },
+        ),
+    }),
+    createTableColumn<Container>({
+      columnId: "archiveStatus",
+      renderHeaderCell: () => "Archive",
+      /*
+       * A SEPARATE column from Status, deliberately. Archive state and lifecycle status are
+       * different Graph properties answering different questions, and a container can be `active`
+       * and `fullyArchived` simultaneously — folding them into one badge would force a choice
+       * between two facts that are both true.
+       *
+       * Absent renders as nothing at all rather than "Not archived": Graph has no `notArchived`
+       * value, so absence cannot distinguish "not archived" from "archival is switched off for this
+       * container type and nothing was ever reported". An empty cell claims neither.
+       */
+      renderCell: (container) =>
+        container.archiveStatus ? (
+          <Tooltip
+            content={archiveStatusExplanation(container.archiveStatus)}
+            relationship="label"
+          >
+            <Badge
+              color={
+                container.archiveStatus === "reactivating"
+                  ? "informative"
+                  : "warning"
+              }
+              appearance="outline"
+              size="small"
+            >
+              {ARCHIVE_STATUS_LABEL[container.archiveStatus]}
+            </Badge>
+          </Tooltip>
+        ) : null,
     }),
     createTableColumn<Container>({
       columnId: "createdDateTime",
@@ -283,30 +586,42 @@ function buildColumns(
     createTableColumn<Container>({
       columnId: "storageUsedInBytes",
       renderHeaderCell: () => "Storage Used",
-      renderCell: (container) => (
-        <Text>{formatBytes(container.storageUsedInBytes)}</Text>
-      ),
+      /*
+       * Three states, not two. Graph reports consumption only on the LIST surface, so a container
+       * can legitimately have no figure — and "not reported" is a different fact from "0 B". An
+       * em-dash conveyed neither; it just looked like the column was broken (which it was).
+       */
+      renderCell: (container) =>
+        container.storageUsedInBytes === undefined ||
+        container.storageUsedInBytes === null ? (
+          <Tooltip
+            content="Microsoft Graph did not report a storage figure for this container. This is not the same as zero."
+            relationship="label"
+          >
+            <Text italic style={{ color: tokens.colorNeutralForeground3 }}>
+              Not reported
+            </Text>
+          </Tooltip>
+        ) : (
+          <Text>{formatBytes(container.storageUsedInBytes)}</Text>
+        ),
     }),
     createTableColumn<Container>({
-      columnId: "browse",
-      renderHeaderCell: () => "",
-      renderCell: (container) =>
-        onBrowse ? (
-          <Button
-            appearance="subtle"
-            size="small"
-            icon={<FolderOpen20Regular />}
-            onClick={(e) => {
-              e.stopPropagation();
-              onBrowse(container.id, container.displayName);
-            }}
-            title="Browse files"
-            aria-label={`Browse files in ${container.displayName}`}
-          >
-            Browse
-          </Button>
-        ) : null,
+      columnId: "webUrl",
+      renderHeaderCell: () => CONTAINER_URL_LABEL,
+      renderCell: (container) => (
+        <ContainerUrlCell container={container} configId={configId} />
+      ),
     }),
+    /*
+     * The per-row "Browse" column was REMOVED on 2026-08-26 (UAT round 8). It duplicated the
+     * Browse toolbar button, which already acts on the selected row, and it cost a full column of
+     * horizontal room on a grid whose Container ID column needs every pixel it can get.
+     *
+     * The `onBrowse` PARAMETER went with it. An earlier draft of this comment claimed the
+     * toolbar still used it — it does not; the toolbar calls `setBrowseContainer` directly, so
+     * the parameter was dead the moment the column left. `tsc --noEmit` caught the claim.
+     */
   ];
 }
 
@@ -417,9 +732,20 @@ const CreateContainerDialog: React.FC<CreateContainerDialogProps> = ({
  */
 interface ContainersPageProps {
   onOpenContainer?: (containerId: string, containerName?: string) => void;
+  /**
+   * Container whose detail panel should be open on first render, from a deep link
+   * (`?page=containers&containerId=…` — Search's "Manage Permissions" builds exactly this).
+   *
+   * Applied once, as the initial state, deliberately: making it a controlled prop would re-open the
+   * panel every time the user closed it, because the URL still names the container.
+   */
+  initialDetailContainerId?: string | null;
 }
 
-export const ContainersPage: React.FC<ContainersPageProps> = ({ onOpenContainer }) => {
+export const ContainersPage: React.FC<ContainersPageProps> = ({
+  onOpenContainer,
+  initialDetailContainerId,
+}) => {
   const styles = useStyles();
   const { selectedConfig } = useBuContext();
 
@@ -432,7 +758,9 @@ export const ContainersPage: React.FC<ContainersPageProps> = ({ onOpenContainer 
   // ── Detail Panel State ──────────────────────────────────────────────────────
 
   /** ID of the container whose detail panel is open, or null when closed. */
-  const [detailContainerId, setDetailContainerId] = React.useState<string | null>(null);
+  const [detailContainerId, setDetailContainerId] = React.useState<string | null>(
+    initialDetailContainerId ?? null,
+  );
 
   // ── Action State ────────────────────────────────────────────────────────────
 
@@ -443,6 +771,17 @@ export const ContainersPage: React.FC<ContainersPageProps> = ({ onOpenContainer 
 
   /** Whether a lifecycle action (activate/lock/unlock/delete) is in flight. */
   const [actionInProgress, setActionInProgress] = React.useState(false);
+
+  /**
+   * Which archival action is awaiting confirmation, or null (FR-E01).
+   *
+   * Archival changes whether content is available, so it is confirmed before it runs — and the
+   * confirmation has to state that consequence, not just ask "are you sure?". Held as state rather
+   * than `window.confirm` (which the Delete action still uses) because ADR-050 requires the canonical
+   * ConfirmModal, and because a native confirm cannot render the differing archive/restore copy.
+   */
+  const [pendingArchival, setPendingArchival] =
+    React.useState<"archive" | "restore" | null>(null);
 
   /** Error message from a failed toolbar action. */
   const [actionError, setActionError] = React.useState<string | null>(null);
@@ -455,9 +794,24 @@ export const ContainersPage: React.FC<ContainersPageProps> = ({ onOpenContainer 
   const [createOpen, setCreateOpen] = React.useState(false);
   const [createSaving, setCreateSaving] = React.useState(false);
 
+  /**
+   * The container currently open in the browse pane below the list, or null when the pane is
+   * closed. File Browser stopped being a top-level tab on 2026-08-26: it could only ever work on a
+   * container chosen HERE, so as a peer tab it was either greyed out or showed a "pick a container"
+   * prompt — a tab whose job was to tell you to go to another tab. It is now the bottom half of
+   * this page.
+   */
+  const [browseContainer, setBrowseContainer] = React.useState<{
+    id: string;
+    name?: string;
+  } | null>(null);
+
   // ── Column Definitions (stable reference) ──────────────────────────────────
 
-  const columns = React.useMemo(() => buildColumns(onOpenContainer), [onOpenContainer]);
+  const columns = React.useMemo(
+    () => buildColumns(selectedConfig?.id),
+    [onOpenContainer, selectedConfig],
+  );
 
   // ── Derived: Selected Container Objects ────────────────────────────────────
 
@@ -482,9 +836,7 @@ export const ContainersPage: React.FC<ContainersPageProps> = ({ onOpenContainer 
       setContainers(data);
     } catch (err) {
       const message =
-        err instanceof ApiError
-          ? err.message
-          : "Failed to load containers. Please try again.";
+        describeApiError(err, "Failed to load containers. Please try again.");
       setError(message);
     } finally {
       setLoading(false);
@@ -516,12 +868,25 @@ export const ContainersPage: React.FC<ContainersPageProps> = ({ onOpenContainer 
   // ── Row Click Handler (opens detail panel) ───────────────────────────────────
 
   /**
-   * Opens the ContainerDetail side panel for the clicked container.
-   * This is triggered by clicking on the non-checkbox area of a row.
+   * Opens the ContainerDetail pane for the clicked container.
+   * This is triggered by clicking on the non-radio area of a row.
+   *
+   * Closes the browse pane first. Since 2026-08-26 both panes dock BELOW the list rather than
+   * overlaying it from the right, so two open at once would leave the grid a sliver between them.
+   * They are alternative views of one container — its metadata, or its files — so showing one at a
+   * time is also the honest model.
    */
   const handleRowClick = React.useCallback((containerId: string) => {
+    setBrowseContainer(null);
     setDetailContainerId(containerId);
   }, []);
+
+  /*
+   * Drag-to-resize for the two bottom panes (UAT round 6). They are mutually exclusive, so ONE
+   * height serves both — dragging the browse pane and then opening details keeps the size the
+   * operator just chose, rather than snapping back to a default.
+   */
+  const bottomPane = useResizablePane({ defaultHeight: 380, minHeight: 160 });
 
   // ── Toolbar Action Handlers ─────────────────────────────────────────────────
 
@@ -552,9 +917,7 @@ export const ContainersPage: React.FC<ContainersPageProps> = ({ onOpenContainer 
       if (failed.length > 0) {
         const firstError = (failed[0] as PromiseRejectedResult).reason;
         const msg =
-          firstError instanceof ApiError
-            ? firstError.message
-            : "One or more operations failed.";
+          describeApiError(firstError, "One or more operations failed.");
         setActionError(
           failed.length === ids.length
             ? msg
@@ -565,7 +928,7 @@ export const ContainersPage: React.FC<ContainersPageProps> = ({ onOpenContainer 
       }
     } catch (err) {
       const message =
-        err instanceof ApiError ? err.message : "Operation failed. Please try again.";
+        describeApiError(err, "Operation failed. Please try again.");
       setActionError(message);
     } finally {
       setActionInProgress(false);
@@ -595,6 +958,73 @@ export const ContainersPage: React.FC<ContainersPageProps> = ({ onOpenContainer 
     );
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selectedContainers, selectedConfig, hasSelection, actionInProgress, loadContainers]);
+
+  /**
+   * Archive / restore (FR-E01).
+   *
+   * Kept OUT of `runLifecycleAction` on purpose. That helper reports
+   * "{n} containers {verbed}" on success — correct for activate/lock/unlock, which complete before
+   * Graph answers. Archival does not: Graph accepts the request and does the work afterwards, and
+   * the API returns 202 with `pending: true` to say so. Routing these through the same helper would
+   * have produced "3 containers archived" for three containers that are still archiving, which is the
+   * precise failure this project exists to remove — and it would have looked like reuse.
+   */
+  const runArchivalAction = React.useCallback(
+    async (mode: "archive" | "restore"): Promise<void> => {
+      if (!selectedConfig || !hasSelection || actionInProgress) return;
+      setActionInProgress(true);
+      setActionError(null);
+      setActionStatus(null);
+
+      const configId = selectedConfig.id;
+      const ids = selectedContainers.map((c) => c.id);
+
+      try {
+        const results = await Promise.allSettled(
+          ids.map((id) =>
+            mode === "archive"
+              ? speApiClient.containers.archive(id, configId)
+              : speApiClient.containers.unarchive(id, configId),
+          ),
+        );
+
+        const failed = results.filter((r) => r.status === "rejected");
+        const accepted = results.length - failed.length;
+
+        await loadContainers();
+
+        if (failed.length > 0) {
+          const firstError = (failed[0] as PromiseRejectedResult).reason;
+          // describeApiError surfaces the ProblemDetails `detail`, which for the
+          // not-opted-in case already carries the exact PowerShell remediation.
+          const msg = describeApiError(firstError, "One or more operations failed.");
+          setActionError(
+            failed.length === ids.length
+              ? msg
+              : `${failed.length} of ${ids.length} operations failed: ${msg}`,
+          );
+        }
+
+        if (accepted > 0) {
+          const noun = `container${accepted !== 1 ? "s" : ""}`;
+          // "started", never "archived". The operation is in flight; the Archive column shows
+          // "Archiving…" / "Restoring…" until Graph finishes.
+          setActionStatus(
+            mode === "archive"
+              ? `Archiving started for ${accepted} ${noun}. This continues in the background — the Archive column updates as it progresses.`
+              : `Restore started for ${accepted} ${noun}. They remain unavailable until reactivation finishes.`,
+          );
+        }
+      } catch (err) {
+        setActionError(describeApiError(err, "Operation failed. Please try again."));
+      } finally {
+        setActionInProgress(false);
+        setPendingArchival(null);
+      }
+    },
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [selectedContainers, selectedConfig, hasSelection, actionInProgress, loadContainers],
+  );
 
   /**
    * Delete (soft-delete) moves containers to the recycle bin via the Graph API.
@@ -632,7 +1062,7 @@ export const ContainersPage: React.FC<ContainersPageProps> = ({ onOpenContainer 
       );
     } catch (err) {
       const message =
-        err instanceof ApiError ? err.message : "Delete failed. Please try again.";
+        describeApiError(err, "Delete failed. Please try again.");
       setActionError(message);
     } finally {
       setActionInProgress(false);
@@ -657,7 +1087,7 @@ export const ContainersPage: React.FC<ContainersPageProps> = ({ onOpenContainer 
         await loadContainers();
       } catch (err) {
         const message =
-          err instanceof ApiError ? err.message : "Failed to create container.";
+          describeApiError(err, "Failed to create container.");
         setActionError(message);
       } finally {
         setCreateSaving(false);
@@ -729,6 +1159,38 @@ export const ContainersPage: React.FC<ContainersPageProps> = ({ onOpenContainer 
           </ToolbarButton>
         </Tooltip>
 
+        {/*
+          Browse opens the file browser in the pane below, for the ONE selected container.
+          Deliberately requires exactly one selection: browsing is a single-container act, so with
+          two rows ticked there is no defensible answer to "browse which?".
+        */}
+        <Tooltip
+          content={
+            selectedContainers.length === 1
+              ? `Browse files in "${selectedContainers[0].displayName}"`
+              : selectedContainers.length > 1
+                ? "Select a single container to browse its files"
+                : "Select a container to browse its files"
+          }
+          relationship="description"
+        >
+          <ToolbarButton
+            icon={<FolderOpen20Regular />}
+            onClick={() => {
+              // Mutually exclusive with the detail pane — see handleRowClick.
+              setDetailContainerId(null);
+              setBrowseContainer({
+                id: selectedContainers[0].id,
+                name: selectedContainers[0].displayName,
+              });
+            }}
+            disabled={selectedContainers.length !== 1 || actionInProgress || loading}
+            aria-label="Browse files in the selected container"
+          >
+            <span className={styles.buttonLabel}>Browse</span>
+          </ToolbarButton>
+        </Tooltip>
+
         <ToolbarDivider />
 
         {/* Activate */}
@@ -790,6 +1252,45 @@ export const ContainersPage: React.FC<ContainersPageProps> = ({ onOpenContainer 
 
         <ToolbarDivider />
 
+        {/* Archive / Restore — FR-E01 */}
+        <Tooltip
+          content={
+            hasSelection
+              ? `Archive ${selectedContainers.length} selected container${selectedContainers.length !== 1 ? "s" : ""} — reduces storage cost, makes content unavailable until restored`
+              : "Select containers to archive"
+          }
+          relationship="description"
+        >
+          <ToolbarButton
+            icon={<Archive20Regular />}
+            onClick={() => setPendingArchival("archive")}
+            disabled={isActionsDisabled}
+            aria-label="Archive selected containers"
+          >
+            <span className={styles.buttonLabel}>Archive</span>
+          </ToolbarButton>
+        </Tooltip>
+
+        <Tooltip
+          content={
+            hasSelection
+              ? `Restore ${selectedContainers.length} selected archived container${selectedContainers.length !== 1 ? "s" : ""} to active use`
+              : "Select archived containers to restore"
+          }
+          relationship="description"
+        >
+          <ToolbarButton
+            icon={<ArchiveArrowBack20Regular />}
+            onClick={() => setPendingArchival("restore")}
+            disabled={isActionsDisabled}
+            aria-label="Restore selected archived containers"
+          >
+            <span className={styles.buttonLabel}>Restore</span>
+          </ToolbarButton>
+        </Tooltip>
+
+        <ToolbarDivider />
+
         {/* Delete */}
         <Tooltip
           content={
@@ -829,6 +1330,72 @@ export const ContainersPage: React.FC<ContainersPageProps> = ({ onOpenContainer 
           </ToolbarButton>
         </Tooltip>
       </Toolbar>
+
+      {/*
+        ── Archive / Restore confirmation (FR-E01, ADR-050 canonical ConfirmModal) ──
+
+        The consequence is stated BEFORE the action, and stated concretely: archiving takes content
+        offline. An admin who reads only the bold first line still learns the thing that would
+        surprise them. `destructive` is set for archive because from the user's point of view the
+        content becomes unavailable — reversible, but not harmless.
+      */}
+      <ConfirmModal
+        open={pendingArchival !== null}
+        busy={actionInProgress}
+        onClose={() => {
+          if (!actionInProgress) setPendingArchival(null);
+        }}
+        onConfirm={() => {
+          if (pendingArchival) void runArchivalAction(pendingArchival);
+        }}
+        title={
+          pendingArchival === "restore"
+            ? "Restore archived containers?"
+            : "Archive containers?"
+        }
+        destructive={pendingArchival === "archive"}
+        confirmLabel={
+          actionInProgress
+            ? "Working…"
+            : pendingArchival === "restore"
+              ? "Restore"
+              : "Archive"
+        }
+        message={
+          pendingArchival === "restore" ? (
+            <>
+              <Text weight="semibold">
+                {selectedContainers.length} container
+                {selectedContainers.length !== 1 ? "s" : ""} will be returned to
+                active use.
+              </Text>
+              <br />
+              <br />
+              Restoring is not instant. Each container enters a{" "}
+              <Text weight="semibold">reactivating</Text> state and stays
+              unavailable until Microsoft 365 finishes bringing its content back
+              online. The Archive column shows progress.
+            </>
+          ) : (
+            <>
+              <Text weight="semibold">
+                Archiving makes container content unavailable until it is
+                restored.
+              </Text>
+              <br />
+              <br />
+              {selectedContainers.length} container
+              {selectedContainers.length !== 1 ? "s" : ""} will be archived.
+              Files stay retained and nothing is deleted, but users cannot open
+              them, and the content is de-prioritised in Copilot results.
+              Storage cost falls by up to 75%.
+              <br />
+              <br />
+              Archiving runs in the background and is reversible with Restore.
+            </>
+          )
+        }
+      />
 
       {/* ── Status / Error Banners ── */}
       {(actionError || actionStatus) && (
@@ -918,6 +1485,50 @@ export const ContainersPage: React.FC<ContainersPageProps> = ({ onOpenContainer 
         )}
       </div>
 
+      {/*
+        ── Browse pane (the former File Browser tab) ──
+        Renders only when a container has been chosen, so the page costs nothing until asked for.
+        FileBrowserPage already took (containerId, configId, containerName) as props, so it embeds
+        here unchanged — it never needed to be a route.
+      */}
+      {browseContainer && (
+        <PaneSplitter
+          label="the file browser"
+          height={bottomPane.height}
+          onPointerDown={bottomPane.onPointerDown}
+          onKeyDown={bottomPane.onKeyDown}
+          isDragging={bottomPane.isDragging}
+        />
+      )}
+      {browseContainer && (
+        <div
+          className={styles.browsePane}
+          style={{ height: `${bottomPane.height}px`, flex: "0 0 auto", maxHeight: "none" }}
+        >
+          <div className={styles.browsePaneHeader}>
+            <Text size={300} weight="semibold">
+              Files in &ldquo;{browseContainer.name ?? browseContainer.id}&rdquo;
+            </Text>
+            <Tooltip content="Close the file browser" relationship="label">
+              <Button
+                appearance="subtle"
+                size="small"
+                icon={<Dismiss20Regular />}
+                onClick={() => setBrowseContainer(null)}
+                aria-label="Close the file browser"
+              />
+            </Tooltip>
+          </div>
+          <div className={styles.browsePaneBody}>
+            <FileBrowserPage
+              containerId={browseContainer.id}
+              configId={selectedConfig.id}
+              containerName={browseContainer.name}
+            />
+          </div>
+        </div>
+      )}
+
       {/* ── Create Container Dialog ── */}
       <CreateContainerDialog
         open={createOpen}
@@ -927,10 +1538,20 @@ export const ContainersPage: React.FC<ContainersPageProps> = ({ onOpenContainer 
       />
 
       {/* ── Container Detail Panel ── */}
+      {detailContainerId !== null && (
+        <PaneSplitter
+          label="container details"
+          height={bottomPane.height}
+          onPointerDown={bottomPane.onPointerDown}
+          onKeyDown={bottomPane.onKeyDown}
+          isDragging={bottomPane.isDragging}
+        />
+      )}
       <ContainerDetail
         containerId={detailContainerId}
         onClose={() => setDetailContainerId(null)}
         onBrowseFiles={onOpenContainer}
+        paneHeight={bottomPane.height}
       />
     </div>
   );
@@ -945,8 +1566,15 @@ export const ContainersPage: React.FC<ContainersPageProps> = ({ onOpenContainer 
  * Extracted to keep ContainersPage readable and allow future feature extension.
  *
  * Row interaction model:
- *   - Clicking the checkbox cell toggles multi-select (toolbar actions).
- *   - Clicking any non-checkbox cell opens the ContainerDetail side panel.
+ *   - Clicking the radio cell selects that container (toolbar actions act on it).
+ *   - Clicking any non-radio cell opens the ContainerDetail side panel.
+ *
+ * ⚠️ **Single-select, operator-directed (UAT 2026-08-26).** This grid was multi-select until then.
+ * The consequence is deliberate and worth knowing before "restoring" it: Activate / Lock / Unlock /
+ * Delete now act on exactly one container per invocation, and `BulkOperationService` — which those
+ * toolbar actions call, and which batches across many containers — no longer has a UI that can
+ * feed it more than one. The service is intact and still batches; only the reachable input narrowed.
+ * Reverting to `multiselect` here restores bulk behaviour with no other change.
  */
 interface ContainerDataGridProps {
   containers: Container[];
@@ -966,11 +1594,10 @@ const ContainerDataGrid: React.FC<ContainerDataGridProps> = ({
   onRowClick,
   className,
 }) => {
+  const grid = useGridStyles();
   const {
     getRows,
     selection: {
-      allRowsSelected,
-      toggleAllRows,
       toggleRow,
       isRowSelected,
     },
@@ -981,7 +1608,7 @@ const ContainerDataGrid: React.FC<ContainerDataGridProps> = ({
     },
     [
       useTableSelection({
-        selectionMode: "multiselect",
+        selectionMode: "single",
         selectedItems: selectedIds,
         onSelectionChange,
       }),
@@ -992,14 +1619,14 @@ const ContainerDataGrid: React.FC<ContainerDataGridProps> = ({
     const isSelected = isRowSelected(row.rowId);
     return {
       ...row,
-      // Row click opens the detail panel — checkbox is handled separately
+      // Row click opens the detail panel — the radio cell is handled separately
       onClick: (e: React.MouseEvent) => {
-        // If the click target is the selection checkbox cell, toggle selection instead
+        // If the click target is the selection radio cell, toggle selection instead
         const target = e.target as HTMLElement;
-        const isCheckbox =
+        const isSelectionCell =
           target.tagName === "INPUT" ||
           target.closest("[data-selection-cell]") !== null;
-        if (isCheckbox) {
+        if (isSelectionCell) {
           toggleRow(e, row.rowId);
         } else {
           onRowClick(row.item.id);
@@ -1024,31 +1651,25 @@ const ContainerDataGrid: React.FC<ContainerDataGridProps> = ({
       items={containers}
       columns={columns}
       sortable={false}
-      selectionMode="multiselect"
+      selectionMode="single"
       selectedItems={selectedIds}
       onSelectionChange={onSelectionChange}
       getRowId={(container) => container.id}
       className={className}
       aria-label="Containers"
+      /* Drag a header edge to resize (UAT round 6). Container IDs and names vary wildly in
+         length, so no fixed set of widths suits every tenant — let the operator set them. */
+      resizableColumns
+      columnSizingOptions={COLUMN_SIZING}
     >
       <DataGridHeader>
-        <DataGridRow
-          selectionCell={{
-            checkboxIndicator: {
-              "aria-label": "Select all containers",
-            },
-          }}
-          aria-selected={allRowsSelected}
-          onClick={(e: React.MouseEvent<HTMLTableRowElement>) => toggleAllRows(e)}
-          onKeyDown={(e: React.KeyboardEvent<HTMLTableRowElement>) => {
-            if (e.key === " " || e.key === "Enter") {
-              e.preventDefault();
-              toggleAllRows(e as unknown as React.MouseEvent);
-            }
-          }}
-        >
+        {/* No select-all affordance under single-select — there is nothing to select all of.
+            Fluent renders an empty leading cell to keep the columns aligned with the rows. */}
+        <DataGridRow>
           {({ renderHeaderCell }) => (
-            <DataGridHeaderCell>{renderHeaderCell()}</DataGridHeaderCell>
+            <DataGridHeaderCell className={grid.headerCell}>
+              {renderHeaderCell()}
+            </DataGridHeaderCell>
           )}
         </DataGridRow>
       </DataGridHeader>
@@ -1059,7 +1680,8 @@ const ContainerDataGrid: React.FC<ContainerDataGridProps> = ({
             <DataGridRow<Container>
               key={rowId}
               selectionCell={{
-                checkboxIndicator: {
+                type: "radio",
+                radioIndicator: {
                   "aria-label": `Select ${item.displayName}`,
                 },
               }}
@@ -1069,7 +1691,9 @@ const ContainerDataGrid: React.FC<ContainerDataGridProps> = ({
               appearance={row?.appearance}
               tabIndex={0}
             >
-              {({ renderCell }) => <DataGridCell>{renderCell(item)}</DataGridCell>}
+              {({ renderCell }) => (
+                <DataGridCell className={grid.cell}>{renderCell(item)}</DataGridCell>
+              )}
             </DataGridRow>
           );
         }}

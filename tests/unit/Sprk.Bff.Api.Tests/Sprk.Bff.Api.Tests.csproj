@@ -11,6 +11,9 @@
     <!-- Cosmos DB SDK — required to mock CosmosClient in SessionPersistenceService tests (AIPU2-030) -->
     <PackageReference Include="Microsoft.Azure.Cosmos" Version="3.62.1" />
     <PackageReference Include="Microsoft.NET.Test.Sdk" Version="17.11.1" />
+    <!-- auth-v4 task 021: deterministic clock for the credential negative-cache TTL tests.
+         tests/CLAUDE.md mandates FakeTimeProvider over Stopwatch/DateTime.UtcNow/Task.Delay. -->
+    <PackageReference Include="Microsoft.Extensions.TimeProvider.Testing" Version="10.9.0" />
     <!-- MimeKit 4.17.0: aligned with Sprk.Bff.Api (task 004/005) to avoid NU1605; retains the
          CVE-2026-30227 fix (CRLF injection in SMTP envelope address, fixed 4.15.1). -->
     <PackageReference Include="MimeKit" Version="4.17.0" />
@@ -38,9 +41,19 @@
     <!-- GHSA-24c8-4792-22hx (HIGH) + GHSA-q6rr-fm2g-g5x8 / GHSA-6q7j-xr26-3h2c (Moderate, DoS): WireMock.Net 1.5.45 pins Scriban.Signed 5.5.0; all patched in 7.2.1. Test-only assembly; WireMock response templating unaffected in our fixtures. -->
     <PackageReference Include="Scriban.Signed" Version="7.2.1" />
 
-    <!-- Exclude MimeKitLite to avoid conflict with MimeKit -->
+    <!-- MimeKitLite: exclude the COMPILE asset only, never the runtime asset.
+         MimeKitLite re-declares MimeKit's types in the same namespaces, so referencing both at
+         compile time is ambiguous — that is the conflict this entry was added to avoid. But
+         WireMock.Net 1.5.45 depends on MimeKitLite at RUNTIME (WireMock.RequestMessage's ctor
+         parses request bodies through it). ExcludeAssets=all stripped the DLL from the test
+         output, so every WireMock request died with FileNotFoundException inside
+         GlobalExceptionMiddleware and came back 500 — which is why the six tests in
+         Integration/GraphApiWireMockTests.cs were skipped as "WireMock.Net path matching returns
+         500 ... requires WireMock configuration investigation". It was never path matching.
+         `compile` keeps our code building against MimeKit alone while letting WireMock resolve
+         MimeKitLite at runtime. Verified by task 040 (sdap-SPE-admin-app-r2). -->
     <PackageReference Include="MimeKitLite" Version="4.17.0">
-      <ExcludeAssets>all</ExcludeAssets>
+      <ExcludeAssets>compile</ExcludeAssets>
     </PackageReference>
 
     <!-- Microsoft.Extensions.AI: needed to resolve IChatClient, ChatCompletion, ChatMessage for chat agent tests -->
@@ -62,6 +75,40 @@
   -->
   <ItemGroup>
     <Compile Include="..\..\integration\contract\**\*.cs" LinkBase="ContractTests" />
+  </ItemGroup>
+
+  <!--
+    Cross-suite test helpers shared by contract/seam/regression/tenant tests (the location
+    tests/CLAUDE.md names for cross-class builders). Added 2026-08-28 for issue #863's
+    TestSessionOwner, which has to be the SAME value in every suite that mints a session — a
+    constant duplicated per file is a constant that drifts.
+  -->
+  <ItemGroup>
+    <Compile Include="..\..\integration\Shared\**\*.cs" LinkBase="SharedTestHelpers" />
+  </ItemGroup>
+
+  <!--
+    Security-auth KEEP path per ADR-038 §2 path #1 (authentication / authorization, token validation,
+    claims handling, OBO exchange). tests/integration/auth/** existed as a documented KEEP category
+    but held only its README and was compiled by NO test project — so one of the seven
+    deletion-protected paths was unusable, and every access-control test in the repo lived
+    off-KEEP-path. Compiled INTO this assembly on the same terms as the
+    contract/regression/seam/domain/tenant globs, so the shared fixtures (CustomWebAppFactory /
+    WorkspaceTestFixture) and this project's package references stay reachable without a second test
+    project. Namespaces preserved (Sprk.Bff.Api.Tests.*); new auth tests add files under
+    tests/integration/auth/{Module}/.
+
+    ONE glob, TWO independent discoveries — deduplicated 2026-08-25 by unified-access-control-r2 task
+    045 during the master merge. `sdap-SPE-admin-app-r2` task 012 (spec FR-B03) and
+    `unified-access-control-r2` task 001 (2026-08-21) each added this glob, and each described itself
+    as the first to compile the path, because each was invisible to the other on an unmerged branch.
+    The merge was textually CLEAN and semantically BROKEN: two identical globs produce
+    NETSDK1022 "Duplicate 'Compile' items", which fails the build with no merge conflict to warn you.
+    Same invisibility pattern as task 045's duplicated credential site and its duplicated stale-test
+    repair — a merge conflict is not the only way two branches can collide.
+  -->
+  <ItemGroup>
+    <Compile Include="..\..\integration\auth\**\*.cs" LinkBase="AuthTests" />
   </ItemGroup>
 
   <!-- Golden-utterance eval suite seed data (spaarke-ai-architecture-redesign-r1
@@ -125,6 +172,20 @@
   -->
   <ItemGroup>
     <Compile Include="..\..\integration\tenant\**\*.cs" LinkBase="TenantTests" />
+  </ItemGroup>
+
+  <!--
+    unified-access-control-r2 task 008 follow-up (2026-08-23) — first backfill of the
+    tests/integration/data-mutation/** KEEP category (ADR-038 §2 path #3: writes, transactions,
+    rollback semantics). It was the LAST of the seven deletion-protected paths with no glob, which
+    made it worse than merely empty: a write-path test placed there compiled nowhere and ran never,
+    so an author following tests/CLAUDE.md's routing table would get silent zero coverage. Same
+    fixture-coupling reason as the contract/regression/seam/domain/tenant/auth globs above.
+    Namespaces preserved. New write-path tests add files under
+    tests/integration/data-mutation/{Module}/.
+  -->
+  <ItemGroup>
+    <Compile Include="..\..\integration\data-mutation\**\*.cs" LinkBase="DataMutationTests" />
   </ItemGroup>
 
   <!-- Insights Engine test fixtures (task 030+: Layer 1 / Layer 2 / D-P7 ingest tests).

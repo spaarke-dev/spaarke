@@ -15,9 +15,15 @@ namespace Spaarke.Dataverse;
 /// <remarks>
 /// Auth (ADR-028 §24 / #3b): prefers <b>Managed Identity</b> via a ServiceClient token-provider function when
 /// <c>Graph:ManagedIdentity:Enabled=true</c> (resolving the UAMI from <c>ManagedIdentity:ClientId</c>);
-/// otherwise falls back to <b>ClientSecret</b> (connection-string method) requiring <c>TENANT_ID</c> /
-/// <c>API_APP_ID</c> / <c>API_CLIENT_SECRET</c>. The secret path is retained as a local-dev fallback and MUST
-/// NOT be removed until MI attribution is proven live per env.
+/// otherwise falls back to the <b>ordered credential provider</b> (<see cref="IConfidentialClientProvider"/>),
+/// which resolves whatever credential that environment has configured.
+/// <para><b>Corrected 2026-08-24 (auth-v4 task 033).</b> This paragraph used to read: <i>"falls back to
+/// ClientSecret (connection-string method) requiring TENANT_ID / API_APP_ID / API_CLIENT_SECRET. The secret
+/// path is retained as a local-dev fallback and MUST NOT be removed until MI attribution is proven live per
+/// env."</i> That was true until task 022, which replaced the <c>AuthType=ClientSecret</c> connection string
+/// with the ordered provider — after which this class read no secret at all. The comment was never refreshed,
+/// so it kept asserting a dependency that no longer existed and instructing readers not to remove it. MI
+/// attribution IS proven live (task 031/032), and the BFF-identity secret was removed at task 033.</para>
 /// Ref: https://learn.microsoft.com/power-apps/developer/data-platform/authenticate-dot-net-framework
 /// </remarks>
 public class DataverseServiceClientImpl : IDataverseService, IDisposable
@@ -41,9 +47,33 @@ public class DataverseServiceClientImpl : IDataverseService, IDisposable
     /// </summary>
     public ServiceClient OrganizationService => _lazyServiceClient.Value;
 
+    /// <param name="confidentialClients">
+    /// Ordered credential provider (auth-v4 task 021/022), supplied by the BFF. Used ONLY in the
+    /// managed-identity-disabled branch, where it replaces the <c>AuthType=ClientSecret</c> connection
+    /// string. Nullable with a null default (NFR-04).
+    /// </param>
+    /// <param name="managedIdentityCredential">
+    /// The app-only managed-identity credential, supplied by the BFF from its single shared factory
+    /// (<c>ManagedIdentityCredentialFactory.Create</c>). Used ONLY in the managed-identity-ENABLED
+    /// branch — the symmetric counterpart to <paramref name="confidentialClients"/>.
+    ///
+    /// <para><b>Why injected rather than built here.</b> ADR-028 A4 requires the app-only credential to
+    /// come from the single shared provider rather than being constructed per call site — "seven call
+    /// sites each rolling their own credential handling is what made the previous state unfixable in one
+    /// place". This class used to build its own <c>DefaultAzureCredential</c>, and it had drifted from
+    /// the shared factory in three ways that are invisible until they are not (see the fallback below).
+    /// The factory itself lives in the BFF and cannot be referenced from here — <c>Spaarke.Dataverse</c>
+    /// is the base layer and references no other Spaarke project (FR-14, enforced by
+    /// <c>LayerDependencyTests</c>) — so the credential is passed IN rather than reached for.</para>
+    ///
+    /// <para>Null default keeps every existing direct-construction call site compiling; when null, the
+    /// fallback below is used.</para>
+    /// </param>
     public DataverseServiceClientImpl(
         IConfiguration configuration,
-        ILogger<DataverseServiceClientImpl> logger)
+        ILogger<DataverseServiceClientImpl> logger,
+        IConfidentialClientProvider? confidentialClients = null,
+        TokenCredential? managedIdentityCredential = null)
     {
         _logger = logger;
 
@@ -51,8 +81,11 @@ public class DataverseServiceClientImpl : IDataverseService, IDisposable
         if (string.IsNullOrEmpty(dataverseUrl))
             throw new InvalidOperationException("Dataverse:ServiceUrl configuration is required");
 
-        // ADR-028 §24 (#3b): prefer Managed Identity when enabled; ClientSecret is the local-dev fallback.
-        // The secret path is retained (do NOT remove API_CLIENT_SECRET) until MI attribution is proven live.
+        // ADR-028 §24 (#3b): prefer Managed Identity when enabled; otherwise use the ordered credential
+        // provider. This line used to read "The secret path is retained (do NOT remove API_CLIENT_SECRET)
+        // until MI attribution is proven live" — stale since task 022 moved this class off the secret and
+        // onto IConfidentialClientProvider. Corrected at task 033; API_CLIENT_SECRET is gone and this class
+        // never read it directly in the first place.
         var useManagedIdentity = string.Equals(
             configuration["Graph:ManagedIdentity:Enabled"], "true", StringComparison.OrdinalIgnoreCase);
 
@@ -65,12 +98,9 @@ public class DataverseServiceClientImpl : IDataverseService, IDisposable
         Func<ServiceClient> connectFactory;
         if (useManagedIdentity)
         {
-            var miClientId = configuration["ManagedIdentity:ClientId"]
-                ?? configuration["Graph:ManagedIdentity:ClientId"];
-            var options = new DefaultAzureCredentialOptions();
-            if (!string.IsNullOrEmpty(miClientId))
-                options.ManagedIdentityClientId = miClientId;
-            var credential = new DefaultAzureCredential(options);
+            // ADR-028 A4: prefer the BFF's single shared credential. The fallback exists only for
+            // direct-construction call sites that pass no credential.
+            var credential = managedIdentityCredential ?? BuildFallbackManagedIdentityCredential(configuration, _logger);
             var instanceUri = new Uri(dataverseUrl);
             // Token scope = the Dataverse ENVIRONMENT ROOT authority (e.g. https://spaarkedev1.crm.dynamics.com/.default).
             // #3b root cause: the ServiceClient token-provider is invoked with the full SOAP endpoint URL
@@ -81,9 +111,14 @@ public class DataverseServiceClientImpl : IDataverseService, IDisposable
 
             connectFactory = () =>
             {
+                // The clientId is no longer resolved here — it is a property of the credential, which is
+                // now supplied by the caller. Report the credential's SOURCE instead: which of the two
+                // is in play is the fact worth having in a log when Dataverse auth misbehaves, and the
+                // fallback logs the identity it resolved at construction time.
                 _logger.LogInformation(
-                    "Connecting Dataverse ServiceClient via Managed Identity (clientId {ClientId}, scope {Scope})",
-                    miClientId ?? "(system-assigned)", dataverseScope);
+                    "Connecting Dataverse ServiceClient via Managed Identity ({CredentialSource}, scope {Scope})",
+                    managedIdentityCredential is not null ? "injected shared credential" : "locally-built fallback",
+                    dataverseScope);
                 return new ServiceClient(
                     instanceUrl: instanceUri,
                     tokenProviderFunction: (string resourceUri) =>
@@ -99,23 +134,54 @@ public class DataverseServiceClientImpl : IDataverseService, IDisposable
         }
         else
         {
-            // Fallback: ClientSecret (Graph/SPE parity). Required only when MI is disabled.
+            // auth-v4 task 022 (FR-B3): ordered credential selection replaces the
+            // AuthType=ClientSecret connection string. Same app registration, same client-credentials
+            // grant against the same environment-authority scope — only the credential that proves the
+            // identity changes (MI-FIC → certificate → transitional secret).
             var tenantId = configuration["TENANT_ID"];
             var clientId = configuration["API_APP_ID"];
-            var clientSecret = configuration["API_CLIENT_SECRET"];
 
-            if (string.IsNullOrEmpty(tenantId) || string.IsNullOrEmpty(clientId) || string.IsNullOrEmpty(clientSecret))
+            if (string.IsNullOrEmpty(tenantId) || string.IsNullOrEmpty(clientId))
             {
                 throw new InvalidOperationException(
-                    "Dataverse authentication requires TENANT_ID, API_APP_ID, and API_CLIENT_SECRET configuration " +
+                    "Dataverse authentication requires TENANT_ID and API_APP_ID configuration " +
                     "when Managed Identity is disabled (Graph:ManagedIdentity:Enabled=false).");
             }
 
-            var connectionString = $"AuthType=ClientSecret;Url={dataverseUrl};TenantId={tenantId};ClientId={clientId};ClientSecret={clientSecret}";
+            if (confidentialClients is null)
+            {
+                throw new InvalidOperationException(
+                    "An IConfidentialClientProvider is required when Managed Identity is disabled " +
+                    "(Graph:ManagedIdentity:Enabled=false). Inside the BFF it is registered by " +
+                    "AuthorizationModule.AddCredentialSelection.");
+            }
+
+            var secretFreeCredential = new ConfidentialClientTokenCredential(confidentialClients, tenantId, clientId);
+            var instanceUri = new Uri(dataverseUrl);
+            // Same env-authority scope derivation as the MI branch, and for the same #3b reason: the
+            // ServiceClient token provider is handed the full SOAP endpoint URL as its resourceUri,
+            // which is not a valid AAD resource.
+            var secretFreeScope = instanceUri.GetLeftPart(UriPartial.Authority).TrimEnd('/') + "/.default";
+
             connectFactory = () =>
             {
-                _logger.LogInformation("Connecting Dataverse ServiceClient via ClientSecret (local-dev fallback)");
-                return new ServiceClient(connectionString);
+                _logger.LogInformation(
+                    "Connecting Dataverse ServiceClient via the ordered credential provider (scope {Scope})",
+                    secretFreeScope);
+                return new ServiceClient(
+                    instanceUrl: instanceUri,
+                    tokenProviderFunction: (string resourceUri) =>
+                    {
+                        // Synchronous acquisition, exactly like the MI branch above — the #3b SIGABRT
+                        // came from acquiring sync-over-async on the STARTUP thread under
+                        // ValidateOnBuild, and that mitigation is untouched: the connect is still
+                        // deferred behind the Lazy below, so this runs at first use on a request thread
+                        // and at most once per token lifetime.
+                        var token = secretFreeCredential.GetToken(
+                            new TokenRequestContext(new[] { secretFreeScope }), CancellationToken.None);
+                        return Task.FromResult(token.Token);
+                    },
+                    useUniqueInstance: true);
             };
         }
 
@@ -144,6 +210,65 @@ public class DataverseServiceClientImpl : IDataverseService, IDisposable
                 throw;
             }
         }, LazyThreadSafetyMode.ExecutionAndPublication);
+    }
+
+    /// <summary>
+    /// Builds the app-only managed-identity credential for call sites that inject none. Mirrors the
+    /// contract of the BFF's <c>ManagedIdentityCredentialFactory</c>, which cannot be referenced from
+    /// this base-layer library (FR-14).
+    /// </summary>
+    /// <remarks>
+    /// This replaces an inline <c>new DefaultAzureCredential(...)</c> that had drifted from the shared
+    /// factory in three ways. None of them fails loudly, which is why they survived:
+    ///
+    /// <list type="number">
+    /// <item><b>Inverted precedence.</b> It read <c>ManagedIdentity:ClientId</c> BEFORE
+    ///   <c>Graph:ManagedIdentity:ClientId</c>; the factory reads the canonical Spaarke-Auth-v2 key first
+    ///   and treats the bare one as the legacy fallback. In an environment where both are set and differ,
+    ///   Dataverse would authenticate as a DIFFERENT identity than Graph — the identity-conflation hazard
+    ///   ADR-028 A4 exists to prevent, presenting as unexplained Dataverse-only authorization failures.</item>
+    /// <item><b>Blank not normalised.</b> A bare <c>??</c> lets a present-but-EMPTY key (an App Service
+    ///   setting cleared to blank, or <c>"ClientId": ""</c>) shadow a correctly-set canonical key and then
+    ///   silently fall through to an unpinned credential — which on a host with several attached
+    ///   identities fails with "Unable to load the proper Managed Identity".</item>
+    /// <item><b>No tenant pinning.</b> The factory pins <c>TenantId</c> from
+    ///   <c>AZURE_TENANT_ID</c>/<c>TENANT_ID</c> (tenant-isolation invariant I5 / FR-32) so the credential
+    ///   cannot silently resolve to the MI host's default tenant. Today that is the same Spaarke tenant,
+    ///   so this is a forcing function rather than a live bug — which is exactly why it needs to be in
+    ///   place BEFORE a multi-tenant switch, not after.</item>
+    /// </list>
+    /// </remarks>
+    private static TokenCredential BuildFallbackManagedIdentityCredential(
+        IConfiguration configuration,
+        ILogger logger)
+    {
+        // Canonical key first, legacy second, blank normalised to null at each step.
+        var miClientId = configuration["Graph:ManagedIdentity:ClientId"];
+        if (string.IsNullOrWhiteSpace(miClientId))
+        {
+            var legacy = configuration["ManagedIdentity:ClientId"];
+            miClientId = string.IsNullOrWhiteSpace(legacy) ? null : legacy;
+        }
+
+        var tenantId = configuration["AZURE_TENANT_ID"] ?? configuration["TENANT_ID"];
+
+        var options = new DefaultAzureCredentialOptions();
+        if (!string.IsNullOrWhiteSpace(miClientId))
+        {
+            options.ManagedIdentityClientId = miClientId;
+        }
+        if (!string.IsNullOrWhiteSpace(tenantId))
+        {
+            options.TenantId = tenantId;
+        }
+
+        logger.LogInformation(
+            "DataverseServiceClientImpl: no managed-identity credential was injected — built one locally " +
+            "(UAMI clientId {ClientId}, tenant {TenantId}). Inside the BFF the shared " +
+            "ManagedIdentityCredentialFactory credential is injected instead (ADR-028 A4).",
+            miClientId ?? "(system-assigned)", tenantId ?? "(host default)");
+
+        return new DefaultAzureCredential(options);
     }
 
     public async Task<string> CreateDocumentAsync(CreateDocumentRequest request, CancellationToken ct = default)
@@ -1915,68 +2040,38 @@ public class DataverseServiceClientImpl : IDataverseService, IDisposable
         throw new NotImplementedException("QueryChildRecordIdsAsync is implemented in DataverseWebApiService. Configure DI to use Web API implementation.");
     }
 
-    public async Task UpdateRecordFieldsAsync(
+    /// <summary>
+    /// Not implemented here by design — <see cref="DataverseWebApiService"/> is the SINGLE live
+    /// implementation of this method. Inject <see cref="IFieldMappingDataverseService"/>, not the
+    /// composite <see cref="IDataverseService"/>.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// Completes interim-hardening item <b>B3</b> ("ONE live impl; route through the narrow interface"),
+    /// which RED-4 B left unfinished: this method was the last <see cref="IFieldMappingDataverseService"/>
+    /// member live in BOTH impls, so the same operation ran on a different implementation depending on
+    /// which alias the consumer injected — the drift class that produced the DEF-2 landmine. The composite
+    /// route had exactly one caller (<c>FinanceRollupService</c>), now on the narrow interface.
+    /// </para>
+    /// <para>
+    /// The deleted body was an OData PATCH via <c>ExecuteWebRequest</c>, including a <c>Clone()</c>+
+    /// <c>CallerId</c> impersonation branch added for email-intelligence task 031 (FR-10). That branch was
+    /// never reached: the live impersonated write goes <c>UpdateRecordActionCore</c> →
+    /// <see cref="IFieldMappingDataverseService"/> → <see cref="DataverseWebApiService"/>, which stamps
+    /// <c>MSCRMCallerID</c> on the PATCH. Impersonation capability is therefore unchanged. Recover the
+    /// implementation from git (<c>4aca6d65a</c>) if the SDK path is ever made primary — see
+    /// <c>projects/dataverse-access-unification-r1/</c> (PAUSED).
+    /// </para>
+    /// </remarks>
+    public Task UpdateRecordFieldsAsync(
         string entityLogicalName,
         Guid recordId,
         Dictionary<string, object?> fields,
         CancellationToken ct = default,
         Guid? impersonateSystemUserId = null)
     {
-        if (fields.Count == 0)
-        {
-            _logger.LogDebug("No fields to update for {Entity}({Id})", entityLogicalName, recordId);
-            return;
-        }
-
-        // Use OData Web API PATCH via ServiceClient.ExecuteWebRequest.
-        // The Web API handles all Dataverse field types natively — OptionSet/Choice
-        // fields accept plain int, currency accepts decimal, @odata.bind works for
-        // lookups — unlike the SDK's Entity model which requires typed wrappers
-        // (OptionSetValue, Money, EntityReference).
-        var entitySetName = await GetEntitySetNameAsync(entityLogicalName, ct);
-        var apiPath = $"{entitySetName}({recordId})";
-        var body = System.Text.Json.JsonSerializer.Serialize(fields);
-
-        // Job B apply (task 031): when a caller systemuserid is supplied, run the PATCH AS that user via a cloned
-        // ServiceClient with CallerId set (the SDK stamps MSCRMCallerID) — mirrors UserPrivilegeChecker's read-path
-        // impersonation. Null/empty = app-only (existing callers byte-unchanged). Fail-closed: if impersonation is
-        // requested but the clone cannot be established, the write throws rather than silently running app-only.
-        var impersonate = impersonateSystemUserId is { } imp && imp != Guid.Empty;
-        ServiceClient? impersonatedClient = impersonate ? _serviceClient.Clone() : null;
-        try
-        {
-            if (impersonatedClient is not null)
-                impersonatedClient.CallerId = impersonateSystemUserId!.Value;
-
-            var client = impersonatedClient ?? _serviceClient;
-
-            _logger.LogDebug(
-                "PATCH {ApiPath} with {FieldCount} fields{Impersonation}",
-                apiPath, fields.Count, impersonate ? $" (impersonating {impersonateSystemUserId})" : string.Empty);
-
-            var response = await Task.Run(() =>
-                client.ExecuteWebRequest(
-                    HttpMethod.Patch,
-                    apiPath,
-                    body,
-                    null,
-                    "application/json"), ct);
-
-            if (!response.IsSuccessStatusCode)
-            {
-                var errorBody = await response.Content.ReadAsStringAsync(ct);
-                _logger.LogError(
-                    "Failed to PATCH {Entity}({Id}): {StatusCode} {ErrorBody}",
-                    entityLogicalName, recordId, response.StatusCode, errorBody);
-                response.EnsureSuccessStatusCode();
-            }
-        }
-        finally
-        {
-            impersonatedClient?.Dispose();
-        }
-
-        _logger.LogInformation("Updated {Entity}({Id}) with {FieldCount} fields via Web API", entityLogicalName, recordId, fields.Count);
+        // RED-4 B: fail LOUD on mis-route. Inject IFieldMappingDataverseService, not the composite.
+        throw new NotImplementedException("UpdateRecordFieldsAsync is implemented in DataverseWebApiService. Inject IFieldMappingDataverseService (not the composite IDataverseService).");
     }
 
     // ========================================

@@ -1,0 +1,152 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="055" project="customer-provisioning-orchestration-r1">
+  <metadata>
+    <title>Implement H13 E2E Acceptance-Gate Handler (verifies ALL 6 T1–T6 traps + ALL 5 I1–I5 invariants + naming + cost)</title>
+    <phase>C Wave C4 — Handler Implementations</phase>
+    <gate>blocked</gate>
+    <status>not-started</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Task tags include 'l2-controlplane','job-handler','deploy'; modifies .cs files; final acceptance gate — asserts EVERY trap + invariant + naming + cost; deployment-touching (gates registry Setup Status transition to Ready).</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Handler wraps extended Validate-DeployedEnvironment.ps1 (Phase B); complete spec (FR-18 + SC #5 + SC #6 + SC #17); asserts a closed set of trap + invariant post-conditions; but touches EVERY prior handler's output for verification — xhigh justified by breadth.</model-tier-reason>
+    <effort>xhigh</effort>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Depends on ALL 14 handlers (041-054) + Wave C6 ArchTests (064-067) + H12a/b/c handlers (070-072 per §4.1 DAG H12a/b/c → H14 → H13; H14 handler task not yet in scope). H13 is the last handler in the DAG (§4.1) and asserts EVERY prior trap/invariant. Serial after all upstream handlers + ArchTests.</parallel-reason>
+    <deps>036, 041, 042, 043, 044, 045, 046, 047, 048, 049, 050, 051, 052, 053, 054, 064, 065, 066, 067, 070, 071, 072</deps>
+    <tags>l2-controlplane, job-handler, deploy, powershell, testing</tags>
+    <estimated-effort>8-12 hours</estimated-effort>
+  </metadata>
+
+  <prompt>Implement the H13 E2E acceptance-gate handler as an IJobHandler in the L2 control-plane. H13 invokes the extended scripts/Validate-DeployedEnvironment.ps1 (Phase B) and asserts EFFECTS not intentions (per R7). Checks: BFF /health, sample analysis, sample document upload+index, workspace-layout render, wizard field-map, ALL 6 §4B T1–T6 silent-fail traps cleared, ALL 5 §4D I1–I5 tenant-isolation invariants sample-verified, `scripts/naming-conformance-check.ps1` exit 0 on r1-owned surfaces, cost envelope conforms per §15 #14. Registry `Setup Status` transitions to `Ready` ONLY if H13 exits 0. Idempotency key: validate-{customerId}-{buildId}.</prompt>
+
+  <role>SPAARKE platform developer. Expert in IJobHandler contract, E2E acceptance validation, effect-verification pattern (R7 — assert effects not intentions), all §4B silent-fail traps + §4D tenant-isolation invariants, cost-envelope drift detection, naming-conformance gate. Follow ADRs strictly.</role>
+
+  <goal>File src/server/services/Sprk.Provisioning.ControlPlane/Handlers/H13E2EAcceptanceGateHandler.cs exists, implements IJobHandler, registers in L2 DI, and: (a) invokes extended Validate-DeployedEnvironment.ps1 with all sample checks (BFF /health + sample analysis + sample doc upload+index + workspace-layout render + wizard field-map); (b) invokes each of 6 T1–T6 trap verifications (T1 keyVaultReferenceIdentity, T2 Dataverse App User, T3 Graph app-role parity, T4 Exchange policies count == 2, T5 both-slot MI KV RBAC OR UAMI structural, T6 SPE confidential-client used); (c) sample-verifies each of 5 I1–I5 tenant-isolation invariants; (d) invokes `scripts/naming-conformance-check.ps1` — must exit 0 on r1-owned surfaces; (e) queries Azure Cost Management for the customer stamp and asserts cost envelope per §15 #14; (f) ONLY on ALL green does Dataverse registry `Setup Status` transition to Ready; (g) asserts idempotency key validate-{customerId}-{buildId}. Unit tests cover happy path (all green → Ready), each trap-fail branch (Ready NOT set), each invariant-fail branch, naming-conformance-fail, cost-drift-fail (per §14 threshold), and idempotency.</goal>
+
+  <context>
+    <background>Per spec.md FR-18 + SC #5, #6, #17 + design.md §4.1 H13 + §4B trap catalog + §4D invariant catalog: H13 is the FINAL gate. Registry Setup Status transitions to Ready ONLY if H13 exits 0. Validates every prior handler's post-condition + every §4D invariant + naming + cost. Cost drift > 20% is currently ambiguous (fail-run or advisory per spec.md Unresolved Questions) — implement as advisory-warn by default with explicit escalation trigger on 20%+ (owner to confirm).</background>
+    <relevant-files>
+      <file role="new">src/server/services/Sprk.Provisioning.ControlPlane/Handlers/H13E2EAcceptanceGateHandler.cs</file>
+      <file role="new">src/server/services/Sprk.Provisioning.ControlPlane/Handlers/H13E2EAcceptanceGateHandler.Tests.cs</file>
+      <file role="canonical-reference">scripts/Validate-DeployedEnvironment.ps1 (Phase B extended)</file>
+      <file role="canonical-reference">scripts/naming-conformance-check.ps1 (r3 task 063)</file>
+      <file role="canonical-reference">src/server/api/Sprk.Bff.Api/Services/Jobs/</file>
+      <file role="modify">src/server/services/Sprk.Provisioning.ControlPlane/Program.cs</file>
+    </relevant-files>
+    <dependencies>
+      <dependency task="036" status="pending">L2 project scaffold — Wave C3</dependency>
+      <dependency task="041" status="pending">H0 preflight (upstream trap owner: N/A but part of run)</dependency>
+      <dependency task="042" status="pending">H0.5 consent-capture</dependency>
+      <dependency task="043" status="pending">H1 subscription readiness</dependency>
+      <dependency task="044" status="pending">H2a Bicep — T1 trap owner (verified here)</dependency>
+      <dependency task="045" status="pending">H2b AI Search indexes</dependency>
+      <dependency task="046" status="pending">H3 Entra app-reg</dependency>
+      <dependency task="047" status="pending">H4 KV secrets — T1 + T5 interim trap owner (verified here)</dependency>
+      <dependency task="048" status="pending">H5 Dataverse env creation</dependency>
+      <dependency task="049" status="pending">H6 solution import</dependency>
+      <dependency task="050" status="pending">H7 env-var values</dependency>
+      <dependency task="051" status="pending">H8 SPE container-type — T6 trap owner (verified here)</dependency>
+      <dependency task="052" status="pending">H9 BFF deploy</dependency>
+      <dependency task="053" status="pending">H10 Dataverse App User + Graph parity — T2 + T3 trap owner (verified here)</dependency>
+      <dependency task="054" status="pending">H11 user provisioning</dependency>
+      <dependency task="064" status="pending">Wave C6 tenant-isolation ArchTests (§4D I1–I5)</dependency>
+      <dependency task="065" status="pending">Tenant-isolation audit sweep of BFF service inventory</dependency>
+      <dependency task="066" status="pending">Register-Entra fix verification + pre-commit scan</dependency>
+      <dependency task="067" status="pending">Nightly Graph app-role parity ArchTest</dependency>
+      <dependency task="070" status="pending">H12a AI seed chain handler (per §4.1 DAG H12a → H14 → H13)</dependency>
+      <dependency task="071" status="pending">H12b app-config seed handler</dependency>
+      <dependency task="072" status="pending">H12c runtime references handler</dependency>
+    </dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-004">Single IJobHandler implementation registered in L2 DI.</constraint>
+    <constraint source="ADR-010">Register in L2 control-plane, NOT BFF.</constraint>
+    <constraint source="ADR-036">Reuse background-job infrastructure; return 202; fire-and-forget.</constraint>
+    <constraint source="ADR-044">registryEnvId + sample assertion GUIDs follow canonicalization.</constraint>
+    <constraint source="project">Idempotency key: validate-{customerId}-{buildId} — buildId is BFF CI build number.</constraint>
+    <constraint source="project">Assert EFFECTS not intentions (R7 principle): sample-run every acceptance check; do NOT trust upstream handler telemetry alone.</constraint>
+    <constraint source="project">Setup Status transition to Ready is CONDITIONAL on ALL: 6 T1–T6 traps clear + 5 I1–I5 invariants clear + naming-conformance exit 0 + cost envelope conform + all sample E2E checks pass. Partial-pass does NOT transition.</constraint>
+    <constraint source="project">On failure: Cosmos state = Quarantined per §4C rollback semantics (blocks new runs against same customerId until operator clears).</constraint>
+    <constraint source="spec.md SC #5">Extended Validate-DeployedEnvironment.ps1 exits 0 asserting BFF /health + sample analysis + sample doc upload+index + workspace-layout render + wizard field-map.</constraint>
+    <constraint source="spec.md SC #6">All 6 §4B T1–T6 traps verified by owning handler's post-condition — H13 re-verifies each independently.</constraint>
+    <constraint source="spec.md SC #17">scripts/naming-conformance-check.ps1 exits 0 on r1-owned surfaces post-provisioning.</constraint>
+    <constraint source="spec.md §4D I1..I5">Sample-verify each invariant: I1 grep provisioning scripts for tenant-shaped GUID defaults; I2 sample AI Search query per index confirms tenantId filter; I3 sample Cosmos query confirms partition-key; I4 SPE container ID resolution goes through ITenantContainerResolver; I5 Graph token per-tenant scoped.</constraint>
+    <constraint source="spec.md §15 #14">Cost envelope: Model 2 empty ≤ $400/mo; Model 1 marginal ≤ $430/mo; shared floor ≤ $400/mo. &gt;20% deviation is cost drift (advisory-warn default; escalate per spec.md Unresolved Questions).</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>L2 handler for E2E acceptance gate with ALL traps + invariants verified</topic>
+    <files>
+      <file>.claude/adr/ADR-004-job-contract.md</file>
+      <file>.claude/adr/ADR-036-background-job-infrastructure.md</file>
+      <file>.claude/adr/ADR-044-dataverse-guid-canonicalization.md</file>
+      <file>.claude/constraints/jobs.md</file>
+      <file>.claude/constraints/azure-deployment.md</file>
+      <file>projects/customer-provisioning-orchestration-r1/spec.md</file>
+      <file>projects/customer-provisioning-orchestration-r1/design.md</file>
+    </files>
+    <patterns>
+      <pattern name="reference-handler-shape" location="src/server/api/Sprk.Bff.Api/Services/Jobs/">IJobHandler exemplar.</pattern>
+    </patterns>
+  </knowledge>
+
+  <steps mode="prescriptive">
+    <step order="0">Declare rigor level (FULL) and load knowledge files.</step>
+    <step order="1">Author H13E2EAcceptanceGateHandler.cs — inject IPowerShellRunner, ITrapVerifier (per T1–T6), IInvariantSampler (per I1–I5), INamingConformanceRunner, IAzureCostClient, IDataverseRegistryClient, IIdempotencyService, ICosmosRunStore.</step>
+    <step order="2">Invoke extended Validate-DeployedEnvironment.ps1 for sample E2E checks (health, analysis, doc upload+index, layout render, field-map).</step>
+    <step order="3">Invoke each of 6 T1–T6 trap verifiers independently; short-circuit-collect failures into diagnostic list.</step>
+    <step order="4">Sample-verify each of 5 I1–I5 invariants; short-circuit-collect failures.</step>
+    <step order="5">Invoke `scripts/naming-conformance-check.ps1`; assert exit 0 on r1-owned surfaces.</step>
+    <step order="6">Query Azure Cost Management for the customer stamp; compare to expected envelope per §15 #14; flag cost drift &gt; 20% (advisory-warn default; owner-configurable to fail-run per spec.md Unresolved Questions).</step>
+    <step order="7">If ALL checks green: transition Dataverse registry sprk_dataverseenvironment.SetupStatus → Ready + clear sprk_currentrunid. If ANY check fails: Cosmos state = Quarantined per §4C; do NOT transition Setup Status.</step>
+    <step order="8">Author unit tests: (a) all green → Ready, (b) each T1–T6 trap fail branch (6 tests) → Quarantined, (c) each I1–I5 invariant fail branch (5 tests) → Quarantined, (d) naming-conformance non-zero → Quarantined, (e) cost drift &gt; 20% → advisory or fail per config, (f) idempotency.</step>
+    <step order="9">Register in L2 Program.cs DI.</step>
+    <step order="10">Run dotnet build + dotnet test; verify green + zero analyzer warnings.</step>
+    <step order="11">Update TASK-INDEX.md: change task 055 status from 🔲 to ✅.</step>
+    <step order="12">Document any deviations in projects/customer-provisioning-orchestration-r1/notes/.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If ANY of the 6 T1–T6 traps fails, STOP and escalate per CLAUDE.md §6 rather than retry-looping — trap failure indicates upstream handler regression, root cause required (not a transient).</trigger>
+    <trigger>If ANY of the 5 I1–I5 invariants fails at sample verification, STOP and escalate per CLAUDE.md §6 — invariant fail is CATASTROPHIC severity per §4D (cross-tenant bleed risk).</trigger>
+    <trigger>If cost drift &gt; 20% is detected per §15 #14 (SC #14), STOP and escalate to confirm advisory-vs-fail semantics per spec.md Unresolved Questions — do NOT silently transition to Ready over cost drift.</trigger>
+    <trigger>If naming-conformance-check.ps1 finds violations on r1-owned surfaces (Phase G regression), STOP and escalate — do NOT accept the drift.</trigger>
+  </escalation>
+
+  <justification>
+    <existing>Closest neighbor: scripts/Validate-DeployedEnvironment.ps1 (existing; Phase B extends). scripts/naming-conformance-check.ps1 (r3 task 063). No existing L2 handler that composes trap + invariant + naming + cost verification.</existing>
+    <extension>No — H13 is the SOLE authoritative gate for Setup Status = Ready. Extending Validate-DeployedEnvironment.ps1 alone cannot own Cosmos state transitions + §4C Quarantined semantics + Dataverse registry transition — those require an IJobHandler.</extension>
+    <cost-of-doing-nothing>Without H13 as the sole Setup Status = Ready gatekeeper, registry rows could transition to Ready with silent trap failures still present (T1 keyVaultReferenceIdentity mismatch → BFF boots with null KV refs → runtime failures the moment operator hands the env to customer). H13 is the r1 acceptance floor.</cost-of-doing-nothing>
+  </justification>
+
+  <tools>
+    <tool name="dotnet">Build and test .NET projects</tool>
+    <tool name="terminal">az CLI for cost queries</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/server/services/Sprk.Provisioning.ControlPlane/Handlers/H13E2EAcceptanceGateHandler.cs</output>
+    <output type="test">src/server/services/Sprk.Provisioning.ControlPlane/Handlers/H13E2EAcceptanceGateHandler.Tests.cs</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Given ALL upstream handlers succeeded, ALL 6 T1–T6 traps clear, ALL 5 I1–I5 invariants clear, naming-conformance exit 0, cost envelope conforms — when HandleAsync runs, then Dataverse registry sprk_dataverseenvironment.SetupStatus transitions to Ready AND sprk_currentrunid is cleared.</criterion>
+    <criterion testable="true">Extended Validate-DeployedEnvironment.ps1 asserts EFFECTS (per R7): BFF /health returns 200; sample analysis returns success; sample doc upload+index returns success; workspace-layout render succeeds; wizard field-map returns expected mapping.</criterion>
+    <criterion testable="true">Trap verification (spec.md SC #6): each of T1 (App Service keyVaultReferenceIdentity == UAMI), T2 (systemusers filter returns 1), T3 (UAMI SP appRoleAssignments == all 14 in GraphAppRoles.cs), T4 (Get-ApplicationAccessPolicy returns 2 entries with matching principals), T5 (both slot MIs KV RBAC OR UAMI-structural post-Phase-C), T6 (SPE container-type creation used confidential-client per creation-audit) is independently re-verified.</criterion>
+    <criterion testable="true">Invariant verification (spec.md §4D sample-verify): I1 grep provisioning scripts for tenant-shaped GUID defaults returns none; I2 sample AI Search query per index has tenantId filter; I3 sample Cosmos query has partition-key predicate; I4 SPE container-ID resolution goes through ITenantContainerResolver; I5 Graph token acquisition includes explicit tenantId.</criterion>
+    <criterion testable="true">Naming (spec.md SC #17): scripts/naming-conformance-check.ps1 exits 0 on r1-owned surfaces; H13 fails deploy with "NamingConformanceFailed" otherwise.</criterion>
+    <criterion testable="true">Cost envelope (spec.md SC #14 + §15 #14): Azure Cost Management report against expected; deviations &gt; 20% flagged (advisory-warn OR fail per configured semantic).</criterion>
+    <criterion testable="true">Rollback (spec.md §4C): given ANY of T1–T6 or I1–I5 or naming or cost checks fails, when HandleAsync runs, then Cosmos state = Quarantined AND Setup Status is NOT transitioned to Ready AND sprk_currentrunid is retained (blocks new runs).</criterion>
+    <criterion testable="true">Idempotency: two invocations for the same customerId + buildId — second call is a no-op (validate-{customerId}-{buildId} match); no re-verification if idempotency-key matches AND registry status is Ready.</criterion>
+    <criterion testable="true">Negative: H13 invoked without tenantId parameter returns failure (§4D I1); all sample queries per-tenant scoped.</criterion>
+    <criterion testable="true">Handler registers in L2 DI; dotnet build + dotnet test exit 0; zero analyzer warnings.</criterion>
+  </acceptance-criteria>
+
+  <notes>Reference: spec.md FR-18 + SC #5, #6, #14, #17 + §4D I1..I5 + MUST rules; design.md §4.1 H13 (final gate) + §4B (all traps) + §4C (Quarantined semantics on failure) + §4D (invariants) + §15 #14 (cost). H13 is the FINAL handler in the DAG and the sole authority for Setup Status = Ready. Phase A + Phase B + all prior Wave C4 handlers + Wave C6 ArchTests must land before H13 can run end-to-end.</notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+  </execution>
+</task>

@@ -1,0 +1,107 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="021" project="customer-provisioning-orchestration-r1">
+  <metadata>
+    <title>Update Validate-DeployedEnvironment.ps1 design to invoke scripts/naming-conformance-check.ps1 in H13 acceptance; require exit 0</title>
+    <phase>G Canonical Naming Compliance</phase>
+    <gate>blocked</gate>
+    <status>not-started</status>
+    <rigor>STANDARD</rigor>
+    <rigor-reason>Modifies existing PowerShell script; introduces a new step to invoke another check + gate on exit code; azure-deployment scope. Per root CLAUDE.md §8 = STANDARD.</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Mechanical wire-up with a clear canonical target (naming-conformance-check.ps1 already exists per r3 task 063). Per Step 3.5.5b default = sonnet.</model-tier-reason>
+    <effort>medium</effort>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Depends on tasks 018/019/020 (needs Bicep param + canonical seeder + exception registry) so the naming-conformance-check invocation has correct scope + exception-awareness.</parallel-reason>
+    <deps>018, 019, 020</deps>
+    <tags>powershell, azure-deployment, deploy</tags>
+    <estimated-effort>2-3 hours</estimated-effort>
+  </metadata>
+
+  <prompt>
+Update scripts/Validate-DeployedEnvironment.ps1 to invoke scripts/naming-conformance-check.ps1 as part of the H13 acceptance path per spec.md FR-35 + SC #17. On r1-owned surfaces, exit 0 from naming-conformance-check MUST be required for H13 to pass; any non-zero exit blocks the acceptance gate and reports the violating surface. Consumes the exception registry from task 020 so `spaarke-spekvcert` and other codified carve-outs do not trigger false positives.
+  </prompt>
+
+  <role>SPAARKE platform DevOps engineer fluent with Validate-DeployedEnvironment.ps1 architecture, the naming-conformance-check.ps1 contract (r3 task 063), and the r1 H13 acceptance-gate model.</role>
+
+  <goal>scripts/Validate-DeployedEnvironment.ps1: (a) invokes scripts/naming-conformance-check.ps1 during the acceptance path, (b) scopes the check to r1-owned surfaces (Bicep + seeder outputs + KV secret set + resource group), (c) requires exit 0 from the check for H13 to succeed, (d) surfaces any non-zero exit as a labeled acceptance-gate failure (not swallowed), (e) consumes the exception registry from task 020 so codified carve-outs do not trigger.</goal>
+
+  <context>
+    <background>
+Per spec.md FR-35 + SC #17 + design.md § handlers H13 + r3 task 063 handoff. naming-conformance-check.ps1 landed in r3; it's an advisory-until-remediated gate. r1's contribution is wiring it into H13 acceptance so the r1-owned surfaces (new customer stamp) MUST pass. Live-dev drift (owner directive #3) is NOT remediated — H13 scopes ONLY r1-owned surfaces.
+    </background>
+    <relevant-files>
+      <file role="modify">scripts/Validate-DeployedEnvironment.ps1</file>
+      <file role="canonical-reference">scripts/naming-conformance-check.ps1</file>
+      <file role="canonical-reference">projects/customer-provisioning-orchestration-r1/notes/naming-exception-registry.md</file>
+      <file role="canonical-reference">projects/customer-provisioning-orchestration-r1/design.md</file>
+    </relevant-files>
+    <dependencies>
+      <dependency task="018" status="pending">Bicep vault-name parameterization</dependency>
+      <dependency task="019" status="pending">Seeder canonical KV secret names</dependency>
+      <dependency task="020" status="pending">Naming exception registry</dependency>
+    </dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="spec.md">SCOPE: naming-conformance-check.ps1 MUST be invoked in the H13 acceptance path; exit 0 required on r1-owned surfaces (per FR-35 acceptance + SC #17).</constraint>
+    <constraint source="spec.md">SCOPE: Scope of the check is r1-owned surfaces (the newly-provisioned customer stamp's Bicep resources + KV secret set). Do NOT sweep live-dev (owner directive #3).</constraint>
+    <constraint source="spec.md">SCOPE: The check MUST honor the exception registry from task 020; codified carve-outs (spaarke-spekvcert, Dataverse-ClientSecret, BFF-API-ClientSecret) do NOT trigger H13 failure.</constraint>
+    <constraint source="project">SCOPE: Non-zero exit from naming-conformance-check MUST propagate as an H13 failure (not swallowed, not warning-only). Diagnostic MUST cite the failing resource + expected canonical form.</constraint>
+    <constraint source="project">SCOPE: This task modifies ONLY scripts/Validate-DeployedEnvironment.ps1. Do NOT modify naming-conformance-check.ps1 itself (r3 task 063 owns).</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>H13 acceptance gate + naming conformance</topic>
+    <files>
+      <file>projects/customer-provisioning-orchestration-r1/spec.md</file>
+      <file>projects/customer-provisioning-orchestration-r1/design.md</file>
+      <file>projects/customer-provisioning-orchestration-r1/CLAUDE.md</file>
+      <file>projects/customer-provisioning-orchestration-r1/notes/r3-handoff.md</file>
+      <file>docs/architecture/AZURE-RESOURCE-NAMING-CONVENTION.md</file>
+      <file>.claude/constraints/azure-deployment.md</file>
+    </files>
+    <patterns>
+      <pattern name="Acceptance-gate propagation" location="scripts/Validate-DeployedEnvironment.ps1">Sub-check invoked → non-zero exit surfaced as labeled failure → outer script exits non-zero.</pattern>
+    </patterns>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="0" name="Context + rigor declaration">Emit the 🔒 RIGOR LEVEL block. Load spec FR-35 + SC #17 + design.md H13 + naming-conformance-check.ps1 contract.</step>
+    <step order="1" name="Baseline">Read Validate-DeployedEnvironment.ps1; identify where H13 acceptance checks live; note existing sub-check patterns.</step>
+    <step order="2" name="Read naming-conformance-check contract">Read scripts/naming-conformance-check.ps1; identify its param surface, scope filters, exception-registry consumption (if any) — coordinate with task 020's registry format.</step>
+    <step order="3" name="Design invocation">Add step in H13 flow: invoke naming-conformance-check with r1-owned scope filter + exception-registry path; capture exit code.</step>
+    <step order="4" name="Propagate exit">On non-zero, surface via labeled acceptance-gate failure ("H13 FAIL: naming-conformance-check exit N — {diagnostic snippet}"); outer script exits non-zero.</step>
+    <step order="5" name="Exception-registry integration">If naming-conformance-check.ps1 accepts an exception-registry input, pass task 020's registry file; otherwise emit an explicit note in the diagnostic mapping known exceptions to expected pass-through.</step>
+    <step order="6" name="Test — happy path">Run against a naming-canonical dev stamp; verify H13 acceptance passes (exit 0).</step>
+    <step order="7" name="Test — drift path">Introduce a naming drift (e.g., a temp KV secret with non-canonical name); verify H13 fails with clear diagnostic.</step>
+    <step order="8" name="Test — exception path">Confirm the codified exceptions do not trigger H13 failure.</step>
+    <step order="9" name="Index update">Update TASK-INDEX.md: set task 021 status to ✅.</step>
+    <step order="10" name="Deviations">Document any deviation in projects/customer-provisioning-orchestration-r1/notes/.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If naming-conformance-check.ps1 (r3 task 063) does NOT support exception-registry consumption AND cannot be extended in scope of task 020, STOP and escalate per CLAUDE.md §6 — do NOT hardcode exceptions inline in Validate-DeployedEnvironment.ps1 (that reintroduces the drift Phase G is closing).</trigger>
+  </escalation>
+
+  <tools>
+    <tool name="pwsh">PowerShell 7.4+</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">scripts/Validate-DeployedEnvironment.ps1 (naming-conformance wired into H13)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Given a naming-canonical newly-provisioned dev stamp, when running Validate-DeployedEnvironment.ps1's H13 acceptance, then naming-conformance-check exits 0 AND H13 passes.</criterion>
+    <criterion testable="true">Given a stamp with an introduced naming drift (non-exception), when running H13, then exit is non-zero AND the diagnostic cites the failing resource + expected canonical name.</criterion>
+    <criterion testable="true">Given the codified exceptions (spekvcert + secret carve-outs), when H13 runs, then the exceptions do NOT trigger a fail — they pass through per registry.</criterion>
+    <criterion testable="true">Given H13 flow log, when reading, then the naming-conformance-check invocation is labeled step (visible in acceptance report).</criterion>
+    <criterion testable="true">Negative: git diff scope = scripts/Validate-DeployedEnvironment.ps1 only. naming-conformance-check.ps1 is NOT modified (r3 task 063 owns it).</criterion>
+    <criterion testable="true">Negative: live-dev is NOT scanned (owner directive #3 — r1-owned surfaces only).</criterion>
+  </acceptance-criteria>
+
+  <notes>Spec FR-35 + SC #17 + design.md H13. Feeds Phase F E2E acceptance dry-run on trial-{yyyymmdd} stamp. Depends on tasks 018 (param) + 019 (canonical seed) + 020 (exception registry) landing first.</notes>
+
+  <execution><skill>.claude/skills/task-execute/SKILL.md</skill></execution>
+</task>

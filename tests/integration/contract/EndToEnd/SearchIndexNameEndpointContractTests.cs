@@ -114,7 +114,9 @@ public class SearchIndexNameEndpointContractTests
         var bodyJson = $$"""
             {
               "query": "force majeure",
-              "scope": "all",
+              "scope": "entity",
+              "entityType": "matter",
+              "entityId": "00000000-0000-0000-0000-0000000000e1",
               "searchIndexName": "{{explicitIndex}}"
             }
             """;
@@ -156,7 +158,9 @@ public class SearchIndexNameEndpointContractTests
         const string bodyJson = """
             {
               "query": "warranty disclaimer",
-              "scope": "all"
+              "scope": "entity",
+              "entityType": "matter",
+              "entityId": "00000000-0000-0000-0000-0000000000e1"
             }
             """;
         using var content = new StringContent(bodyJson, System.Text.Encoding.UTF8, "application/json");
@@ -204,7 +208,9 @@ public class SearchIndexNameEndpointContractTests
         var bodyJson = $$"""
             {
               "query": "any",
-              "scope": "all",
+              "scope": "entity",
+              "entityType": "matter",
+              "entityId": "00000000-0000-0000-0000-0000000000e1",
               "searchIndexName": "{{rejectedIndex}}"
             }
             """;
@@ -339,7 +345,7 @@ public sealed class SearchIndexNameEndpointTestFixture : WebApplicationFactory<P
                 ["Graph:TenantId"] = "test-tenant-id",
                 ["Graph:ClientId"] = "test-client-id",
                 ["Graph:ClientSecret"] = "test-client-secret",
-                ["Graph:UseManagedIdentity"] = "false",
+                ["Graph:ManagedIdentity:Enabled"] = "false",
                 ["Graph:Scopes:0"] = "https://graph.microsoft.com/.default",
                 ["Dataverse:EnvironmentUrl"] = "https://test.crm.dynamics.com",
                 ["Dataverse:ServiceUrl"] = "https://test.crm.dynamics.com",
@@ -423,6 +429,9 @@ public sealed class SearchIndexNameEndpointTestFixture : WebApplicationFactory<P
 
         builder.ConfigureTestServices(services =>
         {
+            // Test hosts must not authenticate for real — see TestTokenCredential.
+            services.UseStubTokenCredential();
+
             // Authentication — emit BOTH oid AND tid claims (tid is what the
             // SemanticSearch endpoint reads to derive tenant routing).
             services.AddAuthentication(options =>
@@ -461,7 +470,46 @@ public sealed class SearchIndexNameEndpointTestFixture : WebApplicationFactory<P
             dataverseMock.Setup(d => d.TestConnectionAsync()).ReturnsAsync(true);
             services.RemoveAll<IDataverseService>();
             services.AddSingleton(dataverseMock.Object);
+
+            // unified-access-control-r2 task 070 — POST /api/ai/search now authorizes the caller
+            // against the parent record named by scope=entity. These tests are about INDEX-NAME
+            // routing (FR-BFF-07), not access, so grant access unconditionally; otherwise every
+            // assertion here would be measuring an authorization decision it never intended to make.
+            //
+            // The three request bodies in this class previously used "scope":"all", which is now
+            // refused outright. `all` was incidental to what they test — the searchIndexName
+            // thread-through — so they were moved to scope=entity rather than the gate being relaxed.
+            services.RemoveAll<Spaarke.Dataverse.IAccessDataSource>();
+            services.AddSingleton<Spaarke.Dataverse.IAccessDataSource>(new PermissiveAccessDataSource());
         });
+    }
+
+    /// <summary>
+    /// Grants full rights to every caller. Index-name CONTRACT tests only — authorization behaviour is
+    /// covered by <c>SemanticSearchAuthorizationTests</c>, whose stub denies by default.
+    /// </summary>
+    private sealed class PermissiveAccessDataSource : Spaarke.Dataverse.IAccessDataSource
+    {
+        private static Spaarke.Dataverse.AccessSnapshot Permit(string userId, string resourceId) => new()
+        {
+            UserId = userId,
+            ResourceId = resourceId,
+            AccessRights = Enum.GetValues<Spaarke.Dataverse.AccessRights>()
+                .Aggregate(Spaarke.Dataverse.AccessRights.None, (a, b) => a | b),
+            TeamMemberships = Array.Empty<string>(),
+            Roles = Array.Empty<string>(),
+            CachedAt = DateTimeOffset.UtcNow
+        };
+
+        public Task<Spaarke.Dataverse.AccessSnapshot> GetUserAccessAsync(
+            string userId, string resourceId, string? userAccessToken = null,
+            CancellationToken ct = default) =>
+            Task.FromResult(Permit(userId, resourceId));
+
+        public Task<Spaarke.Dataverse.AccessSnapshot> GetRecordAccessAsync(
+            string userId, string entitySetName, Guid recordId, string? userAccessToken,
+            CancellationToken ct = default) =>
+            Task.FromResult(Permit(userId, recordId.ToString()));
     }
 
     public HttpClient CreateAuthenticatedClient()

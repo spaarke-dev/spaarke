@@ -15,6 +15,8 @@ export * from './MiniGraphTypes';
 export * from './serviceInterfaces';
 // DataGridConfiguration - Spaarke DataGrid Framework R1 schema (task 001)
 export * from './DataGridConfiguration';
+// RecordHeaderConfiguration - Spaarke.Records.RecordHeader v1.0 schema (record-header-and-notepad-r2 task 030)
+export * from './RecordHeaderConfiguration';
 // sprk_analysis record type + option-set enums + regarding catalog. Hoisted from
 // the SpaarkeAi solution (2026-07-29 P2) so shared-lib widgets + the solution share ONE source.
 export * from './sprkAnalysis';

@@ -62,6 +62,17 @@ Plan, its own UAMI, KV, Cosmos, Storage, AI Search, OpenAI. Strictly ADR-027 com
 customer). It deploys **either into the Spaarke tenant or into the customer's own tenant** (`design.md:1006`:
 "the app registrations live in whichever tenant hosts the deployment").
 
+> ⚠️ **Contingency added 2026-08-21 (task 030).** The claim below that *every* shape is intra-tenant — and
+> therefore that MI-FIC covers all of them and no certificate automation is needed — **assumes
+> [`PROVISIONING-CHANGE-REQUEST.md`](PROVISIONING-CHANGE-REQUEST.md) §9.2 resolves as reading (a)**: that a
+> Model 2 customer-tenant stamp federates its **own** stamp UAMI. §9.2 is still **unanswered**. Under
+> reading (b) — the stamp trusts the shared Spaarke UAMI — that pair is cross-tenant, MI-FIC is structurally
+> impossible for it, and the certificate-provisioning work recorded as *dropped, not deferred* reopens.
+>
+> `Register-EntraAppRegistrations.ps1` now **refuses** a cross-tenant pair at runtime, so this surfaces as a
+> loud error rather than a credential that creates cleanly and fails only at token exchange. Do not read the
+> table below as settled, or that refusal as a bug.
+
 ## 3. The credential decision
 
 | Deployment | App registration lives in | UAMI performing OBO | Same tenant? | **Credential** |

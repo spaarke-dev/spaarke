@@ -1,0 +1,103 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="013" project="sdap-SPE-admin-app-r2">
+  <metadata>
+    <title>Grant SecurityEvents.Read.All and verify the Security screen</title>
+    <phase>2 Workstream B — Resolve the auth model (GATED)</phase>
+    <gate>001 complete</gate>
+    <status>completed</status>
+    <rigor>STANDARD</rigor>
+    <rigor-reason>Azure configuration change with verification. No .cs/.ts modification expected — the code is already correct and the message already names the real cause.</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Configuration + verification; no code authoring.</model-tier-reason>
+    <effort>medium</effort>
+    <parallel-group>W3</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <deps>001</deps>
+    <tags>auth, authorization, deploy, config</tags>
+    <estimated-effort>1-2 hours</estimated-effort>
+  </metadata>
+
+  <prompt>The Security screen fails with "Access denied to the Graph Security API. Ensure the app registration has SecurityEvents.Read.All permission." That message is accurate — this is a missing Azure permission grant, not a code defect. Grant it and verify the screen works.</prompt>
+
+  <role>SPAARKE platform developer with Entra app-registration access. Expert in Microsoft Graph application permissions and admin consent. Follow ADRs strictly.</role>
+
+  <goal>The Security screen renders secure-score and alert data against Spaarke Dev. If the grant cannot be performed by the executing identity, the exact required action is documented for the operator.</goal>
+
+  <context>
+    <background>Spec §2.2 / FR-B04. This is the one broken screen whose error message was already telling the truth — verified in the spec's current-state table as "config, not code". It is the cheapest fix in the project. Graph Security API application permissions require tenant admin consent.</background>
+    <relevant-files>
+      <file role="canonical-reference">src/server/api/Sprk.Bff.Api/Api/SpeAdmin/SecurityEndpoints.cs</file>
+      <file role="canonical-reference">docs/guides/auth-deployment-setup.md</file>
+      <file role="new">projects/sdap-SPE-admin-app-r2/notes/security-grant-record.md</file>
+    </relevant-files>
+    <dependencies>
+      <dependency task="001" status="pending">The real error surface, so a residual failure after the grant shows its true cause.</dependency>
+    </dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="project">Scope: this task is Azure configuration. Do NOT modify SecurityEndpoints.cs unless verification proves a code defect in addition to the missing grant — and if so, record that as a separate finding.</constraint>
+    <constraint source="project">Scope: permission breadth. Grant ONLY SecurityEvents.Read.All. Do not grant broader Security permissions (e.g. SecurityEvents.ReadWrite.All) — this screen is read-only.</constraint>
+    <constraint source="ADR-028">Scope: credential handling. The grant is a permission on the existing registration; MUST NOT introduce a new client secret or credential.</constraint>
+    <constraint source="project">Scope: documentation. The grant MUST be recorded in the deployment runbook so a new environment reproduces it. An undocumented manual grant is a future outage.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>Graph application permissions + admin consent</topic>
+    <files>
+      <file>.claude/adr/ADR-028-spaarke-auth-architecture.md</file>
+      <file>.claude/constraints/auth.md</file>
+      <file>.claude/constraints/azure-deployment.md</file>
+      <file>docs/guides/auth-deployment-setup.md</file>
+      <file>projects/sdap-SPE-admin-app-r2/spec.md</file>
+    </files>
+    <patterns>
+      <pattern name="service-principal" location=".claude/patterns/auth/service-principal.md">App-registration permission model.</pattern>
+      <pattern name="oauth-scopes" location=".claude/patterns/auth/oauth-scopes.md">Application vs delegated permission semantics.</pattern>
+    </patterns>
+  </knowledge>
+
+  <steps mode="prescriptive">
+    <step order="0" name="Context + rigor declaration">Declare rigor STANDARD. Load auth-deployment-setup.md §5 (MI Graph permission grants).</step>
+    <step order="1">Identify the app registration the Security screen authenticates as, and confirm SecurityEvents.Read.All is absent.</step>
+    <step order="2">Add the SecurityEvents.Read.All APPLICATION permission and grant tenant admin consent.</step>
+    <step order="3">Allow for propagation, then reload the Security screen against Spaarke Dev.</step>
+    <step order="4">If it still fails, capture the new error via the task-001 surface — the cause has changed and must be recorded, not assumed away.</step>
+    <step order="5">Record the grant in notes/security-grant-record.md: registration id, permission, consent date, who consented.</step>
+    <step order="6">Add the permission to docs/guides/auth-deployment-setup.md §5 so new environments reproduce it.</step>
+    <step order="7">Update TASK-INDEX.md: task 013 → ✅. Document deviations in notes/.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If the executing identity cannot grant tenant admin consent, STOP and escalate per CLAUDE.md §6 with the exact permission and registration named. Consent is an operator action — do not attempt to work around it in code.</trigger>
+    <trigger>If the Security screen still fails after the grant propagates, STOP and escalate rather than granting broader permissions speculatively. Escalating permission scope to make an error go away is the failure mode this project exists to correct.</trigger>
+  </escalation>
+
+  <justification>
+    <existing>SecurityEndpoints.cs and the Graph Security call path already exist and are believed correct — grep confirms no second security-data path.</existing>
+    <extension>Yes — this is a permission grant on the existing registration, not new surface. The only NEW file is a notes/ record.</extension>
+    <cost-of-doing-nothing>The Security screen returns 403 permanently. It is the one broken screen requiring no code change, so leaving it is pure unrealized value.</cost-of-doing-nothing>
+  </justification>
+
+  <tools>
+    <tool name="dotnet">Build the BFF if any code change proves necessary</tool>
+  </tools>
+
+  <outputs>
+    <output type="doc">projects/sdap-SPE-admin-app-r2/notes/security-grant-record.md</output>
+    <output type="doc">docs/guides/auth-deployment-setup.md (permission added to §5)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">SecurityEvents.Read.All is granted with tenant admin consent on the correct registration.</criterion>
+    <criterion testable="true">Given the grant has propagated, when the Security screen loads against Spaarke Dev, then secure-score/alert data renders.</criterion>
+    <criterion testable="true">Negative: only SecurityEvents.Read.All was granted — no broader Security permission was added.</criterion>
+    <criterion testable="true">Negative: if the screen still fails, the NEW error is captured and recorded rather than resolved by widening permissions.</criterion>
+    <criterion testable="true">The grant is recorded in notes/ and added to docs/guides/auth-deployment-setup.md §5.</criterion>
+    <criterion testable="true">No new client secret or credential was introduced (ADR-028).</criterion>
+  </acceptance-criteria>
+
+  <notes>Spec FR-B04. Cheapest fix in the project — config only. Parallel-safe: touches no source file — runs alongside tasks 011 and 012 in Wave 3.</notes>
+
+  <execution><skill>.claude/skills/task-execute/SKILL.md</skill></execution>
+</task>

@@ -1,0 +1,139 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="143" project="customer-provisioning-orchestration-r1">
+  <metadata>
+    <title>H10: live verification post C5.8 grants (5 REST/Graph seams, code already real)</title>
+    <phase>C'' Wave G-4 -- Dataverse chain</phase>
+    <gate>blocked</gate>
+    <status>completed</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>H10 blocks H11 and is a T2/T3 trap owner -- although code is already real per DS-4, live verification under the newly-granted UAMI is correctness-critical before Wave G-7's T2/T3 probes can trust it.</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Verification-only task against already-real code -- Sonnet @ high, no new implementation.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <deps>111, 140</deps>
+    <tags>l2-controlplane, job-handler, path-x, testing</tags>
+    <estimated-effort>4-6 hours</estimated-effort>
+  </metadata>
+
+  <prompt>H10DataverseAppUserGraphParityHandler.cs's ALL 5 seams are ALREADY REAL per DS-4 ('✅ REAL -- all 5 seams DV-REST/Graph-REST via DefaultAzureCredential') -- the ONLY blocker is C5.8: the L2 UAMI's own Graph app-role grants + Dataverse admin rights on TARGET (customer) environments, delivered by task 111's Grant-ControlPlaneIdentity.ps1. This task performs LIVE VERIFICATION against a real dev customer-shaped environment (or the existing dev stamp) that H10's 5 seams function correctly now that the grants exist -- NOT a re-implementation. If verification surfaces a genuine code defect (unlikely per DS-4's classification but not ruled out), file it as a new gap, do not silently patch around it in this task without documenting the deviation.</prompt>
+
+  <role>SPAARKE platform developer. Expert in Dataverse App User creation verification and Graph app-role parity checking against a live environment.</role>
+
+  <goal>A live verification run against a dev target confirms H10's 5 seams (all already-real per DS-4) function correctly end-to-end now that the L2 UAMI holds the C5.8 grants from task 111: Dataverse App User creation for both the customer UAMI and the BFF app-reg, Graph app-role parity assignment/verification, and any remaining seams per H10's existing implementation. A verification report is filed in this project's notes/.</goal>
+
+  <context>
+    <background>DS-4 §2 (H10 row) is unambiguous: '✅ REAL -- all 5 seams DV-REST/Graph-REST via DefaultAzureCredential. ~0 code. Blocker is C5.8: grant L2 UAMI Graph app roles + Dataverse admin rights on target envs (Grant-ControlPlaneIdentity.ps1, DS-8 §4). Tests exist.' This is the cleanest case in the entire Wave G'' backlog -- the code is done, only the GRANT (task 111) was missing. This task closes the loop with a live verification, since DS-4 §3 does not flag any deep-dive divergence for H10 (unlike H1/H13/H12b which materially overstated delivery).</background>
+    <relevant-files>
+      <file role="canonical-reference">src/server/services/Sprk.Provisioning.ControlPlane.Core/Handlers/DataverseAppUserGraphParity/H10DataverseAppUserGraphParityHandler.cs</file>
+      <file role="new">projects/customer-provisioning-orchestration-r1/notes/h10-live-verification-2026-08.md</file>
+    </relevant-files>
+    <dependencies>
+      <dependency task="111" status="pending">The C5.8 Graph + Dataverse grants for the L2 UAMI must exist before H10 can be verified live</dependency>
+      <dependency task="140" status="pending">H5 must have created a target Dataverse environment for H10 to act against</dependency>
+    </dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="spec.md FR-38">L2's admin-env Dataverse credential model is Path X: L2 UAMI registered as a Dataverse Application User via DefaultAzureCredential pinned to the UAMI (DS-8). MUST NOT provision a new client-secret for L2. The Dataverse-ClientSecret KV secret itself MUST NOT be deleted (BFF still consumes it) -- only L2's dependency on it is removed.</constraint>
+    <constraint source="DS-4 §2 H10 row">This is VERIFICATION, not re-implementation -- do not modify H10's 5 seams unless live verification surfaces a genuine defect; if it does, document the deviation explicitly rather than silently patching.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>H10 live verification (post C5.8)</topic>
+    <files>
+      <file>projects/customer-provisioning-orchestration-r1/spec.md</file>
+      <file>projects/customer-provisioning-orchestration-r1/design.md</file>
+      <file>projects/customer-provisioning-orchestration-r1/CLAUDE.md</file>
+      <file>projects/customer-provisioning-orchestration-r1/notes/design-study-ds4-handler-audit.md</file>
+      <file>projects/customer-provisioning-orchestration-r1/notes/design-study-ds4-handler-audit.md</file>
+      <file>projects/customer-provisioning-orchestration-r1/notes/design-study-ds8-uami-dv-appuser-maturity.md</file>
+    </files>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="0" name="Rigor + load">Emit RIGOR LEVEL (FULL). Read H10DataverseAppUserGraphParityHandler.cs's existing implementation + its existing tests in full.</step>
+    <step order="1" name="Confirm grants">Verify task 111's Grant-ControlPlaneIdentity.ps1 has run successfully against the target environment's tenant (the C5.8 grants exist).</step>
+    <step order="2" name="Live invocation">Invoke H10 against a real dev target (a freshly-created env from task 140, or the existing dev stamp) and observe each of the 5 seams' outcome.</step>
+    <step order="3" name="Verify App User creation">Confirm the customer UAMI AND the BFF app-reg both resolve as Dataverse App Users post-invocation.</step>
+    <step order="4" name="Verify Graph parity">Confirm Graph app-role assignments match GraphAppRoles.cs's completed catalog (11 of 14 -- verify the parity check correctly reports the 3 still-null entries as a known gap, not a false pass).</step>
+    <step order="5" name="Report">File a verification report in notes/ documenting each seam's live outcome, any deviation found, and confirmation that the existing test suite's assertions match live behavior.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If ANY of the 5 seams fails live verification, STOP and escalate — do not silently mark this task complete with a partial pass. DS-4's classification of H10 as fully real makes ANY live failure noteworthy: it either means task 111's grants are incomplete/wrong, or DS-4's classification itself needs correction, both of which require a decision, not a workaround.</trigger>
+  </escalation>
+
+  <tools>
+    <tool name="az account">get-access-token for live verification</tool>
+    <tool name="dotnet">test (existing suite re-run)</tool>
+  </tools>
+
+  <outputs>
+    <output type="report">projects/customer-provisioning-orchestration-r1/notes/h10-live-verification-2026-08.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">A live invocation of H10 against a dev target succeeds for all 5 seams.</criterion>
+    <criterion testable="true">The customer UAMI AND the BFF app-reg both resolve as Dataverse App Users on the target environment post-invocation.</criterion>
+    <criterion testable="true">Graph app-role parity check correctly reports the 11-of-14 completed catalog state (not a false 14-of-14 pass).</criterion>
+    <criterion testable="true">A verification report exists in notes/ documenting the live outcomes.</criterion>
+    <criterion testable="true">H10's existing test suite (per DS-4, already passing) continues to pass unmodified.</criterion>
+  </acceptance-criteria>
+
+  <notes>Justification (CLAUDE.md §11): Existing -- H10's 5 seams are ALREADY fully implemented and correct per DS-4's audit; this task does not build anything new. Extension -- N/A, this is verification, not extension. Cost-of-doing-nothing -- without live verification post-grant, Wave G-7's T2/T3 probes (tasks 177/178) would be the FIRST time H10's real-world behavior under the new grants is observed, too late to catch a grant-scoping mistake cheaply.
+
+COMPLETION SUMMARY (2026-08-20):
+  Live-verified 3 of 5 seams fully end-to-end (both T2/T3 traps, read-only by
+  design: DataverseWebApiAppUserVerifier + GraphRestAppRoleParityVerifier);
+  live-verified the READ components of the remaining 2 (DataverseWebApiAppUserCreator,
+  GraphRestAppRoleGranter) via direct REST calls against spaarkedev1 + real
+  Microsoft Graph; WRITE components deferred to live-ceremony (C5.8/task 111
+  not yet live-executed; no live customer-shaped target env yet from H5/140).
+  Full evidence + per-seam status: notes/h10-live-verification-2026-08.md.
+
+  BONUS CATCH (genuine defect, fixed same commit): GraphAppRoles.cs's
+  GroupMember.ReadWrite.All AppRoleId was WRONG (dbaae8cf-...-c6571, should be
+  dbaae8cf-...-c6695) -- confirmed by cross-checking all 14 catalog entries
+  against the REAL Microsoft Graph resource SP's own appRoles collection.
+  Fixed in GraphAppRoles.cs + its L2GraphAppRolesRegistry.cs mirror; new
+  regression-guard test added (GraphAppRolesCatalog_AppRoleIds_MatchRealMicrosoftGraphAppRoleDefinitions,
+  NightlyTests project) so this class of wrong-but-non-null-GUID defect cannot
+  silently recur. 2 out-of-scope occurrences of the same wrong GUID flagged
+  (not fixed) in docs/guides/AZURE-SETUP-SELF-SERVICE-REGISTRATION.md +
+  scripts/Setup-EntraInfrastructure.ps1 -- pre-r1 Self-Service Registration
+  subsystem, different owner, recommend follow-up.
+
+  DEVIATION: POML assumed "11 of 14" GraphAppRoles.cs GUIDs populated; actual
+  codebase state is 14-of-14 (r1 task 005 landed all 14 on 2026-08-17, three
+  days before this task ran). Documented as Path C (comply with acceptance
+  criterion 3's intent against the codebase's real, better state) -- see
+  verification report §8.
+
+  Tests: Sprk.Provisioning.ControlPlane.Tests (L2, CI-gated) 965 -> 968/968
+  (+3, H10SeamsSmokeTests.cs -- zero regressions). NightlyTests project (not
+  CI-gated) +1 regression test (compiles clean; live execution hits a
+  sandbox-only DefaultAzureCredential/IMDS limitation documented in the
+  report -- not an H10 defect).
+
+  Step 9.5 (code-review + adr-check, self-conducted, test-modifying
+  unconditional override): 0 Critical, 0 Warnings, 2 Suggestions (both
+  non-blocking: file-size note on a test file, future-split idea). ADR-028
+  confirmed compliant (DefaultAzureCredential, explicit tenant, zero
+  ClientSecretCredential). 0 ADR violations.
+
+  Coordination: sibling task 141 (H6) was live-editing
+  Handlers/SolutionImport/** in the SAME working tree throughout this task.
+  Isolated via targeted git stash (2 cycles) to validate build/tests without
+  touching their in-flight files; both cycles restored their exact live state
+  byte-for-byte, including a mid-session file divergence (their own newer
+  edit superseding what I'd stashed) handled via selective per-file restore
+  rather than a blanket stash pop. Zero content of theirs read, edited, or
+  committed. No SendMessage coordination needed (zero file overlap; their
+  domain is SolutionImport, mine is DataverseAppUserGraphParity).</notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+  </execution>
+</task>

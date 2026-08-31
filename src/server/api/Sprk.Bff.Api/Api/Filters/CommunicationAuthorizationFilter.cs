@@ -1,5 +1,6 @@
 using System.Security.Claims;
 using Sprk.Bff.Api.Infrastructure.Errors;
+using Sprk.Bff.Api.Infrastructure.Authentication;
 
 namespace Sprk.Bff.Api.Api.Filters;
 
@@ -29,8 +30,7 @@ public sealed class CommunicationAuthorizationFilter : IEndpointFilter
         }
 
         // Verify user has a valid object ID claim (Azure AD oid)
-        var userId = user.FindFirst("oid")?.Value
-                  ?? user.FindFirst(ClaimTypes.NameIdentifier)?.Value;
+        var userId = CallerResolution.ResolveObjectId(user);
 
         if (string.IsNullOrEmpty(userId))
         {

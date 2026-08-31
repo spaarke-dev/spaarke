@@ -1,0 +1,168 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="113" project="customer-provisioning-orchestration-r1">
+  <metadata>
+    <title>Author Deploy-ControlPlane.ps1 (L2 repeatable deploy script, C5.9/C1.7)</title>
+    <phase>C'' Wave G-1 -- Foundation</phase>
+    <gate>authoring-complete-live-verification-deferred</gate>
+    <status>completed</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>OVERRIDDEN UP from the authored STANDARD to FULL per root CLAUDE.md §8 Step 0.5: author-time discovery required a real .cs modification (Sprk.Provisioning.ControlPlane.Api/Endpoints/HealthEndpoints.cs -- added a missing GET /healthz route the App Service platform health probe has silently 404'd against since task 033). code-review + adr-check ran unconditionally at Step 9.5 as a result. Original STANDARD reasoning (script authoring parity, no .cs touch) preserved above for audit trail.</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Mechanical script authoring following an established sibling pattern (Deploy-BffApi.ps1) -- Sonnet @ high.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <deps>100, 101, 108, 109</deps>
+    <tags>l2-controlplane, deploy, azure-deployment</tags>
+    <estimated-effort>4-6 hours</estimated-effort>
+  </metadata>
+
+  <prompt>Author scripts/Deploy-ControlPlane.ps1 in parity with scripts/Deploy-BffApi.ps1's shape: dotnet publish (linux-x64 framework-dependent) for BOTH .Api and .Worker projects -&gt; az webapp deploy (zip) to their respective App Service targets -&gt; post-deploy verification (healthz on both sites + the C4.6/task 108 queue-property check via az servicebus queue show + config fail-fast confirmation that NFR-05-required keys are present in each site's resolved app settings). This is the delivery vehicle for task 102's dispatcher and converges the currently-ad-hoc-deployed live binary (ahead of committed source per DS-5's B.6 gap) with committed source.</prompt>
+
+  <role>SPAARKE platform developer. Expert in PowerShell deploy-script authoring, dotnet publish for linux-x64 App Service targets, and az webapp deploy zip-deploy semantics.</role>
+
+  <goal>scripts/Deploy-ControlPlane.ps1 exists, accepts -Environment (dev/prod) and -Target (Api|Worker|Both) parameters, publishes + zip-deploys the named target(s), and runs a post-deploy verification block: /healthz 200 on each deployed site, az servicebus queue show confirms sessions+dedup ON (task 108's properties), and a config-presence check confirms the NFR-05 fail-fast keys (Cosmos:AccountEndpoint, ServiceBus:FullyQualifiedNamespace, ManagedIdentity:ClientId) are non-empty in the deployed site's live app settings.</goal>
+
+  <context>
+    <background>DS-5 §C5.9 confirms zero L2 deploy tooling exists today (grep -i controlplane scripts/ .github/workflows/ returns 0 hits) -- the live dev stamp has been deployed ad-hoc, ahead of committed source. DS-4's Wave G-1 content explicitly lists this script as part of the foundation wave, parity with Deploy-BffApi.ps1. Because task 100 split the project into .Api/.Worker, this script MUST target both (Worker has no slot -- deploy = stop -&gt; zip-deploy -&gt; start per DS-3 §3, the honest drain story since no platform gives a graceful 60-min drain).</background>
+    <relevant-files>
+      <file role="new">scripts/Deploy-ControlPlane.ps1</file>
+      <file role="canonical-reference">scripts/Deploy-BffApi.ps1</file>
+    </relevant-files>
+    <dependencies>
+      <dependency task="100" status="pending">.Api/.Worker projects must exist as publish targets</dependency>
+      <dependency task="101" status="pending">Worker App Service resource must exist as a deploy target</dependency>
+      <dependency task="108" status="pending">Queue properties this script's verification step checks must exist</dependency>
+      <dependency task="109" status="pending">Config keys this script verifies must match the corrected Bicep-emitted keys</dependency>
+    </dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="DS-3 §3 Option 2">Worker deploy semantics: NO staging slot -- stop -&gt; zip-deploy -&gt; start. Api KEEPS staging slot + swap (existing Deploy-BffApi.ps1-style slot-swap pattern applies to Api only).</constraint>
+    <constraint source="CLAUDE.md §11">Three-question component-justification gate applies to any NEW class/interface/Bicep resource/script this task introduces. Existing/Extension/Cost-of-doing-nothing are pre-answered in &lt;notes&gt; below; cite them verbatim in the PR description per root CLAUDE.md §11 enforcement table.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>Deploy-ControlPlane.ps1 authoring</topic>
+    <files>
+      <file>projects/customer-provisioning-orchestration-r1/spec.md</file>
+      <file>projects/customer-provisioning-orchestration-r1/design.md</file>
+      <file>projects/customer-provisioning-orchestration-r1/CLAUDE.md</file>
+      <file>projects/customer-provisioning-orchestration-r1/notes/design-study-ds4-handler-audit.md</file>
+      <file>projects/customer-provisioning-orchestration-r1/notes/design-study-ds3-api-worker-split.md</file>
+      <file>projects/customer-provisioning-orchestration-r1/notes/design-study-ds5-cat456-remediation.md</file>
+    </files>
+    <patterns>
+      <pattern name="BFF deploy script parity" location="scripts/Deploy-BffApi.ps1">publish -&gt; az webapp deploy -&gt; post-deploy verification shape this script mirrors for L2's two App Service targets.</pattern>
+    </patterns>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="0" name="Rigor + load">Emit RIGOR LEVEL (STANDARD). Read Deploy-BffApi.ps1 in full.</step>
+    <step order="1" name="Publish block">dotnet publish -c Release -r linux-x64 --self-contained false for the named target project(s).</step>
+    <step order="2" name="Api deploy">az webapp deploy --type zip against the .Api staging slot, then (optionally, behind a -Swap switch) SwapSlotAsync-equivalent az webapp deployment slot swap.</step>
+    <step order="3" name="Worker deploy">az webapp stop -&gt; az webapp deploy --type zip -&gt; az webapp start against the slotless Worker site.</step>
+    <step order="4" name="Verify healthz">curl/Invoke-RestMethod against both sites' /healthz -- expect 200.</step>
+    <step order="5" name="Verify queue">az servicebus queue show --query 'requiresSession,requiresDuplicateDetection' -- expect true/true (task 108's properties).</step>
+    <step order="6" name="Verify config">Query each site's resolved app settings (az webapp config appsettings list) for the presence (non-empty) of Cosmos:AccountEndpoint / ServiceBus:FullyQualifiedNamespace / ManagedIdentity:ClientId (accounting for Bicep's __ delimiter).</step>
+    <step order="7" name="Exit codes">Script exits non-zero on ANY verification failure, with a clear message identifying which check failed.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If the config-presence verification (step 6) finds a KEY MISSING that task 109 was supposed to fix, STOP and escalate rather than deploying anyway — a missing NFR-05 key means the site will fail fast at its own boot per the existing IOptions validation, and shipping it anyway just moves the failure discovery later.</trigger>
+  </escalation>
+
+  <tools>
+    <tool name="dotnet">publish</tool>
+    <tool name="az webapp">deploy/stop/start/config appsettings list</tool>
+    <tool name="az servicebus">queue show</tool>
+    <tool name="curl">healthz verification</tool>
+  </tools>
+
+  <outputs>
+    <output type="script">scripts/Deploy-ControlPlane.ps1</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">scripts/Deploy-ControlPlane.ps1 exists and supports -Target Api|Worker|Both.</criterion>
+    <criterion testable="true">Running it against dev with -Target Both completes with exit code 0 when both sites are healthy post-deploy.</criterion>
+    <criterion testable="true">The script's post-deploy verification block fails (non-zero exit) when injected with a deliberately-broken app-setting (manual smoke test during authoring) -- confirms the check is load-bearing, not decorative.</criterion>
+    <criterion testable="true">grep 'healthz' Deploy-ControlPlane.ps1 shows the verification call for BOTH deployed sites.</criterion>
+    <criterion testable="true">grep 'requiresSession\|requiresDuplicateDetection' Deploy-ControlPlane.ps1 shows the queue-property verification step.</criterion>
+  </acceptance-criteria>
+
+  <notes>Justification (CLAUDE.md §11): Existing -- Deploy-BffApi.ps1 is the proven sibling pattern for App Service publish+deploy+verify; nothing new to invent mechanically. Extension -- this script extends that pattern to L2's two-site topology (Api+Worker) with L2-specific verification steps (queue properties, NFR-05 keys) the BFF script has no equivalent for. Cost-of-doing-nothing -- without a repeatable deploy script, every subsequent Wave G task that needs a live deploy (dispatcher smoke test, sidecar verification, H13 live probes) repeats ad-hoc az commands, perpetuating the exact 'live binary ahead of committed source' drift DS-5 flags today.</notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+  </execution>
+
+  <notes>
+    COMPLETION SUMMARY (2026-08-19): Authored scripts/provisioning/Deploy-ControlPlane.ps1
+    (path deviation from the POML's flat scripts/Deploy-ControlPlane.ps1 -- placed alongside
+    task 111's Grant-ControlPlaneIdentity.ps1 per the dispatching orchestrator's explicit
+    instruction; see notes/task-113-deviations.md Deviation 1). Supports -Target
+    Api|Worker|Both, -Environment dev|staging|production, -Swap (Api staging-slot promotion
+    with automatic rollback-on-failure), -WhatIf/-Confirm (native SupportsShouldProcess) +
+    -DryRun (alias). PSScriptAnalyzer: 0 findings against the repo's
+    PSScriptAnalyzerSettings.psd1. Full <knowledge> load performed (spec.md, design.md,
+    project CLAUDE.md, DS-4/DS-3/DS-5 notes) plus direct reads of
+    platform-controlplane.bicep + both App Service Bicep modules + both .csproj files +
+    both Program.cs files to ground every resource name / config key / health-endpoint
+    assumption in the actual current Bicep + code, not just the POML prose.
+
+    TWO discovered-at-authoring-time gaps, both documented per CLAUDE.md §6.5 (see
+    notes/task-113-deviations.md for full detail):
+      1. FIXED: .Api had NO /healthz route (only /ping) despite the App Service platform
+         health probe expecting one since task 033 -- added GET /healthz to
+         HealthEndpoints.cs mirroring the Worker's existing pattern. Rigor overridden UP to
+         FULL as a result; code-review + adr-check both ran clean (0 findings / 0
+         violations). dotnet build 0/0; L2 unit suite 736/736 pass (no regression).
+      2. DOCUMENTED, NOT FIXED (out of this task's Bicep-touching scope per the dispatching
+         orchestrator's "assume all Bicep is now correct" framing): the .Worker Bicep
+         module's config-key shape still diverges from .Api's DS-5 C5.1 canonical shape --
+         task 109 fixed .Api only and explicitly filed the Worker gap as a follow-on with no
+         owning task number. The script's config-key verification uses two distinct
+         per-target required-key lists reflecting each site's ACTUAL current Bicep-declared
+         keys (not the assumed-uniform NFR-05 shape), documented prominently in the script's
+         own .DESCRIPTION/.NOTES so the gap stays visible.
+
+    Also fixed a real PowerShell pipeline defect discovered during -WhatIf testing:
+    `az ... | Select-Object -First 1` can leave $LASTEXITCODE stale/$null (early
+    pipeline-stop), causing a false "Azure CLI not found" pre-flight failure even when az is
+    present and healthy -- reproduced directly in this environment, fixed by capturing
+    native output to a variable before piping. The IDENTICAL pattern exists unfixed in
+    task 111's Grant-ControlPlaneIdentity.ps1 (flagged, not touched -- out of this task's
+    file scope).
+
+    VERIFICATION PERFORMED (no live Azure deploy, per explicit dispatch instruction):
+      - PSScriptAnalyzer clean.
+      - dotnet build (.Api): 0 warnings / 0 errors.
+      - dotnet test (Sprk.Provisioning.ControlPlane.Tests): 736/736 pass.
+      - Live -WhatIf dry-run, -Target Api: real dotnet publish + Compress-Archive (10.01 MB
+        zip) succeeded; az webapp deploy call correctly skipped under -WhatIf; exit 0.
+      - Live -WhatIf dry-run, -Target Worker: pre-flight passed; dotnet publish correctly
+        FAILED (exit 1, clear diagnostic) due to an untracked, mid-edit file
+        (Worker/Dispatch/ProvisioningHandlerDispatcher.cs) belonging to the CONCURRENTLY
+        RUNNING sibling task 102 dispatcher agent in this same shared worktree -- not a
+        defect in this script; incidentally proves the build-failure path surfaces a clear
+        non-zero-exit diagnostic rather than failing silently.
+      - -Target Bogus correctly rejected by ValidateSet before any work begins.
+      - Get-Help -Full renders; -WhatIf/-Confirm appear in the auto-generated syntax
+        (proof SupportsShouldProcess is wired).
+
+    ACCEPTANCE CRITERIA STATUS: 3 of 5 fully met (script exists + supports -Target;
+    grep 'healthz' shows both-sites verification; grep 'requiresSession|requiresDuplicate
+    Detection' shows the queue check). 2 of 5 are LIVE-ONLY criteria (full -Target Both run
+    against real dev sites reaching exit 0; manual smoke test with a deliberately-broken
+    app-setting) -- explicitly deferred per the dispatching task's "Do NOT execute the
+    script against live Azure" instruction, same posture as sibling task 108's 🟡 status.
+    Marked authoring-complete / live-verification-deferred rather than fully ✅, consistent
+    with task 108's precedent.
+
+    Files touched: scripts/provisioning/Deploy-ControlPlane.ps1 (new),
+    src/server/services/Sprk.Provisioning.ControlPlane.Api/Endpoints/HealthEndpoints.cs
+    (fix), scripts/README.md (registry entries for both provisioning/ scripts),
+    notes/task-113-deviations.md (new).
+  </notes>
+</task>

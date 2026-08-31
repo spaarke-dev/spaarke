@@ -616,6 +616,43 @@ if ($CutoverBffSettings) {
     $bffRg      = "rg-spaarke-$Environment"
     $kvRef      = "@Microsoft.KeyVault(VaultName=$KeyVaultName;SecretName=AiSearch--AdminKey)"
 
+    # ── GUARD (added 2026-08-25, spaarke-auth-v4-dataverse-MI task 090) ────────────────────────────
+    # This switch writes AzureAISearchApiKey + AiSearch__AdminKey onto the BFF as Key Vault references.
+    # Task 053 migrated the BFF's AI Search auth to the user-assigned managed identity and DELETED
+    # AiSearch--AdminKey. Run against a migrated environment, this switch silently re-introduces the
+    # key-based configuration that migration removed — and, because the secret is gone, points two live
+    # app settings at a DANGLING Key Vault reference.
+    #
+    # NOTE: only this switch is affected. The script's index-management paths legitimately use an admin
+    # key, which they READ (az search admin-key show) rather than regenerate.
+    #
+    # Two checks. The first is the one that matters — intent; the second catches the broken reference.
+    $miEnabled = az webapp config appsettings list --resource-group $bffRg --name $bffAppName `
+        --query "[?name=='AiSearch__ManagedIdentity__Enabled'].value | [0]" -o tsv 2>$null
+    if ($miEnabled -and "$miEnabled".Trim() -ieq 'true') {
+        Write-Host ""
+        Write-Host "  '$bffAppName' already authenticates to AI Search with its managed identity" -ForegroundColor Yellow
+        Write-Host "  (AiSearch__ManagedIdentity__Enabled=true). This switch would re-introduce key-based" -ForegroundColor Yellow
+        Write-Host "  configuration and undo that migration (task 053)." -ForegroundColor Yellow
+        Write-Host "  To roll back to key auth deliberately: recover AiSearch--AdminKey, set" -ForegroundColor Yellow
+        Write-Host "  AiSearch__ManagedIdentity__Enabled=false, then re-run." -ForegroundColor Yellow
+        Write-Host "  See docs/guides/auth-deployment-setup.md section 5.1." -ForegroundColor Yellow
+        Write-Error "-CutoverBffSettings refused: '$bffAppName' is on managed-identity AI Search auth."
+        exit 9
+    }
+
+    $kvSecretExists = az keyvault secret show --vault-name $KeyVaultName --name 'AiSearch--AdminKey' `
+        --query id -o tsv 2>$null
+    if (-not $kvSecretExists) {
+        Write-Host ""
+        Write-Host "  Key Vault secret 'AiSearch--AdminKey' does not exist in '$KeyVaultName'." -ForegroundColor Yellow
+        Write-Host "  Both app settings would resolve to a dangling Key Vault reference." -ForegroundColor Yellow
+        Write-Host "  It was deleted 2026-08-25 when the BFF moved to managed-identity AI Search auth." -ForegroundColor Yellow
+        Write-Host "  See docs/guides/auth-deployment-setup.md section 4." -ForegroundColor Yellow
+        Write-Error "-CutoverBffSettings refused: 'AiSearch--AdminKey' not found in '$KeyVaultName'."
+        exit 9
+    }
+
     if ($PSCmdlet.ShouldProcess("$bffAppName App Settings in $bffRg", "Cutover AI Search admin key settings to Key Vault reference")) {
         az webapp config appsettings set `
             --resource-group $bffRg `

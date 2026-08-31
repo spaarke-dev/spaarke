@@ -1,0 +1,277 @@
+// -----------------------------------------------------------------------------
+// ExchangePolicyScriptApplier.cs
+//
+// RETIRED (task 161, Wave G-6, 2026-08-20): superseded by
+// <see cref="ExchangePolicySidecarClient"/> — the sitecontainer-private
+// sidecar HTTP client (task 114's Listener.ps1 on
+// http://127.0.0.1:8091/apply-policy) that quarantines the sole EXO shell-out
+// into a non-routable container per DS-1b §3. No longer registered in
+// IntegrationWiringModule's IExchangePolicyApplier DI slot. Retained on disk
+// (NOT deleted); see AzCliKvSecretReader.cs's retirement banner (task 160) for
+// the full "keep on disk unregistered" rationale this project applies
+// uniformly to every retired shell-out collaborator — reversibility + audit
+// trail over silent deletion, same posture regardless of whether the retired
+// type has its own dedicated test file (this one never did; H14a's own unit
+// tests always faked IExchangePolicyApplier directly, never
+// ExchangePolicyScriptApplier).
+//
+// This retirement closes Option D's zero-shell-out target state for the main
+// Worker process (the last ProcessStartInfo in H14's own collaborator set;
+// H14b/H14c already REST via HttpClient + DefaultAzureCredential, task 160
+// retired the KV-reader shell-out). The pwsh EXO shell-out itself does NOT go
+// away — it moves into the sidecar container where it belongs; the wire
+// contract between Worker and sidecar is the JSON envelope
+// ExchangePolicySidecarClient serializes (task 114's Listener.ps1 documents
+// the authoritative shape).
+//
+// TASK 162 (Wave G-6 Batch G-6C, 2026-08-20): FOSSILIZED — the 3 script-shell
+// configuration fields (PwshExecutable / ExchangePolicyScriptPath /
+// ExchangeScriptTimeout) formerly bound on IntegrationWiringOptions were
+// removed from that live options class (they were only ever consumed by this
+// retired file; deferred from task 161's W3 backlog per its file header note).
+// Their DEFAULTS are inlined below as `private static readonly` constants so
+// the retired class remains COMPILABLE (preserving the audit-trail body — the
+// "keep on disk" convention is meaningful only if the file still parses) but
+// no longer occupies runtime configuration surface on the live Worker. Parity
+// with task 160's AzCliKvSecretReader retirement, which used the same inline-
+// constant fossilization for its own KvSecretReadTimeout. Ctor's
+// IOptions&lt;IntegrationWiringOptions&gt; dependency was ALSO dropped — the retired
+// class no longer needs any options at all, only ILogger for parity with the
+// retired reader.
+//
+// ORIGINAL PURPOSE (retained for audit trail):
+// Production IExchangePolicyApplier — shelled out to the
+// scripts/Set-ExchangeApplicationAccessPolicy.ps1, which owns the
+// ExchangeOnlineManagement PS module connect + Get/New-ApplicationAccessPolicy
+// action-and-verify sequence (spec.md T4). Exchange Online has no REST
+// equivalent for ApplicationAccessPolicy management — the PS module is the
+// only supported surface (parity with H2a's IBicepDeployRunner + H3's
+// IEntraAppRegProvisioner script-wrapping posture for surfaces without a
+// clean REST API).
+//
+// STDOUT PARSING:
+//   The script emits exactly one line prefixed "SPAARKE-H14A-RESULT-JSON:"
+//   followed by a compact JSON object:
+//     { "outcome": "Applied"|"Drift"|"Failure",
+//       "createdCount": 0,
+//       "expectedAppIds": ["...","..."],
+//       "observedAppIds": ["...","..."],
+//       "diagnostic": "..." }
+//   This applier parses that single line rather than relying on free-text
+//   summary output (contrast with RegisterEntraAppRegScriptProvisioner's
+//   regex-over-summary-block approach) — the script is new (this task), so
+//   a structured contract was chosen from day 1.
+//
+// CI COVERAGE:
+//   Not exercised by CI unit suite (pwsh + real Exchange Online — parity with
+//   RegisterEntraAppRegScriptProvisioner's CI exclusion). Handler unit tests
+//   substitute a fake IExchangePolicyApplier.
+// -----------------------------------------------------------------------------
+
+using System.Diagnostics;
+using System.Text;
+using System.Text.Json;
+
+namespace Sprk.Provisioning.ControlPlane.Handlers.IntegrationWiring;
+
+/// <summary>
+/// Shells out to <c>scripts/Set-ExchangeApplicationAccessPolicy.ps1</c> and
+/// translates its structured JSON result line into
+/// <see cref="ExchangePolicyApplyOutcome"/>. RETIRED — see file header.
+/// </summary>
+public sealed class ExchangePolicyScriptApplier : IExchangePolicyApplier
+{
+    private const string ResultLinePrefix = "SPAARKE-H14A-RESULT-JSON:";
+
+    // ---------------------------------------------------------------------
+    // FOSSILIZED CONFIGURATION (task 162, W3 cleanup) — inline defaults
+    // formerly bound on IntegrationWiringOptions.{PwshExecutable,
+    // ExchangePolicyScriptPath, ExchangeScriptTimeout}. Values preserved
+    // verbatim from the retired options-field defaults so the audit-trail
+    // body's behavior remains unchanged (this retired class no longer
+    // participates in DI — see file header for rationale).
+    // ---------------------------------------------------------------------
+    private static readonly string PwshExecutable = "pwsh";
+    private static readonly string DefaultExchangePolicyScriptPath =
+        Path.Combine(AppContext.BaseDirectory, "scripts", "Set-ExchangeApplicationAccessPolicy.ps1");
+    private static readonly TimeSpan ExchangeScriptTimeout = TimeSpan.FromMinutes(5);
+
+    private readonly ILogger<ExchangePolicyScriptApplier> _logger;
+
+    /// <summary>Constructs the retired applier. Kept on disk for audit-trail preservation only.</summary>
+    public ExchangePolicyScriptApplier(ILogger<ExchangePolicyScriptApplier> logger)
+    {
+        ArgumentNullException.ThrowIfNull(logger);
+        _logger = logger;
+    }
+
+    /// <inheritdoc/>
+    public async Task<ExchangePolicyApplyOutcome> ApplyAsync(
+        ExchangePolicyApplyRequest request,
+        CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+        ArgumentException.ThrowIfNullOrWhiteSpace(request.TenantId);
+        ArgumentException.ThrowIfNullOrWhiteSpace(request.PolicyScopeGroupId);
+        if (request.ExpectedAppIds is not { Count: 2 })
+        {
+            return new ExchangePolicyApplyOutcome.Failure(
+                $"ExpectedAppIds must contain exactly 2 entries (BFF app-reg + UAMI); got {request.ExpectedAppIds?.Count ?? 0}.");
+        }
+
+        var scriptPath = DefaultExchangePolicyScriptPath;
+        if (!File.Exists(scriptPath))
+        {
+            return new ExchangePolicyApplyOutcome.Failure(
+                $"Set-ExchangeApplicationAccessPolicy.ps1 not found at '{scriptPath}'. " +
+                "Verify scripts/ ships in the L2 publish output.");
+        }
+
+        var psi = new ProcessStartInfo
+        {
+            FileName = PwshExecutable,
+            RedirectStandardOutput = true,
+            RedirectStandardError = true,
+            UseShellExecute = false,
+            CreateNoWindow = true,
+            WorkingDirectory = Path.GetDirectoryName(scriptPath) ?? AppContext.BaseDirectory,
+        };
+        psi.ArgumentList.Add("-NoProfile");
+        psi.ArgumentList.Add("-NonInteractive");
+        psi.ArgumentList.Add("-File");
+        psi.ArgumentList.Add(scriptPath);
+        psi.ArgumentList.Add("-TenantId");
+        psi.ArgumentList.Add(request.TenantId);
+        psi.ArgumentList.Add("-ExpectedAppIds");
+        psi.ArgumentList.Add(string.Join(",", request.ExpectedAppIds));
+        psi.ArgumentList.Add("-PolicyScopeGroupId");
+        psi.ArgumentList.Add(request.PolicyScopeGroupId);
+        psi.ArgumentList.Add("-DescriptionPrefix");
+        psi.ArgumentList.Add(request.DescriptionPrefix);
+
+        using var process = new Process { StartInfo = psi };
+        var stdout = new StringBuilder();
+        var stderr = new StringBuilder();
+        process.OutputDataReceived += (_, e) => { if (e.Data is not null) stdout.AppendLine(e.Data); };
+        process.ErrorDataReceived += (_, e) => { if (e.Data is not null) stderr.AppendLine(e.Data); };
+
+        _logger.LogInformation(
+            "H14a Exchange policy apply starting: tenantId={TenantId} expectedAppIds={ExpectedAppIds}",
+            request.TenantId, string.Join(",", request.ExpectedAppIds));
+
+        try
+        {
+            process.Start();
+            process.BeginOutputReadLine();
+            process.BeginErrorReadLine();
+
+            using var timeout = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+            timeout.CancelAfter(ExchangeScriptTimeout);
+
+            await process.WaitForExitAsync(timeout.Token).ConfigureAwait(false);
+        }
+        catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
+        {
+            TryKill(process);
+            return new ExchangePolicyApplyOutcome.Failure(
+                $"Set-ExchangeApplicationAccessPolicy.ps1 timed out after {ExchangeScriptTimeout} " +
+                $"for tenantId '{request.TenantId}'.");
+        }
+
+        var stdoutText = stdout.ToString();
+        var stderrText = stderr.ToString();
+
+        _logger.LogInformation(
+            "H14a Exchange policy apply exited: tenantId={TenantId} exitCode={ExitCode}",
+            request.TenantId, process.ExitCode);
+
+        if (process.ExitCode != 0)
+        {
+            return new ExchangePolicyApplyOutcome.Failure(
+                $"Set-ExchangeApplicationAccessPolicy.ps1 exited {process.ExitCode} for tenantId '{request.TenantId}'. " +
+                $"Stderr: {Truncate(stderrText, 800)} Stdout tail: {Truncate(stdoutText, 400)}");
+        }
+
+        return ParseResultLine(stdoutText)
+            ?? new ExchangePolicyApplyOutcome.Failure(
+                "Set-ExchangeApplicationAccessPolicy.ps1 completed with exit 0 but no parseable " +
+                $"'{ResultLinePrefix}' line was found in stdout. Stdout tail: {Truncate(stdoutText, 800)}");
+    }
+
+    /// <summary>
+    /// Parses the script's single structured JSON result line. Exposed
+    /// internal so unit tests can validate parsing without a live process.
+    /// </summary>
+    internal static ExchangePolicyApplyOutcome? ParseResultLine(string stdout)
+    {
+        if (string.IsNullOrWhiteSpace(stdout))
+        {
+            return null;
+        }
+
+        foreach (var line in stdout.Split('\n', StringSplitOptions.RemoveEmptyEntries))
+        {
+            var trimmed = line.Trim();
+            if (!trimmed.StartsWith(ResultLinePrefix, StringComparison.Ordinal))
+            {
+                continue;
+            }
+
+            var jsonText = trimmed[ResultLinePrefix.Length..].Trim();
+            try
+            {
+                using var doc = JsonDocument.Parse(jsonText);
+                var root = doc.RootElement;
+                var outcome = root.GetProperty("outcome").GetString();
+                var diagnostic = root.TryGetProperty("diagnostic", out var d) ? d.GetString() ?? string.Empty : string.Empty;
+                var observed = root.TryGetProperty("observedAppIds", out var obs)
+                    ? obs.EnumerateArray().Select(e => e.GetString() ?? string.Empty).ToList()
+                    : new List<string>();
+
+                switch (outcome)
+                {
+                    case "Applied":
+                        var createdCount = root.TryGetProperty("createdCount", out var cc) ? cc.GetInt32() : 0;
+                        return new ExchangePolicyApplyOutcome.Applied(createdCount, observed);
+                    case "Drift":
+                        var expected = root.TryGetProperty("expectedAppIds", out var exp)
+                            ? exp.EnumerateArray().Select(e => e.GetString() ?? string.Empty).ToList()
+                            : new List<string>();
+                        return new ExchangePolicyApplyOutcome.Drift(expected, observed);
+                    case "Failure":
+                        return new ExchangePolicyApplyOutcome.Failure(diagnostic);
+                    default:
+                        return new ExchangePolicyApplyOutcome.Failure(
+                            $"Unrecognized outcome value '{outcome}' in script result JSON.");
+                }
+            }
+            catch (JsonException ex)
+            {
+                return new ExchangePolicyApplyOutcome.Failure(
+                    $"Failed to parse script result JSON: {ex.Message}. Line: {Truncate(jsonText, 400)}");
+            }
+        }
+
+        return null;
+    }
+
+    private static void TryKill(Process process)
+    {
+        try
+        {
+            if (!process.HasExited)
+            {
+                process.Kill(entireProcessTree: true);
+            }
+        }
+        catch (InvalidOperationException)
+        {
+            // Process already exited between HasExited check + Kill — race is benign.
+        }
+    }
+
+    private static string Truncate(string s, int max)
+        => string.IsNullOrEmpty(s) || s.Length <= max
+            ? s
+            : s[..max] + "...[truncated]";
+}

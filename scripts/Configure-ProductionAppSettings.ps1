@@ -63,22 +63,31 @@ $settings = @(
     "API_APP_ID=$(KVRef 'BFF-API-ClientId')",
     "DEFAULT_CT_ID=$(KVRef 'SPE-ContainerTypeId')",
 
+    # --- Credential selection (ADR-028 A4 — the BFF identity is secret-free) ---
+    # The BFF authenticates as a confidential client using a Managed-Identity-issued federated
+    # credential. There is deliberately NO ClientSecret entry beneath it: with nothing to fall
+    # through to, a broken MI-FIC fails loudly instead of silently reverting to a secret while
+    # every health signal stays green. RequireSecretFreeIdentity makes the app refuse to start
+    # outside Development if ClientSecret is ever re-added to the order.
+    # Removed 2026-08-24 by spaarke-auth-v4 task 033: Graph__ClientSecret, AzureAd__ClientSecret
+    # and Dataverse__ClientSecret (all three were KV references to `BFF-API-ClientSecret`, which
+    # no longer exists in Key Vault). Do NOT re-add them.
+    "Graph__Credentials__Order__0=ManagedIdentityFederated",
+    "Graph__Credentials__RequireSecretFreeIdentity=true",
+
     # --- Graph Configuration ---
     "Graph__TenantId=$(KVRef 'TenantId')",
     "Graph__ClientId=$(KVRef 'BFF-API-ClientId')",
-    "Graph__ClientSecret=$(KVRef 'BFF-API-ClientSecret')",
     "Graph__Scopes__0=https://graph.microsoft.com/.default",
 
     # --- Azure AD Authentication ---
     "AzureAd__TenantId=$(KVRef 'TenantId')",
     "AzureAd__ClientId=$(KVRef 'BFF-API-ClientId')",
-    "AzureAd__ClientSecret=$(KVRef 'BFF-API-ClientSecret')",
     "AzureAd__Audience=$(KVRef 'BFF-API-Audience')",
 
     # --- Dataverse ---
     "Dataverse__EnvironmentUrl=$(KVRef 'Dataverse-ServiceUrl')",
     "Dataverse__ClientId=$(KVRef 'BFF-API-ClientId')",
-    "Dataverse__ClientSecret=$(KVRef 'BFF-API-ClientSecret')",
     "Dataverse__TenantId=$(KVRef 'TenantId')",
 
     # --- Service Bus ---
@@ -93,11 +102,12 @@ $settings = @(
     "DocumentIntelligence__DocIntelEndpoint=$(KVRef 'ai-docintel-endpoint')",
     "DocumentIntelligence__DocIntelKey=$(KVRef 'ai-docintel-key')",
     "DocumentIntelligence__AiSearchEndpoint=$(KVRef 'ai-search-endpoint')",
-    "DocumentIntelligence__AiSearchKey=$(KVRef 'ai-search-key')",
+    "DocumentIntelligence__AiSearchKey=$(KVRef 'AiSearch--AdminKey')",
 
     # --- Analysis ---
-    "Analysis__PromptFlowEndpoint=$(KVRef 'PromptFlow-Endpoint')",
-    "Analysis__PromptFlowKey=$(KVRef 'PromptFlow-Key')",
+    # PromptFlowEndpoint / PromptFlowKey REMOVED 2026-08-21 (auth-v4 task 055, FR-E6): both were bound
+    # and read by nothing, were never deployed, and their Key Vault entries were never-updated
+    # placeholders. See projects/spaarke-auth-v4-dataverse-MI/notes/decisions/055-promptflow-key-disposition.md
 
     # --- Application Insights ---
     "ApplicationInsights__ConnectionString=$(KVRef 'AppInsights-ConnectionString')",

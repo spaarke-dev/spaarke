@@ -48,7 +48,12 @@
 #>
 
 param(
-    [string]$TenantId = "a221a95e-6abc-4434-aecc-e48338a1b2f2",
+    # v3.3 change: -TenantId is MANDATORY (was defaulted to Spaarke tenant) per r1
+    # customer-provisioning-orchestration-r1 design.md §4D tenant-isolation invariant
+    # I1 / FR-28. Sibling script Register-EntraAppRegistrations.ps1 received the
+    # baseline fix (commit 1834b77bc); this script mirrors that pattern via task 065.
+    [Parameter(Mandatory = $true)]
+    [string]$TenantId,
     [string]$KeyVaultName = "sprk-platform-prod-kv",
     [string]$BffApiClientId = "",
     [string]$BffApiClientSecret = ""
@@ -188,13 +193,14 @@ if (-not $BffApiClientId) {
     Write-Host "  Retrieving BFF-API-ClientId from Key Vault..." -ForegroundColor Gray
     $BffApiClientId = Get-SecretFromKeyVault -VaultName $KeyVaultName -SecretName "BFF-API-ClientId"
 }
-if (-not $BffApiClientSecret) {
-    Write-Host "  Retrieving BFF-API-ClientSecret from Key Vault..." -ForegroundColor Gray
-    $BffApiClientSecret = Get-SecretFromKeyVault -VaultName $KeyVaultName -SecretName "BFF-API-ClientSecret"
-}
+# NOTE (2026-08-24, spaarke-auth-v4 task 033): the Key Vault lookup for BFF-API-ClientSecret was removed.
+# The BFF identity is secret-free (ADR-028 A4) and the secret no longer exists in Key Vault, so the
+# lookup could only ever fail. -BffApiClientSecret is still accepted as an explicit parameter for
+# operators testing a non-migrated environment; it is simply no longer sourced automatically.
 
 if (-not $BffApiClientId -or -not $BffApiClientSecret) {
-    Write-TestSkipped "BFF API token acquisition" "Credentials not available (Key Vault not accessible or secrets not set)"
+    Write-TestSkipped "BFF API token acquisition (client-credentials with a secret)" `
+        "By design: the BFF identity is secret-free (ADR-028 A4) and authenticates with a managed-identity federated credential, which cannot be exercised from this script — a workstation has no route to IMDS. This is NOT a missing-credential failure. To verify the live credential, check for 'Ordered credential selection active: ManagedIdentityFederated.' in the app's startup logs, or pass -BffApiClientSecret explicitly for a non-migrated environment."
 } else {
     # Test 1a: App registration exists in Entra ID
     $appInfo = az ad app show --id $BffApiClientId --output json 2>$null | ConvertFrom-Json
@@ -265,12 +271,27 @@ if (-not $BffApiClientId -or -not $BffApiClientSecret) {
 
 Write-Header "TEST 2: Key Vault Secret Verification ($KeyVaultName)"
 
+# BFF-API-ClientSecret REMOVED from this list 2026-08-24 (spaarke-auth-v4 task 033, ADR-028 A4).
+# The BFF identity is secret-free — it authenticates with a managed-identity federated credential —
+# so the secret is deliberately absent from Key Vault. Asserting its presence would make this suite
+# fail permanently, and worse, would tell an operator to "fix" it by re-creating the secret.
 $expectedSecrets = @(
     "TenantId",
     "BFF-API-ClientId",
-    "BFF-API-ClientSecret",
     "BFF-API-Audience"
 )
+
+# The inverse assertion: the retired secret must STAY gone. A re-appearance means someone re-ran a
+# provisioning script without -SkipClientSecret, which ADR-028 E-3 does not license.
+foreach ($retired in @("BFF-API-ClientSecret", "bff-api-client-secret")) {
+    $stillThere = Get-SecretFromKeyVault -VaultName $KeyVaultName -SecretName $retired
+    if ($null -eq $stillThere) {
+        Write-TestResult "Retired secret absent: $retired" $true
+    } else {
+        Write-TestResult "Retired secret absent: $retired" $false `
+            "PRESENT — the BFF identity must be secret-free (ADR-028 A4). Re-created by a provisioning run without -SkipClientSecret?"
+    }
+}
 
 foreach ($secretName in $expectedSecrets) {
     $secretValue = Get-SecretFromKeyVault -VaultName $KeyVaultName -SecretName $secretName

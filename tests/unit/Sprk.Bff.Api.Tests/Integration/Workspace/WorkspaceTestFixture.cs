@@ -16,6 +16,7 @@ using Microsoft.Extensions.Options;
 using Moq;
 using Spaarke.Dataverse;
 using Sprk.Bff.Api.Services.Workspace;
+using Sprk.Bff.Api.Services.Identity;
 
 namespace Sprk.Bff.Api.Tests.Integration.Workspace;
 
@@ -27,8 +28,30 @@ public static class WorkspaceTestConstants
     /// <summary>The Entra ID object ID claim used by the WorkspaceAuthorizationFilter.</summary>
     public const string TestUserId = "test-user-00000000-0000-0000-0000-000000000001";
 
+    /// <summary>
+    /// The Dataverse <c>systemuserid</c> that <see cref="TestUserId"/> resolves to — the value
+    /// <c>ownerid</c> actually holds.
+    /// </summary>
+    /// <remarks>
+    /// <b>This MUST stay different from <see cref="TestUserId"/>.</b> An Entra oid and a Dataverse
+    /// systemuserid are separate identifiers for the same person, and code that confuses them fails
+    /// only in environments where they differ — i.e. every real one. Fixtures that issue a single
+    /// value for both make that entire bug class untestable, which is precisely how the 2026-08-26
+    /// authorization defect survived a green suite. Keep them divergent.
+    /// </remarks>
+    public const string TestSystemUserId = "9f2c1b7e-4d8a-4a6f-9c3e-5b1d0e7a2f48";
+
     /// <summary>Test bearer token value for fake authentication header.</summary>
     public const string TestBearerToken = "workspace-test-token";
+
+    /// <summary>
+    /// The Entra <c>tid</c> claim the fake principal carries. Added by <c>spaarkeai-compose-r8</c>
+    /// task 059: a real Entra access token ALWAYS carries <c>tid</c>, so a fake principal without one
+    /// was a non-contract fixture (per <c>docs/procedures/test-fixture-contracts.md</c>). Tests
+    /// compensated by sending an <c>X-Tenant-Id</c> header, which kept the spoofable fallback alive
+    /// as the only exercised tenant path — the fixture gap was, in effect, holding the hole open.
+    /// </summary>
+    public const string TestTenantId = "test-tenant-001";
 }
 
 /// <summary>
@@ -73,7 +96,7 @@ public class WorkspaceTestFixture : WebApplicationFactory<Program>
                 ["Graph:TenantId"] = "test-tenant-id",
                 ["Graph:ClientId"] = "test-client-id",
                 ["Graph:ClientSecret"] = "test-client-secret",
-                ["Graph:UseManagedIdentity"] = "false",
+                ["Graph:ManagedIdentity:Enabled"] = "false",
                 ["Graph:Scopes:0"] = "https://graph.microsoft.com/.default",
 
                 // Dataverse options (DataverseOptions validator)
@@ -177,6 +200,9 @@ public class WorkspaceTestFixture : WebApplicationFactory<Program>
 
         builder.ConfigureTestServices(services =>
         {
+            // Test hosts must not authenticate for real — see TestTokenCredential.
+            services.UseStubTokenCredential();
+
             // ---------------------------------------------------------------
             // CACHE: Replace Redis with MemoryDistributedCache for deterministic
             // caching behavior (ADR-009: Redis-first in production).
@@ -266,6 +292,16 @@ public class WorkspaceTestFixture : WebApplicationFactory<Program>
 
             services.RemoveAll<IDataverseService>();
             services.AddSingleton(dataverseServiceMock.Object);
+
+            // PortfolioService now translates the caller's Entra oid into the Dataverse systemuserid
+            // that `ownerid` actually holds, and fails CLOSED when the caller cannot be resolved —
+            // deliberately, because the previous behaviour was to DROP the ownership filter and return
+            // every active matter in the org to any caller. The mocked IDataverseService above answers
+            // matter queries, not systemuser lookups, so without this the real resolver returns null and
+            // these tests would assert against an empty portfolio (passing for the wrong reason).
+            services.RemoveAll<ISystemUserIdentityResolver>();
+            services.AddSingleton<ISystemUserIdentityResolver>(
+                new FixtureSystemUserIdentityResolver(WorkspaceTestConstants.TestSystemUserId));
         });
     }
 
@@ -337,6 +373,9 @@ internal sealed class FakeAuthHandler : AuthenticationHandler<AuthenticationSche
             new Claim(ClaimTypes.NameIdentifier, WorkspaceTestConstants.TestUserId),
             new Claim(ClaimTypes.Name, "Test User"),
             new Claim("name", "Test User"),
+            // Every real Entra access token carries `tid`; omitting it here made the fixture
+            // unrepresentative and forced tests onto the X-Tenant-Id fallback (task 059).
+            new Claim("tid", WorkspaceTestConstants.TestTenantId),
             // Admin role required by SpeAdminAuthorizationFilter
             new Claim("roles", "SystemAdmin"),
         };

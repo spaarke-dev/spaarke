@@ -1,15 +1,23 @@
 {
-  "$comment": "Mirror of sprk_analysisaction.sprk_inputschema for compose-revise-document (spaarkeai-compose-r2 DEF-11). Normalized OpenAI-function-parameters subset (validated by CatalogInputSchemaContractTests + jps-validate). documentText is the whole loaded document's current text (Wave-2 session doc text) — the agent loop / Compose surface supplies it from the open document, not from Dataverse. Matter/firm playbook + precedent grounding is supplied by the retrieval layer (not a maker-provided input field). Property-level \"required\": true is FORBIDDEN (invalid JSON Schema — use the object-level required array). No actionId here — it is assigned in Dataverse at deploy time. actionCode carries NO version suffix (owner hygiene).",
+  "$comment": "Mirror of sprk_analysisaction.sprk_inputschema for compose-revise-document. Task 054 (FR-C03 supply half) re-projected this from the seed. The DEPLOYED source is the `inputSchema` member of infra/dataverse/actions/compose-revise-document.action.json — Deploy-AnalysisAction.ps1 reads that file and NOT this directory, so this mirror is CI validation only. documentText is the open document's text with every paragraph prefixed by its w14:paraId; it is the operand AND the closed set of targetable paragraphs. Property-level \"required\": true is FORBIDDEN (use the object-level required array). No actionId here — assigned in Dataverse at deploy time.",
   "actionCode": "compose-revise-document",
   "environment": "spaarkedev1",
   "inputSchema": {
     "type": "object",
-    "required": ["revisionIntent"],
+    "required": [
+      "revisionIntent",
+      "documentText"
+    ],
     "properties": {
       "revisionIntent": {
         "type": "string",
-        "description": "The chosen revision intent for this pass: align-clauses (rewrite deviations from the matter/firm playbook), flag-risks (anchored review comments only, no rewrite), improve-clarity (rewrite ambiguous/redundant passages), or custom (follow the instruction field).",
-        "enum": ["align-clauses", "flag-risks", "improve-clarity", "custom"]
+        "description": "The chosen revision intent for this pass: align-clauses (rewrite deviations from the matter/firm playbook), flag-risks (anchored review comments only, no rewrite), improve-clarity (rewrite ambiguous/redundant passages), or custom (follow the instruction field). Selects the INSTRUCTIONS BY INTENT branch — without it the model cannot tell flag-risks (comments only, empty edits) from improve-clarity.",
+        "enum": [
+          "align-clauses",
+          "flag-risks",
+          "improve-clarity",
+          "custom"
+        ]
       },
       "instruction": {
         "type": "string",
@@ -18,8 +26,8 @@
       },
       "documentText": {
         "type": "string",
-        "description": "The whole loaded document's current text (the Compose editor's open document, Wave-2 session doc text) this revision pass operates over. Every emitted target_text must be a verbatim substring of this field.",
-        "maxLength": 60000
+        "description": "The whole open document's current text, supplied by the Compose editor pane with EVERY paragraph prefixed by its own stable w14:paraId in the form [XXXXXXXX]. Sizing note: a 40-page contract annotates to roughly 130,000 characters, so the earlier 60,000 bound understated what the client actually sends; maxLength here is ADVISORY metadata for makers and CI schema validation — ContextBinder does not enforce it on the operand, and the client deliberately never truncates, because a truncated closed-set would get the model refused on ids that genuinely exist. This is the operand AND the closed set in one artifact: the model targets a paragraph by copying an identifier it can see next to the content, which is a copy rather than a generation. It is supplied by the editor rather than resolved server-side because only the live editor holds the COMPLETE current set — the session's Load-time reference map omits paragraphs typed since and carries no text to annotate.",
+        "maxLength": 400000
       }
     }
   }

@@ -39,7 +39,10 @@ public class AuthorizationTests
         {
             UserId = "user1",
             ResourceId = "resource1",
-            Operation = "read_metadata"
+            Operation = "read_metadata",
+            // task 004 (FR-02): a caller-scoped evaluation requires the caller token; without it
+            // AuthorizationService denies with sdap.access.deny.no_caller_token (fail closed).
+            UserAccessToken = "test-caller-token"
         };
 
         _testDataSource.SetUserAccess("user1", "resource1", AccessRights.Read);
@@ -59,7 +62,10 @@ public class AuthorizationTests
         {
             UserId = "user1",
             ResourceId = "resource1",
-            Operation = "read_metadata"
+            Operation = "read_metadata",
+            // task 004 (FR-02): a caller-scoped evaluation requires the caller token; without it
+            // AuthorizationService denies with sdap.access.deny.no_caller_token (fail closed).
+            UserAccessToken = "test-caller-token"
         };
 
         _testDataSource.SetUserAccess("user1", "resource1", AccessRights.None);
@@ -79,7 +85,8 @@ public class AuthorizationTests
         {
             UserId = "user1",
             ResourceId = "resource1",
-            Operation = "driveitem.update"
+            Operation = "driveitem.update",
+            UserAccessToken = "test-caller-token"
         };
 
         _testDataSource.SetUserAccess("user1", "resource1", AccessRights.Read | AccessRights.Write);
@@ -109,6 +116,29 @@ public class AuthorizationTests
             {
                 UserId = userId,
                 ResourceId = resourceId,
+                AccessRights = rights,
+                TeamMemberships = Array.Empty<string>(),
+                Roles = Array.Empty<string>()
+            };
+
+            return Task.FromResult(snapshot);
+        }
+
+        /// <summary>
+        /// Mirrors <see cref="GetUserAccessAsync"/> for the entity-agnostic path (unified-access-control-r2
+        /// task 070). Keeps the SAME "userId:resourceId" key shape — keyed on <paramref name="recordId"/>'s
+        /// string form — so existing <see cref="SetUserAccess"/> arrange calls apply unchanged;
+        /// entitySetName is not folded into the key because no test here needs to distinguish entity types.
+        /// </summary>
+        public Task<AccessSnapshot> GetRecordAccessAsync(string userId, string entitySetName, Guid recordId, string? userAccessToken, CancellationToken ct = default)
+        {
+            var key = $"{userId}:{recordId}";
+            var rights = _userAccess.TryGetValue(key, out var value) ? value : AccessRights.None;
+
+            var snapshot = new AccessSnapshot
+            {
+                UserId = userId,
+                ResourceId = recordId.ToString(),
                 AccessRights = rights,
                 TeamMemberships = Array.Empty<string>(),
                 Roles = Array.Empty<string>()

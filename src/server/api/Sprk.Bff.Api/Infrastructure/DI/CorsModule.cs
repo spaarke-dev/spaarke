@@ -124,11 +124,24 @@ public static class CorsModule
                           "X-Requested-With",
                           "X-Correlation-Id",
                           "X-Idempotency-Key",
+                          // KEEP. Task 059 stopped the BFF from READING this header, but the browser
+                          // SSE path (useSseStream.ts readSseStream) still SENDS it. Dropping it here
+                          // would make the CORS preflight reject the request outright — turning an
+                          // ignored header into a broken chat stream. Remove only together with the
+                          // client-side send.
                           "X-Tenant-Id",
                           "request-id",
                           "client-request-id",
                           "traceparent",
-                          "tracestate")
+                          "tracestate",
+                          // SSE job-progress streams (Office add-in SaveFlow → SseClient.ts).
+                          // Neither is a CORS-safelisted request header, so both MUST be listed
+                          // explicitly or the preflight fails with "Request header field
+                          // cache-control is not allowed by Access-Control-Allow-Headers".
+                          // Last-Event-ID is only sent on RECONNECT, so omitting it fails later
+                          // and more confusingly than Cache-Control does.
+                          "Cache-Control",
+                          "Last-Event-ID")
                       .WithExposedHeaders(
                           "ETag",
                           "request-id",

@@ -1,0 +1,100 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="061" project="sdap-SPE-admin-app-r2">
+  <metadata>
+    <title>Refresh the knowledge/sharepoint-embedded/ corpus</title>
+    <phase>6 Hygiene + cross-cutting</phase>
+    <gate>025 complete</gate>
+    <status>completed</status>
+    <rigor>MINIMAL</rigor>
+    <rigor-reason>Documentation refresh only — no code, no tests, no behavioural surface.</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Research and documentation synthesis against a defined refresh procedure.</model-tier-reason>
+    <effort>medium</effort>
+    <parallel-group>W18</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <deps>025</deps>
+    <tags>documentation, research</tags>
+    <estimated-effort>2-4 hours</estimated-effort>
+  </metadata>
+
+  <prompt>The local SharePoint Embedded knowledge corpus was curated 2026-05-14 and predates every platform finding this project uncovered. Refresh it so the next project does not re-derive what R2 learned the hard way.</prompt>
+
+  <role>SPAARKE technical writer / researcher. Expert in SharePoint Embedded platform documentation. Follow the repo refresh procedure.</role>
+
+  <goal>The corpus reflects the v1.0 GA surface, container archival, and the July 2026 admin-center Apps experience. REFRESH-LOG.md records the update.</goal>
+
+  <context>
+    <background>Spec FR-X01 / §4. The corpus at knowledge/sharepoint-embedded/docs/ (learn-containers.md, learn-containertypes.md, learn-overview.md, learn-knowledge-source.md, learn-semantic-index.md) was curated in Batch 3 on 2026-05-14. Everything in spec §4 postdates it — the v1.0 GA of container-type APIs, container archival (GA Feb 2026), the admin-center Apps experience (GA Jul 2026), the app-only limitation on containerTypes, and the correct v1.0 settings property names.</background>
+    <relevant-files>
+      <file role="modify">knowledge/sharepoint-embedded/docs/learn-containertypes.md</file>
+      <file role="modify">knowledge/sharepoint-embedded/docs/learn-containers.md</file>
+      <file role="modify">knowledge/sharepoint-embedded/docs/learn-overview.md</file>
+      <file role="modify">knowledge/REFRESH-LOG.md</file>
+      <file role="canonical-reference">knowledge/REFRESH-PROCEDURE.md</file>
+      <file role="canonical-reference">projects/sdap-SPE-admin-app-r2/notes/spe-platform-research-2026-08-20.md</file>
+    </relevant-files>
+    <dependencies>
+      <dependency task="025" status="pending">The verified nine-property settings shape — the corpus should record what was empirically confirmed, not just what docs claim.</dependency>
+    </dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="project">Scope: follow knowledge/REFRESH-PROCEDURE.md. Do not invent a new corpus structure.</constraint>
+    <constraint source="project">Scope: empirical findings. Where this project VERIFIED something against a live tenant (e.g. the containerTypes app-only limitation, the correct property names, the create-role contradiction), record the empirical finding and note it was verified — that is more valuable than restating documentation.</constraint>
+    <constraint source="project">Scope: minimum coverage. At minimum refresh learn-containertypes.md, learn-containers.md, and learn-overview.md, and add coverage of archival and the admin-center Apps experience.</constraint>
+    <constraint source="project">Scope: source citation. Every factual claim cites its source. Undated, uncited claims are what made the current corpus stale without anyone noticing.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>SharePoint Embedded platform documentation</topic>
+    <files>
+      <file>knowledge/REFRESH-PROCEDURE.md</file>
+      <file>knowledge/REFRESH-LOG.md</file>
+      <file>projects/sdap-SPE-admin-app-r2/notes/spe-platform-research-2026-08-20.md</file>
+      <file>projects/sdap-SPE-admin-app-r2/spec.md</file>
+      <file>projects/sdap-SPE-admin-app-r2/design.md</file>
+    </files>
+    <patterns>
+      <pattern name="graph-endpoints-catalog" location=".claude/patterns/auth/graph-endpoints-catalog.md">Endpoint permission matrix to cross-check.</pattern>
+    </patterns>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="0" name="Context + rigor declaration">Declare rigor MINIMAL. Load REFRESH-PROCEDURE.md.</step>
+    <step order="1">Diff the current corpus against spec §4 and the research note; list what is stale.</step>
+    <step order="2">Refresh learn-containertypes.md: v1.0 GA, the app-only limitation, the correct nine settings properties, the lifecycle constraints, and the create-role finding from task 010.</step>
+    <step order="3">Refresh learn-containers.md: archival, the item recycle bin, the container URL field, and whatever task 024 established about consumption.</step>
+    <step order="4">Refresh learn-overview.md: the admin-center Apps experience and the Purview compliance boundary.</step>
+    <step order="5">Mark empirically-verified claims as verified, with the date and this project as the source.</step>
+    <step order="6">Update REFRESH-LOG.md with the refresh date, scope, and source list.</step>
+    <step order="7">Update TASK-INDEX.md: task 061 → ✅.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If a platform claim in the corpus contradicts what this project verified empirically and the contradiction cannot be resolved from documentation, record BOTH with their sources and flag it rather than silently choosing one. The Graph reference-page vs conceptual-doc contradiction on create roles is a known instance.</trigger>
+  </escalation>
+
+  <tools>
+    <tool name="dotnet">Not required — documentation only</tool>
+  </tools>
+
+  <outputs>
+    <output type="doc">knowledge/sharepoint-embedded/docs/learn-containertypes.md</output>
+    <output type="doc">knowledge/sharepoint-embedded/docs/learn-containers.md</output>
+    <output type="doc">knowledge/sharepoint-embedded/docs/learn-overview.md</output>
+    <output type="doc">knowledge/REFRESH-LOG.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">learn-containertypes.md, learn-containers.md, and learn-overview.md are refreshed and reflect the v1.0 GA surface.</criterion>
+    <criterion testable="true">Container archival and the admin-center Apps experience have coverage.</criterion>
+    <criterion testable="true">Empirically-verified findings from this project are marked as verified with the date and source.</criterion>
+    <criterion testable="true">Every factual claim cites a source.</criterion>
+    <criterion testable="true">Negative: where documentation and empirical findings conflict, both are recorded with sources rather than one being silently chosen.</criterion>
+    <criterion testable="true">REFRESH-LOG.md records the refresh date, scope, and sources.</criterion>
+  </acceptance-criteria>
+
+  <notes>Spec FR-X01. Satisfies spec success criterion 16. Parallel-safe: documentation only.</notes>
+
+  <execution><skill>.claude/skills/task-execute/SKILL.md</skill></execution>
+</task>

@@ -1,0 +1,96 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="055" project="unified-access-control-r2">
+  <metadata>
+    <title>Evaluator inheritance term: child records take their core ancestor's rights (FR-27)</title>
+    <phase>3 Child inheritance</phase>
+    <gate>blocked — requires 054 (fourth root set) + Phase 1 tasks 032/037/038 (evaluator with vetoes + deny store) merged</gate>
+    <status>pending</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Core authorization evaluator change (.cs, auth tags); the inheritance term IS the access decision for six entity classes.</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Term 5 of the design §4.5 evaluator is precisely specified (additive union then vetoes, per-child deny after max); implementation follows the Phase-1 evaluator's established term pattern.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>phase3-wave4</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Touches Infrastructure/ExternalAccess/** (evaluator) — exclusive-file zone; must not run concurrently with 054 or 056.</parallel-reason>
+    <deps>054, 032, 037, 038</deps>
+    <tags>bff-api, auth, testing</tags>
+    <estimated-effort>3-4 hours</estimated-effort>
+  </metadata>
+
+  <prompt>Add the inheritance term to the Phase-1 unified evaluator: a child record's rights = its denormalized core ancestor's rights (1 hop via the FR-26 stamp), entering the additive union BEFORE the ordered vetoes, so a per-child deny-list entry (FR-23) revokes one child without touching the parent, and Restricted/Secure vetoes apply to inherited access exactly as to direct access.</prompt>
+  <role>SPAARKE platform developer. Authorization evaluator internals (rights composition, veto ordering). Follow ADRs strictly.</role>
+  <goal>The evaluator returns (recordId -> rights) for child records by resolving the child's core-ancestor stamp column and applying the ancestor's computed rights as an additive term; vetoes evaluate on the CHILD record (its own deny entries, its own sprk_accesspermission, its ancestor's sprk_issecure suppression semantics per design §4.5); closed-set tests cover inherit + per-child revoke + veto interplay for both principal kinds.</goal>
+
+  <context>
+    <background>spec.md FR-27; design.md §4.5 term 5 ("Inheritance — child takes its core ancestor's rights") and the veto order (deny -> Restricted -> Secure-suppression-before-max). The owner accepted that a contact with Project 1 access sees its invoices even when the invoice's own assigned attorney is someone else, with per-child revocation via the deny term. Matter does NOT inherit from Project — both core; the evaluator must not treat a matter's project association as an inheritance edge.</background>
+    <relevant-files>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Infrastructure/ExternalAccess/AccessibleRecordSetService.cs (or the Phase-1 evaluator file that superseded it — follow the as-merged shape)</file>
+      <file role="canonical-reference">projects/unified-access-control-r2/design.md (§4.3, §4.5)</file>
+      <file role="modify">tests/unit/Sprk.Bff.Api.Tests/ (evaluator inheritance tests)</file>
+      <file role="modify">tests/integration/seam/ (evaluator seam tests if the Phase-1 suite established them)</file>
+    </relevant-files>
+    <dependencies>
+      <dependency task="054" status="pending">Fourth root set (service request) so inheritance covers all four core classes.</dependency>
+      <dependency task="032" status="pending">FR-19 evaluator returning (recordId -> rights) with additive-then-veto structure.</dependency>
+      <dependency task="037" status="pending">FR-21/FR-22 Restricted + Secure vetoes the inheritance term must interplay with.</dependency>
+      <dependency task="038" status="pending">FR-23 deny-list store + veto (per-child revocation reuses it).</dependency>
+    </dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-034">1-hop only: inheritance reads the child's OWN stamp columns; scope: no traversal through intermediate child parents (the stamp already collapsed the chain).</constraint>
+    <constraint source="spec-MUST">Vetoes evaluate AFTER the additive max and never as levels; "No Access" is a veto. Scope: term ordering in the evaluator.</constraint>
+    <constraint source="project">Matter-to-Project association is NOT an inheritance edge; scope: the inheritance term keys strictly on the core-ancestor stamp columns of CHILD-class entities.</constraint>
+    <constraint source="NFR-01">Missing/null stamp on a child = no inherited term (record reachable only via its own direct grants/deny state) — fail closed, no fallback lookup walk. Scope: stamp resolution.</constraint>
+    <constraint source="CLAUDE.md-§10">Placement justification cited in PR (extension of the evaluator, not a new service — per design §3 "extend in place"); publish size reported ≤ 60 MB. Scope: PR description.</constraint>
+    <constraint source="ADR-038">Update tests in tests/unit/Sprk.Bff.Api.Tests + seam KEEP paths; coverage is observation, never a gate. Scope: test outputs.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>unified evaluator composition</topic>
+    <files>
+      <file>.claude/adr/ADR-003-authorization-seams.md</file>
+      <file>.claude/adr/ADR-034-user-record-membership.md</file>
+      <file>docs/adr/ADR-038-testing-strategy.md</file>
+      <file>projects/unified-access-control-r2/design.md</file>
+      <file>projects/unified-access-control-r2/spec.md</file>
+    </files>
+    <patterns>
+      <pattern name="uac-access-control" location=".claude/patterns/auth/uac-access-control.md">Seam map for the evaluator.</pattern>
+    </patterns>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="0">Context + rigor declaration. Read the as-merged Phase-1 evaluator before editing; map where terms 1-4 and vetoes 6-8 live.</step>
+    <step order="1">Implement the inheritance term: for a child-entity evaluation, read the stamp columns (project/matter/workassignment/servicerequest), look up the ancestor's already-computed rights from the same evaluation pass, apply as an additive term (highest wins).</step>
+    <step order="2">Verify veto interplay: child-level deny entry vetoes the child only; Restricted on the child denies all contacts on the child; Secure on the ANCESTOR suppresses derived/org terms feeding the ancestor's rights (per design §4.5 note 8) and therefore the inherited term — write this as a test before relying on it.</step>
+    <step order="3">Guard the non-edge: a matter with an associated project must show NO inherited term (test).</step>
+    <step order="4">Closed-set tests per acceptance criteria; run full evaluator suite for regressions.</step>
+    <step order="5">Build + tests green; publish size reported.</step>
+    <step order="6">Update TASK-INDEX.md; document term-ordering decisions in notes.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If the Phase-1 evaluator's merged shape cannot express "ancestor rights computed in the same pass" without a second Dataverse round trip per child (NFR-02 pressure), STOP and escalate the batching design per CLAUDE.md §6 rather than adding per-child queries.</trigger>
+  </escalation>
+
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Infrastructure/ExternalAccess/ (evaluator inheritance term)</output>
+    <output type="test">tests/unit/Sprk.Bff.Api.Tests/ (inheritance + veto interplay)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Given contact C with Collaborate on Project P, when evaluating an invoice stamped sprk_regardingproject = P, then the invoice's rights = Collaborate.</criterion>
+    <criterion testable="true">Given the same setup plus a deny-list entry for C on the invoice, then the invoice evaluates to None while P itself still evaluates to Collaborate (per-child revocation, FR-23).</criterion>
+    <criterion testable="true">Given a child stamped to a Restricted core record, a contact with an explicit Full Access grant on the child's ancestor is denied on the child if the CHILD is Restricted; ancestor Restricted denies the ancestor term per FR-21 — both directions pinned by test.</criterion>
+    <criterion testable="true">Given a Secure ancestor (sprk_issecure = true), a contact whose only path is a standing/org grant has NO inherited rights on the child (suppression happens before the max, FR-22).</criterion>
+    <criterion testable="true">Negative: a matter associated to a project inherits NOTHING from the project (test asserts empty inherited term).</criterion>
+    <criterion testable="true">Negative: a child with all stamp columns null yields no inherited term and no error.</criterion>
+    <criterion testable="true">All Phase-1 evaluator regression tests pass; build green; publish size ≤ 60 MB reported.</criterion>
+  </acceptance-criteria>
+
+  <notes>spec.md FR-27; design.md §4.5. Child-module registration that EXPOSES this term on the fetch seam is task 056.</notes>
+
+  <execution><skill>.claude/skills/task-execute/SKILL.md</skill></execution>
+</task>

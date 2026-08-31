@@ -122,7 +122,7 @@ public sealed class SpeSaveVersioningSeamTests : IClassFixture<ComposeFidelitySe
         using (var scope = _fixture.Services.CreateScope())
         {
             var sessions = scope.ServiceProvider.GetRequiredService<ChatSessionManager>();
-            var session = await sessions.CreateSessionAsync(tenant, documentId: speId);
+            var session = await sessions.CreateSessionAsync(tenant, TestSessionOwner.Oid, documentId: speId);
             sessionId = session.SessionId;
         }
 

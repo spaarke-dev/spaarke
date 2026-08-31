@@ -1,0 +1,86 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="069" project="unified-access-control-r2">
+  <metadata>
+    <title>Phase 4 seam tests: share lifecycle, secure-project explicit-only access, MDA/SPA parity pins (FR-28/29/30)</title>
+    <phase>4 Secure Project, Manage Access, wizard</phase>
+    <gate>blocked — requires 061, 063, 064 merged</gate>
+    <status>pending</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Modifies tests/** — FULL unconditionally (TEST-MODIFYING override).</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Closed scenario list below; extends the established seam suite.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>phase4-wave7</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <parallel-reason>Touches tests/** only; solo wave at phase end.</parallel-reason>
+    <deps>061, 063, 064</deps>
+    <tags>testing, integration-test, auth, bff-api</tags>
+    <estimated-effort>2-4 hours</estimated-effort>
+  </metadata>
+
+  <prompt>Pin Phase 4's security contract at the seams: the internal-share lifecycle (grant -> visible via evaluator -> revoke -> gone), secure-project explicit-only access for every principal kind, the delegation gate on every mutating route, and the provenance report's fidelity — the automatable half of the MDA/SPA parity story ("the share that grants MDA access grants SPA access"). Live-dev parity itself is UAT; here we pin the BFF-side halves so UAT verifies topology, not code.</prompt>
+  <role>SPAARKE platform developer. ADR-038 seam testing. Follow ADRs strictly.</role>
+  <goal>Seam tests under tests/integration/seam/ covering the closed set below, green in CI; UAT-only residue explicitly listed in notes/phase4-uat-acceptance.md (updating 061's file), so nothing silently falls between CI and UAT.</goal>
+
+  <context>
+    <background>NFR-07 discipline: behaviour changed in Phase 4, so the suite pins the new contract. Design §5.1's parity claim rests on FR-20 (impersonated reads see POA shares) + 063 (shares written correctly) — the seam can prove "share written by the endpoint is returned by the impersonated root-set source" without a live MDA. Delegation (FR-07) gains new mutating routes in this phase; each must carry the gate.</background>
+    <relevant-files>
+      <file role="modify">tests/integration/seam/ (extend the existing suite with Phase-4 share/secure seam tests per suite convention)</file>
+      <file role="canonical-reference">tests/integration/seam/ (task 044 + 057 seam tests as structure)</file>
+      <file role="canonical-reference">docs/procedures/test-fixture-contracts.md</file>
+    </relevant-files>
+    <dependencies>
+      <dependency task="061" status="pending">Secure provisioning behaviour.</dependency>
+      <dependency task="063" status="pending">Share endpoints.</dependency>
+      <dependency task="064" status="pending">Report + deny endpoints.</dependency>
+    </dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-038">KEEP-path seam tests; banned patterns excluded; scope: whole task.</constraint>
+    <constraint source="project">Route-coverage assertion: enumerate every mutating route added in Phase 4 (share, unshare, deny add/remove, provision, reverse) and assert each carries the delegation filter — a new ungated route fails the test. Scope: one dedicated test.</constraint>
+    <constraint source="project">UAT-residue honesty: every FR-28 acceptance item this suite CANNOT prove (BU reachability, real MDA read) is listed in the UAT note — never marked covered. Scope: task completion.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>access seam testing</topic>
+    <files>
+      <file>docs/adr/ADR-038-testing-strategy.md</file>
+      <file>docs/standards/TEST-ARCHITECTURE.md</file>
+      <file>projects/unified-access-control-r2/spec.md</file>
+    </files>
+    <patterns>
+      <pattern name="integration-tests" location=".claude/patterns/testing/integration-tests.md">Seam structure.</pattern>
+    </patterns>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="0">Context + rigor declaration.</step>
+    <step order="1">Implement the closed scenario set (criteria below), reusing Phase 0-3 fixtures.</step>
+    <step order="2">Write the route-coverage delegation assertion.</step>
+    <step order="3">Update notes/phase4-uat-acceptance.md with the residue list.</step>
+    <step order="4">Full suite green in CI; update TASK-INDEX.md.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If a scenario reveals a REAL gap (e.g. a share the evaluator cannot see), STOP and file it against the owning task (060/063/FR-20) per CLAUDE.md §6 — do not weaken the test to green.</trigger>
+  </escalation>
+
+  <outputs>
+    <output type="test">tests/integration/seam/ (Phase-4 tests)</output>
+    <output type="docs">projects/unified-access-control-r2/notes/phase4-uat-acceptance.md (updated residue list)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Share lifecycle: 063 grant makes the record appear in the impersonated root-set answer for that user; revoke removes it (the code-provable half of MDA/SPA parity).</criterion>
+    <criterion testable="true">Secure project: after 061 provisioning, a principal with only org/standing paths gets None on both the evaluator and the report; an explicitly shared user gets rights.</criterion>
+    <criterion testable="true">Delegation route-coverage: every Phase-4 mutating route rejects a caller without Write (403) — enumerated assertion, fails on new ungated routes.</criterion>
+    <criterion testable="true">Report fidelity: report rows match evaluator outcomes for the same fixture (no divergence between "who can" and "who the report says can").</criterion>
+    <criterion testable="true">Negative: unauthenticated calls to every new route return 401.</criterion>
+    <criterion testable="true">UAT residue list updated; full suite green in CI.</criterion>
+  </acceptance-criteria>
+
+  <notes>spec.md FR-28/29/30, NFR-04/05 remain their own gates (Phase 1 canary, task 062).</notes>
+
+  <execution><skill>.claude/skills/task-execute/SKILL.md</skill></execution>
+</task>

@@ -1,0 +1,93 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="060" project="sdap-SPE-admin-app-r2">
+  <metadata>
+    <title>Hygiene — delete the dead stub and relocate the misfiled endpoints file</title>
+    <phase>6 Hygiene + cross-cutting</phase>
+    <gate>startable</gate>
+    <status>completed</status>
+    <rigor>STANDARD</rigor>
+    <rigor-reason>File deletion and relocation with no behavioural surface. Modifies .cs only by moving it; no logic change.</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Mechanical file operations with a build check.</model-tier-reason>
+    <effort>low</effort>
+    <parallel-group>W18</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <deps>none</deps>
+    <tags>bff-api, refactor, deletion</tags>
+    <estimated-effort>1 hour</estimated-effort>
+  </metadata>
+
+  <prompt>Two cheap hygiene moves that ship in R2 while the rest of the decomposition is deferred: delete the 3-line dead stub, and move the misfiled endpoints file into the folder it belongs to. Both are file moves with no behavioural surface, and both reduce confusion during the rest of the project.</prompt>
+
+  <role>SPAARKE platform developer. Follow ADRs strictly.</role>
+
+  <goal>The dead stub is gone and ContainerItemEndpoints.cs sits in Api/SpeAdmin/ with its routes unchanged. Build green.</goal>
+
+  <context>
+    <background>Spec FR-F01 + FR-F02 / §5 Workstream F. Verified: Services/SpeAdmin/SpeAdminGraphService.cs is a 3-line comment-only file stating the real implementation lives in Infrastructure/Graph/. Api/ContainerItemEndpoints.cs serves /api/spe/containers/{id}/items/* and is merely in the wrong folder. The full decomposition is out of scope — it ships as speadmingraphservice-decomposition-r1 (spec D5).</background>
+    <relevant-files>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Services/SpeAdmin/SpeAdminGraphService.cs</file>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Api/ContainerItemEndpoints.cs</file>
+      <file role="canonical-reference">src/server/api/Sprk.Bff.Api/Api/SpeAdmin/ContainerEndpoints.cs</file>
+    </relevant-files>
+    <dependencies>
+      <dependency task="none" status="complete">No prerequisites — independent of every other task.</dependency>
+    </dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="project">Scope: behaviour. Neither change may alter a route, a response shape, or any runtime behaviour. If moving the file requires a namespace change, verify route registration still resolves identically.</constraint>
+    <constraint source="project">Scope: the stub. Confirm it is genuinely dead — grep for references before deleting. A comment-only file with an incoming reference is not dead.</constraint>
+    <constraint source="project">Scope: the decomposition boundary. Do NOT extract types, split methods, or begin any part of the deferred decomposition. Two file operations only (spec D5).</constraint>
+    <constraint source="CLAUDE.md §10">Scope: this BFF change. Verify publish size is neutral.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>BFF file organization</topic>
+    <files>
+      <file>.claude/constraints/bff-extensions.md</file>
+      <file>docs/standards/COMPONENT-COMPLEXITY.md</file>
+      <file>src/server/api/Sprk.Bff.Api/CLAUDE.md</file>
+      <file>projects/sdap-SPE-admin-app-r2/spec.md</file>
+    </files>
+    <patterns>
+      <pattern name="endpoint-definition" location=".claude/patterns/api/endpoint-definition.md">Where endpoint files belong.</pattern>
+      <pattern name="service-registration" location=".claude/patterns/api/service-registration.md">DI registration — confirm the stub is not registered.</pattern>
+    </patterns>
+  </knowledge>
+
+  <steps mode="prescriptive">
+    <step order="0" name="Context + rigor declaration">Declare rigor STANDARD. Load spec Workstream F.</step>
+    <step order="1">Grep for references to Services/SpeAdmin/SpeAdminGraphService.cs and confirm the stub is unreferenced, including in SpeAdminModule.cs.</step>
+    <step order="2">Delete the stub.</step>
+    <step order="3">Move Api/ContainerItemEndpoints.cs to Api/SpeAdmin/ContainerItemEndpoints.cs, adjusting the namespace if the convention requires it.</step>
+    <step order="4">Verify route registration still resolves — the routes must be byte-identical.</step>
+    <step order="5">Build: dotnet build src/server/api/Sprk.Bff.Api/ — 0 errors.</step>
+    <step order="6">Run the SpeAdmin tests — green.</step>
+    <step order="7">Measure publish size; confirm neutral. Update TASK-INDEX.md: task 060 → ✅.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If the stub turns out to be referenced anywhere — DI registration, a using directive, a test — STOP and escalate rather than deleting it. A referenced file is not dead, and removing it is a behavioural change disguised as hygiene.</trigger>
+  </escalation>
+
+  <tools>
+    <tool name="dotnet">Build and test the BFF</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Api/SpeAdmin/ContainerItemEndpoints.cs (relocated)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Services/SpeAdmin/SpeAdminGraphService.cs no longer exists and grep confirms it had no references.</criterion>
+    <criterion testable="true">ContainerItemEndpoints.cs is in Api/SpeAdmin/ and its routes are unchanged.</criterion>
+    <criterion testable="true">Negative: no route, response shape, or runtime behaviour changed — verified by the existing tests passing unmodified.</criterion>
+    <criterion testable="true">Negative: no type extraction, method split, or other decomposition work was performed (spec D5 boundary).</criterion>
+    <criterion testable="true">dotnet build 0 errors; SpeAdmin tests green; publish size neutral.</criterion>
+  </acceptance-criteria>
+
+  <notes>Spec FR-F01 + FR-F02. The only Workstream F work in R2 — the rest is speadmingraphservice-decomposition-r1, entry-gated on A–E merged plus the D harness green.</notes>
+
+  <execution><skill>.claude/skills/task-execute/SKILL.md</skill></execution>
+</task>

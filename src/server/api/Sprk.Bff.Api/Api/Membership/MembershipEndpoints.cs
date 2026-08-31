@@ -48,6 +48,7 @@
 //   - bff-extensions.md §A (BFF pre-merge checklist), §F.1 (unconditional registration
 //     — service AddMembership() + endpoint MapMembershipEndpoints() both unconditional)
 
+using Sprk.Bff.Api.Infrastructure.Authentication;
 using System.Security.Claims;
 using System.Text;
 using Microsoft.AspNetCore.Mvc;
@@ -353,9 +354,7 @@ public static class MembershipEndpoints
     /// </remarks>
     internal static Guid? ExtractAadObjectId(ClaimsPrincipal user)
     {
-        var oidString = user.FindFirst("oid")?.Value
-            ?? user.FindFirst("http://schemas.microsoft.com/identity/claims/objectidentifier")?.Value
-            ?? user.FindFirst(ClaimTypes.NameIdentifier)?.Value;
+        var oidString = CallerResolution.ResolveObjectId(user);
 
         if (string.IsNullOrWhiteSpace(oidString))
         {

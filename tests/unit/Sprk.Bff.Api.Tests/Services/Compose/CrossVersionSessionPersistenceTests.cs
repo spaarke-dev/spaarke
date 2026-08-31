@@ -123,7 +123,7 @@ public sealed class CrossVersionSessionPersistenceTests
             LastActivity: DateTimeOffset.UtcNow,
             Messages: Array.Empty<ChatMessage>(),
             HostContext: hostContext)
-        {
+        { OwnerOid = TestSessionOwner.Oid,
             AnchoredAnnotations = annotations,
             Outputs = outputs,
         };
@@ -192,7 +192,7 @@ public sealed class CrossVersionSessionPersistenceTests
             DocumentSpeId = DocumentSpeId,
             TenantId = Tenant,
             SessionId = priorSessionId,
-        }, new DefaultHttpContext(), CancellationToken.None);
+        }, TestHttpContexts.Authenticated(), CancellationToken.None);
 
         // Word save #2 — a NEW DOCX version (different ETag) is now on SPE. The document identity
         // (DocumentSpeId) is unchanged, which is exactly what makes the binding version-independent.
@@ -204,7 +204,7 @@ public sealed class CrossVersionSessionPersistenceTests
             DocumentSpeId = DocumentSpeId,
             TenantId = Tenant,
             SessionId = priorSessionId,
-        }, new DefaultHttpContext(), CancellationToken.None);
+        }, TestHttpContexts.Authenticated(), CancellationToken.None);
 
         firstReload.SessionId.Should().Be(priorSessionId);
         secondReload.SessionId.Should().Be(priorSessionId,
@@ -234,7 +234,7 @@ public sealed class CrossVersionSessionPersistenceTests
             TenantId = Tenant,
             SessionId = priorSessionId,
             MatterId = MatterId,
-        }, new DefaultHttpContext(), CancellationToken.None);
+        }, TestHttpContexts.Authenticated(), CancellationToken.None);
 
         result.SessionId.Should().Be(priorSessionId,
             "the caller-supplied MatterId matches the session's bound Matter — the DocumentId+MatterId key resolves to the SAME session");
@@ -262,7 +262,7 @@ public sealed class CrossVersionSessionPersistenceTests
             TenantId = Tenant,
             SessionId = otherMatterSessionId,
             MatterId = MatterId, // DIFFERENT matter than the seeded session is bound to
-        }, new DefaultHttpContext(), CancellationToken.None);
+        }, TestHttpContexts.Authenticated(), CancellationToken.None);
 
         result.SessionId.Should().NotBe(otherMatterSessionId,
             "the same DocumentId but a DIFFERENT MatterId must not be treated as the same cross-version binding");
@@ -290,7 +290,7 @@ public sealed class CrossVersionSessionPersistenceTests
             TenantId = Tenant,
             SessionId = priorSessionId,
             MatterId = null, // R1/FR-29 caller — predates FR-33
-        }, new DefaultHttpContext(), CancellationToken.None);
+        }, TestHttpContexts.Authenticated(), CancellationToken.None);
 
         result.SessionId.Should().Be(priorSessionId,
             "a null MatterId must preserve the existing FR-29 DocumentId-only resume match");
@@ -310,7 +310,7 @@ public sealed class CrossVersionSessionPersistenceTests
             DocumentSpeId = DocumentSpeId,
             TenantId = Tenant,
             MatterId = MatterId,
-        }, new DefaultHttpContext(), CancellationToken.None);
+        }, TestHttpContexts.Authenticated(), CancellationToken.None);
 
         _store.Should().ContainKey(result.SessionId);
         var created = _store[result.SessionId];
@@ -338,7 +338,7 @@ public sealed class CrossVersionSessionPersistenceTests
             DocumentSpeId = DocumentSpeId,
             TenantId = Tenant,
             SessionId = priorSessionId,
-        }, new DefaultHttpContext(), CancellationToken.None);
+        }, TestHttpContexts.Authenticated(), CancellationToken.None);
 
         result.ActionHistory.Should().ContainSingle();
         var entry = result.ActionHistory[0];
@@ -361,7 +361,7 @@ public sealed class CrossVersionSessionPersistenceTests
             DriveId = DriveId,
             DocumentSpeId = DocumentSpeId,
             TenantId = Tenant,
-        }, new DefaultHttpContext(), CancellationToken.None);
+        }, TestHttpContexts.Authenticated(), CancellationToken.None);
 
         result.ActionHistory.Should().NotBeNull().And.BeEmpty();
     }
@@ -395,7 +395,7 @@ public sealed class CrossVersionSessionPersistenceTests
             CreatedAt: DateTimeOffset.UtcNow,
             LastActivity: DateTimeOffset.UtcNow,
             Messages: Array.Empty<ChatMessage>())
-        {
+        { OwnerOid = TestSessionOwner.Oid,
             Outputs = new[]
             {
                 new SessionOutput

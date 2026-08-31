@@ -1,7 +1,7 @@
 <task id="CICD-088b" project="ci-cd-unit-test-remediation-r1">
   <metadata>
     <title>Push GraphServiceClient resolution into Infrastructure.Graph — eliminate IL-level GraphServiceClient locals in 14 endpoints + FileAccessEndpoints gap — UNBLOCKS SC-12</title>
-    <status>not-started</status>
+    <status>complete</status>
     <estimated-effort>3-4 hours</estimated-effort>
     <phase>2.5 - Pre-cutover BFF ADR remediation</phase>
     <stream>A - CI tiering remediation</stream>
@@ -12,6 +12,7 @@
     <blocks>071</blocks>
     <tags>bff-api, adr-007, spe, graph-sdk, hot-path, FR-A06, structural-refactor</tags>
     <execution-note>088 mechanical refactor was necessary prep but insufficient — NetArchTest's `HaveDependencyOn` is IL-level, so the `var graphClient = await graphService.GetClientForConfigAsync(...)` local in 14 endpoints still references GraphServiceClient. 088b pushes that resolution into Infrastructure.Graph so endpoints never hold the typed local.</execution-note>
+    <disposition date="2026-08-30">OBJECTIVE ALREADY MET — verified 2026-08-30. This task's goal is literally 'EndpointsShouldNotReferenceGraphSdk PASSES on master'. It does: the test passes, and it is armed in the Tier 1 blocking filter, so a regression would fail a build rather than sit unnoticed. The 14 endpoints it was written to remediate were resolved by other work during the project window. Closed on evidence, alongside its dependency 088.</disposition>
   </metadata>
 
   <prompt>

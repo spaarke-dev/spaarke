@@ -1,0 +1,265 @@
+/**
+ * RecordHeader PCF - single source of truth for the control version.
+ *
+ * Version MUST be kept in sync across 5 locations (ADR-020;
+ * `src/client/pcf/CLAUDE.md` says 4 — that count is stale, `pcf-deploy` adds
+ * pack.ps1, which is what actually names the emitted ZIP):
+ *   1. control/ControlManifest.Input.xml                (version="X.Y.Z")
+ *   2. control/version.ts                               (CONTROL_VERSION — this file)
+ *   3. Solution/solution.xml                            (<Version>X.Y.Z.0</Version>)
+ *   4. Solution/Controls/sprk_Spaarke.Records.RecordHeader/ControlManifest.xml
+ *      (build artifact — do NOT hand-edit; it is copied from out/ after build)
+ *   5. Solution/pack.ps1                                ($version = "X.Y.Z.0")
+ *
+ * See docs/guides/PCF-DEPLOYMENT-GUIDE.md and .claude/skills/pcf-deploy/SKILL.md
+ * for the update workflow.
+ *
+ * 1.1.0 (2026-08-25) — initial release of the configuration-driven control
+ * (record-header-and-notepad-r2 task 033). Starts at 1.1.0 rather than 1.0.0
+ * because this is a NEW control identity carrying R1s already-shipped
+ * MatterHeader feature set (spec assumption, confirmed here) plus the R2
+ * renderer/config work. `MatterHeaderPcf` v1.0.21 stays live and is retired
+ * separately at task 081.
+ *
+ * 1.1.1 (2026-08-26) — first-UAT defect fixes.
+ *   DEF-1 metadata never reached the resolver, so every field derived the
+ *   `text` renderer, every label humanized its logical name, and a lookup got
+ *   `$select`ed by its bare name (HTTP 400 -> every cell an em-dash). Two
+ *   independent causes, both fixed in `@spaarke/ui-components`:
+ *     (a) the attribute label/type rescue call used
+ *         `Xrm.WebApi.retrieveMultipleRecords('EntityDefinition', ...)`, which
+ *         cannot work - `Xrm.WebApi` does not serve metadata entities - so it
+ *         threw on every call and its catch swallowed the throw;
+ *     (b) `projectAttribute` parsed only Web-API shapes, but the CLIENT API
+ *         returns a numeric `AttributeType` and a plain-string `DisplayName`.
+ *   Plus two defences: the metadata fetch now NAMES the attributes it needs,
+ *   and a failed `$select` read degrades to an unprojected read instead of
+ *   blanking the header (the RS-1 failure mode, third occurrence).
+ *   DEF-2 `layoutJson` moved to `of-type="Multiple"` - the classic form
+ *   designer caps SingleLine.Text at 100 characters, below any real layout.
+ *
+ * 1.1.3 (2026-08-26) - NFR-02 bundle-ceiling fix. `DateField` now edits through
+ *   the Fluent `Input` in native date mode (`type="date"` /
+ *   `type="datetime-local"`), the pattern already shipping in
+ *   `Spaarke.UI.Components/src/components/CreateWorkAssignmentWizard/EnterInfoStep.tsx`,
+ *   replacing `@fluentui/react-datepicker-compat`. `Input` lives inside the
+ *   `@fluentui/react-components` umbrella that `pcf-scripts` externalizes onto
+ *   the platform library, so it costs ZERO bundle bytes; the picker imported
+ *   its deps by their granular package names, none of which match that
+ *   externals regex, so webpack bundled a second private copy of Fluent
+ *   internals the host already serves. bundle.js: 378,457 -> 99,068 bytes
+ *   (-73.8%), now 40% of the 250,000-byte ceiling. Zero `datepicker-compat` /
+ *   `calendar-compat` references remain in the emitted bundle.
+ *   Two earlier attempts on this defect FAILED and must not be retried:
+ *   lazy-loading `DateField` (pcf-scripts emits one chunk, so `import()`
+ *   inlines back and measured LARGER) and a custom webpack `externals` block
+ *   for the granular `@fluentui/*` packages (built clean, passed static symbol
+ *   verification, then crashed on mount with "Minified React error #31" - see
+ *   notes/decisions/033-nfr02-externals-runtime-failure.md).
+ *   The FR-10 renderer contract is unchanged; `DateField` is now a plain
+ *   staged-draft renderer (type stages, Enter/blur commits) rather than the
+ *   commit-on-calendar-selection special case, and all wall-clock <-> `Date`
+ *   conversion goes through LOCAL calendar fields so no value shifts a day.
+ *
+ * 1.1.4 (2026-08-26) - sparkle wired to `sprk_recordsummary` (task 034, FR-17 /
+ *   FR-22 / FR-23). Visibility keys on the attribute EXISTING in entity
+ *   metadata, never on it being populated: an existing-but-empty column still
+ *   shows the sparkle and the popover reads "No summary yet." (a separate
+ *   project populates these columns, so empty IS the expected state at ship
+ *   time). When the attribute is absent the `aiSummary` prop is OMITTED
+ *   entirely - `HeaderToolbar` then renders no sparkle at all, rather than a
+ *   dead one whose popover is permanently empty.
+ *   Two things had to be true for that gate to work:
+ *     (a) the metadata request now names BOTH summary candidates (the
+ *         configured `summaryField` AND the `RECORDSUMMARY_FIELD` default).
+ *         `sprk_recordsummary` is on none of the six rollout entities' FORMS,
+ *         so without this the payload would never contain it, the gate would
+ *         fail on every entity, and the sparkle would be invisible everywhere
+ *         with no error to explain why;
+ *     (b) the column joins the `$select` ONLY after that check passes - a
+ *         `$select` naming a column the entity lacks fails the WHOLE retrieve
+ *         with HTTP 400 and blanks every cell (RS-1, third occurrence).
+ *   The field name is IMPORTED from the shared library, never re-declared - the
+ *   v1.0.20 sparkle regression was two copies of that literal drifting apart -
+ *   and a source-grep test now enforces it.
+ *   Shared-lib additions (additive; zero change for the nine existing callers):
+ *   `AiSummaryPopover` gained an optional `emptyText` plus stable
+ *   `data-testid`s, and `IHeaderToolbarProps.aiSummary` forwards `emptyText`.
+ *   The refresh icon stays UNWIRED (DEF-01) - and is now absent rather than
+ *   inert, since the shared popover offers only copy-to-clipboard.
+ *
+ * 1.1.5 (2026-08-26) - second-UAT defect fixes. Three defects, ONE root cause:
+ *   the CLIENT API attribute payload is narrower than the Web API's, and two
+ *   fields the header depends on are missing from it.
+ *     DEF-3 every DateOnly column rendered `type="datetime-local"`, and
+ *       committing its `yyyy-MM-ddTHH:mm` value into a DateOnly field errored.
+ *       `projectAttribute` accepted only a STRING `Format`; the Client API
+ *       returns a NUMBER, so `format` was always undefined and the resolver's
+ *       `format === 'DateOnly'` test could never be true.
+ *     DEF-4 lookups were not clickable. `RecordHeaderLookupField` computes
+ *       `editable = onSave && hasTargets`, and `Targets` does not appear in
+ *       Microsoft's documented Client-API attribute metadata at all.
+ *   Both are now filled from the LIVE FORM by `applyFormControlHints`:
+ *   `attribute.getFormat()` returns a documented STRING (`"date"` /
+ *   `"datetime"`) and `control.getEntityTypes()` returns the lookup's targets.
+ *   Zero extra round trips, host-context only, and no enum table to guess -
+ *   the metadata `Format` integer is deliberately NOT decoded, because its
+ *   meaning depends on the attribute type (0 is DateOnly for a DateTime but
+ *   Email for a String). Metadata still WINS wherever it supplied a value; the
+ *   form only fills blanks, and the merge never mutates the page-session cache.
+ *   These are the third and fourth instances of FAILURE-MODES G-13 (after
+ *   `AttributeType` and `DisplayName` in v1.1.1).
+ *     DEF-5 `BooleanField`'s Switch is now ALWAYS VISIBLE while editable
+ *       instead of hidden behind a click-to-edit step. An unset flag rendered
+ *       as a grey cell containing an em-dash, which reads as broken rather
+ *       than settable; a Switch's position IS its value, so it has no
+ *       display/edit distinction to make. Draft/commit semantics are unchanged
+ *       (toggle stages, Enter/blur commits, Escape reverts) - only the reveal
+ *       is gone. The FR-10 contract suite gains an explicit `alwaysEditing`
+ *       carve-out relaxing exactly three assertions; the other 88 still apply.
+ *
+ * 1.1.6 (2026-08-26) - third-UAT fixes. v1.1.5's remedy was right and its
+ *   MECHANISM was wrong, so neither hint actually arrived.
+ *     Correction to the v1.1.5 note above: `Format` is not "returned as a
+ *     NUMBER" by the Client API - it is not returned AT ALL. `@types/xrm`
+ *     declares `Metadata.AttributeMetadata` as exactly six members
+ *     (DefaultFormValue, LogicalName, DisplayName, AttributeType,
+ *     EntityLogicalName, OptionSet). No `Format`, no `Targets`. Reading the
+ *     shipped type definitions would have settled this two rounds earlier.
+ *     DEF-6 v1.1.5 hung both hints off the `page.ui.controls` COLLECTION WALK,
+ *       which did not deliver on the live form - so the DateOnly column still
+ *       rendered a datetime picker and the lookup was still inert. They are now
+ *       read per attribute through `Xrm.Page.getAttribute(name).getFormat()`
+ *       and `Xrm.Page.getControl(name).getEntityTypes()`, the accessor R1
+ *       proved in production (form-buffer staging writes every edit through
+ *       it). The walk is kept only for FORM ORDER, which cannot be obtained one
+ *       name at a time. `DateAttributeFormat` is confirmed "date" / "datetime",
+ *       so the v1.1.5 string mapping was already correct.
+ *     DEF-7 edit-mode text was 12px against 14px in read mode - every editor
+ *       passed `size="small"` (Fluent `fontSizeBase200`) while the read cell
+ *       uses `fontSizeBase300`. All five now pass `size="medium"`, matching
+ *       both the read state and the OOB inputs beside the header.
+ *   Added a grouped `console.info` diagnostic at metadata resolve reporting
+ *   what the control actually sees - Xrm.Page availability, walk count, hints
+ *   resolved, and which attributes are NOT on the form. Three rounds of
+ *   defects here were all "a platform surface did not return what we assumed",
+ *   each costing a full build/import/UAT cycle to disprove. `notOnForm` is the
+ *   one to read first: form-buffer staging needs `getAttribute`, so anything
+ *   listed there cannot be edited and will throw "Field not on form" on save.
+ *
+ * 1.1.7 (2026-08-26) - instrumentation only. `RecordHeaderLookupField` had
+ *   THREE silent exits, including a bare `catch {}`, so any click failure was
+ *   indistinguishable from a control that was never wired. Added a per-cell
+ *   decision log (renderer / format / targets / readOnly / editable).
+ *
+ * 1.1.8 (2026-08-26) - the lookup picker actually works. The v1.1.7 diagnostic
+ *   immediately surfaced what the swallow had hidden since task 023:
+ *     TypeError: Cannot read properties of undefined (reading '_clientApiExecutor')
+ *   `openPicker` aliased the method before calling it -
+ *   `const lookupObjects = xrm.Utility.lookupObjects` - which DETACHES it from
+ *   its namespace object. Xrm's internals dereference `this`, so a detached
+ *   call throws on every invocation. The cell rendered its value and fell
+ *   through to the read-only branch, which NAVIGATES to the related record -
+ *   exactly the reported "locked field value linked to the OOB field".
+ *   Now called directly: `await xrm.Utility.lookupObjects({...})`.
+ *   SECOND OCCURRENCE of this trap. R1 shipped four releases of a silent
+ *   no-op on `Xrm.Navigation.navigateTo` for the identical reason, and both
+ *   the project CLAUDE.md and `useRecordHeaderToolbarActions` carry CRITICAL
+ *   comments about it. Now catalogued repo-wide as FAILURE-MODES G-14.
+ *   The unit suite passed throughout because it mocked `lookupObjects` as a
+ *   plain `jest.fn()`, which needs no receiver - the mock was strictly more
+ *   permissive than the thing it replaced, so the one property that mattered
+ *   went untested. The mock is now `this`-sensitive and throws the real
+ *   TypeError when detached; verified by reverting the fix (3 of 19 fail on
+ *   the old code, 19 of 19 pass on the new).
+ *
+ * 1.1.9 (2026-08-27) - editable lookups now render the INLINE type-ahead
+ *   dropdown instead of the platform side pane. v1.1.8's picker worked, but it
+ *   worked by opening `Xrm.Utility.lookupObjects`, whose UX is the side pane -
+ *   and OOB Dataverse renders a lookup as an inline dropdown under the field.
+ *   A header that departs from that on every lookup cell of every entity reads
+ *   as broken rather than as different (UAT round 5).
+ *   Hosting the platform's OWN inline control is NOT possible and this was
+ *   settled empirically, so do not re-investigate: `ComponentFramework.Factory`
+ *   exposes exactly two members (`getPopupService`, `requestRender`) and there
+ *   is no public constructor for the inline lookup - it is a class the form
+ *   runtime owns. `lookupObjects` is callable only because it is a plain
+ *   function opening the ADVANCED DIALOG. So the shape is reproduced with
+ *   supported primitives, and **Advanced** escalates to that real dialog - the
+ *   "proprietary browse + OOB escalation" pattern in MODAL-DECISION-CRITERIA.
+ *   Three moving parts, all in the shared library so every future header
+ *   consumer inherits them:
+ *     - `components/LookupField` gained the OOB affordances (right-side browse
+ *       button, modern thin scrollbar, pinned right-aligned Advanced footer,
+ *       and deliberately NO "+ New") plus a `span` prop so it composes into
+ *       `FieldGrid` without a hand-rolled wrapper div.
+ *     - NEW `RecordHeader/lookupSearch.ts` owns the Dataverse half: target-table
+ *       metadata resolution, the OData search builder, and the SINGLE
+ *       library-wide `Xrm.Utility.lookupObjects` call site (so the G-14
+ *       `this`-binding discipline cannot drift back out of one copy).
+ *     - `RecordHeaderView` picks the surface per cell. Read-only or
+ *       target-less lookups keep the display renderer, which navigates.
+ *   The target's primary NAME attribute is READ from metadata, never inferred:
+ *   `sprk_projecttype_ref` uses `sprk_name` but `sprk_mattertype_ref` uses
+ *   `sprk_mattertypename`. That second `retrieveEntityMetadata` call is
+ *   load-bearing, not overhead - and it is page-session cached.
+ *   Reverses FR-15a / design.md 6.5, updated in the same commit per CLAUDE.md
+ *   6.5 path B rather than diverging silently.
+ *
+ * 1.1.10 (2026-08-27) - the lookup INPUT now looks like an OOB form field:
+ *   no border box, gray fill, brand-blue underline on focus. Side-by-side with
+ *   OOB, v1.1.9's boxed `outline` input was the remaining visible difference.
+ *   No custom CSS - this is Fluent's `appearance="filled-darker"`, and the
+ *   choice was verified against the SHIPPED @fluentui/react-input source
+ *   rather than inferred:
+ *     - `filled-darker` sets backgroundColor colorNeutralBackground3, which is
+ *       the same gray the sibling read cells already use, and the `filled`
+ *       modifier sets borderColor colorTransparentStroke - hence no box;
+ *     - the 2px brand focus underline is an `::after` on the input's BASE
+ *       style, NOT on the outline/underline variants, so it renders for every
+ *       appearance and animates in on :focus-within.
+ *   Added as an opt-in `appearance` prop on the shared component defaulting to
+ *   'outline', so the twelve Create*Wizard consumers are untouched - they sit
+ *   beside plain outline inputs in Code Page forms, where a form-field look
+ *   would make the lookup the odd one out.
+ *   Placeholder now matches OOB verbatim: "Look for Project Type" rather than
+ *   the component's generic "Search project type...".
+ *   NOT done (deliberate, needs a decision): OOB also shows a per-row entity
+ *   icon, a secondary timestamp line, a "Project Types" group header, and
+ *   "+ New". The first three each need data we do not currently fetch; "+ New"
+ *   is excluded by owner decision and stays excluded.
+ *
+ * 1.1.11 (2026-08-27) - two UAT fixes, both in the SHARED component so every
+ *   consumer gets them.
+ *     DEF-6 "the screen jumps when a value is selected." All three transient
+ *       panels below the field - results list, spinner, empty state - were in
+ *       NORMAL FLOW, so opening the dropdown physically pushed every field
+ *       below it down the form and committing a value let the form snap back.
+ *       A prior comment claimed `shadow8` made the list "elevate over the
+ *       following field instead of pushing it down"; that was simply wrong - a
+ *       box-shadow paints over neighbours but does not remove an element from
+ *       flow. Only `position: absolute` does, and that is now what they use
+ *       (anchored to the field, z-index 100 - above sibling fields, far below
+ *       Fluent's ~1000000 portal layers, so it can never cover a modal).
+ *       Second half of the same jump: committing swapped a 32px Input for a
+ *       shorter chip, reflowing the grid row. The chip now pins minHeight to
+ *       32px (`fieldHeights.medium` in @fluentui/react-input) and drops its
+ *       marginTop, so the two footprints are identical.
+ *     DEF-7 "there is no blue line." Fluent draws that 2px brand underline
+ *       from `:focus-within` on the Input root, so it only lights while the
+ *       real <input> holds focus. Clicking the magnifier from a cold field
+ *       left focus on <body>: the list opened with no underline. The browse
+ *       handler now focuses the input explicitly (preventDefault on mousedown
+ *       stops the BUTTON stealing focus, but cannot grant focus the input
+ *       never had), and option rows preventDefault on mousedown too, so focus
+ *       never leaves the input while browsing and the line stays lit through
+ *       the whole interaction - which is what OOB does.
+ *   Both are pinned by tests: jsdom does no layout, but griffel's CSS does
+ *   resolve through getComputedStyle, so `position: absolute` and the 32px
+ *   chip height are directly assertable - and both assertions fail on the old
+ *   code.
+ *   Owner decision recorded: the per-row entity ICON and the target-entity
+ *   DISPLAY-NAME group header are dropped for good - "not critical, cleaner
+ *   without it". Do not add them back.
+ */
+export const CONTROL_VERSION = '1.1.11';

@@ -1,6 +1,7 @@
 using Azure.Security.KeyVault.Secrets;
 using Spaarke.Dataverse;
 using Sprk.Bff.Api.Configuration;
+using Sprk.Bff.Api.Infrastructure.Auth;
 using Sprk.Bff.Api.Infrastructure.Graph;
 using Sprk.Bff.Api.Services.SpeAdmin;
 
@@ -41,13 +42,27 @@ public static class SpeAdminModule
 
         // Azure Key Vault SecretClient — used by SpeAdminGraphService to fetch per-config client secrets.
         // Singleton: SecretClient is thread-safe and designed for reuse.
-        // Uses DefaultAzureCredential (managed identity in Azure, environment variables in dev).
         var keyVaultUri = configuration["SpeAdmin:KeyVaultUri"]
             ?? configuration["KeyVaultUri"]
             ?? throw new InvalidOperationException(
                 "SpeAdmin:KeyVaultUri (or KeyVaultUri) configuration is required for SpeAdminModule.");
 
-        services.AddSingleton(_ => new SecretClient(new Uri(keyVaultUri), new Azure.Identity.DefaultAzureCredential()));
+        // The credential MUST be pinned to the configured UAMI clientId. spaarke-bff-dev carries a
+        // user-assigned identity and NO system-assigned one, so an unpinned DefaultAzureCredential has
+        // no way to choose an identity and fails with "Unable to load the proper Managed Identity" —
+        // precisely the failure ManagedIdentityCredentialFactory was created (2026-05-24) to prevent.
+        //
+        // This was the LAST bare `new DefaultAzureCredential()` in src/. It survived auth-v4's sweep
+        // because auth-v4 scoped SpeAdmin out (ADR-028 E-1) — but E-1 covers the per-customer OWNING-APP
+        // credentials this client goes on to fetch, NOT the BFF's own identity reaching Key Vault in
+        // order to fetch them. Those are different identities at different layers; the exclusion was
+        // applied one layer too wide. Consequence, measured in dev UAT 2026-08-25: every app-only SPE
+        // Admin screen returned 500 (containers, search, recycle bin, security, dashboard sync) while
+        // Container Types — the one screen on the delegated path, which never touches Key Vault —
+        // rendered correctly. That split is the signature of this bug, not of a Graph problem.
+        services.AddSingleton(_ => new SecretClient(
+            new Uri(keyVaultUri),
+            ManagedIdentityCredentialFactory.Create(configuration)));
 
         // Dataverse Web API REST client (pure HTTP, no System.ServiceModel dependency).
         // Singleton: thread-safe (SemaphoreSlim token refresh), reuses HttpClient connections.
@@ -70,6 +85,12 @@ public static class SpeAdminModule
         // Per-request audit logging to sprk_speauditlog Dataverse table.
         // Scoped: captures HttpContext identity for the audit actor per request.
         services.AddScoped<SpeAuditService>();
+
+        // Cross-customer boundary for the shared-BFF deployment model. Registered unconditionally:
+        // SpeAdminTenantScopeFilter resolves it per request, and a missing registration would throw
+        // at request time on every SPE Admin call rather than failing safe. Scoped, because it reads
+        // the caller's identity and must never be shared across requests.
+        services.AddScoped<SpeAdminTenantScope>();
 
         // Background service: syncs dashboard metrics (container counts, storage usage)
         // from Graph API into IDistributedCache on a configurable interval (default 15 min).

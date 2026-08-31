@@ -1,0 +1,101 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="060" project="unified-access-control-r2">
+  <metadata>
+    <title>Consolidate the two POA share clients into one principal-parameterized seam with revoke (FR-28/FR-29 prerequisite)</title>
+    <phase>4 Secure Project, Manage Access, wizard</phase>
+    <gate>startable once 010 (FR-09 idempotent grant/revoke semantics) is merged; independent of Phases 1-3 files</gate>
+    <status>pending</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Security-critical write path (.cs, auth): POA shares ARE record access; two divergent clients merging is exactly where a regression grants or strands access.</rigor-reason>
+    <model-tier>opus</model-tier>
+    <model-tier-reason>Two implementations merging on a security-critical write path (parent directive): behavioural diffs between IDataverseAccessGrantService (systemuser-only, no revoke) and PlaybookSharingService's client (teams + revoke) must be reconciled by judgment, not literal copying.</model-tier-reason>
+    <effort>xhigh</effort>
+    <parallel-group>phase4-wave1</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>May extend src/server/shared/Spaarke.Dataverse/DataverseWebApiService.cs (declared exclusive file) and touches DI registrations consumed across the BFF.</parallel-reason>
+    <deps>010</deps>
+    <tags>bff-api, auth, dataverse, testing</tags>
+    <estimated-effort>3-4 hours</estimated-effort>
+  </metadata>
+
+  <prompt>Consolidate Spaarke's two principalobjectaccess (POA) share clients — IDataverseAccessGrantService (systemuser-only GrantAccess, no revoke) and the duplicate GrantAccess/RevokeAccess client inside PlaybookSharingService (:302-350, teams + revoke) — into ONE seam parameterized by principal kind (systemuser | team), exposing Grant, Revoke and read-principal-access. This is a CLAUDE.md §11 reuse story: consolidate two into one; do NOT build a third client.</prompt>
+  <role>SPAARKE platform developer. Dataverse Web API GrantAccess/RevokeAccess/RetrievePrincipalAccess actions, DI seams, ADR-038-compliant test seams. Follow ADRs strictly.</role>
+  <goal>One POA seam (evolved IDataverseAccessGrantService or a renamed successor — state the naming decision): GrantAccessAsync(entitySet, recordId, principalRef(kind,id), accessMask), RevokeAccessAsync(same key shape), GetPrincipalAccessAsync; PlaybookSharingService's private helpers deleted and delegating to the seam; DirectThreadAccessService untouched in behaviour; all existing consumers pass their current tests unmodified in behaviour.</goal>
+
+  <context>
+    <background>spec.md Placement table row 4 ("Consolidate the two, parameterize the principal — a third POA client; internal shares unrevocable from the UI" is the cost of doing nothing). design.md §3. 06 §F4 documents that the shipping precedent only ever grants — revoke capability must come from the PlaybookSharingService pattern. The consolidated seam is the write path for FR-28 (share-only secure projects) and FR-29 (the "+ User" picker) — and revoke is what makes internal shares manageable from the UI at all.</background>
+    <relevant-files>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Services/Communication/Access/IDataverseAccessGrantService.cs</file>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Services/Ai/PlaybookSharingService.cs</file>
+      <file role="modify">src/server/shared/Spaarke.Dataverse/DataverseWebApiService.cs (if the concrete Grant/Revoke primitives live/land here — extend, never duplicate)</file>
+      <file role="canonical-reference">src/server/api/Sprk.Bff.Api/Services/Ai/PlaybookSharingService.cs:302-350 (the complete Grant+Revoke reference implementation)</file>
+      <file role="modify">tests/unit/Sprk.Bff.Api.Tests/ (seam tests; existing DirectThreadAccessService no-leak negatives must stay green)</file>
+    </relevant-files>
+    <dependencies>
+      <dependency task="010" status="pending">FR-09 idempotency/deactivate-all semantics on the grant lifecycle the seam must not contradict.</dependency>
+    </dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="CLAUDE.md-§11">Consolidation, not addition: the PR must show PlaybookSharingService's private POA helpers DELETED and delegating; a surviving second client is a task failure. Scope: whole task.</constraint>
+    <constraint source="ADR-010">DI minimalism: one registration for the seam; no interface proliferation (the seam interface exists for the ADR-038 mock-boundary reason already documented in IDataverseAccessGrantService.cs:9-12). Scope: DI wiring.</constraint>
+    <constraint source="project">Revoke MUST use the same key shape (entitySet + recordId + principal) grant writes — the A-13/FR-16 matcher lesson; scope: seam method signatures.</constraint>
+    <constraint source="NFR-01">Grant/Revoke failures propagate as errors (EnsureSuccessStatusCode or equivalent) — no silent catch-and-continue on the write path. Scope: seam implementation.</constraint>
+    <constraint source="CLAUDE.md-§10">Placement justification in PR citing .claude/constraints/bff-extensions.md (this consolidation is the worked example); publish size ≤ 60 MB reported. Scope: PR description.</constraint>
+    <constraint source="ADR-038">Update tests in tests/unit/Sprk.Bff.Api.Tests; the no-leak negative tests (a third user must never be granted) are MAINTAIN-class and must survive the refactor. Scope: test outputs.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>POA sharing seam</topic>
+    <files>
+      <file>.claude/adr/ADR-010-di-minimalism.md</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+      <file>docs/adr/ADR-038-testing-strategy.md</file>
+      <file>projects/unified-access-control-r2/notes/investigation/06-adversarial-critique.md</file>
+      <file>projects/unified-access-control-r2/spec.md</file>
+    </files>
+    <patterns>
+      <pattern name="web-api-client" location=".claude/patterns/dataverse/web-api-client.md">Dataverse action-call conventions.</pattern>
+    </patterns>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="0">Context + rigor declaration.</step>
+    <step order="1">Diff the two implementations precisely: payload shapes, AccessMask mapping, error handling, entity-set handling. Record the diff table in notes BEFORE writing code (Empirical-Reproduction-FIRST spirit, §F.3).</step>
+    <step order="2">Design the consolidated signature (principal kind enum: SystemUser | Team; extension point documented for future kinds, none added now). State the naming/placement decision.</step>
+    <step order="3">Implement; migrate PlaybookSharingService to delegate; keep DirectThreadAccessService's observable behaviour identical.</step>
+    <step order="4">Tests: grant systemuser, grant team, revoke each, revoke-without-grant is a no-op-or-explicit-error per Dataverse semantics (pin whichever is real), error propagation, no-leak negatives green.</step>
+    <step order="5">Build + full test suite green; publish size reported.</step>
+    <step order="6">Update TASK-INDEX.md; write the diff + decisions to projects/unified-access-control-r2/notes/phase4-poa-consolidation.md.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If the two implementations disagree on AccessMask semantics (e.g. rights-mask values that would change what an existing consumer grants), STOP and escalate the reconciliation per CLAUDE.md §6 — do not silently pick one.</trigger>
+  </escalation>
+
+  <justification>
+    <existing>IDataverseAccessGrantService.cs (Services/Communication/Access) and PlaybookSharingService.cs:302-350 — cited in spec.md Existing Patterns; both grep-verified in this worktree.</existing>
+    <extension>Yes — this task IS the extension/consolidation; zero net-new client surface (one seam replaces two).</extension>
+    <cost-of-doing-nothing>FR-29's "+ User" revoke has no server capability (IDataverseAccessGrantService has no revoke): internal shares become permanently unrevocable from the UI, and FR-28's share-only secure projects cannot be unshared — a concrete grant-lifecycle failure.</cost-of-doing-nothing>
+  </justification>
+
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Communication/Access/ (consolidated seam)</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Ai/PlaybookSharingService.cs (delegating)</output>
+    <output type="test">tests/unit/Sprk.Bff.Api.Tests/ (seam tests)</output>
+    <output type="docs">projects/unified-access-control-r2/notes/phase4-poa-consolidation.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">One POA client remains: grep for GrantAccess/RevokeAccess payload construction finds exactly one implementation site (plus the Dataverse-service primitive if placed there).</criterion>
+    <criterion testable="true">Grant then Revoke for a systemuser principal round-trips: after revoke, GetPrincipalAccessAsync reports no access for that principal.</criterion>
+    <criterion testable="true">Grant/Revoke for a team principal behaves identically through the same methods (parameterized, not overloaded copies).</criterion>
+    <criterion testable="true">Negative: a failed Dataverse action call surfaces as an exception/error result — no silent success.</criterion>
+    <criterion testable="true">Existing playbook-sharing and direct-thread-access test suites pass with unchanged expectations.</criterion>
+    <criterion testable="true">Build green; publish size ≤ 60 MB reported with delta.</criterion>
+  </acceptance-criteria>
+
+  <notes>spec.md Placement table; design.md §3. Consumed by 061 (secure provisioning) and 063 (share endpoints).</notes>
+
+  <execution><skill>.claude/skills/task-execute/SKILL.md</skill></execution>
+</task>

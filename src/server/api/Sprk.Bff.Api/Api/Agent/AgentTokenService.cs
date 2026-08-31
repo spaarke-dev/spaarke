@@ -30,7 +30,22 @@ public sealed class AgentTokenService
     private const string AgentDataverseTokenResource = "agent-dataverse-token";
     private const int CacheVersion = 1;
 
-    private readonly IConfidentialClientApplication _cca;
+    /// <summary>
+    /// Ordered credential provider (auth-v4 task 021), injected as the CONCRETE type per ADR-010 —
+    /// only <c>DataverseAccessDataSource</c>, in the base layer, needs the interface.
+    ///
+    /// <para><b>Replaces this type's own static confidential-client cache</b> (task 022). That cache
+    /// was one of three keyed on the same <c>(tenant|client|fingerprint)</c>, so one process could hold
+    /// three confidential clients — and three OBO token caches — for the SAME identity. ADR-028 A4
+    /// forbids exactly that per-call-site duplication; task 011 booked it as a time-boxed exception
+    /// that <b>expires here</b>. The provider now owns the one cache, and its per-key build counter is
+    /// where the sharing seam tests moved to.</para>
+    ///
+    /// <para>Null only under direct construction outside the BFF container, in which case every
+    /// exchange fails closed with a configuration error rather than silently acquiring nothing.</para>
+    /// </summary>
+    private readonly OrderedCredentialClientProvider? _confidentialClients;
+
     private readonly ITenantCache _cache;
     private readonly ILogger<AgentTokenService> _logger;
     private readonly AgentTokenOptions _options;
@@ -38,23 +53,52 @@ public sealed class AgentTokenService
     public AgentTokenService(
         ITenantCache cache,
         IOptions<AgentTokenOptions> options,
-        ILogger<AgentTokenService> logger)
+        ILogger<AgentTokenService> logger,
+        OrderedCredentialClientProvider? confidentialClients = null)
     {
         _cache = cache ?? throw new ArgumentNullException(nameof(cache));
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
         _options = options?.Value ?? throw new ArgumentNullException(nameof(options));
+        _confidentialClients = confidentialClients;
 
-        // Build the MSAL confidential client for OBO exchanges.
-        // The BFF app registration is the "middle tier" that exchanges the agent token.
-        _cca = ConfidentialClientApplicationBuilder
-            .Create(_options.ClientId)
-            .WithClientSecret(_options.ClientSecret)
-            .WithAuthority($"https://login.microsoftonline.com/{_options.TenantId}")
-            .Build();
-
+        // No confidential client is built here any more. The provider's contract is async (selection
+        // PROVES a credential before binding it) and a constructor cannot await; the client is fetched
+        // at the moment of each exchange, where the provider's cache makes it a dictionary lookup.
+        //
+        // AgentToken:ClientSecret is deliberately NOT read. See AcquireTokenAsync's remarks and
+        // IdentityConfigurationValidator rule 5 for the reconciliation this required.
         _logger.LogInformation(
             "[AGENT-TOKEN] Initialized: TenantId length={TenantLen}, ClientId length={ClientLen}, AgentAppId length={AgentLen}",
             _options.TenantId.Length, _options.ClientId.Length, _options.AgentAppId.Length);
+    }
+
+    /// <summary>
+    /// Resolves the BFF's confidential client for the agent OBO exchange.
+    ///
+    /// <para><b>The <c>AgentToken:ClientSecret</c> reconciliation (task 022).</b> This service used to
+    /// present <c>AgentToken:ClientSecret</c> specifically, while the provider resolves the transitional
+    /// secret as <c>AzureAd:ClientSecret</c> → <c>API_CLIENT_SECRET</c> → <c>AZURE_CLIENT_SECRET</c>.
+    /// Folding one into the other silently could have changed which secret the agent path presents, so
+    /// it was decided explicitly rather than defaulted: verified on <c>spaarke-bff-dev</c> on
+    /// 2026-08-21 that <c>AgentToken__ClientSecret</c>, <c>API_CLIENT_SECRET</c>,
+    /// <c>AzureAd__ClientSecret</c> and <c>Dataverse__ClientSecret</c> all hold the SAME value —
+    /// <c>BFF-API-ClientSecret</c> — and that <c>AgentToken__ClientId</c> is the BFF app registration.
+    /// <c>Reconcile-DemoEnvironment.ps1:76</c> maps the demo environment the same way.
+    ///
+    /// <para>Because "verified today" is not "true forever", divergence is not left to be discovered as
+    /// an opaque <c>AADSTS7000215</c> on the agent endpoint: <c>IdentityConfigurationValidator</c>
+    /// rule 5 compares the two at startup by fingerprint and reports a mismatch at error level.</para>
+    /// </summary>
+    private Task<IConfidentialClientApplication> GetConfidentialClientAsync(CancellationToken ct)
+    {
+        if (_confidentialClients is null)
+        {
+            throw new InvalidOperationException(
+                "AgentTokenService requires an OrderedCredentialClientProvider for the OBO exchange. "
+                + "Inside the BFF it is registered by AuthorizationModule.AddCredentialSelection.");
+        }
+
+        return _confidentialClients.GetClientAsync(_options.TenantId, _options.ClientId, ct);
     }
 
     /// <summary>
@@ -89,7 +133,8 @@ public sealed class AgentTokenService
 
         try
         {
-            var result = await _cca.AcquireTokenOnBehalfOf(
+            var cca = await GetConfidentialClientAsync(ct).ConfigureAwait(false);
+            var result = await cca.AcquireTokenOnBehalfOf(
                 _options.GraphScopes,
                 new UserAssertion(userToken)
             ).ExecuteAsync(ct);
@@ -159,7 +204,8 @@ public sealed class AgentTokenService
 
         try
         {
-            var result = await _cca.AcquireTokenOnBehalfOf(
+            var cca = await GetConfidentialClientAsync(ct).ConfigureAwait(false);
+            var result = await cca.AcquireTokenOnBehalfOf(
                 new[] { dataverseScope },
                 new UserAssertion(userToken)
             ).ExecuteAsync(ct);

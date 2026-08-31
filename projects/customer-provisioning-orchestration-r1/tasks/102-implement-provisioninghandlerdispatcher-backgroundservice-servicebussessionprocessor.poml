@@ -1,0 +1,124 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="102" project="customer-provisioning-orchestration-r1">
+  <metadata>
+    <title>Implement ProvisioningHandlerDispatcher BackgroundService (ServiceBusSessionProcessor) in .Worker</title>
+    <phase>C'' Wave G-1 -- Foundation</phase>
+    <gate>blocked</gate>
+    <status>completed</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Load-bearing execution-engine class per task instructions; modifies .cs in the L2 Worker project; concurrency-critical (session dispatch invariant). FULL per root CLAUDE.md §8 + this project's l2-controlplane rigor default.</rigor-reason>
+    <model-tier>opus</model-tier>
+    <model-tier-reason>Named explicitly in the parent task instructions as high-blast-radius (dispatcher class) -- Opus tier per root CLAUDE.md §8.5 escalation list. A single race condition here corrupts ProvisioningRun state for every customer.</model-tier-reason>
+    <effort>xhigh</effort>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <deps>100, 101</deps>
+    <tags>l2-controlplane, dispatcher, job-handler, testing</tags>
+    <estimated-effort>10-16 hours</estimated-effort>
+  </metadata>
+
+  <prompt>Implement Sprk.Provisioning.ControlPlane.Worker/Dispatch/ProvisioningHandlerDispatcher.cs per DS-2 §2.2-2.7 exactly: a BackgroundService hosting a ServiceBusSessionProcessor (CreateSessionProcessor, NOT CreateProcessor) against the sprk-provisioning-jobs queue, with MaxConcurrentSessions=DispatcherOptions.MaxConcurrentCustomers (default 4), MaxConcurrentCallsPerSession=1 (HARD-CODED, not a config value), MaxAutoLockRenewalDuration=DispatcherOptions.MaxHandlerDuration (default 01:05:00), PrefetchCount=0. Implement the 8-step message-handling flow from DS-2 §2.5 verbatim: deserialize envelope -&gt; resolve keyed handler -&gt; Level-2 idempotency gate -&gt; load run (OrphanRun / terminal-status short-circuit) -&gt; invoke handler (never trust it not to throw) -&gt; re-read run + apply outcome via IHandlerOutcomeApplier -&gt; mark processed + release lock -&gt; complete message for both Success and applied-Failure (Abandon reserved for infra faults at steps 3/6 only).</prompt>
+
+  <role>SPAARKE platform developer. Expert in Azure.Messaging.ServiceBus session processors, .NET keyed DI, BackgroundService lifecycle, and the BFF's ServiceBusJobProcessor pattern this class mirrors-and-diverges-from.</role>
+
+  <goal>ProvisioningHandlerDispatcher.cs exists as a BackgroundService in .Worker, registered via AddHostedService, using CreateSessionProcessor with MaxConcurrentCallsPerSession hard-coded to 1 (protected by a forcing-function unit test per DS-2b R3), implementing the full 8-step dispatch flow with the exact dead-letter-reason table from DS-2 §2.8 (InvalidFormat / NoHandler / HandlerResolutionFailed / OrphanRun / OutcomeApplyFailed). DispatchCoreAsync is a pure, unit-testable decision function (no ServiceBusReceivedMessage dependency) per DS-2 §2.2. Shutdown mirrors the BFF's defensive StopProcessingAsync + DisposeAsync pattern including ObjectDisposedException tolerance.</goal>
+
+  <context>
+    <background>DS-2 (owner-locked design) specifies the L2 dispatcher as a mirror-and-diverge of the BFF's ServiceBusJobProcessor.cs (265 lines, read in full by DS-2 §1): same BackgroundService+processor+events shape, but session-aware (not the BFF's plain processor), keyed-DI handler resolution (not enumerate-and-match -- constructing 20 handler dependency graphs per message is wasteful and a single broken graph would poison every handler's dispatch), 65-min lock renewal (handlers run 10-60 min per DS-2b §1.2), and retry authority in §4C RollbackTransitions rather than an SB Abandon-loop (L2 has an explicit rollback taxonomy the BFF does not). DS-2b's adversarial re-examination of 5 alternatives (ETag-retry, conditional-patch, TransactionalBatch, Redis lock, event-sourcing) confirmed session-serialization is the best-practice answer: it costs ~1h on a ~27h E2E process (dominated by the 24h SPE gate) and eliminates, by transport-level construction, the systematic ETag-conflict class every alternative would otherwise have to survive.</background>
+    <relevant-files>
+      <file role="new">src/server/services/Sprk.Provisioning.ControlPlane.Worker/Dispatch/ProvisioningHandlerDispatcher.cs</file>
+      <file role="new">src/server/services/Sprk.Provisioning.ControlPlane.Core/Dispatch/DispatcherOptions.cs</file>
+      <file role="new">src/server/services/Sprk.Provisioning.ControlPlane.Core/Dispatch/DispatchDecision.cs</file>
+      <file role="new">src/server/services/Sprk.Provisioning.ControlPlane.Core/Dispatch/DispatchModule.cs</file>
+      <file role="modify">src/server/services/Sprk.Provisioning.ControlPlane.Worker/Program.cs</file>
+      <file role="canonical-reference">src/server/api/Sprk.Bff.Api/Services/Jobs/ServiceBusJobProcessor.cs</file>
+      <file role="canonical-reference">src/server/services/Sprk.Provisioning.ControlPlane.Core/Enqueue/ServiceBusHandlerEnqueuer.cs</file>
+      <file role="canonical-reference">src/server/services/Sprk.Provisioning.ControlPlane.Core/Reconciler/StateReconcilerService.cs</file>
+    </relevant-files>
+    <dependencies>
+      <dependency task="100" status="pending">.Worker project must exist to host the dispatcher</dependency>
+      <dependency task="101" status="pending">.Worker App Service resource must exist as the deploy target for eventual live testing</dependency>
+      <dependency task="103" status="pending">HandlerIds catalog + keyed registrations must exist for GetKeyedService&lt;IProvisioningHandler&gt; resolution to succeed -- author 102 and 103 together or sequence 103 first if a strict build order is preferred</dependency>
+    </dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="spec.md FR-22">L2 handler execution is session-serialized per customer: ServiceBusSessionProcessor with SessionId=CustomerId, MaxConcurrentCallsPerSession=1 is a HARD-CODED correctness invariant (not a tunable) protecting the 39 ETag-guarded ReplaceRunAsync call sites from cross-handler races (DS-2b Sec.0-1). Retry authority is Sec.4C RollbackTransitions, never an SB Abandon-loop.</constraint>
+    <constraint source="design.md §4.2b">The dispatcher owns dequeue + handler invocation + outcome-apply wiring; it MUST NOT compute DAG ready-sets itself. StateReconcilerService/DagAdvancer remain the single source of truth for ready-set computation (DS-2 Sec.5) -- the dispatcher calls IHandlerOutcomeApplier.ApplyHandlerOutcomeAsync and nothing else.</constraint>
+    <constraint source="DS-2 §2.6">App Service graceful shutdown (~30s, extendable via WEBSITES_CONTAINER_STOP_TIME_LIMIT) can NEVER drain a 30-60 min handler -- the dispatcher MUST NOT pretend otherwise. An interrupted handler's message lock expires, SB redelivers, Level-2 lock has also expired, re-invoke happens, L3 CompletedPhases dedup no-ops the completed portion. Recommend WEBSITES_CONTAINER_STOP_TIME_LIMIT=00:05:00 (documented for the Bicep task, not set here).</constraint>
+    <constraint source="DS-2 §2.8">Handler DOMAIN failures never dead-letter -- they land as §4C Cosmos transitions via IHandlerOutcomeApplier with full operator visibility. Only 5 reasons dead-letter: InvalidFormat, NoHandler, HandlerResolutionFailed, OrphanRun, OutcomeApplyFailed (MaxDeliveryCount exceeded).</constraint>
+    <constraint source="CLAUDE.md §11">Three-question component-justification gate applies to any NEW class/interface/Bicep resource/script this task introduces. Existing/Extension/Cost-of-doing-nothing are pre-answered in &lt;notes&gt; below; cite them verbatim in the PR description per root CLAUDE.md §11 enforcement table.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>ProvisioningHandlerDispatcher BackgroundService</topic>
+    <files>
+      <file>projects/customer-provisioning-orchestration-r1/spec.md</file>
+      <file>projects/customer-provisioning-orchestration-r1/design.md</file>
+      <file>projects/customer-provisioning-orchestration-r1/CLAUDE.md</file>
+      <file>projects/customer-provisioning-orchestration-r1/notes/design-study-ds4-handler-audit.md</file>
+      <file>projects/customer-provisioning-orchestration-r1/notes/design-study-ds2-dispatcher-design.md</file>
+      <file>projects/customer-provisioning-orchestration-r1/notes/design-study-ds2b-concurrency-safety-deep-dive.md</file>
+      <file>.claude/adr/ADR-036-background-job-infrastructure.md</file>
+      <file>docs/standards/TEST-ARCHITECTURE.md</file>
+    </files>
+    <patterns>
+      <pattern name="Session processor mirror-and-diverge" location="src/server/api/Sprk.Bff.Api/Services/Jobs/ServiceBusJobProcessor.cs">Same BackgroundService+processor+events shape; diverges on CreateSessionProcessor, keyed-DI resolution, 65min lock renewal, and §4C retry authority instead of SB Abandon-loop (DS-2 §1.5 table).</pattern>
+      <pattern name="3-level idempotency" location="src/server/api/Sprk.Bff.Api/Services/Jobs/IdempotencyService.cs">L1 SB MessageId dedup (enqueuer-side, exists) + L2 Redis lock (this task's DispatchIdempotencyService, task 105) + L3 CompletedPhases scan (exists per handler).</pattern>
+    </patterns>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="0" name="Rigor + load">Emit RIGOR LEVEL (FULL). Read ServiceBusJobProcessor.cs in full, then DS-2 §2 in full.</step>
+    <step order="1" name="DispatcherOptions">Author DispatcherOptions.cs: Enabled(true), MaxConcurrentCustomers(4), MaxHandlerDuration(01:05:00), SessionIdleTimeout(00:00:30), MaxDeliveryCount(5) -- bound from config section 'Dispatcher'.</step>
+    <step order="2" name="DispatchDecision">Author the DispatchDecision record: Complete | DeadLetter(reason, description) | Abandon.</step>
+    <step order="3" name="Dispatcher class">Author ProvisioningHandlerDispatcher : BackgroundService per DS-2 §2.2 constructor shape (ServiceBusClient, IServiceScopeFactory, IOptions&lt;DispatcherOptions&gt;, IOptions&lt;ServiceBusModuleOptions&gt;, TimeProvider, ILogger). ExecuteAsync creates the session processor with the exact options block from DS-2 §2.2, wires OnSessionMessageAsync + OnErrorAsync, StartProcessingAsync, then parks.</step>
+    <step order="4" name="DispatchCoreAsync">Implement the pure decision function per DS-2 §2.5's 8-step flow, operating on (HandlerEnvelope envelope, int deliveryCount, IServiceProvider scopedProvider, CancellationToken) -&gt; Task&lt;DispatchDecision&gt;, with NO ServiceBusReceivedMessage dependency (event wrapper translates the decision into Complete/DeadLetter/Abandon calls).</step>
+    <step order="5" name="Wire outcome applier">Consume IHandlerOutcomeApplier (task 104's extraction) from the per-message scope for step 6 of the flow; do not re-implement §4C logic in the dispatcher.</step>
+    <step order="6" name="Shutdown">Override StopAsync mirroring ServiceBusJobProcessor.cs's defensive finally block (StopProcessingAsync + DisposeAsync with ObjectDisposedException tolerance).</step>
+    <step order="7" name="Register">AddHostedService&lt;ProvisioningHandlerDispatcher&gt; in .Worker Program.cs via a DispatchModule.AddDispatchModule(services, config) extension per ADR-010.</step>
+    <step order="8" name="Forcing-function test">Author a unit test asserting the constructed ServiceBusSessionProcessorOptions.MaxConcurrentCallsPerSession == 1 -- DS-2b R3: protect this invariant from config drift, it is correctness not tuning.</step>
+    <step order="9" name="Build + verify">dotnet build 0 errors; dotnet format; zero analyzer warnings.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If DispatchCoreAsync's Cosmos re-read at step 6 (post-handler-invoke, fresh ETag) shows the outcome applier returning Conflict repeatedly under a single-writer session (which should be structurally impossible per DS-2b's whole thesis), STOP and escalate per CLAUDE.md §6 -- this would indicate a non-handler writer (endpoint, QuarantineClearService, reconciler) is racing the dispatcher outside the documented R1 rider (DS-2b §9), which is a design violation, not a code bug to patch around.</trigger>
+  </escalation>
+
+  <tools>
+    <tool name="dotnet">build/test the .Worker + .Core projects</tool>
+    <tool name="terminal">shell commands</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/server/services/Sprk.Provisioning.ControlPlane.Worker/Dispatch/ProvisioningHandlerDispatcher.cs</output>
+    <output type="code">src/server/services/Sprk.Provisioning.ControlPlane.Core/Dispatch/DispatcherOptions.cs</output>
+    <output type="code">src/server/services/Sprk.Provisioning.ControlPlane.Core/Dispatch/DispatchDecision.cs</output>
+    <output type="code">src/server/services/Sprk.Provisioning.ControlPlane.Core/Dispatch/DispatchModule.cs</output>
+    <output type="test">src/server/services/Sprk.Provisioning.ControlPlane.Tests/Dispatch/ProvisioningHandlerDispatcherInvariantTests.cs</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">ProvisioningHandlerDispatcher is registered via AddHostedService in .Worker Program.cs; hosted service starts on app start, stops cleanly on shutdown (integration smoke).</criterion>
+    <criterion testable="true">Unit test asserts the constructed ServiceBusSessionProcessorOptions has MaxConcurrentCallsPerSession == 1 -- test FAILS if a future edit changes this to a config-bound value (DS-2b R3 forcing function).</criterion>
+    <criterion testable="true">DispatchCoreAsync given bad-JSON input returns DeadLetter(InvalidFormat); given unknown HandlerId returns DeadLetter(NoHandler); given a processed-marker hit returns Complete-without-invoke; given lock-held returns Abandon; given OrphanRun (run doc absent) returns DeadLetter(OrphanRun); given a terminal-status run (Cancelled/Quarantined/Completed) returns Complete-without-invoke.</criterion>
+    <criterion testable="true">grep 'CreateSessionProcessor' in ProvisioningHandlerDispatcher.cs returns exactly 1 match; grep 'CreateProcessor(' (non-session) returns 0 matches.</criterion>
+    <criterion testable="true">dotnet build src/server/services/Sprk.Provisioning.ControlPlane.Worker/ exits 0; dotnet test (Dispatch/* tests) exits 0.</criterion>
+  </acceptance-criteria>
+
+  <notes>Justification (CLAUDE.md §11): Existing -- BFF's ServiceBusJobProcessor is BFF-scoped (ADR-010 forbids L2 handlers registering in BFF) and is NOT session-aware, so it cannot be reused as-is. Extension -- cannot extend a non-session processor into a session processor without rewriting its core loop; DS-2 §1.5 documents every divergence point explicitly. Cost-of-doing-nothing -- without this class, zero handlers ever execute end-to-end; this is THE load-bearing gap FR-18/SC#5 identifies. Owner sign-off item (DS-2 §7.1, reaffirmed DS-2b §9): session-serialized execution is adopted as designed.
+
+**COMPLETION NOTES (2026-08-19)**: All 5 acceptance criteria satisfied. Freeze test 1 (MaxConcurrentCallsPerSession == 1) + freeze test 2 (zero .Core/.Worker assembly reference to Sprk.Bff.Api) both pass. Full L2 suite = 740/740 passing. dotnet build 0 warnings / 0 errors. dotnet format compliance on all task-102 files.
+
+Files authored: .Core/Dispatch/{DispatcherOptions, DispatchDecision, DispatchModule, IDispatchIdempotencyService, NoOpDispatchIdempotencyService}.cs (5 files) + .Worker/Dispatch/ProvisioningHandlerDispatcher.cs (748 lines including doc comments; ~450 code LOC per DS-2 §2 estimate) + .Tests/Dispatch/ProvisioningHandlerDispatcherInvariantTests.cs (4 tests). Modified: .Worker/Program.cs (added AddDispatchModule + AddHostedService lines with full Placement Justification comment); .Core.csproj (added Microsoft.Extensions.Caching.StackExchangeRedis 10.0.9 — Wave G-1 sole new NuGet); .Worker.csproj (added InternalsVisibleTo for the freeze-test's internal access to BuildSessionProcessorOptions helper).
+
+Necessary implication added beyond strict POML output list: IDispatchIdempotencyService + NoOpDispatchIdempotencyService (in .Core/Dispatch/) — required to satisfy acceptance criterion 3 (lock-held → Abandon; processed-marker hit → Complete-without-invoke). Task 105 will (a) add the Redis-backed DispatchIdempotencyService concrete impl using the transitive IDistributedCache and (b) swap the DI registration in DispatchModule. The dispatcher's consumption of the seam is unchanged across that swap.
+
+Design divergences from POML step 3 (DS-2 §2.2 ctor shape) accommodated to project boundaries: DispatchModule.cs (in .Core) registers ONLY the shared-infra pieces (DispatcherOptions + IDispatchIdempotencyService); the AddHostedService<ProvisioningHandlerDispatcher>() line moved to .Worker/Program.cs directly next to the AddDispatchModule call — because .Core cannot compile-reference the .Worker-hosted dispatcher class. Exact parity with how CrashRecoveryStartupService (in .Core/Reconciler/) is registered from Program.cs today; NOT a weakening of ADR-010's god-class-ratchet posture.
+
+Quality gates (Step 9.5): code-review PASS (0 critical, 0 warnings, 3 non-blocking style suggestions — S1 extract 8-step sub-steps, S2 use UnreachableException, S3 CustomerId log hashing consistency); adr-check PASS (17 ADRs reviewed — 13 N/A, 4 actively verified; 0 violations, 0 warnings). BFF Hygiene NOT triggered (files in L2, not BFF). CLAUDE.md §11 justification concrete.</notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+  </execution>
+</task>

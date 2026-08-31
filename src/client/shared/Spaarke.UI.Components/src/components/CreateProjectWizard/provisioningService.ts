@@ -3,12 +3,15 @@
  * BFF API client for Secure Project infrastructure provisioning.
  *
  * Calls POST /api/v1/external-access/provision-project to orchestrate:
- *   - Child Business Unit creation (SP-{ProjectRef})
+ *   - Assignment of the project to the canonical Secure Project business unit's owner team
  *   - SPE container provisioning
- *   - External Access Account creation
- *   - Storage of all references on the project record
+ *   - Recording the container on the project record
  *
- * Supports umbrella BU selection for multi-project organisations.
+ * CONTRACT CHANGED 2026-08-25 (BFF task 021). The backend no longer creates a business unit per
+ * project, no longer creates an External Access Account, and no longer supports umbrella BU
+ * selection: there is ONE canonical `Secure Project` business unit, resolved by name from server
+ * configuration. `umbrellaBuId`, `accountId`, `accountName` and `wasUmbrellaBu` are gone; the owner
+ * team the project now belongs to is reported instead.
  *
  * Dependencies are injected as parameters (no solution-specific imports):
  *   - authenticatedFetch: MSAL-backed fetch function
@@ -25,24 +28,22 @@ export interface IProvisionProjectRequest {
   /** The sprk_project GUID that has just been created with sprk_issecure = true. */
   projectId: string;
   /**
-   * Short project reference code used to name the BU (e.g. "P-2024-0042").
-   * Required unless umbrellaBuId is provided.
+   * Optional. Short project reference code (e.g. "P-2024-0042"), used only as a fallback for the
+   * SPE container's display name when the project record has no name. It no longer names a business
+   * unit, so it is no longer required.
    */
   projectRef?: string;
-  /**
-   * Optional. When provided, reuses this existing Business Unit instead of
-   * creating a new one (umbrella BU scenario).
-   */
-  umbrellaBuId?: string;
 }
 
 export interface IProvisionProjectResponse {
+  /** The canonical Secure Project business unit — resolved by name, not created. */
   businessUnitId: string;
   businessUnitName: string;
+  /** The business unit's default owner team, which now owns the project. */
+  ownerTeamId: string;
+  ownerTeamName: string;
+  /** The project's own SPE container, recorded on sprk_containerid. */
   speContainerId: string;
-  accountId: string;
-  accountName: string;
-  wasUmbrellaBu: boolean;
 }
 
 export interface IProvisionProjectResult {
@@ -55,12 +56,18 @@ export interface IProvisionProjectResult {
 // Provisioning step progress
 // ---------------------------------------------------------------------------
 
-/** Ordered steps shown in the provisioning progress UI. */
+/**
+ * Ordered steps shown in the provisioning progress UI.
+ *
+ * Mirrors what the backend actually does, in order. The retired 'bu' and 'account' steps described
+ * creating a business unit and an External Access Account per project; neither happens any more.
+ * Ownership is listed first because it is done first \u2014 it is the security step, so a container
+ * failure must not leave the record owned outside the Secure Project business unit.
+ */
 export const PROVISIONING_STEPS = [
-  { key: 'bu', label: 'Creating secure Business Unit\u2026' },
+  { key: 'ownership', label: 'Securing project ownership\u2026' },
   { key: 'container', label: 'Provisioning document container\u2026' },
-  { key: 'account', label: 'Creating external access account\u2026' },
-  { key: 'storing', label: 'Storing project references\u2026' },
+  { key: 'storing', label: 'Recording the container on the project\u2026' },
 ] as const;
 
 export type ProvisioningStepKey = (typeof PROVISIONING_STEPS)[number]['key'];
@@ -115,9 +122,9 @@ export async function provisionSecureProject(
 
     console.info('[ProvisioningService] Provisioning complete:', {
       buId: data.businessUnitId,
+      buName: data.businessUnitName,
+      ownerTeamId: data.ownerTeamId,
       containerId: data.speContainerId,
-      accountId: data.accountId,
-      wasUmbrellaBu: data.wasUmbrellaBu,
     });
 
     return { success: true, data };

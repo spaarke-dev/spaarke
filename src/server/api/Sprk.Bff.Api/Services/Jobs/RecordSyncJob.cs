@@ -695,9 +695,11 @@ public class RecordSyncJob : BackgroundService
 
     private SearchClient BuildSearchClient()
     {
-        var endpoint = new Uri(_options.AiSearchEndpoint);
-        var credential = new AzureKeyCredential(_options.AiSearchApiKey);
-        return new SearchClient(endpoint, IndexName, credential);
+        // auth-v4 task 053 (FR-E4): an absent RecordSync:AiSearchApiKey selects Entra (managed
+        // identity) through the shared factory rather than producing an empty-key credential.
+        return Sprk.Bff.Api.Infrastructure.Auth.SearchClientFactory.CreateSearchClient(
+            new Uri(_options.AiSearchEndpoint), IndexName, _options.AiSearchApiKey,
+            _configuration, _credential);
     }
 
     private static string GetString(JsonElement record, string field)

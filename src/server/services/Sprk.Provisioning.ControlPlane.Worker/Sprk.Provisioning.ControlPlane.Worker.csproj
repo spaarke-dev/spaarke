@@ -1,0 +1,71 @@
+<Project Sdk="Microsoft.NET.Sdk.Web">
+
+  <!--
+    Sprk.Provisioning.ControlPlane.Worker — background-processing host for
+    the L2 control plane. Peer service to Sprk.Bff.Api, NOT a BFF extension
+    (ADR-010 DI minimalism + project MUST rule).
+
+    CREATED BY (task 100, DS-3 § 3 Option 2 owner-lock, 2026-08-19):
+      New project. Hosts the 20-handler fleet DI + reconciler + crash-recovery
+      + customer-run guard + rollback module + Cosmos + Service Bus + OTel.
+      The dispatcher itself (session-serialized ServiceBusSessionProcessor
+      that drains the fleet-scoped queue and invokes handlers by HandlerId)
+      is authored by task 102 — task 100 lays down the host so task 102 is
+      born into its correct home and is never written twice.
+
+    RUNTIME TOPOLOGY (DS-3 § 3, design.md § 4.2a-b):
+      Deployed as its own App Service on the SAME P1v3 plan as the .Api
+      site (shared plan → $0 marginal Azure cost). NO staging slot — deploy
+      = stop → zip-deploy → start; crash machinery (I6 + SB redelivery +
+      L3 dedup + § 4C) is the resume path, now exercised on a chosen
+      schedule instead of on every .Api deploy. Optional refinement in a
+      later task: POST /admin/drain endpoint that calls StopProcessingAsync
+      on the dispatcher and lets the current handler finish before the
+      operator deploys.
+
+    SURFACE (task 100 scope, minimal):
+      - GET /healthz — anonymous, returns 200 "ok" for App Service warm-up
+                       + operator availability probe.
+      - GET /ping    — anonymous, returns 200 "ok" (parity with .Api's
+                       smoke-test endpoint so operator runbooks work
+                       against both hosts).
+      NO Auth, NO Swagger, NO REST endpoints, NO audit middleware. The
+      Worker never receives operator-authored HTTP requests — it drains the
+      Service Bus fleet queue.
+
+    - TargetFramework net10.0 pinned via Directory.Build.props inheritance.
+    - TreatWarningsAsErrors=true + Nullable=enable inherited from root
+      Directory.Build.props.
+    - Publish target: linux-x64 framework-dependent (parity with .Api +
+      BFF).
+  -->
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <AssemblyName>Sprk.Provisioning.ControlPlane.Worker</AssemblyName>
+    <RootNamespace>Sprk.Provisioning.ControlPlane.Worker</RootNamespace>
+    <UserSecretsId>b2d3f1b3-2f5b-5b3f-af6f-3c9f4d0e5f6f</UserSecretsId>
+
+    <!-- Parity with BFF + .Api: framework-dependent linux-x64 publish
+         (L2 Worker App Service is Linux — task 101 authors the Bicep). -->
+    <RuntimeIdentifier>linux-x64</RuntimeIdentifier>
+    <SelfContained>false</SelfContained>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\Sprk.Provisioning.ControlPlane.Core\Sprk.Provisioning.ControlPlane.Core.csproj" />
+  </ItemGroup>
+
+  <!-- Added by task 102 (Phase C'' Wave G-1): expose internal seams to the
+       L2 test project so ProvisioningHandlerDispatcherInvariantTests can
+       assert on ProvisioningHandlerDispatcher.BuildSessionProcessorOptions
+       (the DS-2b R3 forcing-function test surface) + the
+       MaxConcurrentCallsPerSessionInvariant const without promoting either
+       to public API. Parity with the InternalsVisibleTo already on the .Core
+       csproj (which exposes ServiceBusHandlerEnqueuer.ComputeMessageId to
+       the same test project for level-1 idempotency verification). -->
+  <ItemGroup>
+    <InternalsVisibleTo Include="Sprk.Provisioning.ControlPlane.Tests" />
+  </ItemGroup>
+
+</Project>

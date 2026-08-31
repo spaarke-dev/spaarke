@@ -1,0 +1,113 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="062" project="customer-provisioning-orchestration-r1">
+  <metadata>
+    <title>Load-test L2 REST enqueue-and-return-202 + verify ≥30-min handler completes without HTTP timeout</title>
+    <phase>C Wave C5 — L2 REST + Reconciler</phase>
+    <gate>blocked</gate>
+    <status>not-started</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Task tags include 'l2-controlplane','integration-test','testing'; TEST-MODIFYING override — unconditional FULL per root CLAUDE.md §8 override row. Also FR-22 + SC #20 acceptance-gate scope.</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Load-test authoring against a well-specified surface (task 057 endpoints) with clear FR-22 acceptance thresholds (30-min handler completion + no HTTP timeout + reconciler DAG advance under concurrent load). No architectural design; execution against known targets.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <deps>057, 058, 059, 060, 061</deps>
+    <tags>l2-controlplane, integration-test, testing, deploy</tags>
+    <estimated-effort>4-6 hours</estimated-effort>
+  </metadata>
+
+  <prompt>Author + execute a load test for the L2 control plane per spec.md FR-22 acceptance + SC #20. Verify: (1) L2 REST enqueue-and-return-202 latency stays &lt;100ms under N-concurrent request load; (2) a synthetic ≥30-min handler completes without any HTTP timeout on the caller side (the whole point of fire-and-forget); (3) state-reconciler correctly advances the DAG under concurrent-instance load — no duplicate enqueue, no stall. Publish results at projects/customer-provisioning-orchestration-r1/notes/l2-load-test-2026-XX.md with response-time percentiles, reconciler-instance count, and any observed anomalies.</prompt>
+
+  <role>SPAARKE platform performance engineer. Expert in .NET load-testing frameworks (BenchmarkDotNet, k6, NBomber, or dotnet-based custom harness), Azure App Service scaling semantics, Cosmos DB RU observation via App Insights, Service Bus receiver metrics, and structuring a load-test report. Follow ADRs strictly.</role>
+
+  <goal>Load-test harness exists under tests/integration/Sprk.Provisioning.ControlPlane.LoadTests/**; three scenarios green (enqueue latency, 30-min handler completion, reconciler concurrency); result report published at projects/customer-provisioning-orchestration-r1/notes/l2-load-test-2026-XX.md with percentiles + verdict per FR-22 acceptance criteria; if any scenario fails, escalate per CLAUDE.md §6 rather than lowering the acceptance threshold silently.</goal>
+
+  <context>
+    <background>Per spec.md FR-22 + design.md §4.2 + R20: the entire fire-and-forget execution model exists BECAUSE App Service HTTP requests time out at 230s (default) while some handlers (H2a Bicep, H6 solution import) legitimately run 30+ minutes. This load test is the acceptance gate that proves the execution model works end-to-end under production-like load. Also verifies I5/I6 concurrency invariants hold under concurrent reconciler instances (from tasks 059/060).</background>
+    <relevant-files>
+      <file role="new">tests/integration/Sprk.Provisioning.ControlPlane.LoadTests/EnqueueLatencyScenario.cs</file>
+      <file role="new">tests/integration/Sprk.Provisioning.ControlPlane.LoadTests/LongHandlerScenario.cs</file>
+      <file role="new">tests/integration/Sprk.Provisioning.ControlPlane.LoadTests/ReconcilerConcurrencyScenario.cs</file>
+      <file role="new">tests/integration/Sprk.Provisioning.ControlPlane.LoadTests/Sprk.Provisioning.ControlPlane.LoadTests.csproj</file>
+      <file role="new">projects/customer-provisioning-orchestration-r1/notes/l2-load-test-2026-XX.md</file>
+      <file role="canonical-reference">src/server/services/Sprk.Provisioning.ControlPlane/Api/RunsEndpoints.cs</file>
+      <file role="canonical-reference">src/server/services/Sprk.Provisioning.ControlPlane/Reconciler/StateReconcilerService.cs</file>
+    </relevant-files>
+    <dependencies>
+      <dependency task="057" status="pending">L2 REST endpoints to load</dependency>
+      <dependency task="058" status="pending">State-reconciler to observe under concurrent instances</dependency>
+      <dependency task="059" status="pending">I5 concurrency guard — must hold under load</dependency>
+      <dependency task="060" status="pending">I6 crash recovery — verified via kill-mid-run scenario</dependency>
+      <dependency task="061" status="pending">§4C rollback classes — failure paths verified under load</dependency>
+    </dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="spec.md FR-22">SCOPE: 30-min synthetic handler MUST complete without HTTP timeout on the caller side; enqueue response is 202 Accepted in &lt;100ms.</constraint>
+    <constraint source="spec.md SC #20">SCOPE: State-reconciler advances DAG correctly under concurrent-instance load; no duplicate enqueue verified via Service Bus receiver count.</constraint>
+    <constraint source="ADR-038">SCOPE: This is an INTEGRATION test (not unit) — sequenced into the r3 KEEP paths per ADR-038 §7; test-modifying tasks trigger unconditional code-review + adr-check at Step 9.5 per root CLAUDE.md §8 override row.</constraint>
+    <constraint source="project">SCOPE: TimeProvider MUST be used in the harness where relevant; per docs/standards/TEST-ARCHITECTURE.md.</constraint>
+    <constraint source="project">SCOPE: Do NOT mock HttpMessageHandler in this harness — per ADR-038 ban; use a real test-hosted L2 App Service + Azure Cosmos emulator or dev Cosmos.</constraint>
+    <constraint source="project">SCOPE: Report includes response-time percentiles (p50/p95/p99), reconciler-instance count during test, Service Bus enqueue count vs unique message count (duplicate detection), Cosmos RU peak, and verdict against FR-22 thresholds.</constraint>
+    <constraint source="CLAUDE.md-§10">SCOPE: L2-only load test; do NOT run against BFF publish or trip BFF publish-size accounting.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>Load testing L2 control plane against FR-22 fire-and-forget acceptance</topic>
+    <files>
+      <file>docs/standards/TEST-ARCHITECTURE.md</file>
+      <file>docs/adr/ADR-038-testing-strategy.md</file>
+      <file>.claude/constraints/testing.md</file>
+      <file>projects/customer-provisioning-orchestration-r1/spec.md</file>
+      <file>projects/customer-provisioning-orchestration-r1/design.md</file>
+    </files>
+    <patterns>
+      <pattern name="Integration test in tests/integration/**" location="tests/integration/">Existing integration-test project layouts show the .csproj + fixture patterns for dev-Cosmos / dev-Service-Bus tests; copy for the load-test project shape.</pattern>
+    </patterns>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="0" name="Rigor + load">Emit RIGOR LEVEL (FULL). Load spec.md FR-22 + SC #20 + ADR-038 + this project's CLAUDE.md.</step>
+    <step order="1" name="Harness scaffold">Create tests/integration/Sprk.Provisioning.ControlPlane.LoadTests/ .csproj referencing L2 project + xUnit + NBomber (or similar).</step>
+    <step order="2" name="Scenario 1 — enqueue latency">Author EnqueueLatencyScenario: N=50 concurrent POST /api/runs → measure p50/p95/p99 &lt;100ms; verify all responses are 202.</step>
+    <step order="3" name="Scenario 2 — long handler">Register a synthetic 30-min IJobHandler (Thread.Sleep-analog via Task.Delay + cancellation-token respect); enqueue via POST /api/runs; verify caller receives 202 immediately AND that GET /api/runs/{id} eventually shows status=Completed after ~30min without any HTTP timeout on caller side.</step>
+    <step order="4" name="Scenario 3 — reconciler concurrency">Run L2 with N=2..3 hosted reconciler instances (via multiple test-hosts); enqueue M concurrent runs; verify each phase enqueue is UNIQUE via Service Bus receiver dedup metric.</step>
+    <step order="5" name="Report">Write notes/l2-load-test-2026-XX.md with percentiles, instance count, duplicate detection, Cosmos RU peak, and verdict PASS/FAIL against FR-22 thresholds.</step>
+    <step order="6" name="Verify">dotnet build + dotnet test = green; dotnet format; zero analyzer warnings on the new project.</step>
+    <step order="7" name="Index update">Update TASK-INDEX.md: task 062 → ✅.</step>
+    <step order="8" name="Deviations">Document any deviation in projects/customer-provisioning-orchestration-r1/notes/.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If ANY handler exceeds 30-min in the long-handler scenario without completing, OR the reconciler misses a DAG-advance opportunity under concurrent-instance load, STOP and escalate per CLAUDE.md §6 rather than lowering the threshold or adjusting the scenario silently. FR-22 acceptance is BINDING — a fail here blocks Phase F E2E acceptance.</trigger>
+  </escalation>
+
+  <tools>
+    <tool name="dotnet">Build and run load-test project</tool>
+    <tool name="terminal">Run shell commands</tool>
+  </tools>
+
+  <outputs>
+    <output type="test">tests/integration/Sprk.Provisioning.ControlPlane.LoadTests/EnqueueLatencyScenario.cs</output>
+    <output type="test">tests/integration/Sprk.Provisioning.ControlPlane.LoadTests/LongHandlerScenario.cs</output>
+    <output type="test">tests/integration/Sprk.Provisioning.ControlPlane.LoadTests/ReconcilerConcurrencyScenario.cs</output>
+    <output type="test">tests/integration/Sprk.Provisioning.ControlPlane.LoadTests/Sprk.Provisioning.ControlPlane.LoadTests.csproj</output>
+    <output type="docs">projects/customer-provisioning-orchestration-r1/notes/l2-load-test-2026-XX.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">EnqueueLatencyScenario: N=50 concurrent POST /api/runs → p95 latency &lt;100ms; 100% responses are 202 Accepted with Location header.</criterion>
+    <criterion testable="true">LongHandlerScenario: a 30-min synthetic handler enqueued via POST /api/runs receives 202 immediately; GET /api/runs/{id} eventually reports status=Completed; no HTTP timeout observed on caller.</criterion>
+    <criterion testable="true">ReconcilerConcurrencyScenario: with N=2..3 reconciler instances active, M enqueued runs each produce EXACTLY the expected number of Service Bus messages per phase — no duplicates (verified via receiver dedup metric).</criterion>
+    <criterion testable="true">Report notes/l2-load-test-2026-XX.md exists with p50/p95/p99 latencies, reconciler instance count, duplicate detection result, Cosmos RU peak, and a written PASS/FAIL verdict.</criterion>
+    <criterion testable="true">Negative: harness does NOT use Mock&lt;HttpMessageHandler&gt; anywhere (per ADR-038 ban); grep confirms.</criterion>
+    <criterion testable="true">dotnet build exits 0; dotnet test exits 0; zero analyzer warnings.</criterion>
+  </acceptance-criteria>
+
+  <notes>Reference: spec.md FR-22 acceptance + SC #20 + design.md §4.2 R20. Blocks task 089 Phase F acceptance if it fails.</notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+  </execution>
+</task>

@@ -1,0 +1,133 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="044" project="customer-provisioning-orchestration-r1">
+  <metadata>
+    <title>Implement H2a Bicep Infra Deploy Handler (Cosmos + OpenAI + AI Search + Doc Intel + App Insights + optional SignalR; Redis excluded)</title>
+    <phase>C Wave C4 — Handler Implementations</phase>
+    <gate>blocked</gate>
+    <status>not-started</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Task tags include 'l2-controlplane','job-handler','azure-deployment'; wraps hardened Provision-Customer.ps1 with 6 new Bicep module invocations; owns T1 keyVaultReferenceIdentity trap; long-running (10–20 min).</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Handler wraps an already-hardened PS script (post-Phase B); complete spec (FR-04, §4.1 H2a row); ADR-020 model-version-pin is the only structural constraint; not cross-cutting.</model-tier-reason>
+    <effort>xhigh</effort>
+    <parallel-group>waveC4-parallel</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <deps>036, 041</deps>
+    <tags>l2-controlplane, job-handler, azure-deployment, powershell</tags>
+    <estimated-effort>5-8 hours</estimated-effort>
+  </metadata>
+
+  <prompt>Implement the H2a Bicep infra-deploy handler as an IJobHandler in the L2 control-plane. H2a invokes the hardened scripts/Provision-Customer.ps1 (post-Phase B) with 6 new Bicep module invocations vs current step 3: Cosmos DB (BFF prereq per R11), OpenAI, AI Search, Document Intelligence, App Insights/Log Analytics, and optional SignalR (feature-gated per ADR-032). Redis is explicitly NOT provisioned (per-env only via scripts/Deploy-RedisCache.ps1). Post-condition asserts T1: keyVaultReferenceIdentity PATCHed to UAMI on both prod + staging slots. Idempotency key: infra-{customerId}-{bicepVer}.</prompt>
+
+  <role>SPAARKE platform developer. Expert in IJobHandler contract, PowerShell script invocation from .NET (System.Management.Automation), Bicep upgrade-mode + `az deployment group what-if`, ADR-020 model-version pinning, ADR-032 Null-Object kill-switch for SignalR feature-gate, and T1 silent-fail trap verification. Follow ADRs strictly.</role>
+
+  <goal>File src/server/services/Sprk.Provisioning.ControlPlane/Handlers/H2aBicepInfraDeployHandler.cs exists, implements IJobHandler, registers in L2 DI, and: (a) invokes the Phase-B hardened Provision-Customer.ps1 passing customerId + tenantId + tenancyModel + bicepVer, (b) confirms 15 expected resources per §7.2 deployed to expected names per §7.1 naming convention, (c) asserts T1 trap cleared — ARM read confirms App Service keyVaultReferenceIdentity == UAMI resource ID on BOTH prod + staging slots (fails deploy otherwise), (d) writes Bicep-deploy outputs to Cosmos interStepState (openAiEndpoint, aiSearchEndpoint, cosmosEndpoint, miObjectId, miClientId), (e) asserts idempotency key infra-{customerId}-{bicepVer}. Unit tests cover happy path, T1 trap failure, upgrade-mode-drift REJECT + report, and idempotency.</goal>
+
+  <context>
+    <background>Per spec.md FR-04 + design.md §4.1 H2a row: current Provision-Customer.ps1 step 3 deploys only Storage + KV + ServiceBus. H2a needs 6 additions per v3 design (Cosmos + OpenAI + AI Search + Doc Intel + App Insights + optional SignalR). Redis is REMOVED per Q-E FR-12 (per-env, not per-customer). UAMI first-class via new uami.bicep + app-service.bicep refactor is a Phase C dependency; H2a consumes it. H2a owns silent-fail trap T1 (keyVaultReferenceIdentity PATCH to UAMI).</background>
+    <relevant-files>
+      <file role="new">src/server/services/Sprk.Provisioning.ControlPlane/Handlers/H2aBicepInfraDeployHandler.cs</file>
+      <file role="new">src/server/services/Sprk.Provisioning.ControlPlane/Handlers/H2aBicepInfraDeployHandler.Tests.cs</file>
+      <file role="canonical-reference">scripts/Provision-Customer.ps1</file>
+      <file role="canonical-reference">infrastructure/bicep/customer.bicep</file>
+      <file role="canonical-reference">src/server/api/Sprk.Bff.Api/Services/Jobs/</file>
+      <file role="modify">src/server/services/Sprk.Provisioning.ControlPlane/Program.cs</file>
+    </relevant-files>
+    <dependencies>
+      <dependency task="036" status="pending">L2 project scaffold — Wave C3</dependency>
+      <dependency task="041" status="pending">H0 preflight — upstream in DAG</dependency>
+    </dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-004">Single IJobHandler implementation registered in L2 DI.</constraint>
+    <constraint source="ADR-010">Register in L2 control-plane, NOT BFF.</constraint>
+    <constraint source="ADR-020">Model deployment versions in Bicep are pinned per §7.4: gpt-4o 2024-08-06, gpt-4o-mini 2024-07-18, text-embedding-3-large v1. H2a MUST NOT allow "latest" or unpinned deployments.</constraint>
+    <constraint source="ADR-027">D4 subscription-per-customer isolation; H2a deploys to the target subscription only, never the platform sub.</constraint>
+    <constraint source="ADR-032">SignalR (Notifications:SignalRSpine:Enabled=true) follows P1/P2/P3 Null-Object kill-switch — deploys the resource only if flag on; both flag-on and flag-off code paths compile + register.</constraint>
+    <constraint source="ADR-036">Handler enqueued via Service Bus + returns 202 to caller; fire-and-forget execution model (spec.md FR-22 / R20) — the actual 10–20 min Bicep runs off-thread.</constraint>
+    <constraint source="project">Idempotency key: infra-{customerId}-{bicepVer} — bicepVer is a git SHA of infrastructure/bicep/ (design.md §4.1 preamble on {schemaVer} semantics), NOT an attempt counter.</constraint>
+    <constraint source="project">H2a owns T1 trap (design.md §4B): post-condition ARM read on App Service `keyVaultReferenceIdentity` MUST equal the UAMI resource ID on BOTH prod + staging slots. If it doesn't, fail deploy with distinct trap-T1 rejection code.</constraint>
+    <constraint source="project">Redis is NOT provisioned by H2a (spec.md MUST rule + Q-E FR-12 v3.2). If Bicep template accidentally includes a Redis resource, fail deploy.</constraint>
+    <constraint source="project">Upgrade mode (spec.md FR-34 + design.md §14A.2): if sprk_dataverseenvironment.sprk_provisionedon is not null, H2a runs `az deployment group what-if` first and defaults to REJECT + escalate on drift; writes drift report to runNotes/drift-{customerId}-{timestamp}.md.</constraint>
+    <constraint source="spec.md §4D I1">H2a receives tenantId + subscriptionId from run parameters explicitly; no default-tenant fallback anywhere in the invoked script.</constraint>
+    <constraint source="spec.md NFR-01">Report BFF publish-size delta in PR description — H2a is L2-only, so BFF delta should be 0 MB; verify explicitly.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>L2 handler wrapping a hardened PS script with post-condition trap verification</topic>
+    <files>
+      <file>.claude/adr/ADR-004-job-contract.md</file>
+      <file>.claude/adr/ADR-010-di-minimalism.md</file>
+      <file>.claude/adr/ADR-020-versioning.md</file>
+      <file>.claude/adr/ADR-027-subscription-isolation-and-dataverse-solution-management.md</file>
+      <file>.claude/adr/ADR-032-bff-nullobject-kill-switch.md</file>
+      <file>.claude/adr/ADR-036-background-job-infrastructure.md</file>
+      <file>.claude/constraints/jobs.md</file>
+      <file>.claude/constraints/azure-deployment.md</file>
+      <file>projects/customer-provisioning-orchestration-r1/spec.md</file>
+      <file>projects/customer-provisioning-orchestration-r1/design.md</file>
+    </files>
+    <patterns>
+      <pattern name="reference-handler-shape" location="src/server/api/Sprk.Bff.Api/Services/Jobs/">IJobHandler exemplar.</pattern>
+    </patterns>
+  </knowledge>
+
+  <steps mode="prescriptive">
+    <step order="0">Declare rigor level (FULL) and load knowledge files.</step>
+    <step order="1">Author H2aBicepInfraDeployHandler.cs — implement IJobHandler; inject IIdempotencyService, ICosmosRunStore, IPowerShellRunner, IArmProbe, IUpgradeDriftDetector.</step>
+    <step order="2">Implement upgrade-mode branch: if sprk_provisionedon != null, run `az deployment group what-if`; if drift detected, REJECT + write drift report; else proceed.</step>
+    <step order="3">Implement fresh-deploy branch: invoke hardened Provision-Customer.ps1 with parameters — customerId, tenantId, subscriptionId, tenancyModel, bicepVer.</step>
+    <step order="4">Implement post-condition T1 verification: ARM read on App Service keyVaultReferenceIdentity for BOTH prod + staging slots; fail deploy on mismatch with trap-T1 rejection code.</step>
+    <step order="5">Write outputs (openAiEndpoint, aiSearchEndpoint, cosmosEndpoint, miObjectId, miClientId) to Cosmos interStepState.</step>
+    <step order="6">Author unit tests: (a) happy path — 15 resources, T1 cleared, (b) T1 trap failure — keyVaultReferenceIdentity != UAMI, (c) upgrade-mode drift REJECT + report, (d) SignalR flag off — resource not deployed, flag on — resource deployed, (e) Redis presence in Bicep = fail, (f) idempotency.</step>
+    <step order="7">Register in L2 Program.cs DI.</step>
+    <step order="8">Run dotnet build + dotnet test; verify green + zero analyzer warnings.</step>
+    <step order="9">Publish-size verification: `dotnet publish -c Release src/server/api/Sprk.Bff.Api/`; report absolute + delta (expect 0 delta since L2-only).</step>
+    <step order="10">Update TASK-INDEX.md: change task 044 status from 🔲 to ✅.</step>
+    <step order="11">Document any deviations in projects/customer-provisioning-orchestration-r1/notes/.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If BFF publish-size delta &gt; 5 MB single-task (spec.md NFR-01 threshold), STOP and escalate per CLAUDE.md §6 rather than shipping the delta.</trigger>
+    <trigger>If T1 trap verification consistently fails on happy-path integration test despite UAMI PATCH, STOP and escalate — root cause is Phase C uami.bicep refactor gap, not H2a bug.</trigger>
+    <trigger>If Provision-Customer.ps1 hardening from Phase B is missing required parameters (customerId-driven, no spaarkedev1 hardcode), STOP and escalate — Phase B must complete first.</trigger>
+  </escalation>
+
+  <justification>
+    <existing>Closest neighbor: scripts/Provision-Customer.ps1 (Gen 2 orchestrator, 13 steps). H2a is a handler that wraps this script — NOT a re-write.</existing>
+    <extension>No — the PS script must be invocable as a resumable, idempotent, gate-verifiable L2 handler (per §4.2 fire-and-forget model). The script can't be an IJobHandler; the handler wraps it and adds post-condition verification (T1) + Cosmos state writes.</extension>
+    <cost-of-doing-nothing>Without H2a as a handler: (a) T1 trap remains a silent failure — App Service boots but every KV-ref setting is null; (b) DAG cannot advance from H1 to H2b/H4/H5 (parallel branch requires H2a completion signal); (c) upgrade-mode drift detection is skipped entirely, allowing accidental resource-destruction on re-provision. All three are pre-existing Gen 2 known-issues per design.md §2.</cost-of-doing-nothing>
+  </justification>
+
+  <tools>
+    <tool name="dotnet">Build and test .NET projects</tool>
+    <tool name="terminal">Run shell + az CLI</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/server/services/Sprk.Provisioning.ControlPlane/Handlers/H2aBicepInfraDeployHandler.cs</output>
+    <output type="test">src/server/services/Sprk.Provisioning.ControlPlane/Handlers/H2aBicepInfraDeployHandler.Tests.cs</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Given a fresh customerId (sprk_provisionedon == null) and hardened Provision-Customer.ps1 with 6 new module invocations, when HandleAsync runs, then 15 resources per §7.2 deploy to expected names per §7.1 naming convention.</criterion>
+    <criterion testable="true">T1 trap (spec.md FR-33): post-condition ARM read confirms App Service keyVaultReferenceIdentity == UAMI resource ID on BOTH prod and staging slots; deploy fails with trap-T1 rejection code if not.</criterion>
+    <criterion testable="true">Given SignalR feature flag off, when HandleAsync runs, then the SignalR resource is NOT deployed AND the Null-Object registration is present (ADR-032 compliance).</criterion>
+    <criterion testable="true">Given SignalR feature flag on, when HandleAsync runs, then the SignalR resource IS deployed.</criterion>
+    <criterion testable="true">Negative: given Bicep template that includes a Redis resource (would violate spec.md MUST rule + Q-E FR-12), when HandleAsync runs, then deploy fails with distinct "RedisProvisioningForbidden" rejection code.</criterion>
+    <criterion testable="true">Upgrade mode: given sprk_provisionedon != null and `az deployment group what-if` detects drift, when HandleAsync runs, then it REJECTS with distinct code and writes runNotes/drift-{customerId}-{timestamp}.md.</criterion>
+    <criterion testable="true">Idempotency: two invocations for the same customerId + bicepVer — second call is a no-op (infra-{customerId}-{bicepVer} match).</criterion>
+    <criterion testable="true">Negative: H2a invoked without tenantId parameter returns failure (§4D I1); no Bicep deploy fired against a default tenant.</criterion>
+    <criterion testable="true">Model deployment versions in the Bicep template are pinned per ADR-020 (gpt-4o 2024-08-06, gpt-4o-mini 2024-07-18, text-embedding-3-large v1); "latest" is rejected at deploy time.</criterion>
+    <criterion testable="true">Cosmos interStepState populated with openAiEndpoint, aiSearchEndpoint, cosmosEndpoint, miObjectId, miClientId on success.</criterion>
+    <criterion testable="true">BFF publish-size delta = 0 MB (L2-only change); verified via `dotnet publish -c Release` and reported in PR description per NFR-01.</criterion>
+    <criterion testable="true">dotnet build + dotnet test exit 0; zero analyzer warnings.</criterion>
+  </acceptance-criteria>
+
+  <notes>Reference: spec.md FR-04 + FR-33 (T1) + FR-34 (upgrade mode) + NFR-01; design.md §4.1 H2a + §4B T1 + §4.1a Model 1 vs Model 2 + §14A.2 upgrade-mode. Phase B hardening of Provision-Customer.ps1 is a prerequisite. This handler is the source of truth for T1 clearance.</notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+  </execution>
+</task>

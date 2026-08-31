@@ -1,5 +1,6 @@
 using System.IO.Compression;
 using System.Text;
+using Microsoft.AspNetCore.Http.Features;
 using Microsoft.AspNetCore.Mvc;
 using Spaarke.Dataverse;
 using Sprk.Bff.Api.Api.Filters;
@@ -35,6 +36,27 @@ public static class DocumentsBulkEndpoints
     public const int MaxDocumentIdsPerRequest = 500;
 
     /// <summary>
+    /// The single reason reported for any document the caller may not read — whether it is denied,
+    /// absent, or was deleted mid-request.
+    /// </summary>
+    /// <remarks>
+    /// <para><b>Why these must be indistinguishable</b> (finding C1, task 022). The
+    /// <c>_FAILED.txt</c> manifest reports one line per document. If "you lack access" and "no such
+    /// document" were different strings, the manifest would be an <b>enumeration oracle amplified
+    /// 500×</b>: post 500 arbitrary GUIDs and the reply partitions them into real records and
+    /// non-records, for records the caller cannot see. Adding per-document authorization without
+    /// collapsing these reasons would have closed the exfiltration half of C1 while leaving the
+    /// enumeration half wide open — and made it worse, because before the fix every document was
+    /// simply returned, so there was no denial to distinguish.</para>
+    ///
+    /// <para>Shape errors (null, empty, not a GUID) stay distinguishable on purpose: they describe
+    /// the caller's own input and reveal nothing about what exists. Failures AFTER a successful
+    /// authorization also stay distinguishable ("no file attached", "download failed") — that caller
+    /// holds Read on the record, so the record's state is theirs to know.</para>
+    /// </remarks>
+    internal const string NotAccessibleReason = "Document not found or not accessible";
+
+    /// <summary>
     /// Registers POST /api/documents/bulk-download.
     /// </summary>
     public static IEndpointRouteBuilder MapDocumentsBulkEndpoints(this IEndpointRouteBuilder app)
@@ -47,9 +69,11 @@ public static class DocumentsBulkEndpoints
             .WithTags("Documents")
             .WithSummary("Stream a zip of selected documents")
             .WithDescription(
-                "Streams a zip archive of the requested documents using app-only SPE access. " +
-                "Per-document failures are recorded in a _FAILED.txt manifest inside the zip while " +
-                "zipping continues. Total failure (zero accessible documents) returns 4xx ProblemDetails. " +
+                "Streams a zip archive of the requested documents. The caller is authorized for 'read' " +
+                "against EVERY requested document before any bytes are read; unauthorized documents are " +
+                "excluded and reported indistinguishably from nonexistent ones. Per-document failures are " +
+                "recorded in a _FAILED.txt manifest inside the zip while zipping continues. Total failure " +
+                "(zero accessible documents) returns 4xx ProblemDetails. " +
                 $"Maximum {MaxDocumentIdsPerRequest} ids per request.")
             .Produces(StatusCodes.Status200OK, contentType: "application/zip")
             .ProducesProblem(StatusCodes.Status400BadRequest)
@@ -67,11 +91,18 @@ public static class DocumentsBulkEndpoints
     /// </summary>
     /// <remarks>
     /// <para>
+    /// Authorization phase (finding C1, task 022): <see cref="BulkDownloadAuthorizationFilter"/> has
+    /// already authorized the caller for <c>read</c> against every requested document and published
+    /// the allowed set. This handler reads that verdict and denies everything if it is absent — see
+    /// the fail-closed note at the call site.
+    /// </para>
+    /// <para>
     /// Pre-resolve phase: each documentId is looked up in Dataverse and validated. If <b>every</b>
     /// lookup fails, we return ProblemDetails BEFORE flushing the response so callers see a clean
     /// 4xx instead of a partially-written zip. If at least one resolution succeeds, we begin
     /// streaming the zip — at this point response headers are committed and per-document failures
-    /// are appended to a <c>_FAILED.txt</c> manifest inside the zip.
+    /// are appended to a <c>_FAILED.txt</c> manifest inside the zip. Documents the caller may not
+    /// read never reach this phase and are reported as <see cref="NotAccessibleReason"/>.
     /// </para>
     /// <para>
     /// Streaming: <see cref="ZipArchive"/> wraps <see cref="HttpResponse.Body"/> with
@@ -119,6 +150,28 @@ public static class DocumentsBulkEndpoints
                 });
         }
 
+        // 2b. Per-document authorization verdict from BulkDownloadAuthorizationFilter (finding C1).
+        //
+        // FAIL CLOSED (ADR-003): an ABSENT key means the filter did not run — the route was mapped
+        // without it, or the filter was reordered after this handler. Authorize nothing in that case.
+        // An empty set is a legitimate "you may read none of these"; a missing set is a wiring fault,
+        // and both must deny. Returning 500 rather than 403 is deliberate: 403 would tell the caller
+        // "your rights were evaluated and found wanting", which is a lie when nothing evaluated them.
+        if (httpContext.Items[BulkDownloadAuthorizationFilter.AuthorizedDocumentIdsKey]
+                is not IReadOnlySet<string> authorizedIds)
+        {
+            logger.LogError(
+                "Bulk download: authorization verdict missing from HttpContext.Items — " +
+                "BulkDownloadAuthorizationFilter did not run for this request. Denying. TraceId: {TraceId}",
+                traceId);
+
+            return Results.Problem(
+                statusCode: StatusCodes.Status500InternalServerError,
+                title: "Authorization Error",
+                detail: "An error occurred during authorization",
+                extensions: new Dictionary<string, object?> { ["traceId"] = traceId });
+        }
+
         // 3. Pre-resolve every documentId in Dataverse (catches total-failure BEFORE flushing zip)
         var resolved = new List<ResolvedDocument>(request.DocumentIds.Count);
         var failedItems = new List<FailedItem>();
@@ -137,13 +190,25 @@ public static class DocumentsBulkEndpoints
                 continue;
             }
 
+            // Not authorized → excluded before any Dataverse read, and reported with the SAME reason
+            // a nonexistent document gets. See NotAccessibleReason for why they must be
+            // indistinguishable.
+            if (!authorizedIds.Contains(rawId))
+            {
+                failedItems.Add(new FailedItem(rawId, null, NotAccessibleReason));
+                continue;
+            }
+
             try
             {
                 var document = await dataverseService.GetDocumentAsync(rawId, ct);
 
                 if (document is null)
                 {
-                    failedItems.Add(new FailedItem(rawId, null, "Document not found in Dataverse"));
+                    // Authorized but absent: a race (deleted between the authorization pass and here),
+                    // because rights on a nonexistent record evaluate to None and it would not be in
+                    // the authorized set. Same non-committal reason regardless.
+                    failedItems.Add(new FailedItem(rawId, null, NotAccessibleReason));
                     continue;
                 }
 
@@ -207,6 +272,30 @@ public static class DocumentsBulkEndpoints
         var zipFileName = $"documents-{matterIdOrBulk}-{timestamp}.zip";
 
         var response = httpContext.Response;
+
+        // C1-adjacent DEFECT, found 2026-08-24 by task 022 while writing the first ever test for this
+        // route: ZipArchive is a SYNCHRONOUS API. In Create mode it writes to the stream it wraps with
+        // blocking Write/Flush calls, and here that stream is HttpResponse.Body. Kestrel has
+        // AllowSynchronousIO = false by default (since .NET 3.0) and this app never enables it
+        // anywhere, so the first entry flush threw
+        //   InvalidOperationException: Synchronous operations are disallowed.
+        // followed by a cascading
+        //   IOException: Entries cannot be created while previously created entries are still open
+        // when the _FAILED.txt manifest was then written over the entry that had failed to close.
+        // Response headers (200 + application/zip) are committed BEFORE this point, so the caller
+        // received a truncated archive on a broken connection rather than an error they could read.
+        //
+        // Opting this ONE request into synchronous body IO is the correct fix. The alternative —
+        // buffering the archive and copying it at the end — would defeat the endpoint's whole reason
+        // for existing (see the Placement Justification: bounded memory for 500 documents), and
+        // there is no async ZipArchive in the BCL. Scoped to this request only; the global default
+        // stays off.
+        var bodyControl = httpContext.Features.Get<IHttpBodyControlFeature>();
+        if (bodyControl is not null)
+        {
+            bodyControl.AllowSynchronousIO = true;
+        }
+
         response.StatusCode = StatusCodes.Status200OK;
         response.ContentType = "application/zip";
         response.Headers.ContentDisposition = $"attachment; filename=\"{zipFileName}\"";

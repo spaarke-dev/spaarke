@@ -1,0 +1,100 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="033" project="unified-access-control-r2">
+  <metadata>
+    <title>FR-19 consumers — propagate per-record rights onto CallerPrincipal, delete the blanket Collaborate stamp, enforce rights on write routes</title>
+    <phase>1 One evaluator</phase>
+    <gate>after-032</gate>
+    <status>pending</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Authorization-path .cs implementation across resolver + endpoints; tags bff-api/auth.</rigor-reason>
+    <model-tier>opus</model-tier>
+    <model-tier-reason>FR-19 ripple through every consumer of the principal shape (orchestrator directive) — the stamp deletion changes effective rights on live routes.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Modifies CallerPrincipalResolver.cs (orchestrator hot-file list) and ExternalCallerContext.cs shared with task 032's output.</parallel-reason>
+    <deps>032</deps>
+    <tags>bff-api, auth, security, testing</tags>
+    <estimated-effort>3-4 hours</estimated-effort>
+  </metadata>
+
+  <prompt>Propagate the task-032 rights map through the caller-principal layer and the write routes. DELETE the blanket Collaborate stamp (CallerPrincipalResolver.cs — WorkforceProjectAccessLevel const at :354-360 and its application at :429-431), which today elevates a deliberate ViewOnly grant to Read|Write|Create (register A-8). After this task, a route that mutates a record must require Write from the evaluator's answer for THAT record: a View Only grant does not permit a write on any route (FR-19 acceptance).</prompt>
+  <role>SPAARKE platform developer, C#/.NET Minimal API + authorization filters. Follow ADRs strictly.</role>
+  <goal>CallerPrincipal carries per-record levels for projects, matters, and work assignments sourced from AccessibleRecordSet.Rights (no blanket stamp anywhere); IAccessibleRecordSetService exposes a rights-aware check (e.g. GetRightsAsync or IsOperationPermittedAsync with a required-AccessRights argument); every /api/v1/external mutating route on scoped records requires Write via that check; unit tests cover the ViewOnly-cannot-write negative on each mutating route.</goal>
+
+  <context>
+    <background>Task 032 made the evaluator return (recordId → rights) but consumers still flatten: WorkforcePrincipalStrategy stamps Collaborate over all accessible projects, and CallerPrincipal.AccessibleMatterIds / AccessibleWorkAssignmentIds are bare id sets. Phase 0's FR-08 task added a record-SCOPE check to PATCH /api/v1/external/todos/{id}; this task upgrades scope-membership to rights-aware enforcement. CiamContactPrincipalStrategy already carries per-project levels from grants — extend the same fidelity to matters/WAs on both planes.</background>
+    <relevant-files>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Infrastructure/ExternalAccess/CallerPrincipalResolver.cs</file>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Infrastructure/ExternalAccess/ExternalCallerContext.cs</file>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Infrastructure/ExternalAccess/AccessibleRecordSetService.cs</file>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Api/ExternalAccess/ExternalProjectDataEndpoints.cs</file>
+      <file role="modify">tests/unit/Sprk.Bff.Api.Tests/Infrastructure/ExternalAccess/AccessibleRecordSetServiceTests.cs</file>
+      <file role="canonical-reference">src/server/api/Sprk.Bff.Api/Api/ExternalAccess/Tier2ScopeFilterInjector.cs</file>
+    </relevant-files>
+    <dependencies>
+      <dependency task="032" status="pending">The rights map on AccessibleRecordSet + level→rights mapping.</dependency>
+      <dependency task="Phase 0 FR-08 task (see TASK-INDEX)" status="pending">The record-scope check on PATCH /api/v1/external/todos/{id} that this task upgrades to rights-aware. If it has not landed, implement the rights-aware check directly (it subsumes the scope check) and note it.</dependency>
+    </dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-003 (as amended by task 030)">Scope: all enforcement added here. Decisions come from the ONE evaluator (AccessibleRecordSetService) — do not re-derive rights in endpoints, do not consult grant rows directly from a route handler.</constraint>
+    <constraint source="ADR-008">Scope: route enforcement. Record-level authorization on external routes stays in endpoint filters / explicit per-endpoint checks — no global middleware.</constraint>
+    <constraint source="spec NFR-01">Scope: every path touched. A record absent from the rights map, an unresolved principal, or a faulted compose DENIES the mutation (403) — never falls through to the write.</constraint>
+    <constraint source="project">Scope: the stamp deletion. Remove WorkforceProjectAccessLevel and its .Select(...) application entirely — grep the repo for WorkforceProjectAccessLevel afterwards and assert zero references. Do NOT reintroduce any per-plane default level; every level flows from AccessibleRecordSet.Rights.</constraint>
+    <constraint source="project">Scope: read routes. Read-path behavior (scope injection via id sets, module predicates, GetAccessible*Ids) must be unchanged in this task — only mutating routes gain the Write requirement.</constraint>
+    <constraint source="CLAUDE.md §10">Scope: this task's PR (BFF-touching). State the placement decision citing .claude/constraints/bff-extensions.md; run dotnet publish -c Release src/server/api/Sprk.Bff.Api/ -o deploy/api-publish/ and report compressed size + diff vs ~44.96 MB baseline; ceiling 60 MB (NFR-06).</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>caller-principal composition, endpoint authorization</topic>
+    <files>
+      <file>.claude/adr/ADR-003-authorization-seams.md</file>
+      <file>.claude/adr/ADR-008-endpoint-filters.md</file>
+      <file>projects/unified-access-control-r2/design.md</file>
+      <file>projects/unified-access-control-r2/notes/design-register.md</file>
+    </files>
+    <patterns>
+      <pattern name="deny mapping" location="src/server/api/Sprk.Bff.Api/Infrastructure/ExternalAccess/CallerPrincipalResolver.cs">WorkforcePrincipalStrategy's 401/403 ProblemDetails mapping with reasonCode extensions is the deny-shape to reuse for insufficient-rights (403 + machine-readable code).</pattern>
+    </patterns>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="0" name="Context + rigor declaration">Declare rigor FULL. Read CallerPrincipalResolver.cs end-to-end, ExternalCallerContext.cs (CallerPrincipal, CallerProjectAccess, GetAccessible*Ids), and enumerate every mutating /api/v1/external route (grep MapPatch/MapPost/MapPut/MapDelete under Api/ExternalAccess/).</step>
+    <step order="1">Extend CallerPrincipal so matters and WAs carry per-record levels (mirroring ProjectAccess) while GetAccessibleMatterIds/GetAccessibleWorkAssignmentIds keep returning id sets for scope injection.</step>
+    <step order="2">WorkforcePrincipalStrategy: source per-record levels from AccessibleRecordSet.Rights for all three root types; DELETE the blanket stamp const + application. CiamContactPrincipalStrategy: carry matter/WA levels from the task-032 grant set.</step>
+    <step order="3">Add the rights-aware check to IAccessibleRecordSetService (required-rights argument, fail-closed) and wire it into every mutating route found in step 0 — at minimum the external To Do PATCH. Enumerate the wired routes in the PR description.</step>
+    <step order="4">Tests: per-route ViewOnly-denied / Collaborate-allowed pairs; principal-shape tests for matter/WA levels; grep-assertion that WorkforceProjectAccessLevel is gone.</step>
+    <step order="5">Build + full unit test run; publish-size measurement per §10.</step>
+    <step order="6">Update TASK-INDEX.md: set this task's status to ✅.</step>
+    <step order="7">Document any deviation (incl. the exact mutating-route inventory) in projects/unified-access-control-r2/notes/.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If a mutating external route exists whose record cannot be resolved to a scoped root (no entityType/recordId to evaluate), STOP and escalate per CLAUDE.md §6 with the route list — do not ship it unguarded and do not invent a scope for it.</trigger>
+    <trigger>If deleting the blanket stamp visibly REDUCES rights for a live legitimate flow other than the intended ViewOnly demotion (e.g. systemusers writing to membership-derived records would lose Write because membership now maps below Collaborate), STOP — that indicates a term-level regression against task 032's status-quo constraint.</trigger>
+  </escalation>
+
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Infrastructure/ExternalAccess/CallerPrincipalResolver.cs</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Infrastructure/ExternalAccess/ExternalCallerContext.cs</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Infrastructure/ExternalAccess/AccessibleRecordSetService.cs</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Api/ExternalAccess/ExternalProjectDataEndpoints.cs</output>
+    <output type="test">tests/unit/Sprk.Bff.Api.Tests/Infrastructure/ExternalAccess/AccessibleRecordSetServiceTests.cs</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Given a contact whose ONLY source on project P is a ViewOnly grant, PATCH /api/v1/external/todos/{id} for a todo under P returns 403 with a machine-readable reason code (FR-19 acceptance: a View Only grant does not permit a write on any route).</criterion>
+    <criterion testable="true">Given the same caller holding Collaborate on P, the same PATCH succeeds (positive control).</criterion>
+    <criterion testable="true">CallerPrincipal carries per-record levels for projects, matters, and work assignments; a matter-granted-Collaborate + matter-granted-ViewOnly caller shows the two different levels (no flattening).</criterion>
+    <criterion testable="true">Negative: grep for WorkforceProjectAccessLevel returns zero hits; no other constant supplies a blanket per-plane level.</criterion>
+    <criterion testable="true">Negative: a record absent from the composed rights map is denied (403) on every wired mutating route — covered per route.</criterion>
+    <criterion testable="true">Read-path regression: existing module-scope injection tests and GetAccessible*Ids behaviors pass unchanged.</criterion>
+    <criterion testable="true">Build green; publish size reported and ≤60 MB.</criterion>
+  </acceptance-criteria>
+
+  <notes>Spec FR-19 + register A-8. The mutating-route inventory produced in step 0 is load-bearing for review — include it verbatim in the PR. Coordinate with Phase 0's FR-07 delegation task (grant/revoke endpoints get their own Write-on-target check there; do not duplicate it here).</notes>
+
+  <execution><skill>.claude/skills/task-execute/SKILL.md</skill></execution>
+</task>

@@ -13,6 +13,23 @@
 # Health check:  /healthz endpoint (ADR-001).
 #
 # Audit trail: All runs logged in GitHub Actions history (NFR-05).
+#
+# H9 artifact-based re-scope (customer-provisioning-orchestration-r1 task 116,
+# Phase C'' Wave G-1, design.md DS-4 §5): the "Build API" job below also pushes
+# bff-api-{buildId}.zip + a latest.json manifest to a `provisioning-artifacts`
+# blob container on the platform storage account. This is H9's (task 132,
+# Wave G-3) future artifact source -- H9 resolves a build, verifies the r3-gate
+# + size metadata carried in the manifest as a pure-C# check (no re-run at
+# provision time), downloads the blob (Azure.Storage.Blobs, UAMI RBAC), and
+# deploys to the customer's own BFF staging slot. See
+# projects/customer-provisioning-orchestration-r1/notes/
+# h9-artifact-publish-ci-coord-pr.md for the full design rationale + the
+# open live-ceremony items (platform storage account does not exist yet).
+#
+# Governance: r1 holds DIRECT-COMMIT ownership of .github/workflows/** for
+# Phase C'' scope as of commit 8281045052 (see projects/customer-provisioning-
+# orchestration-r1/CLAUDE.md "Coordination with other worktrees" section) --
+# this extension is a direct commit, not a further coord-note.
 # ============================================================================
 
 name: Deploy BFF API
@@ -65,7 +82,7 @@ jobs:
           dotnet-version: ${{ env.DOTNET_VERSION }}
 
       - name: Cache NuGet packages
-        uses: actions/cache@v5
+        uses: actions/cache@v6
         with:
           path: ~/.nuget/packages
           key: ${{ runner.os }}-nuget-${{ hashFiles('**/Directory.Packages.props', '**/*.csproj') }}
@@ -88,6 +105,174 @@ jobs:
           path: ./publish
           retention-days: 7
 
+      # ------------------------------------------------------------------------
+      # H9 artifact-based re-scope (task 116, DS-4 §5) starts here.
+      #
+      # Gate naming matches Sprk.Provisioning.ControlPlane.Handlers.BffDeploy.
+      # R3GateKind + R3GateStatus EXACTLY (Analyzers/GodClassRatchet/ArchTests/
+      # NamingConformance/GraphAppRoleParity; Passed/Skipped/Failed) so task
+      # 132's H9 handler can deserialize latest.json straight into the existing
+      # enums -- no new vocabulary, no re-run of DotnetR3GateVerifier's shell-
+      # outs at provision time.
+      #
+      # r3AnalyzersAsErrors is NOT re-run as a separate step: the "Build" step
+      # above already runs with Directory.Build.props' TreatWarningsAsErrors=
+      # true, and GitHub Actions stops the job on a failed step (no continue-
+      # on-error there) -- reaching this point already proves that gate passed.
+      #
+      # graphAppRoleParity is a DEPLOYMENT-TARGET property (a specific
+      # customer's UAMI service principal vs GraphAppRoles.cs), not a property
+      # of this platform-BFF build artifact, so it cannot be computed here. It
+      # is always recorded "Skipped" with a diagnostic pointing at the
+      # nightly-health.yml graph-app-role-parity job (the platform-baseline
+      # signal); H9/task 132 must do its own live per-environment check rather
+      # than trust this manifest key as a real per-deploy signal. Documented
+      # as a deliberate design decision in notes/h9-artifact-publish-ci-coord-
+      # pr.md -- not a silent gap.
+      # ------------------------------------------------------------------------
+
+      - name: Compute build identifiers (buildId + sha)
+        id: build-id
+        shell: bash
+        run: |
+          set -euo pipefail
+          # buildId: date + monotonic run-number (matches build-provisioning-
+          # sidecar.yml's semver_tag convention) -- deterministic + stable +
+          # human-sortable. NOT a raw timestamp: the run-number is monotonic
+          # per-workflow, so buildId collisions are impossible even for two
+          # dispatches on the same UTC day. sha is carried separately for the
+          # git-anchored identity H9 (task 132) resolves against.
+          build_id="$(date -u +%Y.%m.%d)-${{ github.run_number }}"
+          echo "build_id=${build_id}" >> "$GITHUB_OUTPUT"
+          echo "sha=${{ github.sha }}" >> "$GITHUB_OUTPUT"
+
+      - name: 'Gate: god-class ratchet (tests/Spaarke.ArchTests/GodClassGuardTests.cs)'
+        id: gate-godclass
+        continue-on-error: true # capture red without aborting the job -- the final "Fail job if any r3 gate is red" step below enforces the operator-visible signal AFTER the manifest is published.
+        shell: bash
+        run: |
+          dotnet test tests/Spaarke.ArchTests/Spaarke.ArchTests.csproj \
+            -c Release \
+            --filter "FullyQualifiedName~GodClassGuardTests" \
+            --logger "trx;LogFileName=godclass.trx" \
+            --results-directory ./gate-results
+
+      - name: 'Gate: tenant-isolation ArchTests I1-I5 (FR-28..FR-32)'
+        id: gate-archtests
+        continue-on-error: true
+        shell: bash
+        run: |
+          dotnet test tests/Spaarke.ArchTests/Spaarke.ArchTests.csproj \
+            -c Release \
+            --filter "FullyQualifiedName~TenantIsolation" \
+            --logger "trx;LogFileName=tenantisolation.trx" \
+            --results-directory ./gate-results
+
+      - name: 'Gate: naming-conformance (FR-35 / NFR-08)'
+        id: gate-naming
+        continue-on-error: true
+        shell: pwsh
+        run: ./scripts/naming-conformance-check.ps1
+
+      - name: Translate gate outcomes to R3GateStatus values
+        id: gate-status
+        shell: bash
+        run: |
+          set -euo pipefail
+          to_status () { [ "$1" = "success" ] && echo "Passed" || echo "Failed"; }
+          echo "analyzers=Passed" >> "$GITHUB_OUTPUT"
+          echo "godclass=$(to_status '${{ steps.gate-godclass.outcome }}')" >> "$GITHUB_OUTPUT"
+          echo "archtests=$(to_status '${{ steps.gate-archtests.outcome }}')" >> "$GITHUB_OUTPUT"
+          echo "naming=$(to_status '${{ steps.gate-naming.outcome }}')" >> "$GITHUB_OUTPUT"
+
+      - name: Create artifact zip (bff-api-{buildId}.zip)
+        id: zip
+        shell: bash
+        run: |
+          set -euo pipefail
+          zip_name="bff-api-${{ steps.build-id.outputs.build_id }}.zip"
+          (cd ./publish && zip -r "../${zip_name}" . -x '*.pdb')
+          size_bytes=$(stat -c%s "./${zip_name}")
+          echo "zip_name=${zip_name}" >> "$GITHUB_OUTPUT"
+          echo "size_bytes=${size_bytes}" >> "$GITHUB_OUTPUT"
+
+      - name: Azure Login (OIDC)
+        uses: azure/login@v2
+        with:
+          client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+
+      - name: Push artifact zip to provisioning-artifacts blob (OIDC, no stored key)
+        # PROVISIONING_ARTIFACTS_STORAGE_ACCOUNT: NOT YET PROVISIONED as of this
+        # workflow's authoring (2026-08-19) -- no platform storage account
+        # exists in infrastructure/bicep/platform-controlplane.bicep. This is a
+        # repo VARIABLE (a storage-account name is not confidential), matching
+        # the ACR_LOGIN_SERVER placeholder pattern in build-provisioning-
+        # sidecar.yml. Live-ceremony items (documented, NOT created by task
+        # 116 -- see notes/h9-artifact-publish-ci-coord-pr.md § Open Items):
+        #   1. Create the storage account + `provisioning-artifacts` blob
+        #      container (canonical naming, e.g. `stsprkplatform{env}`).
+        #   2. Grant the OIDC service principal (secrets.AZURE_CLIENT_ID)
+        #      "Storage Blob Data Contributor" RBAC on that account so
+        #      `--auth-mode login` succeeds.
+        #   3. Populate the PROVISIONING_ARTIFACTS_STORAGE_ACCOUNT repo variable.
+        # Until all three land, this step fails cleanly (missing/empty account
+        # name) -- the rest of the existing deploy pipeline (staging/swap/
+        # rollback jobs below) is UNCHANGED and unaffected by this step's
+        # failure (this is an additive step in the Build job only).
+        run: |
+          az storage blob upload \
+            --account-name "${{ vars.PROVISIONING_ARTIFACTS_STORAGE_ACCOUNT }}" \
+            --container-name provisioning-artifacts \
+            --name "${{ steps.zip.outputs.zip_name }}" \
+            --file "./${{ steps.zip.outputs.zip_name }}" \
+            --auth-mode login \
+            --overwrite true
+
+      - name: Generate + push latest.json manifest (AFTER the zip -- never point at a missing blob)
+        run: |
+          set -euo pipefail
+          cat > ./latest.json <<EOF
+          {
+            "buildId": "${{ steps.build-id.outputs.build_id }}",
+            "sha": "${{ steps.build-id.outputs.sha }}",
+            "sizeBytes": ${{ steps.zip.outputs.size_bytes }},
+            "publishedAt": "$(date -u +%Y-%m-%dT%H:%M:%SZ)",
+            "artifactBlobName": "${{ steps.zip.outputs.zip_name }}",
+            "gates": {
+              "r3AnalyzersAsErrors": "${{ steps.gate-status.outputs.analyzers }}",
+              "godClassRatchet": "${{ steps.gate-status.outputs.godclass }}",
+              "archTests": "${{ steps.gate-status.outputs.archtests }}",
+              "namingConformance": "${{ steps.gate-status.outputs.naming }}",
+              "graphAppRoleParity": "Skipped"
+            }
+          }
+          EOF
+          cat ./latest.json
+
+          az storage blob upload \
+            --account-name "${{ vars.PROVISIONING_ARTIFACTS_STORAGE_ACCOUNT }}" \
+            --container-name provisioning-artifacts \
+            --name "latest.json" \
+            --file "./latest.json" \
+            --auth-mode login \
+            --overwrite true
+        shell: bash
+
+      - name: Fail job if any r3 gate is red (manifest still published -- operators must see it)
+        if: always()
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [ "${{ steps.gate-godclass.outcome }}" = "failure" ] || \
+             [ "${{ steps.gate-archtests.outcome }}" = "failure" ] || \
+             [ "${{ steps.gate-naming.outcome }}" = "failure" ]; then
+            echo "::error::One or more r3 gates failed -- see the gate-godclass / gate-archtests / gate-naming step results above. The artifact + manifest were still published (the manifest records the failure) so H9 can see it and refuse to deploy, but this workflow run is marked failed so operators notice immediately."
+            exit 1
+          fi
+          echo "All artifact-scoped r3 gates green. (graphAppRoleParity is intentionally recorded Skipped here -- see step comments above.)"
+
   # ──────────────────────────────────────────────────────────────────────────
   # Job 2: Test
   # ──────────────────────────────────────────────────────────────────────────
@@ -105,7 +290,7 @@ jobs:
           dotnet-version: ${{ env.DOTNET_VERSION }}
 
       - name: Cache NuGet packages
-        uses: actions/cache@v5
+        uses: actions/cache@v6
         with:
           path: ~/.nuget/packages
           key: ${{ runner.os }}-nuget-${{ hashFiles('**/Directory.Packages.props', '**/*.csproj') }}

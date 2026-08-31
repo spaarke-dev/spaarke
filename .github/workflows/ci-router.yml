@@ -72,12 +72,40 @@ concurrency:
   # startup_failure 2026-06-26). Using literal `true` is safe because the
   # `group` key already segregates events:
   #   - PRs: group `ci-router-{pr_number}` — new push cancels previous PR run (desired)
-  #   - master push: group `ci-router-refs/heads/master` — back-to-back master
-  #     pushes (rare) may cancel each other; acceptable since the newer push
-  #     supersedes the older one anyway
-  #   - merge_group: group includes the ephemeral queue ref, so each queued PR
-  #     gets its own group — no cross-cancellation
-  group: ci-router-${{ github.event.pull_request.number || github.ref }}
+  #   - master push: group `ci-router-{sha}` — see below
+  #   - merge_group: `github.sha` is the ephemeral queue commit, so each queued
+  #     PR gets its own group — no cross-cancellation
+  #
+  # CHANGED 2026-08-27: the fallback was `github.ref`, whose comment read
+  # "back-to-back master pushes (rare) may cancel each other; acceptable since
+  # the newer push supersedes the older one anyway". Both halves were wrong.
+  #
+  #   * NOT RARE. On 2026-08-27 four PRs merged inside 35 minutes during a
+  #     routine integration sweep and produced TWO cancellations. Back-to-back
+  #     master merges are the normal mode here, not an edge case.
+  #   * NOT ACCEPTABLE. A cancelled run does not quietly yield to its successor:
+  #     `router-result` aggregates via alls-green, which treats a *cancelled*
+  #     dependency as a hard failure (`allowed-failures` covers failure, not
+  #     cancellation). Run 33096671842 on 7acfec600 is the worked example —
+  #     every Tier 1 gate PASSED (compile, arch, tenant-isolation, compose
+  #     fidelity, eval) and `CI / Router` still reported RED, solely because
+  #     `Classify Tier 1 Surfaces` was cancelled mid-checkout.
+  #
+  # A red that means nothing is the failure mode this project exists to remove,
+  # and once `CI / Router` becomes the required check it stops being cosmetic:
+  # a spurious red BLOCKS the merge.
+  #
+  # Keying master on `github.sha` means runs on DIFFERENT commits never cancel
+  # each other, so every master commit gets its own honest verdict. This is the
+  # same fix ci-tier2-advisory.yml already carries (see its concurrency block,
+  # which documents this identical failure mode) — the router never received it.
+  #
+  # Cost, accepted deliberately: during a sweep, N merges now run N full CI runs
+  # instead of cancelling down to one. That is more runner minutes in exchange
+  # for a correct per-commit verdict. PR behaviour is UNCHANGED — still keyed on
+  # PR number, so a new push still cancels the previous run, which is where the
+  # savings actually matter.
+  group: ci-router-${{ github.event.pull_request.number || github.sha }}
   cancel-in-progress: true
 
 jobs:
@@ -248,19 +276,50 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
+      # ----------------------------------------------------------------------
+      # tier2 is ADVISORY per FR-A03 — it must never be able to fail this gate.
+      # It is therefore excluded from adjudication BY CONSTRUCTION rather than
+      # by allow-list, because the allow-list did not hold:
+      #
+      #   `allowed-failures: tier2` covers conclusion=FAILURE only. A tier2 job
+      #   killed by `timeout-minutes` reports conclusion=CANCELLED, which
+      #   neither allowed-failures nor allowed-skips covers. alls-green then
+      #   counted it against the gate:
+      #       tier2 → ⬜ cancelled [allowed to fail]
+      #       ❌ Some of the required to succeed jobs failed
+      #       Process completed with exit code 1
+      #   → `CI / Router` = failure while tier1 = success.
+      #
+      # Observed 2026-08-24: 17/17 runs red on work/unified-access-control-r2
+      # (never once green), and work/spaarkeai-compose-r8 failing identically —
+      # i.e. repo-wide. Root cause was tier2's 6-minute unit-test budget (raised
+      # to 30 in ci-tier2-advisory.yml in the same change), but the gate must
+      # survive ANY future tier2 cancellation source, not just that one.
+      #
+      # tier2 stays in `needs:` so the Router still sequences after it and the
+      # decision summary below still reports its real result.
+      # ----------------------------------------------------------------------
+      - name: Build adjudication set (tier2 excluded — advisory per FR-A03)
+        id: adjudicate
+        shell: bash
+        run: |
+          # Shape mirrors `toJSON(needs)` exactly — including the empty `outputs`
+          # object — so alls-green sees the structure it would normally receive.
+          # Only `result` participates in adjudication.
+          printf 'json={"classify":{"result":"%s","outputs":{}},"tier1":{"result":"%s","outputs":{}}}\n' \
+            '${{ needs.classify.result }}' '${{ needs.tier1.result }}' >> "$GITHUB_OUTPUT"
+          echo "classify=${{ needs.classify.result }} tier1=${{ needs.tier1.result }} tier2=${{ needs.tier2.result }} (tier2 not adjudicated)"
+
       - name: Aggregate tier results
         # Pinned to a tagged release (v1.2.2) per supply-chain hygiene.
         # If this action is ever deprecated, fallback is inline bash gate
         # documented in notes/router-signal-model-decision.md §5.
         uses: re-actors/alls-green@v1.2.2
         with:
-          jobs: ${{ toJSON(needs) }}
-          # tier2 is advisory per FR-A03 — its failure must not block merge.
-          # NOTE: allowed-failures would allow tier2 to fail; allowed-skips
-          # treats a skipped result as success. We use allowed-failures here
-          # so tier2 failures also don't block (advisory semantics).
-          allowed-failures: tier2
-          allowed-skips: tier1,tier2
+          jobs: ${{ steps.adjudicate.outputs.json }}
+          # tier1 may legitimately be skipped when classify finds no Tier-1
+          # surface in the diff; a skipped job counts as success.
+          allowed-skips: tier1
 
       - name: Router decision summary
         if: always()

@@ -58,7 +58,8 @@ public class OpenAiClient : IOpenAiClient
         IOptions<DocumentIntelligenceOptions> options,
         ILogger<OpenAiClient> logger,
         ICircuitBreakerRegistry? circuitRegistry = null,
-        Sprk.Bff.Api.Telemetry.AiTelemetry? aiTelemetry = null)
+        Sprk.Bff.Api.Telemetry.AiTelemetry? aiTelemetry = null,
+        Azure.Core.TokenCredential? managedIdentityCredential = null)
     {
         _options = options.Value;
         _logger = logger;
@@ -66,7 +67,6 @@ public class OpenAiClient : IOpenAiClient
         _aiTelemetry = aiTelemetry;
 
         var endpoint = new Uri(_options.OpenAiEndpoint);
-        var credential = new AzureKeyCredential(_options.OpenAiKey);
         // Raise the per-attempt network timeout above the SDK default (100s). The Reasoning tier
         // (gpt-5-reasoning) routinely needs 2-4 minutes on a full document; at 100s the call is
         // cancelled + retried 3× and surfaces to the user as "couldn't run that action" (observed
@@ -76,7 +76,42 @@ public class OpenAiClient : IOpenAiClient
         {
             NetworkTimeout = TimeSpan.FromSeconds(_options.OpenAiNetworkTimeoutSeconds),
         };
-        _client = new AzureOpenAIClient(endpoint, credential, clientOptions);
+
+        // auth-v4 task 054 (FR-E5): key-or-managed-identity, mirroring the canonical branch already
+        // in AiModule for the AzureOpenAI:ApiKey path. This client was unconditionally key-based, so
+        // clearing DocumentIntelligence:OpenAiKey would have thrown at construction rather than
+        // falling forward to Entra.
+        //
+        // The key is still what works TODAY: ADR-028 exception E-2 records that this AIServices-kind
+        // account returns HTTP 401 PermissionDenied to managed-identity tokens while accepting user
+        // tokens, and task 052 re-affirmed E-2 with dated evidence on 2026-08-21 (the hoped-for
+        // missing-custom-subdomain cause was eliminated - the subdomain IS configured). So the key is
+        // RETAINED, deliberately, per this task's "or a retained key is documented with its reason".
+        // What changes is that resolving E-2 becomes a config change (clear the key) instead of a
+        // code change.
+        if (!string.IsNullOrWhiteSpace(_options.OpenAiKey))
+        {
+            _client = new AzureOpenAIClient(endpoint, new AzureKeyCredential(_options.OpenAiKey), clientOptions);
+        }
+        else
+        {
+            // Nullable + default so the ~15 existing test fixtures keep compiling (the shape
+            // CLAUDE.md prescribes for the shared-lib seam). DI always supplies it in the app, so a
+            // null here means a hand-constructed instance chose neither credential - fail with an
+            // actionable message rather than a NullReferenceException deep in the SDK.
+            if (managedIdentityCredential is null)
+            {
+                throw new InvalidOperationException(
+                    "DocumentIntelligence:OpenAiKey is not configured and no TokenCredential was supplied, " +
+                    "so Azure OpenAI has no credential. Configure the key, or construct OpenAiClient with " +
+                    "the DI TokenCredential (ADR-028; note exception E-2 for this account).");
+            }
+
+            _logger.LogInformation(
+                "AzureOpenAI auth: Managed Identity (canonical, ADR-028). NOTE exception E-2 - if this " +
+                "account still returns 401 to app tokens, restore DocumentIntelligence:OpenAiKey.");
+            _client = new AzureOpenAIClient(endpoint, managedIdentityCredential, clientOptions);
+        }
 
         // Register with circuit breaker registry
         _circuitRegistry?.RegisterCircuit(CircuitBreakerRegistry.AzureOpenAI);

@@ -1,14 +1,9 @@
 {
   "configProperties": {
     "System.Runtime.TieredCompilation": true,
-    "System.Runtime.TieredPGO": true
+    "System.Runtime.TieredPGO": true,
+    "System.Reflection.Metadata.MetadataUpdater.IsSupported": false,
+    "Microsoft.PowerPlatform.Dataverse.Client.TelemetryOptOut": true
   },
-  "runtimeOptions": {
-    "tfm": "net8.0",
-    "rollForward": "LatestMinor",
-    "configProperties": {
-      "System.Reflection.Metadata.MetadataUpdater.IsSupported": false,
-      "Microsoft.PowerPlatform.Dataverse.Client.TelemetryOptOut": true
-    }
-  }
+  "rollForward": "LatestMinor"
 }

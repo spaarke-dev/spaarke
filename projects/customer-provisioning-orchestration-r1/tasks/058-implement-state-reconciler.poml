@@ -1,0 +1,117 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="058" project="customer-provisioning-orchestration-r1">
+  <metadata>
+    <title>Implement state-reconciler BackgroundService (5s Cosmos polling + DAG advancement + idempotency)</title>
+    <phase>C Wave C5 — L2 REST + Reconciler</phase>
+    <gate>blocked</gate>
+    <status>not-started</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Task tags include 'l2-controlplane','job-handler'; implements the core execution engine — bug here = pipeline stalls or double-fires. FR-22/R20 acceptance scope. Modifies .cs files across L2 + integration paths.</rigor-reason>
+    <model-tier>opus</model-tier>
+    <model-tier-reason>Load-bearing concurrent state machine: 5s Cosmos polling loop + DAG advancement + optimistic-concurrency guard + Service Bus MessageId dedup + Redis idempotency lock. High blast radius; a single race condition here corrupts ProvisioningRun state across every customer. Step 3.5.5b Opus-tier work.</model-tier-reason>
+    <effort>xhigh</effort>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <deps>037, 038, 057</deps>
+    <tags>l2-controlplane, job-handler, azure-deployment, testing</tags>
+    <estimated-effort>8-12 hours</estimated-effort>
+  </metadata>
+
+  <prompt>Implement the state-reconciler BackgroundService in the L2 control-plane per spec.md §4.2 handler-execution-model + FR-22. Every 5s, the reconciler polls Cosmos for runs with status ∈ {Running, WaitingOnGate}; for each, it computes DAG advancement (which handler is next given completed handlers), guards against duplicate enqueue via optimistic-concurrency on the run record + Service Bus MessageId dedup + Redis idempotency lock (3-level idempotency per ADR-036), then enqueues the next handler. Cosmos writes use /customerId partition-key predicate. Multiple L2 instances may run reconciler concurrently — verify no duplicate enqueue under concurrent load.</prompt>
+
+  <role>SPAARKE platform developer. Expert in .NET IHostedService / BackgroundService, Cosmos DB SDK optimistic concurrency (ETag), Service Bus MessageId dedup, Redis IdempotencyService lock, DAG traversal, and reactive polling with jitter/backoff. Follow ADRs strictly.</role>
+
+  <goal>File src/server/services/Sprk.Provisioning.ControlPlane/Reconciler/StateReconcilerService.cs exists as a BackgroundService; is registered in L2 DI; polls Cosmos every 5s (configurable) for status ∈ {Running, WaitingOnGate}; computes DAG advancement per §4.1 handler dependencies; 3-level-idempotent enqueue (MessageId + Redis lock + Cosmos ETag guard); zero duplicate enqueues verified under concurrent-instance load test; TimeProvider used instead of Stopwatch/DateTime.UtcNow; unit + integration tests green.</goal>
+
+  <context>
+    <background>Per spec.md FR-22 + R20 + design.md §4.2: L2 REST endpoints enqueue-and-return-202 to avoid App Service 230s HTTP timeout against 30-min handlers. That leaves DAG advancement to a poller. The reconciler is the beating heart of L2 — it observes handler-completion writes in Cosmos, computes what's next, and enqueues. Because multiple L2 App Service instances may exist (scale-out), the reconciler MUST be safe under N-instance concurrent execution.</background>
+    <relevant-files>
+      <file role="new">src/server/services/Sprk.Provisioning.ControlPlane/Reconciler/StateReconcilerService.cs</file>
+      <file role="new">src/server/services/Sprk.Provisioning.ControlPlane/Reconciler/IDagAdvancer.cs</file>
+      <file role="new">src/server/services/Sprk.Provisioning.ControlPlane/Reconciler/StateReconcilerService.Tests.cs</file>
+      <file role="modify">src/server/services/Sprk.Provisioning.ControlPlane/Program.cs</file>
+      <file role="canonical-reference">src/server/api/Sprk.Bff.Api/Services/Jobs/IdempotencyService.cs</file>
+      <file role="canonical-reference">src/server/api/Sprk.Bff.Api/Services/Jobs/</file>
+    </relevant-files>
+    <dependencies>
+      <dependency task="037" status="pending">Cosmos client wiring (partition /customerId)</dependency>
+      <dependency task="038" status="pending">Service Bus enqueue wiring (MessageId semantics)</dependency>
+      <dependency task="057" status="pending">L2 REST endpoints that write initial run records the reconciler advances</dependency>
+    </dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="spec.md FR-22">SCOPE: Poll interval = 5s (configurable); reconciler advances DAG per §4.1 handler dependencies; 3-level-idempotent enqueue.</constraint>
+    <constraint source="ADR-004">SCOPE: The reconciler is NOT itself an IJobHandler; it is orchestration infrastructure — permitted by the ADR-004 Path A exception at L2 scope (CLAUDE.md §6.5, spec.md ADR Tensions row 1).</constraint>
+    <constraint source="ADR-036">SCOPE: Enqueue uses the shared Service Bus + Redis IdempotencyService infrastructure; MessageId = deterministic per (runId, phaseId, attempt) tuple.</constraint>
+    <constraint source="spec.md §4D I3">SCOPE: Every Cosmos read/write in the reconciler uses /customerId partition-key predicate; no cross-partition queries against the runs container.</constraint>
+    <constraint source="project">SCOPE: Use TimeProvider (injected) NOT Stopwatch or DateTime.UtcNow for polling intervals — per r3-era test-architecture standards (CLAUDE.md pointer table: docs/standards/TEST-ARCHITECTURE.md).</constraint>
+    <constraint source="project">SCOPE: Under N-instance concurrent execution, the reconciler MUST NOT double-enqueue — Cosmos optimistic-concurrency (ETag) on the run's currentPhase transition is the primary guard; MessageId dedup + Redis lock are secondary.</constraint>
+    <constraint source="ADR-032">SCOPE: If the reconciler consumes any feature-gated dependency (e.g., SignalR-based progress broadcasting), that dependency follows P1/P2/P3 Null-Object pattern per ADR-032; do NOT add `if (flag) { ... }` conditional registrations to L2 Program.cs.</constraint>
+    <constraint source="CLAUDE.md-§6.5">SCOPE: ADR-004 Path A exception at L2-only scope — do NOT extend this pattern into BFF; L2 is the single documented exception.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>State-reconciler BackgroundService for custom orchestration state machine</topic>
+    <files>
+      <file>.claude/adr/ADR-004-job-contract.md</file>
+      <file>.claude/adr/ADR-036-background-job-infrastructure.md</file>
+      <file>.claude/adr/ADR-032-bff-nullobject-kill-switch.md</file>
+      <file>.claude/constraints/jobs.md</file>
+      <file>docs/standards/TEST-ARCHITECTURE.md</file>
+      <file>projects/customer-provisioning-orchestration-r1/spec.md</file>
+      <file>projects/customer-provisioning-orchestration-r1/design.md</file>
+    </files>
+    <patterns>
+      <pattern name="3-level idempotency" location="src/server/api/Sprk.Bff.Api/Services/Jobs/IdempotencyService.cs">Service Bus MessageId dedup + Redis check/lock + deterministic key; reconciler reuses this exact stack.</pattern>
+      <pattern name="BackgroundService with cancellation-aware polling" location="src/server/api/Sprk.Bff.Api/Services/Jobs/">Existing hosted services show cancellation-token + TimeProvider integration; copy for reconciler shape.</pattern>
+    </patterns>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="0" name="Rigor + load">Emit RIGOR LEVEL (FULL). Load spec.md §4.2 + design.md §4.2 + ADR-036 + this project's CLAUDE.md ADR Tensions.</step>
+    <step order="1" name="Inventory">Read task 037 Cosmos wiring, task 038 Service Bus wiring, task 057 endpoint enqueue path.</step>
+    <step order="2" name="DAG shape">Author IDagAdvancer + concrete implementation encoding the H0/H0.5/H1/H2a/H2b/H3/H4/H5/H6/H7/H8/H9/H10/H11/H12a/b/c/H13/H14 handler dependencies per spec.md §4.1.</step>
+    <step order="3" name="Reconciler">Author StateReconcilerService (BackgroundService); inject TimeProvider, ICosmosRunStore, IDagAdvancer, IIdempotencyService, IServiceBusEnqueuer.</step>
+    <step order="4" name="Poll loop">Implement ExecuteAsync polling: every 5s (via TimeProvider), query Cosmos for runs status ∈ {Running, WaitingOnGate} across all customers (cross-partition read is permitted here per Cosmos design — the reconciler is the ONE place cross-partition reads happen for orchestration; document rationale).</step>
+    <step order="5" name="Advance">For each run: compute next handler(s) via IDagAdvancer; for each candidate, attempt 3-level-idempotent enqueue: Cosmos ETag guard on currentPhase transition → Redis idempotency lock → Service Bus MessageId dedup.</step>
+    <step order="6" name="Register">Register StateReconcilerService in L2 Program.cs via AddHostedService.</step>
+    <step order="7" name="Tests">Unit tests: DAG advancement per handler completion permutation; idempotency (second poll = no-op); ETag conflict handling. Integration test: N=2 concurrent reconciler instances → verify no double-enqueue.</step>
+    <step order="8" name="Verify">dotnet build + dotnet test = green; dotnet format; zero analyzer warnings.</step>
+    <step order="9" name="Index update">Update TASK-INDEX.md: task 058 → ✅.</step>
+    <step order="10" name="Deviations">Document any deviation in projects/customer-provisioning-orchestration-r1/notes/.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If Cosmos polling under load introduces detectable memory pressure (RU spike, GC pressure) OR the DAG stalls under a race condition that ETag/MessageId dedup cannot resolve, STOP and escalate per CLAUDE.md §6 rather than adding retries or lowering the poll interval unilaterally. The reconciler is load-bearing infrastructure.</trigger>
+  </escalation>
+
+  <tools>
+    <tool name="dotnet">Build and test the L2 control-plane project</tool>
+    <tool name="terminal">Run shell commands</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/server/services/Sprk.Provisioning.ControlPlane/Reconciler/StateReconcilerService.cs</output>
+    <output type="code">src/server/services/Sprk.Provisioning.ControlPlane/Reconciler/IDagAdvancer.cs</output>
+    <output type="code">src/server/services/Sprk.Provisioning.ControlPlane/Reconciler/DagAdvancer.cs</output>
+    <output type="code">src/server/services/Sprk.Provisioning.ControlPlane/Program.cs (AddHostedService)</output>
+    <output type="test">src/server/services/Sprk.Provisioning.ControlPlane/Reconciler/StateReconcilerService.Tests.cs</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">StateReconcilerService is registered via AddHostedService in L2 Program.cs; hosted service starts on app start; stops cleanly on shutdown.</criterion>
+    <criterion testable="true">Given a run in Cosmos with status = Running and completedPhases = [H0, H1, H2a], when the reconciler polls, then it computes the next handler set per §4.1 DAG and enqueues via Service Bus with a deterministic MessageId.</criterion>
+    <criterion testable="true">Given two reconciler instances polling concurrently on the same run, when both attempt to advance the same phase, then EXACTLY ONE Service Bus message is enqueued (verified via receiver count in integration test).</criterion>
+    <criterion testable="true">Given a run with status ∈ {Completed, Failed, Quarantined, Cancelled}, when the reconciler polls, then it is skipped (no enqueue).</criterion>
+    <criterion testable="true">Every Cosmos operation in the reconciler is measured via TimeProvider — grep for DateTime.UtcNow or Stopwatch inside StateReconcilerService.cs returns zero matches.</criterion>
+    <criterion testable="true">Negative: reconciler startup with Cosmos unreachable does NOT crash the L2 App Service — it logs a warning and retries on next tick.</criterion>
+    <criterion testable="true">dotnet build exits 0; dotnet test exits 0; zero analyzer warnings.</criterion>
+  </acceptance-criteria>
+
+  <notes>Reference: spec.md FR-22 + R20 + design.md §4.2 + ADR-004 Path A. Sequencing dep for task 059 (I5 concurrency guard) + task 060 (I6 crash recovery).</notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+  </execution>
+</task>

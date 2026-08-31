@@ -32,14 +32,29 @@ public sealed class SpaarkeStorageException : Exception
     /// </summary>
     public string? ErrorCode { get; }
 
+    /// <summary>
+    /// Microsoft Graph request correlation id for the failed call, when the response carried one.
+    /// Sourced from <c>ODataError.Error.InnerError.RequestId</c> / <c>ClientRequestId</c>, falling back
+    /// to the <c>request-id</c> / <c>client-request-id</c> response headers.
+    /// <para>
+    /// This is the value an operator quotes to Microsoft support. Added 2026-08-21 by
+    /// <c>sdap-SPE-admin-app-r2</c> task 001 (spec FR-A01): the id was reachable all along but nothing in
+    /// the repo extracted it, so <c>ProblemDetailsHelper.FromGraphException</c>'s <c>graphRequestId</c>
+    /// parameter had no caller that could populate it.
+    /// </para>
+    /// </summary>
+    public string? GraphRequestId { get; }
+
     public SpaarkeStorageException(
         string message,
         int? statusCode = null,
         string? errorCode = null,
-        Exception? innerException = null)
+        Exception? innerException = null,
+        string? graphRequestId = null)
         : base(message, innerException)
     {
         StatusCode = statusCode;
         ErrorCode = errorCode;
+        GraphRequestId = graphRequestId;
     }
 }

@@ -7,6 +7,7 @@ using Sprk.Bff.Api.Api.Filters;
 using Sprk.Bff.Api.Configuration;
 using Sprk.Bff.Api.Services.Ai;
 using Sprk.Bff.Api.Services.Ai.PublicContracts;
+using Sprk.Bff.Api.Infrastructure.Authentication;
 
 namespace Sprk.Bff.Api.Api.Workspace;
 
@@ -317,8 +318,7 @@ public static class WorkspaceFileEndpoints
     private static string ResolveUserId(HttpContext httpContext)
     {
         return httpContext.Items["UserId"]?.ToString()
-            ?? httpContext.User.FindFirst("oid")?.Value
-            ?? httpContext.User.FindFirst(ClaimTypes.NameIdentifier)?.Value
+            ?? CallerResolution.ResolveObjectId(httpContext.User)
             ?? "unknown";
     }
 

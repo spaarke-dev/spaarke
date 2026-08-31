@@ -1,0 +1,127 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="040" project="sdap-SPE-admin-app-r2">
+  <metadata>
+    <title>Build the WireMock Graph fixture infrastructure (pulled forward from Workstream D)</title>
+    <phase>2 Workstream D-infra — Build the harness that should have existed</phase>
+    <gate>startable</gate>
+    <status>completed</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>TEST-MODIFYING override row (root CLAUDE.md §8): any task modifying tests/** runs code-review + adr-check UNCONDITIONALLY.</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Well-specified test infrastructure with an existing package and a canonical convention to copy.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>W2</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <deps>none</deps>
+    <tags>testing, integration-test, unit-test, bff-api</tags>
+    <estimated-effort>6-8 hours</estimated-effort>
+  </metadata>
+
+  <prompt>Build the WireMock-backed Graph test infrastructure that R1 recommended and never delivered. This is the mechanism that catches the wrong-property-name defect class, so it must exist BEFORE Phase 3 fixes those properties. WireMock.Net 1.5.45 is already referenced — do not add a package.</prompt>
+
+  <role>SPAARKE platform developer. Expert in xUnit, WireMock.Net, and testing HTTP-boundary mapping code. Follow ADR-038 strictly.</role>
+
+  <goal>A reusable WireMock fixture that stands up a fake Graph endpoint, plus proof-of-mechanism tests demonstrating that a wrong property name fails CI.</goal>
+
+  <context>
+    <background>Spec FR-D01. The 359 tests across 14 SpeAdmin files make no HTTP call and stand up no host — the Graph interaction, which is the substance of the app, has zero automated coverage. Phase2IntegrationTests.cs:1315 contains a passing test whose stated purpose is "only to make the manual test plan visible in the test runner". That is how R1 closed 75 tasks in one day with "4176 passing, 0 failing" for an app that had never run successfully. Most of the code is mapping, so mapping tests are where the value is.
+
+DELIBERATE ORDERING DEVIATION: spec §5 lists Workstream D after C. This task is pulled forward into Phase 2 because it has no auth dependency and it is what protects Phase 3's property fixes. Building it afterwards would mean fixing the properties unprotected. Rationale recorded in plan.md §4 Phase 2.</background>
+    <relevant-files>
+      <file role="new">tests/unit/Sprk.Bff.Api.Tests/Api/SpeAdmin/Fixtures/GraphWireMockFixture.cs</file>
+      <file role="new">tests/unit/Sprk.Bff.Api.Tests/Api/SpeAdmin/GraphMappingTests.cs</file>
+      <file role="canonical-reference">tests/unit/Sprk.Bff.Api.Tests/Sprk.Bff.Api.Tests.csproj</file>
+      <file role="canonical-reference">tests/integration/contract/Eval/AgreementClassifyEvalTests.cs</file>
+      <file role="canonical-reference">src/server/api/Sprk.Bff.Api/Infrastructure/Graph/SpeAdminGraphService.cs</file>
+    </relevant-files>
+    <dependencies>
+      <dependency task="none" status="complete">No prerequisites — test project only, no source dependency.</dependency>
+    </dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-038">Scope: mocking level. Mock at module boundaries via WireMock at the HTTP boundary. MUST NOT use Mock&lt;HttpMessageHandler&gt; — explicitly banned.</constraint>
+    <constraint source="ADR-038">Scope: test value. MUST NOT write DI-registration tests or constructor null-check tests — explicitly banned as scaffolding.</constraint>
+    <constraint source="ADR-038">Scope: coverage. Coverage is observation, never a gate. Do not add a coverage threshold.</constraint>
+    <constraint source="NFR-02">Scope: packages. WireMock.Net 1.5.45 is ALREADY referenced at tests/unit/Sprk.Bff.Api.Tests/Sprk.Bff.Api.Tests.csproj:29. MUST NOT add a new package.</constraint>
+    <constraint source="project">Scope: test category convention. Use [Trait("Category", "...")] — the repo convention. MUST NOT use [Category(...)], which design.md wrote incorrectly.</constraint>
+    <constraint source="project">Scope: these tests run in default CI. They MUST NOT require a live tenant, network access, or credentials.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>WireMock HTTP-boundary testing + ADR-038 test architecture</topic>
+    <files>
+      <file>docs/adr/ADR-038-testing-strategy.md</file>
+      <file>docs/standards/TEST-ARCHITECTURE.md</file>
+      <file>.claude/constraints/testing.md</file>
+      <file>tests/CLAUDE.md</file>
+      <file>projects/sdap-SPE-admin-app-r2/spec.md</file>
+    </files>
+    <patterns>
+      <pattern name="integration-tests" location=".claude/patterns/testing/integration-tests.md">Fixture lifecycle and host setup.</pattern>
+      <pattern name="mocking-patterns" location=".claude/patterns/testing/mocking-patterns.md">Where the mock boundary belongs.</pattern>
+      <pattern name="unit-test-structure" location=".claude/patterns/testing/unit-test-structure.md">Test naming and arrangement.</pattern>
+    </patterns>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="0" name="Context + rigor declaration">Declare rigor FULL (TEST-MODIFYING override). Load ADR-038 and TEST-ARCHITECTURE.md.</step>
+    <step order="1">Confirm WireMock.Net is referenced; do NOT add it. Read the existing [Trait("Category", ...)] convention in tests/integration/contract/Eval/.</step>
+    <step order="2">Build a reusable fixture that starts a WireMock server, serves canned Graph responses, and points a GraphServiceClient at it.</step>
+    <step order="3">Design the fixture so a test declares the expected REQUEST shape (path, query, $select) and the canned RESPONSE — both halves matter, since the §3.2 defect class is a wrong property in a request.</step>
+    <step order="4">Write proof-of-mechanism tests over at least two existing mapping paths (a container list and a container-type read).</step>
+    <step order="5">Write the demonstrator: a test asserting the $select field set, proven to FAIL when a property name is wrong. This is the acceptance mechanism for spec success criterion 18.</step>
+    <step order="6">Verify these tests run offline with no credentials: dotnet test with network access unavailable if possible.</step>
+    <step order="7">Document the fixture's usage in a short README beside it so Phase 3 tasks can add coverage without re-deriving it.</step>
+    <step order="8">Run dotnet test for the SpeAdmin test area — all green.</step>
+    <step order="9">Update TASK-INDEX.md: task 040 → ✅. Document deviations in notes/.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If the Graph SDK's client construction cannot be pointed at a WireMock base address without production-code changes, STOP and escalate rather than modifying production code from a test task — the seam change is a design decision that affects task 021 (Graph Endpoint setting).</trigger>
+  </escalation>
+
+  <justification>
+    <existing>No WireMock fixture exists for SpeAdmin — grep across tests/ shows WireMock.Net referenced in the csproj but no Graph fixture. The 14 SpeAdmin test files make no HTTP call.</existing>
+    <extension>No existing fixture to extend. The PACKAGE is reused (already referenced), so no new dependency is introduced — only new test code.</extension>
+    <cost-of-doing-nothing>The entire wrong-property-name defect class (spec §3.2: deletedDateTime, majorVersionLimit, storageUsedInBytes) ships undetected, exactly as it did in R1. Phase 3 would fix those properties with nothing preventing the next one.</cost-of-doing-nothing>
+  </justification>
+
+  <tools>
+    <tool name="dotnet">Build and run tests</tool>
+  </tools>
+
+  <outputs>
+    <output type="test">tests/unit/Sprk.Bff.Api.Tests/Api/SpeAdmin/Fixtures/GraphWireMockFixture.cs</output>
+    <output type="test">tests/unit/Sprk.Bff.Api.Tests/Api/SpeAdmin/GraphMappingTests.cs</output>
+    <output type="doc">tests/unit/Sprk.Bff.Api.Tests/Api/SpeAdmin/Fixtures/README.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">A reusable WireMock fixture exists that serves canned Graph responses to a GraphServiceClient.</criterion>
+    <criterion testable="true">Tests can assert the outgoing REQUEST shape (path, query, $select field set), not only the response mapping.</criterion>
+    <criterion testable="true">Given a deliberately wrong property name in a $select, when the test suite runs, then it FAILS — demonstrating spec success criterion 18.</criterion>
+    <criterion testable="true">Negative: the tests pass with no network access, no credentials, and no live tenant.</criterion>
+    <criterion testable="true">Negative: no Mock&lt;HttpMessageHandler&gt; is used anywhere in the new tests (ADR-038 ban).</criterion>
+    <criterion testable="true">Negative: no DI-registration or constructor null-check tests were added (ADR-038 ban).</criterion>
+    <criterion testable="true">No new NuGet package was added (NFR-02); WireMock.Net 1.5.45 is reused.</criterion>
+    <criterion testable="true">Category traits use [Trait("Category", "...")], not [Category(...)].</criterion>
+    <criterion testable="true">dotnet test passes for the SpeAdmin area; dotnet build 0 errors.</criterion>
+  </acceptance-criteria>
+
+  <notes>Spec FR-D01. Pulled forward from Workstream D into Phase 2 — deliberate deviation from spec §5 ordering, rationale in plan.md §4. Every Phase 3 task adds its mapping coverage onto this fixture. Parallel-safe: test project only.
+
+COMPLETED 2026-08-21 — full record in notes/task-040-completion.md. 10 tests, 10,602 passed / 0 failed, ArchTests 36/36. NO production file modified.
+
+Four things a later task needs to know:
+
+1. WireMock was UNUSABLE repo-wide and the recorded reason was wrong. Every request 500'd because WireMock.Net 1.5.45 loads MimeKitLite at runtime and the test csproj had ExcludeAssets=all on it (stripping the runtime asset, not just the compile-time one it was added to suppress). Fixed to ExcludeAssets=compile. The six tests in Integration/GraphApiWireMockTests.cs had been skipped as "WireMock.Net path matching ... requires WireMock configuration investigation" — a wrong diagnosis that kept the one tool able to catch the §3.2 defect class dark for all of R1.
+
+2. ESCALATION TRIGGER EVALUATED — DID NOT FIRE. 47 SpeAdminGraphService methods already take GraphServiceClient as a parameter; the hardcoded beta base address is confined to the private CreateGraphClient* helpers serving GetClientForConfigAsync. Task 021's base-address decision is untouched and unprejudiced.
+
+3. KEEP-PATH DEVIATION. The POML's relevant-files put these under tests/unit/Sprk.Bff.Api.Tests/Api/SpeAdmin/, which is not one of ADR-038's seven KEEP paths (and tests/unit/domain/** forbids I/O). Placed at tests/integration/contract/SpeAdmin/ instead. The POML justification's claim that no Graph fixture existed was also wrong — two did; both were assessed under CLAUDE.md §11 and correctly not extended.
+
+4. 🔴 NEW DEFECT FOR TASK 022. The fixture found it on first run: SpeAdminGraphService.cs:4368 guards deletedDateTime with `rawDeletedAt is string`, but Kiota stores a System.DateTime (probed). The guard can never be true, so EVERY recycle-bin row reports a null deletion timestamp. Not fixed here — 040 is parallel-safe because it touches no production code, and W2's one GraphService slot belongs to task 004. Pinned as a characterization test that must fail and be updated when 022 lands.</notes>
+
+  <execution><skill>.claude/skills/task-execute/SKILL.md</skill></execution>
+</task>

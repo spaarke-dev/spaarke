@@ -1,0 +1,108 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="043" project="customer-provisioning-orchestration-r1">
+  <metadata>
+    <title>Implement H1 Subscription Readiness Handler (ARM + Lighthouse Verification)</title>
+    <phase>C Wave C4 — Handler Implementations</phase>
+    <gate>blocked</gate>
+    <status>not-started</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Task tags include 'l2-controlplane','job-handler'; modifies .cs files; implements pre-Bicep gating handler with subscription-scoped auth surface.</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Single-component handler with complete spec (FR-03, §4.1 H1 row); ARM verification is a canonical az CLI pattern; not cross-cutting.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>waveC4-parallel</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <deps>036, 041</deps>
+    <tags>l2-controlplane, job-handler, azure-deployment</tags>
+    <estimated-effort>2-4 hours</estimated-effort>
+  </metadata>
+
+  <prompt>Implement the H1 subscription-readiness handler as an IJobHandler in the L2 control-plane. H1 verifies the target Azure subscription is reachable via ARM (az account show equivalent). For Model 2 CustomerOwned tenancy, additionally verifies Lighthouse delegation is in place and the resource-group scope is accessible. Idempotency key: subready-{customerId}.</prompt>
+
+  <role>SPAARKE platform developer. Expert in IJobHandler contract (ADR-004), Azure Resource Manager REST API + Azure.ResourceManager SDK, Lighthouse delegated resource management, and 3-level idempotency. Follow ADRs strictly.</role>
+
+  <goal>File src/server/services/Sprk.Provisioning.ControlPlane/Handlers/H1SubscriptionReadinessHandler.cs exists, implements IJobHandler, registers in L2 DI, and: (a) invokes ARM subscription-show against the target sub, (b) if ProvisioningRun.parameters.tenancyModel == "CustomerOwned", additionally verifies Lighthouse delegation to Spaarke's managing tenant + resource-group scope accessible, (c) writes verification results to Cosmos interStepState, (d) asserts idempotency key subready-{customerId}. Unit tests cover both Spaarke-owned and CustomerOwned branches + subscription-unreachable failure.</goal>
+
+  <context>
+    <background>Per spec.md FR-03 and design.md §4.1 H1 row: H1 exists as a low-cost readiness check BEFORE H2a (30-min Bicep). If the target subscription is unreachable OR Lighthouse delegation is missing for a CustomerOwned tenancy, we fail fast before spending on a doomed Bicep run.</background>
+    <relevant-files>
+      <file role="new">src/server/services/Sprk.Provisioning.ControlPlane/Handlers/H1SubscriptionReadinessHandler.cs</file>
+      <file role="new">src/server/services/Sprk.Provisioning.ControlPlane/Handlers/H1SubscriptionReadinessHandler.Tests.cs</file>
+      <file role="canonical-reference">src/server/api/Sprk.Bff.Api/Services/Jobs/</file>
+      <file role="modify">src/server/services/Sprk.Provisioning.ControlPlane/Program.cs</file>
+    </relevant-files>
+    <dependencies>
+      <dependency task="036" status="pending">L2 project scaffold — Wave C3</dependency>
+      <dependency task="041" status="pending">H0 preflight — upstream in DAG</dependency>
+    </dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-004">Single IJobHandler implementation registered in L2 DI (not BFF DI per design.md §5.2).</constraint>
+    <constraint source="ADR-010">Register in L2 control-plane; do NOT add to BFF DI.</constraint>
+    <constraint source="ADR-036">Reuse the shared background-job infrastructure (Service Bus + Redis IdempotencyService).</constraint>
+    <constraint source="ADR-044">Any Dataverse GUID references (subscription lookup) use canonicalized format.</constraint>
+    <constraint source="project">Idempotency key: subready-{customerId} — no version token (subscription readiness has no versioned artifact).</constraint>
+    <constraint source="project">CustomerOwned tenancy (per D4 + design.md §3A A2) requires Lighthouse delegation check; SpaarkeOwned skips Lighthouse.</constraint>
+    <constraint source="spec.md §4D I1">H1 receives target subscriptionId + tenantId from run parameters explicitly; no default subscription/tenant fallback.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>ARM subscription verification + Lighthouse delegation check in L2 handler</topic>
+    <files>
+      <file>.claude/adr/ADR-004-job-contract.md</file>
+      <file>.claude/adr/ADR-027-subscription-isolation-and-dataverse-solution-management.md</file>
+      <file>.claude/adr/ADR-036-background-job-infrastructure.md</file>
+      <file>.claude/constraints/jobs.md</file>
+      <file>projects/customer-provisioning-orchestration-r1/spec.md</file>
+      <file>projects/customer-provisioning-orchestration-r1/design.md</file>
+      <file>projects/customer-provisioning-orchestration-r1/CLAUDE.md</file>
+    </files>
+    <patterns>
+      <pattern name="reference-handler-shape" location="src/server/api/Sprk.Bff.Api/Services/Jobs/">Canonical IJobHandler exemplar — copy constructor injection, HandleAsync pattern, telemetry.</pattern>
+    </patterns>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="0">Declare rigor level (FULL) and load knowledge files.</step>
+    <step order="1">Author H1SubscriptionReadinessHandler.cs — implement IJobHandler; inject IIdempotencyService, ICosmosRunStore, IArmSubscriptionProbe, ILighthouseProbe.</step>
+    <step order="2">Implement subscription-reachability check via ARM (Azure.ResourceManager or az CLI wrapper).</step>
+    <step order="3">Implement CustomerOwned-branch Lighthouse delegation check.</step>
+    <step order="4">Author unit tests: (a) SpaarkeOwned happy path, (b) CustomerOwned happy path with Lighthouse present, (c) CustomerOwned failure — Lighthouse missing, (d) subscription unreachable failure, (e) idempotency (second call = no-op).</step>
+    <step order="5">Register in L2 Program.cs DI.</step>
+    <step order="6">Run dotnet build + dotnet test for the L2 project; verify green + zero analyzer warnings.</step>
+    <step order="7">Update TASK-INDEX.md: change task 043 status from 🔲 to ✅.</step>
+    <step order="8">Document any deviations in projects/customer-provisioning-orchestration-r1/notes/.</step>
+  </steps>
+
+  <justification>
+    <existing>No existing subscription-readiness handler in BFF or scripts (grep for "SubscriptionReadiness" returns none). Closest neighbor: az login + az account show usage in scripts/Provision-Customer.ps1 step 1.</existing>
+    <extension>No — the PS script check is inline and not addressable as a resumable handler; H1 needs to be an IJobHandler for L2 DAG advancement and 3-level idempotency.</extension>
+    <cost-of-doing-nothing>Without H1, an unreachable target subscription (typo in customerId → wrong sub) or a missing Lighthouse delegation (CustomerOwned) would only surface at H2a (30-min Bicep), leaving 30 minutes of wasted deploy attempts + a corrupt half-provisioned state. H1 is the last cheap gate before Bicep.</cost-of-doing-nothing>
+  </justification>
+
+  <tools>
+    <tool name="dotnet">Build and test .NET projects</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/server/services/Sprk.Provisioning.ControlPlane/Handlers/H1SubscriptionReadinessHandler.cs</output>
+    <output type="test">src/server/services/Sprk.Provisioning.ControlPlane/Handlers/H1SubscriptionReadinessHandler.Tests.cs</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Given tenancyModel == "SpaarkeOwned" and the target subscriptionId is reachable via ARM, when HandleAsync runs, then it returns success and writes ARM subscription metadata to Cosmos interStepState.</criterion>
+    <criterion testable="true">Given tenancyModel == "CustomerOwned" and Lighthouse delegation is present with RG scope accessible, when HandleAsync runs, then it returns success.</criterion>
+    <criterion testable="true">Given tenancyModel == "CustomerOwned" and Lighthouse delegation is MISSING, when HandleAsync runs, then it returns failure with distinct rejection code "LighthouseDelegationMissing".</criterion>
+    <criterion testable="true">Given the target subscriptionId is unreachable (invalid or no permissions), when HandleAsync runs, then it returns failure with distinct rejection code "SubscriptionUnreachable".</criterion>
+    <criterion testable="true">Idempotency: two invocations for the same customerId — second call is a no-op (subready-{customerId} match).</criterion>
+    <criterion testable="true">Negative: H1 invoked without tenantId parameter returns failure (§4D I1 no-hardcoded-tenant); no ARM call fired against a default tenant.</criterion>
+    <criterion testable="true">Handler registers in L2 DI; dotnet build + dotnet test exit 0; zero analyzer warnings.</criterion>
+  </acceptance-criteria>
+
+  <notes>Reference: spec.md FR-03; design.md §4.1 H1 row + D4 subscription-per-customer + §3A A2 CustomerOwned tenancy. H1 is a cheap pre-Bicep gate.</notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+  </execution>
+</task>

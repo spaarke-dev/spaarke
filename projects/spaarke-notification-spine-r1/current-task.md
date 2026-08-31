@@ -1,7 +1,7 @@
 # Current Task State — spaarke-notification-spine-r1
 
-> **Last Updated**: 2026-07-24 (context-handoff — ALL Phase 1–5 ON MASTER; UAT idempotency fix shipped; only 090 remains).
-> **Recovery**: Read "Quick Recovery" first. Branch `work/spaarke-notification-spine-r1` = **origin/master = `3d46f02cb`** (0 ahead, 0 behind, working tree CLEAN — everything merged). **Phases 1–5 COMPLETE + on master.** **Only 090 (wrap-up, main-session) remains.** NOT deployed (owner's other project handles BFF deploy).
+> **Last Updated**: 2026-08-20 (context-handoff — TWO new workstreams in flight: doc reconciliation + OOB-notifications feature spec; big finding: suggestion renderer was REMOVED by a sibling project).
+> **Recovery**: Read "Quick Recovery" + the "2026-08-20 workstreams" section below. Branch `work/spaarke-notification-spine-r1` = `4c78e7393`; **origin/master = `d6b34f1ed` (branch is 4 BEHIND — merge master before editing)**; 0 unmerged; 2 uncommitted = researcher memory files (OOB findings — commit them). Phases 1–5 shipped + on master. **SignalR UAT-10 RESOLVED** (rotated key re-copied, live). **Two follow-ups tracked: ISS-002 #802 (deploy dev), ISS-003 #803 (KV ref).**
 
 ---
 
@@ -9,10 +9,45 @@
 
 | Field | Value |
 |-------|-------|
-| **Task** | **090 — Project wrap-up, Phase 6 — NOT STARTED** (deps ALL✅). All prior tasks 024–052 ✅ + on master. Phase 5 COMPLETE. |
-| **Step** | Begin task 090 (`tasks/090-project-wrap-up.poml`, opus/high, **main-session** — writes to `.claude/`). Scope: **promote ADR-047 Proposed→Accepted** (gate met: Layers A–D shipped + seam tests green + producer end-to-end) + **write ADR-047 full version** (`docs/adr/ADR-047-*.md`) + doc-drift audit + repo-cleanup. NOTE: `/test-diet` + `/code-review` ALREADY RUN this session (both clean — reports in notes/). |
-| **Status** | **Everything merged to master `3d46f02cb`, clean.** Phase 1–5 done. Sibling `spaarkeai-assistant-enhancements-r1` layered UAT polish on top (also on master — see below). |
-| **Next Action** | **"work on task 090"** (wrap-up, main-session). No master-merge needed — branch already = master. |
+| **Active work** | **(a) DOC RECONCILIATION — ✅ DONE 2026-08-20.** **(b) OOB feature — ✅ HYDRATED as a NEW project `spaarke-notification-spine-r2`** (investigation/assessment written; pre-spec). Remaining: **task 090 wrap-up** (ADR-047 Proposed→Accepted + doc-drift + repo-cleanup). |
+| **Step** | (a) 6 canonical/coordination docs corrected to reality (renderer removed; suggestions produced-but-unrendered; dismiss endpoint; read-time expiry; corrected component model). (b) `projects/spaarke-notification-spine-r2/` created with README + CLAUDE.md + current-task.md + `notes/INVESTIGATION-AND-ASSESSMENT.md`. |
+| **Status** | Merged master. Next: commit + push + merge these edits, then 090. |
+| **Next Action** | Commit/push/merge-to-master the (a) doc edits + (b) r2 folder → then task 090 wrap-up. For r2 execution: run `design-to-spec` on `projects/spaarke-notification-spine-r2/notes/INVESTIGATION-AND-ASSESSMENT.md`. |
+
+### ⚠️ 2026-08-20 workstreams — CRITICAL context (read before resuming)
+
+**THE BIG FINDING — the proactive-suggestion Assistant renderer (tasks 051/052) was REMOVED.**
+`spaarkeai-assistant-enhancements-r2` task 001 (FR-E1) intentionally removed the spine-driven proactive-suggestion surface from the Assistant (the "You have N new notifications" banner + suggestion cards) and **DELETED `useSuggestionCards.tsx`**. The `suggestion` handler in `notificationsBootstrap.ts` is now a **log-only stub**. So today: **the spine BACKEND is fully live** (outbox, delivery, 3 endpoints incl. NEW `POST /api/notifications/{outboxRowId}/dismiss`, idempotent producer, 9-field SuggestionEnvelope) **but the SpaarkeAi suggestion RENDERER is gone.** The one live UI consumer is `communication-arrived` (Communications-widget badge/toast via `Spaarke.Communication.Components/.../useCommunicationArrivals.ts`). `DailyBriefingSuggestionProducer` still writes suggestion outbox rows on interactive briefing render, but **nothing displays them** (r2 deemed harmless; gating the producer was out of r2 scope). `SuggestionCard.tsx` is RETAINED only as a shared presentational primitive for `useRerunFullAnalysisCard` (client-local rerun card — NOT a spine consumer).
+
+**OWNER DECISIONS (2026-08-20) — rebuild suggestions as OOB Dataverse notifications:**
+1. OOB Dataverse **notification bell** is the correct surface (NOT custom Assistant UI).
+2. Click opens the record as a **MODAL** (center dialog), not navigate-away/new-tab.
+3. **7-day re-notify window** for dedup; must NOT repeat or reappear-after-dismiss.
+
+**RESEARCHER FINDINGS (OOB `appnotification` capabilities — full memo `.claude/agent-memory/researcher/appnotification-modal-click-schema-2026-08-20.md`):**
+- **Modal-on-click = NATIVELY supported**: `appnotification` `Data.Actions[].data` with `type:"url"` + **`navigationTarget:"dialog"`** → opens record in center dialog (= `navigateTo target:2`). Constraint: fires from a **labeled action link** ("Review matter" button), NOT the raw title/body click. URL must be **same-origin `?pagetype=entityrecord&etn=<entity>&id=<guid>`** form (2026 security blocks bare-relative/js/data → silent no-op). Action types: `url` | `sidepane` | `teamsChat`; navigationTarget: `dialog`|`inline`(default,full-page)|`newWindow`.
+- **Background generation confirmed**: directly Create-ing `appnotification` rows needs only Create priv (no SendAppNotification priv). Delivery = **MDA shell POLLING** (app-start + page-nav if >1min stale), NOT real-time push. `OwnerId`=systemuser only. `TTLInSeconds` default 14d. `ToastType` Hidden=bell-only / Timed=toast pop. Data JSON ≤5000 chars.
+- **Dedup limitation**: `appnotification` is an **Elastic table with NO read/dismiss state — dismiss DELETES the row.** It cannot self-dedup or answer "was this dismissed." → **MUST use our own ledger. `sprk_notificationoutbox` IS the ledger** (per user/kind/regarding + `sprk_dismissed` + expiry).
+
+**THE OOB FEATURE ARCHITECTURE (agreed) — "Proactive OOB Dataverse notifications from Daily-Briefing high-priority items":**
+1. **NEW scheduled background job** (daily) — computes each user's high-priority items. **Decouples from the interactive briefing render** (TODAY the producer runs ONLY on `POST /api/ai/daily-briefing/render` → `DailyBriefingCompositeService.RenderAsync` → `ProduceAsync`; so if the user never opens the briefing → no notifications — this is the gap being fixed).
+2. Per item, **deduped against `sprk_notificationoutbox` with a 7-DAY re-notify window** (skip if a prior nudge for (owner, kind, regarding) exists within 7d): write the outbox row (dedup ledger) **and** write the OOB `appnotification` via `NotificationService.CreateNotificationAsync` (`Services/NotificationService.cs`) with `title="Review {Name}"` + a "Review matter" action → `navigationTarget:"dialog"` + same-origin `?pagetype=entityrecord&etn=<type>&id=<id>` URL.
+3. **Reuses** the outbox (dedup) + `NotificationService` (writer). Does NOT need the SignalR spine / custom client for suggestions (those stay for `communication-arrived`). `NotificationService.CreateNotificationAsync(userId,title,body?,category?,priority,actionUrl?,regardingId?,aiMetadata?)` exists; `BuildActionData` puts actionUrl/regardingId in `data` — **needs a small tweak to emit the `Actions[].data.navigationTarget="dialog"` + same-origin `?pagetype` URL shape** per the researcher schema.
+
+**WORKSTREAM (a) — DOC RECONCILIATION (edits NOT yet made; audit-agent findings):**
+Update to CURRENT reality (renderer removed; suggestions produced-but-unrendered; dismiss endpoint; corrected component model):
+- `docs/architecture/SPAARKE-NOTIFICATION-SPINE-ARCHITECTURE.md` — §Layer-C endpoints (~L52: ADD `POST /{outboxRowId}/dismiss`), §Consumers table (~L68-72: `useSuggestionCards.tsx` DELETED — rewrite to the real consumer set below), §Flow B (~L83-87: renderer gone — reframe as "produced, currently unrendered"), Entry-points (~L118: dead `useSuggestionCards` path → `notificationsBootstrap.ts`).
+- `docs/guides/NOTIFICATIONS-AND-SUGGESTIONS-USER-GUIDE.md` — Part 1 (~L11-20 "clicking the card opens a modal" — NOT present now), hard-req #2 (~L41 "suggestion renderer" gone).
+- `projects/spaarke-notification-spine-r1/notes/handoffs/CROSS-PROJECT-CONSUMPTION-REPORT.md` — ~L70 "renderer already built — you get the consumer for free" is FALSE; ~L15 TL;DR; §1 (~L41-43) add dismiss endpoint.
+- `docs/data-model/sprk_notificationoutbox.md` — ~L47/L64 "expiry sweep" contradicts read-time-filter → fix to read-time filter.
+- `docs/architecture/ASSISTANT-SURFACE-LAUNCH-MECHANISM.md` (~L25/30/181 `useSuggestionCards` refs) + `docs/standards/ASSISTANT-UI-ELEMENT-CRITERIA.md` (~L84 `useSuggestionCards` ref) → fix deleted-file references.
+- **Current consumer component model (ground truth for the rewrite)**: `notificationsBootstrap.ts` (log-only handlers; the ONE active wiring) · `Spaarke.Notifications/src/NotificationsClient.ts` (shared lib; #688 per-outboxRowId dedup) · `Spaarke.Communication.Components/.../useCommunicationArrivals.ts` (+ CommunicationsWorkspaceWidget) = the REAL active UI consumer (communication-arrived badge/toast) · `SuggestionCard.tsx` = shared presentational primitive for `useRerunFullAnalysisCard` (NOT a spine consumer) · `ProactiveCardStack.tsx` = "You have N pending ACTIONS" disclosure (action cards, NOT spine notifications). `useSuggestionCards.tsx` = **DELETED**.
+- **Superseded docs (KEEP, optional "superseded by ADR-047" banner — NONE delete)**: 2 researcher memos (`assistant-push-channel-2026-07-15`, `signalr-vs-sse-notification-fabric-2026-07-16`) = prior art; the r1.5-scope-moved note = supersession record.
+- ADR-047 status still "Proposed" (both copies) — gate met; promotion to Accepted is the 090/owner call.
+
+**WORKSTREAM (b) — OOB SPEC (NOT started):** scope the feature above as a small spec + tasks (scheduled job + appnotification writer w/ modal `navigationTarget:dialog` action + outbox-as-dedup-ledger 7d window). Decide project home: NEW mini-project vs a new notification-spine Phase 7. Verify `NotificationService.BuildActionData` emits the exact researcher schema (Actions[].data.navigationTarget + `?pagetype` same-origin URL).
+
+**Deferred (still true): task 090 wrap-up** (ADR-047 Proposed→Accepted + full version + doc-drift + repo-cleanup) after (a)/(b).
 
 ### Session since 052 (2026-07-22 → 07-24) — what happened
 - **Merged all Phase 3/4/5 to master** (was batched; now `3d46f02cb`). Clean FF each time; integrated ~15+ commits of sibling-project work with 0 conflicts.

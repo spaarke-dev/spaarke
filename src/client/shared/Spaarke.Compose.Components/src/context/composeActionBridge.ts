@@ -138,6 +138,28 @@ export type ComposeSaveHandler = () => void | Promise<void>;
  */
 export type ComposeSaveCompleted = (info: { documentRecordId: string; fileName?: string }) => void;
 
+/**
+ * READ the open document's current text WITH its paragraph identifiers, for a whole-document AI pass
+ * (spaarkeai-compose-r8 task 054, FR-C03). Flows ASSISTANT → WORKSPACE: the Assistant pane owns the
+ * `compose-revise-document` dispatch but holds no paraId map, and the editor holds both.
+ *
+ * PULL, not push, and deliberately so: the value must be CURRENT at DISPATCH time. Pushing it on
+ * registration (the way {@link ComposeActiveDocumentRegistration} pushes bytes on mount) would go stale
+ * the moment the user typed, and the model would be handed identifiers for a document that no longer
+ * matches the one placement resolves against.
+ *
+ * Returns `null` when no editor is registered (standalone mount, no Compose tab open) — the caller then
+ * dispatches exactly as it did before, with no annotated text and no closed set.
+ *
+ * @see ../widgets/composeAnchoredDocumentText.ts — the annotation + closed set this returns
+ */
+export type ComposeAnchoredDocumentTextProvider = () => {
+  /** The document text with each id-bearing paragraph prefixed `[PARAID] `. */
+  text: string;
+  /** The paraIds present in `text`, in document order — the closed set the model must choose from. */
+  paraIds: readonly string[];
+} | null;
+
 export interface ComposeActionBridgeValue {
   /**
    * Stable enqueue delegating to the currently-registered host dispatcher.
@@ -215,6 +237,17 @@ export interface ComposeActionBridgeValue {
   setComposeSaveCompletedHandler: (handler: ComposeSaveCompleted | null) => void;
   /** True when a host save-completed handler is currently registered. */
   hasComposeSaveCompletedHandler: boolean;
+
+  /**
+   * Stable delegate to the currently-registered editor anchored-document-text provider (task 054).
+   * Returns `null` when no editor is registered — the Assistant gates on
+   * {@link hasComposeAnchoredDocumentTextProvider} via {@link useComposeAnchoredDocumentText}.
+   */
+  readComposeAnchoredDocumentText: ComposeAnchoredDocumentTextProvider;
+  /** Register (or clear, with `null`) the editor's anchored-document-text provider (workspace-side). */
+  setComposeAnchoredDocumentTextProvider: (provider: ComposeAnchoredDocumentTextProvider | null) => void;
+  /** True when an editor anchored-document-text provider is currently registered. */
+  hasComposeAnchoredDocumentTextProvider: boolean;
 }
 
 export const ComposeActionBridgeContext = React.createContext<ComposeActionBridgeValue | null>(null);
@@ -261,6 +294,10 @@ export function ComposeActionBridgeProvider(props: ComposeActionBridgeProviderPr
 
   const saveCompletedHandlerRef = React.useRef<ComposeSaveCompleted | null>(null);
   const [hasComposeSaveCompletedHandler, setHasComposeSaveCompletedHandler] = React.useState<boolean>(false);
+
+  const anchoredDocTextRef = React.useRef<ComposeAnchoredDocumentTextProvider | null>(null);
+  const [hasComposeAnchoredDocumentTextProvider, setHasComposeAnchoredDocumentTextProvider] =
+    React.useState<boolean>(false);
 
   const setDispatcher = React.useCallback((dispatcher: ComposeActionEnqueue | null): void => {
     dispatcherRef.current = dispatcher;
@@ -345,6 +382,20 @@ export function ComposeActionBridgeProvider(props: ComposeActionBridgeProviderPr
     saveCompletedHandlerRef.current?.(info);
   }, []);
 
+  const setComposeAnchoredDocumentTextProvider = React.useCallback(
+    (provider: ComposeAnchoredDocumentTextProvider | null): void => {
+      anchoredDocTextRef.current = provider;
+      setHasComposeAnchoredDocumentTextProvider(provider !== null);
+    },
+    []
+  );
+
+  const readComposeAnchoredDocumentText = React.useCallback<ComposeAnchoredDocumentTextProvider>(() => {
+    // No editor registered (no Compose tab open / standalone mount) → null, and the Assistant
+    // dispatches without an annotated document exactly as it did before task 054.
+    return anchoredDocTextRef.current?.() ?? null;
+  }, []);
+
   const value = React.useMemo<ComposeActionBridgeValue>(
     () => ({
       enqueue,
@@ -368,6 +419,9 @@ export function ComposeActionBridgeProvider(props: ComposeActionBridgeProviderPr
       notifyComposeSaveCompleted,
       setComposeSaveCompletedHandler,
       hasComposeSaveCompletedHandler,
+      readComposeAnchoredDocumentText,
+      setComposeAnchoredDocumentTextProvider,
+      hasComposeAnchoredDocumentTextProvider,
     }),
     [
       enqueue,
@@ -391,6 +445,9 @@ export function ComposeActionBridgeProvider(props: ComposeActionBridgeProviderPr
       notifyComposeSaveCompleted,
       setComposeSaveCompletedHandler,
       hasComposeSaveCompletedHandler,
+      readComposeAnchoredDocumentText,
+      setComposeAnchoredDocumentTextProvider,
+      hasComposeAnchoredDocumentTextProvider,
     ]
   );
 
@@ -571,4 +628,32 @@ export function useRegisterComposeSaveCompletedHandler(handler: ComposeSaveCompl
 export function useComposeSaveCompleted(): ComposeSaveCompleted | null {
   const bridge = useComposeActionBridge();
   return bridge && bridge.hasComposeSaveCompletedHandler ? bridge.notifyComposeSaveCompleted : null;
+}
+
+/**
+ * Workspace-side registration hook (task 054). Call from the pane that owns the live editor
+ * (ComposeWorkspace) to publish its anchored-document-text provider — the one that walks the editor's
+ * blocks and returns the text with each paragraph's `w14:paraId` prefixed. Effect-scoped: re-registers
+ * on identity change, clears on unmount. No-op outside a {@link ComposeActionBridgeProvider}.
+ */
+export function useRegisterComposeAnchoredDocumentTextProvider(provider: ComposeAnchoredDocumentTextProvider): void {
+  const bridge = useComposeActionBridge();
+  const setProvider = bridge?.setComposeAnchoredDocumentTextProvider;
+  React.useEffect(() => {
+    if (!setProvider) return;
+    setProvider(provider);
+    return () => setProvider(null);
+  }, [setProvider, provider]);
+}
+
+/**
+ * Assistant-side consumer hook (task 054). Returns the stable
+ * {@link ComposeAnchoredDocumentTextProvider} delegate when an editor provider is registered, else
+ * `null` (no Compose tab open / standalone mount / isolated test). `ConversationPane` calls it at
+ * whole-document dispatch time; a `null` here — or a `null` RESULT — means the dispatch carries no
+ * annotated text and no closed set, which is exactly the pre-054 behaviour rather than a broken one.
+ */
+export function useComposeAnchoredDocumentText(): ComposeAnchoredDocumentTextProvider | null {
+  const bridge = useComposeActionBridge();
+  return bridge && bridge.hasComposeAnchoredDocumentTextProvider ? bridge.readComposeAnchoredDocumentText : null;
 }

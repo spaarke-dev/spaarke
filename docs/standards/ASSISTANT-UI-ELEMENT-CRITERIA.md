@@ -81,7 +81,7 @@ Rules:
 |---|---|
 | Bubble | `@spaarke/ui-components` `SprkChat` transcript |
 | Chip (next-step) | `SprkChatSuggestions.tsx` (typed SSE `suggestions`: capability / question / action — §5a) · `ConsumerChips` (chiptransitions) |
-| Card (proactive) | `SuggestionCard.tsx` + `useSuggestionCards.tsx` (notification spine) |
+| Card (proactive) | ⚠️ **renderer removed** — `useSuggestionCards.tsx` was deleted (`spaarkeai-assistant-enhancements-r2`); `SuggestionCard.tsx` survives only as a shared visual primitive for `useRerunFullAnalysisCard.tsx`. The proactive spine's suggestions are being rebuilt as OOB Dataverse bell notifications (`spaarke-notification-spine-r2`), not an in-Assistant card. |
 | Card (launcher) | `GetStartedCardsWidget` |
 | Tab | Workspace `widget_load` (see [SURFACE-LAUNCH-MECHANISM](../architecture/ASSISTANT-SURFACE-LAUNCH-MECHANISM.md)) |
 

@@ -1,5 +1,6 @@
 using Microsoft.AspNetCore.Mvc;
 using Sprk.Bff.Api.Infrastructure.Graph;
+using Sprk.Bff.Api.Infrastructure.Errors;
 using Sprk.Bff.Api.Models.SpeAdmin;
 
 namespace Sprk.Bff.Api.Api.SpeAdmin;
@@ -159,7 +160,7 @@ public static class ContainerColumnEndpoints
             logger.LogError(
                 ex, "ListColumns: unexpected error for container '{ContainerId}', configId {ConfigId}, TraceId={TraceId}",
                 containerId, configGuid, context.TraceIdentifier);
-            return UnexpectedProblem("listing columns", context);
+            return UnexpectedProblem("listing columns", ex, context);
         }
     }
 
@@ -234,7 +235,7 @@ public static class ContainerColumnEndpoints
             logger.LogError(
                 ex, "CreateColumn: unexpected error for container '{ContainerId}', configId {ConfigId}, TraceId={TraceId}",
                 containerId, configGuid, context.TraceIdentifier);
-            return UnexpectedProblem("creating column", context);
+            return UnexpectedProblem("creating column", ex, context);
         }
     }
 
@@ -345,7 +346,7 @@ public static class ContainerColumnEndpoints
             logger.LogError(
                 ex, "UpdateColumn: unexpected error for column '{ColumnId}', container '{ContainerId}', configId {ConfigId}, TraceId={TraceId}",
                 columnId, containerId, configGuid, context.TraceIdentifier);
-            return UnexpectedProblem("updating column", context);
+            return UnexpectedProblem("updating column", ex, context);
         }
     }
 
@@ -436,7 +437,7 @@ public static class ContainerColumnEndpoints
             logger.LogError(
                 ex, "DeleteColumn: unexpected error for column '{ColumnId}', container '{ContainerId}', configId {ConfigId}, TraceId={TraceId}",
                 columnId, containerId, configGuid, context.TraceIdentifier);
-            return UnexpectedProblem("deleting column", context);
+            return UnexpectedProblem("deleting column", ex, context);
         }
     }
 
@@ -533,18 +534,17 @@ public static class ContainerColumnEndpoints
             extensions: new Dictionary<string, object?> { ["traceId"] = context.TraceIdentifier });
 
     private static IResult GraphApiProblem(SpaarkeStorageException ex, HttpContext context) =>
-        Results.Problem(
-            title: "Graph API Error",
-            detail: ex.Message ?? "An error occurred communicating with the Graph API.",
-            statusCode: ex.StatusCode is >= 400 and < 600
-                ? ex.StatusCode.Value
-                : StatusCodes.Status502BadGateway,
-            extensions: new Dictionary<string, object?> { ["traceId"] = context.TraceIdentifier });
+        ex.ToProblemDetails(
+            summary: "The Graph API call did not succeed.",
+            errorCode: "spe.containers.columns.graph_error",
+            statusCode: ex.ClientStatusFor(),
+            traceId: context.TraceIdentifier);
 
-    private static IResult UnexpectedProblem(string operation, HttpContext context) =>
+    private static IResult UnexpectedProblem(string operation, Exception ex, HttpContext context) =>
         Results.Problem(
             title: "Internal Server Error",
-            detail: $"An unexpected error occurred while {operation}.",
+            detail: ProblemDetailsHelper.Explain($"An unexpected error occurred while {operation}.", ex),
             statusCode: StatusCodes.Status500InternalServerError,
             extensions: new Dictionary<string, object?> { ["traceId"] = context.TraceIdentifier });
+
 }

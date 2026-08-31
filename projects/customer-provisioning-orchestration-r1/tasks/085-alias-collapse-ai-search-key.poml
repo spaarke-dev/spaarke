@@ -1,0 +1,110 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="085" project="customer-provisioning-orchestration-r1">
+  <metadata>
+    <title>Alias collapse for AI Search key (aisearch-admin-key + 2 aliases → AiSearch--AdminKey canonical) with BINDING pre-check FIRST</title>
+    <phase>H KV Federation Full Remediation</phase>
+    <gate>completed</gate>
+    <status>completed</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Task tags include 'auth','deploy','azure-deployment'; deletes LIVE KV secret aliases — BINDING pre-check GATE FIRST per §7.9. Bug here breaks live App Service.</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Well-scoped alias-collapse operation with BINDING pre-check gate; careful step ordering per §7.9. Step 3.5.5b sonnet @ xhigh justified (complex-brownfield: LIVE consumer trace across App Service + KV + Dataverse).</model-tier-reason>
+    <effort>xhigh</effort>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <deps>084</deps>
+    <tags>auth, deploy, azure-deployment, dataverse</tags>
+    <estimated-effort>4-6 hours</estimated-effort>
+  </metadata>
+
+  <prompt>Collapse the AI Search key KV secret aliases (aisearch-admin-key + 2 additional casings) to the canonical name AiSearch--AdminKey per spec.md FR-36 + §7.9 rename map. Perform the BINDING pre-check FIRST: query LIVE App Service settings + KV secret list + Dataverse-persisted config across each environment where the alias is present. NEVER delete Dataverse-ClientSecret or BFF-API-ClientSecret. Document pre-check evidence in projects/customer-provisioning-orchestration-r1/notes/phase-h-alias-collapse-aisearch-2026-XX.md WITH the exact `az` commands + output snippets. Only after pre-check passes: create canonical secret (if not present), migrate consumers, delete alias.</prompt>
+
+  <role>SPAARKE platform DevOps engineer. Expert in Azure Key Vault secret lifecycle, App Service configuration references (@Microsoft.KeyVault syntax), Dataverse-persisted config auditing, and the BINDING pre-check protocol per spec.md §7.9. Follow ADRs strictly.</role>
+
+  <goal>AI Search key alias (aisearch-admin-key + variants) collapsed to canonical AiSearch--AdminKey; all consumers migrated to canonical; alias secrets deleted; BFF /health returns 200 post-collapse; pre-check evidence + rollback plan documented at projects/customer-provisioning-orchestration-r1/notes/phase-h-alias-collapse-aisearch-2026-XX.md.</goal>
+
+  <context>
+    <background>Per spec.md FR-36 + §7.9 rename map: today 3 AI Search key aliases exist across 3 casings (aisearch-admin-key, AiSearch-AdminKey, AISearchAdminKey — verify exact list via KV list). This drift is the tangible cost of the pre-manifest world. Alias collapse consolidates to canonical AiSearch--AdminKey (double-underscore per canonical secret name convention). BINDING pre-check per §7.9: NEVER delete without confirming zero live consumers.</background>
+    <relevant-files>
+      <file role="new">projects/customer-provisioning-orchestration-r1/notes/phase-h-alias-collapse-aisearch-2026-XX.md</file>
+      <file role="canonical-reference">scripts/canonical-secret-catalog/manifest.yaml</file>
+      <file role="canonical-reference">docs/architecture/AZURE-RESOURCE-NAMING-CONVENTION.md</file>
+    </relevant-files>
+    <dependencies>
+      <dependency task="084" status="pending">Manifest declares AiSearch--AdminKey as canonical + lists aliases explicitly</dependency>
+    </dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="spec.md FR-36">SCOPE: Alias collapse for AI Search key ONLY in this task; other alias collapses are separate tasks.</constraint>
+    <constraint source="spec.md §7.9 BINDING pre-check">SCOPE: BEFORE removing any alias, MUST pre-check LIVE App Service + KV + Dataverse-persisted config across each env; document evidence in task notes.</constraint>
+    <constraint source="spec.md §7.9">SCOPE: NEVER delete Dataverse-ClientSecret or BFF-API-ClientSecret (never-delete flag in manifest).</constraint>
+    <constraint source="CLAUDE.md-§10">SCOPE: BFF-touching if any App Service reference changes; /conflict-check before PR; publish-size delta if any BFF code touched.</constraint>
+    <constraint source="project">SCOPE: Migration order: (1) create canonical secret if not present; (2) update consumer references (App Service + Bicep + Configure); (3) verify /health per env; (4) THEN delete alias.</constraint>
+    <constraint source="project">SCOPE: Rollback plan documented — if any post-collapse /health fails, re-create the alias with same value and re-deploy.</constraint>
+    <constraint source="CLAUDE.md-§6.5">SCOPE: Owner directive #3 — dev-only remediation in r1; other envs stay on aliases until explicit customer engagement. Document per-env scope in report.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>Alias collapse with BINDING pre-check protocol per §7.9</topic>
+    <files>
+      <file>docs/architecture/AZURE-RESOURCE-NAMING-CONVENTION.md</file>
+      <file>.claude/constraints/azure-deployment.md</file>
+      <file>.claude/constraints/auth.md</file>
+      <file>.claude/constraints/config.md</file>
+      <file>projects/customer-provisioning-orchestration-r1/spec.md</file>
+      <file>projects/customer-provisioning-orchestration-r1/design.md</file>
+    </files>
+    <patterns>
+      <pattern name="Pre-check evidence pattern" location="projects/customer-provisioning-orchestration-r1/notes/">Report shape includes exact `az` commands + output snippets + verdict per env.</pattern>
+    </patterns>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="0" name="Rigor + load">Emit RIGOR LEVEL (FULL). Load spec.md FR-36 + §7.9 BINDING pre-check + task 084 manifest.</step>
+    <step order="1" name="Enumerate aliases">List every current AI Search key alias in KV: `az keyvault secret list --vault-name {vault} --query "[?contains(name,'earch') || contains(name,'earchAdmin')].name" -o tsv`.</step>
+    <step order="2" name="Pre-check App Service">For each alias, grep App Service `az webapp config appsettings list` outputs for `@Microsoft.KeyVault(...SecretName={alias}...)` references across all envs in r1 scope (dev).</step>
+    <step order="3" name="Pre-check Dataverse">Query sprk_configuration or equivalent Dataverse-persisted config for alias references.</step>
+    <step order="4" name="Pre-check Bicep">Grep infrastructure/bicep/** for alias literal strings.</step>
+    <step order="5" name="Evidence report">Write notes/phase-h-alias-collapse-aisearch-2026-XX.md § "Pre-check Evidence" with commands + outputs + per-env consumer inventory.</step>
+    <step order="6" name="Confirm canonical">Verify canonical AiSearch--AdminKey exists in KV; if not, create with same secret value as primary alias.</step>
+    <step order="7" name="Migrate consumers">Update all consumer references from alias to canonical (App Service, Bicep, Configure script).</step>
+    <step order="8" name="Deploy + verify">Deploy affected components; curl /health per env; verify 200.</step>
+    <step order="9" name="Delete aliases">`az keyvault secret delete --vault-name {vault} --name {alias}` for each alias (per r1 dev-scope only per owner directive #3).</step>
+    <step order="10" name="Post-verify">Re-run pre-check queries — expect zero remaining references to aliases; re-verify /health.</step>
+    <step order="11" name="Rollback plan">Document in report: if any /health fails, re-create alias with saved value + re-deploy consumers.</step>
+    <step order="12" name="Index update">Update TASK-INDEX.md: task 085 → ✅.</step>
+    <step order="13" name="Deviations">Document any deviation in projects/customer-provisioning-orchestration-r1/notes/.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If pre-check evidence shows a LIVE consumer of the alias that wasn't captured in the task 084 manifest's aliases list, STOP and escalate per CLAUDE.md §6 rather than silently deleting. Update the manifest FIRST, re-run the generator, then re-attempt collapse. NEVER silently delete a KV secret with a live consumer — that's the trap §7.9 exists to prevent.</trigger>
+  </escalation>
+
+  <tools>
+    <tool name="az">Manage Azure KV + App Service</tool>
+    <tool name="dotnet">Build/publish/deploy BFF if changes</tool>
+    <tool name="terminal">Run shell commands</tool>
+  </tools>
+
+  <outputs>
+    <output type="docs">projects/customer-provisioning-orchestration-r1/notes/phase-h-alias-collapse-aisearch-2026-XX.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Pre-check evidence documented in notes/phase-h-alias-collapse-aisearch-2026-XX.md with exact `az` commands + outputs per env.</criterion>
+    <criterion testable="true">Canonical AiSearch--AdminKey secret exists in KV with the correct value.</criterion>
+    <criterion testable="true">All consumer references migrated from alias to canonical (verified via post-check grep).</criterion>
+    <criterion testable="true">BFF /health returns 200 per env post-collapse (r1 dev scope).</criterion>
+    <criterion testable="true">Alias secrets are DELETED from KV; `az keyvault secret list` shows zero aliases.</criterion>
+    <criterion testable="true">Rollback plan documented in report (re-create alias + re-deploy consumers).</criterion>
+    <criterion testable="true">Dataverse-ClientSecret + BFF-API-ClientSecret NOT touched (verified via KV list snapshot before + after).</criterion>
+    <criterion testable="true">Negative: if pre-check surfaces an unlisted live consumer, task STOPS and escalates rather than deleting.</criterion>
+  </acceptance-criteria>
+
+  <notes>Reference: spec.md FR-36 + §7.9 BINDING pre-check + owner directive #3 (dev-only). Consumes task 084 manifest.</notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+  </execution>
+</task>

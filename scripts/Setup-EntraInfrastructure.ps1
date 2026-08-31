@@ -58,7 +58,12 @@
 
 [CmdletBinding(SupportsShouldProcess)]
 param(
-    [string]$TenantId = "a221a95e-6abc-4434-aecc-e48338a1b2f2",
+    # v3.3 change: -TenantId is MANDATORY (was defaulted to Spaarke tenant) per r1
+    # customer-provisioning-orchestration-r1 design.md §4D tenant-isolation invariant
+    # I1 / FR-28. Sibling script Register-EntraAppRegistrations.ps1 received the
+    # baseline fix (commit 1834b77bc); this script mirrors that pattern via task 065.
+    [Parameter(Mandatory = $true)]
+    [string]$TenantId,
     [string]$BffApiAppId = "1e40baad-e065-4aea-a8d4-4b7ab273458c",
     [string]$GroupDisplayName = "Spaarke Demo Users",
     [string]$ConditionalAccessPolicyName = "Exclude Spaarke Demo Users from MFA",

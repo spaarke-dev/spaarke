@@ -27,8 +27,28 @@ namespace Sprk.Bff.Api.Services.Ai.Safety;
 /// existing fail-open path (never fail the chat turn). ADR-015: no prompt/document content
 /// is logged here — the handler only touches headers.
 ///
-/// OPERATOR PREREQUISITE (before enabling MI in any environment): grant the App Service
-/// managed identity the "Cognitive Services User" role on the Content Safety resource.
+/// OPERATOR PREREQUISITE: the App Service managed identity needs the
+/// "Cognitive Services User" role on the account serving Content Safety. That role grants
+/// dataActions <c>Microsoft.CognitiveServices/*</c>, which covers
+/// <c>accounts/ContentSafety/text:shieldprompt/action</c>. NOTE that
+/// "Cognitive Services OpenAI User" does NOT cover it — its dataActions are OpenAI-only, so a
+/// principal can hold OpenAI inference rights on the very same account and still get HTTP 401
+/// PermissionDenied here. Content Safety is served by the multi-service AIServices account
+/// (dev: <c>spaarke-openai-dev</c>); there is no dedicated ContentSafety-kind resource in any
+/// Spaarke subscription. Verified present for the dev UAMI on 2026-08-21
+/// (spaarke-auth-v4-dataverse-MI FR-E1). There is no API key: the setting was removed from
+/// appsettings.template.json because it referenced a Key Vault secret that does not exist.
+///
+/// ⚠️ CORRECT AUTH IS NOT SUFFICIENT FOR A WORKING PERIMETER. Over the full 90-day App
+/// Insights retention window measured 2026-08-21, dev recorded 122 Prompt Shield scans and
+/// ZERO completions: every one was cancelled at the 100ms
+/// <see cref="PromptShieldService"/> deadline and failed OPEN. Auth is not the bottleneck —
+/// <c>DefaultAzureCredential.GetToken</c> averages 7ms (p95 1ms) and the token is cached by
+/// <see cref="ContentSafetyTokenProvider"/>; the shieldPrompt call itself does not answer
+/// inside the budget (43 dependency records, all resultCode=0, p50 92ms / p95 99ms — i.e.
+/// client-side cancellation, never a server response). Restoring an API key would NOT fix
+/// this. Before trusting this perimeter in ANY environment, check
+/// scripts/kql/ai-metering/shield-coverage.kql for a non-zero completed count.
 /// </summary>
 public sealed class ContentSafetyAuthHandler : DelegatingHandler
 {

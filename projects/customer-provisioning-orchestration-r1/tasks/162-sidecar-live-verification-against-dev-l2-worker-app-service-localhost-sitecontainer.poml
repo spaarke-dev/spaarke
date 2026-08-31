@@ -1,0 +1,162 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="162" project="customer-provisioning-orchestration-r1">
+  <metadata>
+    <title>Sidecar live verification against dev L2 Worker App Service (localhost sitecontainer binding + per-boot shared-secret header)</title>
+    <phase>C'' Wave G-6 -- Integration wiring</phase>
+    <gate>unblocked</gate>
+    <status>authoring-complete-live-verification-pending</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Live verification of a security-sensitive component (Exchange-admin cert capability) against a real dev App Service -- deploy-adjacent, escalation-worthy if verification fails.</rigor-reason>
+    <model-tier>opus</model-tier>
+    <model-tier-reason>High-blast-radius per parent task instructions (sidecar-adjacent) -- Opus tier for the live-verification judgment calls.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <deps>101, 113, 114, 161</deps>
+    <tags>l2-controlplane, sidecar, testing, deploy</tags>
+    <estimated-effort>6-10 hours</estimated-effort>
+  </metadata>
+
+  <prompt>Deploy task 114's sidecar image (via task 101's Bicep sitecontainer resource + task 113's Deploy-ControlPlane.ps1) to the dev L2 Worker App Service, and verify live: (1) the sitecontainer binds to localhost:8091 within the shared network namespace and is NOT reachable from the public internet-facing surface; (2) task 161's ExchangePolicySidecarClient can reach it and complete a round-trip against a REAL (or safely-scoped test) Exchange tenant, exercising Set-ExchangeApplicationAccessPolicy.ps1's actual get-before-set idempotency; (3) the per-boot shared-secret header mechanism functions correctly (a request WITHOUT the header is rejected). This is the first end-to-end proof that the Class-C residual (the one PowerShell-only piece in the entire handler fleet, per DS-1b §0's verified finding) actually works in the deployed topology, not just in isolated unit/contract tests.</prompt>
+
+  <role>SPAARKE platform developer / Azure infrastructure operator. Expert in App Service sitecontainer live verification, localhost-network-namespace isolation confirmation, and Exchange Online app-only policy application verification.</role>
+
+  <goal>A live verification report confirms: the sidecar container is running and healthy on the dev Worker App Service, its port is confirmed NOT publicly reachable (a request to the public hostname:8091 fails/times out), a live ExchangePolicySidecarClient round-trip against a safely-scoped test tenant/policy succeeds with the expected AlreadyCompliant-on-second-run idempotency behavior, and the shared-secret header rejection path is confirmed (an unauthenticated request is refused).</goal>
+
+  <context>
+    <background>This is the culminating verification for the entire Option D sidecar design (DS-1b's whole §3), proving the multi-year architectural bet (DS-1b §0's verified finding that NO Graph API exists for Exchange app-only policy management, now or via its designated successor) actually functions once deployed, not merely designed. This project's Wave G-6 exists specifically to close this loop before Wave G-7's T4 probe (task 180) and the final Phase F E2E run (task 186) depend on it.</background>
+    <relevant-files>
+      <file role="canonical-reference">infrastructure/bicep/modules/controlplane-worker-app-service.bicep (task 101's sitecontainer resource)</file>
+      <file role="canonical-reference">scripts/Deploy-ControlPlane.ps1 (task 113)</file>
+      <file role="new">projects/customer-provisioning-orchestration-r1/notes/sidecar-live-verification-2026-08.md</file>
+    </relevant-files>
+    <dependencies>
+      <dependency task="101" status="pending">The sitecontainer Bicep resource this deploys onto</dependency>
+      <dependency task="113" status="pending">The deploy script used to get the sidecar image running</dependency>
+      <dependency task="114" status="pending">The sidecar image itself</dependency>
+      <dependency task="161" status="pending">The client this verification exercises end-to-end</dependency>
+    </dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="DS-1b §3">Verify the port is NOT exposed on the app's public front end -- this is a security property, not merely a functional one; a public-reachable sidecar port is a HIGH-severity finding requiring immediate escalation, not a routine bug.</constraint>
+    <constraint source="Human Escalation Triggers (root CLAUDE.md §6)">Security-sensitive code verification -- if the shared-secret rejection path does NOT correctly reject an unauthenticated request, STOP and escalate immediately rather than documenting it as a known gap.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>Sidecar live verification</topic>
+    <files>
+      <file>projects/customer-provisioning-orchestration-r1/spec.md</file>
+      <file>projects/customer-provisioning-orchestration-r1/design.md</file>
+      <file>projects/customer-provisioning-orchestration-r1/CLAUDE.md</file>
+      <file>projects/customer-provisioning-orchestration-r1/notes/design-study-ds4-handler-audit.md</file>
+      <file>projects/customer-provisioning-orchestration-r1/notes/design-study-ds1b-option-d-hybrid-deep-dive.md</file>
+    </files>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="0" name="Rigor + load">Emit RIGOR LEVEL (FULL). Read DS-1b §3 in full for the exact verification criteria.</step>
+    <step order="1" name="Deploy">Deploy the sidecar image to dev's Worker App Service via task 113's deploy script.</step>
+    <step order="2" name="Container health">Confirm the sitecontainer is running (App Service diagnostics/log stream) and listening on 8091.</step>
+    <step order="3" name="Public-reachability negative test">Attempt to reach the sidecar's port via the app's PUBLIC hostname -- confirm failure/timeout (proving network-namespace isolation).</step>
+    <step order="4" name="Localhost round-trip">From within the Worker's own network context (or via a diagnostic console/Kudu SSH into the main container), POST to http://localhost:8091/apply-policy with a valid shared-secret header against a safely-scoped test tenant/policy; confirm a Success or AlreadyCompliant response.</step>
+    <step order="5" name="Idempotency verify">Run the same request TWICE; confirm the second run returns AlreadyCompliant (proving the script's get-before-set idempotency survives the container+HTTP wrapping).</step>
+    <step order="6" name="Auth rejection test">Send a request WITHOUT the shared-secret header; confirm it is rejected (not silently processed).</step>
+    <step order="7" name="Client integration">Exercise task 161's ExchangePolicySidecarClient itself (not a raw curl) end-to-end against the live sidecar, confirming the C# client's mapping matches the observed live responses.</step>
+    <step order="8" name="Report">File a verification report in notes/ documenting all 6 checks' outcomes.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If the public-reachability negative test (step 3) shows the sidecar IS reachable from outside the network namespace, STOP IMMEDIATELY and escalate as a HIGH-severity security finding per root CLAUDE.md §6 — this exposes Exchange-admin-capability to the public internet, the exact risk DS-1b §3's whole isolation design exists to prevent.</trigger>
+    <trigger>If the auth-rejection test (step 6) shows an unauthenticated request IS processed, STOP IMMEDIATELY and escalate — this is a security-sensitive-code verification failure per root CLAUDE.md §6, not a routine bug to file and move past.</trigger>
+  </escalation>
+
+  <tools>
+    <tool name="az webapp">log stream / Kudu console access for live verification</tool>
+    <tool name="curl">public-reachability negative test + localhost round-trip if console access permits</tool>
+  </tools>
+
+  <outputs>
+    <output type="report">projects/customer-provisioning-orchestration-r1/notes/sidecar-live-verification-2026-08.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">The sitecontainer is confirmed running and healthy on the dev Worker App Service.</criterion>
+    <criterion testable="true">A request to the sidecar's port via the PUBLIC hostname fails/times out (network-namespace isolation confirmed).</criterion>
+    <criterion testable="true">A localhost round-trip (with valid shared-secret header) against a safely-scoped test tenant succeeds with the expected Success/AlreadyCompliant outcome.</criterion>
+    <criterion testable="true">A SECOND identical request returns AlreadyCompliant, proving get-before-set idempotency survives the container+HTTP wrapping.</criterion>
+    <criterion testable="true">A request WITHOUT the shared-secret header is rejected (not processed).</criterion>
+    <criterion testable="true">task 161's ExchangePolicySidecarClient, exercised end-to-end against the live sidecar, correctly maps the observed responses onto HandlerResult.</criterion>
+    <criterion testable="true">A verification report exists in notes/ documenting all 6 checks.</criterion>
+  </acceptance-criteria>
+
+  <notes>Justification (CLAUDE.md §11): Existing -- N/A, this is verification, not a new component. Extension -- N/A. Cost-of-doing-nothing -- without live verification, the entire Class-C sidecar architecture (the ONE genuinely novel infrastructure component in Option D, per DS-1b's framing of it as a multi-year bet) is unproven outside unit/contract tests; a network-isolation or idempotency defect discovered only during Phase F's E2E run (task 186) would be far more expensive to diagnose and could delay the acceptance-target transition.</notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+  </execution>
+
+  <notes-completion>
+    Completed 2026-08-20 (Wave G-6 Batch G-6C, ran alone, OPUS tier). Owner selected Path C for
+    Wave G-6: dispatch autonomously, defer ~7-9 owner-in-the-loop live-ceremony operations. This
+    task delivers the VERIFICATION INFRASTRUCTURE the ceremony will exercise, not the live run
+    itself — per dispatch directive #4 (`build the verification INFRASTRUCTURE that CAN be
+    executed by the owner during live ceremony`). Status set to `authoring-complete-live-verification-pending`
+    per this project's uniform live-vs-authoring separation convention (current-task.md § "3.
+    Live-ceremony vs authoring separation" — task 089 established; tasks 108/110/113 followed).
+
+    Deliverables:
+      - scripts/provisioning/Verify-Sidecar-Live.ps1 (588 lines, PSScriptAnalyzer-clean minus 2
+        deliberate exclusions [PSAvoidUsingWriteHost + PSUseBOMForUnicodeEncodedFile — parity
+        with sibling Deploy-ControlPlane.ps1's operator-console-tool posture]). Runs 6 checks
+        mapping 1:1 to POML acceptance criteria 1-5 via ARM REST + Kudu /api/command curl exec
+        + direct public-hostname probe. Non-destructive by default (safe-placeholder all-zero
+        GUIDs); operator opts in to full check 5 idempotency pass with real tenant/group/app-id
+        overrides.
+      - src/server/services/Sprk.Provisioning.ControlPlane.Tests/Handlers/ExchangePolicySidecarLiveVerificationTests.cs
+        (4 env-gated xUnit tests exercising the actual production ExchangePolicySidecarClient
+        against a real running sidecar). Env-guard pattern parity with CosmosSmokeTests.cs
+        (SIDECAR_LIVE_VERIFY_URL + SIDECAR_LIVE_VERIFY_SECRET); short-circuits as no-op pass in
+        CI when unset. Complements task 161's 21 fake-transport contract tests (client vs mock)
+        by proving the client actually reaches a real Listener.ps1 process (client vs real
+        container). L2 test count 1101 -> 1105.
+      - notes/sidecar-live-verification-runbook.md (202 lines, queue-recreate-runbook style):
+        prerequisites, step-by-step commands, expected-outputs decision table, escalation
+        procedure for both POML <escalation> triggers, rollback procedure.
+      - notes/sidecar-live-verification-2026-08.md (POML <output>): AUTHORING-COMPLETE
+        placeholder with all 6 checks mapped to their harness invocation; PASS/WARN/FAIL
+        population deferred to live ceremony run.
+
+    Bonus quality: task 161's W3 cleanup applied (deferred by that task's own file header note).
+    Removed 3 dead script-shell fields (PwshExecutable / ExchangePolicyScriptPath /
+    ExchangeScriptTimeout) from IntegrationWiringOptions.cs. Because the retired-on-disk
+    ExchangePolicyScriptApplier.cs references them (and the uniform "keep-on-disk with
+    retirement banner" convention requires the retired file to remain COMPILABLE — a retired
+    file that doesn't parse is a broken audit trail, not a preserved one), the 3 constants were
+    fossilized as `private static readonly` fields inside the retired class itself — parity with
+    task 160's AzCliKvSecretReader.KvSecretReadTimeout inline pattern. Also dropped the
+    retired class's IOptions<IntegrationWiringOptions> ctor dependency (no longer needed).
+    IntegrationWiringOptions.cs + IntegrationWiringModule.cs file headers both updated to
+    reflect the removed fields.
+
+    Deviations from POML step sequence (CLAUDE.md §6.5 path A, documented):
+      - Steps 1-7 of the POML are LIVE ops (deploy, container health check, public-reachability
+        test, localhost round-trip, idempotency verify, auth-rejection test, client integration).
+        Path C blocks live execution this session. Delivery: harnessed all 7 into
+        Verify-Sidecar-Live.ps1 (checks 1-6) + ExchangePolicySidecarLiveVerificationTests (step
+        7). No acceptance criterion is dropped — every one is bound to a harness invocation in
+        notes/sidecar-live-verification-2026-08.md §2's map.
+      - Step 8 (report file) is authored in AUTHORING-COMPLETE state; the live ceremony's
+        Verify-Sidecar-Live.ps1 JSON output populates PASS/WARN/FAIL sections.
+
+    Live-ceremony-backlog addition: current-task.md § Wave G-1 LIVE CEREMONY Backlog gains a
+    new step 8 (sidecar live verification) with the 7-substep operator workflow (see
+    notes/sidecar-live-verification-2026-08.md §3 for the enumeration).
+
+    Wave G-6 status post-this-task: 3 of 3 tasks landed (160 ✅, 161 ✅, 162 🟡). Wave G-7
+    (17-task final acceptance gate — H13 probes + Ready writer + Phase F E2E acceptance) is
+    now UNBLOCKED — its dependency on Wave G-6 was that H14's sidecar path be provably
+    deployable + verifiable, which the infrastructure here delivers even before the live run
+    happens. Wave G-7 can dispatch.
+  </notes-completion>
+</task>

@@ -8,6 +8,103 @@ Format follows [Keep a Changelog](https://keepachangelog.com/) conventions.
 
 ---
 
+###### 2026-08-25 — `spaarkeai-compose-r8` task 056: embedded objects carried through an edited paragraph
+
+- **ADR-049 residual list**: the `complex-object-dropped` row moves **§2 (lost) → §3 (carried)**. Images,
+  charts, shapes and OLE embeds now survive an edit to their own paragraph. A **text box** keeps the row
+  (its words are already preserved as prose; carrying the box too would duplicate the sentence) — the new
+  `pictTextBox` parity family keeps the warning code honest, exactly as `fldNested` does for fields.
+- **Empirically settled**: the save's body swap does NOT prune main-part relationships. Verified by OPENING
+  the saved package and resolving every `r:*` attribute, not by reading the renderer's "orphaned … inert
+  weight" remark — now corrected in place. **Second stale-comment correction in this project**, after task
+  049's bookmark claim. Evidence: `projects/spaarkeai-compose-r8/notes/056-object-carry-decisions.md` §1.
+- **One opaque-carry mechanism, two consumers**: `TryParsePreviousProperties<T>` renamed
+  `TryParseOpaqueCarry<T>`. No second contract (CLAUDE.md §11).
+- **New gate — parsing is not sufficient for this construct.** Every attribute in the OOXML relationships
+  namespace must RESOLVE against the carrier before a subtree is authored: a valid drawing naming a missing
+  relationship would produce a file Word reports as damaged, which is worse than the drop it replaces.
+- **ADR-049 I-2 unchanged** — no OOXML crosses the wire. A browser keystroke edit keeps its image because
+  `ComposeBlockMerge.CarryUnmodeledConstructs` (the task-041 base carry already used for bookmarks and SDT
+  shells) restores it from the block's pre-edit base.
+- **Corrects task 057's `data-atom-display` fix**, which did not reach the `object` family: the attribute
+  was re-emitted only when display text was TRUTHY, and the server emits an `object` atom EMPTY — so the
+  placeholder label still leaked (`Object` → `Object: Object` → …) across `getHTML()` round trips. Opaque
+  atoms now always emit the attribute, empty when absent; renderable atoms (tab/symbol) untouched.
+- **Owner sign-off unblocked**: both rows the owner declined on 2026-08-25 are closed (fields 049/057,
+  objects 056). Residual §2 is now nested/unterminated fields, text boxes, footnote refs, endnote refs,
+  content controls.
+
+## 2026-08-25 — Compose write fidelity: the CLIENT half of the field carry (task 057, `spaarkeai-compose-r8`)
+
+- Task 049's Word-field carry was **unreachable from a keystroke edit**: `docxBridge.ts` never mapped a
+  `field` atom into the posted model, and `composeInlineAtom` did not DECLARE the `data-field-*` payload,
+  so ProseMirror dropped it at parse. Both closed. A producer with no consumer — this project's recurring
+  failure with the polarity reversed.
+- **A field is the first segment present in the run stream and ABSENT from the text coordinate space.** A
+  tab or symbol contributes one character, which is what kept task 048's walk byte-identical to
+  `rejectStateText`; a field contributes zero. Byte-identity is re-proven by two independent oracles (the
+  verbatim-tier gate and the rebuild-tier redline diff), both verified to FAIL under a deliberate
+  one-character injection — so they are not tests that only ever pass.
+- **Fixed a `getHTML()` round-trip defect**: the atom's placeholder label (`"Field: 4"`) was re-parsed as
+  its display text, compounding to `"Field: Field: 4"` on a second pass. Harmless while that string was a
+  UI label; a document-content bug once task 057 made it the field's `cachedResult`, and reachable via the
+  ~15s dirty-autosave tick. Fixed backward-compatibly (`data-atom-display`, falling back to `textContent`,
+  so server HTML is unaffected).
+- **Accepted scope extension**: `opaqueAtomNode.ts` + `compose-contracts.ts` sit outside task 057's
+  declared outputs. Its escalation trigger fired on the literal predicate ("attributes do not survive the
+  round trip") but not on the reasoning behind it — the payload was present in the server's HTML and only
+  needed declaring, the same four-line mechanism task 048 used for `symFont`/`symChar` in that file. The
+  agent flagged it and offered revert-and-redispatch rather than proceeding silently, which is the
+  behaviour the trigger exists to produce.
+- **Correction to the published list**: on a keystroke edit the field result's bold/italic/underline are
+  NOT carried (an opaque atom holds no marks), so a bold cross-reference in a plain paragraph returns
+  plain. `notes/049-field-carry-decisions.md` §4 had claimed those three survive — true of the server path
+  only. Both documents corrected; the field itself still survives.
+
+## 2026-08-25 — Compose write fidelity: Word fields carried (task 049, `spaarkeai-compose-r8`)
+
+- `docs/architecture/COMPOSE-WRITE-RESIDUAL-LOSS.md`: the field row moves **§2 (lost) → §3 (carried)**.
+  Ordinary Word fields now round-trip an edit to their own paragraph as their **instruction** plus the
+  result Word last computed, in the authoring form the document used. §2 keeps a narrower row for
+  **nested and unterminated** fields, which have no single reproducible instruction. Owner sign-off on the
+  list is now blocked on task 056 (embedded objects) alone.
+- **The gate is STRUCTURAL, not a keyword allow-list.** A per-instruction freeze would make one document
+  behave two ways, and a frozen `REF` goes *silently wrong* rather than visibly broken — it keeps printing
+  "Section 4" after renumbering. `w:fldLock` is carried so fields an author deliberately froze stay frozen.
+  Decision record: `projects/spaarkeai-compose-r8/notes/049-field-carry-decisions.md`.
+- **Corrects a stale claim in `ComposeDocumentRenderer`** (review 011-P4/P9) that "the model does not carry
+  bookmarks". Untrue since task 041 (`ComposeBlockMerge.CarryBookmarks`), and verifying it rather than
+  inheriting it is what allowed `REF`/`PAGEREF` to be carried LIVE instead of frozen — a carried
+  cross-reference is only an improvement if its target is still there.
+- **Known gap, tracked as task 057:** the carry is server-side (projection → model → renderer). A
+  *keystroke* edit does not yet preserve a field, because `docxBridge.ts` does not map a `field` atom back
+  into the posted model. Task 049 shipped the payload (`data-field-instr` et al) so the client half is a
+  small, well-specified change; 057 owns it.
+
+## 2026-08-25 — `spaarkeai-compose-r8` task 055 (whole-document anchored placement)
+
+No procedure-surface change. Recorded for the ADR-049 evidence trail:
+
+- **ADR-049 I-7 strengthened on the client.** The whole-document review-flag channel (`comments[]` — the
+  `flag-risks` intent's ENTIRE output) now resolves deterministically and populates
+  `AnchoredAnnotationAnchor.paraId`, closing a **dark producer**: that field shipped in R3 FR-11 documented
+  as the PRIMARY anchor, with a live consumer (`AnnotationReanchorService` resolves by it first), and
+  nothing ever wrote it. Every whole-document review flag had been re-anchoring by fuzzy scorer even when
+  the model named its paragraph exactly.
+- **One anchor precedence, three consumers.** `widgets/composeAnchorResolution.ts` is now the single home
+  of paraId-vs-citation precedence, shared by the AI-edit path (`usePendingRedline`), the advisory-comment
+  path (`ComposeEditor.placeAdvisoryComments`) and the review-flag path
+  (`ComposeWorkspace.registerAiReviewComments`). Each keeps its own span policy. The two SINKS stay
+  separate deliberately — collapsing them would cost either Word `w:comment` export or ledger-key
+  idempotency; §11 reasoning in `projects/spaarkeai-compose-r8/notes/055-review-flag-placement-decision.md`.
+- **A silent-drop defect fixed.** `registerAiReviewComments` gated on `target_text` alone, so after task
+  054 a flag carrying a deterministic anchor with weak prose was dropped — precisely the BEST-anchored
+  ones. The gate is now "somewhere to hang it AND something to say".
+- **Client tripwire pattern established.** The prose-matching leg moved to `hooks/redlineTextSearch.ts` so
+  a test can REPLACE it — the client twin of `ThrowIfTextSearched` (`ComposeEditAnchorPassSeamTests.cs`).
+  ts-jest compiles to CommonJS, where a same-module call is un-interceptable, so a module boundary is the
+  only available client seam. Future "prove X was never called" client tests should follow this.
+
 ## How to maintain this
 
 **Every PR that touches** `.claude/skills/`, `.claude/agents/`, `.claude/settings.json`, `.claude/patterns/`, `.claude/constraints/`, `.claude/FAILURE-MODES.md`, or the root `CLAUDE.md` **MUST add an entry to the `[Unreleased]` section below** before merge.
@@ -22,6 +119,106 @@ If you're not sure whether to add an entry, add one. Too granular is better than
 ---
 
 ## [Unreleased]
+
+### Added — FAILURE-MODES **G-12**: a stale test assembly behind a *truthful* "up-to-date" build (2026-08-27, `unified-access-control-r2` Wave A)
+
+**Fifth stale-assembly incident in this project across two waves — and the first that the existing defence does not catch.**
+
+The standing rule from the 075 batch is *"always read the build result before the test result."* That defends against a **failed or skipped** build masked by a stale-but-green test summary. G-12 is different: the build **succeeds** and honestly reports "up-to-date", because the falsehood is in **filesystem metadata**, not in the build.
+
+- **Mechanism 1 — backwards-moving mtime.** `Copy-Item` (and `cp -p`, archive extraction, some editor "revert file" paths) **preserves `LastWriteTime`**. Restoring a file from a backup therefore moves its mtime *backwards*, MSBuild's incremental timestamp comparison concludes the existing DLL is newer than its input, compilation is skipped, and `dotnet test --no-build` executes the **previous** assembly. Task 011 hit this as a test failure that *contradicted the source on disk*.
+- **Mechanism 2 —** `dotnet build Spaarke.sln` **did not refresh the BFF test project's output**; the test csproj had to be built explicitly.
+
+**Why it earns its own entry rather than a line under AP-8**: perturbation testing is the primary anti-vacuity tool, and a stale assembly silently converts *"I proved this guard is load-bearing"* into *"this guard is untested"* — while looking identical. All five incidents produced **confident, wrong** verification results. Detection is by artifact, not by log: compare the DLL's mtime against the source you just edited.
+
+**Changed**: `.claude/FAILURE-MODES.md` — TOC entry + `### G-12`; anchor verified against the heading.
+
+### Changed — publish-size measurement convention is now BINDING, not descriptive (2026-08-27, `unified-access-control-r2` Wave A)
+
+**Root CLAUDE.md §10's publish-size gate was measuring in two incompatible conventions, and every individual report was correct.**
+
+Three sub-agents on the **identical base commit**, each stating *"compressed incl. PDBs"*, reported **45.07 / 45.07 / 43.78 MB** — a **1.29 MB spread on the same tree**. Cause: the POML corpus carries **two baseline clusters** (~43.65–43.71 MB across 24 POMLs, 44.96 MB across 31), so each agent compared against whichever its own POML cited, computed a small delta, and correctly concluded "within ceiling". The set was incoherent; the defect was visible **only by comparing reports across agents**, which no per-task gate can do.
+
+The convention *was* already written down — but as a parenthetical describing how the **baseline** had been measured, not as a requirement on **your** measurement. That is the gap all three fell into.
+
+**Changed**: `.claude/constraints/azure-deployment.md` § "BFF Publish-Size Per-Task Verification Rule (NFR-01)" — added a binding five-field reporting contract (command · RID/deployment mode · configuration · compression level · PDBs in/out), a MUST NOT on cross-convention comparison, the incident record, and an instruction to re-baseline POMLs citing the stale ~43.7 cluster.
+
+**Impact on the gate**: the ≤60 MB HARD STOP was never at risk. What was degraded is the **≥+5 MB single-task drift detector** — with a 1.3 MB convention gap circulating, a real regression can be absorbed as a convention artifact and vice versa. The gate kept its floor and lost the sensitivity it was added for.
+
+### Fixed — ADR-038 Amendment A1: `tests/Spaarke.ArchTests/**` is now the EIGHTH KEEP path (2026-08-24, `spaarke-auth-v4-dataverse-MI` task 090)
+
+**Closed a contradiction that lived inside ADR-038 itself**, and that had been mitigated at the skill layer
+rather than fixed since 2026-06-26:
+
+- ADR-038 §7 bans **B1–B5** (DI-registration tests, ctor null-check tests, `Mock<HttpMessageHandler>` wiring
+  tests), and its own "Some discovery loss" consequence names *"NetArchTest-style architecture tests at
+  Tier 1"* as the **sanctioned replacement** for what those bans give up.
+- But §2's KEEP-path list enumerated **7** categories and **did not include `tests/Spaarke.ArchTests/**`**.
+- `/test-diet` is a **mandatory gate at every project close** (root CLAUDE.md §7) and classifies anything
+  outside a KEEP path as a path violation → delete candidate. **The gate therefore recommended deleting the
+  exact mechanism the ADR prescribes.**
+
+**Why it persisted for two months**: task 063 fixed the *symptom* (heuristic 0 in `/test-diet`, plus naming
+the category in `tests/CLAUDE.md`). That made the pain stop, which also made the cause invisible — while
+leaving the protection in a skill file and a module directive, neither of which is the ADR. Those drift:
+the same task found `/test-diet`'s path list had *also* been missing `tests/integration/seam/**` since
+2026-07-09, silently making every vertical-slice-seam test in the repo a delete candidate.
+
+**Changed** — all four surfaces moved together so they cannot disagree:
+- `docs/adr/ADR-038-testing-strategy.md` — 7 → **8** KEEP paths; new `structural-fitness-function` row;
+  the "discovery loss" consequence now points at its protected home; full **Amendment A1** record appended
+- `.claude/constraints/testing.md` — "Seven" → "Eight" KEEP path categories + the new row
+- `.claude/skills/test-diet/SKILL.md` — heuristic 1's path list now includes `tests/Spaarke.ArchTests/**`;
+  heuristic 0's ratification note updated from OPEN to RATIFIED. **Heuristic 0 is deliberately retained** —
+  the path fix alone would still let heuristics 2–12 mis-flag fitness functions on naming (B13) and
+  setup-ratio (B15) grounds
+- `tests/CLAUDE.md` — "same terms as the seven paths" → the eighth KEEP path, citing A1
+
+**Evidence the category earns it**: graduation criterion 12 was exercised the same day — a deliberate ninth
+secret-bearing confidential client made `CredentialGuardTests` (FR-F1) and `CredentialCensusTests` (FR-F2)
+fail, naming the offending `file:line`. Note `dotnet build` **succeeds**; the ArchTests fail — the CI gate
+is what fails, not the compiler.
+
+### Added (2026-08-23 — the Compose **write-side residual loss list**, with a parity test behind it · `spaarkeai-compose-r8` task 045 / FR-A10)
+
+- **Added — [`docs/architecture/COMPOSE-WRITE-RESIDUAL-LOSS.md`](../docs/architecture/COMPOSE-WRITE-RESIDUAL-LOSS.md)** — publishes exactly what Compose does NOT preserve on save, as the write-side companion to `COMPOSE-READ-REFERENCE-FIDELITY.md` (no duplication: that one is the read path). The **scope rule leads**, because it is what makes the list short and true: loss is **per-edited-block, never per-document** — an untouched block is cloned byte-for-byte, so a construct survives *precisely because* the save never parses it. Eight degradation codes documented; bookmarks and property inheritance documented as carried.
+- **Added — `tests/integration/seam/Compose/ComposeResidualLossParityTests.cs`** — the forcing function. FR-A10 required the parity to be **demonstrated, not asserted**, so the document is not maintained by hand-review: the test measures every construct family through the real renderer (twice — untouched block and edited block) and fails if the document and the code disagree **in either direction**. Under-claim (an undocumented loss) and **over-claim** (a code the renderer no longer emits, or a family it actually preserves) are both failures — the second is the direction that lets a residual list rot into fiction while still looking maintained.
+- **Fixed — `Services/Compose/ComposeBlockMerge.cs`: an INLINE `w:sdt` content control was dropped in SILENCE.** Found by the parity check on its first run (`edited: 0/1 kept · codes: (none)`), not written into it. Only the *block-level* `SdtBlock` had a shell carry and a warning; an inline control — a party name, an effective date, a defined-term placeholder, the ordinary shape in a legal template — was on no taxonomy list at all. `sdt` joined `ReportableConstructs` reusing the **existing** `hard-tier-sdt-flattened` code (root §11 — its client copy already read *"A content control … was saved as plain text"*), and the now-duplicate explicit warn on the block-level path was removed. A hand-written residual list would have inherited the same blind spot: you cannot document a loss you do not know you have.
+
+### Changed (2026-08-21 — ADR-049 **R8 third amendment**: base re-projection + block copy-through · `spaarkeai-compose-r8`)
+
+Owner-accepted §6.5 **Path B** amendment (*"ADR-049 is fine."*, 2026-08-21). Drafted by task 031 on the evidence of the Phase-3 architecture gate; applied at the start of task 040 rather than at the planned 045 wrap-up task, because while the write was outstanding ADR-049 still told a reader that *"render-on-save supersedes surgical byte-patch"* — the exact guidance that produced the defect 040 exists to fix.
+
+- **Changed — [`.claude/adr/ADR-049-compose-shadow-document.md`](adr/ADR-049-compose-shadow-document.md)** — added the **R8 Path-B Amendment**. **The save renders from the content model AND preserves untouched content; these are not alternatives.** At save time the renderer re-projects the retained baseline server-side, pairs its blocks against the posted model **by document order** (`paraId` corroborates, never keys — duplicates are spec-legal across `mc:AlternateContent` and Word regenerates ids on save), then dispatches per block: unchanged → **clone the baseline's `w:p` subtree verbatim** with zero property logic; changed → render with property inheritance; unmergeable → thin render + warning, **never a content refusal**. Codifies **seven standing invariants** and — load-bearing — the **paired MUST**: *invariants (1) every-save-terminates-in-a-defined-outcome and (2) untouched-blocks-are-preserved are a PAIR; no future amendment may trade one away to obtain the other.* Both prior amendments did exactly that (**R4** took preservation and lost termination → the HTTP 422 treadmill; **R6** took termination and lost preservation → silent whole-body rebuild), which is why this clause exists. Adds normative **mechanism MUSTs** (direct `w:body` children only — never `body.Descendants<Paragraph>()`, which interleaves `w:txbxContent` paragraphs and mis-pairs every block after the first text box; "unchanged" decided against a fresh server-side re-projection, never text equality; comparison **fails closed**, baseline unavailability **fails open**). **Status line + footer updated**; the `docs/adr/` twin the footer said did not exist now does. **Scope guard**: save path only — R4.5's read/reference invariants **F-1…F-5** and **I-7** are untouched, and **I-5 (one body author) is reinforced, not relaxed** — the merge lives inside `ComposeDocumentRenderer`.
+- **Added — [`docs/adr/ADR-049-compose-shadow-document.md`](../docs/adr/ADR-049-compose-shadow-document.md)** — the extended record (context, mechanism, consequences, rejected alternatives, evidence). Deliberately scoped to the R8 amendment's full reasoning rather than duplicating the whole ADR: two long documents saying the same thing drift.
+- **Changed — [`.claude/adr/INDEX.md`](adr/INDEX.md)** — the 049 row still described R4's surgical `ComposeShadowPatchEngine` byte-patch and I-4 byte-identity as the save contract (never updated for R6 either). An agent scanning only the index would have taken the twice-superseded rule as current. Row rewritten to the R8 contract + status corrected to "Accepted, amended 3×".
+- **Changed — [`docs/adr/INDEX.md`](../docs/adr/INDEX.md)** — added the missing ADR-049 rows (main table + Backend/API domain table); `Last Updated` refreshed.
+- **Changed — root `CLAUDE.md` §17 Compose row** — same staleness, higher blast radius: root CLAUDE.md loads **every session**, and its Write/save half still read *"edits = step-level ops anchored `(paraId,runIndex,offset)` applied by ONE `ComposeShadowPatchEngine` byte-author"* (R4 — it had never been updated for R6). Replaced with the R8 contract + the paired MUST + a pointer to the extended record; the Read/reference half (R4.5) is unchanged and still accurate.
+
+**Evidence** (measured, not argued — threshold ratified by task 023 *before* any prototype number existed): overall block preservation **18.08% → 100.00%**, near-tier **6.67% → 100%** on every one of 18 corpus documents, zero hard-fails, zero honesty violations, zero cumulative drift over 5 round trips, +2–19 ms per save, no new NuGet, publish 43.68 MB (−1.28 vs the 44.96 MB net10 baseline). `projects/spaarkeai-compose-r8/notes/{gate-contract,control-measurement,merge-prototype-results,gate-decision}.md`.
+
+**Read this caveat with the numbers**: the gate measures **untouched** blocks and excludes the edited one by construction. The paragraph the user types in is still rebuilt from a model carrying `w:jc`/`w:b`/`w:i`. **Task 041 (FR-A04 property inheritance) owns that and is neither optional nor deferrable.** `ComposeShadowPatchEngine` is **NOT** confirmed subsumed (it serves the op-log path) and must not be deleted on this evidence — task 074 stays blocked.
+
+Authored main-session per §3 write boundary.
+
+### Fixed / Added (2026-08-20 — ADR-010 example corrected + new anti-pattern **AP-7** · `spaarke-auth-v4-dataverse-MI` task 011)
+
+- **Fixed — [`.claude/adr/ADR-010-di-minimalism.md`](adr/ADR-010-di-minimalism.md), "Allowed Seams"**: the example read `services.AddSingleton<IAccessDataSource, DataverseAccessDataSource>()`. That is **not what the code does and must not be copied**. `DataverseAccessDataSource` is a **transient typed HttpClient** (`SpaarkeCore`) decorated by a scoped `CachedAccessDataSource`, and it holds **mutable per-instance auth state** (`_currentToken`, the `HttpClient`'s `Authorization` header) — so a singleton registration is a **data race that can bleed a token between users**, not merely an efficiency question. Corrected to the real registration, with the reason stated inline and a pointer to the pattern that *does* solve expensive shared state on a transient type (a static `(tenant|client|secret-fingerprint)` confidential-client cache). The example's actual point — that `IAccessDataSource` is one of only two sanctioned multi-implementation seams — is unchanged. Surfaced by `code-review` finding S-14 at task 011's Step 9.5 gate.
+
+- **Added — [`.claude/FAILURE-MODES.md`](FAILURE-MODES.md) **AP-7: Converting a silent fallback into fail-fast, verified with targeted tests only**. Task 010 correctly replaced a silent `DefaultAzureCredential` fallback with fail-fast validation, verified with targeted seam tests + build + publish + CVE — all green — and shipped **13 failing contract tests**, found only when task 011 ran the full suite. Root cause generalises: **callers that depend on a silent fallback are by definition invisible at the change site** (they supplied nothing — there is no reference, call, or type dependency to grep for), and a targeted test run selects tests *near* the change, which is exactly the set that excludes them. Prevention: run the FULL suite for any change converting a fallback/default/permissive branch into a throw; and when failures surface in a later task, **stash and re-run before calling them pre-existing** — "fails on master too" and "fails without my current edits" are different claims.
+
+### Changed (2026-08-20 — ADR-028 **A4 adoption CONFIRMED** + E4′ wiring correction · `spaarke-auth-v4-dataverse-MI` task 003)
+
+- **Changed — [`.claude/adr/ADR-028-spaarke-auth-architecture.md`](adr/ADR-028-spaarke-auth-architecture.md), Amendment A4**: added an **ADOPTION STATUS** block recording that A4 is no longer accepted-on-reasoning but **verified on the wire**. Task 002 proved, against a real delegated user token on `spaarke-bff-dev/staging`, that the OBO grant succeeds under a Managed-Identity-issued client assertion — Graph/SPE, Dataverse `user_impersonation` (with `upn` preserved, so row-level authorization still evaluates as the *user*), and long-running OBO — with a negative control that fails loudly when the assertion is minted for the wrong identity. **MI-FIC is the adopted credential; the KV-certificate alternative was NOT taken** (it remains sanctioned where the same-tenant rule cannot hold, e.g. an unresolved cross-tenant Model 2 shape). This closes the question that three prior audits closed *wrongly* on an unrecorded premise.
+
+- **Fixed — same file, A4 "Preferred wiring" section**: annotated that `Microsoft.Identity.Web`'s declarative ordered `ClientCredentials` JSON — presented by A4 as the preferred wiring — **is not usable in this codebase** (finding **E4′**). The repo has zero `EnableTokenAcquisition` / `ITokenAcquisition` / `IDownstreamApi` / `ClientCredentials` in any `.cs`; `AddMicrosoftIdentityWebApi` is inbound validation only; `Spaarke.Dataverse` has no Identity.Web reference. The JSON is retained as accurate *general* Microsoft guidance, but the direct-MSAL `.WithClientAssertion` + `ManagedIdentityClientAssertion` path is the mechanism here — **and the ordered fallback the rollback story depends on must therefore be built, not inherited**. Without this note a reader would configure the JSON, observe no effect, and reasonably conclude MI-FIC does not work.
+
+- **Fixed — [`src/server/api/Sprk.Bff.Api/CLAUDE.md`](../src/server/api/Sprk.Bff.Api/CLAUDE.md)** (task 002, listed here for the auth-surface trail; not a `.claude/` file): removed the assertion that OBO *"still requires `BFF-API-ClientSecret` (confidential client per OAuth spec)"* — the exact false sentence that caused three audits to conclude the secret was permanent — and replaced it with the A4 shape plus the empirical evidence.
+
+### Removed / Changed (2026-08-20 — God-class LOC ratchet RETIRED; replaced by complexity guidance)
+
+- **Removed — `tests/Spaarke.ArchTests/GodClassGuardTests.cs`** (the hard CI gate on `src/server` file LOC). It gated on line count — the wrong instrument for a gradual, judgment-laden signal — froze existing large files at arbitrary values, and blocked normal feature work on active files (Compose, Chat) with a build failure that had to be hand-waivered. Per ADR-038's own "coverage = observation, never a gate" precedent, **size is now observed and complexity is evaluated by humans where the work is authored.**
+- **Added — [`docs/standards/COMPONENT-COMPLEXITY.md`](../docs/standards/COMPONENT-COMPLEXITY.md)** — the standard: evaluate complexity/cohesion (responsibilities, coupling, ctor deps, branching), not LOC; when a large *cohesive* file is legitimate; decompose when responsibilities diverge. Wired into **root `CLAUDE.md` §11.5** (new) + **§17 pointer** (replaces the god-class-ratchet row), **`task-create` §3.5.6** (component-complexity check), **`code-review`** (maintainability dimension — complexity *direction*, not size), and a **non-blocking observation report** `scripts/report-large-server-files.ps1`. `.claude/patterns/testing/god-class-ratchet.md` converted to a RETIRED redirect stub; pattern INDEXes + project memory updated.
 
 ### Added (2026-08-18 — Navigator side-pane architecture pointer · spaarke-side-pane-navigation-history-r1 close-out)
 

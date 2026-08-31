@@ -115,13 +115,20 @@ export class SdapApiClient {
       signal?: AbortSignal;
     }
   ): Promise<DriveItem> {
-    const SMALL_FILE_THRESHOLD = 4 * 1024 * 1024; // 4MB
+    // Matches the server's PathValidator.SmallUploadMaxBytes, enforced at
+    // UploadSessionManager.cs:131. Kept as an explicit client-side check so the caller gets an
+    // accurate message instead of a server 400 mid-stream.
+    const SMALL_FILE_THRESHOLD = 4 * 1024 * 1024; // 4 MiB
 
-    if (file.size < SMALL_FILE_THRESHOLD) {
-      return await this.uploadOp.uploadSmall(containerId, file, options);
-    } else {
-      return await this.uploadOp.uploadChunked(containerId, file, options);
+    if (file.size >= SMALL_FILE_THRESHOLD) {
+      // Fails HONESTLY. Before 2026-08-27 this branch called uploadChunked, which threw
+      // 'Failed to get container drive' because the route it depended on does not exist — so large
+      // uploads have never worked, and the old error pointed at the wrong thing. See
+      // UploadOperation.LARGE_FILE_UNSUPPORTED and task 076's notes.
+      throw new Error(UploadOperation.LARGE_FILE_UNSUPPORTED);
     }
+
+    return await this.uploadOp.uploadSmall(containerId, file, options);
   }
 
   /**

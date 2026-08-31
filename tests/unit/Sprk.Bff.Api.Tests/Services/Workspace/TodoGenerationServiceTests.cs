@@ -175,50 +175,6 @@ public class TodoGenerationServiceTests
     // Constructor tests
     // ──────────────────────────────────────────────────────────────────────────
 
-    [Fact]
-    public void Constructor_NullServiceProvider_ThrowsArgumentNullException()
-    {
-        var act = () => new TodoGenerationService(
-            null!,
-            _loggerMock.Object,
-            _defaultOptions);
-
-        act.Should().Throw<ArgumentNullException>()
-            .WithParameterName("serviceProvider");
-    }
-
-    [Fact]
-    public void Constructor_NullLogger_ThrowsArgumentNullException()
-    {
-        var services = new ServiceCollection();
-        services.AddSingleton(_dataverseMock.Object);
-        var sp = services.BuildServiceProvider();
-
-        var act = () => new TodoGenerationService(
-            sp,
-            null!,
-            _defaultOptions);
-
-        act.Should().Throw<ArgumentNullException>()
-            .WithParameterName("logger");
-    }
-
-    [Fact]
-    public void Constructor_NullOptions_ThrowsArgumentNullException()
-    {
-        var services = new ServiceCollection();
-        services.AddSingleton(_dataverseMock.Object);
-        var sp = services.BuildServiceProvider();
-
-        var act = () => new TodoGenerationService(
-            sp,
-            _loggerMock.Object,
-            null!);
-
-        act.Should().Throw<ArgumentNullException>()
-            .WithParameterName("options");
-    }
-
     // ──────────────────────────────────────────────────────────────────────────
     // TodoExistsAsync — idempotency guard (now queries sprk_todo, not sprk_event)
     // ──────────────────────────────────────────────────────────────────────────

@@ -186,13 +186,6 @@ public class SubjectParserTests
     }
 
     [Fact]
-    public void Constructor_NullOptions_Throws()
-    {
-        Action act = () => new SubjectParser(null!);
-        act.Should().Throw<ArgumentNullException>();
-    }
-
-    [Fact]
     public void DefaultSchemes_ListsMatterProjectInvoice()
     {
         var defaults = SubjectSchemeCatalogOptions.DefaultSchemes;

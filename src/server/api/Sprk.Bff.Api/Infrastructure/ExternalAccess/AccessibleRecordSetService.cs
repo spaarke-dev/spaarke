@@ -24,6 +24,7 @@
 // AI-internal types.
 
 using Sprk.Bff.Api.Services.Ai.Membership;
+using Sprk.Bff.Api.Services.Ai.Membership.Models;
 
 namespace Sprk.Bff.Api.Infrastructure.ExternalAccess;
 
@@ -68,6 +69,25 @@ public sealed class AccessibleRecordSet
 
     /// <summary>Which design §5 union terms contributed to this set (audit + test introspection).</summary>
     public required AccessibleRecordSetSources Sources { get; init; }
+
+    /// <summary>
+    /// NFR-03 (unified-access-control-r2 task 015): <c>true</c> when composition stopped at the
+    /// <see cref="CapLimit"/> ceiling while the source still had more records — i.e. this set is
+    /// KNOWN INCOMPLETE. Callers MUST surface it to the user ("Only {CapLimit} records
+    /// displayed"); they MUST NOT present a capped set as the whole truth.
+    /// <para>
+    /// <c>false</c> means composition ran to exhaustion, so the set is complete. Reaching the
+    /// ceiling EXACTLY with nothing left to read is complete, not capped — the flag reports
+    /// "there is more that you are not seeing", never "the count equals the limit".
+    /// </para>
+    /// </summary>
+    public bool Capped { get; init; }
+
+    /// <summary>
+    /// The ceiling that produced <see cref="Capped"/>, so a caller can render the NFR-03
+    /// message without hard-coding the number. Meaningful only when <see cref="Capped"/>.
+    /// </summary>
+    public int CapLimit { get; init; } = MembershipResolveOptions.MaxLimit;
 
     public int Count => RecordIds.Count;
 
@@ -118,6 +138,34 @@ public sealed class AccessibleRecordSetService : IAccessibleRecordSetService
             return grants.WorkAssignments;
         return Enumerable.Empty<Guid>();
     }
+
+    /// <summary>
+    /// Rows requested per membership round trip (unified-access-control-r2 task 015 / FR-14).
+    /// <para>
+    /// DELIBERATELY DECOUPLED from <see cref="MembershipResolveOptions.MaxLimit"/>, the
+    /// completeness ceiling. Collapsing the two (page size == ceiling) would make the
+    /// continuation loop unreachable in practice and turn any test of it into a tautology —
+    /// the page would always "fill" exactly at the ceiling, so a cap check and a page-full
+    /// check would be indistinguishable. Keeping page size (500) strictly below the ceiling
+    /// (5,000) means a caller with 501..5,000 memberships genuinely pages, which is the case
+    /// A-10 silently truncated.
+    /// </para>
+    /// <para>
+    /// Round-trip cost: callers at or below one page (the overwhelming majority) still cost
+    /// exactly ONE round trip, unchanged from the pre-fix behaviour. Extra round trips are
+    /// incurred only by callers whose access was previously being silently discarded.
+    /// </para>
+    /// </summary>
+    internal const int MembershipPageSize = MembershipResolveOptions.DefaultLimit;
+
+    /// <summary>
+    /// Hard ceiling on continuation round trips, independent of how many ids come back.
+    /// A resolver that kept reporting "more" while returning nothing new (or the same page)
+    /// would otherwise spin; the id-count ceiling alone cannot bound that, because a
+    /// no-progress loop never grows the id count. +2 covers the partial first page and the
+    /// zero-row confirmation page that <c>BuildNextContinuationToken</c>'s belt can produce.
+    /// </summary>
+    private const int MaxMembershipPages = (MembershipResolveOptions.MaxLimit / MembershipPageSize) + 2;
 
     private readonly IMembershipResolverService _membership;
     private readonly ExternalParticipationService _participations;
@@ -175,6 +223,147 @@ public sealed class AccessibleRecordSetService : IAccessibleRecordSetService
         return set.Contains(recordId);
     }
 
+    /// <summary>
+    /// The outcome of following a membership stream to its end (or to the ceiling).
+    /// </summary>
+    /// <param name="Ids">Every id read across all pages, de-duplicated.</param>
+    /// <param name="Capped">
+    /// <c>true</c> iff the loop stopped with more records still available — the set is KNOWN
+    /// INCOMPLETE (NFR-03). Exhausting the stream leaves this <c>false</c> even if the id
+    /// count lands exactly on the ceiling.
+    /// </param>
+    /// <param name="Pages">Round trips performed (observability + round-trip-cost assertions).</param>
+    private readonly record struct MembershipPageWalk(HashSet<Guid> Ids, bool Capped, int Pages);
+
+    /// <summary>
+    /// Reads a membership stream to completion by following continuation tokens, instead of
+    /// taking only the first page (unified-access-control-r2 task 015 · finding A-10 · FR-14).
+    /// <para>
+    /// The defect this replaces: both composers called the resolver with <c>options: null</c>,
+    /// which clamps to a 500-row default, and then used <c>response.Ids</c> while DISCARDING
+    /// <c>response.ContinuationToken</c>. A systemuser on 900 matters got 500 of them and was
+    /// DENIED the other 400, with nothing anywhere reporting that a set had been cut. That is
+    /// a fail-closed under-grant: availability/correctness, not disclosure — but silent, which
+    /// is what NFR-03 forbids.
+    /// </para>
+    /// <para>
+    /// Termination is over-determined ON PURPOSE (ADR-003: bounded, never unbounded):
+    ///   (1) the resolver reports no further pages — the normal, complete exit;
+    ///   (2) the id ceiling <see cref="MembershipResolveOptions.MaxLimit"/> is reached — one
+    ///       bounded confirmation read decides complete-at-the-ceiling vs genuinely-capped;
+    ///       never keep reading past it;
+    ///   (3) a page adds no new ids yet claims more — a non-advancing cursor; stop and flag
+    ///       rather than spin (the id ceiling alone cannot catch this, since a no-progress
+    ///       loop never grows the count);
+    ///   (4) <see cref="MaxMembershipPages"/> round trips — a blunt backstop that holds even
+    ///       if (1)-(3) are all defeated.
+    /// Only (1) yields a complete set; (2)-(4) all set <c>Capped</c>.
+    /// </para>
+    /// <para>
+    /// Errors are NOT caught here. If a page throws, the exception propagates and the caller
+    /// denies wholesale. Swallowing it would hand back the pages read so far as though they
+    /// were the complete set — a partial set presented as authoritative, which is strictly
+    /// worse than a loud failure.
+    /// </para>
+    /// </summary>
+    private async Task<MembershipPageWalk> WalkMembershipPagesAsync(
+        Func<MembershipResolveOptions, CancellationToken, Task<MembershipResponse>> readPage,
+        string entityType,
+        string principalDescription,
+        CancellationToken ct)
+    {
+        var ids = new HashSet<Guid>();
+        string? token = null;
+        var pages = 0;
+        var capped = false;
+
+        while (true)
+        {
+            ct.ThrowIfCancellationRequested();
+
+            var response = await readPage(
+                new MembershipResolveOptions(Limit: MembershipPageSize, ContinuationToken: token),
+                ct).ConfigureAwait(false);
+            pages++;
+
+            var before = ids.Count;
+            foreach (var id in response.Ids)
+            {
+                ids.Add(id);
+            }
+            var added = ids.Count - before;
+
+            token = response.ContinuationToken;
+
+            // (1) Stream exhausted — the ONLY complete exit.
+            if (token is null)
+            {
+                break;
+            }
+
+            // (2) Ceiling reached (NFR-03).
+            if (ids.Count >= MembershipResolveOptions.MaxLimit)
+            {
+                // Holding a token at the ceiling does NOT by itself prove more records exist:
+                // BuildNextContinuationToken deliberately emits one whenever a page came back
+                // FULL, so that a provider under-reporting MoreRecords cannot truncate us
+                // silently. A result set that is an exact multiple of the page size therefore
+                // ends on a full page plus a token, and is nonetheless COMPLETE.
+                //
+                // Guessing is wrong in both directions: assume "capped" and every caller whose
+                // membership count lands exactly on the ceiling is told records are hidden that
+                // are not; assume "complete" and the silent truncation A-10 describes comes
+                // straight back. So spend ONE bounded confirmation round trip and know.
+                // Its rows are deliberately NOT merged — if more exists we are capped, and the
+                // count must stay at the ceiling the NFR-03 message quotes.
+                var confirmation = await readPage(
+                    new MembershipResolveOptions(Limit: MembershipPageSize, ContinuationToken: token),
+                    ct).ConfigureAwait(false);
+                pages++;
+
+                capped = confirmation.ContinuationToken is not null
+                         || confirmation.Ids.Any(id => !ids.Contains(id));
+
+                if (capped)
+                {
+                    _logger.LogWarning(
+                        "[WF-AUTHZ] Membership composition for {Principal} on {EntityType} hit the " +
+                        "{CapLimit}-record ceiling after {Pages} page(s) with more records available. " +
+                        "The accessible set is INCOMPLETE and is flagged capped (NFR-03).",
+                        principalDescription, entityType, MembershipResolveOptions.MaxLimit, pages);
+                }
+
+                break;
+            }
+
+            // (3) Cursor claims more but produced nothing new — do not spin.
+            if (added == 0)
+            {
+                capped = true;
+                _logger.LogWarning(
+                    "[WF-AUTHZ] Membership composition for {Principal} on {EntityType} stopped after " +
+                    "{Pages} page(s): the resolver reported a further page but returned no new ids. " +
+                    "Treating the set as INCOMPLETE (capped) rather than paging indefinitely.",
+                    principalDescription, entityType, pages);
+                break;
+            }
+
+            // (4) Blunt round-trip backstop.
+            if (pages >= MaxMembershipPages)
+            {
+                capped = true;
+                _logger.LogWarning(
+                    "[WF-AUTHZ] Membership composition for {Principal} on {EntityType} reached the " +
+                    "{MaxPages}-page round-trip backstop with more records available. The accessible " +
+                    "set is INCOMPLETE and is flagged capped (NFR-03).",
+                    principalDescription, entityType, MaxMembershipPages);
+                break;
+            }
+        }
+
+        return new MembershipPageWalk(ids, capped, pages);
+    }
+
     // ── systemuser plane: ADR-034 membership ∪ the caller's own contact grants ───────────────────
     // (§6.5 Path-B amendment of design §5, spaarke-SPA-external-access-platform-r2 UAT 2026-08-07,
     //  owner directive — "parallel workforce/contact access"): an internal system-user who is ALSO a
@@ -189,11 +378,15 @@ public sealed class AccessibleRecordSetService : IAccessibleRecordSetService
             ?? throw new InvalidOperationException(
                 "A SystemUser principal must carry a SystemUserId (task 020 invariant).");
 
-        var membership = await _membership
-            .ResolveAsync(systemUserId, entityType, options: null, ct)
-            .ConfigureAwait(false);
+        // FR-14: follow continuation tokens to the end of the stream. Passing `options: null`
+        // here (the pre-fix shape) took only the first 500 rows and dropped the rest.
+        var walk = await WalkMembershipPagesAsync(
+            (options, token) => _membership.ResolveAsync(systemUserId, entityType, options, token),
+            entityType,
+            $"systemuser {systemUserId}",
+            ct).ConfigureAwait(false);
 
-        var ids = new HashSet<Guid>(membership.Ids);
+        var ids = walk.Ids;
 
         // Contact-grants union — grants now span project / matter / work-assignment root types
         // (task 028, closing R1 gap #2), so this term applies for any grant-supported entity. Prefer the
@@ -227,14 +420,16 @@ public sealed class AccessibleRecordSetService : IAccessibleRecordSetService
 
         _logger.LogInformation(
             "[WF-AUTHZ] Composed accessible set for systemuser {SystemUserId} on {EntityType}: " +
-            "{Count} records (ADR-034 membership; contact-grants union applied: {ContactGrants}).",
-            systemUserId, entityType, ids.Count, contactGrantsApplied);
+            "{Count} records over {Pages} membership page(s) (ADR-034 membership; contact-grants " +
+            "union applied: {ContactGrants}; capped: {Capped}).",
+            systemUserId, entityType, ids.Count, walk.Pages, contactGrantsApplied, walk.Capped);
 
         return new AccessibleRecordSet
         {
             PrincipalKind = WorkforcePrincipalKind.SystemUser,
             EntityType = entityType,
             RecordIds = ids,
+            Capped = walk.Capped,
             Sources = new AccessibleRecordSetSources(
                 SystemUserMembership: true, ContactGrants: contactGrantsApplied, StandingGrantMembership: false),
         };
@@ -271,28 +466,38 @@ public sealed class AccessibleRecordSetService : IAccessibleRecordSetService
         // negative case is load-bearing: a contact WITHOUT a standing grant gets ONLY the explicit
         // grants above — NEVER automatic membership. (task-051 seam: IContactStandingGrantReader.)
         var standingApplied = false;
+        var capped = false;
+        var membershipPages = 0;
         if (await _standingGrant.HasStandingGrantAsync(contactId, ct).ConfigureAwait(false))
         {
-            var membership = await _membership
-                .ResolveByContactAsync(contactId, entityType, options: null, ct)
-                .ConfigureAwait(false);
-            foreach (var id in membership.Ids)
+            // FR-14: same continuation-following fix as the systemuser plane — the pre-fix
+            // `options: null` call silently capped a standing-grant contact at 500 records.
+            var walk = await WalkMembershipPagesAsync(
+                (options, token) => _membership.ResolveByContactAsync(contactId, entityType, options, token),
+                entityType,
+                $"contact {contactId}",
+                ct).ConfigureAwait(false);
+
+            foreach (var id in walk.Ids)
             {
                 ids.Add(id);
             }
+            capped = walk.Capped;
+            membershipPages = walk.Pages;
             standingApplied = true;
         }
 
         _logger.LogInformation(
             "[WF-AUTHZ] Composed accessible set for contact {ContactId} on {EntityType}: {Count} records " +
-            "(grants: {Grants}, standing-grant membership: {Standing}).",
-            contactId, entityType, ids.Count, grantsApplied, standingApplied);
+            "(grants: {Grants}, standing-grant membership: {Standing} over {Pages} page(s), capped: {Capped}).",
+            contactId, entityType, ids.Count, grantsApplied, standingApplied, membershipPages, capped);
 
         return new AccessibleRecordSet
         {
             PrincipalKind = WorkforcePrincipalKind.ContactOnly,
             EntityType = entityType,
             RecordIds = ids,
+            Capped = capped,
             Sources = new AccessibleRecordSetSources(
                 SystemUserMembership: false,
                 ContactGrants: grantsApplied,

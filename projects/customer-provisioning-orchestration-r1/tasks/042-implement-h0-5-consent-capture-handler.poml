@@ -1,0 +1,141 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="042" project="customer-provisioning-orchestration-r1">
+  <metadata>
+    <title>Implement H0.5 Consent-Capture Handler + BFF POST /api/onboarding/consent-callback Endpoint</title>
+    <phase>C Wave C4 — Handler Implementations</phase>
+    <gate>blocked</gate>
+    <status>not-started</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Task tags include 'bff-api','auth' (BFF endpoint); modifies .cs files in Sprk.Bff.Api; auth-sensitive (HMAC verification + Anonymous endpoint); crosses BFF/L2 boundary.</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Two-surface task (BFF endpoint + L2 handler) with complete spec (FR-02, §4.1 H0.5 row, D18); ADR-013 facade compliance concrete; not a cross-cutting refactor. Effort xhigh because it touches BFF + L2 + HMAC crypto boundary + must coordinate with Wave C6 ArchTests.</model-tier-reason>
+    <effort>xhigh</effort>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Touches src/server/api/Sprk.Bff.Api/** (BFF surface); must run under §10 BFF Hygiene checklist and coordinate with Wave C6 ArchTests for §4D I1/I5 compliance. /conflict-check required before PR per r3 handoff §7 (19 active BFF worktrees).</parallel-reason>
+    <deps>036</deps>
+    <tags>l2-controlplane, job-handler, bff-api, auth, api</tags>
+    <estimated-effort>5-8 hours</estimated-effort>
+  </metadata>
+
+  <prompt>Implement H0.5 as (a) a NEW BFF endpoint POST /api/onboarding/consent-callback (Anonymous, HMAC-verified) that captures the customer admin's tid on Microsoft admin-consent grant, seeds run parameters, and kicks the pipeline via Service Bus enqueue to the L2 control plane; and (b) an IJobHandler in the L2 control-plane that owns the re-consent semantics (no-op with 200+link if an active run exists for the same tid; restart from H0 if Failed/Cancelled). Idempotency key: consent-{customerId}-{tid}.</prompt>
+
+  <role>SPAARKE platform developer. Expert in ASP.NET Core Minimal APIs, HMAC-SHA256 request signing, Anonymous endpoints (no AAD), ADR-013 PublicContracts facade, and CLAUDE.md §10 BFF Hygiene binding rule. Follow ADRs strictly.</role>
+
+  <goal>Two new files exist: (1) src/server/api/Sprk.Bff.Api/Endpoints/Onboarding/ConsentCallbackEndpoint.cs — a Minimal API endpoint that verifies HMAC signature, extracts tid claim, seeds ProvisioningRun.parameters, enqueues to L2 via Service Bus, returns 202 Accepted (&lt;100ms). (2) src/server/services/Sprk.Provisioning.ControlPlane/Handlers/H05ConsentCaptureHandler.cs — an IJobHandler that owns re-consent semantics (no-op with 200 + existing run link if an active run has same tid + status ∈ {Ready, Running, WaitingOnGate}; restart from H0 if Failed/Cancelled). Endpoint is registered in Sprk.Bff.Api Program.cs; handler is registered in L2 DI. Unit tests cover HMAC verify (valid + invalid), Anonymous route wiring, re-consent branches, and idempotency.</goal>
+
+  <context>
+    <background>Per spec.md FR-02, design.md §4.1 H0.5 row, D18: Model 2 self-service requires ONE irreducible customer-tenant admin action (Microsoft admin-consent grant). The consent redirect page POSTs the callback to BFF with the customer tenant's tid claim. This is the ONLY BFF endpoint that must be Anonymous (customer admin is authenticating to THEIR tenant, not to Spaarke's control plane per §4.3a.2). BFF forwards to L2 for handler execution.</background>
+    <relevant-files>
+      <file role="new">src/server/api/Sprk.Bff.Api/Endpoints/Onboarding/ConsentCallbackEndpoint.cs</file>
+      <file role="new">src/server/api/Sprk.Bff.Api/Endpoints/Onboarding/HmacSignatureVerifier.cs</file>
+      <file role="new">src/server/api/Sprk.Bff.Api/Endpoints/Onboarding/ConsentCallbackEndpoint.Tests.cs</file>
+      <file role="new">src/server/services/Sprk.Provisioning.ControlPlane/Handlers/H05ConsentCaptureHandler.cs</file>
+      <file role="new">src/server/services/Sprk.Provisioning.ControlPlane/Handlers/H05ConsentCaptureHandler.Tests.cs</file>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Program.cs</file>
+      <file role="modify">src/server/services/Sprk.Provisioning.ControlPlane/Program.cs</file>
+      <file role="canonical-reference">src/server/api/Sprk.Bff.Api/Api/Registration/</file>
+      <file role="canonical-reference">.claude/patterns/auth/spaarke-sso-binding.md</file>
+    </relevant-files>
+    <dependencies>
+      <dependency task="036" status="pending">L2 project scaffold (DI + JWT bearer + Cosmos + Service Bus wiring) — Wave C3</dependency>
+    </dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-004">The L2-side handler is a single IJobHandler implementation — one message, one handler, one outcome.</constraint>
+    <constraint source="ADR-010">The BFF endpoint is placed in a dedicated Endpoints/Onboarding/ folder; DI additions are strictly bounded (single endpoint + HMAC verifier per spec.md ADR Tensions row ADR-010).</constraint>
+    <constraint source="ADR-013">The consent-callback endpoint and handler MUST NOT inject IActionResolver / IActionRunner / IOpenAiClient / IPlaybookService directly. H0.5 is pure consent-capture — no AI needed. If future AI is required, invoke via Services/Ai/PublicContracts/ facade (per r3 task 040 forcing-functions ArchTest).</constraint>
+    <constraint source="ADR-028">The endpoint is deliberately Anonymous (§4.3a.2) — the customer admin authenticates to their OWN tenant via the Microsoft consent flow, not to Spaarke's control plane. HMAC signing key is a shared secret stored as a KV URI ref in platform KV.</constraint>
+    <constraint source="ADR-036">The BFF endpoint enqueues to Service Bus and returns 202 Accepted &lt;100ms; the L2 handler executes off-thread. No synchronous handler execution in the HTTP request path (spec.md FR-22 / R20 / §4.2 fire-and-forget).</constraint>
+    <constraint source="project">Re-consent semantics per spec.md FR-02 + design.md §4.1 H0.5 row: if sprk_dataverseenvironment row exists with same tid + status ∈ {Ready, Running, WaitingOnGate}, return 200 + link to existing run (no-op); if Failed/Cancelled, restart from H0.</constraint>
+    <constraint source="project">Idempotency key format `consent-{customerId}-{tid}` — tid is the customer tenant claim, NOT the operator's tid.</constraint>
+    <constraint source="project">spec.md §4D I1: NO hardcoded default tenant — every downstream Azure call parameterizes tenantId explicitly with the captured tid.</constraint>
+    <constraint source="project">spec.md NFR-05 + r3 task 061: if H0.5 introduces any new IOptions&lt;T&gt; (e.g., OnboardingOptions with HmacSigningKey), it MUST be classified per Tier 1/2/3 and either validated-on-start (Tier 1) or added to the Tier-2 exemption list per task-061-config-validation-classification.md.</constraint>
+    <constraint source="project">spec.md NFR-01: report BFF publish size + delta in the PR description. Baseline 44.96 MB incl PDBs; H0.5 endpoint expected delta &lt; 0.1 MB.</constraint>
+    <constraint source="CLAUDE.md §10">Load .claude/constraints/bff-extensions.md before designing this addition. Placement Justification (Onboarding endpoint) MUST be stated in PR description per §10 bullet 2.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>BFF Anonymous endpoint with HMAC verification + L2 handler bridge</topic>
+    <files>
+      <file>.claude/adr/ADR-004-job-contract.md</file>
+      <file>.claude/adr/ADR-010-di-minimalism.md</file>
+      <file>.claude/adr/ADR-013-ai-architecture.md</file>
+      <file>.claude/adr/ADR-028-spaarke-auth-architecture.md</file>
+      <file>.claude/adr/ADR-036-background-job-infrastructure.md</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+      <file>.claude/constraints/api.md</file>
+      <file>.claude/constraints/auth.md</file>
+      <file>.claude/constraints/jobs.md</file>
+      <file>.claude/constraints/config.md</file>
+      <file>projects/customer-provisioning-orchestration-r1/spec.md</file>
+      <file>projects/customer-provisioning-orchestration-r1/design.md</file>
+      <file>projects/customer-provisioning-orchestration-r1/CLAUDE.md</file>
+    </files>
+    <patterns>
+      <pattern name="minimal-api-endpoint-definition" location=".claude/patterns/api/endpoint-definition.md">BFF Minimal API endpoint shape — MapPost, ProducesResponseType, tag, dependency injection into handler delegate.</pattern>
+      <pattern name="spaarke-sso-binding" location=".claude/patterns/auth/spaarke-sso-binding.md">Auth binding pattern — H0.5 is the deliberate Anonymous exception per ADR-028 + §4.3a.2.</pattern>
+      <pattern name="reference-handler-shape" location="src/server/api/Sprk.Bff.Api/Services/Jobs/">Canonical IJobHandler exemplar for the L2-side handler.</pattern>
+    </patterns>
+  </knowledge>
+
+  <steps mode="prescriptive">
+    <step order="0">Declare rigor level (FULL) and load .claude/constraints/bff-extensions.md before designing. Load all knowledge files.</step>
+    <step order="1">Run /conflict-check against active BFF worktrees before touching Sprk.Bff.Api.</step>
+    <step order="2">Author HmacSignatureVerifier.cs — HMAC-SHA256 over the raw request body with signing key from IOptions&lt;OnboardingOptions&gt;. Constant-time comparison. Unit tests for valid + invalid signatures.</step>
+    <step order="3">Author ConsentCallbackEndpoint.cs — Minimal API MapPost("/api/onboarding/consent-callback"), .AllowAnonymous(), body binds ConsentCallbackRequest { tid, customerId, correlationId }, verifies HMAC, seeds ProvisioningRun.parameters via Service Bus enqueue, returns 202 Accepted with runId.</step>
+    <step order="4">Register endpoint + HMAC verifier + OnboardingOptions in Sprk.Bff.Api Program.cs. Classify OnboardingOptions per Tier 1/2/3 (Tier 1 → ValidateOnStart).</step>
+    <step order="5">Author H05ConsentCaptureHandler.cs in L2 — implement IJobHandler; inject ICosmosRunStore, IDataverseEnvironmentRegistryClient. Read sprk_dataverseenvironment by tid; branch on status; return existing-run-link OR restart-from-H0 accordingly.</step>
+    <step order="6">Author idempotency-key generator: consent-{customerId}-{tid}.</step>
+    <step order="7">Register H05ConsentCaptureHandler in L2 Program.cs DI.</step>
+    <step order="8">Author unit tests: (a) endpoint HMAC verify happy + invalid, (b) endpoint returns 401 on unauthenticated actually-anonymous route (should be 200 on missing header→ verifier catches), (c) endpoint returns 400 on missing HMAC header, (d) handler re-consent no-op branch, (e) handler restart-from-H0 branch, (f) handler idempotency (second call = no-op).</step>
+    <step order="9">Run dotnet build for BOTH Sprk.Bff.Api AND Sprk.Provisioning.ControlPlane; run dotnet test; verify green + zero analyzer warnings.</step>
+    <step order="10">Run BFF publish-size check: `dotnet publish -c Release src/server/api/Sprk.Bff.Api/ -o deploy/api-publish/`; record absolute + delta vs 44.96 MB baseline in task notes and PR description per spec.md NFR-01.</step>
+    <step order="11">Update TASK-INDEX.md: change task 042 status from 🔲 to ✅.</step>
+    <step order="12">Document any deviations in projects/customer-provisioning-orchestration-r1/notes/.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If the HMAC signing-key rotation strategy differs from platform KV `@Microsoft.KeyVault(...)` reference pattern (e.g., must be short-lived per-run), STOP and escalate per CLAUDE.md §6 rather than inventing a new secret-storage pattern.</trigger>
+    <trigger>If Wave C6 ArchTests (I1 no-hardcoded-tenant, I5 per-tenant Graph tokens) flag any code path in this handler at Step 9.5 code-review, treat as blocker — the tid must flow through as an explicit parameter to every downstream Azure call, not defaulted.</trigger>
+  </escalation>
+
+  <justification>
+    <existing>No existing consent-callback endpoint in BFF (grep for "consent-callback" returns none). Closest neighbor is src/server/api/Sprk.Bff.Api/Api/Registration/ (user registration endpoints — different concern; no HMAC + AAD-protected, not Anonymous).</existing>
+    <extension>No — Anonymous+HMAC pattern is not compatible with the AAD-protected Registration endpoints; different auth surface. Onboarding folder is the correct new placement per §10 endpoint organization.</extension>
+    <cost-of-doing-nothing>Without this endpoint, Model 2 self-service is impossible — every Model 2 provisioning requires a manual operator ceremony to capture the customer's tid + kick the pipeline. Per spec.md § Placement Justification: "the callback IS the extension point" for the ONE irreducible customer-tenant admin action. Without it, all Model 2 acquisitions require operator handholding, breaking the D18 self-service promise.</cost-of-doing-nothing>
+  </justification>
+
+  <tools>
+    <tool name="dotnet">Build and test .NET projects (BFF + L2)</tool>
+    <tool name="terminal">Run shell commands</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Endpoints/Onboarding/ConsentCallbackEndpoint.cs</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Endpoints/Onboarding/HmacSignatureVerifier.cs</output>
+    <output type="test">src/server/api/Sprk.Bff.Api/Endpoints/Onboarding/ConsentCallbackEndpoint.Tests.cs</output>
+    <output type="code">src/server/services/Sprk.Provisioning.ControlPlane/Handlers/H05ConsentCaptureHandler.cs</output>
+    <output type="test">src/server/services/Sprk.Provisioning.ControlPlane/Handlers/H05ConsentCaptureHandler.Tests.cs</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Given a POST to /api/onboarding/consent-callback with a valid HMAC-SHA256 signature over the raw body, when the endpoint runs, then it returns 202 Accepted &lt;100ms with the created runId in the response body.</criterion>
+    <criterion testable="true">Negative: POST with a missing X-Signature header returns 400 Bad Request with a distinct error code (not 500).</criterion>
+    <criterion testable="true">Negative: POST with an invalid HMAC signature returns 401 Unauthorized (verifier failure), not an unhandled exception.</criterion>
+    <criterion testable="true">Given a valid POST with tid = customer-tenant-id, when the endpoint runs, then tid is written to sprk_dataverseenvironment.sprk_tenantid AND ProvisioningRun.parameters.tenantId; no default tenant fallback anywhere.</criterion>
+    <criterion testable="true">Re-consent no-op: given sprk_dataverseenvironment row with same tid + status ∈ {Ready, Running, WaitingOnGate}, when H05ConsentCaptureHandler runs, then it returns 200 with the existing runId link and does NOT restart the pipeline.</criterion>
+    <criterion testable="true">Re-consent restart: given sprk_dataverseenvironment row with same tid + status ∈ {Failed, Cancelled}, when H05ConsentCaptureHandler runs, then it restarts the pipeline from H0 and returns the new runId.</criterion>
+    <criterion testable="true">Idempotency: two identical enqueues for the same customerId + tid — second call is a no-op (consent-{customerId}-{tid} idempotency key match).</criterion>
+    <criterion testable="true">BFF publish size delta &lt; 0.5 MB (spec.md NFR-01); PR description reports absolute + delta.</criterion>
+    <criterion testable="true">Endpoint uses Services/Ai/PublicContracts/ facade if AI needed (spec.md ADR-013 row); ArchTest at Step 9.5 confirms no direct IActionResolver / IActionRunner / IOpenAiClient injection.</criterion>
+    <criterion testable="true">dotnet build for BFF exits 0; dotnet build for L2 exits 0; dotnet test for BOTH exits 0; zero analyzer warnings (analyzers-as-errors per spec.md NFR-06).</criterion>
+  </acceptance-criteria>
+
+  <notes>Reference: spec.md FR-02 + FR-22 + NFR-01 + NFR-05; design.md §4.1 H0.5 row + §4.2 API surface + §4.3a.2 auth flow + D18 self-service. The Anonymous+HMAC pattern is a deliberate exception to §10 general auth rules — cite in PR description. Coordinate with Wave C6 ArchTests for tenant-isolation compliance (I1/I5).</notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+  </execution>
+</task>

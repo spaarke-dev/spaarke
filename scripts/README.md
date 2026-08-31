@@ -294,15 +294,16 @@ This registry tracks all scripts in this directory, their purpose, usage frequen
 ## Entra ID & Identity Scripts
 
 ### `Register-EntraAppRegistrations.ps1`
-**Purpose:** Create the production Entra ID app registration (BFF API) and store credentials in Key Vault
+**Purpose:** Create the production Entra ID app registration (BFF API), store credentials in Key Vault, and create/verify managed-identity federated credentials (MI-FIC)
 **Usage:** 🔴 One-time - Production environment setup
 **Lifecycle:** ✅ Maintained
 **Dependencies:** Azure CLI (`az login`), Entra ID admin permissions, Key Vault access
 **Owner:** DevOps Team
-**Last Used:** March 2026
+**Last Used:** August 2026 (FIC extension, task 030)
 
 **When to Use:**
 - Setting up production Entra ID app registrations
+- Creating a managed-identity federated credential for a new (app-registration, UAMI) pair
 - Recreating registrations in a new tenant
 - After tenant migration
 
@@ -317,12 +318,66 @@ This registry tracks all scripts in this directory, their purpose, usage frequen
 
 **Creates:**
 - `spaarke-bff-api-prod` — BFF API with Graph + Dynamics CRM delegated permissions (this app registration is also the single Dataverse Application User)
-- Key Vault secrets: TenantId, BFF-API-ClientId, BFF-API-ClientSecret, BFF-API-Audience
+- Key Vault secrets: TenantId, BFF-API-ClientId, BFF-API-Audience — **and, unless you pass `-SkipClientSecret`, a 24-month `BFF-API-ClientSecret`**
+
+> 🔴 **Pass `-SkipClientSecret` for any new registration (2026-08-24, `spaarke-auth-v4-dataverse-MI` task 033).**
+> The BFF identity is **secret-free** per ADR-028 **A4**: it authenticates as a confidential client using a
+> federated credential issued to its user-assigned managed identity. `BFF-API-ClientSecret` and its lowercase
+> duplicate were deleted from Key Vault on 2026-08-24.
+>
+> Without the switch, COMBINED mode (`-CreateFederatedCredential` **without** `-FicOnly`) still mints a client
+> secret unconditionally — which would re-introduce a per-customer secret on every onboarding. ADR-028 exception
+> **E-3** is transitional and explicitly *does not license expansion*. The switch is **opt-in, not the default**,
+> because flipping the default would silently change behaviour for every existing caller of an identity-provisioning
+> script (notably `customer-provisioning-orchestration-r1` Wave G-3).
+>
+> Provision the credential instead:
+> `-CreateFederatedCredential -UamiResourceId <resourceId>` — subject is the UAMI's **principalId**, *not* its
+> clientId (the commonest silent failure), audience exactly `api://AzureADTokenExchange`. Then set
+> `Graph__Credentials__Order__0=ManagedIdentityFederated` and `Graph__Credentials__RequireSecretFreeIdentity=true`.
 
 > **Note (2026-08-14, code-quality-and-assurance-r3 task 060):** the separate
 > `spaarke-dataverse-s2s-*` app registration + its `Dataverse-S2S-*` Key Vault secrets
 > were removed. They had zero code consumers; Dataverse server-to-server access
 > consolidated onto the BFF app registration credential (`API_CLIENT_SECRET`) on 2026-01-07.
+
+**Also creates federated identity credentials (MI-FIC)** — added 2026-08-21 by
+`spaarke-auth-v4-dataverse-MI` task 030 (spec FR-C4). This is the repo's **only** FIC automation;
+before it, every federated credential in the tenant was created by hand.
+
+```powershell
+# Create/verify a FIC only (the entry point customer provisioning invokes)
+.\Register-EntraAppRegistrations.ps1 -FicOnly `
+  -FederatedCredentialAppId <app-reg-id> `
+  -UamiResourceId "/subscriptions/<sub>/resourceGroups/<rg>/providers/Microsoft.ManagedIdentity/userAssignedIdentities/<uami>"
+
+# Preview without changing anything
+.\Register-EntraAppRegistrations.ps1 -DryRun -CreateFederatedCredential `
+  -FederatedCredentialAppId <app-reg-id> -UamiResourceId <arm-id>
+```
+
+> **Integrate by INVOKING it, never by dot-sourcing it.** A dot-source runs the script's `param()`
+> block in *your* scope, silently replacing your `$TenantId` with this script's production default —
+> and a wrong tenant means a wrong FIC issuer, i.e. a credential that creates cleanly and never
+> works. `-FicOnly` runs in its own child scope and leaks nothing.
+
+- **Idempotent on the `(issuer, subject, audience)` triple, not the name** — a credential that already
+  carries the required triple under a different name is a no-op, not a duplicate or an error.
+- **Verified by a real token exchange**, never by "create returned success" — a misconfigured FIC
+  creates cleanly and fails only at exchange.
+- **Exit codes**: `0` verified · `1` fault · `2` structurally correct but not exchange-provable from
+  this host (a workstation cannot mint a managed-identity assertion — pass `-AssertionToken`, or
+  `-AllowUnverified` to accept it).
+- **Cross-tenant pairs are refused**, not attempted: Entra requires the app registration and the UAMI
+  in the same tenant, and a cross-tenant FIC creates successfully then fails silently.
+- Behaviour without the new flags is unchanged (verified byte-identical).
+
+> ⚠️ **The client-secret path above is transitional.** It exists under ADR-028 exception **E-3** and is
+> scheduled for removal by spec FR-C3 / task 033 of `spaarke-auth-v4-dataverse-MI`. ADR-028 **A4** ranks
+> secrets last ("development and testing only"). **New credentials should use MI-FIC**, not the secret.
+> The two capabilities above are not co-equal — one is the target state, the other is being retired.
+
+Rationale + verification evidence: [`projects/spaarke-auth-v4-dataverse-MI/notes/decisions/030-fic-automation.md`](../projects/spaarke-auth-v4-dataverse-MI/notes/decisions/030-fic-automation.md)
 
 ---
 
@@ -344,9 +399,16 @@ This registry tracks all scripts in this directory, their purpose, usage frequen
 # Test using Key Vault secrets
 .\Test-EntraAppRegistrations.ps1
 
-# Test with explicit credentials
+# Test with explicit credentials (only for a NON-migrated environment — see note)
 .\Test-EntraAppRegistrations.ps1 -BffApiClientId "abc123" -BffApiClientSecret "secret"
 ```
+
+> **Note (2026-08-24, task 033):** the client-credentials token test now reports **SKIPPED** against a migrated
+> environment, and that is the correct result — not a missing credential. The BFF identity is secret-free, and a
+> managed-identity federated credential cannot be exercised from a workstation (no route to IMDS). To verify the
+> live credential, look for `Ordered credential selection active: ManagedIdentityFederated.` in the app's startup
+> logs. The suite also now asserts the **inverse**: `BFF-API-ClientSecret` must stay **absent** from Key Vault —
+> a re-appearance means a provisioning run without `-SkipClientSecret`.
 
 ---
 
@@ -539,6 +601,65 @@ This registry tracks all scripts in this directory, their purpose, usage frequen
 | 4 | `Deploy-AllWebResources.ps1` | Web resource deployment (per environment) |
 | 5 | `Validate-DeployedEnvironment.ps1` | Post-deploy validation (per environment) |
 | 6 | (built-in) | Tag release in git |
+
+---
+
+## L2 Control-Plane Provisioning Scripts (`scripts/provisioning/`)
+
+Operator scripts for the customer-provisioning-orchestration-r1 L2 control
+plane (`Sprk.Provisioning.ControlPlane.Api` + `.Worker`) — distinct from the
+customer-lifecycle scripts above (`Decommission-Customer.ps1` etc.), which
+operate on a CUSTOMER's environment, not the control plane's own hosting.
+
+### `provisioning/Deploy-ControlPlane.ps1`
+**Purpose:** Repeatable deploy for the L2 control plane. Publishes + zip-deploys BOTH App Service targets (`.Api` -> staging slot with optional `-Swap`; `.Worker` -> slotless stop/deploy/start per DS-3 §3 Option 2), then runs post-deploy verification: `/healthz` on every deployed site, fleet Service Bus queue property check (`requiresSession`/`requiresDuplicateDetection`, task 108), and NFR-05 fail-fast config-key presence check. Sibling pattern to `Deploy-BffApi.ps1`, extended for L2's two-site topology.
+**Usage:** 🟢 Active - Every L2 code deploy (dispatcher, handlers, config changes)
+**Lifecycle:** ✅ Maintained (added 2026-08-19 by customer-provisioning-orchestration-r1 task 113)
+**Dependencies:** Azure CLI (`az login` with Contributor on `rg-spaarke-platform-{env}`), .NET 10 SDK, live Service Bus queue already recreated with sessions+dedup ON (task 108's runbook), `Grant-ControlPlaneIdentity.ps1` already run for the target environment
+**Owner:** Platform Team (customer-provisioning-orchestration-r1)
+**Last Used:** 2026-08-19 (author-time `-WhatIf` dry-run verification only; not yet run against live Azure)
+
+**When to Use:**
+- Deploying any L2 code change (handlers, dispatcher, config) to dev/staging/prod
+- Promoting a verified `.Api` staging-slot build to production (`-Swap`)
+- Post-deploy sanity check of the fleet queue + NFR-05 config surface without a full redeploy (`-SkipBuild`)
+
+**Command:**
+```powershell
+# Dev: publish + deploy BOTH targets; .Api lands on staging slot only
+.\scripts\provisioning\Deploy-ControlPlane.ps1
+
+# Dev: deploy + swap .Api to production once staging is verified healthy
+.\scripts\provisioning\Deploy-ControlPlane.ps1 -Target Api -Swap
+
+# Preview a full run without touching Azure
+.\scripts\provisioning\Deploy-ControlPlane.ps1 -WhatIf
+```
+
+**Parameters:** `-Environment` (dev/staging/production) · `-Target` (Api/Worker/Both) · `-Swap` (promote `.Api` staging -> production) · `-SkipBuild` · `-SkipQueueVerification` / `-SkipConfigVerification` · `-DryRun` (alias for `-WhatIf`) · full reference in the script's comment-based help (`Get-Help .\scripts\provisioning\Deploy-ControlPlane.ps1 -Full`).
+
+**Known gap (documented in the script's own `.DESCRIPTION`, not hidden):** the `.Worker` App Service's Bicep-declared config-key shape still diverges from `.Api`'s canonical NFR-05 shape (task 109 fixed `.Api` only; the Worker follow-on was filed but has no owning task number as of this writing). The script's config-key check uses the Worker's ACTUAL current key shape so the check reflects reality instead of always failing.
+
+### `provisioning/Grant-ControlPlaneIdentity.ps1`
+**Purpose:** Idempotently registers the L2 control-plane UAMI as a Dataverse Application User on the admin registry environment (Path X, scoped custom role — NOT System Administrator) and grants the C5.8 Microsoft Graph app-role set on the same UAMI service principal.
+**Usage:** 🟡 Occasional - Once per environment (re-run is idempotent / safe)
+**Lifecycle:** ✅ Maintained (added 2026-08-18 by customer-provisioning-orchestration-r1 task 111)
+**Dependencies:** Azure CLI (`az login`) with Dataverse System Administrator on the admin env + Graph `AppRoleAssignment.ReadWrite.All`, `scripts/Grant-GraphAppRoles.ps1`
+**Owner:** Platform Team (customer-provisioning-orchestration-r1)
+**Last Used:** 2026-08-18
+
+**When to Use:**
+- Bootstrapping a new environment's L2 control plane before its first registry write
+- Re-verifying grants after a UAMI rotation or admin-env solution re-import
+
+**Command:**
+```powershell
+.\scripts\provisioning\Grant-ControlPlaneIdentity.ps1 `
+    -TenantId "<tenant-guid>" `
+    -AdminEnvironmentUrl "https://spaarkedev1.crm.dynamics.com" `
+    -UamiClientId "<uami-appid>" `
+    -UamiPrincipalId "<uami-spid>"
+```
 
 ---
 
@@ -889,6 +1010,37 @@ This registry tracks all scripts in this directory, their purpose, usage frequen
 ---
 
 ## Testing & Validation Scripts
+
+### `tests/bicep-e2e-dry-run.ps1`
+**Purpose:** Wave C2 Bicep integration test — runs `az bicep build` on the 4 Wave C2 stacks (customer.bicep, platform.bicep, platform-controlplane.bicep, stacks/model1-shared.bicep) + optional `az deployment sub what-if` against dev + structural assertions on Wave C2 acceptance (UAMI both-slots binding, module count, no CI-workflow edits). Persists a machine-readable notes artifact per run.
+**Usage:** 🟡 Occasional - Before any PR that modifies infrastructure/bicep/** or after Wave C2 changes land; recurring pre-Phase F gate per customer-provisioning-orchestration-r1 spec FR-04.
+**Lifecycle:** ✅ Maintained (added 2026-08-17 by customer-provisioning-orchestration-r1 task 034)
+**Dependencies:** Azure CLI (`az login`), Bicep CLI (`az bicep install`), dev subscription context (for `-Mode DryRun/Full`)
+**Owner:** Platform Team (customer-provisioning-orchestration-r1)
+
+**When to Use:**
+- Before merging any PR that touches `infrastructure/bicep/**`
+- After any Wave C2 task lands (027-033), to verify composition coherence
+- As Phase F gate to confirm the 4-stack composition still dry-runs cleanly
+- Nightly / scheduled runs (Phase H CI-wiring coordinated PR)
+
+**Command:**
+```powershell
+# Tier 1 only: fast build check on all 4 stacks (no dev sub needed)
+pwsh scripts/tests/bicep-e2e-dry-run.ps1
+
+# Tier 1 + Tier 2: adds live what-if against dev subscription
+pwsh scripts/tests/bicep-e2e-dry-run.ps1 -Mode DryRun
+
+# Tier 1 + Tier 2 + Tier 3 (full — recommended): adds structural assertions
+pwsh scripts/tests/bicep-e2e-dry-run.ps1 -Mode Full
+```
+
+**Related**: `projects/customer-provisioning-orchestration-r1/tasks/034-integration-test-bicep-dry-run.poml` (task POML); `projects/customer-provisioning-orchestration-r1/spec.md` FR-04; `projects/customer-provisioning-orchestration-r1/notes/bicep-e2e-dry-run-*.md` (per-run notes artifacts).
+
+**Known deferred failure**: `stacks/model1-shared.bicep` build fails as of 2026-08-17 (unmigrated caller of task-029 UAMI-only app-service.bicep). Marked `ExpectedBuild: EXPECTED_FAILURE` in the script — test still PASSES overall. Follow-on task recommended: migrate the `sharedBffApi` module invocation to the new UAMI-only param signature.
+
+---
 
 ### `Validate-DeployedEnvironment.ps1`
 **Purpose:** Comprehensive validation of a deployed Spaarke environment — checks Dataverse Environment Variables (7 required), BFF API health, CORS origin configuration, and dev value leakage detection

@@ -34,7 +34,22 @@ permissions:
   actions: read
 
 concurrency:
-  group: sdap-ci-${{ github.ref }}
+  # CHANGED 2026-08-28: the key was `github.ref`, so back-to-back master merges
+  # cancelled each other's run. This is the same defect PR #841 fixed in
+  # ci-router.yml; sdap-ci.yml never received it.
+  #
+  # For the router the consequence was a spurious RED (alls-green treats a
+  # cancelled dependency as a hard failure). Here it is quieter but works
+  # against the very thing sdap-ci.yml is still alive for: a cancelled run is
+  # not a verdict, so scripts/ci/shadow-window-status.ps1 correctly scores it as
+  # absent data and SKIPS that PR. Every cancellation silently drops one of the
+  # 20 agreeing PRs the window needs, which delays the retirement this workflow
+  # is waiting on. Observed on merge commit 8ef15a69 (PR #857), whose SDAP CI
+  # run was cancelled by the PR #852 merge four seconds later.
+  #
+  # PRs group by number (a new push should still cancel the previous run);
+  # master/merge_group group by SHA so each commit keeps its own verdict.
+  group: sdap-ci-${{ github.event.pull_request.number || github.sha }}
   cancel-in-progress: true
 
 env:
@@ -52,7 +67,10 @@ jobs:
         uses: actions/checkout@v6
 
       - name: Run Trivy vulnerability scanner
-        uses: aquasecurity/trivy-action@master
+        # Pinned, not @master — same upstream break that took out the provisioning
+        # sidecar's scan step. Kept on the same version as the other two workflows so
+        # all three move together.
+        uses: aquasecurity/trivy-action@v0.36.0
         with:
           scan-type: 'fs'
           scan-ref: '.'
@@ -117,7 +135,7 @@ jobs:
           }
 
       - name: Cache NuGet packages
-        uses: actions/cache@v5
+        uses: actions/cache@v6
         continue-on-error: true  # Prevents Debug/Release matrix race on shared cache key from failing the job (PR #337 hit this 2026-06-03 — Release lost the cache-save race to concurrent Debug at 00:18:47)
         with:
           path: ~/.nuget/packages
@@ -139,13 +157,18 @@ jobs:
       # Two-pass test runner — see scripts/ci/classify-and-retry.ps1 + docs/
       # procedures/testing-and-code-quality.md.
       #
-      # Pass 1 runs the full suite. The classifier reads the TRX and consults
-      # tests/.reliability-registry.json. If any pass-1 failure is NOT in the
-      # registry, that's a real bug → classify exits 1 → this job fails (no
-      # retry). If failures are ALL registry-tagged (timing/concurrency-
-      # sensitive), pass 2 reruns just those on a fresh execution. Pass 2
-      # failures fail the build (treated as a real regression — two
-      # consecutive failures on different runs is no longer noise).
+      # Pass 1 runs the full suite. The classifier reads the TRX and emits a
+      # filter covering EVERY failure. Pass 2 re-runs those on a fresh
+      # execution, and only a test that fails BOTH passes fails the build —
+      # two consecutive failures on different runs is no longer noise.
+      #
+      # Changed 2026-08-26: the classifier used to fail the build immediately
+      # for any failure absent from tests/.reliability-registry.json, calling it
+      # "deterministic". Absence from an allowlist is not evidence of
+      # determinism, and the inference was usually wrong — tests failed that way
+      # on three separate runs and every one of them passes locally. It also
+      # meant a single unregistered failure denied the registered ones their
+      # retry. The registry is now reporting only; it does not gate the retry.
       # ------------------------------------------------------------------
       - name: Test with coverage (pass 1)
         id: test-pass-1
@@ -167,7 +190,7 @@ jobs:
         shell: pwsh
         run: ./scripts/ci/classify-and-retry.ps1 -TrxDirectory ./TestResults/pass1
 
-      - name: Retry timing/concurrency-sensitive tests (pass 2)
+      - name: Retry pass-1 failures (pass 2)
         id: test-pass-2
         if: steps.classify.outputs.retry_needed == 'true'
         continue-on-error: true   # final verdict step decides; capture TRX either way
@@ -184,8 +207,9 @@ jobs:
         run: |
           $retryRan = "${{ steps.classify.outputs.retry_needed }}" -eq "true"
           if (-not $retryRan) {
-            # Classify already exited 1 if there were deterministic failures.
-            # Reaching here with retry_needed=false means pass 1 was fully clean.
+            # The classifier requests a retry for ANY pass-1 failure, so
+            # retry_needed=false means pass 1 was clean (or produced no TRX,
+            # which the classifier reports separately).
             Write-Host "Pass 1 clean — no retry was needed"
             exit 0
           }
@@ -198,6 +222,7 @@ jobs:
           }
           $nsUri = "http://microsoft.com/schemas/VisualStudio/TeamTest/2010"
           $stillFailing = @()
+          $executedNames = New-Object System.Collections.Generic.List[string]
           $passed = 0
           foreach ($trx in $trxFiles) {
             $xml = [xml](Get-Content $trx.FullName -Raw)
@@ -205,6 +230,9 @@ jobs:
             $nsm.AddNamespace("x", $nsUri)
             $stillFailing += @($xml.SelectNodes("//x:UnitTestResult[@outcome='Failed']", $nsm))
             $passed += $xml.SelectNodes("//x:UnitTestResult[@outcome='Passed']", $nsm).Count
+            foreach ($r in $xml.SelectNodes("//x:UnitTestResult", $nsm)) {
+              $executedNames.Add($r.GetAttribute("testName")) | Out-Null
+            }
           }
           if ($stillFailing.Count -gt 0) {
             Write-Host "::error::Retry pass failed: $($stillFailing.Count) test(s) still failing after a second attempt — treating as real regression"
@@ -213,7 +241,26 @@ jobs:
             }
             exit 1
           }
-          Write-Host "Retry pass clean: $passed test(s) retried, all passed on second attempt"
+
+          # COVERAGE GUARD — "did not re-run" is not "passed".
+          # A --filter term can silently match zero tests (renamed, deleted, or a
+          # [Theory] whose DisplayName differs from its FullyQualifiedName). Without
+          # this check a vanished test would turn a red build green, which is worse
+          # than the false-accusation bug this two-pass design was rewritten to fix.
+          $expected = "${{ steps.classify.outputs.retry_methods }}" -split ';' | Where-Object { $_ }
+          $notReRun = @()
+          foreach ($method in $expected) {
+            $covered = $executedNames | Where-Object { $_ -eq $method -or $_.StartsWith("$method(") }
+            if (-not $covered) { $notReRun += $method }
+          }
+          if ($notReRun.Count -gt 0) {
+            Write-Host "::error::Retry pass is INCONCLUSIVE: $($notReRun.Count) test method(s) failed pass 1 but did not execute in pass 2. Not treating absence as success."
+            $notReRun | ForEach-Object { Write-Host "  - $_" }
+            Write-Host "Most likely the pass-2 --filter did not match: the test was renamed or deleted between runs, or its TRX testName differs from its FullyQualifiedName."
+            exit 1
+          }
+
+          Write-Host "Retry pass clean: $passed test(s) retried, all $($expected.Count) failing method(s) re-executed and passed"
 
       - name: Upload test results
         uses: actions/upload-artifact@v6
@@ -282,7 +329,7 @@ jobs:
           dotnet-version: '10.x'
 
       - name: Cache NuGet packages
-        uses: actions/cache@v5
+        uses: actions/cache@v6
         continue-on-error: true  # cache is an optimization, never a gate
         with:
           path: ~/.nuget/packages
@@ -299,7 +346,15 @@ jobs:
     runs-on: ubuntu-latest
     continue-on-error: true  # 2026-06-24: CI informational-only until test-architecture-reset-r1 lands. See projects/test-architecture-reset-r1/design.md.
     permissions:
-      contents: write   # Auto-format push-back on PRs
+      # 2026-08-28: downgraded write -> read. The Prettier push-back step was removed.
+      # It committed to contributor PR branches as github-actions[bot]; 163 such commits
+      # landed in 60 days. Because a GITHUB_TOKEN push cannot re-trigger workflows, the
+      # resulting head SHA carried ZERO check-runs and a permanently `pending` combined
+      # status -- the same shape as a paths-ignore-skipped required check, and it would
+      # have made every auto-formatted PR unmergeable the moment `CI / Router` becomes
+      # required. The mechanism was also fully redundant: .husky/pre-commit already runs
+      # `prettier --write` on staged .ts/.tsx via .lintstagedrc.mjs.
+      contents: read
     steps:
       - name: Configure git line endings
         run: git config --global core.autocrlf true
@@ -315,7 +370,7 @@ jobs:
           node-version: '20'
 
       - name: Cache root npm dependencies
-        uses: actions/cache@v5
+        uses: actions/cache@v6
         with:
           path: ~/.npm
           key: ${{ runner.os }}-npm-root-${{ hashFiles('package-lock.json') }}
@@ -323,7 +378,7 @@ jobs:
             ${{ runner.os }}-npm-root-
 
       - name: Cache PCF npm dependencies
-        uses: actions/cache@v5
+        uses: actions/cache@v6
         with:
           path: ~/.npm
           key: ${{ runner.os }}-npm-pcf-${{ hashFiles('src/client/pcf/package-lock.json') }}
@@ -339,19 +394,9 @@ jobs:
         run: npm install --legacy-peer-deps --no-audit --no-fund --ignore-scripts
 
       - name: Prettier auto-fix
+        # Workspace-local only. The push-back step was REMOVED 2026-08-28 — see the
+        # `permissions:` comment on this job for the full rationale.
         run: npx prettier --write "src/client/**/*.{ts,tsx}" --no-error-on-unmatched-pattern
-
-      - name: Push Prettier fixes
-        if: github.event_name == 'pull_request'
-        run: |
-          if [ -n "$(git diff --name-only)" ]; then
-            git config user.name "github-actions[bot]"
-            git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-            git add -u
-            git commit -m "style: auto-format Prettier (CI)"
-            git push
-            echo "::notice::Prettier fixes auto-committed and pushed to PR branch."
-          fi
 
       - name: Prettier format check
         run: npx prettier --check "src/client/**/*.{ts,tsx}" --no-error-on-unmatched-pattern
@@ -455,7 +500,12 @@ jobs:
     needs: build-test
     continue-on-error: true  # 2026-06-24: CI informational-only until test-architecture-reset-r1 lands. See projects/test-architecture-reset-r1/design.md.
     permissions:
-      contents: write   # Auto-format push-back on PRs
+      # 2026-08-28: downgraded write -> read. The `dotnet format` push-back step was
+      # removed for the reasons documented on the `client-quality` job above. This one
+      # additionally ran `git pull --rebase` against the contributor's PR branch, which
+      # can rewrite history on a shared branch mid-review. .husky/pre-commit already runs
+      # `dotnet format --include` on staged .cs files via .lintstagedrc.mjs.
+      contents: read
 
     steps:
       - name: Checkout
@@ -472,21 +522,9 @@ jobs:
         run: dotnet restore --verbosity minimal
 
       - name: Auto-fix whitespace formatting
+        # Workspace-local only. The push-back step was REMOVED 2026-08-28 — see the
+        # `permissions:` comment on this job for the full rationale.
         run: dotnet format whitespace --verbosity minimal
-
-      - name: Push dotnet format fixes
-        if: github.event_name == 'pull_request'
-        shell: bash
-        run: |
-          git pull --rebase || true
-          if [ -n "$(git diff --name-only)" ]; then
-            git config user.name "github-actions[bot]"
-            git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-            git add -u
-            git commit -m "style: auto-format dotnet whitespace (CI)"
-            git push
-            echo "::notice::dotnet format fixes auto-committed and pushed to PR branch."
-          fi
 
       - name: Format verification
         # `dotnet format whitespace` restricts to whitespace-only checks; excludes
@@ -513,6 +551,21 @@ jobs:
           name: adr-test-results
           path: ./TestResults/adr-results.trx
           if-no-files-found: warn
+
+      # -----------------------------------------------------------------------
+      # customer-provisioning-orchestration-r1 task 088 (r3 task 063 gate wiring)
+      # — Naming-conformance gate (FR-35 + NFR-08). Static regex scan for KV-
+      # secret / Azure-resource naming drift. Read-only. ~1 s runtime.
+      #
+      # Advisory (continue-on-error: true) during r1's Phase G/H remediation
+      # window — flip to blocking once r1 wires the follow-on flip signal
+      # (see projects/customer-provisioning-orchestration-r1/notes/phase-h-ci-wiring-coord-pr.md §1.4).
+      # -----------------------------------------------------------------------
+      - name: Naming-conformance gate (FR-35, advisory until r1 remediation lands)
+        id: naming-conformance
+        continue-on-error: true
+        shell: pwsh
+        run: ./scripts/naming-conformance-check.ps1
 
       - name: Plugin size validation
         shell: pwsh
@@ -563,6 +616,59 @@ jobs:
               Write-Output "Vulnerable packages detected, but all match accepted-risk list (ADR-029)."
             }
           }
+
+  # ──────────────────────────────────────────────────────────────────────────
+  # customer-provisioning-orchestration-r1 task 088 (r1 task 064 gate wiring)
+  # — Tenant-isolation invariants I1..I5 (FR-28..FR-32 + design.md §4D).
+  # BLOCKING from day 1 (r1 task 065 audit sweep = 0 findings baseline).
+  #
+  # Deliberately a SEPARATE self-contained job (same rationale as eval-gate
+  # + compose-fidelity-gate in this file): existing jobs carry
+  # continue-on-error: true (2026-06-24 informational posture) which would
+  # swallow a tenant-isolation red. This gate must NEVER be advisory —
+  # cross-tenant leak is a security incident, not a warning.
+  # ──────────────────────────────────────────────────────────────────────────
+  tenant-isolation:
+    name: Tenant Isolation (I1–I5 invariants)
+    runs-on: windows-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Setup .NET 10
+        uses: actions/setup-dotnet@v6
+        with:
+          dotnet-version: '10.x'
+
+      - name: Cache NuGet packages
+        uses: actions/cache@v6
+        continue-on-error: true  # cache is an optimization, never a gate
+        with:
+          path: ~/.nuget/packages
+          key: ${{ runner.os }}-nuget-${{ hashFiles('**/Directory.Packages.props', '**/*.csproj') }}
+          restore-keys: |
+            ${{ runner.os }}-nuget-
+
+      - name: Tenant-isolation invariants (I1..I5 — merge-blocking)
+        # Filter by namespace: all 5 files live in
+        # Spaarke.ArchTests.TenantIsolation.* — this catches I1..I5 as a
+        # cohesive set + auto-picks-up any new I{N}_* tests r1 adds in the
+        # future without a workflow edit.
+        shell: pwsh
+        run: |
+          dotnet test tests/Spaarke.ArchTests/Spaarke.ArchTests.csproj `
+            -c Release `
+            --filter "FullyQualifiedName~Spaarke.ArchTests.TenantIsolation" `
+            --logger "trx;LogFileName=tenant-isolation-results.trx" `
+            --results-directory ./TestResults
+
+      - name: Upload tenant-isolation TRX
+        if: always()
+        uses: actions/upload-artifact@v6
+        with:
+          name: tenant-isolation-results
+          path: ./TestResults/tenant-isolation-results.trx
+          if-no-files-found: warn
 
   integration-readiness:
     name: Integration Readiness
@@ -626,7 +732,7 @@ jobs:
           path: ./test-results
 
       - name: Parse and comment on PR
-        uses: actions/github-script@v8
+        uses: actions/github-script@v9
         with:
           script: |
             const fs = require('fs');
@@ -722,7 +828,7 @@ jobs:
   summary:
     name: CI Summary
     runs-on: ubuntu-latest
-    needs: [security-scan, build-test, code-quality, client-quality, integration-readiness]
+    needs: [security-scan, build-test, code-quality, client-quality, integration-readiness, tenant-isolation]
     if: always()
 
     steps:
@@ -736,6 +842,7 @@ jobs:
           echo "| Code Quality | ${{ needs.code-quality.result }} |" >> $GITHUB_STEP_SUMMARY
           echo "| Client Quality | ${{ needs.client-quality.result }} |" >> $GITHUB_STEP_SUMMARY
           echo "| Integration Readiness | ${{ needs.integration-readiness.result }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| Tenant Isolation | ${{ needs.tenant-isolation.result }} |" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
           echo "### Next Steps" >> $GITHUB_STEP_SUMMARY
           echo "- [ ] Configure deployment environments" >> $GITHUB_STEP_SUMMARY
@@ -778,7 +885,7 @@ jobs:
           dotnet-version: '10.x'
 
       - name: Cache NuGet packages
-        uses: actions/cache@v5
+        uses: actions/cache@v6
         continue-on-error: true  # cache is an optimization, never a gate
         with:
           path: ~/.nuget/packages
@@ -797,3 +904,146 @@ jobs:
           name: fidelity-gate-result
           path: tests/unit/Sprk.Bff.Api.Tests/bin/**/fidelity-gate-result.json
           if-no-files-found: warn  # absent only if the run crashed pre-sink; the test step is already red then
+
+  # ──────────────────────────────────────────────────────────────────────────
+  # Compose CLIENT gate (spaarkeai-compose-r8 task 018, spec Track S) — the
+  # Half-B counterpart to compose-fidelity-gate above.
+  #
+  # WHAT IT GATES: the `@spaarke/compose-components` jest suite
+  # (src/client/shared/Spaarke.Compose.Components — 90 suites / ~1,100 tests):
+  # the CLIENT half of the save contract. Did the save request get built and
+  # issued correctly, and does the UI then tell the user the truth about what
+  # happened. compose-fidelity-gate drives `.docx` BYTES through load → edit →
+  # save → reopen — that is Half A. Half B had no gate at all: no workflow
+  # installed this package, built it, or ran a single one of its tests. R8 task
+  # 010 found a save-error branch that had passed its tests for three releases
+  # while validating a response shape the real transport cannot emit; it passed
+  # because nothing ran it. This job is what stops that from repeating.
+  #
+  # WHY A SEPARATE JOB — the same rationale eval-gate and compose-fidelity-gate
+  # state: build-test, code-quality, client-quality and integration-readiness
+  # all carry job-level `continue-on-error: true` (the 2026-06-24 informational
+  # posture), so a step added to any of them would have its failure swallowed
+  # by the job it lives in. Those jobs are also owned by
+  # ci-cd-unit-test-remediation-r1 and are not modified here. A self-contained
+  # job is the only construction whose result can reach the workflow-run
+  # conclusion.
+  #
+  # ADVISORY ON LANDING (`continue-on-error: true`), WITH THE REASON:
+  # the gate earns the right to block only once the suite is proven
+  # deterministic on THIS runner. Task 018 fixed the two defects that made it
+  # non-deterministic — 39 of 90 suites could not resolve `@spaarke/ui-components`
+  # and never ran at all, and 7 suites carried `jest.mock(..., { virtual: true })`
+  # on `@spaarke/*` specifiers, which registers them in jest's shared resolver
+  # and changed how LATER suites in the same worker resolved the same module
+  # (order-dependent, and invisible to a single-suite run) — and demonstrated six
+  # consecutive byte-identical green runs (90/90 suites, 1103/1103 tests) across
+  # six DIFFERENT suite execution orders at this job's concurrency. But all six
+  # were on a developer Windows box, and this job has never executed once on
+  # ubuntu-latest: no run on the actual runner exists yet. A blocking gate
+  # whose first red is an environment artifact gets ignored, then disabled, and
+  # the surface silently reverts to having no gate — strictly worse than today.
+  #
+  # FLIP CONDITION (do this; do not let it drift): after three consecutive green
+  # `compose-client-gate` runs on unchanged code ON THIS RUNNER, DELETE the
+  # `continue-on-error: true` line below and record the run ids in the PR.
+  # Nothing else about the job changes. Evidence + measurements:
+  # projects/spaarkeai-compose-r8/notes/compose-client-ci-gate.md.
+  #
+  # SHARED-LIB BUILD: the package consumes its `@spaarke/*` siblings as built
+  # `dist/` (see the resolution contract at the top of that package's
+  # jest.config.js). The install → `npx tsc` recipe and its dependency ORDER are
+  # copied from client-quality above; building out of order produces the
+  # TS2307/TS2875 cascade documented there. `npm install`, never `npm ci`, per
+  # root CLAUDE.md §12.
+  # ──────────────────────────────────────────────────────────────────────────
+  compose-client-gate:
+    name: Compose Client Gate (Save-Contract Suite)
+    runs-on: ubuntu-latest
+    continue-on-error: true  # ADVISORY until three green runs on THIS runner — see FLIP CONDITION above
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      # ---- SharedLibs dist, in dependency order (client-quality recipe) ----
+      # Spaarke.Auth first: both Spaarke.UI.Components and Spaarke.DocumentOperations
+      # type-check against its emitted declarations.
+      - name: Install Spaarke.Auth deps
+        working-directory: src/client/shared/Spaarke.Auth
+        run: npm install --legacy-peer-deps --no-audit --no-fund
+
+      - name: Build Spaarke.Auth
+        working-directory: src/client/shared/Spaarke.Auth
+        run: npx tsc
+
+      # Spaarke.UI.Components' tsconfig path-maps @spaarke/sdap-client to
+      # ../Spaarke.SdapClient/dist/index.d.ts — with no dist, tsc falls back to that
+      # package's raw source and the build fails.
+      - name: Install Spaarke.SdapClient deps
+        working-directory: src/client/shared/Spaarke.SdapClient
+        run: npm install --legacy-peer-deps --no-audit --no-fund
+
+      - name: Build Spaarke.SdapClient
+        working-directory: src/client/shared/Spaarke.SdapClient
+        run: npx tsc
+
+      # The one that matters: 39 of the 90 suites cannot even LOAD without this
+      # dist — every ComposeWorkspace/ComposeEditor suite reaches it transitively.
+      - name: Install Spaarke.UI.Components deps
+        working-directory: src/client/shared/Spaarke.UI.Components
+        run: npm install --legacy-peer-deps --no-audit --no-fund
+
+      - name: Build Spaarke.UI.Components
+        working-directory: src/client/shared/Spaarke.UI.Components
+        run: npx tsc
+
+      # ComposeWorkspace + ComposeToolbar import useDocumentActions from here.
+      - name: Install Spaarke.DocumentOperations deps
+        working-directory: src/client/shared/Spaarke.DocumentOperations
+        run: npm install --legacy-peer-deps --no-audit --no-fund
+
+      - name: Build Spaarke.DocumentOperations
+        working-directory: src/client/shared/Spaarke.DocumentOperations
+        run: npx tsc
+
+      # Spaarke.AI.Widgets needs NO dist: jest.config maps @spaarke/ai-widgets
+      # straight to its `src` (that mapping's own comment says so).
+      - name: Install Spaarke.Compose.Components deps
+        working-directory: src/client/shared/Spaarke.Compose.Components
+        run: npm install --legacy-peer-deps --no-audit --no-fund
+
+      # The package's own declared CI entry point (`jest --ci --coverage --maxWorkers=2`).
+      # The extra flags only add the machine-readable result the artifact step uploads.
+      # Coverage is collected but NOT gated (ADR-038: coverage is observation, never a gate).
+      - name: Compose client suite (save contract)
+        id: jest
+        working-directory: src/client/shared/Spaarke.Compose.Components
+        run: npm run test:ci -- --json --outputFile=compose-client-jest-results.json
+
+      # A job-level `continue-on-error: true` renders a failure as a green check with a
+      # warning annotation, which is easy to miss. While the gate is advisory this step is
+      # what makes a red suite legible: a job-summary table plus an ::error:: annotation
+      # naming every failed suite. Keep it after the flip to blocking — it is just as useful.
+      - name: Report result (job summary + annotation)
+        if: always()
+        working-directory: src/client/shared/Spaarke.Compose.Components
+        run: |
+          if [ ! -f compose-client-jest-results.json ]; then
+            echo "::error::compose-client-gate produced no jest results - the run crashed before jest reported"
+            echo "### Compose Client Gate - no results (jest crashed)" >> "$GITHUB_STEP_SUMMARY"
+            exit 0
+          fi
+          node "$GITHUB_WORKSPACE/scripts/ci/summarize-jest-results.js" compose-client-jest-results.json "Compose Client Gate (Save-Contract Suite)" >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload jest results (per-suite breakdown)
+        uses: actions/upload-artifact@v6
+        if: failure()   # the breakdown matters MOST when the gate is red
+        with:
+          name: compose-client-jest-results
+          path: src/client/shared/Spaarke.Compose.Components/compose-client-jest-results.json
+          if-no-files-found: warn  # absent only if the run crashed before jest reported

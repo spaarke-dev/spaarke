@@ -1,11 +1,14 @@
 using System.Collections.Concurrent;
 using System.Net;
+using System.Text.Json;
 using Azure.Identity;
 using Azure.Security.KeyVault.Secrets;
 using Microsoft.Graph;
 using Microsoft.Graph.Models;
 using Microsoft.Graph.Models.ODataErrors;
 using Microsoft.Graph.Search;
+using Microsoft.Kiota.Abstractions;
+using Microsoft.Kiota.Abstractions.Serialization;
 using Microsoft.Kiota.Authentication.Azure;
 using Spaarke.Dataverse;
 
@@ -62,15 +65,119 @@ public sealed class SpeAdminGraphService
             !string.IsNullOrWhiteSpace(OwningAppSecretName);
     }
 
-    /// <summary>Summarised container data returned from Graph API.</summary>
+    /// <summary>
+    /// Summarised container data returned from Graph API.
+    /// </summary>
+    /// <param name="WebUrl">
+    /// The container's SharePoint URL — the scoping key for a Purview eDiscovery search (FR-C10).
+    ///
+    /// 🔑 <b>Populated by GET-single ONLY. Always null from a LIST.</b> This is not an oversight;
+    /// it is a measured Graph limitation (2026-08-24, task 028 — see notes/task-028-findings.md §1):
+    /// <c>fileStorageContainer</c> has <b>no URL property</b> in either API version. The value lives
+    /// on the <c>drive</c> navigation property, and on the containers <b>collection</b> Graph accepts
+    /// <c>$expand=drive($select=webUrl)</c>, returns <b>200</b>, echoes <c>drive(webUrl)</c> in
+    /// <c>@odata.context</c> — and omits <c>drive</c> from every row. Silently. On v1.0 and beta, for
+    /// every expand shape tried (<c>$expand=drive</c>, <c>$select=id,drive</c>, multi-expand).
+    ///
+    /// That is precisely this project's signature defect shape, arriving from the platform itself, so
+    /// do NOT "fix" a null here by adding an expand to <see cref="ListContainersAsync"/> — it will
+    /// still be null and you will have paid for a lie. The list contract deliberately omits the field
+    /// from the wire entirely (see <c>ContainerDto.WebUrl</c>) so that absent cannot be misread as
+    /// "this container has no URL".
+    ///
+    /// Null on a GET-single genuinely means Graph did not report one, and must render as an explicit
+    /// absent state, never a blank (NFR-06). Never synthesise it from the container id — the id
+    /// encodes the site GUID but not the tenant host, so any derived URL would be a fabricated value.
+    /// </param>
+    /// <param name="Status">
+    /// The container's lifecycle status (<c>active</c> / <c>inactive</c>), or null meaning
+    /// <b>NOT REPORTED</b>.
+    ///
+    /// 🔑 <b>Null on every LIST row. Populated by CREATE and GET-single.</b> Measured live
+    /// 2026-08-27 (task 050 — see notes/task-050-findings.md §4): the containers collection accepts
+    /// <c>$select=…,status</c>, answers <b>200</b>, and returns rows carrying only <c>id</c> and
+    /// <c>displayName</c>. Without <c>$select</c> it returns seven properties, <c>status</c> not among
+    /// them. The same shape as <see cref="WebUrl"/> — asked, accepted, silently dropped.
+    ///
+    /// This was <c>string Status = "active"</c> until 2026-08-27, and all four mapping sites ended
+    /// <c>: "active"</c>. Because Graph never returns <c>status</c> on a LIST, that fallback fired for
+    /// <b>100% of grid rows</b> — the Containers grid asserted "Active" for every container in the
+    /// tenant, whatever its real state. Absent collapsed into a benign value; §2.4, shipping.
+    ///
+    /// Do NOT "fix" a null here by adding <c>status</c> to the LIST <c>$select</c>. It is already
+    /// there and Graph drops it. Render null as an explicit absent state (spec NFR-06).
+    /// </param>
+    /// <param name="ArchiveStatus">
+    /// Archive state from <c>archivalDetails.archiveStatus</c> — one of <c>recentlyArchived</c>,
+    /// <c>fullyArchived</c>, <c>reactivating</c> — or null meaning <b>not archived, or not reported</b>
+    /// (FR-E01, task 050).
+    ///
+    /// Graph's <c>siteArchiveStatus</c> enum has <b>no</b> <c>notArchived</c> member on either API
+    /// version, so a non-archived container is expressed by the <i>absence</i> of
+    /// <c>archivalDetails</c>. Null here therefore does not distinguish "not archived" from "Graph did
+    /// not tell us" — treat it as "no archive state to show", never as a positive claim of active
+    /// content.
+    ///
+    /// ⚠️ This is a <b>separate dimension from <paramref name="Status"/></b>. A container can be
+    /// <c>status: active</c> and <c>fullyArchived</c> at the same time; they are different Graph
+    /// properties answering different questions. Do not merge them into one column value.
+    ///
+    /// Beta-only, like the <c>archive</c>/<c>unarchive</c> actions themselves. The container surface
+    /// is already pinned to beta by task 020's measured decision, so this adds no new version risk.
+    /// </param>
+    /// <param name="Quota">
+    /// Per-container storage quota from the container drive's <c>quota</c> facet — the ONLY
+    /// per-container storage surface Graph exposes (FR-E02, task 051). Null on a LIST; populated on
+    /// GET-single, which expands the drive.
+    /// </param>
     public sealed record SpeContainerSummary(
         string Id,
         string DisplayName,
         string? Description,
         string ContainerTypeId,
-        DateTimeOffset CreatedDateTime,
+        DateTimeOffset? CreatedDateTime,
         long? StorageUsedInBytes,
-        string Status = "active");
+        string? Status = null,
+        string? WebUrl = null,
+        string? ArchiveStatus = null,
+        SpeContainerQuota? Quota = null);
+
+    /// <summary>
+    /// A container's storage quota, read from the drive's <c>quota</c> facet (FR-E02, task 051).
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// 🔑 <b>This is the only per-container storage surface Graph has, and it is READ-ONLY.</b>
+    /// <c>maxStoragePerContainerInBytes</c> — the writable ceiling — lives on
+    /// <c>fileStorageContainerTypeSettings</c>, i.e. the container <b>TYPE</b>, and is absent from
+    /// <c>fileStorageContainerSettings</c> on both API versions. <see cref="Total"/> here is that
+    /// type-level ceiling as it applies to this container.
+    /// </para>
+    /// <para>
+    /// 🔴 <b>Do not add a per-container ceiling write.</b> Measured live 2026-08-27 on a throwaway
+    /// container: <c>PATCH /containers/{id}</c> with <c>maxStoragePerContainerInBytes</c> — both
+    /// nested under <c>settings</c> and top-level — returns <b>200 OK</b> and <b>silently discards
+    /// the value</b>; the read-back carries no such property. A control built on that would report
+    /// success forever and change nothing. To change the ceiling, PATCH the container TYPE, which
+    /// changes it for every container of that type. See notes/task-051-findings.md §1.
+    /// </para>
+    /// <para>
+    /// <see cref="Used"/> matters beyond the quota display: <c>storageUsedInBytes</c> is
+    /// <b>LIST-only</b> (tasks 020/024 — absent from GET-single even with an explicit <c>$select</c>),
+    /// so this is the only consumption figure available on a single-container fetch.
+    /// </para>
+    /// </remarks>
+    /// <param name="Total">The ceiling in bytes, sourced from the container TYPE's setting. Null = not reported.</param>
+    /// <param name="Used">Bytes consumed. Null = not reported — never render null as 0 (spec NFR-06).</param>
+    /// <param name="Remaining">Bytes left. Graph computes this; it is NOT derived here.</param>
+    /// <param name="Deleted">Bytes held by deleted items still counting against the quota.</param>
+    /// <param name="State">Graph's own assessment, e.g. <c>normal</c>, <c>nearing</c>, <c>critical</c>, <c>exceeded</c>.</param>
+    public sealed record SpeContainerQuota(
+        long? Total,
+        long? Used,
+        long? Remaining,
+        long? Deleted,
+        string? State);
 
     /// <summary>
     /// A single file or folder item returned from the Graph drive items API.
@@ -147,12 +254,67 @@ public sealed class SpeAdminGraphService
     /// <param name="Description">Optional description of the container type's purpose.</param>
     /// <param name="BillingClassification">Billing classification (e.g., "standard"). Null when not returned by Graph.</param>
     /// <param name="CreatedDateTime">When the container type was created (UTC).</param>
+    /// <param name="OwningAppId">
+    /// Entra application (client) ID of the owning application. SharePoint Embedded mandates a 1:1
+    /// relationship between an owning app and a container type, and the coupling is permanent — so
+    /// this is what identifies a container type to an administrator, not just its GUID.
+    /// <para>
+    /// Null when Graph does not return it. Deliberately NOT defaulted to a placeholder: an absent
+    /// owning app must read as unknown, never as a value.
+    /// </para>
+    /// </param>
+    /// <param name="ExpirationDateTime">
+    /// When a trial container type expires. Trial types are valid for 30 days and are not renewable
+    /// (knowledge/sharepoint-embedded/docs/learn-containertypes.md:69), which is the one lifecycle
+    /// fact an administrator is otherwise never told. Null for non-trial types, and null when Graph
+    /// does not return it.
+    /// </param>
+    /// <remarks>
+    /// Trailing parameters are optional so the positional construction in existing tests keeps
+    /// compiling. Added 2026-08-23 by task 030 — the client asks for both fields
+    /// (<c>types/spe.ts</c>) but nothing above this record ever supplied them, so the grid's
+    /// "Owning App" column rendered blank and the trial-expiry warning could never fire.
+    /// </remarks>
+    /// <summary>
+    /// The container-type settings block, as returned by Graph.
+    /// </summary>
+    /// <remarks>
+    /// The nine v1.0 properties, verified against Graph's OData metadata
+    /// (notes/task-025-schema-verification.md), plus the beta-only <c>isOfficeRestricted</c>.
+    /// <para>
+    /// Every member is nullable and means <b>not reported</b> when null — never a default. A settings
+    /// block we could not read must not present as "search is off".
+    /// </para>
+    /// </remarks>
+    /// <param name="ConsumingTenantOverridables">
+    /// The raw comma-delimited flag string (e.g. <c>"sharingCapability,itemMajorVersionLimit"</c>),
+    /// deliberately NOT the SDK's typed enum — the live tenant uses flags that are not members of it.
+    /// </param>
+    /// <param name="IsOfficeRestricted">
+    /// Beta-only; absent from the v1.0 schema and from the SDK's typed model. Read-only here.
+    /// </param>
+    public sealed record SpeContainerTypeSettings(
+        string? SharingCapability,
+        bool? IsItemVersioningEnabled,
+        long? ItemMajorVersionLimit,
+        long? MaxStoragePerContainerInBytes,
+        bool? IsSearchEnabled,
+        bool? IsDiscoverabilityEnabled,
+        bool? IsSharingRestricted,
+        string? UrlTemplate,
+        string? ConsumingTenantOverridables,
+        bool? IsOfficeRestricted);
+
     public sealed record SpeContainerTypeSummary(
         string Id,
         string DisplayName,
         string? Description,
         string? BillingClassification,
-        DateTimeOffset CreatedDateTime);
+        DateTimeOffset? CreatedDateTime,
+        string? OwningAppId = null,
+        DateTimeOffset? ExpirationDateTime = null,
+        SpeContainerTypeSettings? Settings = null,
+        string? BillingStatus = null);
 
     /// <summary>
     /// An application permission entry on an SPE container type, returned from the Graph
@@ -315,6 +477,22 @@ public sealed class SpeAdminGraphService
     private readonly TimeSpan _cacheTtl;
 
     /// <summary>
+    /// Graph search region, sent on every app-only <c>/search/query</c> call (mandatory — see
+    /// <see cref="SearchItemsAsync"/>). Override with <c>SpeAdmin:SearchRegion</c>.
+    /// </summary>
+    private readonly string _searchRegion;
+
+    /// <summary>Fallback region when none is configured. North America.</summary>
+    internal const string DefaultSearchRegion = "NAM";
+
+    /// <summary>
+    /// Builds delegated (user-context) Graph clients via the BFF's existing OBO exchange.
+    /// Optional so existing constructor callers keep working; required only by
+    /// <see cref="ListContainerTypesForUserAsync"/>.
+    /// </summary>
+    private readonly IGraphClientFactory? _graphClientFactory;
+
+    /// <summary>
     /// Token provider for multi-app OBO flows (Phase 3).
     /// Null when SpeAdminTokenProvider is not registered — falls back to single-app mode.
     /// </summary>
@@ -343,8 +521,11 @@ public sealed class SpeAdminGraphService
         DataverseWebApiClient dataverseClient,
         IConfiguration configuration,
         ILogger<SpeAdminGraphService> logger,
-        Sprk.Bff.Api.Services.SpeAdmin.SpeAdminTokenProvider? tokenProvider = null)
+        Sprk.Bff.Api.Services.SpeAdmin.SpeAdminTokenProvider? tokenProvider = null,
+        IGraphClientFactory? graphClientFactory = null)
     {
+        _graphClientFactory = graphClientFactory;
+
         ArgumentNullException.ThrowIfNull(httpClientFactory);
         ArgumentNullException.ThrowIfNull(secretClient);
         ArgumentNullException.ThrowIfNull(dataverseClient);
@@ -361,10 +542,17 @@ public sealed class SpeAdminGraphService
         var ttlMinutes = configuration.GetValue<int>("SpeAdmin:GraphClientCacheTtlMinutes", defaultValue: 30);
         _cacheTtl = TimeSpan.FromMinutes(ttlMinutes > 0 ? ttlMinutes : 30);
 
+        // Graph requires `region` on every app-only /search/query call. It is a property of where the
+        // tenant is provisioned, so it is configuration, not a constant — a tenant outside North
+        // America needs its own value (EUR, APC, …) or item search fails there while passing here.
+        var region = configuration.GetValue<string>("SpeAdmin:SearchRegion");
+        _searchRegion = string.IsNullOrWhiteSpace(region) ? DefaultSearchRegion : region;
+
         _logger.LogInformation(
             "SpeAdminGraphService initialized. Graph client cache TTL: {TtlMinutes} minutes. " +
-            "Multi-app (OBO) mode: {MultiAppEnabled}",
+            "Search region: {SearchRegion}. Multi-app (OBO) mode: {MultiAppEnabled}",
             ttlMinutes,
+            _searchRegion,
             tokenProvider != null);
     }
 
@@ -624,7 +812,7 @@ public sealed class SpeAdminGraphService
                     config.QueryParameters.Select = new[]
                     {
                         "id", "displayName", "description", "containerTypeId",
-                        "createdDateTime", "storageUsedInBytes", "status"
+                        "createdDateTime", "storageUsedInBytes", "status", "archivalDetails"
                     };
                 }, ct),
             ct);
@@ -635,15 +823,20 @@ public sealed class SpeAdminGraphService
             {
                 foreach (var container in response.Value)
                 {
-                    var status = container.AdditionalData?.TryGetValue("status", out var s) == true && s is string ss ? ss : "active";
                     results.Add(new SpeContainerSummary(
                         container.Id ?? string.Empty,
                         container.DisplayName ?? string.Empty,
                         container.Description,
                         container.ContainerTypeId?.ToString() ?? containerTypeId,
-                        container.CreatedDateTime ?? DateTimeOffset.UtcNow,
-                        StorageUsedInBytes: null, // Not always returned by Graph
-                        Status: status));
+                        container.CreatedDateTime,
+                        // LIST returns real consumption on beta (measured live, task 020). Null
+                        // means NOT REPORTED and must never render as 0 B.
+                        StorageUsedInBytes: ReadStorageUsedInBytes(container.AdditionalData),
+                        // Null on a LIST, always — Graph drops `status` from collection rows even
+                        // when $select asks for it (task 050 §4). This used to read `: "active"`,
+                        // which fabricated the grid's entire Status column.
+                        Status: ReadContainerStatus(container.Status, container.AdditionalData),
+                        ArchiveStatus: ReadArchiveStatus(container.AdditionalData)));
                 }
             }
 
@@ -922,7 +1115,14 @@ public sealed class SpeAdminGraphService
             // The Graph SDK's WithUrl() builder allows resumption from any OData nextLink.
             // We reconstruct the URL in the format Graph expects for skip-token continuation.
             // Note: Graph API containerTypeId is Edm.Guid — no single quotes in filter.
-            var nextLinkUrl = $"https://graph.microsoft.com/beta/storage/fileStorage/containers" +
+            //
+            // The base address is DERIVED from the client that is about to issue the request, never
+            // hardcoded. A synthetic nextLink pointing at a different API version than the client's own
+            // base address sends page 2 somewhere page 1 did not come from — which fails silently as
+            // "no more results" rather than as an error (task 020 / spec FR-C01 pagination constraint).
+            var baseUrl = ResolveGraphBaseUrl(graphClient);
+
+            var nextLinkUrl = $"{baseUrl}/storage/fileStorage/containers" +
                               $"?$filter=containerTypeId+eq+{containerTypeId}" +
                               $"&$skiptoken={Uri.EscapeDataString(skipToken)}";
 
@@ -949,7 +1149,7 @@ public sealed class SpeAdminGraphService
                         config.QueryParameters.Select = new[]
                         {
                             "id", "displayName", "description", "containerTypeId",
-                            "createdDateTime", "storageUsedInBytes", "status"
+                            "createdDateTime", "storageUsedInBytes", "status", "archivalDetails"
                         };
 
                         if (top.HasValue && top.Value > 0)
@@ -966,15 +1166,16 @@ public sealed class SpeAdminGraphService
         {
             foreach (var container in response.Value)
             {
-                var status = container.AdditionalData?.TryGetValue("status", out var s) == true && s is string ss ? ss : "active";
                 items.Add(new SpeContainerSummary(
                     container.Id ?? string.Empty,
                     container.DisplayName ?? string.Empty,
                     container.Description,
                     container.ContainerTypeId?.ToString() ?? containerTypeId,
-                    container.CreatedDateTime ?? DateTimeOffset.UtcNow,
-                    StorageUsedInBytes: null, // Not always returned by Graph
-                    Status: status));
+                    container.CreatedDateTime,
+                    StorageUsedInBytes: ReadStorageUsedInBytes(container.AdditionalData),
+                    // Null on a LIST, always — see ListContainersAsync for the measurement.
+                    Status: ReadContainerStatus(container.Status, container.AdditionalData),
+                    ArchiveStatus: ReadArchiveStatus(container.AdditionalData)));
             }
         }
 
@@ -1050,15 +1251,22 @@ public sealed class SpeAdminGraphService
             "SPE container created: Id={ContainerId}, DisplayName='{DisplayName}', ContainerTypeId={ContainerTypeId}",
             created.Id, created.DisplayName, containerTypeId);
 
-        var createdStatus = created.AdditionalData?.TryGetValue("status", out var csvs) == true && csvs is string csvsStr ? csvsStr : "active";
         return new SpeContainerSummary(
             Id: created.Id ?? string.Empty,
             DisplayName: created.DisplayName ?? displayName,
             Description: created.Description,
             ContainerTypeId: created.ContainerTypeId?.ToString() ?? containerTypeId,
-            CreatedDateTime: created.CreatedDateTime ?? DateTimeOffset.UtcNow,
-            StorageUsedInBytes: null, // New containers always start empty; Graph returns null here
-            Status: createdStatus);
+            CreatedDateTime: created.CreatedDateTime,
+            // Read rather than assumed. The old comment reasoned "new containers always start empty"
+            // and hardcoded null — but an inference is not a measurement, and if Graph ever does
+            // report a value here we would still have been discarding it.
+            StorageUsedInBytes: ReadStorageUsedInBytes(created.AdditionalData),
+            // CREATE genuinely returns this — measured 2026-08-27, a fresh container comes back
+            // `status: inactive` until /activate is called. So unlike the LIST paths this is a real
+            // read, and the old `: "active"` fallback was actively wrong here: it reported a
+            // brand-new, not-yet-activated container as active.
+            Status: ReadContainerStatus(created.Status, created.AdditionalData),
+            ArchiveStatus: ReadArchiveStatus(created.AdditionalData));
     }
 
     /// <summary>
@@ -1089,8 +1297,23 @@ public sealed class SpeAdminGraphService
                         config.QueryParameters.Select = new[]
                         {
                             "id", "displayName", "description", "containerTypeId",
-                            "createdDateTime", "storageUsedInBytes", "status"
+                            "createdDateTime", "storageUsedInBytes", "status", "archivalDetails"
                         };
+                        // The container URL (FR-C10). `fileStorageContainer` exposes no URL property
+                        // in either API version — it lives on the `drive` navigation property.
+                        //
+                        // Verified live 2026-08-24 that $select and $expand DO co-exist here: this
+                        // exact pairing returns `drive: { webUrl }`. That check was not ceremony —
+                        // on the containers COLLECTION the identical expand is accepted, returns 200,
+                        // and is silently dropped, so "the expand is valid" could not be assumed from
+                        // the list's behaviour. See notes/task-028-findings.md §1.
+                        //
+                        // `quota` added 2026-08-27 (task 051 / FR-E02). Verified live that the
+                        // two-field nested $select still returns BOTH — the same check task 028 made
+                        // for `webUrl` alone, for the same reason: on the containers COLLECTION this
+                        // identical expand is accepted, answers 200, and is silently dropped, so
+                        // "the request was accepted" proves nothing about the response.
+                        config.QueryParameters.Expand = new[] { "drive($select=webUrl,quota)" };
                     }, ct),
                 ct);
 
@@ -1100,15 +1323,26 @@ public sealed class SpeAdminGraphService
                 return null;
             }
 
-            var containerStatus = container.AdditionalData?.TryGetValue("status", out var sv) == true && sv is string svs ? svs : "active";
             return new SpeContainerSummary(
                 container.Id ?? string.Empty,
                 container.DisplayName ?? string.Empty,
                 container.Description,
                 container.ContainerTypeId?.ToString() ?? string.Empty,
-                container.CreatedDateTime ?? DateTimeOffset.UtcNow,
-                StorageUsedInBytes: null,
-                Status: containerStatus);
+                container.CreatedDateTime,
+                // GET does NOT return consumption, even on beta (measured live, task 020) — so this
+                // is normally null. Read anyway: if Graph starts returning it, we get it for free
+                // instead of discarding it for another year.
+                StorageUsedInBytes: ReadStorageUsedInBytes(container.AdditionalData),
+                // GET-single DOES return status (measured live 2026-08-27) — it was being discarded
+                // and replaced with a hardcoded "active" because the old reader looked in
+                // AdditionalData for a property the SDK models as typed. See ReadContainerStatus.
+                Status: ReadContainerStatus(container.Status, container.AdditionalData),
+                // FR-C10. GET-single is the ONLY call that can carry this — see SpeContainerSummary.
+                WebUrl: ReadContainerWebUrl(container.Drive?.WebUrl, container.AdditionalData),
+                ArchiveStatus: ReadArchiveStatus(container.AdditionalData),
+                // FR-E02. Also the only consumption figure available on a single-container fetch —
+                // storageUsedInBytes is LIST-only (tasks 020/024).
+                Quota: ReadContainerQuota(container.Drive));
         }
         catch (ODataError odataError) when (odataError.ResponseStatusCode == (int)HttpStatusCode.NotFound)
         {
@@ -1542,8 +1776,55 @@ public sealed class SpeAdminGraphService
         ContainerTypeConfig config, string query, int? pageSize, string? skipToken, CancellationToken ct = default)
     {
         var client = await GetClientForConfigAsync(config, ct).ConfigureAwait(false);
-        try { return await SearchContainersAsync(client, query, pageSize, skipToken, ct).ConfigureAwait(false); }
+        try { return await SearchContainersAsync(client, config.ContainerTypeId, query, pageSize, skipToken, ct).ConfigureAwait(false); }
         catch (ODataError ex) { throw ex.ToSpaarkeStorageException($"SearchContainers({query})"); }
+    }
+
+    /// <summary>
+    /// Lists container types using a DELEGATED (user-context) Graph client.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <b>Container types cannot be read app-only.</b> Proven against the live tenant (task 010):
+    /// <c>GET /storage/fileStorage/containerTypes</c> returns <c>403 accessDenied</c> on v1.0 and beta
+    /// alike, even with a healthy app-only token. Graph requires a delegated token here, so the
+    /// app-only <see cref="ListContainerTypesForConfigAsync"/> path can never succeed for this call.
+    /// </para>
+    /// <para>
+    /// The caller supplies the client, built by <c>IGraphClientFactory.ForUserAsync</c> — the BFF's
+    /// existing OBO exchange, already used by SPE file operations, the Agent, and the Dataverse user
+    /// client. Deliberately NOT <c>SpeAdminTokenProvider</c>: that provider exchanges as the config's
+    /// <c>OwningAppId</c>, which in this environment is the SPA client itself. It exposes no
+    /// identifier URI, so its token request fails with <c>AADSTS500011</c>, and OBO additionally
+    /// requires the exchanging client to be the assertion's audience (the BFF). See
+    /// <c>notes/obo-spike-findings.md</c>.
+    /// </para>
+    /// <para>
+    /// ⚠️ <b>This method applies no tenant scoping.</b> The BFF identity can reach every container type
+    /// it is registered against, so in a multi-customer deployment the caller MUST already have been
+    /// authorized for the relevant business unit. That check does not exist yet — see
+    /// <c>notes/tenant-isolation-gap.md</c>.
+    /// </para>
+    /// </remarks>
+    public async Task<IReadOnlyList<SpeContainerTypeSummary>> ListContainerTypesForUserAsync(
+        HttpContext httpContext, CancellationToken ct = default)
+    {
+        ArgumentNullException.ThrowIfNull(httpContext);
+
+        if (_graphClientFactory is null)
+        {
+            throw new InvalidOperationException(
+                "IGraphClientFactory is not available, so no delegated Graph client can be built. " +
+                "Container types cannot be read app-only (Graph returns 403), so there is no fallback.");
+        }
+
+        // The client is built and consumed entirely inside this service. ADR-007: Graph SDK types
+        // must not surface above the facade — an earlier revision had the endpoint build the client
+        // and pass it in, which the ArchTests correctly rejected.
+        var userGraphClient = await _graphClientFactory.ForUserAsync(httpContext, ct).ConfigureAwait(false);
+
+        try { return await ListContainerTypesAsync(userGraphClient, ct).ConfigureAwait(false); }
+        catch (ODataError ex) { throw ex.ToSpaarkeStorageException("ListContainerTypes(delegated)"); }
     }
 
     public async Task<IReadOnlyList<SpeContainerTypeSummary>> ListContainerTypesForConfigAsync(
@@ -1552,6 +1833,486 @@ public sealed class SpeAdminGraphService
         var client = await GetClientForConfigAsync(config, ct).ConfigureAwait(false);
         try { return await ListContainerTypesAsync(client, ct).ConfigureAwait(false); }
         catch (ODataError ex) { throw ex.ToSpaarkeStorageException("ListContainerTypes"); }
+    }
+
+    // =========================================================================
+    // Delegated container-type operations (task 011 completion)
+    //
+    // 🔴 WHY THESE EXIST. Task 011 routed container-type LIST through the delegated path and stopped
+    // there, leaving GET, CREATE and settings-UPDATE on `…ForConfigAsync` — i.e. app-only. Graph does
+    // NOT support application permissions for container types AT ALL (design.md §3.1; re-proven live
+    // in task 010 and again in task 013: 403 accessDenied on v1.0 *and* beta with a healthy app-only
+    // token). So three of the four container-type operations could never succeed in production, no
+    // matter which credentials were configured — the same class of failure the Container Types screen
+    // was originally reported for, surviving inside the fix for it.
+    //
+    // The delegated client comes from IGraphClientFactory.ForUserAsync — the BFF's existing OBO
+    // exchange — exactly as the LIST path does. Deliberately NOT SpeAdminTokenProvider; see the
+    // remarks on ListContainerTypesForUserAsync for why that provider cannot work here.
+    //
+    // ⚠️ Same tenant-scoping caveat as LIST: no BU authorization happens here
+    // (notes/tenant-isolation-gap.md).
+    // =========================================================================
+
+    /// <summary>Builds the delegated client, or explains why container types have no app-only fallback.</summary>
+    private async Task<GraphServiceClient> GetDelegatedClientForContainerTypesAsync(
+        HttpContext httpContext, CancellationToken ct)
+    {
+        ArgumentNullException.ThrowIfNull(httpContext);
+
+        if (_graphClientFactory is null)
+        {
+            throw new InvalidOperationException(
+                "IGraphClientFactory is not available, so no delegated Graph client can be built. " +
+                "Container types cannot be read or written app-only (Graph returns 403), so there is " +
+                "no fallback.");
+        }
+
+        return await _graphClientFactory.ForUserAsync(httpContext, ct).ConfigureAwait(false);
+    }
+
+    public async Task<SpeContainerTypeSummary?> GetContainerTypeForUserAsync(
+        HttpContext httpContext, string containerTypeId, CancellationToken ct = default)
+    {
+        var client = await GetDelegatedClientForContainerTypesAsync(httpContext, ct).ConfigureAwait(false);
+        try { return await GetContainerTypeAsync(client, containerTypeId, ct).ConfigureAwait(false); }
+        catch (ODataError ex) { throw ex.ToSpaarkeStorageException($"GetContainerType({containerTypeId},delegated)"); }
+    }
+
+    public async Task<SpeContainerTypeSummary> CreateContainerTypeForUserAsync(
+        HttpContext httpContext, string displayName, string? billingClassification, string owningAppId,
+        CancellationToken ct = default)
+    {
+        var client = await GetDelegatedClientForContainerTypesAsync(httpContext, ct).ConfigureAwait(false);
+        try { return await CreateContainerTypeAsync(client, displayName, billingClassification, owningAppId, ct).ConfigureAwait(false); }
+        catch (ODataError ex) { throw ex.ToSpaarkeStorageException($"CreateContainerType({displayName},delegated)"); }
+    }
+
+    public async Task<ContainerTypeSettingsResult?> UpdateContainerTypeSettingsForUserAsync(
+        HttpContext httpContext, string containerTypeId, string? sharingCapability,
+        bool? isItemVersioningEnabled, long? itemMajorVersionLimit, long? maxStoragePerContainerInBytes,
+        bool? isSearchEnabled = null, bool? isDiscoverabilityEnabled = null, bool? isSharingRestricted = null,
+        string? urlTemplate = null, string? consumingTenantOverridables = null, CancellationToken ct = default)
+    {
+        var client = await GetDelegatedClientForContainerTypesAsync(httpContext, ct).ConfigureAwait(false);
+        try
+        {
+            return await UpdateContainerTypeSettingsAsync(
+                client, containerTypeId, sharingCapability, isItemVersioningEnabled, itemMajorVersionLimit,
+                maxStoragePerContainerInBytes, isSearchEnabled, isDiscoverabilityEnabled, isSharingRestricted,
+                urlTemplate, consumingTenantOverridables, ct).ConfigureAwait(false);
+        }
+        catch (ODataError ex) { throw ex.ToSpaarkeStorageException($"UpdateContainerTypeSettings({containerTypeId},delegated)"); }
+    }
+
+    // =========================================================================
+    // Container-type OWNERS — fileStorageContainerType.permissions (FR-C09, task 027)
+    //
+    // 🔑 Three things about this surface that are not obvious and cost real time to establish
+    //    (measured 2026-08-24, notes/task-027-findings.md):
+    //
+    // 1. It is NOT the same thing as the existing "/containertypes/{id}/permissions" BFF endpoint.
+    //    That one maps to Graph's `applicationPermissions` — which APPLICATIONS may access
+    //    containers, with what scopes. This is `Collection(graph.permission)` — which PEOPLE own the
+    //    container type. Orthogonal, not overlapping. Neither supersedes the other; do not "unify"
+    //    them.
+    //
+    // 2. It requires a DELEGATED client pointed at BETA, which had never existed here. Container
+    //    types reject app-only outright (403, both versions), and `permissions` is absent from the
+    //    v1.0 CSDL — a live v1.0 call returns 400 "Resource not found for the segment 'permissions'"
+    //    (routing failing before auth) while the identical beta call returns 403 (route exists, auth
+    //    stops it). Hence GraphClientFactory.ForUserBetaAsync.
+    //
+    // 3. The SDK has NO typed builder for it (Graph 6.5.0 models v1.0), so these calls are made
+    //    through Kiota's untyped request path. That is why the JSON is read by hand below — and why
+    //    every read applies the same "accept the shapes Kiota can produce" discipline as
+    //    ReadStorageUsedInBytes, rather than assuming one.
+    // =========================================================================
+
+    /// <summary>A person who owns / administers an SPE container type.</summary>
+    /// <param name="PermissionId">Graph permission id — the handle needed to revoke this grant.</param>
+    /// <param name="DisplayName">Display name, or null when Graph did not report one.</param>
+    /// <param name="Email">Email/UPN, or null. Null means NOT REPORTED, never "no email".</param>
+    /// <param name="UserId">Directory object id, or null when Graph did not report one.</param>
+    /// <param name="Roles">Roles carried by the grant (e.g. "owner"). Empty when none were reported.</param>
+    public sealed record SpeContainerTypeOwner(
+        string PermissionId,
+        string? DisplayName,
+        string? Email,
+        string? UserId,
+        IReadOnlyList<string> Roles);
+
+    /// <summary>Builds the delegated BETA client owners require, or explains why there is no fallback.</summary>
+    private async Task<GraphServiceClient> GetDelegatedBetaClientForContainerTypesAsync(
+        HttpContext httpContext, CancellationToken ct)
+    {
+        ArgumentNullException.ThrowIfNull(httpContext);
+
+        if (_graphClientFactory is null)
+        {
+            throw new InvalidOperationException(
+                "IGraphClientFactory is not available, so no delegated Graph client can be built. " +
+                "Container-type owners cannot be read or written app-only (Graph returns 403) and do " +
+                "not exist on v1.0 (Graph returns 400 for the 'permissions' segment), so there is no " +
+                "fallback on either axis.");
+        }
+
+        return await _graphClientFactory.ForUserBetaAsync(httpContext, ct).ConfigureAwait(false);
+    }
+
+    /// <summary>Absolute URL of a container type's permissions collection on the client's own base address.</summary>
+    /// <remarks>
+    /// Derived from the client about to issue the request (task 020's lesson) rather than hardcoded,
+    /// so a client built for the wrong version cannot silently address the wrong endpoint.
+    /// </remarks>
+    private static string ContainerTypePermissionsUrl(GraphServiceClient graphClient, string containerTypeId) =>
+        $"{ResolveGraphBaseUrl(graphClient)}/storage/fileStorage/containerTypes/" +
+        $"{Uri.EscapeDataString(containerTypeId)}/permissions";
+
+    /// <summary>Lists the owners of a container type. Returns null when the container type is not found.</summary>
+    public async Task<IReadOnlyList<SpeContainerTypeOwner>?> ListContainerTypeOwnersForUserAsync(
+        HttpContext httpContext, string containerTypeId, CancellationToken ct = default)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(containerTypeId);
+        var client = await GetDelegatedBetaClientForContainerTypesAsync(httpContext, ct).ConfigureAwait(false);
+        return await ListContainerTypeOwnersAsync(client, containerTypeId, ct).ConfigureAwait(false);
+    }
+
+    /// <summary>
+    /// Lists container-type owners against a supplied client.
+    /// </summary>
+    /// <remarks>
+    /// Takes the <see cref="GraphServiceClient"/> as a parameter, like the other 47 methods in this
+    /// file, so the contract tests can drive it against the WireMock fixture. The
+    /// <c>…ForUserAsync</c> wrapper above is the only part that needs an <see cref="HttpContext"/>,
+    /// and it is a two-line client factory call — nothing worth testing lives in it.
+    /// </remarks>
+    public async Task<IReadOnlyList<SpeContainerTypeOwner>?> ListContainerTypeOwnersAsync(
+        GraphServiceClient client, string containerTypeId, CancellationToken ct = default)
+    {
+        ArgumentNullException.ThrowIfNull(client);
+        ArgumentException.ThrowIfNullOrWhiteSpace(containerTypeId);
+
+        _logger.LogInformation("Listing owners for container type {ContainerTypeId}", containerTypeId);
+
+        try
+        {
+            using var json = await SendGraphJsonAsync(
+                client, HttpMethod.Get, ContainerTypePermissionsUrl(client, containerTypeId), body: null, ct)
+                .ConfigureAwait(false);
+
+            if (json is null)
+            {
+                return Array.Empty<SpeContainerTypeOwner>();
+            }
+
+            var owners = new List<SpeContainerTypeOwner>();
+            if (json.RootElement.TryGetProperty("value", out var value) &&
+                value.ValueKind == JsonValueKind.Array)
+            {
+                foreach (var element in value.EnumerateArray())
+                {
+                    owners.Add(MapContainerTypeOwner(element));
+                }
+            }
+
+            _logger.LogInformation(
+                "Listed {Count} owners for container type {ContainerTypeId}", owners.Count, containerTypeId);
+            return owners;
+        }
+        catch (ODataError odataError) when (odataError.ResponseStatusCode == (int)HttpStatusCode.NotFound)
+        {
+            _logger.LogInformation("Container type {ContainerTypeId} not found when listing owners", containerTypeId);
+            return null;
+        }
+        catch (ODataError ex)
+        {
+            throw ex.ToSpaarkeStorageException($"ListContainerTypeOwners({containerTypeId})");
+        }
+    }
+
+    /// <summary>
+    /// Grants ownership of a container type to a user.
+    /// </summary>
+    /// <param name="userIdentifier">
+    /// The user's email/UPN or directory object id. Passed to Graph as given — this method does NOT
+    /// resolve or validate it. A non-existent user must surface as Graph's own error, never as a
+    /// silent no-op (AC-6).
+    /// </param>
+    public async Task<SpeContainerTypeOwner?> AddContainerTypeOwnerForUserAsync(
+        HttpContext httpContext, string containerTypeId, string userIdentifier,
+        CancellationToken ct = default)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(containerTypeId);
+        ArgumentException.ThrowIfNullOrWhiteSpace(userIdentifier);
+
+        var client = await GetDelegatedBetaClientForContainerTypesAsync(httpContext, ct).ConfigureAwait(false);
+        return await AddContainerTypeOwnerAsync(client, containerTypeId, userIdentifier, ct).ConfigureAwait(false);
+    }
+
+    /// <summary>Grants ownership against a supplied client. See the LIST overload for why this split exists.</summary>
+    public async Task<SpeContainerTypeOwner?> AddContainerTypeOwnerAsync(
+        GraphServiceClient client, string containerTypeId, string userIdentifier,
+        CancellationToken ct = default)
+    {
+        ArgumentNullException.ThrowIfNull(client);
+        ArgumentException.ThrowIfNullOrWhiteSpace(containerTypeId);
+        ArgumentException.ThrowIfNullOrWhiteSpace(userIdentifier);
+
+        /*
+         * 🔑 Graph accepts ONLY the user's directory object id here.
+         *
+         * Its reference for Create-permission is explicit: "Only the **user** property with the
+         * user's **id** is supported; group and application identities aren't supported."
+         *
+         * The first implementation sent `userPrincipalName` when the identifier looked like an email
+         * — which Graph rejects as `400 invalidRequest`, with the same message that names nothing as
+         * the etag defect did (notes/patch-400-resolution.md). Confirmed live 2026-08-25.
+         *
+         * So a UPN is resolved to an object id FIRST. That resolution is a real, separate failure
+         * mode — an unknown address must surface as "no such user", never as a generic 400 about
+         * arguments, because those read identically to the admin and mean completely different
+         * things.
+         */
+        var objectId = userIdentifier;
+        if (userIdentifier.Contains('@', StringComparison.Ordinal))
+        {
+            objectId = await ResolveUserObjectIdAsync(client, userIdentifier, ct).ConfigureAwait(false)
+                ?? throw new InvalidOperationException(
+                    $"No user was found for '{userIdentifier}'. Container-type ownership can only be " +
+                    "granted to a user Microsoft Entra can resolve, and only by object id — so an " +
+                    "address that does not resolve cannot be granted ownership.");
+        }
+
+        // Serialized rather than string-built so an identifier containing quotes cannot break the
+        // payload (or inject into it). `owner` is currently the ONLY role Graph supports here.
+        var payload = JsonSerializer.Serialize(new
+        {
+            roles = new[] { "owner" },
+            grantedToV2 = new { user = new { id = objectId } },
+        });
+
+        _logger.LogInformation(
+            "Adding owner to container type {ContainerTypeId}", containerTypeId);
+
+        try
+        {
+            using var json = await SendGraphJsonAsync(
+                client, HttpMethod.Post, ContainerTypePermissionsUrl(client, containerTypeId), payload, ct)
+                .ConfigureAwait(false);
+
+            // A 2xx with no body is a successful grant we cannot describe — say so by returning null
+            // rather than fabricating an owner record the response never contained.
+            return json is null ? null : MapContainerTypeOwner(json.RootElement);
+        }
+        catch (ODataError odataError) when (odataError.ResponseStatusCode == (int)HttpStatusCode.NotFound)
+        {
+            _logger.LogInformation("Container type {ContainerTypeId} not found when adding owner", containerTypeId);
+            return null;
+        }
+        catch (ODataError ex)
+        {
+            throw ex.ToSpaarkeStorageException($"AddContainerTypeOwner({containerTypeId})");
+        }
+    }
+
+    /// <summary>
+    /// Resolves a user principal name to a directory object id, or null when no user matches.
+    /// </summary>
+    /// <remarks>
+    /// Container-type ownership can only be granted by object id (Graph's Create-permission
+    /// reference), but an administrator types an email address. This bridges the two.
+    /// <para>
+    /// Returns null rather than throwing on 404 so the caller can say "no such user" — a different
+    /// and far more actionable message than the `400 invalidRequest` Graph returns for a malformed
+    /// grant. Conflating the two is what made the original failure unreadable.
+    /// </para>
+    /// </remarks>
+    private static async Task<string?> ResolveUserObjectIdAsync(
+        GraphServiceClient client, string userPrincipalName, CancellationToken ct)
+    {
+        // Base address derived from the client about to issue the request, never hardcoded — task
+        // 020's lesson. A hardcoded host would also make every contract test reach the REAL Graph
+        // instead of the fixture, which is a far worse failure than a wrong version. `/users` exists
+        // on both v1.0 and beta, so either base resolves it.
+        var url = ResolveGraphBaseUrl(client) + "/users/" +
+                  Uri.EscapeDataString(userPrincipalName) + "?$select=id";
+        try
+        {
+            using var json = await SendGraphJsonAsync(client, HttpMethod.Get, url, body: null, ct)
+                .ConfigureAwait(false);
+
+            if (json is not null &&
+                json.RootElement.TryGetProperty("id", out var id) &&
+                id.ValueKind == JsonValueKind.String)
+            {
+                return id.GetString();
+            }
+        }
+        catch (ODataError odataError) when (odataError.ResponseStatusCode == (int)HttpStatusCode.NotFound)
+        {
+            return null;
+        }
+
+        return null;
+    }
+
+    /// <summary>Revokes an ownership grant. Returns false when the grant (or the type) was not found.</summary>
+    public async Task<bool> RemoveContainerTypeOwnerForUserAsync(
+        HttpContext httpContext, string containerTypeId, string permissionId,
+        CancellationToken ct = default)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(containerTypeId);
+        ArgumentException.ThrowIfNullOrWhiteSpace(permissionId);
+
+        var client = await GetDelegatedBetaClientForContainerTypesAsync(httpContext, ct).ConfigureAwait(false);
+        return await RemoveContainerTypeOwnerAsync(client, containerTypeId, permissionId, ct).ConfigureAwait(false);
+    }
+
+    /// <summary>Revokes a grant against a supplied client. See the LIST overload for why this split exists.</summary>
+    public async Task<bool> RemoveContainerTypeOwnerAsync(
+        GraphServiceClient client, string containerTypeId, string permissionId,
+        CancellationToken ct = default)
+    {
+        ArgumentNullException.ThrowIfNull(client);
+        ArgumentException.ThrowIfNullOrWhiteSpace(containerTypeId);
+        ArgumentException.ThrowIfNullOrWhiteSpace(permissionId);
+
+        var url = $"{ContainerTypePermissionsUrl(client, containerTypeId)}/{Uri.EscapeDataString(permissionId)}";
+
+        _logger.LogInformation(
+            "Removing owner {PermissionId} from container type {ContainerTypeId}", permissionId, containerTypeId);
+
+        try
+        {
+            using var _ = await SendGraphJsonAsync(client, HttpMethod.Delete, url, body: null, ct)
+                .ConfigureAwait(false);
+            return true;
+        }
+        catch (ODataError odataError) when (odataError.ResponseStatusCode == (int)HttpStatusCode.NotFound)
+        {
+            _logger.LogInformation(
+                "Owner grant {PermissionId} not found on container type {ContainerTypeId}",
+                permissionId, containerTypeId);
+            return false;
+        }
+        catch (ODataError ex)
+        {
+            throw ex.ToSpaarkeStorageException($"RemoveContainerTypeOwner({containerTypeId},{permissionId})");
+        }
+    }
+
+    /// <summary>
+    /// Maps one Graph <c>permission</c> element to a domain owner record.
+    /// </summary>
+    /// <remarks>
+    /// Reads <c>grantedToV2</c> first and falls back to the legacy <c>grantedTo</c>. Both are in the
+    /// beta schema, and which one a response carries is not ours to assume — the same lesson as
+    /// task 030's typed-first/AdditionalData-second billing fix. Every absent field stays null:
+    /// a missing display name must render as unknown, never as an empty string that reads as "no name".
+    /// </remarks>
+    private static SpeContainerTypeOwner MapContainerTypeOwner(JsonElement element)
+    {
+        var roles = new List<string>();
+        if (element.TryGetProperty("roles", out var rolesEl) && rolesEl.ValueKind == JsonValueKind.Array)
+        {
+            foreach (var r in rolesEl.EnumerateArray())
+            {
+                if (r.ValueKind == JsonValueKind.String && r.GetString() is { Length: > 0 } role)
+                {
+                    roles.Add(role);
+                }
+            }
+        }
+
+        JsonElement user = default;
+        var haveUser =
+            (element.TryGetProperty("grantedToV2", out var g2) && g2.TryGetProperty("user", out user)) ||
+            (element.TryGetProperty("grantedTo", out var g1) && g1.TryGetProperty("user", out user));
+
+        static string? Str(JsonElement parent, bool present, string name) =>
+            present && parent.TryGetProperty(name, out var v) &&
+            v.ValueKind == JsonValueKind.String && v.GetString() is { Length: > 0 } s
+                ? s
+                : null;
+
+        return new SpeContainerTypeOwner(
+            PermissionId: element.TryGetProperty("id", out var id) && id.ValueKind == JsonValueKind.String
+                ? id.GetString() ?? string.Empty
+                : string.Empty,
+            DisplayName: Str(user, haveUser, "displayName"),
+            Email: Str(user, haveUser, "email") ?? Str(user, haveUser, "userPrincipalName"),
+            UserId: Str(user, haveUser, "id"),
+            Roles: roles);
+    }
+
+    /// <summary>
+    /// Issues a Graph request through the SDK's own request pipeline for a resource the SDK does not
+    /// model, returning the parsed JSON body (or null when the response had none).
+    /// </summary>
+    /// <remarks>
+    /// Goes through <c>RequestAdapter</c> rather than a bare <see cref="HttpClient"/> so the call
+    /// keeps the SDK's auth provider, retry/circuit-breaker handlers, AND — critically — its error
+    /// mapping, so a Graph failure still arrives as an <c>ODataError</c> and flows into the same
+    /// translation the rest of this file depends on (ADR-007 §1, ADR-019). A hand-rolled HttpClient
+    /// call here would surface raw status codes and bypass every one of those.
+    /// </remarks>
+    private static async Task<JsonDocument?> SendGraphJsonAsync(
+        GraphServiceClient graphClient, HttpMethod method, string url, string? body, CancellationToken ct)
+    {
+        var requestInfo = new RequestInformation
+        {
+            HttpMethod = method switch
+            {
+                _ when method == HttpMethod.Get => Method.GET,
+                _ when method == HttpMethod.Post => Method.POST,
+                _ when method == HttpMethod.Patch => Method.PATCH,
+                _ when method == HttpMethod.Delete => Method.DELETE,
+                _ => throw new ArgumentOutOfRangeException(nameof(method), method, "Unsupported Graph method."),
+            },
+            URI = new Uri(url),
+        };
+        requestInfo.Headers.Add("Accept", "application/json");
+
+        if (body is not null)
+        {
+            requestInfo.SetStreamContent(
+                new MemoryStream(System.Text.Encoding.UTF8.GetBytes(body)), "application/json");
+        }
+
+        // Without this mapping Kiota throws a bare ApiException and the real Graph error is lost —
+        // exactly the "error message names the wrong cause" failure this project exists to remove.
+        var errorMapping = new Dictionary<string, ParsableFactory<IParsable>>
+        {
+            { "XXX", ODataError.CreateFromDiscriminatorValue },
+        };
+
+        var stream = await graphClient.RequestAdapter
+            .SendPrimitiveAsync<Stream>(requestInfo, errorMapping, ct)
+            .ConfigureAwait(false);
+
+        if (stream is null)
+        {
+            return null;
+        }
+
+        await using (stream.ConfigureAwait(false))
+        {
+            if (stream.CanSeek && stream.Length == 0)
+            {
+                return null;
+            }
+
+            try
+            {
+                return await JsonDocument.ParseAsync(stream, cancellationToken: ct).ConfigureAwait(false);
+            }
+            catch (JsonException)
+            {
+                // A 204 or an empty body is normal for DELETE. Absence of JSON is not a failure.
+                return null;
+            }
+        }
     }
 
     public async Task<SpeContainerTypeSummary?> GetContainerTypeForConfigAsync(
@@ -1563,10 +2324,19 @@ public sealed class SpeAdminGraphService
     }
 
     public async Task<SpeContainerTypeSummary> CreateContainerTypeForConfigAsync(
-        ContainerTypeConfig config, string displayName, string? billingClassification, CancellationToken ct = default)
+        ContainerTypeConfig config, string displayName, string? billingClassification,
+        string? owningAppId = null, CancellationToken ct = default)
     {
+        ArgumentNullException.ThrowIfNull(config);
+
+        // Same precedence as the delegated endpoint: explicit argument, else the config's registered
+        // owning app (multi-app mode), else its own client id (single-app mode).
+        var resolvedOwningAppId = owningAppId;
+        if (string.IsNullOrWhiteSpace(resolvedOwningAppId)) resolvedOwningAppId = config.OwningAppId;
+        if (string.IsNullOrWhiteSpace(resolvedOwningAppId)) resolvedOwningAppId = config.ClientId;
+
         var client = await GetClientForConfigAsync(config, ct).ConfigureAwait(false);
-        try { return await CreateContainerTypeAsync(client, displayName, billingClassification, ct).ConfigureAwait(false); }
+        try { return await CreateContainerTypeAsync(client, displayName, billingClassification, resolvedOwningAppId!, ct).ConfigureAwait(false); }
         catch (ODataError ex) { throw ex.ToSpaarkeStorageException($"CreateContainerType({displayName})"); }
     }
 
@@ -1611,10 +2381,10 @@ public sealed class SpeAdminGraphService
     }
 
     public async Task<ContainerTypeSettingsResult?> UpdateContainerTypeSettingsForConfigAsync(
-        ContainerTypeConfig config, string containerTypeId, string? sharingCapability, bool? isVersioningEnabled, int? majorVersionLimit, long? storageUsedInBytes, CancellationToken ct = default)
+        ContainerTypeConfig config, string containerTypeId, string? sharingCapability, bool? isItemVersioningEnabled, long? itemMajorVersionLimit, long? maxStoragePerContainerInBytes, bool? isSearchEnabled = null, bool? isDiscoverabilityEnabled = null, bool? isSharingRestricted = null, string? urlTemplate = null, string? consumingTenantOverridables = null, CancellationToken ct = default)
     {
         var client = await GetClientForConfigAsync(config, ct).ConfigureAwait(false);
-        try { return await UpdateContainerTypeSettingsAsync(client, containerTypeId, sharingCapability, isVersioningEnabled, majorVersionLimit, storageUsedInBytes, ct).ConfigureAwait(false); }
+        try { return await UpdateContainerTypeSettingsAsync(client, containerTypeId, sharingCapability, isItemVersioningEnabled, itemMajorVersionLimit, maxStoragePerContainerInBytes, isSearchEnabled, isDiscoverabilityEnabled, isSharingRestricted, urlTemplate, consumingTenantOverridables, ct).ConfigureAwait(false); }
         catch (ODataError ex) { throw ex.ToSpaarkeStorageException($"UpdateContainerTypeSettings({containerTypeId})"); }
     }
 
@@ -1640,6 +2410,69 @@ public sealed class SpeAdminGraphService
         var client = await GetClientForConfigAsync(config, ct).ConfigureAwait(false);
         try { return await PermanentDeleteContainerAsync(client, containerId, ct).ConfigureAwait(false); }
         catch (ODataError ex) { throw ex.ToSpaarkeStorageException($"PermanentDeleteContainer({containerId})"); }
+    }
+
+    /// <summary>Archives a container (FR-E01). See <see cref="ArchiveContainerAsync"/>.</summary>
+    /// <remarks>
+    /// <see cref="ArchivalNotEnabledException"/> is deliberately allowed to propagate rather than
+    /// being wrapped into <c>SpaarkeStorageException</c> like every other Graph failure here. Wrapping
+    /// it would flatten the one diagnosis the endpoint needs to distinguish back into an anonymous
+    /// 403, which is the exact information loss this task set out to fix.
+    /// </remarks>
+    public async Task<bool> ArchiveContainerForConfigAsync(
+        ContainerTypeConfig config, string containerId, CancellationToken ct = default)
+    {
+        var client = await GetClientForConfigAsync(config, ct).ConfigureAwait(false);
+        try { return await ArchiveContainerAsync(client, containerId, ct).ConfigureAwait(false); }
+        catch (ODataError ex) { throw ex.ToSpaarkeStorageException($"ArchiveContainer({containerId})"); }
+    }
+
+    /// <summary>Unarchives a container (FR-E01). See <see cref="UnarchiveContainerAsync"/>.</summary>
+    public async Task<bool> UnarchiveContainerForConfigAsync(
+        ContainerTypeConfig config, string containerId, CancellationToken ct = default)
+    {
+        var client = await GetClientForConfigAsync(config, ct).ConfigureAwait(false);
+        try { return await UnarchiveContainerAsync(client, containerId, ct).ConfigureAwait(false); }
+        catch (ODataError ex) { throw ex.ToSpaarkeStorageException($"UnarchiveContainer({containerId})"); }
+    }
+
+    // ── Per-container ITEM recycle bin (FR-E03 / task 052) ───────────────────
+    // NOT the deleted-CONTAINERS bin above (spec D3 keeps both).
+
+    /// <summary>Lists deleted ITEMS in a container's recycle bin. See <see cref="ListRecycleBinItemsAsync"/>.</summary>
+    public async Task<IReadOnlyList<SpeRecycleBinItem>> ListRecycleBinItemsForConfigAsync(
+        ContainerTypeConfig config, string containerId, CancellationToken ct = default)
+    {
+        var client = await GetClientForConfigAsync(config, ct).ConfigureAwait(false);
+        try { return await ListRecycleBinItemsAsync(client, containerId, ct).ConfigureAwait(false); }
+        catch (ODataError ex) { throw ex.ToSpaarkeStorageException($"ListRecycleBinItems({containerId})"); }
+    }
+
+    /// <summary>Restores ITEMS from a container's recycle bin. See <see cref="RestoreRecycleBinItemsAsync"/>.</summary>
+    /// <remarks>
+    /// <see cref="RecycleBinRestoreRejectedException"/> propagates unwrapped, for the same reason
+    /// <see cref="ArchivalNotEnabledException"/> does: flattening it into an anonymous
+    /// <c>SpaarkeStorageException</c> would destroy the distinction between "nothing was restored"
+    /// and "some items were restored", which is the whole acceptance criterion.
+    /// </remarks>
+    public async Task<SpeRecycleBinRestoreResult> RestoreRecycleBinItemsForConfigAsync(
+        ContainerTypeConfig config, string containerId, IReadOnlyList<string> itemIds, CancellationToken ct = default)
+    {
+        var client = await GetClientForConfigAsync(config, ct).ConfigureAwait(false);
+        try { return await RestoreRecycleBinItemsAsync(client, containerId, itemIds, ct).ConfigureAwait(false); }
+        catch (ODataError ex) { throw ex.ToSpaarkeStorageException($"RestoreRecycleBinItems({containerId})"); }
+    }
+
+    /// <summary>
+    /// Permanently purges ITEMS from a container's recycle bin — irreversible.
+    /// See <see cref="PermanentDeleteRecycleBinItemsAsync"/>.
+    /// </summary>
+    public async Task<SpeRecycleBinDeleteResult> PermanentDeleteRecycleBinItemsForConfigAsync(
+        ContainerTypeConfig config, string containerId, IReadOnlyList<string> itemIds, CancellationToken ct = default)
+    {
+        var client = await GetClientForConfigAsync(config, ct).ConfigureAwait(false);
+        try { return await PermanentDeleteRecycleBinItemsAsync(client, containerId, itemIds, ct).ConfigureAwait(false); }
+        catch (ODataError ex) { throw ex.ToSpaarkeStorageException($"PermanentDeleteRecycleBinItems({containerId})"); }
     }
 
     public async Task<IReadOnlyList<SecurityAlertResult>> GetSecurityAlertsForConfigAsync(
@@ -1815,8 +2648,7 @@ public sealed class SpeAdminGraphService
         _logger.LogInformation(
             "Updating {Count} custom properties on container {ContainerId}", properties.Count, containerId);
 
-        // Build the customProperties payload via AdditionalData.
-        // Kiota will serialize this as: { "customProperties": { "KeyName": { "value": "...", "isSearchable": false } } }
+        // Build the property map. It becomes the BODY ROOT — see the URL note below.
         var customPropertiesDict = new Dictionary<string, object>(properties.Count);
         foreach (var prop in properties)
         {
@@ -1827,21 +2659,37 @@ public sealed class SpeAdminGraphService
             };
         }
 
-        var patch = new Microsoft.Graph.Models.FileStorageContainer
-        {
-            AdditionalData = new Dictionary<string, object>
-            {
-                ["customProperties"] = customPropertiesDict
-            }
-        };
+        // 🔴 This write was aimed at the wrong URL and had NEVER worked. It PATCHed the CONTAINER
+        // with a { "customProperties": { ... } } wrapper, and Graph rejects that outright:
+        //
+        //     400 invalidRequest: Unsupported request body property: customProperties.
+        //
+        // Proven live on a throwaway container 2026-08-28 (UAT question "do the + Add functions
+        // work?"). customProperties is its own sub-resource: the PATCH goes to
+        // /containers/{id}/customProperties and the property map IS the body root, unwrapped.
+        // The same probe confirmed the semantics we depend on:
+        //   - partial writes MERGE (an untouched property survives), so a delta save is not
+        //     destructive despite the endpoint being exposed as PUT;
+        //   - setting a name to null REMOVES that property.
+        //
+        // Why the read path never caught it: reads go through GET ?$select=customProperties on the
+        // container, which is a different, valid shape. A working read beside a broken write is
+        // exactly how this stayed invisible.
+        // The v1.0 SDK models customProperties for READING (container.CustomProperties) but exposes no
+        // request builder for WRITING to the sub-resource, so this goes through SendGraphJsonAsync —
+        // the same RequestAdapter path the container-type permission calls already use, which keeps
+        // the SDK's auth, retry and ODataError mapping intact.
+        var url = $"{ResolveGraphBaseUrl(graphClient)}/storage/fileStorage/containers/" +
+                  $"{Uri.EscapeDataString(containerId)}/customProperties";
+        var payload = JsonSerializer.Serialize(customPropertiesDict);
 
         try
         {
             await ExecuteWithRetryAsync(
                 async () =>
                 {
-                    await graphClient.Storage.FileStorage.Containers[containerId]
-                        .PatchAsync(patch, cancellationToken: ct);
+                    using var _ = await SendGraphJsonAsync(
+                        graphClient, HttpMethod.Patch, url, payload, ct).ConfigureAwait(false);
                     return (object?)null;
                 },
                 ct);
@@ -3023,18 +3871,43 @@ public sealed class SpeAdminGraphService
     // =========================================================================
 
     /// <summary>
-    /// Searches SPE containers using the Microsoft Graph Search API (/search/query) with
-    /// entity type <c>fileStorageContainer</c>.
+    /// Searches SPE containers by substring match on <c>displayName</c> / <c>description</c>, using an
+    /// OData <c>$filter</c> against <c>/storage/fileStorage/containers</c>.
     ///
     /// Returns domain model <see cref="ContainerSearchPage"/> — no Graph SDK types exposed (ADR-007).
-    ///
-    /// Pagination: Graph Search uses a 0-based <c>from</c> index and <c>size</c> page size.
-    /// The caller supplies a numeric <paramref name="skipToken"/> that encodes the start offset.
-    /// A <see cref="ContainerSearchPage.NextSkipToken"/> is returned when more results exist;
-    /// the token encodes the next <c>from</c> offset as a decimal integer string.
     /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <b>This deliberately does NOT use <c>/search/query</c>.</b> It used to, with
+    /// <c>entityTypes: ["fileStorageContainer"]</c>, and every call returned
+    /// <c>400 BadRequest "The call failed, please try again."</c> — which is Graph's own message, not a
+    /// Spaarke placeholder, so the Search screen has never worked.
+    /// </para>
+    /// <para>
+    /// Proven against the live tenant (task 004, <c>notes/search-root-cause.md</c>): a request for
+    /// <c>fileStorageContainer</c> is byte-for-byte indistinguishable from a request for a deliberately
+    /// nonexistent entity type, on beta and v1.0, with and without <c>region</c> — while
+    /// <c>driveItem</c> returns a specific, actionable error and then real results. <b>Graph does not
+    /// expose <c>fileStorageContainer</c> to <c>/search/query</c>.</b> The old code's serialization
+    /// comment was correct; the entity type was not. This is NOT the app-only permission limitation of
+    /// spec §3.1 — app-only search works fine once the request is valid.
+    /// </para>
+    /// <para>
+    /// <b>Accepted trade-off.</b> <c>contains()</c> is a substring match over two columns, not a
+    /// relevance-ranked full-text search over indexed content and custom properties. That is a real
+    /// reduction in capability — and the alternative on offer is a screen that returns nothing at all.
+    /// If richer container search is needed later, it requires a different mechanism, not a different
+    /// <c>entityTypes</c> value.
+    /// </para>
+    /// <para>
+    /// Pagination is OData: <c>$top</c> plus the opaque <c>$skiptoken</c> carried on
+    /// <c>@odata.nextLink</c>. The previous numeric <c>from</c>-offset token has no meaning here; the
+    /// endpoint contract already declared the token opaque, so callers are unaffected.
+    /// </para>
+    /// </remarks>
     /// <param name="graphClient">Authenticated Graph client from <see cref="GetClientForConfigAsync"/>.</param>
-    /// <param name="query">Full-text search query string. Required; must not be empty.</param>
+    /// <param name="containerTypeId">Container type GUID to scope the search to.</param>
+    /// <param name="query">Search term. Required; matched as a substring, not a full-text query.</param>
     /// <param name="pageSize">Number of results per page (1–50). Defaults to 25.</param>
     /// <param name="skipToken">
     /// Opaque pagination token from a previous <see cref="ContainerSearchPage.NextSkipToken"/>.
@@ -3044,134 +3917,102 @@ public sealed class SpeAdminGraphService
     /// <returns>A <see cref="ContainerSearchPage"/> containing results and an optional next-page token.</returns>
     public async Task<ContainerSearchPage> SearchContainersAsync(
         GraphServiceClient graphClient,
+        string containerTypeId,
         string query,
         int? pageSize,
         string? skipToken,
         CancellationToken ct = default)
     {
         ArgumentNullException.ThrowIfNull(graphClient);
+        ArgumentException.ThrowIfNullOrWhiteSpace(containerTypeId);
         ArgumentException.ThrowIfNullOrWhiteSpace(query);
 
-        // Clamp page size: Graph Search supports 1–500; keep to 25 default, 50 max for admin use.
         var size = Math.Clamp(pageSize ?? 25, 1, 50);
 
-        // Decode skip token: we encode the Graph Search 'from' offset as a decimal string.
-        var from = 0;
-        if (!string.IsNullOrWhiteSpace(skipToken) && int.TryParse(skipToken, out var parsedFrom))
-        {
-            from = Math.Max(0, parsedFrom);
-        }
-
         _logger.LogInformation(
-            "Searching SPE containers: query='{Query}', from={From}, size={Size}",
-            query, from, size);
+            "Searching SPE containers: query='{Query}', containerTypeId={ContainerTypeId}, size={Size}, hasSkipToken={HasSkipToken}",
+            query, containerTypeId, size, !string.IsNullOrWhiteSpace(skipToken));
 
-        // Build the Graph Search request body.
-        // "fileStorageContainer" is a beta-only entity type not yet in the EntityType enum.
-        // We use AdditionalData to inject the raw entityTypes array so it serialises correctly
-        // when posting to the Graph beta /search/query endpoint.
-        var searchRequest = new Microsoft.Graph.Models.SearchRequest
-        {
-            Query = new Microsoft.Graph.Models.SearchQuery { QueryString = query },
-            From = from,
-            Size = size,
-            Fields = new List<string>
-            {
-                "id", "displayName", "description", "containerTypeId"
-            },
-            AdditionalData = new Dictionary<string, object>
-            {
-                // Raw string array — Kiota serialises Dictionary<string, object> values
-                // as JSON, so a string[] here produces the correct JSON array in the request.
-                ["entityTypes"] = new string[] { "fileStorageContainer" }
-            }
-        };
-
-        var requestBody = new Microsoft.Graph.Search.Query.QueryPostRequestBody
-        {
-            Requests = new List<Microsoft.Graph.Models.SearchRequest> { searchRequest }
-        };
+        // containerTypeId is Edm.Guid — bare literal, no quotes (ADR-044 bare-lowercase).
+        // The search term IS quoted, so it must be OData-escaped; see EscapeODataStringLiteral.
+        var term = EscapeODataStringLiteral(query);
+        var filter =
+            $"containerTypeId eq {containerTypeId} and " +
+            $"(contains(displayName,'{term}') or contains(description,'{term}'))";
 
         try
         {
-            var response = await ExecuteWithRetryAsync(
-                () => graphClient.Search.Query.PostAsQueryPostResponseAsync(requestBody, cancellationToken: ct),
-                ct);
+            Microsoft.Graph.Models.FileStorageContainerCollectionResponse? response;
 
-            var items = new List<SearchContainerResult>();
-            long? totalCount = null;
-            string? nextSkipToken = null;
-
-            if (response?.Value != null)
+            if (string.IsNullOrWhiteSpace(skipToken))
             {
-                foreach (var searchResponse in response.Value)
-                {
-                    if (searchResponse.HitsContainers == null) continue;
-
-                    foreach (var hitsContainer in searchResponse.HitsContainers)
+                response = await ExecuteWithRetryAsync(
+                    () => graphClient.Storage.FileStorage.Containers.GetAsync(config =>
                     {
-                        // Capture total result count from first non-null value
-                        if (hitsContainer.Total.HasValue && totalCount is null)
-                        {
-                            totalCount = hitsContainer.Total.Value;
-                        }
+                        config.QueryParameters.Filter = filter;
+                        config.QueryParameters.Select = new[] { "id", "displayName", "description", "containerTypeId" };
+                        config.QueryParameters.Top = size;
+                    }, ct),
+                    ct);
+            }
+            else
+            {
+                // Continuation. The token is the opaque OData $skiptoken from the previous page's
+                // @odata.nextLink; the filter/select/top are re-stated so the page stays consistent.
+                var url =
+                    $"{graphClient.RequestAdapter.BaseUrl}/storage/fileStorage/containers" +
+                    $"?$filter={Uri.EscapeDataString(filter)}" +
+                    $"&$select={Uri.EscapeDataString("id,displayName,description,containerTypeId")}" +
+                    $"&$top={size}" +
+                    $"&$skiptoken={Uri.EscapeDataString(skipToken)}";
 
-                        if (hitsContainer.Hits == null) continue;
-
-                        foreach (var hit in hitsContainer.Hits)
-                        {
-                            var result = MapSearchHit(hit);
-                            if (result != null)
-                            {
-                                items.Add(result);
-                            }
-                        }
-
-                        // Emit a nextSkipToken when Graph reports more results are available.
-                        // Graph Search pagination is offset-based (from + size); we encode the
-                        // next 'from' position as the token.
-                        if (hitsContainer.MoreResultsAvailable == true)
-                        {
-                            nextSkipToken = (from + size).ToString();
-                        }
-                    }
-                }
+                response = await ExecuteWithRetryAsync(
+                    () => graphClient.Storage.FileStorage.Containers.WithUrl(url).GetAsync(cancellationToken: ct),
+                    ct);
             }
 
-            _logger.LogInformation(
-                "Container search '{Query}' returned {Count} hits (totalCount={TotalCount}, hasNext={HasNext})",
-                query, items.Count, totalCount, nextSkipToken != null);
+            var items = (response?.Value ?? [])
+                .Select(c => new SearchContainerResult(
+                    Id: c.Id ?? string.Empty,
+                    DisplayName: c.DisplayName ?? string.Empty,
+                    Description: c.Description,
+                    ContainerTypeId: c.ContainerTypeId?.ToString() ?? containerTypeId))
+                .ToList();
 
-            return new ContainerSearchPage(items, totalCount, nextSkipToken);
+            // Reuses the existing private nextLink parser rather than adding a second one.
+            var nextSkipToken = string.IsNullOrWhiteSpace(response?.OdataNextLink)
+                ? null
+                : ExtractSkipToken(response.OdataNextLink);
+
+            _logger.LogInformation(
+                "Container search '{Query}' returned {Count} matches (hasNext={HasNext})",
+                query, items.Count, nextSkipToken != null);
+
+            // TotalCount is null by design: the containers endpoint reports no total, and
+            // fabricating items.Count would make the last page indistinguishable from a
+            // complete result set.
+            return new ContainerSearchPage(items, TotalCount: null, NextSkipToken: nextSkipToken);
         }
         catch (ODataError odataError)
         {
             _logger.LogError(
                 odataError,
-                "Graph Search API error for query '{Query}': Status={Status}, Message={Message}",
+                "Container search failed for query '{Query}': Status={Status}, Message={Message}",
                 query, odataError.ResponseStatusCode, odataError.Error?.Message);
             throw;
         }
     }
 
     /// <summary>
-    /// Maps a Graph Search hit resource to a <see cref="SearchContainerResult"/> domain record.
-    /// Returns <c>null</c> when the hit resource is not a <see cref="Microsoft.Graph.Models.FileStorageContainer"/>.
-    /// ADR-007: No Graph SDK types are returned from public methods.
+    /// Escapes a user-supplied value for use inside a single-quoted OData string literal.
     /// </summary>
-    private static SearchContainerResult? MapSearchHit(Microsoft.Graph.Models.SearchHit hit)
-    {
-        if (hit.Resource is not Microsoft.Graph.Models.FileStorageContainer container)
-        {
-            return null;
-        }
+    /// <remarks>
+    /// OData escapes a quote by doubling it. Without this, a search for <c>O'Brien</c> terminates the
+    /// literal early and Graph rejects the filter — and a crafted term could otherwise append clauses
+    /// to a filter we build by concatenation.
+    /// </remarks>
+    internal static string EscapeODataStringLiteral(string value) => value.Replace("'", "''");
 
-        return new SearchContainerResult(
-            Id: container.Id ?? hit.HitId ?? string.Empty,
-            DisplayName: container.DisplayName ?? string.Empty,
-            Description: container.Description,
-            ContainerTypeId: container.ContainerTypeId?.ToString());
-    }
 
     /// <summary>
     /// Evicts all expired entries from the client cache (app-only clients and OBO clients).
@@ -3239,15 +4080,19 @@ public sealed class SpeAdminGraphService
 
         _logger.LogInformation("Listing SPE container types from Graph API");
 
+        // NO $select — deliberate (task 030).
+        //
+        // The previous hand-maintained list ("id", "name", "billingClassification", "createdDateTime")
+        // was the reason owningAppId and expirationDateTime never reached the client: a property the
+        // projection does not ask for is a property the caller silently never sees. Naming them
+        // explicitly would fix that but re-arms the failure this workstream exists to remove — a
+        // wrong or version-absent property name in $select is a hard 400 that breaks the whole list,
+        // exactly as `storageUsedInBytes` does on v1.0 (see notes/beta-vs-v1-surface-verification.md).
+        //
+        // Omitting $select returns the resource's default projection instead. There is no size
+        // argument against it here: Microsoft caps a tenant at 25 container types.
         var response = await ExecuteWithRetryAsync(
-            () => graphClient.Storage.FileStorage.ContainerTypes
-                .GetAsync(config =>
-                {
-                    config.QueryParameters.Select = new[]
-                    {
-                        "id", "name", "billingClassification", "createdDateTime"
-                    };
-                }, ct),
+            () => graphClient.Storage.FileStorage.ContainerTypes.GetAsync(cancellationToken: ct),
             ct);
 
         var results = new List<SpeContainerTypeSummary>();
@@ -3354,34 +4199,69 @@ public sealed class SpeAdminGraphService
         GraphServiceClient graphClient,
         string displayName,
         string? billingClassification,
+        string owningAppId,
         CancellationToken ct = default)
     {
         ArgumentNullException.ThrowIfNull(graphClient);
         ArgumentException.ThrowIfNullOrWhiteSpace(displayName);
+        ArgumentException.ThrowIfNullOrWhiteSpace(owningAppId);
 
         _logger.LogInformation(
-            "Creating SPE container type '{DisplayName}' with billingClassification '{BillingClassification}'",
-            displayName, billingClassification ?? "standard");
+            "Creating SPE container type '{DisplayName}' (billingClassification '{BillingClassification}', owningAppId {OwningAppId})",
+            displayName, billingClassification ?? "standard", owningAppId);
 
-        // Parse billingClassification string to the Graph SDK enum.
-        // FileStorageContainerBillingClassification values: Standard, Premium (case-insensitive parse).
-        // Invalid values will be rejected by the endpoint before reaching here.
+        // Parse billingClassification to the Graph SDK enum. Graph's enum is
+        // standard · trial · directToCustomer · unknownFutureValue (beta CSDL).
+        //
+        // 🔴 This used to fall through to null on an unparseable value, so a request for a TRIAL
+        // container type would silently create a STANDARD one and report success. Billing
+        // classification is permanent and cannot be changed afterwards, so a silent substitution
+        // here is unrecoverable — the operator would have to delete and start over, if the type is
+        // even deletable. Fail loudly instead.
         Microsoft.Graph.Models.FileStorageContainerBillingClassification? billingEnum = null;
-        if (!string.IsNullOrWhiteSpace(billingClassification) &&
-            Enum.TryParse<Microsoft.Graph.Models.FileStorageContainerBillingClassification>(
-                billingClassification,
-                ignoreCase: true,
-                out var parsed))
+        if (!string.IsNullOrWhiteSpace(billingClassification))
         {
+            if (!Enum.TryParse<Microsoft.Graph.Models.FileStorageContainerBillingClassification>(
+                    billingClassification, ignoreCase: true, out var parsed))
+            {
+                throw new ArgumentException(
+                    $"Billing classification '{billingClassification}' is not a value the Graph SDK "
+                    + "recognises. Valid values are standard, trial, directToCustomer. Refusing to "
+                    + "create the container type, because defaulting here would silently produce a "
+                    + "classification that can never be changed.",
+                    nameof(billingClassification));
+            }
+
             billingEnum = parsed;
         }
 
         // Build the Graph SDK request body.
         // NOTE: FileStorageContainerType uses "Name" (not "DisplayName") as the display label.
+        //
+        // 🔴 OwningAppId was MISSING here and is REQUIRED — the cause of the UAT 2026-08-28 failure
+        // "invalidRequest: One of the provided arguments is not acceptable". Graph's beta CSDL marks
+        // owningAppId Nullable="false", and the documented create body carries it. Every container
+        // type is owned by exactly one Entra app registration, fixed at creation; without it Graph
+        // has no owner to assign and rejects the whole request without naming the field.
+        // Validate HERE, not only at the endpoint. The delegated endpoint parses the GUID before
+        // calling, but CreateContainerTypeForConfigAsync does not — it resolves owningAppId from a
+        // Dataverse TEXT column, so a malformed value would reach a bare Guid.Parse and throw
+        // FormatException, which that caller's ODataError-only catch does not map. The operator would
+        // get a raw 500 instead of a message naming the field. Validation belongs with the parse.
+        if (!Guid.TryParse(owningAppId, out var owningAppGuid))
+        {
+            throw new ArgumentException(
+                $"Owning application id '{owningAppId}' is not a valid GUID. Graph types "
+                + "fileStorageContainerType.owningAppId as Edm.Guid and rejects anything else with an "
+                + "error that does not name the field.",
+                nameof(owningAppId));
+        }
+
         var body = new Microsoft.Graph.Models.FileStorageContainerType
         {
             Name = displayName,
-            BillingClassification = billingEnum
+            BillingClassification = billingEnum,
+            OwningAppId = owningAppGuid
         };
 
         var created = await ExecuteWithRetryAsync(
@@ -3415,12 +4295,39 @@ public sealed class SpeAdminGraphService
         // BillingClassification: Graph SDK 5.101.0 does not include the typed enum
         // FileStorageContainerTypeBillingClassification in the installed version.
         // Extract the raw string value from AdditionalData as a fallback.
-        string? billingClassification = null;
-        if (ct.AdditionalData != null &&
-            ct.AdditionalData.TryGetValue("billingClassification", out var billingObj))
-        {
-            billingClassification = billingObj?.ToString();
-        }
+        // 🔴 REGRESSION FIXED HERE (task 030, 2026-08-23). This previously read ONLY from
+        // AdditionalData, on the strength of a comment saying "Graph SDK 5.101.0 does not include the
+        // typed enum". That was true at 5.101.0. The repo moved to Microsoft.Graph 6.5.0 on
+        // 2026-08-13 (dotnet-10-upgrade-r1 task 033), which DOES type it — so Kiota began binding the
+        // value to the typed property and AdditionalData stopped carrying it. Billing classification
+        // has been null for every container type ever since, and nothing noticed, because no test
+        // exercised the mapping. Every lifecycle rule in the UI keys off this field: which types are
+        // deletable, which can be registered, which quota applies.
+        //
+        // Typed first, AdditionalData second, so this survives the SDK typing it OR untyping it.
+        var billingClassification = NormalizeEnumMemberName(
+            ct.BillingClassification?.ToString() ?? ReadAdditionalString(ct, "billingClassification"));
+
+        // billingStatus (task 029 / spec FR-C12) — declared on fileStorageContainerType in BOTH the
+        // v1.0 and beta CSDL, as enum fileStorageContainerBillingStatus { invalid, valid,
+        // unknownFutureValue }. Verified against https://graph.microsoft.com/v1.0/$metadata, which
+        // needs no token and outranks documentation prose.
+        //
+        // Read with the same typed-first / AdditionalData-second shape as billingClassification, for
+        // the same reason: whether the installed SDK types a property is not a fact the mapping should
+        // depend on. Null means NOT REPORTED and must never be presented as "valid" (NFR-06) — an
+        // unbilled container type that reads as billed is precisely the silent-success defect this
+        // project exists to remove.
+        var billingStatus = NormalizeEnumMemberName(
+            ct.BillingStatus?.ToString() ?? ReadAdditionalString(ct, "billingStatus"));
+
+        // owningAppId and expirationDateTime come through AdditionalData for the same reason
+        // billingClassification does: the installed Graph SDK does not type them on
+        // FileStorageContainerType. Reading them here rather than adding SDK-typed properties keeps
+        // this resilient to SDK model drift — if a future SDK types them, AdditionalData simply stops
+        // carrying them and both fall back to null rather than throwing.
+        var owningAppId = ct.OwningAppId?.ToString() ?? ReadAdditionalString(ct, "owningAppId");
+        var expirationDateTime = ct.ExpirationDateTime ?? ReadAdditionalTimestamp(ct, "expirationDateTime");
 
         // FileStorageContainerType uses "Name" (not "DisplayName") as the display label in Graph SDK.
         // There is no Description property on the containerType Graph API resource.
@@ -3429,7 +4336,459 @@ public sealed class SpeAdminGraphService
             DisplayName: ct.Name ?? string.Empty,
             Description: null,
             BillingClassification: billingClassification,
-            CreatedDateTime: ct.CreatedDateTime ?? DateTimeOffset.UtcNow);
+            // Fixed by task 023 (handed over by 030): was `?? DateTimeOffset.UtcNow`, which rendered
+            // a container type of unknown age as "created today". Unknown now stays unknown.
+            CreatedDateTime: ct.CreatedDateTime,
+            OwningAppId: owningAppId,
+            ExpirationDateTime: expirationDateTime,
+            Settings: MapContainerTypeSettings(ct.Settings),
+            BillingStatus: billingStatus);
+    }
+
+    /// <summary>
+    /// Reads per-container storage consumption out of Kiota's untyped <c>AdditionalData</c> bag.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <c>storageUsedInBytes</c> is <b>beta-only</b> and <b>LIST-only</b>, measured live on
+    /// 2026-08-23 (task 020): a <c>$select</c> for it on v1.0 returns
+    /// <c>400 "Could not find a property named 'storageUsedInBytes'"</c>, while the identical call on
+    /// beta returns 200 with the value — and even on beta, <c>GET /containers/{id}</c> omits it.
+    /// Because it is not part of the v1.0 schema, the SDK does not type it on
+    /// <c>FileStorageContainer</c>, so it arrives untyped.
+    /// </para>
+    /// <para>
+    /// Every numeric shape Kiota can produce is accepted rather than one guess. Task 022 is why: the
+    /// deleted-container timestamp was discarded for the life of the product because the code tested
+    /// <c>is string</c> and Kiota had stored a <c>DateTime</c>. A byte count can plausibly arrive as
+    /// <c>long</c>, <c>int</c>, <c>double</c>, <c>decimal</c>, <c>JsonElement</c>, or a string, and
+    /// picking one would repeat that defect exactly.
+    /// </para>
+    /// <para>
+    /// Returns null when absent or unreadable. <b>Null means NOT REPORTED, never zero</b> — an
+    /// operator must be able to tell "this container holds nothing" from "we did not measure"
+    /// (spec NFR-06).
+    /// </para>
+    /// </remarks>
+    internal static long? ReadStorageUsedInBytes(IDictionary<string, object>? additionalData)
+    {
+        if (additionalData is null ||
+            !additionalData.TryGetValue("storageUsedInBytes", out var raw) ||
+            raw is null)
+        {
+            return null;
+        }
+
+        return raw switch
+        {
+            long l => l,
+            int i => i,
+            double d when d >= 0 && d <= long.MaxValue => (long)d,
+            decimal m when m >= 0 && m <= long.MaxValue => (long)m,
+            string str when long.TryParse(
+                str, System.Globalization.NumberStyles.Integer,
+                System.Globalization.CultureInfo.InvariantCulture, out var parsed) => parsed,
+            System.Text.Json.JsonElement je when je.ValueKind == System.Text.Json.JsonValueKind.Number
+                && je.TryGetInt64(out var fromJson) => fromJson,
+            _ => null,
+        };
+    }
+
+    /// <summary>
+    /// Maps the expanded drive's <c>quota</c> facet to the domain record, or null when the drive or
+    /// its quota was not returned (FR-E02, task 051).
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <c>quota</c> IS modelled by the SDK (<c>Microsoft.Graph.Models.Quota</c> on <c>Drive</c>), so
+    /// this reads typed properties rather than <c>AdditionalData</c> — the opposite of
+    /// <see cref="ReadArchiveStatus"/>, and the distinction that task 050 got wrong in both directions
+    /// before measuring. Checked, not assumed.
+    /// </para>
+    /// <para>
+    /// Returns null when the whole facet is absent rather than a record of nulls, so a caller can tell
+    /// "no quota reported" from "quota reported, values unknown". Absent is expected on any path that
+    /// does not expand the drive — including every LIST row.
+    /// </para>
+    /// <para>
+    /// <c>Remaining</c> is taken from Graph rather than computed as <c>Total - Used</c>: the live facet
+    /// also carries <c>Deleted</c> (bytes held by deleted items that still count), so a local
+    /// subtraction would disagree with Graph whenever a recycle bin is non-empty — and would look
+    /// authoritative while doing it.
+    /// </para>
+    /// </remarks>
+    internal static SpeContainerQuota? ReadContainerQuota(Drive? drive)
+    {
+        var quota = drive?.Quota;
+        if (quota is null)
+        {
+            return null;
+        }
+
+        return new SpeContainerQuota(
+            Total: quota.Total,
+            Used: quota.Used,
+            Remaining: quota.Remaining,
+            Deleted: quota.Deleted,
+            State: quota.State);
+    }
+
+    /// <summary>
+    /// Reads a container's lifecycle status as the wire string Graph uses (<c>active</c> /
+    /// <c>inactive</c>), or null when Graph did not report one.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// 🔴 <b>Why this takes the typed property first.</b> Until 2026-08-27 all four container mapping
+    /// sites read status as
+    /// <c>additionalData.TryGetValue("status", out var s) &amp;&amp; s is string ss ? ss : "active"</c>.
+    /// <c>status</c> is in the <b>v1.0 schema</b>, so Graph SDK 6.5.0 generates it as a strongly-typed
+    /// <c>Status</c> property on <c>FileStorageContainer</c> — and Kiota therefore <b>never</b> puts it
+    /// in <c>AdditionalData</c>. The lookup could not match on any code path, so the <c>: "active"</c>
+    /// fallback fired <b>100% of the time, everywhere</b> — LIST, GET-single and CREATE alike.
+    /// </para>
+    /// <para>
+    /// Measured consequences (live, 2026-08-27): GET-single returns <c>status: "active"</c> and CREATE
+    /// returns <c>status: "inactive"</c> — both were discarded and replaced with the literal
+    /// <c>"active"</c>. A brand-new container that had not yet been activated was reported as active.
+    /// This is the same class of defect as task 022's discarded <c>deletedDateTime</c>: the value was
+    /// on the wire the whole time and the reader looked in the wrong place.
+    /// </para>
+    /// <para>
+    /// <c>AdditionalData</c> is still consulted as a fallback so that a value Graph adds to the beta
+    /// surface later — one the v1.0-modelled enum cannot represent — is surfaced verbatim rather than
+    /// silently dropped. Null is returned when neither source has a value: <b>null means NOT REPORTED
+    /// and must never render as "Active"</b> (spec NFR-06).
+    /// </para>
+    /// </remarks>
+    internal static string? ReadContainerStatus(
+        FileStorageContainerStatus? typed, IDictionary<string, object>? additionalData)
+    {
+        // A raw wire value wins when present: it is what Graph actually said, and it survives values
+        // the generated enum predates. UnknownFutureValue is the enum admitting it does not know.
+        if (additionalData is not null &&
+            additionalData.TryGetValue("status", out var raw) && raw is not null)
+        {
+            var text = raw switch
+            {
+                string s when !string.IsNullOrWhiteSpace(s) => s,
+                System.Text.Json.JsonElement je when je.ValueKind == System.Text.Json.JsonValueKind.String
+                    => je.GetString(),
+                _ => null,
+            };
+
+            if (!string.IsNullOrWhiteSpace(text))
+            {
+                return text;
+            }
+        }
+
+        if (typed is null or FileStorageContainerStatus.UnknownFutureValue)
+        {
+            return null;
+        }
+
+        // Graph's wire form is camelCase ("active"), the generated enum is PascalCase.
+        var name = typed.Value.ToString();
+        return string.IsNullOrEmpty(name)
+            ? null
+            : char.ToLowerInvariant(name[0]) + name[1..];
+    }
+
+    /// <summary>
+    /// Reads <c>archivalDetails.archiveStatus</c> — <c>recentlyArchived</c> / <c>fullyArchived</c> /
+    /// <c>reactivating</c> — or null when the container is not archived, or Graph did not report.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <c>archivalDetails</c> is <b>beta-only</b> and absent from the v1.0 schema, so the SDK does not
+    /// generate a typed property for it and it can only arrive through <c>AdditionalData</c> — the
+    /// mirror image of <see cref="ReadContainerStatus"/>. Both readers exist because guessing which
+    /// side a field lands on is what produced the defect above.
+    /// </para>
+    /// <para>
+    /// ⚠️ <b>Null is genuinely ambiguous here and that is a platform fact, not a shortcut.</b> Graph's
+    /// <c>siteArchiveStatus</c> enum has no <c>notArchived</c> member on either version, so a
+    /// non-archived container is expressed by omitting <c>archivalDetails</c> entirely. Null therefore
+    /// cannot distinguish "not archived" from "not reported". Callers must render it as "no archive
+    /// state to show" and never as a positive assertion that content is online.
+    /// </para>
+    /// <para>
+    /// As of 2026-08-27 <c>archivalDetails</c> has <b>never been observed on the wire</b> — it is
+    /// omitted from LIST and from GET-single even with an explicit <c>$select</c> that
+    /// <c>@odata.context</c> echoes back, on a tenant whose container type has not opted into
+    /// archival. Whether it appears once the opt-in is set is the open question in
+    /// notes/task-050-findings.md §7. Every shape Kiota can produce is accepted here so that answer
+    /// does not depend on a second guess.
+    /// </para>
+    /// </remarks>
+    internal static string? ReadArchiveStatus(IDictionary<string, object>? additionalData)
+    {
+        if (additionalData is null ||
+            !additionalData.TryGetValue("archivalDetails", out var raw) ||
+            raw is null)
+        {
+            return null;
+        }
+
+        static string? Clean(string? s) => string.IsNullOrWhiteSpace(s) ? null : s;
+
+        switch (raw)
+        {
+            // ── The shape Kiota 2.0 actually produces ──
+            //
+            // MEASURED, not assumed (2026-08-27). Kiota materialises an un-modelled COMPLEX property
+            // as `UntypedObject`; only scalars arrive as native CLR types (`storageUsedInBytes` comes
+            // through as `decimal`, which is why ReadStorageUsedInBytes works without this branch).
+            //
+            // The first draft of this method handled `JsonElement` and `IDictionary<string, object>`
+            // and returned null for every real response — two guesses, both wrong, exactly the
+            // failure task 022 recorded when `deletedDateTime` was tested `is string` while Kiota had
+            // stored a `DateTime`. It was caught only because a contract test asserted the mapped
+            // value instead of asserting that the code ran.
+            case UntypedObject untyped
+                when untyped.GetValue().TryGetValue("archiveStatus", out var node):
+                return node switch
+                {
+                    UntypedString us => Clean(us.GetValue()),
+                    _ => null,
+                };
+
+            // ── Shapes Kiota does not currently produce, kept deliberately ──
+            //
+            // A serializer change, a different Graph version, or a hand-built AdditionalData in a
+            // test could produce either of these. They cost three lines and they are the difference
+            // between "archive state silently disappears" and "archive state keeps working".
+            case System.Text.Json.JsonElement je
+                when je.ValueKind == System.Text.Json.JsonValueKind.Object
+                     && je.TryGetProperty("archiveStatus", out var statusEl)
+                     && statusEl.ValueKind == System.Text.Json.JsonValueKind.String:
+                return Clean(statusEl.GetString());
+
+            case IDictionary<string, object> nested
+                when nested.TryGetValue("archiveStatus", out var nestedStatus):
+                return nestedStatus switch
+                {
+                    string s => Clean(s),
+                    System.Text.Json.JsonElement nje
+                        when nje.ValueKind == System.Text.Json.JsonValueKind.String => Clean(nje.GetString()),
+                    _ => null,
+                };
+
+            default:
+                return null;
+        }
+    }
+
+    /// <summary>
+    /// Reads a container's SharePoint URL from the expanded <c>drive</c> navigation property.
+    /// </summary>
+    /// <param name="typedDriveWebUrl">
+    /// <c>container.Drive?.WebUrl</c> — the typed path, tried FIRST. Task 030's lesson: reading only
+    /// from <c>AdditionalData</c> is what silently nulled <c>billingClassification</c> for ten days
+    /// when the Graph 6 upgrade started typing it. A comment naming an SDK version is a claim with an
+    /// expiry date; reading both makes the code survive the next upgrade in either direction.
+    /// </param>
+    /// <param name="additionalData">
+    /// The untyped bag, tried SECOND. Every shape Kiota can produce for an expanded navigation
+    /// property is accepted — task 022's lesson, where <c>is string</c> could never match the
+    /// <c>DateTime</c> Kiota had actually stored, discarding a present and correct value.
+    /// </param>
+    /// <returns>
+    /// The URL, or null when Graph did not report one. <b>Null means NOT REPORTED</b> and must render
+    /// as an explicit absent state, never a blank cell (NFR-06). Never synthesise a URL to avoid a
+    /// null — see <see cref="SpeContainerSummary"/>.
+    /// </returns>
+    internal static string? ReadContainerWebUrl(
+        string? typedDriveWebUrl,
+        IDictionary<string, object>? additionalData)
+    {
+        if (!string.IsNullOrWhiteSpace(typedDriveWebUrl))
+        {
+            return typedDriveWebUrl;
+        }
+
+        if (additionalData is null ||
+            !additionalData.TryGetValue("drive", out var rawDrive) ||
+            rawDrive is null)
+        {
+            return null;
+        }
+
+        // The expanded `drive` arrives as a nested object. Kiota may hand it back as an untyped
+        // node, a dictionary, or a raw JsonElement depending on whether the property is modelled.
+        switch (rawDrive)
+        {
+            case IDictionary<string, object> driveBag:
+                return driveBag.TryGetValue("webUrl", out var nested) ? CoerceUrl(nested) : null;
+
+            case System.Text.Json.JsonElement je
+                when je.ValueKind == System.Text.Json.JsonValueKind.Object
+                     && je.TryGetProperty("webUrl", out var jsonWebUrl):
+                return CoerceUrl(jsonWebUrl);
+
+            default:
+                return null;
+        }
+
+        static string? CoerceUrl(object? value) => value switch
+        {
+            string s when !string.IsNullOrWhiteSpace(s) => s,
+            System.Text.Json.JsonElement el
+                when el.ValueKind == System.Text.Json.JsonValueKind.String
+                     && !string.IsNullOrWhiteSpace(el.GetString()) => el.GetString(),
+            _ => null,
+        };
+    }
+
+    /// <summary>
+    /// Reads the deletion timestamp for a deleted container out of Kiota's untyped
+    /// <c>AdditionalData</c> bag, accepting every shape the deserializer can produce.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// The property is not typed on <c>FileStorageContainer</c>, so its runtime type is whatever
+    /// Kiota decided — observed as <see cref="DateTime"/> against the real SDK (task 040), but
+    /// <see cref="DateTimeOffset"/> and <see cref="string"/> are both reachable depending on
+    /// serializer configuration and SDK version. The previous implementation matched on
+    /// <c>string</c> alone and therefore discarded a value that was present and correct.
+    /// </para>
+    /// <para>
+    /// Returns null only when the value is genuinely absent or genuinely unreadable. A deletion
+    /// timestamp we cannot read must stay null rather than becoming "now" — an aged-out container
+    /// that reports as freshly deleted is worse than one that admits it does not know.
+    /// </para>
+    /// </remarks>
+    internal static DateTimeOffset? ReadDeletionTimestamp(IDictionary<string, object>? additionalData)
+    {
+        if (additionalData is null ||
+            !additionalData.TryGetValue("deletedDateTime", out var raw) ||
+            raw is null)
+        {
+            return null;
+        }
+
+        return raw switch
+        {
+            DateTimeOffset dto => dto,
+            // Kiota's observed shape. Unspecified kind is treated as UTC: Graph emits this value in
+            // UTC, and assuming local time would shift every timestamp by the server's offset.
+            DateTime dt => new DateTimeOffset(
+                dt.Kind == DateTimeKind.Unspecified ? DateTime.SpecifyKind(dt, DateTimeKind.Utc) : dt),
+            string s when DateTimeOffset.TryParse(
+                s,
+                System.Globalization.CultureInfo.InvariantCulture,
+                System.Globalization.DateTimeStyles.RoundtripKind,
+                out var parsed) => parsed,
+            _ => null,
+        };
+    }
+
+    /// <summary>
+    /// Maps the Graph settings block to the domain record. Returns null when Graph sent no settings —
+    /// which is different from every setting being false, and must stay different.
+    /// </summary>
+    private static SpeContainerTypeSettings? MapContainerTypeSettings(
+        Microsoft.Graph.Models.FileStorageContainerTypeSettings? s)
+    {
+        if (s is null) return null;
+
+        // consumingTenantOverridables and isOfficeRestricted are read from AdditionalData rather than
+        // the typed surface: the first because the SDK enum is narrower than the live values, the
+        // second because it is beta-only and the SDK models v1.0. See the schema note §3.
+        var overridables =
+            s.ConsumingTenantOverridables?.ToString()
+            ?? (s.AdditionalData is not null
+                && s.AdditionalData.TryGetValue("consumingTenantOverridables", out var raw)
+                    ? raw?.ToString()
+                    : null);
+
+        bool? officeRestricted = null;
+        if (s.AdditionalData is not null &&
+            s.AdditionalData.TryGetValue("isOfficeRestricted", out var rawOffice))
+        {
+            officeRestricted = rawOffice switch
+            {
+                bool b => b,
+                string str when bool.TryParse(str, out var parsed) => parsed,
+                _ => null,
+            };
+        }
+
+        return new SpeContainerTypeSettings(
+            SharingCapability: NormalizeEnumMemberName(s.SharingCapability?.ToString()),
+            IsItemVersioningEnabled: s.IsItemVersioningEnabled,
+            ItemMajorVersionLimit: s.ItemMajorVersionLimit,
+            MaxStoragePerContainerInBytes: s.MaxStoragePerContainerInBytes,
+            IsSearchEnabled: s.IsSearchEnabled,
+            IsDiscoverabilityEnabled: s.IsDiscoverabilityEnabled,
+            IsSharingRestricted: s.IsSharingRestricted,
+            UrlTemplate: s.UrlTemplate,
+            ConsumingTenantOverridables: string.IsNullOrWhiteSpace(overridables) ? null : overridables,
+            IsOfficeRestricted: officeRestricted);
+    }
+
+    /// <summary>
+    /// Normalizes a Graph enum member name to the value Graph puts on the wire.
+    /// </summary>
+    /// <remarks>
+    /// The SDK enum stringifies to its C# member name (<c>Trial</c>, <c>DirectToCustomer</c>,
+    /// <c>Invalid</c>), while Graph, the API contract, and every client comparison use camelCase
+    /// (<c>trial</c>, <c>directToCustomer</c>, <c>invalid</c>). Emitting the C# spelling would make the
+    /// DTO's value depend on which SDK version happened to be installed — the exact coupling that hid
+    /// the billing-classification regression above. Lowercasing only the first character preserves the
+    /// rest of the identifier.
+    /// <para>
+    /// Applies to every Graph enum this service surfaces as a string: billing classification, billing
+    /// status, and sharing capability. Renamed from <c>NormalizeBillingClassification</c> by task 029 —
+    /// it had already outgrown that name when task 025 pointed sharing capability at it.
+    /// </para>
+    /// </remarks>
+    private static string? NormalizeEnumMemberName(string? value)
+    {
+        if (string.IsNullOrWhiteSpace(value)) return null;
+        return char.ToLowerInvariant(value[0]) + value[1..];
+    }
+
+    /// <summary>
+    /// Reads a string property from a Graph model's untyped <c>AdditionalData</c> bag.
+    /// Returns null when absent, null-valued, or blank — an absent property must never become "".
+    /// </summary>
+    private static string? ReadAdditionalString(
+        Microsoft.Graph.Models.FileStorageContainerType ct, string propertyName)
+    {
+        if (ct.AdditionalData is null ||
+            !ct.AdditionalData.TryGetValue(propertyName, out var raw) ||
+            raw is null)
+        {
+            return null;
+        }
+
+        var value = raw.ToString();
+        return string.IsNullOrWhiteSpace(value) ? null : value;
+    }
+
+    /// <summary>
+    /// Reads a timestamp from a Graph model's untyped <c>AdditionalData</c> bag.
+    /// </summary>
+    /// <remarks>
+    /// Returns null on an unparseable value rather than throwing or substituting a default. A date we
+    /// cannot read is unknown, and the caller must be able to tell that apart from a real date —
+    /// substituting one is how "expires in 30 days" silently becomes "expires today".
+    /// </remarks>
+    private static DateTimeOffset? ReadAdditionalTimestamp(
+        Microsoft.Graph.Models.FileStorageContainerType ct, string propertyName)
+    {
+        var value = ReadAdditionalString(ct, propertyName);
+        if (value is null) return null;
+
+        return DateTimeOffset.TryParse(
+            value,
+            System.Globalization.CultureInfo.InvariantCulture,
+            System.Globalization.DateTimeStyles.RoundtripKind,
+            out var parsed)
+            ? parsed
+            : null;
     }
 
     // =========================================================================
@@ -3723,13 +5082,15 @@ public sealed class SpeAdminGraphService
     private static SpeConsumingTenant MapPermissionGrantToConsumingTenant(
         Microsoft.Graph.Models.FileStorageContainerTypeAppPermissionGrant perm)
     {
-        var delegated = perm.DelegatedPermissions is not null
-            ? (IReadOnlyList<string>)[perm.DelegatedPermissions.ToString()!]
-            : (IReadOnlyList<string>)[];
-
-        var application = perm.ApplicationPermissions is not null
-            ? (IReadOnlyList<string>)[perm.ApplicationPermissions.ToString()!]
-            : (IReadOnlyList<string>)[];
+        // `DelegatedPermissions` / `ApplicationPermissions` are COLLECTIONS on the Graph SDK type,
+        // not single values. Calling ToString() on a collection returns its TYPE NAME, so this used
+        // to emit a one-element list containing the literal text
+        // "System.Collections.Generic.List`1[System.String]" — which is what the Permissions tab
+        // displayed to operators (UAT 2026-08-26). Every granted scope was replaced by the name of
+        // the container that held it, and nothing errored: a well-formed response, confidently wrong.
+        // Enumerate instead, and drop blanks so an empty grant reads as empty rather than as [""].
+        var delegated = ToScopeList(perm.DelegatedPermissions);
+        var application = ToScopeList(perm.ApplicationPermissions);
 
         return new SpeConsumingTenant(
             AppId: perm.AppId ?? string.Empty,
@@ -3737,6 +5098,36 @@ public sealed class SpeAdminGraphService
             TenantId: null,    // Graph API does not return tenant ID on permission grants
             DelegatedPermissions: delegated,
             ApplicationPermissions: application);
+    }
+
+    /// <summary>
+    /// Flattens a Graph permission-scope collection into plain strings.
+    /// </summary>
+    /// <remarks>
+    /// Written against <see cref="System.Collections.IEnumerable"/> rather than the SDK's concrete
+    /// element type on purpose: across Graph SDK versions these scopes have been modelled as strings
+    /// and as enum members, and both render correctly through <c>ToString()</c> per ELEMENT. What is
+    /// never correct is <c>ToString()</c> on the collection itself, which is the bug this replaces.
+    /// </remarks>
+    private static IReadOnlyList<string> ToScopeList(object? scopes)
+    {
+        if (scopes is null) return [];
+
+        // Guard the string case FIRST: string is itself IEnumerable, so falling through would
+        // enumerate it one CHARACTER at a time and turn "Files.Read.All" into fourteen scopes.
+        if (scopes is string single)
+            return string.IsNullOrWhiteSpace(single) ? [] : [single];
+
+        if (scopes is not System.Collections.IEnumerable items) return [];
+
+        var result = new List<string>();
+        foreach (var item in items)
+        {
+            var text = item?.ToString();
+            if (!string.IsNullOrWhiteSpace(text)) result.Add(text);
+        }
+
+        return result;
     }
 
     // =========================================================================
@@ -3821,22 +5212,28 @@ public sealed class SpeAdminGraphService
     /// Maps a Graph SDK FileStorageContainerTypeAppPermissionGrant to the
     /// SpeContainerTypePermission domain record.
     ///
-    /// DelegatedPermissions and ApplicationPermissions are enum values on the Graph SDK type.
-    /// They are converted to their string representation for the domain model.
     /// Null values are normalized to empty lists (ADR-007: no Graph SDK types in public surface).
     /// </summary>
+    /// <remarks>
+    /// 🔴 This is the SECOND site of the collection-<c>ToString()</c> bug, and it is the one the
+    /// Container Types → Permissions tab actually reads. The first was fixed on 2026-08-26 in
+    /// <c>MapConsumingTenant</c>; this one survived that pass and kept rendering
+    /// <c>System.Collections.Generic.List`1[System.Nullable`1[…FileStorageContainerTypeAppPermission]]</c>
+    /// in every Delegated and Application cell (UAT 2026-08-26, round 6).
+    ///
+    /// The header used to assert "DelegatedPermissions and ApplicationPermissions are enum values
+    /// on the Graph SDK type". Under Graph SDK 6.x they are <c>List&lt;…?&gt;</c> — collections of
+    /// nullable enums. That stale claim is exactly what made <c>.ToString()</c> on them look
+    /// correct: a comment describing another layer, still being trusted after that layer changed.
+    /// Deferring to <see cref="ToScopeList"/> removes the assumption entirely — it handles the
+    /// single-value, collection and null shapes without needing to know which one the SDK is using
+    /// this version.
+    /// </remarks>
     private static SpeContainerTypePermission MapContainerTypePermission(
         Microsoft.Graph.Models.FileStorageContainerTypeAppPermissionGrant perm)
     {
-        // DelegatedPermissions and ApplicationPermissions are typed enums in the Graph SDK.
-        // Convert to string list for the domain model, filtering out null/empty values.
-        var delegated = perm.DelegatedPermissions is not null
-            ? [perm.DelegatedPermissions.ToString()!]
-            : (IReadOnlyList<string>)[];
-
-        var application = perm.ApplicationPermissions is not null
-            ? [perm.ApplicationPermissions.ToString()!]
-            : (IReadOnlyList<string>)[];
+        var delegated = ToScopeList(perm.DelegatedPermissions);
+        var application = ToScopeList(perm.ApplicationPermissions);
 
         return new SpeContainerTypePermission(
             AppId: perm.AppId ?? string.Empty,
@@ -3852,14 +5249,31 @@ public sealed class SpeAdminGraphService
     /// The set of valid sharing capability values accepted by the Graph API for container type settings.
     /// These map to the allowed values for the <c>allowedRoles</c> or equivalent Graph property.
     /// </summary>
+    /// <summary>
+    /// The sharing-capability values Graph actually accepts on a container type.
+    /// </summary>
+    /// <remarks>
+    /// 🔴 CORRECTED 2026-08-24 (task 023). This set previously read
+    /// <c>{ "disabled", "view", "edit", "full" }</c>. Three of those four are not Graph values at all
+    /// — the real ones are the members of <c>Microsoft.Graph.Models.SharingCapabilities</c>, and the
+    /// SPE Admin client has always sent exactly those (<c>types/spe.ts</c> <c>SharingCapability</c>).
+    /// <para>
+    /// The consequence was total: this set is the endpoint's validation allow-list, so **every value
+    /// the client could send except "disabled" was rejected with a 400 by our own validator**, before
+    /// the request ever reached Graph. Sharing capability could not be changed to anything but
+    /// "disabled", and the failure looked like the caller's fault.
+    /// </para>
+    /// <para>
+    /// Derived from the SDK enum rather than hand-listed, so it cannot drift from it again.
+    /// <c>UnknownFutureValue</c> is excluded — it is Kiota's forward-compatibility sentinel, not a
+    /// value anyone may set.
+    /// </para>
+    /// </remarks>
     public static readonly IReadOnlySet<string> ValidSharingCapabilities =
-        new HashSet<string>(StringComparer.OrdinalIgnoreCase)
-        {
-            "disabled",
-            "view",
-            "edit",
-            "full"
-        };
+        new HashSet<string>(
+            Enum.GetNames<Microsoft.Graph.Models.SharingCapabilities>()
+                .Where(n => n != nameof(Microsoft.Graph.Models.SharingCapabilities.UnknownFutureValue)),
+            StringComparer.OrdinalIgnoreCase);
 
     /// <summary>
     /// Result returned by <see cref="UpdateContainerTypeSettingsAsync"/> after a successful PATCH.
@@ -3869,12 +5283,26 @@ public sealed class SpeAdminGraphService
     /// <param name="Id">Container type GUID.</param>
     /// <param name="DisplayName">Human-readable display name for the container type.</param>
     /// <param name="BillingClassification">Billing classification string (e.g., "standard"). Null when not returned.</param>
-    /// <param name="CreatedDateTime">When the container type was created (UTC).</param>
+    /// <param name="CreatedDateTime">
+    /// When the container type was created, or null when Graph does not report it. Nullable since
+    /// 2026-08-24 (task 023): the previous <c>?? DateTimeOffset.UtcNow</c> fallback rendered a
+    /// container type of unknown age as "created today".
+    /// </param>
+    /// <param name="Settings">
+    /// Settings as Graph reports them after the update — the read-back that lets a caller confirm the
+    /// write applied rather than trusting a 200. Added by task 025.
+    /// </param>
+    /// <param name="BillingStatus">
+    /// Billing standing ("valid" / "invalid"), or null when Graph does not report it. Added by task
+    /// 029 so a settings save returns the same billing view the list does, rather than a narrower one.
+    /// </param>
     public sealed record ContainerTypeSettingsResult(
         string Id,
         string DisplayName,
         string? BillingClassification,
-        DateTimeOffset CreatedDateTime);
+        DateTimeOffset? CreatedDateTime,
+        SpeContainerTypeSettings? Settings = null,
+        string? BillingStatus = null);
 
     /// <summary>
     /// Updates settings on an SPE container type via PATCH /storage/fileStorage/containerTypes/{typeId}.
@@ -3882,30 +5310,70 @@ public sealed class SpeAdminGraphService
     /// Only non-null fields from the request are included in the PATCH body. The Graph API
     /// applies partial updates (merge-patch semantics) — fields not included are left unchanged.
     ///
-    /// Settings patched:
-    ///   - SharingCapability (via AdditionalData as "allowedRoles" property)
-    ///   - Versioning (via AdditionalData as "isMajorVersionLimitEnabled"/"majorVersionLimit")
-    ///   - StorageUsedInBytes (via AdditionalData as "quota"/"storagePlanInformation")
-    ///
     /// Returns <c>null</c> when Graph responds with 404 (container type not found).
     /// Returns <see cref="ContainerTypeSettingsResult"/> on success.
     /// Returns domain record only — no Graph SDK types exposed (ADR-007).
     /// </summary>
+    /// <remarks>
+    /// 🔴 <b>REBUILT 2026-08-24 (task 023, spec FR-C04 + FR-C05).</b> Every settings write this method
+    /// made was a silent no-op, for three independent reasons — any one of which was sufficient:
+    /// <list type="number">
+    /// <item>
+    /// <b>Wrong shape.</b> The values were written as <i>top-level</i> properties on the container
+    /// type. Settings live in a <b>nested <c>settings</c> object</b>
+    /// (<c>Microsoft.Graph.Models.FileStorageContainerTypeSettings</c>). Graph ignores unknown
+    /// top-level members on a merge-PATCH, so the request returned <b>200 and changed nothing</b>.
+    /// This alone made correcting the property names insufficient.
+    /// </item>
+    /// <item>
+    /// <b>Wrong names.</b> <c>majorVersionLimit</c> and <c>storageUsedInBytes</c> — the real names are
+    /// <c>itemMajorVersionLimit</c> and <c>maxStoragePerContainerInBytes</c>. <c>isVersioningEnabled</c>
+    /// was wrong too (<c>isItemVersioningEnabled</c>), which the spec had not caught.
+    /// </item>
+    /// <item>
+    /// <b>Wrong meaning.</b> <c>storageUsedInBytes</c> is a consumption <i>metric</i>;
+    /// <c>maxStoragePerContainerInBytes</c> is a per-container quota <i>ceiling</i>. Modelling a limit
+    /// as a measurement is why the storage story never cohered (spec §3.2).
+    /// </item>
+    /// </list>
+    /// <para>
+    /// The fix uses the SDK's <b>typed</b> settings model rather than an untyped dictionary, so every
+    /// property name is now <b>compiler-enforced</b>. This defect class cannot recur here: a
+    /// misspelled setting is a build error, not a 200 that does nothing. (SDK 6.5.0 types all nine
+    /// settings; the remaining five are task 025's surface.)
+    /// </para>
+    /// </remarks>
     /// <param name="graphClient">Authenticated Graph client from <see cref="GetClientForConfigAsync"/>.</param>
     /// <param name="containerTypeId">The Graph container type ID (GUID string).</param>
-    /// <param name="sharingCapability">New sharing capability ("disabled", "view", "edit", "full"). Null = no change.</param>
-    /// <param name="isVersioningEnabled">Enable or disable versioning. Null = no change.</param>
-    /// <param name="majorVersionLimit">Max major versions to retain. Null = no change.</param>
-    /// <param name="storageUsedInBytes">Storage quota limit in bytes. Null = no change.</param>
+    /// <param name="sharingCapability">
+    /// New sharing capability — a member of <c>SharingCapabilities</c> (<c>disabled</c>,
+    /// <c>externalUserSharingOnly</c>, <c>existingExternalUserSharingOnly</c>,
+    /// <c>externalUserAndGuestSharing</c>), matched case-insensitively. Null = no change.
+    /// </param>
+    /// <param name="isItemVersioningEnabled">Enable or disable item versioning. Null = no change.</param>
+    /// <param name="itemMajorVersionLimit">Max major versions to retain per item. Null = no change.</param>
+    /// <param name="maxStoragePerContainerInBytes">
+    /// Per-container storage <b>ceiling</b> in bytes — a limit, never a usage figure. Null = no change.
+    /// </param>
     /// <param name="ct">Cancellation token.</param>
     /// <returns>Updated container type summary, or <c>null</c> if the container type was not found.</returns>
+    /// <exception cref="ArgumentException">
+    /// <paramref name="sharingCapability"/> is not a recognised value. Rejected here rather than
+    /// forwarded, because Graph's response to an unparseable enum is not reliably distinguishable
+    /// from success.
+    /// </exception>
     public async Task<ContainerTypeSettingsResult?> UpdateContainerTypeSettingsAsync(
         GraphServiceClient graphClient,
         string containerTypeId,
         string? sharingCapability,
-        bool? isVersioningEnabled,
-        int? majorVersionLimit,
-        long? storageUsedInBytes,
+        bool? isItemVersioningEnabled,
+        long? itemMajorVersionLimit,
+        long? maxStoragePerContainerInBytes,
+        bool? isSearchEnabled = null,
+        bool? isDiscoverabilityEnabled = null,
+        bool? isSharingRestricted = null,
+        string? urlTemplate = null,
+        string? consumingTenantOverridables = null,
         CancellationToken ct = default)
     {
         ArgumentNullException.ThrowIfNull(graphClient);
@@ -3913,40 +5381,130 @@ public sealed class SpeAdminGraphService
 
         _logger.LogInformation(
             "Updating SPE container type settings for {ContainerTypeId}. " +
-            "SharingCapability: {SharingCapability}, IsVersioningEnabled: {IsVersioningEnabled}, " +
-            "MajorVersionLimit: {MajorVersionLimit}, StorageUsedInBytes: {StorageUsedInBytes}",
-            containerTypeId, sharingCapability, isVersioningEnabled, majorVersionLimit, storageUsedInBytes);
+            "SharingCapability: {SharingCapability}, IsItemVersioningEnabled: {IsItemVersioningEnabled}, " +
+            "ItemMajorVersionLimit: {ItemMajorVersionLimit}, " +
+            "MaxStoragePerContainerInBytes (ceiling): {MaxStoragePerContainerInBytes}",
+            containerTypeId, sharingCapability, isItemVersioningEnabled,
+            itemMajorVersionLimit, maxStoragePerContainerInBytes);
 
-        // Build the PATCH body using AdditionalData for settings not represented
-        // as typed properties in the Graph SDK FileStorageContainerType model.
-        var patchBody = new Microsoft.Graph.Models.FileStorageContainerType
-        {
-            AdditionalData = new Dictionary<string, object>()
-        };
+        // Settings are a NESTED object on the container type, and every member is typed — so the
+        // property names below are checked by the compiler rather than by Graph's silence.
+        var settings = new Microsoft.Graph.Models.FileStorageContainerTypeSettings();
 
         if (!string.IsNullOrWhiteSpace(sharingCapability))
         {
-            // Graph API accepts sharingCapability as a string value on the container type resource.
-            patchBody.AdditionalData["sharingCapability"] = sharingCapability.ToLowerInvariant();
+            if (!Enum.TryParse<Microsoft.Graph.Models.SharingCapabilities>(
+                    sharingCapability, ignoreCase: true, out var parsedSharing) ||
+                parsedSharing == Microsoft.Graph.Models.SharingCapabilities.UnknownFutureValue)
+            {
+                throw new ArgumentException(
+                    $"'{sharingCapability}' is not a valid sharing capability. Valid values: " +
+                    $"{string.Join(", ", ValidSharingCapabilities)}.",
+                    nameof(sharingCapability));
+            }
+
+            settings.SharingCapability = parsedSharing;
         }
 
-        if (isVersioningEnabled.HasValue)
+        if (isItemVersioningEnabled.HasValue)
         {
-            patchBody.AdditionalData["isVersioningEnabled"] = isVersioningEnabled.Value;
+            settings.IsItemVersioningEnabled = isItemVersioningEnabled.Value;
         }
 
-        if (majorVersionLimit.HasValue)
+        if (itemMajorVersionLimit.HasValue)
         {
-            patchBody.AdditionalData["majorVersionLimit"] = majorVersionLimit.Value;
+            settings.ItemMajorVersionLimit = itemMajorVersionLimit.Value;
         }
 
-        if (storageUsedInBytes.HasValue)
+        if (maxStoragePerContainerInBytes.HasValue)
         {
-            patchBody.AdditionalData["storageUsedInBytes"] = storageUsedInBytes.Value;
+            settings.MaxStoragePerContainerInBytes = maxStoragePerContainerInBytes.Value;
         }
+
+        // ── The remaining v1.0 settings (task 025, spec FR-C07) ──────────────
+        // Nine properties total, verified against Graph's OData metadata; task 023 wired four.
+        if (isSearchEnabled.HasValue)
+        {
+            settings.IsSearchEnabled = isSearchEnabled.Value;
+        }
+
+        if (isDiscoverabilityEnabled.HasValue)
+        {
+            settings.IsDiscoverabilityEnabled = isDiscoverabilityEnabled.Value;
+        }
+
+        if (isSharingRestricted.HasValue)
+        {
+            settings.IsSharingRestricted = isSharingRestricted.Value;
+        }
+
+        if (urlTemplate is not null)
+        {
+            settings.UrlTemplate = urlTemplate;
+        }
+
+        if (!string.IsNullOrWhiteSpace(consumingTenantOverridables))
+        {
+            // Written through AdditionalData as the raw flag string, NOT the typed enum: the live
+            // tenant uses flags (`sharingCapability`, `isOfficeRestricted`) that are not members of
+            // the SDK's generated enum, so the typed path cannot round-trip real values.
+            // See notes/task-025-schema-verification.md §3.
+            settings.AdditionalData["consumingTenantOverridables"] = consumingTenantOverridables;
+        }
+
+        var patchBody = new Microsoft.Graph.Models.FileStorageContainerType { Settings = settings };
 
         try
         {
+            /*
+             * 🔑 THE ETAG IS REQUIRED, AND ITS ABSENCE IS WHY EVERY WRITE 400'd.
+             *
+             * Microsoft's own reference for Update fileStorageContainerType lists `etag` as
+             * **Required** in the request BODY, and its "Example 2: Update without ETag" documents
+             * the response as `400 Bad Request`. That was our exact symptom, and it was recorded for
+             * two days as a suspected OWNERSHIP restriction ("only the owning app may modify its
+             * container type") — a hypothesis that would have cost either a throwaway container type
+             * or a change to the production SPA registration to test.
+             *
+             * Proven live 2026-08-25: the IDENTICAL no-op PATCH returns 400 without the etag and
+             * **200 with it**, on both beta and v1.0, followed by a real round-trip
+             * (499 written → 499 read back → restored). See notes/patch-400-resolution.md.
+             *
+             * ⚠️ `etag` is a BODY PROPERTY, not the `If-Match` HTTP header. An earlier session tried
+             * If-Match and saw no change, which is what kept the real cause hidden — the two are one
+             * word apart and mean different things here.
+             *
+             * The GET below is therefore load-bearing, not a convenience: it is the read half of a
+             * read-modify-write. Fetching immediately before the PATCH also keeps the concurrency
+             * window as small as this API allows — if another writer changes the type in between,
+             * Graph rejects our stale etag, which is the behaviour we want rather than a silent
+             * last-writer-wins overwrite.
+             */
+            var current = await ExecuteWithRetryAsync(
+                () => graphClient.Storage.FileStorage.ContainerTypes[containerTypeId]
+                    .GetAsync(cancellationToken: ct),
+                ct);
+
+            if (current is null)
+            {
+                _logger.LogWarning(
+                    "Container type {ContainerTypeId} not found when reading its etag before update",
+                    containerTypeId);
+                return null;
+            }
+
+            patchBody.Etag = current.Etag ?? ReadAdditionalString(current, "etag");
+
+            if (string.IsNullOrWhiteSpace(patchBody.Etag))
+            {
+                // Do not attempt the PATCH: Graph would answer 400 with a message about "arguments"
+                // that names nothing, and the operator would be back where this project started.
+                throw new InvalidOperationException(
+                    $"Graph returned container type '{containerTypeId}' without an etag, which the " +
+                    "Update API requires in the request body. Without it the PATCH would fail as " +
+                    "400 invalidRequest with a message that does not name the cause.");
+            }
+
             // PATCH /storage/fileStorage/containerTypes/{typeId}
             var updated = await ExecuteWithRetryAsync(
                 () => graphClient.Storage.FileStorage.ContainerTypes[containerTypeId]
@@ -3962,16 +5520,101 @@ public sealed class SpeAdminGraphService
                 return null;
             }
 
-            var billingClassification = updated.BillingClassification?.ToString();
+            // 🔴 Fixed by task 029: this read `updated.BillingClassification?.ToString()`, with no
+            // normalization — so the SAME field came back as "Trial" from a settings save and "trial"
+            // from the list, because only the list path passed it through the normalizer. Any client
+            // comparing the two, or comparing either against Graph's own value, would find a mismatch
+            // that depends on which endpoint it happened to ask. Both paths now agree.
+            var billingClassification = NormalizeEnumMemberName(
+                updated.BillingClassification?.ToString()
+                ?? ReadAdditionalString(updated, "billingClassification"));
+
+            var billingStatus = NormalizeEnumMemberName(
+                updated.BillingStatus?.ToString() ?? ReadAdditionalString(updated, "billingStatus"));
+
+            var mappedSettings = MapContainerTypeSettings(updated.Settings);
+
+            /*
+             * READ-BACK VERIFICATION (task 051 / FR-E02 constraint: "every ceiling write MUST be
+             * confirmed by read-back, not by a 200 response").
+             *
+             * 🔴 Why this is not paranoia. Measured live 2026-08-27 on a throwaway container:
+             * PATCHing `maxStoragePerContainerInBytes` at CONTAINER scope returns 200 OK and silently
+             * discards the value — the response body comes back carrying the other settings and simply
+             * omitting that one. A 200 from this API is not evidence that anything was written.
+             *
+             * The container-TYPE PATCH used here DOES persist (proven live by task 023: 499 written →
+             * 499 read back → restored). So this check is expected to pass. It exists because the cost
+             * of it silently ceasing to be true is an admin who sets a storage cap, sees a success
+             * toast, and has no cap — which is §2.4 exactly.
+             *
+             * It compares what we ASKED for against what the response REPORTS, for the fields we set.
+             * That is enough to catch the observed failure mode (silent drop), and unlike an extra GET
+             * it costs no additional round-trip and cannot itself race another writer.
+             */
+            if (mappedSettings is null)
+            {
+                /*
+                 * Graph returned a success with NO settings object. We cannot confirm the write, and
+                 * we cannot refute it either — so this warns rather than throws.
+                 *
+                 * That asymmetry is deliberate. Throwing here would assert a failure we have not
+                 * established, which is the same species of dishonesty as reporting an unverified
+                 * success — just pointing the other way. The live type PATCH always echoes settings
+                 * (task 023), so this branch means something changed upstream and deserves to be
+                 * visible in logs, not converted into a user-facing error we cannot substantiate.
+                 */
+                _logger.LogWarning(
+                    "Container type {ContainerTypeId} settings update returned success with no settings " +
+                    "object — the write could NOT be verified. Expected Graph to echo the settings.",
+                    containerTypeId);
+            }
+            else
+            {
+                var unwritten = new List<string>();
+
+                if (maxStoragePerContainerInBytes.HasValue &&
+                    mappedSettings.MaxStoragePerContainerInBytes != maxStoragePerContainerInBytes.Value)
+                {
+                    unwritten.Add(
+                        $"maxStoragePerContainerInBytes (requested {maxStoragePerContainerInBytes.Value}, " +
+                        $"Graph reports {mappedSettings.MaxStoragePerContainerInBytes?.ToString() ?? "absent"})");
+                }
+
+                if (itemMajorVersionLimit.HasValue &&
+                    mappedSettings.ItemMajorVersionLimit != itemMajorVersionLimit.Value)
+                {
+                    unwritten.Add(
+                        $"itemMajorVersionLimit (requested {itemMajorVersionLimit.Value}, " +
+                        $"Graph reports {mappedSettings.ItemMajorVersionLimit?.ToString() ?? "absent"})");
+                }
+
+                if (unwritten.Count > 0)
+                {
+                    // Thrown, not logged-and-returned. A caller that receives a settings object cannot
+                    // tell it apart from a successful write, and the endpoint would report success.
+                    //
+                    // This is the shape actually measured on the container-scope PATCH: settings came
+                    // back populated with the OTHER fields and simply omitted the one we set. A check
+                    // that only looked for "did we get a 200" — or even "did we get settings" — would
+                    // have passed it.
+                    throw new SettingsNotPersistedException(containerTypeId, unwritten);
+                }
+            }
 
             _logger.LogInformation(
-                "Successfully updated container type settings for {ContainerTypeId}", containerTypeId);
+                "Successfully updated container type settings for {ContainerTypeId} " +
+                "(write verified against Graph's own read of the settings)", containerTypeId);
 
             return new ContainerTypeSettingsResult(
                 Id: updated.Id ?? containerTypeId,
                 DisplayName: updated.Name ?? string.Empty,
                 BillingClassification: billingClassification,
-                CreatedDateTime: updated.CreatedDateTime ?? DateTimeOffset.UtcNow);
+                // Was `?? DateTimeOffset.UtcNow` — a container type of unknown age rendered as
+                // "created today". Handed here by task 030; unknown now stays unknown.
+                CreatedDateTime: updated.CreatedDateTime,
+                Settings: mappedSettings,
+                BillingStatus: billingStatus);
         }
         catch (ODataError odataError) when (odataError.ResponseStatusCode == (int)HttpStatusCode.NotFound)
         {
@@ -4175,11 +5818,69 @@ public sealed class SpeAdminGraphService
     }
 
     /// <summary>
+    /// The Graph base address used for SPE FileStorage container operations.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <b>Beta is deliberate here, and it is measured — not inherited.</b> Verified live against Spaarke
+    /// Dev on 2026-08-23 (task 020 / spec FR-C01), same tenant, token, container type and moment:
+    /// </para>
+    /// <code>
+    /// GET /v1.0/storage/fileStorage/containers?$select=id,displayName,storageUsedInBytes
+    ///   → 400  "Could not find a property named 'storageUsedInBytes'"
+    /// GET /beta/storage/fileStorage/containers?$select=id,displayName,storageUsedInBytes
+    ///   → 200  { "storageUsedInBytes": ... }
+    /// </code>
+    /// <para>
+    /// <b><c>storageUsedInBytes</c> is not defined in the v1.0 schema at all</b> — a property merely
+    /// omitted by default would have been returned on explicit <c>$select</c>; a 400 means v1.0 does not
+    /// know the name. <c>ownershipType</c> is likewise beta-only. Both are consumed by the SPE Admin
+    /// storage surface (spec FR-C06), so migrating this client to v1.0 would delete a feature rather
+    /// than modernise one.
+    /// </para>
+    /// <para>
+    /// FR-C01's rationale — that beta schema drift generates the wrong-property-name defect class — does
+    /// hold for container <i>types</i> (§4.1's <c>itemMajorVersionLimit</c> /
+    /// <c>maxStoragePerContainerInBytes</c>). It is <b>inverted</b> for containers: here v1.0 is the
+    /// version missing properties the application needs.
+    /// </para>
+    /// <para>
+    /// This client is reached through <c>GetClientForConfigAsync</c> and therefore backs EVERY
+    /// <c>…ForConfigAsync</c> method — containers, recycle bin, search, security, audit. Changing this one
+    /// address changes all of them at once. Do not flip it without re-running the probe above.
+    /// Full evidence: <c>projects/sdap-SPE-admin-app-r2/notes/beta-vs-v1-surface-verification.md</c>.
+    /// </para>
+    /// </remarks>
+    internal const string SpeContainerGraphBaseUrl = "https://graph.microsoft.com/beta";
+
+    /// <summary>
+    /// Returns the base address of the client that is about to issue a request, so synthetic
+    /// pagination URLs track the client instead of a hardcoded literal.
+    /// </summary>
+    /// <remarks>
+    /// Falls back to <see cref="SpeContainerGraphBaseUrl"/> only when the adapter reports no base URL,
+    /// which the Graph SDK does not do in practice — the fallback exists so a null can never produce a
+    /// relative URL that silently fails to resolve.
+    /// </remarks>
+    internal static string ResolveGraphBaseUrl(GraphServiceClient graphClient)
+    {
+        ArgumentNullException.ThrowIfNull(graphClient);
+
+        var baseUrl = graphClient.RequestAdapter?.BaseUrl;
+        return string.IsNullOrWhiteSpace(baseUrl)
+            ? SpeContainerGraphBaseUrl
+            : baseUrl.TrimEnd('/');
+    }
+
+    /// <summary>
     /// Creates a <see cref="GraphServiceClient"/> using ClientSecretCredential (app-only).
-    /// Uses beta endpoint for SPE FileStorage APIs (required per graph-sdk-v5 pattern).
     /// Uses the shared "GraphApiClient" named HttpClient which provides centralized resilience
     /// (retry, circuit breaker, timeout) via GraphHttpMessageHandler.
     /// </summary>
+    /// <remarks>
+    /// Base address is <see cref="SpeContainerGraphBaseUrl"/> — see its remarks for why beta is the
+    /// measured-correct choice for container operations.
+    /// </remarks>
     private GraphServiceClient CreateGraphClient(string tenantId, string clientId, string clientSecret)
     {
         var credential = new ClientSecretCredential(tenantId, clientId, clientSecret);
@@ -4191,8 +5892,7 @@ public sealed class SpeAdminGraphService
         // Shared HttpClient with GraphHttpMessageHandler provides resilience (ADR-001)
         var httpClient = _httpClientFactory.CreateClient("GraphApiClient");
 
-        // Beta endpoint required for SPE FileStorage container APIs
-        return new GraphServiceClient(httpClient, authProvider, "https://graph.microsoft.com/beta");
+        return new GraphServiceClient(httpClient, authProvider, SpeContainerGraphBaseUrl);
     }
 
     /// <summary>
@@ -4346,10 +6046,14 @@ public sealed class SpeAdminGraphService
                 .GetAsync(config =>
                 {
                     config.QueryParameters.Filter = $"containerTypeId eq {containerTypeId}";
-                    config.QueryParameters.Select = new[]
-                    {
-                        "id", "displayName", "containerTypeId", "deletedDateTime"
-                    };
+
+                    // NO $select — deliberate (task 022), for the same reason as the container-type
+                    // list. A hand-maintained projection is a hand-maintained list of property names,
+                    // and a wrong or version-absent name is a hard 400 that breaks the entire view —
+                    // exactly what `storageUsedInBytes` does on v1.0. It also silently withholds any
+                    // property the list forgot to ask for, which is how `owningAppId` went missing on
+                    // the container-type surface. The default projection cannot drift out of sync
+                    // with itself, and the result set here is one page of deleted containers.
                 }, ct),
             ct);
 
@@ -4359,17 +6063,25 @@ public sealed class SpeAdminGraphService
             {
                 foreach (var container in response.Value)
                 {
-                    // deletedDateTime is not a first-class typed property on FileStorageContainer
-                    // in Graph SDK 5.x — it is returned via the AdditionalData dictionary when
-                    // querying the deletedContainers endpoint.
-                    DateTimeOffset? deletedAt = null;
-                    if (container.AdditionalData != null &&
-                        container.AdditionalData.TryGetValue("deletedDateTime", out var rawDeletedAt) &&
-                        rawDeletedAt is string deletedAtStr &&
-                        DateTimeOffset.TryParse(deletedAtStr, out var parsed))
-                    {
-                        deletedAt = parsed;
-                    }
+                    // 🔴 DEFECT FIXED HERE (task 022, 2026-08-24). deletedDateTime is not typed on
+                    // FileStorageContainer, so it arrives in AdditionalData — the old comment had
+                    // that right. What it got wrong was the RUNTIME TYPE. The guard read:
+                    //
+                    //     rawDeletedAt is string deletedAtStr && DateTimeOffset.TryParse(...)
+                    //
+                    // Kiota does not put a string there. Probed against the real SDK by task 040:
+                    //
+                    //     'deletedDateTime' => runtime type: System.DateTime  value: 8/1/2026 5:45 PM
+                    //     TryGetValue(...) = True ·  raw is string => False
+                    //
+                    // Graph sent the value, Kiota parsed it, it sat in the dictionary — and the type
+                    // check dropped it. DeletedDateTime was null for EVERY row, so the recycle bin
+                    // could not sort by deletion date or age anything out, and "deleted at an unknown
+                    // time" was indistinguishable from "deleted just now".
+                    //
+                    // ReadDeletionTimestamp handles every shape Kiota can produce rather than
+                    // guessing one, because the guess is what failed.
+                    var deletedAt = ReadDeletionTimestamp(container.AdditionalData);
 
                     results.Add(new DeletedContainerSummary(
                         Id: container.Id ?? string.Empty,
@@ -4435,6 +6147,680 @@ public sealed class SpeAdminGraphService
                 "Deleted container {ContainerId} not found in recycle bin (404 on restore)", containerId);
             return false;
         }
+    }
+
+    /// <summary>
+    /// Thrown when Graph accepted a settings write with a success status but did not persist one or
+    /// more of the values (FR-E02, task 051).
+    /// </summary>
+    /// <remarks>
+    /// A distinct type because the caller must NOT report success. Every other failure here arrives as
+    /// a non-2xx; this one arrives as 200, which is precisely what makes it dangerous — the operator
+    /// sees a confirmation and the setting is unchanged.
+    /// </remarks>
+    public sealed class SettingsNotPersistedException(string containerTypeId, IReadOnlyList<string> unwrittenFields)
+        : Exception(
+            $"Graph accepted the settings update for container type '{containerTypeId}' but did not " +
+            $"persist: {string.Join("; ", unwrittenFields)}. The write was NOT applied despite the " +
+            "success response.")
+    {
+        public string ContainerTypeId { get; } = containerTypeId;
+
+        /// <summary>The fields requested that Graph's own response does not reflect.</summary>
+        public IReadOnlyList<string> UnwrittenFields { get; } = unwrittenFields;
+    }
+
+    /// <summary>
+    /// Thrown when an archive or unarchive call is refused because the container TYPE has not opted
+    /// into archival. Distinct from a generic authorization failure: nothing about the caller's
+    /// permissions can fix it — an operator must enable the capability on the container type.
+    /// </summary>
+    /// <remarks>
+    /// Spec FR-E01 / task 050. The opt-in is deliberately OUT of this app's scope (it is a
+    /// SharePoint PowerShell action, not a Graph one), so the only useful thing the app can do is say
+    /// precisely what is wrong and what fixes it. Carrying this as its own exception type keeps the
+    /// endpoint from having to re-sniff Graph error codes.
+    /// </remarks>
+    public sealed class ArchivalNotEnabledException(string containerId, string? graphMessage)
+        : Exception(
+            $"Archival is not enabled for the container type owning container '{containerId}'. " +
+            (graphMessage is { Length: > 0 } ? $"Graph reported: {graphMessage}" : "Graph reported no detail."))
+    {
+        public string ContainerId { get; } = containerId;
+
+        /// <summary>Graph's own message, preserved verbatim for the ProblemDetails payload.</summary>
+        public string? GraphMessage { get; } = graphMessage;
+    }
+
+    /// <summary>
+    /// Archives an SPE container (FR-E01), reducing its storage cost and de-prioritising its content
+    /// in Copilot results. Calls the Graph <b>beta</b> action
+    /// <c>POST /storage/fileStorage/containers/{id}/archive</c>.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <b>Beta-only, and that is not drift.</b> The <c>archive</c> and <c>unarchive</c> actions are
+    /// absent from the v1.0 CSDL entirely (read from <c>$metadata</c>, 2026-08-27) and exist only on
+    /// beta. The container surface is already pinned to beta by task 020's measured decision —
+    /// <see cref="SpeContainerGraphBaseUrl"/>, guarded by
+    /// <c>SpeAdminGraphVersionContractTests</c> — so this introduces no new version exposure.
+    /// "GA February 2026" refers to the capability in the admin centre and PowerShell, NOT to Graph
+    /// v1.0.
+    /// </para>
+    /// <para>
+    /// Issued through <see cref="SendGraphJsonAsync"/> because Graph SDK 6.5.0 generates from v1.0 and
+    /// therefore models no <c>Archive</c> request builder. That helper keeps the SDK's auth, retry and
+    /// — critically — its <c>ODataError</c> mapping, so failures still translate normally.
+    /// </para>
+    /// <para>
+    /// ⚠️ <b>Asynchronous.</b> A successful call does not mean the content is archived. The container
+    /// enters <c>recentlyArchived</c> and moves to <c>fullyArchived</c> later. Callers must not report
+    /// completion on the strength of this returning.
+    /// </para>
+    /// <para>ADR-007: no Graph SDK types cross this boundary.</para>
+    /// </remarks>
+    /// <exception cref="ArchivalNotEnabledException">
+    /// The container type has not opted into archival. Measured live 2026-08-27: Graph answers
+    /// <c>403 notAllowed — "Archival operation cannot proceed because this application does not
+    /// currently support archiving."</c> The 403 is semantic, not routing: the action exists and is
+    /// reachable; the capability is switched off.
+    /// </exception>
+    /// <returns><c>true</c> when Graph accepted the archive; <c>false</c> when the container was not found.</returns>
+    public async Task<bool> ArchiveContainerAsync(
+        GraphServiceClient graphClient,
+        string containerId,
+        CancellationToken ct = default)
+        => await PostContainerLifecycleActionAsync(graphClient, containerId, "archive", ct)
+            .ConfigureAwait(false);
+
+    /// <summary>
+    /// Returns an archived SPE container to active use (FR-E01). Calls the Graph <b>beta</b> action
+    /// <c>POST /storage/fileStorage/containers/{id}/unarchive</c>.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// 🔑 <b><c>unarchive</c> is NOT <c>restore</c>.</b> Both actions exist on <c>fileStorageContainer</c>
+    /// and they do different things:
+    /// <c>restore</c> recovers a <i>soft-deleted</i> container from <c>deletedContainers</c> — that is
+    /// <see cref="RestoreContainerAsync"/>, already shipped. <c>unarchive</c> reverses <i>archival</i>
+    /// on a container that was never deleted. Naming this method Restore-anything would have collided
+    /// with a real and different operation.
+    /// </para>
+    /// <para>
+    /// ⚠️ <b>Asynchronous, and visibly so.</b> The container enters <c>reactivating</c> and is not
+    /// usable when this returns. Graph's own enum models the intermediate state, so reporting
+    /// "restored" on the return of this call would assert something Graph is explicitly telling us is
+    /// not yet true.
+    /// </para>
+    /// </remarks>
+    /// <exception cref="ArchivalNotEnabledException">The container type has not opted into archival.</exception>
+    /// <returns><c>true</c> when Graph accepted the request; <c>false</c> when the container was not found.</returns>
+    public async Task<bool> UnarchiveContainerAsync(
+        GraphServiceClient graphClient,
+        string containerId,
+        CancellationToken ct = default)
+        => await PostContainerLifecycleActionAsync(graphClient, containerId, "unarchive", ct)
+            .ConfigureAwait(false);
+
+    /// <summary>
+    /// Shared body for the <c>archive</c> / <c>unarchive</c> beta actions — identical request shape,
+    /// identical failure modes, so they share one implementation rather than two copies that drift.
+    /// </summary>
+    private async Task<bool> PostContainerLifecycleActionAsync(
+        GraphServiceClient graphClient,
+        string containerId,
+        string action,
+        CancellationToken ct)
+    {
+        ArgumentNullException.ThrowIfNull(graphClient);
+        ArgumentException.ThrowIfNullOrWhiteSpace(containerId);
+
+        _logger.LogInformation(
+            "Container {ContainerId}: issuing {Action} (Graph beta action)", containerId, action);
+
+        var url =
+            $"{ResolveGraphBaseUrl(graphClient)}/storage/fileStorage/containers/" +
+            $"{Uri.EscapeDataString(containerId)}/{action}";
+
+        try
+        {
+            await ExecuteWithRetryAsync(
+                () => SendGraphJsonAsync(graphClient, HttpMethod.Post, url, "{}", ct),
+                ct).ConfigureAwait(false);
+
+            _logger.LogInformation(
+                "Container {ContainerId}: {Action} accepted by Graph. NOTE: the operation is " +
+                "asynchronous — acceptance is not completion.", containerId, action);
+
+            return true;
+        }
+        catch (ODataError ex) when (IsArchivalNotEnabled(ex))
+        {
+            // Deliberately NOT folded into the generic 403 path. A caller who is told "forbidden"
+            // will go and audit their own permissions, which cannot possibly fix this.
+            _logger.LogWarning(
+                "Container {ContainerId}: {Action} refused — the container type has not opted into " +
+                "archival. Graph: {GraphMessage}",
+                containerId, action, ex.Error?.Message);
+
+            throw new ArchivalNotEnabledException(containerId, ex.Error?.Message);
+        }
+        catch (ODataError ex) when (ex.ResponseStatusCode == (int)System.Net.HttpStatusCode.NotFound)
+        {
+            _logger.LogInformation(
+                "Container {ContainerId} not found (404 on {Action})", containerId, action);
+            return false;
+        }
+    }
+
+    /// <summary>
+    /// Recognises Graph's "archival is not switched on for this container type" refusal.
+    /// </summary>
+    /// <remarks>
+    /// Keys on the machine-readable <c>code</c> (<c>notAllowed</c>) with the message only as a
+    /// secondary signal. Matching on the English sentence alone would break the day Microsoft rewords
+    /// it, and would fail outright under a non-English service locale — a detector that silently stops
+    /// detecting is worse than none, because the not-opted-in case would then fall through to the
+    /// generic 403 branch and produce precisely the misleading "check your permissions" error this
+    /// task exists to eliminate.
+    /// </remarks>
+    private static bool IsArchivalNotEnabled(ODataError ex)
+    {
+        if (ex.ResponseStatusCode is not ((int)System.Net.HttpStatusCode.Forbidden
+            or (int)System.Net.HttpStatusCode.BadRequest))
+        {
+            return false;
+        }
+
+        if (!string.Equals(ex.Error?.Code, "notAllowed", StringComparison.OrdinalIgnoreCase))
+        {
+            return false;
+        }
+
+        // `notAllowed` is not archival-specific, so require the message to be about archiving before
+        // claiming this diagnosis. If Graph localises the message the code-only match is lost and we
+        // fall through to the generic path — a worse message, but never a WRONG one.
+        var message = ex.Error?.Message;
+        return message is not null
+            && message.Contains("archiv", StringComparison.OrdinalIgnoreCase);
+    }
+
+    // =========================================================================
+    // Per-container ITEM recycle bin (FR-E03 / task 052)
+    //
+    // ⚠️ This is NOT the deleted-CONTAINERS recycle bin. Spec decision D3 keeps both:
+    //   • deleted CONTAINERS  → /storage/fileStorage/deletedContainers  (task 022, above)
+    //   • deleted ITEMS       → /storage/fileStorage/containers/{id}/recycleBin/items  (here)
+    // Two Graph resources, two admin needs. Merging them would lose one of them.
+    //
+    // 🔴 THE FINDING THAT SHAPES THIS CODE — restore and delete fail in OPPOSITE ways.
+    // Measured live 2026-08-27 on throwaway containers with real uploaded-then-deleted files:
+    //
+    //                  | all ids valid | any id invalid          | body
+    //   ---------------|---------------|-------------------------|----------------------------
+    //   restore        | 207           | 400 — nothing restored, | the ids that SUCCEEDED
+    //                  |               | ATOMIC                  |
+    //   delete (purge) | 204           | 204 — and it purges the | NONE
+    //                  |               | valid ones anyway,      |
+    //                  |               | NON-ATOMIC              |
+    //
+    // Consequences encoded below, and neither is optional:
+    //   1. A 207 is NOT success. Partial failure is expressed as (requested − returned); Graph
+    //      supplies no per-item error object. Reporting "restored" on a 207 hides every item that
+    //      did not come back.
+    //   2. Permanent delete's 204 means NOTHING. It is returned whether Graph purged all, some, or
+    //      none. For an IRREVERSIBLE operation that is the worst reporting shape in this API. The
+    //      only honest answer comes from re-listing the bin and diffing — the same discipline task
+    //      051 applied to the quota write, for the same reason.
+    //
+    // Issued through SendGraphJsonAsync rather than the Kiota request builders because `restore` and
+    // `delete` are bound to Collection(recycleBinItem) on BETA ONLY — absent from the v1.0 CSDL
+    // entirely (read from $metadata, both versions, 2026-08-27). The container surface is already
+    // beta-pinned by task 020, so this adds no new version exposure.
+    //
+    // Reading raw JSON also DISSOLVES a trap rather than handling it: `deletedBy` and `title` are
+    // OpenType extras absent from the CSDL, so through Kiota they would arrive as UntypedObject —
+    // the shape task 050 guessed wrong twice before measuring. Parsing the response ourselves means
+    // that shape never exists here.
+    // =========================================================================
+
+    /// <summary>
+    /// One item in a container's recycle bin. ADR-007: no Graph SDK types cross this boundary.
+    /// </summary>
+    /// <param name="DeletedByDisplayName">
+    /// Who deleted it. An OpenType extra (not in the CSDL) and the most operationally useful field
+    /// on the record — null means Graph did not report it, never "nobody".
+    /// </param>
+    public sealed record SpeRecycleBinItem(
+        string Id,
+        string Name,
+        long? Size,
+        DateTimeOffset? DeletedDateTime,
+        string? DeletedFromLocation,
+        string? DeletedByDisplayName);
+
+    /// <summary>
+    /// What happened to ONE requested id. The unit of truth for both operations — the acceptance
+    /// criterion forbids collapsing a multi-item result to a single pass/fail.
+    /// </summary>
+    /// <param name="Detail">
+    /// Why, in words an admin can act on. Graph returns no per-item error for either operation, so
+    /// this states what was actually observed rather than inventing a cause.
+    /// </param>
+    public sealed record SpeRecycleBinItemOutcome(
+        string Id,
+        string? Name,
+        bool Succeeded,
+        string Detail);
+
+    /// <summary>Per-item outcomes of a restore. Never collapse to a boolean.</summary>
+    public sealed record SpeRecycleBinRestoreResult(IReadOnlyList<SpeRecycleBinItemOutcome> Outcomes)
+    {
+        public int RequestedCount => Outcomes.Count;
+        public int RestoredCount => Outcomes.Count(o => o.Succeeded);
+        public bool IsPartialSuccess => RestoredCount > 0 && RestoredCount < RequestedCount;
+    }
+
+    /// <summary>Per-item outcomes of a permanent delete, established by re-listing the bin.</summary>
+    /// <param name="Verified">
+    /// <c>false</c> when the post-delete re-list could not be performed. The per-item outcomes are
+    /// then NOT trustworthy and the caller MUST say so. Claiming a purge we did not observe would be
+    /// the exact defect this project exists to remove — and here it would be an unrecoverable one.
+    /// </param>
+    public sealed record SpeRecycleBinDeleteResult(
+        IReadOnlyList<SpeRecycleBinItemOutcome> Outcomes,
+        bool Verified,
+        string? VerificationFailureReason)
+    {
+        public int RequestedCount => Outcomes.Count;
+        public int PurgedCount => Outcomes.Count(o => o.Succeeded);
+    }
+
+    /// <summary>
+    /// Thrown when Graph rejects a restore outright (400). Distinct from a partial success because
+    /// the outcomes are opposite: here <b>nothing</b> was restored and the bin is unchanged.
+    /// </summary>
+    /// <remarks>
+    /// Restore is atomic on rejection — measured: one unknown id in a batch of otherwise-valid ids
+    /// causes the whole call to fail and leaves every valid item in the bin. Folding this into the
+    /// generic 400 path would tell an admin "bad request" when the actionable truth is "your list is
+    /// stale — refresh and retry".
+    /// </remarks>
+    public sealed class RecycleBinRestoreRejectedException(
+        IReadOnlyList<string> requestedIds, string? graphMessage)
+        : Exception(
+            $"Graph rejected the restore of {requestedIds.Count} item(s); nothing was restored. " +
+            (graphMessage is { Length: > 0 } ? $"Graph reported: {graphMessage}" : "Graph reported no detail."))
+    {
+        public IReadOnlyList<string> RequestedIds { get; } = requestedIds;
+        public string? GraphMessage { get; } = graphMessage;
+    }
+
+    /// <summary>
+    /// Lists the items currently in a container's recycle bin (deleted files and folders).
+    /// </summary>
+    /// <returns>The items; an empty list when the bin is empty. Empty is a valid state, not a failure.</returns>
+    public async Task<IReadOnlyList<SpeRecycleBinItem>> ListRecycleBinItemsAsync(
+        GraphServiceClient graphClient,
+        string containerId,
+        CancellationToken ct = default)
+    {
+        ArgumentNullException.ThrowIfNull(graphClient);
+        ArgumentException.ThrowIfNullOrWhiteSpace(containerId);
+
+        var results = new List<SpeRecycleBinItem>();
+        var url = $"{RecycleBinItemsUrl(graphClient, containerId)}";
+
+        // Follow @odata.nextLink. No $select — task 022's lesson: a hand-maintained projection is a
+        // hand-maintained list of property names, and the two most useful fields here (deletedBy,
+        // title) are OpenType extras a projection would have to know to ask for.
+        while (!string.IsNullOrEmpty(url))
+        {
+            using var json = await ExecuteWithRetryAsync(
+                () => SendGraphJsonAsync(graphClient, HttpMethod.Get, url!, body: null, ct),
+                ct).ConfigureAwait(false);
+
+            if (json is null)
+            {
+                break;
+            }
+
+            var root = json.RootElement;
+
+            if (root.TryGetProperty("value", out var value) && value.ValueKind == JsonValueKind.Array)
+            {
+                foreach (var element in value.EnumerateArray())
+                {
+                    results.Add(ParseRecycleBinItem(element));
+                }
+            }
+
+            url = root.TryGetProperty("@odata.nextLink", out var next) && next.ValueKind == JsonValueKind.String
+                ? next.GetString()
+                : null;
+        }
+
+        _logger.LogInformation(
+            "Container {ContainerId}: recycle bin holds {Count} item(s)", containerId, results.Count);
+
+        return results;
+    }
+
+    /// <summary>
+    /// Restores items from a container's recycle bin, reporting the outcome of EACH requested id.
+    /// </summary>
+    /// <remarks>
+    /// Graph answers <c>207 Multi-Status</c> whose <c>value</c> array lists only the ids that
+    /// SUCCEEDED. There is no per-item error object, so a failure is expressed by absence — which is
+    /// why this computes the set difference instead of reading a status per row. An id that does not
+    /// come back did not restore, and the admin is told exactly which.
+    /// </remarks>
+    /// <exception cref="RecycleBinRestoreRejectedException">
+    /// Graph rejected the whole batch (400). Nothing was restored; the bin is unchanged.
+    /// </exception>
+    public async Task<SpeRecycleBinRestoreResult> RestoreRecycleBinItemsAsync(
+        GraphServiceClient graphClient,
+        string containerId,
+        IReadOnlyList<string> itemIds,
+        CancellationToken ct = default)
+    {
+        ArgumentNullException.ThrowIfNull(graphClient);
+        ArgumentException.ThrowIfNullOrWhiteSpace(containerId);
+        ArgumentNullException.ThrowIfNull(itemIds);
+
+        if (itemIds.Count == 0)
+        {
+            return new SpeRecycleBinRestoreResult([]);
+        }
+
+        // Names are for the report only — a failed restore that says "3 items did not restore"
+        // without naming them is barely better than a collapsed boolean.
+        var names = await TryMapItemNamesAsync(graphClient, containerId, ct).ConfigureAwait(false);
+
+        var url = $"{RecycleBinItemsUrl(graphClient, containerId)}/restore";
+        var body = JsonSerializer.Serialize(new { ids = itemIds });
+
+        JsonDocument? json;
+        try
+        {
+            json = await ExecuteWithRetryAsync(
+                () => SendGraphJsonAsync(graphClient, HttpMethod.Post, url, body, ct),
+                ct).ConfigureAwait(false);
+        }
+        catch (ODataError ex) when (ex.ResponseStatusCode == (int)HttpStatusCode.BadRequest)
+        {
+            _logger.LogWarning(
+                "Container {ContainerId}: restore of {Count} item(s) rejected outright — nothing was " +
+                "restored. Graph: {GraphMessage}",
+                containerId, itemIds.Count, ex.Error?.Message);
+
+            throw new RecycleBinRestoreRejectedException(itemIds, ex.Error?.Message);
+        }
+
+        using (json)
+        {
+            var restored = ReadReturnedIds(json);
+
+            var outcomes = itemIds
+                .Select(id => restored.Contains(id)
+                    ? new SpeRecycleBinItemOutcome(
+                        id, names.GetValueOrDefault(id), Succeeded: true, "Restored to its original location.")
+                    : new SpeRecycleBinItemOutcome(
+                        id, names.GetValueOrDefault(id), Succeeded: false,
+                        "Graph did not report this item as restored. It may no longer be in the " +
+                        "recycle bin, or it may have been purged. Refresh the list and retry."))
+                .ToList();
+
+            var result = new SpeRecycleBinRestoreResult(outcomes);
+
+            _logger.LogInformation(
+                "Container {ContainerId}: restore requested {Requested}, Graph confirmed {Restored}. " +
+                "Partial={Partial}",
+                containerId, result.RequestedCount, result.RestoredCount, result.IsPartialSuccess);
+
+            return result;
+        }
+    }
+
+    /// <summary>
+    /// Permanently purges items from a container's recycle bin. <b>Irreversible.</b>
+    /// </summary>
+    /// <remarks>
+    /// 🔴 Graph answers <c>204 No Content</c> with an empty body <i>regardless of what it did</i> —
+    /// measured: a batch containing one unknown id still returned 204 and still purged the valid
+    /// ids. The 204 therefore carries no information, so this method establishes the truth by
+    /// listing the bin BEFORE and AFTER and diffing.
+    ///
+    /// The before-list matters as much as the after-list: without it, an id that was never in the
+    /// bin is absent afterwards and would be reported as "purged" — a fabricated success of exactly
+    /// the kind this project was created to eliminate.
+    ///
+    /// If the after-list cannot be obtained, the result is returned with <c>Verified = false</c>
+    /// rather than assuming the purge worked.
+    /// </remarks>
+    public async Task<SpeRecycleBinDeleteResult> PermanentDeleteRecycleBinItemsAsync(
+        GraphServiceClient graphClient,
+        string containerId,
+        IReadOnlyList<string> itemIds,
+        CancellationToken ct = default)
+    {
+        ArgumentNullException.ThrowIfNull(graphClient);
+        ArgumentException.ThrowIfNullOrWhiteSpace(containerId);
+        ArgumentNullException.ThrowIfNull(itemIds);
+
+        if (itemIds.Count == 0)
+        {
+            return new SpeRecycleBinDeleteResult([], Verified: true, VerificationFailureReason: null);
+        }
+
+        // BEFORE. Separates "purged by us" from "was never here" — see remarks.
+        IReadOnlyList<SpeRecycleBinItem> before;
+        try
+        {
+            before = await ListRecycleBinItemsAsync(graphClient, containerId, ct).ConfigureAwait(false);
+        }
+        catch (ODataError ex)
+        {
+            // Without the before-list we cannot honestly attribute any later absence to this call,
+            // so we do not proceed to destroy anything on a guess.
+            _logger.LogError(
+                ex,
+                "Container {ContainerId}: could not read the recycle bin before a permanent delete — " +
+                "aborting rather than purging unverifiably.", containerId);
+            throw;
+        }
+
+        var presentBefore = before.ToDictionary(i => i.Id, i => i.Name, StringComparer.OrdinalIgnoreCase);
+
+        _logger.LogWarning(
+            "Container {ContainerId}: PERMANENTLY deleting {Count} recycle-bin item(s). This is " +
+            "irreversible.", containerId, itemIds.Count);
+
+        var url = $"{RecycleBinItemsUrl(graphClient, containerId)}/delete";
+        var body = JsonSerializer.Serialize(new { ids = itemIds });
+
+        using (await ExecuteWithRetryAsync(
+            () => SendGraphJsonAsync(graphClient, HttpMethod.Post, url, body, ct),
+            ct).ConfigureAwait(false))
+        {
+            // Deliberately ignored. A 204 here is not evidence of anything — see remarks.
+        }
+
+        // AFTER. The only actual evidence of what happened.
+        HashSet<string> presentAfter;
+        try
+        {
+            var after = await ListRecycleBinItemsAsync(graphClient, containerId, ct).ConfigureAwait(false);
+            presentAfter = after.Select(i => i.Id).ToHashSet(StringComparer.OrdinalIgnoreCase);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            _logger.LogError(
+                ex,
+                "Container {ContainerId}: permanent delete was issued but the recycle bin could not be " +
+                "re-read, so the outcome is UNVERIFIED.", containerId);
+
+            var unverified = itemIds
+                .Select(id => new SpeRecycleBinItemOutcome(
+                    id, presentBefore.GetValueOrDefault(id), Succeeded: false,
+                    "Unverified — the delete was sent but the recycle bin could not be re-read to " +
+                    "confirm what was purged."))
+                .ToList();
+
+            return new SpeRecycleBinDeleteResult(
+                unverified, Verified: false, VerificationFailureReason: ex.Message);
+        }
+
+        var outcomes = itemIds
+            .Select(id =>
+            {
+                var wasPresent = presentBefore.ContainsKey(id);
+                var name = presentBefore.GetValueOrDefault(id);
+
+                return (wasPresent, stillPresent: presentAfter.Contains(id)) switch
+                {
+                    (true, false) => new SpeRecycleBinItemOutcome(
+                        id, name, Succeeded: true, "Permanently deleted. This cannot be undone."),
+
+                    (true, true) => new SpeRecycleBinItemOutcome(
+                        id, name, Succeeded: false,
+                        "Still in the recycle bin after the delete — it was NOT purged."),
+
+                    // Absent both before and after. Graph would have reported 204 either way; saying
+                    // "deleted" here would credit this call with something it did not do.
+                    _ => new SpeRecycleBinItemOutcome(
+                        id, name, Succeeded: false,
+                        "Was not in the recycle bin when the delete was issued — nothing was purged " +
+                        "for this id."),
+                };
+            })
+            .ToList();
+
+        var result = new SpeRecycleBinDeleteResult(outcomes, Verified: true, VerificationFailureReason: null);
+
+        _logger.LogWarning(
+            "Container {ContainerId}: permanent delete requested {Requested}, verified purged {Purged} " +
+            "(bin {Before} → {After} items).",
+            containerId, result.RequestedCount, result.PurgedCount, before.Count, presentAfter.Count);
+
+        return result;
+    }
+
+    /// <summary>Base URL for a container's recycle-bin item collection.</summary>
+    private static string RecycleBinItemsUrl(GraphServiceClient graphClient, string containerId)
+        => $"{ResolveGraphBaseUrl(graphClient)}/storage/fileStorage/containers/" +
+           $"{Uri.EscapeDataString(containerId)}/recycleBin/items";
+
+    /// <summary>
+    /// Best-effort id → name map, used only to make outcome reports legible. A failure here must
+    /// never fail the operation — an unnamed outcome is worse reporting, not a wrong result.
+    /// </summary>
+    private async Task<Dictionary<string, string>> TryMapItemNamesAsync(
+        GraphServiceClient graphClient, string containerId, CancellationToken ct)
+    {
+        try
+        {
+            var items = await ListRecycleBinItemsAsync(graphClient, containerId, ct).ConfigureAwait(false);
+            return items.ToDictionary(i => i.Id, i => i.Name, StringComparer.OrdinalIgnoreCase);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            _logger.LogDebug(
+                ex, "Container {ContainerId}: could not pre-read recycle-bin item names.", containerId);
+            return new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        }
+    }
+
+    /// <summary>Reads the ids Graph echoed back in a 207 <c>value</c> array.</summary>
+    internal static HashSet<string> ReadReturnedIds(JsonDocument? json)
+    {
+        var ids = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+
+        if (json is null ||
+            !json.RootElement.TryGetProperty("value", out var value) ||
+            value.ValueKind != JsonValueKind.Array)
+        {
+            // No body, or no `value`. Returning an empty set means "nothing confirmed", which reports
+            // every requested id as not-restored. That is the safe direction: it under-claims rather
+            // than asserting a success Graph never stated.
+            return ids;
+        }
+
+        foreach (var element in value.EnumerateArray())
+        {
+            // Graph returns bare objects carrying `id`; tolerate a bare string too.
+            var id = element.ValueKind switch
+            {
+                JsonValueKind.String => element.GetString(),
+                JsonValueKind.Object when element.TryGetProperty("id", out var idEl)
+                    && idEl.ValueKind == JsonValueKind.String => idEl.GetString(),
+                _ => null,
+            };
+
+            if (!string.IsNullOrEmpty(id))
+            {
+                ids.Add(id);
+            }
+        }
+
+        return ids;
+    }
+
+    /// <summary>
+    /// Maps one <c>recycleBinItem</c> JSON object to the domain record.
+    /// </summary>
+    /// <remarks>
+    /// <c>recycleBinItem</c> is <c>OpenType="true"</c>, so the wire shape is wider than the CSDL's
+    /// declared properties — <c>deletedBy</c> and <c>title</c> are measured extras. Absent fields map
+    /// to null, which the UI must render as "not reported" rather than as a blank or a zero (NFR-06).
+    /// </remarks>
+    internal static SpeRecycleBinItem ParseRecycleBinItem(JsonElement element)
+    {
+        static string? Str(JsonElement e, string name)
+            => e.TryGetProperty(name, out var v) && v.ValueKind == JsonValueKind.String
+                ? v.GetString()
+                : null;
+
+        // `deletedBy` is an identitySet: { "user": { "displayName": ... } }. Measured live —
+        // "SharePoint App" for app-only deletions.
+        string? deletedBy = null;
+        if (element.TryGetProperty("deletedBy", out var by) && by.ValueKind == JsonValueKind.Object)
+        {
+            foreach (var identity in by.EnumerateObject())
+            {
+                if (identity.Value.ValueKind == JsonValueKind.Object)
+                {
+                    deletedBy = Str(identity.Value, "displayName");
+                    if (!string.IsNullOrWhiteSpace(deletedBy))
+                    {
+                        break;
+                    }
+                }
+            }
+        }
+
+        long? size = element.TryGetProperty("size", out var sizeEl)
+            && sizeEl.ValueKind == JsonValueKind.Number
+            && sizeEl.TryGetInt64(out var sizeValue)
+                ? sizeValue
+                : null;
+
+        DateTimeOffset? deletedAt =
+            element.TryGetProperty("deletedDateTime", out var delEl)
+            && delEl.ValueKind == JsonValueKind.String
+            && DateTimeOffset.TryParse(delEl.GetString(), out var parsed)
+                ? parsed
+                : null;
+
+        return new SpeRecycleBinItem(
+            Id: Str(element, "id") ?? string.Empty,
+            // `title` duplicates `name` in every row observed; prefer `name` and fall back rather
+            // than showing an empty label.
+            Name: Str(element, "name") ?? Str(element, "title") ?? string.Empty,
+            Size: size,
+            DeletedDateTime: deletedAt,
+            DeletedFromLocation: Str(element, "deletedFromLocation"),
+            DeletedByDisplayName: string.IsNullOrWhiteSpace(deletedBy) ? null : deletedBy);
     }
 
     /// <summary>
@@ -4786,9 +7172,31 @@ public sealed class SpeAdminGraphService
     /// <summary>
     /// Searches for drive items within SPE containers using the Microsoft Graph search API.
     /// Uses POST /search/query with entityTypes: ["driveItem"].
-    /// When containerId is provided, search is scoped to that container via contentSources.
     /// Returns domain model SearchItemPage — no Graph SDK types exposed (ADR-007).
     /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <b>Two defects were fixed here in task 004</b>, each of which 400'd every app-only call on its
+    /// own. Both were proven against the live tenant — see <c>notes/search-root-cause.md</c>.
+    /// </para>
+    /// <list type="number">
+    /// <item><b>Missing <c>region</c>.</b> Graph rejects an app-only search request without it:
+    /// <c>"Region is required when request with application permission."</c> Adding it turns the same
+    /// request into a 200 with real hits.</item>
+    /// <item><b><c>contentSources</c> is not valid for <c>driveItem</c>.</b> It was set to
+    /// <c>/drives/{driveId}</c> to scope the search to one container, and Graph answers
+    /// <c>"Content Source is required only for ExternalItem"</c>. So even with <c>region</c> added, a
+    /// container-scoped search still failed.</item>
+    /// </list>
+    /// <para>
+    /// <b>How container scoping works now.</b> Graph offers no server-side way to restrict a
+    /// <c>driveItem</c> search to one drive, so hits are filtered by <c>parentReference.driveId</c>
+    /// after they come back. The consequence is honest but real: paging is approximate, because Graph
+    /// counts pages before the filter is applied. A page can therefore come back partly empty while
+    /// more matches still exist — which is why <c>MoreResultsAvailable</c>, not the post-filter count,
+    /// decides whether a next-page token is issued.
+    /// </para>
+    /// </remarks>
     public async Task<SearchItemPage> SearchItemsAsync(
         GraphServiceClient graphClient,
         string query,
@@ -4813,7 +7221,8 @@ public sealed class SpeAdminGraphService
             "SearchItems: query='{Query}', containerId={ContainerId}, fileType={FileType}, pageSize={PageSize}, hasSkipToken={HasSkipToken}",
             query, containerId, fileType, size, skipToken != null);
 
-        // When scoping to a container, resolve its driveId for contentSources.
+        // When scoping to a container, resolve its driveId so hits can be filtered after the call.
+        // (contentSources cannot do this — Graph accepts it only for externalItem.)
         string? driveId = null;
         if (!string.IsNullOrWhiteSpace(containerId))
         {
@@ -4842,9 +7251,9 @@ public sealed class SpeAdminGraphService
                     },
                     Size = size,
                     From = fromOffset,
-                    ContentSources = !string.IsNullOrWhiteSpace(driveId)
-                        ? new List<string> { $"/drives/{driveId}" }
-                        : null,
+                    // Required for application permissions — without it Graph answers
+                    // "Region is required when request with application permission." (task 004).
+                    Region = _searchRegion,
                     Fields = new List<string>
                     {
                         "id", "name", "size", "lastModifiedDateTime", "webUrl",
@@ -4884,18 +7293,30 @@ public sealed class SpeAdminGraphService
 
                     foreach (var hit in hitsContainer.Hits)
                     {
-                        if (hit.Resource is Microsoft.Graph.Models.DriveItem driveItem)
+                        if (hit.Resource is not Microsoft.Graph.Models.DriveItem driveItem)
                         {
-                            results.Add(new SpeSearchItemResult(
-                                Id: driveItem.Id ?? string.Empty,
-                                Name: driveItem.Name ?? string.Empty,
-                                Size: driveItem.Size,
-                                LastModifiedDateTime: driveItem.LastModifiedDateTime,
-                                ContainerId: containerId,
-                                ContainerName: null,
-                                WebUrl: driveItem.WebUrl,
-                                MimeType: driveItem.File?.MimeType));
+                            continue;
                         }
+
+                        // Container scoping. Graph has no server-side way to restrict a driveItem
+                        // search to one drive (contentSources is externalItem-only), so a hit from
+                        // another container is dropped here. Without this the admin would be shown
+                        // files from containers they did not ask about.
+                        if (!string.IsNullOrWhiteSpace(driveId) &&
+                            !string.Equals(driveItem.ParentReference?.DriveId, driveId, StringComparison.OrdinalIgnoreCase))
+                        {
+                            continue;
+                        }
+
+                        results.Add(new SpeSearchItemResult(
+                            Id: driveItem.Id ?? string.Empty,
+                            Name: driveItem.Name ?? string.Empty,
+                            Size: driveItem.Size,
+                            LastModifiedDateTime: driveItem.LastModifiedDateTime,
+                            ContainerId: containerId,
+                            ContainerName: null,
+                            WebUrl: driveItem.WebUrl,
+                            MimeType: driveItem.File?.MimeType));
                     }
                 }
             }

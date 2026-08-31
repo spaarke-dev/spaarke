@@ -1,3 +1,4 @@
+using Sprk.Bff.Api.Infrastructure.Authentication;
 using System.Runtime.ExceptionServices;
 using System.Security.Claims;
 using System.Text.Json;
@@ -120,6 +121,7 @@ public static class SummarizeSessionEndpoint
             .WithTags("AI Chat");
 
         group.MapPost("/sessions/{sessionId}/summarize", SummarizeAsync)
+            .AddSessionOwnershipFilter()
             .AddAiAuthorizationFilter()
             .WithName("SummarizeChatSession")
             .WithSummary("Summarize files uploaded into a chat session (catalog-driven, FR-P1-01)")
@@ -223,9 +225,7 @@ public static class SummarizeSessionEndpoint
             return;
         }
 
-        var callerOid = httpContext.User.FindFirst("oid")?.Value
-            ?? httpContext.User.FindFirst("http://schemas.microsoft.com/identity/claims/objectidentifier")?.Value
-            ?? httpContext.User.FindFirst(ClaimTypes.NameIdentifier)?.Value;
+        var callerOid = CallerResolution.ResolveObjectId(httpContext.User);
         if (string.IsNullOrWhiteSpace(callerOid))
         {
             await WriteProblemDetailsAsync(

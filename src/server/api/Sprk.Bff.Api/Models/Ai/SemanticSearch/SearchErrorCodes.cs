@@ -87,6 +87,74 @@ public static class SearchErrorCodes
     public const string DocumentAccessDenied = "DOCUMENT_ACCESS_DENIED";
 
     // ========================================================================
+    // Authorization error codes (SemanticSearchAuthorizationFilter, POST /api/ai/search)
+    //
+    // Added by unified-access-control-r2 task 070. Every denial from that filter previously
+    // carried a bare ProblemDetails — same title, same wording, no code, no correlation id — so
+    // a 403 was indistinguishable from any other 403 to the client and left no support handle.
+    // ADR-019 requires both, and names AI endpoints specifically.
+    //
+    // Codes may distinguish cases the human-readable `detail` deliberately does NOT. The uniform
+    // 403 wording is a security property: telling a caller "that record exists but you cannot
+    // read it" versus "no such record" confirms the existence of records they cannot see. These
+    // codes are for the legitimate client's control flow, not for making the denial chattier.
+    // ========================================================================
+
+    /// <summary>
+    /// No tenant claim in the authentication token, so tenant membership cannot be established.
+    /// </summary>
+    public const string MissingTenantIdentity = "MISSING_TENANT_IDENTITY";
+
+    /// <summary>
+    /// No parseable search request body was present on the invocation.
+    /// </summary>
+    public const string RequestBodyRequired = "REQUEST_BODY_REQUIRED";
+
+    /// <summary>
+    /// No caller object id in the authentication token, so access cannot be evaluated for anyone.
+    /// </summary>
+    public const string MissingCallerIdentity = "MISSING_CALLER_IDENTITY";
+
+    /// <summary>
+    /// No caller bearer token available. Access must be evaluated AS THE CALLER; without the token
+    /// the only alternative is an app-only evaluation, which is refused rather than substituted.
+    /// </summary>
+    public const string MissingCallerToken = "MISSING_CALLER_TOKEN";
+
+    /// <summary>
+    /// <c>scope=all</c> was refused. Distinct from <see cref="ScopeNotSupported"/>, which frames the
+    /// same value as a capability gap ("not supported in R1"): this is a permanent authorization
+    /// refusal, not a feature awaiting release, and a client should never retry or feature-flag on it.
+    /// </summary>
+    public const string ScopeAllNotPermitted = "SCOPE_ALL_NOT_PERMITTED";
+
+    /// <summary>
+    /// The requested <c>entityType</c> is not a parent type <c>scope=entity</c> can be authorized
+    /// against. Distinct from <see cref="InvalidEntityType"/>, which is a request-shape complaint:
+    /// this one is reached only after the shape is valid.
+    /// </summary>
+    public const string EntityTypeNotAuthorizable = "ENTITY_TYPE_NOT_AUTHORIZABLE";
+
+    /// <summary>
+    /// <c>entityId</c> was present but is not a non-empty GUID, so no record can be authorized.
+    /// </summary>
+    public const string InvalidEntityId = "INVALID_ENTITY_ID";
+
+    /// <summary>
+    /// One or more <c>documentIds</c> entries is not a GUID. Deliberately a 400 rather than a 403:
+    /// unparseable ids are a malformed payload, and reporting them as an access denial would send the
+    /// caller looking at permissions instead of at their request.
+    /// </summary>
+    public const string InvalidDocumentIds = "INVALID_DOCUMENT_IDS";
+
+    /// <summary>
+    /// The caller may read NONE of the requested documents. Distinct from
+    /// <see cref="DocumentAccessDenied"/> ("one or more"): a partially-readable list is not denied —
+    /// it proceeds with the readable subset — so only the empty case reaches this code.
+    /// </summary>
+    public const string NoReadableDocuments = "NO_READABLE_DOCUMENTS";
+
+    // ========================================================================
     // Record Search error codes (POST /api/ai/search/records)
     // ========================================================================
 

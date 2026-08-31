@@ -77,7 +77,7 @@ public class AnalysisForkEndpointContractTests : IClassFixture<AnalysisForkEndpo
 
         // Arrange — mint a real prior (loose) session via the same ChatSessionManager the endpoint uses.
         var prior = await _fx.Sessions.CreateSessionAsync(
-            AnalysisForkEndpointTestFixture.TenantId, documentId.ToString(), playbookId: null, hostContext: null);
+            AnalysisForkEndpointTestFixture.TenantId, TestSessionOwner.Oid, documentId.ToString(), playbookId: null, hostContext: null);
         _fx.ChatRepo.Created.Clear(); // ignore the prior's create; we assert only the fork's new-session create
 
         var client = _fx.CreateAuthenticatedClient();
@@ -213,7 +213,7 @@ public class AnalysisForkEndpointContractTests : IClassFixture<AnalysisForkEndpo
         CreatedAt: DateTimeOffset.UtcNow,
         LastActivity: DateTimeOffset.UtcNow,
         Messages: Array.Empty<ChatMessage>(),
-        HostContext: null);
+        HostContext: null) { OwnerOid = TestSessionOwner.Oid };
 }
 
 /// <summary>

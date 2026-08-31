@@ -2,6 +2,7 @@ using System.Net;
 using System.Net.Http.Headers;
 using System.Net.Http.Json;
 using FluentAssertions;
+using Sprk.Bff.Api.Api.Filters;
 using Microsoft.Extensions.AI;
 using Moq;
 using Sprk.Bff.Api.Api.Ai;
@@ -89,8 +90,23 @@ public class ChatRefineEndpointTests : IClassFixture<CustomWebAppFactory>
             HttpStatusCode.InternalServerError);
     }
 
+    /// <summary>
+    /// Endpoint reachability with auth.
+    /// </summary>
+    /// <remarks>
+    /// This was <c>Refine_WithAuth_DoesNotReturn404</c> and it passed for the wrong reason. The
+    /// fixture principal carried no <c>tid</c> claim, so the request never got past the handler's
+    /// tenant check — it stopped at a 400, which satisfies "not 404" while proving nothing about
+    /// whether the route is mapped. Task 059 gave the fixture the <c>tid</c> claim a real Entra token
+    /// always carries, so the request now reaches the session lookup and gets a perfectly correct 404
+    /// for a session ID that was never created.
+    ///
+    /// "Not 404" cannot express this test's intent anyway: a mapped route is entitled to return 404.
+    /// So it now asserts what it actually meant — that the response is the HANDLER's own
+    /// session-not-found document rather than the router's empty 404 for an unmapped path.
+    /// </remarks>
     [Fact]
-    public async Task Refine_WithAuth_DoesNotReturn404()
+    public async Task Refine_WithAuth_ReachesTheHandler()
     {
         // Arrange
         _client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", "test-token");
@@ -100,8 +116,23 @@ public class ChatRefineEndpointTests : IClassFixture<CustomWebAppFactory>
         // Act
         var response = await _client.PostAsync($"/api/ai/chat/sessions/{sessionId}/refine", content);
 
-        // Assert - endpoint is reachable with auth
-        response.StatusCode.Should().NotBe(HttpStatusCode.NotFound);
+        // Assert — the route is mapped and the session-scoped pipeline ran, which the routing
+        // layer's empty 404 could not produce.
+        //
+        // Issue #863: this used to assert the body ECHOES the session id. That directly
+        // contradicted DispatchSessionEndpointContractTests, which forbids echoing identifiers in
+        // error detail strings (ADR-019) — two suites asserting opposite things about the same
+        // convention, which is how the convention stops meaning anything. Resolved in favour of NOT
+        // echoing: on a session route an echoed id also hands the caller confirmation of the very
+        // id they probed with. The stable errorCode carries the same proof the echo did — routing's
+        // bare 404 has no body at all — without the disclosure.
+        var body = await response.Content.ReadAsStringAsync();
+        response.StatusCode.Should().Be(HttpStatusCode.NotFound);
+        body.Should().Contain(SessionOwnershipFilterExtensions.NotFoundOrNotOwnedErrorCode,
+            "a ProblemDetails with the session pipeline's stable errorCode proves the request "
+            + "reached that pipeline; an unmapped route answers with an empty body");
+        body.Should().NotContain(sessionId,
+            "ADR-019: do not echo identifiers in error detail strings");
     }
 
 }

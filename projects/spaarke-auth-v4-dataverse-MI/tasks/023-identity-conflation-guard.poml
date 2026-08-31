@@ -1,0 +1,74 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="023" project="spaarke-auth-v4-dataverse-MI">
+  <metadata>
+    <title>UAMI / app-registration conflation guard and test (FR-B4)</title>
+    <phase>2 Provider</phase>
+    <gate>020 complete</gate>
+    <status>completed</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>auth tag, modifies .cs; guards a silent-failure mode.</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Specific, well-bounded defence with a named hazard and a testable assertion.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>C</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <deps>020</deps>
+    <tags>auth,bff-api,config,hardening</tags>
+    <estimated-effort>3-4 hours</estimated-effort>
+  </metadata>
+
+  <prompt>MI-FIC requires holding two different identities at once — the UAMI's clientId to mint the assertion and the app registration's clientId to build the CCA. Make them distinct, separately-named inputs and add a test proving they are not conflated, because this failure is silent.</prompt>
+  <role>SPAARKE platform developer. Follow ADR-028 A4.</role>
+  <goal>The provider takes two explicitly-named identity inputs, resolves identities by resource ID, and a test proves the assertion is minted for the UAMI while the CCA targets the app registration.</goal>
+
+  <context>
+    <background>GraphClientFactory.cs:54 resolves _clientId = AZURE_CLIENT_ID ?? API_APP_ID, and in Azure AZURE_CLIENT_ID is deliberately set to the UAMI's clientId (auth-deployment-setup.md:156-163). The r3 surface map already flagged this as a latent footgun; MI-FIC makes it worse because both identities are now live simultaneously. The dev subscription holds five UAMIs and spaarke-bff-identity is named like the BFF's but is NOT attached to it. A wrong value creates cleanly and fails only at token exchange.</background>
+    <relevant-files>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Infrastructure/Auth/ManagedIdentityAssertionProvider.cs</file>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Infrastructure/Graph/GraphClientFactory.cs</file>
+      <file role="new">tests/integration/seam/Auth/IdentityConflationSeamTests.cs</file>
+    </relevant-files>
+    <dependencies><dependency task="020" status="pending">The provider seam</dependency></dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="project">Scope: the UAMI clientId and the app-registration clientId MUST be separately-named configuration inputs. Do not allow one to default to the other.</constraint>
+    <constraint source="project">Scope: resolve managed identities by RESOURCE ID, never by name — five UAMIs exist and one is a decoy.</constraint>
+    <constraint source="project">Scope: do NOT change GraphClientFactory.cs:54's existing fallback semantics for the app-only path in this task; add the guard and surface the ambiguity. Changing app-only behaviour is out of scope.</constraint>
+    <constraint source="ADR-038">Scope: coverage to tests/integration/seam/**.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>Managed identity resolution, MI-FIC identity topology</topic>
+    <files>
+      <file>.claude/adr/ADR-028-spaarke-auth-architecture.md</file>
+      <file>projects/spaarke-auth-v4-dataverse-MI/notes/PHASE-0-LIVE-VERIFICATION.md</file>
+      <file>docs/guides/auth-deployment-setup.md</file>
+    </files>
+  </knowledge>
+
+  <steps mode="directional">
+    <step>Introduce distinct config keys for the assertion identity and the client identity.</step>
+    <step>Add a startup guard that fails fast if they are equal, or if either is unset while MI-FIC is selected.</step>
+    <step>Add a seam test asserting the assertion targets the UAMI and the CCA targets the app registration.</step>
+    <step>Document the two identities and the decoy hazard in the project notes.</step>
+  </steps>
+
+  <escalation>
+    <trigger>An existing environment sets both keys to the same value — STOP and report; that is a live misconfiguration, not a code defect to paper over.</trigger>
+  </escalation>
+
+  <outputs>
+    <output type="modify">src/server/api/Sprk.Bff.Api/Infrastructure/Auth/ManagedIdentityAssertionProvider.cs</output>
+    <output type="new">tests/integration/seam/Auth/IdentityConflationSeamTests.cs</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion>The two identities are separately-named config inputs with no cross-defaulting.</criterion>
+    <criterion>A test proves the assertion is minted for the UAMI while the CCA targets the app registration.</criterion>
+    <criterion>Negative case: setting both to the same value fails fast at startup with an actionable message.</criterion>
+    <criterion>Negative case: resolving by name would pick spaarke-bff-identity; the code resolves by resource ID and does not.</criterion>
+    <criterion>Negative case: MI-FIC selected with either identity unset fails fast rather than at first token exchange.</criterion>
+    <criterion>App-only credential behaviour at GraphClientFactory.cs:54 is unchanged.</criterion>
+  </acceptance-criteria>
+</task>

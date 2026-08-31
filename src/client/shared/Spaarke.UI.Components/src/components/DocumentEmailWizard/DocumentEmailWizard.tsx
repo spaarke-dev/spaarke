@@ -66,18 +66,17 @@ export interface IDocumentEmailWizardItem {
   summary?: string;
   /** Short-form "TL;DR" string (preferred over `summary` when present). */
   tldr?: string;
-  /**
-   * SharePoint Embedded driveId (sprk_graphdriveid). Required to run AI
-   * summarization on demand via the Document Profile playbook. When omitted,
-   * the Summary step falls back to the cached `summary`/`tldr` if present, or
-   * "(no summary available)".
-   */
-  driveId?: string;
-  /**
-   * SharePoint Embedded itemId (sprk_graphitemid). Required alongside driveId
-   * to run AI summarization on demand.
-   */
-  itemId?: string;
+  // NOTE (unified-access-control-r2, task 070): the `driveId` / `itemId`
+  // SharePoint Embedded pointers were REMOVED from this item shape. They were
+  // declaration-only — no code in this component ever read them, and the
+  // Summary step's `runCombinedSummary` invokes
+  // `POST /api/ai/analysis/execute` with `{ documentIds }` alone. Their doc
+  // comment claimed they were "required to run AI summarization" with a
+  // fallback when omitted; both claims were stale (there is no gate, and the
+  // DocumentRelationshipViewer host has always constructed these items
+  // without the pointers). Under the broker-only decision no client receives
+  // raw SPE pointers — document-id-keyed BFF routes carry the authorization
+  // gate. Do NOT re-add these fields.
 }
 
 /** Props for {@link DocumentEmailWizard}. */

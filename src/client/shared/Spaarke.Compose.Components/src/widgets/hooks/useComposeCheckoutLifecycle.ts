@@ -95,6 +95,48 @@ export interface UseComposeCheckoutLifecycleResult {
  *
  * Returns the three callback handlers needed by ComposeConflictDialog.
  */
+/**
+ * FR-S09 item 4 (r8 task 016): read an HTTP status off a thrown transport error.
+ *
+ * `authenticatedFetch` (ADR-028) RETURNS only when `response.ok` — every non-2xx is THROWN as an
+ * `ApiError` carrying `.status`. That is why the `if (response.ok)` / `if (response.status === 409)`
+ * blocks that used to live in this file could never execute: by the time control reached them the
+ * response was, by construction, already a success. The conflict banner, the 404 and 403 copy, and
+ * the force-close race handler were all written, reviewed, shipped — and unreachable.
+ *
+ * The read is STRUCTURAL rather than `err instanceof ApiError`, for the reason `classifySaveFailure`
+ * documents in `ComposeWorkspace.tsx`: `instanceof` fails silently when `@spaarke/auth` resolves to
+ * two copies across a bundle boundary, and a silent fall-through to the generic message is the exact
+ * defect being removed here. Returns null when the throw carried no HTTP exchange (offline, DNS,
+ * abort) — a genuinely different case, which the callers state differently.
+ */
+function readErrorStatus(err: unknown): number | null {
+  const status = (err as { status?: unknown } | null | undefined)?.status;
+  return typeof status === 'number' && status >= 100 && status <= 599 ? status : null;
+}
+
+/**
+ * FR-S09 item 4 (r8 task 016): recover the lock holder from a thrown 409.
+ *
+ * The checkout endpoint's conflict body carries `checkedOutBy` + `checkedOutAt`; `authenticatedFetch`
+ * parses it onto `ApiError.problemDetails` (the body advertises `status`/`title` so it is recognised
+ * as ProblemDetails — see `DocumentOperationsEndpoints`). Falls back to a named-but-unknown user
+ * rather than throwing: knowing SOMEONE holds the lock is the load-bearing part; the name is the
+ * courtesy.
+ */
+function readLockedBy(err: unknown): ComposeCheckoutLockedByInfo {
+  const fallback: ComposeCheckoutLockedByInfo = { id: '', name: 'Another user', checkedOutAt: null };
+  const details = (err as { problemDetails?: Record<string, unknown> | null } | null | undefined)?.problemDetails;
+  if (!details) return fallback;
+  const by = details['checkedOutBy'] as { id?: unknown; name?: unknown } | null | undefined;
+  const at = details['checkedOutAt'];
+  return {
+    id: typeof by?.id === 'string' ? by.id : '',
+    name: typeof by?.name === 'string' && by.name ? by.name : 'Another user',
+    checkedOutAt: typeof at === 'string' ? at : null,
+  };
+}
+
 export function useComposeCheckoutLifecycle(
   opts: UseComposeCheckoutLifecycleOptions
 ): UseComposeCheckoutLifecycleResult {
@@ -116,6 +158,11 @@ export function useComposeCheckoutLifecycle(
       });
       dispatch({ kind: 'checkoutRequested' });
 
+      // FR-S09 item 4 (r8 task 016): status routing lives in the CATCH, because that is where every
+      // non-2xx actually arrives. The `if (response.ok)` / 409 / 404 / 403 ladder this replaces was
+      // dead from the day `authenticatedFetch` began throwing — so a document locked by a colleague
+      // reported "Could not acquire document lock: HTTP 409" with no name and no force-close
+      // affordance, and the carefully-written conflict copy below never rendered once.
       try {
         const response = await authenticatedFetch(url, {
           method: 'POST',
@@ -124,38 +171,22 @@ export function useComposeCheckoutLifecycle(
 
         if (ac.signal.aborted) return;
 
-        if (response.ok) {
-          // eslint-disable-next-line no-console
-          console.info('[ComposeWorkspace] SPE check-out acquired', {
-            sprkDocumentId: id,
-            status: response.status,
-          });
-          dispatch({ kind: 'checkoutAcquired' });
-          return;
-        }
+        // Reaching here means 2xx — the ONLY thing authenticatedFetch returns.
+        // eslint-disable-next-line no-console
+        console.info('[ComposeWorkspace] SPE check-out acquired', {
+          sprkDocumentId: id,
+          status: response.status,
+        });
+        dispatch({ kind: 'checkoutAcquired' });
+      } catch (err) {
+        if (ac.signal.aborted) return;
+        const status = readErrorStatus(err);
 
-        if (response.status === 409) {
-          // 409 — cross-user only (same-user idempotent re-checkout returns 200).
-          let lockedBy: ComposeCheckoutLockedByInfo = {
-            id: '',
-            name: 'Unknown user',
-            checkedOutAt: null,
-          };
-          try {
-            const body = (await response.json()) as {
-              error?: string;
-              detail?: string;
-              checkedOutBy?: { id?: string; name?: string; email?: string | null };
-              checkedOutAt?: string | null;
-            };
-            lockedBy = {
-              id: body.checkedOutBy?.id ?? '',
-              name: body.checkedOutBy?.name ?? 'Another user',
-              checkedOutAt: body.checkedOutAt ?? null,
-            };
-          } catch {
-            // Body parse failure — fall through with default unknown-user info.
-          }
+        // 409 — cross-user only (a same-user idempotent re-checkout returns 200). This is the branch
+        // that unlocks the conflict dialog, so its absence was not cosmetic: the user had no way to
+        // see WHO held the document or to take it back.
+        if (status === 409) {
+          const lockedBy = readLockedBy(err);
           // eslint-disable-next-line no-console
           console.info('[ComposeWorkspace] SPE check-out conflict', {
             sprkDocumentId: id,
@@ -166,20 +197,18 @@ export function useComposeCheckoutLifecycle(
           return;
         }
 
-        const failureMessage =
-          response.status === 404
-            ? 'This document is not yet recorded in Spaarke. The lock will be acquired after first save.'
-            : response.status === 403
-              ? 'You do not have permission to lock this document.'
-              : `Could not acquire document lock (HTTP ${response.status}). You may continue editing — changes will save normally.`;
-        dispatch({ kind: 'checkoutFailed', failureMessage });
-      } catch (err) {
-        if (ac.signal.aborted) return;
         const message = err instanceof Error ? err.message : String(err);
-        dispatch({
-          kind: 'checkoutFailed',
-          failureMessage: `Could not acquire document lock: ${message}`,
-        });
+        const failureMessage =
+          status === 404
+            ? 'This document is not yet recorded in Spaarke. The lock will be acquired after first save.'
+            : status === 403
+              ? 'You do not have permission to lock this document.'
+              : status !== null
+                ? `Could not acquire document lock (HTTP ${status}). You may continue editing — changes will save normally.`
+                : // No HTTP exchange happened at all (offline / DNS / CORS): say so rather than
+                  // implying the server refused. Editing is unaffected either way.
+                  `Could not acquire document lock: ${message}. You may continue editing — changes will save normally.`;
+        dispatch({ kind: 'checkoutFailed', failureMessage });
       }
     },
     [bffBaseUrl, dispatch, sessionId]
@@ -241,32 +270,29 @@ export function useComposeCheckoutLifecycle(
         });
         if (ac.signal.aborted) return;
 
-        if (probeResponse.ok) {
-          probeSucceeded = true;
-          try {
-            const probeBody = (await probeResponse.json()) as {
-              isCheckedOut?: boolean;
-              checkedOutBy?: { id?: string; name?: string } | null;
-              checkedOutAt?: string | null;
-              isCurrentUser?: boolean;
-            };
-            probeIsCurrentUser = probeBody.isCheckedOut === true && probeBody.isCurrentUser === true;
-            probeCheckedOutAt = probeBody.checkedOutAt ?? null;
-            // eslint-disable-next-line no-console
-            console.info('[ComposeWorkspace] SPE check-out probe result', {
-              sprkDocumentId,
-              isCheckedOut: probeBody.isCheckedOut,
-              isCurrentUser: probeBody.isCurrentUser,
-            });
-          } catch {
-            probeSucceeded = false;
-          }
-        } else {
+        // FR-S09 item 4 (r8 task 016): reaching this line means 2xx — the only thing authenticatedFetch
+        // returns. The `if (probeResponse.ok) { ... } else { ... }` that used to wrap this block is gone
+        // in both halves: the `else` could not execute, and a condition that is necessarily true is the
+        // same defect wearing the opposite sign. A non-2xx lands in the catch below, which logs and
+        // leaves `probeSucceeded` false — the soft-fail this probe has always wanted.
+        probeSucceeded = true;
+        try {
+          const probeBody = (await probeResponse.json()) as {
+            isCheckedOut?: boolean;
+            checkedOutBy?: { id?: string; name?: string } | null;
+            checkedOutAt?: string | null;
+            isCurrentUser?: boolean;
+          };
+          probeIsCurrentUser = probeBody.isCheckedOut === true && probeBody.isCurrentUser === true;
+          probeCheckedOutAt = probeBody.checkedOutAt ?? null;
           // eslint-disable-next-line no-console
-          console.info('[ComposeWorkspace] SPE check-out probe non-OK', {
+          console.info('[ComposeWorkspace] SPE check-out probe result', {
             sprkDocumentId,
-            status: probeResponse.status,
+            isCheckedOut: probeBody.isCheckedOut,
+            isCurrentUser: probeBody.isCurrentUser,
           });
+        } catch {
+          probeSucceeded = false;
         }
       } catch (err) {
         if (ac.signal.aborted) return;
@@ -322,38 +348,48 @@ export function useComposeCheckoutLifecycle(
 
     const discardUrl = buildBffApiUrl(bffBaseUrl, `/documents/${encodeURIComponent(sprkDocumentId)}/discard`);
 
+    // FR-S09 item 4 (r8 task 016): THE defect this item is named for. The `if (!discardResponse.ok)`
+    // block below was unreachable, and the case it protected is the one that actually happens: the
+    // other session releases its lock between the probe and the discard, SharePoint answers 400
+    // "nothing to discard", and that 400 is a SUCCESS — the lock is gone, which is what the user asked
+    // for. Because the block was dead, the 400 threw instead, and the user was told "Could not
+    // force-close other session" while staring at a conflict dialog that has no dismiss button. The
+    // one action available to them reported failure every time it worked.
+    let discarded = false;
     try {
-      const discardResponse = await authenticatedFetch(discardUrl, { method: 'POST' });
-      if (!discardResponse.ok) {
-        if (discardResponse.status === 400) {
-          // Lock already released between probe and discard — race-but-OK.
-          // eslint-disable-next-line no-console
-          console.info('[ComposeWorkspace] Discard 400 — lock already released, proceeding');
-        } else {
-          const failureMessage =
-            discardResponse.status === 403
-              ? 'You do not have permission to release this lock.'
-              : `Could not force-close other session (HTTP ${discardResponse.status}).`;
-          dispatch({ kind: 'checkoutFailed', failureMessage });
-          return;
-        }
-      }
-
-      // eslint-disable-next-line no-console
-      console.info('[ComposeWorkspace] Discard succeeded, posting force-closed message', {
-        sprkDocumentId,
-      });
-      postForceClosed?.();
-
-      // Now acquire a fresh lock in this tab.
-      await runCheckout(sprkDocumentId);
+      await authenticatedFetch(discardUrl, { method: 'POST' });
+      discarded = true;
     } catch (err) {
-      const message = err instanceof Error ? err.message : String(err);
-      dispatch({
-        kind: 'checkoutFailed',
-        failureMessage: `Could not force-close other session: ${message}`,
-      });
+      const status = readErrorStatus(err);
+      if (status === 400) {
+        // Lock already released between probe and discard — race-but-OK. Proceed to acquire.
+        // eslint-disable-next-line no-console
+        console.info('[ComposeWorkspace] Discard 400 — lock already released, proceeding');
+        discarded = true;
+      } else {
+        const message = err instanceof Error ? err.message : String(err);
+        const failureMessage =
+          status === 403
+            ? 'You do not have permission to release this lock.'
+            : status !== null
+              ? `Could not force-close other session (HTTP ${status}).`
+              : `Could not force-close other session: ${message}`;
+        dispatch({ kind: 'checkoutFailed', failureMessage });
+      }
     }
+
+    if (!discarded) return;
+
+    // eslint-disable-next-line no-console
+    console.info('[ComposeWorkspace] Discard succeeded, posting force-closed message', {
+      sprkDocumentId,
+    });
+    postForceClosed?.();
+
+    // Now acquire a fresh lock in this tab. `runCheckout` owns its own error handling and never
+    // throws, so it is deliberately OUTSIDE the try above — a failure to re-acquire must report
+    // itself as a checkout failure, not as "could not force-close".
+    await runCheckout(sprkDocumentId);
   }, [sprkDocumentId, bffBaseUrl, dispatch, postForceClosed, runCheckout]);
 
   // ── discardAndCancel: "Cancel — close this tab" ────────────────────────────

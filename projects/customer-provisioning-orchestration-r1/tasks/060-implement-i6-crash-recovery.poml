@@ -1,0 +1,103 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="060" project="customer-provisioning-orchestration-r1">
+  <metadata>
+    <title>Implement I6 crash recovery — L2 startup scan re-schedules orphaned runs from currentPhase</title>
+    <phase>C Wave C5 — L2 REST + Reconciler</phase>
+    <gate>blocked</gate>
+    <status>not-started</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Task tags include 'l2-controlplane','job-handler'; implements FR-23 crash-recovery; a bug here silently strands runs (customer never reaches Setup Status = Ready).</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Well-scoped IHostedService/StartupTask implementation over Cosmos; requires careful reasoning about idempotency semantics of each handler re-invocation. Step 3.5.5b sonnet @ xhigh justified per complex-brownfield criteria.</model-tier-reason>
+    <effort>xhigh</effort>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <deps>058, 059</deps>
+    <tags>l2-controlplane, job-handler, testing</tags>
+    <estimated-effort>4-6 hours</estimated-effort>
+  </metadata>
+
+  <prompt>Implement the I6 crash-recovery scan per spec.md FR-23 + design.md §4.2. On L2 App Service startup, scan Cosmos for runs with status ∈ {Running, WaitingOnGate} whose lastUpdated is older than 2× median-handler-duration (indicating the orchestrator crashed or was slot-swapped mid-run). For each orphaned run, re-schedule from currentPhase by re-enqueuing the current handler. Because every handler is 3-level idempotent (ADR-036 / NFR-10), re-enqueue is safe — the handler's idempotency key detects the prior attempt and no-ops if already complete, else resumes cleanly.</prompt>
+
+  <role>SPAARKE platform developer. Expert in .NET IHostedService / IStartupFilter, Cosmos DB SDK cross-partition queries, TimeProvider, and reasoning about handler-level idempotency invariants (ADR-036 3-level). Follow ADRs strictly.</role>
+
+  <goal>File src/server/services/Sprk.Provisioning.ControlPlane/Reconciler/CrashRecoveryStartupService.cs exists as an IHostedService or IStartupFilter that runs ONCE on L2 startup; queries Cosmos for runs status ∈ {Running, WaitingOnGate} with lastUpdated older than 2× median-handler-duration (median computed from telemetry or configurable floor); for each orphaned run, re-enqueues currentPhase via the same Service Bus + 3-level-idempotent path the reconciler uses. Log recovery events to App Insights. Integration test simulates crash + restart + verifies orphaned run resumes.</goal>
+
+  <context>
+    <background>Per spec.md FR-23 + design.md §4.2 I6: L2 App Service may crash, slot-swap, or be autoscaled mid-run — leaving Cosmos ProvisioningRun records in Running/WaitingOnGate state with no active reconciler advancing them. The crash-recovery scan is the ONE place the orchestrator recovers automatically without operator intervention. Because handlers are 3-level idempotent (NFR-10), re-scheduling is safe.</background>
+    <relevant-files>
+      <file role="new">src/server/services/Sprk.Provisioning.ControlPlane/Reconciler/CrashRecoveryStartupService.cs</file>
+      <file role="new">src/server/services/Sprk.Provisioning.ControlPlane/Reconciler/CrashRecoveryStartupService.Tests.cs</file>
+      <file role="modify">src/server/services/Sprk.Provisioning.ControlPlane/Program.cs</file>
+      <file role="canonical-reference">src/server/services/Sprk.Provisioning.ControlPlane/Reconciler/StateReconcilerService.cs</file>
+    </relevant-files>
+    <dependencies>
+      <dependency task="058" status="pending">State-reconciler + Cosmos state store + Service Bus enqueue path</dependency>
+      <dependency task="059" status="pending">I5 concurrency guard — recovered runs must still respect same-customer serialization</dependency>
+    </dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="spec.md FR-23">SCOPE: On startup, scan for status ∈ {Running, WaitingOnGate} older than 2× median-handler-duration; re-schedule from currentPhase.</constraint>
+    <constraint source="NFR-10">SCOPE: Re-enqueue relies on handler 3-level idempotency; do NOT add a "resumed" flag or bypass idempotency — a resumed run is functionally identical to a fresh run of the same phase.</constraint>
+    <constraint source="ADR-036">SCOPE: Re-enqueue uses the same Service Bus + IdempotencyService stack the reconciler uses; MessageId semantics unchanged.</constraint>
+    <constraint source="spec.md §4D I3">SCOPE: The startup scan is a cross-partition Cosmos read (the reconciler's one sanctioned cross-partition read); every subsequent per-run Cosmos operation uses /customerId partition-key predicate.</constraint>
+    <constraint source="project">SCOPE: Use TimeProvider (injected) for lastUpdated age comparison; NOT DateTime.UtcNow directly.</constraint>
+    <constraint source="project">SCOPE: 2× median-handler-duration is configurable; floor via IOptions to prevent zero-duration recovery loops in cold environments (default: 5 minutes).</constraint>
+    <constraint source="project">SCOPE: Startup scan runs ONCE per L2 instance boot — not on a timer. The reconciler (task 058) is the ongoing DAG advancer.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>Crash-recovery startup scan for orphaned ProvisioningRun records</topic>
+    <files>
+      <file>.claude/adr/ADR-036-background-job-infrastructure.md</file>
+      <file>.claude/constraints/jobs.md</file>
+      <file>projects/customer-provisioning-orchestration-r1/spec.md</file>
+      <file>projects/customer-provisioning-orchestration-r1/design.md</file>
+    </files>
+    <patterns>
+      <pattern name="IHostedService one-shot startup work" location="src/server/api/Sprk.Bff.Api/Services/Jobs/">Existing hosted services with once-on-start pattern; copy for CrashRecoveryStartupService shape.</pattern>
+      <pattern name="3-level idempotency at re-enqueue" location="src/server/services/Sprk.Provisioning.ControlPlane/Reconciler/StateReconcilerService.cs">Reuse the reconciler's enqueue helper — same MessageId + Redis lock + Cosmos ETag guard.</pattern>
+    </patterns>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="0" name="Rigor + load">Emit RIGOR LEVEL (FULL). Load spec.md FR-23 + design.md §4.2 I6 + this project's CLAUDE.md.</step>
+    <step order="1" name="Inventory">Read task 058 StateReconcilerService to understand the enqueue helper contract to reuse.</step>
+    <step order="2" name="Service">Author CrashRecoveryStartupService.cs implementing IHostedService (or IStartupFilter); inject TimeProvider, ICosmosRunStore, IServiceBusEnqueuer, IIdempotencyService, IOptions&lt;CrashRecoveryOptions&gt;, ILogger.</step>
+    <step order="3" name="Scan">Implement StartAsync: cross-partition Cosmos read for runs status ∈ {Running, WaitingOnGate} with lastUpdated &lt; now - max(2×medianHandlerDuration, floor).</step>
+    <step order="4" name="Re-enqueue">For each orphaned run, log the recovery decision + re-enqueue currentPhase via the reconciler's enqueue helper.</step>
+    <step order="5" name="Register">AddHostedService in L2 Program.cs; verify startup order (must run AFTER Cosmos + Service Bus DI init).</step>
+    <step order="6" name="Tests">Author CrashRecoveryStartupService.Tests.cs: simulate crash by writing a Running-state run with old lastUpdated → assert re-enqueue fires; write a Running-state run with fresh lastUpdated → assert NOT re-enqueued; write Completed/Failed/Quarantined → assert skipped.</step>
+    <step order="7" name="Verify">dotnet build + dotnet test = green; dotnet format; zero analyzer warnings.</step>
+    <step order="8" name="Index update">Update TASK-INDEX.md: task 060 → ✅.</step>
+    <step order="9" name="Deviations">Document any deviation in projects/customer-provisioning-orchestration-r1/notes/.</step>
+  </steps>
+
+  <tools>
+    <tool name="dotnet">Build and test the L2 control-plane project</tool>
+    <tool name="terminal">Run shell commands</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/server/services/Sprk.Provisioning.ControlPlane/Reconciler/CrashRecoveryStartupService.cs</output>
+    <output type="code">src/server/services/Sprk.Provisioning.ControlPlane/Program.cs (AddHostedService)</output>
+    <output type="test">src/server/services/Sprk.Provisioning.ControlPlane/Reconciler/CrashRecoveryStartupService.Tests.cs</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Given a Cosmos run with status = Running and lastUpdated older than 2× median-handler-duration, when the L2 app starts, then the crash-recovery service re-enqueues the currentPhase handler via Service Bus.</criterion>
+    <criterion testable="true">Given a Cosmos run with status = Running and lastUpdated within the threshold, when the L2 app starts, then the run is NOT re-enqueued (belongs to the active reconciler).</criterion>
+    <criterion testable="true">Given a Cosmos run with status ∈ {Completed, Failed, Quarantined, Cancelled}, when the L2 app starts, then the run is skipped.</criterion>
+    <criterion testable="true">Handlers re-enqueued by crash recovery are idempotent — the second invocation is a no-op if the phase already completed (verified via idempotency-key match in integration test).</criterion>
+    <criterion testable="true">Recovery decisions are logged to App Insights with the runId + phaseId + age.</criterion>
+    <criterion testable="true">TimeProvider is used for age comparison — grep for DateTime.UtcNow in CrashRecoveryStartupService.cs returns zero matches.</criterion>
+    <criterion testable="true">dotnet build exits 0; dotnet test exits 0; zero analyzer warnings.</criterion>
+  </acceptance-criteria>
+
+  <notes>Reference: spec.md FR-23 + design.md §4.2 I6. Sequencing pair with task 059 (I5) — I5 acquires, I6 recovers, terminal states release.</notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+  </execution>
+</task>

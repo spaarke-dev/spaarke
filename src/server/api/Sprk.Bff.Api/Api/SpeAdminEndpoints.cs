@@ -27,6 +27,11 @@ public static class SpeAdminEndpoints
         var group = app.MapGroup("/api/spe")
             .RequireAuthorization()
             .AddSpeAdminAuthorizationFilter()
+            // Order matters: the authorization filter decides whether the caller is an SPE admin at
+            // all; the tenant-scope filter then decides WHICH customers' data that admin may reach.
+            // Without the second, `configId` is a bearer capability — every endpoint below accepts it
+            // and, before this filter existed, none checked ownership.
+            .AddSpeAdminTenantScopeFilter()
             .WithTags("SpeAdmin");
 
         // Child endpoint groups registered on the shared /api/spe group.

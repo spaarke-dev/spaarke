@@ -123,7 +123,7 @@ const useStyles = makeStyles({
 // Helpers
 // ─────────────────────────────────────────────────────────────────────────────
 
-function billingLabel(classification: string): string {
+function billingLabel(classification: string | undefined): string {
   switch (classification) {
     case "standard":
       return "Standard";
@@ -132,12 +132,14 @@ function billingLabel(classification: string): string {
     case "directToCustomer":
       return "Direct to Customer";
     default:
-      return classification;
+      // Absent means Graph did not report it (task 029 made the type honest about that). Falling
+      // through to the raw value would render an EMPTY badge, which reads as a state rather than a gap.
+      return classification ?? "Unknown";
   }
 }
 
 function billingBadgeColor(
-  classification: string
+  classification: string | undefined
 ): "success" | "warning" | "informative" {
   switch (classification) {
     case "standard":

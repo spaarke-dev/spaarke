@@ -21,7 +21,14 @@ public static class AgentModule
         services.AddOptions<AgentTokenOptions>()
             .Bind(configuration.GetSection(AgentTokenOptions.SectionName));
         services.AddSingleton<IValidateOptions<AgentTokenOptions>, AgentTokenOptionsValidator>();
-        services.AddScoped<AgentTokenService>();
+        // FR-A2 (auth-v4 task 011): SINGLETON, was Scoped. AgentTokenService builds an MSAL
+        // confidential client in its constructor; per-request construction discarded MSAL's OBO
+        // token cache and (from task 020, once the credential is a Managed-Identity client
+        // assertion) would re-mint a signed assertion per request.
+        // Safe as singleton — every dependency is itself a singleton (ITenantCache → CacheModule,
+        // IOptions<AgentTokenOptions>, ILogger<>) and HttpContext arrives as a method parameter
+        // rather than via an injected IHttpContextAccessor, so no scoped state is captured.
+        services.AddSingleton<AgentTokenService>();
 
         // Agent configuration (playbook visibility, role restrictions, feature toggles)
         services.AddOptions<AgentConfigurationOptions>()

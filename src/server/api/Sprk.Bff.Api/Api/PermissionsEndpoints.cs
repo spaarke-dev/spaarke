@@ -2,7 +2,9 @@ using System.Security.Claims;
 using Microsoft.AspNetCore.Mvc;
 using Spaarke.Core.Auth;
 using Spaarke.Dataverse;
+using Sprk.Bff.Api.Infrastructure.Auth;
 using Sprk.Bff.Api.Models;
+using Sprk.Bff.Api.Infrastructure.Authentication;
 
 namespace Sprk.Bff.Api.Api;
 
@@ -10,6 +12,18 @@ namespace Sprk.Bff.Api.Api;
 /// API endpoints for querying user permissions/capabilities on documents.
 /// Used by UI (PCF controls, Power Apps, React) to determine which buttons/actions to show.
 /// </summary>
+/// <remarks>
+/// <b>Caller-scoped by construction</b> (unified-access-control-r2 task 006, spec FR-05, finding A-4).
+/// Both handlers resolve rights through <see cref="AuthorizationService.GetCallerAccessAsync"/>, which
+/// is the same snapshot accessor <see cref="AuthorizationService.AuthorizeAsync"/> uses for enforcement.
+/// Capabilities therefore cannot drift from what the enforcement path would decide, and a caller with
+/// no access to a document receives every capability <c>false</c> rather than the application's own
+/// capabilities.
+///
+/// <para>Before task 006 these handlers called <see cref="IAccessDataSource"/> directly with
+/// <c>userAccessToken: null</c>, so the response described what the APPLICATION could do and was
+/// returned to anyone who could authenticate.</para>
+/// </remarks>
 public static class PermissionsEndpoints
 {
     /// <summary>
@@ -25,8 +39,8 @@ public static class PermissionsEndpoints
         // GET /api/documents/{documentId}/permissions
         group.MapGet("{documentId}/permissions", GetDocumentPermissionsAsync)
             .WithName("GetDocumentPermissions")
-            .WithSummary("Get user capabilities for a single document")
-            .WithDescription("Returns what operations the current user can perform on the specified document")
+            .WithSummary("Get the CALLING user's capabilities for a single document")
+            .WithDescription("Returns what operations the current user can perform on the specified document. A caller with no access to the document receives all capabilities false.")
             .Produces<DocumentCapabilities>(200)
             .Produces(401) // Unauthorized
             .Produces(404); // Document not found
@@ -34,32 +48,31 @@ public static class PermissionsEndpoints
         // POST /api/documents/permissions/batch
         group.MapPost("permissions/batch", GetBatchPermissionsAsync)
             .WithName("GetBatchPermissions")
-            .WithSummary("Get user capabilities for multiple documents")
-            .WithDescription("Batch endpoint to get permissions for multiple documents in one request (performance optimization for galleries)")
+            .WithSummary("Get the CALLING user's capabilities for multiple documents")
+            .WithDescription("Batch endpoint to get permissions for multiple documents in one request (performance optimization for galleries). Always scoped to the authenticated caller.")
             .Produces<BatchPermissionsResponse>(200)
             .Produces(400) // Bad request
             .Produces(401); // Unauthorized
     }
 
     /// <summary>
-    /// Gets user capabilities for a single document.
+    /// Gets the calling user's capabilities for a single document.
     /// </summary>
     /// <param name="documentId">Dataverse document ID (sprk_documentid)</param>
-    /// <param name="httpContext">HTTP context to extract user identity</param>
-    /// <param name="accessDataSource">Data source for querying Dataverse permissions</param>
+    /// <param name="httpContext">HTTP context to extract user identity and bearer token</param>
+    /// <param name="authorizationService">Supplies the caller-scoped access snapshot</param>
     /// <param name="logger">Logger for diagnostics</param>
     /// <param name="ct">Cancellation token</param>
-    /// <returns>DocumentCapabilities indicating what user can do</returns>
+    /// <returns>DocumentCapabilities indicating what the CALLER can do</returns>
     private static async Task<IResult> GetDocumentPermissionsAsync(
         string documentId,
         HttpContext httpContext,
-        IAccessDataSource accessDataSource,
+        AuthorizationService authorizationService,
         ILogger<Program> logger,
         CancellationToken ct)
     {
         // Extract user ID from claims (Azure AD oid claim)
-        var userId = httpContext.User.FindFirst("oid")?.Value
-                     ?? httpContext.User.FindFirst(ClaimTypes.NameIdentifier)?.Value;
+        var userId = ResolveCallerId(httpContext);
 
         if (string.IsNullOrEmpty(userId))
         {
@@ -71,11 +84,15 @@ public static class PermissionsEndpoints
 
         try
         {
-            // Query Dataverse for user's access rights
-            // Note: This endpoint uses service principal auth (no user token OBO)
-            var snapshot = await accessDataSource.GetUserAccessAsync(userId, documentId, userAccessToken: null, ct);
+            // Caller-scoped (FR-05): the caller's own bearer token is forwarded, so the snapshot answers
+            // "what may THIS CALLER do" rather than "what may the application do". A missing token is
+            // handled fail-closed inside GetCallerAccessAsync (AccessRights.None), never as app-only.
+            var snapshot = await authorizationService.GetCallerAccessAsync(
+                userId,
+                documentId,
+                TokenHelper.ExtractBearerTokenOrNull(httpContext),
+                ct);
 
-            // Convert AccessRights to DocumentCapabilities
             var capabilities = MapToDocumentCapabilities(snapshot);
 
             logger.LogDebug(
@@ -88,32 +105,25 @@ public static class PermissionsEndpoints
         {
             logger.LogError(ex, "Error retrieving permissions for document {DocumentId}", documentId);
 
-            // Fail-closed: Return no permissions on error
-            return TypedResults.Ok(new DocumentCapabilities
-            {
-                DocumentId = documentId,
-                UserId = userId,
-                AccessRights = "None (Error)",
-                CalculatedAt = DateTimeOffset.UtcNow
-                // All boolean capabilities default to false
-            });
+            // Fail-closed: no capabilities on error. Never fall back to an app-scoped answer.
+            return TypedResults.Ok(NoCapabilities(documentId, userId, "None (Error)"));
         }
     }
 
     /// <summary>
-    /// Gets user capabilities for multiple documents in one request.
+    /// Gets the calling user's capabilities for multiple documents in one request.
     /// Performance optimization for galleries/lists that display many documents.
     /// </summary>
     /// <param name="request">Batch request with document IDs</param>
-    /// <param name="httpContext">HTTP context to extract user identity</param>
-    /// <param name="accessDataSource">Data source for querying Dataverse permissions</param>
+    /// <param name="httpContext">HTTP context to extract user identity and bearer token</param>
+    /// <param name="authorizationService">Supplies the caller-scoped access snapshot</param>
     /// <param name="logger">Logger for diagnostics</param>
     /// <param name="ct">Cancellation token</param>
-    /// <returns>BatchPermissionsResponse with capabilities for all documents</returns>
+    /// <returns>BatchPermissionsResponse with the CALLER's capabilities for all documents</returns>
     private static async Task<IResult> GetBatchPermissionsAsync(
         [FromBody] BatchPermissionsRequest request,
         HttpContext httpContext,
-        IAccessDataSource accessDataSource,
+        AuthorizationService authorizationService,
         ILogger<Program> logger,
         CancellationToken ct)
     {
@@ -130,16 +140,25 @@ public static class PermissionsEndpoints
             return TypedResults.BadRequest(new { error = $"Maximum batch size is {MaxBatchSize} documents" });
         }
 
-        // Extract user ID
-        var userId = request.UserId
-                     ?? httpContext.User.FindFirst("oid")?.Value
-                     ?? httpContext.User.FindFirst(ClaimTypes.NameIdentifier)?.Value;
+        // Identity comes from the validated token ONLY (task 006 / FR-05).
+        //
+        // This handler previously honoured a `UserId` supplied in the request BODY, which let a caller
+        // ask about someone else's capabilities. That is incompatible with a caller-scoped answer, and
+        // it is not merely cosmetic: DataverseAccessDataSource.cs:184-199 treats `userId` and
+        // `userAccessToken` as INDEPENDENT inputs — `userId` selects whose Dataverse principal is
+        // queried while the token selects the auth mode. Honouring a body-supplied id would run the
+        // query as the caller (OBO) while asking about a different principal, and task 014's cache key
+        // `sdap:auth:access:obo:{userId}:{resourceId}` would then be written under the VICTIM's oid.
+        var userId = ResolveCallerId(httpContext);
 
         if (string.IsNullOrEmpty(userId))
         {
             logger.LogWarning("Cannot determine user ID from claims for batch permissions check");
             return TypedResults.Unauthorized();
         }
+
+        // Read the caller's token once — it is the same credential for every document in the batch.
+        var callerToken = TokenHelper.ExtractBearerTokenOrNull(httpContext);
 
         logger.LogInformation(
             "Retrieving batch permissions for user {UserId} on {DocumentCount} documents",
@@ -155,10 +174,10 @@ public static class PermissionsEndpoints
         {
             try
             {
-                // Note: This endpoint uses service principal auth (no user token OBO)
-                var snapshot = await accessDataSource.GetUserAccessAsync(userId, documentId, userAccessToken: null, ct);
-                var capabilities = MapToDocumentCapabilities(snapshot);
-                permissions.Add(capabilities);
+                var snapshot = await authorizationService.GetCallerAccessAsync(
+                    userId, documentId, callerToken, ct);
+
+                permissions.Add(MapToDocumentCapabilities(snapshot));
                 successCount++;
             }
             catch (Exception ex)
@@ -174,13 +193,7 @@ public static class PermissionsEndpoints
                 });
 
                 // Add empty capabilities (fail-closed)
-                permissions.Add(new DocumentCapabilities
-                {
-                    DocumentId = documentId,
-                    UserId = userId,
-                    AccessRights = "None (Error)",
-                    CalculatedAt = DateTimeOffset.UtcNow
-                });
+                permissions.Add(NoCapabilities(documentId, userId, "None (Error)"));
 
                 errorCount++;
             }
@@ -203,9 +216,41 @@ public static class PermissionsEndpoints
     }
 
     /// <summary>
-    /// Maps Dataverse AccessSnapshot to DocumentCapabilities DTO.
-    /// Uses OperationAccessPolicy to determine which operations user can perform.
+    /// Resolves the calling user's Entra object id from the validated token's claims.
+    /// The ONLY identity source for these endpoints — never a request-supplied value.
     /// </summary>
+    private static string? ResolveCallerId(HttpContext httpContext) =>
+        CallerResolution.ResolveObjectId(httpContext.User);
+
+    /// <summary>
+    /// The single fail-closed capability shape: every capability false.
+    /// </summary>
+    /// <remarks>
+    /// Used for every path that cannot produce a trustworthy caller-scoped answer. Exists as one factory
+    /// so a capability added to <see cref="DocumentCapabilities"/> later cannot accidentally default to
+    /// <c>true</c> on one error path and <c>false</c> on another — all boolean members are left at their
+    /// <c>false</c> default here deliberately.
+    /// </remarks>
+    private static DocumentCapabilities NoCapabilities(string documentId, string userId, string accessRights) =>
+        new()
+        {
+            DocumentId = documentId,
+            UserId = userId,
+            AccessRights = accessRights,
+            CalculatedAt = DateTimeOffset.UtcNow
+            // All boolean capabilities intentionally left at their `false` default.
+        };
+
+    /// <summary>
+    /// Maps a caller-scoped <see cref="AccessSnapshot"/> to the capability DTO.
+    /// </summary>
+    /// <remarks>
+    /// Every flag is derived from <see cref="OperationAccessPolicy"/> using the SAME operation strings
+    /// and the SAME <c>HasRequiredRights</c> comparison the enforcement path uses
+    /// (<c>OperationAccessRule</c>). There is deliberately no second capability calculus: if a
+    /// capability here disagreed with what the filter would decide, the UI would render an affordance
+    /// the server rejects — or, worse, hide one it would have allowed.
+    /// </remarks>
     private static DocumentCapabilities MapToDocumentCapabilities(AccessSnapshot snapshot)
     {
         var rights = snapshot.AccessRights;

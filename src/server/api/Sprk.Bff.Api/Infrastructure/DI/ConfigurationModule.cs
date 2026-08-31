@@ -36,6 +36,26 @@ public static class ConfigurationModule
         services
             .AddOptions<ServiceBusOptions>()
             .Bind(configuration.GetSection(ServiceBusOptions.SectionName))
+            // auth-v4 task 051 (FR-E2): reconcile the two config keys that both carried the SAS
+            // credential. The section binds ServiceBus:ConnectionString, but the deployed estate
+            // sets the connection string under ConnectionStrings:ServiceBus — that is what the
+            // Bicep stacks emit (model1-shared.bicep:187, model2-full.bicep:199, both as
+            // ConnectionStrings__ServiceBus) and it is the key live on spaarke-bff-dev today.
+            // Meanwhile scripts/Configure-ProductionAppSettings.ps1:85 sets the OTHER key,
+            // ServiceBus__ConnectionString. Both spellings were live simultaneously.
+            //
+            // Until task 033 removes the SAS path outright, back-fill from the legacy key so the
+            // options object is the single source of truth for every consumer. Without this,
+            // moving client construction onto ServiceBusOptions would read an EMPTY connection
+            // string on the deployed app and take background job processing down — the namespace
+            // is not configured yet, so there would be no credential at all.
+            .PostConfigure<IConfiguration>((options, config) =>
+            {
+                if (string.IsNullOrWhiteSpace(options.ConnectionString))
+                {
+                    options.ConnectionString = config.GetConnectionString("ServiceBus") ?? string.Empty;
+                }
+            })
             .ValidateDataAnnotations()
             .ValidateOnStart();
 
@@ -43,6 +63,20 @@ public static class ConfigurationModule
             .AddOptions<RedisOptions>()
             .Bind(configuration.GetSection(RedisOptions.SectionName))
             .ValidateDataAnnotations()
+            .ValidateOnStart();
+
+        // Public runtime config (FR-36 — customer-provisioning-orchestration-r1 task 087).
+        // Tier-1 fail-fast in DEPLOYED envs: PublicConfigOptionsValidator enforces
+        // BffUrl + MsalClientId + TenantId at startup for Production / Staging / Demo / QA;
+        // Development + Testing envs short-circuit (per .claude/constraints/bff-extensions.md
+        // §F.2.1 Testing allow-list stance) so the 30+ per-endpoint test fixtures don't each
+        // need to add PublicConfig:* entries. FeatureFlags is optional (empty dict is valid).
+        // Consumed by GET /api/config (ConfigEndpoints.MapPublicConfigEndpoint). NO
+        // .ValidateDataAnnotations() — the validator is the single source of truth for
+        // requiredness semantics (mirrors the AgentServiceOptions r3 task 061 pattern).
+        services
+            .AddOptions<PublicConfigOptions>()
+            .Bind(configuration.GetSection(PublicConfigOptions.SectionName))
             .ValidateOnStart();
 
         // Document Intelligence Options - conditional validation (only when Enabled=true)
@@ -123,6 +157,19 @@ public static class ConfigurationModule
             .ValidateDataAnnotations()
             .ValidateOnStart();
 
+        // Sharing-link bounds for POST /api/documents/{documentId}/share-link
+        // (unified-access-control-r2 task 072). ValidateOnStart is load-bearing here rather than
+        // cosmetic: the [Range] ceilings ARE the security guarantee — a minted SPE URL survives
+        // Dataverse revocation, so lifetime is this route's only revocation mechanism, and an operator
+        // must not be able to configure an effectively-permanent link. Failing startup on a bad value is
+        // the right direction; silently clamping would hide the misconfiguration. An absent section binds
+        // valid defaults (14d / 7d / anonymous enabled) and boots.
+        services
+            .AddOptions<ShareLinkOptions>()
+            .Bind(configuration.GetSection(ShareLinkOptions.SectionName))
+            .ValidateDataAnnotations()
+            .ValidateOnStart();
+
         // FR-P2-06 (task 035): the FR-46/FR-47 classifier-stack option bindings
         // (candidate-selector thresholds + reranker tuning knobs) were DELETED with
         // the dispatcher stack — no code reads their configuration sections anymore.
@@ -132,6 +179,10 @@ public static class ConfigurationModule
         services.AddSingleton<IValidateOptions<DocumentIntelligenceOptions>, DocumentIntelligenceOptionsValidator>();
         // task 061: Enabled→Endpoint cross-property invariant for the gated Foundry Agent option.
         services.AddSingleton<IValidateOptions<AgentServiceOptions>, AgentServiceOptionsValidator>();
+        // customer-provisioning-orchestration-r1 task 087 (FR-36): env-aware fail-fast for
+        // PublicConfigOptions — enforce in Production / Staging / Demo / QA; short-circuit
+        // in Development / Testing envs so test fixtures don't need PublicConfig:* entries.
+        services.AddSingleton<IValidateOptions<PublicConfigOptions>, PublicConfigOptionsValidator>();
 
         // Startup health check to validate configuration
         services.AddHostedService<StartupValidationService>();

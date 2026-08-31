@@ -33,6 +33,7 @@ import {
   Field,
   Tooltip,
   Badge,
+  Link,
 } from "@fluentui/react-components";
 import {
   ArrowUploadRegular,
@@ -44,9 +45,12 @@ import {
   Folder20Regular,
   ArrowClockwise20Regular,
 } from "@fluentui/react-icons";
-import { FileUploadZone } from "@spaarke/ui-components";
-import type { IUploadedFile, IFileValidationError } from "@spaarke/ui-components";
+// FileUploadZone (@spaarke/ui-components) was removed on 2026-08-26 — see the Upload toolbar
+// button. Its drop target occupied roughly a third of the pane, which the embedded browse pane
+// cannot afford. `IFileValidationError` is still the shape used for per-file upload errors.
+import type { IFileValidationError } from "@spaarke/ui-components";
 import { speApiClient } from "../../services/speApiClient";
+import { useGridStyles } from "../layout/gridStyles";
 import type { DriveItem } from "../../types/spe";
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -175,6 +179,10 @@ const useStyles = makeStyles({
     textAlign: "center",
   },
 
+  /**
+   * Rendered as a Fluent `Link as="button"` — the button chrome is reset here so it reads as a
+   * link, not a control. See the render site for why this became clickable (UAT 2026-08-26).
+   */
   folderNameCell: {
     display: "flex",
     flexDirection: "row",
@@ -182,6 +190,14 @@ const useStyles = makeStyles({
     gap: tokens.spacingHorizontalS,
     color: tokens.colorBrandForeground1,
     fontWeight: tokens.fontWeightSemibold,
+    backgroundColor: "transparent",
+    border: "none",
+    padding: 0,
+    textAlign: "left",
+    cursor: "pointer",
+    minWidth: 0,
+    maxWidth: "100%",
+    overflow: "hidden",
   },
 
   fileNameCell: {
@@ -190,6 +206,21 @@ const useStyles = makeStyles({
     alignItems: "center",
     gap: tokens.spacingHorizontalS,
     color: tokens.colorNeutralForeground1,
+    minWidth: 0,
+    maxWidth: "100%",
+    overflow: "hidden",
+  },
+
+  /**
+   * The filename itself. The icon beside it is fixed-width, so the ellipsis has to live on this
+   * span rather than on the flex row — otherwise a long name (`2026-01-12_Test_Email_#10.eml`)
+   * breaks at its hyphens and wraps into the Type column (UAT round 7).
+   */
+  nameText: {
+    minWidth: 0,
+    overflow: "hidden",
+    textOverflow: "ellipsis",
+    whiteSpace: "nowrap",
   },
 
   selectedRow: {
@@ -349,6 +380,7 @@ export const FileBrowserPage: React.FC<FileBrowserPageProps> = ({
   containerName,
 }) => {
   const styles = useStyles();
+  const grid = useGridStyles();
 
   // ── Navigation state ──────────────────────────────────────────────────────
 
@@ -480,23 +512,23 @@ export const FileBrowserPage: React.FC<FileBrowserPageProps> = ({
   // ── Upload ────────────────────────────────────────────────────────────────
 
   /**
-   * Accept-all validation config for FileUploadZone.
-   * SPE containers can hold any file type, not just PDF/DOCX/XLSX.
-   * We override acceptedExtensions and customValidator to accept everything,
-   * and raise the size limit to 250 MB.
+   * Client-side upload size cap, 250 MB.
+   *
+   * This used to be `FileUploadZone`'s `maxFileSizeBytes`. Removing the zone (2026-08-26) would
+   * otherwise have removed the check with it, silently — the file would upload until the server
+   * refused it, with no local explanation. There is deliberately NO extension allow-list: an SPE
+   * container holds any file type, which is what the zone's accept-all config existed to say.
    */
-  const uploadValidationConfig = React.useMemo(
-    () => ({
-      acceptedExtensions: ["*"] as string[],
-      inputAccept: "*/*",
-      maxFileSizeBytes: 250 * 1024 * 1024, // 250 MB
-      customValidator: (_file: File): null => null, // accept all
-    }),
-    []
-  );
+  const MAX_UPLOAD_BYTES = 250 * 1024 * 1024;
 
-  const handleFilesAccepted = React.useCallback(
-    async (accepted: IUploadedFile[]) => {
+  /**
+   * Uploads a batch of files to the current folder.
+   *
+   * Takes the minimal structural shape `{ file, name }` rather than the shared library's
+   * `IUploadedFile`, so it serves both the (removed) drop zone and the toolbar's file picker.
+   */
+  const uploadFiles = React.useCallback(
+    async (accepted: { file: File; name: string }[]) => {
       if (!containerId || !configId) return;
       setUploadErrors([]);
       setUploadingCount((c) => c + accepted.length);
@@ -531,11 +563,43 @@ export const FileBrowserPage: React.FC<FileBrowserPageProps> = ({
     [containerId, configId, currentFolderId, loadItems]
   );
 
-  const handleValidationErrors = React.useCallback(
-    (errors: IFileValidationError[]) => {
-      setUploadErrors((prev) => [...prev, ...errors]);
+  /**
+   * Hidden file input behind the Upload toolbar button.
+   *
+   * 🔴 The Upload button used to call `scrollIntoView` on the drop zone and nothing else — it never
+   * uploaded anything. When the file browser became a pane docked inside the Containers page the
+   * zone was often already on screen, so the click had no visible effect whatsoever, which is the
+   * operator's "the Upload tool bar does not work" (UAT 2026-08-26). A toolbar button that only
+   * scrolls to the control that does the work is not a command.
+   */
+  const fileInputRef = React.useRef<HTMLInputElement>(null);
+
+  const handleFilePickerChange = React.useCallback(
+    (e: React.ChangeEvent<HTMLInputElement>) => {
+      const picked = Array.from(e.target.files ?? []);
+      // Reset before awaiting, so picking the SAME file twice in a row still fires onChange.
+      e.target.value = "";
+      if (picked.length === 0) return;
+
+      const tooBig = picked.filter((f) => f.size > MAX_UPLOAD_BYTES);
+      const allowed = picked.filter((f) => f.size <= MAX_UPLOAD_BYTES);
+
+      if (tooBig.length > 0) {
+        setUploadErrors((prev) => [
+          ...prev,
+          ...tooBig.map((f) => ({
+            fileName: f.name,
+            reason: `File is ${formatFileSize(f.size)}, over the ${formatFileSize(
+              MAX_UPLOAD_BYTES
+            )} upload limit.`,
+          })),
+        ]);
+      }
+
+      if (allowed.length === 0) return;
+      void uploadFiles(allowed.map((file) => ({ file, name: file.name })));
     },
-    []
+    [uploadFiles, MAX_UPLOAD_BYTES]
   );
 
   // ── New Folder ────────────────────────────────────────────────────────────
@@ -579,16 +643,42 @@ export const FileBrowserPage: React.FC<FileBrowserPageProps> = ({
     setDeleting(true);
 
     try {
-      await Promise.all(
+      // Argument order is (containerId, ITEM id, CONFIG id) — the last two were swapped here
+      // too, exactly as in handleDownload below. Found by auditing every call site with this
+      // three-string shape after the download bug (UAT round 7), not by it being reported:
+      // Delete failed silently for the same two reasons, and nobody had tried it yet.
+      const results = await Promise.allSettled(
         Array.from(selectedIds).map((id) =>
-          speApiClient.items.delete(containerId, configId, id)
+          speApiClient.items.delete(containerId, id, configId)
         )
       );
+
+      const rejected = results.filter(
+        (r): r is PromiseRejectedResult => r.status === "rejected"
+      );
+
+      if (rejected.length > 0) {
+        setUploadErrors((prev) => [
+          ...prev,
+          ...rejected.map((r) => ({
+            fileName: "Delete",
+            reason:
+              r.reason instanceof Error ? r.reason.message : "Delete failed.",
+          })),
+        ]);
+      }
+
       setDeleteOpen(false);
       setSelectedIds(new Set());
       await loadItems();
     } catch (err) {
-      console.error("Delete failed:", err);
+      setUploadErrors((prev) => [
+        ...prev,
+        {
+          fileName: "Delete",
+          reason: err instanceof Error ? err.message : "Delete failed.",
+        },
+      ]);
     } finally {
       setDeleting(false);
     }
@@ -603,13 +693,36 @@ export const FileBrowserPage: React.FC<FileBrowserPageProps> = ({
       (item) => selectedIds.has(item.id) && !isFolder(item)
     );
 
+    const failures: IFileValidationError[] = [];
+
     for (const item of filesToDownload) {
       try {
+        /*
+         * 🔴 The signature is (containerId, ITEM id, CONFIG id). This call passed
+         * (containerId, configId, item.id) — the last two swapped. All three parameters are
+         * `string`, so TypeScript could not see it, and the request went to
+         * `/items/{configId}/content?configId={itemId}`: a container item that does not exist.
+         *
+         * It failed silently on two levels. `authenticatedFetch` resolves for a 404 rather than
+         * throwing, so nothing reached the catch; and the catch only wrote to `console.error`, a
+         * place no operator looks. Download appeared to do nothing at all (UAT round 7).
+         */
         const response = await speApiClient.items.download(
           containerId,
-          configId,
-          item.id
+          item.id,
+          configId
         );
+
+        // A non-2xx here would otherwise be saved to disk AS the file — an error page or JSON
+        // body carrying the document's name. Worse than failing, because it looks like it worked.
+        if (!response.ok) {
+          failures.push({
+            fileName: item.name,
+            reason: `Download failed (HTTP ${response.status}).`,
+          });
+          continue;
+        }
+
         const blob = await response.blob();
         const url = URL.createObjectURL(blob);
         const anchor = document.createElement("a");
@@ -618,11 +731,19 @@ export const FileBrowserPage: React.FC<FileBrowserPageProps> = ({
         document.body.appendChild(anchor);
         anchor.click();
         document.body.removeChild(anchor);
-        URL.revokeObjectURL(url);
+        // Deferred: revoking synchronously after click races the browser's read of the blob and
+        // cancels the save in Chromium.
+        window.setTimeout(() => URL.revokeObjectURL(url), 60_000);
       } catch (err) {
-        console.error(`Download failed for ${item.name}:`, err);
+        failures.push({
+          fileName: item.name,
+          reason: err instanceof Error ? err.message : "Download failed.",
+        });
       }
     }
+
+    // Reported in the same banner the uploads use, rather than to the console.
+    if (failures.length > 0) setUploadErrors((prev) => [...prev, ...failures]);
   }, [containerId, configId, selectedIds, items]);
 
   // ── Guard: no container selected ──────────────────────────────────────────
@@ -688,15 +809,8 @@ export const FileBrowserPage: React.FC<FileBrowserPageProps> = ({
         <Tooltip content="Upload files to the current folder" relationship="label">
           <ToolbarButton
             icon={<ArrowUploadRegular />}
-            disabled={isUploading}
-            onClick={() => {
-              // Scroll the FileUploadZone into view so the user can
-              // drop or click it. The zone's built-in click handler
-              // opens the file picker.
-              document
-                .getElementById("spe-file-browser-upload-zone")
-                ?.scrollIntoView({ behavior: "smooth" });
-            }}
+            disabled={isUploading || loading}
+            onClick={() => fileInputRef.current?.click()}
           >
             Upload
           </ToolbarButton>
@@ -846,7 +960,7 @@ export const FileBrowserPage: React.FC<FileBrowserPageProps> = ({
               <DataGridHeader>
                 <DataGridRow>
                   {({ renderHeaderCell }) => (
-                    <DataGridHeaderCell>
+                    <DataGridHeaderCell className={grid.headerCell}>
                       {renderHeaderCell()}
                     </DataGridHeaderCell>
                   )}
@@ -874,18 +988,39 @@ export const FileBrowserPage: React.FC<FileBrowserPageProps> = ({
                       onDoubleClick={() => handleRowDoubleClick(item)}
                     >
                       {({ columnId }) => (
-                        <DataGridCell>
+                        <DataGridCell className={grid.cell}>
                           {/* Name column — folder/file icon + name */}
                           {columnId === "name" && (
                             itemIsFolder ? (
-                              <span className={styles.folderNameCell}>
+                              /*
+                               * 🔴 A folder name is a LINK, and opens on a single click.
+                               *
+                               * Until 2026-08-26 this was a plain <span> styled brand-coloured and
+                               * semibold — it LOOKED like a link but was inert, and the only way
+                               * into a folder was double-clicking the row, which nothing announced.
+                               * The operator reported the folders "do not open" during UAT; they
+                               * opened fine, but every affordance said single-click and only
+                               * double-click worked.
+                               *
+                               * stopPropagation keeps the row's own click (select) from also
+                               * firing. Row double-click still navigates, so both habits work.
+                               */
+                              <Link
+                                as="button"
+                                className={styles.folderNameCell}
+                                onClick={(e: React.MouseEvent) => {
+                                  e.stopPropagation();
+                                  handleFolderOpen(item);
+                                }}
+                                aria-label={`Open folder ${item.name}`}
+                              >
                                 <Folder20Regular />
-                                {item.name}
-                              </span>
+                                <span className={styles.nameText}>{item.name}</span>
+                              </Link>
                             ) : (
                               <span className={styles.fileNameCell}>
                                 <Document20Regular />
-                                {item.name}
+                                <span className={styles.nameText}>{item.name}</span>
                               </span>
                             )
                           )}
@@ -926,32 +1061,34 @@ export const FileBrowserPage: React.FC<FileBrowserPageProps> = ({
         )}
       </div>
 
-      {/* ── Drag-Drop Upload Zone (ADR-012: FileUploadZone from @spaarke/ui-components) ── */}
-      <div
-        id="spe-file-browser-upload-zone"
-        className={styles.uploadSection}
-      >
-        <Text size={200} className={styles.uploadLabel}>
-          Drop files here to upload to the current folder
-        </Text>
-        <FileUploadZone
-          onFilesAccepted={handleFilesAccepted}
-          onValidationErrors={handleValidationErrors}
-          validationConfig={uploadValidationConfig}
-          disabled={isUploading || loading}
-        />
-        {uploadErrors.length > 0 && (
-          <div className={styles.uploadErrors}>
-            {uploadErrors.map((err, i) => (
-              <MessageBar key={i} intent="warning">
-                <MessageBarBody>
-                  <strong>{err.fileName}</strong>: {err.reason}
-                </MessageBarBody>
-              </MessageBar>
-            ))}
-          </div>
-        )}
-      </div>
+      {/*
+        ── Upload ──
+        The drop zone that used to live here was removed on 2026-08-26: it occupied roughly a third
+        of the pane's height for an affordance the toolbar's Upload button now provides directly.
+        Per-file upload errors still surface — they just no longer need a permanent panel to sit in.
+      */}
+      <input
+        ref={fileInputRef}
+        type="file"
+        multiple
+        accept="*/*"
+        onChange={handleFilePickerChange}
+        style={{ display: "none" }}
+        aria-hidden="true"
+        tabIndex={-1}
+      />
+
+      {uploadErrors.length > 0 && (
+        <div className={styles.uploadErrors}>
+          {uploadErrors.map((err, i) => (
+            <MessageBar key={i} intent="warning">
+              <MessageBarBody>
+                <strong>{err.fileName}</strong>: {err.reason}
+              </MessageBarBody>
+            </MessageBar>
+          ))}
+        </div>
+      )}
 
       {/* ── New Folder Dialog ── */}
       <Dialog

@@ -25,57 +25,97 @@ public static class DocumentOperationsEndpoints
             .WithTags("Document Operations");
 
         // POST /api/documents/{documentId}/checkout
-        // Authorization: PCF controls button visibility based on Dataverse security profile
-        // Actual permissions enforced by Graph API via OBO (same as preview endpoint)
+        //
+        // Finding H3 (task 022). The comment this replaces claimed "PCF controls button visibility
+        // based on Dataverse security profile / actual permissions enforced by Graph API via OBO".
+        // Both halves were wrong for this route: client-side button visibility is not enforcement,
+        // and the checkout path is app-only — it does not reach Graph under the caller's identity, so
+        // nothing downstream ever evaluated the caller. The route returns an EDITABLE url and takes
+        // the document's lock, so Write is the requirement.
         group.MapPost("/checkout", CheckoutDocument)
             .WithName("CheckoutDocument")
             .WithDescription("Locks a document for editing and returns the edit URL")
             .Produces<CheckoutResponse>(200)
             .Produces<DocumentLockedError>(409)
+            .ProducesProblem(403)
             .ProducesProblem(404)
-            .ProducesProblem(401);
+            .ProducesProblem(401)
+            .AddDocumentAuthorizationFilter("write");
 
         // POST /api/documents/{documentId}/checkin
+        // Finding H3 — creates a new version of the document's content.
         group.MapPost("/checkin", CheckInDocument)
             .WithName("CheckInDocument")
             .WithDescription("Releases the document lock and creates a new version")
             .Produces<CheckInResponse>(200)
             .ProducesProblem(400)
+            .ProducesProblem(403)
             .ProducesProblem(404)
-            .ProducesProblem(401);
+            .ProducesProblem(401)
+            .AddDocumentAuthorizationFilter("write");
 
         // POST /api/documents/{documentId}/discard
+        //
+        // Finding H3 — clears the lock, discarding the checked-out changes. Write, like its siblings.
+        // The handler ALSO has its own "you can only discard checkouts you initiated" check
+        // (NotAuthorizedDiscardResult), which is a narrower, different question: this filter asks
+        // whether the caller may touch the document at all, and runs first.
         group.MapPost("/discard", DiscardCheckout)
             .WithName("DiscardCheckout")
             .WithDescription("Cancels the checkout without saving changes")
             .Produces<DiscardResponse>(200)
             .ProducesProblem(400)
+            .ProducesProblem(403)
             .ProducesProblem(404)
-            .ProducesProblem(401);
+            .ProducesProblem(401)
+            .AddDocumentAuthorizationFilter("write");
 
         // DELETE /api/documents/{documentId}
+        //
+        // Finding C2 (unified-access-control-r2 task 022) — this route destroyed the Dataverse row
+        // AND the SPE file with NO per-document authorization: any authenticated caller could delete
+        // any document by GUID. It is reachable from a shipped client hook. The delete itself runs
+        // app-only, so Dataverse's own row-level security never sees the caller — this filter is the
+        // entire boundary (project CLAUDE.md fact 1).
         group.MapDelete("", DeleteDocument)
             .WithName("DeleteDocument")
             .WithDescription("Deletes a document from both Dataverse and SharePoint Embedded")
             .Produces<DeleteDocumentResponse>(200)
             .Produces<DocumentLockedError>(409)
+            .ProducesProblem(403)
             .ProducesProblem(404)
-            .ProducesProblem(401);
+            .ProducesProblem(401)
+            .AddDocumentAuthorizationFilter("delete");
 
         // GET /api/documents/{documentId}/checkout-status
+        //
+        // Finding H3 — discloses WHO holds the lock and when they took it, for any document by GUID.
+        // Read, not Write: it reveals the document's state without changing it.
         group.MapGet("/checkout-status", GetCheckoutStatus)
             .WithName("GetCheckoutStatus")
             .WithDescription("Gets the current checkout status of a document")
             .Produces<CheckoutStatusResponse>(200)
+            .ProducesProblem(403)
             .ProducesProblem(404)
-            .ProducesProblem(401);
+            .ProducesProblem(401)
+            .AddDocumentAuthorizationFilter("read");
 
         // POST /api/documents/{documentId}/analyze
+        //
+        // Finding H3. Operation is `write`, decided explicitly by the owner 2026-08-24 rather than
+        // defaulted. The case for `read` was real: the analysis is written to a DIFFERENT entity
+        // than the one this filter authorizes, which is the same reasoning that made
+        // "finance.confirm" deliberately NOT require Create (see OperationAccessPolicy). The case
+        // for `write` won because this route commits real resources on the caller's say-so — it
+        // spends AI credits and enqueues background work — and because the analysis lands back on
+        // the document's own profile fields, so it does mutate the authorized record's state.
         group.MapPost("/analyze", TriggerDocumentAnalysis)
             .WithName("TriggerDocumentAnalysis")
             .WithDescription("Queues a document for AI analysis (Document Profile) via Service Bus")
             .Produces(202)
-            .ProducesProblem(401);
+            .ProducesProblem(403)
+            .ProducesProblem(401)
+            .AddDocumentAuthorizationFilter("write");
 
         return app;
     }
@@ -111,8 +151,24 @@ public static class DocumentOperationsEndpoints
                     detail: $"Document {documentId} was not found",
                     extensions: new Dictionary<string, object?> { ["correlationId"] = correlationId }
                 ),
+                // FR-S09 item 4 (spaarkeai-compose-r8 task 016): additive `status` + `title` so the body
+                // is recognised as RFC 7807 ProblemDetails by `authenticatedFetch`'s parser, which keys
+                // on the presence of one of those two fields. Without them the parser returns null, the
+                // thrown `ApiError` carries no body at all, and a caller handling the 409 cannot name the
+                // person holding the lock — it can only say "someone". `error`, `detail`, `checkedOutBy`
+                // and `checkedOutAt` keep their existing names and shapes, so every current reader is
+                // unaffected; this is a superset of what was sent before.
                 ConflictCheckoutResult conflict => TypedResults.Json(
-                    conflict.ConflictError,
+                    new
+                    {
+                        status = 409,
+                        title = "Document Locked",
+                        error = conflict.ConflictError.Error,
+                        detail = conflict.ConflictError.Detail,
+                        checkedOutBy = conflict.ConflictError.CheckedOutBy,
+                        checkedOutAt = conflict.ConflictError.CheckedOutAt,
+                        correlationId,
+                    },
                     statusCode: 409
                 ),
                 _ => TypedResults.Problem(

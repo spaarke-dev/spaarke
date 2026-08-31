@@ -143,7 +143,13 @@ public sealed class Def14_ComposeSaveLockedDocumentTests : IClassFixture<Def14Co
     }
 
     [Fact]
-    public async Task SaveDocument_WhenEtagPreconditionFailed_Returns412WithActionableCopy_NotOpaque500()
+    // FR-S02 (r8 task 011): the ROUTE-LAYER mapping moved 412 → 409. Concurrency is now last-writer-wins,
+    // so a merely-moved base SUCCEEDS with a warning and never reaches this catch. Reaching it means the
+    // narrower, genuinely transient case — a writer landed inside the read-to-write window AND the single
+    // rebase retry also lost — which is a Conflict ("try again"), not a stale precondition the caller can
+    // fix by reloading. The TRANSLATION-layer tests below still assert Graph-412 → typed exception: that
+    // half is unchanged, only the status the endpoint maps it to.
+    public async Task SaveDocument_WhenEtagPreconditionFailedAfterRetry_Returns409BusyCopy_NotOpaque500()
     {
         // Arrange
         _fixture.SpeMock
@@ -164,11 +170,14 @@ public sealed class Def14_ComposeSaveLockedDocumentTests : IClassFixture<Def14Co
         // Act
         var response = await client.PostAsJsonAsync("/api/compose/documents/spe-item-moved/save", body);
 
-        // Assert — 412 Precondition Failed, actionable copy, no 500 leak.
-        response.StatusCode.Should().Be(HttpStatusCode.PreconditionFailed,
-            "a document that changed under the caller must surface as 412, not a 500");
+        // Assert — 409 Conflict, actionable copy, no 500 leak.
+        response.StatusCode.Should().Be(HttpStatusCode.Conflict,
+            "FR-S02: a sustained concurrent writer surfaces as 409 Conflict ('try again'), not 412 and not a 500");
         var payload = await response.Content.ReadAsStringAsync();
-        payload.Should().Contain("reload", "the 412 copy tells the user to reload and reapply");
+        payload.Should().Contain("try saving again", "the 409 copy tells the user the actionable next step");
+        payload.Should().Contain("Nothing was overwritten", "the copy must state that the user's work is intact");
+        payload.Should().NotContain("reload and reapply",
+            "the reload-and-reapply refusal flow was removed with the 412 (FR-S02) — its copy must not survive it");
         payload.Should().NotContain("ODataError");
         ((int)response.StatusCode).Should().NotBe(500);
     }
@@ -201,11 +210,14 @@ public sealed class Def14_ComposeSaveLockedDocumentTests : IClassFixture<Def14Co
         // Act
         var response = await client.PostAsJsonAsync("/api/compose/documents/create-on-save", body);
 
-        // Assert — 412 Precondition Failed, actionable copy, no ODataError / 500 leak.
-        response.StatusCode.Should().Be(HttpStatusCode.PreconditionFailed,
-            "a create-on-save that races a genuinely concurrent external edit must surface as 412, not an opaque 500");
+        // Assert — 409 Conflict, actionable copy, no ODataError / 500 leak.
+        // FR-S02 (r8 task 011): same route-layer remap as the replace case above — the DEF-14/051 guarantee
+        // this test protects is "typed, actionable, never an opaque 500", which is unchanged; only the
+        // status carrying it moved from 412 to 409 when the refusal semantics were retired.
+        response.StatusCode.Should().Be(HttpStatusCode.Conflict,
+            "a create-on-save that races a genuinely concurrent external edit must surface as 409, not an opaque 500");
         var payload = await response.Content.ReadAsStringAsync();
-        payload.Should().Contain("reload", "the 412 copy tells the user to reload and reapply");
+        payload.Should().Contain("try saving again", "the 409 copy tells the user the actionable next step");
         payload.Should().NotContain("ODataError", "the raw Graph error must never leak to the client");
         ((int)response.StatusCode).Should().NotBe(500);
     }
@@ -225,7 +237,7 @@ public sealed class Def14_UploadSessionManagerOdataTranslationTests
         var sut = BuildManager(HttpStatusCode.Locked, errorCode: "resourceLocked");
 
         var act = () => sut.ReplaceFileContentAsUserAsync(
-            new DefaultHttpContext(), "drive-1", "item-1",
+            TestHttpContexts.Authenticated(), "drive-1", "item-1",
             new MemoryStream(new byte[] { 1, 2, 3 }), CancellationToken.None);
 
         await act.Should().ThrowAsync<DocumentLockedByWordException>(
@@ -238,7 +250,7 @@ public sealed class Def14_UploadSessionManagerOdataTranslationTests
         var sut = BuildManager(HttpStatusCode.PreconditionFailed, errorCode: "preconditionFailed");
 
         var act = () => sut.ReplaceFileContentAsUserAsync(
-            new DefaultHttpContext(), "drive-1", "item-1",
+            TestHttpContexts.Authenticated(), "drive-1", "item-1",
             new MemoryStream(new byte[] { 1, 2, 3 }), ifMatch: "\"stale\"", CancellationToken.None);
 
         await act.Should().ThrowAsync<EtagPreconditionFailedException>(
@@ -255,7 +267,7 @@ public sealed class Def14_UploadSessionManagerOdataTranslationTests
         var sut = BuildManager(HttpStatusCode.Locked, errorCode: "resourceLocked");
 
         var act = () => sut.UploadSmallAsUserAsync(
-            new DefaultHttpContext(), "container-1", "draft.docx",
+            TestHttpContexts.Authenticated(), "container-1", "draft.docx",
             new MemoryStream(new byte[] { 1, 2, 3 }), CancellationToken.None);
 
         await act.Should().ThrowAsync<DocumentLockedByWordException>(
@@ -275,7 +287,7 @@ public sealed class Def14_UploadSessionManagerOdataTranslationTests
         var sut = BuildManager(HttpStatusCode.PreconditionFailed, errorCode: "preconditionFailed");
 
         var act = () => sut.UploadSmallAsUserAsync(
-            new DefaultHttpContext(), "container-1", "draft.docx",
+            TestHttpContexts.Authenticated(), "container-1", "draft.docx",
             new MemoryStream(new byte[] { 1, 2, 3 }), CancellationToken.None);
 
         await act.Should().ThrowAsync<EtagPreconditionFailedException>(
@@ -327,6 +339,8 @@ internal sealed class StubGraphClientFactory : IGraphClientFactory
     private readonly GraphServiceClient _client;
     public StubGraphClientFactory(GraphServiceClient client) => _client = client;
     public Task<GraphServiceClient> ForUserAsync(HttpContext ctx, CancellationToken ct = default) => Task.FromResult(_client);
+    // Beta delegated variant (SPE container-type owners) — same stub; this test never uses beta.
+    public Task<GraphServiceClient> ForUserBetaAsync(HttpContext ctx, CancellationToken ct = default) => Task.FromResult(_client);
     public GraphServiceClient ForApp() => _client;
 }
 
@@ -360,7 +374,7 @@ public sealed class Def14ComposeSaveFixture : WebApplicationFactory<Program>
                 ["Graph:TenantId"] = "test-tenant-id",
                 ["Graph:ClientId"] = "test-client-id",
                 ["Graph:ClientSecret"] = "test-client-secret",
-                ["Graph:UseManagedIdentity"] = "false",
+                ["Graph:ManagedIdentity:Enabled"] = "false",
                 ["Graph:Scopes:0"] = "https://graph.microsoft.com/.default",
                 ["Dataverse:EnvironmentUrl"] = "https://test.crm.dynamics.com",
                 ["Dataverse:ServiceUrl"] = "https://test.crm.dynamics.com",
@@ -418,6 +432,9 @@ public sealed class Def14ComposeSaveFixture : WebApplicationFactory<Program>
 
         builder.ConfigureTestServices(services =>
         {
+            // Test hosts must not authenticate for real — see TestTokenCredential.
+            services.UseStubTokenCredential();
+
             services.Configure<Microsoft.AspNetCore.Routing.RouteHandlerOptions>(options =>
             {
                 options.ThrowOnBadRequest = false;
@@ -459,7 +476,9 @@ public sealed class Def14ComposeSaveFixture : WebApplicationFactory<Program>
     public HttpClient CreateAuthenticatedClient()
     {
         var client = CreateClient(new WebApplicationFactoryClientOptions { AllowAutoRedirect = false });
-        client.DefaultRequestHeaders.Add("X-Test-User", Guid.NewGuid().ToString());
+        // Issue #863: a STABLE test user. A fresh Guid per client meant the caller identity
+        // changed between the seed and the request, so an ownership check could never pass.
+        client.DefaultRequestHeaders.Add("X-Test-User", TestSessionOwner.Oid);
         client.DefaultRequestHeaders.Authorization =
             new System.Net.Http.Headers.AuthenticationHeaderValue("Bearer", "test-token");
         return client;

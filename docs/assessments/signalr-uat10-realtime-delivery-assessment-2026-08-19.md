@@ -1,5 +1,18 @@
 # Issue Assessment — Azure SignalR real-time notification delivery fails with 401 (UAT env)
 
+> ## ✅ RESOLVED 2026-08-19 (spaarke-notification-spine-r1)
+> **Confirmed root cause (read-only Azure diagnosis): rotated key.** The BFF app setting
+> `Notifications__SignalR__ConnectionString` on `spaarke-bff-dev` (rg-spaarke-dev) held an `AccessKey=` matching
+> **neither** the current primary nor secondary key of `spaarke-signalr-dev` — the #1 predicted cause. Other suspects
+> **ruled out**: Endpoint already correct; resource **is** in **Serverless** mode (`features[].ServiceMode=Serverless`);
+> `SignalR:Enabled` defaults true. (In dev/UAT the value is a **plaintext App Setting**, not a Key Vault reference.)
+> **Fix applied:** re-copied the resource's current **primary connection string** into the app setting
+> (`az webapp config appsettings set`, auto-restarts). Verified: configured key == current primary; `/healthz` 200;
+> negotiate 401 (auth up), not 503 (SignalR configured). **No code deploy needed.**
+> **Remaining verification (UAT owner):** browser re-test — SDK negotiate should now return **200**, poll-fallback
+> warning gone. **Follow-ups:** deploy the endpoint-host diagnostic log (compose-r7) + move dev to a Key Vault
+> reference (ADR-028) so a rotated key re-syncs in one place.
+
 > **Created**: 2026-08-19
 > **Origin**: `spaarkeai-compose-r7` UAT (item UAT-10). Surfaced during Compose UAT but **not a Compose issue**.
 > **Severity**: Medium — real-time push is degraded; **poll-fallback keeps notifications functional** (delayed, not lost).

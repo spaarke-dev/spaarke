@@ -1,0 +1,126 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="036" project="customer-provisioning-orchestration-r1">
+  <metadata>
+    <title>Scaffold NEW .NET 10 project Sprk.Provisioning.ControlPlane — Program.cs + Startup + DI + JWT bearer + Operator/Reader auth + OpenAPI at /swagger</title>
+    <phase>C Wave C3 — L2 Control-Plane Scaffold</phase>
+    <gate>startable</gate>
+    <status>not-started</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Net-new .NET 10 project scaffold + auth tag (JWT bearer + app-role authorization); every downstream handler + REST endpoint depends on this scaffold. task-create Step 3.5.5 FULL (auth tag; l2-controlplane tag; NEW surface; &gt;5 downstream deps).</rigor-reason>
+    <model-tier>opus</model-tier>
+    <model-tier-reason>Brief rubric: L2 scaffold is high-blast-radius (net-new project scaffold); DI + auth + endpoint-filter architecture must be right first time because 19 handlers + 8 REST endpoints + state-reconciler all consume it. "Opus 4.8 / Fable 5 for L2 scaffold + UAMI migration + reconciler".</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>waveC3-scaffold</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <deps>none</deps>
+    <tags>l2-controlplane, auth, api, minimal-api, endpoints, azure, deploy</tags>
+    <estimated-effort>4-6 hours</estimated-effort>
+  </metadata>
+
+  <prompt>Scaffold a NEW .NET 10 (TFM net10.0) project at src/server/services/Sprk.Provisioning.ControlPlane/ with: (a) Program.cs using minimal API + WebApplication builder; (b) Startup module composition (extension methods per feature area to avoid god-class DI); (c) JWT Bearer authentication with audience api://spaarke-provisioning-controlplane-{env}; (d) Operator + Reader app-role authorization policies; (e) OpenAPI/Swashbuckle at /swagger. Include a Sprk.Provisioning.ControlPlane.csproj (net10.0, TreatWarningsAsErrors=true, nullable enable) + a top-level SolutionInclusion.md OR update spaarke.sln to include the new project.</prompt>
+  <role>SPAARKE platform developer with .NET 10 minimal API + JWT Bearer + app-role authorization + Swashbuckle expertise. Follow ADR-010 DI minimalism: L2 has its own DI graph independent of BFF; do NOT reference BFF assemblies from L2.</role>
+  <goal>src/server/services/Sprk.Provisioning.ControlPlane/ project exists as a valid net10.0 minimal API scaffold: Program.cs boots WebApplication with JWT auth + Operator/Reader policies + Swagger at /swagger; dotnet build exits 0 with 0 errors + 0 warnings (analyzers-as-errors); a placeholder /ping endpoint returns 200 (unauthenticated) and a placeholder /api/runs POST endpoint returns 401 without bearer token.</goal>
+
+  <context>
+    <background>Spec FR-20 + design.md §5.2 (L2 in dedicated service, NOT BFF) + spec.md § New Components row 1: L2 control-plane is a new .NET 10 App Service in rg-spaarke-platform-{env}. It sequences all 19 handlers, exposes REST + AAD, and hosts the state-reconciler BackgroundService. Every provisioning run flows through this project. Without the scaffold, no handler infrastructure can register; every downstream Wave C3/C4/C5 task is blocked.</background>
+    <relevant-files>
+      <file role="new">src/server/services/Sprk.Provisioning.ControlPlane/Sprk.Provisioning.ControlPlane.csproj</file>
+      <file role="new">src/server/services/Sprk.Provisioning.ControlPlane/Program.cs</file>
+      <file role="new">src/server/services/Sprk.Provisioning.ControlPlane/Modules/AuthModule.cs</file>
+      <file role="new">src/server/services/Sprk.Provisioning.ControlPlane/Modules/SwaggerModule.cs</file>
+      <file role="new">src/server/services/Sprk.Provisioning.ControlPlane/Endpoints/HealthEndpoints.cs</file>
+      <file role="new">src/server/services/Sprk.Provisioning.ControlPlane/appsettings.json</file>
+      <file role="canonical-reference">src/server/api/Sprk.Bff.Api/Program.cs</file>
+      <file role="canonical-reference">src/server/api/Sprk.Bff.Api/</file>
+      <file role="modify">spaarke.sln</file>
+    </relevant-files>
+    <dependencies>
+      <dependency task="none" status="complete">No prerequisite r1 task — Wave C3 kickoff. Task 024 authored the POCO Models subfolder; this task scaffolds the .csproj that compiles it.</dependency>
+    </dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-010">Scope: L2 has its own DI graph. Do NOT reference BFF (Sprk.Bff.Api) assemblies from L2 — L2 reuses infrastructure PATTERNS (via canonical reference reading), not compiled dependencies. Register services via module extension methods (parity with BFF's *Module.cs pattern) to avoid god-class DI.</constraint>
+    <constraint source="ADR-028">Scope: JWT Bearer configuration uses UAMI identity for downstream calls (KV, Cosmos data-plane, Service Bus). Audience api://spaarke-provisioning-controlplane-{env}; issuer https://sts.windows.net/{spaarkeTenantId}/.</constraint>
+    <constraint source="ADR-032">Scope: any conditional service registered in L2 must follow the Null-Object kill-switch pattern P1/P2/P3 (per §10 §F.1 anti-pattern rule) — do NOT emit if (flag) { AddService } blocks without a Null-Object counterpart.</constraint>
+    <constraint source="project">FR-20 acceptance: L3 skill can auth via az account get-access-token; Operator-role required for mutating endpoints returns 403 without role. This task scaffolds the authorization policies; downstream tasks add the mutating endpoints.</constraint>
+    <constraint source="project">MUST use .NET 10 (TFM net10.0), Directory.Build.props inheritance (TreatWarningsAsErrors=true + analyzers-as-errors per NFR-06), and nullable reference types enabled.</constraint>
+    <constraint source="project">MUST NOT touch src/server/api/Sprk.Bff.Api/** — L2 is a peer service, not a BFF extension.</constraint>
+    <constraint source="project">Scope (this task only): scaffold + placeholder /ping + placeholder /api/runs POST that returns 401 unauth. Do NOT wire Cosmos, Service Bus, or App Insights (those are tasks 037/038/039).</constraint>
+    <constraint source="project">Publish-size impact: L2 is a SEPARATE App Service; its publish size is NOT part of the BFF ≤60 MB ceiling (NFR-01 scopes to BFF). Report L2's own publish size baseline in task notes for future L2-scope tracking.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>.NET 10 minimal API scaffold; JWT Bearer + app-role auth; module-based DI</topic>
+    <files>
+      <file>projects/customer-provisioning-orchestration-r1/spec.md</file>
+      <file>projects/customer-provisioning-orchestration-r1/design.md</file>
+      <file>projects/customer-provisioning-orchestration-r1/CLAUDE.md</file>
+      <file>.claude/adr/ADR-010-di-minimalism.md</file>
+      <file>.claude/adr/ADR-028-spaarke-auth-architecture.md</file>
+      <file>.claude/adr/ADR-032-bff-nullobject-kill-switch.md</file>
+      <file>.claude/adr/ADR-036-background-job-infrastructure.md</file>
+      <file>.claude/constraints/api.md</file>
+      <file>.claude/constraints/auth.md</file>
+      <file>.claude/constraints/jobs.md</file>
+      <file>.claude/patterns/api/</file>
+      <file>.claude/patterns/auth/</file>
+    </files>
+    <patterns>
+      <pattern name="BFF Program.cs minimal API bootstrap" location="src/server/api/Sprk.Bff.Api/Program.cs">Mirror the WebApplication builder + module composition pattern (AddAuthentication, AddAuthorization, module extension methods).</pattern>
+      <pattern name="BFF *Module.cs DI pattern" location="src/server/api/Sprk.Bff.Api/">Extension-method-per-module registration to avoid god-class Program.cs (respect NFR-07 god-class ratchet).</pattern>
+      <pattern name="Endpoint filter pattern (Registration endpoints)" location="src/server/api/Sprk.Bff.Api/Api/Registration/">Mirror the endpoint-filter registration for authorization enforcement.</pattern>
+    </patterns>
+  </knowledge>
+
+  <steps mode="prescriptive">
+    <step order="0" name="Context + rigor declaration">Output the RIGOR LEVEL declaration (FULL + reason — l2-controlplane + auth + NEW surface). Load spec.md FR-20, design.md §5.2, ADR-010, ADR-028, ADR-032, ADR-036.</step>
+    <step order="1">Create the folder src/server/services/Sprk.Provisioning.ControlPlane/ and initialize a net10.0 minimal API .csproj (dotnet new webapi -f net10.0, then adjust per Directory.Build.props inheritance).</step>
+    <step order="2">Add PackageReferences: Microsoft.AspNetCore.Authentication.JwtBearer, Microsoft.Identity.Web (or Microsoft.AspNetCore.Authorization), Swashbuckle.AspNetCore, Microsoft.ApplicationInsights.AspNetCore (deferred wiring to task 039 but reference now), Azure.Identity, System.Text.Json. Verify zero HIGH-severity CVEs per NFR-02.</step>
+    <step order="3">Author Program.cs with WebApplication.CreateBuilder pattern + module composition (AddAuthModule, AddSwaggerModule, MapHealthEndpoints).</step>
+    <step order="4">Author Modules/AuthModule.cs: AddAuthentication().AddJwtBearer(...) with audience api://spaarke-provisioning-controlplane-{env}; AddAuthorization with policies Operator (requires app-role Operator) + Reader (requires app-role Reader OR Operator).</step>
+    <step order="5">Author Modules/SwaggerModule.cs: Swashbuckle at /swagger with bearer-token security scheme.</step>
+    <step order="6">Author Endpoints/HealthEndpoints.cs: MapGet("/ping") returning "ok" (AllowAnonymous); MapPost("/api/runs") returning Results.StatusCode(501) — placeholder — under RequireAuthorization("Operator").</step>
+    <step order="7">Add src/server/services/Sprk.Provisioning.ControlPlane/ project to spaarke.sln.</step>
+    <step order="8">Run dotnet build src/server/services/Sprk.Provisioning.ControlPlane/ -c Release — verify 0 errors, 0 warnings (analyzers-as-errors).</step>
+    <step order="9">Run dotnet publish -c Release -o deploy/l2-publish/ — record baseline publish size in task notes (this is L2's own ceiling; NOT counted against BFF NFR-01).</step>
+    <step order="10">Update TASK-INDEX.md: set this task's status to ✅.</step>
+    <step order="11">Document deviation (e.g. Microsoft.Identity.Web vs raw JwtBearer choice, folder structure nuance) in projects/customer-provisioning-orchestration-r1/notes/.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If DI registration for the placeholder /api/runs endpoint collides with a BFF-namespace type OR the Sprk.Provisioning.ControlPlane project accidentally references Sprk.Bff.Api compiled output, STOP and escalate per CLAUDE.md §6 — L2 must be a peer, not a dependency-referrer.</trigger>
+    <trigger>If Microsoft.AspNetCore.Authentication.JwtBearer or Microsoft.Identity.Web has a HIGH-severity CVE (dotnet list package --vulnerable --include-transitive), STOP and escalate — do NOT add a package with an open HIGH CVE per NFR-02.</trigger>
+  </escalation>
+
+  <justification>
+    <existing>None. src/server/services/ does not exist (verified via ls); Sprk.Bff.Api is per-customer, not fleet-scoped. spec.md § New Components row 1 documents this explicitly: "L2 control-plane .NET 10 App Service — no existing overlap."</existing>
+    <extension>No — BFF's per-customer nature + ADR-010 DI minimalism + §10 BFF Hygiene binding-rule preclude adding fleet orchestration to BFF. L2 is a distinct project.</extension>
+    <cost-of-doing-nothing>Without L2 scaffold, provisioning stays 3-generation fragmented (13 known issues per ENV-GUIDE per spec.md § New Components row 1); no unified state; operator manually merges 3 docs per §2; every downstream Wave C4 handler task blocked. Every Phase D/F acceptance criterion cascades to failure.</cost-of-doing-nothing>
+  </justification>
+
+  <outputs>
+    <output type="code">src/server/services/Sprk.Provisioning.ControlPlane/Sprk.Provisioning.ControlPlane.csproj</output>
+    <output type="code">src/server/services/Sprk.Provisioning.ControlPlane/Program.cs</output>
+    <output type="code">src/server/services/Sprk.Provisioning.ControlPlane/Modules/AuthModule.cs</output>
+    <output type="code">src/server/services/Sprk.Provisioning.ControlPlane/Modules/SwaggerModule.cs</output>
+    <output type="code">src/server/services/Sprk.Provisioning.ControlPlane/Endpoints/HealthEndpoints.cs</output>
+    <output type="code">src/server/services/Sprk.Provisioning.ControlPlane/appsettings.json</output>
+    <output type="code">spaarke.sln (updated to include new project)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Given dotnet build src/server/services/Sprk.Provisioning.ControlPlane/ -c Release, exit is 0 with 0 errors + 0 warnings (analyzers-as-errors).</criterion>
+    <criterion testable="true">Given dotnet run on the scaffold, GET /ping returns 200 with body "ok" (unauthenticated); GET /swagger returns 200.</criterion>
+    <criterion testable="true">Given POST /api/runs without an Authorization header, response is 401 Unauthorized.</criterion>
+    <criterion testable="true">Given a valid bearer token with app-role Operator, POST /api/runs returns 501 (placeholder — will be implemented in Wave C5).</criterion>
+    <criterion testable="true">Given a valid bearer token WITHOUT app-role Operator, POST /api/runs returns 403 Forbidden.</criterion>
+    <criterion testable="true">Given dotnet list package --vulnerable --include-transitive, 0 HIGH-severity CVEs.</criterion>
+    <criterion testable="true">Negative: no reference to Sprk.Bff.Api project OR its compiled DLLs; L2 is a peer.</criterion>
+    <criterion testable="true">Negative: no Cosmos, Service Bus, or App Insights wiring in this task (deferred to 037/038/039).</criterion>
+  </acceptance-criteria>
+
+  <notes>Maps spec.md FR-20 + § New Components row 1 acceptance. The placeholder endpoints validate the auth + routing wiring without committing to handler implementations. Tasks 037/038/039 add Cosmos client + Service Bus client + App Insights wiring on top of this scaffold. L2's publish size is L2's own ceiling; NOT part of BFF NFR-01 60 MB budget.</notes>
+
+  <execution><skill>.claude/skills/task-execute/SKILL.md</skill></execution>
+</task>

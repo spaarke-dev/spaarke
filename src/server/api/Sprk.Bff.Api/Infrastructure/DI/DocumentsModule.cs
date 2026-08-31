@@ -1,3 +1,4 @@
+using Microsoft.Extensions.DependencyInjection.Extensions;
 using Spaarke.Core.Auth;
 using Sprk.Bff.Api.Api.Filters;
 using Sprk.Bff.Api.Infrastructure.Graph;
@@ -9,6 +10,12 @@ public static class DocumentsModule
 {
     public static IServiceCollection AddDocumentsModule(this IServiceCollection services)
     {
+        // Clock for share-link expiry (unified-access-control-r2 task 072). TryAdd, matching the
+        // idempotent convention in CommunicationModule / InsightsIngestModule / MembershipModule —
+        // whichever module loads first wins and the others no-op. Registered HERE so the share-link
+        // route does not depend on an unrelated module having been added.
+        services.TryAddSingleton(TimeProvider.System);
+
         // ============================================================================
         // Phase 4: Token Caching (ADR-009: Redis-First Caching)
         // ============================================================================

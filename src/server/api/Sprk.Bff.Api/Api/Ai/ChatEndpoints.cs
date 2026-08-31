@@ -1,3 +1,4 @@
+using Sprk.Bff.Api.Infrastructure.Authentication;
 using System.Text.Json;
 using System.Text.Json.Serialization;
 using Microsoft.AspNetCore.Mvc;
@@ -32,8 +33,8 @@ namespace Sprk.Bff.Api.Api.Ai;
 /// All endpoints follow ADR-001 (Minimal API) and ADR-008 (endpoint filters for authorization).
 /// SSE streaming follows the same pattern as <see cref="AnalysisEndpoints"/> for consistency.
 ///
-/// TenantId is extracted from the 'tid' JWT claim per ADR-014 (tenant-scoped cache keys),
-/// with X-Tenant-Id header as a fallback for service-to-service calls.
+/// TenantId is extracted from the 'tid' JWT claim per ADR-014 (tenant-scoped cache keys).
+/// Tenant comes from the caller's authenticated principal and from nothing else (task 059 — see Infrastructure/Authentication/TenantResolution).
 /// </summary>
 public static class ChatEndpoints
 {
@@ -95,6 +96,7 @@ public static class ChatEndpoints
         // in task 050 (handler-level) executes only on requests that already passed auth + rate
         // limiting. No filter bypass is introduced.
         group.MapPost("/sessions/{sessionId}/messages", SendMessageAsync)
+            .AddSessionOwnershipFilter()
             .AddAiAuthorizationFilter()
             .RequireRateLimiting("ai-stream")
             .WithName("SendChatMessage")
@@ -110,6 +112,7 @@ public static class ChatEndpoints
 
         // POST /api/ai/chat/sessions/{sessionId}/refine — SSE-streamed text refinement
         group.MapPost("/sessions/{sessionId}/refine", RefineTextAsync)
+            .AddSessionOwnershipFilter()
             .AddAiAuthorizationFilter()
             .RequireRateLimiting("ai-stream")
             .WithName("RefineText")
@@ -125,6 +128,7 @@ public static class ChatEndpoints
 
         // GET /api/ai/chat/sessions/{sessionId}/history — retrieve message history
         group.MapGet("/sessions/{sessionId}/history", GetHistoryAsync)
+            .AddSessionOwnershipFilter()
             .AddAiAuthorizationFilter()
             .WithName("GetChatHistory")
             .WithSummary("Get chat message history for a session")
@@ -135,6 +139,7 @@ public static class ChatEndpoints
 
         // PATCH /api/ai/chat/sessions/{sessionId}/context — switch document/playbook context
         group.MapMethods("/sessions/{sessionId}/context", ["PATCH"], SwitchContextAsync)
+            .AddSessionOwnershipFilter()
             .AddAiAuthorizationFilter()
             .WithName("SwitchChatContext")
             .WithSummary("Switch the document and/or playbook context for an existing session")
@@ -147,6 +152,7 @@ public static class ChatEndpoints
 
         // PATCH /api/ai/chat/sessions/{sessionId} — rename a session (FR-D4, task 032)
         group.MapMethods("/sessions/{sessionId}", ["PATCH"], RenameSessionAsync)
+            .AddSessionOwnershipFilter()
             .AddAiAuthorizationFilter()
             .WithName("RenameChatSession")
             .WithSummary("Rename a chat session (FR-D4)")
@@ -159,17 +165,25 @@ public static class ChatEndpoints
 
         // DELETE /api/ai/chat/sessions/{sessionId} — delete a session
         group.MapDelete("/sessions/{sessionId}", DeleteSessionAsync)
+            .AddSessionOwnershipFilter()
             .AddAiAuthorizationFilter()
             .WithName("DeleteChatSession")
             .WithSummary("Delete a chat session")
-            .WithDescription("Removes the session from Redis and archives it in Dataverse. Chat history is retained as an audit trail.")
+            .WithDescription(
+                "Erases every copy of the session's uploaded file bytes (durable blob + the 4-hour " +
+                "doc-upload caches), removes the session from Redis and Cosmos, and archives it in " +
+                "Dataverse. Chat history is retained as an audit trail. Returns 500 with errorCode " +
+                "'session.durable-erasure-incomplete' if the file bytes could not be confirmed erased — " +
+                "in that case NOTHING was deleted and the request can be retried (FR-B06).")
             .Produces(204)
             .ProducesProblem(401)
             .ProducesProblem(403)
-            .ProducesProblem(404);
+            .ProducesProblem(404)
+            .ProducesProblem(500);
 
         // GET /api/ai/chat/sessions/{sessionId}/restore — restore session state for three-pane UI
         group.MapGet("/sessions/{sessionId}/restore", RestoreSessionAsync)
+            .AddSessionOwnershipFilter()
             .AddAiAuthorizationFilter()
             .WithName("RestoreSession")
             .WithSummary("Restore a persisted session for the three-pane UI")
@@ -197,6 +211,7 @@ public static class ChatEndpoints
         // PATCH /api/ai/chat/sessions/{sessionId}/tabs — write-through workspace tab persistence (NFR-09, task 065)
         // Endpoint filters match the sibling /messages route (ADR-008): auth + ai-stream rate limit.
         group.MapMethods("/sessions/{sessionId}/tabs", ["PATCH"], SaveTabsAsync)
+            .AddSessionOwnershipFilter()
             .AddAiAuthorizationFilter()
             .RequireRateLimiting("ai-stream")
             .WithName("SaveSessionTabs")
@@ -210,6 +225,7 @@ public static class ChatEndpoints
 
         // GET /api/ai/chat/sessions/{sessionId}/tabs — read persisted workspace tabs (NFR-09, task 065)
         group.MapGet("/sessions/{sessionId}/tabs", GetTabsAsync)
+            .AddSessionOwnershipFilter()
             .AddAiAuthorizationFilter()
             .RequireRateLimiting("ai-stream")
             .WithName("GetSessionTabs")
@@ -230,6 +246,7 @@ public static class ChatEndpoints
         // upstream failure or when the AI feature is disabled. Same auth as the sibling session
         // endpoints.
         group.MapPost("/sessions/{sessionId}/suggest", SuggestFollowupsAsync)
+            .AddSessionOwnershipFilter()
             .AddAiAuthorizationFilter()
             .RequireRateLimiting("ai-stream")
             .WithName("SuggestFollowups")
@@ -246,6 +263,7 @@ public static class ChatEndpoints
         // task 016 HOOK #1). Read-only projection of session.Outputs (ADR-040); same auth as
         // the sibling GET session endpoints.
         group.MapGet("/sessions/{sessionId}/compose-outputs", GetComposeOutputsAsync)
+            .AddSessionOwnershipFilter()
             .AddAiAuthorizationFilter()
             .WithName("GetSessionComposeOutputs")
             .WithSummary("Read stored compose-disposition draft outputs for a session (FR-04)")
@@ -267,6 +285,7 @@ public static class ChatEndpoints
         // re-materializes to nothing); "replace" chains this retraction to a fresh Draft-Alternative
         // dispatch (the client). Same auth as the sibling session-write endpoints (ADR-008).
         group.MapPost("/sessions/{sessionId}/compose-outputs/supersede", SupersedeComposeOutputAsync)
+            .AddSessionOwnershipFilter()
             .AddAiAuthorizationFilter()
             .WithName("SupersedeComposeOutput")
             .WithSummary("Retract/supersede a prior compose draft as a ledger supersession (FR-17)")
@@ -285,6 +304,7 @@ public static class ChatEndpoints
         // only via the ISessionTraceReader PublicContracts facade (ADR-013). Same auth + rate
         // limit as the sibling session-read routes (ADR-008): AddAiAuthorizationFilter + ai-stream.
         group.MapGet("/sessions/{sessionId}/trace", GetSessionTraceAsync)
+            .AddSessionOwnershipFilter()
             .AddAiAuthorizationFilter()
             .RequireRateLimiting("ai-stream")
             .WithName("GetSessionTrace")
@@ -343,6 +363,7 @@ public static class ChatEndpoints
         // PendingInvocations — without this route the dialog's Confirm has no server path
         // and the loop-boundary suspensions (task 034) have no resume surface.
         group.MapPost("/sessions/{sessionId}/gates/{gateId}/resolve", ResolveGateAsync)
+            .AddSessionOwnershipFilter()
             .AddAiAuthorizationFilter()
             .RequireRateLimiting("ai-stream")
             .WithName("ResolveGate")
@@ -362,6 +383,7 @@ public static class ChatEndpoints
 
         // GET /api/ai/chat/sessions/{sessionId}/commands — resolve dynamic command catalog
         group.MapGet("/sessions/{sessionId}/commands", GetCommandsAsync)
+            .AddSessionOwnershipFilter()
             .AddAiAuthorizationFilter()
             .WithName("GetChatCommands")
             .WithSummary("Resolve available slash commands for a chat session")
@@ -405,7 +427,20 @@ public static class ChatEndpoints
             return Results.Problem(
                 statusCode: 400,
                 title: "Bad Request",
-                detail: "Tenant ID not found in token claims (tid) or X-Tenant-Id header.");
+                detail: "Tenant ID not found in token claims (tid).");
+        }
+
+        // Issue #863 — the session's owner. Null means the caller carries no Entra oid, which is a
+        // 401 (unidentifiable), never a 403 and never an unowned session: an unowned session fails
+        // closed for everyone afterwards, including the person who just created it.
+        var ownerOid = CallerResolution.ResolveObjectId(httpContext.User);
+        if (string.IsNullOrEmpty(ownerOid))
+        {
+            return Results.Problem(
+                statusCode: 401,
+                title: "Unauthorized",
+                detail: "User identity not found",
+                type: "https://tools.ietf.org/html/rfc7235#section-3.1");
         }
 
         logger.LogInformation(
@@ -414,6 +449,7 @@ public static class ChatEndpoints
 
         var session = await sessionManager.CreateSessionAsync(
             tenantId,
+            ownerOid,
             request.DocumentId,
             request.PlaybookId,
             request.HostContext,
@@ -465,7 +501,7 @@ public static class ChatEndpoints
         if (string.IsNullOrEmpty(tenantId))
         {
             response.StatusCode = StatusCodes.Status400BadRequest;
-            await response.WriteAsJsonAsync(new { error = "Tenant ID not found in token claims or X-Tenant-Id header" }, cancellationToken);
+            await response.WriteAsJsonAsync(new { error = "Tenant ID not found in token claims" }, cancellationToken);
             return;
         }
 
@@ -1157,7 +1193,7 @@ public static class ChatEndpoints
         if (string.IsNullOrEmpty(tenantId))
         {
             response.StatusCode = StatusCodes.Status400BadRequest;
-            await response.WriteAsJsonAsync(new { error = "Tenant ID not found in token claims or X-Tenant-Id header" }, cancellationToken);
+            await response.WriteAsJsonAsync(new { error = "Tenant ID not found in token claims" }, cancellationToken);
             return;
         }
 
@@ -1271,7 +1307,7 @@ public static class ChatEndpoints
             return Results.Problem(
                 statusCode: 400,
                 title: "Bad Request",
-                detail: "Tenant ID not found in token claims (tid) or X-Tenant-Id header.");
+                detail: "Tenant ID not found in token claims (tid).");
         }
 
         logger.LogDebug(
@@ -1311,7 +1347,7 @@ public static class ChatEndpoints
             return Results.Problem(
                 statusCode: 400,
                 title: "Bad Request",
-                detail: "Tenant ID not found in token claims (tid) or X-Tenant-Id header.");
+                detail: "Tenant ID not found in token claims (tid).");
         }
 
         var session = await sessionManager.GetSessionAsync(tenantId, sessionId, cancellationToken);
@@ -1375,7 +1411,7 @@ public static class ChatEndpoints
             return Results.Problem(
                 statusCode: 400,
                 title: "Bad Request",
-                detail: "Tenant ID not found in token claims (tid) or X-Tenant-Id header.");
+                detail: "Tenant ID not found in token claims (tid).");
         }
 
         if (string.IsNullOrWhiteSpace(request.Title))
@@ -1420,7 +1456,13 @@ public static class ChatEndpoints
     /// Delete a chat session.
     /// DELETE /api/ai/chat/sessions/{sessionId}
     /// </summary>
-    private static async Task<IResult> DeleteSessionAsync(
+    /// <remarks>
+    /// <c>internal</c> rather than <c>private</c> so the FR-B06 contract — an unconfirmed durable
+    /// erasure is a 500 with a stable errorCode, never a 204 — is asserted against THIS handler rather
+    /// than against a re-implementation of its branch. No test host maps this route today, and standing
+    /// one up for a two-line decision would cost far more surface than it proves.
+    /// </remarks>
+    internal static async Task<IResult> DeleteSessionAsync(
         string sessionId,
         ChatSessionManager sessionManager,
         HttpContext httpContext,
@@ -1433,7 +1475,7 @@ public static class ChatEndpoints
             return Results.Problem(
                 statusCode: 400,
                 title: "Bad Request",
-                detail: "Tenant ID not found in token claims (tid) or X-Tenant-Id header.");
+                detail: "Tenant ID not found in token claims (tid).");
         }
 
         // Verify session exists before deleting (returns 404 if not found)
@@ -1446,11 +1488,50 @@ public static class ChatEndpoints
         logger.LogInformation(
             "DeleteSession: session={SessionId}, tenant={TenantId}", sessionId, tenantId);
 
-        await sessionManager.DeleteSessionAsync(tenantId, sessionId, cancellationToken);
+        var erasure = await sessionManager.DeleteSessionAsync(tenantId, sessionId, cancellationToken);
 
-        logger.LogInformation("Session deleted: {SessionId}", sessionId);
+        // spaarkeai-compose-r8 FR-B06 (task 063). A 204 here is a statement that the session and its
+        // uploaded files are gone. When the durable byte erasure could not be confirmed, that statement
+        // is false — and it is the kind of false that nothing downstream would ever contradict, because
+        // the manifest and the UI entry are the very things that would have shown the gap. So the
+        // deletion fails closed: the session record is intact (DeleteSessionAsync returned before
+        // touching it), the user still sees the conversation, and re-issuing this DELETE completes the
+        // erasure — SessionFileEraser enumerates the blob prefix and needs no manifest to find residue.
+        if (erasure.State == SessionFileErasureState.Incomplete)
+        {
+            logger.LogError(
+                "DeleteSession REFUSED for session={SessionId}, tenant={TenantId}: durable file bytes " +
+                "could not be confirmed erased (reason={Reason}). The session was not deleted.",
+                sessionId, tenantId, erasure.Reason);
+
+            // ADR-019: stable errorCode + correlationId so a client can tell THIS 500 from any other on
+            // this route, and so the response and the log line can be joined.
+            return Results.Problem(
+                statusCode: 500,
+                title: "Internal Server Error",
+                detail: "The session's stored files could not be confirmed deleted, so the session was " +
+                        "not deleted. Nothing was partially removed from your history. Please try again.",
+                extensions: new Dictionary<string, object?>
+                {
+                    ["errorCode"] = DurableErasureIncompleteErrorCode,
+                    ["correlationId"] = httpContext.TraceIdentifier
+                });
+        }
+
+        logger.LogInformation(
+            "Session deleted: {SessionId} (durableErasure={State}, blobsDeleted={Deleted})",
+            sessionId, erasure.State, erasure.BlobsDeleted);
+
         return Results.NoContent();
     }
+
+    /// <summary>
+    /// ADR-019 stable errorCode for "the session's durable file bytes could not be confirmed erased,
+    /// so the session was NOT deleted" (spaarkeai-compose-r8 FR-B06). Distinct from
+    /// <c>session.durable-store-failed</c> (task 060, the upload-side write failure): this one tells a
+    /// client that nothing was removed and that retrying the same DELETE is both safe and meaningful.
+    /// </summary>
+    internal const string DurableErasureIncompleteErrorCode = "session.durable-erasure-incomplete";
 
     /// <summary>
     /// GET /api/ai/chat/sessions/{sessionId}/compose-outputs
@@ -1476,7 +1557,7 @@ public static class ChatEndpoints
             return Results.Problem(
                 statusCode: 400,
                 title: "Bad Request",
-                detail: "Tenant ID not found in token claims (tid) or X-Tenant-Id header.");
+                detail: "Tenant ID not found in token claims (tid).");
         }
 
         var session = await sessionManager.GetSessionAsync(tenantId, sessionId, cancellationToken);
@@ -1550,7 +1631,7 @@ public static class ChatEndpoints
             return Results.Problem(
                 statusCode: 400,
                 title: "Bad Request",
-                detail: "Tenant ID not found in token claims (tid) or X-Tenant-Id header.");
+                detail: "Tenant ID not found in token claims (tid).");
         }
 
         if (request is null || string.IsNullOrWhiteSpace(request.SupersedesRef))
@@ -1802,21 +1883,21 @@ public static class ChatEndpoints
         var tenantId = ExtractTenantId(httpContext);
         if (string.IsNullOrEmpty(tenantId))
         {
-            // Diagnostic: log claim details for debugging
+            // Diagnostic: log claim details for debugging. Task 059 dropped the X-Tenant-Id header from
+            // this line — the header no longer participates in resolution, so reporting it here would
+            // point whoever reads the log at a value that had no bearing on the outcome.
             var claims = httpContext.User.Claims.Select(c => $"{c.Type}={c.Value}").ToArray();
-            var xTenantHeader = httpContext.Request.Headers["X-Tenant-Id"].FirstOrDefault();
             logger.LogWarning(
                 "GetContextMappings: tenant ID missing — " +
-                "claimCount={ClaimCount}, claims=[{Claims}], X-Tenant-Id={XTenantId}, entityType={EntityType}",
+                "claimCount={ClaimCount}, claims=[{Claims}], entityType={EntityType}",
                 claims.Length,
                 claims.Length > 0 ? string.Join("; ", claims.Take(10)) : "(none)",
-                xTenantHeader ?? "(none)",
                 entityType);
 
             return Results.Problem(
                 statusCode: 400,
                 title: "Bad Request",
-                detail: "Tenant ID not found in token claims (tid) or X-Tenant-Id header.");
+                detail: "Tenant ID not found in token claims (tid).");
         }
 
         logger.LogDebug(
@@ -1848,7 +1929,7 @@ public static class ChatEndpoints
             return Results.Problem(
                 statusCode: 400,
                 title: "Bad Request",
-                detail: "Tenant ID not found in token claims (tid) or X-Tenant-Id header.");
+                detail: "Tenant ID not found in token claims (tid).");
         }
 
         logger.LogInformation(
@@ -1894,7 +1975,7 @@ public static class ChatEndpoints
             return Results.Problem(
                 statusCode: 400,
                 title: "Bad Request",
-                detail: "Tenant ID not found in token claims (tid) or X-Tenant-Id header.");
+                detail: "Tenant ID not found in token claims (tid).");
         }
 
         // Retrieve the session to obtain host context (entity type for playbook filtering)
@@ -2024,12 +2105,27 @@ public static class ChatEndpoints
             return Results.Problem(
                 statusCode: 400,
                 title: "Bad Request",
-                detail: "Tenant ID not found in token claims (tid) or X-Tenant-Id header.");
+                detail: "Tenant ID not found in token claims (tid).");
         }
 
-        // R4-8 (UAT 2026-07-19): list the tenant's most-recent sessions from the Cosmos warm tier.
+        // Issue #863 — History is the CALLER'S history. Until 2026-08-28 this query was
+        // tenant-scoped only, so every user was shown every other user's sessions: ids, titles and
+        // content previews. That list was also the delivery mechanism for the missing owner check
+        // on DELETE, because it handed out the very ids that route accepted.
+        var ownerOid = CallerResolution.ResolveObjectId(httpContext.User);
+        if (string.IsNullOrEmpty(ownerOid))
+        {
+            return Results.Problem(
+                statusCode: 401,
+                title: "Unauthorized",
+                detail: "User identity not found",
+                type: "https://tools.ietf.org/html/rfc7235#section-3.1");
+        }
+
+        // R4-8 (UAT 2026-07-19): list the caller's most-recent sessions from the Cosmos warm tier.
         // Returns a top-level JSON array (the History dropdown expects `Array.isArray`).
-        var recent = await persistenceService.ListRecentSessionsAsync(tenantId, limit, cancellationToken);
+        var recent = await persistenceService.ListRecentSessionsAsync(
+            tenantId, ownerOid, limit, cancellationToken);
         var sessions = recent
             .Select(s => new RecentSessionDto(
                 Id: s.SessionId,
@@ -2073,14 +2169,28 @@ public static class ChatEndpoints
 
     /// <summary>
     /// A single uploaded file in the restore response — minimal projection of the session manifest
-    /// (FR-D5). Camel-cased on the wire by System.Text.Json (fileId/fileName/contentType/sizeBytes),
-    /// matching the client <c>SessionRestoreUploadedFile</c> shape in <c>useSessionRestore.ts</c>.
+    /// (FR-D5). Camel-cased on the wire by System.Text.Json
+    /// (fileId/fileName/contentType/sizeBytes/contentAvailable), matching the client
+    /// <c>SessionRestoreUploadedFile</c> shape in <c>useSessionRestore.ts</c>.
     /// </summary>
+    /// <param name="FileId">Stable session-scoped file id.</param>
+    /// <param name="FileName">Original upload file name (chip label).</param>
+    /// <param name="ContentType">MIME content type as reported on upload.</param>
+    /// <param name="SizeBytes">Original (uncompressed) file size in bytes.</param>
+    /// <param name="ContentAvailable">
+    /// spaarkeai-compose-r8 FR-B05 (task 062) — the server-authoritative availability fact that
+    /// REPLACES R7's client-side ~24h heuristic. <c>true</c> = a durable byte copy exists, so the
+    /// content lives as long as the session. <c>false</c> = the durable store is configured and holds
+    /// no copy. <c>null</c> (omitted-by-shape when unknown) = the server cannot answer, and the client
+    /// MUST render "unknown" rather than substituting a guess — two availability sources is the drift
+    /// FR-B05 exists to remove. See <see cref="Services.Ai.Sessions.SessionFileAvailability"/>.
+    /// </param>
     internal record SessionRestoreUploadedFileDto(
         string FileId,
         string FileName,
         string ContentType,
-        long SizeBytes);
+        long SizeBytes,
+        bool? ContentAvailable);
 
     /// <summary>
     /// GET /api/ai/chat/sessions/{sessionId}/restore
@@ -2098,7 +2208,7 @@ public static class ChatEndpoints
             return Results.Problem(
                 statusCode: 400,
                 title: "Bad Request",
-                detail: "Tenant ID not found in token claims (tid) or X-Tenant-Id header.");
+                detail: "Tenant ID not found in token claims (tid).");
         }
 
         var restored = await restoreService.RestoreSessionAsync(tenantId, sessionId, cancellationToken);
@@ -2120,7 +2230,8 @@ public static class ChatEndpoints
         // FR-D5: project the restored uploaded-files manifest to the wire DTO (already minimal — the
         // restore service dropped enriched fields). Empty list when the session had no attachments.
         var uploadedFiles = restored.UploadedFiles
-            .Select(f => new SessionRestoreUploadedFileDto(f.FileId, f.FileName, f.ContentType, f.SizeBytes))
+            .Select(f => new SessionRestoreUploadedFileDto(
+                f.FileId, f.FileName, f.ContentType, f.SizeBytes, f.ContentAvailable))
             .ToList();
 
         var response = new SessionRestoreResponse(
@@ -2169,7 +2280,7 @@ public static class ChatEndpoints
             return Results.Problem(
                 statusCode: 400,
                 title: "Bad Request",
-                detail: "Tenant ID not found in token claims (tid) or X-Tenant-Id header.");
+                detail: "Tenant ID not found in token claims (tid).");
         }
 
         var sessions = await dataverseRepository.GetSessionsByAnalysisAsync(tenantId, analysisId, cancellationToken);
@@ -2242,7 +2353,7 @@ public static class ChatEndpoints
             return Results.Problem(
                 statusCode: 400,
                 title: "Bad Request",
-                detail: "Tenant ID not found in token claims (tid) or X-Tenant-Id header.");
+                detail: "Tenant ID not found in token claims (tid).");
         }
 
         var trace = await traceReader.ReadTraceAsync(tenantId, sessionId, cancellationToken);
@@ -2290,7 +2401,7 @@ public static class ChatEndpoints
             return Results.Problem(
                 statusCode: 400,
                 title: "Bad Request",
-                detail: "Tenant ID not found in token claims (tid) or X-Tenant-Id header.");
+                detail: "Tenant ID not found in token claims (tid).");
         }
 
         if (request is null || request.Tabs is null)
@@ -2370,7 +2481,7 @@ public static class ChatEndpoints
             return Results.Problem(
                 statusCode: 400,
                 title: "Bad Request",
-                detail: "Tenant ID not found in token claims (tid) or X-Tenant-Id header.");
+                detail: "Tenant ID not found in token claims (tid).");
         }
 
         var session = await persistence.LoadSessionAsync(tenantId, sessionId, cancellationToken);
@@ -2524,7 +2635,7 @@ public static class ChatEndpoints
             return Results.Problem(
                 statusCode: 400,
                 title: "Bad Request",
-                detail: "Tenant ID not found in token claims (tid) or X-Tenant-Id header.");
+                detail: "Tenant ID not found in token claims (tid).");
         }
 
         // A proactive surface degrades silently: a request with no context type yields no chips
@@ -2665,7 +2776,7 @@ public static class ChatEndpoints
         if (string.IsNullOrEmpty(tenantId))
         {
             return Results.Problem(
-                detail: "Tenant ID not found in token claims or X-Tenant-Id header",
+                detail: "Tenant ID not found in token claims",
                 statusCode: StatusCodes.Status400BadRequest,
                 title: "Bad Request");
         }
@@ -2974,21 +3085,14 @@ public static class ChatEndpoints
     }
 
     /// <summary>
-    /// Extracts the tenant ID from the JWT 'tid' claim (ADR-014) with X-Tenant-Id header fallback
-    /// for service-to-service calls that don't carry a user JWT.
+    /// Extracts the tenant ID from the JWT 'tid' claim (ADR-014).
+    /// Tenant comes from the caller's authenticated principal and from nothing else (task 059 — see Infrastructure/Authentication/TenantResolution).
     /// </summary>
     private static string? ExtractTenantId(HttpContext httpContext)
     {
         // Primary: 'tid' claim from Azure AD JWT token
         // Microsoft.Identity.Web may map 'tid' to the long-form URI claim
-        var tenantId = httpContext.User.FindFirst("tid")?.Value
-            ?? httpContext.User.FindFirst("http://schemas.microsoft.com/identity/claims/tenantid")?.Value;
-
-        // Fallback: X-Tenant-Id request header (service-to-service calls)
-        if (string.IsNullOrEmpty(tenantId))
-        {
-            tenantId = httpContext.Request.Headers["X-Tenant-Id"].FirstOrDefault();
-        }
+        var tenantId = TenantResolution.ResolveTenantId(httpContext.User);
 
         return tenantId;
     }
@@ -2999,8 +3103,7 @@ public static class ChatEndpoints
     /// </summary>
     private static Guid? ExtractUserId(HttpContext httpContext)
     {
-        var oid = httpContext.User.FindFirst("oid")?.Value
-            ?? httpContext.User.FindFirst("http://schemas.microsoft.com/identity/claims/objectidentifier")?.Value;
+        var oid = CallerResolution.ResolveObjectId(httpContext.User);
         return Guid.TryParse(oid, out var userId) ? userId : null;
     }
 

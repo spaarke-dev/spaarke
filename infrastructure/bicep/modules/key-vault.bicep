@@ -2,7 +2,12 @@
 // Azure Key Vault module for Spaarke infrastructure
 // Hardened: network restrictions, secret rotation, least-privilege RBAC, audit logging
 
-@description('Name of the Key Vault')
+// Vault name. Default (caller-supplied) follows canonical `sprk-{env}-kv` per
+// AZURE-RESOURCE-NAMING-CONVENTION.md § "KV-Secret & Resource Naming Standard" (R3).
+// Dev exception: `spaarke-spekvcert` is a DO-NOT-RENAME live dev-artifact per
+// projects/customer-provisioning-orchestration-r1/notes/naming-exception-registry.md
+// (owner directive #3, 2026-08-15 · FR-35 · §7.9 R3). Do not rename the dev vault.
+@description('Name of the Key Vault. Canonical: sprk-{env}-kv. Dev exception spaarke-spekvcert per naming-exception-registry.md.')
 param keyVaultName string
 
 @description('Location for the Key Vault')
@@ -44,8 +49,11 @@ param allowedIpRanges array = []
 // RBAC PARAMETERS
 // ============================================================================
 
-@description('Principal ID of the App Service managed identity (granted Key Vault Secrets User)')
+@description('Principal ID of the App Service managed identity (granted Key Vault Secrets User). HISTORICALLY the per-customer BFF App Service SystemAssigned MI; task 029 removed the SystemAssigned MI from `modules/app-service.bicep` and task 030 migrates every UAMI-consuming caller to `userAssignedIdentityPrincipalId` below. This param is retained for callers that still supply a legacy principal (interim per plan.md §3 — remove post-Phase F acceptance).')
 param appServicePrincipalId string = ''
+
+@description('Principal ID of the per-customer User-Assigned Managed Identity (from `modules/uami.bicep`, task 028) granted Key Vault Secrets User (built-in role `4633458b-17de-408a-b874-0445c86b69e6`). Task 030 canonical target per ADR-028 (all outbound = DefaultAzureCredential over UAMI) + T5 structural fix (UAMI is stable across slot swaps). Empty default skips the assignment (caller-side wiring — see `customer.bicep` / `stacks/*.bicep`). Set principalType=ServicePrincipal on the emitted assignment.')
+param userAssignedIdentityPrincipalId string = ''
 
 @description('Principal IDs granted Key Vault Administrator role (deployment pipelines, admins)')
 param adminPrincipalIds array = []
@@ -118,10 +126,11 @@ resource keyVault 'Microsoft.KeyVault/vaults@2023-07-01' = {
 // Key Vault secret rotation policies are applied per-secret at creation time
 // (not declaratively via Bicep). Post-deployment scripts should use these values:
 //
-//   Secrets requiring rotation:
-//     redis-connection-string, servicebus-connection-string,
-//     storage-connection-string, openai-api-key, aisearch-admin-key,
-//     communication-webhook-secret
+//   Secrets requiring rotation (canonical names per
+//   scripts/canonical-secret-catalog/manifest.yaml; task 086 alignment):
+//     Redis-ConnectionString, ServiceBus-ConnectionString,
+//     Storage-ConnectionString, AzureOpenAI-ApiKey, AiSearch--AdminKey,
+//     DocumentIntelligence-ApiKey, Communication-WebhookClientState
 //
 //   Expiry: 365 days | Notify: 30 days before expiry
 //
@@ -146,12 +155,36 @@ var keyVaultSecretsUserRoleId = '4633458b-17de-408a-b874-0445c86b69e6'
 var keyVaultAdministratorRoleId = '00482a5a-887f-4fb3-b363-3b7fe8e74483'
 
 // Grant App Service managed identity "Key Vault Secrets User" (read-only secrets)
+// interim per plan.md §3 — remove post-Phase F acceptance (UAMI grants proven).
+// Historically granted the SystemAssigned MI on the per-customer BFF App Service; task 029
+// removed the SystemAssigned MI from `modules/app-service.bicep` so callers no longer have
+// a live SystemAssigned principal to pass. The canonical Phase-C grant is the sibling
+// `uamiSecretsRole` below (UAMI principal, task 030). This block stays wired for any
+// residual caller that still supplies a legacy principal (interim safety net) and for
+// idempotent re-deploys against environments provisioned pre-Phase-C.
 resource appServiceSecretsRole 'Microsoft.Authorization/roleAssignments@2022-04-01' = if (!empty(appServicePrincipalId)) {
   name: guid(keyVault.id, appServicePrincipalId, keyVaultSecretsUserRoleId)
   scope: keyVault
   properties: {
     roleDefinitionId: subscriptionResourceId('Microsoft.Authorization/roleDefinitions', keyVaultSecretsUserRoleId)
     principalId: appServicePrincipalId
+    principalType: 'ServicePrincipal'
+  }
+}
+
+// Grant User-Assigned Managed Identity "Key Vault Secrets User" (read-only secrets).
+// Canonical Phase-C grant per task 030 + ADR-028: every BFF outbound (KV secret reads for
+// startup + runtime `@Microsoft.KeyVault(...)` references) authenticates as the UAMI. The
+// UAMI's principalId is stable across App Service slot swaps + delete/recreate (T5 structural
+// fix), so this assignment does NOT drift the way a SystemAssigned-MI-tied grant would.
+// principalType=ServicePrincipal avoids Azure Graph propagation-delay "principal not found"
+// deploy failures. Idempotent guid() name allows safe re-deploy.
+resource uamiSecretsRole 'Microsoft.Authorization/roleAssignments@2022-04-01' = if (!empty(userAssignedIdentityPrincipalId)) {
+  name: guid(keyVault.id, userAssignedIdentityPrincipalId, keyVaultSecretsUserRoleId)
+  scope: keyVault
+  properties: {
+    roleDefinitionId: subscriptionResourceId('Microsoft.Authorization/roleDefinitions', keyVaultSecretsUserRoleId)
+    principalId: userAssignedIdentityPrincipalId
     principalType: 'ServicePrincipal'
   }
 }
@@ -176,32 +209,26 @@ resource diagnosticSettings 'Microsoft.Insights/diagnosticSettings@2021-05-01-pr
   scope: keyVault
   properties: {
     workspaceId: logAnalyticsWorkspaceId
+    // NOTE (2026-08-18): `retentionPolicy` on diagnosticSettings logs/metrics is
+    // no longer supported for new diagnostic settings — Microsoft moved retention
+    // to be per-Log-Analytics-workspace. Workspace retention is already set via
+    // monitoring.bicep `retentionInDays` param. Do NOT re-add retentionPolicy
+    // here or the deploy will fail with `BadRequest — Diagnostic settings does
+    // not support retention for new diagnostic settings`.
     logs: [
       {
         categoryGroup: 'audit'
         enabled: true
-        retentionPolicy: {
-          enabled: true
-          days: 90
-        }
       }
       {
         categoryGroup: 'allLogs'
         enabled: true
-        retentionPolicy: {
-          enabled: true
-          days: 30
-        }
       }
     ]
     metrics: [
       {
         category: 'AllMetrics'
         enabled: true
-        retentionPolicy: {
-          enabled: true
-          days: 30
-        }
       }
     ]
   }

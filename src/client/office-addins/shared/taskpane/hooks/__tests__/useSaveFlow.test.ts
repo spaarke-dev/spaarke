@@ -50,8 +50,8 @@ const mockGetAccessToken = jest.fn().mockResolvedValue('test-access-token');
 const mockSaveResponse = {
   jobId: 'job-123',
   documentId: 'doc-456',
-  statusUrl: '/office/jobs/job-123',
-  streamUrl: '/office/jobs/job-123/stream',
+  statusUrl: '/api/office/jobs/job-123',
+  streamUrl: '/api/office/jobs/job-123/stream',
   status: 'Queued',
   duplicate: false,
   correlationId: 'corr-789',
@@ -390,8 +390,8 @@ describe('useSaveFlow', () => {
       const duplicateResponse = {
         jobId: 'existing-job',
         documentId: 'existing-doc',
-        statusUrl: '/office/jobs/existing-job',
-        streamUrl: '/office/jobs/existing-job/stream',
+        statusUrl: '/api/office/jobs/existing-job',
+        streamUrl: '/api/office/jobs/existing-job/stream',
         status: 'Completed',
         duplicate: true,
         message: 'This item was previously saved',

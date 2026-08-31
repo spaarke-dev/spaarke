@@ -1,0 +1,116 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="012" project="spaarkeai-compose-r8">
+  <metadata>
+    <title>FR-S03/S04/S05 — Save lifecycle hardening: dirty flag survives a failed POST, timeout + AbortSignal + in-flight guard, working 423 recovery</title>
+    <phase>1 Track S — Save Reliability (P0, ships alone)</phase>
+    <gate>startable</gate>
+    <status>completed</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Rewrites save lifecycle state across ComposeEditor.tsx and ComposeWorkspace.tsx; a mistake here silently loses user work.</rigor-reason>
+    <model-tier>opus</model-tier>
+    <model-tier-reason>Capability-matched: the defect class is "state cleared before the operation that justified clearing it succeeded" — three distinct instances of the same subtle ordering bug, in a file whose happy path looks identical either way. A wrong fix here does not fail loudly; it loses a user's document silently and only on the failure branch. This is the exact profile the model-tier principle reserves opus for.</model-tier-reason>
+    <effort>xhigh</effort>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Same two client files as 010/011; the lifecycle state is shared with the error routing 010 installs.</parallel-reason>
+    <deps>010</deps>
+    <tags>frontend, compose, save-path, testing</tags>
+    <estimated-effort>6 hours</estimated-effort>
+  </metadata>
+
+  <prompt>
+    Three lifecycle defects, one client file-pass, all instances of the same shape — state that assumes success:
+
+    **FR-S03** — `buildContentModel()` in ComposeEditor.tsx resets the born-in-editor dirty flag (~:3005-3006)
+    BEFORE the POST is issued. A failed save therefore leaves the editor believing it is clean: Save disabled,
+    Ctrl+S inert, `beforeunload` disarmed, unmount flush disarmed, toolbar reading "Saved". The user's work is
+    one tab-close from gone. Note the imported path at ~:3010 explicitly avoids this — the fix is to make both
+    paths behave like the imported one, not to invent new behavior.
+
+    **FR-S05** — the save request has no timeout, no `AbortSignal`, and no in-flight guard. A hung request
+    strands `status === 'saving'` permanently; the only recovery is a page reload, which discards the document.
+
+    **FR-S04** — 423 (Word co-authoring lock) needs a named banner and a Retry that actually retries. Task 010
+    installs the status routing; this task makes 423's recovery affordance real and verifies it end-to-end.
+  </prompt>
+
+  <role>SPAARKE frontend developer. Expert in the Compose editor reducer, the TipTap/ProseMirror dirty-tracking model, and React effect lifecycles. Follow ADR-021 (Fluent v9 semantic tokens) and ADR-028.</role>
+
+  <goal>
+    Save-lifecycle state changes only in response to what actually happened. A failed save leaves every
+    recovery affordance armed. A hung save cannot strand the editor. A locked document offers a Retry that
+    succeeds once the lock clears.
+  </goal>
+
+  <context>
+    <background>
+      Verified 2026-08-19 by the Fable review (design.md §3, S-3/S-4/S-5). These are Half-B defects — "did the
+      request arrive and did we tell the truth" — which is why seven releases of engine work never touched
+      them. The imported-document path already gets FR-S03 right, which is both the proof that the fix is
+      cheap and the reason it was never noticed: whichever path the tester used determined whether they saw
+      the bug.
+    </background>
+    <relevant-files>
+      <file role="primary-edit">src/client/shared/Spaarke.Compose.Components/src/widgets/ComposeEditor.tsx</file>
+      <file role="primary-edit">src/client/shared/Spaarke.Compose.Components/src/widgets/ComposeWorkspace.tsx</file>
+      <file role="reference-impl">src/client/shared/Spaarke.Compose.Components/src/utils/docxBridge.ts (buildImportedContentModel — the path that already behaves correctly)</file>
+      <file role="canonical-reference">src/client/shared/Spaarke.Auth/src/authenticatedFetch.ts</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="spec NFR-09">NEVER delete or restructure `docxBridge.ts`. It is read here as the reference for correct behavior only.</constraint>
+    <constraint source="ADR-028">`authenticatedFetch` remains the transport. The `AbortSignal` MUST be passed through its existing options, not by swapping in a raw `fetch`. Scope: the save request.</constraint>
+    <constraint source="ADR-021">Any banner or status surface uses Fluent v9 semantic tokens — no hex, no inline color. Scope: the 423 banner and Retry affordance.</constraint>
+    <constraint source="project">MUST build on task 010's `ApiError.status` routing. Do NOT add a second error-classification path for 423.</constraint>
+    <constraint source="project">MUST reuse R7's banner stack + SAVE_DEGRADATION_COPY. No new message surface (root CLAUDE.md §11).</constraint>
+    <constraint source="project">The dirty flag MUST be cleared in exactly ONE place, on the success branch, after the response is known good. Clearing it in two places is how this bug persisted.</constraint>
+    <constraint source="ADR-038">Tests drive real state transitions (dispatch a failed save, assert the affordances). MUST NOT assert on internal reducer shape as a proxy for behavior. Scope: this task's tests.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>compose editor lifecycle, dirty tracking, abort/timeout, lock recovery</topic>
+    <files>
+      <file>.claude/adr/ADR-021-fluent-v9-design-system.md</file>
+      <file>.claude/adr/ADR-028-spaarke-auth-architecture.md</file>
+      <file>docs/standards/TEST-ARCHITECTURE.md</file>
+      <file>projects/spaarkeai-compose-r8/spec.md</file>
+      <file>projects/spaarkeai-compose-r8/CLAUDE.md</file>
+      <file>projects/spaarkeai-compose-r7/notes/uat-issues.md</file>
+    </files>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="0" name="Rigor declaration">Declare rigor FULL; load spec.md, CLAUDE.md, ADR-028.</step>
+    <step order="1">Read `buildContentModel()` (~:3000-3015) and the imported path beside it. Enumerate EVERY piece of state the born-in-editor path clears before the POST — dirty flag, Save enablement, Ctrl+S handler, `beforeunload`, unmount flush, toolbar label.</step>
+    <step order="2">Move all of it to a single post-success clear. Verify by inspection that no other call site clears the same state.</step>
+    <step order="3">Add a timeout + `AbortSignal` to the save request via authenticatedFetch's options, and an in-flight guard that prevents a second concurrent save while one is pending.</step>
+    <step order="4">Ensure abort/timeout terminates the `saving` status and routes through 010's error handling — an aborted save is a FAILED save, and must leave the dirty flag set.</step>
+    <step order="5">Wire the 423 Retry to re-issue the save (not to reload the page), reusing the banner stack.</step>
+    <step order="6">Tests: (a) failed born-in-editor save leaves all six affordances armed; (b) hung save aborts and recovers without reload; (c) second save is blocked while one is in flight; (d) 423 → banner + Retry → Retry succeeds; (e) a SUCCESSFUL save still clears the dirty flag exactly once.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If the born-in-editor dirty flag is load-bearing for something other than save enablement (e.g. it gates content-model construction itself, so deferring the clear changes what gets POSTed on a retry), stop and surface it — moving the clear could then change the payload on the second attempt, which is a different bug.</trigger>
+  </escalation>
+
+  <outputs>
+    <output type="code">src/client/shared/Spaarke.Compose.Components/src/widgets/ComposeEditor.tsx</output>
+    <output type="code">src/client/shared/Spaarke.Compose.Components/src/widgets/ComposeWorkspace.tsx</output>
+    <output type="test">src/client/shared/Spaarke.Compose.Components/src/widgets/</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion>After a FAILED born-in-editor save: Save is enabled, Ctrl+S is live, `beforeunload` is armed, the unmount flush is armed, and the toolbar does NOT read "Saved".</criterion>
+    <criterion>The dirty flag is cleared in exactly one place, on the success branch — verified by grep.</criterion>
+    <criterion>The save request carries a timeout and an `AbortSignal`, passed through `authenticatedFetch`.</criterion>
+    <criterion>A hung save terminates and the editor leaves `status === 'saving'` without a page reload.</criterion>
+    <criterion>A second save cannot start while one is in flight.</criterion>
+    <criterion>An aborted/timed-out save is treated as FAILED: the dirty flag remains set.</criterion>
+    <criterion>423 renders a named lock banner with a Retry that re-issues the save; Retry succeeds once the lock clears.</criterion>
+    <criterion>NEGATIVE: a SUCCESSFUL save still clears the dirty flag and shows "Saved" (no false-negative regression).</criterion>
+    <criterion>NEGATIVE: no raw `fetch(` introduced (ADR-028); `docxBridge.ts` unmodified.</criterion>
+    <criterion>NEGATIVE: no second error-classification path for 423 — task 010's routing is the only one.</criterion>
+    <criterion>The Compose client test suite passes.</criterion>
+  </acceptance-criteria>
+</task>

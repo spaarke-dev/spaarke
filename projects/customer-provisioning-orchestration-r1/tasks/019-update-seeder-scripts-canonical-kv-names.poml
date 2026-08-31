@@ -1,0 +1,110 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="019" project="customer-provisioning-orchestration-r1">
+  <metadata>
+    <title>Update seeder scripts to write KV secrets under canonical names per §7.9 R1,R2,R4</title>
+    <phase>G Canonical Naming Compliance</phase>
+    <gate>startable</gate>
+    <status>not-started</status>
+    <rigor>STANDARD</rigor>
+    <rigor-reason>Modifies existing PowerShell seeder scripts (not BFF code); azure-deployment scope with explicit naming constraints. Per root CLAUDE.md §8 = STANDARD.</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Mechanical rename pass with clear canonical target; no cross-cutting refactor. Per Step 3.5.5b default = sonnet.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>groupG-parallel</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <deps>none</deps>
+    <tags>powershell, azure-deployment, deploy</tags>
+    <estimated-effort>3-5 hours</estimated-effort>
+  </metadata>
+
+  <prompt>
+Update existing seeder scripts (scripts/seed-data/*.ps1, scripts/*.ps1 that write KV secrets) to use canonical KV secret names per docs/architecture/AZURE-RESOURCE-NAMING-CONVENTION.md § "KV-Secret &amp; Resource Naming Standard" (R1 env-agnostic, R2 one canonical casing per secret, R4 no orphan/duplicate). Owner directive #3: bake canonical into NEW provisioning only; do NOT rename existing live-dev secrets in this task. Phase H canonical secret-catalog manifest (later) is the durable single-source for these names — this task aligns seeders to that same canonical set.
+  </prompt>
+
+  <role>SPAARKE platform DevOps engineer fluent with KV secret conventions, PowerShell 7.4+, and the canonical naming standard per docs/architecture/AZURE-RESOURCE-NAMING-CONVENTION.md § "KV-Secret &amp; Resource Naming Standard (Conformance-Gated)".</role>
+
+  <goal>Every seeder script that writes KV secrets now uses the canonical name per §7.9 R1/R2/R4; `az keyvault secret set` invocations reference the canonical name (env-agnostic, one casing per logical secret); no orphan / duplicate secret writes; BINDING pre-check applied: `Dataverse-ClientSecret` / `BFF-API-ClientSecret` MUST NOT be renamed or deleted (per r3 handoff + spec MUST rule).
+
+Reference: docs/architecture/AZURE-RESOURCE-NAMING-CONVENTION.md § "KV-Secret &amp; Resource Naming Standard".</goal>
+
+  <context>
+    <background>
+Per spec.md FR-35 + §7.9 R1/R2/R4 + design.md § handlers H4 + r3 task 063 handoff. Multiple seeder scripts write KV secrets under drift-ridden names (mixed casing, env-tokened, orphaned). Phase G aligns seeders to the canonical set so H4 handler (Wave C4) has a deterministic name-set to consume, and Phase H's canonical secret-catalog manifest can generate the same identical names.
+    </background>
+    <relevant-files>
+      <file role="modify">scripts/seed-data/</file>
+      <file role="modify">scripts/</file>
+      <file role="canonical-reference">docs/architecture/AZURE-RESOURCE-NAMING-CONVENTION.md</file>
+      <file role="canonical-reference">.claude/constraints/config.md</file>
+      <file role="canonical-reference">.claude/constraints/auth.md</file>
+      <file role="canonical-reference">projects/customer-provisioning-orchestration-r1/notes/r3-handoff.md</file>
+    </relevant-files>
+    <dependencies>
+      <dependency task="none" status="complete">Phase G is startable in parallel with A/B</dependency>
+    </dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="spec.md">SCOPE: BINDING pre-check — this task MUST NOT rename OR delete `Dataverse-ClientSecret` / `BFF-API-ClientSecret` KV secrets (r3 handoff + spec MUST rule). These are explicit exceptions preserved for OBO + shared-lib Dataverse.</constraint>
+    <constraint source="spec.md">SCOPE: Every non-exception KV secret write MUST use the canonical name per §7.9 R1 (env-agnostic — no `DEV/DEMO/PROD` token) + R2 (one casing per logical secret) + R4 (no orphan / duplicate).</constraint>
+    <constraint source="spec.md">SCOPE: Owner directive #3 — This task modifies SCRIPTS ONLY. Do NOT run any seeder against live-dev in this task. NEW customer provisioning consumes the updated scripts.</constraint>
+    <constraint source="project">SCOPE: If a seeder currently writes an alias (e.g., different casings of AI Search key), leave the LIVE alias intact; the seeder's canonical write is the go-forward form. Alias-collapse pre-check is Phase H's scope.</constraint>
+    <constraint source="project">SCOPE: For each script modified, emit a short summary at end of run: "Wrote {N} canonical secrets to vault {vaultName}; skipped {list of grandfathered exceptions}."</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>KV canonical secret naming + seeder scripts</topic>
+    <files>
+      <file>projects/customer-provisioning-orchestration-r1/spec.md</file>
+      <file>projects/customer-provisioning-orchestration-r1/design.md</file>
+      <file>projects/customer-provisioning-orchestration-r1/CLAUDE.md</file>
+      <file>projects/customer-provisioning-orchestration-r1/notes/r3-handoff.md</file>
+      <file>docs/architecture/AZURE-RESOURCE-NAMING-CONVENTION.md</file>
+      <file>.claude/constraints/config.md</file>
+      <file>.claude/constraints/auth.md</file>
+    </files>
+    <patterns>
+      <pattern name="Canonical secret write" location="scripts/seed-data/">`az keyvault secret set --vault-name $vaultName --name '{Canonical-Name-Kebab}' --value $value`.</pattern>
+    </patterns>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="0" name="Context + rigor declaration">Emit the 🔒 RIGOR LEVEL block. Load AZURE-RESOURCE-NAMING-CONVENTION.md + r3 handoff + spec MUST rules.</step>
+    <step order="1" name="Enumerate">Grep scripts/ + scripts/seed-data/ for `az keyvault secret set` / `Set-AzKeyVaultSecret`; catalog each write site + current name.</step>
+    <step order="2" name="Map to canonical">For each write site, determine canonical name per §7.9 (or confirm it's the grandfathered exception).</step>
+    <step order="3" name="Apply renames">Update each script's write to use canonical name. Skip the two exceptions per BINDING pre-check.</step>
+    <step order="4" name="Emit summary line">Add end-of-script log line summarizing canonical writes + grandfathered exceptions.</step>
+    <step order="5" name="Static verification">Grep updated scripts for any non-canonical name pattern (env-tokened / mixed-casing) — verify only the grandfathered exceptions remain.</step>
+    <step order="6" name="Naming-conformance dry-run">Invoke scripts/naming-conformance-check.ps1 against the updated scripts (advisory dry-run — this is Phase G prep for Phase F acceptance in task 021).</step>
+    <step order="7" name="Index update">Update TASK-INDEX.md: set task 019 status to ✅.</step>
+    <step order="8" name="Deviations">Document any deviation (including any secret name where canonical form is ambiguous) in projects/customer-provisioning-orchestration-r1/notes/.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If any seeder writes a secret whose canonical form is ambiguous (e.g., multiple candidate canonical names in AZURE-RESOURCE-NAMING-CONVENTION.md, OR the secret is not enumerated in the standard), STOP and escalate per CLAUDE.md §6 — do NOT invent a canonical form. Phase H canonical secret-catalog manifest is the durable single-source; hand-invented names create the exact drift Phase G is here to close.</trigger>
+    <trigger>If any code path reaches `Remove-AzKeyVaultSecret` / `az keyvault secret delete` on the grandfathered exceptions (`Dataverse-ClientSecret` / `BFF-API-ClientSecret`), STOP immediately (BINDING pre-check per spec MUST rule + r3 handoff).</trigger>
+  </escalation>
+
+  <tools>
+    <tool name="pwsh">PowerShell 7.4+</tool>
+    <tool name="az">Azure CLI for keyvault operations</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">scripts/seed-data/*.ps1 (canonical-renamed secret writes)</output>
+    <output type="code">scripts/*.ps1 (canonical-renamed secret writes at other sites)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Given every seeder script modified, when grepping for `az keyvault secret set` calls, then each name matches a canonical form per §7.9 OR is on the grandfathered-exception allowlist.</criterion>
+    <criterion testable="true">Given the grandfathered exceptions (`Dataverse-ClientSecret`, `BFF-API-ClientSecret`), when grepping for delete/rename operations on these two secrets, then zero occurrences (BINDING pre-check enforced).</criterion>
+    <criterion testable="true">Given each script's end-of-run output, when reading, then a summary line reports the count of canonical writes + list of skipped exceptions.</criterion>
+    <criterion testable="true">Given scripts/naming-conformance-check.ps1 (advisory dry-run) against the updated scripts, when running, then output shows no NEW non-canonical names being introduced (existing dev-env drift may remain — owner directive #3).</criterion>
+    <criterion testable="true">Negative: no seeder was run against live-dev in this task (owner directive #3).</criterion>
+    <criterion testable="true">Negative: git diff is limited to script files — no Bicep, no BFF, no docs edits (task 018 owns Bicep, task 001/006/007 own docs).</criterion>
+  </acceptance-criteria>
+
+  <notes>Spec FR-35 + §7.9 R1/R2/R4 + owner directive #3 + BINDING pre-check. Feeds Phase H canonical secret-catalog manifest (Phase H) + Phase F H13 acceptance (task 021).</notes>
+
+  <execution><skill>.claude/skills/task-execute/SKILL.md</skill></execution>
+</task>

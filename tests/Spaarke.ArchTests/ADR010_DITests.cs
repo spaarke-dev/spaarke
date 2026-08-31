@@ -161,7 +161,65 @@ public class ADR010_DITests
         // ceiling to the current audited count grandfathers the legitimate set and RE-ARMS the ratchet:
         // any NEW 1:1 interface beyond 153 will fail this test and force the same justify-or-concrete
         // review. This is the maintenance procedure this test documents, not a suppression.
-        const int knownOneToOneCeiling = 153;
+        // ⚠️ auth-v4 task 020 (2026-08-21) DID NOT RAISE THIS, though the task instructed it to.
+        // Empirically verified instead of assumed: the real count is 151, not 153, and the new
+        // IClientAssertionProvider -> ManagedIdentityAssertionProvider pair does NOT appear in the
+        // list at all. Reason: this test scans `typeof(Program).Assembly` — the BFF assembly only —
+        // and IClientAssertionProvider is declared in Spaarke.Dataverse. A CROSS-ASSEMBLY 1:1 seam
+        // (contract in a shared library, implementation in the BFF) is therefore invisible here.
+        // Raising the ceiling would have granted headroom for a future IN-assembly interface to
+        // land unreviewed, which is the opposite of what this ratchet is for. Left at 153.
+        // The blind spot is booked onto tasks 060/061 (the forcing-function tasks), where a
+        // cross-assembly credential census belongs.
+        //
+        // ───────── Ceiling raised 153 → 155, 2026-08-27 (issue #839, spaarkeai-compose-r8) ─────────
+        // This test began FAILING at 155 once the Tier 2 aggregator was repaired and stopped
+        // reporting every ADR line as `pass` regardless of outcome (PR #840). The failure is
+        // inherited from master, not from the branch that raised the ceiling: that branch adds no
+        // interface to any assembly.
+        //
+        // ⚠️ READ THE NET NUMBER CAREFULLY. It is +2, and that is misleading: SEVEN 1:1 interfaces
+        // were added and FIVE were removed. The removals bought headroom that hid five of the
+        // additions from the ratchet entirely. A ceiling on a net count cannot see this; only the
+        // list diff can. Anyone maintaining this number should diff the printed lists, not trust
+        // the delta. (Method: check out the prior ceiling commit, set the ceiling to 0 so the list
+        // prints, capture both lists, `comm` them.)
+        //
+        // Diff vs 5c3652f8d (the 2026-08-12 re-arm):
+        //   ADDED (7):
+        //     IFileSummarizeAi          -> FileSummarizeAi             ADR-013 / CLAUDE.md §10
+        //     IPreferenceMemoryCapture  -> PreferenceMemoryCapture       bullet 3 REQUIRE CRUD→AI
+        //       Both live in Services/Ai/PublicContracts/. These interfaces are not optional
+        //       indirection — the facade boundary is a binding architecture rule, and removing them
+        //       would violate it. 2 impls exist for IPreferenceMemoryCapture.
+        //     IProvisioningEnqueuer     -> ServiceBusProvisioningEnqueuer   test seam (2 doubles)
+        //     ITenantContainerResolver  -> OptionsTenantContainerResolver   test seam (1 double)
+        //     IAdvisoryCapabilityRunner -> AdvisoryCapabilityRunner         test seam (1 double)
+        //       Each is mocked/faked in tests, which is ADR-010's own testing-seam exception.
+        //     ITenantBudgetPolicy       -> TenantBudgetPolicy         ⚠️ WEAKEST — see below
+        //     ITenantTokenLedger        -> InMemoryTenantTokenLedger  ⚠️ WEAKEST — see below
+        //   REMOVED (5): IConfidenceScoringService, IEmailTemplateService, IOwnershipValidator,
+        //     IScopeCopyService, IScopeInheritanceService.
+        //
+        // ⚠️ The two weak seams are grandfathered here but NOT endorsed. Neither has a second
+        // implementation nor a test double today; their justification is documented future
+        // evolution (ITenantTokenLedger's impl is named InMemory* with a Redis successor named per
+        // ADR-009; ITenantBudgetPolicy is a fail-open pre-call gate). "Future flexibility" is
+        // exactly the reasoning CLAUDE.md §11 question 3 rejects. They are grandfathered rather
+        // than fixed because the AI-metering surface belongs to another project and converting it
+        // to concrete registration is a behavior-affecting refactor outside an ArchTest
+        // adjudication branch. Tracked so it is not lost — see the #839 PR description.
+        //
+        // 155 -> 156, same day, on merging master: ISecurableEntityRegistry ->
+        // SecurableEntityRegistry (unified-access-control-r2 task 075). ACCEPTED as an
+        // external-dependency seam: it wraps a live Dataverse metadata retrieval, and its XML doc
+        // states an implementation contract the interface exists to impose — "Implementations MUST
+        // throw rather than return an empty or partial set when the answer cannot be determined",
+        // because "I could not find out whether this entity is securable" read as "it is not
+        // securable" places content in a shared container, which SPE's additive-only permission
+        // model makes irreversible. That is a contract, not indirection. Worth noting as the
+        // ratchet behaving correctly: the count moved for a real reason and named the interface.
+        const int knownOneToOneCeiling = 156;
 
         Assert.True(
             oneToOneInterfaces.Count <= knownOneToOneCeiling,

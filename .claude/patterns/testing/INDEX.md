@@ -12,7 +12,7 @@
 | [unit-test-structure.md](unit-test-structure.md) | Writing xUnit unit tests (AAA, naming, assertions) | 2026-04-05 | Verified |
 | [mocking-patterns.md](mocking-patterns.md) | Setting up Moq, WireMock, or custom fakes | 2026-04-05 | Verified |
 | [integration-tests.md](integration-tests.md) | WebApplicationFactory E2E tests, arch compliance tests | 2026-04-05 | Verified |
-| [god-class-ratchet.md](god-class-ratchet.md) | Adding a new server `.cs` file OR editing a frozen large file (GodClassGuardTests gate) | 2026-08-15 | Verified |
+| [god-class-ratchet.md](god-class-ratchet.md) | **RETIRED 2026-08-20** — the LOC gate is removed; see `docs/standards/COMPONENT-COMPLEXITY.md` (evaluate complexity, not LOC) | 2026-08-20 | Retired |
 
 ## Test Structure
 ```

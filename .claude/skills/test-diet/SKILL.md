@@ -54,6 +54,32 @@ ENUMERATE test files touched during the project:
 IF no test files touched: report "No test changes — diet not applicable" and exit
 ```
 
+#### Touch-radius expansion (added 2026-08-28)
+
+Classify **every test method in a touched FILE**, not only the methods the diff changed.
+
+If a task edits one method in an existing test file, the other methods in that file are swept by
+the same pass. The file is already open and already parsed, so the marginal cost is close to zero —
+and it is the only mechanism that reaches legacy tests as a side effect of ordinary development,
+without a stop-the-world audit nobody has time to run.
+
+Report untouched-but-swept methods in a **separate column or section** from methods the project
+actually wrote. The distinction matters at review time: *"you added this, defend it"* and *"this
+was already here, we noticed it in passing"* deserve different scrutiny, and conflating them makes
+the report feel like blame for code the author never touched.
+
+**Also check the reliability registry.** For each method in scope, look it up in
+[`tests/.reliability-registry.json`](../../../tests/.reliability-registry.json). Two findings:
+
+- **Listed, and the diff removed its timing/concurrency dependence** → the entry is now stale and
+  MUST be deleted in the same PR (the registry's own `_exitRule`). Report it as a required action,
+  not a suggestion. A stale entry buys a deterministic test a free CI retry, which can mask a real
+  regression — exactly what happened to three entries before PR #884.
+- **Listed, and still timing-dependent** → legitimate; no action.
+
+This is the cheap, mechanical half of the isolation checks proposed in the test-suite improvement
+review — a registry lookup, not a heuristic, so it has no false-positive surface.
+
 ### Step 2: Load build-vs-maintain criteria
 
 ```
@@ -70,13 +96,24 @@ For each touched test file, enumerate `[Fact]` / `[Theory]` / `[SkippableFact]` 
 
 | Classification | Criteria | Action |
 |---|---|---|
-| **MAINTAIN** | Tests behavior, lives under one of 6 KEEP paths, fails on real regression | KEEP — confirm at canonical path |
+| **MAINTAIN** | Tests behavior, lives under one of the KEEP paths, fails on real regression | KEEP — confirm at canonical path |
+| **FITNESS FUNCTION** | Lives under `tests/Spaarke.ArchTests/**`; asserts a STRUCTURAL invariant over source/assemblies rather than runtime behavior | KEEP — see the fitness-function note below. Do NOT apply the naming heuristic (2) or the mock/assertion heuristics (3, 5, 6, 7) to these |
 | **SCAFFOLDING** | Matches any B1-B17 ban (mirror, all-mocks-trivial, internal, pass-through, coverage-filler, language-feature, snapshot-trivial, name-without-scenario, exhaustive-switch, setup-to-assertion >10:1, getter/setter, generated-code, or any of B1-B5 wiring antipatterns) | DELETE — emit `git rm` for whole file OR Edit for method-level |
 | **AMBIGUOUS** | Mixed signals (e.g., setup-heavy but assertion is behavioral) | FLAG for reviewer judgment; do not emit removal command |
 
 Per-method evaluation heuristics (apply in order):
 
-1. **Path check (B-path)**: if file is NOT under `tests/integration/{auth,regression,data-mutation,tenant,contract}/**` OR `tests/unit/domain/**`, flag as path-violation; recommend `git mv` to canonical path OR delete if no canonical path applies.
+0. **Fitness-function check (run FIRST)**: if the file is under `tests/Spaarke.ArchTests/**`, classify **FITNESS FUNCTION → KEEP** and stop. Do not apply heuristics 1–12.
+
+   *Why this runs first and why it exists* (added 2026-08-21 by `spaarke-auth-v4-dataverse-MI` task 063): heuristic 1 below would flag every architecture test as a path violation with no canonical path to move it to, and therefore recommend deletion. That is not a gap in the classifier — it contradicts [ADR-038 itself](../../../docs/adr/ADR-038-testing-strategy.md), which at its "Some discovery loss" consequence names **"NetArchTest-style architecture tests at Tier 1"** as the sanctioned REPLACEMENT for the discovery the wiring-test bans give up. The classifier would delete the mechanism the ADR prescribes.
+
+   Heuristics 2–12 are also miscalibrated for this category by construction: a fitness function's name states the INVARIANT it enforces (`NoSecretBearingConfidentialClientOutsideTheAllowlist`) rather than a `{Method}_{Scenario}_{ExpectedResult}` triple, and its "arrange" section is a source scan whose setup-to-assertion ratio is meaninglessly high. Applying behavioral heuristics to structural tests produces confident nonsense.
+
+   Ratification status: ✅ **RATIFIED 2026-08-24 — ADR-038 Amendment A1** (`spaarke-auth-v4-dataverse-MI` task 090) added `tests/Spaarke.ArchTests/**` as the **eighth KEEP path**, so heuristic 1 now recognises it too and this rule is no longer the only thing standing between the classifier and the contradiction. Heuristic 0 is retained deliberately: the path fix alone would still let heuristics 2–12 mis-flag fitness functions on naming and setup-ratio grounds.
+
+1. **Path check (B-path)**: if file is NOT under `tests/integration/{auth,regression,data-mutation,tenant,contract,seam}/**` OR `tests/unit/domain/**` OR `tests/Spaarke.ArchTests/**`, flag as path-violation; recommend `git mv` to canonical path OR delete if no canonical path applies.
+
+   > **Drift correction (2026-08-21, task 063)**: `tests/integration/seam/**` was missing from this list. It has been a KEEP path since 2026-07-09 (ADR-038 §2, added by `spaarke-ai-architecture-redesign-r2` E-40) and is listed as one of the 7 in `tests/CLAUDE.md`, but this heuristic still enumerated six. Every vertical-slice-seam test in the repo was therefore a delete candidate whenever `/test-diet` ran — a far wider exposure than the ArchTests gap that prompted the look.
 2. **Naming check (B13)**: if test name doesn't match `{Method}_{Scenario}_{ExpectedResult}` shape (e.g., `Test1`, `Foo_Works`, `DoIt_Bug417`), classify SCAFFOLDING.
 3. **Mock-shape check (B1, B2, B7, B15)**: if test contains `Mock<HttpMessageHandler>`, `Mock<IServiceClient>`, OR `Mock<>` count ≥ 3 AND assertion count ≤ 2, classify SCAFFOLDING.
 4. **Wiring check (B3, B4)**: if test asserts `services.GetRequiredService<>` OR `Throws<ArgumentNullException>` on constructor, classify SCAFFOLDING.

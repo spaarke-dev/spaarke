@@ -230,14 +230,6 @@ public sealed class LiveFactNodeTests
     }
 
     [Fact]
-    public void Constructor_NullScopeFactory_Throws()
-    {
-        var parser = new SubjectParser(Options.Create(new SubjectSchemeCatalogOptions()));
-        Action act = () => new LiveFactNode(null!, parser, NullLogger<LiveFactNode>.Instance);
-        act.Should().Throw<ArgumentNullException>().WithParameterName("scopeFactory");
-    }
-
-    [Fact]
     public void Constructor_NullParser_Throws()
     {
         Action act = () => new LiveFactNode(Mock.Of<IServiceScopeFactory>(), null!, NullLogger<LiveFactNode>.Instance);

@@ -515,17 +515,31 @@ function Invoke-Step4_PopulateKeyVault {
     # (Q-E Architecture 1, FR-12). Redis is per-environment; the BFF reads
     # `Redis-ConnectionString` from the platform Key Vault populated by
     # `scripts/Deploy-RedisCache.ps1`. See deprecation header in Step 3.
+    #
+    # NAMING (customer-provisioning-orchestration-r1 task 019 / Phase G / spec §7.9 R1,R2,R4):
+    # Every secret name below is CANONICAL per docs/architecture/AZURE-RESOURCE-NAMING-CONVENTION.md
+    # § "KV-Secret & Resource Naming Standard":
+    #   * R1 env-agnostic: no DEV/DEMO/PROD token baked into secret name.
+    #   * R2 one canonical casing per logical secret (`Dataverse-ServiceUrl` not `Dataverse-Url`;
+    #     `BFF-API-BaseUrl` aligned with the grandfathered `BFF-API-*` PascalCase cluster).
+    #   * R4 no orphan / duplicate: same name as Seed-ProductionKeyVault.ps1 + Configure-ProductionAppSettings.ps1
+    #     + config/spaarke-resources.yaml consume. Phase H owns collapsing any live-env aliases;
+    #     this seeder writes the go-forward canonical only.
+    # BINDING pre-check (r3 handoff + spec MUST rule): no code path here deletes/renames
+    # `Dataverse-ClientSecret` or `BFF-API-ClientSecret`. Neither is written here; the BFF
+    # client secret is owned by Register-EntraAppRegistrations.ps1 (platform KV).
     $secrets = [ordered]@{
         "Storage-ConnectionString"    = $State.StepOutputs.StorageConnectionString
         "ServiceBus-ConnectionString" = $State.StepOutputs.ServiceBusConnString
         "Customer-Id"                 = $CustomerId
         "Customer-DisplayName"        = $DisplayName
-        "Dataverse-Url"               = $DataverseEnvUrl
-        "Bff-Api-BaseUrl"             = $BffApiBaseUrl
+        "Dataverse-ServiceUrl"        = $DataverseEnvUrl
+        "BFF-API-BaseUrl"             = $BffApiBaseUrl
     }
 
     $setCount = 0
     $skipCount = 0
+    $writtenNames = New-Object System.Collections.Generic.List[string]
 
     foreach ($entry in $secrets.GetEnumerator()) {
         $secretName = $entry.Key
@@ -555,9 +569,12 @@ function Invoke-Step4_PopulateKeyVault {
             throw "Failed to set Key Vault secret '$secretName'."
         }
         $setCount++
+        $writtenNames.Add($secretName) | Out-Null
     }
 
     Write-Log "$setCount secrets set, $skipCount skipped." -Level SUCCESS
+    # Phase G / task 019 canonical-write summary (spec.md §7.9 R1/R2/R4):
+    Write-Log "Wrote $setCount canonical secrets to vault ${kvName}: $($writtenNames -join ', '); skipped grandfathered exceptions: (none written here — Dataverse-ClientSecret / BFF-API-ClientSecret are owned by Register-EntraAppRegistrations.ps1 against the platform KV)." -Level SUCCESS
 
     Complete-Step -State $State -StepNumber 4 -StepName "Populate Key Vault"
 }
@@ -1131,15 +1148,20 @@ function Invoke-Step10_ProvisionSPEContainers {
     # New-BusinessUnitContainer.ps1 when new BUs are added.
 
     # 1. Get container type ID from platform Key Vault
+    # NAMING (customer-provisioning-orchestration-r1 task 019 / Phase G / spec §7.9 R2,R4):
+    # The canonical secret name is `SPE-ContainerTypeId` (Seed-ProductionKeyVault.ps1 line 129 +
+    # Configure-ProductionAppSettings.ps1 line 64 + config/spaarke-resources.yaml). The prior
+    # `Spe--ContainerTypeId` (double-hyphen) spelling was an R2 casing-drift alias — Phase H
+    # remediates any live-env aliases; this READ consumes the go-forward canonical only.
     Write-Log "Retrieving SPE container type ID from Key Vault ($PlatformKeyVaultName)..."
 
     $containerTypeId = az keyvault secret show `
         --vault-name $PlatformKeyVaultName `
-        --name "Spe--ContainerTypeId" `
+        --name "SPE-ContainerTypeId" `
         --query value -o tsv 2>&1
 
     if ($LASTEXITCODE -ne 0 -or [string]::IsNullOrWhiteSpace($containerTypeId)) {
-        Write-Log "Failed to retrieve Spe--ContainerTypeId from Key Vault: $containerTypeId" -Level ERROR
+        Write-Log "Failed to retrieve SPE-ContainerTypeId from Key Vault: $containerTypeId" -Level ERROR
         Write-Log "Ensure the container type has been created and its ID stored in Key Vault." -Level ERROR
         Write-Log "See: scripts/Create-NewContainerType.ps1 or Create-ContainerType-PowerShell.ps1" -Level INFO
         throw "SPE container type ID not found in Key Vault"

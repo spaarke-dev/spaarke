@@ -1,0 +1,94 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="042" project="unified-access-control-r2">
+  <metadata>
+    <title>FR-25 — standing grants carry the subject's sprk_accesspermissiongrant baseline level (contacts AND organizations)</title>
+    <phase>2 One definition of member</phase>
+    <gate>after-032</gate>
+    <status>pending</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Authorization-path .cs change (standing-grant term levels); tags bff-api/auth.</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Well-specified level semantics (exact option values + acceptance in spec FR-25) with escalation triggers on the genuinely open points; default tier per CLAUDE.md §8.5.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Modifies AccessibleRecordSetService.cs (orchestrator hot-file list) + ExternalAccessModule.cs.</parallel-reason>
+    <deps>032</deps>
+    <tags>bff-api, auth, security, dataverse, testing</tags>
+    <estimated-effort>3-4 hours</estimated-effort>
+  </metadata>
+
+  <prompt>Make the standing-grant term LEVEL-BEARING (spec FR-25): a standing grant contributes at the subject's sprk_accesspermissiongrant baseline — View Only 100000000, Collaborate 100000001, Full Access 100000002 — for contacts AND organizations. Today the contact standing flag is a bare boolean gate (ContactStandingGrantReader) and the standing-membership term contributes untyped ids; sprk_accesspermissiongrant has ZERO references repo-wide (register C-3). Acceptance is exact: a contact with baseline View Only and a standing grant receives exactly Read on standing-derived records.</prompt>
+  <role>SPAARKE platform developer, C#/.NET + Dataverse field-level security handling. Follow ADRs strictly.</role>
+  <goal>The standing-grant reader returns (held, baselineLevel) for a CONTACT (contact.sprk_standinggrant + contact.sprk_accesspermissiongrant) and for an ORGANIZATION (the org-level standing fields — verify live schema names in step 1); ComposeForContactAsync's standing-membership term contributes each record at the mapped baseline rights instead of an untyped id; org baseline read is available for task 043's org term; unit tests pin the exact level arithmetic.</goal>
+
+  <context>
+    <background>Design §10: resolved decision — standing grant applies to organizations, contacts and internal workforce, each with a baseline level ("wire org-level sprk_standinggrant + sprk_accesspermissions + a level"); register C-3: sprk_accesspermissiongrant has zero repo references and org-level fields are unset in dev; register E-7: contact.sprk_standinggrant is FLS-secured and the Field Security Profile membership is a per-environment prerequisite. Spec Prerequisites: "sprk_accesspermissiongrant populated for existing contacts and organizations" is an environment obligation, not a code assumption. The level→rights mapping is task 032's single mapping function — reuse it, never duplicate.</background>
+    <relevant-files>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Infrastructure/ExternalAccess/ContactStandingGrantReader.cs</file>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Infrastructure/ExternalAccess/AccessibleRecordSetService.cs</file>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Infrastructure/DI/ExternalAccessModule.cs</file>
+      <file role="modify">tests/unit/Sprk.Bff.Api.Tests/Infrastructure/ExternalAccess/AccessibleRecordSetServiceTests.cs</file>
+      <file role="canonical-reference">src/server/api/Sprk.Bff.Api/Infrastructure/ExternalAccess/ExternalCallerContext.cs</file>
+    </relevant-files>
+    <dependencies>
+      <dependency task="032" status="pending">Rights-map evaluator + the single ExternalAccessLevel→AccessRights mapping.</dependency>
+    </dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="spec FR-25">Scope: level arithmetic. Baseline option values are exactly View Only 100000000 / Collaborate 100000001 / Full Access 100000002, mapped through task 032's single mapping function. The baseline applies to STANDING-DERIVED contributions only — explicit grant rows keep their own row level; the additive max still governs when both apply.</constraint>
+    <constraint source="spec NFR-01">Scope: reader behavior. Fail closed on every ambiguous read: FLS-stripped field, missing record, transport fault ⇒ (held=false) — the standing term contributes nothing. Preserve ContactStandingGrantReader's documented fail direction and FLS observability warning.</constraint>
+    <constraint source="ADR-010">Scope: DI. Extend the existing reader seam (interface method addition or a superseding ISubjectStandingGrantReader) rather than adding a parallel reader service; keep one registration.</constraint>
+    <constraint source="project">Scope: this task's term set. Contact-plane standing term only. The ORG-side baseline reader is built and unit-tested here but its evaluator consumption (org-derived membership) is task 043 — do not wire an org term here.</constraint>
+    <constraint source="CLAUDE.md §10">Scope: this task's PR (BFF-touching). State the placement decision citing .claude/constraints/bff-extensions.md; run dotnet publish -c Release src/server/api/Sprk.Bff.Api/ -o deploy/api-publish/ and report compressed size + diff vs ~44.96 MB baseline; ceiling 60 MB (NFR-06).</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>standing grants, FLS-secured reads, level-bearing terms</topic>
+    <files>
+      <file>projects/unified-access-control-r2/notes/design-register.md</file>
+      <file>projects/unified-access-control-r2/notes/investigation/02-membership-spine.md</file>
+      <file>projects/unified-access-control-r2/notes/investigation/04-grant-lifecycle.md</file>
+    </files>
+    <patterns>
+      <pattern name="fail-closed FLS reader" location="src/server/api/Sprk.Bff.Api/Infrastructure/ExternalAccess/ContactStandingGrantReader.cs">The reader being extended — keep its fail-closed contract and FLS-stripped-read warning telemetry for the new field.</pattern>
+    </patterns>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="0" name="Context + rigor declaration">Declare rigor FULL. Read the reader, the post-032 standing term, register C-3/E-7.</step>
+    <step order="1">Verify live schema: contact.sprk_accesspermissiongrant exists with the three option values; identify the ORGANIZATION-level standing fields (design §10 names sprk_standinggrant + sprk_accesspermissions on sprk_organization — confirm exact logical names + values against dev metadata). Record findings in notes/. If any field is absent, fire the escalation below.</step>
+    <step order="2">Extend the reader: contact (held, baselineLevel) in one $select; org variant reading the org-level fields; both fail-closed per the constraint; FLS Field Security Profile prerequisite noted in the class header + runbook pointer.</step>
+    <step order="3">Wire the contact standing-membership term to contribute at the mapped baseline rights; keep the flag-gate semantics (no standing flag ⇒ no term) unchanged.</step>
+    <step order="4">Tests per the closed set.</step>
+    <step order="5">Build + tests; publish-size measurement per §10.</step>
+    <step order="6">Update TASK-INDEX.md: set this task's status to ✅.</step>
+    <step order="7">Document schema verification + any deviation in projects/unified-access-control-r2/notes/.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If contact.sprk_accesspermissiongrant or the org-level standing fields do NOT exist in dev metadata, STOP and escalate per CLAUDE.md §6 (schema-creation decision + backfill obligation) — do not invent alternative columns.</trigger>
+    <trigger>If a subject holds sprk_standinggrant=true but the baseline field is EMPTY, STOP and escalate the default (ViewOnly floor vs no contribution) — spec FR-25 only defines populated-baseline behavior; do not pick silently (CLAUDE.md §6).</trigger>
+  </escalation>
+
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Infrastructure/ExternalAccess/ContactStandingGrantReader.cs</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Infrastructure/ExternalAccess/AccessibleRecordSetService.cs</output>
+    <output type="test">tests/unit/Sprk.Bff.Api.Tests/Infrastructure/ExternalAccess/AccessibleRecordSetServiceTests.cs</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">FR-25 acceptance: a contact with baseline View Only (100000000) and a standing grant receives EXACTLY AccessRights.Read on standing-derived records — no Write/Create/Delete bit (pinned bitwise).</criterion>
+    <criterion testable="true">Baseline Collaborate (100000001) ⇒ Read|Write|Create; Full Access (100000002) ⇒ Read|Write|Create|Delete on standing-derived records.</criterion>
+    <criterion testable="true">Max interaction: a record carrying BOTH a standing-derived ViewOnly contribution and an explicit Collaborate grant resolves to Read|Write|Create (grant's level wins the max).</criterion>
+    <criterion testable="true">Org reader: returns (held, baselineLevel) for an organization; unit-tested including fail-closed cases (no evaluator org term yet — negative: composition output has no org-derived entries in this task).</criterion>
+    <criterion testable="true">Negative: no standing flag ⇒ no standing term (existing load-bearing negative preserved); FLS-stripped or faulted baseline read ⇒ (held=false), term contributes nothing, warning logged.</criterion>
+    <criterion testable="true">Negative: an unrecognized baseline value contributes None (fail-closed via the 032 mapping).</criterion>
+    <criterion testable="true">Build green; publish size reported and ≤60 MB.</criterion>
+  </acceptance-criteria>
+
+  <notes>Spec FR-25 + Prerequisites; design §10 resolved decisions C-2/C-3; register E-7 (FLS profile is an environment prerequisite — surface it in the PR). Task 043 consumes the org baseline for the org-expansion term.</notes>
+
+  <execution><skill>.claude/skills/task-execute/SKILL.md</skill></execution>
+</task>

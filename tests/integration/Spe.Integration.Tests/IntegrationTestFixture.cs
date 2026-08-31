@@ -15,6 +15,7 @@ using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 using Moq;
 using Spaarke.Dataverse;
+using Sprk.Bff.Api.Infrastructure.ExternalAccess;
 
 namespace Spe.Integration.Tests;
 
@@ -127,7 +128,7 @@ public class IntegrationTestFixture : WebApplicationFactory<Program>
                 ["Graph:TenantId"] = "test-tenant-id",
                 ["Graph:ClientId"] = "test-client-id",
                 ["Graph:ClientSecret"] = "test-client-secret",
-                ["Graph:UseManagedIdentity"] = "false",
+                ["Graph:ManagedIdentity:Enabled"] = "false",
                 ["Graph:Scopes:0"] = "https://graph.microsoft.com/.default",
 
                 // Dataverse options (DataverseOptions validator)
@@ -223,6 +224,9 @@ public class IntegrationTestFixture : WebApplicationFactory<Program>
 
         builder.ConfigureTestServices(services =>
         {
+            // Test hosts must not authenticate for real — see TestTokenCredential.
+            services.UseStubTokenCredential();
+
             // ---------------------------------------------------------------
             // CACHE: Replace Redis with MemoryDistributedCache for deterministic
             // caching behavior (ADR-009: Redis-first in production).
@@ -235,6 +239,22 @@ public class IntegrationTestFixture : WebApplicationFactory<Program>
             services.AddSingleton<IDistributedCache, MemoryDistributedCache>();
             services.AddSingleton<IMemoryCache, MemoryCache>(sp =>
                 new MemoryCache(Options.Create(new MemoryCacheOptions())));
+
+            // ---------------------------------------------------------------
+            // DELEGATION RULE (unified-access-control-r2 task 008, FR-07):
+            // every /api/v1/external-access route now requires Write on the target
+            // record, evaluated as the caller via an OBO probe. These are endpoint
+            // CONTRACT tests — they assert validation and error shapes for an
+            // ENTITLED caller, not who is entitled — so the fixture's caller holds
+            // Write. Without this the real probe has no Dataverse offline, correctly
+            // answers "no rights", and every case 403s before the behaviour under
+            // test is reached.
+            //
+            // Who is entitled is asserted in
+            // tests/integration/auth/UnifiedAccessControl/, not here.
+            // ---------------------------------------------------------------
+            services.RemoveAll<CallerRecordAccessProbe>();
+            services.AddSingleton<CallerRecordAccessProbe>(new EntitledCallerProbe());
 
             // ---------------------------------------------------------------
             // AUTHENTICATION: Replace JWT/OIDC with a fake handler that
@@ -271,6 +291,30 @@ public class IntegrationTestFixture : WebApplicationFactory<Program>
             dataverseServiceMock.Setup(d => d.TestConnectionAsync()).ReturnsAsync(true);
             services.RemoveAll<IDataverseService>();
             services.AddSingleton(dataverseServiceMock.Object);
+
+            // IDataverseService was mocked here; its field-mapping sibling was not, so
+            // POST /api/v1/field-mappings/push reached a REAL Dataverse client. That client acquires
+            // its token through managed identity, which on a non-Azure machine means probing
+            // 169.254.169.254 — the request then hung until HttpClient's 100-second default timeout.
+            // Same root cause as UseStubTokenCredential above.
+            //
+            // BOTH defects this note used to describe are now FIXED (2026-08-30, spaarkeai-compose-r8):
+            //
+            //   1. DataverseServiceClientImpl built its own credential and GraphModule passed none, so
+            //      the DI-level stub could not reach this path. The credential is now a ctor parameter
+            //      and GraphModule resolves it from DI — so UseStubTokenCredential DOES cover it, and
+            //      replacing the registration is no longer the only lever available.
+            //   2. This fixture set Graph:UseManagedIdentity, which no production code reads (the real
+            //      key is Graph:ManagedIdentity:Enabled, now set above). Corrected here and in 42
+            //      sibling fixtures, along with the wrong entry in
+            //      docs/procedures/test-fixture-contracts.md that they had all copied it from.
+            //
+            // This override is KEPT anyway, deliberately: it is not credential plumbing. The concern is
+            // that a push reaches a REAL Dataverse client at all, and the else branch is MI-backed too
+            // under ADR-028 A4, so neither fix makes a live Dataverse call acceptable in a unit host.
+            // Removing it would trade a fast mock for a real client that now merely fails differently.
+            services.RemoveAll<IFieldMappingDataverseService>();
+            services.AddSingleton(new Mock<IFieldMappingDataverseService>().Object);
         });
     }
 
@@ -513,4 +557,26 @@ internal sealed class ReportingRoleFakeAuthHandler : AuthenticationHandler<Authe
 
         return Task.FromResult(AuthenticateResult.Success(ticket));
     }
+}
+
+/// <summary>
+/// A caller who holds Write on whatever record the delegation rule asks about — the caller these
+/// endpoint contract tests are written from the perspective of (task 008, FR-07).
+/// </summary>
+/// <remarks>
+/// Substituted at the <c>virtual</c> seam on <see cref="CallerRecordAccessProbe"/>, so no OBO exchange
+/// or Dataverse call is attempted. Whether an UNENTITLED caller is refused — the actual subject of
+/// FR-07 — is asserted in <c>tests/integration/auth/UnifiedAccessControl/</c>, not here.
+/// </remarks>
+internal sealed class EntitledCallerProbe : CallerRecordAccessProbe
+{
+    public EntitledCallerProbe()
+        : base(new HttpClient(),
+               new ConfigurationBuilder().Build(),
+               Microsoft.Extensions.Logging.Abstractions.NullLogger<CallerRecordAccessProbe>.Instance)
+    { }
+
+    public override Task<AccessRights> GetCallerRightsAsync(
+        string? callerBearerToken, string entitySet, Guid recordId, CancellationToken ct = default)
+        => Task.FromResult(AccessRights.Read | AccessRights.Write);
 }

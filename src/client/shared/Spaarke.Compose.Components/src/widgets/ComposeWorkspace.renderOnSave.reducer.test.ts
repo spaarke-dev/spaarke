@@ -313,6 +313,62 @@ describe('composeWorkspaceReducer — sourceFormat lifecycle (task 042 / FR-06 P
     expect(state.documentRef?.transientKey).toBe('pdf-dedup-key-1');
   });
 
+  // FR-A09 (r8 task 044) — the REFRESH case. A PDF that has already been saved as a Word document
+  // resolves, on re-open, to that document instead of being projected again. The identity we save
+  // against therefore has to come from the RESPONSE. Getting this wrong is not a cosmetic slip: the
+  // client would hold docx content while still pointing at the .pdf item, and the save path refuses
+  // that outright (docx bytes must never be written over a PDF) — so the user's save would fail with a
+  // 422 they cannot act on.
+  it('loadSucceeded adopts the SERVED drive-item id when the server resumes a PDF on the docx it already became', () => {
+    let state = composeWorkspaceReducer(INITIAL_STATE, {
+      kind: 'requestLoad',
+      documentRef: { speDriveItemId: 'spe-pdf-1', sprkDocumentId: 'source-pdf-record' },
+      sessionId: 'session-pdf',
+    });
+    state = composeWorkspaceReducer(state, {
+      kind: 'loadSucceeded',
+      docxBytes: bytes(),
+      etag: 'etag-docx-v1',
+      // The resumed .docx has REAL version coordinates — unlike the .pdf item, whose version id the
+      // server suppresses. This is what lets the next save resolve a baseline and clone.
+      versionId: 'v-docx-1',
+      sessionId: 'session-pdf',
+      contentModel: LOADED_MODEL,
+      // We asked for the PDF; the server served the Word document it already became.
+      speDriveItemId: 'spe-new-docx-1',
+      driveId: 'drive-new-docx',
+      sprkDocumentId: 'new-docx-record',
+      // NOT 'pdf' — nothing was projected from a PDF on this load; it is an ordinary docx load.
+      sourceFormat: null,
+    });
+
+    expect(state.documentRef?.speDriveItemId).toBe('spe-new-docx-1');
+    expect(state.documentRef?.driveId).toBe('drive-new-docx');
+    expect(state.documentRef?.sprkDocumentId).toBe('new-docx-record');
+    expect(state.versionId).toBe('v-docx-1');
+    expect(state.sourceFormat).toBeNull();
+  });
+
+  it('loadSucceeded WITHOUT a served id (older BFF) keeps the requested drive-item id — no regression', () => {
+    // The re-target must be additive: an older BFF omits the field entirely, and the identity the
+    // client asked with has to survive that untouched.
+    let state = composeWorkspaceReducer(INITIAL_STATE, {
+      kind: 'requestLoad',
+      documentRef: { speDriveItemId: 'spe-docx-existing', sprkDocumentId: 'record-1' },
+      sessionId: 'session-1',
+    });
+    state = composeWorkspaceReducer(state, {
+      kind: 'loadSucceeded',
+      docxBytes: bytes(),
+      etag: 'etag-1',
+      versionId: 'v-load',
+      sessionId: 'session-1',
+      contentModel: LOADED_MODEL,
+    });
+
+    expect(state.documentRef?.speDriveItemId).toBe('spe-docx-existing');
+  });
+
   it('older-BFF omission (no sourceFormat field) normalizes to null — prior behavior bit-identical', () => {
     const state = loadedState();
     expect(state.sourceFormat).toBeNull();

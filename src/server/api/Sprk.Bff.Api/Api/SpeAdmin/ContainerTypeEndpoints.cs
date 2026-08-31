@@ -2,6 +2,7 @@ using Microsoft.AspNetCore.Mvc;
 using Sprk.Bff.Api.Infrastructure.Graph;
 using Sprk.Bff.Api.Models.SpeAdmin;
 using Sprk.Bff.Api.Services.SpeAdmin;
+using Sprk.Bff.Api.Infrastructure.Errors;
 
 namespace Sprk.Bff.Api.Api.SpeAdmin;
 
@@ -29,11 +30,26 @@ namespace Sprk.Bff.Api.Api.SpeAdmin;
 public static class ContainerTypeEndpoints
 {
     /// <summary>
-    /// Valid billing classification values accepted by the Graph API and this endpoint.
-    /// Defined as a static set for O(1) lookup during request validation.
+    /// Valid billing classification values, transcribed from Graph's own enum.
     /// </summary>
+    /// <remarks>
+    /// 🔴 This list was <c>{ "standard", "premium" }</c> and was wrong in both directions
+    /// (UAT 2026-08-28). Graph's <c>fileStorageContainerBillingClassification</c> enum is
+    /// <c>standard · trial · directToCustomer · unknownFutureValue</c> — verified in the beta CSDL:
+    /// <b>"premium" does not exist</b>, and <b>"trial" and "directToCustomer" were both rejected by
+    /// this validator</b> even though the client offers exactly those three and Graph accepts them.
+    ///
+    /// So an operator creating a trial container type — the documented path for a new
+    /// environment — was blocked by our own allow-list, with a message naming a value Graph has
+    /// never accepted. <c>unknownFutureValue</c> is deliberately excluded: it is an OData
+    /// forward-compatibility sentinel, not a classification anyone may request.
+    ///
+    /// The billing classification is <b>permanent</b> — a trial type can never become standard, and
+    /// standard can never become passthrough (see the container-type knowledge doc). Getting this
+    /// list wrong is therefore not a cosmetic validation bug; it decides what an operator can build.
+    /// </remarks>
     private static readonly HashSet<string> ValidBillingClassifications =
-        new(StringComparer.OrdinalIgnoreCase) { "standard", "premium" };
+        new(StringComparer.OrdinalIgnoreCase) { "standard", "trial", "directToCustomer" };
 
     /// <summary>
     /// Registers the container type list, get-by-ID, and create endpoints on the provided route group.
@@ -155,8 +171,10 @@ public static class ContainerTypeEndpoints
 
         try
         {
-            // List container types from Graph API
-            var containerTypes = await graphService.ListContainerTypesForConfigAsync(config, ct);
+            // Container types are readable ONLY with a delegated token — app-only returns 403
+            // accessDenied on v1.0 and beta alike (verified live, task 010). Use the BFF's existing
+            // OBO exchange, the same one SPE file operations already run on.
+            var containerTypes = await graphService.ListContainerTypesForUserAsync(context, ct);
 
             logger.LogInformation(
                 "GET /api/spe/containertypes — returned {Count} container types for config {ConfigId}. TraceId: {TraceId}",
@@ -170,7 +188,13 @@ public static class ContainerTypeEndpoints
                     DisplayName = ct2.DisplayName,
                     Description = ct2.Description,
                     BillingClassification = ct2.BillingClassification,
-                    CreatedDateTime = ct2.CreatedDateTime
+                    BillingStatus = ct2.BillingStatus,
+                    CreatedDateTime = ct2.CreatedDateTime,
+                    // Both are nullable all the way to the client. An absent owning app must render
+                    // as unknown, and an absent expiry must not read as "never expires" (task 030).
+                    OwningAppId = ct2.OwningAppId,
+                    ExpiryDateTime = ct2.ExpirationDateTime,
+                    Settings = ContainerTypeSettingsDto.FromDomain(ct2.Settings)
                 })
                 .ToList();
 
@@ -180,6 +204,16 @@ public static class ContainerTypeEndpoints
                 Count = items.Count
             });
         }
+        catch (SpaarkeStorageException sse) when (sse.StatusCode == StatusCodes.Status403Forbidden)
+        {
+            logger.LogWarning(
+                sse,
+                "Graph denied listing container types for config {ConfigId} — reporting the Entra " +
+                "directory-role prerequisite. TraceId: {TraceId}",
+                configId, context.TraceIdentifier);
+
+            return EntraRoleDeniedProblem(sse, "Could not list container types.", context.TraceIdentifier);
+        }
         catch (SpaarkeStorageException sse)
         {
             logger.LogError(
@@ -187,15 +221,11 @@ public static class ContainerTypeEndpoints
                 "Graph API error listing container types for config {ConfigId}. Status: {Status}. TraceId: {TraceId}",
                 configId, sse.StatusCode, context.TraceIdentifier);
 
-            return Results.Problem(
-                detail: "Failed to retrieve container types from the Graph API. Check the app registration credentials in the config.",
+            return sse.ToProblemDetails(
+                summary: "Could not retrieve container types.",
+                errorCode: "spe.containertypes.graph_error",
                 statusCode: StatusCodes.Status500InternalServerError,
-                title: "Graph API Error",
-                extensions: new Dictionary<string, object?>
-                {
-                    ["errorCode"] = "spe.containertypes.graph_error",
-                    ["traceId"] = context.TraceIdentifier
-                });
+                traceId: context.TraceIdentifier);
         }
         catch (Exception ex)
         {
@@ -205,7 +235,7 @@ public static class ContainerTypeEndpoints
                 configId, context.TraceIdentifier);
 
             return Results.Problem(
-                detail: "An unexpected error occurred while retrieving container types.",
+                detail: ProblemDetailsHelper.Explain("An unexpected error occurred while retrieving container types.", ex),
                 statusCode: StatusCodes.Status500InternalServerError,
                 title: "Internal Server Error",
                 extensions: new Dictionary<string, object?>
@@ -265,8 +295,13 @@ public static class ContainerTypeEndpoints
 
         try
         {
-            // Retrieve the specific container type from Graph API
-            var containerType = await graphService.GetContainerTypeForConfigAsync(config, typeId, ct);
+            // DELEGATED, not app-only. Graph does not support application permissions for container
+            // types at all — app-only returns 403 on v1.0 and beta alike (design.md §3.1, re-proven
+            // live by tasks 010 and 013). This call was left on the app-only path when task 011
+            // converted LIST, so opening any container type failed in production regardless of
+            // credentials. The `config` above is still resolved and validated: it scopes the request
+            // and is what the tenant-scope filter authorizes against.
+            var containerType = await graphService.GetContainerTypeForUserAsync(context, typeId, ct);
 
             if (containerType is null)
             {
@@ -287,8 +322,23 @@ public static class ContainerTypeEndpoints
                 DisplayName = containerType.DisplayName,
                 Description = containerType.Description,
                 BillingClassification = containerType.BillingClassification,
-                CreatedDateTime = containerType.CreatedDateTime
+                BillingStatus = containerType.BillingStatus,
+                CreatedDateTime = containerType.CreatedDateTime,
+                OwningAppId = containerType.OwningAppId,
+                ExpiryDateTime = containerType.ExpirationDateTime,
+                Settings = ContainerTypeSettingsDto.FromDomain(containerType.Settings)
             });
+        }
+        catch (SpaarkeStorageException sse) when (sse.StatusCode == StatusCodes.Status403Forbidden)
+        {
+            logger.LogWarning(
+                sse,
+                "Graph denied reading container type {TypeId} for config {ConfigId} — reporting the " +
+                "Entra directory-role prerequisite. TraceId: {TraceId}",
+                typeId, configId, context.TraceIdentifier);
+
+            return EntraRoleDeniedProblem(
+                sse, $"Could not open container type '{typeId}'.", context.TraceIdentifier);
         }
         catch (SpaarkeStorageException sse)
         {
@@ -297,15 +347,11 @@ public static class ContainerTypeEndpoints
                 "Graph API error getting container type {TypeId} for config {ConfigId}. Status: {Status}. TraceId: {TraceId}",
                 typeId, configId, sse.StatusCode, context.TraceIdentifier);
 
-            return Results.Problem(
-                detail: "Failed to retrieve the container type from the Graph API. Check the app registration credentials in the config.",
+            return sse.ToProblemDetails(
+                summary: $"Could not retrieve container type '{typeId}'.",
+                errorCode: "spe.containertypes.graph_error",
                 statusCode: StatusCodes.Status500InternalServerError,
-                title: "Graph API Error",
-                extensions: new Dictionary<string, object?>
-                {
-                    ["errorCode"] = "spe.containertypes.graph_error",
-                    ["traceId"] = context.TraceIdentifier
-                });
+                traceId: context.TraceIdentifier);
         }
         catch (Exception ex)
         {
@@ -315,7 +361,7 @@ public static class ContainerTypeEndpoints
                 typeId, configId, context.TraceIdentifier);
 
             return Results.Problem(
-                detail: "An unexpected error occurred while retrieving the container type.",
+                detail: ProblemDetailsHelper.Explain("An unexpected error occurred while retrieving the container type.", ex),
                 statusCode: StatusCodes.Status500InternalServerError,
                 title: "Internal Server Error",
                 extensions: new Dictionary<string, object?>
@@ -387,7 +433,9 @@ public static class ContainerTypeEndpoints
                 "POST /api/spe/containertypes — invalid billingClassification '{BillingClassification}'. TraceId: {TraceId}",
                 request.BillingClassification, context.TraceIdentifier);
             return Results.Problem(
-                detail: $"Invalid billingClassification '{request.BillingClassification}'. Accepted values: standard, premium.",
+                detail: $"Invalid billingClassification '{request.BillingClassification}'. "
+                      + "Accepted values: standard, trial, directToCustomer. "
+                      + "This choice is permanent — a container type cannot be reclassified after creation.",
                 statusCode: StatusCodes.Status400BadRequest,
                 title: "Bad Request",
                 extensions: new Dictionary<string, object?> { ["errorCode"] = "spe.containertypes.invalid_billing_classification" });
@@ -407,13 +455,54 @@ public static class ContainerTypeEndpoints
                 extensions: new Dictionary<string, object?> { ["errorCode"] = "spe.containertypes.config_not_found" });
         }
 
+        // 🔴 owningAppId is REQUIRED by Graph and was never sent. That is the whole of the UAT
+        // 2026-08-28 failure: "invalidRequest: One of the provided arguments is not acceptable."
+        // Graph's beta CSDL marks fileStorageContainerType.owningAppId Nullable="false", and the
+        // documented create body carries it alongside name and billingClassification.
+        //
+        // Resolution order: what the caller explicitly asked for, else the owning app registered on
+        // the config (multi-app mode), else the config's own client id (single-app mode) — the same
+        // precedence ContainerTypeConfig.HasOwningApp encodes.
+        var owningAppId = FirstNonBlank(request.OwningAppId, config.OwningAppId, config.ClientId);
+        if (string.IsNullOrWhiteSpace(owningAppId))
+        {
+            // Refuse locally rather than send a request we already know Graph will reject. A 400 that
+            // names the missing field is worth more than relaying "one of the provided arguments is
+            // not acceptable", which does not say WHICH one.
+            logger.LogWarning(
+                "POST /api/spe/containertypes — no owningAppId could be resolved for config {ConfigId}. TraceId: {TraceId}",
+                configId, context.TraceIdentifier);
+            return Results.Problem(
+                detail: "No owning application could be determined for this container type. Graph "
+                      + "requires 'owningAppId' on create. Supply it in the request, or register an "
+                      + $"owning app on config '{configId}'.",
+                statusCode: StatusCodes.Status400BadRequest,
+                title: "Owning App Required",
+                extensions: new Dictionary<string, object?> { ["errorCode"] = "spe.containertypes.owning_app_required" });
+        }
+
+        if (!Guid.TryParse(owningAppId, out _))
+        {
+            // Graph types owningAppId as Edm.Guid. A non-GUID produces the same opaque
+            // "not acceptable" from Graph, so name it here instead.
+            return Results.Problem(
+                detail: $"The owning application id '{owningAppId}' is not a valid GUID. Graph requires "
+                      + "'owningAppId' to be the application (client) id of the owning app registration.",
+                statusCode: StatusCodes.Status400BadRequest,
+                title: "Owning App Invalid",
+                extensions: new Dictionary<string, object?> { ["errorCode"] = "spe.containertypes.owning_app_invalid" });
+        }
+
         try
         {
-            // Create the container type in SharePoint Embedded via Graph API
-            var created = await graphService.CreateContainerTypeForConfigAsync(
-                config,
+            // DELEGATED — see the GET handler above. Graph container-type CREATE is delegated-only and
+            // needs NO admin role (design.md §4.2b): any non-guest owning-tenant user may create one,
+            // and the caller is auto-assigned as owner.
+            var created = await graphService.CreateContainerTypeForUserAsync(
+                context,
                 request.DisplayName,
                 request.BillingClassification,
+                owningAppId,
                 ct);
 
             logger.LogInformation(
@@ -436,10 +525,24 @@ public static class ContainerTypeEndpoints
                 DisplayName = created.DisplayName,
                 Description = created.Description,
                 BillingClassification = created.BillingClassification,
-                CreatedDateTime = created.CreatedDateTime
+                BillingStatus = created.BillingStatus,
+                CreatedDateTime = created.CreatedDateTime,
+                OwningAppId = created.OwningAppId,
+                ExpiryDateTime = created.ExpirationDateTime,
+                Settings = ContainerTypeSettingsDto.FromDomain(created.Settings)
             };
 
             return Results.Created($"/api/spe/containertypes/{created.Id}", dto);
+        }
+        catch (SpaarkeStorageException sse) when (sse.StatusCode == StatusCodes.Status403Forbidden)
+        {
+            logger.LogWarning(
+                sse,
+                "Graph denied creating a container type for config {ConfigId} — reporting the Entra " +
+                "directory-role prerequisite. TraceId: {TraceId}",
+                configId, context.TraceIdentifier);
+
+            return EntraRoleDeniedProblem(sse, "Could not create the container type.", context.TraceIdentifier);
         }
         catch (SpaarkeStorageException sse)
         {
@@ -448,15 +551,11 @@ public static class ContainerTypeEndpoints
                 "Graph API error creating container type for config {ConfigId}. Status: {Status}. TraceId: {TraceId}",
                 configId, sse.StatusCode, context.TraceIdentifier);
 
-            return Results.Problem(
-                detail: "Failed to create the container type via the Graph API. Check the app registration credentials in the config.",
+            return sse.ToProblemDetails(
+                summary: "Could not create the container type.",
+                errorCode: "spe.containertypes.graph_error",
                 statusCode: StatusCodes.Status500InternalServerError,
-                title: "Graph API Error",
-                extensions: new Dictionary<string, object?>
-                {
-                    ["errorCode"] = "spe.containertypes.graph_error",
-                    ["traceId"] = context.TraceIdentifier
-                });
+                traceId: context.TraceIdentifier);
         }
         catch (Exception ex)
         {
@@ -466,7 +565,7 @@ public static class ContainerTypeEndpoints
                 configId, context.TraceIdentifier);
 
             return Results.Problem(
-                detail: "An unexpected error occurred while creating the container type.",
+                detail: ProblemDetailsHelper.Explain("An unexpected error occurred while creating the container type.", ex),
                 statusCode: StatusCodes.Status500InternalServerError,
                 title: "Internal Server Error",
                 extensions: new Dictionary<string, object?>
@@ -672,8 +771,10 @@ public static class ContainerTypeEndpoints
                 typeId, request.AppId, (int?)httpEx.StatusCode, context.TraceIdentifier);
 
             return Results.Problem(
-                detail: "Failed to register the container type via the SharePoint REST API. " +
-                        "Verify the sharePointAdminUrl and app registration credentials.",
+                detail: ProblemDetailsHelper.Explain(
+                    $"Could not register container type '{typeId}' via the SharePoint REST API"
+                    + (httpEx.StatusCode is { } sc ? $" (HTTP {(int)sc})." : "."),
+                    httpEx),
                 statusCode: StatusCodes.Status500InternalServerError,
                 title: "SharePoint REST API Error",
                 extensions: new Dictionary<string, object?>
@@ -690,7 +791,7 @@ public static class ContainerTypeEndpoints
                 typeId, configId, context.TraceIdentifier);
 
             return Results.Problem(
-                detail: "An unexpected error occurred while registering the container type.",
+                detail: ProblemDetailsHelper.Explain("An unexpected error occurred while registering the container type.", ex),
                 statusCode: StatusCodes.Status500InternalServerError,
                 title: "Internal Server Error",
                 extensions: new Dictionary<string, object?>
@@ -700,4 +801,73 @@ public static class ContainerTypeEndpoints
                 });
         }
     }
+
+    /// <summary>
+    /// Stable code for "Graph refused a container-type operation, and the Entra directory role is the
+    /// prerequisite that grants it". The client keys its message off this.
+    /// </summary>
+    internal const string EntraRoleRequiredErrorCode = "spe.containertypes.entra_role_required";
+
+    /// <summary>
+    /// Translate a Graph 403 on a container-type operation into a response that names the Entra
+    /// directory-role prerequisite — the second of the two authorization layers described on
+    /// <see cref="Filters.SpeAdminAuthorizationFilter"/>.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <b>Why this lives at the Graph boundary rather than in the endpoint filter.</b> The filter
+    /// cannot see Entra directory roles: <c>SDAP-BFF-SPE-API</c> leaves
+    /// <c>groupMembershipClaims</c> unset, so no <c>wids</c> claim is emitted — verified 2026-08-22
+    /// against a token issued to a confirmed holder of the SharePoint Embedded Administrator role.
+    /// A Graph 403, by contrast, IS authoritative: Graph applied the real rule and refused.
+    /// </para>
+    /// <para>
+    /// <b>What this message may and may not say.</b> It names the role and what the role enables. It
+    /// does <b>NOT</b> assert that the caller lacks the role — Graph reports that the request was
+    /// denied, not why, and 403 has other causes (an unregistered container type, a consent gap, a
+    /// config pointing at another tenant). Asserting "you lack role X" from this signal would be a
+    /// guess, and a wrong one told to a genuine role holder is precisely the misleading-error defect
+    /// this project removes (spec FR-B03). The wording therefore states the prerequisite and points at
+    /// the Graph diagnostics for the alternative causes.
+    /// </para>
+    /// <para>
+    /// Before this existed, all four container-type operations passed a hardcoded
+    /// <see cref="StatusCodes.Status500InternalServerError"/>, so a permission denial reached the
+    /// admin as "Internal Server Error" — indistinguishable from a server bug.
+    /// </para>
+    /// </remarks>
+    /// <param name="sse">The translated Graph failure. Callers MUST filter on status 403.</param>
+    /// <param name="attempted">What was being attempted, stated without asserting why it failed.</param>
+    /// <param name="traceId">Correlation id for support.</param>
+    // internal rather than private so the wording contract above can be asserted directly. It is pure
+    // translation — no I/O, no mocks — so the test is ADR-038 §2 path #6 (domain logic), not scaffolding.
+    internal static IResult EntraRoleDeniedProblem(
+        SpaarkeStorageException sse,
+        string attempted,
+        string traceId)
+    {
+        return sse.ToProblemDetails(
+            summary:
+                $"{attempted} Microsoft Graph refused the request. Container-type administration " +
+                "requires the \"SharePoint Embedded Administrator\" or \"Global Administrator\" role in " +
+                "Microsoft Entra, which grants tenant-wide visibility and management of container " +
+                "types. That role is granted by a Microsoft Entra administrator and is separate from " +
+                "your Spaarke administrator permission — Spaarke cannot see whether you hold it. If you " +
+                "do hold it, this denial has another cause and the Graph details below identify it.",
+            errorCode: EntraRoleRequiredErrorCode,
+            statusCode: StatusCodes.Status403Forbidden,
+            traceId: traceId,
+            title: "Additional permission required");
+    }
+
+    /// <summary>
+    /// Returns the first candidate that is neither null nor whitespace, or null when none is.
+    /// </summary>
+    /// <remarks>
+    /// Used to resolve <c>owningAppId</c> by precedence. A plain <c>??</c> chain would be wrong here:
+    /// these values arrive from JSON and Dataverse, where "absent" is frequently an EMPTY STRING
+    /// rather than null, and <c>??</c> would happily select <c>""</c> and send it to Graph.
+    /// </remarks>
+    private static string? FirstNonBlank(params string?[] candidates) =>
+        candidates.FirstOrDefault(c => !string.IsNullOrWhiteSpace(c));
 }

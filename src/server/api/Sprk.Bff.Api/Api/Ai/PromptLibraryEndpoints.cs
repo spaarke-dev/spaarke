@@ -1,3 +1,4 @@
+using Sprk.Bff.Api.Infrastructure.Authentication;
 using System.Security.Claims;
 using Sprk.Bff.Api.Services.Ai.PromptLibrary;
 
@@ -253,9 +254,7 @@ public static class PromptLibraryEndpoints
         var user = httpContext.User;
         var tenantId = user.FindFirst("tid")?.Value
             ?? user.FindFirst("http://schemas.microsoft.com/identity/claims/tenantid")?.Value;
-        var userId = user.FindFirst("oid")?.Value
-            ?? user.FindFirst("http://schemas.microsoft.com/identity/claims/objectidentifier")?.Value
-            ?? user.FindFirst(ClaimTypes.NameIdentifier)?.Value;
+        var userId = CallerResolution.ResolveObjectId(user);
         return (tenantId, userId);
     }
 }

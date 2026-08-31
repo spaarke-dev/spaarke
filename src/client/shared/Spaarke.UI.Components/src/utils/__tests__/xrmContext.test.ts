@@ -6,6 +6,7 @@
 
 import {
   getXrm,
+  getXrmPage,
   isCustomPageContext,
   isPcfContext,
   detectThemeFromHost,
@@ -229,6 +230,89 @@ describe('xrmContext', () => {
       (window as any).Xrm = mockXrm;
 
       expect((getXrm()?.WebApi as any).source).toBe('late-injected');
+    });
+  });
+
+  describe('getXrmPage', () => {
+    // Task 021 (FR-20): the single shared accessor replacing the two former
+    // private `getXrmPage()` duplicates in FieldMappingHandler.ts and
+    // MatterHeaderView.tsx.
+
+    it('should return window.Xrm.Page when it exists', () => {
+      const mockAttr = { setValue: jest.fn() };
+      const mockPage = { getAttribute: jest.fn(() => mockAttr) };
+      (window as any).Xrm = { WebApi: { retrieveMultipleRecords: jest.fn() }, Page: mockPage };
+
+      const result = getXrmPage();
+
+      expect(result).toBe(mockPage);
+    });
+
+    it('should walk to window.parent.Xrm.Page when window.Xrm has no Page', () => {
+      const mockPage = { getAttribute: jest.fn() };
+      // window.Xrm exists but carries no Page (e.g. WebApi-only host) — must
+      // still fall through to parent, not stop at window.
+      (window as any).Xrm = { WebApi: { retrieveMultipleRecords: jest.fn() } };
+      Object.defineProperty(window, 'parent', {
+        value: { Xrm: { WebApi: { retrieveMultipleRecords: jest.fn() }, Page: mockPage } },
+        writable: true,
+      });
+
+      const result = getXrmPage();
+
+      expect(result).toBe(mockPage);
+    });
+
+    it('should prefer window.Xrm.Page over parent.Xrm.Page when both are available', () => {
+      const windowPage = { getAttribute: jest.fn(), source: 'window' };
+      const parentPage = { getAttribute: jest.fn(), source: 'parent' };
+
+      (window as any).Xrm = { WebApi: { retrieveMultipleRecords: jest.fn() }, Page: windowPage };
+      Object.defineProperty(window, 'parent', {
+        value: { Xrm: { WebApi: { retrieveMultipleRecords: jest.fn() }, Page: parentPage } },
+        writable: true,
+      });
+
+      const result = getXrmPage();
+
+      expect(result).toBe(windowPage);
+    });
+
+    it('should return null (no throw) when no Xrm.Page exists on either frame', () => {
+      // window.Xrm entirely absent; parent left at beforeEach default (===
+      // window, an un-nested MDA host).
+      expect(() => getXrmPage()).not.toThrow();
+      expect(getXrmPage()).toBeNull();
+    });
+
+    it('should return null (no throw) when Xrm exists on both frames but neither carries Page', () => {
+      (window as any).Xrm = { WebApi: { retrieveMultipleRecords: jest.fn() } };
+      Object.defineProperty(window, 'parent', {
+        value: { Xrm: { WebApi: { retrieveMultipleRecords: jest.fn() } } },
+        writable: true,
+      });
+
+      expect(() => getXrmPage()).not.toThrow();
+      expect(getXrmPage()).toBeNull();
+    });
+
+    it('should never throw even if accessing window.parent raises (cross-origin SecurityError)', () => {
+      // Same construction as getXrm(): each frame access is independently
+      // try/caught, so a throwing accessor on one frame must not propagate.
+      Object.defineProperty(window, 'parent', {
+        get() {
+          throw new DOMException('Blocked a frame with origin from accessing a cross-origin frame.', 'SecurityError');
+        },
+        configurable: true,
+      });
+
+      expect(() => getXrmPage()).not.toThrow();
+      expect(getXrmPage()).toBeNull();
+
+      // Restore a plain replaceable descriptor so afterEach's
+      // Object.defineProperty(window, 'parent', { value: ... }) doesn't itself
+      // throw against the getter-only descriptor installed above.
+      Object.defineProperty(window, 'parent', { value: window, writable: true, configurable: true });
     });
   });
 
