@@ -1,4 +1,4 @@
-using System.Globalization;
+﻿using System.Globalization;
 using System.Xml;
 using DocumentFormat.OpenXml;
 using DocumentFormat.OpenXml.Packaging;
@@ -224,11 +224,11 @@ public sealed class ComposeShadowPatchEngine
         private WordprocessingCommentsPart? _commentsPart;
 
         // Lazy per-apply-session cache of R4.5's read-side numbering MODEL
-        // (ComposeDocxProjectionBuilder.BuildNumberingModel — referenced in place per task 005, R5-D4:
+        // (ComposeNumbering.BuildNumberingModel — referenced in place per task 005, R5-D4:
         // reuse, never fork). See GetNumberingModel: the model is built from a throwaway read-only probe over
         // the retained bytes so a list op that only REFERENCES existing numbering never materializes (and thus
         // never re-serializes) the EDITABLE numbering/styles parts — they stay byte-identical (NFR-01 / I-4).
-        private ComposeDocxProjectionBuilder.NumberingModel? _numberingModel;
+        private ComposeNumbering.NumberingModel? _numberingModel;
 
         // Set once this session AUTHORS a new numbering definition into the editable numbering part; after that
         // the model must be read from the (now-modified) editable part rather than the pristine retained bytes.
@@ -951,7 +951,7 @@ public sealed class ComposeShadowPatchEngine
         /// a DIRECT <c>w:numPr</c> (numId + ilvl) recorded as a tracked <c>w:pPrChange</c>. The numId is
         /// resolved through R4.5's read-side numbering MODEL (<see cref="EnsureListNumbering"/>) so the
         /// resulting numbering renders identically to what the read-side
-        /// <see cref="ComposeDocxProjectionBuilder.NumberingComputationEngine"/> computes — the numbering
+        /// <see cref="ComposeNumbering.NumberingComputationEngine"/> computes — the numbering
         /// algorithm is NEVER re-implemented here (R5-D4 / task 005). <c>ListOrdered</c> switches
         /// numbered/bullet at the current depth; <c>ListLevel</c> re-nests to the requested depth keeping the
         /// paragraph's existing list identity when it has one.
@@ -1077,7 +1077,7 @@ public sealed class ComposeShadowPatchEngine
         /// re-serialize on save, changing those parts' bytes) — they stay copied-verbatim byte-identical
         /// (NFR-01 / I-4). AFTER this session authors a definition into the editable numbering part, the model
         /// is read from that (now-modified) part so a subsequent list op sees the just-authored numId.</summary>
-        private ComposeDocxProjectionBuilder.NumberingModel GetNumberingModel()
+        private ComposeNumbering.NumberingModel GetNumberingModel()
         {
             if (_numberingModel is not null)
             {
@@ -1086,12 +1086,12 @@ public sealed class ComposeShadowPatchEngine
 
             if (_numberingAuthored)
             {
-                _numberingModel = ComposeDocxProjectionBuilder.BuildNumberingModel(_mainPart);
+                _numberingModel = ComposeNumbering.BuildNumberingModel(_mainPart);
             }
             else
             {
                 using var probe = WordprocessingDocument.Open(new MemoryStream(_retainedBytes, writable: false), isEditable: false);
-                _numberingModel = ComposeDocxProjectionBuilder.BuildNumberingModel(probe.MainDocumentPart!);
+                _numberingModel = ComposeNumbering.BuildNumberingModel(probe.MainDocumentPart!);
             }
 
             return _numberingModel;
@@ -1104,7 +1104,7 @@ public sealed class ComposeShadowPatchEngine
         /// task 005), excluding style-linked (heading) numbering; only AUTHORS a fresh definition when the
         /// document carries no suitable list numbering — so removing the SDL-2 guard never yields a
         /// user-triggerable error or a silent no-op (NFR-08). The label a paragraph then shows is computed by
-        /// <see cref="ComposeDocxProjectionBuilder.NumberingComputationEngine"/> at read time — this method picks
+        /// <see cref="ComposeNumbering.NumberingComputationEngine"/> at read time — this method picks
         /// / declares the numbering DATA that engine reads, it does NOT compute labels (R5-D4 no-fork).
         /// </summary>
         private int EnsureListNumbering(bool ordered)
