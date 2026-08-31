@@ -146,3 +146,74 @@ warning: normalising that file toward the house `oid ?? NameIdentifier` pattern 
 
 `BriefingService.cs:292` and `DailyBriefingCollector.cs:628` paging under-grant — acknowledged as
 independent of the oid fix and **not** addressed in #832. Ours only touched those tests for claim shape.
+
+---
+
+# Update — 2026-08-30: #806 merged, and `ComposeService.cs` has been restructured under them
+
+> **Appended**: 2026-08-30 · **Author**: `spaarkeai-compose-r8`
+> **Also posted**: as two comments on issue **#858**
+> ([1](https://github.com/spaarke-dev/spaarke/issues/858#issuecomment-5471596793) ·
+> [2](https://github.com/spaarke-dev/spaarke/issues/858#issuecomment-5472315451)).
+>
+> **Why this appendix exists**: between 2026-08-27 and today all coordination happened in GitHub issue
+> comments, so the in-repo record — the durable one — went stale for three days while the actual state
+> changed substantially. Comments are not indexed in the repo and do not survive a reader who starts from
+> `notes/`. Recording it here closes that gap.
+
+## 1. #806 is merged
+
+**Merged 2026-08-30 as `19bf65ec4`.** Their ask was *"tell us when PR #806 merges, or when
+`IComposeService.cs`, `ComposeEndpoints.cs` and `ComposeService.cs` are stable enough for us to edit."*
+Both halves are now answered.
+
+**What had actually been blocking it was not what the PR page showed.** #806 carried four red checks;
+all four were stale. The branch was **177 commits behind its own PR** — the work had never been pushed —
+so every CI result described a tree that no longer existed. Diagnosed individually before pushing rather
+than assumed: the ArchTests census failure was fixed on 2026-08-29; the Compose Client Gate suite passes
+locally 24/24; `Router` is an aggregate of Tier 1; and Trivy's failure is a code-scanning *configuration*
+mismatch (a path-filtered sidecar workflow), not a scan result.
+
+## 2. What master contains now, and what is still queued
+
+`ComposeService.cs` **4,427 → 3,236** lines on master, six collaborators extracted under task 070
+(`ComposeMemoryCapturer` · `ComposeAnnotationStore` · `ComposeProfileDispatcher` ·
+`ComposeReferenceMapping` · `ComposeReanchorCoordinator` · `ComposeSaveStorageCoordinator`).
+
+**Their target is untouched**, as committed. Anchors on master today:
+
+| Thing | Line on master |
+|---|---|
+| `PromoteIfEphemeralAsync` (definition) | 2306 |
+| `ResolveDriveIdAsync(request.ContainerId, …)` — the container decision | 1602 |
+| the "transient draft with no client-supplied ContainerId" guard | 1589 |
+
+No public `IComposeService` member moved: where a cluster contained interface methods, the
+implementation moved and the member stayed as a thin delegation, so the contract is identical.
+
+**Cluster 4 (PDF intake + provenance) is committed on the branch but NOT in master** — #806 merged the
+snapshot at `d17c75fd0` and closed; cluster 4 came after and needs a new PR. It shifts their region
+again: `PromoteIfEphemeralAsync` **2306 → 1989** (−317). The create-on-save code itself is
+**byte-identical** across both states — only its offset moves.
+
+**Offered them the choice** (comment 2): anchor the patch on symbol names rather than line numbers, or
+tell us to hold cluster 4's PR until they have landed. Cluster 4 is the *only* unmerged work besides its
+checkpoint, so holding it costs us nothing and needs no branch surgery.
+
+## 3. The hold stands
+
+Clusters **2a/2b — create-on-save and its record-resolution helpers — remain deliberately unextracted**
+so their patch applies to recognisable code. Nothing lands inside `PromoteIfEphemeralAsync` or its
+helpers without hearing from them first. This is unchanged from AMENDMENT 1: they own the fix, we do not
+build it, including as an interim.
+
+## 4. One thing we told them that is not about sequencing
+
+Extracting six clusters included a seeded-mutation pass over the moved code, which found **seven places
+where a documented guarantee had no test** — among them the PDF-baseline guard (disabling it left all
+1,791 Compose tests green while a `%PDF-` baseline would write DOCX bytes over the source `.pdf` item)
+and the `If-Match` retry re-sending a stale eTag. All seven are closed with tests.
+
+We flagged this to them because **the create-on-save region they are about to edit has not had that
+treatment** — cluster 2a sits at 76.8% branch coverage. A green suite there is weaker evidence than it
+looks, and that is worth knowing before rather than after.
