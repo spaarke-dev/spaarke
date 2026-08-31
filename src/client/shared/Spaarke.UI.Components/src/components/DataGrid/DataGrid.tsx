@@ -77,6 +77,7 @@ import { discoverChips, augmentFetchXmlWithChips, type ChipDescriptor, type Chip
 import { HeaderCellContent } from './HeaderCellContent';
 import { ViewSelector, type SavedView } from './ViewSelector';
 import type { SavedQuerySummary } from '../../services/IDataverseClient';
+import { thinScrollbarStyle } from '../../theme/scrollbar';
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Props
@@ -325,24 +326,10 @@ const useStyles = makeStyles({
     // sits inside its container with breathing room on the left/right).
     paddingLeft: tokens.spacingHorizontalM,
     paddingRight: tokens.spacingHorizontalM,
-    // Thin overlay scrollbar so the right edge looks clean even when content
-    // overflows. Native overlay scrollbars on macOS/iOS already auto-hide;
-    // these declarations cover Windows Chrome/Edge + Firefox.
-    scrollbarWidth: 'thin',
-    '::-webkit-scrollbar': {
-      width: '8px',
-      height: '8px',
-    },
-    '::-webkit-scrollbar-track': {
-      backgroundColor: 'transparent',
-    },
-    '::-webkit-scrollbar-thumb': {
-      backgroundColor: tokens.colorNeutralStroke2,
-      borderRadius: '4px',
-    },
-    '::-webkit-scrollbar-thumb:hover': {
-      backgroundColor: tokens.colorNeutralStroke1,
-    },
+    // Canonical thin, theme-aware scrollbar (the "modern grey scrollbar"). Replaces
+    // this file's former inline copy that drifted to `colorNeutralStroke2` / 4px —
+    // see `.claude/patterns/ui/thin-scrollbar.md` (it called out this exact drift).
+    ...thinScrollbarStyle,
   },
   loadingOverlay: {
     position: 'absolute',

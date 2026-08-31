@@ -1,8 +1,9 @@
 # Current Task State — `spaarkeai-compose-r8`
 
 > **Last Updated**: 2026-08-30 (by `context-handoff`)
-> **Recovery**: read Quick Recovery, then §S0 (this session), then §S (the prior one).
-> **#863 code-complete · master synced · ALL suites green · 070 clusters 7/6/5b/8/1/3 extracted.**
+> **Recovery**: read Quick Recovery, then §S3 → §S2 → §S1 → §S0.
+> **071 + 072 COMPLETE (2026-08-31). 070 clusters 7/6/5b/8/1/3/4 done, ZERO holes open.**
+> **`ComposeService.cs` is FROZEN for `unified-access-control-r2` — do not touch it.**
 > Everything below "Full State" is preserved history from earlier checkpoints.
 
 ---
@@ -11,12 +12,132 @@
 
 | Field | Value |
 |---|---|
-| **Active work** | **070 decomposition** — clusters **7 · 6 · 5b · 8 · 1 · 3** extracted & verified. **Cluster 4 is next; its executable spec is now written** (2b/2a are HELD). |
-| **Next Action** | **Cluster 4 (PDF intake + provenance)** — the full extraction spec is in the seam map: two source blocks (994–1088 and 1954–2163), six deps, nine call sites, and the `SaveStampJsonOptions` resolution. **Execute it, do not re-derive it.** Then 5a (64.3% branch, weakest of all — extract LAST or test first). 2b/2a only after UAC-r2 replies on #858. |
-| **Branch** | `work/spaarkeai-compose-r8` · clean · **PUSHED** (was 177 commits behind its own PR) · `ComposeService.cs` 4,427 → **3,236** |
-| **PR #806** | **Draft, MERGEABLE, CI running against real state for the first time since 2026-08-28.** Its 4 prior failures were all stale — see §S1. |
-| **Suite** | ALL GREEN — BFF **11,627/0** · Compose client gate **104 suites / 1,336** · Spe.Integration **409/0** · IntegrationTests **103/0** · ArchTests **150/150** · solution build **0 errors** · DI diff **empty** |
+| **Active work** | **071 + 072 COMPLETE.** `ComposeDocxProjectionBuilder` 3,593 → 1,031 (4 collaborators) · `ComposeDocumentRenderer` 2,987 → 1,997 (3 collaborators, **ADR-049 I-5 verified by count**: 8 body writes, all in the renderer). Both proven byte-identical over the corpus. 070 clusters 7/6/5b/8/1/3/4 done; `ComposeService.cs` still **FROZEN**. |
+| **Next Action** | **Task 090 wrap-up** (`/test-diet`, anti-clobber deploy, write-side fidelity doc, `projects/INDEX.md` + root §17). Track D is otherwise done: 073 ✅, 074 ⛔ closed as DO-NOT-DELETE, 070 partially frozen. Do NOT start 070 cluster 5a or 2a/2b — both live in the frozen `ComposeService.cs`; unfreeze signal is UAC-r2 commenting on #858. |
+| **Branch** | `work/spaarkeai-compose-r8` · clean · master `330b9fc55` · main repo synced. **All CODE is merged**; the only unmerged commit is this checkpoint itself (docs-only — it cannot be in master, since it records its own writing). Confirm with `git log --oneline origin/master..HEAD` — anything beyond a checkpoint commit there is unlanded work. |
+| **Merged today** | #806 `19bf65ec4` · #905 `369c3ea89` · #908 `330b9fc55` |
+| **Suite** | ALL GREEN — Compose **1,802/0** · BFF **11,614/0** · ArchTests **153/153** · Spe.Integration **409/0** · IntegrationTests **103/0** · client gate **104 suites / 1,336** · solution build **0 errors** · DI diff **empty** |
 | **Verify with** | **`dotnet build`** at the SOLUTION root — not one project (see §A2 for why that distinction cost real time) |
+
+---
+
+### 🔒 THE FREEZE — read before touching `ComposeService.cs`
+
+**`ComposeService.cs` is frozen until `unified-access-control-r2` lands their #858 create-on-save patch
+and comments on the issue.** We committed to this publicly in
+[#858 comment 5472902579](https://github.com/spaarke-dev/spaarke/issues/858#issuecomment-5472902579):
+*"You will not have to rebase."*
+
+- **Frozen**: clusters **5a** and **2a/2b** — both live in that file. Do not start them.
+- **Not frozen**: tasks **071** (`ComposeDocxProjectionBuilder.cs`) and **072**
+  (`ComposeDocumentRenderer.cs`) — different files, zero overlap.
+- **Unfreeze trigger**: their comment on #858. Then 5a → 2a/2b.
+
+Their anchors on master, which the freeze protects: `PromoteIfEphemeralAsync` **1989** ·
+`ResolveDriveIdAsync(request.ContainerId, …)` **1510** · the no-ContainerId guard **1500**.
+
+**The coordination record is `notes/response-to-unified-access-control-r2-2026-08-27.md`** — its
+`# ✅ DEFINITIVE STATUS` block at the top is the current agreement; everything below it is history. The
+sibling `coordination-from-*.md` is THEIR document, received — do not edit it.
+
+---
+
+## S3. Session close (2026-08-30) — everything merged, and the verification habit that was missing
+
+**All three PRs merged**: #806 (`19bf65ec4`) · #905 (`369c3ea89`) · #908 (`330b9fc55`). Branch has
+**0 unmerged commits**. Main repo synced.
+
+### The mistake worth carrying forward
+
+After #905 merged I reported "done". It wasn't. **GitHub auto-merge merges the head that PASSED CHECKS,
+not the current head** — and I had pushed the client-gate timeout fix while checks were already running.
+#905 merged head `47859684c`, silently leaving behind:
+
+1. the compose-client-gate flake fix — **still live on master**, and
+2. the definitive UAC-r2 coordination record — so the file path I had just given them in #858 pointed at
+   the stale 2026-08-27 version. They work from master.
+
+Both were caught only because the owner asked "where is the coordination document?", which made me look
+at **master** rather than my worktree. PR #908 fixed both.
+
+> **The check that would have caught it, and is now the rule:**
+> ```
+> git log --oneline origin/master..HEAD   # MUST be 0 before saying "merged"
+> ```
+> A merge notification is not proof that YOUR commits merged. Also note the compose-client gate is **not
+> a required check** (only `Router` is), so a PR can and did merge with it red.
+
+### Cluster 4 closed out completely
+
+P7 (`ClearPdfSourceMarkerAsync`) is **closed** — the last of **eleven** coverage holes this session's
+mutation passes found across clusters 1, 3 and 4. All nine cluster-4 mutations now die.
+
+### The client-gate flake — fixed at the cause, and a correction
+
+I had called the #806 client-gate failure "stale" after the suite passed locally. **It was not stale.**
+It is a recurring 5-second jest timeout in suites that mount a real TipTap editor —
+`redline-from-ledger` takes ~95s for 24 tests (~4s each, no headroom under `--maxWorkers=2` contention).
+Fixed with an explicit `testTimeout: 30000` in `jest.config.js`, with the reasoning and the
+"if a test needs >30s that is a defect in the test" rule written inline.
+
+---
+
+## S2-appendix. The one thing that WAS not finished (now closed)
+
+**P7 — `ClearPdfSourceMarkerAsync` has no test.** Replacing its body with `await Task.CompletedTask`
+leaves all 1,801 tests green. Its own log calls this "the marker's one unsafe direction": a session that
+served a PDF then serves a `.docx` must have the marker cleared, or a later save stamps a non-PDF
+document **Authored** and silently drops redlines (the SEV-1 shape UAT #1A caught once). The test that
+*looks* like the guard —
+`ComposePdfRefreshBaselineSeamTests.SessionThatServedAPdfThenServesADocx_DoesNotStampTheDocxAuthored` —
+is not: its own in-test comment says session BINDING, not the clear, is what makes it pass. Full detail
+and two concrete test designs live in the seam map under
+"⚠️ OPEN: `ClearPdfSourceMarkerAsync` has no test (P7)".
+
+---
+
+## S2. This session, part 3 (2026-08-30) — #806 merged, cluster 4 done
+
+### PR #806 is merged (`19bf65ec4`)
+
+The root blocker was **177 unpushed commits**, not the four red checks — all four were stale and were
+diagnosed individually before pushing (§S1). Merged via **Path A auto-merge**, which `merge-to-master`
+mandates regardless of protection state.
+
+**Two traps the skill documents and I walked into anyway — do not repeat:**
+
+1. **Classic branch protection returns `404 "Branch protection has been disabled"` on this repo.** That
+   is NOT "protection is off" — I briefly concluded it was. The real rules are **rulesets**:
+   `gh api repos/{owner}/{repo}/rules/branches/master`. Master requires a PR plus the check named
+   literally **`Router`** (not `CI / Router`).
+2. **Direction matters in Step 2.5**: merge master INTO the branch and resolve there, never resolve on
+   master. Done — clean merge, re-verified locally before marking ready.
+
+`gh pr ready 806` was required first — auto-merge cannot be enabled on a draft. **#858 was answered**:
+UAC-r2 told that #806 is merged, that their create-on-save target is deliberately untouched, and that
+the region they are about to edit has NOT had the mutation treatment (76.8% branch).
+
+### Cluster 4 — extracted, 3 of 4 holes closed
+
+`ComposePdfIntakeCoordinator` + `ComposeCacheJson` (the shared cache-payload serializer cluster 3 left
+open, renamed). Nine mutations, five died, **four survived the full suite**. The entire bytes-first
+sniff (task-040 Step-9.5 MEDIUM-5) had **no test at all**, and the derived-document key's `driveId`
+turned out to be a **cross-container exposure** guard. Three tests close three; **P7 is open** (above).
+
+### CVE work — the correct fix, not the easy one
+
+`fast-uri` HIGHs: **`ajv` was mis-declared as a *production* dependency** in TrackingFieldTrio and
+EmailProcessingMonitor when only the build toolchain needs it. Moving it to `devDependencies` takes
+`fast-uri` out of the shipped graph — **no version bumped, no override, no framework drift**. Both
+`npm update` and an `overrides` entry were rejected first: each dragged `@fluentui/react-components`
+9.66→9.68 along with it, because ANY npm write to these stale lockfiles re-resolves everything in-range.
+Proved rather than assumed — removing `ajv` outright builds fine in one control and **fails the other**,
+which is why it landed as a move. `linkify-it`'s override was also reverted; `npm update` resolves that
+one cleanly.
+
+**21 other client lockfiles carry stale `fast-uri` via dev-only paths** (no runtime exposure). They need
+a deliberate dependency-refresh pass with PCF regression testing — not a drive-by edit, for the
+re-resolution reason above.
 
 ---
 
@@ -473,7 +594,7 @@ clean build — the last sync returned MERGEABLE and then failed to compile (bot
 |-------|-------|
 | **Task** | **DEPLOYED TO DEV — owner is mid-UAT.** No task in progress. |
 | **Status** | 47 of 51 resolved. Tree clean, everything pushed, merged with `origin/master` (12 behind again — other projects merging). BFF **11,931 / 0 / 96** · integration **103 / 6** · ArchTests **9 failed / 101 passed — ALL 9 PRE-EXISTING ON MASTER** (verified against a clean `origin/master` checkout: 9 failed / 95 passed). |
-| **Next Action** | **WAIT for UAT results.** While waiting: fix the misleading *"came from an earlier session"* copy (see 🔴 OPEN BUG below). Then Track D **070/071/072** (worktrees staged at `C:\code_files\spaarke-wt-07{0,1,2}`, **agents NOT dispatched**), then **090**. **059 still needs owner sign-off.** |
+| **Next Action** | **Task 090 wrap-up** (`/test-diet`, anti-clobber deploy, write-side fidelity doc, `projects/INDEX.md` + root §17). Track D is otherwise done: 073 ✅, 074 ⛔ closed as DO-NOT-DELETE, 070 partially frozen. Do NOT start 070 cluster 5a or 2a/2b — both live in the frozen `ComposeService.cs`; unfreeze signal is UAC-r2 commenting on #858. |
 
 ---
 

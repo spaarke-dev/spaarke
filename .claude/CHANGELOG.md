@@ -8,6 +8,23 @@ Format follows [Keep a Changelog](https://keepachangelog.com/) conventions.
 
 ---
 
+###### 2026-08-31 — `email-communication-intelligence-r2`: infinite lazy-scroll is the standard for scrollable lists
+
+- **New ADR-051** ([`.claude/adr/ADR-051-infinite-scroll-lists.md`](adr/ADR-051-infinite-scroll-lists.md)) — every scrollable
+  list uses **infinite lazy-scroll + the canonical thin scrollbar**, **never a pager** (no numbered pages, prev/next,
+  "Load more", or down-arrow/chevron next-page control). `<DataGrid>` is the standard impl. Strengthens ADR-021,
+  composes under ADR-012. Added to [`adr/INDEX.md`](adr/INDEX.md).
+- **New pattern** [`patterns/ui/infinite-scroll-list.md`](patterns/ui/infinite-scroll-list.md) — the how-to: reuse
+  `<DataGrid>` (built-in `useLazyLoad` + sentinel `IntersectionObserver`); the **page-fullness `hasMore` fallback**
+  (why MDA `Xrm.WebApi` grids silently capped at 25 — the platform strips `@…morerecords`/paging-cookie on FetchXML);
+  the custom-scroller recipe; explicit **DO NOT** bans. Registered in [`patterns/ui/INDEX.md`](patterns/ui/INDEX.md).
+- **`patterns/ui/thin-scrollbar.md` updated** — the DataGrid `gridScroll` inline drift it had flagged
+  (`colorNeutralStroke2` / 4px) was converged onto the canonical `thinScrollbarStyle`; cross-linked to the new list
+  pattern.
+- **Shared-lib doc** `src/client/shared/CLAUDE.md` gained a "Scrollable Lists — Infinite Lazy-Scroll (ADR-051)" section.
+- **Code (context)**: `useLazyLoad` `hasMore` now `moreRecords === true || page-was-full`; DataGrid `gridScroll` uses
+  `thinScrollbarStyle`; reconciliation grid pages at 50. Test: `DataGrid/__tests__/useLazyLoad.hasMore.test.ts`.
+
 ###### 2026-08-25 — `spaarkeai-compose-r8` task 056: embedded objects carried through an edited paragraph
 
 - **ADR-049 residual list**: the `complex-object-dropped` row moves **§2 (lost) → §3 (carried)**. Images,

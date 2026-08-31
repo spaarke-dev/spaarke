@@ -4,7 +4,7 @@
     <title>FR-D01 — Decompose ComposeDocumentRenderer.cs (2,304 lines) below 2,000 and DELETE its god-class waiver</title>
     <phase>7 Track D — God-Class Removal</phase>
     <gate>blocked-on-040</gate>
-    <status>pending</status>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>Restructures the single body author, immediately after the merge landed in it.</rigor-reason>
     <model-tier>opus</model-tier>
@@ -107,4 +107,44 @@
     <criterion>NEGATIVE: no DI-registration or ctor-null tests added.</criterion>
     <criterion>`/conflict-check` run; publish size reported; no new NuGet; no new HIGH CVE.</criterion>
   </acceptance-criteria>
+
+  <notes>
+    COMPLETED 2026-08-31. `ComposeDocumentRenderer.cs` 2,987 -> 1,997 via three internal collaborators
+    (`ComposeRunAuthor` 570, `ComposeNumberingAuthor` 424, `ComposeStyleCatalog` 99).
+
+    MEASURED FIRST, as step 1 requires: 2,987 lines, NOT the 2,304 the POML and TASK-INDEX record. Task
+    040 did not bring it under 2,000 -- it GREW by 683 during Track A. So the "just delete the waiver"
+    branch did not apply. Separately, and as in 070/071, the LOC ratchet was retired 2026-08-20 and
+    `GodClassGuardTests.cs` does not exist -- there was no waiver to delete. That correction does real
+    work here rather than being bookkeeping: with no line target left, ADR-049 I-5 was the ONLY thing
+    steering the cut, which is the right way round.
+
+    ADR-049 I-5 (ONE BODY AUTHOR) -- verified by COUNT, not assertion: 8 body writes remain, ALL in the
+    renderer, ZERO in any collaborator. TWO clusters that looked extractable were deliberately LEFT IN
+    because they cross the line: `ResolveHyperlinkRelationships` (calls Remove/InsertBefore on the live
+    body tree -- restructures authored content rather than building an element) and table construction
+    (`BuildTableCell` calls `RenderBlocks` back, so extracting it would leave a collaborator driving the
+    author). Recognising those two boundaries was the actual work of this task.
+
+    EQUIVALENCE: byte-identical over 25 corpus documents x BOTH entry points (SynthesizeDocument and
+    RenderIntoCarrier), after each extraction. Validating the oracle found TWO defects that would each
+    have made the proof worthless while looking green: (1) OpenXML-SDK-minted relationship ids are random
+    per run -- canonicalised, not erased, so the relationship GRAPH is still compared; (2) the carrier
+    capture handed RenderIntoCarrier the model projected from the same bytes, so every block was
+    unchanged, the merge cloned all of them and the RENDER half never executed -- measured as a shared-code
+    seed hitting 3 .synth captures and ZERO .carrier captures. Fixed by editing one block, the shape a
+    real R8 save takes.
+
+    A carrier-only seed SURVIVED the oracle and then DIED on the full Compose suite -- 070's lesson again.
+    The instrument for this task is oracle AND suite, not oracle alone.
+
+    Suites: BFF 11,658/0 - ArchTests green - build 0 errors 0 warnings. DI diff EMPTY.
+    `Descendants&lt;Paragraph&gt;()` 1 -> 1 (none introduced). No new NuGet. Net new tests: zero.
+
+    ALSO FIXED HERE: stray UTF-8 BOMs on 8 files, introduced by task 071's own extraction script
+    (Python `utf-8-sig` adds a BOM on write; all 39 Compose files on master are BOM-less). `dotnet format`
+    in the pre-commit hook did not catch it.
+
+    Evidence: projects/spaarkeai-compose-r8/notes/072-document-renderer-seam-map.md
+  </notes>
 </task>

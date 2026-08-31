@@ -318,7 +318,63 @@ between keeping the user's edit and losing the session — which is what prong 1
 **After the three tests: all six mutations die.** Compose suite 1,794 · ArchTests 150 · solution build 0
 errors · DI diff empty.
 
-## Cluster 4 — executable extraction spec (analysis done 2026-08-30; move not yet made)
+## Cluster 4 — DONE (2026-08-30). Four more holes; three closed, ONE STILL OPEN
+
+Extracted as `ComposePdfIntakeCoordinator` (+ `ComposeCacheJson`, the shared cache-payload serializer
+config cluster 3 deliberately left open — now renamed, since "save stamp" under-described a setting the
+PDF markers had used since task 044). `ComposeService.cs` **3,236 → 2,919**.
+
+**Intake and provenance are one cluster, not two** — the markers exist only because the intake is lossy
+and NON-IDEMPOTENT: projecting the same PDF twice mints a second Word document, so the source→derived
+mapping is the only thing that makes a re-open resume rather than duplicate. Split apart, the markers
+read as unexplained cache plumbing.
+
+Nine mutations, one per member. Five died. **Four survived the full 1,798-test suite:**
+
+| Survivor | What was unguarded |
+|---|---|
+| the `PK\x03\x04` half of the sniff | a **docx named `.pdf`** would be sent through the LOSSY PDF reflow when a native full-fidelity mount was available |
+| the `%PDF-` half of the sniff | a **PDF named `.docx`** would hit the OOXML path and fail closed — a mountable document turned into a dead end |
+| the derived-document cache key's `driveId` | **cross-container exposure** — drive-item ids are unique per DRIVE, so without it, opening PDF X in container A hands the user the document a *different* PDF in container B became |
+| `ClearPdfSourceMarkerAsync` as a no-op | ⚠️ **STILL OPEN** — see below |
+
+The whole bytes-first sniff (the task-040 Step-9.5 MEDIUM-5 fix) had **no test at all**: every existing
+PDF case used a correctly-named file, so the sniff and the extension always agreed and nothing ever
+exercised the disagreement they exist to resolve.
+
+**Three tests close three of them**, all verified to kill their mutants:
+`Project_DocxBytesNamedDotPdf_TakesTheNativePath_NeverTheLossyIntake` ·
+`Project_PdfBytesNamedDotDocx_TakesTheIntakePath_NotTheOoxmlDeadEnd` (both in
+`ComposeMountPdfProjectionSeamTests`) · `ComposePdfProvenanceKeySeamTests` (new file — the coordinator
+against a real `MemoryDistributedCache`, because a key-collision defect should be detectable without
+depending on the whole load/save pipeline).
+
+### ⚠️ OPEN: `ClearPdfSourceMarkerAsync` has no test (P7)
+
+**Mutation that survives**: replace the body's
+`await _cache.RemoveAsync(PdfSourceMarkerKeyPrefix + sessionId, ct)` with
+`await Task.CompletedTask` → 1,798/1,798 still green.
+
+**Why it matters** — the method's own log calls this "the marker's one unsafe direction": a session that
+served a PDF and then serves a `.docx` must have its PDF marker cleared, or a later save on that session
+stamps a non-PDF document **Authored**, which puts every subsequent save on the clean-apply branch and
+**silently drops redlines**. That is the SEV-1 shape UAT #1A already caught once.
+
+**Why the existing test does not cover it**:
+`ComposePdfRefreshBaselineSeamTests.SessionThatServedAPdfThenServesADocx_DoesNotStampTheDocxAuthored`
+looks like the guard but is not — its own in-test comment says so: *"the session is bound to a document,
+so a load of a DIFFERENT document does not resume it — it mints a new one. That binding, not the marker
+clear, is the primary reason a stale PDF fact cannot reach a .docx save."* Session binding masks the
+clear, so the clear can be deleted with that test still green.
+
+**Test design for whoever picks this up**: the clear only becomes load-bearing when the SAME session is
+genuinely reused across a PDF→docx transition, so the fixture must defeat the re-binding — either drive
+`LoadAsync` twice with an explicit `sessionId` for the same bound document id, or exercise
+`ComposePdfIntakeCoordinator` directly against a real `MemoryDistributedCache` (Set → Clear → Get, the
+shape `ComposePdfProvenanceKeySeamTests` already establishes) and assert the marker is gone. The second
+is cheaper and is the one to try first.
+
+## Cluster 4 — extraction spec (executed 2026-08-30; kept for the record)
 
 Verified against the file at HEAD so the next session executes rather than re-derives. Line numbers are
 from `ComposeService.cs` at **3,236 lines**.
