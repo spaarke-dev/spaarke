@@ -169,6 +169,28 @@ existing guard keys on a hand-listed set of files classified for *route authoriz
 | S22 | `Services/DocumentCheckoutService.cs:787` | `DeleteFileAsync` | `document.DriveId/ItemId` off the authorized row | SERVER (record) ✅ the sanctioned delete |
 | S23 | `SpeFileStore.DeleteItemAsUserAsync:245`, `CreateUploadSessionAsUserAsync:278` (+ `DriveItemOperations.cs:671`, `UploadSessionManager.cs:414`) | facade | — | **DEAD CODE** since 071/076 deleted their routes |
 
+### 🔴 CORRECTION 2026-08-30 — PR #806 is MERGED, and the Compose sink MOVED
+
+Every "behind PR #806" / "blocked on #806" note in this project is **stale**. #806 merged to master on
+2026-08-30, so **`#858` (row 6, Compose container selection) is unblocked work, not blocked work**.
+Seven other files in this project still carry the old wording; treat this row as authoritative.
+
+The merge also **moved the sink**. `Services/Compose/ComposeService.cs :: ReplaceFileContentAsUserAsync
+#3` was extracted into **`Services/Compose/ComposeSaveStorageCoordinator.cs`**, where FR-S02's `If-Match`
+precondition split it into **three** write sites — the blind PUT (no version to assert against), the
+preconditioned PUT, and the single rebase retry inside `catch (EtagPreconditionFailedException)`.
+Provenance is **unchanged**: all three trace to `request.DriveId` via `ComposeService.cs:1652`.
+
+Two things worth keeping from how this was found:
+
+- **Rule A reported the old entry stale AND the new sites undeclared in the same run** — the "a rename
+  looks identical to a deletion from here" case it was written for. Without it, an unresolved
+  `ClientSupplied` decision would have left the census during a refactor nobody thought of as touching
+  container provenance.
+- **I declared two sites after reading the method; Rule A named the third.** The retry sits inside a
+  catch block, three sites deep. That is the argument for keying this list per CALL SITE rather than per
+  method, demonstrated on the person maintaining it.
+
 ### ⚠️ Correction to S20 — the deletion was wrong and was reverted (2026-08-29, task 084)
 
 The row above previously read **"RESOLVED — FILE DELETED"**. That disposition rested on two claims, and

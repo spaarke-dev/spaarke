@@ -13,9 +13,21 @@ Number gaps (020–029, 045–049, 059, 070–079) are intentional insertion roo
 > nobody re-checks is how the same collision happens twice — the 2026-08-29 directive asked for this task
 > to be filed at 086, which would have been the third.
 >
-> **2026-08-30**: `085` is now **taken** (Office save). The next free number is **091** — taken the same day
-> (SPE Admin container items). **Free from `092`.** `ls tasks/` before assigning a number, every time; this
-> file's own "insertion room" line has now been wrong twice.
+> **2026-08-30**: `085` (Office save), `091` (SPE Admin container items) and `092` (SPE Admin client route
+> mismatches) are all **taken**. **Free from `093`.** `ls tasks/` before assigning a number, every time;
+> this file's own "insertion room" line has now been wrong twice.
+
+> 🔴 **2026-08-30 — PR #806 IS MERGED. Every "behind PR #806" / "blocked on #806" note in this project is
+> STALE**, here and in seven other files. `#858` (Compose container selection, row 6 of the 083 census) is
+> **unblocked work**. The merge also MOVED that sink: `ComposeService.ReplaceFileContentAsUserAsync #3`
+> became three sites in `ComposeSaveStorageCoordinator.cs` (blind PUT, preconditioned PUT, rebase retry),
+> provenance unchanged (`request.DriveId`). Authoritative account:
+> [`notes/task-083-sink-inventory.md`](../notes/task-083-sink-inventory.md).
+
+> 🔴 **2026-08-30 — the ArchTest baseline is now ZERO failures (176/176).** The 6-failure baseline this
+> project carried and re-verified all the way through (ControlPlane FR-27 ×2, ADR-010 interface ceiling,
+> `ServiceBusClientGuardTests`, FR-F1, FR-F2) was **fixed on master**. Do not re-record it as expected —
+> a red ArchTest is now a real failure.
 
 ---
 

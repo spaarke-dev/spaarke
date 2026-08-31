@@ -1,64 +1,75 @@
 # Current Task State — `unified-access-control-r2`
 
-> **Last Updated**: 2026-08-28 — **FIVE PARALLEL AGENTS IN FLIGHT.** Orchestration state below is the
-> thing to recover; everything after §083 is prior context that has not changed.
-> **Recovery**: read "Quick Recovery", then "§AGENTS IN FLIGHT", then §083, then §076.
-
----
-
-## ⏳ IN PROGRESS — task 091 (SPE Admin container items), 2026-08-30
-
-| Field | Value |
-|---|---|
-| **Task** | 091 — nine `/api/spe` routes registered outside the admin group |
-| **Step** | 6 of 8 — fix landed + guards green; remaining: full suite, publish size, CVE, notes, status |
-| **Status** | in-progress |
-| **Next Action** | full `dotnet test` unit suite → `dotnet publish -c Release` size vs 44.96 MB → `dotnet list package --vulnerable --include-transitive` → write `notes/task-091-spe-admin-container-items.md` → Step 9.5 gates |
-
-**Files modified**: `Api/SpeAdmin/ContainerItemEndpoints.cs` (9 routes → group-relative; signature →
-`RouteGroupBuilder`) · `Api/SpeAdminEndpoints.cs` (registers it on the group) ·
-`Infrastructure/DI/EndpointMappingExtensions.cs` (root-app registration removed) ·
-`tests/Spaarke.ArchTests/RouteAuthorizationGuardTests.cs` (new `Scope.GroupGated` + Rule E) ·
-`tests/Spaarke.ArchTests/SpeWriteSinkContainerProvenanceGuardTests.cs` (3 entries re-owned to 091) ·
-**NEW** `tests/integration/auth/SpeAdmin/SpeAdminContainerItemRouteGateTests.cs`
-
-**Empirical proof, before any fix**: 9 failed / 11 passed. All nine routes answered **500/400 from
-inside the handler** — never 403 — while the control route `/api/spe/containertypes` DID 403 for the
-same caller. Authorization never ran; the handler did. After the fix: **20/20**.
-
-**Perturbations, both bit**: (A) remove the group's role filter → 10 fail (the nine + the control).
-(B) attempt the original root-app registration → **compile error** (`cannot convert from
-'WebApplication' to 'RouteGroupBuilder'`) — the defect can no longer be expressed.
-
-**ArchTests**: 138 passed / 6 failed; clean tree proven by `git stash` at 137/6 — same six, +1 Rule E.
-
-**Escalation trigger did NOT fire**: the SPE Admin client makes 64 `/spe/*` calls and already depends
-on group-gated routes (`containers`, `containertypes`, `configs`, `businessunits`, `environments`), so
-its users must already hold the admin role. Gating these nine adds no new role requirement.
-
-### 🔴 Two PRE-EXISTING client/server route mismatches found (NOT caused by 091, NOT fixed by it)
-
-`src/solutions/SpeAdminApp/src/services/speApiClient.ts`:
-1. `createSharingLink` posts to `…/items/{itemId}/sharing` — the server serves **`/share`**. 404.
-2. `get` calls `GET …/items/{itemId}` — **no such server route exists**. 404.
-
-Both have been dead since written. They slightly *strengthen* the safety of gating (nothing could have
-depended on them), but they are real defects on the admin surface and want their own task.
-
-### ⚠️ Open modelling question left deliberately unresolved (owner decision)
-
-The three write sinks stay `ClientSupplied`. Task 091 closed the authorization half; it did **not**
-change provenance — an SPE admin still names the container, because that IS the function of an admin
-tool, and record-less containers legitimately exist (task 078). But the provenance guard documents
-`ClientSupplied` as *"a work list that shrinks to zero, never exemptions"*, which may be unreachable for
-an admin surface. Options: (a) accept as permanently client-supplied-by-design, or (b) add a distinct
-"administrative, gated by role + tenant scope" provenance. **091 did not choose** — inventing an
-exemption inside a guard whose model forbids exemptions is the quiet reclassification this project
-exists to stop.
+> **Last Updated**: 2026-08-30 — session end. Three tasks completed (091, 092, 085), master merged in,
+> everything pushed. **Recovery**: read "Quick Recovery", then the two OPEN DECISIONS below.
 
 ---
 
 ## Quick Recovery (READ THIS FIRST)
+
+| Field | Value |
+|---|---|
+| **State** | `work/unified-access-control-r2` — clean, pushed, **0 behind master** (207 absorbed 2026-08-30). Main repo master already in sync. |
+| **Tests** | ArchTests **176/176** — the 6-failure baseline carried all project is **GONE**, fixed on master. Do not re-record it. BFF suite ~11,7xx, re-verifying at session end. |
+| **PR** | 🔵 **#887 still DRAFT** — https://github.com/spaarke-dev/spaarke/pull/887. CI was green before the master merge. |
+| **Next Action** | Resolve the two OPEN DECISIONS below, then: (1) `EntityAccessFilter.EntitySetByType` widening (Q4 — `sprk_workassignment`/`sprk_event`/`sprk_todo` + a test each), then re-verify the Office save surface (shared map); (2) close **083**; (3) set **012** to `completed-with-escalation`, **not** ✅; (4) update the #887 body — it still says the folder work is "NOT in this PR", which is false. |
+
+### 🔴 TWO OPEN DECISIONS FOR THE OWNER
+
+**1. Merge #887 to master?** It is a draft carrying ~26 commits of authorization work.
+⚠️ **Do not repeat this session's error**: I told the owner it was "unreviewed" as though a review gate
+were blocking. **This repo does not use GitHub review approvals at all** — the last 8 merged PRs all have
+empty `reviewDecision`, and there is a CODEOWNERS file gating nothing. It is a draft only because it was
+opened as one and never marked ready. The real question is simply whether the owner wants it on master
+now or after reading it.
+
+**2. `#858` Compose container selection is now UNBLOCKED.** It was deferred behind PR #806; **#806
+merged 2026-08-30**. Any doc still saying "blocked on #806" is stale. The sink moved — see below.
+
+### ✅ Completed this session (all pushed)
+
+| Task | What |
+|---|---|
+| **091** | Nine `/api/spe` container-item routes were registered on the ROOT app, inheriting neither the admin-role filter nor the tenant-scope filter. Any authenticated caller could enumerate, download, preview, mint a sharing link, DELETE and upload against any container id, `configId` an unchecked cross-tenant bearer capability. Moved onto the group; `MapContainerItemEndpoints` now takes `RouteGroupBuilder`, so the original registration is a **compile error**. |
+| **092** | Two SPE Admin client/server route mismatches. `createSharingLink` posted to `/sharing` while the server serves `/share` — a **live** 404 behind a shipped button, shown to users as a generic failure. `items.get` had no server route and no callers → deleted. New `SpeAdminClientRouteAgreementTests` cross-checks all 63 client URLs, verb-qualified. |
+| **085** | `POST /api/office/save` authorized against `TargetEntity` but wrote into `SaveRequest.ContainerId` — option (B), live. Field deleted; container now derived from the authorized record via 076's resolver, before the job payload is built. |
+
+### ⚠️ Three of MY OWN errors this session, all caught by guards — keep these
+
+1. **Task 083's census said the SpeAdmin surface was "three routes". It is NINE.** 083's instrument
+   scanned for *write sinks*, so the six read routes — including file download and sharing-link minting
+   — were invisible to it. *A tool finds what it was built to look for; its count is not the size of the
+   problem.*
+2. **My client/server agreement guard had FOUR defects, each producing a plausible wrong answer.** Worst:
+   it ignored nested `MapGroup`, yielding nine FALSE mismatches — "fixing" the client to match would have
+   broken four working surfaces. Also verb-blindness (a client GET matched a server DELETE), paren depth
+   (`encodeURIComponent(x)` truncated a path), and a missing helper (six UNKNOWN verbs).
+3. **I declared 2 Compose sinks after reading the method; Rule A named a THIRD** — the rebase retry
+   inside a `catch` block. That is the argument for keying the census per call site, demonstrated on me.
+
+### 🔁 Master fixed two things this project also fixed — defer to master, do not fork
+
+- **`b30f4edfa` fixed the test-host credential problem independently and better.**
+  `UseStubTokenCredential()` substitutes the credential in DI; `TestHostCredentialGuardTests` fails the
+  build if a fixture forgets. Its docstring reaches the identical diagnosis this project's local-suite
+  repair did. `TestOutboundNetworkGuardTests` layer 1 was rewritten to defer to it and now asserts only
+  what it uniquely owns (module initializer ran; token resolution is instant and offline). **Layer 2 (the
+  outbound-network block) is still ours and still unique.**
+- **PR #806 refactored the Compose sink** out of `ComposeService` into `ComposeSaveStorageCoordinator`,
+  splitting it into three sites. Provenance unchanged (`request.DriveId`, client-supplied).
+
+### Provenance decision made 2026-08-30 (owner-directed)
+
+The three SPE Admin write sinks are **`AdministrativeRoleScoped`**, a new provenance — not
+`ClientSupplied`. Rationale: our auth structure already treats SPE Admin as a distinct plane (two named
+layers, its own `spe.admin.*` deny-code namespace), there is no owning record, and record-less containers
+legitimately exist (078). Shaped like ADR-028's enumerated credential exceptions: membership pinned,
+**Rule F** mechanically re-verifies the routes are group-relative so the category cannot become a
+loophole.
+
+---
+
+## Superseded state (pre-2026-08-30)
 
 | Field | Value |
 |-------|-------|
