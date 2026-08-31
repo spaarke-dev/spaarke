@@ -9,10 +9,37 @@
 
 | Field | Value |
 |---|---|
-| **State** | `work/unified-access-control-r2` — clean, pushed, **0 behind master** (207 absorbed 2026-08-30). Main repo master already in sync. |
-| **Tests** | ArchTests **176/176** — the 6-failure baseline carried all project is **GONE**, fixed on master. Do not re-record it. BFF suite ~11,7xx, re-verifying at session end. |
+| **State** | `work/unified-access-control-r2` — clean, pushed, **0 behind master** (238 commits absorbed 2026-08-30, in two merges; second reached `369c3ea89` = PR #905). Main repo master in sync. |
+| **Tests** | ArchTests **176/176** — the 6-failure baseline carried all project is **GONE**, fixed on master. Do not re-record it; a red ArchTest is now real. BFF suite 11,690 / 0 failed before the second merge. |
 | **PR** | 🔵 **#887 still DRAFT** — https://github.com/spaarke-dev/spaarke/pull/887. CI was green before the master merge. |
 | **Next Action** | Resolve the two OPEN DECISIONS below, then: (1) `EntityAccessFilter.EntitySetByType` widening (Q4 — `sprk_workassignment`/`sprk_event`/`sprk_todo` + a test each), then re-verify the Office save surface (shared map); (2) close **083**; (3) set **012** to `completed-with-escalation`, **not** ✅; (4) update the #887 body — it still says the folder work is "NOT in this PR", which is false. |
+
+### 🤝 ALIGNED WITH `spaarkeai-compose-r8`, 2026-08-30 — read [`notes/alignment-with-compose-r8-2026-08-30.md`](notes/alignment-with-compose-r8-2026-08-30.md) before touching #858
+
+- **PR #905 also merged** (`369c3ea89`) — this branch is level with it. **`ComposeService.cs` is FROZEN
+  for us** until we comment on #858; clusters 2a/2b deliberately unextracted. **No rebase required.**
+- **Anchor the #858 patch on SYMBOL NAMES, not line numbers.** Their anchors verified here: the container
+  decision at `ComposeService.cs:1510` and the guard at `:1500` are **exact**; `PromoteIfEphemeralAsync`
+  is at **`:1998`**, not their stated `:1989` (our tree is 19 lines longer — immaterial, but do not trust
+  the number).
+- 🔴 **#858 IS SMALLER THAN ITS FRAMING.** The guard at `:1500` justifies failing with *"No server-side
+  BU→container resolver (multi-container INV-7)"*. **Both halves are false now.**
+  `RecordContainerResolver` exists with **nine** consumers (076 / 078 / 085 / Communication), and INV-7
+  *prescribes* server-side resolution — this project already corrected that exact inversion in its own
+  `design.md`. **Task 085 is the worked example of the identical fix**: delete the client-supplied
+  container field, call `ResolveForRecordAsync` on the record the caller was already authorized against.
+  The one genuinely-different branch is a transient draft with no owning record yet — 085 hit that too
+  and resolved it *without* inventing an acting-user derivation.
+- ⚠️ **Their coverage warning, taken seriously**: the create-on-save region sits at **76.8% branch
+  coverage**; a seeded-mutation pass on its neighbours found **eleven** documented guarantees with no
+  test, **two of which could destroy a user's document**. The #858 patch must carry its own tests rather
+  than lean on the 1,791-test Compose suite, and those two guarantees should be identified *before*
+  editing.
+- **Task 082 RESCOPED** — its ratchet half is already delivered by their PR #840
+  (`CallerIdentityGuardTests`, incl. the `Guid.TryParse` id-space rule). Only the **four-primitive
+  decision** remains ours. Its "⛔ seed the count after #832" dependency is stale.
+- **We owe them**: patch create-on-save, then **comment on #858 when it merges** — that is their signal
+  to resume clusters 5a → 2a/2b.
 
 ### 🔴 TWO OPEN DECISIONS FOR THE OWNER
 
