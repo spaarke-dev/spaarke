@@ -1,100 +1,133 @@
-# Matter Parity Baseline — `MatterHeaderPcf` v1.0.20
+# Matter header parity baseline — task 002
 
-> **Seeded**: 2026-08-25 from the owner-supplied screenshot [`matter-record-header.jpg`](matter-record-header.jpg)
-> **Consumed by**: task **002** (baseline capture) and task **080** (parity regression gate)
-> **Status**: PARTIAL — light mode captured; **dark mode still outstanding**
+> ## ⚠️ THE PARITY TARGET IS **v1.0.21**, NOT v1.0.20
+>
+> Task 002 was written to capture v1.0.20. **v1.0.20 is no longer in the environment.** `pac solution list`
+> on `spaarkedev1` (2026-08-31) reports `MatterHeaderPcf 1.0.21.0` — task 040's RS-1 hotfix was built AND
+> deployed. This is **escalation path (a)** in the task's own `<escalation>` block, which anticipated exactly
+> this and directs: *"record in the baseline doc that the parity target became v1.0.21 = v1.0.20 minus the
+> broken `$select` entry."* Done here. **Task 080 diffs against v1.0.21.**
+>
+> Consequence: the RS-1 HTTP 400 is already fixed in the deployed control, so the runtime capture should
+> succeed rather than being blocked. The second escalation trigger (control missing from the form) did
+> **not** fire — the form still binds `Spaarke.Records.MatterHeader`, verified below.
 
----
-
-## Why this file exists early
-
-Task 002 was flagged as blocked: the shipped header returns HTTP 400 (RS-1), so there would be nothing left to screenshot. The owner's screenshot **predates the `sprk_mattersummary` deletion**, so it captures the header working. That substantially de-risks the ordering trap — the visual baseline no longer depends on shipping task 040 first.
-
-**RS-1 re-confirmed live 2026-08-25** (so nobody re-litigates it):
-
-```
-GET /sprk_matters?$select=sprk_matternumber,sprk_mattername,_sprk_mattertype_value,
-                          _sprk_practicearea_value,sprk_matterdescription,sprk_mattersummary
-  -> HTTP 400  "Could not find a property named 'sprk_mattersummary'"
-
-Same list with sprk_mattersummary -> sprk_recordsummary
-  -> HTTP 200
-```
-
-The screenshot therefore shows a state that **can no longer be reproduced** against current schema until task 040 lands. Treat it as the authoritative visual record.
+> **Status**: code half ✅ · form half ✅ · **runtime half ⏳ needs an operator browser session**
+> **Environment**: `spaarkedev1` only — never `spaarke-model1-prod`
+> **Captured**: 2026-08-31, read-only (`pac solution list`, `pac org fetch`, source read). No source, solution,
+> or form was modified.
 
 ---
 
-## Captured record
+## Source ≡ deployed (why the code half is trustworthy)
 
-`REAL-2026-123456.02` — "Real Estate Transaction Matter" · Status Reason **Draft** · Matter main form · OVERVIEW tab.
+`ControlManifest.Input.xml` declares `version="1.0.21"`; the environment has `1.0.21.0`. The working tree
+**is** the deployed build, so the code-derived facts below describe what users actually see.
 
-## Layout — 3 columns, 5 fields
+This is what makes the baseline recoverable despite R2 having changed `MatterHeader/**` — task 002 step 0
+tells you to stop if that happened, but its own context (updated 2026-08-27) resolves the tension: the
+baseline is of the **deployed control**, and the deployed control matches this source.
 
-| Row | Cells | Spans |
-|---|---|---|
-| 1 | **Matter Number** `*` · **Matter Name** | 1 · 2 |
-| 2 | **Matter Type** · **Practice Area** | 1 · 1 *(row not filled — third track empty)* |
-| 3 | **Matter Description** | 3 |
+---
 
-Equivalent `layoutJson` for task 080's parity binding:
+## Code half — from `MatterHeaderView.tsx` + `ControlManifest.Input.xml`
 
-```json
-{ "_version": "1.0", "title": "Matter", "columns": 3,
-  "fields": [
-    { "name": "sprk_matternumber",      "span": 1, "required": true },
-    { "name": "sprk_mattername",        "span": 2 },
-    { "name": "sprk_mattertype",        "span": 1 },
-    { "name": "sprk_practicearea",      "span": 1 },
-    { "name": "sprk_matterdescription", "span": 3, "maxLines": 10 } ] }
+**Control identity**: namespace `Spaarke.Records`, constructor `MatterHeader`, version **1.0.21**
+**Platform libraries**: React 16.14.0, Fluent 9.46.2
+
+### The 5-field layout, in render order
+
+| # | logical name | span | renderer |
+|---|---|---:|---|
+| 1 | `sprk_matternumber` | 1 | TextField — **required** |
+| 2 | `sprk_mattername` | 2 | TextField |
+| 3 | `sprk_mattertype` (reads `_sprk_mattertype_value`) | 1 | **editable** `components/LookupField` |
+| 4 | `sprk_practicearea` (reads `_sprk_practicearea_value`) | 1 | **editable** `components/LookupField` |
+| 5 | `sprk_matterdescription` | 3 | TextareaField |
+
+Spans are hand-rolled `gridColumn` wrapper divs — the shipped `LookupField` had no `span` prop at the time.
+
+### `$select` list (post-RS-1)
+
+```
+sprk_matternumber, sprk_mattername, _sprk_mattertype_value,
+_sprk_practicearea_value, sprk_matterdescription, RECORDSUMMARY_FIELD
 ```
 
-`summaryField` omitted — defaults to `sprk_recordsummary` via `RECORDSUMMARY_FIELD` (task 034).
+**The defective `sprk_mattersummary` entry is GONE** — that is the whole of the v1.0.20 → v1.0.21 delta.
+The summary column is now reached only through the shared `RECORDSUMMARY_FIELD` constant.
 
-## Visual details to match
+### `LOOKUP_META` — still present, and that is expected
 
-| Element | Observed |
+`MatterHeaderView.tsx:86–94` still hard-codes the two lookup triples:
+
+- `sprk_mattertype` → `sprk_mattertype_ref` / `sprk_mattertype_refid` / `sprk_mattertypename`
+- `sprk_practicearea` → `sprk_practicearea_ref` / `sprk_practicearea_refid` / `sprk_practiceareaname`
+
+Spec criterion 16 ("grep for `LOOKUP_META` returns nothing") is satisfied when **task 081 deletes this
+control**, not by task 080. The new header resolves these from metadata instead. Do not treat the constant's
+presence here as a task-080 failure.
+
+---
+
+## Form half — live-verified, not assumed
+
+Form: **Matter main form** `4fa382f2-c273-f011-b4cb-6045bdd6a665` (never the legacy *Information* form).
+
+| property | value |
 |---|---|
-| Section header | "MATTER INFORMATION" — this is the **form section** header, rendered by the form, *above* the PCF. Not the control's own title. |
-| Toolbar | Top-right, three icons: sparkle · checkmark **badge 5** · annotation **badge 6→2** (shown: 2). No title text rendered inline. |
-| Required marker | `*` on **Matter Number only** — consistent with D-10 (marker stays TextField-only) |
-| Read-mode cells | Light grey fill (`colorNeutralBackground3`), rounded, ~2em min-height — the v1.0.3 OOB-input-parity treatment |
-| Labels | Above each cell, regular weight, neutral foreground — the v1.0.4 typography |
-| Empty value | Matter Description renders **`—`** (em-dash) — confirms current behaviour for a null Memo |
-| Lookups | **Pill style** with an inline `✕` clear affordance: "Patent ✕", "Intellectual Property Patents ✕" |
-| Version footer | `v1.0.20`, bottom-**right**, inside the description cell's lower area |
-| Description height | Tall — roughly 10 lines of empty space, consistent with `maxLines: 10` |
+| control | `Spaarke.Records.MatterHeader` ✅ still bound |
+| `boundField` | **`sprk_matternumber`** (SingleLine.Text) — matches the manifest comment |
+| `title` | `MATTER INFORMATION` (static) |
+| `showVersion` | `true` — so the footer is visible for the swap check |
+| form factors | **3** copies, params identical across all three |
 
-## ⚠️ Deliberate differences task 080 must NOT flag as regressions
-
-1. **Lookup interaction changes.** The pill + inline-`✕` shown here is the *custom* control. FR-15a replaces the editable path with the OOB `Xrm.Utility.lookupObjects` picker. **Intended change** — the parity criterion explicitly excludes the lookup interaction.
-2. **Sparkle source changes.** v1.0.20 read `sprk_mattersummary`; R2 reads `sprk_recordsummary` (0 populated of 55), so the popover will show the **"No summary yet"** empty state rather than content. Classified under FR-22, not a regression.
-3. **Version footer** will read the new control's version (1.1.0 assumed), not `v1.0.20`. That is the *intended* in-UI check that the swap took.
-
-## Still outstanding for task 002
-
-- [ ] **Dark-mode capture** — the parity criterion requires light **and** dark; only light exists
-- [ ] High-contrast capture (R1 live-QA behaviour)
-- [ ] Confirm which field `boundField` binds on the live form (expected `sprk_matternumber`)
-- [ ] Runtime behaviours that a screenshot cannot show: form-buffer dirty state with **no re-render flash**, 25%×35% Notepad modal, `openTodos` SmartTodo filter
-
-> The four runtime behaviours are blocked until task 040 restores rendering. Everything visual/static above is now settled.
+Task 080 must re-enter all three of these properties and edit all three form factors.
 
 ---
 
-## FR-11 em-dash change (task 014, 2026-08-25)
+## ⏳ Runtime half — what still needs capturing (operator)
 
-`TextField` (the shared-lib renderer Matter's Matter Number / Matter Name / Matter Type / Practice Area fields
-all use) previously rendered an **empty-string** value as an empty styled box — only `null`/`undefined`
-rendered the `—` placeholder. `OptionSetField` and `TextareaField` already treated `''` as empty. Per FR-11
-("`null`, `undefined` and `''` must all render `—` across ALL renderers"), `TextField.tsx:117` now includes
-the strict `value === ''` case, matching `OptionSetField.tsx:110`'s condition shape exactly. The edit-state
-draft normalization (5 sites) was verified, not rewritten — an empty-string field still opens its edit draft
-as `''`, not `'—'`.
+Open a populated Matter record on the main form in `spaarkedev1`. Save screenshots under
+`projects/record-header-and-notepad-r2/notes/baseline/`.
 
-**Task 080 must treat this as an intended change, not a regression**: any Matter text field that is
-empty-string-valued (as opposed to null/undefined) in the live R2 control will now show `—` where the
-shipped v1.0.20 baseline showed an empty box. The baseline capture above (`Matter Description`) happened to
-be a `null` Memo, so it already showed `—` in both v1.0.20 and R2 — the empty-string case is a distinct
-scenario the light/dark screenshots above may not have captured for every field. Whitespace-only strings
-(e.g. `' '`) are explicitly out of scope and continue to render as-is (not treated as empty).
+**Capture each in BOTH light and dark** (parity criterion 15 is assessed in both):
+
+| # | state | filename |
+|---|---|---|
+| 1 | full header, all 5 fields populated | `matter-header-{light,dark}.png` |
+| 2 | sparkle popover open | `sparkle-popover-{light,dark}.png` |
+| 3 | To Do + Notepad badge states | `toolbar-badges-{light,dark}.png` |
+| 4 | Matter Type lookup mid-interaction | `lookup-typeahead-{light,dark}.png` |
+| 5 | inline text edit, form dirty, no flash | `inline-edit-dirty-{light,dark}.png` |
+| 6 | version footer reading **v1.0.21** | `version-footer-{light,dark}.png` |
+
+Also record: the **record GUID** used (080 must diff on the same record), and any console errors verbatim.
+Dark-theme token/contrast defects are **part of the baseline** — record them, do not fix them.
+
+### 🚨 The known lookup delta — record it, do not "fix" it
+
+The deployed v1.0.21 bundles the **pre-2026-08-27** shared `LookupField`. Its lookups therefore have **no
+browse magnifier, no overlaying dropdown, and no pinned Advanced footer**. The new header has all three.
+
+That difference comes from a **shared-library upgrade, not from the migration**. Per owner decision
+2026-08-27, do **not** rebuild MatterHeaderPcf to erase it — a rebuilt baseline would describe a build that
+never shipped, which is a worse "before", not a better one. Task 080 classifies this as
+**expected-and-explained**.
+
+Note the FR-15a exclusion in the original task text is **withdrawn** (2026-08-27): both controls now render
+the same shared inline `LookupField`, so 080 assesses lookups **unqualified**, with only the delta above
+carved out.
+
+---
+
+## Acceptance criteria — current state
+
+| criterion | status |
+|---|---|
+| 5-field layout, spans, renderers from code | ✅ |
+| `boundField` from the form definition, not assumed | ✅ `sprk_matternumber` |
+| Footer version, full `$select`, toolbar inventory | ✅ (v1.0.21; `$select` above; sparkle + To Do + Notepad) |
+| Light **and** dark screenshots of every runtime state | ⏳ **operator** |
+| Lookup interaction documented + delta explained in writing | ✅ |
+| Negative: only `notes/` changed | ✅ read-only capture |
