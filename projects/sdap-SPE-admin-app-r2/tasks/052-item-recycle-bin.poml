@@ -4,7 +4,7 @@
     <title>Per-container item recycle bin — list, restore (207 handled), permanent delete</title>
     <phase>5 Workstream E — New capabilities</phase>
     <gate>022 complete, 041 complete</gate>
-    <status>not-started</status>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>New capability with irreversible operations (permanent delete); .cs endpoints + .tsx; tags include bff-api and frontend.</rigor-reason>
     <model-tier>sonnet</model-tier>
@@ -141,7 +141,29 @@
     <criterion testable="true">dotnet build 0 errors; tests green; publish size within ceiling.</criterion>
   </acceptance-criteria>
 
-  <notes>Spec FR-E03. Satisfies spec success criterion 8. The 207 handling is the acceptance-critical detail.</notes>
+  <notes>
+    Spec FR-E03. Satisfies spec success criterion 8. The 207 handling is the acceptance-critical detail.
+
+    COMPLETED 2026-08-27. All 8 acceptance criteria met; live-verified on a throwaway container
+    (18/18 checks, provisioned and torn down by the probe, teardown confirmed 0 remaining — NFR-07).
+    Full record: notes/task-052-findings.md §5.
+
+    The escalation trigger did NOT fire — verification was performed against a throwaway container
+    exactly as required.
+
+    Three things worth carrying forward:
+    (1) Restore and permanent delete fail in OPPOSITE ways. Restore's 207 lists only successes and is
+        atomic on rejection; delete returns 204 regardless of what it did and is non-atomic. They
+        cannot share a verification strategy, so delete re-lists the bin and diffs BEFORE and AFTER.
+    (2) Graph's error CODE for a rejected restore is not stable — badArgument and invalidRequest were
+        both observed for the same condition hours apart. The detector keys on the 400 STATUS.
+    (3) Raw JSON via SendGraphJsonAsync dissolves the deletedBy/UntypedObject trap rather than
+        handling it, because the response is parsed here rather than by Kiota.
+
+    Deviation: contract tests live at tests/integration/contract/SpeAdmin/ (a KEEP path), not the
+    tests/unit/Sprk.Bff.Api.Tests/Api/SpeAdmin/ this POML named — that path is not a KEEP path and
+    tests there are scheduled for deletion at the /test-diet gate. Same deviation task 050 recorded.
+  </notes>
 
   <execution><skill>.claude/skills/task-execute/SKILL.md</skill></execution>
 </task>

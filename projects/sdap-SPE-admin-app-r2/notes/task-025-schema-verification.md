@@ -127,7 +127,7 @@ What was done instead:
 raw string including flags outside the SDK enum; and a guard that the fictional
 `agent.chatEmbedAllowedHosts` is never sent, so a future reader of FR-C07 cannot "restore" it.
 
-### ⚠️ Not delivered — the settings FORM
+### ⚠️ Not delivered at the time — the settings FORM (✅ DELIVERED 2026-08-27, see §6)
 
 AC-1 says the nine must *render in the UI*. The server now supplies them; the form does not yet show
 the five new ones.
@@ -151,3 +151,97 @@ DTO + domain record on existing read/write paths.
 
 ⚠️ **AC-2 unmet, shared with task 023**: every PATCH to a container type returns 400 in every shape
 tested, so no property's writability is empirically established. Same escalation, not a second one.
+
+> 🔴 **THE PARAGRAPH ABOVE IS STALE — corrected 2026-08-27.** It was written before, and never
+> reconciled with, [`patch-400-resolution.md`](patch-400-resolution.md) (2026-08-25), which found the
+> cause and states in its own header that it **"Unblocks 023, 025, 026, 029"**.
+>
+> **`etag` is a REQUIRED property in the PATCH request BODY** — not the `If-Match` header — and every
+> write this product ever attempted omitted it. Microsoft's reference documents the exact symptom
+> under *"Example 2: Update without ETag → 400 Bad Request"*. The fix is in the code
+> (`SpeAdminGraphService.cs` reads the current etag and sets `patchBody.Etag` before the PATCH) and was
+> proven live on 2026-08-25 with an identical no-op payload, so the etag was the only variable.
+>
+> Two notes therefore disagreed for two days: task 051 §3 reasoned from *"the container-TYPE settings
+> PATCH does persist"* while this one asserted *"returns 400 in every shape tested"*. 051 was right.
+>
+> **What is still genuinely open** is narrower and is a UAT item, not a blocker: whether **each** of the
+> nine properties individually persists. Task 051 added read-back verification
+> (`SettingsNotPersistedException` → 502 with `unwrittenFields`), so a silent per-property discard would
+> now be *reported* rather than absorbed — which is the structural half of AC-2. The empirical half
+> needs one save against Spaarke Dev.
+>
+> Lesson, and it is the project's own: a stale caveat is indistinguishable from a live blocker to the
+> next reader. This one would have carried a false "nothing is writable" into the wrap-up.
+
+---
+
+## 6. ✅ The settings FORM — delivered 2026-08-27 (AC-1 now met)
+
+§5 deferred this deliberately: the form was bound to the **Dataverse config record**, not to the Graph
+settings DTO the task introduced, and rebinding was judged a distinct piece of work. It was, and this
+is it.
+
+### 6.1 🔴 What the rebind exposed — the form was FABRICATING every value
+
+`extractSettingsFromConfig` read `selectedConfig` (Dataverse) and filled every gap with an invented
+default:
+
+```ts
+sharingCapability: (config.sharingCapability as …) ?? "disabled",
+isItemVersioningEnabled: config.isItemVersioningEnabled ?? false,
+itemMajorVersionLimit:   config.itemMajorVersionLimit   ?? 100,
+maxStoragePerBytes:      config.maxStoragePerBytes      ?? 1_073_741_824,
+isSearchEnabled: true, // Graph API search is enabled by default; no Dataverse field yet
+```
+
+Every one of those is a guess presented as configuration, **on the screen whose entire purpose is to
+report the configuration.** The last line is the starkest: `isSearchEnabled` was hard-coded `true`
+with a comment asserting a Graph default that nobody measured — so an administrator looking at a
+container type with search **off** saw a switch in the **on** position.
+
+This is the project's signature defect (spec §2.4) found inside the settings screen, and it is the
+same shape as task 050's fabricated `"active"` status. It is a *fourth* instance.
+
+It was invisible before this task because the server never sent settings at all (§5), so there was
+nothing to disagree with the fabrication.
+
+### 6.2 What shipped
+
+| Change | Detail |
+|---|---|
+| **Form rebound to Graph's shape** | Props now take `ContainerTypeSettings` from `types/spe.ts` — the 9 v1.0 properties + beta `isOfficeRestricted`, every member optional. The form's own duplicate `ContainerTypeSettings` interface (5 required props, Dataverse-named `maxStoragePerBytes`) is gone; there was a genuine **type-name collision** between the two |
+| **Seeded from Graph** | `settingsFromContainerType(ct)` replaces `extractSettingsFromConfig(config)`. Initial state is `{}` — empty, not defaulted, so nothing is asserted while the fetch is in flight |
+| **All 9 render** | Added `isDiscoverabilityEnabled`, `isSharingRestricted`, `urlTemplate` (editable) and `consumingTenantOverridables` (read-only) + `isOfficeRestricted` (read-only) |
+| **`TriStateSwitch`** | A boolean setting can be `true`, `false`, or **not reported**. `<Switch checked={undefined}>` renders identically to `false`, so a "Not reported" badge keeps the third state visible |
+| **Undefined stays undefined** | Only established values are sent (`definedSettings`). The BFF applies non-null fields and leaves the rest alone, so an unreported setting is *omitted* rather than written as `false`. **Coercing an unknown to a default would turn a gap in knowledge into a configuration change** |
+| **Read-back after save** | Re-seeds from the PUT response, not from what was sent — task 025 added that response payload for exactly this (FR-C04), and task 051 measured Graph accepting a settings write while discarding a property. Echoing the request back would hide it |
+
+### 6.3 A bug caught before it shipped
+
+The first version of the save handler did `setContainerType(updated)`. The PUT returns
+`ContainerTypeSettingsResponseDto` — a deliberately **narrower** shape (id, displayName, billing,
+createdDateTime, settings) that does **not** carry `owningAppId`, `expiryDateTime` or `region`.
+Assigning it wholesale would have blanked those from the details panel above the form, so a
+*successful save* would have looked like data loss.
+
+Fixed by merging (`{ ...containerType, ...updated }`) — object spread only copies keys the response
+actually has, so the omitted ones survive.
+
+### 6.4 Deliberate non-goals
+
+- `consumingTenantOverridables` **renders read-only.** AC-1 asks the nine to *render*. It is override
+  PERMISSION metadata, not a setting value, and it is a comma-delimited flag string whose live members
+  include values outside the SDK's enum — a free text box would let a typo silently widen or revoke
+  what a consuming tenant may override. Task 026 renders its meaning in prose above the form.
+- `isOfficeRestricted` **renders read-only** — beta-only, absent from the v1.0 schema this form writes
+  through, so there is nothing to write it with.
+
+### 6.5 Gates
+
+- Client typecheck **124 errors = the pre-existing baseline exactly; 0 in the touched files**
+- `npm run build` succeeds · BFF build **0 errors** (no server change was needed — 025's server half
+  already accepted all nine)
+- No new NuGet, no new endpoint, no new DI registration
+
+⚠️ **AC-2 remains unmet and is unchanged** — shared with task 023, not a second escalation.
