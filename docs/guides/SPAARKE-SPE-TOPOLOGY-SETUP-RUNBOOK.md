@@ -38,13 +38,17 @@ After this runbook completes, ALL future trial prospects (trial2, trial3, ...) r
 
 **What**: Create the immutable-1:1 owning app-reg per topology doc §R1 (permanent binding to the container-type you create at step 3).
 
-**Command**:
+**Command** (script landed 2026-08-30 per task 213.4 — includes `-TenantId` requirement per FR-28 / I1):
 ```powershell
-# From repo root
-./scripts/Register-EntraAppRegistrations.ps1 -CreateOwningApp Trial1
+# From repo root — TenantId is mandatory (never a hardcoded default)
+./scripts/Register-EntraAppRegistrations.ps1 `
+  -TenantId $env:AZURE_TENANT_ID `
+  -CreateOwningApp Trial1
 ```
 
-**Manual fallback** (if script extension per task 213.4 hasn't landed yet):
+The script is idempotent (safe to re-run): existing app-regs detected by display name are skipped with a warning; only new ones are created. It auto-adds Graph `FileStorageContainer.Selected` (Application). It emits an operator-actionable warning for `FileStorageContainerTypeReg.Selected` (which lives on a non-Graph API surface in some tenants and requires the manual portal step below).
+
+**Manual fallback** (only if the script fails for a tenant-specific reason):
 1. Portal → Entra ID → App registrations → New registration
 2. Name: `Spaarke SPE Trial 1 Owner`
 3. Supported account types: **Accounts in this organizational directory only (Single tenant — AzureADMyOrg)**
@@ -168,18 +172,37 @@ If still 404 after 30 minutes, escalate — something is wrong with the containe
 
 **What**: Create the separate BFF app-reg per topology doc §3A row 4 (`Spaarke BFF — Trial 1`). **MUST BE SEPARATE** from the owning app (§3A "The BFF app registration MUST be separate from the owning app" + owner directive 2026-08-30 Q4 "create NEW Spaarke BFF — Trial 1; do not reuse dev").
 
-**Command**:
+**Command** (script landed 2026-08-30 per task 213.4):
 ```powershell
-./scripts/Register-EntraAppRegistrations.ps1 -CreateBffApp Trial1
+# Trial 1 or Model 1 (shared BFF app-reg per tier):
+./scripts/Register-EntraAppRegistrations.ps1 `
+  -TenantId $env:AZURE_TENANT_ID `
+  -CreateBffApp Trial1
+
+# Model 2 per-customer BFF app-reg (topology doc §3A row 6):
+./scripts/Register-EntraAppRegistrations.ps1 `
+  -TenantId $env:AZURE_TENANT_ID `
+  -CreateBffApp Model2 `
+  -CustomerName Acme
 ```
 
-**Manual fallback** (if script extension per task 213.4 hasn't landed yet):
+The script creates the BFF app-reg with:
+- `signInAudience=AzureADMyOrg` (single-tenant, per project CLAUDE.md § MUST rule — BFF apps are ALWAYS single-tenant)
+- Graph delegated permissions: `Files.ReadWrite.All`, `Sites.ReadWrite.All`, `User.Read`, `Mail.Send` (mirrors the reference `spaarke-bff-api-prod` app-reg)
+- Dynamics CRM delegated: `user_impersonation`
+- Application ID URI: `api://{appId}` + exposed `user_impersonation` scope
+- Service principal
+- **NO client secret** (topology BFF apps are secret-free per ADR-028 A4 + KV credential-lifecycle rule 1). FIC is added separately in Step 8 below.
+- **NO Key Vault writes** (that is the per-customer H4 handler's job at provisioning time).
+- **NO redirect URIs** (BFF is a confidential-client using FIC/MI to mint tokens; no OAuth code flow needed).
+
+**Manual fallback** (only if the script fails for a tenant-specific reason):
 1. Portal → Entra ID → App registrations → New registration
-2. Name: `Spaarke BFF — Trial 1`
+2. Name: `Spaarke BFF - Trial 1` (or per-tier equivalent; use ASCII hyphen to match script's display name convention)
 3. Supported account types: **Accounts in this organizational directory only (Single tenant)** — per topology doc §3A rows 4-6 (BFFs are always single-tenant; only Model 2 OWNING app is multi-tenant, row 3).
-4. Redirect URI: (per BFF instance — task 213.4 codifies this)
+4. Redirect URI: (leave blank — BFF is secret-free confidential-client, no OAuth code flow)
 5. Save. Capture the **Application (client) ID** GUID.
-6. Configure API permissions per the reference BFF app-reg (`SDAP-BFF-SPE-API` = `1e40baad-e065-4aea-a8d4-4b7ab273458c`). Task 213.4 automates this.
+6. Configure API permissions per the reference BFF app-reg (`SDAP-BFF-SPE-API` = `1e40baad-e065-4aea-a8d4-4b7ab273458c`).
 
 **Output**: `bffApiAppId` GUID — record it for step 6.
 

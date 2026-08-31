@@ -26,7 +26,7 @@
 //     │     │
 //     │     ↓
 //     │     H3 (Entra app-reg — needs KV for secret storage)
-//     │       ├── H8 (SPE container-type — Graph-based; does NOT need H4-shared / H4b)
+//     │       ├── H8 (SPE container CREATION — H8-B, task 214; container-type is a pre-existing operator prereq per SPAARKE-SPE-TOPOLOGY-SETUP-RUNBOOK.md)
 //     │       └── H9 (BFF deploy — needs H3 AND H4b so KV refs + batched
 //     │                app-settings are landed before BFF boot / F20 chain)
 //     └── H5 (Dataverse env create)
@@ -114,7 +114,7 @@ public sealed class DagAdvancer : IDagAdvancer
     /// <summary>Handler identifier for H7 Dataverse env-var values.</summary>
     public const string HandlerH7 = HandlerIds.H7;
 
-    /// <summary>Handler identifier for H8 SPE container-type.</summary>
+    /// <summary>Handler identifier for H8 SPE container CREATION (H8-B semantics; container-type is a pre-existing operator prereq per docs/guides/SPAARKE-SPE-TOPOLOGY-SETUP-RUNBOOK.md).</summary>
     public const string HandlerH8 = HandlerIds.H8;
 
     /// <summary>Handler identifier for H9 BFF deploy.</summary>
@@ -163,7 +163,7 @@ public sealed class DagAdvancer : IDagAdvancer
             [HandlerH4b] = new[] { HandlerH4, HandlerH4Shared },            // Task 201 / F20 — batched app-settings needs BOTH per-tenant + shared KV populated.
             [HandlerH6] = new[] { HandlerH5 },
             [HandlerH7] = new[] { HandlerH6 },
-            [HandlerH8] = new[] { HandlerH3 },                              // H8 is Graph-based SPE container-type creation; does NOT consume shared-BFF KV — no H4b/H4-shared dep.
+            [HandlerH8] = new[] { HandlerH3 },                              // H8 is Graph-based SPE container CREATION (per-customer; H8-B rewrite per task 214, 2026-08-30). Container-TYPE is a pre-existing per-model operator prereq (docs/guides/SPAARKE-SPE-TOPOLOGY-SETUP-RUNBOOK.md steps 3+7). H3 dep preserved: H8 uses InterStepState.BffAppRegId to construct the T6 ClientCertificateCredential.
             [HandlerH9] = new[] { HandlerH3, HandlerH4b },                  // EXEC-01: BFF boot needs KV refs + batched app-settings; gate on H4b (which transitively gates on H4 + H4-shared).
             [HandlerH10] = new[] { HandlerH7 },
             [HandlerH11] = new[] { HandlerH10 },

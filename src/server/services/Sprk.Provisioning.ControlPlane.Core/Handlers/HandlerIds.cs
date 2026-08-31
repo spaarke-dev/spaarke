@@ -87,7 +87,7 @@ public static class HandlerIds
     /// <summary>H7 -- Dataverse environment-variable values.</summary>
     public const string H7 = "H7";
 
-    /// <summary>H8 -- SPE container-type creation.</summary>
+    /// <summary>H8 -- SPE container CREATION (H8-B semantics per task 214, 2026-08-30). Container-TYPE is a pre-existing per-model operator prereq (docs/guides/SPAARKE-SPE-TOPOLOGY-SETUP-RUNBOOK.md). Wire format literal "H8" is unchanged.</summary>
     public const string H8 = "H8";
 
     /// <summary>H9 -- BFF artifact-based deploy (CI-published blob).</summary>

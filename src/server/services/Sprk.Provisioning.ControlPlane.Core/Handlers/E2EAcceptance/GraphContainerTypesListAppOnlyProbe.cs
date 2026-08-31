@@ -28,7 +28,7 @@
 using System.Security.Cryptography.X509Certificates;
 using Microsoft.Extensions.Options;
 using Microsoft.Graph.Models.ODataErrors;
-using Sprk.Provisioning.ControlPlane.Handlers.SpeContainerType;
+using Sprk.Provisioning.ControlPlane.Handlers.SpeContainer;
 
 namespace Sprk.Provisioning.ControlPlane.Handlers.E2EAcceptance;
 

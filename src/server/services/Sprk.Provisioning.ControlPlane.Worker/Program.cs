@@ -57,7 +57,7 @@ using Sprk.Provisioning.ControlPlane.Handlers.IntegrationWiring;
 using Sprk.Provisioning.ControlPlane.Handlers.KvSecretsPopulation;
 using Sprk.Provisioning.ControlPlane.Handlers.RuntimeReferences;
 using Sprk.Provisioning.ControlPlane.Handlers.SolutionImport;
-using Sprk.Provisioning.ControlPlane.Handlers.SpeContainerType;
+using Sprk.Provisioning.ControlPlane.Handlers.SpeContainer;
 using Sprk.Provisioning.ControlPlane.Handlers.SubscriptionReadiness;
 using Sprk.Provisioning.ControlPlane.Handlers.UserProvisioning;
 using Sprk.Provisioning.ControlPlane.Modules;
@@ -767,47 +767,42 @@ builder.Services.AddHttpClient(DataverseWebApiEnvVarValuesWriter.HttpClientName)
 builder.Services.AddScoped<IEnvVarValuesWriter, DataverseWebApiEnvVarValuesWriter>();
 builder.Services.AddScoped<H7DataverseEnvVarValuesHandler>();
 
-// Task 051 (Batch 3E) -> task 131 (Wave G-3) Graph SDK port: H8 SPE
-// container-type + root-container handler + THREE collaborator seams, now
-// Microsoft.Graph 6.5.0 under ClientCertificateCredential (T6) instead of the
-// retired shell-out scripts (CreateNewContainerTypeScriptProvisioner.cs /
-// SpeContainerAppOnlyVerifier.cs / AzCliSpeContainerIdKvWriter.cs — kept on
-// disk, UNREGISTERED, per this project's retirement pattern):
-//   - ISpeContainerTypeProvisioner -> GraphContainerTypeProvisioner: POST
-//     /storage/fileStorage/containerTypes (v1.0 GA) + POST
-//     /storage/fileStorage/containerTypeRegistrations (owning-app FULL
-//     permission grant — replaces the retired script's separate SharePoint
-//     REST applicationPermissions PUT under a different token audience) +
-//     POST /storage/fileStorage/containers (root container).
+// Task 214 (H8-B rewrite, 2026-08-30): H8 SPE-container-CREATION handler
+// (H8-B semantics — container-TYPE creation retired to operator prereq per
+// topology doc §R5 verified 403 accessDenied 2026-08-30, see
+// runs/h8-live-test-2026-08-30.md + docs/guides/SPAARKE-SPE-TOPOLOGY-SETUP-RUNBOOK.md).
+// Two collaborator seams:
+//   - ISpeContainerProvisioner -> GraphContainerProvisioner: POST
+//     /storage/fileStorage/containers (CREATE) + POST /storage/fileStorage/
+//     containers/{id}/activate (ACTIVATE) under Microsoft.Graph 6.5.0 +
+//     ClientCertificateCredential (T6 app-only cert-based auth — E-1 exception
+//     per ADR-028 for the owning-app cert; BFF identity remains secret-free).
+//     Container CREATION is app-only-capable per topology doc §6 (unlike
+//     container-TYPE creation per §R5 which requires delegated).
 //   - ISpeContainerVerifier -> GraphAppOnlyContainerVerifier: single GET
-//     /storage/fileStorage/containers/{id} — dramatically simplified vs the
-//     retired script's "123 lines of token ceremony around ONE GET"
-//     (Azure.Identity.ClientCertificateCredential owns the JWT client-
-//     assertion ceremony the script hand-rolled). Also owns the NEW 24h
+//     /storage/fileStorage/containers/{id} via app-only. Owns the 24h
 //     SPE-replication-lag classification (404 -> ReplicationPending ->
 //     handler sets RunStatus.WaitingOnGate, never Resumable/QuarantineRequired
 //     — DS-4 §2 / this project's CLAUDE.md MUST rules).
-//   - ISpeContainerIdKvWriter -> SecretClientSpeContainerIdKvWriter: reuses
-//     task 125's SecretClient idiom (single-secret, narrower than H4's
-//     manifest-driven writer — see that file's header for the justification).
-// Both Graph collaborators load the T6 cert from KV via SecretClient (NOT
-// CertificateClient — see SpeConfidentialClientGraphFactory.cs's header for
-// why: the private key is only obtainable via the paired Secret, never via
-// CertificateClient's public-cert-only DownloadCertificateAsync).
+// Both collaborators load the T6 cert from KV via SecretClient (see
+// SpeConfidentialClientGraphFactory.cs).
 //
-// spec.md MUST rule (T6, FR-33): confidential-client (app-only) cert-based
-// token is the ONLY auth path (ClientCertificateCredential, NEVER
-// ClientSecretCredential) — enforced in BOTH the provisioner (creation) and
-// the verifier (post-condition GET), each independently detecting a
-// delegated-token trap signature ("public client not allowed") and
-// classifying QuarantineRequired + TrapT6DelegatedTokenDetected rather than a
-// routine Resumable failure.
-builder.Services.Configure<SpeContainerTypeOptions>(
-    builder.Configuration.GetSection(nameof(SpeContainerTypeOptions)));
-builder.Services.AddSingleton<ISpeContainerTypeProvisioner, GraphContainerTypeProvisioner>();
+// REMOVED FROM H8-A (pre-214-rewrite):
+//   - GraphContainerTypeProvisioner (container-TYPE creation retired)
+//   - SecretClientSpeContainerIdKvWriter + ISpeContainerIdKvWriter (per-customer
+//     SPE-ContainerTypeId KV write retired; containerTypeId now sourced from
+//     spaarke-constants.yaml, not per-customer KV)
+//   - SpeContainerAppOnlyVerifier (retired PS-script version deleted)
+//
+// spec.md MUST rule (T6, FR-33): H8-B does NOT participate in T6-trap
+// detection (per task 214.4 Option A). H13's T6SpeConfidentialClientTrapProbe
+// owns the T6 acceptance gate. SpeConfidentialClientGraphFactory.
+// IsDelegatedTokenTrapError is retained ONLY for H13's use.
+builder.Services.Configure<SpeContainerOptions>(
+    builder.Configuration.GetSection(nameof(SpeContainerOptions)));
+builder.Services.AddSingleton<ISpeContainerProvisioner, GraphContainerProvisioner>();
 builder.Services.AddSingleton<ISpeContainerVerifier, GraphAppOnlyContainerVerifier>();
-builder.Services.AddSingleton<ISpeContainerIdKvWriter, SecretClientSpeContainerIdKvWriter>();
-builder.Services.AddScoped<H8SpeContainerTypeHandler>();
+builder.Services.AddScoped<H8SpeContainerHandler>();
 
 // Task 053 (Batch 3E): H10 Dataverse App User + Graph app-role parity handler
 // (T2 + T3 silent-fail trap owner) + FIVE collaborator seams

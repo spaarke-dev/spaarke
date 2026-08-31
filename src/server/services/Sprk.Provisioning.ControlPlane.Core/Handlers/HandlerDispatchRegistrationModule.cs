@@ -63,7 +63,7 @@ using Sprk.Provisioning.ControlPlane.Handlers.KvSecretsPopulation;
 using Sprk.Provisioning.ControlPlane.Handlers.Preflight;
 using Sprk.Provisioning.ControlPlane.Handlers.RuntimeReferences;
 using Sprk.Provisioning.ControlPlane.Handlers.SolutionImport;
-using Sprk.Provisioning.ControlPlane.Handlers.SpeContainerType;
+using Sprk.Provisioning.ControlPlane.Handlers.SpeContainer;
 using Sprk.Provisioning.ControlPlane.Handlers.SubscriptionReadiness;
 using Sprk.Provisioning.ControlPlane.Handlers.UserProvisioning;
 
@@ -123,7 +123,7 @@ public static class HandlerDispatchRegistrationModule
         services.AddKeyedScoped<IProvisioningHandler>(
             HandlerIds.H7, (sp, _) => sp.GetRequiredService<H7DataverseEnvVarValuesHandler>());
         services.AddKeyedScoped<IProvisioningHandler>(
-            HandlerIds.H8, (sp, _) => sp.GetRequiredService<H8SpeContainerTypeHandler>());
+            HandlerIds.H8, (sp, _) => sp.GetRequiredService<H8SpeContainerHandler>());
         services.AddKeyedScoped<IProvisioningHandler>(
             HandlerIds.H9, (sp, _) => sp.GetRequiredService<H9BffDeployHandler>());
         services.AddKeyedScoped<IProvisioningHandler>(

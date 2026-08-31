@@ -151,7 +151,7 @@ public sealed class Model1SharedDagParityTests
     //     - H5DataverseEnvCreationHandler
     //     - H6SolutionImportHandler
     //     - H7DataverseEnvVarValuesHandler
-    //     - H8SpeContainerTypeHandler
+    //     - H8SpeContainerHandler (H8-B rewrite per task 214, 2026-08-30)
     //     - H9BffDeployHandler
     //     - H11UserProvisioningHandler
     //     - H12aAiSeedChainHandler

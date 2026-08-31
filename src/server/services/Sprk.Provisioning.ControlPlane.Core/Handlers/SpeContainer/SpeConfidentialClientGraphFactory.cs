@@ -1,46 +1,38 @@
 // -----------------------------------------------------------------------------
 // SpeConfidentialClientGraphFactory.cs
 //
-// Task 131 (Wave G-3) — shared T6 cert-loading + ClientCertificateCredential/
-// GraphServiceClient construction helper for GraphContainerTypeProvisioner +
-// GraphAppOnlyContainerVerifier. Extracted per CLAUDE.md §11 (one component
-// that works exceptionally well, not two that partially overlap) — BOTH new
-// H8 collaborators need the IDENTICAL cert-bootstrap + confidential-client
-// credential recipe; duplicating it would violate the reuse-over-new rule.
+// Shared T6 cert-loading + ClientCertificateCredential/GraphServiceClient
+// construction helper for GraphContainerProvisioner + GraphAppOnlyContainerVerifier
+// (H8) and for H13's T6SpeConfidentialClientTrapProbe /
+// GraphContainerTypesListAppOnlyProbe. Extracted per CLAUDE.md §11 (one
+// component that works exceptionally well, not two that partially overlap):
+// all four call sites need the IDENTICAL cert-bootstrap + confidential-client
+// credential recipe.
+//
+// TASK 214 CHANGE (2026-08-30): moved from Handlers/SpeContainerType/ to
+// Handlers/SpeContainer/ + namespace renamed. Logic is unchanged — the KV
+// cert-bootstrap mechanism, EphemeralKeySet posture, ClientCertificateCredential
+// construction, and T6 delegated-token-trap phrase detection are IDENTICAL to
+// the pre-rewrite version. H13's E2EAcceptance probes consume this exactly as
+// before (only their `using` statements needed updating).
 //
 // T6 CERT-FROM-KV MECHANISM (ground-truthed against
 // scripts/common/Get-SpeConfidentialClientToken.ps1, the helper both
 // scripts/Create-NewContainerType.ps1 and scripts/Get-SpeContainerMetadata-
 // AppOnly.ps1 already dot-source):
 //   The cert is stored in Key Vault as a SECRET (base64-encoded PFX text),
-//   NOT as a Key Vault Certificate object. The PS helper uses
-//   `az keyvault secret download --encoding base64` (decodes base64 -> raw
-//   PFX bytes written to a scratch file), then
-//   `X509Certificate2::new(path, '', EphemeralKeySet)`.
-//
-//   Azure.Security.KeyVault.CERTIFICATES' CertificateClient was considered
-//   (per task directive) and REJECTED: CertificateClient only exposes
-//   metadata + the PUBLIC certificate (DownloadCertificateAsync never returns
-//   private-key material — this is a KV platform constraint, not an SDK gap).
-//   The PRIVATE KEY needed to build a ClientCertificateCredential is only
-//   obtainable via the PAIRED SECRET (same name), exactly as the already-
-//   hardened PS helper does. SecretClient (already used by task 125/130's KV
-//   writers/readers) is therefore the CORRECT — and only — typed client for
-//   this read; Azure.Security.KeyVault.Secrets.SecretClient.GetSecretAsync is
-//   used, .Value is base64-decoded to raw PFX bytes, then loaded via the
-//   .NET 9+/10 recommended <see cref="X509CertificateLoader.LoadPkcs12(byte[], string?, X509KeyStorageFlags)"/>
+//   NOT as a Key Vault Certificate object. Azure.Security.KeyVault.Secrets.
+//   SecretClient.GetSecretAsync is used; .Value is base64-decoded to raw PFX
+//   bytes, then loaded via the .NET 9+/10 recommended
+//   <see cref="X509CertificateLoader.LoadPkcs12(byte[], string?, X509KeyStorageFlags)"/>
 //   (NOT the SYSLIB0057-obsolete X509Certificate2(byte[], string, flags)
 //   constructor) with <see cref="X509KeyStorageFlags.EphemeralKeySet"/> —
 //   parity with the PS helper's private-key-never-persisted-to-disk posture.
 //
-// TENANT SCOPING (parity with GraphAppRegistrationProvisioner.cs GOTCHA 1 /
-// GraphRestAppRoleGranter.cs — H10): unlike H3/H10's DefaultAzureCredential
-// (which needs a FRESH instance per tenant because it has no per-request
-// tenant override), Azure.Identity.ClientCertificateCredential is ALREADY
-// constructed with an explicit tenantId + clientId at the call site — it is
-// inherently single-tenant, single-app by construction. No equivalent gotcha
-// applies here; §4D I5 (explicit per-tenant scope) is satisfied by
-// construction, not by a special per-call credential-refresh pattern.
+// TENANT SCOPING: Azure.Identity.ClientCertificateCredential is inherently
+// single-tenant, single-app by construction (unlike DefaultAzureCredential).
+// §4D I5 (explicit per-tenant scope) is satisfied by construction, not by a
+// special per-call credential-refresh pattern.
 // -----------------------------------------------------------------------------
 
 using System.Security.Cryptography.X509Certificates;
@@ -50,27 +42,24 @@ using Azure.Security.KeyVault.Secrets;
 using Microsoft.Graph;
 using Microsoft.Graph.Models.ODataErrors;
 
-namespace Sprk.Provisioning.ControlPlane.Handlers.SpeContainerType;
+namespace Sprk.Provisioning.ControlPlane.Handlers.SpeContainer;
 
 /// <summary>
 /// Shared T6 cert-bootstrap + confidential-client Graph client construction
-/// for H8's Graph SDK collaborators. Internal — consumed only within this
-/// folder; <c>InternalsVisibleTo Sprk.Provisioning.ControlPlane.Tests</c>
-/// (Core.csproj) exposes it to the unit test project for the AC#3 cert-path
-/// test (constructs a <see cref="ClientCertificateCredential"/> from a fake-KV-
-/// sourced certificate, asserts the credential TYPE — never a secret-based
-/// credential).
+/// for H8's Graph SDK collaborators AND H13's E2EAcceptance T6 probes.
+/// Internal — consumed only within Sprk.Provisioning.ControlPlane.Core;
+/// <c>InternalsVisibleTo Sprk.Provisioning.ControlPlane.Tests</c> exposes it
+/// to the unit test project for the cert-path tests.
 /// </summary>
 internal static class SpeConfidentialClientGraphFactory
 {
     private static readonly string[] GraphDefaultScope = { "https://graph.microsoft.com/.default" };
 
     /// <summary>
-    /// T6 regression-detector phrase — parity with the retired PS-script-based
-    /// collaborators' identical check (CreateNewContainerTypeScriptProvisioner.cs
-    /// / SpeContainerAppOnlyVerifier.cs). Under exclusive ClientCertificateCredential
-    /// usage this should never legitimately fire; it exists as a defense-in-depth
-    /// regression signal, not a routine code path.
+    /// T6 regression-detector phrase — parity with the historical PS-script-based
+    /// stdout scan. Under exclusive ClientCertificateCredential usage this
+    /// should never legitimately fire for container CREATE/GET; it exists as a
+    /// defense-in-depth regression signal for H13's T6 acceptance gate.
     /// </summary>
     internal const string DelegatedTokenTrapPhrase = "public client not allowed";
 
@@ -145,9 +134,9 @@ internal static class SpeConfidentialClientGraphFactory
 
     /// <summary>
     /// Builds the confidential-client (app-only, T6) credential — NEVER a
-    /// secret-based credential. The certificate's private key is
-    /// used to sign the client assertion (RS256, x5t header) per RFC 7523,
-    /// identical to the PS helper's manual JWT construction, but performed by
+    /// secret-based credential. The certificate's private key is used to sign
+    /// the client assertion (RS256, x5t header) per RFC 7523, identical to the
+    /// PS helper's manual JWT construction, but performed by
     /// Azure.Identity/MSAL instead of hand-rolled code.
     /// </summary>
     internal static ClientCertificateCredential BuildCredential(
@@ -161,8 +150,10 @@ internal static class SpeConfidentialClientGraphFactory
 
     /// <summary>
     /// T6 regression detector — checks a Graph ODataError for the delegated-
-    /// token trap signature (case-insensitive), parity with the retired
-    /// scripts' stdout-scanning check.
+    /// token trap signature (case-insensitive). H13's T6SpeConfidentialClientTrapProbe
+    /// consumes this to classify a probe result as "trap manifested" vs
+    /// "generic error." H8-B does NOT call this (per task 214.4 Option A —
+    /// H8's new shape doesn't participate in T6-trap detection).
     /// </summary>
     internal static bool IsDelegatedTokenTrapError(ODataError ex)
     {

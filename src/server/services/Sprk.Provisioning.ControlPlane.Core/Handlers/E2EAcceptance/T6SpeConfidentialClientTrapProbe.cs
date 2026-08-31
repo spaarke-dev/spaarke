@@ -61,7 +61,7 @@ using Azure;
 using Azure.Core;
 using Azure.Security.KeyVault.Secrets;
 using Microsoft.Extensions.Options;
-using Sprk.Provisioning.ControlPlane.Handlers.SpeContainerType;
+using Sprk.Provisioning.ControlPlane.Handlers.SpeContainer;
 
 namespace Sprk.Provisioning.ControlPlane.Handlers.E2EAcceptance;
 
@@ -71,7 +71,7 @@ namespace Sprk.Provisioning.ControlPlane.Handlers.E2EAcceptance;
 /// </summary>
 public sealed class T6SpeConfidentialClientTrapProbe : ITrapProbe
 {
-    /// <summary>Canonical KV secret name for the SPE owner cert -- mirrors <see cref="SpeContainerTypeOptions.DefaultCertSecretName"/>. Flagged for Phase H reconciliation (task 084).</summary>
+    /// <summary>Canonical KV secret name for the SPE owner cert -- mirrors <see cref="SpeContainerOptions.DefaultCertSecretName"/>. Flagged for Phase H reconciliation (task 084).</summary>
     internal const string SpeOwnerCertSecretName = "SPE-OwnerCert-Pfx";
 
     /// <summary>Fixed trap identity for this probe -- ALWAYS T6.</summary>

@@ -33,7 +33,7 @@ using Azure.Identity;
 using Azure.Security.KeyVault.Secrets;
 using FluentAssertions;
 using Microsoft.Graph.Models.ODataErrors;
-using Sprk.Provisioning.ControlPlane.Handlers.SpeContainerType;
+using Sprk.Provisioning.ControlPlane.Handlers.SpeContainer;
 using Xunit;
 
 namespace Sprk.Provisioning.ControlPlane.Tests.Handlers;

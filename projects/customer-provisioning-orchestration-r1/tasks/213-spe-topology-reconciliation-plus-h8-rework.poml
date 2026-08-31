@@ -57,7 +57,10 @@
 - The script is documented broken (§7). Container-type creation goes through SPE Admin app / VS Code extension / SharePoint admin center per §R5.
 - Do NOT delete the script (may have residual references in docs). Mark + redirect.
 
-**213.4 — Register-EntraAppRegistrations.ps1 extension for owning + BFF apps** (~3h):
+**213.4 — Register-EntraAppRegistrations.ps1 extension for owning + BFF apps** (~3h) — ✅ **LANDED 2026-08-30**:
+Added `-CreateOwningApp {Trial1|Model1|Model2}` + `-CreateBffApp {Trial1|Model1|Model2}` + `-CustomerName` (for Model 2 per-customer) parameters. Topology mode is a distinct early-exit branch (parallel to `-FicOnly`) that bypasses the prod BFF-API flow (implicit `-SkipBffApi` + `-SkipClientSecret`). Idempotent by display name — existing app-regs skip creation with a warning. Model 2 owning app uses `AzureADMultipleOrgs` (only multi-tenant app-reg in Spaarke topology, per §3A row 3); all others single-tenant per project CLAUDE.md §MUST rule. NO client secrets minted, NO Key Vault writes. Not combinable with `-FicOnly`/`-CreateFederatedCredential`/`-AllowClientSecretMint` (throws with actionable message). Runbook `docs/guides/SPAARKE-SPE-TOPOLOGY-SETUP-RUNBOOK.md` Steps 1 + 6 rewritten to invoke the new switches; `scripts/README.md` documents the topology mode. Parse-check + parameter-surface verify + 4 gate tests + dry-run against Trial1/Model2+Acme all pass.
+
+Original scope (retained for record):
 - Add capability to register the 6 app-regs per topology doc §3A:
   - Row 1: `Spaarke SPE Trial 1 Owner` — signInAudience=`AzureADMyOrg` (topology doc §3A row 1 doesn't specify audience; Trial 1 is single-tenant per §3 "Containers live in Spaarke tenant").
   - Row 2: `Spaarke SPE Model 1 Owner` — same as row 1.
