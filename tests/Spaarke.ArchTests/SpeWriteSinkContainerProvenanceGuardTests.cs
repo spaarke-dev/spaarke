@@ -419,10 +419,26 @@ public class SpeWriteSinkContainerProvenanceGuardTests
             + "why this list is keyed per call site instead of per file."),
 
         new SinkSite("Services/Office/OfficeStorageUploader.cs", "UploadSmallAsync", 1,
-            Provenance.ClientSupplied, "083 (NEW row 9)",
-            "containerId parameter <- OfficeService <- SaveRequest.ContainerId (client body), "
-            + "falling back to EmailProcessing:DefaultContainerId when absent",
-            "The Office add-in save path writes app-only (MI) into a container the client names in the save "
+            Provenance.ServerDerivedRecord, "085 (CLOSED 2026-08-30)",
+            "containerId parameter <- OfficeService.ResolveContainerAsync <- RecordContainerResolver "
+            + "keyed on SaveRequest.TargetEntity (the record AddEntityAccessFilter authorized), "
+            + "falling back to EmailProcessing:DefaultContainerId only when no target entity is named",
+            "CLOSED BY TASK 085. SaveRequest.ContainerId was DELETED from the contract and the container is "
+            + "now derived from the SAME record the caller was authorized against, through task 076's "
+            + "RecordContainerResolver — so the authorization key and the write destination are one value "
+            + "and no code path can let them disagree. A secure record's own container wins, and a secure "
+            + "record with no container of its own is REFUSED rather than falling back to the shared "
+            + "default (ADR-003 fail-closed). The historical finding is preserved because it is the reason "
+            + "this guard is keyed on sinks rather than routes: the client value crossed THREE frames "
+            + "(Api/Office/OfficeEndpoints -> OfficeService -> OfficeStorageUploader) before reaching the "
+            + "sink, so no route-level census could see it. And the sharpest detail — "
+            + "POST /api/office/save DID carry .AddEntityAccessFilter(), authorizing the caller against "
+            + "SaveRequest.TargetEntity while the container came from SaveRequest.ContainerId, a DIFFERENT "
+            + "client-supplied field on the same body. Authorized against one thing, writing into another: "
+            + "option (B), which task 083 rejected. That is why an authorization filter is not evidence "
+            + "about container provenance — the two guards ask different questions.\n\n"
+            + "ORIGINAL FINDING TEXT (retained for the record): The Office add-in save path writes "
+            + "app-only (MI) into a container the client names in the save "
             + "request body (ADR-003; ADR-007). THE HEADLINE FINDING of the 2026-08-28 sweep, and the reason "
             + "this guard is keyed on sinks rather than routes: the client-supplied value crosses THREE "
             + "frames (Api/Office/OfficeEndpoints -> OfficeService -> OfficeStorageUploader) before reaching "
@@ -446,9 +462,21 @@ public class SpeWriteSinkContainerProvenanceGuardTests
         // indistinguishable from here, so the reclassification is written down rather than left to be
         // re-derived. The prior ordinal-2 entry's substance is preserved below.
         new SinkSite("Workers/Office/UploadFinalizationWorker.cs", "UploadSmallAsync", 1,
-            Provenance.ClientSupplied, "083 (NEW row 9)",
-            "the drive resolved from payload.ContainerId, seeded by SaveRequest.ContainerId, reused for attachments",
-            "Email attachments are uploaded into the SAME drive that the client-named container resolved to "
+            Provenance.ServerDerivedRecord, "085 (CLOSED 2026-08-30)",
+            "the drive resolved from payload.ContainerId — which task 085 now seeds with the "
+            + "SERVER-derived container (RecordContainerResolver keyed on the authorized record), "
+            + "not with SaveRequest.ContainerId — reused for attachments",
+            "CLOSED BY TASK 085, at the payload rather than at this site. The container is derived BEFORE "
+            + "the ProcessingJob payload is serialized, so what this worker reads back is the "
+            + "server-derived value; previously the payload carried the client's own choice, which meant a "
+            + "client-supplied container OUTLIVED the request inside a Dataverse row. That laundering "
+            + "through a queue message is the shape most likely to be mistaken for server-derived by a "
+            + "reader who starts at the worker — which is precisely why the fix had to reach the payload "
+            + "and not just the synchronous upload. As of 2026-08-28 the attachment lands FLAT in the "
+            + "container root with the parent document id folded into the filename; that change removed "
+            + "implicit folder creation and did NOT change provenance — this one did.\n\n"
+            + "ORIGINAL FINDING TEXT (retained for the record): Email attachments are uploaded into the "
+            + "SAME drive that the client-named container resolved to "
             + "(ADR-003; ADR-036 background jobs). This is the async half of the Office save path: the "
             + "client-supplied container is laundered through a queue message, which is the shape most "
             + "likely to be mistaken for server-derived by a reader who starts at the worker. A fix that "

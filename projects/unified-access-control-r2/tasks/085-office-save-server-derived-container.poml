@@ -3,7 +3,7 @@
   <metadata>
     <title>POST /api/office/save — take the container from the server, not from SaveRequest.ContainerId</title>
     <phase>0c Secure Documents — Wave 2 (container-selection sweep follow-on)</phase>
-    <status>pending</status>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>Shipped write surface; changes an authorization contract on an app-only MI write with no SPE ACL backstop.</rigor-reason>
     <model-tier>opus</model-tier>
@@ -123,6 +123,48 @@ SHARED MAP WARNING. Per the owner's Q4 answer, `EntityAccessFilter.EntitySetByTy
     <criterion>Build 0 warnings; publish size reported against the 44.96 MB baseline; no new HIGH CVE.</criterion>
   </acceptance-criteria>
 
+  <notes>COMPLETED 2026-08-30. Full write-up: notes/task-085-office-save-container.md.
+
+`SaveRequest.ContainerId` DELETED (tombstoned in place, following the `FolderPath` precedent on the same
+type). New `OfficeService.ResolveContainerAsync` derives the container from the record the caller was
+already authorized against, via task 076's `RecordContainerResolver` — so the authorization key and the
+write destination are ONE value. A secure record with no container of its own is REFUSED
+(`ContainerDecisionOutcome.FailClosed`) rather than falling back to the shared default. Derivation runs
+BEFORE the ProcessingJob payload is serialized, which is what closes the async worker half: previously a
+client-chosen container outlived the request inside a Dataverse row.
+
+⚠️ DELIBERATE DEVIATION FROM THIS POML'S OWN CONSTRAINT. The brief said "no record → derive from the
+acting user's BU". NOT implemented, because `RecordContainerResolver`'s own contract argues against it:
+users sit in the Operations subtree while secure records are owned in Secure Projects, so acting-user
+resolution writes a secure record's content into the general Operations container — the exact isolation
+failure this project exists to close. The owner's Q1 sanctioned acting-user BU for task 076's three
+upload-before-a-record-exists CLIENT paths, a different surface; every shipped add-in path sends a
+TargetEntity, so Office save's no-record branch is contract-only and uses the existing server-side
+config default (fail-closed when unset). Q5's binding requirement — "accepting one in the request is the
+vulnerability" — is fully met, and the response still returns the chosen driveId.
+
+ESCALATION TRIGGER DID NOT FIRE. One scare: `useSaveFlow.ts:62` declares `containerId?: string`, but it
+is on `JobResultArtifact` — the RESPONSE shape — appearing exactly once. That is Q5 working as designed.
+No client sends it in a request; the quick-save body type enumerates its fields without it.
+
+TESTS ASSERT THE CONTRACT, NOT THE BEHAVIOUR, deliberately: no client ever sent ContainerId, so a
+behavioural test over today's callers would have passed throughout the defect's life. The new test
+checks for ANY container- or drive-naming property, because the defect is the capability rather than the
+spelling — reintroducing it as `DriveId` would be the same hole with a different label. Perturbation:
+reinstating the property reddens 2 of 3.
+
+Provenance guard: both Office sinks moved ClientSupplied -> ServerDerivedRecord, owner re-pointed to
+"085 (CLOSED)". Original finding text retained inside each entry — it is the clearest statement of why
+this guard is keyed on SINKS rather than routes (the client value crossed three frames before reaching
+the sink, so no route census could see it).
+
+Verification: build 0 warnings; 3/3 new tests; full BFF suite 10,908 passed / 0 failed / 72 skipped;
+ArchTests 144 passed / 6 failed == clean-tree baseline; publish 45.12 MB compressed incl. PDBs (0.00
+delta, ceiling 60); no vulnerable packages; no packages added. Placement Justification: no new endpoint,
+service, interface, DI registration or package — one existing service gains one already-registered
+scoped dependency, and a property is REMOVED from an existing contract.</notes>
+
+  <!-- Original POML notes follow -->
   <notes>Row 9 of the task 083 census. The sharpest single finding of the 2026-08-28 session: a route that IS gated, by a filter that IS correct, authorizing against a field that is NOT the one it writes to.
 
 Two claims about this surface were REFUTED during investigation and must not be reintroduced:

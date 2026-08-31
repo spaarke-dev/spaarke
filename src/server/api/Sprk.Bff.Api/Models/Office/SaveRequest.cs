@@ -21,10 +21,23 @@ public record SaveRequest
     /// </summary>
     public SaveEntityReference? TargetEntity { get; init; }
 
-    /// <summary>
-    /// Target container ID for file storage.
-    /// </summary>
-    public string? ContainerId { get; init; }
+    // ContainerId DELETED 2026-08-30 by task 085. It was the container-selection defect in its purest
+    // form: the route authorizes the caller against TargetEntity (via AddEntityAccessFilter) and then
+    // wrote the bytes into ContainerId — a DIFFERENT client-supplied field on this same body. The
+    // authorization key and the write destination were two independently caller-chosen values for one
+    // decision, on an app-only MI write with no SPE ACL to catch a mismatch. That is option (B), which
+    // task 083 explicitly rejected.
+    //
+    // Two facts made it worse than it looked. TargetEntity is OPTIONAL, and EntityAccessFilter calls
+    // next() when the target is absent — so a save could run on baseline Office authentication alone
+    // and still name its own container. And the value did not stop at the request: it was serialized
+    // into the ProcessingJob payload, so a client-chosen container outlived the call.
+    //
+    // No shipped client ever sent it (the add-in request body is contentType/email/targetEntity/
+    // aiOptions/documentMetadata), so the hole was the CONTRACT, not the traffic. Do not reintroduce
+    // it: the server now derives the container from the authorized record. Returning the chosen
+    // container/drive id in the RESPONSE is fine and necessary — the client needs driveId for
+    // sprk_graphdriveid and indexFile(). ACCEPTING one is the vulnerability.
 
     // FolderPath DELETED 2026-08-28 (stop minting SPE folders on upload paths). It was client-supplied
     // and always null: no producer under src/client/** ever set it (zero hits for `folderPath` there),

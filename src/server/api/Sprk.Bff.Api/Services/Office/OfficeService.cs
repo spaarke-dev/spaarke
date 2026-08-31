@@ -3,6 +3,7 @@ using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 using Spaarke.Dataverse;
 using Sprk.Bff.Api.Configuration;
+using Sprk.Bff.Api.Infrastructure.Dataverse;
 using Sprk.Bff.Api.Infrastructure.Graph;
 using Sprk.Bff.Api.Models.Office;
 using Sprk.Bff.Api.Services.Ai.Membership.Events;
@@ -37,6 +38,7 @@ public class OfficeService : IOfficeService
     private readonly OfficeJobQueue _jobQueue;
     private readonly OfficeStorageUploader _storageUploader;
     private readonly EmailProcessingOptions _emailProcessingOptions;
+    private readonly RecordContainerResolver _containerResolver;
     private readonly IMembershipEventPublisher _membershipEventPublisher;
     // FR-B3 (task 043): routes a user-saved EMAIL through the SAME Association Engine as mailbox capture so a
     // hand-filed email is associated + triaged (an intelligence-bearing sprk_communication), not merely a
@@ -57,9 +59,12 @@ public class OfficeService : IOfficeService
         OfficeStorageUploader storageUploader,
         IOptions<EmailProcessingOptions> emailProcessingOptions,
         IMembershipEventPublisher membershipEventPublisher,
+        RecordContainerResolver containerResolver,
         ILogger<OfficeService> logger,
         EmailUploadCaptureService? emailUploadCapture = null)
     {
+        _containerResolver = containerResolver
+            ?? throw new ArgumentNullException(nameof(containerResolver));
         _jobStatusService = jobStatusService;
         _jobService = jobService;
         _emailEnricher = emailEnricher;
@@ -70,6 +75,75 @@ public class OfficeService : IOfficeService
         _membershipEventPublisher = membershipEventPublisher;
         _emailUploadCapture = emailUploadCapture;
         _logger = logger;
+    }
+
+    /// <summary>
+    /// Decides which SPE container this save writes into. Server-side, always — task 085.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// With a <c>TargetEntity</c>, the container is derived from that record through task 076's
+    /// <see cref="RecordContainerResolver"/>. That record is the one
+    /// <c>AddEntityAccessFilter</c> already authorized the caller against, so the authorization key
+    /// and the write destination become a single value. The resolver refuses (rather than falling
+    /// back) when a secure record has no container of its own, which is why this method does not catch
+    /// <see cref="SdapProblemException"/>: swallowing it would turn a correct fail-closed refusal into
+    /// what reads like a misconfiguration.
+    /// </para>
+    /// <para>
+    /// Without a <c>TargetEntity</c> there is no record, so the configured default applies. It is
+    /// fail-closed when unset. Every shipped add-in path sends a <c>TargetEntity</c>, so this branch
+    /// exists for the contract rather than for traffic.
+    /// </para>
+    /// </remarks>
+    private async Task<string> ResolveContainerAsync(SaveRequest request, CancellationToken ct)
+    {
+        if (request.TargetEntity is { } target && target.EntityId != Guid.Empty)
+        {
+            var decision = await _containerResolver
+                .ResolveForRecordAsync(target.EntityType, target.EntityId, ct)
+                .ConfigureAwait(false);
+
+            // FailClosed means the record is SECURE and has no container of its own. Falling through to
+            // the configured default here would put a secure record's content in the shared container —
+            // the precise failure this project exists to prevent, and irreversible in SPE because
+            // permissions there are additive-only. Refuse instead.
+            if (decision.Outcome == ContainerDecisionOutcome.FailClosed)
+            {
+                throw new InvalidOperationException(
+                    $"The storage container for secure record {target.EntityType} {target.EntityId} could "
+                    + "not be determined. Refusing rather than writing its content into a shared "
+                    + "container, which SPE cannot subsequently un-share.");
+            }
+
+            if (!string.IsNullOrWhiteSpace(decision.ContainerId))
+            {
+                _logger.LogDebug(
+                    "Office save container derived from {EntityType} {EntityId} (outcome: {Outcome})",
+                    target.EntityType, target.EntityId, decision.Outcome);
+
+                return decision.ContainerId!;
+            }
+
+            // Unresolved: a non-secure record with no container and no business-unit default. Falling
+            // through to the configured default is safe here precisely BECAUSE the record is not
+            // secure — the outcome enum guarantees Unresolved is unreachable for a secure record.
+            _logger.LogDebug(
+                "No container resolved for {EntityType} {EntityId} (outcome: {Outcome}); using the "
+                + "configured default.",
+                target.EntityType, target.EntityId, decision.Outcome);
+        }
+
+        var configured = _emailProcessingOptions.DefaultContainerId;
+        if (string.IsNullOrWhiteSpace(configured))
+        {
+            throw new InvalidOperationException(
+                "No storage container could be determined for this save. The request names no target "
+                + "entity to derive one from, and EmailProcessing:DefaultContainerId is not configured. "
+                + "Refusing rather than guessing a container.");
+        }
+
+        return configured;
     }
 
     /// <inheritdoc />
@@ -161,12 +235,39 @@ public class OfficeService : IOfficeService
                 request.TargetEntity?.EntityType,
                 request.TargetEntity?.EntityId);
 
+            // ══ SERVER-DERIVED CONTAINER (task 085) ═══════════════════════════════════════════════
+            // Derived HERE, before the payload is built, so the job record and the upload below cannot
+            // disagree. Previously the payload carried request.ContainerId — a client-chosen container
+            // that outlived the request inside the ProcessingJob row.
+            //
+            // With a TargetEntity, the container comes from the SAME record the caller was authorized
+            // against (AddEntityAccessFilter), via task 076's resolver: the authorization key and the
+            // write destination are now one value, so no code path can let them disagree. The resolver
+            // is also secure-aware — a secure record's own container wins over any business-unit
+            // default, which is the isolation guarantee a client-supplied id could always defeat.
+            //
+            // Without a TargetEntity there is no record to derive from, so the configured
+            // EmailProcessing:DefaultContainerId applies — server-side, and already fail-closed when
+            // unset (below). This is the sanctioned ServerDerivedConfig shape for content with no
+            // owning record.
+            //
+            // ⚠️ Deliberately NOT the acting user's business unit. That was this task's brief, and the
+            // resolver's own contract argues against it (RecordContainerResolver §"Why the RECORD's
+            // business unit and not the ACTING USER's"): users sit in the Operations subtree while
+            // secure records are owned in Secure Projects, so acting-user resolution writes a secure
+            // record's content into the general Operations container — the exact isolation failure this
+            // project exists to close. The owner's Q1 answer sanctioned acting-user BU for the three
+            // upload-before-a-record-exists client paths in task 076, which are a different surface;
+            // Office save always carries a TargetEntity from the shipped add-in, so its no-record
+            // branch is contract-only and needs no new derivation component (CLAUDE.md §11).
+            var derivedContainerId = await ResolveContainerAsync(request, cancellationToken);
+
             // Serialize the request payload for storage
             var payload = System.Text.Json.JsonSerializer.Serialize(new
             {
                 ContentType = request.ContentType.ToString(),
                 TargetEntity = request.TargetEntity,
-                ContainerId = request.ContainerId,
+                ContainerId = derivedContainerId,
                 Email = request.Email,
                 Attachment = request.Attachment,
                 Document = request.Document,
@@ -293,18 +394,10 @@ public class OfficeService : IOfficeService
                         throw new InvalidOperationException($"Unsupported content type: {request.ContentType}");
                 }
 
-                // Get the container ID (use provided or default from configuration)
-                var containerId = request.ContainerId;
-                if (string.IsNullOrEmpty(containerId))
-                {
-                    containerId = _emailProcessingOptions.DefaultContainerId;
-                    if (string.IsNullOrEmpty(containerId))
-                    {
-                        throw new InvalidOperationException(
-                            "ContainerId is required for save operations. Either provide ContainerId in request or configure EmailProcessing:DefaultContainerId.");
-                    }
-                    _logger.LogDebug("Using default container ID from configuration: {ContainerId}", containerId);
-                }
+                // Task 085: the container was derived from the AUTHORIZED RECORD above, before the job
+                // payload was built. This site used to read request.ContainerId and only fall back to
+                // config — which is how a caller chose the destination of an app-only MI write.
+                var containerId = derivedContainerId;
 
                 // Upload to SPE
                 var (uploadSuccess, driveId, itemId, webUrl, uploadError) = await _storageUploader.UploadToSpeAsync(
