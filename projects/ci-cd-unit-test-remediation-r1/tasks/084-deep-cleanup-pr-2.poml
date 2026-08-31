@@ -1,7 +1,7 @@
 <task id="CICD-084" project="ci-cd-unit-test-remediation-r1">
   <metadata>
     <title>Deep cleanup PR 2/3 — medium-confidence DELETE bucket (coverage-fillers + pass-through + internal-method tests; ~500-1000 tests expected)</title>
-    <status>closed-not-worth-executing</status>
+    <status>cancelled-verified</status>
     <estimated-effort>3 hours</estimated-effort>
     <phase>2.5 - Deep cleanup</phase>
     <stream>B - Test reset (extended)</stream>
@@ -11,6 +11,7 @@
     <dependencies>083</dependencies>
     <blocks>085</blocks>
     <tags>testing, deletion, deep-cleanup, sliced-PR, build-vs-maintain</tags>
+    <disposition date="2026-08-30">CLOSED WITHOUT EXECUTING, per its own per-row verification in notes/b10-verification-round5.md. Of the 247 rows scoped for deletion, exactly ONE was genuine scaffolding; the other 246 asserted real behavior through forms the classifier could not see. Six classifier defects were found across rounds 3-5 and every one was an OVER-call — never an under-call. One test is not worth a task, a PR, or a review cycle; it is covered by the standing /test-diet route. Consistent with ADR-038 §3 (counts are observation, never a gate) and the #852 decision that numeric reduction is a signal, not a gate.</disposition>
   </metadata>
 
   <closure-record date="2026-08-28" resolution="CLOSED — 246 of 247 rows were false positives">
