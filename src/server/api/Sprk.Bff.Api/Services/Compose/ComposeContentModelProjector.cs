@@ -251,10 +251,17 @@ internal static class ComposeContentModelProjector
         var paraId = p.ParagraphId?.Value?.ToUpperInvariant(); // renderer dedups/mints (AssignParaIds)
         var alignment = MapAlignment(p);
 
-        // Uncounted-flatten closure (review finding 020-R3): the model has no indentation field (the read
-        // walk renders w:ind via AppendIndentDeclarations — re-lost on save until a widening task carries
-        // it).
-        if (p.ParagraphProperties?.Indentation is not null) ctx.AddWarning("indentation-dropped", 1);
+        // `indentation-dropped` was RETIRED here (#777, 2026-09-01). Its premise — "re-lost on save until a
+        // widening task carries it" — stopped being true when task 041 added property inheritance:
+        // ComposeBlockMerge.InheritProperties never excluded w:ind, so an edited block inherits it from its
+        // base counterpart and an untouched block is cloned whole. Indentation is not lost on either path,
+        // and ComposeParagraphStyleInheritanceSeamTests pins that in both directions.
+        //
+        // It therefore warned about nothing, once per indented paragraph, across the WHOLE document at open —
+        // "Some indentation was simplified ×84" on a 40-page contract the user had not touched. Owner
+        // direction 2026-09-01: do not surface routine docx→TipTap reconciliation; a warning the user cannot
+        // act on trains them to dismiss the banner that matters. See ADR-049 honest-lossiness: the guarantee
+        // is that REAL loss is never silent, not that every display-time difference is announced.
 
         // Task 025 (020-R11): paragraph-MARK revisions are MODEL data — w:pPr/w:rPr/w:del (mark pending-
         // deleted; accepting merges with the next paragraph) or w:ins (paragraph created while tracking).
@@ -383,13 +390,18 @@ internal static class ComposeContentModelProjector
         // headings, which ComposeOoxmlPrimitives.HeadingLevel's "Heading" prefix cannot classify) cannot be carried by the thin
         // model: the render path emits Normal, so heading-ness/outline/custom look flattens — counted,
         // never silent. Localized heading-id mapping is a 021/026-shaped follow-up.
-        var flattenedStyleId = p.ParagraphProperties?.ParagraphStyleId?.Val?.Value;
-        if (!string.IsNullOrEmpty(flattenedStyleId)
-            && !string.Equals(flattenedStyleId, "Normal", StringComparison.OrdinalIgnoreCase)
-            && !string.Equals(flattenedStyleId, "ListParagraph", StringComparison.OrdinalIgnoreCase))
-        {
-            ctx.AddWarning("paragraph-style-flattened", 1);
-        }
+        // `paragraph-style-flattened` was RETIRED here (#777, 2026-09-01), for the same reason and by the
+        // same change as `indentation-dropped` above. Its premise is stated in the comment block that used to
+        // sit here — "the render path emits Normal, so heading-ness/outline/custom look flattens" — and that
+        // is no longer what the render path does: ComposeBlockMerge.InheritProperties now carries an UNMODELED
+        // w:pStyle onto an edited block (a firm body style, Quote, the localized "Überschrift1" this comment
+        // named), and excludes only the styles the model itself owns, where a missing pStyle is the user
+        // demoting the block rather than a gap.
+        //
+        // What remains true is display-only: the EDITOR draws a Quote as Normal because the thin model has no
+        // field for it. That is routine docx→TipTap reconciliation, not loss, and per owner direction
+        // 2026-09-01 it is not something to warn about — the document is unharmed and there is no action for
+        // the user to take. Pinned by ComposeParagraphStyleInheritanceSeamTests.
 
         return new ComposeBlock
         {
