@@ -62,7 +62,8 @@
 | 065 | **E2b/E2c Fields typed controls + Update-other-fields** — E2b: self-resolve `getXrmForPicker().Utility.getEntityMetadata` (local extended Xrm type + defensive parse) → DateTime/Number→typed Input · Picklist/State/Status→`<Select>`(metadata options) · Lookup→`lookupObjects`(Targets)+name · else text; graceful text fallback non-MDA. E2c: full-width "+ Update other fields" → self-resolved `Navigation.navigateTo({pageType:entityrecord,…})` (confirmed record form), reload on close. OOB self-resolve, **NO BFF, no host prop**; `{overrideValue}` contract unchanged. tsc 0-err; jest 15/15 (+4) & 47/47 reconcile suites; Step 9.5 clean. notes/065. | 5·E-mount | ✅ | 055,063 | **opus·high** | ❌ false (shared lib) |
 | 066 | **E3b New-task Assigned-to OOB advanced-lookup** — `TaskReconcileTab` Assigned-to → `getXrmForPicker().Utility.lookupObjects({entityTypes:['systemuser','team']})` (reuse EmailConnectionsReview:157-176; guarded non-MDA keeps editable text fallback; picked name shown, normalized id in payload). Shared lib only, no BFF. tsc 0-err, jest 15/15 (+2 E3b), Step 9.5 clean. notes/066. | 5·E-mount | ✅ | 056,063 | sonnet·high | ❌ false (shared lib) |
 | 059 | Deploy Pillar E — code page + SpaarkeAi widget (seed needs-review + per-team `sprk_gridconfiguration`, set `NEEDS_REVIEW_CONFIG_ID`, code-page-deploy + rebuild SpaarkeAi + Deploy-AllDataGridConsumers) | 5·E | ✅ | 061,062 | sonnet·med | ❌ false |
-| 090 | Project wrap-up (test-diet, lessons, doc-drift, size) | 6 | 🔲 | all | sonnet·high | ❌ false |
+| 090 | Project wrap-up (test-diet, lessons, doc-drift, size) | 6 | 🔄 | all | sonnet·high | ❌ false |
+| 090-note | wrap-up artifacts DONE 2026-08-31 (test-diet clean/0-del · doc-drift clean · publish ~44 MB≤60 · 0 CVE · lessons · r5 coord · INDEX). Steps 7–8 (README→Complete + all-✅) BLOCKED on **044** live UAT. | 6 | 🔄 | 044 | — | — |
 
 ## Parallel Execution Groups (waves)
 

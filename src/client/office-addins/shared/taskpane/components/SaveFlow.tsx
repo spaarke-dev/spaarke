@@ -684,6 +684,13 @@ export function SaveFlow(props: SaveFlowProps): React.ReactElement {
           showQuickCreate
           placeholder="Search for a Matter, Project, Account…"
           aria-label="File to"
+          // Thread the BFF base URL + token so the picker queries the real
+          // `/api/office/search/entities` endpoint (real Dataverse records +
+          // GUID ids). Without this, useEntitySearch silently falls back to
+          // mockSearchEntities — surfacing fake records (id="4") that then 400
+          // on save-with-association. apiBaseUrl/getAccessToken are already in
+          // SaveFlow scope (used by useSaveFlow for the save POST).
+          searchOptions={{ apiBaseUrl, getAccessToken }}
         />
         {preSelectedFromEngine && selectedEntity && (
           <div className={styles.sectionTitle}>
