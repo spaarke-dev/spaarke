@@ -308,7 +308,7 @@ describe('DEF-09/DEF-12: ComposeWorkspace materializes the redline mark + per-ch
     renderWorkspace(bus);
 
     // Document loads (session id = DOC_SESSION) and the editor mounts.
-    await screen.findByRole('textbox', undefined, { timeout: 5000 });
+    await screen.findByRole('textbox');
 
     // Flow 5 — the Assistant-applied signal referencing the stored ledger entry (exactly
     // what ConversationPane emits after a Draft-alternative dispatch). ComposeWorkspace's
@@ -394,7 +394,7 @@ describe('DEF-11: ComposeWorkspace materializes a whole-document edits[] payload
     renderWorkspaceWithBridge(bus);
     expect(bridgeRef.current?.hasRedlineAcceptHandler).toBe(true);
 
-    await screen.findByRole('textbox', undefined, { timeout: 5000 });
+    await screen.findByRole('textbox');
 
     // Flow 5 — exactly what ConversationPane emits after a whole-document revise dispatch
     // (same signal DEF-09 uses; only the stored payload SHAPE differs).
@@ -476,7 +476,7 @@ describe('DEF-11: ComposeWorkspace materializes a flag-risks comments[] payload 
 
     const bus = new PaneEventBus();
     renderWorkspace(bus);
-    await screen.findByRole('textbox', undefined, { timeout: 5000 });
+    await screen.findByRole('textbox');
 
     // NOTE: ComposeWorkspace's refresh-durability effect (task 016 FR-04) re-materializes the
     // CURRENT stored compose output as soon as the session loads (page-refresh recovery) — so the
@@ -547,7 +547,7 @@ function seedFlags(comments: unknown[]): void {
 
 async function renderAndWaitForFlags(expectedCount: number): Promise<void> {
   renderWorkspace(new PaneEventBus());
-  await screen.findByRole('textbox', undefined, { timeout: 5000 });
+  await screen.findByRole('textbox');
   const workspaceRoot = await screen.findByTestId('compose-workspace');
   await waitFor(() => {
     expect(workspaceRoot.getAttribute('data-compose-anchored-annotation-count')).toBe(String(expectedCount));
@@ -646,7 +646,7 @@ describe('r8 task 055: a whole-document review flag resolves its anchor determin
     ]);
     const bus = new PaneEventBus();
     renderWorkspace(bus);
-    await screen.findByRole('textbox', undefined, { timeout: 5000 });
+    await screen.findByRole('textbox');
     const workspaceRoot = await screen.findByTestId('compose-workspace');
     await waitFor(() => {
       expect(workspaceRoot.getAttribute('data-compose-anchored-annotation-count')).toBe('2');
@@ -794,7 +794,7 @@ describe('FR-16 task 030: ComposeWorkspace re-materializes a durable review flag
 
     const bus = new PaneEventBus();
     renderWorkspace(bus);
-    await screen.findByRole('textbox', undefined, { timeout: 5000 });
+    await screen.findByRole('textbox');
 
     // The FR-04 refresh-durability effect re-materializes the CURRENT stored compose output on load.
     // The findings branch resolves the flagged clause and places a PERSISTENT advisory comment thread —
@@ -865,7 +865,7 @@ describe('FR-16 task 030: ComposeWorkspace re-materializes a durable review flag
       const bus = new PaneEventBus();
       renderWorkspace(bus);
       // The editor still mounts (no crash); the FR-04 effect logs + skips.
-      await screen.findByRole('textbox', undefined, { timeout: 5000 });
+      await screen.findByRole('textbox');
       await waitFor(() =>
         expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining('no usable flagged sections'), REVIEW_LEDGER_REF)
       );
@@ -909,7 +909,7 @@ describe('FR-16 task 032: summary-panel restore (gutter + panel, zero dispatch)'
 
     const bus = new PaneEventBus();
     renderWorkspace(bus);
-    await screen.findByRole('textbox', undefined, { timeout: 5000 });
+    await screen.findByRole('textbox');
 
     // (1) Gutter restore — the pre-existing task 030 guarantee, re-proven here alongside the panel
     // for the FULL closed-guarantee assertion (acceptance criterion 1).
@@ -951,7 +951,7 @@ describe('FR-16 task 032: 128KB payload budget (Leg B — explicit degraded-rest
 
     const bus = new PaneEventBus();
     renderWorkspace(bus);
-    await screen.findByRole('textbox', undefined, { timeout: 5000 });
+    await screen.findByRole('textbox');
 
     const banner = await screen.findByTestId('compose-workspace-review-findings-degraded-banner', undefined, {
       timeout: 5000,
@@ -981,7 +981,7 @@ describe('FR-16 task 032: 128KB payload budget (Leg B — explicit degraded-rest
     ];
     const bus1 = new PaneEventBus();
     const { unmount } = renderWorkspace(bus1);
-    await screen.findByRole('textbox', undefined, { timeout: 5000 });
+    await screen.findByRole('textbox');
     await waitFor(() => {
       expect(document.querySelectorAll('span[data-comment-id]').length).toBe(1);
     });
@@ -995,7 +995,7 @@ describe('FR-16 task 032: 128KB payload budget (Leg B — explicit degraded-rest
 
     const bus2 = new PaneEventBus();
     renderWorkspace(bus2);
-    await screen.findByRole('textbox', undefined, { timeout: 5000 });
+    await screen.findByRole('textbox');
 
     const banner = await screen.findByTestId('compose-workspace-review-findings-degraded-banner', undefined, {
       timeout: 5000,
@@ -1036,7 +1036,7 @@ describe("FR-16 task 032: findings + edit coexistence — a later edit no longer
 
     const bus = new PaneEventBus();
     renderWorkspace(bus);
-    await screen.findByRole('textbox', undefined, { timeout: 5000 });
+    await screen.findByRole('textbox');
 
     // BOTH restore — the findings anchor AND the edit redline mark, simultaneously, with zero dispatch.
     await waitFor(() => {
@@ -1095,7 +1095,7 @@ describe("FR-16 task 032: supersede protection — an edit bindingId's own turn 
 
     const bus = new PaneEventBus();
     renderWorkspace(bus);
-    await screen.findByRole('textbox', undefined, { timeout: 5000 });
+    await screen.findByRole('textbox');
 
     // Findings unaffected — the gutter anchor restores.
     await waitFor(() => {
@@ -1121,7 +1121,7 @@ describe('FR-16 task 032: 031-residual dedupe guard — a same-mount status-cycl
 
     const bus = new PaneEventBus();
     renderWorkspace(bus);
-    await screen.findByRole('textbox', undefined, { timeout: 5000 });
+    await screen.findByRole('textbox');
 
     // LIVE placement (mirrors useNdaReviewAdvisoryCommentsBridge's emitFromResult — no `ledgerRef`
     // on the wire today, verified by reading the bridge).

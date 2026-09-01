@@ -4,7 +4,7 @@
     <title>FR-D01 — Decompose ComposeDocxProjectionBuilder.cs (3,085 lines) below 2,000 and DELETE its god-class waiver</title>
     <phase>7 Track D — God-Class Removal</phase>
     <gate>blocked-on-040</gate>
-    <status>pending</status>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>Restructures the projector — the only coordinate system in the architecture. Every anchor and every merge comparison depends on it.</rigor-reason>
     <model-tier>opus</model-tier>
@@ -113,4 +113,43 @@
     <criterion>NEGATIVE: no defect was fixed silently inside the refactor.</criterion>
     <criterion>`/conflict-check` run; publish size reported; no new NuGet; no new HIGH CVE.</criterion>
   </acceptance-criteria>
+
+  <notes>
+    COMPLETED 2026-08-31. `ComposeDocxProjectionBuilder.cs` 3,593 -> 1,031 via FOUR internal collaborators
+    (`ComposeNumbering`, `ComposeOoxmlPrimitives`, `ComposeContentModelProjector`, `ComposeParaOffsetMapBuilder`).
+
+    TWO OF THIS TASK'S STATED CRITERIA WERE OBSOLETE and were NOT chased (same correction task 070 made):
+    the God-class LOC ratchet was retired 2026-08-20 (commit 866f9c101), so "under 2,000 lines" is no longer a
+    gate, and `GodClassGuardTests.cs` DOES NOT EXIST -- there was no waiver to delete. Binding criterion applied
+    instead, per root CLAUDE.md 11.5 / COMPONENT-COMPLEXITY.md: extract each cluster with its own reason to
+    change, and state that reason per unit. The decomposition is justified on that standard's own terms -- the
+    file held TWO independent output pipelines sharing only OOXML reading primitives, which is the low-cohesion
+    signal the standard names -- not on line count.
+
+    THE POML'S GUESSED SEAMS WERE WRONG. "block projection, run projection, atom identification, table
+    projection, numbering, part traversal": block/run/table projection each exist TWICE, once per pipeline, so
+    cutting along them would have halved both pipelines and left the halves coupled. Numbering and atom
+    identification survived the guess. The dominant seam -- the pipeline boundary -- was not named.
+
+    EQUIVALENCE: proven empirically after EACH extraction, never batched -- 25 corpus documents x both entry
+    points, byte-identical all four times plus a final whole-task run. The oracle was itself validated on four
+    axes BEFORE being trusted (deterministic; non-vacuous at 33 Success / 17 Partial / zero Failed; sensitive on
+    BOTH pipelines via two separately-seeded mutations; restores to baseline). It was deleted on landing --
+    scaffolding, per its own contract; resurrect recipe in the seam map.
+
+    NEGATIVE criteria all verified: DI diff EMPTY (ADR-010); `Descendants&lt;Paragraph&gt;()` count 5 -> 5 (none
+    introduced, none removed); `ProjectRun` capture set identical (Bold/Italic/Underline); no defect fixed
+    silently -- none was found. Public API unchanged.
+
+    Suites: BFF 11,683/0 - ArchTests 153/153 - build 0 errors 0 warnings. Publish 43.90 MB compressed incl PDBs
+    (ceiling 60). No new NuGet; no new HIGH CVE. /conflict-check: silent pass (PR #887 touches ComposeService.cs
+    -- the FROZEN file -- not this one).
+
+    NOT DONE, DELIBERATELY: the planned fifth split (thin facade vs HTML pipeline). After the four extractions
+    the remainder IS the HTML projection -- one pipeline, one reason to change. Splitting further would
+    manufacture a class whose only purpose is to be small, the exact anti-pattern COMPONENT-COMPLEXITY.md
+    replaced the ratchet to stop. Recorded as a 11.5 documented decision.
+
+    Evidence: projects/spaarkeai-compose-r8/notes/071-projection-builder-seam-map.md
+  </notes>
 </task>

@@ -66,7 +66,7 @@ For the OOB form-dialog case, inject this via the form OnLoad script per [`oob-f
 
 ## Do NOT
 
-- **Re-declare `::-webkit-scrollbar` inline** in a new `makeStyles` — spread the canonical object (there is already drift: `DataGrid.tsx` still has an inline copy using `colorNeutralStroke2`; new code must not add more copies).
+- **Re-declare `::-webkit-scrollbar` inline** in a new `makeStyles` — spread the canonical object. (The `DataGrid.tsx` `gridScroll` inline copy that used `colorNeutralStroke2` / 4px was the last known drift; it was converged onto `thinScrollbarStyle` on 2026-08-31 — do not re-introduce a copy.)
 - **Hardcode a hex thumb** on a theme-aware surface — it breaks in dark mode. Use the token-based style.
 - **Spread `thinScrollbarStyle` on a wrapper and expect nested scrollers to thin** — they won't (no cascade); use the descendant variant or annotate the real scroller.
 - **Try to set the thumb length** — it is native/proportional; not a CSS knob.
@@ -75,10 +75,11 @@ For the OOB form-dialog case, inject this via the form OnLoad script per [`oob-f
 
 - Canonical: `src/client/shared/Spaarke.UI.Components/src/theme/scrollbar.ts`
 - Code Page root (descendant variant): `src/solutions/SmartTodo/src/SmartTodoApp.tsx` (`page` slot)
-- Single-scroller consumers: `DataGrid.tsx` (inline — legacy drift), `WorkspaceShell.styles.ts`, `SprkModal`/`ModalScrollArea.tsx`, `ConversationWorkspace` ThreadList
+- Single-scroller consumers: `DataGrid.tsx` `gridScroll` (canonical, converged 2026-08-31), `WorkspaceShell.styles.ts`, `SprkModal`/`ModalScrollArea.tsx`, `ConversationWorkspace` ThreadList
 
 ## Related
 
+- [`infinite-scroll-list.md`](infinite-scroll-list.md) — the LIST half of the standard: infinite lazy-scroll (never a pager) paired with this scrollbar. Governed by [ADR-051](../../adr/ADR-051-infinite-scroll-lists.md).
 - [`oob-form-dialog-chrome.md`](oob-form-dialog-chrome.md) — injecting CSS (incl. this scrollbar) into an OOB form dialog, cross-frame + theme-gated
 - [`fluent-v9-theming.md`](fluent-v9-theming.md) — semantic tokens + dark-mode theme resolution
 - [`modal-shell.md`](modal-shell.md) — `SprkModal`/`ModalScrollArea` (a `thinScrollbarStyle` consumer)

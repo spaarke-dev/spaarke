@@ -1169,7 +1169,7 @@ public sealed class ComposeDocxProjectionBuilderTests
         using var doc = WordprocessingDocument.Open(ms, isEditable: false);
         var mainPart = doc.MainDocumentPart!;
 
-        var model = ComposeDocxProjectionBuilder.BuildNumberingModel(mainPart);
+        var model = ComposeNumbering.BuildNumberingModel(mainPart);
 
         model.AbstractNumIdByNumId[3].Should().Be(7);
 
@@ -1196,10 +1196,10 @@ public sealed class ComposeDocxProjectionBuilderTests
         using var ms = new MemoryStream(docx);
         using var doc = WordprocessingDocument.Open(ms, isEditable: false);
         var mainPart = doc.MainDocumentPart!;
-        var model = ComposeDocxProjectionBuilder.BuildNumberingModel(mainPart);
+        var model = ComposeNumbering.BuildNumberingModel(mainPart);
         var paragraph = mainPart.Document!.Body!.Elements<Paragraph>().Single();
 
-        var resolved = ComposeDocxProjectionBuilder.ResolveParagraphNumbering(paragraph, model);
+        var resolved = ComposeNumbering.ResolveParagraphNumbering(paragraph, model);
 
         resolved.Should().NotBeNull();
         resolved!.NumId.Should().Be(3);
@@ -1253,10 +1253,10 @@ public sealed class ComposeDocxProjectionBuilderTests
         using var ms = new MemoryStream(docx);
         using var doc = WordprocessingDocument.Open(ms, isEditable: false);
         var mainPart = doc.MainDocumentPart!;
-        var model = ComposeDocxProjectionBuilder.BuildNumberingModel(mainPart);
+        var model = ComposeNumbering.BuildNumberingModel(mainPart);
         var paragraph = mainPart.Document!.Body!.Elements<Paragraph>().Single();
 
-        var resolved = ComposeDocxProjectionBuilder.ResolveParagraphNumbering(paragraph, model);
+        var resolved = ComposeNumbering.ResolveParagraphNumbering(paragraph, model);
 
         resolved.Should().NotBeNull("the paragraph has NO direct w:numPr — resolution must fall back to its pStyle (FR-12)");
         resolved!.NumId.Should().Be(4);
@@ -1305,10 +1305,10 @@ public sealed class ComposeDocxProjectionBuilderTests
         using var ms = new MemoryStream(docx);
         using var doc = WordprocessingDocument.Open(ms, isEditable: false);
         var mainPart = doc.MainDocumentPart!;
-        var model = ComposeDocxProjectionBuilder.BuildNumberingModel(mainPart);
+        var model = ComposeNumbering.BuildNumberingModel(mainPart);
         var paragraph = mainPart.Document!.Body!.Elements<Paragraph>().Single();
 
-        var resolved = ComposeDocxProjectionBuilder.ResolveParagraphNumbering(paragraph, model);
+        var resolved = ComposeNumbering.ResolveParagraphNumbering(paragraph, model);
 
         resolved.Should().NotBeNull("Heading2Sub inherits numbering from its w:basedOn ancestor Heading2");
         resolved!.NumId.Should().Be(6);
@@ -1329,12 +1329,12 @@ public sealed class ComposeDocxProjectionBuilderTests
         using var doc = WordprocessingDocument.Open(ms, isEditable: false);
         var mainPart = doc.MainDocumentPart!;
 
-        var model = ComposeDocxProjectionBuilder.BuildNumberingModel(mainPart);
+        var model = ComposeNumbering.BuildNumberingModel(mainPart);
 
         // corpus-manifest.md row 10: Heading1 -> level 0 "%1"; Heading2 -> level 1 "%1.%2" — resolved
         // from the STYLE, since document.xml itself carries zero w:numPr (task 001's confirmed fact).
         var resolvedByOrdinal = mainPart.Document!.Body!.Descendants<Paragraph>()
-            .Select(p => ComposeDocxProjectionBuilder.ResolveParagraphNumbering(p, model))
+            .Select(p => ComposeNumbering.ResolveParagraphNumbering(p, model))
             .ToList();
 
         var heading1Refs = resolvedByOrdinal.Where(r => r is { StyleLinked: true, Ilvl: 0 }).ToList();
@@ -1351,11 +1351,11 @@ public sealed class ComposeDocxProjectionBuilderTests
         using var doc = WordprocessingDocument.Open(ms, isEditable: false);
         var mainPart = doc.MainDocumentPart!;
 
-        var model = ComposeDocxProjectionBuilder.BuildNumberingModel(mainPart);
+        var model = ComposeNumbering.BuildNumberingModel(mainPart);
 
         // corpus-manifest.md row 11: single abstractNum, 3 levels, "%1." / "%1.%2." / "%1.%2.%3.".
         var directRefs = mainPart.Document!.Body!.Descendants<Paragraph>()
-            .Select(p => ComposeDocxProjectionBuilder.ResolveParagraphNumbering(p, model))
+            .Select(p => ComposeNumbering.ResolveParagraphNumbering(p, model))
             .Where(r => r is not null)
             .Select(r => r!)
             .ToList();
