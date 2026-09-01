@@ -189,8 +189,9 @@ const useStyles = makeStyles({
         alignItems: "center",
         justifyContent: "center",
         gap: tokens.spacingVerticalS,
-        paddingTop: tokens.spacingVerticalXXL,
-        paddingBottom: tokens.spacingVerticalXXL,
+        // Fill the step area and center the confirmation vertically + horizontally.
+        flexGrow: 1,
+        minHeight: "520px",
         color: tokens.colorPaletteGreenForeground1,
     },
     unavailable: {
