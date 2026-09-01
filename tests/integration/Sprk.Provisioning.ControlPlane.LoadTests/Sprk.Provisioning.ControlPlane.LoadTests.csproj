@@ -150,8 +150,22 @@
 
   <!-- Shared test helpers (TestSessionOwner, TestHttpContexts, TestTokenCredential).
        Linked rather than copied so every test project sees ONE definition; a second copy is how
-       two projects drift into disagreeing about what a test callers oid is. -->
+       two projects drift into disagreeing about what a test callers oid is.
+
+       ..\Shared\Dataverse\** is EXCLUDED here, and only here, of the four projects that link this
+       folder. Those helpers need Moq + Microsoft.Xrm.Sdk + Spaarke.Dataverse; this project is the
+       one that has none of them (it references only the Sprk.Provisioning.ControlPlane projects,
+       so it does not even get Xrm/Dataverse transitively the way the Sprk.Bff.Api-referencing
+       suites do). Adding those packages to a provisioning load-test project to satisfy a glob
+       would be the wrong trade.
+
+       Why a SUBFOLDER rather than a per-file Compile Remove: a file-name exclusion silently rots
+       the moment someone adds a second Dataverse-dependent helper — they get an error in a project
+       they have never opened, with no hint why. The folder makes the dependency boundary the thing
+       you name, so the next helper lands on the correct side of it by placement.
+       Introduced 2026-09-01 (#858) after TestActingUserBusinessUnit broke this project's build. -->
   <ItemGroup>
     <Compile Include="..\Shared\**\*.cs" LinkBase="SharedTestHelpers" />
+    <Compile Remove="..\Shared\Dataverse\**\*.cs" />
   </ItemGroup>
 </Project>
