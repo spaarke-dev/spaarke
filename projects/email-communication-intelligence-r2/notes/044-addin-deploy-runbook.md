@@ -46,6 +46,10 @@
   - `word/manifest.xml` → 200, version **1.0.4.0**, origin = deployed SWA ✅
   - `outlook/taskpane.html` → 200 ✅
 - **Note**: Word manifest is served at `word/manifest.xml` (not `word/word-manifest.xml`).
+- **Two subsequent deploys this record originally missed** (found 2026-09-01 by the 044 health-check via `gh run list --workflow=deploy-office-addins.yml`):
+  - **2026-08-31 15:26 UTC** — `workflow_dispatch`, sha `cfae9cdc1`, run `33408404756` **success** — redeployed ~1 min after the `cfae9cdc1` add-in-UAT fix (`SaveFlow.tsx` + `OfficeJobQueue.cs`) landed, so that fix IS live.
+  - **2026-09-01 12:49 UTC** — `push`-triggered, sha `b64eb1876` (PR #922 merge), run `33509833655` **success** — the CURRENT live build.
+- **Deploy currency (verified 2026-09-01)**: live SWA = `b64eb1876`, an ancestor of master tip `a826cf347`; `git log b64eb1876..a826cf347 -- src/client/office-addins/ src/client/shared/Spaarke.Auth/` is **empty** → the live add-in equals current-master add-in code. **No re-deploy needed** — the ONLY remaining step is the interactive smoke below.
 
 ### Entra fix applied during live smoke (2026-08-31) — NAA broker redirect
 `AADSTS700046: Invalid Reply Address … must have scheme brk-9199bf20-a13f-4107-85dc-02114787ef48:// and be of Single Page Application type` on first sign-in. Root cause: the add-in registration (`c1258e2d-1688-49d2-ac99-a7485ebd9995`, "Spaarke Office Add-in") had only `brk-multihub://localhost` (publicClient), no broker SPA redirect for the deployed origin. **Fix (via `az rest` PATCH — the portal SPA text box rejects the `brk-` scheme):** added two **SPA** redirect URIs:
