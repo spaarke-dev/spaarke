@@ -13,7 +13,7 @@
 | **Task** | **076** — record-keyed upload contract. `<rigor>FULL</rigor>`, tier `opus`, effort `high`, steps `directional`, `parallel-safe: false` |
 | **Step** | **4 of 11** (client cutover). Steps 0–3 + the >4 MB server half are DONE; 5–11 remain |
 | **Status** | in-progress |
-| **Next Action** | 🔴 **READ [`notes/plan-upload-path-decomposition-2026-08-31.md`](notes/plan-upload-path-decomposition-2026-08-31.md) FIRST.** Then finish **#858's tail** (client `containerId` removal + census reclassification — see §858 below), then file **093/094/095** and execute **076** |
+| **Next Action** | ✅ **#858 is GREEN + committed (`763b05428`)** — remaining: sync master → PR → merge → **post the closing comment on #858** (that comment is compose-r8's resume signal; body is drafted in [`notes/plan-858-closeout.md`](notes/plan-858-closeout.md) §4). THEN: **READ [`notes/plan-upload-path-decomposition-2026-08-31.md`](notes/plan-upload-path-decomposition-2026-08-31.md) FIRST**, file **093/094/095**, execute **076**. Client `containerId` removal is NOT ship-together — any later train |
 
 ### ✅ PR #887 MERGED 2026-09-01T03:18:38Z — 34 commits on master
 
@@ -56,39 +56,58 @@ independently confirms this repo does not gate on review). **`worktree-sync` Ste
    `CallerRecordAccessProbe` from unconditionally-registered `ComposeService` is NOT the §10 F.1
    asymmetric-registration anti-pattern.
 
-### 🔴🔴 THE BRANCH IS RED — 20 FAILING TESTS. DO NOT MERGE. FIX THIS FIRST.
+### ✅ #858 IS GREEN — commit `763b05428` (2026-09-01). Independently verified.
 
-**Full suite after #858: 11,726 passed / 20 FAILED / 57 skipped.** Unit-level Compose is 387/387; every
-failure is in the **integration / seam / regression** layers, and they all share ONE cause:
+**Full suite: 0 failed / 11,750 passed / 57 skipped / 11,807 total** (baseline at `841c24117` was
+20 / 11,726 / 57 / 11,803 → +24 passed = 20 repaired + 4 new tests; reconciles exactly).
+BFF build **0 warn / 0 err** · ArchTests **176/176** · Compose filter **1806/1806** (re-run AFTER the
+husky `dotnet format` hook modified the staged files, so the verification matches what was committed).
+Measured baseline preserved at [`notes/858-red-suite-ground-truth.md`](notes/858-red-suite-ground-truth.md);
+full closeout plan at [`notes/plan-858-closeout.md`](notes/plan-858-closeout.md).
 
-> Those fixtures drive create-on-save **through the wire** (HTTP + DI). The container is now
-> SERVER-derived, so the fixture must arrange the two Dataverse reads that derivation makes —
-> `systemuser` filtered on `azureactivedirectoryobjectid`, then that user's `businessunit.sprk_containerid`
-> — **or** bind the session to a matter. None of them do, so container resolution fails and the test's
-> expected 200/412/423 becomes a container-step failure.
+#### 🔴 The "ONE shared cause" claim recorded here previously was WRONG. Do not re-derive it.
 
-**Fix shape**: one shared fixture-level arrangement, mirroring
-`tests/unit/Sprk.Bff.Api.Tests/Services/Compose/ComposeServiceCollaborators.SetupActingUserContainer`
-but at the `WebApplicationFactory`/DI layer. Do NOT fix these one at a time.
+A Fable investigation read the actual assertion text per test. There were **two** proximate causes and
+a **third latent production defect** behind the second:
 
-**One test's premise is deliberately DEAD and must be rewritten, not repaired**:
-`CreateOnSave_WhenContainerIdMissing_Returns400` — it asserts the 400 guard that #858 removed on purpose.
-Its post-#858 equivalent is "no container CONFIGURED → honest container-step failure, nothing written"
-(the same rewrite already applied to `SaveAsync_TransientDraftWithNoConfiguredContainer_…`).
+| Cause | Count | Class | What it actually was |
+|---|---|---|---|
+| **A** | 8 | **production defect** | `ResolveCreateOnSaveContainerAsync` read the session unconditionally, but `SessionId` is **OPTIONAL** on create-on-save (task-110 Browse/local-file save forwards `""`). `TenantCache`'s id guard throws `ArgumentException` on an empty id → the save route maps it to **400**. #858 turned a DESIGNED session-less flow into a request rejection. The fixtures were innocent: perfect Dataverse arrangement would still have 400'd. |
+| **B** | 12 | fixture gap | `ResolveForActingUserAsync` **THROWS** `SdapProblemException(403 acting_user_not_resolvable)` on zero `systemuser` rows — it does **not** return null. So the tests never reached a container-step failure; they got an opaque 500. The old note here asserted the null/step-failure path — wrong. |
+| **C** | (via B) | **production defect** | `ExecuteSaveAsync` had **no `SdapProblemException` catch arm**, and `/api/compose` carries no exception filter, so EVERY typed refusal the new path raises (403 `compose_record_access_denied`, 409 `compose_host_entity_unsupported`, 403 `acting_user_not_resolvable`) shipped as an **opaque 500** — contradicting the resolver's own documented contract AND the DEF-14 never-an-opaque-500 guarantee. The unit suite was green because it asserts exception *types* at the service layer; only the wire exposed it. |
+| **D** | 1 (∈B) | dead premise | `CreateOnSave_WhenContainerIdMissing_Returns400` — rewritten, not repaired. |
 
-Failing classes: `ComposePdfRefreshBaselineSeamTests` · `Def14_ComposeSaveLockedDocumentTests` ·
-`ComposeCreateOnSave*` contract/seam suites (full list: `dotnet test --filter FullyQualifiedName~Compose`).
+**Lesson worth keeping**: a shared *blast radius* (all 20 were create-on-save-through-the-wire, nothing
+outside it broke) is NOT evidence of a shared *root cause*. Two of the three causes were production
+defects that the fixture-only hypothesis would have papered over.
+
+**The fix shape that worked**: ONE shared arrangement,
+[`tests/integration/Shared/TestActingUserBusinessUnit.cs`](../../tests/integration/Shared/TestActingUserBusinessUnit.cs),
+wired into three fixtures. Its matcher is deliberately **strict** on `azureactivedirectoryobjectid`, so a
+production regression to `systemuserid` lookup (the #840 Rule 2 id-space class) fails these tests closed.
+No test-only container hook; the `sealed` resolver stays real, only its Dataverse boundary is doubled.
+
+**4 NEW wire behaviour tests** now exist for guarantees that had **no test at any layer** before:
+authorized secure matter's own container beats a resolvable shared BU container · read-but-no-`AppendTo`
+→ typed 403 · foreign session's binding ignored and never probed · project-bound session → 409.
+This directly answers compose-r8's 76.8%-branch-coverage warning.
 
 **🔲 REMAINING for #858** (server is done; these are the tail):
 - **Client**: stop sending `containerId` from `ComposeWorkspace.tsx` (`saveContainerId` at :1810,
   `containerIdRef` :1081, and the `resolveContainer` prop). ⚠️ **NOT a ship-together change** — an old
   client sending `containerId` is harmless (System.Text.Json drops unknown properties), so **BFF may
   ship first**. This differs from 076, which IS ship-together.
-- **Census**: reclassify the 3 `ComposeSaveStorageCoordinator` sinks + the create-on-save decision in
-  `SpeWriteSinkContainerProvenanceGuardTests` — `ClientSupplied` → `ServerDerivedRecord`.
-- **Behaviour tests** for the new paths (authorized matter → its container; unauthorized matter → 403;
-  no session → acting-user BU; foreign session → host context ignored). ⚠️ compose-r8 warned this region
-  is **76.8% branch coverage** with 11 untested guarantees, 2 document-destroying.
+- ✅ **Census — DONE, but HALF THE INSTRUCTION ABOVE WAS WRONG.** The create-on-save **mint** moved
+  `ClientSupplied` → `ServerDerivedRecord` in `SpeWriteSinkContainerProvenanceGuardTests`. The
+  3 `ComposeSaveStorageCoordinator` sinks were **deliberately NOT moved**: they trace `request.DriveId`
+  on the **REPLACE** path (`ComposeSaveStorageCoordinator.cs:216,228`), which #858 never touched.
+  Moving them would have written a **false census entry** — precisely the failure this guard exists to
+  prevent. Filed as a follow-on instead (derive replace-path drive+item from the authorized
+  `sprk_document` row, as the dedup sink already does); see plan §3.
+- ✅ **Behaviour tests — DONE** (4 new wire tests, listed above). Verified beforehand that **none**
+  existed at any layer for these paths.
+- 🔲 **`notes/task-083-sink-inventory.md` row 6** still describes the pre-#858 state — update to
+  "mint converted by #858; replace trio remaining, owned by the follow-on task".
 - **Comment on #858** — that is compose-r8's signal to resume clusters 5a → 2a/2b.
 - ⚠️ **A behaviour change to flag in the PR**: a drafter with Read-but-not-AppendTo on the matter
   succeeded before and now gets 403. The mapper is verified correct
