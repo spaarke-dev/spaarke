@@ -22,11 +22,11 @@
  * @see ADR-021  - Fluent UI v9 design system (makeStyles + semantic tokens)
  */
 
-import { useState, useCallback, useMemo } from "react";
+import { useState, useCallback, useMemo, useRef, useEffect } from "react";
 import { MessageBar, MessageBarBody, Text, makeStyles, tokens } from "@fluentui/react-components";
 import { CheckmarkCircleRegular } from "@fluentui/react-icons";
 import { EmailComposer, createXrmEmailComposeHandlers } from "@spaarke/ui-components/components/EmailComposer";
-import type { IWizardContext } from "@spaarke/ui-components/components/EmailComposer";
+import type { IWizardContext, IEmailComposerHandle } from "@spaarke/ui-components/components/EmailComposer";
 import type { ILookupItem } from "@spaarke/ui-components/types/LookupTypes";
 import type { ICommunicationAssociation } from "@spaarke/ui-components/services/communicationApi";
 import type { AuthenticatedFetchFn } from "@spaarke/ui-components/services/EntityCreationService";
@@ -55,6 +55,20 @@ export interface IDocumentEmailStepProps {
     authenticatedFetch?: AuthenticatedFetchFn;
     /** BFF base URL (no `/api` suffix). */
     bffBaseUrl?: string;
+    /**
+     * Registers/unregisters an imperative controller so the host wizard can, on Finish,
+     * detect an unsent composed email and (optionally) trigger the send. Called with the
+     * controller on mount and `null` on unmount.
+     */
+    onControllerChange?: (controller: IDocumentEmailComposeController | null) => void;
+}
+
+/** Imperative controller the wizard uses to guard Finish against an unsent email. */
+export interface IDocumentEmailComposeController {
+    /** True when the user has entered recipients but not yet sent. */
+    hasUnsentEmail: () => boolean;
+    /** Triggers the composer's send. Resolves true on success, false on failure. */
+    send: () => Promise<boolean>;
 }
 
 // ---------------------------------------------------------------------------
@@ -200,6 +214,7 @@ export function DocumentEmailStep({
     uploadedFiles,
     authenticatedFetch,
     bffBaseUrl,
+    onControllerChange,
 }: IDocumentEmailStepProps): JSX.Element {
     const styles = useStyles();
 
@@ -214,6 +229,27 @@ export function DocumentEmailStep({
 
     const [isSent, setIsSent] = useState(false);
     const [sendError, setSendError] = useState<string | null>(null);
+
+    // Imperative controller for the wizard's Finish guard (reads latest state via refs).
+    const composerRef = useRef<IEmailComposerHandle>(null);
+    const hasRecipientsRef = useRef(false);
+    const isSentRef = useRef(false);
+    isSentRef.current = isSent;
+    const controllerRef = useRef<IDocumentEmailComposeController>({
+        hasUnsentEmail: () => hasRecipientsRef.current && !isSentRef.current,
+        send: async () => {
+            try {
+                await composerRef.current?.send();
+                return true;
+            } catch {
+                return false;
+            }
+        },
+    });
+    useEffect(() => {
+        onControllerChange?.(controllerRef.current);
+        return () => onControllerChange?.(null);
+    }, [onControllerChange]);
 
     const handleSearchUsers = useCallback(
         (query: string): Promise<ILookupItem[]> => searchSystemUsers(query),
@@ -273,8 +309,12 @@ export function DocumentEmailStep({
                 </MessageBar>
             )}
             <EmailComposer
+                ref={composerRef}
                 mode="compose"
                 mount="inline"
+                onStateChange={(s) => {
+                    hasRecipientsRef.current = (s.to?.length ?? 0) > 0 || (s.cc?.length ?? 0) > 0;
+                }}
                 authenticatedFetch={authenticatedFetch}
                 bffBaseUrl={bffBaseUrl}
                 initialSubject={defaultSubject}

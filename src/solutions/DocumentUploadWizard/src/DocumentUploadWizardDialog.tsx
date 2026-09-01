@@ -31,6 +31,8 @@ import {
     makeStyles,
     tokens,
 } from "@fluentui/react-components";
+import { MailRegular, CheckmarkCircleRegular } from "@fluentui/react-icons";
+import { ChoiceModal } from "@spaarke/ui-components/components/SprkModal";
 
 import { getAuthProvider, authenticatedFetch, resolveTenantIdSync } from "@spaarke/auth";
 
@@ -57,7 +59,7 @@ import { AssociateToStep, resolveXrm, resolveBusinessUnitContainerId } from "./c
 import { SummaryStep } from "./components/SummaryStep";
 import type { UploadedDocumentInfo } from "./components/SummaryStep";
 import { NextStepsStep } from "./components/NextStepsStep";
-import type { IDocumentEmailStepProps } from "./components/DocumentEmailStep";
+import type { IDocumentEmailStepProps, IDocumentEmailComposeController } from "./components/DocumentEmailStep";
 // BFF base URL is resolved at runtime via resolveRuntimeConfig() in main.tsx
 // and set on window.__SPAARKE_BFF_BASE_URL__ before React renders.
 import { createBffTokenProvider } from "./services/codePageTokenProvider";
@@ -260,6 +262,12 @@ export function DocumentUploadWizardDialog({
 
     // ── Step 3 state: selected next steps ──────────────────────────────
     const [selectedNextSteps, setSelectedNextSteps] = useState<NextStepActionId[]>([]);
+
+    // ── Send Email Finish-guard ────────────────────────────────────────
+    // The Send Email step registers a controller here; on Finish we check for an unsent
+    // composed email and prompt (Send / Finish without sending / Keep editing).
+    const emailControllerRef = useRef<IDocumentEmailComposeController | null>(null);
+    const [unsentPrompt, setUnsentPrompt] = useState<{ resolve: (choice: "send" | "finish" | "cancel") => void } | null>(null);
 
     // (Find Similar now opens in a new tab via nextStepLauncher — no inline state needed)
 
@@ -508,6 +516,7 @@ export function DocumentUploadWizardDialog({
                         containerId={effectiveContainerId}
                         bffBaseUrl={bffBaseUrl}
                         bffTokenProvider={bffTokenProvider}
+                        onEmailControllerChange={(c) => { emailControllerRef.current = c; }}
                     />
                 ),
             });
@@ -538,11 +547,31 @@ export function DocumentUploadWizardDialog({
     // ── Finish handler ──────────────────────────────────────────────────────
 
     const handleFinish = useCallback(async (): Promise<IWizardSuccessConfig | void> => {
-        // Upload is guaranteed complete by the Processing step.
-        const result = uploadResultRef.current;
+        // Send Email Finish-guard: if the user composed an email (entered recipients) on the
+        // Send Email step but hasn't sent it, prompt before finishing.
+        const controller = emailControllerRef.current;
+        if (controller?.hasUnsentEmail()) {
+            const choice = await new Promise<"send" | "finish" | "cancel">((resolve) => {
+                setUnsentPrompt({ resolve });
+            });
+            setUnsentPrompt(null);
+            if (choice === "cancel") {
+                // Abort the finish and keep the wizard open on the step. An empty message
+                // leaves WizardShell's finishError falsy, so no error bar is shown.
+                throw new Error("");
+            }
+            if (choice === "send") {
+                const ok = await controller.send();
+                if (!ok) {
+                    throw new Error("The email could not be sent. Please check the recipients and try again.");
+                }
+            }
+            // "finish" (or a successful "send") falls through to complete the wizard.
+        }
 
+        // Upload is guaranteed complete by the Processing step.
         return buildSuccessConfig({
-            uploadResults: result,
+            uploadResults: uploadResultRef.current,
             onClose,
         });
     }, [onClose]);
@@ -569,6 +598,32 @@ export function DocumentUploadWizardDialog({
                 finishLabel="Finish"
                 finishingLabel="Processing..."
             />
+
+            {unsentPrompt && (
+                <ChoiceModal
+                    open={true}
+                    onClose={() => unsentPrompt.resolve("cancel")}
+                    title="Send your email?"
+                    message="You've started an email but haven't sent it yet."
+                    cancelLabel="Keep editing"
+                    choices={[
+                        {
+                            id: "send",
+                            label: "Send email",
+                            description:
+                                "Send it now from the Spaarke shared mailbox with the uploaded documents attached, then finish.",
+                            icon: <MailRegular />,
+                        },
+                        {
+                            id: "finish",
+                            label: "Finish without sending",
+                            description: "Finish the upload without sending — the email won't be sent.",
+                            icon: <CheckmarkCircleRegular />,
+                        },
+                    ]}
+                    onSelect={(id) => unsentPrompt.resolve(id as "send" | "finish")}
+                />
+            )}
 
             {/* Find Similar now opens in a new tab via nextStepLauncher */}
         </div>
