@@ -47,6 +47,13 @@
   - `outlook/taskpane.html` → 200 ✅
 - **Note**: Word manifest is served at `word/manifest.xml` (not `word/word-manifest.xml`).
 
+### Entra fix applied during live smoke (2026-08-31) — NAA broker redirect
+`AADSTS700046: Invalid Reply Address … must have scheme brk-9199bf20-a13f-4107-85dc-02114787ef48:// and be of Single Page Application type` on first sign-in. Root cause: the add-in registration (`c1258e2d-1688-49d2-ac99-a7485ebd9995`, "Spaarke Office Add-in") had only `brk-multihub://localhost` (publicClient), no broker SPA redirect for the deployed origin. **Fix (via `az rest` PATCH — the portal SPA text box rejects the `brk-` scheme):** added two **SPA** redirect URIs:
+- `brk-9199bf20-a13f-4107-85dc-02114787ef48://icy-desert-0bfdbb61e.6.azurestaticapps.net`
+- `brk-multihub://icy-desert-0bfdbb61e.6.azurestaticapps.net`
+
+**Task-004 gap**: NAA broker redirect for the SWA origin should be part of the Entra NAA provisioning (task 004 / `auth-deployment-setup.md`). Record there so a fresh-env provision includes it. `bffBaseUrl: ''` in the `[SpaarkeAuth]` log is a red herring — `BFF_API_BASE_URL` is set in the workflow and baked into `taskpane.bundle.js`; token acquisition needs only clientId/authority/scope.
+
 ### STILL PENDING — operator live smoke (Success Criterion 7)
 The only remaining step is interactive and needs a live Office host:
 1. Sideload the Outlook add-in — either upload `outlook/manifest.json` in **M365 Admin Center → Integrated Apps → Upload custom app** (bump version if re-uploading; propagation 5–15 min), OR sideload directly in **Outlook on the web → Get Add-ins → My add-ins → Add a custom add-in → Add from URL**: `https://icy-desert-0bfdbb61e.6.azurestaticapps.net/outlook/manifest.json`.
