@@ -329,8 +329,14 @@ public static class OfficeEndpoints
         // If provided, validate entity type and ID
         if (request.TargetEntity is not null)
         {
-            // Validate association entity type is valid
-            var validEntityTypes = new[] { "account", "contact", "sprk_matter", "sprk_project", "sprk_invoice" };
+            // Validate association entity type is valid. The client sends the friendly
+            // AssociationEntityType name ("Matter"/"Project"/…), and the finalization worker's
+            // association switch (UploadFinalizationWorker) matches on the lowercased friendly name.
+            // This list previously mixed logical names (sprk_matter/sprk_project/sprk_invoice) with
+            // friendly ones (account/contact), so every Matter/Project/Invoice association was
+            // rejected with OFFICE_002 while its own error text listed them as valid. Pre-existing on
+            // master — surfaced once real entity search (task 026) returned real typed records.
+            var validEntityTypes = new[] { "matter", "project", "invoice", "account", "contact" };
             if (!validEntityTypes.Contains(request.TargetEntity.EntityType.ToLowerInvariant()))
             {
                 logger.LogWarning(

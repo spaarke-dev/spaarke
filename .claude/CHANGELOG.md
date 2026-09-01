@@ -8,6 +8,21 @@ Format follows [Keep a Changelog](https://keepachangelog.com/) conventions.
 
 ---
 
+###### 2026-09-01 — `email-communication-intelligence-r2`: document-profiling failure mode + the 3 AI execution models documented
+
+- **New architecture doc** [`docs/architecture/DOCUMENT-PROFILE-AND-AI-EXECUTION-MODELS.md`](../docs/architecture/DOCUMENT-PROFILE-AND-AI-EXECUTION-MODELS.md) —
+  authoritative map of the three ways the BFF runs AI (node playbook · direct Action/linear ADR-043 · legacy sequential),
+  the three divergent document-profile entry points (wizard + Compose = direct Action, Outlook/app-only = node playbook),
+  the confirmed failure mechanism (Part 4), fix options, and a change-safety checklist. GitHub #919.
+- **New `FAILURE-MODES.md` AP-10** — a single-level JSON-aware renderer over a double-nested, re-parsed config. The
+  Layer-1 `RenderConfigJsonStructurally` escapes only the outer wrapper; `UpdateRecordNodeExecutor.ParseConfig` re-parses
+  the nested `configJson`-as-a-string and throws `0x0A invalid at $.fieldMappings[0].value`. **Corrects the prior
+  checkpoint hypothesis** ("falls back to flat at `:2284`" — the fallback never fires; the outer wrapper is valid JSON).
+  Root cause settled by pulling the **live** node config from Dataverse, not by forward-reasoning from the renderer.
+- **Root `CLAUDE.md` §17** gained a pointer row to the new doc (read-before-changing-the-file/Document-create-pipeline).
+- **Not a fix** — this entry is investigation + documentation only; the production renderer is unchanged pending the
+  owner's choice among the three fix options in Part 4.
+
 ###### 2026-08-31 — `email-communication-intelligence-r2`: infinite lazy-scroll is the standard for scrollable lists
 
 - **New ADR-051** ([`.claude/adr/ADR-051-infinite-scroll-lists.md`](adr/ADR-051-infinite-scroll-lists.md)) — every scrollable

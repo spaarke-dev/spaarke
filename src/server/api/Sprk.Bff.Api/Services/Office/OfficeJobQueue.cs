@@ -79,7 +79,15 @@ public class OfficeJobQueue
                     SentDate = request.Email.SentDate,
                     ReceivedDate = request.Email.ReceivedDate,
                     BodyPreview = request.Email.Body?[..Math.Min(request.Email.Body.Length, 500)],
-                    HasAttachments = request.Email.Attachments?.Count > 0,
+                    // The Office add-in client sends SelectedAttachmentFileNames (not the
+                    // separate Attachments array) to indicate the email's attachments — it is
+                    // non-null whenever the email has attachments (undefined only when none;
+                    // empty = "create no Documents"). Deriving HasAttachments from Attachments
+                    // alone left it false for every add-in save, so ProcessEmailAttachmentsAsync
+                    // (gated on HasAttachments) never ran and attachment child Documents were
+                    // never created. Consider both signals.
+                    HasAttachments = request.Email.Attachments?.Count > 0
+                        || request.Email.SelectedAttachmentFileNames?.Count > 0,
                     Importance = 1, // Normal
                     SelectedAttachmentFileNames = request.Email.SelectedAttachmentFileNames
                 }

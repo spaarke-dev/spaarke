@@ -302,30 +302,13 @@ public class UploadFinalizationWorker : BackgroundService, IOfficeJobHandler
                 documentId);
 
             // Step 10: Queue next stage (profile or indexing)
-            _logger.LogWarning(
-                "🔵 DIAGNOSTIC: About to check TriggerAiProcessing for job {JobId}. TriggerAiProcessing={TriggerAi}, AiOptions.ProfileSummary={ProfileSummary}, AiOptions.RagIndex={RagIndex}, AiOptions.DeepAnalysis={DeepAnalysis}",
-                message.JobId,
-                payload.TriggerAiProcessing,
-                payload.AiOptions?.ProfileSummary ?? false,
-                payload.AiOptions?.RagIndex ?? false,
-                payload.AiOptions?.DeepAnalysis ?? false);
-
             if (payload.TriggerAiProcessing)
             {
-                _logger.LogWarning(
-                    "🟢 DIAGNOSTIC: TriggerAiProcessing is TRUE - calling QueueNextStageAsync for job {JobId}",
-                    message.JobId);
                 await QueueNextStageAsync(message, documentId, payload, driveId, itemId, cancellationToken);
-                _logger.LogWarning(
-                    "🟢 DIAGNOSTIC: QueueNextStageAsync completed successfully for job {JobId}",
-                    message.JobId);
             }
             else
             {
                 // No AI processing - mark job as complete
-                _logger.LogWarning(
-                    "🔴 DIAGNOSTIC: TriggerAiProcessing is FALSE for job {JobId} - skipping AI processing",
-                    message.JobId);
                 await UpdateJobStatusAsync(
                     message.JobId,
                     JobStatus.Completed,
@@ -605,29 +588,9 @@ public class UploadFinalizationWorker : BackgroundService, IOfficeJobHandler
             HasFile = true
         };
 
-        // Set entity association lookup based on AssociationType
-        if (hasAssociation && payload.AssociationId.HasValue)
-        {
-            switch (payload.AssociationType?.ToLowerInvariant())
-            {
-                case "matter":
-                    updateRequest.MatterLookup = payload.AssociationId.Value;
-                    break;
-                case "project":
-                    updateRequest.ProjectLookup = payload.AssociationId.Value;
-                    break;
-                case "invoice":
-                    updateRequest.InvoiceLookup = payload.AssociationId.Value;
-                    break;
-                // Account and Contact associations would need additional lookup fields
-                // added to UpdateDocumentRequest if needed
-                default:
-                    _logger.LogWarning(
-                        "Unknown association type {AssociationType}, skipping association",
-                        payload.AssociationType);
-                    break;
-            }
-        }
+        // Set entity association lookup based on AssociationType (shared with attachment children
+        // so they inherit the same "File to" association).
+        ApplyAssociationLookup(updateRequest, payload.AssociationType, payload.AssociationId);
 
         // Set email-specific fields if this is an email save
         if (payload.ContentType == SaveContentType.Email && payload.EmailMetadata != null)
@@ -678,13 +641,19 @@ public class UploadFinalizationWorker : BackgroundService, IOfficeJobHandler
             documentId,
             metadata.Subject);
 
-        // Map importance (0=Low, 1=Normal, 2=High) to Dataverse priority option values
+        // Map importance (0=Low, 1=Normal, 2=High) to sprk_emailartifact.sprk_priority
+        // option values. These MUST match the live option set — Urgent(100000000),
+        // High(100000001), Medium(100000002), Low(100000003). The prior values
+        // (192350001-3) are not in the option set, so Dataverse rejected every
+        // EmailArtifact create with AADSTS-style "outside the valid range", aborting
+        // the save job (no .eml document, no SPE file). Confirmed via App Insights
+        // 2026-08-31 (job 237a5c8d). Pre-existing on master.
         var priorityValue = metadata.Importance switch
         {
-            0 => 192350003, // Low
-            1 => 192350002, // Medium (Normal)
-            2 => 192350001, // Important (High)
-            _ => 192350002  // Default to Medium
+            0 => 100000003, // Low
+            1 => 100000002, // Medium (Normal)
+            2 => 100000001, // High
+            _ => 100000002  // Default to Medium
         };
 
         var request = new
@@ -1009,6 +978,8 @@ public class UploadFinalizationWorker : BackgroundService, IOfficeJobHandler
                         containerId,
                         payload.EmailMetadata?.ConversationId,
                         payload.EmailMetadata?.InternetMessageId,
+                        payload.AssociationType,
+                        payload.AssociationId,
                         cancellationToken);
 
                     uploadedCount++;
@@ -1049,6 +1020,40 @@ public class UploadFinalizationWorker : BackgroundService, IOfficeJobHandler
     /// <summary>
     /// Process a single attachment: upload to SPE and create child Document record.
     /// </summary>
+    /// <summary>
+    /// Applies the Matter/Project/Invoice association lookup (from the save's AssociationType +
+    /// AssociationId) onto an <see cref="Spaarke.Dataverse.UpdateDocumentRequest"/>. Shared by the
+    /// parent email document and its attachment children so attachments inherit the same "File to"
+    /// association as the email. No-op when there is no association. Account/Contact have no document
+    /// lookup field yet (see UpdateDocumentRequest).
+    /// </summary>
+    private void ApplyAssociationLookup(
+        Spaarke.Dataverse.UpdateDocumentRequest request,
+        string? associationType,
+        Guid? associationId)
+    {
+        if (!associationId.HasValue || string.IsNullOrEmpty(associationType))
+            return;
+
+        switch (associationType.ToLowerInvariant())
+        {
+            case "matter":
+                request.MatterLookup = associationId.Value;
+                break;
+            case "project":
+                request.ProjectLookup = associationId.Value;
+                break;
+            case "invoice":
+                request.InvoiceLookup = associationId.Value;
+                break;
+            default:
+                _logger.LogWarning(
+                    "Unknown association type {AssociationType}, skipping association",
+                    associationType);
+                break;
+        }
+    }
+
     private async Task ProcessSingleAttachmentAsync(
         EmailAttachmentInfo attachment,
         Guid parentDocumentId,
@@ -1058,6 +1063,8 @@ public class UploadFinalizationWorker : BackgroundService, IOfficeJobHandler
         string containerId,
         string? conversationIndex,
         string? internetMessageId,
+        string? associationType,
+        Guid? associationId,
         CancellationToken cancellationToken)
     {
         if (attachment.Content == null || attachment.Content.Length == 0)
@@ -1144,6 +1151,10 @@ public class UploadFinalizationWorker : BackgroundService, IOfficeJobHandler
             // Copy parent email's internetMessageId for relationship tracking
             EmailParentId = internetMessageId
         };
+
+        // Inherit the parent email's "File to" association (Matter/Project/Invoice) so the attachment
+        // Documents file to the same record as the .eml.
+        ApplyAssociationLookup(updateRequest, associationType, associationId);
 
         await _documentService.UpdateDocumentAsync(childDocumentIdStr, updateRequest, cancellationToken);
 
