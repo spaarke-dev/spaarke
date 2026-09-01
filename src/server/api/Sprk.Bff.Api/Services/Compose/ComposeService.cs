@@ -450,8 +450,29 @@ public class ComposeService : IComposeService
             "Compose apply-template: drive={DriveId} driveItem={DocumentSpeId} template={TemplateName}",
             driveId, documentSpeId, templateName);
 
-        // 1) Download the CURRENT persisted bytes (the merge applies to the SAVED document — the client
-        //    guards apply on a non-dirty, non-transient mount). Mirrors LoadAsync's buffered fetch.
+        // 1) Read the CURRENT version stamp BEFORE the download — this is T1, the version the merge
+        //    below is computed against, and it is what the write at step 4 asserts (#776).
+        //
+        //    WHY IT IS CAPTURED HERE AND NOT JUST BEFORE THE WRITE. Apply-template is a
+        //    read-merge-write over bytes we downloaded: if another writer lands a version between T1 and
+        //    T2, our merged output was computed WITHOUT their change and writing it would erase them at
+        //    the head version. Reading the eTag immediately before the write would assert against that
+        //    NEWER version and succeed — clobbering silently, which is exactly the defect. The
+        //    precondition is only meaningful as of the bytes we actually merged.
+        //
+        //    This is NOT the client's load-time eTag. Sending that would refuse on every stale mount and
+        //    re-create the 422 treadmill R4 removed (see the SaveAsync note on `preWriteETag`). The
+        //    window asserted here is OUR OWN read→write span, so a refusal means a genuine concurrent
+        //    writer, not a stale client.
+        //
+        //    A null stamp (metadata unavailable) degrades to the pre-#776 blind PUT rather than blocking
+        //    the merge — best-effort, same convention as the save path.
+        var preMergeMetadata = await _spe.GetFileMetadataAsUserAsync(httpContext, driveId, documentSpeId, cancellationToken)
+            .ConfigureAwait(false);
+        var preMergeETag = preMergeMetadata?.ETag;
+
+        // Download the CURRENT persisted bytes (the merge applies to the SAVED document — the client
+        // guards apply on a non-dirty, non-transient mount). Mirrors LoadAsync's buffered fetch.
         var stream = await _spe.DownloadFileAsUserAsync(httpContext, driveId, documentSpeId, cancellationToken)
             .ConfigureAwait(false);
         if (stream is null)
@@ -494,15 +515,25 @@ public class ComposeService : IComposeService
         var stamp = _baselineParaIdStamper.MintAndPersist(merged);
         var finalBytes = stamp.Mutated ? stamp.Bytes : merged;
 
-        // 4) Persist as a NEW SPE version via the existing replace idiom (the prior version remains
-        //    retrievable through SPE version history — FR-07 safety net).
-        FileHandleDto? replaced;
-        using (var replaceStream = new MemoryStream(finalBytes, writable: false))
-        {
-            replaced = await _spe.ReplaceFileContentAsUserAsync(
-                    httpContext, driveId, documentSpeId, replaceStream, cancellationToken)
-                .ConfigureAwait(false);
-        }
+        // 4) Persist as a NEW SPE version, ASSERTING the T1 version captured at step 1 (#776). The prior
+        //    version remains retrievable through SPE version history (FR-07 safety net).
+        //
+        //    Reuses the save path's `ReplaceWithPreconditionAsync` rather than adding a second
+        //    precondition idiom (root §11): it already maps a Graph 412 to the typed
+        //    EtagPreconditionFailedException, so the Graph type never crosses the facade (ADR-007), and
+        //    it already degrades to a blind PUT on a null stamp. A 412 here means a sibling tab saved
+        //    while this merge was in flight — the caller is told to re-apply, which is honest and
+        //    actionable. The alternative was writing anyway and discarding their save with no way to
+        //    reconcile it, since the merged bytes never contained their change.
+        //    `rebaseOnConflict: false` is load-bearing, not a stylistic choice. The default retries once
+        //    against the fresh version (last-writer-wins), which is sound on the SAVE path only because
+        //    the edits were rebased onto those bytes first. Nothing rebases the merge here, so retrying
+        //    would write a payload that never contained the other writer's change — the If-Match would
+        //    be decorative and the defect would survive the fix.
+        var replaced = await _saveStorage.ReplaceWithPreconditionAsync(
+                httpContext, driveId, documentSpeId, finalBytes, preMergeETag, cancellationToken,
+                rebaseOnConflict: false)
+            .ConfigureAwait(false);
 
         if (replaced is null || string.IsNullOrEmpty(replaced.Id))
         {

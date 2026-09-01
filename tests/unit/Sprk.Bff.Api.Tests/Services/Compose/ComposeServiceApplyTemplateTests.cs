@@ -135,16 +135,39 @@ public sealed class ComposeServiceApplyTemplateTests
         WebUrl: "https://spe/web/merged",
         DriveId: DriveId);
 
+    /// <summary>The version stamp apply-template reads at T1 (#776) — the version its merge is computed
+    /// against and the one its write asserts.</summary>
+    private const string PreMergeETag = "\"etag-at-T1-032\"";
+
+    private static FileHandleDto CurrentDriveItem() => new(
+        Id: SpeItemId,
+        Name: "current.docx",
+        ParentId: null,
+        Size: 1234,
+        CreatedDateTime: DateTimeOffset.UtcNow,
+        LastModifiedDateTime: DateTimeOffset.UtcNow,
+        ETag: PreMergeETag,
+        IsFolder: false,
+        WebUrl: null,
+        DriveId: DriveId);
+
     private void ArrangeDownloadAndReplace(byte[] currentBytes, out Func<byte[]> capturedBytesAccessor)
     {
+        // #776: apply-template now reads the CURRENT version stamp before downloading, and asserts it on
+        // the write. These tests exercise that real path rather than the null-stamp degradation, so a
+        // regression that stopped sending the precondition shows up here as an unmatched strict-mock call.
+        _spe.Setup(s => s.GetFileMetadataAsUserAsync(
+                It.IsAny<HttpContext>(), DriveId, SpeItemId, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(CurrentDriveItem());
+
         _spe.Setup(s => s.DownloadFileAsUserAsync(
                 It.IsAny<HttpContext>(), DriveId, SpeItemId, It.IsAny<CancellationToken>()))
             .ReturnsAsync(() => new MemoryStream(currentBytes));
 
         byte[]? captured = null;
         _spe.Setup(s => s.ReplaceFileContentAsUserAsync(
-                It.IsAny<HttpContext>(), DriveId, SpeItemId, It.IsAny<Stream>(), It.IsAny<CancellationToken>()))
-            .Callback<HttpContext, string, string, Stream, CancellationToken>((_, _, _, stream, _) =>
+                It.IsAny<HttpContext>(), DriveId, SpeItemId, It.IsAny<Stream>(), PreMergeETag, It.IsAny<CancellationToken>()))
+            .Callback<HttpContext, string, string, Stream, string?, CancellationToken>((_, _, _, stream, _, _) =>
             {
                 using var buffer = new MemoryStream();
                 stream.CopyTo(buffer);
@@ -254,6 +277,11 @@ public sealed class ComposeServiceApplyTemplateTests
     [Fact]
     public async Task ApplyTemplateAsync_DocumentNotFound_ThrowsNotFound_AndNeverWrites()
     {
+        // #776: the version read now precedes the download. A missing document still fails at the
+        // download, unchanged — the metadata read is not what decides not-found.
+        _spe.Setup(s => s.GetFileMetadataAsUserAsync(
+                It.IsAny<HttpContext>(), DriveId, SpeItemId, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(CurrentDriveItem());
         _spe.Setup(s => s.DownloadFileAsUserAsync(
                 It.IsAny<HttpContext>(), DriveId, SpeItemId, It.IsAny<CancellationToken>()))
             .ReturnsAsync((Stream?)null);
@@ -272,11 +300,15 @@ public sealed class ComposeServiceApplyTemplateTests
     [Fact]
     public async Task ApplyTemplateAsync_ReplaceFails_Throws_NeverSilentSuccess()
     {
+        _spe.Setup(s => s.GetFileMetadataAsUserAsync(
+                It.IsAny<HttpContext>(), DriveId, SpeItemId, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(CurrentDriveItem());
         _spe.Setup(s => s.DownloadFileAsUserAsync(
                 It.IsAny<HttpContext>(), DriveId, SpeItemId, It.IsAny<CancellationToken>()))
             .ReturnsAsync(() => new MemoryStream(BuildDocumentBytes()));
+        // #776: the write now carries the T1 precondition, so this is the If-Match overload.
         _spe.Setup(s => s.ReplaceFileContentAsUserAsync(
-                It.IsAny<HttpContext>(), DriveId, SpeItemId, It.IsAny<Stream>(), It.IsAny<CancellationToken>()))
+                It.IsAny<HttpContext>(), DriveId, SpeItemId, It.IsAny<Stream>(), PreMergeETag, It.IsAny<CancellationToken>()))
             .ReturnsAsync((FileHandleDto?)null);
         var sut = CreateSut();
 
@@ -284,6 +316,77 @@ public sealed class ComposeServiceApplyTemplateTests
             TestHttpContexts.Authenticated(), DriveId, SpeItemId, BuildTemplateDotx(), TemplateName, CancellationToken.None);
 
         await act.Should().ThrowAsync<InvalidOperationException>();
+    }
+
+    // ═══════════════════════════════════════════════════════════════════════════════════════════════
+    // #776 — a concurrent save inside the merge window must NOT be clobbered.
+    //
+    // This test exists because the coordinator-level tests cannot cover the thing that actually
+    // matters here. `ComposeSaveStorageCoordinator.ReplaceWithPreconditionAsync` retries ONCE against
+    // the fresh version by DEFAULT (last-writer-wins), which is correct for the save path because its
+    // edits were rebased onto those bytes first. Apply-template never rebases: its merge was computed
+    // from the T1 download. So the fix depends on this call site passing `rebaseOnConflict: false`, and
+    // a test that only exercised the coordinator would pass even if this call site used the default —
+    // the If-Match would still be sent, and the clobber would survive a fix that looks correct.
+    // ═══════════════════════════════════════════════════════════════════════════════════════════════
+
+    [Fact]
+    public async Task ApplyTemplateAsync_WhenAConcurrentSaveLandsInsideTheMergeWindow_WritesNothingAndDoesNotRetry()
+    {
+        const string concurrentWriterETag = "\"etag-someone-else-saved-032\"";
+
+        // THE MOCK HAS TO MODEL THE WORLD, or this test cannot tell the fix from the bug.
+        //
+        // A first draft returned the SAME etag from every metadata read. Under the retrying default the
+        // retry then re-sent the T1 etag, was rejected again, and the exception surfaced anyway — so the
+        // test passed in BOTH worlds and proved nothing. Verified by seeding the naive fix: 11/11 green.
+        //
+        // Reality: after the precondition fails, a fresh read returns the WINNER's version, and the retry
+        // against it SUCCEEDS. That success IS the clobber. So the reads are sequenced — T1 first, the
+        // winner's version second — and the write against the winner is set up to succeed. Now the
+        // retrying default completes without throwing and this test fails, which is the point.
+        _spe.SetupSequence(s => s.GetFileMetadataAsUserAsync(
+                It.IsAny<HttpContext>(), DriveId, SpeItemId, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(CurrentDriveItem())                                  // T1 — what the merge is computed from
+            .ReturnsAsync(CurrentDriveItem() with { ETag = concurrentWriterETag }); // the sibling tab's save
+
+        _spe.Setup(s => s.DownloadFileAsUserAsync(
+                It.IsAny<HttpContext>(), DriveId, SpeItemId, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(() => new MemoryStream(BuildDocumentBytes()));
+
+        // The write asserting the T1 version is rejected — a sibling tab saved while we were merging.
+        _spe.Setup(s => s.ReplaceFileContentAsUserAsync(
+                It.IsAny<HttpContext>(), DriveId, SpeItemId, It.IsAny<Stream>(), PreMergeETag, It.IsAny<CancellationToken>()))
+            .ThrowsAsync(new EtagPreconditionFailedException(
+                $"SPE write precondition failed: drive-item '{SpeItemId}' changed since ETag '{PreMergeETag}' was read.",
+                PreMergeETag));
+
+        // …and a write against the WINNER's version would succeed. Reaching this setup at all means the
+        // stale merge overwrote them.
+        _spe.Setup(s => s.ReplaceFileContentAsUserAsync(
+                It.IsAny<HttpContext>(), DriveId, SpeItemId, It.IsAny<Stream>(), concurrentWriterETag, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(ReplacedDriveItem());
+
+        var sut = CreateSut();
+
+        var act = async () => await sut.ApplyTemplateAsync(
+            new DefaultHttpContext(), DriveId, SpeItemId, BuildTemplateDotx(), "Firm Letterhead", CancellationToken.None);
+
+        await act.Should().ThrowAsync<EtagPreconditionFailedException>(
+            "the merged bytes never contained the concurrent save, so writing them would erase it");
+
+        // The contract, and the reason this test is not redundant with the coordinator tests: NO second
+        // write against the fresh version, and no fall-back to the etag-less blind PUT. Under
+        // MockBehavior.Strict either would surface as an unmatched invocation anyway — these explicit
+        // verifies state the intent rather than relying on that side effect.
+        _spe.Verify(s => s.ReplaceFileContentAsUserAsync(
+                It.IsAny<HttpContext>(), It.IsAny<string>(), It.IsAny<string>(), It.IsAny<Stream>(),
+                concurrentWriterETag, It.IsAny<CancellationToken>()), Times.Never,
+            "retrying against the winner's etag is exactly the clobber #776 removes");
+        _spe.Verify(s => s.ReplaceFileContentAsUserAsync(
+                It.IsAny<HttpContext>(), It.IsAny<string>(), It.IsAny<string>(),
+                It.IsAny<Stream>(), It.IsAny<CancellationToken>()), Times.Never,
+            "and never degrades to a blind PUT once a version WAS resolved");
     }
 
     [Fact]
