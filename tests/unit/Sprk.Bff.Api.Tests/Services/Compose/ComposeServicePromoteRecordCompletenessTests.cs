@@ -75,7 +75,9 @@ public sealed class ComposeServicePromoteRecordCompletenessTests
         _spe.Object,
         _sessions.Object,
         _dataverse.Object, _indexing.Object,
-        NullLogger<ComposeService>.Instance);
+        NullLogger<ComposeService>.Instance,
+        ComposeServiceCollaborators.Resolver(_dataverse.Object),
+        ComposeServiceCollaborators.Probe().Object);
 
     private static ReadOnlyMemory<byte> DraftBytes() =>
         new byte[] { 0x50, 0x4B, 0x03, 0x04, 0x14, 0x00, 0x01, 0x02, 0x03 };
@@ -94,6 +96,10 @@ public sealed class ComposeServicePromoteRecordCompletenessTests
 
     private void ArrangeContainerCreate()
     {
+        // Issue #858: the container is SERVER-derived now — this sets up the two reads that derivation
+        // makes, resolving to the same ContainerId the SPE setup below still expects.
+        ComposeServiceCollaborators.SetupActingUserContainer(_dataverse, ContainerId);
+
         _spe.Setup(s => s.ResolveDriveIdAsync(ContainerId, It.IsAny<CancellationToken>()))
             .ReturnsAsync(ResolvedDriveId);
         _spe.Setup(s => s.UploadSmallAsUserAsync(
@@ -134,7 +140,6 @@ public sealed class ComposeServicePromoteRecordCompletenessTests
         var request = new SaveComposeDocumentRequest
         {
             DocumentSpeId = null,           // transient draft — first Save runs create-on-save
-            ContainerId = ContainerId,
             Content = DraftBytes(),
             SessionId = Guid.NewGuid().ToString(),
             TenantId = Tenant,
@@ -163,7 +168,6 @@ public sealed class ComposeServicePromoteRecordCompletenessTests
         var request = new SaveComposeDocumentRequest
         {
             DocumentSpeId = null,
-            ContainerId = ContainerId,
             Content = DraftBytes(),
             SessionId = Guid.NewGuid().ToString(),
             TenantId = Tenant,

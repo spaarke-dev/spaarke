@@ -13,7 +13,87 @@
 | **Task** | **076** — record-keyed upload contract. `<rigor>FULL</rigor>`, tier `opus`, effort `high`, steps `directional`, `parallel-safe: false` |
 | **Step** | **4 of 11** (client cutover). Steps 0–3 + the >4 MB server half are DONE; 5–11 remain |
 | **Status** | in-progress |
-| **Next Action** | 🔴 **READ [`notes/plan-upload-path-decomposition-2026-08-31.md`](notes/plan-upload-path-decomposition-2026-08-31.md) FIRST — it is the work contract and holds four facts you must not re-derive.** Then: file tasks **093/094/095** per its §3, and execute **076** (client cutover U1/U2/U3 → `(entity, recordId)`; **250 MB** threshold correction; record-less route for the Skip path; classify 12 suppliers; delete W1/W2; delete the legacy route LAST) |
+| **Next Action** | 🔴 **READ [`notes/plan-upload-path-decomposition-2026-08-31.md`](notes/plan-upload-path-decomposition-2026-08-31.md) FIRST.** Then finish **#858's tail** (client `containerId` removal + census reclassification — see §858 below), then file **093/094/095** and execute **076** |
+
+### ✅ PR #887 MERGED 2026-09-01T03:18:38Z — 34 commits on master
+
+All Tier 1 blocking checks passed. ⚠️ One ADVISORY failure: **Markdown Link Validator** — likely a bad
+link in the notes files added 2026-08-31; non-blocking but **unfixed, and probably ours**.
+🔴 **Master is PROTECTED** — `push declined due to repository rule violations`. Merges MUST go through a
+PR; ruleset = `Router` status check + **zero approvals** (`required_approving_review_count: 0`, which
+independently confirms this repo does not gate on review). **`worktree-sync` Step 3 Option A
+(direct push to master) CANNOT work here** — the skill is wrong on this repo and should be fixed.
+
+### 🔴 §858 — Compose create-on-save container: SERVER CODE DONE, tail remains
+
+**Build clean; Compose suite 387/387.** What landed:
+
+- `ComposeService.ResolveCreateOnSaveContainerAsync` — reads `(entityType, entityId)` from the
+  **session** (server-side state), verifies **session ownership** (#863's test, same reason), authorizes
+  the caller against the matter via `CallerRecordAccessProbe` + `OperationAccessPolicy`
+  `entity.associate_document` (**AppendTo** — the SAME key Office save uses), then resolves via
+  `RecordContainerResolver.ResolveForRecordAsync`. No matter → `ResolveForActingUserAsync`.
+- `SaveComposeDocumentRequest.ContainerId` **DELETED**, plus the wire DTO field, the
+  `containerId is required` 400 guard, and both forwarding sites.
+- `ComposeService` ctor gained 2 **required** params (fail-closed; optional-null would mean "no
+  authorization" failing at runtime instead of compile time). Cost: 11 Compose test files updated via
+  one new shared `ComposeServiceCollaborators` helper.
+
+**Design corrections made DURING implementation — do not revert:**
+1. 🔴 **#858's own proposed fix would have RELOCATED the defect.** Threading the owning record through
+   the SAVE request means the caller names a matter instead of a container and the server resolves it —
+   `LoadComposeDocumentRequest.MatterId` is client-supplied and **never authorized**. Hence: identity
+   from the session, and then authorized.
+2. **Unresolvable container returns `null` → `BuildContainerFailedResult`, it does NOT throw.** A missing
+   BU container is a CONFIGURATION state (3 of 6 BUs, verified live) and the client renders a per-step
+   projection. Only denial / unsupported host entity / unattributable caller throw. This was caught by an
+   existing test whose *premise* the change inverted but whose *value* (fail honestly, never write) still
+   held — it was rewritten, not deleted.
+3. **No short→logical entity map added.** `BuildMatterHostContext` (`:898`) is the ONLY host-context
+   producer and hard-codes `matter`, so the reachable set is exactly one — a constant, not a fourth map
+   (CLAUDE.md §11). Any other host type is REFUSED, so a future project-bound session is visible.
+4. ✅ **`AddExternalAccess()` is unconditional** (`Program.cs:69`) — verified, so depending on
+   `CallerRecordAccessProbe` from unconditionally-registered `ComposeService` is NOT the §10 F.1
+   asymmetric-registration anti-pattern.
+
+### 🔴🔴 THE BRANCH IS RED — 20 FAILING TESTS. DO NOT MERGE. FIX THIS FIRST.
+
+**Full suite after #858: 11,726 passed / 20 FAILED / 57 skipped.** Unit-level Compose is 387/387; every
+failure is in the **integration / seam / regression** layers, and they all share ONE cause:
+
+> Those fixtures drive create-on-save **through the wire** (HTTP + DI). The container is now
+> SERVER-derived, so the fixture must arrange the two Dataverse reads that derivation makes —
+> `systemuser` filtered on `azureactivedirectoryobjectid`, then that user's `businessunit.sprk_containerid`
+> — **or** bind the session to a matter. None of them do, so container resolution fails and the test's
+> expected 200/412/423 becomes a container-step failure.
+
+**Fix shape**: one shared fixture-level arrangement, mirroring
+`tests/unit/Sprk.Bff.Api.Tests/Services/Compose/ComposeServiceCollaborators.SetupActingUserContainer`
+but at the `WebApplicationFactory`/DI layer. Do NOT fix these one at a time.
+
+**One test's premise is deliberately DEAD and must be rewritten, not repaired**:
+`CreateOnSave_WhenContainerIdMissing_Returns400` — it asserts the 400 guard that #858 removed on purpose.
+Its post-#858 equivalent is "no container CONFIGURED → honest container-step failure, nothing written"
+(the same rewrite already applied to `SaveAsync_TransientDraftWithNoConfiguredContainer_…`).
+
+Failing classes: `ComposePdfRefreshBaselineSeamTests` · `Def14_ComposeSaveLockedDocumentTests` ·
+`ComposeCreateOnSave*` contract/seam suites (full list: `dotnet test --filter FullyQualifiedName~Compose`).
+
+**🔲 REMAINING for #858** (server is done; these are the tail):
+- **Client**: stop sending `containerId` from `ComposeWorkspace.tsx` (`saveContainerId` at :1810,
+  `containerIdRef` :1081, and the `resolveContainer` prop). ⚠️ **NOT a ship-together change** — an old
+  client sending `containerId` is harmless (System.Text.Json drops unknown properties), so **BFF may
+  ship first**. This differs from 076, which IS ship-together.
+- **Census**: reclassify the 3 `ComposeSaveStorageCoordinator` sinks + the create-on-save decision in
+  `SpeWriteSinkContainerProvenanceGuardTests` — `ClientSupplied` → `ServerDerivedRecord`.
+- **Behaviour tests** for the new paths (authorized matter → its container; unauthorized matter → 403;
+  no session → acting-user BU; foreign session → host context ignored). ⚠️ compose-r8 warned this region
+  is **76.8% branch coverage** with 11 untested guarantees, 2 document-destroying.
+- **Comment on #858** — that is compose-r8's signal to resume clusters 5a → 2a/2b.
+- ⚠️ **A behaviour change to flag in the PR**: a drafter with Read-but-not-AppendTo on the matter
+  succeeded before and now gets 403. The mapper is verified correct
+  (`DataverseAccessRightsMapper.cs:68`), so the refusal is honest — but whether Compose drafters hold
+  `AppendTo` in the deployed role set is EMPIRICAL and unmeasured.
 | **Conflict-check** | ✅ CLEAN 2026-08-31 — 15 open PRs, only #887 is this branch, #894 is CI-only, 13 dependabot. **No overlap on 076's files** |
 | **Behind master** | **10 commits** — sync before the next merge |
 

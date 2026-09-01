@@ -90,7 +90,9 @@ public sealed class ComposeServiceLoadParaIdTests
         _spe.Object,
         _sessions.Object,
         _dataverse.Object, _indexing.Object,
-        NullLogger<ComposeService>.Instance);
+        NullLogger<ComposeService>.Instance,
+        ComposeServiceCollaborators.Resolver(_dataverse.Object),
+        ComposeServiceCollaborators.Probe().Object);
 
     // 3 body paragraphs: one with an existing id, one without, one inside a table cell.
     private static byte[] FormattedDocx()

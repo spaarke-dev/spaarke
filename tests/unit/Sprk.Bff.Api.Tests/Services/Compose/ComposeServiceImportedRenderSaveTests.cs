@@ -67,6 +67,10 @@ public sealed class ComposeServiceImportedRenderSaveTests
         _sessions
             .Setup(s => s.GetSessionAsync(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync((ChatSession?)null);
+
+        // No acting-user container setup here: this fixture exercises the REPLACE path (a document that
+        // already has a drive-item), which never reaches issue #858's create-on-save container
+        // derivation. Adding the setup would arrange a call that is never made.
     }
 
     private ComposeService CreateSut() => new(
@@ -74,7 +78,9 @@ public sealed class ComposeServiceImportedRenderSaveTests
         _sessions.Object,
         _dataverse.Object,
         _indexing.Object,
-        NullLogger<ComposeService>.Instance);
+        NullLogger<ComposeService>.Instance,
+        ComposeServiceCollaborators.Resolver(_dataverse.Object),
+        ComposeServiceCollaborators.Probe().Object);
 
     /// <summary>A retained-original carrier whose STYLES PART carries a distinctive custom style —
     /// the oracle that the save rendered INTO the carrier (parts preserved) rather than synthesizing a
