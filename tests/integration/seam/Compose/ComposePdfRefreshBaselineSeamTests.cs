@@ -53,7 +53,12 @@ public sealed class ComposePdfRefreshBaselineSeamTests : IClassFixture<ComposeFi
 
     private const string PdfDriveId = "drive-pdf-refresh-001";
     private const string PdfFileName = "Master Services Agreement (executed).pdf";
-    private const string ContainerId = "b!container-bu-pdf-refresh";
+    /// <summary>Issue #858: the container is SERVER-derived (acting user → business unit →
+    /// sprk_containerid; arranged by the fixture via <c>TestActingUserBusinessUnit</c>) — the client
+    /// no longer names it. This const aliases the arranged value so the specific
+    /// <c>ResolveDriveIdAsync(ContainerId, …)</c> matchers below only match when the REAL derivation
+    /// produced it: the mint silently proves server-side resolution on every one of these tests.</summary>
+    private const string ContainerId = TestActingUserBusinessUnit.ContainerId;
     private const string MintedDriveId = "drive-pdf-docx-refresh-001";
 
     /// <summary>The edit the FIRST save lands. If the second save is resolving the right baseline, this

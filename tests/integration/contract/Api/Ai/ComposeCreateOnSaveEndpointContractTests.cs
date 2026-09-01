@@ -43,13 +43,16 @@ using Microsoft.Extensions.DependencyInjection.Extensions;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
+using Microsoft.Extensions.Caching.Distributed;
 using Microsoft.Xrm.Sdk;
 using Moq;
 using Spaarke.Dataverse;
 using Sprk.Bff.Api.Api;
 using Sprk.Bff.Api.Infrastructure.Cache;
+using Sprk.Bff.Api.Infrastructure.Dataverse;
 using Sprk.Bff.Api.Infrastructure.Graph;
 using Sprk.Bff.Api.Models;
+using Sprk.Bff.Api.Models.Ai.Chat;
 using Sprk.Bff.Api.Services.Ai;
 using Sprk.Bff.Api.Services.Ai.Chat;
 using Sprk.Bff.Api.Tests.Mocks;
@@ -81,7 +84,11 @@ public sealed class ComposeCreateOnSaveEndpointContractTests
     public async Task UploadThenCreateOnSave_TransientDraft_PersistsNewDocumentAndSpeItemAndRebindsSession()
     {
         // ── Arrange ────────────────────────────────────────────────────────────────────────────
-        const string containerId = "b!container-bu-001";
+        // Issue #858: an OLD client still sends containerId — the server must IGNORE it (unknown JSON
+        // properties are dropped) and derive the container itself. Posting a decoy and asserting the
+        // SPE resolve saw the server-derived value instead is the strongest wire-level form of the
+        // #858 property: the caller can no longer name the container it writes into.
+        const string clientSuppliedDecoyContainerId = "b!client-supplied-must-be-ignored";
         const string mintedSpeItemId = "spe-item-created-001";
         const string resolvedDriveId = "drive-created-001";
         var newDocumentId = Guid.NewGuid();
@@ -160,12 +167,13 @@ public sealed class ComposeCreateOnSaveEndpointContractTests
         var uploadBody = await uploadResponse.Content.ReadFromJsonAsync<ComposeUploadResponse>();
         uploadBody!.Content.Should().Equal(DraftBytes, "the exact retained bytes are served for the transient mount");
 
-        // ── Act 2: create-on-save with containerId + NO documentSpeId (the body the client sends) ──
+        // ── Act 2: create-on-save with NO documentSpeId. The body still carries a containerId — the
+        //    OLD client shape — which the server must ignore (#858 deploy-ordering: BFF ships first). ──
         var createOnSaveResponse = await client.PostAsJsonAsync(
             "/api/compose/documents/create-on-save",
             new
             {
-                containerId,
+                containerId = clientSuppliedDecoyContainerId,
                 tenantId = ComposeCreateOnSaveFixture.TestTenantId,
                 sessionId,
                 content = uploadBody.Content,
@@ -183,8 +191,14 @@ public sealed class ComposeCreateOnSaveEndpointContractTests
             "the server returns the minted SPE id so a second Save targets the real drive-item (gap 1.7)");
 
         // ── Assert: persisted side-effects (this is what a service-only unit test misses) ─────────
-        resolvedContainerArg.Should().Be(containerId,
-            "the client-resolved BU container flowed containerId (body) → request.ContainerId → SPE resolve (gaps 1.1/1.2/1.4)");
+        // REWRITTEN for issue #858. Old assertion: the body containerId "flowed body →
+        // request.ContainerId → SPE resolve" — that flow is the deleted defect. New truth: the SPE
+        // resolve sees the SERVER-derived container (acting user → business unit → sprk_containerid),
+        // and the body's value influences nothing.
+        resolvedContainerArg.Should().Be(TestActingUserBusinessUnit.ContainerId,
+            "#858: the container is derived server-side from the acting user's business unit");
+        resolvedContainerArg.Should().NotBe(clientSuppliedDecoyContainerId,
+            "#858's whole point: a client-supplied container id must never reach the SPE write path");
         _fixture.SpeMock.Verify(s => s.UploadSmallAsUserAsync(
             It.IsAny<HttpContext>(), resolvedDriveId, It.IsAny<string>(),
             It.IsAny<Stream>(), It.IsAny<CancellationToken>()), Times.Once,
@@ -350,14 +364,33 @@ public sealed class ComposeCreateOnSaveEndpointContractTests
         createdEntity!.Contains("sprk_matter").Should().BeFalse("no links could be inherited");
     }
 
+    // ── REWRITTEN for issue #858 (was: CreateOnSave_WhenContainerIdMissing_Returns400) ────────────
+    //
+    // OLD PREMISE (deliberately dead): "no containerId in the body → 400, because the BFF does NOT
+    // resolve BU→container (Fork A / multi-container INV-7) and so cannot know where to write."
+    // #858 inverted that premise on purpose: requiring the caller to name a storage container WAS the
+    // defect (the caller-named-container class this whole project removes), the INV-7 citation was
+    // itself inverted (INV-7 PRESCRIBES server-side resolution), and both the body field and the 400
+    // guard were deleted. The server now derives the container — for a matter-less draft, from the
+    // acting user's business unit.
+    //
+    // PRESERVED INTENT: a create-on-save that cannot be PLACED must write nothing and fail honestly.
+    // The post-#858 shape of "cannot be placed" is a business unit with no sprk_containerid stamped —
+    // a legitimate, common configuration state (3 of 6 live BUs). That is a CONFIGURATION answer, not
+    // a request-validation error: it arrives as the container-step failure the client already renders
+    // (HTTP 200 carrying outcome=storage-failed on the step projection), never a success, and with no
+    // SPE or Dataverse write attempted. Mirrors the unit-layer rewrite
+    // (SaveAsync_TransientDraftWithNoConfiguredContainer_FailsContainerStep_NeverSuccess).
     [Fact]
-    public async Task CreateOnSave_WhenContainerIdMissing_Returns400()
+    public async Task CreateOnSave_WhenActingUsersBusinessUnitHasNoContainer_FailsContainerStepHonestly_AndWritesNothing()
     {
         _fixture.ResetBoundaries();
+        // Override the default arrangement: the derivation chain resolves (user → BU) but the BU has
+        // NO container stamped. Last-setup-wins, so this shadows ResetBoundaries' default.
+        TestActingUserBusinessUnit.ArrangeWithNoContainer(_fixture.DataverseMock);
+
         using var client = _fixture.CreateAuthenticatedClient();
 
-        // No containerId → the server cannot know which BU container to create the drive-item in
-        // (the BFF does NOT resolve BU→container — Fork A / multi-container INV-7).
         var response = await client.PostAsJsonAsync(
             "/api/compose/documents/create-on-save",
             new
@@ -367,12 +400,24 @@ public sealed class ComposeCreateOnSaveEndpointContractTests
                 content = DraftBytes,
             });
 
-        response.StatusCode.Should().Be(HttpStatusCode.BadRequest,
-            "create-on-save requires the client-resolved containerId (Fork A)");
+        var body = await response.Content.ReadAsStringAsync();
+        response.StatusCode.Should().Be(HttpStatusCode.OK,
+            $"no configured container is a CONFIGURATION state carried on the step projection, not a " +
+            $"request error and not an exception — body: {body}");
+
+        using var payload = JsonDocument.Parse(body);
+        payload.RootElement.GetProperty("outcome").GetString().Should().Be("storage-failed",
+            "a save that stored nothing must SAY so on the wire (FR-S06)");
+        payload.RootElement.GetProperty("versionId").GetString().Should().BeEmpty(
+            "no SPE version exists — the outcome and the payload must agree");
+
         _fixture.SpeMock.Verify(
             s => s.UploadSmallAsUserAsync(It.IsAny<HttpContext>(), It.IsAny<string>(),
                 It.IsAny<string>(), It.IsAny<Stream>(), It.IsAny<CancellationToken>()),
-            Times.Never, "no SPE work happens when the request is rejected at validation");
+            Times.Never, "nothing may be written when no container could be derived");
+        _fixture.DataverseMock.Verify(
+            d => d.UpsertAsync(It.IsAny<Entity>(), It.IsAny<CancellationToken>()),
+            Times.Never, "no sprk_document row may be minted for content that was never stored");
     }
 
     // ── FR-S06 (spaarkeai-compose-r8 task 013) — the 200-with-nothing-written defect ──────────────────
@@ -514,7 +559,8 @@ public sealed class ComposeCreateOnSaveEndpointContractTests
     public async Task CreateOnSave_WithEmptySessionId_Returns200AndPersistsDocumentWithoutRebind()
     {
         // ── Arrange ────────────────────────────────────────────────────────────────────────────
-        const string containerId = "b!container-bu-sessionless";
+        // Issue #858: the body carries NO containerId — this is the NEW client shape. The container
+        // is server-derived; with no session (and so no matter) that is the acting user's BU.
         const string mintedSpeItemId = "spe-item-sessionless-001";
         const string resolvedDriveId = "drive-sessionless-001";
         const string sentinelDocId = "sentinel-doc-untouched";
@@ -573,12 +619,12 @@ public sealed class ComposeCreateOnSaveEndpointContractTests
 
         using var client = _fixture.CreateAuthenticatedClient();
 
-        // ── Act: create-on-save with EMPTY sessionId (the body the Browse client actually sends) ──
+        // ── Act: create-on-save with EMPTY sessionId (the body the Browse client actually sends —
+        //    and, post-#858, with no containerId at all) ──
         var response = await client.PostAsJsonAsync(
             "/api/compose/documents/create-on-save",
             new
             {
-                containerId,
                 tenantId = ComposeCreateOnSaveFixture.TestTenantId,
                 sessionId = string.Empty,
                 content = DraftBytes,
@@ -595,7 +641,11 @@ public sealed class ComposeCreateOnSaveEndpointContractTests
         result.DocumentSpeId.Should().Be(mintedSpeItemId, "the server returns the minted SPE id");
 
         // ── Assert: persisted side-effect (the non-waivable E2E DoD — a service-only test misses this) ──
-        resolvedContainerArg.Should().Be(containerId, "the client-resolved BU container still flows through without a session");
+        // REWRITTEN for issue #858 — was "the client-resolved BU container still flows through
+        // without a session", which is the deleted defect. A session-less save derives server-side
+        // from the acting user's business unit.
+        resolvedContainerArg.Should().Be(TestActingUserBusinessUnit.ContainerId,
+            "#858: with no session (and so no matter) the server derives the acting user's BU container");
         _fixture.SpeMock.Verify(s => s.UploadSmallAsUserAsync(
             It.IsAny<HttpContext>(), resolvedDriveId, It.IsAny<string>(),
             It.IsAny<Stream>(), It.IsAny<CancellationToken>()), Times.Once,
@@ -616,6 +666,264 @@ public sealed class ComposeCreateOnSaveEndpointContractTests
                 "the sessionless Save skips the FR-07 rebind entirely — no ChatSession is mutated");
         }
     }
+
+    // ════════════════════════════════════════════════════════════════════════════════════════════
+    // Issue #858 — the NEW server-side container-derivation paths, driven through the wire.
+    //
+    // These four are the FIRST tests of these guarantees at ANY layer (the unit suite covers only the
+    // acting-user resolvable/unresolvable pair) — the compose-r8 coverage warning named this exact
+    // region: 76.8% branch coverage with untested documented guarantees. Each asserts one leg of the
+    // ResolveCreateOnSaveContainerAsync contract: authorized matter → ITS container · missing
+    // AppendTo → typed 403, never an opaque 500 · foreign session → binding ignored, never borrowed ·
+    // unsupported host type → typed 409 refusal, never a guessed container.
+    // ════════════════════════════════════════════════════════════════════════════════════════════
+
+    /// <summary>The plural entity set EntityAccessFilter.TryResolveEntitySet maps sprk_matter to —
+    /// the probe verify pins it so the AUTHORIZED record and the CONTAINER-SOURCE record are one.</summary>
+    private const string MatterEntitySet = "sprk_matters";
+
+    private async Task<string> CreateSessionWithHostContextAsync(string ownerOid, ChatHostContext hostContext)
+    {
+        using var scope = _fixture.Services.CreateScope();
+        var sessions = scope.ServiceProvider.GetRequiredService<ChatSessionManager>();
+        var session = await sessions.CreateSessionAsync(
+            ComposeCreateOnSaveFixture.TestTenantId, ownerOid, documentId: null,
+            playbookId: null, hostContext: hostContext);
+        return session.SessionId;
+    }
+
+    /// <summary>
+    /// Seed the securable-entity registry's cache so the REAL SecurableEntityRegistry answers from
+    /// cache instead of attempting the live metadata query (whose ServiceClient the test host cannot
+    /// unwrap from the loose IDataverseService stub). The REAL registry + REAL RecordContainerResolver
+    /// still run — only their externally-sourced answer is arranged, same as every other boundary.
+    /// </summary>
+    private async Task SeedSecurableEntitiesAsync(params string[] entityLogicalNames)
+    {
+        using var scope = _fixture.Services.CreateScope();
+        var cache = scope.ServiceProvider.GetRequiredService<IDistributedCache>();
+        await cache.SetAsync(
+            SecurableEntityRegistry.CacheKey,
+            JsonSerializer.SerializeToUtf8Bytes(entityLogicalNames));
+    }
+
+    private Task<HttpResponseMessage> PostCreateOnSaveAsync(HttpClient client, string sessionId) =>
+        client.PostAsJsonAsync(
+            "/api/compose/documents/create-on-save",
+            new
+            {
+                tenantId = ComposeCreateOnSaveFixture.TestTenantId,
+                sessionId,
+                content = DraftBytes,
+                displayName = "draft.docx",
+            });
+
+    [Fact]
+    public async Task CreateOnSave_WhenSessionBoundToAuthorizedSecureMatter_WritesIntoTheMattersOwnContainer()
+    {
+        // The strongest form of the #858 derivation: a SECURE matter's own sprk_containerid wins and
+        // the shared acting-user BU container — which IS arranged and resolvable — must not be touched.
+        const string secureMatterContainerId = "b!secure-matter-own-container-001";
+        var matterId = Guid.NewGuid();
+
+        _fixture.ResetBoundaries();
+        await SeedSecurableEntitiesAsync("sprk_matter");
+
+        // The caller holds AppendTo — the OperationAccessPolicy requirement for
+        // entity.associate_document, the SAME key the Office save path uses for the same act.
+        _fixture.ProbeMock
+            .Setup(p => p.GetCallerRightsAsync(
+                It.IsAny<string?>(), MatterEntitySet, matterId, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(DataverseAccessRightsMapper.FromAccessRightsString(
+                "ReadAccess,WriteAccess,AppendToAccess"));
+
+        _fixture.DataverseMock
+            .Setup(d => d.RetrieveAsync(
+                "sprk_matter", matterId, It.IsAny<string[]>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new Entity("sprk_matter", matterId)
+            {
+                ["sprk_issecure"] = true,
+                ["sprk_containerid"] = secureMatterContainerId,
+            });
+
+        string? resolvedContainerArg = null;
+        _fixture.SpeMock
+            .Setup(s => s.ResolveDriveIdAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()))
+            .Callback<string, CancellationToken>((c, _) => resolvedContainerArg = c)
+            .ReturnsAsync("drive-secure-matter-001");
+        _fixture.SpeMock
+            .Setup(s => s.UploadSmallAsUserAsync(
+                It.IsAny<HttpContext>(), It.IsAny<string>(), It.IsAny<string>(),
+                It.IsAny<Stream>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new FileHandleDto(
+                Id: "spe-item-secure-001", Name: "draft.docx", ParentId: null,
+                Size: DraftBytes.Length, CreatedDateTime: DateTimeOffset.UtcNow,
+                LastModifiedDateTime: DateTimeOffset.UtcNow, ETag: "\"v1\"",
+                IsFolder: false, WebUrl: null, DriveId: "drive-secure-matter-001"));
+        _fixture.DataverseMock
+            .Setup(d => d.RetrieveByAlternateKeyAsync(
+                It.IsAny<string>(), It.IsAny<KeyAttributeCollection>(),
+                It.IsAny<string[]>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync((Entity)null!);
+        _fixture.DataverseMock
+            .Setup(d => d.UpsertAsync(It.IsAny<Entity>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync((Guid.NewGuid(), true));
+        _fixture.IndexingMock
+            .Setup(i => i.EnqueueIfApplicableAsync(
+                It.IsAny<PostUploadIndexingRequest>(), It.IsAny<HttpContext>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(PostUploadIndexingResult.Submitted(Guid.NewGuid()));
+
+        var sessionId = await CreateSessionWithHostContextAsync(
+            TestSessionOwner.Oid,
+            new ChatHostContext(EntityType: "matter", EntityId: matterId.ToString()));
+        using var client = _fixture.CreateAuthenticatedClient();
+
+        var response = await PostCreateOnSaveAsync(client, sessionId);
+
+        var body = await response.Content.ReadAsStringAsync();
+        response.StatusCode.Should().Be(HttpStatusCode.OK, $"body: {body}");
+        resolvedContainerArg.Should().Be(secureMatterContainerId,
+            "the container comes from the AUTHORIZED matter bound to the session — the authorization " +
+            "key and the write destination are one value by construction");
+        resolvedContainerArg.Should().NotBe(TestActingUserBusinessUnit.ContainerId,
+            "the shared acting-user BU container was resolvable and must still not be chosen over the " +
+            "secure matter's own container — SPE permissions are additive-only, so this write cannot " +
+            "be retracted if it lands in the shared container");
+        _fixture.ProbeMock.Verify(
+            p => p.GetCallerRightsAsync(
+                It.IsAny<string?>(), MatterEntitySet, matterId, It.IsAny<CancellationToken>()),
+            Times.Once,
+            "the caller was authorized against exactly the record the container came from");
+    }
+
+    [Fact]
+    public async Task CreateOnSave_WhenCallerLacksAppendToOnBoundMatter_Returns403WithStableCode_NotOpaque500()
+    {
+        // The denial leg, asserted THROUGH the wire. Read-but-not-AppendTo succeeded before #858
+        // (nothing was authorized at all); now it must arrive as a typed 403 carrying the stable
+        // compose_record_access_denied code — and NOT as the "Save failed: SdapProblemException: …"
+        // opaque 500 the save route's catch-all produced before the SdapProblemException mapping arm
+        // (verified on the wire 2026-09-01). Nothing may be written on the way.
+        var matterId = Guid.NewGuid();
+
+        _fixture.ResetBoundaries();
+
+        _fixture.ProbeMock
+            .Setup(p => p.GetCallerRightsAsync(
+                It.IsAny<string?>(), MatterEntitySet, matterId, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(DataverseAccessRightsMapper.FromAccessRightsString("ReadAccess"));
+
+        var sessionId = await CreateSessionWithHostContextAsync(
+            TestSessionOwner.Oid,
+            new ChatHostContext(EntityType: "matter", EntityId: matterId.ToString()));
+        using var client = _fixture.CreateAuthenticatedClient();
+
+        var response = await PostCreateOnSaveAsync(client, sessionId);
+
+        var body = await response.Content.ReadAsStringAsync();
+        response.StatusCode.Should().Be(HttpStatusCode.Forbidden,
+            $"a caller who can read the matter but not AppendTo it may not file documents against it — body: {body}");
+        body.Should().Contain("compose_record_access_denied",
+            "the stable code crosses the wire so the client can route the refusal");
+        body.Should().NotContain("SdapProblemException",
+            "the exception type is an implementation detail; leaking it is the opaque-500 shape DEF-14 forbids");
+        _fixture.SpeMock.Verify(
+            s => s.UploadSmallAsUserAsync(It.IsAny<HttpContext>(), It.IsAny<string>(),
+                It.IsAny<string>(), It.IsAny<Stream>(), It.IsAny<CancellationToken>()),
+            Times.Never, "denial precedes every write — nothing is stored speculatively");
+        _fixture.DataverseMock.Verify(
+            d => d.UpsertAsync(It.IsAny<Entity>(), It.IsAny<CancellationToken>()),
+            Times.Never, "no record row may be minted for a refused save");
+    }
+
+    [Fact]
+    public async Task CreateOnSave_WhenSessionOwnedByAnotherUser_IgnoresItsMatterBinding_AndDerivesFromActingUser()
+    {
+        // The borrow attack: supply someone ELSE's SessionId and receive their matter's container.
+        // Session ownership is checked before the host context is trusted (issue #863's test, applied
+        // to #858 for the same reason), so a foreign session's binding is DISCARDED — the save still
+        // succeeds, but into the CALLER's own BU container, and the foreign matter is never even
+        // authorization-probed.
+        var foreignMatterId = Guid.NewGuid();
+
+        _fixture.ResetBoundaries();
+
+        string? resolvedContainerArg = null;
+        _fixture.SpeMock
+            .Setup(s => s.ResolveDriveIdAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()))
+            .Callback<string, CancellationToken>((c, _) => resolvedContainerArg = c)
+            .ReturnsAsync("drive-foreign-session-001");
+        _fixture.SpeMock
+            .Setup(s => s.UploadSmallAsUserAsync(
+                It.IsAny<HttpContext>(), It.IsAny<string>(), It.IsAny<string>(),
+                It.IsAny<Stream>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new FileHandleDto(
+                Id: "spe-item-foreign-001", Name: "draft.docx", ParentId: null,
+                Size: DraftBytes.Length, CreatedDateTime: DateTimeOffset.UtcNow,
+                LastModifiedDateTime: DateTimeOffset.UtcNow, ETag: "\"v1\"",
+                IsFolder: false, WebUrl: null, DriveId: "drive-foreign-session-001"));
+        _fixture.DataverseMock
+            .Setup(d => d.RetrieveByAlternateKeyAsync(
+                It.IsAny<string>(), It.IsAny<KeyAttributeCollection>(),
+                It.IsAny<string[]>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync((Entity)null!);
+        _fixture.DataverseMock
+            .Setup(d => d.UpsertAsync(It.IsAny<Entity>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync((Guid.NewGuid(), true));
+        _fixture.IndexingMock
+            .Setup(i => i.EnqueueIfApplicableAsync(
+                It.IsAny<PostUploadIndexingRequest>(), It.IsAny<HttpContext>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(PostUploadIndexingResult.Submitted(Guid.NewGuid()));
+
+        // The session belongs to ANOTHER user but is bound to a (their) matter.
+        var sessionId = await CreateSessionWithHostContextAsync(
+            TestSessionOwner.OtherOid,
+            new ChatHostContext(EntityType: "matter", EntityId: foreignMatterId.ToString()));
+        using var client = _fixture.CreateAuthenticatedClient(); // authenticates as TestSessionOwner.Oid
+
+        var response = await PostCreateOnSaveAsync(client, sessionId);
+
+        var body = await response.Content.ReadAsStringAsync();
+        response.StatusCode.Should().Be(HttpStatusCode.OK, $"body: {body}");
+        resolvedContainerArg.Should().Be(TestActingUserBusinessUnit.ContainerId,
+            "a session the caller does not own is not a trustworthy source of a matter binding — the " +
+            "binding is ignored and the caller's own BU container is derived instead");
+        _fixture.ProbeMock.Verify(
+            p => p.GetCallerRightsAsync(
+                It.IsAny<string?>(), It.IsAny<string>(), It.IsAny<Guid>(), It.IsAny<CancellationToken>()),
+            Times.Never,
+            "the foreign matter must not even be authorization-probed — the binding is discarded before it");
+    }
+
+    [Fact]
+    public async Task CreateOnSave_WhenSessionBoundToUnsupportedHostType_Returns409Refusal_NotAGuessedContainer()
+    {
+        // BuildMatterHostContext is the ONLY host-context producer Compose has and it hard-codes
+        // "matter" — so a project-bound session cannot occur today, and if a future change makes it
+        // occur, this path must REFUSE (visibly, typed) rather than guess a storage location that was
+        // never authorized. The 409 carries compose_host_entity_unsupported; before the save route's
+        // SdapProblemException mapping arm it would have shipped as an opaque 500.
+        var projectId = Guid.NewGuid();
+
+        _fixture.ResetBoundaries();
+
+        var sessionId = await CreateSessionWithHostContextAsync(
+            TestSessionOwner.Oid,
+            new ChatHostContext(EntityType: "project", EntityId: projectId.ToString()));
+        using var client = _fixture.CreateAuthenticatedClient();
+
+        var response = await PostCreateOnSaveAsync(client, sessionId);
+
+        var body = await response.Content.ReadAsStringAsync();
+        response.StatusCode.Should().Be(HttpStatusCode.Conflict,
+            $"an unsupported host entity type is refused, never resolved to a fallback container — body: {body}");
+        body.Should().Contain("compose_host_entity_unsupported",
+            "the stable code makes a future project-bound session VISIBLE instead of silently misfiled");
+        _fixture.SpeMock.Verify(
+            s => s.UploadSmallAsUserAsync(It.IsAny<HttpContext>(), It.IsAny<string>(),
+                It.IsAny<string>(), It.IsAny<Stream>(), It.IsAny<CancellationToken>()),
+            Times.Never, "refusal precedes every write");
+    }
 }
 
 /// <summary>
@@ -632,12 +940,35 @@ public sealed class ComposeCreateOnSaveFixture : WebApplicationFactory<Program>
     public Mock<IGenericEntityService> DataverseMock { get; } = new(MockBehavior.Loose);
     public Mock<IPostUploadIndexingEnqueuer> IndexingMock { get; } = new(MockBehavior.Loose);
 
+    /// <summary>
+    /// Issue #858: the authorization-answer boundary for a MATTER-bound create-on-save.
+    /// <c>CallerRecordAccessProbe.GetCallerRightsAsync</c> is <c>public virtual</c> precisely so tests
+    /// substitute the ANSWER without mocking its HttpClient transport (ADR-038 ban B1) — the same seam
+    /// the unit-layer <c>ComposeServiceCollaborators.Probe</c> uses. The REAL
+    /// <c>RecordContainerResolver</c> + <c>OperationAccessPolicy</c> stay in play.
+    /// </summary>
+    public Mock<Sprk.Bff.Api.Infrastructure.ExternalAccess.CallerRecordAccessProbe> ProbeMock { get; } =
+        new(
+            new HttpClient(),
+            new ConfigurationBuilder().Build(),
+            Microsoft.Extensions.Logging.Abstractions.NullLogger<Sprk.Bff.Api.Infrastructure.ExternalAccess.CallerRecordAccessProbe>.Instance,
+            null!)
+        { CallBase = false };
+
     /// <summary>Resets the boundary mocks between tests (xUnit runs a class's tests sequentially).</summary>
     public void ResetBoundaries()
     {
         SpeMock.Reset();
         DataverseMock.Reset();
         IndexingMock.Reset();
+        ProbeMock.Reset();
+
+        // Issue #858: the container is SERVER-derived on every create-on-save — a matter-less draft
+        // derives it from the acting user's business unit, so the real derivation reads must be
+        // arranged for the caller every request authenticates as. Re-applied here because Reset()
+        // erases it. Tests that need a different shape (e.g. a business unit with NO container)
+        // override after this call — Moq resolves overlaps last-setup-wins.
+        TestActingUserBusinessUnit.Arrange(DataverseMock);
     }
 
     protected override IHost CreateHost(IHostBuilder builder)
@@ -760,6 +1091,12 @@ public sealed class ComposeCreateOnSaveFixture : WebApplicationFactory<Program>
 
             services.RemoveAll<IPostUploadIndexingEnqueuer>();
             services.AddSingleton(IndexingMock.Object);
+
+            // Issue #858: substitute the authorization-ANSWER boundary (see ProbeMock remarks). The
+            // production registration is a typed HttpClient (ExternalAccessModule) whose real probe
+            // would call Dataverse; the mock answers instead. The REAL RecordContainerResolver stays.
+            services.RemoveAll<Sprk.Bff.Api.Infrastructure.ExternalAccess.CallerRecordAccessProbe>();
+            services.AddSingleton(ProbeMock.Object);
         });
     }
 

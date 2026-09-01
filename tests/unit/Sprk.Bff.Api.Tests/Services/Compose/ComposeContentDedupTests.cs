@@ -68,6 +68,8 @@ public sealed class ComposeContentDedupTests
         _dataverse.Object,
         _indexing.Object,
         NullLogger<ComposeService>.Instance,
+        ComposeServiceCollaborators.Resolver(_dataverse.Object),
+        ComposeServiceCollaborators.Probe().Object,
         dedupDetector: detector);
 
     // SessionId "" skips the FR-07 rebind (no ChatSessionManager interaction) so the test targets the dedup hook.

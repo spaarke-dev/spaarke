@@ -67,7 +67,9 @@ public sealed class ComposeServiceApplyTemplateTests
         _sessions.Object,
         _dataverse.Object,
         _indexing.Object,
-        NullLogger<ComposeService>.Instance);
+        NullLogger<ComposeService>.Instance,
+        ComposeServiceCollaborators.Resolver(_dataverse.Object),
+        ComposeServiceCollaborators.Probe().Object);
 
     // ── builders (real OOXML — the engine under the service is the REAL 030 engine) ──────────────
 

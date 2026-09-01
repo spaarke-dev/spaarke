@@ -303,15 +303,15 @@ public class SpeWriteSinkContainerProvenanceGuardTests
     private static readonly IReadOnlyList<SinkSite> AllowList = new[]
     {
         // ---------------------------------------------------------------------------------------------
-        // ClientSupplied — the work list. ELEVEN sites, all owned.
+        // ClientSupplied — the work list. SEVEN sites, all owned.
         //
-        // COUNT CORRECTED 2026-08-28. This header and the STATE AT THE TIME OF WRITING note below both
-        // said "nine" on the day the guard was written, when the block actually held TWELVE entries. The
-        // prose count was never enforced by anything — Rule A pins AllowList.Count against the DISCOVERED
-        // set, not against a number written in a comment — so the error survived review. It is now eleven
-        // because the unreachable UploadFinalizationWorker sink was deleted. If you change this block,
-        // recount; a hand-maintained number in a comment is exactly the kind of census this guard was
-        // built to distrust.
+        // COUNT CORRECTED 2026-08-28, AND AGAIN 2026-09-01. The header said "nine" on the day the guard
+        // was written when the block held TWELVE, then "eleven" while the block actually held EIGHT —
+        // the prose count is enforced by nothing (Rule A pins AllowList.Count against the DISCOVERED
+        // set, not against a number in a comment), so it drifts. Recounted at seven on 2026-09-01 when
+        // issue #858 converted the Compose create-on-save mint to ServerDerivedRecord. If you change
+        // this block, recount; a hand-maintained number in a comment is exactly the kind of census this
+        // guard was built to distrust.
         // ---------------------------------------------------------------------------------------------
         new SinkSite("Api/DocumentsEndpoints.cs", "UploadSmallAsync", 1,
             Provenance.ClientSupplied, "083 (row 4)",
@@ -400,15 +400,25 @@ public class SpeWriteSinkContainerProvenanceGuardTests
             + "explicit do-not-edit constraint on the three Compose files, so this stays declared rather "
             + "than fixed here."),
 
+        // ── CONVERTED by issue #858 (2026-09-01) — was ClientSupplied ("SaveComposeDocumentRequest."
+        // ── "ContainerId (client body)"), the entry this guard carried since the census was built. ──
         new SinkSite("Services/Compose/ComposeService.cs", "UploadSmallAsUserAsync", 1,
-            Provenance.ClientSupplied, "#858 (behind PR #806)",
-            "SaveComposeDocumentRequest.ContainerId (client body), via ResolveDriveIdAsync",
-            "Compose create-on-save Fork B MINTS a new drive item in a container the client names in the "
-            + "request body — the create case, where no document row exists yet to authorize against "
-            + "(ADR-049; ADR-003). The code is honest about it: it logs 'transient draft with no "
-            + "client-supplied ContainerId' and fails the step rather than guessing, and notes there is no "
-            + "server-side BU->container resolver on this path yet. Fix is to thread (entity, recordId) onto "
-            + "the request and resolve server-side; blocked on #806."),
+            Provenance.ServerDerivedRecord, "",
+            "ResolveCreateOnSaveContainerAsync: session-bound matter (ownership-checked, then authorized "
+            + "via CallerRecordAccessProbe + OperationAccessPolicy entity.associate_document) -> "
+            + "RecordContainerResolver.ResolveForRecordAsync; no matter -> ResolveForActingUserAsync "
+            + "(systemuser.azureactivedirectoryobjectid -> businessunit.sprk_containerid)",
+            "Compose create-on-save Fork B mints the drive item in a SERVER-derived container (issue #858): "
+            + "SaveComposeDocumentRequest.ContainerId is DELETED along with the wire field and the "
+            + "'containerId is required' 400 guard, so the request cannot name a container at all "
+            + "(ADR-049; ADR-003). The record identity the container derives from comes from SERVER-side "
+            + "session state and is authorized before use — #858's originally-proposed fix (thread "
+            + "(entity, recordId) onto the request) was rejected as relocating the defect, since a "
+            + "caller-named matter is the same primitive one hop earlier. Unresolvable container -> honest "
+            + "container-step failure (never a write); denial / unsupported host / unattributable caller "
+            + "-> typed 403/409. The acting-user leg is record-PLANE derivation (the caller's own "
+            + "systemuser row), filed ServerDerivedRecord like OBOEndpoints ordinal 2 rather than "
+            + "ServerDerivedConfig, because nothing about it is configuration."),
 
         // ── The ordinary Compose save replace MOVED, 2026-08-30 ────────────────────────────────────
         //
