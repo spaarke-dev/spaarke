@@ -8,6 +8,38 @@ Format follows [Keep a Changelog](https://keepachangelog.com/) conventions.
 
 ---
 
+###### 2026-09-01 — `unified-access-control-r2` (#858): `worktree-sync` Step 3 could never complete; merge-gating corrected across two skills
+
+**`worktree-sync` was broken, not merely imprecise.** Its Step 3 "Merge to Master" pushed directly to
+master (`git push origin origin/{branch}:master`, with a `temp-master:master` fallback). Both forms are
+rejected by the repository ruleset, so **Full Sync mode could not complete on this repo** — for months.
+Rewritten to a PR-based flow.
+
+- **`skills/worktree-sync/SKILL.md` Step 3 — rewritten.** PR-only merge: sync master in → verify → open/reuse
+  a PR → wait for the FULL check rollup → `gh pr merge`. Includes the explicit "do not restore either form"
+  note so the direct push does not come back.
+- **`skills/worktree-sync/SKILL.md` Step 4 — two fixes.** (1) Main-repo path resolution used **two**
+  `dirname`s on `--git-common-dir`; in a linked worktree that returns the main repo's `.git` directly, so two
+  resolved to `C:/code_files` and the step silently no-op'd. Now one, with a `test -d` verification.
+  (2) Added a dirty-tree branch distinguishing real uncommitted work (`diff --ignore-all-space` non-empty →
+  STOP, never reset over it) from mixed-EOL churn (`i/mixed` blob + `attr/text eol=crlf` → re-dirties after
+  BOTH `checkout --` and `stash push`; do not loop).
+- **`skills/merge-to-master/SKILL.md` Failure Modes — corrected + extended.** The protected-branch row still
+  named `…/branches/master/protection` as the detection fix; that endpoint returns **404 "Branch protection
+  has been disabled"** here (classic protection is off; **rulesets** govern), which reads as "unprotected"
+  and routes straight back into the rejected direct push. Now points at `…/rules/branches/master`. Step 3
+  itself was already correct. Added a row for the required-check trap below.
+- **Cross-cutting rule now stated in both skills — gate on the whole rollup, never the required check alone.**
+  `Router` is the ONLY required check on master, so it can pass while other jobs are red and `mergeable`
+  still reads `MERGEABLE`. Treat `mergeStateStatus: UNSTABLE` as STOP; only `CLEAN` proceeds. Near-miss the
+  same day: `Router` green while two jobs were red from a broken solution build.
+- **Two verification rules added to `worktree-sync`, both from measured failures.** (1) *Build the solution,
+  not a project* — test projects glob `tests/integration/Shared/**`, so a file that compiles where you looked
+  can break a project you never opened; a green single-project run is not evidence about the solution.
+  (2) *After merging, verify the SUBSTANCE on `origin/master`, not just commit reachability* — this is what
+  caught a user-facing string that outlived the mechanism it described, invisible to 11,757 tests and 28 CI
+  checks. Comments and message strings have no compiler and often no test.
+
 ###### 2026-09-01 — `email-communication-intelligence-r2`: document-profiling failure mode + the 3 AI execution models documented
 
 - **New architecture doc** [`docs/architecture/DOCUMENT-PROFILE-AND-AI-EXECUTION-MODELS.md`](../docs/architecture/DOCUMENT-PROFILE-AND-AI-EXECUTION-MODELS.md) —
