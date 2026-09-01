@@ -12,8 +12,8 @@
 
 | Field | Value |
 |---|---|
-| **Active work** | **Fixing the real Compose defects (#777 first).** 071 + 072 complete and merged. **FREEZE LIFTED** — UAC-r2 #887 merged `13a1f5a4a`. Client gate FIXED by #921 (`ec2154bf5`, `lfs: true`) — first green ever, **1 of the 3** greens needed before `continue-on-error` comes off. 090 STARTED, NOT closed. |
-| **Next Action** | **Owner directive 2026-09-01: finish EVERYTHING — 070, #777, and every other open Compose issue. Order is ours to choose.** #777 is 2 of 3 codes done (below). **Start next on 070 clusters 5a + 2a/2b** — same file as #776/#781, so do all three in ONE pass over `ComposeService.cs` rather than three separate passes over a 2,716-line file. Then the client-side items (#699, #696), then 090. Full plan + ordering rationale in §R1 below. |
+| **Active work** | **Closing out every remaining Compose defect in THIS project** (owner directive 2026-09-01: no deferrals, no hand-offs to other projects). 070 ✅ COMPLETE (all 9 clusters). #776 ✅ closed. #777 two-thirds done. #858 merged in from UAC-r2 and reconciled. **23 commits ready, 0 behind master, 0 uncommitted, everything green.** |
+| **Next Action** | **START ON #781** (save-identity self-heal — 3 pieces remain). Then the rest of the SERVER batch in one pass: #777's last code, drive provenance, #696, #698-contract-half. Then the CLIENT batch (#699 + the #858 client cutover) as one `npm` cycle. Then #853 close-out, 090 wrap-up, deploy. Full ordered list + rationale in §R1. |
 | **Branch** | `work/spaarkeai-compose-r8` @ **`f6887d46a`** — identical to `origin/master`. Nothing outstanding. |
 | **Merged today** | #806 `19bf65ec4` · #905 `369c3ea89` · #908 `330b9fc55` |
 | **Suite** | ALL GREEN — Compose **1,802/0** · BFF **11,614/0** · ArchTests **153/153** · Spe.Integration **409/0** · IntegrationTests **103/0** · client gate **104 suites / 1,336** · solution build **0 errors** · DI diff **empty** |
@@ -50,6 +50,30 @@ up to you… the critical focus is on getting everything, all tasks, all issues 
 Also binding, same message: **do not display warnings the user cannot act on.** Routine docx→TipTap format
 reconciliation is expected and must not be surfaced.
 
+### ⛔ THE ONE OPEN QUESTION FOR THE OWNER — #698 corpus fixture
+
+**Ask**: a Word document whose clauses number down to **letter + roman sub-items** — the
+`4.2(b)(iii)` shape. Section → `4.1`/`4.2` → `(a)`/`(b)` → `(i)`/`(ii)`/`(iii)`, as real firm
+documents number schedules and sub-clauses.
+
+**Why it cannot be synthesised**: `CitationResolver` resolves `"4.2(b)(iii)"` today against in-memory
+numbering chains plus a decoy, which proves the RESOLVER. It does not prove the **numbering engine**
+derives that label from real Word `numbering.xml` — the two-engine drift this project exists to
+prevent. A hand-built fixture would encode our own assumption about how Word numbers sub-items and
+then pass against itself. The corpus is real documents for exactly this reason.
+
+**Nearest existing fixture and why it does not cover it**: `multilevel-1-1-1.docx` is decimal
+(`1.1.1`); no corpus document uses letter/roman sub-numbering.
+
+**Where it goes**: `tests/fixtures/compose-corpus/` (Git-LFS — `*.docx filter=lfs`), suggested name
+`letter-roman-subitems.docx`. Any real document works; it can be redacted, and content does not
+matter — only the numbering scheme does.
+
+**The OTHER half of #698 needs nothing from the owner.** "Confirm the `CitationResolver` consumer
+contract" is answerable from the code: consumers exist and are live (`ComposeAnchorResolver.cs`
+server-side, `composeCitationResolver.ts` + `Spaarke.Communication.Components/logic/citations`
+client-side). Whether they want a `PublicContracts` wrapper is decided by reading them, not by asking.
+
 ### Done this session (committed, NOT pushed)
 
 | Commit | What |
@@ -57,27 +81,47 @@ reconciliation is expected and must not be surfaced.
 | `4f26c43fb` | **#777 `paragraph-style-flattened` — fixed.** `ComposeBlockMerge.InheritProperties` excluded `w:pStyle` wholesale; now scoped to model-owned styles via `IsModelDeterminedStyle` (Normal / Heading1-6 / ListParagraph). An UNMODELED style (firm body style, Quote, localized `Überschrift1`, numbered clause style) is carried onto an edited block. |
 | `5593b9d24` | **Pinned it.** 11 seam tests, `ComposeParagraphStyleInheritanceSeamTests`. **Negative control RUN**: reverting the fix fails 5 of 11 and passes 6 — the detector fires on the regression and stays quiet on what it protects. |
 | `81295b210` | **#777 `indentation-dropped` + `paragraph-style-flattened` warnings RETIRED** per the owner directive. Both premises were falsified (task 041 inheritance, then `4f26c43fb`). They fired per-paragraph whole-document at OPEN → "×84 / ×85" on an untouched 40-page contract. |
+| `7324ad82f` | **070 cluster 2b** → `ComposeRecordResolution.cs`. Mutation pass found a REAL hole: `TryFindDocumentByTransientKeyAsync` could match NOTHING and all 1,813 tests stayed green — the transient-key dedup guarding "the 8-duplicate defect". Closed with a KEY-SENSITIVE contract test. |
+| `d14a9cb78` | **070 cluster 2a** → `ComposeCreateOnSavePromoter.cs`. The four result-shaping helpers moved too (measured: `SaveAsync` calls them all, and its transient branch IS create-on-save). Also fixed an orphaned doc comment that had made `PromoteIfEphemeralAsync` read as "memory capture". |
+| `1f1a4662a` | **070 cluster 5a** → `ComposeProfileRetriggerGuard.cs`. Mutation seeded BEFORE the move **survived all 1,814**: the G10 storm guard had NO test in either direction. Closed with 6 seam tests; re-ran the same mutation → 3 red. |
+| `675a7fb3d` | 070 marked ✅ COMPLETE. `ComposeService.cs` **4,427 → 2,114**. No waiver to delete (ratchet retired 2026-08-20). |
+| `27c5b2f16` | **#776 CLOSED** — apply-template asserts the version it merged. Added `rebaseOnConflict` (default true; apply-template false) because the save path's retry would have clobbered anyway, making the If-Match decorative. Added the missing 409 endpoint mapping. |
+| `3810ce303` | **Merged #858** from UAC-r2 + reconciled: 3 conflicts in `ComposeService.cs`; ported cluster 2a onto THEIR post-#858 bodies; census entry recorded as MOVED-not-fixed and the dedup sink renumbered #2 → #1. |
 
-**Suite after all three: Compose 1813/0, build 0/0.**
+**Final state: build 0/0 · ArchTests 176/176 · full BFF suite 11,779 passed / 0 failed / 57 skipped ·
+23 commits ready · 0 behind master · 0 uncommitted.** `ComposeService.cs` is 2,429 lines post-merge.
 
-### The ordering, and why
+### The remaining work — ordered (2026-09-01)
 
-**Do 070 clusters 5a + 2a/2b, #776 and #781 as ONE pass**, not four. All four live in
-`ComposeService.cs` (2,716 lines). Four separate passes = four re-reads of the same large file and four
-merge-conflict surfaces. The freeze that separated them is gone.
+**Batch by TOOLCHAIN, not by issue number.** The server items share files already understood and one
+build/test cycle (~9 min for the full BFF suite); the client items share one `npm` cycle. Interleaving
+them doubles the cycles for no benefit. This is the same reasoning that made 070's clusters one pass.
 
-| # | Work | File | Notes |
+| # | Work | Where | Notes |
 |---|---|---|---|
-| 1 | **070 cluster 5a** | `ComposeService.cs` | 7 of 9 clusters already done. Delete the waiver when the file drops. |
-| 2 | **070 clusters 2a/2b** | `ComposeService.cs` | Last two. Then 070 → ✅. |
-| 3 | **#776** apply-template `If-Match` | `ComposeService.cs:372` `ApplyTemplateAsync`, blind replace @441 | T1 download → merge → blind T2 write; a sibling-tab Save in the window is clobbered at head. |
-| 4 | **#781** save-identity self-heal | `ComposeService.cs` + `ComposeEndpoints.cs` | 3 of 5 pieces remain (#2 self-heal on "found multiple", #3, #4b). |
-| 5 | **#777 `section-break-flattened`** | `ComposeContentModelProjector.cs:~315`, `ComposeBlockMerge` | The LAST of the three codes and the only one that is still REAL loss: interior `w:sectPr` on an EDITED paragraph. `SectionProperties` is excluded from inheritance because the renderer detaches/re-attaches the TRAILING sectPr — an interior one has no carrier. **Keep this warning** — it is real and actionable ("open in Word"). |
-| 6 | **#699** advisory comment anchors wrong clause | client `ComposeEditor.tsx :placeAdvisoryComments` | `placed=2` where 1 expected. **Highest user-harm item left** — a note can attach to the wrong clause. Recommended fix in the issue: anchor by WS-4 computed clause number via `CitationResolver`. |
-| 7 | **#696** unbounded request body | `ComposeEndpoints.cs` | `/api/compose/project` + `/upload` run synchronous OOXML projection with only Kestrel's ~28.6 MB implicit cap. Align to the 25 MB chat-attachment policy. |
-| 8 | **#698** CitationResolver contract | — | Confirm the pure-function contract is what the consumer wants; corpus fixture needs an owner-supplied doc with `(b)(iii)` sub-items. |
-| 9 | **#853** | — | Already FIXED by `220ddd18e` on master. Verify + **close the issue**. |
-| 10 | **090 wrap-up** | — | `/test-diet` → write-side fidelity doc refresh (§2 table: two codes retired, `paragraph-style-flattened` moves to §3 carried) → lessons-learned → `projects/INDEX.md` + root §17 + `.claude/CHANGELOG.md` → **paired deploy** (BFF + `sprk_spaarkeai` together, NFR-05, net10 tree). |
+| **1** | **#781** save-identity self-heal | `ComposeService.cs` / `ComposeCreateOnSavePromoter.cs` / `ComposeEndpoints.cs` | 3 of 5 pieces remain: **#2** self-heal when the promote upsert resolves a graphitemid to MULTIPLE rows (pick canonical by rule), **#3** retroactive dedup tool, **#4b** runtime key-health probe. Shipped already: graceful 409/503 mapping + `scripts/Verify-ComposeIdentityKey.ps1`. Partly served by the dedup test added in `7324ad82f`. |
+| **2** | **#777 `section-break-flattened`** | `ComposeContentModelProjector.cs` + `ComposeBlockMerge.cs` | The LAST of its three codes and the only one still REAL loss: an interior `w:sectPr` on an EDITED paragraph. `SectionProperties` is excluded from inheritance because the renderer detaches/re-attaches the TRAILING sectPr — an interior one has no carrier. **KEEP this warning** (unlike the two retired in `81295b210`): it is real AND actionable ("open in Word"). |
+| **3** | **Drive provenance** (was "their task 096" — **NOT deferred, ours**) | `ComposeService.cs` apply-template + save replace branch | Both take `driveId` from the CLIENT (route param / `request.DriveId`). Derive drive+item from the authorized `sprk_document` row instead — the shape already exists in the dedup path (`match.DriveId/SpeId`, already `ServerDerivedRecord`). Then the 3 `ComposeSaveStorageCoordinator` census entries + the apply-template caller note move honestly. OBO limits blast radius (latent-bypass, not the app-only live-hole class). |
+| **4** | **#696** unbounded request body | `ComposeEndpoints.cs` | `/api/compose/project` + `/upload` run synchronous OOXML projection under only Kestrel's implicit ~28.6 MB cap. Align to the 25 MB chat-attachment policy. |
+| **5** | **#698** contract half | `CitationResolver.cs` + its consumers | Read the live consumers and decide wrapper-or-not. **Fixture half is the owner ask above** — do the contract half regardless; do not block on the document. |
+| **6** | **#699** advisory comment anchors the WRONG clause | client `ComposeEditor.tsx :placeAdvisoryComments` | **Highest user-harm item left** — a review note can attach to the wrong clause. `placed=2` where 1 expected. Issue recommends anchoring by WS-4 computed clause number via `CitationResolver` where the model supplies a section ref. |
+| **7** | **#858 client cutover** | `ComposeWorkspace.tsx` | Remove `containerId` from the create-on-save body (`:2086`) + the dead pre-save `resolveContainer` leg. ⚠️ **UAC-r2 §1.4: do NOT bulk-delete `containerIdRef`** — six senders address OTHER endpoints (load/documentRef/shuttle) and some legitimately still take a container. Check each against its endpoint contract. Their plan: `C:\code_files\spaarke-wt-unified-access-control-r2\projects\unified-access-control-r2\notes\plan-858-closeout.md` §1. |
+| **8** | **#853** | — | Already FIXED by `220ddd18e` on master. Verify on master + **close the issue**. |
+| **9** | **090 wrap-up** | — | `/test-diet` → refresh `COMPOSE-WRITE-RESIDUAL-LOSS.md` (two codes retired; `paragraph-style-flattened` moves from §2-lost to §3-carried) → lessons-learned → `projects/INDEX.md` + root §17 + `.claude/CHANGELOG.md`. |
+| **10** | **Deploy** | — | BFF + `sprk_spaarkeai` **together, one window, same net10 tree** (NFR-05). Report publish size vs the 44.96 MB baseline. |
+
+### Standing rules that cost real time when forgotten
+
+1. **Assert a seeded mutation is IN THE FILE before spending a suite run.** Three separate false
+   results this session (`Copy-Item` timestamp defeating incremental build · a regex miss · an LF/CRLF
+   miss). Each read exactly like a clean survival, and a false survival makes you write a test for a
+   hole that does not exist.
+2. **A test that passes is not a test that works.** The first #776 test passed in BOTH worlds
+   (fix and naive-fix) because its mock returned the same eTag from every read. Always run the
+   negative control.
+3. **`dotnet test` is ~9 min for the full BFF suite, ~7 for the Compose filter.** Batch accordingly.
+4. **`.docx` fixtures are Git-LFS.** A checkout without `lfs: true` yields a 128-byte pointer that
+   `readFileSync` happily returns — this is what kept the client gate red for 40+ builds (#921).
 
 ### Small loose ends
 
