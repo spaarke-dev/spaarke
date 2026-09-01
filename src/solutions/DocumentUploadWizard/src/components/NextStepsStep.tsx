@@ -57,11 +57,15 @@ import type {
     IPlaybook,
     IPlaybookScopes,
 } from "@spaarke/ui-components/components/Playbook";
-import { FindSimilarDialog } from "@spaarke/ui-components/components/FindSimilarDialog";
+// #714 (2026-08-05) renamed FindSimilarDialog (iframe viewer) → FindSimilarViewerDialog under
+// components/FindSimilarViewer/. The shared-lib rename left this consumer's import stale, which
+// broke the whole solution build (present on master too). Same component, corrected path/name.
+import { FindSimilarViewerDialog } from "@spaarke/ui-components/components/FindSimilarViewer";
 
 import type { NextStepActionId, IUploadedFile } from "../types";
 import { DocumentEmailStep } from "./DocumentEmailStep";
-import type { IDocumentEmailStepProps } from "./DocumentEmailStep";
+import type { IDocumentEmailStepProps, IDocumentEmailComposeController } from "./DocumentEmailStep";
+import type { IWizardContext } from "@spaarke/ui-components/components/EmailComposer";
 import { DocumentPicker } from "./DocumentPicker";
 import type { UploadedDocumentInfo } from "./SummaryStep";
 import type { OrchestratorFileResult } from "../services/uploadOrchestrator";
@@ -98,6 +102,8 @@ export interface INextStepsStepProps {
     bffBaseUrl: string;
     /** Token provider for BFF API authentication. */
     bffTokenProvider: () => Promise<string>;
+    /** Registers the Send-Email composer controller so the wizard can guard Finish. */
+    onEmailControllerChange?: (controller: IDocumentEmailComposeController | null) => void;
 }
 
 // ---------------------------------------------------------------------------
@@ -744,8 +750,8 @@ const FindSimilarStepContent: React.FC<IFindSimilarStepContentProps> = ({
                 </div>
             )}
 
-            {/* Inline FindSimilarDialog overlay */}
-            <FindSimilarDialog
+            {/* Inline Find Similar viewer overlay (#714 rename: FindSimilarDialog → FindSimilarViewerDialog) */}
+            <FindSimilarViewerDialog
                 open={showViewer}
                 onClose={() => setShowViewer(false)}
                 url={viewerUrl}
@@ -760,6 +766,10 @@ const FindSimilarStepContent: React.FC<IFindSimilarStepContentProps> = ({
 
 interface IDynamicStepBuildOptions {
     emailStepProps: IDocumentEmailStepProps;
+    /** Uploaded documents shaped for the EmailComposer's `wizardContext` (attachments). */
+    wizardUploadedFiles?: IWizardContext["uploadedFiles"];
+    /** Registers the Send-Email composer controller (Finish guard). */
+    onEmailControllerChange?: (controller: IDocumentEmailComposeController | null) => void;
     successfulFiles?: OrchestratorFileResult[];
     containerId: string;
     uploadedDocumentMap?: Map<string, UploadedDocumentInfo>;
@@ -785,7 +795,13 @@ function buildDynamicStepConfig(
             canAdvance: () => true,
             isSkippable: true,
             renderContent: () => (
-                <DocumentEmailStep {...options.emailStepProps} />
+                <DocumentEmailStep
+                    {...options.emailStepProps}
+                    uploadedFiles={options.wizardUploadedFiles}
+                    authenticatedFetch={spaarkeAuthenticatedFetch}
+                    bffBaseUrl={options.bffBaseUrl}
+                    onControllerChange={options.onEmailControllerChange}
+                />
             ),
         };
     }
@@ -842,6 +858,7 @@ export const NextStepsStep: React.FC<INextStepsStepProps> = ({
     containerId,
     bffBaseUrl,
     bffTokenProvider,
+    onEmailControllerChange,
 }) => {
     const styles = useStyles();
 
@@ -889,6 +906,23 @@ export const NextStepsStep: React.FC<INextStepsStepProps> = ({
             });
     }, [uploadedDocumentMap, uploadedFiles]);
 
+    // Uploaded documents shaped for the EmailComposer's `wizardContext` (attachments on Send Email).
+    const wizardUploadedFiles = React.useMemo((): IWizardContext["uploadedFiles"] => {
+        if (!uploadedDocumentMap || !uploadedFiles) return [];
+        return uploadedFiles
+            .filter((f) => uploadedDocumentMap.has(f.id))
+            .map((f) => {
+                const info = uploadedDocumentMap.get(f.id)!;
+                return {
+                    documentId: info.documentId,
+                    driveItemId: info.itemId,
+                    fileName: f.name,
+                    mimeType: f.file?.type || "application/octet-stream",
+                    sizeBytes: f.sizeBytes ?? 0,
+                };
+            });
+    }, [uploadedDocumentMap, uploadedFiles]);
+
     // Sync dynamic steps with selected actions
     React.useEffect(() => {
         const prev = prevSelectedRef.current;
@@ -899,6 +933,8 @@ export const NextStepsStep: React.FC<INextStepsStepProps> = ({
                 wizardShellRef.current?.addDynamicStep(
                     buildDynamicStepConfig(actionId, {
                         emailStepProps,
+                        wizardUploadedFiles,
+                        onEmailControllerChange,
                         successfulFiles,
                         containerId,
                         uploadedDocumentMap,
@@ -919,7 +955,7 @@ export const NextStepsStep: React.FC<INextStepsStepProps> = ({
         }
 
         prevSelectedRef.current = next;
-    }, [selectedNextSteps, wizardShellRef, emailStepProps, successfulFiles, containerId, uploadedDocumentMap, bffBaseUrl, bffTokenProvider]);
+    }, [selectedNextSteps, wizardShellRef, emailStepProps, wizardUploadedFiles, onEmailControllerChange, successfulFiles, containerId, uploadedDocumentMap, bffBaseUrl, bffTokenProvider]);
 
     return (
         <div className={styles.root}>

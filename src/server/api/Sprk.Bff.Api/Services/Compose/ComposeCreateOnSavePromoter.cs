@@ -582,9 +582,12 @@ internal sealed class ComposeCreateOnSavePromoter
         return JobAwareCompletionStateProjector.Project(job, steps, observedAt);
     }
 
-    /// <summary>Builds the create-on-save result for a FAILED container step (missing client-supplied
-    /// container, or SPE creation returned null): no record, no version, aggregate Failed — never a
-    /// success. record/indexing project as non-terminal since they never ran.</summary>
+    /// <summary>Builds the create-on-save result for a FAILED container step: no record, no version,
+    /// aggregate Failed — never a success. record/indexing project as non-terminal since they never ran.
+    /// <para>Post-#858 the two reachable causes are (a) the server could not DERIVE a container — the
+    /// acting user's business unit has no <c>sprk_containerid</c> stamped, a legitimate configuration
+    /// state — or (b) SPE drive-item creation returned null. A caller-supplied container is NOT one of
+    /// them any more; <c>SaveComposeDocumentRequest.ContainerId</c> no longer exists.</para></summary>
     internal SaveComposeDocumentResult BuildContainerFailedResult(
         SaveComposeDocumentRequest request,
         DateTimeOffset observedAt)
@@ -596,7 +599,13 @@ internal sealed class ComposeCreateOnSavePromoter
             Started = true,
             Attempt = 1,
             MaxAttempts = 1,
-            Detail = "container step failed: no client-supplied ContainerId for a transient draft, or SPE drive-item creation failed",
+            // #858: this Detail reaches the client and is rendered. It used to say "no client-supplied
+            // ContainerId", which post-#858 is both impossible and unactionable — the caller cannot
+            // supply one, so telling them one is missing sends them looking for a control that no longer
+            // exists. Name the two causes that ARE reachable, and point at the one an admin can fix.
+            Detail = "container step failed: no storage container could be resolved for this draft "
+                + "(the acting user's business unit has no container configured), or SPE drive-item "
+                + "creation failed",
         };
 
         var completion = ProjectCreateOnSaveState(

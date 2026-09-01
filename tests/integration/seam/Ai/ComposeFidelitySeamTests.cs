@@ -627,6 +627,13 @@ public class ComposeFidelitySeamFixture : WebApplicationFactory<Program>
         IndexingMock.Reset();
         TemplateSourceMock.Reset();
         PdfIntakeSourceMock.Reset();
+
+        // Issue #858: create-on-save derives its container SERVER-SIDE — for the matter-less sessions
+        // these seams drive, from the acting user's business unit — so the derivation's two Dataverse
+        // reads must be arranged for the caller the fixture authenticates as. Re-applied after every
+        // Reset() (which erases it). Tests assert against TestActingUserBusinessUnit.ContainerId when
+        // they need the resolved container's value.
+        TestActingUserBusinessUnit.Arrange(DataverseMock);
     }
 
     protected override IHost CreateHost(IHostBuilder builder)

@@ -8,6 +8,12 @@ using Microsoft.Extensions.Hosting;
 using Microsoft.Xrm.Sdk;
 using Microsoft.Xrm.Sdk.Query;
 using Spaarke.Dataverse;
+using Spaarke.Core.Auth;
+using Sprk.Bff.Api.Api.Filters;
+using Sprk.Bff.Api.Infrastructure.Auth;
+using Sprk.Bff.Api.Infrastructure.Dataverse;
+using Sprk.Bff.Api.Infrastructure.Exceptions;
+using Sprk.Bff.Api.Infrastructure.ExternalAccess;
 using Sprk.Bff.Api.Infrastructure.Graph;
 using Sprk.Bff.Api.Models;
 using Sprk.Bff.Api.Models.Ai;
@@ -120,6 +126,18 @@ public class ComposeService : IComposeService
     private readonly IGenericEntityService _dataverse;
     private readonly IPostUploadIndexingEnqueuer _indexing;
     private readonly ILogger<ComposeService> _logger;
+
+    /// <summary>
+    /// Task 076/085's container resolver — the ONE place a storage container is chosen (issue #858).
+    /// </summary>
+    private readonly RecordContainerResolver _containerResolver;
+
+    /// <summary>
+    /// Per-record caller rights, OBO, fail-closed (issue #858). The create-on-save path had no
+    /// per-resource authorization at all: the Compose route group carries a bare
+    /// <c>RequireAuthorization()</c>, which asks only "are you anyone?".
+    /// </summary>
+    private readonly CallerRecordAccessProbe _accessProbe;
     // FR-C3 (email-communication-intelligence-r2): SPE content-dedup detector for the create-on-save
     // graduate-on-divergence hook. Optional + defaults null so the single bare test constructor
     // (ComposeServiceCreateOnSaveTests) + any legacy construction keep compiling; DI resolves the real
@@ -258,6 +276,8 @@ public class ComposeService : IComposeService
         IGenericEntityService dataverse,
         IPostUploadIndexingEnqueuer indexing,
         ILogger<ComposeService> logger,
+        RecordContainerResolver containerResolver,
+        CallerRecordAccessProbe accessProbe,
         IDistributedCache? cache = null,
         IDocumentProfileAi? documentProfileAi = null,
         IServiceScopeFactory? scopeFactory = null,
@@ -281,6 +301,8 @@ public class ComposeService : IComposeService
         _dataverse = dataverse;
         _indexing = indexing;
         _logger = logger;
+        _containerResolver = containerResolver ?? throw new ArgumentNullException(nameof(containerResolver));
+        _accessProbe = accessProbe ?? throw new ArgumentNullException(nameof(accessProbe));
         _documentProfileAi = documentProfileAi;
         _scopeFactory = scopeFactory;
         _paraIdPreParser = paraIdPreParser ?? new ParaIdPreParser();
@@ -1090,6 +1112,242 @@ public class ComposeService : IComposeService
             ? null
             : new ChatHostContext(EntityType: ParentEntityContext.EntityTypes.Matter, EntityId: matterId);
 
+    /// <summary>
+    /// The Dataverse LOGICAL name of the only entity a Compose session can be bound to.
+    /// </summary>
+    /// <remarks>
+    /// <see cref="BuildMatterHostContext"/> is the ONLY producer of a Compose session's
+    /// <see cref="ChatHostContext"/> and it hard-codes
+    /// <c>ParentEntityContext.EntityTypes.Matter</c> ("matter"), so the reachable set is exactly one
+    /// entity. That is why <see cref="ResolveCreateOnSaveContainerAsync"/> maps the short name to a
+    /// logical name with a single constant instead of a lookup table: the codebase already carries three
+    /// short/logical → entity-set maps and CLAUDE.md §11 puts a fourth over the line. A table of one row
+    /// for types that cannot occur would be that fourth map. A host context of any OTHER type is refused
+    /// rather than guessed, which is what makes a future project-bound session visible instead of silent.
+    /// </remarks>
+    private const string ComposeHostEntityLogicalName = "sprk_matter";
+
+    /// <summary>
+    /// Issue #858 — choose the storage container for a create-on-save draft, SERVER-SIDE, and authorize
+    /// the caller against the record that choice comes from.
+    /// </summary>
+    /// <remarks>
+    /// <para><b>What this replaces.</b> The transient-create branch used
+    /// <c>request.ContainerId</c> — an SPE container id supplied in the request BODY. The server wrote
+    /// bytes into whatever container the caller named, having authorized the caller against nothing at
+    /// all: the <c>/api/compose</c> group carries a bare <c>RequireAuthorization()</c>, which asks only
+    /// "are you anyone?". Same defect class as task 073 (deleted), 076 (converted) and 085 (Office
+    /// save).</para>
+    ///
+    /// <para><b>Why the session and not the request.</b> Threading the owning record through the SAVE
+    /// request — which is what issue #858 proposed — would have relocated the defect rather than removed
+    /// it: the caller would name a matter instead of a container and the server would resolve it. The
+    /// record identity is taken from SERVER-SIDE session state instead, and then authorized, so the
+    /// authorization key and the write destination are one value by construction.</para>
+    ///
+    /// <para><b>Session ownership is checked first</b>, mirroring <see cref="LoadAsync"/>'s issue #863
+    /// test. Without it, supplying someone else's <c>SessionId</c> would let a caller borrow their
+    /// matter binding — and the whole point of reading identity from the session is that the session is
+    /// trustworthy.</para>
+    ///
+    /// <para><b>No host context → the acting user's business unit</b>, server-derived (task 2a). A
+    /// matter-less draft is a DESIGNED flow, not an edge case: <c>composeEditor.registration.ts</c>
+    /// opens the workspace on its empty state when no document context is supplied. Refusing it would
+    /// break a shipped capability, and keeping <c>ContainerId</c> "just for that path" is option (B)
+    /// through the back door — the client decides whether a matter is bound, so "omit the matter" would
+    /// have become a supported route to naming your own container.</para>
+    ///
+    /// <para>🔴 <b>Residual, unchanged by this patch</b>: a draft that starts matter-less lands in a
+    /// business-unit container, and if it is LATER associated to a secure record the bytes are already
+    /// there — SPE permissions are additive-only. See
+    /// <c>notes/finding-secure-transition-container-migration.md</c>.</para>
+    /// </remarks>
+    /// <returns>
+    /// The resolved container id, or <see langword="null"/> when no container is CONFIGURED for the
+    /// caller / record.
+    /// </returns>
+    /// <remarks>
+    /// <para><b>Null vs throw is a deliberate split.</b> A missing container is a CONFIGURATION state
+    /// (a business unit with no <c>sprk_containerid</c>, which is common — three of six verified live),
+    /// and the caller turns it into <c>BuildContainerFailedResult</c> so the client keeps the per-step
+    /// projection it already renders. An authorization DENIAL, an unsupported host entity, or an
+    /// unattributable caller throw instead: those are answers about the caller, not about
+    /// configuration, and they must reach the client as 403/409 rather than as a save step that
+    /// "didn't work". Both outcomes write nothing.</para>
+    /// </remarks>
+    private async Task<string?> ResolveCreateOnSaveContainerAsync(
+        SaveComposeDocumentRequest request,
+        HttpContext httpContext,
+        CancellationToken cancellationToken)
+    {
+        var callerOid = CallerResolution.ResolveObjectId(httpContext.User);
+
+        if (string.IsNullOrWhiteSpace(callerOid))
+        {
+            // Mirrors LoadAsync: a caller with no Entra oid cannot be attributed, and an unattributable
+            // caller must not pick storage.
+            throw new UnauthorizedAccessException(
+                "Compose create-on-save: the caller carries no Entra oid, so the storage container cannot "
+                + "be attributed to a principal.");
+        }
+
+        // SessionId is OPTIONAL on the create-on-save path (task 110): a Browse/local-file first Save
+        // has no chat session and the endpoint forwards SessionId = "". The session store's id guard
+        // (TenantCache) throws ArgumentException("Id must be a non-empty string") on an empty id, which
+        // the save route maps to a 400 — i.e. an unconditional lookup here turned the DESIGNED
+        // session-less flow into a request rejection. Verified on the wire 2026-09-01 (8 seam/contract
+        // tests, e.g. CreateOnSave_WithEmptySessionId_Returns200AndPersistsDocumentWithoutRebind). No
+        // session means no host context, so the acting-user branch below is the correct — and only —
+        // derivation for it.
+        var session = string.IsNullOrWhiteSpace(request.SessionId)
+            ? null
+            : await _sessions
+                .GetSessionAsync(request.TenantId, request.SessionId, cancellationToken)
+                .ConfigureAwait(false);
+
+        // Issue #863's ownership test, applied here for the same reason: an unowned or foreign session is
+        // not a trustworthy source of the record identity this method is about to authorize against.
+        var sessionIsOwnedByCaller =
+            session is not null
+            && string.Equals(session.OwnerOid, callerOid, StringComparison.Ordinal);
+
+        var hostContext = sessionIsOwnedByCaller ? session!.HostContext : null;
+
+        if (session is not null && !sessionIsOwnedByCaller)
+        {
+            _logger.LogWarning(
+                "Compose create-on-save: session {SessionId} (tenant={TenantId}) is not owned by the "
+                + "caller — its host context is IGNORED for container selection, falling back to the "
+                + "caller's own business unit.",
+                request.SessionId, request.TenantId);
+        }
+
+        if (hostContext is null || string.IsNullOrWhiteSpace(hostContext.EntityId))
+        {
+            // Matter-less draft — the designed empty-state flow. Server-derived from the caller.
+            var actingUserDecision = await _containerResolver
+                .ResolveForActingUserAsync(callerOid, cancellationToken)
+                .ConfigureAwait(false);
+
+            if (string.IsNullOrWhiteSpace(actingUserDecision.ContainerId))
+            {
+                _logger.LogWarning(
+                    "Compose create-on-save: no matter bound to session {SessionId} and the acting user's "
+                    + "business unit has no container stamped — failing the '{Step}' step honestly.",
+                    request.SessionId, StepContainer);
+                return null;
+            }
+
+            _logger.LogInformation(
+                "Compose create-on-save: no matter bound to session {SessionId}; container derived from "
+                + "the acting user's business unit (outcome={Outcome}).",
+                request.SessionId, actingUserDecision.Outcome);
+
+            return actingUserDecision.ContainerId!;
+        }
+
+        // A host context of an unexpected type is refused, not guessed — see
+        // ComposeHostEntityLogicalName's remarks.
+        if (!string.Equals(
+                hostContext.EntityType, ParentEntityContext.EntityTypes.Matter, StringComparison.OrdinalIgnoreCase))
+        {
+            _logger.LogError(
+                "Compose create-on-save: session {SessionId} is bound to host entity type "
+                + "'{EntityType}', which this path cannot authorize. Refusing.",
+                request.SessionId, hostContext.EntityType);
+
+            throw new SdapProblemException(
+                code: "compose_host_entity_unsupported",
+                title: "Cannot determine where to save this document",
+                detail: $"This draft is bound to a '{hostContext.EntityType}', which is not a supported "
+                        + "save target. Refusing rather than choosing a storage location that has not been "
+                        + "authorized.",
+                statusCode: 409);
+        }
+
+        if (!Guid.TryParse(hostContext.EntityId, out var recordId) || recordId == Guid.Empty)
+        {
+            throw new SdapProblemException(
+                code: "compose_host_record_invalid",
+                title: "Cannot determine where to save this document",
+                detail: "The matter this draft is bound to could not be identified, so its storage "
+                        + "location cannot be resolved. Refusing rather than using a shared container.",
+                statusCode: 409);
+        }
+
+        // ── AUTHORIZE the record the container will come from ──────────────────────────────────────
+        // Without this the patch would only MOVE the primitive: the matter id reaches the session from
+        // LoadComposeDocumentRequest.MatterId, which is client-supplied and never authorized, so a caller
+        // could bind their own session to any matter and receive that matter's container.
+        if (!EntityAccessFilter.TryResolveEntitySet(ComposeHostEntityLogicalName, out var entitySet))
+        {
+            throw new SdapProblemException(
+                code: "compose_host_entity_unsupported",
+                title: "Cannot determine where to save this document",
+                detail: "This draft's owning record type cannot be authorized, so the save is refused.",
+                statusCode: 409);
+        }
+
+        var rights = await _accessProbe
+            .GetCallerRightsAsync(
+                TokenHelper.ExtractBearerTokenOrNull(httpContext), entitySet, recordId, cancellationToken)
+            .ConfigureAwait(false);
+
+        // The SAME operation key the Office save path uses for the same act — attaching a document to a
+        // record. One policy decides what that costs (Dataverse AppendTo); this adds no second vocabulary.
+        if (!OperationAccessPolicy.HasRequiredRights(rights, "entity.associate_document"))
+        {
+            _logger.LogWarning(
+                "Compose create-on-save DENIED: caller cannot attach documents to {EntitySet}({RecordId}). "
+                + "Holds {Rights}; requires {Required}. (session={SessionId})",
+                entitySet, recordId, rights,
+                OperationAccessPolicy.GetRequiredRights("entity.associate_document"), request.SessionId);
+
+            throw new SdapProblemException(
+                code: "compose_record_access_denied",
+                title: "You cannot save a document to this matter",
+                detail: "You do not have permission to file documents against this matter. Filing a "
+                        + "document to a record requires the \"Append To\" permission on it, and your "
+                        + "security role does not currently grant that. Ask an administrator to grant "
+                        + "Append To for this record type, or ask the matter's owner to share it with you.",
+                statusCode: 403);
+        }
+
+        var decision = await _containerResolver
+            .ResolveForRecordAsync(ComposeHostEntityLogicalName, recordId, cancellationToken)
+            .ConfigureAwait(false);
+
+        if (decision.Outcome == ContainerDecisionOutcome.FailClosed)
+        {
+            // The resolver already threw for this case; kept as a defensive branch so a future resolver
+            // change that RETURNS FailClosed cannot silently fall through to a shared container.
+            throw new SdapProblemException(
+                code: "secure_record_container_missing",
+                title: "Secure matter has no storage container",
+                detail: "This matter is marked secure but has no container of its own, so its content "
+                        + "cannot be stored in a shared container. Provision the matter's container first.",
+                statusCode: 409);
+        }
+
+        if (string.IsNullOrWhiteSpace(decision.ContainerId))
+        {
+            // Configuration, not authorization — the caller HAS access to the matter; the matter's
+            // business unit simply has no container. Structured step failure, same as above.
+            _logger.LogWarning(
+                "Compose create-on-save: matter {RecordId} resolved to no container (outcome={Outcome}) "
+                + "— failing the '{Step}' step honestly.",
+                recordId, decision.Outcome, StepContainer);
+            return null;
+        }
+
+        _logger.LogInformation(
+            "Compose create-on-save: container derived from the AUTHORIZED matter {RecordId} "
+            + "(outcome={Outcome}, session={SessionId}).",
+            recordId, decision.Outcome, request.SessionId);
+
+        return decision.ContainerId!;
+    }
+
     /// <inheritdoc />
     public async Task<SaveComposeDocumentResult> SaveAsync(
         SaveComposeDocumentRequest request,
@@ -1477,16 +1735,21 @@ public class ComposeService : IComposeService
         }
 
         _logger.LogInformation(
-            "Compose save: tenant={TenantId} drive={DriveId} driveItem={DocumentSpeId} container={ContainerId} transientCreate={IsTransientCreate} contentModel={HasContentModel} comments={CommentCount} session={SessionId} record={DocumentRecordId} size={SizeBytes}",
-            request.TenantId, request.DriveId, request.DocumentSpeId, request.ContainerId,
+            // container= dropped with SaveComposeDocumentRequest.ContainerId (issue #858). The container
+            // is no longer an INPUT to log; the chosen one is logged by ResolveCreateOnSaveContainerAsync
+            // at the point of the decision, alongside which record it was derived from.
+            "Compose save: tenant={TenantId} drive={DriveId} driveItem={DocumentSpeId} transientCreate={IsTransientCreate} contentModel={HasContentModel} comments={CommentCount} session={SessionId} record={DocumentRecordId} size={SizeBytes}",
+            request.TenantId, request.DriveId, request.DocumentSpeId,
             isTransientCreate, request.ContentModel is not null, request.Comments?.Count ?? 0,
             request.SessionId, request.DocumentRecordId, request.Content.Length);
 
         // ────────────────────────────────────────────────────────────────────────────
         // STEP 1 — container (FR-05, Fork A + Fork B).
-        //   Transient draft (no DocumentSpeId): the container id is CLIENT-SUPPLIED (Fork A —
-        //   no server-side BU→container resolver); create the SPE drive-item in it under OBO
-        //   (Fork B). A missing container FAILS the container step honestly — never a success.
+        //   Transient draft (no DocumentSpeId): the container id is SERVER-DERIVED by
+        //   ResolveCreateOnSaveContainerAsync (#858 — the caller cannot name it; the session-bound
+        //   matter is authorized first, else the acting user's BU supplies it); create the SPE
+        //   drive-item in it under OBO (Fork B). An UNRESOLVABLE container FAILS the container step
+        //   honestly — never a success, and never a guessed container.
         //   Existing item (DocumentSpeId present): replace the drive-item's content (R1 behavior).
         // ────────────────────────────────────────────────────────────────────────────
         string effectiveSpeId;
@@ -1540,20 +1803,41 @@ public class ComposeService : IComposeService
             }
             else
             {
-                if (string.IsNullOrWhiteSpace(request.ContainerId))
+                // ══ SERVER-DERIVED CONTAINER (issue #858) ═══════════════════════════════════════════
+                // Was: `request.ContainerId`, an SPE container id supplied in the request BODY, written
+                // into with no per-resource authorization of any kind. Now the container comes from the
+                // matter bound to this session — SERVER-SIDE state — and only after the caller has been
+                // authorized against that matter. The authorization key and the write destination are one
+                // value by construction.
+                //
+                // The old guard here logged "No server-side BU→container resolver (multi-container
+                // INV-7)" and failed the container step. BOTH halves of that were false by the time it
+                // was read: RecordContainerResolver exists (task 075/076) with nine consumers, and INV-7
+                // PRESCRIBES server-side resolution (record's own field → parent's BU → tenant default)
+                // rather than forbidding it — the citation was inverted, and this project corrected the
+                // same misreading in its own design.md. A matter-less draft is now resolved from the
+                // acting user's business unit, server-side, instead of being refused.
+                var resolvedContainerId = await ResolveCreateOnSaveContainerAsync(
+                    request, httpContext, cancellationToken).ConfigureAwait(false);
+
+                // Null means NO CONTAINER IS CONFIGURED (not "access denied" — that threw). Same honest
+                // container-step failure the old client-supplied-ContainerId guard produced, so the
+                // client's per-step projection is unchanged and nothing is ever written speculatively.
+                if (string.IsNullOrWhiteSpace(resolvedContainerId))
                 {
-                    _logger.LogWarning(
-                        "Compose create-on-save: transient draft with no client-supplied ContainerId — failing the '{Step}' step honestly (session={SessionId}). No server-side BU→container resolver (multi-container INV-7).",
-                        StepContainer, request.SessionId);
+                    // #858 (unified-access-control-r2): the "no client-supplied ContainerId" warning that
+                    // stood here is GONE with the premise — the client no longer supplies a container at
+                    // all, so there is nothing about the request to report. The honest step failure below
+                    // is the whole signal. Callee moved by task 070 cluster 2a.
                     return _createOnSave.BuildContainerFailedResult(request, observedAt);
                 }
 
-                // Fork B: mint the SPE drive-item in the supplied container under the user's OBO identity
+                // Fork B: mint the SPE drive-item in the RESOLVED container under the user's OBO identity
                 // (the Compose user holds the file ACL; MI does not — same constraint that deferred profile).
                 // First save of this transient key (or a deliberate Save-New fork): once created, the record
                 // is stamped with the transient key (promote step below) so the NEXT create-on-save with the
                 // same key takes the dedup replace path above — never a double mint.
-                var driveId = await _spe.ResolveDriveIdAsync(request.ContainerId, cancellationToken).ConfigureAwait(false);
+                var driveId = await _spe.ResolveDriveIdAsync(resolvedContainerId, cancellationToken).ConfigureAwait(false);
                 using var createStream = new MemoryStream(contentToPersist, writable: false);
 
                 // The value handed to the sink is named as what it IS — the whole upload path — and is
@@ -1572,7 +1856,7 @@ public class ComposeService : IComposeService
                 {
                     _logger.LogError(
                         "Compose create-on-save: SPE drive-item creation returned null/empty for container={ContainerId} — failing the '{Step}' step (session={SessionId}).",
-                        request.ContainerId, StepContainer, request.SessionId);
+                        resolvedContainerId, StepContainer, request.SessionId);
                     return _createOnSave.BuildContainerFailedResult(request, observedAt);
                 }
 
