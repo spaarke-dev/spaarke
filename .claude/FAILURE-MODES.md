@@ -2,7 +2,7 @@
 
 > **Purpose**: Cross-cutting failure patterns that don't belong inside any single skill's Gotchas section. The agent should mentally cross-reference this catalog before executing a skill; sessions that hit a NEW failure type should append an entry here.
 
-> **Last Updated**: 2026-07-09 (added AP-6: braced GUIDs in `@odata.bind` → use `cleanGuid`)
+> **Last Updated**: 2026-09-01 (added AP-10: single-level JSON-aware renderer over a double-nested, re-parsed config → document profiling stuck at Failed)
 
 ---
 
@@ -29,6 +29,7 @@ The distinction matters because the fix is different. Anti-patterns require *unl
 - [AP-7: Converting a silent fallback into fail-fast, verified with targeted tests only](#ap-7-converting-a-silent-fallback-into-fail-fast-verified-with-targeted-tests-only)
 - [AP-8: A green suite treated as the END of verification rather than the start of it](#ap-8-a-green-suite-treated-as-the-end-of-verification-rather-than-the-start-of-it)
 - [AP-9: Amending a failing test to match the source, without checking the source against the vendor contract](#ap-9-amending-a-failing-test-to-match-the-source)
+- [AP-10: A JSON-aware renderer that escapes one nesting level, over a config that is re-parsed at a deeper level](#ap-10-a-json-aware-renderer-that-escapes-one-nesting-level-over-a-config-re-parsed-deeper)
 
 ### Gotchas
 - [G-1: Settings-file schema malformation silently disables permission rules + hooks](#g-1-settings-file-schema-malformation-silently-disables-permission-rules--hooks)
@@ -801,6 +802,25 @@ Every click threw `TypeError: Cannot read properties of undefined (reading '_cli
 **Fix**: call directly on the namespace — `await xrm.Utility.lookupObjects({ ... })`. Never `const f = xrm.X.y`. Where a no-throw contract is genuinely required, `console.warn` the error; never discard it.
 
 **Prevention — the part that generalizes**: the unit suite passed throughout, because it mocked `lookupObjects` as a plain `jest.fn()`, which needs no receiver. **The mock was strictly more permissive than the thing it replaced, so the one property that mattered went untested.** When mocking a platform API, replicate its *requirements*, not just its signature — here, a `this`-sensitive mock that throws when the receiver is missing. Verified by reverting the fix: 3 of 19 tests fail on the old code, all 19 pass on the new.
+
+---
+
+### AP-10: A JSON-aware renderer that escapes one nesting level, over a config re-parsed deeper
+
+> **Date**: 2026-09-01 · **Class**: Anti-pattern · **Surfaced by**: `email-communication-intelligence-r2` (Pillar B Outlook add-in UAT — every saved document stuck at `sprk_filesummarystatus = Failed`)
+> **Full write-up**: [`docs/architecture/DOCUMENT-PROFILE-AND-AI-EXECUTION-MODELS.md`](../docs/architecture/DOCUMENT-PROFILE-AND-AI-EXECUTION-MODELS.md) Part 4. GitHub #919.
+
+**What happened**: The "Document Profile" **playbook**'s Update Record node writes the AI summary back to `sprk_document`. Its stored `sprk_configjson` is the Playbook-Builder **wrapper format** — an outer JSON object whose `configJson` property is the *real* config encoded as a **JSON string** (`{"__canvasNodeId":…,"configJson":"{\"fieldMappings\":[{\"value\":\"{{output_aiAnalysis…}}\"}]}"}`). The Layer-1 template renderer (`PlaybookOrchestrationService.RenderConfigJsonStructurally`) is explicitly JSON-aware — it parses the config as a tree so that substituted values land in valid JSON. But it parses only the **outer** wrapper; the nested `configJson` is just a *string* to it. It flat-renders the multi-line AI summary into that string (raw `0x0A` newlines) and escapes them at the **outer** level only, so the outer stays valid. Then `UpdateRecordNodeExecutor.ParseConfig` unwraps via `GetString()` (decodes back to a raw newline) and **re-parses the nested string** → `JsonException: '0x0A' is invalid within a JSON string. Path: $.fieldMappings[0].value` → node fails → playbook stops → `Failed`.
+
+**Root cause**: The renderer's JSON-awareness is **single-level**, but the data is **double-nested** (JSON-inside-a-JSON-string) and gets **re-parsed at the inner level** by a different component. Escaping at the level you parsed is necessary but not sufficient when a downstream consumer re-parses a deeper level you treated as opaque text. The two components each look correct in isolation; the defect is in the seam between them.
+
+**Two wrong beliefs this corrected**:
+1. *"The renderer is JSON-aware, so it can't emit invalid JSON."* — It can't emit an invalid **outer** document, but it says nothing about the validity of a **nested** JSON string it never descended into.
+2. *"It falls back to flat substitution at `PlaybookOrchestrationService.cs:2284`."* — The prior checkpoint note asserted this confidently. **Wrong**: the outer wrapper *is* valid JSON, so the structural path runs and the `:2284` fallback never fires. A fix aimed at `:2284` would have missed entirely. The precise site was settled by pulling the **live** node config from Dataverse and matching `fieldMappings[0] = sprk_filesummary` to the observed `$.fieldMappings[0].value` error path — not by reading the renderer and reasoning forward.
+
+**Fix (options, see the doc)**: make Layer 1 **wrapper-aware** (recurse into a nested string that is itself JSON-containing-a-template, so newlines escape at the nested level) — fixes Update Record / Create Task / Create Notification / Send Email at once; or converge the app-only path onto the direct-Action spine that has no config re-parse. **Not yet applied.**
+
+**Prevention**: (a) When two components share a serialized payload across a boundary, ask *at how many levels does someone parse this?* and escape at each. (b) A **stored-config** test passing is not evidence the **rendered** config is valid — the bug lives only after substitution; test the render, or test end-to-end. (c) The same capability (document profiling) exists on two spines here — a node **playbook** and a direct **Action** — and only one had the bug; when a feature "works in one entry point and fails in another", suspect **two implementations**, not one flaky one.
 
 **Known aliasing sites already carrying warning comments** (do not "simplify"): `useRecordHeaderToolbarActions.ts` (navigateTo), `RegardingResolverApp.tsx:1483`, `DailyBriefingApp.tsx:566`.
 
