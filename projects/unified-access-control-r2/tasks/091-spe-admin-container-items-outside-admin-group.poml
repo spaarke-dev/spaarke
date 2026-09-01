@@ -1,0 +1,193 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="091" project="unified-access-control-r2">
+  <metadata>
+    <title>ContainerItemEndpoints — nine /api/spe routes are registered on the root app, outside the admin-role and tenant-scope filters</title>
+    <phase>0c Secure Documents — Wave 2 (container-selection sweep follow-on)</phase>
+    <status>completed</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Cross-tenant disclosure AND destruction surface on shipped routes: download, preview, sharing-link mint, delete, upload, folder-create — reachable by any authenticated caller.</rigor-reason>
+    <model-tier>opus</model-tier>
+    <model-tier-reason>The fix is a route-registration decision with a shipped SPE Admin client on the other side of it; getting the group semantics wrong either leaves the hole open or breaks the admin app.</model-tier-reason>
+    <effort>high</effort>
+    <effort-reason>The change itself may be small; establishing that it neither under- nor over-shoots requires reading the admin client and both filters.</effort-reason>
+    <parallel-group>wave2</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Touches `Infrastructure/DI/EndpointMappingExtensions.cs`, the BFF's highest-conflict registration file.</parallel-reason>
+    <deps>083</deps>
+    <tags>bff-api, api, auth, security, spe-admin</tags>
+    <estimated-effort>4-8 hours</estimated-effort>
+    <origin>Row 10 of task 083's container-selection census. SEVERITY REVISED UPWARD 2026-08-30 on re-verification: the census recorded "three routes with a missing admin gate"; there are NINE, and what they miss is both the admin-role filter and the tenant-scope filter.</origin>
+  </metadata>
+
+  <prompt>Nine routes under the `/api/spe/containers/...` prefix are registered on the **root app**, not on the `/api/spe` group that carries the SPE-admin role filter and the tenant-scope filter. They therefore look like admin routes, sit at admin URLs, and are reachable by any authenticated caller — with `configId` as a bearer capability across tenants.</prompt>
+
+  <role>SPAARKE BFF security engineer.</role>
+
+  <goal>Every `/api/spe/*` route is subject to the same two authorization layers. No route inherits the admin URL prefix without the admin gate.</goal>
+
+  <context>
+    <background>VERIFIED AT CURRENT HEAD, 2026-08-30. Read this section as evidence, then re-verify — do not trust the line numbers alone.
+
+`Api/SpeAdminEndpoints.cs:27-35` builds the admin group with THREE things:
+```
+app.MapGroup("/api/spe")
+   .RequireAuthorization()
+   .AddSpeAdminAuthorizationFilter()   // layer 1: is the caller an SPE admin at all?
+   .AddSpeAdminTenantScopeFilter()     // layer 2: WHICH customers' data may that admin reach?
+```
+Eighteen child endpoint groups are registered **on that group** (`:39-58`) and inherit both filters.
+
+`Infrastructure/DI/EndpointMappingExtensions.cs:380` registers `app.MapContainerItemEndpoints()` on the **root app** instead — the comment at `:377-379` explains why ("ContainerItemEndpoints maps absolute paths, not relative to the /api/spe group") and then states the consequence incompletely: *"Inherits auth via RequireAuthorization()"*. It inherits **authentication**. It does not inherit either authorization layer.
+
+The nine routes, each with bare `.RequireAuthorization()` and a client-supplied `configId` query parameter (`Api/SpeAdmin/ContainerItemEndpoints.cs`):
+
+| Line | Route | Effect if reachable |
+|---|---|---|
+| 36 | `GET  /api/spe/containers/{id}/items` | enumerate any container |
+| 51 | `GET  …/items/{itemId}/versions` | version history |
+| 66 | `GET  …/items/{itemId}/thumbnails` | content preview |
+| 81 | `POST …/items/{itemId}/share` | **mints a sharing link** |
+| 97 | `GET  …/items/{itemId}/content` | **downloads the file** |
+| 112 | `GET  …/items/{itemId}/preview` | renders the file |
+| 127 | `DELETE …/items/{itemId}` | **destroys the file** |
+| 142 | `POST …/containers/{id}/folders` | creates a folder |
+| 160 | `POST …/items/upload` | **writes bytes** |
+
+`AddSpeAdminAuthorizationFilter` requires the `Admin` or `SystemAdmin` **app role** on the BFF registration (`Api/Filters/SpeAdminAuthorizationFilter.cs:103-106`). No `DefaultPolicy`/`FallbackPolicy` override exists — `AuthorizationModule.cs:231` adds only named policies — so bare `.RequireAuthorization()` means *authenticated*, nothing more.
+
+THE PART WORTH READING TWICE. `SpeAdminTenantScopeFilter`'s own doc comment (`:36-40`) says:
+
+> *"Fifteen endpoint files accept `configId`. A check written into each is a check that will be missed on the sixteenth — and the failure mode is silent cross-customer disclosure, which no test would notice unless it was written to look for it. **One filter on the group cannot be forgotten.**"*
+
+`ContainerItemEndpoints` is the sixteenth file. The filter that "cannot be forgotten" was not forgotten in handler code — it was bypassed by **route registration**, a channel the comment did not anticipate. So `configId` remains exactly the bearer capability that filter was written to abolish, on the nine routes above.
+
+Corroborating signal: `SpeAdminEndpoints.cs:48` carries `// group.MapItemEndpoints();` commented out — someone intended this surface to live on the group.
+
+WHY FOUR PRIOR RECOUNTS MISSED IT. `RouteAuthorizationGuardTests` governs a hand-maintained census of 12 files and `ContainerItemEndpoints.cs` is not among them. Task 083's inverted guard found the file by scanning for SPE write sinks — which is why it surfaced only the three *write* routes (`upload`, `delete`, `folders`). The six read routes were invisible to a write-sink scan and were found only by reading the registration.
+
+SCOPE NOTE. The container-selection defect (client names the container) is real here but is the SMALLER half. The primary defect is the missing admin gate plus the missing tenant scope. Fix the gate first; container provenance follows from it.</background>
+    <relevant-files>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Infrastructure/DI/EndpointMappingExtensions.cs</file>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Api/SpeAdmin/ContainerItemEndpoints.cs</file>
+      <file role="reference">src/server/api/Sprk.Bff.Api/Api/SpeAdminEndpoints.cs</file>
+      <file role="reference">src/server/api/Sprk.Bff.Api/Api/Filters/SpeAdminAuthorizationFilter.cs</file>
+      <file role="reference">src/server/api/Sprk.Bff.Api/Api/Filters/SpeAdminTenantScopeFilter.cs</file>
+      <file role="reference">tests/Spaarke.ArchTests/RouteAuthorizationGuardTests.cs</file>
+      <file role="reference">tests/Spaarke.ArchTests/SpeWriteSinkContainerProvenanceGuardTests.cs</file>
+      <file role="reference">projects/unified-access-control-r2/notes/task-083-sink-inventory.md</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-008">The fix is route registration + endpoint filters. Do NOT add per-handler checks — that is precisely the shape `SpeAdminTenantScopeFilter`'s doc comment argues against, and it is how this file drifted in the first place.</constraint>
+    <constraint source="project">Prefer moving the registration onto the existing `/api/spe` group over re-attaching the two filters at nine call sites. Nine attachments is nine chances to miss the tenth route.</constraint>
+    <constraint source="project">If the absolute-path style genuinely blocks group registration, say so with evidence and attach BOTH filters — never just the role filter. The tenant scope is the half that stops cross-customer reach.</constraint>
+    <constraint source="ADR-003">Unresolvable `configId`, or one outside the caller's scope, is refused. Match the existing 404-not-403 convention (`SpeAdminTenantScopeFilter.cs:43-45`) — "exists but not yours" confirms another customer exists.</constraint>
+    <constraint source="project">Inventory the SPE Admin client's callers before tightening. A refusal that breaks the admin app gets reverted, and the revert reopens all nine routes.</constraint>
+    <constraint source="project">Add these routes to `RouteAuthorizationGuardTests`' census as part of the fix. The census missing this file is the reason the hole survived four recounts; closing the hole without closing the census leaves the next one just as invisible.</constraint>
+    <constraint source="build-plan">Do not solve any part of this by granting SPE container permissions. `GrantMembershipAsync` stays at zero callers.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/unified-access-control-r2/notes/SESSION-STATUS-2026-08-28.md</file>
+      <file>projects/unified-access-control-r2/SECURE-DOCUMENTS-BUILD-PLAN.md</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+    </files>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="0">Re-verify the registration at current HEAD: that `MapContainerItemEndpoints` is still called on the root app, that the group still carries both filters, and that no fallback policy has been introduced. All three are load-bearing for the severity claim — if any has changed, re-scope before proceeding.</step>
+    <step order="1">Prove reachability empirically rather than by reading: a test caller holding NO admin app role should today reach at least one of the nine routes. If it does not, find what actually stops it and correct this POML before changing anything.</step>
+    <step order="2">Inventory the SPE Admin client callers of all nine routes (grep evidence), including how `configId` is obtained client-side.</step>
+    <step order="3">Move the registration onto the `/api/spe` group (converting absolute paths to group-relative), or — with evidence that this is impossible — attach both filters explicitly. Prefer the former.</step>
+    <step order="4">Tests: a non-admin authenticated caller is refused on every one of the nine routes (parameterized over the route table, so route number ten inherits the test); an admin naming another tenant's `configId` gets 404; the shipped admin client still works.</step>
+    <step order="5">Add the nine routes to `RouteAuthorizationGuardTests`' census. Perturbation-check: remove the gate and confirm the guard reddens naming the route.</step>
+    <step order="6">Reclassify the three write sinks in `SpeWriteSinkContainerProvenanceGuardTests` and correct the corresponding rows in `notes/task-083-sink-inventory.md`.</step>
+    <step order="7">Build, tests, publish size vs the 44.96 MB baseline (ceiling 60), CVE scan. Placement Justification per CLAUDE.md §10.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If the SPE Admin client is used by anyone who does NOT hold the `Admin`/`SystemAdmin` app role, STOP. Gating then breaks a shipped surface, and the revert reopens all nine routes. Surface the role-assignment question instead of choosing a weaker gate.</trigger>
+    <trigger>If moving to the group changes any route's URL, STOP and surface it — a silently renamed admin route is a broken client, and the fix will be blamed for it.</trigger>
+  </escalation>
+
+  <justification>
+    <existing>Both filters already exist and are already applied to eighteen sibling endpoint groups on `/api/spe`.</existing>
+    <extension>This is a registration correction — moving nine routes under gates that already exist. No new filter, no new policy, no new component.</extension>
+    <cost-of-doing-nothing>Any authenticated caller — no admin role required — can enumerate, download, preview, mint a sharing link for, and DELETE items in any SPE container they can name, and upload bytes into it, across tenant boundaries, because `configId` arrives from the client and nothing checks whose it is. The sharing-link route makes the disclosure durable and reshareable; the delete route makes it destructive. In SPE these are additive-only permissions: content exposed in a shared container cannot be un-exposed after the fact.</cost-of-doing-nothing>
+  </justification>
+
+  <outputs>
+    <output type="code">The nine container-item routes under the admin-role and tenant-scope filters</output>
+    <output type="test">tests/ — parameterized non-admin refusal across the whole route table; cross-tenant configId 404</output>
+    <output type="test">tests/Spaarke.ArchTests/RouteAuthorizationGuardTests.cs — census extended to this file</output>
+    <output type="doc">projects/unified-access-control-r2/notes/task-091-spe-admin-container-items.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion>A caller holding no admin app role is refused on ALL NINE routes — proven by a test parameterized over the route table, not nine hand-written cases.</criterion>
+    <criterion>An admin naming a `configId` outside their tenant scope receives 404, matching the existing convention.</criterion>
+    <criterion>The shipped SPE Admin client still functions (caller inventory evidenced by grep).</criterion>
+    <criterion>`RouteAuthorizationGuardTests`' census includes `ContainerItemEndpoints.cs`, and removing the gate reddens it naming the route (perturbation-checked).</criterion>
+    <criterion>No route URL changed, or every change is enumerated and the client updated in the same PR.</criterion>
+    <criterion>The three write sinks are reclassified in the provenance guard and the inventory rows corrected.</criterion>
+    <criterion>Build 0 warnings; publish size reported against the 44.96 MB baseline; no new HIGH CVE.</criterion>
+  </acceptance-criteria>
+
+  <notes>COMPLETED 2026-08-30. Full write-up: notes/task-091-spe-admin-container-items.md.
+
+Fixed by moving all nine routes onto the `/api/spe` group (group-relative paths; URLs byte-identical,
+proven by the tests returning 403 rather than 404). Per-route `.RequireAuthorization()` removed as
+inherited. `MapContainerItemEndpoints` now takes `RouteGroupBuilder` instead of `IEndpointRouteBuilder`,
+which makes the original root-app registration a COMPILE ERROR rather than a silent hole.
+
+EMPIRICALLY PROVEN BEFORE THE FIX (POML step 1). The new HTTP-level suite, written to assert the correct
+behaviour and run first: 9 failed / 11 passed. The nine answered **500/400 from inside the handler** —
+never 403 — while the control `/api/spe/containertypes` DID 403 for the same caller. Authorization never
+ran; the handler did. Neither of the two obvious instruments could have shown this: the sibling filter
+test invokes the filter directly (the filter was never attached), and endpoint reflection cannot see
+filters at all (`AddEndpointFilter` contributes nothing to `EndpointBuilder.Metadata`).
+
+Perturbations, both bit: (A) remove the group's role filter → 10 fail (nine + control). (B) attempt the
+root-app registration → compile error.
+
+ESCALATION TRIGGER DID NOT FIRE. `SpeAdminApp` is the only consumer and already makes 64 `/spe/*` calls
+against group-gated routes, so its users must already hold `Admin`/`SystemAdmin`. Gating adds no new
+role requirement.
+
+TWO THINGS THIS TASK DID NOT FIX, both recorded rather than silently absorbed:
+
+(1) Pre-existing client/server route mismatches in `speApiClient.ts` — `createSharingLink` posts to
+    `…/sharing` while the server serves `/share`, and `get` calls `GET …/items/{itemId}` which has no
+    server route. Both 404, both dead since written, both unrelated to this change. They want a task.
+
+(2) An OPEN MODELLING QUESTION. The three write sinks stay `ClientSupplied`: this task closed the
+    authorization half but did not change provenance — an admin still names the container, because that
+    IS the function of an admin tool, and record-less containers legitimately exist (078). The guard
+    documents `ClientSupplied` as "a work list that shrinks to zero, never exemptions", which may be
+    unreachable for an administrative surface. Owner must choose: accept as client-supplied-by-design,
+    or add an "administrative, role + tenant scoped" provenance. 091 deliberately did NOT choose.
+
+CENSUS: added to `RouteAuthorizationGuardTests` under a NEW `Scope.GroupGated` + Rule E
+(`GroupGatedFilesRegisterNoAbsolutePaths`). A third scope was necessary, not tidy — `RouteLevelGate`
+would make Rule A demand a per-route filter that correctly is not there, and a guard that flags the code
+it protects gets deleted rather than obeyed (tests/CLAUDE.md).
+
+⚠️ THE POML'S OWN COUNT WAS WRONG AND THE REASON MATTERS. This task was filed after revising 083's "three
+routes" upward to nine. 083 said three because its instrument scanned for WRITE sinks; the six read
+routes — including file download and sharing-link minting — were invisible to it. A tool finds what it
+was built to look for, and the count it returns is not the size of the problem.
+
+Verification: build 0 warnings; new suite 29/29; full BFF suite 10,896 passed / 0 failed / 72 skipped;
+ArchTests 138 passed / 6 failed == clean-tree baseline proven by `git stash` (137/6, +1 Rule E); publish
+45.12 MB compressed incl. PDBs (0.00 delta, ceiling 60); no vulnerable packages; none added.
+
+---
+
+Row 10 of the task 083 census, at revised severity.
+
+WHAT THE CENSUS GOT WRONG, recorded because the correction is the lesson: it described "three routes (`upload`, `delete`, `folders`) whose primary defect is a missing admin gate." Three was the count of SPE **write sinks** in the file, because the instrument that found it was a write-sink scanner. The file has **nine** routes and the six read routes — including file download and sharing-link creation — were invisible to that instrument. A tool finds what it was built to look for; the count it returns is not the size of the problem.
+
+The second lesson is in `SpeAdminTenantScopeFilter`'s own comment. It correctly predicted that a per-handler check would be missed on the sixteenth file, and correctly concluded that a group filter "cannot be forgotten". Both halves were right. The hole opened through a third channel neither half covered: a file that never joined the group. A control that cannot be forgotten can still be **bypassed by not being applied**.</notes>
+</task>

@@ -1,20 +1,467 @@
 # Current Task State — `unified-access-control-r2`
 
-> **Last Updated**: 2026-08-27 (by `context-handoff`) — **MERGED TO MASTER. Next session runs task 083
-> on FABLE.**
-> **Recovery**: read "Quick Recovery", then §083, then §076. The merge-by-branch rule is history (all
-> branches in) but keep it for the next parallel wave.
+> **Last Updated**: 2026-08-31 — **ACTIVE TASK: 076, resuming at step 4.** Two pieces landed today
+> (denial-message fix `848b56798` pushed; `ResolveForActingUserAsync` `279ca8022` committed, NOT pushed).
+> **Recovery**: read "Quick Recovery" then §076-RESUME below.
+
+---
+
+## Quick Recovery (READ THIS FIRST) — 2026-08-31
+
+| Field | Value |
+|---|---|
+| **Task** | **076** — record-keyed upload contract. `<rigor>FULL</rigor>`, tier `opus`, effort `high`, steps `directional`, `parallel-safe: false` |
+| **Step** | **4 of 11** (client cutover). Steps 0–3 + the >4 MB server half are DONE; 5–11 remain |
+| **Status** | in-progress |
+| **Next Action** | 🔴 **READ [`notes/plan-upload-path-decomposition-2026-08-31.md`](notes/plan-upload-path-decomposition-2026-08-31.md) FIRST — it is the work contract and holds four facts you must not re-derive.** Then: file tasks **093/094/095** per its §3, and execute **076** (client cutover U1/U2/U3 → `(entity, recordId)`; **250 MB** threshold correction; record-less route for the Skip path; classify 12 suppliers; delete W1/W2; delete the legacy route LAST) |
+| **Conflict-check** | ✅ CLEAN 2026-08-31 — 15 open PRs, only #887 is this branch, #894 is CI-only, 13 dependabot. **No overlap on 076's files** |
+| **Behind master** | **10 commits** — sync before the next merge |
+
+### 🔴 §076-RESUME — what is ACTUALLY landed vs. what the POML implies
+
+**Verified first-hand 2026-08-31; do not trust the POML's step ordering here.** Step 2 was implemented by
+**ADDING** the record-keyed routes *alongside* the legacy one, not by converting it.
+`Api/OBOEndpoints.cs`'s own header documents **three routes, two contracts**:
+
+| Route | Line | State |
+|---|---|---|
+| `PUT /api/obo/containers/{id}/files/{*path}` | :75 | 🔴 **LEGACY, container-keyed, UNGATED — STILL LIVE** |
+| `PUT /api/obo/records/{entity}/{recordId}/files/{*path}` | :145 | ✅ TARGET, record-keyed, GATED |
+| `POST /api/obo/records/{entity}/{recordId}/upload-session` | :251 | ✅ TARGET, record-keyed, GATED (the >4 MB fix) |
+
+**Consequence for sequencing**: acceptance criterion *"no upload route accepts a caller-named container"*
+is **NOT met** — the legacy route still does. Deleting it belongs **after** the client cutover, so the
+order is: step 4 (cut over) → 5 (classify) → 6 (delete W1/W2) → **delete the legacy route** → 7 → 8 → 9–11.
+Deleting it first would 404 every shipped client.
+
+**Step 3 left a gap inside step 4**: the chunked *client* was deleted, but its replacement was never
+wired. `SdapApiClient.uploadFile` now **throws** `UploadOperation.LARGE_FILE_UNSUPPORTED` for ≥4 MB.
+So step 4 is not three signature changes — it is three signature changes **plus** wiring the
+upload-session + direct-to-Graph chunking the server half already supports.
+
+### ✅ Landed 2026-08-31 (this session, before resuming 076)
+
+| Commit | What |
+|---|---|
+| `848b56798` **pushed** | `EntityAccessFilter` denial text. Users were told *"Access denied to association target"* — no record, no capability, no remedy. Root cause was a **dead branch**: the filter passed `"insufficient_rights"` into a five-arm switch with no arm for it, so every real denial hit the default, and the switch's own better message was unreachable from its only call site. Switch removed rather than extended — one of its dead arms (`entity_not_found → 404`) was a **latent enumeration oracle**, since the probe conflates not-found with no-access on purpose (task 022's finding). Client renders server `detail` (`errorMessages.ts:188`), so this was server-only. **10/10 tests; perturbation bites** |
+| `279ca8022` **NOT pushed** | `RecordContainerResolver.ResolveForActingUserAsync` — the no-record container answer, server-side. Takes the Entra `oid` as a **lookup key** on `systemuser.azureactivedirectoryobjectid` (translates, never compares — the #840 Rule 2 class). Fail-closed: no user / >1 user / no BU all THROW; only "BU has no container stamped" returns `Unresolved`. **11/11; perturbation on the id-space filter reddens ONLY that test — the other 10 stay green, which is why the structural assertion exists** |
+
+**Full BFF suite after both: 11,746 passed / 0 failed / 66 skipped.**
+
+### Why `ResolveForActingUserAsync` had to come first (owner-directed 2026-08-31)
+
+`#858` cannot delete `SaveComposeDocumentRequest.ContainerId` without a server answer for record-less
+drafts, and leaving the field as a *fallback* is **bypassable**: the client decides whether a matter is
+bound at all, so "omit the matter" becomes a supported route to naming your own container. Owner picked
+the single canonical path — server always derives, from the record or from the acting user.
+⚠️ Matter-less Compose drafting is a **designed** flow (`composeEditor.registration.ts:22-25`), not an
+edge case, so "no record → refuse" was not available.
+
+### 🔴 Filed, deferred by owner direction — NOT in 076
+
+[`notes/finding-secure-transition-container-migration.md`](notes/finding-secure-transition-container-migration.md)
+— flipping a record to secure **moves nothing**. New writes go to the secure container; every existing
+file stays in the shared BU container with its `sprk_document` pointers unchanged, and SPE's
+additive-only permissions retract nothing. Verified no container move/copy code exists in `src/**`. Not
+biting yet only because **zero secure projects exist anywhere**. Its own project; revisit after core
+UAC-r2. The hard part is not the copy loop — permanent (not recycle-bin) source deletion is load-bearing,
+and already-minted anonymous share links (task 012) survive their ≤7-day window regardless.
+
+### 🔴 SCOPE DECOMPOSED 2026-08-31 (owner-directed) — 076 → 076 + 093 + 094 + 095
+
+**Contract: [`notes/plan-upload-path-decomposition-2026-08-31.md`](notes/plan-upload-path-decomposition-2026-08-31.md).**
+One conversation grew 076 from "steps 4–6" into six workstreams; running it as one task produces an
+unreviewable change. **Free numbers start at 093** (`085`/`091`/`092` taken — `ls tasks/` every time).
+
+| Task | Scope | Depends |
+|---|---|---|
+| **076** (continues) | container contract: cutover U1/U2/U3 · **250 MB fix** · record-less route (Skip path) · classify 12 suppliers · delete W1/W2 · **delete legacy route LAST** · Communication ×7 · waivers · tests · absence-grep | — |
+| **093** NEW | **reorder all 7 Create wizards** (collect IsSecure → create record → provision-if-secure → upload → link) **+ the Secure Project wizard UI** (owner: part of this solution; never specified) | 076 |
+| **094** NEW | upload collision: **pre-flight existence probe** → dialog (Replace / Rename / Use existing) → explicit `conflictBehavior`. Owner: *"we do not want to silent fail (or fail at the end)"* | 076 |
+| **095** NEW | document↔record multi-association — **intersection entity, owner chose option (b), NOT native N:N** | — (094's "Use existing" waits on it) |
+
+#### 🔴 Four facts these tasks must NOT re-derive (full detail in the plan §4)
+
+1. **The 4 MB threshold is stale by ~3 years.** Simple `PUT …/content` supports **250 MB** (verified
+   2026-08-20 in `…/.claude/agent-memory/researcher/graph-driveitem-upload-facts.md` against MS Learn +
+   the docs source repos). `SdapApiClient.uploadFile`'s `LARGE_FILE_UNSUPPORTED` throw at ≥4 MB is a
+   **live defect on a false premise** — the fix is the threshold, NOT wiring chunked upload.
+2. ⚠️ **`conflictBehavior` IS valid on the simple PUT** — `fail|replace|rename`, *"the default for PUT is
+   replace"*, docs disagree on the default so **always set it explicitly**; name-collision only.
+   **Earlier notes in this project claiming it "takes no conflictBehavior at all" are WRONG** — the SDK
+   method doesn't expose it; the REST API honours it.
+3. **Why the owner's 412 happens**: path-keyed PUT + no explicit `conflictBehavior` → **silent REPLACE**
+   → same item id → second `sprk_document` insert violates the alt-key on the SPE item id → 412 with
+   Dataverse's unsubstituted `{0}`/`{1}`. **The first file's bytes are already gone.** Not a failing
+   duplicate check — an unguarded collision that destroys data then errors confusingly. Every SERVER
+   ingest path already guards this by folding an id into the filename; the CLIENT path never did.
+4. **AI pre-fill does NOT block the Create-wizard reorder.** Pre-fill stages to
+   `SpeOptions.StagingContainerId` (server config — `MatterPreFillService.cs:307`) and the final upload is
+   a **separate** browser call holding the same `File` objects. The legs are independent.
+
+#### Why 093's reorder is the load-bearing one
+
+Today a **secure Matter created with documents puts those documents in the shared BU container** — at
+upload time no matter exists to be secure. Server-side derivation alone cannot fix that; only the reorder
+can. ⚠️ **Provisioning requires the record to exist already** (task 008: its final act stamps three fields
+on the project), so IsSecure is **collected** early (owner: before the Info step) and **acted on** after
+creation. That ordering is also why an abandoned wizard leaves **no orphaned container**.
+`provision-project` is **project-only**; owner: projects first, matters a later add-on.
+
+#### 095 — the schema facts (owner screenshots, live metadata 2026-08-31)
+
+Document→Matter has **TWO** Many-to-one relationships (`sprk_matter_document` +
+`sprk_sprk_matter_sprk_document_sprk_relatedmatter`); Document→Project likewise
+(`sprk_Project_Document_1n` + `…_sprk_relatedproject`); Document→WorkAssignment **one**
+(`sprk_WorkAssignment_Document_1n`). All Many-to-one — **two slots per type, not a many-to-many.**
+**Native N:N was rejected**: it breaks this project's "child inherits **1 hop** via a denormalized core
+ancestor" model (the ancestor becomes multi-valued), Dataverse intersect tables can't carry columns or be
+secured, and the codebase already has the polymorphic-regarding pattern (ADR-024 / `sprk_todo`).
+⚠️ **Do NOT relax the alternate key on the SPE item id** to allow duplicate rows — Compose's
+transient-key dedup and promote-idempotency both rest on it.
+
+### ⚠️ Carried forward, NOT yet done — from the Q4 widening investigation
+
+Widening `EntityAccessFilter.EntitySetByType` with `sprk_workassignment`/`sprk_event`/`sprk_todo` (owner
+said yes — "it is file access") needs `UploadFinalizationWorker.cs:611-629` widened **with** it. That
+switch maps only `matter`/`project`/`invoice`; the three new types would hit `default:` and log
+*"Unknown association type, skipping association"* — the document would be created **silently
+unassociated**. Plural forms attested in live Web API URLs: `sprk_workassignments` (SemanticSearch map),
+`sprk_events` (`DataverseWebApiService.cs:304/405/463`), `sprk_todos` (`ExternalDataService.cs:295/337/386`).
+
+---
+
+## Superseded — 2026-08-30 session end
+
+> Three tasks completed (091, 092, 085), master merged in, everything pushed.
 
 ---
 
 ## Quick Recovery (READ THIS FIRST)
 
 | Field | Value |
+|---|---|
+| **State** | `work/unified-access-control-r2` — clean, pushed, **0 behind master** (238 commits absorbed 2026-08-30, in two merges; second reached `369c3ea89` = PR #905). Main repo master in sync. |
+| **Tests** | ArchTests **176/176** — the 6-failure baseline carried all project is **GONE**, fixed on master. Do not re-record it; a red ArchTest is now real. BFF suite 11,690 / 0 failed before the second merge. |
+| **PR** | 🔵 **#887 still DRAFT** — https://github.com/spaarke-dev/spaarke/pull/887. CI was green before the master merge. |
+| **Next Action** | Resolve the two OPEN DECISIONS below, then: (1) `EntityAccessFilter.EntitySetByType` widening (Q4 — `sprk_workassignment`/`sprk_event`/`sprk_todo` + a test each), then re-verify the Office save surface (shared map); (2) close **083**; (3) set **012** to `completed-with-escalation`, **not** ✅; (4) update the #887 body — it still says the folder work is "NOT in this PR", which is false. |
+
+### 🤝 ALIGNED WITH `spaarkeai-compose-r8`, 2026-08-30 — read [`notes/alignment-with-compose-r8-2026-08-30.md`](notes/alignment-with-compose-r8-2026-08-30.md) before touching #858
+
+- **PR #905 also merged** (`369c3ea89`) — this branch is level with it. **`ComposeService.cs` is FROZEN
+  for us** until we comment on #858; clusters 2a/2b deliberately unextracted. **No rebase required.**
+- **Anchor the #858 patch on SYMBOL NAMES, not line numbers.** Their anchors verified here: the container
+  decision at `ComposeService.cs:1510` and the guard at `:1500` are **exact**; `PromoteIfEphemeralAsync`
+  is at **`:1998`**, not their stated `:1989` (our tree is 19 lines longer — immaterial, but do not trust
+  the number).
+- 🔴 **#858 IS SMALLER THAN ITS FRAMING.** The guard at `:1500` justifies failing with *"No server-side
+  BU→container resolver (multi-container INV-7)"*. **Both halves are false now.**
+  `RecordContainerResolver` exists with **nine** consumers (076 / 078 / 085 / Communication), and INV-7
+  *prescribes* server-side resolution — this project already corrected that exact inversion in its own
+  `design.md`. **Task 085 is the worked example of the identical fix**: delete the client-supplied
+  container field, call `ResolveForRecordAsync` on the record the caller was already authorized against.
+  The one genuinely-different branch is a transient draft with no owning record yet — 085 hit that too
+  and resolved it *without* inventing an acting-user derivation.
+- ⚠️ **Their coverage warning, taken seriously**: the create-on-save region sits at **76.8% branch
+  coverage**; a seeded-mutation pass on its neighbours found **eleven** documented guarantees with no
+  test, **two of which could destroy a user's document**. The #858 patch must carry its own tests rather
+  than lean on the 1,791-test Compose suite, and those two guarantees should be identified *before*
+  editing.
+- **Task 082 RESCOPED** — its ratchet half is already delivered by their PR #840
+  (`CallerIdentityGuardTests`, incl. the `Guid.TryParse` id-space rule). Only the **four-primitive
+  decision** remains ours. Its "⛔ seed the count after #832" dependency is stale.
+- **We owe them**: patch create-on-save, then **comment on #858 when it merges** — that is their signal
+  to resume clusters 5a → 2a/2b.
+
+### 🔴 TWO OPEN DECISIONS FOR THE OWNER
+
+**1. Merge #887 to master?** It is a draft carrying ~26 commits of authorization work.
+⚠️ **Do not repeat this session's error**: I told the owner it was "unreviewed" as though a review gate
+were blocking. **This repo does not use GitHub review approvals at all** — the last 8 merged PRs all have
+empty `reviewDecision`, and there is a CODEOWNERS file gating nothing. It is a draft only because it was
+opened as one and never marked ready. The real question is simply whether the owner wants it on master
+now or after reading it.
+
+**2. `#858` Compose container selection is now UNBLOCKED.** It was deferred behind PR #806; **#806
+merged 2026-08-30**. Any doc still saying "blocked on #806" is stale. The sink moved — see below.
+
+### ✅ Completed this session (all pushed)
+
+| Task | What |
+|---|---|
+| **091** | Nine `/api/spe` container-item routes were registered on the ROOT app, inheriting neither the admin-role filter nor the tenant-scope filter. Any authenticated caller could enumerate, download, preview, mint a sharing link, DELETE and upload against any container id, `configId` an unchecked cross-tenant bearer capability. Moved onto the group; `MapContainerItemEndpoints` now takes `RouteGroupBuilder`, so the original registration is a **compile error**. |
+| **092** | Two SPE Admin client/server route mismatches. `createSharingLink` posted to `/sharing` while the server serves `/share` — a **live** 404 behind a shipped button, shown to users as a generic failure. `items.get` had no server route and no callers → deleted. New `SpeAdminClientRouteAgreementTests` cross-checks all 63 client URLs, verb-qualified. |
+| **085** | `POST /api/office/save` authorized against `TargetEntity` but wrote into `SaveRequest.ContainerId` — option (B), live. Field deleted; container now derived from the authorized record via 076's resolver, before the job payload is built. |
+
+### ⚠️ Three of MY OWN errors this session, all caught by guards — keep these
+
+1. **Task 083's census said the SpeAdmin surface was "three routes". It is NINE.** 083's instrument
+   scanned for *write sinks*, so the six read routes — including file download and sharing-link minting
+   — were invisible to it. *A tool finds what it was built to look for; its count is not the size of the
+   problem.*
+2. **My client/server agreement guard had FOUR defects, each producing a plausible wrong answer.** Worst:
+   it ignored nested `MapGroup`, yielding nine FALSE mismatches — "fixing" the client to match would have
+   broken four working surfaces. Also verb-blindness (a client GET matched a server DELETE), paren depth
+   (`encodeURIComponent(x)` truncated a path), and a missing helper (six UNKNOWN verbs).
+3. **I declared 2 Compose sinks after reading the method; Rule A named a THIRD** — the rebase retry
+   inside a `catch` block. That is the argument for keying the census per call site, demonstrated on me.
+
+### 🔁 Master fixed two things this project also fixed — defer to master, do not fork
+
+- **`b30f4edfa` fixed the test-host credential problem independently and better.**
+  `UseStubTokenCredential()` substitutes the credential in DI; `TestHostCredentialGuardTests` fails the
+  build if a fixture forgets. Its docstring reaches the identical diagnosis this project's local-suite
+  repair did. `TestOutboundNetworkGuardTests` layer 1 was rewritten to defer to it and now asserts only
+  what it uniquely owns (module initializer ran; token resolution is instant and offline). **Layer 2 (the
+  outbound-network block) is still ours and still unique.**
+- **PR #806 refactored the Compose sink** out of `ComposeService` into `ComposeSaveStorageCoordinator`,
+  splitting it into three sites. Provenance unchanged (`request.DriveId`, client-supplied).
+
+### Provenance decision made 2026-08-30 (owner-directed)
+
+The three SPE Admin write sinks are **`AdministrativeRoleScoped`**, a new provenance — not
+`ClientSupplied`. Rationale: our auth structure already treats SPE Admin as a distinct plane (two named
+layers, its own `spe.admin.*` deny-code namespace), there is no owning record, and record-less containers
+legitimately exist (078). Shaped like ADR-028's enumerated credential exceptions: membership pinned,
+**Rule F** mechanically re-verifies the routes are group-relative so the category cannot become a
+loophole.
+
+---
+
+## Superseded state (pre-2026-08-30)
+
+| Field | Value |
 |-------|-------|
-| **State** | ✅ **MERGED TO MASTER** at `8e799f5ec`. Worktree clean, **0/0**. Main repo `master` ref synced (its checkout `ci/task-084-b10-verification` left untouched). |
-| **PR** | **#861 open as DRAFT** — CI **fully green**: 23 success / 1 neutral (Trivy) / **0 failures**, all 8 Tier 1 blocking jobs pass, `Tier 2 / Full Unit Tests` **SUCCESS**, and `Tenant Isolation (I1–I5)` now green (was red on master). |
-| **Next Action** | 🔴 **Run task 083** — [`tasks/083-container-selection-authorization-sweep.poml`](tasks/083-container-selection-authorization-sweep.poml). It is **`<model-tier>fable</model-tier>` @ `xhigh`** — switch with `/model` before starting, or dispatch it as a Fable subagent. **Do not run it on a lower tier**; CLAUDE.md §8.5 requires the escalation. |
-| **Verified on master** | build **0/0** · ArchTests **121 pass / 6 fail** (the recorded not-ours baseline, all in `Sprk.Provisioning.ControlPlane.Core`; **PR #847 fixes exactly those**) · publish **45.11 MB** compressed incl. PDBs (+0.15 vs 44.96, ceiling 60) · CVE clean |
+| **State** | Worktree on `work/unified-access-control-r2`, **pushed and in sync with origin**. All agents finished and merged. Tree clean. |
+| **PR** | 🟢 **#887 open as DRAFT, CI FULLY GREEN** (verified 2026-08-30) — https://github.com/spaarke-dev/spaarke/pull/887. All 19 commits pushed; every check passes. The two "skipping" jobs are conditional, not failures. ⚠️ **The PR BODY is stale** — it still says the folder-removal work is "planned but NOT in this PR". It IS in this PR now, along with task 084. Update the body before marking ready. |
+| **Next Action** | 🔴 **READ [`notes/SESSION-STATUS-2026-08-28.md`](notes/SESSION-STATUS-2026-08-28.md) FIRST — §6.5 holds the owner's answers to Q1–Q5 and is the implementation contract.** Then: (1) **execute task 085** (Office save — server-derive the container, delete `SaveRequest.ContainerId`) and **task 091** (SPE Admin container items — nine routes outside the admin group; see the severity note below); (2) widen `EntityAccessFilter.EntitySetByType` with `sprk_workassignment`/`sprk_event`/`sprk_todo` + a test each, then re-verify the Office save surface (**shared map** — 085 must not widen it itself); (3) 083 closes with the DELETEs (rows 4/5) + row 8 conversion + the landed guard; (4) set 012 to `completed-with-escalation`, **not ✅**; (5) update the #887 body. |
+| **Nine agents DONE, all merged** | test-suite repair · sink guard · 076 server half · 078 complete · 012 analysis · folder-removal · **filename sanitization (task 084)** · plus upstream #860/#862. Zero conflicts, tree clean, pushed. |
+
+### 🔴 TASK 091 IS MORE SEVERE THAN THE CENSUS RECORDED — re-verified 2026-08-30
+
+The 083 census filed row 10 as *"three routes (`upload`, `delete`, `folders`) whose primary defect is a
+missing admin gate."* Both halves understated it.
+
+`Api/SpeAdmin/ContainerItemEndpoints.cs` has **nine** routes, registered on the **root app** at
+`Infrastructure/DI/EndpointMappingExtensions.cs:380` — *not* on the `/api/spe` group that carries
+`AddSpeAdminAuthorizationFilter()` (requires the `Admin`/`SystemAdmin` app role) **and**
+`AddSpeAdminTenantScopeFilter()`. Eighteen sibling groups register on that group; this file does not. No
+`DefaultPolicy`/`FallbackPolicy` override exists, so bare `.RequireAuthorization()` means *authenticated*
+and nothing more.
+
+So **any authenticated caller** can, on any container id they name, with a client-supplied `configId` that
+nothing checks the ownership of: enumerate · read versions · read thumbnails · **mint a sharing link** ·
+**download file content** · preview · **DELETE the item** · create a folder · **upload bytes** — across
+tenant boundaries.
+
+Two things worth carrying forward:
+
+1. `SpeAdminTenantScopeFilter`'s own doc comment predicted that a per-handler check would be missed on the
+   sixteenth file and concluded that a group filter *"cannot be forgotten"*. **Both halves were right.** The
+   hole opened through a third channel neither covered: a file that never joined the group. A control that
+   cannot be forgotten can still be **bypassed by not being applied**.
+2. 083's instrument scanned for SPE **write sinks**, so it reported 3 of 9. The six read routes — including
+   file download and sharing-link creation — were invisible to it. **A tool finds what it was built to look
+   for; the count it returns is not the size of the problem.**
+
+### ⚠️ TASK NUMBERING — do not reuse 084/085 blindly. This has now collided THREE times.
+
+**`084` is TAKEN** — it is the filename-sanitization task filed 2026-08-29 (`c820b3f8f`). `086`–`090` were
+already taken (`086-access-event-log-schema.poml` etc.). **Free: `085`, then `091`+.**
+So: **Office save → `085`** · **SpeAdmin container items → `091`**.
+The `TASK-INDEX.md` line that claimed 084–089 was insertion room was itself wrong and is corrected; the
+index already records a prior 080–083 → 086–089 renumbering caused by the same mistake. **Check the
+directory listing before assigning a number**, every time.
+
+### 🔴 A LIVE linux-x64 PRODUCTION BUG found while consolidating sanitizers
+
+`GraphMessageToEmlConverter`'s private copy called bare `Path.GetInvalidFileNameChars()`, which on
+**linux-x64 returns only `{'\0','/'}`** — so `< > " : \ | ? *` survived into archived `.eml` filenames in
+production. **Its test asserted they were stripped and PASSED — because the test runs on Windows.** A
+platform-dependent API under a platform-independent assertion. Worth a standing check: any
+`Path.GetInvalid*Chars()` use in code that ships to linux is suspect.
+
+Related, not yet fixed: `EntityCreationService.ts:493` interpolates the filename into the URL **without**
+`encodeURIComponent`, unlike its sibling. The server-side fix now turns that into a clean 400 rather than
+folder creation, so it is contained but still wrong at the source.
+
+### 🔴 THE FOLDER MYSTERY IS SOLVED — and it was us, not Word Online
+
+**An unsanitized filename becomes the SPE upload path verbatim.** The Office add-in's free-text "Document
+Name" box let a user type a DATE:
+
+```
+"New Word Document from Word Web Add In 8/24/2026"
+   -> folder "…Add In 8"  ->  folder "24"  ->  extension-less file "2026"
+```
+
+**The trailing `8` in the folder name is the MONTH**, not a truncated title. Two production `sprk_document`
+rows account for both observed folders, written by the BFF service identities (`# mi-bff-api-dev`,
+`SDAP-BFF-SPE-API`). Control case: `Examiner's Report 8-24-2026` — same user, same day, hyphens — minted
+nothing. The upload is **app-only**, which is why SPE Admin showed no human creator; **that absence was
+misread as "something external did this."** Both of my hypotheses (Word Online direct-write; a folder
+prefix derived from the document title) are **refuted**.
+
+The **email** branch already sanitized; the document branch did not. That asymmetry was the whole bug.
+
+**Operator check (falsifiable)**: that folder should contain exactly one subfolder `24` containing one file
+`2026`. Expect the same shape under `Archived: PAT-942665 … Liardo 7` → `19` → `2026`.
+⚠️ **`GET /api/spe/audit` cannot answer this** — `SpeAuditService` is **write-only**, the Office path logs
+nothing, and the table has **0 rows**. My Phase 0 instruction rested on a false premise.
+
+### ⚠️ Three corrections yesterday produced — one would have broken production
+
+1. **My dead-code range 239–334 was WRONG.** The `else` block ends at **305**; 307–336 is **common
+   post-branch** code containing the `ProcessEmailAttachmentsAsync` call — deleting as specified would have
+   broken email attachments. Only 239–305 was deleted. *Telling the agent to verify my riskiest claims
+   rather than trust me is what caught this.*
+2. **The sink guard is keyed on `(File, Sink, Ordinal)`, NOT line numbers.** My warning that moving lines
+   breaks Rule A was wrong; the real mechanism is **ordinal shift**.
+3. **The ArchTest baseline was 7, not 6.** Rule A was *already red* from two OBO sites task 076 left
+   undeclared — which kept Rule A's own **non-vacuity assertion unreachable**, so no allow-list edit was
+   verifiable. Now declared (both `ServerDerivedRecord`); baseline back to **6**, Rule A green.
+
+### The perturbation lesson worth keeping
+
+Reverting one site to a naive flat `{FileName}` **failed the collision test while both no-slash tests still
+passed.** *A flatness assertion alone would have greenlit the data-loss version.* `UploadSmallAsync` uses
+Graph's path-keyed PUT with **no `conflictBehavior`** — two uploads to one path are a **silent
+unconditional REPLACE**, so the `{guid}` folded into the filename is the only collision guard.
+| **Owner directive this session** | Run 083 **and** 012/076/078 (CI-coordination scope), parallel where possible; and **fix** the unreliable local test suite rather than working around it. |
+
+### ⚠️ MERGE HAZARD — `current-task.md` itself
+
+Every agent invokes `task-execute`, which rewrites **this file** in its own worktree. Four or five
+divergent versions of a scratch state file will conflict on merge. **Resolution: keep MINE, discard
+theirs** (`git checkout --ours` on this path) — the orchestrator's copy is authoritative. Do not spend
+time merging them.
+
+### ⚠️ SHARED FILE — `tests/Spaarke.ArchTests/RouteAuthorizationGuardTests.cs`
+
+Three tasks edit it, each owning ONE far-apart waiver entry, so the hunks merge cleanly:
+
+| Lines | Waiver | Owner |
+|---|---|---|
+| ~234, ~239 | `PUT /api/drives/{driveId}/upload`, `DELETE /api/drives/{driveId}/items/{itemId}` (both `UNOWNED`) | task **083** (main session) |
+| ~274 | `PUT /api/obo/containers/{id}/files/{*path}` (`075/076`) | task **076** agent |
+| ~306 | `GET /api/v1/containers/{containerId}/documents` (`078`) | task **078** agent |
+
+Each was instructed: delete, never convert to `Permanent`; no reordering or reformatting (that is what
+would collide). Also in that file: a registration-count pin on `Api/OBOEndpoints.cs` that 076 must update
+with a *reason*, not just a matching number.
+
+---
+
+## §AGENTS IN FLIGHT (2026-08-28)
+
+| Agent | Task | Model | Isolation | Deliverable |
+|---|---|---|---|---|
+| `sweep-083` | 083 steps 1–3 | **fable** | main worktree, **READ-ONLY** | Trace rows 7/8 · caller-grep rows 4/5 · the app-only contract decision · sweep for unlisted sinks |
+| `task-076` | 076 remainder | opus | worktree branch | Route conversion + >=4 MiB upload-session + client cutover + W1/W2 + 7 Communication sites + waiver |
+| `task-078` | 078 | opus | worktree branch | Authorize `GET /api/v1/containers/{containerId}/documents` + waiver |
+| `task-012` | 012 | sonnet | worktree branch | Gap analysis first — the work may already be done by task 072 |
+| `test-signal` | local-suite repair | opus | worktree branch | Make outbound HTTP in tests fail fast + name the escaping URL |
+
+**Why 083's edits stay in the main session**: the POML is `parallel-safe:false` and its reason is real —
+concurrent agents on one authorization surface produce silent lost writes. Only the *read-only*
+investigation was parallelised.
+
+**Model-tier gate (CLAUDE.md §8.5)**: 083 is `<model-tier>fable</model-tier>`. Session is Opus 5, so the
+judgment-critical part was dispatched to an actual **Fable** subagent rather than arguing that opus and
+fable are the same escalation class.
+
+### 🔴 CONFLICT-CHECK RESULT — corrects the POML's blocking claim
+
+Paginated (`gh api --paginate`, because `gh pr view --json files` **caps at 100 silently**) across all 10
+open non-dependabot PRs. Only **#806** overlaps, and it touches MORE than the POML recorded:
+
+| 083 row | File | #806 | Verdict |
+|---|---|---|---|
+| 4, 5 | `DocumentsEndpoints.cs` | absent | ✅ unblocked |
+| 8 | `Api/Ai/ChatDocumentEndpoints.cs` | modified, **0 line changes** | ✅ effectively unblocked |
+| 7 | `Api/Ai/ChatWordExportEndpoints.cs` | **5+/9−** | ⚠️ soft, 14 lines |
+| 6 | 3 Compose files | `ComposeEndpoints.cs` **46+/2671−**, updated today | 🛑 hard blocked |
+
+`RouteAuthorizationGuardTests.cs` is clean across every open PR. **#847 does NOT touch it** (it fixes the
+6 `Sprk.Provisioning.ControlPlane.Core` ArchTest failures, which are the known not-ours master baseline).
+
+### ✅ DONE THIS SESSION (committed at `babf5f7ee`)
+
+`design.md`'s INV-7 claim corrected — **083 step 7 / acceptance criterion met.** And the finding is
+stronger than the POML's: **INV-7 was misread, and it already mandates our model.** Source
+(`spaarke-multi-container-multi-index-r1/design.md:82-88`) reads *record's own field → parent record's
+BU → tenant default (server fallback in BFF config)* — line for line the owner's model. So the seven
+client sites were **in breach of** INV-7, and our design.md cited INV-7 as the reason to leave them that
+way. The "stays in the wizards" phrasing came from INV-7's next line, *"implemented at create-time
+(plugins + wizard)"* — about WHERE the chain runs; that project's CLAUDE.md bans plugins, so it collapsed
+to "wizard". ⚠️ **"INV-7" is an overloaded label** — four unrelated invariants share the number; always
+cite the source project.
+
+### 🔎 STALE POML CLAIM RESOLVED (both 076 and 083 cite it)
+
+`TryResolveParentEntitySet` **does not exist**. The real symbol is
+`SemanticSearchAuthorizationFilter.TryResolveAuthorizableEntitySet` (`:192`, `internal static`, with
+`AuthorizableEntitySets` at `:144`). Worse: there are **THREE** logical-name→entity-set maps and §11 says
+a second is already a review failure —
+
+| Map | Keys on |
+|---|---|
+| `EntityAccessFilter.EntitySetByType:98` (private) | LOGICAL names (`account`, `sprk_matter`) |
+| `SemanticSearchAuthorizationFilter.AuthorizableEntitySets:144` (internal) | SHORT names (`matter`) |
+| `RecordSearchAuthorizationFilter:246` | built dynamically |
+
+Different key spaces, so not interchangeable. **Decision passed to the 076 agent**: the new route keys on
+a LOGICAL name (that is what `ResolveForRecordAsync` takes), so **extend `EntityAccessFilter`** — a fourth
+map is an automatic review failure. Caveat found: `EntityAccessFilter` today reads its target from an
+Office `SaveRequest` **body** and leans on `OfficeAuthFilter` for the user id, so the route-keyed variant
+must take route values and must not depend on `OfficeAuthFilter`.
+`CallerRecordAccessProbe.GetCallerRightsAsync` (`:205`) needs the **plural** entity set and fail-closes to
+`AccessRights.None`.
+
+### 🔴 ESCALATION FIRED + OWNER DECISION (2026-08-28) — read `notes/task-083-sink-inventory.md`
+
+083's escalation trigger 3 fired (">~3 unlisted instances → STOP and re-plan"). **Owner chose: "widen the
+guard first, then re-plan."** So the guard is the instrument, not the last step — its discovered list
+supersedes every inventory including §2's and the notes file's.
+
+**Full findings + evidence: [`notes/task-083-sink-inventory.md`](notes/task-083-sink-inventory.md).** Headlines:
+
+- **Rows 4/5 are NOT live holes** — my earlier reporting was wrong. "app-only" describes only the outbound
+  Graph leg; the routes require a caller token, so trigger 2 cannot fire. Unexploitable today only by
+  **value-space disjointness** (a `b!…` drive id is not a GUID, so `sprk_documents({driveId})` 403s) —
+  luck, not design. **DELETE both.**
+- **Rows 7/8 are not this class** — config-derived, but record-blind. Row 7 has **zero callers** → DELETE.
+  Row 8 is live (`SprkChat.tsx:2014`) → CONVERT via the session's `HostContext`.
+- **ROW 9 (new, LIVE)**: `POST /api/office/save` — `SaveRequest.ContainerId` from the client BODY, **MI**
+  write, gated on `TargetEntity` (a *different* value), and `TargetEntity` is **optional** —
+  `EntityAccessFilter.cs:148-159` returns `next(context)` when absent. Verified in the main session.
+- **ROW 10 (new, LIVE)**: SpeAdmin container items — mapped on the **root app**, not the `/api/spe` admin
+  group, so no admin-role filter and no tenant-scope filter; `configId` is a bearer capability.
+- **Root cause of four missed recounts**: the ArchTest census is a hand-maintained list of **12 files**,
+  and both live rows' files are absent from it.
+
+**Sixth agent dispatched**: `sink-guard` (opus, isolated worktree) building
+`tests/Spaarke.ArchTests/SpeWriteSinkContainerProvenanceGuardTests.cs` — a **NEW file** (zero conflict with
+the two in-flight waiver edits) that INVERTS the census: scans every BFF `.cs` for SPE write sinks and
+fails on any unclassified site, so incompleteness becomes a build failure. Its report must include every
+delta vs the S1–S23 table **in both directions** — anything it finds that the manual sweep missed is the
+most valuable output.
+
+### Next actions, in order
+
+1. **Wait for `sink-guard`'s discovered list** → that gives the true count, which is the re-plan input.
+2. Re-plan: file **084** for the live rows (9, 10) — executed HERE, per the owner's standing "no
+   offloading" directive; acceptance criteria forbid handing any row to another project.
+3. 083 lands: DELETE rows 4, 5, 7 · CONVERT row 8 · the widened guard · `design.md` INV-7 ✅ done.
+4. Merge the five agent branches BY BRANCH NAME. Keep MY `current-task.md`; discard theirs.
+5. Row 6 (Compose, now **three** sinks not one: `ComposeService.cs:1482/1484`, `:1515`, `:442`) stays
+   behind PR #806.
+
+### Prior verified baseline (unchanged)
+
+build **0/0** · ArchTests **121 pass / 6 fail** (not ours; PR #847 fixes exactly those) · publish
+**45.11 MB** compressed incl. PDBs (+0.15 vs 44.96, ceiling 60) · CVE clean · PR **#861** open as draft,
+CI was fully green (23 success / 1 neutral / 0 failures).
 
 ### ⚠️ The local test suite is NOT trustworthy on this machine — CI is
 

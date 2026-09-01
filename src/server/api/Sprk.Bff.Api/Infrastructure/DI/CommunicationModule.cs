@@ -215,7 +215,7 @@ public static class CommunicationModule
 
         // Messaging attachment materialization (messaging-communication-app-r1 task 070 / FR-14). The net-new
         // messaging step that materializes a chat file: ACS/file → SPE (SpeFileStore facade, ADR-007) →
-        // governed sprk_document (sprk_document.sprk_communication lookup) → sprk_communicationattachment
+        // governed sprk_document (sprk_document.sprk_relatedcommunication lookup) → sprk_communicationattachment
         // intersection, returning the reference the ACS message carries (SPE is the store; binary never on the
         // ACS message). Enforces CHAT-ATTACHMENT-POLICY.md (25 MB binary cap + MIME allow-list) BEFORE upload,
         // rejecting oversize/disallowed with RFC 7807 ProblemDetails (ADR-019). Storage SCHEMA is unchanged —
@@ -223,7 +223,14 @@ public static class CommunicationModule
         // Registered UNCONDITIONALLY (ADR-010 / ADR-032 — no feature gate). Scoped to match the Scoped
         // ISpeFileOperations facade lifetime (the Singleton IGenericEntityService composes safely into a Scoped
         // consumer). Consumed by the messaging inbound/file-share wiring (task 031 / 060), not registered here.
-        services.AddScoped<MessageAttachmentMaterializer>(); // task 070
+        //
+        // ⚠️ THIS REGISTRATION WAS DELETED ON 2026-08-28 AND RESTORED ON 2026-08-29. The deletion rested on a
+        // "zero production callers" finding that was PRODUCTION-ONLY and therefore misleading: the type also
+        // had THIS registration, five unit tests (including the CHAT-ATTACHMENT-POLICY gate), an ArchTest
+        // allow-list citation, and live consumers in two sibling worktrees a single-tree grep cannot see.
+        // A production-caller count of zero is NOT a deletion licence. Full reasoning — and the two defects
+        // the deletion was RIGHT about, both fixed rather than reintroduced — is at the class itself.
+        services.AddScoped<MessageAttachmentMaterializer>(); // task 070; restored 2026-08-29
 
         // Reconciliation reader attachment-text read model (email-communication-intelligence-r2 Batch 2 / B2.1).
         // Re-extracts a communication's file-attachment text on demand for the browse reader's folds (the text is

@@ -1,0 +1,220 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="084" project="unified-access-control-r2">
+  <metadata>
+    <title>Sanitize the filename at every remaining SPE upload site, consolidate the eight sanitizers onto one, and make an unsanitized site a build failure</title>
+    <phase>0c Secure Documents — Wave 2</phase>
+    <status>completed</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Touches thirteen `.cs` files across `Api/`, `Services/`, `Workers/` and `Infrastructure/Graph/`, one of which (`ChatWordExportEndpoints`) is client-controlled path injection into SharePoint Embedded. Adds an ArchTest rule and restores a deleted service plus its DI registration. Tags include `bff-api` and `security`, and the change modifies `tests/**` — TEST-MODIFYING override applies regardless.</rigor-reason>
+    <model-tier>opus</model-tier>
+    <model-tier-reason>Two judgment calls that a mechanical pass gets wrong. (1) `Api/OBOEndpoints.cs` must NOT be blanket-sanitized — its `{*path}` is a wildcard route where a caller may legitimately supply a sub-path, so the answer there is per-segment REJECTION, not rewriting; deciding that requires reading the route contract rather than pattern-matching. (2) Restoring `MessageAttachmentMaterializer` means separating the two things the deletion was RIGHT about (folder-minting path, pre-076 caller-authoritative drive) from the one it was wrong about (the caller-count reasoning), and restoring only the hardened form.</model-tier-reason>
+    <effort>xhigh</effort>
+    <effort-reason>Brownfield root-cause work whose deliverable is completeness across a surface that has been miscounted at every previous attempt. The site list supplied at kickoff was short by three (ComposeService, DocumentsEndpoints, SpeAdminGraphService) and the duplicate-sanitizer count was short by four.</effort-reason>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Edits the same files as 083 (`DocumentsEndpoints.cs`, both Chat endpoint files) and the same two ArchTest guards. Two agents rewriting one upload surface produce a silent merge mess.</parallel-reason>
+    <deps>075, 076, 083</deps>
+    <tags>bff-api, api, security, testing, dataverse</tags>
+    <estimated-effort>6-10 hours</estimated-effort>
+    <origin>Owner directive 2026-08-29, following commit `3c3d4072a`. That commit found the root cause of the mystery SPE folders — an unsanitized filename becomes the upload path verbatim — and fixed it at the ONE site where it had been observed (the Office add-in's free-text "Document Name" box). It explicitly did not sweep the rest. The same root cause was latent at every other site, most sharply at `ChatWordExportEndpoints`, whose path is `request.Filename` straight off the request body. The same directive corrected an earlier instruction of the owner's own: the deletion of `MessageAttachmentMaterializer` in that commit was made on a production-only caller search and is reversed here.</origin>
+  </metadata>
+
+  <prompt>A file name IS the whole SPE upload path. Graph creates every '/'-delimited segment of an upload path as a folder, implicitly, as a side effect of the write. Removing hardcoded folder PREFIXES did not subsume this — it fixed the half the server wrote. Fix the half the USER writes, everywhere, and make the next unsanitized site fail the build. Then restore MessageAttachmentMaterializer, improved.</prompt>
+
+  <role>SPAARKE security engineer. The deliverable is a closed set plus a forcing function: after this task no server-constructed SPE upload path can carry a user-supplied separator, there is exactly ONE sanitizer, and a new site that forgets is a red build rather than a folder in an operator's SPE Admin view.</role>
+
+  <goal>Every site that puts a filename into an SPE upload path sanitizes it through one shared implementation. The seven private duplicate sanitizers are consolidated onto it. `Api/OBOEndpoints.cs` is REVIEWED rather than blanket-sanitized, and its per-segment validation is hardened without losing its intentional sub-path capability. `MessageAttachmentMaterializer` is restored with a flat path, a sanitized filename, and its caller-supplied `DriveId` still demoted to a resolver fallback. An ArchTest rule makes an unsanitized site a build failure, with negative and positive controls.</goal>
+
+  <context>
+    <background>⭐ **READ `git show 3c3d4072a` FIRST.** Its commit message carries the evidence, the Graph mechanics, and the trap.
+
+═══════════════════════════════════════════════════════════════════════
+§1 — THE MECHANIC, STATED EXACTLY
+═══════════════════════════════════════════════════════════════════════
+
+`SpeFileStore.UploadSmallAsync` resolves to
+`graphClient.Drives[id].Root.ItemWithPath(path).Content.PutAsync(...)`. Graph creates **every**
+`'/'`-delimited segment of `path` as a FOLDER. There is no "file name" concept on this API — the name
+IS the path.
+
+**The production incident.** The Word add-in's "Document Name" box is free text. A user typed a date:
+`New Word Document from Word Web Add In 8/24/2026`. Graph minted folder `…Add In 8` containing folder
+`24` containing an extension-less file `2026`. Because the upload is app-only (MI), SPE Admin showed no
+human creator, which is what made it look externally created.
+
+**Why the 2026-08-28 flattening did not cover this.** That change deleted folder PREFIXES — `'/'`
+characters the SERVER wrote into a path literal. This `'/'` comes from a USER, through a value the
+literal treats as opaque (`$"{id:N}_{fileName}"`). The flat-path ArchTest rule was green throughout.
+
+═══════════════════════════════════════════════════════════════════════
+§2 — THE SITE LIST. Derive it; do not inherit it.
+═══════════════════════════════════════════════════════════════════════
+
+The kickoff brief named ten sites and cited `SpeUploadPathIsFlatGuardTests.cs` as enumerating eleven.
+**Neither is a list.** That guard is a regex SCANNER with a `>= 5` non-vacuity floor; it contains no
+site enumeration. The usable starting point is the DISCOVERED INVENTORY comment in
+`SpeWriteSinkContainerProvenanceGuardTests.cs` plus `git show 3c3d4072a --stat`, and both must be
+re-derived rather than trusted — three sites were missing from the brief:
+
+  · `Services/Compose/ComposeService.cs` — `ResolveFileName(request.DisplayName)`, **client-supplied**
+  · `Api/DocumentsEndpoints.cs` — `fileName` is a **QUERY-STRING** parameter, and the route writes app-only
+  · `Infrastructure/Graph/SpeAdminGraphService.cs` — a SECOND facade, also calling `ItemWithPath(fileName)`,
+    which the flat-path guard does not probe because it scans for different sink names
+
+═══════════════════════════════════════════════════════════════════════
+§3 — ONE SANITIZER (root CLAUDE.md §11)
+═══════════════════════════════════════════════════════════════════════
+
+The brief reported "four private duplicates". There were **seven**, in two genuinely different classes:
+
+*Same function, consolidate*: `EmlGenerationService`, `MessagingArchiver`, `GraphMessageToEmlConverter`
+— all strip-invalid-chars-then-truncate-50, differing only in truncation and empty-fallback.
+
+*Different function, leave and say why*: `DocumentsBulkEndpoints.SanitizeZipEntryName` /
+`.SanitizeFilenameSegment`, `ReviewMemoEndpoints.BuildMemoFileName`, `DocxExportService` /
+`PdfExportService.GenerateFileName` — these REPLACE with `_` or `-` rather than strip, and their output
+becomes a `Content-Disposition` header or a ZIP entry name, never an SPE path.
+
+⚠️ `GraphMessageToEmlConverter`'s copy was a **latent production bug**, not merely a duplicate: it used a
+bare `Path.GetInvalidFileNameChars()`, which on the **linux-x64** runtime this publishes to returns only
+`{'\0','/'}`. Its unit test asserted `<`, `>`, `"` were stripped and passed — because it runs on Windows,
+where that call returns the wide set.
+
+═══════════════════════════════════════════════════════════════════════
+§4 — `Api/OBOEndpoints.cs` IS DIFFERENT. Review it; do not sanitize it.
+═══════════════════════════════════════════════════════════════════════
+
+`PUT /api/obo/containers/{id}/files/{*path}` is a wildcard route where the caller may legitimately
+address a location inside a container it already holds. Rewriting a caller's path would move their bytes
+without telling them, so the answer is per-segment **rejection**, not sanitization. `ValidatePathForOBO`
+already blocks `..`, control characters, a trailing `/`, blank, and `>1024` chars. Establish what it does
+NOT block, and harden that without removing the sub-path capability.
+
+═══════════════════════════════════════════════════════════════════════
+§5 — RESTORING `MessageAttachmentMaterializer`
+═══════════════════════════════════════════════════════════════════════
+
+Deleted in `3c3d4072a` on a **production-only** caller search. The type also had a DI registration, five
+unit tests including the CHAT-ATTACHMENT-POLICY 25 MB + MIME gate, an ArchTest allow-list citation, and
+live consumers in two sibling worktrees. Restore it IMPROVED — the deletion was right about the
+folder-minting path and about the PRE-076 caller-authoritative `DriveId`, and both stay fixed. Task 076
+had already demoted `request.DriveId` to the fallback ARGUMENT of
+`CommunicationContainerResolver.ResolveContainerAsync`; restoring it in any caller-authoritative form is
+the defect class this project exists to close.
+
+═══════════════════════════════════════════════════════════════════════
+§6 — THE FORCING FUNCTION
+═══════════════════════════════════════════════════════════════════════
+
+An inventory goes stale the day someone adds a site. Extend
+`tests/Spaarke.ArchTests/SpeUploadPathIsFlatGuardTests.cs` with a rule that inspects the path ARGUMENT at
+every sink call, not the literals near it. Two halves, and they are load-bearing together: the argument
+must be a LOCAL whose name ends in `path` (so no site can pass `fileName` straight through and slip past
+a name-keyed scan — a real blind spot, at `ComposeService` and `EmailAttachmentProcessor`), AND that
+local's initializer must run through the one sanitizer. Negative and positive controls both required per
+`tests/CLAUDE.md`; the positive control must include the REAL TREE.</background>
+    <relevant-files>
+      <file role="create">src/server/api/Sprk.Bff.Api/Infrastructure/Graph/SpeUploadPath.cs</file>
+      <file role="create">src/server/api/Sprk.Bff.Api/Services/Communication/MessageAttachmentMaterializer.cs</file>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Api/Ai/ChatWordExportEndpoints.cs</file>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Api/Ai/ChatDocumentEndpoints.cs</file>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Api/DocumentsEndpoints.cs</file>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Api/OBOEndpoints.cs</file>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Services/Ai/WorkingDocumentService.cs</file>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Services/Communication/CommunicationService.cs</file>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Services/Communication/IncomingCommunicationProcessor.cs</file>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Services/Communication/EmlGenerationService.cs</file>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Services/Communication/GraphMessageToEmlConverter.cs</file>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Services/Communication/Channels/MessagingArchiver.cs</file>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Services/Compose/ComposeService.cs</file>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Services/Email/EmailAttachmentProcessor.cs</file>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Services/Office/OfficeEmailEnricher.cs</file>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Services/Office/OfficeService.cs</file>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Services/Office/OfficeStorageUploader.cs</file>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Services/Workspace/MatterPreFillService.cs</file>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Services/Workspace/ProjectPreFillService.cs</file>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Workers/Office/UploadFinalizationWorker.cs</file>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Infrastructure/Graph/SpeAdminGraphService.cs</file>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Infrastructure/DI/CommunicationModule.cs</file>
+      <file role="modify">tests/Spaarke.ArchTests/SpeUploadPathIsFlatGuardTests.cs</file>
+      <file role="modify">tests/Spaarke.ArchTests/SpeWriteSinkContainerProvenanceGuardTests.cs</file>
+      <file role="modify">tests/integration/data-mutation/SpeUploadPaths/SpeFlatUploadPathTests.cs</file>
+      <file role="restore">tests/unit/Sprk.Bff.Api.Tests/Services/Communication/MessageAttachmentMaterializerTests.cs</file>
+      <file role="reference">src/server/api/Sprk.Bff.Api/Services/Communication/Engine/CommunicationContainerResolver.cs</file>
+      <file role="reference">docs/standards/CHAT-ATTACHMENT-POLICY.md</file>
+      <file role="reference">.claude/constraints/bff-extensions.md</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="§11 reuse">Exactly ONE sanitizer. Writing a second is an automatic code-review failure. If the existing public implementation is unreachable or badly placed, MOVE it and update all callers — never duplicate it.</constraint>
+    <constraint source="owner-directive 2026-08-29">Do NOT blanket-sanitize `Api/OBOEndpoints.cs`. Its `{*path}` may legitimately carry separators. Review `ValidatePathForOBO`, harden it, and keep the sub-path capability. Report the finding either way.</constraint>
+    <constraint source="owner-directive 2026-08-29">`MessageAttachmentMaterializer.MaterializeAttachmentRequest.DriveId` MUST remain a resolver FALLBACK. If restoring it in any caller-authoritative form appears unavoidable, STOP and report — that is the exact defect class this project exists to close.</constraint>
+    <constraint source="ADR-007">All SPE access stays behind the `SpeFileStore` facade. Sanitize at the CALL SITES, not inside the facade — sanitizing in the facade would silently rewrite the OBO route's legitimate sub-paths.</constraint>
+    <constraint source="ADR-003">Sanitizing a filename closes the folder-minting half of a site's problems. It does NOT close an authorization hole. Do not let a sanitized `PUT /api/drives/{driveId}/upload` read as fixed — that row is 083's.</constraint>
+    <constraint source="tests/CLAUDE.md">Any new ArchTest rule carries BOTH a negative and a positive control, and the positive control must include the real production tree — a synthetic control can pass while the rule flags shipped code.</constraint>
+    <constraint source="tests/CLAUDE.md B15">Do NOT write one behavioural test per site. Fourteen mock-heavy tests asserting one string each is the banned setup-to-assertion shape. Blanket site coverage is the source rule's job; behavioural tests cover the distinct MECHANISMS.</constraint>
+    <constraint source="project">Restoring the materializer shifts the sink guard's `(File, Sink, Ordinal)` declarations. Update the declarations. NEVER weaken the rule to make a build green.</constraint>
+    <constraint source="CLAUDE.md §10">Placement Justification citing `.claude/constraints/bff-extensions.md`; publish size ≤60 MB (state the five-field convention); `dotnet list package --vulnerable --include-transitive`.</constraint>
+    <constraint source="baseline">ArchTests baseline is **6 pre-existing failures** on a clean tree. Prove it with `git stash` before starting; do not assume the number.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>docs/standards/CHAT-ATTACHMENT-POLICY.md</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+      <file>tests/CLAUDE.md</file>
+      <file>projects/unified-access-control-r2/notes/task-083-sink-inventory.md</file>
+      <file>projects/unified-access-control-r2/notes/task-076-record-keyed-upload-contract.md</file>
+    </files>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="0">Establish the ArchTest baseline on a CLEAN tree and record which tests fail, with their assertion text. `ADR-010`'s message carries a count (153 → 156) that must be unchanged afterwards.</step>
+    <step order="1">DERIVE the site list from the sinks, not from any prose inventory: every call to `UploadSmallAsync` / `UploadSmallAsUserAsync` / `CreateUploadSessionAsUserAsync`, plus any other facade reaching `ItemWithPath`. For each, walk backwards to where the filename came from and classify it: client-supplied, attacker-influenced (an inbound email's attachment name), or server-generated.</step>
+    <step order="2">Find every sanitizer in the tree. Separate the ones that are the SAME function from the ones that merely look similar, and say which is which. Move the surviving implementation to a home every layer can reach without an inverted dependency, and delete the duplicates.</step>
+    <step order="3">Sanitize each site. Where an id carries the collision-uniqueness, sanitize INSIDE the composition (`$"{id:N}_{Sanitize(name)}"`) — folding an id in front does not protect a slash-bearing name.</step>
+    <step order="4">Review `ValidatePathForOBO` per §4. Determine empirically whether the sub-path capability has any client caller, and report it.</step>
+    <step order="5">Restore `MessageAttachmentMaterializer` per §5: the class, its DI registration, its five unit tests, and its ArchTest declaration. Record at the class WHY it was deleted and restored, so the reasoning is not repeated.</step>
+    <step order="6">Fix the stale doc comments claiming `HostContext` drives container resolution (`ChatWordExportEndpoints`, `ChatDocumentEndpoints`). Verify the claim against `ResolveContainerId` before rewriting it.</step>
+    <step order="7">Extend the ArchTest guard per §6, and the integration tests with the REAL failing string as the input.</step>
+    <step order="8">PERTURBATION-CHECK both new instruments: remove sanitization at one site and confirm the ArchTest rule AND the site's behavioural test redden; restore. A guard nobody has seen fail is a guard nobody knows works.</step>
+    <step order="9">Build (0 warnings), targeted tests, full unit suite, ArchTests vs the step-0 baseline, publish size, CVE scan.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If restoring `MessageAttachmentMaterializer`'s `DriveId` in a non-caller-authoritative form proves impossible, STOP. Reinstating a caller-chosen container is worse than leaving the class deleted.</trigger>
+    <trigger>If `ValidatePathForOBO` turns out to be load-bearing for a live client that genuinely sends multi-segment paths, STOP before changing its contract — hardening it would then be a breaking change to a shipped route.</trigger>
+    <trigger>If the sanitizer cannot be placed anywhere reachable without an inverted layer dependency, STOP rather than duplicating it. A second sanitizer is how this codebase got seven.</trigger>
+  </escalation>
+
+  <justification>
+    <existing>`OfficeEmailEnricher.SanitizeFileName` is the one PUBLIC sanitizer and already carries the widened Windows-strict character set (`3c3d4072a`). `SpeUploadPathIsFlatGuardTests` provides the guard harness. `CommunicationContainerResolver` provides the record-aware container decision. `SpeFlatUploadPathTests` provides the fake SPE drive that reproduces the path-keyed replace.</existing>
+    <extension>The sanitizer is MOVED, not re-authored, and seven duplicates collapse onto it — the change is net-negative in implementation count. The new ArchTest rule extends an existing guard class rather than adding one. No new service, no new endpoint, no new package, no publish-size delta.</extension>
+    <cost-of-doing-nothing>`POST /api/ai/chat/export/word` takes `request.Filename` off the request body straight into the SPE upload path: client-controlled path injection, mitigated by nothing (the `.docx` check constrains only the suffix — `a/b/c.docx` passes it). `PUT /api/drives/{driveId}/upload` does the same from a query string, app-only. Inbound email attachment names reach two more. Every one of them creates folders in a customer's container that no one asked for and that no later permission change can tidy — and the incident that started this was a user typing a DATE, not an attack.</cost-of-doing-nothing>
+  </justification>
+
+  <outputs>
+    <output type="code">One shared sanitizer; seven duplicates consolidated or classified as genuinely different with a written reason</output>
+    <output type="code">Every filename→path site sanitized, id-carrying compositions sanitized inside the hole</output>
+    <output type="code">`ValidatePathForOBO` hardened per-segment, sub-path capability intact</output>
+    <output type="code">`MessageAttachmentMaterializer` restored — flat path, sanitized name, `DriveId` still a fallback — with its DI registration, tests, and ArchTest declaration</output>
+    <output type="code">Stale `HostContext`-drives-container doc comments corrected</output>
+    <output type="test">ArchTest rule 2 + negative and positive controls incl. the real tree</output>
+    <output type="test">Behavioural tests using the real failing string, one per distinct mechanism</output>
+    <output type="doc">The derived site list, the sanitizer census, and the `ValidatePathForOBO` finding</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion>No site puts an unsanitized filename into an SPE upload path. Proven by the source rule, not by an inventory.</criterion>
+    <criterion>Exactly one sanitizer implementation exists for SPE upload paths. Every remaining `Path.GetInvalidFileNameChars()` site is documented as serving a different purpose (Content-Disposition, ZIP entry) and never reaches an upload path.</criterion>
+    <criterion>`Api/OBOEndpoints.cs` is NOT blanket-sanitized. `ValidatePathForOBO` rejects a leading `/`, empty segments, `.`/`..` segments, and invalid characters per segment, while a legitimate multi-segment path still succeeds.</criterion>
+    <criterion>`MessageAttachmentMaterializer` exists, is registered in DI, has its five unit tests passing, and its upload path contains no `/`. `request.DriveId` is passed as the resolver's fallback argument and is never consulted ahead of the record.</criterion>
+    <criterion>The ArchTest rule fires on an unsanitized site (negative control), does not fire on the sanctioned shape OR on the real production tree (positive control), and its non-vacuity assertion pins the number of inspected sink calls.</criterion>
+    <criterion>The perturbation check is performed and its result recorded: removing sanitization at one site reddens both the source rule and that site's behavioural test.</criterion>
+    <criterion>The sink-provenance guard's declarations are updated for the restored site, and no rule is weakened.</criterion>
+    <criterion>Build 0 warnings; full unit suite at or above its prior pass count; ArchTests show the SAME pre-existing failures as the step-0 baseline and no new ones; publish size reported with the five-field convention; no new HIGH CVE.</criterion>
+  </acceptance-criteria>
+
+  <notes>The number in every brief for this project has been wrong at least once. This one arrived saying ten sites, eleven in a guard that contains no list, and four duplicate sanitizers; the real figures were fourteen sink calls, a regex scanner, and seven duplicates — and the task number itself (086) was already occupied by `086-access-event-log-schema`, which is the second filing collision in this project's history (see the 080–083 → 086–089 renumbering note in TASK-INDEX). Re-derive every count. The deeper lesson this task encodes is narrower and more useful than "check your counts": a production-caller count of zero is not a deletion licence when a DI registration, a policy-gate test suite, an ArchTest citation, or a sibling worktree depends on the type.</notes>
+</task>

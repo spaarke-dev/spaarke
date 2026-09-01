@@ -1,4 +1,5 @@
 using System.Text;
+using Sprk.Bff.Api.Infrastructure.Graph;
 using Sprk.Bff.Api.Services.Communication.Models;
 
 namespace Sprk.Bff.Api.Services.Communication.Channels;
@@ -50,24 +51,14 @@ public sealed class MessagingArchiver : ICommunicationArchiver
 
         var bytes = Encoding.UTF8.GetBytes(sb.ToString());
 
-        var sanitizedSubject = SanitizeFileName(request.Subject);
+        // The transcript name becomes an SPE upload path verbatim once a caller archives it, so it goes
+        // through the ONE sanitizer (Infrastructure/Graph/SpeUploadPath). The private copy that lived here
+        // — same character set, same 50-char cap, "message" fallback — was consolidated 2026-08-29
+        // (root CLAUDE.md §11). The fallback is passed rather than reimplemented.
+        var sanitizedSubject = SpeUploadPath.SanitizeFileName(request.Subject, maxLength: 50, fallback: "message");
         var dateStr = response.SentAt.ToString("yyyyMMdd_HHmmss");
         var fileName = $"{sanitizedSubject}_{dateStr}_transcript.txt";
 
         return new EmlResult(bytes, fileName);
-    }
-
-    // Windows-strict invalid-filename set (mirrors EmlGenerationService): .txt transcripts are routinely
-    // opened on Windows clients, so strip the Windows-reserved characters regardless of the host OS.
-    private static readonly HashSet<char> s_invalidFileNameChars = new(
-        Path.GetInvalidFileNameChars()
-            .Concat(new[] { '<', '>', ':', '"', '/', '\\', '|', '?', '*' }));
-
-    private static string SanitizeFileName(string input)
-    {
-        var sanitized = new string((input ?? string.Empty).Where(c => !s_invalidFileNameChars.Contains(c)).ToArray());
-        if (string.IsNullOrWhiteSpace(sanitized))
-            sanitized = "message";
-        return sanitized.Length > 50 ? sanitized[..50] : sanitized;
     }
 }

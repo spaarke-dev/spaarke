@@ -60,7 +60,6 @@ public class OfficeJobQueue
             AssociationType = request.TargetEntity?.EntityType,
             AssociationId = request.TargetEntity?.EntityId,
             ContainerId = driveId, // Use resolved drive ID
-            FolderPath = request.FolderPath,
             TempFileLocation = $"spe://{driveId}/{itemId}", // Reference the already-uploaded SPE file
             FileName = fileName,
             FileSize = fileSize,

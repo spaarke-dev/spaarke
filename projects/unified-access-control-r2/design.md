@@ -447,7 +447,7 @@ resolution strategies in the codebase today, not one:
 
 | # | Strategy | Where | Secure-project behaviour needed |
 |---|---|---|---|
-| 1 | Acting **user's BU** → `businessunit.sprk_containerid` | 7 client sites; canonical resolver `xrmProvider.getSpeContainerIdFromBusinessUnit`. The BFF deliberately does not resolve this server-side (INV-7) | **special case** → project's own `sprk_containerid` |
+| 1 | Acting **user's BU** → `businessunit.sprk_containerid` | 7 client sites; canonical resolver `xrmProvider.getSpeContainerIdFromBusinessUnit`. ⚠️ **Row corrected 2026-08-27 — see the INV-7 note below.** Strategy 1 is the DEFECT, not the design, and the BFF now DOES resolve server-side | **special case** → project's own `sprk_containerid` |
 | 2 | A single global `ArchiveContainerId` from config | server-side email/communication ingest (`IncomingCommunicationProcessor:868, 991`) | **special case** → the parent secure project's container, else secure attachments land in the shared archive |
 | 3 | The document's own `GraphDriveId` / `GraphItemId` | every read/download path once a document exists | ✅ no change — already per-document |
 
@@ -455,9 +455,65 @@ Strategy 3 needs nothing. Strategies 1 and 2 both need the special case, and **2
 forget** because it has no client involved and no wizard to put a resolver in.
 
 **Implementation rule**: one shared, record-aware resolver — *if the context record is a secure project,
-use its `sprk_containerid`; otherwise the existing BU cascade* — and route **every** call site through
-it. Do not add the `issecure` test at seven client sites; that is seven places to drift. This respects
-INV-7 (the resolver stays client-side for strategy 1) while giving strategy 2 a server-side equivalent.
+use its `sprk_containerid`; otherwise the BU cascade* — and route **every** call site through it. Do not
+add the `issecure` test at seven client sites; that is seven places to drift.
+
+> ### ⚠️ CORRECTION 2026-08-27 (tasks 075/076/083) — INV-7 was MISREAD, and it already specifies this model
+>
+> This section previously said *"the BFF deliberately does not resolve this server-side (INV-7)"* and
+> *"this respects INV-7 (the resolver stays client-side for strategy 1)"*. **Both statements are
+> withdrawn.** Two things were wrong:
+>
+> **1. INV-7 does not say that — it says the opposite, and we were violating it.** Read the source,
+> [`spaarke-multi-container-multi-index-r1/design.md` §3 INV-7](../spaarke-multi-container-multi-index-r1/design.md#inv-7--resolution-chain-canonical-order):
+>
+> > **INV-7 — Resolution chain (canonical order).** For any record needing a container/index:
+> > 1. **Record's own field** (if set) — wins
+> > 2. **Parent's BU's field** (*for Documents: parent record's BU; for Matters etc.: own BU*) — cascading default
+> > 3. **Tenant-level default** (*server fallback, defined in BFF config*) — last resort
+>
+> That is, line for line, the model below: secure record → its own container; otherwise **the record's**
+> business unit; otherwise a **server-side** config default. INV-7 is a *resolution-order* invariant. It
+> never prohibited server-side resolution — clause 3 explicitly names a server fallback in BFF config —
+> and it explicitly sources the BU from the **parent record**, not the acting user. **The seven client
+> sites were in breach of INV-7, and this document cited INV-7 as the reason to leave them that way.**
+>
+> Where the "client-side" reading came from: INV-7's next sentence says the chain *"is implemented at
+> create-time (plugins + wizard)"* — a statement about **where the chain runs**, not about what the BFF
+> may do. That project's own `CLAUDE.md` forbids introducing Dataverse plugins, so "plugins + wizard"
+> collapsed to "wizard" in practice, which is how the comment on `SaveComposeDocumentRequest.ContainerId`
+> (`Services/Compose/IComposeService.cs:743-751`) came to read *"the resolver stays in the wizards"*. That
+> comment is a note on implementation location; it was then cited downstream as a constraint on
+> capability. Nothing ever prevented server-side resolution — the BFF already reads Dataverse and already
+> reads and writes `sprk_containerid` during provisioning.
+>
+> ⚠️ **Beware the label.** At least four unrelated invariants in this repo are numbered "INV-7" —
+> ADR-028's single-`PublicClientApplication` rule, SpaarkeAi's `buildBffApiUrl` rule, this container/index
+> resolution chain, and others. Cite the source project when referring to one.
+>
+> **2. "Acting user's BU" is the defect, not the design.** Every client site resolved
+> `getUserId() → systemuser.businessunitid → businessunit.sprk_containerid` — *the person uploading, not
+> the thing being uploaded to.* Two users uploading to the same matter split its documents across two
+> containers. Worse for isolation: users sit in the Operations subtree while secure records are owned in
+> `Secure Projects`, so acting-user resolution writes a secure record's content into the general
+> **Operations** container — and because SPE permissions are additive-only, no later permission change
+> retracts it.
+>
+> **The model, settled by the owner 2026-08-27 and implemented in `RecordContainerResolver`:**
+> ```
+> secure record   -> its OWN sprk_containerid, or FAIL CLOSED (never a fallback)
+> everything else -> the RECORD's owningbusinessunit -> businessunit.sprk_containerid
+> server ingest   -> Communication:ArchiveContainerId (no owning record exists — strategy 2 below)
+> ```
+> The container follows the **record**, never the acting user. Verified live against Dataverse on
+> 2026-08-27: `owningbusinessunit` is populated on every `sprk_project` row; `businessunit.sprk_containerid`
+> on 3 of 6 BUs; the `Secure Project` BU has **no** container (correct — secure records use their own);
+> the root `Spaarke` BU **shares** its container with `Spaarke Business Unit 1`, so **a BU container is not
+> itself an isolation boundary**; and `sprk_issecure` is **NULL on 5 of 10 rows** — the "absent is not
+> false" case, in real data.
+>
+> Strategy 2 (`ArchiveContainerId`) is unaffected and remains correct: server-side ingest has no owning
+> record at the moment the bytes move.
 
 **Also required**: the wizard's BU cascade (`EntityCreationService.applyUserBuDefaults`) must **not**
 apply `sprk_containerid` to a secure project. Today it does, which both defeats isolation and collides

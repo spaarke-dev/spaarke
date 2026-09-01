@@ -60,9 +60,18 @@ public static class DocumentsEndpoints
 
                 using var stream = request.Body;
 
+                // SANITIZED 2026-08-29. `fileName` is a QUERY-STRING parameter, so it is fully
+                // client-controlled, and it becomes the whole SPE upload path — Graph creates every
+                // '/'-delimited segment of that path as a folder. This route also writes app-only (MI), so
+                // no container ACL constrains where it lands; it is the same client-controlled path
+                // injection as ChatWordExportEndpoints, on a route that is additionally already flagged as
+                // a live authorization hole (see SpeWriteSinkContainerProvenanceGuardTests row 4, task 083).
+                // Sanitizing does NOT close that authorization hole — it closes the folder-minting half.
+                var uploadPath = SpeUploadPath.SanitizeFileName(fileName);
+
                 var localStream = stream;
                 var result = await GraphCallScope.Run(
-                    () => speFileStore.UploadSmallAsync(driveId, fileName, localStream),
+                    () => speFileStore.UploadSmallAsync(driveId, uploadPath, localStream),
                     "file.upload.small");
 
                 if (result == null)
