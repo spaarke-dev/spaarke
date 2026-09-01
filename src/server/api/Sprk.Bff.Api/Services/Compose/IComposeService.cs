@@ -734,7 +734,8 @@ public sealed record ComposeMountProjection
 /// <b>Create-on-save (FR-05)</b>: <see cref="DocumentSpeId"/> and <see cref="DriveId"/> are
 /// OPTIONAL. When <see cref="DocumentSpeId"/> is absent the caller is saving a TRANSIENT draft
 /// (Browse / Upload / AI-drafted — task 010/012) that has no SPE drive-item yet; the Save then
-/// CREATES the drive-item in the client-supplied <see cref="ContainerId"/> under OBO before the
+/// CREATES the drive-item under OBO in a container the SERVER derives (see the ContainerId
+/// tombstone below and <c>ComposeService.ResolveCreateOnSaveContainerAsync</c>) before the
 /// record + indexing steps. When <see cref="DocumentSpeId"/> is present the Save replaces the
 /// existing item's content (the original R1 behavior). Both cases are idempotent.
 /// </remarks>
@@ -742,11 +743,11 @@ public sealed record SaveComposeDocumentRequest
 {
     /// <summary>SPE drive (container) id. Required for the replace-content path (when
     /// <see cref="DocumentSpeId"/> is present); ignored for the transient create path, where the
-    /// drive is derived from <see cref="ContainerId"/>.</summary>
+    /// drive comes from the SERVER-derived container, never from this request.</summary>
     public string? DriveId { get; init; }
 
     /// <summary>SPE drive-item id. Null/absent for a TRANSIENT create-on-save draft (FR-05,
-    /// Fork B) — the Save creates the drive-item in <see cref="ContainerId"/>. Present for the
+    /// Fork B) — the Save creates the drive-item in the SERVER-derived container. Present for the
     /// replace-content path (a document already backed by SPE).</summary>
     public string? DocumentSpeId { get; init; }
 
