@@ -229,9 +229,15 @@ public class EmailAttachmentProcessor : IEmailAttachmentProcessor
                 attachment.Content.Position = 0;
             }
 
+            // Named as what it IS — the whole upload path — and sanitized at the call. Redundant with
+            // GenerateUniqueFileName above and deliberately so: sanitizing is idempotent, and this is the
+            // line that stays correct if the name's provenance ever changes. Enforced by
+            // tests/Spaarke.ArchTests/SpeUploadPathIsFlatGuardTests.cs.
+            var uploadPath = SpeUploadPath.SanitizeFileName(uniqueFileName);
+
             var uploadResult = await _speFileStore.UploadSmallAsync(
                 request.DriveId,
-                uniqueFileName,
+                uploadPath,
                 attachment.Content,
                 cancellationToken);
 
@@ -348,10 +354,22 @@ public class EmailAttachmentProcessor : IEmailAttachmentProcessor
         };
     }
 
+    /// <summary>
+    /// The uniqueness precedent the 2026-08-28 flattening copied everywhere else: collision safety lives in
+    /// the FILE NAME, never in a folder segment, because <c>UploadSmallAsync</c> is Graph's path-keyed simple
+    /// PUT and replaces silently.
+    /// </summary>
+    /// <remarks>
+    /// SANITIZED 2026-08-29. The result goes straight into the SPE upload path, and
+    /// <c>attachment.FileName</c> comes off a RECEIVED email, so it is attacker-influenced. Sanitizing
+    /// BEFORE the extension split matters: <c>Path.GetExtension("a/b.pdf")</c> is host-OS-dependent, so
+    /// splitting first and sanitizing after would produce a different name on Linux than on Windows.
+    /// </remarks>
     private static string GenerateUniqueFileName(string originalFileName)
     {
-        var extension = Path.GetExtension(originalFileName);
-        var nameWithoutExtension = Path.GetFileNameWithoutExtension(originalFileName);
+        var safeName = SpeUploadPath.SanitizeFileName(originalFileName);
+        var extension = Path.GetExtension(safeName);
+        var nameWithoutExtension = Path.GetFileNameWithoutExtension(safeName);
 
         // Add timestamp to ensure uniqueness
         var timestamp = DateTime.UtcNow.ToString("yyyyMMdd-HHmmss-fff");

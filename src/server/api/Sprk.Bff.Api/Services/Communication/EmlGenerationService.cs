@@ -1,4 +1,5 @@
 using MimeKit;
+using Sprk.Bff.Api.Infrastructure.Graph;
 using Sprk.Bff.Api.Services.Communication.Models;
 
 namespace Sprk.Bff.Api.Services.Communication;
@@ -88,33 +89,20 @@ public sealed class EmlGenerationService
         message.WriteTo(stream);
         var bytes = stream.ToArray();
 
-        // Generate filename
-        var sanitizedSubject = SanitizeFileName(request.Subject);
+        // Generate filename. This value becomes an SPE upload path verbatim (CommunicationService
+        // .ArchiveToSpeAsync -> "{communicationId:N}_{FileName}"), so it goes through the ONE sanitizer:
+        // Infrastructure/Graph/SpeUploadPath. The local copy that used to live here — same Windows-strict
+        // character set, its own 50-char truncation — was consolidated 2026-08-29 (root CLAUDE.md §11).
+        var sanitizedSubject = SpeUploadPath.SanitizeFileName(request.Subject, maxLength: 50);
         var dateStr = response.SentAt.ToString("yyyyMMdd_HHmmss");
         var fileName = $"{sanitizedSubject}_{dateStr}.eml";
 
         return new EmlResult(bytes, fileName);
     }
 
-    // Windows reserves a stricter superset of invalid filename characters than Linux,
-    // and .eml files are routinely opened on Windows clients (Outlook). Use the
-    // Windows-strict set explicitly so the output is portable regardless of the host
-    // OS that generated the file. Linux Path.GetInvalidFileNameChars() returns only
-    // {'\0','/'}, which would leave '<', '>', '"', etc. in filenames written from a
-    // Linux runner — those filenames break on Windows clients.
-    private static readonly HashSet<char> s_invalidFileNameChars = new(
-        Path.GetInvalidFileNameChars()
-            .Concat(new[] { '<', '>', ':', '"', '/', '\\', '|', '?', '*' }));
-
     /// <summary>Returns the first non-null, non-empty value, or null when both are empty (empty-tolerant coalesce).</summary>
     private static string? FirstNonEmpty(string? a, string? b) =>
         !string.IsNullOrEmpty(a) ? a : !string.IsNullOrEmpty(b) ? b : null;
-
-    private static string SanitizeFileName(string input)
-    {
-        var sanitized = new string(input.Where(c => !s_invalidFileNameChars.Contains(c)).ToArray());
-        return sanitized.Length > 50 ? sanitized[..50] : sanitized;
-    }
 }
 
 /// <summary>

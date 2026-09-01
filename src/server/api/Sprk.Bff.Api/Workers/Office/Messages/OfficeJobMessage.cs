@@ -91,13 +91,15 @@ public record UploadFinalizationPayload
     /// </summary>
     public required string ContainerId { get; init; }
 
-    /// <summary>
-    /// Target folder path within the container.
-    /// </summary>
-    public string? FolderPath { get; init; }
+    // FolderPath DELETED 2026-08-28 alongside SaveRequest.FolderPath (stop minting SPE folders on upload
+    // paths). Its only consumer was UploadFinalizationWorker's traditional-upload branch, which was
+    // itself unreachable — see the deletion note in that file.
 
     /// <summary>
-    /// Temporary file location (blob storage URL or local path).
+    /// Temporary file location. ALWAYS an <c>spe://{driveId}/{itemId}</c> reference to a file the
+    /// synchronous save path has already uploaded — <c>OfficeJobQueue</c> is the sole producer of this
+    /// payload and sets it unconditionally. See the reachability note in
+    /// <see cref="Sprk.Bff.Api.Workers.Office.UploadFinalizationWorker"/>.
     /// </summary>
     public required string TempFileLocation { get; init; }
 

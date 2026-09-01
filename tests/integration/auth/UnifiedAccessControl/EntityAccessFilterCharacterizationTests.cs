@@ -88,6 +88,57 @@ public class EntityAccessFilterCharacterizationTests : IClassFixture<OfficeSaveT
     }
 
     /// <summary>
+    /// A refusal the USER can act on.
+    ///
+    /// <para><b>The defect this pins</b> (found + fixed 2026-08-31, owner-directed). The filter passed the
+    /// literal reason <c>"insufficient_rights"</c> into a five-arm <c>MapAuthorizationDenial</c> switch that
+    /// had no arm for that string — so every real denial fell to the default and the user was told
+    /// <i>"Access denied to association target"</i>. That names no record, no missing capability and no
+    /// remedy, and "association target" is internal vocabulary. The switch's own better sentence (for
+    /// <c>"permission_denied"</c>) was unreachable from the only call site.</para>
+    ///
+    /// <para>The Office task pane renders the SERVER's <c>detail</c> in preference to its own static
+    /// per-code string (<c>errorMessages.ts</c> <c>mapProblemDetailsToMessage</c>:
+    /// <c>message: problem.detail || mapped.message</c>), so this text is what the user actually reads —
+    /// which is why asserting it is asserting behaviour, not wording for its own sake.</para>
+    ///
+    /// <para>Third instance of this class in this project: task 092 found a live 404 surfaced as
+    /// <i>"Failed to create sharing link."</i>, and task 072 found every handler exception on nine routes
+    /// masked as <c>500 "Authorization Error"</c>. A correct status code with an uninformative body is a
+    /// support call, not a fix.</para>
+    /// </summary>
+    [Fact]
+    public async Task PostOfficeSave_WhenDeniedForInsufficientRights_ExplainsTheMissingPermissionAndTheRemedy()
+    {
+        // Arrange — a caller who can see the matter but cannot attach anything to it.
+        using var client = _fixture.CreateClientWithRights(ReadOnly);
+
+        // Act
+        var response = await client.PostAsJsonAsync("/api/office/save", SaveRequestTargeting("sprk_matter", MatterId));
+
+        // Assert — the machine-readable half is unchanged (other tests + the client's code map rely on it).
+        response.StatusCode.Should().Be(HttpStatusCode.Forbidden);
+        (await ReasonCodeOf(response)).Should().Be("insufficient_rights");
+
+        var detail = await DetailOf(response);
+
+        detail.Should().NotBeNullOrWhiteSpace("a 403 with no detail leaves the client's generic string to explain a specific failure");
+
+        detail.Should().Contain("Append To",
+            "the user cannot act on 'access denied'; naming the Dataverse permission is the one word an "
+            + "administrator can search for. Safe to name: the filter answers 403 whether or not the record "
+            + "exists (CallerRecordAccessProbe conflates not-found with no-access on purpose), so this "
+            + "discloses no record existence — see task 022's enumeration-oracle finding");
+
+        detail.Should().ContainAny("administrator", "owner",
+            "a denial that states no remedy is a dead end for the user");
+
+        detail.Should().NotContain("association target",
+            "the pre-fix default arm's wording — internal vocabulary that named neither the record nor the "
+            + "missing capability. Its return would mean the reason-code fall-through has come back");
+    }
+
+    /// <summary>
     /// The rights check must be aimed at the TARGET ENTITY's own collection. This is the assertion that
     /// actually pins the defect: before the fix the probe was never consulted at all, and the lookup
     /// that WAS performed named <c>sprk_documents</c>.
@@ -176,6 +227,27 @@ public class EntityAccessFilterCharacterizationTests : IClassFixture<OfficeSaveT
         {
             using var document = JsonDocument.Parse(body);
             return document.RootElement.TryGetProperty("reasonCode", out var code) ? code.GetString() : null;
+        }
+        catch (JsonException)
+        {
+            return null;
+        }
+    }
+
+    /// <summary>
+    /// The ProblemDetails <c>detail</c> — the text the Office task pane actually shows the user, since
+    /// <c>mapProblemDetailsToMessage</c> prefers it over its own static per-error-code string.
+    /// </summary>
+    private static async Task<string?> DetailOf(HttpResponseMessage response)
+    {
+        var body = await response.Content.ReadAsStringAsync();
+        if (string.IsNullOrWhiteSpace(body))
+            return null;
+
+        try
+        {
+            using var document = JsonDocument.Parse(body);
+            return document.RootElement.TryGetProperty("detail", out var detail) ? detail.GetString() : null;
         }
         catch (JsonException)
         {

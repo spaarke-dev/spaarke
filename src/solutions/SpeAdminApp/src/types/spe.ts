@@ -727,7 +727,7 @@ export type SharingLinkType = "view" | "edit" | "embed";
 /** Sharing link scope values */
 export type SharingLinkScope = "anonymous" | "organization" | "users";
 
-/** Sharing link returned by POST /api/spe/containers/{id}/items/{itemId}/sharing */
+/** Sharing link returned by POST /api/spe/containers/{id}/items/{itemId}/share */
 export interface SharingLink {
   /** The sharing link URL */
   link?: {
