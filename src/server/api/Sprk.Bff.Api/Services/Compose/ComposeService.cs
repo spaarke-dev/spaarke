@@ -1145,9 +1145,19 @@ public class ComposeService : IComposeService
                 + "be attributed to a principal.");
         }
 
-        var session = await _sessions
-            .GetSessionAsync(request.TenantId, request.SessionId, cancellationToken)
-            .ConfigureAwait(false);
+        // SessionId is OPTIONAL on the create-on-save path (task 110): a Browse/local-file first Save
+        // has no chat session and the endpoint forwards SessionId = "". The session store's id guard
+        // (TenantCache) throws ArgumentException("Id must be a non-empty string") on an empty id, which
+        // the save route maps to a 400 — i.e. an unconditional lookup here turned the DESIGNED
+        // session-less flow into a request rejection. Verified on the wire 2026-09-01 (8 seam/contract
+        // tests, e.g. CreateOnSave_WithEmptySessionId_Returns200AndPersistsDocumentWithoutRebind). No
+        // session means no host context, so the acting-user branch below is the correct — and only —
+        // derivation for it.
+        var session = string.IsNullOrWhiteSpace(request.SessionId)
+            ? null
+            : await _sessions
+                .GetSessionAsync(request.TenantId, request.SessionId, cancellationToken)
+                .ConfigureAwait(false);
 
         // Issue #863's ownership test, applied here for the same reason: an unowned or foreign session is
         // not a trustworthy source of the record identity this method is about to authorize against.

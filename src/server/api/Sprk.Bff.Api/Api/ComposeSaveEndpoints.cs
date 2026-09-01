@@ -505,6 +505,40 @@ internal static class ComposeSaveEndpoints
                     ? "https://tools.ietf.org/html/rfc7231#section-6.6.4"
                     : "https://tools.ietf.org/html/rfc7231#section-6.5.8");
         }
+        catch (Sprk.Bff.Api.Infrastructure.Exceptions.SdapProblemException ex)
+        {
+            // Issue #858: the server-side container resolution refuses with TYPED problems —
+            // compose_record_access_denied (403), compose_host_entity_unsupported /
+            // compose_host_record_invalid / acting_user_ambiguous / secure_record_container_missing
+            // (409), acting_user_not_resolvable (403). ResolveCreateOnSaveContainerAsync's own contract
+            // says these "must reach the client as 403/409 rather than as a save step that didn't
+            // work" — and without this arm they fell through to the catch-all below and shipped as the
+            // exact opaque 500 ("Save failed: SdapProblemException: …") the DEF-14 regression suite
+            // exists to forbid. Verified on the wire 2026-09-01. The /api/compose group carries no
+            // exception filter (unlike Office's OfficeExceptionFilter), so the mapping lives here on
+            // the one path both save routes share.
+            //
+            // Telemetry mirrors the UnauthorizedAccessException arm above: the request was REFUSED
+            // before any write (nothing stored, nothing overwritten), so the outcome is RefusedInvalid,
+            // with the cause split by what the refusal was about.
+            ComposeSaveTelemetry.RecordSaveOutcome(
+                ComposeSaveOutcome.RefusedInvalid,
+                ex.StatusCode == StatusCodes.Status403Forbidden
+                    ? ComposeSaveTelemetry.CauseForbidden
+                    : ComposeSaveTelemetry.CauseBadRequest);
+            logger.LogWarning(ex,
+                "Compose save refused: {Code} ({StatusCode}). TraceId={TraceId}",
+                ex.Code, ex.StatusCode, httpContext.TraceIdentifier);
+            return Results.Problem(
+                statusCode: ex.StatusCode,
+                title: ex.Title,
+                detail: ex.Detail,
+                extensions: new Dictionary<string, object?>
+                {
+                    ["code"] = ex.Code,
+                    ["correlationId"] = httpContext.TraceIdentifier,
+                });
+        }
         catch (Exception ex)
         {
             ComposeSaveTelemetry.RecordSaveOutcome(ComposeSaveOutcome.StorageFailed, ComposeSaveTelemetry.CauseUnhandled);
