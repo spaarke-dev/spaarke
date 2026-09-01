@@ -302,30 +302,13 @@ public class UploadFinalizationWorker : BackgroundService, IOfficeJobHandler
                 documentId);
 
             // Step 10: Queue next stage (profile or indexing)
-            _logger.LogWarning(
-                "🔵 DIAGNOSTIC: About to check TriggerAiProcessing for job {JobId}. TriggerAiProcessing={TriggerAi}, AiOptions.ProfileSummary={ProfileSummary}, AiOptions.RagIndex={RagIndex}, AiOptions.DeepAnalysis={DeepAnalysis}",
-                message.JobId,
-                payload.TriggerAiProcessing,
-                payload.AiOptions?.ProfileSummary ?? false,
-                payload.AiOptions?.RagIndex ?? false,
-                payload.AiOptions?.DeepAnalysis ?? false);
-
             if (payload.TriggerAiProcessing)
             {
-                _logger.LogWarning(
-                    "🟢 DIAGNOSTIC: TriggerAiProcessing is TRUE - calling QueueNextStageAsync for job {JobId}",
-                    message.JobId);
                 await QueueNextStageAsync(message, documentId, payload, driveId, itemId, cancellationToken);
-                _logger.LogWarning(
-                    "🟢 DIAGNOSTIC: QueueNextStageAsync completed successfully for job {JobId}",
-                    message.JobId);
             }
             else
             {
                 // No AI processing - mark job as complete
-                _logger.LogWarning(
-                    "🔴 DIAGNOSTIC: TriggerAiProcessing is FALSE for job {JobId} - skipping AI processing",
-                    message.JobId);
                 await UpdateJobStatusAsync(
                     message.JobId,
                     JobStatus.Completed,
