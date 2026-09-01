@@ -47,9 +47,9 @@ namespace Sprk.Bff.Api.Services.Compose;
 /// </remarks>
 public class ComposeService : IComposeService
 {
-    private const string DocumentLogicalName = "sprk_document";
-    private const string DocumentIdAttribute = "sprk_documentid";
-    private const string GraphItemIdAttribute = "sprk_graphitemid";
+    internal const string DocumentLogicalName = "sprk_document";
+    internal const string DocumentIdAttribute = "sprk_documentid";
+    internal const string GraphItemIdAttribute = "sprk_graphitemid";
     private const string DisplayNameAttribute = "sprk_documentname";
     private const string FileNameAttribute = "sprk_filename";
     // SPE-pointer + file-metadata columns — logical names mirrored from the canonical
@@ -57,7 +57,7 @@ public class ComposeService : IComposeService
     // which maps through Spaarke.Dataverse UpdateDocumentRequest → DataverseWebApiService.
     // WITHOUT these, every downstream reader (open-links, preview) validates the SPE pointer,
     // finds drive-id empty + sprk_hasfile false, and 409s "No file is attached to this document".
-    private const string GraphDriveIdAttribute = "sprk_graphdriveid";
+    internal const string GraphDriveIdAttribute = "sprk_graphdriveid";
     private const string HasFileAttribute = "sprk_hasfile";
     private const string FileSizeAttribute = "sprk_filesize";
     private const string MimeTypeAttribute = "sprk_mimetype";
@@ -73,15 +73,15 @@ public class ComposeService : IComposeService
     // BEFORE minting a transient SPE item, so repeated create-on-save calls with the same key replace one
     // record in place instead of minting duplicates (the 8-duplicate defect). Resolve by KEY, never by
     // content (I-7/NFR-02).
-    private const string ComposeTransientKeyAttribute = "sprk_composetransientkey";
+    internal const string ComposeTransientKeyAttribute = "sprk_composetransientkey";
     // FR-C3 (email-communication-intelligence-r2, graduate-on-divergence): the SPE content identity
     // (quickXorHash, task 023 indexed column) + the self-referential canonical link. A create-on-save
     // stamps sprk_canonicalhash; on a byte-identical hit it also LINKS via sprk_canonicaldocument (this
     // editable copy is byte-identical NOW). The link is CLEARED the moment content diverges (first edit),
     // graduating the copy to its own canonical — see the create + idempotent branches of
     // PromoteIfEphemeralAsync. Distinct from sprk_parentdocument (attachment→parent-email).
-    private const string CanonicalHashAttribute = "sprk_canonicalhash";
-    private const string CanonicalDocumentAttribute = "sprk_canonicaldocument";
+    internal const string CanonicalHashAttribute = "sprk_canonicalhash";
+    internal const string CanonicalDocumentAttribute = "sprk_canonicaldocument";
 
     // Task 041 B-MED-3 (option C): the sprk_document record-link lookup vocabulary (ADR-024 — the
     // SAME closed set AttachmentDocumentAssociationRung follows, type-agnostic by design). A
@@ -240,6 +240,9 @@ public class ComposeService : IComposeService
     // Task 070 cluster 3: the storage boundary of a save — which bytes it starts from, under what
     // precondition it writes, and the version stamp that makes the NEXT save's staleness detectable.
     private readonly ComposeSaveStorageCoordinator _saveStorage;
+
+    /// <summary>Task 070 cluster 2b — which `sprk_document` row an external identifier denotes.</summary>
+    private readonly ComposeRecordResolution _recordResolution;
     // Task 070 cluster 4: how a PDF becomes an editable document, and how that origin is remembered.
     private readonly ComposePdfIntakeCoordinator _pdfIntake;
 
@@ -297,6 +300,8 @@ public class ComposeService : IComposeService
         // FR-C3 (email-communication-intelligence-r2): null in a bare test constructor (dedup hook = no-op),
         // the real scoped detector in every non-test host.
         _dedupDetector = dedupDetector;
+        // Task 070 cluster 2b — record RESOLUTION. Constructed after _dedupDetector because it takes it.
+        _recordResolution = new ComposeRecordResolution(_sessions, _dataverse, _logger, _dedupDetector);
         // FR-08 (task 050): ADR-009 Redis when present in every non-test host, null (no staleness
         // re-anchor) in a bare test constructor.
         _cache = cache;
@@ -1458,10 +1463,10 @@ public class ComposeService : IComposeService
             // against the durable sprk_composetransientkey_uk alt-key. A hit REUSES the existing record's SPE
             // item (replace in place, no new mint, no new row). Save-New (ForkNew) deliberately SKIPS the
             // dedup to fork a fresh record. Resolves by KEY, never by content (I-7/NFR-02).
-            TransientKeyMatch? dedupMatch = null;
+            ComposeRecordResolution.TransientKeyMatch? dedupMatch = null;
             if (!request.ForkNew && !string.IsNullOrWhiteSpace(request.TransientKey))
             {
-                dedupMatch = await TryFindDocumentByTransientKeyAsync(request.TransientKey!, cancellationToken)
+                dedupMatch = await _recordResolution.TryFindDocumentByTransientKeyAsync(request.TransientKey!, cancellationToken)
                     .ConfigureAwait(false);
             }
 
@@ -2009,7 +2014,7 @@ public class ComposeService : IComposeService
 
         // 1) Idempotency check by SPE drive-item id (alt key sprk_graphitemid_uk). The lookup also carries the
         //    FR-C3 dedup columns so graduate-on-divergence needs no extra round-trip.
-        var existingRow = await TryFindDocumentByGraphItemIdAsync(request.DocumentSpeId, cancellationToken)
+        var existingRow = await _recordResolution.TryFindDocumentByGraphItemIdAsync(request.DocumentSpeId, cancellationToken)
             .ConfigureAwait(false);
 
         if (existingRow is not null)
@@ -2024,7 +2029,7 @@ public class ComposeService : IComposeService
             // null-tolerant, but skipping avoids an empty-session lookup + a misleading warn.
             if (!string.IsNullOrWhiteSpace(request.SessionId))
             {
-                await RebindSessionDocumentIdAsync(
+                await _recordResolution.RebindSessionDocumentIdAsync(
                         tenantId: request.TenantId,
                         sessionId: request.SessionId,
                         currentDocumentId: request.DocumentSpeId,
@@ -2035,7 +2040,7 @@ public class ComposeService : IComposeService
 
             // FR-C3 graduate-on-divergence: if this existing row is a hash-linked COPY whose content has now
             // diverged from the canonical it was linked at, sever the link so it becomes its own canonical.
-            await GraduateLinkedCopyIfDivergedAsync(existingRow, request, cancellationToken)
+            await _recordResolution.GraduateLinkedCopyIfDivergedAsync(existingRow, request, cancellationToken)
                 .ConfigureAwait(false);
 
             // FR-S09 item 7 (r8 task 016): refresh the file metadata this save just changed.
@@ -2284,12 +2289,12 @@ public class ComposeService : IComposeService
                 "Compose promote: upsert failed for driveItem={DocumentSpeId} — likely a concurrent same-transientKey first-save. Re-resolving via alternate key (graphItemId, then transientKey).",
                 request.DocumentSpeId);
 
-            Guid? raceWinnerId = (await TryFindDocumentByGraphItemIdAsync(request.DocumentSpeId, cancellationToken)
+            Guid? raceWinnerId = (await _recordResolution.TryFindDocumentByGraphItemIdAsync(request.DocumentSpeId, cancellationToken)
                 .ConfigureAwait(false))?.Id;
 
             if (!raceWinnerId.HasValue && !string.IsNullOrWhiteSpace(request.TransientKey))
             {
-                var transientKeyWinner = await TryFindDocumentByTransientKeyAsync(request.TransientKey!, cancellationToken)
+                var transientKeyWinner = await _recordResolution.TryFindDocumentByTransientKeyAsync(request.TransientKey!, cancellationToken)
                     .ConfigureAwait(false);
                 raceWinnerId = transientKeyWinner?.RecordId;
             }
@@ -2308,7 +2313,7 @@ public class ComposeService : IComposeService
         //    first Save). The sprk_document create above already completed without a session.
         if (!string.IsNullOrWhiteSpace(request.SessionId))
         {
-            await RebindSessionDocumentIdAsync(
+            await _recordResolution.RebindSessionDocumentIdAsync(
                     tenantId: request.TenantId,
                     sessionId: request.SessionId,
                     currentDocumentId: request.DocumentSpeId,
@@ -2577,205 +2582,6 @@ public class ComposeService : IComposeService
         CancellationToken cancellationToken = default)
         => _annotations.SaveAsync(request, cancellationToken);
 
-    /// <summary>
-    /// FR-07 idempotent rebind of a ChatSession's DocumentId. Handles three cases:
-    /// (a) current==new (no-op), (b) session missing (returns null), (c) stored already at
-    /// target (no-op), (d) rebind applied via ChatSessionManager's cache-write path.
-    /// </summary>
-    private async Task<ChatSession?> RebindSessionDocumentIdAsync(
-        string tenantId,
-        string sessionId,
-        string currentDocumentId,
-        string newDocumentId,
-        CancellationToken ct)
-    {
-        // (a) Caller asked for a no-op.
-        if (string.Equals(currentDocumentId, newDocumentId, StringComparison.Ordinal))
-        {
-            return await _sessions.GetSessionAsync(tenantId, sessionId, ct).ConfigureAwait(false);
-        }
-
-        var session = await _sessions.GetSessionAsync(tenantId, sessionId, ct).ConfigureAwait(false);
-        if (session is null)
-        {
-            _logger.LogWarning(
-                "Compose: rebind called for non-existent session {SessionId} (tenant={TenantId})",
-                sessionId, tenantId);
-            return null;
-        }
-
-        // (c) Stored binding already at target.
-        if (string.Equals(session.DocumentId, newDocumentId, StringComparison.Ordinal))
-        {
-            return session;
-        }
-
-        // Out-of-order race: caller-asserted currentDocumentId differs from stored.
-        // Proceed with new-value-wins semantics but emit a Warning for operator visibility.
-        if (!string.IsNullOrWhiteSpace(currentDocumentId) &&
-            !string.Equals(session.DocumentId, currentDocumentId, StringComparison.Ordinal))
-        {
-            _logger.LogWarning(
-                "Compose rebind: caller-asserted currentDocumentId ({CallerCurrent}) differs from stored DocumentId ({StoredCurrent}) for session {SessionId} (tenant={TenantId}); proceeding with rebind to {NewDocumentId} (new-value-wins).",
-                currentDocumentId, session.DocumentId, sessionId, tenantId, newDocumentId);
-        }
-
-        _logger.LogInformation(
-            "Compose: rebinding session {SessionId} DocumentId {From} -> {To} (tenant={TenantId})",
-            sessionId, session.DocumentId, newDocumentId, tenantId);
-
-        var rebound = session with
-        {
-            DocumentId = newDocumentId,
-            LastActivity = DateTimeOffset.UtcNow,
-        };
-
-        await _sessions.UpdateSessionCacheAsync(rebound, ct).ConfigureAwait(false);
-        return rebound;
-    }
-
-    /// <summary>
-    /// Looks up an existing <c>sprk_document</c> row by SPE drive-item id via the
-    /// <c>sprk_graphitemid_uk</c> alternate key. Returns the <c>sprk_documentid</c> or
-    /// <c>null</c> when no row exists.
-    /// </summary>
-    /// <summary>
-    /// FR-C3 graduate-on-divergence (email-communication-intelligence-r2): when a subsequent Compose save
-    /// routes through <see cref="PromoteIfEphemeralAsync"/>'s idempotent existing-row branch, check whether the
-    /// row is a hash-linked COPY (<c>sprk_canonicaldocument</c> set) whose LIVE content has diverged from the
-    /// hash it was linked at (<c>sprk_canonicalhash</c>). If so, sever the link (clear
-    /// <c>sprk_canonicaldocument</c> via the <see cref="DBNull"/> clear-sentinel) and stamp the new content hash
-    /// — the copy graduates to its own canonical. The row's dedup columns are already in hand from the idempotent
-    /// alt-key lookup (no extra retrieve). Best-effort / non-fatal (NFR-04): every failure logs and leaves the
-    /// row unchanged (re-evaluated on the next save); never fails the save. No-op when the detector is absent
-    /// (bare test ctor), the drive id is unknown, or the row is a true canonical (no link to sever).
-    /// </summary>
-    private async Task GraduateLinkedCopyIfDivergedAsync(
-        Entity existingRow,
-        PromoteComposeDocumentRequest request,
-        CancellationToken cancellationToken)
-    {
-        if (_dedupDetector is null || string.IsNullOrWhiteSpace(request.GraphDriveId))
-            return;
-
-        // Only a hash-linked COPY can graduate — a true canonical has no sprk_canonicaldocument link.
-        if (existingRow.GetAttributeValue<EntityReference>(CanonicalDocumentAttribute) is null)
-            return;
-
-        try
-        {
-            var linkedHash = existingRow.GetAttributeValue<string>(CanonicalHashAttribute);
-            var (liveHash, _) = await _dedupDetector
-                .ResolveContentIdentityAsync(request.GraphDriveId!, request.DocumentSpeId, cancellationToken)
-                .ConfigureAwait(false);
-
-            // No live hash (unavailable) OR still identical → not diverged; leave the link intact.
-            if (string.IsNullOrWhiteSpace(liveHash) || string.Equals(liveHash, linkedHash, StringComparison.Ordinal))
-                return;
-
-            await _dataverse.UpdateAsync(
-                    DocumentLogicalName,
-                    existingRow.Id,
-                    new Dictionary<string, object>
-                    {
-                        [CanonicalDocumentAttribute] = DBNull.Value, // sever the link (DBNull clear-sentinel)
-                        [CanonicalHashAttribute] = liveHash!,        // stamp the diverged content's own identity
-                    },
-                    cancellationToken)
-                .ConfigureAwait(false);
-
-            _logger.LogInformation(
-                "Compose content-dedup: sprk_document {DocumentId} diverged from its linked canonical; graduated to its own document.",
-                existingRow.Id);
-        }
-        catch (Exception ex)
-        {
-            _logger.LogWarning(ex,
-                "Compose content-dedup (graduate) failed (non-fatal) for document {DocumentId}; leaving link intact.",
-                existingRow.Id);
-        }
-    }
-
-    private async Task<Entity?> TryFindDocumentByGraphItemIdAsync(
-        string driveItemId,
-        CancellationToken cancellationToken)
-    {
-        var key = new KeyAttributeCollection
-        {
-            { GraphItemIdAttribute, driveItemId },
-        };
-
-        try
-        {
-            // Fetch the FR-C3 dedup columns alongside the id so the idempotent branch can evaluate
-            // graduate-on-divergence WITHOUT a second Dataverse round-trip on the save hot path.
-            var entity = await _dataverse.RetrieveByAlternateKeyAsync(
-                DocumentLogicalName,
-                key,
-                new[] { DocumentIdAttribute, CanonicalDocumentAttribute, CanonicalHashAttribute },
-                cancellationToken).ConfigureAwait(false);
-
-            return entity;
-        }
-        catch (InvalidOperationException ex)
-        {
-            _logger.LogDebug(ex,
-                "Compose promote alt-key lookup threw InvalidOperationException for driveItem={DocumentSpeId} — treating as not-found",
-                driveItemId);
-            return null;
-        }
-    }
-
-    /// <summary>
-    /// G7 (FR-06, task 022): the resolved dedup identity for a transient key — the <c>sprk_document</c> row id
-    /// plus the SPE pointer (<c>sprk_graphitemid</c> + <c>sprk_graphdriveid</c>) needed to REPLACE its content
-    /// in place instead of minting a duplicate. <see cref="SpeId"/>/<see cref="DriveId"/> are <c>null</c> only
-    /// for a row that somehow carries a transient key but no SPE pointer (a G7-created row always has both) —
-    /// the caller then falls back to minting.
-    /// </summary>
-    private sealed record TransientKeyMatch(Guid RecordId, string? SpeId, string? DriveId);
-
-    /// <summary>
-    /// G7 (FR-06, task 022): looks up an existing <c>sprk_document</c> row by the client-minted transient key
-    /// via the <c>sprk_composetransientkey_uk</c> alternate key, returning its id + SPE pointer (so the caller
-    /// can replace in place). Returns <c>null</c> when no row carries the key (the first save of this draft,
-    /// or a Save-New fork). Resolves by KEY, never by content (I-7/NFR-02). Mirrors
-    /// <see cref="TryFindDocumentByGraphItemIdAsync"/> exactly (same best-effort not-found on a thrown
-    /// InvalidOperationException).
-    /// </summary>
-    private async Task<TransientKeyMatch?> TryFindDocumentByTransientKeyAsync(
-        string transientKey,
-        CancellationToken cancellationToken)
-    {
-        var key = new KeyAttributeCollection
-        {
-            { ComposeTransientKeyAttribute, transientKey },
-        };
-
-        try
-        {
-            var entity = await _dataverse.RetrieveByAlternateKeyAsync(
-                DocumentLogicalName,
-                key,
-                new[] { DocumentIdAttribute, GraphItemIdAttribute, GraphDriveIdAttribute },
-                cancellationToken).ConfigureAwait(false);
-
-            if (entity is null)
-            {
-                return null;
-            }
-
-            var speId = entity.Contains(GraphItemIdAttribute) ? entity[GraphItemIdAttribute] as string : null;
-            var driveId = entity.Contains(GraphDriveIdAttribute) ? entity[GraphDriveIdAttribute] as string : null;
-            return new TransientKeyMatch(entity.Id, speId, driveId);
-        }
-        catch (InvalidOperationException ex)
-        {
-            _logger.LogDebug(ex,
-                "Compose transient-key alt-key lookup threw InvalidOperationException for transientKey — treating as not-found");
-            return null;
-        }
-    }
 
     // =========================================================================
     // FR-31 action history — READ-ONLY ledger query (task 061). See design.md §8:
