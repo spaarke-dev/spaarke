@@ -728,29 +728,9 @@ public class UploadFinalizationWorker : BackgroundService, IOfficeJobHandler
             HasFile = true
         };
 
-        // Set entity association lookup based on AssociationType
-        if (hasAssociation && payload.AssociationId.HasValue)
-        {
-            switch (payload.AssociationType?.ToLowerInvariant())
-            {
-                case "matter":
-                    updateRequest.MatterLookup = payload.AssociationId.Value;
-                    break;
-                case "project":
-                    updateRequest.ProjectLookup = payload.AssociationId.Value;
-                    break;
-                case "invoice":
-                    updateRequest.InvoiceLookup = payload.AssociationId.Value;
-                    break;
-                // Account and Contact associations would need additional lookup fields
-                // added to UpdateDocumentRequest if needed
-                default:
-                    _logger.LogWarning(
-                        "Unknown association type {AssociationType}, skipping association",
-                        payload.AssociationType);
-                    break;
-            }
-        }
+        // Set entity association lookup based on AssociationType (shared with attachment children
+        // so they inherit the same "File to" association).
+        ApplyAssociationLookup(updateRequest, payload.AssociationType, payload.AssociationId);
 
         // Set email-specific fields if this is an email save
         if (payload.ContentType == SaveContentType.Email && payload.EmailMetadata != null)
@@ -1138,6 +1118,8 @@ public class UploadFinalizationWorker : BackgroundService, IOfficeJobHandler
                         containerId,
                         payload.EmailMetadata?.ConversationId,
                         payload.EmailMetadata?.InternetMessageId,
+                        payload.AssociationType,
+                        payload.AssociationId,
                         cancellationToken);
 
                     uploadedCount++;
@@ -1178,6 +1160,40 @@ public class UploadFinalizationWorker : BackgroundService, IOfficeJobHandler
     /// <summary>
     /// Process a single attachment: upload to SPE and create child Document record.
     /// </summary>
+    /// <summary>
+    /// Applies the Matter/Project/Invoice association lookup (from the save's AssociationType +
+    /// AssociationId) onto an <see cref="Spaarke.Dataverse.UpdateDocumentRequest"/>. Shared by the
+    /// parent email document and its attachment children so attachments inherit the same "File to"
+    /// association as the email. No-op when there is no association. Account/Contact have no document
+    /// lookup field yet (see UpdateDocumentRequest).
+    /// </summary>
+    private void ApplyAssociationLookup(
+        Spaarke.Dataverse.UpdateDocumentRequest request,
+        string? associationType,
+        Guid? associationId)
+    {
+        if (!associationId.HasValue || string.IsNullOrEmpty(associationType))
+            return;
+
+        switch (associationType.ToLowerInvariant())
+        {
+            case "matter":
+                request.MatterLookup = associationId.Value;
+                break;
+            case "project":
+                request.ProjectLookup = associationId.Value;
+                break;
+            case "invoice":
+                request.InvoiceLookup = associationId.Value;
+                break;
+            default:
+                _logger.LogWarning(
+                    "Unknown association type {AssociationType}, skipping association",
+                    associationType);
+                break;
+        }
+    }
+
     private async Task ProcessSingleAttachmentAsync(
         EmailAttachmentInfo attachment,
         Guid parentDocumentId,
@@ -1187,6 +1203,8 @@ public class UploadFinalizationWorker : BackgroundService, IOfficeJobHandler
         string containerId,
         string? conversationIndex,
         string? internetMessageId,
+        string? associationType,
+        Guid? associationId,
         CancellationToken cancellationToken)
     {
         if (attachment.Content == null || attachment.Content.Length == 0)
@@ -1262,6 +1280,10 @@ public class UploadFinalizationWorker : BackgroundService, IOfficeJobHandler
             // Copy parent email's internetMessageId for relationship tracking
             EmailParentId = internetMessageId
         };
+
+        // Inherit the parent email's "File to" association (Matter/Project/Invoice) so the attachment
+        // Documents file to the same record as the .eml.
+        ApplyAssociationLookup(updateRequest, associationType, associationId);
 
         await _documentService.UpdateDocumentAsync(childDocumentIdStr, updateRequest, cancellationToken);
 
