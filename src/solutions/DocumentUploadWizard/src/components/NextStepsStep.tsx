@@ -57,7 +57,10 @@ import type {
     IPlaybook,
     IPlaybookScopes,
 } from "@spaarke/ui-components/components/Playbook";
-import { FindSimilarDialog } from "@spaarke/ui-components/components/FindSimilarDialog";
+// #714 (2026-08-05) renamed FindSimilarDialog (iframe viewer) → FindSimilarViewerDialog under
+// components/FindSimilarViewer/. The shared-lib rename left this consumer's import stale, which
+// broke the whole solution build (present on master too). Same component, corrected path/name.
+import { FindSimilarViewerDialog } from "@spaarke/ui-components/components/FindSimilarViewer";
 
 import type { NextStepActionId, IUploadedFile } from "../types";
 import { DocumentEmailStep } from "./DocumentEmailStep";
@@ -744,8 +747,8 @@ const FindSimilarStepContent: React.FC<IFindSimilarStepContentProps> = ({
                 </div>
             )}
 
-            {/* Inline FindSimilarDialog overlay */}
-            <FindSimilarDialog
+            {/* Inline Find Similar viewer overlay (#714 rename: FindSimilarDialog → FindSimilarViewerDialog) */}
+            <FindSimilarViewerDialog
                 open={showViewer}
                 onClose={() => setShowViewer(false)}
                 url={viewerUrl}
@@ -785,7 +788,14 @@ function buildDynamicStepConfig(
             canAdvance: () => true,
             isSkippable: true,
             renderContent: () => (
-                <DocumentEmailStep {...options.emailStepProps} />
+                <DocumentEmailStep
+                    {...options.emailStepProps}
+                    attachmentDocumentIds={(options.successfulFiles ?? [])
+                        .map((f) => f.createResult?.documentId)
+                        .filter((id): id is string => !!id)}
+                    authenticatedFetch={spaarkeAuthenticatedFetch}
+                    bffBaseUrl={options.bffBaseUrl}
+                />
             ),
         };
     }
