@@ -1136,7 +1136,7 @@ public sealed record SaveComposeDocumentResult : ComposeDocumentResult
     /// so the synchronous aggregate is <see cref="JobAwareState.Partial"/> on the
     /// happy path (record exists + indexed, profile dispatched off-thread). A record with no SPE
     /// file OR no index is never a success — see
-    /// <see cref="ComposeService.IsInterimCreateOnSaveSuccess"/> for the interim R5-E bar. Null
+    /// <see cref="ComposeCreateOnSavePromoter.IsInterimCreateOnSaveSuccess"/> for the interim R5-E bar. Null
     /// only for legacy callers that predate FR-05 (always populated by the current Save path).
     /// </summary>
     public JobAwareCompletionState? CompletionState { get; init; }
