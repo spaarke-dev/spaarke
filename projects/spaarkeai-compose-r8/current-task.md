@@ -13,7 +13,7 @@
 | Field | Value |
 |---|---|
 | **Active work** | **Fixing the real Compose defects (#777 first).** 071 + 072 complete and merged. **FREEZE LIFTED** — UAC-r2 #887 merged `13a1f5a4a`. Client gate FIXED by #921 (`ec2154bf5`, `lfs: true`) — first green ever, **1 of the 3** greens needed before `continue-on-error` comes off. 090 STARTED, NOT closed. |
-| **Next Action** | **IN FLIGHT — `paragraph-style-flattened` (#777), 1 of 3 steps done.** (1) ✅ `ComposeBlockMerge.InheritProperties` now inherits an UNMODELED `w:pStyle`; the blanket exclusion is scoped to model-owned styles by the new `IsModelDeterminedStyle` (Normal / Heading1-6 / ListParagraph). Build 0/0, Compose **1802/0**. (2) ⬜ **ADD A TEST — the change is UNPINNED**: `ComposeResidualLossParityTests` covers neither `pStyle` nor indentation (grep: no matches), which is exactly why it passed unchanged. (3) ⬜ **Split the warning's two meanings** — `ComposeContentModelProjector.cs:386-392` still emits `paragraph-style-flattened` on the now-FALSE premise *"the render path emits Normal"*. Still TRUE at open (the editor cannot display `Quote`/`Überschrift1`), FALSE at save. **Unverified, and it decides severity: does a projection warning surface on SAVE?** If yes, editing one paragraph reports ×84 losses that never happened. |
+| **Next Action** | **Owner directive 2026-09-01: finish EVERYTHING — 070, #777, and every other open Compose issue. Order is ours to choose.** #777 is 2 of 3 codes done (below). **Start next on 070 clusters 5a + 2a/2b** — same file as #776/#781, so do all three in ONE pass over `ComposeService.cs` rather than three separate passes over a 2,716-line file. Then the client-side items (#699, #696), then 090. Full plan + ordering rationale in §R1 below. |
 | **Branch** | `work/spaarkeai-compose-r8` @ **`f6887d46a`** — identical to `origin/master`. Nothing outstanding. |
 | **Merged today** | #806 `19bf65ec4` · #905 `369c3ea89` · #908 `330b9fc55` |
 | **Suite** | ALL GREEN — Compose **1,802/0** · BFF **11,614/0** · ArchTests **153/153** · Spe.Integration **409/0** · IntegrationTests **103/0** · client gate **104 suites / 1,336** · solution build **0 errors** · DI diff **empty** |
@@ -40,6 +40,56 @@ sanitization at every SPE upload site) is on master. Our public promise on
 **The coordination record is `notes/response-to-unified-access-control-r2-2026-08-27.md`** — its
 `# ✅ DEFINITIVE STATUS` block at the top is the current agreement; everything below it is history. The
 sibling `coordination-from-*.md` is THEIR document, received — do not edit it.
+
+---
+
+## R1. THE REMAINING WORK — one list, owner-directed "finish everything" (2026-09-01)
+
+**Owner directive**: *"we need to get 070 and #777 and any other work completed — the order of operation is
+up to you… the critical focus is on getting everything, all tasks, all issues fixed and completed."*
+Also binding, same message: **do not display warnings the user cannot act on.** Routine docx→TipTap format
+reconciliation is expected and must not be surfaced.
+
+### Done this session (committed, NOT pushed)
+
+| Commit | What |
+|---|---|
+| `4f26c43fb` | **#777 `paragraph-style-flattened` — fixed.** `ComposeBlockMerge.InheritProperties` excluded `w:pStyle` wholesale; now scoped to model-owned styles via `IsModelDeterminedStyle` (Normal / Heading1-6 / ListParagraph). An UNMODELED style (firm body style, Quote, localized `Überschrift1`, numbered clause style) is carried onto an edited block. |
+| `5593b9d24` | **Pinned it.** 11 seam tests, `ComposeParagraphStyleInheritanceSeamTests`. **Negative control RUN**: reverting the fix fails 5 of 11 and passes 6 — the detector fires on the regression and stays quiet on what it protects. |
+| `81295b210` | **#777 `indentation-dropped` + `paragraph-style-flattened` warnings RETIRED** per the owner directive. Both premises were falsified (task 041 inheritance, then `4f26c43fb`). They fired per-paragraph whole-document at OPEN → "×84 / ×85" on an untouched 40-page contract. |
+
+**Suite after all three: Compose 1813/0, build 0/0.**
+
+### The ordering, and why
+
+**Do 070 clusters 5a + 2a/2b, #776 and #781 as ONE pass**, not four. All four live in
+`ComposeService.cs` (2,716 lines). Four separate passes = four re-reads of the same large file and four
+merge-conflict surfaces. The freeze that separated them is gone.
+
+| # | Work | File | Notes |
+|---|---|---|---|
+| 1 | **070 cluster 5a** | `ComposeService.cs` | 7 of 9 clusters already done. Delete the waiver when the file drops. |
+| 2 | **070 clusters 2a/2b** | `ComposeService.cs` | Last two. Then 070 → ✅. |
+| 3 | **#776** apply-template `If-Match` | `ComposeService.cs:372` `ApplyTemplateAsync`, blind replace @441 | T1 download → merge → blind T2 write; a sibling-tab Save in the window is clobbered at head. |
+| 4 | **#781** save-identity self-heal | `ComposeService.cs` + `ComposeEndpoints.cs` | 3 of 5 pieces remain (#2 self-heal on "found multiple", #3, #4b). |
+| 5 | **#777 `section-break-flattened`** | `ComposeContentModelProjector.cs:~315`, `ComposeBlockMerge` | The LAST of the three codes and the only one that is still REAL loss: interior `w:sectPr` on an EDITED paragraph. `SectionProperties` is excluded from inheritance because the renderer detaches/re-attaches the TRAILING sectPr — an interior one has no carrier. **Keep this warning** — it is real and actionable ("open in Word"). |
+| 6 | **#699** advisory comment anchors wrong clause | client `ComposeEditor.tsx :placeAdvisoryComments` | `placed=2` where 1 expected. **Highest user-harm item left** — a note can attach to the wrong clause. Recommended fix in the issue: anchor by WS-4 computed clause number via `CitationResolver`. |
+| 7 | **#696** unbounded request body | `ComposeEndpoints.cs` | `/api/compose/project` + `/upload` run synchronous OOXML projection with only Kestrel's ~28.6 MB implicit cap. Align to the 25 MB chat-attachment policy. |
+| 8 | **#698** CitationResolver contract | — | Confirm the pure-function contract is what the consumer wants; corpus fixture needs an owner-supplied doc with `(b)(iii)` sub-items. |
+| 9 | **#853** | — | Already FIXED by `220ddd18e` on master. Verify + **close the issue**. |
+| 10 | **090 wrap-up** | — | `/test-diet` → write-side fidelity doc refresh (§2 table: two codes retired, `paragraph-style-flattened` moves to §3 carried) → lessons-learned → `projects/INDEX.md` + root §17 + `.claude/CHANGELOG.md` → **paired deploy** (BFF + `sprk_spaarkeai` together, NFR-05, net10 tree). |
+
+### Small loose ends
+
+- **Client copy map** `ComposeBannerStack.tsx:322-341` still maps the two retired codes. Dead, harmless, but
+  remove them so nobody re-derives that the server still emits them.
+- **`ComposeBlockMerge.cs` contains 2 raw NUL bytes** inside a string literal (offset ~19314), which makes the
+  file read as BINARY to `grep`/ripgrep — `Grep` refuses it and silently returns nothing useful. Almost
+  certainly a deliberate sentinel separator in the block-canonicalisation, but confirm intent; if deliberate,
+  use `\0` escape instead so tooling can read the file.
+- **Compose Client Gate is at 1 of 3** greens needed before `continue-on-error: true` comes off (#921 fixed
+  the LFS checkout). Two more green runs, then delete that line and it becomes a real gate.
+- **#858 is UAC-r2's to close**, not ours.
 
 ---
 
