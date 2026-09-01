@@ -1,7 +1,7 @@
 # Current Task State — email-communication-intelligence-r2
 
-> **Last Updated**: 2026-08-31 (task 090 wrap-up — automatable close-out artifacts DONE; project gated on 044 live UAT)
-> **Recovery**: Read "Quick Recovery" first. Wrap-up ran; ONE task (044) is operator-gated on an Office host.
+> **Last Updated**: 2026-09-01 (context-handoff — Pillar B add-in deep-fix arc DONE + PR #922 auto-merging; NEXT SESSION = investigate the document-profile playbook bug #919)
+> **Recovery**: Read "Quick Recovery" first, then "NEXT SESSION" below.
 
 ---
 
@@ -9,11 +9,22 @@
 
 | Field | Value |
 |-------|-------|
-| **Status** | **WRAP-UP DONE except the 044 gate.** 090 close-out artifacts all written (test-diet, doc-drift, publish-size, CVE, lessons-learned, r5 coordination, INDEX). Project NOT yet flipped to Complete — blocked on **044** (Pillar B add-in live UAT, operator-gated). |
-| **Branch** | `work/email-communication-intelligence-r2` · has **uncommitted** wrap-up notes + INDEX/TASK-INDEX/r5-coord/current-task edits (need commit + push + PR). |
-| **Last merge** | PR **#911** MERGED 2026-08-31 → `3c577bce4` (infinite scroll + ADR-051). master protected (ruleset `21824191`, required check `Router`; use `/merge-to-master` Path A). |
-| **090 artifacts (this session)** | `notes/test-diet-report.md` (clean, 0 deletes) · `notes/drift-audit-2026-08-31.md` (clean) · `notes/lessons-learned.md` · `notes/044-addin-deploy-runbook.md` · publish ~**44 MB** compressed (≤60), **0 HIGH CVE** · r5 coord §10 close-out stamp · `projects/INDEX.md` row → WRAP-UP. |
-| **Next Action** | (1) Commit + push these wrap-up edits (PR via Path A). (2) **044**: operator runs `deploy-office-addins.yml` + live NAA smoke at an Office host (see `notes/044-addin-deploy-runbook.md`), then flip 044→✅. (3) Then flip README→Complete + all-✅ + reset current-task→none. |
+| **Status** | **Pillar B add-in is FULLY FUNCTIONAL** (sign-in, real Dataverse "File to" search, save `.eml`, attachment child docs, matter association, indexing — all UAT-verified). 6 pre-existing master bugs + real entity search fixed, tested, deployed to dev. **PR #922 open with auto-merge** (merges when `Router` check passes). |
+| **Branch** | `work/email-communication-intelligence-r2` @ `b680cd286` — 0 behind master (merged origin/master cleanly, 66 commits, no conflicts). Working tree CLEAN. |
+| **Open PR** | **#922** (Path A auto-merge; `gh pr view 922`) — the Pillar B fixes + entity search. **PR #911** already merged (`3c577bce4`, infinite scroll + ADR-051). master protected (ruleset `21824191`, required check `Router`). |
+| **🔴 NEXT SESSION** | **Investigate the document-profile playbook bug — GitHub #919** (see NEXT SESSION section below). This is the ONLY remaining functional issue; everything else works. |
+| **Deployed (dev)** | `spaarke-bff-dev` = branch `b680cd286`-equivalent (hash-verified, healthy). Add-in SWA from `cfae9cdc1`. App Insights app id `6a76b012-46d9-412f-b4ab-4905658a9559`. |
+
+## 🔴 NEXT SESSION — document-profile playbook bug (#919), fully root-caused
+**Symptom**: every saved Document shows `sprk_filesummarystatus = Failed` — the document-profile AI playbook doesn't complete (no summary / AI documenttype). Save/search/association/indexing all WORK; only profiling fails.
+
+**ROOT CAUSE (definitive, via runtime App Insights capture 2026-09-01)**: the profile playbook's **"Update Record" node** (`sprk_playbooknode 0fa4e8db-b216-f111-8343-7c1e520aa4df`) has `fieldMappings[].value = "{{output_aiAnalysis.output.sprk_filesummary}}"`. At runtime the orchestrator **string-substitutes the multi-line AI summary into the JSON `value` WITHOUT JSON-escaping newlines** → invalid JSON → `UpdateRecordNodeExecutor.ParseConfig` throws `JsonException: '0x0A' is invalid within a JSON string. Path: $.fieldMappings[0].value` → node fails → playbook stops (batch 2) → `filesummarystatus=Failed`.
+
+**Fix location**: `src/server/api/Sprk.Bff.Api/Services/Ai/PlaybookOrchestrationService.cs`. The JSON-aware `RenderConfigJsonStructurally` (R7 Wave 11, ~L2299) is meant to prevent this, but for this node it **falls back to flat string substitution at L2284** (catch on JsonException) which corrupts the JSON. **Next step**: add a temp diagnostic in `RenderConfigJsonStructurally` (or the L2277 catch) to capture WHY it throws / falls back for this node's wrapper-format config, then fix (keep on the JSON-aware path / make the flat fallback JSON-safe).
+- **The node's config is the Code-Page WRAPPER format**: outer `{__canvasNodeId,__actionType,isConfigured,validationErrors,configJson}` whose **nested `configJson` STRING** holds the real config. `ParseConfig` handles the STORED template fine (proven by `UpdateRecordParseConfigReproTests` — green); only the RENDERED config (AI text w/ newlines) is invalid.
+- **Blast radius**: SHARED — affects ANY playbook injecting multi-line/quoted content into a node ConfigJson (Insights, Daily Briefing). Governed by `docs/architecture/SPAARKE-PLAYBOOK-LLM-OUTPUT-PATTERN.md`; AI-orchestration area (`spaarke-ai-architecture-redesign-r2`). NOT the Office save path.
+- **Verify a fix**: fresh add-in save → query `SELECT TOP 4 sprk_documentname, sprk_filesummarystatus, sprk_documenttype FROM sprk_document ORDER BY createdon DESC` (via Dataverse MCP) → expect `filesummarystatus` != Failed (100000004) + AI-set documenttype. Or App Insights: `traces | where message contains 'Failed to parse update record'`.
+- Full record: `notes/pillar-b-uat-findings-2026-08-31.md` (#7 section) + GitHub #919.
 
 ## Pillar B add-in UAT — deep-fix arc (2026-08-31, deployed to dev)
 Live UAT surfaced 6 issues (full record: `notes/pillar-b-uat-findings-2026-08-31.md`; GitHub #919). All deployed to dev (`spaarke-bff-dev` hash-verified + healthy; add-in SWA from `cfae9cdc1`):
