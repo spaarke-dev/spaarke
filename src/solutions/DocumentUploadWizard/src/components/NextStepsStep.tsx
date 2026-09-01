@@ -65,6 +65,7 @@ import { FindSimilarViewerDialog } from "@spaarke/ui-components/components/FindS
 import type { NextStepActionId, IUploadedFile } from "../types";
 import { DocumentEmailStep } from "./DocumentEmailStep";
 import type { IDocumentEmailStepProps } from "./DocumentEmailStep";
+import type { IWizardContext } from "@spaarke/ui-components/components/EmailComposer";
 import { DocumentPicker } from "./DocumentPicker";
 import type { UploadedDocumentInfo } from "./SummaryStep";
 import type { OrchestratorFileResult } from "../services/uploadOrchestrator";
@@ -763,6 +764,8 @@ const FindSimilarStepContent: React.FC<IFindSimilarStepContentProps> = ({
 
 interface IDynamicStepBuildOptions {
     emailStepProps: IDocumentEmailStepProps;
+    /** Uploaded documents shaped for the EmailComposer's `wizardContext` (attachments). */
+    wizardUploadedFiles?: IWizardContext["uploadedFiles"];
     successfulFiles?: OrchestratorFileResult[];
     containerId: string;
     uploadedDocumentMap?: Map<string, UploadedDocumentInfo>;
@@ -790,9 +793,7 @@ function buildDynamicStepConfig(
             renderContent: () => (
                 <DocumentEmailStep
                     {...options.emailStepProps}
-                    attachmentDocumentIds={(options.successfulFiles ?? [])
-                        .map((f) => f.createResult?.documentId)
-                        .filter((id): id is string => !!id)}
+                    uploadedFiles={options.wizardUploadedFiles}
                     authenticatedFetch={spaarkeAuthenticatedFetch}
                     bffBaseUrl={options.bffBaseUrl}
                 />
@@ -899,6 +900,23 @@ export const NextStepsStep: React.FC<INextStepsStepProps> = ({
             });
     }, [uploadedDocumentMap, uploadedFiles]);
 
+    // Uploaded documents shaped for the EmailComposer's `wizardContext` (attachments on Send Email).
+    const wizardUploadedFiles = React.useMemo((): IWizardContext["uploadedFiles"] => {
+        if (!uploadedDocumentMap || !uploadedFiles) return [];
+        return uploadedFiles
+            .filter((f) => uploadedDocumentMap.has(f.id))
+            .map((f) => {
+                const info = uploadedDocumentMap.get(f.id)!;
+                return {
+                    documentId: info.documentId,
+                    driveItemId: info.itemId,
+                    fileName: f.name,
+                    mimeType: f.file?.type || "application/octet-stream",
+                    sizeBytes: f.sizeBytes ?? 0,
+                };
+            });
+    }, [uploadedDocumentMap, uploadedFiles]);
+
     // Sync dynamic steps with selected actions
     React.useEffect(() => {
         const prev = prevSelectedRef.current;
@@ -909,6 +927,7 @@ export const NextStepsStep: React.FC<INextStepsStepProps> = ({
                 wizardShellRef.current?.addDynamicStep(
                     buildDynamicStepConfig(actionId, {
                         emailStepProps,
+                        wizardUploadedFiles,
                         successfulFiles,
                         containerId,
                         uploadedDocumentMap,
@@ -929,7 +948,7 @@ export const NextStepsStep: React.FC<INextStepsStepProps> = ({
         }
 
         prevSelectedRef.current = next;
-    }, [selectedNextSteps, wizardShellRef, emailStepProps, successfulFiles, containerId, uploadedDocumentMap, bffBaseUrl, bffTokenProvider]);
+    }, [selectedNextSteps, wizardShellRef, emailStepProps, wizardUploadedFiles, successfulFiles, containerId, uploadedDocumentMap, bffBaseUrl, bffTokenProvider]);
 
     return (
         <div className={styles.root}>

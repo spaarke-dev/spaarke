@@ -1,39 +1,33 @@
 /**
  * DocumentEmailStep.tsx
- * Document-upload-specific wrapper around the shared SendEmailStep component.
+ * Document-upload "Send Email" step — embeds the canonical shared EmailComposer
+ * INLINE (the standard Spaarke compose form: From / To / Cc / Bcc, rich-text body,
+ * Attachments, Related-to), with the uploaded documents pre-attached and the parent
+ * record as the association.
  *
- * Pre-fills email subject and body with uploaded document names and parent
- * entity context, and — when the send dependencies are supplied at the dynamic
- * "Send Email" step injection point (NextStepsStep) — actually SENDS the email
- * via the shared `POST /api/communications/send` service, attaching the
- * uploaded documents.
+ * Design (owner decisions, 2026-09-01):
+ *   - INLINE mount → the composer renders its own native Send button (top "From:" row,
+ *     Outlook-style) and NO Save Draft / Cancel bar (that chrome only exists in the
+ *     dialog/page mounts). No modal — this stays a wizard step.
+ *   - `sendMode="sharedMailbox"` fixes the send mode + hides the From switcher, so Send
+ *     is a plain button (no "From" dropdown to fuss with).
+ *   - "Don't send" = just finish the wizard (the wizard's own Finish/Back/Cancel handle it).
  *
- * The send action lives on an explicit "Send Email" button inside the step,
- * mirroring the sibling dynamic next-steps ("Work on Analysis" → Create
- * Analysis, "Find Similar" → Find Similar Documents) and the standalone
- * DocumentEmailWizard.handleFinish send path. Before GitHub #919's sibling UAT
- * this step was a dead form — it rendered To/Subject/Body but was never wired
- * to send (the composed values were trapped in local state).
+ * Supersedes the earlier basic `EmailStep/SendEmailStep` + custom Send button (the
+ * dead-form fix). The composer owns all send mechanics (`sendCommunication`), so there
+ * is no hand-rolled send here.
  *
  * @see ADR-006  - Code Pages for standalone dialogs (not PCF)
- * @see ADR-007  - Document access through BFF API (SpeFileStore facade)
+ * @see ADR-012  - Shared, context-agnostic components (auth + Xrm handlers injected)
  * @see ADR-021  - Fluent UI v9 design system (makeStyles + semantic tokens)
  */
 
 import { useState, useCallback, useMemo } from "react";
-import {
-    Button,
-    MessageBar,
-    MessageBarBody,
-    Spinner,
-    Text,
-    makeStyles,
-    tokens,
-} from "@fluentui/react-components";
-import { CheckmarkCircleRegular, MailRegular } from "@fluentui/react-icons";
-import { SendEmailStep, extractEmailFromUserName } from "@spaarke/ui-components/components/EmailStep";
-import type { ILookupItem } from "@spaarke/ui-components/components/EmailStep";
-import { sendCommunication } from "@spaarke/ui-components/services/communicationApi";
+import { MessageBar, MessageBarBody, Text, makeStyles, tokens } from "@fluentui/react-components";
+import { CheckmarkCircleRegular } from "@fluentui/react-icons";
+import { EmailComposer, createXrmEmailComposeHandlers } from "@spaarke/ui-components/components/EmailComposer";
+import type { IWizardContext } from "@spaarke/ui-components/components/EmailComposer";
+import type { ILookupItem } from "@spaarke/ui-components/types/LookupTypes";
 import type { ICommunicationAssociation } from "@spaarke/ui-components/services/communicationApi";
 import type { AuthenticatedFetchFn } from "@spaarke/ui-components/services/EntityCreationService";
 
@@ -42,7 +36,7 @@ import type { AuthenticatedFetchFn } from "@spaarke/ui-components/services/Entit
 // ---------------------------------------------------------------------------
 
 export interface IDocumentEmailStepProps {
-    /** Display names of uploaded files. */
+    /** Display names of uploaded files (for the default body). */
     uploadedFileNames: string[];
     /** Display name of the parent entity (e.g., matter name). */
     parentEntityName: string;
@@ -52,18 +46,14 @@ export interface IDocumentEmailStepProps {
     parentEntityId: string;
 
     // ── Send wiring (supplied at the dynamic-step injection point) ──────────
-    // These are optional so the display-only props the dialog memoizes still
-    // satisfy the type; NextStepsStep supplies them when it renders the step.
+    // Optional so the display-only props the dialog memoizes still satisfy the type;
+    // NextStepsStep supplies these when it renders the step.
 
-    /** `sprk_document` GUIDs of the uploaded files, attached to the email. */
-    attachmentDocumentIds?: string[];
-    /**
-     * Authenticated fetch (Bearer-attached) for `POST /api/communications/send`.
-     * When omitted the step renders display-only (no Send button) — a defensive
-     * fallback; in the wizard it is always supplied.
-     */
+    /** Uploaded documents — surfaced as the composer's `'wizard'` attachment source. */
+    uploadedFiles?: IWizardContext["uploadedFiles"];
+    /** Authenticated fetch (Bearer-attached) for the composer's send + BFF calls. */
     authenticatedFetch?: AuthenticatedFetchFn;
-    /** BFF base URL for the send call. */
+    /** BFF base URL (no `/api` suffix). */
     bffBaseUrl?: string;
 }
 
@@ -71,18 +61,13 @@ export interface IDocumentEmailStepProps {
 // Email template helpers
 // ---------------------------------------------------------------------------
 
-/**
- * Builds the default email subject line.
- * Example: "Documents uploaded - Anderson v. Smith"
- */
+/** Builds the default email subject line. */
 function buildDefaultSubject(parentEntityName: string): string {
     const entityLabel = parentEntityName || "document record";
     return `Documents uploaded - ${entityLabel}`;
 }
 
-/**
- * Builds the default email body with uploaded file names and parent entity context.
- */
+/** Builds the default email body with uploaded file names and parent entity context. */
 function buildDefaultBody(
     uploadedFileNames: string[],
     parentEntityName: string,
@@ -107,24 +92,18 @@ function buildDefaultBody(
     ].join("\n");
 }
 
-/**
- * Converts a Dataverse logical name like "sprk_matter" into a
- * human-readable label like "Matter".
- */
+/** Converts a Dataverse logical name like "sprk_matter" into a label like "Matter". */
 function formatEntityTypeLabel(entityType: string): string {
     if (!entityType) return "record";
-    // Strip prefix (e.g., "sprk_") and capitalize
     const stripped = entityType.replace(/^[a-z]+_/, "");
     return stripped.charAt(0).toUpperCase() + stripped.slice(1);
 }
 
 // ---------------------------------------------------------------------------
-// Xrm.WebApi: search systemuser
+// Xrm.WebApi: recipient typeahead (systemuser search)
 // ---------------------------------------------------------------------------
 
-/**
- * Resolve Xrm.WebApi from the frame hierarchy.
- */
+/** Resolve Xrm.WebApi from the frame hierarchy. */
 function resolveXrmWebApi(): { retrieveMultipleRecords: (entity: string, options: string) => Promise<{ entities: Record<string, unknown>[] }> } | null {
     const frames: Window[] = [window];
     try { if (window.parent !== window) frames.push(window.parent); } catch { /* cross-origin */ }
@@ -146,9 +125,10 @@ function resolveXrmWebApi(): { retrieveMultipleRecords: (entity: string, options
 }
 
 /**
- * Searches the Dataverse systemuser table via Xrm.WebApi for user lookup.
- * Uses Xrm.WebApi (authenticated automatically) instead of direct OData fetch.
- * Returns ILookupItem[] with id (systemuserid) and name ("FullName (email)").
+ * Recipient typeahead: searches the Dataverse systemuser table via Xrm.WebApi and
+ * returns ILookupItem[] for the composer's `onSearchRecipients`. The composer's
+ * advanced people picker (`onLookupRecipients`, from the Xrm factory) additionally
+ * covers contacts.
  */
 async function searchSystemUsers(query: string): Promise<ILookupItem[]> {
     if (!query || query.trim().length < 2) return [];
@@ -165,12 +145,11 @@ async function searchSystemUsers(query: string): Promise<ILookupItem[]> {
 
     try {
         const result = await webApi.retrieveMultipleRecords("systemuser", options);
-
         return result.entities.map((user) => ({
             id: user.systemuserid as string,
             name: user.internalemailaddress
                 ? `${user.fullname} (${user.internalemailaddress})`
-                : user.fullname as string,
+                : (user.fullname as string),
         }));
     } catch (err) {
         console.error("[DocumentEmailStep] systemuser search failed:", err);
@@ -186,22 +165,26 @@ const useStyles = makeStyles({
     root: {
         display: "flex",
         flexDirection: "column",
-        gap: tokens.spacingVerticalL,
+        flexGrow: 1,
+        // The composer's BodyEditor flex-grows and owns the scroll region; give it room.
+        minHeight: "520px",
     },
-    footer: {
+    sentBlock: {
         display: "flex",
         flexDirection: "column",
-        gap: tokens.spacingVerticalS,
-    },
-    sendRow: {
-        display: "flex",
-        justifyContent: "flex-end",
-    },
-    successBlock: {
-        display: "flex",
         alignItems: "center",
-        gap: tokens.spacingHorizontalS,
+        justifyContent: "center",
+        gap: tokens.spacingVerticalS,
+        paddingTop: tokens.spacingVerticalXXL,
+        paddingBottom: tokens.spacingVerticalXXL,
         color: tokens.colorPaletteGreenForeground1,
+    },
+    unavailable: {
+        color: tokens.colorNeutralForeground3,
+        paddingTop: tokens.spacingVerticalL,
+    },
+    errorBar: {
+        marginBottom: tokens.spacingVerticalS,
     },
 });
 
@@ -214,13 +197,12 @@ export function DocumentEmailStep({
     parentEntityName,
     parentEntityType,
     parentEntityId,
-    attachmentDocumentIds,
+    uploadedFiles,
     authenticatedFetch,
     bffBaseUrl,
 }: IDocumentEmailStepProps): JSX.Element {
     const styles = useStyles();
 
-    // Memoize default values so they only recompute when inputs change
     const defaultSubject = useMemo(
         () => buildDefaultSubject(parentEntityName),
         [parentEntityName]
@@ -230,134 +212,91 @@ export function DocumentEmailStep({
         [uploadedFileNames, parentEntityName, parentEntityType]
     );
 
-    // Controlled email form state
-    const [emailTo, setEmailTo] = useState("");
-    const [emailSubject, setEmailSubject] = useState(defaultSubject);
-    const [emailBody, setEmailBody] = useState(defaultBody);
-
-    // Send state
-    const [isSending, setIsSending] = useState(false);
-    const [sendError, setSendError] = useState<string | null>(null);
     const [isSent, setIsSent] = useState(false);
+    const [sendError, setSendError] = useState<string | null>(null);
 
-    // User search callback (stable reference via useCallback)
     const handleSearchUsers = useCallback(
-        (query: string): Promise<ILookupItem[]> => {
-            return searchSystemUsers(query);
-        },
+        (query: string): Promise<ILookupItem[]> => searchSystemUsers(query),
         []
     );
 
-    // Send handler — mirrors DocumentEmailWizard.handleFinish: parse recipients,
-    // validate, build SendCommunicationOptions (attaching the uploaded documents
-    // and associating to the parent), and POST /api/communications/send.
-    const handleSend = useCallback(async () => {
-        setSendError(null);
+    // Xrm-backed advanced lookups (people picker, "Related to" record lookup, local-file
+    // upload-to-Document, template picker, AI draft, share-link). Context-agnostic engine
+    // (ADR-012) — the Code Page injects these via the shared factory.
+    const composeHandlers = useMemo(
+        () => createXrmEmailComposeHandlers({ authenticatedFetch, bffBaseUrl }),
+        [authenticatedFetch, bffBaseUrl]
+    );
 
-        const recipients = emailTo
-            .split(/[;,]/)
-            .map((s) => s.trim())
-            .map((s) => extractEmailFromUserName(s) || s)
-            .filter(Boolean);
-
-        if (recipients.length === 0) {
-            setSendError("At least one recipient is required.");
-            return;
-        }
-        if (!emailSubject.trim()) {
-            setSendError("Subject is required.");
-            return;
-        }
-        if (!emailBody.trim()) {
-            setSendError("Message body is required.");
-            return;
-        }
-        if (!authenticatedFetch) {
-            setSendError("Email sending is unavailable in this context.");
-            return;
-        }
-
-        const associations: ICommunicationAssociation[] = [];
+    // Associate the sent email with the parent record (ADR-024 regarding family).
+    const associations = useMemo<ICommunicationAssociation[] | undefined>(() => {
         if (parentEntityType && parentEntityId) {
-            associations.push({ entityType: parentEntityType, entityId: parentEntityId });
+            return [{ entityType: parentEntityType, entityId: parentEntityId, entityName: parentEntityName }];
         }
+        return undefined;
+    }, [parentEntityType, parentEntityId, parentEntityName]);
 
-        setIsSending(true);
-        try {
-            await sendCommunication(
-                {
-                    to: recipients,
-                    subject: emailSubject.trim(),
-                    body: emailBody,
-                    bodyFormat: "text",
-                    attachmentDocumentIds:
-                        attachmentDocumentIds && attachmentDocumentIds.length > 0
-                            ? attachmentDocumentIds
-                            : undefined,
-                    associations: associations.length > 0 ? associations : undefined,
-                    sendMode: "sharedMailbox",
-                },
-                { authenticatedFetch, bffBaseUrl }
-            );
-            setIsSent(true);
-        } catch (err) {
-            setSendError(err instanceof Error ? err.message : "Failed to send email.");
-        } finally {
-            setIsSending(false);
-        }
-    }, [emailTo, emailSubject, emailBody, authenticatedFetch, bffBaseUrl, attachmentDocumentIds, parentEntityType, parentEntityId]);
+    // Uploaded docs → the composer's `'wizard'` attachment source (auto-included in
+    // `attachmentSources` when `wizardContext` is present).
+    const wizardContext = useMemo<IWizardContext | undefined>(
+        () => (uploadedFiles && uploadedFiles.length > 0 ? { uploadedFiles } : undefined),
+        [uploadedFiles]
+    );
 
-    const canSend = !!authenticatedFetch;
-    const attachmentCount = attachmentDocumentIds?.length ?? 0;
+    // Defensive: without an authenticated fetch the composer cannot send (AI features off,
+    // or a unit-render without the seam). Show a note rather than a broken form.
+    if (!authenticatedFetch) {
+        return (
+            <div className={styles.root}>
+                <Text className={styles.unavailable}>Email is unavailable in this context.</Text>
+            </div>
+        );
+    }
+
+    if (isSent) {
+        return (
+            <div className={styles.sentBlock}>
+                <CheckmarkCircleRegular fontSize={48} />
+                <Text size={500} weight="semibold">Email sent</Text>
+                <Text size={300} style={{ color: tokens.colorNeutralForeground2 }}>
+                    You can finish the wizard.
+                </Text>
+            </div>
+        );
+    }
 
     return (
         <div className={styles.root}>
-            <SendEmailStep
-                title="Send Email"
-                subtitle="Share the uploaded documents with a colleague via email."
-                emailTo={emailTo}
-                onEmailToChange={setEmailTo}
-                emailSubject={emailSubject}
-                onEmailSubjectChange={setEmailSubject}
-                emailBody={emailBody}
-                onEmailBodyChange={setEmailBody}
-                onSearchUsers={handleSearchUsers}
-                regardingEntityType={parentEntityType}
-                regardingId={parentEntityId}
-                infoNote={
-                    attachmentCount > 0
-                        ? `The email is sent via the Spaarke shared mailbox with ${attachmentCount} attached document${attachmentCount === 1 ? "" : "s"}, and saved as a Communication${parentEntityType ? " on the parent record" : ""}.`
-                        : `The email is sent via the Spaarke shared mailbox and saved as a Communication${parentEntityType ? " on the parent record" : ""}.`
-                }
-                messageRows={12}
-            />
-
-            {canSend && (
-                <div className={styles.footer}>
-                    {sendError && (
-                        <MessageBar intent="error">
-                            <MessageBarBody>{sendError}</MessageBarBody>
-                        </MessageBar>
-                    )}
-                    {isSent ? (
-                        <div className={styles.successBlock}>
-                            <CheckmarkCircleRegular fontSize={20} />
-                            <Text size={300} weight="semibold">Email sent.</Text>
-                        </div>
-                    ) : (
-                        <div className={styles.sendRow}>
-                            <Button
-                                appearance="primary"
-                                icon={isSending ? <Spinner size="tiny" /> : <MailRegular />}
-                                onClick={handleSend}
-                                disabled={isSending || emailTo.trim() === ""}
-                            >
-                                {isSending ? "Sending…" : "Send Email"}
-                            </Button>
-                        </div>
-                    )}
-                </div>
+            {sendError && (
+                <MessageBar intent="error" className={styles.errorBar}>
+                    <MessageBarBody>{sendError}</MessageBarBody>
+                </MessageBar>
             )}
+            <EmailComposer
+                mode="compose"
+                mount="inline"
+                authenticatedFetch={authenticatedFetch}
+                bffBaseUrl={bffBaseUrl}
+                initialSubject={defaultSubject}
+                initialBody={defaultBody}
+                initialBodyFormat="PlainText"
+                associations={associations}
+                wizardContext={wizardContext}
+                // Fixed to the shared mailbox → plain Send button, no From switcher.
+                sendMode="sharedMailbox"
+                onSearchRecipients={handleSearchUsers}
+                onLookupRecipients={composeHandlers.onLookupRecipients}
+                recordLookupCatalog={composeHandlers.recordLookupCatalog}
+                onLookupRecord={composeHandlers.onLookupRecord}
+                onAddRelationship={composeHandlers.onAddRelationship}
+                onUploadLocalAttachment={composeHandlers.onUploadLocalAttachment}
+                onResolveShareLink={composeHandlers.onResolveShareLink}
+                onListEmailTemplates={composeHandlers.onListEmailTemplates}
+                onRenderEmailTemplate={composeHandlers.onRenderEmailTemplate}
+                onDraftWithAi={composeHandlers.onDraftWithAi}
+                onSent={() => setIsSent(true)}
+                onError={(err) => setSendError(err?.detail || "Failed to send email.")}
+            />
         </div>
     );
 }
