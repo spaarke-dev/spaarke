@@ -13,7 +13,7 @@
 | **Task** | **076** — record-keyed upload contract. `<rigor>FULL</rigor>`, tier `opus`, effort `high`, steps `directional`, `parallel-safe: false` |
 | **Step** | **4 of 11** (client cutover). Steps 0–3 + the >4 MB server half are DONE; 5–11 remain |
 | **Status** | in-progress |
-| **Next Action** | ✅ **#858 is GREEN + committed (`763b05428`)** — remaining: sync master → PR → merge → **post the closing comment on #858** (that comment is compose-r8's resume signal; body is drafted in [`notes/plan-858-closeout.md`](notes/plan-858-closeout.md) §4). THEN: **READ [`notes/plan-upload-path-decomposition-2026-08-31.md`](notes/plan-upload-path-decomposition-2026-08-31.md) FIRST**, file **093/094/095**, execute **076**. Client `containerId` removal is NOT ship-together — any later train |
+| **Next Action** | ✅ **#858 IS CLOSED AND MERGED — compose-r8 is UNBLOCKED.** PRs #926 (`8860e066e`) + #928 (`7c6bfafe5`) on master; closing comment posted (`#858#issuecomment-5498848073`); issue CLOSED. Main repo master synced. **NEXT: READ [`notes/plan-upload-path-decomposition-2026-08-31.md`](notes/plan-upload-path-decomposition-2026-08-31.md) FIRST**, then file **093/094/095** and execute **076**. Client `containerId` removal is NOT ship-together — any later train |
 
 ### ✅ PR #887 MERGED 2026-09-01T03:18:38Z — 34 commits on master
 
@@ -56,7 +56,35 @@ independently confirms this repo does not gate on review). **`worktree-sync` Ste
    `CallerRecordAccessProbe` from unconditionally-registered `ComposeService` is NOT the §10 F.1
    asymmetric-registration anti-pattern.
 
-### ✅ #858 IS GREEN — commit `763b05428` (2026-09-01). Independently verified.
+### ✅ #858 IS CLOSED AND ON MASTER (2026-09-01). compose-r8 unblocked.
+
+**Landed**: PR **#926** → `8860e066e` (the fix) · PR **#928** → `7c6bfafe5` (stale copy the fix left
+behind). Issue **#858 CLOSED**; resume signal posted as `#858#issuecomment-5498848073`.
+`ComposeService.cs` explicitly unfrozen for compose-r8. Main repo master synced to `7c6bfafe5`.
+
+**Two things caught AFTER the suite went green — neither had any test pinning it:**
+
+1. 🔴 **The shared test helper broke a build no local run covered.** `TestActingUserBusinessUnit.cs`
+   went into `tests/integration/Shared/`, which **four** projects glob. `Sprk.Provisioning.ControlPlane.LoadTests`
+   has no Moq / Xrm / Dataverse (it references only the provisioning projects, so it doesn't even get
+   them transitively) → 12 compile errors. **A green `dotnet test` on ONE project is not evidence about
+   the solution** — CI builds `Spaarke.sln`. Fixed by moving the helper to `Shared/Dataverse/` and
+   excluding that subtree from that one project; put any future Dataverse-dependent shared helper there.
+2. 🔴 **A user-facing string still described the deleted mechanism.** The container-step failure Detail
+   said *"no client-supplied ContainerId for a transient draft"* — post-#858 impossible AND unactionable,
+   since the caller cannot supply one; it hid the cause an admin can fix (no `sprk_containerid` on the
+   BU). Plus a `STEP 1` comment asserting *"the container id is CLIENT-SUPPLIED (Fork A — no server-side
+   BU→container resolver)"*, in the exact region compose-r8 was about to extract. **11,757 tests and 28
+   CI checks passed with all of it in place.** Deleting a field updates every call site the compiler can
+   see; it does not touch the prose that explains the field — and the user-visible half of a contract
+   often lives in that prose.
+
+⚠️ **`Router` is the ONLY required check on master** (ruleset `21824191`; classic branch protection is
+OFF). It passed while two test jobs were red — `mergeable` said `MERGEABLE`. **Gate on the whole rollup,
+never on `Router` alone**, or a broken solution build reaches master. Also: `worktree-sync` Step 3's
+direct-push-to-master cannot work on this repo (needs a PR) — the skill is wrong and should be fixed.
+
+### ✅ Suite status — independently verified (not taken from the implementing agent)
 
 **Full suite: 0 failed / 11,750 passed / 57 skipped / 11,807 total** (baseline at `841c24117` was
 20 / 11,726 / 57 / 11,803 → +24 passed = 20 repaired + 4 new tests; reconciles exactly).
