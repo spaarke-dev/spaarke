@@ -12,11 +12,11 @@
 
 | Field | Value |
 |---|---|
-| **Active work** | **Closing out every remaining Compose defect in THIS project** (owner directive 2026-09-01: no deferrals, no hand-offs to other projects). 070 ✅ COMPLETE (all 9 clusters). #776 ✅ closed. #777 two-thirds done. #858 merged in from UAC-r2 and reconciled. **23 commits ready, 0 behind master, 0 uncommitted, everything green.** |
-| **Next Action** | **START ON #781** (save-identity self-heal — 3 pieces remain). Then the rest of the SERVER batch in one pass: #777's last code, drive provenance, #696, #698-contract-half. Then the CLIENT batch (#699 + the #858 client cutover) as one `npm` cycle. Then #853 close-out, 090 wrap-up, deploy. Full ordered list + rationale in §R1. |
-| **Branch** | `work/spaarkeai-compose-r8` @ **`f6887d46a`** — identical to `origin/master`. Nothing outstanding. |
-| **Merged today** | #806 `19bf65ec4` · #905 `369c3ea89` · #908 `330b9fc55` |
-| **Suite** | ALL GREEN — Compose **1,802/0** · BFF **11,614/0** · ArchTests **153/153** · Spe.Integration **409/0** · IntegrationTests **103/0** · client gate **104 suites / 1,336** · solution build **0 errors** · DI diff **empty** |
+| **Active work** | **Closing out every remaining Compose defect in THIS project** (owner directive 2026-09-01: no deferrals, no hand-offs to other projects). 070 ✅ · #776 ✅ · **#781 ✅ (all 3 remaining pieces, `1789e9d08`)** · **#698 fixture ✅ (`a39c7abbe`)** · **#777 ✅ code done, uncommitted — verifying** · #858 merged from UAC-r2 and reconciled. |
+| **Next Action** | Commit #777 once the Compose filter reports, then the rest of the SERVER batch in one pass: **drive provenance → #696 → #698 contract half**. Then the CLIENT batch (#699 + the #858 client cutover) as one `npm` cycle. Then #853 close-out, 090 wrap-up, deploy. Ordered list + rationale in §R1. |
+| **Branch** | `work/spaarkeai-compose-r8` — **17 commits ahead of `origin/master`, 0 behind.** #777 is the only uncommitted work. |
+| **Suite** | Compose **1,871/0** · BFF **11,831 / 0 / 57 skipped** · ArchTests **176/176** · solution build **0 errors** · DI diff confined to `ComposeModule.cs` (a genuine new registration, not an extraction) |
+| **Open, not blocking** | `Repair-ComposeIdentityKey.ps1` has **not** been run against a live environment. `section-break-flattened` may want a row in `COMPOSE-WRITE-RESIDUAL-LOSS.md` now that it is a per-edited-block code (settle at 090). No corpus doc still uses **letter/roman** sub-numbering (`4.2(b)(iii)`) — the original #698 ask, still open, low priority. |
 | **Verify with** | **`dotnet build`** at the SOLUTION root — not one project (see §A2 for why that distinction cost real time) |
 
 ---
@@ -74,7 +74,15 @@ contract" is answerable from the code: consumers exist and are live (`ComposeAnc
 server-side, `composeCitationResolver.ts` + `Spaarke.Communication.Components/logic/citations`
 client-side). Whether they want a `PublicContracts` wrapper is decided by reading them, not by asking.
 
-### Done this session (committed, NOT pushed)
+### Done 2026-09-01 (later session — committed, NOT pushed)
+
+| Commit | What |
+|---|---|
+| `a39c7abbe` | **#698 fixture** — owner supplied a real Word doc; added as `style-inherited-numbering.docx`. Its value is **style-inherited numbering**: three paragraphs carry NO `w:numPr` and are numbered by `ListParagraph`'s own `numPr` in `styles.xml`. Our engine already handles it (FR-12), so this is a guard, not a fix. **The negative control corrected the test's own claim**: dropping the style lookup does NOT shift deeper labels (Word gives an un-incremented level its `start`), so `1.1.1.` is unaffected — the damage is to the style-numbered paragraphs and their siblings (`1.2.`, `2.1.`) only. One of the four tests is decorative against that mutation and is labelled so. |
+| `1789e9d08` | **#781 CLOSED** — all three remaining pieces. **(2) self-heal**: the alt-key lookup swallowed BOTH identity faults as not-found, sending an EXISTING document into the create branch whose upsert failed on the same key. A column query answers in both fault states → lands on the idempotent branch → no third row, and existing-document saves survive a Failed key. **Deviations from the issue text, deliberate**: oldest `createdon` (not newest `modifiedon` — `modifiedon` moves, so concurrent saves could pick different canonicals) and **nothing is deleted** on a user's save. **(3)** `scripts/Repair-ComposeIdentityKey.ps1`, same canonical rule as the runtime heal. **(4b)** `ComposeIdentityKeyHealthCheck` — needed *because of* (2): the heal turns a loud 500 into a quiet log, so the signal had to be restored. Degraded-never-Unhealthy + `catalog` tag so it cannot touch `/healthz` liveness. No interface widened (`TryUnwrapServiceClient` + the `protected virtual` fetch seam already existed). 18 tests; both negative controls fired. |
+| *(uncommitted)* | **#777 `section-break-flattened`** — the last of its three codes. It fired at PROJECTION (open), whole-document; but `Capture` clones an untouched block **including** its `pPr/sectPr`, so only an EDITED paragraph loses it. Moved to the save path, per edited block. **KEPT, not retired** — unlike the other two its premise is still true. Also retired the 023-F1 promotion predicate (a hand-maintained mirror of the renderer's condition) in favour of a value comparison. Client copy for the two retired codes removed per the file's own Direction-B rule. Two negative controls, each firing on its own test. |
+
+### Done earlier 2026-09-01 (committed, NOT pushed)
 
 | Commit | What |
 |---|---|

@@ -309,18 +309,27 @@ internal static class ComposeContentModelProjector
             };
         }
 
-        // Task 023: an INTERIOR section break (pPr-nested w:sectPr — this paragraph ends a section) is not
-        // model data; on render its content joins the FINAL section's page setup — a real pagination/
-        // header-scope change, counted LOUDLY. Full multi-section modeling is a follow-up (the trailing
-        // body-level sectPr is preserved by RenderIntoCarrier and is not this warning's subject).
-        // EXCEPTION (review 023-F1): the 011-P1 promotion shape — the FINAL section's sectPr parked in the
-        // LAST body paragraph's pPr with NO body-level sectPr (third-party generators) — loses NOTHING:
-        // RenderIntoCarrier promotes a clone to body level, so warning would be a false loss report (and a
-        // spurious Partial status). The predicate mirrors the renderer's promotion condition exactly.
-        if (p.ParagraphProperties?.SectionProperties is not null && !IsPromotedTrailingSectPr(p))
-        {
-            ctx.AddWarning("section-break-flattened", 1);
-        }
+        // `section-break-flattened` IS NO LONGER EMITTED HERE (#777, r8 2026-09-01) — it moved to the SAVE
+        // path, where the loss actually happens. It is NOT retired: unlike `indentation-dropped` and
+        // `paragraph-style-flattened` (whose premises were falsified and which were deleted outright), an
+        // interior `w:sectPr` on an EDITED paragraph is still real, unavoidable loss, and it is still
+        // reported — see ComposeBlockMerge.WarnForConstructsLostOnThisBlock.
+        //
+        // Why it could not stay here. This runs at PROJECTION, i.e. when the document is OPENED, and it
+        // fired for every interior section break in the file. But an interior sectPr on a paragraph the user
+        // never touches SURVIVES: ComposeBlockMerge.Capture clones each unchanged body child whole (only the
+        // BODY-level trailing sectPr is excluded there), so the clone carries `pPr/sectPr` verbatim. Only a
+        // block the user actually edits is re-rendered, and only then does InheritParagraphProperties drop it.
+        //
+        // So the open-time warning reported loss on a document nothing had been done to — the same
+        // over-firing shape as the two retired codes ("×6" on an untouched contract), and the same thing the
+        // owner directive names: do not show a user a warning they cannot act on. The save-path emission
+        // counts one warning per ACTUALLY-lost section break, which is both real and actionable.
+        //
+        // Moving it also retires the 023-F1 promotion exception as a special case. The save-side check
+        // compares the base sectPr against the authored body's trailing one, so the promoted shape — where
+        // the two are the same section — reports nothing by construction rather than by a predicate that has
+        // to be kept in step with the renderer.
 
         // Task 023: paragraph-level page break — model data (w:pPr/w:pageBreakBefore, OnOff semantics).
         var pageBreakBefore = ComposeOoxmlPrimitives.IsOn(p.ParagraphProperties?.PageBreakBefore);
@@ -458,13 +467,12 @@ internal static class ComposeContentModelProjector
         return result;
     }
 
-    /// <summary>Review 023-F1: whether <paramref name="p"/> is the LAST direct body paragraph of a body
-    /// with NO body-level <c>sectPr</c> — the 011-P1 shape whose pPr-nested <c>sectPr</c> the renderer
-    /// PROMOTES to body level (nothing flattens; mirrors <c>RenderIntoCarrier</c>'s promotion predicate).</summary>
-    private static bool IsPromotedTrailingSectPr(Paragraph p) =>
-        p.Parent is Body body
-        && !body.Elements<SectionProperties>().Any()
-        && ReferenceEquals(body.Elements<Paragraph>().LastOrDefault(), p);
+    // `IsPromotedTrailingSectPr` DELETED (#777, r8 2026-09-01) with its only caller. It mirrored
+    // RenderIntoCarrier's promotion predicate — a duplicate of the renderer's condition that had to be kept
+    // in step with it by hand. The save-side check that replaced it
+    // (ComposeDocumentRenderer.WarnIfSectionBreakFlattened) compares the base section against the trailing
+    // one BY VALUE, so the promotion shape reports nothing by construction and there is no second copy of
+    // the renderer's logic to drift.
 
     /// <summary>Ordered-vs-bullet from the R4.5 <see cref="ComposeNumbering.NumberingModel"/> (override-aware via
     /// <see cref="ComposeNumbering.NumberingModel.ResolveLevel"/>), with <c>ComposeDocxProjectionBuilder.ResolveOrdered</c>'s tolerant posture:

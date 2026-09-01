@@ -319,9 +319,14 @@ const SAVE_DEGRADATION_COPY: Record<string, string> = {
   // simplifications (the text/content is intact) — folded into the concise summary below via
   // SAVE_DEGRADATION_LABEL rather than one sentence each. Entries here keep the per-code fallback honest
   // if the summary path is ever bypassed. See also DEF-002 (the actual widener engine work, UAT-07a).
-  'indentation-dropped': 'Some indentation was simplified.',
-  'paragraph-style-flattened': 'Some paragraph styles were simplified.',
-  'section-break-flattened': 'A section break was simplified.',
+  // 'indentation-dropped' and 'paragraph-style-flattened' RETIRED (#777, 2026-09-01) — same
+  // Direction-B rule as 'internal-link-flattened' below. Neither has a producer any more: task 041 made
+  // an edited block inherit w:ind from its base, and ComposeBlockMerge.InheritParagraphProperties now
+  // carries an UNMODELED w:pStyle (only Normal/Heading1-6/ListParagraph are the model's to decide). They
+  // were also whole-document open-time counts, which is how an untouched contract reported "×84 / ×85".
+  // Leaving the copy would let a reader conclude the server still emits them.
+  'section-break-flattened':
+    'A section break was removed — page setup and headers from that point now follow the final section.',
   'tab-flattened': 'Some tab stops were simplified.',
   'table-formatting-flattened': 'Some table formatting was simplified.',
   'line-break-flattened': 'A line break was simplified.',
@@ -336,8 +341,7 @@ const SAVE_DEGRADATION_COPY: Record<string, string> = {
 // Codes not listed here fall back to their full SAVE_DEGRADATION_COPY sentence (they are usually
 // content-affecting, e.g. a dropped link target, and deserve their own line).
 const SAVE_DEGRADATION_LABEL: Record<string, string> = {
-  'indentation-dropped': 'indentation',
-  'paragraph-style-flattened': 'paragraph styles',
+  // 'indentation-dropped' / 'paragraph-style-flattened' RETIRED — see SAVE_DEGRADATION_COPY above.
   'section-break-flattened': 'section breaks',
   'tab-flattened': 'tab stops',
   'table-formatting-flattened': 'table formatting',
