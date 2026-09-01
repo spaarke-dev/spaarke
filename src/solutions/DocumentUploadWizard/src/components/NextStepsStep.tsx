@@ -64,7 +64,7 @@ import { FindSimilarViewerDialog } from "@spaarke/ui-components/components/FindS
 
 import type { NextStepActionId, IUploadedFile } from "../types";
 import { DocumentEmailStep } from "./DocumentEmailStep";
-import type { IDocumentEmailStepProps } from "./DocumentEmailStep";
+import type { IDocumentEmailStepProps, IDocumentEmailComposeController } from "./DocumentEmailStep";
 import type { IWizardContext } from "@spaarke/ui-components/components/EmailComposer";
 import { DocumentPicker } from "./DocumentPicker";
 import type { UploadedDocumentInfo } from "./SummaryStep";
@@ -102,6 +102,8 @@ export interface INextStepsStepProps {
     bffBaseUrl: string;
     /** Token provider for BFF API authentication. */
     bffTokenProvider: () => Promise<string>;
+    /** Registers the Send-Email composer controller so the wizard can guard Finish. */
+    onEmailControllerChange?: (controller: IDocumentEmailComposeController | null) => void;
 }
 
 // ---------------------------------------------------------------------------
@@ -766,6 +768,8 @@ interface IDynamicStepBuildOptions {
     emailStepProps: IDocumentEmailStepProps;
     /** Uploaded documents shaped for the EmailComposer's `wizardContext` (attachments). */
     wizardUploadedFiles?: IWizardContext["uploadedFiles"];
+    /** Registers the Send-Email composer controller (Finish guard). */
+    onEmailControllerChange?: (controller: IDocumentEmailComposeController | null) => void;
     successfulFiles?: OrchestratorFileResult[];
     containerId: string;
     uploadedDocumentMap?: Map<string, UploadedDocumentInfo>;
@@ -796,6 +800,7 @@ function buildDynamicStepConfig(
                     uploadedFiles={options.wizardUploadedFiles}
                     authenticatedFetch={spaarkeAuthenticatedFetch}
                     bffBaseUrl={options.bffBaseUrl}
+                    onControllerChange={options.onEmailControllerChange}
                 />
             ),
         };
@@ -853,6 +858,7 @@ export const NextStepsStep: React.FC<INextStepsStepProps> = ({
     containerId,
     bffBaseUrl,
     bffTokenProvider,
+    onEmailControllerChange,
 }) => {
     const styles = useStyles();
 
@@ -928,6 +934,7 @@ export const NextStepsStep: React.FC<INextStepsStepProps> = ({
                     buildDynamicStepConfig(actionId, {
                         emailStepProps,
                         wizardUploadedFiles,
+                        onEmailControllerChange,
                         successfulFiles,
                         containerId,
                         uploadedDocumentMap,
@@ -948,7 +955,7 @@ export const NextStepsStep: React.FC<INextStepsStepProps> = ({
         }
 
         prevSelectedRef.current = next;
-    }, [selectedNextSteps, wizardShellRef, emailStepProps, wizardUploadedFiles, successfulFiles, containerId, uploadedDocumentMap, bffBaseUrl, bffTokenProvider]);
+    }, [selectedNextSteps, wizardShellRef, emailStepProps, wizardUploadedFiles, onEmailControllerChange, successfulFiles, containerId, uploadedDocumentMap, bffBaseUrl, bffTokenProvider]);
 
     return (
         <div className={styles.root}>
