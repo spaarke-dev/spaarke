@@ -246,24 +246,10 @@ public class AnalysisChatContextEndpointsTests : IClassFixture<CustomWebAppFacto
             "endpoint response must be application/json for JSON deserialization by the client");
     }
 
-    // =========================================================================
-    // 404 Path — pending Dataverse implementation
-    // =========================================================================
-
-    [Fact(Skip = "404 path requires real Dataverse integration (task 021). Stub resolver always returns non-null. " +
-                 "This test will be enabled once ResolveFromDataverseAsync is fully implemented.")]
-    public async Task GetAnalysisChatContext_WhenAnalysisNotFound_Returns404()
-    {
-        // Arrange
-        _client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", "test-token");
-
-        // Act — once Dataverse integration is complete, a non-existent ID should return 404
-        var response = await _client.GetAsync("/api/ai/chat/context-mappings/analysis/non-existent-id-00000");
-
-        // Assert
-        response.StatusCode.Should().Be(HttpStatusCode.NotFound,
-            "resolver returns null when analysis record not found → endpoint returns 404");
-    }
+    // The 404-path test lived here. It asserted an unimplemented behavior against a stub resolver
+    // that always returns non-null, so it could never run without live Dataverse. Removed rather
+    // than left permanently skipped: the 404 contract belongs in a contract test written WITH
+    // `ResolveFromDataverseAsync`, not in a placeholder that reads as coverage.
 }
 
 /// <summary>

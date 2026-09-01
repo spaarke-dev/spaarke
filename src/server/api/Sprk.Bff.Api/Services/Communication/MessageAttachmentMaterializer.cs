@@ -11,10 +11,43 @@ namespace Sprk.Bff.Api.Services.Communication;
 /// <summary>
 /// Materializes a messaging (ACS Chat) file attachment into Spaarke's channel-agnostic storage model
 /// (design §6.4, FR-14):
-/// <c>ACS/file → SPE (SpeFileStore) → sprk_document → sprk_document.sprk_communication lookup +
+/// <c>ACS/file → SPE (SpeFileStore) → sprk_document → sprk_document.sprk_relatedcommunication lookup +
 /// sprk_communicationattachment intersection</c>.
 /// </summary>
 /// <remarks>
+/// <para>
+/// ══ DELETED 2026-08-28, RESTORED 2026-08-29 — READ THIS BEFORE PROPOSING ITS DELETION AGAIN ══
+/// </para>
+/// <para>
+/// This class was deleted on 2026-08-28 on a "zero production callers" finding. <b>That finding was
+/// correct and the conclusion drawn from it was wrong</b>, because the search that produced it was
+/// PRODUCTION-ONLY. <b>A production-caller count of zero is not a deletion licence.</b> What the count
+/// missed, all of which existed at the time:
+/// </para>
+/// <list type="bullet">
+///   <item><description>a live <b>DI registration</b> in <c>CommunicationModule</c> — deleting the type
+///     forced an edit to the composition root, which is the tell that something depends on it;</description></item>
+///   <item><description><b>five unit tests</b>, including the CHAT-ATTACHMENT-POLICY 25 MB cap and MIME
+///     allow-list gate — a real policy gate, not scaffolding, and therefore maintain-class under
+///     ADR-038 §7;</description></item>
+///   <item><description>a <b>citation in an ArchTest</b> allow-list, i.e. a structural fitness function
+///     was already tracking this site;</description></item>
+///   <item><description>and the messaging channel it serves is <b>in flight in two sibling
+///     worktrees</b>, which a single-worktree grep cannot see at all.</description></item>
+/// </list>
+/// <para>
+/// The generalisable rule: before deleting a type, count DI registrations, tests, ArchTest/allow-list
+/// citations and sibling worktrees — not just <c>new X(</c> call sites in this tree. The deletion note
+/// left in <c>CommunicationModule</c> said "recover it from git history if messaging is revived", which
+/// reads as reversible and is not: the class would have come back re-authored, without its policy gate.
+/// </para>
+/// <para>
+/// <b>It was restored IMPROVED, not verbatim.</b> Three things the deletion was right about are fixed
+/// here rather than reintroduced — see <see cref="MaterializeAsync"/> for the flat path and the
+/// hardened container decision, and <see cref="MaterializeAttachmentRequest.DriveId"/> for why the
+/// caller-supplied drive is a FALLBACK and must never be restored to an authoritative one.
+/// </para>
+///
 /// <para>
 /// This is the messaging channel's own materialization STEP — the net-new surface of task 070. The
 /// storage SCHEMA is unchanged: it reuses the exact <c>sprk_document</c> + <c>sprk_communicationattachment</c>
@@ -70,16 +103,31 @@ public sealed class MessageAttachmentMaterializer
     private readonly CommunicationOptions _options;
     private readonly ILogger<MessageAttachmentMaterializer> _logger;
 
+    /// <summary>
+    /// The record-aware container decision (unified-access-control-r2 task 076). Injected directly —
+    /// both this type and the resolver are registered Scoped (<c>CommunicationModule</c>), so no
+    /// scope-factory dance is needed here (unlike <c>CommunicationService</c>, which is not Scoped).
+    ///
+    /// <para>OPTIONAL so existing test constructions stay compilable, but the registration is NOT
+    /// feature-gated. A null resolver means the container decision cannot be made, and
+    /// <see cref="MaterializeAsync"/> therefore REFUSES rather than falling back to the shared archive
+    /// container — the CLAUDE.md §10 F.1 asymmetric-registration trap is that an absent isolation seam
+    /// silently becomes "use the shared container", which is the exact defect this routing removes.</para>
+    /// </summary>
+    private readonly Engine.CommunicationContainerResolver? _containerResolver;
+
     public MessageAttachmentMaterializer(
         ISpeFileOperations speFileStore,
         IGenericEntityService genericEntityService,
         IOptions<CommunicationOptions> options,
-        ILogger<MessageAttachmentMaterializer> logger)
+        ILogger<MessageAttachmentMaterializer> logger,
+        Engine.CommunicationContainerResolver? containerResolver = null)
     {
         _speFileStore = speFileStore;
         _genericEntityService = genericEntityService;
         _options = options.Value;
         _logger = logger;
+        _containerResolver = containerResolver;
     }
 
     /// <summary>
@@ -108,10 +156,56 @@ public sealed class MessageAttachmentMaterializer
             return MaterializeAttachmentResult.Rejected(policyProblem);
         }
 
-        // ── Resolve the SPE drive/container (same source as the email archive path) ──
-        var driveId = !string.IsNullOrWhiteSpace(request.DriveId)
+        // ── Resolve the SPE drive/container — RECORD-AWARE as of task 076 ───────────────────────
+        //
+        // This used to be `request.DriveId ?? _options.ArchiveContainerId`, so a chat attachment on a
+        // message regarding a SECURE matter landed in the shared archive container. SPE permissions
+        // are additive-only, so that placement cannot be retracted by any later permission change.
+        // Task 075 fixed the email inbound-attachment twin; this is the messaging-channel one.
+        //
+        // ⚠️ NOTE THE ORDER. `request.DriveId` is the FALLBACK, not the winner. If the resolver
+        // ran only when `request.DriveId` was absent, the isolation fix would be caller-bypassable —
+        // any caller supplying a drive id would silently reinstate the defect. A secure regarding's
+        // own container must beat every caller-supplied value; a NON-SECURE message keeps exactly its
+        // previous behaviour, because `request.DriveId ?? ArchiveContainerId` is what gets passed in
+        // as INV-7's tier-3 default.
+        //
+        // This ordering is the reason the class could be restored at all. The 2026-08-28 deletion note
+        // said the DriveId override was "a caller-named drive waiting for its first caller"; that was
+        // true of the PRE-076 shape and had already been fixed by 076 when the note was written. It is
+        // restored in the hardened form ONLY. Do not "simplify" this back to
+        // `request.DriveId ?? ArchiveContainerId` at the call site.
+        if (_containerResolver is null)
+        {
+            // Refuse rather than fall back. An absent isolation seam that degrades to "use the shared
+            // container" is the CLAUDE.md §10 F.1 anti-pattern in its most damaging form.
+            _logger.LogError(
+                "Cannot materialize attachment '{FileName}' for communication {CommunicationId}: the " +
+                "record-aware container resolver is unavailable, so it cannot be determined whether the " +
+                "message regards a secure record. Refusing rather than using the shared archive container. " +
+                "CorrelationId: {CorrelationId}",
+                request.FileName, request.CommunicationId, request.CorrelationId);
+
+            return MaterializeAttachmentResult.Rejected(Problem(
+                status: 500,
+                errorCode: "ATTACHMENT_STORE_NOT_CONFIGURED",
+                title: "Attachment store not configured",
+                detail: "The storage container for this message could not be determined, so the "
+                        + "attachment was not stored.",
+                correlationId: request.CorrelationId));
+        }
+
+        var fallbackDriveId = !string.IsNullOrWhiteSpace(request.DriveId)
             ? request.DriveId!
             : _options.ArchiveContainerId;
+
+        // Throws SdapProblemException for a secure regarding with no container of its own
+        // (secure_record_container_missing, 409) or ambiguous ownership — fail closed by design, and
+        // deliberately NOT caught here: swallowing it into a "not configured" rejection would turn a
+        // correct refusal into what reads like a deployment problem.
+        var driveId = await _containerResolver
+            .ResolveContainerAsync(request.CommunicationId, fallbackDriveId, cancellationToken);
+
         if (string.IsNullOrWhiteSpace(driveId))
         {
             return MaterializeAttachmentResult.Rejected(Problem(
@@ -126,7 +220,21 @@ public sealed class MessageAttachmentMaterializer
         if (request.Content.CanSeek)
             request.Content.Position = 0;
 
-        var spePath = $"/communications/{request.CommunicationId:N}/attachments/{request.FileName}";
+        // FLAT container root, communication id folded into the FILE NAME.
+        //
+        // This was "/communications/{id:N}/attachments/{fileName}" before the 2026-08-28 deletion, and
+        // that path is the second thing the deletion was right about: in SPE, Graph creates EVERY
+        // '/'-delimited segment of an upload path as a folder, implicitly, so this minted three folder
+        // levels per attachment. It gets the same treatment every other site got — the {id} moves into
+        // the name rather than being dropped, because UploadSmallAsync is Graph's path-keyed simple PUT:
+        // it accepts no @microsoft.graph.conflictBehavior and REPLACES silently, so a bare {fileName}
+        // would be data loss the first time two messages shared an attachment name (image001.png).
+        //
+        // The name is sanitized because request.FileName is CHAT-USER-SUPPLIED and a file name IS the
+        // whole upload path — folding the id in front does not protect it ("{id}_a/b.pdf" still mints
+        // "{id}_a"). Same sanitizer as every other site (root CLAUDE.md §11 — there is exactly one).
+        var spePath = $"{request.CommunicationId:N}_{SpeUploadPath.SanitizeFileName(request.FileName)}";
+
         var fileHandle = await _speFileStore.UploadSmallAsync(driveId, spePath, request.Content, cancellationToken);
         if (fileHandle?.Id is null)
         {
@@ -138,7 +246,7 @@ public sealed class MessageAttachmentMaterializer
                 correlationId: request.CorrelationId));
         }
 
-        // ── Governed sprk_document (message → doc lookup: sprk_document.sprk_communication) ──
+        // ── Governed sprk_document (message → doc lookup: sprk_document.sprk_relatedcommunication) ──
         // Mirrors the email inbound attachment shape; storage schema is unchanged.
         var document = new DataverseEntity("sprk_document")
         {
@@ -258,7 +366,7 @@ public sealed record MaterializeAttachmentRequest
     /// <summary>The parent <c>sprk_communication</c> (message) record id the attachment belongs to.</summary>
     public required Guid CommunicationId { get; init; }
 
-    /// <summary>File name including extension.</summary>
+    /// <summary>File name including extension. Sanitized before it becomes the SPE upload path.</summary>
     public required string FileName { get; init; }
 
     /// <summary>MIME content type. Validated against the CHAT-ATTACHMENT-POLICY allow-list before upload.</summary>
@@ -271,9 +379,22 @@ public sealed record MaterializeAttachmentRequest
     public long? SizeBytes { get; init; }
 
     /// <summary>
-    /// Optional SPE drive/container override. When null, the materializer uses
-    /// <c>Communication:ArchiveContainerId</c> — the same store the email archive path uses.
+    /// Optional SPE drive/container <b>FALLBACK</b> — <b>not</b> an override, and the distinction is the
+    /// whole point.
     /// </summary>
+    /// <remarks>
+    /// <para>⚠️ This property is a caller-supplied container id, which is the defect class
+    /// unified-access-control-r2 exists to close (ADR-003 / ADR-045). It is safe ONLY because of where it
+    /// is consumed: <see cref="MessageAttachmentMaterializer.MaterializeAsync"/> passes it INTO
+    /// <c>CommunicationContainerResolver.ResolveContainerAsync</c> as the non-secure default, so a secure
+    /// regarding's own container beats it every time and a secure regarding with no container FAILS CLOSED.
+    /// It is consulted only when nothing about the message is secure — which is exactly INV-7's tier-3
+    /// server-side default.</para>
+    /// <para><b>Do NOT change this to an authoritative caller-supplied container</b> — i.e. never
+    /// <c>request.DriveId ?? resolver.Resolve(...)</c>, and never pass it straight to an upload. That
+    /// ordering makes the isolation fix caller-bypassable, which is what task 076 removed and what the
+    /// 2026-08-28 deletion (correctly) objected to about the PRE-076 shape.</para>
+    /// </remarks>
     public string? DriveId { get; init; }
 
     /// <summary>Correlation id for tracing / ProblemDetails.</summary>

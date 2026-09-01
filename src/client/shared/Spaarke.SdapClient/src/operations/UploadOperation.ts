@@ -66,16 +66,26 @@ export class UploadOperation {
    * `uploadChunk` did not even use the BFF chunk route — it PUT directly to Graph's own
    * `session.uploadUrl` — so that route had no client at all.
    *
-   * ⚠️ **Files >= 4 MiB have no working upload path, and did not before this change either.** The
-   * server caps the small route at `PathValidator.SmallUploadMaxBytes` (4 MiB), and this was the
-   * only alternative. {@link uploadFile} previously routed large files here and failed with a
-   * misleading drive-resolution error; it now fails with an explicit, accurate message. Restoring
-   * large-file upload needs a record-keyed upload-session route and is follow-up work.
+   * ⚠️ **Files >= 4 MiB still have no working path FROM THIS CLIENT** — but the server side of the
+   * gap is now closed. The small route is capped at `PathValidator.SmallUploadMaxBytes` (4 MiB), and
+   * the BFF now exposes a working replacement for the chunked path:
+   *
+   *     POST /api/obo/records/{entityLogicalName}/{recordId}/upload-session
+   *
+   * It returns Graph's own upload-session URL, which a client PUTs chunks to directly — the same
+   * mechanism the deleted `uploadChunk` used, minus the `GET /api/obo/containers/{id}/drive` call
+   * that never existed and made the old path dead on arrival.
+   *
+   * This client has NOT been wired to it because the cutover is blocked on an owner decision: three
+   * upload paths in the wider codebase have no owning record at the moment the bytes move, so
+   * `(entityLogicalName, recordId)` cannot be supplied for them. See
+   * `projects/unified-access-control-r2/notes/task-076-record-keyed-upload-contract.md` §5.
+   * Leaving an honest error beats shipping a half-working upload.
    */
   public static readonly LARGE_FILE_UNSUPPORTED =
-    'Files of 4 MiB or larger cannot be uploaded: the chunked upload path was removed in 2026-08 ' +
-    'because it was non-functional (it depended on GET /api/obo/containers/{id}/drive, a route ' +
-    'that does not exist). A record-keyed upload-session route is required to restore it.';
+    'Files of 4 MiB or larger cannot be uploaded by this client. The BFF supports large uploads via ' +
+    'POST /api/obo/records/{entityLogicalName}/{recordId}/upload-session, but this client has not ' +
+    'been wired to it yet — the record-keyed cutover is pending (unified-access-control-r2 task 076).';
 
   private async parseError(response: Response): Promise<string> {
     try {

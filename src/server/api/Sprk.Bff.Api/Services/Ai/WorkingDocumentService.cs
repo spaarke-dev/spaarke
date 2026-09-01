@@ -166,7 +166,15 @@ public class WorkingDocumentService : IWorkingDocumentService
             };
         }
 
-        var path = $"/analysis-outputs/{analysisId}/{fileName}";
+        // FLAT container root. "/analysis-outputs/{analysisId}/" implicitly minted two folder levels on
+        // every save (in SPE, Graph creates every segment of an upload path), while the {analysisId}
+        // segment was the only thing keeping two analyses' identically-named outputs apart — the
+        // path-keyed simple PUT behind UploadSmallAsync takes no conflictBehavior and silently replaces.
+        // The id therefore moves into the filename rather than being dropped.
+        // SANITIZED 2026-08-29: `fileName` is a caller-supplied argument to SaveWorkingDocumentAsync, and a
+        // filename IS the whole upload path — any '/' in it makes Graph create that folder, exactly as the
+        // deleted prefix did. Folding the id in front does not help: "{id}_a/b.docx" still mints "…_a".
+        var path = $"{analysisId}_{SpeUploadPath.SanitizeFileName(fileName)}";
         using var stream = new MemoryStream(content);
 
         var uploadResult = await speFileStore.UploadSmallAsync(driveId, path, stream, cancellationToken);

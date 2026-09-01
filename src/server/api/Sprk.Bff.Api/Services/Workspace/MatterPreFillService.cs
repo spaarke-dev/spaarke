@@ -26,7 +26,9 @@ namespace Sprk.Bff.Api.Services.Workspace;
 /// underlying orchestrator; only the injected type changes).
 ///
 /// File storage lifecycle:
-/// Files uploaded here are stored under a per-request staging prefix (ai-prefill/{requestId}/...).
+/// Files uploaded here are stored FLAT in the staging container root, with a per-request
+/// prefix folded into the FILE NAME ({requestId}_{fileName}) rather than into a folder path —
+/// an upload path with folder segments makes Graph implicitly create those folders in SPE.
 /// They are available for later association when the matter record is created.
 /// Cleanup of orphaned staging files is a separate concern (background job).
 /// </remarks>
@@ -323,7 +325,14 @@ public sealed class MatterPreFillService
             TextExtractionResult extractionResult;
             if (!string.IsNullOrEmpty(stagingContainerId))
             {
-                var stagingPath = $"ai-prefill/{requestId}/{fileName}";
+                // FLAT staging-container root — see the twin in ProjectPreFillService. The folder prefix
+                // was minted implicitly by Graph on every upload; the {requestId} that was carrying the
+                // per-request uniqueness moves into the filename rather than being dropped, because the
+                // path-keyed simple PUT behind UploadSmallAsUserAsync silently replaces on collision.
+                // SANITIZED 2026-08-29: fileName is Path.GetFileName(IFormFile.FileName) — client-supplied,
+                // and GetFileName splits on the HOST OS separator only, so on the linux-x64 runtime a
+                // "a\b.docx" survives intact while Graph may still read the backslash as a separator.
+                var stagingPath = $"{requestId}_{SpeUploadPath.SanitizeFileName(fileName)}";
 
                 try
                 {

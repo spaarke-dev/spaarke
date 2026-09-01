@@ -375,29 +375,17 @@ public class OfficeEmailEnricher
     public static string GenerateEmlFileName(EmailMetadata metadata)
     {
         var datePrefix = metadata.SentDate?.ToString("yyyy-MM-dd") ?? DateTime.UtcNow.ToString("yyyy-MM-dd");
-        var sanitizedSubject = SanitizeFileName(metadata.Subject);
 
-        // Limit subject to 80 chars to leave room for date and extension
-        if (sanitizedSubject.Length > 80)
-        {
-            sanitizedSubject = sanitizedSubject[..80];
-        }
+        // Subject capped at 80 chars to leave room for the date prefix and the extension.
+        var sanitizedSubject = SpeUploadPath.SanitizeFileName(metadata.Subject, maxLength: 80);
 
         return $"{datePrefix}_{sanitizedSubject}.eml";
     }
 
-    /// <summary>
-    /// Sanitizes a string for use as a filename.
-    /// </summary>
-    public static string SanitizeFileName(string name)
-    {
-        if (string.IsNullOrWhiteSpace(name))
-        {
-            return "untitled";
-        }
-
-        var invalid = Path.GetInvalidFileNameChars();
-        var sanitized = new string(name.Where(c => !invalid.Contains(c)).ToArray());
-        return string.IsNullOrWhiteSpace(sanitized) ? "untitled" : sanitized.Trim();
-    }
+    // SanitizeFileName MOVED 2026-08-29 to Infrastructure/Graph/SpeUploadPath.SanitizeFileName, together
+    // with its explicit Windows-strict character set. It was the only PUBLIC implementation of a function
+    // seven other places had privately re-written, and callers now span Api/, Services/Communication/,
+    // Services/Workspace/, Services/Ai/, Services/Compose/ and Workers/ — reaching into Services/Office
+    // from all of those is the inverted dependency that produced the copies in the first place
+    // (root CLAUDE.md §11). Read the rationale at the new site; do not re-add a local copy here.
 }
