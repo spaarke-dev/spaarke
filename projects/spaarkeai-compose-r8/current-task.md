@@ -12,8 +12,8 @@
 
 | Field | Value |
 |---|---|
-| **Active work** | **071 + 072 COMPLETE and merged.** Worktree FULLY SYNCED at `f6887d46a` (0 uncommitted / 0 unpushed / 0 behind / 0 unmerged; main repo synced). **090 STARTED but NOT closed** — its escalation trigger fired. |
-| **Next Action** | **1. DEPLOY (090 step 2)** — `scripts/Deploy-BffApi.ps1` + `scripts/Deploy-CustomPage.ps1` for `sprk_spaarkeai`, **together, one window, same tree** (NFR-05). TFM verified **net10.0**. Owner authorised the deploy after being told the save-contract gate is red. **2. Then 090 docs**: `/test-diet` → write-side fidelity doc → lessons-learned (Half-A/Half-B) → `projects/INDEX.md` + root §17 + `.claude/CHANGELOG.md`. **3. Separate session: fix the client save-contract suite** (see below). |
+| **Active work** | **Fixing the real Compose defects (#777 first).** 071 + 072 complete and merged. **FREEZE LIFTED** — UAC-r2 #887 merged `13a1f5a4a`. Client gate FIXED by #921 (`ec2154bf5`, `lfs: true`) — first green ever, **1 of the 3** greens needed before `continue-on-error` comes off. 090 STARTED, NOT closed. |
+| **Next Action** | **IN FLIGHT — `paragraph-style-flattened` (#777), 1 of 3 steps done.** (1) ✅ `ComposeBlockMerge.InheritProperties` now inherits an UNMODELED `w:pStyle`; the blanket exclusion is scoped to model-owned styles by the new `IsModelDeterminedStyle` (Normal / Heading1-6 / ListParagraph). Build 0/0, Compose **1802/0**. (2) ⬜ **ADD A TEST — the change is UNPINNED**: `ComposeResidualLossParityTests` covers neither `pStyle` nor indentation (grep: no matches), which is exactly why it passed unchanged. (3) ⬜ **Split the warning's two meanings** — `ComposeContentModelProjector.cs:386-392` still emits `paragraph-style-flattened` on the now-FALSE premise *"the render path emits Normal"*. Still TRUE at open (the editor cannot display `Quote`/`Überschrift1`), FALSE at save. **Unverified, and it decides severity: does a projection warning surface on SAVE?** If yes, editing one paragraph reports ×84 losses that never happened. |
 | **Branch** | `work/spaarkeai-compose-r8` @ **`f6887d46a`** — identical to `origin/master`. Nothing outstanding. |
 | **Merged today** | #806 `19bf65ec4` · #905 `369c3ea89` · #908 `330b9fc55` |
 | **Suite** | ALL GREEN — Compose **1,802/0** · BFF **11,614/0** · ArchTests **153/153** · Spe.Integration **409/0** · IntegrationTests **103/0** · client gate **104 suites / 1,336** · solution build **0 errors** · DI diff **empty** |
@@ -21,20 +21,21 @@
 
 ---
 
-### 🔒 THE FREEZE — read before touching `ComposeService.cs`
+### 🔓 THE FREEZE IS LIFTED (2026-09-01) — `ComposeService.cs` is editable again
 
-**`ComposeService.cs` is frozen until `unified-access-control-r2` lands their #858 create-on-save patch
-and comments on the issue.** We committed to this publicly in
-[#858 comment 5472902579](https://github.com/spaarke-dev/spaarke/issues/858#issuecomment-5472902579):
-*"You will not have to rebase."*
+**UAC-r2's PR #887 MERGED as `13a1f5a4a`.** Their `ComposeService.cs` work (`c820b3f8f` — filename
+sanitization at every SPE upload site) is on master. Our public promise on
+[#858](https://github.com/spaarke-dev/spaarke/issues/858) — *"You will not have to rebase"* — is
+**discharged**. Nothing in this project is waiting on them any more.
 
-- **Frozen**: clusters **5a** and **2a/2b** — both live in that file. Do not start them.
-- **Not frozen**: tasks **071** (`ComposeDocxProjectionBuilder.cs`) and **072**
-  (`ComposeDocumentRenderer.cs`) — different files, zero overlap.
-- **Unfreeze trigger**: their comment on #858. Then 5a → 2a/2b.
+**Now unblocked**: 070 clusters **5a** and **2a/2b** · **#776** (apply-template `If-Match`) ·
+**#781** (save-identity self-heal). #858 itself is still OPEN — theirs to close, not ours.
 
-Their anchors on master, which the freeze protects: `PromoteIfEphemeralAsync` **1989** ·
-`ResolveDriveIdAsync(request.ContainerId, …)` **1510** · the no-ContainerId guard **1500**.
+> **The trap that was here, recorded so it is not repeated.** The unfreeze trigger used to read
+> *"their comment on #858"* — while our own last comment there opened *"✅ DEFINITIVE — you are
+> unblocked. Nothing here needs a reply."* We asked for a signal and told them not to send it; waiting
+> on it would have blocked us forever. **An unfreeze trigger must be something you can OBSERVE
+> yourself** (a PR merging, a file changing on master), never a message another party has to volunteer.
 
 **The coordination record is `notes/response-to-unified-access-control-r2-2026-08-27.md`** — its
 `# ✅ DEFINITIVE STATUS` block at the top is the current agreement; everything below it is history. The
