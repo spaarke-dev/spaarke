@@ -150,7 +150,7 @@ existing guard keys on a hand-listed set of files classified for *route authoriz
 | S3 | `Api/OBOEndpoints.cs:66,72` | `ResolveDriveIdAsync`+`UploadSmallAsUserAsync` | client route `{id}` | CLIENT — 076 converting |
 | S4 | `Api/Ai/ChatWordExportEndpoints.cs:148,154` | same pair (OBO) | config staging → default | CONFIG; zero callers → DELETE |
 | S5 | `Api/Ai/ChatDocumentEndpoints.cs:1155,1160` | same pair (OBO) | same config keys | CONFIG; LIVE → CONVERT |
-| S6 | `Services/Compose/ComposeService.cs:1482,1484` | `UploadSmallAsUserAsync` | `SaveComposeDocumentRequest.ContainerId` (body) | CLIENT — #858, behind #806 |
+| S6 | `Services/Compose/ComposeService.cs` | `UploadSmallAsUserAsync` | ~~`SaveComposeDocumentRequest.ContainerId` (body)~~ → `ResolveCreateOnSaveContainerAsync` | ✅ **SERVER (record) — CONVERTED by #858, 2026-09-01** |
 | S7 | `Services/Compose/ComposeService.cs:1515` | `ReplaceFileContentAsUserAsync` | `request.DriveId` (body) | CLIENT — behind #806 |
 | S8 | `Services/Compose/ComposeService.cs:1448` | `ReplaceFileContentAsUserAsync` | Dataverse transient-key lookup | SERVER (record) ✅ |
 | S9 | `Services/Compose/ComposeService.cs:442` | `ReplaceFileContentAsUserAsync` | `body.DriveId` (body) | CLIENT — behind #806 |
@@ -168,6 +168,24 @@ existing guard keys on a hand-listed set of files classified for *route authoriz
 | S21 | `Services/Email/EmailAttachmentProcessor.cs:232` | `UploadSmallAsync` | `request.DriveId` | **DEAD** (zero callers) |
 | S22 | `Services/DocumentCheckoutService.cs:787` | `DeleteFileAsync` | `document.DriveId/ItemId` off the authorized row | SERVER (record) ✅ the sanctioned delete |
 | S23 | `SpeFileStore.DeleteItemAsUserAsync:245`, `CreateUploadSessionAsUserAsync:278` (+ `DriveItemOperations.cs:671`, `UploadSessionManager.cs:414`) | facade | — | **DEAD CODE** since 071/076 deleted their routes |
+
+### ✅ RESOLVED 2026-09-01 — #858 landed; the MINT converted, the REPLACE trio did NOT
+
+Commit `763b05428`. **Row S6 (the create-on-save MINT) is now `ServerDerivedRecord`**:
+`SaveComposeDocumentRequest.ContainerId` is deleted along with the wire field and the
+`containerId is required` 400 guard, so the request cannot name a container at all. The server derives it
+in `ComposeService.ResolveCreateOnSaveContainerAsync` — caller oid → session (ownership-checked) →
+authorize the bound matter via `CallerRecordAccessProbe` + `entity.associate_document` (AppendTo) →
+`ResolveForRecordAsync`; no matter → `ResolveForActingUserAsync` (systemuser → BU → `sprk_containerid`).
+
+**Rows S7 / S9 (and their `ComposeSaveStorageCoordinator` successors) are UNCHANGED and still
+`ClientSupplied` — this is deliberate, not an oversight.** They trace `request.DriveId` on the **REPLACE**
+path (`ComposeSaveStorageCoordinator.cs:216,228`), which #858 did not touch. A handoff note directed
+moving all of them; that instruction was **wrong**, and reclassifying them would have written a false
+census entry of exactly the kind Rule A exists to catch. Follow-on work: derive the replace-path
+drive+item from the authorized `sprk_document` row, as row S8 (the dedup path) already does. Blast-radius
+note: the replace path is OBO, so the user's own ACL constrains it — LATENT-bypass class, not the
+app-only live-hole class. See [`plan-858-closeout.md`](plan-858-closeout.md) §3.
 
 ### 🔴 CORRECTION 2026-08-30 — PR #806 is MERGED, and the Compose sink MOVED
 

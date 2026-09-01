@@ -79,7 +79,9 @@ public sealed class AnchoredAnnotationPersistenceTests
         _spe.Object,
         _sessions.Object,
         _dataverse.Object, _indexing.Object,
-        NullLogger<ComposeService>.Instance);
+        NullLogger<ComposeService>.Instance,
+        ComposeServiceCollaborators.Resolver(_dataverse.Object),
+        ComposeServiceCollaborators.Probe().Object);
 
     private ChatSession SeedSession(string sessionId, string documentId, string tenantId = Tenant)
     {

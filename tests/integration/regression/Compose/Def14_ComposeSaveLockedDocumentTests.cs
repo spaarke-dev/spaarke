@@ -460,9 +460,16 @@ public sealed class Def14ComposeSaveFixture : WebApplicationFactory<Program>
             // No background workers in tests.
             services.RemoveAll<IHostedService>();
 
-            // Dataverse stub (never reached before the SPE throw, but keeps the graph resolvable).
+            // Dataverse stub. Mostly never reached before the SPE throw — EXCEPT the issue #858
+            // create-on-save container derivation, which now runs BEFORE the SPE write: the container
+            // is server-derived from the acting user's business unit (no matter is bound here), and
+            // IGenericEntityService forwards to THIS mock (GraphModule.cs registers it as
+            // sp.GetRequiredService<IDataverseService>()). Without the arrangement, resolution throws
+            // acting_user_not_resolvable and the 423/412 SPE throws these tests exist for are never
+            // reached.
             var dataverseMock = new Mock<IDataverseService>();
             dataverseMock.Setup(d => d.TestConnectionAsync()).ReturnsAsync(true);
+            TestActingUserBusinessUnit.Arrange(dataverseMock);
             services.RemoveAll<IDataverseService>();
             services.AddSingleton(dataverseMock.Object);
 

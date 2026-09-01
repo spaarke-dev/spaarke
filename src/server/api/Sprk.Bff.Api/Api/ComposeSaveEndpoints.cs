@@ -114,9 +114,8 @@ internal static class ComposeSaveEndpoints
         {
             DriveId = body.DriveId,
             DocumentSpeId = documentSpeId,
-            // ContainerId is ignored on the replace path (DocumentSpeId present) but forwarded
-            // for symmetry so both save routes map the same body shape.
-            ContainerId = body.ContainerId,
+            // ContainerId forwarding REMOVED — issue #858. It was already ignored on this (replace)
+            // path, and the field no longer exists on SaveComposeDocumentRequest.
             Content = body.Content is null ? ReadOnlyMemory<byte>.Empty : body.Content,
             // Replace path still requires a session (guarded above at the endpoint); non-null here.
             SessionId = body.SessionId!,
@@ -161,7 +160,11 @@ internal static class ComposeSaveEndpoints
         var logger = loggerFactory.CreateLogger("ComposeEndpoints");
 
         if (body is null) return BadRequest("Request body is required.");
-        if (string.IsNullOrWhiteSpace(body.ContainerId)) return BadRequest("containerId is required for create-on-save (the client resolves it from the user's Business Unit).");
+        // The `containerId is required` guard is DELETED — issue #858. Requiring it was the contract
+        // expression of the defect: the caller had to name a storage container, and the server wrote
+        // there. The container is now chosen by ComposeService.ResolveCreateOnSaveContainerAsync from
+        // the matter bound to the session (after authorizing the caller against it), or from the acting
+        // user's business unit when there is no matter.
         if (string.IsNullOrWhiteSpace(body.TenantId)) return BadRequest("tenantId is required in the request body.");
 
         // R4 FR-06 (task 032): reject the retired paragraph-diff delta shape (stale client) with a clean 400.
@@ -179,16 +182,15 @@ internal static class ComposeSaveEndpoints
             return BadRequest("Provide the retained-original 'content' bytes, or a 'contentModel' for a born-in-editor draft (the client no longer authors .docx bytes).");
 
         logger.LogInformation(
-            "Compose create-on-save: tenant={TenantId} container={ContainerId} session={SessionId} contentBytes={SizeBytes} modelBlocks={BlockCount} TraceId={TraceId}",
-            body.TenantId, body.ContainerId, body.SessionId, body.Content?.Length ?? 0, body.ContentModel?.Blocks.Count ?? 0, httpContext.TraceIdentifier);
+            "Compose create-on-save: tenant={TenantId} session={SessionId} contentBytes={SizeBytes} modelBlocks={BlockCount} TraceId={TraceId}",
+            body.TenantId, body.SessionId, body.Content?.Length ?? 0, body.ContentModel?.Blocks.Count ?? 0, httpContext.TraceIdentifier);
 
         var request = new SaveComposeDocumentRequest
         {
-            // DocumentSpeId null → SaveAsync transient-create branch. DriveId is derived from
-            // ContainerId server-side; the client does not (and cannot) know it for a new draft.
+            // DocumentSpeId null → SaveAsync transient-create branch. The drive is derived from the
+            // container the SERVER resolves (issue #858) — the client neither supplies nor knows it.
             DocumentSpeId = null,
             DriveId = null,
-            ContainerId = body.ContainerId,
             Content = body.Content is null ? ReadOnlyMemory<byte>.Empty : body.Content,
             // Empty when no session is bound (Browse/local-file first Save). The service treats an
             // empty/whitespace SessionId as "no session" and skips the FR-07 rebind (task 110).
@@ -503,6 +505,40 @@ internal static class ComposeSaveEndpoints
                     ? "https://tools.ietf.org/html/rfc7231#section-6.6.4"
                     : "https://tools.ietf.org/html/rfc7231#section-6.5.8");
         }
+        catch (Sprk.Bff.Api.Infrastructure.Exceptions.SdapProblemException ex)
+        {
+            // Issue #858: the server-side container resolution refuses with TYPED problems —
+            // compose_record_access_denied (403), compose_host_entity_unsupported /
+            // compose_host_record_invalid / acting_user_ambiguous / secure_record_container_missing
+            // (409), acting_user_not_resolvable (403). ResolveCreateOnSaveContainerAsync's own contract
+            // says these "must reach the client as 403/409 rather than as a save step that didn't
+            // work" — and without this arm they fell through to the catch-all below and shipped as the
+            // exact opaque 500 ("Save failed: SdapProblemException: …") the DEF-14 regression suite
+            // exists to forbid. Verified on the wire 2026-09-01. The /api/compose group carries no
+            // exception filter (unlike Office's OfficeExceptionFilter), so the mapping lives here on
+            // the one path both save routes share.
+            //
+            // Telemetry mirrors the UnauthorizedAccessException arm above: the request was REFUSED
+            // before any write (nothing stored, nothing overwritten), so the outcome is RefusedInvalid,
+            // with the cause split by what the refusal was about.
+            ComposeSaveTelemetry.RecordSaveOutcome(
+                ComposeSaveOutcome.RefusedInvalid,
+                ex.StatusCode == StatusCodes.Status403Forbidden
+                    ? ComposeSaveTelemetry.CauseForbidden
+                    : ComposeSaveTelemetry.CauseBadRequest);
+            logger.LogWarning(ex,
+                "Compose save refused: {Code} ({StatusCode}). TraceId={TraceId}",
+                ex.Code, ex.StatusCode, httpContext.TraceIdentifier);
+            return Results.Problem(
+                statusCode: ex.StatusCode,
+                title: ex.Title,
+                detail: ex.Detail,
+                extensions: new Dictionary<string, object?>
+                {
+                    ["code"] = ex.Code,
+                    ["correlationId"] = httpContext.TraceIdentifier,
+                });
+        }
         catch (Exception ex)
         {
             ComposeSaveTelemetry.RecordSaveOutcome(ComposeSaveOutcome.StorageFailed, ComposeSaveTelemetry.CauseUnhandled);
@@ -555,8 +591,16 @@ internal static class ComposeSaveEndpoints
 
 /// <summary>Request body for <c>POST /api/compose/documents/{id}/save</c> (replace path) and
 /// <c>POST /api/compose/documents/create-on-save</c> (FR-05 transient create path, task 100).
-/// On the create-on-save path <see cref="DriveId"/> is null and <see cref="ContainerId"/> carries
-/// the client-resolved BU container; on the replace path <see cref="ContainerId"/> is ignored.</summary>
+///
+/// <para><b><c>containerId</c> was REMOVED from this body — issue #858 (2026-09-01).</b> It carried a
+/// client-resolved SPE container that the server then wrote bytes into, with no per-resource
+/// authorization anywhere on the path. The container is now chosen server-side by
+/// <c>ComposeService.ResolveCreateOnSaveContainerAsync</c>.</para>
+///
+/// <para><b>Deploy ordering — this change is BFF-safe-first</b>, unlike task 076's upload contract. A
+/// client that still sends <c>containerId</c> has it silently ignored (System.Text.Json drops unknown
+/// properties), and the server derives the container regardless. So the BFF may ship before the client
+/// with no 404s and no broken saves. The client change is cleanup, not a coupled release.</para></summary>
 public sealed record SaveComposeDocumentBody(
     /// <summary>Bound ChatSession id. OPTIONAL on the create-on-save (transient Browse/local-file)
     /// path (task 110) — absent when the draft has no chat session; the server skips the FR-07
@@ -570,9 +614,8 @@ public sealed record SaveComposeDocumentBody(
     /// <c>.docx</c> bytes — the only bytes it ever sends are this retained original.</summary>
     [property: JsonPropertyName("content")] byte[]? Content = null,
     [property: JsonPropertyName("driveId")] string? DriveId = null,
-    /// <summary>Client-resolved SPE container id for the create-on-save path (Fork A —
-    /// businessunit.sprk_containerid). Required when there is no drive-item yet; ignored on replace.</summary>
-    [property: JsonPropertyName("containerId")] string? ContainerId = null,
+    // `containerId` DELETED — issue #858. See the record's summary for the deploy-ordering note: an
+    // old client still sending it is harmless (unknown JSON properties are ignored).
     [property: JsonPropertyName("documentRecordId")] Guid? DocumentRecordId = null,
     [property: JsonPropertyName("displayName")] string? DisplayName = null,
     /// <summary>R3 FR-06 (task 027): the LOAD-TIME SPE version id (from the Load response) = the op-log's
