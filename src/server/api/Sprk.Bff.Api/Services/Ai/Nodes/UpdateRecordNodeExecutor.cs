@@ -137,20 +137,9 @@ public sealed class UpdateRecordNodeExecutor : INodeExecutor
             return NodeValidationResult.Failure(errors.ToArray());
         }
 
-        var config = ParseConfig(context.Node.ConfigJson, out var parseError);
+        var config = ParseConfig(context.Node.ConfigJson);
         if (config is null)
         {
-            // TEMP DIAGNOSTIC (2026-09-01): capture the ACTUAL runtime ConfigJson + the exact parse
-            // exception, because the stored sprk_configjson parses fine in a unit test yet fails here.
-            // Remove once the profiling parse failure (#919) is understood.
-            var cj = context.Node.ConfigJson ?? string.Empty;
-            _logger.LogWarning(
-                "🔴 DIAGNOSTIC UpdateRecord ParseConfig returned null. NodeId={NodeId} NodeName={NodeName} Error={ParseError} Len={Len} Prefix={Prefix}",
-                context.Node.Id,
-                context.Node.Name,
-                parseError ?? "(none)",
-                cj.Length,
-                cj.Length > 0 ? cj.Substring(0, Math.Min(cj.Length, 700)) : "(empty)");
             errors.Add("Failed to parse update record configuration");
         }
         else
@@ -333,16 +322,10 @@ public sealed class UpdateRecordNodeExecutor : INodeExecutor
     ///   1. Direct: top-level entityLogicalName, recordId, fields (Code Page sync)
     ///   2. Nested: configJson property contains a JSON string with the config (PCF sync)
     /// </summary>
-    internal static UpdateRecordNodeConfig? ParseConfig(string? configJson) => ParseConfig(configJson, out _);
-
-    internal static UpdateRecordNodeConfig? ParseConfig(string? configJson, out string? parseError)
+    internal static UpdateRecordNodeConfig? ParseConfig(string? configJson)
     {
-        parseError = null;
         if (string.IsNullOrWhiteSpace(configJson))
-        {
-            parseError = "configJson null/whitespace";
             return null;
-        }
 
         try
         {
@@ -366,9 +349,8 @@ public sealed class UpdateRecordNodeExecutor : INodeExecutor
 
             return config;
         }
-        catch (Exception ex)
+        catch
         {
-            parseError = $"{ex.GetType().Name}: {ex.Message}";
             return null;
         }
     }

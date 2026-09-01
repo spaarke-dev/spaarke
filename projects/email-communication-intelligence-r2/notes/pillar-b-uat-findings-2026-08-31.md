@@ -27,3 +27,21 @@
 1. **(this doc)** document + file issues.
 2. Deploy #3/#4/#6 to dev; verify a fresh save (email + attachments → `.eml` + attachment child docs) via Dataverse.
 3. Implement real Dataverse entity search (#2 / task 026): FetchXML across Matter/Project/Invoice/Account/Contact, security-trimmed, paged, + tests. Then investigate #5 (AI-index of archives).
+
+---
+
+## #7 Document-profile playbook fails — ROOT-CAUSED 2026-09-01 (shared AI-orchestration bug)
+
+During UAT it emerged that indexing + association now work, but every saved Document shows `sprk_filesummarystatus = Failed` — the **document-profile AI playbook is not completing**.
+
+**Root cause (definitive, via runtime App Insights capture):** the profile playbook's **"Update Record" node** (`sprk_playbooknode 0fa4e8db-…`) has `fieldMappings[].value = "{{output_aiAnalysis.output.sprk_filesummary}}"`. At runtime the orchestrator **string-substitutes the AI summary — long, multi-line text — into the JSON `value` without JSON-escaping the newlines**, producing invalid JSON:
+
+> `JsonException: '0x0A' is invalid within a JSON string. Path: $.fieldMappings[0].value`
+
+→ `UpdateRecordNodeExecutor.ParseConfig` throws → returns null → node "Update Record" fails validation ("Failed to parse update record configuration") → playbook stops in batch 2 → `filesummarystatus=Failed`.
+
+**Why it was masked:** the STORED `sprk_configjson` is a valid template (`{{…}}`), so it parses fine in a unit test (`UpdateRecordParseConfigReproTests`, added as a regression guard). Only the RENDERED config (AI text with newlines) is invalid.
+
+**Where the fix belongs:** `PlaybookOrchestrationService.RenderConfigJsonStructurally` (R7 Wave 11, JSON-aware) is meant to prevent exactly this, but for this node the orchestrator is **falling back to flat string substitution** (`PlaybookOrchestrationService.cs:2284`) which corrupts the JSON. Fix = ensure this path uses the JSON-aware structural renderer (values injected into JSON string positions must be escaped), OR make the flat fallback JSON-safe.
+
+**Blast radius:** SHARED — affects ANY playbook injecting multi-line / quoted content into a node's `ConfigJson` (Insights, Daily Briefing, etc.), governed by `docs/architecture/SPAARKE-PLAYBOOK-LLM-OUTPUT-PATTERN.md`. Owned by the AI-orchestration area (`spaarke-ai-architecture-redesign-r2`). **NOT the Office save path** — recommend a focused fix owned there. Temp runtime diagnostic used to capture this has been removed; `ParseConfig` left `internal` for the regression test.
