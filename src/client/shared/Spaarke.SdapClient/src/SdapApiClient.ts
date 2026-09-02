@@ -7,7 +7,7 @@ import {
   IndexFileResult,
 } from './types';
 import { TokenProvider } from './auth/TokenProvider';
-import { UploadOperation } from './operations/UploadOperation';
+import { UploadOperation, type ConflictBehaviorOption } from './operations/UploadOperation';
 import { DownloadOperation } from './operations/DownloadOperation';
 import { DeleteOperation } from './operations/DeleteOperation';
 import { IndexFileOperation } from './operations/IndexFileOperation';
@@ -113,6 +113,12 @@ export class SdapApiClient {
     options?: {
       onProgress?: (percent: number) => void;
       signal?: AbortSignal;
+      /**
+       * Name-collision behaviour. Omit on the FIRST attempt — the BFF defaults to `fail`, so a
+       * collision throws `UploadNameConflictError` with the existing file untouched. Pass
+       * `'rename'` or `'replace'` only when retrying after the user has chosen.
+       */
+      conflictBehavior?: ConflictBehaviorOption;
     }
   ): Promise<DriveItem> {
     // Graph's simple `PUT .../content` boundary, which is what uploadSmall actually uses.
