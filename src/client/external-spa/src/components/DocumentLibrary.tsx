@@ -53,7 +53,7 @@ import { FileUploadZone, UploadedFileList } from '@spaarke/ui-components/compone
 import type { IUploadedFile, IFileValidationError } from '@spaarke/ui-components/components/FileUpload';
 import { AiSummaryPopover } from '@spaarke/ui-components/components/AiSummaryPopover';
 import { getDocuments, ODataDocument } from '../api/web-api-client';
-import { bffApiCall } from '../auth/bff-client';
+import { bffApiCall, bffApiBlob } from '../auth/bff-client';
 import { AccessLevel } from '../types';
 
 // ---------------------------------------------------------------------------
@@ -577,16 +577,25 @@ export const DocumentLibrary: React.FC<DocumentLibraryProps> = ({ projectId, acc
 
       setDownloadingId(doc.sprk_documentid);
 
+      let objectUrl: string | undefined;
       try {
-        // BFF returns a signed download URL or the file bytes.
-        // We request a download URL from the BFF and open it.
-        const result = await bffApiCall<{ downloadUrl: string }>(
-          `/api/v1/external/documents/${doc.sprk_documentid}/download`
+        // The BFF streams the file itself (application/octet-stream) from the
+        // project-scoped route; it deliberately never returns a signed URL or an
+        // SPE pointer. So read the bytes and hand the browser an object URL.
+        //
+        // Fixed 2026-09-01: this previously called
+        // `/api/v1/external/documents/{id}/download` expecting `{ downloadUrl }`.
+        // That route does not exist (guaranteed 404) and the response shape it
+        // assumed is one the server is designed never to produce.
+        const blob = await bffApiBlob(
+          `/api/v1/external/projects/${projectId}/documents/${doc.sprk_documentid}/content`
         );
+
+        objectUrl = window.URL.createObjectURL(blob);
 
         // Trigger browser download via a temporary anchor element
         const anchor = window.document.createElement('a');
-        anchor.href = result.downloadUrl;
+        anchor.href = objectUrl;
         anchor.download = doc.sprk_name;
         anchor.style.display = 'none';
         window.document.body.appendChild(anchor);
@@ -595,10 +604,16 @@ export const DocumentLibrary: React.FC<DocumentLibraryProps> = ({ projectId, acc
       } catch (err) {
         console.error(`[DocumentLibrary] Download failed for document ${doc.sprk_documentid}:`, err);
       } finally {
+        // Revoke on the next tick — revoking synchronously can cancel the
+        // in-flight navigation the anchor click just started.
+        if (objectUrl) {
+          const toRevoke = objectUrl;
+          window.setTimeout(() => window.URL.revokeObjectURL(toRevoke), 0);
+        }
         setDownloadingId(null);
       }
     },
-    [canActOnDocuments]
+    [canActOnDocuments, projectId]
   );
 
   // ---------------------------------------------------------------------------
