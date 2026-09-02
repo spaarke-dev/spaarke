@@ -6,8 +6,15 @@
 
 ## Module Overview
 
-This module contains TypeScript/React PCF controls for Dataverse model-driven apps:
-- **UniversalDatasetGrid** - Custom dataset grid with actions (shared lib component)
+This module contains TypeScript/React PCF controls for Dataverse model-driven apps.
+**20 controls exist on disk** (a control = a directory with a `ControlManifest*.xml`); the notable ones:
+
+- **UniversalDatasetGrid** — ⛔ **DELETED. Not in the repo.** (Corrected 2026-09-01; this file listed it as
+  live.) It was retired in favour of the **DataGrid framework** — `<DataGrid configId=… />` from
+  `@spaarke/ui-components` + a `sprk_gridconfiguration` Dataverse record. See
+  [`docs/architecture/SPAARKE-DATAGRID-FRAMEWORK-ARCHITECTURE.md`](../../../docs/architecture/SPAARKE-DATAGRID-FRAMEWORK-ARCHITECTURE.md).
+  **Do not use it as a pattern exemplar** — six `.claude/patterns/` files still did, which is how this
+  survived; they are corrected in the same change.
 - **VisualHost** - Configuration-driven visualization (charts, drill-through, MetricCards)
 - **SemanticSearchControl** - Semantic document search with natural-language queries
 - **DocumentRelationshipViewer** - Document relationship visualization
@@ -269,18 +276,31 @@ try {
 # Install dependencies
 npm install
 
-# Build controls
+# Build controls (development)
 npm run build
 
 # Start dev server (test harness)
 npm run start
 
-# Build for production
-npm run build -- --mode production
-
-# Push to Dataverse (requires pac auth)
-pac pcf push --publisher-prefix sprk
+# Build for production — USE THIS, not `npm run build -- --mode production`
+npm run build:prod
 ```
+
+> 🔴 **Corrected 2026-09-01** (`unified-access-control-r2`). This block previously prescribed
+> `npm run build -- --mode production` for production builds and `pac pcf push --publisher-prefix sprk`
+> for deployment. **Both are wrong**, and this file is loaded as ground truth by every agent touching a
+> PCF — so it was actively producing broken deployments.
+>
+> - **Production build is `npm run build:prod`.** Root [`CLAUDE.md` §12](../../../CLAUDE.md) states this
+>   explicitly, and it is the subject of [`FAILURE-MODES.md` AP-1](../../../.claude/FAILURE-MODES.md#ap-1-skill-prescribes-x-but-x-is-wrong)
+>   — *"skill prescribes X but X is wrong"*. A module CLAUDE.md contradicting the root rule is the exact
+>   AP-1 shape.
+> - **`pac pcf push` is NOT the deployment path for releases.** It is a dev-loop convenience that pushes an
+>   unmanaged control under its own solution. Releases go through solution-ZIP import — use the
+>   [`pcf-deploy`](../../../.claude/skills/pcf-deploy/SKILL.md) skill. **This same file already said so at
+>   its "Deployment" section**, so the two halves contradicted each other and a reader could follow either.
+
+**Deploy**: use `/pcf-deploy` (build:prod → pack → solution-ZIP import). Do not hand-roll the deploy.
 
 ## Testing Guidelines
 
