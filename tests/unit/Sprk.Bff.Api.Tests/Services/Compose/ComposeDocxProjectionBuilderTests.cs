@@ -737,7 +737,11 @@ public sealed class ComposeDocxProjectionBuilderTests
 
         var projection = new ComposeDocxProjectionBuilder().Build(docx);
 
-        projection.Html.Should().Contain("<ol>").And.Contain("<li>").And.NotContain("<ul>");
+        // UAT round 2 (r8): the open tag now carries the `data-projected-list` provenance marker, so the
+        // needle is the tag PREFIX. Asserting the marker explicitly — the client CSS keys the native
+        // `<ol>` marker suppression off it, so dropping it here would silently give real document
+        // clauses a browser-invented number (the F-3 violation).
+        projection.Html.Should().Contain("<ol data-projected-list=\"1\">").And.Contain("<li>").And.NotContain("<ul");
     }
 
     [Fact]
@@ -748,7 +752,7 @@ public sealed class ComposeDocxProjectionBuilderTests
 
         var projection = new ComposeDocxProjectionBuilder().Build(docx);
 
-        projection.Html.Should().Contain("<ul>").And.Contain("<li>").And.NotContain("<ol>");
+        projection.Html.Should().Contain("<ul data-projected-list=\"1\">").And.Contain("<li>").And.NotContain("<ol");
     }
 
     [Theory]

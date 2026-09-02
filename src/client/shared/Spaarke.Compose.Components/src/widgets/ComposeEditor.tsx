@@ -1385,14 +1385,25 @@ const useStyles = makeStyles({
       color: tokens.colorBrandForegroundLink,
       textDecoration: 'underline',
     },
-    // FR-13 (task 032, fidelity-r4.5): the editor NEVER relies on the browser `<ol>` CSS auto-count for
-    // a legal number (F-3 invariant) — `composeNumberAtomExtension.ts`'s decoration is the SOLE source
-    // of a displayed number. Suppressing the native marker here (not per-item) is intentionally
-    // unconditional: it applies even to the rare unresolvable-numId case where no atom renders (031's
-    // "do not fabricate a number" fail-closed posture) — showing NO number is safer than a CSS-counted
-    // one that would silently disagree with 031's computed label ("1." vs "4.2", the double-numbering
-    // defect this task exists to fix). `<ul>` bullet lists are untouched (no legal number involved).
-    '& .ProseMirror ol': {
+    // FR-13 (task 032, fidelity-r4.5): for a list that came from the SOURCE DOCUMENT the editor NEVER
+    // relies on the browser `<ol>` CSS auto-count for a legal number (F-3 invariant) —
+    // `composeNumberAtomExtension.ts`'s decoration is the SOLE source. That still holds even when the
+    // atom renders nothing (the unresolvable-`numId` fail-closed case): showing NO number is safer than
+    // a CSS count that would silently disagree with the computed label ("1." vs "4.2" — the
+    // double-numbering defect task 032 exists to fix).
+    //
+    // UAT round 2 (r8, 2026-09-02) — this rule used to be UNCONDITIONAL, which over-applied it. A list
+    // the USER creates has no computed label either, so it rendered with no number at all, and
+    // "Numbered list" looked like a dead button (UAT round 1 item 4). The two cases are indistinguishable
+    // by the number attribute — both lack one — so they are separated by PROVENANCE instead:
+    // `ComposeDocxProjectionBuilder.EnsureList` stamps `data-projected-list` on document-sourced lists,
+    // and only those are suppressed. An editor-created list takes the browser's native marker, which is
+    // honest — it is a real, freshly authored list, not a claim about the source document's numbering.
+    //
+    // KNOWN LIMIT, deliberate: a new item added INSIDE a projected list is still unnumbered, because its
+    // `<ol>` is projected and it has no computed label. Closing that needs live renumbering (the Option C
+    // client engine), not a CSS change — a browser count there WOULD contradict the document's numbering.
+    '& .ProseMirror ol[data-projected-list]': {
       listStyleType: 'none',
     },
     '& .ProseMirror table': {

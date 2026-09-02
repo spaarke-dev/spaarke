@@ -1015,7 +1015,13 @@ public sealed class ComposeDocxProjectionBuilder
             if (_listOpen && _listOrdered != ordered) CloseOpenList();
             if (!_listOpen)
             {
-                Append(ordered ? "<ol>" : "<ul>");
+                // `data-projected-list` marks a list that came from the SOURCE DOCUMENT, as opposed to one
+                // the user later creates in the editor. The client suppresses the native `<ol>` marker for
+                // THESE lists only: their number must come from the 031-computed label (or, for an
+                // unresolvable `numId`, be absent — the F-3 "never fabricate a number" posture). An
+                // editor-created list carries no such marker, has no server-computed label, and would
+                // otherwise render with NO number at all, which is what UAT round 1 item 4 reported.
+                Append(ordered ? "<ol data-projected-list=\"1\">" : "<ul data-projected-list=\"1\">");
                 _listOpen = true;
                 _listOrdered = ordered;
             }

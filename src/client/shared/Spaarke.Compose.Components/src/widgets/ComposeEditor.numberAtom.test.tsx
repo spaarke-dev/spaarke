@@ -105,14 +105,24 @@ describe('ComposeEditor — FR-13 number-atom rendering (task 032)', () => {
     expect(atom?.textContent).toBe('4.1');
   });
 
-  it('the native <ol> marker is suppressed (list-style-type: none) — the atom is the SOLE source of the number, avoiding "1. 4.2" double-numbering', async () => {
-    renderEditor('<ol><li><p data-paraid="00320003" data-computed-number="4.2.">Clause text</p></li></ol>');
+  it('suppresses the native <ol> marker for a PROJECTED list only — scoped, not global (UAT round 2)', async () => {
+    renderEditor(
+      '<ol data-projected-list="1"><li><p data-paraid="00320003" data-computed-number="4.2.">Clause text</p></li></ol>'
+    );
     await screen.findByRole('textbox');
 
     const rules = allCssRuleText();
-    const olRule = rules.find(text => / \.ProseMirror ol\s*\{/.test(text));
-    expect(olRule).toBeDefined();
-    expect(olRule).toMatch(/list-style-type:\s*none/);
+
+    // The atom stays the SOLE source of a document-sourced number, avoiding "1. 4.2" double-numbering.
+    const projectedRule = rules.find(text => /\.ProseMirror ol\[data-projected-list\]\s*\{/.test(text));
+    expect(projectedRule).toBeDefined();
+    expect(projectedRule).toMatch(/list-style-type:\s*none/);
+
+    // UAT round 2: the suppression must NOT be global any more. It was, and that is why a list the USER
+    // created rendered with no number at all and "Numbered list" looked like a dead button. An
+    // unqualified `.ProseMirror ol { list-style-type: none }` is the regression this catches.
+    const unscopedRule = rules.find(text => /\.ProseMirror ol\s*\{/.test(text) && /list-style-type:\s*none/.test(text));
+    expect(unscopedRule).toBeUndefined();
 
     // Negative — bullet (<ul>) lists are untouched by this suppression (no legal number involved).
     const ulRule = rules.find(text => / \.ProseMirror ul\s*\{/.test(text) && /list-style-type:\s*none/.test(text));
