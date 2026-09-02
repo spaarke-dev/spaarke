@@ -130,8 +130,11 @@ const useStyles = makeStyles({
     ':hover': { backgroundColor: tokens.colorStatusSuccessBackground3, color: tokens.colorNeutralForegroundOnBrand },
   },
   regardingLabel: { color: tokens.colorNeutralForeground2, marginBottom: tokens.spacingVerticalXS },
+  // Priority/Effort: side-by-side when there's room, stack when the pane is narrow.
   twoCol: { display: 'flex', gap: tokens.spacingHorizontalM, flexWrap: 'wrap' },
-  col: { flex: '1 1 120px', minWidth: '120px' },
+  col: { flex: '1 1 110px', minWidth: '110px' },
+  // Fluent Dropdown defaults to a ~250px min-width — override so it shrinks in a narrow pane.
+  dropdownFull: { minWidth: 'unset', width: '100%' },
   // Contact lookup.
   lookupResults: {
     display: 'flex',
@@ -168,6 +171,7 @@ const useStyles = makeStyles({
     justifyContent: 'space-between',
     gap: tokens.spacingHorizontalS,
     marginTop: tokens.spacingVerticalS,
+    flexWrap: 'wrap',
   },
   savedBtn: {
     backgroundColor: tokens.colorNeutralBackground5,
@@ -435,6 +439,7 @@ export const CreateTodoView: React.FC<CreateTodoViewProps> = ({
           <div className={styles.twoCol}>
             <Field label="Priority" className={styles.col}>
               <Dropdown
+                className={styles.dropdownFull}
                 value={priority}
                 selectedOptions={[priority]}
                 onOptionSelect={(_, d) => setPriority((d.optionValue as string) ?? DEFAULT_PRIORITY_CHOICE)}
@@ -449,6 +454,7 @@ export const CreateTodoView: React.FC<CreateTodoViewProps> = ({
             </Field>
             <Field label="Effort" className={styles.col}>
               <Dropdown
+                className={styles.dropdownFull}
                 value={effort}
                 selectedOptions={[effort]}
                 onOptionSelect={(_, d) => setEffort((d.optionValue as string) ?? DEFAULT_EFFORT_CHOICE)}
@@ -475,17 +481,12 @@ export const CreateTodoView: React.FC<CreateTodoViewProps> = ({
               Cancel
             </Button>
             {status === 'created' ? (
-              <Button className={styles.savedBtn} icon={<CheckmarkRegular />} disabled>
+              <Button className={styles.savedBtn} disabled>
                 Saved
               </Button>
             ) : (
-              <Button
-                appearance="primary"
-                icon={status === 'creating' ? <Spinner size="tiny" /> : <TaskListAddRegular />}
-                onClick={() => void handleCreate()}
-                disabled={!canCreate}
-              >
-                {status === 'creating' ? 'Creating…' : 'Save'}
+              <Button appearance="primary" onClick={() => void handleCreate()} disabled={!canCreate}>
+                {status === 'creating' ? 'Saving…' : 'Save'}
               </Button>
             )}
           </div>

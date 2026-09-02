@@ -22,7 +22,6 @@ import {
   Label,
 } from '@fluentui/react-components';
 import {
-  SaveRegular,
   DocumentRegular,
   ArrowResetRegular,
   CheckmarkCircleRegular,
@@ -878,12 +877,7 @@ export function SaveFlow(props: SaveFlowProps): React.ReactElement {
         <Button appearance="secondary" onClick={handleCancel} disabled={isSaving}>
           Cancel
         </Button>
-        <Button
-          appearance="primary"
-          icon={isSaving ? <Spinner size="tiny" /> : <SaveRegular />}
-          onClick={handleSave}
-          disabled={isSaving || !isValid}
-        >
+        <Button appearance="primary" onClick={handleSave} disabled={isSaving || !isValid}>
           {isSaving ? 'Saving...' : 'Save'}
         </Button>
       </div>
