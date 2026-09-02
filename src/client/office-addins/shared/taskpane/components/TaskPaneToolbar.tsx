@@ -23,7 +23,6 @@ import {
   WeatherSunnyRegular,
   ColorRegular,
 } from '@fluentui/react-icons';
-import { SpaarkeLogo } from './SpaarkeLogo';
 import { getAvailableTabs, type NavigationTab } from './TaskPaneNavigation';
 import type { HostType } from './TaskPaneHeader';
 import type { ThemePreference } from '../hooks/useTheme';
@@ -121,10 +120,6 @@ export const TaskPaneToolbar: React.FC<TaskPaneToolbarProps> = ({
 
   return (
     <header className={styles.toolbar} role="banner">
-      <div className={styles.logo}>
-        <SpaarkeLogo size={22} aria-label="Spaarke" />
-      </div>
-
       {showTabs && isAuthenticated && tabs.length > 0 && (
         <div className={styles.tabs}>
           <TabList

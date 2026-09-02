@@ -35,7 +35,7 @@ import {
   PersonSearchRegular,
   EditRegular,
 } from '@fluentui/react-icons';
-import { EntityPicker } from './EntityPicker';
+import { RelatedToPicker } from './RelatedToPicker';
 import { AttachmentSelector } from './AttachmentSelector';
 import { ALL_ENTITY_TYPES } from '../hooks/useEntitySearch';
 import type { EntitySearchResult, EntityType } from '../hooks/useEntitySearch';
@@ -49,8 +49,59 @@ import {
   type UseSaveFlowOptions,
 } from '../hooks/useSaveFlow';
 import { useAnnounce } from '../hooks/useAnnounce';
-import { fetchEnginePreSelection } from '../services/communicationSuggestionsService';
+import { fetchRelatedCandidates, type RelatedCandidate } from '../services/communicationSuggestionsService';
+import { authenticatedJsonFetch } from '@shared/services/authenticatedJsonFetch';
 import type { AttachmentInfo, HostType } from '@shared/adapters/types';
+
+/** True inside the browser test harness (taskpane-test.html sets the flag). */
+function isBrowserTestMode(): boolean {
+  try {
+    return (window as unknown as { __SPAARKE_TEST_MODE__?: boolean }).__SPAARKE_TEST_MODE__ === true;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Demo "Related to" candidates for the browser test harness ONLY — the real
+ * /suggestions endpoint 404s without a captured email. Mirrors the reconciliation
+ * screenshots so the auto-match card UX is iterable.
+ */
+const DEMO_RELATED_CANDIDATES: RelatedCandidate[] = [
+  {
+    id: '11111111-1111-1111-1111-111111111111',
+    entityType: 'Matter',
+    logicalName: 'sprk_matter',
+    name: 'Litigation matter',
+    displayInfo: 'LITG-763955',
+    confidence: 1.0,
+    matchReason: 'Sender is on the matter team',
+  },
+  {
+    id: '22222222-2222-2222-2222-222222222222',
+    entityType: 'Matter',
+    logicalName: 'sprk_matter',
+    name: 'Monte Rosa Biotechnology v Spaarke Inc',
+    displayInfo: 'LITG-119896',
+    confidence: 0.97,
+  },
+  {
+    id: '33333333-3333-3333-3333-333333333333',
+    entityType: 'Matter',
+    logicalName: 'sprk_matter',
+    name: 'Meridian Corp v. Pinnacle Industries',
+    displayInfo: 'LITG-226554',
+    confidence: 0.92,
+  },
+  {
+    id: '44444444-4444-4444-4444-444444444444',
+    entityType: 'Project',
+    logicalName: 'sprk_project',
+    name: 'Q1 Patent Filing Project',
+    displayInfo: 'PROJ-2025-014',
+    confidence: 0.88,
+  },
+];
 
 /**
  * Styles using Fluent UI v9 design tokens (ADR-021).
@@ -359,12 +410,11 @@ export function SaveFlow(props: SaveFlowProps): React.ReactElement {
   const [documentName, setDocumentName] = useState<string>('');
   const [documentDescription, setDocumentDescription] = useState<string>('');
 
-  // FR-B2 engine pre-selection: true while the current selection is the engine's
-  // predicted record (cleared the moment the user picks a different record).
-  const [preSelectedFromEngine, setPreSelectedFromEngine] = useState(false);
-  // Set once the user manually touches the picker — stops a late-returning engine
-  // prediction from clobbering their explicit choice.
-  const userTouchedPickerRef = useRef(false);
+  // Auto-match candidates for the "Related to" cards (engine suggestions, ranked
+  // highest-first). Replaces the old single pre-selection with the reconciliation-
+  // style card list (UI feedback 2026-09-02).
+  const [relatedCandidates, setRelatedCandidates] = useState<RelatedCandidate[]>([]);
+  const [candidatesLoading, setCandidatesLoading] = useState(false);
 
   // Build save context
   const buildSaveContext = useCallback(
@@ -406,11 +456,9 @@ export function SaveFlow(props: SaveFlowProps): React.ReactElement {
     startSave(context);
   }, [buildSaveContext, startSave]);
 
-  // Handle entity selection
+  // Handle entity selection (Confirm a card / select a search result / Change).
   const handleEntitySelect = useCallback(
     (entity: EntitySearchResult | null) => {
-      userTouchedPickerRef.current = true;
-      setPreSelectedFromEngine(false);
       setSelectedEntity(entity);
       if (entity) {
         announce(`Selected ${entity.entityType}: ${entity.name}`, 'polite');
@@ -419,29 +467,76 @@ export function SaveFlow(props: SaveFlowProps): React.ReactElement {
     [setSelectedEntity, announce]
   );
 
-  // FR-B2: pre-select the Association Engine's predicted record when the picker opens.
-  // Reuses the SHARED derivePrimaryReview candidate model (no fork; ADR-045). Outlook
-  // only, best-effort: a 404 (email not captured), no usable candidate, or any failure
-  // leaves the picker with NO engine pre-selection (the user must choose — never an
-  // auto-filed guess). Does not override a selection the user has already made.
+  // Fetch the engine's ranked "Related to" candidates for the auto-match cards.
+  // Reuses the SHARED derivePrimaryReview model (no fork; ADR-045). Outlook only,
+  // best-effort: a 404 (email not captured) / failure → no cards (the user searches
+  // instead — never an auto-filed guess). The browser test harness seeds demo
+  // candidates so the card UX is iterable.
   useEffect(() => {
     if (hostType !== 'outlook' || !itemId) return;
     let cancelled = false;
+    setCandidatesLoading(true);
     (async () => {
       try {
-        const pre = await fetchEnginePreSelection(itemId);
-        if (cancelled || userTouchedPickerRef.current || !pre) return;
-        setSelectedEntity(pre.predicted);
-        setPreSelectedFromEngine(true);
-        announce(`Spaarke suggested ${pre.predicted.entityType}: ${pre.predicted.name}`, 'polite');
+        let candidates = await fetchRelatedCandidates(itemId);
+        if (candidates.length === 0 && isBrowserTestMode()) {
+          candidates = DEMO_RELATED_CANDIDATES;
+        }
+        if (!cancelled) setRelatedCandidates(candidates);
       } catch {
-        // Best-effort — a failed prediction must never block the manual save flow.
+        if (!cancelled && isBrowserTestMode()) setRelatedCandidates(DEMO_RELATED_CANDIDATES);
+      } finally {
+        if (!cancelled) setCandidatesLoading(false);
       }
     })();
     return () => {
       cancelled = true;
     };
-  }, [hostType, itemId, setSelectedEntity, announce]);
+  }, [hostType, itemId]);
+
+  // "Look up another record" search — scoped to the selected chip type.
+  const relatedSearch = useCallback(
+    async (query: string, type: EntityType): Promise<EntitySearchResult[]> => {
+      if (!apiBaseUrl || !getAccessToken) return [];
+      try {
+        const token = await getAccessToken();
+        const res = await authenticatedJsonFetch(
+          `${apiBaseUrl}/api/office/search/entities?q=${encodeURIComponent(query)}&type=${type}&top=10`,
+          { headers: { 'Content-Type': 'application/json' } },
+          token,
+          { getRetryToken: getAccessToken }
+        );
+        if (!res.ok) return [];
+        const data = await res.json();
+        const rows = (data.results ?? []) as Array<{
+          id: string;
+          entityType: string;
+          logicalName: string;
+          name: string;
+          displayInfo?: string;
+        }>;
+        return rows.map(item => ({
+          id: item.id,
+          entityType: item.entityType as EntityType,
+          logicalName: item.logicalName,
+          name: item.name,
+          ...(item.displayInfo ? { displayInfo: item.displayInfo } : {}),
+        }));
+      } catch {
+        return [];
+      }
+    },
+    [apiBaseUrl, getAccessToken]
+  );
+
+  // "New record" — Slice 3 will wire the BFF-backed create; for now route to the
+  // host's Quick Create seam (opens a Dataverse create form) when available.
+  const handleCreateNew = useCallback(
+    (type: EntityType) => {
+      onQuickCreate?.(type, '');
+    },
+    [onQuickCreate]
+  );
 
   // Handle view document
   const handleViewDocument = useCallback(() => {
@@ -674,31 +769,17 @@ export function SaveFlow(props: SaveFlowProps): React.ReactElement {
           <PersonSearchRegular />
           <Text weight="semibold">Related to</Text>
         </div>
-        <EntityPicker
+        <RelatedToPicker
           value={selectedEntity}
           onChange={handleEntitySelect}
+          candidates={relatedCandidates}
+          candidatesLoading={candidatesLoading}
+          onSearch={relatedSearch}
+          onCreateNew={handleCreateNew}
           allowedTypes={allowedEntityTypes ?? ALL_ENTITY_TYPES}
-          onQuickCreate={onQuickCreate}
+          defaultType="Matter"
           disabled={isSaving}
-          showTypeFilter
-          showRecent
-          showQuickCreate
-          placeholder="Search for a Matter, Project, Account…"
-          aria-label="Related to"
-          // Thread the BFF base URL + token so the picker queries the real
-          // `/api/office/search/entities` endpoint (real Dataverse records +
-          // GUID ids). Without this, useEntitySearch silently falls back to
-          // mockSearchEntities — surfacing fake records (id="4") that then 400
-          // on save-with-association. apiBaseUrl/getAccessToken are already in
-          // SaveFlow scope (used by useSaveFlow for the save POST).
-          searchOptions={{ apiBaseUrl, getAccessToken }}
         />
-        {preSelectedFromEngine && selectedEntity && (
-          <div className={styles.sectionTitle}>
-            <SparkleRegular />
-            <Text size={200}>Suggested by Spaarke from this email</Text>
-          </div>
-        )}
       </div>
 
       {/* Document Metadata Fields */}
