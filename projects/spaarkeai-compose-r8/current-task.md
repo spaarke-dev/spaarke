@@ -35,7 +35,19 @@ stream (tracked insert/delete, "2 suggested edits pending", Accept-all, per-sugg
    "add numbering does nothing" (a new list has no server number to paint) are the same gap. The header
    names it **"R5 G3, explicitly OUT of R4.5 scope; escalate rather than converting this to a doc node."**
    Fixing = client renumbering engine (the two-engine drift this project exists to prevent) **or** a server
-   round-trip per structural edit. **Needs a written design decision first.**
+   round-trip per structural edit. **DESIGN ANSWERED 2026-09-02** →
+   `notes/uat/numbering-editing-design-options.md`. Headline: the blocking constraint was misread — it rules
+   out INLINE CONTENT, not a NODE ATTRIBUTE, and the number already IS one (`data-computed-number`). So the
+   rendering mechanism needs no change; the only missing piece is **recomputation**, via ProseMirror's
+   maintainer-prescribed `appendTransaction`. Recommended: **client engine for immediacy + server
+   authoritative + parity enforced by the #699 shared-corpus pattern**. The HARDER half is not renumbering —
+   it is authoring/removing `w:numPr` on the write path (a new list has no numbering definition to inherit).
+
+   **Owner scope call (2026-09-02): "whether we continue r8 or start a new project is semantic — I'll follow
+   your better judgement." DECISION: sequence, don't merge.** R8 closes on its own thesis (save reliability +
+   fidelity) — it is deployed, green, every item closed; holding it open for a toolbar redesign delays value
+   already earned. The UAT follow-on (items 2/5/6/7/8 + numbering) runs as the next project with its own
+   design gate, because numbering touches the WRITE path and must not ride in on a UX task.
 
 2. **Item 8 is a WIRING job, not a new capability.** `compose-summarize-word-changes` is a live consumer
    type with a binding row + client action, deliberately pulled from the selection toolbar because without
