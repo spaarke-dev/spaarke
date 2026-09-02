@@ -84,10 +84,39 @@ public class UploadSessionManager
             ct).ConfigureAwait(false);
     }
 
+    /// <summary>
+    /// App-only small upload, preserving the historical <see cref="ConflictBehavior.Replace"/> behaviour.
+    /// </summary>
+    /// <remarks>
+    /// Kept as a delegating overload rather than changed in place: every existing app-only caller
+    /// (Compose save, communication ingest, invoice extraction, …) writes to a path it derived itself
+    /// and relies on replace-in-place. Flipping the default under them would turn a working save into a
+    /// 409. New callers that must not clobber a same-named file pass
+    /// <see cref="ConflictBehavior.Fail"/> explicitly — mirrors the OBO twin
+    /// <see cref="UploadSmallAsUserAsync(Sprk.Bff.Api.Infrastructure.Graph.UserOperationContext,string,string,Stream,CancellationToken)"/>.
+    /// </remarks>
+    public Task<FileHandleDto?> UploadSmallAsync(
+        string driveId,
+        string path,
+        Stream content,
+        CancellationToken ct = default)
+        => UploadSmallAsync(driveId, path, content, ConflictBehavior.Replace, ct);
+
+    /// <summary>
+    /// App-only small upload with an EXPLICIT name-collision behaviour.
+    /// </summary>
+    /// <remarks>
+    /// <see cref="ConflictBehavior.Fail"/> makes a collision a Graph 409, translated here to
+    /// <see cref="SpaarkeStorageException"/> (409) with the existing item left UNTOUCHED — the caller
+    /// can then tell the user rather than silently overwriting. This is the behaviour the external
+    /// upload route requires: an external participant must never be able to overwrite a document by
+    /// uploading a same-named file.
+    /// </remarks>
     public async Task<FileHandleDto?> UploadSmallAsync(
         string driveId,
         string path,
         Stream content,
+        ConflictBehavior conflictBehavior,
         CancellationToken ct = default)
     {
         using var activity = Activity.Current;
@@ -103,12 +132,11 @@ public class UploadSessionManager
             var graphClient = _factory.ForApp();
 
             // Upload the file using PUT to drive item content endpoint.
-            // conflictBehavior is stated EXPLICITLY — Replace preserves this method's prior observable
-            // behaviour (Graph's undocumented-but-actual default for PUT) while removing the reliance
-            // on a default the Graph docs contradict each other about. Callers that must not clobber a
-            // same-named file need ConflictBehavior.Fail or .Rename; see the type's remarks.
+            // conflictBehavior is stated EXPLICITLY — never left to Graph's PUT default, which its own
+            // docs contradict each other about. The 4-arg overload supplies Replace to preserve this
+            // method's historical behaviour; callers that must not clobber a same-named file pass Fail.
             var item = await PutContentWithConflictBehaviorAsync(
-                graphClient, driveId, path, content, ConflictBehavior.Replace, ct)
+                graphClient, driveId, path, content, conflictBehavior, ct)
                 .ConfigureAwait(false);
 
             if (item == null)
@@ -131,6 +159,23 @@ public class UploadSessionManager
                 item.Folder != null,
                 item.WebUrl,
                 item.ParentReference?.DriveId ?? driveId);
+        }
+        // Reached only when the caller passed ConflictBehavior.Fail — it explicitly asked to be told
+        // about a name collision rather than silently overwriting. The existing item is UNTOUCHED.
+        // Translated HERE, inside Infrastructure.Graph, so only the domain exception crosses the
+        // ISpeFileOperations facade (ADR-007) — the same treatment the OBO twin gives this response.
+        // Caught before the ServiceException clauses below because Kiota raises ODataError, which does
+        // NOT derive from ServiceException and would otherwise propagate raw as an opaque 500.
+        catch (ODataError ex) when (ex.ResponseStatusCode == 409)
+        {
+            _logger.LogInformation(
+                "SPE app-only upload-small: name collision on path {Path} in drive {DriveId}; " +
+                "existing item left intact (conflictBehavior=fail)", path, driveId);
+            throw new SpaarkeStorageException(
+                $"A file named '{path}' already exists in this location.",
+                statusCode: 409,
+                errorCode: ex.Error?.Code ?? "nameAlreadyExists",
+                innerException: ex);
         }
         catch (ServiceException ex) when (ex.ResponseStatusCode == (int)System.Net.HttpStatusCode.NotFound)
         {
