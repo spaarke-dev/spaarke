@@ -104,8 +104,11 @@ export interface RelatedToPickerProps {
   candidatesLoading?: boolean;
   /** "Look up another record" search — scoped to the selected chip type. */
   onSearch: (query: string, type: EntityType) => Promise<EntitySearchResult[]>;
-  /** Create a new record of the given type (Slice 3 — BFF-backed). */
-  onCreateNew?: (type: EntityType) => void;
+  /**
+   * Create a new record of the given type + name (BFF-backed). Resolves to the created
+   * record (auto-selected as the Related-to) or null on failure. Absent → no "New" button.
+   */
+  onCreateRecord?: (type: EntityType, name: string) => Promise<EntitySearchResult | null>;
   /** Types offered as chips. */
   allowedTypes: EntityType[];
   /** Default selected type. */
@@ -127,7 +130,7 @@ export const RelatedToPicker: React.FC<RelatedToPickerProps> = ({
   candidates,
   candidatesLoading = false,
   onSearch,
-  onCreateNew,
+  onCreateRecord,
   allowedTypes,
   defaultType = 'Matter',
   disabled = false,
@@ -138,6 +141,10 @@ export const RelatedToPicker: React.FC<RelatedToPickerProps> = ({
   const [query, setQuery] = useState('');
   const [searchResults, setSearchResults] = useState<EntitySearchResult[]>([]);
   const [searching, setSearching] = useState(false);
+  const [showCreate, setShowCreate] = useState(false);
+  const [newName, setNewName] = useState('');
+  const [creating, setCreating] = useState(false);
+  const [createError, setCreateError] = useState<string | null>(null);
 
   const typeMatches = useMemo(() => candidates.filter(c => c.entityType === selectedType), [candidates, selectedType]);
 
@@ -149,6 +156,31 @@ export const RelatedToPicker: React.FC<RelatedToPickerProps> = ({
     setSelectedType(type);
     setQuery('');
     setSearchResults([]);
+    setShowCreate(false);
+    setNewName('');
+    setCreateError(null);
+  };
+
+  const handleCreate = async () => {
+    if (!onCreateRecord) return;
+    const n = newName.trim();
+    if (n.length === 0) return;
+    setCreating(true);
+    setCreateError(null);
+    try {
+      const created = await onCreateRecord(selectedType, n);
+      if (created) {
+        onChange(created);
+        setShowCreate(false);
+        setNewName('');
+      } else {
+        setCreateError(`Couldn't create the ${selectedType}.`);
+      }
+    } catch {
+      setCreateError(`Couldn't create the ${selectedType}.`);
+    } finally {
+      setCreating(false);
+    }
   };
 
   const runSearch = async () => {
@@ -264,17 +296,60 @@ export const RelatedToPicker: React.FC<RelatedToPickerProps> = ({
         <Button appearance="subtle" onClick={() => void runSearch()} disabled={disabled || searching}>
           {searching ? <Spinner size="tiny" /> : 'Search'}
         </Button>
-        {onCreateNew && (
+        {onCreateRecord && (
           <Button
             appearance="subtle"
             icon={<AddRegular />}
-            onClick={() => onCreateNew(selectedType)}
+            onClick={() => {
+              setShowCreate(true);
+              setCreateError(null);
+            }}
             disabled={disabled}
           >
             New
           </Button>
         )}
       </div>
+
+      {/* Inline "New {type}" form — created via the BFF, then auto-selected. */}
+      {showCreate && onCreateRecord && (
+        <div className={styles.searchRow}>
+          <Input
+            value={newName}
+            onChange={(_, d) => setNewName(d.value)}
+            onKeyDown={e => {
+              if (e.key === 'Enter') void handleCreate();
+            }}
+            placeholder={`New ${selectedType} name`}
+            disabled={disabled || creating}
+            style={{ flexGrow: 1 }}
+            aria-label={`New ${selectedType} name`}
+          />
+          <Button
+            appearance="primary"
+            onClick={() => void handleCreate()}
+            disabled={disabled || creating || newName.trim().length === 0}
+          >
+            {creating ? <Spinner size="tiny" /> : 'Create'}
+          </Button>
+          <Button
+            appearance="subtle"
+            onClick={() => {
+              setShowCreate(false);
+              setNewName('');
+              setCreateError(null);
+            }}
+            disabled={creating}
+          >
+            Cancel
+          </Button>
+        </div>
+      )}
+      {createError && (
+        <Text size={200} className={styles.emptyNote} role="alert">
+          {createError}
+        </Text>
+      )}
 
       {searchResults.length > 0 && (
         <div className={styles.cards}>{searchResults.map(r => renderCard(r, { keyPrefix: 's:' }))}</div>

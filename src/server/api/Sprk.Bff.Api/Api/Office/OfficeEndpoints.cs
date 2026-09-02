@@ -51,9 +51,9 @@ public static class OfficeEndpoints
         // Search endpoints (entities, documents)
         MapSearchEndpoints(group);
 
-        // Quick create endpoints
-        // TODO: Implement in task 026
-        // MapQuickCreateEndpoints(group);
+        // Quick create endpoints — inline "New record" for the add-in "Related to" picker.
+        // Implemented for Matter + Project (email-communication-intelligence-r2 Slice 3, #10).
+        MapQuickCreateEndpoints(group);
 
         // Share endpoints (links, attach) - Task 027/028
         MapShareEndpoints(group);
@@ -1178,6 +1178,7 @@ public static class OfficeEndpoints
         QuickCreateRequest request,
         IOfficeService officeService,
         IMembershipEventPublisher membershipEventPublisher,
+        Sprk.Bff.Api.Services.Ai.Context.ICallerSystemUserResolver callerResolver,
         ILogger<Program> logger,
         HttpContext context,
         CancellationToken cancellationToken)
@@ -1247,11 +1248,17 @@ public static class OfficeEndpoints
 
         try
         {
+            // Attribute record ownership to the caller (ADR-024) — best-effort; an unresolved
+            // caller leaves ownerid to the Dataverse default (app user) rather than failing the create.
+            var ownerResolution = await callerResolver.ResolveAsync(context.User, cancellationToken);
+            var ownerSystemUserId = ownerResolution.IsResolved ? ownerResolution.SystemUserId : null;
+
             // Call service to create entity
             var response = await officeService.QuickCreateAsync(
                 parsedEntityType,
                 request,
                 userId,
+                ownerSystemUserId,
                 cancellationToken);
 
             if (response is null)

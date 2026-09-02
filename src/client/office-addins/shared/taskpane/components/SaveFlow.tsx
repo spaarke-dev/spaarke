@@ -544,13 +544,39 @@ export function SaveFlow(props: SaveFlowProps): React.ReactElement {
     [apiBaseUrl, getAccessToken]
   );
 
-  // "New record" — Slice 3 will wire the BFF-backed create; for now route to the
-  // host's Quick Create seam (opens a Dataverse create form) when available.
-  const handleCreateNew = useCallback(
-    (type: EntityType) => {
-      onQuickCreate?.(type, '');
+  // "New record" — BFF-backed inline create (Slice 3, #10). POST /api/office/quickcreate/{type}
+  // creates the sprk_matter/sprk_project under the caller's ownership and returns it; the picker
+  // auto-selects the created record as the Related-to.
+  const createRelatedRecord = useCallback(
+    async (type: EntityType, name: string): Promise<EntitySearchResult | null> => {
+      // Test harness: return a mock created record so the flow is iterable without the BFF.
+      if (isBrowserTestMode()) {
+        await new Promise(resolve => setTimeout(resolve, 400));
+        return {
+          id: `demo-new-${Date.now()}`,
+          entityType: type,
+          logicalName: type === 'Matter' ? 'sprk_matter' : 'sprk_project',
+          name,
+          displayInfo: 'New',
+        };
+      }
+      if (!apiBaseUrl || !getAccessToken) return null;
+      try {
+        const token = await getAccessToken();
+        const res = await authenticatedJsonFetch(
+          `${apiBaseUrl}/api/office/quickcreate/${type.toLowerCase()}`,
+          { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ name }) },
+          token,
+          { getRetryToken: getAccessToken }
+        );
+        if (!res.ok) return null;
+        const data = (await res.json()) as { id: string; logicalName: string; name: string };
+        return { id: data.id, entityType: type, logicalName: data.logicalName, name: data.name };
+      } catch {
+        return null;
+      }
     },
-    [onQuickCreate]
+    [apiBaseUrl, getAccessToken]
   );
 
   // Handle view document
@@ -785,7 +811,7 @@ export function SaveFlow(props: SaveFlowProps): React.ReactElement {
           candidates={relatedCandidates}
           candidatesLoading={candidatesLoading}
           onSearch={relatedSearch}
-          onCreateNew={handleCreateNew}
+          onCreateRecord={createRelatedRecord}
           allowedTypes={allowedEntityTypes ?? ALL_ENTITY_TYPES}
           defaultType="Matter"
           disabled={isSaving}

@@ -163,6 +163,7 @@ public interface IOfficeService
         QuickCreateEntityType entityType,
         QuickCreateRequest request,
         string userId,
+        string? ownerSystemUserId = null,
         CancellationToken cancellationToken = default);
 
     /// <summary>
