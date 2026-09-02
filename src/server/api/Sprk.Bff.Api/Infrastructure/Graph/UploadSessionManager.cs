@@ -24,6 +24,66 @@ public class UploadSessionManager
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
     }
 
+    /// <summary>
+    /// PUTs content to a path with an EXPLICIT <c>@microsoft.graph.conflictBehavior</c>.
+    /// </summary>
+    /// <remarks>
+    /// <para>The Kiota-generated <c>Content.PutAsync</c> does not expose <c>conflictBehavior</c>, but
+    /// the REST API honours it — so the query parameter is appended to the generated request rather
+    /// than forking to a hand-rolled <c>HttpClient</c> (which would lose the SDK's auth, retry and
+    /// error mapping). The error mapping is passed through deliberately: without it a 4XX/5XX surfaces
+    /// as a generic Kiota <c>ApiException</c> instead of <c>ODataError</c>, which would silently
+    /// dead-code every <c>catch (ODataError …)</c> filter in the callers — including the FR-08 412
+    /// surface.</para>
+    ///
+    /// <para>Reuses the existing <see cref="Sprk.Bff.Api.Models.ConflictBehavior"/> enum and its
+    /// <c>ToGraphString()</c> mapping (already used by <c>CreateUploadSessionAsUserAsync</c>) rather
+    /// than introducing a second vocabulary for the same Graph concept.</para>
+    ///
+    /// <para>⚠️ The behaviour MUST always be stated explicitly. The <c>driveItem</c> docs say "the
+    /// default for PUT is replace" while the createUploadSession docs say "fail (default)" — they
+    /// disagree, so relying on the default is relying on undefined behaviour. Verified 2026-08-20
+    /// against MS Learn + the docs source repos:
+    /// <c>.claude/agent-memory/researcher/graph-driveitem-upload-facts.md</c>. Note it is a NAME
+    /// collision control only, never a content or version comparison.</para>
+    /// </remarks>
+    private async Task<DriveItem?> PutContentWithConflictBehaviorAsync(
+        GraphServiceClient graphClient,
+        string driveOrContainerId,
+        string path,
+        Stream content,
+        ConflictBehavior conflictBehavior,
+        CancellationToken ct)
+    {
+        var requestInfo = graphClient.Drives[driveOrContainerId].Root
+            .ItemWithPath(path)
+            .Content
+            .ToPutRequestInformation(content);
+
+        var parameter =
+            $"@microsoft.graph.conflictBehavior={Uri.EscapeDataString(conflictBehavior.ToGraphString())}";
+        var uriBuilder = new UriBuilder(requestInfo.URI);
+        uriBuilder.Query = string.IsNullOrEmpty(uriBuilder.Query)
+            ? parameter
+            : $"{uriBuilder.Query.TrimStart('?')}&{parameter}";
+        requestInfo.URI = uriBuilder.Uri;
+
+        // Fully qualified: unqualified `IParsable` binds to System.IParsable<TSelf>, not Kiota's.
+        var errorMapping = new Dictionary<
+            string,
+            Microsoft.Kiota.Abstractions.Serialization.ParsableFactory<
+                Microsoft.Kiota.Abstractions.Serialization.IParsable>>
+        {
+            { "XXX", ODataError.CreateFromDiscriminatorValue },
+        };
+
+        return await graphClient.RequestAdapter.SendAsync(
+            requestInfo,
+            DriveItem.CreateFromDiscriminatorValue,
+            errorMapping,
+            ct).ConfigureAwait(false);
+    }
+
     public async Task<FileHandleDto?> UploadSmallAsync(
         string driveId,
         string path,
@@ -42,11 +102,14 @@ public class UploadSessionManager
         {
             var graphClient = _factory.ForApp();
 
-            // Upload the file using PUT to drive item content endpoint
-            var item = await graphClient.Drives[driveId].Root
-                .ItemWithPath(path)
-                .Content
-                .PutAsync(content, cancellationToken: ct);
+            // Upload the file using PUT to drive item content endpoint.
+            // conflictBehavior is stated EXPLICITLY — Replace preserves this method's prior observable
+            // behaviour (Graph's undocumented-but-actual default for PUT) while removing the reliance
+            // on a default the Graph docs contradict each other about. Callers that must not clobber a
+            // same-named file need ConflictBehavior.Fail or .Rename; see the type's remarks.
+            var item = await PutContentWithConflictBehaviorAsync(
+                graphClient, driveId, path, content, ConflictBehavior.Replace, ct)
+                .ConfigureAwait(false);
 
             if (item == null)
             {
