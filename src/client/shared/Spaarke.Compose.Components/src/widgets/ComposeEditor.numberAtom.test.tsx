@@ -171,3 +171,42 @@ describe('ComposeEditor — FR-13 number-atom rendering (task 032)', () => {
     expect(atom.getAttribute('contenteditable')).toBe('false');
   });
 });
+
+// ---------------------------------------------------------------------------
+// Editor typography (UAT round 2) — readability, not document spacing
+// ---------------------------------------------------------------------------
+
+describe('ComposeEditor — editor typography defaults', () => {
+  it('gives headings a UNITLESS line-height so a large glyph is not trapped in a fixed 20px line box', async () => {
+    renderEditor('<h1 data-paraid="TYPO0001">A heading long enough to wrap onto more than one line</h1>');
+    await screen.findByRole('textbox');
+
+    const rules = allCssRuleText();
+    const headingRule = rules.find(t => /\.ProseMirror h1/.test(t) && /line-height/.test(t));
+    expect(headingRule).toBeDefined();
+    // The bug was inheriting FluentProvider's root line-height, a FIXED PIXEL value (20px) smaller than a
+    // ~28px heading glyph. A unitless ratio scales with font-size; a px value would reintroduce it at a
+    // different size, so the absence of a unit is the actual contract here.
+    expect(headingRule).toMatch(/line-height:\s*1(\.\d+)?\s*[;}]/);
+    expect(headingRule).not.toMatch(/line-height:\s*\d+px/);
+  });
+
+  it('gives body paragraphs their own line-height and bottom margin', async () => {
+    renderEditor('<p data-paraid="TYPO0002">Body prose.</p>');
+    await screen.findByRole('textbox');
+
+    const rules = allCssRuleText();
+    const paraRule = rules.find(t => /\.ProseMirror p\b/.test(t) && /line-height/.test(t));
+    expect(paraRule).toBeDefined();
+    expect(paraRule).not.toMatch(/line-height:\s*\d+px/);
+  });
+
+  it('keeps list and table paragraphs tight — the prose margins must not space list rows apart', async () => {
+    renderEditor('<ul><li><p data-paraid="TYPO0003">Item</p></li></ul>');
+    await screen.findByRole('textbox');
+
+    const rules = allCssRuleText();
+    const tightRule = rules.find(t => /\.ProseMirror li p/.test(t) && /margin-bottom/.test(t));
+    expect(tightRule).toBeDefined();
+  });
+});

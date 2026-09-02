@@ -1423,6 +1423,36 @@ const useStyles = makeStyles({
       paddingLeft: tokens.spacingHorizontalM,
       color: tokens.colorNeutralForeground2,
     },
+    // UAT round 2 (r8, 2026-09-02) — EDITOR TYPOGRAPHY. The surface previously set none, so headings and
+    // paragraphs inherited `FluentProvider`'s root `line-height`, which is a FIXED PIXEL value
+    // (lineHeightBase300 = 20px). A heading glyph is ~28px, so its line box was SMALLER than its type and
+    // multi-line headings collided — the "this is not readable" the owner reported. Word and the preview
+    // look correct because neither inherits that pixel line-height.
+    //
+    // Deliberately UNITLESS ratios, not tokens: a unitless line-height scales with each element's own
+    // font-size, which is the whole point — a fixed token would reintroduce the bug at a different size.
+    //
+    // This is READ-SIDE PRESENTATION ONLY. It sets no `w:spacing`, touches no content-model field, and is
+    // therefore invisible to the save path: an edited paragraph still inherits the document's real spacing
+    // through `ComposeBlockMerge.InheritProperties` as an unmodeled property. Making the editor MATCH the
+    // document's own spacing, and making that spacing editable, are separate and larger steps.
+    '& .ProseMirror h1, & .ProseMirror h2, & .ProseMirror h3, & .ProseMirror h4, & .ProseMirror h5, & .ProseMirror h6':
+      {
+        lineHeight: '1.3',
+        marginTop: '1em',
+        marginBottom: '0.4em',
+      },
+    '& .ProseMirror p': {
+      lineHeight: '1.5',
+      marginTop: '0',
+      marginBottom: '0.6em',
+    },
+    // List items and table cells keep tight paragraph rhythm — the block margins above are for body prose
+    // and would otherwise space list rows apart like paragraphs.
+    '& .ProseMirror li p, & .ProseMirror td p, & .ProseMirror th p': {
+      marginTop: '0',
+      marginBottom: '0',
+    },
     '& .ProseMirror hr': {
       border: 'none',
       borderTop: `1px solid ${tokens.colorNeutralStroke1}`,
