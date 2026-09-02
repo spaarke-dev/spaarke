@@ -1,19 +1,58 @@
 # Current Task State — `unified-access-control-r2`
 
-> **Last Updated**: 2026-08-31 — **ACTIVE TASK: 076, resuming at step 4.** Two pieces landed today
-> (denial-message fix `848b56798` pushed; `ResolveForActingUserAsync` `279ca8022` committed, NOT pushed).
-> **Recovery**: read "Quick Recovery" then §076-RESUME below.
+> **Last Updated**: **2026-09-01** (by `context-handoff`, pre-`/compact`).
+> **Recovery**: read "Quick Recovery", then **§ REMAINING WORK (ordered)**. Everything below the
+> Quick Recovery block is history/detail — the ordered list is the authority on what to do next.
+> ⚠️ The previous header claimed "ACTIVE TASK 076 step 4" with two unpushed commits; **both merged long
+> since**. If a header ever disagrees with § REMAINING WORK, trust the list and fix the header.
 
 ---
 
-## Quick Recovery (READ THIS FIRST) — 2026-08-31
+## Quick Recovery (READ THIS FIRST) — 2026-09-01
 
 | Field | Value |
 |---|---|
-| **Task** | **076** — record-keyed upload contract. `<rigor>FULL</rigor>`, tier `opus`, effort `high`, steps `directional`, `parallel-safe: false` |
-| **Step** | **4 of 11** (client cutover). Steps 0–3 + the >4 MB server half are DONE; 5–11 remain |
-| **Status** | in-progress |
-| **Next Action** | ▶ **See § REMAINING WORK (ordered) immediately below.** #858 is CLOSED + merged; compose-r8 unblocked. Open PR **#931** carries the client wrong-destination fixes + dead-wizard deletion + route guard + binding-doc fixes (head `2c44dde99`) — **check its CI and merge it first** |
+| **Nominal task** | **076** — record-keyed upload contract (still `in-progress`, step 4 of 11: client cutover). But 076 was **NOT** this session's work — see below. |
+| **This session did** | Closed **#858** (merged, compose-r8 unblocked) → fixed **3 live wrong-destination defects** → deleted **27 dead wizard files** → added a **route-agreement guard** → fixed **9 binding agent-docs** |
+| **Status** | Branch **green and fully pushed**; working tree **clean**; `HEAD = d7fee52a6` |
+| **Next Action** | **1)** Check **PR #931** CI and merge it — gate on the FULL rollup, NOT `Router` alone. **2)** Then work § REMAINING WORK items 2 → 8 in order. |
+
+### Files Modified This Session — ALL COMMITTED AND PUSHED (nothing at risk)
+
+| Theme | Commits |
+|---|---|
+| #858 server-derived container + 20-test repair | `841c24117` · `763b05428` · `6ad731d89` (merged via PR #926 → `8860e066e`) |
+| #858 stale user-facing copy | `1ac3c2e6d` (merged via PR #928 → `7c6bfafe5`) |
+| Dead LegalWorkspace wizards (27 deleted / 7 kept) | `144ef43c4` |
+| 3 live client defects (secure leak · upload 404 · fake delete) | `304b6d8f2` |
+| Route-agreement guard + `FAILURE-MODES.md` AP-11 | `04295a3af` |
+| `worktree-sync` / `merge-to-master` skill fixes | `b701b730a` |
+| Binding agent-doc fixes (9 files) | `2c44dde99` |
+| Checkpoints / plan corrections | `7d2b68a96` · `e25788c8a` · `d7fee52a6` |
+
+**On master**: `8860e066e`, `7c6bfafe5`. **Open PR #931** = everything from `144ef43c4` onward.
+
+### Critical Context (the four things that will bite a fresh session)
+
+1. **`Router` is the ONLY required check on master.** It has already passed once while two test jobs were
+   RED. Gate on the whole rollup — `UNSTABLE` = STOP, only `CLEAN` merges. Classic branch-protection API
+   **404s** here (rulesets govern), which misleadingly reads as "unprotected".
+2. **A static `from '...'` grep CANNOT establish dead code.** It declared `CloseProjectDialog` unreferenced
+   while it is live via `React.lazy(() => import(...))`. Ten channels — see `FAILURE-MODES.md` AP-11.
+3. **The tech-debt sweep is a LEAD LIST, not a work list.** Its #1 claim was wrong, it missed a live 404,
+   and one "dead" entry (`SprkChatBridge`) would break the shared-lib build. Only act on the
+   **verification** file's confirmed list.
+4. **Build the SOLUTION** (`dotnet build Spaarke.sln`), never one project. A green single-project run is
+   not evidence about the solution — that is how a broken build nearly reached master.
+
+### Known-broken, pre-existing, NOT ours (don't chase these)
+
+- LegalWorkspace `vite build` fails on master: unresolved `@spaarke/document-operations` from
+  `Spaarke.Compose.Components/ComposeToolbar.tsx` (package exists as `Spaarke.DocumentOperations`, not
+  declared in LegalWorkspace `package.json`). Proved pre-existing by stashing our deletion.
+- `SpeAdminApp` tsc: **89 errors before and after** our change.
+- `"modules transformed"` counts are **nondeterministic** (3015/2988/3006 on identical code) — never use
+  them to compare module graphs.
 
 ### ✅ PR #887 MERGED 2026-09-01T03:18:38Z — 34 commits on master
 
