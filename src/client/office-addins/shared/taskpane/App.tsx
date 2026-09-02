@@ -17,6 +17,7 @@ import type {
   CreateTodoResult,
   ContactOption,
 } from './components/views/CreateTodoView';
+import type { EntitySearchResult } from './hooks/useEntitySearch';
 
 /**
  * Main App shell for Office Add-in taskpane.
@@ -115,9 +116,20 @@ export const App: React.FC<AppProps> = ({
     initialAction === 'createTodo' ? 'createTodo' : initialTab
   );
 
-  // The record this email is filed to — drives the inline "Create To Do" tool.
-  // Seeded from initialSavedContext (browser-test demo / future SaveView wiring).
-  const [savedContext] = useState<SavedTodoContext | undefined>(initialSavedContext);
+  // The record this email is filed to — drives the inline "Create To Do" tool. Seeded from
+  // initialSavedContext (browser-test demo) and set live when a real save completes (§C — the
+  // SaveView's onSaved hands us the selected "Related to" record).
+  const [savedContext, setSavedContext] = useState<SavedTodoContext | undefined>(initialSavedContext);
+
+  // §C — a successful save makes the email "filed to" the selected record; seed the Create To Do
+  // regarding from it so the To Do tab goes live (no more "file this email first" prompt).
+  const handleSaved = useCallback((entity: EntitySearchResult) => {
+    setSavedContext({
+      regardingEntity: entity.entityType,
+      regardingRecordId: entity.id,
+      ...(entity.name ? { regardingName: entity.name } : {}),
+    });
+  }, []);
 
   // Save operation state
   const [isSaving, setIsSaving] = useState(false);
@@ -232,7 +244,7 @@ export const App: React.FC<AppProps> = ({
       }
       // Browser test harness: a demo context id → mock success so the UX is iterable
       // without a real Dataverse write.
-      if (savedContext.communicationId.startsWith('demo-')) {
+      if (savedContext.communicationId?.startsWith('demo-')) {
         await new Promise(resolve => setTimeout(resolve, 600));
         return { ok: true };
       }
@@ -271,7 +283,7 @@ export const App: React.FC<AppProps> = ({
   const handleSearchContacts = useCallback(
     async (query: string): Promise<ContactOption[]> => {
       // Browser test harness (demo filed context) → static demo contacts.
-      if (savedContext?.communicationId.startsWith('demo-')) {
+      if (savedContext?.communicationId?.startsWith('demo-')) {
         await new Promise(resolve => setTimeout(resolve, 200));
         const demo: ContactOption[] = [
           { id: 'demo-contact-1', name: 'Jane Cooper', displayInfo: 'Acme Corp · GC' },
@@ -432,6 +444,7 @@ export const App: React.FC<AppProps> = ({
             onComplete={(docId, docUrl) => {
               console.log('Save complete:', docId, docUrl);
             }}
+            onSaved={handleSaved}
             onQuickCreate={(entityType, searchQuery) => {
               // Quick Create - opens Dataverse form in new window.
               // Org URL (email-communication-solution-r4 task 072 / FR-25): config-driven,

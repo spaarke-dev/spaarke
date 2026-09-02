@@ -300,6 +300,12 @@ export interface SaveFlowProps {
   apiBaseUrl?: string;
   /** Callback when save is complete */
   onComplete?: (documentId: string, documentUrl: string) => void;
+  /**
+   * Callback fired once when a save completes successfully, carrying the selected
+   * "Related to" record. The host uses it to seed the Create To Do tab's regarding
+   * (email-communication-intelligence-r2 §C — production save-context wiring).
+   */
+  onSaved?: (entity: EntitySearchResult) => void;
   /** Callback when Quick Create is triggered */
   onQuickCreate?: (entityType: EntityType, searchQuery: string) => void;
   /** Callback when view document is clicked */
@@ -359,6 +365,7 @@ export function SaveFlow(props: SaveFlowProps): React.ReactElement {
     getAccessToken,
     apiBaseUrl = '',
     onComplete,
+    onSaved,
     onQuickCreate,
     onViewDocument,
     onNavigate,
@@ -507,6 +514,19 @@ export function SaveFlow(props: SaveFlowProps): React.ReactElement {
       cancelled = true;
     };
   }, [hostType, itemId]);
+
+  // §C — when a save completes, hand the selected "Related to" record to the host once so it can
+  // seed the Create To Do tab's regarding. Reset on a fresh save (idle/selecting) so a second save
+  // re-notifies. Fires on 'complete' and 'duplicate' (both mean "this email is now filed to X").
+  const savedNotifiedRef = useRef(false);
+  useEffect(() => {
+    if ((flowState === 'complete' || flowState === 'duplicate') && selectedEntity && !savedNotifiedRef.current) {
+      savedNotifiedRef.current = true;
+      onSaved?.(selectedEntity);
+    } else if (flowState === 'idle' || flowState === 'selecting') {
+      savedNotifiedRef.current = false;
+    }
+  }, [flowState, selectedEntity, onSaved]);
 
   // "Look up another record" search — scoped to the selected chip type.
   const relatedSearch = useCallback(

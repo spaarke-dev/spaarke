@@ -50,10 +50,14 @@ import {
  * Fluent UI v9 + Griffel `makeStyles` + semantic tokens only (ADR-021).
  */
 
-/** The record this email is filed to (from the Save flow) — the To Do's regarding + its communication. */
+/** The record this email is filed to (from the Save flow) — the To Do's regarding. */
 export interface SavedTodoContext {
-  /** `sprk_communicationid` of the saved email (audit linkage). */
-  communicationId: string;
+  /**
+   * `sprk_communicationid` of the saved email, when known. Optional — the To Do's regarding is the
+   * RECORD (below), not the communication, so a real save need not surface a communication id. The
+   * browser harness sets a `demo-…` value to route the create to a mocked success.
+   */
+  communicationId?: string;
   /** Confirmed record's friendly type — "Matter" / "Project" / "Invoice" (the To Do regarding). */
   regardingEntity: string;
   /** Confirmed record id (the To Do regarding). */
