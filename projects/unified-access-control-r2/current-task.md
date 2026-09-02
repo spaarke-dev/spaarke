@@ -1,21 +1,72 @@
 # Current Task State — `unified-access-control-r2`
 
-> **Last Updated**: **2026-09-01** (by `context-handoff`, pre-`/compact`).
+> **Last Updated**: **2026-09-02** (by `context-handoff`, pre-`/compact`).
 > **Recovery**: read "Quick Recovery", then **§ REMAINING WORK (ordered)**. Everything below the
 > Quick Recovery block is history/detail — the ordered list is the authority on what to do next.
-> ⚠️ The previous header claimed "ACTIVE TASK 076 step 4" with two unpushed commits; **both merged long
-> since**. If a header ever disagrees with § REMAINING WORK, trust the list and fix the header.
+> ⚠️ If a header ever disagrees with § REMAINING WORK, **trust the list and fix the header**. This has
+> already happened twice (a header claiming "ACTIVE TASK 076 step 4" with two commits described as
+> unpushed that had merged long since).
 
 ---
 
-## Quick Recovery (READ THIS FIRST) — 2026-09-01
+## Quick Recovery (READ THIS FIRST) — 2026-09-02
 
 | Field | Value |
 |---|---|
-| **Nominal task** | **076** — record-keyed upload contract (still `in-progress`, step 4 of 11: client cutover). But 076 was **NOT** this session's work — see below. |
-| **This session did** | Closed **#858** (merged, compose-r8 unblocked) → fixed **3 live wrong-destination defects** → deleted **27 dead wizard files** → added a **route-agreement guard** → fixed **9 binding agent-docs** |
-| **Status** | Branch **green and fully pushed**; working tree **clean**; `HEAD = d7fee52a6` |
-| **Next Action** | **1)** Check **PR #931** CI and merge it — gate on the FULL rollup, NOT `Router` alone. **2)** Then work § REMAINING WORK items 2 → 8 in order. |
+| **Nominal task** | **076** — record-keyed upload contract (`in-progress`, step 4 of 11). 076 was NOT this session's work, but this session did land 3 of its facts (250 MB threshold, conflictBehavior, U1/U2/U3 census). |
+| **This session did** | Fixed **4 of the 5 live route mismatches** (R14 · R10/R11 · R13 · R3) → deleted **47 verified-dead files** → **stopped a live data-loss bug** on every file upload (name collision silently overwrote) → removed a **4 MiB ceiling that no server ever enforced** |
+| **Status** | Working tree **CLEAN**, 0 unpushed, **0 behind master**. `HEAD = 01b7c1603` (this handoff commit); last CODE commit = `086b9e9ce`. If HEAD differs from this, someone committed after the handoff — re-read `git log` before trusting the rest. |
+| **Next Action** | **1)** Merge **PR #931** — `Router=pass`; ONE SDAP-CI job ("Build & Test (Debug)", the full 11k suite) was still `in_progress` at handoff. Re-check `gh pr checks 931`; merge when pending=0 and nothing failed. **2)** Then § REMAINING WORK items 3b → 8. |
+
+### Commit map — this session (10 commits, ALL pushed; nothing at risk)
+
+| Theme | Commit |
+|---|---|
+| 47 verified-dead file deletions (+2 corrections to the "verified" list) | `b866f95bb` |
+| R14 external document download (wrong URL **and** impossible response contract) | `2843d53ce` |
+| R10/R11 external calendar events + 8 contract tests + fixture access-level header | `0f73aa60d` |
+| R13 external document versions + app-only `ListFileVersionsAsync` facade method | `0ca206f42` |
+| R3 reporting privilege — read from `/status`, no new endpoint needed | `68eb58ad0` |
+| `ISpeFileOperations` stale 4 MB docstring | `13d8b878a` |
+| 4 MiB client ceiling removed + dead `PathValidator.SmallUploadMaxBytes` deleted | `4044286a6` |
+| Explicit `conflictBehavior` mechanism (no behaviour change) | `9c208a7f2` |
+| 🔴 **Collision no longer overwrites** — `conflictBehavior=Fail` default | `93d5e673e` |
+| Typed `UploadNameConflictError` through BOTH upload clients | `086b9e9ce` |
+
+### 🔴 The five things that will bite a fresh session
+
+1. **`Router` is the ONLY required check** (ruleset verified 2026-09-02: `required_status_checks: [Router]`,
+   `required_approving_review_count: 0`). It has passed while other jobs were RED. **Gate on the whole
+   rollup.** Also note `require_extra_approval_for_unattributed_changes: true` — if a merge is ever
+   blocked with `reviewDecision` empty and all checks green, that flag is the likely cause, not CI.
+2. **STALE PROSE COST REAL WORK SIX TIMES THIS SESSION.** Every instance: something was deleted or never
+   built, the compiler updated every call site it could see, and the *comments* survived to describe a
+   contract that does not exist. Two of them made me give the owner wrong answers.
+   `PathValidator.SmallUploadMaxBytes` was the worst — a constant with **zero code references** became a
+   real product limit purely because comments claimed it was enforced. **When a doc comment states a
+   limit, a route, or a role mapping, verify it against code before believing it.**
+3. **THREE upload implementations, not two** — `EntityCreationService.ts:493` is a **raw inline `fetch`**
+   (U1), plus two client classes (U2/U3). I initially reported "two" and was wrong. Any change to upload
+   behaviour must be applied at all three, or done server-side (which is why the collision fix is on the
+   server).
+4. **The SOLUTION build catches what the project build cannot — 3 times this session.**
+   `dotnet build src/server/api/Sprk.Bff.Api/` was 0/0 while a hand-written `ISpeFileOperations` double
+   in `tests/` failed to compile (CS0535). **Any facade/interface addition: run `dotnet build Spaarke.sln`.**
+5. **The tech-debt sweep AND its own "verified" list both contain errors.** The verification file's
+   SAFE-TO-DELETE list was wrong on `wizardTypes.ts` (deleting it would have broken the LegalWorkspace
+   typecheck — two must-stay files import it). Re-derive; never inherit a count or a "dies with X" claim.
+
+### Known-broken, pre-existing, NOT ours (do not chase)
+
+- LegalWorkspace `vite build` fails on master (unresolved `@spaarke/document-operations`).
+- `SpeAdminApp` tsc: 89 errors before and after.
+- `external-spa` / `Reporting` / DRV / PlaybookBuilder tsc: dozens of errors that are **missing
+  `node_modules`** or a **duplicate `@types/react`** from a fresh `npm install`. The only meaningful
+  signal in those packages is **`TS2307` on a `./` or `../` specifier** — that is what a broken deletion
+  produces. Raw error totals there are noise.
+- `"modules transformed"` counts are nondeterministic — never use them to compare module graphs.
+- `@spaarke/sdap-client` resolves via **`dist`**, not `src` (gitignored). After changing that package,
+  `npm run build` in it before typechecking any dependent, or the new exports read as phantom errors.
 
 ### Files Modified This Session — ALL COMMITTED AND PUSHED (nothing at risk)
 
@@ -102,10 +153,12 @@ deletions, then live user-facing fixes, then planning artifacts, then the big ex
 
 | # | Item | State | Notes |
 |---|---|---|---|
-| 0 | **Merge PR #931** | 🔲 | Head now `2843d53ce` (was `2c44dde99`; +3 commits since). Gate on the FULL check rollup, not `Router` alone (see the ⚠️ below). Master was merged IN at `4490296e3` — branch is 0 behind. |
+| 0 | **Merge PR #931** | 🟡 **ONE CHECK AWAY** | Head `086b9e9ce`, 21 commits. `Router=pass`; `conflict-check` CLEAN (zero file overlap across all 16 open PRs; hot-path BFF shared with compose-r8 → soft warn only). At handoff ONE job was `in_progress`: SDAP-CI "Build & Test (Debug)" (full 11k suite). `gh pr checks 931` → merge when pending=0 with no failures. |
 | 1 | Binding `.claude/` doc fixes | ✅ **DONE** `2c44dde99` | constraints/pcf.md MUST at a dead dir · 6 pattern pointer files · pcf/CLAUDE.md banned build cmd · 4 stale tsconfig excludes |
 | 2 | **Verified-safe deletions** | ✅ **DONE** `b866f95bb` | **47 deleted, not 48.** 🔴 The "verified" list was WRONG on `wizardTypes.ts` — it is imported by `formTypes.ts:15` + `matterService.ts:19`, both of which the SAME document lists under DO-NOT-DELETE. Deleting it would have broken the LW typecheck. `FileUploadZone`/`UploadedFileList` (pure re-export shims, Playbook was their only importer) went as planned. Also: §6A.1 is headed "12 files" but enumerates 10 — the count was wrong, not the list. Full record in the notes file's new **EXECUTION CORRECTIONS** section. Verified via `tsc --noEmit` per package (zero unresolved relative imports anywhere) + a stashed-baseline jest run (9 failed suites / 14 failed tests **before and after** — identical; delta is only the 2 deleted test files). |
-| 3 | Live route-mismatch fixes | 🟡 **PARTIAL** — 1 of 5 fixed; rest escalated | ✅ **R14 external document DOWNLOAD fixed** (`2843d53ce`): wrong URL **and** an impossible response contract — it expected `{downloadUrl}` while the real route streams `Results.File` and its comment states pointers are *never* surfaced. Repointing the URL alone would have produced a silently broken download. Now blob + object URL via a new `bffApiBlob` (extends the existing client; `bffApiCall` can't be reused — `parseResponse` always calls `.json()`). 🔔 **R3 · R10/R11 · R13 · R15 · R17 are NOT typos — each needs BFF surface that does not exist.** Four land on `/api/v1/external/**`, the surface this project's evaluator governs; inventing endpoints there ahead of FR-07→FR-29 delegation risks a new unauthorized read path (CLAUDE.md §6.5). **Owner decision needed — see § ITEM-3 ESCALATION below.** **DORMANT (record only)**: R1/R2/R5-R9/R12/R16 + `getContainerIdForEntity`. R4 UNSURE (org-side PCF binding). ✅ Already fixed earlier: external-spa `/upload` 404 (`304b6d8f2`). |
+| 3a | Live route-mismatch fixes | ✅ **4 of 5 DONE** | **R14** external download (`2843d53ce`) — wrong URL AND an impossible contract: it expected `{downloadUrl}` while the route streams `Results.File` and its own comment says pointers are NEVER surfaced, so no URL fix could have worked; now blob + object URL via a new `bffApiBlob`. **R10/R11** external calendar events (`0f73aa60d`) — `/events` was DELIBERATELY deleted by smart-todo-decoupling-r3 FR-29 (event-as-todo retirement) and its sibling `SmartTodo` was migrated to `/todos` while `EventsCalendar` was left behind. Restored for REAL `sprk_event` only; `sprk_todoflag` must never come back. `PATCH /events/{id}` deliberately NOT restored (zero callers). **R13** document versions (`0ca206f42`) — needed a new APP-ONLY `ListFileVersionsAsync`; the OBO variant cannot serve an external CIAM contact (not a Dataverse principal, no delegated permission to exchange). **R3** reporting privilege (`68eb58ad0`) — **no new endpoint and no owner decision were needed**: `GET /api/reporting/status` ALREADY returns it and `ReportingAuthorizationFilter` already maps three roles (`sprk_ReportingAccess`/`Author`/`Admin`). I had escalated this to the owner in error; the hook's docstring named a route that never existed. ⚠️ Roles are read as JWT **claims** and can lag ~1h — if it still shows Viewer after deploy, check the token, not the fix. **R17 LEFT AS-IS — owner decision 2026-09-02** ("I don't think we are using this"). Its adapter targets `/api/dataverse/{entity}` for all 5 CRUD methods and only `retrieveRecord` has a real counterpart. **DORMANT (record only)**: R1/R2/R5-R9/R12/R16 + `getContainerIdForEntity`; R4 UNSURE (org-side PCF binding). |
+| 3b | **R15 external upload** | 🔲 **NEXT** | The only remaining route mismatch. Design SETTLED — do not re-derive: `POST /api/v1/external/projects/{id}/documents`; two-stage gate (participation → `AccessRights.Create`) copied from `CreateEvent`; container **server-derived** via `RecordContainerResolver.ResolveForRecordAsync("sprk_project", id)` — a client must NEVER name it (#858); `Unresolved` outcome must fail honestly, not write elsewhere; app-only `UploadSmallAsync` with **`ConflictBehavior.Fail`** from the start; **bare filename** (a prefix mints folders — `SpeUploadPathIsFlatGuardTests` enforces this); then create the `sprk_document` row. ⚠️ **No size cap needed** (250 MB simple-PUT). ⚠️ Owner corrected my risk framing: SPE permissions are CONTAINER-level, so removing a file from a container DOES revoke access — "cannot be un-shared" was wrong. Client: repoint `UploadDialog` (`DocumentLibrary.tsx:366`) off `/api/v1/external/documents/upload`. |
+| 3c | **Two-option collision dialog** | 🔲 **NEXT** | Data layer DONE (`086b9e9ce`): `UploadNameConflictError` + `ConflictBehaviorOption` + `ServiceResult.nameConflict`, wired through BOTH clients. Remaining is UI only: two buttons in the wizard's per-file failure row + retry through `uploadOrchestrator` with `conflictBehavior: 'rename' | 'replace'`. **Owner decided TWO options, not three** — "all saves are effectively save-as-new-version", and true replacement = delete then upload. Until it ships a collision shows the 409 ProblemDetails rather than "Unknown error occurred": uglier, honest, non-destructive. |
 | 4 | `__SPAARKE_OPEN_CLOSE_PROJECT__` has **zero in-repo callers** | 🔲 | Set at `WorkspaceGrid.tsx:450`, never called. Origin task exposed it "for ribbon command integration". **Secure-project closure — the access-revocation cascade this project is about — may be unlaunchable.** Needs an ENVIRONMENT query (org-side ribbon), not a repo search. |
 | 5 | File tasks **093 / 094 / 095 / 096** | 🔲 | Per [`notes/plan-upload-path-decomposition-2026-08-31.md`](notes/plan-upload-path-decomposition-2026-08-31.md) — **read it first**. 093 must NOT author a new Secure UI (exists ×2; task 068 owns it — see the plan's 2026-09-01 correction). 096 = replace-path drive provenance. `ls tasks/` before numbering (highest is 092). |
 | 6 | Execute **076** | 🔲 | The container contract. **Ship-together** (client+BFF). Its own session. |
@@ -1873,3 +1926,68 @@ and for four of the five, on the exact surface this project is rewriting.
 
 **Do NOT** let these sit as "known 404s". R3 and R10/R11 are user-visible broken features on shipped
 pages.
+
+---
+
+## § NEW ITEMS from the 2026-09-02 session (add to the ordered list)
+
+### 🔴 N-1 — 076 AMENDMENT: consolidate to ONE upload client (owner-raised)
+
+Owner asked, correctly: *"don't we want both (and all similar) to go through our shared components?"*
+
+**The gap**: the plan's only line on this is *"Client cutover U1 `EntityCreationService.ts:493` / U2
+`SdapApiClient.ts:110` / U3 `UploadOperation.ts` to `(entity, recordId)`"*. That re-points three
+implementations at the record-keyed route and **leaves three implementations**. The *route* cutover is
+tracked; the *client* consolidation is NOT. Both duplicates live INSIDE shared libraries — this is not
+app code bypassing shared components, it is the shared layer having three front doors.
+
+| | Implementation | Consumer | Typed collision handling |
+|---|---|---|---|
+| **U1** | raw inline `fetch` PUT at `EntityCreationService.ts:493` | shared service | ❌ none |
+| **U2** | `Spaarke.UI.Components/services/document-upload/SdapApiClient.uploadFile` | `FileUploadService` → `uploadOrchestrator` → DocumentUploadWizard | ✅ added |
+| **U3** | `@spaarke/sdap-client` `UploadOperation.uploadSmall` | `EntityCreationService` (for `indexFile` only) | ✅ added |
+
+**Proposed amendment** — do it WITH the route cutover, not after (both touch the same three sites, so
+splitting means editing each twice):
+1. `@spaarke/sdap-client` is the ONE surviving client.
+2. **U1 stops doing HTTP** — call the shared client. It already imports that package for `indexFile()`.
+3. **Delete U2**; `FileUploadService` keeps orchestration (validation, `ServiceResult`, `nameConflict`)
+   and delegates transport.
+4. ⚠️ **Reconcile the capability diff FIRST** — U2 carries `onUnauthorized` (401 token-cache clearing),
+   configurable timeout, injected logger, `getUserFriendlyErrorMessage`. A blind delete regresses the
+   wizard's 401 recovery. This is the only part needing care; the rest is mechanical.
+
+**The generalizable rule** (worth a constraint, not six one-off fixes): not "use shared components" but
+**one shared component per external contract**. Same shape found three times: three upload clients, a
+duplicated `humanizeLogicalName` inside one package, and — caught by the compiler this session — my own
+second `ConflictBehavior` vocabulary next to the existing enum.
+
+### N-2 — `EntityCreationService.ts:493` does not `encodeURIComponent` the filename
+
+U1 interpolates `fileName` straight into the URL; U2 and U3 both encode. A name containing a space,
+`#`, `&` or `+` builds a malformed path. Independent of this session's work; fix with N-1.
+
+### N-3 — the stale-prose pattern deserves a standing rule
+
+Six instances this session, two of which produced wrong answers to the owner:
+`PathValidator.SmallUploadMaxBytes` (zero code refs, became a real product limit via comments alone) ·
+`ISpeFileOperations` "<4 MB" · `OBOEndpoints` ×2 · `RouteAuthorizationGuardTests` ·
+`useReportingPrivilege` naming a route that never existed · `pcf-safe.ts` importing a deleted component ·
+`FilePreview/index.ts` citing a migrated consumer. Mechanism is always the same: deleting or
+never-building a thing updates every call site the compiler can see and **nothing** in the prose.
+Candidate: extend `FAILURE-MODES.md` AP-11 with "a doc comment stating a limit, route, or role mapping
+is a CLAIM — verify against code before acting on it", plus the 11th channel already added
+(*a dead file may have a live twin at another path*).
+
+### N-4 — R15 is unblocked and should NOT inherit the defect
+
+Because the collision fix is server-side and defaults to `Fail`, R15 gets safe behaviour for free — but
+it must pass `ConflictBehavior.Fail` explicitly (per the researcher note: the Graph docs contradict each
+other on the PUT default, so never rely on it).
+
+### N-5 — item 3a's dormant claims are recorded, per owner
+
+Owner 2026-09-02: *"let's document these and we will evaluate when / if they arise as issues."* The
+11 dormant route mismatches (R1/R2/R5–R9/R12/R16 + `getContainerIdForEntity`) stay documented in
+`notes/tech-debt-sweep-VERIFICATION-2026-09-01.md` § TASK 3. **Do not build endpoints for them** — their
+callers are exported-but-never-invoked or their UI is never mounted; they should die with the dead code.
