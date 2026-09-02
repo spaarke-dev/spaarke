@@ -12,11 +12,52 @@
 
 | Field | Value |
 |---|---|
-| **Active work** | **Closing out every remaining Compose defect in THIS project** (owner directive 2026-09-01: no deferrals, no hand-offs to other projects). 070 ✅ · #776 ✅ · **#781 ✅ (all 3 remaining pieces, `1789e9d08`)** · **#698 fixture ✅ (`a39c7abbe`)** · **#777 ✅ code done, uncommitted — verifying** · #858 merged from UAC-r2 and reconciled. |
-| **Next Action** | Commit #777 once the Compose filter reports, then the rest of the SERVER batch in one pass: **drive provenance → #696 → #698 contract half**. Then the CLIENT batch (#699 + the #858 client cutover) as one `npm` cycle. Then #853 close-out, 090 wrap-up, deploy. Ordered list + rationale in §R1. |
-| **Branch** | `work/spaarkeai-compose-r8` — **17 commits ahead of `origin/master`, 0 behind.** #777 is the only uncommitted work. |
-| **Suite** | Compose **1,871/0** · BFF **11,831 / 0 / 57 skipped** · ArchTests **176/176** · solution build **0 errors** · DI diff confined to `ComposeModule.cs` (a genuine new registration, not an extraction) |
-| **Open, not blocking** | `Repair-ComposeIdentityKey.ps1` has **not** been run against a live environment. `section-break-flattened` may want a row in `COMPOSE-WRITE-RESIDUAL-LOSS.md` now that it is a per-edited-block code (settle at 090). No corpus doc still uses **letter/roman** sub-numbering (`4.2(b)(iii)`) — the original #698 ask, still open, low priority. |
+| **Active work** | **Closing out every remaining Compose defect in THIS project** (owner directive 2026-09-01: no deferrals, no hand-offs). 070 ✅ · #776 ✅ · **#781 ✅** `1789e9d08` · **#698 fixture ✅** `a39c7abbe` · **#777 ✅** `1f88817c7` · **#696 ✅** `4fe224ce9` · **#698 contract half ✅** (answered on the issue, no wrapper) · #858 merged from UAC-r2 and reconciled. |
+| **Next Action** | **START ON DRIVE PROVENANCE** — the last and riskiest server item; full brief in §R2 below. Then the CLIENT batch (#699 + the #858 client cutover) as one `npm` cycle. Then #853 close-out, 090 wrap-up, deploy. |
+| **Branch** | `work/spaarkeai-compose-r8` — **20 ahead of `origin/master`, 4 BEHIND, tree clean.** ⚠️ Master moved during this session. **Merge master BEFORE starting drive provenance** (`git merge origin/master`, never rebase — shared branch under review). Drive provenance touches `ComposeService.cs`, the file most likely to conflict, so resolving on the branch first is the cheap order. |
+| **Suite** | Compose **1,886 / 0** · BFF **11,831 / 0 / 57 skipped** · ArchTests **176/176** · solution build **0 errors** |
+| **Open, not blocking** | `Repair-ComposeIdentityKey.ps1` has **not** been run against a live environment. `section-break-flattened` may want a row in `COMPOSE-WRITE-RESIDUAL-LOSS.md` now that it is a per-edited-block code (settle at 090). No corpus doc uses **letter/roman** sub-numbering (`4.2(b)(iii)`) — the open half of #698, needs an owner document. Client `composeCitationResolver.ts` parity with its server twin has **no forcing function** — fold into #699 (same file's consumer). |
+
+---
+
+## R2. DRIVE PROVENANCE — the brief (next task)
+
+**What it is.** `ApplyTemplateAsync` and `SaveAsync`'s replace branch both take `driveId` from the
+CLIENT (route body / `request.DriveId`) and write bytes there. The authorized `sprk_document` row
+already knows the answer (`sprk_graphdriveid`), and the server does not consult it.
+
+**What it is NOT.** Not the app-only live-hole class. Every write is OBO, so SPE authorizes it as the
+user — a caller cannot reach a drive they could not already reach. The defect is **provenance**: the
+`sprk_document` record says the document lives at drive X while the save writes to drive Y, so the
+record and the bytes diverge and the audit trail is wrong. Same reasoning as #858's `ContainerId`
+deletion ("a field that still EXISTS is a capability that still exists"), one level down.
+
+**The resolution already exists — reuse it.** `ComposeRecordResolution.TryFindDocumentByGraphItemIdAsync`
+resolves speId → row, and after #781 it survives a duplicated/broken alternate key. **Extend its column
+set to include `ComposeService.GraphDriveIdAttribute`** (it currently fetches DocumentId + the two
+FR-C3 dedup columns); the sibling `TryFindDocumentByTransientKeyAsync` already fetches drive+item and
+returns them as `TransientKeyMatch`, which is the shape to mirror.
+
+**The one real design decision — fail-closed vs. fall-back.** Legacy rows may carry an empty
+`sprk_graphdriveid`: `PromoteIfEphemeralAsync`'s create branch documents that a row without the full
+SPE pointer makes downstream readers 409 with "No file is attached", which implies rows predating that
+fix exist. So a hard fail-closed can break saves on real documents. **Recommended**: use the row's
+drive when it has one and IGNORE the client's; log at Warning when they differ (that divergence IS the
+signal); fall back to the client value ONLY when the row has no drive id, logged. An attacker cannot
+make a row's drive id disappear, so the fallback covers legacy data, not an attack path. State this in
+the PR rather than letting it read as a half-measure.
+
+**Then the census moves honestly**: the 3 `ComposeSaveStorageCoordinator` entries + the apply-template
+caller note in `tests/Spaarke.ArchTests/SpeWriteSinkContainerProvenanceGuardTests.cs`. Remember the
+2026-09-01 lesson — a renumber presents as one stale entry + one undeclared site, and only both halves
+together distinguish it from a deletion.
+
+**Sites**: `ComposeService.cs` — `ApplyTemplateAsync` (~T1 metadata read + the replace) and the save
+replace branch (`request.DriveId` at ~1871–1897). `ComposeSaveEndpoints.cs:80` currently 400s when
+`driveId` is absent from the body; that validation should survive the change (the client still sends
+it) but its *meaning* becomes "the client's claim", not "the write target".
+
+---
 | **Verify with** | **`dotnet build`** at the SOLUTION root — not one project (see §A2 for why that distinction cost real time) |
 
 ---
