@@ -49,8 +49,31 @@ not a regression.
 Owner: *"for the Secure Project UI it is a part of this solution so need to include it."*
 - Reorder all 7 Create wizards: **collect** IsSecure early (owner: **before the Info step**) → create the
   record → provision the container if secure → upload against `(entity, recordId)` → create document rows
-- The Secure Project wizard step UI (never specified — `SECURE-DOCUMENTS-BUILD-PLAN.md` covers components
-  and invariants, no UI)
+- 🔴 **CORRECTION 2026-09-01 — "the Secure Project wizard step UI was never specified" is WRONG.**
+  It exists, in **two** implementations, and there is already a **pending task 068** to rework it:
+  - `src/client/shared/Spaarke.UI.Components/src/components/CreateProjectWizard/SecureProjectSection.tsx`
+  - `src/solutions/LegalWorkspace/src/components/CreateProject/SecureProjectSection.tsx`
+  - [`tasks/068-create-project-wizard-secure-step.poml`](../tasks/068-create-project-wizard-secure-step.poml)
+    (status `pending`, Phase 4, FR-31) — *"SecureProjectSection.tsx copy + behaviour match the 061 server
+    contract … the permanence warning is gone; a reversibility note replaces it."*
+
+  **So 093 MUST NOT author a new Secure Project UI** (CLAUDE.md §11 — extend, do not fork). What 093
+  actually owns is narrower and should be scoped to exactly this: **move the IsSecure collection point
+  earlier** (owner: before the Info step) so the flag is known before record creation, and **reuse the
+  existing section component** where it renders. Whether that means depending on 068, folding 068 into
+  093, or landing 093 first and letting 068 rework what it moved is a **sequencing decision for the task
+  author** — but duplicating the component is not on the menu.
+
+  ⚠️ **Two copies is itself an open question** 093 should surface rather than silently pick: a shared-lib
+  component and a LegalWorkspace copy. Determine which is live for each of the 7 wizards before editing
+  either; changing the wrong one produces a fix that never renders.
+
+  *How this was missed*: the plan asserted "never specified" without a `Glob`/`Grep` for the component —
+  the exact evidence step CLAUDE.md §11 question 1 requires ("Verify by `Grep`/`Glob` before claiming
+  'none'"). It was caught only because filing 093 triggered a reuse check. Note also that the first
+  `Glob` run here returned a **false negative** because a backgrounded `cd` had moved the session cwd
+  into `projects/`; when a glob for a file you expect contradicts you, re-check the search root before
+  believing it.
 - ⚠️ **Provisioning requires the record to already exist** (task 008 finding: its final act is an
   `UpdateAsync` stamping three fields on the project). So IsSecure is *collected* early and *acted on*
   after creation. These are compatible — but the order cannot be inverted.

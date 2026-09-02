@@ -1,3 +1,5 @@
+import type { ConflictBehaviorOption } from '@spaarke/sdap-client';
+
 /**
  * Document Upload Service Types
  *
@@ -128,6 +130,17 @@ export interface ServiceResult<T = void> {
   success: boolean;
   data?: T;
   error?: string;
+
+  /**
+   * Present when the operation was blocked by a NAME COLLISION rather than failing.
+   *
+   * Distinct from `error` because it is recoverable and the recovery needs a user decision:
+   * nothing was written, the existing file is intact, and retrying the same upload with
+   * `conflictBehavior: 'rename' | 'replace'` will succeed. A caller that only reads `error` still
+   * behaves correctly (it shows the message) — this field is additive so existing consumers are
+   * unaffected.
+   */
+  nameConflict?: { fileName: string };
 }
 
 // ---------------------------------------------------------------------------
@@ -147,6 +160,14 @@ export interface FileUploadApiRequest {
 
   /** File name */
   fileName: string;
+
+  /**
+   * Name-collision behaviour. OMIT on the first attempt — the BFF then defaults to `fail`, so a
+   * same-named file throws `UploadNameConflictError` with the existing file untouched. Set to
+   * `'rename'` (keep both) or `'replace'` (save as a new version) only when retrying after the
+   * user has chosen.
+   */
+  conflictBehavior?: ConflictBehaviorOption;
 }
 
 /**

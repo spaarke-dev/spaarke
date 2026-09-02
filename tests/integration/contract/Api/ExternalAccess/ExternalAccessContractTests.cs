@@ -463,7 +463,10 @@ public sealed class ExternalAccessContractFixture : WebApplicationFactory<Progra
         CreateClient(new WebApplicationFactoryClientOptions { AllowAutoRedirect = false });
 
     /// <summary>External (CIAM) caller. Scenario is carried on request headers read by the stub services.</summary>
-    public HttpClient CreateAuthenticatedClient(IReadOnlyList<Guid> accessibleProjects, Guid? documentProjectId = null)
+    public HttpClient CreateAuthenticatedClient(
+        IReadOnlyList<Guid> accessibleProjects,
+        Guid? documentProjectId = null,
+        ExternalAccessLevel? accessLevel = null)
     {
         var client = CreateClient(new WebApplicationFactoryClientOptions { AllowAutoRedirect = false });
         client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", "test-token");
@@ -471,6 +474,11 @@ public sealed class ExternalAccessContractFixture : WebApplicationFactory<Progra
         client.DefaultRequestHeaders.Add("X-Test-Projects", string.Join(",", accessibleProjects));
         if (documentProjectId.HasValue)
             client.DefaultRequestHeaders.Add("X-Test-DocProject", documentProjectId.Value.ToString());
+        // Optional: participation access level. Omitted ⇒ FullAccess, preserving the behaviour every
+        // pre-existing caller of this helper relies on. Set it to assert that a read-capable but
+        // write-incapable participant is refused on a write route (unified-access-control-r2).
+        if (accessLevel.HasValue)
+            client.DefaultRequestHeaders.Add("X-Test-AccessLevel", accessLevel.Value.ToString());
         return client;
     }
 
@@ -548,11 +556,18 @@ internal sealed class StubExternalParticipationService : ExternalParticipationSe
     public override Task<ExternalGrantSet> GetGrantSetAsync(Guid contactId, CancellationToken ct = default)
     {
         var raw = Header("X-Test-Projects");
+
+        // Default FullAccess — every test written before X-Test-AccessLevel existed assumes it.
+        var levelRaw = Header("X-Test-AccessLevel");
+        var level = Enum.TryParse<ExternalAccessLevel>(levelRaw, ignoreCase: true, out var parsed)
+            ? parsed
+            : ExternalAccessLevel.FullAccess;
+
         IReadOnlyList<ExternalParticipation> projects = string.IsNullOrWhiteSpace(raw)
             ? Array.Empty<ExternalParticipation>()
             : raw.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
                  .Where(p => Guid.TryParse(p, out _))
-                 .Select(p => new ExternalParticipation { ProjectId = Guid.Parse(p), AccessLevel = ExternalAccessLevel.FullAccess })
+                 .Select(p => new ExternalParticipation { ProjectId = Guid.Parse(p), AccessLevel = level })
                  .ToList();
 
         // Optional matter / work-assignment grants for polymorphic tests (task 028).

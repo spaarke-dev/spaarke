@@ -24,6 +24,8 @@ import type {
   FileReplaceRequest,
 } from './types';
 import { consoleLogger } from './types';
+// One definition of the collision error across both clients that hit this route.
+import { UploadNameConflictError } from '@spaarke/sdap-client';
 
 /**
  * Optional callback invoked on 401 responses before retry.
@@ -98,7 +100,11 @@ export class SdapApiClient {
     try {
       const token = await this.getAccessToken();
 
-      const url = `${this.baseUrl}/api/obo/containers/${encodeURIComponent(request.driveId)}/files/${encodeURIComponent(request.fileName)}`;
+      // conflictBehavior is omitted on a first attempt: the BFF then defaults to `fail`, so a
+      // same-named file yields 409 with the existing file UNTOUCHED. It is only sent when the user
+      // has already chosen (rename / replace) — see UploadNameConflictError.
+      const query = request.conflictBehavior ? `?conflictBehavior=${encodeURIComponent(request.conflictBehavior)}` : '';
+      const url = `${this.baseUrl}/api/obo/containers/${encodeURIComponent(request.driveId)}/files/${encodeURIComponent(request.fileName)}${query}`;
 
       const response = await this.fetchWithTimeout(url, {
         method: 'PUT',
@@ -108,11 +114,29 @@ export class SdapApiClient {
         body: request.file,
       });
 
+      // Checked BEFORE handleResponse so the collision keeps its own type instead of collapsing
+      // into a generic Error with a user-friendly string. Callers branch on `instanceof`, never on
+      // message text. Imported from @spaarke/sdap-client rather than redeclared — this file is the
+      // SECOND client hitting this route, and a second error type for one condition would be worse
+      // than the duplication already here.
+      if (response.status === 409) {
+        throw new UploadNameConflictError(request.fileName);
+      }
+
       const result = await this.handleResponse<SpeFileMetadata>(response);
 
       this.logger.info('SdapApiClient', 'File uploaded successfully', result);
       return result;
     } catch (error) {
+      // A name collision is an expected, user-resolvable outcome — not a failure to dress up.
+      // Rethrow it untouched: enhanceError would prefix "File upload failed: " onto a message the
+      // UI shows verbatim, and "failed" is the wrong word for "nothing was written, please choose".
+      if (error instanceof UploadNameConflictError) {
+        this.logger.info('SdapApiClient', 'File name already exists — awaiting user choice', {
+          fileName: request.fileName,
+        });
+        throw error;
+      }
       this.logger.error('SdapApiClient', 'File upload failed', error);
       throw this.enhanceError(error, 'File upload failed');
     }

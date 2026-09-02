@@ -8,8 +8,14 @@
 Adding error boundaries, user-facing error states, or error logging in PCF controls.
 
 ## Read These Files
-1. `src/client/pcf/UniversalDatasetGrid/control/components/ErrorBoundary.tsx` — React error boundary component
-2. `src/client/pcf/UniversalDatasetGrid/control/services/SdapApiClient.ts` — API error handling with retry
+1. `src/client/shared/Spaarke.UI.Components/src/components/AppErrorBoundary/AppErrorBoundary.tsx` — app-root React error boundary
+   (widget-scoped variant: `components/WidgetErrorBoundary/WidgetErrorBoundary.tsx`)
+2. `src/client/shared/Spaarke.UI.Components/src/services/document-upload/SdapApiClient.ts` — API error handling with retry
+   <!-- Corrected 2026-09-01: both pointers named `src/client/pcf/UniversalDatasetGrid/control/...`, a
+        DELETED control. NOTE the exemplars moved LAYER, not just path: there is no ErrorBoundary anywhere
+        under src/client/pcf/ — error boundaries live in the shared library and PCFs consume them. Do not
+        re-add a per-control boundary. -->
+
 
 ## Constraints
 - **ADR-006**: PCF controls must show inline error states — never crash silently
