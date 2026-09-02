@@ -45,6 +45,7 @@ using Microsoft.Extensions.DependencyInjection;
 using Moq;
 using Sprk.Bff.Api.Api;
 using Sprk.Bff.Api.Models;
+using Sprk.Bff.Api.Services.Compose;
 using Sprk.Bff.Api.Tests.Seam.Ai;
 using Xunit;
 
@@ -178,6 +179,69 @@ public sealed class ComposeProjectSeamTests : IClassFixture<ComposeFidelitySeamF
         _fixture.SpeMock
             .Setup(s => s.DownloadFileAsUserAsync(It.IsAny<HttpContext>(), driveId, speId, It.IsAny<CancellationToken>()))
             .Returns(() => Task.FromResult<Stream?>(new MemoryStream(bytes)));
+    }
+
+    // ═══════════════════════════════════════════════════════════════════════════════════════════
+    // #696 (DEF-02) — the size ceiling on this door.
+    //
+    // This handler runs SYNCHRONOUS OOXML projection on bytes taken straight off the wire, and had
+    // only Kestrel's implicit ~28.6 MB cap. It now carries the same two-level bound the save routes
+    // do, from the same constants: a transport cap at MaxRequestBodyBytes (the LARGER number, so a
+    // legal document is never pre-empted by a bodiless 413) and an honest per-document refusal at
+    // MaxDocumentBytes.
+    //
+    // Note what #696 asked for that is NOT here. The issue names `/api/compose/upload` alongside
+    // this route as running "projection on byte[] Content". It does not: ComposeUploadRequest carries
+    // a sessionId and a documentId — two strings — and the bytes come from ITenantCache, where the
+    // chat-upload pipeline already bounded them at ingress. There is no unbounded request body on
+    // that route to cap, so capping it would have been ceremony against a threat that is not there.
+    // ═══════════════════════════════════════════════════════════════════════════════════════════
+
+    [Fact]
+    public async Task Project_DocumentOverTheLimit_RefusedWithTheStatedLimit_BeforeAnyProjection()
+    {
+        _fixture.ResetBoundaries();
+        using var client = _fixture.CreateAuthenticatedClient();
+
+        // One byte over — the boundary IS the contract, so test at the boundary (same stance as the
+        // save-path ceiling test in ConcurrencySaveSeamTests).
+        var oversize = new byte[ComposeSaveLimits.MaxDocumentBytes + 1];
+        oversize[0] = 0x50; oversize[1] = 0x4B; oversize[2] = 0x03; oversize[3] = 0x04;
+
+        var response = await client.PostAsJsonAsync("/api/compose/project",
+            new { content = oversize, fileName = "huge.docx" });
+
+        var body = await response.Content.ReadAsStringAsync();
+
+        response.StatusCode.Should().Be(HttpStatusCode.BadRequest,
+            $"an oversize document is refused as invalid, with a body that explains it. Body: {body}");
+        response.StatusCode.Should().NotBe(HttpStatusCode.RequestEntityTooLarge,
+            "a raw 413 carries no body and tells the user nothing about what to do — the same reason " +
+            "FR-S08 replaced the transport rejection on the save routes");
+
+        // Reads the very constant the endpoint enforces, so advertising one number while enforcing
+        // another fails here rather than in front of a user.
+        body.Should().Contain(ComposeSaveLimits.MaxDocumentDisplay,
+            "the refusal must name the real limit, not a stale hard-coded number");
+        body.Should().Contain("Document Too Large");
+    }
+
+    [Fact]
+    public async Task Project_DocumentUnderTheLimit_StillProjects()
+    {
+        // The paired positive. A ceiling test alone cannot tell a working limit from a door that
+        // refuses everything, and this endpoint's whole job is to render what it is given.
+        _fixture.ResetBoundaries();
+        using var client = _fixture.CreateAuthenticatedClient();
+
+        var docx = BuildDocx(new Paragraph(new Run(new Text("Under the limit."))));
+        docx.Length.Should().BeLessThan((int)ComposeSaveLimits.MaxDocumentBytes);
+
+        var response = await client.PostAsJsonAsync("/api/compose/project",
+            new { content = docx, fileName = "small.docx" });
+
+        response.StatusCode.Should().Be(HttpStatusCode.OK);
+        (await response.Content.ReadAsStringAsync()).Should().NotContain("Document Too Large");
     }
 
     /// <summary>Minimal in-memory .docx builder — mirrors ComposeUploadProjectionSeamTests.BuildDocx
