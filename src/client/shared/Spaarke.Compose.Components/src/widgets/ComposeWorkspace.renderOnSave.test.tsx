@@ -690,7 +690,12 @@ describe('ComposeWorkspace — imported save-routing flip (task 012)', () => {
     expect(body.displayName).toBe('uploaded.docx');
     expect(body.contentModel).toEqual(BUILT_MODEL);
     expect(body.content).toBe(CONTENT_B64);
-    expect(body.containerId).toBe('bu-container-1');
+    // #858 (2026-09-01): the create-on-save body MUST NOT carry a container. The server derives it
+    // from the session-bound matter (authorized first) or the acting user's business unit, and
+    // `SaveComposeDocumentRequest.ContainerId` no longer exists. This assertion is INVERTED from what
+    // it was — it used to pin `'bu-container-1'`, i.e. it pinned the defect. The host still passes a
+    // `containerId` PROP (it feeds client state); what must not happen is it reaching the wire.
+    expect(body.containerId).toBeUndefined();
     expect(typeof body.transientKey).toBe('string');
     expect(body.forkNew).toBe(false);
     expect(body.operationLog).toBeUndefined();
@@ -794,7 +799,12 @@ describe('ComposeWorkspace — PDF-sourced save routing (task 042 / FR-06)', () 
     // Model shape (dirty imported create): merged model + retained synthesized bytes as carrier.
     expect(body.contentModel).toEqual(BUILT_MODEL);
     expect(body.content).toBe(CONTENT_B64);
-    expect(body.containerId).toBe('bu-container-1');
+    // #858 (2026-09-01): the create-on-save body MUST NOT carry a container. The server derives it
+    // from the session-bound matter (authorized first) or the acting user's business unit, and
+    // `SaveComposeDocumentRequest.ContainerId` no longer exists. This assertion is INVERTED from what
+    // it was — it used to pin `'bu-container-1'`, i.e. it pinned the defect. The host still passes a
+    // `containerId` PROP (it feeds client state); what must not happen is it reaching the wire.
+    expect(body.containerId).toBeUndefined();
 
     // …and after the successful save the banner RETIRES (the doc is a native docx now).
     expect(screen.queryByTestId('compose-workspace-pdf-source-banner')).not.toBeInTheDocument();
