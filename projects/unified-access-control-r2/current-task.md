@@ -13,7 +13,7 @@
 | **Task** | **076** — record-keyed upload contract. `<rigor>FULL</rigor>`, tier `opus`, effort `high`, steps `directional`, `parallel-safe: false` |
 | **Step** | **4 of 11** (client cutover). Steps 0–3 + the >4 MB server half are DONE; 5–11 remain |
 | **Status** | in-progress |
-| **Next Action** | ✅ **#858 IS CLOSED AND MERGED — compose-r8 is UNBLOCKED.** PRs #926 (`8860e066e`) + #928 (`7c6bfafe5`) on master; closing comment posted (`#858#issuecomment-5498848073`); issue CLOSED. Main repo master synced. **NEXT: READ [`notes/plan-upload-path-decomposition-2026-08-31.md`](notes/plan-upload-path-decomposition-2026-08-31.md) FIRST**, then file **093/094/095** and execute **076**. Client `containerId` removal is NOT ship-together — any later train |
+| **Next Action** | ▶ **See § REMAINING WORK (ordered) immediately below.** #858 is CLOSED + merged; compose-r8 unblocked. Open PR **#931** carries the client wrong-destination fixes + dead-wizard deletion + route guard + binding-doc fixes (head `2c44dde99`) — **check its CI and merge it first** |
 
 ### ✅ PR #887 MERGED 2026-09-01T03:18:38Z — 34 commits on master
 
@@ -55,6 +55,34 @@ independently confirms this repo does not gate on review). **`worktree-sync` Ste
 4. ✅ **`AddExternalAccess()` is unconditional** (`Program.cs:69`) — verified, so depending on
    `CallerRecordAccessProbe` from unconditionally-registered `ComposeService` is NOT the §10 F.1
    asymmetric-registration anti-pattern.
+
+### ▶ REMAINING WORK (ordered, 2026-09-01) — owner: "we need to do all of these"
+
+**Rationale for the order**: binding agent-docs first (they misdirect every later step), then code
+deletions, then live user-facing fixes, then planning artifacts, then the big execution task.
+
+| # | Item | State | Notes |
+|---|---|---|---|
+| 0 | **Merge PR #931** | 🔲 | Head `2c44dde99`. Gate on the FULL check rollup, not `Router` alone (see the ⚠️ below). |
+| 1 | Binding `.claude/` doc fixes | ✅ **DONE** `2c44dde99` | constraints/pcf.md MUST at a dead dir · 6 pattern pointer files · pcf/CLAUDE.md banned build cmd · 4 stale tsconfig excludes |
+| 2 | **Verified-safe deletions** | 🔲 | From [`notes/tech-debt-sweep-VERIFICATION-2026-09-01.md`](notes/tech-debt-sweep-VERIFICATION-2026-09-01.md) "SAFE TO DELETE" list: LW `Playbook/**` chain (9) **+ the 3 leaves that die with it** (`FileUploadZone`, `UploadedFileList`, `wizardTypes` — kept in `144ef43c4` ONLY because Playbook used them; `matterService`/`formTypes`/`CloseProjectDialog`/`closureService` MUST STAY) · shared `components/FindSimilar/` family (5) · LW `Wizard/` shims (5) · 7 DatasetGrid hooks · VisualHost deprecated chart configs + `GradeMetricCard` · 12 auth shims · 2 commented-out DocRelViewer visualizations + `NodeActionBar`. ⛔ **`SprkChatBridge` is NOT dead** — type-imported by 3 live files; deleting breaks the shared-lib build. |
+| 3 | Live route-mismatch fixes | 🔲 | Verification confirmed all 17 absences. **LIVE (fix)**: R3 Reporting privilege on every app mount · R10/R11 + R13-R15 external-spa calendar + document versions/download · R17 `PlaybookLibraryShell`. **DORMANT (record only)**: R1/R2/R5-R9/R12/R16 + `getContainerIdForEntity` → `/api/containers/{entity}/{id}`. R4 UNSURE (org-side PCF binding). ✅ Already fixed: external-spa `/upload` 404 (`304b6d8f2`). |
+| 4 | `__SPAARKE_OPEN_CLOSE_PROJECT__` has **zero in-repo callers** | 🔲 | Set at `WorkspaceGrid.tsx:450`, never called. Origin task exposed it "for ribbon command integration". **Secure-project closure — the access-revocation cascade this project is about — may be unlaunchable.** Needs an ENVIRONMENT query (org-side ribbon), not a repo search. |
+| 5 | File tasks **093 / 094 / 095 / 096** | 🔲 | Per [`notes/plan-upload-path-decomposition-2026-08-31.md`](notes/plan-upload-path-decomposition-2026-08-31.md) — **read it first**. 093 must NOT author a new Secure UI (exists ×2; task 068 owns it — see the plan's 2026-09-01 correction). 096 = replace-path drive provenance. `ls tasks/` before numbering (highest is 092). |
+| 6 | Execute **076** | 🔲 | The container contract. **Ship-together** (client+BFF). Its own session. |
+| 7 | Q4 widening + `UploadFinalizationWorker.cs:611-629` | 🔲 | Or associations silently drop. |
+| 8 | Close **083**; set **012** → `completed-with-escalation` | 🔲 | Bookkeeping. |
+
+⚠️ **`Router` is the ONLY required check on master** (ruleset `21824191`; classic protection is OFF and its
+API 404s, which reads as "unprotected"). It passed once while two test jobs were RED. **Gate on the whole
+rollup; `UNSTABLE` = STOP, only `CLEAN` merges.** Also: build the **SOLUTION** (`dotnet build Spaarke.sln`),
+never one project — a green single-project run is not evidence about the solution.
+
+⚠️ **Dead-code method rule** (learned the hard way, `144ef43c4`): a static `from '...'` grep is NOT
+sufficient. It declared `CloseProjectDialog` unreferenced when it is LIVE via
+`React.lazy(() => import(...))`. Check all 10 channels — static, dynamic import, barrels, string
+registries, `window.__X__` globals, webresources/ribbon XML, code-page entries, PCF `dist` deep-imports,
+tests, and org-side artifacts. See [`.claude/FAILURE-MODES.md` AP-11](../../.claude/FAILURE-MODES.md).
 
 ### ✅ #858 IS CLOSED AND ON MASTER (2026-09-01). compose-r8 unblocked.
 
