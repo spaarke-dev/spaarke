@@ -14,20 +14,25 @@ import type { RelatedCandidate } from '../services/communicationSuggestionsServi
  * RelatedToPicker — the add-in's "Related to" selector, modeled on the email-intelligence
  * reconciliation surface (UI feedback, owner 2026-09-02).
  *
- * Layout (feedback round 3):
- *   [ Related to ]                          [ Matter Project Invoice … ]  ← header + right chips
- *   [ search input ] [ Search ]                                    [ + ]  ← search row on top
- *   ┌ recommended auto-match cards ───────────────────────────────────┐
- *   │ LITG-763955 : Litigation matter · Matter · 100% match       [✓]  │  ← small blue check
- *   └─────────────────────────────────────────────────────────────────┘
+ * Layout (feedback round 4):
+ *   [ Related to  Matter Project Invoice … ]                         ← header + left chips
+ *   [ search input ] [ Search ] [ + New ]                            ← search row (always visible)
+ *   ┌ recommended auto-match cards ──────────────────────────────┐
+ *   │ LITG-763955 : Litigation matter · Matter · 100% match  [✓]  │  ← blue check; green ✓ + × on select
+ *   └────────────────────────────────────────────────────────────┘
  *
- * Selecting a card turns its check GREEN with a small "×" to reset; the other cards go
- * gray. Single-select chips (gray except selected=blue, default Matter). Host-agnostic:
- * selecting only *chooses*; the regarding is written at save. Fluent v9 (ADR-021).
+ * Selecting only turns the card's check GREEN (with a small × to clear) — the search row
+ * and other cards stay. Single-select chips (gray except selected=blue, default Matter).
+ * Host-agnostic: selecting only *chooses*; the regarding is written at save. Fluent v9.
  */
 
 const useStyles = makeStyles({
-  root: { display: 'flex', flexDirection: 'column', gap: tokens.spacingVerticalS },
+  root: {
+    display: 'flex',
+    flexDirection: 'column',
+    gap: tokens.spacingVerticalM,
+    marginBottom: tokens.spacingVerticalM,
+  },
   header: { display: 'flex', alignItems: 'center', gap: tokens.spacingHorizontalM, flexWrap: 'wrap' },
   headerLabel: {
     display: 'flex',
@@ -36,7 +41,7 @@ const useStyles = makeStyles({
     color: tokens.colorNeutralForeground2,
     flexShrink: 0,
   },
-  chips: { display: 'flex', flexWrap: 'wrap', gap: tokens.spacingHorizontalXS, marginLeft: 'auto' },
+  chips: { display: 'flex', flexWrap: 'wrap', gap: tokens.spacingHorizontalXS },
   chip: {
     borderRadius: '999px',
     minWidth: 'auto',
@@ -52,22 +57,39 @@ const useStyles = makeStyles({
   cards: { display: 'flex', flexDirection: 'column', gap: tokens.spacingVerticalXS },
   card: { padding: tokens.spacingVerticalS },
   cardSelected: { borderLeft: `3px solid ${tokens.colorStatusSuccessBorder2}` },
-  cardDimmed: { opacity: 0.5 },
   cardRow: { display: 'flex', alignItems: 'center', gap: tokens.spacingHorizontalS },
   cardBody: { display: 'flex', flexDirection: 'column', gap: '2px', flexGrow: 1, minWidth: 0 },
   cardTitle: { overflow: 'hidden', textOverflow: 'ellipsis' },
   cardMeta: { color: tokens.colorNeutralForeground3 },
-  selectedControls: { display: 'flex', alignItems: 'center', gap: '2px', flexShrink: 0 },
-  greenCheck: {
+  checkWrap: { position: 'relative', flexShrink: 0 },
+  greenCheckBtn: {
+    backgroundColor: tokens.colorStatusSuccessBackground3,
+    color: tokens.colorNeutralForegroundOnBrand,
+    ':hover': { backgroundColor: tokens.colorStatusSuccessBackground3, color: tokens.colorNeutralForegroundOnBrand },
+    ':hover:active': {
+      backgroundColor: tokens.colorStatusSuccessBackground3,
+      color: tokens.colorNeutralForegroundOnBrand,
+    },
+  },
+  clearX: {
+    position: 'absolute',
+    top: '-6px',
+    right: '-6px',
+    width: '16px',
+    height: '16px',
+    minWidth: '16px',
+    padding: 0,
+    margin: 0,
+    borderRadius: '50%',
+    border: `1px solid ${tokens.colorNeutralStroke1}`,
+    backgroundColor: tokens.colorNeutralBackground1,
+    color: tokens.colorNeutralForeground1,
     display: 'inline-flex',
     alignItems: 'center',
     justifyContent: 'center',
-    width: '28px',
-    height: '28px',
-    borderRadius: tokens.borderRadiusMedium,
-    backgroundColor: tokens.colorStatusSuccessBackground3,
-    color: tokens.colorNeutralForegroundOnBrand,
-    flexShrink: 0,
+    cursor: 'pointer',
+    fontSize: '12px',
+    ':hover': { backgroundColor: tokens.colorNeutralBackground1Hover },
   },
   ctrlBtn: { flexShrink: 0 },
   emptyNote: { color: tokens.colorNeutralForeground3, padding: `${tokens.spacingVerticalXS} 0` },
@@ -118,8 +140,10 @@ export const RelatedToPicker: React.FC<RelatedToPickerProps> = ({
   const [searching, setSearching] = useState(false);
 
   const typeMatches = useMemo(() => candidates.filter(c => c.entityType === selectedType), [candidates, selectedType]);
-  const isConfirmed = value !== null;
-  const confirmedNotInList = value !== null && !typeMatches.some(c => sameRecord(c, value));
+
+  // Prepend the selected record as a card only when it isn't already shown in either list.
+  const selectedShown =
+    value !== null && (typeMatches.some(c => sameRecord(c, value)) || searchResults.some(r => sameRecord(r, value)));
 
   const handleTypeChange = (type: EntityType) => {
     setSelectedType(type);
@@ -143,21 +167,12 @@ export const RelatedToPicker: React.FC<RelatedToPickerProps> = ({
     }
   };
 
-  // One card. `state`: 'confirm' (blue check), 'selected' (green check + reset ×), 'dimmed'.
-  const renderCard = (
-    rec: EntitySearchResult,
-    opts: { confidence?: number; state: 'confirm' | 'selected' | 'dimmed'; keyPrefix?: string }
-  ) => {
+  // One card. Selected → green check + a small × to clear; else a blue check to select.
+  const renderCard = (rec: EntitySearchResult, opts: { confidence?: number; keyPrefix?: string }) => {
+    const selected = value !== null && sameRecord(rec, value);
     const key = `${opts.keyPrefix ?? ''}${rec.logicalName}:${rec.id}`;
     return (
-      <Card
-        key={key}
-        className={mergeClasses(
-          styles.card,
-          opts.state === 'selected' && styles.cardSelected,
-          opts.state === 'dimmed' && styles.cardDimmed
-        )}
-      >
+      <Card key={key} className={mergeClasses(styles.card, selected && styles.cardSelected)}>
         <div className={styles.cardRow}>
           <div className={styles.cardBody}>
             <Text weight="semibold" className={styles.cardTitle}>
@@ -167,29 +182,33 @@ export const RelatedToPicker: React.FC<RelatedToPickerProps> = ({
               {opts.confidence != null ? `${rec.entityType} · ${pct(opts.confidence)}% match` : rec.entityType}
             </Text>
           </div>
-          {opts.state === 'selected' ? (
-            <div className={styles.selectedControls}>
-              <span className={styles.greenCheck} aria-label="Selected">
-                <CheckmarkRegular />
-              </span>
+          {selected ? (
+            <div className={styles.checkWrap}>
               <Button
-                className={styles.ctrlBtn}
-                size="small"
-                appearance="subtle"
-                icon={<DismissRegular />}
+                className={styles.greenCheckBtn}
+                appearance="primary"
+                icon={<CheckmarkRegular />}
                 onClick={() => onChange(null)}
                 disabled={disabled}
-                aria-label="Reset selection"
+                aria-label="Selected — click to clear"
               />
+              <button
+                type="button"
+                className={styles.clearX}
+                onClick={() => onChange(null)}
+                disabled={disabled}
+                aria-label="Clear selection"
+              >
+                <DismissRegular />
+              </button>
             </div>
           ) : (
             <Button
               className={styles.ctrlBtn}
-              size="small"
               appearance="primary"
               icon={<CheckmarkRegular />}
               onClick={() => onChange(rec)}
-              disabled={disabled || opts.state === 'dimmed'}
+              disabled={disabled}
               aria-label="Select this record"
             />
           )}
@@ -200,7 +219,7 @@ export const RelatedToPicker: React.FC<RelatedToPickerProps> = ({
 
   return (
     <div className={styles.root}>
-      {/* Header: "Related to" (left) + type chips (right-aligned). */}
+      {/* Header: "Related to" + type chips, left-aligned next to the label. */}
       <div className={styles.header}>
         <div className={styles.headerLabel}>
           <PersonSearchRegular aria-hidden="true" />
@@ -228,65 +247,52 @@ export const RelatedToPicker: React.FC<RelatedToPickerProps> = ({
         </div>
       </div>
 
-      {/* Search row on top — hidden once a record is selected. */}
-      {!isConfirmed && (
-        <>
-          <div className={styles.searchRow}>
-            <Input
-              value={query}
-              onChange={(_, d) => setQuery(d.value)}
-              onKeyDown={e => {
-                if (e.key === 'Enter') void runSearch();
-              }}
-              placeholder={`Look up another ${selectedType}…`}
-              disabled={disabled}
-              contentBefore={<SearchRegular />}
-              style={{ flexGrow: 1 }}
-              aria-label={`Search ${selectedType} records`}
-            />
-            <Button appearance="subtle" onClick={() => void runSearch()} disabled={disabled || searching}>
-              {searching ? <Spinner size="tiny" /> : 'Search'}
-            </Button>
-            {onCreateNew && (
-              <Button
-                className={styles.ctrlBtn}
-                appearance="subtle"
-                icon={<AddRegular />}
-                onClick={() => onCreateNew(selectedType)}
-                disabled={disabled}
-                aria-label={`New ${selectedType}`}
-                title={`New ${selectedType}`}
-              />
-            )}
-          </div>
+      {/* Search row — always visible (New button matches the Search button size). */}
+      <div className={styles.searchRow}>
+        <Input
+          value={query}
+          onChange={(_, d) => setQuery(d.value)}
+          onKeyDown={e => {
+            if (e.key === 'Enter') void runSearch();
+          }}
+          placeholder={`Look up another ${selectedType}…`}
+          disabled={disabled}
+          contentBefore={<SearchRegular />}
+          style={{ flexGrow: 1 }}
+          aria-label={`Search ${selectedType} records`}
+        />
+        <Button appearance="subtle" onClick={() => void runSearch()} disabled={disabled || searching}>
+          {searching ? <Spinner size="tiny" /> : 'Search'}
+        </Button>
+        {onCreateNew && (
+          <Button
+            appearance="subtle"
+            icon={<AddRegular />}
+            onClick={() => onCreateNew(selectedType)}
+            disabled={disabled}
+          >
+            New
+          </Button>
+        )}
+      </div>
 
-          {searchResults.length > 0 && (
-            <div className={styles.cards}>
-              {searchResults.map(r => renderCard(r, { state: 'confirm', keyPrefix: 's:' }))}
-            </div>
-          )}
-        </>
+      {searchResults.length > 0 && (
+        <div className={styles.cards}>{searchResults.map(r => renderCard(r, { keyPrefix: 's:' }))}</div>
       )}
 
       {/* Recommended auto-match cards. */}
       <div className={styles.cards}>
-        {confirmedNotInList && value && renderCard(value, { state: 'selected', keyPrefix: 'sel:' })}
+        {value && !selectedShown && renderCard(value, { keyPrefix: 'sel:' })}
         {candidatesLoading ? (
           <div className={styles.cardRow}>
             <Spinner size="tiny" /> <Text size={200}>Finding matches…</Text>
           </div>
         ) : typeMatches.length > 0 ? (
-          typeMatches.map(c => {
-            const selected = value !== null && sameRecord(c, value);
-            const state: 'confirm' | 'selected' | 'dimmed' = selected ? 'selected' : isConfirmed ? 'dimmed' : 'confirm';
-            return renderCard(c, { confidence: c.confidence, state });
-          })
+          typeMatches.map(c => renderCard(c, { confidence: c.confidence }))
         ) : (
-          !isConfirmed && (
-            <Text size={200} className={styles.emptyNote}>
-              No suggested {selectedType} matches — search above or create a new record.
-            </Text>
-          )
+          <Text size={200} className={styles.emptyNote}>
+            No suggested {selectedType} matches — search above or create a new record.
+          </Text>
         )}
       </div>
     </div>
