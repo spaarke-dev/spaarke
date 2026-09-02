@@ -247,13 +247,20 @@ function canUploadOrDownload(accessLevel: AccessLevel): boolean {
 // ---------------------------------------------------------------------------
 
 interface VersionHistoryPanelProps {
+  projectId: string;
   documentId: string;
   documentName: string;
   open: boolean;
   onClose: () => void;
 }
 
-const VersionHistoryPanel: React.FC<VersionHistoryPanelProps> = ({ documentId, documentName, open, onClose }) => {
+const VersionHistoryPanel: React.FC<VersionHistoryPanelProps> = ({
+  projectId,
+  documentId,
+  documentName,
+  open,
+  onClose,
+}) => {
   const styles = useStyles();
   const [versions, setVersions] = React.useState<DocumentVersion[]>([]);
   const [loading, setLoading] = React.useState<boolean>(false);
@@ -270,8 +277,11 @@ const VersionHistoryPanel: React.FC<VersionHistoryPanelProps> = ({ documentId, d
       setVersions([]);
 
       try {
+        // Fixed 2026-09-02: was `/api/v1/external/documents/{id}/versions`, which does not
+        // exist. Version history — like content download — is project-scoped, so the server
+        // can enforce document→project containment before touching SPE.
         const response = await bffApiCall<DocumentVersionsResponse>(
-          `/api/v1/external/documents/${documentId}/versions`
+          `/api/v1/external/projects/${projectId}/documents/${documentId}/versions`
         );
         if (!cancelled) {
           setVersions(response.versions ?? []);
@@ -868,6 +878,7 @@ export const DocumentLibrary: React.FC<DocumentLibraryProps> = ({ projectId, acc
       {/* Version history dialog */}
       {versionHistoryDoc && (
         <VersionHistoryPanel
+          projectId={projectId}
           documentId={versionHistoryDoc.sprk_documentid}
           documentName={versionHistoryDoc.sprk_name}
           open={versionHistoryDoc !== null}

@@ -108,6 +108,15 @@ public static class ExternalProjectDataEndpoints
             .ProducesProblem(StatusCodes.Status401Unauthorized)
             .ProducesProblem(StatusCodes.Status403Forbidden);
 
+        // GET /api/v1/external/projects/{id}/documents/{documentId}/versions — SPE version history
+        group.MapGet("/projects/{id:guid}/documents/{documentId:guid}/versions", GetDocumentVersions)
+            .WithName("GetExternalDocumentVersions")
+            .WithSummary("Get SPE version history for a document in a Secure Project")
+            .Produces<ExternalDocumentVersionsResponse>(StatusCodes.Status200OK)
+            .ProducesProblem(StatusCodes.Status401Unauthorized)
+            .ProducesProblem(StatusCodes.Status403Forbidden)
+            .ProducesProblem(StatusCodes.Status404NotFound);
+
         // GET /api/v1/external/projects/{id}/events — calendar events for the project
         group.MapGet("/projects/{id:guid}/events", GetEvents)
             .WithName("GetExternalProjectEvents")
@@ -324,6 +333,89 @@ public static class ExternalProjectDataEndpoints
 
         var created = await dataService.CreateTodoAsync(id, request, ct);
         return Results.Created($"/api/v1/external/todos/{created.SprkTodoid}", created);
+    }
+
+    /// <summary>
+    /// GET /api/v1/external/projects/{id}/documents/{documentId}/versions — SPE version history.
+    /// </summary>
+    /// <remarks>
+    /// Authorization is the SAME two-stage gate as <c>DownloadDocumentContent</c>, deliberately
+    /// mirrored rather than reinvented, and for the same reason: nothing touches SPE/Graph until BOTH
+    /// checks pass.
+    ///   (1) project participation, and
+    ///   (2) document→project scoping — a mismatch OR a non-existent document is a UNIFORM 403, so
+    ///       this route cannot be used to probe which document ids exist.
+    /// Only then are the SPE pointers resolved and the version list read APP-ONLY. It must not use
+    /// the OBO ListFileVersionsAsUserAsync path: an external CIAM contact is not a Dataverse
+    /// principal and holds no delegated permission on the drive item.
+    /// </remarks>
+    private static async Task<IResult> GetDocumentVersions(
+        Guid id,
+        Guid documentId,
+        HttpContext httpContext,
+        ExternalDataService dataService,
+        IDocumentStorageResolver storageResolver,
+        ISpeFileOperations fileStore,
+        ILogger<Program> logger,
+        CancellationToken ct)
+    {
+        var callerContext = GetCallerPrincipal(httpContext);
+        if (callerContext is null) return MissingContextResult();
+
+        // ── AUTHORIZATION FIRST — nothing below reads SPE/Graph until BOTH checks pass ──
+        if (!callerContext.HasProjectAccess(id))
+        {
+            logger.LogWarning("[EXT-VERSIONS] Contact {ContactId} denied — no access to project {ProjectId}",
+                callerContext.ContactId, id);
+            return Results.Problem(statusCode: 403, title: "Forbidden",
+                detail: "You do not have access to this project");
+        }
+
+        var (documentProjectId, _) = await dataService.GetDocumentProjectAndNameAsync(documentId, ct);
+        if (documentProjectId is null || documentProjectId.Value != id)
+        {
+            logger.LogWarning(
+                "[EXT-VERSIONS] Contact {ContactId} denied — document {DocumentId} not in project {ProjectId}",
+                callerContext.ContactId, documentId, id);
+            return Results.Problem(statusCode: 403, title: "Forbidden",
+                detail: "This document is not part of the requested project");
+        }
+
+        // ── AUTHORIZED — resolve SPE pointers server-side and read app-only ──
+        try
+        {
+            var (driveId, itemId) = await storageResolver.GetSpePointersAsync(documentId, ct);
+
+            var versions = await fileStore.ListFileVersionsAsync(driveId, itemId, ct);
+            if (versions is null)
+            {
+                return Results.Problem(statusCode: 404, title: "Not Found",
+                    detail: "Document content is not available.");
+            }
+
+            // Project to the external contract. Graph pointers (driveId/itemId) are NEVER surfaced —
+            // same rule the content-download route states explicitly.
+            var dto = versions
+                .Select(v => new ExternalDocumentVersionDto
+                {
+                    VersionId = v.Id,
+                    // For a SharePoint driveItemVersion the id IS the human version label
+                    // ("1.0", "2.0", …), so this is the same value, not a fabricated one.
+                    VersionLabel = v.Id,
+                    CreatedAt = v.LastModifiedDateTime.ToString("o"),
+                    FileSizeBytes = v.Size,
+                    // CreatedByName is intentionally left null: VersionInfoDto does not carry
+                    // lastModifiedBy, and inventing an author is worse than omitting one. The client
+                    // types it optional and renders a dash. Widening VersionInfoDto is a separate change.
+                })
+                .ToList();
+
+            return Results.Ok(new ExternalDocumentVersionsResponse { Versions = dto });
+        }
+        catch (SdapProblemException ex)
+        {
+            return Results.Problem(statusCode: ex.StatusCode, title: ex.Title, detail: ex.Detail);
+        }
     }
 
     /// <summary>

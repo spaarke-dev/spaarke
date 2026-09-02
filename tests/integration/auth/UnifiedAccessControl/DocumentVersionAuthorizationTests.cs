@@ -388,6 +388,12 @@ public class DocumentVersionTestFixture : DocumentDestroyAuthorizationTestFixtur
         public Task<FileHandleDto?> GetFileMetadataAsync(string driveId, string itemId, CancellationToken ct = default) => Unmodelled<Task<FileHandleDto?>>();
         public Task<FileHandleDto?> GetFileMetadataAsUserAsync(HttpContext ctx, string driveId, string itemId, CancellationToken ct = default) => Unmodelled<Task<FileHandleDto?>>();
         public Task<Stream?> DownloadFileAsync(string driveId, string itemId, CancellationToken ct = default) => Unmodelled<Task<Stream?>>();
+        // Deliberately UNMODELLED, not recorded. These are the INTERNAL OBO version routes; the
+        // app-only overload exists only for the external-access surface (unified-access-control-r2).
+        // If an internal route ever reaches this, it has silently dropped from the caller's delegated
+        // permission to the broker identity — a privilege escalation — and this throws instead of
+        // quietly returning a version list.
+        public Task<IReadOnlyList<VersionInfoDto>?> ListFileVersionsAsync(string driveId, string itemId, CancellationToken ct = default) => Unmodelled<Task<IReadOnlyList<VersionInfoDto>?>>();
         public Task<Stream?> DownloadFileAsUserAsync(HttpContext ctx, string driveId, string itemId, CancellationToken ct = default) => Unmodelled<Task<Stream?>>();
         public Task<string?> GetCurrentVersionIdAsUserAsync(HttpContext ctx, string driveId, string itemId, CancellationToken ct = default) => Unmodelled<Task<string?>>();
         public Task<FileHandleDto?> UploadSmallAsUserAsync(HttpContext ctx, string containerId, string path, Stream content, CancellationToken ct = default) => Unmodelled<Task<FileHandleDto?>>();

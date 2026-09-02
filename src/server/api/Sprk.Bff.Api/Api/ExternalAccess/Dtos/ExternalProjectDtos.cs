@@ -224,6 +224,50 @@ public sealed class UpdateExternalTodoRequest
 }
 
 // ---------------------------------------------------------------------------
+// Document version DTOs
+//
+// Property names deliberately match the external SPA's existing DocumentVersion
+// interface (versionId / versionLabel / createdAt / createdByName /
+// fileSizeBytes) so the client needs no reshaping. This is NOT the internal
+// VersionInfoDto projection — Graph pointers (driveId/itemId) are never
+// surfaced to an external caller.
+// ---------------------------------------------------------------------------
+
+public sealed class ExternalDocumentVersionDto
+{
+    [JsonPropertyName("versionId")]
+    public string VersionId { get; init; } = "";
+
+    /// <summary>
+    /// Human version label. For a SharePoint driveItemVersion the id IS the label ("1.0", "2.0"),
+    /// so this carries the same value rather than a synthesised one.
+    /// </summary>
+    [JsonPropertyName("versionLabel")]
+    public string VersionLabel { get; init; } = "";
+
+    /// <summary>ISO-8601 ("o") timestamp of the version's last modification.</summary>
+    [JsonPropertyName("createdAt")]
+    public string CreatedAt { get; init; } = "";
+
+    /// <summary>
+    /// Always null today: <c>VersionInfoDto</c> does not carry <c>lastModifiedBy</c>. Kept in the
+    /// contract because the client already types it optional; fabricating an author would be worse
+    /// than omitting one.
+    /// </summary>
+    [JsonPropertyName("createdByName")]
+    public string? CreatedByName { get; init; }
+
+    [JsonPropertyName("fileSizeBytes")]
+    public long? FileSizeBytes { get; init; }
+}
+
+public sealed class ExternalDocumentVersionsResponse
+{
+    [JsonPropertyName("versions")]
+    public IReadOnlyList<ExternalDocumentVersionDto> Versions { get; init; } = [];
+}
+
+// ---------------------------------------------------------------------------
 // Event DTOs
 //
 // These are CALENDAR events (sprk_event), not to-dos. smart-todo-decoupling-r3

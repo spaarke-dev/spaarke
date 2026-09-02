@@ -152,6 +152,17 @@ public class SpeFileStore : ISpeFileOperations
         CancellationToken ct = default)
         => _driveItemOps.ListFileVersionsAsUserAsync(ctx, driveId, itemId, ct);
 
+    // unified-access-control-r2: app-only version-history list, backing
+    // GET /api/v1/external/projects/{id}/documents/{documentId}/versions. The external surface
+    // authorizes on the Dataverse side (project participation + document→project scoping) and then
+    // reads app-only, exactly as the sibling content-download route does — an external CIAM contact
+    // is not a Dataverse principal, so there is no delegated permission to exchange.
+    public Task<IReadOnlyList<VersionInfoDto>?> ListFileVersionsAsync(
+        string driveId,
+        string itemId,
+        CancellationToken ct = default)
+        => _driveItemOps.ListFileVersionsAsync(driveId, itemId, ct);
+
     public Task<FilePreviewDto> GetPreviewUrlAsync(
         string driveId,
         string itemId,

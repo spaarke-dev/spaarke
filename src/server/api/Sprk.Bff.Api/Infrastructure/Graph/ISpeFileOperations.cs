@@ -112,6 +112,24 @@ public interface ISpeFileOperations
         CancellationToken ct = default);
 
     /// <summary>
+    /// Lists a file's versions using APP-ONLY (broker) authentication.
+    /// </summary>
+    /// <remarks>
+    /// App-only sibling of <see cref="ListFileVersionsAsUserAsync"/> — same Graph route, same
+    /// newest-first <see cref="VersionInfoDto"/> projection, read-only (no restore/branch surface).
+    ///
+    /// ⚠️ Performs NO authorization. The broker identity can read any item in a container it owns,
+    /// so the CALLER must authorize the principal against the owning record first. Exists for the
+    /// external-access surface, whose CIAM contacts are not Dataverse principals and therefore have
+    /// no delegated permission to exchange for the AsUser variant. Prefer the AsUser overload
+    /// wherever an acting Entra user is available. unified-access-control-r2.
+    /// </remarks>
+    Task<IReadOnlyList<VersionInfoDto>?> ListFileVersionsAsync(
+        string driveId,
+        string itemId,
+        CancellationToken ct = default);
+
+    /// <summary>
     /// Create a NEW small (&lt;4 MB) drive-item in a container/drive under the user's OBO
     /// identity. PUTs the stream to <c>drives/{driveId}/root:/{path}:/content</c>, minting a
     /// fresh drive-item, and returns its <see cref="FileHandleDto"/> (id + name + size + etag +
