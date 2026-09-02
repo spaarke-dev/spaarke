@@ -385,6 +385,56 @@ function currentBlockLabel(editor: Editor | null): string {
 }
 
 /**
+ * U-0 (spaarkeai-compose-r8, UAT round 1) — is the caret in a block whose PROJECTED IDENTITY a list
+ * toggle would destroy?
+ *
+ * TipTap's `toggleList` retypes the block, and none of the projected identity survives that retype.
+ * Measured against the real production extension set (`StarterKit` + paraId + number-atom + pStyle +
+ * indent), toggling "Numbered list" on a numbered Heading 2:
+ *
+ * ```
+ * before  <h2 data-paraid="AAAA1111" data-computed-number="1.2">Technical Field…</h2>
+ * after   <ol><li><p>Technical Field…</p></li></ol>        paraId re-minted → "1EBA2C7D"
+ *                                                          computedNumber → null, heading level → gone
+ * ```
+ *
+ * Three independent losses: the heading level is flattened, the server-computed legal number is
+ * dropped, and the session `paraId` is RE-MINTED — orphaning any comment or redline anchored to the
+ * original. `orderedList: { keepAttributes: true }` was measured too and recovers none of it.
+ *
+ * That is not merely a display defect. The save re-renders a changed block from the content model, and
+ * `ComposeBlockMerge.IsModelDeterminedStyle` deliberately treats Heading1-6 as MODEL-owned, so the
+ * baseline's `Heading2` is intentionally not inherited: the model now says "plain paragraph", so a
+ * single toolbar click silently flattens a real Word heading in the saved `.docx`. Silent, and named
+ * nowhere in `COMPOSE-WRITE-RESIDUAL-LOSS.md`.
+ *
+ * Why a refusal rather than a partial fix: the number cannot be re-authored either, because a new list
+ * has no `w:numPr`/numbering definition to reference — so a "fixed" toggle would still leave the block
+ * unnumbered (UAT item 4). Carrying `paraId` alone would preserve the anchor while still flattening the
+ * heading, which trades a loud loss for a quiet one. Editable numbering (a client renumbering engine on
+ * `appendTransaction` + `w:numPr` authoring/removal on the write path) is the approved Option C work and
+ * re-enables this control properly; until then the honest behaviour is to refuse, not to destroy.
+ *
+ * Defensive shape mirrors {@link canRunTableCommand}: lighter-weight test/host editors may not expose
+ * `getAttributes`, and a missing capability must read as "not destructive", never throw.
+ *
+ * @see projects/spaarkeai-compose-r8/notes/uat/numbering-editing-design-options.md — the Option C design
+ */
+export function listToggleWouldDestroyBlockIdentity(editor: Editor | null): boolean {
+  if (!editor) return false;
+  // A heading always loses its level to `listItem`'s `paragraph block*` content spec.
+  if (typeof editor.isActive === 'function' && editor.isActive('heading')) return true;
+  const getAttributes = (editor as Partial<Editor>).getAttributes;
+  if (typeof getAttributes !== 'function') return false;
+  for (const nodeType of ['heading', 'paragraph'] as const) {
+    const attrs = getAttributes.call(editor, nodeType) as Record<string, unknown> | undefined;
+    const computedNumber = attrs?.computedNumber;
+    if (typeof computedNumber === 'string' && computedNumber.length > 0) return true;
+  }
+  return false;
+}
+
+/**
  * FR-18 (task 041) — dry-run one of the `@tiptap/extension-table` commands via
  * `editor.can()` WITHOUT executing it, guarding against an `editor.can()` shape that
  * does not expose the table commands at all (a hand-rolled test double without the
@@ -621,6 +671,18 @@ export function ComposeFormatToolbar(props: ComposeFormatToolbarProps): React.JS
   const deferredIfLoaded = isLoadedBaseline ? FUTURE_RELEASE_TOOLTIP : undefined;
   // Heading + bullet/ordered list — RE-ENABLED on loaded docs (R5 task 011); read-only gate still applies.
   const headingListEditDisabled = controlDisabled;
+  // U-0 (spaarkeai-compose-r8, UAT round 1): the list toggles are additionally refused on a block that
+  // carries PROJECTED IDENTITY — a heading, or a paragraph the server numbered. See
+  // `listToggleWouldDestroyBlockIdentity` for the measured losses and why this is a refusal rather than
+  // a partial fix. Ordinary unnumbered body paragraphs are unaffected, so R5 task 011 stands elsewhere.
+  const listIdentityRefusal = listToggleWouldDestroyBlockIdentity(editor);
+  const listEditDisabled = headingListEditDisabled || listIdentityRefusal;
+  // Actionable, and only ever seen on hover of the refused control — the reason names what the user can
+  // actually do about it today. Kept distinct from FUTURE_RELEASE_TOOLTIP: this control is not deferred
+  // in general, it is refused for THIS block.
+  const listDeferredReason = listIdentityRefusal
+    ? 'Headings and numbered clauses take their numbering from the document — change it in Word for now.'
+    : undefined;
   // Alignment — re-enabled on loaded docs (R5 task 010); read-only gate still applies.
   const alignmentEditDisabled = controlDisabled;
   // Insert-table (whole-table CREATE) — still loaded-gated (out of the R5 task-014 closed table-op catalog:
@@ -678,7 +740,8 @@ export function ComposeFormatToolbar(props: ComposeFormatToolbarProps): React.JS
               icon={<TextBulletListLtr24Regular />}
               label="Bullet list"
               active={editor.isActive('bulletList')}
-              disabled={headingListEditDisabled}
+              disabled={listEditDisabled}
+              deferredReason={listDeferredReason}
               onClick={() => editor.chain().focus().toggleBulletList().run()}
               testId="compose-format-bullet-list"
             />
@@ -686,7 +749,8 @@ export function ComposeFormatToolbar(props: ComposeFormatToolbarProps): React.JS
               icon={<TextNumberListLtr24Regular />}
               label="Numbered list"
               active={editor.isActive('orderedList')}
-              disabled={headingListEditDisabled}
+              disabled={listEditDisabled}
+              deferredReason={listDeferredReason}
               onClick={() => editor.chain().focus().toggleOrderedList().run()}
               testId="compose-format-ordered-list"
             />

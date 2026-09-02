@@ -13,7 +13,7 @@
 | Field | Value |
 |---|---|
 | **Active work** | **DEPLOYED to `spaarkedev1` 2026-09-02 (BFF + `sprk_spaarkeai` together, NFR-05); UAT round 1 returned.** All R8 code + issue items CLOSED. Not merged — PR #924 open on this branch. |
-| **Next Action** | **1) OWNER SCOPE DECISION** on the split proposed in `notes/uat/uat-round-1-findings-and-plan.md` (R8 finishes its own thesis · items 2/5/6/7/8 → a Compose-UX project · numbering = its own design decision). **2) REPRODUCE the heading-style-loss sub-observation** (U-0) — if real it is an R8 fidelity defect and stays here. **3) UAT sections A + B were NOT exercised** — R8 cannot close without them. |
+| **Next Action** | **UAT sections A + B — the ONLY things R8 still waits on, and both need the owner.** (A) open a real `.docx`, edit one paragraph, save, reopen, confirm untouched content byte-identical. (B) the **`section-break-flattened` accept/decline** (five → six signed residual-loss rows). Then rewrite PR #924's title to cover the release and merge. ✅ Scope decision TAKEN (sequence, don't merge). ✅ Numbering **Option C APPROVED by owner 2026-09-02** → next project. ✅ **U-0 REPRODUCED + FIXED** — see `notes/uat/u0-heading-style-loss.md`. |
 | **Branch** | `work/spaarkeai-compose-r8` — **33 ahead of `origin/master`, 0 behind, tree clean.** PR **#924** already open (its title still describes only #777 — needs rewriting to cover the release). |
 | **Suite** | Client **1,381 / 1,381** · BFF **11,894 / 0 / 57 skipped** · ArchTests **181/181** · solution build **0 errors** · deployed build hash-verified |
 | **Open, not blocking** | §R3 carried items (repair script now VALIDATED — report mode run clean on dev; letter/roman fixture still owner-dependent) · 8 AI consumer types with no `ConsumerTypes.All` constant (census-only, `/healthz/catalog` stays 503) · 2 path-violation test files |
@@ -54,9 +54,27 @@ stream (tracked insert/delete, "2 suggested edits pending", Accept-all, per-sugg
    real change data **the LLM fabricates a phantom "[Insertion]"**. The NDA analogue is
    `AgreementReviewSummaryPanel`, reusable. Binding rule to carry: **never fire it without real change data.**
 
-**⚠️ U-0 — REPRODUCE BEFORE ACTING**: screenshots suggest removing numbering from "1.2 Technical Field of
-the Invention" ALSO cost it its heading style (it appears afterwards as indented body text). If reproducible
-that is **more serious than the numbering gap and belongs to R8's own fidelity scope**. Not assumed.
+**✅ U-0 — REPRODUCED, ROOT-CAUSED, FIXED (2026-09-02).** Full record: `notes/uat/u0-heading-style-loss.md`.
+
+The projection never puts a numbered heading in a list (`headingLevel is null ? ListInfo(p, ctx) : null`),
+so `isActive('orderedList')` is FALSE on it and **the "remove numbering" click was the toggle ADDING a
+list**. One fact explains the whole screenshot. Measured losses on the real extension set: heading level
+flattened · `computedNumber` → null · **`paraId` RE-MINTED** (orphaning anchored comments/redlines).
+Irreversible; `keepAttributes: true` recovers none of it. It is a *fidelity* defect, not just UI: the save
+re-renders the changed block from the model and `IsModelDeterminedStyle` treats Heading1-6 as model-owned,
+so a toolbar click silently flattens a real Word heading in the `.docx`.
+
+**Fix**: `listToggleWouldDestroyBlockIdentity` refuses both list toggles on a heading or a server-numbered
+block, with an actionable hover reason. Ordinary unnumbered paragraphs unaffected (R5 task 011 stands).
+Partial fixes rejected: carrying `paraId` alone trades a loud loss for a quiet one; authoring numbering is
+impossible without a `w:numPr` definition, so the control would stay a broken promise. 11 tests, **both
+negative controls run** (revert wiring → 3 red; force predicate always-true → 3 red the other way).
+Body/Heading menu probed and **clean** — it preserves paraId AND computedNumber, so scope is measured.
+
+**Hand-off to the numbering project**: the native `<ol>` marker is suppressed **unconditionally**, so an
+editor-created list shows no number even born-in-editor — UAT item 4 is universal, not loaded-only. The
+obvious quick fix (scope the suppression to projected lists) collides with invariant F-3 (never fabricate a
+number for an unresolvable `numId`); distinguishing them needs a projection-emitted marker on the `<ol>`.
 
 **⚠️ UAT sections A + B were NOT exercised**: (A) edit one paragraph of a real `.docx`, save, reopen,
 confirm untouched content byte-identical — the entire subject of Track A; (B) the **`section-break-flattened`
