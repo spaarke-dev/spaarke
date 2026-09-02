@@ -34,6 +34,21 @@ namespace Sprk.Bff.Api.Services.Compose;
 /// </para>
 ///
 /// <para>
+/// <b>THIS TYPE HAS A CLIENT MIRROR — changes here must land there too (#699, 2026-09-01).</b>
+/// <c>src/client/shared/Spaarke.Compose.Components/src/widgets/composeCitationResolver.ts</c> reimplements
+/// the FORWARD half of this resolver in TypeScript (a browser cannot call a C# static, and a
+/// resolve-citation endpoint would add per-finding latency for data the projection payload already
+/// carries). The mirror is what <c>ComposeEditor.placeAdvisoryComments</c> anchors advisory review
+/// findings with, so a shape this parser understands and the mirror does not makes that finding fall
+/// through to TEXT search — the wrong-clause anchoring #699 exists to close. Two mechanisms enforce it:
+/// the shared corpus <c>tests/fixtures/compose-citation-parity/cases.json</c>, executed by BOTH parsers
+/// (<c>ComposeCitationParityCorpusTests</c> + <c>composeCitationResolver.parity.test.ts</c>), and the
+/// source-level drift detector <c>tests/Spaarke.ArchTests/ComposeCitationResolverParityGuardTests.cs</c>,
+/// which pins <see cref="CitationShape"/>, the leading-label vocabulary and the range separators.
+/// ADDING A CITATION SHAPE MEANS ADDING A CASE TO THE SHARED CORPUS.
+/// </para>
+///
+/// <para>
 /// <b>Pure (ADR-007/013).</b> No I/O, no <c>Microsoft.Graph</c>, no model call, no router — string parse +
 /// integer-chain matching over the in-memory reference map. Stateless; safe as a shared utility.
 /// <see cref="ParaReferenceMapEntry"/> lives in <c>Models/Ai/Chat</c>, a namespace <c>Services/Compose</c>
