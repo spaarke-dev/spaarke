@@ -12,8 +12,8 @@
 | **Active work** | **Outlook add-in UX redesign** (UAT-driven, owner 2026-09-01/02). Iterated in the add-in's **own browser test harness**: `cd src/client/office-addins && npm run start:outlook` → `https://localhost:3000/outlook/taskpane-test.html` (mock Office + mock auth + demo data via `window.__SPAARKE_TEST_MODE__`). NOT spaarke-prototype (Xrm-based; add-in is Office.js). First run: `npm install --legacy-peer-deps` + `npx office-addin-dev-certs install`. |
 | **Branch** | `work/email-communication-intelligence-r2` — **10 commits ahead of master, all committed, tree clean.** Nothing merged yet (WIP). |
 | **Build gate** | Add-in: `cd src/client/office-addins && npm run build:dev` (webpack/babel — the gate). BFF: `dotnet build src/server/api/Sprk.Bff.Api/`. Both currently **0-err**. `npm run typecheck` = ~393 PRE-EXISTING errors (exactOptional / jest-dom missing) — filter to changed files. |
-| **DONE** | **Slice 1** toolbar (logo removed, tabs+⋮ overflow) + "Related to" rename. **Slice 2** reconciliation-style auto-match cards + chips + green-check select + wizard footer + AI-toggles-removed. **Slice 3** BFF-backed inline "New record". Inline-create in the search row; chips = Matter/Project/Invoice; BFF quickcreate supports Invoice. **#3 Create To Do form redesign — DONE (commit d2b5dbc34):** now creates a **first-class `sprk_todo`** (NOT sprk_event) regarding the filed record, mirroring the CreateTodoWizard field set (Name/Description/Assigned-To-contact/Due/Priority/Effort); regarding shown as green record card; Cancel/Save footer with gray "Saved" (pane stays open). New BFF `POST /api/office/todo` + `OfficeService.CreateTodoAsync`. Both builds 0-err; publish 48.94 MB; no CVEs. |
-| **NEXT (big)** | Owner UAT of the Create To Do form (browser harness). Then: SaveFlow footer "Saved" decision (§A.4), production save-context wiring (§C), logo (§B), deploy (§D). |
+| **DONE** | Slices 1–3 (toolbar, reconciliation "Related to" cards, inline New-record). **#3 Create To Do → first-class `sprk_todo`** (d2b5dbc34) + UAT round (f8364819e: responsive form, plain no-icon Save on both To Do + SaveFlow, schema fix). **§C save→To-Do regarding wiring** (9e62afcac: SaveFlow `onSaved` → App seeds savedContext live after a real save). **§10 contract tests** for `POST /api/office/todo` (e59c7a4b0: 2 run, 1 skip). **§B app-tile icons** from Spaarke logo (92dfacfe3: generated icon-color/outline + refreshed set → fixes blank tile). **§D version bumps** (c9d89ca2f: Outlook 1.0.21, Word 1.0.5). All builds 0-err. |
+| **NEXT** | **Operator deploy** (see §D — live Azure/M365/CI, not agent-run): (1) BFF `Deploy-BffApi.ps1`; (2) add-in via `deploy-office-addins.yml`; (3) M365 re-register at the bumped versions. Then owner UAT on the deployed add-in. Open decision: SaveFlow footer gray-"Saved" style (§A.4 — currently keeps the richer success card). |
 
 ---
 
@@ -39,19 +39,19 @@
 
 Current `CreateTodoView.tsx` has only Title + Due date + a warning-style "Linked to". Files: `src/client/office-addins/shared/taskpane/components/views/CreateTodoView.tsx`.
 
-### B. Logo
-- **Black logo asset saved**: `projects/email-communication-intelligence-r2/spaarke-black-logo.svg` (owner-provided, monochrome). Earlier color one at `spaarke-color-logo-only.svg`.
-- The in-pane toolbar logo was **removed** per feedback. The black logo is (most likely) for the **app-tile** — the manifest `icons.color`/`icons.outline` point at **missing** `assets/icon-color.png`/`icon-outline.png` → **blank Apps-list tile**. Wiring = generate PNGs (color + 32px monochrome outline + ribbon icons) from the SVG via `generate-icons.mjs` (uses `sharp`) → reference in `outlook/manifest.json` + `word/word-manifest.xml`. Confirm with owner whether black logo is for app-tile or a re-added in-pane mark.
+### B. Logo — ✅ DONE (92dfacfe3)
+- Source `shared/assets/spaarke-logo.svg` (owner's black mark). `generate-icons.mjs` rewritten to render from it into `shared/assets` (the CopyWebpackPlugin source) → produced the missing `icon-color.png` (128) + `icon-outline.png` (32) that the Outlook unified-manifest `icons.color`/`icons.outline` reference (was blank tile), plus refreshed `icon-16/32/64/80/128`. Verified they copy to `dist/assets` on build. `sharp` is a manual dev dep (`npm install --no-save sharp`), not in package.json.
+- **Not done (pre-existing, out of §B scope):** ribbon command-button icons `save-*/share-*/grant-*.png` referenced by the manifest don't exist in `shared/assets` → those buttons show broken/blank glyphs. Separate cleanup.
 
-### C. Production wiring (before deploy)
-- **Create To Do** real `communicationId` + regarding must come from the Save flow (demo-wired only via `initialSavedContext`).
-- **Related-to** confirm writes the regarding at SAVE (existing path) — verify end-to-end once deployed.
+### C. Production save-context wiring — ✅ DONE (9e62afcac)
+- SaveFlow fires `onSaved(selectedEntity)` once on save complete/duplicate; App's `handleSaved` seeds `savedContext` from it → the Create To Do tab goes live (regarding = the filed record) after a real save. `SavedTodoContext.communicationId` made optional (the To Do regarding is the record, not the communication). Demo detection tolerant of the optional id. **Verify end-to-end once deployed** (a real save → switch to Create To Do → confirm the regarding card shows the saved record).
 
-### D. Deploy
-- Version bump (Outlook `manifest.json` 1.0.20→ + Word) → GitHub Actions `deploy-office-addins.yml` (holds secrets; live SWA `b64eb1876` on `icy-desert-0bfdbb61e.6.azurestaticapps.net`) → re-register in M365 admin (version bump required).
-- **BFF must also deploy** (Slice 3 added the quickcreate endpoint) via `.\scripts\Deploy-BffApi.ps1`.
-- Other-entity-types: quickcreate is Matter/Project/Invoice only (Account/Contact removed from chips; the 3 supported types cover the chips).
-- **Test obligation (§10)**: BFF `Services/Office` changed → the e2e spec `tests/e2e/specs/quickcreate-flow.spec.ts` covers the flow (a unit test needs OfficeService's 12-dep ctor → mock-heavy, ADR-038-discouraged). Add/confirm before the wrap-up PR.
+### D. Deploy — version bumps DONE (c9d89ca2f); EXECUTION is operator-gated (live Azure/M365/CI — NOT agent-run)
+Versions bumped: Outlook `manifest.json` + `index.tsx` → **1.0.21**; Word → **1.0.5**. Operator steps, in order:
+1. **BFF** (adds `POST /api/office/todo`): `pwsh -ExecutionPolicy Bypass -File scripts/Deploy-BffApi.ps1` → verify `curl https://spaarke-bff-dev.azurewebsites.net/api/office/todo` returns **401** (route found, auth required) NOT 404.
+2. **Add-in**: push branch → GitHub Actions `deploy-office-addins.yml` (holds secrets; live SWA `b64eb1876` on `icy-desert-0bfdbb61e.6.azurestaticapps.net`). Confirm run green + `gh run list --workflow=deploy-office-addins.yml`.
+3. **M365 re-register** at the bumped versions (M365 admin / sideload) — required because the manifest version changed.
+- **§10 test obligation — ✅ DONE (e59c7a4b0):** `tests/integration/contract/Api/Office/OfficeEndpointsContractTests.cs` — `Post_OfficeCreateTodo_WithMissingName_Returns400` + `_WhenUnauthenticated_Returns401` (both run) + a Skip'd 201 happy-path.
 
 ---
 
