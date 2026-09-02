@@ -224,6 +224,62 @@ public sealed class UpdateExternalTodoRequest
 }
 
 // ---------------------------------------------------------------------------
+// Event DTOs
+//
+// These are CALENDAR events (sprk_event), not to-dos. smart-todo-decoupling-r3
+// FR-29 removed the legacy event-AS-todo model (sprk_event + sprk_todoflag used
+// to represent a to-do) and replaced it with the first-class sprk_todo entity
+// above — and the /events routes went with it. That retirement was correct, but
+// it also removed the only way an external user could see genuine calendar
+// events for their project, which the external SPA's EventsCalendar still
+// renders. These DTOs restore that surface for real events ONLY.
+//
+// The distinction is load-bearing: sprk_todoflag is NOT carried here and must
+// never be reintroduced. To-dos are served by ExternalTodoDto / the /todos
+// routes; events are chronological calendar entries. Two entities, two
+// surfaces, no overlap.
+// ---------------------------------------------------------------------------
+
+public sealed class ExternalEventDto
+{
+    [JsonPropertyName("sprk_eventid")]
+    public string SprkEventid { get; init; } = "";
+
+    [JsonPropertyName("sprk_name")]
+    public string SprkName { get; init; } = "";
+
+    [JsonPropertyName("sprk_duedate")]
+    public string? SprkDuedate { get; init; }
+
+    /// <summary>sprk_eventstatus choice value.</summary>
+    [JsonPropertyName("sprk_status")]
+    public int? SprkStatus { get; init; }
+
+    [JsonPropertyName("createdon")]
+    public string? Createdon { get; init; }
+
+    /// <summary>
+    /// The owning project lookup. sprk_event has no "sprk_projectid" attribute — its project
+    /// lookup is sprk_regardingproject (metadata-verified, smart-todo-r5 task 002), so the
+    /// OData value field is _sprk_regardingproject_value.
+    /// </summary>
+    [JsonPropertyName("_sprk_regardingproject_value")]
+    public string? SprkRegardingprojectValue { get; init; }
+}
+
+public sealed class CreateExternalEventRequest
+{
+    [JsonPropertyName("sprk_name")]
+    public string SprkName { get; init; } = "";
+
+    [JsonPropertyName("sprk_duedate")]
+    public string? SprkDuedate { get; init; }
+
+    [JsonPropertyName("sprk_status")]
+    public int? SprkStatus { get; init; }
+}
+
+// ---------------------------------------------------------------------------
 // Contact DTO
 // ---------------------------------------------------------------------------
 

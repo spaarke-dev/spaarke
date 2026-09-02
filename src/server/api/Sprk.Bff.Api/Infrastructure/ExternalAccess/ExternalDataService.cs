@@ -101,6 +101,16 @@ public class ExternalDataService
         [JsonPropertyName("sprk_regardingrecordurl")] public string? SprkRegardingrecordurl { get; set; }
     }
 
+    private sealed class EventRow
+    {
+        [JsonPropertyName("sprk_eventid")] public string? SprkEventid { get; set; }
+        [JsonPropertyName("sprk_name")] public string? SprkName { get; set; }
+        [JsonPropertyName("sprk_duedate")] public string? SprkDuedate { get; set; }
+        [JsonPropertyName("sprk_status")] public int? SprkStatus { get; set; }
+        [JsonPropertyName("createdon")] public string? Createdon { get; set; }
+        [JsonPropertyName("_sprk_regardingproject_value")] public string? SprkRegardingprojectValue { get; set; }
+    }
+
     private sealed class ContactRow
     {
         [JsonPropertyName("contactid")] public string? Contactid { get; set; }
@@ -338,6 +348,84 @@ public class ExternalDataService
 
         var rows = await GetCollectionAsync<TodoRow>(url, ct);
         return rows.Select(MapTodo).ToList();
+    }
+
+    /// <summary>
+    /// Retrieves all <c>sprk_event</c> records whose regarding-project equals the supplied project id.
+    /// </summary>
+    /// <remarks>
+    /// CALENDAR events, not to-dos. <c>sprk_event</c> has no <c>sprk_projectid</c> attribute — its
+    /// project lookup is <c>sprk_regardingproject</c> (metadata-verified, smart-todo-r5 task 002),
+    /// so the filter uses <c>_sprk_regardingproject_value</c>.
+    ///
+    /// The legacy <c>sprk_todoflag</c> attribute is deliberately NOT selected. smart-todo-decoupling-r3
+    /// FR-29 retired the event-as-todo model; to-dos live on <c>sprk_todo</c> and are served by
+    /// <see cref="GetTodosAsync"/>. Reintroducing that flag here would resurrect the model FR-29 removed.
+    /// </remarks>
+    public async Task<IReadOnlyList<ExternalEventDto>> GetEventsAsync(Guid projectId, CancellationToken ct = default)
+    {
+        var select = "sprk_eventid,sprk_name,sprk_duedate,sprk_status,createdon,_sprk_regardingproject_value";
+        var filter = Uri.EscapeDataString($"_sprk_regardingproject_value eq {projectId}");
+        var url = $"{GetApiUrl()}/sprk_events?$filter={filter}&$select={select}&$orderby=sprk_duedate asc&$top=200";
+
+        var rows = await GetCollectionAsync<EventRow>(url, ct);
+        return rows.Select(MapEvent).ToList();
+    }
+
+    /// <summary>
+    /// Creates a new <c>sprk_event</c> record associated with the supplied project via
+    /// <c>sprk_regardingproject</c>.
+    /// </summary>
+    /// <remarks>
+    /// Unlike <see cref="CreateTodoAsync"/> this does NOT apply the four ADR-024 resolver fields:
+    /// those are a <c>sprk_todo</c> construct (the 11-entity regarding model). <c>sprk_event</c>
+    /// carries a direct project lookup only.
+    /// </remarks>
+    public async Task<ExternalEventDto> CreateEventAsync(
+        Guid projectId, CreateExternalEventRequest request, CancellationToken ct = default)
+    {
+        if (projectId == Guid.Empty)
+            throw new ArgumentException("Project id must be a non-empty GUID.", nameof(projectId));
+
+        var token = await GetAppOnlyTokenAsync(ct);
+
+        var body = new Dictionary<string, object?>();
+        if (!string.IsNullOrWhiteSpace(request.SprkName))
+            body["sprk_name"] = request.SprkName;
+        if (request.SprkDuedate is not null)
+            body["sprk_duedate"] = request.SprkDuedate;
+        if (request.SprkStatus.HasValue)
+            body["sprk_status"] = request.SprkStatus.Value;
+
+        // R5 002: PascalCase nav prop (metadata-verified) — same binding the to-do create uses.
+        body["sprk_RegardingProject@odata.bind"] = $"/sprk_projects({projectId})";
+
+        var url = $"{GetApiUrl()}/sprk_events";
+        using var httpRequest = new HttpRequestMessage(HttpMethod.Post, url);
+        httpRequest.Headers.Authorization = new AuthenticationHeaderValue("Bearer", token);
+        httpRequest.Headers.Add("OData-MaxVersion", "4.0");
+        httpRequest.Headers.Add("OData-Version", "4.0");
+        httpRequest.Headers.Add("Prefer", "return=representation");
+        httpRequest.Content = new StringContent(
+            JsonSerializer.Serialize(body),
+            Encoding.UTF8,
+            "application/json");
+
+        var response = await _httpClient.SendAsync(httpRequest, ct);
+
+        if (!response.IsSuccessStatusCode)
+        {
+            var errorBody = await response.Content.ReadAsStringAsync(ct);
+            _logger.LogWarning("[EXT-DATA] Create event failed for project {ProjectId}: {Status} — {Body}",
+                projectId, response.StatusCode, errorBody);
+            throw new InvalidOperationException($"Failed to create event: {response.StatusCode}");
+        }
+
+        var row = await response.Content.ReadFromJsonAsync<EventRow>(ct);
+        if (row is null)
+            throw new InvalidOperationException("Dataverse returned no event data after create");
+
+        return MapEvent(row);
     }
 
     /// <summary>
@@ -787,6 +875,16 @@ public class ExternalDataService
         SprkRegardingrecordid = r.SprkRegardingrecordid,
         SprkRegardingrecordname = r.SprkRegardingrecordname,
         SprkRegardingrecordurl = r.SprkRegardingrecordurl,
+    };
+
+    private static ExternalEventDto MapEvent(EventRow r) => new()
+    {
+        SprkEventid = r.SprkEventid ?? "",
+        SprkName = r.SprkName ?? "",
+        SprkDuedate = r.SprkDuedate,
+        SprkStatus = r.SprkStatus,
+        Createdon = r.Createdon,
+        SprkRegardingprojectValue = r.SprkRegardingprojectValue,
     };
 
     private static ExternalContactDto MapContact(ContactRow r) => new()
