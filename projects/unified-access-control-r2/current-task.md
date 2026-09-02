@@ -15,7 +15,7 @@
 |---|---|
 | **Nominal task** | **076** — record-keyed upload contract (`in-progress`, step 4 of 11). 076 was NOT this session's work, but this session did land 3 of its facts (250 MB threshold, conflictBehavior, U1/U2/U3 census). |
 | **This session did** | Fixed **4 of the 5 live route mismatches** (R14 · R10/R11 · R13 · R3) → deleted **47 verified-dead files** → **stopped a live data-loss bug** on every file upload (name collision silently overwrote) → removed a **4 MiB ceiling that no server ever enforced** |
-| **Status** | Working tree **CLEAN**, 0 unpushed, **0 behind master**. `HEAD = 01b7c1603` (this handoff commit); last CODE commit = `086b9e9ce`. If HEAD differs from this, someone committed after the handoff — re-read `git log` before trusting the rest. |
+| **Status** | Working tree **CLEAN**, 0 unpushed, **0 behind master**. Last **CODE** commit = `086b9e9ce`; HEAD is a docs/handoff commit on top of it (no SHA recorded here on purpose — a commit cannot state its own hash, and the two attempts that tried were both wrong within seconds). Verify with `git log --oneline -3`. |
 | **Next Action** | **1)** Merge **PR #931** — `Router=pass`; ONE SDAP-CI job ("Build & Test (Debug)", the full 11k suite) was still `in_progress` at handoff. Re-check `gh pr checks 931`; merge when pending=0 and nothing failed. **2)** Then § REMAINING WORK items 3b → 8. |
 
 ### Commit map — this session (10 commits, ALL pushed; nothing at risk)
