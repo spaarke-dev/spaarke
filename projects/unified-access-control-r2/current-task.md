@@ -102,10 +102,10 @@ deletions, then live user-facing fixes, then planning artifacts, then the big ex
 
 | # | Item | State | Notes |
 |---|---|---|---|
-| 0 | **Merge PR #931** | 🔲 | Head `2c44dde99`. Gate on the FULL check rollup, not `Router` alone (see the ⚠️ below). |
+| 0 | **Merge PR #931** | 🔲 | Head now `2843d53ce` (was `2c44dde99`; +3 commits since). Gate on the FULL check rollup, not `Router` alone (see the ⚠️ below). Master was merged IN at `4490296e3` — branch is 0 behind. |
 | 1 | Binding `.claude/` doc fixes | ✅ **DONE** `2c44dde99` | constraints/pcf.md MUST at a dead dir · 6 pattern pointer files · pcf/CLAUDE.md banned build cmd · 4 stale tsconfig excludes |
-| 2 | **Verified-safe deletions** | 🔲 | From [`notes/tech-debt-sweep-VERIFICATION-2026-09-01.md`](notes/tech-debt-sweep-VERIFICATION-2026-09-01.md) "SAFE TO DELETE" list: LW `Playbook/**` chain (9) **+ the 3 leaves that die with it** (`FileUploadZone`, `UploadedFileList`, `wizardTypes` — kept in `144ef43c4` ONLY because Playbook used them; `matterService`/`formTypes`/`CloseProjectDialog`/`closureService` MUST STAY) · shared `components/FindSimilar/` family (5) · LW `Wizard/` shims (5) · 7 DatasetGrid hooks · VisualHost deprecated chart configs + `GradeMetricCard` · 12 auth shims · 2 commented-out DocRelViewer visualizations + `NodeActionBar`. ⛔ **`SprkChatBridge` is NOT dead** — type-imported by 3 live files; deleting breaks the shared-lib build. |
-| 3 | Live route-mismatch fixes | 🔲 | Verification confirmed all 17 absences. **LIVE (fix)**: R3 Reporting privilege on every app mount · R10/R11 + R13-R15 external-spa calendar + document versions/download · R17 `PlaybookLibraryShell`. **DORMANT (record only)**: R1/R2/R5-R9/R12/R16 + `getContainerIdForEntity` → `/api/containers/{entity}/{id}`. R4 UNSURE (org-side PCF binding). ✅ Already fixed: external-spa `/upload` 404 (`304b6d8f2`). |
+| 2 | **Verified-safe deletions** | ✅ **DONE** `b866f95bb` | **47 deleted, not 48.** 🔴 The "verified" list was WRONG on `wizardTypes.ts` — it is imported by `formTypes.ts:15` + `matterService.ts:19`, both of which the SAME document lists under DO-NOT-DELETE. Deleting it would have broken the LW typecheck. `FileUploadZone`/`UploadedFileList` (pure re-export shims, Playbook was their only importer) went as planned. Also: §6A.1 is headed "12 files" but enumerates 10 — the count was wrong, not the list. Full record in the notes file's new **EXECUTION CORRECTIONS** section. Verified via `tsc --noEmit` per package (zero unresolved relative imports anywhere) + a stashed-baseline jest run (9 failed suites / 14 failed tests **before and after** — identical; delta is only the 2 deleted test files). |
+| 3 | Live route-mismatch fixes | 🟡 **PARTIAL** — 1 of 5 fixed; rest escalated | ✅ **R14 external document DOWNLOAD fixed** (`2843d53ce`): wrong URL **and** an impossible response contract — it expected `{downloadUrl}` while the real route streams `Results.File` and its comment states pointers are *never* surfaced. Repointing the URL alone would have produced a silently broken download. Now blob + object URL via a new `bffApiBlob` (extends the existing client; `bffApiCall` can't be reused — `parseResponse` always calls `.json()`). 🔔 **R3 · R10/R11 · R13 · R15 · R17 are NOT typos — each needs BFF surface that does not exist.** Four land on `/api/v1/external/**`, the surface this project's evaluator governs; inventing endpoints there ahead of FR-07→FR-29 delegation risks a new unauthorized read path (CLAUDE.md §6.5). **Owner decision needed — see § ITEM-3 ESCALATION below.** **DORMANT (record only)**: R1/R2/R5-R9/R12/R16 + `getContainerIdForEntity`. R4 UNSURE (org-side PCF binding). ✅ Already fixed earlier: external-spa `/upload` 404 (`304b6d8f2`). |
 | 4 | `__SPAARKE_OPEN_CLOSE_PROJECT__` has **zero in-repo callers** | 🔲 | Set at `WorkspaceGrid.tsx:450`, never called. Origin task exposed it "for ribbon command integration". **Secure-project closure — the access-revocation cascade this project is about — may be unlaunchable.** Needs an ENVIRONMENT query (org-side ribbon), not a repo search. |
 | 5 | File tasks **093 / 094 / 095 / 096** | 🔲 | Per [`notes/plan-upload-path-decomposition-2026-08-31.md`](notes/plan-upload-path-decomposition-2026-08-31.md) — **read it first**. 093 must NOT author a new Secure UI (exists ×2; task 068 owns it — see the plan's 2026-09-01 correction). 096 = replace-path drive provenance. `ls tasks/` before numbering (highest is 092). |
 | 6 | Execute **076** | 🔲 | The container contract. **Ship-together** (client+BFF). Its own session. |
@@ -1825,3 +1825,51 @@ All `Infrastructure/ExternalAccess/**`, `Api/ExternalAccess/**`, `Spaarke.Core/A
 `DataverseWebApiService.cs` tasks are `parallel-safe:false`. Tasks 030/031/040 edit `.claude/**` →
 **main-session-only**. **Phase 0 has no remaining co-schedulable pair** — run serially.
 Last master check (2026-08-22): 1 docs-only commit ahead, **zero overlap**.
+
+---
+
+## § ITEM-3 ESCALATION — five live route mismatches that are NOT client typos
+
+🔔 **Owner decision required.** All five were confirmed absent server-side. None can be fixed by
+correcting a URL: in each case the **server route family does not exist**. Writing them means adding
+BFF surface, which triggers CLAUDE.md §10 (Placement Justification · publish-size · CVE · tests) —
+and for four of the five, on the exact surface this project is rewriting.
+
+| # | Client call | What's actually there | Impact today |
+|---|---|---|---|
+| **R3** | `GET /api/reporting/privilege` (`reportingApi.ts:347`) | `/api/reporting` serves `status`, `embed-token`, `reports` CRUD, `export`. **No `/privilege`.** | `useReportingPrivilege` runs on **every** app mount (`Reporting/App.tsx:163`). It fails **CLOSED** — defaults to `"Viewer"` — so **not** a security hole, but **no user can ever author or admin a report.** The privilege feature is 100% non-functional. |
+| **R10/R11** | `GET` + `POST /api/v1/external/projects/{id}/events` | external group has projects · documents/content · todos · contacts · organizations. **No `/events`.** | Shipped Calendar tab (`ProjectPage.tsx:264`) 404s for every external user. |
+| **R13** | `GET /api/v1/external/documents/{id}/versions` | no `/documents/*` at the external root | version history 404s |
+| **R15** | `POST /api/v1/external/documents/upload` | same | external upload 404s |
+| **R17** | `bffDataServiceAdapter` → `/api/dataverse/{entity}[/{id}]` for **all five** CRUD methods | group serves only `savedquery`, `savedqueries/{e}`, `metadata/{e}`, `POST fetch`, `record/{e}/{id}`, `gridconfigurations/{e}` | Live consumer `PlaybookLibraryShell` → `DocumentSelector.tsx:134` calls `retrieveMultipleRecords` — **no OData collection route exists at all**. |
+
+### Why I did not just write these
+
+1. **Four of five are `/api/v1/external/**`** — the surface whose authorization model this project
+   is unifying. The existing external routes each carry a hand-written participation check
+   (`HasProjectAccess` + child-to-parent scoping, uniform 403 so existence isn't leaked). Adding
+   `/events` or `/documents/*` now means **hand-writing that check a sixth and seventh time**, before
+   the unified evaluator lands — and per spec **FR-07 → FR-29**, delegation must ship *before* new
+   grant-adjacent surface. This is the §6.5 tension, path **A or B**, not a silent write.
+2. **R17 is not a URL bug at all** — it is an adapter written against a BFF surface that was never
+   built (or was deleted). 4 of its 5 methods have no counterpart. A one-line fix to `retrieveRecord`
+   would produce a *partially* working adapter and hide the real gap, so it was left untouched
+   deliberately.
+3. **R3 is the cheapest and least entangled** — one GET, internal surface, fails closed today. But
+   the role→privilege mapping (`sprk_ReportingAccess` + Author/Admin, per the hook's own docstring
+   `:10-14`) is an **authorization decision**, not an implementation detail. It needs owner sign-off
+   on which roles confer what.
+
+### Recommended sequencing
+
+- **R3** → its own task; smallest, self-contained, unblocks report authoring. Needs the role-mapping
+  decision first.
+- **R10/R11 + R13 + R15** → **one** task for "external document + event surface", sequenced *after*
+  the evaluator, so the participation check is written **once** against the unified evaluator instead
+  of copied twice more.
+- **R17** → task; decide **rewrite-adapter-onto-`fetch`** vs **add-CRUD-proxy**. Prefer the former —
+  a generic Dataverse CRUD proxy at `/api/dataverse/{entity}` is a broad new authorization surface
+  and reads as exactly the kind of component CLAUDE.md §11 asks us to justify or avoid.
+
+**Do NOT** let these sit as "known 404s". R3 and R10/R11 are user-visible broken features on shipped
+pages.
