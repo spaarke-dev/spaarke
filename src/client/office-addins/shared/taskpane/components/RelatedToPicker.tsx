@@ -1,18 +1,7 @@
 import React, { useMemo, useState } from 'react';
-import {
-  makeStyles,
-  tokens,
-  Button,
-  Card,
-  Input,
-  Spinner,
-  Text,
-  Badge,
-  mergeClasses,
-} from '@fluentui/react-components';
+import { makeStyles, tokens, Button, Card, Input, Spinner, Text, mergeClasses } from '@fluentui/react-components';
 import {
   CheckmarkRegular,
-  CheckmarkCircleFilled,
   SearchRegular,
   AddRegular,
   DismissRegular,
@@ -25,28 +14,21 @@ import type { RelatedCandidate } from '../services/communicationSuggestionsServi
  * RelatedToPicker — the add-in's "Related to" selector, modeled on the email-intelligence
  * reconciliation surface (UI feedback, owner 2026-09-02).
  *
- * Layout (UI feedback round 2):
- *   [ Related to ]                         [ Matter  Project  Invoice … ]   ← header + chips
- *   [ search input ] [ Search ]            [ + New Matter ]                 ← search row on top
- *   ┌ recommended auto-match cards ────────────────────────────────────┐
- *   │ LITG-763955 : Litigation matter · Matter · 100% match   [Confirm] │
- *   └──────────────────────────────────────────────────────────────────┘
+ * Layout (feedback round 3):
+ *   [ Related to ]                          [ Matter Project Invoice … ]  ← header + right chips
+ *   [ search input ] [ Search ]                                    [ + ]  ← search row on top
+ *   ┌ recommended auto-match cards ───────────────────────────────────┐
+ *   │ LITG-763955 : Litigation matter · Matter · 100% match       [✓]  │  ← small blue check
+ *   └─────────────────────────────────────────────────────────────────┘
  *
- * On Confirm the chosen card turns GREEN with a check + a small "x" (change); the other
- * cards go gray. Single-select chips (gray except selected=blue, default Matter) scope
- * the cards + search. Host-agnostic: Confirm only *selects*; the regarding is written at
- * save. Fluent v9 (ADR-021).
+ * Selecting a card turns its check GREEN with a small "×" to reset; the other cards go
+ * gray. Single-select chips (gray except selected=blue, default Matter). Host-agnostic:
+ * selecting only *chooses*; the regarding is written at save. Fluent v9 (ADR-021).
  */
 
 const useStyles = makeStyles({
   root: { display: 'flex', flexDirection: 'column', gap: tokens.spacingVerticalS },
-  header: {
-    display: 'flex',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    gap: tokens.spacingHorizontalXXL,
-    flexWrap: 'wrap',
-  },
+  header: { display: 'flex', alignItems: 'center', gap: tokens.spacingHorizontalM, flexWrap: 'wrap' },
   headerLabel: {
     display: 'flex',
     alignItems: 'center',
@@ -54,7 +36,7 @@ const useStyles = makeStyles({
     color: tokens.colorNeutralForeground2,
     flexShrink: 0,
   },
-  chips: { display: 'flex', flexWrap: 'wrap', gap: tokens.spacingHorizontalXS },
+  chips: { display: 'flex', flexWrap: 'wrap', gap: tokens.spacingHorizontalXS, marginLeft: 'auto' },
   chip: {
     borderRadius: '999px',
     minWidth: 'auto',
@@ -67,28 +49,28 @@ const useStyles = makeStyles({
     border: 'none',
   },
   searchRow: { display: 'flex', gap: tokens.spacingHorizontalXS, alignItems: 'center' },
-  newBtn: { flexShrink: 0 },
   cards: { display: 'flex', flexDirection: 'column', gap: tokens.spacingVerticalXS },
-  card: { padding: tokens.spacingVerticalS, position: 'relative' },
-  cardConfirmed: {
-    backgroundColor: tokens.colorStatusSuccessBackground1,
-    border: `1px solid ${tokens.colorStatusSuccessBorder1}`,
-  },
+  card: { padding: tokens.spacingVerticalS },
+  cardSelected: { borderLeft: `3px solid ${tokens.colorStatusSuccessBorder2}` },
   cardDimmed: { opacity: 0.5 },
   cardRow: { display: 'flex', alignItems: 'center', gap: tokens.spacingHorizontalS },
   cardBody: { display: 'flex', flexDirection: 'column', gap: '2px', flexGrow: 1, minWidth: 0 },
   cardTitle: { overflow: 'hidden', textOverflow: 'ellipsis' },
   cardMeta: { color: tokens.colorNeutralForeground3 },
-  changeX: { position: 'absolute', top: '2px', right: '2px' },
-  confirmedBadge: {
-    display: 'flex',
+  selectedControls: { display: 'flex', alignItems: 'center', gap: '2px', flexShrink: 0 },
+  greenCheck: {
+    display: 'inline-flex',
     alignItems: 'center',
-    gap: tokens.spacingHorizontalXS,
-    color: tokens.colorStatusSuccessForeground1,
+    justifyContent: 'center',
+    width: '28px',
+    height: '28px',
+    borderRadius: tokens.borderRadiusMedium,
+    backgroundColor: tokens.colorStatusSuccessBackground3,
+    color: tokens.colorNeutralForegroundOnBrand,
     flexShrink: 0,
   },
+  ctrlBtn: { flexShrink: 0 },
   emptyNote: { color: tokens.colorNeutralForeground3, padding: `${tokens.spacingVerticalXS} 0` },
-  confirmBtn: { flexShrink: 0 },
 });
 
 export interface RelatedToPickerProps {
@@ -137,6 +119,7 @@ export const RelatedToPicker: React.FC<RelatedToPickerProps> = ({
 
   const typeMatches = useMemo(() => candidates.filter(c => c.entityType === selectedType), [candidates, selectedType]);
   const isConfirmed = value !== null;
+  const confirmedNotInList = value !== null && !typeMatches.some(c => sameRecord(c, value));
 
   const handleTypeChange = (type: EntityType) => {
     setSelectedType(type);
@@ -160,86 +143,55 @@ export const RelatedToPicker: React.FC<RelatedToPickerProps> = ({
     }
   };
 
-  // Confirmed record shown as a green card. If the selection came from search (not in the
-  // candidate list), prepend it so it still renders as the confirmed green card.
-  const confirmedNotInList = value && !typeMatches.some(c => sameRecord(c, value));
-
-  const renderChips = () => (
-    <div className={styles.chips} role="radiogroup" aria-label="Record type">
-      {allowedTypes.map(type => {
-        const selected = type === selectedType;
-        return (
-          <Button
-            key={type}
-            size="small"
-            shape="circular"
-            appearance={selected ? 'primary' : 'subtle'}
-            className={mergeClasses(styles.chip, !selected && styles.chipUnselected)}
-            onClick={() => handleTypeChange(type)}
-            disabled={disabled}
-            role="radio"
-            aria-checked={selected}
-          >
-            {type}
-          </Button>
-        );
-      })}
-    </div>
-  );
-
-  const renderConfirmedCard = (record: EntitySearchResult, key: string) => (
-    <Card key={key} className={mergeClasses(styles.card, styles.cardConfirmed)}>
-      <Button
-        className={styles.changeX}
-        size="small"
-        appearance="subtle"
-        icon={<DismissRegular />}
-        onClick={() => onChange(null)}
-        disabled={disabled}
-        aria-label="Change related record"
-      />
-      <div className={styles.cardRow}>
-        <div className={styles.cardBody}>
-          <div className={styles.confirmedBadge}>
-            <CheckmarkCircleFilled aria-hidden="true" />
-            <Badge appearance="tint" color="success">
-              {record.entityType}
-            </Badge>
-          </div>
-          <Text weight="semibold" className={styles.cardTitle}>
-            {record.displayInfo ? `${record.displayInfo} : ${record.name}` : record.name}
-          </Text>
-        </div>
-      </div>
-    </Card>
-  );
-
-  const renderCandidateCard = (c: RelatedCandidate) => {
-    const confirmed = value !== null && sameRecord(c, value);
-    if (confirmed) {
-      return renderConfirmedCard(c, `${c.logicalName}:${c.id}`);
-    }
+  // One card. `state`: 'confirm' (blue check), 'selected' (green check + reset ×), 'dimmed'.
+  const renderCard = (
+    rec: EntitySearchResult,
+    opts: { confidence?: number; state: 'confirm' | 'selected' | 'dimmed'; keyPrefix?: string }
+  ) => {
+    const key = `${opts.keyPrefix ?? ''}${rec.logicalName}:${rec.id}`;
     return (
-      <Card key={`${c.logicalName}:${c.id}`} className={mergeClasses(styles.card, isConfirmed && styles.cardDimmed)}>
+      <Card
+        key={key}
+        className={mergeClasses(
+          styles.card,
+          opts.state === 'selected' && styles.cardSelected,
+          opts.state === 'dimmed' && styles.cardDimmed
+        )}
+      >
         <div className={styles.cardRow}>
           <div className={styles.cardBody}>
             <Text weight="semibold" className={styles.cardTitle}>
-              {c.displayInfo ? `${c.displayInfo} : ${c.name}` : c.name}
+              {rec.displayInfo ? `${rec.displayInfo} : ${rec.name}` : rec.name}
             </Text>
             <Text size={200} className={styles.cardMeta}>
-              {c.entityType} · {pct(c.confidence)}% match
+              {opts.confidence != null ? `${rec.entityType} · ${pct(opts.confidence)}% match` : rec.entityType}
             </Text>
           </div>
-          {!isConfirmed && (
+          {opts.state === 'selected' ? (
+            <div className={styles.selectedControls}>
+              <span className={styles.greenCheck} aria-label="Selected">
+                <CheckmarkRegular />
+              </span>
+              <Button
+                className={styles.ctrlBtn}
+                size="small"
+                appearance="subtle"
+                icon={<DismissRegular />}
+                onClick={() => onChange(null)}
+                disabled={disabled}
+                aria-label="Reset selection"
+              />
+            </div>
+          ) : (
             <Button
-              className={styles.confirmBtn}
+              className={styles.ctrlBtn}
+              size="small"
               appearance="primary"
               icon={<CheckmarkRegular />}
-              onClick={() => onChange(c)}
-              disabled={disabled}
-            >
-              Confirm
-            </Button>
+              onClick={() => onChange(rec)}
+              disabled={disabled || opts.state === 'dimmed'}
+              aria-label="Select this record"
+            />
           )}
         </div>
       </Card>
@@ -248,16 +200,35 @@ export const RelatedToPicker: React.FC<RelatedToPickerProps> = ({
 
   return (
     <div className={styles.root}>
-      {/* Header: "Related to" (left) + type chips (right). */}
+      {/* Header: "Related to" (left) + type chips (right-aligned). */}
       <div className={styles.header}>
         <div className={styles.headerLabel}>
           <PersonSearchRegular aria-hidden="true" />
           <Text weight="semibold">Related to</Text>
         </div>
-        {renderChips()}
+        <div className={styles.chips} role="radiogroup" aria-label="Record type">
+          {allowedTypes.map(type => {
+            const selected = type === selectedType;
+            return (
+              <Button
+                key={type}
+                size="small"
+                shape="circular"
+                appearance={selected ? 'primary' : 'subtle'}
+                className={mergeClasses(styles.chip, !selected && styles.chipUnselected)}
+                onClick={() => handleTypeChange(type)}
+                disabled={disabled}
+                role="radio"
+                aria-checked={selected}
+              >
+                {type}
+              </Button>
+            );
+          })}
+        </div>
       </div>
 
-      {/* Search row on top of the recommendations — hidden once a record is confirmed. */}
+      {/* Search row on top — hidden once a record is selected. */}
       {!isConfirmed && (
         <>
           <div className={styles.searchRow}>
@@ -278,42 +249,20 @@ export const RelatedToPicker: React.FC<RelatedToPickerProps> = ({
             </Button>
             {onCreateNew && (
               <Button
-                className={styles.newBtn}
-                appearance="primary"
+                className={styles.ctrlBtn}
+                appearance="subtle"
                 icon={<AddRegular />}
                 onClick={() => onCreateNew(selectedType)}
                 disabled={disabled}
-              >
-                New {selectedType}
-              </Button>
+                aria-label={`New ${selectedType}`}
+                title={`New ${selectedType}`}
+              />
             )}
           </div>
 
           {searchResults.length > 0 && (
             <div className={styles.cards}>
-              {searchResults.map(r => (
-                <Card key={`s:${r.logicalName}:${r.id}`} className={styles.card}>
-                  <div className={styles.cardRow}>
-                    <div className={styles.cardBody}>
-                      <Text weight="semibold" className={styles.cardTitle}>
-                        {r.displayInfo ? `${r.displayInfo} : ${r.name}` : r.name}
-                      </Text>
-                      <Text size={200} className={styles.cardMeta}>
-                        {r.entityType}
-                      </Text>
-                    </div>
-                    <Button
-                      className={styles.confirmBtn}
-                      appearance="outline"
-                      icon={<CheckmarkRegular />}
-                      onClick={() => onChange(r)}
-                      disabled={disabled}
-                    >
-                      Confirm
-                    </Button>
-                  </div>
-                </Card>
-              ))}
+              {searchResults.map(r => renderCard(r, { state: 'confirm', keyPrefix: 's:' }))}
             </div>
           )}
         </>
@@ -321,13 +270,17 @@ export const RelatedToPicker: React.FC<RelatedToPickerProps> = ({
 
       {/* Recommended auto-match cards. */}
       <div className={styles.cards}>
-        {confirmedNotInList && value && renderConfirmedCard(value, `sel:${value.logicalName}:${value.id}`)}
+        {confirmedNotInList && value && renderCard(value, { state: 'selected', keyPrefix: 'sel:' })}
         {candidatesLoading ? (
           <div className={styles.cardRow}>
             <Spinner size="tiny" /> <Text size={200}>Finding matches…</Text>
           </div>
         ) : typeMatches.length > 0 ? (
-          typeMatches.map(renderCandidateCard)
+          typeMatches.map(c => {
+            const selected = value !== null && sameRecord(c, value);
+            const state: 'confirm' | 'selected' | 'dimmed' = selected ? 'selected' : isConfirmed ? 'dimmed' : 'confirm';
+            return renderCard(c, { confidence: c.confidence, state });
+          })
         ) : (
           !isConfirmed && (
             <Text size={200} className={styles.emptyNote}>

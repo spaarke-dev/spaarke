@@ -170,6 +170,13 @@ const useStyles = makeStyles({
     gap: tokens.spacingVerticalS,
     marginTop: tokens.spacingVerticalM,
   },
+  footer: {
+    display: 'flex',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    gap: tokens.spacingHorizontalS,
+    marginTop: tokens.spacingVerticalM,
+  },
   errorActions: {
     display: 'flex',
     gap: tokens.spacingHorizontalS,
@@ -455,6 +462,14 @@ export function SaveFlow(props: SaveFlowProps): React.ReactElement {
     const context = buildSaveContext();
     startSave(context);
   }, [buildSaveContext, startSave]);
+
+  // Cancel = clear the current selection + fields (wizard "Cancel" pattern).
+  const handleCancel = useCallback(() => {
+    setSelectedEntity(null);
+    setDocumentName('');
+    setDocumentDescription('');
+    reset();
+  }, [setSelectedEntity, reset]);
 
   // Handle entity selection (Confirm a card / select a search result / Change).
   const handleEntitySelect = useCallback(
@@ -831,16 +846,18 @@ export function SaveFlow(props: SaveFlowProps): React.ReactElement {
           saved to Spaarke — always on (DEFAULT_PROCESSING_OPTIONS), no toggles
           (UI feedback 2026-09-02). */}
 
-      {/* Actions */}
-      <div className={styles.actions}>
+      {/* Footer actions — wizard pattern: Cancel (left), Save (right). */}
+      <div className={styles.footer}>
+        <Button appearance="secondary" onClick={handleCancel} disabled={isSaving}>
+          Cancel
+        </Button>
         <Button
           appearance="primary"
           icon={isSaving ? <Spinner size="tiny" /> : <SaveRegular />}
           onClick={handleSave}
           disabled={isSaving || !isValid}
-          size="large"
         >
-          {isSaving ? 'Saving...' : 'Save to Spaarke'}
+          {isSaving ? 'Saving...' : 'Save'}
         </Button>
       </div>
     </>
