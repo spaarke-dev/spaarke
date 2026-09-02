@@ -1413,11 +1413,13 @@ public class OfficeService : IOfficeService
             entityType,
             userId);
 
-        // Scope: Matter + Project only for now.
-        if (entityType != QuickCreateEntityType.Matter && entityType != QuickCreateEntityType.Project)
+        // Scope: Matter + Project + Invoice (UI feedback 2026-09-02). Others not yet supported.
+        if (entityType is not (QuickCreateEntityType.Matter
+            or QuickCreateEntityType.Project
+            or QuickCreateEntityType.Invoice))
         {
             _logger.LogInformation(
-                "Quick create for {EntityType} is not yet supported (Matter/Project only).",
+                "Quick create for {EntityType} is not yet supported (Matter/Project/Invoice only).",
                 entityType);
             return null;
         }
@@ -1435,13 +1437,16 @@ public class OfficeService : IOfficeService
         }
 
         var logicalName = QuickCreateFieldRequirements.GetLogicalName(entityType);
-        var nameField = entityType == QuickCreateEntityType.Matter ? "sprk_mattername" : "sprk_projectname";
-        var descriptionField =
-            entityType == QuickCreateEntityType.Matter ? "sprk_matterdescription" : "sprk_projectdescription";
+        var (nameField, descriptionField) = entityType switch
+        {
+            QuickCreateEntityType.Matter => ("sprk_mattername", (string?)"sprk_matterdescription"),
+            QuickCreateEntityType.Project => ("sprk_projectname", (string?)"sprk_projectdescription"),
+            _ => ("sprk_invoicename", (string?)null), // Invoice: name-only (no verified description field)
+        };
 
         var entity = new Microsoft.Xrm.Sdk.Entity(logicalName);
         entity[nameField] = name;
-        if (!string.IsNullOrWhiteSpace(request.Description))
+        if (descriptionField is not null && !string.IsNullOrWhiteSpace(request.Description))
         {
             entity[descriptionField] = request.Description!.Trim();
         }

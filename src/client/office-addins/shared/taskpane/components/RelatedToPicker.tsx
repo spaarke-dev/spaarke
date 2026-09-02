@@ -279,72 +279,63 @@ export const RelatedToPicker: React.FC<RelatedToPickerProps> = ({
         </div>
       </div>
 
-      {/* Search row — always visible (New button matches the Search button size). */}
+      {/* Search row. Clicking "New" turns this SAME row into the create form:
+          the input becomes the new-record name, Search→Create, New→Cancel. */}
       <div className={styles.searchRow}>
         <Input
-          value={query}
-          onChange={(_, d) => setQuery(d.value)}
+          value={showCreate ? newName : query}
+          onChange={(_, d) => (showCreate ? setNewName(d.value) : setQuery(d.value))}
           onKeyDown={e => {
-            if (e.key === 'Enter') void runSearch();
+            if (e.key === 'Enter') void (showCreate ? handleCreate() : runSearch());
           }}
-          placeholder={`Look up another ${selectedType}…`}
-          disabled={disabled}
-          contentBefore={<SearchRegular />}
+          placeholder={showCreate ? `New ${selectedType} name` : `Look up another ${selectedType}…`}
+          disabled={disabled || (showCreate && creating)}
+          {...(showCreate ? {} : { contentBefore: <SearchRegular /> })}
           style={{ flexGrow: 1 }}
-          aria-label={`Search ${selectedType} records`}
+          aria-label={showCreate ? `New ${selectedType} name` : `Search ${selectedType} records`}
         />
-        <Button appearance="subtle" onClick={() => void runSearch()} disabled={disabled || searching}>
-          {searching ? <Spinner size="tiny" /> : 'Search'}
-        </Button>
-        {onCreateRecord && (
-          <Button
-            appearance="subtle"
-            icon={<AddRegular />}
-            onClick={() => {
-              setShowCreate(true);
-              setCreateError(null);
-            }}
-            disabled={disabled}
-          >
-            New
-          </Button>
+        {showCreate ? (
+          <>
+            <Button
+              appearance="primary"
+              onClick={() => void handleCreate()}
+              disabled={disabled || creating || newName.trim().length === 0}
+            >
+              {creating ? <Spinner size="tiny" /> : 'Create'}
+            </Button>
+            <Button
+              appearance="subtle"
+              onClick={() => {
+                setShowCreate(false);
+                setNewName('');
+                setCreateError(null);
+              }}
+              disabled={creating}
+            >
+              Cancel
+            </Button>
+          </>
+        ) : (
+          <>
+            <Button appearance="subtle" onClick={() => void runSearch()} disabled={disabled || searching}>
+              {searching ? <Spinner size="tiny" /> : 'Search'}
+            </Button>
+            {onCreateRecord && (
+              <Button
+                appearance="subtle"
+                icon={<AddRegular />}
+                onClick={() => {
+                  setShowCreate(true);
+                  setCreateError(null);
+                }}
+                disabled={disabled}
+              >
+                New
+              </Button>
+            )}
+          </>
         )}
       </div>
-
-      {/* Inline "New {type}" form — created via the BFF, then auto-selected. */}
-      {showCreate && onCreateRecord && (
-        <div className={styles.searchRow}>
-          <Input
-            value={newName}
-            onChange={(_, d) => setNewName(d.value)}
-            onKeyDown={e => {
-              if (e.key === 'Enter') void handleCreate();
-            }}
-            placeholder={`New ${selectedType} name`}
-            disabled={disabled || creating}
-            style={{ flexGrow: 1 }}
-            aria-label={`New ${selectedType} name`}
-          />
-          <Button
-            appearance="primary"
-            onClick={() => void handleCreate()}
-            disabled={disabled || creating || newName.trim().length === 0}
-          >
-            {creating ? <Spinner size="tiny" /> : 'Create'}
-          </Button>
-          <Button
-            appearance="subtle"
-            onClick={() => {
-              setShowCreate(false);
-              setNewName('');
-              setCreateError(null);
-            }}
-            disabled={creating}
-          >
-            Cancel
-          </Button>
-        </div>
-      )}
       {createError && (
         <Text size={200} className={styles.emptyNote} role="alert">
           {createError}

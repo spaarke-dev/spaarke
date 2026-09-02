@@ -555,7 +555,7 @@ export function SaveFlow(props: SaveFlowProps): React.ReactElement {
         return {
           id: `demo-new-${Date.now()}`,
           entityType: type,
-          logicalName: type === 'Matter' ? 'sprk_matter' : 'sprk_project',
+          logicalName: type === 'Matter' ? 'sprk_matter' : type === 'Project' ? 'sprk_project' : 'sprk_invoice',
           name,
           displayInfo: 'New',
         };
@@ -812,7 +812,8 @@ export function SaveFlow(props: SaveFlowProps): React.ReactElement {
           candidatesLoading={candidatesLoading}
           onSearch={relatedSearch}
           onCreateRecord={createRelatedRecord}
-          allowedTypes={allowedEntityTypes ?? ALL_ENTITY_TYPES}
+          // Matter/Project/Invoice only (Account/Contact removed — UI feedback 2026-09-02).
+          allowedTypes={['Matter', 'Project', 'Invoice']}
           defaultType="Matter"
           disabled={isSaving}
         />
