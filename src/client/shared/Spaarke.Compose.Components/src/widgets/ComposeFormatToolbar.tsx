@@ -147,6 +147,7 @@ import {
   Mail24Regular,
   DocumentWordRegular,
   PaintBrush24Regular,
+  Warning12Filled,
 } from '@fluentui/react-icons';
 
 const useStyles = makeStyles({
@@ -180,6 +181,20 @@ const useStyles = makeStyles({
   },
   // FR-03 (task 041): the save-state indicator (Saving… / Unsaved / Saved + Auto Save On/Off).
   // Subtle, single-line, Fluent v9 semantic tokens only (ADR-021 dark-mode-correct).
+  // UAT round 2 #5d — Save-icon warning badge (see UnsavedSaveIcon). `position: relative` on the wrapper
+  // anchors the absolutely-positioned triangle to the icon's own box rather than the toolbar row.
+  unsavedSaveIcon: {
+    position: 'relative',
+    display: 'inline-flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  unsavedSaveBadge: {
+    position: 'absolute',
+    right: '-3px',
+    bottom: '-3px',
+    color: tokens.colorPaletteYellowForeground1,
+  },
   saveStateIndicator: {
     display: 'inline-flex',
     alignItems: 'center',
@@ -370,6 +385,28 @@ export interface ComposeFormatToolbarProps {
   onEmailMemo?: () => void;
   /** True while a memo generate/email fetch is in flight — disables both actions and shows a spinner on the trigger. */
   isMemoActionInFlight?: boolean;
+}
+
+/**
+ * UAT round 2 #5d — the Save icon with a small warning triangle overlaid, shown while there are unsaved
+ * edits. It replaces the "Unsaved · …" text that used to sit beside the Save control.
+ *
+ * Composed rather than imported as a single glyph because Fluent ships no "save with warning" icon, and
+ * the badge must sit on the SAVE control specifically — the point is that the control which resolves the
+ * state is the one that shows it. `aria-hidden` on the badge: the state is announced through the button's
+ * `aria-label` ("Save — you have unsaved changes"), so exposing the decoration too would say it twice.
+ *
+ * Semantic tokens only (ADR-021): the triangle uses the Fluent WARNING foreground, so it stays legible in
+ * both themes without a light/dark branch.
+ */
+function UnsavedSaveIcon(): React.JSX.Element {
+  const styles = useStyles();
+  return (
+    <span className={styles.unsavedSaveIcon} data-testid="compose-format-save-unsaved-badge">
+      <SaveRegular />
+      <Warning12Filled className={styles.unsavedSaveBadge} aria-hidden />
+    </span>
+  );
 }
 
 /**
@@ -720,6 +757,30 @@ export function ComposeFormatToolbar(props: ComposeFormatToolbarProps): React.JS
       aria-label="Document formatting"
       data-testid="compose-format-toolbar"
     >
+      {/* ==== UAT round 2 #5c — Undo · Redo, FAR LEFT (left of Body) ====
+             Owner-directed placement. They were previously the last group on the right, next to Info.
+             Editing history reads as a document-level action rather than a formatting one, so it opens
+             the row; the format menus follow. ==== */}
+      <ToolbarButton
+        appearance="subtle"
+        icon={<ArrowUndo24Regular />}
+        aria-label="Undo"
+        disabled={controlDisabled || !editor.can().undo()}
+        onClick={() => editor.chain().focus().undo().run()}
+        data-testid="compose-format-undo"
+      />
+
+      <ToolbarButton
+        appearance="subtle"
+        icon={<ArrowRedo24Regular />}
+        aria-label="Redo"
+        disabled={controlDisabled || !editor.can().redo()}
+        onClick={() => editor.chain().focus().redo().run()}
+        data-testid="compose-format-redo"
+      />
+
+      <ToolbarDivider data-testid="compose-format-divider-history" />
+
       {/* ---- Body (block/heading style) ---- */}
       {/* R5 task 011 (G3 heading/list): the heading menu is RE-ENABLED on loaded docs — the engine now applies
           a setBlockAttr Style op as a tracked w:pPrChange. Gated only by the read-only `controlDisabled`. */}
@@ -917,73 +978,6 @@ export function ComposeFormatToolbar(props: ComposeFormatToolbarProps): React.JS
         </MenuPopover>
       </Menu>
 
-      {/* ---- UAT round-4 #12 (2026-08-04): Open Document / Reload from source / Refresh Profile
-             are NOT named in the owner's regrouped left→right order below (Review Summary·Memo |
-             Word·Save | Review Notes·Track Changes | Undo·Redo·Info). PLACEMENT DECISION — FLAGGED
-             for the owner to adjust: kept immediately after the format-menu group (Body/Paragraph/
-             Font/Table) and before the (now right-aligned) regrouped action-icon area, preserving
-             their pre-round-4 relative order. Nothing was deleted. ---- */}
-      {onOpenDocument ? (
-        <Tooltip content="Open document" relationship="label" withArrow>
-          <ToolbarButton
-            appearance="subtle"
-            icon={<DocumentText24Regular />}
-            aria-label="Open document"
-            disabled={controlDisabled}
-            onClick={onOpenDocument}
-            data-testid="compose-format-open-document"
-          />
-        </Tooltip>
-      ) : null}
-
-      {onReloadFromSource ? (
-        <Tooltip content="Reload from source" relationship="label" withArrow>
-          <ToolbarButton
-            appearance="subtle"
-            icon={<ArrowClockwise24Regular />}
-            aria-label="Reload from source"
-            disabled={controlDisabled}
-            onClick={onReloadFromSource}
-            data-testid="compose-format-reload-from-source"
-          />
-        </Tooltip>
-      ) : null}
-
-      {/* FR-05 (spaarkeai-compose-r6 task 032) — "Apply firm template": opens the host's
-          template-select dialog (ComposeApplyTemplateDialog). Gated like its neighbors (hidden when
-          the host wires no handler — an unpersisted doc has nothing saved to merge onto); DISABLED
-          with an explanatory tooltip while dirty/transient/saving (`applyTemplateDisabledReason` —
-          the server merges the PERSISTED bytes). Semantic tokens only (ADR-021). */}
-      {onApplyTemplate ? (
-        <Tooltip content={applyTemplateDisabledReason ?? 'Apply firm template'} relationship="description" withArrow>
-          <ToolbarButton
-            appearance="subtle"
-            icon={<PaintBrush24Regular />}
-            aria-label="Apply firm template"
-            disabled={controlDisabled || Boolean(applyTemplateDisabledReason)}
-            onClick={onApplyTemplate}
-            data-testid="compose-format-apply-template"
-          />
-        </Tooltip>
-      ) : null}
-
-      {onRefreshProfile ? (
-        <Tooltip
-          content={isRefreshingProfile ? 'Refreshing document profile…' : 'Refresh document profile'}
-          relationship="label"
-          withArrow
-        >
-          <ToolbarButton
-            appearance="subtle"
-            icon={isRefreshingProfile ? <Spinner size="tiny" /> : <DocumentSync24Regular />}
-            aria-label={isRefreshingProfile ? 'Refreshing document profile' : 'Refresh document profile'}
-            disabled={controlDisabled || isRefreshingProfile}
-            onClick={onRefreshProfile}
-            data-testid="compose-format-refresh-profile"
-          />
-        </Tooltip>
-      ) : null}
-
       {/* Spacer — pushes the regrouped action-icon area (below) to the right edge. */}
       <div className={styles.spacer} />
 
@@ -1065,15 +1059,20 @@ export function ComposeFormatToolbar(props: ComposeFormatToolbarProps): React.JS
           <MenuTrigger disableButtonEnhancement>
             {(triggerProps: MenuButtonProps) => (
               <Tooltip content="Word" relationship="label" withArrow>
+                {/* UAT round 2 #5e — the trigger gains a trailing chevron so it reads as a MENU, matching
+                    the Save group's caret. It was an undifferentiated icon button next to real actions. */}
                 <Button
                   {...triggerProps}
                   appearance="subtle"
                   size="small"
                   icon={<DocumentWordRegular />}
+                  iconPosition="before"
                   aria-label="Word"
                   disabled={controlDisabled}
                   data-testid="compose-format-word-menu"
-                />
+                >
+                  <ChevronDown16Regular />
+                </Button>
               </Tooltip>
             )}
           </MenuTrigger>
@@ -1090,7 +1089,7 @@ export function ComposeFormatToolbar(props: ComposeFormatToolbarProps): React.JS
                   onClick={onOpenInWord}
                   data-testid="compose-format-open-word-web"
                 >
-                  Open in Word (web)
+                  Open in web
                 </Button>
               ) : null}
               {onOpenInWordDesktop ? (
@@ -1104,8 +1103,49 @@ export function ComposeFormatToolbar(props: ComposeFormatToolbarProps): React.JS
                   onClick={onOpenInWordDesktop}
                   data-testid="compose-format-open-word-desktop"
                 >
-                  Open in Word (desktop)
+                  Open in desktop
                 </Button>
+              ) : null}
+              {/* UAT round 2 #5f — "Open document" MOVED here from its standalone toolbar icon and
+                  relabelled "Open in preview": all three ways to open this document now sit in one menu,
+                  which is what makes the group legible. */}
+              {onOpenDocument ? (
+                <Button
+                  appearance="subtle"
+                  size="small"
+                  className={styles.wordMenuItem}
+                  icon={<DocumentText24Regular />}
+                  aria-label="Open in preview"
+                  disabled={controlDisabled}
+                  onClick={onOpenDocument}
+                  data-testid="compose-format-open-document"
+                >
+                  Open in preview
+                </Button>
+              ) : null}
+              {/* UAT round 2 #5i — "Apply template" MOVED here from its standalone toolbar icon. It is a
+                  Word-document operation on the PERSISTED bytes, so it belongs with the Word actions.
+                  The disabled-while-dirty reason (applyTemplateDisabledReason) is preserved verbatim —
+                  the server merges saved bytes, so applying while dirty would merge the wrong base. */}
+              {onApplyTemplate ? (
+                <Tooltip
+                  content={applyTemplateDisabledReason ?? 'Apply firm template'}
+                  relationship="description"
+                  withArrow
+                >
+                  <Button
+                    appearance="subtle"
+                    size="small"
+                    className={styles.wordMenuItem}
+                    icon={<PaintBrush24Regular />}
+                    aria-label="Apply firm template"
+                    disabled={controlDisabled || Boolean(applyTemplateDisabledReason)}
+                    onClick={onApplyTemplate}
+                    data-testid="compose-format-apply-template"
+                  >
+                    Apply template
+                  </Button>
+                </Tooltip>
               ) : null}
             </div>
           </MenuPopover>
@@ -1143,8 +1183,12 @@ export function ComposeFormatToolbar(props: ComposeFormatToolbarProps): React.JS
                   primaryActionButton={{
                     onClick: () => onSave('version'),
                     disabled: saveDisabled,
-                    icon: <SaveRegular />,
-                    'aria-label': isSaving ? 'Saving' : 'Save',
+                    // UAT round 2 #5d — the unsaved state now rides on the SAVE ICON as a small warning
+                    // triangle, replacing the "Unsaved · …" text that used to sit beside it. The state has
+                    // to live somewhere; putting it on the control that resolves it is both more compact
+                    // and more direct than a sentence two controls away.
+                    icon: hasUnsavedEdits ? <UnsavedSaveIcon /> : <SaveRegular />,
+                    'aria-label': isSaving ? 'Saving' : hasUnsavedEdits ? 'Save — you have unsaved changes' : 'Save',
                   }}
                 />
               </Tooltip>
@@ -1185,33 +1229,53 @@ export function ComposeFormatToolbar(props: ComposeFormatToolbarProps): React.JS
                   </MenuItemCheckbox>
                 </>
               ) : null}
+              {/* UAT round 2 #5h — "Refresh document profile" MOVED here from its standalone toolbar icon
+                  and shortened to "Refresh profile". It re-runs the AI document profile against the SAVED
+                  document, so it belongs with the save actions rather than floating among the format
+                  menus. Spinner + disabled state preserved verbatim. */}
+              {onRefreshProfile ? (
+                <>
+                  <MenuDivider />
+                  <MenuItem
+                    icon={isRefreshingProfile ? <Spinner size="tiny" /> : <DocumentSync24Regular />}
+                    disabled={controlDisabled || isRefreshingProfile}
+                    onClick={onRefreshProfile}
+                    data-testid="compose-format-refresh-profile"
+                  >
+                    {isRefreshingProfile ? 'Refreshing profile…' : 'Refresh profile'}
+                  </MenuItem>
+                </>
+              ) : null}
             </MenuList>
           </MenuPopover>
         </Menu>
       ) : null}
 
-      {/* FR-03 (task 041): save-state indicator (absorbs R6 D6). Reflects task-040 draft/dirty state:
-          Saving… while a save is in flight, Unsaved when there are dirty edits, Saved otherwise — plus
-          the Auto Save On/Off state. Rendered only when the host tracks save state (Save wired +
-          hasUnsavedEdits provided). Fluent v9 semantic tokens only (ADR-021 dark-mode); `aria-live` so
-          the state change is announced to assistive tech. */}
-      {onSave && hasUnsavedEdits !== undefined ? (
-        <Text
-          className={styles.saveStateIndicator}
-          data-testid="compose-save-state-indicator"
-          data-save-state={isSaving ? 'saving' : hasUnsavedEdits ? 'unsaved' : 'saved'}
-          aria-live="polite"
-        >
-          {isSaving ? <Spinner size="extra-tiny" aria-hidden /> : null}
-          {isSaving ? 'Saving…' : hasUnsavedEdits ? 'Unsaved' : 'Saved'}
-          {/* UAT round 2 #6 (r8, 2026-09-02) — this used to read "Auto Save On", which was FALSE. The
-              autosave tick (`ComposeWorkspace`'s COMPOSE_DRAFT_AUTOSAVE_INTERVAL_MS interval) writes a
-              localStorage recovery draft and DELIBERATELY never calls the BFF (NFR-03). So the toolbar
-              claimed "Unsaved · Auto Save On" simultaneously, and the owner correctly read that as
-              "it says it autosaves but nothing gets saved". The mechanism is fine; the words were wrong.
-              "Recovery draft" says what it actually protects: a crash or a closed tab, NOT the document. */}
-          {autoSaveEnabled !== undefined ? ` · Recovery draft ${autoSaveEnabled ? 'On' : 'Off'}` : ''}
-        </Text>
+      {/* UAT round 2 #5d — the "Unsaved · Recovery draft On" text that lived here is REMOVED, per the
+          owner's request to reclaim toolbar space. Its two halves did not go to the same place, on purpose:
+            · "Unsaved" now rides on the Save icon as a warning triangle (see primaryActionButton above),
+              which is more direct than a sentence two controls away.
+            · "Recovery draft On/Off" stays discoverable as the checkable item in the Save menu — a
+              background safety net does not need permanent screen space, and the user meets it exactly
+              where they go looking for save options.
+          The `aria-live` announcement moves with it: the Save button's aria-label carries the unsaved
+          state, so assistive tech is told the same thing without a separate live region. */}
+
+      {/* UAT round 2 #5b — "Reload from source" joins the right-hand tool group [Word · Save · Reload].
+          It was a standalone icon over among the format menus; it is a document action, not a formatting
+          one. Kept as its own button rather than folded into a menu because the owner's order names it
+          alongside Word and Save. */}
+      {onReloadFromSource ? (
+        <Tooltip content="Reload from source" relationship="label" withArrow>
+          <ToolbarButton
+            appearance="subtle"
+            icon={<ArrowClockwise24Regular />}
+            aria-label="Reload from source"
+            disabled={controlDisabled}
+            onClick={onReloadFromSource}
+            data-testid="compose-format-reload-from-source"
+          />
+        </Tooltip>
       ) : null}
 
       <ToolbarDivider data-testid="compose-format-divider-2" />
@@ -1275,27 +1339,6 @@ export function ComposeFormatToolbar(props: ComposeFormatToolbarProps): React.JS
           />
         </Tooltip>
       ) : null}
-
-      <ToolbarDivider data-testid="compose-format-divider-3" />
-
-      {/* ==== Group 4 (UAT round-4 #12): Undo · Redo · Info ==== */}
-      <ToolbarButton
-        appearance="subtle"
-        icon={<ArrowUndo24Regular />}
-        aria-label="Undo"
-        disabled={controlDisabled || !editor.can().undo()}
-        onClick={() => editor.chain().focus().undo().run()}
-        data-testid="compose-format-undo"
-      />
-
-      <ToolbarButton
-        appearance="subtle"
-        icon={<ArrowRedo24Regular />}
-        aria-label="Redo"
-        disabled={controlDisabled || !editor.can().redo()}
-        onClick={() => editor.chain().focus().redo().run()}
-        data-testid="compose-format-redo"
-      />
 
       {/* UAT round-6 #4 — the not-legal-advice warning, moved OUT of the Review Summary body to a far-
           right info (ⓘ) button. Shown only when an NDA advisory review is present (reviewDisclaimer set). */}
