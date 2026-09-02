@@ -231,14 +231,19 @@ public static class OBOEndpoints
         .RequireRateLimiting("graph-write")
         .RequireAuthorization();
 
-        // POST: upload session for files >= 4 MiB, against the owning record.
+        // POST: upload session for files too large for a single PUT, against the owning record.
         //
-        // WHY THIS EXISTS (task 076). Files >= 4 MiB had NO working upload path at all: the small
-        // route is capped at PathValidator.SmallUploadMaxBytes (enforced in
-        // UploadSessionManager.UploadSmallAsUserAsync), and the chunked OBO pair that nominally served
-        // them was deleted earlier in this same task because it was dead by 404 — its client began
-        // with GET /api/obo/containers/{id}/drive, a route mapped nowhere. This restores the
-        // capability on the record-keyed contract rather than reviving the container-keyed one.
+        // WHY THIS EXISTS (task 076). The chunked OBO pair that nominally served large files was
+        // deleted earlier in this same task because it was dead by 404 — its client began with
+        // GET /api/obo/containers/{id}/drive, a route mapped nowhere. This restores the capability on
+        // the record-keyed contract rather than reviving the container-keyed one.
+        //
+        // ⚠️ Corrected 2026-09-02: this comment used to say files ">= 4 MiB had NO working upload
+        // path at all" because "the small route is capped at PathValidator.SmallUploadMaxBytes
+        // (enforced in UploadSessionManager.UploadSmallAsUserAsync)". Both halves were false — that
+        // guard was deleted by spaarkeai-compose-r8 task 015 and the constant was never enforced
+        // anywhere (it has since been deleted too). The simple PUT handles up to 250 MB, so the
+        // genuine threshold for needing THIS route is 250 MB, not 4 MiB.
         //
         // The response carries Graph's own upload-session URL, which the client then PUTs chunks to
         // DIRECTLY — exactly as the previous client did, and as Graph's large-file protocol requires.
@@ -364,10 +369,11 @@ public static class OBOEndpoints
         // same live UploadSessionManager.CreateUploadSessionAsUserAsync the deleted pair used, minus
         // the GET /api/obo/containers/{id}/drive hop that never existed.
         //
-        // ⚠️ Still true on the CLIENT: no shipped client calls the new route yet, so >= 4 MiB uploads
-        // continue to fail — now with an accurate message naming the route
-        // (Spaarke.SdapClient UploadOperation.LARGE_FILE_UNSUPPORTED) instead of a misleading
-        // 'Failed to get container drive'. The client cutover is blocked on the §5 escalation in
+        // ⚠️ CLIENT state (updated 2026-09-02): no shipped client calls the new route yet, so uploads
+        // ABOVE 250 MB still fail — with an accurate size message (Spaarke.SdapClient
+        // UploadOperation.fileTooLarge) instead of a misleading 'Failed to get container drive'.
+        // Between 4 MiB and 250 MB now WORKS: the client's 4 MiB throw was removed, having rested on
+        // a server cap that did not exist. The client cutover is blocked on the §5 escalation in
         // projects/unified-access-control-r2/notes/task-076-record-keyed-upload-contract.md.
         //
         // Both routes carried Pending waivers in RouteAuthorizationGuardTests owned by "073/075/076";
