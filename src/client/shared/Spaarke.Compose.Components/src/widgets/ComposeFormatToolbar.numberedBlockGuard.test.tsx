@@ -202,3 +202,48 @@ describe('ComposeFormatToolbar — list toggles on a projected numbered block', 
     editor.destroy();
   });
 });
+
+// ---------------------------------------------------------------------------
+// 4. Outline depth (UAT round 2 #2)
+// ---------------------------------------------------------------------------
+
+describe('ComposeFormatToolbar — Body menu outline depth', () => {
+  it('offers Heading 1 through 6, not just 1-3', async () => {
+    const user = userEvent.setup();
+    const editor = renderToolbarFor(PLAIN_PARAGRAPH);
+    await user.click(screen.getByTestId('compose-format-heading-menu'));
+
+    // In a heading-style-numbered document, outline depth IS the numbering depth: reaching 1.1.1.1
+    // needs Heading 4. Both ends already supported six levels; only this menu capped it at three.
+    for (const level of [1, 2, 3, 4, 5, 6]) {
+      expect(screen.getByTestId(`compose-format-heading-${level}`)).toHaveTextContent(`Heading ${level}`);
+    }
+    editor.destroy();
+  });
+
+  it('applies a deep heading and reports it on the menu button (the label ladder used to stop at 3)', async () => {
+    const user = userEvent.setup();
+    const editor = renderToolbarFor(PLAIN_PARAGRAPH);
+    await user.click(screen.getByTestId('compose-format-heading-menu'));
+    await user.click(screen.getByTestId('compose-format-heading-4'));
+
+    expect(editor.state.doc.firstChild?.type.name).toBe('heading');
+    expect(editor.state.doc.firstChild?.attrs.level).toBe(4);
+    // Before the fix this button read "Body" for a Heading 4 paragraph.
+    expect(screen.getByTestId('compose-format-heading-menu')).toHaveTextContent('Heading 4');
+    editor.destroy();
+  });
+
+  it('preserves paraId and the computed number across a depth change', async () => {
+    const user = userEvent.setup();
+    const editor = renderToolbarFor(NUMBERED_PARAGRAPH);
+    await user.click(screen.getByTestId('compose-format-heading-menu'));
+    await user.click(screen.getByTestId('compose-format-heading-3'));
+
+    // Unlike the list toggle (suite 1), a depth change is identity-preserving — measured, not assumed.
+    const attrs = editor.state.doc.firstChild?.attrs as Record<string, unknown>;
+    expect(attrs.paraId).toBe('BBBB2222');
+    expect(attrs.computedNumber).toBe('1.3');
+    editor.destroy();
+  });
+});

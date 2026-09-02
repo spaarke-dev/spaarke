@@ -373,14 +373,25 @@ export interface ComposeFormatToolbarProps {
 }
 
 /**
+ * Outline depths the Body menu offers. Kept in lockstep with BOTH ends of the pipeline:
+ * `ComposeEditor.tsx`'s `StarterKit.configure({ heading: { levels: [1..6] } })` and the server's
+ * `ComposeDocumentRenderer.MaxHeadingLevel` (6) / `ComposeStyleCatalog.HeadingStyleId`. Widening past 6
+ * requires changing all three, not just this list.
+ */
+const HEADING_LEVELS = [1, 2, 3, 4, 5, 6] as const;
+type HeadingLevel = (typeof HEADING_LEVELS)[number];
+
+/**
  * Currently-selected block level, derived from the editor. Drives the label on the
  * Body menu button so operators see what block their cursor is in.
  */
 function currentBlockLabel(editor: Editor | null): string {
   if (!editor) return 'Body';
-  if (editor.isActive('heading', { level: 1 })) return 'Heading 1';
-  if (editor.isActive('heading', { level: 2 })) return 'Heading 2';
-  if (editor.isActive('heading', { level: 3 })) return 'Heading 3';
+  // Iterates HEADING_LEVELS so the button label cannot silently lag the menu (before UAT round 2 #2 this
+  // was a hardcoded 1-3 ladder; a Heading 4 paragraph would have reported "Body").
+  for (const level of HEADING_LEVELS) {
+    if (editor.isActive('heading', { level })) return `Heading ${level}`;
+  }
   return 'Body';
 }
 
@@ -569,7 +580,14 @@ export function ComposeFormatToolbar(props: ComposeFormatToolbarProps): React.JS
 
   const controlDisabled = disabled === true;
 
-  const setHeading = (level: 1 | 2 | 3 | null): void => {
+  // UAT round 2 #2 (r8, 2026-09-02): widened from 1|2|3 to the full 1-6. In a Word document numbered by
+  // HEADING STYLES (the shape the owner is editing — "1.1 AT-WILL EMPLOYMENT" is a Heading2 whose number
+  // comes from the style's own numPr), changing outline depth IS how you move 1.1 -> 1.1.1. The menu
+  // stopping at Heading 3 capped reachable depth at three levels even though both ends already supported
+  // six: `LOCKED_EXTENSIONS` configures `heading: { levels: [1..6] }` and the server renders
+  // Heading1..6 (`ComposeDocumentRenderer.MaxHeadingLevel` = 6, `ComposeStyleCatalog.HeadingStyleId`).
+  // Exposing the existing capability -- no write-path change.
+  const setHeading = (level: HeadingLevel | null): void => {
     if (controlDisabled) return;
     const chain = editor.chain().focus();
     if (level === null) {
@@ -722,9 +740,11 @@ export function ComposeFormatToolbar(props: ComposeFormatToolbarProps): React.JS
         <MenuPopover>
           <MenuList>
             <MenuItem onClick={() => setHeading(null)}>Body</MenuItem>
-            <MenuItem onClick={() => setHeading(1)}>Heading 1</MenuItem>
-            <MenuItem onClick={() => setHeading(2)}>Heading 2</MenuItem>
-            <MenuItem onClick={() => setHeading(3)}>Heading 3</MenuItem>
+            {HEADING_LEVELS.map(level => (
+              <MenuItem key={level} onClick={() => setHeading(level)} data-testid={`compose-format-heading-${level}`}>
+                {`Heading ${level}`}
+              </MenuItem>
+            ))}
           </MenuList>
         </MenuPopover>
       </Menu>
