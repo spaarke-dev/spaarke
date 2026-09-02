@@ -666,12 +666,13 @@ export function SaveFlow(props: SaveFlowProps): React.ReactElement {
         </div>
       )}
 
-      {/* File to (association target) — FR-B2: pre-selected with the engine's
-          predicted record when available (reuses derivePrimaryReview; ADR-045). */}
+      {/* Related to (association target) — FR-B2: pre-selected with the engine's
+          predicted record when available (reuses derivePrimaryReview; ADR-045).
+          "Related to" matches the system's reconciliation terminology (UI feedback 2026-09-02). */}
       <div className={styles.section}>
         <div className={styles.sectionTitle}>
           <PersonSearchRegular />
-          <Text weight="semibold">File to</Text>
+          <Text weight="semibold">Related to</Text>
         </div>
         <EntityPicker
           value={selectedEntity}
@@ -683,7 +684,7 @@ export function SaveFlow(props: SaveFlowProps): React.ReactElement {
           showRecent
           showQuickCreate
           placeholder="Search for a Matter, Project, Account…"
-          aria-label="File to"
+          aria-label="Related to"
           // Thread the BFF base URL + token so the picker queries the real
           // `/api/office/search/entities` endpoint (real Dataverse records +
           // GUID ids). Without this, useEntitySearch silently falls back to

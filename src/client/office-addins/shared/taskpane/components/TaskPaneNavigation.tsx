@@ -44,7 +44,7 @@ export type NavigationTab = 'save' | 'createTodo' | 'share' | 'recent' | 'search
 /**
  * Tab configuration.
  */
-interface TabConfig {
+export interface TabConfig {
   value: NavigationTab;
   label: string;
   icon: React.ReactElement;
@@ -90,6 +90,11 @@ const TAB_CONFIGS: TabConfig[] = [
   //   availableFor: ['outlook', 'word'],
   // },
 ];
+
+/** Tabs available for a given host — shared by the nav row and the consolidated toolbar. */
+export function getAvailableTabs(hostType: HostType): TabConfig[] {
+  return TAB_CONFIGS.filter(tab => tab.availableFor.includes(hostType));
+}
 
 export interface TaskPaneNavigationProps {
   /** Currently selected tab */
