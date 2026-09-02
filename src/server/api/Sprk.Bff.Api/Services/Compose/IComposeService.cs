@@ -291,7 +291,11 @@ public interface IComposeService
     /// <c>Services/Compose</c> stays pure (no AI internals, no Graph types — ADR-007/ADR-013).
     /// </remarks>
     /// <param name="httpContext">HTTP context for OBO auth into Graph. Required.</param>
-    /// <param name="driveId">SPE drive (container) id. Required.</param>
+    /// <param name="requestedDriveId">SPE drive (container) id as named by the CALLER. Required, but it is
+    /// a claim rather than the write target: the implementation resolves the drive RECORDED on the owning
+    /// <c>sprk_document</c> row and uses that when the row has one, falling back to this value only for a
+    /// row that carries no drive id (legacy) or no row at all. See
+    /// <c>ComposeRecordResolution.TryResolveRecordedDriveIdAsync</c>.</param>
     /// <param name="documentSpeId">SPE drive-item id of the persisted document. Required.</param>
     /// <param name="resolvedTemplateBytes">The resolved firm/matter <c>.dotx</c> package bytes
     /// (task 031's <c>IComposeTemplateSource.ResolveAsync</c> output). Required, non-empty.</param>
@@ -301,7 +305,7 @@ public interface IComposeService
     /// merge degradation warnings (loud, never silent), and the post-merge canonical content model.</returns>
     Task<ApplyComposeTemplateResult> ApplyTemplateAsync(
         HttpContext httpContext,
-        string driveId,
+        string requestedDriveId,
         string documentSpeId,
         byte[] resolvedTemplateBytes,
         string templateName,

@@ -444,6 +444,77 @@ public class ComposeService : IComposeService
         };
     }
 
+    /// <summary>
+    /// DRIVE PROVENANCE (#858 family, 2026-09-01): resolves the drive a write into an EXISTING drive item
+    /// must target — the drive RECORDED on the <c>sprk_document</c> row, not the one the caller named.
+    /// </summary>
+    /// <remarks>
+    /// <para><b>What was wrong.</b> Both write paths into an existing item (<c>ApplyTemplateAsync</c>'s route
+    /// parameter and <c>SaveAsync</c>'s <c>request.DriveId</c>) took the drive from the CALLER while the
+    /// authorized row already held <c>sprk_graphdriveid</c>. The server never consulted it, so the record
+    /// could claim one location while the bytes went to another.</para>
+    /// <para><b>What this is NOT.</b> Not the app-only container hole this codebase's other
+    /// <c>ClientSupplied</c> sinks describe. Compose writes are OBO — SPE authorizes them as the acting
+    /// user, so no caller reaches a drive they could not already reach. The defect is that the record and
+    /// the bytes could DIVERGE; the audit trail, not the ACL, is what was unsound.</para>
+    /// <para><b>The fallback is deliberate, and it is not a half-measure.</b> When the row has no drive id
+    /// the caller's value is used, logged. Legacy rows predating the full-SPE-pointer stamp exist — see
+    /// <c>PromoteIfEphemeralAsync</c>, which documents that a row without the pointer makes downstream
+    /// readers 409 "No file is attached" — so a hard fail-closed here would break saves on real documents
+    /// to close a hole that OBO already closes. An attacker cannot make a row's drive id DISAPPEAR, so the
+    /// fallback covers legacy data, not an attack path. When the row DOES have a drive id it wins
+    /// unconditionally and a divergence is logged at Warning: that divergence is the signal this method
+    /// exists to produce.</para>
+    /// <para><b>Cost.</b> One keyed Dataverse retrieve per replace-path write, on a path that already does a
+    /// Graph metadata read and a cache read. The save's promote step resolves the same row AFTER the write;
+    /// this is not folded into that call because the value is needed BEFORE it — the point is to write to
+    /// the right place, which is a decision that cannot be made after the write.</para>
+    /// </remarks>
+    private async Task<string?> ResolveAuthoritativeDriveIdAsync(
+        string documentSpeId,
+        string? requestedDriveId,
+        string operation,
+        CancellationToken cancellationToken)
+    {
+        string? recorded;
+        try
+        {
+            recorded = await _recordResolution.TryResolveRecordedDriveIdAsync(documentSpeId, cancellationToken)
+                .ConfigureAwait(false);
+        }
+        catch (Exception ex)
+        {
+            // Best-effort: a provenance READ must never be the reason a user's save fails. Degrading to
+            // the caller's value reproduces the pre-fix behaviour exactly, loudly.
+            _logger.LogWarning(ex,
+                "Compose {Operation}: drive-provenance lookup failed for driveItem={DocumentSpeId}; " +
+                "falling back to the caller-supplied drive={RequestedDriveId}.",
+                operation, documentSpeId, requestedDriveId);
+            return requestedDriveId;
+        }
+
+        if (string.IsNullOrWhiteSpace(recorded))
+        {
+            _logger.LogDebug(
+                "Compose {Operation}: no sprk_document row records a drive for driveItem={DocumentSpeId}; " +
+                "using the caller-supplied drive={RequestedDriveId}.",
+                operation, documentSpeId, requestedDriveId);
+            return requestedDriveId;
+        }
+
+        if (!string.IsNullOrWhiteSpace(requestedDriveId)
+            && !string.Equals(recorded, requestedDriveId, StringComparison.Ordinal))
+        {
+            _logger.LogWarning(
+                "Compose {Operation}: the caller named drive={RequestedDriveId} for driveItem={DocumentSpeId} " +
+                "but sprk_document records drive={RecordedDriveId}. Writing to the RECORDED drive — the " +
+                "record is the authority on where its own bytes live.",
+                operation, requestedDriveId, documentSpeId, recorded);
+        }
+
+        return recorded;
+    }
+
     /// <inheritdoc />
     // Task 032 (spaarkeai-compose-r6, FR-05) — the apply-template orchestration: download the PERSISTED
     // bytes (mirror LoadAsync's fetch idiom), merge via the ONE 030 engine (never re-implemented),
@@ -454,19 +525,29 @@ public class ComposeService : IComposeService
     // PublicContracts facade call); no AI dispatch (ADR-039).
     public async Task<ApplyComposeTemplateResult> ApplyTemplateAsync(
         HttpContext httpContext,
-        string driveId,
+        string requestedDriveId,
         string documentSpeId,
         byte[] resolvedTemplateBytes,
         string templateName,
         CancellationToken cancellationToken = default)
     {
-        if (string.IsNullOrWhiteSpace(driveId))
-            throw new ArgumentException("DriveId is required for SPE drive-item access.", nameof(driveId));
+        if (string.IsNullOrWhiteSpace(requestedDriveId))
+            throw new ArgumentException("DriveId is required for SPE drive-item access.", nameof(requestedDriveId));
         if (string.IsNullOrWhiteSpace(documentSpeId))
             throw new ArgumentException("DocumentSpeId (drive-item id) is required.", nameof(documentSpeId));
         ArgumentNullException.ThrowIfNull(resolvedTemplateBytes);
         if (resolvedTemplateBytes.Length == 0)
             throw new ArgumentException("Resolved template bytes must not be empty.", nameof(resolvedTemplateBytes));
+
+        // DRIVE PROVENANCE (#858 family): the route names a drive; the sprk_document row KNOWS one. From
+        // here down `driveId` is the authoritative value, so the read (metadata + download) and the write
+        // (the preconditioned replace) all address the same drive the record claims — apply-template is a
+        // read-merge-write, and reading from one drive while writing to another is the sharpest form of
+        // the divergence this closes. The parameter is renamed rather than shadowed so no later edit can
+        // reach the caller's claim by accident.
+        var driveId = await ResolveAuthoritativeDriveIdAsync(
+                documentSpeId, requestedDriveId, "apply-template", cancellationToken)
+            .ConfigureAwait(false) ?? requestedDriveId;
 
         _logger.LogInformation(
             "Compose apply-template: drive={DriveId} driveItem={DocumentSpeId} template={TemplateName}",
@@ -1390,6 +1471,29 @@ public class ComposeService : IComposeService
         // ────────────────────────────────────────────────────────────────────────────
         var observedAt = DateTimeOffset.UtcNow;
         var isTransientCreate = string.IsNullOrWhiteSpace(request.DocumentSpeId);
+
+        // ────────────────────────────────────────────────────────────────────────────
+        // DRIVE PROVENANCE (#858 family, 2026-09-01) — resolved ONCE, HERE, and folded back onto the
+        // request so every downstream consumer inherits it: the baseline re-fetch below, the pre-write
+        // metadata read + PDF guard, the stale-base re-anchor's own download, and the preconditioned
+        // replace. Rewriting the request rather than threading a second drive parameter through five
+        // collaborators is deliberate — a threaded parameter is a site a future edit can forget, and the
+        // one property that has to hold is that NO site on this path can still reach the caller's claim.
+        //
+        // The transient-create branch is untouched by design: it has no drive item yet and its drive comes
+        // from the SERVER-derived container (#858), which is already provenance-correct.
+        // ────────────────────────────────────────────────────────────────────────────
+        if (!isTransientCreate)
+        {
+            var authoritativeDriveId = await ResolveAuthoritativeDriveIdAsync(
+                    request.DocumentSpeId!, request.DriveId, "save", cancellationToken)
+                .ConfigureAwait(false);
+
+            if (!string.Equals(authoritativeDriveId, request.DriveId, StringComparison.Ordinal))
+            {
+                request = request with { DriveId = authoritativeDriveId };
+            }
+        }
 
         (byte[] contentToPersist, var renderDegradationWarnings) = await _saveStorage.ResolveSaveBaselineAsync(request, httpContext, cancellationToken)
             .ConfigureAwait(false);

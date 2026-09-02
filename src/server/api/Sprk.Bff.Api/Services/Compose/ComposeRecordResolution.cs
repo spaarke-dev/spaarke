@@ -187,10 +187,19 @@ internal sealed class ComposeRecordResolution
         {
             // Fetch the FR-C3 dedup columns alongside the id so the idempotent branch can evaluate
             // graduate-on-divergence WITHOUT a second Dataverse round-trip on the save hot path.
+            // `sprk_graphdriveid` rides along for DRIVE PROVENANCE (see TryResolveRecordedDriveIdAsync):
+            // the row is the authority on WHERE its bytes live, and adding the column here costs nothing
+            // — it is the same retrieve, one column wider.
             var entity = await _dataverse.RetrieveByAlternateKeyAsync(
                 ComposeService.DocumentLogicalName,
                 key,
-                new[] { ComposeService.DocumentIdAttribute, ComposeService.CanonicalDocumentAttribute, ComposeService.CanonicalHashAttribute },
+                new[]
+                {
+                    ComposeService.DocumentIdAttribute,
+                    ComposeService.CanonicalDocumentAttribute,
+                    ComposeService.CanonicalHashAttribute,
+                    ComposeService.GraphDriveIdAttribute,
+                },
                 cancellationToken).ConfigureAwait(false);
 
             return entity;
@@ -282,6 +291,7 @@ internal sealed class ComposeRecordResolution
                     ComposeService.DocumentIdAttribute,
                     ComposeService.CanonicalDocumentAttribute,
                     ComposeService.CanonicalHashAttribute,
+                    ComposeService.GraphDriveIdAttribute,
                     "statecode",
                     "createdon"),
                 TopCount = MaxDuplicateRowsInspected,
@@ -332,6 +342,40 @@ internal sealed class ComposeRecordResolution
                 driveItemId);
             return null;
         }
+    }
+
+    /// <summary>
+    /// DRIVE PROVENANCE (#858 family): the SPE drive id RECORDED on the <c>sprk_document</c> row that owns
+    /// this drive item, or <c>null</c> when no row carries the item or the row has no drive id stamped.
+    /// </summary>
+    /// <remarks>
+    /// <para>The row is the authority on where its own bytes live. Every Compose write into an EXISTING
+    /// drive item previously took the drive from the caller (request body / route parameter) while the row
+    /// already held the answer — so the record could say "drive X" while the bytes landed in "drive Y",
+    /// and nothing in the system noticed.</para>
+    /// <para><b>This is a PROVENANCE fix, not an access-control fix.</b> Every Compose write is OBO, so SPE
+    /// authorizes it as the acting user and a caller cannot reach a drive their own token could not already
+    /// reach. What was broken is that the record and the bytes could disagree, which makes the audit trail
+    /// wrong — the same reasoning that deleted <c>ContainerId</c> from the save request in #858, one level
+    /// down.</para>
+    /// <para>Deliberately routed through <see cref="TryFindDocumentByGraphItemIdAsync"/> rather than a new
+    /// query, so it inherits the #781 self-heal for free: a duplicated or non-Active
+    /// <c>sprk_graphitemid_uk</c> still resolves to the canonical row instead of silently answering "no
+    /// row" and handing the write back to the caller's claim.</para>
+    /// </remarks>
+    internal async Task<string?> TryResolveRecordedDriveIdAsync(
+        string driveItemId,
+        CancellationToken cancellationToken)
+    {
+        if (string.IsNullOrWhiteSpace(driveItemId))
+            return null;
+
+        var row = await TryFindDocumentByGraphItemIdAsync(driveItemId, cancellationToken).ConfigureAwait(false);
+        if (row is null)
+            return null;
+
+        var recorded = row.GetAttributeValue<string>(ComposeService.GraphDriveIdAttribute);
+        return string.IsNullOrWhiteSpace(recorded) ? null : recorded;
     }
 
     /// <summary>
