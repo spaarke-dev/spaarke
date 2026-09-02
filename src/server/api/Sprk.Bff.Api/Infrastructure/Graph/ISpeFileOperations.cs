@@ -130,7 +130,7 @@ public interface ISpeFileOperations
         CancellationToken ct = default);
 
     /// <summary>
-    /// Create a NEW small (&lt;4 MB) drive-item in a container/drive under the user's OBO
+    /// Create a NEW drive-item in a container/drive under the user's OBO
     /// identity. PUTs the stream to <c>drives/{driveId}/root:/{path}:/content</c>, minting a
     /// fresh drive-item, and returns its <see cref="FileHandleDto"/> (id + name + size + etag +
     /// resolved drive id). Used by the Compose create-on-save backbone (FR-05) when a transient
@@ -142,9 +142,18 @@ public interface ISpeFileOperations
     /// <remarks>
     /// ADR-007: no <c>Microsoft.Graph</c> type crosses this boundary — the facade returns the
     /// <see cref="FileHandleDto"/> shape only. Throws <see cref="UnauthorizedAccessException"/> on
-    /// 403 ACL denial and <see cref="ArgumentException"/> on 413 (content &gt; 4 MB — use chunked
-    /// upload). The concrete <c>SpeFileStore</c> already implements this; it is surfaced here so
-    /// OBO callers can create drive-items through the same injected facade.
+    /// 403 ACL denial. The concrete <c>SpeFileStore</c> already implements this; it is surfaced here
+    /// so OBO callers can create drive-items through the same injected facade.
+    ///
+    /// ⚠️ <b>"Small" is a legacy name, NOT a 4 MB limit.</b> Corrected 2026-09-02: this text used to
+    /// say "&lt;4 MB" and "throws ArgumentException on 413 (content &gt; 4 MB — use chunked upload)".
+    /// Both were wrong. Graph's simple-upload boundary for SPE containers has been <b>250 MB</b>
+    /// since October 2023; the 4 MB figure came from the retired OneDrive REST docs.
+    /// <c>spaarkeai-compose-r8</c> task 015 (FR-S08) DELETED the 4 MB guard from the implementation
+    /// precisely because it failed a Compose create-on-save of any document over 4 MB outright — but
+    /// the guard's advice survived here in prose, where it kept reading as a live constraint and
+    /// caused a later reviewer to propose capping an upload UI at 4 MB. Do not reintroduce either.
+    /// The app-only twin below has no size guard at all.
     /// </remarks>
     Task<FileHandleDto?> UploadSmallAsUserAsync(
         HttpContext ctx,
@@ -154,11 +163,28 @@ public interface ISpeFileOperations
         CancellationToken ct = default);
 
     /// <summary>
-    /// Create a NEW small (&lt;4 MB) drive-item in a container/drive under APP-ONLY (managed identity,
+    /// Create a NEW drive-item in a container/drive under APP-ONLY (managed identity,
     /// ADR-028) auth — the background/server-side counterpart to
     /// <see cref="UploadSmallAsUserAsync(HttpContext, string, string, Stream, CancellationToken)"/>.
     /// PUTs the stream to <c>drives/{driveId}/root:/{path}:/content</c> and returns the created
     /// item's <see cref="FileHandleDto"/> (id + name + size + etag + resolved drive id).
+    ///
+    /// ⚠️ <b>"Small" is a legacy name.</b> This implementation has NO size guard whatsoever — see the
+    /// OBO twin above for why the "&lt;4 MB" claim that used to sit here was wrong (250 MB is the real
+    /// simple-upload boundary for SPE containers).
+    ///
+    /// ⚠️ <b>The path MUST be a bare file name.</b> Uploading to a path makes Graph implicitly create
+    /// every folder segment in it, so any prefix mints folders nobody asked for. Enforced by
+    /// <c>tests/Spaarke.ArchTests/SpeUploadPathIsFlatGuardTests.cs</c> (2026-08-28 flat-path decision).
+    /// Sanitize via <c>SpeUploadPath.SanitizeFileName</c>.
+    ///
+    /// ⚠️ <b>This overwrites unconditionally on a name collision.</b> The path-keyed simple PUT takes
+    /// no <c>@microsoft.graph.conflictBehavior</c> — not rename, not fail. Two uploads of the same file
+    /// name collapse onto ONE drive-item (SharePoint retains the prior content as a version, so it is
+    /// recoverable, but the two uploads stop being two documents). Callers needing distinct documents
+    /// must make the file name unique first — see <c>EmailAttachmentProcessor.GenerateUniqueFileName</c>
+    /// and the collision-survival tests in
+    /// <c>tests/integration/data-mutation/SpeUploadPaths/SpeFlatUploadPathTests.cs</c>.
     /// </summary>
     /// <remarks>
     /// ADR-007: no <c>Microsoft.Graph</c> type crosses this boundary — the facade returns the
