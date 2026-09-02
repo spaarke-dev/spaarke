@@ -155,11 +155,12 @@ src/solutions/LegalWorkspace/src/components/Playbook/playbookService.ts
 src/solutions/LegalWorkspace/src/components/Playbook/types.ts
 src/solutions/LegalWorkspace/src/components/Playbook/index.ts
 
-# …and the 3 CreateMatter files orphaned BY that deletion (only in the same commit;
-#   they are live until Playbook goes):
+# …and the CreateMatter files orphaned BY that deletion (only in the same commit;
+#   they are live until Playbook goes). ⚠️ CORRECTED 2026-09-01 at execution time:
+#   this said THREE files. It is TWO. See "EXECUTION CORRECTIONS" at the bottom —
+#   wizardTypes.ts is NOT orphaned and MUST STAY.
 src/solutions/LegalWorkspace/src/components/CreateMatter/FileUploadZone.tsx
 src/solutions/LegalWorkspace/src/components/CreateMatter/UploadedFileList.tsx
-src/solutions/LegalWorkspace/src/components/CreateMatter/wizardTypes.ts
 
 # 3.1 LW Wizard re-export shims (5 files, zero importers post-144ef43c4)
 src/solutions/LegalWorkspace/src/components/Wizard/index.ts
@@ -241,3 +242,96 @@ src/client/pcf/DocumentRelationshipViewer/DocumentRelationshipViewer/types/auth.
 | **UNSURE (correctly so; needs environment query)** | 3 | R4 reachability (EPM PCF binding), 4.6 org-side ribbon caller, 6A.5 PCF form binding |
 
 **Calibration for the owner**: the sweep's *dead-code* claims are highly reliable (1 refutation in ~20 — but that one, 1.3, would have broken the shared-lib build, vindicating the adversarial pass). Its *route-absence* claims were 17/17 correct, though reachability severity was under-differentiated and one live mismatch was missed. Its *behavioural* (§4) claims are directionally right but prone to over-broad framing (4.1) and undercounting (4.3) — re-derive counts before acting, exactly as `DocumentsEndpoints.cs`'s own note warns: "Re-derive counts; never inherit them."
+
+---
+
+## EXECUTION CORRECTIONS — found while executing the list (2026-09-01)
+
+The "SAFE TO DELETE" list above was itself adversarially verified, and **45 of its 48 entries
+executed exactly as written**. Two entries were wrong. Both were caught by re-deriving rather
+than inheriting — the discipline this file's own closing paragraph prescribes.
+
+### 🔴 C-1 — `CreateMatter/wizardTypes.ts` is NOT dead. It MUST STAY.
+
+The list grouped it with `FileUploadZone.tsx` / `UploadedFileList.tsx` as "orphaned BY the
+Playbook deletion". That is true of those two — they are **pure one-line re-export shims** onto
+`@spaarke/ui-components/components/FileUpload/*`, and `Playbook/DocumentUploadStep.tsx:21-22` was
+their only importer. It is **false** of `wizardTypes.ts`, which exports `IUploadedFile` and is
+imported by **two files this same document lists under DO-NOT-DELETE**:
+
+| Live importer | Line | Uses |
+|---|---|---|
+| `CreateMatter/formTypes.ts` | `:15` → `:182` | `import type { IUploadedFile }` → `uploadedFiles: IUploadedFile[]` |
+| `CreateMatter/matterService.ts` | `:19` → `:163` | `import type { IUploadedFile }` → `uploadedFiles: IUploadedFile[]` |
+
+`matterService.ts` is live via `FilePreview/FilePreviewDialog.tsx:18` ← `DocumentCard.tsx` — this
+file says so itself, in the DO-NOT-DELETE table, one screen below the line telling you to delete
+its dependency. **Deleting `wizardTypes.ts` would have broken the LegalWorkspace typecheck.**
+
+**Root cause of the error**: the three files were grouped by *who orphaned them* (Playbook) rather
+than by *who still needs them*. Playbook was indeed the last importer of all three — but only two
+of them had Playbook as their **only** importer. A "dies with X" claim needs the importer set to be
+a subset of {X}, not merely to contain X.
+
+### 🟡 C-2 — the auth-shim count is 10, not 12
+
+Section `6A.1` is headed "zombie auth shims (12 files)" and then enumerates **10**. All 10 verified
+dead (self-references and stale checked-in `bundle.js` build artifacts only) and were deleted. There
+is no 11th or 12th file; the header count was wrong, not the list. Same class as the `1.11` /
+`4.3` undercounts already logged in the ERROR-RATE table — inherited counts drift, enumerations
+don't.
+
+### What was executed
+
+**47 files deleted** (48 listed − `wizardTypes.ts`), plus **5 edits**:
+
+| Edit | Why |
+|---|---|
+| `Spaarke.UI.Components/src/hooks/index.ts` | dropped 7 barrel lines; **kept** `useKeyboardShortcuts` (live) |
+| `Spaarke.UI.Components/src/types/index.ts` | dropped the `useDatasetMode` + `useVirtualization` re-exports (`:40-41`) |
+| `Spaarke.UI.Components/jest.config.js` | dropped the `useVirtualization` coverage entry; kept `useKeyboardShortcuts` |
+| `Spaarke.Visuals/src/components/index.ts` | dropped the `GradeMetricCard` barrel line |
+| `Spaarke.UI.Components/src/pcf-safe.ts` | **stale prose** — its usage example told developers to import the now-deleted `FindSimilarDialog`. Repointed to a symbol the file actually exports (`RelationshipCountCard`). This is [`FAILURE-MODES.md` AP-11](../../../.claude/FAILURE-MODES.md)'s "grep the PROSE when deleting" rule applied to itself. |
+
+### Verification performed (deletion-safety instrument)
+
+`tsc --noEmit` per package — it typechecks **every** file regardless of reachability, which is the
+property that makes it the right instrument here (a Vite/webpack build only walks reachable
+modules, and its `"modules transformed"` count is nondeterministic).
+
+| Package | Result |
+|---|---|
+| `Spaarke.UI.Components` | **0 errors** |
+| `Spaarke.Visuals` | 1 pre-existing (`Cannot find type definition file for 'node'`) |
+| `LegalWorkspace` | 208, **all pre-existing**; **zero** unresolved relative imports |
+| DRV code-page · PlaybookBuilder code-page | deps not installed (even `react` unresolved → counts meaningless); **zero** unresolved relative imports |
+| `src/client/pcf` workspace | 32 unresolved relative imports, **all** `./generated/ManifestTypes` (PCF build artifacts); **zero** errors naming any deleted path |
+
+The load-bearing signal is **"zero unresolved relative imports"** (`TS2307` on a `./` or `../`
+specifier) — that is the exact error a broken deletion produces, and it is absent everywhere. Raw
+error *totals* are useless in the packages whose `node_modules` are absent, so they were not used.
+
+### Name collisions that made path-scoping mandatory
+
+Three deletion targets have **live same-named siblings**. A basename-keyed delete would have
+destroyed shipping code:
+
+| Deleted (dead) | Live sibling — DO NOT TOUCH |
+|---|---|
+| `LegalWorkspace/src/components/Playbook/{PlaybookCardGrid,ScopeList,ScopeConfigurator,index}` | `Spaarke.UI.Components/src/components/Playbook/*` — consumed by `PlaybookLibraryShell.tsx` + `IntentWizardFlow.tsx` |
+| `LegalWorkspace/src/components/Wizard/{WizardShell,WizardSuccessScreen,…}` | `Spaarke.UI.Components/src/components/Wizard/*` — **modified on master this same day** |
+| `code-pages/DocumentRelationshipViewer/src/components/NodeActionBar.tsx` | `pcf/DocumentRelationshipViewer/.../components/NodeActionBar.tsx` — used by `RelationshipViewerModal.tsx` + its test |
+
+Add this to AP-11's channel list as an **11th** consideration: *a dead file may have a live twin at
+another path.* Never delete by basename; always by full path.
+
+### The FindSimilar family — why the ribbon button does NOT keep it alive
+
+`sprk_wizard_commands.js:270` `openFindSimilarDialog` is a **live ribbon button** on `sprk_matter`
+(`spaarke_insights/Entities/sprk_Matter/RibbonDiff.xml:53,158,166`). It opens code page
+`sprk_findsimilar`, which is the `FindSimilarCodePage` solution — a **standalone 573-line
+reimplementation** whose only shared-lib import is `OOB_MODAL_SIZES`. It never touches
+`components/FindSimilar/`. The LW adapter that *did* wrap the shared family was already deleted in
+`144ef43c4`. So: live ribbon → live code page → **dead shared family**. Worth recording because the
+ribbon/webresource channel looked like a hit and was not one; the check that settled it was reading
+the code page's import list, not grepping for the component name.
