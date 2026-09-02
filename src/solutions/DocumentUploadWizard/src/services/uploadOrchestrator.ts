@@ -39,6 +39,8 @@ import {
 } from "@spaarke/ui-components/services/document-upload";
 import type { EntityConfigResolver } from "@spaarke/ui-components/services/document-upload";
 
+import type { ConflictBehaviorOption } from "@spaarke/sdap-client";
+
 import { authenticatedFetch } from "@spaarke/auth";
 import { resolveSearchIndexNameForRecord } from "../components/AssociateToStep";
 
@@ -67,6 +69,14 @@ export interface OrchestratorFileProgress {
     errorMessage?: string;
     /** Created Dataverse record ID (populated after Phase 2). */
     documentRecordId?: string;
+    /**
+     * Present when this file stopped on a NAME COLLISION rather than a real failure.
+     *
+     * Nothing was written to SPE, so the row can offer "Keep both" / "Save as new version" and the
+     * caller re-invokes {@link orchestrateUpload} for just this file with the chosen
+     * `conflictBehavior`.
+     */
+    nameConflict?: { fileName: string };
 }
 
 /** Overall result of the orchestrated upload. */
@@ -94,6 +104,8 @@ export interface OrchestratorFileResult {
     success: boolean;
     /** Error message if any critical phase failed. */
     errorMessage?: string;
+    /** Set when the file stopped on a recoverable name collision — see OrchestratorFileProgress. */
+    nameConflict?: { fileName: string };
 }
 
 /** Configuration for the upload orchestrator. */
@@ -116,8 +128,11 @@ export interface UploadOrchestratorConfig {
     onUnauthorized?: () => void;
 }
 
-/** Chunked upload threshold: 4 MB. Files larger than this could use chunked sessions. */
-const CHUNKED_UPLOAD_THRESHOLD_BYTES = 4 * 1024 * 1024;
+// `CHUNKED_UPLOAD_THRESHOLD_BYTES = 4 MB` was DELETED here 2026-09-02. It had zero references —
+// no branch ever read it — but it was the third copy of a 4 MiB limit that no server ever enforced
+// (`PathValidator.SmallUploadMaxBytes`, deleted in `4044286a6`, was the same fiction). The simple
+// PUT this pipeline uses accepts up to 250 MB. Do not reintroduce a size constant here: the only
+// honest place for an upload ceiling is the client that actually chooses a transfer strategy.
 
 // ---------------------------------------------------------------------------
 // Upload Orchestrator
@@ -129,12 +144,17 @@ const CHUNKED_UPLOAD_THRESHOLD_BYTES = 4 * 1024 * 1024;
  * @param files - Files selected by the user in Step 1
  * @param config - Orchestrator configuration
  * @param onProgress - Per-file progress callback
+ * @param conflictBehavior - OMIT on the first attempt: the BFF then defaults to `fail`, so a
+ *   same-named file reports `nameConflict` with the existing file untouched. Pass `'rename'` or
+ *   `'replace'` only when the caller is RETRYING the files in `files` after the user chose. A
+ *   retry is normally a single-file call, since one decision covers one file.
  * @returns Overall orchestration result
  */
 export async function orchestrateUpload(
     files: File[],
     config: UploadOrchestratorConfig,
     onProgress?: (progress: OrchestratorFileProgress) => void,
+    conflictBehavior?: ConflictBehaviorOption,
 ): Promise<OrchestratorResult> {
     const logger = config.logger ?? consoleLogger;
 
@@ -196,6 +216,7 @@ export async function orchestrateUpload(
         {
             files,
             containerId: config.parentContext.containerId,
+            conflictBehavior,
         },
         (progress) => {
             // Map MultiFileUploadService progress to orchestrator progress
@@ -208,6 +229,7 @@ export async function orchestrateUpload(
                 phase: progress.status === "failed" ? "error" : "uploading",
                 uploadPercent: percent,
                 errorMessage: progress.error,
+                nameConflict: progress.nameConflict,
             });
         },
     );
@@ -223,11 +245,15 @@ export async function orchestrateUpload(
         const idx = fileResults.findIndex((r) => r.fileName === err.fileName);
         if (idx >= 0) {
             fileResults[idx].errorMessage = err.error;
+            // Carried onto both the result and the progress event: the result drives the wizard's
+            // final counts, the progress event drives the row that offers the user the choice.
+            fileResults[idx].nameConflict = err.nameConflict;
             onProgress?.({
                 fileName: err.fileName,
                 phase: "error",
                 uploadPercent: 0,
                 errorMessage: err.error,
+                nameConflict: err.nameConflict,
             });
         }
     }

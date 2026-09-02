@@ -228,6 +228,13 @@ export interface FileUploadRequest {
 
   /** Optional override for file name */
   fileName?: string;
+
+  /**
+   * Name-collision behaviour. OMIT on the first attempt (server defaults to `fail`, so a collision
+   * returns `nameConflict` with the existing file untouched). Set only when RETRYING after the user
+   * has chosen rename or replace.
+   */
+  conflictBehavior?: ConflictBehaviorOption;
 }
 
 // ---------------------------------------------------------------------------
@@ -243,6 +250,15 @@ export interface UploadFilesRequest {
 
   /** SharePoint Embedded Container ID (from parent record) */
   containerId: string;
+
+  /**
+   * Name-collision behaviour applied to EVERY file in this batch. Omit on a first attempt.
+   *
+   * Batch-wide rather than per-file because a retry carries exactly one user decision: the UI
+   * re-invokes the pipeline with the single file the user just chose for. A batch of mixed
+   * decisions is therefore a batch of single-file retries, not one call with a map.
+   */
+  conflictBehavior?: ConflictBehaviorOption;
 }
 
 /**
@@ -263,6 +279,14 @@ export interface UploadProgress {
 
   /** Error message (when status is 'failed') */
   error?: string;
+
+  /**
+   * Present when `status === 'failed'` because of a NAME COLLISION rather than a real failure.
+   *
+   * Carried alongside `error` (not instead of it) so a consumer that only reads `error` still shows
+   * something sensible. Consumers that understand this field offer the rename / new-version choice.
+   */
+  nameConflict?: { fileName: string };
 }
 
 /**
@@ -287,8 +311,14 @@ export interface UploadFilesResult {
   /** SPE metadata for successfully uploaded files */
   uploadedFiles: SpeFileMetadata[];
 
-  /** Errors for failed uploads */
-  errors: { fileName: string; error: string }[];
+  /**
+   * Errors for failed uploads.
+   *
+   * `nameConflict` marks the recoverable subset: nothing was written for that file, and retrying it
+   * with `conflictBehavior` will succeed. Without this the collision reached the UI as an
+   * indistinguishable error string, which is how it previously surfaced as "Unknown error occurred".
+   */
+  errors: { fileName: string; error: string; nameConflict?: { fileName: string } }[];
 }
 
 // ---------------------------------------------------------------------------
