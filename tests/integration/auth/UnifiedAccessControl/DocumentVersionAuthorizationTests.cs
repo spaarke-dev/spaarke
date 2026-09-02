@@ -397,6 +397,7 @@ public class DocumentVersionTestFixture : DocumentDestroyAuthorizationTestFixtur
         public Task<Stream?> DownloadFileAsUserAsync(HttpContext ctx, string driveId, string itemId, CancellationToken ct = default) => Unmodelled<Task<Stream?>>();
         public Task<string?> GetCurrentVersionIdAsUserAsync(HttpContext ctx, string driveId, string itemId, CancellationToken ct = default) => Unmodelled<Task<string?>>();
         public Task<FileHandleDto?> UploadSmallAsUserAsync(HttpContext ctx, string containerId, string path, Stream content, CancellationToken ct = default) => Unmodelled<Task<FileHandleDto?>>();
+        public Task<FileHandleDto?> UploadSmallAsUserAsync(HttpContext ctx, string containerId, string path, Stream content, Sprk.Bff.Api.Models.ConflictBehavior conflictBehavior, CancellationToken ct = default) => Unmodelled<Task<FileHandleDto?>>();
         public Task<FileHandleDto?> UploadSmallAsync(string driveId, string path, Stream content, CancellationToken ct = default) => Unmodelled<Task<FileHandleDto?>>();
         public Task<FileHandleDto?> ReplaceFileContentAsUserAsync(HttpContext ctx, string driveId, string itemId, Stream content, CancellationToken ct = default) => Unmodelled<Task<FileHandleDto?>>();
         public Task<FileHandleDto?> ReplaceFileContentAsUserAsync(HttpContext ctx, string driveId, string itemId, Stream content, string? ifMatch, CancellationToken ct = default) => Unmodelled<Task<FileHandleDto?>>();

@@ -186,11 +186,34 @@ public class UploadSessionManager
     /// the same figure for containers, so this method now covers every document size Spaarke carries.
     /// Callers enforce their own product limits (see <c>ComposeSaveLimits</c>); this method enforces none.
     /// </summary>
+    public Task<FileHandleDto?> UploadSmallAsUserAsync(
+        HttpContext ctx,
+        string containerId,
+        string path,
+        Stream content,
+        CancellationToken ct = default)
+        // Replace preserves the behaviour every existing caller was already getting from Graph's
+        // implicit PUT default. Kept as a separate 4-arg overload rather than an optional parameter
+        // so the ~15 Moq Setup/Verify expressions pinning this arity keep compiling — the collision
+        // decision belongs to new callers, not to a signature change rippling through old tests.
+        => UploadSmallAsUserAsync(ctx, containerId, path, content, ConflictBehavior.Replace, ct);
+
+    /// <summary>
+    /// Create a NEW drive-item under the user's OBO identity with an EXPLICIT name-collision behaviour.
+    /// </summary>
+    /// <remarks>
+    /// <see cref="ConflictBehavior.Fail"/> makes a name collision a Graph 409 with the existing item
+    /// left untouched — the only value that is safe when the caller has not yet asked the user what
+    /// to do. <see cref="ConflictBehavior.Rename"/> stores under a server-generated name;
+    /// <see cref="ConflictBehavior.Replace"/> overwrites in place (SharePoint keeps the prior content
+    /// as a version).
+    /// </remarks>
     public async Task<FileHandleDto?> UploadSmallAsUserAsync(
         HttpContext ctx,
         string containerId,
         string path,
         Stream content,
+        ConflictBehavior conflictBehavior,
         CancellationToken ct = default)
     {
         try
@@ -218,10 +241,9 @@ public class UploadSessionManager
             // Reference: https://learn.microsoft.com/en-us/sharepoint/dev/embedded/concepts/app-concepts/containertypes
             _logger.LogDebug("Using container ID as drive ID for SPE OBO upload");
 
-            var uploadedItem = await graphClient.Drives[containerId].Root
-                .ItemWithPath(path)
-                .Content
-                .PutAsync(content, cancellationToken: ct);
+            var uploadedItem = await PutContentWithConflictBehaviorAsync(
+                graphClient, containerId, path, content, conflictBehavior, ct)
+                .ConfigureAwait(false);
 
             if (uploadedItem == null)
             {
@@ -263,6 +285,23 @@ public class UploadSessionManager
             _logger.LogError(ex, "SPE create (upload-small): access denied for container={ContainerId} path={Path}",
                 containerId, path);
             throw new UnauthorizedAccessException($"Access denied to container {containerId}: {ex.Error?.Message ?? ex.Message}", ex);
+        }
+        catch (ODataError ex) when (ex.ResponseStatusCode == 409)
+        {
+            // Reached only when the caller passed ConflictBehavior.Fail — i.e. it explicitly asked to
+            // be told about a name collision rather than silently overwriting. The existing item is
+            // UNTOUCHED, which is the whole point: the caller can now ask the user to rename or save a
+            // new version. Surfaced as SpaarkeStorageException (409 + Graph's own code, typically
+            // "nameAlreadyExists") because the OBO endpoints already translate that to ProblemDetails —
+            // no new exception type for a case the existing one models exactly.
+            _logger.LogInformation(
+                "SPE create (upload-small): name collision on path {Path} in container {ContainerId}; " +
+                "existing item left intact (conflictBehavior=fail)", path, containerId);
+            throw new SpaarkeStorageException(
+                $"A file named '{path}' already exists in this location.",
+                statusCode: 409,
+                errorCode: ex.Error?.Code ?? "nameAlreadyExists",
+                innerException: ex);
         }
         catch (ODataError ex) when (ex.ResponseStatusCode == 413)
         {

@@ -93,7 +93,8 @@ public static class OBOEndpoints
 
                 // Stream directly to Graph SDK (no memory buffering)
                 var item = await GraphCallScope.Run(
-                    () => speFileStore.UploadSmallAsUserAsync(ctx, driveId, path, req.Body, ct),
+                    () => speFileStore.UploadSmallAsUserAsync(
+                        ctx, driveId, path, req.Body, ResolveConflictBehavior(req), ct),
                     "obo.upload.small");
 
                 logger.LogInformation("OBO upload successful - DriveItemId: {ItemId}", item?.Id);
@@ -193,7 +194,8 @@ public static class OBOEndpoints
 
                 // Stream directly to Graph SDK (no memory buffering)
                 var item = await GraphCallScope.Run(
-                    () => speFileStore.UploadSmallAsUserAsync(ctx, driveId, path, req.Body, ct),
+                    () => speFileStore.UploadSmallAsUserAsync(
+                        ctx, driveId, path, req.Body, ResolveConflictBehavior(req), ct),
                     "obo.upload.small");
 
                 logger.LogInformation("OBO record-keyed upload successful - DriveItemId: {ItemId}", item?.Id);
@@ -449,6 +451,39 @@ public static class OBOEndpoints
     /// URL WITHOUT <c>encodeURIComponent</c>, so a '/' in a user's file name silently becomes extra route
     /// segments there. After this change that request gets a clean 400 instead of minting folders.</para>
     /// </remarks>
+    /// <summary>
+    /// Resolves the name-collision behaviour for an upload from the <c>?conflictBehavior=</c> query
+    /// parameter, defaulting to <see cref="ConflictBehavior.Fail"/>.
+    /// </summary>
+    /// <remarks>
+    /// <para><b>Fail is the default deliberately, and it is a behaviour CHANGE.</b> Previously these
+    /// routes inherited Graph's implicit PUT default of <c>replace</c>, so uploading a file whose name
+    /// already existed silently overwrote the stored bytes — and the failure the user actually saw came
+    /// later and from somewhere else: the follow-on <c>sprk_document</c> insert violated the alternate
+    /// key on the SPE item id and Dataverse returned a 412 titled "Duplicate Record" with an
+    /// unsubstituted <c>{1}</c> placeholder. That reads as duplicate detection but is data loss
+    /// followed by a confusing error. With <c>fail</c>, Graph returns 409 and the existing file is
+    /// untouched.</para>
+    ///
+    /// <para>Clients that have ASKED the user what to do pass their choice back explicitly:
+    /// <c>?conflictBehavior=rename</c> (keep both — Graph stores under a non-colliding name) or
+    /// <c>?conflictBehavior=replace</c> (save as a new version — SharePoint retains the prior content
+    /// as a version, so it stays recoverable). There is no separate "replace and discard" value: at the
+    /// Graph level that is the same call as <c>replace</c>, and a user who genuinely wants the old
+    /// document gone deletes it and uploads fresh.</para>
+    ///
+    /// <para>Unrecognised values fall back to <c>replace</c> via
+    /// <c>ConflictBehaviorExtensions.ParseConflictBehavior</c>, so this only reads the parameter when
+    /// it is actually present — an absent parameter must mean <c>fail</c>, not the parser's default.</para>
+    /// </remarks>
+    private static ConflictBehavior ResolveConflictBehavior(HttpRequest req)
+    {
+        var raw = req.Query["conflictBehavior"].ToString();
+        return string.IsNullOrWhiteSpace(raw)
+            ? ConflictBehavior.Fail
+            : ConflictBehaviorExtensions.ParseConflictBehavior(raw);
+    }
+
     private static (bool ok, string? error) ValidatePathForOBO(string path)
     {
         if (string.IsNullOrWhiteSpace(path)) return (false, "path is required");

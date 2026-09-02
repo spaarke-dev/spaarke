@@ -269,6 +269,17 @@ public class SpeFileStore : ISpeFileOperations
         CancellationToken ct = default)
         => _uploadManager.UploadSmallAsUserAsync(ctx, containerId, path, content, ct);
 
+    // unified-access-control-r2: explicit-collision overload. See ISpeFileOperations for why callers
+    // that have not yet asked the user what to do must pass ConflictBehavior.Fail.
+    public Task<FileHandleDto?> UploadSmallAsUserAsync(
+        HttpContext ctx,
+        string containerId,
+        string path,
+        Stream content,
+        Sprk.Bff.Api.Models.ConflictBehavior conflictBehavior,
+        CancellationToken ct = default)
+        => _uploadManager.UploadSmallAsUserAsync(ctx, containerId, path, content, conflictBehavior, ct);
+
     public Task<FileHandleDto?> ReplaceFileContentAsUserAsync(
         HttpContext ctx,
         string driveId,

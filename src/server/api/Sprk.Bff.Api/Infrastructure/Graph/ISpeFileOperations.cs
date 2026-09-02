@@ -163,6 +163,28 @@ public interface ISpeFileOperations
         CancellationToken ct = default);
 
     /// <summary>
+    /// Create a NEW drive-item under the user's OBO identity with an EXPLICIT name-collision behaviour.
+    /// </summary>
+    /// <remarks>
+    /// The 5-argument overload above is equivalent to passing
+    /// <see cref="Sprk.Bff.Api.Models.ConflictBehavior.Replace"/> — which silently overwrites a
+    /// same-named file. Any caller that has NOT already asked the user what to do on a collision
+    /// should pass <see cref="Sprk.Bff.Api.Models.ConflictBehavior.Fail"/> instead: Graph then returns
+    /// 409 and the existing item is untouched, which is recoverable. Overwriting first and reporting
+    /// afterwards is not.
+    ///
+    /// Added by unified-access-control-r2 as an OVERLOAD rather than a parameter on the existing
+    /// method so that the many Moq expectations pinning the 4-argument arity keep compiling.
+    /// </remarks>
+    Task<FileHandleDto?> UploadSmallAsUserAsync(
+        HttpContext ctx,
+        string containerId,
+        string path,
+        Stream content,
+        Sprk.Bff.Api.Models.ConflictBehavior conflictBehavior,
+        CancellationToken ct = default);
+
+    /// <summary>
     /// Create a NEW drive-item in a container/drive under APP-ONLY (managed identity,
     /// ADR-028) auth — the background/server-side counterpart to
     /// <see cref="UploadSmallAsUserAsync(HttpContext, string, string, Stream, CancellationToken)"/>.
