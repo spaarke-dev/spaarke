@@ -10,7 +10,13 @@ export type { StatusViewProps, ProcessingJob } from './StatusView';
 export { SignInView } from './SignInView';
 export type { SignInViewProps } from './SignInView';
 
-// Inline "Create To Do" tool — creates a sprk_event (type=task) via the BFF create-task
-// endpoint, right in the pane (email-communication-intelligence-r2, owner 2026-09-01).
+// Inline "Create To Do" tool — creates a first-class sprk_todo via the BFF `POST /api/office/todo`,
+// right in the pane, regarding the filed record (email-communication-intelligence-r2, owner 2026-09-02).
 export { CreateTodoView } from './CreateTodoView';
-export type { CreateTodoViewProps, SavedTodoContext, CreateTaskInput, CreateTaskResult } from './CreateTodoView';
+export type {
+  CreateTodoViewProps,
+  SavedTodoContext,
+  CreateTodoInput,
+  CreateTodoResult,
+  ContactOption,
+} from './CreateTodoView';

@@ -47,11 +47,15 @@ function readInitialAction(): 'createTodo' | undefined {
 /**
  * In the browser test harness (webpack dev mode) supply a demo "filed" context so
  * the inline Create To Do form is fully interactive without a real save — the
- * `demo-` communication id routes the create-task call to a mocked success in App.
+ * `demo-` communication id routes the create-To-Do call to a mocked success in App.
  *
  * In production this returns undefined until the SaveView → regarding wiring lands;
  * until then the Create To Do tab shows a "file this email first" prompt (correct
  * behavior — a To Do needs the record the email is filed to as its regarding).
+ *
+ * `regardingEntity` is the FRIENDLY type ("Matter"/"Project"/"Invoice") the BFF
+ * `POST /api/office/todo` expects; App also maps the Dataverse logical name
+ * defensively, so the future Save-flow wiring may pass either form.
  */
 function buildDemoSavedContext(): SavedTodoContext | undefined {
   if (process.env.NODE_ENV !== 'development') {
@@ -59,7 +63,7 @@ function buildDemoSavedContext(): SavedTodoContext | undefined {
   }
   return {
     communicationId: 'demo-communication-0001',
-    regardingEntity: 'sprk_matter',
+    regardingEntity: 'Matter',
     regardingRecordId: '00000000-0000-0000-0000-000000000001',
     regardingName: 'Acme Corp — NDA (demo)',
   };

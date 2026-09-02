@@ -11,7 +11,12 @@ import { ShareView } from './components/views/ShareView';
 import { StatusView } from './components/views/StatusView';
 import { SignInView } from './components/views/SignInView';
 import { CreateTodoView } from './components/views/CreateTodoView';
-import type { SavedTodoContext, CreateTaskInput, CreateTaskResult } from './components/views/CreateTodoView';
+import type {
+  SavedTodoContext,
+  CreateTodoInput,
+  CreateTodoResult,
+  ContactOption,
+} from './components/views/CreateTodoView';
 
 /**
  * Main App shell for Office Add-in taskpane.
@@ -206,35 +211,49 @@ export const App: React.FC<AppProps> = ({
     }
   };
 
-  // Inline "Create To Do" — POST the human-authored task to the BFF create-task
-  // endpoint against the filed record (regarding). No SmartTodo popup; the To Do is a
-  // sprk_event (type=task). Returns a plain ok/error the view renders inline.
+  // Inline "Create To Do" — POST the human-authored form to the BFF `POST /api/office/todo`
+  // endpoint, creating a first-class sprk_todo regarding the filed record (owner 2026-09-02:
+  // "we are not using the sprk-event type 'to do' anymore"; "the To Do should be created Related
+  // to the record that the email has been Related to"). Returns a plain ok/error the view renders.
   const apiBaseUrl = process.env.BFF_API_BASE_URL || 'https://spaarke-bff-dev.azurewebsites.net';
-  const handleCreateTask = useCallback(
-    async (input: CreateTaskInput): Promise<CreateTaskResult> => {
+
+  // Logical → friendly regarding type (the BFF expects "Matter"/"Project"/"Invoice"). The saved
+  // context may carry either the friendly type or the Dataverse logical name depending on the Save-
+  // flow wiring; normalize defensively so both work.
+  const toFriendlyRegardingType = (entity: string): string => {
+    const map: Record<string, string> = { sprk_matter: 'Matter', sprk_project: 'Project', sprk_invoice: 'Invoice' };
+    return map[entity] ?? entity;
+  };
+
+  const handleCreateTodo = useCallback(
+    async (input: CreateTodoInput): Promise<CreateTodoResult> => {
       if (!savedContext) {
         return { ok: false, error: 'File this email to Spaarke first (Save tab).' };
       }
       // Browser test harness: a demo context id → mock success so the UX is iterable
-      // without a real communication row.
+      // without a real Dataverse write.
       if (savedContext.communicationId.startsWith('demo-')) {
         await new Promise(resolve => setTimeout(resolve, 600));
         return { ok: true };
       }
       try {
         const token = await authService.getAccessToken();
-        const res = await fetch(`${apiBaseUrl}/api/communications/${savedContext.communicationId}/create-task`, {
+        const res = await fetch(`${apiBaseUrl}/api/office/todo`, {
           method: 'POST',
           headers: {
             'Content-Type': 'application/json',
             ...(token ? { Authorization: `Bearer ${token}` } : {}),
           },
           body: JSON.stringify({
-            subject: input.subject,
+            name: input.name,
             description: input.description,
+            assignedToContactId: input.assignedToContactId,
             dueDate: input.dueDate,
-            regardingEntity: savedContext.regardingEntity,
+            priorityScore: input.priorityScore,
+            effortScore: input.effortScore,
+            regardingEntityType: toFriendlyRegardingType(savedContext.regardingEntity),
             regardingRecordId: savedContext.regardingRecordId,
+            regardingRecordName: savedContext.regardingName,
           }),
         });
         if (!res.ok) {
@@ -243,6 +262,44 @@ export const App: React.FC<AppProps> = ({
         return { ok: true };
       } catch (err) {
         return { ok: false, error: err instanceof Error ? err.message : 'Create failed.' };
+      }
+    },
+    [savedContext, apiBaseUrl]
+  );
+
+  // Assigned-To (Contact) lookup — reuses the Office entity search scoped to Contact.
+  const handleSearchContacts = useCallback(
+    async (query: string): Promise<ContactOption[]> => {
+      // Browser test harness (demo filed context) → static demo contacts.
+      if (savedContext?.communicationId.startsWith('demo-')) {
+        await new Promise(resolve => setTimeout(resolve, 200));
+        const demo: ContactOption[] = [
+          { id: 'demo-contact-1', name: 'Jane Cooper', displayInfo: 'Acme Corp · GC' },
+          { id: 'demo-contact-2', name: 'Robert Fox', displayInfo: 'Acme Corp · Paralegal' },
+          { id: 'demo-contact-3', name: 'Wade Warren', displayInfo: 'Beta LLC · Counsel' },
+        ];
+        const q = query.toLowerCase();
+        return demo.filter(c => c.name.toLowerCase().includes(q));
+      }
+      try {
+        const token = await authService.getAccessToken();
+        const res = await fetch(
+          `${apiBaseUrl}/api/office/search/entities?q=${encodeURIComponent(query)}&type=Contact&top=10`,
+          { headers: { ...(token ? { Authorization: `Bearer ${token}` } : {}) } }
+        );
+        if (!res.ok) {
+          return [];
+        }
+        const data = (await res.json()) as {
+          results?: { id: string; name: string; displayInfo?: string }[];
+        };
+        return (data.results ?? []).map(r => ({
+          id: r.id,
+          name: r.name,
+          ...(r.displayInfo ? { displayInfo: r.displayInfo } : {}),
+        }));
+      } catch {
+        return [];
       }
     },
     [savedContext, apiBaseUrl]
@@ -350,11 +407,12 @@ export const App: React.FC<AppProps> = ({
           />
         )}
 
-        {/* Create To Do tab — inline task creation (a sprk_event type=task; no SmartTodo popup) */}
+        {/* Create To Do tab — inline first-class sprk_todo creation (no SmartTodo popup) */}
         {currentTab === 'createTodo' && (
           <CreateTodoView
             hostAdapter={hostAdapter}
-            onCreateTask={handleCreateTask}
+            onCreateTodo={handleCreateTodo}
+            onSearchContacts={handleSearchContacts}
             onGoToSave={() => setCurrentTab('save')}
             {...(savedContext ? { savedContext } : {})}
           />

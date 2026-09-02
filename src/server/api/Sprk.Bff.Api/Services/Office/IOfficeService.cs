@@ -167,6 +167,30 @@ public interface IOfficeService
         CancellationToken cancellationToken = default);
 
     /// <summary>
+    /// Creates a first-class <c>sprk_todo</c> from the add-in inline "Create To Do"
+    /// (email-communication-intelligence-r2, #3), regarding the record the email was filed to.
+    /// </summary>
+    /// <param name="request">Create-To-Do request (name, description, contact assignee, due date, priority/effort scores, regarding).</param>
+    /// <param name="userId">Authenticated user id (OBO oid).</param>
+    /// <param name="ownerSystemUserId">Caller's resolved <c>systemuserid</c> for <c>ownerid</c> attribution (ADR-024); null → app-owned.</param>
+    /// <param name="cancellationToken">Cancellation token.</param>
+    /// <returns>The created To Do id + name, or null when creation is unavailable (no generic-create dep injected).</returns>
+    /// <remarks>
+    /// <para>
+    /// Targets <c>sprk_todo</c> (NOT <c>sprk_event</c>) — mirroring the <c>CreateTodoWizard</c> field set. The
+    /// regarding is written via the entity-specific lookup (<c>sprk_regardingmatter</c>/<c>project</c>/<c>invoice</c>)
+    /// plus the ADR-024 denormalized resolver fields (id/name, and a best-effort record-type ref). App-only create
+    /// via <see cref="IGenericEntityService"/> with <c>ownerid</c> = caller (same posture as
+    /// <see cref="QuickCreateAsync"/> — no impersonated-create helper exists in the BFF).
+    /// </para>
+    /// </remarks>
+    Task<CreateTodoResponse?> CreateTodoAsync(
+        CreateTodoRequest request,
+        string userId,
+        string? ownerSystemUserId = null,
+        CancellationToken cancellationToken = default);
+
+    /// <summary>
     /// Gets recently used association targets and documents for the user.
     /// </summary>
     /// <param name="userId">Authenticated user ID.</param>
