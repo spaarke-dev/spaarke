@@ -1,6 +1,6 @@
 # Current Task State — email-communication-intelligence-r2
 
-> **Last Updated**: 2026-09-02 (context-handoff — Outlook add-in UX redesign in progress: Slices 1–2 done + 4 UI-feedback rounds, Slice 3 = BFF-backed inline "New record" being scoped)
+> **Last Updated**: 2026-09-02 (context-handoff before /compact — Outlook add-in UX redesign: Slices 1–3 DONE on branch + multiple UI-feedback rounds; next big item is #3 the Create To Do form redesign)
 > **Recovery**: Read "Quick Recovery" first.
 
 ---
@@ -9,46 +9,65 @@
 
 | Field | Value |
 |-------|-------|
-| **Active work** | **Outlook add-in UX redesign** (UAT-driven, owner 2026-09-01/02). Iterating in the add-in's **own browser test harness** (`npm run start:outlook` → `https://localhost:3000/outlook/taskpane-test.html`, mock Office + mock auth + demo data). NOT the spaarke-prototype (that's Xrm-based; the add-in is Office.js). |
-| **Branch** | `work/email-communication-intelligence-r2` — **7 commits ahead of master, all committed, tree clean.** Nothing merged yet (WIP on branch). |
-| **Done** | **Slice 1** (`220070ed3`): consolidated toolbar (logo removed per feedback; tabs left + ⋮ overflow right) + "Related to" rename. **Slice 2** (`9377fff79` + refinements `9d799dfd2`, `c16a5b718`, `c881d6c76`): "Related to" = reconciliation-style **auto-match cards** (record + type + % match + check) + single-select type chips (default Matter, gray/blue, left of label) + green-check+× select state + wizard footer (Cancel left / Save right) + AI-processing toggles removed (always-on). Plus the earlier **nav + inline Create To Do** (`71d93eb12`). |
-| **In progress** | **Slice 3 — BFF-backed inline "New record"** (behind the `+ New` button). Owner chose "BFF-backed inline create" over open-in-browser. Scope defaulted to **Matter + Project, minimal fields** (owner didn't pin it). An Explore agent is mapping the create mechanism (wizard path / existing BFF endpoint / required fields / impersonated-create pattern) before building. |
-| **Next** | Read the agent's create-mechanism map → build the BFF create endpoint (§10 governance: placement justification, publish-size + CVE, tests, ADR-024 impersonation) + the add-in inline create form → auto-select the created record as Related-to. |
+| **Active work** | **Outlook add-in UX redesign** (UAT-driven, owner 2026-09-01/02). Iterated in the add-in's **own browser test harness**: `cd src/client/office-addins && npm run start:outlook` → `https://localhost:3000/outlook/taskpane-test.html` (mock Office + mock auth + demo data via `window.__SPAARKE_TEST_MODE__`). NOT spaarke-prototype (Xrm-based; add-in is Office.js). First run: `npm install --legacy-peer-deps` + `npx office-addin-dev-certs install`. |
+| **Branch** | `work/email-communication-intelligence-r2` — **10 commits ahead of master, all committed, tree clean.** Nothing merged yet (WIP). |
+| **Build gate** | Add-in: `cd src/client/office-addins && npm run build:dev` (webpack/babel — the gate). BFF: `dotnet build src/server/api/Sprk.Bff.Api/`. Both currently **0-err**. `npm run typecheck` = ~393 PRE-EXISTING errors (exactOptional / jest-dom missing) — filter to changed files. |
+| **DONE** | **Slice 1** toolbar (logo removed, tabs+⋮ overflow) + "Related to" rename. **Slice 2** reconciliation-style auto-match cards + chips + green-check select + wizard footer + AI-toggles-removed (4 refinement rounds). **Slice 3** BFF-backed inline "New record". Plus earlier **nav + inline Create To Do** tab. Latest round: **inline-create in the search row** (New→input becomes name, Search→Create, New→Cancel); **chips = Matter/Project/Invoice** (Account/Contact removed); **BFF quickcreate supports Invoice**. |
+| **NEXT (big)** | **#3 Create To Do form redesign** — see "Outstanding work" §A. Then logo wiring (§B), production save-context (§C), deploy (§D). |
 
 ---
 
-## Add-in redesign — architecture + key files
+## Outstanding work (prioritized)
 
-**Reconciliation reuse verdict (Explore agent, this session):** the add-in CANNOT reuse the reconciliation UI components (`EmailConnectionsReview`/`RelatedToCell`/`ReconciliationWorkspace`) — they're bound to a Dataverse `Xrm.WebApi` host the add-in doesn't have. It CAN reuse (and already does) the **host-agnostic candidate logic** (`@spaarke/communication-components/logic/connections/provenance` → `derivePrimaryReview`) + the **BFF suggestion endpoint** (`GET /api/office/communications/by-message-id/{id}/suggestions`, returns candidates with `ReinforcedConfidence` = % + server-resolved names). So we render **our own Fluent v9 cards** from that data. The **regarding is written at SAVE** (existing path) — Confirm on a card only *selects*; no new "confirm-regarding" BFF endpoint needed.
+### A. #3 — Create To Do form redesign (the main next build)
+Owner UI feedback 2026-09-02 on the `CreateTodoView` (the Create To Do tab):
+1. **Replace "Linked to" with the record card** — reuse the Save screen's selected-card look (green check style) for the regarding record.
+2. **Full form** matching the existing **`CreateTodoWizard` "To Do Details" step**: **Name/Title, Description, Assigned To (lookup to Contact), Due Date, Priority (choice), Effort (choice)**, Notes. Owner: *reuse the CreateTodoWizard form if possible, else recreate to match*.
+   - The wizard form lives in **`@spaarke/ui-components`** (`src/solutions/CreateTodoWizard/src/main.tsx` is just a thin Xrm host). ⚠️ Like the reconciliation components, it is likely **Xrm-host-bound** (Assigned-To lookup, choice option-sets) → the add-in (no Xrm) probably **recreates the layout** rather than reusing directly. Investigate first (mirror the RelatedToPicker verdict).
+   - **Assigned To** in the add-in needs a **Contact search via BFF** (no Xrm lookup); **Priority/Effort** are `sprk_event` option-sets — render as `<Select>` with the option values.
+   - **BFF gap**: the create-task endpoint `POST /api/communications/{communicationId}/create-task` (`CreateAdHocTaskRequest` in `CommunicationCreateTaskApplyService.cs`) has Subject, Description, DueDate, **AssignedTo**, Status — but **NOT Priority/Effort**. Adding those = a BFF change (extend the request + the impersonated PATCH field set). Confirm the `sprk_event` field names for priority/effort before wiring.
+3. **Cancel + Save at bottom; on Save DO NOT close the pane** — change the Save button to a **gray "Saved"** indicator. **Same behavior for the main Save-to-Spaarke form** (SaveFlow footer). (Cross-cutting: both `CreateTodoView` and `SaveFlow` footers.)
 
-**Client files (all `src/client/office-addins/`):**
-- `shared/taskpane/components/RelatedToPicker.tsx` — NEW: the auto-match cards + chips + search + select. Rewritten across 4 feedback rounds.
-- `shared/taskpane/components/SaveFlow.tsx` — swapped EntityPicker → RelatedToPicker; removed AI-processing UI (defaults stay `{profileSummary:true, ragIndex:true}`); wizard footer (Cancel/Save); `relatedSearch` (GET `/api/office/search/entities?q=&type=&top=`); `handleCreateNew` (currently routes to onQuickCreate — Slice 3 replaces with BFF create). DEMO_RELATED_CANDIDATES seeded when `isBrowserTestMode()`.
-- `shared/taskpane/services/communicationSuggestionsService.ts` — added `fetchRelatedCandidates()` + `RelatedCandidate` (candidates WITH confidence) alongside the existing single `fetchEnginePreSelection`.
-- `shared/taskpane/components/TaskPaneToolbar.tsx` — NEW: single toolbar (tabs left + ⋮ overflow). `TaskPaneShell.tsx` uses it (dropped separate Header+Nav rows). `TaskPaneNavigation.tsx` exports `getAvailableTabs`.
-- `shared/taskpane/components/views/CreateTodoView.tsx` — NEW inline Create To Do (title/due/regarding → `POST /communications/{id}/create-task`); `App.tsx` renders it under the `createTodo` tab; `outlook/taskpane/index.tsx` seeds demo saved-context + mocks auth in test mode.
-- `outlook/taskpane/taskpane-test.html` — sets `window.__SPAARKE_TEST_MODE__ = true` (drives auth mock + demo data).
+Current `CreateTodoView.tsx` has only Title + Due date + a warning-style "Linked to". Files: `src/client/office-addins/shared/taskpane/components/views/CreateTodoView.tsx`.
 
-**Test-harness pattern:** `window.__SPAARKE_TEST_MODE__` (set in taskpane-test.html) → index.tsx mocks auth (no real Entra); SaveFlow seeds DEMO_RELATED_CANDIDATES; CreateTodoView gets a demo saved-context. Real `.env` has PLACEHOLDER GUIDs (tenant `…0002`) — that's why a real sign-in 404s; the harness bypasses it.
+### B. Logo
+- **Black logo asset saved**: `projects/email-communication-intelligence-r2/spaarke-black-logo.svg` (owner-provided, monochrome). Earlier color one at `spaarke-color-logo-only.svg`.
+- The in-pane toolbar logo was **removed** per feedback. The black logo is (most likely) for the **app-tile** — the manifest `icons.color`/`icons.outline` point at **missing** `assets/icon-color.png`/`icon-outline.png` → **blank Apps-list tile**. Wiring = generate PNGs (color + 32px monochrome outline + ribbon icons) from the SVG via `generate-icons.mjs` (uses `sharp`) → reference in `outlook/manifest.json` + `word/word-manifest.xml`. Confirm with owner whether black logo is for app-tile or a re-added in-pane mark.
 
-**Build/verify:** `cd src/client/office-addins && npm run build:dev` (webpack, babel transpile-only — the gate). `npm run typecheck` reports ~393 PRE-EXISTING errors (exactOptionalPropertyTypes / jest-dom not installed / etc.) — filter to changed files. Deps already installed (node_modules present).
+### C. Production wiring (before deploy)
+- **Create To Do** real `communicationId` + regarding must come from the Save flow (demo-wired only via `initialSavedContext`).
+- **Related-to** confirm writes the regarding at SAVE (existing path) — verify end-to-end once deployed.
+
+### D. Deploy
+- Version bump (Outlook `manifest.json` 1.0.20→ + Word) → GitHub Actions `deploy-office-addins.yml` (holds secrets; live SWA `b64eb1876` on `icy-desert-0bfdbb61e.6.azurestaticapps.net`) → re-register in M365 admin (version bump required).
+- **BFF must also deploy** (Slice 3 added the quickcreate endpoint) via `.\scripts\Deploy-BffApi.ps1`.
+- Other-entity-types: quickcreate is Matter/Project/Invoice only (Account/Contact removed from chips; the 3 supported types cover the chips).
+- **Test obligation (§10)**: BFF `Services/Office` changed → the e2e spec `tests/e2e/specs/quickcreate-flow.spec.ts` covers the flow (a unit test needs OfficeService's 12-dep ctor → mock-heavy, ADR-038-discouraged). Add/confirm before the wrap-up PR.
 
 ---
 
-## Still-open add-in items (post-redesign, before deploy)
-- **Logo/app-tile**: manifest `icons.color`/`icons.outline` point at files that don't exist → blank Apps-list tile. (In-pane logo was removed per feedback; the app-tile icon is separate — still to fix at deploy.)
-- **Production save-context wiring**: CreateTodoView's real `communicationId` + regarding must come from the Save flow (only demo-wired now).
-- **Version bump + deploy + re-register** (Outlook manifest 1.0.20→ + Word) — after UX is locked. Add-in deploys via GitHub Actions `deploy-office-addins.yml` (task 044; live SWA `b64eb1876` on `icy-desert-0bfdbb61e.6.azurestaticapps.net`).
-- **Jest**: `TaskPaneNavigation.test.tsx` (+ others) fail on missing `@testing-library/jest-dom` (pre-existing infra gap) — not blocking.
+## Add-in architecture (key files + facts)
+
+**Reconciliation reuse verdict**: the add-in can't reuse the Xrm-bound reconciliation/wizard UI components; it reuses the **host-agnostic candidate logic** (`@spaarke/communication-components/logic/connections/provenance` → `derivePrimaryReview`) + BFF endpoints, and renders **its own Fluent v9 cards**.
+
+**Client (`src/client/office-addins/`):**
+- `shared/taskpane/components/RelatedToPicker.tsx` — auto-match cards + chips (Matter/Project/Invoice, left of "Related to" label) + inline-create-in-search-row + green-check select. `onCreateRecord(type,name)` → BFF quickcreate → auto-select.
+- `shared/taskpane/components/SaveFlow.tsx` — uses RelatedToPicker; `relatedSearch` (GET `/api/office/search/entities`), `createRelatedRecord` (POST `/api/office/quickcreate/{type}`); AI-processing UI removed (defaults stay on); wizard footer (Cancel/Save — **needs "Saved" state per §A.3**). DEMO_RELATED_CANDIDATES + isBrowserTestMode mocks.
+- `shared/taskpane/services/communicationSuggestionsService.ts` — `fetchRelatedCandidates()` (candidates w/ confidence) + `RelatedCandidate`.
+- `shared/taskpane/components/TaskPaneToolbar.tsx` (single toolbar) + `TaskPaneShell.tsx` + `TaskPaneNavigation.tsx` (`getAvailableTabs`).
+- `shared/taskpane/components/views/CreateTodoView.tsx` — inline Create To Do (**needs the §A form redesign**). `App.tsx` renders it under the `createTodo` tab; `outlook/taskpane/index.tsx` mocks auth + demo saved-context in test mode; `taskpane-test.html` sets the test flag.
+- `SpaarkeLogo.tsx` — was swapped to the color brand SVG then removed from the toolbar (component still exists, unused).
+
+**BFF (Slice 3):**
+- `Services/Office/OfficeService.cs` `QuickCreateAsync` — creates `sprk_matter`/`sprk_project`/`sprk_invoice` (name field per type; matter/project also description) via `IGenericEntityService.CreateAsync` with `ownerid` = caller (resolved in the endpoint). Optional `IGenericEntityService` ctor dep (registered singleton → IDataverseService).
+- `Api/Office/OfficeEndpoints.cs` — `MapQuickCreateEndpoints` uncommented → `POST /api/office/quickcreate/{entityType}` routable; handler resolves caller systemuserid via `ICallerSystemUserResolver` (best-effort) + passes it.
+- `Services/Office/IOfficeService.cs` — signature gained `string? ownerSystemUserId`.
 
 ---
 
-## Prior completed work (this project, merged to master)
-- **#919 document-profile AI bug** — FIXED (PR #923, deployed to BFF). Renderer nested-string fix + convergence. Doc: `docs/architecture/DOCUMENT-PROFILE-AND-AI-EXECUTION-MODELS.md`.
-- **Document Upload wizard "Send Email"** — rebuilt (dead-form fix #925 → EmailComposer #927 → Finish-guard #929 → centering #930), all merged + deployed to `sprk_documentuploadwizard`.
-- **Task 044 add-in deploy** — deployed + current (3 deploys; live SWA `b64eb1876`); only the interactive live smoke remained, and owner UAT confirmed the core save flow works.
-- **R-1/R-2/R-3 remediation** (affinity write / Compose content-dedup graduate-on-divergence / orphan cleanup) — all shipped + merged.
+## Prior completed work (merged to master, this project)
+- **#919 document-profile AI bug** FIXED (#923, deployed). **Document Upload wizard "Send Email"** rebuilt (#925/#927/#929/#930). **Task 044 add-in deploy** (live SWA current). **R-1/R-2/R-3 remediation** shipped.
 
 ## Merge/deploy reference
-- Master PROTECTED (ruleset `21824191`, required check literal `Router`). Use `gh pr create` + `gh pr merge {n} --auto --merge`. Always `git fetch origin && git merge origin/master` before pushing.
-- Add-in: GitHub Actions `deploy-office-addins.yml` (holds env secrets); manifests re-registered via M365 admin (version bump required for re-upload).
+- Master PROTECTED (ruleset `21824191`, required check literal `Router`). `gh pr create` + `gh pr merge {n} --auto --merge`. `git fetch origin && git merge origin/master` before pushing.
+- Add-in deploy: `deploy-office-addins.yml`. BFF deploy: `scripts/Deploy-BffApi.ps1`. M365 re-register needs a manifest version bump.
