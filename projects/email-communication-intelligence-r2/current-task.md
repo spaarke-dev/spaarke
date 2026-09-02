@@ -12,15 +12,24 @@
 | **Active work** | **Outlook add-in UX redesign** (UAT-driven, owner 2026-09-01/02). Iterated in the add-in's **own browser test harness**: `cd src/client/office-addins && npm run start:outlook` → `https://localhost:3000/outlook/taskpane-test.html` (mock Office + mock auth + demo data via `window.__SPAARKE_TEST_MODE__`). NOT spaarke-prototype (Xrm-based; add-in is Office.js). First run: `npm install --legacy-peer-deps` + `npx office-addin-dev-certs install`. |
 | **Branch** | `work/email-communication-intelligence-r2` — **10 commits ahead of master, all committed, tree clean.** Nothing merged yet (WIP). |
 | **Build gate** | Add-in: `cd src/client/office-addins && npm run build:dev` (webpack/babel — the gate). BFF: `dotnet build src/server/api/Sprk.Bff.Api/`. Both currently **0-err**. `npm run typecheck` = ~393 PRE-EXISTING errors (exactOptional / jest-dom missing) — filter to changed files. |
-| **DONE** | **Slice 1** toolbar (logo removed, tabs+⋮ overflow) + "Related to" rename. **Slice 2** reconciliation-style auto-match cards + chips + green-check select + wizard footer + AI-toggles-removed (4 refinement rounds). **Slice 3** BFF-backed inline "New record". Plus earlier **nav + inline Create To Do** tab. Latest round: **inline-create in the search row** (New→input becomes name, Search→Create, New→Cancel); **chips = Matter/Project/Invoice** (Account/Contact removed); **BFF quickcreate supports Invoice**. |
-| **NEXT (big)** | **#3 Create To Do form redesign** — see "Outstanding work" §A. Then logo wiring (§B), production save-context (§C), deploy (§D). |
+| **DONE** | **Slice 1** toolbar (logo removed, tabs+⋮ overflow) + "Related to" rename. **Slice 2** reconciliation-style auto-match cards + chips + green-check select + wizard footer + AI-toggles-removed. **Slice 3** BFF-backed inline "New record". Inline-create in the search row; chips = Matter/Project/Invoice; BFF quickcreate supports Invoice. **#3 Create To Do form redesign — DONE (commit d2b5dbc34):** now creates a **first-class `sprk_todo`** (NOT sprk_event) regarding the filed record, mirroring the CreateTodoWizard field set (Name/Description/Assigned-To-contact/Due/Priority/Effort); regarding shown as green record card; Cancel/Save footer with gray "Saved" (pane stays open). New BFF `POST /api/office/todo` + `OfficeService.CreateTodoAsync`. Both builds 0-err; publish 48.94 MB; no CVEs. |
+| **NEXT (big)** | Owner UAT of the Create To Do form (browser harness). Then: SaveFlow footer "Saved" decision (§A.4), production save-context wiring (§C), logo (§B), deploy (§D). |
 
 ---
 
 ## Outstanding work (prioritized)
 
-### A. #3 — Create To Do form redesign (the main next build)
-Owner UI feedback 2026-09-02 on the `CreateTodoView` (the Create To Do tab):
+### A. #3 — Create To Do form redesign — ✅ DONE (commit d2b5dbc34, 2026-09-02)
+**Decision locked (AskUserQuestion):** creates a **first-class `sprk_todo`**, not `sprk_event` (the requested Priority/Effort/Contact-assignee fields only exist on `sprk_todo`; owner confirmed "we are not using the sprk-event type 'to do' anymore"). Regarding = the record the email was filed to.
+
+**Built:** `CreateTodoView.tsx` full form (Name/Description/Assigned-To Contact type-ahead/Due/Priority/Effort dropdowns), green record card for the regarding, Cancel(reset)/Save footer with gray "Saved" (don't-close). `todoChoices.ts` add-in-local mirror of the priority/effort choice→score tables (§11 sanctioned dup of `todoScoreMappings.ts`). BFF: `CreateTodoRequest`/`Response`, `OfficeService.CreateTodoAsync` (app-only create via `IGenericEntityService`, ownerid=caller, regarding via `sprk_regardingmatter/project/invoice` + resolver fields id/name + best-effort `sprk_recordtype_ref`, assignee→contact), `POST /api/office/todo`. Contact lookup reuses `/api/office/search/entities?type=Contact`.
+
+**Residual / open:**
+- **§A.4 SaveFlow "Saved" footer** — owner asked the Save form footer to also show gray "Saved". DEFERRED: SaveFlow already has a richer async success flow (job-status → "Document Saved" card, pane stays open) — didn't force the gray-button pattern there to avoid regressing View-Document/Save-Another affordances. **Confirm with owner** whether they want the exact gray-button style on the Save footer too.
+- **§10 test obligation** — `Services/Office` changed; add/confirm a test for `POST /api/office/todo` before the wrap-up PR (OfficeService's 12-dep ctor is mock-heavy per ADR-038 → prefer the e2e spec path).
+- `sprk_assignedto` targets **contact** (live), NOT systemuser as the stale `entity-schema.md` row 40 says — the wizard's `todoService` + the owner both confirm contact.
+
+**Original owner UI feedback 2026-09-02 (for reference):**
 1. **Replace "Linked to" with the record card** — reuse the Save screen's selected-card look (green check style) for the regarding record.
 2. **Full form** matching the existing **`CreateTodoWizard` "To Do Details" step**: **Name/Title, Description, Assigned To (lookup to Contact), Due Date, Priority (choice), Effort (choice)**, Notes. Owner: *reuse the CreateTodoWizard form if possible, else recreate to match*.
    - The wizard form lives in **`@spaarke/ui-components`** (`src/solutions/CreateTodoWizard/src/main.tsx` is just a thin Xrm host). ⚠️ Like the reconciliation components, it is likely **Xrm-host-bound** (Assigned-To lookup, choice option-sets) → the add-in (no Xrm) probably **recreates the layout** rather than reusing directly. Investigate first (mirror the RelatedToPicker verdict).
