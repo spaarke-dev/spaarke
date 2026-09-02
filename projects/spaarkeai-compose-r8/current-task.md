@@ -16,7 +16,7 @@
 | **Next Action** | **START ON DRIVE PROVENANCE** — the last and riskiest server item; full brief in §R2 below. Then the CLIENT batch (#699 + the #858 client cutover) as one `npm` cycle. Then #853 close-out, 090 wrap-up, deploy. |
 | **Branch** | `work/spaarkeai-compose-r8` — **20 ahead of `origin/master`, 4 BEHIND, tree clean.** ⚠️ Master moved during this session. **Merge master BEFORE starting drive provenance** (`git merge origin/master`, never rebase — shared branch under review). Drive provenance touches `ComposeService.cs`, the file most likely to conflict, so resolving on the branch first is the cheap order. |
 | **Suite** | Compose **1,886 / 0** · BFF **11,831 / 0 / 57 skipped** · ArchTests **176/176** · solution build **0 errors** |
-| **Open, not blocking** | `Repair-ComposeIdentityKey.ps1` has **not** been run against a live environment. `section-break-flattened` may want a row in `COMPOSE-WRITE-RESIDUAL-LOSS.md` now that it is a per-edited-block code (settle at 090). No corpus doc uses **letter/roman** sub-numbering (`4.2(b)(iii)`) — the open half of #698, needs an owner document. Client `composeCitationResolver.ts` parity with its server twin has **no forcing function** — fold into #699 (same file's consumer). |
+| **Open, not blocking** | See §R3 — four carried items, each with what it needs. |
 
 ---
 
@@ -56,6 +56,17 @@ together distinguish it from a deletion.
 replace branch (`request.DriveId` at ~1871–1897). `ComposeSaveEndpoints.cs:80` currently 400s when
 `driveId` is absent from the body; that validation should survive the change (the client still sends
 it) but its *meaning* becomes "the client's claim", not "the write target".
+
+---
+
+## R3. CARRIED ITEMS — what each one actually needs
+
+| # | Item | What it needs | Owner action? |
+|---|---|---|---|
+| 1 | **`Repair-ComposeIdentityKey.ps1` never executed** | It has been written + syntax-checked, never run against real Dataverse. Report mode is READ-ONLY (`.\scripts\Repair-ComposeIdentityKey.ps1` with no switches) and safe anywhere; it needs `az login` + Dataverse admin. Run it against `spaarkedev1` first — that both validates the script and tells us whether dev is still clean after the 2026-08-17 hand-cleanup. `-Apply` only on an owner say-so. **Prod MUST have `sprk_graphitemid_uk` = Active before Compose ships there**, or every save 500s (the original incident). | Offered 2026-09-01; owner said "i don't know what that is but ok" — the explanation was given, no decision taken. Agent may run REPORT mode unprompted; never `-Apply`. |
+| 2 | **Letter/roman corpus fixture** (open half of #698) | A Word doc numbered `1.` → `a.` → `i.` — i.e. Word's **Home → Multilevel List → the `1. / a. / i.` variant**. **The doc the owner supplied twice is NOT it**: `notes/Word doucment paragraph number test.docx` (21,113 B) and the earlier OneDrive copy (21,192 B) are the SAME document re-saved — same `numId=7`, decimal at every level. Already in the corpus as `style-inherited-numbering.docx`; do not add it a third time. Its `numbering.xml` DEFINES lowerLetter/lowerRoman in unused abstractNums, so no paragraph references them. | Yes — needs a document only the owner can produce. Low priority: the resolver's letter/roman PARSE is proven; what is unproven is the numbering engine deriving `(b)`/`(iii)` from real `numbering.xml`. |
+| 3 | **`section-break-flattened` doc row** | `COMPOSE-WRITE-RESIDUAL-LOSS.md` has no row for it. It is now a per-EDITED-block code like the constructs already tabled there, so it arguably belongs. Settle at 090 wrap-up. | No |
+| 4 | **Client citation-resolver parity has no forcing function** | `composeCitationResolver.ts` mirrors the server `CitationResolver`; parity rests on ported test cases + `@see` comments. Nothing fails if the server parser gains a shape the client lacks. Its sole consumer is `ComposeEditor.placeAdvisoryComments` — which IS #699 — so fix it there, not separately. | No |
 
 ---
 | **Verify with** | **`dotnet build`** at the SOLUTION root — not one project (see §A2 for why that distinction cost real time) |
