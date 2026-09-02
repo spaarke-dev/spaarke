@@ -7,7 +7,7 @@ import { OutlookAdapter } from '@shared/adapters/OutlookAdapter';
 import { authService, apiClient } from '@shared/services';
 
 // Version information - synced with outlook/manifest.json's "version" field
-const APP_VERSION = '1.0.20';
+const APP_VERSION = '1.0.21';
 // Task 040 / FR-B0: fallback (used only outside webpack, e.g. non-build test
 // contexts) was a stale hardcoded date; webpack's DefinePlugin always injects
 // the real build date, so this fallback should never be user-visible.
