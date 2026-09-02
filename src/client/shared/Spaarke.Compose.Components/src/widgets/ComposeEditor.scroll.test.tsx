@@ -45,51 +45,40 @@ function setScrollGeometry(
   Object.defineProperty(el, 'scrollTop', { configurable: true, writable: true, value: geo.scrollTop });
 }
 
-describe('ComposeEditor — FIX #9 hidden scrollbar + scroll-for-more FAB', () => {
-  it('the editor surface hides its native scrollbar while remaining scrollable', async () => {
+describe('ComposeEditor — editor-surface scrolling (UAT round 2 #5)', () => {
+  // This suite REPLACES "FIX #9 hidden scrollbar + scroll-for-more FAB". That design hid the native
+  // scrollbar (`scrollbarWidth: 'none'`) and substituted a floating down-arrow FAB — the exact
+  // down-arrow control `src/client/shared/CLAUDE.md` bans, and ADR-051 requires the shared thin
+  // scrollbar on every scroll container. The old tests asserted the banned behaviour, so they are
+  // rewritten to assert the replacement rather than deleted: the surface must still scroll, and it
+  // must now do so with a VISIBLE scrollbar and no FAB.
+
+  it('the editor surface scrolls, and no longer suppresses its native scrollbar', async () => {
     renderComposeEditor();
     await screen.findByRole('textbox');
     const surface = screen.getByTestId('compose-editor-surface');
     const style = getComputedStyle(surface);
     expect(style.overflow).toBe('auto');
-    // Native scrollbar suppressed (Firefox) — the FAB is the affordance instead.
-    expect(style.scrollbarWidth).toBe('none');
+    // The whole point of the change: 'none' was the old value and is the regression to catch.
+    expect(style.scrollbarWidth).toBe('thin');
   });
 
-  it('shows the circular down-arrow FAB only when content sits below the fold, and hides it at the bottom', async () => {
+  it('renders NO down-arrow scroll FAB, at any scroll position', async () => {
     renderComposeEditor();
     await screen.findByRole('textbox');
     const surface = screen.getByTestId('compose-editor-surface');
 
-    // Not scrolled to bottom → FAB visible.
+    // The geometry that used to SHOW the FAB (content below the fold) must now show nothing.
     setScrollGeometry(surface, { scrollHeight: 1000, clientHeight: 400, scrollTop: 0 });
     act(() => {
       fireEvent.scroll(surface);
     });
-    expect(screen.getByTestId('compose-editor-scroll-down')).toBeInTheDocument();
+    expect(screen.queryByTestId('compose-editor-scroll-down')).not.toBeInTheDocument();
 
-    // Scrolled to the bottom → FAB gone.
     setScrollGeometry(surface, { scrollHeight: 1000, clientHeight: 400, scrollTop: 600 });
     act(() => {
       fireEvent.scroll(surface);
     });
     expect(screen.queryByTestId('compose-editor-scroll-down')).not.toBeInTheDocument();
-  });
-
-  it('clicking the FAB scrolls the surface down', async () => {
-    renderComposeEditor();
-    await screen.findByRole('textbox');
-    const surface = screen.getByTestId('compose-editor-surface');
-
-    const scrollBy = jest.fn();
-    (surface as unknown as { scrollBy: typeof scrollBy }).scrollBy = scrollBy;
-
-    setScrollGeometry(surface, { scrollHeight: 1000, clientHeight: 400, scrollTop: 0 });
-    act(() => {
-      fireEvent.scroll(surface);
-    });
-
-    fireEvent.click(screen.getByTestId('compose-editor-scroll-down'));
-    expect(scrollBy).toHaveBeenCalledWith(expect.objectContaining({ top: expect.any(Number), behavior: 'smooth' }));
   });
 });

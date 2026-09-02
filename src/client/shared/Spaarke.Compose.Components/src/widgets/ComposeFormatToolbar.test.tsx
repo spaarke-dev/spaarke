@@ -494,7 +494,12 @@ describe('ComposeFormatToolbar — Save / Save As dropdown + Auto Save (FR-01 ta
 
     await user.click(screen.getByRole('button', { name: /save options/i }));
     const toggle = await screen.findByTestId('compose-format-autosave-toggle');
-    expect(toggle).toHaveTextContent(/auto save/i);
+    // UAT round 2 #6: the label is "Keep recovery draft", NOT "Auto Save". The toggle controls a
+    // localStorage recovery draft that never reaches the BFF, and sat directly under Save/Save As
+    // where the old wording read as a third save mode. Asserting the literal copy is deliberate —
+    // a /save/i-style regex would pass on a relapse to the misleading label.
+    expect(toggle).toHaveTextContent('Keep recovery draft');
+    expect(toggle).not.toHaveTextContent(/auto ?save/i);
     expect(toggle).toHaveAttribute('aria-checked', 'true'); // reflects autoSaveEnabled
     await user.click(toggle);
     expect(onAutoSaveToggle).toHaveBeenCalledWith(false); // toggling an ON item turns it OFF
@@ -1191,19 +1196,24 @@ describe('ComposeFormatToolbar — FR-03 save-state indicator', () => {
     expect(el).toHaveTextContent('Saving…');
   });
 
-  it('reflects the Auto Save On/Off state when the toggle is wired', () => {
+  it('names the recovery draft honestly — never "Auto Save", which claimed a save it does not perform', () => {
     const { unmount } = renderFormatToolbar(
       {},
       { props: { onSave: jest.fn(), hasUnsavedEdits: false, autoSaveEnabled: true, onAutoSaveToggle: jest.fn() } }
     );
-    expect(screen.getByTestId('compose-save-state-indicator')).toHaveTextContent('Auto Save On');
+    // UAT round 2 #6 (r8): this read "Auto Save On" while the same element read "Unsaved", because the
+    // autosave tick writes localStorage and deliberately never calls the BFF (NFR-03). The owner read
+    // that pairing as "it says it autosaves but nothing saves" — correctly.
+    const onIndicator = screen.getByTestId('compose-save-state-indicator');
+    expect(onIndicator).toHaveTextContent('Recovery draft On');
+    expect(onIndicator).not.toHaveTextContent(/auto ?save/i);
     unmount();
 
     renderFormatToolbar(
       {},
       { props: { onSave: jest.fn(), hasUnsavedEdits: false, autoSaveEnabled: false, onAutoSaveToggle: jest.fn() } }
     );
-    expect(screen.getByTestId('compose-save-state-indicator')).toHaveTextContent('Auto Save Off');
+    expect(screen.getByTestId('compose-save-state-indicator')).toHaveTextContent('Recovery draft Off');
   });
 
   it('renders correctly in dark mode (ADR-021 — no crash, indicator present)', () => {

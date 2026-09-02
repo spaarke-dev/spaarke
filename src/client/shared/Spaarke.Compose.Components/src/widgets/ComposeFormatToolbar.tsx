@@ -1156,8 +1156,12 @@ export function ComposeFormatToolbar(props: ComposeFormatToolbarProps): React.JS
               {autoSaveEnabled !== undefined && onAutoSaveToggle ? (
                 <>
                   <MenuDivider />
+                  {/* UAT round 2 #6 — renamed from "Auto Save" for the same reason as the status
+                      indicator below: this toggles a localStorage RECOVERY DRAFT, never a save to the
+                      document. Sitting directly under "Save"/"Save As" made the old label read as a
+                      third save mode. */}
                   <MenuItemCheckbox name="autosave" value="on" data-testid="compose-format-autosave-toggle">
-                    Auto Save
+                    Keep recovery draft
                   </MenuItemCheckbox>
                 </>
               ) : null}
@@ -1180,7 +1184,13 @@ export function ComposeFormatToolbar(props: ComposeFormatToolbarProps): React.JS
         >
           {isSaving ? <Spinner size="extra-tiny" aria-hidden /> : null}
           {isSaving ? 'Saving…' : hasUnsavedEdits ? 'Unsaved' : 'Saved'}
-          {autoSaveEnabled !== undefined ? ` · Auto Save ${autoSaveEnabled ? 'On' : 'Off'}` : ''}
+          {/* UAT round 2 #6 (r8, 2026-09-02) — this used to read "Auto Save On", which was FALSE. The
+              autosave tick (`ComposeWorkspace`'s COMPOSE_DRAFT_AUTOSAVE_INTERVAL_MS interval) writes a
+              localStorage recovery draft and DELIBERATELY never calls the BFF (NFR-03). So the toolbar
+              claimed "Unsaved · Auto Save On" simultaneously, and the owner correctly read that as
+              "it says it autosaves but nothing gets saved". The mechanism is fine; the words were wrong.
+              "Recovery draft" says what it actually protects: a crash or a closed tab, NOT the document. */}
+          {autoSaveEnabled !== undefined ? ` · Recovery draft ${autoSaveEnabled ? 'On' : 'Off'}` : ''}
         </Text>
       ) : null}
 
