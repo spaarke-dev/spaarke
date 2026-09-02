@@ -78,18 +78,61 @@ that already caught a seeded one-sided change in CI. Adopting C without building
 
 **Why C rather than B:** B trades a real, felt UX cost for a risk C has already neutralised.
 
-## The harder half, which is NOT the renumbering
+## ~~The harder half, which is NOT the renumbering~~ — ❌ **THIS SECTION WAS WRONG. Corrected 2026-09-02.**
 
-Item 4 needs more than a label. **Creating a list that did not exist means authoring OOXML numbering.**
+> **What it claimed**: that creating a list means building OOXML numbering authoring we do not have — "a
+> new list has no `w:numPr` to inherit, the content model must carry list membership + level, and
+> `ComposeDocumentRenderer` must emit `w:numPr`… this is where the OOXML fidelity risk actually sits."
+>
+> **Every one of those is already built.** I asserted the gap from the client symptom instead of reading the
+> write path. Recording the claim rather than deleting it, because the *sizing* in this document was
+> derived from it and anyone who read the earlier version needs to see it retracted.
 
-- A new list has no `w:numPr` to inherit. The **content model must carry list membership + level**, and
-  `ComposeDocumentRenderer` must emit `w:numPr` referencing a numbering definition — either reusing an
-  existing `numId` in the document or minting an `abstractNum` + `num` pair in `numbering.xml`.
-- **Removing** numbering must emit the *absence* of `w:numPr` (or an explicit override), not merely stop
-  painting the label — otherwise the document still says "numbered" and Word renumbers it on open.
-- Both are **write-path changes**, so both are governed by ADR-049's invariants and by the residual-loss
-  parity test. This is where the OOXML fidelity risk actually sits, and it should be scoped and tested as
-  its own piece rather than assumed to come along with the client work.
+What actually exists today:
+
+| Piece the section called missing | Where it already lives |
+|---|---|
+| Content model carries list membership + level | `ComposeBlock { Kind = ListItem, Level, Ordered, StartsNewList, NumId }` — `ComposeContentModel.cs:355-419` |
+| Client serializes editor `<ol>/<li>` into it | `docxBridge.ts:957` — and it **preserves the imported `numId`** when the loaded block was already a ListItem (`:1195`) |
+| Renderer emits `w:numPr` | `ComposeDocumentRenderer.BuildListItem` (`:1021`) — direct `numPr` with `ilvl` + `numId` |
+| Minting / merging `numbering.xml` | **`ComposeNumberingAuthor.cs`** (424 lines) — authors `abstractNum` + `num`, owns three abstract schemes, and **remaps ids to merge into an existing carrier's numbering part** |
+| Removal emitting the *absence* of `w:numPr` | A non-list block renders via `BuildParagraph`, which never appends `numPr` |
+
+Headings are deliberately different and this is not an oversight: `BuildHeading` emits **no** `numPr`
+because the `Heading{level}` style carries its own (FR-27) — a direct `numId` there would double-number.
+
+### So what is actually left
+
+**The likely truth about UAT item 4 is that the DOCUMENT is already right and only the EDITOR is wrong** —
+a list created in the editor probably saves as a genuinely numbered list, and the user simply cannot see a
+number while editing, because `useStyles().editorSurface` suppresses the native `<ol>` marker
+*unconditionally* and a new block has no server-computed number to paint.
+
+**That is a claim, not a finding — and one cheap experiment settles it**: create a list in Compose on a
+loaded document, save, open the result in Word. Numbered → item 4 is display-only and the remaining work
+is small. Not numbered → the round trip has a real hole and the pre-correction sizing was closer.
+**Run this before scoping anything else**; it is the highest-information hour available and it decides
+whether the rest is small or medium.
+
+### The one genuine design decision
+
+Un-suppressing the native marker for editor-created lists collides with **invariant F-3**: a projected
+paragraph whose `numId` could not be resolved is deliberately left unnumbered (*never fabricate a number*),
+and un-suppressing would hand it a browser-invented one. Distinguishing "editor-created, browser may
+number it" from "projected but unresolvable, must stay bare" needs a projection-emitted discriminator on
+the `<ol>` itself. That is the decision worth a design gate — not the OOXML authoring, which is done.
+
+### And it re-opens the option comparison
+
+Option B (server round-trip) was rejected partly because numbering would visibly lag. But if new lists can
+carry the **native browser marker** while *loaded* numbering stays server-computed, the "briefly wrong
+number" objection weakens considerably — a native `<ol>` renumbers instantly and for free. That would
+deliver items 3 and 4 **without a second numbering engine at all**, and therefore without needing the
+parity corpus that Option C's step 1 exists to build.
+
+Option C remains the owner-approved direction and this does not overturn it. But the verification
+experiment above should be run **before** step 1 commits effort to a corpus that a cheaper shape may not
+need.
 
 ## Suggested sequence
 
