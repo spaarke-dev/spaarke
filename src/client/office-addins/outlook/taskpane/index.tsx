@@ -1,6 +1,8 @@
 import React from 'react';
 import { createRoot, Root } from 'react-dom/client';
+import type { AccountInfo } from '@azure/msal-browser';
 import { App } from '@shared/taskpane';
+import type { SavedTodoContext } from '@shared/taskpane/components/views/CreateTodoView';
 import { OutlookAdapter } from '@shared/adapters/OutlookAdapter';
 import { authService, apiClient } from '@shared/services';
 
@@ -43,31 +45,65 @@ function readInitialAction(): 'createTodo' | undefined {
 }
 
 /**
- * Build the createTodoConfig wiring for the App, including the save-flow
- * adapter. When the user clicks "Create To Do" and the email isn't yet saved
- * to Spaarke, the CreateTodoView calls this callback. Until task 072 wires
- * the in-taskpane SaveView orchestration, this returns null (signalling "save
- * was not completed") so the view surfaces a clear "save first" message.
+ * In the browser test harness (webpack dev mode) supply a demo "filed" context so
+ * the inline Create To Do form is fully interactive without a real save — the
+ * `demo-` communication id routes the create-task call to a mocked success in App.
  *
- * @see projects/smart-todo-decoupling-r3/notes/outlook-ribbon-create-todo.md
+ * In production this returns undefined until the SaveView → regarding wiring lands;
+ * until then the Create To Do tab shows a "file this email first" prompt (correct
+ * behavior — a To Do needs the record the email is filed to as its regarding).
  */
-function buildCreateTodoConfig() {
-  if (!CONFIG.smartTodoCodePageUrl) {
-    // Action disabled — the App falls through to the default tabs.
+function buildDemoSavedContext(): SavedTodoContext | undefined {
+  if (process.env.NODE_ENV !== 'development') {
     return undefined;
   }
   return {
-    codePageBaseUrl: CONFIG.smartTodoCodePageUrl,
-    saveEmailToSpaarke: async () => {
-      // Initial wiring: the host save-flow integration is intentionally a stub
-      // here. The CreateTodoView's "save first" path surfaces a clear message
-      // pointing users to the Save view. A follow-up task can replace this
-      // with a richer in-taskpane orchestrator (open SaveView programmatically,
-      // await job completion, re-look up). For task 070 (code-only), the
-      // stub keeps the contract intact without requiring cross-view coupling.
-      return null;
-    },
+    communicationId: 'demo-communication-0001',
+    regardingEntity: 'sprk_matter',
+    regardingRecordId: '00000000-0000-0000-0000-000000000001',
+    regardingName: 'Acme Corp — NDA (demo)',
   };
+}
+
+/**
+ * True inside the browser test harness (`taskpane-test.html` sets the flag before the
+ * bundle loads). Never true in a deployed build.
+ */
+function isBrowserTestMode(): boolean {
+  try {
+    return (window as unknown as { __SPAARKE_TEST_MODE__?: boolean }).__SPAARKE_TEST_MODE__ === true;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Browser test harness only: replace the auth service methods with mocks so the taskpane
+ * renders the authenticated app (Save + Create To Do tabs) without a real Entra sign-in.
+ * The deployed build never calls this — the `.env` placeholder tenant/client would 401
+ * against Entra otherwise, which is exactly what a UX harness must not require.
+ */
+function installMockAuth(): void {
+  const mockAccount: AccountInfo = {
+    homeAccountId: 'test-home-account',
+    environment: 'login.microsoftonline.com',
+    tenantId: 'test-tenant',
+    username: 'test.user@spaarke.com',
+    localAccountId: 'test-local-account',
+    name: 'Test User',
+  };
+  const mutableAuth = authService as unknown as {
+    isAuthenticated: () => boolean;
+    getAccount: () => AccountInfo | null;
+    getAccessToken: (scopes?: string[]) => Promise<string | null>;
+    signIn: () => Promise<void>;
+    signOut: () => Promise<void>;
+  };
+  mutableAuth.isAuthenticated = () => true;
+  mutableAuth.getAccount = () => mockAccount;
+  mutableAuth.getAccessToken = async () => 'mock-access-token';
+  mutableAuth.signIn = async () => {};
+  mutableAuth.signOut = async () => {};
 }
 
 // Global root for error rendering
@@ -141,19 +177,24 @@ async function init() {
     throw error;
   }
 
-  // Stage 2: Initialize auth service
-  console.log('[Spaarke] Stage 2: Initializing auth service...');
-  try {
-    await authService.initialize({
-      clientId: CONFIG.clientId,
-      tenantId: CONFIG.tenantId,
-      bffApiClientId: CONFIG.bffApiClientId,
-      ...(CONFIG.fallbackRedirectUri ? { fallbackRedirectUri: CONFIG.fallbackRedirectUri } : {}),
-    });
-    console.log('[Spaarke] Auth service initialized');
-  } catch (error) {
-    renderError(error as Error, 'Auth service initialization');
-    throw error;
+  // Stage 2: Initialize auth service (mocked in the browser test harness).
+  if (isBrowserTestMode()) {
+    console.log('[Spaarke] Browser test mode — mocking auth (no real Entra sign-in).');
+    installMockAuth();
+  } else {
+    console.log('[Spaarke] Stage 2: Initializing auth service...');
+    try {
+      await authService.initialize({
+        clientId: CONFIG.clientId,
+        tenantId: CONFIG.tenantId,
+        bffApiClientId: CONFIG.bffApiClientId,
+        ...(CONFIG.fallbackRedirectUri ? { fallbackRedirectUri: CONFIG.fallbackRedirectUri } : {}),
+      });
+      console.log('[Spaarke] Auth service initialized');
+    } catch (error) {
+      renderError(error as Error, 'Auth service initialization');
+      throw error;
+    }
   }
 
   // Stage 3: Configure API client
@@ -194,7 +235,7 @@ async function init() {
   try {
     reactRoot = createRoot(container);
     const initialAction = readInitialAction();
-    const createTodoConfig = buildCreateTodoConfig();
+    const initialSavedContext = buildDemoSavedContext();
     reactRoot.render(
       <React.StrictMode>
         <App
@@ -203,7 +244,7 @@ async function init() {
           version={APP_VERSION}
           buildDate={BUILD_DATE}
           {...(initialAction ? { initialAction } : {})}
-          {...(createTodoConfig ? { createTodoConfig } : {})}
+          {...(initialSavedContext ? { initialSavedContext } : {})}
         />
       </React.StrictMode>
     );
