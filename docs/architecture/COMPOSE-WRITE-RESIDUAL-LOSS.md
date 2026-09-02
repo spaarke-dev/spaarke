@@ -17,7 +17,7 @@
 > **the nested-field half retired 2026-08-26** by task 058 — a conditional merge block
 > (`{ IF { MERGEFIELD State } = … }`, the shape a template is built from) moved to §3, leaving only the
 > **unterminated** field in §2.
-> **Owner sign-off**: ✅ **ACCEPTED 2026-08-25** — see [Sign-off](#sign-off).
+> **Owner sign-off**: ✅ **ACCEPTED** — five rows 2026-08-25, the sixth (`section-break-flattened`) 2026-09-02. See [Sign-off](#sign-off).
 > **Enforced by**: `tests/integration/seam/Compose/ComposeResidualLossParityTests.cs`. This document is
 > not maintained by hand-review; a test measures each family through the real renderer and fails if this
 > list and the code disagree **in either direction**.
@@ -270,10 +270,10 @@ FR-A10 requires owner sign-off, and an unsigned list does not complete the task.
 
 | Field | Value |
 |---|---|
-| Version | **2026-09-01** (section-break row added, style/indentation rows retired — see the amendment below; supersedes 2026-08-25) |
+| Version | **2026-09-02** (sixth row `section-break-flattened` ACCEPTED by the owner; supersedes the 2026-09-01 unsigned amendment and the 2026-08-25 five-row signature) |
 | Measured against | `spaarkeai-compose-r8` @ #777 + drive-provenance, corpus of 25 documents |
-| Signed off by | **Project owner** — accepted in session, 2026-08-25 |
-| Date | 2026-08-25 |
+| Signed off by | **Project owner** — five rows accepted in session 2026-08-25; the sixth (`section-break-flattened`) accepted 2026-09-02 |
+| Date | 2026-08-25 (rows 1-5) · 2026-09-02 (row 6) |
 
 
 **What was accepted — and what was NOT.** The owner **declined** the original field and embedded-object
@@ -327,8 +327,38 @@ rather than a documentation revision"* — the honest options are:
 | **Accept** the sixth row | Editing a paragraph that holds an interior section break drops it, reported by name every time (`section-break-flattened`), and the prior version stays in SPE version history |
 | **Decline** it | Carrying an interior `w:sectPr` onto a re-authored block becomes scope. It is genuinely harder than the other carries: the renderer detaches and re-attaches the **trailing** section, so an interior one has no carrier — this is why it was excluded from property inheritance in the first place |
 
-Flagged for the UAT session rather than assumed. Until it is answered, this list is accurate and the
-warning is honest; what is unresolved is whether the loss is *acceptable*, which only the owner can say.
+### ✅ RESOLVED — owner ACCEPTED the sixth row, 2026-09-02
+
+**Decision: Accept.** Editing a paragraph that holds an interior section break drops it, is reported by
+name every time (`section-break-flattened`), and the prior version stays in SPE version history. **The
+signed set is now six rows.**
+
+**Accepted on an explicit basis: "ship with it named" — NOT "never fix".** The owner asked what carrying
+it would actually cost before signing, and the answer changed the framing above, so it is recorded here
+rather than left as the reason people re-read:
+
+- The *"an interior one has no carrier"* wording overstates the blocker. `InheritProperties` excludes
+  `w:sectPr` to **prevent duplication** — the renderer detaches and re-attaches the TRAILING section
+  itself — which is a reason for care, not a structural impossibility.
+- **The carrier survives the body swap with its header/footer parts still referenced.** So an interior
+  `sectPr`'s `headerReference r:id` would still resolve if carried. That is the fact that would otherwise
+  sink the whole idea, and it holds.
+- The renderer already enumerates paragraph-level `sectPr`s (`interiorSectionBreaksAtRisk`) and already
+  has the value rule that a break identical to the trailing section is a no-op.
+
+So the remaining work is: distinguish interior from final (the final section is sometimes parked in the
+LAST paragraph's `pPr` by third-party generators — review finding 011-P1 already handles that shape),
+carry only the interior ones, and add a corpus case. **The risk is specific**: a duplicated or misplaced
+`sectPr` is the malformed-OOXML shape that triggers Word's "unreadable content" repair dialog — a hard
+fail in the fidelity gate. That is why it needs a corpus case rather than a careful patch, and why it is
+scoped work rather than a drive-by.
+
+**Why accepting is still right**: the exposure is narrow (untouched paragraphs keep their break through
+the clone path; only the paragraph CARRYING it loses it, and those are typically section-terminating or
+empty paragraphs rather than prose). What argues the other way is the surprise-to-cause ratio — the cause
+is one paragraph, the visible effect is a whole section changing orientation or losing its headers.
+Carrying it is therefore recommended for the follow-on project, and this acceptance should be revisited
+(and this row retired) when that lands.
 
 ## 7. Related
 
