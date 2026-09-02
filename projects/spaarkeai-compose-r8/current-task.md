@@ -1,6 +1,6 @@
 # Current Task State — `spaarkeai-compose-r8`
 
-> **Last Updated**: 2026-08-30 (by `context-handoff`)
+> **Last Updated**: 2026-09-02 (by `context-handoff`) — post-deploy, post-UAT-round-1
 > **Recovery**: read Quick Recovery, then §S3 → §S2 → §S1 → §S0.
 > **071 + 072 COMPLETE (2026-08-31). 070 clusters 7/6/5b/8/1/3/4 done, ZERO holes open.**
 > **`ComposeService.cs` is FROZEN for `unified-access-control-r2` — do not touch it.**
@@ -12,11 +12,44 @@
 
 | Field | Value |
 |---|---|
-| **Active work** | **Closing out every remaining Compose defect in THIS project** (owner directive 2026-09-01: no deferrals, no hand-offs). 070 ✅ · #776 ✅ · **#781 ✅** `1789e9d08` · **#698 fixture ✅** `a39c7abbe` · **#777 ✅** `1f88817c7` · **#696 ✅** `4fe224ce9` · **#698 contract half ✅** (answered on the issue, no wrapper) · #858 merged from UAC-r2 and reconciled. · **drive provenance ✅** (the last server item). · **drive provenance ✅** · **#699 ✅ (closed)** · **#858 client ✅** · **#853 ✅ (closed)**. |
-| **Next Action** | **090 WRAP-UP** (row 9): `/test-diet` → refresh `COMPOSE-WRITE-RESIDUAL-LOSS.md` (two codes retired + settle the `section-break-flattened` row, §R3 row 3) → lessons-learned → `projects/INDEX.md` + root §17 + `.claude/CHANGELOG.md`. Then **deploy** (row 10): BFF + `sprk_spaarkeai` together, report publish size vs the 44.96 MB baseline. **All nine code/issue rows are done.** |
-| **Branch** | `work/spaarkeai-compose-r8` — **26 ahead of `origin/master`, 0 behind, tree clean.** Master merged 2026-09-01 (`4cd086680`). |
-| **Suite** | Client **1,381 / 1,381** (105 suites) · BFF **11,893 / 0 / 57 skipped** · ArchTests **181/181** · solution build **0 errors** |
-| **Open, not blocking** | See §R3 — four carried items, each with what it needs. |
+| **Active work** | **DEPLOYED to `spaarkedev1` 2026-09-02 (BFF + `sprk_spaarkeai` together, NFR-05); UAT round 1 returned.** All R8 code + issue items CLOSED. Not merged — PR #924 open on this branch. |
+| **Next Action** | **1) OWNER SCOPE DECISION** on the split proposed in `notes/uat/uat-round-1-findings-and-plan.md` (R8 finishes its own thesis · items 2/5/6/7/8 → a Compose-UX project · numbering = its own design decision). **2) REPRODUCE the heading-style-loss sub-observation** (U-0) — if real it is an R8 fidelity defect and stays here. **3) UAT sections A + B were NOT exercised** — R8 cannot close without them. |
+| **Branch** | `work/spaarkeai-compose-r8` — **33 ahead of `origin/master`, 0 behind, tree clean.** PR **#924** already open (its title still describes only #777 — needs rewriting to cover the release). |
+| **Suite** | Client **1,381 / 1,381** · BFF **11,894 / 0 / 57 skipped** · ArchTests **181/181** · solution build **0 errors** · deployed build hash-verified |
+| **Open, not blocking** | §R3 carried items (repair script now VALIDATED — report mode run clean on dev; letter/roman fixture still owner-dependent) · 8 AI consumer types with no `ConsumerTypes.All` constant (census-only, `/healthz/catalog` stays 503) · 2 path-violation test files |
+
+---
+
+## R0. UAT ROUND 1 (2026-09-02) — read `notes/uat/uat-round-1-findings-and-plan.md` for the full analysis
+
+**Confirmed working**: PDF intake (open → editable → save → honest `pdf-intake-*` warnings) · the AI redline
+stream (tracked insert/delete, "2 suggested edits pending", Accept-all, per-suggestion rationale).
+
+**8 items returned. Two findings changed their scoping — do not re-derive these:**
+
+1. **Items 3 + 4 are ONE finding and a KNOWN DEFERRAL, not an R8 regression.**
+   `composeNumberAtomExtension.ts`'s header states it outright: legal numbers are computed SERVER-SIDE AT
+   LOAD and painted as a ProseMirror **view decoration** (never a doc node — it must not shift the text
+   offsets the redline/reanchor table indexes), and the native `<ol>` marker is suppressed
+   **unconditionally**. So "remove numbering doesn't renumber" (decoration is a load-time snapshot) and
+   "add numbering does nothing" (a new list has no server number to paint) are the same gap. The header
+   names it **"R5 G3, explicitly OUT of R4.5 scope; escalate rather than converting this to a doc node."**
+   Fixing = client renumbering engine (the two-engine drift this project exists to prevent) **or** a server
+   round-trip per structural edit. **Needs a written design decision first.**
+
+2. **Item 8 is a WIRING job, not a new capability.** `compose-summarize-word-changes` is a live consumer
+   type with a binding row + client action, deliberately pulled from the selection toolbar because without
+   real change data **the LLM fabricates a phantom "[Insertion]"**. The NDA analogue is
+   `AgreementReviewSummaryPanel`, reusable. Binding rule to carry: **never fire it without real change data.**
+
+**⚠️ U-0 — REPRODUCE BEFORE ACTING**: screenshots suggest removing numbering from "1.2 Technical Field of
+the Invention" ALSO cost it its heading style (it appears afterwards as indented body text). If reproducible
+that is **more serious than the numbering gap and belongs to R8's own fidelity scope**. Not assumed.
+
+**⚠️ UAT sections A + B were NOT exercised**: (A) edit one paragraph of a real `.docx`, save, reopen,
+confirm untouched content byte-identical — the entire subject of Track A; (B) the **`section-break-flattened`
+accept/decline**, which changes the owner-signed residual-loss set from five rows to six. **R8 cannot close
+without both.**
 
 ---
 
