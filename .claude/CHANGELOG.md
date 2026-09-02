@@ -8,6 +8,32 @@ Format follows [Keep a Changelog](https://keepachangelog.com/) conventions.
 
 ---
 
+###### 2026-09-01 — `spaarkeai-compose-r8`: residual-loss list gains a row, and the guard that keeps it honest gains three
+
+- **[`docs/architecture/COMPOSE-WRITE-RESIDUAL-LOSS.md`](../docs/architecture/COMPOSE-WRITE-RESIDUAL-LOSS.md) republished (2026-09-01).**
+  Two rows LEFT §2 — `indentation-dropped` and `paragraph-style-flattened` retired *with their premises*
+  (unmodeled paragraph styles and indentation are now carried, so they moved to §3). One row ENTERED §2:
+  `section-break-flattened`. That one is **not a new loss** — editing a paragraph holding an interior
+  `w:sectPr` always dropped it; what was wrong is that the warning fired at *open*, whole-document, and the
+  loss itself was **absent from the list**. The signed set grows from five rows to six, so it is flagged for
+  owner accept/decline at UAT rather than added silently (issue #777).
+- **`ComposeResidualLossParityTests` — three holes closed, each found by seeding a removal and watching
+  nothing happen.** The test whose stated job is to fail when the document and the renderer disagree *in
+  either direction* stayed green after a row was added to the document. Causes: (1) no interior-section-break
+  family in the measured set — structural, since every other family is a **run** and `w:sectPr` lives in
+  `w:pPr`; (2) the code missing from the check's hard-coded `known` list; (3) **Direction A scanned the whole
+  document**, so prose *discussing* a code satisfied it — and on the second attempt, so did the sign-off
+  amendment's own table. Direction A is now scoped to §2's loss table. **A green guard is evidence about the
+  guard, not about the code, until you have watched it go red.**
+- **New cross-runtime parity mechanism (issue #699)** — `tests/fixtures/compose-citation-parity/cases.json`,
+  45 cases executed by BOTH the C# `CitationResolver` and its TypeScript mirror, plus
+  `tests/Spaarke.ArchTests/ComposeCitationResolverParityGuardTests.cs` pinning the leading-label vocabulary,
+  the `CitationShape` set and the range separators across both source files. Ported test cases — two
+  hand-kept copies of the same expectations — cannot detect drift between themselves.
+- **`projects/INDEX.md`** — removed a **duplicate `spaarkeai-compose-r8` row** (two rows, same project,
+  branch and worktree path, differing only by date). `/conflict-check` consumes this registry, so a
+  duplicate row is a coordination defect, not a cosmetic one.
+
 ###### 2026-09-01 — `email-communication-intelligence-r2`: document-profiling failure mode + the 3 AI execution models documented
 
 - **New architecture doc** [`docs/architecture/DOCUMENT-PROFILE-AND-AI-EXECUTION-MODELS.md`](../docs/architecture/DOCUMENT-PROFILE-AND-AI-EXECUTION-MODELS.md) —
