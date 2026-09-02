@@ -87,8 +87,7 @@ Track D**) · ADR-013 · ADR-014/015 · ADR-021/050 · ADR-028 · ADR-029 · ADR
 
 ## Constraints
 
-- **BFF Hygiene (root §10)** — Placement Justification per new surface; publish ≤60 MB reported against the
-  **44.96 MB** net10 baseline (incl. PDBs); no new HIGH CVE; tests updated. **No new NuGet on Track A.**
+- **BFF Hygiene (root §10)** — Placement Justification per new surface; publish ≤60 MB, and the delta measured against a **fresh `origin/master` publish zipped with the same tool on the same day** — NOT against a recorded baseline (root §10 bullet 4, corrected 2026-09-02; the stale-baseline comparison overstated this project&#39;s contribution 46×). Master @ `a826cf347` = **45.42 MB** incl. PDBs via Compress-Archive; no new HIGH CVE; tests updated. **No new NuGet on Track A.**
 - **God-class ratchet** — five Compose files are frozen. Track D removes them; **delete each waiver** as its
   file drops below 2,000. Never silently re-baseline.
 - **`parallel-safe: false` on the entire Compose spine.** `/conflict-check` before EVERY BFF PR.
