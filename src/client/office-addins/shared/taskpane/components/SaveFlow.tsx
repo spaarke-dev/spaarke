@@ -761,14 +761,9 @@ export function SaveFlow(props: SaveFlowProps): React.ReactElement {
         </div>
       )}
 
-      {/* Related to (association target) — FR-B2: pre-selected with the engine's
-          predicted record when available (reuses derivePrimaryReview; ADR-045).
-          "Related to" matches the system's reconciliation terminology (UI feedback 2026-09-02). */}
+      {/* Related to — the RelatedToPicker renders its own header + type chips
+          (UI feedback 2026-09-02); reconciliation-style auto-match cards. */}
       <div className={styles.section}>
-        <div className={styles.sectionTitle}>
-          <PersonSearchRegular />
-          <Text weight="semibold">Related to</Text>
-        </div>
         <RelatedToPicker
           value={selectedEntity}
           onChange={handleEntitySelect}
@@ -832,8 +827,9 @@ export function SaveFlow(props: SaveFlowProps): React.ReactElement {
         />
       )}
 
-      {/* Processing Options */}
-      {renderProcessingOptions()}
+      {/* AI processing (Profile Summary + Search Index) is mandatory for all content
+          saved to Spaarke — always on (DEFAULT_PROCESSING_OPTIONS), no toggles
+          (UI feedback 2026-09-02). */}
 
       {/* Actions */}
       <div className={styles.actions}>

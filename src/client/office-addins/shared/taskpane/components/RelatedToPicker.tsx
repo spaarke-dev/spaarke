@@ -16,6 +16,7 @@ import {
   SearchRegular,
   AddRegular,
   DismissRegular,
+  PersonSearchRegular,
 } from '@fluentui/react-icons';
 import type { EntitySearchResult, EntityType } from '../hooks/useEntitySearch';
 import type { RelatedCandidate } from '../services/communicationSuggestionsService';
@@ -24,19 +25,35 @@ import type { RelatedCandidate } from '../services/communicationSuggestionsServi
  * RelatedToPicker — the add-in's "Related to" selector, modeled on the email-intelligence
  * reconciliation surface (UI feedback, owner 2026-09-02).
  *
- * Instead of the recent-list dropdown, it shows the Association Engine's **auto-matched
- * candidate cards** (record + type + "% match" + Confirm), defaulting to matches rather
- * than Recent (#6/#7). Single-select **type chips** (gray except the selected one, default
- * Matter — #8) scope the cards + the "Look up another record" search. Confirming a card
- * (or selecting a search result) shows the **full selected card** (#9). "New record" is
- * wired to a host-supplied create callback (#10, BFF-backed — Slice 3).
+ * Layout (UI feedback round 2):
+ *   [ Related to ]                         [ Matter  Project  Invoice … ]   ← header + chips
+ *   [ search input ] [ Search ]            [ + New Matter ]                 ← search row on top
+ *   ┌ recommended auto-match cards ────────────────────────────────────┐
+ *   │ LITG-763955 : Litigation matter · Matter · 100% match   [Confirm] │
+ *   └──────────────────────────────────────────────────────────────────┘
  *
- * Host-agnostic: the confirm just *selects* the record; the regarding is written when the
- * email is saved (the existing save path), so no Xrm host is required. Fluent v9 (ADR-021).
+ * On Confirm the chosen card turns GREEN with a check + a small "x" (change); the other
+ * cards go gray. Single-select chips (gray except selected=blue, default Matter) scope
+ * the cards + search. Host-agnostic: Confirm only *selects*; the regarding is written at
+ * save. Fluent v9 (ADR-021).
  */
 
 const useStyles = makeStyles({
   root: { display: 'flex', flexDirection: 'column', gap: tokens.spacingVerticalS },
+  header: {
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: tokens.spacingHorizontalXXL,
+    flexWrap: 'wrap',
+  },
+  headerLabel: {
+    display: 'flex',
+    alignItems: 'center',
+    gap: tokens.spacingHorizontalXS,
+    color: tokens.colorNeutralForeground2,
+    flexShrink: 0,
+  },
   chips: { display: 'flex', flexWrap: 'wrap', gap: tokens.spacingHorizontalXS },
   chip: {
     borderRadius: '999px',
@@ -49,21 +66,28 @@ const useStyles = makeStyles({
     color: tokens.colorNeutralForeground3,
     border: 'none',
   },
+  searchRow: { display: 'flex', gap: tokens.spacingHorizontalXS, alignItems: 'center' },
+  newBtn: { flexShrink: 0 },
   cards: { display: 'flex', flexDirection: 'column', gap: tokens.spacingVerticalXS },
-  card: { padding: tokens.spacingVerticalS },
+  card: { padding: tokens.spacingVerticalS, position: 'relative' },
+  cardConfirmed: {
+    backgroundColor: tokens.colorStatusSuccessBackground1,
+    border: `1px solid ${tokens.colorStatusSuccessBorder1}`,
+  },
+  cardDimmed: { opacity: 0.5 },
   cardRow: { display: 'flex', alignItems: 'center', gap: tokens.spacingHorizontalS },
   cardBody: { display: 'flex', flexDirection: 'column', gap: '2px', flexGrow: 1, minWidth: 0 },
   cardTitle: { overflow: 'hidden', textOverflow: 'ellipsis' },
   cardMeta: { color: tokens.colorNeutralForeground3 },
-  selectedCard: {
-    padding: tokens.spacingVerticalM,
-    border: `1px solid ${tokens.colorBrandStroke1}`,
-    backgroundColor: tokens.colorNeutralBackground1,
+  changeX: { position: 'absolute', top: '2px', right: '2px' },
+  confirmedBadge: {
+    display: 'flex',
+    alignItems: 'center',
+    gap: tokens.spacingHorizontalXS,
+    color: tokens.colorStatusSuccessForeground1,
+    flexShrink: 0,
   },
-  selectedHeader: { display: 'flex', alignItems: 'center', gap: tokens.spacingHorizontalXS },
-  searchRow: { display: 'flex', gap: tokens.spacingHorizontalXS, marginTop: tokens.spacingVerticalXS },
   emptyNote: { color: tokens.colorNeutralForeground3, padding: `${tokens.spacingVerticalXS} 0` },
-  footerRow: { display: 'flex', justifyContent: 'flex-start', marginTop: tokens.spacingVerticalXS },
   confirmBtn: { flexShrink: 0 },
 });
 
@@ -89,6 +113,10 @@ function pct(confidence: number): number {
   return Math.round(Math.max(0, Math.min(1, confidence)) * 100);
 }
 
+function sameRecord(a: EntitySearchResult, b: EntitySearchResult): boolean {
+  return a.id === b.id && a.logicalName === b.logicalName;
+}
+
 export const RelatedToPicker: React.FC<RelatedToPickerProps> = ({
   value,
   onChange,
@@ -107,8 +135,8 @@ export const RelatedToPicker: React.FC<RelatedToPickerProps> = ({
   const [searchResults, setSearchResults] = useState<EntitySearchResult[]>([]);
   const [searching, setSearching] = useState(false);
 
-  // Auto-match cards for the selected type (ranked highest-first from the service).
   const typeMatches = useMemo(() => candidates.filter(c => c.entityType === selectedType), [candidates, selectedType]);
+  const isConfirmed = value !== null;
 
   const handleTypeChange = (type: EntityType) => {
     setSelectedType(type);
@@ -124,8 +152,7 @@ export const RelatedToPicker: React.FC<RelatedToPickerProps> = ({
     }
     setSearching(true);
     try {
-      const results = await onSearch(q, selectedType);
-      setSearchResults(results);
+      setSearchResults(await onSearch(q, selectedType));
     } catch {
       setSearchResults([]);
     } finally {
@@ -133,163 +160,182 @@ export const RelatedToPicker: React.FC<RelatedToPickerProps> = ({
     }
   };
 
-  // ---- Selected state (#9: full card) --------------------------------------
-  if (value) {
-    const meta = value.displayInfo;
-    return (
-      <div className={styles.root}>
-        <Card className={styles.selectedCard} appearance="filled-alternative">
-          <div className={styles.cardRow}>
-            <div className={styles.cardBody}>
-              <div className={styles.selectedHeader}>
-                <CheckmarkCircleFilled style={{ color: tokens.colorBrandForeground1 }} aria-hidden="true" />
-                <Badge appearance="tint" color="brand">
-                  {value.entityType}
-                </Badge>
-              </div>
-              <Text weight="semibold">{value.name}</Text>
-              {meta && (
-                <Text size={200} className={styles.cardMeta}>
-                  {meta}
-                </Text>
-              )}
-            </div>
-            <Button
-              appearance="subtle"
-              icon={<DismissRegular />}
-              onClick={() => onChange(null)}
-              disabled={disabled}
-              aria-label="Change related record"
-            >
-              Change
-            </Button>
-          </div>
-        </Card>
-      </div>
-    );
-  }
+  // Confirmed record shown as a green card. If the selection came from search (not in the
+  // candidate list), prepend it so it still renders as the confirmed green card.
+  const confirmedNotInList = value && !typeMatches.some(c => sameRecord(c, value));
 
-  // ---- Unselected: chips + auto-match cards + search + new -----------------
+  const renderChips = () => (
+    <div className={styles.chips} role="radiogroup" aria-label="Record type">
+      {allowedTypes.map(type => {
+        const selected = type === selectedType;
+        return (
+          <Button
+            key={type}
+            size="small"
+            shape="circular"
+            appearance={selected ? 'primary' : 'subtle'}
+            className={mergeClasses(styles.chip, !selected && styles.chipUnselected)}
+            onClick={() => handleTypeChange(type)}
+            disabled={disabled}
+            role="radio"
+            aria-checked={selected}
+          >
+            {type}
+          </Button>
+        );
+      })}
+    </div>
+  );
+
+  const renderConfirmedCard = (record: EntitySearchResult, key: string) => (
+    <Card key={key} className={mergeClasses(styles.card, styles.cardConfirmed)}>
+      <Button
+        className={styles.changeX}
+        size="small"
+        appearance="subtle"
+        icon={<DismissRegular />}
+        onClick={() => onChange(null)}
+        disabled={disabled}
+        aria-label="Change related record"
+      />
+      <div className={styles.cardRow}>
+        <div className={styles.cardBody}>
+          <div className={styles.confirmedBadge}>
+            <CheckmarkCircleFilled aria-hidden="true" />
+            <Badge appearance="tint" color="success">
+              {record.entityType}
+            </Badge>
+          </div>
+          <Text weight="semibold" className={styles.cardTitle}>
+            {record.displayInfo ? `${record.displayInfo} : ${record.name}` : record.name}
+          </Text>
+        </div>
+      </div>
+    </Card>
+  );
+
+  const renderCandidateCard = (c: RelatedCandidate) => {
+    const confirmed = value !== null && sameRecord(c, value);
+    if (confirmed) {
+      return renderConfirmedCard(c, `${c.logicalName}:${c.id}`);
+    }
+    return (
+      <Card key={`${c.logicalName}:${c.id}`} className={mergeClasses(styles.card, isConfirmed && styles.cardDimmed)}>
+        <div className={styles.cardRow}>
+          <div className={styles.cardBody}>
+            <Text weight="semibold" className={styles.cardTitle}>
+              {c.displayInfo ? `${c.displayInfo} : ${c.name}` : c.name}
+            </Text>
+            <Text size={200} className={styles.cardMeta}>
+              {c.entityType} · {pct(c.confidence)}% match
+            </Text>
+          </div>
+          {!isConfirmed && (
+            <Button
+              className={styles.confirmBtn}
+              appearance="primary"
+              icon={<CheckmarkRegular />}
+              onClick={() => onChange(c)}
+              disabled={disabled}
+            >
+              Confirm
+            </Button>
+          )}
+        </div>
+      </Card>
+    );
+  };
+
   return (
     <div className={styles.root}>
-      {/* Type chips — single-select, gray except the selected one (blue). */}
-      <div className={styles.chips} role="radiogroup" aria-label="Record type">
-        {allowedTypes.map(type => {
-          const isSelected = type === selectedType;
-          return (
-            <Button
-              key={type}
-              size="small"
-              shape="circular"
-              appearance={isSelected ? 'primary' : 'subtle'}
-              className={mergeClasses(styles.chip, !isSelected && styles.chipUnselected)}
-              onClick={() => handleTypeChange(type)}
-              disabled={disabled}
-              role="radio"
-              aria-checked={isSelected}
-            >
-              {type}
-            </Button>
-          );
-        })}
+      {/* Header: "Related to" (left) + type chips (right). */}
+      <div className={styles.header}>
+        <div className={styles.headerLabel}>
+          <PersonSearchRegular aria-hidden="true" />
+          <Text weight="semibold">Related to</Text>
+        </div>
+        {renderChips()}
       </div>
 
-      {/* Auto-match candidate cards for the selected type. */}
+      {/* Search row on top of the recommendations — hidden once a record is confirmed. */}
+      {!isConfirmed && (
+        <>
+          <div className={styles.searchRow}>
+            <Input
+              value={query}
+              onChange={(_, d) => setQuery(d.value)}
+              onKeyDown={e => {
+                if (e.key === 'Enter') void runSearch();
+              }}
+              placeholder={`Look up another ${selectedType}…`}
+              disabled={disabled}
+              contentBefore={<SearchRegular />}
+              style={{ flexGrow: 1 }}
+              aria-label={`Search ${selectedType} records`}
+            />
+            <Button appearance="subtle" onClick={() => void runSearch()} disabled={disabled || searching}>
+              {searching ? <Spinner size="tiny" /> : 'Search'}
+            </Button>
+            {onCreateNew && (
+              <Button
+                className={styles.newBtn}
+                appearance="primary"
+                icon={<AddRegular />}
+                onClick={() => onCreateNew(selectedType)}
+                disabled={disabled}
+              >
+                New {selectedType}
+              </Button>
+            )}
+          </div>
+
+          {searchResults.length > 0 && (
+            <div className={styles.cards}>
+              {searchResults.map(r => (
+                <Card key={`s:${r.logicalName}:${r.id}`} className={styles.card}>
+                  <div className={styles.cardRow}>
+                    <div className={styles.cardBody}>
+                      <Text weight="semibold" className={styles.cardTitle}>
+                        {r.displayInfo ? `${r.displayInfo} : ${r.name}` : r.name}
+                      </Text>
+                      <Text size={200} className={styles.cardMeta}>
+                        {r.entityType}
+                      </Text>
+                    </div>
+                    <Button
+                      className={styles.confirmBtn}
+                      appearance="outline"
+                      icon={<CheckmarkRegular />}
+                      onClick={() => onChange(r)}
+                      disabled={disabled}
+                    >
+                      Confirm
+                    </Button>
+                  </div>
+                </Card>
+              ))}
+            </div>
+          )}
+        </>
+      )}
+
+      {/* Recommended auto-match cards. */}
       <div className={styles.cards}>
+        {confirmedNotInList && value && renderConfirmedCard(value, `sel:${value.logicalName}:${value.id}`)}
         {candidatesLoading ? (
           <div className={styles.cardRow}>
             <Spinner size="tiny" /> <Text size={200}>Finding matches…</Text>
           </div>
         ) : typeMatches.length > 0 ? (
-          typeMatches.map(c => (
-            <Card key={`${c.logicalName}:${c.id}`} className={styles.card}>
-              <div className={styles.cardRow}>
-                <div className={styles.cardBody}>
-                  <Text weight="semibold" className={styles.cardTitle}>
-                    {c.displayInfo ? `${c.displayInfo} : ${c.name}` : c.name}
-                  </Text>
-                  <Text size={200} className={styles.cardMeta}>
-                    {c.entityType} · {pct(c.confidence)}% match
-                  </Text>
-                </div>
-                <Button
-                  className={styles.confirmBtn}
-                  appearance="primary"
-                  icon={<CheckmarkRegular />}
-                  onClick={() => onChange(c)}
-                  disabled={disabled}
-                >
-                  Confirm
-                </Button>
-              </div>
-            </Card>
-          ))
+          typeMatches.map(renderCandidateCard)
         ) : (
-          <Text size={200} className={styles.emptyNote}>
-            No suggested {selectedType} matches — search below or create a new record.
-          </Text>
+          !isConfirmed && (
+            <Text size={200} className={styles.emptyNote}>
+              No suggested {selectedType} matches — search above or create a new record.
+            </Text>
+          )
         )}
       </div>
-
-      {/* Look up another record (scoped to the selected type). */}
-      <div className={styles.searchRow}>
-        <Input
-          value={query}
-          onChange={(_, d) => setQuery(d.value)}
-          onKeyDown={e => {
-            if (e.key === 'Enter') void runSearch();
-          }}
-          placeholder={`Look up another ${selectedType}…`}
-          disabled={disabled}
-          contentBefore={<SearchRegular />}
-          style={{ flexGrow: 1 }}
-          aria-label={`Search ${selectedType} records`}
-        />
-        <Button appearance="subtle" onClick={() => void runSearch()} disabled={disabled || searching}>
-          {searching ? <Spinner size="tiny" /> : 'Search'}
-        </Button>
-      </div>
-
-      {searchResults.length > 0 && (
-        <div className={styles.cards}>
-          {searchResults.map(r => (
-            <Card key={`${r.logicalName}:${r.id}`} className={styles.card}>
-              <div className={styles.cardRow}>
-                <div className={styles.cardBody}>
-                  <Text weight="semibold" className={styles.cardTitle}>
-                    {r.displayInfo ? `${r.displayInfo} : ${r.name}` : r.name}
-                  </Text>
-                  <Text size={200} className={styles.cardMeta}>
-                    {r.entityType}
-                  </Text>
-                </div>
-                <Button
-                  className={styles.confirmBtn}
-                  appearance="outline"
-                  onClick={() => onChange(r)}
-                  disabled={disabled}
-                >
-                  Select
-                </Button>
-              </div>
-            </Card>
-          ))}
-        </div>
-      )}
-
-      {/* New record (#10 — BFF-backed create wired in Slice 3). */}
-      {onCreateNew && (
-        <div className={styles.footerRow}>
-          <Button
-            appearance="subtle"
-            icon={<AddRegular />}
-            onClick={() => onCreateNew(selectedType)}
-            disabled={disabled}
-          >
-            New {selectedType}
-          </Button>
-        </div>
-      )}
     </div>
   );
 };
