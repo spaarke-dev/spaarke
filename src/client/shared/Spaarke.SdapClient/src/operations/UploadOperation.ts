@@ -50,7 +50,110 @@ export class UploadOperation {
   ) {}
 
   /**
+   * Upload against the OWNING RECORD. The server resolves the container from that record.
+   *
+   * This is the task-076 contract. The caller names the record it is already authorized against and
+   * the server derives the container from it, so the authorization key and the container are the
+   * same value by construction and cannot disagree. There is deliberately NO container parameter.
+   *
+   * Refusals are the contract, not faults: a secure record with no container of its own fails closed
+   * (`secure_record_container_missing`), an unresolvable record 404s, and a non-secure record whose
+   * business unit has no container returns 409. None of them fall back to a shared container.
+   */
+  public async uploadSmallForRecord(
+    entityLogicalName: string,
+    recordId: string,
+    file: File,
+    options?: {
+      onProgress?: (percent: number) => void;
+      signal?: AbortSignal;
+      conflictBehavior?: ConflictBehaviorOption;
+    }
+  ): Promise<DriveItem> {
+    return this.put(
+      `/api/obo/records/${encodeURIComponent(entityLogicalName)}/${encodeURIComponent(recordId)}/files/${encodeURIComponent(file.name)}`,
+      file,
+      options
+    );
+  }
+
+  /**
+   * Upload content that has NO OWNING RECORD YET. The server resolves the container from the ACTING
+   * USER's business unit.
+   *
+   * For the three flows where the bytes genuinely move before any record exists — an EmailComposer
+   * local attachment, the Analysis wizard's standalone document, and DocumentUploadWizard's "skip
+   * associate". Per the owner's 2026-08-28 resolution order.
+   *
+   * ⚠️ This is NOT a general-purpose escape hatch, and it is not "upload without authorization". If
+   * the content HAS an owning record, use {@link uploadSmallForRecord} — routing it here would place
+   * it in the caller's business-unit container rather than the record's, which for a secure record is
+   * provably the wrong container and cannot be undone (SPE permissions are additive-only).
+   */
+  public async uploadSmallWithoutRecord(
+    file: File,
+    options?: {
+      onProgress?: (percent: number) => void;
+      signal?: AbortSignal;
+      conflictBehavior?: ConflictBehaviorOption;
+    }
+  ): Promise<DriveItem> {
+    return this.put(`/api/obo/me/files/${encodeURIComponent(file.name)}`, file, options);
+  }
+
+  /**
+   * Shared transport for both record-keyed and record-less uploads.
+   *
+   * Extracted so the two contracts cannot drift in how they authenticate, report progress, encode
+   * `conflictBehavior`, or translate a 409 — that drift is exactly what produced four divergent
+   * copies of the association switch on the server side.
+   */
+  private async put(
+    routePath: string,
+    file: File,
+    options?: {
+      onProgress?: (percent: number) => void;
+      signal?: AbortSignal;
+      conflictBehavior?: ConflictBehaviorOption;
+    }
+  ): Promise<DriveItem> {
+    const authFetch = requireAuthenticatedFetch(this.authenticatedFetch, 'uploadFile');
+
+    options?.onProgress?.(0);
+
+    const query = options?.conflictBehavior ? `?conflictBehavior=${encodeURIComponent(options.conflictBehavior)}` : '';
+
+    const response = await requestOrThrow(
+      authFetch,
+      `${this.baseUrl}${routePath}${query}`,
+      {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/octet-stream' },
+        body: file,
+        signal: options?.signal ?? AbortSignal.timeout(this.timeout),
+      },
+      'Upload failed',
+      status => {
+        if (status === 409) {
+          throw new UploadNameConflictError(file.name);
+        }
+      }
+    );
+
+    const result = await response.json();
+    options?.onProgress?.(100);
+    return result;
+  }
+
+  /**
    * Upload a file in a single request (Graph simple PUT — up to 250 MB).
+   *
+   * @deprecated Task 076: the caller names a CONTAINER, which is the shape this project exists to
+   * remove — the server obeys a destination the client chose, with no per-resource decision behind
+   * it. Use {@link uploadSmallForRecord} when the content has an owning record, or
+   * {@link uploadSmallWithoutRecord} when it genuinely does not. This method and the route it calls
+   * (`PUT /api/obo/containers/{id}/files/{*path}`) are deleted together once every caller has moved;
+   * that deletion is the ship-together moment.
    */
   public async uploadSmall(
     containerId: string,

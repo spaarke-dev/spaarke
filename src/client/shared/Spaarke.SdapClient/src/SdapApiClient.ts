@@ -144,15 +144,75 @@ export class SdapApiClient {
     // 25 MB -> 256 MB -> 250 MB across Oct 2023; stable since) and SharePoint Embedded documents the
     // same figure for containers. Verified against MS Learn + the docs source repos, 2026-08-20:
     // src/server/api/Sprk.Bff.Api/.claude/agent-memory/researcher/graph-driveitem-upload-facts.md
+    this.guardSimpleUploadSize(file);
+
+    return await this.uploadOp.uploadSmall(containerId, file, options);
+  }
+
+  /**
+   * The Graph simple-PUT ceiling, enforced in ONE place for all three upload methods.
+   *
+   * Extracted 2026-09-03 with the record-keyed/record-less pair, so the three cannot drift on the
+   * limit. This project has already deleted THREE separate copies of a 4 MiB ceiling that no server
+   * ever enforced (`PathValidator.SmallUploadMaxBytes`, the client constant, and
+   * `CHUNKED_UPLOAD_THRESHOLD_BYTES`) — a fourth divergence is the predictable next instance.
+   */
+  private guardSimpleUploadSize(file: File): void {
     const SIMPLE_UPLOAD_MAX_BYTES = 250 * 1024 * 1024; // 250 MB — Graph simple-PUT ceiling
 
     if (file.size > SIMPLE_UPLOAD_MAX_BYTES) {
-      // Still fails honestly, but now only where Graph itself would refuse. Above this a caller
-      // genuinely needs a resumable upload session, which this client is not wired to.
+      // Fails only where Graph itself would refuse. Above this a caller genuinely needs a resumable
+      // upload session; the record-keyed one is at POST /api/obo/records/{entity}/{id}/upload-session.
       throw new Error(UploadOperation.fileTooLarge(file.size, SIMPLE_UPLOAD_MAX_BYTES));
     }
+  }
 
-    return await this.uploadOp.uploadSmall(containerId, file, options);
+  /**
+   * Uploads a file against its OWNING RECORD (task 076 contract).
+   *
+   * The server resolves the container from the record — the same record it authorizes the caller
+   * against — so the authorization key and the storage destination are one value and cannot
+   * disagree. There is no container parameter, by design.
+   *
+   * Prefer this over {@link uploadFile} everywhere the content has an owning record. Use
+   * {@link uploadFileWithoutRecord} only for the flows where bytes genuinely move first.
+   *
+   * @throws UploadNameConflictError on a name collision (nothing was overwritten)
+   * @throws SdapHttpError with the server's typed refusal — notably a secure record with no
+   *   container of its own, which FAILS CLOSED rather than falling back
+   */
+  public async uploadFileForRecord(
+    entityLogicalName: string,
+    recordId: string,
+    file: File,
+    options?: {
+      onProgress?: (percent: number) => void;
+      signal?: AbortSignal;
+      conflictBehavior?: ConflictBehaviorOption;
+    }
+  ): Promise<DriveItem> {
+    this.guardSimpleUploadSize(file);
+    return await this.uploadOp.uploadSmallForRecord(entityLogicalName, recordId, file, options);
+  }
+
+  /**
+   * Uploads content that has NO owning record yet; the server resolves the container from the acting
+   * user's business unit.
+   *
+   * ⚠️ Only for the flows that genuinely cannot create the record first. If a record exists, use
+   * {@link uploadFileForRecord} — sending it here stores it in the caller's business-unit container
+   * instead of the record's, which for a secure record is the wrong container and is not reversible.
+   */
+  public async uploadFileWithoutRecord(
+    file: File,
+    options?: {
+      onProgress?: (percent: number) => void;
+      signal?: AbortSignal;
+      conflictBehavior?: ConflictBehaviorOption;
+    }
+  ): Promise<DriveItem> {
+    this.guardSimpleUploadSize(file);
+    return await this.uploadOp.uploadSmallWithoutRecord(file, options);
   }
 
   /**

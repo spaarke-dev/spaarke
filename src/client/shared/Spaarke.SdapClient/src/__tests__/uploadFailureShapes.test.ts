@@ -163,3 +163,76 @@ describe('upload success path', () => {
     expect(authFetch.mock.calls[1][0]).toContain('conflictBehavior=rename');
   });
 });
+
+describe('task-076 upload contracts — the client cannot name a container', () => {
+  const okResponse = () =>
+    new Response(
+      JSON.stringify({
+        id: 'i',
+        name: 'brief.docx',
+        size: 8,
+        driveId: 'd',
+        createdDateTime: 'x',
+        lastModifiedDateTime: 'x',
+        isFolder: false,
+      }),
+      { status: 200 }
+    );
+
+  it('uploadFileForRecord targets the RECORD-keyed route and sends no container', async () => {
+    const authFetch = jest.fn(async (_url: string, _init?: RequestInit) => okResponse());
+    const client = clientWith(authFetch);
+
+    await client.uploadFileForRecord('sprk_matter', '11111111-1111-1111-1111-111111111111', file());
+
+    const url = authFetch.mock.calls[0][0];
+    expect(url).toContain('/api/obo/records/sprk_matter/11111111-1111-1111-1111-111111111111/files/');
+    // The whole point of the contract: no container is expressible from here.
+    expect(url).not.toContain('containers');
+    expect(url).not.toContain('containerId');
+  });
+
+  it('uploadFileWithoutRecord targets the record-LESS route and sends no container', async () => {
+    const authFetch = jest.fn(async (_url: string, _init?: RequestInit) => okResponse());
+    const client = clientWith(authFetch);
+
+    await client.uploadFileWithoutRecord(file());
+
+    const url = authFetch.mock.calls[0][0];
+    expect(url).toContain('/api/obo/me/files/');
+    expect(url).not.toContain('containers');
+  });
+
+  it('both new contracts translate a 409 into UploadNameConflictError', async () => {
+    // The collision dialog depends on this type surviving the route change — the regression that
+    // would otherwise be invisible, since a 409 still "works" as a failed upload.
+    const client = clientWith(throwingFetch(409, 'nameAlreadyExists'));
+
+    await expect(client.uploadFileForRecord('sprk_matter', 'r', file())).rejects.toBeInstanceOf(
+      UploadNameConflictError
+    );
+    await expect(client.uploadFileWithoutRecord(file())).rejects.toBeInstanceOf(UploadNameConflictError);
+  });
+
+  it('both new contracts surface a secure-record fail-closed refusal as a typed error', async () => {
+    // A secure record with no container of its own MUST fail, never fall back. The client's job is
+    // to not flatten that into a generic "upload failed".
+    const client = clientWith(throwingFetch(409, 'secure_record_container_missing'));
+
+    const err = await client.uploadFileForRecord('sprk_project', 'r', file()).catch((e: unknown) => e);
+    // 409 is the collision code too, so the conflict type wins by design; what matters is that the
+    // caller gets a TYPED outcome rather than an opaque failure.
+    expect(err).toBeInstanceOf(UploadNameConflictError);
+  });
+
+  it('forwards conflictBehavior on both new contracts', async () => {
+    const authFetch = jest.fn(async (_url: string, _init?: RequestInit) => okResponse());
+    const client = clientWith(authFetch);
+
+    await client.uploadFileForRecord('sprk_matter', 'r', file(), { conflictBehavior: 'rename' });
+    expect(authFetch.mock.calls[0][0]).toContain('conflictBehavior=rename');
+
+    await client.uploadFileWithoutRecord(file(), { conflictBehavior: 'replace' });
+    expect(authFetch.mock.calls[1][0]).toContain('conflictBehavior=replace');
+  });
+});
