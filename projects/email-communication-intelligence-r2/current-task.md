@@ -1,7 +1,7 @@
 # Current Task State — email-communication-intelligence-r2
 
-> **Last Updated**: 2026-09-03 (context-handoff before /compact — the Outlook/Word add-in stream is DONE + MERGED to master via PR #934; NEW focus for the fresh session is **triage/AI-catalog + email semantic search**).
-> **Recovery**: Read "Quick Recovery" first, then "FRESH-SESSION PRIORITIES".
+> **Last Updated**: 2026-09-03 (matching-approaches analysis DONE + owner-reviewed; arch-doc refreshed; **go-forward plan authored at `notes/email-matching-and-triage-go-forward-plan.md`** — that plan is now the tracker for P1/P2/G1–G5).
+> **Recovery**: Read "Quick Recovery" first, then the **go-forward plan** (`notes/email-matching-and-triage-go-forward-plan.md`), then "FRESH-SESSION PRIORITIES" below.
 
 ---
 
@@ -12,14 +12,14 @@
 | **Branch** | `work/email-communication-intelligence-r2`. **Add-in stream MERGED to master** via **PR #934** (squash `f5fee2141`; master tip `399651fff`). Tree clean. Branch not yet deleted. Main repo `C:/code_files/spaarke` local master is behind (has unrelated dirty WIP — left untouched; ff it when convenient). |
 | **Add-in stream — ✅ DONE + MERGED** | Outlook/Word add-in: **Create To Do → first-class `sprk_todo`** (new BFF `POST /api/office/todo` + `OfficeService.CreateTodoAsync`); §C Save→ToDo regarding wiring; §10 contract tests; **Word real `.docx` save** (`WordHostAdapter.getFileAsync(Compressed)` + `.docx` ext); **web auth fix** (`OfficeNaaStrategy`: desktop=silent NAA, Office-web=standard `https` popup via `auth-callback.html`; portable `brk-multihub://${hostname}`); XML manifest for M365 admin center (`outlook/outlook-manifest.xml`); naming "Spaarke Outlook"/"Spaarke Word"; **white-on-black icons**. All deployed to dev + UAT-confirmed. Full detail: `git log` on the branch / PR #934. |
 | **Build gate** | BFF: `dotnet build src/server/api/Sprk.Bff.Api/` (0-err). Add-in: `cd src/client/office-addins && npm run build:dev`. `npm run typecheck` = ~397 PRE-EXISTING errors (exactOptional) — filter to changed files. |
-| **NEXT (this session's ask)** | See **FRESH-SESSION PRIORITIES** immediately below. Owner (2026-09-03): **triage is very important — fix it**; **email semantic search — build it**; and **FIRST read + analyze `notes/email-record-matching-approaches.md` and give feedback** (owner: "very important for the AI routing catalog and triage"). |
+| **NEXT** | **P1 — seed the triage routing catalog to `spaarkedev1`** (verify dev empty first, then seed Actions→consumers). Tracked in `notes/email-matching-and-triage-go-forward-plan.md`. The matching-approaches analysis is DONE + owner-reviewed (arch-doc refreshed 6→13 rungs; note extracted + deleted). |
 
 ---
 
 ## 🎯 FRESH-SESSION PRIORITIES (owner-set 2026-09-03)
 
-### 0. ⚠️ FIRST — read + analyze `notes/email-record-matching-approaches.md`, give the owner feedback
-Owner flagged this as **very important for the AI routing catalog + triage approach** — do this analysis BEFORE seeding/fixing, and report feedback. (Not yet read as of this handoff.)
+### 0. ✅ DONE — matching-approaches analysis + owner review (2026-09-03)
+Analyzed against a full codebase inventory: the 5-tier "matching ladder" is **already built** as the 13-rung Association Engine. Owner reviewed the feedback and directed: refresh the canonical arch doc (✅ `communication-intelligence-architecture.md` §3–§5, 6→13 rungs), extract the 2 worthwhile ideas (eval harness + party graph) into a plan, delete the note. **All done** — see `notes/email-matching-and-triage-go-forward-plan.md` (the tracker for P1/P2/G1–G5). Plan items **G1 done**, **G2** (delete categorization dead-seam) pending, **G3/G4** queued, **G5** parked (ADR-013 Path-B).
 
 ### 1. 🔴 Triage fix (HIGH) — the whole Pillar-E intelligence layer is "built but dark"
 - **Symptom**: on REAL email captures, every triage field is null — `sprk_triagepriority` / `sprk_triagecategory` / `sprk_triagesummary` / `sprk_riconfidence` / `sprk_reviewoutcome`. Also Job-B (propose field-updates) + Job-C (propose create-task) produce nothing. Only the 14 seeded rows have triage (seed script wrote fields directly).
