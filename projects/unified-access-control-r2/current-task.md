@@ -16,7 +16,7 @@
 | **Nominal task** | **076** — record-keyed upload contract (`in-progress`, step 4 of 11). 076 was NOT this session's work, but this session did land 3 of its facts (250 MB threshold, conflictBehavior, U1/U2/U3 census). |
 | **This session did** | Fixed **4 of the 5 live route mismatches** (R14 · R10/R11 · R13 · R3) → deleted **47 verified-dead files** → **stopped a live data-loss bug** on every file upload (name collision silently overwrote) → removed a **4 MiB ceiling that no server ever enforced** |
 | **Status** | Working tree **CLEAN**, 0 unpushed, **0 behind master**. Branch is **fully merged** — `git rev-list --count origin/master..HEAD` = 0. Verify with `git log --oneline -3` rather than trusting a SHA written here (a commit cannot state its own hash; two attempts to do so were wrong within seconds). |
-| **Next Action** | ✅ **R15 (3b) + collision dialog (3c) DONE and committed** — `524a32fd3`, `09025ab39`, on top of merged master `5fa7468ae`. **ALL FIVE live route mismatches are now fixed.** Branch is 2 commits ahead of origin, **NOT pushed, no PR yet**. **START AT § REMAINING WORK item N-1** (consolidate to ONE upload client) — or push + open a PR first if the owner wants these two landed before more work stacks on them. ⚠️ Gate any merge on the FULL check rollup, not `Router` alone. |
+| **Next Action** | ✅ **PR #932 MERGED** → master `3d65f7ebf` (0 pending / 0 failing, CLEAN; main repo + worktree synced). Since then, on branch and **UNPUSHED**: `33857412b` (AP-12), `b8260826e` (item 8), `920ba6b7a` (N-1 first half). **START AT § REMAINING WORK — item N-1 SECOND HALF** (point `FileUploadService` at `@spaarke/sdap-client`, delete U2's parallel `SdapApiClient`, update `pcf-safe.ts` + `document-upload/index.ts` exports, verify the wizard). Then items 5 → 7 → 6, with 4 needing an ENVIRONMENT query. ⚠️ **Owner committed to a real-Dataverse create+read smoke on `POST /api/v1/external/projects/{id}/documents` BEFORE the external SPA deploys** — it is unverified against real Dataverse and the SPA deploy is manual `workflow_dispatch`, which is the only reason merging first was safe. |
 
 ### Commit map — this session (10 commits, ALL pushed; nothing at risk)
 
@@ -146,6 +146,31 @@ independently confirms this repo does not gate on review). **`worktree-sync` Ste
    `CallerRecordAccessProbe` from unconditionally-registered `ComposeService` is NOT the §10 F.1
    asymmetric-registration anti-pattern.
 
+### 🔴 THREE OF MY OWN NOTES WERE WRONG (2026-09-02) — re-derive, never inherit
+
+This is now the single highest-value warning in this file. Trap #2 (stale prose) has a sibling: **this
+project's own handoff notes carry false claims at roughly the same rate as the code comments do.**
+
+1. **"N-2 — `EntityCreationService.ts:493` missing `encodeURIComponent`"** — **FALSE.** It is present at
+   **:482** and *used* at :493. The note cited the use site as if it were the defect. Nothing to fix.
+2. **"Item 8 — close 083"** — **WRONG, and dangerous.** 083 is a security sweep and it has **live holes**.
+   Parsing the build-enforced `SpeWriteSinkContainerProvenanceGuardTests.AllowList` gives **7 sinks still
+   `ClientSupplied`**: `DocumentsEndpoints` UploadSmallAsync#1 + DeleteFileAsync#1, `OBOEndpoints`
+   UploadSmallAsUserAsync#1, `ComposeService` ReplaceFileContentAsUserAsync#1, `ComposeSaveStorageCoordinator`
+   ReplaceFileContentAsUserAsync#1/#2/#3. (#858 converted the Compose **MINT** only; the REPLACE trio did
+   not.) Totals: 7 / 14 ServerDerivedRecord / 5 ServerDerivedConfig / 3 AdministrativeRoleScoped / 1 Dead.
+   **083 cannot close before task 076**, which owns the OBO row.
+3. **"N-1 — U1 stops doing HTTP; delete U2; `@spaarke/sdap-client` survives"** — **INVERTED.** The
+   "surviving" client's upload/download/delete/getFileMetadata authenticated through a `TokenProvider`
+   shim returning `''`, and each caller guarded the header as `token ? {Authorization} : {}` — so they sent
+   **no Authorization header** to a `RequireAuthorization` BFF. Following the plan literally would have
+   replaced a working client with one that 401s. Fixed in `920ba6b7a` (ADR-028 `authenticatedFetch`); the
+   reason it was safe to fix rather than preserve is that those four methods had **zero callers**.
+
+**The instrument that caught all three**: check the claim against code — a grep for references, a parse of
+the guard's own allow-list, a read of the auth path — *before* acting on it. Each took under two minutes.
+
+
 ### ▶ REMAINING WORK (ordered, 2026-09-01) — owner: "we need to do all of these"
 
 **Rationale for the order**: binding agent-docs first (they misdirect every later step), then code
@@ -164,6 +189,29 @@ deletions, then live user-facing fixes, then planning artifacts, then the big ex
 | 6 | Execute **076** | 🔲 | The container contract. **Ship-together** (client+BFF). Its own session. |
 | 7 | Q4 widening + `UploadFinalizationWorker.cs:611-629` | 🔲 | Or associations silently drop. |
 | 8 | Close **083**; set **012** → `completed-with-escalation` | 🔲 | Bookkeeping. |
+
+### ▶ STATUS AFTER 2026-09-02 SESSION 2 (authoritative — supersedes the N-x rows above)
+
+| Item | State | Detail |
+|---|---|---|
+| **3b** R15 external upload | ✅ `524a32fd3` | merged in #932 |
+| **3c** collision dialog | ✅ `09025ab39` | merged in #932 |
+| **N-2** encodeURIComponent | ✅ **VOID** | false claim — see the three-wrong-notes block above |
+| **N-3** FAILURE-MODES | ✅ `33857412b` | new **AP-12** "a comment becomes the constraint" + CHANGELOG + back-filled AP-11 TOC entry |
+| **8** bookkeeping | ✅ `b8260826e` | 012 → `completed-with-escalation` **with the residue stated**; **083 explicitly NOT closed** |
+| **N-1** one upload client | 🔄 **HALF DONE** `920ba6b7a` | ✅ shared client given working auth (4 sites), `TokenProvider` deleted, U2's failure copy + typed `SdapHttpError` ported ahead of the cut, `DriveItem.webUrl` widened, U1's raw fetch → `SdapApiClient.uploadFile()`. 🔲 **REMAINING**: point `FileUploadService` at the shared client, delete `services/document-upload/SdapApiClient.ts`, update `pcf-safe.ts` + `document-upload/index.ts` exports, re-verify the wizard. Kept separate because it changes `@spaarke/ui-components`' PUBLIC surface and the wizard's upload path landed the same day. ⚠️ `UploadOperation` still throws `UploadNameConflictError` on 409 **before** the generic failure — that ordering is load-bearing for the dialog; do not reorder. |
+| **4** `__SPAARKE_OPEN_CLOSE_PROJECT__` | 🔲 **NEEDS OWNER/ENV** | zero in-repo callers; it is an **org-side ribbon**, so a repo search cannot answer it. Query the ENVIRONMENT's ribbon definitions for the command. If genuinely uncalled, secure-project closure — the access-revocation cascade this project is about — may be unlaunchable. |
+| **5** file tasks 093–096 | 🔲 | read `notes/plan-upload-path-decomposition-2026-08-31.md` FIRST. 093 must NOT author a new Secure UI (exists ×2; task 068 owns it). `ls tasks/` before numbering — highest is **092**. |
+| **6** execute **076** | 🔲 | the container contract, ship-together client+BFF, own session. **Gates 083's OBO row.** |
+| **7** Q4 widening + `UploadFinalizationWorker.cs:611-629` | 🔲 | or associations silently drop. Note S13 in the 083 inventory is the same file and is **LIVE** with a client-supplied container via the job payload. |
+
+**Unpushed on branch**: `33857412b`, `b8260826e`, `920ba6b7a`. Working tree clean at checkpoint time.
+
+⚠️ **Owner-committed follow-up**: a real-Dataverse **create + read** smoke on
+`POST /api/v1/external/projects/{id}/documents` before the external SPA deploys. `CreateDocumentAsync`
+writes `sprk_documentname` / `sprk_filename` / `sprk_graphitemid` / `sprk_graphdriveid` / `sprk_filesize` /
+`sprk_filepath` + `sprk_Project@odata.bind` — field names and a case-sensitive nav property that have
+never executed against real Dataverse. This is the R4 `sprk_contact`-vs-OOB-`contact` failure class.
 
 ⚠️ **`Router` is the ONLY required check on master** (ruleset `21824191`; classic protection is OFF and its
 API 404s, which reads as "unprotected"). It passed once while two test jobs were RED. **Gate on the whole
