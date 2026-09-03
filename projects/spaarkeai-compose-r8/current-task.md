@@ -13,10 +13,34 @@
 | Field | Value |
 |---|---|
 | **Active work** | **DEPLOYED to `spaarkedev1` 2026-09-02 (BFF + `sprk_spaarkeai` together, NFR-05); UAT round 1 returned.** All R8 code + issue items CLOSED. Not merged — PR #924 open on this branch. |
-| **Next Action** | **R8 GATES ARE CLOSED.** Track A ✅ passed (round 2 #4). `section-break-flattened` ✅ **ACCEPTED 2026-09-02** — signed set is now SIX rows, accepted as "ship with it named", NOT "never fix" (carrying it is more tractable than the doc claimed; recommended for the follow-on). Remaining: rewrite PR #924's title to cover the release and merge. **Then the owner-approved UX order: 5 (toolbar redesign) → Numbering menu + 6 (Spacing) → 2 (notification popover) → 7 (Assistant scroll) → 8 (change summary).** |
+| **Next Action** | **UX backlog: 5 ✅ · 2 ✅ · 7 ✅ · line-spacing readability ✅ — all DEPLOYED. NEXT: item 8 (document change summary), then item 6 (editable spacing) + numbering as one group.** ⚠️ **Item 8 is BIGGER than first characterised** — see §U8 below; it is not a wiring job. R8's own gates are CLOSED (Track A passed; `section-break-flattened` accepted). PR #924 still needs its title rewritten to cover the release, then merge. |
 | **Branch** | `work/spaarkeai-compose-r8` — **33 ahead of `origin/master`, 0 behind, tree clean.** PR **#924** already open (its title still describes only #777 — needs rewriting to cover the release). |
 | **Suite** | Client **1,381 / 1,381** · BFF **11,894 / 0 / 57 skipped** · ArchTests **181/181** · solution build **0 errors** · deployed build hash-verified |
 | **Open, not blocking** | §R3 carried items (repair script now VALIDATED — report mode run clean on dev; letter/roman fixture still owner-dependent) · 8 AI consumer types with no `ConsumerTypes.All` constant (census-only, `/healthz/catalog` stays 503) · 2 path-violation test files |
+
+---
+
+## U8. Item 8 (document change summary) — CORRECTION to the round-1 note
+
+The round-1 analysis called this **"a wiring job, not a new capability"**. That was wrong, and the
+correction matters because it changes the size:
+
+| Piece | Status |
+|---|---|
+| `compose-summarize-word-changes` consumer type + Action + input/output schemas | ✅ exists |
+| Result renderer (`composeResultFormat.ts`) | ✅ exists |
+| Server operand binding (`ContextBinder` `changesText` → `OperandKind.ChangesText`) | ✅ exists |
+| **A client producer of `changesText`** | ❌ **DOES NOT EXIST** |
+| **Any live trigger** | ❌ **DOES NOT EXIST** — the only client references are the comment in `ComposeAiToolbar.tsx` explaining its REMOVAL, and `useComposeToolbarActivation.ts` |
+
+So the capability is real end-to-end on the server and dead on the client. Item 8 needs **two new
+pieces**: something that walks the editor's tracked insertion/deletion marks and produces structured
+change text, and a document-level trigger. `describeKinds` in `ComposeReanchorBanner.tsx` counts
+annotation kinds but produces no text, so it is a precedent for the shape, not a reusable producer.
+
+**The binding constraint stands and is the reason this must not be rushed**: the action was pulled from
+the selection toolbar because without real change data **the LLM fabricates a phantom "[Insertion]"**.
+Any trigger MUST refuse when there are no tracked changes rather than dispatch an empty operand.
 
 ---
 
