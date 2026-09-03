@@ -51,9 +51,9 @@ public static class OfficeEndpoints
         // Search endpoints (entities, documents)
         MapSearchEndpoints(group);
 
-        // Quick create endpoints
-        // TODO: Implement in task 026
-        // MapQuickCreateEndpoints(group);
+        // Quick create endpoints — inline "New record" for the add-in "Related to" picker.
+        // Implemented for Matter + Project (email-communication-intelligence-r2 Slice 3, #10).
+        MapQuickCreateEndpoints(group);
 
         // Share endpoints (links, attach) - Task 027/028
         MapShareEndpoints(group);
@@ -1158,6 +1158,108 @@ public static class OfficeEndpoints
             .ProducesProblem(StatusCodes.Status403Forbidden)
             .ProducesProblem(StatusCodes.Status409Conflict) // For idempotency conflicts
             .ProducesProblem(StatusCodes.Status429TooManyRequests);
+
+        // POST /office/todo - Create a first-class sprk_todo from the add-in inline "Create To Do"
+        // (email-communication-intelligence-r2 #3). Regarding = the record the email was filed to.
+        // Authorization: OfficeAuthFilter validates user authentication.
+        // Rate Limit: reuses the QuickCreate category (both are low-frequency inline creates).
+        group.MapPost("/todo", CreateTodoAsync)
+            .WithName("OfficeCreateTodo")
+            .WithSummary("Create a To Do (sprk_todo)")
+            .WithDescription("Creates a first-class sprk_todo regarding the filed record, mirroring the CreateTodoWizard field set (name, description, contact assignee, due date, priority/effort). NOT a sprk_event.")
+            .AddOfficeRateLimitFilter(OfficeRateLimitCategory.QuickCreate)
+            .AddIdempotencyFilter()
+            .AddOfficeAuthFilter()
+            .Accepts<CreateTodoRequest>("application/json")
+            .Produces<CreateTodoResponse>(StatusCodes.Status201Created)
+            .ProducesProblem(StatusCodes.Status400BadRequest)
+            .ProducesProblem(StatusCodes.Status401Unauthorized)
+            .ProducesProblem(StatusCodes.Status403Forbidden)
+            .ProducesProblem(StatusCodes.Status409Conflict)
+            .ProducesProblem(StatusCodes.Status429TooManyRequests);
+    }
+
+    /// <summary>
+    /// Create To Do endpoint handler. Creates a first-class <c>sprk_todo</c> regarding the filed record
+    /// (email-communication-intelligence-r2 #3). Owner attribution is best-effort (ADR-024).
+    /// </summary>
+    private static async Task<IResult> CreateTodoAsync(
+        CreateTodoRequest request,
+        IOfficeService officeService,
+        Sprk.Bff.Api.Services.Ai.Context.ICallerSystemUserResolver callerResolver,
+        ILogger<Program> logger,
+        HttpContext context,
+        CancellationToken cancellationToken)
+    {
+        var traceId = context.TraceIdentifier;
+        var userId = context.Items[OfficeAuthFilter.UserIdKey] as string
+            ?? CallerResolution.ResolveObjectId(context.User);
+
+        logger.LogInformation(
+            "Create To Do requested by user {UserId}, CorrelationId={CorrelationId}", userId, traceId);
+
+        if (string.IsNullOrEmpty(userId))
+        {
+            logger.LogWarning("Create To Do requested without valid user identity");
+            return ProblemDetailsHelper.OfficeAccessDenied(traceId);
+        }
+
+        if (string.IsNullOrWhiteSpace(request.Name))
+        {
+            return Results.ValidationProblem(
+                new Dictionary<string, string[]> { ["name"] = ["Name is required"] },
+                title: "Validation Error",
+                detail: "A To Do requires a name.",
+                extensions: new Dictionary<string, object?>
+                {
+                    ["errorCode"] = "OFFICE_007",
+                    ["correlationId"] = traceId
+                });
+        }
+
+        try
+        {
+            // Attribute ownership to the caller (ADR-024) — best-effort; unresolved → app-owned.
+            var ownerResolution = await callerResolver.ResolveAsync(context.User, cancellationToken);
+            var ownerSystemUserId = ownerResolution.IsResolved ? ownerResolution.SystemUserId : null;
+
+            var response = await officeService.CreateTodoAsync(request, userId, ownerSystemUserId, cancellationToken);
+
+            if (response is null)
+            {
+                logger.LogWarning(
+                    "Create To Do failed: service returned null, CorrelationId={CorrelationId}", traceId);
+                return Results.Problem(
+                    type: "https://spaarke.com/errors/office/create-failed",
+                    title: "Create Failed",
+                    detail: "Failed to create the To Do.",
+                    statusCode: StatusCodes.Status403Forbidden,
+                    extensions: new Dictionary<string, object?>
+                    {
+                        ["errorCode"] = "OFFICE_010",
+                        ["correlationId"] = traceId
+                    });
+            }
+
+            logger.LogInformation(
+                "Create To Do succeeded: TodoId={TodoId}, CorrelationId={CorrelationId}", response.TodoId, traceId);
+
+            return Results.Created($"/office/todo/{response.TodoId}", response);
+        }
+        catch (Exception ex)
+        {
+            logger.LogError(ex, "Error during Create To Do by user {UserId}, CorrelationId={CorrelationId}", userId, traceId);
+            return Results.Problem(
+                type: "https://spaarke.com/errors/office/internal_error",
+                title: "Internal Server Error",
+                detail: "An unexpected error occurred while creating the To Do.",
+                statusCode: StatusCodes.Status500InternalServerError,
+                extensions: new Dictionary<string, object?>
+                {
+                    ["errorCode"] = "OFFICE_INTERNAL",
+                    ["correlationId"] = traceId
+                });
+        }
     }
 
     /// <summary>
@@ -1178,6 +1280,7 @@ public static class OfficeEndpoints
         QuickCreateRequest request,
         IOfficeService officeService,
         IMembershipEventPublisher membershipEventPublisher,
+        Sprk.Bff.Api.Services.Ai.Context.ICallerSystemUserResolver callerResolver,
         ILogger<Program> logger,
         HttpContext context,
         CancellationToken cancellationToken)
@@ -1247,11 +1350,17 @@ public static class OfficeEndpoints
 
         try
         {
+            // Attribute record ownership to the caller (ADR-024) — best-effort; an unresolved
+            // caller leaves ownerid to the Dataverse default (app user) rather than failing the create.
+            var ownerResolution = await callerResolver.ResolveAsync(context.User, cancellationToken);
+            var ownerSystemUserId = ownerResolution.IsResolved ? ownerResolution.SystemUserId : null;
+
             // Call service to create entity
             var response = await officeService.QuickCreateAsync(
                 parsedEntityType,
                 request,
                 userId,
+                ownerSystemUserId,
                 cancellationToken);
 
             if (response is null)

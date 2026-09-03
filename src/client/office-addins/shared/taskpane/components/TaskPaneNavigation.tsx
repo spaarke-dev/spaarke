@@ -2,6 +2,7 @@ import React from 'react';
 import { makeStyles, tokens, TabList, Tab } from '@fluentui/react-components';
 import {
   SaveRegular,
+  TaskListAddRegular,
   // V1: Disabled icons - uncomment for future releases
   // ShareRegular,
   // ClockRegular,
@@ -38,12 +39,12 @@ const useStyles = makeStyles({
 /**
  * Available navigation tabs.
  */
-export type NavigationTab = 'save' | 'share' | 'recent' | 'search';
+export type NavigationTab = 'save' | 'createTodo' | 'share' | 'recent' | 'search';
 
 /**
  * Tab configuration.
  */
-interface TabConfig {
+export interface TabConfig {
   value: NavigationTab;
   label: string;
   icon: React.ReactElement;
@@ -61,6 +62,13 @@ const TAB_CONFIGS: TabConfig[] = [
     label: 'Save',
     icon: <SaveRegular />,
     availableFor: ['outlook', 'word'],
+  },
+  {
+    // Inline "Create To Do" tool — Outlook only (a To Do is created from an email).
+    value: 'createTodo',
+    label: 'Create To Do',
+    icon: <TaskListAddRegular />,
+    availableFor: ['outlook'],
   },
   // V1: Disabled - uncomment for future releases
   // {
@@ -82,6 +90,11 @@ const TAB_CONFIGS: TabConfig[] = [
   //   availableFor: ['outlook', 'word'],
   // },
 ];
+
+/** Tabs available for a given host — shared by the nav row and the consolidated toolbar. */
+export function getAvailableTabs(hostType: HostType): TabConfig[] {
+  return TAB_CONFIGS.filter(tab => tab.availableFor.includes(hostType));
+}
 
 export interface TaskPaneNavigationProps {
   /** Currently selected tab */

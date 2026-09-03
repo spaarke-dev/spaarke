@@ -51,6 +51,10 @@
      * This simulates the Outlook environment so we can test the add-in UI without Outlook.
      */
 
+    // Browser test harness flag — read by outlook/taskpane/index.tsx to MOCK auth
+    // (no real Entra sign-in) so the pane renders the authenticated app directly.
+    window.__SPAARKE_TEST_MODE__ = true;
+
     // Mock email data
     const mockEmail = {
       itemId: 'AAMkAGI2TG93AAA=',

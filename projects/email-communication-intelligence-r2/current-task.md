@@ -1,6 +1,6 @@
 # Current Task State — email-communication-intelligence-r2
 
-> **Last Updated**: 2026-09-01 (context-handoff — UAT-driven fixes session: #919 document-profile AI bug FIXED, and the Document Upload wizard "Send Email" follow-on rebuilt end-to-end — dead-form fix → standard EmailComposer → Finish-guard → centered success. All merged or auto-merging + deployed to dev.)
+> **Last Updated**: 2026-09-02 (context-handoff before /compact — Outlook add-in UX redesign: Slices 1–3 DONE on branch + multiple UI-feedback rounds; next big item is #3 the Create To Do form redesign)
 > **Recovery**: Read "Quick Recovery" first.
 
 ---
@@ -9,52 +9,77 @@
 
 | Field | Value |
 |-------|-------|
-| **Status** | **All this session's work is DONE, deployed to dev, and merged (or auto-merging) to master.** No blocking work. The session was reactive UAT fixes on two fronts: **(A)** the #919 document-profile AI bug; **(B)** the Document Upload wizard's "Send Email" follow-on step. Every item was owner-UAT-confirmed except the final centering polish (deployed; test after a wizard reload). |
-| **Branch** | `work/email-communication-intelligence-r2` (0 behind after each merge). Working tree CLEAN. |
-| **Open PR** | **#930** (centering polish) — auto-merge on `Router`. **MERGED**: **#923** (#919 profiling fix, BFF), **#925** (Send Email dead-form fix), **#927** (EmailComposer redesign), **#929** (Finish-guard). |
-| **Deployed (dev)** | **BFF** `spaarke-bff-dev` ← #923 (profiling fix, hash-verified + healthy). **Code page** `sprk_documentuploadwizard` on `spaarkedev1` ← latest build (composer + guard + centering; published). App Insights app id `6a76b012-46d9-412f-b4ab-4905658a9559`. |
-| **Next** | Confirm #930 merged (`gh pr view 930`). No pending fix work — awaiting any further owner UAT. |
+| **Active work** | **Outlook add-in UX redesign** (UAT-driven, owner 2026-09-01/02). Iterated in the add-in's **own browser test harness**: `cd src/client/office-addins && npm run start:outlook` → `https://localhost:3000/outlook/taskpane-test.html` (mock Office + mock auth + demo data via `window.__SPAARKE_TEST_MODE__`). NOT spaarke-prototype (Xrm-based; add-in is Office.js). First run: `npm install --legacy-peer-deps` + `npx office-addin-dev-certs install`. |
+| **Branch** | `work/email-communication-intelligence-r2` — **10 commits ahead of master, all committed, tree clean.** Nothing merged yet (WIP). |
+| **Build gate** | Add-in: `cd src/client/office-addins && npm run build:dev` (webpack/babel — the gate). BFF: `dotnet build src/server/api/Sprk.Bff.Api/`. Both currently **0-err**. `npm run typecheck` = ~393 PRE-EXISTING errors (exactOptional / jest-dom missing) — filter to changed files. |
+| **DONE** | Slices 1–3 (toolbar, reconciliation "Related to" cards, inline New-record). **#3 Create To Do → first-class `sprk_todo`** (d2b5dbc34) + UAT round (f8364819e: responsive form, plain no-icon Save on both To Do + SaveFlow, schema fix). **§C save→To-Do regarding wiring** (9e62afcac: SaveFlow `onSaved` → App seeds savedContext live after a real save). **§10 contract tests** for `POST /api/office/todo` (e59c7a4b0: 2 run, 1 skip). **§B app-tile icons** from Spaarke logo (92dfacfe3: generated icon-color/outline + refreshed set → fixes blank tile). **§D version bumps** (c9d89ca2f: Outlook 1.0.21, Word 1.0.5). All builds 0-err. |
+| **DEPLOYED 2026-09-03** | **BFF** → `spaarke-bff-dev` (Deploy-BffApi.ps1; hash-verified; `/api/office/todo`→401 live). **Add-in** → SWA `spaarke-office-addins` (`icy-desert-0bfdbb61e.6.azurestaticapps.net`, RG `spe-infrastructure-westus2`) via `gh workflow run deploy-office-addins.yml --ref work/email-communication-intelligence-r2` (run 33706384108, success). Verified live: outlook manifest **1.0.21**, `assets/icon-color.png`+`icon-outline.png` 200. |
+| **UAT ROUND 2026-09-03** | **M365 admin center registration**: the unified `manifest.json` (manifestVersion `devPreview`) is REJECTED by Integrated apps (URL upload expects XML; devPreview not accepted). Solution: **restored the OfficeApp/MailApp XML manifest** at `outlook/outlook-manifest.xml` (recovered from d47fa31f1^) + wired into the build → served at `https://icy-desert-…/outlook/outlook-manifest.xml`. **Word already has XML** (`word/manifest.xml`). Admin center accepts the XML by **file upload** (URL upload failed — content-type quirk). Naming: **Outlook="Spaarke Outlook"**, **Word="Spaarke Word"**. Logo enlarged (icons regenerated at 4% padding; IconUrl→icon-64, HighRes→icon-128). Versions: Outlook **1.0.22**, Word **1.0.6**. Re-upload files: `C:\tmp\spaarke-outlook-manifest.xml`, `C:\tmp\spaarke-word-manifest.xml`. **Word .docx bug FIXED** (cf2f46527): `WordHostAdapter` now captures the real .docx via `getFileAsync(FileType.Compressed)` (was flat OOXML XML from `getOoxml()` → no preview/open/AI); `useSaveFlow` guarantees `.docx` extension. **SPE content-type sanity check: BFF correct** — Graph infers MIME from the name extension (`ItemWithPath(path).Content.PutAsync`), so the `.docx` extension fix is sufficient; no BFF change. |
+| **AUTH FIX 2026-09-03 (55bd3fe95, DEPLOYED)** | Office-on-the-**web** login failed AADSTS7000471 (desktop worked). Root cause: `OfficeNaaStrategy` hardcoded `brk-multihub://localhost` (only in the app's **publicClient/native** list → native broker/desktop OK) but the **SPA** platform (web flow) has the **domain form** `brk-multihub://<host>`. **Option A (code, portable):** derive `brk-multihub://${window.location.hostname}` — matches the SPA-registered host; portable to every prod customer domain. **Option B (dev-only):** added `brk-multihub://localhost` to the dev app's SPA URIs for localhost web dev. ⚠️ **PROD PORTABILITY REQUIREMENT:** each customer env's Entra app MUST register `brk-multihub://<that-SWA-host>` as a **SPA** redirect URI (+ the https taskpane URIs) — a provisioning step; the code needs no per-env change. Add to the customer deployment guide. |
+| **NEXT** | **Re-test auth on ALL surfaces after this deploy** — Word/Outlook **desktop** (confirm no native-broker regression from the redirect change) AND Word/Outlook **web** (the fix target, should now sign in). Reload taskpanes / clear Wef icon cache (`%LOCALAPPDATA%\Microsoft\Office\16.0\Wef\`) for the logo. Re-upload 1.0.22/1.0.6 XML manifests for name+logo. Then Word Save re-test (real .docx: preview/open/Compose/AI) + Outlook Create To Do live UAT (§1.7 real-Dataverse smoke, first `sprk_todo` write). Open decision: SaveFlow footer gray-"Saved" (§A.4). |
 
 ---
 
-## A. #919 document-profile AI bug — FIXED (PR #923, deployed to BFF, UAT-confirmed ✅)
+## Outstanding work (prioritized)
 
-**Symptom (resolved)**: every saved Document stuck at `sprk_filesummarystatus = Failed` — profiling never completed.
+### A. #3 — Create To Do form redesign — ✅ DONE (commit d2b5dbc34, 2026-09-02)
+**Decision locked (AskUserQuestion):** creates a **first-class `sprk_todo`**, not `sprk_event` (the requested Priority/Effort/Contact-assignee fields only exist on `sprk_todo`; owner confirmed "we are not using the sprk-event type 'to do' anymore"). Regarding = the record the email was filed to.
 
-**Root cause (empirically confirmed)**: the "Document Profile" **node playbook**'s Update Record node stores config in the Playbook-Builder **wrapper format** (JSON-inside-a-JSON-string). Layer-1 `RenderConfigJsonStructurally` escaped substituted values only at the OUTER level; `UpdateRecordNodeExecutor.ParseConfig` re-parsing the nested string threw `'0x0A' is invalid within a JSON string. Path: $.fieldMappings[0].value`. (The prior ":2284 fallback" hypothesis was WRONG — corrected.)
+**Built:** `CreateTodoView.tsx` full form (Name/Description/Assigned-To Contact type-ahead/Due/Priority/Effort dropdowns), green record card for the regarding, Cancel(reset)/Save footer with gray "Saved" (don't-close). `todoChoices.ts` add-in-local mirror of the priority/effort choice→score tables (§11 sanctioned dup of `todoScoreMappings.ts`). BFF: `CreateTodoRequest`/`Response`, `OfficeService.CreateTodoAsync` (app-only create via `IGenericEntityService`, ownerid=caller, regarding via `sprk_regardingmatter/project/invoice` + resolver fields id/name + best-effort `sprk_recordtype_ref`, assignee→contact), `POST /api/office/todo`. Contact lookup reuses `/api/office/search/entities?type=Contact`.
 
-**Two fixes shipped in #923**:
-1. **Renderer (root cause)** — `PlaybookOrchestrationService.RenderConfigJsonStructurally` now recurses into a nested JSON-containing-a-template string (escapes at the nested level). Protects Update Record / Create Task / Create Notification / Send Email nodes in ANY playbook. Made `internal static` for a rendered-config regression test (`UpdateRecordParseConfigReproTests`).
-2. **Convergence** — `AppOnlyAnalysisService` routes the "Document Profile" consumer through the direct-Action (ADR-043) spine (`IActionResolver → IActionRunner → UpdateDocumentFieldsAsync`) like the wizard + Compose paths, not the node playbook. +2 optional ctor deps.
+**Residual / open:**
+- **§A.4 SaveFlow "Saved" footer** — owner asked the Save form footer to also show gray "Saved". DEFERRED: SaveFlow already has a richer async success flow (job-status → "Document Saved" card, pane stays open) — didn't force the gray-button pattern there to avoid regressing View-Document/Save-Another affordances. **Confirm with owner** whether they want the exact gray-button style on the Save footer too.
+- **§10 test obligation** — `Services/Office` changed; add/confirm a test for `POST /api/office/todo` before the wrap-up PR (OfficeService's 12-dep ctor is mock-heavy per ADR-038 → prefer the e2e spec path).
+- `sprk_assignedto` targets **contact** (live), NOT systemuser as the stale `entity-schema.md` row 40 says — the wizard's `todoService` + the owner both confirm contact.
 
-**Authoritative doc**: [`docs/architecture/DOCUMENT-PROFILE-AND-AI-EXECUTION-MODELS.md`](../../docs/architecture/DOCUMENT-PROFILE-AND-AI-EXECUTION-MODELS.md) — the 3 AI execution models (node playbook · direct Action · legacy), the 3 profiling entry paths, the failure mechanism (Part 4), and a change-safety checklist. Cross-ref `.claude/FAILURE-MODES.md` AP-10; GitHub #919.
+**Original owner UI feedback 2026-09-02 (for reference):**
+1. **Replace "Linked to" with the record card** — reuse the Save screen's selected-card look (green check style) for the regarding record.
+2. **Full form** matching the existing **`CreateTodoWizard` "To Do Details" step**: **Name/Title, Description, Assigned To (lookup to Contact), Due Date, Priority (choice), Effort (choice)**, Notes. Owner: *reuse the CreateTodoWizard form if possible, else recreate to match*.
+   - The wizard form lives in **`@spaarke/ui-components`** (`src/solutions/CreateTodoWizard/src/main.tsx` is just a thin Xrm host). ⚠️ Like the reconciliation components, it is likely **Xrm-host-bound** (Assigned-To lookup, choice option-sets) → the add-in (no Xrm) probably **recreates the layout** rather than reusing directly. Investigate first (mirror the RelatedToPicker verdict).
+   - **Assigned To** in the add-in needs a **Contact search via BFF** (no Xrm lookup); **Priority/Effort** are `sprk_event` option-sets — render as `<Select>` with the option values.
+   - **BFF gap**: the create-task endpoint `POST /api/communications/{communicationId}/create-task` (`CreateAdHocTaskRequest` in `CommunicationCreateTaskApplyService.cs`) has Subject, Description, DueDate, **AssignedTo**, Status — but **NOT Priority/Effort**. Adding those = a BFF change (extend the request + the impersonated PATCH field set). Confirm the `sprk_event` field names for priority/effort before wiring.
+3. **Cancel + Save at bottom; on Save DO NOT close the pane** — change the Save button to a **gray "Saved"** indicator. **Same behavior for the main Save-to-Spaarke form** (SaveFlow footer). (Cross-cutting: both `CreateTodoView` and `SaveFlow` footers.)
+
+Current `CreateTodoView.tsx` has only Title + Due date + a warning-style "Linked to". Files: `src/client/office-addins/shared/taskpane/components/views/CreateTodoView.tsx`.
+
+### B. Logo — ✅ DONE (92dfacfe3)
+- Source `shared/assets/spaarke-logo.svg` (owner's black mark). `generate-icons.mjs` rewritten to render from it into `shared/assets` (the CopyWebpackPlugin source) → produced the missing `icon-color.png` (128) + `icon-outline.png` (32) that the Outlook unified-manifest `icons.color`/`icons.outline` reference (was blank tile), plus refreshed `icon-16/32/64/80/128`. Verified they copy to `dist/assets` on build. `sharp` is a manual dev dep (`npm install --no-save sharp`), not in package.json.
+- **Not done (pre-existing, out of §B scope):** ribbon command-button icons `save-*/share-*/grant-*.png` referenced by the manifest don't exist in `shared/assets` → those buttons show broken/blank glyphs. Separate cleanup.
+
+### C. Production save-context wiring — ✅ DONE (9e62afcac)
+- SaveFlow fires `onSaved(selectedEntity)` once on save complete/duplicate; App's `handleSaved` seeds `savedContext` from it → the Create To Do tab goes live (regarding = the filed record) after a real save. `SavedTodoContext.communicationId` made optional (the To Do regarding is the record, not the communication). Demo detection tolerant of the optional id. **Verify end-to-end once deployed** (a real save → switch to Create To Do → confirm the regarding card shows the saved record).
+
+### D. Deploy — version bumps DONE (c9d89ca2f); EXECUTION is operator-gated (live Azure/M365/CI — NOT agent-run)
+Versions bumped: Outlook `manifest.json` + `index.tsx` → **1.0.21**; Word → **1.0.5**. Operator steps, in order:
+1. **BFF** (adds `POST /api/office/todo`): `pwsh -ExecutionPolicy Bypass -File scripts/Deploy-BffApi.ps1` → verify `curl https://spaarke-bff-dev.azurewebsites.net/api/office/todo` returns **401** (route found, auth required) NOT 404.
+2. **Add-in**: push branch → GitHub Actions `deploy-office-addins.yml` (holds secrets; live SWA `b64eb1876` on `icy-desert-0bfdbb61e.6.azurestaticapps.net`). Confirm run green + `gh run list --workflow=deploy-office-addins.yml`.
+3. **M365 re-register** at the bumped versions (M365 admin / sideload) — required because the manifest version changed.
+- **§10 test obligation — ✅ DONE (e59c7a4b0):** `tests/integration/contract/Api/Office/OfficeEndpointsContractTests.cs` — `Post_OfficeCreateTodo_WithMissingName_Returns400` + `_WhenUnauthenticated_Returns401` (both run) + a Skip'd 201 happy-path.
 
 ---
 
-## B. Document Upload wizard "Send Email" — rebuilt end-to-end (client `sprk_documentuploadwizard`)
+## Add-in architecture (key files + facts)
 
-Launched from the **Semantic Search PCF**; steps Add Files → Processing → Next Steps → **Send Email**. Four fixes, all deployed + UAT-confirmed (centering just deployed):
+**Reconciliation reuse verdict**: the add-in can't reuse the Xrm-bound reconciliation/wizard UI components; it reuses the **host-agnostic candidate logic** (`@spaarke/communication-components/logic/connections/provenance` → `derivePrimaryReview`) + BFF endpoints, and renders **its own Fluent v9 cards**.
 
-1. **Dead-form fix (#925)** — the embedded Send Email step rendered a form but **never sent** (`handleFinish` only built the success screen; fields trapped in local state). Wired it to `sendCommunication` (`POST /api/communications/send`). **Also unblocked the whole solution build**: `NextStepsStep` imported the stale `components/FindSimilarDialog` (renamed to `FindSimilarViewer/FindSimilarViewerDialog` by #714) — broke `npm run build` on master too. NOT a regression from #923 (Send Email is a direct BFF endpoint, not the AI node engine).
-2. **Standard EmailComposer redesign (#927)** — replaced the basic To/Subject/Message form with the canonical **`EmailComposer`** mounted **inline** (`mount="inline"`, `mode="compose"`): native Send button in the top "From:" row (no Save Draft — that chrome only exists in dialog/page mounts), `sendMode="sharedMailbox"` (plain Send, no From switcher), uploaded docs auto-attached via `wizardContext` (the `'wizard'` attachment source), parent as `associations`, Xrm lookups via `createXrmEmailComposeHandlers`. The composer owns send mechanics.
-3. **Finish-guard (#929)** — if the user composed an email (entered recipients) but hasn't sent, clicking **Finish** prompts a `ChoiceModal` (**Send email** / **Finish without sending** / **Keep editing**). `DocumentEmailStep` exposes a controller (`hasUnsentEmail()`+`send()`) via a composer ref + `onStateChange`; the dialog's `handleFinish` awaits the choice (cancel = `throw new Error("")` → WizardShell `finishError` falsy → stays open, no error bar).
-4. **Centering polish (#930, auto-merging)** — the step's "Email sent" block (`DocumentEmailStep`) and the wizard's final success screen (shared **`WizardSuccessScreen`**, `justifyContent: 'safe center'` + `flexGrow`) now center vertically + horizontally. `safe center` protects tall success screens from clipping. Shared change is latent for other wizards until each rebuilds.
+**Client (`src/client/office-addins/`):**
+- `shared/taskpane/components/RelatedToPicker.tsx` — auto-match cards + chips (Matter/Project/Invoice, left of "Related to" label) + inline-create-in-search-row + green-check select. `onCreateRecord(type,name)` → BFF quickcreate → auto-select.
+- `shared/taskpane/components/SaveFlow.tsx` — uses RelatedToPicker; `relatedSearch` (GET `/api/office/search/entities`), `createRelatedRecord` (POST `/api/office/quickcreate/{type}`); AI-processing UI removed (defaults stay on); wizard footer (Cancel/Save — **needs "Saved" state per §A.3**). DEMO_RELATED_CANDIDATES + isBrowserTestMode mocks.
+- `shared/taskpane/services/communicationSuggestionsService.ts` — `fetchRelatedCandidates()` (candidates w/ confidence) + `RelatedCandidate`.
+- `shared/taskpane/components/TaskPaneToolbar.tsx` (single toolbar) + `TaskPaneShell.tsx` + `TaskPaneNavigation.tsx` (`getAvailableTabs`).
+- `shared/taskpane/components/views/CreateTodoView.tsx` — inline Create To Do (**needs the §A form redesign**). `App.tsx` renders it under the `createTodo` tab; `outlook/taskpane/index.tsx` mocks auth + demo saved-context in test mode; `taskpane-test.html` sets the test flag.
+- `SpaarkeLogo.tsx` — was swapped to the color brand SVG then removed from the toolbar (component still exists, unused).
 
-**Client files (all in `src/solutions/DocumentUploadWizard/src/`)**: `components/DocumentEmailStep.tsx` (the composer + controller), `components/NextStepsStep.tsx` (threads props + the FindSimilar import fix), `DocumentUploadWizardDialog.tsx` (Finish-guard + ChoiceModal). Shared: `src/client/shared/Spaarke.UI.Components/src/components/Wizard/WizardSuccessScreen.tsx` (centering).
+**BFF (Slice 3):**
+- `Services/Office/OfficeService.cs` `QuickCreateAsync` — creates `sprk_matter`/`sprk_project`/`sprk_invoice` (name field per type; matter/project also description) via `IGenericEntityService.CreateAsync` with `ownerid` = caller (resolved in the endpoint). Optional `IGenericEntityService` ctor dep (registered singleton → IDataverseService).
+- `Api/Office/OfficeEndpoints.cs` — `MapQuickCreateEndpoints` uncommented → `POST /api/office/quickcreate/{entityType}` routable; handler resolves caller systemuserid via `ICallerSystemUserResolver` (best-effort) + passes it.
+- `Services/Office/IOfficeService.cs` — signature gained `string? ownerSystemUserId`.
 
 ---
 
-## Build / deploy reference (this session)
+## Prior completed work (merged to master, this project)
+- **#919 document-profile AI bug** FIXED (#923, deployed). **Document Upload wizard "Send Email"** rebuilt (#925/#927/#929/#930). **Task 044 add-in deploy** (live SWA current). **R-1/R-2/R-3 remediation** shipped.
 
-- **Code page** (`sprk_documentuploadwizard`, a Vite code page): `cd src/solutions/DocumentUploadWizard && rm -rf dist node_modules/.vite .vite && npm run build` (first run needs `npm install --legacy-peer-deps --no-audit --no-fund`; node_modules is gitignored). Verify a known string is in `dist/index.html`. Deploy: `pwsh scripts/Deploy-WebResourceInline.ps1 -DataverseUrl https://spaarkedev1.crm.dynamics.com -WebResourceName sprk_documentuploadwizard -FilePath src\solutions\DocumentUploadWizard\dist\index.html` (uses `az` token — `az login` = ralph.schroeder@spaarke.com; `pac` active profile = SPAARKE DEV 1). The vite alias maps `@spaarke/ui-components` → the lib **source**, so shared-lib edits are picked up by rebuilding the code page (no separate lib build).
-- **BFF** (`spaarke-bff-dev`): `.\scripts\Deploy-BffApi.ps1` (build + package + SHA-256 hash-verify + health check). net10 (`DOTNETCORE|10.0`); ~45 MB compressed.
-- **PRs**: master is PROTECTED (ruleset `21824191`, required check literal `Router`). Use `gh pr create` + `gh pr merge {n} --auto --merge` (Path A). Always `git fetch origin && git merge origin/master` before pushing (master is very active).
-
-## Merge / protection notes
-- Direct `git push origin HEAD:master` is REFUSED. Classic `/branches/master/protection` returns a misleading 404 — check **rulesets**.
-- Pre-commit hook runs `prettier --write` (.ts/.tsx) + `dotnet format` (.cs) on staged files — whitespace only; deployed bundles remain functionally identical.
-
-## Key references
-- Doc: `docs/architecture/DOCUMENT-PROFILE-AND-AI-EXECUTION-MODELS.md` · `.claude/FAILURE-MODES.md` AP-10.
-- UAT findings: `notes/pillar-b-uat-findings-2026-08-31.md` (#7 = profiling, corrected).
-- The EmailComposer engine + wrappers: `src/client/shared/Spaarke.UI.Components/src/components/EmailComposer/**` (SendEmailStep/SendEmailDialog wrappers; `createXrmEmailComposeHandlers`; inline mount shows the native Send in the From row, no ComposerActionBar).
+## Merge/deploy reference
+- Master PROTECTED (ruleset `21824191`, required check literal `Router`). `gh pr create` + `gh pr merge {n} --auto --merge`. `git fetch origin && git merge origin/master` before pushing.
+- Add-in deploy: `deploy-office-addins.yml`. BFF deploy: `scripts/Deploy-BffApi.ps1`. M365 re-register needs a manifest version bump.

@@ -49,6 +49,10 @@ public class OfficeService : IOfficeService
     // GenerateStubResults hardcoded fixtures). App-only read (ADR-028); singleton REST client.
     // Optional/null-tolerant so bare test constructions keep compiling; null → stub fallback.
     private readonly DataverseWebApiClient? _dataverseClient;
+    // Slice 3 (#10): generic Dataverse create for the add-in inline "New record" (Matter/Project).
+    // Registered singleton (→ IDataverseService, GraphModule.cs); optional/null-tolerant so bare test
+    // ctors keep compiling; null → quick-create returns null (endpoint 403s).
+    private readonly IGenericEntityService? _genericEntityService;
     private readonly ILogger<OfficeService> _logger;
 
     // In-memory job storage for development/testing (fallback when Dataverse unavailable)
@@ -66,7 +70,8 @@ public class OfficeService : IOfficeService
         RecordContainerResolver containerResolver,
         ILogger<OfficeService> logger,
         EmailUploadCaptureService? emailUploadCapture = null,
-        DataverseWebApiClient? dataverseClient = null)
+        DataverseWebApiClient? dataverseClient = null,
+        IGenericEntityService? genericEntityService = null)
     {
         _containerResolver = containerResolver
             ?? throw new ArgumentNullException(nameof(containerResolver));
@@ -80,6 +85,7 @@ public class OfficeService : IOfficeService
         _membershipEventPublisher = membershipEventPublisher;
         _emailUploadCapture = emailUploadCapture;
         _dataverseClient = dataverseClient;
+        _genericEntityService = genericEntityService;
         _logger = logger;
     }
 
@@ -1385,10 +1391,21 @@ public class OfficeService : IOfficeService
     }
 
     /// <inheritdoc />
+    /// <remarks>
+    /// Slice 3 (#10, email-communication-intelligence-r2 2026-09-02): implements the inline
+    /// "New record" for the add-in "Related to" picker. Scope = <b>Matter + Project</b> (the common
+    /// filings from an email); other types return null (endpoint 403s) until built out. The record is
+    /// created via the generic Dataverse create (<see cref="IGenericEntityService.CreateAsync"/>) with
+    /// only the required name (Dataverse-required set is name-only for both). Ownership is attributed to
+    /// the caller when their <c>systemuserid</c> resolved (<paramref name="ownerSystemUserId"/>, ADR-024
+    /// — best-effort; unresolved → app-owned, still created). There is no impersonated-create helper in
+    /// the BFF, so ownership is set via the <c>ownerid</c> lookup rather than MSCRMCallerID.
+    /// </remarks>
     public async Task<QuickCreateResponse?> QuickCreateAsync(
         QuickCreateEntityType entityType,
         QuickCreateRequest request,
         string userId,
+        string? ownerSystemUserId = null,
         CancellationToken cancellationToken = default)
     {
         _logger.LogInformation(
@@ -1396,44 +1413,199 @@ public class OfficeService : IOfficeService
             entityType,
             userId);
 
-        // Get the display name for the created entity
-        var displayName = entityType == QuickCreateEntityType.Contact
-            ? $"{request.FirstName} {request.LastName}".Trim()
-            : request.Name ?? "Unnamed";
+        // Scope: Matter + Project + Invoice (UI feedback 2026-09-02). Others not yet supported.
+        if (entityType is not (QuickCreateEntityType.Matter
+            or QuickCreateEntityType.Project
+            or QuickCreateEntityType.Invoice))
+        {
+            _logger.LogInformation(
+                "Quick create for {EntityType} is not yet supported (Matter/Project/Invoice only).",
+                entityType);
+            return null;
+        }
 
-        // TRACKED: GitHub #229 - Implement Dataverse record creation
-        // The implementation should:
-        // 1. Verify user has create permission for the entity type
-        // 2. Build the entity record with appropriate fields based on entity type:
-        //    - Matter: sprk_name, sprk_description, sprk_account (lookup)
-        //    - Project: sprk_name, sprk_description, sprk_account (lookup)
-        //    - Invoice: sprk_name, sprk_description, sprk_account (lookup)
-        //    - Account: name, description, industrycode, address1_city
-        //    - Contact: firstname, lastname, emailaddress1, parentcustomerid (lookup)
-        // 3. Create the record via Dataverse SDK
-        // 4. Return the created record ID and URL
+        if (_genericEntityService is null)
+        {
+            _logger.LogWarning("Quick create unavailable — IGenericEntityService not injected.");
+            return null;
+        }
 
-        // Simulate async Dataverse operation
-        await Task.Delay(100, cancellationToken);
+        var name = request.Name?.Trim();
+        if (string.IsNullOrWhiteSpace(name))
+        {
+            return null; // endpoint validates Name; guard defensively
+        }
 
-        // Generate stub response for testing
-        var createdId = Guid.NewGuid();
         var logicalName = QuickCreateFieldRequirements.GetLogicalName(entityType);
+        var (nameField, descriptionField) = entityType switch
+        {
+            QuickCreateEntityType.Matter => ("sprk_mattername", (string?)"sprk_matterdescription"),
+            QuickCreateEntityType.Project => ("sprk_projectname", (string?)"sprk_projectdescription"),
+            _ => ("sprk_invoicename", (string?)null), // Invoice: name-only (no verified description field)
+        };
+
+        var entity = new Microsoft.Xrm.Sdk.Entity(logicalName);
+        entity[nameField] = name;
+        if (descriptionField is not null && !string.IsNullOrWhiteSpace(request.Description))
+        {
+            entity[descriptionField] = request.Description!.Trim();
+        }
+
+        // Attribute ownership to the caller when resolved (ADR-024). Best-effort: an unresolved
+        // caller leaves ownerid to the Dataverse default (app user) rather than failing the create.
+        if (!string.IsNullOrWhiteSpace(ownerSystemUserId) && Guid.TryParse(ownerSystemUserId, out var ownerGuid))
+        {
+            entity["ownerid"] = new Microsoft.Xrm.Sdk.EntityReference("systemuser", ownerGuid);
+        }
+
+        var createdId = await _genericEntityService.CreateAsync(entity, cancellationToken).ConfigureAwait(false);
 
         _logger.LogInformation(
             "Quick create completed: EntityType={EntityType}, Id={Id}, Name={Name}",
             entityType,
             createdId,
-            displayName);
+            name);
 
         return new QuickCreateResponse
         {
             Id = createdId,
             EntityType = entityType,
             LogicalName = logicalName,
-            Name = displayName,
-            Url = $"https://spaarkedev1.crm.dynamics.com/main.aspx?etn={logicalName}&id={createdId}&pagetype=entityrecord"
+            Name = name,
+            // Org URL isn't known server-side (the add-in must not be org-pinned); the add-in uses
+            // Id + Name to select the new record as the regarding, not the Url.
+            Url = null
         };
+    }
+
+    /// <summary>Friendly regarding type → (entity-specific <c>sprk_todo</c> lookup attribute, target logical name).
+    /// Mirrors <c>TodoRegardingUpdateBuilder.TODO_REGARDING_CATALOG</c> for the three types the add-in "Related to"
+    /// picker offers (Matter/Project/Invoice).</summary>
+    private static readonly IReadOnlyDictionary<string, (string LookupAttribute, string LogicalName)> _todoRegardingMap =
+        new Dictionary<string, (string, string)>(StringComparer.OrdinalIgnoreCase)
+        {
+            ["Matter"] = ("sprk_regardingmatter", "sprk_matter"),
+            ["Project"] = ("sprk_regardingproject", "sprk_project"),
+            ["Invoice"] = ("sprk_regardinginvoice", "sprk_invoice"),
+        };
+
+    /// <inheritdoc />
+    public async Task<CreateTodoResponse?> CreateTodoAsync(
+        CreateTodoRequest request,
+        string userId,
+        string? ownerSystemUserId = null,
+        CancellationToken cancellationToken = default)
+    {
+        _logger.LogInformation("Create To Do requested by user {UserId}", userId);
+
+        if (_genericEntityService is null)
+        {
+            _logger.LogWarning("Create To Do unavailable — IGenericEntityService not injected.");
+            return null;
+        }
+
+        var name = request.Name?.Trim();
+        if (string.IsNullOrWhiteSpace(name))
+        {
+            return null; // endpoint validates Name; guard defensively.
+        }
+
+        // Core sprk_todo body (mirrors CreateTodoWizard's todoService.createTodo — statecode/statuscode Open+Active).
+        var entity = new Microsoft.Xrm.Sdk.Entity("sprk_todo");
+        entity["sprk_name"] = name;
+        entity["statecode"] = new Microsoft.Xrm.Sdk.OptionSetValue(0);   // Active
+        entity["statuscode"] = new Microsoft.Xrm.Sdk.OptionSetValue(1);  // Open
+
+        if (!string.IsNullOrWhiteSpace(request.Description))
+        {
+            entity["sprk_description"] = request.Description!.Trim();
+        }
+
+        // sprk_duedate is Date-Only — write UTC-midnight of the supplied yyyy-MM-dd (best-effort parse).
+        if (!string.IsNullOrWhiteSpace(request.DueDate)
+            && DateOnly.TryParse(request.DueDate, System.Globalization.CultureInfo.InvariantCulture,
+                System.Globalization.DateTimeStyles.None, out var due))
+        {
+            entity["sprk_duedate"] = due.ToDateTime(TimeOnly.MinValue, DateTimeKind.Utc);
+        }
+
+        // Priority/Effort scores (client resolved the choice → 0-100 score, mirroring the wizard).
+        entity["sprk_priorityscore"] = request.PriorityScore;
+        entity["sprk_effortscore"] = request.EffortScore;
+
+        // Assignee → CONTACT (sprk_assignedto migrated systemuser → contact, 2026-06-21).
+        if (request.AssignedToContactId is { } contactId && contactId != Guid.Empty)
+        {
+            entity["sprk_assignedto"] = new Microsoft.Xrm.Sdk.EntityReference("contact", contactId);
+        }
+
+        // Regarding (the filed record) — entity-specific lookup + ADR-024 resolver fields.
+        if (!string.IsNullOrWhiteSpace(request.RegardingEntityType)
+            && request.RegardingRecordId is { } regardingId && regardingId != Guid.Empty
+            && _todoRegardingMap.TryGetValue(request.RegardingEntityType!, out var reg))
+        {
+            entity[reg.LookupAttribute] = new Microsoft.Xrm.Sdk.EntityReference(reg.LogicalName, regardingId);
+            entity["sprk_regardingrecordid"] = regardingId.ToString();
+            if (!string.IsNullOrWhiteSpace(request.RegardingRecordName))
+            {
+                entity["sprk_regardingrecordname"] = request.RegardingRecordName!.Trim();
+            }
+
+            // Best-effort record-type ref (denormalized ADR-024 resolver lookup). Non-fatal — the typed lookup
+            // above is the load-bearing relationship; a missing record-type ref only affects cross-entity display.
+            var recordTypeId = await ResolveRegardingRecordTypeIdAsync(reg.LogicalName, cancellationToken)
+                .ConfigureAwait(false);
+            if (recordTypeId is { } rtId && rtId != Guid.Empty)
+            {
+                entity["sprk_regardingrecordtype"] = new Microsoft.Xrm.Sdk.EntityReference("sprk_recordtype_ref", rtId);
+            }
+        }
+
+        // Owner attribution (ADR-024) — best-effort, same posture as QuickCreate.
+        if (!string.IsNullOrWhiteSpace(ownerSystemUserId) && Guid.TryParse(ownerSystemUserId, out var ownerGuid))
+        {
+            entity["ownerid"] = new Microsoft.Xrm.Sdk.EntityReference("systemuser", ownerGuid);
+        }
+
+        var todoId = await _genericEntityService.CreateAsync(entity, cancellationToken).ConfigureAwait(false);
+
+        _logger.LogInformation(
+            "Create To Do completed: Id={TodoId}, Name={Name}, Regarding={RegardingType}",
+            todoId, name, request.RegardingEntityType ?? "(none)");
+
+        return new CreateTodoResponse { TodoId = todoId, Name = name };
+    }
+
+    /// <summary>
+    /// Resolves the <c>sprk_recordtype_ref</c> id for a target entity logical name (mirrors the client
+    /// <c>PolymorphicResolverService.resolveRecordType</c>). Best-effort — returns null on any failure or when the
+    /// reference table / row is absent, so the To Do create proceeds with the typed lookup alone.
+    /// </summary>
+    private async Task<Guid?> ResolveRegardingRecordTypeIdAsync(string logicalName, CancellationToken cancellationToken)
+    {
+        if (_dataverseClient is null)
+        {
+            return null;
+        }
+
+        try
+        {
+            var value = Uri.EscapeDataString(logicalName.Replace("'", "''"));
+            var rows = await _dataverseClient.QueryAsync<Dictionary<string, JsonElement>>(
+                "sprk_recordtype_refs",
+                filter: $"sprk_recordlogicalname eq '{value}' and statecode eq 0",
+                select: "sprk_recordtype_refid",
+                top: 1,
+                cancellationToken: cancellationToken).ConfigureAwait(false);
+
+            var idString = rows.Count > 0 ? GetJsonString(rows[0], "sprk_recordtype_refid") : null;
+            return Guid.TryParse(idString, out var id) ? id : null;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Record-type ref lookup failed for {LogicalName}; To Do regarding will omit it.", logicalName);
+            return null;
+        }
     }
 
     /// <inheritdoc />

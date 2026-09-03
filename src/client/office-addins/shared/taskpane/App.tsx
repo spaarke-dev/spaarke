@@ -11,7 +11,13 @@ import { ShareView } from './components/views/ShareView';
 import { StatusView } from './components/views/StatusView';
 import { SignInView } from './components/views/SignInView';
 import { CreateTodoView } from './components/views/CreateTodoView';
-import type { SaveEmailToSpaarkeFn } from './hooks';
+import type {
+  SavedTodoContext,
+  CreateTodoInput,
+  CreateTodoResult,
+  ContactOption,
+} from './components/views/CreateTodoView';
+import type { EntitySearchResult } from './hooks/useEntitySearch';
 
 /**
  * Main App shell for Office Add-in taskpane.
@@ -70,25 +76,16 @@ export interface AppProps {
    */
   onViewLinkedTodos?: (communicationId: string) => void;
   /**
-   * Optional Outlook "Create To Do" ribbon-action wiring (smart-todo-decoupling-r3
-   * FR-27 / task 070). When provided AND `initialAction === 'createTodo'` (set by
-   * the host based on the URL `?action=createTodo` query param), the taskpane
-   * renders the CreateTodoView instead of the default tabs.
-   *
-   * - `codePageBaseUrl`: SmartTodo Code Page base URL (env-supplied; no hardcoded
-   *   org URLs allowed per CLAUDE.md §16).
-   * - `saveEmailToSpaarke`: callback the host wires to its existing Save flow.
-   *   When the email isn't already saved, the view invokes this; the host runs
-   *   the SaveView and resolves with the new sprk_communication triple.
+   * The record this email is filed to (from the Save flow) — seeds the inline
+   * "Create To Do" tool's regarding + communication. In production this is set when
+   * the SaveView completes (wiring pending); the browser test harness passes a demo
+   * value so the Create To Do form is fully interactive without a real save.
    */
-  createTodoConfig?: {
-    codePageBaseUrl: string;
-    saveEmailToSpaarke: SaveEmailToSpaarkeFn;
-  };
+  initialSavedContext?: SavedTodoContext;
   /**
    * Initial action discriminator read from the host's URL / launch context.
-   * Today: 'createTodo' to mount CreateTodoView immediately. Default: undefined
-   * (renders the default tab from `initialTab`).
+   * 'createTodo' (from the ribbon `?action=createTodo` deep-link) selects the
+   * Create To Do tab on open. Default: undefined → the default `initialTab`.
    */
   initialAction?: 'createTodo';
 }
@@ -102,7 +99,7 @@ export const App: React.FC<AppProps> = ({
   showErrorDetails = process.env.NODE_ENV === 'development',
   communicationId,
   onViewLinkedTodos,
-  createTodoConfig,
+  initialSavedContext,
   initialAction,
 }) => {
   const styles = useStyles();
@@ -115,7 +112,24 @@ export const App: React.FC<AppProps> = ({
   const [error, setError] = useState<string | null>(null);
   const [isAuthenticated, setIsAuthenticated] = useState(false);
   const [hostContext, setHostContext] = useState<IHostContext | null>(null);
-  const [currentTab, setCurrentTab] = useState<NavigationTab>(initialTab);
+  const [currentTab, setCurrentTab] = useState<NavigationTab>(
+    initialAction === 'createTodo' ? 'createTodo' : initialTab
+  );
+
+  // The record this email is filed to — drives the inline "Create To Do" tool. Seeded from
+  // initialSavedContext (browser-test demo) and set live when a real save completes (§C — the
+  // SaveView's onSaved hands us the selected "Related to" record).
+  const [savedContext, setSavedContext] = useState<SavedTodoContext | undefined>(initialSavedContext);
+
+  // §C — a successful save makes the email "filed to" the selected record; seed the Create To Do
+  // regarding from it so the To Do tab goes live (no more "file this email first" prompt).
+  const handleSaved = useCallback((entity: EntitySearchResult) => {
+    setSavedContext({
+      regardingEntity: entity.entityType,
+      regardingRecordId: entity.id,
+      ...(entity.name ? { regardingName: entity.name } : {}),
+    });
+  }, []);
 
   // Save operation state
   const [isSaving, setIsSaving] = useState(false);
@@ -209,6 +223,100 @@ export const App: React.FC<AppProps> = ({
     }
   };
 
+  // Inline "Create To Do" — POST the human-authored form to the BFF `POST /api/office/todo`
+  // endpoint, creating a first-class sprk_todo regarding the filed record (owner 2026-09-02:
+  // "we are not using the sprk-event type 'to do' anymore"; "the To Do should be created Related
+  // to the record that the email has been Related to"). Returns a plain ok/error the view renders.
+  const apiBaseUrl = process.env.BFF_API_BASE_URL || 'https://spaarke-bff-dev.azurewebsites.net';
+
+  // Logical → friendly regarding type (the BFF expects "Matter"/"Project"/"Invoice"). The saved
+  // context may carry either the friendly type or the Dataverse logical name depending on the Save-
+  // flow wiring; normalize defensively so both work.
+  const toFriendlyRegardingType = (entity: string): string => {
+    const map: Record<string, string> = { sprk_matter: 'Matter', sprk_project: 'Project', sprk_invoice: 'Invoice' };
+    return map[entity] ?? entity;
+  };
+
+  const handleCreateTodo = useCallback(
+    async (input: CreateTodoInput): Promise<CreateTodoResult> => {
+      if (!savedContext) {
+        return { ok: false, error: 'File this email to Spaarke first (Save tab).' };
+      }
+      // Browser test harness: a demo context id → mock success so the UX is iterable
+      // without a real Dataverse write.
+      if (savedContext.communicationId?.startsWith('demo-')) {
+        await new Promise(resolve => setTimeout(resolve, 600));
+        return { ok: true };
+      }
+      try {
+        const token = await authService.getAccessToken();
+        const res = await fetch(`${apiBaseUrl}/api/office/todo`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            ...(token ? { Authorization: `Bearer ${token}` } : {}),
+          },
+          body: JSON.stringify({
+            name: input.name,
+            description: input.description,
+            assignedToContactId: input.assignedToContactId,
+            dueDate: input.dueDate,
+            priorityScore: input.priorityScore,
+            effortScore: input.effortScore,
+            regardingEntityType: toFriendlyRegardingType(savedContext.regardingEntity),
+            regardingRecordId: savedContext.regardingRecordId,
+            regardingRecordName: savedContext.regardingName,
+          }),
+        });
+        if (!res.ok) {
+          return { ok: false, error: `Create failed (${res.status}).` };
+        }
+        return { ok: true };
+      } catch (err) {
+        return { ok: false, error: err instanceof Error ? err.message : 'Create failed.' };
+      }
+    },
+    [savedContext, apiBaseUrl]
+  );
+
+  // Assigned-To (Contact) lookup — reuses the Office entity search scoped to Contact.
+  const handleSearchContacts = useCallback(
+    async (query: string): Promise<ContactOption[]> => {
+      // Browser test harness (demo filed context) → static demo contacts.
+      if (savedContext?.communicationId?.startsWith('demo-')) {
+        await new Promise(resolve => setTimeout(resolve, 200));
+        const demo: ContactOption[] = [
+          { id: 'demo-contact-1', name: 'Jane Cooper', displayInfo: 'Acme Corp · GC' },
+          { id: 'demo-contact-2', name: 'Robert Fox', displayInfo: 'Acme Corp · Paralegal' },
+          { id: 'demo-contact-3', name: 'Wade Warren', displayInfo: 'Beta LLC · Counsel' },
+        ];
+        const q = query.toLowerCase();
+        return demo.filter(c => c.name.toLowerCase().includes(q));
+      }
+      try {
+        const token = await authService.getAccessToken();
+        const res = await fetch(
+          `${apiBaseUrl}/api/office/search/entities?q=${encodeURIComponent(query)}&type=Contact&top=10`,
+          { headers: { ...(token ? { Authorization: `Bearer ${token}` } : {}) } }
+        );
+        if (!res.ok) {
+          return [];
+        }
+        const data = (await res.json()) as {
+          results?: { id: string; name: string; displayInfo?: string }[];
+        };
+        return (data.results ?? []).map(r => ({
+          id: r.id,
+          name: r.name,
+          ...(r.displayInfo ? { displayInfo: r.displayInfo } : {}),
+        }));
+      } catch {
+        return [];
+      }
+    },
+    [savedContext, apiBaseUrl]
+  );
+
   // Settings handler (placeholder)
   const handleSettings = () => {
     // Will open settings dialog in later tasks
@@ -224,13 +332,6 @@ export const App: React.FC<AppProps> = ({
   // Determine title and host type
   const hostType: HostType = hostAdapter.getHostType() === 'outlook' ? 'outlook' : 'word';
   const displayTitle = title || 'Spaarke Add-in';
-
-  // Outlook "Create To Do" ribbon-action mode (smart-todo-decoupling-r3 FR-27 / task 070).
-  // When the host launched the taskpane with `?action=createTodo` AND a
-  // `createTodoConfig` is supplied, the CreateTodoView replaces the default tabs.
-  // Outlook-only — the action makes no sense in Word.
-  const showCreateTodoView =
-    initialAction === 'createTodo' && createTodoConfig !== undefined && hostAdapter.getHostType() === 'outlook';
 
   // Outlook taskpane banner indicator (smart-todo-decoupling-r3 FR-28 / A-1).
   // The hook is inert when communicationId is undefined / not Outlook, so it
@@ -300,7 +401,7 @@ export const App: React.FC<AppProps> = ({
         version={version}
         buildDate={buildDate}
         connectionStatus={connectionStatus}
-        showNavigation={false}
+        showNavigation={hostType === 'outlook'}
         selectedTab={currentTab}
         onTabChange={setCurrentTab}
         themePreference={preference}
@@ -318,23 +419,19 @@ export const App: React.FC<AppProps> = ({
           />
         )}
 
-        {/*
-          Outlook "Create To Do" ribbon-action view (smart-todo-decoupling-r3 FR-27 / task 070).
-          Mounted instead of the default tabs when the host invoked the taskpane
-          with `?action=createTodo` (set by the manifest button click handler).
-          Requires `createTodoConfig` to wire the save flow + code-page URL — when
-          absent we fall through to the default tabs so the action degrades gracefully.
-        */}
-        {showCreateTodoView && (
+        {/* Create To Do tab — inline first-class sprk_todo creation (no SmartTodo popup) */}
+        {currentTab === 'createTodo' && (
           <CreateTodoView
             hostAdapter={hostAdapter}
-            saveEmailToSpaarke={createTodoConfig!.saveEmailToSpaarke}
-            codePageBaseUrl={createTodoConfig!.codePageBaseUrl}
+            onCreateTodo={handleCreateTodo}
+            onSearchContacts={handleSearchContacts}
+            onGoToSave={() => setCurrentTab('save')}
+            {...(savedContext ? { savedContext } : {})}
           />
         )}
 
-        {/* Tab Content (default — when not in createTodo action mode) */}
-        {!showCreateTodoView && currentTab === 'save' && (
+        {/* Tab Content */}
+        {currentTab === 'save' && (
           <SaveView
             hostAdapter={hostAdapter}
             getAccessToken={async () => {
@@ -347,6 +444,7 @@ export const App: React.FC<AppProps> = ({
             onComplete={(docId, docUrl) => {
               console.log('Save complete:', docId, docUrl);
             }}
+            onSaved={handleSaved}
             onQuickCreate={(entityType, searchQuery) => {
               // Quick Create - opens Dataverse form in new window.
               // Org URL (email-communication-solution-r4 task 072 / FR-25): config-driven,
@@ -374,7 +472,7 @@ export const App: React.FC<AppProps> = ({
           />
         )}
 
-        {!showCreateTodoView && currentTab === 'share' && (
+        {currentTab === 'share' && (
           <ShareView
             onSearch={async query => {
               // Placeholder - will connect to API in later tasks
@@ -393,7 +491,7 @@ export const App: React.FC<AppProps> = ({
           />
         )}
 
-        {!showCreateTodoView && currentTab === 'search' && (
+        {currentTab === 'search' && (
           <StatusView
             onFetchJobs={async () => {
               // Placeholder - shows document search in later tasks
@@ -403,7 +501,7 @@ export const App: React.FC<AppProps> = ({
           />
         )}
 
-        {!showCreateTodoView && currentTab === 'recent' && (
+        {currentTab === 'recent' && (
           <StatusView
             onFetchJobs={async () => {
               // Placeholder - will connect to API in later tasks
