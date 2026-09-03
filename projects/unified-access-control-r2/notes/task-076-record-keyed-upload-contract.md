@@ -163,7 +163,39 @@ for a secure record — were entirely unpinned. Closed by
 
 ---
 
-## 5 — 🔔 ESCALATION: three client upload paths have no owning record
+## 5 — ~~🔔 ESCALATION~~ ✅ ANSWERED 2026-08-28. Route BUILT 2026-09-03.
+
+> 🔴 **THIS SECTION WAS STALE FOR FIVE DAYS AND CAUSED A WRONG STATUS REPORT.** It presents an open
+> escalation asking the owner to choose option 1, 2 or 3. **The owner answered on 2026-08-28** — in
+> [`SESSION-STATUS-2026-08-28.md`](SESSION-STATUS-2026-08-28.md) §6.5 Q1 — and the answer is **none of
+> those three**:
+>
+> > **Q1 → acting user's BU, but the SERVER derives it. No upload ticket needed.**
+>
+> The resolution order the owner settled:
+>
+> ```
+> record exists + secure    -> the record's OWN sprk_containerid, or FAIL CLOSED
+> record exists, non-secure -> the RECORD's owningbusinessunit -> sprk_containerid
+> NO record yet             -> the ACTING USER's businessunitid -> sprk_containerid  (server-derived)
+> server-side ingest        -> Communication:ArchiveContainerId
+> ```
+>
+> The invariant survives because *the user's BU container is the correct **VALUE*** ≠ ***the CLIENT**
+> should send a container id*. The server reads Dataverse and derives it.
+>
+> **✅ The route is BUILT** — `PUT /api/obo/me/files/{*path}` (`756e089cb`), using
+> `RecordContainerResolver.ResolveForActingUserAsync`, the same resolver ComposeService already uses for
+> the matter-less draft. No container parameter; typed 403 for an unresolvable caller; 409 for a BU with
+> no container; secure content can never reach it.
+>
+> **What remains for 076 is the CLIENT CUTOVER**, not a decision. Nothing below is a live question.
+> This note was written independently of SESSION-STATUS-2026-08-28 and never reconciled with it — do not
+> re-derive an open escalation from it.
+
+### Original text (superseded, kept for the reasoning)
+
+## 5 — ~~🔔 ESCALATION~~: three client upload paths have no owning record
 
 **The POML's first escalation trigger has fired.** It reads:
 
