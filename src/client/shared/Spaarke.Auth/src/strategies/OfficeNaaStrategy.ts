@@ -114,7 +114,14 @@ async function detectNaaSupport(): Promise<boolean> {
     console.info(`[OfficeNaaStrategy] platform=${platform} version=${version}`);
 
     if (platform === OfficeRef.PlatformType?.OfficeOnline) {
-      return true;
+      // Office-on-the-web: use the STANDARD MSAL popup (https redirect), NOT NAA.
+      // Empirically (email-communication-intelligence-r2 UAT 2026-09-03, Word/Outlook on the web) the
+      // NAA broker does not actually engage for this add-in/app-registration — MSAL opens a real popup
+      // still carrying the brk-multihub:// redirect, which Entra rejects for the now-non-brokered
+      // request (AADSTS7000471). The desktop native broker works, so NAA stays enabled there. The web
+      // standard-popup path uses the registered https://<origin>/auth-callback.html redirect and is
+      // reliable + portable (any customer domain that registers its auth-callback.html SPA redirect).
+      return false;
     }
 
     if (platform === OfficeRef.PlatformType?.PC) {
@@ -181,7 +188,6 @@ export class OfficeNaaStrategy implements AuthStrategy {
   private readonly _config: Required<IAuthConfig>;
   private readonly _options: IOfficeNaaConfig;
   private _instance: IPublicClientApplication | null = null;
-  private _fallbackInstance: IPublicClientApplication | null = null;
   private _initPromise: Promise<void> | null = null;
   private _isNaaActive = false;
 
@@ -200,27 +206,8 @@ export class OfficeNaaStrategy implements AuthStrategy {
   async acquire(): Promise<TokenResult> {
     const msal = await this._ensureInitialized();
     if (!msal) return { accessToken: '', expiresOn: 0 };
-
-    // Primary attempt on the initialized instance (NAA broker when active, else the standard PCA).
-    const primary = await this._tryAcquireWith(msal);
-    if (primary) return primary;
-
-    // NAA fallback (email-communication-intelligence-r2 UAT 2026-09-03): some Office-on-the-web hosts
-    // report NAA support but the broker does NOT actually engage — MSAL then opens a REAL popup still
-    // carrying the `brk-multihub://` redirect, which Entra rejects for the (now non-brokered) request
-    // (AADSTS7000471). When that happens, fall back to a standard PublicClientApplication that uses the
-    // registered `https://<origin>/auth-callback.html` redirect and retry. Desktop (real NAA broker)
-    // succeeds on the primary attempt and never reaches this path, so its silent flow is unaffected.
-    if (this._isNaaActive) {
-      const fallback = await this._ensureFallbackPca();
-      if (fallback) {
-        console.warn('[OfficeNaaStrategy] NAA acquisition failed; retrying via standard MSAL popup (https redirect)');
-        const secondary = await this._tryAcquireWith(fallback);
-        if (secondary) return secondary;
-      }
-    }
-
-    return { accessToken: '', expiresOn: 0 };
+    const token = await this._tryAcquireWith(msal);
+    return token ?? { accessToken: '', expiresOn: 0 };
   }
 
   /**
@@ -266,26 +253,6 @@ export class OfficeNaaStrategy implements AuthStrategy {
     }
 
     return null;
-  }
-
-  /**
-   * Lazily build + initialize the standard (non-NAA) PublicClientApplication used as the NAA-failure
-   * fallback. Uses `_buildFallbackConfig` (the registered `https://<origin>/auth-callback.html`
-   * redirect). Cached after first creation. Returns null if MSAL init fails.
-   */
-  private async _ensureFallbackPca(): Promise<IPublicClientApplication | null> {
-    if (this._fallbackInstance) return this._fallbackInstance;
-    try {
-      const msalModule = await import('@azure/msal-browser');
-      const pca = new msalModule.PublicClientApplication(this._buildFallbackConfig());
-      await pca.initialize();
-      await this._drainRedirectIfAny(pca);
-      this._fallbackInstance = pca;
-      return pca;
-    } catch (err) {
-      console.warn('[OfficeNaaStrategy] fallback PCA initialization failed:', err);
-      return null;
-    }
   }
 
   clearCache(): void {
@@ -363,6 +330,27 @@ export class OfficeNaaStrategy implements AuthStrategy {
     return { accessToken: result.accessToken, expiresOn };
   }
 
+  /**
+   * Clear a stale MSAL "interaction in progress" lock from session storage. MSAL sets
+   * `msal.<clientId>.interaction.status` = `interaction_in_progress` while an interactive request runs
+   * and clears it on completion — but a popup the user closes / a request that errored mid-flight (e.g.
+   * the prior AADSTS7000471 attempts) can leave it stuck, after which every subsequent interactive call
+   * throws `interaction_in_progress`. This removes ONLY that lock key (tokens + accounts untouched) so a
+   * fresh attempt can proceed. Best-effort; never throws.
+   */
+  private _clearStaleInteractionLock(): void {
+    try {
+      if (typeof sessionStorage === 'undefined') return;
+      for (const key of Object.keys(sessionStorage)) {
+        if (key.includes('interaction.status')) {
+          sessionStorage.removeItem(key);
+        }
+      }
+    } catch {
+      /* best-effort */
+    }
+  }
+
   /** Pick the most recently signed-in account, or null if none cached. */
   private _pickAccount(msal: IPublicClientApplication): AccountInfo | null {
     const accounts = msal.getAllAccounts();
@@ -375,6 +363,11 @@ export class OfficeNaaStrategy implements AuthStrategy {
     if (!this._initPromise) {
       this._initPromise = (async () => {
         try {
+          // Release any stale MSAL interaction lock left by a prior FAILED interactive attempt
+          // (a closed/blocked popup leaves `msal.*.interaction.status` set → the next acquire throws
+          // `interaction_in_progress` forever). Only the lock is cleared, never tokens/accounts.
+          this._clearStaleInteractionLock();
+
           const useNaa = !this._options.forceFallback && (await detectNaaSupport());
 
           // Dynamic import keeps MSAL out of the bundle if a non-Office strategy is used
