@@ -81,6 +81,18 @@ export interface EnginePreSelection {
   model: PrimaryReviewModel;
 }
 
+/**
+ * An auto-matched "Related to" candidate for the reconciliation-style cards: the
+ * picker's `EntitySearchResult` plus the engine's confidence (the "% match") and the
+ * human match reason. Ranked highest-confidence first by the shared model.
+ */
+export interface RelatedCandidate extends EntitySearchResult {
+  /** 0-1 reinforced confidence → rendered as "%". */
+  confidence: number;
+  /** Human match reason (e.g. "sender on matter team"), when the engine provides one. */
+  matchReason?: string;
+}
+
 /** Dataverse logical name → the add-in picker's EntityType (only the 5 the picker supports). */
 const LOGICAL_TO_ENTITY_TYPE: Record<string, EntityType> = {
   sprk_matter: 'Matter',
@@ -160,6 +172,17 @@ function candidateToEntity(candidate: PrimaryCandidate): EntitySearchResult | nu
   };
 }
 
+/** Map a shared `PrimaryCandidate` to a `RelatedCandidate` (entity + confidence), or null for unsupported types. */
+function candidateToRelated(candidate: PrimaryCandidate): RelatedCandidate | null {
+  const entity = candidateToEntity(candidate);
+  if (!entity) return null;
+  return {
+    ...entity,
+    confidence: candidate.confidence,
+    ...(candidate.matchReason ? { matchReason: candidate.matchReason } : {}),
+  };
+}
+
 /**
  * Fetch the engine's suggestion for an email and reduce it — via the SHARED
  * `derivePrimaryReview` — to a pre-selection for the picker.
@@ -175,9 +198,7 @@ function candidateToEntity(candidate: PrimaryCandidate): EntitySearchResult | nu
  *   should treat a throw as "no pre-selection" (best-effort — a failed prediction
  *   must never block the manual save flow).
  */
-export async function fetchEnginePreSelection(
-  internetMessageId: string | undefined
-): Promise<EnginePreSelection | null> {
+async function fetchModel(internetMessageId: string | undefined): Promise<PrimaryReviewModel | null> {
   if (!internetMessageId) return null;
   const trimmed = internetMessageId.trim();
   if (trimmed.length === 0) return null;
@@ -186,18 +207,25 @@ export async function fetchEnginePreSelection(
   try {
     response = await apiClient.get<CommunicationSuggestionsWire>(buildEndpoint(trimmed));
   } catch (err) {
-    // 404 = "not captured yet" → no pre-selection (the FR-B2 fallback path).
+    // 404 = "not captured yet" → no suggestions (the FR-B2 fallback path).
     if (err instanceof ApiClientError && err.error.status === 404) {
       return null;
     }
     throw err;
   }
-
   if (!response?.suggestions) return null;
 
   // SAME candidate model as the code page (no fork; ADR-045). Server-resolved display
   // names are folded into the model's `targetName` (the field it is designed to receive).
-  const model = derivePrimaryReview(JSON.stringify(toProvenanceDoc(response.suggestions, response.names)), null, []);
+  return derivePrimaryReview(JSON.stringify(toProvenanceDoc(response.suggestions, response.names)), null, []);
+}
+
+export async function fetchEnginePreSelection(
+  internetMessageId: string | undefined
+): Promise<EnginePreSelection | null> {
+  const model = await fetchModel(internetMessageId);
+  if (!model) return null;
+
   const predictedCandidate = model.primary ?? model.candidates[0];
   if (!predictedCandidate) return null;
 
@@ -210,4 +238,17 @@ export async function fetchEnginePreSelection(
     .filter((e): e is EntitySearchResult => e !== null);
 
   return { predicted, alternates, model };
+}
+
+/**
+ * Fetch the engine's ranked "Related to" candidates (highest confidence first),
+ * mapped to {@link RelatedCandidate} for the reconciliation-style auto-match cards.
+ * Unsupported candidate types are dropped. Returns `[]` when the email is not
+ * captured / has no suggestions (the caller falls back to search). Best-effort — a
+ * throw should be treated as "no candidates" by the caller.
+ */
+export async function fetchRelatedCandidates(internetMessageId: string | undefined): Promise<RelatedCandidate[]> {
+  const model = await fetchModel(internetMessageId);
+  if (!model) return [];
+  return model.candidates.map(candidateToRelated).filter((c): c is RelatedCandidate => c !== null);
 }
