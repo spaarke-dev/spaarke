@@ -84,13 +84,25 @@ action. It was **deliberately removed from the selection toolbar** (FIX #5, an e
 > It is a RETURN-FROM-WORD action requiring real tracked-change data (`changesText`); on the selection
 > toolbar it has no change data, so the LLM **fabricates a phantom "[Insertion]"**.
 
-Its only wired trigger today is the return-from-Word reanchor flow. The NDA/agreement analogue the owner
-remembers is **`AgreementReviewSummaryPanel`** — a real, reusable panel.
+> ❌ **BOTH claims below were WRONG. Corrected 2026-09-02 — see `current-task.md` §U8.**
+>
+> **"Its only wired trigger today is the return-from-Word reanchor flow"** — there is **no** trigger. A
+> repo-wide search returns nine references and not one dispatches it: two comments (one of them the note
+> explaining the action's REMOVAL), the result renderer, the consumer-type constant, and the dispatch
+> orchestrator's discriminator. `AnnotationReanchorService` explicitly says the opposite of what I wrote:
+> *"the human-friendly change summary is a SEPARATE gated capability … that DOES call the model; this
+> engine does not."* The reanchor flow deliberately does **not** trigger it.
+>
+> **"A wiring job, not a new capability"** — the server half is complete (Action, both schemas,
+> `ContextBinder`'s `changesText` operand, the renderer) but the client half is **entirely absent**: there
+> is no producer of `changesText` and no trigger. Item 8 needs both built.
 
-**So**: "summarise what changed in this document" is a **wiring job, not a new capability** — feed the action
-real change data (the tracked-change set already in the editor) and render it in the existing panel pattern.
-The prior removal is the binding constraint: **never trigger it without real change data**, or it invents
-changes. That is the design rule any implementation must carry.
+The NDA/agreement analogue the owner remembers is **`AgreementReviewSummaryPanel`** — a real, reusable
+panel, and still the right render target.
+
+The prior removal is the binding constraint and survives the correction intact: **never trigger it without
+real change data**, or it invents changes. That makes the PRODUCER the load-bearing piece, not the button —
+any trigger must refuse when there are no tracked changes rather than dispatch an empty operand.
 
 ---
 
