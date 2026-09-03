@@ -11,8 +11,25 @@ import type { AuthStrategy } from './AuthStrategy';
 /** Buffer (ms) before token expiry to consider it stale. Matches config.TOKEN_EXPIRY_BUFFER_MS. */
 const EXPIRY_BUFFER_MS = 5 * 60 * 1000;
 
-/** NAA broker redirect URI — required when running inside Office hosts that support NAA. */
-const NAA_REDIRECT_URI = 'brk-multihub://localhost';
+/**
+ * NAA broker redirect URI — required when running inside Office hosts that support NAA.
+ *
+ * PORTABLE by design (email-communication-intelligence-r2 UAT 2026-09-03): derived from the serving
+ * host, NOT hardcoded. The value MUST match a `brk-multihub://<host>` redirect URI registered under the
+ * Entra app's **SPA** platform for Office-on-the-web (the pure-SPA flow validates the redirect against
+ * that list; a mismatch → AADSTS7000471 "reply address scheme is reserved for brokered application
+ * requests"). Because it tracks `window.location.hostname`, each environment (dev SWA, and every future
+ * production customer SWA / custom domain) works as long as its Entra app registers
+ * `brk-multihub://<that-host>` — no code change per environment. Falls back to `localhost` for
+ * non-browser/test contexts.
+ *
+ * Was previously hardcoded to `brk-multihub://localhost`, which is only in the dev app's publicClient
+ * (native) list — so desktop (native broker) worked but Office-on-the-web (SPA flow) failed.
+ */
+function naaRedirectUri(): string {
+  const host = typeof window !== 'undefined' && window.location?.hostname ? window.location.hostname : 'localhost';
+  return `brk-multihub://${host}`;
+}
 
 /**
  * Decode a JWT and return its `exp` claim as a Unix-ms timestamp.
@@ -169,9 +186,9 @@ export class OfficeNaaStrategy implements AuthStrategy {
 
   /**
    * @param config Standard @spaarke/auth resolved config (clientId, authority,
-   *               redirectUri, bffApiScope). The Office redirectUri default of
-   *               `brk-multihub://localhost` is applied internally when NAA is
-   *               active — callers do NOT need to override `config.redirectUri`.
+   *               redirectUri, bffApiScope). The Office NAA redirectUri is derived
+   *               internally from the serving host (`brk-multihub://<hostname>`) when
+   *               NAA is active — callers do NOT need to override `config.redirectUri`.
    * @param options Office-specific overrides (fallback redirect URI; forced fallback).
    */
   constructor(config: Required<IAuthConfig>, options: IOfficeNaaConfig = {}) {
@@ -357,8 +374,9 @@ export class OfficeNaaStrategy implements AuthStrategy {
         clientId: this._config.clientId,
         authority: this._config.authority,
         // NAA always uses the brk-multihub broker URI regardless of caller-provided redirectUri.
-        // Honor caller override only if it's the canonical brk-multihub form, otherwise force.
-        redirectUri: this._config.redirectUri?.startsWith('brk-') ? this._config.redirectUri : NAA_REDIRECT_URI,
+        // Honor caller override only if it's the canonical brk- form, otherwise derive from the host
+        // (portable across dev + prod customer domains — see naaRedirectUri).
+        redirectUri: this._config.redirectUri?.startsWith('brk-') ? this._config.redirectUri : naaRedirectUri(),
         supportsNestedAppAuth: true,
         navigateToLoginRequestUrl: false,
       },
