@@ -1293,8 +1293,11 @@ public class RouteAuthorizationGuardTests
         // that same record server-side.
         //
         // The upload-session route also RESTORES a capability rather than only re-keying one: files
-        // >= 4 MiB had no working upload path at all after the dead chunked pair was deleted earlier in
-        // this task (the small route is capped at PathValidator.SmallUploadMaxBytes).
+        // too large for a single PUT had no working upload path after the dead chunked pair was
+        // deleted earlier in this task.
+        // (Corrected 2026-09-02: this said the threshold was 4 MiB "because the small route is capped
+        // at PathValidator.SmallUploadMaxBytes". That constant was never enforced and has been
+        // deleted; the simple PUT handles 250 MB, so the real threshold is 250 MB.)
         //
         // ⚠️ WHY THE COUNT IS 3 AND NOT 2. PUT /api/obo/containers/{id}/files/{*path} SURVIVES, and its
         // Pending waiver survives with it — deliberately, and this is the honest state rather than a

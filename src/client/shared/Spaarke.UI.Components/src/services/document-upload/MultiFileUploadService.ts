@@ -42,16 +42,16 @@ export class MultiFileUploadService {
     request: UploadFilesRequest,
     onProgress?: (progress: UploadProgress) => void
   ): Promise<UploadFilesResult> {
-    const { files, containerId } = request;
+    const { files, containerId, conflictBehavior } = request;
 
     this.logger.info('MultiFileUploadService', `Starting upload of ${files.length} files to container: ${containerId}`);
 
-    const errors: { fileName: string; error: string }[] = [];
+    const errors: UploadFilesResult['errors'] = [];
     const uploadedFiles: SpeFileMetadata[] = [];
 
     // Upload all files in parallel
     const uploadResults = await Promise.allSettled(
-      files.map(file => this.fileUploadService.uploadFile({ file, driveId: containerId }))
+      files.map(file => this.fileUploadService.uploadFile({ file, driveId: containerId, conflictBehavior }))
     );
 
     // Process results
@@ -59,40 +59,42 @@ export class MultiFileUploadService {
       const file = files[i];
       const uploadResult = uploadResults[i];
 
-      try {
-        // Report progress: uploading
-        onProgress?.({
-          current: i + 1,
-          total: files.length,
-          currentFileName: file.name,
-          status: 'uploading',
-        });
+      // Report progress: uploading
+      onProgress?.({
+        current: i + 1,
+        total: files.length,
+        currentFileName: file.name,
+        status: 'uploading',
+      });
 
-        // Check if upload succeeded
-        if (uploadResult.status === 'rejected') {
-          throw new Error(uploadResult.reason?.message || 'Upload failed');
+      // A failure is described by the ServiceResult, NOT by an exception. This loop used to wrap
+      // everything in try/catch and re-throw `new Error(serviceResult.error)`, which discarded
+      // `serviceResult.nameConflict` — the one field that tells the UI the failure is recoverable
+      // and offers a choice. Branch on the result instead of round-tripping it through an Error.
+      let failure: { error: string; nameConflict?: { fileName: string } } | null = null;
+      let metadata: SpeFileMetadata | undefined;
+
+      if (uploadResult.status === 'rejected') {
+        failure = { error: uploadResult.reason?.message || 'Upload failed' };
+      } else if (!uploadResult.value.success || !uploadResult.value.data) {
+        failure = {
+          error: uploadResult.value.error || 'Upload failed',
+          nameConflict: uploadResult.value.nameConflict,
+        };
+      } else {
+        metadata = uploadResult.value.data;
+      }
+
+      if (failure || !metadata) {
+        failure ??= { error: 'Upload failed' };
+        errors.push({ fileName: file.name, ...failure });
+
+        // A name collision is an expected, user-resolvable outcome — log it at info, not error.
+        if (failure.nameConflict) {
+          this.logger.info('MultiFileUploadService', `Name collision — awaiting user choice: ${file.name}`);
+        } else {
+          this.logger.error('MultiFileUploadService', `Failed to upload: ${file.name}`, failure.error);
         }
-
-        const serviceResult = uploadResult.value;
-        if (!serviceResult.success || !serviceResult.data) {
-          throw new Error(serviceResult.error || 'Upload failed');
-        }
-
-        // Store SPE metadata
-        uploadedFiles.push(serviceResult.data);
-
-        // Report progress: complete
-        onProgress?.({
-          current: i + 1,
-          total: files.length,
-          currentFileName: file.name,
-          status: 'complete',
-        });
-      } catch (error) {
-        const errorMessage = error instanceof Error ? error.message : 'Unknown error';
-        errors.push({ fileName: file.name, error: errorMessage });
-
-        this.logger.error('MultiFileUploadService', `Failed to upload: ${file.name}`, error);
 
         // Report progress: failed
         onProgress?.({
@@ -100,9 +102,22 @@ export class MultiFileUploadService {
           total: files.length,
           currentFileName: file.name,
           status: 'failed',
-          error: errorMessage,
+          error: failure.error,
+          nameConflict: failure.nameConflict,
         });
+        continue;
       }
+
+      // Store SPE metadata
+      uploadedFiles.push(metadata);
+
+      // Report progress: complete
+      onProgress?.({
+        current: i + 1,
+        total: files.length,
+        currentFileName: file.name,
+        status: 'complete',
+      });
     }
 
     const result: UploadFilesResult = {

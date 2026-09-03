@@ -835,4 +835,71 @@ Every click threw `TypeError: Cannot read properties of undefined (reading '_cli
 
 ---
 
+### AP-11: Code that RUNS but reaches the wrong destination — no compiler and no test spans the seam
+
+> **Added 2026-09-01** by `unified-access-control-r2`. **Class**: silent under-delivery across a
+> language/process boundary. Three independent instances found in one sweep, all shipped, all
+> user-visible, none with a test.
+
+**What happened.** Three defects of one shape reached production:
+
+| Instance | Ran fine, but | User saw |
+|---|---|---|
+| `bffUploadServiceAdapter.uploadFile` | POSTed to `/api/documents/upload`, a route the BFF serves at **no** group prefix | every external-user upload 404'd, for the life of the feature |
+| `SummarizeFilesDialog` create-project | built `ProjectService` without `authFetch`/`bffBaseUrl`, so `provisionSecureProject` never ran — while `sprk_issecure = true` was written anyway and `sprk_containerid` cascaded from the SHARED business unit | a project **marked secure** whose documents land in the shared container, **with no warning** |
+| SpeAdmin `ContainersPage.handleDelete` | made **no server call at all**; stripped rows from local state and reported success | *"N containers deleted (moved to Recycle Bin)"* — nothing was deleted; rows returned on refresh |
+
+**Root cause — three reinforcing blind spots.**
+
+1. **No compiler spans the seam.** TypeScript cannot see C# routes; C# cannot see TS string literals. A
+   client URL is just a string, so a URL nobody serves compiles perfectly and passes every client test.
+2. **Optional collaborators degrade silently.** `ProjectService(dataService, authFetch?, bffBaseUrl?)` —
+   the security-relevant leg sits behind `if (authFetch && bffBaseUrl)`. One host wires three
+   collaborators, another wires one, and the under-wired host **silently skips the behaviour** instead of
+   failing. The tell is **optional constructor params / optional props**, and the shape is *"a component
+   rendered by two hosts where one wires fewer collaborators."*
+3. **The warning lived on the path that was bypassed.** The real wizard surfaces
+   *"Secure Project provisioning failed…"*; the dialog that skipped provisioning also skipped the warning.
+   **The error path and the happy path were both in the wrapper the caller went around.**
+
+**Why nothing caught them.** No test asserted any of it. The container-step failure copy still said
+*"no client-supplied ContainerId"* long after that field was deleted — **prose has no compiler**, so
+comments and user-facing strings outlive the mechanisms they describe. And the `ContainersPage` comment
+asserted *"speApiClient.containers does not currently expose a delete method… when the endpoint is added"*
+while `POST /api/spe/bulk/delete` had been live and a **sibling component was already calling it**.
+
+**Prevention.**
+- **Client↔server route agreement is a structural fitness function, not a unit test.**
+  `tests/Spaarke.ArchTests/SpeAdminClientRouteAgreementTests.cs` (task 092, found two live 404s) and
+  `ClientUploadRouteAgreementTests.cs` (this entry) are the instrument. When adding a client that builds
+  `/api/...` URLs, extend the census — **a guard scoped to one file is why the next file slips past.**
+- **Resolve nested `MapGroup` prefixes** when checking route existence. Ignoring them produced **nine
+  false mismatches** in a sibling project, and "fixing" the client would have broken four working surfaces.
+- **A destructive or security-relevant action must not degrade quietly.** If required collaborators are
+  absent, **warn or refuse** — never complete the non-security half and report success. Prefer required
+  params over optional ones for the leg that enforces isolation.
+- **An enqueue is acceptance, not completion.** Don't claim "deleted" for work you have not observed
+  finish, and don't optimistically mutate local state before the server acts — that is what made a
+  no-op look successful.
+- **When deleting a field or route, grep the PROSE too** — doc comments, `<see cref=…>`, and user-facing
+  message strings. The compiler updates call sites; it does not update the sentences that explain them.
+- **Distrust a comment that explains why something isn't wired.** Both false premises here were
+  load-bearing comments. Check the claim before inheriting it: in one case the endpoint existed and a
+  sibling file was already using it.
+
+**Also — the meta-lesson about the sweeps themselves.** A broad automated debt sweep found candidates but
+graded them badly: its **#1 severity claim was wrong** (the sibling delete path *does* call the server), it
+**missed** the upload 404 entirely, and it listed `SprkChatBridge` as dead when it is type-imported by three
+live files — actioning that would have broken the shared-lib build. An **adversarial verification pass**
+(default verdict NOT-DEAD, ten consumption channels incl. `React.lazy(() => import(...))`, ribbon XML,
+`window.__X__` globals, string registries, PCF `dist` deep-imports) is what made the list safe to use.
+Error rate: ~48 claims → 40 confirmed / 3 refuted-or-wrong / 4 undercounted / 3 correctly unsure.
+**Treat a sweep as a lead list, never a work list.**
+
+**Evidence**: `projects/unified-access-control-r2/notes/tech-debt-sweep-VERIFICATION-2026-09-01.md` ·
+`notes/client-tech-debt-sweep-2026-09-01.md` · `notes/create-wizard-duplication-analysis.md` · fixes in
+commit `304b6d8f2`; guard in `tests/Spaarke.ArchTests/ClientUploadRouteAgreementTests.cs`.
+
+---
+
 *Established 2026-05-14 by project `ai-procedure-quality-r1` (task 013). Cross-reference: [.claude/CHANGELOG.md](CHANGELOG.md) for the entry stream.*

@@ -5,7 +5,7 @@
  * verified compatible with React 16/17 (the PCF platform-provided version).
  *
  * PCF controls MUST import from this entry point:
- *   import { FindSimilarDialog } from '@spaarke/ui-components/src/pcf-safe';
+ *   import { RelationshipCountCard } from '@spaarke/ui-components/src/pcf-safe';
  *
  * Code pages should import from the main barrel:
  *   import { SprkChat, WizardShell } from '@spaarke/ui-components';

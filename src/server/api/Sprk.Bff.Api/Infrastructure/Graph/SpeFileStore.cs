@@ -75,6 +75,19 @@ public class SpeFileStore : ISpeFileOperations
         => _uploadManager.UploadSmallAsync(driveId, path, content, ct);
 
     /// <summary>
+    /// App-only small upload with an explicit collision behaviour. See <see cref="ISpeFileOperations"/>
+    /// for the contract — notably that this performs NO authorization and the container must be
+    /// server-derived. <c>virtual</c> for the same module-boundary-test-double reason as its sibling.
+    /// </summary>
+    public virtual Task<FileHandleDto?> UploadSmallAsync(
+        string driveId,
+        string path,
+        Stream content,
+        Sprk.Bff.Api.Models.ConflictBehavior conflictBehavior,
+        CancellationToken ct = default)
+        => _uploadManager.UploadSmallAsync(driveId, path, content, conflictBehavior, ct);
+
+    /// <summary>
     /// Reads the SPE <c>quickXorHash</c> content identity for a persisted drive item (app-only), for the
     /// FR-C3 content-dedup detector. <c>virtual</c> so the concrete facade can be substituted at the module
     /// boundary in tests (the established idiom — cf. <see cref="UploadSmallAsync"/>). Best-effort: returns
@@ -151,6 +164,17 @@ public class SpeFileStore : ISpeFileOperations
         string itemId,
         CancellationToken ct = default)
         => _driveItemOps.ListFileVersionsAsUserAsync(ctx, driveId, itemId, ct);
+
+    // unified-access-control-r2: app-only version-history list, backing
+    // GET /api/v1/external/projects/{id}/documents/{documentId}/versions. The external surface
+    // authorizes on the Dataverse side (project participation + document→project scoping) and then
+    // reads app-only, exactly as the sibling content-download route does — an external CIAM contact
+    // is not a Dataverse principal, so there is no delegated permission to exchange.
+    public Task<IReadOnlyList<VersionInfoDto>?> ListFileVersionsAsync(
+        string driveId,
+        string itemId,
+        CancellationToken ct = default)
+        => _driveItemOps.ListFileVersionsAsync(driveId, itemId, ct);
 
     public Task<FilePreviewDto> GetPreviewUrlAsync(
         string driveId,
@@ -257,6 +281,17 @@ public class SpeFileStore : ISpeFileOperations
         Stream content,
         CancellationToken ct = default)
         => _uploadManager.UploadSmallAsUserAsync(ctx, containerId, path, content, ct);
+
+    // unified-access-control-r2: explicit-collision overload. See ISpeFileOperations for why callers
+    // that have not yet asked the user what to do must pass ConflictBehavior.Fail.
+    public Task<FileHandleDto?> UploadSmallAsUserAsync(
+        HttpContext ctx,
+        string containerId,
+        string path,
+        Stream content,
+        Sprk.Bff.Api.Models.ConflictBehavior conflictBehavior,
+        CancellationToken ct = default)
+        => _uploadManager.UploadSmallAsUserAsync(ctx, containerId, path, content, conflictBehavior, ct);
 
     public Task<FileHandleDto?> ReplaceFileContentAsUserAsync(
         HttpContext ctx,

@@ -13,6 +13,7 @@
 import { SdapApiClient } from './SdapApiClient';
 import type { ILogger, SpeFileMetadata, ServiceResult, FileUploadRequest } from './types';
 import { consoleLogger } from './types';
+import { UploadNameConflictError } from '@spaarke/sdap-client';
 
 /**
  * Service for uploading files to SharePoint Embedded.
@@ -55,6 +56,7 @@ export class FileUploadService {
         file: request.file,
         driveId: request.driveId,
         fileName: request.fileName || request.file.name,
+        conflictBehavior: request.conflictBehavior,
       });
 
       // Normalize API response to include convenience aliases
@@ -74,6 +76,22 @@ export class FileUploadService {
 
       return { success: true, data: speMetadata };
     } catch (error) {
+      // A name collision is surfaced as a DISTINCT result, not folded into `error`. Nothing was
+      // written, so the caller can offer rename / save-as-new-version and retry the same upload
+      // with `conflictBehavior`. Folding it into the generic error string is how this previously
+      // reached the user as "Unknown error occurred" — after the original file had already been
+      // overwritten by the old conflictBehavior=replace default.
+      if (error instanceof UploadNameConflictError) {
+        this.logger.info('FileUploadService', 'Upload blocked by a name collision', {
+          fileName: error.fileName,
+        });
+        return {
+          success: false,
+          error: error.message,
+          nameConflict: { fileName: error.fileName },
+        };
+      }
+
       this.logger.error('FileUploadService', 'File upload failed', error);
 
       return {

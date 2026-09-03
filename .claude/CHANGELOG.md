@@ -8,6 +8,64 @@ Format follows [Keep a Changelog](https://keepachangelog.com/) conventions.
 
 ---
 
+###### 2026-09-01 — `unified-access-control-r2`: new `FAILURE-MODES.md` **AP-11** — code that runs but reaches the wrong destination
+
+- **New `FAILURE-MODES.md` AP-11.** Three shipped, user-visible defects of one shape, none with a test:
+  an upload adapter POSTing to a route the BFF serves at **no** prefix (every external-user upload 404'd);
+  a dialog that wrote `sprk_issecure = true` and cascaded the **shared** BU container while never calling
+  `provisionSecureProject` (a project *marked* secure, documents in the shared container, **no warning**);
+  and an admin Delete that made **no server call**, stripped rows locally, and reported success.
+  Root cause is three reinforcing blind spots — no compiler spans the TS↔C# seam; **optional**
+  collaborators let an under-wired host silently skip the security leg; and the warning lived on the very
+  wrapper the caller bypassed. Prevention: route-agreement fitness functions (extend the census — a guard
+  scoped to one file is why the next file slips past), resolve nested `MapGroup` prefixes, refuse rather
+  than degrade for security-relevant legs, never claim completion for an enqueue, and **grep the prose**
+  when deleting a field (comments and user-facing strings have no compiler and outlive what they describe).
+- **New guard** `tests/Spaarke.ArchTests/ClientUploadRouteAgreementTests.cs` (6 tests; ArchTests 176 → 182).
+  Rule 1 = the adapter's target route exists server-side; **Rule 2 = it is never repointed at a
+  caller-named** drive/container route, because the tempting one-line 404 fix reintroduces the exact defect
+  this project removes. Carries two negative controls, three positive controls, and a control on the
+  comment-stripper. **Rule 2 found a real over-reach in itself on first run** — it flagged a legitimate
+  server-derives READ — and was narrowed to the `uploadFile` body.
+- **AP-11 also records the meta-lesson**: a broad automated debt sweep is a **lead list, not a work list**.
+  Its #1 severity claim was wrong, it missed the upload 404 entirely, and one "dead code" entry
+  (`SprkChatBridge`) would have broken the shared-lib build. An adversarial pass (default verdict
+  NOT-DEAD; ten consumption channels incl. `React.lazy(() => import(...))`, ribbon XML, `window.__X__`
+  globals, string registries, PCF `dist` deep-imports) is what made it safe to act on. ~48 claims →
+  40 confirmed / 3 refuted / 4 undercounted / 3 correctly unsure.
+
+###### 2026-09-01 — `unified-access-control-r2` (#858): `worktree-sync` Step 3 could never complete; merge-gating corrected across two skills
+
+**`worktree-sync` was broken, not merely imprecise.** Its Step 3 "Merge to Master" pushed directly to
+master (`git push origin origin/{branch}:master`, with a `temp-master:master` fallback). Both forms are
+rejected by the repository ruleset, so **Full Sync mode could not complete on this repo** — for months.
+Rewritten to a PR-based flow.
+
+- **`skills/worktree-sync/SKILL.md` Step 3 — rewritten.** PR-only merge: sync master in → verify → open/reuse
+  a PR → wait for the FULL check rollup → `gh pr merge`. Includes the explicit "do not restore either form"
+  note so the direct push does not come back.
+- **`skills/worktree-sync/SKILL.md` Step 4 — two fixes.** (1) Main-repo path resolution used **two**
+  `dirname`s on `--git-common-dir`; in a linked worktree that returns the main repo's `.git` directly, so two
+  resolved to `C:/code_files` and the step silently no-op'd. Now one, with a `test -d` verification.
+  (2) Added a dirty-tree branch distinguishing real uncommitted work (`diff --ignore-all-space` non-empty →
+  STOP, never reset over it) from mixed-EOL churn (`i/mixed` blob + `attr/text eol=crlf` → re-dirties after
+  BOTH `checkout --` and `stash push`; do not loop).
+- **`skills/merge-to-master/SKILL.md` Failure Modes — corrected + extended.** The protected-branch row still
+  named `…/branches/master/protection` as the detection fix; that endpoint returns **404 "Branch protection
+  has been disabled"** here (classic protection is off; **rulesets** govern), which reads as "unprotected"
+  and routes straight back into the rejected direct push. Now points at `…/rules/branches/master`. Step 3
+  itself was already correct. Added a row for the required-check trap below.
+- **Cross-cutting rule now stated in both skills — gate on the whole rollup, never the required check alone.**
+  `Router` is the ONLY required check on master, so it can pass while other jobs are red and `mergeable`
+  still reads `MERGEABLE`. Treat `mergeStateStatus: UNSTABLE` as STOP; only `CLEAN` proceeds. Near-miss the
+  same day: `Router` green while two jobs were red from a broken solution build.
+- **Two verification rules added to `worktree-sync`, both from measured failures.** (1) *Build the solution,
+  not a project* — test projects glob `tests/integration/Shared/**`, so a file that compiles where you looked
+  can break a project you never opened; a green single-project run is not evidence about the solution.
+  (2) *After merging, verify the SUBSTANCE on `origin/master`, not just commit reachability* — this is what
+  caught a user-facing string that outlived the mechanism it described, invisible to 11,757 tests and 28 CI
+  checks. Comments and message strings have no compiler and often no test.
+
 ###### 2026-09-01 — `email-communication-intelligence-r2`: document-profiling failure mode + the 3 AI execution models documented
 
 - **New architecture doc** [`docs/architecture/DOCUMENT-PROFILE-AND-AI-EXECUTION-MODELS.md`](../docs/architecture/DOCUMENT-PROFILE-AND-AI-EXECUTION-MODELS.md) —
