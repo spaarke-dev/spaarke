@@ -42,6 +42,15 @@ export interface DriveItem {
 
   /** MIME type (files only) */
   mimeType?: string;
+
+  /**
+   * SharePoint web URL for the item.
+   *
+   * Added 2026-09-02: the BFF's `FileHandleDto` has always returned this, and consumers persist it
+   * as `sprk_document.sprk_filepath` — this type was simply an incomplete view of the response.
+   * Optional because Graph omits it for some item states, not because the server might not send it.
+   */
+  webUrl?: string;
 }
 
 /**

@@ -6,21 +6,27 @@ import {
   IndexFileRequest,
   IndexFileResult,
 } from './types';
-import { TokenProvider } from './auth/TokenProvider';
 import { UploadOperation, type ConflictBehaviorOption } from './operations/UploadOperation';
 import { DownloadOperation } from './operations/DownloadOperation';
 import { DeleteOperation } from './operations/DeleteOperation';
 import { IndexFileOperation } from './operations/IndexFileOperation';
+import { requireAuthenticatedFetch, throwHttpFailure } from './operations/httpFailure';
 
 /**
  * SDAP API Client for file operations with SharePoint Embedded.
  *
  * Supports:
- * - Small file uploads (< 4MB)
- * - Chunked uploads (≥ 4MB) with progress tracking
- * - File downloads with streaming
+ * - Single-request file uploads (Graph simple PUT — up to 250 MB)
+ * - File downloads
  * - File deletion
- * - Metadata retrieval
+ * - Sync OBO indexing into Azure AI Search
+ *
+ * 🔴 **Corrected 2026-09-02.** This list used to advertise "Small file uploads (< 4MB)" and
+ * "Chunked uploads (≥ 4MB) with progress tracking". Both were false: the chunked path was DELETED
+ * (task 076 — its first request hit a route the BFF maps nowhere, so it never worked), and the 4 MB
+ * figure came from retired OneDrive REST docs. The simple PUT has accepted up to 250 MB since
+ * October 2023. Above 250 MB a resumable session is genuinely required and this client does not yet
+ * wire one. Do not re-derive the 4 MB claim from this file's history — see FAILURE-MODES AP-12.
  *
  * @example
  * ```typescript
@@ -41,7 +47,6 @@ import { IndexFileOperation } from './operations/IndexFileOperation';
 export class SdapApiClient {
   private readonly baseUrl: string;
   private readonly timeout: number;
-  private readonly tokenProvider: TokenProvider;
   private readonly authenticatedFetch?: AuthenticatedFetchFn;
   private readonly uploadOp: UploadOperation;
   private readonly downloadOp: DownloadOperation;
@@ -51,12 +56,11 @@ export class SdapApiClient {
   /**
    * Creates a new SDAP API client instance.
    *
-   * @param config - Client configuration. Pass `authenticatedFetch` to enable
-   *   operations that require Spaarke Auth v2 (ADR-028) — currently
-   *   {@link indexFile}. Without it, those operations throw on call.
-   *   Legacy operations (upload/download/delete) still use the internal
-   *   `TokenProvider` shim until the full migration in
-   *   `sdap-client-shared-library-fix-r1`.
+   * @param config - Client configuration. `authenticatedFetch` (from `@spaarke/auth`, ADR-028) is
+   *   required by EVERY operation on this client — upload, download, delete and {@link indexFile}.
+   *   Operations throw a named error if it is absent rather than issuing an unauthenticated
+   *   request. It is typed optional only so a consumer can construct the client before auth is
+   *   initialised; there is no unauthenticated mode.
    */
   constructor(config: SdapClientConfig & { authenticatedFetch?: AuthenticatedFetchFn }) {
     this.validateConfig(config);
@@ -65,10 +69,13 @@ export class SdapApiClient {
     this.timeout = config.timeout ?? 300000; // 5 minutes default
     this.authenticatedFetch = config.authenticatedFetch;
 
-    this.tokenProvider = new TokenProvider();
-    this.uploadOp = new UploadOperation(this.baseUrl, this.timeout, this.tokenProvider);
-    this.downloadOp = new DownloadOperation(this.baseUrl, this.timeout, this.tokenProvider);
-    this.deleteOp = new DeleteOperation(this.baseUrl, this.timeout, this.tokenProvider);
+    // Every operation now authenticates through `authenticatedFetch` (ADR-028). Previously
+    // upload/download/delete shared a `TokenProvider` shim that returned '' — so they sent NO
+    // Authorization header to a RequireAuthorization BFF. Passing it here (rather than only to
+    // indexFile) is what makes those three operations usable at all.
+    this.uploadOp = new UploadOperation(this.baseUrl, this.timeout, this.authenticatedFetch);
+    this.downloadOp = new DownloadOperation(this.baseUrl, this.timeout, this.authenticatedFetch);
+    this.deleteOp = new DeleteOperation(this.baseUrl, this.timeout, this.authenticatedFetch);
 
     if (this.authenticatedFetch) {
       this.indexFileOp = new IndexFileOperation(this.baseUrl, this.timeout, this.authenticatedFetch);
@@ -99,7 +106,9 @@ export class SdapApiClient {
   /**
    * Uploads a file to SDAP.
    *
-   * Automatically chooses small upload (< 4MB) or chunked upload (≥ 4MB).
+   * Single request (Graph simple PUT). Files up to 250 MB are supported; above that a resumable
+   * session is required and this client does not yet wire one. There is no automatic chunking —
+   * the chunked path was deleted in task 076 because it never worked.
    *
    * @param containerId - Container ID
    * @param file - File to upload
@@ -178,16 +187,21 @@ export class SdapApiClient {
    * @throws Error if retrieval fails
    */
   public async getFileMetadata(driveId: string, itemId: string): Promise<FileMetadata> {
-    const token = await this.tokenProvider.getToken();
+    // The FOURTH site with the same dead-auth defect — this one inline in the client rather than in
+    // an operation class, which is why converting the three operations did not cover it. Same fix:
+    // `authenticatedFetch` (ADR-028), and a named failure instead of an unauthenticated request.
+    const authFetch = requireAuthenticatedFetch(this.authenticatedFetch, 'getFileMetadata');
 
-    const response = await fetch(`${this.baseUrl}/api/obo/drives/${driveId}/items/${itemId}`, {
-      method: 'GET',
-      headers: token ? { Authorization: `Bearer ${token}` } : {},
-      signal: AbortSignal.timeout(this.timeout),
-    });
+    const response = await authFetch(
+      `${this.baseUrl}/api/obo/drives/${encodeURIComponent(driveId)}/items/${encodeURIComponent(itemId)}`,
+      {
+        method: 'GET',
+        signal: AbortSignal.timeout(this.timeout),
+      }
+    );
 
     if (!response.ok) {
-      throw new Error(`Failed to get file metadata: ${response.statusText}`);
+      await throwHttpFailure(response, 'Failed to get file metadata');
     }
 
     return await response.json();

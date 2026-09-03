@@ -1,26 +1,32 @@
-import { TokenProvider } from '../auth/TokenProvider';
+import { AuthenticatedFetchFn } from '../types';
+import { requireAuthenticatedFetch, throwHttpFailure } from './httpFailure';
 
 export class DeleteOperation {
   constructor(
     private readonly baseUrl: string,
     private readonly timeout: number,
-    private readonly tokenProvider: TokenProvider
+    private readonly authenticatedFetch?: AuthenticatedFetchFn
   ) {}
 
   /**
    * Delete file from SDAP.
+   *
+   * Auth is `authenticatedFetch` (@spaarke/auth, ADR-028). It replaced a `TokenProvider` shim that
+   * returned '' and left this request with no Authorization header at all — see FAILURE-MODES AP-12.
    */
-  public async delete(driveId: string, itemId: string): Promise<void> {
-    const token = await this.tokenProvider.getToken();
+  public async delete(driveId: string, itemId: string, signal?: AbortSignal): Promise<void> {
+    const authFetch = requireAuthenticatedFetch(this.authenticatedFetch, 'deleteFile');
 
-    const response = await fetch(`${this.baseUrl}/api/obo/drives/${driveId}/items/${itemId}`, {
-      method: 'DELETE',
-      headers: token ? { Authorization: `Bearer ${token}` } : {},
-      signal: AbortSignal.timeout(this.timeout),
-    });
+    const response = await authFetch(
+      `${this.baseUrl}/api/obo/drives/${encodeURIComponent(driveId)}/items/${encodeURIComponent(itemId)}`,
+      {
+        method: 'DELETE',
+        signal: signal ?? AbortSignal.timeout(this.timeout),
+      }
+    );
 
     if (!response.ok) {
-      throw new Error(`Delete failed: ${response.statusText}`);
+      await throwHttpFailure(response, 'Delete failed');
     }
   }
 }

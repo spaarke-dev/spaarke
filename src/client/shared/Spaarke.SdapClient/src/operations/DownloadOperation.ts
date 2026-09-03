@@ -1,26 +1,32 @@
-import { TokenProvider } from '../auth/TokenProvider';
+import { AuthenticatedFetchFn } from '../types';
+import { requireAuthenticatedFetch, throwHttpFailure } from './httpFailure';
 
 export class DownloadOperation {
   constructor(
     private readonly baseUrl: string,
     private readonly timeout: number,
-    private readonly tokenProvider: TokenProvider
+    private readonly authenticatedFetch?: AuthenticatedFetchFn
   ) {}
 
   /**
    * Download file from SDAP.
+   *
+   * Auth is `authenticatedFetch` (@spaarke/auth, ADR-028). It replaced a `TokenProvider` shim that
+   * returned '' and left this request with no Authorization header at all — see FAILURE-MODES AP-12.
    */
-  public async download(driveId: string, itemId: string): Promise<Blob> {
-    const token = await this.tokenProvider.getToken();
+  public async download(driveId: string, itemId: string, signal?: AbortSignal): Promise<Blob> {
+    const authFetch = requireAuthenticatedFetch(this.authenticatedFetch, 'downloadFile');
 
-    const response = await fetch(`${this.baseUrl}/api/obo/drives/${driveId}/items/${itemId}/content`, {
-      method: 'GET',
-      headers: token ? { Authorization: `Bearer ${token}` } : {},
-      signal: AbortSignal.timeout(this.timeout),
-    });
+    const response = await authFetch(
+      `${this.baseUrl}/api/obo/drives/${encodeURIComponent(driveId)}/items/${encodeURIComponent(itemId)}/content`,
+      {
+        method: 'GET',
+        signal: signal ?? AbortSignal.timeout(this.timeout),
+      }
+    );
 
     if (!response.ok) {
-      throw new Error(`Download failed: ${response.statusText}`);
+      await throwHttpFailure(response, 'Download failed');
     }
 
     return await response.blob();
