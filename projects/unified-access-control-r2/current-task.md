@@ -16,7 +16,7 @@
 | **Nominal task** | **076** — record-keyed upload contract (`in-progress`, step 4 of 11). 076 was NOT this session's work, but this session did land 3 of its facts (250 MB threshold, conflictBehavior, U1/U2/U3 census). |
 | **This session did** | Fixed **4 of the 5 live route mismatches** (R14 · R10/R11 · R13 · R3) → deleted **47 verified-dead files** → **stopped a live data-loss bug** on every file upload (name collision silently overwrote) → removed a **4 MiB ceiling that no server ever enforced** |
 | **Status** | Working tree **CLEAN**, 0 unpushed, **0 behind master**. Branch is **fully merged** — `git rev-list --count origin/master..HEAD` = 0. Verify with `git log --oneline -3` rather than trusting a SHA written here (a commit cannot state its own hash; two attempts to do so were wrong within seconds). |
-| **Next Action** | ✅ **N-1 COMPLETE** — `047c9df8d` pushed (branch 0 unpushed, 0 behind master). **START AT § REMAINING WORK — item 5** (file tasks 093–096; read [`notes/plan-upload-path-decomposition-2026-08-31.md`](notes/plan-upload-path-decomposition-2026-08-31.md) FIRST, `ls tasks/` before numbering — highest is 092). Then 7 → 6. Item 4 needs an ENVIRONMENT query, not a repo search. ⚠️ Everything since #932 (`33857412b`, `b8260826e`, `920ba6b7a`, `047c9df8d`) is on the branch and **NOT yet in a PR** — open one before more work piles up. ⚠️ **Owner committed to a real-Dataverse create+read smoke on `POST /api/v1/external/projects/{id}/documents` BEFORE the external SPA deploys** — unverified against real Dataverse; the SPA deploy is manual `workflow_dispatch`, which is the only reason merging first was safe. |
+| **Next Action** | ✅ **N-1 + item 7 DONE**; **PR #933 OPEN** (https://github.com/spaarke-dev/spaarke/pull/933) — gate on the FULL rollup, not `Router`. Remaining: **item 5** (file tasks 093/094/095 — read [`notes/plan-upload-path-decomposition-2026-08-31.md`](notes/plan-upload-path-decomposition-2026-08-31.md) FIRST; ⚠️ its **094 is now largely SHIPPED** by `09025ab39`/`524a32fd3` — re-scope against current code, do not author it as written; `ls tasks/` before numbering, highest is 092), then **item 6** (execute 076 — ship-together, own session). Item 4 needs an ENVIRONMENT query. 🔔 **OWNER DECISION PENDING — see the account/contact row below.** |
 
 ### Commit map — this session (10 commits, ALL pushed; nothing at risk)
 
@@ -198,7 +198,7 @@ deletions, then live user-facing fixes, then planning artifacts, then the big ex
 | 4 | `__SPAARKE_OPEN_CLOSE_PROJECT__` has **zero in-repo callers** | 🔲 | Set at `WorkspaceGrid.tsx:450`, never called. Origin task exposed it "for ribbon command integration". **Secure-project closure — the access-revocation cascade this project is about — may be unlaunchable.** Needs an ENVIRONMENT query (org-side ribbon), not a repo search. |
 | 5 | File tasks **093 / 094 / 095 / 096** | 🔲 | Per [`notes/plan-upload-path-decomposition-2026-08-31.md`](notes/plan-upload-path-decomposition-2026-08-31.md) — **read it first**. 093 must NOT author a new Secure UI (exists ×2; task 068 owns it — see the plan's 2026-09-01 correction). 096 = replace-path drive provenance. `ls tasks/` before numbering (highest is 092). |
 | 6 | Execute **076** | 🔲 | The container contract. **Ship-together** (client+BFF). Its own session. |
-| 7 | Q4 widening + `UploadFinalizationWorker.cs:611-629` | 🔲 | Or associations silently drop. |
+| 7 | Q4 widening + association map | ✅ **DONE** `f85796f70` | See the item-7 row in the status table below — the note was wrong twice. |
 | 8 | Close **083**; set **012** → `completed-with-escalation` | 🔲 | Bookkeeping. |
 
 ### ▶ STATUS AFTER 2026-09-02 SESSION 2 (authoritative — supersedes the N-x rows above)
@@ -214,10 +214,28 @@ deletions, then live user-facing fixes, then planning artifacts, then the big ex
 | **4** `__SPAARKE_OPEN_CLOSE_PROJECT__` | 🔲 **NEEDS OWNER/ENV** | zero in-repo callers; it is an **org-side ribbon**, so a repo search cannot answer it. Query the ENVIRONMENT's ribbon definitions for the command. If genuinely uncalled, secure-project closure — the access-revocation cascade this project is about — may be unlaunchable. |
 | **5** file tasks 093–096 | 🔲 | read `notes/plan-upload-path-decomposition-2026-08-31.md` FIRST. 093 must NOT author a new Secure UI (exists ×2; task 068 owns it). `ls tasks/` before numbering — highest is **092**. |
 | **6** execute **076** | 🔲 | the container contract, ship-together client+BFF, own session. **Gates 083's OBO row.** |
-| **7** Q4 widening + `UploadFinalizationWorker.cs:611-629` | 🔲 | or associations silently drop. Note S13 in the 083 inventory is the same file and is **LIVE** with a client-supplied container via the job payload. |
+| **7** Q4 widening + association map | ✅ **DONE** `f85796f70` | 🔴 **The note was wrong twice.** (1) There were **FOUR** copies of the association switch, not one, and they had DRIFTED on spelling — `UploadFinalizationWorker` took only friendly ("matter"), `EmailAttachmentProcessor` only logical ("sprk_matter"), `OfficeDocumentPersistence` both, `RecordMatchEndpoints` only logical and the ONLY one failing closed. The same token applied in one path and silently vanished in another; three then warn-and-continued, so the document was created unassociated with no error. Now ONE map — `Spaarke.Dataverse.DocumentAssociationMap` — accepting BOTH spellings, returning a bool so each caller keeps its own miss behaviour. (2) **`sprk_todo` is NOT mappable.** Live `sprk_document` metadata has lookup columns for matter/project/invoice/**workassignment**/**event** but **no `sprk_todo` column** — so a document cannot be associated to a to-do at all. It is deliberately absent from the map AND from `EntitySetByType`; widening access for it would authorize a route whose upload could only land unassociated. Needs a SCHEMA change, not code. Two forcing functions fired correctly and were fixed, not silenced: the `UpdateDocumentRequest` field-mapping count, and `RecordKeyedUploadAuthorizationTests`' unmapped-entity example (was `sprk_workassignment`, which this widening mapped → repointed at `sprk_todo`). 22 new tests, perturbation-checked. Note S13 in the 083 inventory is `UploadFinalizationWorker` and is still **LIVE** with a client-supplied container via the job payload — untouched here. |
 
-**Branch state (2026-09-03)**: `33857412b`, `b8260826e`, `920ba6b7a`, `047c9df8d` — all PUSHED, 0 unpushed, 0 behind
-master, working tree clean. **None of them are in a PR yet.** Verify with `git log --oneline -3` rather than trusting a
+### 🔔 OWNER DECISION PENDING — `account` / `contact` saves are filed NOWHERE
+
+The Office save endpoint **accepts** `account` and `contact` as association types (they are in its
+`validEntityTypes` allow-list and in the `AssociationType` enum), but **`sprk_document` has no
+`sprk_account` or `sprk_contact` lookup column** (verified against live Dataverse metadata
+2026-09-03). So every save filed to an account or contact is persisted **UNASSOCIATED** — the user
+believes it is filed and it is not. This is pre-existing, NOT introduced by item 7.
+
+Left **accepted** deliberately: rejecting the type changes a user-visible flow and is the owner's
+call, not a silent fix. The drop is now logged loudly at all three persistence sites. **Two options**:
+(a) add the `sprk_account`/`sprk_contact` lookup columns to `sprk_document`, then add the cases to
+`DocumentAssociationMap`; or (b) drop the two types from the endpoint allow-list and the enum so a
+save that cannot be filed is refused up front.
+
+⚠️ **Same gap client-side**: `DocumentUploadWizard`'s `ENTITY_CONFIGS` (`uploadOrchestrator.ts`)
+declares `account → sprk_account` and `contact → sprk_contact` lookups that **do not exist**. Whichever
+option is chosen has to cover that too.
+
+**Branch state (2026-09-03)**: `33857412b`, `b8260826e`, `920ba6b7a`, `047c9df8d`, `081ea57e6`, `f85796f70` — all PUSHED and **in PR #933**, 0 unpushed, 0 behind
+master, working tree clean. Verify with `git log --oneline -3` rather than trusting a
 SHA written here.
 
 ⚠️ **Owner-committed follow-up**: a real-Dataverse **create + read** smoke on
