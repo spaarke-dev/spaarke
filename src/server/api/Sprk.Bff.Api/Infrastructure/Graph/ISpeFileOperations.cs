@@ -200,13 +200,22 @@ public interface ISpeFileOperations
     /// <c>tests/Spaarke.ArchTests/SpeUploadPathIsFlatGuardTests.cs</c> (2026-08-28 flat-path decision).
     /// Sanitize via <c>SpeUploadPath.SanitizeFileName</c>.
     ///
-    /// ⚠️ <b>This overwrites unconditionally on a name collision.</b> The path-keyed simple PUT takes
-    /// no <c>@microsoft.graph.conflictBehavior</c> — not rename, not fail. Two uploads of the same file
-    /// name collapse onto ONE drive-item (SharePoint retains the prior content as a version, so it is
-    /// recoverable, but the two uploads stop being two documents). Callers needing distinct documents
-    /// must make the file name unique first — see <c>EmailAttachmentProcessor.GenerateUniqueFileName</c>
-    /// and the collision-survival tests in
-    /// <c>tests/integration/data-mutation/SpeUploadPaths/SpeFlatUploadPathTests.cs</c>.
+    /// ⚠️ <b>THIS overload overwrites on a name collision</b> — it supplies
+    /// <c>ConflictBehavior.Replace</c> to preserve the behaviour its existing callers depend on. Two
+    /// uploads of the same file name collapse onto ONE drive-item (SharePoint retains the prior content
+    /// as a version, so the bytes are recoverable, but the two uploads stop being two documents).
+    /// Callers that need distinct documents either make the file name unique first — see
+    /// <c>EmailAttachmentProcessor.GenerateUniqueFileName</c> and the collision-survival tests in
+    /// <c>tests/integration/data-mutation/SpeUploadPaths/SpeFlatUploadPathTests.cs</c> — or use the
+    /// <see cref="UploadSmallAsync(string,string,Stream,Sprk.Bff.Api.Models.ConflictBehavior,CancellationToken)"/>
+    /// overload with <c>Fail</c> / <c>Rename</c>.
+    ///
+    /// 🔴 <b>Corrected 2026-09-02.</b> This remark used to assert the path-keyed simple PUT "takes no
+    /// <c>@microsoft.graph.conflictBehavior</c> — not rename, not fail". <b>That is false and led to a
+    /// wrong design conclusion more than once.</b> The REST API honours the parameter
+    /// (<c>fail|replace|rename</c>); it is the Kiota SDK's generated <c>PutAsync</c> that does not
+    /// expose it, which is exactly why <c>UploadSessionManager.PutContentWithConflictBehaviorAsync</c>
+    /// appends it to the request URI by hand. Do not re-derive the old claim from this file's history.
     /// </summary>
     /// <remarks>
     /// ADR-007: no <c>Microsoft.Graph</c> type crosses this boundary — the facade returns the
@@ -220,6 +229,33 @@ public interface ISpeFileOperations
         string driveId,
         string path,
         Stream content,
+        CancellationToken ct = default);
+
+    /// <summary>
+    /// App-only small upload with an EXPLICIT name-collision behaviour.
+    ///
+    /// ⚠️ <b>The path MUST be a bare file name</b>, exactly as for the 4-arg overload — a prefix makes
+    /// Graph mint folders nobody asked for. Enforced by <c>SpeUploadPathIsFlatGuardTests</c>.
+    ///
+    /// ⚠️ <b>Performs NO authorization.</b> App-only means broker identity: the caller MUST have
+    /// authorized the acting principal against the owning record first, and MUST have derived the
+    /// container server-side rather than accepting one from the client.
+    /// </summary>
+    /// <remarks>
+    /// Added as an overload rather than by changing the 4-arg signature: ~a dozen app-only callers
+    /// (Compose save, communication ingest, invoice extraction, …) depend on replace-in-place, and
+    /// flipping the default under them would turn working saves into 409s.
+    ///
+    /// <para>With <see cref="Sprk.Bff.Api.Models.ConflictBehavior.Fail"/> a collision throws
+    /// <see cref="SpaarkeStorageException"/> with status 409 and leaves the existing item untouched —
+    /// translated inside <c>Infrastructure.Graph</c> so no <c>Microsoft.Graph</c> type crosses this
+    /// facade (ADR-007).</para>
+    /// </remarks>
+    Task<FileHandleDto?> UploadSmallAsync(
+        string driveId,
+        string path,
+        Stream content,
+        Sprk.Bff.Api.Models.ConflictBehavior conflictBehavior,
         CancellationToken ct = default);
 
     /// <summary>

@@ -56,6 +56,7 @@ export class FileUploadService {
         file: request.file,
         driveId: request.driveId,
         fileName: request.fileName || request.file.name,
+        conflictBehavior: request.conflictBehavior,
       });
 
       // Normalize API response to include convenience aliases
