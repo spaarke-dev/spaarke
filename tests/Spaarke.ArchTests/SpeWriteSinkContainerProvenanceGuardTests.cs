@@ -164,6 +164,37 @@ public class SpeWriteSinkContainerProvenanceGuardTests
         ServerDerivedConfig,
 
         /// <summary>
+        /// The container comes from the ACTING USER's business unit, read server-side from Dataverse.
+        /// Added 2026-09-03 by task 076, implementing the owner's 2026-08-28 resolution order for content
+        /// that has no owning record at the moment the bytes move.
+        ///
+        /// <para><b>Why this is not <see cref="ServerDerivedRecord"/>.</b> That category means "a Dataverse
+        /// row the caller was authorized against" — the row that OWNS the content. Here no such row exists
+        /// yet; the container is derived from the caller's own user → business-unit chain. Filing these
+        /// under ServerDerivedRecord would blur the exact distinction this guard exists to draw, and would
+        /// hide the fact that the destination was chosen without an owning record to justify it.</para>
+        ///
+        /// <para><b>Why it is not <see cref="ClientSupplied"/> either.</b> The client cannot name the
+        /// container — the route carries no container parameter. The correct VALUE being the user's BU
+        /// container is a different claim from the CLIENT being allowed to send one, and that distinction
+        /// is the whole basis of the owner's answer.</para>
+        ///
+        /// <para><b>Why it cannot become a loophole.</b> It is admissible ONLY where no record exists.
+        /// Secure content can never arrive this way: secure records resolve through the record-keyed route
+        /// and fail closed, and for a secure record the acting user's BU is provably the WRONG container —
+        /// users sit in the Operations subtree while secure records are owned in <c>Secure Projects</c>.
+        /// A site claiming this provenance from a route that also accepts a record id is misclassified.</para>
+        ///
+        /// <para>🔴 <b>Known residual, accepted and separately filed.</b> Content placed in a BU container
+        /// this way and LATER associated to a secure record is already in the shared container, and SPE
+        /// permissions are additive-only, so nothing retracts it. See
+        /// <c>notes/finding-secure-transition-container-migration.md</c> — its own project by owner
+        /// direction 2026-08-31. It is strictly smaller than the behaviour it replaces, where the CLIENT
+        /// named the container.</para>
+        /// </summary>
+        ServerDerivedActingUser,
+
+        /// <summary>
         /// The container/drive comes from client route, query or body. FAILS unless the entry carries an
         /// owning task — the analogue of RouteAuthorizationGuardTests' UNOWNED rule. These are a work list
         /// that shrinks to zero, never exemptions.
@@ -630,6 +661,21 @@ public class SpeWriteSinkContainerProvenanceGuardTests
             + "the CONTAINER's origin, and the container is the record's. Contrast ordinal 1 in this same "
             + "file — the container-KEYED route — which is ClientSupplied and deliberately still present "
             + "for the three upload paths that have no owning record."),
+
+        new SinkSite("Api/OBOEndpoints.cs", "UploadSmallAsUserAsync", 3,
+            Provenance.ServerDerivedActingUser, "",
+            "RecordContainerResolver.ResolveForActingUserAsync(callerOid) -> decision.ContainerId",
+            "The task-076 record-LESS upload route (PUT /api/obo/me/files/{*path}), for content with no "
+            + "owning record at the moment the bytes move: EmailComposer local attachments, the Analysis "
+            + "wizard's standalone document, and DocumentUploadWizard 'skip associate'. The route carries "
+            + "NO container parameter, so the caller cannot name a destination — the container is derived "
+            + "server-side from the acting user's business unit, per the owner's 2026-08-28 resolution "
+            + "order (ADR-003 fail-closed; ADR-007 SpeFileStore). A caller who cannot be resolved to a "
+            + "Dataverse principal gets a typed 403 (acting_user_not_resolvable), and a business unit with "
+            + "no sprk_containerid returns 409 — neither falls back to a shared container. Secure content "
+            + "never reaches this sink: secure records go through ordinal 2 (the record-keyed route) and "
+            + "fail closed there. Contrast ordinal 1 in this same file — the container-KEYED legacy route, "
+            + "still ClientSupplied, which this route is what finally makes deletable."),
 
         new SinkSite("Api/OBOEndpoints.cs", "CreateUploadSessionAsUserAsync", 1,
             Provenance.ServerDerivedRecord, "",

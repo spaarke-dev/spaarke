@@ -1,6 +1,7 @@
 using Microsoft.AspNetCore.Mvc;
 using Sprk.Bff.Api.Api.Filters;
 using Sprk.Bff.Api.Infrastructure.Auth;
+using Sprk.Bff.Api.Infrastructure.Authentication;
 using Sprk.Bff.Api.Infrastructure.Dataverse;
 using Sprk.Bff.Api.Infrastructure.Errors;
 using Sprk.Bff.Api.Infrastructure.Exceptions;
@@ -230,6 +231,137 @@ public static class OBOEndpoints
             }
         })
         .AddRecordRouteAccessAuthorizationFilter(RecordRouteAccessAuthorizationFilter.AssociateContentOperation)
+        .RequireRateLimiting("graph-write")
+        .RequireAuthorization();
+
+        // ═════════════════════════════════════════════════════════════════════════════════════════
+        // PUT: small upload for content that has NO OWNING RECORD YET.
+        //
+        // This is the fourth and last row of the container-resolution order the owner settled on
+        // 2026-08-28 (`notes/SESSION-STATUS-2026-08-28.md` §6.5 Q1). The other three are built:
+        //
+        //   record exists + secure    -> the record's OWN sprk_containerid, or FAIL CLOSED
+        //   record exists, non-secure -> the RECORD's owningbusinessunit -> sprk_containerid
+        //   NO record yet             -> the ACTING USER's businessunitid -> sprk_containerid   <-- HERE
+        //   server-side ingest        -> Communication:ArchiveContainerId
+        //
+        // WHY IT EXISTS. Three client flows genuinely have no record when the bytes move — the
+        // EmailComposer local attachment (the email may have no persisted regarding yet), the Analysis
+        // wizard's standalone document, and DocumentUploadWizard's "skip associate" (the user declined
+        // a parent). Without this route those three have no callable upload path once the
+        // container-keyed route is deleted, and giving the record-keyed routes a container parameter
+        // for their benefit would be option (B) — the rejected one.
+        //
+        // 🔴 THE INVARIANT STILL HOLDS, and the distinction is the whole point:
+        //
+        //        the user's BU container is the correct VALUE
+        //     != the CLIENT should send a container id
+        //
+        // The SERVER reads Dataverse and derives the acting user's business unit itself. There is no
+        // container parameter on this route, so a caller cannot name one — which is the property this
+        // task exists to establish. Exposure is bounded: a caller can only ever write into their own
+        // BU's container, which they are entitled to anyway.
+        //
+        // ⚠️ NEVER reachable for secure content. Secure records resolve through the RECORD-keyed route
+        // and fail closed. Acting-user BU is admissible ONLY where no record exists — for a secure
+        // record the acting user's BU is provably the WRONG container, because users sit in the
+        // Operations subtree while secure records are owned in `Secure Projects`. Do not "generalise"
+        // this route to accept a record id as a convenience; that reintroduces the two-keys-for-one-
+        // decision shape the record-keyed contract removed.
+        //
+        // 🔴 KNOWN RESIDUAL, accepted and separately filed. Content placed in a BU container here and
+        // LATER associated to a secure record is already in the shared container, and SPE permissions
+        // are additive-only, so nothing retracts it. That is
+        // `notes/finding-secure-transition-container-migration.md`, made its own project by owner
+        // direction 2026-08-31. It is the price of supporting create-before-the-record-exists at all,
+        // and it is strictly SMALLER than the behaviour it replaces, where the CLIENT named the
+        // container.
+        //
+        // AUTHORIZATION. There is deliberately no per-resource filter: there is no resource yet to
+        // authorize against. The decision this route can actually make is "is the caller a resolvable
+        // Dataverse principal", and `ResolveForActingUserAsync` makes it — throwing a typed 403
+        // (`acting_user_not_resolvable`) rather than falling back to a shared container. Same shape as
+        // the Permanent waiver on `POST /api/v1/documents` ("CREATE. There is no pre-existing resource
+        // to authorize"). Its waiver is Permanent for that reason, NOT to make a build go green.
+        app.MapPut("/api/obo/me/files/{*path}", async (
+            string path, HttpRequest req, HttpContext ctx,
+            [FromServices] SpeFileStore speFileStore,
+            [FromServices] RecordContainerResolver containerResolver,
+            [FromServices] ILogger<Program> logger,
+            CancellationToken ct) =>
+        {
+            var (ok, err) = ValidatePathForOBO(path);
+            if (!ok) return TypedResults.ValidationProblem(new Dictionary<string, string[]> { ["path"] = new[] { err! } });
+
+            try
+            {
+                var callerOid = CallerResolution.ResolveObjectId(ctx.User);
+
+                logger.LogInformation("OBO record-less upload starting - Path: {Path}", path);
+
+                // Throws SdapProblemException(403 acting_user_not_resolvable) when the caller cannot be
+                // resolved to a Dataverse user. Refusing beats resolving to whatever a null filter
+                // would match.
+                var decision = await containerResolver.ResolveForActingUserAsync(callerOid, ct);
+
+                if (decision.ContainerId is null)
+                {
+                    // The caller's business unit has no sprk_containerid stamped. There is nowhere to
+                    // put the bytes, and the one thing we must not do is pick a different container.
+                    logger.LogWarning(
+                        "OBO record-less upload refused - the acting user's business unit has no "
+                        + "sprk_containerid stamped.");
+
+                    return TypedResults.Problem(
+                        title: "No storage container is configured",
+                        detail: "No SharePoint Embedded container is configured for your business unit, "
+                                + "so there is nowhere to store a file that is not attached to a record yet.",
+                        statusCode: 409);
+                }
+
+                var driveId = await GraphCallScope.Run(
+                    () => speFileStore.ResolveDriveIdAsync(decision.ContainerId, ct),
+                    "obo.driveid.resolve");
+
+                var item = await GraphCallScope.Run(
+                    () => speFileStore.UploadSmallAsUserAsync(
+                        ctx, driveId, path, req.Body, ResolveConflictBehavior(req), ct),
+                    "obo.upload.small");
+
+                logger.LogInformation("OBO record-less upload successful - DriveItemId: {ItemId}", item?.Id);
+
+                // The response carries the drive id the SERVER chose. Per the 2026-08-28 Q5 answer this
+                // is NOT option (B): accepting a container in the REQUEST lets the caller choose where
+                // bytes go; returning the one the server chose tells the caller where they landed, which
+                // it must record on the sprk_document row it creates next.
+                return item is null ? TypedResults.NotFound() : TypedResults.Ok(item);
+            }
+            catch (UnauthorizedAccessException ex)
+            {
+                logger.LogError(ex, "OBO record-less upload unauthorized");
+                return TypedResults.Unauthorized();
+            }
+            catch (SpaarkeStorageException ex)
+            {
+                logger.LogError(ex, "OBO record-less upload failed - Graph API error: {Message}", ex.Message);
+                return ex.ToProblemDetails();
+            }
+            catch (SdapProblemException)
+            {
+                // The resolver's refusals are the contract, not faults — rethrow so the global handler
+                // renders the typed code/status.
+                throw;
+            }
+            catch (Exception ex)
+            {
+                logger.LogError(ex, "OBO record-less upload failed - Unexpected error: {Message}", ex.Message);
+                return TypedResults.Problem(
+                    title: "Upload failed",
+                    detail: $"An unexpected error occurred: {ex.Message}",
+                    statusCode: 500
+                );
+            }
+        })
         .RequireRateLimiting("graph-write")
         .RequireAuthorization();
 
