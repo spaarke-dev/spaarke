@@ -115,7 +115,20 @@ public class EntityAccessFilter : IEndpointFilter
             ["sprk_project"] = "sprk_projects",
             ["project"] = "sprk_projects",
             ["sprk_invoice"] = "sprk_invoices",
-            ["invoice"] = "sprk_invoices"
+            ["invoice"] = "sprk_invoices",
+            // Added 2026-09-03 (unified-access-control-r2 item 7 / Q4 widening — owner: "it is file
+            // access"). Both have a real lookup column on sprk_document (verified against live
+            // Dataverse metadata), so a document CAN actually be filed to them; widening the access
+            // map without that column would authorize a route that then silently drops the
+            // association. Plural forms attested in live Web API URLs.
+            ["sprk_workassignment"] = "sprk_workassignments",
+            ["workassignment"] = "sprk_workassignments",
+            ["sprk_event"] = "sprk_events",
+            ["event"] = "sprk_events"
+            // ⚠️ sprk_todo is deliberately ABSENT. The Q4 note listed it alongside these two, but
+            // sprk_document has NO sprk_todo lookup column, so a document cannot be associated to a
+            // to-do at all. Adding it here would authorize record-keyed access for a type whose
+            // upload can only ever land unassociated. Needs a schema change first.
         };
 
     /// <summary>

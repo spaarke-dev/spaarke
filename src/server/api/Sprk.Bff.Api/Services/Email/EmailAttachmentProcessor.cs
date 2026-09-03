@@ -299,23 +299,15 @@ public class EmailAttachmentProcessor : IEmailAttachmentProcessor
             // Set entity association if provided
             if (request.AssociatedEntityId.HasValue && !string.IsNullOrEmpty(request.AssociatedEntityType))
             {
-                // Map entity type to specific lookup field
-                switch (request.AssociatedEntityType.ToLowerInvariant())
+                // Shared map. This copy accepted ONLY logical names, so an attachment whose parent
+                // carried the friendly "matter" was filed nowhere — see DocumentAssociationMap.
+                if (!DocumentAssociationMap.TryApply(
+                        updateRequest, request.AssociatedEntityType, request.AssociatedEntityId))
                 {
-                    case "sprk_matter":
-                        updateRequest.MatterLookup = request.AssociatedEntityId;
-                        break;
-                    case "sprk_project":
-                        updateRequest.ProjectLookup = request.AssociatedEntityId;
-                        break;
-                    case "sprk_invoice":
-                        updateRequest.InvoiceLookup = request.AssociatedEntityId;
-                        break;
-                    default:
-                        _logger.LogWarning(
-                            "Unknown entity type for association: {EntityType}",
-                            request.AssociatedEntityType);
-                        break;
+                    _logger.LogWarning(
+                        "Entity type {EntityType} has no sprk_document lookup — attachment document " +
+                        "will be created UNASSOCIATED. Known gaps: account, contact, sprk_todo.",
+                        request.AssociatedEntityType);
                 }
             }
 
