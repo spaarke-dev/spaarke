@@ -791,6 +791,83 @@ public sealed class ComposeDocxProjectionBuilderTests
         projection.Html.Should().NotContain("text-align");
     }
 
+    // ─── UAT round 2 (spaarkeai-compose-r8, 2026-09-02): document line spacing ────────────────────
+    // The editor showed generic typographic defaults because the projection never carried w:spacing, so a
+    // 1.5-spaced or double-spaced document looked single-spaced. READ PATH ONLY — the renderer still never
+    // authors w:spacing; an edited block keeps its real spacing through InheritProperties as an unmodeled
+    // property, which is what makes this safe to do without touching the write path.
+
+    [Fact]
+    public void Build_ParagraphWithAutoLineSpacing_EmitsUnitlessMultiple()
+    {
+        // w:lineRule="auto" -> w:line is 240ths of a line, so 360 = 1.5x. Emitted UNITLESS so it scales
+        // with the element's own font size.
+        var para = Para("00E00101", "One-and-a-half spaced clause");
+        para.ParagraphProperties = new ParagraphProperties(
+            new SpacingBetweenLines { Line = "360", LineRule = LineSpacingRuleValues.Auto });
+
+        var projection = new ComposeDocxProjectionBuilder().Build(BuildDocx(para));
+
+        projection.Html.Should().Contain("line-height:1.5");
+        projection.Html.Should().NotContain("line-height:1.5pt");
+    }
+
+    [Fact]
+    public void Build_ParagraphWithOmittedLineRule_IsTreatedAsAuto()
+    {
+        // Word OMITS w:lineRule when it means auto. Reading an absent rule as "exact" would render a
+        // double-spaced paragraph at 24pt leading instead of 2x — the failure this pins.
+        var para = Para("00E00102", "Double spaced, rule omitted");
+        para.ParagraphProperties = new ParagraphProperties(new SpacingBetweenLines { Line = "480" });
+
+        var projection = new ComposeDocxProjectionBuilder().Build(BuildDocx(para));
+
+        projection.Html.Should().Contain("line-height:2");
+        projection.Html.Should().NotContain("pt\"");
+    }
+
+    [Fact]
+    public void Build_ParagraphWithExactLineSpacing_EmitsPointsNotAMultiple()
+    {
+        // w:lineRule="exact" -> w:line is TWIPS, an absolute height: 360/20 = 18pt. The two readings differ
+        // by more than an order of magnitude (18pt vs 1.5x), so conflating them is not a rounding error.
+        var para = Para("00E00103", "Exactly 18pt leading");
+        para.ParagraphProperties = new ParagraphProperties(
+            new SpacingBetweenLines { Line = "360", LineRule = LineSpacingRuleValues.Exact });
+
+        var projection = new ComposeDocxProjectionBuilder().Build(BuildDocx(para));
+
+        projection.Html.Should().Contain("line-height:18pt");
+    }
+
+    [Fact]
+    public void Build_ParagraphWithSpaceBeforeAndAfter_EmitsMargins()
+    {
+        var para = Para("00E00104", "Spaced clause");
+        para.ParagraphProperties = new ParagraphProperties(
+            new SpacingBetweenLines { Before = "240", After = "120" });
+
+        var projection = new ComposeDocxProjectionBuilder().Build(BuildDocx(para));
+
+        projection.Html.Should().Contain("margin-top:12pt");
+        projection.Html.Should().Contain("margin-bottom:6pt");
+    }
+
+    [Fact]
+    public void Build_ParagraphWithNoSpacing_EmitsNoSpacingDeclarations()
+    {
+        // Negative control for the whole family: a paragraph Word never spaced must not acquire spacing
+        // from us. Emitting a default here would overwrite the editor's own typography for every ordinary
+        // paragraph in every document.
+        var para = Para("00E00105", "Ordinary clause");
+
+        var projection = new ComposeDocxProjectionBuilder().Build(BuildDocx(para));
+
+        projection.Html.Should().NotContain("line-height");
+        projection.Html.Should().NotContain("margin-top");
+        projection.Html.Should().NotContain("margin-bottom");
+    }
+
     [Fact]
     public void Build_ParagraphWithLeftIndent_EmitsMarginLeftStyle()
     {

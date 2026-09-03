@@ -718,6 +718,7 @@ public sealed class ComposeDocxProjectionBuilder
         }
 
         AppendIndentDeclarations(p, ref decls);
+        AppendSpacingDeclarations(p, ref decls);
 
         if (decls is { Count: > 0 })
         {
@@ -751,6 +752,55 @@ public sealed class ComposeDocxProjectionBuilder
     /// precedence (Word's own resolution), so it is checked first.
     /// </para>
     /// </remarks>
+    /// <summary>
+    /// UAT round 2 (spaarkeai-compose-r8, 2026-09-02) — emits the paragraph's OWN <c>w:spacing</c> as CSS so
+    /// the editor shows the document's real line spacing instead of a generic default.
+    ///
+    /// <para><b>READ PATH ONLY.</b> This carries spacing OUT for display; it adds no content-model field and
+    /// the renderer still never authors <c>w:spacing</c>. That asymmetry is deliberate: spacing on an
+    /// untouched block survives by cloning, and on an EDITED block it survives as an unmodeled property
+    /// through <c>ComposeBlockMerge.InheritProperties</c>. The moment the model owned spacing, that
+    /// inheritance rule would have to change, and getting it wrong flattens spacing on every edited
+    /// paragraph — the same shape as the `paragraph-style-flattened` defect this release fixed. Making
+    /// spacing EDITABLE is a separate, larger step and is scoped with the numbering work.</para>
+    ///
+    /// <para><b>Line rule mapping.</b> <c>w:line</c> means different things depending on <c>w:lineRule</c>:
+    /// <c>auto</c> (the common case) is a MULTIPLE in 240ths of a line, so 360 = 1.5× — emitted unitless so
+    /// it scales with the element's own font size. <c>exact</c>/<c>atLeast</c> are TWIPS, an absolute
+    /// height, emitted in points. Treating them alike would render a 1.5-spaced paragraph at 18pt leading
+    /// or an exact-18pt one at 18× line height — both badly wrong, in opposite directions.</para>
+    /// </summary>
+    private static void AppendSpacingDeclarations(Paragraph p, ref List<string>? decls)
+    {
+        var spacing = p.ParagraphProperties?.SpacingBetweenLines;
+        if (spacing is null) return;
+
+        var line = spacing.Line?.Value;
+        if (!string.IsNullOrEmpty(line)
+            && int.TryParse(line, NumberStyles.Integer, CultureInfo.InvariantCulture, out var lineValue)
+            && lineValue > 0)
+        {
+            // Word omits w:lineRule when it means `auto`, so ABSENT must map to the multiple reading.
+            var rule = spacing.LineRule?.Value;
+            if (rule == LineSpacingRuleValues.Exact || rule == LineSpacingRuleValues.AtLeast)
+            {
+                (decls ??= new List<string>(4)).Add($"line-height:{FormatPt(lineValue / 20.0)}");
+            }
+            else
+            {
+                var multiple = lineValue / 240.0;
+                (decls ??= new List<string>(4)).Add(
+                    $"line-height:{multiple.ToString("0.##", CultureInfo.InvariantCulture)}");
+            }
+        }
+
+        var beforePt = TwipsToPoints(spacing.Before?.Value);
+        if (beforePt is not null) (decls ??= new List<string>(4)).Add($"margin-top:{FormatPt(beforePt.Value)}");
+
+        var afterPt = TwipsToPoints(spacing.After?.Value);
+        if (afterPt is not null) (decls ??= new List<string>(4)).Add($"margin-bottom:{FormatPt(afterPt.Value)}");
+    }
+
     private static void AppendIndentDeclarations(Paragraph p, ref List<string>? decls)
     {
         var ind = p.ParagraphProperties?.Indentation;

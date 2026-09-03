@@ -19,10 +19,11 @@ import { Editor } from '@tiptap/core';
 import StarterKit from '@tiptap/starter-kit';
 import { COMPOSE_NUMBER_ATOM } from './composeNumberAtomExtension';
 import { COMPOSE_R3_PARAID } from './paraIdExtension';
+import { COMPOSE_INDENT } from './composeIndentExtension';
 
 function makeEditor(content: string): Editor {
   return new Editor({
-    extensions: [StarterKit, ...COMPOSE_R3_PARAID, ...COMPOSE_NUMBER_ATOM],
+    extensions: [StarterKit, ...COMPOSE_R3_PARAID, ...COMPOSE_NUMBER_ATOM, ...COMPOSE_INDENT],
     content,
   });
 }
@@ -70,6 +71,50 @@ describe('projected-list provenance marker', () => {
     // Provenance is a property of the SOURCE, not of whether the text has been touched. Losing it here
     // would hand a real legal clause a browser-invented number — the F-3 violation this guards.
     expect(editor.state.doc.firstChild?.attrs.projectedList).toBe(true);
+    editor.destroy();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Document spacing round-trip (UAT round 2 — read path)
+// ---------------------------------------------------------------------------
+
+describe('document spacing survives the TipTap parse', () => {
+  // The projection's AppendSpacingDeclarations writes w:spacing as inline CSS. TipTap's base
+  // Paragraph/Heading nodes strip any style property they do not know about, so without the registered
+  // attributes the editor would drop the document's real spacing on setContent and silently fall back to
+  // the generic typographic defaults — looking correct while being wrong, the worst failure shape here.
+
+  it('parses line-height / margin-top / margin-bottom and re-emits them through getHTML()', () => {
+    const editor = makeEditor(
+      '<p data-paraid="SP000001" style="line-height: 1.5; margin-top: 12pt; margin-bottom: 6pt">Spaced clause.</p>'
+    );
+    const attrs = editor.state.doc.firstChild?.attrs as Record<string, unknown>;
+    expect(attrs.spacingLineHeight).toBe('1.5');
+    expect(attrs.spacingMarginTop).toBe('12pt');
+    expect(attrs.spacingMarginBottom).toBe('6pt');
+
+    const html = editor.getHTML();
+    expect(html).toContain('line-height: 1.5');
+    expect(html).toContain('margin-top: 12pt');
+    expect(html).toContain('margin-bottom: 6pt');
+    editor.destroy();
+  });
+
+  it('keeps an EXACT (pt) line-height verbatim — the client never re-derives the unit', () => {
+    // The server distinguishes w:lineRule auto (a multiple) from exact (points); the two differ by more
+    // than an order of magnitude. The client carries the string opaquely so it cannot disagree.
+    const editor = makeEditor('<p data-paraid="SP000002" style="line-height: 18pt">Exact leading.</p>');
+    expect((editor.state.doc.firstChild?.attrs as Record<string, unknown>).spacingLineHeight).toBe('18pt');
+    editor.destroy();
+  });
+
+  it('leaves an unspaced paragraph with null spacing attributes', () => {
+    const editor = makeEditor('<p data-paraid="SP000003">Ordinary clause.</p>');
+    const attrs = editor.state.doc.firstChild?.attrs as Record<string, unknown>;
+    expect(attrs.spacingLineHeight).toBeNull();
+    expect(attrs.spacingMarginTop).toBeNull();
+    expect(attrs.spacingMarginBottom).toBeNull();
     editor.destroy();
   });
 });
