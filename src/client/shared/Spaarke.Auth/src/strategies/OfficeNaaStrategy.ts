@@ -181,6 +181,7 @@ export class OfficeNaaStrategy implements AuthStrategy {
   private readonly _config: Required<IAuthConfig>;
   private readonly _options: IOfficeNaaConfig;
   private _instance: IPublicClientApplication | null = null;
+  private _fallbackInstance: IPublicClientApplication | null = null;
   private _initPromise: Promise<void> | null = null;
   private _isNaaActive = false;
 
@@ -200,6 +201,34 @@ export class OfficeNaaStrategy implements AuthStrategy {
     const msal = await this._ensureInitialized();
     if (!msal) return { accessToken: '', expiresOn: 0 };
 
+    // Primary attempt on the initialized instance (NAA broker when active, else the standard PCA).
+    const primary = await this._tryAcquireWith(msal);
+    if (primary) return primary;
+
+    // NAA fallback (email-communication-intelligence-r2 UAT 2026-09-03): some Office-on-the-web hosts
+    // report NAA support but the broker does NOT actually engage — MSAL then opens a REAL popup still
+    // carrying the `brk-multihub://` redirect, which Entra rejects for the (now non-brokered) request
+    // (AADSTS7000471). When that happens, fall back to a standard PublicClientApplication that uses the
+    // registered `https://<origin>/auth-callback.html` redirect and retry. Desktop (real NAA broker)
+    // succeeds on the primary attempt and never reaches this path, so its silent flow is unaffected.
+    if (this._isNaaActive) {
+      const fallback = await this._ensureFallbackPca();
+      if (fallback) {
+        console.warn('[OfficeNaaStrategy] NAA acquisition failed; retrying via standard MSAL popup (https redirect)');
+        const secondary = await this._tryAcquireWith(fallback);
+        if (secondary) return secondary;
+      }
+    }
+
+    return { accessToken: '', expiresOn: 0 };
+  }
+
+  /**
+   * Run the silent→popup acquisition ladder against a given MSAL instance. Shared by the primary
+   * (NAA or fallback) attempt and the NAA-failure fallback retry so both paths validate/expire tokens
+   * identically. Returns a validated TokenResult or null if both steps fail.
+   */
+  private async _tryAcquireWith(msal: IPublicClientApplication): Promise<TokenResult | null> {
     const scopes = [this._config.bffApiScope];
     const account = this._pickAccount(msal);
 
@@ -217,9 +246,8 @@ export class OfficeNaaStrategy implements AuthStrategy {
       }
     }
 
-    // 2. acquireTokenPopup — under NAA this routes through the Office broker
-    //    (no real popup); under fallback PCA it opens an interactive popup.
-    //    Either way it's the documented last-resort for getting the user signed in.
+    // 2. acquireTokenPopup — under NAA this routes through the Office broker (no real popup);
+    //    under fallback PCA it opens an interactive popup.
     try {
       const loginHint = account?.username;
       console.info(
@@ -237,7 +265,27 @@ export class OfficeNaaStrategy implements AuthStrategy {
       console.warn('[OfficeNaaStrategy] acquireTokenPopup failed:', err);
     }
 
-    return { accessToken: '', expiresOn: 0 };
+    return null;
+  }
+
+  /**
+   * Lazily build + initialize the standard (non-NAA) PublicClientApplication used as the NAA-failure
+   * fallback. Uses `_buildFallbackConfig` (the registered `https://<origin>/auth-callback.html`
+   * redirect). Cached after first creation. Returns null if MSAL init fails.
+   */
+  private async _ensureFallbackPca(): Promise<IPublicClientApplication | null> {
+    if (this._fallbackInstance) return this._fallbackInstance;
+    try {
+      const msalModule = await import('@azure/msal-browser');
+      const pca = new msalModule.PublicClientApplication(this._buildFallbackConfig());
+      await pca.initialize();
+      await this._drainRedirectIfAny(pca);
+      this._fallbackInstance = pca;
+      return pca;
+    } catch (err) {
+      console.warn('[OfficeNaaStrategy] fallback PCA initialization failed:', err);
+      return null;
+    }
   }
 
   clearCache(): void {
