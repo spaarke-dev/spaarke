@@ -22,11 +22,23 @@ namespace Spaarke.ArchTests;
 /// line and sink. Incompleteness is no longer silent — it is a red build.</para>
 ///
 /// <para><b>The defect class.</b> The client names a container or drive; the server writes bytes into it. SPE
-/// permissions are <b>additive-only</b> — <i>"you can't break inheritance on arbitrary files or folders"</i> —
-/// so a secure record's content written into a shared container is readable by every member of that container
-/// and NO later per-item permission retracts it. There is no repair. That asymmetry is why the container
-/// decision is an authorization decision and not a routing detail, and it is why the guard cares about the
-/// container's ORIGIN rather than about whether some authorization mechanism is present. See
+/// permissions are <b>container-level</b>: access to a container confers access to everything in it, and
+/// there is no per-file grant or deny to narrow that — <i>"you can't break inheritance on arbitrary files or
+/// folders"</i>. So a secure record's content written into a shared container is readable by every member of
+/// that container, and no later per-item permission narrows it. That is why the container decision is an
+/// authorization decision and not a routing detail, and why the guard cares about the container's ORIGIN
+/// rather than about whether some authorization mechanism is present.</para>
+///
+/// <para>🔴 <b>Corrected 2026-09-02 (owner).</b> This paragraph used to say such content "cannot be
+/// retracted" and that "there is no repair". That overstates it and misdescribes the model: because
+/// permissions attach to the CONTAINER, removing the file from the container DOES end the access. The real
+/// hazard is exposure for as long as the file sits there, plus the fact that nobody finds out — a
+/// misrouted write is silent. So the remedy exists but depends on noticing, which is exactly what this
+/// guard supplies. Do not restore the "irreversible" framing; it invites the wrong fix (hunting for a
+/// per-file ACL that does not exist) instead of the right one (move or delete the item, then fix the
+/// provenance).</para>
+///
+/// <para>See
 /// <c>Infrastructure/Dataverse/SecureContainerDecision.cs</c> for the rule itself (pure, pinned jointly with a
 /// TypeScript half against <c>tests/fixtures/secure-container-decision-table.json</c>).</para>
 ///
@@ -61,7 +73,7 @@ public class SpeWriteSinkContainerProvenanceGuardTests
     //
     // IN SCOPE — operations that CREATE, REPLACE or DELETE an item (bytes or folder) INSIDE an SPE
     //            container/drive. That is the set of operations whose blast radius is governed by the
-    //            container's additive-only permission model.
+    //            container's CONTAINER-LEVEL permission model (no per-file grant or deny narrows it).
     //
     // OUT OF SCOPE, and each for a stated reason:
     //   · container LIFECYCLE (CreateContainerAsync, PermanentDeleteContainerForConfigAsync) — creating or
@@ -588,6 +600,18 @@ public class SpeWriteSinkContainerProvenanceGuardTests
         // ---------------------------------------------------------------------------------------------
         // ServerDerivedRecord — the sanctioned shape. These are the sites the guard must NOT push away.
         // ---------------------------------------------------------------------------------------------
+        new SinkSite("Api/ExternalAccess/ExternalProjectDataEndpoints.cs", "UploadSmallAsync", 1,
+            Provenance.ServerDerivedRecord, "",
+            "decision.ContainerId from RecordContainerResolver.ResolveForRecordAsync(\"sprk_project\", id)",
+            "The EXTERNAL upload route (R15). Highest-stakes sink in this list: the caller is an external "
+            + "CIAM contact, not a Dataverse principal, so nothing downstream would stop a client-named "
+            + "container. The request carries the file and NOTHING about storage — the container is resolved "
+            + "from the same project id the participation gate authorized, so the authorization key and the "
+            + "storage target cannot disagree (#858). Unresolved and FailClosed both return 422 rather than "
+            + "falling back to a shared container, and the upload passes ConflictBehavior.Fail so an "
+            + "external participant can never overwrite an existing document with a same-named file "
+            + "(ADR-003 fail-closed; ADR-007)."),
+
         new SinkSite("Services/Communication/IncomingCommunicationProcessor.cs", "UploadSmallAsync", 1,
             Provenance.ServerDerivedRecord, "",
             "ResolveContainerForContentAsync(scope, communicationId, \"attachment processing\", ct)",
@@ -923,8 +947,10 @@ public class SpeWriteSinkContainerProvenanceGuardTests
             violations.Count == 0,
             "SPE write-sink site(s) in the BFF have NO declared container provenance. This is the whole "
             + "point of this guard: a sink nobody has classified is a container decision nobody has "
-            + "reviewed, and SPE permissions are additive-only — content written into a shared container "
-            + "cannot be retracted.\n\n"
+            + "reviewed, and SPE permissions are CONTAINER-level — content written into a shared container "
+            + "is readable by every member of that container, with no per-file deny to narrow it, until "
+            + "somebody notices and moves or deletes the item. A misrouted write is silent; this guard is "
+            + "the noticing.\n\n"
             + "REMEDY — trace the container/drive id BACKWARDS from the sink to where it is first produced, "
             + "then add an entry to AllowList in this file. Read the MAINTENANCE PROCEDURE above it first; "
             + "in particular, a value threaded three call frames down from a request DTO is still "

@@ -217,6 +217,78 @@ public class ExternalDataService
     }
 
     /// <summary>
+    /// Creates a <c>sprk_document</c> row for a file already uploaded to SPE, linked to the project.
+    /// </summary>
+    /// <remarks>
+    /// <para>Called ONLY after the bytes are in SPE — the pointers in <paramref name="pointers"/> are
+    /// produced by the upload endpoint from a server-derived container, never from client input.</para>
+    ///
+    /// <para><b>Field choices mirror the canonical wizard create</b>
+    /// (<c>Spaarke.UI.Components/services/document-upload/DocumentRecordService.ts</c>) rather than
+    /// inventing a second convention: <c>sprk_graphdriveid</c> is the canonical Document container
+    /// field and <c>sprk_containerid</c> stays NULL on <c>sprk_document</c> (the Phase F backfill audit
+    /// depends on that, and the wizard has a regression test asserting it). <c>sprk_documentname</c> is
+    /// the display name; <c>sprk_filename</c> / <c>sprk_filesize</c> / <c>sprk_graphitemid</c> /
+    /// <c>sprk_filepath</c> carry the file identity.</para>
+    ///
+    /// <para><c>sprk_Project@odata.bind</c> uses the PascalCase navigation property, the same
+    /// case-sensitive form the event and to-do creates use. The read side of this service filters
+    /// documents on <c>_sprk_project_value</c>, so this is the lookup that makes an uploaded document
+    /// visible in the SPA's own list.</para>
+    /// </remarks>
+    public virtual async Task<ExternalDocumentDto> CreateDocumentAsync(
+        Guid projectId, ExternalUploadedFilePointers pointers, CancellationToken ct = default)
+    {
+        if (projectId == Guid.Empty)
+            throw new ArgumentException("Project id must be a non-empty GUID.", nameof(projectId));
+        ArgumentNullException.ThrowIfNull(pointers);
+
+        var token = await GetAppOnlyTokenAsync(ct);
+
+        var body = new Dictionary<string, object?>
+        {
+            ["sprk_documentname"] = pointers.FileName,
+            ["sprk_filename"] = pointers.FileName,
+            ["sprk_graphitemid"] = pointers.ItemId,
+            ["sprk_graphdriveid"] = pointers.DriveId,
+            ["sprk_Project@odata.bind"] = $"/sprk_projects({projectId})",
+        };
+
+        if (pointers.FileSizeBytes.HasValue)
+            body["sprk_filesize"] = pointers.FileSizeBytes.Value;
+        if (!string.IsNullOrWhiteSpace(pointers.WebUrl))
+            body["sprk_filepath"] = pointers.WebUrl;
+
+        var url = $"{GetApiUrl()}/sprk_documents";
+        using var httpRequest = new HttpRequestMessage(HttpMethod.Post, url);
+        httpRequest.Headers.Authorization = new AuthenticationHeaderValue("Bearer", token);
+        httpRequest.Headers.Add("OData-MaxVersion", "4.0");
+        httpRequest.Headers.Add("OData-Version", "4.0");
+        httpRequest.Headers.Add("Prefer", "return=representation");
+        httpRequest.Content = new StringContent(
+            JsonSerializer.Serialize(body),
+            Encoding.UTF8,
+            "application/json");
+
+        var response = await _httpClient.SendAsync(httpRequest, ct);
+
+        if (!response.IsSuccessStatusCode)
+        {
+            var errorBody = await response.Content.ReadAsStringAsync(ct);
+            _logger.LogWarning(
+                "[EXT-DATA] Create document failed for project {ProjectId}: {Status} — {Body}",
+                projectId, response.StatusCode, errorBody);
+            throw new InvalidOperationException($"Failed to create document: {response.StatusCode}");
+        }
+
+        var row = await response.Content.ReadFromJsonAsync<DocumentRow>(ct);
+        if (row is null)
+            throw new InvalidOperationException("Dataverse returned no document data after create");
+
+        return MapDocument(row);
+    }
+
+    /// <summary>
     /// Returns the document's parent project id and display name — used by the external download
     /// endpoint (task 027) for document→project authorization scoping BEFORE any SPE pointer
     /// resolution or Graph content read. App-only Dataverse read; returns (null, null) when the

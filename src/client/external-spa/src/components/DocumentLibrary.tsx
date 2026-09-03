@@ -54,7 +54,7 @@ import type { IUploadedFile, IFileValidationError } from '@spaarke/ui-components
 import { AiSummaryPopover } from '@spaarke/ui-components/components/AiSummaryPopover';
 import { getDocuments, ODataDocument } from '../api/web-api-client';
 import { bffApiCall, bffApiBlob } from '../auth/bff-client';
-import { AccessLevel } from '../types';
+import { AccessLevel, ApiError } from '../types';
 
 // ---------------------------------------------------------------------------
 // Styles
@@ -411,11 +411,16 @@ const UploadDialog: React.FC<UploadDialogProps> = ({ projectId, open, onClose, o
     try {
       const formData = new FormData();
       formData.append('file', selectedFiles[0].file);
-      formData.append('projectId', projectId);
+      // NOTE: projectId is NOT sent in the body — it is the route parameter, and the server derives
+      // the storage container from it. A client must never name a container (#858).
 
+      // Fixed 2026-09-02: was `POST /api/v1/external/documents/upload`, which is mapped NOWHERE in
+      // the BFF — every upload from this dialog 404'd. The real route is project-scoped.
       // Use bffApiCall for authenticated upload — omit Content-Type so the browser
       // sets the correct multipart/form-data boundary automatically.
-      await bffApiCall<void>('/api/v1/external/documents/upload', {
+      // Response body is the created document row; it is ignored here because onUploadComplete
+      // refetches the list, which is the single source of truth for what the project contains.
+      await bffApiCall<unknown>(`/api/v1/external/projects/${projectId}/documents`, {
         method: 'POST',
         body: formData,
         headers: {},
@@ -426,7 +431,26 @@ const UploadDialog: React.FC<UploadDialogProps> = ({ projectId, open, onClose, o
       onClose();
     } catch (err) {
       console.error('[DocumentLibrary] Upload failed:', err);
-      setUploadError('Failed to upload the document. Please check the file and try again.');
+      // Branch on ApiError.statusCode — the field ApiError actually exposes (there is no `status`,
+      // and no `detail`: its `message` is the raw response text). Composing the copy here from the
+      // known file name beats parsing a ProblemDetails JSON string back out of `message`.
+      const statusCode = err instanceof ApiError ? err.statusCode : undefined;
+      if (statusCode === 409) {
+        // A NAME COLLISION is not a failure: nothing was uploaded and the existing document is
+        // intact, so "check the file and try again" would be misleading advice.
+        setUploadError(
+          `A file named "${selectedFiles[0].name}" already exists in this project. ` +
+            'Nothing was uploaded or changed — rename the file and try again.'
+        );
+      } else if (statusCode === 422) {
+        setUploadError(
+          'This project has no storage configured, so documents cannot be uploaded yet. Please contact the project owner.'
+        );
+      } else if (statusCode === 403) {
+        setUploadError('Your access level does not permit uploading documents to this project.');
+      } else {
+        setUploadError('Failed to upload the document. Please check the file and try again.');
+      }
     } finally {
       setUploading(false);
     }

@@ -435,13 +435,19 @@ public sealed class Phase2EndToEndFixture : WebApplicationFactory<Program>
     /// </summary>
     private void WireOfficeMock()
     {
+        // `ownerSystemUserId` (arg 4) was added to IOfficeService.QuickCreateAsync by #934
+        // (email-communication-intelligence-r2) without updating this setup, which left the solution
+        // unable to compile — the arity mismatch reads as "cannot convert CancellationToken to
+        // string?". Repaired here 2026-09-03 by unified-access-control-r2 because it blocked PR #933;
+        // the regression is not that PR's.
         OfficeMock
             .Setup(o => o.QuickCreateAsync(
                 It.Is<QuickCreateEntityType>(t => t == QuickCreateEntityType.Matter),
                 It.IsAny<QuickCreateRequest>(),
                 It.IsAny<string>(),
+                It.IsAny<string?>(),
                 It.IsAny<CancellationToken>()))
-            .Returns<QuickCreateEntityType, QuickCreateRequest, string, CancellationToken>((entityType, request, _, _) =>
+            .Returns<QuickCreateEntityType, QuickCreateRequest, string, string?, CancellationToken>((entityType, request, _, _, _) =>
                 Task.FromResult<QuickCreateResponse?>(new QuickCreateResponse
                 {
                     Id = NextQuickCreateMatterId,

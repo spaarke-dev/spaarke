@@ -284,6 +284,77 @@ public class OfficeEndpointsContractTests : IClassFixture<OfficeTestWebAppFactor
 
     #endregion
 
+    #region Create To Do Endpoint Tests
+
+    // email-communication-intelligence-r2 #3 — POST /api/office/todo creates a first-class sprk_todo
+    // regarding the filed record. The name-validation + auth paths are exercised here without a real
+    // Dataverse write (both return before the create); the happy path is Skip'd like the sibling
+    // QuickCreate tests (needs a fully-mocked IGenericEntityService).
+
+    [Fact]
+    public async Task Post_OfficeCreateTodo_WithMissingName_Returns400()
+    {
+        // Arrange — a To Do with no name fails validation (OFFICE_007) BEFORE any create is attempted.
+        var request = new CreateTodoRequest
+        {
+            RegardingEntityType = "Matter",
+            RegardingRecordId = Guid.NewGuid(),
+            PriorityScore = 50,
+            EffortScore = 50
+        };
+
+        // Act
+        var response = await _client.PostAsJsonAsync("/api/office/todo", request);
+
+        // Assert
+        response.StatusCode.Should().Be(HttpStatusCode.BadRequest);
+    }
+
+    [Fact]
+    public async Task Post_OfficeCreateTodo_WhenUnauthenticated_Returns401()
+    {
+        // Arrange — X-Test-Unauthenticated makes the test auth handler fail the caller, so the group's
+        // RequireAuthorization returns 401 before the handler runs.
+        var client = _factory.CreateClient();
+        client.DefaultRequestHeaders.Add("X-Test-Unauthenticated", "true");
+        var request = new CreateTodoRequest { Name = "Test To Do" };
+
+        // Act
+        var response = await client.PostAsJsonAsync("/api/office/todo", request);
+
+        // Assert
+        response.StatusCode.Should().Be(HttpStatusCode.Unauthorized);
+    }
+
+    [Fact(Skip = "Requires a fully mocked IGenericEntityService for the sprk_todo create")]
+    public async Task Post_OfficeCreateTodo_WithValidRequest_Returns201Created()
+    {
+        // Arrange
+        var request = new CreateTodoRequest
+        {
+            Name = "Review NDA red-lines",
+            Description = "From the Acme email",
+            RegardingEntityType = "Matter",
+            RegardingRecordId = Guid.NewGuid(),
+            RegardingRecordName = "Acme Corp — NDA",
+            PriorityScore = 75,
+            EffortScore = 50
+        };
+
+        // Act
+        var response = await _client.PostAsJsonAsync("/api/office/todo", request);
+
+        // Assert
+        response.StatusCode.Should().Be(HttpStatusCode.Created);
+
+        var result = await response.Content.ReadFromJsonAsync<CreateTodoResponse>();
+        result.Should().NotBeNull();
+        result!.Name.Should().Be("Review NDA red-lines");
+        result.TodoId.Should().NotBe(Guid.Empty);
+    }
+
+    #endregion
+
     #region Share Links Endpoint Tests
 
     [Fact]

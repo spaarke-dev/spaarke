@@ -73,6 +73,7 @@ import type {
     OrchestratorResult,
 } from "./services/uploadOrchestrator";
 import { FileUploadProgress } from "./components/FileUploadProgress";
+import type { ConflictResolution } from "./components/FileUploadProgress";
 import { buildSuccessConfig } from "./components/SuccessScreen";
 // nextStepLauncher is no longer used here — inline playbook/find-similar in NextStepsStep
 
@@ -92,6 +93,42 @@ function AutoUploadTrigger({ onStart }: { onStart: () => void }): null {
 }
 
 // (FindSimilarDialog is no longer inline — opens in new tab via nextStepLauncher)
+
+// ---------------------------------------------------------------------------
+// Result merging (single-file collision retries)
+// ---------------------------------------------------------------------------
+
+/**
+ * Fold a retry's outcome into the batch result.
+ *
+ * `next` describes ONLY the retried file(s). Replacing `prev` with it would drop every other file
+ * from the counts, from `_summaryResults`, and from the `uploadResults` payload the Next Steps step
+ * consumes. Files in `prev` that were not retried are carried through unchanged.
+ */
+function mergeOrchestratorResults(
+    prev: OrchestratorResult,
+    next: OrchestratorResult,
+): OrchestratorResult {
+    const fileResults = prev.fileResults.map(
+        (r) => next.fileResults.find((n) => n.fileName === r.fileName) ?? r,
+    );
+
+    // Defensive: a retried file that was somehow absent from `prev` still belongs in the result.
+    for (const n of next.fileResults) {
+        if (!fileResults.some((r) => r.fileName === n.fileName)) {
+            fileResults.push(n);
+        }
+    }
+
+    const successCount = fileResults.filter((r) => r.success).length;
+    return {
+        success: successCount > 0,
+        totalFiles: fileResults.length,
+        successCount,
+        failureCount: fileResults.length - successCount,
+        fileResults,
+    };
+}
 
 // ---------------------------------------------------------------------------
 // File state reducer
@@ -250,6 +287,10 @@ export function DocumentUploadWizardDialog({
     const [orchestratorProgress, setOrchestratorProgress] = useState<OrchestratorFileProgress[]>([]);
     const [uploadResult, setUploadResult] = useState<OrchestratorResult | null>(null);
     const [isUploading, setIsUploading] = useState(false);
+    /** File names whose collision retry is in flight — disables their buttons, shows a spinner. */
+    const [resolvingFileNames, setResolvingFileNames] = useState<ReadonlySet<string>>(
+        () => new Set<string>()
+    );
 
     // ── Step 2 state: uploaded document map + profiling status ─────────────
     // uploadedDocumentMap is populated by the upload pipeline (tasks 012/014)
@@ -326,22 +367,42 @@ export function DocumentUploadWizardDialog({
     );
 
     // ── Run upload pipeline ─────────────────────────────────────────────────
-    const runUploadPipeline = useCallback(async (): Promise<OrchestratorResult> => {
+    /**
+     * Run the pipeline over the selected files, or over a SUBSET when retrying.
+     *
+     * A retry (`options.onlyFileNames` set) must not reset the progress list or the result — the
+     * other files' outcomes are still on screen and still valid. It merges into them instead.
+     */
+    const runUploadPipeline = useCallback(async (options?: {
+        /** Restrict this run to these file names. Omit to run the whole selection. */
+        onlyFileNames?: readonly string[];
+        /** Collision resolution to apply to this run. Only meaningful with `onlyFileNames`. */
+        conflictBehavior?: ConflictResolution;
+    }): Promise<OrchestratorResult> => {
         const selectedFiles = fileStateRef.current.selectedFiles;
+        const retryNames = options?.onlyFileNames;
+        const isRetry = retryNames != null;
 
         // Convert IUploadedFile[] to File[] via the .file property
         const nativeFiles: File[] = selectedFiles
+            .filter((f) => !isRetry || retryNames!.includes(f.name))
             .map((f) => f.file)
             .filter((f): f is File => f != null);
 
         if (nativeFiles.length === 0) {
-            throw new Error("No files to upload. Please add files in Step 1.");
+            throw new Error(
+                isRetry
+                    ? "The file to retry is no longer available. Please add it again in Step 1."
+                    : "No files to upload. Please add files in Step 1.",
+            );
         }
 
         setIsUploading(true);
-        setOrchestratorProgress([]);
-        setUploadResult(null);
-        fileDispatch({ type: "START_UPLOAD" });
+        if (!isRetry) {
+            setOrchestratorProgress([]);
+            setUploadResult(null);
+            fileDispatch({ type: "START_UPLOAD" });
+        }
 
         try {
             const dataverseClient = createCodePageDataverseClient();
@@ -378,12 +439,21 @@ export function DocumentUploadWizardDialog({
                     },
                 },
                 handleOrchestratorProgress,
+                options?.conflictBehavior,
             );
 
-            setUploadResult(result);
+            // On a retry, fold this run's per-file outcomes into the existing result rather than
+            // replacing it — `result` only describes the retried file, so assigning it directly
+            // would drop every other file from the counts and from the Next Steps payload.
+            const effectiveResult =
+                isRetry && uploadResultRef.current
+                    ? mergeOrchestratorResults(uploadResultRef.current, result)
+                    : result;
+
+            setUploadResult(effectiveResult);
 
             // Populate uploadedDocumentMap for SummaryStep (Document Profile streaming)
-            for (const fileResult of result.fileResults) {
+            for (const fileResult of effectiveResult.fileResults) {
                 if (fileResult.success && fileResult.createResult?.recordId && fileResult.speMetadata) {
                     const matchingFile = selectedFiles.find((f) => f.name === fileResult.fileName);
                     if (matchingFile) {
@@ -399,16 +469,44 @@ export function DocumentUploadWizardDialog({
             // Update summary results
             const totalBytes = selectedFiles.reduce((sum, f) => sum + (f.sizeBytes ?? 0), 0);
             _setSummaryResults({
-                successCount: result.successCount,
-                failureCount: result.failureCount,
+                successCount: effectiveResult.successCount,
+                failureCount: effectiveResult.failureCount,
                 totalBytesUploaded: totalBytes,
             });
 
-            return result;
+            return effectiveResult;
         } finally {
             setIsUploading(false);
         }
     }, [effectiveParentEntityType, effectiveParentEntityId, effectiveParentEntityName, effectiveContainerId, handleOrchestratorProgress, uploadedDocumentMap]);
+
+    // ── Name-collision resolution ───────────────────────────────────────────
+    /**
+     * Retry ONE file with the collision resolution the user picked.
+     *
+     * Nothing was written when the collision was reported (the BFF uploads with
+     * `conflictBehavior=fail` by default), so this is a clean re-run of the full pipeline for that
+     * file — upload, Dataverse record, and indexing — not a patch-up of a partial write.
+     */
+    const handleResolveConflict = useCallback(
+        (fileName: string, resolution: ConflictResolution) => {
+            setResolvingFileNames((prev) => new Set(prev).add(fileName));
+            void runUploadPipeline({ onlyFileNames: [fileName], conflictBehavior: resolution })
+                .catch(() => {
+                    // orchestrateUpload reports per-file failures through progress; a throw here is
+                    // a pipeline-level fault, already surfaced on the row. Swallow so the finally
+                    // below always clears the spinner.
+                })
+                .finally(() => {
+                    setResolvingFileNames((prev) => {
+                        const next = new Set(prev);
+                        next.delete(fileName);
+                        return next;
+                    });
+                });
+        },
+        [runUploadPipeline],
+    );
 
     // ── Email step props (memoized for the dynamic Send Email step) ────────
     const emailStepProps: IDocumentEmailStepProps = useMemo(
@@ -472,29 +570,46 @@ export function DocumentUploadWizardDialog({
                     return result !== null && !isUploadingRef.current;
                 },
                 renderContent: (_handle: IWizardShellHandle) => {
-                    // After upload completes: show SummaryStep with Document Profile streaming
+                    const progressPane = (
+                        <FileUploadProgress
+                            fileProgress={orchestratorProgress}
+                            onResolveConflict={handleResolveConflict}
+                            resolvingFileNames={resolvingFileNames}
+                        />
+                    );
+
+                    // After upload completes: show SummaryStep with Document Profile streaming.
+                    // Any file still waiting on a collision decision keeps its row ABOVE the
+                    // summary — otherwise one successful file hides the choice entirely and the
+                    // pending file is silently dropped from the batch.
                     if (uploadResult && uploadedDocumentMap.size > 0) {
+                        const hasPendingConflict = orchestratorProgress.some(
+                            (p) => p.phase === "error" && p.nameConflict != null,
+                        );
                         return (
-                            <SummaryStep
-                                files={fileState.selectedFiles}
-                                apiBaseUrl={bffBaseUrl}
-                                getToken={bffTokenProvider}
-                                uploadedDocumentMap={uploadedDocumentMap}
-                                onProcessingChange={setIsProfileProcessing}
-                            />
+                            <>
+                                {hasPendingConflict && progressPane}
+                                <SummaryStep
+                                    files={fileState.selectedFiles}
+                                    apiBaseUrl={bffBaseUrl}
+                                    getToken={bffTokenProvider}
+                                    uploadedDocumentMap={uploadedDocumentMap}
+                                    onProcessingChange={setIsProfileProcessing}
+                                />
+                            </>
                         );
                     }
 
                     // Upload complete but all files failed — show progress with errors
                     if (uploadResult) {
-                        return <FileUploadProgress fileProgress={orchestratorProgress} />;
+                        return progressPane;
                     }
 
                     // Auto-trigger upload when entering Processing step
                     return (
                         <>
                             <AutoUploadTrigger onStart={() => void runUploadPipeline()} />
-                            <FileUploadProgress fileProgress={orchestratorProgress} />
+                            {progressPane}
                         </>
                     );
                 },
@@ -541,6 +656,10 @@ export function DocumentUploadWizardDialog({
             handleFilesAdded,
             handleFileRemoved,
             handleClearErrors,
+            // Both are read by the Processing step's progress pane: without them the retry buttons
+            // fire a stale closure and the in-flight spinner never appears.
+            handleResolveConflict,
+            resolvingFileNames,
         ]
     );
 

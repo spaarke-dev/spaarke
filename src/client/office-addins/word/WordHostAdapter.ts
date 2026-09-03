@@ -123,22 +123,27 @@ export class WordHostAdapter implements IHostAdapter {
 
   /**
    * Get the document content as an ArrayBuffer.
+   *
+   * The default (and `ooxml`) path returns the **real .docx binary** (the compressed OOXML package)
+   * via `Office.context.document.getFileAsync(Office.FileType.Compressed)`. This replaces the previous
+   * `body.getOoxml()` approach, which returned FLAT OOXML XML text — not a valid .docx — so SPE could
+   * not preview it, Word could not open it, and AI profiling reported "unsupported file type"
+   * (email-communication-intelligence-r2 UAT 2026-09-03). `getFileAsync(Compressed)` returns the same
+   * bytes Word would write to disk, which every downstream consumer (SPE preview, Compose mount, AI
+   * text extraction) expects. `html`/`text` remain body-scoped extractions for non-save callers.
    */
   async getDocumentContent(options?: GetDocumentContentOptions): Promise<ArrayBuffer> {
     const format = options?.format || 'ooxml';
 
+    // The save path wants the actual .docx — Compressed is the file Word writes to disk.
+    if (format === 'ooxml') {
+      return this.getCompressedFile();
+    }
+
     return Word.run(async context => {
       const body = context.document.body;
 
-      if (format === 'ooxml') {
-        // Get as OOXML and convert to ArrayBuffer
-        const ooxml = body.getOoxml();
-        await context.sync();
-
-        // Convert OOXML string to ArrayBuffer
-        const encoder = new TextEncoder();
-        return encoder.encode(ooxml.value).buffer as ArrayBuffer;
-      } else if (format === 'html') {
+      if (format === 'html') {
         const html = body.getHtml();
         await context.sync();
 
@@ -153,6 +158,64 @@ export class WordHostAdapter implements IHostAdapter {
       }
 
       throw new Error(`Unsupported format: ${format}`);
+    });
+  }
+
+  /**
+   * Read the current document as a compressed .docx via the Common API `getFileAsync`, assembling the
+   * 4 MB-max slices into a single ArrayBuffer. `getFileAsync` returns the document's SAVED state; Office
+   * auto-persists a temporary copy for an unsaved/dirty document, so this works before an explicit save.
+   * Slices are read sequentially (simpler + avoids the parallel-callback edge cases) and the file handle
+   * is always closed.
+   */
+  private getCompressedFile(): Promise<ArrayBuffer> {
+    return new Promise<ArrayBuffer>((resolve, reject) => {
+      Office.context.document.getFileAsync(Office.FileType.Compressed, { sliceSize: 65536 }, result => {
+        if (result.status !== Office.AsyncResultStatus.Succeeded) {
+          reject(new Error(result.error?.message || 'Failed to read the Word document (getFileAsync).'));
+          return;
+        }
+
+        const file = result.value;
+        const sliceCount = file.sliceCount;
+        const slices: Uint8Array[] = new Array(sliceCount);
+
+        const finish = (err?: Error) => {
+          file.closeAsync(() => {
+            /* best-effort close */
+          });
+          if (err) {
+            reject(err);
+            return;
+          }
+          const total = slices.reduce((n, s) => n + s.length, 0);
+          const out = new Uint8Array(total);
+          let offset = 0;
+          for (const s of slices) {
+            out.set(s, offset);
+            offset += s.length;
+          }
+          resolve(out.buffer);
+        };
+
+        const readSlice = (index: number): void => {
+          if (index >= sliceCount) {
+            finish();
+            return;
+          }
+          file.getSliceAsync(index, sliceResult => {
+            if (sliceResult.status !== Office.AsyncResultStatus.Succeeded) {
+              finish(new Error(sliceResult.error?.message || `Failed to read document slice ${index}.`));
+              return;
+            }
+            const data = sliceResult.value.data as unknown;
+            slices[index] = data instanceof Uint8Array ? data : Uint8Array.from(data as number[]);
+            readSlice(index + 1);
+          });
+        };
+
+        readSlice(0);
+      });
     });
   }
 

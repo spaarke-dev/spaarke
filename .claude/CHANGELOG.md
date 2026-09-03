@@ -8,6 +8,36 @@ Format follows [Keep a Changelog](https://keepachangelog.com/) conventions.
 
 ---
 
+###### 2026-09-02 — `unified-access-control-r2`: new `FAILURE-MODES.md` **AP-12** — a comment becomes the constraint
+
+- **New `FAILURE-MODES.md` AP-12: prose outlives the mechanism it describes.** Promoted from a single
+  observation inside AP-11 ("prose has no compiler") to its own anti-pattern, because the consequence is
+  not a wrong destination but a **wrong decision**. **Eight instances in one session.** The worst:
+  `PathValidator.SmallUploadMaxBytes` had **zero code references** and its enforcing guard had been
+  deleted, yet it became a **real 4 MiB product limit** purely because comments said it was enforced —
+  refusing every file between 4 MiB and 250 MB, from three separate client copies of the same fiction.
+  Two instances produced **wrong answers to the owner**: a hook docstring naming a privilege route that
+  never existed (triggering an unnecessary escalation for a decision already made in code), and
+  `ISpeFileOperations` asserting the simple PUT "takes no `@microsoft.graph.conflictBehavior`" — which
+  drove a design conclusion **twice, the second time after this project had already written down that
+  the claim was false**. Also corrected: three sites describing SPE permissions as "additive-only" and a
+  misrouted write as "irreversible" (they are **container-level**; removing the item ends the access —
+  the old framing invites hunting for a per-file ACL that does not exist), and a `TokenProvider` whose
+  comment claims "authentication handled by browser session" while returning `''`, which makes the
+  caller omit the `Authorization` header entirely.
+- **Why it is durable, and the prevention.** Deleting code is loud (the build breaks); deleting a *claim*
+  is silent, so nobody does it — and an agent reading a file top-to-bottom meets the comment **before**
+  the code, so the claim frames the reading of the evidence that would refute it. Rules: treat any
+  comment stating a **limit, route, role mapping, capability, or reason-something-isn't-wired** as a
+  claim to verify before quoting it to a human; a **constant with zero references means the limit does
+  not exist**; grep the prose in the same change that deletes a field or guard; and **correct in place
+  with a dated "🔴 do not re-derive" note** rather than silently — one of these had been silently
+  corrected before and came back.
+- **Including your own project's notes.** This session's handoff asserted a missing `encodeURIComponent`
+  that was present two lines above the cited line, and a consolidation plan that would have replaced a
+  working upload client with one that cannot authenticate. Re-derive; never inherit a claim.
+- Also **back-filled the missing AP-11 TOC entry** (AP-11 shipped 2026-09-01 without one).
+
 ###### 2026-09-01 — `spaarkeai-compose-r8`: residual-loss list gains a row, and the guard that keeps it honest gains three
 
 - **[`docs/architecture/COMPOSE-WRITE-RESIDUAL-LOSS.md`](../docs/architecture/COMPOSE-WRITE-RESIDUAL-LOSS.md) republished (2026-09-01).**

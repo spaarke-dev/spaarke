@@ -2,15 +2,24 @@
  * File Upload Service
  *
  * Orchestrates single-file upload to SharePoint Embedded (SPE) via SDAP BFF API.
- * Uses SdapApiClient with injected ITokenProvider for authentication.
+ *
+ * **Migrated 2026-09-03** onto `@spaarke/sdap-client`'s `SdapApiClient`, retiring the parallel
+ * client that used to live beside this file at `./SdapApiClient.ts`. There were THREE upload
+ * implementations in the repo (this one, `EntityCreationService`'s raw inline `fetch`, and the
+ * shared package); this was the last of the three to converge. Upload behaviour — the explicit
+ * `conflictBehavior`, the 250 MB simple-PUT ceiling, RFC7807 failure copy, the typed
+ * `SdapHttpError` and `UploadNameConflictError` — now has ONE definition rather than one per
+ * caller. Auth moved with it: from an `ITokenProvider` to `authenticatedFetch` (ADR-028), which
+ * the rest of the client surface already used.
  *
  * ADR Compliance:
  * - ADR-007: All SPE operations through BFF API
+ * - ADR-028: Auth via `authenticatedFetch` from `@spaarke/auth`
  *
- * @version 1.0.0
+ * @version 2.0.0
  */
 
-import { SdapApiClient } from './SdapApiClient';
+import type { SdapApiClient } from '@spaarke/sdap-client';
 import type { ILogger, SpeFileMetadata, ServiceResult, FileUploadRequest } from './types';
 import { consoleLogger } from './types';
 import { UploadNameConflictError } from '@spaarke/sdap-client';
@@ -51,20 +60,32 @@ export class FileUploadService {
         return { success: false, error: 'No drive ID provided' };
       }
 
-      // Upload file via SDAP API (authentication handled by ITokenProvider)
-      const apiResponse = await this.apiClient.uploadFile({
-        file: request.file,
-        driveId: request.driveId,
-        fileName: request.fileName || request.file.name,
+      // Upload via the shared client (auth: `authenticatedFetch`, ADR-028).
+      const item = await this.apiClient.uploadFile(request.driveId, request.file, {
+        conflictBehavior: request.conflictBehavior,
       });
 
-      // Normalize API response to include convenience aliases
+      // DriveItem -> SpeFileMetadata, field by field rather than by spread. The spread this
+      // replaced was over a response typed AS SpeFileMetadata, so it carried anything the BFF sent;
+      // an explicit mapping states which fields this contract actually depends on, and makes a
+      // missing one a compile error instead of an undefined at runtime. `size` is nullable on
+      // DriveItem (folders have none); an uploaded file always has one, and 0 is the honest value
+      // for a zero-byte upload.
       const speMetadata: SpeFileMetadata = {
-        ...apiResponse,
-        driveItemId: apiResponse.id,
-        fileName: apiResponse.name,
-        sharePointUrl: apiResponse.webUrl || '',
-        fileSize: apiResponse.size,
+        id: item.id,
+        name: item.name,
+        parentId: item.parentId,
+        size: item.size ?? 0,
+        createdDateTime: item.createdDateTime,
+        lastModifiedDateTime: item.lastModifiedDateTime,
+        eTag: item.eTag,
+        isFolder: item.isFolder,
+        webUrl: item.webUrl,
+        // Convenience aliases consumers read.
+        driveItemId: item.id,
+        fileName: item.name,
+        sharePointUrl: item.webUrl || '',
+        fileSize: item.size ?? 0,
       };
 
       this.logger.info('FileUploadService', 'File uploaded successfully', {

@@ -498,8 +498,9 @@ public sealed class ComposeServiceCreateOnSaveTests
     // is no server-side resolver, so the step fails". Both halves are gone: the field was deleted and the
     // server now derives the container. What still MATTERS — and is what this test was really protecting
     // — is that when NO container can be resolved, the save fails honestly and writes NOTHING, rather
-    // than picking somewhere plausible. SPE permissions are additive-only, so a speculative write cannot
-    // be undone.
+    // than picking somewhere plausible. SPE permissions are CONTAINER-level, so a speculative write puts
+    // the content in front of everyone with access to whatever container it landed in, with no per-file
+    // deny to narrow it — and nothing announces that it happened.
     //
     // The post-#858 equivalent of "no container": the draft has no matter (no session → no host context)
     // AND the acting user's business unit has no `sprk_containerid` stamped. That is a real, common state

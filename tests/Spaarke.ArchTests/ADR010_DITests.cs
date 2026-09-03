@@ -216,8 +216,11 @@ public class ADR010_DITests
         // states an implementation contract the interface exists to impose — "Implementations MUST
         // throw rather than return an empty or partial set when the answer cannot be determined",
         // because "I could not find out whether this entity is securable" read as "it is not
-        // securable" places content in a shared container, which SPE's additive-only permission
-        // model makes irreversible. That is a contract, not indirection. Worth noting as the
+        // securable" places content in a shared container, where SPE's CONTAINER-level permission
+        // model exposes it to every member with no per-file deny available — and does so silently.
+        // (Corrected 2026-09-02: this said "makes irreversible". Removing the item from the container
+        // does end the access; the hazard is silent exposure until someone notices, not permanence.)
+        // That is a contract, not indirection. Worth noting as the
         // ratchet behaving correctly: the count moved for a real reason and named the interface.
         const int knownOneToOneCeiling = 156;
 

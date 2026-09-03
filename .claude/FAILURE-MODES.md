@@ -2,7 +2,7 @@
 
 > **Purpose**: Cross-cutting failure patterns that don't belong inside any single skill's Gotchas section. The agent should mentally cross-reference this catalog before executing a skill; sessions that hit a NEW failure type should append an entry here.
 
-> **Last Updated**: 2026-09-01 (added AP-10: single-level JSON-aware renderer over a double-nested, re-parsed config → document profiling stuck at Failed)
+> **Last Updated**: 2026-09-02 (added AP-12: a comment becomes the constraint — prose outliving its mechanism, 8 instances in one session; also back-filled the missing AP-11 TOC entry)
 
 ---
 
@@ -30,6 +30,8 @@ The distinction matters because the fix is different. Anti-patterns require *unl
 - [AP-8: A green suite treated as the END of verification rather than the start of it](#ap-8-a-green-suite-treated-as-the-end-of-verification-rather-than-the-start-of-it)
 - [AP-9: Amending a failing test to match the source, without checking the source against the vendor contract](#ap-9-amending-a-failing-test-to-match-the-source)
 - [AP-10: A JSON-aware renderer that escapes one nesting level, over a config that is re-parsed at a deeper level](#ap-10-a-json-aware-renderer-that-escapes-one-nesting-level-over-a-config-re-parsed-deeper)
+- [AP-11: Code that RUNS but reaches the wrong destination — no compiler and no test spans the seam](#ap-11-code-that-runs-but-reaches-the-wrong-destination--no-compiler-and-no-test-spans-the-seam)
+- [AP-12: A comment becomes the constraint — prose outlives the mechanism it describes](#ap-12-a-comment-becomes-the-constraint--prose-outlives-the-mechanism-it-describes)
 
 ### Gotchas
 - [G-1: Settings-file schema malformation silently disables permission rules + hooks](#g-1-settings-file-schema-malformation-silently-disables-permission-rules--hooks)
@@ -899,6 +901,66 @@ Error rate: ~48 claims → 40 confirmed / 3 refuted-or-wrong / 4 undercounted / 
 **Evidence**: `projects/unified-access-control-r2/notes/tech-debt-sweep-VERIFICATION-2026-09-01.md` ·
 `notes/client-tech-debt-sweep-2026-09-01.md` · `notes/create-wizard-duplication-analysis.md` · fixes in
 commit `304b6d8f2`; guard in `tests/Spaarke.ArchTests/ClientUploadRouteAgreementTests.cs`.
+
+---
+
+### AP-12: A comment becomes the constraint — prose outlives the mechanism it describes
+
+> **Added 2026-09-02** by `unified-access-control-r2`. **Class**: documentation drift promoted to
+> de-facto behaviour. **Eight instances in a single session**, two of which produced wrong answers to
+> the owner, and one of which this project had *already flagged as wrong* and still acted on.
+> Sibling of [AP-11](#ap-11-code-that-runs-but-reaches-the-wrong-destination--no-compiler-and-no-test-spans-the-seam),
+> which notes "prose has no compiler"; this entry is that observation promoted to its own failure mode,
+> because the consequence is not a wrong destination but a **wrong decision**.
+
+**The shape.** Something is deleted, never built, or built differently. The compiler dutifully updates
+every call site it can see. **Nothing updates the sentences that explain them.** The prose survives,
+reads as authoritative, and the next reader — human or agent — treats it as the specification.
+
+The tell is a comment that states **a limit, a route, a role mapping, a capability, or a reason
+something isn't wired**. Those are exactly the claims that (a) cannot be checked by any compiler and
+(b) get believed without checking.
+
+**Worked instances (all real, all this session).**
+
+| Prose said | Reality | Cost |
+|---|---|---|
+| `PathValidator.SmallUploadMaxBytes` enforces a 4 MiB upload cap | The constant had **zero code references**; the guard using it was deleted long before | A **real product limit**. Files 4 MiB–250 MB were refused by clients alone, for no server-side reason. Three separate client copies of the same fiction |
+| `ISpeFileOperations`: the simple PUT "takes no `@microsoft.graph.conflictBehavior` — not rename, not fail" | The **REST API honours it**; only the Kiota SDK doesn't expose it | Drove a design conclusion twice — **including after this project had written down that the claim was false** |
+| SPE permissions are "additive-only"; a misrouted write "cannot be retracted" / is "irreversible" | Permissions are **container-level** — removing the item ends the access | Wrong mental model in an arch guard's own failure message; invites hunting for a per-file ACL that does not exist |
+| A hook's docstring named a privilege route and a compound role model | The route never existed; `/status` already returned the privilege, and the filter already mapped three roles | An **unnecessary escalation to the owner** for a decision that had already been made in code |
+| `TokenProvider`: "authentication handled by browser session / Dataverse authentication" | Returns `''`, and the caller then omits the `Authorization` header entirely | Describes auth that **cannot work** against a `RequireAuthorization` BFF. Survived because the path has zero callers |
+| A retirement note described a 4 MiB ceiling on a path it was itself deleting | Same phantom constant | Propagated the fiction into a *new* file while removing the old one |
+
+**Why it is so durable.** Deleting code is loud — the build breaks. Deleting a *claim* is silent, so
+nobody does it. Worse, prose accretes authority with age: a comment that has survived several refactors
+reads as battle-tested rather than merely unexamined. And an agent reading a file top-to-bottom
+encounters the comment **before** the code, so the claim frames the reading of the very evidence that
+would refute it.
+
+**Prevention.**
+- **A doc comment stating a limit, route, role mapping, or capability is a CLAIM, not a fact.** Verify
+  it against code before believing it — and *especially* before quoting it to a human. Two of the eight
+  produced wrong answers to the owner.
+- **A constant with zero references is not harmless.** Grep for references before treating any named
+  limit as real; if it has none, the limit does not exist — delete it, and say in its place why it must
+  not come back (see `PathValidator`, `UploadOperation`, `uploadOrchestrator`).
+- **When you delete a field, route, guard, or constant, grep the PROSE in the same change** — doc
+  comments, `<see cref=…>`, retirement notes, user-facing strings, and *test* comments. AP-11 says this
+  too; it keeps being the step that is skipped.
+- **Correct in place, and say the claim was wrong.** A silent rewrite lets the next reader re-derive the
+  old belief from history. Leave a dated "🔴 Corrected — do not re-derive X" line. Both corrections in
+  commit `524a32fd3` do this, precisely because one of them had been silently corrected before and came
+  back.
+- **Distrust your own project's notes at the same rate.** This project's handoff asserted a missing
+  `encodeURIComponent` that was present two lines above the cited line, and a consolidation plan that
+  would have replaced a working client with one that cannot authenticate. **Re-derive; never inherit a
+  claim, including your own.**
+
+**Evidence**: commits `4044286a6` (dead constant + 4 MiB client ceiling), `13d8b878a` (stale docstring),
+`68eb58ad0` (phantom route in a docstring), `09025ab39` (third copy of the phantom cap), `524a32fd3`
+(conflictBehavior claim + the additive-only framing, both corrected with do-not-re-derive notes) ·
+`projects/unified-access-control-r2/current-task.md` § "the five things that will bite a fresh session".
 
 ---
 

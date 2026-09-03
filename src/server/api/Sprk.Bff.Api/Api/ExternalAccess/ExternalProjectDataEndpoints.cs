@@ -4,6 +4,7 @@ using Sprk.Bff.Api.Infrastructure.Dataverse;
 using Sprk.Bff.Api.Infrastructure.Exceptions;
 using Sprk.Bff.Api.Infrastructure.ExternalAccess;
 using Sprk.Bff.Api.Infrastructure.Graph;
+using Sprk.Bff.Api.Models;
 
 namespace Sprk.Bff.Api.Api.ExternalAccess;
 
@@ -14,6 +15,7 @@ namespace Sprk.Bff.Api.Api.ExternalAccess;
 ///   GET  /projects                       — list user's accessible projects
 ///   GET  /projects/{id}                  — single project by ID
 ///   GET  /projects/{id}/documents        — documents for a project
+///   POST /projects/{id}/documents        — upload a file + create its sprk_document row
 ///   GET  /projects/{id}/todos            — to-dos for a project (sprk_todo, regarding=project)
 ///   POST /projects/{id}/todos            — create a new to-do regarding the project
 ///   GET  /projects/{id}/events           — CALENDAR events for a project (sprk_event)
@@ -107,6 +109,21 @@ public static class ExternalProjectDataEndpoints
             .ProducesProblem(StatusCodes.Status400BadRequest)
             .ProducesProblem(StatusCodes.Status401Unauthorized)
             .ProducesProblem(StatusCodes.Status403Forbidden);
+
+        // POST /api/v1/external/projects/{id}/documents — upload a file and create its document row.
+        // Container is SERVER-DERIVED from the project (never client-named) and the upload uses
+        // ConflictBehavior.Fail so a same-named file can never be overwritten by an external caller.
+        group.MapPost("/projects/{id:guid}/documents", UploadDocument)
+            .WithName("UploadExternalProjectDocument")
+            .WithSummary("Upload a document to a Secure Project (server-derived container, app-only)")
+            .Accepts<IFormFile>("multipart/form-data")
+            .DisableAntiforgery() // multipart upload; auth is the JWT + participation gate, not a form token
+            .Produces<ExternalDocumentDto>(StatusCodes.Status201Created)
+            .ProducesProblem(StatusCodes.Status400BadRequest)
+            .ProducesProblem(StatusCodes.Status401Unauthorized)
+            .ProducesProblem(StatusCodes.Status403Forbidden)
+            .ProducesProblem(StatusCodes.Status409Conflict)
+            .ProducesProblem(StatusCodes.Status422UnprocessableEntity);
 
         // GET /api/v1/external/projects/{id}/documents/{documentId}/versions — SPE version history
         group.MapGet("/projects/{id:guid}/documents/{documentId:guid}/versions", GetDocumentVersions)
@@ -333,6 +350,152 @@ public static class ExternalProjectDataEndpoints
 
         var created = await dataService.CreateTodoAsync(id, request, ct);
         return Results.Created($"/api/v1/external/todos/{created.SprkTodoid}", created);
+    }
+
+    /// <summary>
+    /// POST /api/v1/external/projects/{id}/documents — upload a file and create its <c>sprk_document</c>.
+    /// </summary>
+    /// <remarks>
+    /// <para><b>Two-stage gate, mirroring <see cref="CreateEvent"/>:</b> project participation, then the
+    /// <c>Create</c> right. A View-Only participant can read documents but must never add one.</para>
+    ///
+    /// <para><b>The container is SERVER-DERIVED and the client cannot name it</b> (#858). The request
+    /// carries only the file; the container comes from
+    /// <c>RecordContainerResolver.ResolveForRecordAsync("sprk_project", id)</c>, so the authorization key
+    /// and the storage target both derive from the same project id and no code path lets them disagree.
+    /// The old route this replaces (<c>POST /api/v1/external/documents/upload</c>) never existed
+    /// server-side at all, so there is no prior contract to preserve here.</para>
+    ///
+    /// <para><b>Unresolved fails honestly.</b> A project with no resolvable container is a configuration
+    /// state, not a licence to write somewhere else: it returns 422 rather than falling back to a shared
+    /// container. <c>FailClosed</c> — a secure project whose own container is missing — is the case the
+    /// resolver exists to refuse, and is likewise never substituted.</para>
+    ///
+    /// <para><b>Upload is app-only with <see cref="ConflictBehavior.Fail"/>.</b> App-only because an
+    /// external CIAM contact is not a Dataverse principal and holds no delegated permission on the drive
+    /// (same reason the versions and download routes are app-only). <c>Fail</c> because the alternative
+    /// is letting an external participant overwrite an existing document by uploading a file of the same
+    /// name — the collision returns 409 with the stored file untouched.</para>
+    ///
+    /// <para><b>The path is a BARE FILE NAME.</b> Any prefix would make Graph implicitly create folder
+    /// segments — the phantom-folder defect. Enforced by <c>SpeUploadPathIsFlatGuardTests</c>.</para>
+    ///
+    /// <para><b>Ordering:</b> bytes first, then the Dataverse row. A failed row-create leaves an
+    /// orphaned file in the container rather than a document record pointing at nothing — the recoverable
+    /// direction, and the same order the wizard's pipeline uses.</para>
+    /// </remarks>
+    private static async Task<IResult> UploadDocument(
+        Guid id,
+        IFormFile file,
+        HttpContext httpContext,
+        ExternalDataService dataService,
+        RecordContainerResolver containerResolver,
+        ISpeFileOperations fileStore,
+        ILogger<Program> logger,
+        CancellationToken ct)
+    {
+        var callerContext = GetCallerPrincipal(httpContext);
+        if (callerContext is null) return MissingContextResult();
+
+        // ── AUTHORIZATION FIRST — nothing below touches Dataverse or SPE until both checks pass ──
+        if (!callerContext.HasProjectAccess(id))
+        {
+            logger.LogWarning("[EXT-UPLOAD] Contact {ContactId} denied — no access to project {ProjectId}",
+                callerContext.ContactId, id);
+            return Results.Problem(statusCode: 403, title: "Forbidden",
+                detail: "You do not have access to this project");
+        }
+
+        var rights = callerContext.GetEffectiveRights(id);
+        if (!rights.HasFlag(Spaarke.Dataverse.AccessRights.Create))
+        {
+            logger.LogWarning(
+                "[EXT-UPLOAD] Contact {ContactId} denied — access level lacks Create on project {ProjectId}",
+                callerContext.ContactId, id);
+            return Results.Problem(statusCode: 403, title: "Forbidden",
+                detail: "Your access level does not permit uploading documents to this project");
+        }
+
+        if (file is null || file.Length == 0)
+            return Results.Problem(statusCode: 400, title: "Bad Request",
+                detail: "A non-empty file is required");
+
+        // Named `uploadPath`, not `fileName`, because that is what the value IS: a client-supplied file
+        // name becomes the upload path verbatim, and an unsanitized one containing "/" makes Graph
+        // create folders (an operator found real folders minted from a typed date). Sanitizing collapses
+        // it to a single bare segment. Both facts are enforced by SpeUploadPathIsFlatGuardTests.
+        var uploadPath = SpeUploadPath.SanitizeFileName(file.FileName);
+
+        // ── AUTHORIZED — derive the container from the PROJECT, never from the request ──
+        ContainerDecision decision;
+        try
+        {
+            decision = await containerResolver.ResolveForRecordAsync("sprk_project", id, ct);
+        }
+        catch (SdapProblemException ex)
+        {
+            return Results.Problem(statusCode: ex.StatusCode, title: ex.Title, detail: ex.Detail,
+                extensions: new Dictionary<string, object?> { ["code"] = ex.Code });
+        }
+
+        if (decision.Outcome is ContainerDecisionOutcome.Unresolved or ContainerDecisionOutcome.FailClosed
+            || string.IsNullOrWhiteSpace(decision.ContainerId))
+        {
+            // Refuse rather than write into whatever container happens to be reachable. For a secure
+            // project that substitution IS the leak this project exists to close.
+            logger.LogWarning(
+                "[EXT-UPLOAD] No usable container for project {ProjectId} (outcome {Outcome}) — refusing upload",
+                id, decision.Outcome);
+            return Results.Problem(statusCode: 422, title: "Storage not configured",
+                detail: "This project has no storage container configured, so the document cannot be "
+                        + "uploaded. Please contact the project owner.");
+        }
+
+        FileHandleDto? uploaded;
+        try
+        {
+            await using var content = file.OpenReadStream();
+            uploaded = await fileStore.UploadSmallAsync(
+                decision.ContainerId, uploadPath, content, ConflictBehavior.Fail, ct);
+        }
+        catch (SpaarkeStorageException ex) when (ex.StatusCode == 409)
+        {
+            // Nothing was written — the existing document is intact. Stated plainly so the SPA can tell
+            // the user to rename, rather than the upload silently replacing someone else's file.
+            logger.LogInformation(
+                "[EXT-UPLOAD] Contact {ContactId} hit a name collision on '{FileName}' in project {ProjectId}",
+                callerContext.ContactId, uploadPath, id);
+            return Results.Problem(statusCode: 409, title: "File already exists",
+                detail: $"A file named '{uploadPath}' already exists in this project. Nothing was uploaded "
+                        + "or changed — rename the file and try again.");
+        }
+
+        if (uploaded is null)
+        {
+            logger.LogError("[EXT-UPLOAD] Upload returned no handle for project {ProjectId}", id);
+            return Results.Problem(statusCode: 502, title: "Upload failed",
+                detail: "The document could not be stored. Please try again.");
+        }
+
+        var created = await dataService.CreateDocumentAsync(
+            id,
+            new ExternalUploadedFilePointers(
+                // FileHandleDto.DriveId is the drive resolved during the upload; fall back to the
+                // container we resolved rather than persisting a null pointer.
+                DriveId: uploaded.DriveId ?? decision.ContainerId,
+                ItemId: uploaded.Id,
+                FileName: uploaded.Name,
+                FileSizeBytes: uploaded.Size,
+                WebUrl: uploaded.WebUrl),
+            ct);
+
+        logger.LogInformation(
+            "[EXT-UPLOAD] Contact {ContactId} uploaded '{FileName}' to project {ProjectId} as document {DocumentId}",
+            callerContext.ContactId, uploadPath, id, created.SprkDocumentid);
+
+        // Response carries the document row only — Graph pointers are never surfaced on this surface.
+        return Results.Created(
+            $"/api/v1/external/projects/{id}/documents/{created.SprkDocumentid}", created);
     }
 
     /// <summary>

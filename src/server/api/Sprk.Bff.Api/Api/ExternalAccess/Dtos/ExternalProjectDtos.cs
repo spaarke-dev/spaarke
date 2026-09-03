@@ -267,6 +267,24 @@ public sealed class ExternalDocumentVersionsResponse
     public IReadOnlyList<ExternalDocumentVersionDto> Versions { get; init; } = [];
 }
 
+/// <summary>
+/// SPE pointers for a freshly uploaded file, passed from the upload endpoint to
+/// <c>ExternalDataService.CreateDocumentAsync</c>.
+/// </summary>
+/// <remarks>
+/// ⚠️ <b>Internal only — never returned to a client.</b> The external surface has a standing rule
+/// that Graph pointers (driveId/itemId) are never surfaced; the download and versions routes both
+/// state it. This type exists to move those pointers from the endpoint that produced them to the
+/// Dataverse write that persists them, both server-side. It is deliberately NOT part of any response
+/// DTO. If a future change puts it in one, that is the leak the rule exists to prevent.
+/// </remarks>
+public sealed record ExternalUploadedFilePointers(
+    string DriveId,
+    string ItemId,
+    string FileName,
+    long? FileSizeBytes,
+    string? WebUrl);
+
 // ---------------------------------------------------------------------------
 // Event DTOs
 //
