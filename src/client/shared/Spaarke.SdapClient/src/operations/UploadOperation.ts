@@ -1,5 +1,5 @@
 import { DriveItem, AuthenticatedFetchFn } from '../types';
-import { requireAuthenticatedFetch, throwHttpFailure } from './httpFailure';
+import { requireAuthenticatedFetch, requestOrThrow } from './httpFailure';
 
 // `UploadSession` and the 320 KB CHUNK_SIZE constant were dropped from this file on 2026-08-27 with
 // the chunked path (task 076). The `UploadSession` TYPE is deliberately left in ../types and in the
@@ -77,7 +77,11 @@ export class UploadOperation {
 
     const query = options?.conflictBehavior ? `?conflictBehavior=${encodeURIComponent(options.conflictBehavior)}` : '';
 
-    const response = await authFetch(
+    // `requestOrThrow` rather than a bare `authFetch` + `response.ok` check: the canonical injected
+    // fetch (`@spaarke/auth`) THROWS on non-2xx and never returns the response, so an inline
+    // `response.status === 409` test never runs under it. See requestOrThrow's own note.
+    const response = await requestOrThrow(
+      authFetch,
       `${this.baseUrl}/api/obo/containers/${encodeURIComponent(containerId)}/files/${encodeURIComponent(file.name)}${query}`,
       {
         method: 'PUT',
@@ -88,20 +92,18 @@ export class UploadOperation {
         },
         body: file,
         signal: options?.signal ?? AbortSignal.timeout(this.timeout),
+      },
+      'Upload failed',
+      status => {
+        // A name collision is a DISTINCT, RECOVERABLE outcome, not a generic failure. It must be
+        // distinguishable by type rather than by string-matching a message, so the UI can offer the
+        // rename / new-version choice. Nothing was overwritten to get here — the BFF sends
+        // conflictBehavior=fail unless the caller says otherwise.
+        if (status === 409) {
+          throw new UploadNameConflictError(file.name);
+        }
       }
     );
-
-    // A name collision is a DISTINCT, RECOVERABLE outcome, not a generic failure. It must be
-    // distinguishable by type rather than by string-matching a message, so the UI can offer the
-    // rename / new-version choice. Nothing was overwritten to get here — the BFF sends
-    // conflictBehavior=fail unless the caller says otherwise.
-    if (response.status === 409) {
-      throw new UploadNameConflictError(file.name);
-    }
-
-    if (!response.ok) {
-      await throwHttpFailure(response, 'Upload failed');
-    }
 
     const result = await response.json();
 

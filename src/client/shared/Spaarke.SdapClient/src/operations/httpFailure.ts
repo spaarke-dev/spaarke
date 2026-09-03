@@ -3,8 +3,9 @@
  *
  * Extracted so the user-facing wording lives in ONE place. It was previously private to
  * `@spaarke/ui-components`'s parallel upload client (`services/document-upload/SdapApiClient.ts`),
- * which is being retired onto this package — porting the copy first means the retirement does not
- * silently downgrade every error message from a sentence to `HTTP 502`.
+ * which was retired onto this package on 2026-09-03 — porting the copy first meant the retirement
+ * did not silently downgrade every error message from a sentence to `HTTP 502`. That file no longer
+ * exists; this is now the only definition.
  */
 
 /**
@@ -78,6 +79,78 @@ export class SdapHttpError extends Error {
 export async function throwHttpFailure(response: Response, context: string): Promise<never> {
   const raw = await readFailureMessage(response);
   throw new SdapHttpError(response.status, `${context}: ${describeHttpFailure(response.status, raw)}`);
+}
+
+/**
+ * Read an HTTP status off an error THROWN by an injected fetch, if it carries one.
+ *
+ * Deliberately duck-typed on a numeric `status`: this package must not import `@spaarke/auth`
+ * (the whole point of injecting the fetch is to avoid that dependency), so it cannot use
+ * `instanceof ApiError`. Anything without a numeric `status` — `AuthError`, an `AbortError`, a
+ * network failure — returns undefined and is rethrown untouched, because those are not HTTP
+ * outcomes and dressing them up as one would lose the real cause.
+ */
+export function httpStatusOfThrown(error: unknown): number | undefined {
+  if (!error || typeof error !== 'object') return undefined;
+  const status = (error as { status?: unknown }).status;
+  return typeof status === 'number' ? status : undefined;
+}
+
+/**
+ * Issue a request through the injected fetch and return a SUCCESSFUL response.
+ *
+ * 🔴 **An injected `authenticatedFetch` has TWO shapes in production, and this package used to
+ * handle only one.** Both are real, today:
+ *
+ *   - `@spaarke/auth.authenticatedFetch` (every code page, every wizard) **THROWS** `ApiError`
+ *     on any non-2xx and never returns the response.
+ *   - `external-spa`'s `createAuthenticatedFetch()` **RETURNS** the raw response, non-2xx included.
+ *
+ * Under the first shape every `if (!response.ok)` / `response.status === 409` check in this package
+ * was unreachable, so `SdapHttpError`, the {@link describeHttpFailure} copy, and — worst —
+ * `UploadNameConflictError` could never be produced. The name-collision dialog depends on that
+ * type: without this, repointing the wizard's upload onto this client would have silently turned
+ * "a file by that name already exists — keep both or save a new version?" back into an opaque
+ * failure, which is the exact regression the collision work fixed. It had no test because the
+ * operations had no production callers when they were written.
+ *
+ * `onStatus` runs BEFORE the generic translation under **both** shapes, so an operation-specific
+ * typed outcome (upload's 409) wins over the generic `SdapHttpError` either way. That ordering is
+ * load-bearing — do not move the callback after the throw.
+ */
+export async function requestOrThrow(
+  authFetch: (url: string, init?: RequestInit) => Promise<Response>,
+  url: string,
+  init: RequestInit,
+  context: string,
+  onStatus?: (status: number) => void
+): Promise<Response> {
+  let response: Response;
+
+  try {
+    response = await authFetch(url, init);
+  } catch (error) {
+    // Already one of ours (including UploadNameConflictError, which carries no `status`) — leave it.
+    if (error instanceof SdapHttpError) throw error;
+
+    const status = httpStatusOfThrown(error);
+    if (status === undefined) throw error;
+
+    onStatus?.(status);
+
+    // The throwing shape has already consumed the body, so its message IS the RFC7807
+    // detail/title. Passing it through describeHttpFailure gives the same user-facing copy the
+    // returned-response path produces.
+    const raw = error instanceof Error ? error.message : String(error);
+    throw new SdapHttpError(status, `${context}: ${describeHttpFailure(status, raw)}`);
+  }
+
+  if (!response.ok) {
+    onStatus?.(response.status);
+    await throwHttpFailure(response, context);
+  }
+
+  return response;
 }
 
 /**

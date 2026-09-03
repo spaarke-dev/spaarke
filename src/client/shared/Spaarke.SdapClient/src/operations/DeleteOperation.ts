@@ -1,5 +1,5 @@
 import { AuthenticatedFetchFn } from '../types';
-import { requireAuthenticatedFetch, throwHttpFailure } from './httpFailure';
+import { requireAuthenticatedFetch, requestOrThrow } from './httpFailure';
 
 export class DeleteOperation {
   constructor(
@@ -17,16 +17,14 @@ export class DeleteOperation {
   public async delete(driveId: string, itemId: string, signal?: AbortSignal): Promise<void> {
     const authFetch = requireAuthenticatedFetch(this.authenticatedFetch, 'deleteFile');
 
-    const response = await authFetch(
+    await requestOrThrow(
+      authFetch,
       `${this.baseUrl}/api/obo/drives/${encodeURIComponent(driveId)}/items/${encodeURIComponent(itemId)}`,
       {
         method: 'DELETE',
         signal: signal ?? AbortSignal.timeout(this.timeout),
-      }
+      },
+      'Delete failed'
     );
-
-    if (!response.ok) {
-      await throwHttpFailure(response, 'Delete failed');
-    }
   }
 }

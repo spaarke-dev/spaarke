@@ -10,7 +10,7 @@ import { UploadOperation, type ConflictBehaviorOption } from './operations/Uploa
 import { DownloadOperation } from './operations/DownloadOperation';
 import { DeleteOperation } from './operations/DeleteOperation';
 import { IndexFileOperation } from './operations/IndexFileOperation';
-import { requireAuthenticatedFetch, throwHttpFailure } from './operations/httpFailure';
+import { requireAuthenticatedFetch, requestOrThrow } from './operations/httpFailure';
 
 /**
  * SDAP API Client for file operations with SharePoint Embedded.
@@ -192,17 +192,15 @@ export class SdapApiClient {
     // `authenticatedFetch` (ADR-028), and a named failure instead of an unauthenticated request.
     const authFetch = requireAuthenticatedFetch(this.authenticatedFetch, 'getFileMetadata');
 
-    const response = await authFetch(
+    const response = await requestOrThrow(
+      authFetch,
       `${this.baseUrl}/api/obo/drives/${encodeURIComponent(driveId)}/items/${encodeURIComponent(itemId)}`,
       {
         method: 'GET',
         signal: AbortSignal.timeout(this.timeout),
-      }
+      },
+      'Failed to get file metadata'
     );
-
-    if (!response.ok) {
-      await throwHttpFailure(response, 'Failed to get file metadata');
-    }
 
     return await response.json();
   }

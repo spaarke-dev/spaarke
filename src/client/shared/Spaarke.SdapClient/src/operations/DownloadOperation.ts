@@ -1,5 +1,5 @@
 import { AuthenticatedFetchFn } from '../types';
-import { requireAuthenticatedFetch, throwHttpFailure } from './httpFailure';
+import { requireAuthenticatedFetch, requestOrThrow } from './httpFailure';
 
 export class DownloadOperation {
   constructor(
@@ -17,17 +17,15 @@ export class DownloadOperation {
   public async download(driveId: string, itemId: string, signal?: AbortSignal): Promise<Blob> {
     const authFetch = requireAuthenticatedFetch(this.authenticatedFetch, 'downloadFile');
 
-    const response = await authFetch(
+    const response = await requestOrThrow(
+      authFetch,
       `${this.baseUrl}/api/obo/drives/${encodeURIComponent(driveId)}/items/${encodeURIComponent(itemId)}/content`,
       {
         method: 'GET',
         signal: signal ?? AbortSignal.timeout(this.timeout),
-      }
+      },
+      'Download failed'
     );
-
-    if (!response.ok) {
-      await throwHttpFailure(response, 'Download failed');
-    }
 
     return await response.blob();
   }
