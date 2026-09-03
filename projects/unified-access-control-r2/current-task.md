@@ -16,7 +16,7 @@
 | **Nominal task** | **076** — record-keyed upload contract (`in-progress`, step 4 of 11). 076 was NOT this session's work, but this session did land 3 of its facts (250 MB threshold, conflictBehavior, U1/U2/U3 census). |
 | **This session did** | Fixed **4 of the 5 live route mismatches** (R14 · R10/R11 · R13 · R3) → deleted **47 verified-dead files** → **stopped a live data-loss bug** on every file upload (name collision silently overwrote) → removed a **4 MiB ceiling that no server ever enforced** |
 | **Status** | Working tree **CLEAN**, 0 unpushed, **0 behind master**. Branch is **fully merged** — `git rev-list --count origin/master..HEAD` = 0. Verify with `git log --oneline -3` rather than trusting a SHA written here (a commit cannot state its own hash; two attempts to do so were wrong within seconds). |
-| **Next Action** | ✅ **PR #932 MERGED** → master `3d65f7ebf` (0 pending / 0 failing, CLEAN; main repo + worktree synced). Since then, on branch and **UNPUSHED**: `33857412b` (AP-12), `b8260826e` (item 8), `920ba6b7a` (N-1 first half). **START AT § REMAINING WORK — item N-1 SECOND HALF** (point `FileUploadService` at `@spaarke/sdap-client`, delete U2's parallel `SdapApiClient`, update `pcf-safe.ts` + `document-upload/index.ts` exports, verify the wizard). Then items 5 → 7 → 6, with 4 needing an ENVIRONMENT query. ⚠️ **Owner committed to a real-Dataverse create+read smoke on `POST /api/v1/external/projects/{id}/documents` BEFORE the external SPA deploys** — it is unverified against real Dataverse and the SPA deploy is manual `workflow_dispatch`, which is the only reason merging first was safe. |
+| **Next Action** | ✅ **N-1 COMPLETE** — `047c9df8d` pushed (branch 0 unpushed, 0 behind master). **START AT § REMAINING WORK — item 5** (file tasks 093–096; read [`notes/plan-upload-path-decomposition-2026-08-31.md`](notes/plan-upload-path-decomposition-2026-08-31.md) FIRST, `ls tasks/` before numbering — highest is 092). Then 7 → 6. Item 4 needs an ENVIRONMENT query, not a repo search. ⚠️ Everything since #932 (`33857412b`, `b8260826e`, `920ba6b7a`, `047c9df8d`) is on the branch and **NOT yet in a PR** — open one before more work piles up. ⚠️ **Owner committed to a real-Dataverse create+read smoke on `POST /api/v1/external/projects/{id}/documents` BEFORE the external SPA deploys** — unverified against real Dataverse; the SPA deploy is manual `workflow_dispatch`, which is the only reason merging first was safe. |
 
 ### Commit map — this session (10 commits, ALL pushed; nothing at risk)
 
@@ -32,6 +32,17 @@
 | Explicit `conflictBehavior` mechanism (no behaviour change) | `9c208a7f2` |
 | 🔴 **Collision no longer overwrites** — `conflictBehavior=Fail` default | `93d5e673e` |
 | Typed `UploadNameConflictError` through BOTH upload clients | `086b9e9ce` |
+
+### 🔴 NEW (2026-09-03) — an injected function's CONTRACT is not its TYPE
+
+`AuthenticatedFetchFn` is typed `(url, init) => Promise<Response>`. Two production implementations
+satisfy that type and behave **oppositely** on failure: `@spaarke/auth.authenticatedFetch` THROWS
+`ApiError` and never returns a non-ok response; `external-spa`'s returns the raw response. Code
+written against one shape silently no-ops against the other — `@spaarke/sdap-client` had a whole
+layer of `response.ok` / `409` handling that could never run, including the typed error the
+collision dialog depends on. tsc cannot see this, and neither can a test whose only fake happens to
+match the shape the author had in mind. **When a function is injected, check what its real
+implementations DO on the failure path, not just what they are typed to return.**
 
 ### 🔴 The five things that will bite a fresh session
 
@@ -199,13 +210,15 @@ deletions, then live user-facing fixes, then planning artifacts, then the big ex
 | **N-2** encodeURIComponent | ✅ **VOID** | false claim — see the three-wrong-notes block above |
 | **N-3** FAILURE-MODES | ✅ `33857412b` | new **AP-12** "a comment becomes the constraint" + CHANGELOG + back-filled AP-11 TOC entry |
 | **8** bookkeeping | ✅ `b8260826e` | 012 → `completed-with-escalation` **with the residue stated**; **083 explicitly NOT closed** |
-| **N-1** one upload client | 🔄 **HALF DONE** `920ba6b7a` | ✅ shared client given working auth (4 sites), `TokenProvider` deleted, U2's failure copy + typed `SdapHttpError` ported ahead of the cut, `DriveItem.webUrl` widened, U1's raw fetch → `SdapApiClient.uploadFile()`. 🔲 **REMAINING**: point `FileUploadService` at the shared client, delete `services/document-upload/SdapApiClient.ts`, update `pcf-safe.ts` + `document-upload/index.ts` exports, re-verify the wizard. Kept separate because it changes `@spaarke/ui-components`' PUBLIC surface and the wizard's upload path landed the same day. ⚠️ `UploadOperation` still throws `UploadNameConflictError` on 409 **before** the generic failure — that ordering is load-bearing for the dialog; do not reorder. |
+| **N-1** one upload client | ✅ **DONE** `920ba6b7a` + `047c9df8d` | First half: shared client given working auth (4 sites), `TokenProvider` deleted, U2's failure copy + typed `SdapHttpError` ported ahead of the cut, `DriveItem.webUrl` widened, U1's raw fetch → `SdapApiClient.uploadFile()`. Second half: `FileUploadService` repointed, U2's 408-line `SdapApiClient.ts` DELETED, `pcf-safe.ts` + barrel + 4 dead request types cleaned, wizard orchestrator on `authenticatedFetch`. 🔴 **The second half could not land until a defect in the SURVIVING client was fixed** — an injected `authenticatedFetch` has TWO production shapes: `@spaarke/auth`'s **THROWS** `ApiError` on non-2xx (every code page + wizard) while `external-spa`'s **RETURNS** the raw response. Only the second was handled, so every `response.ok` / `status === 409` check was unreachable under the canonical one: `UploadNameConflictError` could not be produced, and repointing the wizard would have silently killed the collision dialog `09025ab39` shipped two days earlier — with nothing failing to compile and no test going red. `requestOrThrow` now normalizes both shapes across upload/download/delete/getFileMetadata; its `onStatus` hook fires before the generic translation in BOTH branches, so the 409-before-generic ordering still holds — **do not reorder it**. Also: `DriveItem.parentReferenceId` → **`parentId`** (the wire field; the old name was invented by the type and undefined on every response, and the wizard reads `parentId`), and `FileUploadRequest.fileName` removed rather than accepted-and-ignored. |
 | **4** `__SPAARKE_OPEN_CLOSE_PROJECT__` | 🔲 **NEEDS OWNER/ENV** | zero in-repo callers; it is an **org-side ribbon**, so a repo search cannot answer it. Query the ENVIRONMENT's ribbon definitions for the command. If genuinely uncalled, secure-project closure — the access-revocation cascade this project is about — may be unlaunchable. |
 | **5** file tasks 093–096 | 🔲 | read `notes/plan-upload-path-decomposition-2026-08-31.md` FIRST. 093 must NOT author a new Secure UI (exists ×2; task 068 owns it). `ls tasks/` before numbering — highest is **092**. |
 | **6** execute **076** | 🔲 | the container contract, ship-together client+BFF, own session. **Gates 083's OBO row.** |
 | **7** Q4 widening + `UploadFinalizationWorker.cs:611-629` | 🔲 | or associations silently drop. Note S13 in the 083 inventory is the same file and is **LIVE** with a client-supplied container via the job payload. |
 
-**Unpushed on branch**: `33857412b`, `b8260826e`, `920ba6b7a`. Working tree clean at checkpoint time.
+**Branch state (2026-09-03)**: `33857412b`, `b8260826e`, `920ba6b7a`, `047c9df8d` — all PUSHED, 0 unpushed, 0 behind
+master, working tree clean. **None of them are in a PR yet.** Verify with `git log --oneline -3` rather than trusting a
+SHA written here.
 
 ⚠️ **Owner-committed follow-up**: a real-Dataverse **create + read** smoke on
 `POST /api/v1/external/projects/{id}/documents` before the external SPA deploys. `CreateDocumentAsync`
