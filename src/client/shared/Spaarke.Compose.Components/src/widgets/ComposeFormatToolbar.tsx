@@ -147,6 +147,7 @@ import {
   Mail24Regular,
   DocumentWordRegular,
   PaintBrush24Regular,
+  History24Regular,
   Warning12Filled,
 } from '@fluentui/react-icons';
 
@@ -255,6 +256,20 @@ export interface ComposeFormatToolbarProps {
   onOpenInWordDesktop?: () => void;
   /** Disables the two Open-in-Word items (no persisted document, or an action is in flight). */
   wordActionsDisabled?: boolean;
+  /**
+   * R8 UAT item 8 — "Summarise changes" in the Word menu (owner placement call, 2026-09-03). Produces
+   * the plain-language change memo from the document's tracked changes.
+   *
+   * Deliberately NOT disabled while the editor is dirty, unlike `onApplyTemplate`. The two look alike
+   * — both read the PERSISTED bytes — but the intended answers differ: applying a template to the wrong
+   * base is silently destructive, so it is refused; an unsaved document here is recoverable by saving,
+   * so the flow returns `needs-save` and the HOST offers "There are unsaved changes — save before
+   * generating the summary?" (owner requirement). Disabling it instead would hide the affordance behind
+   * a state the user can trivially resolve, with no way to discover why.
+   *
+   * Rendered only when supplied.
+   */
+  onSummarizeChanges?: () => void;
 
   // ---- Track Changes (item 4, UAT round-4) — labelled toggle, rendered only when handler set ----
   /** True when the live Track Changes decoration overlay is on (user edits render as redlines). */
@@ -571,6 +586,7 @@ export function ComposeFormatToolbar(props: ComposeFormatToolbarProps): React.JS
     onOpenInWord,
     onOpenInWordDesktop,
     wordActionsDisabled,
+    onSummarizeChanges,
     hasLoadedBaseline,
     onSave,
     canSave,
@@ -695,7 +711,7 @@ export function ComposeFormatToolbar(props: ComposeFormatToolbarProps): React.JS
   const canDeleteColumn = canRunTableCommand(editor, 'deleteColumn');
   const canDeleteTable = canRunTableCommand(editor, 'deleteTable');
 
-  const showWordMenu = Boolean(onOpenInWord || onOpenInWordDesktop);
+  const showWordMenu = Boolean(onOpenInWord || onOpenInWordDesktop || onSummarizeChanges);
   const openInWordDisabled = controlDisabled || wordActionsDisabled === true;
   const saveDisabled = controlDisabled || canSave !== true || isSaving === true;
 
@@ -1144,6 +1160,27 @@ export function ComposeFormatToolbar(props: ComposeFormatToolbarProps): React.JS
                     data-testid="compose-format-apply-template"
                   >
                     Apply template
+                  </Button>
+                </Tooltip>
+              ) : null}
+              {/* R8 UAT item 8 — "Summarise changes" (owner placement call, 2026-09-03). It sits in the
+                  Word menu because that is how the task reads to a user: a reviewer edited this in Word
+                  and I want to know what they changed. The Save menu was the alternative and was
+                  rejected — the summary is save-GATED, but a precondition is not the same as being a
+                  save action, and filing it there would imply the summary is something a save produces. */}
+              {onSummarizeChanges ? (
+                <Tooltip content="Summarise the tracked changes made in Word" relationship="description" withArrow>
+                  <Button
+                    appearance="subtle"
+                    size="small"
+                    className={styles.wordMenuItem}
+                    icon={<History24Regular />}
+                    aria-label="Summarise the tracked changes made in Word"
+                    disabled={controlDisabled}
+                    onClick={onSummarizeChanges}
+                    data-testid="compose-format-summarize-changes"
+                  >
+                    Summarise changes
                   </Button>
                 </Tooltip>
               ) : null}

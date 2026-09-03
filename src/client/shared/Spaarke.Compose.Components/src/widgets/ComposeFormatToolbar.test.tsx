@@ -684,6 +684,66 @@ describe('ComposeFormatToolbar — Open in preview (UAT round 2 #5f: moved into 
 });
 
 // ---------------------------------------------------------------------------
+// 6a-2. Summarise changes (R8 UAT item 8 — owner placement call, 2026-09-03)
+// ---------------------------------------------------------------------------
+
+describe('ComposeFormatToolbar — Summarise changes (Word menu)', () => {
+  const wordProps = { onOpenInWord: jest.fn(), onOpenInWordDesktop: jest.fn() };
+
+  async function openWordMenu(user: ReturnType<typeof userEvent.setup>): Promise<void> {
+    await user.click(screen.getByTestId('compose-format-word-menu'));
+  }
+
+  it('is not rendered when no onSummarizeChanges handler is wired', async () => {
+    const user = userEvent.setup();
+    renderFormatToolbar({}, { props: { ...wordProps } });
+    await openWordMenu(user);
+    expect(screen.queryByTestId('compose-format-summarize-changes')).not.toBeInTheDocument();
+  });
+
+  it('renders inside the Word menu and fires onSummarizeChanges', async () => {
+    const user = userEvent.setup();
+    const onSummarizeChanges = jest.fn();
+    renderFormatToolbar({}, { props: { ...wordProps, onSummarizeChanges } });
+
+    await openWordMenu(user);
+    const item = screen.getByTestId('compose-format-summarize-changes');
+    expect(item).toHaveTextContent('Summarise changes');
+    await user.click(item);
+    expect(onSummarizeChanges).toHaveBeenCalledTimes(1);
+  });
+
+  it('stays ENABLED on a dirty document — unsaved state is answered by a prompt, not by hiding the control', async () => {
+    // The deliberate difference from "Apply template", which IS disabled while dirty. Applying a
+    // template to the wrong base is silently destructive; an unsaved document here is recoverable by
+    // saving, so the flow returns `needs-save` and the host offers to save. Disabling instead would
+    // hide the affordance behind a state the user can trivially resolve, with no way to discover why.
+    const user = userEvent.setup();
+    const onSummarizeChanges = jest.fn();
+    renderFormatToolbar({}, { props: { ...wordProps, onSummarizeChanges, isDirty: true } });
+
+    await openWordMenu(user);
+    expect(screen.getByTestId('compose-format-summarize-changes')).toBeEnabled();
+  });
+
+  it('opens the Word menu on its own when it is the only Word action wired', async () => {
+    // The menu's visibility is an OR over its items; a host that wires only this one must still get it.
+    const user = userEvent.setup();
+    renderFormatToolbar({}, { props: { onSummarizeChanges: jest.fn() } });
+
+    await openWordMenu(user);
+    expect(screen.getByTestId('compose-format-summarize-changes')).toBeInTheDocument();
+  });
+
+  it('ADR-021: renders under a dark theme', async () => {
+    const user = userEvent.setup();
+    renderFormatToolbar({}, { theme: webDarkTheme, props: { ...wordProps, onSummarizeChanges: jest.fn() } });
+    await openWordMenu(user);
+    expect(screen.getByTestId('compose-format-summarize-changes')).toBeInTheDocument();
+  });
+});
+
+// ---------------------------------------------------------------------------
 // 6b. Track Changes toggle (item 4, UAT round-4)
 // ---------------------------------------------------------------------------
 
