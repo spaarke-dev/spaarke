@@ -182,9 +182,13 @@ to be judged on their failure mode rather than their size:
 
 | Step | Work | Note |
 |---|---|---|
-| 1 | **Projection-emitted discriminator on the `<ol>`** | The one genuine design decision, unchanged by the experiment — it is what lets an editor-created list be numbered by the browser without fabricating a number for an unresolvable `numId` (F-3). |
-| 2 | **Native marker for editor-created lists only** | Delivers item 4 with no numbering engine and no corpus. Numbers are the browser's, and they are correct because the list is genuinely the browser's. |
-| 3 | **Item 3 (stale numbers on a loaded list after a structural edit)** | NOT covered by step 2 — projected lists keep suppressed markers and decoration numbers. Choose then between `appendTransaction` recomputation (client engine → corpus comes back, scoped to display) and a debounced reproject. The "briefly wrong number" objection to reproject is weaker here than the design note first judged, because a wrong number on screen no longer implies a wrong number in the file. |
+| 1 | ✅ **ALREADY SHIPPED** (`b323c2718`, 2026-09-02) — projection-emitted discriminator on the `<ol>` | `ComposeDocxProjectionBuilder.EnsureList` stamps `data-projected-list`; `composeNumberAtomExtension` registers it as a node attribute on `orderedList`/`bulletList` so it survives the `setContent`/`getHTML` round trip. |
+| 2 | ✅ **ALREADY SHIPPED** (same commit) — native marker for editor-created lists only | `ComposeEditor`'s `list-style-type: none` is scoped to `ol[data-projected-list]`. Verified 2026-09-03: server emit + client attribute + CSS scoping, 29 tests green across `ComposeEditor.projectedListMarker.test.tsx` + `ComposeEditor.numberAtom.test.tsx`. |
+| 3 | 🔲 **The whole remaining gap** — a new item added INSIDE a projected list, and stale labels after a structural edit | Already named as a deliberate KNOWN LIMIT in `ComposeEditor.tsx`'s own comment. Not a CSS change: a browser count inside a projected list WOULD contradict the document's numbering. Choose between `appendTransaction` recomputation (client engine → the corpus returns, but scoped to DISPLAY only) and a debounced reproject. The "briefly wrong number" objection is weaker than the design note first judged, because a wrong number on screen no longer implies a wrong number in the file. |
+
+> **Correction (2026-09-03)**: an earlier draft of this table listed steps 1 and 2 as pending. They were
+> shipped the day before, in the same UX backlog that fixed numbering *visibility*. Checked before building
+> rather than after — the residual is step 3 alone.
 
 ## Also verify first (U-0)
 
