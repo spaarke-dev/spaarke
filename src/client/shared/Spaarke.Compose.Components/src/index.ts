@@ -110,6 +110,18 @@ export type {
   AnchorValidationResult,
 } from './widgets/hooks/useAiApplyValidation';
 
+// R8 UAT item 8 — the on-demand change-summary flow: save gate → live pull-annotations → the
+// `changesText` producer → dispatch. Returns a CLOSED outcome set (`needs-save` / `no-changes` /
+// `dispatched` / `failed`) so the host renders a real answer for each; `no-changes` in particular must
+// be TOLD to the user, since the action was asked for rather than offered.
+export { useComposeChangeSummary } from './widgets/hooks/useComposeChangeSummary';
+export type {
+  ComposeChangeSummaryOutcome,
+  ComposeChangeSummaryTarget,
+  UseComposeChangeSummaryOptions,
+  UseComposeChangeSummaryResult,
+} from './widgets/hooks/useComposeChangeSummary';
+
 // -------------------------------------------------------------------------
 // Workspace-level widgets (Phase 7 task 091 — moved from SpaarkeAi)
 // -------------------------------------------------------------------------
