@@ -15,6 +15,7 @@ import { getBffBaseUrl } from "../config/runtimeConfig";
 import {
   REPORTING_EMBED_TOKEN_PATH,
   REPORTING_CATALOG_PATH,
+  REPORTING_STATUS_PATH,
 } from "../config/reportingConfig";
 import type { ExportFormat, ExportStatus, UserPrivilege, ReportCatalogItem } from "../types";
 
@@ -345,7 +346,21 @@ export async function saveAsReport(
 
 export async function fetchUserPrivilege(): Promise<ApiResult<{ privilege: UserPrivilege }>> {
   try {
-    const url = `${getBffBaseUrl()}/api/reporting/privilege`;
+    // Fixed 2026-09-02: this called GET /api/reporting/privilege, which has never existed —
+    // a guaranteed 404, so the hook always fell back to "Viewer" and Author/Admin controls
+    // were unreachable for everyone.
+    //
+    // No new endpoint was needed. GET /api/reporting/status ALREADY returns the resolved
+    // privilege: ReportingAuthorizationFilter maps the caller's Dataverse roles
+    // (sprk_ReportingAccess / sprk_ReportingAuthor / sprk_ReportingAdmin) to a
+    // ReportingPrivilegeLevel, and ReportingStatusResponse carries it as `privilege`
+    // ("Viewer" | "Author" | "Admin") — exactly this function's return shape.
+    //
+    // NOTE: ModuleGate already probes this same endpoint on mount and discards the body.
+    // Collapsing the two into one call means threading privilege through the gate into a
+    // context; deliberately not done here to keep this fix off a working auth gate. The
+    // duplicate request is one lightweight probe.
+    const url = `${getBffBaseUrl()}${REPORTING_STATUS_PATH}`;
     const response = await authenticatedFetch(url, { method: "GET" });
 
     if (!response.ok) {

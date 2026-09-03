@@ -93,7 +93,8 @@ public static class OBOEndpoints
 
                 // Stream directly to Graph SDK (no memory buffering)
                 var item = await GraphCallScope.Run(
-                    () => speFileStore.UploadSmallAsUserAsync(ctx, driveId, path, req.Body, ct),
+                    () => speFileStore.UploadSmallAsUserAsync(
+                        ctx, driveId, path, req.Body, ResolveConflictBehavior(req), ct),
                     "obo.upload.small");
 
                 logger.LogInformation("OBO upload successful - DriveItemId: {ItemId}", item?.Id);
@@ -193,7 +194,8 @@ public static class OBOEndpoints
 
                 // Stream directly to Graph SDK (no memory buffering)
                 var item = await GraphCallScope.Run(
-                    () => speFileStore.UploadSmallAsUserAsync(ctx, driveId, path, req.Body, ct),
+                    () => speFileStore.UploadSmallAsUserAsync(
+                        ctx, driveId, path, req.Body, ResolveConflictBehavior(req), ct),
                     "obo.upload.small");
 
                 logger.LogInformation("OBO record-keyed upload successful - DriveItemId: {ItemId}", item?.Id);
@@ -231,14 +233,19 @@ public static class OBOEndpoints
         .RequireRateLimiting("graph-write")
         .RequireAuthorization();
 
-        // POST: upload session for files >= 4 MiB, against the owning record.
+        // POST: upload session for files too large for a single PUT, against the owning record.
         //
-        // WHY THIS EXISTS (task 076). Files >= 4 MiB had NO working upload path at all: the small
-        // route is capped at PathValidator.SmallUploadMaxBytes (enforced in
-        // UploadSessionManager.UploadSmallAsUserAsync), and the chunked OBO pair that nominally served
-        // them was deleted earlier in this same task because it was dead by 404 — its client began
-        // with GET /api/obo/containers/{id}/drive, a route mapped nowhere. This restores the
-        // capability on the record-keyed contract rather than reviving the container-keyed one.
+        // WHY THIS EXISTS (task 076). The chunked OBO pair that nominally served large files was
+        // deleted earlier in this same task because it was dead by 404 — its client began with
+        // GET /api/obo/containers/{id}/drive, a route mapped nowhere. This restores the capability on
+        // the record-keyed contract rather than reviving the container-keyed one.
+        //
+        // ⚠️ Corrected 2026-09-02: this comment used to say files ">= 4 MiB had NO working upload
+        // path at all" because "the small route is capped at PathValidator.SmallUploadMaxBytes
+        // (enforced in UploadSessionManager.UploadSmallAsUserAsync)". Both halves were false — that
+        // guard was deleted by spaarkeai-compose-r8 task 015 and the constant was never enforced
+        // anywhere (it has since been deleted too). The simple PUT handles up to 250 MB, so the
+        // genuine threshold for needing THIS route is 250 MB, not 4 MiB.
         //
         // The response carries Graph's own upload-session URL, which the client then PUTs chunks to
         // DIRECTLY — exactly as the previous client did, and as Graph's large-file protocol requires.
@@ -364,10 +371,11 @@ public static class OBOEndpoints
         // same live UploadSessionManager.CreateUploadSessionAsUserAsync the deleted pair used, minus
         // the GET /api/obo/containers/{id}/drive hop that never existed.
         //
-        // ⚠️ Still true on the CLIENT: no shipped client calls the new route yet, so >= 4 MiB uploads
-        // continue to fail — now with an accurate message naming the route
-        // (Spaarke.SdapClient UploadOperation.LARGE_FILE_UNSUPPORTED) instead of a misleading
-        // 'Failed to get container drive'. The client cutover is blocked on the §5 escalation in
+        // ⚠️ CLIENT state (updated 2026-09-02): no shipped client calls the new route yet, so uploads
+        // ABOVE 250 MB still fail — with an accurate size message (Spaarke.SdapClient
+        // UploadOperation.fileTooLarge) instead of a misleading 'Failed to get container drive'.
+        // Between 4 MiB and 250 MB now WORKS: the client's 4 MiB throw was removed, having rested on
+        // a server cap that did not exist. The client cutover is blocked on the §5 escalation in
         // projects/unified-access-control-r2/notes/task-076-record-keyed-upload-contract.md.
         //
         // Both routes carried Pending waivers in RouteAuthorizationGuardTests owned by "073/075/076";
@@ -443,6 +451,39 @@ public static class OBOEndpoints
     /// URL WITHOUT <c>encodeURIComponent</c>, so a '/' in a user's file name silently becomes extra route
     /// segments there. After this change that request gets a clean 400 instead of minting folders.</para>
     /// </remarks>
+    /// <summary>
+    /// Resolves the name-collision behaviour for an upload from the <c>?conflictBehavior=</c> query
+    /// parameter, defaulting to <see cref="ConflictBehavior.Fail"/>.
+    /// </summary>
+    /// <remarks>
+    /// <para><b>Fail is the default deliberately, and it is a behaviour CHANGE.</b> Previously these
+    /// routes inherited Graph's implicit PUT default of <c>replace</c>, so uploading a file whose name
+    /// already existed silently overwrote the stored bytes — and the failure the user actually saw came
+    /// later and from somewhere else: the follow-on <c>sprk_document</c> insert violated the alternate
+    /// key on the SPE item id and Dataverse returned a 412 titled "Duplicate Record" with an
+    /// unsubstituted <c>{1}</c> placeholder. That reads as duplicate detection but is data loss
+    /// followed by a confusing error. With <c>fail</c>, Graph returns 409 and the existing file is
+    /// untouched.</para>
+    ///
+    /// <para>Clients that have ASKED the user what to do pass their choice back explicitly:
+    /// <c>?conflictBehavior=rename</c> (keep both — Graph stores under a non-colliding name) or
+    /// <c>?conflictBehavior=replace</c> (save as a new version — SharePoint retains the prior content
+    /// as a version, so it stays recoverable). There is no separate "replace and discard" value: at the
+    /// Graph level that is the same call as <c>replace</c>, and a user who genuinely wants the old
+    /// document gone deletes it and uploads fresh.</para>
+    ///
+    /// <para>Unrecognised values fall back to <c>replace</c> via
+    /// <c>ConflictBehaviorExtensions.ParseConflictBehavior</c>, so this only reads the parameter when
+    /// it is actually present — an absent parameter must mean <c>fail</c>, not the parser's default.</para>
+    /// </remarks>
+    private static ConflictBehavior ResolveConflictBehavior(HttpRequest req)
+    {
+        var raw = req.Query["conflictBehavior"].ToString();
+        return string.IsNullOrWhiteSpace(raw)
+            ? ConflictBehavior.Fail
+            : ConflictBehaviorExtensions.ParseConflictBehavior(raw);
+    }
+
     private static (bool ok, string? error) ValidatePathForOBO(string path)
     {
         if (string.IsNullOrWhiteSpace(path)) return (false, "path is required");

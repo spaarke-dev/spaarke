@@ -7,7 +7,7 @@ import {
   IndexFileResult,
 } from './types';
 import { TokenProvider } from './auth/TokenProvider';
-import { UploadOperation } from './operations/UploadOperation';
+import { UploadOperation, type ConflictBehaviorOption } from './operations/UploadOperation';
 import { DownloadOperation } from './operations/DownloadOperation';
 import { DeleteOperation } from './operations/DeleteOperation';
 import { IndexFileOperation } from './operations/IndexFileOperation';
@@ -113,19 +113,34 @@ export class SdapApiClient {
     options?: {
       onProgress?: (percent: number) => void;
       signal?: AbortSignal;
+      /**
+       * Name-collision behaviour. Omit on the FIRST attempt — the BFF defaults to `fail`, so a
+       * collision throws `UploadNameConflictError` with the existing file untouched. Pass
+       * `'rename'` or `'replace'` only when retrying after the user has chosen.
+       */
+      conflictBehavior?: ConflictBehaviorOption;
     }
   ): Promise<DriveItem> {
-    // Matches the server's PathValidator.SmallUploadMaxBytes, enforced at
-    // UploadSessionManager.cs:131. Kept as an explicit client-side check so the caller gets an
-    // accurate message instead of a server 400 mid-stream.
-    const SMALL_FILE_THRESHOLD = 4 * 1024 * 1024; // 4 MiB
+    // Graph's simple `PUT .../content` boundary, which is what uploadSmall actually uses.
+    //
+    // Corrected 2026-09-02: this was 4 MiB, described as matching
+    // "PathValidator.SmallUploadMaxBytes, enforced at UploadSessionManager.cs:131". Neither half was
+    // true. The server guard at that site was DELETED by spaarkeai-compose-r8 task 015 (FR-S08)
+    // because it enforced a Graph limit that had not existed since October 2023, and
+    // PathValidator.SmallUploadMaxBytes is referenced by NOTHING but a comment — it is not enforced
+    // anywhere. So this client was the only thing rejecting >4 MiB files, on the strength of a
+    // server cap that is not there.
+    //
+    // 250 MB is the real, current boundary for `PUT /drives/{d}/root:/{path}:/content` (4 MB ->
+    // 25 MB -> 256 MB -> 250 MB across Oct 2023; stable since) and SharePoint Embedded documents the
+    // same figure for containers. Verified against MS Learn + the docs source repos, 2026-08-20:
+    // src/server/api/Sprk.Bff.Api/.claude/agent-memory/researcher/graph-driveitem-upload-facts.md
+    const SIMPLE_UPLOAD_MAX_BYTES = 250 * 1024 * 1024; // 250 MB — Graph simple-PUT ceiling
 
-    if (file.size >= SMALL_FILE_THRESHOLD) {
-      // Fails HONESTLY. Before 2026-08-27 this branch called uploadChunked, which threw
-      // 'Failed to get container drive' because the route it depended on does not exist — so large
-      // uploads have never worked, and the old error pointed at the wrong thing. See
-      // UploadOperation.LARGE_FILE_UNSUPPORTED and task 076's notes.
-      throw new Error(UploadOperation.LARGE_FILE_UNSUPPORTED);
+    if (file.size > SIMPLE_UPLOAD_MAX_BYTES) {
+      // Still fails honestly, but now only where Graph itself would refuse. Above this a caller
+      // genuinely needs a resumable upload session, which this client is not wired to.
+      throw new Error(UploadOperation.fileTooLarge(file.size, SIMPLE_UPLOAD_MAX_BYTES));
     }
 
     return await this.uploadOp.uploadSmall(containerId, file, options);

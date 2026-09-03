@@ -8,7 +8,11 @@
 Creating or modifying a PCF control's lifecycle (init, updateView, destroy).
 
 ## Read These Files
-1. `src/client/pcf/UniversalDatasetGrid/control/index.ts` — Dataset control exemplar (ReactControl with updateView)
+1. `src/client/pcf/VisualHost/control/index.ts` — ReactControl exemplar (init / updateView / destroy lifecycle)
+   <!-- Corrected 2026-09-01: was `UniversalDatasetGrid/control/index.ts`, a DELETED control. For
+        list/dataset UX do NOT build a dataset PCF at all — use `<DataGrid configId=… />` from
+        @spaarke/ui-components (docs/architecture/SPAARKE-DATAGRID-FRAMEWORK-ARCHITECTURE.md). Other live
+        entry points if VisualHost is a poor fit: MatterHeader, RecordHeader, EmailProcessingMonitor. -->
 2. `src/client/pcf/UniversalQuickCreate/control/index.ts` — Standard control exemplar (field-bound)
 
 ## Constraints

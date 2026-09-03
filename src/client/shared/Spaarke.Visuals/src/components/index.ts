@@ -23,7 +23,6 @@ export * from './DueDateCardList';
 export * from './ErrorBoundary';
 export * from './EventDueDateCard';
 export * from './GaugeVisual';
-export * from './GradeMetricCard';
 export * from './HorizontalStackedBar';
 export * from './LineChart';
 export * from './MetricCardMatrix';
