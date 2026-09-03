@@ -1822,6 +1822,34 @@ public class ComposeService : IComposeService
                 request.SummaryPage.FlaggedSections.Count, request.SummaryPage.OverallRisk, request.SessionId);
         }
 
+        // spaarkeai-compose-r8 (UAT item 8): the "Include document revision report" appendix — the
+        // plain-language "we made these edits, here is what they do" memo, appended as real body content
+        // so it prints and survives to PDF (metadata would not). Same shipped AppendSection path as the
+        // Summary Page above and placed immediately after it, so when a save carries both, the ordering is
+        // deterministic rather than incidental. Pure + deterministic, no second LLM call.
+        //
+        // The generator returns EMPTY when there is nothing to report, and appending then would leave a
+        // heading with nothing under it — the document-shaped version of the phantom change the client
+        // producer refuses to dispatch. So the emptiness is checked here, not assumed away.
+        if (request.RevisionReport is not null)
+        {
+            var reportBlocks = ComposeRevisionReportGenerator.Build(request.RevisionReport);
+            if (reportBlocks.Count > 0)
+            {
+                contentToPersist = _documentRenderer.AppendSection(contentToPersist, reportBlocks);
+
+                _logger.LogInformation(
+                    "Compose save: appended Document Revision Report ({ChangeCount} itemised change(s)) to the document (session={SessionId}).",
+                    request.RevisionReport.Changes?.Count ?? 0, request.SessionId);
+            }
+            else
+            {
+                _logger.LogInformation(
+                    "Compose save: Document Revision Report requested but the ledgered result carried nothing to report — nothing appended (session={SessionId}).",
+                    request.SessionId);
+            }
+        }
+
         // Task 012 (the client cutover): on a render-path save, project the FINAL persisted bytes back
         // into the canonical model and return it — the client adopts it as its new retained loaded model
         // and re-baselines its edit snapshot, so the NEXT dirty save merges against the just-persisted

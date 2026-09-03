@@ -911,6 +911,23 @@ public sealed record SaveComposeDocumentRequest
     public NdaReviewSummaryPageInput? SummaryPage { get; init; }
 
     /// <summary>
+    /// spaarkeai-compose-r8 (UAT item 8, "Include document revision report"): optional Document Revision
+    /// Report content, deterministically derived from the ONE ledgered
+    /// <c>compose-summarize-word-changes</c> result (<c>{summary, changes[]}</c>) plus the document
+    /// identity the report is scoped to — NO second LLM call (see
+    /// <see cref="ComposeRevisionReportGenerator"/>). When present, <see cref="SaveAsync"/> appends it as
+    /// a page-broken, non-tracked section at the END of <c>contentToPersist</c> via
+    /// <see cref="ComposeDocumentRenderer.AppendSection"/> — the SAME shipped path
+    /// <see cref="SummaryPage"/> uses, not a parallel mechanism.
+    /// <para>
+    /// Null/absent (every ordinary Compose save) → no report appended, unchanged behavior. Supplying an
+    /// input the generator finds empty (no summary AND no changes) also appends nothing: a report over no
+    /// changes is the fabricated-change failure the upstream producer refuses to enable.
+    /// </para>
+    /// </summary>
+    public ComposeRevisionReportInput? RevisionReport { get; init; }
+
+    /// <summary>
     /// G7 (FR-06, task 022): a CLIENT-MINTED stable key for a TRANSIENT (not-yet-promoted) Compose draft,
     /// minted once (<c>crypto.randomUUID()</c>) when the draft is mounted and sent on every create-on-save.
     /// It is the durable dedup identity that fixes the 8-duplicate defect: a transient draft has no SPE
