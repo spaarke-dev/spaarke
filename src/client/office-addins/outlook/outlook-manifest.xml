@@ -4,13 +4,13 @@
   xmlns:bt="http://schemas.microsoft.com/office/officeappbasictypes/1.0"
   xmlns:mailappor="http://schemas.microsoft.com/office/mailappversionoverrides/1.0" xsi:type="MailApp">
   <Id>5e4d66d0-2603-44ea-acbc-400d3b881c90</Id>
-  <Version>1.0.21.0</Version>
+  <Version>1.0.22.0</Version>
   <ProviderName>Spaarke</ProviderName>
   <DefaultLocale>en-US</DefaultLocale>
-  <DisplayName DefaultValue="Spaarke Outlook Add-in"/>
+  <DisplayName DefaultValue="Spaarke Outlook"/>
   <Description DefaultValue="Save and share emails with Spaarke DMS"/>
-  <IconUrl DefaultValue="https://icy-desert-0bfdbb61e.6.azurestaticapps.net/assets/icon-32.png"/>
-  <HighResolutionIconUrl DefaultValue="https://icy-desert-0bfdbb61e.6.azurestaticapps.net/assets/icon-64.png"/>
+  <IconUrl DefaultValue="https://icy-desert-0bfdbb61e.6.azurestaticapps.net/assets/icon-64.png"/>
+  <HighResolutionIconUrl DefaultValue="https://icy-desert-0bfdbb61e.6.azurestaticapps.net/assets/icon-128.png"/>
   <SupportUrl DefaultValue="https://spaarke.com/support"/>
   <AppDomains>
     <AppDomain>https://icy-desert-0bfdbb61e.6.azurestaticapps.net</AppDomain>

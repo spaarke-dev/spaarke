@@ -8,13 +8,13 @@
 
   <!-- Basic Identity -->
   <Id>b3965ea0-6942-4f17-81b3-2c645bd05ebf</Id>
-  <Version>1.0.5.0</Version>
+  <Version>1.0.6.0</Version>
   <ProviderName>Spaarke</ProviderName>
   <DefaultLocale>en-US</DefaultLocale>
   <DisplayName DefaultValue="Spaarke Word"/>
   <Description DefaultValue="Save and share documents with Spaarke DMS"/>
-  <IconUrl DefaultValue="https://localhost:3000/assets/icon-32.png"/>
-  <HighResolutionIconUrl DefaultValue="https://localhost:3000/assets/icon-64.png"/>
+  <IconUrl DefaultValue="https://localhost:3000/assets/icon-64.png"/>
+  <HighResolutionIconUrl DefaultValue="https://localhost:3000/assets/icon-128.png"/>
   <SupportUrl DefaultValue="https://spaarke.com/support"/>
 
   <!-- Domains -->

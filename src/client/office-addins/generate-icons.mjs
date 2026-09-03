@@ -23,8 +23,10 @@ const svg = readFileSync(join(assetsDir, 'spaarke-logo.svg'));
 
 const TRANSPARENT = { r: 0, g: 0, b: 0, alpha: 0 };
 
-/** Render the logo fit-contained + centered on a transparent `size`×`size` PNG with padding. */
-async function render(size, outName, padRatio = 0.14) {
+/** Render the logo fit-contained + centered on a transparent `size`×`size` PNG with padding.
+ *  Padding is minimal (4%) so the mark fills the tile — Office renders ribbon/app-list icons at a
+ *  fixed slot size, so a large mark inside the square is the only lever on apparent size. */
+async function render(size, outName, padRatio = 0.04) {
   const inner = Math.max(1, Math.round(size * (1 - padRatio * 2)));
   const logo = await sharp(svg, { density: 512 })
     .resize(inner, inner, { fit: 'contain', background: TRANSPARENT })
