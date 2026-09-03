@@ -11,7 +11,8 @@
 | Field | Value |
 |---|---|
 | **Where we are** | **R8's own gates are CLOSED.** Track A passed (owner UAT: saved, reopened, edits held). `section-break-flattened` **ACCEPTED** — the signed residual-loss set is now **six rows**. The project has since absorbed an owner-approved **UX backlog**, most of which is now done and deployed. |
-| **Branch** | `work/spaarkeai-compose-r8` @ **`0f5525bea`** — **pushed, 0 unpushed, tree clean.** PR **#924** retitled to cover the whole release; left as a **DRAFT deliberately** (in-flight UX work — do not promote to ready until the backlog below is finished or the owner asks). |
+| **Branch** | `work/spaarkeai-compose-r8` @ **`3073b3743`** — ⚠️ **4 commits UNPUSHED** (2026-09-03 session: `5e4176da6` numbering experiment · `3969c57d9` changesText producer · `400819ecb` revision-report appendix · `3073b3743` change-summary flow). Tree clean. PR **#924** left a **DRAFT deliberately**. |
+| **2026-09-03 session** | **Numbering RE-SCOPED to display-only** (experiment run, see Next Action). **Item 8 built server-side + client-flow**, NOT yet triggerable — see §U8-BUILD. Owner decisions taken this session: numbering lands in R8; item 8 is an on-demand **report artifact** (not a panel), **appendix first**, live pull, save-gated. |
 | **Next Action** | **1) Numbering — RE-SCOPED 2026-09-03, do NOT build the parity corpus first.** The gating experiment the design note demanded has been RUN (two seam tests + negative control): **an editor-created list already saves as a genuinely numbered, fully resolvable list** and the read side computes "1." for it. Items 3 + 4 are **DISPLAY defects only**; there is no write-path hole, so no second numbering engine is needed for saves to be correct and the corpus is no longer a prerequisite. Read the `✅ EXPERIMENT RUN 2026-09-03` block + `Revised sequence` in `notes/uat/numbering-editing-design-options.md` before scoping. Remaining: the `<ol>` discriminator (F-3), native marker for editor-born lists, then item 3's stale-decoration question. **2) Item 8** — see §U8; needs a `changesText` producer + trigger, NOT a wiring job. **3) Editable spacing** (UAT item 6). |
 | **Suite** | Client **1,406/1,406** · Compose server **1,948/1,948** · ArchTests **187/187** · SprkChat **376/376** · build 0 errors — **all re-run AFTER the 24-commit master merge**, not carried over from before it |
 | **Deployed** | `spaarkedev1`, BFF + `sprk_spaarkeai` **together** (NFR-05). BFF **45.43 MB** vs same-day fresh master **45.42** = **+0.01**. `/healthz` 200. |
@@ -54,6 +55,48 @@
 3. 🔲 **Editable spacing** — model + renderer. **The risk that keeps it out of a UX task**: the moment the
    model owns spacing, `InheritProperties` must change, and getting it wrong flattens spacing on every
    edited paragraph — the `paragraph-style-flattened` defect replayed.
+
+---
+
+## U8-BUILD. Item 8 as BUILT (2026-09-03) — read this before §U8's history
+
+**Owner reframe that shaped everything**: the change summary is **not a UI panel**. It is a **report
+artifact** — *"we made edits to the document, here is a summary of the changes"* — that must travel with
+the document, print, and reach PDF. Owner chose: **on-demand** (not automatic), **live pull** (not the
+load-time snapshot), **save-gated**, **appendix first** (standalone `.docx` later).
+
+**Metadata was considered and REJECTED for this purpose** (do not re-propose it as the primary form).
+Custom document properties / custom XML parts *do* survive Compose's save — verified: `RenderIntoCarrier`
+mutates only the main document part, so package-level parts are never parsed. But metadata is invisible:
+no print, no PDF, no recipient will find it. It stays the right instrument for a later
+regenerate-and-replace pointer.
+
+| Piece | State |
+|---|---|
+| `buildComposeChangesText` producer + `hasComposeChangeData` (client) | ✅ `3969c57d9` — 14 tests, 2 controls |
+| `ComposeRevisionReportGenerator` + `SaveComposeDocumentRequest.RevisionReport` (server) | ✅ `400819ecb` — 8 seam tests (57 w/ corpus) + 2 save-wiring tests, 3 controls |
+| `useComposeChangeSummary` flow — save gate → live pull → produce → dispatch (client) | ✅ `3073b3743` — 8 tests, 2 controls |
+| **The trigger + host rendering of the 4 outcomes** | 🔲 **NOT BUILT — this is the remaining work** |
+| **The "Include document revision report" save toggle** | 🔲 not built |
+
+**The pattern was already shipped twice** and is reused, not reinvented: `ComposeSummaryPageGenerator` +
+`ComposeDocumentRenderer.AppendSection` (append INTO a document, opt-in via `request.SummaryPage`) and
+`ReviewMemoDocumentBuilder` + `SynthesizeDocument` (standalone `.docx` from a persisted record). The
+revision report is the first one's sibling. `ReviewMemoDocumentBuilder`'s **render-from-persisted** rule is
+the answer to "the separate document must stay linked": persist once, render into appendix / `.docx` /
+email body from the same record.
+
+**Constraints that are now enforced by tests — do not relax without reading the control:**
+- The report is **style- and numbering-INDEPENDENT** (plain paragraphs, literal `•`, never `w:numPr`). A
+  corpus-wide test asserts numbering + styles parts are byte-identical after the append. The control
+  proved a "make the bullets proper list items" change **renumbers the host agreement**.
+- **Empty in ⇒ nothing appended.** Deliberately unlike the Summary Page (a clean NDA is itself a finding).
+- The **scope line is always emitted**, stating unrecorded fields as unknown — a missing version reads as
+  "current", the exact wrong impression, because the pull reads STORED bytes.
+- The hook **never auto-saves**; its surface is exactly `{running, requestSummary}`, pinned by a test.
+
+**Known gap inherited, not introduced**: the sibling `SummaryPage` request field has **no** test on its
+`SaveAsync` call site. `RevisionReport`'s call site now does (`ComposeServiceImportedRenderSaveTests`).
 
 ---
 
