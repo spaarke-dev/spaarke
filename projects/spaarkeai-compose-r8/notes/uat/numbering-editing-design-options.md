@@ -114,6 +114,35 @@ is small. Not numbered → the round trip has a real hole and the pre-correction
 **Run this before scoping anything else**; it is the highest-information hour available and it decides
 whether the rest is small or medium.
 
+### ✅ EXPERIMENT RUN 2026-09-03 — the claim is CONFIRMED. The document is already right.
+
+Run as two seam tests over real bytes rather than as a Word screenshot, because the answer re-scopes the
+whole project and a screenshot cannot be re-run in CI:
+`ComposeMergeSeamTests.Merge_ListCreatedInEditor_*` (`tests/integration/seam/Compose/`).
+
+| Case | Result |
+|---|---|
+| New list in a carrier with **no numbering part at all** | `w:numPr` authored · numbering part created · `numId → w:num → w:abstractNum → ilvl 0` resolves the whole way · read-back computes **"1."** |
+| New list **beside an imported list** (carrier `numId` 5) | Gets its **own** instance (≠ 5) and restarts at **1.** |
+
+**Negative control run** (per this project's method rules): seeding `if (block.NumId is not null)` in front
+of `BuildListItem`'s `numPr` append — i.e. simulating exactly the hole being tested for — turns both tests
+red, plus the pre-existing section-3 continuation test. Reverted; renderer diff empty; suite green.
+
+**Therefore UAT item 4 is a DISPLAY defect only.** A list created in the editor saves as a genuinely
+numbered list that Word will number correctly. The user simply cannot see a number *while editing*.
+
+**Item 3 is the same class**, by the merge contract rather than by separate measurement: untouched blocks
+are cloned verbatim and keep their own `numPr`, so after a deletion Word renumbers the saved document
+correctly — it is the editor's load-time decoration snapshot that goes stale, not the file.
+
+**What this deletes from the plan below.** Steps 1–3 of the suggested sequence were sized against the write
+path. The write path is done. There is no OOXML authoring work, and therefore **no second numbering engine
+is required to make saves correct** — which is what the parity corpus existed to police. The corpus becomes
+optional-and-scoped-to-display rather than a prerequisite, and the remaining question is only the display
+one already stated above: how to distinguish "editor-created, may carry a native marker" from "projected but
+unresolvable, must stay bare" (invariant F-3). **Do not build the corpus before re-reading this block.**
+
 ### The one genuine design decision
 
 Un-suppressing the native marker for editor-created lists collides with **invariant F-3**: a projected
@@ -136,12 +165,26 @@ need.
 
 ## Suggested sequence
 
+> ⚠️ **Superseded by the 2026-09-03 experiment above** — steps 1–3 were sized against a write-path hole
+> that does not exist. Kept for the reasoning; do not execute as written.
+
 | Step | Work | Why this order |
 |---|---|---|
 | 1 | **Numbering parity corpus + drift detector** | Build the forcing function *before* the second engine, not after. Reuses the #699 pattern wholesale. |
 | 2 | **Client numbering engine + `appendTransaction`** | Items 3 + 4 *visually* resolved; gated by step 1 from day one. |
 | 3 | **Content-model list membership + `w:numPr` authoring/removal** | The real fidelity work; extends the residual-loss parity test. |
 | 4 | **Reconcile-on-reproject** | Server result adopted over the client prediction; proves the client is a predictor, not a fork. |
+
+### Revised sequence (2026-09-03, post-experiment)
+
+The work is now display-only, and that changes which option wins. Both remaining shapes are small enough
+to be judged on their failure mode rather than their size:
+
+| Step | Work | Note |
+|---|---|---|
+| 1 | **Projection-emitted discriminator on the `<ol>`** | The one genuine design decision, unchanged by the experiment — it is what lets an editor-created list be numbered by the browser without fabricating a number for an unresolvable `numId` (F-3). |
+| 2 | **Native marker for editor-created lists only** | Delivers item 4 with no numbering engine and no corpus. Numbers are the browser's, and they are correct because the list is genuinely the browser's. |
+| 3 | **Item 3 (stale numbers on a loaded list after a structural edit)** | NOT covered by step 2 — projected lists keep suppressed markers and decoration numbers. Choose then between `appendTransaction` recomputation (client engine → corpus comes back, scoped to display) and a debounced reproject. The "briefly wrong number" objection to reproject is weaker here than the design note first judged, because a wrong number on screen no longer implies a wrong number in the file. |
 
 ## Also verify first (U-0)
 
