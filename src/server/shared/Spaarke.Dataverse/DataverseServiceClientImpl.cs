@@ -908,6 +908,12 @@ public class DataverseServiceClientImpl : IDataverseService, IDisposable
             document["sprk_project"] = new EntityReference("sprk_project", request.ProjectLookup.Value);
         if (request.InvoiceLookup.HasValue)
             document["sprk_invoice"] = new EntityReference("sprk_invoice", request.InvoiceLookup.Value);
+        // Columns verified present on sprk_document against live Dataverse metadata 2026-09-03; they
+        // predate this code, which is why a save filed to one produced no error AND no association.
+        if (request.WorkAssignmentLookup.HasValue)
+            document["sprk_workassignment"] = new EntityReference("sprk_workassignment", request.WorkAssignmentLookup.Value);
+        if (request.EventLookup.HasValue)
+            document["sprk_event"] = new EntityReference("sprk_event", request.EventLookup.Value);
 
         // ═══════════════════════════════════════════════════════════════════════════
         // Search Index Tracking Fields (RAG/Semantic Search)

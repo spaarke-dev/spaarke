@@ -1,5 +1,5 @@
-import { DriveItem } from '../types';
-import { TokenProvider } from '../auth/TokenProvider';
+import { DriveItem, AuthenticatedFetchFn } from '../types';
+import { requireAuthenticatedFetch, requestOrThrow } from './httpFailure';
 
 // `UploadSession` and the 320 KB CHUNK_SIZE constant were dropped from this file on 2026-08-27 with
 // the chunked path (task 076). The `UploadSession` TYPE is deliberately left in ../types and in the
@@ -46,7 +46,7 @@ export class UploadOperation {
   constructor(
     private readonly baseUrl: string,
     private readonly timeout: number,
-    private readonly tokenProvider: TokenProvider
+    private readonly authenticatedFetch?: AuthenticatedFetchFn
   ) {}
 
   /**
@@ -66,39 +66,44 @@ export class UploadOperation {
       conflictBehavior?: ConflictBehaviorOption;
     }
   ): Promise<DriveItem> {
-    const token = await this.tokenProvider.getToken();
+    // Auth comes from `authenticatedFetch` (@spaarke/auth, ADR-028) — the same contract indexFile
+    // uses. It replaced a `TokenProvider` shim that returned '' and made this request omit the
+    // Authorization header entirely: an unauthenticated call to a RequireAuthorization BFF, which
+    // could only ever 401. It went unnoticed because this method has no production callers yet.
+    const authFetch = requireAuthenticatedFetch(this.authenticatedFetch, 'uploadFile');
 
     // Report initial progress
     options?.onProgress?.(0);
 
     const query = options?.conflictBehavior ? `?conflictBehavior=${encodeURIComponent(options.conflictBehavior)}` : '';
 
-    const response = await fetch(
-      `${this.baseUrl}/api/obo/containers/${containerId}/files/${encodeURIComponent(file.name)}${query}`,
+    // `requestOrThrow` rather than a bare `authFetch` + `response.ok` check: the canonical injected
+    // fetch (`@spaarke/auth`) THROWS on non-2xx and never returns the response, so an inline
+    // `response.status === 409` test never runs under it. See requestOrThrow's own note.
+    const response = await requestOrThrow(
+      authFetch,
+      `${this.baseUrl}/api/obo/containers/${encodeURIComponent(containerId)}/files/${encodeURIComponent(file.name)}${query}`,
       {
         method: 'PUT',
         headers: {
-          ...(token ? { Authorization: `Bearer ${token}` } : {}),
           'Content-Type': 'application/octet-stream',
-          'Content-Length': file.size.toString(),
+          // Content-Length is deliberately NOT set: it is a forbidden header name, so the browser
+          // ignores it and computes the real value from the body.
         },
         body: file,
         signal: options?.signal ?? AbortSignal.timeout(this.timeout),
+      },
+      'Upload failed',
+      status => {
+        // A name collision is a DISTINCT, RECOVERABLE outcome, not a generic failure. It must be
+        // distinguishable by type rather than by string-matching a message, so the UI can offer the
+        // rename / new-version choice. Nothing was overwritten to get here — the BFF sends
+        // conflictBehavior=fail unless the caller says otherwise.
+        if (status === 409) {
+          throw new UploadNameConflictError(file.name);
+        }
       }
     );
-
-    // A name collision is a DISTINCT, RECOVERABLE outcome, not a generic failure. It must be
-    // distinguishable by type rather than by string-matching a message, so the UI can offer the
-    // rename / new-version choice. Nothing was overwritten to get here — the BFF sends
-    // conflictBehavior=fail unless the caller says otherwise.
-    if (response.status === 409) {
-      throw new UploadNameConflictError(file.name);
-    }
-
-    if (!response.ok) {
-      const error = await this.parseError(response);
-      throw new Error(`Upload failed: ${error}`);
-    }
 
     const result = await response.json();
 
@@ -146,14 +151,5 @@ export class UploadOperation {
       `upload. Files larger than ${mb(maxBytes)} need a resumable upload session, which this ` +
       `client does not yet support. Try splitting the file or compressing it.`
     );
-  }
-
-  private async parseError(response: Response): Promise<string> {
-    try {
-      const error = await response.json();
-      return error.detail || error.title || response.statusText;
-    } catch {
-      return response.statusText;
-    }
   }
 }

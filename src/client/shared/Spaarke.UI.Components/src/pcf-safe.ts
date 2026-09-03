@@ -53,9 +53,13 @@ export {
   DocumentRecordService,
   MultiFileUploadService,
   NavMapClient,
-  SdapApiClient,
 } from './services/document-upload';
-export type { SdapApiClientOptions, OnUnauthorizedCallback } from './services/document-upload';
+// `SdapApiClient` + `SdapApiClientOptions` + `OnUnauthorizedCallback` were REMOVED from this
+// surface 2026-09-03. They belonged to this package's parallel upload client, which is deleted —
+// `FileUploadService` now takes the one from `@spaarke/sdap-client`, so consumers construct it as:
+//
+//     import { SdapApiClient } from '@spaarke/sdap-client';
+//     new FileUploadService(new SdapApiClient({ baseUrl, authenticatedFetch }), logger);
 
 // ─── Types (no React dependency) ────────────────────────────────────────────
 export type { MiniGraphNode, MiniGraphEdge } from './types/MiniGraphTypes';

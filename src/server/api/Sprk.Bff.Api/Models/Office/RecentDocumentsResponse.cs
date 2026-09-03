@@ -221,5 +221,16 @@ public enum AssociationType
     /// <summary>
     /// Contact (standard Dataverse contact).
     /// </summary>
-    Contact
+    Contact,
+
+    /// <summary>
+    /// Work assignment (sprk_workassignment). Added 2026-09-03 with the Q4 widening — the save
+    /// endpoint now accepts this association type, so the response shape has to be able to name it.
+    /// </summary>
+    WorkAssignment,
+
+    /// <summary>
+    /// Event (sprk_event). Added 2026-09-03, same reason as <see cref="WorkAssignment"/>.
+    /// </summary>
+    Event
 }

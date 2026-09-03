@@ -4,7 +4,37 @@
     <title>FR-11 (A-14): Anonymous share links must be tracked and revocable, or disabled</title>
     <phase>0 Enforcement Remediation</phase>
     <gate>after-002</gate>
-    <status>pending</status>
+    <status>completed-with-escalation</status>
+    <status-note>**Set to `completed-with-escalation` 2026-09-02** (unified-access-control-r2 item 8).
+
+**What is actually fixed** — by task **072**, not by this task: the route gained a per-document `share`
+gate (it had none); the link gained a **mandatory bounded expiry** (it was `expiration: null`, i.e.
+permanent); and `anonymous` **stopped being the silent default** — it is now an explicit request, capped
+harder, logged, and gated behind `Documents:ShareLinks:AnonymousLinksEnabled` (refused with
+`anonymous_links_disabled` when off). So of this task's goal — "no code path mints a **permanent**,
+**unrevocable**, **anonymous** link" — *permanent* and *ungated-anonymous* are closed.
+
+**What remains, and why it is an escalation rather than a deferral.** FR-11 offered exactly two
+acceptable outcomes: (a) tracked + revocable, or (b) disabled. What shipped is a defensible THIRD thing
+— bounded + gated + logged — which is neither. The gap is **revocation**, and it is a platform property,
+not an oversight: a minted SPE URL **cannot be revoked through Dataverse**. Removing the caller's rights
+afterwards does not invalidate the URL; revoking it requires deleting the Graph `permission` on the drive
+item. So "persist the link in a Spaarke table" alone would produce an audit trail that *looks* like a
+revoke path and is not one — the exact silent-under-delivery shape of FAILURE-MODES AP-11.
+
+**The concrete closing move, if the owner wants (a) built**: persist each minted link with its Graph
+`permission id`, and add a revoke endpoint that calls Graph permission-delete on the drive item (plus a
+sweep for expired rows). That is real work with a Dataverse schema decision attached, which is why it is
+not being smuggled in under a bookkeeping item.
+
+**Why option (b) — disable anonymous — was NOT taken as the "smaller safe change" this POML's own
+background prescribes as the default**: this project exists to serve EXTERNAL participants, and SPE
+`organization` scope is tenant-scoped. Switching scope would have broken external document sharing —
+the very capability under construction. The POML's default assumed a purely internal surface.
+
+Evidence: `notes/SESSION-STATUS-2026-08-28.md` §145 + §292 (recommended this status);
+`notes/review-2026-08-24-findings.md` H4; `Api/FileAccessEndpoints.cs` CreateShareLink remarks (task 072).
+Governed by root CLAUDE.md §6.5 path **A** — documented exception with rationale, surfaced not silent.</status-note>
     <rigor>FULL</rigor>
     <rigor-reason>Modifies .cs producing an unrevocable anonymous exfiltration artifact (High) — FULL per root CLAUDE.md §8; security-sensitive per §6.</rigor-reason>
     <model-tier>sonnet</model-tier>

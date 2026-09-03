@@ -11,6 +11,86 @@ public class CreateDocumentRequest
 }
 
 /// <summary>
+/// The ONE place that maps a caller-supplied association type onto an
+/// <see cref="UpdateDocumentRequest"/>'s lookup field.
+/// </summary>
+/// <remarks>
+/// <para>Created 2026-09-03 (unified-access-control-r2 item 7). It replaces <b>four</b> hand-written
+/// copies of the same switch that had already drifted apart:</para>
+/// <list type="bullet">
+///   <item><c>UploadFinalizationWorker.ApplyAssociationLookup</c> — accepted <b>only friendly</b>
+///     names ("matter"), warn-and-continue on a miss</item>
+///   <item><c>OfficeDocumentPersistence</c> — accepted friendly <b>and</b> logical, warn-and-continue</item>
+///   <item><c>EmailAttachmentProcessor</c> — accepted <b>only logical</b> names ("sprk_matter"),
+///     warn-and-continue</item>
+///   <item><c>RecordMatchEndpoints</c> — only logical, and the <b>only</b> one that failed closed</item>
+/// </list>
+/// <para>The drift was the defect: the same association token silently dropped in one path and
+/// applied in another purely because of which spelling that copy happened to list. This map accepts
+/// <b>both</b> spellings for every supported type, so a caller cannot lose an association by picking
+/// the "wrong" form.</para>
+///
+/// <para><b>Supported types are exactly those with a real lookup column on <c>sprk_document</c></b>,
+/// verified against live Dataverse metadata 2026-09-03: <c>sprk_matter</c>, <c>sprk_project</c>,
+/// <c>sprk_invoice</c>, <c>sprk_workassignment</c>, <c>sprk_event</c>. Do not add a case here without
+/// confirming the column exists — a case that sets a property no column backs produces a Dataverse
+/// write error, and one that is missing produces a silently unassociated document.</para>
+///
+/// <para>⚠️ <b>Known gaps — deliberately NOT mapped, because the column does not exist:</b>
+/// <c>account</c>, <c>contact</c> and <c>sprk_todo</c>. `account`/`contact` are nonetheless still
+/// ACCEPTED by the Office save endpoint's own allow-list, so a save filed to one of them creates an
+/// unassociated document today. That is a live behaviour gap needing an owner decision (add the
+/// columns, or reject the type at the endpoint) — it is recorded rather than silently changed here,
+/// because rejecting would alter a user-visible flow. <c>sprk_todo</c> was assumed mappable by the
+/// Q4-widening note; it is not, for the same reason.</para>
+/// </remarks>
+public static class DocumentAssociationMap
+{
+    /// <summary>
+    /// Apply <paramref name="recordId"/> to the lookup matching <paramref name="entityTypeOrAlias"/>.
+    /// </summary>
+    /// <returns>
+    /// <see langword="true"/> when the association was applied; <see langword="false"/> when the type
+    /// is not one this codebase can associate a document to. A <see langword="false"/> return is the
+    /// caller's decision to make — a background worker logs and continues, a request handler should
+    /// reject — but it must never be ignored, or the document is created unassociated.
+    /// </returns>
+    public static bool TryApply(UpdateDocumentRequest request, string? entityTypeOrAlias, Guid? recordId)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+
+        if (!recordId.HasValue || recordId.Value == Guid.Empty || string.IsNullOrWhiteSpace(entityTypeOrAlias))
+            return false;
+
+        switch (entityTypeOrAlias.Trim().ToLowerInvariant())
+        {
+            case "matter":
+            case "sprk_matter":
+                request.MatterLookup = recordId;
+                return true;
+            case "project":
+            case "sprk_project":
+                request.ProjectLookup = recordId;
+                return true;
+            case "invoice":
+            case "sprk_invoice":
+                request.InvoiceLookup = recordId;
+                return true;
+            case "workassignment":
+            case "sprk_workassignment":
+                request.WorkAssignmentLookup = recordId;
+                return true;
+            case "event":
+            case "sprk_event":
+                request.EventLookup = recordId;
+                return true;
+            default:
+                return false;
+        }
+    }
+}
+
+/// <summary>
 /// Request model for updating an existing document
 /// </summary>
 public class UpdateDocumentRequest
@@ -162,6 +242,20 @@ public class UpdateDocumentRequest
 
     /// <summary>Invoice lookup (sprk_invoice). Maps to sprk_Invoice@odata.bind.</summary>
     public Guid? InvoiceLookup { get; set; }
+
+    /// <summary>
+    /// Work assignment lookup (<c>sprk_workassignment</c>). Added 2026-09-03 (unified-access-control-r2
+    /// item 7 / Q4 widening) — the column already existed on <c>sprk_document</c>; only this request
+    /// model and the association mappers were missing it, so a save filed to a work assignment was
+    /// created UNASSOCIATED.
+    /// </summary>
+    public Guid? WorkAssignmentLookup { get; set; }
+
+    /// <summary>
+    /// Event lookup (<c>sprk_event</c>). Added 2026-09-03, same reason as
+    /// <see cref="WorkAssignmentLookup"/>.
+    /// </summary>
+    public Guid? EventLookup { get; set; }
 
     // ═══════════════════════════════════════════════════════════════════════════
     // Document Source Tracking

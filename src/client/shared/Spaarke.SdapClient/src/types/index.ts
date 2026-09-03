@@ -25,8 +25,16 @@ export interface DriveItem {
   /** Drive ID containing this item */
   driveId: string;
 
-  /** Parent folder reference ID */
-  parentReferenceId?: string;
+  /**
+   * Parent folder ID.
+   *
+   * Renamed from `parentReferenceId` 2026-09-03: the BFF's `FileHandleDto` has always serialized
+   * this as `parentId`, so `parentReferenceId` was `undefined` at runtime for every response — a
+   * field name invented by this type rather than read off the wire. It had zero consumers here,
+   * but DocumentUploadWizard reads `parentId` off the same payload, so the mismatch would have
+   * silently dropped the field the moment that path started going through this client.
+   */
+  parentId?: string;
 
   /** Created date/time */
   createdDateTime: string;
@@ -42,6 +50,15 @@ export interface DriveItem {
 
   /** MIME type (files only) */
   mimeType?: string;
+
+  /**
+   * SharePoint web URL for the item.
+   *
+   * Added 2026-09-02: the BFF's `FileHandleDto` has always returned this, and consumers persist it
+   * as `sprk_document.sprk_filepath` — this type was simply an incomplete view of the response.
+   * Optional because Graph omits it for some item states, not because the server might not send it.
+   */
+  webUrl?: string;
 }
 
 /**
