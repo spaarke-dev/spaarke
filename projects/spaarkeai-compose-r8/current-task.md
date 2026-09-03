@@ -1,9 +1,7 @@
 # Current Task State — `spaarkeai-compose-r8`
 
-> **Last Updated**: 2026-09-02 (by `context-handoff`) — post-deploy, post-UAT-round-1
-> **Recovery**: read Quick Recovery, then §S3 → §S2 → §S1 → §S0.
-> **071 + 072 COMPLETE (2026-08-31). 070 clusters 7/6/5b/8/1/3/4 done, ZERO holes open.**
-> **`ComposeService.cs` is FROZEN for `unified-access-control-r2` — do not touch it.**
+> **Last Updated**: 2026-09-02 (by `context-handoff`) — end of a long session. **Branch PUSHED; tree clean.**
+> **Recovery**: read Quick Recovery, then §UX (the live backlog), then §U8, then §R0.
 > Everything below "Full State" is preserved history from earlier checkpoints.
 
 ---
@@ -12,35 +10,87 @@
 
 | Field | Value |
 |---|---|
-| **Active work** | **DEPLOYED to `spaarkedev1` 2026-09-02 (BFF + `sprk_spaarkeai` together, NFR-05); UAT round 1 returned.** All R8 code + issue items CLOSED. Not merged — PR #924 open on this branch. |
-| **Next Action** | **UX backlog: 5 ✅ · 2 ✅ · 7 ✅ · line-spacing readability ✅ — all DEPLOYED. NEXT: item 8 (document change summary), then item 6 (editable spacing) + numbering as one group.** ⚠️ **Item 8 is BIGGER than first characterised** — see §U8 below; it is not a wiring job. R8's own gates are CLOSED (Track A passed; `section-break-flattened` accepted). PR #924 still needs its title rewritten to cover the release, then merge. |
-| **Branch** | `work/spaarkeai-compose-r8` — **33 ahead of `origin/master`, 0 behind, tree clean.** PR **#924** already open (its title still describes only #777 — needs rewriting to cover the release). |
-| **Suite** | Client **1,381 / 1,381** · BFF **11,894 / 0 / 57 skipped** · ArchTests **181/181** · solution build **0 errors** · deployed build hash-verified |
-| **Open, not blocking** | §R3 carried items (repair script now VALIDATED — report mode run clean on dev; letter/roman fixture still owner-dependent) · 8 AI consumer types with no `ConsumerTypes.All` constant (census-only, `/healthz/catalog` stays 503) · 2 path-violation test files |
+| **Where we are** | **R8's own gates are CLOSED.** Track A passed (owner UAT: saved, reopened, edits held). `section-break-flattened` **ACCEPTED** — the signed residual-loss set is now **six rows**. The project has since absorbed an owner-approved **UX backlog**, most of which is now done and deployed. |
+| **Branch** | `work/spaarkeai-compose-r8` @ **`0f5525bea`** — **pushed, 0 unpushed, tree clean.** PR **#924** retitled to cover the whole release; left as a **DRAFT deliberately** (in-flight UX work — do not promote to ready until the backlog below is finished or the owner asks). |
+| **Next Action** | **1) Numbering engine** — client renumber via ProseMirror `appendTransaction`, gated by a shared parity corpus BUILT FIRST (`tests/fixtures/compose-numbering-parity/cases.json`, mirroring the #699 pattern). Design: `notes/uat/numbering-editing-design-options.md` (⚠️ read its RETRACTION block — the write path already exists). **2) Item 8** — see §U8; needs a `changesText` producer + trigger, NOT a wiring job. **3) Editable spacing** (UAT item 6) — grouped with numbering by owner decision. |
+| **Suite** | Client **1,406/1,406** · Compose server **1,948/1,948** · SprkChat **376/376** · solution build 0 errors |
+| **Deployed** | `spaarkedev1`, BFF + `sprk_spaarkeai` **together** (NFR-05). BFF **45.43 MB** vs same-day fresh master **45.42** = **+0.01**. `/healthz` 200. |
+| **CI** | ⚠️ **NOT yet verified** — `gh pr checks 924` reported *"no checks reported"* right after the push (not started, ≠ passing). **Re-run it.** |
+
+### ⚠️ Coordination — PR #932 (`unified-access-control-r2`) overlaps on TWO TEST FILES
+
+`ComposeService.cs` itself does **not** overlap. These two do, and whoever merges second reconciles:
+- `tests/Spaarke.ArchTests/SpeWriteSinkContainerProvenanceGuardTests.cs` — we moved 3 census entries
+  `ClientSupplied` → `ServerDerivedRecord`; they add an external-upload write sink.
+  **A census renumber presents as one stale entry + one undeclared site** — only both halves together
+  distinguish it from a deletion.
+- `tests/unit/Sprk.Bff.Api.Tests/Services/Compose/ComposeServiceCreateOnSaveTests.cs`
 
 ---
 
-## U8. Item 8 (document change summary) — CORRECTION to the round-1 note
+## UX. The owner-approved backlog — order was **5 → 6 → 2 → 7 → 8**
 
-The round-1 analysis called this **"a wiring job, not a new capability"**. That was wrong, and the
-correction matters because it changes the size:
+| # | Item | State |
+|---|---|---|
+| **5** | Toolbar restructure, sub-items a–i | ✅ **DONE + deployed** (`c0751e0d9`) |
+| — | Editor typography (headings collided when wrapping) | ✅ **DONE + deployed** (`4887bc98a`) |
+| — | Numbering visibility (`data-projected-list`) | ✅ **DONE + deployed** (`b323c2718`) |
+| **2** | Formatting notices → one collapsed row + popover | ✅ **DONE + deployed** (`e8ea2bbce`) |
+| **7** | Injected Assistant turns pin to top | ✅ **DONE + deployed** (`8d9b31eb8`) |
+| — | Document line spacing carried into the editor (READ path) | ✅ **DONE + deployed** (`0f5525bea`) |
+| **6** | **Editable** spacing (the Spacing menu) | 🔲 grouped with numbering — **write path** |
+| — | **Numbering menu**: toggle · `<` `>` level arrows · type (1./a./i.) | 🔲 owner's design; `<`/`>` small, type = new `ComposeNumberingAuthor` schemes |
+| **8** | Document change summary | 🔲 see §U8 — bigger than first stated |
+
+### The spacing ladder (owner asked "is there a less complex approach?" — yes, and rungs 1+2 shipped)
+
+1. ✅ **Editor typography** — the readability fix. Headings inherited FluentProvider's **fixed 20px**
+   line-height; a ~28px glyph in a 20px line box is why multi-line headings collided. Unitless ratios.
+2. ✅ **Carry the document's own `w:spacing`** — read path only. `w:lineRule` is load-bearing: `w:line` is
+   a MULTIPLE in 240ths under `auto` (360 = 1.5×) but TWIPS under `exact` (360 = 18pt), and **Word OMITS
+   the rule when it means auto** — so absent must map to the multiple reading.
+3. 🔲 **Editable spacing** — model + renderer. **The risk that keeps it out of a UX task**: the moment the
+   model owns spacing, `InheritProperties` must change, and getting it wrong flattens spacing on every
+   edited paragraph — the `paragraph-style-flattened` defect replayed.
+
+---
+
+## U8. Item 8 (document change summary) — CORRECTION, twice over
+
+The round-1 note called this **"a wiring job, not a new capability"** and said its trigger was the
+return-from-Word reanchor flow. **Both were wrong**; a repo-wide search settled it:
 
 | Piece | Status |
 |---|---|
-| `compose-summarize-word-changes` consumer type + Action + input/output schemas | ✅ exists |
+| Consumer type, Action, input + output schemas | ✅ exists |
 | Result renderer (`composeResultFormat.ts`) | ✅ exists |
-| Server operand binding (`ContextBinder` `changesText` → `OperandKind.ChangesText`) | ✅ exists |
-| **A client producer of `changesText`** | ❌ **DOES NOT EXIST** |
-| **Any live trigger** | ❌ **DOES NOT EXIST** — the only client references are the comment in `ComposeAiToolbar.tsx` explaining its REMOVAL, and `useComposeToolbarActivation.ts` |
+| Server operand binding (`ContextBinder` `changesText`) | ✅ exists |
+| **A client producer of `changesText`** | ❌ **does not exist** |
+| **Any live trigger** | ❌ **does not exist** |
 
-So the capability is real end-to-end on the server and dead on the client. Item 8 needs **two new
-pieces**: something that walks the editor's tracked insertion/deletion marks and produces structured
-change text, and a document-level trigger. `describeKinds` in `ComposeReanchorBanner.tsx` counts
-annotation kinds but produces no text, so it is a precedent for the shape, not a reusable producer.
+`AnnotationReanchorService` states the opposite of the old claim outright: *"the human-friendly change
+summary is a SEPARATE gated capability … that DOES call the model; this engine does not."*
 
-**The binding constraint stands and is the reason this must not be rushed**: the action was pulled from
-the selection toolbar because without real change data **the LLM fabricates a phantom "[Insertion]"**.
-Any trigger MUST refuse when there are no tracked changes rather than dispatch an empty operand.
+**The binding constraint that survives both corrections**: the action was pulled from the selection
+toolbar because **without real change data the LLM fabricates a phantom "[Insertion]"**. Any trigger MUST
+refuse when there are no tracked changes rather than dispatch an empty operand — which makes the
+**producer** the load-bearing piece, not the button. Render target: `AgreementReviewSummaryPanel`.
+
+---
+
+## Method rules that cost real time when forgotten (carried forward)
+
+1. **Run the negative control.** Every fix this session shipped with one; two of them found real problems
+   (an in-test extractor that was line-anchored; a Direction-A scan that prose satisfied).
+2. **Assert a seeded mutation is IN THE FILE before spending a suite run**, and that the build is green —
+   a stale binary reports a PASS.
+3. **`dotnet test` is ~7–9 min for the Compose filter.** Batch.
+4. **Verify the deployed bundle by a STRING LITERAL, never a symbol name** — minification renames symbols,
+   so an absent function name is not evidence of a stale build.
+5. **Measure publish size against a SAME-DAY fresh master build with the SAME zip tool.** The recorded
+   baseline ages; that error once overstated this project's delta 46×.
+6. **A screenshot is evidence about a BUILD.** UAT round 2's heading report came from a stale bundle —
+   the tell was toolbar text that had already been removed. Check the build before diagnosing the code.
 
 ---
 
