@@ -8,6 +8,37 @@ Format follows [Keep a Changelog](https://keepachangelog.com/) conventions.
 
 ---
 
+###### 2026-09-04 — `unified-access-control-r2`: **ADR-003 Amendment A1** — two-surface authorization + the unified evaluator (path B)
+
+- **`.claude/adr/ADR-003-authorization-seams.md` rewritten; `docs/adr/ADR-003-lean-authorization-seams.md`
+  gains Amendment A1.** Root CLAUDE.md §6.5 **path B**. Retires **exactly four** rules that no longer
+  described the code: *"two seams only"*, *"new auth logic MUST be an `IAuthorizationRule`"*,
+  *"MUST NOT create new service layers for auth"*, and *"cache UAC snapshots per-request only"*.
+- **Why, verified in source rather than inferred from docs.** `CachedAccessDataSource` caches access
+  data in **`IDistributedCache`** at 2-minute (roles/teams) and 60-second (per-resource) TTLs — that is
+  cross-request *and* cross-instance, flatly contradicting "per-request only"; and the external stack
+  (`CallerPrincipalResolver` + `AccessibleRecordSetService`) is a **service layer, not a rule**. A rule
+  nobody follows is a trap for the next reader, not a guardrail.
+- **The replacement contract.** Two enforcement **surfaces** (Dataverse-native vs the BFF evaluator),
+  and one evaluator returning **`(recordId → rights)`** — a map, never a bare id set, because a
+  `HashSet<Guid>` structurally cannot carry a level (which is why matters and work assignments have
+  none today). Additive terms compose by **highest-wins `max()`**; vetoes apply **after** the max in
+  the order **deny-list → Restricted**; **Secure suppresses derived-member + org-expansion BEFORE the
+  max** for every principal kind; **`"No Access"` is a veto, never a level** — modelled as a level,
+  `max()` ignores it and an ethical wall fails silently in exactly the case it exists for.
+- **The surface rule agents get wrong.** Ask *"does this read go through the BFF?"*, **not** *"is this
+  the MDA?"* — an MDA-hosted PCF reading via the BFF is on the BFF surface, with SPA-equivalent
+  exposure. Demonstrated: a user denied Read on all 442 documents saw and downloaded a matter's files
+  through an MDA form's embedded PCF.
+- **Nothing was weakened.** Fail-closed, machine-readable deny codes, authorize-before-`SpeFileStore`,
+  and never-cache-**decisions** are all preserved verbatim. **`OperationAccessRule` is NOT orphaned** —
+  the single live `IAuthorizationRule` (registered `SpaarkeCore.cs:96`) stays valid and registered;
+  checked before amending, because retiring a MUST that a live consumer depends on would be an
+  amendment that breaks running code. Also fixed the concise ADR's dead
+  `patterns/auth/authorization-service.md` link (→ `uac-access-control.md`), logged as register §G row 2.
+- **Sequencing**: A1 merges **before** task 032 implements the evaluator, so the code lands under an ADR
+  that sanctions it rather than in violation of one.
+
 ###### 2026-09-02 — `unified-access-control-r2`: new `FAILURE-MODES.md` **AP-12** — a comment becomes the constraint
 
 - **New `FAILURE-MODES.md` AP-12: prose outlives the mechanism it describes.** Promoted from a single

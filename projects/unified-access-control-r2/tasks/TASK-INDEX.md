@@ -582,7 +582,7 @@ authorization → task 012 · M8 `AccessGrantModal.postJson` never checks `res.o
 
 | # | Task | FR | Deps | Group | Safe | Tier | Effort |
 |---|---|---|---|---|---|---|---|
-| 🔲 030 | ADR-003 amendment — two-surface authorization | FR-19 sanction | — | — | ❌ *main-session* | opus | high |
+| ✅ **030** | **ADR-003 Amendment A1 — two-surface authorization + the unified evaluator.** Retires exactly 4 rules; both drift claims re-verified in source (`CachedAccessDataSource` uses `IDistributedCache` @ 2 min/60 s — cross-*instance*, not just cross-request). Escalation trigger evaluated and did **not** fire: `OperationAccessRule` is live + registered (`SpaarkeCore.cs:96`) but **not orphaned** — the mandate is retired, the mechanism is not. Notes: [`notes/task-030-adr-003-amendment.md`](../notes/task-030-adr-003-amendment.md) | FR-19 sanction | — | — | ❌ *main-session* | opus | high |
 | 🔲 031 | ADR-028 A2 amendment — impersonated derivation | FR-20 sanction | — | — | ❌ *main-session* | opus | high |
 | 🔲 032 | Evaluator spine — `(recordId→rights)` + max + veto seams | FR-19 | 030 | — | ❌ | **opus** | **xhigh** |
 | 🔲 033 | Consumer propagation · **delete the `Collaborate` stamp** | FR-19 | 032 (+009 soft) | — | ❌ | opus | high |
