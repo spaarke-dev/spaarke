@@ -4,15 +4,15 @@
     <title>Server-side regarding writers: audit + converge on core-ancestor stamping (FR-26)</title>
     <phase>3 Child inheritance</phase>
     <gate>startable (derivation rules are spec-fixed; runs parallel to 050)</gate>
-    <status>pending</status>
+    <status>blocked</status>
     <rigor>FULL</rigor>
     <rigor-reason>Authorization-path .cs changes: server-created children (emails, todos from automation) without stamps are invisible to inheriting principals; wrong stamps over-grant.</rigor-reason>
     <model-tier>sonnet</model-tier>
     <model-tier-reason>Audit + convergence against an explicit derivation-rules table; well-specified after 050's rules note; default tier.</model-tier-reason>
     <effort>high</effort>
     <parallel-group>phase3-wave1</parallel-group>
-    <parallel-safe>true</parallel-safe>
-    <parallel-reason>Touches Services/Communication/** + a new helper — disjoint from task 050's TS shared-lib files; does NOT touch Infrastructure/ExternalAccess, Api/ExternalAccess or DataverseWebApiService.cs.</parallel-reason>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>CORRECTED 2026-09-03 (task 052 execution): was true, which was WRONG. The original reason established disjointness with task 050 ONLY, then generalized it to "safe". Services/Communication/** is a heavily shared surface across this project and the concurrent email/communication projects; convergence there must serialize. See notes/phase3-server-writers.md 1. ORIGINAL TEXT: Touches Services/Communication/** + a new helper — disjoint from task 050's TS shared-lib files; does NOT touch Infrastructure/ExternalAccess, Api/ExternalAccess or DataverseWebApiService.cs.</parallel-reason>
     <deps>none</deps>
     <tags>bff-api, auth, dataverse, testing</tags>
     <estimated-effort>3-4 hours</estimated-effort>

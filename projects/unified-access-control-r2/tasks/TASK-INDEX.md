@@ -609,7 +609,7 @@ authorization → task 012 · M8 `AccessGrantModal.postJson` never checks `res.o
 |---|---|---|---|---|---|---|---|
 | ✅ **050** | Core-ancestor derivation in the shared resolver | FR-26 | — | **P3-W1** | ✅ | **opus** | **xhigh** |
 | 🔲 051 | `RegardingResolver` re-stamp on set/reparent/clear | FR-26 | 050 | **P3-W2** | ✅ | opus | high |
-| 🔲 052 | Server-writer audit + C# `CoreAncestorResolver` | FR-26 | 050 soft | **P3-W1** | ✅ | sonnet | high |
+| 🔄 052 | Server-writer audit + C# `CoreAncestorResolver` — **audit + resolver DONE; writer convergence BLOCKED** (5 of 9 writers are in `Services/Communication/**`, concurrently owned; POML `parallel-safe` was wrong — corrected to false). Split 052b/052c proposed in `notes/phase3-server-writers.md` | FR-26 | 050 soft | **P3-W1** | ❌ | sonnet | high |
 | 🔲 053 | Ancestor-stamp backfill script | FR-26 | 050,052 | **P3-W2** | ✅ | sonnet | medium |
 | 🔲 054 | Root-set generalization (`sprk_servicerequest` 4th root) | FR-27 | 032,035,036 | — | ❌ | sonnet | high |
 | 🔲 055 | Evaluator child-inheritance term | FR-27 | 054,032,037,038 | — | ❌ | sonnet | high |
