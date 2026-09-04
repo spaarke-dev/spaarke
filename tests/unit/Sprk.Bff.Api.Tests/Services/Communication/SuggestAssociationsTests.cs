@@ -69,6 +69,7 @@ public class SuggestAssociationsTests
             null!, // JobSubmissionService — not reached
             Mock.Of<ICommunicationEnrichmentService>(),
             Microsoft.Extensions.Options.Options.Create(options),
+            Sprk.Bff.Api.Tests.TestInfrastructure.CoreAncestorResolverFixtures.Inert(),
             Mock.Of<ILogger<CommunicationService>>());
     }
 
@@ -83,6 +84,7 @@ public class SuggestAssociationsTests
             dv,
             dv,
             AssociationTestSupport.Mapper(),
+            Sprk.Bff.Api.Tests.TestInfrastructure.CoreAncestorResolverFixtures.Inert(),
             NullLogger<IncomingAssociationResolver>.Instance);
 
     // =========================================================================

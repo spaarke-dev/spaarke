@@ -212,11 +212,10 @@ export class InvoiceService {
     // but guard here too so a programmatic caller that omits it still gets a value).
     entity['sprk_invoicedate'] = form.invoiceDate?.trim() ? form.invoiceDate.trim() : todayIsoDateFallback();
 
-    // Store the host-resolved SPE container ID on the invoice record (enables Documents tab).
-    // Applied FIRST so it acts as an explicit override during the subsequent BU cascade (INV-5).
-    if (this._containerId) {
-      entity['sprk_containerid'] = this._containerId;
-    }
+    // 🔴 DELETED 2026-09-03 by task 076 (harmful write "W1", second half). Its own comment stated
+    // the mechanism plainly — "applied FIRST so it acts as an explicit override during the
+    // subsequent BU cascade (INV-5)" — which is exactly why deleting `applyDefaultContainerId`
+    // alone would NOT have removed the write. See the CreateMatterWizard twin for full reasoning.
 
     // Vendor Org lookup (sprk_vendororg -> sprk_organization)
     if (form.vendorOrgId) {
@@ -310,9 +309,13 @@ export class InvoiceService {
     }
 
     // -- Step 2: Upload files to SPE + dual-bind sprk_document ---------------
-    if (uploadedFiles.length > 0 && this._containerId) {
+    //
+    // Task 076: keyed on the INVOICE; the server derives the container from it. The former
+    // `&& this._containerId` guard is gone with the client-side resolution it depended on.
+    if (uploadedFiles.length > 0) {
       const uploadResult = await this._entityService.uploadFilesToSpe(
-        this._containerId,
+        'sprk_invoice',
+        invoiceId,
         uploadedFiles,
         onUploadProgress
       );
@@ -360,7 +363,7 @@ export class InvoiceService {
             invoiceNavProp ?? 'sprk_Invoice',
             uploadResult.uploadedFiles,
             {
-              containerId: this._containerId,
+              // No `containerId` — `sprk_graphdriveid` comes from the server's upload response.
               parentRecordName: form.name.trim(),
               additionalBinds: additionalBinds.length > 0 ? additionalBinds : undefined,
             }

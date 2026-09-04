@@ -5,66 +5,24 @@
  * spaarke-multi-container-multi-index-r1 / FR-WIZ-01..08.
  *
  * Covered:
- *   - applyDefaultContainerId: INV-5 (skip when explicit), cascade (set when empty), empty-input no-op
  *   - applyDefaultSearchIndexName: INV-5, cascade, empty-input no-op (NULL BU value scenario)
- *   - applyUserBuDefaults: composes the two helpers, INV-5 honored per-field, null-defaults safe
+ *   - applyUserBuDefaults: delegates to the search-index helper, INV-5 honored, null-defaults safe,
+ *     and NEVER writes `sprk_containerid` onto the payload (task 076 security guarantee)
  *   - resolveUserBuDefaults: systemuser → BU chain, normalizes empty strings to undefined,
  *     handles unset BU fields gracefully (no throw — leaves fields undefined)
+ *
+ * The `applyDefaultContainerId` coverage that used to lead this list was removed 2026-09-03 by
+ * unified-access-control-r2 task 076: the helper itself was deleted (a client may not choose a
+ * record's storage location), so those tests have no subject.
  */
 
 import { EntityCreationService, type IUserBuCascadeDefaults } from '../EntityCreationService';
 import type { IWebApiLike } from '../../types/WebApiLike';
 
-// ---------------------------------------------------------------------------
-// applyDefaultContainerId
-// ---------------------------------------------------------------------------
-
-describe('EntityCreationService.applyDefaultContainerId', () => {
-  it('sets sprk_containerid on empty payload when BU value is provided (cascade)', () => {
-    const entity: Record<string, unknown> = { sprk_mattername: 'Test Matter' };
-    const result = EntityCreationService.applyDefaultContainerId(entity, 'bu-container-abc');
-    expect(result).toBe(true);
-    expect(entity['sprk_containerid']).toBe('bu-container-abc');
-  });
-
-  it('does NOT overwrite when payload already has explicit sprk_containerid (INV-5)', () => {
-    const entity: Record<string, unknown> = {
-      sprk_mattername: 'Test Matter',
-      sprk_containerid: 'explicit-override-xyz',
-    };
-    const result = EntityCreationService.applyDefaultContainerId(entity, 'bu-container-abc');
-    expect(result).toBe(false);
-    expect(entity['sprk_containerid']).toBe('explicit-override-xyz');
-  });
-
-  it('is a no-op when containerId input is undefined / null / empty string', () => {
-    const e1: Record<string, unknown> = {};
-    expect(EntityCreationService.applyDefaultContainerId(e1, undefined)).toBe(false);
-    expect('sprk_containerid' in e1).toBe(false);
-
-    const e2: Record<string, unknown> = {};
-    expect(EntityCreationService.applyDefaultContainerId(e2, null)).toBe(false);
-    expect('sprk_containerid' in e2).toBe(false);
-
-    const e3: Record<string, unknown> = {};
-    expect(EntityCreationService.applyDefaultContainerId(e3, '')).toBe(false);
-    expect('sprk_containerid' in e3).toBe(false);
-  });
-
-  it('treats whitespace-only existing value as empty (cascade can fill)', () => {
-    const entity: Record<string, unknown> = { sprk_containerid: '   ' };
-    const result = EntityCreationService.applyDefaultContainerId(entity, 'bu-container-abc');
-    expect(result).toBe(true);
-    expect(entity['sprk_containerid']).toBe('bu-container-abc');
-  });
-
-  it('treats null existing value as empty (cascade can fill)', () => {
-    const entity: Record<string, unknown> = { sprk_containerid: null };
-    const result = EntityCreationService.applyDefaultContainerId(entity, 'bu-container-abc');
-    expect(result).toBe(true);
-    expect(entity['sprk_containerid']).toBe('bu-container-abc');
-  });
-});
+// The 5 `EntityCreationService.applyDefaultContainerId` tests that stood here were REMOVED
+// 2026-09-03 by task 076: the helper was deleted, so they have no subject — do not re-add them.
+// The guarantee that replaces them ("no `sprk_containerid` ever reaches the payload") is asserted
+// in the `applyUserBuDefaults` block below and in each create-service suite.
 
 // ---------------------------------------------------------------------------
 // applyDefaultSearchIndexName
@@ -112,7 +70,7 @@ describe('EntityCreationService.applyDefaultSearchIndexName', () => {
 // ---------------------------------------------------------------------------
 
 describe('EntityCreationService.applyUserBuDefaults', () => {
-  it('applies both fields when BU has both populated and payload is empty', () => {
+  it('applies sprk_searchindexname — and NEVER sprk_containerid — when the BU has both populated', () => {
     const entity: Record<string, unknown> = { sprk_mattername: 'Test Matter' };
     const defaults: IUserBuCascadeDefaults = {
       businessUnitId: 'bu-123',
@@ -120,12 +78,14 @@ describe('EntityCreationService.applyUserBuDefaults', () => {
       searchIndexName: 'spaarke-knowledge-index-v2',
     };
     const result = EntityCreationService.applyUserBuDefaults(entity, defaults);
-    expect(result).toEqual({ containerIdSet: true, searchIndexNameSet: true });
-    expect(entity['sprk_containerid']).toBe('bu-container-abc');
+    expect(result).toEqual({ searchIndexNameSet: true });
     expect(entity['sprk_searchindexname']).toBe('spaarke-knowledge-index-v2');
+    // Task 076 (W1): a populated `defaults.containerId` must NOT reach the payload — a search-index
+    // routing hint is the client's to cascade, a storage location is not.
+    expect(entity).not.toHaveProperty('sprk_containerid');
   });
 
-  it('honors INV-5 per-field independently — pre-seeded indexname kept, container filled', () => {
+  it('honors INV-5 — pre-seeded indexname kept, and still no container written', () => {
     const entity: Record<string, unknown> = {
       sprk_mattername: 'Protected Matter',
       sprk_searchindexname: 'spaarke-file-index',
@@ -136,12 +96,12 @@ describe('EntityCreationService.applyUserBuDefaults', () => {
       searchIndexName: 'spaarke-knowledge-index-v2',
     };
     const result = EntityCreationService.applyUserBuDefaults(entity, defaults);
-    expect(result).toEqual({ containerIdSet: true, searchIndexNameSet: false });
-    expect(entity['sprk_containerid']).toBe('bu-container-abc');
+    expect(result).toEqual({ searchIndexNameSet: false });
     expect(entity['sprk_searchindexname']).toBe('spaarke-file-index'); // override preserved
+    expect(entity).not.toHaveProperty('sprk_containerid');
   });
 
-  it('leaves a field unset when the corresponding BU field is undefined (NULL BU)', () => {
+  it('leaves sprk_searchindexname unset when the BU field is undefined (NULL BU)', () => {
     const entity: Record<string, unknown> = { sprk_mattername: 'Test Matter' };
     const defaults: IUserBuCascadeDefaults = {
       businessUnitId: 'bu-123',
@@ -149,17 +109,17 @@ describe('EntityCreationService.applyUserBuDefaults', () => {
       searchIndexName: undefined, // BU exists but field is unset
     };
     const result = EntityCreationService.applyUserBuDefaults(entity, defaults);
-    expect(result).toEqual({ containerIdSet: true, searchIndexNameSet: false });
-    expect(entity['sprk_containerid']).toBe('bu-container-abc');
+    expect(result).toEqual({ searchIndexNameSet: false });
     expect('sprk_searchindexname' in entity).toBe(false);
+    expect(entity).not.toHaveProperty('sprk_containerid');
   });
 
   it('is a no-op when defaults is null or undefined', () => {
     const entity: Record<string, unknown> = { sprk_mattername: 'Test Matter' };
     const r1 = EntityCreationService.applyUserBuDefaults(entity, null);
-    expect(r1).toEqual({ containerIdSet: false, searchIndexNameSet: false });
+    expect(r1).toEqual({ searchIndexNameSet: false });
     const r2 = EntityCreationService.applyUserBuDefaults(entity, undefined);
-    expect(r2).toEqual({ containerIdSet: false, searchIndexNameSet: false });
+    expect(r2).toEqual({ searchIndexNameSet: false });
     expect('sprk_containerid' in entity).toBe(false);
     expect('sprk_searchindexname' in entity).toBe(false);
   });
@@ -201,10 +161,16 @@ describe('EntityCreationService.resolveUserBuDefaults', () => {
       searchIndexName: 'spaarke-knowledge-index-v2',
     });
     expect(webApi.retrieveRecord).toHaveBeenCalledWith('systemuser', 'user-guid-1', '?$select=_businessunitid_value');
+    // ⚠️ PRE-EXISTING failure, fixed 2026-09-03 in passing — NOT caused by task 076, which does not
+    // touch `resolveUserBuDefaults`. The production `$select` has carried a third column
+    // (`_sprk_ai_search_index_value`, consumed by the EmailComposer's
+    // `sprk_AI_Search_Index@odata.bind`) since before this branch, and this assertion still pinned
+    // the two-column string. Another instance of the pattern this project keeps paying for: an
+    // artifact describing a contract the code had already moved past.
     expect(webApi.retrieveRecord).toHaveBeenCalledWith(
       'businessunit',
       'bu-guid-1',
-      '?$select=sprk_containerid,sprk_searchindexname'
+      '?$select=sprk_containerid,sprk_searchindexname,_sprk_ai_search_index_value'
     );
   });
 
@@ -282,8 +248,10 @@ describe('EntityCreationService — resolve + apply (end-to-end INV-5 contract)'
     const defaults = await EntityCreationService.resolveUserBuDefaults(webApi, 'user-guid');
     const applied = EntityCreationService.applyUserBuDefaults(entity, defaults);
 
-    expect(applied).toEqual({ containerIdSet: true, searchIndexNameSet: false });
-    expect(entity['sprk_containerid']).toBe('bu-container-abc');
+    expect(applied).toEqual({ searchIndexNameSet: false });
     expect(entity['sprk_searchindexname']).toBe('spaarke-file-index'); // INV-5 preserved
+    // Task 076 (W1): `resolveUserBuDefaults` still RESOLVES the BU container (other callers consume
+    // it), but nothing in the apply path may put it on a create payload.
+    expect(entity).not.toHaveProperty('sprk_containerid');
   });
 });

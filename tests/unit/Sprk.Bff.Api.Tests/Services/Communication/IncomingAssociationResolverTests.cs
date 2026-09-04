@@ -46,6 +46,7 @@ public class IncomingAssociationResolverTests
             _dataverseServiceMock.Object,
             _dataverseServiceMock.Object,
             AssociationTestSupport.Mapper(),
+            Sprk.Bff.Api.Tests.TestInfrastructure.CoreAncestorResolverFixtures.Inert(),
             Mock.Of<ILogger<IncomingAssociationResolver>>());
     }
 
@@ -404,6 +405,7 @@ public class IncomingAssociationResolverTests
             _dataverseServiceMock.Object,
             _dataverseServiceMock.Object,
             AssociationTestSupport.Mapper(enabled: false),
+            Sprk.Bff.Api.Tests.TestInfrastructure.CoreAncestorResolverFixtures.Inert(),
             Mock.Of<ILogger<IncomingAssociationResolver>>());
 
         var envelope = CreateEnvelope("Re: Test", "jane@external.com", inReplyTo: "<p2@contoso.com>");
@@ -455,6 +457,7 @@ public class IncomingAssociationResolverTests
             _dataverseServiceMock.Object,
             _dataverseServiceMock.Object,
             AssociationTestSupport.Mapper(),
+            Sprk.Bff.Api.Tests.TestInfrastructure.CoreAncestorResolverFixtures.Inert(),
             Mock.Of<ILogger<IncomingAssociationResolver>>());
 
         var envelope = CreateEnvelope("LITG-119896 filing", "clerk@court.gov");
@@ -582,6 +585,7 @@ public class IncomingAssociationResolverTests
             _dataverseServiceMock.Object,
             _dataverseServiceMock.Object,
             AssociationTestSupport.Mapper(),
+            Sprk.Bff.Api.Tests.TestInfrastructure.CoreAncestorResolverFixtures.Inert(),
             Mock.Of<ILogger<IncomingAssociationResolver>>());
 
         var envelope = CreateEnvelope("Two matters and an invoice", "clerk@court.gov");

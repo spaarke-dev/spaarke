@@ -81,6 +81,9 @@ public sealed class CommunicationService : ICommunicationEnvelopeReader
     /// facet (task 051) reads. Optional so existing unit constructions keep compiling; production DI always supplies
     /// it. Best-effort / non-fatal + idempotent (it never throws) — a junction-write failure never fails the send.
     /// </param>
+    /// <summary>FR-26 core-ancestor derivation for the outbound communication write path (task 052).</summary>
+    private readonly Sprk.Bff.Api.Services.Dataverse.CoreAncestorResolver _coreAncestors;
+
     public CommunicationService(
         CommunicationChannelDispatcher channelDispatcher,
         ApprovedSenderValidator senderValidator,
@@ -91,6 +94,7 @@ public sealed class CommunicationService : ICommunicationEnvelopeReader
         JobSubmissionService jobSubmissionService,
         ICommunicationEnrichmentService enrichmentService,
         IOptions<CommunicationOptions> options,
+        Sprk.Bff.Api.Services.Dataverse.CoreAncestorResolver coreAncestors,
         ILogger<CommunicationService> logger,
         IThreadResolver? threadResolver = null,
         IServiceScopeFactory? scopeFactory = null,
@@ -108,6 +112,7 @@ public sealed class CommunicationService : ICommunicationEnvelopeReader
         _accountService = accountService;
         _jobSubmissionService = jobSubmissionService;
         _enrichmentService = enrichmentService;
+        _coreAncestors = coreAncestors ?? throw new ArgumentNullException(nameof(coreAncestors));
         _threadResolver = threadResolver;
         _scopeFactory = scopeFactory;
         _directThreadAccess = directThreadAccess;
@@ -866,7 +871,7 @@ public sealed class CommunicationService : ICommunicationEnvelopeReader
             await CopyRegardingFromSourceAsync(communication, srcCommId, correlationId, ct);
 
         // Map primary association (regarding lookup + denormalized fields) — same ADR-024 mechanism as email.
-        MapAssociationFields(communication, request.Associations, _logger);
+        await MapAssociationFieldsAsync(communication, request.Associations, correlationId, ct);
 
         var recordId = await _genericEntityService.CreateAsync(communication, ct);
 
@@ -1780,7 +1785,7 @@ public sealed class CommunicationService : ICommunicationEnvelopeReader
             await CopyRegardingFromSourceAsync(communication, srcCommId, correlationId, ct);
 
         // Map primary association (regarding lookup + denormalized fields)
-        MapAssociationFields(communication, request.Associations, _logger);
+        await MapAssociationFieldsAsync(communication, request.Associations, correlationId, ct);
 
         var recordId = await _genericEntityService.CreateAsync(communication, ct);
 
@@ -1885,7 +1890,7 @@ public sealed class CommunicationService : ICommunicationEnvelopeReader
             await CopyRegardingFromSourceAsync(communication, srcCommId, correlationId, ct);
 
         // Map primary association (regarding lookup + denormalized fields)
-        MapAssociationFields(communication, request.Associations, _logger);
+        await MapAssociationFieldsAsync(communication, request.Associations, correlationId, ct);
 
         var recordId = await _genericEntityService.CreateAsync(communication, ct);
 
@@ -1920,10 +1925,11 @@ public sealed class CommunicationService : ICommunicationEnvelopeReader
     /// Maps the primary association (associations[0]) to Dataverse regarding lookup
     /// and denormalized text fields on the sprk_communication entity.
     /// </summary>
-    private static void MapAssociationFields(
+    private async Task MapAssociationFieldsAsync(
         DataverseEntity communication,
         CommunicationAssociation[]? associations,
-        ILogger logger)
+        string correlationId,
+        CancellationToken ct)
     {
         if (associations is not { Length: > 0 })
             return;
@@ -1936,10 +1942,39 @@ public sealed class CommunicationService : ICommunicationEnvelopeReader
         if (RegardingLookupMap.TryGetValue(primary.EntityType, out var mapping))
         {
             communication[mapping.LookupField] = new EntityReference(primary.EntityType, primary.EntityId);
+
+            // FR-26 core-ancestor stamp (task 052) - applied AFTER the typed lookup so it survives, and
+            // after CopyRegardingFromSourceAsync so an explicit association's ancestor wins over an
+            // inherited one. Four of the twelve mapped targets are child-class (analysis, invoice, event
+            // and - via the reply path - communication), so an email filed against an invoice would
+            // otherwise carry no matter stamp and stay invisible to everyone whose access comes from
+            // that matter.
+            var stamp = await _coreAncestors
+                .StampAsync(communication, primary.EntityType, primary.EntityId, ct)
+                .ConfigureAwait(false);
+
+            if (!stamp.Succeeded)
+            {
+                // NFR-01 fail-closed, in this class's existing error contract (SdapProblemException, as
+                // ValidateRequest uses). Recording an unstamped communication would leave a row nobody
+                // downstream of the regarding record can see - a silent under-grant, worse than a loud
+                // failure the caller can retry.
+                throw new SdapProblemException(
+                    code: "CORE_ANCESTOR_DERIVATION_FAILED",
+                    title: "Regarding association could not be resolved",
+                    detail: "The core-record ancestor of the regarding target could not be derived, so the "
+                          + "communication cannot be filed with correct access inheritance.",
+                    statusCode: 502,
+                    extensions: new Dictionary<string, object>
+                    {
+                        ["correlationId"] = correlationId,
+                        ["regardingEntityType"] = primary.EntityType,
+                    });
+            }
         }
         else
         {
-            logger.LogWarning(
+            _logger.LogWarning(
                 "Unknown entity type for association lookup mapping: {EntityType}. Regarding lookup will not be set.",
                 primary.EntityType);
         }

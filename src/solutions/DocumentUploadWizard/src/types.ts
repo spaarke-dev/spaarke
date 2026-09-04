@@ -90,8 +90,9 @@ export interface IDocumentUploadWizardDialogProps {
     parentEntityId: string;
     /** Display name of the parent record. */
     parentEntityName: string;
-    /** SPE container ID for file uploads. */
-    containerId: string;
+    // `containerId: string` was DELETED 2026-09-03 (task 076). The wizard no longer names an upload
+    // destination; the server resolves it from `(parentEntityType, parentEntityId)`. Every launch
+    // envelope that used to append `&containerId=…` had it removed in the same change.
     /** Callback invoked when the wizard is closed or cancelled. */
     onClose: () => void;
 }
@@ -108,8 +109,10 @@ export interface IResolvedParentContext {
     parentEntityId: string;
     /** Parent record display name. Empty string if unassociated. */
     parentEntityName: string;
-    /** SPE container ID — always resolved (from record or business unit). */
-    containerId: string;
+    // `containerId: string` was DELETED 2026-09-03 (task 076). Its value came from
+    // `AssociateToStep`'s fail-OPEN resolver, which answered "the shared business-unit container"
+    // whenever the selected record's own container read was DENIED. Both the field and the resolver
+    // are gone; the upload names the record and the server resolves the container.
     /** Whether this is an unassociated upload (no parent record). */
     isUnassociated: boolean;
 }

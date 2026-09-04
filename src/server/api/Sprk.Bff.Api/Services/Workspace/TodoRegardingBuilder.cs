@@ -1,5 +1,6 @@
 using Microsoft.Xrm.Sdk;
 using Spaarke.Dataverse;
+using Sprk.Bff.Api.Services.Dataverse;
 
 namespace Sprk.Bff.Api.Services.Workspace;
 
@@ -87,6 +88,7 @@ internal sealed class TodoRegardingBuilder
     // ─────────────────────────────────────────────────────────────────────────
 
     private readonly ICommunicationDataverseService _communicationService;
+    private readonly CoreAncestorResolver _coreAncestors;
     private readonly ILogger<TodoRegardingBuilder> _logger;
 
     /// <summary>
@@ -96,9 +98,11 @@ internal sealed class TodoRegardingBuilder
 
     public TodoRegardingBuilder(
         ICommunicationDataverseService communicationService,
+        CoreAncestorResolver coreAncestors,
         ILogger<TodoRegardingBuilder> logger)
     {
         _communicationService = communicationService ?? throw new ArgumentNullException(nameof(communicationService));
+        _coreAncestors = coreAncestors ?? throw new ArgumentNullException(nameof(coreAncestors));
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
     }
 
@@ -196,9 +200,31 @@ internal sealed class TodoRegardingBuilder
                 regardingEntityName);
         }
 
+        // 3) FR-26 core-ancestor stamp — LAST, so it can never be overwritten by steps 1–2, and so the
+        //    ADR-024 mutual-exclusion guard above (which fires on an ALREADY-SET lookup) does not mistake
+        //    an ancestor stamp for a competing user choice. A CORE target stamps only itself and is
+        //    skipped here as already bound by step 1; a CHILD target (event / communication / invoice /
+        //    analysis / document — 5 of the 11 supported parents) additionally carries its own core
+        //    ancestor onto this to-do. Without it, a to-do filed under a communication is invisible to
+        //    every principal whose access comes from that communication's matter.
+        var stamp = await _coreAncestors
+            .StampAsync(todoEntity, regardingEntityName, regardingId, ct)
+            .ConfigureAwait(false);
+
+        if (!stamp.Succeeded)
+        {
+            // NFR-01 fail-closed. This method's existing error contract is to throw, and its callers
+            // already treat a throw as "do not create the to-do" — so an unstamped row cannot be written
+            // by this path.
+            throw new InvalidOperationException(
+                $"Core-ancestor derivation failed for regarding target '{regardingEntityName}' " +
+                $"({regardingId:D}); refusing to write an unstamped sprk_todo (FR-26 / NFR-01). " +
+                stamp.Error);
+        }
+
         _logger.LogDebug(
-            "Applied resolver fields to sprk_todo: Entity={Entity}, Id={Id}, Name={Name}",
-            regardingEntityName, cleanId, regardingDisplayName);
+            "Applied resolver fields to sprk_todo: Entity={Entity}, Id={Id}, Name={Name}, AncestorStatus={Status}",
+            regardingEntityName, cleanId, regardingDisplayName, stamp.Status);
     }
 
     // ─────────────────────────────────────────────────────────────────────────

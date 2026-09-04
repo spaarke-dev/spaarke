@@ -54,6 +54,7 @@ public class AssociationLadderIntegrationTests
 
         return new IncomingAssociationResolver(
             rungs, _dv.Object, _dv.Object, AssociationTestSupport.Mapper(),
+            Sprk.Bff.Api.Tests.TestInfrastructure.CoreAncestorResolverFixtures.Inert(),
             NullLogger<IncomingAssociationResolver>.Instance);
     }
 

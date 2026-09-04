@@ -1,0 +1,114 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="094" project="unified-access-control-r2">
+  <metadata>
+    <title>Upload collision: ask BEFORE the bytes move (pre-flight probe), and add "Use existing"</title>
+    <phase>0c Secure Documents — upload path decomposition</phase>
+    <status>pending</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Touches the live upload path and the shipped collision dialog; a regression here silently restores data loss or breaks a working user choice.</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Well-specified once re-scoped; the hard judgement (two options vs three, fail-closed default) was already settled and shipped.</model-tier-reason>
+    <effort>high</effort>
+    <effort-reason>Brownfield against a path that changed twice in three days; the re-scope itself needs care.</effort-reason>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Shares the upload client and the wizard collision UI with 076 and 093.</parallel-reason>
+    <deps>076</deps>
+    <tags>bff-api, frontend</tags>
+    <estimated-effort>1 day</estimated-effort>
+    <origin>notes/plan-upload-path-decomposition-2026-08-31.md §3. Owner: "we do not want to silent fail (or fail at the end)", and "open a dialog with user option to either replace or rename/create new."</origin>
+  </metadata>
+
+  <prompt>🔴 RE-SCOPE THIS BEFORE IMPLEMENTING. Most of the original 094 SHIPPED on 2026-09-02. Read what is already done before writing any code — implementing the plan note as written would rebuild working behaviour and risk regressing it.</prompt>
+
+  <role>SPAARKE full-stack engineer.</role>
+
+  <goal>The user is asked about a name collision BEFORE their bytes are uploaded, not after — and "Use existing" becomes available once 095 lands.</goal>
+
+  <context>
+    <background>🔴 **ALREADY DONE — do not rebuild:**
+
+  - **Explicit `conflictBehavior` on the small-upload path** — `9c208a7f2`.
+  - **Collision no longer overwrites.** Server default is now `Fail`, so a same-named file returns 409
+    with the existing file UNTOUCHED — `93d5e673e`. This ended the data-loss bug where a collision
+    silently replaced the stored bytes and the user saw a Dataverse 412 "Duplicate Record" AFTER the
+    original content was already gone.
+  - **Typed `UploadNameConflictError`** through the upload clients — `086b9e9ce`, consolidated onto
+    `@spaarke/sdap-client` in `047c9df8d`.
+  - **The two-option dialog** — `09025ab39`. **Keep both** (`rename`) / **Save as new version**
+    (`replace`). Owner chose TWO options, not three. A retry re-runs the full pipeline for that one
+    file and MERGES into the batch result. A pending conflict row renders above `SummaryStep`.
+  - **The signal path**, both directions: `nameConflict` up (`FileUploadService` →
+    `MultiFileUploadService` → `UploadFilesResult.errors[]` → `UploadProgress` →
+    `OrchestratorFileProgress` → the row) and `conflictBehavior` down.
+
+**WHAT ACTUALLY REMAINS:**
+
+1. **The pre-flight existence probe.** Today the collision is discovered by ATTEMPTING the upload and
+   catching the 409 — i.e. the user waits for the bytes to move and is asked at the end. That is the
+   half of the owner's requirement still unmet ("or fail at the end"). It matters more now than when
+   the note was written: the client-side 4 MiB ceiling was removed (`4044286a6`) and the real limit is
+   250 MB, so "ask after the upload" can mean a very long wait before a question.
+
+   The container is SERVER-resolved, so the client cannot look inside it — it must ask the server.
+   ⚠️ **Check `DriveItemOperations.ListChildrenAsync` for reuse BEFORE adding an endpoint** (CLAUDE.md
+   §11). A new endpoint needs the three-question justification.
+
+   ⚠️ The probe is an OPTIMISATION, not the guarantee. The 409 path MUST remain — two users can race
+   between probe and upload. Do not let the probe become the only check.
+
+2. **"Use existing"** — a third option meaning "do not upload; link the existing document". Depends on
+   **095** (the intersection entity), because it needs the document to be associable to a second
+   record. Do NOT attempt it before 095.
+
+⚠️ `UploadOperation` throws `UploadNameConflictError` on 409 **before** the generic failure. That
+ordering is load-bearing for the dialog — do not reorder it.
+
+⚠️ The shared client's failure translation handles TWO injected-fetch shapes (throwing vs returning);
+see `requestOrThrow`. Any new probe call must go through it, or its failures will be untyped.</background>
+  </context>
+
+  <knowledge>
+    <files>
+      <file>projects/unified-access-control-r2/notes/plan-upload-path-decomposition-2026-08-31.md</file>
+      <file>src/client/shared/Spaarke.SdapClient/src/operations/UploadOperation.ts</file>
+      <file>src/client/shared/Spaarke.SdapClient/src/operations/httpFailure.ts</file>
+      <file>src/client/shared/Spaarke.UI.Components/src/services/document-upload/MultiFileUploadService.ts</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+    </files>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="0">🔴 RE-SCOPE. Verify at current HEAD exactly which of the above is already shipped, and narrow this task to what remains. Record the narrowed scope before writing code.</step>
+    <step order="1">Decide probe vs reuse: can `ListChildrenAsync` answer "does this name exist in this container" without a new endpoint? Answer the §11 three questions either way.</step>
+    <step order="2">Wire the probe ahead of the byte transfer, reusing the EXISTING dialog and its two options. Do not author a second dialog.</step>
+    <step order="3">Keep the 409 path fully intact as the race-safe backstop; add a test proving a collision discovered ONLY at upload time still reaches the dialog.</step>
+    <step order="4">"Use existing" — only if 095 has landed. Otherwise leave it out and say so.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If answering the probe requires a new BFF endpoint, surface the §11 justification for owner review before adding it.</trigger>
+    <trigger>If 095 has not landed, do NOT implement "Use existing" — narrow the task and record why.</trigger>
+  </escalation>
+
+  <justification>
+    <existing>The collision dialog, the typed error, the retry-and-merge path and explicit `conflictBehavior` all exist and work.</existing>
+    <extension>This adds only the pre-flight question and (later) a third option to the SAME dialog.</extension>
+    <cost-of-doing-nothing>With a 250 MB ceiling, a user can wait out a long upload only to be asked a question that could have been asked immediately. The data-loss half is already fixed, so this is a UX-completeness item, not a correctness one — scope it accordingly.</cost-of-doing-nothing>
+  </justification>
+
+  <outputs>
+    <output type="code">Pre-flight collision probe ahead of byte transfer</output>
+    <output type="test">Collision discovered only at upload time still reaches the dialog</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion>A colliding name is detected and the user asked BEFORE the bytes are uploaded.</criterion>
+    <criterion>The 409 path still works and still reaches the same dialog (race backstop) — asserted by test.</criterion>
+    <criterion>No second collision dialog is authored; the shipped one is reused.</criterion>
+    <criterion>Any new endpoint carries the §11 three-question justification, or none was added.</criterion>
+    <criterion>"Use existing" is implemented only if 095 landed; otherwise its absence is recorded.</criterion>
+  </acceptance-criteria>
+
+  <notes>NOT STARTED. ⚠️ Scope is MUCH smaller than the plan note implies — see the background block.</notes>
+</task>

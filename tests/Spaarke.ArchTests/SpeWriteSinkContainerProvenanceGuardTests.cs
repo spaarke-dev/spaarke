@@ -164,6 +164,37 @@ public class SpeWriteSinkContainerProvenanceGuardTests
         ServerDerivedConfig,
 
         /// <summary>
+        /// The container comes from the ACTING USER's business unit, read server-side from Dataverse.
+        /// Added 2026-09-03 by task 076, implementing the owner's 2026-08-28 resolution order for content
+        /// that has no owning record at the moment the bytes move.
+        ///
+        /// <para><b>Why this is not <see cref="ServerDerivedRecord"/>.</b> That category means "a Dataverse
+        /// row the caller was authorized against" — the row that OWNS the content. Here no such row exists
+        /// yet; the container is derived from the caller's own user → business-unit chain. Filing these
+        /// under ServerDerivedRecord would blur the exact distinction this guard exists to draw, and would
+        /// hide the fact that the destination was chosen without an owning record to justify it.</para>
+        ///
+        /// <para><b>Why it is not <see cref="ClientSupplied"/> either.</b> The client cannot name the
+        /// container — the route carries no container parameter. The correct VALUE being the user's BU
+        /// container is a different claim from the CLIENT being allowed to send one, and that distinction
+        /// is the whole basis of the owner's answer.</para>
+        ///
+        /// <para><b>Why it cannot become a loophole.</b> It is admissible ONLY where no record exists.
+        /// Secure content can never arrive this way: secure records resolve through the record-keyed route
+        /// and fail closed, and for a secure record the acting user's BU is provably the WRONG container —
+        /// users sit in the Operations subtree while secure records are owned in <c>Secure Projects</c>.
+        /// A site claiming this provenance from a route that also accepts a record id is misclassified.</para>
+        ///
+        /// <para>🔴 <b>Known residual, accepted and separately filed.</b> Content placed in a BU container
+        /// this way and LATER associated to a secure record is already in the shared container, and SPE
+        /// permissions are additive-only, so nothing retracts it. See
+        /// <c>notes/finding-secure-transition-container-migration.md</c> — its own project by owner
+        /// direction 2026-08-31. It is strictly smaller than the behaviour it replaces, where the CLIENT
+        /// named the container.</para>
+        /// </summary>
+        ServerDerivedActingUser,
+
+        /// <summary>
         /// The container/drive comes from client route, query or body. FAILS unless the entry carries an
         /// owning task — the analogue of RouteAuthorizationGuardTests' UNOWNED rule. These are a work list
         /// that shrinks to zero, never exemptions.
@@ -271,6 +302,8 @@ public class SpeWriteSinkContainerProvenanceGuardTests
     //   Api/DocumentsEndpoints.cs:65                              UploadSmallAsync                    CLIENT
     //   Api/DocumentsEndpoints.cs:122                             DeleteFileAsync                     CLIENT
     //   Api/OBOEndpoints.cs:72                                    UploadSmallAsUserAsync              CLIENT
+    //     ^ ROUTE DELETED 2026-09-03 (task 076). Kept in this historical census because the census
+    //       records what the ORIGINAL scan found; the live set is the AllowList below.
     //   Api/SpeAdmin/ContainerItemEndpoints.cs:633                CreateFolderForConfigAsync          CLIENT  <-- NEW
     //   Api/SpeAdmin/ContainerItemEndpoints.cs:924                DeleteDriveItemForConfigAsync       CLIENT  <-- NEW
     //   Api/SpeAdmin/ContainerItemEndpoints.cs:1067               UploadFileToContainerForConfigAsync CLIENT  <-- NEW
@@ -315,18 +348,30 @@ public class SpeWriteSinkContainerProvenanceGuardTests
     private static readonly IReadOnlyList<SinkSite> AllowList = new[]
     {
         // ---------------------------------------------------------------------------------------------
-        // ClientSupplied — the work list. THREE sites, all owned.
+        // ClientSupplied — the work list. TWO sites, all owned. Both are in Api/DocumentsEndpoints.cs.
         //
-        // COUNT CORRECTED 2026-08-28, AND TWICE ON 2026-09-01. The header said "nine" on the day the guard
-        // was written when the block held TWELVE, then "eleven" while the block actually held EIGHT, then
-        // "seven" when a machine count says SIX — the prose count is enforced by nothing (Rule A pins
-        // AllowList.Count against the DISCOVERED set, not against a number in a comment), so it drifts
-        // EVERY time, including in the same edit that corrects it. Recounted at THREE on 2026-09-01, after
-        // issue #858 converted the Compose create-on-save mint and the drive-provenance fix converted the
-        // three ComposeSaveStorageCoordinator replace sinks, both to ServerDerivedRecord.
+        // COUNT CORRECTED 2026-08-28, TWICE ON 2026-09-01, AND AGAIN AT THE 2026-09-03 MERGE. The header
+        // said "nine" on the day the guard was written when the block held TWELVE, then "eleven" while the
+        // block actually held EIGHT, then "seven" when a machine count said SIX — the prose count is
+        // enforced by nothing (Rule A pins AllowList.Count against the DISCOVERED set, not against a
+        // number in a comment), so it drifts EVERY time, including in the same edit that corrects it.
+        //
+        // ⚠️ THE 2026-09-03 MERGE IS THE SHARPEST INSTANCE YET, and it is why this paragraph is kept.
+        // TWO branches each shrank this list, and each wrote its own count in this same header — so the
+        // merge conflicted on the NUMBER while both bodies merged cleanly. Neither number was right
+        // afterward:
+        //   · compose-r8 wrote THREE  — true on its branch: #858 converted the Compose create-on-save
+        //     mint, and the drive-provenance fix converted the three ComposeSaveStorageCoordinator
+        //     replace sinks, all to ServerDerivedRecord.
+        //   · unified-access-control-r2 wrote SIX — true on ITS branch: task 076 deleted the route behind
+        //     `Api/OBOEndpoints.cs :: UploadSmallAsUserAsync #1`, so that sink left the list. There is no
+        //     longer a ClientSupplied upload sink in OBOEndpoints.cs at all.
+        // Both reductions are real and they compose. The merged answer is TWO, and it was obtained by
+        // running the grep below — NOT by picking a side, and NOT by subtracting one prose number from
+        // the other.
         //
         // Recount with `grep -c "^            Provenance.ClientSupplied,"` rather than by reading — that
-        // is a machine count, and the four wrong numbers above are the argument for taking one.
+        // is a machine count, and the five wrong numbers above are the argument for taking one.
         // ---------------------------------------------------------------------------------------------
         new SinkSite("Api/DocumentsEndpoints.cs", "UploadSmallAsync", 1,
             Provenance.ClientSupplied, "083 (row 4)",
@@ -346,15 +391,17 @@ public class SpeWriteSinkContainerProvenanceGuardTests
             + "the worst case for a wrong-resource-domain decision because, unlike a misplaced write, there "
             + "is not even a record left to audit afterwards."),
 
-        new SinkSite("Api/OBOEndpoints.cs", "UploadSmallAsUserAsync", 1,
-            Provenance.ClientSupplied, "076 (converting)",
-            "route parameter {id} (container), via ResolveDriveIdAsync",
-            "PUT /api/obo/containers/{id}/files/{*path} — the surviving live upload route after task 071 "
-            + "deleted the four dead read/mutate routes and 076 deleted the dead chunked pair. It runs under "
-            + "OBO, so the user's own container ACL is the only thing standing between the request and the "
-            + "container it names (ADR-007 SpeFileStore; ADR-003 requires the container follow the record). "
-            + "Task 076 CONVERTS it to the record-keyed contract; the entry goes when the conversion lands "
-            + "and must never become permanent."),
+        // 🔴 DELETED 2026-09-03: the ClientSupplied entry for
+        // `Api/OBOEndpoints.cs :: UploadSmallAsUserAsync #1`, which described
+        // `PUT /api/obo/containers/{id}/files/{*path}` — a route that took its container straight
+        // from a route parameter. The ROUTE was deleted (task 076, client cutover complete), so the
+        // declaration went with it. It never became permanent, which was the standing requirement.
+        //
+        // ⚠️ ORDINALS IN THIS FILE SHIFTED AS A RESULT. Ordinals are assigned per (file, sink) in
+        // FILE order, so removing the FIRST `UploadSmallAsUserAsync` call site in OBOEndpoints.cs
+        // renumbered the two below it: #2 -> #1 and #3 -> #2. Deleting this entry without
+        // renumbering those fails Rule A in both directions at once — two undeclared sites AND two
+        // stale declarations, in one run.
 
         // ── The three SPE-Admin item writes ───────────────────────────────────────────────────────
         //
@@ -450,7 +497,7 @@ public class SpeWriteSinkContainerProvenanceGuardTests
             + "caller-named matter is the same primitive one hop earlier. Unresolvable container -> honest "
             + "container-step failure (never a write); denial / unsupported host / unattributable caller "
             + "-> typed 403/409. The acting-user leg is record-PLANE derivation (the caller's own "
-            + "systemuser row), filed ServerDerivedRecord like OBOEndpoints ordinal 2 rather than "
+            + "systemuser row), filed ServerDerivedRecord like OBOEndpoints ordinal 1 rather than "
             + "ServerDerivedConfig, because nothing about it is configuration."),
 
         // ── The ordinary Compose save replace MOVED, 2026-08-30 ────────────────────────────────────
@@ -676,7 +723,7 @@ public class SpeWriteSinkContainerProvenanceGuardTests
         //
         // Both are the SANCTIONED shape, traced not assumed — hence ServerDerivedRecord and no owning
         // task. This is a declaration gap being closed, not a hole being waived.
-        new SinkSite("Api/OBOEndpoints.cs", "UploadSmallAsUserAsync", 2,
+        new SinkSite("Api/OBOEndpoints.cs", "UploadSmallAsUserAsync", 1,
             Provenance.ServerDerivedRecord, "",
             "RecordContainerResolver.ResolveForRecordAsync(entityLogicalName, recordId) -> decision.ContainerId",
             "The task-076 record-keyed upload route: the container is derived from the RECORD named in the "
@@ -685,9 +732,24 @@ public class SpeWriteSinkContainerProvenanceGuardTests
             + "ADR-007 SpeFileStore). An Unresolved decision returns 409 rather than defaulting, and a "
             + "secure record with no container of its own throws secure_record_container_missing. Note "
             + "what is and is not client-supplied here: {*path} IS the caller's, but this guard classifies "
-            + "the CONTAINER's origin, and the container is the record's. Contrast ordinal 1 in this same "
-            + "file — the container-KEYED route — which is ClientSupplied and deliberately still present "
-            + "for the three upload paths that have no owning record."),
+            + "the CONTAINER's origin, and the container is the record's. This was ordinal 2 until "
+            + "2026-09-03, when the container-KEYED route that held ordinal 1 was deleted; there is no "
+            + "longer any ClientSupplied upload sink in this file."),
+
+        new SinkSite("Api/OBOEndpoints.cs", "UploadSmallAsUserAsync", 2,
+            Provenance.ServerDerivedActingUser, "",
+            "RecordContainerResolver.ResolveForActingUserAsync(callerOid) -> decision.ContainerId",
+            "The task-076 record-LESS upload route (PUT /api/obo/me/files/{*path}), for content with no "
+            + "owning record at the moment the bytes move: EmailComposer local attachments, the Analysis "
+            + "wizard's standalone document, and DocumentUploadWizard 'skip associate'. The route carries "
+            + "NO container parameter, so the caller cannot name a destination — the container is derived "
+            + "server-side from the acting user's business unit, per the owner's 2026-08-28 resolution "
+            + "order (ADR-003 fail-closed; ADR-007 SpeFileStore). A caller who cannot be resolved to a "
+            + "Dataverse principal gets a typed 403 (acting_user_not_resolvable), and a business unit with "
+            + "no sprk_containerid returns 409 — neither falls back to a shared container. Secure content "
+            + "never reaches this sink: secure records go through ordinal 1 (the record-keyed route) and "
+            + "fail closed there. This was ordinal 3 until 2026-09-03; providing this route is what made "
+            + "the container-KEYED legacy route deletable, and it was deleted the same day."),
 
         new SinkSite("Api/OBOEndpoints.cs", "CreateUploadSessionAsUserAsync", 1,
             Provenance.ServerDerivedRecord, "",
