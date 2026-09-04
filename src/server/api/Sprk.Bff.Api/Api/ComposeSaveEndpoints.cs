@@ -136,6 +136,8 @@ internal static class ComposeSaveEndpoints
             // its SPE id; the dedup only runs in the transient-create branch).
             TransientKey = body.TransientKey,
             ForkNew = body.ForkNew,
+            // R8 UAT item 8 — without this line the client's revisionReport is dropped silently.
+            RevisionReport = body.RevisionReport,
         };
 
         return await ExecuteSaveAsync(request, documentSpeId, composeService, logger, httpContext, ct).ConfigureAwait(false);
@@ -208,6 +210,12 @@ internal static class ComposeSaveEndpoints
             // C2 (UAT 2026-07-20): the client paraId map — carried for symmetry (the stamper is a no-op on the
             // born-in-editor ContentModel path, where the renderer already mints ids into the bytes it authors).
             ParaIdMap = body.ParaIdMap,
+            // R8 UAT item 8: RevisionReport is deliberately NOT mapped here. A revision report summarises
+            // tracked changes read from a STORED document, and this route exists for a draft that has no
+            // SPE item yet — so it cannot legitimately arrive. The client agrees (the field rides
+            // `replaceCommon`, never the create shape). Stated rather than omitted, so a future reader
+            // sees a decision instead of the same silent-drop bug this field was added to fix.
+            //
             // G7 (task 022): the transient-key dedup identity + Save-New fork flag — the whole point of this
             // route (the transient-create branch). transientKey dedups repeated create-on-save to ONE record;
             // forkNew forces a fresh record ("Save New Document").
@@ -667,7 +675,22 @@ public sealed record SaveComposeDocumentBody(
     // create derives from — sent by the client on a PDF-sourced create-on-save so the new Word document
     // INHERITS the source PDF's record links (matter/project/… — filed alongside the PDF). Optional/
     // trailing (ADR-040 additive); null = no inheritance (every pre-existing flow).
-    [property: JsonPropertyName("sourceDocumentRecordId")] Guid? SourceDocumentRecordId = null);
+    [property: JsonPropertyName("sourceDocumentRecordId")] Guid? SourceDocumentRecordId = null,
+    /// <summary>
+    /// R8 UAT item 8: the "Include revision report" appendix — the ledgered
+    /// <c>compose-summarize-word-changes</c> result plus the document identity the report is scoped to.
+    /// When present AND non-empty, <see cref="IComposeService.SaveAsync"/> appends a Document Revision
+    /// Report section via <c>ComposeDocumentRenderer.AppendSection</c>. Optional/trailing (ADR-040
+    /// additive); null on every ordinary save.
+    /// <para>
+    /// <b>This field exists because its absence made the whole feature dead.</b> The endpoint maps this
+    /// body onto <see cref="SaveComposeDocumentRequest"/> FIELD BY FIELD, and unknown JSON properties are
+    /// silently ignored — so a client sending <c>revisionReport</c> against a DTO without it loses the
+    /// payload with no error anywhere. See <see cref="SaveComposeDocumentRequest.SummaryPage"/>, which
+    /// still has exactly that defect.
+    /// </para>
+    /// </summary>
+    [property: JsonPropertyName("revisionReport")] ComposeRevisionReportInput? RevisionReport = null);
 
 /// <summary>Response shape for <c>POST /api/compose/documents/{id}/save</c>.</summary>
 public sealed record SaveComposeDocumentResponse(
