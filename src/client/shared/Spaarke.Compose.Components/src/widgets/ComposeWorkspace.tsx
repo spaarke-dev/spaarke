@@ -96,6 +96,8 @@ import {
 import { resolveAnchorParaIds } from './composeAnchorResolution';
 import { describeAnchorlessProposal } from './redlineFailureCopy';
 import type { ComposeActionEnqueue } from './ComposeAiToolbar';
+import { getComposeAiToolbarActions } from './ComposeAiToolbar';
+import { useComposeChangeSummary } from './hooks/useComposeChangeSummary';
 // spaarkeai-compose-r1 task 093: deep-import from `@spaarke/ai-widgets/events`
 // rather than the barrel `@spaarke/ai-widgets` to skip the barrel's side-effect
 // widget registration (`register-workspace-widgets.ts` transitively pulls in
@@ -1558,6 +1560,98 @@ export function ComposeWorkspace(props: ComposeWorkspaceProps): React.JSX.Elemen
   const { summary: reanchorSummary, reanchor: runReanchor, reset: resetReanchor } = useComposeReanchor({ bffBaseUrl });
   const { pull: pullAnnotations } = useComposePullAnnotations({ bffBaseUrl });
   const { checkChanges } = useComposeCheckChanges({ bffBaseUrl });
+
+  // -------------------------------------------------------------------------
+  // R8 UAT item 8 — "Summarise changes" (Word menu). The flow hook owns the four outcomes; this
+  // block owns what each one MEANS to the user:
+  //   needs-save  → ask (the summary reads STORED bytes, so unsaved edits would be missing from it)
+  //   no-changes  → tell them (the action was ASKED for; silence would read as a broken button, and
+  //                 dispatching anyway is what makes the model invent a change that is not there)
+  //   dispatched  → nothing here; the Assistant renders the result
+  //   failed      → tell them, without server detail (ADR-019)
+  // -------------------------------------------------------------------------
+  const [changeSummaryMessage, setChangeSummaryMessage] = React.useState<string | null>(null);
+  const [changeSummarySavePrompt, setChangeSummarySavePrompt] = React.useState(false);
+
+  const { running: changeSummaryRunning, requestSummary } = useComposeChangeSummary({
+    isEditorDirty: () => editorRef.current?.isDirty() ?? false,
+    pull: pullAnnotations,
+    dispatch: async changesText => {
+      // The bindingId is read at CLICK time from the activation registry rather than held in state:
+      // `useComposeToolbarActivation` fills it in asynchronously after the capabilities fetch, and a
+      // snapshot taken at mount would be the empty stub forever.
+      const bindingId = getComposeAiToolbarActions().find(a => a.id === 'compose-summarize-word-changes')?.bindingId;
+      if (!bindingId) {
+        // The catalog Binding is not deployed in this environment. Honest and specific — the generic
+        // failure copy would send someone hunting for a bug in the document instead.
+        throw new Error('binding-not-deployed');
+      }
+      if (!enqueueComposeAction) throw new Error('no-enqueue');
+      await enqueueComposeAction({
+        id: `compose-summarize-word-changes#${Date.now()}`,
+        bindingId,
+        args: { slots: { changesText } },
+      });
+    },
+  });
+
+  const runChangeSummary = React.useCallback(async (): Promise<void> => {
+    const speId = state.documentRef?.speDriveItemId;
+    if (!speId || !effectiveDriveId || !tenantId) {
+      setChangeSummaryMessage(
+        'This document has not been saved to the DMS yet, so there are no tracked changes to read.'
+      );
+      return;
+    }
+
+    setChangeSummaryMessage(null);
+    const outcome = await requestSummary({ documentSpeId: speId, driveId: effectiveDriveId, tenantId });
+
+    switch (outcome.kind) {
+      case 'needs-save':
+        setChangeSummarySavePrompt(true);
+        return;
+      case 'no-changes':
+        setChangeSummaryMessage('This document has no tracked changes or comments to summarise.');
+        return;
+      case 'failed':
+        setChangeSummaryMessage(outcome.message);
+        return;
+      case 'dispatched':
+        // The Assistant renders the summary. Nothing to say here — a banner would duplicate it.
+        return;
+    }
+  }, [state.documentRef?.speDriveItemId, effectiveDriveId, tenantId, requestSummary]);
+
+  const handleSummarizeChanges = React.useCallback((): void => {
+    void runChangeSummary();
+  }, [runChangeSummary]);
+
+  // "Save and summarise" must actually summarise. `requestSave` is fire-and-forget (it can route
+  // through the name modal), so completion is observed the way the rest of this file observes it —
+  // a bump in `state.saveSuccessToken` — and the summary resumes on that edge.
+  //
+  // The name-modal detour is unreachable HERE by construction: `runChangeSummary` refuses unless the
+  // document already has an speDriveItemId, and a document that is already in the DMS never needs a
+  // name. So "user cancels the name modal, leaving this armed" cannot strand the flag.
+  const resumeSummaryAfterSaveRef = React.useRef(false);
+  const lastSeenSaveTokenRef = React.useRef(state.saveSuccessToken);
+
+  React.useEffect(() => {
+    const token = state.saveSuccessToken;
+    const previous = lastSeenSaveTokenRef.current;
+    lastSeenSaveTokenRef.current = token;
+
+    if (!resumeSummaryAfterSaveRef.current || token === previous) return;
+    resumeSummaryAfterSaveRef.current = false;
+    void runChangeSummary();
+  }, [state.saveSuccessToken, runChangeSummary]);
+
+  // A failed save must DISARM the resume — otherwise the next unrelated successful save would fire a
+  // summary the user never asked for at that moment.
+  React.useEffect(() => {
+    if (state.errorMessage) resumeSummaryAfterSaveRef.current = false;
+  }, [state.errorMessage]);
 
   // FIX #5 (UAT): Open-in-Word (Web + Desktop) handlers for the consolidated
   // toolbar's "Word" dropdown. Bound HERE (the host) and threaded to ComposeEditor
@@ -4964,6 +5058,7 @@ export function ComposeWorkspace(props: ComposeWorkspaceProps): React.JSX.Elemen
             onClearRedlineError={() => editorRef.current?.clearRedlineError()}
             composeDraftError={composeDraftError}
             memoActionMessage={memoActionMessage}
+            changeSummaryMessage={changeSummaryMessage}
           />
 
           {/* ai-advanced-capabilities-nda-r1 UAT round-5 #1 — the Review Summary panel MOVED from here
@@ -5015,6 +5110,8 @@ export function ComposeWorkspace(props: ComposeWorkspaceProps): React.JSX.Elemen
                 void openInWordFlushed('desktop');
               }}
               wordActionsDisabled={wordActionsDisabled}
+              // R8 UAT item 8 — the Word-menu "Summarise changes" trigger.
+              onSummarizeChanges={handleSummarizeChanges}
               // G7 (task 022): the toolbar Save split-button threads its choice ('version' default /
               // 'new' fork) into the save path. FR-02 (task 030): route through requestSave so a first
               // create-on-save / Save As opens the name modal (UC-3) before persisting. Ctrl+S also
@@ -5199,6 +5296,32 @@ export function ComposeWorkspace(props: ComposeWorkspaceProps): React.JSX.Elemen
           void forceCloseAndAcquire();
         }}
         onCancel={discardAndCancel}
+      />
+
+      {/* R8 UAT item 8 — the unsaved-changes question (owner requirement, 2026-09-03).
+          `pull-annotations` reads the document's STORED bytes, so a summary generated now would
+          silently omit whatever is unsaved. That is tolerable in a panel and a defect in a memo the
+          user attaches to an email, so we ask rather than proceed.
+
+          Confirm SAVES and then re-runs; Cancel abandons. The flow hook never saves on the user's
+          behalf — that decision lives here, with the user, which is why the hook returns
+          `needs-save` instead of handling it. */}
+      <ConfirmModal
+        open={changeSummarySavePrompt}
+        busy={changeSummaryRunning}
+        title="Unsaved changes"
+        message="There are unsaved changes. The summary is generated from the last saved version, so anything unsaved would be left out of it. Save before generating the summary?"
+        confirmLabel="Save and summarise"
+        cancelLabel="Cancel"
+        onClose={() => setChangeSummarySavePrompt(false)}
+        onConfirm={() => {
+          setChangeSummarySavePrompt(false);
+          // Arm the resume BEFORE requesting the save, so a synchronous completion cannot land
+          // between the two. Deliberately not a silent save inside the flow hook: the user has now
+          // asked for it explicitly, which is the whole point of the prompt.
+          resumeSummaryAfterSaveRef.current = true;
+          requestSave('version');
+        }}
       />
 
       {/* FR-C05 (r8 task 052) — the stale-target question. NOT an ADR-041 Gate (task-050 assessment

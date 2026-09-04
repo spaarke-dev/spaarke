@@ -801,6 +801,13 @@ export interface ComposeEditorProps {
   onOpenInWordDesktop?: () => void;
   /** Disables the two Open-in-Word items (no persisted document, or an action in flight). */
   wordActionsDisabled?: boolean;
+  /**
+   * R8 UAT item 8 — "Summarise changes" in the Word menu. Pure passthrough to
+   * {@link ComposeFormatToolbar}; the host owns the flow (save gate → pull → produce → dispatch) and
+   * the rendering of its outcomes, because all four of them are host concerns (a save prompt, a
+   * notice, an Assistant dispatch). Omitted ⇒ the menu item does not render.
+   */
+  onSummarizeChanges?: () => void;
   /** Save handler (create-on-save first Save, or update). Renders the Save split-button when set.
    *  G7 (task 022): receives the split-button choice — `'version'` (default, replace/dedup) or `'new'`
    *  (fork a new document). A bare call (Ctrl+S / cross-pane bridge) defaults to `'version'`. */
@@ -2174,6 +2181,7 @@ export const ComposeEditor = React.forwardRef<ComposeEditorHandle, ComposeEditor
       enqueueComposeAction,
       onOpenInWord,
       onOpenInWordDesktop,
+      onSummarizeChanges,
       wordActionsDisabled,
       onSave,
       canSave,
@@ -3691,6 +3699,7 @@ export const ComposeEditor = React.forwardRef<ComposeEditorHandle, ComposeEditor
           hasLoadedBaseline={docxBytes !== null || projection != null}
           onOpenInWord={onOpenInWord}
           onOpenInWordDesktop={onOpenInWordDesktop}
+          onSummarizeChanges={onSummarizeChanges}
           wordActionsDisabled={wordActionsDisabled}
           onSave={onSave}
           canSave={canSave}
