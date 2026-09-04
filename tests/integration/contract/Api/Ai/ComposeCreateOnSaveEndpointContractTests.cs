@@ -220,6 +220,136 @@ public sealed class ComposeCreateOnSaveEndpointContractTests
         }
     }
 
+    // G7 / FR-06 (task 022) — THE TRANSIENT-KEY DEDUP GUARANTEE, and why this test exists.
+    //
+    // `ComposeService` resolves the client-minted transient key against the durable
+    // `sprk_composetransientkey_uk` alt-key BEFORE minting, so repeated create-on-save calls with the
+    // same key replace ONE record in place instead of minting duplicates — the production defect the
+    // field comment calls "the 8-duplicate defect".
+    //
+    // That guarantee had NO test. Found by the task-070 cluster-2b mutation pass: making
+    // `TryFindDocumentByTransientKeyAsync` match nothing at all left the whole Compose suite
+    // (1,813 tests) GREEN. A dedup path that can silently stop deduplicating, on a defect that has
+    // already shipped once, is exactly the shape ADR-038's regression rule exists for.
+    //
+    // The Dataverse mock below is deliberately KEY-SENSITIVE — it answers only for the REAL transient
+    // key. A mock that answered any alternate-key lookup would keep passing under that mutation and
+    // reintroduce the hole in test form.
+    [Fact]
+    public async Task CreateOnSave_WhenTransientKeyMatchesAnExistingRow_ReplacesInPlaceAndMintsNoDuplicate()
+    {
+        // ── Arrange ────────────────────────────────────────────────────────────────────────────
+        const string containerId = "b!container-bu-dedup";
+        const string transientKey = "transient-key-dedup-001";
+        const string existingSpeItemId = "spe-item-existing-dedup";
+        const string existingDriveId = "drive-existing-dedup";
+        var existingDocumentId = Guid.NewGuid();
+        var wouldBeNewDocumentId = Guid.NewGuid();
+
+        _fixture.ResetBoundaries();
+
+        var existingRow = new Entity("sprk_document", existingDocumentId);
+        existingRow["sprk_documentid"] = existingDocumentId;
+        existingRow["sprk_graphitemid"] = existingSpeItemId;
+        existingRow["sprk_graphdriveid"] = existingDriveId;
+
+        // KEY-SENSITIVE: the row is findable by its REAL transient key, and (for the idempotent
+        // promote step that follows the replace) by its graph-item id. Any other key value is a miss.
+        _fixture.DataverseMock
+            .Setup(d => d.RetrieveByAlternateKeyAsync(
+                It.IsAny<string>(), It.IsAny<KeyAttributeCollection>(),
+                It.IsAny<string[]>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync((string _, KeyAttributeCollection key, string[] _, CancellationToken _) =>
+            {
+                if (key.TryGetValue("sprk_composetransientkey", out var tk)
+                    && string.Equals(tk as string, transientKey, StringComparison.Ordinal))
+                {
+                    return existingRow;
+                }
+
+                if (key.TryGetValue("sprk_graphitemid", out var gid)
+                    && string.Equals(gid as string, existingSpeItemId, StringComparison.Ordinal))
+                {
+                    return existingRow;
+                }
+
+                return null!;
+            });
+
+        // If the dedup fails to resolve, the mint branch runs and creates a DIFFERENT record — which
+        // is what the assertions below detect.
+        _fixture.DataverseMock
+            .Setup(d => d.UpsertAsync(It.IsAny<Entity>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync((wouldBeNewDocumentId, true));
+
+        _fixture.SpeMock
+            .Setup(s => s.ResolveDriveIdAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync("drive-should-not-be-used");
+        _fixture.SpeMock
+            .Setup(s => s.ReplaceFileContentAsUserAsync(
+                It.IsAny<HttpContext>(), It.IsAny<string>(), It.IsAny<string>(),
+                It.IsAny<Stream>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new FileHandleDto(
+                Id: existingSpeItemId,
+                Name: "draft.docx",
+                ParentId: null,
+                Size: DraftBytes.Length,
+                CreatedDateTime: DateTimeOffset.UtcNow,
+                LastModifiedDateTime: DateTimeOffset.UtcNow,
+                ETag: "\"v2-etag\"",
+                IsFolder: false,
+                WebUrl: null,
+                DriveId: existingDriveId));
+
+        _fixture.IndexingMock
+            .Setup(i => i.EnqueueIfApplicableAsync(
+                It.IsAny<PostUploadIndexingRequest>(), It.IsAny<HttpContext>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(PostUploadIndexingResult.Submitted(Guid.NewGuid()));
+
+        string sessionId;
+        using (var scope = _fixture.Services.CreateScope())
+        {
+            var sessions = scope.ServiceProvider.GetRequiredService<ChatSessionManager>();
+            var session = await sessions.CreateSessionAsync(
+                ComposeCreateOnSaveFixture.TestTenantId, TestSessionOwner.Oid, documentId: null);
+            sessionId = session.SessionId;
+        }
+
+        using var client = _fixture.CreateAuthenticatedClient();
+
+        // ── Act: create-on-save carrying the transient key of an ALREADY-CREATED record ──────────
+        var response = await client.PostAsJsonAsync(
+            "/api/compose/documents/create-on-save",
+            new
+            {
+                containerId,
+                tenantId = ComposeCreateOnSaveFixture.TestTenantId,
+                sessionId,
+                content = DraftBytes,
+                displayName = "draft.docx",
+                transientKey,
+            });
+
+        // ── Assert ───────────────────────────────────────────────────────────────────────────────
+        response.StatusCode.Should().Be(HttpStatusCode.OK);
+        var result = await response.Content.ReadFromJsonAsync<SaveComposeDocumentResponse>();
+        result.Should().NotBeNull();
+
+        result!.DocumentRecordId.Should().Be(existingDocumentId,
+            "the transient key resolved to the EXISTING sprk_document — a second row here is the 8-duplicate defect");
+        result.DocumentRecordId.Should().NotBe(wouldBeNewDocumentId,
+            "the mint branch must not have run");
+
+        _fixture.SpeMock.Verify(s => s.ReplaceFileContentAsUserAsync(
+                It.IsAny<HttpContext>(), existingDriveId, existingSpeItemId,
+                It.IsAny<Stream>(), It.IsAny<CancellationToken>()), Times.Once,
+            "a dedup hit replaces the EXISTING drive-item's content in place");
+        _fixture.SpeMock.Verify(s => s.UploadSmallAsUserAsync(
+                It.IsAny<HttpContext>(), It.IsAny<string>(), It.IsAny<string>(),
+                It.IsAny<Stream>(), It.IsAny<CancellationToken>()), Times.Never,
+            "no NEW drive-item is minted when the transient key already resolves to one");
+    }
+
     // Task 041 B-MED-3 (operator resolution 2026-08-07, option C): a PDF-sourced create-on-save
     // carries the SOURCE sprk_document id and the new record INHERITS the source's record links
     // (ADR-024 document link set) — the new Word document files ALONGSIDE the source PDF.

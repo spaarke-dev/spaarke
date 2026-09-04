@@ -64,7 +64,14 @@ public class ComposeRouteSurfaceContractTests : IClassFixture<CustomWebAppFactor
         "POST api/compose/documents/{documentSpeId}/apply-template | name=ComposeApplyTemplate | auth=authorize | rateLimit=ai-persist | tags=Compose | produces=200,400,401,403,404,500 | sizeLimit=default",
         "POST api/compose/documents/{documentSpeId}/promote | name=ComposePromoteDocument | auth=authorize | rateLimit=ai-context | tags=Compose | produces=200,400,401,500 | sizeLimit=default",
         "POST api/compose/documents/{documentSpeId}/save | name=ComposeSaveDocument | auth=authorize | rateLimit=ai-persist | tags=Compose | produces=200,400,401,404,500 | sizeLimit=raised",
-        "POST api/compose/project | name=ComposeProject | auth=authorize | rateLimit=ai-context | tags=Compose | produces=200,400,401 | sizeLimit=default",
+        // sizeLimit default -> raised (#696, 2026-09-01): this door runs synchronous OOXML projection on
+        // caller-supplied bytes and had only Kestrel's implicit ~28.6 MB cap. Now bounded on the same two
+        // levels as the save routes, from the same ComposeSaveLimits constants. `raised` here means the
+        // transport cap is MaxRequestBodyBytes (1.5x the document limit) — LARGER than the default, so a
+        // legal 25 MB document reaches the handler and is refused, if at all, by a 400 ProblemDetails that
+        // names the limit. `produces` is unchanged for the same reason the save routes leave it unchanged:
+        // 413 is a transport backstop, not a declared outcome.
+        "POST api/compose/project | name=ComposeProject | auth=authorize | rateLimit=ai-context | tags=Compose | produces=200,400,401 | sizeLimit=raised",
         "POST api/compose/sessions/{sessionId}/annotations | name=ComposeSaveAnnotations | auth=authorize | rateLimit=ai-context | tags=Compose | produces=200,400,401,404,500 | sizeLimit=default",
         "POST api/compose/upload | name=ComposeUpload | auth=authorize | rateLimit=ai-context | tags=Compose | produces=200,400,401,404,500 | sizeLimit=default",
         "POST api/compose/webhooks/spe-doc-changed | name=ComposeSpeDocChangedWebhook | auth=anonymous | rateLimit=webhook-graph | tags=Compose | produces=200,202,400,401,429,500 | sizeLimit=default",

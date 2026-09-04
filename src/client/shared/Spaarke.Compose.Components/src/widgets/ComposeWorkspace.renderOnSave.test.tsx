@@ -37,7 +37,7 @@
  */
 
 import * as React from 'react';
-import { render, screen, waitFor, act, fireEvent } from '@testing-library/react';
+import { fireEvent, render, screen, waitFor, act } from '@testing-library/react';
 import { FluentProvider, webLightTheme } from '@fluentui/react-components';
 
 // Fluent's MessageBar uses ResizeObserver, which jsdom lacks.
@@ -528,20 +528,23 @@ describe('ComposeWorkspace — imported save-routing flip (task 012)', () => {
 
     // The SEPARATE save-warning banner renders (the workspace passes hideImportWarnings, which
     // suppresses only the load-time import banner — the 026-F5 bug was save warnings dying there).
-    const banner = await screen.findByTestId('compose-workspace-save-degradation-banner');
+    // UAT round 1 #2: the copy moved behind the collapsed row's popover — open it, then read the notice.
+    fireEvent.click(await screen.findByTestId('compose-workspace-formatting-notices-open'));
+    const banner = await screen.findByTestId('compose-workspace-save-degradation-notice');
     // Duplicate codes merged with summed counts (2 mapper + 1 server = ×3) + friendly copy.
     expect(banner.textContent).toContain('A text box was converted to regular text. (×3)');
     expect(banner.textContent).toContain("A comment's anchor could not be placed; the comment text was kept.");
-    expect(screen.queryByTestId('compose-workspace-import-warning-banner')).not.toBeInTheDocument();
+    // hideImportWarnings suppresses the IMPORT family only; the save family must survive it (026-F5).
+    // With both collapsed behind one row, that is now asserted on the notice inside the popover rather
+    // than on a second top-level banner.
+    expect(screen.queryByTestId('compose-workspace-import-warning-notice')).not.toBeInTheDocument();
 
     // A clean second save (no server warnings, no mapper warnings) CLEARS the stale banner.
     config.builtResult = { model: BUILT_MODEL, warnings: [] };
     config.saveDegradationWarnings = undefined;
     await clickSave();
     await waitFor(() => expect(saveRequests).toHaveLength(2));
-    await waitFor(() =>
-      expect(screen.queryByTestId('compose-workspace-save-degradation-banner')).not.toBeInTheDocument()
-    );
+    await waitFor(() => expect(screen.queryByTestId('compose-workspace-formatting-notices')).not.toBeInTheDocument());
   });
 
   // Task 044 (r8) SUPERSEDES task 013's F7 fold. The old test asserted that a model-path save folds the
@@ -571,9 +574,7 @@ describe('ComposeWorkspace — imported save-routing flip (task 012)', () => {
     // No banner at all: nothing the server reported, nothing the mapper reported, and the held flatten
     // warnings are no longer folded. A false "Some formatting was simplified when saving" here is exactly
     // what trains a reader to ignore the true ones.
-    await waitFor(() =>
-      expect(screen.queryByTestId('compose-workspace-save-degradation-banner')).not.toBeInTheDocument()
-    );
+    await waitFor(() => expect(screen.queryByTestId('compose-workspace-formatting-notices')).not.toBeInTheDocument());
   });
 
   it('task 044: the SERVER remains authoritative — a real loss it reports still reaches the banner', async () => {
@@ -588,7 +589,9 @@ describe('ComposeWorkspace — imported save-routing flip (task 012)', () => {
     await clickSave();
     await waitFor(() => expect(saveRequests).toHaveLength(1));
 
-    const banner = await screen.findByTestId('compose-workspace-save-degradation-banner');
+    // UAT round 1 #2: the copy moved behind the collapsed row's popover — open it, then read the notice.
+    fireEvent.click(await screen.findByTestId('compose-workspace-formatting-notices-open'));
+    const banner = await screen.findByTestId('compose-workspace-save-degradation-notice');
     // The server's real finding is shown...
     expect(banner.textContent).toContain('A line break inside an edited paragraph was dropped.');
     // ...and the stale mount-time flatten warning is NOT, because that block was cloned.
@@ -609,7 +612,9 @@ describe('ComposeWorkspace — imported save-routing flip (task 012)', () => {
     await clickSave();
     await waitFor(() => expect(saveRequests).toHaveLength(1));
 
-    const banner = await screen.findByTestId('compose-workspace-save-degradation-banner');
+    // UAT round 1 #2: the copy moved behind the collapsed row's popover — open it, then read the notice.
+    fireEvent.click(await screen.findByTestId('compose-workspace-formatting-notices-open'));
+    const banner = await screen.findByTestId('compose-workspace-save-degradation-notice');
     // The PDF intake already reflowed the source into the synthesized carrier — that loss is real
     // whatever the save does, so it must still surface.
     expect(banner.textContent.length).toBeGreaterThan(0);
@@ -631,7 +636,7 @@ describe('ComposeWorkspace — imported save-routing flip (task 012)', () => {
 
     // No banner: the retained flatten warnings were NOT folded (and stay retained for a later
     // model-path save, per the reducer lifecycle guarded in the reducer suite).
-    expect(screen.queryByTestId('compose-workspace-save-degradation-banner')).not.toBeInTheDocument();
+    expect(screen.queryByTestId('compose-workspace-formatting-notices')).not.toBeInTheDocument();
   });
 
   it('falls back to the op-log shape when the mapper returns null (editor unavailable)', async () => {
@@ -690,7 +695,12 @@ describe('ComposeWorkspace — imported save-routing flip (task 012)', () => {
     expect(body.displayName).toBe('uploaded.docx');
     expect(body.contentModel).toEqual(BUILT_MODEL);
     expect(body.content).toBe(CONTENT_B64);
-    expect(body.containerId).toBe('bu-container-1');
+    // #858 (2026-09-01): the create-on-save body MUST NOT carry a container. The server derives it
+    // from the session-bound matter (authorized first) or the acting user's business unit, and
+    // `SaveComposeDocumentRequest.ContainerId` no longer exists. This assertion is INVERTED from what
+    // it was — it used to pin `'bu-container-1'`, i.e. it pinned the defect. The host still passes a
+    // `containerId` PROP (it feeds client state); what must not happen is it reaching the wire.
+    expect(body.containerId).toBeUndefined();
     expect(typeof body.transientKey).toBe('string');
     expect(body.forkNew).toBe(false);
     expect(body.operationLog).toBeUndefined();
@@ -794,7 +804,12 @@ describe('ComposeWorkspace — PDF-sourced save routing (task 042 / FR-06)', () 
     // Model shape (dirty imported create): merged model + retained synthesized bytes as carrier.
     expect(body.contentModel).toEqual(BUILT_MODEL);
     expect(body.content).toBe(CONTENT_B64);
-    expect(body.containerId).toBe('bu-container-1');
+    // #858 (2026-09-01): the create-on-save body MUST NOT carry a container. The server derives it
+    // from the session-bound matter (authorized first) or the acting user's business unit, and
+    // `SaveComposeDocumentRequest.ContainerId` no longer exists. This assertion is INVERTED from what
+    // it was — it used to pin `'bu-container-1'`, i.e. it pinned the defect. The host still passes a
+    // `containerId` PROP (it feeds client state); what must not happen is it reaching the wire.
+    expect(body.containerId).toBeUndefined();
 
     // …and after the successful save the banner RETIRES (the doc is a native docx now).
     expect(screen.queryByTestId('compose-workspace-pdf-source-banner')).not.toBeInTheDocument();

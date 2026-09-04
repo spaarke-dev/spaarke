@@ -1,9 +1,7 @@
 # Current Task State — `spaarkeai-compose-r8`
 
-> **Last Updated**: 2026-08-30 (by `context-handoff`)
-> **Recovery**: read Quick Recovery, then §S3 → §S2 → §S1 → §S0.
-> **071 + 072 COMPLETE (2026-08-31). 070 clusters 7/6/5b/8/1/3/4 done, ZERO holes open.**
-> **`ComposeService.cs` is FROZEN for `unified-access-control-r2` — do not touch it.**
+> **Last Updated**: 2026-09-02 (by `context-handoff`) — end of a long session. **Branch PUSHED; tree clean.**
+> **Recovery**: read Quick Recovery, then §UX (the live backlog), then §U8, then §R0.
 > Everything below "Full State" is preserved history from earlier checkpoints.
 
 ---
@@ -12,33 +10,374 @@
 
 | Field | Value |
 |---|---|
-| **Active work** | **071 + 072 COMPLETE.** `ComposeDocxProjectionBuilder` 3,593 → 1,031 (4 collaborators) · `ComposeDocumentRenderer` 2,987 → 1,997 (3 collaborators, **ADR-049 I-5 verified by count**: 8 body writes, all in the renderer). Both proven byte-identical over the corpus. 070 clusters 7/6/5b/8/1/3/4 done; `ComposeService.cs` still **FROZEN**. |
-| **Next Action** | **Task 090 wrap-up** (`/test-diet`, anti-clobber deploy, write-side fidelity doc, `projects/INDEX.md` + root §17). Track D is otherwise done: 073 ✅, 074 ⛔ closed as DO-NOT-DELETE, 070 partially frozen. Do NOT start 070 cluster 5a or 2a/2b — both live in the frozen `ComposeService.cs`; unfreeze signal is UAC-r2 commenting on #858. |
-| **Branch** | `work/spaarkeai-compose-r8` · clean · master `330b9fc55` · main repo synced. **All CODE is merged**; the only unmerged commit is this checkpoint itself (docs-only — it cannot be in master, since it records its own writing). Confirm with `git log --oneline origin/master..HEAD` — anything beyond a checkpoint commit there is unlanded work. |
-| **Merged today** | #806 `19bf65ec4` · #905 `369c3ea89` · #908 `330b9fc55` |
-| **Suite** | ALL GREEN — Compose **1,802/0** · BFF **11,614/0** · ArchTests **153/153** · Spe.Integration **409/0** · IntegrationTests **103/0** · client gate **104 suites / 1,336** · solution build **0 errors** · DI diff **empty** |
+| **Where we are** | **R8's own gates are CLOSED.** Track A passed (owner UAT: saved, reopened, edits held). `section-break-flattened` **ACCEPTED** — the signed residual-loss set is now **six rows**. The project has since absorbed an owner-approved **UX backlog**, most of which is now done and deployed. |
+| **Branch** | `work/spaarkeai-compose-r8` @ **`20abcee77`** — **pushed, 0 unpushed, tree clean. 0 behind master, 61 ahead.** PR **#924** left a **DRAFT deliberately** (the Word-menu item has no host handler yet). |
+| **2026-09-03 session** | **Numbering RE-SCOPED to display-only** (experiment run, see Next Action). **Item 8 built server-side + client-flow**, NOT yet triggerable — see §U8-BUILD. Owner decisions taken this session: numbering lands in R8; item 8 is an on-demand **report artifact** (not a panel), **appendix first**, live pull, save-gated. |
+| **Next Action** | **1) Numbering — RE-SCOPED 2026-09-03, do NOT build the parity corpus first.** The gating experiment the design note demanded has been RUN (two seam tests + negative control): **an editor-created list already saves as a genuinely numbered, fully resolvable list** and the read side computes "1." for it. Items 3 + 4 are **DISPLAY defects only**; there is no write-path hole, so no second numbering engine is needed for saves to be correct and the corpus is no longer a prerequisite. Read the `✅ EXPERIMENT RUN 2026-09-03` block + `Revised sequence` in `notes/uat/numbering-editing-design-options.md` before scoping. Remaining: the `<ol>` discriminator (F-3), native marker for editor-born lists, then item 3's stale-decoration question. **2) Item 8** — see §U8; needs a `changesText` producer + trigger, NOT a wiring job. **3) Editable spacing** (UAT item 6). |
+| **Suite** | Client **1,406/1,406** · Compose server **1,948/1,948** · ArchTests **187/187** · SprkChat **376/376** · build 0 errors — **all re-run AFTER the 24-commit master merge**, not carried over from before it |
+| **Deployed** | ✅ **RE-DEPLOYED 2026-09-03** from `20abcee77` (post-master-merge), BFF + `sprk_spaarkeai` **together** (NFR-05). BFF → `spaarke-bff-dev`, `/healthz` passed + CORS verified. Code page → `sprk_spaarkeai` on `spaarkedev1`, 5,750 KB, published. **Publish size: fresh same-day master `45.43` vs branch `45.45` = `+0.02 MB`** (Compress-Archive, the method `Deploy-BffApi.ps1` uses). |
+| **⚠️ Deploy lesson (2026-09-03)** | The owner reported the OLD toolbar in `spaarkedev1` and suspected the code had been clobbered. **It had not** — `git diff c0751e0d9 HEAD -- ComposeFormatToolbar.tsx` was EMPTY. The environment was running a **stale bundle**; the prior session's "deployed" claim for UX item 5 did not match reality. Diagnosed from the screenshot by STRING literal: the visible `"Unsaved · Auto Save On"` is the exact text `c0751e0d9` removed (`git log -S` confirms), and Undo/Redo sat right instead of far left. **Before deploying a code page, verify the built artifact by string literal** (`grep -c 'Summarise changes' dist/spaarkeai.html`) — symbol names are minified, and "deployed" in a handoff is a claim, not evidence. |
+| **Deploy ordering rule learned** | **Merge master BEFORE deploying to a shared env.** On 2026-09-03 master was **17 commits** ahead carrying live BFF work (email-intelligence-r2 `OfficeService` +222 / `OfficeEndpoints` +128; unified-access-control-r2 `ExternalProjectDataEndpoints` +163, upload/SPE). Deploying the branch build without them would have **reverted merged work on `spaarkedev1`**. `@spaarke/compose-components` is aliased to **SOURCE** in SpaarkeAi's `vite.config.ts` (not a built `dist`), so no library pre-build step is needed — but that also means a stale `dist/` is never the cause; a stale *deploy* is. |
+| **CI** | ✅ **RUNNING** on `c99472ba1` — checks appeared once the master-merge commit landed. Earlier in the session `gh run list` showed nothing for two pushes and I hypothesised the DRAFT status was the gate; **that hypothesis is retracted** — the PR is still a draft and checks now run, so it was a trigger delay, not draft gating. `Build & Test (Debug/Release)` already pass; the rest were pending at handoff. **Verify with `gh pr checks 924` and confirm `grep -c pending` is 0 before judging.** |
+| **PR #924** | **MERGEABLE** (the conflict is resolved). `mergeStateStatus=BLOCKED` only because it is a DRAFT with checks in flight — not a new problem. Left draft deliberately. |
+| **Master merge** | ✅ **DONE this session.** Master had moved **24 commits** (UAC-r2 #931 merged) and GitHub reported #924 `CONFLICTING`/`DIRTY`. Merged `origin/master` into the branch (**never rebase**) — exactly **ONE** conflict, `.claude/CHANGELOG.md`, two independent appended entries, resolved by keeping both. Post-merge, ALL RE-RUN: solution build **0 errors** · ArchTests **187/187** (up from 181 — master added six) · client **1,406/1,406** · Compose server **1,948/1,948**. |
+
+### ⚠️ Coordination — PR #932 (`unified-access-control-r2`) overlaps on TWO TEST FILES
+
+`ComposeService.cs` itself does **not** overlap. These two do, and whoever merges second reconciles:
+- `tests/Spaarke.ArchTests/SpeWriteSinkContainerProvenanceGuardTests.cs` — we moved 3 census entries
+  `ClientSupplied` → `ServerDerivedRecord`; they add an external-upload write sink.
+  **A census renumber presents as one stale entry + one undeclared site** — only both halves together
+  distinguish it from a deletion.
+- `tests/unit/Sprk.Bff.Api.Tests/Services/Compose/ComposeServiceCreateOnSaveTests.cs`
+
+---
+
+## UX. The owner-approved backlog — order was **5 → 6 → 2 → 7 → 8**
+
+| # | Item | State |
+|---|---|---|
+| **5** | Toolbar restructure, sub-items a–i | ✅ **DONE + deployed** (`c0751e0d9`) |
+| — | Editor typography (headings collided when wrapping) | ✅ **DONE + deployed** (`4887bc98a`) |
+| — | Numbering visibility (`data-projected-list`) | ✅ **DONE + deployed** (`b323c2718`) |
+| **2** | Formatting notices → one collapsed row + popover | ✅ **DONE + deployed** (`e8ea2bbce`) |
+| **7** | Injected Assistant turns pin to top | ✅ **DONE + deployed** (`8d9b31eb8`) |
+| — | Document line spacing carried into the editor (READ path) | ✅ **DONE + deployed** (`0f5525bea`) |
+| **6** | **Editable** spacing (the Spacing menu) | 🔲 grouped with numbering — **write path** |
+| — | **Numbering menu**: toggle · `<` `>` level arrows · type (1./a./i.) | 🔲 owner's design; `<`/`>` small, type = new `ComposeNumberingAuthor` schemes |
+| **8** | Document change summary | 🔲 see §U8 — bigger than first stated |
+
+### The spacing ladder (owner asked "is there a less complex approach?" — yes, and rungs 1+2 shipped)
+
+1. ✅ **Editor typography** — the readability fix. Headings inherited FluentProvider's **fixed 20px**
+   line-height; a ~28px glyph in a 20px line box is why multi-line headings collided. Unitless ratios.
+2. ✅ **Carry the document's own `w:spacing`** — read path only. `w:lineRule` is load-bearing: `w:line` is
+   a MULTIPLE in 240ths under `auto` (360 = 1.5×) but TWIPS under `exact` (360 = 18pt), and **Word OMITS
+   the rule when it means auto** — so absent must map to the multiple reading.
+3. 🔲 **Editable spacing** — model + renderer. **The risk that keeps it out of a UX task**: the moment the
+   model owns spacing, `InheritProperties` must change, and getting it wrong flattens spacing on every
+   edited paragraph — the `paragraph-style-flattened` defect replayed.
+
+---
+
+## U8-BUILD. Item 8 as BUILT (2026-09-03) — read this before §U8's history
+
+**Owner reframe that shaped everything**: the change summary is **not a UI panel**. It is a **report
+artifact** — *"we made edits to the document, here is a summary of the changes"* — that must travel with
+the document, print, and reach PDF. Owner chose: **on-demand** (not automatic), **live pull** (not the
+load-time snapshot), **save-gated**, **appendix first** (standalone `.docx` later).
+
+**Metadata was considered and REJECTED for this purpose** (do not re-propose it as the primary form).
+Custom document properties / custom XML parts *do* survive Compose's save — verified: `RenderIntoCarrier`
+mutates only the main document part, so package-level parts are never parsed. But metadata is invisible:
+no print, no PDF, no recipient will find it. It stays the right instrument for a later
+regenerate-and-replace pointer.
+
+| Piece | State |
+|---|---|
+| `buildComposeChangesText` producer + `hasComposeChangeData` (client) | ✅ `3969c57d9` — 14 tests, 2 controls |
+| `ComposeRevisionReportGenerator` + `SaveComposeDocumentRequest.RevisionReport` (server) | ✅ `400819ecb` — 8 seam tests (57 w/ corpus) + 2 save-wiring tests, 3 controls |
+| `useComposeChangeSummary` flow — save gate → live pull → produce → dispatch (client) | ✅ `3073b3743` — 8 tests, 2 controls |
+| **The trigger + host rendering of the 4 outcomes** | 🔲 **NOT BUILT — this is the remaining work** |
+| **The "Include document revision report" save toggle** | 🔲 not built |
+
+**The pattern was already shipped twice** and is reused, not reinvented: `ComposeSummaryPageGenerator` +
+`ComposeDocumentRenderer.AppendSection` (append INTO a document, opt-in via `request.SummaryPage`) and
+`ReviewMemoDocumentBuilder` + `SynthesizeDocument` (standalone `.docx` from a persisted record). The
+revision report is the first one's sibling. `ReviewMemoDocumentBuilder`'s **render-from-persisted** rule is
+the answer to "the separate document must stay linked": persist once, render into appendix / `.docx` /
+email body from the same record.
+
+**Constraints that are now enforced by tests — do not relax without reading the control:**
+- The report is **style- and numbering-INDEPENDENT** (plain paragraphs, literal `•`, never `w:numPr`). A
+  corpus-wide test asserts numbering + styles parts are byte-identical after the append. The control
+  proved a "make the bullets proper list items" change **renumbers the host agreement**.
+- **Empty in ⇒ nothing appended.** Deliberately unlike the Summary Page (a clean NDA is itself a finding).
+- The **scope line is always emitted**, stating unrecorded fields as unknown — a missing version reads as
+  "current", the exact wrong impression, because the pull reads STORED bytes.
+- The hook **never auto-saves**; its surface is exactly `{running, requestSummary}`, pinned by a test.
+
+**Known gap inherited, not introduced**: the sibling `SummaryPage` request field has **no** test on its
+`SaveAsync` call site. `RevisionReport`'s call site now does (`ComposeServiceImportedRenderSaveTests`).
+
+---
+
+## U8. Item 8 (document change summary) — CORRECTION, twice over
+
+The round-1 note called this **"a wiring job, not a new capability"** and said its trigger was the
+return-from-Word reanchor flow. **Both were wrong**; a repo-wide search settled it:
+
+| Piece | Status |
+|---|---|
+| Consumer type, Action, input + output schemas | ✅ exists |
+| Result renderer (`composeResultFormat.ts`) | ✅ exists |
+| Server operand binding (`ContextBinder` `changesText`) | ✅ exists |
+| **A client producer of `changesText`** | ❌ **does not exist** |
+| **Any live trigger** | ❌ **does not exist** |
+
+`AnnotationReanchorService` states the opposite of the old claim outright: *"the human-friendly change
+summary is a SEPARATE gated capability … that DOES call the model; this engine does not."*
+
+**The binding constraint that survives both corrections**: the action was pulled from the selection
+toolbar because **without real change data the LLM fabricates a phantom "[Insertion]"**. Any trigger MUST
+refuse when there are no tracked changes rather than dispatch an empty operand — which makes the
+**producer** the load-bearing piece, not the button. Render target: `AgreementReviewSummaryPanel`.
+
+---
+
+## Method rules that cost real time when forgotten (carried forward)
+
+1. **Run the negative control.** Every fix this session shipped with one; two of them found real problems
+   (an in-test extractor that was line-anchored; a Direction-A scan that prose satisfied).
+2. **Assert a seeded mutation is IN THE FILE before spending a suite run**, and that the build is green —
+   a stale binary reports a PASS.
+3. **`dotnet test` is ~7–9 min for the Compose filter.** Batch.
+4. **Verify the deployed bundle by a STRING LITERAL, never a symbol name** — minification renames symbols,
+   so an absent function name is not evidence of a stale build.
+5. **Measure publish size against a SAME-DAY fresh master build with the SAME zip tool.** The recorded
+   baseline ages; that error once overstated this project's delta 46×.
+6. **A screenshot is evidence about a BUILD.** UAT round 2's heading report came from a stale bundle —
+   the tell was toolbar text that had already been removed. Check the build before diagnosing the code.
+
+---
+
+## R0. UAT ROUND 1 (2026-09-02) — read `notes/uat/uat-round-1-findings-and-plan.md` for the full analysis
+
+**Confirmed working**: PDF intake (open → editable → save → honest `pdf-intake-*` warnings) · the AI redline
+stream (tracked insert/delete, "2 suggested edits pending", Accept-all, per-suggestion rationale).
+
+**8 items returned. Two findings changed their scoping — do not re-derive these:**
+
+1. **Items 3 + 4 are ONE finding and a KNOWN DEFERRAL, not an R8 regression.**
+   `composeNumberAtomExtension.ts`'s header states it outright: legal numbers are computed SERVER-SIDE AT
+   LOAD and painted as a ProseMirror **view decoration** (never a doc node — it must not shift the text
+   offsets the redline/reanchor table indexes), and the native `<ol>` marker is suppressed
+   **unconditionally**. So "remove numbering doesn't renumber" (decoration is a load-time snapshot) and
+   "add numbering does nothing" (a new list has no server number to paint) are the same gap. The header
+   names it **"R5 G3, explicitly OUT of R4.5 scope; escalate rather than converting this to a doc node."**
+   Fixing = client renumbering engine (the two-engine drift this project exists to prevent) **or** a server
+   round-trip per structural edit. **DESIGN ANSWERED 2026-09-02** →
+   `notes/uat/numbering-editing-design-options.md`. Headline: the blocking constraint was misread — it rules
+   out INLINE CONTENT, not a NODE ATTRIBUTE, and the number already IS one (`data-computed-number`). So the
+   rendering mechanism needs no change; the only missing piece is **recomputation**, via ProseMirror's
+   maintainer-prescribed `appendTransaction`. Recommended: **client engine for immediacy + server
+   authoritative + parity enforced by the #699 shared-corpus pattern**. The HARDER half is not renumbering —
+   it is authoring/removing `w:numPr` on the write path (a new list has no numbering definition to inherit).
+
+   **Owner scope call (2026-09-02): "whether we continue r8 or start a new project is semantic — I'll follow
+   your better judgement." DECISION: sequence, don't merge.** R8 closes on its own thesis (save reliability +
+   fidelity) — it is deployed, green, every item closed; holding it open for a toolbar redesign delays value
+   already earned. The UAT follow-on (items 2/5/6/7/8 + numbering) runs as the next project with its own
+   design gate, because numbering touches the WRITE path and must not ride in on a UX task.
+
+2. **Item 8 is a WIRING job, not a new capability.** `compose-summarize-word-changes` is a live consumer
+   type with a binding row + client action, deliberately pulled from the selection toolbar because without
+   real change data **the LLM fabricates a phantom "[Insertion]"**. The NDA analogue is
+   `AgreementReviewSummaryPanel`, reusable. Binding rule to carry: **never fire it without real change data.**
+
+**✅ U-0 — REPRODUCED, ROOT-CAUSED, FIXED (2026-09-02).** Full record: `notes/uat/u0-heading-style-loss.md`.
+
+The projection never puts a numbered heading in a list (`headingLevel is null ? ListInfo(p, ctx) : null`),
+so `isActive('orderedList')` is FALSE on it and **the "remove numbering" click was the toggle ADDING a
+list**. One fact explains the whole screenshot. Measured losses on the real extension set: heading level
+flattened · `computedNumber` → null · **`paraId` RE-MINTED** (orphaning anchored comments/redlines).
+Irreversible; `keepAttributes: true` recovers none of it. It is a *fidelity* defect, not just UI: the save
+re-renders the changed block from the model and `IsModelDeterminedStyle` treats Heading1-6 as model-owned,
+so a toolbar click silently flattens a real Word heading in the `.docx`.
+
+**Fix**: `listToggleWouldDestroyBlockIdentity` refuses both list toggles on a heading or a server-numbered
+block, with an actionable hover reason. Ordinary unnumbered paragraphs unaffected (R5 task 011 stands).
+Partial fixes rejected: carrying `paraId` alone trades a loud loss for a quiet one; authoring numbering is
+impossible without a `w:numPr` definition, so the control would stay a broken promise. 11 tests, **both
+negative controls run** (revert wiring → 3 red; force predicate always-true → 3 red the other way).
+Body/Heading menu probed and **clean** — it preserves paraId AND computedNumber, so scope is measured.
+
+**Hand-off to the numbering project**: the native `<ol>` marker is suppressed **unconditionally**, so an
+editor-created list shows no number even born-in-editor — UAT item 4 is universal, not loaded-only. The
+obvious quick fix (scope the suppression to projected lists) collides with invariant F-3 (never fabricate a
+number for an unresolvable `numId`); distinguishing them needs a projection-emitted marker on the `<ol>`.
+
+**⚠️ UAT sections A + B were NOT exercised**: (A) edit one paragraph of a real `.docx`, save, reopen,
+confirm untouched content byte-identical — the entire subject of Track A; (B) the **`section-break-flattened`
+accept/decline**, which changes the owner-signed residual-loss set from five rows to six. **R8 cannot close
+without both.**
+
+---
+
+## R2. DRIVE PROVENANCE — the brief (next task)
+
+**What it is.** `ApplyTemplateAsync` and `SaveAsync`'s replace branch both take `driveId` from the
+CLIENT (route body / `request.DriveId`) and write bytes there. The authorized `sprk_document` row
+already knows the answer (`sprk_graphdriveid`), and the server does not consult it.
+
+**What it is NOT.** Not the app-only live-hole class. Every write is OBO, so SPE authorizes it as the
+user — a caller cannot reach a drive they could not already reach. The defect is **provenance**: the
+`sprk_document` record says the document lives at drive X while the save writes to drive Y, so the
+record and the bytes diverge and the audit trail is wrong. Same reasoning as #858's `ContainerId`
+deletion ("a field that still EXISTS is a capability that still exists"), one level down.
+
+**The resolution already exists — reuse it.** `ComposeRecordResolution.TryFindDocumentByGraphItemIdAsync`
+resolves speId → row, and after #781 it survives a duplicated/broken alternate key. **Extend its column
+set to include `ComposeService.GraphDriveIdAttribute`** (it currently fetches DocumentId + the two
+FR-C3 dedup columns); the sibling `TryFindDocumentByTransientKeyAsync` already fetches drive+item and
+returns them as `TransientKeyMatch`, which is the shape to mirror.
+
+**The one real design decision — fail-closed vs. fall-back.** Legacy rows may carry an empty
+`sprk_graphdriveid`: `PromoteIfEphemeralAsync`'s create branch documents that a row without the full
+SPE pointer makes downstream readers 409 with "No file is attached", which implies rows predating that
+fix exist. So a hard fail-closed can break saves on real documents. **Recommended**: use the row's
+drive when it has one and IGNORE the client's; log at Warning when they differ (that divergence IS the
+signal); fall back to the client value ONLY when the row has no drive id, logged. An attacker cannot
+make a row's drive id disappear, so the fallback covers legacy data, not an attack path. State this in
+the PR rather than letting it read as a half-measure.
+
+**Then the census moves honestly**: the 3 `ComposeSaveStorageCoordinator` entries + the apply-template
+caller note in `tests/Spaarke.ArchTests/SpeWriteSinkContainerProvenanceGuardTests.cs`. Remember the
+2026-09-01 lesson — a renumber presents as one stale entry + one undeclared site, and only both halves
+together distinguish it from a deletion.
+
+**Sites**: `ComposeService.cs` — `ApplyTemplateAsync` (~T1 metadata read + the replace) and the save
+replace branch (`request.DriveId` at ~1871–1897). `ComposeSaveEndpoints.cs:80` currently 400s when
+`driveId` is absent from the body; that validation should survive the change (the client still sends
+it) but its *meaning* becomes "the client's claim", not "the write target".
+
+---
+
+## R3. CARRIED ITEMS — what each one actually needs
+
+| # | Item | What it needs | Owner action? |
+|---|---|---|---|
+| 1 | **`Repair-ComposeIdentityKey.ps1` never executed** | It has been written + syntax-checked, never run against real Dataverse. Report mode is READ-ONLY (`.\scripts\Repair-ComposeIdentityKey.ps1` with no switches) and safe anywhere; it needs `az login` + Dataverse admin. Run it against `spaarkedev1` first — that both validates the script and tells us whether dev is still clean after the 2026-08-17 hand-cleanup. `-Apply` only on an owner say-so. **Prod MUST have `sprk_graphitemid_uk` = Active before Compose ships there**, or every save 500s (the original incident). | Offered 2026-09-01; owner said "i don't know what that is but ok" — the explanation was given, no decision taken. Agent may run REPORT mode unprompted; never `-Apply`. |
+| 2 | **Letter/roman corpus fixture** (open half of #698) | A Word doc numbered `1.` → `a.` → `i.` — i.e. Word's **Home → Multilevel List → the `1. / a. / i.` variant**. **The doc the owner supplied twice is NOT it**: `notes/Word doucment paragraph number test.docx` (21,113 B) and the earlier OneDrive copy (21,192 B) are the SAME document re-saved — same `numId=7`, decimal at every level. Already in the corpus as `style-inherited-numbering.docx`; do not add it a third time. Its `numbering.xml` DEFINES lowerLetter/lowerRoman in unused abstractNums, so no paragraph references them. | Yes — needs a document only the owner can produce. Low priority: the resolver's letter/roman PARSE is proven; what is unproven is the numbering engine deriving `(b)`/`(iii)` from real `numbering.xml`. |
+| 3 | **`section-break-flattened` doc row** | `COMPOSE-WRITE-RESIDUAL-LOSS.md` has no row for it. It is now a per-EDITED-block code like the constructs already tabled there, so it arguably belongs. Settle at 090 wrap-up. | No |
+| 4 | **Client citation-resolver parity has no forcing function** | `composeCitationResolver.ts` mirrors the server `CitationResolver`; parity rests on ported test cases + `@see` comments. Nothing fails if the server parser gains a shape the client lacks. Its sole consumer is `ComposeEditor.placeAdvisoryComments` — which IS #699 — so fix it there, not separately. | No |
+
+---
 | **Verify with** | **`dotnet build`** at the SOLUTION root — not one project (see §A2 for why that distinction cost real time) |
 
 ---
 
-### 🔒 THE FREEZE — read before touching `ComposeService.cs`
+### 🔓 THE FREEZE IS LIFTED (2026-09-01) — `ComposeService.cs` is editable again
 
-**`ComposeService.cs` is frozen until `unified-access-control-r2` lands their #858 create-on-save patch
-and comments on the issue.** We committed to this publicly in
-[#858 comment 5472902579](https://github.com/spaarke-dev/spaarke/issues/858#issuecomment-5472902579):
-*"You will not have to rebase."*
+**UAC-r2's PR #887 MERGED as `13a1f5a4a`.** Their `ComposeService.cs` work (`c820b3f8f` — filename
+sanitization at every SPE upload site) is on master. Our public promise on
+[#858](https://github.com/spaarke-dev/spaarke/issues/858) — *"You will not have to rebase"* — is
+**discharged**. Nothing in this project is waiting on them any more.
 
-- **Frozen**: clusters **5a** and **2a/2b** — both live in that file. Do not start them.
-- **Not frozen**: tasks **071** (`ComposeDocxProjectionBuilder.cs`) and **072**
-  (`ComposeDocumentRenderer.cs`) — different files, zero overlap.
-- **Unfreeze trigger**: their comment on #858. Then 5a → 2a/2b.
+**Now unblocked**: 070 clusters **5a** and **2a/2b** · **#776** (apply-template `If-Match`) ·
+**#781** (save-identity self-heal). #858 itself is still OPEN — theirs to close, not ours.
 
-Their anchors on master, which the freeze protects: `PromoteIfEphemeralAsync` **1989** ·
-`ResolveDriveIdAsync(request.ContainerId, …)` **1510** · the no-ContainerId guard **1500**.
+> **The trap that was here, recorded so it is not repeated.** The unfreeze trigger used to read
+> *"their comment on #858"* — while our own last comment there opened *"✅ DEFINITIVE — you are
+> unblocked. Nothing here needs a reply."* We asked for a signal and told them not to send it; waiting
+> on it would have blocked us forever. **An unfreeze trigger must be something you can OBSERVE
+> yourself** (a PR merging, a file changing on master), never a message another party has to volunteer.
 
 **The coordination record is `notes/response-to-unified-access-control-r2-2026-08-27.md`** — its
 `# ✅ DEFINITIVE STATUS` block at the top is the current agreement; everything below it is history. The
 sibling `coordination-from-*.md` is THEIR document, received — do not edit it.
+
+---
+
+## R1. THE REMAINING WORK — one list, owner-directed "finish everything" (2026-09-01)
+
+**Owner directive**: *"we need to get 070 and #777 and any other work completed — the order of operation is
+up to you… the critical focus is on getting everything, all tasks, all issues fixed and completed."*
+Also binding, same message: **do not display warnings the user cannot act on.** Routine docx→TipTap format
+reconciliation is expected and must not be surfaced.
+
+### ⛔ THE ONE OPEN QUESTION FOR THE OWNER — #698 corpus fixture
+
+**Ask**: a Word document whose clauses number down to **letter + roman sub-items** — the
+`4.2(b)(iii)` shape. Section → `4.1`/`4.2` → `(a)`/`(b)` → `(i)`/`(ii)`/`(iii)`, as real firm
+documents number schedules and sub-clauses.
+
+**Why it cannot be synthesised**: `CitationResolver` resolves `"4.2(b)(iii)"` today against in-memory
+numbering chains plus a decoy, which proves the RESOLVER. It does not prove the **numbering engine**
+derives that label from real Word `numbering.xml` — the two-engine drift this project exists to
+prevent. A hand-built fixture would encode our own assumption about how Word numbers sub-items and
+then pass against itself. The corpus is real documents for exactly this reason.
+
+**Nearest existing fixture and why it does not cover it**: `multilevel-1-1-1.docx` is decimal
+(`1.1.1`); no corpus document uses letter/roman sub-numbering.
+
+**Where it goes**: `tests/fixtures/compose-corpus/` (Git-LFS — `*.docx filter=lfs`), suggested name
+`letter-roman-subitems.docx`. Any real document works; it can be redacted, and content does not
+matter — only the numbering scheme does.
+
+**The OTHER half of #698 needs nothing from the owner.** "Confirm the `CitationResolver` consumer
+contract" is answerable from the code: consumers exist and are live (`ComposeAnchorResolver.cs`
+server-side, `composeCitationResolver.ts` + `Spaarke.Communication.Components/logic/citations`
+client-side). Whether they want a `PublicContracts` wrapper is decided by reading them, not by asking.
+
+### Done 2026-09-01 (later session — committed, NOT pushed)
+
+| Commit | What |
+|---|---|
+| `a39c7abbe` | **#698 fixture** — owner supplied a real Word doc; added as `style-inherited-numbering.docx`. Its value is **style-inherited numbering**: three paragraphs carry NO `w:numPr` and are numbered by `ListParagraph`'s own `numPr` in `styles.xml`. Our engine already handles it (FR-12), so this is a guard, not a fix. **The negative control corrected the test's own claim**: dropping the style lookup does NOT shift deeper labels (Word gives an un-incremented level its `start`), so `1.1.1.` is unaffected — the damage is to the style-numbered paragraphs and their siblings (`1.2.`, `2.1.`) only. One of the four tests is decorative against that mutation and is labelled so. |
+| `1789e9d08` | **#781 CLOSED** — all three remaining pieces. **(2) self-heal**: the alt-key lookup swallowed BOTH identity faults as not-found, sending an EXISTING document into the create branch whose upsert failed on the same key. A column query answers in both fault states → lands on the idempotent branch → no third row, and existing-document saves survive a Failed key. **Deviations from the issue text, deliberate**: oldest `createdon` (not newest `modifiedon` — `modifiedon` moves, so concurrent saves could pick different canonicals) and **nothing is deleted** on a user's save. **(3)** `scripts/Repair-ComposeIdentityKey.ps1`, same canonical rule as the runtime heal. **(4b)** `ComposeIdentityKeyHealthCheck` — needed *because of* (2): the heal turns a loud 500 into a quiet log, so the signal had to be restored. Degraded-never-Unhealthy + `catalog` tag so it cannot touch `/healthz` liveness. No interface widened (`TryUnwrapServiceClient` + the `protected virtual` fetch seam already existed). 18 tests; both negative controls fired. |
+| *(uncommitted)* | **#777 `section-break-flattened`** — the last of its three codes. It fired at PROJECTION (open), whole-document; but `Capture` clones an untouched block **including** its `pPr/sectPr`, so only an EDITED paragraph loses it. Moved to the save path, per edited block. **KEPT, not retired** — unlike the other two its premise is still true. Also retired the 023-F1 promotion predicate (a hand-maintained mirror of the renderer's condition) in favour of a value comparison. Client copy for the two retired codes removed per the file's own Direction-B rule. Two negative controls, each firing on its own test. |
+
+### Done earlier 2026-09-01 (committed, NOT pushed)
+
+| Commit | What |
+|---|---|
+| `4f26c43fb` | **#777 `paragraph-style-flattened` — fixed.** `ComposeBlockMerge.InheritProperties` excluded `w:pStyle` wholesale; now scoped to model-owned styles via `IsModelDeterminedStyle` (Normal / Heading1-6 / ListParagraph). An UNMODELED style (firm body style, Quote, localized `Überschrift1`, numbered clause style) is carried onto an edited block. |
+| `5593b9d24` | **Pinned it.** 11 seam tests, `ComposeParagraphStyleInheritanceSeamTests`. **Negative control RUN**: reverting the fix fails 5 of 11 and passes 6 — the detector fires on the regression and stays quiet on what it protects. |
+| `81295b210` | **#777 `indentation-dropped` + `paragraph-style-flattened` warnings RETIRED** per the owner directive. Both premises were falsified (task 041 inheritance, then `4f26c43fb`). They fired per-paragraph whole-document at OPEN → "×84 / ×85" on an untouched 40-page contract. |
+| `7324ad82f` | **070 cluster 2b** → `ComposeRecordResolution.cs`. Mutation pass found a REAL hole: `TryFindDocumentByTransientKeyAsync` could match NOTHING and all 1,813 tests stayed green — the transient-key dedup guarding "the 8-duplicate defect". Closed with a KEY-SENSITIVE contract test. |
+| `d14a9cb78` | **070 cluster 2a** → `ComposeCreateOnSavePromoter.cs`. The four result-shaping helpers moved too (measured: `SaveAsync` calls them all, and its transient branch IS create-on-save). Also fixed an orphaned doc comment that had made `PromoteIfEphemeralAsync` read as "memory capture". |
+| `1f1a4662a` | **070 cluster 5a** → `ComposeProfileRetriggerGuard.cs`. Mutation seeded BEFORE the move **survived all 1,814**: the G10 storm guard had NO test in either direction. Closed with 6 seam tests; re-ran the same mutation → 3 red. |
+| `675a7fb3d` | 070 marked ✅ COMPLETE. `ComposeService.cs` **4,427 → 2,114**. No waiver to delete (ratchet retired 2026-08-20). |
+| `27c5b2f16` | **#776 CLOSED** — apply-template asserts the version it merged. Added `rebaseOnConflict` (default true; apply-template false) because the save path's retry would have clobbered anyway, making the If-Match decorative. Added the missing 409 endpoint mapping. |
+| `3810ce303` | **Merged #858** from UAC-r2 + reconciled: 3 conflicts in `ComposeService.cs`; ported cluster 2a onto THEIR post-#858 bodies; census entry recorded as MOVED-not-fixed and the dedup sink renumbered #2 → #1. |
+
+**Final state: build 0/0 · ArchTests 176/176 · full BFF suite 11,779 passed / 0 failed / 57 skipped ·
+23 commits ready · 0 behind master · 0 uncommitted.** `ComposeService.cs` is 2,429 lines post-merge.
+
+### The remaining work — ordered (2026-09-01)
+
+**Batch by TOOLCHAIN, not by issue number.** The server items share files already understood and one
+build/test cycle (~9 min for the full BFF suite); the client items share one `npm` cycle. Interleaving
+them doubles the cycles for no benefit. This is the same reasoning that made 070's clusters one pass.
+
+| # | Work | Where | Notes |
+|---|---|---|---|
+| **1** | ✅ **#781** save-identity self-heal — DONE `1789e9d08` | `ComposeService.cs` / `ComposeCreateOnSavePromoter.cs` / `ComposeEndpoints.cs` | 3 of 5 pieces remain: **#2** self-heal when the promote upsert resolves a graphitemid to MULTIPLE rows (pick canonical by rule), **#3** retroactive dedup tool, **#4b** runtime key-health probe. Shipped already: graceful 409/503 mapping + `scripts/Verify-ComposeIdentityKey.ps1`. Partly served by the dedup test added in `7324ad82f`. |
+| **2** | ✅ **#777 `section-break-flattened`** — DONE `1f88817c7` | `ComposeContentModelProjector.cs` + `ComposeBlockMerge.cs` | The LAST of its three codes and the only one still REAL loss: an interior `w:sectPr` on an EDITED paragraph. `SectionProperties` is excluded from inheritance because the renderer detaches/re-attaches the TRAILING sectPr — an interior one has no carrier. **KEEP this warning** (unlike the two retired in `81295b210`): it is real AND actionable ("open in Word"). |
+| **3** | ✅ **Drive provenance** — DONE 2026-09-01 | `ComposeService.cs` + `ComposeRecordResolution.cs` | Both write paths into an EXISTING item now resolve the drive from `sprk_graphdriveid` on the authorized row (`TryResolveRecordedDriveIdAsync`, routed through `TryFindDocumentByGraphItemIdAsync` so it inherits the #781 self-heal). `SaveAsync` folds the result onto the request so reads AND the write move together; `ApplyTemplateAsync` renames its parameter to `requestedDriveId` (a read-merge-write converted at the write ONLY would read one drive and overwrite another). Fallback to the caller's value when the row records no drive — declared, logged, and pinned by a test; a hard fail-closed would break legacy rows to close a hole OBO already closes. 3 census entries `ClientSupplied` → `ServerDerivedRecord`. 11 tests, 3 negative controls. Reasoning: `notes/drive-provenance-decisions.md`. |
+| **4** | ✅ **#696** unbounded request body — DONE `4fe224ce9` | `ComposeEndpoints.cs` | `/api/compose/project` + `/upload` run synchronous OOXML projection under only Kestrel's implicit ~28.6 MB cap. Align to the 25 MB chat-attachment policy. |
+| **5** | ✅ **#698** contract half — DONE (answered on the issue; no wrapper) | `CitationResolver.cs` + its consumers | Read the live consumers and decide wrapper-or-not. **Fixture half is the owner ask above** — do the contract half regardless; do not block on the document. |
+| **6** | ✅ **#699** — DONE `6cca7b649`, issue CLOSED | client `ComposeEditor.tsx :placeAdvisoryComments` | **Highest user-harm item left** — a review note can attach to the wrong clause. `placed=2` where 1 expected. Issue recommends anchoring by WS-4 computed clause number via `CitationResolver` where the model supplies a section ref. |
+| **7** | ✅ **#858 client cutover** — DONE `3ac433683` | `ComposeWorkspace.tsx` | Remove `containerId` from the create-on-save body (`:2086`) + the dead pre-save `resolveContainer` leg. ⚠️ **UAC-r2 §1.4: do NOT bulk-delete `containerIdRef`** — six senders address OTHER endpoints (load/documentRef/shuttle) and some legitimately still take a container. Check each against its endpoint contract. Their plan: `C:\code_files\spaarke-wt-unified-access-control-r2\projects\unified-access-control-r2\notes\plan-858-closeout.md` §1. |
+| **8** | ✅ **#853** — verified on branch, issue CLOSED | — | Already FIXED by `220ddd18e` on master. Verify on master + **close the issue**. |
+| **9** | **090 wrap-up** | — | `/test-diet` → refresh `COMPOSE-WRITE-RESIDUAL-LOSS.md` (two codes retired; `paragraph-style-flattened` moves from §2-lost to §3-carried) → lessons-learned → `projects/INDEX.md` + root §17 + `.claude/CHANGELOG.md`. |
+| **10** | **Deploy** | — | BFF + `sprk_spaarkeai` **together, one window, same net10 tree** (NFR-05). Report publish size vs the 44.96 MB baseline. |
+
+### Standing rules that cost real time when forgotten
+
+1. **Assert a seeded mutation is IN THE FILE before spending a suite run.** Three separate false
+   results this session (`Copy-Item` timestamp defeating incremental build · a regex miss · an LF/CRLF
+   miss). Each read exactly like a clean survival, and a false survival makes you write a test for a
+   hole that does not exist.
+2. **A test that passes is not a test that works.** The first #776 test passed in BOTH worlds
+   (fix and naive-fix) because its mock returned the same eTag from every read. Always run the
+   negative control.
+3. **`dotnet test` is ~9 min for the full BFF suite, ~7 for the Compose filter.** Batch accordingly.
+4. **`.docx` fixtures are Git-LFS.** A checkout without `lfs: true` yields a 128-byte pointer that
+   `readFileSync` happily returns — this is what kept the client gate red for 40+ builds (#921).
+
+### Small loose ends
+
+- **Client copy map** `ComposeBannerStack.tsx:322-341` still maps the two retired codes. Dead, harmless, but
+  remove them so nobody re-derives that the server still emits them.
+- **`ComposeBlockMerge.cs` contains 2 raw NUL bytes** inside a string literal (offset ~19314), which makes the
+  file read as BINARY to `grep`/ripgrep — `Grep` refuses it and silently returns nothing useful. Almost
+  certainly a deliberate sentinel separator in the block-canonicalisation, but confirm intent; if deliberate,
+  use `\0` escape instead so tooling can read the file.
+- **Compose Client Gate is at 1 of 3** greens needed before `continue-on-error: true` comes off (#921 fixed
+  the LFS checkout). Two more green runs, then delete that line and it becomes a real gate.
+- **#858 is UAC-r2's to close**, not ours.
 
 ---
 
@@ -594,7 +933,7 @@ clean build — the last sync returned MERGEABLE and then failed to compile (bot
 |-------|-------|
 | **Task** | **DEPLOYED TO DEV — owner is mid-UAT.** No task in progress. |
 | **Status** | 47 of 51 resolved. Tree clean, everything pushed, merged with `origin/master` (12 behind again — other projects merging). BFF **11,931 / 0 / 96** · integration **103 / 6** · ArchTests **9 failed / 101 passed — ALL 9 PRE-EXISTING ON MASTER** (verified against a clean `origin/master` checkout: 9 failed / 95 passed). |
-| **Next Action** | **Task 090 wrap-up** (`/test-diet`, anti-clobber deploy, write-side fidelity doc, `projects/INDEX.md` + root §17). Track D is otherwise done: 073 ✅, 074 ⛔ closed as DO-NOT-DELETE, 070 partially frozen. Do NOT start 070 cluster 5a or 2a/2b — both live in the frozen `ComposeService.cs`; unfreeze signal is UAC-r2 commenting on #858. |
+| **Next Action** | **1. DEPLOY (090 step 2)** — `scripts/Deploy-BffApi.ps1` + `scripts/Deploy-CustomPage.ps1` for `sprk_spaarkeai`, **together, one window, same tree** (NFR-05). TFM verified **net10.0**. Owner authorised the deploy after being told the save-contract gate is red. **2. Then 090 docs**: `/test-diet` → write-side fidelity doc → lessons-learned (Half-A/Half-B) → `projects/INDEX.md` + root §17 + `.claude/CHANGELOG.md`. **3. Separate session: fix the client save-contract suite** (see below). |
 
 ---
 
@@ -1043,3 +1382,44 @@ changed is that §2's promise ("reported by name … none is silent") is now *tr
 Root `CLAUDE.md`'s ADR-049 pointer says the save "pairs blocks by **document order**". It has paired by
 **LCS** since task 040 — loosely true (matches are monotone) but imprecise, and 047b showed the imprecision
 is where a real defect hid. Touching root CLAUDE.md needs `/conflict-check` + a `.claude/CHANGELOG.md` entry.
+
+---
+
+## 090 — WHY THE PROJECT IS NOT CLOSED (escalation fired, owner informed)
+
+The POML's trigger: *"If any Track's gate did not pass, do NOT close the project."* Two are outstanding:
+
+| Blocker | State |
+|---|---|
+| **Task 070** | 🔲 — clusters 5a + 2a/2b **frozen** in `ComposeService.cs` until `unified-access-control-r2` lands #858 and comments. A declared dep of 090. |
+| **Compose Client Gate (Save-Contract Suite)** | ❌ red on master — 19 failing tests |
+
+**The Compose FIDELITY Gate passes** — document fidelity is verified. The red one is the client
+save-contract suite. Do not conflate them.
+
+So: do the deploy + the 090 documentation, but **do NOT mark the project complete** until 070 unfreezes
+and the save-contract gate is addressed.
+
+## The save-contract gate — for the fresh session that will fix it
+
+Full write-up: `notes/compose-client-gate-red-open.md`. **Read it before touching anything** — it records
+three disproved hypotheses so they are not re-run.
+
+**The single most important fact**: 19 failures × 15s ≈ 285s of a 288s run, so the **5 passing tests mount
+the editor instantly while 19 never mount at all**. Slowness would make all 24 slow. The split is binary
+⇒ **conditional state, not resources**. Three timing-shaped fixes (#908 `testTimeout`, #916
+`asyncUtilTimeout`, #917 `maxWorkers`) all failed; #916 and #917 are reverted.
+
+**Do NOT re-run**: RTL-vs-jest timeout distinction · `--coverage` overhead (the 10s-vs-102s figure was
+warm-vs-cold jest cache; cold it is 20s vs 26s) · CPU contention (serial run is identical).
+
+**Start here instead**: make CI print WHICH 5 tests pass. First N in file order ⇒ state pollution after
+test N; scattered ⇒ per-test input.
+
+**And the meta-rule**: this box has 32 cores and the suite passes on it unconditionally. **A local pass is
+not evidence for this gate.** Validate on the real runner or not at all — that blind spot is what made all
+three previous fixes look right.
+
+**Do not "solve" it by deleting the tests.** 21 of the 24 assertions read editor-rendered DOM
+(`data-compose-mark`, `span[data-comment-id]`); the editor mount IS the system under test, and the names
+carry defect ids (DEF-09/11/12, FR-16 tasks 030/032, r8 task 055) — ADR-038 KEEP category.

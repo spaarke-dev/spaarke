@@ -233,9 +233,9 @@ describe('FR-21 (DEF-15) — dismissing the simplification banner persists for t
     const user = userEvent.setup();
     const { unmount } = renderBannerStack({ importWarnings: SIMPLIFICATION_WARNINGS });
 
-    expect(screen.getByTestId('compose-workspace-import-warning-banner')).toBeInTheDocument();
-    await user.click(screen.getByTestId('compose-workspace-import-warning-dismiss'));
-    expect(screen.queryByTestId('compose-workspace-import-warning-banner')).not.toBeInTheDocument();
+    expect(screen.getByTestId('compose-workspace-formatting-notices')).toBeInTheDocument();
+    await user.click(screen.getByTestId('compose-workspace-formatting-notices-dismiss'));
+    expect(screen.queryByTestId('compose-workspace-formatting-notices')).not.toBeInTheDocument();
 
     // Simulate "re-render the editor within the same session" — unmount and remount an ENTIRELY
     // new component tree with the SAME import warnings (e.g. navigating away and back, or the host
@@ -243,21 +243,23 @@ describe('FR-21 (DEF-15) — dismissing the simplification banner persists for t
     unmount();
     renderBannerStack({ importWarnings: SIMPLIFICATION_WARNINGS });
 
-    expect(screen.queryByTestId('compose-workspace-import-warning-banner')).not.toBeInTheDocument();
+    expect(screen.queryByTestId('compose-workspace-formatting-notices')).not.toBeInTheDocument();
   });
 
   it('a genuinely different set of import warnings is NOT suppressed by a prior dismissal', async () => {
     const user = userEvent.setup();
     const { unmount } = renderBannerStack({ importWarnings: SIMPLIFICATION_WARNINGS });
 
-    await user.click(screen.getByTestId('compose-workspace-import-warning-dismiss'));
-    expect(screen.queryByTestId('compose-workspace-import-warning-banner')).not.toBeInTheDocument();
+    await user.click(screen.getByTestId('compose-workspace-formatting-notices-dismiss'));
+    expect(screen.queryByTestId('compose-workspace-formatting-notices')).not.toBeInTheDocument();
     unmount();
 
     const DIFFERENT_WARNINGS = [{ type: 'formatting', message: 'A different document had a footnote dropped.' }];
     renderBannerStack({ importWarnings: DIFFERENT_WARNINGS });
 
-    expect(screen.getByTestId('compose-workspace-import-warning-banner')).toBeInTheDocument();
+    expect(screen.getByTestId('compose-workspace-formatting-notices')).toBeInTheDocument();
+    // UAT round 1 #2: the copy sits behind the collapsed row's popover now.
+    await user.click(screen.getByTestId('compose-workspace-formatting-notices-open'));
     expect(screen.getByText('Some formatting was simplified')).toBeInTheDocument();
   });
 
@@ -265,7 +267,7 @@ describe('FR-21 (DEF-15) — dismissing the simplification banner persists for t
     const user = userEvent.setup();
     renderBannerStack({ importWarnings: SIMPLIFICATION_WARNINGS });
 
-    await user.click(screen.getByTestId('compose-workspace-import-warning-dismiss'));
+    await user.click(screen.getByTestId('compose-workspace-formatting-notices-dismiss'));
 
     const keys = Object.keys(window.sessionStorage).filter(k =>
       k.startsWith('spaarke-compose:import-warnings-dismissed:')
@@ -306,8 +308,8 @@ describe('ADR-021 dark mode — toolbar, bubble menu, and simplification banner 
         />
       </FluentProvider>
     );
-    expect(screen.getByTestId('compose-workspace-import-warning-banner')).toBeInTheDocument();
-    expect(screen.getByTestId('compose-workspace-import-warning-dismiss')).toBeInTheDocument();
+    expect(screen.getByTestId('compose-workspace-formatting-notices')).toBeInTheDocument();
+    expect(screen.getByTestId('compose-workspace-formatting-notices-dismiss')).toBeInTheDocument();
     expect(container.innerHTML).not.toMatch(/#[0-9a-fA-F]{3,8}\b/);
   });
 });

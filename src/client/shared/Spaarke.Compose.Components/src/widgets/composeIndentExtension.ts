@@ -55,6 +55,41 @@ export const ComposeIndentExtension = Extension.create({
               return value ? { style: `margin-left: ${value}` } : {};
             },
           },
+          // ── UAT round 2 (spaarkeai-compose-r8, 2026-09-02): document SPACING ──────────────────
+          // Same pattern, same reason: the projection's `AppendSpacingDeclarations` writes the paragraph's
+          // own `w:spacing` as inline CSS, and TipTap's base Paragraph/Heading nodes strip any style
+          // property they do not know about — so without these three the editor would drop the document's
+          // real spacing on the `setContent(projection.html)` parse and fall back to the generic
+          // typographic defaults in ComposeEditor's `editorSurface`.
+          //
+          // Values stay OPAQUE CSS strings (`"1.5"`, `"18pt"`). The twips/240ths conversion and the
+          // `w:lineRule` auto-vs-exact distinction are the SERVER's (ADR-007/013: `Services/Compose/` owns
+          // the OOXML read) — re-deriving either here would be the two-engine drift this project exists to
+          // prevent, on a value where the two readings differ by more than an order of magnitude.
+          spacingLineHeight: {
+            default: null,
+            parseHTML: (element: HTMLElement) => element.style.lineHeight || null,
+            renderHTML: (attributes: Record<string, unknown>) => {
+              const value = attributes.spacingLineHeight as string | null;
+              return value ? { style: `line-height: ${value}` } : {};
+            },
+          },
+          spacingMarginTop: {
+            default: null,
+            parseHTML: (element: HTMLElement) => element.style.marginTop || null,
+            renderHTML: (attributes: Record<string, unknown>) => {
+              const value = attributes.spacingMarginTop as string | null;
+              return value ? { style: `margin-top: ${value}` } : {};
+            },
+          },
+          spacingMarginBottom: {
+            default: null,
+            parseHTML: (element: HTMLElement) => element.style.marginBottom || null,
+            renderHTML: (attributes: Record<string, unknown>) => {
+              const value = attributes.spacingMarginBottom as string | null;
+              return value ? { style: `margin-bottom: ${value}` } : {};
+            },
+          },
           indentTextIndent: {
             default: null,
             parseHTML: (element: HTMLElement) => element.style.textIndent || null,

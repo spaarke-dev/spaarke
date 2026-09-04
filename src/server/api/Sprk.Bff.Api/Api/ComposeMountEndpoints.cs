@@ -51,12 +51,24 @@ internal static class ComposeMountEndpoints
         group.MapPost("/project", Project)
             .WithName("ComposeProject")
             .WithSummary("Stateless bytes->projection render for the Browse-local-file door (FR-03, no persistence)")
+            // #696 (DEF-02): this door runs SYNCHRONOUS OOXML projection on caller-supplied bytes, and had
+            // only Kestrel's implicit ~28.6 MB body cap. Bounded on the same two levels the save routes use
+            // (ComposeSaveEndpoints), from the same constants, so a document that Compose would refuse to
+            // SAVE is not one it will burn CPU projecting. The transport cap is deliberately the LARGER
+            // number: base64 inflates by 4/3 inside a JSON envelope, so a cap set at MaxDocumentBytes would
+            // reject a legal 25 MB document at the transport with no body — the unexplained-413 failure
+            // FR-S08 removed. The honest per-document check lives in the handler.
+            .WithMetadata(new RequestSizeLimitAttribute(ComposeSaveLimits.MaxRequestBodyBytes))
             // Read-shaped, deterministic, in-memory CPU work — same bucket as sibling Upload/Load,
             // not a persistence/ingest bucket (nothing is written).
             .RequireRateLimiting("ai-context")
             .Produces<ComposeProjectResponse>(StatusCodes.Status200OK)
             .Produces(StatusCodes.Status400BadRequest)
             .Produces(StatusCodes.Status401Unauthorized);
+            // Deliberately NOT .Produces(413): the raised cap is a transport backstop, and an oversize
+            // document is refused by the handler as a 400 ProblemDetails that names the limit. The save
+            // routes declare their responses the same way — a 413 in the contract would advertise a
+            // bodiless rejection as a normal outcome, which is the failure mode FR-S08 removed.
 
         return group;
     }
@@ -261,6 +273,25 @@ internal static class ComposeMountEndpoints
         if (body is null) return BadRequest("Request body is required.");
         if (body.Content is null || body.Content.Length == 0)
             return BadRequest("content (the document's raw bytes) is required.");
+
+        // #696 (DEF-02): refuse an oversize document BEFORE the synchronous projection, with the same
+        // limit and the same voice as the save routes. Two reasons it is a ProblemDetails naming the
+        // number rather than a bare transport rejection: a user who opens a 40 MB file needs to know what
+        // to do about it, and a door that refused SILENTLY here while the save door explained itself would
+        // read as two different products.
+        if (body.Content.Length > ComposeSaveLimits.MaxDocumentBytes)
+        {
+            logger.LogWarning(
+                "Compose project refused: document is {Size} bytes, over the {Limit}-byte limit (file={FileName}). TraceId={TraceId}",
+                body.Content.Length, ComposeSaveLimits.MaxDocumentBytes, body.FileName, httpContext.TraceIdentifier);
+            return Results.Problem(
+                statusCode: StatusCodes.Status400BadRequest,
+                title: "Document Too Large",
+                detail: $"This document is {body.Content.Length / (1024 * 1024)} MB, and Compose can open documents up to " +
+                        $"{ComposeSaveLimits.MaxDocumentDisplay}. Remove or compress large embedded images, or split the " +
+                        "document, then try again.",
+                type: "https://tools.ietf.org/html/rfc7231#section-6.5.1");
+        }
 
         // The SAME builder instance LoadAsync/Upload use, so Browse renders through the one reader (F-2),
         // not a forked projection path. Task 050 (FR-06): the DOCX render stays pure/synchronous/no-I/O

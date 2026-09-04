@@ -482,6 +482,125 @@ public sealed class ComposeMergeSeamTests
             "countable output — zero of everything — not a reason to skip the count");
     }
 
+    // ═══════════════════════════════════════════════════════════════════════════════════════════════
+    // 8. A list CREATED IN THE EDITOR inside a LOADED document (UAT items 3 + 4).
+    //
+    // Section 3 above covers a typed item CONTINUING a cloned list — it inherits that list's instance and
+    // the assertion is about continuity. The case neither it nor the synthesize-path round-trip seam
+    // reaches is the one UAT actually reported: a BRAND-NEW list, carrying no NumId, with no neighbouring
+    // list to continue, inside a carrier the user opened from Word.
+    //
+    // The design note (notes/uat/numbering-editing-design-options.md) retracted its own sizing of this and
+    // left one claim explicitly unsettled: "the DOCUMENT is already right and only the EDITOR is wrong —
+    // that is a claim, not a finding". These two tests are that experiment, run against real bytes rather
+    // than against a Word screenshot. The answer decides whether the remaining numbering work is a display
+    // fix or a write-path hole, so it is worth pinning permanently either way: if the write path ever
+    // stops authoring numbering for an editor-created list, that is a silent fidelity regression that no
+    // other test in this file would catch.
+    // ═══════════════════════════════════════════════════════════════════════════════════════════════
+
+    [Fact]
+    public void Merge_ListCreatedInEditor_WhenCarrierHasNoNumberingAtAll_SavesAResolvableNumberedList()
+    {
+        // The hardest version of the case: the carrier has NO numbering part, so there is nothing to
+        // inherit, merge into, or accidentally borrow. Everything the saved list needs must be authored.
+        var source = BuildFormattedSource();
+        NumberingPartOf(source).Should().BeNull("the fixture must start with no numbering part — that absence IS the condition");
+
+        var model = Project(source);
+        var withNewList = model with { Blocks = model.Blocks.Append(NewOrderedListItem("An item the user typed in the editor.")).ToList() };
+
+        var rendered = Render(source, withNewList, out var stats);
+
+        stats.ClonedBlocks.Should().Be(model.Blocks.Count, "every pre-existing block is untouched");
+        stats.RenderedBlocks.Should().Be(1, "only the new list item is rendered");
+
+        AssertNumberingResolves(rendered, "An item the user typed in the editor.");
+
+        // ...and the read side agrees. A numPr that resolves in numbering.xml but computes no label would
+        // still show the user nothing when the document is reopened.
+        var labels = new ComposeDocxProjectionBuilder().Build(rendered).ParaIdMap;
+        labels[^1].ComputedNumber.Should().Be("1.",
+            "the appended item is the last body paragraph and it is the first item of a new list — the " +
+            "computation the editor paints from must produce a real label for it");
+    }
+
+    [Fact]
+    public void Merge_ListCreatedInEditor_BesideAnImportedList_GetsItsOwnInstanceAndRestartsAtOne()
+    {
+        // The second shape: the carrier already has a list, and the user starts a SEPARATE one. The risk
+        // here is the mirror of section 3's — joining the imported instance would continue its numbering
+        // ("4.") when the user asked for a new list.
+        var source = BuildNumberedListSource();
+        var model = Project(source);
+
+        var separated = model.Blocks
+            .Append(NewParagraph("Intervening prose that ends the imported list."))
+            .Append(NewOrderedListItem("The first item of a genuinely new list."))
+            .ToList();
+
+        var rendered = Render(source, model with { Blocks = separated }, out _);
+
+        var numId = AssertNumberingResolves(rendered, "The first item of a genuinely new list.");
+        numId.Should().NotBe(5, "an explicitly-new list must not join the carrier's imported w:num instance (numId 5) — that would continue its numbering instead of restarting");
+
+        var labels = new ComposeDocxProjectionBuilder().Build(rendered).ParaIdMap;
+        labels[^1].ComputedNumber.Should().Be("1.", "a new list restarts at 1");
+    }
+
+    /// <summary>
+    /// Asserts the paragraph containing <paramref name="text"/> carries a <c>w:numPr</c> whose
+    /// <c>numId</c> resolves the whole way through the saved package — instance → abstract definition →
+    /// a level 0 that actually numbers. Returns the effective numId. A dangling numId is the specific
+    /// failure that renders as an UNNUMBERED paragraph in Word, which is exactly UAT item 4's symptom,
+    /// so following the chain to its end is the point rather than assertion padding.
+    /// </summary>
+    private static int AssertNumberingResolves(byte[] rendered, string text)
+    {
+        var paragraph = ParagraphContaining(rendered, text);
+        var numbering = paragraph.ParagraphProperties?.NumberingProperties;
+        numbering.Should().NotBeNull($"the saved list item '{text}' must carry a direct w:numPr — without one Word shows no number at all");
+
+        var numId = numbering!.NumberingId?.Val?.Value;
+        numId.Should().NotBeNull("w:numPr must name a w:num instance");
+        numbering.NumberingLevelReference?.Val?.Value.Should().Be(0, "a top-level item is at ilvl 0");
+
+        var part = NumberingPartOf(rendered);
+        part.Should().NotBeNull("authoring a list must have created the numbering part");
+
+        var instance = part!.Elements<NumberingInstance>().FirstOrDefault(n => n.NumberID?.Value == numId);
+        instance.Should().NotBeNull($"numId {numId} must resolve to a w:num instance — a dangling numId numbers nothing");
+
+        var abstractId = instance!.AbstractNumId?.Val?.Value;
+        abstractId.Should().NotBeNull("the instance must point at an abstract definition");
+
+        var definition = part.Elements<AbstractNum>().FirstOrDefault(a => a.AbstractNumberId?.Value == abstractId);
+        definition.Should().NotBeNull($"abstractNumId {abstractId} must be defined in the same package");
+
+        var level0 = definition!.Elements<Level>().FirstOrDefault(l => l.LevelIndex?.Value == 0);
+        level0.Should().NotBeNull("the abstract definition must define ilvl 0");
+        level0!.NumberingFormat?.Val?.Value.Should().NotBe(NumberFormatValues.None,
+            "a level that formats as None is a definition that resolves but still shows nothing");
+
+        return numId!.Value;
+    }
+
+    private static Numbering? NumberingPartOf(byte[] docx)
+    {
+        using var doc = WordprocessingDocument.Open(new MemoryStream(docx, writable: false), isEditable: false);
+        return doc.MainDocumentPart!.NumberingDefinitionsPart?.Numbering?.CloneNode(true) as Numbering;
+    }
+
+    private static ComposeBlock NewOrderedListItem(string text) => new()
+    {
+        Kind = ComposeBlockKind.ListItem,
+        Ordered = true,
+        Level = 0,
+        StartsNewList = true,
+        NumId = null, // born in the editor — the whole point of the case
+        Runs = new[] { new ComposeInlineRun { Text = text } },
+    };
+
     // ── helpers ──────────────────────────────────────────────────────────────────────────────────
 
     private static byte[] Render(byte[] carrier, ComposeContentModel model, out ComposeMergeStats stats)
