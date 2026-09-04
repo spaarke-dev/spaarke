@@ -4,7 +4,7 @@
     <title>Amend ADR-012 — enumerate the 15 shared packages and record the three evaluation questions</title>
     <phase>1 The shared surface is knowable</phase>
     <gate>startable</gate>
-    <status>not-started</status>
+    <status>completed</status>
     <rigor>STANDARD</rigor>
     <rigor-reason>ADR amendment (documentation), no code or tests. Not a FULL trigger, but it is an architectural-record change under CLAUDE.md §6.5 path B, so it carries a declared amendment obligation.</rigor-reason>
     <model-tier>sonnet</model-tier>
@@ -84,7 +84,17 @@
     <criterion testable="true">Negative: the 2+ consumer trigger is unchanged — it is not raised, lowered, or converted into a gate.</criterion>
   </acceptance-criteria>
 
-  <notes>Maps spec.md FR-01 + FR-03. The enumeration this task produces is the input to task 002's census — if the two disagree, the census is wrong, not the ADR. Measured 2026-09-04: exactly 15 directories, including Spaarke.LegalWorkspace (which has no package.json — see task 002).</notes>
+  <notes>Maps spec.md FR-01 + FR-03. The enumeration this task produces is the input to task 002's census — if the two disagree, the census is wrong, not the ADR. Measured 2026-09-04: exactly 15 directories.
+
+CORRECTION (applied on completion 2026-09-04): this note previously claimed "including Spaarke.LegalWorkspace (which has no package.json — see task 002)". That is WRONG — all 15 of 15 directories carry a package.json, LegalWorkspace included (@spaarke/legal-workspace). Task 002's census may key on package.json uniformly across all 15 and MUST NOT special-case LegalWorkspace. The real distinction the note was reaching for is build-orchestrator exclusion: Spaarke.LegalWorkspace is excluded from Build-AllClientComponents.ps1 by design (source-only re-export barrel; peer deps unresolvable standalone), while Spaarke.DailyBriefing.Components was excluded on the same basis but restored 2026-07-08. "Builds standalone" is therefore NOT a uniform property and must not be asserted by the census without that exclusion list.
+
+Second correction: the spec constraint's "@spaarke/visuals has 0 current consumers" is stale — measured 1 (the VisualHost PCF). The constraint's substance (record as legitimately anticipatory, never a removal candidate) was honored; the count was corrected rather than copied, to avoid writing a checkable falsehood into a governance doc. Full record: notes/task-001-deviations.md.</notes>
+
+  <completion>
+    <date>2026-09-04</date>
+    <summary>ADR-012 amended under CLAUDE.md §6.5 path B. The sanctioned set is now a closed 15-package enumeration with one line of reason each, replacing "…plus the domain component libraries (…, etc.)" — an open set that made the ADR's own new-sibling amendment requirement unenforceable by construction. The 2+ consumer rule is recorded as a trigger to EVALUATE with three written questions, each explicitly a non-gate, and the duplicate statement of the rule in the "When to Add to Shared Library" table was annotated to match. Full ADR history (docs/adr/) gained a v2.2 revision row pointing at the concise ADR rather than restating it. No package added, removed, deprecated, or regressed; 2+ trigger unchanged. Both escalation triggers evaluated and neither fired.</summary>
+    <files-modified>.claude/adr/ADR-012-shared-components.md; docs/adr/ADR-012-shared-component-library.md; projects/code-quality-and-assurance-r4/notes/task-001-deviations.md</files-modified>
+  </completion>
 
   <execution><skill>.claude/skills/task-execute/SKILL.md</skill></execution>
 </task>

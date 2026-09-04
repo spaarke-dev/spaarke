@@ -18,7 +18,7 @@ Legend: 🔲 not started · 🔄 needs retry · ✅ complete · ⏸️ blocked
 
 | # | Task | Deps | Rigor | Tier/Effort | Safe | Status |
 |---|---|---|---|---|---|---|
-| 001 | [Amend ADR-012 — enumerate 15, record 3 evaluation questions](001-adr-012-amendment-enumerate-shared-set.poml) | — | STANDARD | sonnet/high | ❌ | 🔲 |
+| 001 | [Amend ADR-012 — enumerate 15, record 3 evaluation questions](001-adr-012-amendment-enumerate-shared-set.poml) | — | STANDARD | sonnet/high | ❌ | ✅ |
 | 002 | [SharedPackageCensusTests — a 16th fails the build](002-shared-package-census-test.poml) | 001 | FULL | sonnet/high | ✅ | 🔲 |
 | 003 | [Publish the governance baseline (6 measures)](003-publish-governance-baseline.poml) | — | STANDARD | sonnet/high | ✅ | 🔲 |
 
