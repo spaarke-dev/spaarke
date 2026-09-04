@@ -4,7 +4,7 @@
     <title>FR-19 spine — AccessibleRecordSet carries (recordId → rights): additive-max composition + veto pipeline seam</title>
     <phase>1 One evaluator</phase>
     <gate>after-030</gate>
-    <status>pending</status>
+    <status>in-progress</status>
     <rigor>FULL</rigor>
     <rigor-reason>Authorization-path .cs implementation; tags bff-api/auth; the shape change every Phase 1/2 task depends on.</rigor-reason>
     <model-tier>opus</model-tier>
@@ -33,7 +33,7 @@
       <file role="canonical-reference">projects/unified-access-control-r2/design.md</file>
     </relevant-files>
     <dependencies>
-      <dependency task="030" status="pending">ADR-003 amendment sanctioning the (recordId → rights) shape and the veto ordering.</dependency>
+      <dependency task="030" status="completed">ADR-003 amendment sanctioning the (recordId → rights) shape and the veto ordering.</dependency>
     </dependencies>
   </context>
 
