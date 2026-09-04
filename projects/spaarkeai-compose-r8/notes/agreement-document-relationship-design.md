@@ -11,6 +11,11 @@
 > superseded — §9.1 row 8 is the authority.** Existing unprefixed fields (`sprk_matter`,
 > `sprk_invoice`, …) are NOT renamed; they appear in §9.1 because they already exist, not because
 > anything is being added to that pattern.
+>
+> **🔴 UPDATE (schema confirmed, §11): `sprk_RelatedAgreement` ALREADY EXISTS — nothing to create.**
+> §9.1 row 8 said CREATE and was wrong. The bigger finding: the code declarations know **7 of 16**
+> document links, so Compose create-on-save silently drops nine link types — including Agreement.
+> **§11 supersedes §9.1.**
 
 ---
 
@@ -484,3 +489,105 @@ The control is document-centric by design and hard-codes the entity logical name
   control at all.
 - What WOULD break it: renaming the `sprk_document` **entity**, or `sprk_documenttype` /
   `sprk_workspaceflag`. None of those are in scope here.
+
+---
+
+## 11. 🔴 SCHEMA TRUTH (owner screenshot, 2026-09-04) — §9.1 was wrong, and the real finding is bigger
+
+The actual `sprk_document` column list supersedes everything inferred from code. **Three corrections:**
+
+### 11.1 `sprk_RelatedAgreement` ALREADY EXISTS — there is nothing to create
+
+§9.1 row 8 said "CREATE". Wrong. The column is there. The Agreement link needs **no schema work at all** —
+only registration in the map (§8 Tier 1) and the read-path change (§5).
+
+§9.2 was also wrong: it said *"do NOT create `sprk_relatedinvoice` / `sprk_relatedworkassignment`"* on the
+premise they did not exist. **`sprk_RelatedInvoice` and `sprk_RelatedWorkAssignment` both exist.** The
+advice ("don't create them") happens to still hold, but for the opposite reason.
+
+### 11.2 The real finding: the code knows about **7 of 16** document links
+
+Confirmed columns on `sprk_document` (schema names as displayed; **logical names are all lowercase** — use
+those in code):
+
+| `Related*` family (12) | Unprefixed (4) |
+|---|---|
+| `sprk_RelatedAgreement`, `sprk_RelatedCommunication`, `sprk_RelatedContact`, `sprk_RelatedInvoice`, `sprk_relatedmatter`, `sprk_RelatedOrganization`, `sprk_relatedproject`, `sprk_RelatedServiceRequest`, `sprk_RelatedToDo`, `sprk_relatedvendororg`, `sprk_RelatedWorkAssignment`, `sprk_RelatedEvent` | `sprk_Matter`, `sprk_Project`, `sprk_WorkAssignment`, `sprk_Invoice` |
+
+**The two code declarations know only 6** (`sprk_matter`, `sprk_relatedmatter`, `sprk_project`,
+`sprk_relatedproject`, `sprk_invoice`, `sprk_workassignment`), plus `sprk_relatedcommunication` known
+separately to `CrossPathLink` = **7 of 16**.
+
+**Nine links are invisible to both consumers**: Agreement, Contact, Invoice(related), Organization,
+ServiceRequest, ToDo, VendorOrg, WorkAssignment(related), Event.
+
+**This is a live functional defect, not a tidiness issue.** Concretely:
+- **Compose create-on-save** copies forward only the 6 it knows. A PDF filed under an **Agreement**, Service
+  Request, To Do, Event, Contact, Organization or Vendor Org produces a new Word document that **silently
+  loses that filing**. The user sees a document that is simply not where they filed the original.
+- **Email→document association** scans only the 6, so nine link types never surface a candidate.
+
+§8.1 called Document's vocabulary "declared twice, both incomplete". The schema shows *how* incomplete — the
+declarations have drifted more than half a table behind. **This raises Tier 1 from a refactor to a bug fix.**
+
+⚠️ The screenshot's sort order suggests it may be partial (`Related Event` trails the alphabetical run).
+**Enumerate the full column list via MCP `describe` before finalising the map.**
+
+### 11.3 The unprefixed four: deprecate by WRITE, not by read — do not simply "ignore" them
+
+Owner: *"we just need to ignore the `sprk_{recordtype}` (i guess); we can't remove them b/c of dependencies."*
+Right on removal, but **"ignore" is unsafe as a first move**, because today's code **reads** all four, and
+they may be the only place a link lives on existing rows. Stop reading them and every such document silently
+loses its association — the same class of quiet loss as §11.2.
+
+**Use the standard deprecation order:**
+
+1. **Write** `sprk_related*` only. Nothing new lands in the unprefixed four.
+2. **Read both**, preferring `sprk_related*` and falling back to the unprefixed. One helper in the map; no
+   consumer needs to know.
+3. **Measure** (§8 Tier 2): rows where only the unprefixed is set, and rows where both are set to
+   *different* records.
+4. **Migrate** the unprefixed-only rows into `sprk_related*`.
+5. **Then** drop the read fallback. Leave the columns in place (dependencies) but unread and unwritten —
+   mark them deprecated in the schema description so the next reader knows.
+
+Steps 1–2 are safe immediately. Only after step 4 is "ignore" actually true.
+
+---
+
+## 12. Q: do we also need N:1 in the other direction (record → document)?
+
+**No — and adding it would create the §1 modelling bug.**
+
+`sprk_document.sprk_relatedagreement → sprk_agreement` **already gives both directions**:
+
+| Question | Answered by | Cost |
+|---|---|---|
+| "Which documents belong to this Agreement?" | the **1:N subgrid**, generated from the same lookup | free |
+| "Which Agreement is this document filed under?" | the lookup column | the column itself |
+
+A second column `sprk_agreement.sprk_document → sprk_document` would be an **independent** relationship. It
+can hold a value that contradicts the child lookup, and nothing reconciles them — you would have two answers
+to one question and no rule for which wins.
+
+### The ONE legitimate exception — and you already have an instance of it
+
+Add a record→document lookup **only when it expresses a DIFFERENT fact** than "documents filed here", and
+name it for that fact. The existing example is `sprk_invoice.sprk_document` — display name **"Source
+Document"**, i.e. *the document this invoice was extracted FROM*. That is provenance, not filing, so it is
+legitimately its own relationship (§9.5).
+
+The test: **can the subgrid already answer it?** If yes, the column is redundant. The subgrid can list an
+Agreement's documents; what it **cannot** express is *which one plays a particular role* — you cannot ask it
+"which of these 40 is the executed original?"
+
+So for Agreement, the only reason to add a record→document lookup is a **distinguished single document**,
+e.g.:
+
+- `sprk_agreement.sprk_executeddocument` → "the signed, executed copy"
+- `sprk_agreement.sprk_currentdraft` → "the draft under negotiation"
+
+**Recommendation**: do not add one now. If a distinguished-document need appears, add a **role-named** lookup
+for that specific role — never a generic `sprk_document` on Agreement, which would just duplicate the
+subgrid. And if several roles emerge at once, that is the §4 intersect-entity signal rather than a column
+per role.
