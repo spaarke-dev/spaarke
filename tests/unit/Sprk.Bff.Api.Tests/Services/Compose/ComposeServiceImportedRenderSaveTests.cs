@@ -594,4 +594,69 @@ public sealed class ComposeServiceImportedRenderSaveTests
             "a fact that carries an author keeps it — imported revisions round-trip their true authors");
     }
 
+    // ═══════════════════════════════════════════════════════════════════════════════════════════════
+    // Document Revision Report appendix (spaarkeai-compose-r8, UAT item 8) — the SAVE-PATH WIRING.
+    //
+    // ComposeRevisionReportSeamTests proves the generator and AppendSection agree over real corpus bytes.
+    // What it cannot reach is whether SaveAsync actually CALLS them, which is the half that silently does
+    // nothing if the request field is added and the call site is not. Worth noting: the sibling
+    // `SummaryPage` field has no equivalent wiring test — this closes that gap for the new field rather
+    // than matching a weak precedent.
+    // ═══════════════════════════════════════════════════════════════════════════════════════════════
+
+    [Fact]
+    public async Task SaveAsync_WithARevisionReport_AppendsTheReportToThePersistedBytes()
+    {
+        ArrangeReplaceExisting(out var capturedBytes);
+        var sut = CreateSut();
+
+        var request = ReplaceRequest(EditedModel(), content: BuildCarrierBytes()) with
+        {
+            RevisionReport = new ComposeRevisionReportInput(
+                Summary: "The reviewer added a liability cap.",
+                Changes: new[]
+                {
+                    new ComposeRevisionChangeInput("insertion", "Section 7.4", "Added a 12-month cap on aggregate liability."),
+                },
+                DocumentName: "Master Services Agreement.docx",
+                DocumentVersion: "7",
+                AsOf: new DateTimeOffset(2026, 9, 3, 14, 30, 0, TimeSpan.Zero)),
+        };
+
+        await sut.SaveAsync(request, TestHttpContexts.Authenticated(), CancellationToken.None);
+
+        using var doc = WordprocessingDocument.Open(new MemoryStream(capturedBytes(), writable: false), isEditable: false);
+        var text = doc.MainDocumentPart!.Document!.Body!.InnerText;
+
+        text.Should().Contain("Document Revision Report", "the appendix must reach the PERSISTED bytes, not just the generator");
+        text.Should().Contain("The reviewer added a liability cap.");
+        text.Should().Contain("Section 7.4");
+        text.Should().Contain("version 7", "the scope line travels with the report into the document");
+        text.Should().Contain("Edited body text.", "appending the report must not disturb the document it describes");
+    }
+
+    [Fact]
+    public async Task SaveAsync_WithARevisionReportCarryingNothingToReport_AppendsNothing()
+    {
+        // The branch the sibling SummaryPage path does not have. A report over no changes would append a
+        // heading with nothing under it — the document-shaped version of the phantom change the client
+        // producer refuses to dispatch.
+        ArrangeReplaceExisting(out var capturedBytes);
+        var sut = CreateSut();
+
+        var request = ReplaceRequest(EditedModel(), content: BuildCarrierBytes()) with
+        {
+            RevisionReport = new ComposeRevisionReportInput(string.Empty, Array.Empty<ComposeRevisionChangeInput>()),
+        };
+
+        var result = await sut.SaveAsync(request, TestHttpContexts.Authenticated(), CancellationToken.None);
+
+        result.VersionId.Should().NotBeNullOrEmpty("the save itself still succeeds — an empty report is not a failure");
+
+        using var doc = WordprocessingDocument.Open(new MemoryStream(capturedBytes(), writable: false), isEditable: false);
+        var text = doc.MainDocumentPart!.Document!.Body!.InnerText;
+
+        text.Should().NotContain("Document Revision Report", "nothing to report means nothing appended");
+        text.Should().Contain("Edited body text.", "the ordinary save is unaffected");
+    }
 }

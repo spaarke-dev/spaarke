@@ -445,15 +445,22 @@ export class EntityCreationService {
   }
 
   /**
-   * Upload files to SPE via the BFF OBO upload endpoint.
+   * Upload files to SPE through the shared `@spaarke/sdap-client` upload path.
    *
    * Uses: PUT /api/obo/containers/{containerId}/files/{path}
-   * Each file is uploaded individually with Bearer token auth.
+   *
+   * **Migrated 2026-09-02** off a raw inline `fetch` and onto `SdapApiClient.uploadFile()` — the
+   * migration this docstring used to describe as "planned". It was the third of three parallel
+   * upload implementations in the repo; going through the shared client means server-side upload
+   * behaviour (explicit `conflictBehavior`, the 250 MB simple-PUT ceiling, RFC7807 failure copy,
+   * typed `SdapHttpError`) applies here automatically instead of being re-implemented per caller.
+   *
+   * ⚠️ The shared client's upload could not be used before this: it authenticated through a
+   * `TokenProvider` shim that returned `''`, which made it send NO Authorization header. That was
+   * fixed in the same change (ADR-028 `authenticatedFetch`) — see FAILURE-MODES AP-12.
    *
    * Post-upload RAG indexing is the caller's responsibility — invoke
-   * `SdapApiClient.indexFile()` from `@spaarke/sdap-client` for each
-   * returned `ISpeFileMetadata`. See project `sdap-client-shared-library-fix-r1`
-   * for the planned migration of this method to `sdap-client.UploadOperation`.
+   * `SdapApiClient.indexFile()` from `@spaarke/sdap-client` for each returned `ISpeFileMetadata`.
    *
    * @param containerId SPE container/drive ID for the target storage
    * @param files Files to upload
@@ -479,8 +486,6 @@ export class EntityCreationService {
 
     for (let i = 0; i < files.length; i++) {
       const file = files[i];
-      const fileName = encodeURIComponent(file.name);
-
       onProgress?.({
         current: i + 1,
         total: files.length,
@@ -489,35 +494,21 @@ export class EntityCreationService {
       });
 
       try {
-        const response = await this._authenticatedFetch(
-          `${this._bffBaseUrl}/api/obo/containers/${containerId}/files/${fileName}`,
-          {
-            method: 'PUT',
-            body: file.file,
-            headers: {
-              'Content-Type': file.file.type || 'application/octet-stream',
-            },
-          }
-        );
+        // The shared client owns URL construction (including encoding the file name) and failure
+        // translation. `conflictBehavior` is deliberately OMITTED so the BFF applies its
+        // non-destructive `fail` default: a same-named file returns 409 with the stored file
+        // untouched, rather than silently overwriting it.
+        const item = await this._getSdapClient().uploadFile(containerId, file.file);
 
-        if (!response.ok) {
-          const errorText = await response.text().catch(() => response.statusText);
-          errors.push({
-            fileName: file.name,
-            error: `HTTP ${response.status}: ${errorText}`,
-          });
-          onProgress?.({
-            current: i + 1,
-            total: files.length,
-            currentFileName: file.name,
-            status: 'failed',
-            error: `HTTP ${response.status}`,
-          });
-          continue;
-        }
-
-        const metadata: ISpeFileMetadata = await response.json();
-        uploadedFiles.push(metadata);
+        // DriveItem -> ISpeFileMetadata. `size` is nullable on the shared type (folders); an
+        // uploaded file always has one, and 0 is the honest fallback for a zero-byte upload.
+        uploadedFiles.push({
+          id: item.id,
+          name: item.name,
+          size: item.size ?? 0,
+          webUrl: item.webUrl,
+          driveId: item.driveId,
+        });
 
         onProgress?.({
           current: i + 1,

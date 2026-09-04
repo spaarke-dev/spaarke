@@ -8,6 +8,61 @@ Format follows [Keep a Changelog](https://keepachangelog.com/) conventions.
 
 ---
 
+###### 2026-09-02 — `unified-access-control-r2`: new `FAILURE-MODES.md` **AP-12** — a comment becomes the constraint
+
+- **New `FAILURE-MODES.md` AP-12: prose outlives the mechanism it describes.** Promoted from a single
+  observation inside AP-11 ("prose has no compiler") to its own anti-pattern, because the consequence is
+  not a wrong destination but a **wrong decision**. **Eight instances in one session.** The worst:
+  `PathValidator.SmallUploadMaxBytes` had **zero code references** and its enforcing guard had been
+  deleted, yet it became a **real 4 MiB product limit** purely because comments said it was enforced —
+  refusing every file between 4 MiB and 250 MB, from three separate client copies of the same fiction.
+  Two instances produced **wrong answers to the owner**: a hook docstring naming a privilege route that
+  never existed (triggering an unnecessary escalation for a decision already made in code), and
+  `ISpeFileOperations` asserting the simple PUT "takes no `@microsoft.graph.conflictBehavior`" — which
+  drove a design conclusion **twice, the second time after this project had already written down that
+  the claim was false**. Also corrected: three sites describing SPE permissions as "additive-only" and a
+  misrouted write as "irreversible" (they are **container-level**; removing the item ends the access —
+  the old framing invites hunting for a per-file ACL that does not exist), and a `TokenProvider` whose
+  comment claims "authentication handled by browser session" while returning `''`, which makes the
+  caller omit the `Authorization` header entirely.
+- **Why it is durable, and the prevention.** Deleting code is loud (the build breaks); deleting a *claim*
+  is silent, so nobody does it — and an agent reading a file top-to-bottom meets the comment **before**
+  the code, so the claim frames the reading of the evidence that would refute it. Rules: treat any
+  comment stating a **limit, route, role mapping, capability, or reason-something-isn't-wired** as a
+  claim to verify before quoting it to a human; a **constant with zero references means the limit does
+  not exist**; grep the prose in the same change that deletes a field or guard; and **correct in place
+  with a dated "🔴 do not re-derive" note** rather than silently — one of these had been silently
+  corrected before and came back.
+- **Including your own project's notes.** This session's handoff asserted a missing `encodeURIComponent`
+  that was present two lines above the cited line, and a consolidation plan that would have replaced a
+  working upload client with one that cannot authenticate. Re-derive; never inherit a claim.
+- Also **back-filled the missing AP-11 TOC entry** (AP-11 shipped 2026-09-01 without one).
+
+###### 2026-09-01 — `spaarkeai-compose-r8`: residual-loss list gains a row, and the guard that keeps it honest gains three
+
+- **[`docs/architecture/COMPOSE-WRITE-RESIDUAL-LOSS.md`](../docs/architecture/COMPOSE-WRITE-RESIDUAL-LOSS.md) republished (2026-09-01).**
+  Two rows LEFT §2 — `indentation-dropped` and `paragraph-style-flattened` retired *with their premises*
+  (unmodeled paragraph styles and indentation are now carried, so they moved to §3). One row ENTERED §2:
+  `section-break-flattened`. That one is **not a new loss** — editing a paragraph holding an interior
+  `w:sectPr` always dropped it; what was wrong is that the warning fired at *open*, whole-document, and the
+  loss itself was **absent from the list**. The signed set grows from five rows to six, so it is flagged for
+  owner accept/decline at UAT rather than added silently (issue #777).
+- **`ComposeResidualLossParityTests` — three holes closed, each found by seeding a removal and watching
+  nothing happen.** The test whose stated job is to fail when the document and the renderer disagree *in
+  either direction* stayed green after a row was added to the document. Causes: (1) no interior-section-break
+  family in the measured set — structural, since every other family is a **run** and `w:sectPr` lives in
+  `w:pPr`; (2) the code missing from the check's hard-coded `known` list; (3) **Direction A scanned the whole
+  document**, so prose *discussing* a code satisfied it — and on the second attempt, so did the sign-off
+  amendment's own table. Direction A is now scoped to §2's loss table. **A green guard is evidence about the
+  guard, not about the code, until you have watched it go red.**
+- **New cross-runtime parity mechanism (issue #699)** — `tests/fixtures/compose-citation-parity/cases.json`,
+  45 cases executed by BOTH the C# `CitationResolver` and its TypeScript mirror, plus
+  `tests/Spaarke.ArchTests/ComposeCitationResolverParityGuardTests.cs` pinning the leading-label vocabulary,
+  the `CitationShape` set and the range separators across both source files. Ported test cases — two
+  hand-kept copies of the same expectations — cannot detect drift between themselves.
+- **`projects/INDEX.md`** — removed a **duplicate `spaarkeai-compose-r8` row** (two rows, same project,
+  branch and worktree path, differing only by date). `/conflict-check` consumes this registry, so a
+  duplicate row is a coordination defect, not a cosmetic one.
 ###### 2026-09-01 — `unified-access-control-r2`: new `FAILURE-MODES.md` **AP-11** — code that runs but reaches the wrong destination
 
 - **New `FAILURE-MODES.md` AP-11.** Three shipped, user-visible defects of one shape, none with a test:

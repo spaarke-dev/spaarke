@@ -336,7 +336,18 @@ public static class OfficeEndpoints
             // friendly ones (account/contact), so every Matter/Project/Invoice association was
             // rejected with OFFICE_002 while its own error text listed them as valid. Pre-existing on
             // master — surfaced once real entity search (task 026) returned real typed records.
-            var validEntityTypes = new[] { "matter", "project", "invoice", "account", "contact" };
+            // ⚠️ `account` and `contact` are accepted here but sprk_document has NO account/contact
+            // lookup column (verified against live Dataverse metadata 2026-09-03), so a save filed to
+            // one is persisted UNASSOCIATED — the user believes it is filed and it is not. Left
+            // accepted rather than silently rejected because that is a user-visible flow change and
+            // an owner decision (add the columns, or reject the type). The drop is now logged loudly
+            // at both persistence sites. See Spaarke.Dataverse.DocumentAssociationMap.
+            //
+            // `workassignment` + `event` added 2026-09-03 — both DO have lookup columns.
+            var validEntityTypes = new[]
+            {
+                "matter", "project", "invoice", "workassignment", "event", "account", "contact"
+            };
             if (!validEntityTypes.Contains(request.TargetEntity.EntityType.ToLowerInvariant()))
             {
                 logger.LogWarning(

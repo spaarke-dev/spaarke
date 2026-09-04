@@ -30,7 +30,6 @@ import type {
     UploadFilesResult,
 } from "@spaarke/ui-components/services/document-upload";
 import {
-    SdapApiClient,
     FileUploadService,
     MultiFileUploadService,
     NavMapClient,
@@ -39,7 +38,9 @@ import {
 } from "@spaarke/ui-components/services/document-upload";
 import type { EntityConfigResolver } from "@spaarke/ui-components/services/document-upload";
 
-import type { ConflictBehaviorOption } from "@spaarke/sdap-client";
+// The upload client moved OUT of @spaarke/ui-components on 2026-09-03. That package's own
+// SdapApiClient was one of three parallel upload implementations; this is the surviving one.
+import { SdapApiClient, type ConflictBehaviorOption } from "@spaarke/sdap-client";
 
 import { authenticatedFetch } from "@spaarke/auth";
 import { resolveSearchIndexNameForRecord } from "../components/AssociateToStep";
@@ -160,12 +161,16 @@ export async function orchestrateUpload(
 
     logger.info("UploadOrchestrator", `Starting upload pipeline for ${files.length} files`);
 
-    // Initialize service graph
+    // Initialize service graph.
+    //
+    // Auth is `authenticatedFetch` (ADR-028) — the same function this file already uses for RAG
+    // indexing below — rather than `config.bffTokenProvider`. Both resolve to the same
+    // SpaarkeAuthProvider token; `authenticatedFetch` additionally owns the 401 retry + cache clear
+    // that `onUnauthorized` was passed in to trigger, so nothing is lost by not forwarding it here.
+    // `bffTokenProvider` / `onUnauthorized` stay on the config: NavMapClient still takes them.
     const sdapClient = new SdapApiClient({
         baseUrl: config.bffBaseUrl,
-        getAccessToken: config.bffTokenProvider,
-        logger,
-        onUnauthorized: config.onUnauthorized,
+        authenticatedFetch,
     });
 
     const fileUploadService = new FileUploadService(sdapClient, logger);

@@ -69,6 +69,7 @@
 import * as React from 'react';
 import { useEditor, EditorContent, BubbleMenu, type Editor } from '@tiptap/react';
 import StarterKit from '@tiptap/starter-kit';
+import { thinScrollbarStyle } from '@spaarke/ui-components';
 import Underline from '@tiptap/extension-underline';
 import Link from '@tiptap/extension-link';
 import Image from '@tiptap/extension-image';
@@ -99,7 +100,6 @@ import {
   Textarea,
 } from '@fluentui/react-components';
 import {
-  ArrowDown20Regular,
   Checkmark16Regular,
   CommentMultiple20Regular,
   Dismiss16Regular,
@@ -1334,9 +1334,9 @@ const useStyles = makeStyles({
     boxSizing: 'border-box',
     overflow: 'hidden',
   },
-  // FIX #9 — the scroll region that wraps the editor surface + the floating
-  // "scroll for more" FAB. `position: relative` anchors the absolutely-positioned
-  // FAB; it does NOT itself scroll (the inner `editorSurface` does).
+  // The scroll region wrapping the editor surface. `position: relative` anchors the absolutely
+  // positioned FABs (comments/styles toggles); it does NOT itself scroll — the inner `editorSurface`
+  // does, and that is the element carrying the thin scrollbar.
   editorScrollWrap: {
     position: 'relative',
     flex: 1,
@@ -1347,13 +1347,14 @@ const useStyles = makeStyles({
   editorSurface: {
     flex: 1,
     overflow: 'auto',
-    // FIX #9 — hide the native scrollbar while remaining scrollable. The floating
-    // down-arrow FAB is the progressive-scroll affordance instead of a visible
-    // scrollbar. Layout/visibility only (no color) — ADR-021-neutral.
-    scrollbarWidth: 'none',
-    '::-webkit-scrollbar': {
-      display: 'none',
-    },
+    // UAT round 2 #5 (r8, 2026-09-02) — SUPERSEDES "FIX #9", which hid the native scrollbar
+    // (`scrollbarWidth: 'none'` + `::-webkit-scrollbar { display: none }`) and used a floating
+    // down-arrow FAB as the progressive-scroll affordance instead. That pairing is banned by the
+    // canonical pattern: `src/client/shared/CLAUDE.md` lists "a down-arrow/chevron next-page control"
+    // as an explicit DON'T, and ADR-051 requires the shared thin scrollbar on every scroll container.
+    // Compose used neither. Spreading `thinScrollbarStyle` restores a real, draggable scrollbar — which
+    // also gives back position/length feedback ("how much document is left") that a FAB cannot convey.
+    ...thinScrollbarStyle,
     padding: tokens.spacingHorizontalL,
     backgroundColor: tokens.colorNeutralBackground1,
     color: tokens.colorNeutralForeground1,
@@ -1384,14 +1385,25 @@ const useStyles = makeStyles({
       color: tokens.colorBrandForegroundLink,
       textDecoration: 'underline',
     },
-    // FR-13 (task 032, fidelity-r4.5): the editor NEVER relies on the browser `<ol>` CSS auto-count for
-    // a legal number (F-3 invariant) — `composeNumberAtomExtension.ts`'s decoration is the SOLE source
-    // of a displayed number. Suppressing the native marker here (not per-item) is intentionally
-    // unconditional: it applies even to the rare unresolvable-numId case where no atom renders (031's
-    // "do not fabricate a number" fail-closed posture) — showing NO number is safer than a CSS-counted
-    // one that would silently disagree with 031's computed label ("1." vs "4.2", the double-numbering
-    // defect this task exists to fix). `<ul>` bullet lists are untouched (no legal number involved).
-    '& .ProseMirror ol': {
+    // FR-13 (task 032, fidelity-r4.5): for a list that came from the SOURCE DOCUMENT the editor NEVER
+    // relies on the browser `<ol>` CSS auto-count for a legal number (F-3 invariant) —
+    // `composeNumberAtomExtension.ts`'s decoration is the SOLE source. That still holds even when the
+    // atom renders nothing (the unresolvable-`numId` fail-closed case): showing NO number is safer than
+    // a CSS count that would silently disagree with the computed label ("1." vs "4.2" — the
+    // double-numbering defect task 032 exists to fix).
+    //
+    // UAT round 2 (r8, 2026-09-02) — this rule used to be UNCONDITIONAL, which over-applied it. A list
+    // the USER creates has no computed label either, so it rendered with no number at all, and
+    // "Numbered list" looked like a dead button (UAT round 1 item 4). The two cases are indistinguishable
+    // by the number attribute — both lack one — so they are separated by PROVENANCE instead:
+    // `ComposeDocxProjectionBuilder.EnsureList` stamps `data-projected-list` on document-sourced lists,
+    // and only those are suppressed. An editor-created list takes the browser's native marker, which is
+    // honest — it is a real, freshly authored list, not a claim about the source document's numbering.
+    //
+    // KNOWN LIMIT, deliberate: a new item added INSIDE a projected list is still unnumbered, because its
+    // `<ol>` is projected and it has no computed label. Closing that needs live renumbering (the Option C
+    // client engine), not a CSS change — a browser count there WOULD contradict the document's numbering.
+    '& .ProseMirror ol[data-projected-list]': {
       listStyleType: 'none',
     },
     '& .ProseMirror table': {
@@ -1410,6 +1422,36 @@ const useStyles = makeStyles({
       borderLeft: `4px solid ${tokens.colorNeutralStroke1}`,
       paddingLeft: tokens.spacingHorizontalM,
       color: tokens.colorNeutralForeground2,
+    },
+    // UAT round 2 (r8, 2026-09-02) — EDITOR TYPOGRAPHY. The surface previously set none, so headings and
+    // paragraphs inherited `FluentProvider`'s root `line-height`, which is a FIXED PIXEL value
+    // (lineHeightBase300 = 20px). A heading glyph is ~28px, so its line box was SMALLER than its type and
+    // multi-line headings collided — the "this is not readable" the owner reported. Word and the preview
+    // look correct because neither inherits that pixel line-height.
+    //
+    // Deliberately UNITLESS ratios, not tokens: a unitless line-height scales with each element's own
+    // font-size, which is the whole point — a fixed token would reintroduce the bug at a different size.
+    //
+    // This is READ-SIDE PRESENTATION ONLY. It sets no `w:spacing`, touches no content-model field, and is
+    // therefore invisible to the save path: an edited paragraph still inherits the document's real spacing
+    // through `ComposeBlockMerge.InheritProperties` as an unmodeled property. Making the editor MATCH the
+    // document's own spacing, and making that spacing editable, are separate and larger steps.
+    '& .ProseMirror h1, & .ProseMirror h2, & .ProseMirror h3, & .ProseMirror h4, & .ProseMirror h5, & .ProseMirror h6':
+      {
+        lineHeight: '1.3',
+        marginTop: '1em',
+        marginBottom: '0.4em',
+      },
+    '& .ProseMirror p': {
+      lineHeight: '1.5',
+      marginTop: '0',
+      marginBottom: '0.6em',
+    },
+    // List items and table cells keep tight paragraph rhythm — the block margins above are for body prose
+    // and would otherwise space list rows apart like paragraphs.
+    '& .ProseMirror li p, & .ProseMirror td p, & .ProseMirror th p': {
+      marginTop: '0',
+      marginBottom: '0',
     },
     '& .ProseMirror hr': {
       border: 'none',
@@ -1676,20 +1718,9 @@ const useStyles = makeStyles({
     alignItems: 'center',
     maxWidth: '100vw',
   },
-  // FIX #9 — floating circular "scroll for more" button, pinned bottom-center of
-  // the editor scroll region. Elevated (shadow) so it reads above the page; shown
-  // only when the surface is not scrolled to the bottom. Semantic tokens only.
-  scrollDownFab: {
-    position: 'absolute',
-    bottom: tokens.spacingVerticalL,
-    left: '50%',
-    transform: 'translateX(-50%)',
-    zIndex: 2,
-    boxShadow: tokens.shadow16,
-  },
   // FR-23 (task 044) — floating "Comments" panel toggle, pinned top-right of the editor scroll
-  // region (the top-center/bottom-center positions are taken by the format toolbar / scroll FAB).
-  // Semantic tokens only (ADR-021 dark-mode-correct); mirrors `scrollDownFab`'s elevated-FAB treatment.
+  // region (the top-center position is taken by the format toolbar; the bottom-center scroll FAB was
+  // removed in UAT round 2 #5). Semantic tokens only (ADR-021 dark-mode-correct); elevated FAB treatment.
   commentsToggleFab: {
     position: 'absolute',
     top: tokens.spacingVerticalM,
@@ -2375,24 +2406,11 @@ export const ComposeEditor = React.forwardRef<ComposeEditorHandle, ComposeEditor
       commentThreadsRef.current = threads;
     }, []);
 
-    // ----- FIX #9 — hidden-scrollbar editor surface + "scroll for more" FAB ----
-    // The editor scroll region hides its native scrollbar (see `editorSurface`
-    // style: `scrollbarWidth: none` + `::-webkit-scrollbar { display: none }`)
-    // while staying scrollable (`overflow: auto`). To keep the "there is more
-    // below" affordance a docx editor needs, a floating circular down-arrow button
-    // appears at the bottom whenever the surface is NOT scrolled to the end; it
-    // scrolls the content down one viewport-ish on click. (This is the
-    // progressive-scroll interpretation of the UAT "lazy load" note — a docx
-    // editor loads its whole document into ProseMirror; there is no paged data to
-    // lazily fetch, so the affordance is a scroll cue, not a data pager.)
+    // The editor scroll region. UAT round 2 #5 (r8): it now shows the canonical thin scrollbar
+    // (`thinScrollbarStyle`, ADR-051) instead of hiding the native one behind a down-arrow FAB — see
+    // the `editorSurface` style block. Other features scroll this element by ref (comment sync,
+    // anchor reveal), which is why the ref outlived the FAB.
     const editorScrollRef = React.useRef<HTMLDivElement | null>(null);
-    const [showScrollDown, setShowScrollDown] = React.useState<boolean>(false);
-
-    const scrollEditorDown = React.useCallback((): void => {
-      const el = editorScrollRef.current;
-      if (!el) return;
-      el.scrollBy({ top: Math.round(el.clientHeight * 0.8), behavior: 'smooth' });
-    }, []);
 
     // ----- DEF-12 — per-change on-click accept/reject affordance ------------
     // The cramped fixed `compose-redline-controls` bar (scroll-hidden, no reason-wrap) was REMOVED
@@ -3302,33 +3320,6 @@ export const ComposeEditor = React.forwardRef<ComposeEditorHandle, ComposeEditor
       });
     }, [editor]);
 
-    // ----- FIX #9 — track whether the editor surface has more content below ---
-    // Show the down-arrow FAB only when NOT scrolled to the bottom. Re-measure on
-    // scroll, on content-size changes (ResizeObserver — guarded for jsdom), and on
-    // editor transactions (typing/import grows the doc). A small epsilon avoids a
-    // flickering button at the exact bottom.
-    React.useEffect(() => {
-      const el = editorScrollRef.current;
-      if (!el) return;
-      const measure = (): void => {
-        const remaining = el.scrollHeight - el.scrollTop - el.clientHeight;
-        setShowScrollDown(remaining > 8);
-      };
-      measure();
-      el.addEventListener('scroll', measure, { passive: true });
-      let ro: ResizeObserver | undefined;
-      if (typeof ResizeObserver !== 'undefined') {
-        ro = new ResizeObserver(measure);
-        ro.observe(el);
-      }
-      if (editor) editor.on('transaction', measure);
-      return () => {
-        el.removeEventListener('scroll', measure);
-        ro?.disconnect();
-        if (editor) editor.off('transaction', measure);
-      };
-    }, [editor, referenceOnly, projectionUnavailable, isImporting]);
-
     // ----- Imperative handle ----------------------------------------------
     // R6 (task 012): the session + advisory comment threads folded into a ContentModel save —
     // assembled EXACTLY like getAnchoredComments (session panel threads from commentThreadsRef
@@ -4011,11 +4002,8 @@ export const ComposeEditor = React.forwardRef<ComposeEditorHandle, ComposeEditor
             <Text size={200}>Importing document…</Text>
           </div>
         ) : null}
-        {/* FIX #9 — scroll region: native scrollbar hidden (see `editorSurface`
-            style), with a floating circular down-arrow FAB that appears only when
-            more content sits below the fold and scrolls the surface down on click.
-            The FAB is a sibling of the scroller (not inside it) so it stays pinned
-            at the bottom instead of scrolling away with the content. */}
+        {/* Scroll region. The inner `editorSurface` is the scroller and carries the canonical thin
+            scrollbar (ADR-051); the wrapper stays `position: relative` for the FABs pinned inside it. */}
         <div className={styles.editorScrollWrap}>
           <div
             ref={editorScrollRef}
@@ -4071,18 +4059,11 @@ export const ComposeEditor = React.forwardRef<ComposeEditorHandle, ComposeEditor
           {/* UAT round-4: the "Show styles" toggle was REMOVED per user request — the apply-existing-
               styles pane added little value over the Body/Paragraph/Font toolbar dropdowns. The
               ComposeStylesPane component + hook remain in the codebase (unmounted) in case it returns. */}
-          {showScrollDown ? (
-            <Button
-              appearance="primary"
-              shape="circular"
-              size="large"
-              className={styles.scrollDownFab}
-              icon={<ArrowDown20Regular />}
-              aria-label="Scroll down for more"
-              onClick={scrollEditorDown}
-              data-testid="compose-editor-scroll-down"
-            />
-          ) : null}
+          {/* UAT round 2 #5 (r8, 2026-09-02): the floating down-arrow scroll FAB was REMOVED. It
+              existed only because `editorSurface` hid the native scrollbar (the old "FIX #9"); that
+              pairing is the down-arrow control `src/client/shared/CLAUDE.md` bans and it left the
+              surface with no scroll-position feedback. `editorSurface` now spreads the canonical
+              `thinScrollbarStyle` (ADR-051) and the real scrollbar is the affordance. */}
         </div>
 
         {/* ===================================================================

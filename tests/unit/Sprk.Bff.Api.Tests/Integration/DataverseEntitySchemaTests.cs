@@ -80,6 +80,11 @@ public class DataverseEntitySchemaTests
         { "MatterLookup", new("sprk_matter", typeof(EntityReference)) },
         { "ProjectLookup", new("sprk_project", typeof(EntityReference)) },
         { "InvoiceLookup", new("sprk_invoice", typeof(EntityReference)) },
+        // Q4 widening 2026-09-03. Both columns already existed on sprk_document — verified against
+        // live Dataverse metadata — which is exactly why the gap was invisible: the write path had
+        // nothing to write, so a save filed to one produced no error and no association.
+        { "WorkAssignmentLookup", new("sprk_workassignment", typeof(EntityReference)) },
+        { "EventLookup", new("sprk_event", typeof(EntityReference)) },
 
         // Document Source Tracking
         { "SourceType", new("sprk_sourcetype", typeof(OptionSetValue)) },

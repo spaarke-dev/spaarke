@@ -4,8 +4,14 @@
  * ITokenProvider implementations for the DocumentUploadWizard Code Page.
  *
  * Provides two token providers:
- *   1. BFF API token provider — for SPE file operations (via SdapApiClient / NavMapClient)
+ *   1. BFF API token provider — for NavMap lookups (via NavMapClient)
  *   2. Dataverse token provider — for OData record operations (via ODataDataverseClient)
+ *
+ * ⚠️ **No longer covers SPE file upload** (changed 2026-09-03). Upload moved to
+ * `@spaarke/sdap-client`, which authenticates through `authenticatedFetch` (ADR-028) rather than an
+ * `ITokenProvider`. Both ultimately call the same `SpaarkeAuthProvider`, so this is a change of
+ * plumbing, not of identity — but do not re-derive "SdapApiClient takes a token provider" from this
+ * file. See `uploadOrchestrator.ts`.
  *
  * Both use @spaarke/auth's SpaarkeAuthProvider (initialized via initAuth() in main.tsx)
  * which chains 5 strategies: bridge -> cache -> Xrm -> MSAL silent -> MSAL popup.
@@ -28,7 +34,7 @@ import type { ITokenProvider } from "@spaarke/ui-components/services/document-up
  * The scope is configured via initAuth() in main.tsx (defaults to
  * api://1e40baad-e065-4aea-a8d4-4b7ab273458c/user_impersonation).
  *
- * @returns ITokenProvider function compatible with SdapApiClient and NavMapClient
+ * @returns ITokenProvider function compatible with NavMapClient
  */
 export function createBffTokenProvider(): ITokenProvider {
     return async (): Promise<string> => {

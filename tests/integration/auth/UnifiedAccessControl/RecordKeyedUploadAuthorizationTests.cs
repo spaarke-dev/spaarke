@@ -43,7 +43,13 @@ public class RecordKeyedUploadAuthorizationTests
 {
     private const string MappedEntity = "sprk_matter";
     private const string MappedEntitySet = "sprk_matters";
-    private const string UnmappedEntity = "sprk_workassignment";
+    // Changed 2026-09-03 from `sprk_workassignment`, which the Q4 widening ADDED to the shared map —
+    // so the old value silently stopped testing the deny path and this test went red, correctly.
+    // `sprk_todo` is the better example anyway: it is genuinely unmappable rather than merely
+    // not-yet-mapped, because `sprk_document` has no `sprk_todo` lookup column at all, so a document
+    // uploaded against a to-do could never be associated to it. If a to-do lookup is ever added and
+    // the type is mapped, pick another unmapped type here — do not delete the test.
+    private const string UnmappedEntity = "sprk_todo";
     private const string OwnContainer = "b!secure-own-container-0000000000";
     private const string BusinessUnitContainer = "b!record-bu-container-00000000000";
 
@@ -111,10 +117,10 @@ public class RecordKeyedUploadAuthorizationTests
     [Fact(DisplayName = "Task 076: an entity logical name outside the shared map DENIES rather than passing through")]
     public async Task Upload_WhenEntityTypeIsNotAuthorizable_IsDeniedWithoutProbing()
     {
-        // sprk_workassignment is a real upload target (CreateWorkAssignmentWizard uploads against it) that
-        // is NOT in EntityAccessFilter's logical-name -> entity-set table. It must deny, not proceed: an
-        // entity whose per-record access nothing here can evaluate is an entity whose uploads cannot be
-        // accepted, because accepting one writes bytes into a container on the strength of no decision.
+        // sprk_todo is NOT in EntityAccessFilter's logical-name -> entity-set table. It must deny, not
+        // proceed: an entity whose per-record access nothing here can evaluate is an entity whose
+        // uploads cannot be accepted, because accepting one writes bytes into a container on the
+        // strength of no decision.
         var probe = new StubProbe(RequiredRights);
         var handlerRan = false;
 

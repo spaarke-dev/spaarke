@@ -119,19 +119,12 @@ public static class RecordMatchEndpoints
             // Build the update request with the appropriate lookup field
             var updateRequest = new UpdateDocumentRequest();
 
-            switch (request.RecordType.ToLowerInvariant())
+            // Shared map — see Spaarke.Dataverse.DocumentAssociationMap. This site keeps its
+            // fail-closed miss behaviour: it is a request handler, so an unsupported type is a
+            // caller error to report, not a warning to log and continue past.
+            if (!DocumentAssociationMap.TryApply(updateRequest, request.RecordType, recordGuid))
             {
-                case "sprk_matter":
-                    updateRequest.MatterLookup = recordGuid;
-                    break;
-                case "sprk_project":
-                    updateRequest.ProjectLookup = recordGuid;
-                    break;
-                case "sprk_invoice":
-                    updateRequest.InvoiceLookup = recordGuid;
-                    break;
-                default:
-                    return Results.BadRequest($"Unsupported record type: {request.RecordType}");
+                return Results.BadRequest($"Unsupported record type: {request.RecordType}");
             }
 
             // Update the Document record

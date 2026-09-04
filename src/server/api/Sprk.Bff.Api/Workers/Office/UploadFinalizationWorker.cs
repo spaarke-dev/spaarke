@@ -1035,22 +1035,16 @@ public class UploadFinalizationWorker : BackgroundService, IOfficeJobHandler
         if (!associationId.HasValue || string.IsNullOrEmpty(associationType))
             return;
 
-        switch (associationType.ToLowerInvariant())
+        // ONE map (Spaarke.Dataverse.DocumentAssociationMap) rather than this method's own switch,
+        // which accepted only the FRIENDLY spellings — so an "sprk_matter" reaching here dropped the
+        // association while the very same token applied fine in OfficeDocumentPersistence.
+        if (!DocumentAssociationMap.TryApply(request, associationType, associationId))
         {
-            case "matter":
-                request.MatterLookup = associationId.Value;
-                break;
-            case "project":
-                request.ProjectLookup = associationId.Value;
-                break;
-            case "invoice":
-                request.InvoiceLookup = associationId.Value;
-                break;
-            default:
-                _logger.LogWarning(
-                    "Unknown association type {AssociationType}, skipping association",
-                    associationType);
-                break;
+            _logger.LogWarning(
+                "Association type {AssociationType} has no sprk_document lookup — document {DocumentId} " +
+                "will be created UNASSOCIATED. Known gaps: account, contact, sprk_todo (no column exists).",
+                associationType,
+                request.GraphItemId);
         }
     }
 

@@ -405,11 +405,18 @@ internal static class ComposeBlockMerge
     /// paragraph has no element of that type. Anything the model expresses (alignment, numbering, heading
     /// style, run marks) is already on the rendered paragraph and is never overwritten.</para>
     ///
-    /// <para><b>Three exclusions</b>, each because the model fully determines it and inheriting would fight
-    /// the user's edit: <c>w:pStyle</c> and <c>w:numPr</c> (determined by the block's Kind/Level/NumId — a user
-    /// who turned a heading into a paragraph must not get the heading style back), and <c>w:sectPr</c> (the
-    /// renderer detaches and re-attaches the trailing section itself; inheriting it here would duplicate it).
-    /// An interior <c>w:sectPr</c> on an UNTOUCHED paragraph survives through the clone path instead.</para>
+    /// <para><b>Two unconditional exclusions</b>, each because the model fully determines it and inheriting
+    /// would fight the user's edit: <c>w:numPr</c> (determined by the block's Kind/Level/NumId), and
+    /// <c>w:sectPr</c> (the renderer detaches and re-attaches the trailing section itself; inheriting it here
+    /// would duplicate it). An interior <c>w:sectPr</c> on an UNTOUCHED paragraph survives through the clone
+    /// path instead.</para>
+    ///
+    /// <para><b><c>w:pStyle</c> is excluded CONDITIONALLY</b>, per <see cref="IsModelDeterminedStyle"/>: only
+    /// when the base style is one the model owns (Normal / Heading1-6 / ListParagraph), which preserves the
+    /// rule that a user who turned a heading into a paragraph must not get the heading style back. An
+    /// UNMODELED style is inherited, because the model cannot express it and so its absence is not an edit.
+    /// This was previously a blanket exclusion, which flattened every custom paragraph style on any block the
+    /// user touched — the `paragraph-style-flattened` degradation.</para>
     /// </remarks>
     public static void InheritProperties(OpenXmlElement rendered, OpenXmlElement baseElement)
     {
@@ -443,7 +450,17 @@ internal static class ComposeBlockMerge
 
         foreach (var child in basePr.ChildElements)
         {
-            if (child is ParagraphStyleId or NumberingProperties or SectionProperties)
+            if (child is NumberingProperties or SectionProperties)
+            {
+                continue;
+            }
+
+            // w:pStyle is inherited ONLY when the base style is one the content model cannot express.
+            // A MODEL-DETERMINED style (Normal / Heading1-6 / ListParagraph) is the model's to decide, so
+            // its absence here is a deliberate demotion and must not be undone. Any OTHER style — a firm
+            // body style, Quote, a numbered-clause style — is invisible to the model, so its absence is
+            // not a user decision and flattening it to Normal is pure loss. See IsModelDeterminedStyle.
+            if (child is ParagraphStyleId baseStyleId && IsModelDeterminedStyle(baseStyleId))
             {
                 continue;
             }
@@ -457,6 +474,52 @@ internal static class ComposeBlockMerge
             // inherited like any other unmodeled property.
             InsertInSchemaOrder(renderedPr, child.CloneNode(true), ParagraphPropertyOrder);
         }
+    }
+
+    /// <summary>
+    /// True when <paramref name="styleId"/> names a paragraph style the CONTENT MODEL determines, and whose
+    /// absence from a rendered block is therefore the model speaking rather than a gap.
+    /// </summary>
+    /// <remarks>
+    /// <para>The model expresses exactly three paragraph styles, all authored by <c>ComposeStyleCatalog</c>:
+    /// <c>Normal</c> (the default), <c>Heading1</c>-<c>Heading6</c> (block Kind = Heading + Level) and
+    /// <c>ListParagraph</c> (Kind = ListItem). For those, a rendered paragraph carrying no <c>w:pStyle</c>
+    /// means the user demoted the block, and re-inheriting the base style would undo the edit.</para>
+    ///
+    /// <para><b>Every other style is unmodeled</b> — the projection has nowhere to put it, so the rendered
+    /// paragraph's silence carries no user intent at all. Excluding those was flattening a firm body style,
+    /// a Quote, or a numbered-clause style to Normal on any paragraph the user touched, and reporting it as
+    /// <c>paragraph-style-flattened</c>. That is real loss, not a modelling decision, which is why the
+    /// exclusion is now scoped to the styles the model actually owns rather than to <c>w:pStyle</c> wholesale.</para>
+    ///
+    /// <para>Numbering cannot double up as a result: a block the model rendered as a list item already carries
+    /// <c>ListParagraph</c> + a direct <c>w:numPr</c>, so the <c>present</c> guard above blocks the base style
+    /// before this is consulted. A plain paragraph that inherits a style-numbered custom style regains the
+    /// number it had in the source document, which is the original appearance, not a new one.</para>
+    /// </remarks>
+    private static bool IsModelDeterminedStyle(ParagraphStyleId styleId)
+    {
+        var value = styleId.Val?.Value;
+        if (string.IsNullOrEmpty(value))
+        {
+            return false;
+        }
+
+        if (string.Equals(value, ComposeStyleCatalog.NormalStyleId, StringComparison.OrdinalIgnoreCase)
+            || string.Equals(value, ComposeStyleCatalog.ListParagraphStyleId, StringComparison.OrdinalIgnoreCase))
+        {
+            return true;
+        }
+
+        for (var level = 1; level <= ComposeDocumentRenderer.MaxHeadingLevel; level++)
+        {
+            if (string.Equals(value, ComposeStyleCatalog.HeadingStyleId(level), StringComparison.OrdinalIgnoreCase))
+            {
+                return true;
+            }
+        }
+
+        return false;
     }
 
     /// <summary>

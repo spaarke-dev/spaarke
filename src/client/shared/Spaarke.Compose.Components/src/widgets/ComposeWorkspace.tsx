@@ -1076,19 +1076,25 @@ export function ComposeWorkspace(props: ComposeWorkspaceProps): React.JSX.Elemen
 
   // FR-05 (task 100): keep the latest host-resolved BU container id in a ref so the Browse
   // handler + upload effect (whose closures would otherwise capture a stale prop) always thread
-  // the current value into `mountTransient` → `documentRef.containerId`. triggerSave also falls
-  // back to this ref if the reducer state predates resolution (async-resolve race).
+  // the current value into `mountTransient` → `documentRef.containerId`.
+  //
+  // #858 (2026-09-01): `triggerSave` no longer reads this — the save path's container send and its
+  // pre-save gate are both deleted, because the server derives the container itself. The ref and its
+  // six `mountTransient`/`documentRef` senders are KEPT DELIBERATELY and NOT bulk-deleted: they feed
+  // client state, not a request body, and unpicking that chain is a separate change from closing the
+  // #858 send. What remains true is that nothing downstream reads `documentRef.containerId` today
+  // (`ComposeEditorDocumentRef` declares the field and never uses it), so this is now vestigial
+  // plumbing rather than a live capability — worth retiring, on its own pass, with its own reasoning.
   const containerIdRef = React.useRef<string | undefined>(containerId);
   React.useEffect(() => {
     containerIdRef.current = containerId;
   }, [containerId]);
 
-  // UAT-11 (honest/safe): keep the host's save-time container RETRY resolver in a ref so the save
-  // callback can re-resolve without re-subscribing (mirrors containerIdRef). See the prop docs.
-  const resolveContainerRef = React.useRef(resolveContainer);
-  React.useEffect(() => {
-    resolveContainerRef.current = resolveContainer;
-  }, [resolveContainer]);
+  // `resolveContainerRef` DELETED (#858, 2026-09-01). Its ONLY reader was the pre-save container gate
+  // in `triggerSave`, which is gone: a client-side pre-check for a decision the server makes
+  // authoritatively can only produce false refusals. The `resolveContainer` PROP stays declared (a
+  // host passes it — removing it from the public interface is a host-breaking change and belongs in
+  // the same pass that retires the plumbing above), but it is no longer invoked from here.
 
   // Imperative editor ref for save (TipTap → DOCX bytes).
   const editorRef = React.useRef<ComposeEditorHandle | null>(null);
@@ -1806,8 +1812,11 @@ export function ComposeWorkspace(props: ComposeWorkspaceProps): React.JSX.Elemen
             )
         : null;
       const forkLogicalId = forkNew ? startNewComposeLogicalId() : undefined;
-      // `let` (UAT-11): the transient-create gate below may REPLACE this with a save-time retry result.
-      let saveContainerId = state.documentRef.containerId ?? containerIdRef.current;
+      // `saveContainerId` DELETED — issue #858 client cutover (2026-09-01). It read
+      // `state.documentRef.containerId ?? containerIdRef.current` and was sent on the create-on-save
+      // body; the server no longer accepts a container from the caller (the field is gone from
+      // SaveComposeDocumentRequest) and derives it from the session-bound matter, else the acting
+      // user's business unit. See the deleted gate below for why sending it was not the worst half.
       // UAT 2026-07-19 P2: prefer the drive the document actually lives in (captured from the save
       // response after a create-on-save — the born-in-editor doc lands in the BU container's drive,
       // which the host `driveId` prop does NOT identify) over the host default. This is the drive the
@@ -1869,42 +1878,27 @@ export function ComposeWorkspace(props: ComposeWorkspaceProps): React.JSX.Elemen
         dispatch({ kind: 'saveFailed', errorMessage });
       };
 
-      if (isTransientCreate) {
-        let resolvedContainerId = saveContainerId;
-        // UAT-11 (2026-08-18, honest/safe): the mount-time container resolver is a one-shot
-        // useEffect([]) — if Xrm wasn't ready, a transient 401, or a Dataverse fault made it fail,
-        // `containerId` stays undefined and the OLD gate emitted a DISHONEST "your BU has no storage
-        // container configured" for what may be a correctly-configured BU. RETRY here (if the host
-        // supplied a resolver) and only claim "no container configured" when the query actually
-        // confirms the BU has none — otherwise say honestly that we couldn't determine it.
-        let containerOutcome: 'resolved' | 'no-container' | 'unavailable' | 'unknown' = resolvedContainerId
-          ? 'resolved'
-          : 'unknown';
-        if (!resolvedContainerId && resolveContainerRef.current) {
-          try {
-            const retry = await resolveContainerRef.current();
-            containerOutcome = retry.outcome;
-            if (retry.containerId) {
-              resolvedContainerId = retry.containerId;
-              containerIdRef.current = retry.containerId; // cache for subsequent saves this mount
-            }
-          } catch {
-            containerOutcome = 'unavailable';
-          }
-        }
-        if (!resolvedContainerId) {
-          const errorMessage =
-            containerOutcome === 'no-container'
-              ? 'Cannot save this new document — your Business Unit has no storage container configured. ' +
-                'Contact an administrator to set the container on your Business Unit.'
-              : // unavailable / unknown: do NOT blame the BU config — the resolution didn't complete.
-                "Cannot save this new document yet — we couldn't determine your storage container " +
-                '(the Dataverse context may still be loading). Please try again in a moment.';
-          failEarly(errorMessage);
-          return;
-        }
-        saveContainerId = resolvedContainerId;
-      } else if (!saveDriveId) {
+      // ══ THE PRE-SAVE CONTAINER GATE IS DELETED — issue #858 client cutover (2026-09-01) ═════════
+      //
+      // What stood here: resolve the acting user's BU container client-side (mount value, then a
+      // save-time retry through the host's `resolveContainer`), and REFUSE the save when it came back
+      // empty — "your Business Unit has no storage container configured" / "we couldn't determine your
+      // storage container".
+      //
+      // Why it goes, and why deleting it is a FIX rather than only a cleanup. The server now derives
+      // the container itself (session-bound matter, authorized, else the acting user's business unit)
+      // and `SaveComposeDocumentRequest.ContainerId` no longer exists, so the resolved value had
+      // nowhere to go. But the gate was worse than redundant: it ran the SAME derivation on the
+      // client, over a browser Xrm context that can be slow, unavailable, or 401 at mount — and on
+      // failure it BLOCKED a save the server would have completed. A client-side pre-check for a
+      // decision the server makes authoritatively can only ever produce false refusals; it cannot
+      // produce a save that would otherwise have failed.
+      //
+      // The honest failure is not lost, it moved to the side that actually knows: an underivable
+      // container returns the `storage-failed` outcome (BuildContainerFailedResult), which the outcome
+      // gate below renders — with the create-specific copy that names the admin action, so the one
+      // genuinely actionable thing the deleted gate said survives its deletion.
+      if (!isTransientCreate && !saveDriveId) {
         failEarly('Cannot save — SPE drive configuration missing.');
         return;
       }
@@ -2083,7 +2077,9 @@ export function ComposeWorkspace(props: ComposeWorkspaceProps): React.JSX.Elemen
           // G7 (task 022): `transientKey` = the transient dedup key (repeated create-on-save → ONE record);
           // `forkNew` = the Save-New fork flag (skips dedup → a deliberately new record).
           const createCommon = {
-            containerId: saveContainerId,
+            // `containerId` DELETED (#858, 2026-09-01) — the server derives the container from the
+            // session-bound matter (authorized first) or the acting user's business unit, and the wire
+            // field is gone from SaveComposeDocumentRequest. Sending it would now be ignored at best.
             tenantId,
             sessionId: state.sessionId,
             // FR-07(a) (task 012): a Save-New fork sends the uniquified name so the SPE PUT-by-path
@@ -2296,8 +2292,19 @@ export function ComposeWorkspace(props: ComposeWorkspaceProps): React.JSX.Elemen
               payload.outcome === 'partially-recorded'
                 ? 'Partly saved — the document was stored, but not everything was recorded. Reload the ' +
                   'document to see what landed, then redo anything missing.'
-                : 'Not saved — the server accepted the request but could not store the document. Your ' +
-                  'changes are still here — try again, and contact an administrator if it keeps failing.',
+                : isTransientCreate
+                  ? // #858 (2026-09-01): the create-specific copy that carries the ADMIN ACTION the
+                    // deleted client-side container gate used to name. On a first save the dominant
+                    // cause of `storage-failed` is exactly what BuildContainerFailedResult reports —
+                    // no container could be derived for this draft — and "contact an administrator"
+                    // is useless without saying what to ask them for. Deliberately hedged ("usually
+                    // means"): the server does not tell us WHICH of its two causes fired, and naming
+                    // one as certain would be the dishonest half of the gate we just removed.
+                    "Not saved — this new document couldn't be stored. That usually means your " +
+                    'Business Unit has no storage container configured; ask an administrator to set ' +
+                    'one. Your changes are still here — nothing was lost.'
+                  : 'Not saved — the server accepted the request but could not store the document. Your ' +
+                    'changes are still here — try again, and contact an administrator if it keeps failing.',
           });
           return;
         }

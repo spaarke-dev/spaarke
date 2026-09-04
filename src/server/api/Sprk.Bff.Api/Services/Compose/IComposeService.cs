@@ -291,7 +291,11 @@ public interface IComposeService
     /// <c>Services/Compose</c> stays pure (no AI internals, no Graph types — ADR-007/ADR-013).
     /// </remarks>
     /// <param name="httpContext">HTTP context for OBO auth into Graph. Required.</param>
-    /// <param name="driveId">SPE drive (container) id. Required.</param>
+    /// <param name="requestedDriveId">SPE drive (container) id as named by the CALLER. Required, but it is
+    /// a claim rather than the write target: the implementation resolves the drive RECORDED on the owning
+    /// <c>sprk_document</c> row and uses that when the row has one, falling back to this value only for a
+    /// row that carries no drive id (legacy) or no row at all. See
+    /// <c>ComposeRecordResolution.TryResolveRecordedDriveIdAsync</c>.</param>
     /// <param name="documentSpeId">SPE drive-item id of the persisted document. Required.</param>
     /// <param name="resolvedTemplateBytes">The resolved firm/matter <c>.dotx</c> package bytes
     /// (task 031's <c>IComposeTemplateSource.ResolveAsync</c> output). Required, non-empty.</param>
@@ -301,7 +305,7 @@ public interface IComposeService
     /// merge degradation warnings (loud, never silent), and the post-merge canonical content model.</returns>
     Task<ApplyComposeTemplateResult> ApplyTemplateAsync(
         HttpContext httpContext,
-        string driveId,
+        string requestedDriveId,
         string documentSpeId,
         byte[] resolvedTemplateBytes,
         string templateName,
@@ -907,6 +911,23 @@ public sealed record SaveComposeDocumentRequest
     public NdaReviewSummaryPageInput? SummaryPage { get; init; }
 
     /// <summary>
+    /// spaarkeai-compose-r8 (UAT item 8, "Include document revision report"): optional Document Revision
+    /// Report content, deterministically derived from the ONE ledgered
+    /// <c>compose-summarize-word-changes</c> result (<c>{summary, changes[]}</c>) plus the document
+    /// identity the report is scoped to — NO second LLM call (see
+    /// <see cref="ComposeRevisionReportGenerator"/>). When present, <see cref="SaveAsync"/> appends it as
+    /// a page-broken, non-tracked section at the END of <c>contentToPersist</c> via
+    /// <see cref="ComposeDocumentRenderer.AppendSection"/> — the SAME shipped path
+    /// <see cref="SummaryPage"/> uses, not a parallel mechanism.
+    /// <para>
+    /// Null/absent (every ordinary Compose save) → no report appended, unchanged behavior. Supplying an
+    /// input the generator finds empty (no summary AND no changes) also appends nothing: a report over no
+    /// changes is the fabricated-change failure the upstream producer refuses to enable.
+    /// </para>
+    /// </summary>
+    public ComposeRevisionReportInput? RevisionReport { get; init; }
+
+    /// <summary>
     /// G7 (FR-06, task 022): a CLIENT-MINTED stable key for a TRANSIENT (not-yet-promoted) Compose draft,
     /// minted once (<c>crypto.randomUUID()</c>) when the draft is mounted and sent on every create-on-save.
     /// It is the durable dedup identity that fixes the 8-duplicate defect: a transient draft has no SPE
@@ -1157,7 +1178,7 @@ public sealed record SaveComposeDocumentResult : ComposeDocumentResult
     /// so the synchronous aggregate is <see cref="JobAwareState.Partial"/> on the
     /// happy path (record exists + indexed, profile dispatched off-thread). A record with no SPE
     /// file OR no index is never a success — see
-    /// <see cref="ComposeService.IsInterimCreateOnSaveSuccess"/> for the interim R5-E bar. Null
+    /// <see cref="ComposeCreateOnSavePromoter.IsInterimCreateOnSaveSuccess"/> for the interim R5-E bar. Null
     /// only for legacy callers that predate FR-05 (always populated by the current Save path).
     /// </summary>
     public JobAwareCompletionState? CompletionState { get; init; }
