@@ -14,7 +14,7 @@
 | **Step** | — |
 | **Status** | not-started |
 | **Execution** | **AUTONOMOUS** — do not ask between waves |
-| **Next Action** | **(1)** Amend `spec.md` FR-10 to the revision-header standard (see "The FR-10 amendment" below) — this is plan.md risk **R4** and must land before P3. **(2)** Run `/conflict-check` for `.claude/` and `.github/workflows/`. **(3)** `task-execute` on `tasks/001-adr-012-amendment-enumerate-shared-set.poml`, then continue through the waves in `tasks/TASK-INDEX.md` without stopping for confirmation. |
+| **Next Action** | **(1)** `/worktree-sync` Update Only — branch is **36 commits behind master**; several tasks measure the tree at head. **(2)** Amend `spec.md` FR-10 to the revision-header standard (see below) — plan.md risk **R4**, must land before P3. **(3)** `/conflict-check` for `.claude/` and `.github/workflows/`. **(4)** `task-execute` on `tasks/001-adr-012-amendment-enumerate-shared-set.poml`, then run the waves in `tasks/TASK-INDEX.md` without stopping for confirmation. |
 
 ### Files Modified This Session
 
@@ -158,8 +158,13 @@ lines, **adds keys only** for skills, idempotent, `-Check` mode for CI.
 ### Handoff Notes
 
 Everything is committed and pushed to PR [#935](https://github.com/spaarke-dev/spaarke/pull/935) on
-`work/code-quality-and-assurance-r4`. Branch is level with `origin/master` as of 2026-09-04. A fresh
-session needs only this file plus `CLAUDE.md` and `tasks/TASK-INDEX.md` to start executing.
+`work/code-quality-and-assurance-r4` (HEAD `235ec7de3`, working tree clean). A fresh session needs only
+this file plus `CLAUDE.md` and `tasks/TASK-INDEX.md` to start executing.
+
+⚠️ **Re-sync before executing.** The branch was level with `origin/master` at pipeline time but master has
+since moved — **36 commits behind as of 2026-09-04**. Run `/worktree-sync` (Update Only) first: task 003's
+baseline and task 044's divergence register both measure the tree at head, and task 010 classifies ADRs
+against current code, so stale inputs produce wrong answers rather than merge conflicts.
 
 **Not done by the pipeline**: the `/devops-project-sync` portfolio hook (writes to GitHub Project #940) —
 run it if you want the board current.
