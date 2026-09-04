@@ -388,10 +388,58 @@ can genuinely complete with nowhere to hang its summary.
   one review run. Re-running yields a new Analysis → new Summary, and history falls out for free. Re-parenting
   to the Document would make "which review is this summarising?" ambiguous the moment a document is reviewed
   twice.
-- Discovery = Document (and plausibly **Agreement**, the third candidate not named in the question — the
-  review is *about* an agreement; the document is merely its paper, and the record header lives on agreements).
-  Users ask "show me the summary for this agreement", not "for analysis GUID X". That is a **read-model**
-  concern — document/agreement → analyses → latest output — and needs **no storage change**.
+- Discovery = Document. ~~and plausibly Agreement… the document is merely its paper~~ — **WRONG, corrected
+  by owner 2026-09-04. See below.**
+
+#### 🔴 Owner correction (2026-09-04): Agreement is NOT "the document's meaning"
+
+> *"we should not conflate 'Agreement' with 'Document'; an Agreement is a core record type, not an adjunct
+> for document/file. An Agreement stores the metadata (like a matter or project or invoice or work
+> assignment etc), and has an association to one (or more) Documents."*
+
+**`sprk_agreement` is a peer of Matter / Project / Invoice / WorkAssignment** — a first-class business record
+holding metadata, with a **1‑to‑many** association to Documents. My framing ("the review is about an
+agreement; the document is merely its paper") treated the two as one thing seen from two sides. They are not:
+one Agreement can carry many Documents, so "the agreement's summary" and "the document's summary" are
+**different questions with different answers**.
+
+**This is corroborated by the schema, and the corroboration is itself a finding.** Everything the analysis
+path touches is **`sprk_agreementtype`** — a *classification registry* (`sprk_key` = `'nda'`, lease, …;
+`CreateAnalysisWizardWidget.tsx:858`, `sprkAnalysis.ts:163`). `sprk_analysis` has a lookup to the agreement
+**TYPE**, and a `DocumentId`. It has **no lookup to `sprk_agreement`, the record.**
+
+Meanwhile `sprk_memo` *does* have `sprk_regardingagreement` → the core record (added 2026-08-25).
+
+**Consequence — a real gap, not a naming quibble.** Today a Summary can answer *"this was an NDA review"*
+but **cannot** answer *"…of which Agreement?"* except by traversing `Analysis → Document → (Agreement)`.
+Agreement-level discovery is therefore a **roll-up across that agreement's Documents**, which is a
+materially bigger thing than the read-model I described — and I withdraw "needs no storage change", because
+whether it is traversable at all depends on the Document↔Agreement association.
+
+⚠️ **Unverified from this repo**: `sprk_document`'s lookup to `sprk_agreement`. There is no
+`docs/data-model/sprk_document.md` or `sprk_agreement.md`, and the ERD has no agreement rows — the
+data-model docs lag the org (CLAUDE.md §2). **Confirm the association's shape via Dataverse MCP `describe`
+before designing any agreement-level roll-up.** Do not assume it from this note.
+
+#### The SPE question, restated precisely — "evergreen" applies to PRESENTATION, not CONTENT
+
+Owner intuition (2026-09-04): *"maybe that's the point — it is always evergreen and fresh."* Correct, with
+one sharpening that improves the risk picture:
+
+- **Content is FROZEN at generate time.** `PersistReviewMemoAsync` serializes the assembled memo; the
+  findings, before/after text and risk ratings are fixed in that row forever.
+- **Only the RENDERING is regenerated.** `GetReviewMemoDocx` re-renders that frozen JSON through the current
+  template.
+
+So the "it might silently change" worry applies **only to formatting**, never to findings. That is why
+render-on-demand is the right default: template fixes apply retroactively to old summaries at zero cost, and
+there is no second artifact to drift.
+
+**The one place evergreen is a liability**: a summary **transmitted externally** (sent to counsel, attached
+to a filing) must be frozen in *presentation* too — "here is exactly the document you received on 3 Sept".
+That argues for snapshotting to SPE **at the moment of external delivery**, not at generate time. Note the
+contrast with R8's revision report, which is embedded INTO the .docx on save and is therefore inherently a
+frozen snapshot — the two features differ here deliberately, not accidentally.
 
 ### What this instance teaches that the DTO guard cannot
 
