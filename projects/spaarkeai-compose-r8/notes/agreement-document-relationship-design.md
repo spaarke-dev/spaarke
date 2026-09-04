@@ -368,3 +368,108 @@ behaviour first.
 5. **Tier 3 / resolver-on-Document**: only on a stated need.
 
 Steps 1–3 are independent of every open question and can start immediately.
+
+---
+
+## 9. DECIDED: Document keeps the `Related*` convention — the build checklist
+
+> **Owner decision, 2026-09-04**: *"for the Document 'related/regarding' we'll keep the 'related'
+> convention."* This CLOSES §8's Tier 3 (no rename to `Regarding*`). New Document links use `sprk_related*`.
+
+### 9.1 The vocabulary — every row is ONE relationship, a lookup ON `sprk_document`
+
+**Direction is the same for all of them**: the lookup column lives on **`sprk_document`** (the child) and
+points at the parent — **N:1 from Document**. The parent's 1:N "Documents" subgrid is generated from it.
+**Create one relationship per row. Never a second one in the opposite direction** (§1).
+
+| # | Field on `sprk_document` | Target | Status | Evidence |
+|---|---|---|---|---|
+| 1 | `sprk_matter` | `sprk_matter` | **CONFIRM** | `DocumentLinkFields` + `DocumentAssociationLookupAttributes` |
+| 2 | `sprk_relatedmatter` | `sprk_matter` | **CONFIRM** | both lists |
+| 3 | `sprk_project` | `sprk_project` | **CONFIRM** | both lists |
+| 4 | `sprk_relatedproject` | `sprk_project` | **CONFIRM** | both lists |
+| 5 | `sprk_invoice` | `sprk_invoice` | **CONFIRM** | both lists |
+| 6 | `sprk_workassignment` | `sprk_workassignment` | **CONFIRM** | both lists |
+| 7 | `sprk_relatedcommunication` | `sprk_communication` | **CONFIRM** ⚠️ | `CrossPathLink` + 12 call sites — **absent from BOTH lists today** |
+| 8 | **`sprk_relatedagreement`** | `sprk_agreement` | **CREATE** | new (§2) |
+
+⚠️ **Row 7 is the one to look at hardest.** It is real, load-bearing and heavily used, yet neither existing
+declaration knows about it. That is precisely the "declared twice, both incomplete" defect from §8.1 — and
+it is already live, not hypothetical.
+
+### 9.2 Do NOT create `sprk_relatedinvoice` / `sprk_relatedworkassignment`
+
+Keeping the `Related*` convention for NEW fields does **not** mean back-filling it onto the old ones. Doing
+so would mean 2 new columns + 4 data migrations + 4 retirements, and would buy **naming tidiness only** —
+§8's Tier 3 reasoning applies unchanged. The map absorbs the mixed naming so no consumer ever sees it.
+
+**Rule going forward**: new Document links are `sprk_related*`; existing names stay as they are until
+§8 Tier 2's data query justifies touching them.
+
+### 9.3 Fields that are lookups on `sprk_document` but must STAY OUT of the map
+
+The map is the **record-association vocabulary** — "what business record is this document filed under". These
+are lookups too, and including them would corrupt every consumer:
+
+| Field | Target | Why excluded |
+|---|---|---|
+| `sprk_parentdocument` | `sprk_document` | attachment → parent email |
+| `sprk_canonicaldocument` | `sprk_document` | dedup/canonical pointer |
+| `sprk_containername` | `sprk_container` | storage location, not a business parent |
+| `sprk_currentversionid` | `sprk_fileversion` | version pointer |
+| `sprk_checkedoutby` / `sprk_checkedinby` | `systemuser` | lock state |
+
+### 9.4 Design the map so row 7 cannot happen again
+
+Make `DocumentLinkFieldMap` the **complete** vocabulary, and let each consumer declare its own subset
+**explicitly, with a reason** — rather than by silent omission, which is how row 7 got lost:
+
+- `ComposeService` copy-forward → **all** rows (a new Word doc should file alongside its source).
+- `AttachmentDocumentAssociationRung` → probably **excludes `sprk_relatedcommunication`**, since the
+  communication is the thing being matched *from*, so it is not a candidate. That is very likely correct —
+  but it is currently expressed as *absence*, and absence is indistinguishable from an oversight. Write it
+  as an explicit exclusion with that sentence attached.
+
+### 9.5 ⚠️ Confirm intent: there is a lookup in the OPPOSITE direction too
+
+`sprk_invoice` carries **`sprk_document`** ("Source Document" → `sprk_document`,
+`docs/data-model/field-mapping-reference.md:153`). So Document↔Invoice has links **both ways**:
+
+- `sprk_document.sprk_invoice` → "this document is filed under this invoice"
+- `sprk_invoice.sprk_document` → "this invoice was extracted FROM this document"
+
+**These are probably two legitimately different facts** (filing vs extraction provenance), not the §1
+anti-pattern — the "Source Document" display name points that way, and invoice extraction is a real pipeline
+here. **But confirm it**, because if they are ever meant to agree, nothing makes them, and they will drift
+silently. If they ARE different facts, say so in the schema description so the next reader does not "tidy"
+one away.
+
+---
+
+## 10. Q: is `sprk_document` baked into the SemanticSearch PCF?
+
+**Yes — but as the ENTITY, never as a link field, so none of §9 affects it.**
+
+The control is document-centric by design and hard-codes the entity logical name at 9+ sites:
+
+| Location | Use |
+|---|---|
+| `SemanticSearchControl.tsx:277` | `sprk_document: 'document'` entity→label map |
+| `:434` | `getDocumentTypeOptions('sprk_document', 'sprk_documenttype')` |
+| `:764`, `:980` | `retrieveMultipleRecords('sprk_document', …)` |
+| `:948`, `:1522` | record URL `etn=sprk_document` |
+| `:1012`, `:1427`, `:1453` | `updateRecord('sprk_document', …)` |
+| `:1360` | `deleteRecord('sprk_document', …)` |
+| `services/DataverseMetadataService.ts:69–70` | defaults `entityName = 'sprk_document'`, `attributeName = 'sprk_documenttype'` |
+
+**The only `sprk_document` COLUMNS it binds are `sprk_documentid`, `sprk_documenttype` and
+`sprk_workspaceflag`.** Searched for a `sprk_document` *lookup field* reference — `_sprk_document_value`,
+`sprk_document@odata.bind` — and there is **none**.
+
+**Consequences:**
+- Adding `sprk_relatedagreement` (§9.1 row 8): **no impact on this control.**
+- Retiring `sprk_relatedmatter` / `sprk_relatedproject` later (§8 Tier 2): **no impact on this control.**
+- The field named `sprk_document` that exists on **`sprk_invoice`** (§9.5) is **not referenced** by the
+  control at all.
+- What WOULD break it: renaming the `sprk_document` **entity**, or `sprk_documenttype` /
+  `sprk_workspaceflag`. None of those are in scope here.
