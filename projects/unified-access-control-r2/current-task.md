@@ -14,6 +14,7 @@
 | **State** | Branch **clean**, 0 unpushed, **0 behind master**. **PR #939 is MERGED.** |
 | **Just completed** | **PR #939 merged** · **ALL THREE ADR AMENDMENTS** (030 / 031-as-**A5** / 040) · 🔑 **TASK 032 — THE EVALUATOR SPINE**, the deliverable this project is named for |
 | **Verified** | Clean `dotnet build Spaarke.sln --no-incremental` ✅ · BFF unit **12,062 passed / 0 failed** / 58 skipped · ArchTests **191/191** · publish **44.15 MB compressed** (ceiling 60) · 032's rights assertions **perturbation-verified** |
+| **Also done 2026-09-04** | Owner-approved dead-code sweep: task 096's 27-file deletion was already on master; **completed the remainder** — `WorkspaceGrid` now consumes the **shared** `CloseProjectDialog` (LW twin + its `closureService` deleted), and the zero-mount `ProvisioningProgressStep` is gone. −859 lines. 🔴 Surfaced a **pre-existing** break: [LegalWorkspace's Vite build has been RED since 2026-07-02](notes/finding-legalworkspace-build-broken-since-2026-07-02.md) — `tsc` passes, only the bundler fails, and no CI job runs it. |
 | **Next Action** | **Task 033** — propagate the new shape to consumers + delete the blanket Collaborate stamp (`CallerPrincipalResolver`), which 032 deliberately left alone. Then **037** (Secure/Restricted) and **038/039** (deny list) fill the ordered veto seam 032 wired as a no-op. **041** is also open and is `parallel-safe: TRUE`. |
 
 ### 🔴 The traps that still apply
@@ -34,6 +35,14 @@
 ## ▶ NEXT SESSION — ORDERED WORK ITEMS
 
 ### 1. Task 033 — consumer propagation + delete the blanket Collaborate stamp
+
+⚠️ **Start this one FRESH — it changes effective rights on LIVE routes.** Deleting the stamp means a
+deliberate **ViewOnly grant stops conferring Write**, which is the correct fix (register A-8) and is
+also a real, user-visible change. Every mutating `/api/v1/external` route then has to require Write
+from the evaluator's answer *for that record*. A half-applied version of this leaves the authorization
+boundary partially enforced, so it wants full context headroom, not the tail of a long session.
+`opus` @ high · `parallel-safe: false` · touches `CallerPrincipalResolver.cs` (hot file).
+
 
 032 deliberately did NOT touch `CallerPrincipalResolver.cs` (task 033 owns it). That file still
 blanket-stamps Collaborate over every accessible record (register A-8) — 032 relocated that stamp INTO
