@@ -1,9 +1,16 @@
-# Agreement ↔ Document relationship — structure advice
+﻿# Agreement ↔ Document relationship — structure advice
 
 > **Date**: 2026-09-04 · **Trigger**: owner question during the §GAPS-5 Review Summary discussion —
 > *"a Document can be associated to an Agreement and other record types; an Agreement can have multiple
 > documents — do we need both 1:N and N:1 or some other structure?"*
 > **Status**: advice, not a decision. One question (§3) must be answered by the owner before building.
+>
+> **⚠️ NAMING — read this before anything else.** `sprk_document` uses the **`Related*`** convention
+> (owner decision, §9). The ONE field being created is **`sprk_relatedagreement`**. §§1–2 were written
+> before that decision and say `sprk_regardingagreement`; §8.4 said `sprk_agreement`. **Both are
+> superseded — §9.1 row 8 is the authority.** Existing unprefixed fields (`sprk_matter`,
+> `sprk_invoice`, …) are NOT renamed; they appear in §9.1 because they already exist, not because
+> anything is being added to that pattern.
 
 ---
 
@@ -354,8 +361,12 @@ behaviour first.
 ### 8.4 What this means for the Agreement link (§2)
 
 - Add **ONE** lookup. Never both forms.
-- **Name it `sprk_agreement`**, the unprefixed form — it is the more complete family (4 targets vs 2), and it
-  is the form that survives the Tier 2 consolidation, so this avoids a second migration later.
+- ~~**Name it `sprk_agreement`**, the unprefixed form — the more complete family (4 targets vs 2), and the
+  form that survives Tier 2.~~ **SUPERSEDED by the owner decision in §9 (2026-09-04): Document keeps the
+  `Related*` convention, so the field is `sprk_relatedagreement`.** The reasoning above was sound on
+  completeness grounds but is overridden — `related` reads better as "the business record this document
+  relates to", and it is what the newest field on the table (`sprk_relatedcommunication`) already uses.
+  **§9.1 row 8 is the authority; this bullet is kept only so the reversal is visible rather than silent.**
 - Add it to the Tier 1 `DocumentLinkFieldMap` in the same change, so Compose copy-forward and email
   association pick it up together rather than one silently lagging.
 
