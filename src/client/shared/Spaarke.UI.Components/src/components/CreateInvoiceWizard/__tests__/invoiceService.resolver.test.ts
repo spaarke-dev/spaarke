@@ -454,7 +454,12 @@ describe('InvoiceService.createInvoice', () => {
       expect('sprk_Project@odata.bind' in docPayload!).toBe(false);
     });
 
-    it('skips upload entirely (with a warning) when files are present but no container ID is configured', async () => {
+    // Converted by task 076: this asserted that an absent client-side container SKIPPED the upload
+    // with a "no SPE container configured" warning. That guard is deleted — the upload is keyed on
+    // the invoice and the server resolves the container — so the surviving guarantee is the
+    // opposite one: the upload proceeds, and `sprk_graphdriveid` records the drive the SERVER
+    // reported rather than anything the client chose.
+    it('uploads and links the document with NO client-side container configured (server-derived)', async () => {
       const ds = makeDataService();
       const service = new InvoiceService(
         ds,
@@ -467,9 +472,34 @@ describe('InvoiceService.createInvoice', () => {
 
       const result = await service.createInvoice(makeForm({ name: 'X' }), null, [makeUploadedFile()]);
 
-      expect(result.status).toBe('partial');
-      expect(result.warnings.some(w => w.toLowerCase().includes('no spe container configured'))).toBe(true);
-      expect(ds._captured['sprk_document']).toBeUndefined();
+      expect(result.status === 'success' || result.status === 'partial').toBe(true);
+      const docPayload = ds._captured['sprk_document']?.[0];
+      expect(docPayload).toBeDefined();
+      expect(docPayload!['sprk_Invoice@odata.bind']).toBe(`/sprk_invoices(${NEW_INVOICE_GUID})`);
+      // 'drive-1' is what stubAuthenticatedFetch's upload response reports.
+      expect(docPayload!['sprk_graphdriveid']).toBe('drive-1');
+    });
+  });
+
+  // Added by task 076 — the create payload must name no storage location. Both writes that could
+  // have put one there are deleted: the host-injected `this._containerId` assignment and the
+  // `applyDefaultContainerId` half of the BU cascade.
+  describe('task 076 — no client-written sprk_containerid', () => {
+    it('omits sprk_containerid from the invoice create payload even when a host container is supplied', async () => {
+      const ds = makeDataService();
+      const service = new InvoiceService(
+        ds,
+        stubAuthenticatedFetch(),
+        'https://bff.example',
+        'host-resolved-container-1',
+        undefined,
+        NO_CASCADE_OVERRIDE
+      );
+
+      const result = await service.createInvoice(makeForm({ name: 'X' }), null, []);
+
+      expect(result.status).toBe('success');
+      expect(invoicePayload(ds)).not.toHaveProperty('sprk_containerid');
     });
   });
 

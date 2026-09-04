@@ -421,11 +421,9 @@ export class WorkAssignmentService {
       entity['sprk_responseduedate'] = form.responseDueDate;
     }
 
-    // Store the host-resolved SPE container ID on the work assignment record (enables Documents tab).
-    // Applied FIRST so it acts as an explicit override during the subsequent BU cascade (INV-5).
-    if (this._containerId) {
-      entity['sprk_containerid'] = this._containerId;
-    }
+    // 🔴 DELETED 2026-09-03 by task 076 (harmful write "W1", second half) — same shape and same
+    // reasoning as the CreateInvoiceWizard and CreateMatterWizard twins. The client does not choose
+    // where a record's content is stored; the server derives it from the record at upload time.
 
     // Helper: bind a lookup if the nav-prop exists on the entity
     const bindLookup = (referencedEntity: string, entitySet: string, guid: string, columnHint?: string) => {
@@ -541,9 +539,15 @@ export class WorkAssignmentService {
     }
 
     // -- Step 2: Upload files to SPE -----------------------------------------
-    if (uploadedFiles.length > 0 && this._containerId) {
+    //
+    // Task 076: keyed on the WORK ASSIGNMENT. `sprk_workassignment` was added to
+    // `EntityAccessFilter.EntitySetByType` by item 7 (`f85796f70`) with its `sprk_document` lookup
+    // column verified present against live Dataverse metadata, so the record-keyed route resolves
+    // rather than denying for this type.
+    if (uploadedFiles.length > 0) {
       const uploadResult = await this._entityService.uploadFilesToSpe(
-        this._containerId,
+        'sprk_workassignment',
+        workAssignmentId,
         uploadedFiles,
         onUploadProgress
       );
@@ -565,7 +569,7 @@ export class WorkAssignmentService {
             waNavProp,
             uploadResult.uploadedFiles,
             {
-              containerId: this._containerId,
+              // No `containerId` — `sprk_graphdriveid` comes from the server's upload response.
               parentRecordName: form.name.trim(),
             }
           );

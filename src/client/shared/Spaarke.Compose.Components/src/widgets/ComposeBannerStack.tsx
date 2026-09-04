@@ -163,6 +163,17 @@ export interface ComposeBannerStackProps {
    * renders nothing. No dismiss affordance (cleared by the parent at the next Generate/Email attempt).
    */
   memoActionMessage?: string | null;
+  /**
+   * R8 UAT item 8 — the change-summary negative-path notice. EXACT sibling of
+   * {@link memoActionMessage} (same shape, same lifecycle, same rationale): the honest
+   * "no tracked changes to summarise" / "couldn't generate" answer, rendered here rather than as a
+   * stray host MessageBar. Null renders nothing; cleared by the parent at the next attempt.
+   *
+   * This one carries more weight than a convenience notice. The summary Action is ASKED for from the
+   * Word menu, so "there is nothing to summarise" is an answer the user is owed — the alternative is
+   * dispatching an empty operand, which is what makes the model fabricate a phantom "[Insertion]".
+   */
+  changeSummaryMessage?: string | null;
 }
 
 /** How long the transient "Saved ✓" confirmation stays up before auto-dismissing. */
@@ -453,6 +464,7 @@ export function ComposeBannerStack(props: ComposeBannerStackProps): React.JSX.El
     onClearRedlineError,
     composeDraftError = null,
     memoActionMessage = null,
+    changeSummaryMessage = null,
   } = props;
 
   // Task 041 (FR-06, PDF intake): per-mount dismissal only — DELIBERATELY not sessionStorage-keyed
@@ -610,6 +622,7 @@ export function ComposeBannerStack(props: ComposeBannerStackProps): React.JSX.El
     !!pendingRedlineError ||
     !!composeDraftError ||
     !!memoActionMessage ||
+    !!changeSummaryMessage ||
     checkoutStatus === 'conflict' ||
     checkoutStatus === 'failed' ||
     checkoutStatus === 'cancelled';
@@ -1030,6 +1043,17 @@ export function ComposeBannerStack(props: ComposeBannerStackProps): React.JSX.El
           <MessageBarBody>
             <MessageBarTitle>Create Summary Memo</MessageBarTitle>
             {memoActionMessage}
+          </MessageBarBody>
+        </MessageBar>
+      ) : null}
+
+      {/* R8 UAT item 8: the change-summary negative path — "no tracked changes to summarise" or a
+          failure. Mirrors the memo notice above; cleared by the parent at the next attempt. */}
+      {changeSummaryMessage ? (
+        <MessageBar intent="info" data-testid="compose-workspace-change-summary-message" aria-live="polite">
+          <MessageBarBody>
+            <MessageBarTitle>Summarise changes</MessageBarTitle>
+            {changeSummaryMessage}
           </MessageBarBody>
         </MessageBar>
       ) : null}

@@ -3,6 +3,13 @@
  *
  * Orchestrates single-file upload to SharePoint Embedded (SPE) via SDAP BFF API.
  *
+ * **Cut over 2026-09-03 (task 076) to the record-keyed contract.** The caller names an
+ * {@link FileUploadRequest.target} — an owning record, or an explicit "no record" — and the SERVER
+ * resolves the container. There is no `driveId` parameter and no way to reintroduce one. Previously
+ * this took a container the caller had resolved from the acting user's business unit, so files
+ * attached to a SECURE record landed in the shared BU container; SPE permissions are additive-only,
+ * so nothing retracted that afterwards.
+ *
  * **Migrated 2026-09-03** onto `@spaarke/sdap-client`'s `SdapApiClient`, retiring the parallel
  * client that used to live beside this file at `./SdapApiClient.ts`. There were THREE upload
  * implementations in the repo (this one, `EntityCreationService`'s raw inline `fetch`, and the
@@ -48,7 +55,7 @@ export class FileUploadService {
       this.logger.info('FileUploadService', 'Starting file upload', {
         fileName: request.file.name,
         fileSize: request.file.size,
-        driveId: request.driveId,
+        target: request.target,
       });
 
       // Validate request
@@ -56,14 +63,36 @@ export class FileUploadService {
         return { success: false, error: 'No file provided' };
       }
 
-      if (!request.driveId) {
-        return { success: false, error: 'No drive ID provided' };
+      // A record target missing either half would build a URL like `/api/obo/records//` + a GUID,
+      // which MISSES the constrained route and 404s — reaching the user as a bare "upload failed"
+      // with no clue that the identifiers were the cause. Refuse here instead, and refuse CLOSED:
+      // never quietly downgrade to the record-less contract, which would file the bytes in the
+      // caller's business-unit container rather than the record's.
+      if (request.target.kind === 'record') {
+        if (!request.target.entityLogicalName || !request.target.recordId) {
+          return {
+            success: false,
+            error:
+              'No owning record provided. An upload against a record needs both its entity logical ' +
+              'name and its id.',
+          };
+        }
       }
 
-      // Upload via the shared client (auth: `authenticatedFetch`, ADR-028).
-      const item = await this.apiClient.uploadFile(request.driveId, request.file, {
-        conflictBehavior: request.conflictBehavior,
-      });
+      // Upload via the shared client (auth: `authenticatedFetch`, ADR-028). Neither branch names a
+      // container: the server resolves it — from the record for the first, from the acting user's
+      // business unit for the second.
+      const item =
+        request.target.kind === 'record'
+          ? await this.apiClient.uploadFileForRecord(
+              request.target.entityLogicalName,
+              request.target.recordId,
+              request.file,
+              { conflictBehavior: request.conflictBehavior }
+            )
+          : await this.apiClient.uploadFileWithoutRecord(request.file, {
+              conflictBehavior: request.conflictBehavior,
+            });
 
       // DriveItem -> SpeFileMetadata, field by field rather than by spread. The spread this
       // replaced was over a response typed AS SpeFileMetadata, so it carried anything the BFF sent;
@@ -75,6 +104,10 @@ export class FileUploadService {
         id: item.id,
         name: item.name,
         parentId: item.parentId,
+        // Where the bytes actually landed, per the SERVER. Consumers persist this as
+        // `sprk_document.sprk_graphdriveid`; under the record-keyed contract it is the only
+        // trustworthy value, because the caller no longer chooses the destination.
+        driveId: item.driveId,
         size: item.size ?? 0,
         createdDateTime: item.createdDateTime,
         lastModifiedDateTime: item.lastModifiedDateTime,

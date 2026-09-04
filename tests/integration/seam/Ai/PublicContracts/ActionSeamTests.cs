@@ -70,6 +70,7 @@ public class ActionSeamTests
         _entityServiceMock.Object,
         _fieldMappingMock.Object,
         _scopeFactoryMock.Object,
+        Sprk.Bff.Api.Tests.TestInfrastructure.CoreAncestorResolverFixtures.Inert(),
         NullLogger<ActionSeam>.Instance);
 
     // ── CreateNotification: parity + negative case ────────────────────────────────────────────

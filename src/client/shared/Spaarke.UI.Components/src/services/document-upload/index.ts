@@ -16,6 +16,7 @@ export type {
   ILogger,
   SpeFileMetadata,
   ServiceResult,
+  UploadTarget,
   FileUploadRequest,
   UploadFilesRequest,
   UploadProgress,

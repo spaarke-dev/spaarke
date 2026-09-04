@@ -354,22 +354,52 @@ public class RouteAuthorizationGuardTests
         // 076 DID build the gated record-keyed replacement —
         //   PUT  /api/obo/records/{entityLogicalName}/{recordId}/files/{*path}
         //   POST /api/obo/records/{entityLogicalName}/{recordId}/upload-session
-        // both carrying .AddRecordRouteAccessAuthorizationFilter(...). What it could not do is DELETE the
-        // container-keyed route, because three live client upload paths have no owning record at the
-        // moment the bytes move, so they have nothing to key the new contract on. Deleting would break
-        // them; adding a container parameter to the new routes for their benefit is option (B), rejected.
-        // So the waiver stays, re-pointed to the owner decision that unblocks it. It is a WORK ITEM and
-        // must not become Permanent — see maintenance rule 4 above.
-        new Waiver("PUT /api/obo/containers/{id}/files/{*path}", WaiverKind.Pending, "076-ESCALATED",
-            "Finding #2 — writes into a caller-named container with no per-resource decision. Task 076 "
-            + "shipped the gated record-keyed replacement (PUT/POST /api/obo/records/{entityLogicalName}/"
-            + "{recordId}/...), so this route is now LEGACY rather than the only option. It survives "
-            + "solely because three client paths upload bytes before any owning record exists — "
-            + "EmailComposer local attachments, the Analysis wizard's standalone document, and "
-            + "DocumentUploadWizard 'skip associate'. That is a modelling gap (record-after-bytes), not a "
-            + "missing filter, and closing it is an owner decision: create the record first, or issue a "
-            + "server-side upload ticket. Deletes when the last of those three moves. Latent meanwhile: "
-            + "OBO means SPE denies without a container ACL and no user holds one."),
+        // both carrying .AddRecordRouteAccessAuthorizationFilter(...).
+        //
+        // 🔴 THE PENDING WAIVER FOR "PUT /api/obo/containers/{id}/files/{*path}" WAS DELETED HERE
+        // 2026-09-03 — because THE ROUTE WAS DELETED, which is the only way a Pending waiver is
+        // allowed to leave this list. It was NOT converted to Permanent: it was a work item, and the
+        // work item was completed.
+        //
+        // It survived this long because three client paths uploaded bytes before any owning record
+        // existed (EmailComposer local attachments, the Analysis wizard's standalone document, and
+        // DocumentUploadWizard "skip associate"). PUT /api/obo/me/files/{*path} gave all three a
+        // callable upload that names no container, DocumentUploadWizard — the last client on the old
+        // route — cut over, and the route went with it. `NoWaiverNamesARouteThatNoLongerExists` is
+        // what would have caught this entry being left behind.
+
+        // ---------- task 076: the record-LESS upload route. PERMANENT, and honestly so. ----------
+        //
+        // Added 2026-09-03 with PUT /api/obo/me/files/{*path}. This is Permanent under maintenance
+        // rule 2's SECOND clause — "a create with no pre-existing resource" — not rule 4's forbidden
+        // build-go-green move. The distinction matters, so state it plainly: there is no resource to
+        // authorize because the record does not exist yet; that is the whole reason the route exists.
+        // It is the same reasoning the Permanent waiver on POST /api/v1/documents already carries.
+        //
+        // What makes it safe is NOT a filter, and pretending otherwise would be the dishonest version:
+        //   - The route has NO container parameter, so a caller cannot name where bytes go. That is
+        //     the property finding #2 was about, and it holds here by construction.
+        //   - The container is derived SERVER-side from the acting user's business unit
+        //     (RecordContainerResolver.ResolveForActingUserAsync), so exposure is bounded to a
+        //     container the caller is entitled to anyway.
+        //   - A caller who cannot be resolved to a Dataverse principal gets a typed 403
+        //     (acting_user_not_resolvable) rather than a shared-container fallback.
+        //   - Secure content can never arrive here: secure records resolve through the RECORD-keyed
+        //     route and fail closed. Acting-user BU is admissible ONLY where no record exists — for a
+        //     secure record it is provably the WRONG container, since users sit in the Operations
+        //     subtree while secure records are owned in `Secure Projects`.
+        //
+        // If someone later adds a record id to this route "for convenience", this waiver is wrong and
+        // the route needs the record-keyed filter instead. That is the only way it becomes stale.
+        new Waiver("PUT /api/obo/me/files/{*path}", WaiverKind.Permanent, "076",
+            "Record-LESS upload: content that has no owning record at the moment the bytes move "
+            + "(EmailComposer local attachment, Analysis wizard standalone document, "
+            + "DocumentUploadWizard 'skip associate'). There is no pre-existing resource to authorize — "
+            + "the record is created afterwards. The route takes NO container parameter; the container "
+            + "is derived server-side from the acting user's business unit per the owner's 2026-08-28 "
+            + "resolution order, so the caller can only ever write into a container they are already "
+            + "entitled to, and an unresolvable caller is refused with a typed 403 rather than given a "
+            + "shared-container fallback. Secure content never reaches this route."),
 
         // ---------- task 076: TWO WAIVERS REMOVED 2026-08-27, the routes were DELETED ----------
         //
@@ -1311,12 +1341,23 @@ public class RouteAuthorizationGuardTests
         // Update this number when routes are added or removed here — that is the ratchet working, not a
         // nuisance. Note the retroactive-validation test above is unaffected by any of this: it feeds
         // the scanner INLINE source text, so it still proves the rule catches finding #2's shape.
+        //
+        // 3 → 4 on 2026-09-03: the record-LESS route was added — the fourth and last row of the
+        // container-resolution order the owner settled on 2026-08-28 (acting user's business unit,
+        // SERVER-derived), and what finally gave the three no-owning-record client paths a callable
+        // upload that names no container.
+        //
+        // 4 → 3 on 2026-09-03, later the same day: with every client moved, PUT
+        // /api/obo/containers/{id}/files/{*path} was DELETED and its Pending waiver deleted with it.
+        // ⚠️ A future 3 → 4 here is the thing to look at hardest: the shape that was removed is a
+        // route that writes bytes to a CALLER-NAMED destination. If one comes back, it needs a
+        // per-resource authorization decision, not a waiver.
         Assert.True(
             ScanFile("Api/OBOEndpoints.cs").Count == 3,
-            "Expected 3 registrations in OBOEndpoints.cs after task 076: the legacy container-keyed "
-            + "upload route (still ungated, still waived, pending an owner decision on the three "
-            + "no-owning-record client paths) plus the two GATED record-keyed routes that replace it. "
-            + "A drop here would make one of them invisible.");
+            "Expected 3 registrations in OBOEndpoints.cs: the two GATED record-keyed upload routes "
+            + "(PUT files + POST upload-session) and the record-LESS route for content that has no "
+            + "owning record yet. A drop here would make one of them invisible; a RISE means a new "
+            + "upload route was added and needs its authorization decision stated.");
     }
 
     // =============================================================================================

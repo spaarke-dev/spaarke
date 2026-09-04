@@ -44,6 +44,7 @@ public class CreateTaskNodeExecutorTests
         _executor = new CreateTaskNodeExecutor(
             _templateEngineMock.Object,
             _entityServiceMock.Object,
+            Sprk.Bff.Api.Tests.TestInfrastructure.CoreAncestorResolverFixtures.Inert(),
             _loggerMock.Object);
     }
 

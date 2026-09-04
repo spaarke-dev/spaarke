@@ -245,13 +245,19 @@ export class EventService {
     }
 
     // -------------------------------------------------------------------------
-    // FR-WIZ-05 (spaarke-multi-container-multi-index-r1): cascade BOTH
-    // `sprk_containerid` and `sprk_searchindexname` from the current user's
-    // owning Business Unit onto the create payload.
+    // FR-WIZ-05 (spaarke-multi-container-multi-index-r1): cascade
+    // `sprk_searchindexname` from the current user's owning Business Unit onto
+    // the create payload.
+    //
+    // ⚠️ This used to cascade `sprk_containerid` as well. That half was DELETED
+    // 2026-09-03 by unified-access-control-r2 task 076 (harmful write "W1") —
+    // see the block comment on `EntityCreationService.applyDefaultContainerId`.
+    // A storage location is not the client's to choose; a search-index routing
+    // hint still is.
     //
     // INV-5 contract: if the payload already has an explicit non-empty value
-    // for either field, DO NOT overwrite. `EntityCreationService.applyUserBuDefaults`
-    // enforces this guard per-field independently.
+    // for the field, DO NOT overwrite. `EntityCreationService.applyUserBuDefaults`
+    // enforces this guard.
     //
     // Non-fatal: if userId resolution fails (no Xrm host), or the BU has no
     // value for one or both fields, leave the corresponding field unset — the
@@ -267,17 +273,8 @@ export class EventService {
         const webApi = _toWebApiLike(this._dataService);
         const buDefaults = await EntityCreationService.resolveUserBuDefaults(webApi, userId);
         const applied = EntityCreationService.applyUserBuDefaults(entity, buDefaults);
-        if (applied.containerIdSet) {
-          console.info(
-            '[EventService] Cascaded sprk_containerid from user BU:',
-            buDefaults.containerId,
-            '(BU:',
-            buDefaults.businessUnitId,
-            ')'
-          );
-        } else if (buDefaults.containerId) {
-          console.info('[EventService] sprk_containerid already explicitly set on payload — preserving (INV-5).');
-        }
+        // The `sprk_containerid` cascade + its two log branches were DELETED here 2026-09-03 by
+        // task 076 (W1) along with `applyDefaultContainerId` itself.
         if (applied.searchIndexNameSet) {
           console.info(
             '[EventService] Cascaded sprk_searchindexname from user BU:',
@@ -289,9 +286,9 @@ export class EventService {
         } else if (buDefaults.searchIndexName) {
           console.info('[EventService] sprk_searchindexname already explicitly set on payload — preserving (INV-5).');
         }
-        if (!buDefaults.containerId && !buDefaults.searchIndexName) {
+        if (!buDefaults.searchIndexName) {
           console.info(
-            '[EventService] User BU has neither sprk_containerid nor sprk_searchindexname — leaving payload fields unset; BFF tenant-default chain will apply.'
+            '[EventService] User BU has no sprk_searchindexname — leaving the payload field unset; BFF tenant-default chain will apply.'
           );
         }
         // Phase G: cascade BU's `sprk_ai_search_index` lookup onto the new Event.

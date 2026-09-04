@@ -59,7 +59,7 @@ public sealed class EmailUploadCaptureSeamTests
             new ParticipantCorrelationRung(dv.Object),
         };
         var resolver = new IncomingAssociationResolver(
-            rungs, dv.Object, dv.Object, mapper, NullLogger<IncomingAssociationResolver>.Instance);
+            rungs, dv.Object, dv.Object, mapper, Sprk.Bff.Api.Tests.TestInfrastructure.CoreAncestorResolverFixtures.Inert(), NullLogger<IncomingAssociationResolver>.Instance);
 
         var enrich = enrichment ?? new Mock<ICommunicationEnrichmentService>();
 

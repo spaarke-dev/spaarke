@@ -1,7 +1,7 @@
 # Current Task State — email-communication-intelligence-r2
 
-> **Last Updated**: 2026-09-03 (matching-approaches analysis DONE + owner-reviewed; arch-doc refreshed; **go-forward plan authored at `notes/email-matching-and-triage-go-forward-plan.md`** — that plan is now the tracker for P1/P2/G1–G5).
-> **Recovery**: Read "Quick Recovery" first, then the **go-forward plan** (`notes/email-matching-and-triage-go-forward-plan.md`), then "FRESH-SESSION PRIORITIES" below.
+> **Last Updated**: 2026-09-03 (context-handoff — **triage category fix DONE + DEPLOYED**; matching intelligence layer verified live; G4/G5 scoped. Awaiting owner UAT + build go-aheads).
+> **Recovery**: Read "Quick Recovery" first, then the **go-forward plan** (`notes/email-matching-and-triage-go-forward-plan.md` → "Session closeout"), then "FRESH-SESSION PRIORITIES".
 
 ---
 
@@ -9,7 +9,10 @@
 
 | Field | Value |
 |-------|-------|
-| **Branch** | `work/email-communication-intelligence-r2`. **Add-in stream MERGED to master** via **PR #934** (squash `f5fee2141`; master tip `399651fff`). Tree clean. Branch not yet deleted. Main repo `C:/code_files/spaarke` local master is behind (has unrelated dirty WIP — left untouched; ff it when convenient). |
+| **Branch / merges** | `work/email-communication-intelligence-r2`. **Triage fix merged: PR #936 (`edaac1f88`, code) + PR #937 (docs).** Also earlier: add-in stream PR #934, compose-r8 PR #924 (both on master). Branch was reset to master + follow-up commit `88af9566b` (force-pushed). **BFF DEPLOYED to `spaarke-bff-dev`** (45.45 MB, hash-verified, healthy). |
+| **✅ TRIAGE CATEGORY — DONE, UAT-PASSED, MERGED** | Round-1 UAT (`LITG-119896`) still showed `None` on the pre-fix build → root-caused the Linear-path gap (below) → real fix deployed. **Round-2 UAT PASSED** (`Fw: PAT-942665 Patent Application…` → category = **Administrative**). Merged to master **PR #941** (merge `6e31e425c`); BFF already live on `spaarke-bff-dev` (no re-deploy needed). |
+| **Matching cards → email-r3** | UAT of the "Related to" cards surfaced 3 items, captured in `notes/email-r3-candidate-backlog.md`: (1) cards show GUIDs → need record-type+name preview; (2) top-3 strip hides real 4th candidate (PAT-942404 was found at 96.5%) → "See all" modal; (3) FR-12 `ReferencedNotFiledCap` demotes "related to X" ranking → split suggest-rank from auto-file-safety (ADR-045/FR-12, gate on G4). Owner: not filing issues — going into an r3 project. |
+| **The triage-category bug (REAL root cause, fixed `ceba44928`, DEPLOYED)** | Triage runs on the **Linear AI Consumer path** (`ActionRunner`), NOT the node path. Only `AiAnalysisNodeExecutor` pre-resolved a JPS Action's `$choices`; `ActionRunner` never did → the TRIAGE-EMAIL `category` `$choices` (`lookup:sprk_triagecategory.sprk_name`) was never resolved on the path triage uses. The 7 names reached the model through **neither** the prompt (structuredOutput:true → output fields aren't rendered) **nor** the constrained schema (catalog leaves category a free string per FR-16). Model emitted a free-form label → matched no taxonomy row → category unset. **The PR #936 `y→ies` fix was correct but on a resolver this path never called.** Fix (ActionRunner, linear-path only): (1) resolve `$choices` before render via `IServiceScopeFactory` (Scoped resolver from a Singleton); (2) inject resolved values as a JSON-Schema `enum` on the matching output property so structured-output decoding ENFORCES the live taxonomy — resolved per-run from Dataverse (FR-16 preserved). Best-effort/non-fatal. Seam test `ActionRunnerChoicesResolutionSeamTests` (real ActionRunner+renderer+resolver). Verified against live `sprk_outputschemajson` (top-level `properties.category`). Deployed to `spaarke-bff-dev` (45.45 MB, hash-verified, healthy). **NOT yet merged to master** — awaiting UAT round-2 confirm. |
 | **Add-in stream — ✅ DONE + MERGED** | Outlook/Word add-in: **Create To Do → first-class `sprk_todo`** (new BFF `POST /api/office/todo` + `OfficeService.CreateTodoAsync`); §C Save→ToDo regarding wiring; §10 contract tests; **Word real `.docx` save** (`WordHostAdapter.getFileAsync(Compressed)` + `.docx` ext); **web auth fix** (`OfficeNaaStrategy`: desktop=silent NAA, Office-web=standard `https` popup via `auth-callback.html`; portable `brk-multihub://${hostname}`); XML manifest for M365 admin center (`outlook/outlook-manifest.xml`); naming "Spaarke Outlook"/"Spaarke Word"; **white-on-black icons**. All deployed to dev + UAT-confirmed. Full detail: `git log` on the branch / PR #934. |
 | **Build gate** | BFF: `dotnet build src/server/api/Sprk.Bff.Api/` (0-err). Add-in: `cd src/client/office-addins && npm run build:dev`. `npm run typecheck` = ~397 PRE-EXISTING errors (exactOptional) — filter to changed files. |
 | **NEXT** | **UAT: confirm triage category populates on a fresh capture.** The triage-category bug is FIXED + DEPLOYED (PR #936 `edaac1f88`; BFF live on `spaarke-bff-dev`, hash-verified). Root cause was a `y→ies` entity-set pluralization bug in `LookupChoicesResolver` (queried `sprk_triagecategorys`→404). Send a test email → verify `sprk_triagecategory` now resolves (was 100% empty). See `notes/email-matching-and-triage-go-forward-plan.md` "Session closeout". **P1 catalog was already seeded; P2 .eml already indexed; G3 affinity already closed — all verified live (docs were stale). G4/G5 scoped (no ADR amendment needed).** |
@@ -17,6 +20,18 @@
 ---
 
 ## 🎯 FRESH-SESSION PRIORITIES (owner-set 2026-09-03)
+
+> **STATUS 2026-09-03 (end of session) — nearly all resolved. Full record: `notes/email-matching-and-triage-go-forward-plan.md` "Session closeout".**
+>
+> - **Triage (P1)** ✅ FIXED + DEPLOYED. The premise was wrong (catalog was already seeded; triage works). The *real* bug — triage **category** empty on 100% of captures — was a `y→ies` pluralization bug in `LookupChoicesResolver`; fixed + on `spaarke-bff-dev`. **Only UAT remains** (see Quick Recovery).
+> - **Semantic search (P2)** ✅ already working live (10/10 `.eml` = `searchindexed=true`). Emails are NOT indexed differently (same pipeline; MimeKit extraction only). Optional: email-metadata *facets* (from/to/date/thread filtering) = owner decision.
+> - **G1 arch doc / G2 dead-seam / G3 affinity loop** ✅ done (G3 was already done as R-1).
+> - **G4 eval harness + G5 learned scorer + party graph** ✅ SCOPED (`notes/G4-G5-matching-enhancements-scope.md`). **No ADR amendment needed** (ADR-013 permits ML via facade; ADR-045 only bars AI/ML *auto-file*). Awaiting owner go-ahead to build (order: G4.3 → G5.1 → G4.1 → G4.2 → G5.2).
+> - **Minor:** #4 attachments ✅ verified live; ribbon icons ✅ non-issue; Entra redirect URIs ✅ documented (`SPAARKE-CUSTOMER-DEPLOYMENT-GUIDE.md` §7.3); §A.4 footer = keep-the-card (rec, owner call).
+>
+> **OPEN OWNER DECISIONS:** (1) UAT-confirm triage category; (2) build G4/G5? (3) email-metadata facets Y/N; (4) §A.4 footer.
+>
+> ⚠️ The detailed sections 1–3 below are the ORIGINAL owner-set priorities and are now **historical** — do not act on them without reading the closeout (P1/P2 premises were stale).
 
 ### 0. ✅ DONE — matching-approaches analysis + owner review (2026-09-03)
 Analyzed against a full codebase inventory: the 5-tier "matching ladder" is **already built** as the 13-rung Association Engine. Owner reviewed the feedback and directed: refresh the canonical arch doc (✅ `communication-intelligence-architecture.md` §3–§5, 6→13 rungs), extract the 2 worthwhile ideas (eval harness + party graph) into a plan, delete the note. **All done** — see `notes/email-matching-and-triage-go-forward-plan.md` (the tracker for P1/P2/G1–G5). Plan items **G1 done**, **G2** (delete categorization dead-seam) pending, **G3/G4** queued, **G5** parked (ADR-013 Path-B).
