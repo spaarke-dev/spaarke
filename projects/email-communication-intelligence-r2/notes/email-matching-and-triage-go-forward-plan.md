@@ -88,6 +88,21 @@ Live verification overturned Pillar-B UAT finding #5 (like P1's root-cause doc, 
 
 ---
 
+## Session closeout (2026-09-03)
+
+| Item | Final status |
+|---|---|
+| **P1 triage category fix** | ✅ **DONE + DEPLOYED** — PR #936 (`edaac1f88`) merged to master; BFF deployed to `spaarke-bff-dev` (45.45 MB, hash-verified, healthy). **UAT confirmation pending**: send a test email → verify `sprk_triagecategory` now populates (was 100% empty). |
+| **P2 .eml indexing** | ✅ already working live (verified). Optional email-metadata-facets enhancement = owner decision (no new index; add fields to `spaarke-files-index`). |
+| **G1 arch doc** | ✅ merged (#936). |
+| **G2 categorization dead-seam** | ✅ merged (#936). |
+| **G3 affinity loop** | ✅ already done (R-1). |
+| **G4 eval harness / G5 scorer+graph** | ✅ **SCOPED** → `G4-G5-matching-enhancements-scope.md`. **No ADR amendment required** (ADR-013 permits ML via facade; ADR-045 only bars AI/ML auto-file). Build order + sizing documented; awaiting owner go-ahead to build. |
+| **Minor — #4 attachments** | ✅ verified working live (child docs linked to parent `.eml`). |
+| **Minor — ribbon icons** | ✅ not a live issue (deployed XML manifest icons all exist). |
+| **Minor — Entra redirect URIs** | ✅ documented in `SPAARKE-CUSTOMER-DEPLOYMENT-GUIDE.md` §7.3 (H3) — `brk-multihub://<host>` + `https://<host>/auth-callback.html` SPA redirects, per host. |
+| **Minor — §A.4 SaveFlow footer** | Recommendation: keep the richer "Document Saved" card (owner decision open). |
+
 ## Provenance
 
 `email-record-matching-approaches.md` was reviewed 2026-09-03. Its worthwhile residue (IDEA-1, IDEA-2, and the framing corrections) is captured above; its 5-tier taxonomy is superseded by the as-built engine (`communication-intelligence-architecture.md` §4–§7). The original note is **deleted** — retaining it risks a future reader treating the built ladder as greenfield and rebuilding it. This plan + the refreshed architecture doc are the go-forward references.
