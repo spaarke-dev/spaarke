@@ -3,7 +3,7 @@
   <metadata>
     <title>e2e tier reconciliation (M6) -- or an explicit decision to retire a tier no workflow runs</title>
     <phase>0 Enforcement Remediation</phase>
-    <status>pending</status>
+    <status>completed</status>
     <rigor>STANDARD</rigor>
     <rigor-reason>Modifies test specs but no production code; a tier no workflow currently runs.</rigor-reason>
     <model-tier>sonnet</model-tier>
@@ -79,7 +79,42 @@
     <criterion testable="true">No stale column name (sprk_projectid, sprk_contactid, sprk_name on project, sprk_issecureproject) remains in tests/e2e/**.</criterion>
   </acceptance-criteria>
 
-  <notes>Review finding M6. Note the CI decision of 2026-08-24: rely on CI / Router, so prefer a Tier 2 advisory job over a new workflow.</notes>
+  <notes>Review finding M6. Note the CI decision of 2026-08-24: rely on CI / Router, so prefer a Tier 2 advisory job over a new workflow.
+
+  RESOLUTION (2026-09-04): RETIRE, not reconcile. Full decision + evidence at
+  notes/task-027-e2e-decision.md. Summary: all 4 pinned BFF contracts in
+  project-closure-cascade.spec.ts are fictional (routes missing /v1, one route
+  -- user-context -- never existed at all, the 4-field response shape shares
+  zero fields with the real CloseProjectResponse, a /container endpoint that
+  was never built, 2 stale-column FetchXML filters, and project-creation
+  columns sprk_name/sprk_issecureproject that don't exist on live sprk_project
+  -- confirmed via Dataverse MCP describe). revocation.spec.ts is closer but
+  still has the same fictional project-creation columns plus 2 of 3 error-case
+  assertions now wrong (DelegationRuleFilter returns 403
+  delegation_target_unresolved for both cases, confirmed by reading the filter
+  source; only the 401 case is still correct). Zero workflow in
+  .github/workflows/** runs any part of tests/e2e/** (tier-wide, not just
+  these 2 files -- verified across all 22 workflow files). Beyond CI wiring,
+  the delegation-rule auth model requires a caller-scoped OBO user token that
+  nothing in these specs or the repo's CI can mint -- the escalation trigger
+  fires. The invariants both files targeted are already covered, more
+  precisely, by tests/integration/auth/UnifiedAccessControl/
+  ProjectClosureCascadeTests.cs + GrantLifecycleCharacterizationTests.cs +
+  DelegationRuleCharacterizationTests.cs (a real, running ADR-038 KEEP path).
+  Deleted both spec files; no scaffolding orphaned (utils/dataverse-api.ts and
+  .env.example are shared with untouched sibling specs and had no
+  file-specific entries for these two). tsc --noEmit baseline confirmed
+  exactly 9 pre-existing window.__* TS2339 errors, all inside revocation.spec.ts,
+  all removed by the deletion -- 0 new errors introduced. Quality gates
+  (code-review + adr-check) run unconditionally per the test-modifying
+  override (root CLAUDE.md §8 / ADR-038 §6); both clean. The workflow file
+  originally listed as a relevant-file (.github/workflows/ci-tier2-advisory.yml)
+  was NOT edited -- it is under a freeze owned by another project, and no
+  workflow change is needed for a retirement decision. Not touched (out of
+  this task's declared scope, and confirmed not to share the defect):
+  access-level-enforcement.spec.ts, invitation-onboarding.spec.ts,
+  secure-project-creation.spec.ts. Flagged for a future task, not fixed here:
+  the entire tests/e2e/** tier (29 spec files, 8 domains) runs nowhere.</notes>
 
   <execution><skill>.claude/skills/task-execute/SKILL.md</skill></execution>
 </task>

@@ -127,6 +127,34 @@ public static class ExternalAccessModule
         // Interface is the ADR-010 testing seam. Singleton is safe (IDataverseService is a singleton).
         services.AddSingleton<IContactStandingGrantReader, ContactStandingGrantReader>();
 
+        // Deny-list reader (unified-access-control-r2 task 038, FR-23) — the fail-closed reader
+        // over sprk_noaccessentry (the ethical-wall / per-child-revocation VETO store; store +
+        // reader only, task 039 wires the veto into AccessibleRecordSetService.ApplyVetoPipeline).
+        // Typed HttpClient with its own app-only token management, matching the established
+        // QUERY-shaped-reader style of this module (ExternalParticipationService,
+        // ModuleEntitlementResolver) rather than ContactStandingGrantReader's single
+        // retrieve-by-id via the shared IDataverseService broker (no batched/filtered query
+        // capability). Interface is the ADR-010 testing seam for task 039's future consumer; the
+        // concrete type additionally exposes an internal-virtual query seam
+        // (InternalsVisibleTo("Sprk.Bff.Api.Tests"), matching ExternalParticipationService's own
+        // convention) for THIS task's unit tests to exercise the real chunking/matching/
+        // fail-closed orchestration without mocking HttpMessageHandler (banned, testing.md B1).
+        // Transient (AddHttpClient default) — safe to inject into the Scoped
+        // AccessibleRecordSetService; no shared mutable state crosses requests.
+        services.AddHttpClient<NoAccessListReader>((sp, client) =>
+        {
+            var config = sp.GetRequiredService<IConfiguration>();
+            var dataverseUrl = config["Dataverse:ServiceUrl"];
+            if (!string.IsNullOrEmpty(dataverseUrl))
+            {
+                client.BaseAddress = new Uri($"{dataverseUrl.TrimEnd('/')}/api/data/v9.2/");
+                client.DefaultRequestHeaders.Add("OData-MaxVersion", "4.0");
+                client.DefaultRequestHeaders.Add("OData-Version", "4.0");
+            }
+            client.Timeout = TimeSpan.FromSeconds(15);
+        });
+        services.AddTransient<INoAccessListReader>(sp => sp.GetRequiredService<NoAccessListReader>());
+
         // Principal-agnostic caller resolution (teams-app-r1 task 025 · R2 FR-22 · Option A). The
         // reusable abstraction that lets the /api/v1/external collaboration endpoints serve BOTH the
         // CIAM external contact AND the workforce (Teams-host) user through ONE endpoint set. The two

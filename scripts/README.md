@@ -1009,6 +1009,37 @@ operate on a CUSTOMER's environment, not the control plane's own hosting.
 
 ---
 
+## Data Backfill Scripts
+
+### `Backfill-CoreAncestorStamps.ps1`
+**Purpose:** One-time (re-runnable) backfill of FR-26 core-ancestor stamps onto EXISTING child-class Dataverse records (`sprk_todo`, `sprk_communication`, `sprk_event`, `sprk_invoice`, `sprk_document`, `sprk_analysis`) whose regarding target is itself a child-class record — so FR-27 access inheritance ("a contact with Project access sees its To Dos/communications/...") works for records created before the `unified-access-control-r2` FR-26 write-path tasks (050/052) shipped. Discovers ancestor-stamp columns and child-of-child lookups from LIVE Dataverse metadata every run (never a hard-coded list) — see the script header and the companion runbook for a live-metadata finding this caught (`sprk_invoice`/`sprk_document` structurally cannot carry an ancestor stamp under the current schema).
+**Usage:** 🔴 One-time (per environment) — re-runnable to fixpoint for deep (2+ hop) chains; safe to run repeatedly (idempotent).
+**Lifecycle:** ✅ Maintained (added 2026-09-04 by `unified-access-control-r2` task 053)
+**Dependencies:** Azure CLI (`az login`), Dataverse connection, PowerShell 7+
+**Owner:** UAC Team (`unified-access-control-r2`)
+**Last Used:** Author-time syntax validation only (`[ScriptBlock]::Create`, `Get-Help -Full`, PSScriptAnalyzer, and an isolated local test of the retry/closure helper) — **not yet run against a live environment**; live metadata (`EntityDefinitions`/`ManyToOneRelationships`, read-only) was queried during authoring to verify column names. Execution against a real environment is an explicit operator decision (see the runbook §7).
+
+**When to Use:**
+- Once, per environment, after tasks 050/052 (FR-26 write-path convergence) have shipped — to backfill pre-existing child records that predate the stamp.
+- Re-run after a partial/interrupted `-Apply` — resumable by construction (the candidate query itself excludes already-stamped rows; no checkpoint file needed).
+- Re-run to fixpoint for deep chains (2+ hops of child-of-child) — each pass can resolve one more hop as earlier targets get stamped; converged when a run reports `ToWrite: 0`.
+
+**Command:**
+```powershell
+# Dry run (default) — zero writes, full candidate summary + log. Always run first.
+.\Backfill-CoreAncestorStamps.ps1 -EnvironmentUrl "https://spaarkedev1.crm.dynamics.com"
+
+# Apply — writes every resolvable stamp (unless the 50k/20%-unresolvable escalation gate fires).
+.\Backfill-CoreAncestorStamps.ps1 -EnvironmentUrl "https://spaarkedev1.crm.dynamics.com" -Apply
+
+# Stage one entity at a time.
+.\Backfill-CoreAncestorStamps.ps1 -EnvironmentUrl "https://spaarkedev1.crm.dynamics.com" -Apply -Entities sprk_todo
+```
+
+**Safety model:** dry-run default (`-WhatIf` also forces preview even combined with `-Apply`); idempotent (compares the derived value against the row's current value, not just null-vs-populated); a disagreeing existing stamp is reported as a `Conflict` and never overwritten; an escalation gate (>50,000 total candidates, or any entity >20% unresolvable) blocks `-Apply` until `-AcknowledgeEscalation` is passed. Full detail: `Get-Help .\Backfill-CoreAncestorStamps.ps1 -Full` and [`projects/unified-access-control-r2/notes/phase3-backfill-runbook.md`](../projects/unified-access-control-r2/notes/phase3-backfill-runbook.md).
+
+---
+
 ## Testing & Validation Scripts
 
 ### `tests/bicep-e2e-dry-run.ps1`
@@ -1436,3 +1467,4 @@ Most scripts require:
 - **2026-03-31:** Added Initialize-ReportingCustomer.ps1 — end-to-end customer onboarding for the Reporting module: PBI workspace, SP profile, report deployment, Dataverse module enablement (Task 040).
 - **2026-03-31:** Added Deploy-ReportingCodePage.ps1 — builds and deploys the Reporting Code Page (sprk_reporting web resource) to Dataverse using vite-plugin-singlefile single-file output (Task 016).
 - **2026-04-04:** Added Release & Deployment Orchestration section with three new scripts: Deploy-Release.ps1 (master release orchestrator), Build-AllClientComponents.ps1 (dependency-ordered client build), Deploy-AllWebResources.ps1 (all web resources to Dataverse) — Task PRPR-032.
+- **2026-09-04:** Added new "Data Backfill Scripts" section with Backfill-CoreAncestorStamps.ps1 — one-time FR-26 core-ancestor stamp backfill for existing child records (`unified-access-control-r2` task 053). Discovers ancestor-stamp + child-of-child lookup columns from live Dataverse metadata every run rather than a hard-coded list, after a live-metadata check during authoring found the project's own prior notes stale on which columns `sprk_todo` carries, and found `sprk_invoice`/`sprk_document` structurally cannot carry an ancestor stamp under the current schema (filed for owner decision, not fixed by this script).

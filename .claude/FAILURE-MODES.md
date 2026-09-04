@@ -964,4 +964,42 @@ would refute it.
 
 ---
 
+### AP-13: A tool with no parameter for a thing you must control, silently picking a default
+
+> **Found** 2026-09-04 by `unified-access-control-r2` task 038, on a live environment.
+
+**The shape**: an agent calls a tool to create a durable, shared artifact. The tool exposes no parameter
+for an attribute that is *not optional in this repo*. The tool succeeds, so nothing signals a problem —
+and the artifact is created under a default the caller never chose and cannot see in the result.
+
+**The instance**: `mcp__dataverse__create_table` has **no publisher or solution parameter**. Called to
+create `sprk_noaccessentry`, it silently used the environment's **default publisher**, producing
+`cr140_noaccessentry` in `spaarkedev1`. Wrong prefix, wrong solution, outside `SpaarkeCore`, invisible to
+the repo's ALM. The call returned success. Only an explicit read-back caught it.
+
+**Why it is not "just be careful"**: the failure is in the *shape of the tool*, not the caller's
+diligence. There is no argument to get wrong and no error to notice. Every future caller meets the same
+trap at full strength, and a stray table is permanent-ish: someone must find it and consent to deleting
+it. In Dataverse specifically, publisher prefix is **immutable** — the artifact cannot be corrected in
+place, only recreated.
+
+**Rules**:
+- **MUST NOT** use `mcp__dataverse__create_table` when the entity must live under the `sprk` publisher —
+  which is every Spaarke entity. Use the raw Web API with the `MSCRM.SolutionUniqueName` header, the
+  pattern `scripts/Deploy-PrecedentEntity.ps1` already uses.
+- **MUST** read the artifact back (`mcp__dataverse__describe`) and assert the *prefix*, not merely that
+  creation succeeded. A success return says the tool ran, not that it did what you meant.
+- **Generalize before reaching for a tool that mutates shared state**: ask *"what does this tool NOT let
+  me specify, and does this repo care about it?"* If the answer is "it cares", the tool is wrong for the
+  job regardless of how convenient it is.
+
+**The wider lesson, which is the reason this entry exists**: an agent should not have been creating a
+live table at all here. Task 038's declared output was a schema **document**; the brief authorized
+*verifying* schema against live metadata — a read. "I need to check the schema" drifted into "I'll create
+the schema" with no gate in between. **A read authorization is not a write authorization**, and a shared
+environment is not scratch space. Owner directive 2026-09-04: schema work on this project is **code +
+docs only**; live table creation is an explicit operator step.
+
+---
+
 *Established 2026-05-14 by project `ai-procedure-quality-r1` (task 013). Cross-reference: [.claude/CHANGELOG.md](CHANGELOG.md) for the entry stream.*

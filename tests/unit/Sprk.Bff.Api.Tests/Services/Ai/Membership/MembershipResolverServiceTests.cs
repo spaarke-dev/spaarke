@@ -942,10 +942,15 @@ public class MembershipResolverServiceTests
     }
 
     [Fact]
-    public async Task ResolveByContactAsync_NewlyAddedAssignedConventionField_AutoQualifiesWithoutCodeChange()
+    public async Task ResolveByContactAsync_FieldNotInRegistry_DoesNotQualify_EvenIfNameMatchesRetiredConvention()
     {
-        // (c) A brand-new sprk_assigned* contact lookup nobody referenced in code
-        // auto-qualifies purely via metadata discovery + the naming convention.
+        // FR-24 registry-lock test — INVERTS the retired convention-lock test this replaces
+        // (ResolveByContactAsync_NewlyAddedAssignedConventionField_AutoQualifiesWithoutCodeChange,
+        // which asserted the OPPOSITE: that naming a field sprk_assigned* was sufficient). Conferral is
+        // now registry membership ONLY (ADR-034 Amendment A1) — a brand-new sprk_assigned*-named
+        // contact lookup that nobody has reviewed onto the registry must NOT confer access purely by
+        // matching the old naming pattern. Uses the seeded migration-default registry (SeededOptions()
+        // via CreateSut's default), which has no entry for this never-before-seen field.
         var discovery = BuildDiscoveryMock(
             Descriptor("sprk_assignedguardianadlitem", "assignedGuardianAdLitem", "Contact"));
 
@@ -957,18 +962,51 @@ public class MembershipResolverServiceTests
         // Act
         var result = await sut.ResolveByContactAsync(TestContactId, EntityType, options: null, CancellationToken.None);
 
-        // Assert — the never-before-seen field confers access with no code change.
+        // Assert — the never-before-seen field confers NOTHING despite matching the retired convention.
+        result.Ids.Should().BeEmpty();
+        result.ByRole.Should().NotContainKey("assignedGuardianAdLitem");
+    }
+
+    [Fact]
+    public async Task ResolveByContactAsync_FieldAddedToRegistryViaConfigOnly_Qualifies()
+    {
+        // The other half of the FR-24 inversion (spec acceptance criterion, literal claim): adding the
+        // SAME field to the registry — config only, no code change — makes it qualify.
+        var discovery = BuildDiscoveryMock(
+            Descriptor("sprk_assignedguardianadlitem", "assignedGuardianAdLitem", "Contact"));
+
+        var dataverse = BuildDataverseMockReturning(
+            MatterRow(MatterIdA, ("sprk_assignedguardianadlitem", new EntityReference("contact", TestContactId))));
+
+        var membershipOptions = new MembershipOptions();
+        membershipOptions.AccessConferringRoles.Entities[EntityType] = new List<AccessConferringColumn>
+        {
+            new() { Field = "sprk_assignedguardianadlitem", IdentityType = "Contact" },
+        };
+
+        var sut = CreateSut(
+            discovery.Object,
+            new Mock<IIdentityNormalizationService>(MockBehavior.Strict).Object,
+            dataverse.Object,
+            membershipOptions: membershipOptions);
+
+        // Act
+        var result = await sut.ResolveByContactAsync(TestContactId, EntityType, options: null, CancellationToken.None);
+
+        // Assert — the SAME field now confers access, purely via the registry edit.
         result.Ids.Should().BeEquivalentTo(new[] { MatterIdA });
         result.ByRole.Should().ContainKey("assignedGuardianAdLitem");
         result.ByRole["assignedGuardianAdLitem"].Should().BeEquivalentTo(new[] { MatterIdA });
     }
 
     [Fact]
-    public async Task ResolveByContactAsync_ConventionMatchOnExclusionList_IsSuppressed()
+    public async Task ResolveByContactAsync_FieldOmittedFromRegistry_IsSuppressed_EvenWhenDiscoveryStillFindsIt()
     {
-        // (d) A field that MATCHES the sprk_assigned* convention but is on the
-        // config/data-driven exclusion list must be suppressed — while another
-        // convention-matching, non-excluded field still confers access.
+        // FR-24: exclusion is now suppression-BY-OMISSION, not a separate ExcludedFields mechanism
+        // (that config surface is DELETED — the registry itself IS the allow-list; see
+        // MembershipOptions.AccessConferringRegistry). A field discovery still classifies as a
+        // Contact-typed lookup is suppressed simply by NOT appearing in the entity's registry list,
+        // while another registry-listed field on the same entity still confers access.
         var discovery = BuildDiscoveryMock(
             Descriptor("sprk_assignedtoexternal", "assignedToExternal", "Contact"),
             Descriptor("sprk_assignedattorney1", "assignedAttorney", "Contact"));
@@ -983,8 +1021,13 @@ public class MembershipResolverServiceTests
                 MatterRow(MatterIdB, ("sprk_assignedattorney1", new EntityReference("contact", TestContactId))),
             }));
 
+        // Registry lists ONLY sprk_assignedattorney1 for sprk_matter — sprk_assignedtoexternal is
+        // deliberately omitted, even though discovery still finds it as a Contact-typed lookup.
         var membershipOptions = new MembershipOptions();
-        membershipOptions.AccessConferringRoles.ExcludedFields.Add("sprk_assignedtoexternal");
+        membershipOptions.AccessConferringRoles.Entities[EntityType] = new List<AccessConferringColumn>
+        {
+            new() { Field = "sprk_assignedattorney1", IdentityType = "Contact" },
+        };
 
         var sut = CreateSut(
             discovery.Object,
@@ -995,14 +1038,14 @@ public class MembershipResolverServiceTests
         // Act
         var result = await sut.ResolveByContactAsync(TestContactId, EntityType, options: null, CancellationToken.None);
 
-        // Assert — excluded field suppressed despite matching the convention.
+        // Assert — the omitted field is suppressed; the registry-listed field still confers access.
         result.ByRole.Keys.Should().BeEquivalentTo(new[] { "assignedAttorney" });
         result.ByRole.Should().NotContainKey("assignedToExternal");
         result.Ids.Should().BeEquivalentTo(new[] { MatterIdB });
         captured.Should().NotBeNull();
         captured!.Query.Should().Contain("sprk_assignedattorney1");
         captured.Query.Should().NotContain("sprk_assignedtoexternal",
-            "a convention-matching field on the exclusion list must never confer access");
+            "a field omitted from the registry must never confer access, regardless of discovery output");
     }
 
     [Fact]
@@ -1016,6 +1059,237 @@ public class MembershipResolverServiceTests
         Func<Task> act = () => sut.ResolveByContactAsync(Guid.Empty, EntityType, options: null, CancellationToken.None);
 
         await act.Should().ThrowAsync<ArgumentException>().WithParameterName("contactId");
+    }
+
+    // ─────────────────────────────────────────────────────────────────────
+    // ADR-034 Amendment A1 / spec FR-24 (unified-access-control-r2 task 041) — the access-conferring
+    // column registry: systemuser-plane opt-in gate (AccessConferringOnly), org-typed coverage,
+    // fail-closed defaults, malformed-entry handling.
+    // ─────────────────────────────────────────────────────────────────────
+
+    [Fact]
+    public async Task ResolveAsync_AccessConferringOnlyTrue_FiltersToRegistryListedColumnsOnly()
+    {
+        // AC (systemuser opt-in gate): AccessConferringOnly=true applies the SAME registry filter
+        // ResolveByContactAsync always applies, on the systemuser (ResolveAsync) path. A registry-listed
+        // Contact column resolves; a non-registry Contact column (sprk_opposingcounsel — discovery still
+        // finds it) never reaches the emitted FetchXml; a non-Contact/Organization descriptor
+        // (SystemUser-typed "owner") is excluded regardless, same as the contact path always was.
+        var discovery = BuildDiscoveryMock(
+            Descriptor("ownerid", "owner", "SystemUser"),
+            Descriptor("sprk_assignedattorney1", "assignedAttorney", "Contact"),
+            Descriptor("sprk_opposingcounsel", "opposingCounsel", "Contact"));
+
+        var identity = BuildIdentityMock(BuildFullIdentity());
+
+        FetchExpression? captured = null;
+        var dataverse = new Mock<IDataverseService>();
+        dataverse
+            .Setup(x => x.RetrieveMultipleAsync(It.IsAny<FetchExpression>(), It.IsAny<CancellationToken>()))
+            .Callback<FetchExpression, CancellationToken>((fe, _) => captured = fe)
+            .ReturnsAsync(new EntityCollection(new List<Entity>
+            {
+                MatterRow(MatterIdA, ("sprk_assignedattorney1", new EntityReference("contact", TestContactId))),
+            }));
+
+        var sut = CreateSut(discovery.Object, identity.Object, dataverse.Object);
+
+        // Act
+        var result = await sut.ResolveAsync(
+            TestSystemUserId,
+            EntityType,
+            new MembershipResolveOptions(AccessConferringOnly: true),
+            CancellationToken.None);
+
+        // Assert — only the registry-listed Contact column resolves.
+        result.ByRole.Keys.Should().BeEquivalentTo(new[] { "assignedAttorney" });
+        result.ByRole.Should().NotContainKey("owner");
+        result.ByRole.Should().NotContainKey("opposingCounsel");
+        captured.Should().NotBeNull();
+        captured!.Query.Should().Contain("sprk_assignedattorney1");
+        captured.Query.Should().NotContain("ownerid",
+            "AccessConferringOnly excludes non-Contact/Organization descriptors even on the systemuser plane");
+        captured.Query.Should().NotContain("sprk_opposingcounsel",
+            "AccessConferringOnly excludes a Contact-typed field that is not in the registry");
+    }
+
+    [Fact]
+    public async Task ResolveAsync_AccessConferringOnlyDefaultsFalse_ScopingOutputByteIdentical()
+    {
+        // AC pin (the OTHER half of the opt-in gate): omitting AccessConferringOnly (default false)
+        // leaves ResolveAsync's pre-task-041 behavior unchanged — EVERY discovered descriptor still
+        // confers, including a field that is NOT in the access-conferring registry. Uses the SAME
+        // discovery shape as ResolveAsync_AccessConferringOnlyTrue_FiltersToRegistryListedColumnsOnly so
+        // the two tests are a direct true/false contrast pair.
+        var discovery = BuildDiscoveryMock(
+            Descriptor("ownerid", "owner", "SystemUser"),
+            Descriptor("sprk_assignedattorney1", "assignedAttorney", "Contact"),
+            Descriptor("sprk_opposingcounsel", "opposingCounsel", "Contact"));
+
+        var identity = BuildIdentityMock(BuildFullIdentity());
+
+        var dataverse = BuildDataverseMockReturning(
+            MatterRow(MatterIdA,
+                ("ownerid", new EntityReference("systemuser", TestSystemUserId)),
+                ("sprk_assignedattorney1", new EntityReference("contact", TestContactId)),
+                ("sprk_opposingcounsel", new EntityReference("contact", TestContactId))));
+
+        var sut = CreateSut(discovery.Object, identity.Object, dataverse.Object);
+
+        // Act — options: null is the common case; AccessConferringOnly defaults false either way.
+        var result = await sut.ResolveAsync(TestSystemUserId, EntityType, options: null, CancellationToken.None);
+
+        // Assert — ALL THREE descriptors still confer; nothing is filtered by the registry.
+        result.ByRole.Keys.Should().BeEquivalentTo(new[] { "owner", "assignedAttorney", "opposingCounsel" });
+    }
+
+    [Fact]
+    public async Task ResolveAsync_AccessConferringOnly_OrgTypedRegistryColumn_SurvivesFilterAndResolves()
+    {
+        // AC (org half): a registry-listed org-typed column (sprk_assignedlawfirm1, seeded per ADR-034
+        // M4) produces an Organization descriptor that SURVIVES the registry filter and resolves a real
+        // row when the caller's identity carries organization affiliations (BuildFullIdentity() sets
+        // OrganizationIds: [TestOrgA]).
+        var discovery = BuildDiscoveryMock(
+            Descriptor("sprk_assignedlawfirm1", "assignedLawFirm", "Organization"));
+
+        var identity = BuildIdentityMock(BuildFullIdentity());
+
+        FetchExpression? captured = null;
+        var dataverse = new Mock<IDataverseService>();
+        dataverse
+            .Setup(x => x.RetrieveMultipleAsync(It.IsAny<FetchExpression>(), It.IsAny<CancellationToken>()))
+            .Callback<FetchExpression, CancellationToken>((fe, _) => captured = fe)
+            .ReturnsAsync(new EntityCollection(new List<Entity>
+            {
+                MatterRow(MatterIdA, ("sprk_assignedlawfirm1", new EntityReference("sprk_organization", TestOrgA))),
+            }));
+
+        var sut = CreateSut(discovery.Object, identity.Object, dataverse.Object);
+
+        // Act
+        var result = await sut.ResolveAsync(
+            TestSystemUserId,
+            EntityType,
+            new MembershipResolveOptions(AccessConferringOnly: true),
+            CancellationToken.None);
+
+        // Assert
+        result.ByRole.Should().ContainKey("assignedLawFirm");
+        result.ByRole["assignedLawFirm"].Should().BeEquivalentTo(new[] { MatterIdA });
+        captured.Should().NotBeNull();
+        captured!.Query.Should().Contain("sprk_assignedlawfirm1");
+    }
+
+    [Fact]
+    public async Task ResolveAsync_AccessConferringOnly_OrganizationFieldNotInRegistry_NeverReachesFetchXml()
+    {
+        // AC (FR-24 negative, org half): an organization referenced via a NON-registry lookup confers
+        // nothing — the field never reaches the emitted FetchXml. Mirrors the existing Contact-typed
+        // adverse-field assertion shape (sprk_opposingcounsel) for the Organization identity type — this
+        // is the disclosure ADR-034 Amendment A1 closes: unrestricted org expansion would otherwise
+        // confer access from ANY organization referenced on the record, including opposing counsel.
+        var discovery = BuildDiscoveryMock(
+            Descriptor("sprk_assignedlawfirm1", "assignedLawFirm", "Organization"),          // registered
+            Descriptor("sprk_opposingcounselfirm", "opposingCounselFirm", "Organization"));  // NOT registered
+
+        var identity = BuildIdentityMock(BuildFullIdentity());
+
+        FetchExpression? captured = null;
+        var dataverse = new Mock<IDataverseService>();
+        dataverse
+            .Setup(x => x.RetrieveMultipleAsync(It.IsAny<FetchExpression>(), It.IsAny<CancellationToken>()))
+            .Callback<FetchExpression, CancellationToken>((fe, _) => captured = fe)
+            .ReturnsAsync(new EntityCollection());
+
+        var sut = CreateSut(discovery.Object, identity.Object, dataverse.Object);
+
+        // Act
+        var result = await sut.ResolveAsync(
+            TestSystemUserId,
+            EntityType,
+            new MembershipResolveOptions(AccessConferringOnly: true),
+            CancellationToken.None);
+
+        // Assert
+        result.ByRole.Keys.Should().BeEquivalentTo(new[] { "assignedLawFirm" });
+        captured.Should().NotBeNull();
+        captured!.Query.Should().Contain("sprk_assignedlawfirm1");
+        captured.Query.Should().NotContain("sprk_opposingcounselfirm",
+            "an organization-typed lookup not in the access-conferring registry must never confer access " +
+            "— unrestricted org expansion would disclose access from ANY organization on the record, " +
+            "including opposing counsel");
+    }
+
+    [Fact]
+    public async Task ResolveByContactAsync_EntityWithNoRegistryEntries_YieldsZeroConferringDescriptors()
+    {
+        // AC (fail-closed default, spec NFR-01): an entity with ZERO registry entries confers nothing
+        // via the derived-member term — even when discovery finds a plausible-looking Contact lookup.
+        // "sprk_document" (verified live 2026-09-04 against Dataverse metadata) has no
+        // sprk_assigned*-prefixed lookups and is deliberately absent from the migration seed
+        // (SeededOptions(), used by CreateSut's default).
+        var discovery = BuildDiscoveryMock(
+            Descriptor("sprk_relatedcontact", "relatedContact", "Contact"));
+
+        var dataverse = new Mock<IDataverseService>(MockBehavior.Strict);
+
+        var sut = CreateSut(discovery.Object, new Mock<IIdentityNormalizationService>(MockBehavior.Strict).Object, dataverse.Object);
+
+        // Act
+        var result = await sut.ResolveByContactAsync(TestContactId, "sprk_document", options: null, CancellationToken.None);
+
+        // Assert
+        result.Ids.Should().BeEmpty();
+        result.ByRole.Should().BeEmpty();
+        dataverse.VerifyNoOtherCalls();
+    }
+
+    [Fact]
+    public async Task ResolveByContactAsync_MalformedRegistryEntry_IsIgnoredAndLogged_NeverWidened()
+    {
+        // AC (malformed entry, spec NFR-01): a registry entry whose IdentityType is neither Contact nor
+        // Organization is logged and ignored — never widened. A well-formed sibling entry on the same
+        // entity still confers access, proving the malformed entry does not poison the whole filter.
+        var discovery = BuildDiscoveryMock(
+            Descriptor("sprk_assignedattorney1", "assignedAttorney", "Contact"),
+            Descriptor("sprk_owningteam", "owningTeam", "Team"));
+
+        var dataverse = BuildDataverseMockReturning(
+            MatterRow(MatterIdA, ("sprk_assignedattorney1", new EntityReference("contact", TestContactId))));
+
+        var membershipOptions = new MembershipOptions();
+        membershipOptions.AccessConferringRoles.Entities[EntityType] = new List<AccessConferringColumn>
+        {
+            new() { Field = "sprk_assignedattorney1", IdentityType = "Contact" },
+            new() { Field = "sprk_owningteam", IdentityType = "Team" }, // malformed: Team is not Contact/Organization
+        };
+
+        var loggerMock = new Mock<ILogger<MembershipResolverService>>();
+        var sut = CreateSut(
+            discovery.Object,
+            new Mock<IIdentityNormalizationService>(MockBehavior.Strict).Object,
+            dataverse.Object,
+            membershipOptions: membershipOptions,
+            logger: loggerMock.Object);
+
+        // Act
+        var result = await sut.ResolveByContactAsync(TestContactId, EntityType, options: null, CancellationToken.None);
+
+        // Assert — the malformed entry is dropped; the well-formed sibling entry still resolves.
+        result.ByRole.Keys.Should().BeEquivalentTo(new[] { "assignedAttorney" });
+        result.ByRole.Should().NotContainKey("owningTeam");
+
+        loggerMock.Verify(
+            l => l.Log(
+                LogLevel.Warning,
+                It.IsAny<EventId>(),
+                It.Is<It.IsAnyType>((o, _) => o.ToString()!.Contains("malformed")
+                                              && o.ToString()!.Contains("sprk_owningteam")),
+                It.IsAny<Exception?>(),
+                It.IsAny<Func<It.IsAnyType, Exception?, string>>()),
+            Times.AtLeastOnce,
+            "a malformed registry entry (unsupported IdentityType) MUST be logged, per spec NFR-01");
     }
 
     // ─────────────────────────────────────────────────────────────────────
@@ -1035,8 +1309,25 @@ public class MembershipResolverServiceTests
             identity,
             dataverse,
             cache ?? new FakeDistributedCache(),
-            Options.Create(membershipOptions ?? new MembershipOptions()),
+            Options.Create(membershipOptions ?? SeededOptions()),
             logger ?? NullLogger<MembershipResolverService>.Instance);
+    }
+
+    /// <summary>
+    /// The default <see cref="MembershipOptions"/> for tests that don't construct a custom registry.
+    /// Applies the SAME post-configure seeding production DI uses (<see cref="MembershipOptionsDefaults"/>),
+    /// so the contact-path allowlist tests exercise the REAL migration-seeded access-conferring registry
+    /// (ADR-034 Amendment A1 / spec FR-24) rather than an empty one. Raw <c>new MembershipOptions()</c>
+    /// has an EMPTY registry — Dictionary/List-typed seeding must go through post-configure, same
+    /// reasoning already documented on <see cref="MembershipOptions.IncludedIdentityTables"/>
+    /// (IConfiguration.Bind APPENDS to List-typed values, so a property-level default would double up
+    /// an operator's own entries).
+    /// </summary>
+    private static MembershipOptions SeededOptions()
+    {
+        var options = new MembershipOptions();
+        new MembershipOptionsDefaults().PostConfigure(name: null, options);
+        return options;
     }
 
     private static Mock<IMembershipFieldDiscoveryService> BuildDiscoveryMock(

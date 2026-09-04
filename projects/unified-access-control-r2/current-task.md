@@ -1,9 +1,9 @@
 # Current Task State — `unified-access-control-r2`
 
-> **Last Updated**: **2026-09-04** (by `context-handoff`).
-> **Recovery**: read Quick Recovery, then **§ NEXT SESSION — ORDERED WORK ITEMS**.
-> ⚠️ **This project's own notes have been WRONG THIRTEEN times.** Verify before believing —
-> especially counts, route names, "already done" claims, and open-vs-answered questions.
+> **Last Updated**: **2026-09-04** (by `context-handoff`, end of the 5-agent parallel wave).
+> **Recovery**: read Quick Recovery, then **§ NEXT SESSION**.
+> ⚠️ **This project's notes have now been WRONG FIFTEEN times.** Verify before believing —
+> counts, route names, schema claims, "already done" claims, open-vs-answered questions.
 
 ---
 
@@ -11,132 +11,112 @@
 
 | Field | Value |
 |---|---|
-| **Task** | **038** — deny-list store (schema + fail-closed reader). 037 ✅ done 2026-09-04 |
-| **Status** | `pending` — not started. **`parallel-safe: TRUE`** (group P1-A), no deps |
-| **Repo state** | Branch **clean**, **0 unpushed**, master merged 2026-09-04 (`eb71df826`) |
-| **Next Action** | `task-execute` on 038, then 039 (deny veto wiring — needs 037 ✅ + 038). **Read `notes/task-037-restricted-secure-vetoes.md` § For task 039 first** — the deny slot runs FIRST by construction and must REMOVE keys, never write `None` |
-| **Progress** | **37 completed** · 2 completed-with-escalation · 1 blocked-shipped · **52 pending** (of 92) |
+| **Task** | **039** — deny-veto wiring + ordered-pipeline tests. Deps 032 ✅ 037 ✅ 038 ✅ all met |
+| **Status** | `pending` — not started |
+| **Repo state** | See "IF THE COMMIT DID NOT HAPPEN" below — verify with `git status` FIRST |
+| **Next Action** | `task-execute` on `tasks/039-fr23-deny-veto-wiring-pipeline-tests.poml`. **Read `notes/task-037-restricted-secure-vetoes.md` § "For task 039" first** — the deny slot already runs FIRST by construction and must REMOVE keys, never write `None` |
+| **Progress** | **42 completed** · 2 completed-with-escalation · 1 blocked-shipped · **47 pending** (of 92) |
 
-### Completed THIS session (all merged or pushed)
+### 🚨 IF THE COMMIT DID NOT HAPPEN
 
-| Item | Result |
-|---|---|
-| **PR #939** | **MERGED.** Resolved a real conflict — two branches each shrank the SPE provenance census and each wrote its own count in the same comment. Resolved with the machine count the file prescribes → **2** ClientSupplied sinks remain (both in `Api/DocumentsEndpoints.cs`) |
-| **030** | ADR-003 **Amendment A1** — two surfaces, one evaluator |
-| **031** | ADR-028 **Amendment A5** (numbered A5; A1–A4 already existed) — impersonated derivation. **Exactly ONE line changed** in a 428-line ADR |
-| **040** | ADR-034 **Amendment A1** — allow-list first-class + per-surface |
-| **032** 🔑 | **The evaluator spine** — `(recordId → rights)`, additive max, ordered veto seam |
-| **dead-code sweep** | Owner-directed. `WorkspaceGrid` → **shared** `CloseProjectDialog`; twin + `ProvisioningProgressStep` deleted. **−859 lines** |
-| **doc drift** | Two guides repointed at the shared wizards. `DATA-ACCESS-DECISION-CRITERIA` was stale **3 ways**, not the 1 filed |
-| **LW build** 🔧 | RED since 2026-07-02 — **fixed + watched**. Alias + 15 TipTap deps; `nightly-health.yml` now builds it. Verified by DELETING the alias (exit 1) and from a clean checkout |
-| **033** 🔑 | The write gates were already there and **could not fire**. Stamp deleted; rights per record on all 3 root types; caught a `HasFlag(None)` fail-open |
-| **037** | Restricted + Secure vetoes. Dedupe was destroying the provenance suppression needs → additive `DirectAccessLevel`. Surfaced 5 doubles silently failing closed |
+A 5-agent wave (027/038/041/051/053) plus main-session fixes were being committed when the session
+ended. **Run `git status` before anything else.**
 
-### Files modified this session
-
-- `src/server/api/Sprk.Bff.Api/Infrastructure/ExternalAccess/` — `AccessibleRecordSetService.cs` (rights map + terms + veto seam), `ExternalCallerContext.cs` (extracted mapping, `ExternalRootGrant`, derived views), `ExternalParticipationService.cs` (levels + dedupe + **`CacheVersion` 3→4**)
-- `.claude/adr/` — ADR-003 (rewritten), ADR-028 (+A5), ADR-034 (+A1) · `.claude/CHANGELOG.md` (3 entries)
-- `docs/adr/` — ADR-003 full (+A1), ADR-034 full (+A1)
-- `tests/` — new `AccessibleRecordSetTestFactory.cs`; 5 test files migrated; **10 new rights-fidelity tests**
-- `src/solutions/LegalWorkspace/.../WorkspaceGrid.tsx` + shared `CreateProjectWizard/**` — consolidation
-- `projects/unified-access-control-r2/notes/` — 5 new notes (030, 031, 032, 040, LW-build finding)
-
-### Critical context
-
-**032 changed the evaluator's return shape**, so 033 exists to propagate it: `CallerPrincipalResolver`
-still blanket-stamps Collaborate over every accessible record, which 032 deliberately left alone.
-**Verified at HEAD**: clean `dotnet build Spaarke.sln --no-incremental` · BFF unit **12,062 passed / 0
-failed** / 58 skipped · ArchTests **191/191** · publish **44.15 MB compressed** (ceiling 60).
+- **Clean tree + `git log -1` shows the wave commit** → all good, proceed to 039.
+- **Dirty tree** → the work is on disk but uncommitted. Solution build was **GREEN**; the full suite was
+  still running at handoff. **Re-run** `dotnet build Spaarke.sln --no-incremental`, the full unit suite,
+  and ArchTests, then commit. Do NOT `git stash`, do NOT `git add -A` — stage explicit paths.
 
 ---
 
-### ✅ Task 037 findings (DONE 2026-09-04) — full record in `notes/task-037-restricted-secure-vetoes.md`
+## What landed this session
 
-**Step 1 — live metadata verified (escalation trigger 1 does NOT fire).** All THREE root types carry
-BOTH flags, with identical option sets:
+| Task | Result |
+|---|---|
+| **033** | The write gates were already there and **could not fire**. Stamp deleted; rights per-record on all 3 roots. Caught a `HasFlag(None)` fail-open |
+| **037** | Restricted veto + Secure pre-max suppression. The grant dedupe was **destroying the provenance suppression needs** → additive `DirectAccessLevel` |
+| **027** | e2e tier **RETIRED** on evidence: 4 contracts wrong, `beforeAll` impossible, **no workflow runs any of the 29 e2e specs** |
+| **038** | Deny-list store + fail-closed reader. ⚠️ Also created the table LIVE (see below) |
+| **041** | Conferring-column registry — a **rename can no longer grant or revoke access** |
+| **051** | Re-stamp on set/reparent/clear. **Both suites ran 0 tests at HEAD**; a Critical its own report missed was found + fixed |
+| **053** | Backfill script (dry-run default, never run live) — and it found two schema truths the notes had wrong |
+| **LW build** | RED since 2026-07-02 — fixed, and now watched by `nightly-health.yml` |
+| **doc drift** | Two guides repointed at the shared wizards |
 
-| Entity | `sprk_issecure` | `sprk_accesspermission` | Restricted |
-|---|---|---|---|
-| `sprk_project` | BIT | CHOICE | **100000002** |
-| `sprk_matter` | BIT | CHOICE | **100000002** |
-| `sprk_workassignment` | BIT | CHOICE | **100000002** |
+---
 
-⚠️ The POML cited `TrackingFieldTrio/index.ts:136-138` for the raw values, but that file's own
-comment says those are **`sprk_communication`** values, "entity-specific … never in the shared core".
-The number happens to be right for all three roots — **verified live, not inherited from the citation.**
+## 🔴 NEW — the three findings that change other tasks
 
-**Escalation trigger 2 does NOT fire** — provenance is already structural at read time: org grants are a
-SEPARATE query keyed `_sprk_contact_value eq null` (the org-grant marker). An additive field suffices.
+### 1. `sprk_todo` DOES have `sprk_regardingservicerequest` — **owner decision C is MOOT**
 
-**🔴 The design crux.** `ExternalParticipationService` merges org rows into the direct lists and then
-dedupes by record id keeping the MAX level. That **destroys** what Secure suppression needs: a contact
-with a ViewOnly DIRECT grant + a Collaborate ORG grant collapses to Collaborate, so after suppressing
-the org term there is no ViewOnly left to fall back to. The acceptance criterion requires exactly
-**Read** in that case.
-**Chosen shape**: keep ONE entry per record id (changing the dedupe key to `(id, provenance)` would let
-duplicates reach `CallerPrincipal.ProjectAccess`, where `GetEffectiveRights`'s `FirstOrDefault` would
-pick one **arbitrarily** — a silent wrong answer). Instead add an **additive** `DirectAccessLevel`
-alongside the existing `AccessLevel`: non-secure reads `AccessLevel` (byte-identical to today), secure
-reads `DirectAccessLevel`.
+Verified in LIVE metadata. `CoreAncestorResolver.cs:90` **and `:287`** assert the opposite, and `:287`
+calls it "a genuine hole in child inheritance". Two notes (`phase3-derivation-rules.md` F-050-1,
+`phase3-server-writers.md` F-052-1) repeat it. **Correct them at source** — AP-12 again.
 
-**Reuse (§11)**: `SecurableEntityRegistry` already answers "which entities carry `sprk_issecure`" from
-live metadata with a 6h cache and a fail-closed empty-set rule — do NOT rebuild that.
+### 2. 🔴 `sprk_document` and `sprk_invoice` carry NO `sprk_regarding{core}` columns
+
+They use `sprk_matter` / `sprk_project` / `sprk_workassignment` directly. `CoreAncestorResolver.cs:96-99`
+hard-codes the map as `(core → "sprk_regarding{core}")`, so **documents cannot participate in 1-hop child
+inheritance at all**. Documents are this project's PRIMARY disclosure surface. **Belongs to 054/055/056.**
+
+### 3. 🔴 The *reachable* CLEAR bypasses the PCF entirely (051)
+
+Clearing a regarding lookup natively on a form runs no PCF code. A **core** parent self-heals; a **child**
+parent does not — the record shows no regarding while staying visible to the OLD ancestor's people.
+Needs a Dataverse plugin. `clearRegarding` also has **no caller** in `src/client/**`.
+
+---
+
+## ⚠️ Live-environment change made this session (owner-directed policy now in force)
+
+Task 038's agent created **`sprk_noaccessentry` in `spaarkedev1`** — beyond its POML, whose declared
+output was a schema **document**. A stray `cr140_noaccessentry` (default publisher) was created first;
+**the owner deleted it**.
+
+**BINDING, owner directive 2026-09-04: schema work on this project is CODE + DOCS ONLY.** Live table
+creation is an explicit operator step. Captured as [`FAILURE-MODES.md` **AP-13**](../../.claude/FAILURE-MODES.md).
+`mcp__dataverse__create_table` has **no publisher/solution parameter** and silently uses the default —
+use raw Web API + `MSCRM.SolutionUniqueName` (see `scripts/Deploy-PrecedentEntity.ps1`), then read back
+and assert the **prefix**. Dataverse prefixes are immutable, so a wrong one cannot be fixed in place.
+
+⚠️ **Once 039 wires the reader in, an environment missing `sprk_noaccessentry` denies EVERYTHING**
+(fail-closed by design). Provisioning must create it before or with 039's deploy.
 
 ---
 
 ## 🔴 The traps that still apply
 
-1. **`Router` is the ONLY required check on master** — it has passed while other jobs were RED (#934
-   reached master with a broken solution build). **Gate on the FULL rollup; only `CLEAN` merges.**
-2. **The incremental solution build LIES.** Always `--no-incremental`. `MSB3026`/`MSB3027` = a
-   concurrent test run, not a code error.
-3. **🆕 `tsc` PASSING IS NOT EVIDENCE A VITE SOLUTION BUILDS.** TypeScript resolves via tsconfig
-   paths, the bundler via Vite aliases, and the two lists drift. This hid a **2-month-old broken
-   LegalWorkspace build**, and bit me once in the same session
-   (`@spaarke/ui-components/src/components/…` typechecks, bundles as a doubled `src/src/`).
-   **Run the build, not just the typecheck.**
-4. **STALE PROSE HAS COST REAL WORK THIRTEEN TIMES.** Newest: `notes/access-model-decision.md` pairs
-   `MSCRMCallerID` with the **AAD oid** (it takes the **systemuserid**), and ADR-034 documented contact
-   resolution as AAD-oid-only when **`sprk_primarycontact` is primary**.
-5. **NEVER `git stash` here, and never `git add -A` with concurrent agents.** Both caused loss.
-6. **Both arch guards fire on new work and are RIGHT every time.** Fix them honestly.
+1. **`Router` is the ONLY required check on master** — gate on the FULL rollup; only `CLEAN` merges.
+2. **The incremental build LIES.** Always `--no-incremental`. `MSB3026`/`MSB3027` = a concurrent run.
+3. **`tsc` PASSING IS NOT EVIDENCE A VITE/PCF BUNDLE BUILDS** — two resolution systems, one unchecked.
+4. **A GREEN SUITE MAY BE RUNNING ZERO TESTS.** Task 051 found *both* RegardingResolver suites executing
+   **0 tests** — they mocked a specifier nothing imported. `CommunicationConnections` has the same shape,
+   **filed not fixed**. Check the test COUNT, not the colour.
+5. **STALE PROSE HAS COST REAL WORK FIFTEEN TIMES.** Newest: the `sprk_regardingservicerequest` claim.
+6. **NEVER `git stash` here; never `git add -A`.** Both caused loss. Stage explicit paths.
+7. **A read authorization is not a write authorization** (AP-13).
+8. **A sub-agent's own report can miss a Critical its own reviewer found** — 051's did. Read the gate
+   output, not just the summary.
 
 ---
 
-## ▶ NEXT SESSION — ORDERED WORK ITEMS
+## ▶ NEXT SESSION — ORDERED
 
-### ~~1. Task 033~~ ✅ **DONE 2026-09-04** — see `notes/task-033-consumer-propagation.md`
+1. **039** — deny-veto wiring. Deps all met. The slot runs first by construction; a veto REMOVES a key.
+   `IsOperationPermittedAsync` rejects `AccessRights.None` as a caller bug, so a `None` written by a veto
+   would be refused as malformed rather than honoured as a denial.
+2. **042** → **043** → **044** (Phase 2 close-out). 043 must route the org-expansion term through the same
+   `isSecure` predicate — the hook is already plane-agnostic.
+3. **054/055/056** — child inheritance. **Fix finding #2 first**, or documents silently never inherit.
+4. **035** (opus) — `ImpersonatedRootSetSource`. **036 stays BLOCKED** on decision B.
+5. **083** — 2 ClientSupplied sinks. Re-run the grep; do not trust this number either.
 
-⚠️ **Start FRESH — this changes effective rights on LIVE routes.** Deleting the stamp
-(`CallerPrincipalResolver.cs` `WorkforceProjectAccessLevel` :354-360, applied :429-431) means a
-deliberate **ViewOnly grant stops conferring Write** — correct per register A-8, and user-visible.
-Every mutating `/api/v1/external` route must then require Write from the evaluator's answer **for that
-record**. A half-applied version leaves the boundary partially enforced.
-`opus` @ high · `parallel-safe: false` · deps **032 ✅**.
+### The parallel-wave recipe that worked (5 agents, 1 worktree)
 
-### 2. Tasks 037 / 038 / 039 — fill the veto seam 032 wired
-
-`ApplyVetoPipeline` is an **ordered no-op** with two named slots; the order is already correct and
-load-bearing (pre-max Secure suppression → deny list → Restricted).
-⚠️ **A veto REMOVES a key.** It must never write a low rights value — under `max()` a low value is
-ignored, so an ethical wall modelled as a level fails silently in exactly the case it exists for.
-
-### 3. Task 041 — access-conferring column registry (contact **+ org**)
-
-Unblocked by 040. `sonnet` @ high, **`parallel-safe: TRUE`** (group P2-A with 044) — one of the few
-genuinely parallelizable tasks left. Adding a conferring column must be a **registry edit**; a
-**rename must not** grant or revoke access (FR-24).
-
-### 4. Task 035 — `ImpersonatedRootSetSource` + per-user cache
-
-Unblocked by 031. ⚠️ **036 (the FR-20 swap) stays BLOCKED** on open decision B.
-
-### 5. Task 083 — container-selection sweep (**2** sinks, not 7)
-
-Machine-counted at the 2026-09-04 merge. Both survivors are in `Api/DocumentsEndpoints.cs` — the
-`{driveId}` upload and the `{driveId}/{itemId}` delete, both app-only behind the wrong-resource-domain
-`canwritefiles` policy. The delete is worse: a destroy leaves no record to audit. **Re-run the grep;
-do not trust this number either.**
+Verify **declared outputs do not overlap** — group labels are not enough. Then forbid, in every prompt:
+`TASK-INDEX.md` / `current-task.md` edits, any git command, and solution-wide `dotnet build`/`test`. The
+main session does the authoritative build + suite + ONE commit. Tell agents MSB3026/3027 = contention,
+not a code error. Give each agent the session's hard-won traps — it measurably changed their behaviour.
 
 ---
 
@@ -144,12 +124,14 @@ do not trust this number either.**
 
 | # | Decision | Blocks |
 |---|---|---|
-| A | **`sprk_account` / `sprk_contact` lookups on `sprk_document`.** Use schema names **`sprk_Account`** / **`sprk_Contact`** (PascalCase is load-bearing for `@odata.bind`). **Do NOT wire code before the columns exist.** | Office saves filed to account/contact persist **unassociated** today |
-| B | **034 canary user + CI path.** No non-admin canary user in dev; no pipeline here reaches Dataverse. Recommended: scheduled nightly canary + manual gate. | **Task 036 must NOT proceed** |
-| C | **`sprk_todo` has no `sprk_regardingservicerequest`** — handled as `unstampable` + warn. Schema change vs accept. | 028 / 056 |
-| D | **Real-Dataverse smoke** on `POST /api/v1/external/projects/{id}/documents` before the external SPA deploys. | external SPA deploy |
-| ~~E~~ | ✅ **FIXED 2026-09-04** (owner: "addressed here, not deferred"). LW build green from a clean checkout: `@spaarke/document-operations` alias + 15 TipTap deps at SpaarkeAi's exact versions + a `Build LegalWorkspace solution` step in `nightly-health.yml`. **The chain ended at TipTap** — my note's "expect more" was wrong. Verified by DELETING the alias and confirming exit 1. See [`notes/finding-legalworkspace-build-broken-since-2026-07-02.md`](notes/finding-legalworkspace-build-broken-since-2026-07-02.md) § Resolution. | — |
-| F | 🆕 **28 of 30 `src/solutions/**` have NO build signal at all** — measured 2026-09-04 while fixing E. Nothing builds a solution on `pull_request`; only deploy workflows and the nightly job (2 of 30 before today, 3 now). Any of the other 27 may be red right now for exactly the reason LW was. Sizing that gate is `ci-cd-unit-test-remediation-r1`'s call — the three tier files are **frozen** for the shadow window and this is not a freeze-carve-out "gate repair" (there is no gate to repair). | nothing here; CI-owner call |
+| A | `sprk_account`/`sprk_contact` lookups on `sprk_document` — schema names **`sprk_Account`**/**`sprk_Contact`** (PascalCase is load-bearing for `@odata.bind`) | Office saves file unassociated today |
+| B | 034 canary user + CI path | **036 must NOT proceed** |
+| ~~C~~ | ~~`sprk_todo` has no `sprk_regardingservicerequest`~~ ✅ **MOOT — the column EXISTS** (verified live) | 028/056 unblocked on this point |
+| D | Real-Dataverse smoke on `POST /api/v1/external/projects/{id}/documents` | external SPA deploy |
+| ~~E~~ | ~~LegalWorkspace build~~ ✅ **FIXED + watched** | — |
+| F | **28 of 30 `src/solutions/**` have NO build signal**, and **none of the 29 e2e specs run in any workflow**. Both need CI infrastructure, not spec fixes | CI-owner call |
+| G | 🆕 `sprk_document`/`sprk_invoice` cannot inherit (finding #2). Rename columns, widen the resolver map, or accept the gap? | **054/055/056** |
+| H | 🆕 Native form CLEAR needs a Dataverse plugin (finding #3) | FR-26 completeness |
 
 ---
 

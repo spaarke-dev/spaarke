@@ -571,8 +571,42 @@ public class MembershipPagingCharacterizationTests
             identity.Object,
             dataverse.Object,
             new NoOpTenantCache(),
-            Options.Create(new MembershipOptions()),
+            SeededOptions(),
             NullLogger<MembershipResolverService>.Instance);
+    }
+
+    /// <summary>
+    /// <see cref="MembershipOptions"/> seeded the way DI seeds it (task 041).
+    /// </summary>
+    /// <remarks>
+    /// This used to be a raw <c>Options.Create(new MembershipOptions())</c>, which worked only by
+    /// accident: the retired <c>ConventionPrefix</c> carried a property-level default (<c>"sprk_assigned"</c>)
+    /// that survived raw construction, so the allow-list still matched this file's mocked
+    /// <c>sprk_assignedattorney1</c> descriptor.
+    /// <para>
+    /// Task 041's <c>AccessConferringRegistry</c> deliberately CANNOT carry a property-level default —
+    /// <c>IConfiguration.Bind</c> APPENDS to List-typed values, so a default would double up an operator's
+    /// own entries. It is therefore seeded only by <see cref="MembershipOptionsDefaults"/> post-configure,
+    /// exactly as <c>IncludedIdentityTables</c> and <c>GlobalFieldExclusions</c> already were.
+    /// </para>
+    /// <para>
+    /// A raw options object consequently has an EMPTY registry, and the fail-closed filter then suppresses
+    /// every field — including this file's own. That is the veto working, not a regression: verified that
+    /// NO production path constructs <see cref="MembershipOptions"/> directly (DI-only, and
+    /// <c>MembershipModule</c> always registers the post-configure seeder), so the empty-registry state is
+    /// reachable only from a test double that bypasses seeding.
+    /// </para>
+    /// <para>
+    /// Seeding with the real defaults — rather than hand-building a registry entry — keeps these tests
+    /// about PAGING, which is what they characterize. A hand-built entry would pin a registry shape this
+    /// file does not care about and would break again on the next registry change.
+    /// </para>
+    /// </remarks>
+    private static IOptions<MembershipOptions> SeededOptions()
+    {
+        var options = new MembershipOptions();
+        new MembershipOptionsDefaults().PostConfigure(null, options);
+        return Options.Create(options);
     }
 
     private static AccessibleRecordSetService ComposerWith(
