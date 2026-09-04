@@ -2,6 +2,9 @@
 
 > **Status**: Active (binding)
 > **Created**: 2026-05-26
+> **Last Updated**: 2026-09-04 — `unified-access-control-r2` refreshed the BFF worked example: the
+> file had moved to the shared library, and the endpoint's contract changed on 2026-08-25 (no more
+> per-project business unit, no more External Access Account)
 > **Source**: R4 spec DR-06 / backlog item C-1
 > **Audience**: Anyone touching Dataverse data from a Spaarke client surface (Code Pages, PCF controls, web resources, BFF endpoints, or BFF-backed services)
 > **Companion**: [`.claude/constraints/bff-extensions.md`](../../.claude/constraints/bff-extensions.md) (BFF-side governance — load alongside this doc when adding BFF code)
@@ -136,41 +139,45 @@ This is exactly the right shape: **host-context, single-entity, read-only, no AI
 
 ---
 
-## Worked example — BFF (LegalWorkspace `provisioningService.ts`)
+## Worked example — BFF (`provisioningService.ts`, shared `CreateProjectWizard`)
 
-**Surface**: LegalWorkspace "Create Project" wizard.
-**Need**: Provision a Secure Project — create a child Business Unit, create an SPE container, create an External Access Account, store all references on the project record. Four discrete steps; if any fails, the others must be reconciled.
+**Surface**: the Create Project wizard (shared library; LegalWorkspace and the other hosts consume the same component).
+**Need**: Provision a Secure Project — reassign the project to the canonical Secure Project business unit's owner team, provision an SPE container, and record that container on the project. Three ordered steps across two systems; the ordering is a security property, not a preference.
 
 ```ts
-// src/solutions/LegalWorkspace/src/components/CreateProject/provisioningService.ts (excerpt)
-
-import { getBffBaseUrl } from '../../config/runtimeConfig';
-import { authenticatedFetch } from '../../services/authInit';
+// src/client/shared/Spaarke.UI.Components/src/components/CreateProjectWizard/provisioningService.ts (excerpt)
 
 export async function provisionSecureProject(
-  request: IProvisionProjectRequest
+  request: IProvisionProjectRequest,
+  authenticatedFetch: typeof fetch,   // injected — the shared lib imports no solution-specific auth
+  bffBaseUrl: string
 ): Promise<IProvisionProjectResult> {
-  const url = `${getBffBaseUrl()}/api/v1/external-access/provision-project`;
+  const url = `${bffBaseUrl}/api/v1/external-access/provision-project`;
   const response = await authenticatedFetch(url, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(request),
   });
-  // ... RFC 7807 error handling ...
+  // ... ProblemDetails error handling; returns a result object, never throws ...
 }
 ```
 
+> **Contract changed 2026-08-25** (BFF task 021), and this section previously described the old one.
+> The backend no longer creates a business unit per project and no longer creates an External Access
+> Account: there is **one** canonical `Secure Project` business unit, resolved by name from server
+> configuration. `umbrellaBuId`, `accountId`, `accountName` and `wasUmbrellaBu` are gone.
+
 **Why BFF is correct here** (mapped to the criteria above):
 
-1. **Auth** — provisioning the BU + SPE container + external-access account requires OBO to Graph and to the External Access service. `Xrm.WebApi` cannot do OBO; the BFF mediates the token exchange per ADR-028.
-2. **Complexity** — four discrete writes across three systems (Dataverse BU, SPE container API, External Access service, then back to Dataverse to store references). One server-side transaction; client gets a single result.
-3. **AI** — none in this specific call, but the surrounding wizard step (Create Project closure) does involve AI; consistency keeps the whole flow server-mediated.
-4. **Audit** — the BFF writes structured audit events capturing which user initiated the provision, what BU was created, what SPE container ID came back. Dataverse audit alone would not capture the cross-system context.
-5. **Errors** — RFC 7807 errors; `authenticatedFetch` retries 401 once; the BFF handles transient Graph throttling internally with backoff.
-6. **Concurrency / rate limits** — provisioning is throttled by the BFF rate-limit policy; concurrent BU creations across users are serialized server-side.
-7. **Streaming** — no, but the wizard shows step-by-step progress via the `PROVISIONING_STEPS` UI indicator while the single BFF call runs.
+1. **Auth** — the ownership reassignment and the SPE container provision both need credentials the browser must never hold (Graph, and a Dataverse identity that can reassign ownership). `Xrm.WebApi` cannot do this; the BFF mediates per ADR-028.
+2. **Complexity** — three ordered writes across two systems (Dataverse ownership → SPE container API → back to Dataverse to store `sprk_containerid`). One server-side operation; the client gets a single result.
+3. **AI** — none in this call.
+4. **Audit** — the BFF writes structured audit events capturing which user initiated the provision and which container came back. Dataverse audit alone would not capture the cross-system context.
+5. **Errors** — ProblemDetails responses; the service returns `{ success: false, errorMessage }` rather than throwing, so the wizard can surface a step-level failure.
+6. **Concurrency / rate limits** — provisioning is throttled by the BFF rate-limit policy.
+7. **Streaming** — no, but the wizard shows step-by-step progress via `PROVISIONING_STEPS` while the single BFF call runs.
 
-This is exactly the right shape: **cross-system, OBO-protected, multi-step transaction, requires server-side reconciliation.** Doing this from the client with chained `Xrm.WebApi` calls would (a) require Graph access from the client which Spaarke does not allow, (b) leave the system in an inconsistent state if any step fails, (c) bypass the structured audit.
+**The ordering is the point.** `PROVISIONING_STEPS` runs ownership **first**, then container, then storing — because ownership is the security step. If the container call fails after ownership succeeded, the record is still owned inside the Secure Project business unit; the reverse order would leave a record holding a secure container while owned outside the secure BU. A client-side chain of `Xrm.WebApi` calls could not enforce that ordering across a browser refresh, would need Graph access the client is not allowed, and would bypass the structured audit.
 
 **Companion pattern**: `workspaceLayoutMutations.ts` (SpaarkeAi) — uses BFF for layout writes because they require server-side validation, concurrency safety (B-5 PATCH + ETag), and audit. The file's header comment explicitly cites CLAUDE.md §10 BFF Hygiene as the standard.
 

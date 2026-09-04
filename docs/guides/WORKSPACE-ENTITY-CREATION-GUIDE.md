@@ -1,9 +1,10 @@
 # Workspace Entity Creation Guide
 
-> **Version:** 2.0.1
-> **Last Updated:** April 5, 2026
-> **Last Reviewed:** 2026-04-05
-> **Reviewed By:** ai-procedure-refactoring-r2
+> **Version:** 2.1.0
+> **Last Updated:** September 4, 2026
+> **Last Reviewed:** 2026-09-04
+> **Reviewed By:** unified-access-control-r2 (doc-drift: the LegalWorkspace wizard files this guide
+> described had been deleted as dead code; corrected to point at the shared `Create{Entity}Wizard/`)
 > **Status:** Current
 > **Applies To:** Corporate Workspace SPA — Create New Matter, Project, Event, Todo, Work Assignment wizards
 
@@ -54,8 +55,8 @@ The Legal Workspace provides multi-step wizards for creating Dataverse entity re
 
 | Component | Location | Purpose |
 |-----------|----------|---------|
-| **MatterService** | `components/CreateMatter/matterService.ts` | Matter-specific orchestrator (entity payload, follow-on actions) |
-| **ProjectService** | `components/CreateProject/projectService.ts` | Project-specific orchestrator |
+| **MatterService** | shared `components/CreateMatterWizard/matterService.ts` | Matter-specific orchestrator (entity payload, follow-on actions). **Moved out of the solution.** LegalWorkspace keeps a same-named `components/CreateMatter/matterService.ts`, but it is no longer the wizard orchestrator — it survives only for `searchUsersAsLookup`, consumed by `FilePreview/FilePreviewDialog.tsx` |
+| **ProjectService** | shared `components/CreateProjectWizard/projectService.ts` | Project-specific orchestrator. **Moved out of the solution** — `src/solutions/LegalWorkspace/src/components/CreateProject/` no longer exists |
 | **xrmProvider.ts** | `services/xrmProvider.ts` | Frame-walk to find Xrm global, user ID, SPE container resolution |
 | **`@spaarke/auth`** | shared library | OBO token acquisition for BFF API calls — wizards call `authenticatedFetch` from `@spaarke/auth` per [ADR-028](../../.claude/adr/ADR-028-spaarke-auth-architecture.md). The legacy `services/bffAuthProvider.ts` was deleted in Auth v2 task 031. |
 | **runtimeConfig.ts** | `config/runtimeConfig.ts` | BFF base URL and MSAL configuration (typed accessors consumed by `initAuth()`) |
@@ -332,7 +333,11 @@ components/
 │   ├── AiFieldTag/               # "AI" badge for pre-filled fields
 │   ├── LookupField/              # Search-as-you-type lookup
 │   ├── CreateRecordWizard/       # Multi-step wizard shell
-│   └── FileUpload/               # Drag-and-drop file upload
+│   ├── FileUpload/               # Drag-and-drop file upload
+│   └── Create{Entity}Wizard/     # The per-entity wizards THEMSELVES now live here —
+│                                 # CreateMatter, CreateProject, CreateEvent, CreateTodo,
+│                                 # CreateWorkAssignment, CreateInvoice, CreateReportCard.
+│                                 # Each holds its own steps + {entity}Service.ts orchestrator.
 services/
 │   └── EntityCreationService.ts  # Entity-agnostic: SPE upload, doc records, AI analysis
 types/
@@ -342,18 +347,10 @@ types/
 ### Solution (`src/solutions/LegalWorkspace/src/`)
 
 ```
-components/CreateMatter/
-│   ├── WizardDialog.tsx          # Matter wizard dialog
-│   ├── CreateRecordStep.tsx      # Matter form step (uses useAiPrefill)
-│   ├── NextStepsStep.tsx         # Follow-on action selection
-│   ├── LookupField.tsx           # Thin wrapper (imports from shared lib)
-│   ├── AiFieldTag.tsx            # Re-export from shared lib
-│   ├── matterService.ts          # Matter-specific orchestrator
-│   └── formTypes.ts              # Matter form state types
-components/CreateProject/
-│   ├── ProjectWizardDialog.tsx   # Project wizard dialog
-│   ├── CreateProjectStep.tsx     # Project form step (uses useAiPrefill)
-│   └── projectService.ts        # Project-specific orchestrator
+components/CreateMatter/           # RESIDUAL — the wizard itself is gone (see note below)
+│   ├── matterService.ts          # NOT the orchestrator any more: kept for searchUsersAsLookup
+│   ├── formTypes.ts              # Matter form state types
+│   └── wizardTypes.ts            # IUploadedFile et al.
 services/
 │   ├── EntityCreationService.ts  # Re-export from shared lib
 │   └── xrmProvider.ts            # Xrm frame-walk, userId, container resolution
@@ -361,6 +358,14 @@ services/
 config/
 │   └── runtimeConfig.ts              # BFF base URL + typed accessors for initAuth()
 ```
+
+> **⚠️ The wizards are no longer solution-specific.** A 2026-03 move to the shared library was left
+> half-finished: the shared copies became the live ones while the LegalWorkspace originals stayed on
+> disk, unreferenced, for months. They were deleted in three passes (`144ef43c4` — 27 files,
+> `b866f95bb` — 47 files, `1dc190f42` — the `CloseProjectDialog` twin), so
+> `components/CreateProject/` no longer exists and `components/CreateMatter/` is a three-file
+> residue. **Read the shared `Create{Entity}Wizard/` directories, not this solution tree**, when
+> changing wizard behavior. This guide described the deleted files as current until 2026-09-04.
 
 ### BFF API (Server-Side)
 
