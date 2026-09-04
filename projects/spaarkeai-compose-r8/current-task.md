@@ -421,6 +421,8 @@ whether it is traversable at all depends on the Document↔Agreement association
 data-model docs lag the org (CLAUDE.md §2). **Confirm the association's shape via Dataverse MCP `describe`
 before designing any agreement-level roll-up.** Do not assume it from this note.
 
+**Structure advice for the missing Agreement↔Document link**: [`notes/agreement-document-relationship-design.md`](notes/agreement-document-relationship-design.md) — 1:N vs N:1 is ONE relationship (author the lookup on Document); use ADR-024 (which already names `sprk_document`, and Agreement is a proven parent on `sprk_memo`/`sprk_todo`); the one owner question that decides the structure is whether a Document can belong to MULTIPLE Agreements at once; and do NOT denormalise onto `sprk_analysis` — resolve server-side in the read path that already resolves DocumentName.
+
 #### The SPE question, restated precisely — "evergreen" applies to PRESENTATION, not CONTENT
 
 Owner intuition (2026-09-04): *"maybe that's the point — it is always evergreen and fresh."* Correct, with
