@@ -259,3 +259,112 @@ DATA — see the safe first step below.
 
 ⚠️ **Do not add `sprk_agreement` AND `sprk_relatedagreement`.** That would replicate the exact duplication
 this section exists to retire.
+
+---
+
+## 8. RECOMMENDATION — how to address the Document lookup inconsistency
+
+> Requested 2026-09-04. Read §7 first for the evidence. **Headline: do not lead with a rename.**
+
+### 8.1 The premise needs correcting first: there is no single platform-wide convention to be consistent WITH
+
+"Documents are inconsistent with the rest of the platform" is only half true. The `Regarding*` family is
+**not** uniform — each polymorphic host declares **its own** field map, and they already disagree with each
+other on purpose:
+
+| Host | Declared map | Divergence |
+|---|---|---|
+| `sprk_communication` | `Services/Communication/Engine/RegardingFieldMap.cs` | `contact` → **`sprk_regardingperson`** |
+| `sprk_event` | `Services/Ai/Nodes/ActionCore/TaskActionCore.cs` `RegardingFieldByEntity` | `contact` → **`sprk_regardingcontact`**, plus the schema's real misspelling **`sprk_regardingorganziation`** which the code comment says explicitly: *"do not 'fix' it in code"* |
+| `sprk_document` | **TWO** lists (§7.1) | `Related*` + unprefixed |
+
+`TaskActionCore` states the architecture outright:
+
+> *"This is `sprk_event`'s OWN regarding family — it differs from the `sprk_communication` `RegardingFieldMap`
+> (e.g. `contact` → `sprk_regardingcontact` here vs `sprk_regardingperson` there), so it is NOT reused."*
+
+**So the real invariant is not a naming convention. It is: _every polymorphic host declares its link
+vocabulary exactly once, in code, as the contract._** The field name is deliberately treated as *schema
+data* — read from the declaration, never derived by string convention. That is why `RegardingResolver`
+resolves from relationship metadata (§7.2) and why a misspelling is tolerated rather than renamed.
+
+**Document's actual deviation is therefore not the `Related*` prefix.** It is that Document declares its
+vocabulary **twice, in two subsystems, and both declarations are incomplete** (neither lists
+`sprk_relatedcommunication`, which `CrossPathLink` treats as a member of exactly this family). Measured
+against the real invariant, *that* is the defect — and it is the one that can silently bite.
+
+### 8.2 Recommendation, in priority order
+
+#### Tier 1 — Give Document ONE declared link vocabulary. Do this now.
+
+Create a single `DocumentLinkFieldMap` mirroring `RegardingFieldMap`'s shape, and have both
+`AttachmentDocumentAssociationRung` and `ComposeService` consume it.
+
+- **Zero schema change, zero migration, zero user-visible impact.** Pure refactor.
+- **Closes a live silent-failure path**: today a new document link must be added in two files in two
+  subsystems. Miss one and Compose stops copying it forward, or the association engine stops following it —
+  **with no error**. Same class as §GAPS-5, and the §GAPS work this session exists to stop recurring.
+- **It is the prerequisite for Agreement** (§2): one edit instead of two-and-hope.
+- While doing it, resolve `sprk_relatedcommunication`'s absence — either add it, or write the one line
+  saying why an association-candidate scan deliberately excludes it (it almost certainly should, since the
+  communication IS the thing being matched from; but that reasoning is currently nowhere).
+
+#### Tier 2 — Retire the duplication, driven by DATA not by code reading.
+
+The code says `sprk_matter` and `sprk_relatedmatter` are redundant (§7.3). The data may disagree. Query the
+org for the distribution — and specifically **rows where BOTH are set to DIFFERENT records**, which is the
+only evidence that a distinction was ever really used.
+
+Note the union is ragged, so no family is a superset:
+
+| Target | unprefixed | `related*` |
+|---|---|---|
+| matter | ✅ | ✅ |
+| project | ✅ | ✅ |
+| invoice | ✅ | ✗ |
+| workassignment | ✅ | ✗ |
+| communication | ✗ | ✅ (load-bearing — 12 call sites) |
+
+**If the data shows no meaningful divergence, the minimal-risk consolidation is to deprecate only the two
+genuinely redundant columns (`sprk_relatedmatter`, `sprk_relatedproject`)** — after migrating any rows where
+only the `related*` form is populated. That leaves matter/project/invoice/workassignment unprefixed plus
+`sprk_relatedcommunication`: **mixed naming, but zero redundancy, no new columns and no renames.** Given
+§8.1, mixed naming is the platform norm, not a wart.
+
+#### Tier 3 — A cosmetic rename to `sprk_regarding*`: only with a stated reason beyond tidiness.
+
+It buys nothing functional (§7.2: the resolver reads metadata; the maps are per-host anyway), costs a rename
+plus data migration plus solution/form/view rework, and would be chasing a uniformity §8.1 shows does not
+exist. The codebase's own precedent — a preserved misspelling — is the house position on renaming schema for
+neatness. **Recommend: don't, unless a concrete need appears.**
+
+### 8.3 On putting `RegardingResolver` on the Document form — probably not needed
+
+Separate decision from all of the above, and the prerequisite is the **five resolver columns + a
+`sprk_regardingrecordtype` discriminator** (§7.2), NOT a rename.
+
+But first ask whether the capability is wanted: the resolver's job is *a user picking a polymorphic parent
+on a form*. A document's parent is normally set by the flow that creates it — upload, email capture, Compose
+create-on-save (which copies the source record's links forward). If users do not hand-pick a document's
+parent on the form, the resolver adds columns and a control for a workflow that does not occur.
+
+**Recommend: defer until someone asks for hand-picking on the Document form.** §11 — name the failing
+behaviour first.
+
+### 8.4 What this means for the Agreement link (§2)
+
+- Add **ONE** lookup. Never both forms.
+- **Name it `sprk_agreement`**, the unprefixed form — it is the more complete family (4 targets vs 2), and it
+  is the form that survives the Tier 2 consolidation, so this avoids a second migration later.
+- Add it to the Tier 1 `DocumentLinkFieldMap` in the same change, so Compose copy-forward and email
+  association pick it up together rather than one silently lagging.
+
+### 8.5 Suggested sequence
+
+1. **Tier 1 refactor** (one shared map, both consumers, `sprk_relatedcommunication` question resolved) — safe, immediate, unblocks everything else.
+2. **Add `sprk_agreement`** to schema + the shared map (§8.4) — closes the Summary→Agreement gap of §5.
+3. **Extend the read path** so a Summary can name its Agreement (§5) — server-side resolve, no denormalisation.
+4. **Tier 2 data query**, then the deprecation decision.
+5. **Tier 3 / resolver-on-Document**: only on a stated need.
+
+Steps 1–3 are independent of every open question and can start immediately.
