@@ -4,7 +4,8 @@
     <title>Publish the governance baseline — six measures, confirmed not re-derived</title>
     <phase>1 The shared surface is knowable</phase>
     <gate>startable</gate>
-    <status>not-started</status>
+    <status>blocked</status>
+    <blocked-reason>Escalation trigger fired on measure (c) per-package import fan-in — spec.md's 2026-09-03 figure is not reproducible by any of five plausible recipes (no recipe matches both the head and the tail of its distribution), and the recipe was never recorded. Which recipe becomes canonical binds FR-12, FR-16/17 and FR-18 downstream, so it is a decision, not a default. Measures (a), (b), (d), (e), (f) are measured, reproducible and published. See notes/task-003-escalation.md.</blocked-reason>
     <rigor>STANDARD</rigor>
     <rigor-reason>New documentation artifact built from mechanical measurement; no code, no tests, no hot-path edit.</rigor-reason>
     <model-tier>sonnet</model-tier>
