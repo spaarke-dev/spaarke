@@ -54,7 +54,8 @@ it is also its limit (see §3).
 
 ### What to build — small, and precedented
 
-1. Add lookup `sprk_regardingagreement` on `sprk_document` → `sprk_agreement`.
+1. Add ONE Agreement lookup on `sprk_document` → `sprk_agreement`. ⚠️ **NAME PENDING — see §7**: Document
+   uses `Related*` (`sprk_relatedmatter`), NOT the `Regarding*` convention assumed here. Never add both forms.
 2. Ensure the resolver fields populate for it (`PolymorphicResolverService` / the Field Mapping framework
    already do this for the other parents — extend the mapping, do not write a new resolver).
 3. Seed a `sprk_recordtype_ref` row for Agreement: `sprk_recordlogicalname = "sprk_agreement"`,
@@ -166,3 +167,95 @@ exists.
 5. **Intersect entity (§4) only if §3 said yes**, and only when a real case exists.
 
 Steps 1–4 are independent of §3's answer and can proceed immediately.
+
+---
+
+## 7. ⚠️ CORRECTION + follow-on: `sprk_document` uses `Related*`, not `Regarding*` (owner, 2026-09-04)
+
+**§2 above is wrong in its field naming.** Owner: *"in events, communication, matters, projects, work
+assignment we use the 'Regarding' lookup structure; but in Documents the lookup relationships are 'Related'
+— e.g. `sprk_RelatedMatter`. Also there is inconsistency because we also have `sprk_Matter` and
+`sprk_Invoice`."* Confirmed in code. Read §2's *pattern* advice as still correct and its *field names* as
+placeholders pending the naming decision below.
+
+### 7.1 The actual `sprk_document` link vocabulary
+
+It is a **closed set, hard-coded in TWO places** that must agree:
+
+| Source | Purpose |
+|---|---|
+| `Services/Communication/Engine/Rungs/AttachmentDocumentAssociationRung.cs:73` `DocumentLinkFields` | Email→document association candidates |
+| `Services/Compose/ComposeService.cs:96` `DocumentAssociationLookupAttributes` | create-on-save copy-forward |
+
+Both list the same six: `sprk_matter`, **`sprk_relatedmatter`**, `sprk_project`, **`sprk_relatedproject`**,
+`sprk_invoice`, `sprk_workassignment`.
+
+**Note the asymmetry**: matter and project have BOTH forms; invoice and work-assignment have only the
+primary. A designed dual-field scheme would be uniform. This one is not — evidence of accretion.
+
+### 7.2 Q1 — does Regarding-vs-Related matter, and is `RegardingResolver` Document-capable?
+
+**For the entity-specific lookup name: NO, it genuinely does not matter.** `ResolverWriteHandler.ts:135`
+resolves the write target from **Dataverse relationship metadata**:
+
+```
+?$select=ReferencingAttribute,ReferencingEntityNavigationPropertyName,ReferencedEntity
+   -> columnName: r.ReferencingAttribute        (ResolverWriteHandler.ts:152)
+```
+
+So the resolver discovers `sprk_relatedmatter` perfectly well. `RegardingResolverApp.tsx`'s docblock line
+*"iterate `sprk_regarding{entityName}` field names"* describes the **typical result on today's hosts, not
+the mechanism** — do not read it as a naming requirement (it reads as one, which is worth a doc fix).
+
+**What DOES block Document as a resolver host: the five denormalised columns, which ARE hard-coded by name.**
+`sprk_regardingrecordtype` / `…recordid` / `…recordname` / `…recordurl` (+ `…recordnumber`). Only
+`regardingRecordNumberField` and `regardingRecordNameField` are re-bindable via manifest properties; the
+rest are literals in `applyResolverFields`.
+
+**Is it used on Documents today? No — and the direction is the opposite of what one might assume.** The
+manifest names its hosts: *"Designed for `sprk_todo`, `sprk_event`, `sprk_invoice`, `sprk_communication`,
+`sprk_kpiassessment` child forms."* `sprk_document` appears **only in `regardingTargets`** — Document is a
+**parent you can point AT**, never the child doing the pointing.
+
+> **So**: if you ever want the resolver ON the Document form, the prerequisite is the **resolver-field set**
+> (and a `sprk_regardingrecordtype` discriminator), **not** renaming `Related*` → `Regarding*`. Renaming for
+> consistency is a legitimate goal on its own — just do not expect it to unblock the resolver, and do not
+> skip it believing the resolver requires it.
+
+### 7.3 Q2 — why both `sprk_relatedmatter` AND `sprk_matter`? Code dependencies?
+
+**Dependency: yes — exactly the two lists in §7.1. Semantics: none implemented anywhere.**
+
+- Both lists map **both fields to the same target entity**; nothing branches on which is populated.
+  `AttachmentDocumentAssociationRung`: *"'Related' links point at the same target entity as their primary
+  counterpart (a related matter is still a matter)."*
+- The intended distinction survives only in prose. `CrossPathLink.cs:39` calls the related family *"the
+  confirmed related record this document points at"*; `RungKind.cs:50` lumps both as *"OWN
+  matter/project/invoice links (`sprk_matter` / `sprk_relatedmatter` / …)"* — i.e. the two comments do not
+  even agree with each other.
+- **No code writes either field** on `sprk_document` (searched server + shared client). They are
+  form/user-populated; code only READS them, and reads them identically. `ComposeService` copies whichever
+  are non-empty, without distinguishing.
+
+**Conclusion: the pair is redundant *in the code as written*.** That is not proof it is redundant in the
+DATA — see the safe first step below.
+
+### 7.4 Recommended cleanup sequence
+
+1. **Do the free win first, independent of any naming decision: collapse the two hard-coded lists into ONE
+   shared constant.** Today adding a document link (e.g. Agreement) requires editing two files in two
+   subsystems; miss one and behaviour silently diverges — Compose stops copying a lookup forward, or the
+   association engine stops following it, with no error. This is the same silent-omission class as §GAPS.
+2. **Measure the data before merging the pair.** Query the org: how many `sprk_document` rows have
+   `sprk_matter` set, how many `sprk_relatedmatter`, how many BOTH, and do they ever disagree? Rows where
+   both are set to *different* matters are the ones that decide whether a distinction was being used in
+   practice, whatever the code does.
+3. **Then decide the target shape** — most likely one lookup per target entity, named consistently with the
+   rest of the platform (`sprk_regarding*`) so Document stops being the odd one out. That is a rename +
+   data migration, so it wants its own project, not a drive-by.
+4. **For Agreement specifically (§2)**: add ONE lookup and match whatever convention step 3 lands on. If the
+   cleanup is not imminent, follow the local convention (`sprk_relatedagreement`) rather than introducing a
+   third style on the same table — and add it to the §7.4.1 shared constant.
+
+⚠️ **Do not add `sprk_agreement` AND `sprk_relatedagreement`.** That would replicate the exact duplication
+this section exists to retire.
