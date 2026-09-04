@@ -478,6 +478,13 @@ Upgrade mode: `az deployment group what-if` runs FIRST; defaults to REJECT + rep
 - Grants ~14 permissions per `Infrastructure/Auth/GraphAppRoles.cs`
 - Client secret stored as KV URI reference (never cleartext)
 
+**Office add-in SPA redirect URIs (Outlook/Word add-in sign-in — REQUIRED, per add-in host).** If the environment serves the Spaarke Office add-in, register BOTH of the following as **Single-page application (SPA)** platform redirect URIs on the app registration:
+
+- `brk-multihub://<addin-host>` — the Nested-App-Authentication (NAA) broker redirect used by **desktop** Office (Windows/Mac).
+- `https://<addin-host>/auth-callback.html` — the standard MSAL popup redirect used by **Office on the web** (which does not support NAA, so `OfficeNaaStrategy` falls back to a standard `PublicClientApplication`).
+
+`<addin-host>` is the origin serving the add-in bundle (the Static Web App / CDN host in the manifest `SourceLocation`), so these are **per-host** — every environment (dev / each customer) that serves the add-in from a distinct host needs its own pair. Missing them produces `AADSTS7000471` ("no matching redirect URI") at add-in sign-in. Reference impl: [`src/client/shared/Spaarke.Auth/src/strategies/OfficeNaaStrategy.ts`](../../src/client/shared/Spaarke.Auth/src/strategies/OfficeNaaStrategy.ts) derives the broker redirect as `brk-multihub://${window.location.hostname}` and the web fallback as `https://<host>/auth-callback.html`.
+
 **Escalation gate** (per FR-13 / H10): 10 of 14 null `AppRoleId` GUIDs in `GraphAppRoles.cs` must be completed via `az` enumeration BEFORE first production customer provisioning.
 
 **H4** populates KV secrets from the canonical catalog manifest + PATCHes `keyVaultReferenceIdentity` to UAMI on both slots (**T1 verification**).

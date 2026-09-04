@@ -205,6 +205,38 @@ public sealed class LookupChoicesResolver
     }
 
     /// <summary>
+    /// Derives the Dataverse OData entity-set (collection) name from a logical name using the platform's
+    /// default English pluralization. Only special-cases the endings where a naive <c>"+ s"</c> is wrong
+    /// (and therefore already 404s): consonant+<c>y</c> → <c>ies</c>; <c>s</c>/<c>x</c>/<c>z</c>/<c>ch</c>/<c>sh</c>
+    /// → <c>es</c>. Every other name keeps the naive <c>"+ s"</c>, so no previously-resolving lookup can
+    /// regress. (A custom, non-default EntitySetName would still need metadata resolution — not observed in
+    /// this codebase's action catalog.)
+    /// </summary>
+    private static string ToEntitySetName(string logicalName)
+    {
+        if (string.IsNullOrEmpty(logicalName))
+            return logicalName;
+
+        if (logicalName.Length >= 2
+            && logicalName.EndsWith('y')
+            && "aeiou".IndexOf(char.ToLowerInvariant(logicalName[^2])) < 0)
+        {
+            return logicalName[..^1] + "ies";
+        }
+
+        if (logicalName.EndsWith('s')
+            || logicalName.EndsWith('x')
+            || logicalName.EndsWith('z')
+            || logicalName.EndsWith("ch", StringComparison.Ordinal)
+            || logicalName.EndsWith("sh", StringComparison.Ordinal))
+        {
+            return logicalName + "es";
+        }
+
+        return logicalName + "s";
+    }
+
+    /// <summary>
     /// Parses a "prefix:entity.field" reference into its entity and field parts.
     /// </summary>
     private bool TryParseReference(string choicesRef, string prefix, string fieldName, out string entity, out string field)
@@ -236,8 +268,11 @@ public sealed class LookupChoicesResolver
         if (!TryParseReference(choicesRef, prefix, fieldName, out var entityLogicalName, out var selectField))
             return null;
 
-        // Dataverse OData entity set name = logical name + 's'
-        var entitySetName = entityLogicalName + "s";
+        // Dataverse OData entity set (collection) name. The default plural follows standard English
+        // rules — NOT a naive "+ s". `sprk_triagecategory` → `sprk_triagecategories` (y → ies), not
+        // `sprk_triagecategorys` (which 404s, silently blanking the resolved $choices — the exact bug
+        // that left every email-triage category unresolved, email-communication-intelligence-r2 2026-09-03).
+        var entitySetName = ToEntitySetName(entityLogicalName);
 
         try
         {
