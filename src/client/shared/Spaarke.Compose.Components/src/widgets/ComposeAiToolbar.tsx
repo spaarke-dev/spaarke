@@ -371,6 +371,26 @@ const DEFAULT_ACTIONS: readonly ComposeAiToolbarAction[] = [
     surfaces: [],
   },
   {
+    // R8 UAT item 8 — RESTORED to the registry, but NOT to any surface.
+    //
+    // FIX #5 removed this definition outright, which also removed the only place its deployed
+    // bindingId could land: `useComposeToolbarActivation` registers a capability onto the DEFAULT
+    // action whose `id === consumerType`, and with no such action the binding was silently skipped.
+    // The removal was right about the SURFACE (dispatched from the selection toolbar it has no change
+    // data, so the model fabricates a phantom "[Insertion]") and wrong about the DEFINITION.
+    //
+    // `surfaces: []` is the established shape for exactly this — see `compose-explain-clause` and
+    // `compose-compare-to-playbook` above, both retired from the selection surface with their
+    // definitions kept. The Word menu's "Summarise changes" reads the bindingId from here at click
+    // time; it never renders as a selection tool.
+    id: 'compose-summarize-word-changes',
+    label: 'Summarise changes',
+    tooltip: 'Summarise the tracked changes made in Word',
+    bindingId: '',
+    placement: 'overflow',
+    surfaces: [],
+  },
+  {
     id: 'compose-draft-alternative',
     label: 'Draft alternative',
     tooltip: DRAFT_TOOLTIP,
