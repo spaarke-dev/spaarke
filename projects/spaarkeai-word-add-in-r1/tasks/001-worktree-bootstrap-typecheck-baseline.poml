@@ -1,0 +1,120 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="001" project="spaarkeai-word-add-in-r1">
+  <metadata>
+    <title>Worktree bootstrap and true typecheck baseline</title>
+    <phase>0 De-risk and baseline</phase>
+    <gate>startable</gate>
+    <status>not-started</status>
+    <rigor>MINIMAL</rigor>
+    <rigor-reason>Measurement and documentation only. No .ts/.tsx/.cs source file is modified; the sole committed artifacts are markdown/log files under projects/spaarkeai-word-add-in-r1/notes/. No ADR surface is touched, so the Step 9.5 code-review and adr-check gates would have nothing to inspect.</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Mechanical work: run three commands, parse compiler output, tabulate by file and directory. Zero architectural judgment, zero blast radius. Sonnet default per root CLAUDE.md section 8.5.</model-tier-reason>
+    <effort>medium</effort>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <deps>none</deps>
+    <tags>office-addins, typecheck, baseline, tooling, measurement, phase-0</tags>
+    <estimated-effort>1-2 hours (dominated by the npm install and the tsc run, not by analysis)</estimated-effort>
+  </metadata>
+
+  <prompt>Install dependencies in src/client/office-addins and produce the REAL typecheck error baseline — total count, per-file breakdown, and a per-directory rollup that maps exactly onto the ownership boundaries of tasks 006, 007 and 008. The widely-repeated "~397 errors" figure is unverified: plan.md risk R-6 records that it traces to a single source repeated in five places with no committed artifact behind it. Tasks 006-008 cannot be sized until this task replaces that guess with a measurement.</prompt>
+
+  <role>SPAARKE platform developer. TypeScript build tooling and compiler-diagnostic analysis. You are measuring, not fixing. Follow ADRs strictly.</role>
+
+  <goal>projects/spaarkeai-word-add-in-r1/notes/typecheck-baseline.md exists and contains: (1) the exact total typecheck error count, (2) a per-file breakdown sorted by count descending, (3) a per-directory rollup bucketed into the three task-ownership boundaries plus an explicit UNASSIGNED bucket, (4) an error-code histogram, (5) the pass/fail status of `npm run build` and `npm test`, and (6) an explicit comparison against the unverified ~397 figure. The raw compiler output is committed alongside it so the numbers are reproducible without re-running the build.</goal>
+
+  <context>
+    <background>FR-18 requires clearing the pre-existing typecheck debt in src/client/office-addins BEFORE feature work, so that new errors introduced during Phases 1-3 are visible rather than buried in noise. The debt is driven by four strict compiler options that the package enables (see tsconfig.json lines 16, 17, 20, 21). plan.md section 4 splits the clearance across tasks 006/007/008 by directory, but that split is currently unsized because nobody has measured the real distribution. Risk R-6 in plan.md section 7 names the consequence: if the backlog is much larger than ~397, Phase 0 balloons and the split needs rethinking. This task is the prerequisite for sizing 006-008 and is deliberately fast.</background>
+    <relevant-files>
+      <file role="canonical-reference">src/client/office-addins/package.json</file>
+      <file role="canonical-reference">src/client/office-addins/tsconfig.json</file>
+      <file role="canonical-reference">src/client/office-addins/CLAUDE.md</file>
+      <file role="canonical-reference">src/client/office-addins/shared/taskpane/index.ts</file>
+      <file role="canonical-reference">src/client/office-addins/shared/taskpane/components/views/index.ts</file>
+      <file role="canonical-reference">projects/spaarkeai-word-add-in-r1/plan.md</file>
+    </relevant-files>
+    <dependencies>
+      <dependency task="none" status="complete">No prerequisite tasks. This task requires only a clean worktree on branch work/spaarkeai-word-add-in-r1.</dependency>
+    </dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="project">SCOPE: src/client/office-addins/** is READ-ONLY for this task. Do NOT fix any typecheck error, do NOT edit tsconfig.json, do NOT edit package.json, and do NOT commit a regenerated package-lock.json. Fixing is the job of tasks 006/007/008; a fix applied here would corrupt the very baseline this task exists to establish.</constraint>
+    <constraint source="project">SCOPE: dependency installation in src/client/office-addins. The install command is EXACTLY `npm install --legacy-peer-deps --no-audit --no-fund`. A bare `npm install` fails with ERESOLVE because @testing-library/react@14 peer-requires React 18 while this package is on React 19 (package.json lines 27-28 and 36). Do NOT resolve the ERESOLVE by changing a dependency version.</constraint>
+    <constraint source="project">SCOPE: the build command. There is NO `build:prod` script in this package — `npm run build` IS the production build (package.json line 7: `webpack --mode production --no-bail --stats errors-only`). src/client/office-addins/CLAUDE.md line 39 names `build:prod`, which does not exist; record that as a documentation defect in the report rather than acting on it.</constraint>
+    <constraint source="project">SCOPE: the reported numbers. Report the count you actually measured, even if it contradicts every other document in this repository. Do NOT reconcile toward ~397. The whole point of this task is that ~397 is unverified.</constraint>
+    <constraint source="project">SCOPE: the raw compiler output. Capture stdout AND stderr in full and commit the untruncated log. A summary without the raw artifact reproduces exactly the failure mode (an unsourced number) that this task exists to correct.</constraint>
+    <constraint source="ADR-038">SCOPE: the `npm test` run in step 8. Record pass/fail and counts only. Do NOT add, delete, skip or modify any test to make the suite green — test changes are out of scope for a baseline task and would violate the KEEP-path rules in docs/adr/ADR-038-testing-strategy.md.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>Office add-in package tooling; TypeScript strict-mode diagnostics; project baseline artifacts</topic>
+    <files>
+      <file>projects/spaarkeai-word-add-in-r1/spec.md</file>
+      <file>projects/spaarkeai-word-add-in-r1/plan.md</file>
+      <file>src/client/office-addins/CLAUDE.md</file>
+      <file>docs/adr/ADR-038-testing-strategy.md</file>
+    </files>
+    <patterns>
+      <pattern name="strict-option to error-code mapping" location="src/client/office-addins/tsconfig.json">Four options drive nearly all of this debt and each produces a recognisable diagnostic family: `noUnusedLocals` (line 16) and `noUnusedParameters` (line 17) produce TS6133/TS6196; `noUncheckedIndexedAccess` (line 20) produces TS2532/TS18048/TS18047 (possibly-undefined after an index access); `exactOptionalPropertyTypes` (line 21) produces TS2375/TS2412/TS2379 (undefined not assignable to an optional property). Bucketing by code tells tasks 006-008 what KIND of work they inherit, which is more useful for sizing than the raw count.</pattern>
+      <pattern name="two known barrel defects" location="src/client/office-addins/shared/taskpane/index.ts">Line 3 re-exports `ViewType` from `./App`, and App.tsx does not export it. Line 18 re-exports `SaveOptions` from `./components/views/SaveView`, and SaveView.tsx does not export it. shared/taskpane/components/views/index.ts line 2 repeats the same broken `SaveOptions` re-export. These are concrete, already-confirmed defects — use them as a correctness check on your capture: if they do NOT appear in the output, your tsc run is not reaching those files and the whole baseline is suspect.</pattern>
+    </patterns>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="0" name="Context + rigor declaration">Emit the mandatory rigor declaration (RIGOR LEVEL: MINIMAL, reason, protocol steps). Load projects/spaarkeai-word-add-in-r1/CLAUDE.md, spec.md FR-18, and plan.md sections 3 and 4 (Phase 0) plus risk R-6. Confirm the working directory is the worktree at c:\code_files\spaarke-wt-spaarkeai-word-add-in-r1.</step>
+    <step order="1">Confirm src/client/office-addins/node_modules does not exist, then run `npm install --legacy-peer-deps --no-audit --no-fund` in src/client/office-addins. Record the exit code, wall-clock duration, and any warnings that name a peer-dependency conflict. Verify `git status` shows package-lock.json unmodified; if npm rewrote it, revert that file — it is not part of this task's output.</step>
+    <step order="2">Run `npm run typecheck` (which is `tsc --noEmit --skipLibCheck`) capturing stdout and stderr together, untruncated, to projects/spaarkeai-word-add-in-r1/notes/typecheck-baseline-raw.log. Record the exit code.</step>
+    <step order="3">Count the total number of diagnostics — lines matching the `error TS####:` shape. Separately count the number of DISTINCT files that carry at least one error. Report both; they are different numbers and conflating them is how the ~397 figure lost its meaning.</step>
+    <step order="4">Build the per-file breakdown: file path, error count, sorted descending. Include every file with at least one error.</step>
+    <step order="5">Build the per-directory rollup using EXACTLY these four buckets, because they are the ownership boundaries of the downstream tasks: (a) `shared/taskpane/**` — task 006; (b) `shared/adapters/**` plus `shared/services/**` — task 007; (c) `word/**` plus `outlook/**` — task 008; (d) UNASSIGNED — every erroring file that falls in none of the above (for example `shared/__mocks__/**` or any root-level file). The UNASSIGNED bucket MUST be reported explicitly even when empty; silently folding a stray file into a neighbouring bucket is what leaves an unowned residue at the phase gate.</step>
+    <step order="6">Build the error-code histogram (code, count, one-line meaning) and attribute each code to the tsconfig option that produced it where the mapping is clear. This is the sizing signal: a bucket that is 90 percent TS6133 (unused locals) is far cheaper than one that is 90 percent TS2375 (exactOptionalPropertyTypes).</step>
+    <step order="7">Verify the two known barrel defects appear in the captured output — the `ViewType` re-export at shared/taskpane/index.ts line 3 and the `SaveOptions` re-exports at shared/taskpane/index.ts line 18 and shared/taskpane/components/views/index.ts line 2. Record the exact error code and message for each. If any of them does NOT appear, state that plainly in the report and flag the capture as suspect — do not paper over it.</step>
+    <step order="8">Run `npm run build` and record pass/fail plus the error tail if it fails. Then run `npm test` and record pass/fail plus suite/test counts. Note in the report that `build` is the production build and `build:prod` does not exist.</step>
+    <step order="9">Run `npm run lint` and record what happens. The script is `eslint src --ext .ts,.tsx` (package.json line 13) and there is no `src` directory in this package — so it lints nothing. Record this as a finding for the operator; do NOT fix it (out of scope for FR-18, which is about typecheck, not lint).</step>
+    <step order="10">Write projects/spaarkeai-word-add-in-r1/notes/typecheck-baseline.md with all of the above plus a dedicated section titled "Comparison against the unverified ~397 figure" stating the measured total, the ratio to 397, and whether the escalation trigger fired.</step>
+    <step order="11">Apply the escalation check: if the measured total is below 199 or above 794 (a factor-of-two band around 397), STOP and escalate per the escalation block before tasks 006-008 are dispatched.</step>
+    <step order="12">Update projects/spaarkeai-word-add-in-r1/tasks/TASK-INDEX.md: set this task's status to completed.</step>
+    <step order="13">Document any deviation from this task file in projects/spaarkeai-word-add-in-r1/notes/.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If the measured typecheck total differs from 397 by more than a factor of two in either direction (that is, below 199 or above 794), STOP. Do not proceed to size or dispatch tasks 006/007/008. Report the measured number, the per-directory rollup, and the error-code histogram, and request an operator decision on whether the three-way split is still the right decomposition. This is plan.md risk R-6 firing; a much larger backlog changes Phase 0's shape, and a much smaller one may mean the three-way split is unnecessary overhead.</trigger>
+    <trigger>If `npm install --legacy-peer-deps --no-audit --no-fund` fails, STOP and escalate per root CLAUDE.md section 6. Do NOT resolve the failure by editing package.json, downgrading React, or removing @testing-library/react. Dependency-graph changes are outside this task's scope and would silently alter what every downstream task compiles against.</trigger>
+    <trigger>If the UNASSIGNED bucket is non-empty with anything other than files under `shared/__mocks__/**`, STOP and request an ownership assignment before 006-008 are dispatched. An unowned erroring file means FR-18's acceptance criterion ("`npm run typecheck` is clean") cannot be met by 006+007+008 alone.</trigger>
+  </escalation>
+
+  <tools>
+    <tool name="npm">Dependency install (`npm install --legacy-peer-deps --no-audit --no-fund`), typecheck (`npm run typecheck`), production build (`npm run build`), tests (`npm test`), lint probe (`npm run lint`).</tool>
+    <tool name="git">Confirm package-lock.json is unmodified after install; confirm no source file under src/client/office-addins was touched.</tool>
+  </tools>
+
+  <outputs>
+    <output type="doc">projects/spaarkeai-word-add-in-r1/notes/typecheck-baseline.md</output>
+    <output type="doc">projects/spaarkeai-word-add-in-r1/notes/typecheck-baseline-raw.log</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Given a worktree with no src/client/office-addins/node_modules, when `npm install --legacy-peer-deps --no-audit --no-fund` is run in that directory, then it exits 0 and node_modules exists.</criterion>
+    <criterion testable="true">Given the install succeeded, when `npm run typecheck` is run, then its complete stdout+stderr is committed untruncated at projects/spaarkeai-word-add-in-r1/notes/typecheck-baseline-raw.log.</criterion>
+    <criterion testable="true">projects/spaarkeai-word-add-in-r1/notes/typecheck-baseline.md states a single exact total diagnostic count AND a distinct count of files carrying at least one error, and the two numbers are labelled distinctly.</criterion>
+    <criterion testable="true">The report contains a per-file table covering every erroring file, sorted by count descending, whose counts sum to the stated total.</criterion>
+    <criterion testable="true">The report contains a four-bucket per-directory rollup — `shared/taskpane/**` (006), `shared/adapters/**` + `shared/services/**` (007), `word/**` + `outlook/**` (008), and UNASSIGNED — whose bucket counts sum to the stated total, with the UNASSIGNED bucket present even when its count is zero.</criterion>
+    <criterion testable="true">The report contains an error-code histogram attributing each code to the tsconfig strict option that produced it where the mapping is determinable.</criterion>
+    <criterion testable="true">The report explicitly confirms or denies the presence of the three known barrel diagnostics (`ViewType` at shared/taskpane/index.ts line 3; `SaveOptions` at shared/taskpane/index.ts line 18; `SaveOptions` at shared/taskpane/components/views/index.ts line 2), quoting the error code for each. A denial is accompanied by a statement that the capture is suspect.</criterion>
+    <criterion testable="true">The report records `npm run build` pass/fail, `npm test` pass/fail with suite and test counts, and the `npm run lint` no-op finding — and states that `build` is the production build and `build:prod` does not exist.</criterion>
+    <criterion testable="true">The report contains a section comparing the measured total against 397 and states whether the factor-of-two escalation trigger fired.</criterion>
+    <criterion testable="true">Negative: `git status` shows no modification to any file under src/client/office-addins/ — including package.json, package-lock.json and tsconfig.json. The only changed files are under projects/spaarkeai-word-add-in-r1/.</criterion>
+    <criterion testable="true">Negative: no typecheck error was fixed by this task; re-running `npm run typecheck` at the end of the task produces the same total as the committed raw log.</criterion>
+  </acceptance-criteria>
+
+  <notes>Spec reference: FR-18 (spec.md line 92) and Success Criterion 12. Plan reference: section 4 Phase 0 task 001, section 3 finding table, risk R-6 (section 7).
+
+No `&lt;justification&gt;` block is present because this task creates no new code surface — its only artifacts are project notes files in an already-provisioned directory (projects/spaarkeai-word-add-in-r1/notes/). CLAUDE.md section 11's three-question gate governs new services, abstractions, endpoints, DI registrations, packages and columns, none of which this task introduces.
+
+Parallel-safety note: this task is in no wave group and has no peers to conflict with. It is the gate for the P0-typecheck wave (006/007/008); the four P0-spikes (002-005) are independent of it and may run concurrently.
+
+Useful counts observed at authoring time (verify, do not trust): shared/taskpane contains 56 .ts/.tsx files, shared/adapters 8, shared/services 5, shared/__mocks__ 1, word 3, outlook 3. If the measured error distribution is wildly out of proportion to those file counts, say so — it is a signal about where the debt actually concentrates.</notes>
+
+  <execution><skill>.claude/skills/task-execute/SKILL.md</skill></execution>
+</task>

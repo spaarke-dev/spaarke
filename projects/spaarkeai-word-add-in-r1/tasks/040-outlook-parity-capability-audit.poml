@@ -1,0 +1,163 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="040" project="spaarkeai-word-add-in-r1">
+  <metadata>
+    <title>FR-19: Outlook parity pass and capability-gating audit</title>
+    <phase>4 Parity, deploy, close</phase>
+    <gate>033 complete (Find view), 035 complete (Add To Do), 036 complete (Send Email)</gate>
+    <status>not-started</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Refactors host branching across many `.tsx` views; tags include frontend; a wrong capability gate silently disables a working feature in one host. Step 9.5 code-review + adr-check are mandatory.</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Mechanical audit-and-refactor against a stated rule (NFR-10) with a named replacement mechanism (`hostAdapter.getCapabilities()`). Breadth, not depth.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <deps>033,035,036</deps>
+    <tags>frontend, office-addin, refactor, e2e-test</tags>
+    <estimated-effort>1 day</estimated-effort>
+  </metadata>
+
+  <prompt>Every shared-tier capability must work in both Word and Outlook, or be explicitly gated by `hostAdapter.getCapabilities()`. Audit `src/client/office-addins/shared/**` for host-type conditionals scattered through views — an NFR-10 violation — replace each with a declared capability, and produce a parity checklist covering every shared capability.</prompt>
+
+  <role>SPAARKE platform developer. Expertise in the add-in's host-adapter abstraction and Fluent UI v9 views. Follow ADRs strictly. Treat every `if (host === …)` in a view as a defect to be converted, not documented.</role>
+
+  <goal>No host-type conditional remains in any view under `shared/taskpane/`. Every host difference is expressed as a capability declared on `IHostAdapter` and reported honestly by each adapter. `notes/parity-checklist.md` enumerates every shared capability with its verified status in each host. Every capability that both hosts support has been exercised in both.</goal>
+
+  <context>
+    <background>
+      **NFR-19 / NFR-10, from the spec.** "Every shared-tier capability works in both hosts or is explicitly gated by `hostAdapter.getCapabilities()`" — with the acceptance being "no host-type conditionals scattered through views; parity verified per capability". NFR-10 states the same rule positively: "Capabilities land in `shared/taskpane/` and are gated by host capability, not by host-type branching in views."
+
+      **The parity boundary the spec fixes (Assumptions):** Outlook parity covers the tab shell, Find, profile display, record card, To Do, Send Email and creation-completeness. **Word-only:** document identity, `.docx` save, version-save. **Outlook-only:** email/attachment save, triage, linked-todos. Word-only and Outlook-only capabilities are legitimately absent in the other host — they must be *declared* absent, not conditionally branched.
+
+      **The mechanism exists.** `IHostAdapter.getCapabilities(): HostCapabilities` is declared at `shared/adapters/IHostAdapter.ts:148`, with the intended usage shown in that file's own doc comment at `:17` (`if (adapter.getCapabilities().canGetAttachments) { … }`). There is also a `@deprecated` alternative at `:248` that this audit should confirm is unused.
+
+      **Why this is a task and not a checklist item.** Tasks 033, 035 and 036 each land a shared capability in the same wave-adjacent window, and each is individually told to use capability gating. This task is the sweep that catches what slipped — including anything the earlier r2 work left behind — and produces the artifact (`notes/parity-checklist.md`) that task 042's UAT verifies against.
+    </background>
+    <relevant-files>
+      <file role="modify">src/client/office-addins/shared/adapters/IHostAdapter.ts</file>
+      <file role="modify">src/client/office-addins/shared/adapters/WordAdapter.ts</file>
+      <file role="modify">src/client/office-addins/shared/adapters/OutlookAdapter.ts</file>
+      <file role="modify">src/client/office-addins/shared/taskpane/App.tsx</file>
+      <file role="modify">src/client/office-addins/shared/taskpane/components/views/FindView.tsx</file>
+      <file role="modify">src/client/office-addins/shared/taskpane/components/views/CreateTodoView.tsx</file>
+      <file role="modify">src/client/office-addins/shared/taskpane/components/views/SaveView.tsx</file>
+      <file role="modify">src/client/office-addins/shared/taskpane/components/views/ShareView.tsx</file>
+      <file role="new">projects/spaarkeai-word-add-in-r1/notes/parity-checklist.md</file>
+    </relevant-files>
+    <dependencies>
+      <dependency task="033" status="pending">The Find view and its three-state gate — a shared capability that must be verified in both hosts.</dependency>
+      <dependency task="035" status="pending">Add To Do — a shared capability whose Word/Outlook difference (document vs. communication regarding) must be capability-expressed.</dependency>
+      <dependency task="036" status="pending">Send Email — the capability most likely to be legitimately absent in one host, and therefore the sharpest test of the gating mechanism.</dependency>
+    </dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="NFR-10">Scope: every file under `src/client/office-addins/shared/taskpane/**`. A host-type conditional in a view (`if (host === 'Word')`, `hostType === 'Outlook'`, a ternary on host name, or an equivalent switch) MUST be replaced with a capability read from `hostAdapter.getCapabilities()`. Documenting a conditional instead of converting it does not satisfy this task.</constraint>
+    <constraint source="project">Host-type checks inside `shared/adapters/*Adapter.ts` implementations are legitimate — an adapter's job is to know its host. The ban is on host branching in **views** and shared services. State this distinction in the checklist so the rule is not over-applied.</constraint>
+    <constraint source="project">Capabilities MUST be reported honestly. Declaring a capability true in a host where it does not work to make the audit pass is worse than the conditional it replaced — it converts a visible branch into a silent runtime failure.</constraint>
+    <constraint source="project">`notes/parity-checklist.md` MUST enumerate **every** shared capability with, per host: supported / gated-absent / broken, and the evidence (which `&lt;ui-test&gt;` or manual check verified it). A capability with no evidence row is an incomplete checklist.</constraint>
+    <constraint source="project">Scope boundary: this is an audit and refactor. Do NOT add new features, and do NOT fix a capability that is broken in one host by implementing it here — record it in the checklist and file it via `/project-defer-issue-tracking` (both `notes/defer-issues.md` and a GitHub Issue).</constraint>
+    <constraint source="ADR-021">Any view touched by this refactor MUST still honor the Office light/dark theme via `useOfficeTheme` and use Fluent v9 tokens. Refactoring a conditional must not regress theming.</constraint>
+    <constraint source="ADR-012">The add-in consumes `@spaarke/auth` only. Do not add a dependency on `@spaarke/ui-components` while refactoring.</constraint>
+    <constraint source="NFR-11">Views touched by this refactor MUST remain keyboard-navigable with announced state changes. A capability-gated element that disappears must not strand keyboard focus.</constraint>
+    <constraint source="project">There is no `build:prod` script in `src/client/office-addins` — `npm run build` IS the production build. Install with `npm install --legacy-peer-deps --no-audit --no-fund`.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>Host-capability abstraction across Word and Outlook add-in surfaces</topic>
+    <files>
+      <file>projects/spaarkeai-word-add-in-r1/spec.md</file>
+      <file>projects/spaarkeai-word-add-in-r1/plan.md</file>
+      <file>src/client/office-addins/CLAUDE.md</file>
+      <file>docs/architecture/office-outlook-teams-integration-architecture.md</file>
+      <file>.claude/adr/ADR-021-fluent-design-system.md</file>
+      <file>.claude/adr/ADR-012-shared-components.md</file>
+    </files>
+    <patterns>
+      <pattern name="fluent-v9-host-visual-fit" location=".claude/patterns/ui/fluent-v9-host-visual-fit.md">Explicitly covers Office add-ins — apply when verifying each capability renders correctly in both hosts' pane geometry.</pattern>
+    </patterns>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="0" name="Context + rigor declaration">Load `projects/spaarkeai-word-add-in-r1/CLAUDE.md`, `spec.md` FR-19 + NFR-10 + the Assumptions parity boundary, and `src/client/office-addins/CLAUDE.md`. Emit the mandatory rigor declaration (FULL / sonnet / high).</step>
+    <step order="1">Grep `src/client/office-addins/shared/**` for host-type conditionals — host-name string comparisons, `Office.context.host` checks, and any equivalent switch. Record every hit with file:line in `notes/parity-checklist.md` as the audit's raw findings before changing anything.</step>
+    <step order="2">For each hit in a view or shared service, identify the capability it is really testing for, add or reuse a named capability on `HostCapabilities`, and implement it honestly in both adapters.</step>
+    <step order="3">Replace each conditional with the capability read. Confirm the `@deprecated` alternative at `IHostAdapter.ts:248` has no remaining call sites; if it does, convert those too.</step>
+    <step order="4">Enumerate every shared capability in `notes/parity-checklist.md` with per-host status (supported / gated-absent / broken) and the evidence that established it. Include the spec's Word-only and Outlook-only lists explicitly, marked gated-absent rather than missing.</step>
+    <step order="5">Exercise every capability marked supported in **both** hosts. Anything that fails is recorded as broken and filed via `/project-defer-issue-tracking` — not fixed here.</step>
+    <step order="6">Run `npm run typecheck` and `npm run build` in `src/client/office-addins`; run the add-in unit tests. Execute the `&lt;ui-tests&gt;` below.</step>
+    <step order="7">Update `projects/spaarkeai-word-add-in-r1/tasks/TASK-INDEX.md`: set this task's status to ✅.</step>
+    <step order="8">Document any deviation in `projects/spaarkeai-word-add-in-r1/notes/`.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If a capability the spec lists as shared-tier turns out not to work in one host and cannot be honestly gated — i.e. gating it absent would silently remove a capability the spec promised in both hosts — STOP and escalate per CLAUDE.md §6 rather than declaring it supported or quietly narrowing the spec. FR-19's whole point is that the parity claim is true.</trigger>
+    <trigger>If the audit finds host branching so pervasive that converting it amounts to rewriting a view rather than refactoring it, STOP and escalate with the inventory rather than expanding this task into a rewrite.</trigger>
+  </escalation>
+
+  <ui-tests>
+    <test name="Shared capability works in both hosts">
+      <steps>
+        <step>For each capability marked supported in the checklist, exercise it in Word.</step>
+        <step>Exercise the same capability in Outlook.</step>
+      </steps>
+      <expected>The capability behaves equivalently in both hosts, allowing for the documented host-shaped differences (e.g. document vs. communication as the To Do's non-record regarding).</expected>
+    </test>
+    <test name="Gated-absent capability is hidden, not broken">
+      <steps>
+        <step>In the host where a capability is declared absent, look for its affordance.</step>
+      </steps>
+      <expected>The affordance is not rendered at all. It is not rendered-and-disabled, and it does not render and then fail on click.</expected>
+    </test>
+    <test name="No host conditional remains in views">
+      <steps>
+        <step>Grep `src/client/office-addins/shared/taskpane/**` for host-name comparisons and `Office.context.host` reads.</step>
+      </steps>
+      <expected>Zero hits in views and shared services. Any remaining hits are inside `shared/adapters/*Adapter.ts`, where they are legitimate.</expected>
+    </test>
+    <test name="Dark mode survives the refactor (ADR-021)">
+      <steps>
+        <step>Switch each host to dark theme and visit every view touched by this refactor.</step>
+      </steps>
+      <expected>All views render with Fluent v9 theme tokens and adequate contrast — the refactor introduced no hard-coded colors and removed no theming.</expected>
+    </test>
+    <test name="Keyboard focus is not stranded by gating (NFR-11)">
+      <steps>
+        <step>In the host where a capability is gated absent, tab through the view that would otherwise contain its affordance.</step>
+      </steps>
+      <expected>Focus order is continuous with no invisible stop where the gated element would have been, and state changes remain announced.</expected>
+    </test>
+  </ui-tests>
+
+  <tools>
+    <tool name="npm">`npm install --legacy-peer-deps --no-audit --no-fund`, `npm run typecheck`, `npm run build`, and the add-in unit tests in `src/client/office-addins` (no `build:prod` here — `build` IS production).</tool>
+    <tool name="grep">Audit sweep for host-type conditionals across `src/client/office-addins/shared/**`.</tool>
+  </tools>
+
+  <outputs>
+    <output type="doc">projects/spaarkeai-word-add-in-r1/notes/parity-checklist.md</output>
+    <output type="code">src/client/office-addins/shared/adapters/IHostAdapter.ts</output>
+    <output type="code">src/client/office-addins/shared/adapters/WordAdapter.ts</output>
+    <output type="code">src/client/office-addins/shared/adapters/OutlookAdapter.ts</output>
+    <output type="test">src/client/office-addins/shared/adapters/__tests__/capabilities.test.ts</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Grepping `src/client/office-addins/shared/taskpane/**` for host-name comparisons and `Office.context.host` reads returns zero hits; any remaining hits are confined to `shared/adapters/*Adapter.ts`.</criterion>
+    <criterion testable="true">`notes/parity-checklist.md` exists and enumerates every shared capability with, per host, one of supported / gated-absent / broken plus the evidence that established it. No capability appears without an evidence row.</criterion>
+    <criterion testable="true">The checklist explicitly lists the spec's Word-only capabilities (document identity, `.docx` save, version-save) and Outlook-only capabilities (email/attachment save, triage, linked-todos) as gated-absent in the other host — not as gaps.</criterion>
+    <criterion testable="true">Given a capability declared absent in a host, when that host's pane renders, then the affordance is not rendered at all — not rendered-and-disabled and not rendered-then-failing.</criterion>
+    <criterion testable="true">Every capability marked supported was exercised in BOTH hosts, and the checklist records which test or manual check did so.</criterion>
+    <criterion testable="true">Negative: no capability is declared true in a host where exercising it fails — verified by the both-hosts pass, not by inspection of the declarations.</criterion>
+    <criterion testable="true">Any capability found broken was recorded in the checklist AND filed via `/project-defer-issue-tracking` with a GitHub Issue URL — not fixed inside this task.</criterion>
+    <criterion testable="true">The `@deprecated` alternative at `IHostAdapter.ts:248` has zero remaining call sites.</criterion>
+    <criterion testable="true">All five `&lt;ui-tests&gt;` pass, including the dark-mode and keyboard-focus checks.</criterion>
+    <criterion testable="true">`npm run typecheck` is clean, `npm run build` succeeds, and all add-in unit tests pass.</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    spec.md FR-19, NFR-10 and the Assumptions parity boundary. plan.md §4 Phase 4 task 040. `notes/parity-checklist.md` is the artifact task 042's UAT verifies against — it is a deliverable, not a byproduct.
+  </notes>
+
+  <execution><skill>.claude/skills/task-execute/SKILL.md</skill></execution>
+</task>

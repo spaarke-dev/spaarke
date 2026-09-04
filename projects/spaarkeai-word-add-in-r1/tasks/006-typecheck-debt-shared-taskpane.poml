@@ -1,0 +1,175 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="006" project="spaarkeai-word-add-in-r1">
+  <metadata>
+    <title>FR-18: clear typecheck debt in shared/taskpane</title>
+    <phase>0 De-risk and baseline</phase>
+    <gate>001 complete</gate>
+    <status>not-started</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Modifies .ts and .tsx source files across the largest directory in the package (56 files), and the fix patterns chosen here set the precedent that 007 and 008 follow. Root CLAUDE.md section 8 makes code implementation touching .ts/.tsx a FULL-rigor trigger; the Step 9.5 code-review and adr-check gates run because the primary risk is a type "fix" that silently changes runtime behaviour.</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Fully specified, mechanical, high-volume work: the error list arrives from task 001, the allowed fix patterns are enumerated in the constraints, and the forbidden ones are named explicitly. No architectural judgment. Sonnet default per root CLAUDE.md section 8.5; the judgment boundaries that do exist are covered by the escalation triggers rather than by a tier bump.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>P0-typecheck</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <deps>001</deps>
+    <tags>frontend, office-addins, typescript, typecheck, tech-debt, fluent-ui, phase-0</tags>
+    <estimated-effort>1-2 days, proportional to the shared/taskpane row in the task 001 rollup</estimated-effort>
+  </metadata>
+
+  <prompt>Clear every typecheck error in src/client/office-addins/shared/taskpane/** so that FR-18's acceptance criterion — `npm run typecheck` is clean — becomes reachable, and so that errors introduced during Phases 1 through 3 are visible instead of buried in pre-existing noise. This directory also owns the three known broken barrel re-exports (`ViewType` and `SaveOptions`). Fix the types properly: this task is type-level only and must not change what the pane does at runtime.</prompt>
+
+  <role>SPAARKE platform developer. TypeScript strict-mode remediation (exactOptionalPropertyTypes, noUncheckedIndexedAccess, noUnusedLocals/Parameters) in a React 19 plus Fluent UI v9 Office add-in. You are correcting types, not refactoring components. Follow ADRs strictly.</role>
+
+  <goal>`npm run typecheck` in src/client/office-addins reports zero errors for every file under shared/taskpane/**; the three known barrel defects are resolved correctly rather than papered over; `npm run build` and `npm test` are green; the error counts in the two directories this task does NOT own are unchanged from the task 001 baseline; and the fix patterns used are recorded in projects/spaarkeai-word-add-in-r1/notes/ for tasks 007 and 008 to follow.</goal>
+
+  <context>
+    <background>FR-18 (spec.md line 92) requires clearing the pre-existing typecheck debt in src/client/office-addins first, so new errors are visible during feature work. Four strict options in src/client/office-addins/tsconfig.json drive the debt: `noUnusedLocals` (line 16), `noUnusedParameters` (line 17), `noUncheckedIndexedAccess` (line 20) and `exactOptionalPropertyTypes` (line 21). plan.md splits the clearance three ways by directory; this task owns the largest share. Two concrete defects are already confirmed in this directory and are not merely strictness noise: src/client/office-addins/shared/taskpane/index.ts line 3 re-exports `ViewType` from `./App`, and App.tsx does not export it; the same file's line 18 re-exports `SaveOptions` from `./components/views/SaveView`, and SaveView.tsx does not export it; and src/client/office-addins/shared/taskpane/components/views/index.ts line 2 repeats the same broken `SaveOptions` re-export. These are real broken public surface, not formatting. This directory is where every Phase 1 through 3 pane feature lands (tabs, views, cards, profile, Find, To Do, Send Email), which is why it is cleared before that work rather than after.</background>
+    <relevant-files>
+      <file role="modify">src/client/office-addins/shared/taskpane/index.ts</file>
+      <file role="modify">src/client/office-addins/shared/taskpane/components/views/index.ts</file>
+      <file role="modify">src/client/office-addins/shared/taskpane/App.tsx</file>
+      <file role="modify">src/client/office-addins/shared/taskpane/components/</file>
+      <file role="modify">src/client/office-addins/shared/taskpane/hooks/</file>
+      <file role="modify">src/client/office-addins/shared/taskpane/services/</file>
+      <file role="modify">src/client/office-addins/shared/taskpane/utils/</file>
+      <file role="canonical-reference">projects/spaarkeai-word-add-in-r1/notes/typecheck-baseline.md</file>
+      <file role="canonical-reference">src/client/office-addins/tsconfig.json</file>
+      <file role="canonical-reference">src/client/office-addins/CLAUDE.md</file>
+    </relevant-files>
+    <dependencies>
+      <dependency task="001" status="pending">Installed node_modules, the measured per-file error breakdown, and the per-directory rollup row for shared/taskpane/** that sizes this task. Do not start before 001's report exists; without it there is no way to prove at the end that no error was displaced into another task's directory.</dependency>
+    </dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="project">SCOPE: src/client/office-addins/shared/taskpane/** ONLY. Do NOT edit any file under shared/adapters/**, shared/services/**, shared/__mocks__/**, word/** or outlook/** — tasks 007 and 008 own those and run concurrently with this one. A cross-boundary edit is both a merge conflict and a lost fix. If a shared/taskpane error can only be fixed by changing a file outside this directory, STOP and escalate rather than reaching across.</constraint>
+    <constraint source="project">SCOPE: every fix in this task. Fix types PROPERLY. MUST NOT use `any`, `as any`, `as unknown as T`, `@ts-ignore`, `@ts-expect-error`, or a blanket non-null assertion (`!`) applied merely to silence a diagnostic. MUST NOT relax src/client/office-addins/tsconfig.json — `strict`, `exactOptionalPropertyTypes`, `noUncheckedIndexedAccess`, `noUnusedLocals` and `noUnusedParameters` all stay exactly as they are. tsconfig.json is OUT OF SCOPE for this task and for 007 and 008. A suppressed error is not a cleared error; FR-18 exists so that NEW errors are visible in Phases 1 through 3, and a suppression re-hides them.</constraint>
+    <constraint source="project">SCOPE: every fix in this task. This is a TYPE-LEVEL change only. MUST NOT change runtime behaviour: no altered conditional, no changed default value, no reordered or added/removed effect, no changed hook dependency array semantics, no renamed prop that alters the rendered DOM or the props a consumer passes, no deleted branch. `noUnusedLocals` and `noUnusedParameters` errors are the trap here — deleting an "unused" variable that is actually a side-effecting call, or an unused parameter that shifts the positional signature of a callback, IS a runtime change. Prefer prefixing an intentionally unused parameter with an underscore over deleting it. If an error can only be resolved by a behaviour change, STOP and escalate.</constraint>
+    <constraint source="project">SCOPE: the three known barrel defects (shared/taskpane/index.ts lines 3 and 18; shared/taskpane/components/views/index.ts line 2). For each missing type, first determine whether it exists under another name or in another module — if so, correct the re-export to point at the real declaration. If it does not exist at all, REMOVE the broken re-export. MUST NOT invent a placeholder type, an empty interface, or a stub union merely to satisfy the barrel: that converts a visible defect into an invisible lie and gives Phase 1 a type that means nothing. If any consumer imports the missing name, that consumer is also broken — fix it (it is inside this directory) and record it.</constraint>
+    <constraint source="project">SCOPE: the `ViewType` finding specifically. FR-03 (task 015) will extend `NavigationTab` and build the Save and Find tab shell. `ViewType` may be an intended-but-never-created union. RECORD that finding for task 015 in your notes; do NOT pre-build the tab type system here. Scope expansion into FR-03 is out of bounds for a typecheck task.</constraint>
+    <constraint source="ADR-021">SCOPE: any JSX or styling you touch while fixing a type. Fluent UI v9 only, and the Office theme continues to drive light/dark via the existing `useOfficeTheme` / `useTheme` hooks. MUST NOT introduce a hardcoded colour, a raw hex value, or a non-Fluent component while resolving a type error.</constraint>
+    <constraint source="ADR-012">SCOPE: import resolution while fixing types. This project holds a recorded Path A exception (project CLAUDE.md Decisions, 2026-09-04): the add-in keeps thin views under shared/taskpane/ and consumes `@spaarke/auth` only. MUST NOT resolve a missing type by importing from `@spaarke/ui-components` — its components assume a different React posture and some are Xrm-bound, which breaks at runtime in an Office host (NFR-03).</constraint>
+    <constraint source="project">SCOPE: dependencies. MUST NOT add, remove or upgrade any npm dependency to satisfy a type, and MUST NOT modify package.json or package-lock.json. If a type error stems from a missing or wrong `@types` package, STOP and escalate — a dependency change alters what every other task compiles against.</constraint>
+    <constraint source="ADR-038">SCOPE: test files under shared/taskpane/**/__tests__/. These are inside the tsconfig include globs, so their errors count toward this task. Fix their types the same way as production code. MUST NOT delete, skip or `xit` a test to make typecheck pass — that is a KEEP-path violation under docs/adr/ADR-038-testing-strategy.md. If a test's type error reveals that the test asserts something the code no longer does, STOP and escalate.</constraint>
+    <constraint source="project">SCOPE: build verification. `npm run build` IS the production build in this package — there is no `build:prod` script (package.json line 7). Do not attempt `npm run build:prod`; src/client/office-addins/CLAUDE.md line 39 names it in error.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>TypeScript strict-mode remediation; React 19 plus Fluent UI v9 in an Office task pane</topic>
+    <files>
+      <file>projects/spaarkeai-word-add-in-r1/spec.md</file>
+      <file>projects/spaarkeai-word-add-in-r1/plan.md</file>
+      <file>projects/spaarkeai-word-add-in-r1/notes/typecheck-baseline.md</file>
+      <file>src/client/office-addins/CLAUDE.md</file>
+      <file>.claude/adr/ADR-021-fluent-design-system.md</file>
+      <file>.claude/adr/ADR-012-shared-components.md</file>
+      <file>docs/adr/ADR-038-testing-strategy.md</file>
+      <file>.claude/patterns/ui/fluent-v9-host-visual-fit.md</file>
+    </files>
+    <patterns>
+      <pattern name="exactOptionalPropertyTypes — the two correct fixes" location="src/client/office-addins/tsconfig.json line 21">Under this option, `prop?: T` means "may be absent", NOT "may be undefined". Two legitimate fixes: (1) if the property genuinely may hold `undefined`, widen the DECLARATION to `prop?: T | undefined` — this is honest and is usually right for React props threaded from optional state; (2) if the property should simply be absent, fix the CALL SITE with a conditional spread such as `...(value !== undefined ? { prop: value } : {})`. Choose per case based on what the consumer means. Never widen to `any` and never cast the object.</pattern>
+      <pattern name="noUncheckedIndexedAccess — narrow, do not assert" location="src/client/office-addins/tsconfig.json line 20">An index access yields `T | undefined`. Fix by narrowing — a guard, a default via `??`, optional chaining, or destructuring with a default — not by appending `!`. A non-null assertion here is exactly the class of "fix" that turns a compile-time signal into a runtime crash inside an Office webview, where the failure surfaces as a blank pane with no console the user can reach.</pattern>
+      <pattern name="noUnusedLocals / noUnusedParameters — the side-effect trap" location="src/client/office-addins/tsconfig.json lines 16-17">Before deleting an unused binding, check whether its initialiser has a side effect (a subscription, a registration, a hook call). Deleting `const x = doSomething()` deletes the call. For an unused function parameter that must stay for positional reasons, prefix with an underscore rather than removing it. This is the single most common way a "type-only" change becomes a behaviour change.</pattern>
+      <pattern name="displacement check" location="projects/spaarkeai-word-add-in-r1/notes/typecheck-baseline.md">Because 006, 007 and 008 run concurrently on the same package, a fix in one directory can surface or move an error into another. At the end of this task, re-run the full typecheck and compare the counts for shared/adapters, shared/services, word and outlook against the task 001 baseline rows. They must not increase. If they do, that is your fix leaking across a boundary — resolve it inside your own directory or escalate.</pattern>
+      <pattern name="Office theme is the dark-mode source" location="src/client/office-addins/shared/taskpane/hooks/useOfficeTheme.ts">ADR-021's dark-mode requirement is satisfied in this package by the Office host theme driving the Fluent provider. The ui-test below toggles the Office theme rather than an app-level switch — verify the hook still supplies the theme after any type change in the provider chain.</pattern>
+    </patterns>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="0" name="Context + rigor declaration">Emit the mandatory rigor declaration (RIGOR LEVEL: FULL, reason, protocol steps). Load projects/spaarkeai-word-add-in-r1/CLAUDE.md, spec.md FR-18, and projects/spaarkeai-word-add-in-r1/notes/typecheck-baseline.md. Record this task's starting error count for shared/taskpane/** and the baseline counts for the four directories you do NOT own.</step>
+    <step order="1">Ensure src/client/office-addins/node_modules exists. If it does not (a fresh shell), run `npm install --legacy-peer-deps --no-audit --no-fund` — a bare `npm install` fails with ERESOLVE. Then revert package-lock.json if npm rewrote it.</step>
+    <step order="2">Resolve the three known barrel defects first, because they are real broken public surface and because their resolution may change the error counts elsewhere in the directory: `ViewType` at shared/taskpane/index.ts line 3, `SaveOptions` at shared/taskpane/index.ts line 18, and `SaveOptions` at shared/taskpane/components/views/index.ts line 2. For each, search for the type's real declaration; correct the re-export if it exists, remove it if it does not. Fix any in-directory consumer of the removed name. Record what you found for each.</step>
+    <step order="3">Work the remaining errors file by file, highest count first per the task 001 breakdown. Apply the fix patterns in the knowledge block; for each distinct error code, settle on one canonical fix shape and apply it consistently across the directory so the diff is reviewable.</step>
+    <step order="4">Re-run `npm run typecheck` and filter to shared/taskpane/**. Iterate until that filter is empty.</step>
+    <step order="5">Run the displacement check: re-run the full typecheck and compare the per-directory counts for shared/adapters, shared/services, shared/__mocks__, word and outlook against the task 001 baseline. None may increase. Record the comparison.</step>
+    <step order="6">Run `npm run build` (the production build; there is no build:prod) and confirm it is green.</step>
+    <step order="7">Run `npm test` and confirm the suite is green with no test deleted, skipped or weakened relative to the task 001 baseline counts.</step>
+    <step order="8">Execute the ui-tests below in a dev build against a host (or the mock-office harness where a live host is unavailable) and record the result of each, including the dark-mode check.</step>
+    <step order="9">Write projects/spaarkeai-word-add-in-r1/notes/typecheck-fix-patterns.md recording, per error code, the canonical fix shape you used and any case where you deviated and why. Tasks 007 and 008 follow this so all three diffs look like one change. Also record the `ViewType` finding for task 015 (FR-03).</step>
+    <step order="9.5">Run the Step 9.5 quality gates (code-review plus adr-check) per the FULL rigor level. The review's primary question is not "does it compile" but "did any of these edits change behaviour" — direct it at deleted bindings, changed defaults, altered conditionals and modified hook dependency arrays.</step>
+    <step order="10">Update projects/spaarkeai-word-add-in-r1/tasks/TASK-INDEX.md: set this task's status to completed.</step>
+    <step order="11">Document any deviation from this task file in projects/spaarkeai-word-add-in-r1/notes/.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If a typecheck error in shared/taskpane/** can only be resolved by editing a file outside that directory, STOP and escalate per root CLAUDE.md section 6. Tasks 007 and 008 own those files and are running concurrently; reaching across produces a merge conflict and silently discards one of the two fixes. Report the error, the file that would need to change, and which task owns it.</trigger>
+    <trigger>If a typecheck error can only be resolved by changing runtime behaviour — altering a conditional, a default value, an effect, or a rendered output — STOP and escalate. This task's contract is type-level only. A behaviour change smuggled in under a typecheck task is invisible to review and will be attributed to whichever Phase 1-3 task lands next.</trigger>
+    <trigger>If a test file's type error reveals that the test asserts behaviour the code no longer has, STOP and escalate rather than deleting, skipping or rewriting the assertion (ADR-038 KEEP-path rules). That is a real defect finding, not typecheck debt.</trigger>
+    <trigger>If clearing this directory requires adding, removing or upgrading an npm dependency (including a missing `@types` package), or relaxing any tsconfig option, STOP and escalate. Both change what every other task in the package compiles against.</trigger>
+    <trigger>If the actual error count for shared/taskpane/** differs materially from the task 001 baseline row when you start, STOP and reconcile before working — either the baseline is stale or another task has already touched this directory, and both are worth knowing before a large mechanical diff.</trigger>
+  </escalation>
+
+  <ui-tests>
+    <test name="Word task pane renders after type remediation">
+      <steps>
+        <step>Run `npm run build` in src/client/office-addins and load the Word add-in in a dev build (or run `npm run start:word`).</step>
+        <step>Open the Spaarke task pane in Word.</step>
+        <step>Observe the shell: header, footer, and the Save surface.</step>
+      </steps>
+      <expected>The pane renders with no blank screen and no error boundary. The browser console shows no new uncaught exception relative to the pre-change build. The Save surface is present and interactive exactly as before the change.</expected>
+    </test>
+    <test name="Outlook task pane renders after type remediation">
+      <steps>
+        <step>Load the Outlook add-in in a dev build (or run `npm run start:outlook`).</step>
+        <step>Open the Spaarke task pane on a mail item.</step>
+        <step>Exercise the navigation between the visible tabs and open the Create To Do view.</step>
+      </steps>
+      <expected>The pane renders, navigation works, and the Create To Do view opens and displays its fields. No error boundary is triggered and no new console exception appears. Outlook is the host with the most shared/taskpane surface in use today, so it is the stronger regression signal of the two.</expected>
+    </test>
+    <test name="ADR-021 dark mode via Office theme toggle">
+      <steps>
+        <step>With the pane open, switch the Office host theme from light to dark (Office Account settings, Office Theme, or the host's dark-mode toggle).</step>
+        <step>Observe the pane without reloading it, then reload the pane and observe again.</step>
+        <step>Switch back to light and repeat.</step>
+      </steps>
+      <expected>The pane follows the Office theme in both directions, via the existing `useOfficeTheme` / `useTheme` hooks. Text remains legible against its background in both themes, no element keeps a light-mode background in dark mode, and no hardcoded colour has been introduced by the type fixes (ADR-021).</expected>
+    </test>
+    <test name="Keyboard navigation and announcements unchanged">
+      <steps>
+        <step>With the pane open, tab through the shell from the first focusable element to the last.</step>
+        <step>Trigger a state change that uses the existing `useAnnounce` pattern (for example a save or a validation error).</step>
+      </steps>
+      <expected>Focus order and visible focus rings are unchanged from before the task, every interactive element remains reachable by keyboard, and the announcement still fires (NFR-11). A dropped announcement would indicate a deleted "unused" binding.</expected>
+    </test>
+  </ui-tests>
+
+  <tools>
+    <tool name="npm">`npm install --legacy-peer-deps --no-audit --no-fund` if needed; `npm run typecheck`; `npm run build` (production — there is no build:prod); `npm test`; `npm run start:word` / `npm run start:outlook` for the ui-tests.</tool>
+    <tool name="Grep">Locate the real declarations of `ViewType` and `SaveOptions`, and find consumers of any re-export you remove.</tool>
+    <tool name="code-review">Step 9.5 gate — directed at behaviour-change risk, not compilation.</tool>
+    <tool name="adr-check">Step 9.5 gate — ADR-021, ADR-012 Path A, ADR-038.</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/client/office-addins/shared/taskpane/** (type-level edits only)</output>
+    <output type="doc">projects/spaarkeai-word-add-in-r1/notes/typecheck-fix-patterns.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Given a completed `npm install`, when `npm run typecheck` is run in src/client/office-addins and the output is filtered to paths under shared/taskpane/, then zero errors are reported.</criterion>
+    <criterion testable="true">Given the same typecheck run, when the per-directory counts for shared/adapters/, shared/services/, shared/__mocks__/, word/ and outlook/ are compared against the task 001 baseline, then none has increased.</criterion>
+    <criterion testable="true">`npm run build` exits 0.</criterion>
+    <criterion testable="true">`npm test` exits 0 with suite and test counts greater than or equal to the task 001 baseline — no test was deleted, skipped or replaced with a weaker assertion.</criterion>
+    <criterion testable="true">Each of the three known barrel defects is resolved by either pointing the re-export at a real declaration or removing it, and projects/spaarkeai-word-add-in-r1/notes/typecheck-fix-patterns.md records which resolution was applied to each and why.</criterion>
+    <criterion testable="true">Negative: `grep` across the diff finds no newly added `any`, `as any`, `as unknown as`, `@ts-ignore` or `@ts-expect-error` in shared/taskpane/**.</criterion>
+    <criterion testable="true">Negative: `git diff` shows src/client/office-addins/tsconfig.json, package.json and package-lock.json unmodified.</criterion>
+    <criterion testable="true">Negative: `git diff --name-only` lists no file under shared/adapters/, shared/services/, shared/__mocks__/, word/ or outlook/.</criterion>
+    <criterion testable="true">Negative: no placeholder, stub or empty type was introduced to satisfy a barrel re-export.</criterion>
+    <criterion testable="true">Negative: no import from `@spaarke/ui-components` was added (ADR-012 Path A exception, NFR-03).</criterion>
+    <criterion testable="true">Negative: the diff introduces no hardcoded colour or non-Fluent-v9 component (ADR-021).</criterion>
+    <criterion testable="true">All four ui-tests below pass and their results are recorded, including the dark-mode check in both directions.</criterion>
+    <criterion testable="true">projects/spaarkeai-word-add-in-r1/notes/typecheck-fix-patterns.md exists, records a canonical fix shape per error code, and records the `ViewType` finding for task 015 (FR-03).</criterion>
+    <criterion testable="true">The Step 9.5 code-review and adr-check gates ran and their findings are resolved or explicitly accepted.</criterion>
+  </acceptance-criteria>
+
+  <notes>Spec reference: FR-18 (line 92), NFR-04 (line 101), NFR-11 (line 108), Success Criterion 12 (line 209). Plan reference: section 4 Phase 0 tasks 006-008, risk R-6.
+
+No `&lt;justification&gt;` block is present: this is a modify-only task. It adds no new service, abstraction, endpoint, DI registration, package or column — CLAUDE.md section 11's gate does not apply to edits of existing files.
+
+Parallel-safety within the P0-typecheck wave: 006 owns shared/taskpane/**, 007 owns shared/adapters/** plus shared/services/** (and shared/__mocks__/** if task 001 reports it as the only UNASSIGNED residue), 008 owns word/** plus outlook/**. The three directory sets are disjoint, so the three tasks can run concurrently without touching the same file. The shared risks are (a) all three run `npm run build` and `npm test` against the same node_modules, and (b) all three may edit projects/spaarkeai-word-add-in-r1/notes/typecheck-fix-patterns.md — this task CREATES that file and 007/008 append to it, so write it early and keep sections clearly headed by task id. tsconfig.json is out of scope for all three, which removes the one file they would otherwise contend for.
+
+Sizing note: shared/taskpane contained 56 .ts/.tsx files at authoring time — the largest of the three buckets by file count. The task 001 rollup, not this note, is the authority on the error count.</notes>
+
+  <execution><skill>.claude/skills/task-execute/SKILL.md</skill></execution>
+</task>

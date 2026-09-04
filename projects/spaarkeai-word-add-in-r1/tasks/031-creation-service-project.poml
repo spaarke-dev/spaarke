@@ -1,0 +1,130 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="031" project="spaarkeai-word-add-in-r1">
+  <metadata>
+    <title>FR-13: Project creation completeness and QuickCreate routing</title>
+    <phase>3 Surfacing Spaarke</phase>
+    <gate>030 complete — the creation service exists and is proven for Matter</gate>
+    <status>not-started</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Modifies the BFF creation service and `QuickCreateAsync`; tags include bff-api and dataverse; writes production Dataverse rows. Step 9.5 code-review + adr-check are mandatory.</rigor-reason>
+    <model-tier>opus</model-tier>
+    <model-tier-reason>Requires a judgment call the codebase cannot answer mechanically: `sprk_projectnumber` is the Project PRIMARY NAME ATTRIBUTE, so "populate a number" may be the wrong framing entirely. Getting this wrong writes a wrong primary name onto every pane-created Project.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <deps>030</deps>
+    <tags>bff-api, dataverse, field-mapping, creation, integration-test</tags>
+    <estimated-effort>4-8 hours</estimated-effort>
+  </metadata>
+
+  <prompt>Extend the creation service from task 030 to cover Project, and route `QuickCreateAsync`'s Project branch through it. **Project is not a mirror of Matter.** `sprk_projectnumber` is the Project primary name attribute and no client-side generator exists for it, so this task must first state Project's intended creation semantics explicitly and only then implement them.</prompt>
+
+  <role>SPAARKE platform developer. Expertise in Dataverse entity metadata (primary name attributes), .NET 10 Minimal API, and the Field Mapping Framework. Follow ADRs strictly.</role>
+
+  <goal>The creation service handles Project, and `QuickCreateAsync` routes Project through it. A Project created from the pane has an owner, business-unit defaults and Field-Mapping-Framework-mapped fields, and its `sprk_projectnumber` is populated according to the semantics documented in `notes/031-project-semantics.md` (written by this task and reviewed before implementation). A contract test covers `POST /api/office/quickcreate/project` including the unauthorized negative case.</goal>
+
+  <context>
+    <background>
+      Verified as-built, and it differs from Matter in two ways that matter:
+
+      1. **`sprk_projectnumber` is the Project PRIMARY NAME ATTRIBUTE.** It is not a secondary reference field like `sprk_matternumber`. Whatever is written there is what every lookup, every grid and every record header displays as the Project's name.
+      2. **`CreateProjectWizard/projectService.ts` generates NO number at all** — unlike `matterService.ts:255-273`, which generates `{typeCode}-{random6}`. There is no existing client-side scheme for this task to lift onto the server, because none exists.
+
+      Consequently the Matter design from task 030 cannot be copied. Blindly generating a `{typeCode}-{6 digits}` value for `sprk_projectnumber` would overwrite the Project's display name with a machine token, which is a user-visible regression, not a fix.
+
+      The correct r1 semantics are a judgment call this task must make explicitly and record — plausible outcomes include (a) `sprk_projectnumber` is populated from the user-supplied name in the pane, so the primary name is what the user typed; (b) a number IS generated and the wizard's current behavior of leaving it to the user is itself the defect; (c) both, with the name winning. Owner/BU/field-mapping completeness applies to Project regardless of which is chosen — that half IS symmetric with Matter.
+    </background>
+    <relevant-files>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Services/Office/RecordCreationService.cs</file>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Services/Office/IRecordCreationService.cs</file>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Services/Office/OfficeService.cs</file>
+      <file role="modify">tests/integration/contract/Api/Office/OfficeQuickCreateContractTests.cs</file>
+      <file role="canonical-reference">src/client/shared/Spaarke.UI.Components/src/components/CreateProjectWizard/projectService.ts</file>
+      <file role="canonical-reference">src/client/shared/Spaarke.UI.Components/src/components/CreateMatterWizard/matterService.ts</file>
+      <file role="canonical-reference">src/client/shared/Spaarke.UI.Components/src/services/EntityCreationService.ts</file>
+      <file role="new">projects/spaarkeai-word-add-in-r1/notes/031-project-semantics.md</file>
+    </relevant-files>
+    <dependencies>
+      <dependency task="030" status="pending">The creation service, its DI registration, the owner/BU/field-mapping implementation, and the proven contract-test harness for `POST /api/office/quickcreate/{entityType}`.</dependency>
+    </dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="project">MUST NOT mirror the Matter numbering scheme onto Project without first writing `notes/031-project-semantics.md` stating: (a) that `sprk_projectnumber` is the Project primary name attribute, (b) that `projectService.ts` generates no number today, and (c) the chosen semantics with their rationale. Implementing before that note exists is a defect.</constraint>
+    <constraint source="project">Scope of this task is **Project only**. Do not alter the Matter branch delivered by task 030, and do not add Invoice handling.</constraint>
+    <constraint source="project">MUST NOT modify any file under `src/client/shared/Spaarke.UI.Components/src/components/Create*Wizard/**` — wizard migration is out of scope for r1 (spec FR-13, `design.md` §7.1). Verify with `git diff --stat`.</constraint>
+    <constraint source="ADR-044">Every Dataverse GUID crossing a boundary in this task (owner id, business unit id, created record id) MUST be canonicalized to bare-lowercase via the shared `cleanGuid` equivalent. Never interpolate a raw GUID into an OData key predicate.</constraint>
+    <constraint source="ADR-010">This task adds NO new DI registration — it extends the service registered by task 030. If a new registration seems necessary, escalate rather than adding one.</constraint>
+    <constraint source="ADR-038">`POST /api/office/quickcreate/{entityType}` is modified, so contract coverage MUST be extended to the Project branch in `tests/integration/contract/Api/Office/`. Banned: `Mock&lt;HttpMessageHandler&gt;`, DI-registration assertions, ctor null-check assertions, `Stopwatch` + `Task.Delay`.</constraint>
+    <constraint source="ADR-029">This task touches the BFF, so publish size MUST be measured **against a fresh build of `origin/master`, not the recorded baseline number** — `git worktree add` a detached `origin/master`, publish both, zip BOTH with PowerShell `Compress-Archive`, and report both absolute sizes, the delta and the zip tool. Ceiling 60 MB; escalate at ≥+5 MB.</constraint>
+    <constraint source="project">The PR description MUST carry a **Placement Justification** section per `.claude/constraints/bff-extensions.md`, even though the answer is "extends the service task 030 placed in `Services/Office/`".</constraint>
+    <constraint source="project">Run `/conflict-check` before opening the BFF PR — `OfficeService.cs` is shared with `spaarkeai-compose-r8` and `unified-access-control-r2` on this hot path.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>Dataverse primary name attributes; server-side record creation completeness for Project</topic>
+    <files>
+      <file>projects/spaarkeai-word-add-in-r1/spec.md</file>
+      <file>projects/spaarkeai-word-add-in-r1/plan.md</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+      <file>.claude/adr/ADR-044-dataverse-guid-canonicalization.md</file>
+      <file>.claude/adr/ADR-029-bff-publish-hygiene.md</file>
+      <file>docs/adr/ADR-038-testing-strategy.md</file>
+      <file>docs/architecture/SPAARKE-FIELD-MAPPING-FRAMEWORK.md</file>
+    </files>
+    <patterns>
+      <pattern name="polymorphic-resolver" location=".claude/patterns/dataverse/polymorphic-resolver.md">Apply for `cleanGuid` canonicalization and for any record-type reference stamped on the created Project.</pattern>
+    </patterns>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="0" name="Context + rigor declaration">Load `projects/spaarkeai-word-add-in-r1/CLAUDE.md`, `spec.md` FR-13, `plan.md` §3 (the FR-13 asymmetry finding), and task 030's completed POML + notes. Emit the mandatory rigor declaration (FULL / opus / high). Run `/conflict-check`.</step>
+    <step order="1">Confirm against live Dataverse metadata that `sprk_projectnumber` is the `sprk_project` primary name attribute. Read `projectService.ts` end to end and confirm it generates no number. Record both findings with evidence.</step>
+    <step order="2">Write `projects/spaarkeai-word-add-in-r1/notes/031-project-semantics.md` stating the two as-built facts and the chosen r1 semantics for `sprk_projectnumber` with rationale. If the choice is not clear-cut on the evidence, fire the escalation trigger below instead of picking one.</step>
+    <step order="3">Extend the creation service with a Project path implementing the documented semantics. Reuse task 030's owner assignment, business-unit defaulting and Field Mapping Framework application unchanged — that half IS symmetric.</step>
+    <step order="4">Route `QuickCreateAsync`'s Project branch through the service. Leave Matter and Invoice behavior exactly as task 030 left them.</step>
+    <step order="5">Extend `OfficeQuickCreateContractTests.cs` with the Project happy path and the Project unauthorized negative path.</step>
+    <step order="6">Measure BFF publish size against a fresh `origin/master` build per the ADR-029 constraint; record both absolute sizes, the delta and the zip tool.</step>
+    <step order="7">Run `dotnet build` and `dotnet test`. Confirm `git diff --stat` shows no `Create*Wizard` file and no change to the Matter branch's behavior.</step>
+    <step order="8">Update `projects/spaarkeai-word-add-in-r1/tasks/TASK-INDEX.md`: set this task's status to ✅.</step>
+    <step order="9">Document any deviation in `projects/spaarkeai-word-add-in-r1/notes/`.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If the primary-name-attribute nature of `sprk_projectnumber` means that "populate a number" is the wrong framing for Project — i.e. the evidence does not support a single defensible semantics — STOP and escalate per CLAUDE.md §6 rather than inventing semantics. Present the options (name-derived primary name / generated number / both) with their user-visible consequences and let the owner choose. Writing a generated token into a Project's display name without that decision is a user-visible regression.</trigger>
+    <trigger>If live Dataverse metadata contradicts either premise (that `sprk_projectnumber` is the primary name attribute, or that `projectService.ts` generates no number), STOP and escalate — the task's whole framing rests on those two facts.</trigger>
+  </escalation>
+
+  <tools>
+    <tool name="dotnet">Build and test the BFF: `dotnet build src/server/api/Sprk.Bff.Api/`, `dotnet test`.</tool>
+    <tool name="dataverse-mcp">Confirm `sprk_project` entity metadata — specifically the `PrimaryNameAttribute`.</tool>
+    <tool name="git">`git worktree add` a detached `origin/master` for publish-size comparison; `git diff --stat` for the wizard-untouched check.</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Office/RecordCreationService.cs</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Office/OfficeService.cs</output>
+    <output type="test">tests/integration/contract/Api/Office/OfficeQuickCreateContractTests.cs</output>
+    <output type="doc">projects/spaarkeai-word-add-in-r1/notes/031-project-semantics.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">`notes/031-project-semantics.md` exists, states that `sprk_projectnumber` is the Project primary name attribute, states that `projectService.ts` generates no number, and documents the chosen r1 semantics with rationale — and it was written before the implementation commit.</criterion>
+    <criterion testable="true">Given an authorized caller and a valid Project name, when `POST /api/office/quickcreate/project` is called, then the created `sprk_project` row has a non-null `ownerid`, business-unit defaults applied, every field the applicable Field Mapping profile defines, and a `sprk_projectnumber` consistent with the documented semantics.</criterion>
+    <criterion testable="true">Given a Project created from the pane, when it is displayed in any Dataverse lookup or grid, then its displayed name is the value the documented semantics intend — not an unintended machine token.</criterion>
+    <criterion testable="true">Given no Field Mapping profile exists for the source/target pair, when Project creation runs, then the mapping step is a graceful no-op and the record is still created — creation does not throw.</criterion>
+    <criterion testable="true">Negative: given an unauthenticated or unauthorized caller, when `POST /api/office/quickcreate/project` is called, then the response is 401/403 and no `sprk_project` row is created.</criterion>
+    <criterion testable="true">Negative: given a request with an empty or whitespace-only name, when the endpoint is called, then it returns a 400 ProblemDetails and no row is created — not an unhandled exception.</criterion>
+    <criterion testable="true">The Matter branch delivered by task 030 is behaviorally unchanged — its contract tests still pass without modification.</criterion>
+    <criterion testable="true">No new DI registration was added by this task (ADR-010).</criterion>
+    <criterion testable="true">`git diff --stat` lists no file under `src/client/shared/Spaarke.UI.Components/src/components/Create*Wizard/`.</criterion>
+    <criterion testable="true">BFF publish size was measured against a fresh `origin/master` build with PowerShell `Compress-Archive`; both absolute sizes, delta and tool are recorded; delta &lt;+5 MB and absolute &lt;60 MB.</criterion>
+    <criterion testable="true">All unit and contract tests pass; `dotnet build` is green.</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    spec.md FR-13 ("same for Project and `sprk_projectnumber`") and plan.md §3, which records the asymmetry as an answered open question: "Task 031 must state Project semantics explicitly rather than mirroring Matter." The single most likely failure mode for this task is copying task 030 and shipping a generated token as a Project's display name.
+  </notes>
+
+  <execution><skill>.claude/skills/task-execute/SKILL.md</skill></execution>
+</task>

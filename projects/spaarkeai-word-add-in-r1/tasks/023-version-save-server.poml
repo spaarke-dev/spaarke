@@ -1,0 +1,161 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="023" project="spaarkeai-word-add-in-r1">
+  <metadata>
+    <title>FR-11 server: make ExistingDocumentId/IsNewVersion real in SaveAsync</title>
+    <phase>2 Save flow</phase>
+    <gate>012 complete</gate>
+    <status>not-started</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Data-integrity change on the BFF save spine (`POST /api/office/save`); modifies `.cs` on the write path where the failure mode is a duplicate or a lost `sprk_document` row.</rigor-reason>
+    <model-tier>opus</model-tier>
+    <model-tier-reason>High blast radius: `SaveAsync` is shared by Email, Attachment, and Document content types, feeds the idempotency key, the ProcessingJob payload, the content-dedup gate, and the finalization queue. Getting the scoping wrong silently changes email save behavior.</model-tier-reason>
+    <effort>xhigh</effort>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <deps>012</deps>
+    <tags>bff-api, save-flow, dataverse, spe, data-integrity</tags>
+    <estimated-effort>1-2 days</estimated-effort>
+  </metadata>
+
+  <prompt>`SaveRequest.DocumentMetadata` declares `IsNewVersion`, `ExistingDocumentId`, and `VersionComment`, but all three are INERT — the only server reference is inside the idempotency-key string, and no client sends them. Make them real in `OfficeService.SaveAsync` so that a save carrying `ExistingDocumentId` writes a NEW VERSION of that existing `sprk_document` instead of creating a second row, scoped strictly to `ContentType=Document`.</prompt>
+
+  <role>SPAARKE platform developer. Deep expertise in the BFF Office save spine, SharePoint Embedded versioning via `SpeFileStore`, Dataverse `sprk_document` identity (the `sprk_graphitemid_uk` alternate key), and the content-dedup layer. Follow ADRs strictly.</role>
+
+  <goal>A `POST /api/office/save` with `ContentType=Document` and a populated `document.existingDocumentId` results in exactly ONE `sprk_document` row (the existing one) with an incremented SPE version, and no second row. A save WITHOUT `existingDocumentId` behaves exactly as it does today. Email and Attachment behavior is byte-for-byte unchanged. Contract and integration tests prove all three.</goal>
+
+  <context>
+    <background>
+      plan.md finding F-d: FR-11's server hook is inert. `ExistingDocumentId` (`SaveRequest.cs:369`), `IsNewVersion` (`:364`), and `VersionComment` (`:375`) exist on `DocumentMetadata`, but the ONLY server reference to `ExistingDocumentId` is inside the idempotency-key canonical string at `OfficeService.cs:620`. No client sends any of the three — `useSaveFlow.ts:854-859` populates only `fileName`, `title`, `contentType`, and `contentBase64`. The contract is DECLARED AND UNIMPLEMENTED ON BOTH SIDES. Do not describe it as "already wired".
+
+      Verified as-built save path (do not re-derive):
+      - `OfficeService.SaveAsync` begins at `Services/Office/OfficeService.cs:168`.
+      - Container resolution is `ResolveContainerAsync` (private, `:117-165`). `SaveRequest.ContainerId` was DELETED 2026-08-30 by task 085 and `FolderPath` on 2026-08-28; large inline warnings sit at `SaveRequest.cs:24-47`. MUST NOT reintroduce either.
+      - The Document branch decodes base64 at `:376-387` and sanitizes the filename via `SpeUploadPath.SanitizeFileName` at `:408` — that sanitization is the folder-minting fix and is load-bearing.
+      - Upload happens at `:421` via `_storageUploader.UploadToSpeAsync(containerId, fileName, contentStream, ct)`.
+      - Record creation happens at `:455` via `_documentPersistence.CreateDocumentWithSpePointersAsync(...)`, which returns `(documentId, wasContentDuplicate)`. Inside it, `ContentDedupDetector.ReconcileAsync` runs gate-after-write and, on a byte-identical hit, returns the CANONICAL id with `wasContentDuplicate = true`; `SaveAsync` then deletes the transient blob at `:475` and short-circuits.
+      - Finalization is queued at `:538` via `_jobQueue.QueueUploadFinalizationAsync(...)`, carrying `documentId`.
+      - The idempotency key at `:611-625` already includes `request.Document?.ExistingDocumentId` in its canonical string, so a version save and a fresh save of the same filename already hash differently. Confirm this before changing anything.
+      - `sprk_graphitemid_uk` is the alternate key that guarantees one `sprk_document` per SPE drive item. NFR-07: MUST NOT relax it.
+
+      This task is the SERVER half only. Task 024 is the client half and depends on this one.
+    </background>
+    <relevant-files>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Services/Office/OfficeService.cs</file>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Services/Office/OfficeDocumentPersistence.cs</file>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Services/Office/OfficeStorageUploader.cs</file>
+      <file role="canonical-reference">src/server/api/Sprk.Bff.Api/Models/Office/SaveRequest.cs</file>
+      <file role="canonical-reference">src/server/api/Sprk.Bff.Api/Services/Documents/ContentDedupDetector.cs</file>
+      <file role="canonical-reference">src/server/api/Sprk.Bff.Api/Services/Compose/ComposeCreateOnSavePromoter.cs</file>
+      <file role="canonical-reference">src/server/api/Sprk.Bff.Api/Api/Office/OfficeEndpoints.cs</file>
+      <file role="modify">tests/integration/contract/Api/Office/OfficeEndpointsContractTests.cs</file>
+    </relevant-files>
+    <dependencies>
+      <dependency task="012" status="pending">FR-01 server identity resolver — establishes how an open document maps to an existing `sprk_document`, which is where the client (task 024) will obtain the `existingDocumentId` this task consumes.</dependency>
+    </dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="project">SCOPE — this change applies to `ContentType=Document` ONLY. The Email and Attachment branches of `SaveAsync` MUST behave byte-for-byte as they do today. Guard the new behavior on the content type explicitly; do not rely on `request.Document` being null for the other types.</constraint>
+    <constraint source="project">SCOPE — NFR-07: `sprk_graphitemid_uk` on the SPE drive-item id MUST NOT be relaxed, widened, or worked around. Compose's transient-key dedup and promote-idempotency both rest on it.</constraint>
+    <constraint source="project">SCOPE — within `SaveRequest`: `ContainerId` and `FolderPath` are deleted and MUST NOT be reintroduced in any form, including as a version-save parameter. Read the inline warnings at `SaveRequest.cs:24-47` before touching the model. The container continues to come from `ResolveContainerAsync`, derived from the authorized record.</constraint>
+    <constraint source="project">SCOPE — the version save MUST write a new SPE version of the SAME drive item, not a second item with a suffixed name. If `SpeFileStore` cannot express that, escalate rather than approximating it with a rename.</constraint>
+    <constraint source="project">SCOPE — the filename sanitization at `OfficeService.cs:408` (`SpeUploadPath.SanitizeFileName`) is the folder-minting fix and MUST remain on the version-save path too.</constraint>
+    <constraint source="project">SCOPE — the content-dedup gate: on the version-save path the uploaded bytes are by definition a new revision of a document that already exists, so the byte-identical short-circuit at `OfficeService.cs:473-498` must not delete the version the user just saved or redirect them to a different canonical. State explicitly in the PR how the version path interacts with `ContentDedupDetector.ReconcileAsync`.</constraint>
+    <constraint source="ADR-007">SCOPE — all SPE operations, including version writes, go through the `SpeFileStore` facade. MUST NOT let a Microsoft.Graph SDK type leak into `OfficeService`, `OfficeStorageUploader`, or `OfficeDocumentPersistence`.</constraint>
+    <constraint source="ADR-008">SCOPE — authorization for the target document stays on an endpoint filter on the `/api/office` group. MUST NOT add an inline permission check inside `SaveAsync`.</constraint>
+    <constraint source="ADR-019">SCOPE — every new failure mode (unknown `ExistingDocumentId`, caller not authorized on that document, document exists but has no SPE pointers) returns ProblemDetails with a distinct code, not a generic 500.</constraint>
+    <constraint source="ADR-044">SCOPE — `ExistingDocumentId` MUST be canonicalized bare-lowercase via `cleanGuid` at every Dataverse boundary and MUST NOT be interpolated raw into an OData key predicate.</constraint>
+    <constraint source="ADR-010">SCOPE — DI minimalism: reuse the already-registered `SpeFileStore`, `OfficeStorageUploader`, and `OfficeDocumentPersistence`. MUST NOT add a new interface-plus-implementation pair for versioning.</constraint>
+    <constraint source="ADR-038">SCOPE — this task modifies the behavior of `POST /api/office/save`, so it MUST add contract tests AND a data-mutation integration test asserting the one-row invariant. Banned: `Mock&lt;HttpMessageHandler&gt;`, DI-registration tests, ctor null-check tests. Cite `docs/adr/ADR-038-testing-strategy.md` — there is no concise copy in `.claude/adr/`.</constraint>
+    <constraint source="project">SCOPE — BFF publish size: measure the delta against a FRESH BUILD OF `origin/master`, never against the recorded baseline number (root CLAUDE.md §10 bullet 4). Zip both with PowerShell `Compress-Archive` and report both absolute sizes, the delta, and the tool name.</constraint>
+    <constraint source="project">SCOPE — the PR description MUST state the Placement Justification for this change per `.claude/constraints/bff-extensions.md`, and MUST include the §11 justification for extending `SaveAsync` rather than adding a new route.</constraint>
+    <constraint source="project">SCOPE — run `/conflict-check` before opening this BFF PR. `spaarkeai-compose-r8` owns the other `.docx` write path and `unified-access-control-r2` is live on the same hot path.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>Office save spine, SPE versioning, Dataverse document identity, content dedup</topic>
+    <files>
+      <file>projects/spaarkeai-word-add-in-r1/spec.md</file>
+      <file>projects/spaarkeai-word-add-in-r1/plan.md</file>
+      <file>projects/spaarkeai-word-add-in-r1/DEDUP-AND-SAVE-BACK-IDENTITY.md</file>
+      <file>docs/architecture/content-identity-and-deduplication-architecture.md</file>
+      <file>docs/architecture/office-outlook-teams-integration-architecture.md</file>
+      <file>.claude/adr/ADR-049-compose-shadow-document.md</file>
+      <file>.claude/adr/ADR-044-dataverse-guid-canonicalization.md</file>
+      <file>docs/adr/ADR-038-testing-strategy.md</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+    </files>
+    <patterns>
+      <pattern name="endpoint-filters" location=".claude/patterns/api/endpoint-filters.md">Authorization for the target document belongs on a filter attached to the save endpoint, not inside `SaveAsync`.</pattern>
+    </patterns>
+  </knowledge>
+
+  <steps mode="prescriptive">
+    <step order="0" name="Context + rigor declaration">Load projects/spaarkeai-word-add-in-r1/CLAUDE.md, spec.md FR-11 and NFR-07/NFR-08, DEDUP-AND-SAVE-BACK-IDENTITY.md, and the knowledge files above. Output the mandatory rigor declaration (FULL) per root CLAUDE.md §8. This task runs in PRESCRIPTIVE step mode — the sequence below binds, because it is a data-integrity change on a shared write path.</step>
+    <step order="1">Read, in order and in full: `SaveRequest.cs` (especially the deleted-field warnings at `:24-47` and `DocumentMetadata` at `:330-376`), `OfficeService.cs:117-165` (`ResolveContainerAsync`), `OfficeService.cs:168-605` (`SaveAsync`), `OfficeService.cs:611-625` (`GenerateIdempotencyKey`), and `OfficeDocumentPersistence.CreateDocumentWithSpePointersAsync`. Write a short trace of the current Document path into projects/spaarkeai-word-add-in-r1/notes/023-save-path-trace.md BEFORE changing any code.</step>
+    <step order="2">Confirm empirically that `ExistingDocumentId` has no effect today other than on the idempotency key: grep the whole `src/server` tree for `ExistingDocumentId`, `IsNewVersion`, and `VersionComment` and record every hit in the trace note. If any hit contradicts F-d, STOP and escalate.</step>
+    <step order="3">Determine the SPE versioning mechanism available through `SpeFileStore` for writing a new version of an existing drive item (identified by the existing document's `sprk_graphdriveid` + `sprk_graphitemid`). Record the chosen call and its version semantics in the trace note. If no such capability exists on the facade, fire the escalation trigger rather than adding a rename-based approximation.</step>
+    <step order="4">Add a version-save branch to `SaveAsync`, guarded on `request.ContentType == SaveContentType.Document` AND a non-empty `request.Document.ExistingDocumentId`. In that branch: resolve the existing `sprk_document` (canonicalized GUID), read its SPE pointers, refuse with a distinct ProblemDetails code if it does not exist or has no pointers, and write the new bytes as a new version of that same drive item through `SpeFileStore`.</step>
+    <step order="5">Ensure the version branch does NOT call `CreateDocumentWithSpePointersAsync` (which creates a row). Update the existing row's file metadata (size, path, filename where changed) instead — mirror the metadata-refresh discipline in `ComposeCreateOnSavePromoter.PromoteIfEphemeralAsync`, which updates only size and path on its existing-row branch and never mutates identity columns.</step>
+    <step order="6">Decide and implement the interaction with `ContentDedupDetector.ReconcileAsync` on the version path so a byte-identical re-save is not treated as a duplicate that deletes the just-written version. Document the decision inline and in the PR.</step>
+    <step order="7">Thread `VersionComment` and `IsNewVersion` through to whatever the chosen SPE version call accepts, or state explicitly in the PR that the platform does not carry a version comment and record `VersionComment` on the Dataverse row instead. Do not leave them inert.</step>
+    <step order="8">Ensure the finalization queue call at `OfficeService.cs:538` receives the EXISTING document id on the version path, so downstream artifacts and AI attach to the same record.</step>
+    <step order="9">Verify the Email and Attachment branches are untouched: run the existing Office contract and integration tests and diff the behavior. `git diff` must show no change inside either branch.</step>
+    <step order="10">Add tests: (a) a data-mutation integration test asserting exactly ONE `sprk_document` row after a version save, with an incremented SPE version; (b) a contract test asserting a save WITHOUT `existingDocumentId` still creates a new document as before; (c) negative contract tests for an unknown `existingDocumentId`, an unauthorized caller on that document, and an `existingDocumentId` sent with `ContentType=Email` (which must be ignored or rejected, never acted on).</step>
+    <step order="11">Run `dotnet build` and the full Office test set. All green.</step>
+    <step order="12">Measure BFF publish size against a fresh `origin/master` build per the constraint above; record both absolute sizes, the delta, and the zip tool.</step>
+    <step order="13">Run `/conflict-check`, then code-review + adr-check per task-execute Step 9.5.</step>
+    <step order="14">Update tasks/TASK-INDEX.md: set this task's status to ✅.</step>
+    <step order="15">Document any deviation in projects/spaarkeai-word-add-in-r1/notes/.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If making `ExistingDocumentId` live would change behavior for the Email or Attachment content types in any way, STOP and escalate per CLAUDE.md §6 — the change MUST be scoped to `ContentType=Document` only.</trigger>
+    <trigger>If `SpeFileStore` exposes no way to write a new version of an existing drive item, STOP and escalate per CLAUDE.md §6. Do NOT approximate versioning with a renamed second item, a delete-then-upload, or a direct Graph SDK call that bypasses the ADR-007 facade.</trigger>
+    <trigger>If satisfying the one-row invariant appears to require relaxing or bypassing the `sprk_graphitemid_uk` alternate key, STOP and escalate — NFR-07 makes that key inviolable, and Compose's promote-idempotency depends on it.</trigger>
+    <trigger>If the content-dedup gate cannot be reconciled with the version path without changing `ContentDedupDetector` itself, STOP and escalate rather than editing the shared detector; `email-communication-intelligence-r2` shipped it and other paths depend on its semantics.</trigger>
+  </escalation>
+
+  <justification>
+    <existing>The contract already exists on `SaveRequest.DocumentMetadata`: `IsNewVersion` (`src/server/api/Sprk.Bff.Api/Models/Office/SaveRequest.cs:364`), `ExistingDocumentId` (`:369`), `VersionComment` (`:375`). Grep run: `grep -rn "ExistingDocumentId" --include=*.cs src/server` returns exactly ONE non-model hit — the idempotency-key canonical string at `Services/Office/OfficeService.cs:620`. The nearest working analogue for existing-row handling is `ComposeCreateOnSavePromoter.PromoteIfEphemeralAsync:76`, on a different (Compose) spine.</existing>
+    <extension>Yes — extend `SaveAsync`. A new route would duplicate everything the save spine already owns (idempotency, container derivation from the authorized record, ProcessingJob creation, SPE upload, dedup gate, finalization queue) and would give the add-in two save endpoints whose behavior must be kept in lockstep. The declared-but-inert fields are the contract's own statement that this belongs on `SaveAsync`.</extension>
+    <cost-of-doing-nothing>Every re-save of a Spaarke-sourced Word document creates a SECOND `sprk_document` row instead of a version. The matter accumulates duplicate document records that differ only by revision, the record card and profile point at whichever row was created last, and the earlier row's associations, profile, and index entry are stranded. This is Success Criterion 4 in spec.md and the single most-reported UAT defect on the save flow.</cost-of-doing-nothing>
+  </justification>
+
+  <tools>
+    <tool name="dotnet">Build the BFF; run the Office contract and integration tests.</tool>
+    <tool name="npm">Not used by this task (server-side only).</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Office/OfficeService.cs</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Office/OfficeDocumentPersistence.cs</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Office/OfficeStorageUploader.cs</output>
+    <output type="test">tests/integration/contract/Api/Office/OfficeEndpointsContractTests.cs</output>
+    <output type="doc">projects/spaarkeai-word-add-in-r1/notes/023-save-path-trace.md</output>
+    <output type="doc">projects/spaarkeai-word-add-in-r1/notes/023-publish-size.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Given a `ContentType=Document` save carrying a valid `document.existingDocumentId`, when the save completes, then EXACTLY ONE `sprk_document` row exists for that document (the pre-existing one) and no second row was created — asserted by a data-mutation integration test that counts rows before and after.</criterion>
+    <criterion testable="true">Given the same version save, when it completes, then the SPE drive item's version count is incremented and the drive-item id is UNCHANGED (the same `sprk_graphitemid` the row already carried).</criterion>
+    <criterion testable="true">Given a `ContentType=Document` save with NO `document.existingDocumentId`, when the save completes, then a new `sprk_document` is created exactly as it is today — asserted by a contract test that is executing, not skipped.</criterion>
+    <criterion testable="true">Given `IsNewVersion` and `VersionComment` on a version save, when the save completes, then neither remains inert: each is either carried into the SPE version call or recorded on the Dataverse row, and the PR states which.</criterion>
+    <criterion testable="true">Negative: given an `existingDocumentId` that does not resolve to a `sprk_document`, when the save is submitted, then it returns a distinct ProblemDetails code (not a generic 500) and creates no row and no SPE item.</criterion>
+    <criterion testable="true">Negative: given an `existingDocumentId` the caller is not authorized on, when the save is submitted, then it is refused by the endpoint filter and no bytes are written to SPE.</criterion>
+    <criterion testable="true">Negative: given an existing document row with no SPE pointers, when a version save targets it, then it returns a distinct ProblemDetails code rather than silently falling back to creating a new item.</criterion>
+    <criterion testable="true">Negative: given `existingDocumentId` sent alongside `ContentType=Email` or `ContentType=Attachment`, when the save runs, then the Email/Attachment behavior is identical to master and the field is not acted on.</criterion>
+    <criterion testable="true">`git diff` shows no change inside the Email or Attachment branches of `SaveAsync`, and the pre-existing Office tests pass unchanged.</criterion>
+    <criterion testable="true">`SaveRequest` gains no `ContainerId` or `FolderPath` member, and the inline warnings at `SaveRequest.cs:24-47` remain intact.</criterion>
+    <criterion testable="true">No Microsoft.Graph SDK type appears in `OfficeService.cs`, `OfficeStorageUploader.cs`, or `OfficeDocumentPersistence.cs` after this change (ADR-007).</criterion>
+    <criterion testable="true">`ContentDedupDetector.cs` is unmodified by this task; verified by `git diff --name-only`.</criterion>
+    <criterion testable="true">`dotnet build` is green and the full Office contract + integration test set passes.</criterion>
+    <criterion testable="true">BFF publish size is measured against a fresh `origin/master` build with `Compress-Archive`, both absolute sizes and the delta are recorded, and the delta is under the +5 MB escalation threshold.</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    spec.md FR-11 (server half) + Success Criterion 4; plan.md §3 finding F-d and §4 Phase 2 task 023. This task deliberately stops at the server boundary — task 024 sends the field from the client and owns the "Save as new document" override, whose failure mode is NFR-08 data loss. Keep the two halves separable so a rollback of one does not strand the other.
+  </notes>
+
+  <execution><skill>.claude/skills/task-execute/SKILL.md</skill></execution>
+</task>

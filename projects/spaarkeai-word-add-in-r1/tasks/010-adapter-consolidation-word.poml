@@ -1,0 +1,171 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="010" project="spaarkeai-word-add-in-r1">
+  <metadata>
+    <title>FR-04: consolidate onto one Word adapter reached via HostAdapterFactory</title>
+    <phase>1 Foundation</phase>
+    <gate>006,007,008 complete — typecheck debt cleared in shared/adapters and word/** so a new error is visible</gate>
+    <status>not-started</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Modifies .ts/.tsx on the host-abstraction spine, activates dead infrastructure, and deletes a live adapter. Tags include frontend. A wrong ordering silently reintroduces the 2026-09-03 UAT defect.</rigor-reason>
+    <model-tier>opus</model-tier>
+    <model-tier-reason>High blast radius with an invisible failure mode: a flat-OOXML regression passes typecheck, passes the existing tests, and only surfaces as broken SPE preview and broken AI extraction after deploy. Judgment is needed on what "byte-identical" means across the two extraction paths.</model-tier-reason>
+    <effort>xhigh</effort>
+    <parallel-group>P1-a</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <deps>006,007,008</deps>
+    <tags>frontend, office-addins, adapter, refactor, typescript, unit-test, word, outlook</tags>
+    <estimated-effort>6-9 hours</estimated-effort>
+  </metadata>
+
+  <prompt>Collapse the two competing Word host adapters into one, reached through HostAdapterFactory, WITHOUT losing the .docx byte-extraction path that UAT proved correct on 2026-09-03. The order of operations is load-bearing: port the working extraction into the surviving adapter FIRST, activate the factory SECOND, delete the duplicate LAST — reversing this order regresses the save.</prompt>
+
+  <role>SPAARKE platform developer. Expert in Office.js host adapters, TypeScript strict mode, and OOXML/.docx byte handling in Office add-ins. Follow ADRs strictly.</role>
+
+  <goal>Exactly one Word adapter exists (`shared/adapters/WordAdapter.ts`), it produces .docx bytes via `Office.context.document.getFileAsync(Office.FileType.Compressed)` slice assembly, both taskpanes obtain their adapter through `HostAdapterFactory.createAndInitialize()`, `word/WordHostAdapter.ts` is deleted, unit tests cover the .docx path, and Outlook is verified unregressed BEFORE the deletion.</goal>
+
+  <context>
+    <background>
+      plan.md finding **F-e**: FR-04 as written would regress the .docx save. Three verified facts drive this task.
+      (1) `HostAdapterFactory.registerAdapter()` has ZERO call sites — the registry is empty and `create()` always throws `INVALID_HOST`. The factory is dead infrastructure.
+      (2) Both taskpanes bypass it and `new` their adapter directly: `word/taskpane/index.tsx:124-126` and `outlook/taskpane/index.tsx:219-221`.
+      (3) `shared/adapters/WordAdapter.ts:221-270` — the adapter FR-04 wants to keep — still uses the known-broken `body.getOoxml()` path. The correct path lives in the adapter FR-04 wants to delete: `word/WordHostAdapter.ts:171-220` `getCompressedFile()`, whose header comment at :126-134 records why flat OOXML broke SPE preview and AI extraction (UAT 2026-09-03).
+      So the naive reading of FR-04 ("route Word through the factory onto WordAdapter, delete the duplicate") would ship the broken extraction. The port must precede the routing, and the deletion must follow an Outlook verification.
+    </background>
+    <relevant-files>
+      <file role="modify">src/client/office-addins/shared/adapters/WordAdapter.ts</file>
+      <file role="canonical-reference">src/client/office-addins/word/WordHostAdapter.ts</file>
+      <file role="modify">src/client/office-addins/shared/adapters/HostAdapterFactory.ts</file>
+      <file role="modify">src/client/office-addins/word/taskpane/index.tsx</file>
+      <file role="modify">src/client/office-addins/outlook/taskpane/index.tsx</file>
+      <file role="modify">src/client/office-addins/shared/adapters/__tests__/WordAdapter.test.ts</file>
+      <file role="canonical-reference">src/client/office-addins/shared/adapters/__tests__/OutlookAdapter.test.ts</file>
+      <file role="canonical-reference">src/client/office-addins/shared/adapters/IHostAdapter.ts</file>
+      <file role="canonical-reference">src/client/office-addins/outlook/OutlookHostAdapter.ts</file>
+      <file role="modify">src/client/office-addins/shared/adapters/index.ts</file>
+      <file role="modify">src/client/office-addins/CLAUDE.md</file>
+    </relevant-files>
+    <dependencies>
+      <dependency task="006" status="pending">typecheck debt cleared in shared/taskpane/**</dependency>
+      <dependency task="007" status="pending">typecheck debt cleared in shared/adapters + shared/services — new errors introduced here must be visible against a clean baseline</dependency>
+      <dependency task="008" status="pending">typecheck debt cleared in word/** and outlook/**</dependency>
+    </dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="project">Scope: the .docx byte payload produced by the consolidated `WordAdapter` after this task MUST be byte-identical to what `word/WordHostAdapter.getCompressedFile()` (`:171-220`) produces today for the same open document. A flat-OOXML regression re-breaks SPE preview and AI extraction — the exact 2026-09-03 UAT defect. Verify by comparing the assembled ArrayBuffer's byte length and its leading PK zip signature (0x50 0x4B 0x03 0x04) against the reference path; do not accept "it compiles and returns a buffer" as verification.</constraint>
+    <constraint source="project">Scope: step ordering inside this task is PRESCRIPTIVE, not directional. Port the extraction, then register, then route, then verify Outlook, then delete. Deleting `word/WordHostAdapter.ts` before the Outlook verification passes is forbidden — it removes the reference implementation you would need to recover from.</constraint>
+    <constraint source="ADR-049">Scope: any code path in this task that reads, assembles or forwards .docx bytes. ADR-049 governs the OTHER .docx write path (Compose). This task must not import from, refactor, or otherwise couple to `Services/Compose/**` or `Spaarke.Compose.Components`; the add-in's extraction stays independent. Read ADR-049 before touching .docx bytes so you recognize what NOT to entangle with.</constraint>
+    <constraint source="ADR-028">Scope: the taskpane entry points modified here. Do NOT construct MSAL (`new PublicClientApplication` / `createNestablePublicClientApplication`) while rewiring the bootstrap — auth stays inside `@spaarke/auth` `OfficeNaaStrategy` via `shared/services/AuthService.ts`. Arch-test enforced.</constraint>
+    <constraint source="ADR-012">Scope: adapter and view code touched here. The add-in keeps its own thin components under `shared/taskpane/`; do NOT pull in `@spaarke/ui-components` while refactoring (project-scoped Path A exception, project CLAUDE.md Decisions 2026-09-04) — its components assume React 19 and some are Xrm-bound (NFR-03).</constraint>
+    <constraint source="project">Scope: `shared/adapters/**`. The consolidated adapter is the ONLY Word adapter after this task. Do not leave `word/WordHostAdapter.ts` in place "deprecated" — a second live implementation is what created this defect.</constraint>
+    <constraint source="project">Scope: build commands in this module. There is NO `build:prod` script in `src/client/office-addins` — `npm run build` IS the production build. Install with `npm install --legacy-peer-deps --no-audit --no-fund`; a bare install fails with ERESOLVE.</constraint>
+    <constraint source="ADR-021">Scope: any pane surface that re-renders after the adapter swap. Fluent UI v9 only, Office theme drives dark mode via `hooks/useOfficeTheme.ts`. This task should not change UI, but must not break theming through the bootstrap rewrite.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>Office.js host adapters, .docx byte extraction, factory activation</topic>
+    <files>
+      <file>projects/spaarkeai-word-add-in-r1/spec.md</file>
+      <file>projects/spaarkeai-word-add-in-r1/plan.md</file>
+      <file>projects/spaarkeai-word-add-in-r1/CLAUDE.md</file>
+      <file>src/client/office-addins/CLAUDE.md</file>
+      <file>docs/architecture/office-outlook-teams-integration-architecture.md</file>
+      <file>.claude/adr/ADR-049-compose-shadow-document.md</file>
+      <file>.claude/adr/ADR-028-spaarke-auth-architecture.md</file>
+      <file>.claude/adr/ADR-012-shared-components.md</file>
+      <file>.claude/adr/ADR-021-fluent-design-system.md</file>
+      <file>docs/adr/ADR-038-testing-strategy.md</file>
+    </files>
+    <patterns>
+      <pattern name="fluent-v9-host-visual-fit" location=".claude/patterns/ui/fluent-v9-host-visual-fit.md">Explicitly covers Office add-ins. Consult if the bootstrap rewrite affects how the pane mounts or themes.</pattern>
+      <pattern name="spaarke-sso-binding" location=".claude/patterns/auth/spaarke-sso-binding.md">INV-1..INV-8. The taskpane entry points you rewrite are where NAA is bootstrapped — do not disturb the invariants while changing adapter construction.</pattern>
+    </patterns>
+  </knowledge>
+
+  <steps mode="prescriptive">
+    <step order="0" name="Context + rigor declaration">Load project CLAUDE.md, spec.md FR-04, plan.md §3 finding F-e, and `src/client/office-addins/CLAUDE.md`. Declare: RIGOR LEVEL FULL, model-tier opus, effort xhigh, steps mode PRESCRIPTIVE. Read BOTH adapters end to end before writing anything — specifically `word/WordHostAdapter.ts:126-220` (the header comment plus `getCompressedFile()`) and `shared/adapters/WordAdapter.ts:221-270` (the broken `body.getOoxml()` path).</step>
+    <step order="1">Port `getCompressedFile()` and its slice-assembly logic from `word/WordHostAdapter.ts:171-220` INTO `shared/adapters/WordAdapter.ts`, REPLACING the `body.getOoxml()` path at `:221-270`. Carry the header comment at `:126-134` with it — it is the record of why this path exists. Use `Office.context.document.getFileAsync(Office.FileType.Compressed, { sliceSize: 65536 })`, read every slice in order, concatenate into a single ArrayBuffer, and close the file handle in a finally block. Do NOT "improve" the slice size or the assembly while porting.</step>
+    <step order="2">Add unit tests for the .docx path in `src/client/office-addins/shared/adapters/__tests__/WordAdapter.test.ts`, following `__tests__/OutlookAdapter.test.ts` as the shape reference. Cover: multi-slice assembly produces the concatenated buffer in slice order; the returned buffer starts with the PK zip signature (0x50 0x4B 0x03 0x04); a slice read failure surfaces a typed `CONTENT_RETRIEVAL_FAILED` error and still closes the file handle; and a single-slice document is handled. Mock `Office.context.document.getFileAsync` per the existing `shared/__mocks__` convention — do NOT introduce a new mocking framework.</step>
+    <step order="3">Call `HostAdapterFactory.registerAdapter()` for BOTH hosts at the taskpane entry points: register `'word'` with the consolidated `WordAdapter` in `word/taskpane/index.tsx`, and `'outlook'` with `OutlookAdapter` (or the currently-constructed Outlook adapter class) in `outlook/taskpane/index.tsx`. Registration must run before any `create()`/`createAndInitialize()` call in that entry point.</step>
+    <step order="4">Route both taskpanes through `HostAdapterFactory.createAndInitialize()`, replacing the direct `new` at `word/taskpane/index.tsx:124-126` and `outlook/taskpane/index.tsx:219-221`. Preserve the existing initialization ordering relative to auth bootstrap and `Office.onReady` — move the construction, not the lifecycle.</step>
+    <step order="5">VERIFY OUTLOOK STILL WORKS BEFORE DELETING ANYTHING. Run `npm run typecheck` and the full adapter test suite; then exercise the Outlook pane per the ui-tests below (load pane, read the selected item, run a save). If Outlook regresses, STOP and fire the escalation trigger — do not proceed to step 6.</step>
+    <step order="6">Delete `src/client/office-addins/word/WordHostAdapter.ts`. Remove every import of it and any re-export from `shared/adapters/index.ts` or other barrels. Confirm with a repo grep for `WordHostAdapter` that zero references remain.</step>
+    <step order="7">Update the entry-point table in `src/client/office-addins/CLAUDE.md` (the "Host abstraction" row currently names `word/WordHostAdapter.ts`) so it reflects the single adapter reached via the factory. Do not rewrite unrelated sections of that file.</step>
+    <step order="8">Run `npm run typecheck` and `npm run build` in `src/client/office-addins` (after `npm install --legacy-peer-deps --no-audit --no-fund`). Both must be clean. Run the full add-in test suite.</step>
+    <step order="9">Update projects/spaarkeai-word-add-in-r1/tasks/TASK-INDEX.md: set this task's status to ✅.</step>
+    <step order="10">Document any deviation in projects/spaarkeai-word-add-in-r1/notes/ — in particular, record the byte-length/signature comparison evidence from the constraint check so a later reader can confirm the extraction was not regressed.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If Outlook regresses at step 5 — pane fails to load, adapter init throws, item read fails, or save breaks — STOP. Do NOT delete `word/WordHostAdapter.ts`, and do NOT "fix forward" by special-casing Outlook back onto direct construction. Escalate per CLAUDE.md §6 with the failure symptom and the factory registration you added.</trigger>
+    <trigger>If the ported `getCompressedFile()` cannot be made to produce byte-identical output to the reference implementation (differing length, missing PK signature, or a different assembly order), STOP and escalate rather than shipping "close enough" bytes. Silently accepting a different payload is the 2026-09-03 UAT defect recurring.</trigger>
+    <trigger>If activating the factory surfaces a latent Office.js host-detection problem (for example `Office.context.host` undefined in a supported host), STOP and escalate per CLAUDE.md §6 — do not add a host-sniffing fallback that bypasses `detectHostType()`.</trigger>
+  </escalation>
+
+  <ui-tests>
+    <test name="Word pane loads through the factory and extracts .docx bytes">
+      <steps>
+        <step>Sideload the Word add-in and open a .docx document.</step>
+        <step>Open the Spaarke task pane and confirm it mounts without an adapter error.</step>
+        <step>Run a save from the Save view against a test Matter.</step>
+        <step>Download the saved file from Spaarke and open it in Word.</step>
+      </steps>
+      <expected>The pane mounts, the save completes, and the downloaded file opens as a valid .docx (not a flat OOXML blob). SPE preview renders the document.</expected>
+    </test>
+    <test name="Outlook pane is unregressed after factory activation">
+      <steps>
+        <step>Sideload the Outlook add-in and select an email.</step>
+        <step>Open the Spaarke task pane.</step>
+        <step>Confirm the selected item's subject and sender render.</step>
+        <step>Run a save of the email against a test Matter.</step>
+      </steps>
+      <expected>Pane mounts, item metadata renders, save completes — identical behavior to before this task.</expected>
+    </test>
+    <test name="Dark mode unaffected by the bootstrap rewrite (ADR-021)">
+      <steps>
+        <step>With the pane open in Word, switch the Office theme to Dark (File - Account - Office Theme - Black).</step>
+        <step>Reload the task pane.</step>
+        <step>Repeat in Outlook.</step>
+      </steps>
+      <expected>Both panes render in dark tokens with no hardcoded light backgrounds and no unreadable text; theming continues to come from `useOfficeTheme`.</expected>
+    </test>
+  </ui-tests>
+
+  <tools>
+    <tool name="npm">typecheck, build (NOTE: `npm run build` IS production here; there is no `build:prod`), test — run after `npm install --legacy-peer-deps --no-audit --no-fund`</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/client/office-addins/shared/adapters/WordAdapter.ts</output>
+    <output type="code">src/client/office-addins/shared/adapters/HostAdapterFactory.ts</output>
+    <output type="code">src/client/office-addins/word/taskpane/index.tsx</output>
+    <output type="code">src/client/office-addins/outlook/taskpane/index.tsx</output>
+    <output type="test">src/client/office-addins/shared/adapters/__tests__/WordAdapter.test.ts</output>
+    <output type="doc">src/client/office-addins/CLAUDE.md</output>
+    <output type="doc">projects/spaarkeai-word-add-in-r1/notes/010-adapter-consolidation.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Given the repo after this task, when grepping for `WordHostAdapter`, then zero references remain and `src/client/office-addins/word/WordHostAdapter.ts` does not exist.</criterion>
+    <criterion testable="true">Given a Word document open in the host, when `WordAdapter` extracts document content, then it uses `Office.context.document.getFileAsync(Office.FileType.Compressed, { sliceSize: 65536 })` slice assembly and the returned buffer begins with the PK zip signature 0x50 0x4B 0x03 0x04.</criterion>
+    <criterion testable="true">Given the same document, when the consolidated extraction runs, then the produced byte length matches what `getCompressedFile()` produced before consolidation (evidence recorded in notes/).</criterion>
+    <criterion testable="true">Given `shared/adapters/WordAdapter.ts` after this task, when searching it for `getOoxml`, then no call remains.</criterion>
+    <criterion testable="true">Given either taskpane entry point, when it obtains its adapter, then it calls `HostAdapterFactory.createAndInitialize()` and no `new WordAdapter()` / direct adapter construction remains in `word/taskpane/index.tsx` or `outlook/taskpane/index.tsx`.</criterion>
+    <criterion testable="true">Given `HostAdapterFactory.getRegisteredHosts()` after taskpane bootstrap, when inspected, then it contains the host for that entry point (registration is no longer empty).</criterion>
+    <criterion testable="true">Negative: given a multi-slice read where one slice fails, when extraction runs, then a typed `CONTENT_RETRIEVAL_FAILED` HostAdapterError is surfaced (not an unhandled rejection) and the Office file handle is closed.</criterion>
+    <criterion testable="true">Negative: given an unsupported Office host, when `HostAdapterFactory.create()` is called, then it throws `INVALID_HOST` — the pre-existing contract is preserved, not swallowed.</criterion>
+    <criterion testable="true">Given the Outlook pane after consolidation, when an email is selected and saved, then behavior is identical to before this task (verified at step 5, before the deletion).</criterion>
+    <criterion testable="true">Given `src/client/office-addins/CLAUDE.md`, when reading the "Host abstraction" entry-point row, then it names the single `shared/adapters/WordAdapter.ts` reached via `HostAdapterFactory` and no longer names `word/WordHostAdapter.ts`.</criterion>
+    <criterion testable="true">`npm run typecheck` is clean, `npm run build` succeeds, and all adapter unit tests pass.</criterion>
+    <criterion testable="true">No MSAL construction was added to the add-in package (ADR-028 arch-test remains green).</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    spec.md FR-04. plan.md §3 finding F-e and §7 risk R-4 ("HostAdapterFactory activation surfaces latent breakage in Outlook").
+    Parallel with task 011 in wave P1-a: 011 touches only `word/word-manifest.xml`, a new `word/manifest.json`, and `webpack.config.js`; this task touches adapters, taskpane entry points, tests and the module CLAUDE.md. The file sets are disjoint — no shared file, no shared symbol.
+    This task is modify-only (it removes a component rather than adding one), so no `justification` block is required per CLAUDE.md §11.
+    Downstream: task 013 adds `getDocumentUrl()` to this consolidated adapter and depends on the factory being live.
+  </notes>
+
+  <execution><skill>.claude/skills/task-execute/SKILL.md</skill></execution>
+</task>

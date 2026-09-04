@@ -1,0 +1,131 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="011" project="spaarkeai-word-add-in-r1">
+  <metadata>
+    <title>FR-05: migrate Word to the unified JSON manifest</title>
+    <phase>1 Foundation</phase>
+    <gate>startable</gate>
+    <status>not-started</status>
+    <rigor>STANDARD</rigor>
+    <rigor-reason>New file creation (`word/manifest.json`) plus a build-config edit, with explicit constraints. No .cs/.ts service logic; the risk is deployment/registration, not code correctness. Quality gates skipped per the Step 3.5.5 decision tree.</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Fully specified translation task with an in-repo precedent to copy verbatim (`outlook/manifest.json`). No architectural judgment required.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>P1-a</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <deps>none</deps>
+    <tags>office-addins, manifest, word, build-config, deployment</tags>
+    <estimated-effort>4-6 hours</estimated-effort>
+  </metadata>
+
+  <prompt>Migrate the Word add-in from the legacy XML manifest (`word/word-manifest.xml`) to the unified JSON manifest, following `outlook/manifest.json` as the in-repo precedent. This closes two real gaps Word has today: no `webApplicationInfo` block (so no SSO identity binding) and a declared `WordApi MinVersion="1.1"` that contradicts the adapter's demand for 1.3.</prompt>
+
+  <role>SPAARKE platform developer. Expert in Office Add-ins manifests (legacy XML and unified JSON), Office requirement sets, and webpack build-time templating. Follow ADRs strictly.</role>
+
+  <goal>A `word/manifest.json` unified manifest exists that mirrors `outlook/manifest.json`'s structure (runtimes, ribbon, `webApplicationInfo`), declares the correct WordApi requirement set, is parameterized by webpack the same way Outlook's is, carries a bumped 4-part version, and installs and runs the Word add-in on both desktop and web. `word/word-manifest.xml` is retained until that verification passes.</goal>
+
+  <context>
+    <background>
+      spec.md FR-05. `word/word-manifest.xml` today: version `1.0.6.0` (`:11`), `WordApi MinVersion="1.1"` (`:34`), a single `VersionOverrides` V1_0, DesktopFormFactor only, and exactly ONE control (`SaveButton` mapped to ShowTaskpane, `:61`). It has NO `FunctionFile` and NO `WebApplicationInfo`/SSO block.
+      `outlook/manifest.json` is the working precedent: 289 lines, `manifestVersion: "devPreview"`, version "1.0.22", three runtimes (`:44-100`), two ribbons (`:103-281`), and `webApplicationInfo` (`:285-288`).
+      Webpack parameterizes manifests at `webpack.config.js:178-227`. Outlook's manifest gets client-id/resource substitution at `:178-204`; the Word manifest handling at `:205-215` does not receive the same treatment and must be extended.
+      The `WordApi 1.1` vs adapter-demands-1.3 mismatch is a genuine defect, not a documentation nit: a host that satisfies 1.1 but not 1.3 will install the add-in and then fail at runtime inside the adapter.
+    </background>
+    <relevant-files>
+      <file role="new">src/client/office-addins/word/manifest.json</file>
+      <file role="canonical-reference">src/client/office-addins/outlook/manifest.json</file>
+      <file role="modify">src/client/office-addins/word/word-manifest.xml</file>
+      <file role="modify">src/client/office-addins/webpack.config.js</file>
+      <file role="canonical-reference">src/client/office-addins/shared/adapters/WordAdapter.ts</file>
+      <file role="canonical-reference">src/client/office-addins/CLAUDE.md</file>
+      <file role="canonical-reference">docs/architecture/office-outlook-teams-integration-architecture.md</file>
+    </relevant-files>
+    <dependencies>
+      <dependency task="none" status="complete">No task dependency. This task reads the adapter only to determine the required WordApi version; it does not modify adapter code.</dependency>
+    </dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="project">Scope: `word/manifest.json` structure. Follow `outlook/manifest.json` EXACTLY as the precedent — same `manifestVersion`, same top-level key ordering, same runtime/ribbon shape, same `webApplicationInfo` shape. Do not invent a different JSON layout or pull a structure from external documentation that diverges from the in-repo file.</constraint>
+    <constraint source="project">Scope: the WordApi requirement declaration. Reconcile the `WordApi MinVersion="1.1"` (`word-manifest.xml:34`) against what `shared/adapters/WordAdapter.ts` actually calls. Determine the true minimum from the adapter's Office.js usage and declare THAT. Do not silently copy 1.1 forward, and do not raise it beyond what the adapter needs (an over-declared requirement set blocks otherwise-capable hosts).</constraint>
+    <constraint source="ADR-028">Scope: the `webApplicationInfo` block being added to Word. It must carry the same app id / resource shape Outlook uses, sourced from the same build-time parameterization — never a hardcoded client id or secret. Auth v2 is secret-free; `.WithClientSecret` and any embedded credential are forbidden.</constraint>
+    <constraint source="project">Scope: `webpack.config.js:205-215` (the Word manifest branch). Extend it so the Word JSON manifest receives the same client-id/resource substitution Outlook's gets at `:178-204`. Reuse the existing substitution mechanism; do not add a second templating approach.</constraint>
+    <constraint source="project">Scope: file retention. Keep `word/word-manifest.xml` in the repo until the JSON manifest is verified installing AND running on BOTH Word desktop and Word on the web. Deleting the XML manifest before that verification leaves no rollback path for a sideload failure.</constraint>
+    <constraint source="project">Scope: versioning. Bump the 4-part version (currently `1.0.6.0`). Any manifest change requires an M365 Admin Center re-registration — note this in the outputs so the deploy task (042) picks it up.</constraint>
+    <constraint source="project">Scope: CI files. Do NOT edit `ci-router.yml`, `ci-tier1-blocking.yml`, or `ci-tier2-advisory.yml` — they are frozen under the shadow-comparison window opened 2026-08-27.</constraint>
+    <constraint source="project">Scope: deploy execution. Deploy is CI-only via `deploy-office-addins.yml`; never run the workflow as an agent. This task produces the manifest; it does not deploy it.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>Office Add-ins unified JSON manifest, requirement sets, webpack manifest templating</topic>
+    <files>
+      <file>projects/spaarkeai-word-add-in-r1/spec.md</file>
+      <file>projects/spaarkeai-word-add-in-r1/plan.md</file>
+      <file>projects/spaarkeai-word-add-in-r1/CLAUDE.md</file>
+      <file>src/client/office-addins/CLAUDE.md</file>
+      <file>docs/architecture/office-outlook-teams-integration-architecture.md</file>
+      <file>.claude/adr/ADR-028-spaarke-auth-architecture.md</file>
+    </files>
+    <patterns>
+      <pattern name="spaarke-sso-binding" location=".claude/patterns/auth/spaarke-sso-binding.md">INV-1..INV-8. The `webApplicationInfo` block you add is the manifest half of the SSO binding — check the invariants for what the resource URI and scopes must be.</pattern>
+    </patterns>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="0" name="Context + rigor declaration">Load project CLAUDE.md, spec.md FR-05, `src/client/office-addins/CLAUDE.md`, and the architecture doc's manifest-rules section. Declare: RIGOR LEVEL STANDARD, model-tier sonnet, effort high, steps mode DIRECTIONAL. Read `outlook/manifest.json` end to end and `word/word-manifest.xml` end to end before writing.</step>
+    <step order="1">Inventory what `word-manifest.xml` declares today: id/version/provider, hosts, the `WordApi 1.1` requirement (`:34`), the single `VersionOverrides` V1_0, DesktopFormFactor, and the one `SaveButton` control mapped to ShowTaskpane (`:61`). Record each element and where its JSON equivalent lives in `outlook/manifest.json`.</step>
+    <step order="2">Determine the true minimum WordApi requirement set by reading every Office.js call in `shared/adapters/WordAdapter.ts`. Record which specific API forces the minimum. Resolve the 1.1-vs-1.3 contradiction with evidence, not assumption.</step>
+    <step order="3">Author `src/client/office-addins/word/manifest.json` mirroring `outlook/manifest.json`: same `manifestVersion`, the runtime block(s) Word needs (Word has one taskpane control today, so it needs fewer runtimes than Outlook's three), the ribbon entry for the existing SaveButton, and the `webApplicationInfo` block Word currently lacks. Bump the 4-part version above `1.0.6.0`.</step>
+    <step order="4">Extend `webpack.config.js:205-215` so the Word JSON manifest receives the same client-id/resource parameterization as Outlook's at `:178-204`. Verify by building and inspecting the emitted manifest for substituted values (no literal placeholder tokens left).</step>
+    <step order="5">Build with `npm run build` (after `npm install --legacy-peer-deps --no-audit --no-fund`) and validate the emitted `manifest.json` — well-formed JSON, no unsubstituted tokens, all icon and URL references resolvable against the SWA host.</step>
+    <step order="6">Sideload and verify on Word DESKTOP: the add-in installs, the ribbon button appears, the task pane opens, and auth completes. Then verify the same on Word on the WEB. Record both results.</step>
+    <step order="7">Only after step 6 passes on both surfaces, decide the disposition of `word/word-manifest.xml` — keep it for this release with a header comment naming `manifest.json` as authoritative, or remove it. Record the decision and its reason in notes/.</step>
+    <step order="8">Note the M365 Admin Center re-registration obligation (manifest change plus version bump) in `projects/spaarkeai-word-add-in-r1/notes/` so task 042 (deploy + UAT) consumes it.</step>
+    <step order="9">Update projects/spaarkeai-word-add-in-r1/tasks/TASK-INDEX.md: set this task's status to ✅.</step>
+    <step order="10">Document any deviation in projects/spaarkeai-word-add-in-r1/notes/.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If the unified JSON manifest will not install on Word desktop (or installs but the pane fails to load) and the cause is a platform limitation rather than a manifest authoring error, STOP and escalate per CLAUDE.md §6. Do not ship a half-migrated state where desktop uses XML and web uses JSON without an explicit owner decision.</trigger>
+    <trigger>If reconciling the WordApi requirement set reveals that the adapter calls an API above what the target Word builds support, STOP and escalate — the correct resolution may be to change the adapter (task 010's surface), which is outside this task's scope.</trigger>
+    <trigger>If adding `webApplicationInfo` requires a new or changed Entra app registration beyond NFR-09's two SPA redirect URIs, STOP and escalate — registration changes are a provisioning step (task 041), not a manifest edit.</trigger>
+  </escalation>
+
+  <justification>
+    <existing>`src/client/office-addins/outlook/manifest.json` (289 lines) — the only unified JSON manifest in the repo; grep `manifestVersion` across `src/client/office-addins/**` returns that file alone. Word's counterpart today is the legacy XML `word/word-manifest.xml`.</existing>
+    <extension>No — a unified JSON manifest cannot be an extension of an XML manifest; they are different artifact formats consumed by different Office manifest processors. The Outlook JSON manifest is copied as a structural precedent, not extended, because a manifest is per-add-in by definition.</extension>
+    <cost-of-doing-nothing>Word has no `webApplicationInfo` block, so the add-in has no manifest-declared SSO identity binding — the SSO path Outlook has is simply unavailable to Word. Separately, the manifest declares `WordApi 1.1` while the adapter calls 1.3 APIs, so a host satisfying only the declared requirement installs the add-in and then fails at runtime inside the adapter with no manifest-level guard.</cost-of-doing-nothing>
+  </justification>
+
+  <tools>
+    <tool name="npm">install (`--legacy-peer-deps --no-audit --no-fund`), build (NOTE: `npm run build` IS production here; there is no `build:prod`)</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/client/office-addins/word/manifest.json</output>
+    <output type="code">src/client/office-addins/webpack.config.js</output>
+    <output type="doc">projects/spaarkeai-word-add-in-r1/notes/011-word-manifest-migration.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Given `src/client/office-addins/word/manifest.json`, when parsed, then it is valid JSON and its top-level structure mirrors `outlook/manifest.json` (same `manifestVersion`, runtimes, ribbon and `webApplicationInfo` keys).</criterion>
+    <criterion testable="true">Given the new manifest, when inspecting `webApplicationInfo`, then the block exists and carries a build-substituted app id and resource — a gap Word did not have before this task.</criterion>
+    <criterion testable="true">Given the new manifest, when inspecting the Word requirement-set declaration, then the declared minimum matches the highest WordApi version actually called by `shared/adapters/WordAdapter.ts`, with the forcing API named in notes/.</criterion>
+    <criterion testable="true">Given the manifest version, when compared to the previous `1.0.6.0`, then it is a bumped 4-part version.</criterion>
+    <criterion testable="true">Given a `npm run build`, when inspecting the emitted Word manifest, then no unsubstituted placeholder tokens remain (client id and resource are parameterized exactly as Outlook's are).</criterion>
+    <criterion testable="true">Given Word DESKTOP, when the unified manifest is sideloaded, then the add-in installs, the ribbon control appears, the task pane opens, and auth completes.</criterion>
+    <criterion testable="true">Given Word on the WEB, when the unified manifest is sideloaded, then the same four outcomes hold.</criterion>
+    <criterion testable="true">Given the repo after this task, when checking `word/word-manifest.xml`, then it is retained (or removed only with an explicit recorded decision made AFTER both desktop and web verification passed).</criterion>
+    <criterion testable="true">Negative: no client secret, hardcoded client id, or other credential is embedded in `word/manifest.json` (ADR-028 secret-free).</criterion>
+    <criterion testable="true">Negative: `ci-router.yml`, `ci-tier1-blocking.yml`, and `ci-tier2-advisory.yml` are unmodified.</criterion>
+    <criterion testable="true">The M365 Admin Center re-registration obligation is recorded in notes/ for task 042.</criterion>
+    <criterion testable="true">`npm run build` succeeds and `npm run typecheck` remains clean.</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    spec.md FR-05. plan.md §4 Phase 1 task 011. `src/client/office-addins/CLAUDE.md:44` records the manifest-change rules (bump the 4-part version, M365 re-register); the architecture doc holds the full manifest rule set (no `FunctionFile`, single VersionOverrides, icons 200).
+    Parallel with task 010 in wave P1-a: 010 touches adapters, taskpane entry points, adapter tests and the module CLAUDE.md; this task touches only the two manifests and `webpack.config.js`. No shared file — the pair is disjoint by construction.
+    Task 037 (Phase 3) later adds the `quickSave`/`shareDocument` ribbon commands to this manifest; author the ribbon section so an additional control is a clean addition, but do NOT add those controls here.
+  </notes>
+
+  <execution><skill>.claude/skills/task-execute/SKILL.md</skill></execution>
+</task>

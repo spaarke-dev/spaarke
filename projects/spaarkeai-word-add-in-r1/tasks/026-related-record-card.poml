@@ -1,0 +1,191 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="026" project="spaarkeai-word-add-in-r1">
+  <metadata>
+    <title>FR-09: related-to record card honoring the two-slot model</title>
+    <phase>2 Save flow</phase>
+    <gate>013 complete</gate>
+    <status>not-started</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Modifies .tsx/.ts client code and reads Dataverse lookup slots through the BFF; tags include frontend + bff-api + dataverse.</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>The twelve candidate slots are enumerated below and verified live; the task is scoping and rendering, not discovery. The one judgment call (which slots to read) has an explicit escalation boundary and a coordination partner.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>P2-b</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <deps>013</deps>
+    <tags>frontend, fluent-ui, bff-api, office-addins, dataverse</tags>
+    <estimated-effort>5-7 hours</estimated-effort>
+  </metadata>
+
+  <prompt>When the open document is identified and associated to a record, show a card in the pane for that related record: its type, name, and number. The card MUST state which of `sprk_document`'s association slots it reads, because the schema carries TWO many-to-one slots per type plus ten more `sprk_related*` lookups, and reading the wrong one shows the user an empty card on a correctly-filed document.</prompt>
+
+  <role>SPAARKE platform developer. Expertise in the `sprk_document` association model, the BFF `/api/office` read surface, and Fluent UI v9 card layouts in a narrow task pane. Follow ADRs strictly.</role>
+
+  <goal>An identified, associated document renders a related-record card showing record type, name, and number, sourced from an explicitly-scoped set of `sprk_document` lookup slots. The scoping decision (which slots are read, which are excluded, and why) is written down in the code and in the PR. Contract test covers the read surface including the unauthorized case.</goal>
+
+  <context>
+    <background>
+      spec.md FR-09: when the document is identified and associated, show a card for the related record with type, name and number; clicking it opens the record (that click behavior is task 027, FR-10).
+
+      Verified live in Dataverse (do not re-derive): `sprk_document` has TWO many-to-one slots per type for the two headline types —
+      - `sprk_matter` AND `sprk_relatedmatter`
+      - `sprk_project` AND `sprk_relatedproject`
+      — plus TEN further `sprk_related*` lookups: `sprk_relatedagreement`, `sprk_relatedcommunication`, `sprk_relatedcontact`, `sprk_relatedevent`, `sprk_relatedinvoice`, `sprk_relatedorganization`, `sprk_relatedservicerequest`, `sprk_relatedtodo`, `sprk_relatedvendororg`, `sprk_relatedworkassignment`.
+
+      Also verified: the SAVE path writes only the DIRECT slots. `DocumentAssociationMap.TryApply` (in `src/server/shared/Spaarke.Dataverse/Models.cs`) maps matter/project/invoice/workassignment/event onto `MatterLookup`/`ProjectLookup`/`InvoiceLookup`/`WorkAssignmentLookup`/`EventLookup`, and `DataverseServiceClientImpl.cs:905-916` writes those to `sprk_matter`, `sprk_project`, `sprk_invoice`, `sprk_workassignment`, `sprk_event`. Nothing in the Office save path writes any `sprk_related*` column. That asymmetry is the scoping fact this task must confront rather than gloss.
+
+      Coordination: `unified-access-control-r2` task 095 is IN FLIGHT on document-record multi-association (the two-slot model). Coordinate; do not duplicate. Spec Dependencies is explicit: "FR-09's record card must respect 095's two-slot model."
+
+      The pane already has a related-record picker for the SAVE direction — `shared/taskpane/components/RelatedToPicker.tsx` (368 lines), rendered from `SaveFlow.tsx:826-839` with `allowedTypes={['Matter','Project','Invoice']}`. That is an INPUT for choosing where to file. This task's card is a READ-BACK of what the identified document is already filed to. Keep the two distinguishable in the UI.
+    </background>
+    <relevant-files>
+      <file role="new">src/client/office-addins/shared/taskpane/components/RelatedRecordCard.tsx</file>
+      <file role="new">src/client/office-addins/shared/taskpane/hooks/useRelatedRecord.ts</file>
+      <file role="modify">src/client/office-addins/shared/taskpane/components/SaveFlow.tsx</file>
+      <file role="modify">src/client/office-addins/shared/taskpane/components/views/SaveView.tsx</file>
+      <file role="canonical-reference">src/client/office-addins/shared/taskpane/components/RelatedToPicker.tsx</file>
+      <file role="canonical-reference">src/server/shared/Spaarke.Dataverse/Models.cs</file>
+      <file role="canonical-reference">src/server/shared/Spaarke.Dataverse/DataverseServiceClientImpl.cs</file>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Api/Office/OfficeEndpoints.cs</file>
+      <file role="modify">tests/integration/contract/Api/Office/OfficeEndpointsContractTests.cs</file>
+    </relevant-files>
+    <dependencies>
+      <dependency task="013" status="pending">FR-01 client identity wiring — supplies the resolved `sprk_document` id whose associations this card reads.</dependency>
+    </dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="project">SCOPE — the card MUST state explicitly, in code comments and in the PR description, WHICH of the twelve-plus association slots it reads and why the others are excluded. The candidate set is: direct `sprk_matter`, `sprk_project`, `sprk_invoice`, `sprk_workassignment`, `sprk_event`; and `sprk_relatedmatter`, `sprk_relatedproject`, `sprk_relatedagreement`, `sprk_relatedcommunication`, `sprk_relatedcontact`, `sprk_relatedevent`, `sprk_relatedinvoice`, `sprk_relatedorganization`, `sprk_relatedservicerequest`, `sprk_relatedtodo`, `sprk_relatedvendororg`, `sprk_relatedworkassignment`. A card that silently reads a subset is a defect.</constraint>
+    <constraint source="project">SCOPE — `unified-access-control-r2` task 095 owns document-record multi-association. Within this task: consume the two-slot model, do not redefine it, and do not modify any file UAC-r2 task 095 is changing. Run `/conflict-check` and coordinate before the PR.</constraint>
+    <constraint source="project">SCOPE — this card is a READ-BACK for an identified document. MUST NOT merge it into `RelatedToPicker.tsx`, which is the save-direction input; the two must remain visually and functionally distinguishable in the pane.</constraint>
+    <constraint source="project">SCOPE — the card's click behavior (opening the record) is task 027 / FR-10. Within this task, expose the click seam but MUST NOT implement the Office Dialog or any navigation mechanism.</constraint>
+    <constraint source="ADR-044">SCOPE — every association GUID this card reads MUST be canonicalized bare-lowercase via the shared `cleanGuid` at every boundary and MUST NOT be interpolated raw into an OData key predicate.</constraint>
+    <constraint source="ADR-008">SCOPE — if this task adds or modifies a read route on `/api/office`, authorization goes on an endpoint filter on the group, never inside the handler body. A user who cannot read the related record must not see its name and number in the card.</constraint>
+    <constraint source="ADR-021">SCOPE — for all card UI: Fluent UI v9 semantic tokens only, no hex literals; the card honors the Office light/dark theme via `useOfficeTheme`.</constraint>
+    <constraint source="ADR-012">SCOPE — for this add-in package only: per this project's Path A exception, the card is a thin view under `shared/taskpane/`. MUST NOT import `@spaarke/ui-components`.</constraint>
+    <constraint source="project">SCOPE — NFR-03: `Xrm.*` does not exist in an Office host. MUST NOT import any Xrm-bound component; recreate the layout, per the r2 precedent.</constraint>
+    <constraint source="project">SCOPE — NFR-10 shared-first: the card lands in `shared/taskpane/` and is gated by host capability, not by a `hostType === 'word'` branch inside the view.</constraint>
+    <constraint source="ADR-038">SCOPE — any endpoint this task adds or modifies gets a contract test in `tests/integration/contract/Api/Office/OfficeEndpointsContractTests.cs`, including the unauthorized case. Cite `docs/adr/ADR-038-testing-strategy.md` — there is no concise copy in `.claude/adr/`.</constraint>
+    <constraint source="project">SCOPE — BFF publish size: measure the delta against a FRESH BUILD OF `origin/master`, never against the recorded baseline number (root CLAUDE.md §10 bullet 4). Zip both with PowerShell `Compress-Archive` and report both absolute sizes, the delta, and the tool name.</constraint>
+    <constraint source="project">SCOPE — the PR description MUST state the Placement Justification for every BFF-side change per `.claude/constraints/bff-extensions.md`.</constraint>
+    <constraint source="project">SCOPE — run `/conflict-check` before opening this BFF PR. `unified-access-control-r2` task 095 is live on exactly this association model, and `spaarkeai-compose-r8` is on the same hot path.</constraint>
+    <constraint source="project">SCOPE — build commands for `src/client/office-addins` only: install with `npm install --legacy-peer-deps --no-audit --no-fund`; there is NO `build:prod` script — `npm run build` IS the production build.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>sprk_document association model, polymorphic record resolution, Fluent v9 cards in an Office host</topic>
+    <files>
+      <file>projects/spaarkeai-word-add-in-r1/spec.md</file>
+      <file>projects/spaarkeai-word-add-in-r1/plan.md</file>
+      <file>src/client/office-addins/CLAUDE.md</file>
+      <file>docs/architecture/office-outlook-teams-integration-architecture.md</file>
+      <file>docs/data-model/</file>
+      <file>.claude/adr/ADR-021-fluent-design-system.md</file>
+      <file>.claude/adr/ADR-044-dataverse-guid-canonicalization.md</file>
+      <file>docs/adr/ADR-038-testing-strategy.md</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+    </files>
+    <patterns>
+      <pattern name="polymorphic-resolver" location=".claude/patterns/dataverse/polymorphic-resolver.md">The canonical approach for resolving a record reference to its display name and number across entity types. Follow it rather than writing a per-type switch in the pane.</pattern>
+      <pattern name="fluent-v9-host-visual-fit" location=".claude/patterns/ui/fluent-v9-host-visual-fit.md">Explicitly covers Office add-ins. A record card must fit the narrow pane and truncate long matter names without horizontal overflow.</pattern>
+      <pattern name="endpoint-filters" location=".claude/patterns/api/endpoint-filters.md">Read before adding any read route to `/api/office`; the group already carries `.RequireAuthorization()`.</pattern>
+    </patterns>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="0" name="Context + rigor declaration">Load projects/spaarkeai-word-add-in-r1/CLAUDE.md, spec.md FR-09 and Dependencies (cross-project coordination), and the knowledge files above. Output the mandatory rigor declaration (FULL) per root CLAUDE.md §8.</step>
+    <step order="1">Run `/conflict-check` and read the current state of `unified-access-control-r2` task 095. Record what it has already landed on the two-slot model so this task consumes rather than redefines it.</step>
+    <step order="2">Make the slot-scoping decision explicitly. Enumerate all candidate slots, decide which the card reads (at minimum the direct slots the Office save path actually writes: `sprk_matter`, `sprk_project`, `sprk_invoice`, `sprk_workassignment`, `sprk_event`), decide the precedence when more than one is populated, and write the rationale for every exclusion into projects/spaarkeai-word-add-in-r1/notes/026-slot-scope-decision.md.</step>
+    <step order="3">Determine the read surface: extend an existing `/api/office` or `/api/documents` route if one already returns the association plus the related record's name and number; only add a route if none does. Record the grep evidence (CLAUDE.md §11).</step>
+    <step order="4">Build `useRelatedRecord.ts` to resolve the association through the polymorphic-resolver pattern, and `RelatedRecordCard.tsx` to render type, name, and number with an exposed click seam for task 027.</step>
+    <step order="5">Wire the card into the Save tab beside — not merged into — `RelatedToPicker`, so the filed-to read-back and the file-to input stay distinguishable.</step>
+    <step order="6">Add contract tests for the read surface: populated association, no association, and the unauthorized case (a caller without read on the related record does not receive its name or number).</step>
+    <step order="7">Add client unit tests: each read slot renders, the precedence rule when multiple are populated, the no-association state, and the excluded slots do not render.</step>
+    <step order="8">Run `npm run typecheck`, `npm test`, `npm run build`; run `dotnet build` and the Office contract tests. All green.</step>
+    <step order="9">Measure BFF publish size against a fresh `origin/master` build per the constraint above; record both absolute sizes, the delta, and the zip tool.</step>
+    <step order="10">Run `/conflict-check` again immediately before the PR, then code-review + adr-check per task-execute Step 9.5.</step>
+    <step order="11">Update tasks/TASK-INDEX.md: set this task's status to ✅.</step>
+    <step order="12">Document any deviation in projects/spaarkeai-word-add-in-r1/notes/.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If `unified-access-control-r2` task 095 has changed the association model in a way that makes the direct slots no longer authoritative (for example if the Office save path is being migrated onto the `sprk_related*` slots), STOP and escalate per CLAUDE.md §6 to reconcile scope rather than shipping a card that reads the losing side of an in-flight migration.</trigger>
+    <trigger>If more than one association slot is populated on the same document and no precedence rule is derivable from the schema or from UAC-r2's work, STOP and escalate rather than picking one silently — showing the user an arbitrary one of two correct answers is worse than asking.</trigger>
+    <trigger>If satisfying the card requires a NEW BFF route, STOP before writing it and escalate with the §11 three-question answers plus the grep evidence, so the placement decision is made explicitly.</trigger>
+  </escalation>
+
+  <justification>
+    <existing>Closest neighbor: `src/client/office-addins/shared/taskpane/components/RelatedToPicker.tsx` (368 lines), rendered from `SaveFlow.tsx:826-839`. Grep run over `src/client/office-addins` for a read-back of an identified document's existing association returns nothing — `RelatedToPicker` is an INPUT that searches for a record to file TO, with `allowedTypes={['Matter','Project','Invoice']}` and an `onChange` that sets `selectedEntity`; it has no notion of an already-filed document. On the server side, `grep -rn "DocumentAssociationMap" --include=*.cs src/server` shows the write-direction map only.</existing>
+    <extension>No. `RelatedToPicker` is a search-and-select control whose whole state model is "the user has not chosen yet"; the card's state model is "the document is already filed here". Merging them would mean one component with two contradictory reasons to change, and would blur the user-facing distinction between what a document IS filed to and what it WILL be filed to.</extension>
+    <cost-of-doing-nothing>Without it, a user with an identified Spaarke document sees no indication in the pane of which matter or project it belongs to. They cannot confirm the document is filed correctly before re-saving, and FR-10's "open the related record" has no anchor to hang off — clicking through to the record from the pane becomes impossible because the pane never names the record.</cost-of-doing-nothing>
+  </justification>
+
+  <ui-tests>
+    <test name="Card renders type, name, and number for an associated document">
+      <steps>
+        <step>Open a Spaarke-sourced Word document filed to a matter with a populated `sprk_matternumber`, and view the Save tab.</step>
+      </steps>
+      <expected>A card shows the record type ("Matter"), the matter name, and the matter number; it is visually distinct from the "Related to" picker below or above it.</expected>
+    </test>
+    <test name="No-association state">
+      <steps>
+        <step>Open an identified document that has no populated association slot and view the Save tab.</step>
+      </steps>
+      <expected>The card area shows an explicit "not filed to a record" state rather than an empty card or a blank region; the "Related to" picker remains available for filing it.</expected>
+    </test>
+    <test name="Excluded slots do not render">
+      <steps>
+        <step>Seed a document whose only populated association is a slot this task's scope decision EXCLUDES, and view the Save tab.</step>
+      </steps>
+      <expected>The card shows the no-association state and does not render the excluded slot's record; the exclusion is documented in `notes/026-slot-scope-decision.md`.</expected>
+    </test>
+    <test name="ADR-021 dark-mode check via the Office theme toggle">
+      <steps>
+        <step>Switch the Office theme to Dark and reload the pane; view the card in the populated state and in the no-association state.</step>
+      </steps>
+      <expected>Card surface, border, text, and type badge all resolve from Fluent v9 semantic tokens with legible contrast in dark mode; no hex literals; repeat in Light mode with the same result.</expected>
+    </test>
+    <test name="Long record name does not break the pane layout">
+      <steps>
+        <step>Open a document filed to a matter with a very long name and narrow the pane to its minimum width.</step>
+      </steps>
+      <expected>The name truncates or wraps inside the card; the pane never scrolls horizontally; the number stays visible.</expected>
+    </test>
+  </ui-tests>
+
+  <tools>
+    <tool name="dotnet">Build the BFF and run the Office contract tests.</tool>
+    <tool name="npm">Install with --legacy-peer-deps --no-audit --no-fund; typecheck, test, and build (build IS production here).</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/client/office-addins/shared/taskpane/components/RelatedRecordCard.tsx</output>
+    <output type="code">src/client/office-addins/shared/taskpane/hooks/useRelatedRecord.ts</output>
+    <output type="code">src/client/office-addins/shared/taskpane/components/SaveFlow.tsx</output>
+    <output type="test">src/client/office-addins/shared/taskpane/components/__tests__/RelatedRecordCard.test.tsx</output>
+    <output type="test">tests/integration/contract/Api/Office/OfficeEndpointsContractTests.cs</output>
+    <output type="doc">projects/spaarkeai-word-add-in-r1/notes/026-slot-scope-decision.md</output>
+    <output type="doc">projects/spaarkeai-word-add-in-r1/notes/026-publish-size.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Given an identified document filed to a matter, when the Save tab renders, then a card shows record type, name, and number for that matter.</criterion>
+    <criterion testable="true">Given the implementation, when reviewed, then `notes/026-slot-scope-decision.md` and the PR description both enumerate all candidate association slots, name the subset the card reads, and give a reason for each exclusion.</criterion>
+    <criterion testable="true">Given a document with more than one association slot populated, when the card renders, then it applies the documented precedence rule deterministically — the same input always yields the same card.</criterion>
+    <criterion testable="true">Given the card, when it renders, then it is a separate component from `RelatedToPicker.tsx` and the picker's behavior is unchanged.</criterion>
+    <criterion testable="true">Negative: given an identified document with no populated association in the read scope, when the Save tab renders, then an explicit no-association state appears — not an empty card, not a blank region, not an error.</criterion>
+    <criterion testable="true">Negative: given a caller without read access to the related record, when the read surface is invoked, then the record's name and number are NOT returned and the response is a ProblemDetails 403 or an empty association — asserted by a contract test.</criterion>
+    <criterion testable="true">Negative: given no resolved document identity, when the Save tab renders, then the card is absent and no association read call is made.</criterion>
+    <criterion testable="true">Every association GUID is canonicalized via `cleanGuid` at every boundary and never appears raw in an OData key predicate; verified by inspection during code review.</criterion>
+    <criterion testable="true">Given the Office theme set to Dark, when the card renders in any state, then every color resolves from a Fluent v9 semantic token and no hex literal appears in the added styles.</criterion>
+    <criterion testable="true">`git diff --name-only` shows no change to files `unified-access-control-r2` task 095 is modifying; `/conflict-check` was run before the PR and its result is cited.</criterion>
+    <criterion testable="true">`npm run typecheck` is clean for the files this task touched; `npm test` and `npm run build` pass; `dotnet build` and the Office contract tests pass.</criterion>
+    <criterion testable="true">BFF publish size is measured against a fresh `origin/master` build with `Compress-Archive`, both absolute sizes and the delta are recorded, and the delta is under the +5 MB escalation threshold.</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    spec.md FR-09 and its cross-project coordination row; plan.md §2 (Dataverse schema validated live — the two-slot model is already in schema, no schema task needed) and §4 Phase 2 task 026. The direct-versus-related asymmetry is real and load-bearing: the Office save path writes only the direct slots, so a card that reads only `sprk_related*` would be empty on every document the add-in itself created.
+  </notes>
+
+  <execution><skill>.claude/skills/task-execute/SKILL.md</skill></execution>
+</task>

@@ -1,0 +1,179 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="022" project="spaarkeai-word-add-in-r1">
+  <metadata>
+    <title>FR-08: Generate Profile button and BFF trigger</title>
+    <phase>2 Save flow</phase>
+    <gate>013 complete</gate>
+    <status>not-started</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Adds a new BFF trigger route on `/api/office` and modifies .tsx/.ts client code; tags include bff-api + frontend.</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>The reference implementation to mirror is named exactly (`ComposeDocumentEndpoints.RefreshProfileAsync`), and the semantics (fire-and-forget 202, overwrite without confirmation) are already decided in spec Assumptions.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>P2-a</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <deps>013</deps>
+    <tags>frontend, fluent-ui, bff-api, office-addins, ai-profile</tags>
+    <estimated-effort>5-7 hours</estimated-effort>
+  </metadata>
+
+  <prompt>Add a "Generate Profile" button to the pane that re-runs document profiling for the currently identified document, and the `/api/office` trigger behind it. Mirror Compose's shipped `refresh-profile` semantics exactly: fire-and-forget, 202 Accepted, overwrite the existing profile with no confirmation prompt.</prompt>
+
+  <role>SPAARKE platform developer. Expertise in .NET 10 Minimal API endpoint groups with filter-based authorization, the Spaarke document-profile dispatch pipeline, and React 19 + Fluent UI v9 task-pane views. Follow ADRs strictly.</role>
+
+  <goal>A Generate Profile control exists on the Save tab for an identified document; invoking it dispatches the same background profile pipeline Compose's `refresh-profile` uses and returns 202; the pane then reflects the updated `sprk_filesummarystatus` through task 021's status rendering. Contract test covers the new route including its unauthorized case.</goal>
+
+  <context>
+    <background>
+      spec.md FR-08 requires a button that re-runs document profiling for the current document, with the pane reflecting the updated status. Profiling itself WORKS — GitHub #919 was fixed on master (`f5c7687d8`) — so this task is about the trigger and its surfacing, not about repairing the pipeline.
+
+      Verified as-built (do not re-derive):
+      - The canonical reference to mirror is `POST /api/compose/documents/{documentRecordId:guid}/refresh-profile`, mapped at `src/server/api/Sprk.Bff.Api/Api/ComposeDocumentEndpoints.cs:49` with handler `RefreshProfileAsync`. It validates the route GUID and a `tenantId` body field, delegates to `IComposeService.RefreshProfileAsync`, and returns `Results.Accepted` — a best-effort 202, never a synchronous wait. Errors map to 400 for bad input and a ProblemDetails 500 otherwise.
+      - Per spec Assumptions, GENERATE PROFILE OVERWRITES the existing profile, matching `refresh-profile` semantics, with NO confirmation prompt. Do not add a confirm dialog.
+      - The add-in's route group is `app.MapGroup("/api/office")` at `OfficeEndpoints.cs:36` with `.RequireAuthorization()` at `:38`. Existing sub-groups: `/jobs` (:487), `/search` (:779), `/share` (:1478). Existing pattern for a BFF-backed record op from the pane is `group.MapPost("/todo", CreateTodoAsync)` at `:1177` — that is the working template for shape and authorization.
+      - Task 021 owns the seven-state `sprk_filesummarystatus` rendering. This task MUST reuse that mapping rather than forking a second copy.
+      - Task 013 supplies the resolved `sprk_document` id. Without an identity there is nothing to profile and the control must be disabled with a reason, not hidden silently.
+    </background>
+    <relevant-files>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Api/Office/OfficeEndpoints.cs</file>
+      <file role="canonical-reference">src/server/api/Sprk.Bff.Api/Api/ComposeDocumentEndpoints.cs</file>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Services/Office/OfficeService.cs</file>
+      <file role="modify">src/client/office-addins/shared/taskpane/components/DocumentProfileSection.tsx</file>
+      <file role="modify">src/client/office-addins/shared/taskpane/hooks/useDocumentProfile.ts</file>
+      <file role="canonical-reference">src/client/office-addins/shared/taskpane/services/SseClient.ts</file>
+      <file role="canonical-reference">src/client/office-addins/shared/services/authenticatedJsonFetch.ts</file>
+      <file role="modify">tests/integration/contract/Api/Office/OfficeEndpointsContractTests.cs</file>
+    </relevant-files>
+    <dependencies>
+      <dependency task="013" status="pending">FR-01 client identity wiring — supplies the `sprk_document` GUID the trigger targets. Task 021 (same wave) owns the status rendering this task's result flows into; if 021 has not landed, reuse its status map rather than authoring a second one.</dependency>
+    </dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="project">SCOPE — for this trigger only: mirror `ComposeDocumentEndpoints.RefreshProfileAsync` semantics exactly — fire-and-forget, 202 Accepted, no synchronous wait for the profile to complete. MUST NOT block the pane on profile completion.</constraint>
+    <constraint source="project">SCOPE — per spec Assumptions, Generate Profile OVERWRITES the existing profile with no confirmation prompt. MUST NOT add a confirm dialog or an "are you sure" step to this action.</constraint>
+    <constraint source="project">SCOPE — the seven-state `sprk_filesummarystatus` mapping is owned by task 021. MUST NOT create a second status-to-message table in this task; import and reuse task 021's.</constraint>
+    <constraint source="ADR-008">SCOPE — the new route sits on the existing `/api/office` group, which already carries `.RequireAuthorization()`. Any resource-level authorization for the target document goes on an ENDPOINT FILTER, never inline in the handler body.</constraint>
+    <constraint source="ADR-013">SCOPE — if this trigger needs any AI capability from CRUD code, it goes through `Services/Ai/PublicContracts/`. MUST NOT inject `IOpenAiClient` or `IPlaybookService` directly into the Office service or endpoint.</constraint>
+    <constraint source="ADR-019">SCOPE — every error path of the new route returns ProblemDetails: 400 for a missing or malformed document id, 401/403 for an unauthorized caller, 500 for an unexpected failure. No raw exception text in the response.</constraint>
+    <constraint source="ADR-010">SCOPE — DI minimalism: if this task needs a service, reuse an already-registered one. MUST NOT add a new interface-plus-implementation pair when the existing profile-dispatch seam can be reached from the Office service.</constraint>
+    <constraint source="ADR-044">SCOPE — the document GUID this route accepts and passes to Dataverse MUST be canonicalized bare-lowercase via `cleanGuid` at every boundary and MUST NOT be interpolated raw into an OData key predicate.</constraint>
+    <constraint source="ADR-021">SCOPE — for the Generate Profile control: Fluent UI v9 semantic tokens only, no hex literals; the button, its busy state, and its disabled state all honor the Office light/dark theme via `useOfficeTheme`.</constraint>
+    <constraint source="ADR-012">SCOPE — for this add-in package only: per this project's Path A exception, the control is a thin view under `shared/taskpane/`. MUST NOT import `@spaarke/ui-components`.</constraint>
+    <constraint source="project">SCOPE — NFR-03: `Xrm.*` does not exist in an Office host. MUST NOT import any Xrm-bound component.</constraint>
+    <constraint source="ADR-038">SCOPE — this task adds a new endpoint, so it MUST add a contract test in `tests/integration/contract/Api/Office/OfficeEndpointsContractTests.cs` covering the happy path AND the unauthorized/malformed-id paths. Cite `docs/adr/ADR-038-testing-strategy.md` — there is no concise copy in `.claude/adr/`.</constraint>
+    <constraint source="project">SCOPE — BFF publish size: measure the delta against a FRESH BUILD OF `origin/master`, never against the recorded baseline number (root CLAUDE.md §10 bullet 4). Zip both with PowerShell `Compress-Archive` and report both absolute sizes, the delta, and the tool name.</constraint>
+    <constraint source="project">SCOPE — the PR description MUST state the Placement Justification for this new endpoint, per `.claude/constraints/bff-extensions.md`, naming why it extends `/api/office` rather than living elsewhere.</constraint>
+    <constraint source="project">SCOPE — run `/conflict-check` before opening this BFF PR. `spaarkeai-compose-r8` is live on the Compose spine this task's reference implementation belongs to, and `unified-access-control-r2` is live on the same hot path.</constraint>
+    <constraint source="project">SCOPE — build commands for `src/client/office-addins` only: install with `npm install --legacy-peer-deps --no-audit --no-fund`; there is NO `build:prod` script — `npm run build` IS the production build.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>Document profiling dispatch, Minimal API endpoint groups, Fluent v9 in an Office host</topic>
+    <files>
+      <file>projects/spaarkeai-word-add-in-r1/spec.md</file>
+      <file>projects/spaarkeai-word-add-in-r1/plan.md</file>
+      <file>src/client/office-addins/CLAUDE.md</file>
+      <file>docs/architecture/DOCUMENT-PROFILE-AND-AI-EXECUTION-MODELS.md</file>
+      <file>docs/architecture/office-outlook-teams-integration-architecture.md</file>
+      <file>.claude/adr/ADR-021-fluent-design-system.md</file>
+      <file>.claude/adr/ADR-044-dataverse-guid-canonicalization.md</file>
+      <file>.claude/adr/ADR-049-compose-shadow-document.md</file>
+      <file>docs/adr/ADR-038-testing-strategy.md</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+    </files>
+    <patterns>
+      <pattern name="endpoint-filters" location=".claude/patterns/api/endpoint-filters.md">The authorization mechanism for the new route. Put the document-level check on a filter attached to the endpoint, not in the handler.</pattern>
+      <pattern name="fluent-v9-host-visual-fit" location=".claude/patterns/ui/fluent-v9-host-visual-fit.md">Explicitly covers Office add-ins. The button must fit the narrow pane and keep its busy state legible.</pattern>
+    </patterns>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="0" name="Context + rigor declaration">Load projects/spaarkeai-word-add-in-r1/CLAUDE.md, spec.md FR-08 and Assumptions, and the knowledge files above. Output the mandatory rigor declaration (FULL) per root CLAUDE.md §8.</step>
+    <step order="1">Read `ComposeDocumentEndpoints.cs:49` and its `RefreshProfileAsync` handler end to end. Note the validation order, the delegation seam, the 202 shape, and the error mapping — this task copies those semantics, it does not fork the Compose service.</step>
+    <step order="2">Read `OfficeEndpoints.cs:36-38` (group + RequireAuthorization) and `:1177` (`MapPost("/todo", ...)`) as the shape template for a BFF-backed record op from the pane.</step>
+    <step order="3">Add the trigger route to the `/api/office` group with an endpoint filter for document-level authorization. Validate the document GUID, canonicalize it via `cleanGuid`, dispatch the profile, and return 202 with a correlation id.</step>
+    <step order="4">Wire the Office service method to the SAME background profile dispatch the Compose refresh path uses. Do not introduce a second dispatch pipeline.</step>
+    <step order="5">Add the Generate Profile control to the Profile section from task 021: disabled with a stated reason when no identity is resolved; busy state while the request is in flight; on 202, move the displayed status to Pending and re-read.</step>
+    <step order="6">Add contract tests: happy path returns 202; missing or malformed document id returns 400 ProblemDetails; unauthorized caller returns 401/403.</step>
+    <step order="7">Add client unit tests: disabled-without-identity, busy state, and the post-202 status transition.</step>
+    <step order="8">Run `npm run typecheck`, `npm test`, `npm run build`; run `dotnet build` and the Office contract tests. All green.</step>
+    <step order="9">Measure BFF publish size against a fresh `origin/master` build per the constraint above; record both absolute sizes, the delta, and the zip tool.</step>
+    <step order="10">Run `/conflict-check`, then code-review + adr-check per task-execute Step 9.5.</step>
+    <step order="11">Update tasks/TASK-INDEX.md: set this task's status to ✅.</step>
+    <step order="12">Document any deviation in projects/spaarkeai-word-add-in-r1/notes/.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If reaching the Compose profile-dispatch seam from the Office surface would require injecting an AI-internal type (`IOpenAiClient`, `IPlaybookService`) into CRUD code, STOP and escalate per CLAUDE.md §6 — the correct path is the `Services/Ai/PublicContracts/` facade (ADR-013), and if no suitable contract exists there, that is a design decision, not an implementation detail.</trigger>
+    <trigger>If mirroring the Compose semantics would require modifying `IComposeService` or anything under `Services/Compose/`, STOP and escalate. `spaarkeai-compose-r8` is live on that spine and this task must not change it.</trigger>
+  </escalation>
+
+  <justification>
+    <existing>Closest neighbor: `POST /api/compose/documents/{documentRecordId:guid}/refresh-profile`, mapped at `src/server/api/Sprk.Bff.Api/Api/ComposeDocumentEndpoints.cs:49`. Grep run: `grep -rn "refresh-profile" --include=*.cs src/server` returns exactly that route and its handler at `:250-345` — no equivalent exists on the `/api/office` surface.</existing>
+    <extension>No, not for the route. The Compose route is bound to the Compose group's session/tenant body contract and lives on a spine `spaarkeai-compose-r8` is actively changing; the add-in has no Compose session. The route is new, but the SERVICE behind it is reused — this task dispatches the same background profile pipeline rather than building a second one.</extension>
+    <cost-of-doing-nothing>Without it, a document whose `sprk_filesummarystatus` is Failed, None, or Skipped can never be re-profiled from the pane. The user's only recourse is to leave Word, open the record in a browser, and find the refresh action there — which is the workflow break FR-08 exists to remove, and it also strands every document that failed profiling before #919 was fixed.</cost-of-doing-nothing>
+  </justification>
+
+  <ui-tests>
+    <test name="Generate Profile dispatches and the status advances">
+      <steps>
+        <step>Open a Spaarke-sourced Word document whose `sprk_filesummarystatus` is Failed (100000004).</step>
+        <step>Click Generate Profile in the Profile section.</step>
+      </steps>
+      <expected>The button enters a busy state, the request returns 202, the displayed status moves to Pending, and no confirmation dialog appears at any point.</expected>
+    </test>
+    <test name="Disabled without a resolved identity">
+      <steps>
+        <step>Open a document that did not originate from Spaarke and view the Profile section.</step>
+      </steps>
+      <expected>Generate Profile is present but disabled, with a stated reason (the document is not yet in Spaarke); clicking it issues no network request.</expected>
+    </test>
+    <test name="Overwrite is silent by design">
+      <steps>
+        <step>Open a document whose `sprk_filesummarystatus` is Completed with populated summary text, and click Generate Profile.</step>
+      </steps>
+      <expected>The existing profile is re-run and overwritten with no confirmation prompt, per spec Assumptions; the pane shows the status transition rather than an unchanged view.</expected>
+    </test>
+    <test name="ADR-021 dark-mode check via the Office theme toggle">
+      <steps>
+        <step>Switch the Office theme to Dark and reload the pane; observe the Generate Profile button in its default, busy, and disabled states.</step>
+      </steps>
+      <expected>All three states resolve their colors from Fluent v9 semantic tokens with legible contrast in dark mode; no hex literals; repeat in Light mode with the same result.</expected>
+    </test>
+  </ui-tests>
+
+  <tools>
+    <tool name="dotnet">Build the BFF and run the Office contract tests.</tool>
+    <tool name="npm">Install with --legacy-peer-deps --no-audit --no-fund; typecheck, test, and build (build IS production here).</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Api/Office/OfficeEndpoints.cs</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Office/OfficeService.cs</output>
+    <output type="code">src/client/office-addins/shared/taskpane/components/DocumentProfileSection.tsx</output>
+    <output type="test">tests/integration/contract/Api/Office/OfficeEndpointsContractTests.cs</output>
+    <output type="doc">projects/spaarkeai-word-add-in-r1/notes/022-publish-size.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Given an identified `sprk_document`, when the user clicks Generate Profile, then the new `/api/office` route returns 202 Accepted with a correlation id and does not block on profile completion.</criterion>
+    <criterion testable="true">Given a 202 response, when the pane updates, then the displayed `sprk_filesummarystatus` advances to Pending using task 021's status mapping (no second status table exists in the codebase).</criterion>
+    <criterion testable="true">Given a document with a Completed profile, when Generate Profile is clicked, then the profile is overwritten with no confirmation prompt shown to the user.</criterion>
+    <criterion testable="true">Negative: given no resolved document identity, when the Profile section renders, then Generate Profile is disabled with a stated reason and issues no network request.</criterion>
+    <criterion testable="true">Negative: given a malformed or empty document id, when the route is invoked, then it returns 400 as ProblemDetails, not an unhandled error.</criterion>
+    <criterion testable="true">Negative: given an unauthenticated or unauthorized caller, when the route is invoked, then it returns 401/403 via the endpoint filter, not from inline handler logic — asserted by a contract test.</criterion>
+    <criterion testable="true">The document GUID is canonicalized via `cleanGuid` at every boundary and never appears raw in an OData key predicate; verified by inspection during code review.</criterion>
+    <criterion testable="true">No file under `src/server/api/Sprk.Bff.Api/Services/Compose/` is modified by this task; verified by `git diff --name-only`.</criterion>
+    <criterion testable="true">Given the Office theme set to Dark, when the Generate Profile control renders in default, busy, and disabled states, then every color resolves from a Fluent v9 semantic token and no hex literal appears in the added styles.</criterion>
+    <criterion testable="true">Contract tests for the new route are executing (not `[Fact(Skip)]`) and cover the 202, 400, and unauthorized cases.</criterion>
+    <criterion testable="true">`npm run typecheck` is clean for the files this task touched; `npm test` and `npm run build` pass; `dotnet build` and the Office contract tests pass.</criterion>
+    <criterion testable="true">BFF publish size is measured against a fresh `origin/master` build with `Compress-Archive`, both absolute sizes and the delta are recorded, and the delta is under the +5 MB escalation threshold.</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    spec.md FR-08 + Assumptions ("Generate Profile overwrites the existing profile, matching `refresh-profile` semantics, with no confirmation prompt"); plan.md §4 Phase 2 task 022. Profiling works on master (#919, `f5c7687d8`) — if a profile run fails during verification, investigate the environment before assuming a regression, and read `docs/architecture/DOCUMENT-PROFILE-AND-AI-EXECUTION-MODELS.md` Part 4 for the historical failure mode.
+  </notes>
+
+  <execution><skill>.claude/skills/task-execute/SKILL.md</skill></execution>
+</task>

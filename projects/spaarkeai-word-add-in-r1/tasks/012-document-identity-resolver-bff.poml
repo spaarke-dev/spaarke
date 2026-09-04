@@ -1,0 +1,148 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="012" project="spaarkeai-word-add-in-r1">
+  <metadata>
+    <title>FR-01 server: document-identity resolver extending /api/documents</title>
+    <phase>1 Foundation</phase>
+    <gate>002 complete — Spike-1 must confirm the `Office.context.document.url` shape for SPE files in Word desktop before this resolver is built</gate>
+    <status>not-started</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>New BFF endpoint modifying .cs in `Sprk.Bff.Api`, with authorization, Graph and Dataverse boundaries. Tags include bff-api and auth. Code-review plus adr-check run at Step 9.5.</rigor-reason>
+    <model-tier>opus</model-tier>
+    <model-tier-reason>Architectural: the resolver crosses three seams (Graph behind SpeFileStore per ADR-007, endpoint-filter authorization per ADR-008, Dataverse alternate-key retrieve) and carries a subtle canonicalization rule where ADR-044 applies to the sprk_document GUID but explicitly does NOT apply to the opaque SPE item id. Getting that inverted corrupts lookups silently.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <deps>002</deps>
+    <tags>bff-api, dataverse, graph, auth, endpoint, integration-test, backend</tags>
+    <estimated-effort>6-8 hours</estimated-effort>
+  </metadata>
+
+  <prompt>Add a document-identity resolver to the existing `/api/documents` route group that turns an `Office.context.document.url` into the `sprk_document` record it came from, or into a clean "not a Spaarke document" answer. This is the keystone of FR-01: without it the pane cannot know which record and matter the open document belongs to, so version-save, profile display, the record card and open-record are all impossible.</prompt>
+
+  <role>SPAARKE platform developer. Expert in .NET 10 Minimal API endpoint groups, endpoint-filter authorization, Microsoft Graph shares/driveItem resolution behind the SpeFileStore facade, and Dataverse alternate-key retrieval. Follow ADRs strictly.</role>
+
+  <goal>A route in the `/api/documents` group accepts a document URL, resolves it through base64url encoding to Graph `GET /shares/u!{enc}/driveItem` to obtain `driveId` plus `itemId`, looks up `sprk_document` via the `sprk_graphitemid_uk` alternate key, and returns the resolved document identity (document id, name, related record) — or a clean not-found result for a document that did not originate from Spaarke. Authorization is enforced by an endpoint filter, not middleware. Contract coverage is added by task 016.</goal>
+
+  <context>
+    <background>
+      spec.md FR-01 and plan.md §4 Phase 1 task 012. The pane today has no real document identity: `word/WordHostAdapter.getItemId():35-46` returns a fresh `word-doc-{title}-{Date.now()}` string on every call, and `shared/adapters/WordAdapter.getItemId():78-106` hashes title plus author plus creationDate (dead code). Neither identifies a record.
+      The `/api/documents` group is created at `Api/FileAccessEndpoints.cs:34` (`app.MapGroup("/api/documents").RequireAuthorization()`). It exposes 9 routes, ALL keyed by `{documentId}`, and every one carries `AddDocumentAuthorizationFilter("read")` or `("share")`. There is NO POST/create route in this group today — this task adds the first route that resolves an identity rather than consuming one, so its authorization shape needs deliberate thought (the caller does not yet know the documentId).
+      Dataverse: `sprk_document` carries `sprk_graphitemid` and `sprk_graphdriveid`; the alternate key is `sprk_graphitemid_uk`. Alternate-key retrieve already exists on `IGenericEntityService` (`src/server/shared/Spaarke.Dataverse/IGenericEntityService.cs:26`).
+      The canonical resolver to copy (not fork) is `Services/Compose/ComposeRecordResolution.cs:117` `TryFindDocumentByGraphItemIdAsync`, including its column-query fallback at `:254`.
+      Gating: Spike-1 (task 002) determines whether `Office.context.document.url` is usable on Word desktop for SPE files. If it comes back negative, FR-01's primary path fails and this task's shape changes (plan.md risk R-1).
+    </background>
+    <relevant-files>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Api/FileAccessEndpoints.cs</file>
+      <file role="canonical-reference">src/server/api/Sprk.Bff.Api/Services/Compose/ComposeRecordResolution.cs</file>
+      <file role="canonical-reference">src/server/api/Sprk.Bff.Api/Services/Compose/ComposeCreateOnSavePromoter.cs</file>
+      <file role="canonical-reference">src/server/shared/Spaarke.Dataverse/IGenericEntityService.cs</file>
+      <file role="canonical-reference">src/server/api/Sprk.Bff.Api/Api/Office/OfficeEndpoints.cs</file>
+      <file role="canonical-reference">src/server/api/Sprk.Bff.Api/Services/Office/OfficeService.cs</file>
+      <file role="new">projects/spaarkeai-word-add-in-r1/notes/012-identity-resolver-decisions.md</file>
+    </relevant-files>
+    <dependencies>
+      <dependency task="002" status="pending">Spike-1 — the confirmed `Office.context.document.url` shape for SPE files in Word desktop. This determines whether the primary Graph path is viable and what the client will actually send.</dependency>
+    </dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-007">Scope: every Graph call made by this resolver. Microsoft Graph SDK types MUST stay behind the `SpeFileStore` facade — no `DriveItem`, `GraphServiceClient` or other Graph SDK type may appear in the endpoint signature, the response DTO, or any type that escapes the storage seam. The shares/driveItem resolution belongs behind that facade.</constraint>
+    <constraint source="ADR-008">Scope: the new route only. Authorization is an endpoint filter on the route, not global middleware and not an inline check inside the handler. Follow the pattern the sibling routes in `FileAccessEndpoints.cs` already use. Because the caller supplies a URL rather than a documentId, state explicitly in the code comment which filter runs and at what point the resolved document id becomes available for the per-document check.</constraint>
+    <constraint source="ADR-044">Scope: the `sprk_document` GUID and every other Dataverse GUID crossing a boundary in this task — canonicalize to bare lowercase via the shared `cleanGuid`. Never interpolate a raw GUID into an OData key predicate. EXPLICIT EXCEPTION: `sprk_graphitemid` is an opaque SPE drive-item id (a STRING, not a GUID) and is matched EXACT-STRING; ADR-044 canonicalization does NOT apply to it. This is verified and recorded at `Services/Compose/ComposeCreateOnSavePromoter.cs:336-339`. Applying GUID canonicalization to the SPE item id would silently break the alternate-key lookup.</constraint>
+    <constraint source="project">Scope: the `sprk_graphitemid_uk` alternate key. MUST NOT be relaxed, widened, or bypassed (NFR-07) — Compose's transient-key dedup and promote-idempotency both rest on it. Read through it; do not add a competing lookup path that tolerates duplicates.</constraint>
+    <constraint source="project">Scope: BFF publish size. Measure the delta against a FRESH BUILD OF MASTER, not the recorded baseline number (root CLAUDE.md §10 bullet 4). Build master in a temporary worktree, publish both, zip BOTH with PowerShell `Compress-Archive` (the method `scripts/Deploy-BffApi.ps1` uses), and report both absolute sizes, the delta, and the zip tool. Escalate at a single-task delta of +5 MB or more; hard stop at 60 MB.</constraint>
+    <constraint source="project">Scope: the PR for this task. State the Placement Justification explicitly per `.claude/constraints/bff-extensions.md` — why this resolver belongs in the BFF and specifically in the `/api/documents` group rather than `/api/office`. The answer is that it extends existing Graph plus Dataverse plumbing and is latency-coupled to the other document routes; say so and cite the decision criteria.</constraint>
+    <constraint source="ADR-010">Scope: DI registrations added by this task. Keep additions minimal; prefer reusing `IGenericEntityService` and the existing `SpeFileStore` registration over introducing a new service registration. If a new registration is unavoidable, justify it in the PR.</constraint>
+    <constraint source="ADR-019">Scope: error responses from the new route. Use ProblemDetails for failure shapes. A document that simply is not from Spaarke is NOT an error — it is a successful response carrying "no identity".</constraint>
+    <constraint source="ADR-013">Scope: any AI capability this resolver might reach for. Do not inject `IOpenAiClient` or `IPlaybookService`; go through `Services/Ai/PublicContracts/` if AI is needed at all. This resolver should need none.</constraint>
+    <constraint source="ADR-038">Scope: test obligation. A new endpoint requires a contract test. Task 016 owns writing it — coordinate rather than duplicating, but do not consider this task done if 016 has no route to test against. Banned: `Mock&lt;HttpMessageHandler&gt;`, DI-registration tests, ctor null-check tests.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>Graph shares/driveItem resolution, Dataverse alternate-key retrieve, endpoint-filter authorization</topic>
+    <files>
+      <file>projects/spaarkeai-word-add-in-r1/spec.md</file>
+      <file>projects/spaarkeai-word-add-in-r1/plan.md</file>
+      <file>projects/spaarkeai-word-add-in-r1/CLAUDE.md</file>
+      <file>docs/architecture/content-identity-and-deduplication-architecture.md</file>
+      <file>docs/architecture/office-outlook-teams-integration-architecture.md</file>
+      <file>.claude/adr/ADR-007-spefilestore.md</file>
+      <file>.claude/adr/ADR-008-endpoint-filters.md</file>
+      <file>.claude/adr/ADR-044-dataverse-guid-canonicalization.md</file>
+      <file>.claude/adr/ADR-019-problemdetails.md</file>
+      <file>.claude/adr/ADR-010-di-minimalism.md</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+      <file>docs/adr/ADR-038-testing-strategy.md</file>
+    </files>
+    <patterns>
+      <pattern name="endpoint-definition" location=".claude/patterns/api/endpoint-definition.md">Shape of a Minimal API route in an existing group — follow it rather than inventing a handler style.</pattern>
+      <pattern name="endpoint-filters" location=".claude/patterns/api/endpoint-filters.md">How authorization filters attach to a route and where they run relative to the handler. Load this before deciding how the per-document check fires for a route whose documentId is not yet known.</pattern>
+      <pattern name="polymorphic-resolver" location=".claude/patterns/dataverse/polymorphic-resolver.md">For reading the related record off the resolved `sprk_document` — the pane needs matter/project identity, not just the document id.</pattern>
+    </patterns>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="0" name="Context + rigor declaration">Load project CLAUDE.md, spec.md FR-01, plan.md §4 Phase 1, `.claude/constraints/bff-extensions.md`, and the Spike-1 report in `projects/spaarkeai-word-add-in-r1/notes/spikes/`. Declare: RIGOR LEVEL FULL, model-tier opus, effort high, steps mode DIRECTIONAL. Confirm Spike-1 closed positively before proceeding; if it did not, fire the escalation trigger.</step>
+    <step order="1">Read `ComposeRecordResolution.cs:117` `TryFindDocumentByGraphItemIdAsync` and its column-query fallback at `:254` end to end. This is the canonical resolver — copy its lookup semantics rather than writing a new one, and reuse it if it is reachable without coupling the add-in path to Compose internals. Record the reuse-versus-copy decision and its reason.</step>
+    <step order="2">Read `Api/FileAccessEndpoints.cs` around the group definition at `:34` and at least two existing routes, so the new route matches the group's established filter, logging and response conventions.</step>
+    <step order="3">Design the request/response contract: what the client sends (the document URL, per Spike-1's confirmed shape) and what it gets back (document id, document name, the related record's type/id/name, plus an explicit "no identity" result). Keep Graph types out of the DTO (ADR-007). Record the contract in notes/ before implementing.</step>
+    <step order="4">Implement the resolution chain behind `SpeFileStore`: base64url-encode the URL, call Graph `GET /shares/u!{enc}/driveItem`, extract `driveId` plus `itemId`. Handle the Graph failure modes explicitly — the URL is not a shareable item, the caller lacks access, the item is outside SPE.</step>
+    <step order="5">Look up `sprk_document` via the `sprk_graphitemid_uk` alternate key using the RAW SPE item id string (exact-string match; NO GUID canonicalization on that value). Canonicalize the returned `sprk_documentid` with `cleanGuid` before it crosses any boundary.</step>
+    <step order="6">Attach the authorization endpoint filter (ADR-008). Because the caller does not supply a documentId, the per-document check must run against the RESOLVED id — implement it so an unauthorized caller receives 403 and never sees document metadata for a record they cannot read. A caller who can reach the route but not the resolved document MUST NOT be able to infer the document's existence from the response.</step>
+    <step order="7">Add the "not a Spaarke document" path: the Graph lookup succeeds but no `sprk_document` matches, or the URL is not resolvable at all. This returns a successful response carrying no identity — NOT a 404 and NOT a ProblemDetails error. The pane treats it as "this is a new document".</step>
+    <step order="8">Run `dotnet build src/server/api/Sprk.Bff.Api/` and `dotnet test` for the affected test projects. Run `dotnet list package --vulnerable --include-transitive` and confirm no new HIGH-severity CVE.</step>
+    <step order="9">Measure BFF publish size against a fresh build of master per the constraint. Record both absolute sizes, the delta, and the zip tool in notes/.</step>
+    <step order="10">Run `/conflict-check` before opening the PR — `spaarkeai-compose-r8` owns the Compose spine this task reads from and is `parallel-safe:false` across it.</step>
+    <step order="11">Update projects/spaarkeai-word-add-in-r1/tasks/TASK-INDEX.md: set this task's status to ✅.</step>
+    <step order="12">Document any deviation in projects/spaarkeai-word-add-in-r1/notes/ — including the reuse-versus-copy decision from step 1 and the authorization design from step 6.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If Spike-1 (task 002) closed NEGATIVE — `Office.context.document.url` is unusable on Word desktop for SPE files — STOP and escalate per CLAUDE.md §6 before writing any resolver code. FR-01's primary path fails and the FR-02 stamp becomes the only identity mechanism, which does not work for documents saved before this release. That is a scope conversation, not an implementation adaptation (plan.md risk R-1).</trigger>
+    <trigger>If enforcing per-document authorization on a URL-keyed route cannot be done with an endpoint filter without leaking existence information to an unauthorized caller, STOP and escalate per CLAUDE.md §6.5 as an ADR-008 tension rather than falling back to an inline handler check.</trigger>
+    <trigger>If the resolution requires relaxing or bypassing `sprk_graphitemid_uk` (NFR-07), STOP and escalate. Do not add a tolerant secondary lookup.</trigger>
+    <trigger>If the publish-size delta is +5 MB or more against a fresh master build, STOP and escalate with explicit justification per root CLAUDE.md §10.</trigger>
+  </escalation>
+
+  <justification>
+    <existing>Closest neighbor: `Services/Compose/ComposeRecordResolution.cs:117` `TryFindDocumentByGraphItemIdAsync` — resolves a `sprk_document` from an SPE item id via `sprk_graphitemid_uk`, but starts from an item id the Compose flow already holds, not from a document URL. On the client side, `word/WordHostAdapter.getItemId():35-46` returns `word-doc-{title}-{Date.now()}` (a new value every call) and `shared/adapters/WordAdapter.getItemId():78-106` hashes title plus author plus creationDate (dead code). Grep of the `/api/documents` group in `Api/FileAccessEndpoints.cs` confirms 9 routes, all keyed by `{documentId}`, and no route that produces a documentId from anything else.</existing>
+    <extension>Partly — the Dataverse half extends the existing `ComposeRecordResolution` lookup and the route extends the existing `/api/documents` group rather than creating a new group or deployable. The URL-to-driveItem half is genuinely new: nothing in the codebase turns an `Office.context.document.url` into an SPE item id, and the client-side `getItemId()` implementations are structurally incapable of identifying a record (a timestamped string cannot match anything).</extension>
+    <cost-of-doing-nothing>Without this, FR-11's version-save targets the wrong record or creates a duplicate `sprk_document` row on every save from Word; FR-07's profile fields have no record to read from; FR-09's related-record card has no record to show; and FR-10's open-record has nothing to open. Concretely: a user who opens a Spaarke document from Word and saves it back gets a second `sprk_document` row instead of a new version — the exact UAT complaint this project exists to fix.</cost-of-doing-nothing>
+  </justification>
+
+  <tools>
+    <tool name="dotnet">build `src/server/api/Sprk.Bff.Api/`, test, publish (for the size measurement), `list package --vulnerable --include-transitive`</tool>
+    <tool name="git">worktree add for the fresh master publish-size baseline</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Api/FileAccessEndpoints.cs</output>
+    <output type="doc">projects/spaarkeai-word-add-in-r1/notes/012-identity-resolver-decisions.md</output>
+    <output type="doc">projects/spaarkeai-word-add-in-r1/notes/012-publish-size.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Given a document URL for a file that originated from Spaarke, when the resolver route is called by an authorized user, then it returns the correct `sprk_document` id, the document name, and the related record's type/id/name.</criterion>
+    <criterion testable="true">Given the resolution chain, when traced, then it goes document URL to base64url to Graph `GET /shares/u!{enc}/driveItem` to `driveId` plus `itemId` to `sprk_document` via the `sprk_graphitemid_uk` alternate key — with no step skipped or substituted.</criterion>
+    <criterion testable="true">Negative: given a document that did NOT come from Spaarke (a desktop file, a OneDrive file outside SPE, a document from another DMS), when the resolver is called, then it returns a successful response carrying NO identity — not a 404, not a ProblemDetails error, and not an unhandled exception.</criterion>
+    <criterion testable="true">Negative: given an authenticated caller who lacks Read on the resolved `sprk_document`, when the resolver is called, then the response is 403 and carries no document metadata — the caller cannot infer the document's existence from the response.</criterion>
+    <criterion testable="true">Negative: given an unauthenticated caller, when the resolver route is called, then the response is 401 (the group's `RequireAuthorization()` holds).</criterion>
+    <criterion testable="true">Negative: given a malformed or empty document URL, when the resolver is called, then it returns a ProblemDetails 400 — not an unhandled exception and not a 500.</criterion>
+    <criterion testable="true">Given the new code, when inspected, then no Microsoft Graph SDK type appears in the endpoint signature, the response DTO, or any type escaping `SpeFileStore` (ADR-007).</criterion>
+    <criterion testable="true">Given the new code, when inspected, then authorization is attached as an endpoint filter on the route and there is no inline authorization check in the handler body and no new global middleware (ADR-008).</criterion>
+    <criterion testable="true">Given the alternate-key lookup, when inspected, then it passes the RAW `sprk_graphitemid` string with NO GUID canonicalization applied, and every `sprk_document` GUID crossing a boundary IS canonicalized via `cleanGuid` (ADR-044 plus its documented SPE-item-id exception).</criterion>
+    <criterion testable="true">Given the Dataverse schema after this task, when inspected, then `sprk_graphitemid_uk` is unchanged — not relaxed, widened, or bypassed (NFR-07).</criterion>
+    <criterion testable="true">Given a publish of this branch and a fresh publish of `origin/master`, when both are zipped with PowerShell `Compress-Archive`, then the delta is recorded in notes/ with both absolute sizes and the tool named, and the delta is under +5 MB.</criterion>
+    <criterion testable="true">`dotnet build` succeeds, `dotnet test` passes for affected projects, and `dotnet list package --vulnerable --include-transitive` reports no new HIGH-severity CVE.</criterion>
+    <criterion testable="true">The PR description contains an explicit Placement Justification citing `.claude/constraints/bff-extensions.md` decision criteria.</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    spec.md FR-01, NFR-06, NFR-07. plan.md §4 Phase 1 task 012 and §7 risk R-1.
+    The ADR-044 exception for `sprk_graphitemid` is not an inference — it is recorded verbatim at `Services/Compose/ComposeCreateOnSavePromoter.cs:336-339`: "sprk_graphitemid is an opaque SPE drive-item id (a STRING, not a GUID), so the match is exact-string and ADR-044 GUID canonicalization does NOT apply". Read that comment before writing the lookup.
+    Downstream: task 013 consumes this route from the client, task 014 uses the resolved identity for the custom XML part stamp, and task 016 writes its contract test.
+    `parallel-safe:true` but no wave partner — this task sits alone between the P1-a pair (010/011) and the P1-b pair (014/015), because 013, 014 and 016 all depend on it.
+  </notes>
+
+  <execution><skill>.claude/skills/task-execute/SKILL.md</skill></execution>
+</task>

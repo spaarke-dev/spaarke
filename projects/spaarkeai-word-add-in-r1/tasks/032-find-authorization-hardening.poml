@@ -1,0 +1,140 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="032" project="spaarkeai-word-add-in-r1">
+  <metadata>
+    <title>FR-16a: per-row authorization on the content-similarity surface</title>
+    <phase>3 Surfacing Spaarke</phase>
+    <gate>startable</gate>
+    <status>not-started</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Security-sensitive authorization change on a live endpoint; tags include bff-api and auth; modifies a shared authorization filter and the ArchTests governed-file census. Step 9.5 code-review + adr-check are mandatory and non-negotiable.</rigor-reason>
+    <model-tier>opus</model-tier>
+    <model-tier-reason>Closes a confirmed permission-leak matching the UAC-r2 442-document failure mode. Getting the fail-closed forcing function or the memoized per-row check subtly wrong ships a security hole that looks fixed.</model-tier-reason>
+    <effort>xhigh</effort>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Modifies a shared authorization filter (`Api/Filters/VisualizationAuthorizationFilter.cs`) and the ArchTests governed-file census (`tests/Spaarke.ArchTests/RouteAuthorizationGuardTests.cs`), neither of which any other task may touch concurrently without producing a merge that silently drops half the fix.</parallel-reason>
+    <deps>none</deps>
+    <tags>bff-api, auth, security, integration-test, testing</tags>
+    <estimated-effort>1-2 days</estimated-effort>
+  </metadata>
+
+  <prompt>The `documentVector3072` cosine-KNN similarity surface that FR-16's Find tab is about to consume has **no per-row authorization**: result rows are trimmed by `tenantId` alone, and `POST /api/ai/visualization/related-from-content` has no authorization filter at all. This is exactly the failure mode NFR-02 exists to prevent — a user denied Read on all 442 documents of a matter still saw and downloaded them. Harden the surface with real per-row trimming, close the unfiltered route, add the file to the ArchTests governed-file census, and prove it with a negative test. This task **gates task 033**; Find must not be built on an unsafe surface.</prompt>
+
+  <role>SPAARKE platform developer. Expertise in ASP.NET Core endpoint filters, Dataverse record-level access checks (`AccessRights`), and fail-closed authorization design. Follow ADRs strictly. Treat every deviation from the reference implementation as a security defect until proven otherwise.</role>
+
+  <goal>Every row returned by the visualization similarity surface has been individually authorized for the calling user. `POST /api/ai/visualization/related-from-content` carries an authorization filter. `Api/Ai/VisualizationEndpoints.cs` appears in `GovernedFiles` in `tests/Spaarke.ArchTests/RouteAuthorizationGuardTests.cs`. A negative test proves that a user denied Read on a matter sees none of that matter's documents through the similarity surface, and it passes.</goal>
+
+  <context>
+    <background>
+      **The finding (plan.md §3, F-b), verified against the code:**
+
+      The cosine-KNN engine is `Services/Ai/Visualization/VisualizationService.cs` — `GetRelatedDocumentsAsync:65`, with `SearchRelatedDocumentsAsync:969` building `new VectorizedQuery(sourceVector){ KNearestNeighborsCount = limit*2, Fields = {"documentVector3072"} }` at `:993-997`. The search filter it applies is `tenantId eq '…' and documentId ne '&lt;source&gt;'` at `:1011-1024` — **tenant scoping and self-exclusion, nothing more.**
+
+      `Api/Filters/VisualizationAuthorizationFilter.cs:56` authorizes **only the source document** (`AuthorizeAsync(user, [documentId], …)` at `:105`). Nothing authorizes the rows that come back. `GET /api/ai/visualization/related/{documentId}` is declared at `Api/Ai/VisualizationEndpoints.cs:45`; `POST /api/ai/visualization/related-from-content` at `:59` has **no authorization filter at all**. And `VisualizationEndpoints.cs` is **absent** from the `GovernedFiles` census in `tests/Spaarke.ArchTests/RouteAuthorizationGuardTests.cs:111`, so the arch guard never noticed.
+
+      **The reference implementation to copy, not fork** is `Api/Ai/RecordSearchEndpoints.cs`:
+      - the **fail-closed forcing function** at `:117-129` — if `HttpContext.Items[RecordSearchAuthorization.HttpContextItemsKey]` is absent, or `!RequiresPerRowRecordAuthorization`, the handler returns **500** rather than serving unauthorized rows;
+      - `AuthorizeRowsAsync:242` — per row, `TryResolveAuthorizableEntitySet:264` → `GetCallerRecordAccessAsync:284` → keep the row **iff** `AccessRights.Read` at `:287`; memoized at `:256`/`:273`; bounded by `MaxRecordAuthorizationChecks = 50` at `:207`; and `Metadata.TotalCount` rewritten to the **permitted** count at `:315` so the count cannot leak what the rows did not;
+      - `Api/Filters/RecordSearchAuthorizationFilter.cs` publishes `RequiresPerRowRecordAuthorization` at `:64`.
+
+      The backing check is `Spaarke.Core/Auth/AuthorizationService.GetCallerRecordAccessAsync:255`, which returns `AccessRights.None` when there is no user token (`:265-279`) — it **never** falls back to app-only. That property is what makes the whole pattern fail-closed and MUST NOT be weakened.
+    </background>
+    <relevant-files>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Api/Ai/VisualizationEndpoints.cs</file>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Api/Filters/VisualizationAuthorizationFilter.cs</file>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Services/Ai/Visualization/VisualizationService.cs</file>
+      <file role="modify">tests/Spaarke.ArchTests/RouteAuthorizationGuardTests.cs</file>
+      <file role="canonical-reference">src/server/api/Sprk.Bff.Api/Api/Ai/RecordSearchEndpoints.cs</file>
+      <file role="canonical-reference">src/server/api/Sprk.Bff.Api/Api/Filters/RecordSearchAuthorizationFilter.cs</file>
+      <file role="canonical-reference">src/server/shared/Spaarke.Core/Auth/AuthorizationService.cs</file>
+      <file role="new">tests/integration/contract/Api/Ai/VisualizationRowAuthorizationContractTests.cs</file>
+    </relevant-files>
+    <dependencies>
+      <dependency task="none" status="complete">No task dependencies. This task is startable immediately and gates 033.</dependency>
+    </dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="NFR-02">Scope: every route in `Api/Ai/VisualizationEndpoints.cs` that returns document or record rows. An endpoint that receives a per-row-authorization signal and does not perform the row check MUST refuse (500), not serve rows. Copy the fail-closed forcing function from `RecordSearchEndpoints.cs:117-129` — do not invent a softer variant that logs and continues.</constraint>
+    <constraint source="project">MUST NOT weaken the check to make it faster: no sampling, no "authorize the first N and assume the rest", no tenant-only fallback when the per-row check is unavailable, and no app-only credential path. `AuthorizationService.GetCallerRecordAccessAsync:265-279` returns `AccessRights.None` with no token by design; preserve that.</constraint>
+    <constraint source="ADR-008">Authorization for the `related-from-content` route MUST be an endpoint filter on the route/group — not inline handler code and not global middleware. Follow `.claude/patterns/api/endpoint-filters.md` and the `RecordSearchAuthorizationFilter` shape.</constraint>
+    <constraint source="project">The result count returned to the client MUST reflect the **permitted** rows, mirroring `RecordSearchEndpoints.cs:315` where `Metadata.TotalCount` is rewritten. A count that reveals how many rows were filtered out is itself a leak.</constraint>
+    <constraint source="ADR-044">Every document/record GUID crossing a boundary in the authorization path MUST be canonicalized to bare-lowercase via `cleanGuid`. Never interpolate a raw GUID into an OData key predicate in the access lookup.</constraint>
+    <constraint source="ADR-038">This task modifies two endpoints, so both MUST have contract coverage in `tests/integration/contract/Api/Ai/`. The NFR-02 negative test is a **gate, not a checklist item** — it must exist and pass. Banned: `Mock&lt;HttpMessageHandler&gt;`, DI-registration assertions, ctor null-check assertions, `Stopwatch` + `Task.Delay` (use `TimeProvider`).</constraint>
+    <constraint source="ADR-029">This task touches the BFF, so publish size MUST be measured **against a fresh build of `origin/master`, not the recorded baseline number** — worktree a detached `origin/master`, publish both, zip BOTH with PowerShell `Compress-Archive`, and report both absolute sizes, the delta and the zip tool. Ceiling 60 MB; escalate at ≥+5 MB.</constraint>
+    <constraint source="project">The PR description MUST carry a **Placement Justification** section per `.claude/constraints/bff-extensions.md`, stating why the row-authorization logic lives where it is placed.</constraint>
+    <constraint source="project">Run `/conflict-check` before opening the BFF PR. This task modifies a shared filter and the ArchTests census; `unified-access-control-r2` is live on the authorization hot path and `spaarkeai-compose-r8` on the BFF spine.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>Fail-closed per-row authorization on search/similarity result sets</topic>
+    <files>
+      <file>projects/spaarkeai-word-add-in-r1/spec.md</file>
+      <file>projects/spaarkeai-word-add-in-r1/plan.md</file>
+      <file>.claude/adr/ADR-008-endpoint-filters.md</file>
+      <file>.claude/adr/ADR-044-dataverse-guid-canonicalization.md</file>
+      <file>.claude/adr/ADR-029-bff-publish-hygiene.md</file>
+      <file>docs/adr/ADR-038-testing-strategy.md</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+    </files>
+    <patterns>
+      <pattern name="endpoint-filters" location=".claude/patterns/api/endpoint-filters.md">The binding shape for the new `related-from-content` authorization filter and for publishing the per-row signal into `HttpContext.Items`.</pattern>
+      <pattern name="polymorphic-resolver" location=".claude/patterns/dataverse/polymorphic-resolver.md">Apply when resolving each result row's entity set for the access check, mirroring `TryResolveAuthorizableEntitySet:264`.</pattern>
+    </patterns>
+  </knowledge>
+
+  <steps mode="prescriptive">
+    <step order="0" name="Context + rigor declaration">Load `projects/spaarkeai-word-add-in-r1/CLAUDE.md`, `spec.md` NFR-02, `plan.md` §3 finding F-b, ADR-008, and `.claude/patterns/api/endpoint-filters.md`. Read `RecordSearchEndpoints.cs:110-330` and `RecordSearchAuthorizationFilter.cs` in full before writing anything. Emit the mandatory rigor declaration (FULL / opus / xhigh). Run `/conflict-check`.</step>
+    <step order="1">Copy the **fail-closed forcing function** from `RecordSearchEndpoints.cs:117-129` into the visualization handlers: if the per-row-authorization signal is absent from `HttpContext.Items`, or the flag is false, return 500 and serve no rows. Implement this FIRST, so every subsequent step is developed against a surface that already refuses to serve unauthorized results.</step>
+    <step order="2">Implement per-row trimming modeled on `AuthorizeRowsAsync:242`: resolve each row's authorizable entity set (`:264`), call `GetCallerRecordAccessAsync` (`:284`), keep the row iff `AccessRights.Read` (`:287`), memoize the per-record verdict (`:256`/`:273`), bound the work with a `MaxRecordAuthorizationChecks` equivalent (`:207`), and rewrite the returned count to the permitted count (`:315`).</step>
+    <step order="3">Add an authorization filter to `POST /api/ai/visualization/related-from-content` (`VisualizationEndpoints.cs:59`), which has none today. It MUST publish the same per-row signal the forcing function in step 1 checks for, so the two routes cannot drift apart.</step>
+    <step order="4">Add `Api/Ai/VisualizationEndpoints.cs` to the `GovernedFiles` list in `tests/Spaarke.ArchTests/RouteAuthorizationGuardTests.cs` (the list begins at `:111`) with the correct `Scope` and a `Reason` string naming this task and the F-b finding. Run the arch tests and confirm the guard now covers the file and passes.</step>
+    <step order="5">Write the NFR-02 negative test: seed a matter with documents, deny the test user Read on that matter, call both visualization routes, and assert the user sees **none** of that matter's documents and that the returned count reflects zero permitted rows. Confirm the test **fails** when the row check is temporarily disabled — a negative test that passes against the unfixed code proves nothing.</step>
+    <step order="6">Add contract coverage for both routes in `tests/integration/contract/Api/Ai/VisualizationRowAuthorizationContractTests.cs`, including the forcing-function 500 case (signal absent ⇒ refuse).</step>
+    <step order="7">Measure BFF publish size against a fresh `origin/master` build per the ADR-029 constraint; record both absolute sizes, the delta and the zip tool in `notes/` and the PR description.</step>
+    <step order="8">Run `dotnet build` and the full `dotnet test` for BFF + ArchTests. All must be green.</step>
+    <step order="9">Update `projects/spaarkeai-word-add-in-r1/tasks/TASK-INDEX.md`: set this task's status to ✅.</step>
+    <step order="10">Document any deviation in `projects/spaarkeai-word-add-in-r1/notes/`, and record the measured per-row latency at the default limit so task 033 can size the Find view against it.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If per-row trimming makes the endpoint unacceptably slow at the default limit, STOP and escalate per CLAUDE.md §6 rather than sampling, batching past the correctness boundary, or weakening the check. Acceptable escalation outcomes include lowering the default limit or accepting the latency — never serving unauthorized rows.</trigger>
+    <trigger>If the negative test still passes when the row check is disabled, STOP — the test is not exercising the path it claims to. Do not proceed to task 033 on the strength of a test that cannot fail.</trigger>
+    <trigger>If adding `VisualizationEndpoints.cs` to `GovernedFiles` makes the arch guard flag routes this task is not scoped to fix, STOP and escalate with the list rather than either suppressing the guard or silently widening scope.</trigger>
+  </escalation>
+
+  <tools>
+    <tool name="dotnet">Build and test: `dotnet build src/server/api/Sprk.Bff.Api/`, `dotnet test` (BFF unit, contract, and `tests/Spaarke.ArchTests`).</tool>
+    <tool name="git">`git worktree add` a detached `origin/master` for the publish-size comparison.</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Api/Ai/VisualizationEndpoints.cs</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Api/Filters/VisualizationAuthorizationFilter.cs</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Ai/Visualization/VisualizationService.cs</output>
+    <output type="test">tests/Spaarke.ArchTests/RouteAuthorizationGuardTests.cs</output>
+    <output type="test">tests/integration/contract/Api/Ai/VisualizationRowAuthorizationContractTests.cs</output>
+    <output type="doc">projects/spaarkeai-word-add-in-r1/notes/032-authorization-hardening.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">**Negative (the NFR-02 gate):** given a user denied Read on a matter that has documents indexed in `documentVector3072`, when that user calls `GET /api/ai/visualization/related/{documentId}` with a source document whose neighbors include that matter's documents, then **none** of that matter's documents appear in the response. This is a passing automated test, not a checklist item.</criterion>
+    <criterion testable="true">**Negative:** the same assertion holds for `POST /api/ai/visualization/related-from-content`.</criterion>
+    <criterion testable="true">Given the per-row-authorization signal is absent from `HttpContext.Items`, when either visualization route is invoked, then it returns 500 and serves zero rows — the fail-closed forcing function copied from `RecordSearchEndpoints.cs:117-129`.</criterion>
+    <criterion testable="true">Given a mixed result set of permitted and denied rows, when the route returns, then the returned count equals the number of **permitted** rows — it does not reveal the pre-trim total.</criterion>
+    <criterion testable="true">Given no user token on the request, when the access check runs, then it resolves `AccessRights.None` and no app-only fallback occurs.</criterion>
+    <criterion testable="true">`POST /api/ai/visualization/related-from-content` has an authorization filter attached at the route or group level (ADR-008) — verified by the arch guard, not by inspection alone.</criterion>
+    <criterion testable="true">`Api/Ai/VisualizationEndpoints.cs` appears in `GovernedFiles` in `tests/Spaarke.ArchTests/RouteAuthorizationGuardTests.cs`, and `tests/Spaarke.ArchTests` passes.</criterion>
+    <criterion testable="true">The negative test was verified to FAIL when the per-row check is temporarily disabled, and that verification is recorded in `notes/032-authorization-hardening.md`.</criterion>
+    <criterion testable="true">Per-row verdicts are memoized per record within a request, and the check is bounded by a maximum-checks constant mirroring `MaxRecordAuthorizationChecks:207`.</criterion>
+    <criterion testable="true">BFF publish size was measured against a fresh `origin/master` build with PowerShell `Compress-Archive`; both absolute sizes, delta and tool are recorded; delta &lt;+5 MB and absolute &lt;60 MB.</criterion>
+    <criterion testable="true">The PR description contains a Placement Justification section per `.claude/constraints/bff-extensions.md`.</criterion>
+    <criterion testable="true">All unit, contract and arch tests pass; `dotnet build` is green.</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    spec.md NFR-02 and FR-16; plan.md §3 finding F-b and risk R-3 ("If hardening proves large, Find is cut from r1 rather than shipped unsafe"). This task gates 033 structurally — do not begin the Find view on an unhardened surface. Record the measured per-row latency at the default limit in `notes/` so 033 can size its result page against real numbers.
+  </notes>
+
+  <execution><skill>.claude/skills/task-execute/SKILL.md</skill></execution>
+</task>

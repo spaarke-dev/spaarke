@@ -1,0 +1,201 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="033" project="spaarkeai-word-add-in-r1">
+  <metadata>
+    <title>FR-16b: Find view three-state gating and Run Index</title>
+    <phase>3 Surfacing Spaarke</phase>
+    <gate>032 complete (the similarity surface is per-row authorized), 015 complete (tab shell), 013 complete (client document identity)</gate>
+    <status>not-started</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Modifies BFF handler code (`RagEndpoints` index-name resolution) and adds a new React view; tags include bff-api, frontend and fluent-ui; modifies `.tsx`. Step 9.5 code-review + adr-check are mandatory.</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Fully specified work: the three states, the endpoint to call, the required `documentId` argument and the in-handler index-name fix are all named exactly. No architectural judgment remains after task 032.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <deps>032,015,013</deps>
+    <tags>frontend, fluent-ui, bff-api, office-addin, integration-test</tags>
+    <estimated-effort>1 day</estimated-effort>
+  </metadata>
+
+  <prompt>Build the Find tab's state machine. Similarity requires the open document to be indexed, and there is no on-demand embedding path, so the tab branches on three states derived from `sprk_searchindexed`. In the middle state the pane offers a **Run Index** button that calls the **existing** `POST /api/ai/rag/send-to-index` — no new endpoint. Fix, in-handler, the fact that that route ignores per-record `sprk_searchindexname`.</prompt>
+
+  <role>SPAARKE platform developer. Expertise in React 19 + Fluent UI v9 inside an Office task pane, Office theme handling, and the BFF RAG indexing route. Follow ADRs strictly.</role>
+
+  <goal>A `FindView` renders in both Word and Outlook and correctly selects one of three states from the resolved document identity and `sprk_searchindexed`. Run Index calls `POST /api/ai/rag/send-to-index` passing `documentId`, and after the pipeline completes the view transitions to the results state. `RagEndpoints`' index-name resolution honors per-record `sprk_searchindexname`. The view is keyboard-navigable, announces state changes, and renders correctly in Office light and dark themes.</goal>
+
+  <context>
+    <background>
+      **The three states (spec FR-16), driven by `sprk_searchindexed`, which is a Dataverse BIT — true / false / null gives exactly these three:**
+
+      | State | Pane shows |
+      |---|---|
+      | No `sprk_document` (unsaved / external document) | "Save this document to Spaarke so it can be indexed for AI similarity search." + a link to the Save tab |
+      | `sprk_document` exists, `sprk_searchindexed` is false or null | "This document isn't indexed yet." + a **Run Index** button |
+      | `sprk_searchindexed` is true | Similarity results (owned by task 034) |
+
+      **Run Index needs no new endpoint.** `POST /api/ai/rag/send-to-index` already exists at `Api/Ai/RagEndpoints.cs:119` (handler at `:599`), carries JWT + `AddTenantAuthorizationFilter()` + the `ai-batch` limiter, takes `SendToIndexRequest { DocumentIds: List&lt;string&gt;, TenantId: string }` (`:1297`) and returns `SendToIndexResponse` (`:1313`) with per-document `SendToIndexDocumentResult` (`:1339`). It runs **OBO** (`IndexFileAsync(…, httpContext, …)` at `:702`) and **stamps `sprk_searchindexed` / `sprk_searchindexedon` at `:710-722`**.
+
+      **The one defect to fix in-handler:** the index name comes from `searchIndexNameResolver.GetDefaultIndexName()` at `:632` and **ignores the per-record `sprk_searchindexname`**. That is a handler fix, not a new route.
+
+      **Non-negotiable from `.claude/patterns/ai/indexing-pipeline.md`:** the call MUST pass `documentId` or chunks land as orphans and the tracking fields cannot be written; GUIDs must be lowercased; and an HTTP 200 carrying `ChunksIndexed = 0` is a **failure**, not a success — the UI must not report it as one.
+
+      Related fields that exist on `sprk_document` and may be surfaced: `sprk_searchindexedon`, `sprk_searchindexqueuedon`, `sprk_searchindexcompletedon`, `sprk_searchindexname`, and the `sprk_ai_search_index` lookup.
+    </background>
+    <relevant-files>
+      <file role="new">src/client/office-addins/shared/taskpane/components/views/FindView.tsx</file>
+      <file role="modify">src/client/office-addins/shared/taskpane/components/views/index.ts</file>
+      <file role="modify">src/client/office-addins/shared/taskpane/App.tsx</file>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Api/Ai/RagEndpoints.cs</file>
+      <file role="canonical-reference">src/client/office-addins/shared/taskpane/components/views/CreateTodoView.tsx</file>
+      <file role="canonical-reference">src/client/office-addins/shared/taskpane/components/views/SaveView.tsx</file>
+      <file role="new">tests/integration/contract/Api/Ai/RagSendToIndexIndexNameContractTests.cs</file>
+    </relevant-files>
+    <dependencies>
+      <dependency task="032" status="pending">Per-row authorization on the visualization similarity surface. Find must not be built on an unhardened surface; 032's measured per-row latency also sizes this view's result page.</dependency>
+      <dependency task="015" status="pending">The Save | Find tab shell and the extended `NavigationTab` union that this view mounts into.</dependency>
+      <dependency task="013" status="pending">Client document identity — whether a `sprk_document` exists for the open document, which selects between state 1 and states 2/3.</dependency>
+    </dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="project">Run Index MUST call the existing `POST /api/ai/rag/send-to-index`. Do NOT create a new `/api/office` re-index endpoint — plan.md §3 records this as an answered open question.</constraint>
+    <constraint source="project">Every Run Index call MUST pass `documentId` (the `sprk_document` GUID, lowercased). Omitting it lands chunks as orphans and makes the tracking fields unwritable — per `.claude/patterns/ai/indexing-pipeline.md`, this is not optional and not recoverable after the fact.</constraint>
+    <constraint source="project">An HTTP 200 response carrying `ChunksIndexed = 0` MUST be surfaced in the pane as a **failure** state, not as success. Scope: the Run Index result handler in `FindView`.</constraint>
+    <constraint source="project">`sprk_searchindexed` is written by `RagIndexingJobHandler`, **never by the add-in**. The pane MUST NOT write that field, `sprk_searchindexedon`, or any other index-tracking field directly — it reads them and re-polls.</constraint>
+    <constraint source="ADR-044">Every Dataverse GUID crossing a boundary in this task (documentId sent to the index route, the identity read back) MUST be canonicalized to bare-lowercase via `cleanGuid`. Never interpolate a raw GUID into an OData key predicate.</constraint>
+    <constraint source="ADR-021">All Find-tab UI uses Fluent UI v9 and MUST honor the Office light/dark theme via the existing `useOfficeTheme` hook. No hard-coded hex colors, no `Xrm`-bound components (NFR-03 — `Xrm.*` does not exist in an Office host).</constraint>
+    <constraint source="ADR-012">Scope: this view lives in `src/client/office-addins/shared/taskpane/` and consumes `@spaarke/auth` only. The add-in does not depend on `@spaarke/ui-components` — recreate layouts per the r2 precedent and this project's documented Path-A exception. Do not add a dependency on the shared UI library.</constraint>
+    <constraint source="NFR-10">Shared-first: the view lands in `shared/taskpane/` and any host difference is expressed through `hostAdapter.getCapabilities()`, not through `if (host === 'Word')` branching inside the view.</constraint>
+    <constraint source="NFR-11">The view MUST be keyboard-navigable and MUST announce each state transition via the existing `useAnnounce` pattern — including the transition into and out of the Run Index in-progress state.</constraint>
+    <constraint source="ADR-038">`POST /api/ai/rag/send-to-index` is modified by the index-name fix, so it MUST gain contract coverage asserting per-record `sprk_searchindexname` is honored. Banned: `Mock&lt;HttpMessageHandler&gt;`, DI-registration assertions, ctor null-check assertions, `Stopwatch` + `Task.Delay`.</constraint>
+    <constraint source="ADR-029">This task touches the BFF, so publish size MUST be measured **against a fresh build of `origin/master`, not the recorded baseline number** — worktree a detached `origin/master`, publish both, zip BOTH with PowerShell `Compress-Archive`, and report both absolute sizes, the delta and the tool. Ceiling 60 MB; escalate at ≥+5 MB.</constraint>
+    <constraint source="project">The PR description MUST carry a **Placement Justification** section per `.claude/constraints/bff-extensions.md` for the `RagEndpoints` handler change.</constraint>
+    <constraint source="project">Run `/conflict-check` before opening the BFF PR — `spaarkeai-compose-r8` and `unified-access-control-r2` are live on this hot path.</constraint>
+    <constraint source="project">There is no `build:prod` script in `src/client/office-addins` — `npm run build` IS the production build. Install with `npm install --legacy-peer-deps --no-audit --no-fund`.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>Office task-pane view state machines; the Spaarke RAG indexing pipeline</topic>
+    <files>
+      <file>projects/spaarkeai-word-add-in-r1/spec.md</file>
+      <file>projects/spaarkeai-word-add-in-r1/plan.md</file>
+      <file>src/client/office-addins/CLAUDE.md</file>
+      <file>docs/architecture/office-outlook-teams-integration-architecture.md</file>
+      <file>.claude/adr/ADR-021-fluent-design-system.md</file>
+      <file>.claude/adr/ADR-044-dataverse-guid-canonicalization.md</file>
+      <file>.claude/adr/ADR-029-bff-publish-hygiene.md</file>
+      <file>docs/adr/ADR-038-testing-strategy.md</file>
+    </files>
+    <patterns>
+      <pattern name="indexing-pipeline" location=".claude/patterns/ai/indexing-pipeline.md">Binding for the Run Index call: pass `documentId`, lowercase GUIDs, treat `ChunksIndexed = 0` as failure.</pattern>
+      <pattern name="fluent-v9-host-visual-fit" location=".claude/patterns/ui/fluent-v9-host-visual-fit.md">Explicitly covers Office add-ins — apply for sizing, density and theme fit inside the narrow task pane.</pattern>
+    </patterns>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="0" name="Context + rigor declaration">Load `projects/spaarkeai-word-add-in-r1/CLAUDE.md`, `spec.md` FR-16, `src/client/office-addins/CLAUDE.md`, and `.claude/patterns/ai/indexing-pipeline.md`. Read task 032's notes for the measured per-row latency. Emit the mandatory rigor declaration (FULL / sonnet / high). Run `/conflict-check`.</step>
+    <step order="1">Read `RagEndpoints.cs:599-730` end to end — specifically `GetDefaultIndexName()` at `:632`, the OBO call at `:702` and the tracking stamp at `:710-722` — so the client is written against the route's real contract.</step>
+    <step order="2">Fix the index-name resolution in-handler so a per-record `sprk_searchindexname` is honored and `GetDefaultIndexName()` is the fallback, not the only path. Add the contract test asserting this.</step>
+    <step order="3">Build `FindView.tsx` with the three-state selector. State is derived from (a) whether task 013 resolved a `sprk_document` and (b) the BIT value of `sprk_searchindexed` — null and false both mean "not indexed yet".</step>
+    <step order="4">Implement state 1 (no `sprk_document`): the copy from spec FR-16 plus a control that switches to the Save tab through the tab shell delivered by task 015.</step>
+    <step order="5">Implement state 2 (not indexed): the copy plus the Run Index button. On click, call `POST /api/ai/rag/send-to-index` with `{ DocumentIds: [lowercased documentId], TenantId }`, show an in-progress state, then re-read the identity/index state. Treat a 200 with `ChunksIndexed = 0` as a failure and say so.</step>
+    <step order="6">Implement state 3 (indexed): render the results container that task 034 will fill. In this task it may be a minimal list — 034 owns lazy-scroll and the records bridge.</step>
+    <step order="7">Wire `FindView` into `App.tsx` and the views barrel, gated by `hostAdapter.getCapabilities()` so both hosts get the same capability decision rather than a host-name branch.</step>
+    <step order="8">Add unit tests for the three-state selector logic (true / false / null / no-document) in `shared/taskpane/components/views/__tests__/`.</step>
+    <step order="9">Run `npm run typecheck` and `npm run build` in `src/client/office-addins`; run `dotnet build` + `dotnet test` for the BFF change. Execute the `&lt;ui-tests&gt;` below in both hosts.</step>
+    <step order="10">Measure BFF publish size against a fresh `origin/master` build per the ADR-029 constraint; record both absolute sizes, the delta and the tool.</step>
+    <step order="11">Update `projects/spaarkeai-word-add-in-r1/tasks/TASK-INDEX.md`: set this task's status to ✅.</step>
+    <step order="12">Document any deviation in `projects/spaarkeai-word-add-in-r1/notes/`.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If honoring per-record `sprk_searchindexname` turns out to require changes beyond the `RagEndpoints` handler — a new resolver, a signature change on `IndexFileAsync`, or a change to `RagIndexingJobHandler` — STOP and escalate per CLAUDE.md §6. plan.md §3 sizes this as an in-handler fix; if it is not, the sizing is wrong and the owner should decide.</trigger>
+    <trigger>If Run Index returns HTTP 200 with `ChunksIndexed = 0` consistently for a document that ought to be indexable, STOP and escalate rather than presenting it to the user as success or silently retrying — that pattern is a known pipeline failure mode, not a UI concern.</trigger>
+    <trigger>If task 032's measured per-row authorization latency makes the results state unusable at the default limit, STOP and escalate rather than raising the limit past what 032 authorized or bypassing the hardened path.</trigger>
+  </escalation>
+
+  <justification>
+    <existing>No Find view exists in the add-in. `ls src/client/office-addins/shared/taskpane/components/views/` returns `CreateTodoView.tsx`, `SaveView.tsx`, `ShareView.tsx`, `SignInView.tsx`, `StatusView.tsx` — the closest neighbor is Outlook's unbuilt `search` placeholder tab, which has no view behind it. On the server side, `POST /api/ai/rag/send-to-index` already exists at `Api/Ai/RagEndpoints.cs:119`, so no new endpoint is created.</existing>
+    <extension>Yes on the server (the existing send-to-index route is extended in-handler, not replaced); No on the client (there is no view to extend — the `search` tab is a placeholder string in a union type with no component behind it).</extension>
+    <cost-of-doing-nothing>Without the three-state gate the Find tab either renders empty for every unindexed document with no explanation, or attempts a similarity query that cannot return anything — and the user has no way to get the document indexed from the pane, because the only trigger today is post-upload. The specific failing behavior is: open a Spaarke document that predates indexing, click Find, get a blank pane and no path forward.</cost-of-doing-nothing>
+  </justification>
+
+  <ui-tests>
+    <test name="State 1 — unsaved document shows the save prompt">
+      <steps>
+        <step>Open a document in Word that has never been saved to Spaarke (a local desktop file).</step>
+        <step>Open the Spaarke pane and select the Find tab.</step>
+      </steps>
+      <expected>The pane shows "Save this document to Spaarke so it can be indexed for AI similarity search." and a control that switches to the Save tab. No Run Index button appears. No similarity request is issued.</expected>
+    </test>
+    <test name="State 2 — saved but unindexed shows Run Index">
+      <steps>
+        <step>Open a Spaarke-sourced document whose `sprk_searchindexed` is null or false.</step>
+        <step>Select the Find tab.</step>
+      </steps>
+      <expected>The pane shows "This document isn't indexed yet." and an enabled Run Index button. No results list renders.</expected>
+    </test>
+    <test name="Run Index transitions to results">
+      <steps>
+        <step>From state 2, click Run Index.</step>
+        <step>Wait for the indexing pipeline to complete and the pane to re-read index state.</step>
+      </steps>
+      <expected>An in-progress state is shown and announced; on completion `sprk_searchindexed` reads true and the view transitions to the results state. A 200 response with `ChunksIndexed = 0` instead surfaces an explicit failure message, not results and not a success toast.</expected>
+    </test>
+    <test name="Dark mode (ADR-021)">
+      <steps>
+        <step>Switch the Office host theme to dark (File → Account → Office Theme → Black, or the web host's dark setting).</step>
+        <step>Reopen the pane and visit each of the three Find states.</step>
+      </steps>
+      <expected>All text, buttons, borders and empty-state illustrations use Fluent v9 theme tokens and remain legible with adequate contrast in dark mode. No hard-coded light-mode colors bleed through in any of the three states.</expected>
+    </test>
+    <test name="Keyboard navigation and announcements (NFR-11)">
+      <steps>
+        <step>With the pane focused, navigate the Find tab using Tab / Shift+Tab / Enter only.</step>
+        <step>Trigger Run Index from the keyboard and let it complete.</step>
+      </steps>
+      <expected>Every interactive element is reachable and operable from the keyboard with a visible focus ring; each state transition (including entering and leaving the in-progress state) is announced via `useAnnounce`.</expected>
+    </test>
+    <test name="Outlook parity">
+      <steps>
+        <step>Repeat states 1 and 2 in the Outlook add-in.</step>
+      </steps>
+      <expected>The same states render, driven by `hostAdapter.getCapabilities()` rather than a host-name conditional; any capability legitimately absent in Outlook is gated, not silently broken.</expected>
+    </test>
+  </ui-tests>
+
+  <tools>
+    <tool name="npm">`npm install --legacy-peer-deps --no-audit --no-fund`, `npm run typecheck`, `npm run build` in `src/client/office-addins` (there is no `build:prod` here — `build` IS production).</tool>
+    <tool name="dotnet">Build and test the BFF: `dotnet build src/server/api/Sprk.Bff.Api/`, `dotnet test`.</tool>
+    <tool name="git">`git worktree add` a detached `origin/master` for the publish-size comparison.</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/client/office-addins/shared/taskpane/components/views/FindView.tsx</output>
+    <output type="code">src/client/office-addins/shared/taskpane/App.tsx</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Api/Ai/RagEndpoints.cs</output>
+    <output type="test">src/client/office-addins/shared/taskpane/components/views/__tests__/FindView.test.tsx</output>
+    <output type="test">tests/integration/contract/Api/Ai/RagSendToIndexIndexNameContractTests.cs</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Given the open document resolves to no `sprk_document`, when the Find tab renders, then it shows the save prompt and a link to the Save tab, and issues no similarity request.</criterion>
+    <criterion testable="true">Given a resolved `sprk_document` with `sprk_searchindexed` = null, when the Find tab renders, then it shows the "isn't indexed yet" copy and an enabled Run Index button.</criterion>
+    <criterion testable="true">Given a resolved `sprk_document` with `sprk_searchindexed` = false, when the Find tab renders, then it shows the same not-indexed state as null — false and null are not distinguished in the UI.</criterion>
+    <criterion testable="true">Given a resolved `sprk_document` with `sprk_searchindexed` = true, when the Find tab renders, then it shows the results state.</criterion>
+    <criterion testable="true">Given Run Index is clicked, when the request is issued, then the request body contains the `sprk_document` GUID in `DocumentIds`, lowercased and brace-free, and the route called is `POST /api/ai/rag/send-to-index` — asserted in a test, not by inspection.</criterion>
+    <criterion testable="true">Given Run Index returns HTTP 200 with `ChunksIndexed = 0`, when the response is handled, then the pane shows an explicit failure state and does not transition to results.</criterion>
+    <criterion testable="true">Given a `sprk_document` with a non-null `sprk_searchindexname`, when `POST /api/ai/rag/send-to-index` processes it, then that index name is used and `GetDefaultIndexName()` is only the fallback — asserted by contract test.</criterion>
+    <criterion testable="true">Negative: given an unauthenticated caller, when Run Index is invoked, then the request is rejected by the route's existing JWT + tenant filter and the pane surfaces an error state rather than an unhandled exception.</criterion>
+    <criterion testable="true">The add-in never writes `sprk_searchindexed`, `sprk_searchindexedon`, or any other index-tracking field — verified by grep over `src/client/office-addins/`.</criterion>
+    <criterion testable="true">All six `&lt;ui-tests&gt;` pass, including the dark-mode and keyboard/announcement checks.</criterion>
+    <criterion testable="true">`npm run typecheck` is clean and `npm run build` succeeds in `src/client/office-addins`; `dotnet build` and `dotnet test` are green.</criterion>
+    <criterion testable="true">BFF publish size was measured against a fresh `origin/master` build with PowerShell `Compress-Archive`; both absolute sizes, delta and tool are recorded; delta &lt;+5 MB and absolute &lt;60 MB.</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    spec.md FR-16 (the three-state table is quoted verbatim above) and the Owner Clarification "Require indexing first — removes the on-demand-embedding slow path entirely". plan.md §3 answers the spec's open question: Run Index needs no new endpoint. Task 034 owns the results themselves (lazy-scroll + the records bridge decision); this task owns the state machine and Run Index.
+  </notes>
+
+  <execution><skill>.claude/skills/task-execute/SKILL.md</skill></execution>
+</task>

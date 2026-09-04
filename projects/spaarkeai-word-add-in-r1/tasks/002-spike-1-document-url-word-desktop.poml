@@ -1,0 +1,126 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="002" project="spaarkeai-word-add-in-r1">
+  <metadata>
+    <title>Spike-1: Office.context.document.url shape for SPE files in Word desktop</title>
+    <phase>0 De-risk and baseline</phase>
+    <gate>startable</gate>
+    <status>not-started</status>
+    <rigor>STANDARD</rigor>
+    <rigor-reason>Research and decision-record task producing a new notes artifact, not code. No .ts/.tsx/.cs file is modified, so the Step 9.5 code-review and adr-check gates have no code surface to inspect. STANDARD rather than MINIMAL because the output gates FR-01 and, through it, FR-07/09/10/11 — the report's rigor is the deliverable.</rigor-reason>
+    <model-tier>opus</model-tier>
+    <model-tier-reason>This is the keystone of the project (plan.md section 1 critical path). A wrong or over-confident conclusion here mis-scopes four downstream FRs and an entire phase. The work requires reconciling external platform documentation against in-repo evidence and distinguishing documented-for-web behaviour from verified-on-desktop behaviour — exactly the judgment boundary that justifies opus per root CLAUDE.md section 8.5.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>P0-spikes</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <deps>none</deps>
+    <tags>spike, research, office-addins, word, graph, document-identity, phase-0</tags>
+    <estimated-effort>4-6 hours desk research plus an operator-run verification pass</estimated-effort>
+  </metadata>
+
+  <prompt>Determine the actual shape and usability of `Office.context.document.url` for a SharePoint-Embedded-backed file opened in Word DESKTOP, and whether that value carries end-to-end through the FR-01 identity chain: url to base64url to Graph `GET /shares/u!{enc}/driveItem` to `driveId` plus `itemId` to an `sprk_document` row via the `sprk_graphitemid_uk` alternate key. Microsoft documents this API's behaviour for Word on the web; the desktop behaviour for SPE containers is the unknown, and FR-01's primary path rests entirely on it.</prompt>
+
+  <role>SPAARKE platform developer. Office.js host-API semantics, Microsoft Graph shares/driveItem resolution, and SharePoint Embedded container addressing. You are establishing a verified fact, not building a feature. Follow ADRs strictly.</role>
+
+  <goal>projects/spaarkeai-word-add-in-r1/notes/spikes/spike-1-document-url.md exists and answers the four chain questions with an explicit per-link verdict, states for each answer whether it is DESK-RESEARCHED or EMPIRICALLY VERIFIED (never blurring the two), carries a paste-ready operator verification recipe, and closes with a single GREEN / AMBER / RED verdict plus the concrete consequence of that verdict for FR-01, FR-07, FR-09, FR-10 and FR-11.</goal>
+
+  <context>
+    <background>FR-01 (spec.md line 61) specifies conditional document identity: when a document originated from Spaarke, the pane must know which `sprk_document` and which matter it is. The specified mechanism is `Office.context.document.url` to base64url to Graph `GET /shares/u!{enc}/driveItem` to `driveId`+`itemId` to `sprk_document` via the `sprk_graphitemid_uk` alternate key. Everything downstream depends on this: the profile section (FR-07), the related-record card (FR-09), open-record (FR-10) and version-save (FR-11) all require a resolved identity. spec.md's Unresolved Questions (line 281) and plan.md risk R-1 both name the failure: if `document.url` is unusable on Word desktop for SPE files, FR-01's primary path fails and the FR-02 custom-XML stamp becomes the ONLY identity mechanism — and the stamp is forward-only (project CLAUDE.md Decisions, 2026-09-04), so it cannot identify any document saved before this release. What exists in the repo today is not an identity mechanism at all: `WordAdapter.getItemId()` (shared/adapters/WordAdapter.ts, roughly lines 78-106) synthesises a hash from title, author and timestamp, which is structurally incapable of resolving to a record (spec.md New Components table, line 176).</background>
+    <relevant-files>
+      <file role="canonical-reference">src/client/office-addins/shared/adapters/WordAdapter.ts</file>
+      <file role="canonical-reference">src/client/office-addins/shared/adapters/IHostAdapter.ts</file>
+      <file role="canonical-reference">src/client/office-addins/word/WordHostAdapter.ts</file>
+      <file role="canonical-reference">src/client/office-addins/word/word-manifest.xml</file>
+      <file role="canonical-reference">docs/architecture/office-outlook-teams-integration-architecture.md</file>
+      <file role="canonical-reference">projects/spaarkeai-word-add-in-r1/DEDUP-AND-SAVE-BACK-IDENTITY.md</file>
+      <file role="canonical-reference">src/server/api/Sprk.Bff.Api/Services/Office/OfficeDocumentPersistence.cs</file>
+    </relevant-files>
+    <dependencies>
+      <dependency task="none" status="complete">No prerequisite tasks. Runs concurrently with 003, 004 and 005 in the P0-spikes wave, and concurrently with 001.</dependency>
+    </dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="project">SCOPE: src/client/office-addins/**. This spike MUST NOT leave committed instrumentation in the add-in. Any probe snippet belongs inside the spike report as a fenced code block for the operator to paste into a dev build or the webview console — never as a committed source file, a new debug view, or a temporary console.log in an existing component. A spike that ships debug code has changed the product.</constraint>
+    <constraint source="project">SCOPE: the whole report. Every claim carries a provenance label — DESK-RESEARCHED (cite the exact Microsoft Learn URL and its last-updated date, or the exact `@types/office-js` declaration) or EMPIRICALLY VERIFIED (state host, host build number, platform, file source, and what was observed). A claim with no label is a defect. The entire reason this spike exists is that a web-documented behaviour was assumed to hold on desktop.</constraint>
+    <constraint source="project">SCOPE: the alternate-key link of the chain. NFR-07 is inviolable — you MUST NOT propose relaxing `sprk_graphitemid_uk`, widening it, or adding a second key as a workaround for a format mismatch. Compose's transient-key dedup and promote-idempotency both rest on it. If Graph returns an item id in a format that does not match what `sprk_document.sprk_graphitemid` stores, report the mismatch and the normalisation required on the BFF side; do not touch the key.</constraint>
+    <constraint source="ADR-044">SCOPE: any GUID that appears in the report's proposed resolution flow (container id, drive id, document id). Show them canonicalised bare-lowercase via the shared `cleanGuid` at every boundary, and never interpolated raw into an OData key predicate. If the spike finds that Graph returns a braced or upper-cased identifier anywhere in the chain, that is a finding to record, not a licence to hand-roll brace-stripping.</constraint>
+    <constraint source="ADR-007">SCOPE: any BFF-side implementation sketch in the report. Graph SDK types MUST stay behind `SpeFileStore`; a proposed resolver must be described as calling through that facade, not as a direct Graph SDK call from an endpoint. This is a sketch for task 012, not an implementation — keep it at the level of "which facade method, what shape in, what shape out".</constraint>
+    <constraint source="project">SCOPE: the verdict. Do NOT soften a negative result into an optimistic one. If the desktop behaviour cannot be established without a live host and no live host is available to you, the honest verdict is AMBER with the operator recipe attached — not GREEN. plan.md risk R-1 exists precisely so a negative result triggers a scope conversation BEFORE Phase 1, not during it.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>Office.js document addressing; Microsoft Graph shares API; SharePoint Embedded container URLs; Dataverse alternate keys</topic>
+    <files>
+      <file>projects/spaarkeai-word-add-in-r1/spec.md</file>
+      <file>projects/spaarkeai-word-add-in-r1/plan.md</file>
+      <file>projects/spaarkeai-word-add-in-r1/DEDUP-AND-SAVE-BACK-IDENTITY.md</file>
+      <file>src/client/office-addins/CLAUDE.md</file>
+      <file>docs/architecture/office-outlook-teams-integration-architecture.md</file>
+      <file>.claude/adr/ADR-007-spefilestore.md</file>
+      <file>.claude/adr/ADR-044-dataverse-guid-canonicalization.md</file>
+    </files>
+    <patterns>
+      <pattern name="Graph shares encoding" location="external — Microsoft Graph /shares/{sharingToken} documentation">The sharing token is `u!` followed by the base64url encoding of the URL: base64-encode, strip trailing `=`, replace `+` with `-` and `/` with `_`. Confirm from current documentation rather than memory, and confirm whether Graph accepts a `contentstorage` SPE URL as a sharing token at all — SPE containers are not conventional SharePoint document libraries and the shares endpoint may behave differently or require the container-scoped drive route instead.</pattern>
+      <pattern name="candidate fallbacks to evaluate before declaring RED" location="external — Office.js common API and Word JS API">A negative on the primary property is only terminal if the alternatives also fail. Evaluate at minimum: (1) `Office.context.document.url` (synchronous property); (2) `Office.context.document.getFilePropertiesAsync` which returns a `url` and may differ from the synchronous property on desktop; (3) `Office.context.document.getActiveViewAsync`/document settings; (4) the Word-specific `Word.run` document properties surface; (5) whether the manifest's requested permission level (`ReadWriteDocument` vs lower) gates the value. Report each candidate's result separately — an AMBER verdict backed by a named working fallback is a very different input to Phase 1 than a bare RED.</pattern>
+      <pattern name="the existing non-identity" location="src/client/office-addins/shared/adapters/WordAdapter.ts">`getItemId()` returns a hash over title, author and timestamp. Read it before writing the report so the "what exists today" section is grounded in code rather than in the spec's summary of it, and so task 012 inherits an accurate statement of what is being replaced.</pattern>
+      <pattern name="how the item id is actually stored" location="src/server/api/Sprk.Bff.Api/Services/Office/OfficeDocumentPersistence.cs">The last link of the chain only holds if the value Graph returns matches the value the BFF wrote. Grep for `sprk_graphitemid` across src/server/** and record the exact format written on save (bare item id, composite driveId+itemId, cased how). A format mismatch here is a silent lookup miss, not an error — which makes it the most dangerous link in the chain and the one most likely to be assumed rather than checked.</pattern>
+    </patterns>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="0" name="Context + rigor declaration">Emit the mandatory rigor declaration (RIGOR LEVEL: STANDARD, reason, protocol steps). Load projects/spaarkeai-word-add-in-r1/CLAUDE.md, spec.md FR-01/FR-02 and Unresolved Questions, and plan.md risk R-1.</step>
+    <step order="1">Establish the in-repo ground truth first, before any external research. Read `WordAdapter.getItemId()` and `IHostAdapter` to record exactly what identity capability exists today. Grep src/server/** for `sprk_graphitemid` and record the exact stored format and the code path that writes it. Read the word manifest to record the requested permission level and requirement sets. Cite file:line for each finding.</step>
+    <step order="2">Research link 1 of the chain: does `Office.context.document.url` return a usable value in Word on Windows desktop for a file opened from a SharePoint Embedded container? Determine what it returns for each of: an SPE-backed file opened via the Spaarke open flow; a file opened from OneDrive; a file opened from local disk; a document that has never been saved. Consult current Microsoft Learn documentation and the `@types/office-js` declarations, and label each answer's provenance. Explicitly state where the documentation says "web only" or is silent on desktop.</step>
+    <step order="3">Research link 2: is the value from link 1 base64url-encodable into a Graph sharing token, and does `GET /shares/u!{enc}/driveItem` resolve for an SPE `contentstorage` URL? Determine whether the shares endpoint supports SPE container URLs at all, whether it requires delegated or application permissions, and what it returns for a URL the caller cannot access (this is the authorization behaviour FR-01 will inherit).</step>
+    <step order="4">Research link 3: does the resolved driveItem carry `parentReference.driveId` and `id`, and are those the same identifiers Spaarke stores? Cross-check against the format recorded in step 1. Any casing, bracing or composition difference is a finding.</step>
+    <step order="5">Research link 4: does that identifier pair resolve to an `sprk_document` row via the `sprk_graphitemid_uk` alternate key as currently defined? State what the key is defined over and whether the value from link 3 can be presented to it without relaxing the key (NFR-07).</step>
+    <step order="6">Evaluate the candidate fallbacks listed in the knowledge block — `getFilePropertiesAsync`, document settings, the Word JS API document surface, and permission-level effects — and record each one's result separately. Do this even if link 1 looks GREEN, because a fallback is what makes the eventual implementation robust across hosts.</step>
+    <step order="7">Record the Word-on-the-web and Word-for-Mac behaviours as a secondary section. FR-01's acceptance is written against Word desktop; the other hosts are reported for completeness and to inform FR-19 parity, not gated on.</step>
+    <step order="8">Write the operator verification recipe: a paste-ready snippet the operator can run in a dev build or the add-in webview console that prints, for the currently open document, each candidate value and the derived base64url sharing token. Include the exact steps to open a Spaarke-sourced document in Word desktop first. State clearly that this snippet is NOT to be committed to src/.</step>
+    <step order="9">Write projects/spaarkeai-word-add-in-r1/notes/spikes/spike-1-document-url.md with these sections: Question · What exists today (with file:line) · Method and provenance policy · Link-by-link findings (1 through 4, each labelled DESK-RESEARCHED or EMPIRICALLY VERIFIED) · Candidate fallbacks · Other hosts (web, Mac) · Operator verification recipe · Verdict (GREEN / AMBER / RED) · Consequences for FR-01, FR-07, FR-09, FR-10, FR-11 · Implementation sketch for task 012 (facade-level only, per ADR-007) · Open questions remaining.</step>
+    <step order="10">Apply the verdict gate. GREEN means every link resolves and FR-01 proceeds as specified. AMBER means the chain works only via a named fallback or could not be empirically confirmed — record the fallback and the residual risk, and flag that task 012 must confirm before building. RED fires the escalation below.</step>
+    <step order="11">Update projects/spaarkeai-word-add-in-r1/tasks/TASK-INDEX.md: set this task's status to completed.</step>
+    <step order="12">Document any deviation from this task file in projects/spaarkeai-word-add-in-r1/notes/.</step>
+  </steps>
+
+  <escalation>
+    <trigger>RED VERDICT — if `Office.context.document.url` (and every evaluated fallback) is unusable on Word desktop for SPE-backed files, STOP and escalate per root CLAUDE.md section 6 for a SCOPE DECISION before Phase 1 begins. Do NOT proceed to design an alternative identity mechanism on your own initiative. The consequence is specific and must be stated in the escalation: FR-01's primary path fails, the FR-02 custom-XML stamp becomes the only identity mechanism, and because the stamp is forward-only (project CLAUDE.md Decisions, 2026-09-04) NO document saved before this release can ever be identified — which in turn strands FR-07 (profile), FR-09 (record card), FR-10 (open record) and FR-11 (version-save) for the entire existing document corpus. The operator must choose between narrowing FR-01 to post-release documents, reopening the retroactive-stamp decision, or cutting the dependent FRs.</trigger>
+    <trigger>If the Graph shares endpoint does not accept SPE `contentstorage` URLs and the only route to `driveId`+`itemId` requires an identifier the add-in cannot obtain client-side, STOP and escalate — that is a RED on link 2 with the same downstream consequence, and it changes task 012 from "an endpoint that resolves a URL" into a different design.</trigger>
+    <trigger>If the only way to make link 4 resolve would be to relax, widen or duplicate `sprk_graphitemid_uk`, STOP and escalate. NFR-07 declares that key inviolable because Compose's transient-key dedup and promote-idempotency rest on it; this is a cross-project blast radius that an add-in spike must not decide.</trigger>
+  </escalation>
+
+  <tools>
+    <tool name="WebSearch">Locate current Microsoft Learn documentation for Office.js document addressing and the Graph shares API.</tool>
+    <tool name="WebFetch">Read the located Microsoft Learn and Graph reference pages; capture URLs and last-updated dates for the provenance labels.</tool>
+    <tool name="Agent">Optionally dispatch the `researcher` subagent for the Office.js and Graph platform questions — it consults `knowledge/` first and memoizes findings across sessions (root CLAUDE.md section 15). Do not delegate the in-repo evidence gathering; that is yours.</tool>
+    <tool name="Grep">In-repo evidence: `sprk_graphitemid` across src/server/**, `getItemId` across src/client/office-addins/**.</tool>
+  </tools>
+
+  <outputs>
+    <output type="doc">projects/spaarkeai-word-add-in-r1/notes/spikes/spike-1-document-url.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">projects/spaarkeai-word-add-in-r1/notes/spikes/spike-1-document-url.md exists and contains a section per chain link (url; base64url to Graph shares; driveId plus itemId; sprk_document via sprk_graphitemid_uk), each with an explicit verdict.</criterion>
+    <criterion testable="true">Every factual claim in the report carries a provenance label of exactly DESK-RESEARCHED (with a cited URL and its last-updated date, or a cited `@types/office-js` declaration) or EMPIRICALLY VERIFIED (with host, build, platform and observation). No claim is unlabelled.</criterion>
+    <criterion testable="true">The report states, for Word on Windows desktop specifically, what `Office.context.document.url` returns for each of four cases: an SPE-backed Spaarke-sourced file, a OneDrive file, a local-disk file, and a never-saved document.</criterion>
+    <criterion testable="true">The report records what the repository stores in `sprk_graphitemid` today, cited to file:line in src/server/**, and states whether the Graph-returned identifier matches that format.</criterion>
+    <criterion testable="true">The report evaluates at least the four named fallback candidates (`getFilePropertiesAsync`, document settings, the Word JS API document surface, manifest permission level) and gives each a separate result.</criterion>
+    <criterion testable="true">The report contains a paste-ready operator verification recipe, explicitly marked as not-to-be-committed, that prints each candidate value and the derived sharing token for the open document.</criterion>
+    <criterion testable="true">The report closes with exactly one verdict — GREEN, AMBER or RED — and a consequence statement naming FR-01, FR-07, FR-09, FR-10 and FR-11 individually.</criterion>
+    <criterion testable="true">The report contains a facade-level implementation sketch for task 012 that routes Graph access through `SpeFileStore` (ADR-007) and canonicalises GUIDs via `cleanGuid` (ADR-044).</criterion>
+    <criterion testable="true">Negative: `git status` shows no file added or modified under src/client/office-addins/ or src/server/** by this task. The probe snippet exists only inside the report.</criterion>
+    <criterion testable="true">Negative: the report contains no proposal to relax, widen or duplicate `sprk_graphitemid_uk` (NFR-07).</criterion>
+    <criterion testable="true">Negative: if the desktop behaviour could not be empirically confirmed, the verdict is AMBER or RED — never GREEN on desk research alone.</criterion>
+  </acceptance-criteria>
+
+  <notes>Spec reference: FR-01 (line 61), FR-02 (line 62), Dependencies/Spikes table (line 237), Unresolved Questions (line 281). Plan reference: section 1 critical path ("Spike-1 is the keystone"), section 4 Phase 0 task 002, risk R-1.
+
+No `&lt;justification&gt;` block is present: this task creates no new code surface, only a project notes artifact in the already-provisioned projects/spaarkeai-word-add-in-r1/notes/spikes/ directory.
+
+Parallel-safety: P0-spikes wave. 002, 003, 004 and 005 write to four distinct files under notes/spikes/ and read disjoint code areas; none modifies source. Safe to run all four concurrently, and concurrently with 001.
+
+Downstream consumers of this report, so write for them: task 012 (FR-01 server — the identity resolver extending /api/documents), task 013 (FR-01 client — the `canGetDocumentUrl` capability and `getDocumentUrl()` on IHostAdapter), and task 014 (FR-02 stamp), whose scope changes materially on an AMBER or RED verdict.</notes>
+
+  <execution><skill>.claude/skills/task-execute/SKILL.md</skill></execution>
+</task>

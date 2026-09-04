@@ -1,0 +1,202 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="027" project="spaarkeai-word-add-in-r1">
+  <metadata>
+    <title>FR-10: open the related record and the Document record from the pane</title>
+    <phase>2 Save flow</phase>
+    <gate>003+026 complete</gate>
+    <status>not-started</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Modifies .tsx/.ts client code, introduces a host-integration mechanism (Office Dialog API) with an auth boundary, and touches the BFF read surface; tags include frontend + office-addins.</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Spike-2 has already resolved the mechanism question by the time this runs; the task implements the chosen branch against a documented fallback. The ADR-050 tension is pre-resolved as Path C.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>P2-b</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <deps>003,026</deps>
+    <tags>frontend, fluent-ui, office-addins, bff-api, e2e-test</tags>
+    <estimated-effort>1 day</estimated-effort>
+  </metadata>
+
+  <prompt>Make the related-record card (task 026) and a Document-record affordance actually open their records from the pane, using the mechanism Spike-2 (task 003) determined. The preferred mechanism is the Office Dialog API; if the spike came back negative, implement the documented fallback instead — read-only detail in-pane with a browser-tab escape hatch. Record which branch was taken in `notes/`.</prompt>
+
+  <role>SPAARKE platform developer. Expertise in the Office Dialog API (dialog lifecycle, `messageParent`, framing constraints), Office add-in auth context, and Fluent UI v9. Follow ADRs strictly.</role>
+
+  <goal>From the pane, a user can open the related record and the `sprk_document` record, use them, and see any change they made reflected in the pane on return. The mechanism matches Spike-2's finding; whichever branch was taken is recorded with its rationale in `projects/spaarkeai-word-add-in-r1/notes/`.</goal>
+
+  <context>
+    <background>
+      spec.md FR-10: open the related record and the `sprk_document` record from the pane. Preferred mechanism is the Office Dialog API (see Spike-2). Acceptance: the record opens and is usable, and edits made there are reflected in the pane on return.
+
+      Spike-2 (task 003) answers four questions and gates this task: (a) can the Office Dialog host an MDA record form without a framing refusal, or must we host a Spaarke code page? (b) does auth context travel via `messageParent`? (c) does the form function at dialog size? (d) does a change propagate back to the pane?
+
+      ADR TENSION — ALREADY RESOLVED, do not re-litigate. spec.md ADR Tensions records ADR-050 as PATH C: the Office dialog is host chrome and sits outside ADR-050's scope, so `SprkModal` cannot and need not wrap it. BUT any Spaarke UI rendered INSIDE the dialog still follows ADR-050 and ADR-021. Cite this resolution in the PR rather than reopening it.
+
+      The documented fallback, if Spike-2 is negative: read-only detail in-pane with a browser-tab escape hatch. That is an acceptable outcome for this task — write the implementation so either branch satisfies the acceptance criteria, and record the choice.
+
+      Verified constraint: `Xrm.*` does NOT exist in an Office host (NFR-03). Any deep-link or navigation must be constructed from configuration, not from `Xrm.Navigation`. The add-in already reads an `ORG_URL` environment variable for the Quick-Create deep link, with an unset value being a safe no-op — follow that precedent rather than hardcoding an org URL.
+
+      Task 026 exposes the click seam on the related-record card. This task fills it and adds the equivalent affordance for the `sprk_document` record itself.
+    </background>
+    <relevant-files>
+      <file role="canonical-reference">projects/spaarkeai-word-add-in-r1/notes/spikes/spike-2-dialog-api.md</file>
+      <file role="modify">src/client/office-addins/shared/taskpane/components/RelatedRecordCard.tsx</file>
+      <file role="new">src/client/office-addins/shared/taskpane/services/openRecordLauncher.ts</file>
+      <file role="modify">src/client/office-addins/shared/adapters/IHostAdapter.ts</file>
+      <file role="modify">src/client/office-addins/shared/adapters/WordAdapter.ts</file>
+      <file role="modify">src/client/office-addins/shared/adapters/OutlookAdapter.ts</file>
+      <file role="modify">src/client/office-addins/shared/taskpane/components/SaveFlow.tsx</file>
+      <file role="canonical-reference">src/client/office-addins/shared/taskpane/services/createTodoLauncher.ts</file>
+      <file role="canonical-reference">src/client/office-addins/shared/services/AuthService.ts</file>
+      <file role="modify">tests/integration/contract/Api/Office/OfficeEndpointsContractTests.cs</file>
+    </relevant-files>
+    <dependencies>
+      <dependency task="003" status="pending">Spike-2 — determines the record-open mechanism: Office Dialog hosting an MDA form, Office Dialog hosting a Spaarke code page, or the documented in-pane fallback.</dependency>
+      <dependency task="026" status="pending">FR-09 related-record card — exposes the click seam this task fills and names the record to open.</dependency>
+    </dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="project">SCOPE — read `projects/spaarkeai-word-add-in-r1/notes/spikes/spike-2-dialog-api.md` FIRST and implement the branch it selected. BOTH the Office Dialog path and the documented fallback (read-only detail in-pane plus a browser-tab escape hatch) are acceptable outcomes for this task. Record the branch taken and its rationale in `projects/spaarkeai-word-add-in-r1/notes/`.</constraint>
+    <constraint source="ADR-050">SCOPE — resolved as PATH C for this project: the Office dialog is host chrome, outside ADR-050's scope, so it is NOT wrapped in `SprkModal`. However, any Spaarke-rendered UI INSIDE the dialog (and any in-pane fallback detail view) still follows ADR-050 and ADR-021. Cite this resolution in the PR; do not re-litigate the tension.</constraint>
+    <constraint source="ADR-021">SCOPE — for every surface this task renders (dialog contents, in-pane fallback, the open affordances themselves): Fluent UI v9 semantic tokens only, no hex literals; honors the Office light/dark theme via `useOfficeTheme`.</constraint>
+    <constraint source="project">SCOPE — NFR-03: `Xrm.*` does not exist in an Office host. MUST NOT call `Xrm.Navigation`, MUST NOT import any Xrm-bound component, and MUST NOT assume a model-driven app JS context inside the dialog.</constraint>
+    <constraint source="project">SCOPE — no hardcoded org URLs. Any record deep link is built from configuration, following the existing `ORG_URL` precedent where an unset value is a safe no-op rather than a broken link.</constraint>
+    <constraint source="ADR-028">SCOPE — auth for anything the dialog loads uses NAA via `@spaarke/auth` `OfficeNaaStrategy`, wrapped by `shared/services/AuthService.ts`. MUST NOT construct MSAL directly in this package (arch-test enforced), and MUST NOT pass a raw access token through `messageParent` or a query string.</constraint>
+    <constraint source="project">SCOPE — NFR-10 shared-first: the launcher lands in `shared/taskpane/` and is gated by `hostAdapter.getCapabilities()`, not by a `hostType === 'word'` conditional inside a view. If a host cannot open a dialog, the capability reports false and the fallback renders.</constraint>
+    <constraint source="ADR-012">SCOPE — for this add-in package only: per this project's Path A exception, any in-pane detail view is a thin view under `shared/taskpane/`. MUST NOT import `@spaarke/ui-components`.</constraint>
+    <constraint source="project">SCOPE — the return path: an edit made in the opened record MUST be reflected in the pane on return. Whether that is driven by a `messageParent` message, a dialog-close event, or a re-read on focus, the mechanism must be explicit and tested, not left to chance.</constraint>
+    <constraint source="ADR-044">SCOPE — every record GUID used to build a link or a dialog URL MUST be canonicalized bare-lowercase via `cleanGuid` before use.</constraint>
+    <constraint source="ADR-038">SCOPE — any endpoint this task adds or modifies gets a contract test. The record-open behavior itself gets end-to-end coverage per the ui-tests block below. Cite `docs/adr/ADR-038-testing-strategy.md` — there is no concise copy in `.claude/adr/`.</constraint>
+    <constraint source="project">SCOPE — BFF publish size: measure the delta against a FRESH BUILD OF `origin/master`, never against the recorded baseline number (root CLAUDE.md §10 bullet 4). Zip both with PowerShell `Compress-Archive` and report both absolute sizes, the delta, and the tool name. If this task turns out to be client-only, state that explicitly and record a zero-delta measurement rather than skipping it.</constraint>
+    <constraint source="project">SCOPE — the PR description MUST state the Placement Justification for any BFF-side change per `.claude/constraints/bff-extensions.md`.</constraint>
+    <constraint source="project">SCOPE — run `/conflict-check` before opening any BFF-touching PR. `spaarkeai-compose-r8` and `unified-access-control-r2` are live on the same hot path.</constraint>
+    <constraint source="project">SCOPE — build commands for `src/client/office-addins` only: install with `npm install --legacy-peer-deps --no-audit --no-fund`; there is NO `build:prod` script — `npm run build` IS the production build.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>Office Dialog API, add-in auth context, record deep-linking without Xrm</topic>
+    <files>
+      <file>projects/spaarkeai-word-add-in-r1/notes/spikes/spike-2-dialog-api.md</file>
+      <file>projects/spaarkeai-word-add-in-r1/spec.md</file>
+      <file>projects/spaarkeai-word-add-in-r1/plan.md</file>
+      <file>src/client/office-addins/CLAUDE.md</file>
+      <file>docs/architecture/office-outlook-teams-integration-architecture.md</file>
+      <file>.claude/adr/ADR-021-fluent-design-system.md</file>
+      <file>.claude/adr/ADR-050-canonical-modal-shell.md</file>
+      <file>.claude/adr/ADR-028-spaarke-auth-architecture.md</file>
+      <file>.claude/adr/ADR-044-dataverse-guid-canonicalization.md</file>
+      <file>docs/adr/ADR-038-testing-strategy.md</file>
+      <file>docs/standards/MODAL-DECISION-CRITERIA.md</file>
+      <file>.claude/patterns/auth/spaarke-sso-binding.md</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+    </files>
+    <patterns>
+      <pattern name="fluent-v9-host-visual-fit" location=".claude/patterns/ui/fluent-v9-host-visual-fit.md">Explicitly covers Office add-ins. Governs both the open affordance in the narrow pane and any Spaarke UI rendered inside the dialog.</pattern>
+      <pattern name="spaarke-sso-binding" location=".claude/patterns/auth/spaarke-sso-binding.md">INV-1..INV-8. Read before deciding how auth reaches whatever the dialog loads; a token must never travel in a URL or a `messageParent` payload.</pattern>
+    </patterns>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="0" name="Context + rigor declaration">Load projects/spaarkeai-word-add-in-r1/CLAUDE.md, spec.md FR-10 and its ADR Tensions row (ADR-050 Path C), and the knowledge files above. Output the mandatory rigor declaration (FULL) per root CLAUDE.md §8.</step>
+    <step order="1">Read `notes/spikes/spike-2-dialog-api.md` and restate its four answers (framing, auth, dialog-size usability, change propagation) in the task log. Choose the branch it selected. If the file does not exist, this task is not startable — stop and report that task 003 has not closed.</step>
+    <step order="2">Add an `canOpenRecord`-style capability to `IHostAdapter` and implement it in both `WordAdapter` and `OutlookAdapter`, so the view gates on capability rather than host type (NFR-10).</step>
+    <step order="3">Build `openRecordLauncher.ts` in `shared/taskpane/services/`, following the shape of the existing `createTodoLauncher.ts`. It takes a canonicalized record reference and opens it via the chosen mechanism, exposing a completion/return signal.</step>
+    <step order="4">Wire the launcher into the related-record card's click seam from task 026, and add an equivalent affordance for the `sprk_document` record itself.</step>
+    <step order="5">Implement the return path: on dialog close or on the propagation signal Spike-2 identified, re-read the affected pane state (profile, record card) so edits made in the record are visible without a manual refresh.</step>
+    <step order="6">If the fallback branch was taken: build the read-only in-pane detail view plus a browser-tab escape hatch, and make the return path a re-read on focus. Same acceptance criteria apply.</step>
+    <step order="7">Add unit tests: capability gating, launcher invocation with a canonicalized GUID, the return-path re-read, and the no-capability fallback rendering.</step>
+    <step order="8">Run `npm run typecheck`, `npm test`, `npm run build`; if any BFF file changed, run `dotnet build` and the Office contract tests. All green.</step>
+    <step order="9">Measure BFF publish size against a fresh `origin/master` build per the constraint above, or record an explicit zero-delta if this task is client-only.</step>
+    <step order="10">Run `/conflict-check` if any BFF file changed, then code-review + adr-check per task-execute Step 9.5.</step>
+    <step order="11">Record the branch taken (dialog or fallback) and its rationale in projects/spaarkeai-word-add-in-r1/notes/027-record-open-mechanism.md.</step>
+    <step order="12">Update tasks/TASK-INDEX.md: set this task's status to ✅.</step>
+    <step order="13">Document any deviation in projects/spaarkeai-word-add-in-r1/notes/.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If implementing the chosen branch would require passing an access token through a URL, a query string, or a `messageParent` payload, STOP and escalate per CLAUDE.md §6 — that violates ADR-028 and the `spaarke-sso-binding` invariants, and no dialog convenience justifies it.</trigger>
+    <trigger>If Spike-2's finding no longer holds when you exercise it (for example the dialog now refuses framing where the spike said it did not), STOP and escalate rather than silently switching branches — the spike is the project's recorded evidence and a contradiction needs to be reconciled, not overwritten.</trigger>
+    <trigger>If the change-propagation requirement ("edits made there are reflected in the pane on return") cannot be met by either branch, STOP and escalate — that is an acceptance criterion in spec.md FR-10, not a nice-to-have to drop quietly.</trigger>
+  </escalation>
+
+  <justification>
+    <existing>Closest neighbor: `src/client/office-addins/shared/taskpane/services/createTodoLauncher.ts` — the existing "launch something from the pane" service, with tests at `services/__tests__/createTodoLauncher.test.ts`. Grep run over `src/client/office-addins` for `displayDialogAsync`, `messageParent`, and `openRecord` returns nothing: no record-open mechanism exists in this package today. `Xrm.Navigation` is unavailable here by NFR-03, so there is no platform launcher to call either.</existing>
+    <extension>No. `createTodoLauncher` launches a create-form flow with a To Do payload and owns that payload's shape; the record-open launcher takes an arbitrary record reference and owns a dialog/return lifecycle instead. They share no state and change for different reasons. The launcher does reuse `createTodoLauncher`'s SHAPE and its capability-gating discipline rather than inventing a new one.</extension>
+    <cost-of-doing-nothing>Without it, the related-record card (task 026) is a dead label: the user can see which matter a document is filed to but cannot reach it, and the pane's profile fields — which are read-only by design (FR-07 / spec Assumptions) — have no edit path at all. FR-13's "finish editing in the record" premise also has no mechanism behind it.</cost-of-doing-nothing>
+  </justification>
+
+  <ui-tests>
+    <test name="Open the related record from the card">
+      <steps>
+        <step>Open a Spaarke-sourced Word document filed to a matter and view the Save tab.</step>
+        <step>Click the related-record card.</step>
+      </steps>
+      <expected>The matter record opens via the mechanism Spike-2 selected and is usable — fields are readable and, in the dialog branch, editable at dialog size.</expected>
+    </test>
+    <test name="Open the Document record from the pane">
+      <steps>
+        <step>On the same identified document, use the Document-record affordance.</step>
+      </steps>
+      <expected>The `sprk_document` record opens and is usable.</expected>
+    </test>
+    <test name="Edits propagate back to the pane">
+      <steps>
+        <step>Open the Document record, change a field the pane displays (for example the document name or a profile field), and close the record.</step>
+      </steps>
+      <expected>On return, the pane reflects the change without a manual refresh or a pane reload.</expected>
+    </test>
+    <test name="Capability gating, not host branching">
+      <steps>
+        <step>Run the pane in a host whose adapter reports the open-record capability as false.</step>
+      </steps>
+      <expected>The fallback surface renders; no `hostType === 'word'` conditional appears in the view code (verified by grep during review).</expected>
+    </test>
+    <test name="ADR-021 dark-mode check via the Office theme toggle">
+      <steps>
+        <step>Switch the Office theme to Dark and reload the pane; view the open affordances, and any Spaarke UI rendered inside the dialog or in the fallback detail view.</step>
+      </steps>
+      <expected>Every Spaarke-rendered surface resolves its colors from Fluent v9 semantic tokens with legible contrast in dark mode; no hex literals; repeat in Light mode with the same result. Host chrome around the dialog is out of scope.</expected>
+    </test>
+    <test name="Keyboard-only operation (NFR-11)">
+      <steps>
+        <step>Using only the keyboard, reach and activate both open affordances, and return from the opened record.</step>
+      </steps>
+      <expected>Both affordances are reachable and operable by keyboard; focus returns sensibly to the pane on close; the return is announced via `useAnnounce`.</expected>
+    </test>
+  </ui-tests>
+
+  <tools>
+    <tool name="dotnet">Build the BFF and run the Office contract tests, if any BFF file changed.</tool>
+    <tool name="npm">Install with --legacy-peer-deps --no-audit --no-fund; typecheck, test, and build (build IS production here).</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/client/office-addins/shared/taskpane/services/openRecordLauncher.ts</output>
+    <output type="code">src/client/office-addins/shared/adapters/IHostAdapter.ts</output>
+    <output type="code">src/client/office-addins/shared/taskpane/components/RelatedRecordCard.tsx</output>
+    <output type="test">src/client/office-addins/shared/taskpane/services/__tests__/openRecordLauncher.test.ts</output>
+    <output type="doc">projects/spaarkeai-word-add-in-r1/notes/027-record-open-mechanism.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Given the Spike-2 report exists, when this task starts, then its four answers are restated in the task log and the selected branch is cited in the PR before any code is written.</criterion>
+    <criterion testable="true">Given an identified document with a related record, when the user activates the card, then the related record opens via the selected mechanism and is usable.</criterion>
+    <criterion testable="true">Given an identified document, when the user activates the Document-record affordance, then the `sprk_document` record opens and is usable.</criterion>
+    <criterion testable="true">Given an edit made in the opened record to a field the pane displays, when the user returns to the pane, then the pane reflects the change without a manual refresh.</criterion>
+    <criterion testable="true">Given the Office Dialog branch, when reviewed, then the dialog itself is NOT wrapped in `SprkModal` (ADR-050 Path C) AND any Spaarke UI rendered inside it uses Fluent v9 semantic tokens per ADR-021.</criterion>
+    <criterion testable="true">Given the fallback branch, when reviewed, then a read-only in-pane detail view plus a browser-tab escape hatch is implemented, the return path re-reads pane state, and `notes/027-record-open-mechanism.md` records why the fallback was taken.</criterion>
+    <criterion testable="true">Negative: given a host whose adapter reports the open-record capability as false, when the pane renders, then the fallback surface appears and no host-type conditional exists in the view code.</criterion>
+    <criterion testable="true">Negative: given no configured org URL, when the open affordance is activated, then it is a safe no-op with a stated reason rather than opening a broken link.</criterion>
+    <criterion testable="true">No access token appears in any URL, query string, or `messageParent` payload; no MSAL is constructed in this package; verified by grep and by the arch-test.</criterion>
+    <criterion testable="true">Every record GUID used to build a link or dialog URL is canonicalized via `cleanGuid`; verified by inspection during code review.</criterion>
+    <criterion testable="true">Given the Office theme set to Dark, when every Spaarke-rendered surface added by this task is viewed, then all colors resolve from Fluent v9 semantic tokens and no hex literal appears in the added styles.</criterion>
+    <criterion testable="true">`npm run typecheck` is clean for the files this task touched; `npm test` and `npm run build` pass; if any BFF file changed, `dotnet build` and the Office contract tests pass.</criterion>
+    <criterion testable="true">Publish-size impact is either measured against a fresh `origin/master` build with `Compress-Archive` or explicitly recorded as zero-delta because the task is client-only.</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    spec.md FR-10, its Owner Clarification ("Dialog API (a) preferred — investigate first; (c) is the documented fallback"), and its ADR Tensions row resolving ADR-050 as Path C; plan.md §4 Phase 2 task 027 and Unresolved Question on the Spike-2 outcome. Note that a negative Spike-2 also weakens FR-13's "finish editing in the record" premise — if the fallback branch is taken, say so in `notes/` so the Phase 3 creation-completeness tasks can account for it.
+  </notes>
+
+  <execution><skill>.claude/skills/task-execute/SKILL.md</skill></execution>
+</task>

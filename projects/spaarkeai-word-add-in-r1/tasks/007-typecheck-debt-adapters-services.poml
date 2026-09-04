@@ -1,0 +1,185 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="007" project="spaarkeai-word-add-in-r1">
+  <metadata>
+    <title>FR-18: clear typecheck debt in shared/adapters and shared/services</title>
+    <phase>0 De-risk and baseline</phase>
+    <gate>001 complete</gate>
+    <status>not-started</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Modifies .ts source files, and the files in scope are the load-bearing seams of the add-in: the host abstraction (IHostAdapter, WordAdapter, OutlookAdapter, HostAdapterFactory) and the auth and API clients. Root CLAUDE.md section 8 makes .ts modification a FULL-rigor trigger; the Step 9.5 gates matter here because ADR-028 is arch-test enforced on this exact surface and because task 010 will rewrite WordAdapter on top of whatever this task leaves behind.</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Fully specified, mechanical work: the error list arrives from task 001, the allowed fix patterns are enumerated, and the forbidden ones are named. The one real judgment boundary — not pre-empting task 010's adapter restructuring — is handled by an explicit constraint plus an escalation trigger rather than a tier bump. Sonnet default per root CLAUDE.md section 8.5.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>P0-typecheck</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <deps>001</deps>
+    <tags>frontend, office-addins, typescript, typecheck, tech-debt, adapters, auth, phase-0</tags>
+    <estimated-effort>0.5-1 day, proportional to the shared/adapters plus shared/services row in the task 001 rollup</estimated-effort>
+  </metadata>
+
+  <prompt>Clear every typecheck error in src/client/office-addins/shared/adapters/** and src/client/office-addins/shared/services/**, so FR-18's clean-typecheck criterion becomes reachable and Phase 1's adapter work starts from a clean compile. These are the host-abstraction and auth/API seams, so the type-level-only rule is strict here: task 010 (FR-04 adapter consolidation) will restructure WordAdapter afterwards and must not inherit a half-restructure from this task.</prompt>
+
+  <role>SPAARKE platform developer. TypeScript strict-mode remediation across an Office.js host-adapter abstraction and an NAA-based auth/API client layer. You are correcting types, not restructuring the adapter seam. Follow ADRs strictly.</role>
+
+  <goal>`npm run typecheck` in src/client/office-addins reports zero errors for every file under shared/adapters/** and shared/services/**; `npm run build` and `npm test` are green; the error counts in the directories this task does NOT own are unchanged from the task 001 baseline; the adapter seam is structurally unchanged so task 010 inherits exactly the code plan.md finding F-e describes; and the fix patterns used are appended to projects/spaarkeai-word-add-in-r1/notes/typecheck-fix-patterns.md.</goal>
+
+  <context>
+    <background>FR-18 (spec.md line 92) requires clearing the pre-existing typecheck debt in src/client/office-addins first, so new errors are visible during feature work. Four strict options in src/client/office-addins/tsconfig.json drive the debt: `noUnusedLocals` (line 16), `noUnusedParameters` (line 17), `noUncheckedIndexedAccess` (line 20) and `exactOptionalPropertyTypes` (line 21). This task owns two small but structurally important directories. shared/adapters contains IHostAdapter.ts, HostAdapterFactory.ts, WordAdapter.ts, OutlookAdapter.ts, types.ts, index.ts and a __tests__ folder with OutlookAdapter.test.ts and WordAdapter.test.ts. shared/services contains AuthService.ts, ApiClient.ts, authenticatedJsonFetch.ts, index.ts and a __tests__ folder with ApiClient.test.ts. Two facts constrain the work sharply. First, plan.md finding F-e: `HostAdapterFactory.registerAdapter()` has zero call sites, the registry is empty, `create()` always throws INVALID_HOST, both taskpanes construct their adapter directly, and shared/adapters/WordAdapter.ts still uses the known-broken `body.getOoxml()` path that word/WordHostAdapter.ts documents as the 2026-09-03 UAT defect. Task 010 fixes all of that in a prescribed order. This task must leave that situation exactly as it found it, only compiling. Second, ADR-028 is arch-test enforced on shared/services/AuthService.ts: auth is NAA via `@spaarke/auth` `OfficeNaaStrategy`, and MSAL construction must never appear in this package.</background>
+    <relevant-files>
+      <file role="modify">src/client/office-addins/shared/adapters/IHostAdapter.ts</file>
+      <file role="modify">src/client/office-addins/shared/adapters/HostAdapterFactory.ts</file>
+      <file role="modify">src/client/office-addins/shared/adapters/WordAdapter.ts</file>
+      <file role="modify">src/client/office-addins/shared/adapters/OutlookAdapter.ts</file>
+      <file role="modify">src/client/office-addins/shared/adapters/types.ts</file>
+      <file role="modify">src/client/office-addins/shared/adapters/index.ts</file>
+      <file role="modify">src/client/office-addins/shared/adapters/__tests__/</file>
+      <file role="modify">src/client/office-addins/shared/services/AuthService.ts</file>
+      <file role="modify">src/client/office-addins/shared/services/ApiClient.ts</file>
+      <file role="modify">src/client/office-addins/shared/services/authenticatedJsonFetch.ts</file>
+      <file role="modify">src/client/office-addins/shared/services/index.ts</file>
+      <file role="modify">src/client/office-addins/shared/services/__tests__/</file>
+      <file role="canonical-reference">projects/spaarkeai-word-add-in-r1/notes/typecheck-baseline.md</file>
+      <file role="canonical-reference">src/client/office-addins/word/WordHostAdapter.ts</file>
+      <file role="canonical-reference">src/client/shared/Spaarke.Auth/src/strategies/OfficeNaaStrategy.ts</file>
+    </relevant-files>
+    <dependencies>
+      <dependency task="001" status="pending">Installed node_modules, the measured per-file error breakdown, and the per-directory rollup row for shared/adapters plus shared/services that sizes this task — including whether the UNASSIGNED bucket is confined to shared/__mocks__/**.</dependency>
+    </dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="project">SCOPE: src/client/office-addins/shared/adapters/** and src/client/office-addins/shared/services/** ONLY, plus src/client/office-addins/shared/__mocks__/** IF AND ONLY IF task 001's rollup reports the UNASSIGNED bucket as confined to that path (it is adapter and service test scaffolding, so it belongs with this task). If the UNASSIGNED bucket contains anything else, do NOT absorb it — escalate. Do NOT edit any file under shared/taskpane/**, word/** or outlook/**; tasks 006 and 008 own those and run concurrently. A cross-boundary edit is both a merge conflict and a lost fix.</constraint>
+    <constraint source="project">SCOPE: the adapter seam. This task MUST NOT pre-empt task 010 (FR-04). Specifically: do NOT port `getCompressedFile()` from word/WordHostAdapter.ts into WordAdapter.ts; do NOT add any `registerAdapter()` call site or otherwise activate `HostAdapterFactory`; do NOT change which adapter a taskpane constructs; do NOT delete or deprecate any adapter; and do NOT "fix" the known-broken `body.getOoxml()` path in WordAdapter.ts. Task 010 does all of that in a prescribed order for a documented reason (plan.md finding F-e). Your diff must leave the structure identical and only the types corrected.</constraint>
+    <constraint source="project">SCOPE: every fix in this task. Fix types PROPERLY. MUST NOT use `any`, `as any`, `as unknown as T`, `@ts-ignore`, `@ts-expect-error`, or a blanket non-null assertion (`!`) applied merely to silence a diagnostic. MUST NOT relax src/client/office-addins/tsconfig.json — `strict`, `exactOptionalPropertyTypes`, `noUncheckedIndexedAccess`, `noUnusedLocals` and `noUnusedParameters` all stay exactly as they are. tsconfig.json is OUT OF SCOPE for this task and for 006 and 008.</constraint>
+    <constraint source="project">SCOPE: every fix in this task. This is a TYPE-LEVEL change only. MUST NOT change runtime behaviour: no altered conditional, no changed default value, no changed Office.js call sequence, no altered error-mapping, no removed retry or timeout. The adapters wrap Office.js and the services wrap fetch and token acquisition — both are places where a "harmless" tidy-up changes what the host or the BFF actually receives. If an error can only be resolved by a behaviour change, STOP and escalate.</constraint>
+    <constraint source="ADR-028">SCOPE: shared/services/AuthService.ts and anything it touches. Auth is NAA via `@spaarke/auth` `OfficeNaaStrategy`; MSAL construction lives inside that strategy, never in this package. MUST NOT introduce `new PublicClientApplication`, `createNestablePublicClientApplication`, or `.WithClientSecret` while resolving a type — these are arch-test enforced and a violation fails CI regardless of whether it compiles. If a type error tempts you toward constructing an MSAL object to satisfy a signature, that is an escalation.</constraint>
+    <constraint source="project">SCOPE: dependencies. MUST NOT add, remove or upgrade any npm dependency to satisfy a type, and MUST NOT modify package.json or package-lock.json. Note in particular that `@azure/msal-browser` is a direct dependency of this package (package.json line 22) — do NOT begin importing from it to fix a type; that is the ADR-028 violation wearing a different hat.</constraint>
+    <constraint source="ADR-038">SCOPE: shared/adapters/__tests__/ and shared/services/__tests__/. These are inside the tsconfig include globs, so their errors count toward this task. Fix their types the same way as production code. MUST NOT delete, skip or `xit` a test to make typecheck pass (KEEP-path violation under docs/adr/ADR-038-testing-strategy.md). WordAdapter.test.ts and OutlookAdapter.test.ts are the only automated coverage the host seam has before task 010 restructures it — weakening them removes the safety net that task 010 depends on.</constraint>
+    <constraint source="ADR-012">SCOPE: import resolution while fixing types. This project holds a recorded Path A exception: the add-in consumes `@spaarke/auth` only. MUST NOT resolve a missing type by importing from `@spaarke/ui-components` (NFR-03 — some of it is Xrm-bound and breaks at runtime in an Office host).</constraint>
+    <constraint source="project">SCOPE: build verification. `npm run build` IS the production build in this package — there is no `build:prod` script (package.json line 7). src/client/office-addins/CLAUDE.md line 39 names `build:prod` in error.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>TypeScript strict-mode remediation; Office.js host adapters; NAA auth and fetch clients</topic>
+    <files>
+      <file>projects/spaarkeai-word-add-in-r1/spec.md</file>
+      <file>projects/spaarkeai-word-add-in-r1/plan.md</file>
+      <file>projects/spaarkeai-word-add-in-r1/notes/typecheck-baseline.md</file>
+      <file>projects/spaarkeai-word-add-in-r1/notes/typecheck-fix-patterns.md</file>
+      <file>src/client/office-addins/CLAUDE.md</file>
+      <file>.claude/adr/ADR-028-spaarke-auth-architecture.md</file>
+      <file>.claude/adr/ADR-012-shared-components.md</file>
+      <file>.claude/adr/ADR-021-fluent-design-system.md</file>
+      <file>docs/adr/ADR-038-testing-strategy.md</file>
+      <file>.claude/patterns/auth/spaarke-sso-binding.md</file>
+    </files>
+    <patterns>
+      <pattern name="follow task 006's fix vocabulary" location="projects/spaarkeai-word-add-in-r1/notes/typecheck-fix-patterns.md">Task 006 creates this file and records a canonical fix shape per error code. Read it before starting and follow the same shapes, appending your own section for anything it does not cover. Three concurrent tasks producing three different idioms for the same diagnostic makes the combined diff unreviewable.</pattern>
+      <pattern name="exactOptionalPropertyTypes — the two correct fixes" location="src/client/office-addins/tsconfig.json line 21">`prop?: T` means "may be absent", NOT "may be undefined". Either widen the DECLARATION to `prop?: T | undefined` where the property genuinely may hold undefined, or fix the CALL SITE with a conditional spread such as `...(value !== undefined ? { prop: value } : {})`. In adapter option objects and fetch init objects the call-site spread is usually the honest fix, because the underlying API distinguishes an absent option from an explicit undefined one.</pattern>
+      <pattern name="noUncheckedIndexedAccess — narrow, do not assert" location="src/client/office-addins/tsconfig.json line 20">An index access yields `T | undefined`. Narrow with a guard, a `??` default, optional chaining, or destructuring with a default — never `!`. This matters more here than anywhere else in the package: an unchecked index inside an adapter runs in an Office webview where a thrown TypeError shows the user a blank pane.</pattern>
+      <pattern name="noUnusedParameters in adapter signatures" location="src/client/office-addins/shared/adapters/IHostAdapter.ts">Adapter methods implement a shared interface, so an implementation that legitimately ignores a parameter still must keep it positionally. Prefix with an underscore; do NOT delete it and do NOT change the interface signature — the interface is a contract that WordAdapter, OutlookAdapter and (after task 010) the factory all depend on, and task 013 will extend it with `getDocumentUrl()`.</pattern>
+      <pattern name="displacement check" location="projects/spaarkeai-word-add-in-r1/notes/typecheck-baseline.md">006, 007 and 008 run concurrently on the same package. At the end of this task, re-run the full typecheck and compare the counts for shared/taskpane, word and outlook against the task 001 baseline rows. They must not increase. A change to an exported type in shared/adapters or shared/services is the most likely way to push errors into someone else's directory — if that happens, fix it inside yours or escalate.</pattern>
+    </patterns>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="0" name="Context + rigor declaration">Emit the mandatory rigor declaration (RIGOR LEVEL: FULL, reason, protocol steps). Load projects/spaarkeai-word-add-in-r1/CLAUDE.md, spec.md FR-18 and FR-04, plan.md finding F-e, and projects/spaarkeai-word-add-in-r1/notes/typecheck-baseline.md. Record this task's starting error counts and the baseline counts for the directories you do NOT own. Confirm whether task 001 reported the UNASSIGNED bucket as confined to shared/__mocks__/**.</step>
+    <step order="1">Ensure src/client/office-addins/node_modules exists. If not, run `npm install --legacy-peer-deps --no-audit --no-fund` (a bare install fails with ERESOLVE), then revert package-lock.json if npm rewrote it.</step>
+    <step order="2">Read word/WordHostAdapter.ts and plan.md finding F-e BEFORE touching WordAdapter.ts, so you know exactly which parts of the current WordAdapter are deliberately broken-and-owned-by-task-010. You are compiling that code, not correcting it.</step>
+    <step order="3">Read projects/spaarkeai-word-add-in-r1/notes/typecheck-fix-patterns.md if task 006 has already created it, and adopt its fix shapes.</step>
+    <step order="4">Work the errors file by file, highest count first per the task 001 breakdown, across shared/adapters/** then shared/services/** (then shared/__mocks__/** if it is yours per the constraint). Apply one canonical fix shape per error code, consistently.</step>
+    <step order="5">Re-run `npm run typecheck` and filter to the directories you own. Iterate until that filter is empty.</step>
+    <step order="6">Run the displacement check: re-run the full typecheck and compare the per-directory counts for shared/taskpane, word and outlook against the task 001 baseline. None may increase. Record the comparison.</step>
+    <step order="7">Run `npm run build` (the production build; there is no build:prod) and confirm it is green.</step>
+    <step order="8">Run `npm test` and confirm green, with the adapter and ApiClient suites still executing at their baseline counts — no test deleted, skipped or weakened.</step>
+    <step order="9">Execute the ui-tests below and record each result, including the dark-mode check. The adapters and auth service sit under every pane interaction, so a regression here shows up as a failure to sign in or a failure to save rather than as a visual defect — the tests below are shaped accordingly.</step>
+    <step order="10">Append your section to projects/spaarkeai-word-add-in-r1/notes/typecheck-fix-patterns.md (create it if task 006 has not yet), headed with this task's id. Record explicitly that the adapter seam was left structurally unchanged for task 010, and note anything you saw in WordAdapter.ts that task 010 should know.</step>
+    <step order="10.5">Run the Step 9.5 quality gates (code-review plus adr-check) per the FULL rigor level. Direct code-review at two questions: did any edit change behaviour, and did the adapter seam change shape. Direct adr-check at ADR-028 in particular — it is arch-test enforced on this surface.</step>
+    <step order="11">Update projects/spaarkeai-word-add-in-r1/tasks/TASK-INDEX.md: set this task's status to completed.</step>
+    <step order="12">Document any deviation from this task file in projects/spaarkeai-word-add-in-r1/notes/.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If a typecheck error in your directories can only be resolved by editing a file under shared/taskpane/**, word/** or outlook/**, STOP and escalate per root CLAUDE.md section 6. Tasks 006 and 008 own those files and are running concurrently; reaching across produces a merge conflict and silently discards one of the two fixes.</trigger>
+    <trigger>If a typecheck error can only be resolved by restructuring the adapter seam — porting `getCompressedFile()`, activating `HostAdapterFactory`, changing which adapter a taskpane constructs, or altering the IHostAdapter contract — STOP and escalate. That work is task 010's, is prescriptive-mode for a documented reason (plan.md finding F-e), and doing part of it here leaves task 010 with a half-migrated seam and no clean starting point.</trigger>
+    <trigger>If a type error tempts a change that would put MSAL construction, `createNestablePublicClientApplication`, or a client secret into this package, STOP and escalate. ADR-028 is arch-test enforced; this is a security-sensitive boundary under root CLAUDE.md section 6 and is never a local judgment call.</trigger>
+    <trigger>If a test file's type error reveals that the test asserts behaviour the adapter or client no longer has, STOP and escalate rather than deleting, skipping or rewriting the assertion (ADR-038 KEEP-path rules). These suites are the safety net task 010 depends on.</trigger>
+    <trigger>If task 001 reported an UNASSIGNED bucket containing anything other than shared/__mocks__/**, STOP and request an ownership assignment rather than absorbing it. An unowned erroring file means FR-18's clean-typecheck criterion cannot be met by 006 plus 007 plus 008 alone.</trigger>
+    <trigger>If clearing these directories requires adding, removing or upgrading an npm dependency (including a missing `@types` package), or relaxing any tsconfig option, STOP and escalate.</trigger>
+  </escalation>
+
+  <ui-tests>
+    <test name="Sign-in still works after auth-service type remediation">
+      <steps>
+        <step>Run `npm run build` in src/client/office-addins, then load the add-in in a dev build (`npm run start:outlook`).</step>
+        <step>Open the Spaarke task pane while signed out, and complete sign-in.</step>
+        <step>Confirm the pane transitions past the SignInView to the authenticated shell.</step>
+      </steps>
+      <expected>Sign-in completes via NAA exactly as before. No AADSTS error, no popup loop, and no new console exception. This is the primary regression signal for shared/services/AuthService.ts — a type change there fails here rather than visually.</expected>
+    </test>
+    <test name="Save path still reaches the BFF after adapter and ApiClient type remediation">
+      <steps>
+        <step>With the pane authenticated in Outlook, select an item and run a save through the Save view.</step>
+        <step>Observe the request in the network panel and the job progress in the pane.</step>
+      </steps>
+      <expected>The request is issued to the BFF with the same shape and headers as before the change, and the pane reflects job progress. A malformed init object or a dropped header would indicate an `exactOptionalPropertyTypes` fix applied at the wrong level (declaration versus call site).</expected>
+    </test>
+    <test name="Word host adapter still extracts the document after type remediation">
+      <steps>
+        <step>Load the Word add-in in a dev build (`npm run start:word`) and open the pane on a document.</step>
+        <step>Run a save and observe that document content is extracted and transmitted.</step>
+      </steps>
+      <expected>Behaviour is identical to before the task — including the known-broken paths, which this task does not fix. The point of this test is to prove nothing changed, not that anything improved. Any change in extraction behaviour means the adapter seam moved, which is task 010's job, not this one's.</expected>
+    </test>
+    <test name="ADR-021 dark mode via Office theme toggle">
+      <steps>
+        <step>With the pane open, switch the Office host theme from light to dark.</step>
+        <step>Observe the pane, then reload it and observe again.</step>
+        <step>Switch back to light and repeat.</step>
+      </steps>
+      <expected>The pane follows the Office theme in both directions via the existing `useOfficeTheme` / `useTheme` hooks, with legible text in both themes and no element retaining a light-mode background in dark mode. This task edits no JSX, so any change here would indicate an unintended edit (ADR-021).</expected>
+    </test>
+  </ui-tests>
+
+  <tools>
+    <tool name="npm">`npm install --legacy-peer-deps --no-audit --no-fund` if needed; `npm run typecheck`; `npm run build` (production — there is no build:prod); `npm test`; `npm run start:word` / `npm run start:outlook` for the ui-tests.</tool>
+    <tool name="Grep">Confirm no MSAL construction is introduced; find consumers of any exported type you adjust.</tool>
+    <tool name="code-review">Step 9.5 gate — behaviour-change risk and adapter-seam shape.</tool>
+    <tool name="adr-check">Step 9.5 gate — ADR-028 (arch-test enforced here), ADR-012 Path A, ADR-038.</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/client/office-addins/shared/adapters/** (type-level edits only)</output>
+    <output type="code">src/client/office-addins/shared/services/** (type-level edits only)</output>
+    <output type="doc">projects/spaarkeai-word-add-in-r1/notes/typecheck-fix-patterns.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Given a completed `npm install`, when `npm run typecheck` is run in src/client/office-addins and the output is filtered to paths under shared/adapters/ and shared/services/, then zero errors are reported.</criterion>
+    <criterion testable="true">Given task 001 reported the UNASSIGNED bucket as confined to shared/__mocks__/**, when the same typecheck output is filtered to shared/__mocks__/, then zero errors are reported. Given task 001 reported UNASSIGNED as empty, this criterion is vacuously satisfied.</criterion>
+    <criterion testable="true">Given the same typecheck run, when the per-directory counts for shared/taskpane/, word/ and outlook/ are compared against the task 001 baseline, then none has increased.</criterion>
+    <criterion testable="true">`npm run build` exits 0.</criterion>
+    <criterion testable="true">`npm test` exits 0 with suite and test counts greater than or equal to the task 001 baseline, and WordAdapter.test.ts, OutlookAdapter.test.ts and ApiClient.test.ts all still execute.</criterion>
+    <criterion testable="true">Negative: `git diff` on shared/adapters/ shows no `registerAdapter()` call site added, no `getCompressedFile()` ported in, no adapter deleted, no change to which adapter a taskpane constructs, and no change to the `body.getOoxml()` path — the seam is structurally identical to its pre-task state (plan.md finding F-e; task 010 owns all of it).</criterion>
+    <criterion testable="true">Negative: `grep` across the diff finds no newly added `any`, `as any`, `as unknown as`, `@ts-ignore` or `@ts-expect-error`.</criterion>
+    <criterion testable="true">Negative: `grep` across the diff finds no `new PublicClientApplication`, no `createNestablePublicClientApplication`, no `.WithClientSecret`, and no new import from `@azure/msal-browser` (ADR-028, arch-test enforced).</criterion>
+    <criterion testable="true">Negative: `git diff` shows src/client/office-addins/tsconfig.json, package.json and package-lock.json unmodified.</criterion>
+    <criterion testable="true">Negative: `git diff --name-only` lists no file under shared/taskpane/, word/ or outlook/.</criterion>
+    <criterion testable="true">Negative: no import from `@spaarke/ui-components` was added (ADR-012 Path A exception, NFR-03).</criterion>
+    <criterion testable="true">All four ui-tests below pass and their results are recorded, including the dark-mode check in both directions.</criterion>
+    <criterion testable="true">projects/spaarkeai-word-add-in-r1/notes/typecheck-fix-patterns.md contains a section headed for task 007 that records the fix shapes used and confirms the adapter seam was left structurally unchanged for task 010.</criterion>
+    <criterion testable="true">The Step 9.5 code-review and adr-check gates ran and their findings are resolved or explicitly accepted.</criterion>
+  </acceptance-criteria>
+
+  <notes>Spec reference: FR-18 (line 92), FR-04 (line 64), NFR-03 (line 100), Success Criterion 12 (line 209). Plan reference: section 4 Phase 0 tasks 006-008, finding F-e, Phase 1 task 010, risk R-4.
+
+No `&lt;justification&gt;` block is present: this is a modify-only task. It adds no new service, abstraction, endpoint, DI registration, package or column — CLAUDE.md section 11's gate does not apply to edits of existing files.
+
+Parallel-safety within the P0-typecheck wave: 006 owns shared/taskpane/**, 007 owns shared/adapters/** plus shared/services/** (plus shared/__mocks__/** conditionally), 008 owns word/** plus outlook/**. The three directory sets are disjoint. The shared surfaces are node_modules (read-only concurrency, fine) and projects/spaarkeai-word-add-in-r1/notes/typecheck-fix-patterns.md — task 006 creates it and 007/008 append their own clearly headed sections, so keep edits additive and scoped to your own heading. tsconfig.json is out of scope for all three, which removes the one file they would otherwise contend for.
+
+Sizing note: shared/adapters contained 8 .ts files and shared/services 5 at authoring time — the smallest shared bucket by file count, but the highest-consequence one per file. The task 001 rollup, not this note, is the authority on the error count.
+
+Downstream: task 010 (FR-04 adapter consolidation, prescriptive mode) and task 013 (FR-01 client — adds `canGetDocumentUrl` and `getDocumentUrl()` to IHostAdapter) both build directly on this directory. Leaving it compiling but structurally untouched is the deliverable.</notes>
+
+  <execution><skill>.claude/skills/task-execute/SKILL.md</skill></execution>
+</task>

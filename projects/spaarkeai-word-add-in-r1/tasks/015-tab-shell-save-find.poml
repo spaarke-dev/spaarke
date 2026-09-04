@@ -1,0 +1,185 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="015" project="spaarkeai-word-add-in-r1">
+  <metadata>
+    <title>FR-03: Save|Find tab shell, enable navigation in Word</title>
+    <phase>1 Foundation</phase>
+    <gate>010 complete — the consolidated adapter reached via the factory must be in place before the shell branches on capabilities</gate>
+    <status>not-started</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Modifies .tsx in the pane shell consumed by both hosts, changes navigation visibility for a host that has never had tabs, and creates new view surface. Tags include frontend and fluent-ui.</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Well-specified UI composition with an existing tab mechanism to extend and an explicit decision to make (toolbar versus orphaned navigation component) that is scoped and documented rather than open-ended.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>P1-b</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <deps>010</deps>
+    <tags>frontend, fluent-ui, office-addins, react, typescript, word, outlook</tags>
+    <estimated-effort>5-7 hours</estimated-effort>
+  </metadata>
+
+  <prompt>Give Word tabs. Today `App.tsx:404` sets `showNavigation={hostType === 'outlook'}`, so Word is Save-only and has no navigation at all. Extend the tab model to carry `find`, flip navigation on for Word, and build the Save|Find frame — the Find VIEW itself is Phase 3 (tasks 032-034); this task builds the shell it will mount into.</prompt>
+
+  <role>SPAARKE platform developer. Expert in React 19, Fluent UI v9 with semantic tokens, Office task-pane layout, and Office theme-driven dark mode. Follow ADRs strictly.</role>
+
+  <goal>`NavigationTab` carries a `find` member alongside the existing five; `TAB_CONFIGS` declares Save and Find as available in both hosts; `App.tsx` no longer gates navigation on `hostType === 'outlook'`; both hosts render the Save|Find frame; `share` and `recent` remain in the union but hidden with no views built; and the decision of which component renders the tabs (the live `TaskPaneToolbar` versus the orphaned `TaskPaneNavigation`) is made explicitly and documented.</goal>
+
+  <context>
+    <background>
+      spec.md FR-03; plan.md §4 Phase 1 task 015. r1 tabs are Save and Find only.
+      Verified as-built: `NavigationTab = 'save' | 'createTodo' | 'share' | 'recent' | 'search'` at `shared/taskpane/components/TaskPaneNavigation.tsx:42`. `TAB_CONFIGS` at `:59-92` declares only `save` (both hosts) and `createTodo` (Outlook only) as live; `share`, `search` and `recent` are present but COMMENTED OUT with a "V1: Disabled - uncomment for future releases" marker.
+      A structural split exists and must be resolved deliberately: `TaskPaneShell.tsx:189-201` renders `TaskPaneToolbar`, NOT `TaskPaneNavigation` — the latter is orphaned as a rendered component, though its exported `getAvailableTabs(hostType)` helper is documented as "shared by the nav row and the consolidated toolbar" and IS consumed. So the tab DATA is shared while the tab ROW component is not. Decide which renders the tabs; do not leave two competing renderers.
+      `App.tsx:404` currently reads `showNavigation={hostType === 'outlook'}`. `src/client/office-addins/CLAUDE.md` load-bearing fact 2 records this as "Navigation is Outlook-only — Word is Save-only". That module doc must be updated when this changes.
+      Note the existing union already contains `'search'`. Decide whether Find reuses `'search'` or adds `'find'`, and record the reason — do not end up with both meaning the same thing.
+    </background>
+    <relevant-files>
+      <file role="modify">src/client/office-addins/shared/taskpane/components/TaskPaneNavigation.tsx</file>
+      <file role="modify">src/client/office-addins/shared/taskpane/components/TaskPaneShell.tsx</file>
+      <file role="modify">src/client/office-addins/shared/taskpane/App.tsx</file>
+      <file role="canonical-reference">src/client/office-addins/shared/taskpane/components/views/SaveView.tsx</file>
+      <file role="canonical-reference">src/client/office-addins/shared/taskpane/components/views/CreateTodoView.tsx</file>
+      <file role="modify">src/client/office-addins/CLAUDE.md</file>
+      <file role="new">projects/spaarkeai-word-add-in-r1/notes/015-tab-shell-decisions.md</file>
+    </relevant-files>
+    <dependencies>
+      <dependency task="010" status="pending">One consolidated Word adapter reached via `HostAdapterFactory` — the shell reads capabilities from whatever the factory returns, so the factory must be live first</dependency>
+    </dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-021">Scope: every UI element added or modified in this task. Fluent UI v9 only, semantic design tokens only, NO hex colors and no hardcoded light-mode backgrounds. Office theme drives dark mode through `hooks/useOfficeTheme.ts` — verify both themes.</constraint>
+    <constraint source="project">Scope: the `NavigationTab` union. `share` and `recent` STAY in the union but remain hidden — no views are built for them in r1 (spec.md Assumptions). Do not delete them and do not build placeholder views for them.</constraint>
+    <constraint source="project">Scope: the Find tab in this task. Build the FRAME only — the tab, its route into the shell, and an empty/placeholder mount point. The Find VIEW (three-state gating on `sprk_searchindexed`, Run Index, similarity results) is Phase 3 tasks 032-034 and is gated on authorization hardening (plan.md finding F-b). Do NOT implement similarity results here; shipping them before task 032 would ship permission-leaking results.</constraint>
+    <constraint source="project">Scope: the tab renderer. Resolve the `TaskPaneToolbar` versus orphaned `TaskPaneNavigation` split in this task — pick one renderer, document the choice and its reason in notes/, and leave exactly one live path. Do not add a third rendering path and do not leave both wired.</constraint>
+    <constraint source="ADR-051">Scope: any list surface this task creates. Infinite lazy-scroll, never a pager — no numbered pages, prev/next, or "Load more". The Find frame must not introduce a pager even as a placeholder.</constraint>
+    <constraint source="ADR-012">Scope: components added here. The add-in keeps thin views under `shared/taskpane/` and consumes `@spaarke/auth` only — do NOT import `@spaarke/ui-components` (project-scoped Path A exception, project CLAUDE.md Decisions 2026-09-04).</constraint>
+    <constraint source="project">Scope: components in `shared/taskpane/**`. MUST NOT import Xrm-bound components; `Xrm.*` does not exist in an Office host (NFR-03).</constraint>
+    <constraint source="project">Scope: tab availability logic. Gate by host CAPABILITY where a tab depends on one, not by scattered `hostType` conditionals inside views (NFR-10). The `availableFor` host list on `TabConfig` is the existing sanctioned mechanism for host scoping and may be used as-is; new per-view branching may not.</constraint>
+    <constraint source="project">Scope: accessibility. The tab shell must be keyboard-navigable and announce tab changes via the existing `useAnnounce` pattern (NFR-11).</constraint>
+    <constraint source="project">Scope: build commands. There is NO `build:prod` in this module — `npm run build` IS production. Install with `npm install --legacy-peer-deps --no-audit --no-fund`.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>Office task-pane navigation, Fluent v9 tabs, Office theme dark mode</topic>
+    <files>
+      <file>projects/spaarkeai-word-add-in-r1/spec.md</file>
+      <file>projects/spaarkeai-word-add-in-r1/plan.md</file>
+      <file>projects/spaarkeai-word-add-in-r1/CLAUDE.md</file>
+      <file>src/client/office-addins/CLAUDE.md</file>
+      <file>docs/architecture/office-outlook-teams-integration-architecture.md</file>
+      <file>.claude/adr/ADR-021-fluent-design-system.md</file>
+      <file>.claude/adr/ADR-051-infinite-scroll-lists.md</file>
+      <file>.claude/adr/ADR-012-shared-components.md</file>
+    </files>
+    <patterns>
+      <pattern name="fluent-v9-host-visual-fit" location=".claude/patterns/ui/fluent-v9-host-visual-fit.md">Explicitly covers Office add-ins — the authority for how a Fluent v9 surface should sit inside a task pane. Load before authoring the tab frame.</pattern>
+      <pattern name="infinite-scroll-list" location=".claude/patterns/ui/infinite-scroll-list.md">For the Find frame's future list mount point — ensure the frame does not preclude lazy-scroll or invite a pager.</pattern>
+      <pattern name="thin-scrollbar" location=".claude/patterns/ui/thin-scrollbar.md">The canonical scrollbar treatment for pane lists.</pattern>
+    </patterns>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="0" name="Context + rigor declaration">Load project CLAUDE.md, spec.md FR-03 and its Assumptions, plan.md §4 Phase 1, and `src/client/office-addins/CLAUDE.md` (load-bearing fact 2). Declare: RIGOR LEVEL FULL, model-tier sonnet, effort high, steps mode DIRECTIONAL. Read `TaskPaneNavigation.tsx` (especially `:42` and `:59-92`), `TaskPaneShell.tsx:189-201`, and `App.tsx` around `:404` before writing.</step>
+    <step order="1">Resolve the renderer split: determine what `TaskPaneToolbar` renders today, what `TaskPaneNavigation` would render if mounted, and which of the two should own the tab row going forward. Record the decision and its reason in notes/. Whichever loses is either deleted or explicitly documented as helper-only (`getAvailableTabs` is consumed and must survive regardless).</step>
+    <step order="2">Decide whether Find reuses the existing `'search'` union member or adds a new `'find'` member. Record the reason. The union must not end up carrying two members that mean the same thing.</step>
+    <step order="3">Extend the tab model: update `NavigationTab` per step 2 and add the Find entry to `TAB_CONFIGS` with `availableFor: ['outlook', 'word']` and a Fluent v9 icon consistent with the existing entries. Leave the commented-out `share` and `recent` blocks as they are.</step>
+    <step order="4">Flip `App.tsx:404` so Word gets navigation — replace `showNavigation={hostType === 'outlook'}` with a condition that yields true for both hosts (or with the tab-availability check, if the chosen renderer already derives visibility from `getAvailableTabs`). Confirm Outlook's existing tab set is unchanged: `createTodo` stays Outlook-only.</step>
+    <step order="5">Build the Save|Find frame: Find mounts an empty placeholder surface with no similarity logic, no results list and no pager. Wire tab switching through the shell's existing `selectedTab` / `onTabChange` plumbing.</step>
+    <step order="6">Add keyboard navigation and `useAnnounce` announcements for tab changes (NFR-11).</step>
+    <step order="7">Update `src/client/office-addins/CLAUDE.md` load-bearing fact 2 ("Navigation is Outlook-only — Word is Save-only"), which becomes false with this task. Do not rewrite unrelated sections.</step>
+    <step order="8">Run `npm install --legacy-peer-deps --no-audit --no-fund`, then `npm run typecheck`, `npm run build` and the test suite. All must be clean.</step>
+    <step order="9">Execute the ui-tests below in both hosts and both Office themes; record results in notes/.</step>
+    <step order="10">Update projects/spaarkeai-word-add-in-r1/tasks/TASK-INDEX.md: set this task's status to ✅.</step>
+    <step order="11">Document any deviation in projects/spaarkeai-word-add-in-r1/notes/ — including the renderer decision and the `search`-versus-`find` naming decision.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If resolving the `TaskPaneToolbar` versus `TaskPaneNavigation` split would require restructuring the shell beyond swapping which component renders the tab row, STOP and escalate per CLAUDE.md §6 — a shell rewrite is not in this task's scope and would collide with Phase 2 view work.</trigger>
+    <trigger>If enabling navigation in Word breaks the existing Save view layout at task-pane width (content clipped, controls unreachable), STOP and escalate rather than shrinking or hiding Save-view content to make room.</trigger>
+    <trigger>If building the Find frame appears to require any similarity or search call, STOP — that is Phase 3 (tasks 032-034) and is gated on task 032's authorization hardening (plan.md finding F-b). Shipping results before 032 would ship permission-leaking results.</trigger>
+  </escalation>
+
+  <justification>
+    <existing>`shared/taskpane/components/TaskPaneNavigation.tsx` — `NavigationTab` at `:42` and `TAB_CONFIGS` at `:59-92` already model tabs, with `share`/`search`/`recent` present but commented out. `TaskPaneShell.tsx:189-201` already renders a tab-bearing toolbar. So a tab mechanism exists; what does not exist is a Find entry, Word visibility, or a Find mount point.</existing>
+    <extension>Yes — this task extends the existing `NavigationTab` union, the existing `TAB_CONFIGS` array, and the existing shell plumbing rather than introducing a new navigation system. The only genuinely new surface is the Find frame's placeholder view, which has no existing counterpart because no Find view has ever been built.</extension>
+    <cost-of-doing-nothing>Word has no tabs at all: `App.tsx:404` gates navigation on `hostType === 'outlook'`, so Word users see only the Save view and there is no place for Find, the profile section, or the record card to live. Concretely, FR-16's Find tab and every Phase 2 pane surface have no mount point in Word without this shell.</cost-of-doing-nothing>
+  </justification>
+
+  <ui-tests>
+    <test name="Word renders Save and Find tabs">
+      <steps>
+        <step>Sideload the Word add-in, open a .docx, and open the Spaarke task pane.</step>
+        <step>Observe the tab row.</step>
+        <step>Click Find, then click back to Save.</step>
+      </steps>
+      <expected>Two tabs render, Save and Find. Both are clickable, the active tab is visually indicated, and switching back to Save restores the Save view with its state intact. Find shows its placeholder surface with no error.</expected>
+    </test>
+    <test name="Outlook tab set is unchanged plus Find">
+      <steps>
+        <step>Sideload the Outlook add-in, select an email, and open the Spaarke task pane.</step>
+        <step>Observe the tab row.</step>
+      </steps>
+      <expected>Save, Create To Do and Find render. `createTodo` remains Outlook-only. No `share` or `recent` tab appears in either host.</expected>
+    </test>
+    <test name="Dark mode across the tab shell (ADR-021)">
+      <steps>
+        <step>With the pane open in Word, switch the Office theme to Dark (File - Account - Office Theme - Black) and reload the pane.</step>
+        <step>Switch between Save and Find in dark mode.</step>
+        <step>Switch the Office theme back to Colorful/White and reload.</step>
+        <step>Repeat the dark-mode check in Outlook.</step>
+      </steps>
+      <expected>Tab row, active-tab indicator and both view surfaces render with Fluent v9 semantic tokens in both themes — readable contrast, no hardcoded hex, no light-only background bleeding through in dark mode.</expected>
+    </test>
+    <test name="Keyboard navigation and announcements (NFR-11)">
+      <steps>
+        <step>With the pane focused in Word, Tab to the tab row.</step>
+        <step>Use arrow keys to move between Save and Find and Enter/Space to activate.</step>
+        <step>With a screen reader active, confirm the tab change is announced.</step>
+      </steps>
+      <expected>Tabs are reachable and operable by keyboard alone, focus is visible, and the tab change is announced via the existing `useAnnounce` pattern.</expected>
+    </test>
+    <test name="No pager anywhere in the new shell (ADR-051)">
+      <steps>
+        <step>Open the Find tab in both hosts.</step>
+        <step>Inspect the placeholder surface.</step>
+      </steps>
+      <expected>No numbered pages, no prev/next controls, no "Load more" button — the frame is built for lazy-scroll only.</expected>
+    </test>
+  </ui-tests>
+
+  <tools>
+    <tool name="npm">install (`--legacy-peer-deps --no-audit --no-fund`), typecheck, build (production; no `build:prod` here), test</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/client/office-addins/shared/taskpane/components/TaskPaneNavigation.tsx</output>
+    <output type="code">src/client/office-addins/shared/taskpane/components/TaskPaneShell.tsx</output>
+    <output type="code">src/client/office-addins/shared/taskpane/App.tsx</output>
+    <output type="doc">src/client/office-addins/CLAUDE.md</output>
+    <output type="doc">projects/spaarkeai-word-add-in-r1/notes/015-tab-shell-decisions.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Given `TaskPaneNavigation.tsx`, when inspecting `NavigationTab`, then it carries a Find member (either the reused `'search'` or a new `'find'`, per the recorded decision) and does not carry two members meaning the same thing.</criterion>
+    <criterion testable="true">Given `TAB_CONFIGS`, when inspected, then Save and Find are both declared `availableFor: ['outlook', 'word']`, and `createTodo` remains Outlook-only.</criterion>
+    <criterion testable="true">Given `App.tsx`, when inspected, then `showNavigation` is no longer `hostType === 'outlook'` and Word receives navigation.</criterion>
+    <criterion testable="true">Given the Word pane, when opened, then Save and Find tabs render and switching between them works with no console error.</criterion>
+    <criterion testable="true">Given the Outlook pane, when opened, then Save, Create To Do and Find render and existing Outlook behavior is otherwise unchanged.</criterion>
+    <criterion testable="true">Negative: given either host, when the tab row is inspected, then no `share` or `recent` tab is visible — both remain in the union, hidden, with no views built.</criterion>
+    <criterion testable="true">Negative: given the Find tab in this release, when opened, then it shows a placeholder and issues NO similarity or search request (Phase 3 owns the view; task 032 gates it).</criterion>
+    <criterion testable="true">Given the shell after this task, when the tab row's renderer is traced, then exactly ONE component renders it and the decision is documented in notes/ with its reason; `getAvailableTabs` remains exported and consumed.</criterion>
+    <criterion testable="true">Given both Office themes in both hosts, when the shell renders, then all surfaces use Fluent v9 semantic tokens with no hex colors and remain readable in dark mode (ADR-021).</criterion>
+    <criterion testable="true">Given the tab row, when operated by keyboard alone, then tabs are reachable, focus is visible, and tab changes are announced via `useAnnounce` (NFR-11).</criterion>
+    <criterion testable="true">Negative: given the new shell, when inspected, then no pager control exists anywhere (ADR-051).</criterion>
+    <criterion testable="true">Given `src/client/office-addins/CLAUDE.md`, when reading load-bearing fact 2, then it no longer states that navigation is Outlook-only.</criterion>
+    <criterion testable="true">`npm run typecheck` is clean, `npm run build` succeeds, and all tests pass.</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    spec.md FR-03, NFR-04, NFR-10, NFR-11. plan.md §4 Phase 1 task 015.
+    The `search`-versus-`find` naming question is real: the union already contains `'search'` (commented out of `TAB_CONFIGS`), and spec.md calls the r1 tab "Find". Pick one, record why, and keep the union honest.
+    Wave P1-b with task 014: 015 is client-side TypeScript/React in `shared/taskpane/**` plus the module CLAUDE.md; 014 is server-side C# in `Services/Office/**` plus contract tests. No shared file and no shared symbol — the pair is disjoint by construction.
+    Downstream: Phase 3 tasks 032-034 build the real Find view into the frame this task creates; Phase 2 pane surfaces mount into the Save tab.
+  </notes>
+
+  <execution><skill>.claude/skills/task-execute/SKILL.md</skill></execution>
+</task>

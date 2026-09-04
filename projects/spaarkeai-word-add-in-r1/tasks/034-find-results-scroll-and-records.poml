@@ -1,0 +1,185 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="034" project="spaarkeai-word-add-in-r1">
+  <metadata>
+    <title>FR-16c: Find results, lazy-scroll, records bridge decision</title>
+    <phase>3 Surfacing Spaarke</phase>
+    <gate>033 complete — the Find view and its three-state gate exist</gate>
+    <status>not-started</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Modifies `.tsx` in the add-in and consumes a security-hardened BFF surface; tags include frontend and fluent-ui; carries an architectural decision (the records bridge) that must be recorded. Step 9.5 code-review + adr-check are mandatory.</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Well-specified UI work against a named pattern (`ui/infinite-scroll-list.md`) plus one bounded decision with both options already enumerated by finding F-c.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <deps>033</deps>
+    <tags>frontend, fluent-ui, office-addin, bff-api</tags>
+    <estimated-effort>1 day</estimated-effort>
+  </metadata>
+
+  <prompt>Fill the Find tab's results state: render content-similar documents from the per-row-authorized visualization surface, with infinite lazy-scroll and the canonical thin scrollbar. Before writing the results code, make and record the **records bridge decision** — no single endpoint returns similar documents *and* records, so r1 must either issue a text-seeded second call to `POST /api/ai/search/records` or ship documents-only.</prompt>
+
+  <role>SPAARKE platform developer. Expertise in React 19 + Fluent UI v9 list virtualization/progressive loading inside a narrow Office task pane. Follow ADRs strictly — particularly ADR-051, which bans pagers outright.</role>
+
+  <goal>The Find tab's results state renders permission-trimmed, content-similar results with infinite lazy-scroll and the canonical thin scrollbar, no pager of any kind. `notes/034-records-bridge-decision.md` records the F-c decision with its rationale before the results code is written. Results render correctly in Office light and dark themes and are keyboard-navigable with announced load events.</goal>
+
+  <context>
+    <background>
+      **Finding F-c, verified:** there is **no single endpoint that returns similar documents AND records.**
+
+      - Vector similarity from a source document → `GET /api/ai/visualization/related/{documentId}` — **documents only**. Matter / Project / Invoice appear in that response as parent **HUB nodes** derived from Dataverse lookups (`GetHardcodedRelationshipsAsync:353`), **not as vector matches**. A hub node is "the matter this document belongs to", not "a matter similar to this document's content".
+      - `POST /api/ai/search/records` (`RecordSearchEndpoints.cs:40`) is **query-TEXT driven and accepts no source document**. `RecordSearchRequest.query` is capped at 1000 chars; `RecordEntityType` is limited to `sprk_matter | sprk_project | sprk_invoice`; it searches `spaarke-records-index` on the `contentVector` field.
+
+      So "similar records" in r1 is a bridge decision with exactly two honest options: **(a)** derive a text seed from the open document and issue a second call to `/api/ai/search/records`, accepting that it is a *text* query and not true content-vector similarity over the document; or **(b)** ship documents-only in r1 and defer records. Whichever is chosen must be recorded — the cost of not recording it is that a later reader assumes the records in the list were vector matches when they were hub nodes or a text query.
+
+      **Scrollbar note specific to this surface:** the canonical `thinScrollbarStyle` lives in `@spaarke/ui-components` (`src/theme/scrollbar.ts`), and the add-in does **not** depend on that package — `src/client/office-addins/package.json` lists `@spaarke/auth` as its only Spaarke dependency. Per this project's documented ADR-012 Path-A exception, the style is **recreated locally** in the add-in following the pattern, not imported. Do not add a dependency on `@spaarke/ui-components` to fix this.
+    </background>
+    <relevant-files>
+      <file role="modify">src/client/office-addins/shared/taskpane/components/views/FindView.tsx</file>
+      <file role="new">src/client/office-addins/shared/taskpane/components/FindResultsList.tsx</file>
+      <file role="new">src/client/office-addins/shared/taskpane/hooks/useLazyResults.ts</file>
+      <file role="new">projects/spaarkeai-word-add-in-r1/notes/034-records-bridge-decision.md</file>
+      <file role="canonical-reference">src/client/shared/Spaarke.UI.Components/src/theme/scrollbar.ts</file>
+      <file role="canonical-reference">src/server/api/Sprk.Bff.Api/Api/Ai/VisualizationEndpoints.cs</file>
+      <file role="canonical-reference">src/server/api/Sprk.Bff.Api/Api/Ai/RecordSearchEndpoints.cs</file>
+    </relevant-files>
+    <dependencies>
+      <dependency task="033" status="pending">The `FindView` three-state machine and its results-state container, plus the resolved document identity that seeds the similarity query.</dependency>
+    </dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-051">Scope: the Find results list and any list this task introduces. **Infinite lazy-scroll only, NO pager.** Explicitly banned: numbered page links, prev/next controls, a down-arrow/chevron "next page" button, and a "Load more" button. Also banned: capping the list at its first page, and loading the entire set in one giant page to avoid paging.</constraint>
+    <constraint source="ADR-051">Use the canonical thin scrollbar. Because the add-in does not depend on `@spaarke/ui-components`, recreate `thinScrollbarStyle` locally in the add-in per `.claude/patterns/ui/thin-scrollbar.md`. Do NOT hand-roll ad-hoc `::-webkit-scrollbar` rules with hex thumbs, and do NOT add a dependency on `@spaarke/ui-components`.</constraint>
+    <constraint source="project">The F-c records bridge decision MUST be written to `projects/spaarkeai-word-add-in-r1/notes/034-records-bridge-decision.md` **before** the results implementation, naming the chosen option (text-seeded second call to `/api/ai/search/records` vs. documents-only in r1) and its rationale. If records are included, the note MUST state plainly that they are a text-seeded query result, not document-content vector matches.</constraint>
+    <constraint source="project">Results MUST come from the per-row-authorized surface hardened by task 032. Do NOT call any similarity route that bypasses that hardening, and do NOT re-derive the result set client-side from a broader query.</constraint>
+    <constraint source="project">Hub nodes (`GetHardcodedRelationshipsAsync:353`) MUST NOT be presented to the user as similarity matches. If they are shown at all, they are labeled as the document's parent record, distinctly from similarity results.</constraint>
+    <constraint source="ADR-044">Every Dataverse GUID crossing a boundary in this task (source documentId, result row ids used for navigation) MUST be canonicalized to bare-lowercase via `cleanGuid`. Never interpolate a raw GUID into an OData key predicate.</constraint>
+    <constraint source="ADR-021">All results UI uses Fluent UI v9 and MUST honor the Office light/dark theme via `useOfficeTheme`. No hard-coded hex colors; no `Xrm`-bound components (NFR-03).</constraint>
+    <constraint source="NFR-10">Shared-first: the results list lands in `shared/taskpane/` and any host difference is expressed via `hostAdapter.getCapabilities()`, not `if (host === 'Word')` inside the component.</constraint>
+    <constraint source="NFR-11">The results list MUST be keyboard-navigable and MUST announce page-load events via the existing `useAnnounce` pattern, so a screen-reader user knows more rows arrived on scroll.</constraint>
+    <constraint source="ADR-029">If this task changes any BFF file, publish size MUST be measured **against a fresh build of `origin/master`, not the recorded baseline number**, zipping both with PowerShell `Compress-Archive` and reporting both absolute sizes, the delta and the tool. If the task turns out to be client-only, state that explicitly in the PR rather than omitting the check silently.</constraint>
+    <constraint source="project">If this task changes any BFF file, the PR MUST carry a **Placement Justification** section per `.claude/constraints/bff-extensions.md`, and `/conflict-check` MUST be run before the PR.</constraint>
+    <constraint source="project">There is no `build:prod` script in `src/client/office-addins` — `npm run build` IS the production build. Install with `npm install --legacy-peer-deps --no-audit --no-fund`.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>Infinite lazy-scroll result lists in a narrow Office task pane</topic>
+    <files>
+      <file>projects/spaarkeai-word-add-in-r1/spec.md</file>
+      <file>projects/spaarkeai-word-add-in-r1/plan.md</file>
+      <file>src/client/office-addins/CLAUDE.md</file>
+      <file>.claude/adr/ADR-051-infinite-scroll-lists.md</file>
+      <file>.claude/adr/ADR-021-fluent-design-system.md</file>
+      <file>.claude/adr/ADR-044-dataverse-guid-canonicalization.md</file>
+      <file>projects/spaarkeai-word-add-in-r1/notes/032-authorization-hardening.md</file>
+    </files>
+    <patterns>
+      <pattern name="infinite-scroll-list" location=".claude/patterns/ui/infinite-scroll-list.md">The binding interaction model: an `IntersectionObserver` on a bottom sentinel firing the next page ~200px before it enters the viewport, accumulating rows. Mirror the `useLazyLoad` semantics; the `&lt;DataGrid&gt;` component itself is not consumable here because the add-in does not depend on `@spaarke/ui-components`.</pattern>
+      <pattern name="thin-scrollbar" location=".claude/patterns/ui/thin-scrollbar.md">Recreate `thinScrollbarStyle` locally in the add-in per this pattern's Griffel definition.</pattern>
+      <pattern name="fluent-v9-host-visual-fit" location=".claude/patterns/ui/fluent-v9-host-visual-fit.md">Explicitly covers Office add-ins — apply for row density and sizing in the narrow pane.</pattern>
+    </patterns>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="0" name="Context + rigor declaration">Load `projects/spaarkeai-word-add-in-r1/CLAUDE.md`, `spec.md` FR-16 + NFR-05, `plan.md` §3 finding F-c, ADR-051 and both scroll patterns. Read task 032's notes for the per-row authorization latency budget. Emit the mandatory rigor declaration (FULL / sonnet / high).</step>
+    <step order="1">Make the F-c bridge decision and write `notes/034-records-bridge-decision.md` — chosen option, rationale, and (if records are included) an explicit statement that they are a text-seeded query result rather than document-content vector matches. Do this before implementation.</step>
+    <step order="2">Implement `useLazyResults` mirroring the `useLazyLoad` + `IntersectionObserver` sentinel semantics from `ui/infinite-scroll-list.md`: accumulate rows across pages, fire the next page from a bottom sentinel with a ~200px `rootMargin`, and expose an honest `hasMore`.</step>
+    <step order="3">Recreate `thinScrollbarStyle` locally in the add-in per `ui/thin-scrollbar.md` and spread it into the results scroll container.</step>
+    <step order="4">Build `FindResultsList` rendering each similar document with enough identity to be actionable (name, parent record, and whatever the authorized response provides). Label any hub node distinctly from a similarity match.</step>
+    <step order="5">If the bridge decision includes records, issue the text-seeded second call to `POST /api/ai/search/records` and merge its results into the list under a clearly distinct grouping — respecting the 1000-char `query` cap and the `sprk_matter | sprk_project | sprk_invoice` type restriction.</step>
+    <step order="6">Wire the list into `FindView`'s results state from task 033. Announce each page load via `useAnnounce`.</step>
+    <step order="7">Add unit tests: `hasMore` behavior, sentinel-driven page advance, empty-result state, and an explicit assertion that no pager control is rendered.</step>
+    <step order="8">Run `npm run typecheck` and `npm run build` in `src/client/office-addins`. Execute the `&lt;ui-tests&gt;` below in both hosts.</step>
+    <step order="9">If any BFF file changed, measure publish size against a fresh `origin/master` build and run `/conflict-check`; otherwise state in the PR that the task is client-only.</step>
+    <step order="10">Update `projects/spaarkeai-word-add-in-r1/tasks/TASK-INDEX.md`: set this task's status to ✅.</step>
+    <step order="11">Document any deviation in `projects/spaarkeai-word-add-in-r1/notes/`.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If the per-row authorization added by task 032 makes progressive loading unworkable — e.g. each page costs enough authorization work that scrolling stalls — STOP and escalate per CLAUDE.md §6. Do not respond by increasing page size past what 032 authorized, by caching authorization verdicts across requests, or by falling back to an unhardened route.</trigger>
+    <trigger>If neither F-c option is defensible on the evidence — e.g. the text seed produces results so unrelated that showing them would mislead — STOP and escalate rather than shipping a records section the team cannot explain.</trigger>
+    <trigger>If ADR-051 compliance appears to require a "Load more" affordance because the pane's scroll container cannot host an `IntersectionObserver` sentinel, STOP and escalate. ADR-051 bans that control outright; a host limitation is an escalation, not a licence.</trigger>
+  </escalation>
+
+  <justification>
+    <existing>No lazy-scroll list exists in the add-in package. `grep -rln "IntersectionObserver|useInfiniteScroll" src/client/office-addins/` returns nothing, and `src/client/office-addins/package.json` depends on `@spaarke/auth` only — so `@spaarke/ui-components`' `&lt;DataGrid&gt;` / `useLazyLoad` / `thinScrollbarStyle` (`src/theme/scrollbar.ts`) are not reachable from here.</existing>
+    <extension>No — the canonical implementation cannot be imported. The add-in's documented ADR-012 Path-A exception (React-version and `Xrm` coupling in the shared library, NFR-03) means the pattern is **recreated** locally, as r2 established for every other add-in view. This is a recreate-per-precedent, not a new competing abstraction.</extension>
+    <cost-of-doing-nothing>Without it the Find tab's results state renders a fixed first page with no way to reach further matches — precisely the "it shows 25 and there are 100" defect ADR-051 names as a bug — and the only alternatives available in the add-in today are a pager (banned) or loading everything at once (also banned).</cost-of-doing-nothing>
+  </justification>
+
+  <ui-tests>
+    <test name="Infinite lazy-scroll, no pager (ADR-051)">
+      <steps>
+        <step>Open a Spaarke-sourced, indexed document with more similar documents than fit one page.</step>
+        <step>Select the Find tab and scroll the results list to the bottom.</step>
+      </steps>
+      <expected>More rows load automatically as the bottom is approached, accumulating in the same list. No numbered pages, no prev/next control, no chevron, and no "Load more" button appears anywhere in the pane.</expected>
+    </test>
+    <test name="Thin scrollbar">
+      <steps>
+        <step>With results overflowing, observe the results scroll container's scrollbar in both hosts.</step>
+      </steps>
+      <expected>The thin, theme-aware grey scrollbar renders — matching the canonical style, not the browser default chunky bar and not a hand-rolled hex thumb.</expected>
+    </test>
+    <test name="Empty results">
+      <steps>
+        <step>Open an indexed document that has no similar documents the user is permitted to see.</step>
+        <step>Select the Find tab.</step>
+      </steps>
+      <expected>An explicit empty state renders and is announced. The pane does not show a spinner indefinitely and does not imply results were withheld.</expected>
+    </test>
+    <test name="Dark mode (ADR-021)">
+      <steps>
+        <step>Switch the Office host theme to dark.</step>
+        <step>Reopen the pane, load results, and scroll.</step>
+      </steps>
+      <expected>Rows, dividers, group headers, the empty state and the scrollbar all use Fluent v9 theme tokens and remain legible with adequate contrast. No light-mode colors bleed through.</expected>
+    </test>
+    <test name="Keyboard navigation and load announcements (NFR-11)">
+      <steps>
+        <step>Navigate the results list using the keyboard only, scrolling far enough to trigger at least one additional page load.</step>
+      </steps>
+      <expected>Every row is reachable and actionable from the keyboard with a visible focus ring; each additional page load is announced via `useAnnounce`.</expected>
+    </test>
+    <test name="Hub nodes are not shown as similarity matches">
+      <steps>
+        <step>Open a document whose parent matter appears in the visualization response as a hub node.</step>
+        <step>Inspect the Find results.</step>
+      </steps>
+      <expected>The parent matter is either omitted or labeled distinctly as the document's related record — it is never listed among content-similarity matches.</expected>
+    </test>
+  </ui-tests>
+
+  <tools>
+    <tool name="npm">`npm install --legacy-peer-deps --no-audit --no-fund`, `npm run typecheck`, `npm run build` in `src/client/office-addins` (no `build:prod` here — `build` IS production).</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/client/office-addins/shared/taskpane/components/FindResultsList.tsx</output>
+    <output type="code">src/client/office-addins/shared/taskpane/hooks/useLazyResults.ts</output>
+    <output type="code">src/client/office-addins/shared/taskpane/components/views/FindView.tsx</output>
+    <output type="test">src/client/office-addins/shared/taskpane/components/__tests__/FindResultsList.test.tsx</output>
+    <output type="doc">projects/spaarkeai-word-add-in-r1/notes/034-records-bridge-decision.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">`notes/034-records-bridge-decision.md` exists, names the chosen F-c option with rationale, and — if records are included — states explicitly that they come from a text-seeded `/api/ai/search/records` query rather than document-content vector similarity. It was written before the implementation commit.</criterion>
+    <criterion testable="true">Given more similar documents than one page holds, when the user scrolls to the bottom of the results list, then the next page loads automatically and rows accumulate in the same list.</criterion>
+    <criterion testable="true">Negative (ADR-051): the rendered Find tab contains no numbered page link, no prev/next control, no chevron next-page button and no "Load more" button — asserted by an automated test over the rendered output, not by inspection.</criterion>
+    <criterion testable="true">Negative: the results list does not load the entire result set in one page to avoid paging — page size is bounded and `hasMore` reflects reality.</criterion>
+    <criterion testable="true">Given the results scroll container overflows, when it renders, then it carries the locally recreated thin scrollbar style, and `src/client/office-addins/package.json` still lists `@spaarke/auth` as its only Spaarke dependency.</criterion>
+    <criterion testable="true">Given an indexed document with no permitted similar documents, when Find renders, then an explicit empty state is shown and announced — not an indefinite spinner.</criterion>
+    <criterion testable="true">Given the visualization response includes parent hub nodes, when results render, then those nodes are omitted or labeled distinctly from similarity matches — never presented as content matches.</criterion>
+    <criterion testable="true">All results come from the per-row-authorized surface delivered by task 032 — verified by grep that no unhardened similarity route is called from the add-in.</criterion>
+    <criterion testable="true">All six `&lt;ui-tests&gt;` pass, including the dark-mode and keyboard/announcement checks.</criterion>
+    <criterion testable="true">`npm run typecheck` is clean and `npm run build` succeeds in `src/client/office-addins`; all unit tests pass.</criterion>
+    <criterion testable="true">If any BFF file changed, publish size was measured against a fresh `origin/master` build with `Compress-Archive` and both absolute sizes, delta and tool are recorded; if the task is client-only, the PR says so explicitly.</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    spec.md FR-16 + NFR-05; plan.md §3 finding F-c. The bridge decision is the load-bearing output of this task — a future reader must be able to tell, from `notes/`, whether a record in the Find list was a vector match, a hub node, or a text query hit.
+  </notes>
+
+  <execution><skill>.claude/skills/task-execute/SKILL.md</skill></execution>
+</task>

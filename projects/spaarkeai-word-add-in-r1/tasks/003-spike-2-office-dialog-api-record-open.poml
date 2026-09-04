@@ -1,0 +1,128 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="003" project="spaarkeai-word-add-in-r1">
+  <metadata>
+    <title>Spike-2: Office Dialog API for opening a record</title>
+    <phase>0 De-risk and baseline</phase>
+    <gate>startable</gate>
+    <status>not-started</status>
+    <rigor>STANDARD</rigor>
+    <rigor-reason>Research and decision-record task producing a new notes artifact, not code. No .ts/.tsx/.cs file is modified, so the Step 9.5 gates have no code surface to inspect. STANDARD rather than MINIMAL because the four answers determine the entire shape of task 027 (FR-10) and weaken or hold FR-13's "finish editing in the record" premise.</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>The four questions are well-bounded and largely answerable from platform documentation plus a bounded empirical probe. Unlike Spike-1 there is a documented fallback already chosen by the owner (read-only detail in-pane with a browser-tab escape hatch), so a negative result degrades gracefully rather than restructuring the project. Sonnet default per root CLAUDE.md section 8.5.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>P0-spikes</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <deps>none</deps>
+    <tags>spike, research, office-addins, dialog-api, dataverse, auth, phase-0</tags>
+    <estimated-effort>4-6 hours desk research plus an operator-run verification pass</estimated-effort>
+  </metadata>
+
+  <prompt>Answer the four Office Dialog API questions that spec.md's Dependencies table poses for FR-10 (open record / open Document record): can `Office.context.ui.displayDialogAsync` host a model-driven-app record form without a framing refusal, or must Spaarke host its own code page; does the dialog obtain usable auth context; does the form actually function at dialog dimensions; and does an edit made in the dialog propagate back to the pane. FR-10 is specified as "preferred mechanism: Office Dialog API" and task 027 cannot be designed until these are settled.</prompt>
+
+  <role>SPAARKE platform developer. Office.js Dialog API semantics, browser framing and same-origin policy, Spaarke Auth v2 (NAA) token flow, and Dataverse model-driven-app form hosting. You are establishing verified facts and a recommendation, not building a feature. Follow ADRs strictly.</role>
+
+  <goal>projects/spaarkeai-word-add-in-r1/notes/spikes/spike-2-dialog-api.md exists and answers questions (a) through (d) with an explicit per-question verdict and provenance label, states the same-origin implications for `messageParent` and `messageChild` as verified rather than assumed, and closes with one of three named recommendations — (1) MDA form directly in the dialog, (2) a Spaarke-hosted code page in the dialog, or (3) the documented fallback of read-only detail in-pane plus a browser-tab escape hatch — with the concrete consequence of that choice for FR-10 and FR-13.</goal>
+
+  <context>
+    <background>FR-10 (spec.md line 73) requires opening the related record and the `sprk_document` record from the pane, with the acceptance criterion that "the record opens and is usable; edits made there are reflected in the pane on return". The owner chose the Dialog API as the preferred mechanism and named option (c) — read-only detail in-pane with a browser-tab escape hatch — as the documented fallback (spec.md Owner Clarifications, line 257). spec.md's Unresolved Questions (line 282) records the risk: if the Dialog API cannot host a usable record editor, FR-13's "finish editing in the record" premise weakens and the deferred "+More fields on create" request may need reopening. There is a second constraint the spike must respect: NFR-03 says `Xrm.*` does not exist in an Office host, so nothing that depends on the host page's Xrm object can be reused; and the project has already recorded ADR-050 as Path C — the Office dialog is host chrome outside ADR-050's scope, but any Spaarke UI rendered INSIDE the dialog still follows ADR-050 and ADR-021 (spec.md ADR Tensions, line 190).</background>
+    <relevant-files>
+      <file role="canonical-reference">src/client/office-addins/shared/taskpane/App.tsx</file>
+      <file role="canonical-reference">src/client/office-addins/shared/services/AuthService.ts</file>
+      <file role="canonical-reference">src/client/shared/Spaarke.Auth/src/strategies/OfficeNaaStrategy.ts</file>
+      <file role="canonical-reference">src/client/office-addins/staticwebapp.config.json</file>
+      <file role="canonical-reference">src/client/office-addins/outlook/manifest.json</file>
+      <file role="canonical-reference">docs/standards/MODAL-DECISION-CRITERIA.md</file>
+      <file role="canonical-reference">docs/architecture/office-outlook-teams-integration-architecture.md</file>
+    </relevant-files>
+    <dependencies>
+      <dependency task="none" status="complete">No prerequisite tasks. Runs concurrently with 002, 004 and 005 in the P0-spikes wave.</dependency>
+    </dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="project">SCOPE: src/client/office-addins/**. This spike MUST NOT leave committed code in the add-in — no new dialog page, no new route, no temporary handler wired into App.tsx. Any probe belongs inside the spike report as a fenced code block plus an operator recipe. A spike that ships a half-built dialog has pre-empted task 027's design.</constraint>
+    <constraint source="project">SCOPE: the whole report. Every claim carries a provenance label — DESK-RESEARCHED (cite the Microsoft Learn URL and its last-updated date, or the `@types/office-js` declaration) or EMPIRICALLY VERIFIED (state host, host build, platform and what was observed). The same-origin rules for `messageParent`/`messageChild` in particular must be VERIFIED against current documentation, not recalled — they are the hinge on which questions (b) and (d) turn.</constraint>
+    <constraint source="ADR-028">SCOPE: any auth flow sketched for the dialog. Spaarke Auth v2 is secret-free and NAA-based via `@spaarke/auth` `OfficeNaaStrategy`. A proposed dialog auth path MUST NOT introduce direct MSAL construction in the add-in package (arch-test enforced) and MUST NOT use `.WithClientSecret`. If the dialog needs its own sign-in, describe it in terms of the existing strategy and the existing SPA redirect URIs; if it needs a NEW redirect URI registration, say so explicitly — that is an NFR-09 provisioning consequence per environment, not a code change.</constraint>
+    <constraint source="ADR-050">SCOPE: Spaarke-rendered UI inside the dialog only. This project has recorded ADR-050 as Path C: the Office dialog window itself is host chrome and outside ADR-050's scope, but any Spaarke UI rendered inside it still uses the canonical modal shell conventions and Fluent v9 with Office theme (ADR-021). If your recommendation is option (2) — a Spaarke-hosted code page — say which shell and preset it would use.</constraint>
+    <constraint source="project">SCOPE: NFR-03. Any recommendation MUST NOT depend on `Xrm.*` being available. An MDA form loaded in a dialog has its own Xrm inside that document; the add-in pane does not, and cannot reach into the dialog's. If your propagation answer for question (d) depends on reading Xrm state, state precisely which document owns it.</constraint>
+    <constraint source="project">SCOPE: the recommendation. Recommend exactly one of the three named options and state the cost of the other two. Do NOT recommend "it depends" or defer the choice to task 027 — task 027 exists to build what this spike chooses. If the evidence genuinely does not separate two options, say which additional observation would separate them and put it in the operator recipe.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>Office Dialog API; browser framing policy; NAA token flow; Dataverse form hosting</topic>
+    <files>
+      <file>projects/spaarkeai-word-add-in-r1/spec.md</file>
+      <file>projects/spaarkeai-word-add-in-r1/plan.md</file>
+      <file>src/client/office-addins/CLAUDE.md</file>
+      <file>.claude/adr/ADR-028-spaarke-auth-architecture.md</file>
+      <file>.claude/adr/ADR-050-canonical-modal-shell.md</file>
+      <file>.claude/adr/ADR-021-fluent-design-system.md</file>
+      <file>.claude/patterns/auth/spaarke-sso-binding.md</file>
+      <file>docs/standards/MODAL-DECISION-CRITERIA.md</file>
+      <file>.claude/patterns/ui/fluent-v9-host-visual-fit.md</file>
+    </files>
+    <patterns>
+      <pattern name="the same-origin hinge" location="external — Office Dialog API documentation">The Dialog API can DISPLAY a cross-domain URL, but the cross-document messaging surface (`messageParent` from the dialog, `messageChild` from the host page) is constrained by origin. Verify the current rule exactly, because it decides questions (b) and (d) simultaneously: a Dataverse MDA form lives on a different origin from the add-in's Static Web App, so if messaging is same-origin-only then an MDA form in the dialog can neither receive a token from the pane nor report a change back to it. Do not assert this from memory — cite the current documentation and, where possible, verify empirically.</pattern>
+      <pattern name="framing refusal is a server decision, not an Office one" location="external — Dataverse/MDA hosting headers">Question (a) is answered by what the Dataverse host actually sends (X-Frame-Options and/or a CSP frame-ancestors directive), and by whether the Office dialog on a given platform is an iframe or a separate top-level window. These differ between Word desktop and Word on the web — record the answer per platform rather than as one global yes/no, because the fallback may be needed only on one of them.</pattern>
+      <pattern name="dialog sizing" location="external — displayDialogAsync options">Height and width are given as percentages of the screen (or device) with documented maxima. Question (c) is not "does it render" but "does the record form remain operable" — specifically saving, lookup pickers (which themselves open overlays), and subgrids. State the tested dimensions and the observed behaviour of each of those three interactions separately.</pattern>
+      <pattern name="the escape hatch already has a decision doc" location="docs/standards/MODAL-DECISION-CRITERIA.md">Spaarke already has criteria for when to open a record via OOB navigation versus a proprietary Fluent modal versus a browse shell, including an explicit iframe-embedding anti-pattern. Read it before recommending: if the criteria already rule out an approach for reasons unrelated to Office, the spike should say so rather than rediscovering it.</pattern>
+    </patterns>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="0" name="Context + rigor declaration">Emit the mandatory rigor declaration (RIGOR LEVEL: STANDARD, reason, protocol steps). Load projects/spaarkeai-word-add-in-r1/CLAUDE.md, spec.md FR-10 and FR-13 plus the Dependencies/Spikes table and Unresolved Questions, and the ADR Tensions row for ADR-050.</step>
+    <step order="1">Establish in-repo ground truth: how the pane obtains tokens today (shared/services/AuthService.ts into `@spaarke/auth` `OfficeNaaStrategy`), what origin the add-in is served from (staticwebapp.config.json and the manifest's URLs), and what redirect URIs are registered per NFR-09. Cite file:line. This defines what "same origin" concretely means for this add-in.</step>
+    <step order="2">Question (a) — framing. Determine whether an MDA record form URL can be displayed in an Office dialog without a framing refusal, separately for Word desktop and Word on the web. Establish what headers the Dataverse host sends and whether the Office dialog is an iframe or a top-level window on each platform. If a refusal occurs or is expected, state what the user would see.</step>
+    <step order="3">Question (b) — auth context. Determine whether a dialog can obtain a usable token: can the pane pass one in (and under what origin constraint), or must the dialog perform its own sign-in? Sketch both against ADR-028 (NAA via `@spaarke/auth`, no MSAL construction in the add-in package, no client secret) and state explicitly whether either option requires a NEW Entra SPA redirect URI registration — that is an NFR-09 per-environment provisioning consequence that must surface here, not at deploy time.</step>
+    <step order="4">Question (c) — usability at dialog dimensions. Determine the maximum practical dialog size and whether a record form remains operable at it. Test or reason about three interactions separately: saving the record; opening a lookup picker (which opens its own overlay inside an already-constrained window); and scrolling/using a subgrid. Report each separately — "the form renders" is not an answer to this question.</step>
+    <step order="5">Question (d) — propagation. Determine whether an edit made in the dialog can be reported back to the pane via `messageParent`, and under what origin constraint. If messaging is unavailable for the chosen content, state what FR-10's acceptance criterion ("edits made there are reflected in the pane on return") would instead require — for example the pane re-fetching identity/profile on dialog close, which is a different and possibly acceptable design, but must be named rather than assumed.</step>
+    <step order="6">Evaluate the three options against the four answers: (1) MDA form directly in the dialog; (2) a Spaarke-hosted code page in the dialog, served from the add-in's own origin so messaging works, rendering Spaarke UI under ADR-050 Path C and ADR-021; (3) the documented fallback — read-only detail in-pane with a browser-tab escape hatch that opens the record in the user's browser. For each, state what FR-10 gains and loses, and what FR-13's "finish editing in the record" premise becomes.</step>
+    <step order="7">Write the operator verification recipe: paste-ready steps that display a dialog against each candidate URL from a dev build, and observe framing, token availability, sizing behaviour and `messageParent` delivery. State clearly that nothing in this recipe is to be committed to src/.</step>
+    <step order="8">Write projects/spaarkeai-word-add-in-r1/notes/spikes/spike-2-dialog-api.md with these sections: Questions · In-repo ground truth (with file:line) · Method and provenance policy · (a) Framing, per platform · (b) Auth context, with any NFR-09 consequence called out · (c) Usability at dialog size, per interaction · (d) Propagation · Option comparison · Recommendation (exactly one of the three) · Consequences for FR-10 and FR-13 · Operator verification recipe · Open questions remaining.</step>
+    <step order="9">Update projects/spaarkeai-word-add-in-r1/tasks/TASK-INDEX.md: set this task's status to completed.</step>
+    <step order="10">Document any deviation from this task file in projects/spaarkeai-word-add-in-r1/notes/.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If none of the three options satisfies FR-10's acceptance criterion — that is, the record cannot be opened in a usable form by any mechanism, not even the browser-tab escape hatch — STOP and escalate per root CLAUDE.md section 6. FR-10 would then need to be renegotiated rather than designed, and FR-09's record card loses its click target.</trigger>
+    <trigger>If the only viable path requires a NEW Entra app registration, a new redirect URI class, or an admin-consent-requiring permission beyond what NFR-09 already specifies (`brk-multihub://{swa-host}` and `https://{swa-host}/auth-callback.html`), STOP and escalate. That is a per-environment provisioning change with a security review attached (root CLAUDE.md section 6, security-sensitive), not something a spike may commit the project to.</trigger>
+    <trigger>If the recommendation would require embedding Dataverse UI in a way that docs/standards/MODAL-DECISION-CRITERIA.md already names as an anti-pattern, STOP and escalate as a CLAUDE.md section 6.5 conflict rather than proceeding — state the rule, the technical need, and a proposed path (A exception / B amendment / C pivot).</trigger>
+  </escalation>
+
+  <tools>
+    <tool name="WebSearch">Locate current Microsoft Learn documentation for the Office Dialog API, `displayDialogAsync` options, and cross-document messaging origin rules.</tool>
+    <tool name="WebFetch">Read the located reference pages; capture URLs and last-updated dates for provenance labels.</tool>
+    <tool name="Agent">Optionally dispatch the `researcher` subagent for the Office Dialog API and Dataverse form-hosting questions (root CLAUDE.md section 15). Do not delegate the in-repo auth-flow evidence gathering.</tool>
+    <tool name="Grep">In-repo evidence: `displayDialogAsync`, `messageParent`, `openBrowserWindow` across src/client/**; redirect URIs across the auth package and deployment config.</tool>
+  </tools>
+
+  <outputs>
+    <output type="doc">projects/spaarkeai-word-add-in-r1/notes/spikes/spike-2-dialog-api.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">projects/spaarkeai-word-add-in-r1/notes/spikes/spike-2-dialog-api.md exists and contains one clearly headed section per question (a), (b), (c), (d), each closing with an explicit verdict.</criterion>
+    <criterion testable="true">Question (a) is answered separately for Word desktop and Word on the web, and names the mechanism (header and/or window type) behind each answer.</criterion>
+    <criterion testable="true">Question (b) states whether the dialog can receive a token from the pane, whether it must sign in independently, and whether either route requires a new Entra SPA redirect URI beyond the two NFR-09 already specifies.</criterion>
+    <criterion testable="true">Question (c) reports saving, lookup pickers and subgrids as three separate observations at a stated dialog dimension — not as a single "the form works" claim.</criterion>
+    <criterion testable="true">Question (d) states the origin constraint on `messageParent` with a citation, and — if messaging is unavailable for the recommended content — names the alternative mechanism that would satisfy "edits are reflected in the pane on return".</criterion>
+    <criterion testable="true">Every factual claim carries a provenance label of exactly DESK-RESEARCHED (with URL and last-updated date, or a cited type declaration) or EMPIRICALLY VERIFIED (with host, build, platform and observation).</criterion>
+    <criterion testable="true">The report recommends exactly one of the three named options and states, for each of the other two, what it would have cost.</criterion>
+    <criterion testable="true">The report states the consequence of the recommendation for FR-10's acceptance criterion and for FR-13's "finish editing in the record" premise.</criterion>
+    <criterion testable="true">The report contains a paste-ready operator verification recipe, explicitly marked as not-to-be-committed.</criterion>
+    <criterion testable="true">If the recommendation is option (2) — a Spaarke-hosted code page — the report names the ADR-050 shell/preset and confirms Fluent v9 plus Office theme per ADR-021.</criterion>
+    <criterion testable="true">Negative: no proposed auth path constructs MSAL inside the add-in package or uses a client secret (ADR-028).</criterion>
+    <criterion testable="true">Negative: no recommendation depends on `Xrm.*` being reachable from the pane document (NFR-03).</criterion>
+    <criterion testable="true">Negative: `git status` shows no file added or modified under src/client/office-addins/ by this task.</criterion>
+  </acceptance-criteria>
+
+  <notes>Spec reference: FR-10 (line 73), FR-13 (line 79), Dependencies/Spikes table (line 238), Owner Clarifications "Record open" (line 257), Unresolved Questions (line 282), ADR Tensions ADR-050 row (line 190). Plan reference: section 4 Phase 0 task 003; Phase 2 task 027 is the direct consumer.
+
+The documented fallback is option (c) in the owner's framing: read-only record detail rendered in the pane, with a browser-tab escape hatch for full editing. It is a legitimate outcome, not a failure — recommend it without hedging if the evidence supports it.
+
+No `&lt;justification&gt;` block is present: this task creates no new code surface, only a project notes artifact in the already-provisioned notes/spikes/ directory.
+
+Parallel-safety: P0-spikes wave. 002, 003, 004 and 005 write to four distinct files under notes/spikes/ and modify no source. Safe to run all four concurrently.</notes>
+
+  <execution><skill>.claude/skills/task-execute/SKILL.md</skill></execution>
+</task>

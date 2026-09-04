@@ -1,0 +1,147 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="014" project="spaarkeai-word-add-in-r1">
+  <metadata>
+    <title>FR-02: server-side custom XML part GUID stamp (forward-only)</title>
+    <phase>1 Foundation</phase>
+    <gate>012 complete — the identity resolver must exist so the stamp has a fallback to complement, not replace</gate>
+    <status>not-started</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>New BFF surface modifying .cs in `Sprk.Bff.Api`, on the save path, writing into .docx bytes. Tags include bff-api. Code-review plus adr-check run at Step 9.5.</rigor-reason>
+    <model-tier>opus</model-tier>
+    <model-tier-reason>Touching OOXML bytes on a save path is the highest-consequence category in this repo — ADR-049's amendment history exists because two prior approaches to .docx mutation each produced a distinct data-fidelity failure. A malformed stamp corrupts a user's work product, and the corruption may not surface until the file is opened in Word.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>P1-b</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <deps>012</deps>
+    <tags>bff-api, ooxml, docx, save-path, dataverse, integration-test, backend</tags>
+    <estimated-effort>6-8 hours</estimated-effort>
+  </metadata>
+
+  <prompt>On every Spaarke save, write the `sprk_document` GUID into a custom XML part inside the UPLOADED BYTES on the server — never by mutating the user's open document, which would dirty it and prompt an unexpected save. A stamped document that is downloaded and later re-uploaded self-identifies without a Graph round-trip. The stamp is forward-only: existing stored bytes are never rewritten.</prompt>
+
+  <role>SPAARKE platform developer. Expert in OOXML package structure (custom XML parts, `[Content_Types].xml`, relationship parts), .NET stream handling on a save path, and BFF service composition. Follow ADRs strictly.</role>
+
+  <goal>The BFF save path stamps the `sprk_document` GUID into a custom XML part in the uploaded .docx bytes before they reach SPE. A document downloaded after a Spaarke save carries the stamp and self-identifies on re-upload. A document saved BEFORE this release is untouched and still resolves through task 012's Graph path. The user's open document in Word is never modified.</goal>
+
+  <context>
+    <background>
+      spec.md FR-02 plus its Assumptions section: "FR-02 stamping is server-side, into the uploaded bytes — not client-side into the open document. Client-side stamping would dirty the user's document and prompt an unexpected save."
+      Owner decision recorded in `projects/spaarkeai-word-add-in-r1/CLAUDE.md` Decisions (2026-09-04): **FR-02 stamping is forward-only** — no retroactive rewrite of existing `sprk_document` bytes. Rationale: FR-01's Graph plus alternate-key path already identifies pre-existing Spaarke documents; the stamp is a fallback for round-tripped files; retroactive stamping would mean rewriting stored bytes for every existing document. This closes the spec's open question at line 283.
+      The stamp complements task 012, it does not replace it. Identity resolution order after both ship: read the stamp if present (no Graph call), else fall back to the URL-to-Graph-to-alternate-key path.
+      Residual risk accepted by the owner: a Spaarke GUID travels inside documents sent to opposing counsel. Mitigations (customer-facing documentation, or a strip-on-export option) are explicitly NOT built in r1.
+      Coordination: `spaarkeai-compose-r8` owns the OTHER .docx write path and is `parallel-safe:false` across the Compose spine (plan.md §5 hot-path coordination, risk R-5). ADR-049 governs that path and must be read before touching any .docx bytes.
+    </background>
+    <relevant-files>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Services/Office/OfficeService.cs</file>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Api/Office/OfficeEndpoints.cs</file>
+      <file role="canonical-reference">src/server/api/Sprk.Bff.Api/Services/Compose/ComposeCreateOnSavePromoter.cs</file>
+      <file role="canonical-reference">src/server/api/Sprk.Bff.Api/Api/FileAccessEndpoints.cs</file>
+      <file role="canonical-reference">src/server/shared/Spaarke.Dataverse/IGenericEntityService.cs</file>
+      <file role="new">projects/spaarkeai-word-add-in-r1/notes/014-xml-part-stamp-decisions.md</file>
+    </relevant-files>
+    <dependencies>
+      <dependency task="012" status="pending">The document-identity resolver — the stamp is the round-trip fallback for the Graph path 012 establishes, and the two must agree on what identity means</dependency>
+    </dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="project">Scope: the entire stamping mechanism. MUST NOT mutate the user's OPEN document in Word. No client-side custom-XML-part write, no `Office.context.document.customXmlParts` write, no round-trip that dirties the document and prompts an unexpected save. The stamp goes into the bytes already in flight to the server.</constraint>
+    <constraint source="project">Scope: existing stored documents. FORWARD-ONLY — no retroactive rewrite of any existing `sprk_document`'s stored bytes (owner decision 2026-09-04, project CLAUDE.md Decisions). Do not add a backfill job, a migration, or an opportunistic "stamp on next read". A document saved before this release stays unstamped and resolves via task 012's Graph path.</constraint>
+    <constraint source="ADR-049">Scope: any code in this task that reads, writes or repackages .docx bytes. ADR-049 governs the Compose .docx write path; read it before touching bytes. This task MUST NOT import from, extend, or share mutable state with `Services/Compose/**` or `Spaarke.Compose.Components` — the two write paths stay independent. If a shared OOXML helper looks tempting, escalate rather than coupling the spines.</constraint>
+    <constraint source="project">Scope: byte fidelity. Adding the custom XML part MUST NOT alter any other part of the package — body content, styles, numbering, section properties, relationships unrelated to the new part. Verify by round-tripping a fixture: stamp it, then confirm every pre-existing package part is byte-identical and the document opens cleanly in Word.</constraint>
+    <constraint source="project">Scope: non-.docx uploads. The save path also carries emails, attachments and other content types. The stamp applies ONLY where an OOXML package is present; a PDF, an EML or an arbitrary binary MUST pass through untouched, not fail and not be silently rewritten.</constraint>
+    <constraint source="ADR-044">Scope: the `sprk_document` GUID written into the stamp and every Dataverse GUID crossing a boundary here — canonicalize to bare lowercase via the shared `cleanGuid`. The stamped value must be the canonical form so the read side can match it without normalization ambiguity.</constraint>
+    <constraint source="ADR-007">Scope: the upload path this task hooks. Graph SDK types stay behind `SpeFileStore`; the stamper operates on a byte stream, not on a Graph `DriveItem`.</constraint>
+    <constraint source="project">Scope: BFF publish size. Measure the delta against a FRESH BUILD OF MASTER, not the recorded baseline (root CLAUDE.md §10 bullet 4). If an OOXML manipulation package is added, its size contribution is the dominant risk in this task — report it explicitly. Escalate at +5 MB or more; hard stop at 60 MB.</constraint>
+    <constraint source="ADR-010">Scope: DI registrations. Keep additions minimal. Prefer a method on an existing save-path service over a new registered service unless the stamper genuinely needs its own lifetime.</constraint>
+    <constraint source="project">Scope: pre-PR process. Run `/conflict-check` before opening the PR — `spaarkeai-compose-r8` owns the other .docx write path and is `parallel-safe:false` across the Compose spine.</constraint>
+    <constraint source="ADR-038">Scope: test obligation. A modified endpoint or save-path service requires contract/integration coverage. Banned: `Mock&lt;HttpMessageHandler&gt;`, DI-registration tests, ctor null-check tests.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>OOXML custom XML parts, server-side byte stamping, save-path composition</topic>
+    <files>
+      <file>projects/spaarkeai-word-add-in-r1/spec.md</file>
+      <file>projects/spaarkeai-word-add-in-r1/plan.md</file>
+      <file>projects/spaarkeai-word-add-in-r1/CLAUDE.md</file>
+      <file>docs/architecture/content-identity-and-deduplication-architecture.md</file>
+      <file>docs/architecture/office-outlook-teams-integration-architecture.md</file>
+      <file>.claude/adr/ADR-049-compose-shadow-document.md</file>
+      <file>docs/architecture/COMPOSE-WRITE-RESIDUAL-LOSS.md</file>
+      <file>.claude/adr/ADR-007-spefilestore.md</file>
+      <file>.claude/adr/ADR-044-dataverse-guid-canonicalization.md</file>
+      <file>.claude/adr/ADR-010-di-minimalism.md</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+      <file>docs/adr/ADR-038-testing-strategy.md</file>
+    </files>
+    <patterns>
+      <pattern name="endpoint-definition" location=".claude/patterns/api/endpoint-definition.md">If the stamp needs any route surface at all; prefer hooking the existing save path over adding a route.</pattern>
+      <pattern name="endpoint-filters" location=".claude/patterns/api/endpoint-filters.md">Authorization conventions if any new route is unavoidable.</pattern>
+    </patterns>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="0" name="Context + rigor declaration">Load project CLAUDE.md (especially the Decisions table's forward-only entry), spec.md FR-02 and its Assumptions, plan.md §4 Phase 1, and ADR-049 in full. Declare: RIGOR LEVEL FULL, model-tier opus, effort high, steps mode DIRECTIONAL.</step>
+    <step order="1">Trace the current save path from `POST /api/office/save` through `OfficeService.SaveAsync` to the point where .docx bytes are handed to storage. Identify the single place where the bytes are in memory AND the `sprk_document` GUID is known. Record it — if the GUID is not yet known at the byte-handoff point, that ordering problem is the real work of this task.</step>
+    <step order="2">Decide the stamp's representation and record it in notes/ before implementing: the custom XML part's namespace, its root element, the GUID's canonical form, and how a reader distinguishes a Spaarke stamp from any other custom XML part in the package. Also decide whether additional fields (tenant, save timestamp) belong — default to the GUID alone unless a concrete consumer needs more (CLAUDE.md §11).</step>
+    <step order="3">Implement the stamper: open the uploaded bytes as an OOXML package, add the custom XML part with its content-type entry and relationship, and repackage. Every pre-existing part must survive byte-identical. Non-OOXML payloads pass through untouched.</step>
+    <step order="4">Hook the stamper into the save path at the point identified in step 1, ensuring the user's open document is never touched and the operation is idempotent — re-saving an already-stamped document updates or leaves the stamp coherent rather than accumulating duplicate parts.</step>
+    <step order="5">Implement the read side: a stamped document's GUID is readable from the bytes so re-upload self-identifies WITHOUT a Graph round-trip. Wire it so identity resolution prefers the stamp and falls back to task 012's Graph path. Record the precedence in notes/.</step>
+    <step order="6">Add integration coverage: stamp a fixture and assert all other parts byte-identical; assert the document opens in Word (or passes an OOXML validity check); assert a non-OOXML payload is unmodified; assert a pre-release unstamped document still resolves via the 012 path; assert re-saving does not duplicate the part.</step>
+    <step order="7">Run `dotnet build src/server/api/Sprk.Bff.Api/` and `dotnet test`. Run `dotnet list package --vulnerable --include-transitive`; confirm no new HIGH-severity CVE (especially relevant if an OOXML package was added).</step>
+    <step order="8">Measure BFF publish size against a fresh build of master per the constraint; record both absolute sizes, the delta and the zip tool in notes/. Call out any package added for OOXML manipulation.</step>
+    <step order="9">Run `/conflict-check` before opening the PR. State the Placement Justification per `.claude/constraints/bff-extensions.md` in the PR description.</step>
+    <step order="10">Update projects/spaarkeai-word-add-in-r1/tasks/TASK-INDEX.md: set this task's status to ✅.</step>
+    <step order="11">Document any deviation in projects/spaarkeai-word-add-in-r1/notes/ — including the stamp representation, the precedence decision, and the byte-fidelity evidence.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If stamping cannot be done without altering other parts of the OOXML package (a repackage that rewrites unrelated parts, or a library that normalizes XML on save), STOP and escalate per CLAUDE.md §6. Silent byte churn on a user's work product is exactly the failure class ADR-049 was amended three times over — do not accept "the document still opens" as sufficient.</trigger>
+    <trigger>If the `sprk_document` GUID is not available at the point in the save path where the bytes are handed to storage, and making it available would require reordering the save (create-record-before-upload), STOP and escalate per CLAUDE.md §6 — that reordering has dedup and idempotency consequences beyond this task's scope.</trigger>
+    <trigger>If implementing the stamp appears to require sharing OOXML helper code with `Services/Compose/**`, STOP and escalate per CLAUDE.md §6.5 rather than coupling the two .docx write spines.</trigger>
+    <trigger>If a scenario is found where forward-only stamping is insufficient and a retroactive rewrite seems necessary, STOP and escalate — the forward-only decision is an owner decision (2026-09-04), not an implementation default to be revisited in-task.</trigger>
+    <trigger>If the publish-size delta is +5 MB or more against a fresh master build, STOP and escalate with explicit justification per root CLAUDE.md §10.</trigger>
+  </escalation>
+
+  <justification>
+    <existing>None found for stamping. Grep of `src/server/api/Sprk.Bff.Api/**` for custom XML part handling (`customXml`, `CustomXmlPart`, `AddCustomXmlPart`) returns no stamp mechanism; spec.md's New Components table records the same conclusion ("Custom XML part stamper (server-side) — existing overlap: None"). The nearest neighbour is the Compose .docx write path under `Services/Compose/**` (ADR-049), which repackages document BODY content for an entirely different purpose and is explicitly out of bounds for coupling.</existing>
+    <extension>No — the Compose write path is a body-content renderer governed by its own ADR with its own fidelity contract, and `spaarkeai-compose-r8` owns it as `parallel-safe:false`. Extending it would entangle two independent write spines and put this task's changes inside the Compose fidelity guarantees. The stamper is a small, additive package operation on the Office save path only.</extension>
+    <cost-of-doing-nothing>A document that leaves Spaarke and comes back cannot be re-identified: a user who downloads a document, edits it locally, and re-uploads it through the pane creates a NEW `sprk_document` row on every round trip instead of a new version — because task 012's Graph path keys on the SPE item id, which a locally-saved copy no longer has. Every round trip permanently forks the record.</cost-of-doing-nothing>
+  </justification>
+
+  <tools>
+    <tool name="dotnet">build `src/server/api/Sprk.Bff.Api/`, test, publish (size measurement), `list package --vulnerable --include-transitive`</tool>
+    <tool name="git">worktree add for the fresh master publish-size baseline</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Office/OfficeService.cs</output>
+    <output type="test">tests/integration/contract/Api/Office/OfficeEndpointsContractTests.cs</output>
+    <output type="doc">projects/spaarkeai-word-add-in-r1/notes/014-xml-part-stamp-decisions.md</output>
+    <output type="doc">projects/spaarkeai-word-add-in-r1/notes/014-publish-size.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Given a .docx saved through the Spaarke pane after this release, when the stored file is downloaded and its package inspected, then it contains a custom XML part carrying the canonical bare-lowercase `sprk_document` GUID.</criterion>
+    <criterion testable="true">Given that downloaded stamped document, when it is re-uploaded through the pane, then it self-identifies to the original `sprk_document` WITHOUT a Graph round-trip.</criterion>
+    <criterion testable="true">Given a document saved BEFORE this release, when opened in the pane, then it is unaffected by this change and still resolves through task 012's Graph path — no stored bytes were rewritten.</criterion>
+    <criterion testable="true">Given the repo after this task, when searched for a backfill job, migration, or stamp-on-read path over existing documents, then none exists (forward-only, owner decision 2026-09-04).</criterion>
+    <criterion testable="true">Given the user's document open in Word during a Spaarke save, when the save completes, then the open document is NOT modified — Word does not report unsaved changes caused by Spaarke and does not prompt to save.</criterion>
+    <criterion testable="true">Given a fixture .docx, when stamped, then every pre-existing package part is byte-identical to the input and the resulting file opens cleanly in Word.</criterion>
+    <criterion testable="true">Negative: given a non-OOXML payload (PDF, EML, arbitrary binary) on the same save path, when saved, then the bytes are passed through unmodified and no error is raised.</criterion>
+    <criterion testable="true">Negative: given an already-stamped document, when saved again, then the package contains exactly one Spaarke stamp part — parts do not accumulate.</criterion>
+    <criterion testable="true">Negative: given a corrupt or truncated OOXML payload, when stamping is attempted, then it fails with a handled ProblemDetails error and does not write partial bytes to storage.</criterion>
+    <criterion testable="true">Given the new code, when inspected, then it does not import from `Services/Compose/**` or `Spaarke.Compose.Components` and shares no mutable state with the Compose write path (ADR-049 independence).</criterion>
+    <criterion testable="true">Given a publish of this branch and a fresh publish of `origin/master`, when both are zipped with PowerShell `Compress-Archive`, then the delta is recorded with both absolute sizes and the tool named, and is under +5 MB.</criterion>
+    <criterion testable="true">`dotnet build` succeeds, `dotnet test` passes, and `dotnet list package --vulnerable --include-transitive` reports no new HIGH-severity CVE.</criterion>
+    <criterion testable="true">`/conflict-check` was run before the PR and its result recorded; the PR description states the Placement Justification.</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    spec.md FR-02, its Assumptions section, and Success Criterion 3 ("A stamped document, downloaded and re-opened from disk, self-identifies"). plan.md §4 Phase 1 task 014 and §7 risk R-5.
+    The forward-only scope decision resolves spec.md's Unresolved Question at line 283 ("Backfill for FR-02"). It is an owner decision, recorded in project CLAUDE.md Decisions (2026-09-04) — treat it as binding, not as a default.
+    Wave P1-b with task 015: 014 is server-side C# on `Services/Office/**` plus contract tests; 015 is client-side TypeScript/React in `shared/taskpane/**`. No shared file and no shared symbol — the pair is disjoint by construction.
+  </notes>
+
+  <execution><skill>.claude/skills/task-execute/SKILL.md</skill></execution>
+</task>

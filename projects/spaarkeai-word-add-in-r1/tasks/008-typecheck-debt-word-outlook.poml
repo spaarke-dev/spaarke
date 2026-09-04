@@ -1,0 +1,184 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="008" project="spaarkeai-word-add-in-r1">
+  <metadata>
+    <title>FR-18: clear typecheck debt in word/ and outlook/</title>
+    <phase>0 De-risk and baseline</phase>
+    <gate>001 complete</gate>
+    <status>not-started</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Modifies .ts and .tsx source files, and the six files in scope are the host mount points and ribbon command entry points — the code that runs before anything else in each host. Root CLAUDE.md section 8 makes .ts/.tsx modification a FULL-rigor trigger; the Step 9.5 gates matter here because word/WordHostAdapter.ts contains the UAT-correct `.docx` extraction path that must not change semantically, and because a broken mount produces a blank pane rather than a caught error.</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Fully specified, mechanical, and the smallest of the three buckets (six .ts/.tsx files). The error list arrives from task 001, the allowed fix patterns are enumerated, and the two judgment boundaries — do not alter `getCompressedFile()` semantics, do not delete WordHostAdapter.ts — are handled by explicit constraints plus escalation triggers. Sonnet default per root CLAUDE.md section 8.5.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>P0-typecheck</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <deps>001</deps>
+    <tags>frontend, office-addins, typescript, typecheck, tech-debt, word, outlook, phase-0</tags>
+    <estimated-effort>0.5 day, proportional to the word plus outlook row in the task 001 rollup</estimated-effort>
+  </metadata>
+
+  <prompt>Clear every typecheck error in src/client/office-addins/word/** and src/client/office-addins/outlook/**, so FR-18's clean-typecheck criterion becomes reachable across the whole package. These are the two host mount points, their ribbon command files, and the two host adapters — including word/WordHostAdapter.ts, whose `getCompressedFile()` is the UAT-correct `.docx` extraction path that task 010 will port before deleting the file. Fix types only; change no behaviour and delete nothing.</prompt>
+
+  <role>SPAARKE platform developer. TypeScript strict-mode remediation at Office.js host mount points and ribbon command entry points, in Word and Outlook. You are correcting types, not restructuring hosts. Follow ADRs strictly.</role>
+
+  <goal>`npm run typecheck` in src/client/office-addins reports zero errors for every file under word/** and outlook/**; `npm run build` and `npm test` are green; the error counts in the directories this task does NOT own are unchanged from the task 001 baseline; word/WordHostAdapter.ts still exists with its `.docx` extraction semantics intact for task 010; and the fix patterns used are appended to projects/spaarkeai-word-add-in-r1/notes/typecheck-fix-patterns.md.</goal>
+
+  <context>
+    <background>FR-18 (spec.md line 92) requires clearing the pre-existing typecheck debt in src/client/office-addins first, so new errors are visible during feature work. Four strict options in src/client/office-addins/tsconfig.json drive the debt: `noUnusedLocals` (line 16), `noUnusedParameters` (line 17), `noUncheckedIndexedAccess` (line 20) and `exactOptionalPropertyTypes` (line 21). This task owns the smallest bucket: word/ contains WordHostAdapter.ts, commands/index.ts and taskpane/index.tsx; outlook/ contains OutlookHostAdapter.ts, commands/index.ts and taskpane/index.tsx. Three facts constrain the work. First, plan.md finding F-e records that `word/WordHostAdapter.getCompressedFile()` is the UAT-correct `.docx` extraction path — the one that shared/adapters/WordAdapter.ts does NOT use — and that task 010 will port it into WordAdapter and only then delete this file. Until that port happens, this file is load-bearing. Second, FR-17 (task 037) will wire the currently stubbed `quickSave` and `shareDocument` ribbon commands, which live in the commands/ files this task touches; the stubs stay stubs here. Third, the manifests in these directories (word/word-manifest.xml and outlook/manifest.json) are owned by task 011 (FR-05 unified JSON manifest) and task 042 (deploy) — a manifest edit forces a 4-part version bump and M365 re-registration, which is never a side effect of a typecheck task.</background>
+    <relevant-files>
+      <file role="modify">src/client/office-addins/word/WordHostAdapter.ts</file>
+      <file role="modify">src/client/office-addins/word/commands/index.ts</file>
+      <file role="modify">src/client/office-addins/word/taskpane/index.tsx</file>
+      <file role="modify">src/client/office-addins/outlook/OutlookHostAdapter.ts</file>
+      <file role="modify">src/client/office-addins/outlook/commands/index.ts</file>
+      <file role="modify">src/client/office-addins/outlook/taskpane/index.tsx</file>
+      <file role="canonical-reference">projects/spaarkeai-word-add-in-r1/notes/typecheck-baseline.md</file>
+      <file role="canonical-reference">src/client/office-addins/shared/adapters/IHostAdapter.ts</file>
+      <file role="canonical-reference">src/client/office-addins/CLAUDE.md</file>
+    </relevant-files>
+    <dependencies>
+      <dependency task="001" status="pending">Installed node_modules, the measured per-file error breakdown, and the per-directory rollup row for word/ plus outlook/ that sizes this task.</dependency>
+    </dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="project">SCOPE: src/client/office-addins/word/** and src/client/office-addins/outlook/** ONLY. Do NOT edit any file under shared/taskpane/**, shared/adapters/**, shared/services/** or shared/__mocks__/** — tasks 006 and 007 own those and run concurrently. A cross-boundary edit is both a merge conflict and a lost fix. If a word/ or outlook/ error can only be fixed by changing a shared type, STOP and escalate.</constraint>
+    <constraint source="project">SCOPE: word/WordHostAdapter.ts. This file is scheduled for DELETION by task 010, but only AFTER `getCompressedFile()` is ported into shared/adapters/WordAdapter.ts. Do NOT delete it here, do NOT deprecate it, and do NOT alter the SEMANTICS of `getCompressedFile()` — it is the UAT-correct `.docx` extraction path and the reason task 010 is prescriptive-mode (plan.md finding F-e). Fix its types minimally and invest nothing in refactoring a file that is going away; a large cleanup diff here is wasted work that also makes task 010's port harder to verify.</constraint>
+    <constraint source="project">SCOPE: the ribbon command files (word/commands/index.ts and outlook/commands/index.ts). The `quickSave` and `shareDocument` commands are stubbed today and are wired by task 037 (FR-17). Fix their types; do NOT implement them, do NOT remove a stub because it looks dead, and do NOT change a command's registered name or signature. A stub whose parameters you "cleaned up" is a command that no longer matches the manifest.</constraint>
+    <constraint source="project">SCOPE: manifests. src/client/office-addins/word/word-manifest.xml, src/client/office-addins/word/taskpane/taskpane.html, src/client/office-addins/outlook/manifest.json, src/client/office-addins/outlook/outlook-manifest.xml and the html/command files' companion assets are OUT OF SCOPE. Do NOT edit a manifest and do NOT bump any version. Task 011 owns the Word unified JSON manifest migration and task 042 owns deploy-time version bumps; a manifest change forces a 4-part version bump plus M365 re-registration, which must never be a side effect of a typecheck task.</constraint>
+    <constraint source="project">SCOPE: every fix in this task. Fix types PROPERLY. MUST NOT use `any`, `as any`, `as unknown as T`, `@ts-ignore`, `@ts-expect-error`, or a blanket non-null assertion (`!`) applied merely to silence a diagnostic. MUST NOT relax src/client/office-addins/tsconfig.json — `strict`, `exactOptionalPropertyTypes`, `noUncheckedIndexedAccess`, `noUnusedLocals` and `noUnusedParameters` all stay exactly as they are. tsconfig.json is OUT OF SCOPE for this task and for 006 and 007.</constraint>
+    <constraint source="project">SCOPE: every fix in this task. This is a TYPE-LEVEL change only. MUST NOT change runtime behaviour: no altered Office.onReady or initialization sequence, no changed `createRoot` mount target, no altered conditional, no changed default, no removed Office.js call. These six files are the first code that runs in each host — a mistake here produces a blank pane with no reachable console, not a caught error. If an error can only be resolved by a behaviour change, STOP and escalate.</constraint>
+    <constraint source="project">SCOPE: NFR-03. MUST NOT introduce any reference to `Xrm.*` or import an Xrm-bound component while resolving a type. `Xrm` does not exist in an Office host; a type that compiles against it will throw at runtime.</constraint>
+    <constraint source="ADR-021">SCOPE: any JSX you touch in the two taskpane/index.tsx mount files. Fluent UI v9 only, and the Office theme continues to drive light/dark via the existing hooks. MUST NOT introduce a hardcoded colour or a non-Fluent component while resolving a type error, and MUST NOT change the provider chain that supplies the theme.</constraint>
+    <constraint source="ADR-012">SCOPE: import resolution while fixing types. This project holds a recorded Path A exception: the add-in consumes `@spaarke/auth` only. MUST NOT resolve a missing type by importing from `@spaarke/ui-components` (NFR-03 — some of it is Xrm-bound and breaks at runtime in an Office host).</constraint>
+    <constraint source="ADR-028">SCOPE: the mount files, which bootstrap auth. MUST NOT introduce `new PublicClientApplication`, `createNestablePublicClientApplication`, `.WithClientSecret`, or a new import from `@azure/msal-browser` while fixing a type. MSAL construction belongs inside `@spaarke/auth` `OfficeNaaStrategy` and is arch-test enforced.</constraint>
+    <constraint source="project">SCOPE: dependencies. MUST NOT add, remove or upgrade any npm dependency to satisfy a type, and MUST NOT modify package.json or package-lock.json.</constraint>
+    <constraint source="project">SCOPE: build verification. `npm run build` IS the production build in this package — there is no `build:prod` script (package.json line 7). src/client/office-addins/CLAUDE.md line 39 names `build:prod` in error.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>TypeScript strict-mode remediation; Office.js host mounts and ribbon commands</topic>
+    <files>
+      <file>projects/spaarkeai-word-add-in-r1/spec.md</file>
+      <file>projects/spaarkeai-word-add-in-r1/plan.md</file>
+      <file>projects/spaarkeai-word-add-in-r1/notes/typecheck-baseline.md</file>
+      <file>projects/spaarkeai-word-add-in-r1/notes/typecheck-fix-patterns.md</file>
+      <file>src/client/office-addins/CLAUDE.md</file>
+      <file>docs/architecture/office-outlook-teams-integration-architecture.md</file>
+      <file>.claude/adr/ADR-021-fluent-design-system.md</file>
+      <file>.claude/adr/ADR-028-spaarke-auth-architecture.md</file>
+      <file>.claude/adr/ADR-012-shared-components.md</file>
+      <file>docs/adr/ADR-038-testing-strategy.md</file>
+      <file>.claude/patterns/ui/fluent-v9-host-visual-fit.md</file>
+    </files>
+    <patterns>
+      <pattern name="follow the established fix vocabulary" location="projects/spaarkeai-word-add-in-r1/notes/typecheck-fix-patterns.md">Task 006 creates this file and records a canonical fix shape per error code; task 007 appends. Read it before starting and follow the same shapes, appending your own section headed with this task's id. Three concurrent tasks producing three different idioms for the same diagnostic makes the combined diff unreviewable.</pattern>
+      <pattern name="exactOptionalPropertyTypes — the two correct fixes" location="src/client/office-addins/tsconfig.json line 21">`prop?: T` means "may be absent", NOT "may be undefined". Either widen the DECLARATION to `prop?: T | undefined`, or fix the CALL SITE with a conditional spread such as `...(value !== undefined ? { prop: value } : {})`. In Office.js option objects the call-site spread is usually the honest fix, because Office.js distinguishes an absent option from an explicitly undefined one.</pattern>
+      <pattern name="noUncheckedIndexedAccess — narrow, do not assert" location="src/client/office-addins/tsconfig.json line 20">An index access yields `T | undefined`. Narrow with a guard, a `??` default, optional chaining, or destructuring with a default — never `!`. In a mount file a thrown TypeError means the pane never renders and the user sees a blank panel with no console they can reach.</pattern>
+      <pattern name="noUnusedLocals in Office event handlers" location="src/client/office-addins/outlook/commands/index.ts">Ribbon command handlers receive an event argument that must be completed (`event.completed()`) even when otherwise unused, and initialization files frequently hold bindings whose construction is the side effect. Before deleting an "unused" binding, check whether its initialiser does work. For a parameter that must stay positionally, prefix with an underscore rather than removing it.</pattern>
+      <pattern name="the file that is going away" location="src/client/office-addins/word/WordHostAdapter.ts">`getCompressedFile()` is the UAT-correct `.docx` extraction path; shared/adapters/WordAdapter.ts still uses the known-broken `body.getOoxml()` path instead. Task 010 ports the former into the latter, activates HostAdapterFactory, and only then deletes this file. Your job is to make it compile without changing what it does — treat every line of it as something task 010 will copy verbatim.</pattern>
+      <pattern name="displacement check" location="projects/spaarkeai-word-add-in-r1/notes/typecheck-baseline.md">006, 007 and 008 run concurrently on the same package. At the end of this task, re-run the full typecheck and compare the counts for shared/taskpane, shared/adapters, shared/services and shared/__mocks__ against the task 001 baseline rows. They must not increase.</pattern>
+    </patterns>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="0" name="Context + rigor declaration">Emit the mandatory rigor declaration (RIGOR LEVEL: FULL, reason, protocol steps). Load projects/spaarkeai-word-add-in-r1/CLAUDE.md, spec.md FR-18, FR-04, FR-05 and FR-17, plan.md finding F-e, and projects/spaarkeai-word-add-in-r1/notes/typecheck-baseline.md. Record this task's starting error counts and the baseline counts for the directories you do NOT own.</step>
+    <step order="1">Ensure src/client/office-addins/node_modules exists. If not, run `npm install --legacy-peer-deps --no-audit --no-fund` (a bare install fails with ERESOLVE), then revert package-lock.json if npm rewrote it.</step>
+    <step order="2">Read plan.md finding F-e and `word/WordHostAdapter.getCompressedFile()` in full BEFORE editing that file, so you know precisely which behaviour must survive verbatim into task 010's port.</step>
+    <step order="3">Read projects/spaarkeai-word-add-in-r1/notes/typecheck-fix-patterns.md if tasks 006 or 007 have created it, and adopt their fix shapes.</step>
+    <step order="4">Work the errors file by file across word/** then outlook/**, applying one canonical fix shape per error code, consistently. Keep the WordHostAdapter.ts diff as small as the errors require and no larger.</step>
+    <step order="5">Re-run `npm run typecheck` and filter to word/ and outlook/. Iterate until that filter is empty.</step>
+    <step order="6">Run the displacement check: re-run the full typecheck and compare the per-directory counts for shared/taskpane, shared/adapters, shared/services and shared/__mocks__ against the task 001 baseline. None may increase. Record the comparison.</step>
+    <step order="7">Run `npm run build` (the production build; there is no build:prod) and confirm it is green. Because this task edits the two webpack entry points, a green build is a stronger signal here than in 006 or 007 — confirm both the Word and Outlook bundles emit.</step>
+    <step order="8">Run `npm test` and confirm green with no test deleted, skipped or weakened relative to the task 001 baseline counts.</step>
+    <step order="9">Execute the ui-tests below and record each result, including the dark-mode check. Both hosts must be exercised: this is the only one of the three typecheck tasks that edits both mount points, so a mount regression appears here first.</step>
+    <step order="10">Append your section to projects/spaarkeai-word-add-in-r1/notes/typecheck-fix-patterns.md (create it if 006 and 007 have not), headed with this task's id. Record explicitly that word/WordHostAdapter.ts still exists with unchanged `getCompressedFile()` semantics, and note anything you observed in it that task 010 should know before porting.</step>
+    <step order="10.5">Run the Step 9.5 quality gates (code-review plus adr-check) per the FULL rigor level. Direct code-review at three questions: did any edit change the host initialization sequence, did `getCompressedFile()` change semantically, and did any ribbon command's registered name or signature move. Direct adr-check at ADR-021, ADR-028 and ADR-012.</step>
+    <step order="11">Update projects/spaarkeai-word-add-in-r1/tasks/TASK-INDEX.md: set this task's status to completed.</step>
+    <step order="12">Document any deviation from this task file in projects/spaarkeai-word-add-in-r1/notes/.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If a typecheck error in word/** or outlook/** can only be resolved by editing a file under shared/**, STOP and escalate per root CLAUDE.md section 6. Tasks 006 and 007 own those files and are running concurrently; reaching across produces a merge conflict and silently discards one of the two fixes. Report the error, the shared file that would need to change, and which task owns it.</trigger>
+    <trigger>If a typecheck error in word/WordHostAdapter.ts can only be resolved by changing what `getCompressedFile()` does, STOP and escalate. That method is the UAT-correct `.docx` extraction path and task 010 ports it verbatim; a semantic change here silently reintroduces the 2026-09-03 UAT defect through the back door, in a task nobody would think to look at.</trigger>
+    <trigger>If a typecheck error can only be resolved by changing the host initialization sequence, the mount target, or a ribbon command's registered name or signature, STOP and escalate. A command whose signature no longer matches the manifest fails only at runtime in the ribbon, and manifests are out of scope for this task to correct.</trigger>
+    <trigger>If a typecheck error appears to require a manifest edit or a version bump, STOP and escalate. Task 011 owns the Word unified JSON manifest and task 042 owns deploy-time version bumps; a manifest change forces M365 re-registration and must never be a side effect of a typecheck task.</trigger>
+    <trigger>If a test file's type error reveals that the test asserts behaviour the code no longer has, STOP and escalate rather than deleting, skipping or rewriting the assertion (ADR-038 KEEP-path rules).</trigger>
+    <trigger>If clearing these directories requires adding, removing or upgrading an npm dependency (including a missing `@types` package), or relaxing any tsconfig option, STOP and escalate.</trigger>
+  </escalation>
+
+  <ui-tests>
+    <test name="Word add-in mounts and the pane renders">
+      <steps>
+        <step>Run `npm run build` in src/client/office-addins and confirm the Word bundle emits, then load the Word add-in in a dev build (`npm run start:word`).</step>
+        <step>Open the Spaarke task pane in Word on a document.</step>
+        <step>Observe the shell and complete a save.</step>
+      </steps>
+      <expected>The pane mounts and renders — no blank panel, no error boundary, no new console exception. Save completes and extracts document content exactly as before the change. word/taskpane/index.tsx is a mount point, so a failure here is total rather than partial.</expected>
+    </test>
+    <test name="Outlook add-in mounts and the pane renders">
+      <steps>
+        <step>Confirm the Outlook bundle emits from `npm run build`, then load the Outlook add-in in a dev build (`npm run start:outlook`).</step>
+        <step>Open the Spaarke task pane on a mail item and navigate between the visible tabs.</step>
+      </steps>
+      <expected>The pane mounts and renders, navigation works, and no error boundary is triggered. No new console exception relative to the pre-change build.</expected>
+    </test>
+    <test name="Ribbon commands still register and execute">
+      <steps>
+        <step>With the add-in loaded, invoke each ribbon command that is wired today from the Outlook ribbon.</step>
+        <step>In Word, confirm the ribbon renders the add-in's buttons and that the stubbed `quickSave` and `shareDocument` entries behave exactly as they did before this task (still stubs, not newly broken and not newly implemented).</step>
+      </steps>
+      <expected>Every command that executed before still executes and completes its event. No command has disappeared from the ribbon and none throws. The stubs remain stubs — task 037 wires them, not this task.</expected>
+    </test>
+    <test name="ADR-021 dark mode via Office theme toggle in both hosts">
+      <steps>
+        <step>With the pane open in Word, switch the Office host theme from light to dark, observe, reload, observe again, then switch back.</step>
+        <step>Repeat the same sequence in Outlook.</step>
+      </steps>
+      <expected>In both hosts the pane follows the Office theme in both directions via the existing theme hooks and provider chain, text stays legible against its background in both themes, no element retains a light-mode background in dark mode, and no hardcoded colour has been introduced (ADR-021).</expected>
+    </test>
+  </ui-tests>
+
+  <tools>
+    <tool name="npm">`npm install --legacy-peer-deps --no-audit --no-fund` if needed; `npm run typecheck`; `npm run build` (production — there is no build:prod); `npm test`; `npm run start:word` / `npm run start:outlook` for the ui-tests.</tool>
+    <tool name="Grep">Confirm no `Xrm` reference and no MSAL construction is introduced; confirm no manifest file appears in the diff.</tool>
+    <tool name="code-review">Step 9.5 gate — initialization sequence, `getCompressedFile()` semantics, ribbon command signatures.</tool>
+    <tool name="adr-check">Step 9.5 gate — ADR-021, ADR-028, ADR-012 Path A, ADR-038.</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/client/office-addins/word/** (type-level edits only)</output>
+    <output type="code">src/client/office-addins/outlook/** (type-level edits only)</output>
+    <output type="doc">projects/spaarkeai-word-add-in-r1/notes/typecheck-fix-patterns.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Given a completed `npm install`, when `npm run typecheck` is run in src/client/office-addins and the output is filtered to paths under word/ and outlook/, then zero errors are reported.</criterion>
+    <criterion testable="true">Given the same typecheck run, when the per-directory counts for shared/taskpane/, shared/adapters/, shared/services/ and shared/__mocks__/ are compared against the task 001 baseline, then none has increased.</criterion>
+    <criterion testable="true">`npm run build` exits 0 and both the Word and Outlook bundles emit.</criterion>
+    <criterion testable="true">`npm test` exits 0 with suite and test counts greater than or equal to the task 001 baseline — no test was deleted, skipped or replaced with a weaker assertion.</criterion>
+    <criterion testable="true">Negative: src/client/office-addins/word/WordHostAdapter.ts still exists, and `git diff` on it shows no change to the semantics of `getCompressedFile()` — no altered Office.js call, no changed slicing or encoding, no changed error path (plan.md finding F-e; task 010 ports it verbatim).</criterion>
+    <criterion testable="true">Negative: `git diff` shows no change to any ribbon command's registered name or signature in word/commands/index.ts or outlook/commands/index.ts, and neither `quickSave` nor `shareDocument` was implemented or removed.</criterion>
+    <criterion testable="true">Negative: `git diff --name-only` lists no manifest or html file — specifically not word/word-manifest.xml, outlook/manifest.json, outlook/outlook-manifest.xml, or any taskpane.html / commands.html — and no version string was bumped.</criterion>
+    <criterion testable="true">Negative: `grep` across the diff finds no newly added `any`, `as any`, `as unknown as`, `@ts-ignore` or `@ts-expect-error`.</criterion>
+    <criterion testable="true">Negative: `grep` across the diff finds no `Xrm` reference (NFR-03), no `new PublicClientApplication`, no `createNestablePublicClientApplication`, no `.WithClientSecret`, and no new import from `@azure/msal-browser` (ADR-028).</criterion>
+    <criterion testable="true">Negative: `git diff` shows src/client/office-addins/tsconfig.json, package.json and package-lock.json unmodified.</criterion>
+    <criterion testable="true">Negative: `git diff --name-only` lists no file under shared/.</criterion>
+    <criterion testable="true">Negative: no import from `@spaarke/ui-components` was added (ADR-012 Path A exception, NFR-03).</criterion>
+    <criterion testable="true">All four ui-tests below pass in both hosts and their results are recorded, including the dark-mode check in both directions.</criterion>
+    <criterion testable="true">projects/spaarkeai-word-add-in-r1/notes/typecheck-fix-patterns.md contains a section headed for task 008 recording the fix shapes used and confirming word/WordHostAdapter.ts survives with unchanged `getCompressedFile()` semantics.</criterion>
+    <criterion testable="true">The Step 9.5 code-review and adr-check gates ran and their findings are resolved or explicitly accepted.</criterion>
+  </acceptance-criteria>
+
+  <notes>Spec reference: FR-18 (line 92), FR-04 (line 64), FR-05 (line 65), FR-17 (line 91), NFR-03 (line 100), Success Criterion 12 (line 209). Plan reference: section 4 Phase 0 tasks 006-008, finding F-e, Phase 1 tasks 010 and 011, Phase 3 task 037.
+
+No `&lt;justification&gt;` block is present: this is a modify-only task. It adds no new service, abstraction, endpoint, DI registration, package or column — CLAUDE.md section 11's gate does not apply to edits of existing files.
+
+Parallel-safety within the P0-typecheck wave: 006 owns shared/taskpane/**, 007 owns shared/adapters/** plus shared/services/** (plus shared/__mocks__/** conditionally), 008 owns word/** plus outlook/**. The three directory sets are disjoint. The shared surfaces are node_modules (read-only concurrency, fine) and projects/spaarkeai-word-add-in-r1/notes/typecheck-fix-patterns.md — task 006 creates it and 007/008 append clearly headed sections, so keep edits additive and scoped to your own heading. tsconfig.json is out of scope for all three, which removes the one file they would otherwise contend for.
+
+Sizing note: word/ contained 3 .ts/.tsx files and outlook/ 3 at authoring time — the smallest bucket. The task 001 rollup, not this note, is the authority on the error count. If the measured error count for these six files is large relative to their size, WordHostAdapter.ts is the likely concentration; keep its diff minimal regardless, since task 010 deletes it.
+
+Downstream: task 010 (FR-04, prescriptive — ports `getCompressedFile()` then deletes word/WordHostAdapter.ts), task 011 (FR-05 Word unified JSON manifest), task 037 (FR-17 ribbon commands) and task 042 (deploy) all build on this directory pair. Leaving it compiling and otherwise untouched is the deliverable.</notes>
+
+  <execution><skill>.claude/skills/task-execute/SKILL.md</skill></execution>
+</task>

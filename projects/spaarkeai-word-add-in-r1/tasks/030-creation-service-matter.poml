@@ -1,0 +1,142 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="030" project="spaarkeai-word-add-in-r1">
+  <metadata>
+    <title>FR-13: shared server-side creation service (Matter)</title>
+    <phase>3 Surfacing Spaarke</phase>
+    <gate>012 complete — the identity resolver supplies the pane's record context</gate>
+    <status>not-started</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>New BFF service + modified endpoint handler; tags include bff-api and dataverse; writes production Dataverse rows. Step 9.5 code-review + adr-check are mandatory.</rigor-reason>
+    <model-tier>opus</model-tier>
+    <model-tier-reason>High blast radius: introduces the first server-side record-creation service in the codebase and a numbering scheme that must not collide with ~production `sprk_matternumber` values. Architectural placement decision under CLAUDE.md §10/§11.</model-tier-reason>
+    <effort>xhigh</effort>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <deps>012</deps>
+    <tags>bff-api, dataverse, field-mapping, creation, integration-test</tags>
+    <estimated-effort>1-2 days</estimated-effort>
+  </metadata>
+
+  <prompt>Records created from the Office task pane arrive with `sprk_matternumber` empty, no field-mapping applied and only best-effort owner attribution — the exact UAT complaint FR-13 exists to fix. Build a shared server-side creation service that generates the matter number, assigns the owner, applies business-unit defaults and runs the Field Mapping Framework, and route `OfficeService.QuickCreateAsync` through it for **Matter only**. Project is task 031 and its semantics are different — do not generalize ahead of it.</prompt>
+
+  <role>SPAARKE platform developer. Expertise in .NET 10 Minimal API, Dataverse entity creation via `IGenericEntityService`, the Field Mapping Framework, and BFF placement governance. Follow ADRs strictly.</role>
+
+  <goal>A server-side creation service exists in the BFF and is called by `QuickCreateAsync` for Matter. A Matter created from the pane has: a unique `sprk_matternumber` in the existing `{typeCode}-{6 digits}` format, an owner, business-unit defaults, and Field-Mapping-Framework-mapped fields. A contract test covers `POST /api/office/quickcreate/matter`, including the unauthorized negative case. `src/client/shared/Spaarke.UI.Components/src/components/Create*Wizard/**` is byte-for-byte unchanged.</goal>
+
+  <context>
+    <background>
+      Verified as-built: `OfficeService.QuickCreateAsync` (`Services/Office/OfficeService.cs:1410`) writes **name + optional description only** (:1446-1458) plus a best-effort `ownerid` (:1462-1465), then calls `_genericEntityService.CreateAsync` (:1467). There is **no number generation, no BU cascade and no field mapping** on the server path.
+
+      Matter numbering today is **client-side only**: `matterService.ts:255-273` sets `entity['sprk_matternumber'] = ${typeCode}-${random6}` where `random6 = Math.floor(100000 + Math.random()*900000)`. Verified live in Dataverse, real values are `PAT-191111`, `CMRCL-285858`, `CMRCL-734193`. It is **not** an autonumber column, so the server must produce the value itself.
+
+      A broad sweep of `src/server/api/Sprk.Bff.Api/Services/` found **no server-side creation service with numbering anywhere in the codebase**. `FieldMappingEndpoints.PushFieldMappingsAsync:436` is a server-side mapping engine, but it is a parent→existing-children **push**, not a create-time apply — it cannot be called before the row exists.
+
+      Per spec FR-13 and `design.md` §7.1, migrating the existing `Create*Wizard` components onto this service is explicitly **out of scope for r1** and is evaluated afterwards. Two creation paths coexisting is the accepted r1 state.
+    </background>
+    <relevant-files>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Services/Office/OfficeService.cs</file>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Api/Office/OfficeEndpoints.cs</file>
+      <file role="new">src/server/api/Sprk.Bff.Api/Services/Office/IRecordCreationService.cs</file>
+      <file role="new">src/server/api/Sprk.Bff.Api/Services/Office/RecordCreationService.cs</file>
+      <file role="new">tests/integration/contract/Api/Office/OfficeQuickCreateContractTests.cs</file>
+      <file role="canonical-reference">src/client/shared/Spaarke.UI.Components/src/components/CreateMatterWizard/matterService.ts</file>
+      <file role="canonical-reference">src/client/shared/Spaarke.UI.Components/src/services/FieldMappingService.ts</file>
+      <file role="canonical-reference">src/client/shared/Spaarke.UI.Components/src/services/EntityCreationService.ts</file>
+      <file role="canonical-reference">src/server/api/Sprk.Bff.Api/Api/FieldMappings/FieldMappingEndpoints.cs</file>
+      <file role="canonical-reference">src/server/api/Sprk.Bff.Api/Services/Office/OfficeService.cs</file>
+    </relevant-files>
+    <dependencies>
+      <dependency task="012" status="pending">The document-identity resolver, which gives the pane the record context a created Matter is filed against.</dependency>
+    </dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="project">Scope of this task is **Matter only**. Do not add Project or Invoice handling to the creation service; Project is task 031 and its `sprk_projectnumber` semantics differ materially. Invoice stays on the existing minimal `QuickCreateAsync` path.</constraint>
+    <constraint source="project">MUST NOT modify any file under `src/client/shared/Spaarke.UI.Components/src/components/Create*Wizard/**`. Wizard migration onto this service is out of scope for r1 per spec FR-13 and `design.md` §7.1. Verify with `git diff --stat` that no wizard file appears in the change set.</constraint>
+    <constraint source="project">The server-side numbering scheme MUST be collision-safe and MUST preserve the existing `{typeCode}-{6 digits}` format observed in production (`PAT-191111`, `CMRCL-285858`). Required scheme: generate a candidate, verify uniqueness with a Dataverse retrieve filtered on `sprk_matternumber eq '{candidate}'`, retry up to 5 times, and on exhaustion return a failure result rather than writing a value that may collide. Do NOT emit a bare client-style `Math.random`-equivalent without the uniqueness probe.</constraint>
+    <constraint source="ADR-044">Every Dataverse GUID crossing a boundary in this task (owner id, business unit id, field-mapping profile ids, the created record id returned to the pane) MUST be canonicalized to bare-lowercase via the shared `cleanGuid` equivalent. Never interpolate a raw GUID into an OData key predicate in the uniqueness probe or the field-mapping lookup.</constraint>
+    <constraint source="ADR-010">DI minimalism applies to this task's registrations: register at most ONE new non-framework service (`IRecordCreationService`). If the design appears to need a second registration, fold it into the first or escalate — do not quietly widen the DI surface.</constraint>
+    <constraint source="ADR-013">If any part of this creation path needs an AI capability, it MUST go through `Services/Ai/PublicContracts/`. Do NOT inject `IOpenAiClient` or `IPlaybookService` into the creation service.</constraint>
+    <constraint source="ADR-038">`POST /api/office/quickcreate/{entityType}` is modified by this task, so it MUST gain a contract test in `tests/integration/contract/Api/Office/`. Banned in that test: `Mock&lt;HttpMessageHandler&gt;`, DI-registration assertions, ctor null-check assertions, `Stopwatch` + `Task.Delay`.</constraint>
+    <constraint source="ADR-029">This task touches the BFF, so publish size MUST be measured **against a fresh build of `origin/master`, not the recorded baseline number**. Procedure: `git worktree add` a detached `origin/master`, `dotnet publish -c Release` both, zip BOTH with PowerShell `Compress-Archive` (the method `scripts/Deploy-BffApi.ps1` uses), and report both absolute sizes plus the delta and the zip tool used. Ceiling 60 MB; escalate at ≥+5 MB single-task delta.</constraint>
+    <constraint source="project">The PR description MUST carry an explicit **Placement Justification** section per `.claude/constraints/bff-extensions.md`, stating why the creation service belongs in `Sprk.Bff.Api/Services/Office/` rather than in `Spaarke.Core`, `Spaarke.Dataverse`, or a new deployable — even though the answer is "in BFF".</constraint>
+    <constraint source="project">Run `/conflict-check` before opening the BFF PR. `spaarkeai-compose-r8` and `unified-access-control-r2` are live on this hot path; `OfficeService.cs` and `OfficeEndpoints.cs` are shared files.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>Server-side Dataverse record creation, numbering, ownership and field mapping in the BFF</topic>
+    <files>
+      <file>projects/spaarkeai-word-add-in-r1/spec.md</file>
+      <file>projects/spaarkeai-word-add-in-r1/plan.md</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+      <file>.claude/adr/ADR-044-dataverse-guid-canonicalization.md</file>
+      <file>.claude/adr/ADR-029-bff-publish-hygiene.md</file>
+      <file>docs/adr/ADR-038-testing-strategy.md</file>
+      <file>docs/architecture/SPAARKE-FIELD-MAPPING-FRAMEWORK.md</file>
+    </files>
+    <patterns>
+      <pattern name="polymorphic-resolver" location=".claude/patterns/dataverse/polymorphic-resolver.md">Apply when stamping the created Matter's regarding/record-type references, and for the `cleanGuid` canonicalization helper this task must mirror server-side.</pattern>
+      <pattern name="endpoint-definition" location=".claude/patterns/api/endpoint-definition.md">Apply to any change to the `POST /api/office/quickcreate/{entityType}` handler signature or response shape — the pane already consumes it.</pattern>
+    </patterns>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="0" name="Context + rigor declaration">Load `projects/spaarkeai-word-add-in-r1/CLAUDE.md`, `spec.md` FR-13, `plan.md` §3 (the FR-13 asymmetry note), and the constraint/ADR files above. Emit the mandatory rigor declaration (FULL / opus / xhigh). Run `/conflict-check`.</step>
+    <step order="1">Read `OfficeService.QuickCreateAsync:1410-1470` and `matterService.ts:255-320` end to end. Write down, in `notes/`, exactly which fields the client wizard sets that the server path does not — that delta is the task's scope.</step>
+    <step order="2">Design the creation service contract: an input carrying entity type, name, optional description, the caller's user id, and the source-record context from task 012; an output carrying the created id, the assigned number, and a structured failure reason. Record the Placement Justification (§10) and the §11 three-question answers in the PR draft before writing code.</step>
+    <step order="3">Implement number generation with the mandated uniqueness probe. Preserve the `{typeCode}-{6 digits}` format exactly. Emit a structured failure — not an exception, not a colliding write — when the probe exhausts its retries.</step>
+    <step order="4">Implement owner assignment and business-unit defaulting, mirroring `EntityCreationService.applyUserBuDefaults:383` semantics on the server. Owner attribution here is load-bearing, not best-effort as in the current `QuickCreateAsync:1462-1465`.</step>
+    <step order="5">Implement create-time Field Mapping Framework application. Note that `PushFieldMappingsAsync:436` is parent→existing-children push and cannot be reused directly; mirror the client engine's semantics from `FieldMappingService.applyFieldMappings:110` — one profile lookup, a missing profile is a graceful no-op, never a throw.</step>
+    <step order="6">Register the service (exactly one DI registration) and route `QuickCreateAsync` through it for Matter. Leave the Invoice path on the existing minimal behavior.</step>
+    <step order="7">Write the contract test in `tests/integration/contract/Api/Office/OfficeQuickCreateContractTests.cs` covering the happy path and the unauthorized negative path.</step>
+    <step order="8">Measure BFF publish size against a fresh `origin/master` build per the ADR-029 constraint. Record both absolute sizes, the delta and the zip tool in the PR description and in `notes/`.</step>
+    <step order="9">Run `dotnet build` and `dotnet test` for the affected projects. Confirm `git diff --stat` shows no `Create*Wizard` file.</step>
+    <step order="10">Update `projects/spaarkeai-word-add-in-r1/tasks/TASK-INDEX.md`: set this task's status to ✅.</step>
+    <step order="11">Document any deviation in `projects/spaarkeai-word-add-in-r1/notes/`.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If a server-side numbering scheme would produce values that collide with, or differ in format from, existing `{typeCode}-{random6}` records — or if the uniqueness probe reveals that `sprk_matternumber` is not in fact unique in production data — STOP and escalate per CLAUDE.md §6 for a format decision. Do not invent a new format, do not add a discriminating prefix/suffix, and do not silently allow duplicates.</trigger>
+    <trigger>If applying the Field Mapping Framework at create time requires changing the shared client engine or the `GET /api/v1/field-mappings/profiles/{source}/{target}` contract, STOP and escalate — that is a cross-surface contract change beyond this task's boundary.</trigger>
+    <trigger>If completing this task appears to require modifying a `Create*Wizard` component, STOP and escalate. That is explicitly out of scope for r1 (spec FR-13, `design.md` §7.1) and reaching for it means the design is wrong.</trigger>
+  </escalation>
+
+  <justification>
+    <existing>No server-side creation service with numbering exists anywhere in the codebase. Verified by a broad sweep of `src/server/api/Sprk.Bff.Api/Services/`: the closest neighbors are `OfficeService.QuickCreateAsync` at `src/server/api/Sprk.Bff.Api/Services/Office/OfficeService.cs:1410` (creates the row but sets name + optional description only, :1446-1458) and `FieldMappingEndpoints.PushFieldMappingsAsync` at `src/server/api/Sprk.Bff.Api/Api/FieldMappings/FieldMappingEndpoints.cs:436` (a real server-side mapping engine, but parent→existing-children push, so it cannot run before the row exists). All numbering lives client-side in `matterService.ts:255-273`.</existing>
+    <extension>Yes — `QuickCreateAsync:1410` is the extension point, and it already carries auth, idempotency, rate limiting and owner attribution. The new code is the numbering/BU/field-mapping logic that has no server-side home today, factored into a service so task 031 and the post-r1 wizard-migration evaluation can call the same thing rather than forking it a third time.</extension>
+    <cost-of-doing-nothing>A Matter created from the task pane is written with `sprk_matternumber` empty, no business-unit defaults and no mapped fields — the record is invalid for downstream matter workflows that key off the number, and it is the specific defect UAT reported. The client wizard's number cannot be reused because `Xrm` does not exist in an Office host (NFR-03) and the add-in cannot import Xrm-bound wizard components.</cost-of-doing-nothing>
+  </justification>
+
+  <tools>
+    <tool name="dotnet">Build and test the BFF: `dotnet build src/server/api/Sprk.Bff.Api/`, `dotnet test`.</tool>
+    <tool name="git">`git worktree add` a detached `origin/master` for the publish-size comparison; `git diff --stat` for the wizard-untouched check.</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Office/IRecordCreationService.cs</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Office/RecordCreationService.cs</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Office/OfficeService.cs</output>
+    <output type="test">tests/integration/contract/Api/Office/OfficeQuickCreateContractTests.cs</output>
+    <output type="doc">projects/spaarkeai-word-add-in-r1/notes/030-publish-size.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Given an authorized caller and a valid Matter name, when `POST /api/office/quickcreate/matter` is called, then the created `sprk_matter` row has a non-empty `sprk_matternumber` matching `^[A-Z]+-\d{6}$`, a non-null `ownerid`, business-unit defaults applied, and every field the applicable Field Mapping profile defines.</criterion>
+    <criterion testable="true">Given a Matter number candidate that already exists in Dataverse, when the creation service generates it, then it probes, detects the collision and retries — and no row is written with a duplicate `sprk_matternumber`.</criterion>
+    <criterion testable="true">Given the uniqueness probe exhausts 5 retries, when creation is attempted, then the service returns a structured failure and NO `sprk_matter` row is created.</criterion>
+    <criterion testable="true">Given no Field Mapping profile exists for the source/target pair, when creation runs, then the mapping step is a graceful no-op and the record is still created with number and owner — creation does not throw.</criterion>
+    <criterion testable="true">Negative: given an unauthenticated or unauthorized caller, when `POST /api/office/quickcreate/matter` is called, then the response is 401/403 and no `sprk_matter` row is created.</criterion>
+    <criterion testable="true">Negative: given a request with an empty or whitespace-only name, when the endpoint is called, then it returns a 400 ProblemDetails and no row is created — not an unhandled exception.</criterion>
+    <criterion testable="true">`git diff --stat` against the branch point lists no file under `src/client/shared/Spaarke.UI.Components/src/components/Create*Wizard/`.</criterion>
+    <criterion testable="true">Exactly one new non-framework DI registration was added (ADR-010).</criterion>
+    <criterion testable="true">BFF publish size was measured against a fresh `origin/master` build with PowerShell `Compress-Archive`; both absolute sizes, the delta and the tool are recorded in `notes/030-publish-size.md` and the PR description; the delta is &lt;+5 MB and the absolute size is &lt;60 MB.</criterion>
+    <criterion testable="true">The PR description contains a Placement Justification section per `.claude/constraints/bff-extensions.md`.</criterion>
+    <criterion testable="true">All unit and contract tests pass; `dotnet build` is green.</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    spec.md FR-13; plan.md §3 ("FR-13's halves are not symmetric") and §4 Phase 3. This task is Matter; task 031 is Project and is deliberately NOT a mirror. The `sprk_matternumber` values verified live are `PAT-191111`, `CMRCL-285858`, `CMRCL-734193` — six digits, uppercase type-code prefix, hyphen separator.
+  </notes>
+
+  <execution><skill>.claude/skills/task-execute/SKILL.md</skill></execution>
+</task>

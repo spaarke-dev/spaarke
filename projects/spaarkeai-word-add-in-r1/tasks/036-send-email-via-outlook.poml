@@ -1,0 +1,182 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="036" project="spaarkeai-word-add-in-r1">
+  <metadata>
+    <title>FR-15: Send Email via Outlook with document and record links</title>
+    <phase>3 Surfacing Spaarke</phase>
+    <gate>026 complete — the related-record card resolves the record to link</gate>
+    <status>not-started</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Modifies `.tsx` in the add-in and consumes the share-link surface, which mints externally-reachable URLs; tags include frontend and fluent-ui. Step 9.5 code-review + adr-check are mandatory.</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Well-specified: the share-link endpoint, its expiry policy and the Office compose API are all named. No architectural judgment remains; the deferred modal variant is explicitly out of scope.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>P3-c</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <deps>026</deps>
+    <tags>frontend, fluent-ui, office-addin, bff-api</tags>
+    <estimated-effort>4-8 hours</estimated-effort>
+  </metadata>
+
+  <prompt>Add a Send Email action to the task pane that opens Outlook pre-populated with links to the open document and its related record. Use the existing share-link surface and honor its expiry bounds — do not mint links by another route and do not extend the expiry. The Spaarke-modal variant of this feature is explicitly deferred and out of scope for r1.</prompt>
+
+  <role>SPAARKE platform developer. Expertise in the Office.js mail-compose APIs, the Spaarke share-link surface, and Fluent UI v9 inside an Office task pane. Follow ADRs strictly.</role>
+
+  <goal>From the pane in both hosts, a Send Email action opens an Outlook compose window pre-populated with a working link to the document and a working link to the related record, where both exist. Links are minted through the existing share-link endpoint at its existing expiry policy. When only one of the two exists, only that link appears and the action still works.</goal>
+
+  <context>
+    <background>
+      **The share-link surface, verified as-built.** `POST /api/documents/{documentId}/share-link` is declared at `Api/FileAccessEndpoints.cs:130` (`CreateShareLink`, handler documented at `:673`). The scope and expiry for a share-link request are decided in one place at `:1139` — a `unified-access-control-r2` change. That policy is the boundary: this task consumes it and MUST NOT widen it.
+
+      `FileAccessEndpoints.cs` is in the `RouteAuthorizationGuardTests` governed-file census with `Scope.RouteLevelGate`, and eight of its nine routes carry `AddDocumentAuthorizationFilter("read")` — so authorization for link minting is already enforced at the route. This task adds no authorization logic of its own; it must not bypass that route either.
+
+      **Spec Assumptions, binding here:** "Send Email includes **both** a document link and a related-record link where both exist, using existing share-link endpoints and honoring their expiry bounds."
+
+      **Explicitly deferred (spec Scope → Out of Scope, `design.md` §4.2):** the "Send Email via Spaarke email client modal" variant and the "Send Message" modal. r1 opens the host's own Outlook compose window. Building a Spaarke modal for this is scope creep, not a stretch goal.
+
+      **Host reality.** In Outlook, a compose window is opened through the host's own mail APIs. In Word, there is no mail host, so the capability must be gated by `hostAdapter.getCapabilities()` and the affordance shown or hidden accordingly (NFR-10) — not branched on a host-name string inside the view.
+    </background>
+    <relevant-files>
+      <file role="modify">src/client/office-addins/shared/taskpane/App.tsx</file>
+      <file role="new">src/client/office-addins/shared/taskpane/services/sendEmailService.ts</file>
+      <file role="modify">src/client/office-addins/shared/adapters/IHostAdapter.ts</file>
+      <file role="modify">src/client/office-addins/shared/adapters/WordAdapter.ts</file>
+      <file role="modify">src/client/office-addins/shared/adapters/OutlookAdapter.ts</file>
+      <file role="canonical-reference">src/server/api/Sprk.Bff.Api/Api/FileAccessEndpoints.cs</file>
+      <file role="canonical-reference">src/client/office-addins/shared/taskpane/components/views/ShareView.tsx</file>
+    </relevant-files>
+    <dependencies>
+      <dependency task="026" status="pending">The related-to record card, which resolves which record the document is associated with and therefore which record link to include.</dependency>
+    </dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="project">Scope: links MUST be minted through the existing `POST /api/documents/{documentId}/share-link` route and MUST honor the expiry bounds decided at `FileAccessEndpoints.cs:1139`. Do NOT add an expiry parameter, do NOT request a longer-lived link for email, and do NOT mint links through any other route or construct them by hand.</constraint>
+    <constraint source="project">The Spaarke email-client modal variant and the Send Message modal are DEFERRED and out of scope for r1 (spec Scope, `design.md` §4.2). r1 opens the host's Outlook compose window only. Do not build a Spaarke modal for this feature.</constraint>
+    <constraint source="project">When both a document and a related record exist, the compose body MUST contain BOTH links. When only one exists, include only that one and still open the compose window — a missing record is not an error state.</constraint>
+    <constraint source="NFR-10">Shared-first: the Send Email capability lands in `shared/taskpane/` and is gated by `hostAdapter.getCapabilities()`. Do NOT branch on a host-name string inside a view. If Word cannot open a compose window, that is a capability the Word adapter reports as absent, and the affordance is hidden accordingly.</constraint>
+    <constraint source="ADR-021">All Send Email UI uses Fluent UI v9 and honors the Office light/dark theme via `useOfficeTheme`. No `Xrm`-bound components (NFR-03 — `Xrm.*` does not exist in an Office host).</constraint>
+    <constraint source="ADR-012">Scope: the add-in consumes `@spaarke/auth` only. Do not add a dependency on `@spaarke/ui-components`; recreate any needed layout locally per this project's documented Path-A exception.</constraint>
+    <constraint source="ADR-044">Every Dataverse GUID crossing a boundary in this task (documentId sent to the share-link route, the related record id used to build the record link) MUST be canonicalized to bare-lowercase via `cleanGuid`. Never interpolate a raw GUID into an OData key predicate or a URL path segment without canonicalizing first.</constraint>
+    <constraint source="NFR-11">The Send Email affordance MUST be keyboard-reachable with a visible focus ring, and link-minting success/failure MUST be announced via the existing `useAnnounce` pattern.</constraint>
+    <constraint source="ADR-038">If this task modifies any BFF file, that endpoint MUST have contract coverage. If it is client-only, say so explicitly in the PR rather than omitting the obligation silently. Banned in any test written here: `Mock&lt;HttpMessageHandler&gt;`, DI-registration assertions, ctor null-check assertions, `Stopwatch` + `Task.Delay`.</constraint>
+    <constraint source="ADR-029">If this task changes any BFF file, publish size MUST be measured **against a fresh build of `origin/master`, not the recorded baseline number**, zipping both with PowerShell `Compress-Archive` and reporting both absolute sizes, the delta and the tool. Ceiling 60 MB; escalate at ≥+5 MB. If client-only, state that in the PR.</constraint>
+    <constraint source="project">If any BFF file changes, the PR MUST carry a **Placement Justification** section per `.claude/constraints/bff-extensions.md` and `/conflict-check` MUST be run first — `unified-access-control-r2` owns recent changes to `FileAccessEndpoints.cs`.</constraint>
+    <constraint source="project">This task is in wave P3-c with 035 and 037. Do not modify `OfficeService.CreateTodoAsync`, `CreateTodoView`, `word/commands/**`, or the Word manifest — those belong to siblings in this wave.</constraint>
+    <constraint source="project">There is no `build:prod` script in `src/client/office-addins` — `npm run build` IS the production build. Install with `npm install --legacy-peer-deps --no-audit --no-fund`.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>Office mail-compose APIs; the Spaarke share-link surface and its expiry policy</topic>
+    <files>
+      <file>projects/spaarkeai-word-add-in-r1/spec.md</file>
+      <file>projects/spaarkeai-word-add-in-r1/plan.md</file>
+      <file>src/client/office-addins/CLAUDE.md</file>
+      <file>docs/architecture/office-outlook-teams-integration-architecture.md</file>
+      <file>.claude/adr/ADR-021-fluent-design-system.md</file>
+      <file>.claude/adr/ADR-044-dataverse-guid-canonicalization.md</file>
+      <file>.claude/adr/ADR-008-endpoint-filters.md</file>
+    </files>
+    <patterns>
+      <pattern name="fluent-v9-host-visual-fit" location=".claude/patterns/ui/fluent-v9-host-visual-fit.md">Explicitly covers Office add-ins — apply to the Send Email affordance's placement and density in the narrow pane.</pattern>
+      <pattern name="endpoint-filters" location=".claude/patterns/api/endpoint-filters.md">Read to confirm the share-link route's existing authorization posture before consuming it; this task adds no authorization of its own and must not bypass the route.</pattern>
+    </patterns>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="0" name="Context + rigor declaration">Load `projects/spaarkeai-word-add-in-r1/CLAUDE.md`, `spec.md` FR-15 + Assumptions, and `src/client/office-addins/CLAUDE.md`. Read `FileAccessEndpoints.cs:130` and the scope/expiry decision at `:1139` before writing any link-minting code. Emit the mandatory rigor declaration (FULL / sonnet / high).</step>
+    <step order="1">Add a `canComposeEmail` (or equivalently named) capability to `IHostAdapter` and implement it honestly in both adapters — true where a compose window can be opened, false where it cannot.</step>
+    <step order="2">Implement `sendEmailService`: mint the document share link via `POST /api/documents/{documentId}/share-link`, resolve the related-record link from task 026's card, and compose the body. Include both links when both exist; include one when only one does.</step>
+    <step order="3">Open the host's compose window with the composed subject and body. Do not build a Spaarke modal.</step>
+    <step order="4">Wire the Send Email affordance into the pane, shown or hidden by `hostAdapter.getCapabilities()` and never by a host-name conditional.</step>
+    <step order="5">Handle failure honestly: if share-link minting is denied or fails, surface an explicit error and do not open a compose window containing a broken or placeholder link.</step>
+    <step order="6">Add unit tests for `sendEmailService`: both-links, document-only, record-only, and the minting-failure path.</step>
+    <step order="7">Run `npm run typecheck` and `npm run build` in `src/client/office-addins`. Execute the `&lt;ui-tests&gt;` below in both hosts.</step>
+    <step order="8">If any BFF file changed, measure publish size against a fresh `origin/master` build and run `/conflict-check`; otherwise state in the PR that the task is client-only.</step>
+    <step order="9">Update `projects/spaarkeai-word-add-in-r1/tasks/TASK-INDEX.md`: set this task's status to ✅.</step>
+    <step order="10">Document any deviation in `projects/spaarkeai-word-add-in-r1/notes/`.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If the existing share-link expiry bounds make the emailed links unusable for the intended recipient — e.g. they expire before an external recipient could reasonably open them — STOP and escalate per CLAUDE.md §6 rather than requesting a longer expiry or minting the link by another route. The expiry policy at `FileAccessEndpoints.cs:1139` is owned by `unified-access-control-r2` and is not this task's to change.</trigger>
+    <trigger>If opening a compose window from the Word host proves impossible, STOP and escalate before implementing a workaround. Report it as a capability the Word adapter must declare absent, and confirm with the owner that hiding the affordance in Word is the accepted r1 behavior rather than substituting a mailto: or a Spaarke modal.</trigger>
+    <trigger>If delivering this feature appears to require a Spaarke-rendered email modal, STOP — that variant is explicitly deferred (spec Scope, `design.md` §4.2) and reaching for it means the scope has drifted.</trigger>
+  </escalation>
+
+  <justification>
+    <existing>No email-composition path exists in the add-in. `ls src/client/office-addins/shared/taskpane/services/` returns `communicationLookupService.ts`, `communicationSuggestionsService.ts`, `createTodoLauncher.ts`, `quickSaveHelpers.ts`, `SseClient.ts`, `todoChoices.ts` — none composes mail. The closest neighbor is `ShareView.tsx`, which surfaces a share link in the pane but does not put it into a message. On the server side nothing new is created: `POST /api/documents/{documentId}/share-link` already exists at `Api/FileAccessEndpoints.cs:130`.</existing>
+    <extension>Yes on the server (the existing share-link route is consumed unchanged, at its existing expiry policy); No on the client — `ShareView` renders a link for copying and has no compose responsibility, so a small dedicated service is the honest shape rather than overloading a view.</extension>
+    <cost-of-doing-nothing>A user who wants to send a colleague the document they just filed must leave the pane, find the record in Dataverse, mint a share link there, open Outlook, and paste both links by hand — and the record link is the half most often omitted, which is the specific behavior FR-15 exists to fix.</cost-of-doing-nothing>
+  </justification>
+
+  <ui-tests>
+    <test name="Both links present">
+      <steps>
+        <step>Open a Spaarke-sourced document associated with a Matter, in a host that reports the compose capability.</step>
+        <step>Trigger Send Email from the pane.</step>
+        <step>Click both links in the composed message.</step>
+      </steps>
+      <expected>A compose window opens containing a document link and a Matter link. Both resolve to the intended targets within the share link's existing expiry window.</expected>
+    </test>
+    <test name="Document only">
+      <steps>
+        <step>Open a Spaarke-sourced document with no related record and trigger Send Email.</step>
+      </steps>
+      <expected>The compose window opens with the document link only. No empty placeholder, no broken record link, no error.</expected>
+    </test>
+    <test name="Capability gating (NFR-10)">
+      <steps>
+        <step>Open the pane in a host whose adapter reports the compose capability as absent.</step>
+      </steps>
+      <expected>The Send Email affordance is hidden. Grep confirms the decision came from `hostAdapter.getCapabilities()` and that no `if (host === 'Word')` conditional was added to a view.</expected>
+    </test>
+    <test name="Minting failure surfaces honestly">
+      <steps>
+        <step>Trigger Send Email as a user not permitted to mint a share link for the document.</step>
+      </steps>
+      <expected>An explicit error is shown and announced. No compose window opens containing a broken or placeholder link.</expected>
+    </test>
+    <test name="Dark mode (ADR-021)">
+      <steps>
+        <step>Switch the Office host theme to dark and view the Send Email affordance and any in-pane status it renders.</step>
+      </steps>
+      <expected>The control, its icon, and any success/error state use Fluent v9 theme tokens and remain legible with adequate contrast.</expected>
+    </test>
+    <test name="Keyboard navigation and announcement (NFR-11)">
+      <steps>
+        <step>Reach and activate Send Email using the keyboard only.</step>
+      </steps>
+      <expected>The control is reachable with a visible focus ring; link-minting success and failure are announced via `useAnnounce`.</expected>
+    </test>
+  </ui-tests>
+
+  <tools>
+    <tool name="npm">`npm install --legacy-peer-deps --no-audit --no-fund`, `npm run typecheck`, `npm run build` in `src/client/office-addins` (no `build:prod` here — `build` IS production).</tool>
+    <tool name="dotnet">Only if a BFF file changes: `dotnet build src/server/api/Sprk.Bff.Api/`, `dotnet test`.</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/client/office-addins/shared/taskpane/services/sendEmailService.ts</output>
+    <output type="code">src/client/office-addins/shared/adapters/IHostAdapter.ts</output>
+    <output type="code">src/client/office-addins/shared/taskpane/App.tsx</output>
+    <output type="test">src/client/office-addins/shared/taskpane/services/__tests__/sendEmailService.test.ts</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Given a document with a related record, when Send Email is triggered in a compose-capable host, then the compose window opens containing both a document link and a record link.</criterion>
+    <criterion testable="true">Given a document with no related record, when Send Email is triggered, then the compose window opens with the document link only and no error is surfaced.</criterion>
+    <criterion testable="true">Given a related record but no resolved document, when Send Email is triggered, then the compose window opens with the record link only.</criterion>
+    <criterion testable="true">Given a Send Email request, when the document link is minted, then it is minted via `POST /api/documents/{documentId}/share-link` at the endpoint's existing expiry policy — asserted by test that no expiry override is sent and no alternative minting route is called.</criterion>
+    <criterion testable="true">Negative: given a caller not permitted to mint a share link for the document, when Send Email is triggered, then an explicit error is shown and announced, and no compose window opens with a broken or placeholder link.</criterion>
+    <criterion testable="true">Negative: given a host whose adapter reports the compose capability absent, when the pane renders, then the Send Email affordance is not shown — and grep confirms no host-name conditional was added to any view (NFR-10).</criterion>
+    <criterion testable="true">No Spaarke-rendered email modal was created — verified by diff (the modal variant is deferred per spec Scope).</criterion>
+    <criterion testable="true">All six `&lt;ui-tests&gt;` pass, including the dark-mode and keyboard checks.</criterion>
+    <criterion testable="true">`npm run typecheck` is clean, `npm run build` succeeds, and all unit tests pass.</criterion>
+    <criterion testable="true">If any BFF file changed, publish size was measured against a fresh `origin/master` build with `Compress-Archive` and recorded with both absolute sizes, delta and tool; if client-only, the PR states so explicitly.</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    spec.md FR-15 and the Assumptions entry "Send Email includes both a document link and a related-record link where both exist, using existing share-link endpoints and honoring their expiry bounds". The Spaarke email-client modal variant is deferred (`design.md` §4.2). The share-link scope/expiry decision at `FileAccessEndpoints.cs:1139` belongs to `unified-access-control-r2` — consume it, do not change it.
+  </notes>
+
+  <execution><skill>.claude/skills/task-execute/SKILL.md</skill></execution>
+</task>

@@ -1,0 +1,182 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="035" project="spaarkeai-word-add-in-r1">
+  <metadata>
+    <title>FR-14: Add To Do carrying document and related record</title>
+    <phase>3 Surfacing Spaarke</phase>
+    <gate>013 complete (client document identity), 026 complete (related-record card)</gate>
+    <status>not-started</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Modifies BFF service code and `.tsx`; tags include bff-api and dataverse; writes production Dataverse rows with a fail-closed core-ancestor stamp. Step 9.5 code-review + adr-check are mandatory.</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Adaptation of a shipped, working template (`CreateTodoAsync` + `CreateTodoView`) with the extension point named exactly. The one judgment boundary is covered by an explicit escalation trigger.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>P3-c</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <deps>013,026</deps>
+    <tags>bff-api, dataverse, frontend, fluent-ui, office-addin, integration-test</tags>
+    <estimated-effort>4-8 hours</estimated-effort>
+  </metadata>
+
+  <prompt>Let the user create a first-class `sprk_todo` from the task pane that carries **both** the open document and its related record as regarding. Reuse the shipped `POST /api/office/todo` endpoint and the existing `CreateTodoView` — this is an adaptation of working code, not a new surface. The current server-side regarding map covers Matter/Project/Invoice only; widen it to also set the document lookup.</prompt>
+
+  <role>SPAARKE platform developer. Expertise in Dataverse polymorphic regarding (ADR-024), the `sprk_todo` entity model, and React + Fluent UI v9 inside an Office task pane. Follow ADRs strictly.</role>
+
+  <goal>From the pane, in both Word and Outlook, the user creates a `sprk_todo` whose regarding carries the document **and** the related record. In Word that is the `sprk_document` plus the Matter/Project/Invoice; in Outlook it is the communication plus the record. The existing fail-closed core-ancestor stamp still holds. A contract test covers `POST /api/office/todo` with both regarding values, including the unauthorized negative case.</goal>
+
+  <context>
+    <background>
+      **The working template, verified as-built.** `POST /api/office/todo` is declared at `Api/Office/OfficeEndpoints.cs:1178` and handled by `OfficeService.CreateTodoAsync:1499`. It already does everything except carry the document:
+
+      - `_todoRegardingMap` at `:1490-1496` maps friendly names to `(lookupAttribute, logicalName)` — today only `Matter → sprk_regardingmatter`, `Project → sprk_regardingproject`, `Invoice → sprk_regardinginvoice`.
+      - statecode 0 / statuscode 1 at `:1522-1523`; due date written as UTC-midnight from a `DateOnly` parse at `:1531-1536`; `sprk_assignedto` resolves to a **contact**, not a systemuser, at `:1545` (migrated 2026-06-21).
+      - Regarding lookup plus the ADR-024 resolver fields `sprk_regardingrecordid` / `sprk_regardingrecordname` / `sprk_regardingrecordtype` at `:1553-1567`.
+      - A **fail-closed** core-ancestor stamp: `_coreAncestors.StampAsync` at `:1574-1587` returns and the method yields `null` on failure, because creating the To Do without the stamp would be a silent inheritance hole.
+
+      **The document lookup exists.** `sprk_todo` has a `sprk_regardingdocument` lookup to `sprk_document` — attested in the shared catalog at `src/client/shared/Spaarke.UI.Components/src/components/AssociateToStep/types.ts:112` and `src/client/shared/Spaarke.UI.Components/src/hooks/toolbarLaunchDefaults.ts:184`. So the widening is a map entry plus a request field, not a schema change.
+
+      **The ADR-024 resolver fields are single-slot.** `sprk_regardingrecordid` / `-name` / `-type` can describe exactly ONE record. With two regarding values set (document + record), which one those denormalized fields describe is a real decision — see the escalation trigger.
+
+      **The client side.** `CreateTodoView` is at `shared/taskpane/components/views/CreateTodoView.tsx`, wired in `App.tsx:240-280`, with the launcher at `shared/taskpane/services/createTodoLauncher.ts`.
+
+      ⚠️ **The association-widening check (corrected as-built).** Design §9's warning about `UploadFinalizationWorker` widening now resolves to a single consolidated map: `Spaarke.Dataverse.DocumentAssociationMap.TryApply` at `src/server/shared/Spaarke.Dataverse/Models.cs:47`, which `UploadFinalizationWorker.ApplyAssociationLookup` calls. It **already handles** `sprk_workassignment` and `sprk_event`; `sprk_todo` is **deliberately absent** because `sprk_document` has no `sprk_todo` lookup column. `EntityAccessFilter.EntitySetByType` (`Api/Filters/EntityAccessFilter.cs:108`) carries the same deliberate omission with the same reason. That direction (document filed TO a to-do) does not exist and this task must not invent it — FR-14 goes the other way (to-do regarding a document), which `sprk_regardingdocument` supports.
+    </background>
+    <relevant-files>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Services/Office/OfficeService.cs</file>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Api/Office/OfficeEndpoints.cs</file>
+      <file role="modify">src/client/office-addins/shared/taskpane/components/views/CreateTodoView.tsx</file>
+      <file role="modify">src/client/office-addins/shared/taskpane/services/createTodoLauncher.ts</file>
+      <file role="modify">src/client/office-addins/shared/taskpane/App.tsx</file>
+      <file role="canonical-reference">src/server/shared/Spaarke.Dataverse/Models.cs</file>
+      <file role="canonical-reference">src/server/api/Sprk.Bff.Api/Api/Filters/EntityAccessFilter.cs</file>
+      <file role="canonical-reference">src/client/shared/Spaarke.UI.Components/src/components/AssociateToStep/types.ts</file>
+      <file role="modify">tests/integration/contract/Api/Office/OfficeEndpointsContractTests.cs</file>
+    </relevant-files>
+    <dependencies>
+      <dependency task="013" status="pending">Client document identity — the resolved `sprk_document` GUID that becomes the To Do's document regarding.</dependency>
+      <dependency task="026" status="pending">The related-to record card, which resolves which Matter/Project/Invoice the document is associated with and respects the two-slot association model.</dependency>
+    </dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="project">Scope: reuse `POST /api/office/todo` and `CreateTodoView`. Do NOT create a new endpoint, a new view, or a second To Do creation path. The change is a widened regarding map plus a widened request model plus client wiring.</constraint>
+    <constraint source="project">The created To Do MUST carry BOTH regarding values when both exist: the document (`sprk_regardingdocument`) and the related record (`sprk_regardingmatter` / `sprk_regardingproject` / `sprk_regardinginvoice`). Setting only one when both are available is a defect, not a graceful degradation.</constraint>
+    <constraint source="project">**Association-widening check (corrected):** the consolidated map is `Spaarke.Dataverse.DocumentAssociationMap.TryApply` (`src/server/shared/Spaarke.Dataverse/Models.cs:47`), mirrored by `EntityAccessFilter.EntitySetByType` (`Api/Filters/EntityAccessFilter.cs:108`). Both deliberately omit `sprk_todo` because `sprk_document` has no `sprk_todo` lookup column. This task MUST NOT add `sprk_todo` to either map — doing so would authorize a route whose upload can only ever land unassociated. If any part of this task appears to require filing a *document* to a to-do, that is the wrong direction: escalate.</constraint>
+    <constraint source="project">The fail-closed core-ancestor stamp at `OfficeService.cs:1574-1587` MUST remain fail-closed. If `StampAsync` fails, the To Do is NOT created. Do not soften it to a warning to make the two-regarding path succeed.</constraint>
+    <constraint source="ADR-024">The denormalized resolver fields `sprk_regardingrecordid` / `sprk_regardingrecordname` / `sprk_regardingrecordtype` describe exactly one record. Whichever regarding value they describe MUST be chosen deliberately and documented in `notes/` — not left to whichever branch happens to run last.</constraint>
+    <constraint source="ADR-044">Every Dataverse GUID crossing a boundary in this task (documentId, regarding record id, assignee contact id, owner id) MUST be canonicalized to bare-lowercase via `cleanGuid`. Never interpolate a raw GUID into an OData key predicate.</constraint>
+    <constraint source="ADR-021">All To Do UI uses Fluent UI v9 and honors the Office light/dark theme via `useOfficeTheme`. No `Xrm`-bound components (NFR-03).</constraint>
+    <constraint source="NFR-10">Shared-first: the Word/Outlook difference (document vs. communication as the non-record regarding) is expressed via `hostAdapter.getCapabilities()`, not `if (host === 'Word')` inside `CreateTodoView`.</constraint>
+    <constraint source="ADR-038">`POST /api/office/todo` is modified, so its contract coverage MUST be extended to assert both regarding values are written, plus the unauthorized negative case. Banned: `Mock&lt;HttpMessageHandler&gt;`, DI-registration assertions, ctor null-check assertions, `Stopwatch` + `Task.Delay`.</constraint>
+    <constraint source="ADR-029">This task touches the BFF, so publish size MUST be measured **against a fresh build of `origin/master`, not the recorded baseline number** — worktree a detached `origin/master`, publish both, zip BOTH with PowerShell `Compress-Archive`, and report both absolute sizes, the delta and the tool. Ceiling 60 MB; escalate at ≥+5 MB.</constraint>
+    <constraint source="project">The PR MUST carry a **Placement Justification** section per `.claude/constraints/bff-extensions.md`, and `/conflict-check` MUST be run before the BFF PR — `OfficeService.cs` is shared with `spaarkeai-compose-r8` and `unified-access-control-r2`.</constraint>
+    <constraint source="project">This task is in wave P3-c with 036 and 037. Do not modify `word/commands/**`, the Word manifest, or the share-link path — those belong to siblings in this wave.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>Polymorphic regarding on `sprk_todo`; BFF-backed record ops from the Office pane</topic>
+    <files>
+      <file>projects/spaarkeai-word-add-in-r1/spec.md</file>
+      <file>projects/spaarkeai-word-add-in-r1/plan.md</file>
+      <file>src/client/office-addins/CLAUDE.md</file>
+      <file>docs/architecture/spaarke-todo-architecture.md</file>
+      <file>.claude/adr/ADR-024-polymorphic-resolver-pattern.md</file>
+      <file>.claude/adr/ADR-044-dataverse-guid-canonicalization.md</file>
+      <file>.claude/adr/ADR-021-fluent-design-system.md</file>
+      <file>docs/adr/ADR-038-testing-strategy.md</file>
+    </files>
+    <patterns>
+      <pattern name="polymorphic-resolver" location=".claude/patterns/dataverse/polymorphic-resolver.md">Binding for the regarding lookup + denormalized resolver fields and for `cleanGuid` canonicalization.</pattern>
+      <pattern name="fluent-v9-host-visual-fit" location=".claude/patterns/ui/fluent-v9-host-visual-fit.md">Explicitly covers Office add-ins — apply to the To Do form's density in the narrow pane.</pattern>
+    </patterns>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="0" name="Context + rigor declaration">Load `projects/spaarkeai-word-add-in-r1/CLAUDE.md`, `spec.md` FR-14, `design.md` §9, and ADR-024. Read `OfficeService.CreateTodoAsync:1485-1600` in full before changing it. Emit the mandatory rigor declaration (FULL / sonnet / high). Run `/conflict-check`.</step>
+    <step order="1">Verify against live Dataverse metadata that `sprk_todo.sprk_regardingdocument` exists and targets `sprk_document`. Record the confirmation.</step>
+    <step order="2">Decide and record in `notes/035-todo-regarding-decision.md` which regarding value the single-slot ADR-024 resolver fields describe when both a document and a record are present. If the choice is not clear-cut, fire the escalation trigger instead of picking.</step>
+    <step order="3">Widen `_todoRegardingMap` and the `CreateTodoRequest` model so the handler can accept and set both a document regarding and a record regarding in one call.</step>
+    <step order="4">Implement the two-regarding write in `CreateTodoAsync`, preserving statecode/statuscode, the UTC-midnight due-date semantics, the contact-typed `sprk_assignedto`, and — unchanged and still fail-closed — the core-ancestor stamp.</step>
+    <step order="5">Wire the client: `CreateTodoView` and `createTodoLauncher` pass the resolved `sprk_document` (Word) or communication (Outlook) alongside the related record from task 026's card. Express the host difference through `hostAdapter.getCapabilities()`.</step>
+    <step order="6">Extend `OfficeEndpointsContractTests.cs` to assert both regarding values are written, the resolver fields describe the documented record, and the unauthorized negative case returns 401/403 with no row created.</step>
+    <step order="7">Run `npm run typecheck` + `npm run build` in `src/client/office-addins` and `dotnet build` + `dotnet test`. Execute the `&lt;ui-tests&gt;` in both hosts.</step>
+    <step order="8">Measure BFF publish size against a fresh `origin/master` build per the ADR-029 constraint; record both absolute sizes, the delta and the tool.</step>
+    <step order="9">Update `projects/spaarkeai-word-add-in-r1/tasks/TASK-INDEX.md`: set this task's status to ✅.</step>
+    <step order="10">Document any deviation in `projects/spaarkeai-word-add-in-r1/notes/`.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If it is not clear which regarding value the single-slot ADR-024 resolver fields (`sprk_regardingrecordid` / `-name` / `-type`) should describe when both a document and a record are set, STOP and escalate per CLAUDE.md §6. Getting this wrong makes the To Do display under the wrong parent everywhere those denormalized fields are read.</trigger>
+    <trigger>If the fail-closed core-ancestor stamp (`OfficeService.cs:1574-1587`) fails for the document-regarding path, STOP and escalate rather than softening it to a warning. A To Do created without the stamp is a silent access-inheritance hole.</trigger>
+    <trigger>If completing this task appears to require adding `sprk_todo` to `DocumentAssociationMap.TryApply` or `EntityAccessFilter.EntitySetByType`, STOP and escalate — both omit it deliberately because `sprk_document` has no `sprk_todo` lookup column, and needing it means the data direction has been inverted.</trigger>
+  </escalation>
+
+  <ui-tests>
+    <test name="Word — To Do carries document and record">
+      <steps>
+        <step>Open a Spaarke-sourced Word document that is associated with a Matter.</step>
+        <step>In the pane, create a To Do with a name and due date.</step>
+        <step>Open the created `sprk_todo` in Dataverse.</step>
+      </steps>
+      <expected>`sprk_regardingdocument` points at the open document's `sprk_document`, and `sprk_regardingmatter` points at the Matter. Both are set, not one.</expected>
+    </test>
+    <test name="Outlook — To Do carries communication and record">
+      <steps>
+        <step>In Outlook, select a message associated with a Matter and create a To Do from the pane.</step>
+        <step>Open the created `sprk_todo`.</step>
+      </steps>
+      <expected>The communication regarding and the Matter regarding are both set, and the host difference came from `hostAdapter.getCapabilities()`, not a host-name conditional in the view.</expected>
+    </test>
+    <test name="Only a record available">
+      <steps>
+        <step>Create a To Do from the pane when the open document has no resolved `sprk_document` but a related record is known.</step>
+      </steps>
+      <expected>The To Do is created with the record regarding only, and the pane does not error or silently drop the create.</expected>
+    </test>
+    <test name="Dark mode (ADR-021)">
+      <steps>
+        <step>Switch the Office host theme to dark and open the To Do form in the pane.</step>
+      </steps>
+      <expected>All fields, labels, the date picker and the submit/cancel controls use Fluent v9 theme tokens and remain legible with adequate contrast.</expected>
+    </test>
+    <test name="Keyboard navigation and announcement (NFR-11)">
+      <steps>
+        <step>Complete and submit the To Do form using the keyboard only.</step>
+      </steps>
+      <expected>Every field and control is reachable with a visible focus ring; success and failure are announced via `useAnnounce`.</expected>
+    </test>
+  </ui-tests>
+
+  <tools>
+    <tool name="dotnet">Build and test the BFF: `dotnet build src/server/api/Sprk.Bff.Api/`, `dotnet test`.</tool>
+    <tool name="npm">`npm install --legacy-peer-deps --no-audit --no-fund`, `npm run typecheck`, `npm run build` in `src/client/office-addins`.</tool>
+    <tool name="dataverse-mcp">Confirm `sprk_todo.sprk_regardingdocument` metadata and inspect created rows.</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Office/OfficeService.cs</output>
+    <output type="code">src/client/office-addins/shared/taskpane/components/views/CreateTodoView.tsx</output>
+    <output type="test">tests/integration/contract/Api/Office/OfficeEndpointsContractTests.cs</output>
+    <output type="doc">projects/spaarkeai-word-add-in-r1/notes/035-todo-regarding-decision.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Given a Word document resolved to a `sprk_document` and associated with a Matter, when a To Do is created from the pane, then the created `sprk_todo` has BOTH `sprk_regardingdocument` and `sprk_regardingmatter` populated.</criterion>
+    <criterion testable="true">Given an Outlook message associated with a record, when a To Do is created from the pane, then the created `sprk_todo` carries both the communication regarding and the record regarding.</criterion>
+    <criterion testable="true">Given both a document and a record regarding are set, when the row is written, then `sprk_regardingrecordid` / `-name` / `-type` describe the record documented in `notes/035-todo-regarding-decision.md` — consistently, not order-dependently.</criterion>
+    <criterion testable="true">Given only a record (no resolved document), when a To Do is created, then it is created with the record regarding only and no error is surfaced.</criterion>
+    <criterion testable="true">Given `_coreAncestors.StampAsync` fails, when To Do creation runs, then NO `sprk_todo` row is created and the endpoint reports failure — the stamp remains fail-closed.</criterion>
+    <criterion testable="true">Negative: given an unauthenticated or unauthorized caller, when `POST /api/office/todo` is called, then the response is 401/403 and no `sprk_todo` row is created.</criterion>
+    <criterion testable="true">Negative: given a request with an empty or whitespace-only name, when the endpoint is called, then it returns a validation failure and no row is created — not an unhandled exception.</criterion>
+    <criterion testable="true">`sprk_todo` was NOT added to `DocumentAssociationMap.TryApply` (`Models.cs:47`) or `EntityAccessFilter.EntitySetByType` (`EntityAccessFilter.cs:108`) — verified by diff.</criterion>
+    <criterion testable="true">No new endpoint and no second To Do view were created — verified by diff.</criterion>
+    <criterion testable="true">All five `&lt;ui-tests&gt;` pass, including the dark-mode and keyboard checks.</criterion>
+    <criterion testable="true">`npm run typecheck` is clean, `npm run build` succeeds, `dotnet build` and `dotnet test` are green.</criterion>
+    <criterion testable="true">BFF publish size was measured against a fresh `origin/master` build with `Compress-Archive`; both absolute sizes, delta and tool are recorded; delta &lt;+5 MB and absolute &lt;60 MB.</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    spec.md FR-14 and the Owner Clarification "To Do only; defer Event". `design.md` §9 raised an association-widening concern against `UploadFinalizationWorker`; the as-built has since consolidated that logic into `DocumentAssociationMap.TryApply` (`Models.cs:47`), where `sprk_workassignment` and `sprk_event` are already handled and `sprk_todo` is deliberately excluded — the constraint above reflects the corrected location and the corrected conclusion. No `&lt;justification&gt;` block: this is an adaptation of the shipped `POST /api/office/todo` + `CreateTodoView`, not new surface.
+  </notes>
+
+  <execution><skill>.claude/skills/task-execute/SKILL.md</skill></execution>
+</task>

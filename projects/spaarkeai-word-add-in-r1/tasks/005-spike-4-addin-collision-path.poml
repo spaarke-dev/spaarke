@@ -1,0 +1,129 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="005" project="spaarkeai-word-add-in-r1">
+  <metadata>
+    <title>Spike-4: does the add-in save path share the shipped collision semantics</title>
+    <phase>0 De-risk and baseline</phase>
+    <gate>startable</gate>
+    <status>not-started</status>
+    <rigor>STANDARD</rigor>
+    <rigor-reason>Read-only code trace producing a decision record, not code. No .cs/.ts file is modified, so the Step 9.5 gates have no code surface to inspect. STANDARD rather than MINIMAL because the output is a CLAUDE.md section 6.5 path recommendation that binds task 025's scope, and because the trace may surface a live data-loss defect.</rigor-reason>
+    <model-tier>opus</model-tier>
+    <model-tier-reason>Brownfield root-cause tracing across four layers (endpoint, service, job queue, storage facade) where the failure mode is a SILENT default rather than an error, and where the conclusion feeds a CLAUDE.md section 6.5 A/B/C path decision with cross-project implications for `unified-access-control-r2`. Distinguishing "no explicit conflictBehavior is set here" from "no collision protection exists" requires following the value to where Graph actually receives it — the exact judgment boundary that justifies opus per root CLAUDE.md section 8.5.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>P0-spikes</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <deps>none</deps>
+    <tags>spike, research, bff-api, office-addins, upload, data-loss, phase-0</tags>
+    <estimated-effort>4-6 hours of code tracing plus the decision record</estimated-effort>
+  </metadata>
+
+  <prompt>Resolve plan.md finding F-a: determine whether the Office add-in's save path actually inherits the collision handling that `unified-access-control-r2` shipped on 2026-09-02, or whether it is a separate path with different (possibly absent) semantics. FR-12 is written as "consume the shipped collision handling, verify, do not rebuild" — but the shipped handling lives on a different endpoint, reached through a client library the add-in does not depend on. Trace the real path end to end and produce a CLAUDE.md section 6.5 path recommendation for FR-12 before task 025 is sized.</prompt>
+
+  <role>SPAARKE platform developer. BFF service tracing, SharePoint Embedded upload semantics through the `SpeFileStore` facade, and Microsoft Graph conflict-behaviour defaults. You are establishing what the code actually does today, not changing it. Follow ADRs strictly.</role>
+
+  <goal>projects/spaarkeai-word-add-in-r1/notes/spikes/spike-4-collision-path.md exists and contains: a hop-by-hop call trace of the add-in save path cited to file:line at every hop; the exact `conflictBehavior` value (or absence) that reaches Graph on that path, and the code that determines it; a side-by-side comparison against the shipped `PUT /api/obo/records/{entity}/{recordId}/files/{name}` path; a statement of what a same-named-file save from the add-in does to the existing file's bytes today; a recorded overlap boundary against `unified-access-control-r2` task 094; and a single CLAUDE.md section 6.5 path recommendation (A project-scoped exception / B ADR amendment / C pivot to comply) for FR-12 with the rejected alternatives shown.</goal>
+
+  <context>
+    <background>FR-12 (spec.md line 75) asserts that the data-loss bug is already fixed and that the add-in's only job is to surface the typed conflict error and honour the two-option dialog. plan.md finding F-a (section 3) says that premise does not hold. The shipped handling lives on `PUT /api/obo/records/{entity}/{recordId}/files/{name}`, where `ResolveConflictBehavior` at src/server/api/Sprk.Bff.Api/Api/OBOEndpoints.cs line 558 returns `ConflictBehavior.Fail` when the query parameter is absent — deliberately, per its own remarks, so that "an absent parameter must mean fail, not the parser's default". That server behaviour is surfaced to clients by `@spaarke/sdap-client`, whose `UploadOperation` throws `UploadNameConflictError` at src/client/shared/Spaarke.SdapClient/src/operations/UploadOperation.ts line 138. The add-in reaches none of that: it posts JSON with base64 content to `POST /api/office/save`, which goes to `OfficeService.SaveAsync`, onto the job queue, and finally to `OfficeStorageUploader`. And src/client/office-addins/package.json lists no dependency on `@spaarke/sdap-client` at all (its dependencies are @azure/msal-browser, @spaarke/auth, the Fluent packages, @microsoft/office-js and React). An authoring-time grep found ZERO occurrences of the string "conflict" anywhere in src/server/api/Sprk.Bff.Api/Services/Office/OfficeStorageUploader.cs — which is a lead, not a conclusion: the effective behaviour may still be set inside `SpeFileStore` or defaulted by Graph, and the whole point of this spike is to follow the value to where Graph actually receives it rather than to stop at the first file that does not mention it.</background>
+    <relevant-files>
+      <file role="canonical-reference">src/server/api/Sprk.Bff.Api/Api/Office/OfficeEndpoints.cs</file>
+      <file role="canonical-reference">src/server/api/Sprk.Bff.Api/Services/Office/OfficeService.cs</file>
+      <file role="canonical-reference">src/server/api/Sprk.Bff.Api/Services/Office/OfficeStorageUploader.cs</file>
+      <file role="canonical-reference">src/server/api/Sprk.Bff.Api/Services/Office/OfficeJobQueue.cs</file>
+      <file role="canonical-reference">src/server/api/Sprk.Bff.Api/Api/OBOEndpoints.cs</file>
+      <file role="canonical-reference">src/client/shared/Spaarke.SdapClient/src/operations/UploadOperation.ts</file>
+      <file role="canonical-reference">src/client/office-addins/package.json</file>
+      <file role="canonical-reference">projects/unified-access-control-r2/tasks/094-upload-collision-preflight-probe.poml</file>
+    </relevant-files>
+    <dependencies>
+      <dependency task="none" status="complete">No prerequisite tasks. Runs concurrently with 002, 003 and 004 in the P0-spikes wave.</dependency>
+    </dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="project">SCOPE: src/server/** and src/client/** are READ-ONLY for this task. Do NOT fix, patch or harden anything you find — not even a one-line explicit `conflictBehavior`. If the trace surfaces a data-loss defect, that is an escalation (see below), not an invitation to fix it inline. A spike that ships a fix has bypassed the section 6.5 decision it exists to inform.</constraint>
+    <constraint source="project">SCOPE: the trace. Every hop is cited to file:line, and the trace continues until you reach the point where a conflict behaviour is (or is not) handed to Graph. Stopping at "OfficeStorageUploader does not mention conflict" is NOT an answer — the value may be set in `SpeFileStore`, in a Graph request-builder default, or nowhere at all, and those three have different consequences.</constraint>
+    <constraint source="project">SCOPE: the small-file versus large-file distinction. `POST /api/office/save` carries base64 content in JSON, but the storage layer may route small and large payloads through different Graph mechanisms (simple content PUT versus an upload session). Determine whether BOTH routes have the same conflict semantics; a difference means a size-dependent data-loss window, which is a materially worse finding than a uniform one.</constraint>
+    <constraint source="project">SCOPE: cross-project boundary with `unified-access-control-r2`. Read projects/unified-access-control-r2/tasks/094-upload-collision-preflight-probe.poml before writing your recommendation, and record explicitly what task 094 already owns (the pre-flight probe before bytes move, and the "Use existing" option). Your recommendation MUST name what this project must NOT build because 094 owns it. spec.md line 75 says "coordinate, do not duplicate" — make that boundary concrete rather than restating the instruction.</constraint>
+    <constraint source="project">SCOPE: NFR-08 interaction. A Word document is editable, so a content-hash hit on the add-in path MUST route through link/graduate (mirroring the Compose promoter), never the immutable suppress path — suppress-forever on an editable document collapses two distinct drafts into one record. Filename collision and content-hash dedup are DIFFERENT mechanisms that can both fire on the same save; state how they interact on the add-in path, because a recommendation that fixes one and silently changes the other is not safe.</constraint>
+    <constraint source="ADR-007">SCOPE: any implementation sketch in the report. Graph SDK types stay behind `SpeFileStore`. Describe a proposed change at the facade level (which method, what parameter, what shape) rather than as a Graph SDK call, so task 025 inherits an ADR-compliant starting point.</constraint>
+    <constraint source="project">SCOPE: the recommendation. Recommend exactly ONE of the three CLAUDE.md section 6.5 paths for FR-12 and show the two you rejected with the reason. Path A is a documented project-scoped exception; Path B is an amendment to the governing rule; Path C is a pivot to comply. Root CLAUDE.md section 6.5 states there is no fourth path — do not produce "surface whatever is there and move on" as a recommendation if the trace shows there is nothing to surface.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>BFF upload paths; SPE conflict behaviour; content dedup versus filename collision; section 6.5 conflict resolution</topic>
+    <files>
+      <file>projects/spaarkeai-word-add-in-r1/spec.md</file>
+      <file>projects/spaarkeai-word-add-in-r1/plan.md</file>
+      <file>projects/spaarkeai-word-add-in-r1/DEDUP-AND-SAVE-BACK-IDENTITY.md</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+      <file>.claude/adr/ADR-007-spefilestore.md</file>
+      <file>.claude/adr/ADR-019-problemdetails.md</file>
+      <file>docs/adr/ADR-038-testing-strategy.md</file>
+      <file>src/server/api/Sprk.Bff.Api/CLAUDE.md</file>
+    </files>
+    <patterns>
+      <pattern name="the reference path to compare against" location="src/server/api/Sprk.Bff.Api/Api/OBOEndpoints.cs">`ResolveConflictBehavior` at line 558 reads the `conflictBehavior` query parameter and returns `ConflictBehavior.Fail` when it is absent or whitespace, explicitly declining the parser's own `replace` default. Read the surrounding remarks — they document the design intent (an absent parameter must mean fail) that FR-12 assumes the add-in inherits. This is the semantics to compare the add-in path against, hop for hop.</pattern>
+      <pattern name="the client surface that makes it visible" location="src/client/shared/Spaarke.SdapClient/src/operations/UploadOperation.ts">Line 138 throws `UploadNameConflictError`, which is what the two-option dialog (Keep both / Save as new version) keys off. Establish what HTTP status and body the server returns on conflict, and then determine whether the add-in — which does not depend on this package — can distinguish that response from any other failure with the error handling it has today. "There is a typed error in a library we do not import" is not the same as "the pane can surface it".</pattern>
+      <pattern name="silent defaults are the hazard" location="src/server/api/Sprk.Bff.Api/Services/Office/OfficeStorageUploader.cs">The dangerous outcome is not an exception, it is a successful-looking save that replaced someone's file. When you reach the Graph call, determine what happens with NO conflict behaviour specified — that is a platform default, and it must be stated with a citation, not inferred. The finding "the parameter is never set" only becomes a data-loss finding once you know what the unset default does.</pattern>
+      <pattern name="contract coverage context" location="projects/spaarkeai-word-add-in-r1/plan.md">Finding F-f records that `POST /api/office/save` has ZERO executing contract coverage — both its tests are skipped in tests/integration/contract/Api/Office/OfficeEndpointsContractTests.cs (lines 48 and 82), and 13 of 22 tests in that file are skipped. Note this in the report: whatever the current behaviour is, no test is asserting it, so nothing would catch a regression either way. This is context for the recommendation, not a task to fix here (task 016 owns the un-skip).</pattern>
+    </patterns>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="0" name="Context + rigor declaration">Emit the mandatory rigor declaration (RIGOR LEVEL: STANDARD, reason, protocol steps). Load projects/spaarkeai-word-add-in-r1/CLAUDE.md, spec.md FR-12 and NFR-08, plan.md finding F-a and risk R-2.</step>
+    <step order="1">Establish the client side first. Confirm from src/client/office-addins/package.json that the add-in has no dependency on `@spaarke/sdap-client`, and find the code in src/client/office-addins/** that actually issues the save request. Record the request shape (endpoint, method, body encoding) and — critically — how the response and any error are handled today. Cite file:line.</step>
+    <step order="2">Trace the server path hop by hop, citing file:line at each: the `POST /api/office/save` route registration in src/server/api/Sprk.Bff.Api/Api/Office/OfficeEndpoints.cs; the handler; `OfficeService.SaveAsync`; the enqueue via OfficeJobQueue; the job handler that dequeues it; `OfficeStorageUploader.UploadToSpeAsync`; and the `SpeFileStore` method it calls.</step>
+    <step order="3">Follow the conflict behaviour INTO `SpeFileStore` and onward until you reach the Graph request. Determine whether a conflict behaviour is set anywhere on this path, and if not, what the effective platform default is. Do not stop at the first file that lacks the string — the authoring-time observation that OfficeStorageUploader.cs contains zero occurrences of "conflict" is a lead to follow, not the finding itself.</step>
+    <step order="4">Determine whether small-payload and large-payload uploads take different Graph mechanisms on this path, and whether their conflict semantics differ. Report each separately.</step>
+    <step order="5">Build the side-by-side comparison table: the shipped OBO path versus the add-in save path, across at least these rows — endpoint and method; request encoding; where conflict behaviour is decided (file:line); the value when the caller specifies nothing; what happens to the existing file's bytes on a same-name save; what HTTP status and body the caller receives; whether the client surface can distinguish that from a generic failure.</step>
+    <step order="6">State plainly what a same-named-file save from the add-in does TODAY to the existing file's bytes. This single sentence is the finding the rest of the report supports. If the answer is "replaces them", apply the escalation trigger immediately.</step>
+    <step order="7">Record the interaction with content-hash dedup (NFR-08): on the add-in path, does a content-hash hit route through link/graduate or through the immutable suppress path, and can a filename collision and a hash hit fire on the same save? Name the code that decides.</step>
+    <step order="8">Read projects/unified-access-control-r2/tasks/094-upload-collision-preflight-probe.poml and record the overlap boundary: what task 094 owns (pre-flight probe before bytes move, and the "Use existing" option), what it does NOT cover, and therefore what this project must not build.</step>
+    <step order="9">Write the CLAUDE.md section 6.5 recommendation for FR-12 in the required format: the rule being challenged, the conflict, the proposed path (A / B / C), the rationale, the impact if accepted, and the alternatives considered and rejected. Include a facade-level implementation sketch for task 025 (ADR-007) and the contract-test obligation it will carry (ADR-038, with F-f context).</step>
+    <step order="10">Write projects/spaarkeai-word-add-in-r1/notes/spikes/spike-4-collision-path.md with these sections: Question (F-a restated) · Client side (with file:line) · Server trace, hop by hop (with file:line) · Where conflict behaviour is decided, and the effective value · Small versus large payload · Side-by-side comparison table · What a same-name save does today · Dedup interaction (NFR-08) · Task 094 overlap boundary · Section 6.5 recommendation · Implementation sketch for task 025 · Open questions.</step>
+    <step order="11">Update projects/spaarkeai-word-add-in-r1/tasks/TASK-INDEX.md: set this task's status to completed.</step>
+    <step order="12">Document any deviation from this task file in projects/spaarkeai-word-add-in-r1/notes/.</step>
+  </steps>
+
+  <escalation>
+    <trigger>LIVE DATA-LOSS FINDING — if the trace shows that the add-in save path has no collision protection at all (that is, a save under an existing filename overwrites or replaces the existing file's bytes rather than failing or versioning), STOP IMMEDIATELY and escalate per root CLAUDE.md section 6 before completing the rest of the report. Report: the exact hop where the behaviour is determined (file:line), what is overwritten, whether the previous bytes are recoverable through SPE versioning, and whether the condition is reachable from the shipped add-in today. Do NOT implement a fix. This is a production defect disclosure that needs an operator decision on urgency and ownership — it may belong to a hotfix or to `unified-access-control-r2`, not to task 025 in this project's normal sequence.</trigger>
+    <trigger>If the add-in path and the OBO path have DIFFERENT conflict semantics such that FR-12's "consume, do not rebuild" premise is false, STOP and escalate as a CLAUDE.md section 6.5 conflict before task 025 is sized. Present the A/B/C paths and let the operator choose; do not select a path unilaterally and proceed to implementation.</trigger>
+    <trigger>If the finding overlaps materially with what `unified-access-control-r2` task 094 is currently building — such that a fix here would collide with or duplicate theirs — STOP and escalate for cross-project coordination rather than proposing parallel work. Run `/conflict-check` and cite the result.</trigger>
+  </escalation>
+
+  <tools>
+    <tool name="Grep">Trace the call chain: `conflictBehavior`, `ConflictBehavior`, `UploadToSpeAsync`, `SaveAsync`, `UploadNameConflictError` across src/server/** and src/client/**.</tool>
+    <tool name="Read">Read each hop in full rather than relying on grep excerpts — a silent default is exactly the kind of thing a grep window hides.</tool>
+    <tool name="conflict-check">Confirm the coordination boundary with `unified-access-control-r2` before writing the recommendation.</tool>
+  </tools>
+
+  <outputs>
+    <output type="doc">projects/spaarkeai-word-add-in-r1/notes/spikes/spike-4-collision-path.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">projects/spaarkeai-word-add-in-r1/notes/spikes/spike-4-collision-path.md exists and contains a hop-by-hop server trace from `POST /api/office/save` through to the Graph call, with a file:line citation at every hop.</criterion>
+    <criterion testable="true">The report states the exact `conflictBehavior` value (or documented platform default in its absence) that applies on the add-in save path, and cites the code that determines it.</criterion>
+    <criterion testable="true">The report confirms from src/client/office-addins/package.json that the add-in does not depend on `@spaarke/sdap-client`, and identifies, with file:line, the add-in code that issues the save request and handles its response.</criterion>
+    <criterion testable="true">The report answers whether small-payload and large-payload uploads on this path have the same conflict semantics, reporting each separately.</criterion>
+    <criterion testable="true">The report contains a side-by-side comparison table of the shipped OBO path versus the add-in path covering at minimum: endpoint and method, request encoding, where conflict behaviour is decided (file:line), the value when unspecified, the effect on the existing file's bytes, the HTTP status and body returned, and whether the client can distinguish a conflict from a generic failure.</criterion>
+    <criterion testable="true">The report contains a single plain sentence stating what a same-named-file save from the add-in does to the existing file's bytes today.</criterion>
+    <criterion testable="true">The report states how filename collision and content-hash dedup interact on this path, and whether an editable-document hash hit routes through link/graduate or the immutable suppress path (NFR-08), citing the deciding code.</criterion>
+    <criterion testable="true">The report records the `unified-access-control-r2` task 094 overlap boundary, naming what 094 owns and what this project must therefore not build.</criterion>
+    <criterion testable="true">The report contains exactly one CLAUDE.md section 6.5 recommendation for FR-12 in the required format — ADR/rule in question, specific rule, conflict, proposed path (A / B / C), rationale, impact if accepted, and alternatives considered and rejected.</criterion>
+    <criterion testable="true">The report contains a facade-level implementation sketch for task 025 that keeps Graph types behind `SpeFileStore` (ADR-007) and names the contract-test obligation, noting the F-f context that `POST /api/office/save` has no executing contract coverage today.</criterion>
+    <criterion testable="true">Negative: `git status` shows no file added or modified under src/server/** or src/client/** by this task — no fix, no explicit conflictBehavior, no test change.</criterion>
+    <criterion testable="true">Negative: the recommendation is not a fourth path — it is A, B or C, never "surface what is there and move on" where the trace showed there is nothing to surface (root CLAUDE.md section 6.5).</criterion>
+  </acceptance-criteria>
+
+  <notes>Spec reference: FR-12 (line 75), NFR-08 (line 105), Cross-project coordination `unified-access-control-r2` (line 229), Success Criterion 6 (line 203). Plan reference: section 3 finding F-a, section 4 Phase 0 task 005, risk R-2, Phase 2 task 025 ("blocked until 005 closes").
+
+Authoring-time observations to verify rather than trust: `OfficeStorageUploader.cs` contains zero occurrences of the string "conflict"; src/client/office-addins/package.json lists no `@spaarke/sdap-client` dependency; `ResolveConflictBehavior` sits at src/server/api/Sprk.Bff.Api/Api/OBOEndpoints.cs line 558; `UploadOperation.ts` throws `UploadNameConflictError` at line 138 in src/client/shared/Spaarke.SdapClient/src/operations/. Line numbers drift — confirm each before citing it in the report.
+
+No `&lt;justification&gt;` block is present: this task creates no new code surface, only a project notes artifact in the already-provisioned notes/spikes/ directory.
+
+Parallel-safety: P0-spikes wave. 002, 003, 004 and 005 write to four distinct files under notes/spikes/ and modify no source. Safe to run all four concurrently. This task reads BFF code that `spaarkeai-compose-r8` and `unified-access-control-r2` are actively changing — read-only, so no conflict, but re-verify line numbers at execution time rather than trusting this file.</notes>
+
+  <execution><skill>.claude/skills/task-execute/SKILL.md</skill></execution>
+</task>

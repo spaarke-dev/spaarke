@@ -1,0 +1,114 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="004" project="spaarkeai-word-add-in-r1">
+  <metadata>
+    <title>Spike-3: can a task pane open the Copilot pane or a named agent (timeboxed)</title>
+    <phase>0 De-risk and baseline</phase>
+    <gate>startable</gate>
+    <status>not-started</status>
+    <rigor>MINIMAL</rigor>
+    <rigor-reason>Timeboxed documentation search producing a single notes artifact. No .ts/.tsx/.cs file is modified and no design is committed to — the most likely outcome (a negative) closes FR-20 outright. The Step 9.5 gates have no code surface to inspect.</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Bounded literature search over a small, well-defined question space (Office.js surface, URI schemes, deep links, the existing declarative agent's manifest). No architectural judgment and no blast radius: the negative outcome simply closes a spec item. Sonnet default per root CLAUDE.md section 8.5.</model-tier-reason>
+    <effort>medium</effort>
+    <parallel-group>P0-spikes</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <deps>none</deps>
+    <tags>spike, research, office-addins, copilot, declarative-agent, timeboxed, phase-0</tags>
+    <estimated-effort>Timeboxed to 2 hours of research plus report writing. Stop at the box and report what you have.</estimated-effort>
+  </metadata>
+
+  <prompt>Determine, within a hard timebox, whether ANY documented mechanism exists for an Office task pane to open the Microsoft 365 Copilot pane or activate a named declarative agent — an Office.js API, a URI scheme, a protocol handler, or a deep link. Spaarke's declarative agent already exists at src/solutions/CopilotAgent/. A NEGATIVE result is a successful outcome: it closes FR-20 cleanly and removes an item from the project rather than leaving it unresolved.</prompt>
+
+  <role>SPAARKE platform developer. Office add-in extensibility surface, Microsoft 365 Copilot extensibility, and declarative agent packaging. You are answering a yes/no question with evidence, not building an affordance. Follow ADRs strictly.</role>
+
+  <goal>projects/spaarkeai-word-add-in-r1/notes/spikes/spike-3-copilot-launch.md exists and records, for each of the five named candidate mechanisms, what was searched and what was found, with a citation or an explicit "no documentation found for this after searching X". The report closes with a binary verdict — MECHANISM FOUND or NO MECHANISM FOUND — and the corresponding disposition of FR-20 (build the affordance as specified, or close FR-20 as documented-negative).</goal>
+
+  <context>
+    <background>FR-20 (spec.md line 94) is spike-gated by design: "if a mechanism exists to open the Copilot pane / the 'Spaarke AI' agent, expose it as a button or icon — not a tab. If none exists, omit it." Its acceptance criterion explicitly admits the negative: "either the affordance opens the agent, or the spike is documented as negative and the item is closed." The agent itself is out of this project's scope — `spaarkeai-word-native-r1` owns MCP and the declarative agent (spec.md Cross-project coordination, line 231); FR-20 only LAUNCHES it. The in-repo artifacts to inspect are src/solutions/CopilotAgent/declarativeAgent.json, its appPackage/, spaarke-api-plugin.json and cards/. Note that this project's tabs are Save and Find only (FR-03); FR-20 was never a tab, so a negative result costs the pane nothing structurally.</background>
+    <relevant-files>
+      <file role="canonical-reference">src/solutions/CopilotAgent/declarativeAgent.json</file>
+      <file role="canonical-reference">src/solutions/CopilotAgent/spaarke-api-plugin.json</file>
+      <file role="canonical-reference">src/client/office-addins/outlook/manifest.json</file>
+      <file role="canonical-reference">src/client/office-addins/shared/taskpane/components/TaskPaneToolbar.tsx</file>
+      <file role="canonical-reference">projects/spaarkeai-word-add-in-r1/spec.md</file>
+    </relevant-files>
+    <dependencies>
+      <dependency task="none" status="complete">No prerequisite tasks. Runs concurrently with 002, 003 and 005 in the P0-spikes wave.</dependency>
+    </dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="project">SCOPE: the timebox. Spend at most 2 hours on research. When the box expires, write the report with what you have and state the timebox in it. Do NOT extend the box to chase a promising lead — record the lead as an open question and let the operator decide whether it is worth reopening. An unbounded search here is exactly the failure mode the "timeboxed" designation exists to prevent.</constraint>
+    <constraint source="project">SCOPE: the verdict. A negative is a SUCCESS. Do NOT manufacture a mechanism out of an undocumented behaviour, a preview API, a community blog post, or a URI scheme you inferred rather than found documented. If the only candidate is undocumented or preview-gated, the verdict is NO MECHANISM FOUND with that candidate recorded as an open question — not MECHANISM FOUND with a caveat.</constraint>
+    <constraint source="project">SCOPE: src/client/office-addins/** and src/solutions/CopilotAgent/**. Both are READ-ONLY for this task. Do NOT add a button, an icon, a handler, a manifest entry or a Copilot-related dependency. FR-20's implementation, if it happens at all, belongs to a later task that this spike unblocks.</constraint>
+    <constraint source="project">SCOPE: the declarative agent. `spaarkeai-word-native-r1` owns it. Do NOT modify src/solutions/CopilotAgent/ in any way, and do NOT propose changes to the agent's manifest as part of a launch mechanism without flagging it as cross-project scope requiring their agreement.</constraint>
+    <constraint source="project">SCOPE: every "not found" statement. Record HOW you looked — the exact search terms, the documentation surfaces consulted, and the date. A bare "no mechanism exists" is unfalsifiable and will simply be re-litigated in six months. A negative with a method is a durable answer.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>Office add-in extensibility; Microsoft 365 Copilot extensibility; declarative agent activation</topic>
+    <files>
+      <file>projects/spaarkeai-word-add-in-r1/spec.md</file>
+      <file>projects/spaarkeai-word-add-in-r1/plan.md</file>
+      <file>src/client/office-addins/CLAUDE.md</file>
+      <file>docs/architecture/office-outlook-teams-integration-architecture.md</file>
+      <file>.claude/patterns/ui/fluent-v9-host-visual-fit.md</file>
+    </files>
+    <patterns>
+      <pattern name="the five candidate mechanisms" location="this task — search each one explicitly and report each separately">(1) An Office.js API — sweep `Office.context.ui.*`, `Office.addin.*`, `Office.actions.*` and any host-specific surface for anything that opens another pane or a named extension. (2) A URI scheme or protocol handler — for example an `ms-word:` style activation, or a Copilot-specific scheme. (3) A web deep link into M365 Copilot chat that targets a named agent by id, opened via `Office.context.ui.openBrowserWindowAsync` or an anchor. (4) A ribbon/manifest mechanism — can a manifest declare a command that activates another installed extension. (5) Anything in the declarative agent's own packaging (src/solutions/CopilotAgent/declarativeAgent.json and appPackage/) that exposes an addressable id or activation URL. Report all five even when four are trivially negative; the enumerated negative is the deliverable.</pattern>
+      <pattern name="where the affordance would live if positive" location="src/client/office-addins/shared/taskpane/components/TaskPaneToolbar.tsx">FR-20 specifies a button or icon, explicitly NOT a tab. If the verdict is positive, sketch the affordance at the level of "which component, which Fluent v9 control, which icon" so the follow-on task inherits a placement decision — but do not build it. Follow ADR-021 (Fluent v9, Office theme) and the host visual-fit pattern.</pattern>
+    </patterns>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="0" name="Context + rigor declaration">Emit the mandatory rigor declaration (RIGOR LEVEL: MINIMAL, reason, protocol steps). Load projects/spaarkeai-word-add-in-r1/CLAUDE.md and spec.md FR-20 plus the Spikes table. Start the timebox and record the start time in your working notes.</step>
+    <step order="1">Read the in-repo agent artifacts first: src/solutions/CopilotAgent/declarativeAgent.json, spaarke-api-plugin.json and appPackage/. Record whether the agent has an addressable identifier (an app id, an agent id, a deep-link URL) and what its distribution model is. This determines whether candidate mechanisms 3 and 5 are even addressable in principle.</step>
+    <step order="2">Search candidate mechanism 1 — an Office.js API. Sweep the current Office.js reference and the `@types/office-js` declarations for any surface that opens another pane, activates another installed add-in, or references Copilot. Record the search terms and the result.</step>
+    <step order="3">Search candidate mechanism 2 — a URI scheme or protocol handler that activates the Copilot pane from within a host application. Record the search terms and the result.</step>
+    <step order="4">Search candidate mechanism 3 — a web deep link into M365 Copilot chat that targets a named agent, and whether a task pane could open it via `Office.context.ui.openBrowserWindowAsync` or an anchor. Note that opening a browser tab is a materially weaker outcome than opening the in-host Copilot pane; if only this works, say so plainly and let the operator judge whether it satisfies FR-20's intent.</step>
+    <step order="5">Search candidate mechanism 4 — a manifest or ribbon mechanism by which one extension activates another. Record the search terms and the result.</step>
+    <step order="6">Consolidate candidate mechanism 5 from step 1's findings. State whether the agent's packaging exposes anything a task pane could target.</step>
+    <step order="7">Close the timebox. Write projects/spaarkeai-word-add-in-r1/notes/spikes/spike-3-copilot-launch.md with these sections: Question · Timebox (start, end, elapsed) · In-repo agent artifacts (with file:line) · Candidate 1 through Candidate 5, each with search method, sources consulted and result · Verdict (MECHANISM FOUND or NO MECHANISM FOUND) · FR-20 disposition · Open questions and leads not chased (with the reason they were not chased).</step>
+    <step order="8">If the verdict is NO MECHANISM FOUND, state explicitly in the report that FR-20 is CLOSED as documented-negative per its own acceptance criterion, and that no pane affordance will be built. If the verdict is MECHANISM FOUND, sketch the affordance placement per the knowledge block but build nothing.</step>
+    <step order="9">Update projects/spaarkeai-word-add-in-r1/tasks/TASK-INDEX.md: set this task's status to completed.</step>
+    <step order="10">Document any deviation from this task file in projects/spaarkeai-word-add-in-r1/notes/.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If a mechanism IS found but requires a manifest change, a new permission scope, admin consent, a tenant-level configuration, or a Copilot licensing dependency, STOP and escalate per root CLAUDE.md section 6 rather than recording it as a simple positive. FR-20 was scoped as "expose a button or icon" — anything that expands into a manifest/consent/licensing change is scope expansion beyond the task boundary and needs an operator decision, especially since manifest changes force a 4-part version bump and M365 re-registration.</trigger>
+    <trigger>If the only viable mechanism would require modifying src/solutions/CopilotAgent/, STOP and escalate. That surface is owned by `spaarkeai-word-native-r1`; changing it is cross-project coordination, not a spike outcome.</trigger>
+  </escalation>
+
+  <tools>
+    <tool name="WebSearch">Search Microsoft Learn and official Microsoft documentation for each of the five candidate mechanisms. Record exact search terms used.</tool>
+    <tool name="WebFetch">Read located reference pages; capture URLs and last-updated dates.</tool>
+    <tool name="Agent">Optionally dispatch the `researcher` subagent for the Copilot extensibility question — it consults `knowledge/` first and memoizes findings (root CLAUDE.md section 15). Keep it inside the timebox.</tool>
+    <tool name="Read">In-repo agent artifacts under src/solutions/CopilotAgent/.</tool>
+  </tools>
+
+  <outputs>
+    <output type="doc">projects/spaarkeai-word-add-in-r1/notes/spikes/spike-3-copilot-launch.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">projects/spaarkeai-word-add-in-r1/notes/spikes/spike-3-copilot-launch.md exists and contains a separately headed section for each of the five candidate mechanisms, even where a mechanism is trivially negative.</criterion>
+    <criterion testable="true">Each candidate section records the exact search terms used, the documentation surfaces consulted, and the date of the search — so that a future reader can tell a real negative from an unattempted one.</criterion>
+    <criterion testable="true">The report states the timebox start, end and elapsed time, and confirms the 2-hour box was respected.</criterion>
+    <criterion testable="true">The report records what src/solutions/CopilotAgent/declarativeAgent.json and appPackage/ expose as an addressable identifier, cited to file, or states that they expose none.</criterion>
+    <criterion testable="true">The report closes with exactly one verdict — MECHANISM FOUND or NO MECHANISM FOUND — and no hedged third state.</criterion>
+    <criterion testable="true">Given the verdict is NO MECHANISM FOUND, the report states that FR-20 is closed as documented-negative per spec.md line 94's acceptance criterion, and that no affordance will be built.</criterion>
+    <criterion testable="true">Given the verdict is MECHANISM FOUND, the report distinguishes whether the mechanism opens the in-host Copilot pane or merely a browser tab, and sketches affordance placement (component, Fluent v9 control, icon) without building it.</criterion>
+    <criterion testable="true">Negative: no undocumented, preview-only or blog-sourced mechanism is recorded as MECHANISM FOUND; any such candidate appears only under open questions.</criterion>
+    <criterion testable="true">Negative: `git status` shows no file added or modified under src/client/office-addins/ or src/solutions/CopilotAgent/ by this task.</criterion>
+  </acceptance-criteria>
+
+  <notes>Spec reference: FR-20 (line 94), Dependencies/Spikes table row Spike-3 (line 239), Cross-project coordination (line 231 — `spaarkeai-word-native-r1` owns the agent). Plan reference: section 4 Phase 0 task 004.
+
+Framing that matters for whoever executes this: the project's expected outcome is negative. spec.md wrote FR-20's acceptance criterion to accept a documented negative, and plan.md called the spike timeboxed for the same reason. Producing a clean, well-sourced "no" in two hours is the target result — not a consolation prize. The only bad outcomes are an unbounded search and a manufactured positive.
+
+No `&lt;justification&gt;` block is present: this task creates no new code surface, only a project notes artifact in the already-provisioned notes/spikes/ directory.
+
+Parallel-safety: P0-spikes wave. 002, 003, 004 and 005 write to four distinct files under notes/spikes/ and modify no source. Safe to run all four concurrently.</notes>
+
+  <execution><skill>.claude/skills/task-execute/SKILL.md</skill></execution>
+</task>
