@@ -1,7 +1,7 @@
 # Code Quality & Assurance R4 — Governance That Enforces Itself
 
 > **Portfolio**: [Project #940](https://github.com/spaarke-dev/spaarke/issues/940) under [Epic #427](https://github.com/spaarke-dev/spaarke/issues/427) `[Epic]: Code Quality` · [Board #2](https://github.com/users/spaarke-dev/projects/2) — one Project Issue; phases = capabilities, no per-phase Issues. Status=Active (Planning), Start 2026-09-03.
-> **Status**: Initialized 2026-09-04 via `/project-pipeline` (INITIALIZE-ONLY — artifacts + tasks; execution operator-gated wave by wave)
+> **Status**: Initialized 2026-09-04 via `/project-pipeline` — artifacts + 33 tasks. **Execution is AUTONOMOUS**: run wave by wave without per-wave confirmation, stopping only for a true decision (see [plan.md §3.5](plan.md)), a fired escalation trigger, or a red build.
 > **Branch**: `work/code-quality-and-assurance-r4` · **Worktree**: `c:/code_files/spaarke-wt-code-quality-and-assurance-r4`
 > **PR**: [#935](https://github.com/spaarke-dev/spaarke/pull/935) (draft)
 

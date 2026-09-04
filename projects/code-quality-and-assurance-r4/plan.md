@@ -23,8 +23,10 @@ when it does.
 
 **Timeline**: one phase at a time; P1 ships in days. **Estimated effort**: ~32–38 tasks excluding P2b.
 
-**Execution posture**: `INITIALIZE-ONLY`. The pipeline produced artifacts + tasks; execution is
-operator-gated wave by wave.
+**Execution posture**: **AUTONOMOUS** (owner direction, 2026-09-04). The pipeline produced artifacts +
+tasks; execution runs wave by wave without a per-wave "continue". Stop only for a true decision or a
+genuine problem — the per-task `<escalation><trigger>` blocks are those stop conditions, and they are now
+load-bearing rather than advisory. See §3.5.
 
 ---
 
@@ -52,7 +54,7 @@ operator-gated wave by wave.
 | Decision | Rationale | Impact |
 |---|---|---|
 | **Split P2** into P2a (classify) + P2b (write tests) | FR-07's size is genuinely unknown until FR-05 classifies all 49. Committing to a task count before that is a guess. | P2b is not decomposed at pipeline time; task 020 emits the set, then `/task-create` runs again |
-| **Initialize-only** | Matches the repo's dominant convention across ~10 active projects | No task executed by the pipeline; operator gates each wave |
+| **Autonomous execution** | Owner direction 2026-09-04: run autonomously as long as it is safe and accurate; gate only on a true decision or a significant issue | No per-wave "continue". The POML escalation triggers become the stop conditions (§3.5) |
 | **FR-10 → a revision-header standard** | Owner direction during planning: one standard way to date and revision-track files, at the top, human readable, carrying version + revision type, **applied by script not LLM** | Supersedes FR-10 as written; recorded as a §6.5 path-B amendment (§8 R4 below) |
 | **Frontmatter, not blockquote** | Skills cannot drop frontmatter (Claude Code parses `description`/`tags`/`appliesTo`). A blockquote standard would leave skills carrying two headers. | ~159 files gain frontmatter; migrated blockquote lines are removed so there is one source of truth |
 | **Header applied to `.claude/**` only in r4** | `docs/**` is 324 more files. A 554-file diff across both trees while 17 worktrees are active is the exact collision NFR-06 warns about. | Same script, different `-Path`, run when the worktree count is low |
@@ -138,6 +140,38 @@ P5  Tailored review that actually runs      (050–058)   workflow section
 | A 110-file header backfill lands mid-flight across 17 worktrees | Scoped to `.claude/**` only; `docs/**` deferred; the script is idempotent so a re-run after a merge is free |
 | FR-23's Claude Code headless runner in GitHub Actions is **unverified** | Spec's own Unresolved Question #2. P5 task 052 proves the runner before 053 wires it |
 | Scope creep back into rejected territory | The spec's Out-of-Scope list is reproduced in each task's `<constraints>` so a later task cannot silently re-adopt it |
+
+### 3.5 Autonomous execution contract
+
+Owner direction 2026-09-04: **run autonomously as long as it is safe and accurate.** Do not stop between
+waves for confirmation. Stop only when a true decision is required or a significant issue arises.
+
+**What runs without asking**: every task whose acceptance criteria are a closed set and whose verification
+is mechanical — which is most of them. Dispatch each task through `task-execute` at its declared
+`<model-tier>`/`<effort>`, run the Step 9.5 gates, mark the task ✅, and continue to the next wave.
+
+**Between every wave, verify before dispatching the next** (project-pipeline Step 5):
+
+- any `.cs` touched → `dotnet build Spaarke.sln` (the solution, not one project — test projects glob shared sources)
+- any `.ts`/`.tsx` touched → build the relevant package
+- **a red build STOPS the run.** Do not dispatch the next wave on a broken tree.
+
+**Hard stops — these are decisions, not obstacles.** Surface and wait:
+
+| Where | Condition | Why it cannot be autonomous |
+|---|---|---|
+| **012** | A stale/contested ADR governing auth, security, tenant isolation, or compliance | CLAUDE.md §6.5 **requires** explicit human sign-off. Non-negotiable. |
+| **020** | The criterion set is empty, or large enough that P2b exceeds the rest of the project | Changes the project's shape — an r4-versus-r5 scope call |
+| **052** | The headless runner does not work | P5 drops FR-23 rather than building an alternative; that is an owner call |
+| **012** | A path-B amendment would change a rule other active worktrees depend on | Cross-worktree coordination |
+| **any** | `/conflict-check` reports another worktree actively editing the same file | Silent overwrite is what NFR-06 exists to prevent |
+| **any** | A fired `<escalation><trigger>` | Each one marks a known judgment boundary. Firing is a legitimate outcome, **not a failure** — do not retry past it |
+
+**What is NOT a stop**: a task failing its own verification. Fix it and re-run, or mark it 🔄 and continue
+with the wave's other tasks. One failure does not abort a wave.
+
+**One prerequisite before P3**: resolve risk **R4** — `spec.md` FR-10 still describes the superseded
+requirement. Amend it (or record the divergence) before task 030 runs.
 
 ---
 
@@ -302,16 +336,16 @@ Mirrors spec §Success Criteria; each is verified by exercising the mechanism, n
 
 ## 9. Next Steps
 
-1. **Review** this plan and `tasks/TASK-INDEX.md`
-2. **Resolve R4** — update `spec.md` FR-10 to the revision-header standard so spec and tasks agree
-3. **Run** `/conflict-check` before starting any phase that touches `.claude/` or `.github/workflows/`
-4. **Execute** P1 via `task-execute` (tasks 001–004) — touches nothing hot, ships in days
-5. **After P2a**, re-run `/task-create` for P2b
+1. **Resolve R4** — update `spec.md` FR-10 to the revision-header standard so spec and tasks agree
+2. **Run** `/conflict-check` for `.claude/` and `.github/workflows/`
+3. **Execute autonomously from task 001**, wave by wave per §3.5, building between waves
+4. **After P2a**, re-run `/task-create` for P2b, then continue
+5. **Stop only** on a §3.5 hard stop, a fired escalation trigger, or a red build
 
 ---
 
-**Status**: Ready for Tasks — initialize-only; execution operator-gated
-**Next Action**: operator review, then task 001
+**Status**: Ready for Tasks — **autonomous execution**
+**Next Action**: resolve R4, then start task 001 and run through
 
 ---
 

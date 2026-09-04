@@ -7,10 +7,10 @@
 
 ## Project Status
 
-- **Phase**: Initialized (initialize-only; execution operator-gated)
+- **Phase**: Initialized — **ready for autonomous execution**
 - **Last Updated**: 2026-09-04
 - **Current Task**: Not started
-- **Next Action**: resolve the FR-10 spec amendment (R4 below), then task 001
+- **Next Action**: resolve the FR-10 spec amendment (R4 below), then run tasks 001 onward autonomously
 
 ---
 
@@ -58,6 +58,32 @@ implement manually.
 | "pick up where we left off" | Load `current-task.md`, invoke task-execute |
 
 Bypassing loses ADR constraints, checkpointing, and the Step 9.5 gates.
+
+### 🚨 Execution posture: AUTONOMOUS (owner direction, 2026-09-04)
+
+**Run autonomously as long as it is safe and accurate.** Do not stop between waves for confirmation. Work
+through the waves in `tasks/TASK-INDEX.md`, dispatching each task via `task-execute` at its declared
+`<model-tier>`/`<effort>`, running the Step 9.5 gates, marking it ✅, and continuing.
+
+**Between every wave**: build before dispatching the next. Any `.cs` touched → `dotnet build Spaarke.sln`
+(the **solution**, not one project — test projects glob shared sources, so a green single-project build is
+not evidence). Any `.ts`/`.tsx` → build the relevant package. **A red build stops the run.**
+
+**Stop and ask only for these** — they are decisions, not obstacles:
+
+| Where | Condition |
+|---|---|
+| **012** | A stale/contested ADR governing auth, security, tenant isolation, or compliance — CLAUDE.md §6.5 **requires** human sign-off |
+| **012** | A path-B amendment changing a rule other active worktrees depend on |
+| **020** | Criterion set empty, or large enough that P2b exceeds the rest of the project |
+| **052** | Headless runner does not work — P5 drops FR-23 rather than building an alternative |
+| **any** | `/conflict-check` shows another worktree actively editing the same file |
+| **any** | A fired `<escalation><trigger>` — each marks a known judgment boundary. Firing is a **legitimate outcome, not a failure**; do not retry past it |
+
+**Not a stop**: a task failing its own verification. Fix and re-run, or mark 🔄 and continue with the
+wave's other tasks. One failure does not abort a wave.
+
+**Before P3**: resolve risk R4 (`spec.md` FR-10 still describes the superseded requirement).
 
 ### 🚨 Project-specific execution rules
 
@@ -114,8 +140,10 @@ agents per wave. **`.claude/` tasks are sequential.**
 
 - 2026-09-04: **Split P2** into P2a (classify, 010–013) and P2b (write tests, 020 → N). FR-07's size is
   unknown until FR-05 runs; committing to a count first is a guess. (Owner, spec Unresolved Q1)
-- 2026-09-04: **Initialize-only** — pipeline generates artifacts + tasks; execution operator-gated wave by
-  wave. Matches the repo convention across ~10 active projects. (Owner)
+- 2026-09-04: **Autonomous execution** — run wave by wave without per-wave confirmation, as long as it is
+  safe and accurate; gate only on a true decision or a significant issue. Supersedes the initialize-only
+  posture chosen earlier the same day. The POML `<escalation><trigger>` blocks are the stop conditions and
+  are now load-bearing. (Owner)
 - 2026-09-04: **FR-10 replaced by a revision-header standard** — one standard way to date and
   revision-track files: at the top, human readable, carrying `version` + `revision-type` beyond the date,
   and **applied by script, not by LLM**. (Owner)

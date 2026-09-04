@@ -1,9 +1,14 @@
 # Task Index — Code Quality & Assurance R4
 
 > **Last Updated**: 2026-09-04
-> **Status**: Initialized (INITIALIZE-ONLY — execution operator-gated wave by wave)
+> **Status**: Initialized — **AUTONOMOUS execution** (owner direction 2026-09-04)
 > **Tasks**: 33 generated · **P2b**: not yet decomposed (sized by task 020)
 > **Lint**: `pwsh scripts/Validate-TaskPoml.ps1 projects/code-quality-and-assurance-r4/tasks` → 33/33 clean
+
+> **How to run this project**: work top to bottom, dispatching each task via `task-execute` without asking
+> between waves. **Build between waves** (`dotnet build Spaarke.sln` for any `.cs`). Stop only for a
+> plan.md §3.5 hard stop, a fired `<escalation><trigger>`, or a red build. A task failing its own
+> verification is **not** a stop — fix and re-run, or mark 🔄 and carry on with the wave.
 
 Legend: 🔲 not started · 🔄 needs retry · ✅ complete · ⏸️ blocked
 
@@ -107,6 +112,13 @@ Everything else is serial: either a hard dependency chain (030→031→032→033
 
 ### `/goal` wave eligibility
 
+> **This table is about the `/goal` loop specifically — not about whether to run autonomously.** Execution
+> **is** autonomous (see the banner above). `/goal` is a narrower mechanism: a Haiku evaluator judges a
+> compiled stopping condition from the transcript. It is not eligible here because r4's waves are small,
+> judgment-dense, or irreversible — a transcript-only evaluator cannot tell whether an ADR was correctly
+> classified `stale` or whether 230 files were rewritten without losing a date. Dispatch normally and
+> autonomously; just don't wrap a wave in `/goal`.
+
 | Wave | Eligible | Reason |
 |---|---|---|
 | P1 | ❌ | Only 3 tasks, and 001 is an ADR amendment carrying a §6.5 obligation — judgment, not machine-verifiable |
@@ -115,7 +127,7 @@ Everything else is serial: either a hard dependency chain (030→031→032→033
 | P4 | ❌ | Mostly `.claude/` serial writes on a contended surface |
 | P5 | ❌ | 052 is a spike whose negative result changes the phase's shape |
 
-**No wave is `/goal`-eligible.** Per `task-create` Step 3.85 the bar is a machine-verifiable end-state across ≥3 well-specified low-ambiguity tasks; r4's waves are small, judgment-dense, or irreversible. Dispatch normally.
+**No wave is `/goal`-eligible.** Per `task-create` Step 3.85 the bar is a machine-verifiable end-state across ≥3 well-specified low-ambiguity tasks. Dispatch autonomously without the `/goal` wrapper.
 
 ---
 
