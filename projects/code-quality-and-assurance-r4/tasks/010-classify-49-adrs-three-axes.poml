@@ -4,7 +4,7 @@
     <title>Classify all 49 ADRs on three axes and grow INDEX.md from 36 to 49</title>
     <phase>2a Every ADR is routed, accurate, and measured</phase>
     <gate>startable</gate>
-    <status>not-started</status>
+    <status>completed</status>
     <rigor>FULL</rigor>
     <rigor-reason>Architectural classification with repo-wide blast radius — the enforceability and accuracy verdicts decide what P2b enforces and what FR-08 blocks from enforcement. A wrong "current" verdict causes a stale rule to be enforced in CI.</rigor-reason>
     <model-tier>opus</model-tier>
@@ -81,7 +81,7 @@
   </outputs>
 
   <acceptance-criteria>
-    <criterion testable="true">Given INDEX.md, it lists exactly 49 ADR entries.</criterion>
+    <criterion testable="true">SUPERSEDED (arithmetic cannot hold): INDEX.md lists 50 rows — the 49 concise ADR files PLUS ADR-038, which has an INDEX row but no .claude/adr/ file (canonical at docs/adr/, its row carries the content inline). The task constraint forbids removing existing entries, so 49 rows was unreachable without deleting a protected row. All 49 files are now indexed; zero files lack a row. See notes/adr-classification-2026-09.md deviation 2.</criterion>
     <criterion testable="true">Given each of the 49, an enforceability value and a one-line reason are recorded.</criterion>
     <criterion testable="true">Given each of the 49, an accuracy value and a one-line reason are recorded.</criterion>
     <criterion testable="true">Given each judgment-only ADR, a checkability value and a one-line reason are recorded.</criterion>
@@ -93,4 +93,17 @@
   <notes>Maps spec.md FR-05. Spec assumption worth testing here: ADR-028 (auth, 1,521 citations) may already be effectively enforced by unnamed auth guards — step 1 determines this, and the answer changes whether P2b needs a test for it. Feeds task 011 (routing), task 012 (§6.5 records), and task 020 (criterion sizing).</notes>
 
   <execution><skill>.claude/skills/task-execute/SKILL.md</skill></execution>
+  <completion>
+    <date>2026-09-04</date>
+    <summary>All 49 ADRs classified on enforceability (21 enforceable / 25 partially-enforceable / 3 judgment-only), accuracy (38 current / 10 contested / 1 stale), and checkability for the 3 judgment-only ADRs. INDEX.md grew from 36 to 50 rows — 14 missing entries added, not the 13 the spec predicted. Full reasoning in notes/adr-classification-2026-09.md.
+
+HEADLINE FINDING: ten ADRs carry Status: Proposed and were never ratified, yet six have substantial shipped code — ADR-019 (ProblemDetails) across 187 files, ADR-042 across 92, ADR-043 across 59. Classified contested not because they are inaccurate but because enforcing an unratified rule is what FR-08 exists to prevent; the likely 6.5 path for all ten is CONFIRM (ratify), not amend. ADR-018 (Proposed) is enforced by ADR-032 (Accepted).
+
+SPEC ASSUMPTION RESOLVED: ADR-028 IS already enforced by unnamed guards — six arch-test files cite it. P2b needs no new test for it, only naming (task 011). More broadly enforcement is 17/49 (8 named + 9 unnamed), not 7/49.
+
+Escalation trigger 3 checked: 11 of 49 stale-or-contested = 22.4%, under the one-third threshold, so task 012 stays a step rather than becoming its own project.</summary>
+    <files-modified>.claude/adr/INDEX.md; projects/code-quality-and-assurance-r4/notes/adr-classification-2026-09.md</files-modified>
+    <deviations>(1) 14 ADRs were missing from INDEX, not 13 — ADR-038 has a row with no file, so 36 rows = 35 file-backed + 1 fileless and the subtraction hid a compensating pair. Headline counts both matched, so the trigger did not fire. (2) The "exactly 49 entries" criterion is unreachable — superseded above. (3) ADR-035 exists in neither tier; a numbering gap, not a missing file. (4) Accuracy verification depth is uneven and stated: strong for the Proposed/Superseded findings and for enforceability, weaker for `current` on the 25 partially-enforceable ADRs.</deviations>
+  </completion>
+
 </task>
