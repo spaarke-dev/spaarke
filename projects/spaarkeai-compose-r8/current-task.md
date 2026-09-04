@@ -1,7 +1,7 @@
 # Current Task State — `spaarkeai-compose-r8`
 
-> **Last Updated**: 2026-09-02 (by `context-handoff`) — end of a long session. **Branch PUSHED; tree clean.**
-> **Recovery**: read Quick Recovery, then §UX (the live backlog), then §U8, then §R0.
+> **Last Updated**: 2026-09-03 (by `context-handoff`) — end of a long session. **Branch PUSHED; tree clean.**
+> **Recovery**: read Quick Recovery, then **§GAPS (the highest-priority open work)**, then §UX, then §U8-BUILD.
 > Everything below "Full State" is preserved history from earlier checkpoints.
 
 ---
@@ -11,10 +11,11 @@
 | Field | Value |
 |---|---|
 | **Where we are** | **R8's own gates are CLOSED.** Track A passed (owner UAT: saved, reopened, edits held). `section-break-flattened` **ACCEPTED** — the signed residual-loss set is now **six rows**. The project has since absorbed an owner-approved **UX backlog**, most of which is now done and deployed. |
-| **Branch** | `work/spaarkeai-compose-r8` @ **`20abcee77`** — **pushed, 0 unpushed, tree clean. 0 behind master, 61 ahead.** PR **#924** left a **DRAFT deliberately** (the Word-menu item has no host handler yet). |
-| **2026-09-03 session** | **Numbering RE-SCOPED to display-only** (experiment run, see Next Action). **Item 8 built server-side + client-flow**, NOT yet triggerable — see §U8-BUILD. Owner decisions taken this session: numbering lands in R8; item 8 is an on-demand **report artifact** (not a panel), **appendix first**, live pull, save-gated. |
-| **Next Action** | **1) Numbering — RE-SCOPED 2026-09-03, do NOT build the parity corpus first.** The gating experiment the design note demanded has been RUN (two seam tests + negative control): **an editor-created list already saves as a genuinely numbered, fully resolvable list** and the read side computes "1." for it. Items 3 + 4 are **DISPLAY defects only**; there is no write-path hole, so no second numbering engine is needed for saves to be correct and the corpus is no longer a prerequisite. Read the `✅ EXPERIMENT RUN 2026-09-03` block + `Revised sequence` in `notes/uat/numbering-editing-design-options.md` before scoping. Remaining: the `<ol>` discriminator (F-3), native marker for editor-born lists, then item 3's stale-decoration question. **2) Item 8** — see §U8; needs a `changesText` producer + trigger, NOT a wiring job. **3) Editable spacing** (UAT item 6). |
-| **Suite** | Client **1,406/1,406** · Compose server **1,948/1,948** · ArchTests **187/187** · SprkChat **376/376** · build 0 errors — **all re-run AFTER the 24-commit master merge**, not carried over from before it |
+| **Branch** | `work/spaarkeai-compose-r8` @ **`cd6f54c84`** — **pushed, 0 unpushed, tree clean.** **PR #924 is MERGED** (master @ `d7fd88366`); the 4 commits after it have **NO open PR** and need a new one to reach master. |
+| **2026-09-03 session** | **Numbering RE-SCOPED to display-only.** **Item 8 COMPLETE end-to-end** — producer · appendix generator + save-request field · flow hook · Word-menu item · host wiring · save toggle. **PR #924 merged to master.** Dev redeployed. **A `revisionReport` DEAD WIRE was found and fixed**, and the defect class it belongs to now has a guard — see **§GAPS**. |
+| **Next Action** | **0) §GAPS — `summaryPage` is an OPEN instance of a shipped defect class. Owner directive 2026-09-03: investigate and RESOLVE, do not defer.** Then: **1) Numbering — RE-SCOPED, do NOT build the parity corpus first.** The gating experiment the design note demanded has been RUN (two seam tests + negative control): **an editor-created list already saves as a genuinely numbered, fully resolvable list** and the read side computes "1." for it. Items 3 + 4 are **DISPLAY defects only**; there is no write-path hole, so no second numbering engine is needed for saves to be correct and the corpus is no longer a prerequisite. Read the `✅ EXPERIMENT RUN 2026-09-03` block + `Revised sequence` in `notes/uat/numbering-editing-design-options.md` before scoping. Remaining: the `<ol>` discriminator (F-3), native marker for editor-born lists, then item 3's stale-decoration question. **2) Item 8** — see §U8; needs a `changesText` producer + trigger, NOT a wiring job. **3) Editable spacing** (UAT item 6). |
+| **Suite** | Compose client **1,443/1,443** (110 suites) · Compose server **2,009/2,009** · ArchTests **191/191** · BFF build 0 errors — re-run after the 17-commit master merge, not carried over |
+| **⚠️ Deploy is STALE again** | Dev runs `20abcee77`. Everything after it — the Word-menu item, host wiring, save toggle, and the `revisionReport` mapping fix — is **NOT deployed**. Redeploy BFF + `sprk_spaarkeai` together before any UAT of item 8. |
 | **Deployed** | ✅ **RE-DEPLOYED 2026-09-03** from `20abcee77` (post-master-merge), BFF + `sprk_spaarkeai` **together** (NFR-05). BFF → `spaarke-bff-dev`, `/healthz` passed + CORS verified. Code page → `sprk_spaarkeai` on `spaarkedev1`, 5,750 KB, published. **Publish size: fresh same-day master `45.43` vs branch `45.45` = `+0.02 MB`** (Compress-Archive, the method `Deploy-BffApi.ps1` uses). |
 | **⚠️ Deploy lesson (2026-09-03)** | The owner reported the OLD toolbar in `spaarkedev1` and suspected the code had been clobbered. **It had not** — `git diff c0751e0d9 HEAD -- ComposeFormatToolbar.tsx` was EMPTY. The environment was running a **stale bundle**; the prior session's "deployed" claim for UX item 5 did not match reality. Diagnosed from the screenshot by STRING literal: the visible `"Unsaved · Auto Save On"` is the exact text `c0751e0d9` removed (`git log -S` confirms), and Undo/Redo sat right instead of far left. **Before deploying a code page, verify the built artifact by string literal** (`grep -c 'Summarise changes' dist/spaarkeai.html`) — symbol names are minified, and "deployed" in a handoff is a claim, not evidence. |
 | **Deploy ordering rule learned** | **Merge master BEFORE deploying to a shared env.** On 2026-09-03 master was **17 commits** ahead carrying live BFF work (email-intelligence-r2 `OfficeService` +222 / `OfficeEndpoints` +128; unified-access-control-r2 `ExternalProjectDataEndpoints` +163, upload/SPE). Deploying the branch build without them would have **reverted merged work on `spaarkedev1`**. `@spaarke/compose-components` is aliased to **SOURCE** in SpaarkeAi's `vite.config.ts` (not a built `dist`), so no library pre-build step is needed — but that also means a stale `dist/` is never the cause; a stale *deploy* is. |
@@ -57,6 +58,79 @@
 3. 🔲 **Editable spacing** — model + renderer. **The risk that keeps it out of a UX task**: the moment the
    model owns spacing, `InheritProperties` must change, and getting it wrong flattens spacing on every
    edited paragraph — the `paragraph-style-flattened` defect replayed.
+
+---
+
+## GAPS. "Server-ready, client-unwired" — an OPEN defect class (owner directive: RESOLVE, do not defer)
+
+> **Owner directive, 2026-09-03**: *"we need to investigate those more thoroughly and get resolved, not
+> pushed off or deferred."* This section is the live work item, not a note.
+
+### The defect
+
+A feature is built at every layer — service, generator, seam test, sometimes a whole UI — and one wire is
+missing, so it does **nothing** in the running app. It is **totally silent**: no exception, no log, no red
+test. Two mechanisms produce it, both at the transport boundary:
+
+1. **The HTTP body DTO lacks the property.** `System.Text.Json` ignores unknown JSON, so a client sending
+   the field loses it with no error.
+2. **The endpoint's field-by-field mapping omits it.** `ComposeSaveEndpoints` constructs
+   `SaveComposeDocumentRequest` property by property; an unmapped property is simply never copied.
+
+**Why the test suite does not catch it**: the seam tests construct `SaveComposeDocumentRequest` directly
+and never traverse the endpoint mapping. They are green precisely while the feature is dead.
+
+### The corrected census (an earlier "three gaps" framing was WRONG — do not repeat it)
+
+| # | Instance | Status |
+|---|---|---|
+| 1 | `paraIdMap` / `importedRevisions` / `importedComments` (compose-r2 task 052) | ✅ **FIXED then.** Guard is `ComposeWorkspace.imports.test.tsx` — client-side, cannot see the server side. |
+| 2 | **`summaryPage`** (nda-r1 task 041) | 🔴 **OPEN — this is the work.** |
+| 3 | `revisionReport` (r8, this session) | ✅ **FIXED in `cd6f54c84`**, caught before it reached a user. |
+
+So: **two shipped instances plus one caught in flight — not three shipped.** The pattern is real; the
+number used earlier was not, and a wrong number in a handoff gets acted on.
+
+### The forcing function now exists
+
+`tests/Spaarke.ArchTests/ComposeSaveBodyMappingGuardTests.cs` (191/191 green) asserts every
+`SaveComposeDocumentBody` property is READ by the endpoint or listed as a deliberate omission **with a
+written reason**. Carries the ArchTests-required negative + positive controls, and a real-file control was
+run (removing `RevisionReport = body.RevisionReport` makes it fail, naming that property).
+
+⚠️ **It found a defect in its own parser**: bounding the DTO slice at a literal `");` truncated the parse
+before the last property, so the guard silently under-reported — the exact quiet-omission failure it exists
+to prevent. Now bounded at the next declaration. **If you extend this guard, re-run its own sanity
+assertion**; a parser that finds nothing makes every assertion vacuous.
+
+### `summaryPage` — the open instance, and what resolving it requires
+
+`SaveComposeDocumentRequest.SummaryPage` is consumed by `SaveAsync` (appends the NDA Summary Page via
+`AppendSection`). `ComposeSummaryPageGenerator` + `ComposeSummaryPageSeamTests` are green. **But**:
+`SaveComposeDocumentBody` has no `summaryPage` property, the endpoint never reads one, and `grep summaryPage
+src/` returns **zero** client references. **The NDA Summary Page appendix has never been produced in the
+running app since nda-r1 task 041.**
+
+It is kept EXECUTABLE, not prose: `ComposeSaveBodyMappingGuardTests.SummaryPage_IsStillTheOpenInstanceOfThisDefectClass`
+asserts the endpoint does NOT forward it. **When someone wires it that test flips red and should be
+deleted** — its purpose is to stop the gap being forgotten (FAILURE-MODES AP-12: a comment becomes the
+constraint).
+
+**Resolving it is a decision, not just a patch** — and it belongs to the agreements/NDA feature, not R8:
+- **Wire it** — add the DTO property + mapping (server half, ~2 lines, mirrors `revisionReport`) AND a
+  client sender. Without the client half, wiring the server only re-creates the same dead state.
+- **Or retire it** — if the Summary Page was superseded by `AgreementReviewSummaryPanel` / the memo
+  (`ReviewMemoDocumentBuilder`), delete `SummaryPage`, its generator and its seam test. **A field that
+  still exists is a capability that still exists** (issue #858's reasoning).
+- **Do not leave it half-wired.** That is the state that produced this whole class.
+
+### Next step for this section
+
+1. Ask the owner which path (wire / retire) — it is another project's feature and the call is theirs.
+2. **Widen the audit.** Only the Compose SAVE body has a guard. The same hand-mapping shape exists on
+   other endpoints (`ComposeEndpoints`, `OfficeEndpoints`, the AI dispatch surface). Enumerate every
+   `[FromBody]` DTO → request hand-mapping in the BFF and check each for unread properties. **Assume the
+   two found instances are not the only ones** — nobody had looked before today.
 
 ---
 
