@@ -288,7 +288,7 @@ public sealed class ComposeServiceCreateOnSaveTests
         // index exist, profile pending) — never Completed-on-claim — and the interim R5-E bar holds.
         StateOf(completion, ComposeService.StepProfileAnalysis).Should().Be(JobAwareState.Queued);
         completion.Aggregate.Should().Be(JobAwareState.Partial);
-        ComposeService.IsInterimCreateOnSaveSuccess(completion).Should().BeTrue();
+        ComposeCreateOnSavePromoter.IsInterimCreateOnSaveSuccess(completion).Should().BeTrue();
     }
 
     // ── FR-07d (task 013): promote performs an ATOMIC UPSERT on the sprk_graphitemid_uk alternate key
@@ -397,7 +397,7 @@ public sealed class ComposeServiceCreateOnSaveTests
         profile.State.Should().Be(JobAwareState.Running);
         profile.Detail.Should().Contain("background");
         result.CompletionState!.Aggregate.Should().Be(JobAwareState.Partial);
-        ComposeService.IsInterimCreateOnSaveSuccess(result.CompletionState!).Should().BeTrue();
+        ComposeCreateOnSavePromoter.IsInterimCreateOnSaveSuccess(result.CompletionState!).Should().BeTrue();
 
         // The background profile runs on a DETACHED HttpContext (not the request one) carrying the
         // captured OBO bearer token — proving the user assertion survives the response boundary (OBO).
@@ -451,7 +451,7 @@ public sealed class ComposeServiceCreateOnSaveTests
         fake.Started.IsCompleted.Should().BeFalse("no dispatch occurred, so the facade was never invoked");
         fake.InvokedDocumentId.Should().BeNull();
         result.DocumentRecordId.Should().Be(recordId);
-        ComposeService.IsInterimCreateOnSaveSuccess(result.CompletionState!).Should().BeTrue();
+        ComposeCreateOnSavePromoter.IsInterimCreateOnSaveSuccess(result.CompletionState!).Should().BeTrue();
 
         provider.Dispose();
     }
@@ -481,7 +481,7 @@ public sealed class ComposeServiceCreateOnSaveTests
         var result = await sut.SaveAsync(request, HttpContextWithBearer(), CancellationToken.None);
 
         result.DocumentRecordId.Should().Be(recordId);
-        ComposeService.IsInterimCreateOnSaveSuccess(result.CompletionState!).Should().BeTrue();
+        ComposeCreateOnSavePromoter.IsInterimCreateOnSaveSuccess(result.CompletionState!).Should().BeTrue();
 
         // The background task runs, throws, and the exception is SWALLOWED by RunBackgroundProfileAsync
         // (never rethrown) — awaiting Finished completes without faulting the test.
@@ -536,7 +536,7 @@ public sealed class ComposeServiceCreateOnSaveTests
         var completion = result.CompletionState!;
         StateOf(completion, ComposeService.StepContainer).Should().Be(JobAwareState.Failed);
         completion.Aggregate.Should().Be(JobAwareState.Failed);
-        ComposeService.IsInterimCreateOnSaveSuccess(completion).Should().BeFalse();
+        ComposeCreateOnSavePromoter.IsInterimCreateOnSaveSuccess(completion).Should().BeFalse();
     }
 
     // ── Acceptance (negative interim R5-E): a record with no index is never a success ───────────
@@ -562,7 +562,7 @@ public sealed class ComposeServiceCreateOnSaveTests
         StateOf(completion, ComposeService.StepRecord).Should().Be(JobAwareState.Completed, "the row was created");
         StateOf(completion, ComposeService.StepIndexing).Should().Be(JobAwareState.Failed);
         completion.Aggregate.Should().Be(JobAwareState.Failed);
-        ComposeService.IsInterimCreateOnSaveSuccess(completion).Should().BeFalse("no index → never a success");
+        ComposeCreateOnSavePromoter.IsInterimCreateOnSaveSuccess(completion).Should().BeFalse("no index → never a success");
     }
 
     // ── Acceptance: existing drive-item path replaces content, does NOT create a drive-item ─────
@@ -597,7 +597,7 @@ public sealed class ComposeServiceCreateOnSaveTests
             It.IsAny<HttpContext>(), "drive-existing", "spe-existing", It.IsAny<Stream>(), It.IsAny<CancellationToken>()), Times.Once);
         _spe.Verify(s => s.UploadSmallAsUserAsync(
             It.IsAny<HttpContext>(), It.IsAny<string>(), It.IsAny<string>(), It.IsAny<Stream>(), It.IsAny<CancellationToken>()), Times.Never);
-        ComposeService.IsInterimCreateOnSaveSuccess(result.CompletionState!).Should().BeTrue();
+        ComposeCreateOnSavePromoter.IsInterimCreateOnSaveSuccess(result.CompletionState!).Should().BeTrue();
     }
 
     // ── Acceptance: idempotency — re-Save of an already-promoted document does not double-create ─
@@ -819,7 +819,7 @@ public sealed class ComposeServiceCreateOnSaveTests
         // reached the response path.
         result.DocumentRecordId.Should().Be(recordId);
         result.WasPromotedThisSave.Should().BeTrue();
-        ComposeService.IsInterimCreateOnSaveSuccess(result.CompletionState!).Should().BeTrue();
+        ComposeCreateOnSavePromoter.IsInterimCreateOnSaveSuccess(result.CompletionState!).Should().BeTrue();
         capture.CallCount.Should().Be(1, "capture was attempted (and threw) — proving the Save absorbed the failure");
     }
 
@@ -903,7 +903,7 @@ public sealed class ComposeServiceCreateOnSaveTests
         var result = await sut.SaveAsync(request, TestHttpContexts.Authenticated(), CancellationToken.None);
 
         result.DocumentRecordId.Should().Be(recordId);
-        ComposeService.IsInterimCreateOnSaveSuccess(result.CompletionState!).Should().BeTrue(
+        ComposeCreateOnSavePromoter.IsInterimCreateOnSaveSuccess(result.CompletionState!).Should().BeTrue(
             "a missing memory-capture facade must never affect the Save");
     }
 

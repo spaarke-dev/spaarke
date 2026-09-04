@@ -1,3 +1,4 @@
+using Microsoft.Extensions.Diagnostics.HealthChecks;
 using Sprk.Bff.Api.Services.Compose;
 
 namespace Sprk.Bff.Api.Infrastructure.DI;
@@ -60,6 +61,29 @@ public static class ComposeModule
         // scoped ISpeFileOperations); the hosted service resolves it via CreateScope.
         services.AddScoped<SpeSyncOrchestrator>();
         services.AddHostedService<SpeWebhookRenewalHostedService>();
+
+        // #781 item 4b — save-identity key health. ONE class on TWO surfaces, mirroring
+        // RoutingConsumerTypeHealthCheck (RoutingModule): the hosted service logs the key's status at
+        // startup, and the same instance answers /healthz/catalog continuously.
+        //
+        // Registered as a singleton FIRST so both surfaces share one instance — AddHostedService and
+        // AddCheck would otherwise each construct their own, and a test subclass registered over this
+        // would only replace one of them.
+        //
+        // DEGRADED, never Unhealthy, and tagged "catalog" so it lands on /healthz/catalog and NOT on
+        // the /healthz liveness probe (which filters on !Tags.Contains("catalog")). Both choices say
+        // the same thing: a broken identity key must not take instances out of rotation or fail a
+        // deploy gate. The platform compensates — existing documents still save via the item-2
+        // self-heal; only the creation of a NEW document is affected. See the class doc for why this
+        // deliberately differs from its Unhealthy-on-drift sibling.
+        services.AddSingleton<ComposeIdentityKeyHealthCheck>();
+        services.AddHostedService(sp => sp.GetRequiredService<ComposeIdentityKeyHealthCheck>());
+        services.AddHealthChecks()
+            .AddCheck<ComposeIdentityKeyHealthCheck>(
+                "compose-identity-key",
+                failureStatus: HealthStatus.Degraded,
+                tags: new[] { "compose", "identity-key", "catalog" });
+
         return services;
     }
 }

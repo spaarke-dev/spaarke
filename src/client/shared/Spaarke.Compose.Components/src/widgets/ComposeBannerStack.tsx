@@ -34,13 +34,17 @@ import * as React from 'react';
 import {
   makeStyles,
   tokens,
+  Popover,
+  PopoverTrigger,
+  PopoverSurface,
+  Text,
   MessageBar,
   MessageBarBody,
   MessageBarTitle,
   MessageBarActions,
   Button,
 } from '@fluentui/react-components';
-import { Dismiss16Regular } from '@fluentui/react-icons';
+import { Dismiss16Regular, Info16Regular } from '@fluentui/react-icons';
 
 import type {
   ComposeCheckoutLockedByInfo,
@@ -319,9 +323,14 @@ const SAVE_DEGRADATION_COPY: Record<string, string> = {
   // simplifications (the text/content is intact) — folded into the concise summary below via
   // SAVE_DEGRADATION_LABEL rather than one sentence each. Entries here keep the per-code fallback honest
   // if the summary path is ever bypassed. See also DEF-002 (the actual widener engine work, UAT-07a).
-  'indentation-dropped': 'Some indentation was simplified.',
-  'paragraph-style-flattened': 'Some paragraph styles were simplified.',
-  'section-break-flattened': 'A section break was simplified.',
+  // 'indentation-dropped' and 'paragraph-style-flattened' RETIRED (#777, 2026-09-01) — same
+  // Direction-B rule as 'internal-link-flattened' below. Neither has a producer any more: task 041 made
+  // an edited block inherit w:ind from its base, and ComposeBlockMerge.InheritParagraphProperties now
+  // carries an UNMODELED w:pStyle (only Normal/Heading1-6/ListParagraph are the model's to decide). They
+  // were also whole-document open-time counts, which is how an untouched contract reported "×84 / ×85".
+  // Leaving the copy would let a reader conclude the server still emits them.
+  'section-break-flattened':
+    'A section break was removed — page setup and headers from that point now follow the final section.',
   'tab-flattened': 'Some tab stops were simplified.',
   'table-formatting-flattened': 'Some table formatting was simplified.',
   'line-break-flattened': 'A line break was simplified.',
@@ -336,8 +345,7 @@ const SAVE_DEGRADATION_COPY: Record<string, string> = {
 // Codes not listed here fall back to their full SAVE_DEGRADATION_COPY sentence (they are usually
 // content-affecting, e.g. a dropped link target, and deserve their own line).
 const SAVE_DEGRADATION_LABEL: Record<string, string> = {
-  'indentation-dropped': 'indentation',
-  'paragraph-style-flattened': 'paragraph styles',
+  // 'indentation-dropped' / 'paragraph-style-flattened' RETIRED — see SAVE_DEGRADATION_COPY above.
   'section-break-flattened': 'section breaks',
   'tab-flattened': 'tab stops',
   'table-formatting-flattened': 'table formatting',
@@ -390,6 +398,25 @@ function saveDegradationSignature(warnings: ReadonlyArray<{ code: string; count:
 }
 
 const useStyles = makeStyles({
+  // UAT round 1 #2 — the collapsed formatting-notice row. One line of chrome instead of a stack of
+  // full-width MessageBars. Semantic tokens only (ADR-021).
+  noticeRow: {
+    display: 'flex',
+    alignItems: 'center',
+    gap: tokens.spacingHorizontalXS,
+    paddingInline: tokens.spacingHorizontalM,
+    paddingBlock: tokens.spacingVerticalXXS,
+    backgroundColor: tokens.colorNeutralBackground2,
+    borderRadius: tokens.borderRadiusMedium,
+  },
+  noticeIcon: { color: tokens.colorNeutralForeground3, flexShrink: 0 },
+  noticeText: { color: tokens.colorNeutralForeground2 },
+  noticePopover: {
+    display: 'flex',
+    flexDirection: 'column',
+    gap: tokens.spacingVerticalM,
+    maxWidth: '380px',
+  },
   bannerStack: {
     display: 'flex',
     flexDirection: 'column',
@@ -491,6 +518,11 @@ export function ComposeBannerStack(props: ComposeBannerStackProps): React.JSX.El
   const concurrencyNotice = saveWarnings.find(w => w.code === CONCURRENT_EXTERNAL_CHANGE_CODE) ?? null;
   const degradationOnlyWarnings = saveWarnings.filter(w => w.code !== CONCURRENT_EXTERNAL_CHANGE_CODE);
   const showSaveDegradation = degradationOnlyWarnings.length > 0 && !saveWarningsDismissed;
+  // UAT round 1 #2 — how many formatting-notice families are currently showing. Drives the collapsed
+  // row's count and its render gate. Deliberately a count of FAMILIES, not of individual warning codes:
+  // the popover shows one paragraph per family, and "7 formatting notices" for a single simplification
+  // message would be the same over-reporting the retired per-paragraph warnings were guilty of.
+  const formattingNoticeCount = (showImportWarnings ? 1 : 0) + (showSaveDegradation ? 1 : 0);
   const showConcurrencyNotice = concurrencyNotice !== null && !saveWarningsDismissed;
 
   // UAT #7: a successful Save previously showed no confirmation — the button flipped from
@@ -829,28 +861,80 @@ export function ComposeBannerStack(props: ComposeBannerStackProps): React.JSX.El
         </MessageBar>
       ) : null}
 
-      {showImportWarnings ? (
-        <MessageBar intent="info" data-testid="compose-workspace-import-warning-banner" aria-live="polite">
-          <MessageBarBody>
-            <MessageBarTitle>Some formatting was simplified</MessageBarTitle>
-            This document uses advanced Word features that Compose shows in a simplified view. Your original file
-            isn&apos;t changed until you save.
-          </MessageBarBody>
-          {/* FR-21/DEF-15: Fluent v9's MessageBar dismiss affordance — the trailing
-              container action. Clears the banner AND persists the dismissal to
-              sessionStorage so it stays closed for the rest of the session. */}
-          <MessageBarActions
-            containerAction={
-              <Button
-                appearance="transparent"
-                aria-label="Dismiss"
-                icon={<Dismiss16Regular />}
-                data-testid="compose-workspace-import-warning-dismiss"
-                onClick={dismissImportWarnings}
-              />
-            }
+      {/* ═══ UAT round 1 #2 (r8, 2026-09-02) — FORMATTING NOTICES, COLLAPSED ═══
+          The two formatting-notice families (load-time "simplified view" and save-time "simplified when
+          saving") used to render as full-width MessageBars stacked in this rail. On a real contract that
+          is several lines of chrome above the document, every session — the owner's "very intrusive,
+          takes a lot of space".
+
+          They now collapse into ONE compact row: a count plus a popover holding the same copy verbatim.
+          Nothing is lost, and both keep their own sessionStorage dismissal keys, so dismissing the load
+          notice still does not dismiss a later save notice (026-F5) — the two families stay independent
+          behind one affordance.
+
+          WHY HERE AND NOT IN THE TOOLBAR: the owner asked for this as part of the toolbar redesign. The
+          warning STATE lives in ComposeWorkspace and the toolbar lives inside ComposeEditor, so hosting
+          it there would mean threading this state through a 4,000-line component purely for placement.
+          This rail sits immediately above the toolbar, so the affordance reads as adjacent to it while
+          the state stays where it is owned. Flagged for the owner to redirect if the exact position
+          matters more than the coupling.
+
+          ERRORS ARE DELIBERATELY NOT COLLAPSED. A failed save, a checkout conflict and a redline anchor
+          failure stay full-width: they are actionable and blocking, and hiding one behind a popover would
+          be the opposite of the never-silent rule the rest of this release enforces. ═══ */}
+      {formattingNoticeCount > 0 ? (
+        <div className={styles.noticeRow} data-testid="compose-workspace-formatting-notices">
+          <Info16Regular className={styles.noticeIcon} aria-hidden />
+          <Text size={200} className={styles.noticeText}>
+            {formattingNoticeCount === 1 ? '1 formatting notice' : `${formattingNoticeCount} formatting notices`}
+          </Text>
+          <Popover withArrow positioning="below-start" size="small">
+            <PopoverTrigger disableButtonEnhancement>
+              <Button appearance="transparent" size="small" data-testid="compose-workspace-formatting-notices-open">
+                View
+              </Button>
+            </PopoverTrigger>
+            <PopoverSurface data-testid="compose-workspace-formatting-notices-popover">
+              <div className={styles.noticePopover}>
+                {showImportWarnings ? (
+                  <div data-testid="compose-workspace-import-warning-notice">
+                    <Text weight="semibold" as="p">
+                      Some formatting was simplified
+                    </Text>
+                    <Text size={200} as="p">
+                      This document uses advanced Word features that Compose shows in a simplified view. Your original
+                      file isn&apos;t changed until you save.
+                    </Text>
+                  </div>
+                ) : null}
+                {showSaveDegradation ? (
+                  <div data-testid="compose-workspace-save-degradation-notice">
+                    <Text weight="semibold" as="p">
+                      Some formatting was simplified when saving
+                    </Text>
+                    <Text size={200} as="p">
+                      {`${summarizeSaveDegradation(degradationOnlyWarnings)} These changes are in the version you just saved. The previous version is still available in version history.`}
+                    </Text>
+                  </div>
+                ) : null}
+              </div>
+            </PopoverSurface>
+          </Popover>
+          <Button
+            appearance="transparent"
+            size="small"
+            aria-label="Dismiss formatting notices"
+            icon={<Dismiss16Regular />}
+            data-testid="compose-workspace-formatting-notices-dismiss"
+            onClick={() => {
+              // Each family keeps its OWN dismissal key (026-F5). Dismissing the collapsed row dismisses
+              // whichever families are currently showing — not a single shared flag, which would make a
+              // later save notice inherit an earlier load dismissal.
+              if (showImportWarnings) dismissImportWarnings();
+              if (showSaveDegradation) dismissSaveWarnings();
+            }}
           />
-        </MessageBar>
+        </div>
       ) : null}
 
       {showConcurrencyNotice ? (
@@ -870,28 +954,6 @@ export function ComposeBannerStack(props: ComposeBannerStackProps): React.JSX.El
                 aria-label="Dismiss"
                 icon={<Dismiss16Regular />}
                 data-testid="compose-workspace-concurrency-dismiss"
-                onClick={dismissSaveWarnings}
-              />
-            }
-          />
-        </MessageBar>
-      ) : null}
-
-      {showSaveDegradation ? (
-        // 026-F5 (task 012, r6): save-time degradation — the save SUCCEEDED but some content was
-        // simplified while authoring it. Own dismissible banner; NOT gated by hideImportWarnings.
-        <MessageBar intent="warning" data-testid="compose-workspace-save-degradation-banner" aria-live="polite">
-          <MessageBarBody>
-            <MessageBarTitle>Some formatting was simplified when saving</MessageBarTitle>
-            {`${summarizeSaveDegradation(degradationOnlyWarnings)} These changes are in the version you just saved. The previous version is still available in version history.`}
-          </MessageBarBody>
-          <MessageBarActions
-            containerAction={
-              <Button
-                appearance="transparent"
-                aria-label="Dismiss"
-                icon={<Dismiss16Regular />}
-                data-testid="compose-workspace-save-degradation-dismiss"
                 onClick={dismissSaveWarnings}
               />
             }
