@@ -808,6 +808,10 @@ export interface ComposeEditorProps {
    * notice, an Assistant dispatch). Omitted ⇒ the menu item does not render.
    */
   onSummarizeChanges?: () => void;
+  /** R8 UAT item 8 — passthrough for the Save-menu "Include revision report" toggle (host-controlled). */
+  includeRevisionReport?: boolean;
+  /** R8 UAT item 8 — passthrough toggle handler; the item renders only when both are supplied. */
+  onIncludeRevisionReportToggle?: (include: boolean) => void;
   /** Save handler (create-on-save first Save, or update). Renders the Save split-button when set.
    *  G7 (task 022): receives the split-button choice — `'version'` (default, replace/dedup) or `'new'`
    *  (fork a new document). A bare call (Ctrl+S / cross-pane bridge) defaults to `'version'`. */
@@ -2182,6 +2186,8 @@ export const ComposeEditor = React.forwardRef<ComposeEditorHandle, ComposeEditor
       onOpenInWord,
       onOpenInWordDesktop,
       onSummarizeChanges,
+      includeRevisionReport,
+      onIncludeRevisionReportToggle,
       wordActionsDisabled,
       onSave,
       canSave,
@@ -3700,6 +3706,8 @@ export const ComposeEditor = React.forwardRef<ComposeEditorHandle, ComposeEditor
           onOpenInWord={onOpenInWord}
           onOpenInWordDesktop={onOpenInWordDesktop}
           onSummarizeChanges={onSummarizeChanges}
+          includeRevisionReport={includeRevisionReport}
+          onIncludeRevisionReportToggle={onIncludeRevisionReportToggle}
           wordActionsDisabled={wordActionsDisabled}
           onSave={onSave}
           canSave={canSave}

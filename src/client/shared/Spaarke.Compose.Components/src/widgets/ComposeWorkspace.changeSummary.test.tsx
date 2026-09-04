@@ -278,4 +278,120 @@ describe('ComposeWorkspace — change-summary wiring', () => {
     // banner here would duplicate it.
     expect(screen.queryByTestId('compose-workspace-change-summary-message')).not.toBeInTheDocument();
   });
+
+  describe('the revision-report appendix toggle', () => {
+    function registerBinding(): void {
+      registerComposeAiToolbarAction({
+        id: 'compose-summarize-word-changes',
+        label: 'Summarise changes',
+        tooltip: 'Summarise the tracked changes made in Word',
+        bindingId: 'binding-guid-1',
+        placement: 'overflow',
+        surfaces: [],
+      });
+    }
+
+    it('does not offer the toggle before a summary exists — there is no report to append', async () => {
+      mockFetchRoutes({ revisions: [] });
+      renderWorkspace();
+      await waitFor(() => expect(screen.getByTestId('compose-editor-stub')).toBeInTheDocument());
+
+      // Undefined on BOTH props is what hides the Save-menu item. An always-visible toggle would
+      // promise an appendix the save could not produce.
+      const props = editorProps.current as { includeRevisionReport?: unknown; onIncludeRevisionReportToggle?: unknown };
+      expect(props.includeRevisionReport).toBeUndefined();
+      expect(props.onIncludeRevisionReportToggle).toBeUndefined();
+    });
+
+    it('offers the toggle once a summary has been generated', async () => {
+      registerBinding();
+      const enqueue = jest.fn().mockResolvedValue({
+        result: { summary: 'A cap was added.', changes: [{ kind: 'insertion', location: 'S7.4', description: 'cap' }] },
+      });
+      mockFetchRoutes({ revisions: [REVISION] });
+
+      render(
+        <FluentProvider theme={webLightTheme}>
+          <ComposeWorkspace
+            bffBaseUrl="https://bff.example.test"
+            driveId={DRIVE_ID}
+            tenantId="tenant-1"
+            initialDocumentRef={{ speDriveItemId: SPE_ID }}
+            enqueueComposeAction={enqueue}
+          />
+        </FluentProvider>
+      );
+      await waitFor(() => expect(screen.getByTestId('compose-editor-stub')).toBeInTheDocument());
+
+      await act(async () => {
+        editorProps.current.onSummarizeChanges?.();
+      });
+
+      await waitFor(() => {
+        const props = editorProps.current as {
+          includeRevisionReport?: unknown;
+          onIncludeRevisionReportToggle?: unknown;
+        };
+        expect(props.includeRevisionReport).toBe(false);
+        expect(typeof props.onIncludeRevisionReportToggle).toBe('function');
+      });
+    });
+
+    it('captures the result from the DISPATCH, so the appendix cannot disagree with what the Assistant showed', async () => {
+      registerBinding();
+      const enqueue = jest.fn().mockResolvedValue({
+        result: { summary: 'A cap was added.', changes: [{ kind: 'insertion', location: 'S7.4', description: 'cap' }] },
+      });
+      mockFetchRoutes({ revisions: [REVISION] });
+
+      render(
+        <FluentProvider theme={webLightTheme}>
+          <ComposeWorkspace
+            bffBaseUrl="https://bff.example.test"
+            driveId={DRIVE_ID}
+            tenantId="tenant-1"
+            initialDocumentRef={{ speDriveItemId: SPE_ID }}
+            enqueueComposeAction={enqueue}
+          />
+        </FluentProvider>
+      );
+      await waitFor(() => expect(screen.getByTestId('compose-editor-stub')).toBeInTheDocument());
+
+      await act(async () => {
+        editorProps.current.onSummarizeChanges?.();
+      });
+
+      // The toggle only becomes available because the dispatch RESULT was read — a dispatch that
+      // returns nothing usable must leave it unavailable rather than offering an empty appendix.
+      await waitFor(() =>
+        expect((editorProps.current as { includeRevisionReport?: unknown }).includeRevisionReport).toBe(false)
+      );
+    });
+
+    it('leaves the toggle unavailable when the dispatch returns no usable payload', async () => {
+      registerBinding();
+      const enqueue = jest.fn().mockResolvedValue({ result: { unexpected: true } });
+      mockFetchRoutes({ revisions: [REVISION] });
+
+      render(
+        <FluentProvider theme={webLightTheme}>
+          <ComposeWorkspace
+            bffBaseUrl="https://bff.example.test"
+            driveId={DRIVE_ID}
+            tenantId="tenant-1"
+            initialDocumentRef={{ speDriveItemId: SPE_ID }}
+            enqueueComposeAction={enqueue}
+          />
+        </FluentProvider>
+      );
+      await waitFor(() => expect(screen.getByTestId('compose-editor-stub')).toBeInTheDocument());
+
+      await act(async () => {
+        editorProps.current.onSummarizeChanges?.();
+      });
+
+      await waitFor(() => expect(enqueue).toHaveBeenCalled());
+      expect((editorProps.current as { includeRevisionReport?: unknown }).includeRevisionReport).toBeUndefined();
+    });
+  });
 });

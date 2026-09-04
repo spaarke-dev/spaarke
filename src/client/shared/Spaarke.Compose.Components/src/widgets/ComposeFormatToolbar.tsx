@@ -271,6 +271,19 @@ export interface ComposeFormatToolbarProps {
    */
   onSummarizeChanges?: () => void;
 
+  /**
+   * R8 UAT item 8 — "Include revision report" in the SAVE menu. Checked state is host-controlled and
+   * the item renders ONLY when the host wires both, which it does only once a change summary has
+   * actually been generated. That gating is the point: there is no report to append until one exists,
+   * and an always-visible toggle would promise an appendix the save could not produce.
+   *
+   * It lives in the Save menu rather than the Word menu (where "Summarise changes" sits) because it
+   * modifies what the SAVE writes — unlike the summary itself, which only reads.
+   */
+  includeRevisionReport?: boolean;
+  /** Toggles {@link includeRevisionReport}. Rendered only when supplied alongside it. */
+  onIncludeRevisionReportToggle?: (include: boolean) => void;
+
   // ---- Track Changes (item 4, UAT round-4) — labelled toggle, rendered only when handler set ----
   /** True when the live Track Changes decoration overlay is on (user edits render as redlines). */
   trackChangesEnabled?: boolean;
@@ -587,6 +600,8 @@ export function ComposeFormatToolbar(props: ComposeFormatToolbarProps): React.JS
     onOpenInWordDesktop,
     wordActionsDisabled,
     onSummarizeChanges,
+    includeRevisionReport,
+    onIncludeRevisionReportToggle,
     hasLoadedBaseline,
     onSave,
     canSave,
@@ -712,6 +727,7 @@ export function ComposeFormatToolbar(props: ComposeFormatToolbarProps): React.JS
   const canDeleteTable = canRunTableCommand(editor, 'deleteTable');
 
   const showWordMenu = Boolean(onOpenInWord || onOpenInWordDesktop || onSummarizeChanges);
+  const showRevisionReportToggle = includeRevisionReport !== undefined && Boolean(onIncludeRevisionReportToggle);
   const openInWordDisabled = controlDisabled || wordActionsDisabled === true;
   const saveDisabled = controlDisabled || canSave !== true || isSaving === true;
 
@@ -1203,11 +1219,13 @@ export function ComposeFormatToolbar(props: ComposeFormatToolbarProps): React.JS
           // FR-01 (task 020): the Auto Save toggle is a checkable menu item. Its checked state is
           // controlled by the host (autoSaveEnabled); rendered only when the host wired autosave
           // (both autoSaveEnabled + onAutoSaveToggle set — the FR-03 Phase-4 behavior lives there).
-          checkedValues={
-            autoSaveEnabled !== undefined && onAutoSaveToggle ? { autosave: autoSaveEnabled ? ['on'] : [] } : undefined
-          }
+          checkedValues={{
+            ...(autoSaveEnabled !== undefined && onAutoSaveToggle ? { autosave: autoSaveEnabled ? ['on'] : [] } : {}),
+            ...(showRevisionReportToggle ? { revisionreport: includeRevisionReport ? ['on'] : [] } : {}),
+          }}
           onCheckedValueChange={(_e, data) => {
             if (data.name === 'autosave') onAutoSaveToggle?.(data.checkedItems.includes('on'));
+            if (data.name === 'revisionreport') onIncludeRevisionReportToggle?.(data.checkedItems.includes('on'));
           }}
         >
           <MenuTrigger disableButtonEnhancement>
@@ -1263,6 +1281,21 @@ export function ComposeFormatToolbar(props: ComposeFormatToolbarProps): React.JS
                       third save mode. */}
                   <MenuItemCheckbox name="autosave" value="on" data-testid="compose-format-autosave-toggle">
                     Keep recovery draft
+                  </MenuItemCheckbox>
+                </>
+              ) : null}
+              {/* R8 UAT item 8 — appends the generated change summary to the document as a
+                  "Document Revision Report" appendix on the next save. Only rendered once a summary
+                  exists (the host gates it), so it never promises an appendix the save cannot write. */}
+              {showRevisionReportToggle ? (
+                <>
+                  <MenuDivider />
+                  <MenuItemCheckbox
+                    name="revisionreport"
+                    value="on"
+                    data-testid="compose-format-revision-report-toggle"
+                  >
+                    Include revision report
                   </MenuItemCheckbox>
                 </>
               ) : null}

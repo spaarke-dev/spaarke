@@ -1572,6 +1572,18 @@ export function ComposeWorkspace(props: ComposeWorkspaceProps): React.JSX.Elemen
   // -------------------------------------------------------------------------
   const [changeSummaryMessage, setChangeSummaryMessage] = React.useState<string | null>(null);
   const [changeSummarySavePrompt, setChangeSummarySavePrompt] = React.useState(false);
+  // The generated report, held so the Save menu can offer to append it. Null until a summary runs —
+  // which is what gates the toggle: there is no appendix to promise before one exists.
+  const [revisionReportResult, setRevisionReportResult] = React.useState<{
+    summary: string;
+    changes: Array<{ kind: string; location: string; description: string }>;
+    /** When the tracked changes were READ — not when the save happens. The report states the version
+     *  it describes, and those two moments differ (a summary generated now can be appended later). */
+    generatedAt: string;
+    /** The version the summary was generated FROM — captured at read time for the same reason. */
+    generatedFromVersionId: string | null;
+  } | null>(null);
+  const [includeRevisionReport, setIncludeRevisionReport] = React.useState(false);
 
   const { running: changeSummaryRunning, requestSummary } = useComposeChangeSummary({
     isEditorDirty: () => editorRef.current?.isDirty() ?? false,
@@ -1587,11 +1599,26 @@ export function ComposeWorkspace(props: ComposeWorkspaceProps): React.JSX.Elemen
         throw new Error('binding-not-deployed');
       }
       if (!enqueueComposeAction) throw new Error('no-enqueue');
-      await enqueueComposeAction({
+      const dispatched = await enqueueComposeAction({
         id: `compose-summarize-word-changes#${Date.now()}`,
         bindingId,
         args: { slots: { changesText } },
       });
+
+      // Capture the ledgered {summary, changes[]} so the Save menu can offer the appendix. Taken from
+      // the dispatch RESULT rather than re-read from a ledger or re-derived: this is the exact payload
+      // the Assistant rendered, so the appendix and the on-screen summary cannot disagree.
+      const payload = (dispatched as { result?: unknown } | undefined)?.result as
+        | { summary?: unknown; changes?: unknown }
+        | undefined;
+      if (payload && typeof payload.summary === 'string' && Array.isArray(payload.changes)) {
+        setRevisionReportResult({
+          summary: payload.summary,
+          changes: payload.changes as Array<{ kind: string; location: string; description: string }>,
+          generatedAt: new Date().toISOString(),
+          generatedFromVersionId: state.versionId ?? null,
+        });
+      }
     },
   });
 
@@ -2276,6 +2303,20 @@ export function ComposeWorkspace(props: ComposeWorkspaceProps): React.JSX.Elemen
             // the op-log path it re-anchors. The server prefers its own save-stamp when this session has
             // already saved — this covers the first-save-of-a-pre-existing-item gap.
             baselineETag: state.etag ?? undefined,
+            // R8 UAT item 8 — the "Include revision report" appendix. Sent on ALL THREE replace shapes
+            // (it rides `replaceCommon` rather than one branch) because the appendix is orthogonal to
+            // which authoring path the save takes. Undefined unless the user opted in AND a summary
+            // exists; the server additionally appends nothing when the report carries nothing to say.
+            revisionReport:
+              includeRevisionReport && revisionReportResult
+                ? {
+                    summary: revisionReportResult.summary,
+                    changes: revisionReportResult.changes,
+                    documentName: state.documentRef.fileName ?? null,
+                    documentVersion: revisionReportResult.generatedFromVersionId,
+                    asOf: revisionReportResult.generatedAt,
+                  }
+                : undefined,
           };
           if (bornInEditor) {
             // Shape 1 — in-session born-in-editor re-save: re-author from the content model (no retained
@@ -5112,6 +5153,10 @@ export function ComposeWorkspace(props: ComposeWorkspaceProps): React.JSX.Elemen
               wordActionsDisabled={wordActionsDisabled}
               // R8 UAT item 8 — the Word-menu "Summarise changes" trigger.
               onSummarizeChanges={handleSummarizeChanges}
+              // R8 UAT item 8 — the Save-menu appendix toggle. Both are undefined until a summary has
+              // been generated, which is what keeps the menu item hidden until there is a report.
+              includeRevisionReport={revisionReportResult ? includeRevisionReport : undefined}
+              onIncludeRevisionReportToggle={revisionReportResult ? setIncludeRevisionReport : undefined}
               // G7 (task 022): the toolbar Save split-button threads its choice ('version' default /
               // 'new' fork) into the save path. FR-02 (task 030): route through requestSave so a first
               // create-on-save / Save As opens the name modal (UC-3) before persisting. Ctrl+S also
