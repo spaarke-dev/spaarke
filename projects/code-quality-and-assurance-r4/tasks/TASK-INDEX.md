@@ -20,7 +20,7 @@ Legend: 🔲 not started · 🔄 needs retry · ✅ complete · ⏸️ blocked
 |---|---|---|---|---|---|---|
 | 001 | [Amend ADR-012 — enumerate 15, record 3 evaluation questions](001-adr-012-amendment-enumerate-shared-set.poml) | — | STANDARD | sonnet/high | ❌ | ✅ |
 | 002 | [SharedPackageCensusTests — a 16th fails the build](002-shared-package-census-test.poml) | 001 | FULL | sonnet/high | ✅ | ✅ |
-| 003 | [Publish the governance baseline (6 measures)](003-publish-governance-baseline.poml) | — | STANDARD | sonnet/high | ✅ | 🔄 |
+| 003 | [Publish the governance baseline (6 measures)](003-publish-governance-baseline.poml) | — | STANDARD | sonnet/high | ✅ | ✅ |
 
 **Capability at phase end**: a 16th shared package fails the build with a message naming the evaluation questions; nothing existing was un-promoted. **Touches nothing hot.**
 
@@ -69,7 +69,8 @@ Legend: 🔲 not started · 🔄 needs retry · ✅ complete · ⏸️ blocked
 | 042 | [Escalation ladder for absence claims](042-escalation-ladder-for-absence-claims.poml) | 040 | STANDARD | sonnet/high | ❌ | 🔲 |
 | 043 | [Functional equivalence check at Step 6.6](043-functional-equivalence-check.poml) | 040, 042 | STANDARD | sonnet/high | ❌ | 🔲 |
 | 044 | [Known-divergence register — a list, not a mechanism](044-known-divergence-register.poml) | — | STANDARD | sonnet/high | ✅ | 🔲 |
-| 045 | [`constraints/reuse.md` — **written last**](045-constraints-reuse-md.poml) | 040–044 | STANDARD | sonnet/high | ❌ | 🔲 |
+| 046 | [Nightly boundary-crossing drift check (FR-19b) — with a kill criterion](046-boundary-crossing-drift-check.poml) | 040,041,044 | FULL | sonnet/high | ❌ | 🔲 |
+| 045 | [`constraints/reuse.md` — **written last**](045-constraints-reuse-md.poml) | 040–044, 046 | STANDARD | sonnet/high | ❌ | 🔲 |
 
 **Capability at phase end**: a new export equivalent to an existing capability returns a concrete `file:line`; known divergences are named. **Touches `.claude/skills/` — contended with `unified-access-control-r2`.**
 

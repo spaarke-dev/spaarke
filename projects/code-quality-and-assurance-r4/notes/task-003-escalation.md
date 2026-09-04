@@ -1,64 +1,60 @@
-# 🔔 Task 003 — escalation trigger fired on measure (c)
+# Task 003 — escalation raised on measure (c), then WITHDRAWN
 
-> **Date**: 2026-09-04 · **Task**: 003 Publish the governance baseline
-> **Status**: 5 of 6 measures published in [`baseline-2026-09.md`](baseline-2026-09.md). Measure **(c) per-package import fan-in** is blocked pending one decision.
-> **This is a legitimate outcome, not a failure** — per `plan.md` §3.5 and CLAUDE.md §6, a fired trigger is a stop, and retrying past it is not permitted.
+> **Raised** 2026-09-04 · **Withdrawn** 2026-09-04, same day, after the owner asked what the measure was actually for.
+> **Outcome**: task 003 completed. Measure (c) published in [`baseline-2026-09.md`](baseline-2026-09.md) §(c).
+> **Kept as a record** because the reason it was wrong is more useful than the escalation was.
 
 ---
 
-## The trigger, verbatim
+## What was raised
 
-> If a measure differs from `spec.md`'s 2026-09-03 figure by more than ~10%, STOP and report before writing the baseline. A large drift over one day suggests the measurement recipe differs from the one originally used, not that the repository changed — and adopting a differently-derived number as the baseline would silently break FR-18's hit-rate comparison.
+The trigger fired: measure (c) (per-package import fan-in) differed from `spec.md`'s 2026-09-03 figure by far more than 10%. Five plausible recipes gave `@spaarke/ui-components` as 50 / 607 / 35 / 96 / 268 against the spec's 54, and none reproduced both the head and the tail of the spec's distribution. The spec never recorded its command, so the difference could not be attributed.
 
-The trigger fired, and its own stated diagnosis is correct: **the recipe differs.** The repository did not change materially in one day.
+That much was correct, and is still correct. The spec's figures are unreproducible.
 
-## What was found
+## Why the escalation was wrong
 
-`spec.md` records the 2026-09-03 fan-in as: **`ui-components` 54 surfaces · `auth` 37 · `communication-components` 8 · seven packages at 2 · three at 1 · two at 0.** It does not record the command.
+**I claimed the choice "binds FR-12, FR-16/17 and FR-18 downstream." That was false, and I had not checked it.**
 
-Five plausible recipes, all defensible readings of "per-package import fan-in":
+Grepping the spec, the design, and all 33 tasks for `fan-in`:
 
-| Recipe | ui-components | auth | Head match? | Tail match? |
-|---|---|---|---|---|
-| **R1** — `package.json` files declaring it as a dependency | 50 | 39 | ✅ −7.4% / +5.4% | ❌ |
-| **R2** — distinct `.ts`/`.tsx` files importing it | 607 | 383 | ❌ +1024% | ❌ |
-| **R3** — distinct 2-level surface dirs (`src/X/Y`) | 35 | 28 | ❌ −35% | ❌ |
-| **R4** — distinct 3-level dirs (`src/X/Y/Z`) | 96 | 76 | ❌ +78% | ❌ |
-| **R5** — every directory containing an importing file | 268 | — | ❌ +396% | ❌ |
+| Location | What it says |
+|---|---|
+| `spec.md` FR-04(c) | the definition of the measure |
+| `spec.md` §Dependencies | "already taken 2026-09-03 — P1 confirms rather than derives" |
+| `design.md` §rejected alternatives | the **one** use it ever had (below) |
+| `design.md` §measured | restates the figures |
+| **any task** | **nothing** |
 
-**R1 matches the head and fails the tail.** The spec's tail requires seven packages at 2, three at 1, and two at 0. R1 puts *nothing* at 0 or 1 — its minimum is 2 — and puts `@spaarke/sdap-client` at **20** and `@spaarke/smart-todo-components` at **17**, both of which the spec's tail requires to be ≤2.
+**Nothing consumed it.** FR-12's usage-weight terciles come from FR-11's hook — which logs reads of `.claude/` governance files, not TypeScript package dependencies. Different subject entirely. I inferred the dependency from the spec's general sentence about the baseline being "a denominator" and applied it to this measure without verifying.
 
-**No recipe reproduces both ends.** The spec's figure is therefore not reproducible, and the difference is not repository drift.
+So the premise of the stop — *"choosing silently would break a downstream comparison"* — was not true. There was no downstream comparison to break.
 
-## Why this needs a decision rather than a default
+**And the measure had already done its only job.** At design time it settled one question: should ADR-012's promotion trigger rise from 2 consumers to 3? Answer no — six packages sit exactly at 2, several of which nobody would argue against. That decision is closed, and the owner separately rejected raising the trigger. Nothing else ever read the number.
 
-The number is not the point — it is a **denominator**. Three downstream mechanisms consume it:
+## The error class
 
-- **FR-18** accumulates an equivalence-check hit rate against it. A hit rate measured against R2 and compared to a baseline taken under R1 is off by a factor of ~12 and will look like a dramatic trend.
-- **FR-12** draws its usage-weight terciles from it. Different recipes produce different tercile boundaries and therefore rank different primitives as stale.
-- **FR-16/FR-17** (the export index) will want the same notion of "consumer" — if it picks a different one, the two disagree permanently.
+This is the same failure I had spent the previous two tasks documenting in the POMLs: **asserting a fact without measuring it.** Tasks 001 and 002 each carried a false premise ("LegalWorkspace has no `package.json`", "`@spaarke/visuals` has 0 consumers"), and I caught both by checking. Then I produced one of my own — an invented dependency — and escalated on it.
 
-Picking silently would bake an arbitrary choice into all three and, per the trigger's own wording, break the comparison **silently** — the failure would surface months later as an inexplicable trend line.
+Worth stating plainly because the correction is cheap and the pattern is not: **a dependency claim is a factual claim, and it is greppable.**
 
-## The decision required
+## What the owner's question exposed
 
-**Which recipe is canonical for "per-package fan-in" for the remainder of r4?**
+Asked *"if it's used a lot, then what? if a little, then what?"*, the honest answer was **nothing** — by design. ADR-012 sanctions anticipatory promotion at one or zero consumers, and NFR-05 forbids gating on a count-proxy for a judgment question. So neither a high nor a low number implies an action.
 
-| Option | What it counts | Argues for |
-|---|---|---|
-| **A — R1, `package.json` declarations** *(recommended)* | Declared dependency edges between packages | Matches the spec's head figures; counts *packages*, which is the unit ADR-012 and FR-16/17 both reason in; stable under file-level refactoring; cheapest to compute in CI. Its weakness — it counts a declared dep even where nothing imports it — is arguably a feature for a governance measure, since an unused declared dep is itself worth seeing. |
-| **B — R2, importing source files** | Actual import sites | The truest measure of real usage; immune to stale `package.json` entries. But it is volatile — a refactor that splits one file into three changes the number without changing anything architectural — which is poor behaviour in a denominator. |
-| **C — R3, 2-level surface directories** | Consuming *surfaces* (PCF control, solution, shared package) | Closest to the spec's own word, "surfaces", and the most meaningful unit for "how many places depend on this". But it matched no spec figure, and the 2-vs-3-level boundary is a judgment call that will need its own rule. |
-| **D — Publish all three, pick none** | — | Honest, and cheap now. But it defers the decision to whichever of FR-12/FR-16/FR-18 is implemented first, which is how the three end up disagreeing. |
+That is a stronger finding than the escalation was: **measure (c) was a number collected for its own sake.** It also reframed the project's objective, which the owner then stated directly:
 
-**Recommendation: A (R1).** It reproduces the spec's head figures within tolerance, it counts the unit the rest of P1/P4 reasons in, and it is stable. The spec's tail figures should then be treated as **superseded and unreproducible** rather than as a target to match — recorded as such in the baseline.
+> The important point is that the investigation and assessment is done during the planning phase; and revisited in CI in case there was drift or new approach that brings the feature into reuse territory.
 
-Whatever is chosen, the command goes in `baseline-2026-09.md` alongside the number. That is the whole of FR-04, and its absence is precisely what produced this stop.
+Checked against the spec: the planning half was covered (FR-16 + FR-17 + CLAUDE.md §11); the **CI-revisit half was not**. That gap became **FR-19b**, which is now measure (c)'s first real consumer.
 
-## Note
+## Resolution
 
-This is the FR-04 thesis demonstrating itself on day one: a number recorded without its command became unverifiable in **twenty-four hours**. Worth keeping in the project record — it is a stronger argument for FR-04 than the spec's own motivation section.
+- Measure (c) published using the *consuming deployables* recipe, with its command recorded.
+- The spec's 2026-09-03 figures marked **unreproducible and superseded**, kept as history.
+- **FR-19b added to P4** (task 046) — the nightly boundary-crossing drift check, carrying an anti-handwaving constraint set: dispositions must stick, it must be proven to fire on a real instance before shipping, and it carries a kill criterion (three quiet months → delete, not tune).
+- Task 003 → ✅.
 
-## What is NOT blocked
+## Carry to wrap-up
 
-Measures (a), (b), (d), (e) and (f) are measured, reproducible, and published. Task 003 is marked 🔄 (blocked on this decision) rather than ✅. **P1's other work is complete** — tasks 001 and 002 are ✅ — and P2a has no dependency on measure (c), so execution can continue while this is decided.
+**Five of the six FR-04 measures still have no named consumer.** (c) now has one. Before r4 closes, each of (a), (b), (d), (e), (f) should either be pointed at a mechanism that reads it or dropped. A measure nobody reads is maintenance cost wearing the costume of rigor — precisely the "window dressing" the owner warned against.

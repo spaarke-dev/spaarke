@@ -26,7 +26,7 @@ Two workstreams: **don't rebuild / don't diverge** (we don't rebuild what exists
 | **P1** | The shared surface is knowable | FR-01 … FR-04 |
 | **P2** | Every ADR is routed, accurate, and measured | FR-05 … FR-09 |
 | **P3** | The governance surface maintains itself | FR-10 … FR-15 |
-| **P4** | Don't rebuild, don't diverge | FR-16 … FR-20 |
+| **P4** | Don't rebuild, don't diverge | FR-16 … FR-20 (incl. FR-19b) |
 | **P5** | Tailored review that actually runs, over a visible test suite | FR-21 … FR-27 |
 
 ### Out of Scope
@@ -166,7 +166,25 @@ Only `version` and `revision-type` are new; the other four already exist somewhe
 *Acceptance (closed set)*: (a) a check in `code-review` Step 6.6 asking whether a new exported symbol is functionally equivalent to a named existing capability despite a different implementation; (b) resolves **against the FR-16 index** — returns a concrete `file:line` or nothing; (c) **advisory severity only**; (d) **no sub-agent**; (e) hit rate accumulates against the FR-04 baseline.
 
 **FR-19 — Record the known divergences.**
-*Acceptance*: an enumerated register naming both code paths, the shared behavior, and why merging was deferred — seeded from r3's out-of-scope list (two live `.eml` builders; two distinct R6 financial handlers). **A list, not a mechanism**; r4 does not merge them. If it needs tooling, it has left scope.
+*Acceptance*: an enumerated register naming both code paths, the shared behavior, and why merging was deferred — seeded from r3's out-of-scope list (two live `.eml` builders; two distinct R6 financial handlers). **A list, not a mechanism**; r4 does not merge them. If it needs tooling, it has left scope. **Extended 2026-09-04 (FR-19b)**: the register is also the **disposition store** — a boundary crossing recorded here is suppressed by FR-19b's nightly check and does not re-report.
+
+**FR-19b — Revisit the planning decision nightly, at the boundary.** *(added 2026-09-04, owner direction)*
+
+The §11/ADR-012 assessment happens **once, at planning time**, on the information available then. A component judged "keep it local — one consumer" is correct until a second consumer appears, and nothing currently notices when that happens. This closes the loop **without a repo-wide audit** (explicitly out of scope): rather than searching for duplication, it watches the one place a second consumer becomes structurally visible — **a build-config alias or import that crosses a package boundary into another component's source.**
+
+*Why this signal and not similarity detection*: it is exact, not fuzzy — no threshold, no percentage, no ranking. Either a resolution path crosses a boundary or it does not. It is also **rare**, which is what keeps the report readable and un-ignorable.
+
+*Acceptance (closed set)*:
+(a) The check reports **crossings, not states** — a build alias, `tsconfig` path, or import that resolves from one component into another component's `src/`. It does **not** enumerate "everything with 2+ consumers"; a count of consumers is a count-proxy for a judgment question and NFR-05 forbids acting on one.
+(b) Each finding names **`file:line`, both sides of the crossing, and the two available actions** — promote the shared surface, or record the crossing in FR-19's register with a reason. No finding may be emitted without a concrete action.
+(c) **A disposition sticks.** A crossing recorded in FR-19's register is not re-reported unless it changes. A check that re-nags a decided question is how a report becomes filtered to trash, and that outcome is the failure this requirement is written against.
+(d) **Advisory, exit 0, no gate, no threshold** — a section of FR-12's existing nightly job. No new workflow (NFR-04 holds), no new agent, no new skill.
+(e) **Proven to fire on a real instance before it ships.** As of 2026-09-04 the repo contains exactly **two** live crossings, and they are the acceptance fixture: `src/client/shared/Spaarke.AI.Widgets/tsconfig.json:29` aliases `@spaarke/legal-workspace` to `../../../solutions/LegalWorkspace/src/index.d.ts` (fourteen sibling aliases in the same file resolve to a shared package's `dist/`; this one resolves into a solution's source), and `src/solutions/SpaarkeAi/vite.config.ts` resolves `../LegalWorkspace/src` for the same reason — the R2 task-022 package boundary was created but the files were never moved. A check that cannot detect these two does not ship.
+(f) **A falsifiable kill criterion, recorded at build time.** If the check produces **zero findings other than the two known crossings for three consecutive months**, it is to be **deleted, not tuned**. Written into the check's own header so the person reading it in six months knows it was built with an expiry test rather than an assumption of permanence.
+
+> **Scope guard.** r4 does **not** fix the two known crossings — they go into FR-19's register as the seed dispositions. Finishing the LegalWorkspace file migration is a separate piece of work and is **not** in this project.
+
+> **Complexity budget (NFR-02).** P4's one net-new concept remains *the export index*. FR-19b adds no second concept: it reuses FR-16's generator pass, FR-19's register as its disposition store, and FR-12's job as its channel. Declared explicitly because a requirement added after spec sign-off is exactly where a budget silently slips.
 
 **FR-20 — Document shipped reality.**
 *Acceptance*: `.claude/constraints/reuse.md`, written **last** in this phase, 100–200 lines per the `constraints/INDEX.md` convention, **pointing at** CLAUDE.md §11 and ADR-012 rather than restating them.
@@ -328,6 +346,9 @@ Only `version` and `revision-type` are new; the other four already exist somewhe
 | **Revision tracking** (2026-09-04) | Is "a parseable `last-reviewed`" enough? | **No.** We need **one standard way to date and revision-track our files** — at the top, human readable, carrying more than a date (revision type, version number). It is a large number of files, but it should run **through a script with regex or other matching**, so it is not really a lot of LLM work. | **FR-10 rewritten** (§P3): a published standard + `Update-DocHeader.ps1` + a scripted backfill + census. Tasks 030–033. |
 | **Execution posture** (2026-09-04) | Operator-gate every wave? | **No.** Run **autonomous** as long as it is safe and accurate; stop only for a true decision or a significant issue that genuinely needs operator direction. | plan.md §3.5; the `<escalation><trigger>` blocks already in each POML are the stop conditions |
 | **Scope trim** (2026-09-04) | Full P1–P5, or defer P4/P5 to r5? | **Full P1–P5, with P2 split** — P2a classifies; P2b's arch tests are sized by task 020, then decomposed by re-running `/task-create`. | Resolves Unresolved Questions 1 and 3 below |
+| **Reuse process** (2026-09-04) | Is the objective "measure how much reuse we have"? | **No.** The objective is a **process**: (1) rigorous investigation and assessment of reuse / shared-library opportunities **during the planning phase**, and (2) that assessment **revisited in CI**, in case drift or a new approach has since brought a feature into reuse territory. A fan-in count is an indicator, not a measure — "a lot" and "a little" are both fine and neither implies an action. | (1) is FR-16 + FR-17 + CLAUDE.md §11; (2) was the gap → **FR-19b added**. Also explains why FR-04's measure (c) had no consumer: it answered a question nobody was asking. |
+| **Repo-wide audit** (2026-09-04) | Widen P4 to sweep existing code for duplication? | **No — do not add this scope.** The assessment belongs at planning time, revisited in CI for drift. | Out of Scope list stands; FR-19b watches a **structural boundary crossing**, not code similarity |
+| **Anti-handwaving** (2026-09-04) | — | **"We need to be very careful in this project that we are not building process that will be window dressing and handwaving with no value."** | Binding on FR-19b: acceptance (c) disposition-sticks, (e) proven-to-fire-on-a-real-instance-before-shipping, (f) **a falsifiable kill criterion** — three quiet months and the check is deleted, not tuned |
 
 ---
 

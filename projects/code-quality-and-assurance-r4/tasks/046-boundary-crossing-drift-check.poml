@@ -1,0 +1,122 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="046" project="code-quality-and-assurance-r4">
+  <metadata>
+    <title>Nightly boundary-crossing drift check — revisit the planning decision, with a kill criterion</title>
+    <phase>4 Don't rebuild, don't diverge</phase>
+    <gate>040 and 041 complete (needs the generator pass and the nightly wiring)</gate>
+    <status>not-started</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Adds a reporting mechanism to a CI job and a script under scripts/quality/. Modifies .github/workflows/ (hot path) and emits into .claude/-adjacent project state. Code-review + adr-check run at Step 9.5.</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>The detection rule is exact and fully specified (a resolution path crossing into another component's src/), the fixture is named, and the acceptance set is closed. Not open architectural reasoning.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Edits .github/workflows/ (the single new workflow from FR-12) and coordinates with FR-19's register. Main-session only alongside 041.</parallel-reason>
+    <deps>040,041,044</deps>
+    <tags>ci-workflows,quality,governance,reuse,shared-components</tags>
+    <estimated-effort>4-5 hours</estimated-effort>
+  </metadata>
+
+  <prompt>Add a boundary-crossing drift check as a section of FR-12's nightly job. It reports build aliases, tsconfig paths, and imports that resolve from one component into ANOTHER component's src/ — the point at which a "keep it local, one consumer" planning decision has quietly become false. Report crossings, not states. Every finding names file:line, both sides, and the two available actions. Findings dispositioned in FR-19's register do not re-report. Advisory, exit 0, no gate, no threshold. It MUST be proven to fire on the two live crossings before it ships, and it MUST carry its own kill criterion.</prompt>
+  <role>SPAARKE platform developer building a CI observation. Sceptical of your own mechanism: a check nobody acts on is worse than no check, because it manufactures the appearance of coverage.</role>
+  <goal>A nightly section that detects the two known live boundary crossings, names a concrete action for each, suppresses anything dispositioned in FR-19's register, and states in its own header the condition under which it should be deleted.</goal>
+
+  <context>
+    <background>spec.md FR-19b, added 2026-09-04 by owner direction. The §11 / ADR-012 reuse assessment happens ONCE, at planning time, on the information available then. "Keep it local — only one consumer" is correct until a second consumer appears, and nothing notices when it does. This closes that loop WITHOUT a repo-wide duplication audit, which the owner explicitly rejected and which remains out of scope. The signal is structural rather than similarity-based: a resolution path crossing a component boundary is exact, needs no threshold, and is rare.
+
+MEASURED 2026-09-04 — the check has exactly two things to find today, and they are the acceptance fixture:
+  1. src/client/shared/Spaarke.AI.Widgets/tsconfig.json:29 — "@spaarke/legal-workspace" resolves to ../../../solutions/LegalWorkspace/src/index.d.ts. FOURTEEN sibling aliases in the same file resolve to a shared package's dist/; this one resolves into a SOLUTION's source. It is the odd one out in its own list.
+  2. src/solutions/SpaarkeAi/vite.config.ts — resolves ../LegalWorkspace/src for dep-resolution, documented in-file as needed because the @spaarke/legal-workspace barrel "re-exports the LegalWorkspace solution's src" and the files "still physically live under src/solutions/LegalWorkspace/src".
+Both trace to R2 FR-10 task 022, which created the package boundary but never moved the files. Zero crossings exist via relative imports (measured); the alias form is the one that matters.</background>
+    <relevant-files>
+      <file role="new">scripts/quality/Find-BoundaryCrossings.ps1</file>
+      <file role="modify">.github/workflows/{the FR-12 nightly workflow created by task 035}</file>
+      <file role="modify">projects/code-quality-and-assurance-r4/notes/known-divergence-register.md</file>
+      <file role="canonical-reference">src/client/shared/Spaarke.AI.Widgets/tsconfig.json</file>
+      <file role="canonical-reference">src/solutions/SpaarkeAi/vite.config.ts</file>
+    </relevant-files>
+    <dependencies>
+      <dependency task="040" status="pending">The export-index generator pass this check runs alongside.</dependency>
+      <dependency task="041" status="pending">The nightly wiring this becomes a section of.</dependency>
+      <dependency task="044" status="pending">FR-19's register, which is this check's disposition store.</dependency>
+    </dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="owner">Scope (BINDING, owner direction 2026-09-04): "we need to be very careful in this project that we are not building process that will be window dressing and handwaving with no value." This is the governing constraint on this task. If the check cannot be shown to produce an actionable finding on a real instance, it does not ship — reduce or abandon it rather than shipping something that only looks like coverage.</constraint>
+    <constraint source="owner">Scope (no repo-wide audit): MUST NOT scan for code similarity, duplicate blocks, or clone percentages. MUST NOT introduce jscpd, a Roslyn duplicate analyzer, ast-grep, or any fuzzy matcher. The signal is a structural boundary crossing, full stop.</constraint>
+    <constraint source="spec">Scope (crossings not states): MUST NOT emit a list of "components with 2+ consumers". A consumer count is a count-proxy for a judgment question; NFR-05 forbids acting on one, and ADR-012 records that anticipatory promotion at one or zero consumers is legitimate.</constraint>
+    <constraint source="spec">Scope (every finding actionable): MUST NOT emit a finding without file:line, both sides of the crossing, and the two available actions (promote the shared surface / record it in the FR-19 register with a reason).</constraint>
+    <constraint source="spec">Scope (dispositions stick): a crossing recorded in the FR-19 register MUST be suppressed until it changes. Re-nagging a decided question is the specific mechanism by which a report becomes filtered to trash.</constraint>
+    <constraint source="NFR-04">Scope (one workflow): a SECTION of the existing FR-12 nightly job. MUST NOT create a second workflow, agent, skill, or POML block.</constraint>
+    <constraint source="NFR-05">Scope (advisory): exit 0 always. MUST NOT gate, block, or fail a build. No threshold, ratio, or ranking anywhere.</constraint>
+    <constraint source="project">Scope (r4 does NOT fix them): the two known crossings are SEEDED into the FR-19 register as dispositions. Finishing the LegalWorkspace file migration is separate work and is out of this project.</constraint>
+    <constraint source="project">Scope (worktrees): MUST exclude .claude/worktrees/ and the ~17 sibling worktrees, or it reports phantom findings.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>Boundary-crossing detection as a reuse-drift signal</topic>
+    <files>
+      <file>projects/code-quality-and-assurance-r4/spec.md</file>
+      <file>.claude/adr/ADR-012-shared-components.md</file>
+      <file>CLAUDE.md</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+    </files>
+    <patterns>
+      <pattern name="Advisory nightly section" location="scripts/quality/">FR-12's job reports; it never gates. Exit 0 on findings.</pattern>
+      <pattern name="Teaching failure output" location="tests/Spaarke.ArchTests/SharedPackageCensusTests.cs">Task 002's census: the message names the action, not just the mismatch. Same standard applies to a report line.</pattern>
+    </patterns>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="0" name="Context + rigor declaration">Output the rigor declaration (FULL). Re-measure the two known crossings before writing anything — if the count has changed, that is a finding, not an error.</step>
+    <step order="1">Write Find-BoundaryCrossings.ps1: scan tsconfig*.json path aliases, vite/rollup config resolve paths, and relative imports for any resolution that lands inside another component's src/. Exact matching only.</step>
+    <step order="2">Prove it detects BOTH known crossings. A check that misses either does not ship (acceptance e).</step>
+    <step order="3">Prove it does NOT fire on the fourteen sibling aliases in the same tsconfig that resolve to a shared package's dist/. A detector that flags the sanctioned shape gets deleted rather than obeyed.</step>
+    <step order="4">Add the disposition read: suppress any crossing already recorded in the FR-19 register, keyed so that a CHANGE to the crossing re-surfaces it.</step>
+    <step order="5">Format each finding with file:line, both sides, and the two actions. No finding without an action.</step>
+    <step order="6">Seed the FR-19 register with the two known crossings as dispositions, each citing R2 FR-10 task 022 and the reason the migration is deferred.</step>
+    <step order="7">Write the kill criterion into the script's own header: zero findings beyond the two known crossings for three consecutive months means DELETE, not tune. Include the date the clock starts.</step>
+    <step order="8">Wire it as a section of the FR-12 nightly job. Verify exit 0 with findings present.</step>
+    <step order="9">Update TASK-INDEX.md: set task 046 status to ✅.</step>
+    <step order="10">Document any deviation in projects/code-quality-and-assurance-r4/notes/.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If the two known crossings have been fixed by other work before this task runs, STOP and escalate. The check would then ship with ZERO demonstrated findings, which fails acceptance (e) and makes it precisely the window dressing the owner's constraint forbids. The right response may be to drop FR-19b, not to ship an unproven detector — that is the owner's call, not this task's.</trigger>
+    <trigger>If detecting the crossings requires resolving TypeScript path aliases through a real module resolver (rather than reading config text), STOP. That is a materially larger mechanism than "a section of the nightly job" and breaks NFR-02's complexity budget. Escalate before building it.</trigger>
+    <trigger>If the check produces more than ~10 findings on the current tree, STOP. The design assumes this signal is rare; a large result set means the rule is matching something other than what it was built for, and shipping a long advisory list is how the report becomes ignored.</trigger>
+  </escalation>
+
+  <justification>
+    <existing>FR-16's export index (task 040) indexes shared-library exports; FR-18's equivalence check (task 043) runs at code-review on new exported symbols. Neither looks at build-config resolution paths, and neither runs after the PR that introduced the crossing has merged.</existing>
+    <extension>Yes, largely — this is a SECTION of FR-12's existing nightly job, reusing FR-16's generator pass and FR-19's register as its disposition store. NFR-02's net-new-concept count for P4 stays at one (the export index). The only genuinely new thing is the detection rule itself, which is a grep over config files.</extension>
+    <cost-of-doing-nothing>The §11 reuse assessment is made once at planning time and never revisited. A component correctly judged "keep it local" at one consumer stays judged that way after the second consumer arrives — and the second consumer arrives as a boundary-crossing alias, which is exactly what happened with LegalWorkspace and sat undetected from 2026-07-02 to 2026-09-04. Without this, planning-time rigor decays silently and the only correction is somebody noticing by hand.</cost-of-doing-nothing>
+  </justification>
+
+  <tools><tool name="pwsh">Run and test the detection script</tool></tools>
+
+  <outputs>
+    <output type="script">scripts/quality/Find-BoundaryCrossings.ps1</output>
+    <output type="doc">projects/code-quality-and-assurance-r4/notes/known-divergence-register.md (seeded with 2 dispositions)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Given the current tree, the check detects BOTH known crossings (Spaarke.AI.Widgets/tsconfig.json and SpaarkeAi/vite.config.ts).</criterion>
+    <criterion testable="true">Given the fourteen sibling aliases resolving to a shared package's dist/, the check does NOT fire on any of them.</criterion>
+    <criterion testable="true">Given a finding, it names file:line, both sides of the crossing, and the two available actions.</criterion>
+    <criterion testable="true">Given a crossing recorded in the FR-19 register, it is suppressed; given a CHANGE to that crossing, it re-surfaces.</criterion>
+    <criterion testable="true">Given findings present, the check exits 0 and blocks nothing.</criterion>
+    <criterion testable="true">Given the script header, it states the kill criterion (three quiet months → delete, not tune) and the date the clock starts.</criterion>
+    <criterion testable="true">Negative: no threshold, ratio, percentage, ranking, or consumer count appears anywhere in the output or the script.</criterion>
+    <criterion testable="true">Negative: no similarity/clone/duplicate matcher is introduced; no second workflow is created (NFR-04 intact).</criterion>
+    <criterion testable="true">Negative: neither known crossing is FIXED by this task — both are recorded as dispositions.</criterion>
+  </acceptance-criteria>
+
+  <notes>Maps spec.md FR-19b. Added 2026-09-04 after the owner clarified that the objective is a PROCESS (planning-time assessment + CI revisit for drift), not a reuse measurement — and that fan-in "a lot vs a little" is not a usable measure. This task is the CI-revisit half. It is also what finally gives FR-04's measure (c) a consumer; before this, nothing read it.
+
+The owner's governing constraint on this task is anti-handwaving. Three acceptance criteria exist solely to enforce it: dispositions must stick (or the report gets filtered to trash), the check must be proven against a real instance before shipping (or it is unfalsifiable), and it carries a kill criterion (or it outlives its usefulness by default). If the mechanism cannot meet all three, the correct outcome is to drop FR-19b — that is an acceptable result, not a failure.</notes>
+
+  <execution><skill>.claude/skills/task-execute/SKILL.md</skill></execution>
+</task>

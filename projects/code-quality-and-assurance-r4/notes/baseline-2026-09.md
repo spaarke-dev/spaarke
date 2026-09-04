@@ -1,8 +1,8 @@
 # Governance baseline — 2026-09
 
 > **Task**: 003 (spec FR-04) · **Measured**: 2026-09-04 · **Tree**: `work/code-quality-and-assurance-r4` @ `0ea19d408`, level with `origin/master`
-> **Status**: **5 of 6 measures published. Measure (c) is BLOCKED** — its escalation trigger fired. See §(c).
-> **Purpose**: a denominator. FR-18's equivalence-check hit rate accumulates against these numbers, FR-12's usage-weight terciles are drawn from them, and FR-07 prioritises its criterion set by (d).
+> **Status**: **All 6 measures published.** Measure (c) was briefly escalated and the escalation withdrawn — see [`task-003-escalation.md`](task-003-escalation.md).
+> **Purpose**: a denominator — but **check which measure feeds what before assuming**. Verified 2026-09-04: **(d)** feeds FR-07's prioritisation. **(c)** feeds FR-19b's drift check (and nothing else — it had no consumer at all until FR-19b was added). **FR-12's usage-weight terciles do NOT come from this document** — they come from FR-11's hook logging which `.claude/` primitives get read, a different subject entirely. An earlier draft of this file asserted otherwise; that was wrong and is corrected here.
 
 **Observation only.** No threshold, target, or gate is derived or proposed from any number here, and none may be. A count-proxy for a judgment question is the retired God-class ratchet.
 
@@ -41,25 +41,42 @@ grep -rhoiE "<existing>[[:space:]]*(none|no existing)" projects/*/tasks/*.poml |
 
 **Drift vs spec**: spec said **53 of 448**; measured **49 of 470** (−7.5% absolute, and a larger relative fall as a share: 11.8% → 10.4%). Under the 10% trigger, but note the direction — a *decrease* in an append-only corpus means the two counts were not derived identically, or that POMLs were edited after authoring. Flagged, not resolved.
 
-## (c) Per-package import fan-in — **BLOCKED, escalation trigger fired**
+## (c) Per-package import fan-in — consuming deployables
 
-**No value published.** See [`task-003-escalation.md`](task-003-escalation.md) for the decision required.
+> **Resolved 2026-09-04.** The escalation was **withdrawn** — see [`task-003-escalation.md`](task-003-escalation.md) for why it should not have been raised. Short version: nothing consumed this measure, so no downstream mechanism could be broken by choosing a recipe. The spec's 2026-09-03 figures are **unreproducible and superseded**; they are recorded below as history, not as a target.
 
-The task's escalation trigger reads: *"If a measure differs from spec.md's 2026-09-03 figure by more than ~10%, STOP and report before writing the baseline. A large drift over one day suggests the measurement recipe differs from the one originally used… adopting a differently-derived number as the baseline would silently break FR-18's hit-rate comparison."*
+**Recipe (canonical for r4)**: count `package.json` files that declare the package as a dependency, **excluding the package itself and its shared-library siblings** — i.e. how many *deployables* (PCF controls, solutions, SPA, add-ins) depend on it.
 
-That is exactly the condition. Four plausible recipes give four irreconcilable answers for the same package:
+```bash
+grep -rl "\"@spaarke/{package}\"" --include=package.json src/ \
+  | grep -v node_modules | grep -v "^src/client/shared/" | wc -l
+```
 
-| Recipe | `@spaarke/ui-components` | `@spaarke/auth` | vs spec (54 / 37) |
-|---|---|---|---|
-| R1 — `package.json` files declaring it | **50** | **39** | −7.4% / +5.4% — **within tolerance** |
-| R2 — distinct `.ts`/`.tsx` files importing it | 607 | 383 | +1024% |
-| R3 — distinct 2-level surface dirs (`src/X/Y`) | 35 | 28 | −35% |
-| R4 — distinct 3-level dirs (`src/X/Y/Z`) | 96 | 76 | +78% |
-| R5 — every directory containing an importing file | 268 | — | +396% |
+| Package | Consuming deployables |
+|---|---|
+| `@spaarke/ui-components` | 43 |
+| `@spaarke/auth` | 30 |
+| `@spaarke/sdap-client` | 18 |
+| `@spaarke/smart-todo-components` | 16 |
+| `@spaarke/communication-components` | 7 |
+| `@spaarke/events-components` | 5 |
+| `@spaarke/daily-briefing-components` | 4 |
+| `@spaarke/document-operations` | 2 |
+| `@spaarke/compose-components` | 2 |
+| `@spaarke/ai-widgets` | 2 |
+| `@spaarke/ai-outputs` | 2 |
+| `@spaarke/visuals` | 1 |
+| `@spaarke/notifications` | 1 |
+| `@spaarke/legal-workspace` | 1 |
+| `@spaarke/ai-context` | 1 |
 
-R1 matches on the two head packages — but **fails on the tail**. Spec's distribution is *"communication-components 8, seven at 2, three at 1, two at 0"*; R1 puts nothing at 0 or 1 (minimum 2) and puts `sdap-client` at 20 and `smart-todo-components` at 17, both of which the spec's tail requires to be ≤2. **No single recipe reproduces both the head and the tail**, so the spec's number is not reproducible at all.
+**Nothing follows from these numbers, and that is deliberate.** A package with one consumer is legitimate (ADR-012 sanctions anticipatory promotion); a package with 43 is not thereby virtuous. NFR-05 forbids gating on a count-proxy for a judgment question, and "shared packages must have ≥N consumers" is exactly that. **Do not derive a rule from this table.**
 
-**This is the FR-04 thesis demonstrating itself**: the 2026-09-03 measurement recorded a number without its command, and one day later nobody can re-derive it. Which recipe becomes canonical is a real decision — it binds FR-12 and FR-18 downstream — and the spec's figure cannot arbitrate because its derivation was never written down.
+**Superseded figures** — spec.md recorded on 2026-09-03: `ui-components` 54 · `auth` 37 · `communication-components` 8 · seven at 2 · three at 1 · two at 0. No recipe reproduces both that head and that tail (five were tried; the closest matches the head within tolerance but puts `sdap-client` at 18 where the tail requires ≤2, and puts nothing at 0). Its command was never recorded, so the difference cannot be attributed. **Treat the 2026-09-03 figures as unreproducible.** The table above supersedes them.
+
+**What this measure is for, as of 2026-09-04.** Until today it had **no consumer** — no FR read it, and the one job it ever did was settled at design time (it killed a proposal to raise ADR-012's promotion trigger from 2 to 3, since six packages sat exactly at 2). It now feeds **FR-19b**, the nightly boundary-crossing drift check: the counts are the "before" against which a component acquiring a second consumer becomes visible. A measure with no consumer is a candidate for deletion, not maintenance — worth remembering at wrap-up for the other five.
+
+**The FR-04 thesis demonstrating itself**: a number recorded on 2026-09-03 without its command was unverifiable on 2026-09-04. That is the argument for this whole requirement, and it appeared inside r4's own spec on day one.
 
 ## (d) ADR citation counts across POML tasks — ranked descending
 
@@ -138,7 +155,7 @@ Spec gave no 2026-09-03 reference figure for this measure.
 |---|---|---|---|---|
 | (a) justifications | 448 | 470 | +4.9% | no |
 | (b) `<existing>none` | 53 | 49 | −7.5% | no |
-| (c) fan-in | 54 / 37 / 8 / 7@2 / 3@1 / 2@0 | **irreproducible** | — | **🔴 FIRED** |
+| (c) fan-in | 54 / 37 / 8 / 7@2 / 3@1 / 2@0 | 43 / 30 / 18 / 16 / 7 … | spec's figures **unreproducible**, superseded | fired, **withdrawn** |
 | (d) ADR citations | 50 distinct; top-6 named | 50 distinct; counts ±3.3%, **ranks 4↔5 swapped** | ≤3.3% | no |
 | (e) escalation triggers | — | 1,317 across 1,018 POMLs | — | n/a |
 | (f) §6.5 amendments | — | 5 ADRs; 844 citing files | — | n/a |
