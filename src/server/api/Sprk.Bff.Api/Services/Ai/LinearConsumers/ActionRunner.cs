@@ -1,5 +1,7 @@
 using System.Text;
 using System.Text.Json;
+using System.Text.Json.Nodes;
+using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Options;
 using Sprk.Bff.Api.Configuration;
 using Sprk.Bff.Api.Models.Ai;
@@ -31,6 +33,7 @@ public sealed class ActionRunner : IActionRunner
     private readonly ILogger<ActionRunner> _logger;
     private readonly DocumentIntelligenceOptions _modelOptions;
     private readonly ReferenceRetrievalService? _referenceRetrieval;
+    private readonly IServiceScopeFactory? _scopeFactory;
 
     /// <summary>
     /// TopK for linear-path reference grounding. The <c>spaarke-rag-references</c> corpus is small and
@@ -64,7 +67,8 @@ public sealed class ActionRunner : IActionRunner
         PromptSchemaRenderer promptRenderer,
         ILogger<ActionRunner> logger,
         IOptions<DocumentIntelligenceOptions>? modelOptions = null,
-        ReferenceRetrievalService? referenceRetrieval = null)
+        ReferenceRetrievalService? referenceRetrieval = null,
+        IServiceScopeFactory? scopeFactory = null)
     {
         _openAi = openAi;
         _promptRenderer = promptRenderer;
@@ -78,6 +82,12 @@ public sealed class ActionRunner : IActionRunner
         // registered only when DocumentIntelligence:Enabled (AiModule), and left null for the seam-test
         // constructor call sites; a null instance simply means "no grounding" (graceful degrade).
         _referenceRetrieval = referenceRetrieval;
+        // email-communication-intelligence-r2 (2026-09-04): needed to pre-resolve a JPS Action's $choices
+        // lookup/optionset references against Dataverse before render — LookupChoicesResolver is Scoped, so
+        // this Singleton resolves it from a per-call scope (mirrors AiAnalysisNodeExecutor on the node path).
+        // Optional/nullable so the existing seam-test ctor call sites keep compiling; null ⇒ no $choices
+        // pre-resolution (the exact pre-change behavior), never a throw.
+        _scopeFactory = scopeFactory;
     }
 
     /// <summary>
@@ -142,7 +152,13 @@ public sealed class ActionRunner : IActionRunner
             ? await RetrieveReferenceGroundingAsync(action, inputs, context, cancellationToken)
             : null;
 
-        var prompt = BuildPrompt(action.SystemPrompt, inputs.Operand, referenceKnowledge);
+        // Pre-resolve the Action's JPS $choices lookup/optionset references against Dataverse so the rendered
+        // prompt lists the live valid values (e.g. the firm's sprk_triagecategory taxonomy) as constrained-
+        // decoding guidance — the SAME pre-render pass the node path runs. Empty/null for flat-text Actions
+        // and on any failure (best-effort, NFR-04) → the prompt renders exactly as before.
+        var resolvedChoices = await ResolveLookupChoicesAsync(action.SystemPrompt, cancellationToken).ConfigureAwait(false);
+
+        var prompt = BuildPrompt(action.SystemPrompt, inputs.Operand, referenceKnowledge, resolvedChoices);
         // D6 / PE-D8(b) (F-1/F-2/F-7 envelope-convergence task): render the bound envelope's grounding
         // context into the dispatched capability's prompt — the SAME BoundInputs the dispatch path already
         // binds (no second bind). Deterministic position: the stable-prefix additions (User + Business,
@@ -151,7 +167,14 @@ public sealed class ActionRunner : IActionRunner
         // byte-IDENTICAL to pre-change (the seam regression pin); dispatch prompts carry no date suffix
         // today, so none is added (match what exists, don't invent).
         prompt = ComposeGroundingContext(prompt, inputs);
-        var jsonSchema = BinaryData.FromString(action.OutputSchemaJson);
+        // Enforce the runtime-resolved $choices values as a constrained-decoding enum on the matching output
+        // property. A JPS Action with structuredOutput:true (e.g. TRIAGE-EMAIL) never renders its output
+        // fields into the PROMPT, so the category $choices could only bite via the SCHEMA — and the catalog
+        // leaves category a free string (FR-16). Resolving the enum here, from live Dataverse per run, makes
+        // the constraint real while preserving FR-16 dynamism. Empty/failed resolution → schema unchanged.
+        var effectiveOutputSchemaJson = EnrichOutputSchemaWithResolvedChoices(
+            action.OutputSchemaJson!, action.SystemPrompt, resolvedChoices);
+        var jsonSchema = BinaryData.FromString(effectiveOutputSchemaJson);
         var schemaName = SanitizeSchemaName(action.Name);
         var temperature = (float?)action.Temperature;
 
@@ -325,12 +348,181 @@ public sealed class ActionRunner : IActionRunner
         }
     }
 
-    private string BuildPrompt(string systemPrompt, ResolvedOperand operand, string? knowledgeContext) => operand.Channel switch
+    private string BuildPrompt(
+        string systemPrompt,
+        ResolvedOperand operand,
+        string? knowledgeContext,
+        IReadOnlyDictionary<string, string[]>? resolvedChoices) => operand.Channel switch
     {
-        OperandChannel.Document => BuildDocumentPrompt(systemPrompt, RequireDocument(operand), knowledgeContext),
-        OperandChannel.Input => BuildInputPrompt(systemPrompt, RequireInput(operand), knowledgeContext),
-        _ => BuildNoOperandPrompt(systemPrompt, knowledgeContext),
+        OperandChannel.Document => BuildDocumentPrompt(systemPrompt, RequireDocument(operand), knowledgeContext, resolvedChoices),
+        OperandChannel.Input => BuildInputPrompt(systemPrompt, RequireInput(operand), knowledgeContext, resolvedChoices),
+        _ => BuildNoOperandPrompt(systemPrompt, knowledgeContext, resolvedChoices),
     };
+
+    /// <summary>
+    /// Pre-resolves a JPS Action's <c>$choices</c> lookup/optionset references against Dataverse before
+    /// render (the linear-path equivalent of <c>AiAnalysisNodeExecutor</c>'s pre-render pass on the node
+    /// path). Without this, a JPS Action on the linear path (e.g. TRIAGE-EMAIL) renders with its
+    /// <c>category</c> <c>$choices</c> UNRESOLVED — the model never sees the firm's allowed category names,
+    /// so the emitted category matches no <c>sprk_triagecategory</c> taxonomy row and
+    /// <c>sprk_triagecategory</c> is left unset (email-communication-intelligence-r2, 2026-09-04: category
+    /// null on 100% of captures). The resolved values are injected into the PROMPT only; the Action's
+    /// constrained-decoding output schema stays a free string, so FR-16 (admin-tunable taxonomy without a
+    /// redeploy) is preserved.
+    /// </summary>
+    /// <remarks>
+    /// <see cref="LookupChoicesResolver"/> is Scoped, so this Singleton resolves it from a per-call scope.
+    /// Best-effort (NFR-04): a missing scope factory (seam-test ctor), a missing resolver, a non-JPS/flat
+    /// prompt, or a Dataverse read failure all degrade to <c>null</c> (render with unresolved choices — the
+    /// exact pre-change behavior) rather than throwing into the completion path.
+    /// </remarks>
+    private async Task<IReadOnlyDictionary<string, string[]>?> ResolveLookupChoicesAsync(
+        string? systemPrompt, CancellationToken cancellationToken)
+    {
+        if (_scopeFactory is null || string.IsNullOrWhiteSpace(systemPrompt))
+        {
+            return null;
+        }
+
+        try
+        {
+            using var scope = _scopeFactory.CreateScope();
+            var resolver = scope.ServiceProvider.GetService<LookupChoicesResolver>();
+            if (resolver is null)
+            {
+                return null;
+            }
+
+            var resolved = await resolver.ResolveFromJpsAsync(systemPrompt, cancellationToken).ConfigureAwait(false);
+            return resolved.Count > 0 ? resolved : null;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex,
+                "Linear run: $choices pre-resolution failed; rendering with unresolved choices (non-fatal).");
+            return null;
+        }
+    }
+
+    /// <summary>
+    /// Injects the runtime-resolved <c>$choices</c> values as a JSON-Schema <c>enum</c> constraint on the
+    /// matching output-schema property, so Azure OpenAI structured-output decoding ENFORCES the firm's live
+    /// taxonomy (e.g. the model MUST emit one of the seven <c>sprk_triagecategory</c> names, never a
+    /// free-form label that resolves to no row).
+    /// </summary>
+    /// <remarks>
+    /// This is the structured-output counterpart to the renderer's <c>— one of: …</c> prompt hint, which
+    /// <see cref="PromptSchemaRenderer"/> only emits for <c>structuredOutput:false</c> JPS actions. A
+    /// TRIAGE-EMAIL-style Action declares <c>structuredOutput:true</c>, so its output fields never render into
+    /// the prompt and its <c>category</c> <c>$choices</c> could only bite via the SCHEMA — which the catalog
+    /// deliberately leaves a free string to keep the taxonomy admin-tunable (FR-16). Resolving the enum HERE,
+    /// from live Dataverse per run, keeps that FR-16 dynamism (an admin-added category appears on the next
+    /// run) while making the constraint actually enforced. Best-effort (NFR-04): a malformed schema/JPS, a
+    /// missing property, or any parse error returns <paramref name="outputSchemaJson"/> unchanged — the exact
+    /// pre-change behavior — never throwing into the completion path.
+    /// </remarks>
+    private string EnrichOutputSchemaWithResolvedChoices(
+        string outputSchemaJson,
+        string? systemPrompt,
+        IReadOnlyDictionary<string, string[]>? resolvedChoices)
+    {
+        if (resolvedChoices is not { Count: > 0 } || string.IsNullOrWhiteSpace(systemPrompt))
+        {
+            return outputSchemaJson;
+        }
+
+        try
+        {
+            var fieldValues = MapFieldsToResolvedChoices(systemPrompt, resolvedChoices);
+            if (fieldValues.Count == 0)
+            {
+                return outputSchemaJson;
+            }
+
+            if (JsonNode.Parse(outputSchemaJson) is not JsonObject schemaObj
+                || schemaObj["properties"] is not JsonObject properties)
+            {
+                return outputSchemaJson;
+            }
+
+            var injected = 0;
+            foreach (var (fieldName, values) in fieldValues)
+            {
+                if (values.Length == 0 || properties[fieldName] is not JsonObject prop)
+                {
+                    continue;
+                }
+
+                var enumArray = new JsonArray();
+                foreach (var value in values)
+                {
+                    enumArray.Add(value);
+                }
+
+                prop["enum"] = enumArray;
+                injected++;
+            }
+
+            if (injected == 0)
+            {
+                return outputSchemaJson;
+            }
+
+            _logger.LogInformation(
+                "Linear run: enforced {Count} $choices field(s) as output-schema enum from the live Dataverse taxonomy.",
+                injected);
+
+            return schemaObj.ToJsonString();
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex,
+                "Linear run: output-schema $choices enum injection failed; using the catalog schema unchanged (non-fatal).");
+            return outputSchemaJson;
+        }
+    }
+
+    /// <summary>
+    /// Maps each JPS <c>output.fields[]</c> field NAME to the resolved values of its <c>$choices</c> reference
+    /// (<see cref="LookupChoicesResolver"/> returns values keyed by the reference string, not the field name,
+    /// so this re-joins them by field for schema injection).
+    /// </summary>
+    private static IReadOnlyDictionary<string, string[]> MapFieldsToResolvedChoices(
+        string systemPrompt,
+        IReadOnlyDictionary<string, string[]> resolvedChoices)
+    {
+        var map = new Dictionary<string, string[]>(StringComparer.Ordinal);
+
+        using var doc = JsonDocument.Parse(systemPrompt);
+        if (!doc.RootElement.TryGetProperty("output", out var output)
+            || !output.TryGetProperty("fields", out var fields)
+            || fields.ValueKind != JsonValueKind.Array)
+        {
+            return map;
+        }
+
+        foreach (var field in fields.EnumerateArray())
+        {
+            if (!field.TryGetProperty("$choices", out var choices)
+                || choices.ValueKind != JsonValueKind.String
+                || !field.TryGetProperty("name", out var nameProp)
+                || nameProp.ValueKind != JsonValueKind.String)
+            {
+                continue;
+            }
+
+            var choicesRef = choices.GetString();
+            var name = nameProp.GetString();
+            if (!string.IsNullOrWhiteSpace(choicesRef)
+                && !string.IsNullOrWhiteSpace(name)
+                && resolvedChoices.TryGetValue(choicesRef, out var values))
+            {
+                map[name!] = values;
+            }
+        }
+
+        return map;
+    }
 
     /// <summary>
     /// nda-r1 follow-up: the labeled reference-standard block injected into the flat-text (non-JPS) prompt
@@ -349,7 +541,11 @@ public sealed class ActionRunner : IActionRunner
     /// document under <c>## Document</c>; flat text appends the "Document:" block or substitutes the
     /// <c>{{document.extractedText}}</c> placeholder. Empty extracted text is a hard error (unchanged).
     /// </summary>
-    private string BuildDocumentPrompt(string systemPrompt, DocumentText documentText, string? knowledgeContext)
+    private string BuildDocumentPrompt(
+        string systemPrompt,
+        DocumentText documentText,
+        string? knowledgeContext,
+        IReadOnlyDictionary<string, string[]>? resolvedChoices)
     {
         if (string.IsNullOrWhiteSpace(documentText.ExtractedText))
         {
@@ -363,7 +559,8 @@ public sealed class ActionRunner : IActionRunner
             knowledgeContext: knowledgeContext,
             documentText: documentText.ExtractedText,
             templateParameters: null,
-            downstreamNodes: null);
+            downstreamNodes: null,
+            preResolvedLookupChoices: resolvedChoices);
 
         if (rendered.Format == PromptFormat.JsonPromptSchema && !string.IsNullOrWhiteSpace(rendered.PromptText))
         {
@@ -391,7 +588,11 @@ public sealed class ActionRunner : IActionRunner
     /// action (e.g. compose actions) appends the single-source <see cref="PromptInputSection"/> directly —
     /// so both formats emit byte-identical <c>## Input</c> (the frozen, golden-pinned producer).
     /// </summary>
-    private string BuildInputPrompt(string systemPrompt, JsonElement input, string? knowledgeContext)
+    private string BuildInputPrompt(
+        string systemPrompt,
+        JsonElement input,
+        string? knowledgeContext,
+        IReadOnlyDictionary<string, string[]>? resolvedChoices)
     {
         var rendered = _promptRenderer.Render(
             rawPrompt: systemPrompt,
@@ -400,6 +601,7 @@ public sealed class ActionRunner : IActionRunner
             documentText: null,
             templateParameters: null,
             downstreamNodes: null,
+            preResolvedLookupChoices: resolvedChoices,
             runtimeInput: input);
 
         if (rendered.Format == PromptFormat.JsonPromptSchema && !string.IsNullOrWhiteSpace(rendered.PromptText))
@@ -416,7 +618,10 @@ public sealed class ActionRunner : IActionRunner
     /// The prompt-only build (no operand — the relaxed no-file / args-less run). JPS renders the
     /// instruction sections; flat text returns the prompt unchanged.
     /// </summary>
-    private string BuildNoOperandPrompt(string systemPrompt, string? knowledgeContext)
+    private string BuildNoOperandPrompt(
+        string systemPrompt,
+        string? knowledgeContext,
+        IReadOnlyDictionary<string, string[]>? resolvedChoices)
     {
         var rendered = _promptRenderer.Render(
             rawPrompt: systemPrompt,
@@ -424,7 +629,8 @@ public sealed class ActionRunner : IActionRunner
             knowledgeContext: knowledgeContext,
             documentText: null,
             templateParameters: null,
-            downstreamNodes: null);
+            downstreamNodes: null,
+            preResolvedLookupChoices: resolvedChoices);
 
         return rendered.Format == PromptFormat.JsonPromptSchema && !string.IsNullOrWhiteSpace(rendered.PromptText)
             ? rendered.PromptText
