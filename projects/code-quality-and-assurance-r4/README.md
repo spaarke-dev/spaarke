@@ -1,7 +1,7 @@
 # Code Quality & Assurance R4 — Governance That Enforces Itself
 
 > **Portfolio**: [Project #940](https://github.com/spaarke-dev/spaarke/issues/940) under [Epic #427](https://github.com/spaarke-dev/spaarke/issues/427) `[Epic]: Code Quality` · [Board #2](https://github.com/users/spaarke-dev/projects/2) — one Project Issue; phases = capabilities, no per-phase Issues. Status=Active (Planning), Start 2026-09-03.
-> **Status**: Design + spec complete · `/project-pipeline` pending
+> **Status**: Initialized 2026-09-04 via `/project-pipeline` (INITIALIZE-ONLY — artifacts + tasks; execution operator-gated wave by wave)
 > **Branch**: `work/code-quality-and-assurance-r4` · **Worktree**: `c:/code_files/spaarke-wt-code-quality-and-assurance-r4`
 > **PR**: [#935](https://github.com/spaarke-dev/spaarke/pull/935) (draft)
 
@@ -39,7 +39,7 @@ Each phase is a **capability** — deployable, functionally complete, independen
 ## Measured baseline (2026-09-03)
 
 - ADR enforcement **7/49**; `.claude/adr/INDEX.md` lists **36 of 49**
-- **55 of 71** skills unreviewed for 3+ months; **0/16** constraints and **0/94** patterns carry any review stamp
+- **55 of 71** skills unreviewed for 3+ months; **0/16** constraints and **0/94** patterns carry a *machine-parseable* review stamp — they carry a human-readable `> **Last Reviewed**:` blockquote instead (87/94 and 15/16), so the gap is two competing conventions, not missing dates (measured 2026-09-04; rewrites FR-10)
 - **9,750** test methods, **68** `Skip=` occurrences (down from 168 on 2026-08-19), Flaky traits with no expiry
 - **Four specified quality cadences, none of which ever ran** — including a complete nightly reviewer committed 2026-03-14 and never wired, while three docs describe a `nightly-quality.yml` that does not exist
 

@@ -1,0 +1,90 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="043" project="code-quality-and-assurance-r4">
+  <metadata>
+    <title>Detect functional equivalence at code-review Step 6.6</title>
+    <phase>4 Don't rebuild, don't diverge</phase>
+    <gate>040 complete, 042 complete</gate>
+    <status>not-started</status>
+    <rigor>STANDARD</rigor>
+    <rigor-reason>Directive edit to one skill file; no code, no tests. The file is hot and contended.</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>A specified check with a defined resolution target and severity.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Edits .claude/skills/code-review/SKILL.md — main-session only; contended with unified-access-control-r2.</parallel-reason>
+    <deps>040,042</deps>
+    <tags>skill-directives,governance,reuse,code-review</tags>
+    <estimated-effort>2-3 hours</estimated-effort>
+  </metadata>
+
+  <prompt>Add a check at code-review Step 6.6 asking whether a newly exported symbol is functionally equivalent to a named existing capability despite a different implementation — resolving against the FR-16 export index and returning a concrete file:line or nothing.</prompt>
+  <role>SPAARKE platform developer editing a skill directive. This is retrieval against an index, not an opinion.</role>
+  <goal>A new export that duplicates an existing capability under a different name gets flagged, advisory-only, with a concrete pointer or silence.</goal>
+
+  <context>
+    <background>spec.md FR-18 (closed set a–e). This addresses the owner's second stated risk directly: the same function living in two code paths. Name-based search cannot catch it, because the whole problem is that the second implementation is called something else. Resolving against the export index makes the check concrete — it returns a file:line or nothing, never a hedge. It is advisory by design: a genuine equivalence may still be the right call, and a blocking gate on a judgment question is the line NFR-05 says r4 must not cross.</background>
+    <relevant-files>
+      <file role="modify">.claude/skills/code-review/SKILL.md</file>
+      <file role="canonical-reference">.claude/catalogs/shared-export-index.json</file>
+      <file role="canonical-reference">projects/code-quality-and-assurance-r4/notes/baseline-2026-09.md</file>
+    </relevant-files>
+    <dependencies>
+      <dependency task="040" status="pending">Supplies the index the check resolves against.</dependency>
+      <dependency task="042" status="pending">Establishes the Step 6.6 edit surface, so both edits land coherently.</dependency>
+    </dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="spec">Scope (resolution): resolve against the FR-16 index. MUST return a concrete file:line or nothing. A "possibly similar" verdict with no pointer is not an acceptable output.</constraint>
+    <constraint source="spec">Scope (severity): advisory ONLY. MUST NOT block a PR or raise a Critical finding.</constraint>
+    <constraint source="spec">Scope (no sub-agent): MUST NOT introduce a sub-agent. The owner rejected reviewer agents — they produce differences of opinion without substantive value, and this question is retrieval.</constraint>
+    <constraint source="spec">Scope (measurement): the hit rate accumulates against task 003's baseline so the mechanism's value is measurable rather than assumed.</constraint>
+    <constraint source="project">Scope (trigger): applies to newly EXPORTED symbols. Do not run it over every internal function — that produces noise that trains reviewers to skip the section.</constraint>
+    <constraint source="project">Scope (conflict discipline): /conflict-check before starting and before merge.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>Duplication and equivalence detection</topic>
+    <files>
+      <file>.claude/skills/code-review/SKILL.md</file>
+      <file>projects/code-quality-and-assurance-r4/spec.md</file>
+      <file>CLAUDE.md</file>
+    </files>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="0" name="Context + rigor declaration">Output the rigor-level declaration (STANDARD + reason). Run /conflict-check for code-review/SKILL.md.</step>
+    <step order="1">Add the equivalence check to Step 6.6, scoped to newly exported symbols.</step>
+    <step order="2">Specify resolution against the export index, returning file:line or nothing.</step>
+    <step order="3">Set severity to advisory and say so explicitly in the directive, so a future reader does not escalate it.</step>
+    <step order="4">Specify how hits are recorded so the rate accumulates against the baseline.</step>
+    <step order="5">Verify empirically: seed a known-equivalent symbol under a different name and confirm the check returns the existing capability's file:line.</step>
+    <step order="6">Verify the negative: a genuinely novel export returns nothing rather than a speculative match.</step>
+    <step order="7">Update TASK-INDEX.md: set task 043 status to ✅.</step>
+    <step order="8">Document any deviation in projects/code-quality-and-assurance-r4/notes/.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If step 6 shows the check returning speculative matches for novel exports, STOP and tighten it. A false-positive-prone equivalence check is worse than none — reviewers learn to skip the section, and the real hit when it comes is skipped with it.</trigger>
+    <trigger>If implementing this appears to require a sub-agent or an LLM judgment call per symbol, STOP and escalate. The owner rejected that approach explicitly; if index retrieval genuinely cannot answer the question, that is a design finding worth surfacing rather than working around.</trigger>
+  </escalation>
+
+  <outputs>
+    <output type="doc">.claude/skills/code-review/SKILL.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Given a new export equivalent to an indexed capability, the check returns that capability's file:line.</criterion>
+    <criterion testable="true">Given a genuinely novel export, the check returns nothing.</criterion>
+    <criterion testable="true">Given a hit, its severity is advisory.</criterion>
+    <criterion testable="true">Given the directive, hits are recorded so the rate accumulates against task 003's baseline.</criterion>
+    <criterion testable="true">Negative: no sub-agent is introduced or referenced.</criterion>
+    <criterion testable="true">Negative: the check cannot block a PR or produce a Critical finding.</criterion>
+    <criterion testable="true">Negative: the check does not run over non-exported internal functions.</criterion>
+  </acceptance-criteria>
+
+  <notes>Maps spec.md FR-18 (closed set a–e). Directly serves success criterion 5 — seed a known-equivalent symbol, confirm the hit.</notes>
+
+  <execution><skill>.claude/skills/task-execute/SKILL.md</skill></execution>
+</task>

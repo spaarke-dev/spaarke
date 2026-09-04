@@ -1,0 +1,91 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="012" project="code-quality-and-assurance-r4">
+  <metadata>
+    <title>Nothing stale gets enforced — a §6.5 record for every stale or contested ADR</title>
+    <phase>2a Every ADR is routed, accurate, and measured</phase>
+    <gate>010 complete</gate>
+    <status>not-started</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Each record is an architectural decision under CLAUDE.md §6.5 choosing amendment or compliance for a live governance rule; the outcome determines whether P2b may enforce that ADR.</rigor-reason>
+    <model-tier>opus</model-tier>
+    <model-tier-reason>Choosing between §6.5 path B (amend) and path C (comply) per ADR is architectural judgment with downstream enforcement consequences — CLAUDE.md §8.5 assigns ADR-migration work to the top tier.</model-tier-reason>
+    <effort>xhigh</effort>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Writes .claude/adr/ records — main-session only per root CLAUDE.md §3.</parallel-reason>
+    <deps>010</deps>
+    <tags>adr,governance,escalation,docs</tags>
+    <estimated-effort>4-6 hours</estimated-effort>
+  </metadata>
+
+  <prompt>For every ADR that task 010 marked stale or contested, produce its own CLAUDE.md §6.5 record choosing path B (amend) or path C (confirm and comply), so that no inaccurate rule is enforced and no inaccuracy is silently skipped. The set size is discovered by task 010 and is not known at authoring time.</prompt>
+  <role>SPAARKE platform architect. Each record is a decision on the record, in the §6.5 output format. Where the right path is genuinely unclear, escalate to the owner rather than choosing.</role>
+  <goal>Every stale or contested ADR has a §6.5 record naming the rule, the conflict, the chosen path, and the rationale — and none of them is scheduled for an arch test until amended or confirmed.</goal>
+
+  <context>
+    <background>spec.md FR-08. This is the point of FR-05: classification surfaces inaccurate ADRs BY CONSTRUCTION, and the spec pre-declares this in its ADR Tensions table as a discovered-mid-project tension. Enforcing a stale rule in CI is worse than not enforcing it — it forces code to comply with a decision that no longer holds. Skipping it silently is equally bad: the inaccuracy persists unrecorded. §6.5 exists precisely so there is a third option that is neither.</background>
+    <relevant-files>
+      <file role="modify">.claude/adr/</file>
+      <file role="canonical-reference">projects/code-quality-and-assurance-r4/notes/adr-classification-2026-09.md</file>
+      <file role="canonical-reference">CLAUDE.md</file>
+    </relevant-files>
+    <dependencies>
+      <dependency task="010" status="pending">Supplies the explicit list of stale and contested ADRs. The set size is unknown until it completes.</dependency>
+    </dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="project">Scope (CLAUDE.md §6.5): use the required output format for every record — ADR in question, specific rule quoted, conflict, proposed path, rationale, impact, and the alternative considered and rejected.</constraint>
+    <constraint source="spec">Scope (per ADR): one record each. Do NOT batch several ADRs into a single combined record — each rule was decided separately and is challenged separately.</constraint>
+    <constraint source="spec">Scope (enforcement block): no ADR in this set receives an arch test until it is amended or confirmed. Record that block explicitly so task 020 excludes them from the criterion set.</constraint>
+    <constraint source="project">Scope (path selection): paths B and C only. Path A (project-scoped exception) does not apply — the question here is whether the ADR itself is still correct, not whether this project should deviate from it.</constraint>
+    <constraint source="project">Scope (security ADRs): per CLAUDE.md §6.5, auth, security, and compliance ADRs require explicit human sign-off. Do not choose a path for one unilaterally — escalate.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>ADR conflict resolution</topic>
+    <files>
+      <file>CLAUDE.md</file>
+      <file>.claude/adr/INDEX.md</file>
+      <file>projects/code-quality-and-assurance-r4/spec.md</file>
+    </files>
+    <patterns>
+      <pattern name="§6.5 resolution record" location="CLAUDE.md §6.5">Three paths (A exception, B amendment, C comply); required output format; silent violation and deferred documentation are both forbidden.</pattern>
+    </patterns>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="0" name="Context + rigor declaration">Output the rigor-level declaration (FULL + reason). Read task 010's stale/contested list and CLAUDE.md §6.5.</step>
+    <step order="1">For each ADR in the set, re-read it against the current code to confirm the stale or contested verdict before acting on it.</step>
+    <step order="2">Choose path B or path C per ADR, with rationale. Escalate any auth, security, or compliance ADR to the owner rather than choosing.</step>
+    <step order="3">Write each record in the §6.5 output format.</step>
+    <step order="4">For path-B ADRs, identify the amendment scope — which sections change — without making the amendment here unless it is trivial and unambiguous.</step>
+    <step order="5">Record the enforcement block for the whole set so task 020 excludes them from the criterion set.</step>
+    <step order="6">Update TASK-INDEX.md: set task 012 status to ✅.</step>
+    <step order="7">Document any deviation in projects/code-quality-and-assurance-r4/notes/.</step>
+  </steps>
+
+  <escalation>
+    <trigger>Any stale or contested ADR governing auth, security, tenant isolation, or compliance: STOP and escalate to the owner. CLAUDE.md §6.5 requires explicit human sign-off for these, and choosing a path unilaterally violates it.</trigger>
+    <trigger>If a path-B amendment would change a rule that other active worktrees currently depend on, STOP and escalate. Amending a live rule mid-flight across ~17 worktrees needs coordination, not a unilateral edit.</trigger>
+    <trigger>If the stale/contested set is large enough that resolving it exceeds this task's scope, STOP and report. Per spec NFR-03 the phase is sized by completeness — but a set that turns out to be a project of its own is an owner decision, not something to grind through silently.</trigger>
+  </escalation>
+
+  <outputs>
+    <output type="doc">projects/code-quality-and-assurance-r4/notes/decisions/</output>
+    <output type="doc">.claude/adr/INDEX.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Given the stale/contested set from task 010, every member has its own §6.5 record.</criterion>
+    <criterion testable="true">Given each record, it uses the §6.5 required output format including the rejected alternative.</criterion>
+    <criterion testable="true">Given each record, the chosen path is B or C and the rationale is specific rather than boilerplate.</criterion>
+    <criterion testable="true">Negative: no ADR in this set is scheduled for or given an arch test.</criterion>
+    <criterion testable="true">Negative: no auth, security, tenant-isolation, or compliance ADR had a path chosen without owner sign-off.</criterion>
+    <criterion testable="true">The enforcement block is recorded where task 020 will read it.</criterion>
+  </acceptance-criteria>
+
+  <notes>Maps spec.md FR-08 and the third row of the spec's ADR Tensions table ("Any ADR marked stale or contested by FR-05 — path B or C, per ADR — discovered mid-project by construction"). Set size unknown until task 010 completes; that is expected, not a planning defect.</notes>
+
+  <execution><skill>.claude/skills/task-execute/SKILL.md</skill></execution>
+</task>

@@ -1,0 +1,105 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="002" project="code-quality-and-assurance-r4">
+  <metadata>
+    <title>Add SharedPackageCensusTests — a 16th shared package fails the build</title>
+    <phase>1 The shared surface is knowable</phase>
+    <gate>001 complete</gate>
+    <status>not-started</status>
+    <rigor>FULL</rigor>
+    <rigor-reason>Modifies .cs under tests/**; TEST-MODIFYING override row in CLAUDE.md §8 applies unconditionally — code-review + adr-check run at Step 9.5 regardless of the default level.</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Copying an established census pattern (CredentialCensusTests) against an enumerated set; the reference implementation is named and the acceptance set is closed.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <deps>001</deps>
+    <tags>testing,arch-test,governance,shared-components</tags>
+    <estimated-effort>3-4 hours</estimated-effort>
+  </metadata>
+
+  <prompt>Add tests/Spaarke.ArchTests/SharedPackageCensusTests.cs asserting that the set of shared packages under src/client/shared/ is exactly the 15 enumerated in ADR-012. A 16th directory must fail the build with a message that names the three ADR-012 evaluation questions and the amendment requirement, so the failure teaches the reader what to do next rather than just reporting a mismatch.</prompt>
+  <role>SPAARKE platform developer writing architecture-fitness tests. Follow ADR-038 strictly: positive and negative controls, no DI resolution, reuse SourceScan.</role>
+  <goal>A census test that passes on the current 15, fails on a synthetic 16th, is keyed on directory presence, allow-lists the four application-scoped @spaarke/* names, and emits a failure message naming FR-03's three questions plus the amendment requirement.</goal>
+
+  <context>
+    <background>spec.md FR-02. ADR-012's amendment rule (task 001) is unenforceable without a forcing function: a 16th package can land silently and the ADR would simply be wrong. This census is that forcing function. The design deliberately keys on DIRECTORY PRESENCE rather than package.json, because Spaarke.LegalWorkspace has no package.json — a package.json-keyed census enumerates 14 and silently misses it, which is precisely the class of silent miss the test exists to prevent.</background>
+    <relevant-files>
+      <file role="new">tests/Spaarke.ArchTests/SharedPackageCensusTests.cs</file>
+      <file role="canonical-reference">tests/Spaarke.ArchTests/CredentialCensusTests.cs</file>
+      <file role="canonical-reference">tests/Spaarke.ArchTests/SourceScan.cs</file>
+      <file role="canonical-reference">.claude/adr/ADR-012-shared-components.md</file>
+    </relevant-files>
+    <dependencies>
+      <dependency task="001" status="pending">Provides the enumerated 15-package list and the three evaluation questions the failure message must name.</dependency>
+    </dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-038">Scope (this test file): MUST pair positive and negative controls — a test that only asserts the happy path cannot prove it would catch a 16th package.</constraint>
+    <constraint source="ADR-038">Scope (this test file): MUST NOT use DI resolution (ban B3). MUST NOT use Mock&lt;HttpMessageHandler&gt;.</constraint>
+    <constraint source="ADR-038">Scope (source scanning): MUST reuse tests/Spaarke.ArchTests/SourceScan.cs. MUST NOT fork it or hand-roll a directory walker.</constraint>
+    <constraint source="spec">Scope (census key): MUST key on directory presence under src/client/shared/, NOT on package.json presence. Spaarke.LegalWorkspace has no package.json; a package.json-keyed census silently enumerates 14.</constraint>
+    <constraint source="spec">Scope (allow-list): MUST carry an explicit allow-list for @spaarke/* names that are applications rather than shared packages — office-addins, secure-project-workspace, document-upload-wizard, pcf-shared. These are not shared-library members and must not trigger a census failure.</constraint>
+    <constraint source="spec">Scope (failure message): the message MUST name FR-03's three evaluation questions AND the ADR-012 amendment requirement. A bare "expected 15, found 16" is insufficient — the message is the teaching surface.</constraint>
+    <constraint source="project">Scope (no thresholds): assert an enumerated set. MUST NOT introduce any threshold, count ceiling, or ratio.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>Architecture-fitness census tests</topic>
+    <files>
+      <file>.claude/adr/ADR-038-testing-strategy.md</file>
+      <file>.claude/adr/ADR-012-shared-components.md</file>
+      <file>docs/standards/TEST-ARCHITECTURE.md</file>
+      <file>.claude/constraints/testing.md</file>
+    </files>
+    <patterns>
+      <pattern name="Census test" location="tests/Spaarke.ArchTests/CredentialCensusTests.cs">Assert one enumerated set with a teaching failure message; positive control proves the current set passes, negative control proves an injected extra fails.</pattern>
+      <pattern name="Source scanning" location="tests/Spaarke.ArchTests/SourceScan.cs">The single sanctioned primitive for walking source. Reuse, never fork.</pattern>
+    </patterns>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="0" name="Context + rigor declaration">Output the rigor-level declaration (FULL + TEST-MODIFYING override reason). Read CredentialCensusTests.cs and SourceScan.cs before writing anything.</step>
+    <step order="1">Read the 15-package enumeration from ADR-012 (task 001's output) and encode it as the expected set.</step>
+    <step order="2">Implement the census keyed on directory presence under src/client/shared/, reusing SourceScan.</step>
+    <step order="3">Add the application allow-list (office-addins, secure-project-workspace, document-upload-wizard, pcf-shared) with a comment explaining why each is excluded.</step>
+    <step order="4">Write the failure message so it names the three ADR-012 evaluation questions and the amendment requirement.</step>
+    <step order="5">Add the positive control: the current 15 pass.</step>
+    <step order="6">Add the negative control: a synthetic 16th entry fails, and the assertion covers the message content — not just that it threw.</step>
+    <step order="7">Run dotnet build and the ArchTests project; confirm green.</step>
+    <step order="8">Verify empirically that the negative control actually fires: temporarily create a 16th directory, observe the failure and its message, then remove it. Do not rely on the synthetic in-memory case alone.</step>
+    <step order="9">Update TASK-INDEX.md: set task 002 status to ✅.</step>
+    <step order="10">Document any deviation in projects/code-quality-and-assurance-r4/notes/.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If the directory count under src/client/shared/ does not match ADR-012's enumeration from task 001, STOP and escalate per CLAUDE.md §6. Do not "fix" the discrepancy by editing whichever side is convenient — a mismatch means either a package landed without an amendment or task 001 is wrong, and which one it is changes the correct response.</trigger>
+    <trigger>If reusing SourceScan turns out to be impossible for directory-level scanning, STOP and escalate rather than forking it. Forking SourceScan is explicitly banned; if the primitive genuinely cannot serve, that is an ADR-038 conflict requiring a §6.5 record.</trigger>
+  </escalation>
+
+  <justification>
+    <existing>tests/Spaarke.ArchTests/CredentialCensusTests.cs (census pattern) and Adr038TestBanGuardTests.cs (guard pattern) are the closest neighbors — both assert enumerated facts over scanned source.</existing>
+    <extension>No. A census asserts exactly one enumerated set with one teaching failure message; folding a second subject into an existing census file breaks per-file locality and makes the failure message serve two audiences. It does reuse SourceScan, which is the actual shared machinery.</extension>
+    <cost-of-doing-nothing>A 16th shared package lands silently and ADR-012's enumeration is wrong from that moment. The amendment rule task 001 writes stays unenforceable, which makes the whole of P1 documentation rather than a forcing function.</cost-of-doing-nothing>
+  </justification>
+
+  <tools><tool name="dotnet">Build and run tests/Spaarke.ArchTests</tool></tools>
+
+  <outputs>
+    <output type="test">tests/Spaarke.ArchTests/SharedPackageCensusTests.cs</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Given the current repository, the census passes on exactly the 15 enumerated packages.</criterion>
+    <criterion testable="true">Given a synthetic 16th directory under src/client/shared/, the census fails.</criterion>
+    <criterion testable="true">Given that failure, the message names all three ADR-012 evaluation questions and the amendment requirement.</criterion>
+    <criterion testable="true">Given Spaarke.LegalWorkspace has no package.json, it is still counted — proving the census is keyed on directory presence.</criterion>
+    <criterion testable="true">Negative: the four application-scoped @spaarke/* names do not trigger a failure.</criterion>
+    <criterion testable="true">Negative: the test performs no DI resolution and does not fork SourceScan.</criterion>
+    <criterion testable="true">dotnet build Spaarke.sln is green; the ArchTests project passes.</criterion>
+  </acceptance-criteria>
+
+  <notes>Maps spec.md FR-02 (closed acceptance set a–g). Measured 2026-09-04: 15 directories present; Spaarke.LegalWorkspace confirmed to have no package.json. Step 8's empirical check exists because a synthetic in-memory negative control can pass while the real scan path is broken.</notes>
+
+  <execution><skill>.claude/skills/task-execute/SKILL.md</skill></execution>
+</task>

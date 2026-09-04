@@ -1,0 +1,84 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="053" project="code-quality-and-assurance-r4">
+  <metadata>
+    <title>Refresh the existing nightly review prompt</title>
+    <phase>5 Tailored review that actually runs</phase>
+    <gate>011 complete, 050 complete</gate>
+    <status>not-started</status>
+    <rigor>STANDARD</rigor>
+    <rigor-reason>Edits an existing prompt document; no code, no tests.</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Targeted edits to an existing prompt against a defined section list.</model-tier-reason>
+    <effort>medium</effort>
+    <parallel-group>P5-B</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <deps>011,050</deps>
+    <tags>docs,code-review,governance</tags>
+    <estimated-effort>2 hours</estimated-effort>
+  </metadata>
+
+  <prompt>Refresh scripts/quality/nightly-review-prompt.md: update .NET 8 to .NET 10, align its sections to what task 011's routing actually sends it, and make it accept task 050's review checklist as scope input.</prompt>
+  <role>SPAARKE platform developer updating an existing prompt. Refresh it — do not rewrite it.</role>
+  <goal>A prompt that describes the current stack, covers exactly the ADRs routed to it, and takes the checklist as scope.</goal>
+
+  <context>
+    <background>spec.md FR-22. The prompt was written 2026-03-14 and never wired, so it has drifted: it describes .NET 8, while the repo moved to .NET 10 in August (dotnet-10-upgrade-r1). Its sections were also written before ADR classification existed, so they do not match what routing will actually send it. This is a refresh of a complete artifact, not new authoring — the spec is explicit that FR-23 is wiring, not writing.</background>
+    <relevant-files>
+      <file role="modify">scripts/quality/nightly-review-prompt.md</file>
+      <file role="canonical-reference">projects/code-quality-and-assurance-r4/notes/adr-routing-2026-09.md</file>
+      <file role="canonical-reference">projects/code-quality-and-assurance-r4/review-checklist.md</file>
+    </relevant-files>
+    <dependencies>
+      <dependency task="011" status="pending">Supplies the judgment-only + checkable-by-reading ADR list the prompt's sections must align to.</dependency>
+      <dependency task="050" status="pending">Supplies the checklist shape the prompt accepts as scope input.</dependency>
+    </dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="spec">Scope (three changes only): .NET 8 to .NET 10; sections aligned to routing output; accept the checklist as scope input. Do NOT rewrite the prompt wholesale — it is a working artifact.</constraint>
+    <constraint source="spec">Scope (coverage): sections must cover the judgment-only + checkable-by-reading ADRs from routing, and not the ones handled by arch tests. Reviewing what a test already asserts is wasted review.</constraint>
+    <constraint source="project">Scope (stack accuracy): check for other stale stack references beyond .NET 8 — the repo also moved Graph v5 to v6 and Kiota 1 to 2 in the same upgrade.</constraint>
+    <constraint source="project">Scope (no new prompt): edit the existing file. MUST NOT create a second prompt.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>Review prompt maintenance</topic>
+    <files>
+      <file>scripts/quality/nightly-review-prompt.md</file>
+      <file>projects/code-quality-and-assurance-r4/spec.md</file>
+      <file>.claude/adr/INDEX.md</file>
+    </files>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="0" name="Context + rigor declaration">Output the rigor-level declaration (STANDARD + reason). Read the prompt and the routing output.</step>
+    <step order="1">Update .NET 8 references to .NET 10.</step>
+    <step order="2">Scan for other stale stack references — Graph and Kiota versions in particular — and correct them.</step>
+    <step order="3">Align sections to the routed judgment-only + checkable-by-reading ADR list; remove sections covering ADRs now handled by arch tests.</step>
+    <step order="4">Add checklist consumption as scope input.</step>
+    <step order="5">Verify no stale stack reference remains.</step>
+    <step order="6">Update TASK-INDEX.md: set task 053 status to ✅.</step>
+    <step order="7">Document any deviation in projects/code-quality-and-assurance-r4/notes/.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If routing sends the prompt materially more or fewer ADRs than its current sections cover, report the delta before editing. A large mismatch suggests the prompt was scoped by intuition in March, which is worth knowing before it is wired to run nightly.</trigger>
+  </escalation>
+
+  <outputs>
+    <output type="doc">scripts/quality/nightly-review-prompt.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Given the prompt, no .NET 8 reference remains.</criterion>
+    <criterion testable="true">Given the prompt, its sections cover exactly the routed judgment-only + checkable-by-reading ADRs.</criterion>
+    <criterion testable="true">Given the prompt, it accepts the review checklist as scope input.</criterion>
+    <criterion testable="true">Given a scan, no other stale stack reference remains.</criterion>
+    <criterion testable="true">Negative: no section covers an ADR already handled by an arch test.</criterion>
+    <criterion testable="true">Negative: no second prompt file was created.</criterion>
+  </acceptance-criteria>
+
+  <notes>Maps spec.md FR-22. The prompt has existed unwired since 2026-03-14 — one of the four cadences that never fired.</notes>
+
+  <execution><skill>.claude/skills/task-execute/SKILL.md</skill></execution>
+</task>

@@ -1,0 +1,90 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="003" project="code-quality-and-assurance-r4">
+  <metadata>
+    <title>Publish the governance baseline — six measures, confirmed not re-derived</title>
+    <phase>1 The shared surface is knowable</phase>
+    <gate>startable</gate>
+    <status>not-started</status>
+    <rigor>STANDARD</rigor>
+    <rigor-reason>New documentation artifact built from mechanical measurement; no code, no tests, no hot-path edit.</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Counting and tabulating against a closed set of six specified measures; the measurement recipes are mechanical.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>P1-A</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <deps>none</deps>
+    <tags>docs,quality,baseline,measurement</tags>
+    <estimated-effort>2-3 hours</estimated-effort>
+  </metadata>
+
+  <prompt>Publish projects/code-quality-and-assurance-r4/notes/baseline-2026-09.md recording FR-04's six measures. Five were already taken on 2026-09-03; this task CONFIRMS them against the current tree and records the measurement recipe for each so the nightly job (FR-12) and the equivalence check (FR-18) can measure their hit rates against a stable denominator.</prompt>
+  <role>SPAARKE platform developer. Measure mechanically; report what you find, including where it disagrees with the spec.</role>
+  <goal>A baseline document carrying all six FR-04 measures, each with the exact command used to produce it, and an explicit note on any measure that differs from spec.md's 2026-09-03 figure.</goal>
+
+  <context>
+    <background>spec.md FR-04. The baseline exists so later mechanisms have a denominator: FR-18's equivalence-check hit rate accumulates against it, FR-12's usage-weight terciles are drawn from it, and FR-07 prioritises the criterion set by its ADR citation counts. Because the measurements were taken on 2026-09-03 and the branch has since merged 65 commits from master, this task confirms rather than assumes. A measure that has moved is a finding, not an error.</background>
+    <relevant-files>
+      <file role="new">projects/code-quality-and-assurance-r4/notes/baseline-2026-09.md</file>
+      <file role="canonical-reference">projects/code-quality-and-assurance-r4/spec.md</file>
+    </relevant-files>
+    <dependencies>
+      <dependency task="none" status="complete">Independent of 001 and 002 — measures the tree as it stands.</dependency>
+    </dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="spec">Scope (closed set of six): (a) &lt;extension&gt; yes/no ratio across 448 justifications; (b) &lt;existing&gt;none count (53 on 2026-09-03); (c) per-package import fan-in; (d) ADR citation counts across POML tasks; (e) &lt;escalation&gt;&lt;trigger&gt; firing count; (f) CLAUDE.md §6.5 amendment count. Do not add measures beyond these six.</constraint>
+    <constraint source="spec">Scope (every measure): record the exact command that produced it. A number without a reproducible recipe cannot be re-measured by the nightly job and is worthless as a denominator.</constraint>
+    <constraint source="project">Scope (repo-wide passes): MUST exclude .claude/worktrees/ and the ~17 sibling worktrees. A pass that walks siblings reports phantom counts.</constraint>
+    <constraint source="project">Scope (no thresholds): this is observation only. MUST NOT derive or propose any threshold, target, or gate from these numbers.</constraint>
+    <constraint source="project">Scope (honesty): where a confirmed measure differs from spec.md's 2026-09-03 figure, record BOTH and say which is current. Do not silently overwrite the spec's number.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>Governance baseline measurement</topic>
+    <files>
+      <file>projects/code-quality-and-assurance-r4/spec.md</file>
+      <file>projects/code-quality-and-assurance-r4/plan.md</file>
+      <file>CLAUDE.md</file>
+    </files>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="0" name="Context + rigor declaration">Output the rigor-level declaration (STANDARD + reason). Read spec.md FR-04's six measures.</step>
+    <step order="1">Measure (a) and (b) by scanning POML &lt;justification&gt; blocks across projects/*/tasks/ — excluding sibling worktrees.</step>
+    <step order="2">Measure (c) per-package import fan-in across consuming surfaces for each of the 15 shared packages.</step>
+    <step order="3">Measure (d) ADR citation counts across POML tasks; rank descending. This ordering is what FR-07 uses to prioritise within its criterion set.</step>
+    <step order="4">Measure (e) &lt;escalation&gt;&lt;trigger&gt; occurrences and, where determinable, how many actually fired.</step>
+    <step order="5">Measure (f) CLAUDE.md §6.5 amendment records across the repo.</step>
+    <step order="6">Write the baseline document: one section per measure, each with value, command, and date. Flag any drift from the spec's 2026-09-03 figures.</step>
+    <step order="7">Update TASK-INDEX.md: set task 003 status to ✅.</step>
+    <step order="8">Document any deviation in projects/code-quality-and-assurance-r4/notes/.</step>
+  </steps>
+
+  <escalation>
+    <trigger>If a measure differs from spec.md's 2026-09-03 figure by more than ~10%, STOP and report before writing the baseline. A large drift over one day suggests the measurement recipe differs from the one originally used, not that the repository changed — and adopting a differently-derived number as the baseline would silently break FR-18's hit-rate comparison.</trigger>
+  </escalation>
+
+  <justification>
+    <existing>No existing baseline artifact. Grep of projects/*/notes/ for baseline/measurement documents returns per-project scorecards (e.g. r3's SCORECARD.md) which measure code surfaces, not the governance surface.</existing>
+    <extension>No. r3's scorecard grades code quality per surface on D1–D11; this records six governance-surface counts as a denominator for later mechanisms. Different subject, different consumer, different lifecycle.</extension>
+    <cost-of-doing-nothing>FR-18's equivalence-check hit rate has nothing to accumulate against, FR-12's usage terciles have no source, and FR-07 loses its stated prioritisation input — so the criterion set would be ordered by intuition.</cost-of-doing-nothing>
+  </justification>
+
+  <outputs>
+    <output type="doc">projects/code-quality-and-assurance-r4/notes/baseline-2026-09.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Given the baseline document, all six FR-04 measures are present with a value.</criterion>
+    <criterion testable="true">Given each measure, the exact reproducible command is recorded alongside it.</criterion>
+    <criterion testable="true">Given the ADR citation counts, they are ranked descending so FR-07 can consume the ordering directly.</criterion>
+    <criterion testable="true">Negative: no threshold, target, or gate is proposed anywhere in the document.</criterion>
+    <criterion testable="true">Negative: no measurement command walks .claude/worktrees/ or sibling worktrees.</criterion>
+    <criterion testable="true">Any measure differing from spec.md's 2026-09-03 figure records both values and identifies which is current.</criterion>
+  </acceptance-criteria>
+
+  <notes>Maps spec.md FR-04 (closed set a–f). spec.md's 2026-09-03 reference figures: fan-in ui-components 54 surfaces, auth 37, communication-components 8, seven at 2, three at 1, two at 0; citations across 50 distinct ADRs led by ADR-021 (3,061), ADR-013 (2,131), ADR-038 (1,745), ADR-010 (1,527), ADR-028 (1,521), ADR-012 (1,210); &lt;existing&gt;none = 53 of 448.</notes>
+
+  <execution><skill>.claude/skills/task-execute/SKILL.md</skill></execution>
+</task>
