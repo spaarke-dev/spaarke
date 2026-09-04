@@ -8,6 +8,41 @@ Format follows [Keep a Changelog](https://keepachangelog.com/) conventions.
 
 ---
 
+###### 2026-09-04 — `unified-access-control-r2`: **ADR-028 Amendment A5** — workforce `systemuser` root sets derive from Dataverse's impersonated answer (path B, narrow)
+
+- **`.claude/adr/ADR-028-spaarke-auth-architecture.md` gains Amendment A5** (concise-only; no full
+  `docs/adr/ADR-028-*.md` exists — re-confirmed, consistent with the A2/A3/A4 notes). Root CLAUDE.md
+  §6.5 **path B**, deliberately **narrow**: it amends **one clause** of A2 — the parenthesised
+  derivation on the `systemuser` branch — and nothing else.
+- **The change.** `systemuser` → ~~ADR-034 membership~~ → **Dataverse's own answer via app-only
+  impersonated read, ∪ contact grants**. The token model, client surface, plane selection and
+  Tier-1/Tier-2 split are all unchanged. A2's clause now carries an inline pointer to A5 so a reader of
+  A2 cannot apply the superseded rule.
+- **Why.** ADR-034 membership derivation approximates Dataverse by pattern-matching columns and is wrong
+  in **both** directions — granting BU-matched records to users whose role depth doesn't cover them, and
+  hiding records that were explicitly shared. Dataverse already computes this exactly (ownership, role
+  depth, BU, teams, POA shares, hierarchy), at the same 3 round trips. It also **removes the need for a
+  systemuser allow-list** — there is no approximation left to tame.
+- **Broker-only compliance is recorded IN THE ADR, not just in project notes.** Impersonation is **not**
+  OBO: it uses the BFF's **own app-only credential** plus an `MSCRMCallerID` header naming the user to
+  scope to. The caller's token is never exchanged or forwarded — satisfying broker-only exactly as the
+  implementing code defines it (`AccessibleRecordSetService.cs:22-24`: *"No caller-token exchange (no
+  OBO)"*). Recorded here because a future reader meeting "impersonation" on a plane whose defining
+  invariant is "no OBO" would otherwise have to re-derive whether they conflict — and could guess wrong.
+- **Two precision points that a careless reading gets backwards.** (1) `MSCRMCallerID` takes the Dataverse
+  **`systemuserid`**, *not* the AAD `oid` — `notes/access-model-decision.md` states the wrong pairing;
+  the live helper uses the right one. (2) The **fail-closed lives in the READ METHOD, not the helper**:
+  `RetrieveMultipleImpersonatedAsync` throws on `Guid.Empty` (`DataverseWebApiService.cs:978`), while
+  `DataverseImpersonation` deliberately adds *no header* for an empty id — so a **new** impersonated call
+  site that bypasses the read method would silently degrade to an unscoped app-only query. A5 requires
+  any new access-scoped impersonated path to carry its own refusal.
+- **Nothing weakened.** The A1/A2/A3 **no-OBO** prohibition is textually unchanged and still in force;
+  the **CIAM/contact plane derivation is untouched** (and impersonation is unavailable to it regardless —
+  a `contact` is not a security principal). ADR-034 is **not** amended. Blocking prerequisites recorded:
+  `prvActOnBehalfOfAnotherUser` on the BFF app user + the app user staying Organization-scoped, with the
+  **NFR-04 negative canary** (task 034) as the standing guard — impersonated reads must return strictly
+  fewer rows than app-only, and **equality fails the build**.
+
 ###### 2026-09-04 — `unified-access-control-r2`: **ADR-003 Amendment A1** — two-surface authorization + the unified evaluator (path B)
 
 - **`.claude/adr/ADR-003-authorization-seams.md` rewritten; `docs/adr/ADR-003-lean-authorization-seams.md`
